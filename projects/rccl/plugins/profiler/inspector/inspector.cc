@@ -49,6 +49,10 @@ static bool enableNcclInspectorDumpVerbose = false;
 // Global flag to control prometheus format dumping
 static bool enableNcclInspectorPromDump = false;
 static bool warnedOtelPromDumpConflict = false;
+// Opt-in flag for the extra per-device stats metrics (collectives/p2p totals
+// and drop counters) in Prometheus mode; kept off so the default Prometheus
+// output stays minimal. Non-static: read from inspector_prom.cc.
+bool enableNcclInspectorPromStats = false;
 // Per-communicator completed-collective ring buffer capacity
 static uint32_t ncclInspectorDumpCollRingSize = 1024;
 // Per-communicator completed-P2P ring buffer capacity
@@ -64,6 +68,7 @@ static bool ncclInspectorInit = false;
 bool enableNcclInspectorP2p = true;
 // Global flag: require kernel-based timing; discard events without it
 bool requireKernelTiming = true;
+bool useNcclSourcedTimings = false;
 bool inspectorIsDumpVerboseEnabled() {
   return enableNcclInspectorDumpVerbose;
 }
@@ -951,11 +956,13 @@ static void showInspectorEnvVars() {
   } envVars[] = {
     {"NCCL_INSPECTOR_ENABLE", getenv("NCCL_INSPECTOR_ENABLE"), "0", "Enable/disable inspector plugin"},
     {"NCCL_INSPECTOR_ENABLE_P2P", getenv("NCCL_INSPECTOR_ENABLE_P2P"), "1", "Enable/disable P2P tracking"},
+    {"NCCL_INSPECTOR_NCCL_SOURCED_TIMINGS", getenv("NCCL_INSPECTOR_NCCL_SOURCED_TIMINGS"), "1", "Use NCCL-stamped event timestamps (v8 profiler interface) instead of plugin host clocks; set 0 to fall back to plugin host clocks"},
     {"NCCL_INSPECTOR_DUMP_THREAD_ENABLE", getenv("NCCL_INSPECTOR_DUMP_THREAD_ENABLE"), "1", "Enable/disable dump thread"},
     {"NCCL_INSPECTOR_DUMP_THREAD_INTERVAL_MICROSECONDS", getenv("NCCL_INSPECTOR_DUMP_THREAD_INTERVAL_MICROSECONDS"), "-1", "Dump interval in microseconds (-1 = disabled/dump only at teardown, 0 = continuous, >0 = periodic)"},
     {"NCCL_INSPECTOR_DUMP_DIR", getenv("NCCL_INSPECTOR_DUMP_DIR"), "(auto-generated)", "Output directory for inspector logs"},
     {"NCCL_INSPECTOR_DUMP_VERBOSE", getenv("NCCL_INSPECTOR_DUMP_VERBOSE"), "0", "Enable/disable verbose dumping (event_trace)"},
     {"NCCL_INSPECTOR_PROM_DUMP", getenv("NCCL_INSPECTOR_PROM_DUMP"), "0", "Enable/disable Prometheus format output dump"},
+    {"NCCL_INSPECTOR_PROM_DUMP_STATS", getenv("NCCL_INSPECTOR_PROM_DUMP_STATS"), "0", "Enable/disable extra per-device Prometheus stats metrics (collectives/p2p totals and drop counters)"},
     {"NCCL_INSPECTOR_OTEL_EXPORT", getenv("NCCL_INSPECTOR_OTEL_EXPORT"), "0", "Enable/disable OTLP HTTP metrics export"},
     {"NCCL_INSPECTOR_OTEL_VERBOSE", getenv("NCCL_INSPECTOR_OTEL_VERBOSE"), "0", "Enable/disable high-cardinality per-operation OTLP metrics"},
     {"OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"), "http://localhost:4318/v1/metrics", "OTLP HTTP metrics endpoint"},
@@ -1080,6 +1087,23 @@ static void initKernelTimingFromEnv() {
 /*
  * Description:
  *
+ *   Initializes the NCCL-sourced timings opt-in from the environment.
+ *   When enabled, the plugin asks NCCL (through the v8 profiler config)
+ *   to stamp event timestamps, and uses them in place of its own host
+ *   clock reads. Off by default because it makes NCCL run a periodic
+ *   GPU clock calibration on the profiler thread.
+ *
+ * Return:
+ *   None.
+ */
+static void initNcclSourcedTimingsFromEnv() {
+  const char* str = getenv("NCCL_INSPECTOR_NCCL_SOURCED_TIMINGS");
+  useNcclSourcedTimings = str ? (atoi(str) != 0) : true;
+}
+
+/*
+ * Description:
+ *
  *   Initializes event pools using sizes from environment variables.
  *
  * Return:
@@ -1121,6 +1145,10 @@ static inspectorResult_t initDumpThreadFromEnv() {
   enable = str ? atoi(str) : 0;
   enableNcclInspectorPromDump = enable == 0 ? false : true;
   warnedOtelPromDumpConflict = false;
+
+  str = getenv("NCCL_INSPECTOR_PROM_DUMP_STATS");
+  enable = str ? atoi(str) : 0;
+  enableNcclInspectorPromStats = enable == 0 ? false : true;
 
   inspectorOtelInitFromEnv();
 
@@ -1208,6 +1236,7 @@ inspectorResult_t inspectorGlobalInit(int rank) {
   INS_CHK(inspectorGlobalStateInit());
   initP2pTrackingFromEnv();
   initKernelTimingFromEnv();
+  initNcclSourcedTimingsFromEnv();
   INS_CHK(inspectorEventPoolInitFromEnv());
   INS_CHK(initDumpThreadFromEnv());
   return inspectorSuccess;
@@ -1768,6 +1797,7 @@ void inspectorUpdateCollPerf(struct inspectorCompletedOpInfo *completedOp,
     calculateMaxKernelExecTimeUsecs(collInfo, &completedOp->timingSource);
   completedOp->algo = collInfo->algo;
   completedOp->proto = collInfo->proto;
+  completedOp->userTag = collInfo->userTag;
   completedOp->evtTrk = collInfo->collEvtTrk;
 }
 
@@ -1854,6 +1884,7 @@ void inspectorUpdateP2pPerf(struct inspectorCompletedOpInfo *completedOp,
       ? p2pInfo->tsCompletedUsec : inspectorGetTime();
   completedOp->msgSizeBytes = p2pInfo->msgSizeBytes;
   completedOp->peer = p2pInfo->peer;
+  completedOp->userTag = p2pInfo->userTag;
   completedOp->execTimeUsecs =
     calculateMaxKernelExecTimeUsecsP2p(p2pInfo, &completedOp->timingSource);
   completedOp->evtTrk = p2pInfo->p2pEvtTrk;

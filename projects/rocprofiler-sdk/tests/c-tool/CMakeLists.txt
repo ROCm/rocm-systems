@@ -32,6 +32,24 @@ rocprofiler_add_integration_execute_test(
         "${ROCPROFILER_DEFAULT_FAIL_REGEX}|Internal thread for rocprofiler-sdk should not be created"
     )
 
+# The C tool returns NULL from rocprofiler_configure, so with the KFD dispatch-log master
+# switch on the SDK must still create no internal thread and activate nothing.
+rocprofiler_add_integration_execute_test(
+    test-c-tool-signal-less
+    COMMAND $<TARGET_FILE:transpose> 1
+    DEPENDS transpose
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT
+        "ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS=true"
+        "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
+    PASS_REGULAR_EXPRESSION
+        "Test C tool \\(priority=0\\) is using rocprofiler-sdk v([0-9]+\\.[0-9]+\\.[0-9]+)"
+    FAIL_REGULAR_EXPRESSION
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}|Internal thread for rocprofiler-sdk should not be created|signal-less kernel-dispatch completion is ACTIVE"
+    )
+
 # this test uses ROCP_TOOL_LIBRARIES instead of LD_PRELOAD
 rocprofiler_add_integration_execute_test(
     test-c-tool-rocp-tool-lib
@@ -42,6 +60,25 @@ rocprofiler_add_integration_execute_test(
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT
         "ROCP_TOOL_LIBRARIES=$<TARGET_FILE:rocprofiler-sdk-c-tool>"
+        "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
+    PASS_REGULAR_EXPRESSION
+        "Test C tool \\(priority=0\\) is using rocprofiler-sdk v([0-9]+\\.[0-9]+\\.[0-9]+)"
+    FAIL_REGULAR_EXPRESSION
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}|Internal thread for rocprofiler-sdk should not be created"
+    )
+
+# the last library in a colon-delimited ROCP_TOOL_LIBRARIES list is loaded. The
+# rocprofiler-sdk under test is preloaded so that rocprofiler-register uses it instead of
+# an SDK colocated with an installed rocprofiler-register, which may predate list support.
+rocprofiler_add_integration_execute_test(
+    test-c-tool-rocp-tool-lib-list
+    COMMAND $<TARGET_FILE:transpose> 1
+    DEPENDS transpose rocprofiler-sdk-c-tool
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "$<TARGET_FILE:rocprofiler-sdk::rocprofiler-sdk-shared-library>"
+    ENVIRONMENT
+        "ROCP_TOOL_LIBRARIES=:$<TARGET_FILE:rocprofiler-sdk-c-tool>"
         "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
     PASS_REGULAR_EXPRESSION
         "Test C tool \\(priority=0\\) is using rocprofiler-sdk v([0-9]+\\.[0-9]+\\.[0-9]+)"

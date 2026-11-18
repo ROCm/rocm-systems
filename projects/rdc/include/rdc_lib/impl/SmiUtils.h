@@ -58,7 +58,6 @@ amdsmi_status_t get_socket_handles(std::vector<amdsmi_socket_handle>& sockets);
 amdsmi_status_t get_processor_handles(amdsmi_socket_handle socket,
                                       std::vector<amdsmi_processor_handle>& processors);
 amdsmi_status_t get_kfd_partition_id(amdsmi_processor_handle proc, uint32_t* partition_id);
-amdsmi_status_t get_metrics_info(amdsmi_processor_handle proc, amdsmi_gpu_metrics_t* metrics);
 amdsmi_status_t get_num_partition(uint32_t index, uint16_t* num_partition);
 
 struct GpuHandleEntry {

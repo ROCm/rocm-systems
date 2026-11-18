@@ -8,6 +8,10 @@ subtrees:
         title: Build from source
       - file: install/python-bindings
         title: Install Python bindings
+  - caption: Conceptual
+    entries:
+      - file: conceptual/amd-infinity-storage
+        title: AMD Infinity Storage
   - caption: How to
     entries:
       - file: how-to/checking-system-compatibility
@@ -40,6 +44,8 @@ subtrees:
     entries:
       - file: reference/hipFile-io-backends.rst
         title: Fastpath and fallback backends
+      - file: reference/hipFile-kernel-p2pdma-support.rst
+        title: Kernel P2PDMA support
       - file: reference/hipFile-file-registration.rst
         title: File registration
       - file: reference/hipFile-buffer-registration.rst
@@ -52,6 +58,8 @@ subtrees:
         title: Environment variables
       - file: reference/hipFile-cuFile-compatibility.rst
         title: cuFile compatibility
+      - file: reference/hipFile-integrations.rst
+        title: Frameworks and applications
       - file: reference/hipFile-api-reference.rst
         title: API reference
         subtrees:

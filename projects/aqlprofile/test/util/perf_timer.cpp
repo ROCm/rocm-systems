@@ -182,6 +182,14 @@ uint64_t PerfTimer::MeasureTSCFreqHz() {
 #elif defined(__powerpc__)
   return (__ppc_get_timebase_freq() + 50000000) / 100000000;
 #else
-#error "Unsupported architecture"
+  // RISC-V and other Linux targets do not expose an x86-style TSC. The
+  // generic timer path uses wall-clock units, so return the corresponding
+  // 100 MHz scaling factor without probing an architecture-specific counter.
+  std::cerr
+      << "Warning: PerfTimer::MeasureTSCFreqHz(): "
+         "architecture-specific timer calibration is unavailable; "
+         "the generic wall-clock path does not require it."
+      << std::endl;
+  return 10;
 #endif
 }

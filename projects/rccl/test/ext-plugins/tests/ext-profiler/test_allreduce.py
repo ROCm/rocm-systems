@@ -684,6 +684,7 @@ def test_single_node_detailed_profiling(paths):
 def test_kernel_phase_events_traced(paths):
     """Profiler v7 reports per-kernel initial_sync, compute and final_sync phases.
 
+    Only symmetric kernels emit phases, so the run registers symmetric windows.
     The v5/v6 compat shims strip ncclProfileKernelPhase, so these events also prove
     the plugin was negotiated at v7.
     """
@@ -709,6 +710,7 @@ def test_kernel_phase_events_traced(paths):
         "NCCL_PROFILE_DUMP_FILE": dump_file_base,
         # DDA claims this size first and emits no profiler events at all.
         "RCCL_DDA_ENABLE": "0",
+        "NCCL_CUMEM_ENABLE": "1",
         "NCCL_DEBUG": "INFO",
         "NCCL_DEBUG_SUBSYS": "INIT",
     })
@@ -723,6 +725,7 @@ def test_kernel_phase_events_traced(paths):
         "-e", "4M",
         "-f", "2",
         "-g", "1",
+        "-R", "2",
         # A phase fires per channel per kernel; 2 iterations is tens of MB.
         "-n", "2",
         "-w", "1",

@@ -10,6 +10,7 @@
 #ifndef EVENT_H_
 #define EVENT_H_
 
+#include <pthread.h>
 #include <sys/types.h>
 #include <stdint.h>
 #include <unistd.h>
@@ -25,17 +26,23 @@ typedef enum {
   CE_TIMING_GPU = 1
 } CeTimingMode_t;
 
+// Must match MAXCHANNELS in RCCL's src/include/device.h (not exposed by the public or
+// plugin API). Core reports raw channel ids in [0, MAXCHANNELS) and does not clamp them.
 #define MAX_CHANNELS                     256 // RCCL MAXCHANNELS
 #define MAX_STEPS                        1024
 #define MAX_OPS                          16 // Up to 64K ranks for PAT
 #define MAX_EVENTS_PER_REQ               (8)
 #define MAX_KERNEL_PHASES                3  // initial_sync, compute, final_sync (v7)
 
+struct context;
 struct proxyOp;
 struct proxyStep;
 
 struct netPlugin {
   uint64_t type;
+  struct context* ctx;              // profiler context
+  void* parent;                     // optional ProxyStep parent event
+  uint64_t parentType;              // parent event type, or 0 when parent is NULL
   int pluginType;
   int pluginVer;
   uint8_t pluginEvent;
@@ -55,7 +62,14 @@ struct netPlugin {
   };
   double startTs;
   double stopTs;
-  struct proxyStep* parent;
+};
+
+// Chunks never move or reuse records; handles stay valid until context cleanup.
+#define NET_PLUGIN_EVENTS_PER_CHUNK 4096
+struct netPluginChunk {
+  struct netPlugin events[NET_PLUGIN_EVENTS_PER_CHUNK];
+  int numUsed;                         // atomic reservations; bounded by chunk capacity
+  struct netPluginChunk* next;
 };
 
 struct kernelCh;
@@ -101,8 +115,6 @@ struct proxyStep {
   double startTs;
   double stopTs;
   struct proxyOp* parent;
-  struct netPlugin net[MAX_EVENTS_PER_REQ];
-  int nNetEvents;
 };
 
 struct proxyOp {
@@ -124,7 +136,6 @@ struct proxyOp {
 };
 
 struct group;
-struct context;
 
 struct proxyCtrl {
   uint64_t type;
@@ -409,6 +420,10 @@ struct context {
   int proxyCtrlPoolBase;
   int proxyCtrlPoolIndex;
   struct proxyCtrl* proxyCtrlPool;
+
+  pthread_mutex_t netPluginMutex;   // protects chunk creation and linking
+  struct netPluginChunk* netPluginHead;
+  struct netPluginChunk* netPluginTail; // published with release, loaded with acquire
 
   // CE event pools
   int ceCollPoolSize;

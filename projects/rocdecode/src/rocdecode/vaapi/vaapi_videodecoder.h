@@ -91,6 +91,35 @@ typedef enum {
 } ComputePartition;
 #endif
 
+/**
+ * @brief Capabilities of a single VLD-capable VA profile.
+ *
+ * Filled by DecodeSurfaceAttribs() from the VASurfaceAttrib list of a VLD config, so that
+ * both platforms share one VA_FOURCC_* -> rocDecVideoSurfaceFormat mapping. On Linux the
+ * record is transient, probed on demand by CheckDecCapForCodecType(). On Windows the probe
+ * VADisplay is terminated as soon as GetVaContext() has finished enumerating profiles, so
+ * the record is cached and every later capability query is answered from it rather than
+ * from the VA driver. See VaContext::ProbeAllProfileCaps().
+ */
+typedef struct {
+    uint32_t rt_format_attrib;
+    // rocDecVideoSurfaceFormat bitmask derived from the VA_FOURCC_* values reported by
+    // VASurfaceAttribPixelFormat.
+    uint32_t output_format_mask;
+    uint32_t max_width;
+    uint32_t max_height;
+    uint32_t min_width;
+    uint32_t min_height;
+} VaProfileCaps;
+
+/**
+ * @brief Decodes the VASurfaceAttrib list of a VLD config into a VaProfileCaps record.
+ *
+ * Fields with no matching attribute in the list are left untouched, so pass a value-
+ * initialized record to get zeros for anything the driver does not report.
+ */
+void DecodeSurfaceAttribs(const VASurfaceAttrib *attr_list, unsigned int attr_count, VaProfileCaps &caps);
+
 typedef struct {
     int device_id;
     std::string gpu_uuid;
@@ -99,6 +128,8 @@ typedef struct {
     int drm_fd;
 #else
     LUID adapter_luid;
+    // Capabilities of every VLD-capable profile, probed once while the probe display was alive.
+    std::unordered_map<VAProfile, VaProfileCaps> profile_caps;
 #endif
     VADisplay va_display;
     hipDeviceProp_t hip_dev_prop;
@@ -198,6 +229,11 @@ private:
     // GPU PCI BDF -> render node index / compute partition (primary match key).
     std::unordered_map<std::string, int> gpu_pci_bdf_to_render_nodes_map_;
     std::unordered_map<std::string, ComputePartition> gpu_pci_bdf_to_compute_partition_map_;
+#else
+    // Probes the capabilities of every VLD-capable profile into profile_caps. Must be called
+    // with the probe display still alive and the mutex held; a failure on an individual profile
+    // is skipped rather than propagated, leaving that profile reported as unsupported.
+    void ProbeAllProfileCaps(uint32_t va_ctx_idx);
 #endif
     VaContext();
     VaContext(const VaContext&) = delete;

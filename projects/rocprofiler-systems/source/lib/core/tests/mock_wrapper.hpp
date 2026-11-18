@@ -859,8 +859,9 @@ struct wrapper
         ::rocprofsys::mock::rocprofiler_sdk::callback_tracing_record_t;
     using code_object_load_data =
         ::rocprofsys::mock::rocprofiler_sdk::code_object_load_data_t;
-    using kernel_symbol_data = ::rocprofsys::mock::rocprofiler_sdk::kernel_symbol_data_t;
-    using marker_payload_t   = ::rocprofsys::mock::rocprofiler_sdk::marker_payload_t;
+    using code_object_kernel_symbol_register_data =
+        ::rocprofsys::mock::rocprofiler_sdk::kernel_symbol_data_t;
+    using marker_payload_t = ::rocprofsys::mock::rocprofiler_sdk::marker_payload_t;
 
     // ─── Callback / iterator function pointer types ───────────────────────────
     using buffer_tracing_cb_t = ::rocprofsys::mock::rocprofiler_sdk::buffer_tracing_cb_t;

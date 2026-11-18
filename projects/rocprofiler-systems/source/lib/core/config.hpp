@@ -210,9 +210,6 @@ int
 get_verbose() ROCPROFSYS_HOT;
 
 bool&
-get_use_perfetto() ROCPROFSYS_HOT;
-
-bool&
 get_use_timemory() ROCPROFSYS_HOT;
 
 bool&
@@ -390,6 +387,15 @@ get_use_tmp_files();
 int
 get_kill_delay();
 
+[[nodiscard]] std::optional<std::uint64_t>
+get_mpi_rank_from_env();
+
+[[nodiscard]] std::optional<std::uint64_t>
+get_mpi_world_size_from_env();
+
+[[nodiscard]] std::string
+get_output_process_suffix();
+
 namespace output_filtering
 {
 bool
@@ -417,6 +423,9 @@ get_database_absolute_path(std::string_view database_name, std::string_view tag)
 void
 reset_database_path_memo();
 
+void
+refresh_output_format_settings();
+
 std::string
 get_output_absolute_path(std::string_view basename, std::string_view extension,
                          std::string_view tag, std::string_view dir);
@@ -433,11 +442,8 @@ get_use_rocpd() ROCPROFSYS_HOT;
 bool&
 get_use_unified_memory_profiling() ROCPROFSYS_HOT;
 
-bool&
-get_caching_perfetto() ROCPROFSYS_HOT;
-
 bool
-get_merge_perfetto_files();
+get_use_perfetto() ROCPROFSYS_HOT;
 
 struct tmp_file
 {

@@ -543,6 +543,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VMovB64Vop1 : public Vop1 {
@@ -886,6 +889,9 @@ class VPermlane16SwapB32Vop1 : public Vop1 {
 public:
   VPermlane16SwapB32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.valu_permutation = amdgpu::ValuPermutation::Swap16;
+  }
   Operand vdst;
   Operand src0;
 };
@@ -894,6 +900,9 @@ class VPermlane32SwapB32Vop1 : public Vop1 {
 public:
   VPermlane32SwapB32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.valu_permutation = amdgpu::ValuPermutation::Swap32;
+  }
   Operand vdst;
   Operand src0;
 };
@@ -901,6 +910,28 @@ public:
 class VCvtF32Bf16Vop1 : public Vop1 {
 public:
   VCvtF32Bf16Vop1(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
+};
+
+class VExpLegacyF32Vop1 : public Vop1 {
+public:
+  VExpLegacyF32Vop1(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
+};
+
+class VLogLegacyF32Vop1 : public Vop1 {
+public:
+  VLogLegacyF32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;

@@ -489,8 +489,8 @@ static ncclResult_t shmSendProxySetup(struct ncclProxyConnection* connection, st
   struct shmProxyInfo* proxyInfo;
 
   NCCLCHECK(ncclCalloc(&proxyInfo, 1));
-  NCCLCHECKGOTO(ncclShmAllocateShareableBuffer(req->size, req->legacy, &proxyInfo->desc, &info->buf.hptr,
-                                               &info->buf.dptr),
+  NCCLCHECKGOTO(ncclShmAllocateShareableBuffer(req->size, req->legacy || !proxyState->cuMemHostEnabled, &proxyInfo->desc,
+                                               &info->buf.hptr, &info->buf.dptr),
                 result, fail);
   memcpy(&info->desc, &proxyInfo->desc, sizeof(ncclShmIpcDesc_t));
   connection->transportResources = proxyInfo;
@@ -513,8 +513,8 @@ static ncclResult_t shmRecvProxySetup(struct ncclProxyConnection* connection, st
   struct shmProxyInfo* proxyInfo;
 
   NCCLCHECK(ncclCalloc(&proxyInfo, 1));
-  NCCLCHECKGOTO(ncclShmAllocateShareableBuffer(req->size, req->legacy, &proxyInfo->desc, &info->buf.hptr,
-                                               &info->buf.dptr),
+  NCCLCHECKGOTO(ncclShmAllocateShareableBuffer(req->size, req->legacy || !proxyState->cuMemHostEnabled, &proxyInfo->desc,
+                                               &info->buf.hptr, &info->buf.dptr),
                 result, fail);
   memcpy(&info->desc, &proxyInfo->desc, sizeof(ncclShmIpcDesc_t));
   connection->transportResources = proxyInfo;
@@ -540,13 +540,14 @@ static void initCeOperation() {
     }
     shmLocality = ncclParamShmLocality();
     if (shmLocality != SHM_SEND_SIDE && shmLocality != SHM_RECV_SIDE) {
-      WARN("Ignoring SHM locality, must be 1 (sender side) or 2 (receiver side, default)");
+      ATTN("Ignoring SHM locality, must be 1 (sender side) or 2 (receiver side, default)");
       shmLocality = SHM_RECV_SIDE;
     }
     init = 1;
   }
 }
 
+// legacy is the final allocation mode (proxy callers must set it to true when proxyState->cuMemHostEnabled is false)
 ncclResult_t ncclShmAllocateShareableBuffer(size_t size, bool legacy, ncclShmIpcDesc_t* desc, void** hptr,
                                             void** dptr) {
   if (desc == NULL || hptr == NULL) {
@@ -554,7 +555,7 @@ ncclResult_t ncclShmAllocateShareableBuffer(size_t size, bool legacy, ncclShmIpc
     return ncclInvalidArgument;
   }
 #if CUDART_VERSION >= 12020
-  if (ncclCuMemEnable() && ncclCuMemHostEnable() && !legacy) {
+  if (!legacy) {
     // cuMem API support
     CUmemAllocationHandleType type = SHM_HANDLE_TYPE;
     CUmemGenericAllocationHandle handle;
@@ -607,7 +608,7 @@ ncclResult_t ncclShmImportShareableBuffer(struct ncclComm* comm, int proxyRank, 
     return ncclInvalidArgument;
   }
 #if CUDART_VERSION >= 12020
-  if (ncclCuMemEnable() && ncclCuMemHostEnable() && !desc->legacy) {
+  if (!desc->legacy) {
     // cuMem API support
     CUdeviceptr hostptr = 0;
     CUmemAllocationHandleType type = SHM_HANDLE_TYPE;
@@ -623,11 +624,14 @@ ncclResult_t ncclShmImportShareableBuffer(struct ncclComm* comm, int proxyRank, 
     // Import and map the remote memory descriptor to the local GPU
     if (type == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
       // UDS fd support
-      int fd = -1;
+      ncclIpcFd fd = NCCL_INVALID_IPC_FD;
       // Send cuMem handle to remote for conversion to an fd
       NCCLCHECK(ncclProxyClientGetFdBlocking(comm, proxyRank, &desc->shmci.data, &fd));
-      CUCHECK(cuMemImportFromShareableHandle(&handle, (void*)(uintptr_t)fd, type));
-      (void)close(fd);
+      ncclResult_t ret = ncclSuccess;
+      CUCHECKGOTO(cuMemImportFromShareableHandle(&handle, (void*)(uintptr_t)fd, type), ret, closeFd);
+    closeFd:
+      (void)ncclIpcFdClose(fd);
+      NCCLCHECK(ret);
     } else {
       CUCHECK(cuMemImportFromShareableHandle(&handle, &desc->shmci.handle, type));
     }
@@ -696,7 +700,7 @@ ncclResult_t ncclShmImportShareableBuffer(struct ncclComm* comm, int proxyRank, 
 ncclResult_t ncclShmIpcClose(ncclShmIpcDesc_t* desc) {
   if (desc) {
 #if CUDART_VERSION >= 12020
-    if (ncclCuMemEnable() && ncclCuMemHostEnable() && !desc->legacy) {
+    if (!desc->legacy) {
       NCCLCHECK(ncclCuMemHostFree(desc->shmci.ptr));
     } else {
       NCCLCHECK(ncclShmClose(desc->shmli.handle));

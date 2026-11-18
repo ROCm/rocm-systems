@@ -22,6 +22,7 @@
 
 #include "hsakmt/hsakmt_virtio.h"
 #include "hsakmt_virtio_device.h"
+#include <stddef.h>
 #include <unistd.h>
 #include <xf86drm.h>
 

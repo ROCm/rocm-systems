@@ -216,6 +216,68 @@ HIP_TEST_CASE(Unit_hipFreeDoubleHost) {
   HIP_CHECK_ERROR(hipHostFree(ptr), hipErrorInvalidValue);
 }
 
+// Freeing device memory through a pointer that is not the base address
+HIP_TEST_CASE(Unit_hipFreeInteriorPtrDev) {
+  constexpr size_t size = 1024;
+  char* ptr{};
+  HIP_CHECK(hipMalloc(&ptr, size));
+
+  SECTION("InteriorPtr") {
+#if HT_NVIDIA
+    HIP_CHECK_ERROR(hipFree(ptr + size / 2), hipErrorInvalidValue);
+    HIP_CHECK(hipFree(ptr));
+#else
+    // The whole allocation is released, so the base address is no longer valid
+    HIP_CHECK(hipFree(ptr + size / 2));
+    HIP_CHECK_ERROR(hipFree(ptr), hipErrorInvalidValue);
+#endif
+  }
+  SECTION("LastBytePtr") {
+#if HT_NVIDIA
+    HIP_CHECK_ERROR(hipFree(ptr + size - 1), hipErrorInvalidValue);
+    HIP_CHECK(hipFree(ptr));
+#else
+    HIP_CHECK(hipFree(ptr + size - 1));
+    HIP_CHECK_ERROR(hipFree(ptr), hipErrorInvalidValue);
+#endif
+  }
+  SECTION("PtrPastEnd") {
+    HIP_CHECK_ERROR(hipFree(ptr + size), hipErrorInvalidValue);
+    HIP_CHECK(hipFree(ptr));
+  }
+}
+
+// Freeing pinned host memory through a pointer that is not the base address
+HIP_TEST_CASE(Unit_hipFreeInteriorPtrHost) {
+  constexpr size_t size = 1024;
+  char* ptr{};
+  HIP_CHECK(hipHostMalloc(&ptr, size));
+
+  SECTION("InteriorPtr") {
+#if HT_NVIDIA
+    HIP_CHECK_ERROR(hipHostFree(ptr + size / 2), hipErrorInvalidValue);
+    HIP_CHECK(hipHostFree(ptr));
+#else
+    // The whole allocation is released, so the base address is no longer valid
+    HIP_CHECK(hipHostFree(ptr + size / 2));
+    HIP_CHECK_ERROR(hipHostFree(ptr), hipErrorInvalidValue);
+#endif
+  }
+  SECTION("LastBytePtr") {
+#if HT_NVIDIA
+    HIP_CHECK_ERROR(hipHostFree(ptr + size - 1), hipErrorInvalidValue);
+    HIP_CHECK(hipHostFree(ptr));
+#else
+    HIP_CHECK(hipHostFree(ptr + size - 1));
+    HIP_CHECK_ERROR(hipHostFree(ptr), hipErrorInvalidValue);
+#endif
+  }
+  SECTION("PtrPastEnd") {
+    HIP_CHECK_ERROR(hipHostFree(ptr + size), hipErrorInvalidValue);
+    HIP_CHECK(hipHostFree(ptr));
+  }
+}
+
 #if HT_NVIDIA
 HIP_TEST_CASE(Unit_hipFreeDoubleArrayFree) {
   HIP_SKIP_TEST("tracked issue EXSWCPHIPT-120.");

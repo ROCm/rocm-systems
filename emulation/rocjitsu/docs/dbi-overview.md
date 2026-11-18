@@ -220,12 +220,12 @@ not to the code.
    condition codes, and mode bits, is bit-identical wherever the guest can
    observe it.
 
-   This extends to state that is easy to overlook because it is not a register
-   the guest names. **Probe memory operations perturb the guest's
-   outstanding-memory counters**, and guest code performs arithmetic against its
-   own count of outstanding operations; leaving those disturbed violates this
-   invariant in a way that manifests as data corruption rather than a fault.
-   Handling it is the framework's responsibility, not the probe's (§6.6).
+    This extends to state that is easy to overlook because it is not a register
+    the guest names. **Probe memory operations perturb the guest's
+    outstanding-memory counters**, and guest code performs arithmetic against its
+    own count of outstanding operations; leaving those disturbed violates this
+    invariant in a way that manifests as data corruption rather than a fault.
+    Handling it is the framework's responsibility, not the probe's (§6.6).
 
 2. **No silent loss of coverage.** Every instrumentation request resolves to
    instrumented, or to rejected with a reason. Every dropped record is counted.
@@ -252,13 +252,13 @@ not to the code.
    in the design may depend on kernels running one at a time; that would change
    the behavior being measured and is very hard to walk back.
 
-   This is a constraint on the framework, not a promise about every run. A
-   sufficiently heavyweight tool can induce serialization as a consequence of
-   what it asked for; most concretely, a large enough scratch request causes
-   the runtime to admit one scratch dispatch at a time. The heavier the tool,
-   the more it perturbs the application; that is inherent, and acceptable. What
-   is not acceptable is it happening invisibly, so induced serialization is
-   detected and reported (§7).
+    This is a constraint on the framework, not a promise about every run. A
+    sufficiently heavyweight tool can induce serialization as a consequence of
+    what it asked for; most concretely, a large enough scratch request causes
+    the runtime to admit one scratch dispatch at a time. The heavier the tool,
+    the more it perturbs the application; that is inherent, and acceptable. What
+    is not acceptable is it happening invisibly, so induced serialization is
+    detected and reported (§7).
 
 6. **The device never waits on the host for an individual record** (§5.5, noting
    the deliberate exception in lossless mode).
@@ -429,21 +429,21 @@ corruption if missed:
   during its execution, not only at wave launch, so nothing short of completion
   bounds the last read.
 
-  The trap here is that several earlier events look like completion and are not.
-  The packet being written, the command processor consuming it, and the queue's
-  read index advancing past it all mean the dispatch was *launched*. A framework
-  that reclaims on any of them corrupts a kernel still reading its arguments,
-  and does so intermittently, under load, in a way that will be blamed on the
-  application.
+    The trap here is that several earlier events look like completion and are not.
+    The packet being written, the command processor consuming it, and the queue's
+    read index advancing past it all mean the dispatch was *launched*. A framework
+    that reclaims on any of them corrupts a kernel still reading its arguments,
+    and does so intermittently, under load, in a way that will be blamed on the
+    application.
 
-  Completion is observable only through a signal. A dispatch packet carries at
-  most one, and applications frequently leave it unset, so the framework cannot
-  assume there is one to watch and cannot add a second. The dependable
-  construction is for the framework to introduce **its own** synchronisation
-  after the dispatch, carrying a signal it owns, and to reclaim when that fires.
-  Note that this is the same mechanism §7 needs in order to count dispatches in
-  flight, so it is one facility serving two requirements rather than a cost
-  incurred here alone.
+    Completion is observable only through a signal. A dispatch packet carries at
+    most one, and applications frequently leave it unset, so the framework cannot
+    assume there is one to watch and cannot add a second. The dependable
+    construction is for the framework to introduce **its own** synchronisation
+    after the dispatch, carrying a signal it owns, and to reclaim when that fires.
+    Note that this is the same mechanism §7 needs in order to count dispatches in
+    flight, so it is one facility serving two requirements rather than a cost
+    incurred here alone.
 
 **Read from the dispatch packet.** A wave can be given a pointer to its own
 dispatch packet in a preloaded scalar pair. This does not carry the buffer
@@ -1070,17 +1070,18 @@ What buys throughput is **producing fewer records**:
   not conveniences; they are what makes the framework applicable to workloads
   that cannot be shrunk.
 
-  The decision is a table lookup, but the mechanism is not free. Observing
-  packets requires interposing on submission, which routes every dispatch in the
-  process through the framework, including those sampling declines to
-  instrument, and adds latency to each. Applications issuing very many small
-  dispatches pay this whether or not they are being sampled. It is the price of
-  admission for everything in §2.1, and it should be counted once, honestly,
-  rather than assumed away.
+    The decision is a table lookup, but the mechanism is not free. Observing
+    packets requires interposing on submission, which routes every dispatch in the
+    process through the framework, including those sampling declines to
+    instrument, and adds latency to each. Applications issuing very many small
+    dispatches pay this whether or not they are being sampled. It is the price of
+    admission for everything in §2.1, and it should be counted once, honestly,
+    rather than assumed away.
 
-  Finer granularity, such as per workgroup, per wave, or every Nth execution of
-  a site, happens inside the probe and costs cycles there instead. The two
-  mechanisms should not be conflated.
+    Finer granularity, such as per workgroup, per wave, or every Nth execution of
+    a site, happens inside the probe and costs cycles there instead. The two
+    mechanisms should not be conflated.
+
 - **Filtering in the probe.** The earliest point volume can be reduced. It costs
   cycles rather than memory, so it survives the memory model. This is the
   design's main lever and should be a first-class probe capability.

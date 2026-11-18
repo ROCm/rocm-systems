@@ -48,7 +48,6 @@ struct collector
     // Type aliases from config
     using device_provider = DeviceProvider;
     using SettingsApi     = Config::SettingsApi;
-    using PerfettoApi     = Config::PerfettoApi;
     using CacheApi        = Config::CacheApi;
 
     // Device entry type from traits (contains device + cached supported metrics)
@@ -69,8 +68,8 @@ struct collector
     /**
      * @brief Initialize the collector and enumerate devices.
      *
-     * Retrieves version information (for GPU), enumerates devices based on filter
-     * settings, and initializes Perfetto storage if legacy metrics are enabled.
+     * Retrieves version information (for GPU) and enumerates devices based on filter
+     * settings.
      *
      * @throws std::runtime_error If device provider is not set.
      */
@@ -88,18 +87,12 @@ struct collector
 
         LOG_INFO("Enabled {} {} devices for PMC sampling", m_device_entries.size(),
                  Traits::device_name);
-
-        if(SettingsApi::get_use_perfetto_legacy_metrics())
-        {
-            Traits::template init_perfetto_storage<PerfettoApi>(m_device_entries);
-        }
     }
 
     /**
      * @brief Configure metrics tracking and initialize metadata.
      *
-     * Sets up category metadata, Perfetto counter tracks, and PMC tracks/metadata
-     * for all enabled devices.
+     * Sets up category metadata and PMC tracks/metadata for all enabled devices.
      */
     void config()
     {
@@ -108,11 +101,6 @@ struct collector
 
         for(const auto& entry : m_device_entries)
         {
-            if(SettingsApi::get_use_perfetto_legacy_metrics())
-            {
-                Traits::template setup_counter_tracks<PerfettoApi>(entry.device,
-                                                                   m_enabled_metrics);
-            }
             Traits::template init_pmc_metadata<CacheApi>(entry.device);
         }
     }
@@ -121,7 +109,7 @@ struct collector
      * @brief Sample metrics from all enabled devices.
      *
      * Iterates through all devices, retrieves current metrics, and stores them
-     * via the cache API and optionally Perfetto. Devices that fail to read metrics
+     * via the cache API. Devices that fail to read metrics
      * are automatically disabled and removed from the device list.
      *
      * @param timestamp Current timestamp in nanoseconds for the sample.
@@ -142,11 +130,6 @@ struct collector
 
                     CacheApi::store_sample(_device_id, _device_name, m_enabled_metrics,
                                            entry.supported_metrics, _metrics, _timestamp);
-
-                    if(SettingsApi::get_use_perfetto_legacy_metrics())
-                    {
-                        PerfettoApi::store_sample(_device_id, _metrics, _timestamp);
-                    }
                     m_sample_counts[_device_id]++;
                     return false;  // Keep device
                 } catch(const std::runtime_error& e)
@@ -161,17 +144,10 @@ struct collector
     }
 
     /**
-     * @brief Perform post-processing of collected metrics.
-     *
-     * Triggers Perfetto post-processing if legacy metrics mode is enabled.
+     * @brief Log per-device sample counts after collection.
      */
     void post_process()
     {
-        if(SettingsApi::get_use_perfetto_legacy_metrics())
-        {
-            Traits::template post_process_perfetto<PerfettoApi>(m_device_entries,
-                                                                m_enabled_metrics);
-        }
         for(const auto& entry : m_device_entries)
         {
             const auto   _device_id   = entry.device->get_index();
@@ -221,7 +197,7 @@ struct collector
      *
      * This method is used when profiling is paused. It records a sample
      * with all metrics set to zero for every enabled device. The main
-     * purpose of this is to make Perfetto counter tracks drop to zero
+     * purpose of this is to make counter tracks drop to zero
      * during the pause, ensuring that the profiler does not appear to be
      * continuing to sample the previous value.
      *
@@ -240,11 +216,6 @@ struct collector
             CacheApi::store_sample(device_id, device_name, m_enabled_metrics,
                                    entry.supported_metrics, zero_metrics,
                                    current_timestamp);
-
-            if(SettingsApi::get_use_perfetto_legacy_metrics())
-            {
-                PerfettoApi::store_sample(device_id, zero_metrics, current_timestamp);
-            }
         }
     }
 

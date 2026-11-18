@@ -222,23 +222,27 @@ control the behavior of rocSHMEM.
       -
 
     * - | ``ROCSHMEM_SDMA_ENABLED``
-        | Enable or disable the SDMA transport at runtime (requires ``USE_SDMA`` build option).
-      - ``1``
-      - | ``0``: Disabled. All transfers use GPU load/store (IPC path).
+        | Enable or disable the SDMA transport at runtime. (build option ``USE_SDMA=OFF`` disables this feature).
+      - ``0``
+      - | ``0``: Disabled. All transfers use load/store (IPC path).
         | ``1``: Enabled. Transfers at or above ``ROCSHMEM_SDMA_THRESHOLD`` use the SDMA engine.
 
     * - | ``ROCSHMEM_SDMA_THRESHOLD``
-        | Minimum transfer size in bytes to route through the SDMA engine.
-        | Transfers smaller than this threshold use GPU load/store instead.
-      - ``256``
+        | Minimum transfer size in bytes to route through the SDMA engine for
+        | per-lane operations. Wave and workgroup operations automatically scale
+        | the threshold by the wavefront size (e.g., 1024 × 64 = 64KB on gfx9).
+        | Transfers smaller than the effective threshold use load/store (IPC path) instead.
+      - ``1024``
       - Size in bytes.
 
     * - | ``ROCSHMEM_SDMA_NUM_CHANNELS``
         | Number of SDMA channels (ring buffers) allocated per destination PE.
         | More channels reduce CAS contention when many wavefronts submit concurrently,
         | at the cost of additional queue memory and SDMA engine resources.
+        | If any rank on a node sets a value outside 1-8, every rank on that node
+        | aborts during initialization and names the rank(s) with the bad value.
       - ``1``
-      - Number of channels per destination PE.
+      - Number of channels per destination PE (1-8).
 
     * - | ``ROCSHMEM_SDMA_SPREAD_CHANNELS``
         | When enabled, each wavefront within a workgroup selects its SDMA channel
@@ -255,3 +259,41 @@ control the behavior of rocSHMEM.
       - ``0``
       - | ``0``: Apply wf_id spreading only for the default (shared) context.
         | ``1``: Apply wf_id spreading for all contexts.
+
+    * - | ``ROCSHMEM_LDS_STAGE_TILE_BYTES``
+        | Tile size in bytes for LDS-staged work-group or wave put/get
+        | (requires ``USE_LDS_STAGE`` or ``USE_TDM`` build option, gfx1250
+        | only). Backed by the portable async backend, or by TDM (Tensor
+        | Data Mover) specifically when built with ``USE_TDM``.
+        | Doubled internally for double buffering; see
+        | ``rocshmem_query_lds_stage_bytes()``. Wave put/get splits the
+        | registered LDS buffer evenly across the block's waves, so each
+        | wave's effective tile is smaller than this value.
+      - ``131072``
+      - | ``0``: auto-size the tile to use all LDS available per block on
+        | this device.
+        | Nonzero (default ``131072``): use this tile size explicitly. Must
+        | be a multiple of 8 bytes (the element size); non-multiples are
+        | rounded down with a warning. On the TDM backend, must also fit
+        | the descriptor's 65535-element ``tile_dim0`` field. If the
+        | requested size (doubled) doesn't fit in this device's shared
+        | memory per block, falls back to the auto-sized value instead.
+
+    * - | ``ROCSHMEM_LDS_STAGE_PUT_THRESHOLD``
+        | Minimum transfer size in bytes to route a put through the
+        | LDS-staged copy path for work-group or wave put (requires
+        | ``USE_LDS_STAGE`` or ``USE_TDM`` build option). Transfers smaller
+        | than this use the normal (non-staged) copy path instead, since
+        | the fast path's issue latency isn't amortized for small
+        | transfers.
+      - ``16384``
+      - Size in bytes.
+
+    * - | ``ROCSHMEM_LDS_STAGE_GET_THRESHOLD``
+        | Minimum transfer size in bytes to route a get through the
+        | LDS-staged copy path for work-group or wave get (requires
+        | ``USE_LDS_STAGE`` or ``USE_TDM`` build option). Gets are
+        | latency-bound on the remote read, so this path pays off at a
+        | much smaller size than put.
+      - ``1024``
+      - Size in bytes.

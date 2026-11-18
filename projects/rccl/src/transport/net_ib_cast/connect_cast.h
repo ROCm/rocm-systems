@@ -61,8 +61,20 @@ struct ncclIbQpCreateAttr {
   bool isQpSharingEnabled;
   int  cqDepthMultiplier;
   int  qpSharingGroupIdx;
-  int  qpIdx;               // Per-device QP ordinal (for intra-group UDMA alternation)
+  int  qpIdx;               // Per-device QP ordinal (for UDMA alternation)
 };
+
+// QPs are striped across a comm's devices: QP qpIndex lives on device
+// qpIndex % ndevs and is that device's (qpIndex / ndevs)-th QP.
+static inline ncclResult_t IbCastQpStripe(int qpIndex, int ndevs, int* devIndex, int* qpIdxInDev) {
+  if (ndevs <= 0) {
+    WARN("NET/IB : invalid device count %d while striping QP %d", ndevs, qpIndex);
+    return ncclInternalError;
+  }
+  *devIndex = qpIndex % ndevs;
+  *qpIdxInDev = qpIndex / ndevs;
+  return ncclSuccess;
+}
 
 // Per-QP connection metatdata
 struct ncclIbQpInfo {
@@ -115,6 +127,7 @@ struct ncclIbConnectionMetadata {
   int      sharedGroupIdx;      // QP sharing group index (-1 = not shared)
   uint16_t commId;              // QP sharing comm ID (0 = not shared)
   int      senderIbDevIdx;      // sender's IB device index
+  bool     optRecvCompletion;
 };
 
 // Initialize QP sharing fields to defaults (sharing disabled)

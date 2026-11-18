@@ -18,8 +18,7 @@ Xcd::Xcd(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory 
          simdojo::ExecMode exec_mode, std::shared_ptr<DeviceCacheCoherence> coherence)
     : simdojo::CompositeComponent(std::move(name)), exec_mode_(exec_mode),
       coherence_(std::move(coherence)) {
-  if (!coherence_)
-    throw std::invalid_argument("XCD requires a cache-coherence domain");
+  assert(coherence_ && "XCD requires a cache-coherence domain");
   set_weight(0); // Structural container, not a work-producing component.
   auto xcd_name = this->name();
 
@@ -44,7 +43,8 @@ Xcd::Xcd(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory 
     // This also sets up on_idle callbacks from CUs to CP::check_all_idle().
     for (uint32_t c = 0; c < se->num_compute_units(); ++c) {
       auto *cu = se->compute_unit(c);
-      cu->set_shader_engine_location(i, c, config.shader_engine.cus_per_shader_array);
+      cu->set_shader_engine_location(i, c, config.shader_engine.cus_per_shader_array,
+                                     se->num_compute_units());
       cp_->add_compute_unit(cu);
     }
     // Register the SE's SPI with the CP so ace_dispatch_all() can use the
@@ -56,23 +56,70 @@ Xcd::Xcd(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory 
 
   cp_->add_l2_cache(l2_cache_);
   add_child(std::move(cp));
+
+  // Share one device-global GWS store across every CU of this XCD now that all
+  // shader engines and their CUs exist.
+  wire_gws_to_cus();
+}
+
+void Xcd::wire_gws_to_cus() {
+  // Include CUs attached directly to the CP by custom topologies.
+  if (cp_) {
+    [[maybe_unused]] const util::Result wired = cp_->set_gws_device(gws_device_);
+    assert(wired.succeeded() && "CUs must accept the XCD's GWS store during construction");
+    return;
+  }
+  // Standalone-XCD fallback: no command processor, so wire the CUs directly.
+  for (ShaderEngine *shader_engine : shader_engines_)
+    for ([[maybe_unused]] ComputeUnitCore *compute_unit : shader_engine->compute_units())
+      assert(compute_unit->can_set_gws_device(gws_device_) &&
+             "CUs must accept the XCD's GWS store during construction");
+  for (ShaderEngine *shader_engine : shader_engines_)
+    for (ComputeUnitCore *compute_unit : shader_engine->compute_units())
+      (void)compute_unit->set_gws_device(gws_device_);
+}
+
+util::Result Xcd::adopt_gws_store(std::shared_ptr<GwsDevice> store,
+                                  util::DiagnosticEmitter emit_error) {
+  if (!store || store == gws_device_)
+    return util::Result::success();
+  // Preflight the entire XCD before changing any owner. Topology changes require
+  // external serialization and drained CUs, as for the CP wiring API.
+  for (ShaderEngine *se : shader_engines_)
+    for (ComputeUnitCore *cu : se->compute_units())
+      if (!cu->can_set_gws_device(store))
+        return emit_error.emit() << "Cannot replace XCD GWS store with active waves or workgroups";
+  if (cp_) {
+    if (cp_->set_gws_device(store, emit_error).failed())
+      return util::Result::failure();
+  } else {
+    for (ShaderEngine *se : shader_engines_)
+      for (ComputeUnitCore *cu : se->compute_units())
+        (void)cu->set_gws_device(store);
+  }
+  gws_device_ = std::move(store);
+  return util::Result::success();
 }
 
 void Xcd::set_l2_cache(L2Cache *l2) {
   l2_cache_ = l2;
-  if (l2_cache_)
-    l2_cache_->set_coherence_domain(coherence_);
+  if (l2_cache_) {
+    // coherence_ is non-null by construction; null is the setter's only failure.
+    (void)l2_cache_->set_coherence_domain(coherence_);
+  }
 }
 
-void Xcd::set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence) {
+util::Result Xcd::set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence,
+                                       util::DiagnosticEmitter emit_error) {
   if (!coherence)
-    throw std::invalid_argument("XCD requires a cache-coherence domain");
+    return emit_error.emit() << "XCD requires a cache-coherence domain";
+  if (l2_cache_ && l2_cache_->set_coherence_domain(coherence, emit_error).failed())
+    return util::Result::failure();
   coherence_ = std::move(coherence);
-  if (l2_cache_)
-    l2_cache_->set_coherence_domain(coherence_);
   for (ShaderEngine *shader_engine : shader_engines_)
     for (ComputeUnitCore *compute_unit : shader_engine->compute_units())
       compute_unit->set_l2(l2_cache_);
+  return util::Result::success();
 }
 
 void Xcd::initialize() {

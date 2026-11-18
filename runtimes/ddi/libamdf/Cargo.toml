@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 [package]
 name = "libamdf"
 description = "Early-access AMDF C API implementation over the private rocddi core"
@@ -10,12 +13,16 @@ repository.workspace = true
 
 [lib]
 name = "amdf"
-crate-type = ["cdylib", "staticlib"]
+crate-type = ["rlib", "staticlib"]
 doc = false
 doctest = false
 
 [dependencies]
 rocddi.workspace = true
+
+[dev-dependencies]
+rocddi = { path = "../rocddi", features = ["allocator-test-hooks"] }
+libc = "0.2.189"
 
 [lints.rust]
 missing_docs = "deny"

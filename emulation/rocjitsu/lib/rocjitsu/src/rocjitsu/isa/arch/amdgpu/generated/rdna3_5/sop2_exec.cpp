@@ -6,8 +6,8 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/sop2.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_fp.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -181,62 +181,78 @@ void SPackHlB32B16Sop2::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_pack_hl_b32_b16_sop2(*this, wf);
 }
 
-void SAddF32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_add_f32_sop2(*this, wf); }
+void SAddF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::scalar_fp::arithmetic<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::Op::Add>(wf, sdst, ssrc0,
+                                                                                    ssrc1);
+}
 
-void SSubF32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_sub_f32_sop2(*this, wf); }
+void SSubF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::scalar_fp::arithmetic<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::Op::Sub>(wf, sdst, ssrc0,
+                                                                                    ssrc1);
+}
 
 void SMinF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  float result = std::min(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)),
-                          std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)));
-  amdgpu::RegisterAccess(wf).write_scalar(sdst, std::bit_cast<uint32_t>(result));
+  amdgpu::scalar_fp::select<amdgpu::scalar_fp::F32, amdgpu::minmax::LegacyMin>(wf, sdst, ssrc0,
+                                                                               ssrc1);
 }
 
 void SMaxF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  float result = std::max(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0)),
-                          std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1)));
-  amdgpu::RegisterAccess(wf).write_scalar(sdst, std::bit_cast<uint32_t>(result));
+  amdgpu::scalar_fp::select<amdgpu::scalar_fp::F32, amdgpu::minmax::LegacyMax>(wf, sdst, ssrc0,
+                                                                               ssrc1);
 }
 
-void SMulF32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_mul_f32_sop2(*this, wf); }
+void SMulF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::scalar_fp::arithmetic<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::Op::Mul>(wf, sdst, ssrc0,
+                                                                                    ssrc1);
+}
 
 void SFmaakF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_fmaak_f32_sop2(*this, wf);
+  amdgpu::scalar_fp::arithmetic<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::Op::Fma>(wf, sdst, ssrc0,
+                                                                                    ssrc1, &simm32);
 }
 
 void SFmamkF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_fmamk_f32_sop2(*this, wf);
+  amdgpu::scalar_fp::arithmetic<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::Op::Fma>(wf, sdst, ssrc0,
+                                                                                    simm32, &ssrc1);
 }
 
 void SFmacF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_fmac_f32_sop2(*this, wf);
+  amdgpu::scalar_fp::arithmetic<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::Op::Fma>(wf, sdst, ssrc0,
+                                                                                    ssrc1, &sdst);
 }
 
 void SCvtPkRtzF16F32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cvt_pk_rtz_f16_f32_sop2(*this, wf);
+  amdgpu::scalar_fp::pack_rtz(wf, sdst, ssrc0, ssrc1);
 }
 
-void SAddF16Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_add_f16_sop2(*this, wf); }
+void SAddF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::scalar_fp::arithmetic<amdgpu::scalar_fp::F16, amdgpu::scalar_fp::Op::Add>(wf, sdst, ssrc0,
+                                                                                    ssrc1);
+}
 
-void SSubF16Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_sub_f16_sop2(*this, wf); }
+void SSubF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::scalar_fp::arithmetic<amdgpu::scalar_fp::F16, amdgpu::scalar_fp::Op::Sub>(wf, sdst, ssrc0,
+                                                                                    ssrc1);
+}
 
 void SMinF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  float result = std::min(
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0))),
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))));
-  amdgpu::RegisterAccess(wf).write_scalar(sdst, util::f32_to_f16(result));
+  amdgpu::scalar_fp::select<amdgpu::scalar_fp::F16, amdgpu::minmax::LegacyMin>(wf, sdst, ssrc0,
+                                                                               ssrc1);
 }
 
 void SMaxF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  float result = std::max(
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0))),
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))));
-  amdgpu::RegisterAccess(wf).write_scalar(sdst, util::f32_to_f16(result));
+  amdgpu::scalar_fp::select<amdgpu::scalar_fp::F16, amdgpu::minmax::LegacyMax>(wf, sdst, ssrc0,
+                                                                               ssrc1);
 }
 
-void SMulF16Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_mul_f16_sop2(*this, wf); }
+void SMulF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::scalar_fp::arithmetic<amdgpu::scalar_fp::F16, amdgpu::scalar_fp::Op::Mul>(wf, sdst, ssrc0,
+                                                                                    ssrc1);
+}
 
 void SFmacF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_fmac_f16_sop2(*this, wf);
+  amdgpu::scalar_fp::arithmetic<amdgpu::scalar_fp::F16, amdgpu::scalar_fp::Op::Fma>(wf, sdst, ssrc0,
+                                                                                    ssrc1, &sdst);
 }
 
 } // namespace rdna3_5

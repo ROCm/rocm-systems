@@ -27,6 +27,7 @@ THE SOFTWARE.
 #include <cstring>
 #include <iomanip>
 #include <set>
+#include <vector>
 
 #include "rdc/rdc.h"
 #include "rdc/rdc_private.h"
@@ -125,6 +126,16 @@ void RdciDiscoverySubSystem::show_attributes() {
     return;
   }
 
+  // Read every GPU first, so that a failure prints only the error.
+  std::vector<rdc_device_attributes_t> attributes(count);
+  for (uint32_t i = 0; i < count; i++) {
+    result = rdc_device_get_attributes(rdc_handle_, gpu_index_list[i], &attributes[i]);
+    if (result != RDC_ST_OK) {
+      throw RdcException(result,
+                         "Fail to get the attributes of GPU " + std::to_string(gpu_index_list[i]));
+    }
+  }
+
   if (is_json_output()) {
     std::cout << "\"gpus\" : [";
   } else {
@@ -134,11 +145,7 @@ void RdciDiscoverySubSystem::show_attributes() {
     std::cout << "GPU Index\t Device Information\n";
   }
   for (uint32_t i = 0; i < count; i++) {
-    rdc_device_attributes_t attribute;
-    result = rdc_device_get_attributes(rdc_handle_, gpu_index_list[i], &attribute);
-    if (result != RDC_ST_OK) {
-      return;
-    }
+    const rdc_device_attributes_t& attribute = attributes[i];
     if (is_json_output()) {
       std::cout << "{\"gpu_index\": \"" << i << "\", \"device_name\": \"" << attribute.device_name
                 << "\"}";
@@ -173,6 +180,22 @@ void RdciDiscoverySubSystem::show_attributes_with_partitions() {
     return;
   }
 
+  // Read every GPU first, so that a failure prints only the error.
+  std::vector<rdc_device_attributes_t> attributes(count);
+  std::vector<uint16_t> num_partitions(count, 0);
+  for (uint32_t i = 0; i < count; i++) {
+    result = rdc_device_get_attributes(rdc_handle_, gpu_index_list[i], &attributes[i]);
+    if (result != RDC_ST_OK) {
+      throw RdcException(result,
+                         "Fail to get the attributes of GPU " + std::to_string(gpu_index_list[i]));
+    }
+    result = rdc_get_num_partition(rdc_handle_, gpu_index_list[i], &num_partitions[i]);
+    if (result != RDC_ST_OK) {
+      throw RdcException(
+          result, "Fail to get the partition count of GPU " + std::to_string(gpu_index_list[i]));
+    }
+  }
+
   // Print header.
   if (!is_json_output()) {
     std::cout << count << " GPUs found." << std::endl;
@@ -187,9 +210,7 @@ void RdciDiscoverySubSystem::show_attributes_with_partitions() {
 
   // Loop over each GPU.
   for (uint32_t i = 0; i < count; i++) {
-    rdc_device_attributes_t attribute;
-    result = rdc_device_get_attributes(rdc_handle_, gpu_index_list[i], &attribute);
-    if (result != RDC_ST_OK) return;
+    const rdc_device_attributes_t& attribute = attributes[i];
 
     // Build physical device entity info.
     rdc_entity_info_t phys_info;
@@ -222,11 +243,7 @@ void RdciDiscoverySubSystem::show_attributes_with_partitions() {
                 << "}";
     }
 
-    uint16_t num_partition = 0;
-    rdc_status_t result = rdc_get_num_partition(rdc_handle_, i, &num_partition);
-    if (result != RDC_ST_OK) {
-      return;
-    }
+    uint16_t num_partition = num_partitions[i];
 
     // A partitionable device not in partitionable mode will have metrics.num_partition=1
     // Where as, a non-partitionable device will have metrics.num_partition = UINT16_MAX

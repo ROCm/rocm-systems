@@ -15,19 +15,10 @@
 #include "register.h"
 #include "transport.h"
 #include "register_inline.h"
+#include "dev_runtime.h"
+#include <stdint.h>
 
 #if CUDART_VERSION >= 12010
-
-struct graphRegData {
-  uintptr_t offset;
-  size_t size;
-};
-
-struct localRegData {
-  struct ncclReg reg;
-  intptr_t offset;
-  int handleTypes;
-};
 
 ncclResult_t nvlsCanConnect(int* ret, struct ncclComm* comm, struct ncclTopoGraph* graph, struct ncclPeerInfo* info1,
                             struct ncclPeerInfo* info2) {
@@ -49,102 +40,14 @@ struct ncclTransport nvlsTransport = {"NVLS",
                                       {NULL, NULL, nvlsSendFree, NULL, NULL, NULL, NULL, NULL},
                                       {NULL, NULL, nvlsRecvFree, NULL, NULL, NULL, NULL, NULL}};
 
-ncclResult_t ncclNvlsGroupCreate(struct ncclComm* comm, CUmulticastObjectProp* prop, int rank, unsigned int nranks,
-                                 CUmemGenericAllocationHandle* mcHandle, char* shareableHandle) {
-  CUmemAllocationHandleType type = ncclCuMemHandleType;
-  size_t size = prop->size;
-
-  // Create a Multicast group
-
-  INFO(NCCL_NVLS, "NVLS Creating Multicast group nranks %d size %zu on rank %d", nranks, size, rank);
-  CUCHECK(cuMulticastCreate(mcHandle, prop));
-
-  if (type == CU_MEM_HANDLE_TYPE_FABRIC) {
-    // Get a handle to pass to other ranks
-    CUCHECK(cuMemExportToShareableHandle(shareableHandle, *mcHandle, ncclCuMemHandleType, 0));
-  } else {
-    memcpy(shareableHandle, mcHandle, sizeof(CUmemGenericAllocationHandle));
+// Release a consumer's UC physical memory and its mapping (inverse of nvlsAllocBindUc's alloc).
+static ncclResult_t nvlsFreeUc(struct ncclComm* comm, struct ncclNvlsUcSegment* uc) {
+  if (uc->ptr) {
+    INFO(NCCL_NVLS, "NVLS release UC handle %llx ptr %p size %zu", uc->handle, uc->ptr, uc->size);
+    // Unmaps/frees/releases and untracks the persistent ncclMemTrack entry from nvlsAllocBindUc.
+    NCCLCHECK(ncclCuMemFree(uc->ptr, comm->memManager));
+    memset(uc, 0, sizeof(*uc));
   }
-
-  INFO(NCCL_NVLS, "NVLS Created Multicast group %llx nranks %d size %zu on rank %d", *mcHandle, nranks, size, rank);
-
-  return ncclSuccess;
-}
-
-ncclResult_t ncclNvlsGroupConnect(struct ncclComm* comm, char* shareableHandle, int rank,
-                                  CUmemGenericAllocationHandle* mcHandle) {
-  CUmemAllocationHandleType type = ncclCuMemHandleType;
-  int fd = -1;
-  ncclResult_t ret = ncclSuccess;
-  INFO(NCCL_NVLS, "NVLS importing shareableHandle %p from rank %d", shareableHandle, rank);
-
-  // Import and map the remote memory descriptor to the local GPU
-  if (type == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
-    // cuMem UDS support
-    TRACE(NCCL_NVLS, "NVLS rank %d Importing shareable handle %p from rank %d", comm->localRank, shareableHandle, rank);
-    TRACE(NCCL_NVLS, "NVLS rank %d request conversion of handle 0x%lx from rank %d", comm->localRank,
-          *(uint64_t*)shareableHandle, rank);
-    NCCLCHECKGOTO(ncclProxyClientGetFdBlocking(comm, rank, shareableHandle, &fd), ret, fail);
-    TRACE(NCCL_NVLS, "NVLS rank %d received converted fd %d from rank %d", comm->localRank, fd, rank);
-    CUCHECKGOTO(cuMemImportFromShareableHandle(mcHandle, (void*)(uintptr_t)fd, type), ret, fail);
-    SYSCHECK(close(fd), "close");
-  } else {
-    if (type == CU_MEM_HANDLE_TYPE_FABRIC) {
-      CUCHECKGOTO(cuMemImportFromShareableHandle(mcHandle, (void*)shareableHandle, type), ret, fail);
-    } else {
-      memcpy(mcHandle, shareableHandle, sizeof(CUmemGenericAllocationHandle));
-    }
-  }
-exit:
-  return ret;
-fail:
-  if (fd != -1) close(fd);
-  goto exit;
-}
-
-ncclResult_t nvlsGroupUnbind(struct ncclComm* comm, size_t size, CUmemGenericAllocationHandle* mcHandle) {
-  int dev = comm->cudaDev;
-  INFO(NCCL_NVLS, "NVLS Unbind MC handle %llx size %zu dev %d", *mcHandle, size, dev);
-
-  // Unbind physical memory from group for the given device
-  if (size) CUCHECK(cuMulticastUnbind(*mcHandle, dev, 0 /*mcOffset*/, size));
-
-  return ncclSuccess;
-}
-
-ncclResult_t ncclNvlsDeregBuffer(struct ncclComm* comm, CUmemGenericAllocationHandle* mcHandler, CUdeviceptr ptr,
-                                 int dev, size_t ucsize, size_t mcsize) {
-  // unbind can trigger RM error if buffer is freed already by users
-  // however, it is safe to ignore the error, and unbind will succeed anyway
-  CUCALL(cuMulticastUnbind(*mcHandler, dev, 0 /*mcOffset*/, ucsize));
-  CUCHECK(cuMemUnmap(ptr, mcsize));
-  CUCHECK(cuMemAddressFree(ptr, mcsize));
-  CUCHECK(cuMemRelease(*mcHandler));
-  INFO(NCCL_NVLS, "rank %d - NVLS deregistered buffer %p on device %d ucsize %ld mcsize %ld", comm->rank, (void*)ptr,
-       dev, ucsize, mcsize);
-  return ncclSuccess;
-}
-
-ncclResult_t nvlsGroupUnmapMem(struct ncclComm* comm, size_t ucsize, void* ucptr,
-                               CUmemGenericAllocationHandle* ucHandle, size_t mcsize, void* mcptr,
-                               CUmemGenericAllocationHandle* mcHandle) {
-  INFO(NCCL_NVLS, "NVLS Unmap mem UC handle 0x%llx(%p) ucsize %zu MC handle 0x%llx(%p) mcsize %zd", *ucHandle, ucptr,
-       ucsize, *mcHandle, mcptr, mcsize);
-
-  // Release the UC memory and mapping
-  if (ucptr) {
-    CUCHECK(cuMemUnmap((CUdeviceptr)ucptr, ucsize));
-    CUCHECK(cuMemAddressFree((CUdeviceptr)ucptr, ucsize));
-    CUCHECK(cuMemRelease(*ucHandle));
-  }
-
-  // Release the MC memory and mapping
-  if (mcptr) {
-    CUCHECK(cuMemUnmap((CUdeviceptr)mcptr, mcsize));
-    CUCHECK(cuMemAddressFree((CUdeviceptr)mcptr, mcsize));
-    CUCHECK(cuMemRelease(*mcHandle));
-  }
-
   return ncclSuccess;
 }
 
@@ -152,13 +55,78 @@ ncclResult_t nvlsGroupUnmapMem(struct ncclComm* comm, size_t ucsize, void* ucptr
 #include "channel.h"
 
 #define NVLS_MEM_ALIGN_SIZE (1 << 21)
-#define NVLS_NCHANNELS_SM90 16
-#define NVLS_NCHANNELS_SM100 32
-#define NVLS_NCHANNELS_SM100_NVL 24
 
 NCCL_PARAM(NvlsEnable, "NVLS_ENABLE", 2);
 NCCL_PARAM(NvlsChunkSize, "NVLS_CHUNKSIZE", 128 * 1024);
 NCCL_PARAM(NvlsTreeMaxChunkSize, "NVLSTREE_MAX_CHUNKSIZE", -2);
+// NVLS staging FIFO layout:
+//  -1: automatic (layout 2 for multi-node Rubin+, layout 1 for single-node Rubin+, layout 0 otherwise)
+//   0: [head][dir][channel][slot]
+//   1: [channel][slot][head][dir]   (all streams of a channel at one step are contiguous)
+//   2: [slot][channel][head][dir]   (all streams of all channels at one step are contiguous)
+// Same allocation size and per-slot chunk size; only slot addressing changes.
+NCCL_PARAM(NvlsFifoLayout, "NVLS_FIFO_LAYOUT", -1);
+
+static ncclResult_t ncclNvlsGetFifoLayout(struct ncclComm* comm, int* layout) {
+  int64_t requested = ncclParamNvlsFifoLayout();
+  if (requested < -1 || requested > 2) {
+    WARN("NCCL_NVLS_FIFO_LAYOUT=%ld is invalid (expected -1, 0, 1 or 2)", requested);
+    return ncclInvalidArgument;
+  }
+
+  if (requested != -1) {
+    *layout = (int)requested;
+    return ncclSuccess;
+  }
+
+  // On Rubin and later, use layout 2 for multi-node and layout 1 for single-node communicators.
+  *layout = (comm->nNodes == 1) ? 1 : 2;
+  for (int r = 0; r < comm->nRanks; r++) {
+    if (!RUBIN_AND_LATER(comm->peerInfo[r].cudaCompCap)) {
+      *layout = 0;
+      break;
+    }
+  }
+  return ncclSuccess;
+}
+
+// Slot-to-slot stride of every NVLS staging FIFO: slot k of a stream lives at its offset + k * stride.
+static size_t ncclNvlsFifoSlotStride(int layout, int nHeads, int nChannels, int chunkSize) {
+  if (layout == 1) return (size_t)2 * nHeads * chunkSize;
+  if (layout == 2) return (size_t)nChannels * 2 * nHeads * chunkSize;
+  return (size_t)chunkSize;
+}
+
+// Byte offset of the first slot of stream (h, dir) on channel c.
+static size_t ncclNvlsFifoOffset(int layout, int nHeads, int nChannels, int chunkSize, int h, int dir, int c) {
+  if (layout == 1) return ((size_t)c * NCCL_STEPS * 2 * nHeads + (size_t)h * 2 + dir) * chunkSize;
+  if (layout == 2) return ((size_t)c * 2 * nHeads + (size_t)h * 2 + dir) * chunkSize;
+  return (((size_t)h * 2 + dir) * nChannels + c) * NCCL_STEPS * chunkSize;
+}
+
+static const char* ncclNvlsFifoLayoutName(int layout) {
+  if (layout == 1) return "channel-major [channel][slot][head][dir]";
+  if (layout == 2) return "step-major [slot][channel][head][dir]";
+  return "default [head][dir][channel][slot]";
+}
+
+// Returns optimal NVLSTree tuning parameters for VeraRubin multi-node configurations.
+static ncclResult_t ncclNvlsTreeRubinTuning(struct ncclComm* comm, int* nChannels, int* chunkSize,
+                                            int* treeMaxChunkSize) {
+  *treeMaxChunkSize = 512 * 1024;
+
+  int nDomains = comm->nNodes;
+  int nRanksPerDomain = comm->minLocalRanks;
+  // TODO: Move this chunk-size policy into the pipeline cost model once it models NVLSTree pipelining and supports
+  // chunk-size selection.
+  int ranksPerDomainFactor = pow2Up(DIVUP(32, nRanksPerDomain));
+  int multiDomainChunkFactor = nDomains > 2 ? 2 : 1;
+  *chunkSize = std::min(512 * 1024, 64 * 1024 * ranksPerDomainFactor * multiDomainChunkFactor);
+  *nChannels = comm->nvlsChannels;
+  INFO(NCCL_INIT, "NVLSTree topology tuning: domains %d ranksPerDomain %d channels %d chunkSize %d", nDomains,
+       nRanksPerDomain, *nChannels, *chunkSize);
+  return ncclSuccess;
+}
 
 // Returns optimal NVLSTree tuning parameters for SM100 multi-node configurations.
 static ncclResult_t ncclNvlsTreeSm100Tuning(struct ncclComm* comm, int* nChannels, int* chunkSize,
@@ -199,27 +167,53 @@ static ncclResult_t ncclNvlsTreeSm100Tuning(struct ncclComm* comm, int* nChannel
   return ncclSuccess;
 }
 
+ncclResult_t ncclNvlsChannels(struct ncclComm* comm, int* nChannels, int* chunkSize, int* treeMaxChunkSize) {
+  int channels = 0;
+
+  if (comm->minCompCap >= 100 && comm->nNodes > 1 && !RUBIN_AND_LATER(comm->minCompCap)) {
+    NCCLCHECK(ncclNvlsTreeSm100Tuning(comm, &channels, chunkSize, treeMaxChunkSize));
+  }
+  if (RUBIN_AND_LATER(comm->minCompCap) && comm->nNodes > 1) {
+    NCCLCHECK(ncclNvlsTreeRubinTuning(comm, &channels, chunkSize, treeMaxChunkSize));
+  }
+
+  if (comm->config.nvlsCTAs != NCCL_CONFIG_UNDEF_INT) {
+    channels = comm->config.nvlsCTAs;
+  } else if (channels == 0 && comm->compCap >= 100) {
+    // Use a reduced number of channels for single node/MNNVL domain on Blackwell and above.
+    // comm->nNodes is not yet initialized at this point so we need to use local information.
+    bool multiNode = false;
+    if (comm->MNNVL) {
+      multiNode = (comm->clique.size < comm->nRanks);
+    } else {
+      int i;
+      for (i = 1; i < comm->nRanks; i++) {
+        if (comm->peerInfo[i].hostHash != comm->peerInfo[0].hostHash) break;
+      }
+      multiNode = (i < comm->nRanks);
+    }
+    if (multiNode) {
+      channels = RUBIN_AND_LATER(comm->compCap) ? /*RUBIN=*/64 : /*SM100=*/32;
+    } else {
+      channels = RUBIN_AND_LATER(comm->compCap) ? /*RUBIN=*/48 : /*SM100=*/24;
+    }
+  } else if (channels == 0) {
+    channels = /*SM90=*/16;
+  }
+
+  *nChannels = std::max(comm->config.minCTAs, std::min(comm->config.maxCTAs, channels));
+  return ncclSuccess;
+}
+
 ncclResult_t ncclNvlsTuning(struct ncclComm* comm) {
-  int nChannels;
   int chunkSize = 0;
   int treeMaxChunkSize = 0;
   const char* chunkSizeEnv = ncclGetEnv("NCCL_NVLS_CHUNKSIZE");
   bool userSetChunkSize = (chunkSizeEnv != NULL && strlen(chunkSizeEnv) > 0);
-
-  // Set default nChannels based on SM architecture
-  if (comm->compCap >= 100) {
-    nChannels = (comm->nNodes > 1) ? NVLS_NCHANNELS_SM100 : NVLS_NCHANNELS_SM100_NVL;
-  } else {
-    nChannels = NVLS_NCHANNELS_SM90;
-  }
-
-  // SM100 multi-node NVLSTree tuning (may adjust all three values)
-  if (comm->minCompCap >= 100 && comm->nNodes > 1) {
-    NCCLCHECK(ncclNvlsTreeSm100Tuning(comm, &nChannels, &chunkSize, &treeMaxChunkSize));
-  }
+  int nChannels;
+  NCCLCHECK(ncclNvlsChannels(comm, &nChannels, &chunkSize, &treeMaxChunkSize));
 
   // User overrides take priority over tuning
-  if (comm->config.nvlsCTAs != NCCL_CONFIG_UNDEF_INT) nChannels = comm->config.nvlsCTAs;
   // If user has set chunk size or chunkSize is not set, use the chunk size as determined by ncclParamNvlsChunkSize()
   if (userSetChunkSize || chunkSize == 0) chunkSize = ncclParamNvlsChunkSize();
 
@@ -230,9 +224,6 @@ ncclResult_t ncclNvlsTuning(struct ncclComm* comm) {
   } else if (envTreeMaxChunkSize != -2) {
     treeMaxChunkSize = envTreeMaxChunkSize;
   }
-
-  // Clamp nvlsChannels to [minCTAs, maxCTAs]
-  nChannels = std::max(comm->config.minCTAs, std::min(comm->config.maxCTAs, nChannels));
 
   // Apply final values
   comm->nvlsChannels = nChannels;
@@ -276,13 +267,15 @@ ncclResult_t ncclNvlsInit(struct ncclComm* comm) {
     comm->nvlsSupport = 1;
   }
 
-  INFO(NCCL_INIT, "NVLS multicast support is %savailable on dev %d", comm->nvlsSupport ? "" : "not ", dev);
+  INFO(NCCL_INIT, "NVLS multicast support is %savailable on dev %d, transport %s, symmetric multimem %s",
+       comm->nvlsSupport ? "" : "not ", dev, ncclNvlsTransportEnabled(comm) ? "enabled" : "disabled",
+       ncclNvlsSymmetricMultimemEnabled(comm) ? "enabled" : "disabled");
   return ncclSuccess;
 }
 
 ncclResult_t ncclNvlsTreeConnect(struct ncclComm* comm) {
   ncclResult_t ret = ncclSuccess;
-  if (comm && comm->nvlsSupport && comm->nNodes > 1) {
+  if (comm && ncclNvlsTransportEnabled(comm) && comm->nNodes > 1) {
     for (int c = 0; c < comm->nvlsChannels; c++) {
       struct ncclChannel* channel = comm->channels + c;
       NCCLCHECKGOTO(ncclTransportP2pConnect(comm, c, NCCL_MAX_NVLS_TREE_ARITY, channel->nvls.treeDown, 1,
@@ -301,47 +294,15 @@ fail:
   goto exit;
 }
 
-static ncclResult_t nvlsAllocateMem(struct ncclComm* comm, const CUmemAccessDesc* desc, size_t size,
-                                    CUmemGenericAllocationHandle* ucHandle, CUmemGenericAllocationHandle* mcHandle,
-                                    void** ucptr, void** mcptr, size_t* ucsizePtr, size_t* mcsizePtr) {
-  char shareableHandle[NVLS_HANDLE_SIZE];
-  CUmulticastObjectProp mcprop;
+// Allocate UC backing for a consumer and bind it into its resolved MC-group slice.
+static ncclResult_t nvlsAllocBindUc(struct ncclComm* comm, const struct ncclMcPartition* partition, size_t size,
+                                    cudaStream_t stream, struct ncclNvlsUcSegment* outUc) {
   CUmemAllocationProp ucprop;
-  CUresult err;
   ncclResult_t ret = ncclSuccess;
-  size_t mcsize;
-  size_t ucsize;
-  size_t ucgran, mcgran;
-  int allocMcHandle = 0;
-
-  mcsize = ucsize = size;
-  *ucptr = *mcptr = NULL;
-  memset(shareableHandle, '\0', sizeof(shareableHandle));
-  memset(&mcprop, 0, sizeof(CUmulticastObjectProp));
-  mcprop.numDevices = comm->localRanks;
-  mcprop.handleTypes = ncclCuMemHandleType;
-  mcprop.flags = 0;
-  mcprop.size = size;
-  CUCHECKGOTO(cuMulticastGetGranularity(&mcgran, &mcprop, CU_MULTICAST_GRANULARITY_RECOMMENDED), ret, fail);
-  ALIGN_SIZE(mcsize, mcgran);
-  mcprop.size = mcsize;
-
-  if (comm->localRank == 0) {
-    NCCLCHECKGOTO(ncclNvlsGroupCreate(comm, &mcprop, comm->localRank, comm->localRanks, mcHandle, shareableHandle), ret,
-                  fail);
-    allocMcHandle = 1;
-    NCCLCHECKGOTO(bootstrapIntraNodeBroadcast(comm->bootstrap, comm->localRankToRank, comm->localRank, comm->localRanks,
-                                              0, shareableHandle, NVLS_HANDLE_SIZE),
-                  ret, fail);
-  } else {
-    NCCLCHECKGOTO(bootstrapIntraNodeBroadcast(comm->bootstrap, comm->localRankToRank, comm->localRank, comm->localRanks,
-                                              0, shareableHandle, NVLS_HANDLE_SIZE),
-                  ret, fail);
-    NCCLCHECKGOTO(ncclNvlsGroupConnect(comm, shareableHandle, comm->localRankToRank[0], mcHandle), ret, fail);
-    allocMcHandle = 1;
-  }
-
-  CUCHECKGOTO(cuMulticastAddDevice(*mcHandle, comm->cudaDev), ret, fail);
+  size_t ucsize = size;
+  size_t ucgran;
+  void* ucptr = NULL;
+  CUmemGenericAllocationHandle ucHandle = 0;
 
   memset(&ucprop, 0, sizeof(CUmemAllocationProp));
   ucprop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
@@ -351,58 +312,40 @@ static ncclResult_t nvlsAllocateMem(struct ncclComm* comm, const CUmemAccessDesc
   CUCHECKGOTO(cuMemGetAllocationGranularity(&ucgran, &ucprop, CU_MEM_ALLOC_GRANULARITY_RECOMMENDED), ret, fail);
   ALIGN_SIZE(ucsize, ucgran);
   // Map a VA for UC memory with MC alignment and size
-  CUCHECKGOTO(cuMemAddressReserve((CUdeviceptr*)ucptr, ucsize, ucgran, 0U, 0), ret, fail);
+  CUCHECKGOTO(cuMemAddressReserve((CUdeviceptr*)&ucptr, ucsize, ucgran, 0U, 0), ret, fail);
 
   // Alloc local physical mem for this NVLS group
-  CUCHECKGOTO(cuMemCreate(ucHandle, ucsize, &ucprop, 0), ret, fail1);
-  CUCHECKGOTO(cuMemMap((CUdeviceptr)*ucptr, ucsize, 0, *ucHandle, 0), ret, fail2);
-  CUCHECKGOTO(cuMemSetAccess((CUdeviceptr)*ucptr, ucsize, desc, 1), ret, fail3);
-  CUDACHECKGOTO(cudaMemset(*ucptr, 0, ucsize), ret, fail3);
+  CUCHECKGOTO(cuMemCreate(&ucHandle, ucsize, &ucprop, 0), ret, fail1);
+  CUCHECKGOTO(cuMemMap((CUdeviceptr)ucptr, ucsize, 0, ucHandle, 0), ret, fail2);
+  CUCHECKGOTO(cuMemSetAccess((CUdeviceptr)ucptr, ucsize, &comm->nvlsResources->accessDesc, 1), ret, fail3);
+  NCCLCHECKGOTO(ncclCudaMemsetSync(ucptr, 0, ucsize, stream), ret, fail3);
   // Track NVLS buffer as persistent memory
-  NCCLCHECKGOTO(ncclMemTrack(comm->memManager, *ucptr, ucsize, *ucHandle, ncclCuMemHandleType, ncclMemPersist), ret,
+  NCCLCHECKGOTO(ncclMemTrack(comm->memManager, ucptr, ucsize, ucHandle, ncclCuMemHandleType, ncclMemPersist), ret,
                 fail3);
 
   // intra-node barrier to mitigate the possible hang in cuMulticastBindMem during abort
   NCCLCHECKGOTO(bootstrapIntraNodeBarrier(comm->bootstrap, comm->localRankToRank, comm->localRank, comm->localRanks,
                                           comm->localRankToRank[0]),
                 ret, fail3);
-  // Bind physical memory to the Multicast group
-  // NB: It will block until all ranks have been added to the Group
-  // This is where we normally see issues if the system NVLS/Multicast support is broken
-  err = CUPFN(cuMulticastBindMem(*mcHandle, 0 /*mcOffset*/, *ucHandle, 0 /*memOffset*/, ucsize, 0 /*flags*/));
-  if (err != CUDA_SUCCESS) {
-    const char* errStr;
-    (void)pfn_cuGetErrorString(err, &errStr);    // Fail the job as NVLS support is not functional
-    WARN("Failed to bind NVLink SHARP (NVLS) Multicast memory of size %ld : CUDA error %d '%s'.\nThis is usually "
-         "caused by a system or configuration error in the Fabric Manager or NVSwitches.\nDisable NVLS "
-         "(NCCL_NVLS_ENABLE=0) if you wish to avoid this error in the future.",
-         ucsize, err, errStr);
-    ret = ncclUnhandledCudaError;
-    goto fail3;
-  }
+  NCCLCHECKGOTO(ncclMcPartitionBindMem(partition, 0 /*offsetInPartition*/, ucHandle, 0 /*memOffset*/, ucsize), ret,
+                fail3);
 
-  // Map mc virtual address
-  CUCHECKGOTO(cuMemAddressReserve((CUdeviceptr*)mcptr, mcsize, mcgran, 0U, 0), ret, fail);
-  CUCHECKGOTO(cuMemMap((CUdeviceptr)*mcptr, mcsize, 0, *mcHandle, 0), ret, fail);
-  CUCHECKGOTO(cuMemSetAccess((CUdeviceptr)*mcptr, mcsize, desc, 1), ret, fail);
-  *ucsizePtr = ucsize;
-  *mcsizePtr = mcsize;
+  INFO(NCCL_NVLS, "NVLS rank %d (dev %d) bound UC ptr %p ucsize %zu into MC slice offset %zu (inputsize %zu)",
+       comm->rank, comm->cudaDev, ucptr, ucsize, partition->offset, size);
 
-  INFO(
-    NCCL_NVLS,
-    "NVLS rank %d (dev %d) alloc done, ucptr %p ucgran %ld mcptr %p mcgran %ld ucsize %ld mcsize %ld (inputsize %ld)",
-    comm->rank, comm->cudaDev, *ucptr, ucgran, *mcptr, mcgran, ucsize, mcsize, size);
-
+  // Publish the UC owner only on success (callers test outUc->ptr).
+  outUc->handle = ucHandle;
+  outUc->ptr = ucptr;
+  outUc->size = ucsize;
 exit:
   return ret;
 fail3:
-  CUCHECK(cuMemUnmap((CUdeviceptr)*ucptr, ucsize));
+  CUCHECK(cuMemUnmap((CUdeviceptr)ucptr, ucsize));
 fail2:
-  CUCHECK(cuMemRelease(*ucHandle));
+  CUCHECK(cuMemRelease(ucHandle));
 fail1:
-  CUCHECK(cuMemAddressFree((CUdeviceptr)*ucptr, ucsize));
+  CUCHECK(cuMemAddressFree((CUdeviceptr)ucptr, ucsize));
 fail:
-  if (allocMcHandle && *mcptr == NULL && *ucptr == NULL) CUCHECK(cuMemRelease(*mcHandle));
   goto exit;
 }
 
@@ -418,8 +361,8 @@ ncclResult_t ncclNvlsBufferSetup(struct ncclComm* comm) {
   int nChannels = -1;
   cudaStream_t deviceStream, hostStream;
 
-  if (comm->nvlsSupport == 0 || comm->nvlsResources->inited) return ncclSuccess;
-  // initialize after checking comm->nvlsSupport
+  if (!ncclNvlsTransportEnabled(comm) || comm->nvlsResources->inited) return ncclSuccess;
+  // initialize after checking ncclNvlsTransportEnabled(comm)
   nHeads = comm->channels[0].nvls.nHeads;
   headRank = comm->channels[0].nvls.headRank;
   resources = comm->nvlsResources;
@@ -428,15 +371,14 @@ ncclResult_t ncclNvlsBufferSetup(struct ncclComm* comm) {
   buffSize = nvlsStepSize * NCCL_STEPS;
   nvlsPerRankSize = nChannels * 2 * buffSize;
   nvlsTotalSize = nvlsPerRankSize * nHeads;
+  const int fifoLayout = resources->fifoLayout;
+  const size_t slotStride = ncclNvlsFifoSlotStride(fifoLayout, nHeads, nChannels, nvlsStepSize);
+  INFO(NCCL_INIT | NCCL_NVLS, "NVLS FIFO layout %d (%s) slotStride %zu", fifoLayout, ncclNvlsFifoLayoutName(fifoLayout),
+       slotStride);
 
   INFO(NCCL_INIT | NCCL_NVLS,
        "NVLS comm %p headRank %d nHeads %d nvlsRanks %d buffSize %zu nvlsPerRankSize %zu nvlsTotalSize %zu", comm,
        headRank, nHeads, comm->localRanks, buffSize, nvlsPerRankSize, nvlsTotalSize);
-
-  NCCLCHECKGOTO(nvlsAllocateMem(comm, &resources->accessDesc, nvlsTotalSize, &resources->ucBuffHandle,
-                                &resources->mcBuffHandle, (void**)&resources->ucBuff, (void**)&resources->mcBuff,
-                                &resources->buffUCSize, &resources->buffMCSize),
-                res, fail);
 
   NCCLCHECKGOTO(ncclStrongStreamAcquire(ncclCudaGraphNone(comm->config.graphUsageMode), &comm->sharedRes->hostStream,
                                         /*concurrent=*/false, &hostStream),
@@ -444,19 +386,31 @@ ncclResult_t ncclNvlsBufferSetup(struct ncclComm* comm) {
   NCCLCHECKGOTO(ncclStrongStreamAcquire(ncclCudaGraphNone(comm->config.graphUsageMode), &comm->sharedRes->deviceStream,
                                         /*concurrent=*/false, &deviceStream),
                 res, fail);
+  // A prior setup attempt may have bound the data slice and then failed (inited
+  // still false); the slice offset is fixed, so reuse that binding.
+  if (resources->dataUc.ptr == NULL) {
+    NCCLCHECKGOTO(nvlsAllocBindUc(comm, &resources->dataPartition, nvlsTotalSize, deviceStream, &resources->dataUc),
+                  res, fail);
+  }
+
   for (int h = 0; h < nHeads; h++) {
     int nvlsPeer = comm->nRanks + 1 + h;
     for (int c = 0; c < nChannels; c++) {
       struct ncclChannel* channel = comm->channels + c;
       struct ncclChannelPeer* peer = channel->peers[nvlsPeer];
 
+      // Byte offset of the first slot of stream (h, dir) on channel c. Slot k of the stream
+      // then lives at offset + k * conn.stepSize (see ncclNvlsSetup for stepSize).
+      const size_t upOff = ncclNvlsFifoOffset(fifoLayout, nHeads, nChannels, nvlsStepSize, h, 0, c);
+      const size_t downOff = ncclNvlsFifoOffset(fifoLayout, nHeads, nChannels, nvlsStepSize, h, 1, c);
+
       // Reduce UC -> MC
-      peer->send[1].conn.buffs[NCCL_PROTO_SIMPLE] = resources->ucBuff + (h * 2 * nChannels + c) * buffSize;
-      peer->recv[0].conn.buffs[NCCL_PROTO_SIMPLE] = resources->mcBuff + (h * 2 * nChannels + c) * buffSize;
+      peer->send[1].conn.buffs[NCCL_PROTO_SIMPLE] = (char*)resources->dataUc.ptr + upOff;
+      peer->recv[0].conn.buffs[NCCL_PROTO_SIMPLE] = (char*)resources->dataPartition.ptr + upOff;
 
       // Broadcast MC -> UC
-      peer->recv[1].conn.buffs[NCCL_PROTO_SIMPLE] = resources->ucBuff + ((h * 2 + 1) * nChannels + c) * buffSize;
-      peer->send[0].conn.buffs[NCCL_PROTO_SIMPLE] = resources->mcBuff + ((h * 2 + 1) * nChannels + c) * buffSize;
+      peer->recv[1].conn.buffs[NCCL_PROTO_SIMPLE] = (char*)resources->dataUc.ptr + downOff;
+      peer->send[0].conn.buffs[NCCL_PROTO_SIMPLE] = (char*)resources->dataPartition.ptr + downOff;
 
       CUDACHECKGOTO(cudaMemcpyAsync(&comm->channels[c].devPeersHostPtr[nvlsPeer]->send[0], &peer->send[0].conn,
                                     sizeof(struct ncclConnInfo), cudaMemcpyHostToDevice, hostStream),
@@ -493,14 +447,58 @@ fail:
   goto exit;
 }
 
+// Fill parentSlots[r] with the parent NVLS slot that backs child slot r when the child shares the parent's
+// NVLS resources. Slot h < nHeads belongs to head h, so each child head maps to the parent slot whose head
+// is the same GPU; heads are distinct GPUs, so this pairs the head slots one-to-one and the remaining
+// slots keep their index. If the parent does not have the same heads, *share is cleared and the child must
+// allocate its own resources.
+static ncclResult_t nvlsMapSharedSlots(struct ncclComm* comm, struct ncclComm* parent, int* parentSlots, bool* share) {
+  int nHeads = comm->channels[0].nvls.nHeads;
+  bool remapped = false;
+
+  if (parent->channels[0].nvls.nHeads != nHeads) {
+    INFO(NCCL_INIT | NCCL_NVLS, "NVLS: comm %p has %d heads, parent %p has %d; not sharing NVLS resources", comm,
+         nHeads, parent, parent->channels[0].nvls.nHeads);
+    *share = false;
+    return ncclSuccess;
+  }
+
+  for (int h = 0; h < nHeads; h++) {
+    int gpu = comm->topParentRanks[comm->nvlsHeads[h]];
+    int s = 0;
+    while (s < nHeads && parent->topParentRanks[parent->nvlsHeads[s]] != gpu) s++;
+    if (s == nHeads) {
+      INFO(NCCL_INIT | NCCL_NVLS,
+           "NVLS: comm %p head %d (rank %d) is not a head of parent %p; not sharing NVLS resources", comm, h,
+           comm->nvlsHeads[h], parent);
+      *share = false;
+      return ncclSuccess;
+    }
+    parentSlots[h] = s;
+    remapped |= (s != h);
+  }
+  for (int r = nHeads; r < comm->localRanks; r++) parentSlots[r] = r;
+  if (remapped) {
+    INFO(NCCL_INIT | NCCL_NVLS, "NVLS: comm %p shares parent %p NVLS resources with head slots remapped", comm, parent);
+  }
+  return ncclSuccess;
+}
+
 ncclResult_t ncclNvlsSetup(struct ncclComm* comm, struct ncclComm* parent) {
   ncclResult_t res = ncclSuccess;
   size_t typeSize;
   char shmPath[sizeof("/dev/shm/nccl-XXXXXX")];
   uintptr_t* nvlsShmem = NULL;
-  bool nvlsShare = parent && parent->nvlsSupport && parent->shareResources && parent->localRanks == comm->localRanks;
+  int* parentSlots = NULL;
+  bool nvlsShare =
+    parent && ncclNvlsTransportEnabled(parent) && parent->shareResources && parent->localRanks == comm->localRanks;
 
-  if (comm->nvlsSupport == 0 || comm->nvlsChannels == 0) return ncclSuccess;
+  if (!ncclNvlsTransportEnabled(comm) || comm->nvlsChannels == 0) return ncclSuccess;
+
+  if (nvlsShare) {
+    NCCLCHECKGOTO(ncclCalloc(&parentSlots, comm->localRanks), res, fail);
+    NCCLCHECKGOTO(nvlsMapSharedSlots(comm, parent, parentSlots, &nvlsShare), res, fail);
+  }
 
   if (nvlsShare) {
     /* reuse NVLS resources */
@@ -510,7 +508,7 @@ ncclResult_t ncclNvlsSetup(struct ncclComm* comm, struct ncclComm* parent) {
     comm->nvlsChunkSize = parent->nvlsResources->chunkSize;
     comm->nvlsTreeMaxChunkSize = parent->nvlsResources->treeMaxChunkSize;
     for (int c = 0; c < comm->nvlsChannels; c++) {
-      NCCLCHECKGOTO(initNvlsChannel(comm, c, parent, true), res, fail);
+      NCCLCHECKGOTO(initNvlsChannel(comm, c, parent, parentSlots), res, fail);
     }
 
     comm->nvlsResources = parent->nvlsResources;
@@ -521,7 +519,7 @@ ncclResult_t ncclNvlsSetup(struct ncclComm* comm, struct ncclComm* parent) {
     size_t memSize = 64;
     cudaStream_t hostStream, deviceStream;
 
-    if (parent != nullptr && parent->nvlsSupport && parent->shareResources) {
+    if (parent != nullptr && ncclNvlsTransportEnabled(parent) && parent->shareResources) {
       /* ranks on other nodes might share the NVLS resources, we need to cap nvlsChannels
        * and match NVLS chunk sizes to make sure they agree for each rank. */
       comm->nvlsChannels = std::min(comm->nvlsChannels, parent->nvlsResources->nChannels);
@@ -532,6 +530,15 @@ ncclResult_t ncclNvlsSetup(struct ncclComm* comm, struct ncclComm* parent) {
     int nChannels = comm->nvlsChannels;
     size_t creditSize = nChannels * 2 * memSize * nHeads;
     int nvlsStepSize = comm->nvlsChunkSize;
+    int fifoLayout;
+    NCCLCHECKGOTO(ncclNvlsGetFifoLayout(comm, &fifoLayout), res, fail);
+    const size_t nvlsStepStrideBytes = ncclNvlsFifoSlotStride(fifoLayout, nHeads, nChannels, nvlsStepSize);
+    if (nvlsStepStrideBytes > (size_t)UINT32_MAX) {
+      WARN("NCCL_NVLS_FIFO_LAYOUT=%d slot stride %zu does not fit conn.stepSize", fifoLayout, nvlsStepStrideBytes);
+      res = ncclInvalidArgument;
+      goto fail;
+    }
+    const uint32_t nvlsStepStride = (uint32_t)nvlsStepStrideBytes;
 
     NCCLCHECKGOTO(ncclCalloc(&comm->nvlsResources, 1), res, fail);
     comm->nvlsResources->inited = false;
@@ -539,11 +546,12 @@ ncclResult_t ncclNvlsSetup(struct ncclComm* comm, struct ncclComm* parent) {
     comm->nvlsResources->nChannels = nChannels;
     comm->nvlsResources->nHeads = nHeads;
     comm->nvlsResources->chunkSize = comm->nvlsChunkSize;
+    comm->nvlsResources->fifoLayout = fifoLayout;
     comm->nvlsResources->treeMaxChunkSize = comm->nvlsTreeMaxChunkSize;
     resources = comm->nvlsResources;
 
     for (int c = 0; c < nChannels; c++) {
-      NCCLCHECKGOTO(initNvlsChannel(comm, c, NULL, false), res, fail);
+      NCCLCHECKGOTO(initNvlsChannel(comm, c, NULL, NULL), res, fail);
     }
 
     memset(&resources->accessDesc, 0, sizeof(resources->accessDesc));
@@ -552,18 +560,38 @@ ncclResult_t ncclNvlsSetup(struct ncclComm* comm, struct ncclComm* parent) {
     resources->accessDesc.location.id = comm->cudaDev;
     resources->dev = comm->cudaDev;
 
-    NCCLCHECKGOTO(nvlsAllocateMem(comm, &resources->accessDesc, creditSize, &resources->ucCreditHandle,
-                                  &resources->mcCreditHandle, (void**)&resources->ucCredit,
-                                  (void**)&resources->mcCredit, &resources->creditUCSize, &resources->creditMCSize),
-                  res, fail);
-
-    // Set up head and tail only for now
     NCCLCHECKGOTO(ncclStrongStreamAcquire(ncclCudaGraphNone(comm->config.graphUsageMode), &comm->sharedRes->hostStream,
                                           /*concurrent=*/false, &hostStream),
                   res, fail);
     NCCLCHECKGOTO(ncclStrongStreamAcquire(ncclCudaGraphNone(comm->config.graphUsageMode),
                                           &comm->sharedRes->deviceStream, /*concurrent=*/false, &deviceStream),
                   res, fail);
+    // Build the single shared MC group for this NVLS domain. The data slice is
+    // reserved here but bound later by ncclNvlsBufferSetup.
+    {
+      size_t buffSize = nvlsStepSize * NCCL_STEPS;
+      size_t dataSize = nChannels * 2 * buffSize * nHeads;
+      size_t ubSize = ncclNvlsUbSize(comm);
+      // Slice 3 is the device runtime's (see ncclDevrState::nvlsMcPartition).
+      struct ncclMcRequest requests[4] = {
+        {creditSize, 0}, {dataSize, 0}, {ubSize, 0}, {computeBigSize(comm), NCCL_MAX_PAGE_SIZE}
+      };
+      struct ncclMcPartition partitions[4];
+      struct ncclMcRankSet ranks = {comm->localRank, comm->localRanks, comm->localRankToRank};
+      NCCLCHECKGOTO(ncclMcGroupBuildPartitions(comm, &ranks, requests, 4, &resources->mcGroup, partitions), res, fail);
+      resources->creditPartition = partitions[0];
+      resources->dataPartition = partitions[1];
+      comm->devrState.nvlsMcPartition = partitions[3];
+      if (ubSize) {
+        resources->ubPartition = partitions[2];
+        NCCLCHECKGOTO(ncclMcArenaInit(comm, &resources->ubArena, &resources->ubPartition), res, fail);
+        resources->ubEnabled = true;
+      }
+      NCCLCHECKGOTO(nvlsAllocBindUc(comm, &resources->creditPartition, creditSize, deviceStream, &resources->creditUc),
+                    res, fail);
+    }
+
+    // Set up head and tail only for now
     for (int h = 0; h < nHeads; h++) {
       int nvlsPeer = comm->nRanks + 1 + h;
       for (int c = 0; c < nChannels; c++) {
@@ -572,33 +600,33 @@ ncclResult_t ncclNvlsSetup(struct ncclComm* comm, struct ncclComm* parent) {
         struct ncclChannelPeer* peer = channel->peers[nvlsPeer];
 
         // Reduce UC -> MC
-        mem = resources->ucCredit + (h * 2 * nChannels + c) * memSize;
+        mem = (char*)resources->creditUc.ptr + (h * 2 * nChannels + c) * memSize;
         peer->send[1].transportComm = &nvlsTransport.send;
         peer->send[1].conn.buffs[NCCL_PROTO_SIMPLE] = NULL;
         peer->send[1].conn.head = (uint64_t*)mem;
         peer->send[1].conn.tail = (uint64_t*)(mem + memSize / 2);
-        peer->send[1].conn.stepSize = nvlsStepSize;
-        mem = resources->mcCredit + (h * 2 * nChannels + c) * memSize;
+        peer->send[1].conn.stepSize = nvlsStepStride;
+        mem = (char*)resources->creditPartition.ptr + (h * 2 * nChannels + c) * memSize;
         peer->recv[0].transportComm = &nvlsTransport.recv;
         peer->recv[0].conn.buffs[NCCL_PROTO_SIMPLE] = NULL;
         peer->recv[0].conn.head = (uint64_t*)mem;
         peer->recv[0].conn.tail = (uint64_t*)(mem + memSize / 2);
-        peer->recv[0].conn.stepSize = nvlsStepSize;
+        peer->recv[0].conn.stepSize = nvlsStepStride;
         peer->recv[0].conn.flags |= NCCL_NVLS_MIN_POLL;
 
         // Broadcast MC -> UC
-        mem = resources->ucCredit + ((h * 2 + 1) * nChannels + c) * memSize;
+        mem = (char*)resources->creditUc.ptr + ((h * 2 + 1) * nChannels + c) * memSize;
         peer->recv[1].transportComm = &nvlsTransport.recv;
         peer->recv[1].conn.buffs[NCCL_PROTO_SIMPLE] = NULL;
         peer->recv[1].conn.head = (uint64_t*)mem;
         peer->recv[1].conn.tail = (uint64_t*)(mem + memSize / 2);
-        peer->recv[1].conn.stepSize = nvlsStepSize;
-        mem = resources->mcCredit + ((h * 2 + 1) * nChannels + c) * memSize;
+        peer->recv[1].conn.stepSize = nvlsStepStride;
+        mem = (char*)resources->creditPartition.ptr + ((h * 2 + 1) * nChannels + c) * memSize;
         peer->send[0].transportComm = &nvlsTransport.send;
         peer->send[0].conn.buffs[NCCL_PROTO_SIMPLE] = NULL;
         peer->send[0].conn.head = (uint64_t*)mem;
         peer->send[0].conn.tail = (uint64_t*)(mem + memSize / 2);
-        peer->send[0].conn.stepSize = nvlsStepSize;
+        peer->send[0].conn.stepSize = nvlsStepStride;
         peer->send[0].conn.flags |= NCCL_NVLS_MIN_POLL;
 
         CUDACHECKGOTO(cudaMemcpyAsync(&comm->channels[c].devPeersHostPtr[nvlsPeer]->send[0], &peer->send[0].conn,
@@ -627,7 +655,7 @@ ncclResult_t ncclNvlsSetup(struct ncclComm* comm, struct ncclComm* parent) {
   // MNNVL does not support NVLS buffer registration
   if (!comm->MNNVL && comm->nvlsResources->nvlsShmemHandle == NULL) {
     /* create shared memory for fast NVLS buffer registration */
-    typeSize = DIVUP(sizeof(struct localRegData) << 1, CACHE_LINE_SIZE) * CACHE_LINE_SIZE;
+    typeSize = DIVUP(ncclNvlsUbScratchTypeSize(), CACHE_LINE_SIZE) * CACHE_LINE_SIZE;
 
     if (comm->localRank == 0) {
       shmPath[0] = '\0';
@@ -660,6 +688,7 @@ ncclResult_t ncclNvlsSetup(struct ncclComm* comm, struct ncclComm* parent) {
   }
 
 exit:
+  free(parentSlots);
   return res;
 fail:
   comm->nvlsSupport = 0;
@@ -668,346 +697,79 @@ fail:
 
 ncclResult_t ncclNvlsFree(struct ncclComm* comm) {
   struct ncclNvlsSharedRes* resources = (struct ncclNvlsSharedRes*)comm->nvlsResources;
+  ncclResult_t ret = ncclSuccess;
   if (resources == NULL) return ncclSuccess;
 
   if (ncclAtomicRefCountDecrement(&resources->refCount) == 0) {
-    if (!comm->MNNVL && resources->nvlsShmemHandle) NCCLCHECK(ncclShmClose(resources->nvlsShmemHandle));
+    if (!comm->MNNVL && resources->nvlsShmemHandle) NCCLCHECKIGNORE(ncclShmClose(resources->nvlsShmemHandle), ret);
 
-    if (resources->ucCredit || resources->mcCredit) {
-      NCCLCHECK(nvlsGroupUnbind(comm, resources->creditUCSize, &resources->mcCreditHandle));
-      NCCLCHECK(nvlsGroupUnmapMem(comm, resources->creditUCSize, resources->ucCredit, &resources->ucCreditHandle,
-                                  resources->creditMCSize, resources->mcCredit, &resources->mcCreditHandle));
+    if (resources->creditUc.ptr) {
+      NCCLCHECKIGNORE(
+        ncclMcPartitionUnbind(&resources->creditPartition, 0 /*offsetInPartition*/, resources->creditUc.size), ret);
+      NCCLCHECKIGNORE(nvlsFreeUc(comm, &resources->creditUc), ret);
     }
+    if (resources->dataUc.ptr) {
+      NCCLCHECKIGNORE(ncclMcPartitionUnbind(&resources->dataPartition, 0 /*offsetInPartition*/, resources->dataUc.size),
+                      ret);
+      NCCLCHECKIGNORE(nvlsFreeUc(comm, &resources->dataUc), ret);
+    }
+    if (resources->ubEnabled) ncclMcArenaDestroy(&resources->ubArena);
+    NCCLCHECKIGNORE(ncclMcGroupDestroy(&resources->mcGroup), ret);
 
-    if (comm->nvlsResources->inited) {
-      NCCLCHECK(nvlsGroupUnbind(comm, resources->buffUCSize, &resources->mcBuffHandle));
-      NCCLCHECK(nvlsGroupUnmapMem(comm, resources->buffUCSize, resources->ucBuff, &resources->ucBuffHandle,
-                                  resources->buffMCSize, resources->mcBuff, &resources->mcBuffHandle));
-    }
     free(resources);
     comm->nvlsResources = NULL;
   }
-  return ncclSuccess;
-}
-
-ncclResult_t tryRegisterBuffer(struct ncclComm* comm, uintptr_t userBuff, size_t buffSize, CUdeviceptr* regAddr,
-                               int* regUsed) {
-  ncclResult_t ret = ncclSuccess;
-  struct ncclReg* regRecord = NULL;
-  CUdeviceptr regPtr = 0;
-  CUmulticastObjectProp mcprop;
-  CUmemAllocationProp ucprop;
-  char shareableHandle[NVLS_HANDLE_SIZE];
-  CUmemGenericAllocationHandle mcHandle = 0;
-  size_t minSize = SIZE_MAX;
-  struct localRegData* regData = NULL;
-  cudaPointerAttributes attr;
-  size_t ucgran, mcgran, ucsize = 0, mcsize = 0;
-  bool bindComplete = false, mapComplete = false;
-
-  NCCLCHECKGOTO(ncclCalloc(&regData, comm->localRanks), ret, fail);
-
-  if (userBuff) {
-    NCCLCHECKGOTO(ncclRegFind(comm, (void*)userBuff, buffSize, &regRecord), ret, fail);
-    if (regRecord) {
-      CUDACHECKGOTO(cudaPointerGetAttributes(&attr, (void*)regRecord->begAddr), ret, fail);
-      if (attr.type == cudaMemoryTypeDevice) {
-        size_t regSize = regRecord->endAddr - regRecord->begAddr;
-        memset(&mcprop, 0, sizeof(CUmulticastObjectProp));
-        mcprop.numDevices = comm->localRanks;
-        mcprop.handleTypes = ncclCuMemHandleType;
-        mcprop.flags = 0;
-        mcprop.size = regSize;
-        CUCHECKGOTO(cuMulticastGetGranularity(&mcgran, &mcprop, CU_MULTICAST_GRANULARITY_RECOMMENDED), ret, fail);
-
-        memset(&ucprop, 0, sizeof(CUmemAllocationProp));
-        ucprop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
-        ucprop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-        ucprop.location.id = comm->cudaDev;
-        ucprop.requestedHandleTypes = ncclCuMemHandleType;
-        CUCHECKGOTO(cuMemGetAllocationGranularity(&ucgran, &ucprop, CU_MEM_ALLOC_GRANULARITY_RECOMMENDED), ret, fail);
-
-        if (regRecord->begAddr % ucgran == 0) {
-          if (regSize % ucgran != 0) {
-            regRecord->regUCSize = ALIGN_SIZE(regSize, ucgran);
-          } else {
-            regRecord->regUCSize = regSize;
-          }
-          regRecord->state |= NVLS_REG_POSSIBLE;
-          memcpy(&regData[comm->localRank].reg, regRecord, sizeof(struct ncclReg));
-          regData[comm->localRank].offset = userBuff - regRecord->begAddr;
-        }
-      }
-
-      if ((regRecord->state & NVLS_REG_POSSIBLE) == 0) {
-        regRecord->state |= NVLS_REG_NO_SUPPORT;
-      }
-    }
-  }
-
-  NCCLCHECKGOTO(ncclShmemAllgather(comm, &comm->nvlsResources->nvlsShmem, regData + comm->localRank, regData,
-                                   sizeof(struct localRegData)),
-                ret, fail);
-
-  for (int i = 0; i < comm->localRanks; ++i) {
-    if ((regData[i].reg.state & NVLS_REG_POSSIBLE) == 0) {
-      goto fail;
-    }
-    // We need to check whether the offsets are the same among ranks.
-    if (i > 0 && regData[i].offset != regData[i - 1].offset) {
-      goto fail;
-    }
-    /* get minimal reg size of nvls buffers */
-    if (minSize > regData[i].reg.regUCSize) minSize = regData[i].reg.regUCSize;
-  }
-
-  /* start registration */
-  mcsize = ucsize = minSize;
-  mcprop.size = minSize;
-  CUCHECKGOTO(cuMulticastGetGranularity(&mcgran, &mcprop, CU_MULTICAST_GRANULARITY_RECOMMENDED), ret, fail);
-  ALIGN_SIZE(mcsize, mcgran);
-  mcprop.size = mcsize;
-
-  if (comm->localRank == 0) {
-    NCCLCHECKGOTO(ncclNvlsGroupCreate(comm, &mcprop, comm->localRank, comm->localRanks, &mcHandle, shareableHandle),
-                  ret, fail);
-    NCCLCHECKGOTO(bootstrapIntraNodeBroadcast(comm->bootstrap, comm->localRankToRank, comm->localRank, comm->localRanks,
-                                              0, shareableHandle, NVLS_HANDLE_SIZE),
-                  ret, fail);
-  } else {
-    NCCLCHECKGOTO(bootstrapIntraNodeBroadcast(comm->bootstrap, comm->localRankToRank, comm->localRank, comm->localRanks,
-                                              0, shareableHandle, NVLS_HANDLE_SIZE),
-                  ret, fail);
-    NCCLCHECKGOTO(ncclNvlsGroupConnect(comm, shareableHandle, comm->localRankToRank[0], &mcHandle), ret, fail);
-  }
-
-  CUCHECKGOTO(cuMulticastAddDevice(mcHandle, comm->nvlsResources->dev), ret, fail);
-  // intra-node barrier to mitigate the possible hang in cuMulticastBindAddr during abort
-  // It also ensures that if cuMulticastBindAddr fails, the cleanup code won't race with the UDS proxy
-  NCCLCHECKGOTO(bootstrapIntraNodeBarrier(comm->bootstrap, comm->localRankToRank, comm->localRank, comm->localRanks,
-                                          comm->localRankToRank[0]),
-                ret, fail);
-  // Coverity complains that regRecord could be NULL.  That won't in practice be the case because we've already checked
-  // (regData[i].reg.state & NVLS_REG_POSSIBLE) of all local ranks, which would catch it and bail out.
-  // coverity[var_deref_op]
-  CUresult err;
-  err = CUPFN(cuMulticastBindAddr(mcHandle, 0, (CUdeviceptr)regRecord->begAddr, ucsize, 0));
-  if (err != CUDA_SUCCESS) {
-    // Don't print an error in case of buffers that are incompatible with MC.
-    if (err != CUDA_ERROR_INVALID_VALUE) {
-      const char* errStr;
-      CUCALL(cuGetErrorString(err, &errStr));
-      INFO(NCCL_REG, "Failed to multicast-bind user buffer: CUDA error %d '%s'", err, errStr);
-    }
-    goto fail;
-  }
-  bindComplete = true;
-
-  // Create a VA for the NVLS
-  CUCHECKGOTO(cuMemAddressReserve(&regPtr, mcsize, mcgran, 0U, 0), ret, fail);
-  // Map the VA locally
-  CUCHECKGOTO(cuMemMap(regPtr, mcsize, 0, mcHandle, 0), ret, fail);
-  mapComplete = true;
-  CUCHECKGOTO(cuMemSetAccess(regPtr, mcsize, &comm->nvlsResources->accessDesc, 1), ret, fail);
-
-  /* get all buffer addresses */
-  regRecord->caddrs[comm->localRank] = regRecord->begAddr;
-  NCCLCHECKGOTO(ncclShmemAllgather(comm, &comm->nvlsResources->nvlsShmem, regRecord->caddrs + comm->localRank,
-                                   regRecord->caddrs, sizeof(uintptr_t)),
-                ret, fail);
-
-  regRecord->regAddr = regPtr;
-  regRecord->regUCSize = ucsize;
-  regRecord->regMCSize = mcsize;
-  regRecord->dev = comm->nvlsResources->dev;
-  regRecord->mcHandle = mcHandle;
-  regRecord->state |= NVLS_REG_COMPLETE;
-
-  *regAddr = (uintptr_t)regPtr + regData[comm->localRank].offset;
-  *regUsed = 1;
-exit:
-  free(regData);
   return ret;
-fail:
-  if (regPtr) {
-    if (mapComplete) CUCALL(cuMemUnmap(regPtr, mcsize));
-    CUCALL(cuMemAddressFree(regPtr, mcsize));
-  }
-  if (mcHandle) {
-    if (bindComplete) CUCALL(cuMulticastUnbind(mcHandle, comm->nvlsResources->dev, 0 /*mcOffset*/, ucsize));
-    CUCALL(cuMemRelease(mcHandle));
-  }
-  *regUsed = 0;
-  goto exit;
 }
 
-static ncclResult_t nvlsRegisterBuffer(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t sendbuffSize,
-                                       size_t recvbuffSize, struct ncclReg* sendRegRecord,
-                                       struct ncclReg* recvRegRecord, int* outRegBufUsed, void** outRegBufSend,
-                                       void** outRegBufRecv) {
-  ncclResult_t ret = ncclSuccess;
-  int regBufUsed = 0;
-  struct localRegData* regData = NULL;
-  bool sendNeedReg = false, recvNeedReg = false;
-  CUdeviceptr regSendPtr = 0;
-  CUdeviceptr regRecvPtr = 0;
+// Find the local registration record for one buffer, or leave *outReg NULL for a buffer
+// that cannot take this path; a NULL record travels through the gathers as an ineligible
+// payload. Even on error the caller must still call ncclNvlsUbRegister, since peers
+// cannot see this rank's failure.
+static ncclResult_t nvlsFindLocalReg(struct ncclComm* comm, const void* buff, size_t size, struct ncclReg** outReg) {
+  struct ncclReg* reg = NULL;
+  bool isValid = false;
+  void* base = NULL;
+  size_t baseSize = 0;
+  int numSegments = 0;
 
-  NCCLCHECKGOTO(ncclCalloc(&regData, comm->localRanks * 2), ret, fail);
-
-  if (sendRegRecord) {
-    memcpy(&regData[comm->localRank * 2].reg, sendRegRecord, sizeof(struct ncclReg));
-    regData[comm->localRank * 2].offset = (uintptr_t)sendbuff - sendRegRecord->begAddr;
-  }
-  if (sendbuff) {
-    CUCHECKGOTO(cuPointerGetAttribute((void*)&regData[comm->localRank * 2].handleTypes,
-                                      CU_POINTER_ATTRIBUTE_ALLOWED_HANDLE_TYPES, (CUdeviceptr)sendbuff),
-                ret, fail);
-  }
-
-  if (recvRegRecord) {
-    memcpy(&regData[comm->localRank * 2 + 1].reg, recvRegRecord, sizeof(struct ncclReg));
-    regData[comm->localRank * 2 + 1].offset = (uintptr_t)recvbuff - recvRegRecord->begAddr;
-  }
-  if (recvbuff) {
-    CUCHECKGOTO(cuPointerGetAttribute((void*)&regData[comm->localRank * 2 + 1].handleTypes,
-                                      CU_POINTER_ATTRIBUTE_ALLOWED_HANDLE_TYPES, (CUdeviceptr)recvbuff),
-                ret, fail);
-  }
-
-  NCCLCHECKGOTO(ncclShmemAllgather(comm, &comm->nvlsResources->nvlsShmem, regData + comm->localRank * 2, regData,
-                                   sizeof(struct localRegData) * 2),
-                ret, fail);
-
-  /* first check whether all local ranks find their registered buffer */
-  for (int i = 0; i < comm->localRanks; ++i) {
-    if ((regData[i * 2].reg.state & NVLS_REG_COMPLETE) == 0 ||
-        regData[comm->localRank * 2].reg.caddrs[i] != regData[i * 2].reg.begAddr) {
-      sendNeedReg = true;
-    }
-
-    if ((regData[i * 2 + 1].reg.state & NVLS_REG_COMPLETE) == 0 ||
-        regData[comm->localRank * 2 + 1].reg.caddrs[i] != regData[i * 2 + 1].reg.begAddr) {
-      recvNeedReg = true;
-    }
-
-    if ((regData[i * 2].reg.state & NVLS_REG_NO_SUPPORT) || (regData[i * 2 + 1].reg.state & NVLS_REG_NO_SUPPORT)) {
-      goto fail;
-    }
-
-    if ((sendbuff && (regData[i * 2].handleTypes & ncclCuMemHandleType) == 0) ||
-        (recvbuff && (regData[i * 2 + 1].handleTypes & ncclCuMemHandleType) == 0)) {
-      goto fail;
-    }
-  }
-
-  if (sendNeedReg == false) {
-    for (int i = 0; i < comm->localRanks - 1; ++i) {
-      if (regData[i * 2].offset != regData[(i + 1) * 2].offset) {
-        /* offset are different, we cannot apply user buffer registration */
-        goto fail;
-      }
-    }
-
-    /* reuse previous registered buffer if possible */
-    if (!sendNeedReg)
-      regSendPtr = (CUdeviceptr)((uintptr_t)sendRegRecord->regAddr + regData[comm->localRank * 2].offset);
-  }
-
-  if (recvNeedReg == false) {
-    for (int i = 0; i < comm->localRanks - 1; ++i) {
-      if (regData[i * 2 + 1].offset != regData[(i + 1) * 2 + 1].offset) {
-        goto fail;
-      }
-    }
-
-    if (!recvNeedReg)
-      regRecvPtr = (CUdeviceptr)((uintptr_t)recvRegRecord->regAddr + regData[comm->localRank * 2 + 1].offset);
-  }
-
-  if ((!sendNeedReg || sendbuff == NULL) && (!recvNeedReg || recvbuff == NULL)) {
-    regBufUsed = 1;
-    INFO(NCCL_REG,
-         "rank %d reuse registered NVLS sendbuff %p, recvbuff %p, sendbuff size %ld, recvbuff size %ld, reg sendbuff "
-         "%p, reg recvbuff %p",
-         comm->rank, sendbuff, recvbuff, sendbuffSize, recvbuffSize, (void*)regSendPtr, (void*)regRecvPtr);
-    goto exit;
-  }
-
-  /* Start Registration. Not found registered buffers, then check whether both send and recv buffer locate
-   * in register request cache. */
-  if (sendNeedReg && sendbuff && sendbuffSize > 0) {
-    tryRegisterBuffer(comm, (uintptr_t)sendbuff, sendbuffSize, &regSendPtr, &regBufUsed);
-    if (regBufUsed == 0) goto fail;
-  }
-
-  if (recvNeedReg && recvbuff && recvbuffSize > 0) {
-    tryRegisterBuffer(comm, (uintptr_t)recvbuff, recvbuffSize, &regRecvPtr, &regBufUsed);
-    if (regBufUsed == 0) goto fail;
-  }
-
-  INFO(NCCL_REG,
-       "rank %d successfully registered NVLS sendbuff %p, recvbuff %p, sendbuff size %ld, recvbuff size %ld, reg "
-       "sendbuff %p, reg recvbuff %p",
-       comm->rank, sendbuff, recvbuff, sendbuffSize, recvbuffSize, (void*)regSendPtr, (void*)regRecvPtr);
-
-exit:
-  *outRegBufSend = (void*)regSendPtr;
-  *outRegBufRecv = (void*)regRecvPtr;
-  *outRegBufUsed = regBufUsed;
-  free(regData);
+  NCCLCHECK(ncclRegFind(comm, buff, size, &reg));
+  if (reg == NULL) return ncclSuccess;
+  NCCLCHECK(ncclRegLocalIsValid(reg, &isValid));
+  if (!isValid || !ncclNvlsUbEligible(comm, buff, reg)) return ncclSuccess;
+  NCCLCHECK(ncclCuMemGetAddressRange((CUdeviceptr)reg->begAddr, reg->endAddr - reg->begAddr, (CUdeviceptr*)&base,
+                                     &baseSize, &numSegments));
+  if (numSegments > 1 && !ncclParamMultiSegmentRegister()) return ncclSuccess;
+  *outReg = reg;
   return ncclSuccess;
-fail:
-  regBufUsed = 0;
-  INFO(NCCL_REG, "rank %d failed to NVLS register sendbuff %p sendbuffSize %ld recvbuff %p recvbuffSize %ld",
-       comm->rank, sendbuff, sendbuffSize, recvbuff, recvbuffSize);
-  goto exit;
 }
 
 ncclResult_t ncclNvlsLocalRegisterBuffer(struct ncclComm* comm, const void* sendbuff, void* recvbuff,
                                          size_t sendbuffSize, size_t recvbuffSize, int* outRegBufUsed,
                                          void** outRegBufSend, void** outRegBufRecv) {
-  struct ncclReg* sendRegRecord = NULL;
-  struct ncclReg* recvRegRecord = NULL;
-  bool sendIsValid = false;
-  bool recvIsValid = false;
-  void* baseSend = NULL;
-  void* baseRecv = NULL;
-  size_t baseSendSize = 0;
-  size_t baseRecvSize = 0;
+  ncclResult_t ret = ncclSuccess;
 
   *outRegBufUsed = 0;
+  *outRegBufSend = NULL;
+  *outRegBufRecv = NULL;
+
+  // Uniform across local ranks, so no risk of deadlock.
+  if (!ncclNvlsUbEnabled(comm)) return ret;
+
+  struct ncclReg* sendRegRecord = NULL;
+  struct ncclReg* recvRegRecord = NULL;
+
   if (sendbuff) {
-    NCCLCHECK(ncclRegFind(comm, sendbuff, sendbuffSize, &sendRegRecord));
-    NCCLCHECK(ncclRegLocalIsValid(sendRegRecord, &sendIsValid));
-    if (sendIsValid) {
-      int numSegments = 0;
-      NCCLCHECK(ncclCuMemGetAddressRange((CUdeviceptr)sendbuff, sendbuffSize, (CUdeviceptr*)&baseSend, &baseSendSize,
-                                         &numSegments));
-      if (numSegments > 1 && !ncclParamMultiSegmentRegister()) goto exit;
-    }
-  } else {
-    sendIsValid = true;
+    NCCLCHECKIGNORE(nvlsFindLocalReg(comm, sendbuff, sendbuffSize, &sendRegRecord), ret);
   }
 
   if (recvbuff) {
-    NCCLCHECK(ncclRegFind(comm, recvbuff, recvbuffSize, &recvRegRecord));
-    NCCLCHECK(ncclRegLocalIsValid(recvRegRecord, &recvIsValid));
-    if (recvIsValid) {
-      int numSegments = 0;
-      NCCLCHECK(ncclCuMemGetAddressRange((CUdeviceptr)recvbuff, recvbuffSize, (CUdeviceptr*)&baseRecv, &baseRecvSize,
-                                         &numSegments));
-      if (numSegments > 1 && !ncclParamMultiSegmentRegister()) goto exit;
-    }
-  } else {
-    recvIsValid = true;
+    NCCLCHECKIGNORE(nvlsFindLocalReg(comm, recvbuff, recvbuffSize, &recvRegRecord), ret);
   }
 
-  if (sendIsValid && recvIsValid)
-    NCCLCHECK(nvlsRegisterBuffer(comm, sendbuff, recvbuff, sendbuffSize, recvbuffSize, sendRegRecord, recvRegRecord,
-                                 outRegBufUsed, outRegBufSend, outRegBufRecv));
-
-exit:
-  return ncclSuccess;
+  NCCLCHECK(ncclNvlsUbRegister(comm, sendbuff, recvbuff, sendbuffSize, recvbuffSize, sendRegRecord, recvRegRecord,
+                               outRegBufUsed, outRegBufSend, outRegBufRecv));
+  return ret;
 }
 
 struct ncclNvlsCleanupCallback {
@@ -1018,77 +780,94 @@ struct ncclNvlsCleanupCallback {
 
 static ncclResult_t cleanupNvls(struct ncclComm* comm, struct ncclCommCallback* cb) {
   struct ncclNvlsCleanupCallback* obj = (struct ncclNvlsCleanupCallback*)cb;
-  NCCLCHECK(ncclCommGraphDeregister(obj->comm, obj->reg));
+  ncclResult_t ret = ncclCommGraphDeregister(obj->comm, obj->reg);
   free(obj);
-  return ncclSuccess;
+  return ret;
+}
+
+// Take a graph registration on one buffer, with the same failure contract as
+// nvlsFindLocalReg. The reference is taken only on success, so the caller releases
+// exactly the records it was handed.
+static ncclResult_t nvlsGraphReg(struct ncclComm* comm, const void* buff, size_t size, struct ncclReg** outReg,
+                                 struct ncclNvlsCleanupCallback** outRecord) {
+  ncclResult_t ret = ncclSuccess;
+
+  struct ncclReg* reg = NULL;
+  struct ncclNvlsCleanupCallback* record = NULL;
+
+  void* base = NULL;
+  size_t baseSize = 0;
+  int numSegments = 0;
+  NCCLCHECK(ncclCuMemGetAddressRange((CUdeviceptr)buff, size, (CUdeviceptr*)&base, &baseSize, &numSegments));
+  if (numSegments > 1 && !ncclParamMultiSegmentRegister()) return ret;
+
+  NCCLCHECKGOTO(ncclCommGraphRegister(comm, base, baseSize, (void**)&reg), ret, done);
+  if (reg == NULL) goto done;
+  if (!ncclNvlsUbEligible(comm, buff, reg)) goto fail;
+
+  NCCLCHECKGOTO(ncclCalloc(&record, 1), ret, fail);
+  record->base.fn = cleanupNvls;
+  record->reg = reg;
+  record->comm = comm;
+
+  *outReg = reg;
+  *outRecord = record;
+
+done:
+  return ret;
+
+fail:
+  NCCLCHECKIGNORE(ncclCommGraphDeregister(comm, reg), ret);
+  goto done;
 }
 
 ncclResult_t ncclNvlsGraphRegisterBuffer(
   struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t sendbuffSize, size_t recvbuffSize,
   int* outRegBufUsed, void** outRegBufSend, void** outRegBufRecv,
   struct ncclIntruQueue<struct ncclCommCallback, &ncclCommCallback::next>* cleanupQueue, int* nCleanupQueueEltsAdded) {
+  ncclResult_t ret = ncclSuccess;
+  *outRegBufUsed = 0;
+  *outRegBufSend = NULL;
+  *outRegBufRecv = NULL;
+
+  // Uniform across local ranks, so no risk of deadlock.
+  if (!ncclNvlsUbEnabled(comm)) return ret;
+
   struct ncclNvlsCleanupCallback* sendRecord = NULL;
   struct ncclNvlsCleanupCallback* recvRecord = NULL;
-  void* baseSend = NULL;
-  void* baseRecv = NULL;
-  size_t baseSendSize = 0;
-  size_t baseRecvSize = 0;
   struct ncclReg* sendRegRecord = NULL;
   struct ncclReg* recvRegRecord = NULL;
 
-  *outRegBufUsed = 0;
   if (sendbuff) {
-    int numSegments = 0;
-    NCCLCHECK(ncclCuMemGetAddressRange((CUdeviceptr)sendbuff, sendbuffSize, (CUdeviceptr*)&baseSend, &baseSendSize,
-                                       &numSegments));
-    if (numSegments > 1 && !ncclParamMultiSegmentRegister()) goto exit;
-    NCCLCHECK(ncclCommGraphRegister(comm, baseSend, baseSendSize, (void**)&sendRegRecord));
+    NCCLCHECKIGNORE(nvlsGraphReg(comm, sendbuff, sendbuffSize, &sendRegRecord, &sendRecord), ret);
   }
 
   if (recvbuff) {
-    int numSegments = 0;
-    NCCLCHECK(ncclCuMemGetAddressRange((CUdeviceptr)recvbuff, recvbuffSize, (CUdeviceptr*)&baseRecv, &baseRecvSize,
-                                       &numSegments));
-    if (numSegments > 1 && !ncclParamMultiSegmentRegister()) goto exit;
-    NCCLCHECK(ncclCommGraphRegister(comm, baseRecv, baseRecvSize, (void**)&recvRegRecord));
+    NCCLCHECKIGNORE(nvlsGraphReg(comm, recvbuff, recvbuffSize, &recvRegRecord, &recvRecord), ret);
   }
 
-  NCCLCHECK(nvlsRegisterBuffer(comm, sendbuff, recvbuff, sendbuffSize, recvbuffSize, sendRegRecord, recvRegRecord,
-                               outRegBufUsed, outRegBufSend, outRegBufRecv));
+  NCCLCHECKIGNORE(ncclNvlsUbRegister(comm, sendbuff, recvbuff, sendbuffSize, recvbuffSize, sendRegRecord, recvRegRecord,
+                                     outRegBufUsed, outRegBufSend, outRegBufRecv),
+                  ret);
 
-  if (*outRegBufUsed) {
+  if (ret == ncclSuccess && *outRegBufUsed) {
     if (sendRegRecord) {
-      sendRecord = (struct ncclNvlsCleanupCallback*)malloc(sizeof(struct ncclNvlsCleanupCallback));
-      if (sendRecord == nullptr) {
-        WARN("Failed to allocate NVLS send cleanup callback");
-        return ncclSystemError;
-      }
-      sendRecord->base.fn = cleanupNvls;
-      sendRecord->reg = sendRegRecord;
-      sendRecord->comm = comm;
       ncclIntruQueueEnqueue(cleanupQueue, (struct ncclCommCallback*)sendRecord);
       *nCleanupQueueEltsAdded += 1;
     }
 
     if (recvRegRecord) {
-      recvRecord = (struct ncclNvlsCleanupCallback*)malloc(sizeof(struct ncclNvlsCleanupCallback));
-      if (recvRecord == nullptr) {
-        WARN("Failed to allocate NVLS recv cleanup callback");
-        return ncclSystemError;
-      }
-      recvRecord->base.fn = cleanupNvls;
-      recvRecord->reg = recvRegRecord;
-      recvRecord->comm = comm;
       ncclIntruQueueEnqueue(cleanupQueue, (struct ncclCommCallback*)recvRecord);
       *nCleanupQueueEltsAdded += 1;
     }
   } else {
-    if (sendbuff) NCCLCHECK(ncclCommGraphDeregister(comm, sendRegRecord));
-    if (recvbuff) NCCLCHECK(ncclCommGraphDeregister(comm, recvRegRecord));
+    if (sendbuff) NCCLCHECKIGNORE(ncclCommGraphDeregister(comm, sendRegRecord), ret);
+    if (recvbuff) NCCLCHECKIGNORE(ncclCommGraphDeregister(comm, recvRegRecord), ret);
+    free(sendRecord);
+    free(recvRecord);
   }
 
-exit:
-  return ncclSuccess;
+  return ret;
 }
 
 ncclResult_t ncclNvlsRegResourcesQuery(struct ncclComm* comm, ncclFunc_t func, int* recChannels) {
@@ -1130,6 +909,12 @@ ncclResult_t ncclNvlsRegResourcesQuery(struct ncclComm* comm, ncclFunc_t func, i
     } else if (func == ncclFuncAllReduce) {
       if (comm->compCap >= 100 && comm->minNetBw >= 96.0f) {
         factor = 10 * 8;
+      } else if (comm->compCap >= 100 && comm->minNetBw >= 48.0f) {
+        if (comm->nNodes == 2) {
+          factor = 14 * 8;
+        } else {
+          factor = 8 * 8;
+        }
       } else if (comm->compCap >= 100) {
         factor = 7 * 8;
       } else {
@@ -1180,19 +965,23 @@ ncclResult_t ncclNvlsGraphRegisterBuffer(
   struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t sendbuffSize, size_t recvbuffSize,
   int* outRegBufUsed, void** outRegBufSend, void** outRegBufRecv,
   struct ncclIntruQueue<struct ncclCommCallback, &ncclCommCallback::next>* cleanupQueue, int* nCleanupQueueEltsAdded) {
-  *outRegBufUsed = false;
+  *outRegBufUsed = 0;
+  *outRegBufSend = NULL;
+  *outRegBufRecv = NULL;
   return ncclSuccess;
 }
 
 ncclResult_t ncclNvlsLocalRegisterBuffer(struct ncclComm* comm, const void* sendbuff, void* recvbuff,
                                          size_t sendbuffSize, size_t recvbuffSize, int* outRegBufUsed,
                                          void** outRegBufSend, void** outRegBufRecv) {
-  *outRegBufUsed = false;
+  *outRegBufUsed = 0;
+  *outRegBufSend = NULL;
+  *outRegBufRecv = NULL;
   return ncclSuccess;
 }
 
-ncclResult_t ncclNvlsDeregBuffer(struct ncclComm* comm, CUmemGenericAllocationHandle* mcHandler, CUdeviceptr ptr,
-                                 int dev, size_t ucsize, size_t mcsize) {
+// The real implementation lives in nvls_ub.cc, which is empty before CUDA 12.1.
+ncclResult_t ncclNvlsUbDeregister(struct ncclComm* comm, struct ncclReg* reg) {
   return ncclSuccess;
 }
 

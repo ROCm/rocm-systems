@@ -136,22 +136,6 @@ NCCL_DEVICE_INLINE ncclGin_BackendMask<beMask>::ncclGin_BackendMask(ncclDevComm 
   ncclGinInitCommon(this, comm, contextIndex);
 }
 
-NCCL_DEVICE_INLINE ncclGin_C::ncclGin_C(ncclDevComm const& comm, unsigned backendMask, int contextIndex,
-                                        ncclGinResourceSharingMode resourceSharingMode)
-  : comm(comm), resourceSharingMode(resourceSharingMode), backendMask(backendMask) {
-  ncclGinInitCommon(this, comm, contextIndex);
-}
-
-NCCL_DEVICE_INLINE void ncclGin_C_init(ncclGin_C* net, unsigned backendMask, ncclDevComm const& comm,
-                                       int contextIndex) {
-  ::new (net) ncclGin_C(comm, backendMask, contextIndex, NCCL_GIN_RESOURCE_SHARING_GPU);
-}
-
-NCCL_DEVICE_INLINE void ncclGin_C_initWithResourceSharingMode(ncclGin_C* net, unsigned backendMask,
-                                                              ncclDevComm const& comm, int contextIndex,
-                                                              ncclGinResourceSharingMode resourceSharingMode) {
-  ::new (net) ncclGin_C(comm, backendMask, contextIndex, resourceSharingMode);
-}
 #endif
 
 #ifdef __CUDACC__
@@ -173,23 +157,6 @@ NCCL_DEVICE_INLINE ncclGinCtx_M<beMask> ncclGin_BackendMask<beMask>::_makeCtx() 
   return ans;
 }
 
-NCCL_DEVICE_INLINE ncclGinCtx ncclGin_C_makeCtx(ncclGin_C* net) {
-  using nccl::utility::idivFast32;
-  ncclGinCtx ans;
-  ans.backendMask = net->backendMask;
-  ans.backend = (ncclNetDeviceType)net->_ginBackend;
-  if (net->comm.ginConnectionStride == 1) {
-    ans.rank = net->comm.rank;
-    ans.nRanks = net->comm.nRanks;
-  } else {
-    ans.rank = idivFast32(net->comm.rank, net->comm.ginConnectionStride, net->comm.ginConnectionStride_rcp32);
-    ans.nRanks = idivFast32(net->comm.nRanks, net->comm.ginConnectionStride, net->comm.ginConnectionStride_rcp32);
-  }
-  ans.handle = net->_ginHandle;
-  ans.contextId = net->contextId;
-  ans.resourceSharingMode = (uint8_t)net->resourceSharingMode;
-  return ans;
-}
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -225,8 +192,9 @@ template <typename RemoteAction>
 NCCL_DEVICE_INLINE constexpr uint64_t ncclGin_getSignalOpArg(RemoteAction) {
   return 0;
 }
-template <typename RemoteAction>
-NCCL_DEVICE_INLINE constexpr ncclGinSignalDescriptor ncclGin_getSignalDescriptor(ncclGin const&, RemoteAction) {
+template <unsigned beMask, typename RemoteAction>
+NCCL_DEVICE_INLINE constexpr ncclGinSignalDescriptor ncclGin_getSignalDescriptor(ncclGin_BackendMask<beMask> const&,
+                                                                                 RemoteAction) {
   ncclGinSignalDescriptor desc{};
   desc.type = NCCL_GIN_SIGNAL_TYPE_NONE;
   return desc;
@@ -234,7 +202,9 @@ NCCL_DEVICE_INLINE constexpr ncclGinSignalDescriptor ncclGin_getSignalDescriptor
 #endif
 
 #ifdef __CUDACC__
-NCCL_DEVICE_INLINE ncclGinSignalDescriptor ncclGin_getSignalDescriptor(ncclGin const& net, ncclGin_SignalInc arg) {
+template <unsigned beMask>
+NCCL_DEVICE_INLINE ncclGinSignalDescriptor ncclGin_getSignalDescriptor(ncclGin_BackendMask<beMask> const& net,
+                                                                       ncclGin_SignalInc arg) {
   ncclGinSignalDescriptor desc{};
   desc.type = NCCL_GIN_SIGNAL_TYPE_INDEXED;
   desc.indexedSignal.signalId = arg.signal;
@@ -250,7 +220,8 @@ NCCL_DEVICE_INLINE constexpr uint64_t ncclGin_getSignalOpArg(ncclGin_SignalInc) 
 #endif
 
 #ifdef __CUDACC__
-NCCL_DEVICE_INLINE constexpr ncclGinSignalDescriptor ncclGin_getSignalDescriptor(ncclGin const& net,
+template <unsigned beMask>
+NCCL_DEVICE_INLINE constexpr ncclGinSignalDescriptor ncclGin_getSignalDescriptor(ncclGin_BackendMask<beMask> const& net,
                                                                                  ncclGin_StrongSignalInc arg) {
   ncclGinSignalDescriptor desc{};
   desc.type = NCCL_GIN_SIGNAL_TYPE_INDEXED;
@@ -267,7 +238,8 @@ NCCL_DEVICE_INLINE constexpr uint64_t ncclGin_getSignalOpArg(ncclGin_StrongSigna
 #endif
 
 #ifdef __CUDACC__
-NCCL_DEVICE_INLINE constexpr ncclGinSignalDescriptor ncclGin_getSignalDescriptor(ncclGin const& net,
+template <unsigned beMask>
+NCCL_DEVICE_INLINE constexpr ncclGinSignalDescriptor ncclGin_getSignalDescriptor(ncclGin_BackendMask<beMask> const& net,
                                                                                  ncclGin_WeakSignalInc arg) {
   ncclGinSignalDescriptor desc{};
   desc.type = NCCL_GIN_SIGNAL_TYPE_INDEXED;
@@ -284,7 +256,9 @@ NCCL_DEVICE_INLINE constexpr uint64_t ncclGin_getSignalOpArg(ncclGin_WeakSignalI
 #endif
 
 #ifdef __CUDACC__
-NCCL_DEVICE_INLINE ncclGinSignalDescriptor ncclGin_getSignalDescriptor(ncclGin const& net, ncclGin_SignalAdd arg) {
+template <unsigned beMask>
+NCCL_DEVICE_INLINE ncclGinSignalDescriptor ncclGin_getSignalDescriptor(ncclGin_BackendMask<beMask> const& net,
+                                                                       ncclGin_SignalAdd arg) {
   ncclGinSignalDescriptor desc{};
   desc.type = NCCL_GIN_SIGNAL_TYPE_INDEXED;
   desc.indexedSignal.signalId = arg.signal;
@@ -300,7 +274,8 @@ NCCL_DEVICE_INLINE constexpr uint64_t ncclGin_getSignalOpArg(ncclGin_SignalAdd a
 #endif
 
 #ifdef __CUDACC__
-NCCL_DEVICE_INLINE constexpr ncclGinSignalDescriptor ncclGin_getSignalDescriptor(ncclGin const& net,
+template <unsigned beMask>
+NCCL_DEVICE_INLINE constexpr ncclGinSignalDescriptor ncclGin_getSignalDescriptor(ncclGin_BackendMask<beMask> const& net,
                                                                                  ncclGin_StrongSignalAdd arg) {
   ncclGinSignalDescriptor desc{};
   desc.type = NCCL_GIN_SIGNAL_TYPE_INDEXED;
@@ -317,7 +292,8 @@ NCCL_DEVICE_INLINE constexpr uint64_t ncclGin_getSignalOpArg(ncclGin_StrongSigna
 #endif
 
 #ifdef __CUDACC__
-NCCL_DEVICE_INLINE constexpr ncclGinSignalDescriptor ncclGin_getSignalDescriptor(ncclGin const& net,
+template <unsigned beMask>
+NCCL_DEVICE_INLINE constexpr ncclGinSignalDescriptor ncclGin_getSignalDescriptor(ncclGin_BackendMask<beMask> const& net,
                                                                                  ncclGin_WeakSignalAdd arg) {
   ncclGinSignalDescriptor desc{};
   desc.type = NCCL_GIN_SIGNAL_TYPE_INDEXED;
@@ -334,7 +310,9 @@ NCCL_DEVICE_INLINE constexpr uint64_t ncclGin_getSignalOpArg(ncclGin_WeakSignalA
 #endif
 
 #ifdef __CUDACC__
-NCCL_DEVICE_INLINE ncclGinSignalDescriptor ncclGin_getSignalDescriptor(ncclGin const& net, ncclGin_VASignalInc arg) {
+template <unsigned beMask>
+NCCL_DEVICE_INLINE ncclGinSignalDescriptor ncclGin_getSignalDescriptor(ncclGin_BackendMask<beMask> const& net,
+                                                                       ncclGin_VASignalInc arg) {
   ncclGinSignalDescriptor desc{};
   desc.type = NCCL_GIN_SIGNAL_TYPE_VA;
   desc.vaSignal.signalWindow =
@@ -353,7 +331,8 @@ NCCL_DEVICE_INLINE constexpr uint64_t ncclGin_getSignalOpArg(ncclGin_VASignalInc
 #endif
 
 #ifdef __CUDACC__
-NCCL_DEVICE_INLINE ncclGinSignalDescriptor ncclGin_getSignalDescriptor(ncclGin const& net,
+template <unsigned beMask>
+NCCL_DEVICE_INLINE ncclGinSignalDescriptor ncclGin_getSignalDescriptor(ncclGin_BackendMask<beMask> const& net,
                                                                        ncclGin_StrongVASignalInc arg) {
   ncclGinSignalDescriptor desc{};
   desc.type = NCCL_GIN_SIGNAL_TYPE_VA;
@@ -373,7 +352,8 @@ NCCL_DEVICE_INLINE constexpr uint64_t ncclGin_getSignalOpArg(ncclGin_StrongVASig
 #endif
 
 #ifdef __CUDACC__
-NCCL_DEVICE_INLINE ncclGinSignalDescriptor ncclGin_getSignalDescriptor(ncclGin const& net,
+template <unsigned beMask>
+NCCL_DEVICE_INLINE ncclGinSignalDescriptor ncclGin_getSignalDescriptor(ncclGin_BackendMask<beMask> const& net,
                                                                        ncclGin_WeakVASignalInc arg) {
   ncclGinSignalDescriptor desc{};
   desc.type = NCCL_GIN_SIGNAL_TYPE_VA;
@@ -393,7 +373,9 @@ NCCL_DEVICE_INLINE constexpr uint64_t ncclGin_getSignalOpArg(ncclGin_WeakVASigna
 #endif
 
 #ifdef __CUDACC__
-NCCL_DEVICE_INLINE ncclGinSignalDescriptor ncclGin_getSignalDescriptor(ncclGin const& net, ncclGin_VASignalAdd arg) {
+template <unsigned beMask>
+NCCL_DEVICE_INLINE ncclGinSignalDescriptor ncclGin_getSignalDescriptor(ncclGin_BackendMask<beMask> const& net,
+                                                                       ncclGin_VASignalAdd arg) {
   ncclGinSignalDescriptor desc{};
   desc.type = NCCL_GIN_SIGNAL_TYPE_VA;
   desc.vaSignal.signalWindow =
@@ -412,7 +394,8 @@ NCCL_DEVICE_INLINE constexpr uint64_t ncclGin_getSignalOpArg(ncclGin_VASignalAdd
 #endif
 
 #ifdef __CUDACC__
-NCCL_DEVICE_INLINE ncclGinSignalDescriptor ncclGin_getSignalDescriptor(ncclGin const& net,
+template <unsigned beMask>
+NCCL_DEVICE_INLINE ncclGinSignalDescriptor ncclGin_getSignalDescriptor(ncclGin_BackendMask<beMask> const& net,
                                                                        ncclGin_StrongVASignalAdd arg) {
   ncclGinSignalDescriptor desc{};
   desc.type = NCCL_GIN_SIGNAL_TYPE_VA;
@@ -432,7 +415,8 @@ NCCL_DEVICE_INLINE constexpr uint64_t ncclGin_getSignalOpArg(ncclGin_StrongVASig
 #endif
 
 #ifdef __CUDACC__
-NCCL_DEVICE_INLINE ncclGinSignalDescriptor ncclGin_getSignalDescriptor(ncclGin const& net,
+template <unsigned beMask>
+NCCL_DEVICE_INLINE ncclGinSignalDescriptor ncclGin_getSignalDescriptor(ncclGin_BackendMask<beMask> const& net,
                                                                        ncclGin_WeakVASignalAdd arg) {
   ncclGinSignalDescriptor desc{};
   desc.type = NCCL_GIN_SIGNAL_TYPE_VA;
@@ -459,8 +443,8 @@ template <typename LocalAction>
 NCCL_DEVICE_INLINE constexpr bool ncclGin_isCounter(LocalAction) {
   return false;
 }
-template <typename LocalAction>
-NCCL_DEVICE_INLINE constexpr ncclGinCounter_t ncclGin_getCounterId(ncclGin const&, LocalAction) {
+template <unsigned beMask, typename LocalAction>
+NCCL_DEVICE_INLINE constexpr ncclGinCounter_t ncclGin_getCounterId(ncclGin_BackendMask<beMask> const&, LocalAction) {
   return -1u;
 }
 #endif
@@ -469,7 +453,9 @@ NCCL_DEVICE_INLINE constexpr ncclGinCounter_t ncclGin_getCounterId(ncclGin const
 NCCL_DEVICE_INLINE constexpr bool ncclGin_isCounter(ncclGin_CounterInc) {
   return true;
 }
-NCCL_DEVICE_INLINE constexpr ncclGinCounter_t ncclGin_getCounterId(ncclGin const& net, ncclGin_CounterInc arg) {
+template <unsigned beMask>
+NCCL_DEVICE_INLINE constexpr ncclGinCounter_t ncclGin_getCounterId(ncclGin_BackendMask<beMask> const& net,
+                                                                   ncclGin_CounterInc arg) {
   return arg.counter;
 }
 #endif
@@ -478,7 +464,9 @@ NCCL_DEVICE_INLINE constexpr ncclGinCounter_t ncclGin_getCounterId(ncclGin const
 NCCL_DEVICE_INLINE constexpr bool ncclGin_isCounter(ncclGin_WeakCounterInc) {
   return true;
 }
-NCCL_DEVICE_INLINE constexpr ncclGinCounter_t ncclGin_getCounterId(ncclGin const& net, ncclGin_WeakCounterInc arg) {
+template <unsigned beMask>
+NCCL_DEVICE_INLINE constexpr ncclGinCounter_t ncclGin_getCounterId(ncclGin_BackendMask<beMask> const& net,
+                                                                   ncclGin_WeakCounterInc arg) {
   return arg.counter;
 }
 #endif
@@ -502,44 +490,6 @@ NCCL_DEVICE_INLINE constexpr bool ncclGin_isDeviceOnly(ncclGin_SegmentHostNuma) 
 ////////////////////////////////////////////////////////////////////////////////
 
 #ifdef __CUDACC__
-NCCL_DEVICE_INLINE void ncclGinPut_v2(ncclGin_C* net, ncclTeam team, int peer, ncclWindow_t dstWin, size_t dstOffset,
-                                      ncclWindow_t srcWin, size_t srcOffset, size_t bytes, bool isSignal,
-                                      ncclGinSignal_t signalId, ncclGinSignalOp_t signalOp, uint64_t signalOpArg,
-                                      bool isCounter, ncclGinCounter_t counterId, ncclCoopAny coop, bool isDescriptor,
-                                      ncclGinDescriptorSmem* descriptor, cuda::thread_scope givenRelease,
-                                      cuda::thread_scope requiredRelease, uint32_t optFlags) {
-  using nccl::utility::loadConst;
-  using nccl::gin::internal::teamRankToGinRank;
-  ncclGinCtx ctx = ncclGin_C_makeCtx(net);
-  coop.sync();
-  ncclGinSignalDescriptor signal{};
-  signal.type = NCCL_GIN_SIGNAL_TYPE_NONE;
-  if (isSignal) {
-    signal.type = NCCL_GIN_SIGNAL_TYPE_INDEXED;
-    signal.indexedSignal.signalId = signalId;
-  }
-  if (coop.thread_rank() == 0) {
-    ncclGinCall<ncclGinApi_Put>(ctx, ncclCoopThread(), teamRankToGinRank(net->comm, team, peer), /*hasWins=*/true,
-                                nccl::gin::internal::getGinWindow(dstWin, net->comm.backendIndex, net->connectionId),
-                                4096 * size_t(loadConst(&dstWin->ginOffset4K)) + dstOffset,
-                                nccl::gin::internal::getGinWindow(srcWin, net->comm.backendIndex, net->connectionId),
-                                4096 * size_t(loadConst(&srcWin->ginOffset4K)) + srcOffset, bytes, signal, signalOp,
-                                signalOpArg, isCounter, counterId, isDescriptor, descriptor, requiredRelease,
-                                givenRelease, optFlags);
-  }
-  coop.sync();
-}
-
-NCCL_DEVICE_INLINE void ncclGinPut(ncclGin_C* net, ncclTeam team, int peer, ncclWindow_t dstWin, size_t dstOffset,
-                                   ncclWindow_t srcWin, size_t srcOffset, size_t bytes, bool isSignal,
-                                   ncclGinSignal_t signalId, ncclGinSignalOp_t signalOp, uint64_t signalOpArg,
-                                   bool isCounter, ncclGinCounter_t counterId, ncclCoopAny coop, bool isDescriptor,
-                                   ncclGinDescriptorSmem* descriptor, cuda::thread_scope givenRelease,
-                                   cuda::thread_scope requiredRelease) {
-  ncclGinPut_v2(net, team, peer, dstWin, dstOffset, srcWin, srcOffset, bytes, isSignal, signalId, signalOp, signalOpArg,
-                isCounter, counterId, coop, isDescriptor, descriptor, givenRelease, requiredRelease,
-                ncclGinOptFlagsDefault);
-}
 
 template <unsigned beMask>
 template <typename RemoteAction, // one of ncclGin_{None|SignalInc}
@@ -677,61 +627,6 @@ NCCL_DEVICE_INLINE void ncclGin_BackendMask<beMask>::putValue(
   coop.sync();
 }
 
-NCCL_DEVICE_INLINE void ncclGinPutValue_v2(ncclGin_C* net, ncclTeam team, int peer, ncclWindow_t dstWin,
-                                           size_t dstOffset, uint64_t value, size_t size, bool isSignal,
-                                           ncclGinSignal_t signalId, ncclGinSignalOp_t signalOp, uint64_t signalOpArg,
-                                           ncclCoopAny coop, bool isDescriptor, ncclGinDescriptorSmem* descriptor,
-                                           cuda::thread_scope givenRelease, cuda::thread_scope requiredRelease,
-                                           uint32_t optFlags) {
-  using nccl::utility::loadConst;
-  using nccl::gin::internal::teamRankToGinRank;
-  coop.sync();
-  if (coop.thread_rank() == 0) {
-    ncclGinSignalDescriptor signal{};
-    signal.type = NCCL_GIN_SIGNAL_TYPE_NONE;
-    if (isSignal) {
-      signal.type = NCCL_GIN_SIGNAL_TYPE_INDEXED;
-      signal.indexedSignal.signalId = signalId;
-    }
-    ncclGinCtx ctx = ncclGin_C_makeCtx(net);
-    // Dispatch based on size to call with appropriate type
-    if (size == 1) {
-      ncclGinCall<ncclGinApi_PutValue>(
-        ctx, ncclCoopThread(), teamRankToGinRank(net->comm, team, peer),
-        nccl::gin::internal::getGinWindow(dstWin, net->comm.backendIndex, net->connectionId),
-        4096 * size_t(loadConst(&dstWin->ginOffset4K)) + dstOffset, (uint8_t)value, signal, signalOp, signalOpArg,
-        isDescriptor, descriptor, requiredRelease, givenRelease, optFlags);
-    } else if (size == 2) {
-      ncclGinCall<ncclGinApi_PutValue>(
-        ctx, ncclCoopThread(), teamRankToGinRank(net->comm, team, peer),
-        nccl::gin::internal::getGinWindow(dstWin, net->comm.backendIndex, net->connectionId),
-        4096 * size_t(loadConst(&dstWin->ginOffset4K)) + dstOffset, (uint16_t)value, signal, signalOp, signalOpArg,
-        isDescriptor, descriptor, requiredRelease, givenRelease, optFlags);
-    } else if (size == 4) {
-      ncclGinCall<ncclGinApi_PutValue>(
-        ctx, ncclCoopThread(), teamRankToGinRank(net->comm, team, peer),
-        nccl::gin::internal::getGinWindow(dstWin, net->comm.backendIndex, net->connectionId),
-        4096 * size_t(loadConst(&dstWin->ginOffset4K)) + dstOffset, (uint32_t)value, signal, signalOp, signalOpArg,
-        isDescriptor, descriptor, requiredRelease, givenRelease, optFlags);
-    } else {
-      ncclGinCall<ncclGinApi_PutValue>(
-        ctx, ncclCoopThread(), teamRankToGinRank(net->comm, team, peer),
-        nccl::gin::internal::getGinWindow(dstWin, net->comm.backendIndex, net->connectionId),
-        4096 * size_t(loadConst(&dstWin->ginOffset4K)) + dstOffset, value, signal, signalOp, signalOpArg, isDescriptor,
-        descriptor, requiredRelease, givenRelease, optFlags);
-    }
-  }
-  coop.sync();
-}
-
-NCCL_DEVICE_INLINE void ncclGinPutValue(ncclGin_C* net, ncclTeam team, int peer, ncclWindow_t dstWin, size_t dstOffset,
-                                        uint64_t value, size_t size, bool isSignal, ncclGinSignal_t signalId,
-                                        ncclGinSignalOp_t signalOp, uint64_t signalOpArg, ncclCoopAny coop,
-                                        bool isDescriptor, ncclGinDescriptorSmem* descriptor,
-                                        cuda::thread_scope givenRelease, cuda::thread_scope requiredRelease) {
-  ncclGinPutValue_v2(net, team, peer, dstWin, dstOffset, value, size, isSignal, signalId, signalOp, signalOpArg, coop,
-                     isDescriptor, descriptor, givenRelease, requiredRelease, ncclGinOptFlagsDefault);
-}
 #endif
 
 #ifdef __CUDACC__
@@ -768,36 +663,6 @@ NCCL_DEVICE_INLINE void ncclGin_BackendMask<beMask>::signal(ncclTeam team, int p
   coop.sync();
 }
 
-NCCL_DEVICE_INLINE void ncclGinSignal_v2(ncclGin_C* net, ncclTeam team, int peer, bool isSignal,
-                                         ncclGinSignal_t signalId, ncclGinSignalOp_t signalOp, uint64_t signalOpArg,
-                                         ncclCoopAny coop, bool isDescriptor, ncclGinDescriptorSmem* descriptor,
-                                         cuda::thread_scope givenRelease, cuda::thread_scope requiredRelease,
-                                         uint32_t optFlags) {
-  using nccl::gin::internal::teamRankToGinRank;
-  coop.sync();
-  ncclGinSignalDescriptor signal{};
-  signal.type = NCCL_GIN_SIGNAL_TYPE_NONE;
-  if (isSignal) {
-    signal.type = NCCL_GIN_SIGNAL_TYPE_INDEXED;
-    signal.indexedSignal.signalId = signalId;
-  }
-  if (coop.thread_rank() == 0) {
-    ncclGinCtx ctx = ncclGin_C_makeCtx(net);
-    ncclGinCall<ncclGinApi_Put>(ctx, ncclCoopThread(), teamRankToGinRank(net->comm, team, peer),
-                                /*hasWins=*/false, nullptr, 0, nullptr, 0, 0, signal, signalOp, signalOpArg,
-                                /*hasCounter=*/false, 0, isDescriptor, descriptor, requiredRelease, givenRelease,
-                                optFlags);
-  }
-  coop.sync();
-}
-
-NCCL_DEVICE_INLINE void ncclGinSignal(ncclGin_C* net, ncclTeam team, int peer, bool isSignal, ncclGinSignal_t signalId,
-                                      ncclGinSignalOp_t signalOp, uint64_t signalOpArg, ncclCoopAny coop,
-                                      bool isDescriptor, ncclGinDescriptorSmem* descriptor,
-                                      cuda::thread_scope givenRelease, cuda::thread_scope requiredRelease) {
-  ncclGinSignal_v2(net, team, peer, isSignal, signalId, signalOp, signalOpArg, coop, isDescriptor, descriptor,
-                   givenRelease, requiredRelease, ncclGinOptFlagsDefault);
-}
 #endif
 
 #ifdef __CUDACC__
@@ -823,11 +688,19 @@ NCCL_DEVICE_INLINE ncclResult_t ncclGin_BackendMask<beMask>::flush(
   return ret;
 }
 
-NCCL_DEVICE_INLINE void ncclGinFlush(ncclGin_C* net, ncclCoopAny coop, cuda::memory_order ord) {
-  coop.sync();
-  ncclGinCtx ctx = ncclGin_C_makeCtx(net);
-  ncclGinCall<ncclGinApi_Flush>(ctx, coop, /*hasDescriptor=*/false, /*descriptor=*/nullptr, ord, net->comm.abortFlag);
-  coop.sync();
+#endif
+
+#ifdef __CUDACC__
+template <unsigned beMask>
+NCCL_DEVICE_INLINE bool ncclGin_BackendMask<beMask>::_flushesAllPutsOnAnySignal() const {
+  return ncclGinCall<ncclGinApi_FlushesAllPutsOnAnySignal>(this->_makeCtx());
+}
+#endif
+
+#ifdef __CUDACC__
+template <unsigned beMask>
+NCCL_DEVICE_INLINE ncclGinBarrierOptions_t ncclGin_BackendMask<beMask>::_barrierOptions() const {
+  return ncclGinCall<ncclGinApi_BarrierOptions>(this->_makeCtx());
 }
 #endif
 
@@ -860,17 +733,6 @@ NCCL_DEVICE_INLINE ncclResult_t ncclGin_BackendMask<beMask>::waitCounter(
   return ret;
 }
 
-NCCL_DEVICE_INLINE void ncclGinWaitCounter(ncclGin_C* net, ncclCoopAny coop, ncclGinCounter_t counter, uint64_t least,
-                                           int bits, cuda::memory_order ord) {
-  coop.sync();
-  if (coop.thread_rank() == 0) {
-    ncclGinCtx ctx = ncclGin_C_makeCtx(net);
-    auto ctr = ncclGinCall<ncclGinApi_GetCounterPtr>(ctx, counter);
-    (void)nccl::gin::internal::waitRollingLessEq</*EnableTimeout=*/false>(ctr, least, bits, ord, net->comm.abortFlag,
-                                                                          0ULL);
-  }
-  coop.sync();
-}
 #endif
 
 #ifdef __CUDACC__
@@ -883,14 +745,6 @@ NCCL_DEVICE_INLINE uint64_t ncclGin_BackendMask<beMask>::readCounter(ncclGinCoun
   return (raw - ctr.offset) & mask;
 }
 
-NCCL_DEVICE_INLINE uint64_t ncclGinReadCounter(ncclGin_C* net, ncclGinCounter_t counter, int bits,
-                                               cuda::memory_order ord) {
-  ncclGinCtx ctx = ncclGin_C_makeCtx(net);
-  auto ctr = ncclGinCall<ncclGinApi_GetCounterPtr>(ctx, counter);
-  uint64_t mask = uint64_t(-1) >> (64 - bits);
-  uint64_t raw = cuda::atomic_ref<uint64_t>{*ctr.ptr}.load(ord);
-  return (raw - ctr.offset) & mask;
-}
 #endif
 
 #ifdef __CUDACC__
@@ -899,9 +753,6 @@ NCCL_DEVICE_INLINE uint64_t* ncclGin_BackendMask<beMask>::getSignalShadowPtr(ncc
   return &this->_signalShadows[signal];
 }
 
-NCCL_DEVICE_INLINE uint64_t* ncclGinGetSignalShadowPtr(ncclGin_C* net, ncclGinSignal_t signal) {
-  return &net->_signalShadows[signal];
-}
 #endif
 
 #ifdef __CUDACC__
@@ -914,6 +765,7 @@ NCCL_DEVICE_INLINE void ncclGin_BackendMask<beMask>::increaseSignalShadow(ncclGi
   asm volatile("red.relaxed.cta.add.u64 [%0],%1;" ::"l"(this->_signalShadows + signal), "l"(delta) : "memory");
 #endif
 }
+
 #endif
 
 #ifdef __CUDACC__
@@ -934,14 +786,6 @@ NCCL_DEVICE_INLINE uint64_t ncclGin_BackendMask<beMask>::readSignal(ncclWindow_t
   return mask & cuda::atomic_ref<uint64_t>{*ptr}.load(ord);
 }
 
-NCCL_DEVICE_INLINE uint64_t ncclGinReadSignal(ncclGin_C* net, ncclGinSignal_t signal, int bits,
-                                              cuda::memory_order ord) {
-  ncclGinCtx ctx = ncclGin_C_makeCtx(net);
-  auto sig = ncclGinCall<ncclGinApi_GetSignalPtr>(ctx, signal);
-  uint64_t mask = uint64_t(-1) >> (64 - bits);
-  uint64_t raw = cuda::atomic_ref<uint64_t>{*sig.ptr}.load(ord);
-  return (raw - sig.offset) & mask;
-}
 #endif
 
 #ifdef __CUDACC__
@@ -1045,21 +889,6 @@ NCCL_DEVICE_INLINE void ncclGin_BackendMask<beMask>::get(ncclTeam team, int peer
   coop.sync();
 }
 
-NCCL_DEVICE_INLINE void ncclGinGet(ncclGin_C* net, ncclTeam team, int peer, ncclWindow_t remoteWnd, size_t remoteOffset,
-                                   ncclWindow_t localWnd, size_t localOffset, size_t bytes, ncclCoopAny coop,
-                                   bool isDescriptor, ncclGinDescriptorSmem* descriptor, uint32_t optFlags) {
-  using nccl::utility::loadConst;
-  using nccl::gin::internal::teamRankToGinRank;
-  coop.sync();
-  ncclGinCtx ctx = ncclGin_C_makeCtx(net);
-  ncclGinCall<ncclGinApi_Get>(ctx, coop, teamRankToGinRank(net->comm, team, peer),
-                              nccl::gin::internal::getGinWindow(remoteWnd, net->comm.backendIndex, net->connectionId),
-                              4096 * size_t(loadConst(&remoteWnd->ginOffset4K)) + remoteOffset,
-                              nccl::gin::internal::getGinWindow(localWnd, net->comm.backendIndex, net->connectionId),
-                              4096 * size_t(loadConst(&localWnd->ginOffset4K)) + localOffset, bytes,
-                              ncclGin_isDescriptor(descriptor), ncclGin_getDescriptor(descriptor), optFlags);
-  coop.sync();
-}
 #endif
 
 #ifdef __CUDACC__
@@ -1121,17 +950,6 @@ NCCL_DEVICE_INLINE ncclResult_t ncclGin_BackendMask<beMask>::waitSignal(Coop coo
   return ret;
 }
 
-NCCL_DEVICE_INLINE void ncclGinWaitSignal(ncclGin_C* net, ncclCoopAny coop, ncclGinSignal_t signal, uint64_t least,
-                                          int bits, cuda::memory_order ord) {
-  coop.sync();
-  if (coop.thread_rank() == 0) {
-    ncclGinCtx ctx = ncclGin_C_makeCtx(net);
-    auto sig = ncclGinCall<ncclGinApi_GetSignalPtr>(ctx, signal);
-    (void)nccl::gin::internal::waitRollingLessEq</*EnableTimeout=*/false>(sig, least, bits, ord, net->comm.abortFlag,
-                                                                          0ULL);
-  }
-  coop.sync();
-}
 #endif
 
 #ifdef __CUDACC__
@@ -1147,6 +965,7 @@ NCCL_DEVICE_INLINE void ncclGin_BackendMask<beMask>::waitSignalMeetShadow(Coop c
   }
   coop.sync();
 }
+
 #endif
 
 #ifdef __CUDACC__
@@ -1188,6 +1007,7 @@ NCCL_DEVICE_INLINE void ncclGin_BackendMask<beMask>::waitSignalFollowShadow(Coop
     *delta = (Uint)(mask & (after64 - before64));
   }
 }
+
 #endif
 
 #ifdef __CUDACC__
@@ -1196,10 +1016,6 @@ NCCL_DEVICE_INLINE void ncclGin_BackendMask<beMask>::resetCounter(ncclGinCounter
   ncclGinCall<ncclGinApi_ResetCounter>(this->_makeCtx(), counter);
 }
 
-NCCL_DEVICE_INLINE void ncclGinResetCounter(ncclGin_C* net, ncclGinCounter_t counter) {
-  ncclGinCtx ctx = ncclGin_C_makeCtx(net);
-  ncclGinCall<ncclGinApi_ResetCounter>(ctx, counter);
-}
 #endif
 
 #ifdef __CUDACC__
@@ -1223,14 +1039,6 @@ NCCL_DEVICE_INLINE void ncclGin_BackendMask<beMask>::resetSignal(ncclWindow_t si
   ncclGinCall<ncclGinApi_ResetSignal>(this->_makeCtx(), signal);
 }
 
-NCCL_DEVICE_INLINE void ncclGinResetSignal(ncclGin_C* net, ncclGinSignal_t signal) {
-  ncclGinCtx ctx = ncclGin_C_makeCtx(net);
-  ncclGinSignalDescriptor signalDesc{};
-  signalDesc.type = NCCL_GIN_SIGNAL_TYPE_INDEXED;
-  signalDesc.indexedSignal.signalId = signal;
-  ncclGinCall<ncclGinApi_ResetSignal>(ctx, signalDesc);
-  net->_signalShadows[signal] = 0;
-}
 #endif
 
 #endif // _NCCL_DEVICE_GIN_SESSION__FUNCS_H_

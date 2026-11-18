@@ -9,9 +9,9 @@
 #include <array>
 #include <random>
 
-#include <cmd_options.hh>
 #include <cpu_grid.h>
 #include <hip_test_common.hh>
+#include <hip_test_params.hh>
 #include <hip/hip_cooperative_groups.h>
 #include <resource_guards.hh>
 #include <utils.hh>
@@ -468,7 +468,9 @@ __global__ void block_tile_sync_check(T* global_data, unsigned int* wait_modifie
 
 template <bool global_memory, typename T, size_t tile_size> void BlockTileSyncTestImpl() {
   DYNAMIC_SECTION("Tile size: " << tile_size) {
-    const auto randomized_run_count = GENERATE(range(0, cmd_options.cg_iterations));
+    const auto cg_iterations = TestParameterStore::instance().getCgIterationsForCurrentLevel();
+
+    const auto randomized_run_count = GENERATE_COPY(range(0, cg_iterations));
     INFO("Run number: " << randomized_run_count + 1);
     auto blocks = GenerateBlockDimensions();
     auto threads = GenerateThreadDimensions();

@@ -1,4 +1,5 @@
 #include "common_cast.h"
+#include "net_ib_cast_inspect.h"
 #include <algorithm>
 extern int64_t ncclParamIbCastQpsPerConn();
 
@@ -477,6 +478,17 @@ extern "C" ncclResult_t ncclIbCastGetSchedState(void* sendComm, struct ncclIbCas
   return ncclSuccess;
 }
 
+extern "C" ncclResult_t ncclIbCastGdrFlushGetScratch(void* recvComm, int dev, int** hostMem, int** gpuMem) {
+  static_assert(offsetof(struct ncclIbRecvComm, base) == 0,
+                "base must be the first member of ncclIbRecvComm");
+  if (recvComm == NULL || hostMem == NULL || gpuMem == NULL) return ncclInvalidArgument;
+  struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)recvComm;
+  if (dev < 0 || dev >= comm->base.vProps.ndevs) return ncclInvalidArgument;
+  *hostMem = &comm->gpuFlushHostMem;
+  *gpuMem = comm->devs[dev].gpuFlush.gpuFlushGpuMem;
+  return ncclSuccess;
+}
+
 // ncclIbCastGetGrhState — read per-QP global-addressing state out of a sendComm.
 // For each active QP, copies rtrAttr.linkLayer and queries the live QP via
 // ibv_query_qp to read back the driver-programmed ah_attr.is_global. Reading it
@@ -506,7 +518,13 @@ extern "C" ncclResult_t ncclIbCastGetGrhState(void* sendComm, struct ncclIbCastG
       }
     }
   }
+  return ncclSuccess;
+}
 
+extern "C" ncclResult_t ncclIbCastGetOptRecvCompletion(void* comm, int* out) {
+  if (!comm || !out) return ncclInvalidArgument;
+  struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*)comm;
+  *out = base->optRecvCompletion ? 1 : 0;
   return ncclSuccess;
 }
 

@@ -22,6 +22,9 @@ junits/
 /plugins/mixed/example/*.so
 /plugins/tuner/model_demo/*.so
 /plugins/net/mock/*.so
+/plugins/profiler/example/*.so
+/plugins/profiler/inspector/*.so
+/plugins/profiler/inspector/version.cc
 tags
 *.swp
 .cache/
@@ -45,3 +48,4 @@ examples/**/rmsnorm_lsa
 examples/**/rmsnorm_multimem
 examples/**/rmsnorm_gin
 examples/**/rmsnorm_hybrid
+docs/examples/**/ring_exchange

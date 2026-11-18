@@ -22,6 +22,9 @@ from nccl.core.team import *
 # Communicator and configuration
 from nccl.core.communicator import *
 
+# NCCL Socket Encryption specification
+from nccl.core.encryption import *
+
 # Resource management
 from nccl.core.resources import *
 
@@ -46,11 +49,17 @@ __all__ = [  # noqa: RUF022
     "NcclRedOp",
     "NcclGinType",
     "NcclGinConnectionType",
+    "NcclHostCftMode",
+    "NcclNvlsHostMode",
+    "NcclCftTeamMode",
+    "NcclCftCap",
     "NcclCommMemStat",
     "NcclBufferSpec",
     "NcclScalarSpec",
     "NcclDeviceSpec",
     "NcclStreamSpec",
+    "NcclEventSpec",
+    "NcclEncryptionMode",
     # Exceptions
     "NcclInvalid",
     # Data type constants
@@ -84,6 +93,9 @@ __all__ = [  # noqa: RUF022
     "WindowFlag",
     # Communicator
     "NCCLConfig",
+    "NCCLCollConfig",
+    "VendorOption",
+    "NCCLCommProperties",
     "WaitSignalDesc",
     "TeamRequirement",
     "LsaBarrierRequirement",
@@ -91,6 +103,9 @@ __all__ = [  # noqa: RUF022
     "LLA2ARequirement",
     "NCCLDevCommRequirements",
     "Communicator",
+    # Encryption
+    "NCCLEncryptionConfig",
+    "set_encryption",
     # Team
     "NCCLTeam",
     # Resources
@@ -100,6 +115,7 @@ __all__ = [  # noqa: RUF022
     "LLA2AHandle",
     "RegisteredBufferHandle",
     "RegisteredWindowHandle",
+    "CftLeInfo",
     "CustomRedOp",
     "DevCommResource",
     # Group

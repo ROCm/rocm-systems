@@ -12,6 +12,7 @@
 #include "hip_platform.hpp"
 #include "platform/program.hpp"
 #include <hip/hip_version.h>
+#include <mutex>
 
 HIP_PUBLIC_API const char* amd_dbgapi_get_build_name(void) { return HIP_VERSION_BUILD_NAME; }
 
@@ -30,8 +31,8 @@ void __hipGetPCH(const char** pch, unsigned int* size) {
 #ifdef __HIP_ENABLE_PCH
   hipDeviceProp_t deviceProp;
   int deviceId;
-  hipError_t error = hipGetDevice(&deviceId);
-  error = hipGetDeviceProperties(&deviceProp, deviceId);
+  (void)hipGetDevice(&deviceId);
+  (void)hipGetDeviceProperties(&deviceProp, deviceId);
   if (deviceProp.warpSize == 32) {
     *pch = __hip_pch_wave32;
     *size = __hip_pch_wave32_size;
@@ -45,9 +46,6 @@ void __hipGetPCH(const char** pch, unsigned int* size) {
 #endif
 }
 namespace hip {
-
-// forward declaration of methods required for managed variables
-hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
 
 // ================================================================================================
 Function::Function(const std::string& name, FatBinaryInfo** modules)
@@ -76,13 +74,15 @@ amd::Kernel* Function::BuildKernel(hipModule_t hmod) const {
 }
 
 // ================================================================================================
-hipError_t Function::GetDynFunc(hipFunction_t* hfunc, hipModule_t hmod) {
+hipError_t Function::GetDynFunc(hipFunction_t* hfunc, hipModule_t hmod, int deviceId) {
   guarantee((dFunc_.size() == g_devices.size()), "dFunc Size mismatch");
-  int dev = ihipGetDevice();
-  if (dFunc_[dev] == nullptr) {
-    dFunc_[dev] = BuildKernel(hmod);
+
+  if (dFunc_[deviceId] == nullptr) {
+    dFunc_[deviceId] = BuildKernel(hmod);
   }
-  *hfunc = asHipFunction(dFunc_[dev]);
+
+  *hfunc = asHipFunction(dFunc_[deviceId]);
+
   return hipSuccess;
 }
 
@@ -121,8 +121,11 @@ hipError_t Function::GetStatFuncAttr(hipFuncAttributes* func_attr, int deviceId)
   const std::vector<amd::Device*>& devices = amd::Device::getDevices(CL_DEVICE_TYPE_GPU, false);
   amd::Kernel* kernel = dFunc_[deviceId];
   auto* device_handle = devices[deviceId];
-  const device::Kernel::WorkGroupInfo* wginfo =
-      kernel->getDeviceKernel(*device_handle)->workGroupInfo();
+  auto* device_kernel = kernel->getDeviceKernel(*device_handle);
+  if (device_kernel == nullptr) {
+    return hipErrorInvalidDeviceFunction;
+  }
+  const device::Kernel::WorkGroupInfo* wginfo = device_kernel->workGroupInfo();
   int binaryVersion =
       device_handle->isa().versionMajor() * 10 + device_handle->isa().versionMinor();
   func_attr->sharedSizeBytes = static_cast<int>(wginfo->localMemSize_);
@@ -139,13 +142,11 @@ hipError_t Function::GetStatFuncAttr(hipFuncAttributes* func_attr, int deviceId)
 }
 
 // ================================================================================================
-Var::Var(const std::string& name, DeviceVarKind dVarKind, size_t size, int type, int norm,
+Var::Var(const std::string& name, DeviceVarKind dVarKind, size_t size,
          FatBinaryInfo** modules)
     : name_(name),
       dVarKind_(dVarKind),
       size_(size),
-      type_(type),
-      norm_(norm),
       modules_(modules),
       managedVarPtr_(nullptr),
       align_(0) {
@@ -160,10 +161,8 @@ Var::Var(const std::string& name, DeviceVarKind dVarKind, void* pointer, size_t 
       size_(size),
       modules_(modules),
       managedVarPtr_(pointer),
-      allocFlag_(false),
       align_(align),
-      type_(0),
-      norm_(0) {
+      managedVarMapped_(false) {
   dMem_.resize(g_devices.size());
 }
 
@@ -260,14 +259,21 @@ hipError_t Var::GetStatDeviceVar(amd::Memory** mem, int deviceId) {
 }
 
 // ================================================================================================
-hipError_t Var::AllocateManagedVarPtr() {
+// Makes this managed variable reachable from the device.
+hipError_t Var::EnsureManagedVarIsMapped() {
   void** pointer = static_cast<void**>(managedVarPtr_);
-  // check if it is deffered allocation
-  if (!allocFlag_) {
-    // Allocate managed memory for this var
+  if (!managedVarMapped_) {
+    // `use_host_ptr` registers the host range that `__hipRegisterManagedVar` already
+    // reserved and initialized as a fine-grain SVM buffer, leaving migration to HMM.
+    // Passing false would allocate fresh storage and drop the initial value.
     const bool use_host_ptr = true;
-    IHIP_RETURN_ONFAIL(ihipMallocManaged(pointer, size_, align_, use_host_ptr));
-    allocFlag_ = true;
+    const hipError_t status = ihipMallocManaged(pointer, size_, align_, use_host_ptr,
+                                               ManagedMemOwner::kModuleVariable);
+    if (status != hipSuccess) {
+      LogPrintfError("Failed to map managed var %s, error: %d", name_.c_str(), status);
+      return status;
+    }
+    managedVarMapped_ = true;
   }
   if (dMem_.empty()) {
     ResizeDVar(g_devices.size());

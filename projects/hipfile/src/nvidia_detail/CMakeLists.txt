@@ -11,7 +11,7 @@ set(HIPFILE_SOURCES
 )
 
 # Create hipfile target
-ais_add_libraries(
+hipfile_add_libraries(
     NAME    hipfile
     DETAIL  nvidia
     SRCS    ${HIPFILE_SOURCES}

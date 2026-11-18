@@ -6,8 +6,8 @@
 
 #pragma once
 
-#include <cmd_options.hh>
 #include <hip_test_common.hh>
+#include <hip_test_params.hh>
 #include <hip/hip_cooperative_groups.h>
 #include <resource_guards.hh>
 

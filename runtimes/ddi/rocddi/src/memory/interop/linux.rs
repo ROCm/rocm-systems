@@ -1,17 +1,183 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 //! Linux DMA-BUF import and export.
 //!
 //! DMA-BUF is a Linux file-descriptor transport, not a portable memory kind.
 //! This module keeps descriptor ownership, duplication, physical-identity
 //! checks, and KFD/DRM interop outside rocddi's platform-neutral memory model.
 
+use crate::memory::storage::TryPush;
+use std::io;
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd, RawFd};
 
 use crate::device::Device;
-use crate::driver::linux_interop::LinuxMemoryInteropDriver;
-use crate::host_storage::{Buffer, Shared};
+use crate::driver::{Driver, DriverInstance, KfdDeviceState, KfdDriver};
+use crate::memory::storage::Shared;
 use crate::memory::{Allocation, DeviceAccess, VirtualMemory};
+use crate::os::linux::{errno, file as os_file};
 use crate::session::Session;
 use crate::{Error, ErrorKind};
+
+/// Closes a descriptor whose ownership the caller has transferred.
+///
+/// # Safety
+/// If `descriptor` names an open file, the caller must own it and must not
+/// use it after this call, including when close reports an error. An invalid
+/// descriptor is permitted and reported by the kernel.
+///
+/// # Errors
+/// Preserves the Linux close error, if any.
+#[allow(unsafe_code)]
+pub unsafe fn close_owned_descriptor(descriptor: RawFd) -> io::Result<()> {
+    os_file::close_descriptor(descriptor)
+}
+
+/// Validates and duplicates a caller descriptor into an owned Rust descriptor.
+/// The returned owner is independent of the caller's descriptor.
+///
+/// # Errors
+/// Reports an invalid or closed descriptor, or native descriptor exhaustion.
+pub fn duplicate_descriptor(descriptor: RawFd) -> Result<OwnedFd, Error> {
+    os_file::duplicate_file(descriptor)
+        .map(Into::into)
+        .map_err(|source| Error::NativeOperation {
+            kind: match source.raw_os_error() {
+                // EBADF and the explicit negative-descriptor rejection.
+                Some(errno::EBADF) => ErrorKind::InvalidArgument,
+                Some(errno::ENFILE | errno::EMFILE | errno::ENOMEM) => ErrorKind::ResourceExhausted,
+                _ if source.kind() == io::ErrorKind::InvalidInput => ErrorKind::InvalidArgument,
+                _ => ErrorKind::Driver,
+            },
+            operation: "descriptor duplication",
+            source,
+        })
+}
+
+/// Maximum bytes submitted in one AIS operation, matching Linux `MAX_RW_COUNT`.
+pub const AIS_MAX_TRANSFER_BYTES: u64 = 0x7fff_f000;
+
+/// Direction of a Linux AIS transfer between a file and device VRAM.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AisFileOperation {
+    /// Read file bytes into the allocation.
+    Read,
+    /// Write allocation bytes into the file.
+    Write,
+}
+
+/// AIS transfer result with known copied-byte progress.
+/// A nonzero status is a negative Linux errno.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AisFileResult {
+    /// Bytes reported as copied, bounded by the submitted transfer size.
+    pub size_copied: u64,
+    /// Operation status, zero on success or a negative Linux errno.
+    pub status: i32,
+}
+
+/// CPU-visible storage borrowed for one positioned AIS file transfer.
+pub enum AisHostBuffer<'a> {
+    /// Read file bytes into writable host storage.
+    Read(&'a mut [u8]),
+    /// Write readable host storage into the file.
+    Write(&'a [u8]),
+}
+
+/// Transfers one bounded chunk through positioned host file I/O.
+///
+/// A short read at end of file succeeds. A short write continues from the
+/// reported position; a write with no progress is retried at most three times.
+/// Partial progress and Linux errno remain available on failure. A zero-byte
+/// request still issues one positioned call to validate the descriptor.
+#[must_use]
+pub fn ais_host_transfer(
+    descriptor: RawFd,
+    mut buffer: AisHostBuffer<'_>,
+    file_offset: i64,
+) -> AisFileResult {
+    let size = match &buffer {
+        AisHostBuffer::Read(bytes) => bytes.len(),
+        AisHostBuffer::Write(bytes) => bytes.len(),
+    }
+    .min(usize::try_from(AIS_MAX_TRANSFER_BYTES).unwrap_or(usize::MAX));
+    let mut copied = 0;
+    let mut write_retries = 3;
+    let mut first = true;
+    let status = loop {
+        let remaining = size - copied;
+        if !first && remaining == 0 {
+            break 0;
+        }
+        first = false;
+        let Some(offset) = i64::try_from(copied)
+            .ok()
+            .and_then(|copied| file_offset.checked_add(copied))
+        else {
+            break -errno::EOVERFLOW;
+        };
+        let transferred = match &mut buffer {
+            AisHostBuffer::Read(bytes) => {
+                os_file::read_descriptor_at(descriptor, &mut bytes[copied..size], offset)
+            }
+            AisHostBuffer::Write(bytes) => {
+                os_file::write_descriptor_at(descriptor, &bytes[copied..size], offset)
+            }
+        };
+        let transferred = match transferred {
+            Ok(transferred) => transferred,
+            Err(error) => break -error.raw_os_error().unwrap_or(errno::EIO),
+        };
+        if transferred == 0 {
+            if matches!(&buffer, AisHostBuffer::Read(_)) || remaining == 0 {
+                break 0;
+            }
+            if write_retries == 0 {
+                break -errno::EIO;
+            }
+            write_retries -= 1;
+            continue;
+        }
+        if transferred > remaining {
+            break -errno::EIO;
+        }
+        copied += transferred;
+    };
+    AisFileResult {
+        size_copied: copied as u64,
+        status,
+    }
+}
+
+/// Transfers between a borrowed file descriptor and live mapped VRAM.
+///
+/// `allocation_offset` is relative to the allocation's logical device address.
+/// One native operation transfers at most Linux's `MAX_RW_COUNT` bytes. The
+/// caller retains the descriptor through this synchronous call; neither its
+/// ownership nor its shared file position changes. If the ioctl fails, the
+/// copied-byte count is unknown and the operation is never replayed here.
+///
+/// # Errors
+/// Rejects invalid ranges, descriptors, offsets, and unsupported backing.
+/// Preserves the native errno if KFD reports an ioctl failure.
+pub fn ais_transfer(
+    allocation: &Allocation,
+    descriptor: RawFd,
+    allocation_offset: u64,
+    size: u64,
+    file_offset: i64,
+    operation: AisFileOperation,
+) -> Result<AisFileResult, Error> {
+    let _operation = allocation.inner.linux_kfd()?.admit()?;
+    crate::driver::KfdDriver::ais_transfer(
+        allocation.inner.linux_kfd()?.driver_state(),
+        descriptor,
+        allocation_offset,
+        size,
+        file_offset,
+        operation,
+    )
+}
 
 /// Opaque 256-bit KFD IPC identifier for one shareable allocation.
 ///
@@ -20,70 +186,15 @@ use crate::{Error, ErrorKind};
 /// backend may use a HANDLE-based shared-resource representation instead.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct KfdIpcMemoryHandle {
-    words: [u32; 8],
-}
-
-impl KfdIpcMemoryHandle {
-    /// Wraps the eight words supplied by a KFD-compatible public API.
-    #[must_use]
-    pub const fn from_words(words: [u32; 8]) -> Self {
-        Self { words }
-    }
-
-    /// Returns the eight words carried by the KFD IPC contract.
-    #[must_use]
-    pub const fn words(self) -> [u32; 8] {
-        self.words
-    }
-}
-
-/// Location value accepted by Linux KFD SVM attribute operations.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum KfdSvmLocation {
-    /// Host system memory.
-    System,
-    /// No uniform or preferred location.
-    Undefined,
-    /// One activated endpoint, identified without exposing KFD's GPU ID.
-    Device([u8; 16]),
-}
-
-/// Per-device accessibility accepted by Linux KFD SVM operations.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum KfdSvmAccess {
-    /// Faulting access with migration permitted.
-    Accessible,
-    /// Non-faulting access without migration.
-    AccessibleInPlace,
-    /// Access denied.
-    NoAccess,
-}
-
-/// One Linux KFD SVM operation attribute.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum KfdSvmAttribute {
-    /// Preferred physical location.
-    PreferredLocation(KfdSvmLocation),
-    /// Immediate migration target or most recent prefetch location.
-    PrefetchLocation(KfdSvmLocation),
-    /// Access mode for one activated GPU endpoint.
-    Access {
-        /// Opaque rocddi endpoint identity.
-        device: [u8; 16],
-        /// Requested or returned access mode.
-        access: KfdSvmAccess,
-    },
-    /// KFD SVM flags to set.
-    SetFlags(u32),
-    /// KFD SVM flags to clear.
-    ClearFlags(u32),
-    /// Base-two logarithm of the migration page count.
-    MigrationGranularity(u32),
+    /// Opaque words carried unchanged across the KFD IPC ABI.
+    pub words: [u32; 8],
 }
 
 /// One owned DMA-BUF file descriptor plus immutable backing facts.
 pub struct DmaBuf {
+    /// Owned descriptor keeping the shared backing reachable.
     descriptor: OwnedFd,
+    /// Extent, offset, and physical identity captured from that descriptor.
     info: DmaBufInfo,
 }
 
@@ -122,6 +233,38 @@ pub struct DmaBufInfo {
     pub physical_backing_id: [u64; 2],
 }
 
+/// Selects the KFD backend for Linux interop that has no device owner yet.
+pub(crate) fn kfd_driver(session: &Session) -> Result<&Shared<KfdDriver>, Error> {
+    session
+        .installed_drivers()?
+        .iter()
+        .find_map(DriverInstance::linux_kfd)
+        .ok_or(Error::Operation {
+            kind: ErrorKind::Unsupported,
+            detail: "session has no Linux KFD driver",
+        })
+}
+
+/// Borrows activated KFD states after checking their exact session driver.
+fn kfd_states_for<'a>(
+    driver: &Shared<KfdDriver>,
+    devices: &[&'a Device],
+    mismatch: &'static str,
+) -> Result<Vec<&'a KfdDeviceState>, Error> {
+    let mut states = crate::memory::storage::try_vec_with_capacity(devices.len())?;
+    for device in devices {
+        let (device_driver, state) = device.driver_state.linux_kfd()?;
+        if !Shared::ptr_eq(driver, device_driver) {
+            return Err(Error::Operation {
+                kind: ErrorKind::InvalidArgument,
+                detail: mismatch,
+            });
+        }
+        states.try_push(state)?;
+    }
+    Ok(states)
+}
+
 /// Imports detached virtual-memory backing from a borrowed DMA-BUF.
 ///
 /// The backend duplicates `descriptor` before returning, so the caller retains
@@ -134,14 +277,19 @@ pub fn import_virtual_memory(
     session: &Session,
     descriptor: BorrowedFd<'_>,
 ) -> Result<VirtualMemory, Error> {
-    let owner = crate::host_storage::Shared::try_new_uninit(session.driver().allocator())?;
-    let inner = session.driver().import_virtual_memory(descriptor)?;
-    let info = inner.info();
-    Ok(VirtualMemory {
-        driver: session.driver().clone(),
-        inner: owner.write(inner),
-        info,
-    })
+    let driver = kfd_driver(session)?;
+    let _operation = driver.admission().enter()?;
+    let process = crate::os::ProcessIdentity::capture()
+        .map_err(|source| crate::os::native_error("virtual memory process identity", source))?;
+    let owner = crate::memory::storage::Shared::try_new_uninit()?;
+    let inner = driver.import_virtual_memory(descriptor)?;
+    Ok(VirtualMemory::new(
+        crate::driver::VirtualMemoryState::from_linux_kfd(crate::memory::DriverVirtualMemory::new(
+            driver.clone(),
+            owner.write(inner),
+            process,
+        )),
+    ))
 }
 
 /// Exports detached virtual-memory backing as an independently owned DMA-BUF.
@@ -149,10 +297,53 @@ pub fn import_virtual_memory(
 /// # Errors
 /// Reports descriptor duplication or backing-validation failures.
 pub fn export_virtual_memory(memory: &VirtualMemory) -> Result<DmaBuf, Error> {
-    crate::driver::PlatformDriver::export_virtual_memory(&memory.inner)
+    let _operation = memory.inner.linux_kfd().admit()?;
+    crate::driver::KfdDriver::export_virtual_memory(memory.inner.linux_kfd().driver_state()?)
 }
 
-/// Imports one same-provider system allocation from a borrowed DMA-BUF.
+/// Reports whether the owning `UALink` accelerator is ready to export a fabric
+/// handle. A negative result can become true without recreating the backing.
+///
+/// # Errors
+/// Reports a lost or invalid native owner.
+pub fn fabric_virtual_memory_ready(memory: &VirtualMemory) -> Result<bool, Error> {
+    let _operation = memory.inner.linux_kfd().admit()?;
+    crate::driver::KfdDriver::fabric_virtual_memory_ready(memory.inner.linux_kfd().driver_state()?)
+}
+
+/// Exports owned virtual-memory backing as a globally unique `UALink` handle.
+///
+/// # Errors
+/// Reports accelerator readiness, native export, or owner failures.
+pub fn export_fabric_virtual_memory(memory: &VirtualMemory) -> Result<[u8; 16], Error> {
+    let _operation = memory.inner.linux_kfd().admit()?;
+    crate::driver::KfdDriver::export_fabric_virtual_memory(memory.inner.linux_kfd().driver_state()?)
+}
+
+/// Imports a `UALink` handle through the selected activated GPU's render file.
+///
+/// # Errors
+/// Reports an invalid handle, native import, or owner acquisition failure.
+pub fn import_fabric_virtual_memory(
+    device: &Device,
+    fabric: [u8; 16],
+) -> Result<VirtualMemory, Error> {
+    let _operation = device.driver_state.admit()?;
+    let (driver, state) = device.driver_state.linux_kfd()?;
+    let process = crate::os::ProcessIdentity::capture()
+        .map_err(|source| crate::os::native_error("virtual memory process identity", source))?;
+    let owner = Shared::try_new_uninit()?;
+    let inner = driver.import_fabric_virtual_memory(state, fabric)?;
+    Ok(VirtualMemory::new(
+        crate::driver::VirtualMemoryState::from_linux_kfd(crate::memory::DriverVirtualMemory::new(
+            driver.clone(),
+            owner.write(inner),
+            process,
+        )),
+    ))
+}
+
+/// Imports one same-driver system allocation from a borrowed DMA-BUF.
 ///
 /// The logical range is established in `device`'s address space with exactly
 /// `permissions`. The backend duplicates `descriptor` before native acquisition,
@@ -170,32 +361,39 @@ pub fn import_dma_buf(
     alignment: u64,
     permissions: DeviceAccess,
 ) -> Result<Allocation, Error> {
-    let inner = device.driver.import_dma_buf(
-        &device.state,
+    let _operation = device.driver_state.admit()?;
+    let (driver, state) = device.driver_state.linux_kfd()?;
+    let inner = driver.import_dma_buf(
+        state,
         descriptor,
         source_offset,
         byte_length,
         alignment,
         permissions,
     )?;
-    let info = inner.cached_info();
-    Ok(Allocation { inner, info })
+    Ok(Allocation::new(
+        crate::driver::AllocationState::from_linux_kfd(driver, inner),
+    ))
 }
 
 /// Whether an activated Linux GPU can attach a qualified same-device GTT
 /// DMA-BUF with explicit GPU permissions and a write-back host view.
 #[must_use]
 pub fn supports_system_dma_buf_import(device: &Device) -> bool {
-    crate::driver::PlatformDriver::supports_system_dma_buf_import(&device.state)
+    device
+        .driver_state
+        .linux_kfd()
+        .is_ok_and(|(_, state)| crate::driver::KfdDriver::supports_system_dma_buf_import(state))
 }
 
-/// Imports a qualified SYSTEM DMA-BUF into one native GPU address domain.
+/// Imports a qualified SYSTEM DMA-BUF into a common address in every requested VM.
 ///
 /// The raw descriptor is borrowed and may be invalid. The native owner first
 /// duplicates it, then establishes an independent host view plus exact GPU
 /// access before this function returns.
-/// Repeated device wrappers sharing one VM receive the same address; distinct
-/// GPU VMs are currently unsupported by this qualified profile.
+/// Repeated wrappers sharing one VM reuse its mapping. Distinct compatible
+/// GPU VMs acquire their own GEM imports and page-table mappings, retaining
+/// independent cleanup state. The first device identifies the backing's origin.
 ///
 /// # Errors
 /// Rejects unqualified placement, cache policy, source ranges, permissions, or
@@ -215,17 +413,14 @@ pub fn import_system_dma_buf(
             detail: "system import requires a device",
         });
     }
-    let mut states = Buffer::try_with_capacity(devices.len(), session.driver().allocator())?;
-    for device in devices {
-        if !Shared::ptr_eq(session.driver(), &device.driver) {
-            return Err(Error::Operation {
-                kind: ErrorKind::InvalidArgument,
-                detail: "system import devices must belong to this session",
-            });
-        }
-        states.try_push(&device.state)?;
-    }
-    let inner = session.driver().import_system_dma_buf(
+    let driver = kfd_driver(session)?;
+    let _operation = driver.admission().enter()?;
+    let states = kfd_states_for(
+        driver,
+        devices,
+        "system import devices must belong to this session",
+    )?;
+    let inner = driver.import_system_dma_buf(
         states.as_slice(),
         descriptor,
         source_offset,
@@ -233,8 +428,9 @@ pub fn import_system_dma_buf(
         alignment,
         permissions,
     )?;
-    let info = inner.cached_info();
-    Ok(Allocation { inner, info })
+    Ok(Allocation::new(
+        crate::driver::AllocationState::from_linux_kfd(driver, inner),
+    ))
 }
 
 /// Imports a Linux graphics DMA-BUF into the common address range of `devices`.
@@ -259,22 +455,17 @@ pub fn import_graphics_dma_buf(
             detail: "graphics import requires at least one device",
         });
     }
-    let mut states = Buffer::try_with_capacity(devices.len(), session.driver().allocator())?;
-    for device in devices {
-        if !Shared::ptr_eq(session.driver(), &device.driver) {
-            return Err(Error::Operation {
-                kind: ErrorKind::InvalidArgument,
-                detail: "graphics import devices must belong to this session",
-            });
-        }
-        states.try_push(&device.state)?;
-    }
-    let inner =
-        session
-            .driver()
-            .import_graphics_dma_buf(states.as_slice(), descriptor, size_hint)?;
-    let info = inner.cached_info();
-    Ok(Allocation { inner, info })
+    let driver = kfd_driver(session)?;
+    let _operation = driver.admission().enter()?;
+    let states = kfd_states_for(
+        driver,
+        devices,
+        "graphics import devices must belong to this session",
+    )?;
+    let inner = driver.import_graphics_dma_buf(states.as_slice(), descriptor, size_hint)?;
+    Ok(Allocation::new(
+        crate::driver::AllocationState::from_linux_kfd(driver, inner),
+    ))
 }
 
 /// Exports a live allocation as an independently owned DMA-BUF.
@@ -283,7 +474,8 @@ pub fn import_graphics_dma_buf(
 /// Returns a native error if Linux cannot export the allocation, or a driver
 /// contract error if the resulting file does not describe the same backing.
 pub fn export_dma_buf(allocation: &Allocation) -> Result<DmaBuf, Error> {
-    crate::driver::PlatformDriver::export_dma_buf(&allocation.inner)
+    let _operation = allocation.inner.linux_kfd()?.admit()?;
+    crate::driver::KfdDriver::export_dma_buf(allocation.inner.linux_kfd()?.driver_state())
 }
 
 /// Imports one KFD IPC allocation and maps it to the requested GPU devices.
@@ -304,35 +496,23 @@ pub fn import_kfd_ipc_memory(
     handle: KfdIpcMemoryHandle,
     size: u64,
 ) -> Result<Allocation, Error> {
-    let mut states = Buffer::try_with_capacity(devices.len(), session.driver().allocator())?;
-    for device in devices {
-        if !Shared::ptr_eq(session.driver(), &device.driver) {
-            return Err(Error::Operation {
-                kind: ErrorKind::InvalidArgument,
-                detail: "KFD IPC import devices must belong to this session",
-            });
-        }
-        states.try_push(&device.state)?;
-    }
-    let mut mapping_states =
-        Buffer::try_with_capacity(mapping_devices.len(), session.driver().allocator())?;
-    for device in mapping_devices {
-        if !Shared::ptr_eq(session.driver(), &device.driver) {
-            return Err(Error::Operation {
-                kind: ErrorKind::InvalidArgument,
-                detail: "KFD IPC mapping devices must belong to this session",
-            });
-        }
-        mapping_states.try_push(&device.state)?;
-    }
-    let inner = session.driver().import_kfd_ipc_memory(
-        states.as_slice(),
-        mapping_states.as_slice(),
-        handle,
-        size,
+    let driver = kfd_driver(session)?;
+    let _operation = driver.admission().enter()?;
+    let states = kfd_states_for(
+        driver,
+        devices,
+        "KFD IPC import devices must belong to this session",
     )?;
-    let info = inner.cached_info();
-    Ok(Allocation { inner, info })
+    let mapping_states = kfd_states_for(
+        driver,
+        mapping_devices,
+        "KFD IPC mapping devices must belong to this session",
+    )?;
+    let inner =
+        driver.import_kfd_ipc_memory(states.as_slice(), mapping_states.as_slice(), handle, size)?;
+    Ok(Allocation::new(
+        crate::driver::AllocationState::from_linux_kfd(driver, inner),
+    ))
 }
 
 /// Exports a live native allocation as a process-independent KFD IPC handle.
@@ -342,45 +522,92 @@ pub fn import_kfd_ipc_memory(
 /// Rejects unsupported backing or an unavailable allocation and reports the
 /// native export failure without changing ownership.
 pub fn export_kfd_ipc_memory(allocation: &Allocation) -> Result<KfdIpcMemoryHandle, Error> {
-    crate::driver::PlatformDriver::export_kfd_ipc_memory(&allocation.inner)
+    let _operation = allocation.inner.linux_kfd()?.admit()?;
+    crate::driver::KfdDriver::export_kfd_ipc_memory(allocation.inner.linux_kfd()?.driver_state())
 }
 
-/// Applies Linux KFD SVM attributes to a process virtual-address range.
-///
-/// # Errors
-/// Rejects invalid ranges, endpoint identities, flags, or attributes and
-/// reports the native KFD operation failure.
-pub fn set_kfd_svm_attributes(
-    session: &Session,
-    address: u64,
-    size: u64,
-    attributes: &[KfdSvmAttribute],
-) -> Result<(), Error> {
-    session
-        .driver()
-        .set_kfd_svm_attributes(address, size, attributes)
-}
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod descriptor_tests {
+    use super::*;
+    use std::io::{Seek, SeekFrom};
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::FileExt;
 
-/// Queries Linux KFD SVM attributes for a process virtual-address range.
-///
-/// # Errors
-/// Rejects invalid ranges or query attributes and reports malformed or failed
-/// native KFD results without publishing partial translated output.
-pub fn get_kfd_svm_attributes(
-    session: &Session,
-    address: u64,
-    size: u64,
-    attributes: &mut [KfdSvmAttribute],
-) -> Result<(), Error> {
-    session
-        .driver()
-        .get_kfd_svm_attributes(address, size, attributes)
-}
+    #[test]
+    fn duplicate_rejects_closed_descriptors_and_retains_its_own_owner() {
+        assert_eq!(
+            duplicate_descriptor(-1).unwrap_err().kind(),
+            ErrorKind::InvalidArgument
+        );
+        let source = std::fs::File::open("/dev/null").unwrap();
+        let duplicate = duplicate_descriptor(source.as_raw_fd()).unwrap();
+        drop(source);
+        assert_eq!(
+            duplicate_descriptor(i32::MAX).unwrap_err().kind(),
+            ErrorKind::InvalidArgument
+        );
+        assert!(std::fs::File::from(duplicate).metadata().is_ok());
+    }
 
-/// Transfers an installed KFD signal-event page to process-lifetime ownership.
-///
-/// # Errors
-/// Rejects an allocation that is not a live, host-visible KFD event page.
-pub fn retain_kfd_signal_event_page_for_process(mut allocation: Allocation) -> Result<(), Error> {
-    crate::driver::PlatformDriver::retain_kfd_signal_event_page(&mut allocation.inner)
+    #[test]
+    fn descriptor_path_remains_owned_after_the_caller_closes_its_file() {
+        let mut path = std::env::temp_dir();
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        path.push(format!("rocddi path #{}-{nonce}", std::process::id()));
+        let file = std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        assert!(crate::host::linux::duplicate_file(-1).is_err());
+        let resolved = crate::host::file::path(&file).unwrap();
+        assert_eq!(resolved, path);
+        drop(file);
+        let _other = std::fs::File::open("/dev/null").unwrap();
+        assert_eq!(resolved, path);
+        assert!(std::fs::File::open(&resolved).is_ok());
+        let unlinked = std::fs::File::open(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+        assert!(crate::host::file::path(&unlinked).is_err());
+    }
+
+    #[test]
+    fn host_ais_reports_partial_progress_without_moving_the_file_position() {
+        let mut path = std::env::temp_dir();
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        path.push(format!("rocddi-host-ais-{}-{nonce}", std::process::id()));
+        let mut file = std::fs::OpenOptions::new()
+            .create_new(true)
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        file.write_all_at(b"abc", 0).unwrap();
+        file.seek(SeekFrom::Start(2)).unwrap();
+
+        let mut bytes = [0xa5_u8; 5];
+        let result = ais_host_transfer(file.as_raw_fd(), AisHostBuffer::Read(&mut bytes), 0);
+        assert_eq!((result.size_copied, result.status), (3, 0));
+        assert_eq!(&bytes, b"abc\xa5\xa5");
+        assert_eq!(file.stream_position().unwrap(), 2);
+
+        let result = ais_host_transfer(file.as_raw_fd(), AisHostBuffer::Write(b"de"), 1);
+        assert_eq!((result.size_copied, result.status), (2, 0));
+        assert_eq!(file.stream_position().unwrap(), 2);
+        let mut updated = [0_u8; 3];
+        file.read_exact_at(&mut updated, 0).unwrap();
+        assert_eq!(&updated, b"ade");
+
+        let result = ais_host_transfer(-1, AisHostBuffer::Write(b"x"), 0);
+        assert_eq!((result.size_copied, result.status), (0, -9));
+        drop(file);
+        std::fs::remove_file(path).unwrap();
+    }
 }

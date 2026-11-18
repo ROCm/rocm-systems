@@ -119,93 +119,6 @@ using ncclGin_BackendOne = ncclGin_BackendMask<(1u << (int)backend)>;
 
 using ncclGin = ncclGin_BackendMask<NCCL_GIN_BACKEND_MASK_ALL>;
 
-#endif
-
-#ifdef __CUDACC__
-struct ncclGin_C {
-  ncclDevComm const& comm;
-  uint32_t nConnections:8, connectionId:8, _ginBackend:8;
-  uint32_t contextId;
-  ncclGinResourceSharingMode resourceSharingMode;
-
-  //////////////////////////////////////////////////////////////////////////////
-  // internal:
-  void* _ginHandle;
-  uint64_t* _signalShadows;
-  unsigned backendMask;
-
-  NCCL_DEVICE_INLINE ncclGin_C(ncclDevComm const& comm_, unsigned backendMask_, int contextIndex,
-                               ncclGinResourceSharingMode resourceSharingMode_ = NCCL_GIN_RESOURCE_SHARING_GPU);
-};
-
-// Helper init function that wraps placement new
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGin_C_init(ncclGin_C* net, unsigned backendMask, ncclDevComm const& comm,
-                                                        int contextIndex);
-
-// Helper init function with explicit resource sharing mode.
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGin_C_initWithResourceSharingMode(
-  ncclGin_C* net, unsigned backendMask, ncclDevComm const& comm, int contextIndex,
-  ncclGinResourceSharingMode resourceSharingMode);
-
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinPut(
-  ncclGin_C* net, ncclTeam team, int peer, ncclWindow_t dstWin, size_t dstOffset, ncclWindow_t srcWin, size_t srcOffset,
-  size_t bytes, bool isSignal, ncclGinSignal_t signalId, ncclGinSignalOp_t signalOp, uint64_t signalOpArg,
-  bool isCounter, ncclGinCounter_t counterId, ncclCoopAny coop, bool isDescriptor, ncclGinDescriptorSmem* descriptor,
-  cuda::thread_scope givenRelease, cuda::thread_scope requiredRelease);
-
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinGet(ncclGin_C* net, ncclTeam team, int peer, ncclWindow_t remoteWnd,
-                                                    size_t remoteOffset, ncclWindow_t localWnd, size_t localOffset,
-                                                    size_t bytes, ncclCoopAny coop, bool isDescriptor,
-                                                    ncclGinDescriptorSmem* descriptor, uint32_t optFlags);
-
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinSignal(
-  ncclGin_C* net, ncclTeam team, int peer, bool isSignal, ncclGinSignal_t signalId, ncclGinSignalOp_t signalOp,
-  uint64_t signalOpArg, ncclCoopAny coop, bool isDescriptor, ncclGinDescriptorSmem* descriptor,
-  cuda::thread_scope givenRelease, cuda::thread_scope requiredRelease);
-
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinPut_v2(
-  ncclGin_C* net, ncclTeam team, int peer, ncclWindow_t dstWin, size_t dstOffset, ncclWindow_t srcWin, size_t srcOffset,
-  size_t bytes, bool isSignal, ncclGinSignal_t signalId, ncclGinSignalOp_t signalOp, uint64_t signalOpArg,
-  bool isCounter, ncclGinCounter_t counterId, ncclCoopAny coop, bool isDescriptor, ncclGinDescriptorSmem* descriptor,
-  cuda::thread_scope givenRelease, cuda::thread_scope requiredRelease, uint32_t optFlags);
-
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinSignal_v2(
-  ncclGin_C* net, ncclTeam team, int peer, bool isSignal, ncclGinSignal_t signalId, ncclGinSignalOp_t signalOp,
-  uint64_t signalOpArg, ncclCoopAny coop, bool isDescriptor, ncclGinDescriptorSmem* descriptor,
-  cuda::thread_scope givenRelease, cuda::thread_scope requiredRelease, uint32_t optFlags);
-
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinFlush(ncclGin_C* net, ncclCoopAny coop, cuda::memory_order ord);
-
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE uint64_t ncclGinReadCounter(ncclGin_C* net, ncclGinCounter_t counter, int bits,
-                                                                cuda::memory_order ord);
-
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinWaitCounter(ncclGin_C* net, ncclCoopAny coop, ncclGinCounter_t counter,
-                                                            uint64_t least, int bits, cuda::memory_order ord);
-
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE uint64_t ncclGinReadSignal(ncclGin_C* net, ncclGinSignal_t signal, int bits,
-                                                               cuda::memory_order ord);
-
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinWaitSignal(ncclGin_C* net, ncclCoopAny coop, ncclGinSignal_t signal,
-                                                           uint64_t least, int bits, cuda::memory_order ord);
-
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinResetCounter(ncclGin_C* net, ncclGinCounter_t counter);
-
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinResetSignal(ncclGin_C* net, ncclGinSignal_t signal);
-
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinPutValue(
-  ncclGin_C* net, ncclTeam team, int peer, ncclWindow_t dstWin, size_t dstOffset, uint64_t value, size_t size,
-  bool isSignal, ncclGinSignal_t signalId, ncclGinSignalOp_t signalOp, uint64_t signalOpArg, ncclCoopAny coop,
-  bool isDescriptor, ncclGinDescriptorSmem* descriptor, cuda::thread_scope givenRelease,
-  cuda::thread_scope requiredRelease);
-
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinPutValue_v2(
-  ncclGin_C* net, ncclTeam team, int peer, ncclWindow_t dstWin, size_t dstOffset, uint64_t value, size_t size,
-  bool isSignal, ncclGinSignal_t signalId, ncclGinSignalOp_t signalOp, uint64_t signalOpArg, ncclCoopAny coop,
-  bool isDescriptor, ncclGinDescriptorSmem* descriptor, cuda::thread_scope givenRelease,
-  cuda::thread_scope requiredRelease, uint32_t optFlags);
-
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE uint64_t* ncclGinGetSignalShadowPtr(ncclGin_C* net, ncclGinSignal_t signal);
-
 template <unsigned backendMask>
 struct ncclGin_BackendMask {
   ncclDevComm const& comm;
@@ -404,6 +317,12 @@ struct ncclGin_BackendMask {
   NCCL_DEVICE_INLINE void resetSignal(ncclGinSignal_t signal) const;
   // Resets a VA signal at the given window and offset.
   NCCL_DEVICE_INLINE void resetSignal(ncclWindow_t signalWindow, size_t signalOffset) const;
+
+  // True when the backend flushes all previously-received puts on any received signal, from any peer.
+  NCCL_DEVICE_INLINE bool _flushesAllPutsOnAnySignal() const;
+
+  // The barrier NCCL runs on this backend (ncclGinApi_BarrierOptions); see ncclGinBarrierSlots.
+  NCCL_DEVICE_INLINE ncclGinBarrierOptions_t _barrierOptions() const;
 
   //////////////////////////////////////////////////////////////////////////////
   // internal:

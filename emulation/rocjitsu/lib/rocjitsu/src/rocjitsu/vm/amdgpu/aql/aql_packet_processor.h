@@ -48,11 +48,13 @@ enum class AqlPacketDiagnostic : uint8_t {
   InvalidSignalAddress,
   MissingSignalReader,
   MissingAdmissionCallback,
+  MalformedPm4Ib,
 };
 
 enum class AqlPreparedPacketKind : uint8_t {
   KernelDispatch,
   NonKernel,
+  Pm4Ib,
 };
 
 /// @brief Outcome of attempting to commit a decoded AQL action to its CP queue.
@@ -74,9 +76,13 @@ struct AqlPreparedPacket {
   AqlPreparedPacketKind kind = AqlPreparedPacketKind::NonKernel;
   hsa_kernel_dispatch_packet_t kernel_dispatch{};
   ClusterDispatchShape cluster_shape{};
+  uint64_t pm4_ib_address = 0;
+  uint32_t pm4_ib_dwords = 0;
   uint64_t completion_signal = 0;
   bool barrier_bit = false;
   bool blocks_following = false;
+  /// A standard HSA barrier with neither acquire nor release fence scope.
+  bool no_fence_aql_barrier = false;
 };
 
 struct AqlPacketProcessRequest {

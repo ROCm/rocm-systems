@@ -28,6 +28,9 @@
 #define MAX_ATTR_COUNT 16
 #define MAX_SUBS 512 // Changed the value from 128 to 512 for CPX mode
 #define UALOE_GPU_FABRIC_UUID_LEN 16
+
+#define NCCL_TOPO_UNDEF_BIT (0x1 << 16)
+
 #define NODE_TYPE_NONE 0
 #define NODE_TYPE_OPEN 1
 #define NODE_TYPE_CLOSE 2
@@ -76,6 +79,8 @@ ncclResult_t ncclTopoConvertXml(struct ncclXml* xml, uintptr_t base, int exp);
 /* Functions  */
 /**************/
 
+ncclResult_t xmlUnsetAttr(struct ncclXmlNode* node, const char* attrName);
+
 static size_t xmlMemSize(int maxNodes) {
   return offsetof(struct ncclXml, nodes) + sizeof(struct ncclXmlNode) * maxNodes;
 }
@@ -96,6 +101,15 @@ static ncclResult_t xmlGetAttrIndex(struct ncclXmlNode* node, const char* attrNa
       return ncclSuccess;
     }
   }
+  return ncclSuccess;
+}
+
+static ncclResult_t xmlGetNextAttrIndex(struct ncclXmlNode* node, int* index) {
+  if (node->nAttrs >= MAX_ATTR_COUNT) {
+    WARN("Error : too many XML attributes (max %d)", MAX_ATTR_COUNT);
+    return ncclInternalError;
+  }
+  *index = node->nAttrs++;
   return ncclSuccess;
 }
 
@@ -243,7 +257,7 @@ static ncclResult_t xmlSetAttr(struct ncclXmlNode* node, const char* attrName, c
   int index;
   NCCLCHECK(xmlGetAttrIndex(node, attrName, &index));
   if (index == -1) {
-    index = node->nAttrs++;
+    NCCLCHECK(xmlGetNextAttrIndex(node, &index));
     strncpy(node->attrs[index].key, attrName, MAX_STR_LEN);
     node->attrs[index].key[MAX_STR_LEN] = '\0';
   }
@@ -273,7 +287,7 @@ static ncclResult_t xmlSetAttrIfUnset(struct ncclXmlNode* node, const char* attr
   int index;
   NCCLCHECK(xmlGetAttrIndex(node, attrName, &index));
   if (index != -1) return ncclSuccess;
-  index = node->nAttrs++;
+  NCCLCHECK(xmlGetNextAttrIndex(node, &index));
   strncpy(node->attrs[index].key, attrName, MAX_STR_LEN);
   node->attrs[index].key[MAX_STR_LEN] = '\0';
   strncpy(node->attrs[index].value, value, MAX_STR_LEN);
@@ -285,7 +299,7 @@ static ncclResult_t xmlSetAttrInt(struct ncclXmlNode* node, const char* attrName
   int index;
   NCCLCHECK(xmlGetAttrIndex(node, attrName, &index));
   if (index == -1) {
-    index = node->nAttrs++;
+    NCCLCHECK(xmlGetNextAttrIndex(node, &index));
     strncpy(node->attrs[index].key, attrName, MAX_STR_LEN);
     node->attrs[index].key[MAX_STR_LEN] = '\0';
   }
@@ -297,7 +311,7 @@ static ncclResult_t xmlSetAttrFloat(struct ncclXmlNode* node, const char* attrNa
   int index;
   NCCLCHECK(xmlGetAttrIndex(node, attrName, &index));
   if (index == -1) {
-    index = node->nAttrs++;
+    NCCLCHECK(xmlGetNextAttrIndex(node, &index));
     strncpy(node->attrs[index].key, attrName, MAX_STR_LEN);
     node->attrs[index].key[MAX_STR_LEN] = '\0';
   }
@@ -309,7 +323,7 @@ static ncclResult_t xmlSetAttrLong(struct ncclXmlNode* node, const char* attrNam
   int index;
   NCCLCHECK(xmlGetAttrIndex(node, attrName, &index));
   if (index == -1) {
-    index = node->nAttrs++;
+    NCCLCHECK(xmlGetNextAttrIndex(node, &index));
     strncpy(node->attrs[index].key, attrName, MAX_STR_LEN);
     node->attrs[index].key[MAX_STR_LEN] = '\0';
   }
@@ -321,23 +335,11 @@ static ncclResult_t xmlSetAttrUint64(struct ncclXmlNode* node, const char* attrN
   int index;
   NCCLCHECK(xmlGetAttrIndex(node, attrName, &index));
   if (index == -1) {
-    index = node->nAttrs++;
+    NCCLCHECK(xmlGetNextAttrIndex(node, &index));
     strncpy(node->attrs[index].key, attrName, MAX_STR_LEN);
     node->attrs[index].key[MAX_STR_LEN] = '\0';
   }
-  snprintf(node->attrs[index].value, MAX_STR_LEN, "0x%" PRIx64, value);
-  return ncclSuccess;
-}
-
-static ncclResult_t xmlUnsetAttr(struct ncclXmlNode* node, const char* attrName) {
-  int index;
-  NCCLCHECK(xmlGetAttrIndex(node, attrName, &index));
-  if (index == -1) return ncclSuccess;
-  for (int i = index + 1; i < node->nAttrs; i++) {
-    strcpy(node->attrs[i - 1].key, node->attrs[i].key);
-    strcpy(node->attrs[i - 1].value, node->attrs[i].value);
-  }
-  node->nAttrs--;
+  snprintf(node->attrs[index].value, MAX_STR_LEN, "%#" PRIx64, value);
   return ncclSuccess;
 }
 

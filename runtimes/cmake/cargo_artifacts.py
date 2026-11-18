@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 """Stage selected Cargo artifacts without teaching CMake Cargo's output layout."""
 
 import argparse
@@ -66,9 +68,18 @@ def collect_messages(
     return found, native_libraries
 
 
+def native_response(libraries: str, system: str) -> str:
+    # rustc's MSVC closure is already a linker command-line fragment. Preserve
+    # its quotes and backslashes; POSIX tokenization would change Windows paths.
+    if system == "Windows":
+        return libraries + "\n"
+    return shlex.join(shlex.split(libraries)) + "\n"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--metadata", type=Path, required=True)
+    parser.add_argument("--system", choices=("Linux", "Windows"), default="Linux")
     parser.add_argument(
         "--artifact",
         nargs=4,
@@ -116,9 +127,7 @@ def main() -> int:
             )
         # GNU linker response syntax: preserve order and duplication. These must
         # follow the archive so --as-needed does not discard required libraries.
-        responses[Path(destination)] = (
-            shlex.join(shlex.split(native_libraries[key])) + "\n"
-        )
+        responses[Path(destination)] = native_response(native_libraries[key], args.system)
     for artifact, source in found.items():
         copy_changed(source, artifact.destination)
     for path, response in responses.items():

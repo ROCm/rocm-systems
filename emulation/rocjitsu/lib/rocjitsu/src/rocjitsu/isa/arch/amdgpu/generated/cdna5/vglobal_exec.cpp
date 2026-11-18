@@ -210,7 +210,8 @@ void GlobalStoreB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
   auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);
   d->store_data.resize(wf.wf_size() * 4);
-  data.copy_dwords_lane_major(d->store_data, exec);
+  if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+    return;
   set_data(std::move(d));
 }
 
@@ -229,7 +230,8 @@ void GlobalStoreB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
   auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 2, exec);
   d->store_data.resize(wf.wf_size() * 8);
-  data.copy_dwords_lane_major(d->store_data, exec);
+  if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+    return;
   set_data(std::move(d));
 }
 
@@ -248,7 +250,8 @@ void GlobalStoreB96Vglobal::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
   auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 3, exec);
   d->store_data.resize(wf.wf_size() * 12);
-  data.copy_dwords_lane_major(d->store_data, exec);
+  if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+    return;
   set_data(std::move(d));
 }
 
@@ -267,7 +270,8 @@ void GlobalStoreB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
   auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 4, exec);
   d->store_data.resize(wf.wf_size() * 16);
-  data.copy_dwords_lane_major(d->store_data, exec);
+  if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+    return;
   set_data(std::move(d));
 }
 
@@ -1442,31 +1446,44 @@ void GlobalLoadBlockVglobal::execute_impl(amdgpu::Wavefront &wf) {
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 4;
-  d->num_elems = 32;
+  d->num_elems = amdgpu::kBlockDwordCount;
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
+  d->set_block_dword_mask(wf.m0());
   set_data(std::move(d));
 }
 
 void GlobalStoreBlockVglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 4;
-  d->num_elems = 32;
+  d->num_elems = amdgpu::kBlockDwordCount;
   d->is_load = false;
   d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
-  uint64_t exec = wf.exec();
+  d->set_block_dword_mask(wf.m0());
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
-  auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 32, exec);
-  d->store_data.resize(wf.wf_size() * 128);
-  data.copy_dwords_lane_major(d->store_data, exec);
+  constexpr uint32_t block_bytes = amdgpu::kBlockDwordCount * sizeof(uint32_t);
+  d->store_data.resize(wf.wf_size() * block_bytes);
+  const amdgpu::RegisterAccess registers(wf);
+  for (uint32_t i = 0; i < amdgpu::kBlockDwordCount; ++i) {
+    if (!d->block_dword_enabled(i))
+      continue;
+    const auto source = registers.block_store_source_vgpr(data_base + i);
+    auto data = registers.read_vgpr_region(source, 1, d->lane_mask);
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(d->lane_mask & (uint64_t{1} << lane)))
+        continue;
+      const uint32_t value = data.lane(0, lane);
+      std::memcpy(&d->store_data[lane * block_bytes + i * sizeof(value)], &value, sizeof(value));
+    }
+  }
   set_data(std::move(d));
 }
 
@@ -1548,6 +1565,9 @@ void GlobalLoadTr16B128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->transpose = 4;
+  const uint64_t full_exec = ~uint64_t{0} >> (64 - wf.wf_size());
+  if (wf.exec() != 0 && wf.exec() != full_exec)
+    wf.report_undefined_behavior("global transpose load requires a full or empty EXEC mask");
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1564,6 +1584,9 @@ void GlobalLoadTr8B64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->transpose = 6;
+  const uint64_t full_exec = ~uint64_t{0} >> (64 - wf.wf_size());
+  if (wf.exec() != 0 && wf.exec() != full_exec)
+    wf.report_undefined_behavior("global transpose load requires a full or empty EXEC mask");
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1816,6 +1839,10 @@ void GlobalStoreAsyncFromLdsB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = false;
   d->wait_counter_type = amdgpu::WaitCounterType::ASYNCCNT;
+  d->lds_src = true;
+  d->lds_per_lane_addr = true;
+  d->per_lane_lds_addr.fill(amdgpu::kInvalidLdsAddress);
+  d->per_lane_lds_src_bytes.fill(0);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1831,9 +1858,11 @@ void GlobalStoreAsyncFromLdsB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t lane_lds_addr = amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);
-    uint32_t lds_addr = async_lds_lane_address(inst_, wf, lane_lds_addr, 1);
-    // Out-of-range LDS reads return zero; the global store still issues.
-    lds.read(lds_addr, &d->store_data[lane * 1], 1);
+    const auto source = async_lds_lane_source(inst_, wf, lane_lds_addr, 1);
+    d->per_lane_lds_addr[lane] = source.address;
+    d->per_lane_lds_src_bytes[lane] = source.bytes;
+    // LDS bytes past the allocation read zero; the global store still issues.
+    lds.read(source.address, &d->store_data[lane * 1], source.bytes);
   }
   set_data(std::move(d));
 }
@@ -1844,6 +1873,10 @@ void GlobalStoreAsyncFromLdsB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = false;
   d->wait_counter_type = amdgpu::WaitCounterType::ASYNCCNT;
+  d->lds_src = true;
+  d->lds_per_lane_addr = true;
+  d->per_lane_lds_addr.fill(amdgpu::kInvalidLdsAddress);
+  d->per_lane_lds_src_bytes.fill(0);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1859,9 +1892,11 @@ void GlobalStoreAsyncFromLdsB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t lane_lds_addr = amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);
-    uint32_t lds_addr = async_lds_lane_address(inst_, wf, lane_lds_addr, 4);
-    // Out-of-range LDS reads return zero; the global store still issues.
-    lds.read(lds_addr, &d->store_data[lane * 4], 4);
+    const auto source = async_lds_lane_source(inst_, wf, lane_lds_addr, 4);
+    d->per_lane_lds_addr[lane] = source.address;
+    d->per_lane_lds_src_bytes[lane] = source.bytes;
+    // LDS bytes past the allocation read zero; the global store still issues.
+    lds.read(source.address, &d->store_data[lane * 4], source.bytes);
   }
   set_data(std::move(d));
 }
@@ -1872,6 +1907,10 @@ void GlobalStoreAsyncFromLdsB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 2;
   d->is_load = false;
   d->wait_counter_type = amdgpu::WaitCounterType::ASYNCCNT;
+  d->lds_src = true;
+  d->lds_per_lane_addr = true;
+  d->per_lane_lds_addr.fill(amdgpu::kInvalidLdsAddress);
+  d->per_lane_lds_src_bytes.fill(0);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1887,9 +1926,11 @@ void GlobalStoreAsyncFromLdsB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t lane_lds_addr = amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);
-    uint32_t lds_addr = async_lds_lane_address(inst_, wf, lane_lds_addr, 8);
-    // Out-of-range LDS reads return zero; the global store still issues.
-    lds.read(lds_addr, &d->store_data[lane * 8], 8);
+    const auto source = async_lds_lane_source(inst_, wf, lane_lds_addr, 8);
+    d->per_lane_lds_addr[lane] = source.address;
+    d->per_lane_lds_src_bytes[lane] = source.bytes;
+    // LDS bytes past the allocation read zero; the global store still issues.
+    lds.read(source.address, &d->store_data[lane * 8], source.bytes);
   }
   set_data(std::move(d));
 }
@@ -1900,6 +1941,10 @@ void GlobalStoreAsyncFromLdsB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 4;
   d->is_load = false;
   d->wait_counter_type = amdgpu::WaitCounterType::ASYNCCNT;
+  d->lds_src = true;
+  d->lds_per_lane_addr = true;
+  d->per_lane_lds_addr.fill(amdgpu::kInvalidLdsAddress);
+  d->per_lane_lds_src_bytes.fill(0);
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1915,9 +1960,11 @@ void GlobalStoreAsyncFromLdsB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t lane_lds_addr = amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);
-    uint32_t lds_addr = async_lds_lane_address(inst_, wf, lane_lds_addr, 16);
-    // Out-of-range LDS reads return zero; the global store still issues.
-    lds.read(lds_addr, &d->store_data[lane * 16], 16);
+    const auto source = async_lds_lane_source(inst_, wf, lane_lds_addr, 16);
+    d->per_lane_lds_addr[lane] = source.address;
+    d->per_lane_lds_src_bytes[lane] = source.bytes;
+    // LDS bytes past the allocation read zero; the global store still issues.
+    lds.read(source.address, &d->store_data[lane * 16], source.bytes);
   }
   set_data(std::move(d));
 }
@@ -2145,6 +2192,9 @@ void GlobalLoadTr4B64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->transpose = 1;
+  const uint64_t full_exec = ~uint64_t{0} >> (64 - wf.wf_size());
+  if (wf.exec() != 0 && wf.exec() != full_exec)
+    wf.report_undefined_behavior("global transpose load requires a full or empty EXEC mask");
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -2161,6 +2211,9 @@ void GlobalLoadTr6B96Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->transpose = 2;
+  const uint64_t full_exec = ~uint64_t{0} >> (64 - wf.wf_size());
+  if (wf.exec() != 0 && wf.exec() != full_exec)
+    wf.report_undefined_behavior("global transpose load requires a full or empty EXEC mask");
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);

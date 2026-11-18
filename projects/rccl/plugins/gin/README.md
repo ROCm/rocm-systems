@@ -111,18 +111,18 @@ and the plugins. NCCL decides how user contexts map to plugin connections and co
 
 ### Operations
 
-**Put/PutValue**  
+**Put/PutValue**
 Put moves data from a local source buffer to a (likely remote) target buffer. PutValue places
 a value in a target buffer. Puts are not required to be completed in the order they are requested.
 
 A single call to `Put` or `PutValue` may include a signal or counter operation. See below for
 more details.
 
-**Get**  
+**Get**
 Get moves data from a (likely remote) source buffer to a local target buffer. Gets are
 not required to be completed in the order they are requested.
 
-**Signal**  
+**Signal**
 Signal increments a target memory address by a fixed value. There's 2 types of visibility guarantees:
 strong and weak. The visibility of a *strong* signal guarantees the completion/visibility of all previous
 puts and signals, including the bundled put in the case of put+signal. The visibility of a *weak*
@@ -135,12 +135,12 @@ current signal value, while `waitSignal` blocks until the signal meets or exceed
 value. `resetSignal` reinitializes a signal before reuse and must not race with concurrent
 signal updates.
 
-**Flush**  
+**Flush**
 Flush ensures all previous operations are locally complete. In the case of gets, flush indicates
 the data is visible and ready to use. In the case of puts, flush indicates source buffers are
 ready for reuse.
 
-**Counter**  
+**Counter**
 Counter increments a local memory address by a fixed value. The completion/visibility of a counter
 guarantees the local completion of a bundled put. It does not guarantee completion at the target,
 nor local completion of any previous puts.
@@ -171,7 +171,12 @@ GIN plugins expose two property queries. `getProperties` returns an
 `ncclNetProperties_t` for a GIN-capable device; this structure is shared with
 the network plugin API and is documented in `plugins/net/README.md`.
 `getGinProperties` returns GIN-specific capabilities, such as strong signal and
-VA signal support.
+VA signal support, and, from v15, the plugin's barrier preference
+(`barrierOptions`). A plugin whose signals are limited can report `NCCL_GIN_BARRIER_SIGNAL_EFFICIENT`, and NCCL's GIN barrier will reduce signal usage (possibly at the cost of performance).
+`NCCL_GIN_BARRIER_DEFAULT`, which NCCL also assumes for v14 and older plugins,
+keeps NCCL's default barrier. The device code NCCL compiles in for a backend
+type must make the same choice, so a new backend that wants the
+signal-efficient barrier needs matching NCCL support.
 
 If an application requires a feature that is not supported by a specific backend, NCCL will not use
 that backend. NCCL will fall back to a backend that supports the required features, if such a backend is available.
@@ -188,6 +193,9 @@ peers. A `collComm` is initialized in several steps:
 
 `ncclImpl` initializes a TCP socket in `listen` and stores it in `listenComm`. The address of the socket is included in `handle` so
 that all peers can connect to the socket.
+
+Since v15, `connect` also receives `abortFlag` (may be NULL). It becomes non-zero when the communicator is
+aborted; any blocking wait on the `collComm` should then return an error.
 
 ### Context Setup
 
@@ -254,7 +262,7 @@ A `ncclGinCtx` contains metadata associated with a GIN context. The most importa
 
 This is the pointer returned as `ginHandle` in `regMrSym`.
 
-**Coop**  
+**Coop**
 
 In many places, the backend API supplies a `coop` argument. `coop` specifies the threads
 calling/participating in the operation. `coop` can be used for both correctness and performance:
@@ -276,14 +284,14 @@ Some backends choose to "reset" indexed signals by caching an offset (the value 
 Accordingly, `GetSignalPtr` returns an offset. Backends can return an offset of 0 if `ResetSignal`
 actually sets the memory location of the indexed signal to 0.
 
-**Abort flag**  
+**Abort flag**
 
 Many blocking functions supply an `abortFlag` argument. When true, the function should return
 immediately. The function (and corresponding state) can have undefined behavior if it returns
 early due to an abort flag. `abortFlag` may be null, in which case the function should return
 only when the requested operation is complete.
 
-**Counter**  
+**Counter**
 
 A counter is a 64-bit *local* memory location allocated by the custom implementation. All
 writes are done via the backend API (e.g. either `ResetCounter` or `Put` (with counter)).
@@ -291,14 +299,14 @@ All reads are done via `GetCounterPtr`, which should return a device-side addres
 be read using CUDA atomic operations (e.g. `cuda::atomic_ref`). Similar to signals,
 `GetCounterPtr` returns an offset in case backends wish to "reset" counters by caching an offset.
 
-**DescriptorSmem**  
+**DescriptorSmem**
 
 `DescriptorSmem` is a 64-byte, user-allocated, shared-memory scratch pad. As an optional
 performance improvement, implementations may use this scratch pad instead of reallocating
 internal structs on each API call. Users can reuse one `DescriptorSmem` across many
 non-overlapping GIN calls, but they do not have to.
 
-**Optimization flags**  
+**Optimization flags**
 
 GIN exposes several optimization flags in the form of `ncclGinOptFlags`.
 The flags include:
@@ -307,6 +315,8 @@ The flags include:
 expected in the near future. Implementations can reduce overhead by delaying some logic
 until after the batch is complete. For example, `ncclImpl` skips ringing the doorbell when
 this flag is specified (and rings it once for all requests when the flag is no longer specified).
+If a user posts N requests, this flag can be used for (N - 1) requests.
+However, the Nth request must not use this flag to ensure that the doorbell is rung.
 
 ## Types summary
 
@@ -339,7 +349,7 @@ allocate/initialize the structs according to the format that existed at the time
 
 ## Example
 
-`plugins/gin/example` contains a minimal GIN plugin example. It exports the current v14
+`plugins/gin/example` contains a minimal GIN plugin example. It exports the current v15
 interface while preserving older example exports for compatibility. Build it with:
 
 ```shell

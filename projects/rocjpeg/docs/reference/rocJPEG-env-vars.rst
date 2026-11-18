@@ -20,6 +20,7 @@ The following environment variables affect the rocJPEG runtime.
      -  | ``1``: Enables hardware color-space conversion when there are eight or more JPEG cores and RGB or RGB planar output is in use.
         | Hardware color-space conversion is off by default regardless of the number of cores. 
         | Not used for ``CSS_440`` (4:4:0) chroma subsampling even when enabled.
+        | Use the ``hw_rgb_subsampling_mask`` and ``hw_rgb_output_format_mask`` fields reported by ``rocJpegGetDecoderCaps()`` to check whether it is in effect.
    * - ``ROCJPEG_LOG_LEVEL``
      - | Sets the maximum severity of log messages. Each level defines the maximum severity of log messages to output.
        | ``0``: Output critical messages only (default) 

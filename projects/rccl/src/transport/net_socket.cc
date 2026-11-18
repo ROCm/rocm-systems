@@ -12,6 +12,7 @@
 #include "param.h"
 #include "profiler/net_socket.h"
 #include "os.h"
+#include "net_socket/common.h"
 
 #include <stdlib.h>
 #include <limits.h>
@@ -20,23 +21,7 @@
 #include <condition_variable>
 
 /* Init functions */
-static int ncclNetIfs = -1;
-struct ncclNetSocketDev {
-  union ncclSocketAddress addr;
-  char devName[MAX_IF_NAME_SIZE];
-  char* pciPath;
-};
-static struct ncclNetSocketDev ncclNetSocketDevs[MAX_IFS];
-
 static std::mutex ncclNetSocketMutex;
-
-static ncclResult_t ncclNetSocketGetPciPath(char* devName, char** pciPath) {
-  char devicePath[PATH_MAX];
-  snprintf(devicePath, PATH_MAX, "/sys/class/net/%s/device", devName);
-  // May return NULL if the file doesn't exist.
-  *pciPath = ncclOsRealpath(devicePath, NULL);
-  return ncclSuccess;
-}
 
 static ncclProfilerCallback_t ncclProfilerFunction;
 
@@ -50,124 +35,19 @@ static int netRefCount;
 ncclResult_t ncclNetSocketInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config, ncclDebugLogger_t logFunction,
                                ncclProfilerCallback_t profFunction) {
   std::lock_guard<std::mutex> lock(ncclNetSocketMutex);
-  ncclResult_t ret = ncclSuccess;
   if (netRefCount) {
     netRefCount++;
     return ncclSuccess;
   }
   ncclProfilerFunction = profFunction;
-  if (ncclNetIfs == -1) {
-    char names[MAX_IF_NAME_SIZE * MAX_IFS];
-    union ncclSocketAddress addrs[MAX_IFS];
-    NCCLCHECKGOTO(ncclFindInterfaces(names, addrs, MAX_IF_NAME_SIZE, MAX_IFS, &ncclNetIfs), ret, fail);
-    if (ncclNetIfs <= 0) {
-      WARN("NET/Socket : no interface found");
-      ret = ncclInternalError;
-      goto fail;
-    } else {
-#define MAX_LINE_LEN (2047)
-      char line[MAX_LINE_LEN + 1];
-      char addrline[SOCKET_NAME_MAXLEN + 1];
-      line[0] = '\0';
-      addrline[SOCKET_NAME_MAXLEN] = '\0';
-      for (int i = 0; i < ncclNetIfs; i++) {
-        strcpy(ncclNetSocketDevs[i].devName, names + i * MAX_IF_NAME_SIZE);
-        memcpy(&ncclNetSocketDevs[i].addr, addrs + i, sizeof(union ncclSocketAddress));
-        NCCLCHECKGOTO(ncclNetSocketGetPciPath(ncclNetSocketDevs[i].devName, &ncclNetSocketDevs[i].pciPath), ret, fail);
-        snprintf(line + strlen(line), MAX_LINE_LEN - strlen(line), " [%d]%s:%s", i, names + i * MAX_IF_NAME_SIZE,
-                 ncclSocketToString(&addrs[i], addrline));
-      }
-      line[MAX_LINE_LEN] = '\0';
-      INFO(NCCL_INIT | NCCL_NET, "NET/Socket : Using%s", line);
-    }
-  }
+  NCCLCHECK(ncclNetSocketInitDevices("NET/Socket"));
   netRefCount++;
   return ncclSuccess;
-fail:
-  ncclNetIfs = -1;
-  return ret;
 }
 
 ncclResult_t ncclNetSocketDevices(int* ndev) {
   *ndev = ncclNetIfs;
   return ncclSuccess;
-}
-
-static ncclResult_t ncclNetSocketGetSpeed(char* devName, int* speed) {
-  ncclResult_t ret = ncclSuccess;
-  *speed = 0;
-
-#if defined(NCCL_OS_WINDOWS)
-  // On Windows, use GetAdaptersAddresses to get network interface speed
-  ULONG bufferSize = 15000;
-  IP_ADAPTER_ADDRESSES* adapterAddresses = NULL;
-  ULONG result;
-  int attempts = 0;
-
-  do {
-    adapterAddresses = (IP_ADAPTER_ADDRESSES*)malloc(bufferSize);
-    if (adapterAddresses == NULL) {
-      WARN("Failed to allocate memory for adapter addresses");
-      *speed = 10000;
-      return ncclSuccess;
-    }
-
-    result = GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_INCLUDE_PREFIX, NULL, adapterAddresses, &bufferSize);
-    if (result == ERROR_BUFFER_OVERFLOW) {
-      free(adapterAddresses);
-      adapterAddresses = NULL;
-    }
-    attempts++;
-  } while (result == ERROR_BUFFER_OVERFLOW && attempts < 3);
-
-  if (result == NO_ERROR) {
-    // Iterate through adapters to find the matching one
-    for (IP_ADAPTER_ADDRESSES* adapter = adapterAddresses; adapter != NULL; adapter = adapter->Next) {
-      // Convert adapter friendly name to UTF-8 for comparison
-      char adapterName[MAX_IF_NAME_SIZE];
-      WideCharToMultiByte(CP_UTF8, 0, adapter->FriendlyName, -1, adapterName, sizeof(adapterName), NULL, NULL);
-
-      // Check if this is the adapter we're looking for
-      if (strstr(adapterName, devName) != NULL || strstr(devName, adapterName) != NULL) {
-        // TransmitLinkSpeed is in bits per second, convert to Mbps
-        if (adapter->TransmitLinkSpeed > 0) {
-          *speed = (int)(adapter->TransmitLinkSpeed / 1000000);
-          INFO(NCCL_NET, "Found network interface %s with speed %d Mbps", devName, *speed);
-          break;
-        }
-      }
-    }
-  }
-
-  if (adapterAddresses) {
-    free(adapterAddresses);
-  }
-
-  if (*speed <= 0) {
-    INFO(NCCL_NET, "Could not get speed for interface %s. Defaulting to 10 Gbps.", devName);
-    *speed = 10000;
-  }
-#elif defined(NCCL_OS_LINUX)
-  char speedPath[PATH_MAX];
-  snprintf(speedPath, sizeof(speedPath), "/sys/class/net/%s/speed", devName);
-  int fd = -1;
-  SYSCHECKSYNC(open(speedPath, O_RDONLY), "open", fd);
-  if (fd != -1) {
-    char speedStr[] = "        ";
-    int n;
-    // Allow this to silently fail
-    n = read(fd, speedStr, sizeof(speedStr) - 1);
-    if (n > 0) {
-      *speed = strtol(speedStr, NULL, 0);
-    }
-  }
-  if (*speed <= 0) {
-    INFO(NCCL_NET, "Could not get speed from %s. Defaulting to 10 Gbps.", speedPath);
-    *speed = 10000;
-  }
-  if (fd != -1) SYSCHECK(close(fd), "close");
-#endif
-  return ret;
 }
 
 ncclResult_t ncclNetSocketGetProperties(int dev, ncclNetProperties_t* props) {
@@ -228,6 +108,7 @@ struct ncclNetSocketHandle {
   struct ncclNetSocketCommStage stage;
 };
 
+// Structure shared between the main thread and the helper threads.  Atomics are required for simultaneous accesses.
 struct ncclNetSocketTask {
   int op;
   void* data;
@@ -257,17 +138,24 @@ struct ncclNetSocketRequest {
   struct ncclProfilerInfo pInfo;
 };
 
+// Structure shared between the main thread and the helper threads.  Atomics are required for simultaneous accesses.
 struct ncclNetSocketTaskQueue {
   int next;
   int len;
   struct ncclNetSocketTask* tasks;
 };
 
+// Structure shared between the main thread and the helper threads.  Most simultaneous accesses require atomics,
+// with an exception noted below.
 struct ncclNetSocketThreadResources {
   struct ncclNetSocketTaskQueue threadTaskQueue;
-  int stop;
+  int stop; // Simultaneous access protected by threadMutex.
   struct ncclNetSocketComm* comm;
   struct ncclProfilerInfo* pInfo;
+  // The mutex below is used primarily for notifications (in conjunction with the condition variable), not as the main
+  // means of resolving simultaneous accesses (which require atomics).  The one exception is the stop field above,
+  // which is accessed using regular loads/stores with the mutex held, plus an unprotected load on the fast path which
+  // is guaranteed to be eventually-consistent (once the thread goes idle).
   std::mutex threadMutex;
   std::condition_variable threadCond;
 };
@@ -304,14 +192,17 @@ void* persistentSocketThread(void* args_) {
 #endif
   while (1) {
     int idle = 1;
-    int mark = myQueue->next; // mark newest task seen
+    // A scan that starts from a given value of next must see every task that value counts.
+    // Pairs with the release store in ncclNetSocketGetTask.
+    int mark = COMPILER_ATOMIC_LOAD(&myQueue->next, std::memory_order_acquire); // mark newest task seen
     for (int i = 0; i < myQueue->len; i += nSocksPerThread) {
       int repeat;
       do {
         repeat = 0;
         for (int j = 0; j < nSocksPerThread; j++) {
           struct ncclNetSocketTask* r = myQueue->tasks + i + j;
-          if (r != NULL && r->used == 1 && r->offset < r->size) {
+          // Acquire load pairs with the release store in ncclNetSocketGetTask/ncclNetSocketTest
+          if (r != NULL && COMPILER_ATOMIC_LOAD(&r->used, std::memory_order_acquire) == 1 && r->offset < r->size) {
 #ifdef NCCL_ENABLE_NET_PROFILING
             if (!eHandle[i + j]) {
               ncclProfilerNetSockDescr_v1_t data;
@@ -323,8 +214,12 @@ void* persistentSocketThread(void* args_) {
                                    NCCL_PROFILER_NET_TYPE_SOCK | 1, &data);
             }
 #endif
-            r->result = ncclSocketProgress(r->op, r->sock, r->data, r->size, &r->offset);
-            if (r->result != ncclSuccess) {
+            int offset = r->offset;
+            ncclResult_t result = ncclSocketProgress(r->op, r->sock, r->data, r->size, &offset);
+            if (result != ncclSuccess) {
+              // Pairs with the acquire load in ncclNetSocketTest.  The value is initialized to ncclSuccess in
+              // ncclNetSocketGetTask, so we need to set it only in case of an error.
+              COMPILER_ATOMIC_STORE(&r->result, result, std::memory_order_release);
 #ifdef NCCL_ENABLE_NET_PROFILING
               ncclProfilerFunction(&eHandle[i + j], ncclProfilerNetEventStop, NULL, 0, NULL);
               eHandle[i + j] = NULL;
@@ -333,7 +228,10 @@ void* persistentSocketThread(void* args_) {
               return NULL;
             }
             idle = 0;
-            if (r->offset < r->size) repeat = 1;
+            if (offset < r->size) repeat = 1;
+            // Once offset reaches size, the proxy thread hands the buffer to the GPU and may refill this slot,
+            // so r must not be touched afterwards.  Pairs with the acquire load in ncclNetSocketTest.
+            COMPILER_ATOMIC_STORE(&r->offset, offset, std::memory_order_release);
 #ifdef NCCL_ENABLE_NET_PROFILING
             if (repeat == 0) {
               ncclProfilerFunction(&eHandle[i + j], ncclProfilerNetEventStop, NULL, 0, NULL);
@@ -346,7 +244,13 @@ void* persistentSocketThread(void* args_) {
     }
     if (idle) {
       std::unique_lock<std::mutex> lock(resource->threadMutex);
-      resource->threadCond.wait(lock, [&] { return mark != myQueue->next || resource->stop; });
+      resource->threadCond.wait(lock, [&] {
+        // Acquire load pairs with the release store in ncclNetSocketGetTask.  In principle, the threadMutex should
+        // provide sufficient synchronization with the store without requiring atomics (like it does for stop), but we
+        // also load the same field without holding the mutex at the top of the outer loop above, so for consistency we
+        // use an atomic load here as well.
+        return mark != COMPILER_ATOMIC_LOAD(&myQueue->next, std::memory_order_acquire) || resource->stop;
+      });
     }
     if (resource->stop) return NULL;
   }
@@ -357,7 +261,7 @@ ncclResult_t ncclNetSocketGetNsockNthread(int dev, int* ns, int* nt) {
   int nSocksPerThread = ncclParamSocketNsocksPerThread();
   int nThreads = ncclParamSocketNthreads();
   if (nThreads > MAX_THREADS) {
-    WARN("NET/Socket : NCCL_SOCKET_NTHREADS is greater than the maximum allowed, setting to %d", MAX_THREADS);
+    ATTN("NET/Socket : NCCL_SOCKET_NTHREADS is greater than the maximum allowed, setting to %d", MAX_THREADS);
     nThreads = MAX_THREADS;
   }
   int fd = -1;
@@ -397,7 +301,7 @@ ncclResult_t ncclNetSocketGetNsockNthread(int dev, int* ns, int* nt) {
   nSocks = nSocksPerThread * nThreads;
   if (nSocks > MAX_SOCKETS) {
     nSocksPerThread = MAX_SOCKETS / nThreads;
-    WARN("NET/Socket : the total number of sockets is greater than the maximum allowed, setting NCCL_NSOCKS_PERTHREAD "
+    ATTN("NET/Socket : the total number of sockets is greater than the maximum allowed, setting NCCL_NSOCKS_PERTHREAD "
          "to %d",
          nSocksPerThread);
     nSocks = nSocksPerThread * nThreads;
@@ -413,23 +317,14 @@ fail:
 }
 
 ncclResult_t ncclNetSocketListen(void* ctx, int dev, void* opaqueHandle, void** listenComm) {
-  if (dev < 0 || dev >= ncclNetIfs) {
-    // data transfer socket is based on specified dev
-    WARN("NET/Socket : ncclNetSocketListen dev=%d ncclNetIfs=%d", dev, ncclNetIfs);
-    return ncclInternalError;
-  }
   ncclResult_t ret = ncclSuccess;
   struct ncclNetSocketHandle* handle = (struct ncclNetSocketHandle*)opaqueHandle;
   memset(handle, 0, sizeof(struct ncclNetSocketHandle));
   static_assert(sizeof(struct ncclNetSocketHandle) <= NCCL_NET_HANDLE_MAXSIZE, "ncclNetSocketHandle size too large");
   struct ncclNetSocketListenComm* comm;
   NCCLCHECK(ncclCalloc(&comm, 1));
-  handle->magic = ncclSocketDefaultMagic();
-  NCCLCHECKGOTO(ncclSocketInit(&comm->sock, &ncclNetSocketDevs[dev].addr, handle->magic, ncclSocketTypeNetSocket, NULL,
-                               1),
-                ret, fail);
-  NCCLCHECKGOTO(ncclSocketListen(&comm->sock), ret, fail);
-  NCCLCHECKGOTO(ncclSocketGetAddr(&comm->sock, &handle->connectAddr), ret, fail);
+  NCCLCHECKGOTO(ncclNetSocketCreateListener("NET/Socket", dev, &comm->sock, &handle->connectAddr, &handle->magic), ret,
+                fail);
   NCCLCHECKGOTO(ncclNetSocketGetNsockNthread(dev, &comm->nSocks, &comm->nThreads), ret, fail);
   handle->nSocks = comm->nSocks;
   handle->nThreads = comm->nThreads;
@@ -529,8 +424,16 @@ ncclResult_t ncclNetSocketAccept(void* listenComm, void** recvComm, ncclNetDevic
     NCCLCHECK(ncclSocketProgress(NCCL_SOCKET_RECV, sock, &sendSockIdx, sizeof(uint8_t), &done));
     if (done == 0) return ncclSuccess;
 
-    if (sendSockIdx == rComm->nSocks) rComm->ctrlSock = *sock;
-    else rComm->socks[sendSockIdx] = *sock;
+    struct ncclSocket* slot = NULL;
+    if (sendSockIdx == rComm->nSocks) slot = &rComm->ctrlSock;
+    else if (sendSockIdx < rComm->nSocks) slot = &rComm->socks[sendSockIdx];
+    if (slot == NULL || slot->state == ncclSocketStateReady) {
+      WARN("NET/Socket : peer sent invalid or duplicate socket index %d (nSocks %d)", sendSockIdx, rComm->nSocks);
+      (void)ncclSocketClose(sock);
+      free(sock);
+      return ncclInternalError;
+    }
+    ncclSocketMove(slot, sock);
     free(sock);
   }
   NCCLCHECK(ncclCalloc(&rComm->inlineData, MAX_REQUESTS * (SOCKET_CTRL_SIZE + ncclParamSocketInlineSize())));
@@ -595,10 +498,12 @@ ncclResult_t ncclNetSocketGetTask(struct ncclNetSocketComm* comm, struct ncclPro
     r->offset = 0;
     r->result = ncclSuccess;
     comm->nextSock = (comm->nextSock + 1) % comm->nSocks;
-    r->used = 1;
+    COMPILER_ATOMIC_STORE(&r->used, 1, std::memory_order_release);
     *req = r;
     std::lock_guard<std::mutex> lock(res->threadMutex);
-    queue->next = (queue->next + 1) % queue->len;
+    // An atomic store is required here because one of the loads of next in persistentSocketThread is conducted without
+    // holding the threadMutex.
+    COMPILER_ATOMIC_STORE(&queue->next, (queue->next + 1) % queue->len, std::memory_order_release);
     res->threadCond.notify_one();
     return ncclSuccess;
   }
@@ -643,7 +548,7 @@ ncclResult_t ncclNetSocketTest(void* request, int* done, int* size) {
              "network is in a healthy state, "
              "there may be a mismatch in collective sizes or environment settings (e.g. NCCL_PROTO, NCCL_ALGO) between "
              "ranks",
-             ncclSocketToString(&addr, line), senderSize, r->size);
+             ncclSocketToString(&addr, line, sizeof(line)), senderSize, r->size);
         return ncclInvalidUsage;
       }
       // copy to the data buffer if we have received some inline data already
@@ -682,16 +587,17 @@ ncclResult_t ncclNetSocketTest(void* request, int* done, int* size) {
       int nCompleted = 0;
       for (int i = 0; i < r->nSubs; i++) {
         struct ncclNetSocketTask* sub = r->tasks[i];
-        if (sub->result != ncclSuccess) return sub->result;
-        if (sub->offset == sub->size) nCompleted++;
+        ncclResult_t result = COMPILER_ATOMIC_LOAD(&sub->result, std::memory_order_acquire);
+        if (result != ncclSuccess) return result;
+        if (COMPILER_ATOMIC_LOAD(&sub->offset, std::memory_order_acquire) == sub->size) nCompleted++;
       }
       if (nCompleted == r->nSubs) {
         if (size) *size = r->size;
         *done = 1;
-        r->used = 0;
+        COMPILER_ATOMIC_STORE(&r->used, 0, std::memory_order_release);
         for (int i = 0; i < r->nSubs; i++) {
           struct ncclNetSocketTask* sub = r->tasks[i];
-          sub->used = 0;
+          COMPILER_ATOMIC_STORE(&sub->used, 0, std::memory_order_release);
         }
       }
     } else {
@@ -713,7 +619,7 @@ ncclResult_t ncclNetSocketTest(void* request, int* done, int* size) {
       if (r->offset == r->size) {
         if (size) *size = r->size;
         *done = 1;
-        r->used = 0;
+        COMPILER_ATOMIC_STORE(&r->used, 0, std::memory_order_release);
 #ifdef NCCL_ENABLE_NET_PROFILING
         ncclProfilerFunction(&r->pInfo.eHandle, ncclProfilerNetEventStop, NULL, 0, NULL);
         r->pInfo.eHandle = NULL;

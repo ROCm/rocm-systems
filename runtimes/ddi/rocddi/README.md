@@ -1,80 +1,125 @@
+<!-- Copyright (c) 2026 Advanced Micro Devices, Inc. -->
+<!-- SPDX-License-Identifier: MIT -->
+
 # rocddi
 
-> [!CAUTION]
-> This is early-access runtime infrastructure. Expect API, packaging, and
-> deployment details to move while rocddi is integrated into ROCm Systems. It
-> is not part of the repository's default build or installation.
+rocddi is the private Rust device layer used by
+[libamdf](../libamdf/README.md) and [libhsa](../libhsa/README.md). It owns
+hardware discovery, driver contexts, device activation, and native memory and
+queue resources. The frontends own their C APIs, public handles, and runtime
+policy. rocddi is an `rlib`; it exports no C API and promises no stable Rust
+interface.
 
-rocddi is a private, implementation-neutral Rust device interface for ROCm
-runtime frontends. Its universal layer models passive topology endpoints,
-explicit activation, memory, and recoverable resource lifetimes without making
-PCI attachment, GPU execution, or a particular operating-system handle model
-mandatory. Kind-specific capabilities and platform interoperability are
-available through explicit child modules.
+## Runtime model
 
-This is a member of the shared [runtime workspace](../../README.md). The `rocddi`
-crate is an `rlib`, not a public C API or preload target. It installs no
-headers, exports no C symbols, and does not promise a stable Rust ABI. The only
-implementation currently provided is the Linux KFD/DRM GPU backend on x86-64
-and AArch64. The neutral public contracts are intentionally shaped so future
-CPU, GPU, and NPU backends, including Windows backends, do not need placeholder
-KFD, DRM, file-descriptor, PCI, or GPU-only fields.
+A `Session` is a frontend's scope for discovery, activation, and driver
+shutdown. Creating one constructs an instance of each compiled backend
+without activating a device or acquiring a GPU context. Session clones share
+those driver instances. Discovery returns passive `Endpoint` snapshots.
+`Session::populate_endpoint` adds optional facts to the same endpoint record,
+then `Session::activate` returns a `Device` that owns its driver state. Both
+operations revalidate discovered facts. GPU
+operations require the checked `Device::gpu` view. Each discovery reads
+current backend topology; endpoint records can become stale. Separate sessions
+have independent driver identities. Sessions using
+`DriverContextLifetime::Process` reuse the native primary KFD context.
 
-## Architecture
+`driver::linux_kfd::KfdConfiguration` owns the XNACK request and debugger
+registration options. Frontends assemble one complete value and pass it to
+`Session::configure`, which accepts a `DriverConfiguration` value, selects the
+installed driver by configuration type, and checks exclusive registry and
+driver ownership. The private `ConfigurableDriver` trait uses an associated
+configuration type to replace the driver's complete pending configuration
+before GPU activation. Each backend owns its options and validation, so
+KFD-specific data and native behavior remain in `linux_kfd`.
+Debugger registration descriptors preserve the frontend's unsafe obligation
+to keep the native record valid for the process lifetime.
 
-The current peer frontends are:
+Activation applies required or preferred settings under the native context
+lock. `GpuDevice::xnack_enabled()` queries the effective mode through private
+provider dispatch; GPUs sharing a native KFD context share this mode. An absent
+option makes no native request, so it does not clear settings in an already
+active shared context.
 
-- `ddi/libamdf`, which implements the AMDF v3 table ABI and builds
-  `libamdf.so` and `libamdf.a`;
-- `hsa/libhsa`, which implements early-access HSA and AMD HSA extension entry
-  points and builds the Cargo artifact `libhsa_runtime64.so`.
+`DriverContextLifetime::Process` permits a process-owned driver context to
+survive session shutdown; `DriverContextLifetime::Session` requires the context
+and its bindings to be released with the session.
 
-The frontends own public handles, statuses, callbacks, initialization and
-shutdown, ABI validation, loaders, and tooling semantics. rocddi owns only
-shared native mechanisms and their resource lifetimes. Neither frontend may
-depend on the other.
+`Session::state` observes one shared `Open`, `Retiring`, or `Closed` lifecycle.
+`begin_retirement` closes admission across every session clone and derived
+device or resource handle. Already admitted transactions can finish, including
+nested core calls and publication of their resource owners. Cleanup and
+completion operations remain available. Native calls run outside lifecycle
+locks; published raw queue producer pointers still require the frontend to
+stop producers before destruction.
 
-The core source is organized by ownership domain:
+`try_close` returns `RetirementOutcome::Busy` while clones, driver-backed
+resources, notification leases, or admitted operations remain. A busy open
+session stays open. Once retiring, it admits no new transactions; native
+cleanup failures return `Failed` and preserve the unfinished driver owners
+for retry. `Closed` means this session's obligations are discharged, even if
+another session or the backend's process owner retains the native context.
+`SessionRetirement::try_close` preserves this same state after a frontend has
+removed its public handle. `destroy` and `try_destroy` retain the older
+`Result` interface. See the [safety guide](docs/safety.md) for ownership rules.
 
-- `session.rs` owns the root session lifetime and cross-device coordination;
-- `topology/` owns passive endpoint metadata. `EndpointKind` separates CPU,
-  GPU, NPU, and future endpoint kinds; PCI attachment is optional, while
-  `topology::platform::linux` carries KFD and DRM identities and procfs/sysfs
-  host facts needed by Linux compatibility frontends;
-- `device.rs` owns explicitly activated endpoint state, core lifecycle checks,
-  and kind-neutral introspection. `gpu/` is the checked GPU capability view and
-  exposes GPU queues and profiling, with KFD events below `gpu::event::linux`;
-- `memory/` owns the platform-neutral allocation, address-reservation, and
-  mapping model. `memory::interop::linux` contains DMA-BUF, KFD IPC, and KFD SVM
-  contracts used to exchange backing with Linux APIs and other processes;
-- `driver/` is the private downward-facing platform contract, with the current
-  Linux KFD and DRM implementation under `driver/builtin/linux_kfd/`. Linux
-  memory and event interop have separate driver contracts so future platform
-  backends do not need to implement file-descriptor or KFD event operations.
+HSA begins core retirement after its tool preparation, callbacks, and unload
+have finished. It then releases frontend resources and GPU owners before
+attempting core closure. Its HSA initialization reference count and generation
+remain frontend policy; native retirement outcomes determine whether another
+generation may start. Configuration and native activation constraints remain
+per driver, so activating one backend does not freeze another backend's
+configuration.
 
-A topology endpoint is passive metadata. It is not an activated `Device` and
-does not authorize native execution or memory operations. The current backend
-publishes only GPU endpoints, but GPU geometry and queue capabilities live in
-the `Gpu` endpoint-kind payload instead of being mandatory universal fields.
-Likewise, Linux identities and sharing mechanisms stay in Linux-specific
-extensions rather than defining the core endpoint or memory contracts.
+The current backend is Linux KFD/DRM on x86-64 and AArch64. It discovers GPU
+endpoints; rocddi has no CPU or NPU device backend yet. Host-only memory works
+without an activated GPU. Availability of GPU operations depends on the
+discovered device and driver capabilities.
 
-Public API declarations live separately under `../../api-headers/include`. The
-[runtime API headers README](../../api-headers/README.md) records their
-authoritative sources and synchronization rules.
+On Linux, sessions and native owners retain their creating-process identity.
+An owner inherited by `fork` rejects new work before entering its copied
+mutexes, issuing ioctls, or releasing its parent's mappings. The first session
+or KFD connection attempt pins the runtime image to its process. A fork child
+cannot open a GPU connection through that image, even if the parent created
+only a passive session or the connection attempt failed. The child must `exec`
+before GPU use. A new passive session may still be constructed in the child.
+Linux uses private wipe-on-fork pages for process witnesses and falls back to
+PID plus PID-namespace identity for native owners when that advice is
+unavailable.
+These checks do not make an arbitrary library call from a multithreaded fork
+child a substitute for `exec`.
 
-## Build and validation
+`topology::host::graph_snapshot` returns a `HostTopologyGraphSnapshot` with
+CPU identity, online CPUs, NUMA domains, memory capacity, and cache records as
+passive OS facts. `Session::topology_graph_snapshot` combines these observations
+with driver contributions in a `TopologyGraphSnapshot`. The OS reads are
+best-effort and are not one atomic topology generation. A host domain is not
+an endpoint or activated `Device`; frontends decide how to expose it.
+`host::clock` reads the live profiling timebase. `host::cache` qualifies a
+recipe for one mapping policy, and the mapping owner keeps the entire line
+cover live through maintenance. Cache geometry from topology does not qualify
+that operation. `memory::host` owns host allocations and reservations.
 
-Run all commands in this section from `runtimes`:
+## Code layout
 
-```sh
-cargo build --workspace --locked
-cargo test --workspace --all-targets --all-features --locked
-cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-cargo fmt --all --check
-RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
-```
+- `session.rs` coordinates driver instances and their context lifetime;
+  `topology/` holds passive endpoint and host topology, while `host/` groups
+  the live profiling clock and cache recipes.
+- `driver.rs` defines configuration routing and private backend contracts;
+  `driver/linux_kfd/` implements the current GPU backend and owns its native
+  configuration types.
+- `device/` owns activated devices, events, GPU queues, copies, and profiling.
+- The Linux GPU event service owns KFD's first signal-page transaction across
+  AMDF and HSA. Direct native queue owners retain frontend-supplied signal and
+  scratch backing through proven native retirement.
+- `memory/storage/` owns runtime records; `memory/host.rs` provides host-only
+  backing; `memory/device/` owns device-qualified allocations, registrations,
+  and virtual mappings; `memory/interop/` holds platform sharing interfaces.
+- `os/` provides host services used by the core and the Linux backend.
 
-The native C probes under `ddi/libamdf/tests/abi` and the GPU examples
-under `ddi/libamdf/examples` can be built directly when those checks are
-needed. GPU execution requires `/dev/kfd` and DRM render-node access.
+## Build and verification
+
+See the [workspace instructions](../../README.md) for CMake and Cargo commands.
+The Rust unit and integration tests cover host contracts. The ignored GPU CTS
+cases require a qualified host and do not run in the default suite. The runtime
+is early-access and is not part of the repository's default build or installation.

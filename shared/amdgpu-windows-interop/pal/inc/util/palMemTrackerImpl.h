@@ -302,7 +302,8 @@ void MemTracker<Allocator>::MemoryReport()
 {
     // When this env var is set to non-zero, don't report leaks.
     // Useful for crashing apps that don't give us a chance to clean up.
-    const char* pToggle = getenv("AMDPAL_NO_LEAK_REPORT");
+    char        toggleBuf[2] = {};
+    const char* pToggle      = GetEnv("AMDPAL_NO_LEAK_REPORT", toggleBuf, sizeof(toggleBuf));
 
     if ((pToggle == nullptr) || (atoi(pToggle) == 0))
     {

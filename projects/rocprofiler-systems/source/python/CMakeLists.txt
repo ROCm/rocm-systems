@@ -81,8 +81,6 @@ add_target_cxx_flag_if_avail(
 file(GLOB pyheaders ${CMAKE_CURRENT_LIST_DIR}/libpyrocprofsys*.hpp)
 set(pysources ${CMAKE_CURRENT_LIST_DIR}/libpyrocprofsys.cpp)
 
-set(pybind_libs pybind11::module)
-
 add_library(libpyrocprofiler-systems-interface INTERFACE)
 target_link_libraries(
     libpyrocprofiler-systems-interface
@@ -123,10 +121,9 @@ rocprofiler_systems_python_console_script("${BINARY_NAME_PREFIX}-python" "rocpro
 
 set(_INDEX 0)
 foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
-    # add_library(libpyrocprofsys MODULE ${pysources} ${pyheaders})
     list(GET ROCPROFSYS_PYTHON_ROOT_DIRS ${_INDEX} Python3_ROOT_DIR)
     rocprofiler_systems_pybind11_add_module(
-        libpyrocprofiler-systems-${_VERSION} MODULE
+        libpyrocprofiler-systems-${_VERSION}
         PYTHON_VERSION ${_VERSION}
         VISIBILITY "hidden" ${pysources} ${pyheaders}
     )

@@ -2,10 +2,13 @@
 // SPDX-License-Identifier: MIT
 
 /// @file packed_wmma_test.cpp
-/// @brief Packed WMMA raw hardware fixtures across architectures and wave sizes.
+/// @brief WMMA hardware fixtures and numerical regression checks.
 
+#include "compute_unit_test_util.h"
 #include "fixtures/float_dot/packed_operand_cases.h"
 #include "fixtures/float_dot/packed_wmma_cases.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
@@ -19,7 +22,9 @@
 #include "util/simd_test_hooks.h"
 
 #include <array>
+#include <bit>
 #include <cfenv>
+#include <cmath>
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <memory>
@@ -47,13 +52,18 @@ public:
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 256;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("dot_test", cfg, &memory, &cache);
+    rocjitsu::test::initialize_compute_unit(cu, "dot_test", cfg, &memory, &cache);
+    if (!cu)
+      return;
     decoder = Decoder::create(arch);
     wave = cu->dispatch_wf(0, 0, 106, 256, width);
     wave->set_exec(width == 64 ? ~uint64_t{0} : 0xffffffff);
     base = wave->vgpr_alloc().base;
   }
-  ~DotMachine() { wave->halt(); }
+  ~DotMachine() {
+    if (wave)
+      wave->halt();
+  }
   void set(uint32_t reg, uint32_t lane, uint32_t bits) { cu->write_vgpr(base + reg, lane, bits); }
   uint32_t get(uint32_t reg, uint32_t lane) { return cu->read_vgpr(base + reg, lane); }
   void execute(std::array<uint32_t, 2> encoding) {
@@ -67,9 +77,78 @@ public:
   amdgpu::L2Cache cache;
   std::unique_ptr<amdgpu::ComputeUnitCore> cu;
   std::unique_ptr<Decoder> decoder;
-  amdgpu::Wavefront *wave;
+  amdgpu::Wavefront *wave = nullptr;
   uint32_t base;
 };
+
+// Regression for the dense BF16 reference used by Triton's test_scaled_dot
+// and its BF16-output counterpart with the same F32 accumulator.
+// These products cancel exactly. Grouping them separately preserves a small C;
+// this test does not establish the physical CDNA5 accumulation order.
+TEST(Cdna5Wmma, Bf16CancellationPreservesIncomingC) {
+  HostState restore;
+  DotMachine machine(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
+  constexpr std::array<float, 32> products = {3456,   4608, 5376,  3072, -3840, 2816, -27648, 3072,
+                                              -1920,  1024, -6656, 1792, 20480, 7680, 0,      1024,
+                                              -43008, 3072, -7168, 1280, 14336, 2560, 3456,   1536,
+                                              -9216,  1536, -5760, 1408, 10240, 896,  7168,   3328};
+  constexpr float incoming = -0.012669563293457031f;
+  for (bool scalar : {false, true})
+    for (bool packed : {false, true})
+      for (uint32_t dst : {0u, 4u, 8u, 12u, 16u, 20u, 24u})
+        for (uint16_t src2 : {uint16_t{272}, uint16_t{128}, uint16_t{242}})
+          for (uint8_t modifier = 0; modifier < 4; ++modifier) {
+            SCOPED_TRACE(testing::Message()
+                         << "scalar=" << scalar << " packed=" << packed << " dst=" << dst
+                         << " src2=" << src2 << " modifier=" << unsigned(modifier));
+            util::set_force_scalar_for_testing(scalar);
+            for (uint32_t lane = 0; lane < 32; ++lane) {
+              for (uint32_t reg = 0; reg < 32; ++reg)
+                machine.set(reg, lane, 0xa55a1234u ^ (lane << 16) ^ reg);
+              for (uint32_t reg = 0; reg < 8; ++reg) {
+                const uint32_t k = (reg / 4) * 16 + (lane / 16) * 8 + (reg % 4) * 2;
+                machine.set(reg, lane, 0x3f803f80u); // A = 1 in BF16.
+                machine.set(8 + reg, lane,
+                            (std::bit_cast<uint32_t>(products[k]) >> 16) |
+                                (std::bit_cast<uint32_t>(products[k + 1]) & 0xffff0000u));
+                machine.set(16 + reg, lane, std::bit_cast<uint32_t>(incoming));
+              }
+            }
+            std::array<uint32_t, 32 * 32> before;
+            for (uint32_t reg = 0; reg < 32; ++reg)
+              for (uint32_t lane = 0; lane < 32; ++lane)
+                before[reg * 32 + lane] = machine.get(reg, lane);
+            float expected = src2 == 272 ? incoming : src2 == 128 ? 0.0f : 1.0f;
+            if (modifier & 2)
+              expected = std::fabs(expected);
+            if (modifier & 1)
+              expected = -expected;
+            // Adding an exactly zero dot produces +0 for either signed zero C.
+            expected += 0.0f;
+            uint32_t expected_word = std::bit_cast<uint32_t>(expected);
+            if (packed) {
+              const uint32_t half = expected_word >> 16;
+              expected_word = half | (half << 16);
+            }
+            const uint32_t dst_regs = packed ? 4 : 8;
+            machine.execute(cdna5::build_vop3p(packed ? cdna5::kVWmmaBf16f3216x16x32Bf16Vop3p
+                                                      : cdna5::kVWmmaF3216x16x32Bf16Vop3p,
+                                               {.vdst = uint8_t(dst),
+                                                .neg_hi = uint8_t((modifier & 2) << 1),
+                                                .src0 = 256,
+                                                .src1 = 264,
+                                                .src2 = src2,
+                                                .opsel_hi = 3,
+                                                .neg = uint8_t((modifier & 1) << 2)}));
+            for (uint32_t reg = 0; reg < 32; ++reg)
+              for (uint32_t lane = 0; lane < 32; ++lane)
+                ASSERT_EQ(machine.get(reg, lane), reg >= dst && reg < dst + dst_regs
+                                                      ? expected_word
+                                                      : before[reg * 32 + lane])
+                    << "reg=" << reg << " lane=" << lane;
+          }
+}
 
 std::array<uint32_t, 2> packed_encoding(bool gfx12, bool bf16, uint32_t dst, uint32_t high,
                                         uint16_t src2 = 272, uint8_t neg = 0, uint8_t neg_hi = 0) {
@@ -102,6 +181,7 @@ TEST(PackedWmma, HardwareMatricesBothWavesAndOperandOverlap) {
     const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4;
     for (uint32_t width : {32u, 64u}) {
       DotMachine machine(arch, width);
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
       for (bool bf16 : {false, true})
         for (uint32_t high = 0; high < (gfx12 ? 1u : 2u); ++high)
           for (uint32_t dst : {16u, 24u, 0u, 8u})
@@ -176,6 +256,7 @@ TEST(PackedWmma, HardwareModifiersSelectorsAndInlineConstants) {
     const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4;
     for (uint32_t width : {32u, 64u}) {
       DotMachine machine(arch, width);
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
       for (const auto &fixture : kPackedOperandCases) {
         for (uint32_t lane = 0; lane < width; ++lane)
           for (uint32_t reg = 0; reg < 8; ++reg) {
@@ -204,6 +285,7 @@ TEST(PackedWmma, HardwareOverflowModeAtIntermediateSteps) {
     const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4;
     for (uint32_t width : {32u, 64u}) {
       DotMachine machine(arch, width);
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
       for (bool bf16 : {false, true})
         for (bool saturate : {false, true})
           for (uint32_t pattern = 0; pattern < 4; ++pattern)

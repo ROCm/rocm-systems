@@ -16,6 +16,13 @@ namespace rdna2 {
 
 class VInterpP1F32Vop3 : public Vop3 {
 public:
+  void append_src_operand(std::string &out, uint8_t index) const override {
+    append_interp_operand(out, index, src0, &src1);
+  }
+  void append_mnemonic(std::string &out) const override {
+    out += mnemonic_;
+    out += "_e64";
+  }
   VInterpP1F32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
@@ -26,6 +33,13 @@ public:
 
 class VInterpP2F32Vop3 : public Vop3 {
 public:
+  void append_src_operand(std::string &out, uint8_t index) const override {
+    append_interp_operand(out, index, src0, &src1);
+  }
+  void append_mnemonic(std::string &out) const override {
+    out += mnemonic_;
+    out += "_e64";
+  }
   VInterpP2F32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
@@ -36,6 +50,13 @@ public:
 
 class VInterpMovF32Vop3 : public Vop3 {
 public:
+  void append_src_operand(std::string &out, uint8_t index) const override {
+    append_interp_operand(out, index, src0, nullptr);
+  }
+  void append_mnemonic(std::string &out) const override {
+    out += mnemonic_;
+    out += "_e64";
+  }
   VInterpMovF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
@@ -673,6 +694,9 @@ class VCndmaskB32Vop3 : public Vop3 {
 public:
   VCndmaskB32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.src2_is_wave_mask = true;
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -1671,6 +1695,14 @@ public:
 
 class VInterpP1llF16Vop3 : public Vop3 {
 public:
+  void append_src_operand(std::string &out, uint8_t index) const override {
+    append_interp_operand(out, index, src0, &src1);
+  }
+  void build_modifiers(std::string &out) const override {
+    if (inst_.src0 & 0x100u)
+      out += " high";
+    Vop3::build_modifiers(out);
+  }
   VInterpP1llF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
@@ -1680,6 +1712,14 @@ public:
 
 class VInterpP1lvF16Vop3 : public Vop3 {
 public:
+  void append_src_operand(std::string &out, uint8_t index) const override {
+    append_interp_operand(out, index, src0, &src1);
+  }
+  void build_modifiers(std::string &out) const override {
+    if (inst_.src0 & 0x100u)
+      out += " high";
+    Vop3::build_modifiers(out);
+  }
   VInterpP1lvF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
@@ -1840,6 +1880,16 @@ public:
 
 class VInterpP2F16Vop3 : public Vop3 {
 public:
+  void append_src_operand(std::string &out, uint8_t index) const override {
+    append_interp_operand(out, index, src0, &src1);
+  }
+  void build_modifiers(std::string &out) const override {
+    if (inst_.src0 & 0x100u)
+      out += " high";
+    if (inst_.op_sel & 8u)
+      out += " op_sel:[0,0,0,1]";
+    Vop3::build_modifiers(out);
+  }
   VInterpP2F16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
@@ -2044,6 +2094,11 @@ class VPermlane16B32Vop3 : public Vop3 {
 public:
   VPermlane16B32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.valu_permutation = amdgpu::ValuPermutation::Perm16;
+    modifiers.fi = inst_.op_sel & 1;
+    modifiers.bound_ctrl = (inst_.op_sel >> 1) & 1;
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -2054,6 +2109,11 @@ class VPermlanex16B32Vop3 : public Vop3 {
 public:
   VPermlanex16B32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.valu_permutation = amdgpu::ValuPermutation::X16;
+    modifiers.fi = inst_.op_sel & 1;
+    modifiers.bound_ctrl = (inst_.op_sel >> 1) & 1;
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3878,6 +3938,9 @@ class VAddCoCiU32Vop3SdstEnc : public Vop3SdstEnc {
 public:
   VAddCoCiU32Vop3SdstEnc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.src2_is_wave_mask = true;
+  }
   Operand vdst;
   Operand sdst;
   Operand src0;
@@ -3889,6 +3952,9 @@ class VSubCoCiU32Vop3SdstEnc : public Vop3SdstEnc {
 public:
   VSubCoCiU32Vop3SdstEnc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.src2_is_wave_mask = true;
+  }
   Operand vdst;
   Operand sdst;
   Operand src0;
@@ -3900,6 +3966,9 @@ class VSubrevCoCiU32Vop3SdstEnc : public Vop3SdstEnc {
 public:
   VSubrevCoCiU32Vop3SdstEnc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.src2_is_wave_mask = true;
+  }
   Operand vdst;
   Operand sdst;
   Operand src0;

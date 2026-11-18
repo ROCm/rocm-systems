@@ -37,6 +37,7 @@ class GraphExecClassic;
 class GraphExecSegmented;
 class UserObject;
 class GraphKernelNode;
+class GraphMemAllocNode;
 typedef GraphNode* Node;
 enum class GraphMemcpyNodeKind {
   None,
@@ -82,8 +83,8 @@ class UserObject : public amd::ReferenceCountedObject {
   // should be cleared from Graph's list of user object.
   std::unordered_set<Graph*> owning_graphs_;
 
-  UserObject(UserCallbackDestructor callback, void* data, unsigned int flags)
-      : ReferenceCountedObject(), callback_(callback), data_(data), flags_(flags) {
+  UserObject(UserCallbackDestructor callback, void* data)
+      : ReferenceCountedObject(), callback_(callback), data_(data) {
     amd::ScopedLock lock(UserObjectLock_);
     ObjectSet_.insert(this);
   }
@@ -130,7 +131,6 @@ class UserObject : public amd::ReferenceCountedObject {
  private:
   UserCallbackDestructor callback_;
   void* data_;
-  unsigned int flags_;
   //! Disable default operator=
   UserObject& operator=(const UserObject&) = delete;
   //! Disable copy constructor
@@ -208,18 +208,19 @@ class GraphKernelArgManager : public amd::ReferenceCountedObject,
   using KernelArgImpl = device::Settings::KernelArgImpl;
 };
 
-//! Per-GraphExecBase pool of HW event sets.
+//! Per-GraphExecBase pool of HW event sets, taken from the device's pool and given back to it
+//! when the graph is destroyed.
 class GraphSignalManager : public amd::ReferenceCountedObject {
  public:
   GraphSignalManager() : amd::ReferenceCountedObject() {}
   ~GraphSignalManager();
 
-  //! Pre-create `num_sets` signal sets of `count` signals each at instantiate
+  //! Take `num_sets` signal sets of `count` signals each at instantiate
   //! time, so launches never pay signal creation on the hot path.
   bool Prepopulate(amd::Device* device, int count, int num_sets);
 
   //! Acquire a ready signal set for a single launch. Pops from the free pool;
-  //! only creates a new set as a fallback if the pool is unexpectedly empty.
+  //! takes a new set from the device only if the pool is unexpectedly empty.
   bool AcquireSet(amd::Device* device, int count, std::vector<void*>& out_set);
 
   //! Re-arm a used set and return it to the free pool. Called from the launch
@@ -252,13 +253,13 @@ class GraphNode : public hipGraphNodeDOTAttribute {
  public:
   GraphNode(hipGraphNodeType type, const char* style = "", const char* shape = "",
             const char* label = "")
-      : type_(type),
+      : hipGraphNodeDOTAttribute(style, shape, label),
+        id_(0),
+        type_(type),
         visited_(false),
-        id_(nextID.fetch_add(1, std::memory_order_relaxed)),
         parentGraph_(nullptr),
         isEnabled_(1),
-        dev_id_(ihipGetDevice()),
-        hipGraphNodeDOTAttribute(style, shape, label) {
+        dev_id_(ihipGetDevice()) {
     amd::ScopedLock lock(nodeSetLock_);
     nodeSet_.insert(this);
   }
@@ -303,7 +304,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   //! packet for each AQL packet (pointer-parallel to |batchPackets|). Entries are
   //! nullptr for packets that produced no metadata (e.g. device has no metadata
   //! ring buffer), so the batch's flat metadata buffer stays index-aligned.
-  hipError_t CaptureAndFormPacket(GraphKernelArgManager* kernArgMgr,
+  virtual hipError_t CaptureAndFormPacket(GraphKernelArgManager* kernArgMgr,
                                   std::vector<uint8_t*>* batchPackets = nullptr,
                                   std::vector<const std::string*>* batchKernelNames = nullptr,
                                   std::vector<uint8_t*>* batchMetadataPackets = nullptr,
@@ -388,7 +389,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     stream_ = stream;
     return hipSuccess;
   }
-  /// Return node unique ID
+  /// Return the node ID local to its containing graph
   int GetID() const { return id_; }
   /// Returns command for graph node
   virtual std::vector<amd::Command*>& GetCommands() { return commands_; }
@@ -572,7 +573,6 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   int hw_queue_id_ = -1; //! Hardware queue ID on which this node will be executed
   int32_t segment_id_ = -1;  //! Segment ID on which this node will be executed
   int32_t launch_id_ = -1;  //! Launch ID of this node in the entire graph execution sequence
-  static std::atomic<int> nextID;
   Graph* parentGraph_;
   static std::unordered_set<GraphNode*> nodeSet_;
   static amd::Monitor nodeSetLock_;
@@ -632,7 +632,6 @@ class GraphEventWaitNode : public GraphNode {
 
   hipError_t EnqueueCommands(hip::Stream* stream) override {
     if (!commands_.empty()) {
-      hip::Event* e = reinterpret_cast<hip::Event*>(event_);
       commands_[0]->enqueue();
       commands_[0]->release();
     }
@@ -712,11 +711,11 @@ class Graph {
       // Graph is destorying so remove it from user object's graph list.
       userobj.first->owning_graphs_.erase(this);
       // Bypass if graph owned refcount is more then actual refcount of user object
-      if (userobj.second > userobj.first->referenceCount()) {
+      if (static_cast<uint>(userobj.second) > userobj.first->referenceCount()) {
         continue;
       }
       // User object is about to die and hence remove it.
-      if (userobj.first->referenceCount() == userobj.second) {
+      if (userobj.first->referenceCount() == static_cast<uint>(userobj.second)) {
         RemoveUserObjectFromOwingGraphs(userobj.first);
       }
       // Release user object = # of times it is owned by this graph.
@@ -847,8 +846,10 @@ class Graph {
   //! Schedules nodes into batches for optimized execution
   hipError_t ScheduleNodesIntoBatches();
 
-  //! Find execution paths hierarchically, keeping child graphs separate
-  hipError_t FindExecutionPathsHierarchical(GraphExecutionPaths& graph_paths);
+  //! Find execution paths hierarchically, keeping child graphs separate.
+  //! skip_topo_check: the caller has already checked this graph for cycles.
+  hipError_t FindExecutionPathsHierarchical(GraphExecutionPaths& graph_paths,
+                                            bool skip_topo_check = false);
 
   //! Find all paths from a node using an explicit DFS over a node stack, with
   //! hierarchical handling of child graphs (only child graphs recurse)
@@ -1027,6 +1028,8 @@ class Graph {
     // Hierarchical child graph information
     Graph* child_graph_ptr = nullptr;           // Direct pointer to child graph for quick access
 
+    //! First node is an uncaptured SDMA memcpy behind a leading barrier.
+    bool leads_with_uncaptured_sdma = false;
     bool needs_completion_signal = false;        // True if any downstream segment is on a different stream/device, or this is a leaf
 
     // Most urgent declared priority across this segment's nodes.
@@ -1054,6 +1057,7 @@ class Graph {
   std::unordered_map<UserObject*, int> graphUserObj_;
   unsigned int id_;
   static std::atomic<int> nextID;
+  unsigned int nextNodeID_ = 0;
   uint32_t memalloc_nodes_ = 0;  //!< Count of unreleased Memalloc nodes
   std::vector<Node> roots_;      //!< Root nodes, used in parallel launches
   std::vector<Node> leafs_;      //!< The list of leaf nodes on every parallel stream
@@ -1163,9 +1167,23 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
     return (it != clonedNodes_.end()) ? it->second : nullptr;
   }
 
-  std::vector<Node>& GetNodes() { return topoOrder_; }
+  //! A node of this instantiated graph, paired with the exec object that owns its
+  //! segment/packet state. For a top-level node that is this graphExec; for a node
+  //! inside a child graph it is the ChildGraphNode holding that node.
+  struct ResolvedExecNode {
+    GraphNode* node = nullptr;
+    GraphExecBase* owner = nullptr;
+    explicit operator bool() const { return node != nullptr; }
+  };
+
+  //! Translate a caller-visible node handle into this exec's corresponding node,
+  //! descending through child graphs. Returns an empty result if the node is not
+  //! part of the graph this exec was instantiated from.
+  ResolvedExecNode ResolveClonedNode(Node node);
+
+  const std::vector<Node>& GetNodes() const { return topoOrder_; }
   uint64_t GetFlags() const { return flags_; }
-  bool TopologicalOrder() { return Graph::TopologicalOrder(topoOrder_); }
+  bool TopologicalOrder();
 
   virtual hipError_t Init() = 0;
   virtual hipError_t Run(hip::Stream* stream) = 0;
@@ -1182,6 +1200,8 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
  protected:
   uint64_t flags_ = 0;
   bool repeatLaunch_ = false;
+  //! MemAlloc nodes of topoOrder_, in order. Filled by TopologicalOrder() at Init time.
+  std::vector<GraphMemAllocNode*> memAllocNodes_;
   //! parallel streams per device
   std::unordered_map<int, std::vector<hip::Stream*>> parallel_streams_;
   //! Extra capture-device stream created on first cross-device launch, covering
@@ -1334,6 +1354,10 @@ class GraphExecSegmented : public GraphExecBase {
     std::vector<uint32_t> filteredValidPacketFullHeaders;
     std::vector<uint8_t> filteredFlatMetadataData;
     bool filteredCacheValid = false;
+    // Slot of each dispatchPackets entry in the filtered buffers, or kNotFiltered when its
+    // node is disabled. Built by rebuildFilteredLists.
+    static constexpr size_t kNotFiltered = ~size_t{0};
+    std::vector<size_t> filteredIndex;
 
     // Node tracking
     struct NodeRange {
@@ -1352,7 +1376,31 @@ class GraphExecSegmented : public GraphExecBase {
     // when every node packet in this batch is disabled, so the segment can still
     // emit its completion signal instead of losing it. nullptr when unused.
     uint8_t* fallbackBarrier = nullptr;
+    // Standalone single-dependency barrier reserved (at BuildSyncPlan) for a batch whose first
+    // packet carries the segment's one dependency in its ext-dispatch dep_signal. Spliced in
+    // front of the *filtered* dispatch buffer by rebuildFilteredLists when that first packet's
+    // node is disabled, so the segment still waits on its dependency. nullptr when unused.
+    uint8_t* fallbackDepBarrier = nullptr;
+    // Dispatch the first packet without the AQL barrier bit. Set by BuildSyncPlan for a segment
+    // queued behind an independent same-level segment on its stream that needs no wait packet:
+    // it has no remaining dependency, or its first kernel carries the one dependency in its
+    // ext-dispatch dep_signal. Later packets keep the barrier bit.
+    bool firstPacketUnordered = false;
+    // A patch_list entry whose packet is in dispatchPackets or is fallbackDepBarrier, and the
+    // last known index of that packet in dispatchPackets (kNoSlot when it has none). The patch
+    // functions below only touch these entries.
+    struct OwnedPatch {
+      size_t patch;
+      size_t slot;
+    };
+    static constexpr size_t kNoSlot = ~size_t{0};
+    std::vector<OwnedPatch> ownedPatches;
     PacketBatch() {}
+    // Index in dispatchPackets of |owned|'s packet. Uses the cached slot when it still holds
+    // the packet; otherwise searches the batch and re-caches. Callers handle fallbackDepBarrier,
+    // which has no slot. A packet that is not in the batch is a broken patch, and the search
+    // asserts.
+    size_t findAndCachePacketSlot(OwnedPatch& owned, const uint8_t* packet);
     // O(1) enable/disable operations - just update state
     void setEnabled(GraphNode* node, bool enabled);
     // Rebuild cached filtered lists if cache is stale.
@@ -1374,9 +1422,21 @@ class GraphExecSegmented : public GraphExecBase {
                                          amd::AlignedVector64<uint8_t>& flatData,
                                          std::vector<uint32_t>& fullHeaders,
                                          std::vector<uint8_t>& flatMetadata);
+    // Write one packet and its metadata into existing flat-buffer slots, in the same layout
+    // appendPacketToFlatBuffer produces.
+    static void writePacketToFlatSlot(const uint8_t* pkt_raw, const uint8_t* metadata_raw,
+                                      uint8_t* dst, uint32_t* fullHeader, uint8_t* metadataDst);
+    // Rewrite flat-buffer slot |idx| in place from dispatchPackets[idx]. Requires the flat
+    // buffers to already hold one slot per dispatchPackets entry.
+    void rewriteFlatSlot(size_t idx);
+    // Rewrite the filtered-buffer slot holding dispatchPackets[idx] in place. Requires a valid
+    // filtered cache; does nothing when the packet's node is disabled.
+    void rewriteFilteredSlot(size_t idx);
     // Stamp the four packet headers of a 256-byte metadata slot with
     // HSA_PACKET_TYPE_INVALID (type=1) so the CP metadata-prefetch engine skips it.
     static void invalidateMetadataSlot(uint8_t* slot);
+    // Clear the barrier bit on the first saved header when firstPacketUnordered is set.
+    void clearFirstBarrierBit(std::vector<uint32_t>& fullHeaders) const;
   };
 
   //! Structure linking packet batches to segments
@@ -1392,6 +1452,8 @@ class GraphExecSegmented : public GraphExecBase {
   //! Batches of accumulated packets and kernel names for batch dispatch optimization
   //! Map from segment ID to SegmentBatch for O(1) lookup
   std::unordered_map<int, SegmentBatch> segmentBatches_;
+  //! Packet batch holding each captured node. Rebuilt by CaptureAndFormPacketsForGraph.
+  std::unordered_map<GraphNode*, PacketBatch*> nodeToPacketBatch_;
   bool batchAQLPacketUpdates_ = false;
   bool reuseKernargSlots_ = false;
   std::vector<PacketBatch*> updatedPacketBatches_;
@@ -1399,6 +1461,7 @@ class GraphExecSegmented : public GraphExecBase {
   struct SyncPlan {
     int num_segments = 0;   // total segment count (used for bounds checks)
     int num_hw_events = 0;  // HW event slots to allocate (one per ncs=true segment)
+    int num_unordered_segments = 0;  // segments whose first packet drops the barrier bit
 
     // Dense index into segment_hw_events for each segment.
     // seg_to_hw_event[seg_id] == -1  ->  no completion signal emitted.
@@ -1429,7 +1492,7 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
  protected:
   // Copy Constructor. This is protected to prevent accidental copies causing unexpected behaviors.
   ChildGraphNode(const ChildGraphNode& rhs) : GraphNode(rhs), GraphExecSegmented() {
-    rhs.Graph::clone(this);
+    rhs.Graph::clone(this, /*clonesNodes=*/true);
     graphCaptureStatus_ = rhs.graphCaptureStatus_;
   }
 
@@ -1611,6 +1674,7 @@ class GraphKernelNode : public GraphNode {
   int globalWorkSizeY_remainder_;
   int globalWorkSizeZ_remainder_;
   dim3 clusterDim_;                    //!< Cluster dimensions for cluster launch
+  bool clusterDimsSpecified_ = false;  //!< Cluster dimensions were explicitly supplied
   uint32_t launchFlags_;               //!< Ext launch flags (e.g. hipExtAnyOrderLaunch)
   hipFunction_t resolvedFunc_ = nullptr;  //!< Cached resolved function to avoid redundant lookups
   hipError_t paramCopyStatus_ = hipSuccess;
@@ -1627,6 +1691,7 @@ class GraphKernelNode : public GraphNode {
     globalWorkSizeY_remainder_ = rhs.globalWorkSizeY_remainder_;
     globalWorkSizeZ_remainder_ = rhs.globalWorkSizeZ_remainder_;
     clusterDim_ = rhs.clusterDim_;
+    clusterDimsSpecified_ = rhs.clusterDimsSpecified_;
     launchFlags_ = rhs.launchFlags_;
     hipError_t status = copyParams(&rhs.kernelParams_);
     paramCopyStatus_ = status;
@@ -1875,6 +1940,7 @@ class GraphKernelNode : public GraphNode {
                   int globalWorkSizeY_remainder = 0,
                   int globalWorkSizeZ_remainder = 0,
                   dim3 clusterDim = {1, 1, 1},
+                  bool clusterDimsSpecified = false,
                   uint32_t launchFlags = 0)
       : GraphNode(hipGraphNodeTypeKernel, "bold", "octagon", "KERNEL") {
     kernelEvents_ = {0};
@@ -1892,6 +1958,7 @@ class GraphKernelNode : public GraphNode {
     globalWorkSizeY_remainder_ = globalWorkSizeY_remainder;
     globalWorkSizeZ_remainder_ = globalWorkSizeZ_remainder;
     clusterDim_ = clusterDim;
+    clusterDimsSpecified_ = clusterDimsSpecified;
     launchFlags_ = launchFlags;
   }
 
@@ -1931,7 +1998,9 @@ class GraphKernelNode : public GraphNode {
         globalWorkSizeY_remainder_ != other->globalWorkSizeY_remainder_ ||
         globalWorkSizeZ_remainder_ != other->globalWorkSizeZ_remainder_ ||
         clusterDim_.x != other->clusterDim_.x || clusterDim_.y != other->clusterDim_.y ||
-        clusterDim_.z != other->clusterDim_.z || launchFlags_ != other->launchFlags_ ||
+        clusterDim_.z != other->clusterDim_.z ||
+        clusterDimsSpecified_ != other->clusterDimsSpecified_ ||
+        launchFlags_ != other->launchFlags_ ||
         std::memcmp(&accessPolicyWindow_, &other->accessPolicyWindow_, sizeof(accessPolicyWindow_)) != 0 ||
         cooperative_ != other->cooperative_ ||
         priority_ != other->priority_ ||
@@ -1995,7 +2064,7 @@ class GraphKernelNode : public GraphNode {
       resolvedFunc_ = func;
     }
     if (!paramsValidated_) {
-      status = validateKernelParams(&kernelParams_, func, dev_id_);
+      status = validateKernelParams(&kernelParams_, func, dev_id_, clusterDim_);
       if (hipSuccess != status) {
         return status;
       }
@@ -2022,7 +2091,7 @@ class GraphKernelNode : public GraphNode {
     }
     if (signal_is_required_) {
       // Optimize the barriers by adding a signal into the dispatch packet directly
-      command->SetProfiling();
+      command->RequireSignal();
     }
     commands_.emplace_back(command);
     return status;
@@ -2031,14 +2100,27 @@ class GraphKernelNode : public GraphNode {
   void GetParams(hipKernelNodeParams* params) { *params = kernelParams_; }
 
   hipError_t SetParams(const hipKernelNodeParams* params) {
+    return SetParams(params, clusterDim_, clusterDimsSpecified_);
+  }
+
+  hipError_t SetParams(const hipKernelNodeParams* params, dim3 clusterDim,
+                       bool clusterDimsSpecified) {
     // Update device ID since new params may require validation for the current device.
     dev_id_ = ihipGetDevice();
     hipFunction_t func = getFunc(*params, dev_id_);
     if (!func) {
       return hipErrorInvalidDeviceFunction;
     }
+
+    dim3 resolvedClusterDim = clusterDimsSpecified ? clusterDim : dim3{0, 0, 0};
+    hipError_t status =
+        ihipResolveGraphClusterDimensions(func, dev_id_, params->gridDim, &resolvedClusterDim);
+    if (status != hipSuccess) {
+      return status;
+    }
+
     // updates kernel params
-    hipError_t status = validateKernelParams(params, func, dev_id_);
+    status = validateKernelParams(params, func, dev_id_, resolvedClusterDim);
     if (hipSuccess != status) {
       ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed to validateKernelParams");
       return status;
@@ -2049,6 +2131,8 @@ class GraphKernelNode : public GraphNode {
       kernelParams_ = *params;
       resolvedFunc_ = func;
       paramsValidated_ = true;
+      clusterDim_ = resolvedClusterDim;
+      clusterDimsSpecified_ = clusterDimsSpecified;
       return status;
     }
     status = copyParams(params);
@@ -2057,12 +2141,14 @@ class GraphKernelNode : public GraphNode {
       ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed to set params");
     } else {
       paramsValidated_ = true;
+      clusterDim_ = resolvedClusterDim;
+      clusterDimsSpecified_ = clusterDimsSpecified;
     }
     return status;
   }
 
   hipError_t SetAttrParams(hipKernelNodeAttrID attr, const hipKernelNodeAttrValue* params) {
-    hipDeviceProp_t prop = {0};
+    hipDeviceProp_t prop = {};
     // Update device ID since new params may require validation for the current device.
     dev_id_ = ihipGetDevice();
     hipError_t status = ihipGetDeviceProperties(&prop, dev_id_);
@@ -2085,7 +2171,7 @@ class GraphKernelNode : public GraphNode {
 
       // need to check against accessPolicyMaxWindowSize from device
       // accessPolicyMaxWindowSize not implemented on the device side yet
-      if (params->accessPolicyWindow.num_bytes > accessPolicyMaxWindowSize) {
+      if (params->accessPolicyWindow.num_bytes > static_cast<size_t>(accessPolicyMaxWindowSize)) {
         return hipErrorInvalidValue;
       }
 
@@ -2109,6 +2195,12 @@ class GraphKernelNode : public GraphNode {
       if (clusterDim.x == 0 || clusterDim.y == 0 || clusterDim.z == 0) {
         return hipErrorInvalidConfiguration;
       }
+      hipFunction_t func = resolvedFunc_ ? resolvedFunc_ : getFunc(kernelParams_, dev_id_);
+      if (hipError_t status =
+              ihipResolveGraphClusterDimensions(func, dev_id_, kernelParams_.gridDim, &clusterDim);
+          status != hipSuccess) {
+        return status;
+      }
       const amd::Device* device = g_devices[dev_id_]->devices()[0];
       amd::HIPLaunchParams launch_params(kernelParams_.gridDim.x, kernelParams_.gridDim.y,
                                          kernelParams_.gridDim.z, kernelParams_.blockDim.x,
@@ -2121,6 +2213,7 @@ class GraphKernelNode : public GraphNode {
         return hipErrorInvalidConfiguration;
       }
       clusterDim_ = clusterDim;
+      clusterDimsSpecified_ = true;
       return hipSuccess;
     } else {
       return hipErrorInvalidValue;
@@ -2152,6 +2245,7 @@ class GraphKernelNode : public GraphNode {
   //! Copy all attribute slots from srcNode, mirroring its exact state.
   hipError_t CopyAttr(const GraphKernelNode* srcNode) {
     clusterDim_ = srcNode->clusterDim_;
+    clusterDimsSpecified_ = srcNode->clusterDimsSpecified_;
     accessPolicyWindow_ = srcNode->accessPolicyWindow_;
     cooperative_ = srcNode->cooperative_;
     priority_ = srcNode->priority_;
@@ -2163,17 +2257,15 @@ class GraphKernelNode : public GraphNode {
     if (coopKernel_ != kernelNode->coopKernel_) {
       return hipErrorInvalidValue;
     }
-    dim3 oldClusterDim = clusterDim_;
     int oldGlobalWorkSizeX_remainder = globalWorkSizeX_remainder_;
     int oldGlobalWorkSizeY_remainder = globalWorkSizeY_remainder_;
     int oldGlobalWorkSizeZ_remainder = globalWorkSizeZ_remainder_;
-    clusterDim_ = kernelNode->clusterDim_;
     globalWorkSizeX_remainder_ = kernelNode->globalWorkSizeX_remainder_;
     globalWorkSizeY_remainder_ = kernelNode->globalWorkSizeY_remainder_;
     globalWorkSizeZ_remainder_ = kernelNode->globalWorkSizeZ_remainder_;
-    hipError_t status = SetParams(&kernelNode->kernelParams_);
+    hipError_t status = SetParams(&kernelNode->kernelParams_, kernelNode->clusterDim_,
+                                  kernelNode->clusterDimsSpecified_);
     if (status != hipSuccess) {
-      clusterDim_ = oldClusterDim;
       globalWorkSizeX_remainder_ = oldGlobalWorkSizeX_remainder;
       globalWorkSizeY_remainder_ = oldGlobalWorkSizeY_remainder;
       globalWorkSizeZ_remainder_ = oldGlobalWorkSizeZ_remainder;
@@ -2181,12 +2273,14 @@ class GraphKernelNode : public GraphNode {
     }
     launchFlags_ = kernelNode->launchFlags_;
     kernelEvents_ = kernelNode->kernelEvents_;
-    CopyAttr(kernelNode);
+    const dim3 resolvedClusterDim = clusterDim_;
+    status = CopyAttr(kernelNode);
+    clusterDim_ = resolvedClusterDim;
     return status;
   }
 
-  hipError_t validateKernelParams(const hipKernelNodeParams* pNodeParams,
-                                  hipFunction_t func, int devId) {
+  hipError_t validateKernelParams(const hipKernelNodeParams* pNodeParams, hipFunction_t func,
+                                  int devId, dim3 clusterDim) {
 
     const amd::Device* device = g_devices[devId]->devices()[0];
     amd::HIPLaunchParams launch_params(pNodeParams->gridDim.x, pNodeParams->gridDim.y,
@@ -2194,7 +2288,7 @@ class GraphKernelNode : public GraphNode {
                                        pNodeParams->blockDim.y, pNodeParams->blockDim.z,
                                        pNodeParams->sharedMemBytes, *device, globalWorkSizeX_remainder_,
                                        globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_,
-                                       clusterDim_.x, clusterDim_.y, clusterDim_.z);
+                                       clusterDim.x, clusterDim.y, clusterDim.z);
 
     if (!launch_params.IsValidConfig()) {
       HIP_RETURN(hipErrorInvalidConfiguration);
@@ -2577,7 +2671,6 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
       }
 
       amd::Command::EventWaitList waitList;
-      amd::Command* depdentMarker = nullptr;
       amd::Command* cmd = stream->getLastQueuedCommand(true);
       if (cmd != nullptr) {
         waitList.push_back(cmd);
@@ -2649,11 +2742,6 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
   }
   static hipError_t ValidateParams(void* dst, const void* src, size_t count, hipMemcpyKind kind);
   virtual std::string GetLabel(hipGraphDebugDotFlags flag) override {
-    size_t sOffsetOrig = 0;
-    amd::Memory* origSrcMemory = getMemoryObjectForCurrentDevice(src_, sOffsetOrig);
-    size_t dOffsetOrig = 0;
-    amd::Memory* origDstMemory = getMemoryObjectForCurrentDevice(dst_, dOffsetOrig);
-
     size_t sOffset = 0;
     amd::Memory* srcMemory = getMemoryObjectForCurrentDevice(src_, sOffset);
     size_t dOffset = 0;
@@ -2702,8 +2790,6 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
     }
   }
   virtual bool GraphCaptureEnabled() override {
-    hip::MemcpyType type = hipHostToHost;
-
     size_t dOffset, sOffset;
     amd::Memory* dstMemory = getMemoryObjectForCurrentDevice(dst_, dOffset);
     amd::Memory* srcMemory = getMemoryObjectForCurrentDevice(src_, sOffset);
@@ -3091,12 +3177,6 @@ class GraphMemsetNode : public GraphNode {
     depth_ = depth;
     arrWidth_ = arrWidth;
     arrHeight_ = arrHeight;
-    size_t sizeBytes = 0;
-    if (memsetParams_.height == 1) {
-      sizeBytes = memsetParams_.width * memsetParams_.elementSize;
-    } else {
-      sizeBytes = memsetParams_.width * memsetParams_.height * depth_ * memsetParams_.elementSize;
-    }
   }
 
   ~GraphMemsetNode() {}
@@ -3154,8 +3234,6 @@ class GraphMemsetNode : public GraphNode {
       status = ihipMemsetCommand(commands_, memObj, memsetParams_.value, memsetParams_.elementSize,
                                  sizeBytes, stream, offset);
     } else {
-      auto sizeBytes =
-          memsetParams_.width * memsetParams_.elementSize * memsetParams_.height * depth_;
       size_t offset = 0;
       amd::Memory* memObj = getMemoryObjectForCurrentDevice(memsetParams_.dst, offset);
       if (memObj == nullptr) {
@@ -3307,7 +3385,7 @@ class GraphEventRecordNode : public GraphNode {
     hip::Event* e = reinterpret_cast<hip::Event*>(event_);
     commands_.reserve(1);
     amd::Command* command = nullptr;
-    status = e->recordCommand(command, stream);
+    status = e->recordCommand(command, stream, 0, !hip::Event::kBatchFlush);
     commands_.emplace_back(command);
     return status;
   }
@@ -3437,10 +3515,30 @@ class GraphEmptyNode : public GraphNode {
 
   GraphNode* clone() const override { return new GraphEmptyNode(*this); }
 
-  // Empty nodes participate in AQL capture as zero-packet dependency points.
-  // The capture loop registers them as zero-packet nodeRanges so dependency
-  // tracking works without emitting any GPU commands.
   bool GraphCaptureEnabled() override { return true; }
+
+  // submitMarker -> dispatchBarrierPacket writes directly to the HSA ring buffer,
+  // bypassing dispatchAqlPacket (the capture intercept), so no packet reaches
+  // gpuPackets_ via the Marker path.  Allocate a NOP barrier directly instead so
+  // BuildSyncPlan can embed the completion signal on it.
+  hipError_t CaptureAndFormPacket(GraphKernelArgManager*,
+                                  std::vector<uint8_t*>* batchPackets,
+                                  std::vector<const std::string*>* batchKernelNames,
+                                  std::vector<uint8_t*>* batchMetadataPackets,
+                                  bool /*reuseKernargSlots*/ = true) override {
+    for (auto* p : gpuPackets_) { delete[] p; }
+    gpuPackets_.clear();
+
+    uint8_t* barrier = g_devices[dev_id_]->devices()[0]->CreateBarrierPacket(0);
+    gpuPackets_.push_back(barrier);
+
+    if (batchPackets != nullptr && batchKernelNames != nullptr) {
+      batchPackets->push_back(barrier);
+      batchKernelNames->push_back(nullptr);
+      if (batchMetadataPackets != nullptr) batchMetadataPackets->push_back(nullptr);
+    }
+    return hipSuccess;
+  }
 
   hipError_t CreateCommand(hip::Stream* stream) override {
     hipError_t status = GraphNode::CreateCommand(stream);
@@ -3648,7 +3746,7 @@ class GraphMemAllocNode final : public GraphNode {
   virtual hipError_t CreateCommand(hip::Stream* stream) final {
     auto error = GraphNode::CreateCommand(stream);
     if (!HIP_MEM_POOL_USE_VM) {
-      auto ptr = Execute(stream_);
+      (void)Execute(stream_);
     } else {
       auto graph = GetParentGraph();
       if (graph != nullptr) {
@@ -3701,7 +3799,7 @@ class GraphMemAllocNode final : public GraphNode {
     return node_params_.dptr;
   }
 
-  void* Execute(hip::Stream* stream = nullptr) {
+  [[nodiscard]] void* Execute(hip::Stream* stream = nullptr) {
     auto graph = GetParentGraph();
     if (graph != nullptr) {
       // The node creation requires to return a valid address, however FreeNode can't
@@ -3786,7 +3884,7 @@ class GraphMemFreeNode : public GraphNode {
   virtual hipError_t CreateCommand(hip::Stream* stream) final {
     auto error = GraphNode::CreateCommand(stream);
     if (!HIP_MEM_POOL_USE_VM) {
-      Execute(stream_);
+      (void)Execute(stream_);
     } else {
       auto graph = GetParentGraph();
       if (graph != nullptr) {
@@ -3962,6 +4060,7 @@ class hipGraphExternalSemSignalNode : public GraphNode {
                 sizeof(hipExternalSemaphoreSignalNodeParams));
   }
 
+  using GraphNode::SetParams;
   hipError_t SetParams(const hipExternalSemaphoreSignalNodeParams* pNodeParams) {
     std::memcpy(&externalSemaphorNodeParam_, pNodeParams,
                 sizeof(hipExternalSemaphoreSignalNodeParams));
@@ -4025,6 +4124,7 @@ class hipGraphExternalSemWaitNode : public GraphNode {
                 sizeof(hipExternalSemaphoreWaitNodeParams));
   }
 
+  using GraphNode::SetParams;
   hipError_t SetParams(const hipExternalSemaphoreWaitNodeParams* pNodeParams) {
     std::memcpy(&externalSemaphorNodeParam_, pNodeParams,
                 sizeof(hipExternalSemaphoreWaitNodeParams));
@@ -4093,6 +4193,7 @@ class hipGraphBatchMemOpNode : public GraphNode {
     std::memcpy(pNodeParams, &batchMemOpNodeParam_, sizeof(hipBatchMemOpNodeParams));
   }
 
+  using GraphNode::SetParams;
   hipError_t SetParams(const hipBatchMemOpNodeParams* pNodeParams) {
     copyParams(pNodeParams);
     return hipSuccess;

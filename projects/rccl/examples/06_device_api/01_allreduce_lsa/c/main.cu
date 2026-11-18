@@ -65,14 +65,13 @@ __global__ void simpleAllReduceKernel(ncclWindow_t sendwin, size_t sendoffset,
   // LSA barriers enable coordination between GPU threads across different ranks
   // Barrier scope: CTA (all threads in this block participate)
   // Barrier index: blockIdx.x selects this CTA's dedicated barrier (one barrier per CTA)
-  ncclLsaBarrierSession<ncclCoopCta> bar { ncclCoopCta(), devComm, ncclTeamLsa(devComm),
-                                           devComm.lsaBarrier, blockIdx.x };
+  ncclLsaBarrierSession<ncclCoopCta> bar { ncclCoopCta(), devComm, ncclTeamTagLsa(), blockIdx.x };
   bar.sync(ncclCoopCta(), cuda::memory_order_acquire);
 
   const int rank = devComm.rank, nRanks = devComm.nRanks;
 
   // We are going to spread the workload across all GPU ranks.
-  // So calculate the global thread ID accross all ranks.
+  // So calculate the global thread ID across all ranks.
   // This maps global threads to data elements in the data to be reduced
   const int globalTid = threadIdx.x + blockDim.x * (rank + blockIdx.x * nRanks);
   const int globalNthreads = blockDim.x * gridDim.x * nRanks;

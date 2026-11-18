@@ -23,8 +23,9 @@
 
 #include <windows.h>
 #include "os.h"
+#include "compiler.h"
+#include "crypt.h"
 #include <cstring>
-#include <cstdbool>
 #include "socket.h"
 #include "utils.h"
 #include "checks.h"
@@ -35,7 +36,6 @@
 #include <chrono>
 #include <thread>
 #include <new>
-#include <nmmintrin.h>
 #include <cstdint>
 #include <setupapi.h>
 #include <cfgmgr32.h>
@@ -119,6 +119,10 @@ size_t ncclOsGetPageSize() {
   return (size_t)si.dwPageSize;
 }
 
+size_t ncclOsGetCommMempoolMaxSize() {
+  return (size_t)1 << 30;
+}
+
 void* ncclOsAlignedAlloc(size_t alignment, size_t size) {
   return _aligned_malloc(size, alignment);
 }
@@ -136,7 +140,7 @@ void ncclOsSetEnv(const char* name, const char* value) {
   if (result == 0) {
     BOOL res = SetEnvironmentVariableA(name, value);
     if (!res) {
-      WARN("Failed to set environment variable %s to %s: error %lu", name, value, GetLastError());
+      ATTN("Failed to set environment variable %s to %s: error %lu", name, value, GetLastError());
     }
   }
 }
@@ -314,20 +318,21 @@ static ncclResult_t socketConnectCheck(struct ncclSocket* sock, int errCode, con
       if (sock->errorRetries++ == ncclParamRetryCnt()) {
         sock->state = ncclSocketStateError;
         WARN("%s: connect to %s returned %s, exceeded error retry count after %d attempts", funcName,
-             ncclSocketToString(&sock->addr, line), getWSAErrorMessage(errCode), sock->errorRetries);
+             ncclSocketToString(&sock->addr, line, sizeof(line)), getWSAErrorMessage(errCode), sock->errorRetries);
         return ncclRemoteError;
       }
       unsigned int sleepTime = sock->errorRetries * ncclParamRetryTimeOut();
       INFO(NCCL_NET | NCCL_INIT, "%s: connect to %s returned %s, retrying (%d/%ld) after sleep for %u msec", funcName,
-           ncclSocketToString(&sock->addr, line), getWSAErrorMessage(errCode), sock->errorRetries, ncclParamRetryCnt(),
-           sleepTime);
+           ncclSocketToString(&sock->addr, line, sizeof(line)), getWSAErrorMessage(errCode), sock->errorRetries,
+           ncclParamRetryCnt(), sleepTime);
       std::this_thread::sleep_for(std::chrono::milliseconds(sleepTime));
     }
     NCCLCHECK(ncclOsSocketResetFd(sock)); /* in case of failure in connect, socket state is unspecified */
     sock->state = ncclSocketStateConnecting;
   } else {
     sock->state = ncclSocketStateError;
-    WARN("%s: connect to %s failed : %s", funcName, ncclSocketToString(&sock->addr, line), getWSAErrorMessage(errCode));
+    WARN("%s: connect to %s failed : %s", funcName, ncclSocketToString(&sock->addr, line, sizeof(line)),
+         getWSAErrorMessage(errCode));
     return ncclSystemError;
   }
   return ncclSuccess;
@@ -354,7 +359,7 @@ ncclResult_t ncclOsSocketPollConnect(struct ncclSocket* sock) {
     return ncclSuccess;
   } else if (ret < 0) {
     int wsaError = WSAGetLastError();
-    WARN("ncclOsSocketPollConnect to %s failed with error %s", ncclSocketToString(&sock->addr, line),
+    WARN("ncclOsSocketPollConnect to %s failed with error %s", ncclSocketToString(&sock->addr, line, sizeof(line)),
          getWSAErrorMessage(wsaError));
     return ncclSystemError;
   }
@@ -398,8 +403,8 @@ ncclResult_t ncclOsSocketProgressOpt(int op, struct ncclSocket* sock, void* ptr,
       // WSAEINTR means interrupted by signal
       if (wsaError != WSAEWOULDBLOCK && wsaError != WSAEINPROGRESS && wsaError != WSAEINTR) {
         WARN("ncclOsSocketProgressOpt: Call to %s %s failed : %d (%s)",
-             (op == NCCL_SOCKET_RECV ? "recv from" : "send to"), ncclSocketToString(&sock->addr, line), wsaError,
-             getWSAErrorMessage(wsaError));
+             (op == NCCL_SOCKET_RECV ? "recv from" : "send to"), ncclSocketToString(&sock->addr, line, sizeof(line)),
+             wsaError, getWSAErrorMessage(wsaError));
         return ncclRemoteError;
       } else {
         bytes = 0;
@@ -483,7 +488,7 @@ ncclResult_t ncclOsFindInterfaces(const char* prefixList, char* names, union ncc
       WideCharToMultiByte(CP_UTF8, 0, adapter->FriendlyName, -1, adapterName, MAX_IF_NAME_SIZE, NULL, NULL);
 
       TRACE(NCCL_INIT | NCCL_NET, "Found interface %s:%s", adapterName,
-            ncclSocketToString((union ncclSocketAddress*)unicast->Address.lpSockaddr, line));
+            ncclSocketToString((union ncclSocketAddress*)unicast->Address.lpSockaddr, line, sizeof(line)));
 
       // Check against user specified interfaces
       if (!(matchIfList(adapterName, -1, userIfs, nUserIfs, searchExact) ^ searchNot)) {
@@ -653,7 +658,7 @@ ncclResult_t ncclFindInterfaceMatchSubnet(char* ifName, union ncclSocketAddress*
       WideCharToMultiByte(CP_UTF8, 0, adapter->FriendlyName, -1, ifName, ifNameMaxSize, NULL, NULL);
 
       TRACE(NCCL_INIT | NCCL_NET, "NET : Found interface %s:%s in the same subnet as remote address %s", ifName,
-            ncclSocketToString(localAddr, line), ncclSocketToString(remoteAddr, line_a));
+            ncclSocketToString(localAddr, line, sizeof(line)), ncclSocketToString(remoteAddr, line_a, sizeof(line_a)));
       *found = 1;
     }
   }
@@ -667,11 +672,11 @@ ncclResult_t ncclSocketClose(struct ncclSocket* sock, bool wait) {
     if (sock->state > ncclSocketStateNone && sock->state < ncclSocketStateNum && ncclOsSocketIsValid(sock)) {
       if (wait) {
         char data;
-        int closed = 0;
+        bool closed = false;
         do {
           int offset = 0;
           if (ncclSocketProgress(NCCL_SOCKET_RECV, sock, &data, sizeof(char), &offset, &closed) != ncclSuccess) break;
-        } while (closed == 0);
+        } while (!closed);
       }
       /* shutdown() is needed to send FIN packet to proxy thread; shutdown() is not affected
        * by refcount of fd, but close() is. close() won't close a fd and send FIN packet if
@@ -679,6 +684,10 @@ ncclResult_t ncclSocketClose(struct ncclSocket* sock, bool wait) {
        * connection close here. */
       (void)shutdown(sock->socketDescriptor, SD_BOTH);
       (void)closesocket(sock->socketDescriptor);
+    }
+    if (sock->crypto) {
+      ncclCryptFree(sock->crypto);
+      sock->crypto = nullptr;
     }
     sock->state = ncclSocketStateClosed;
     sock->socketDescriptor = NCCL_INVALID_SOCKET;
@@ -702,47 +711,81 @@ void ncclOsUnsetMutexCondShared(std::mutex& mutex, std::condition_variable& cond
 }
 
 void ncclOsCpuZero(ncclAffinity& affinity) {
-  affinity = 0;
+  memset(&affinity, 0, sizeof(affinity));
 }
 
 int ncclOsCpuCount(const ncclAffinity& affinity) {
-  return _mm_popcnt_u64(affinity);
+  int count = 0;
+  for (int group = 0; group < NCCL_WINDOWS_PROCESSOR_GROUP_COUNT; group++) {
+    count += COMPILER_POPCOUNT64((unsigned long long)affinity.masks[group]);
+  }
+  return count;
 }
 
 void ncclOsCpuSet(ncclAffinity& affinity, int cpu) {
-  affinity |= (1ULL << cpu);
+  if (cpu < 0 || cpu >= NCCL_WINDOWS_MAX_CPUS) return;
+  int group = cpu / NCCL_WINDOWS_PROCESSORS_PER_GROUP;
+  int index = cpu % NCCL_WINDOWS_PROCESSORS_PER_GROUP;
+  affinity.masks[group] |= ((KAFFINITY)1 << index);
 }
 
 bool ncclOsCpuIsSet(const ncclAffinity& affinity, int cpu) {
-  return (affinity & (1ULL << cpu)) != 0;
+  if (cpu < 0 || cpu >= NCCL_WINDOWS_MAX_CPUS) return false;
+  int group = cpu / NCCL_WINDOWS_PROCESSORS_PER_GROUP;
+  int index = cpu % NCCL_WINDOWS_PROCESSORS_PER_GROUP;
+  return (affinity.masks[group] & ((KAFFINITY)1 << index)) != 0;
 }
 
 ncclAffinity ncclOsCpuAnd(const ncclAffinity& a, const ncclAffinity& b) {
-  return a & b;
+  ncclAffinity result = {};
+  for (int group = 0; group < NCCL_WINDOWS_PROCESSOR_GROUP_COUNT; group++) {
+    result.masks[group] = a.masks[group] & b.masks[group];
+  }
+  return result;
 }
 
 ncclResult_t ncclOsGetAffinity(ncclAffinity* affinity) {
-  DWORD_PTR processAffinityMask, systemAffinityMask;
-  BOOL result = GetProcessAffinityMask(GetCurrentProcess(), &processAffinityMask, &systemAffinityMask);
+  GROUP_AFFINITY groupAffinity = {};
+  BOOL result = GetThreadGroupAffinity(GetCurrentThread(), &groupAffinity);
   if (result == FALSE) {
-    WARN("GetProcessAffinityMask failed with error: %ld", GetLastError());
+    WARN("GetThreadGroupAffinity failed with error: %ld", GetLastError());
     return ncclSystemError;
   }
-  *affinity = processAffinityMask;
+  ncclOsCpuZero(*affinity);
+  affinity->masks[groupAffinity.Group] = groupAffinity.Mask;
   return ncclSuccess;
 }
 
 ncclResult_t ncclOsSetAffinity(const ncclAffinity& affinity) {
-  BOOL result = SetProcessAffinityMask(GetCurrentProcess(), affinity);
+  int groupCount = 0;
+  WORD selectedGroup = 0;
+  for (WORD group = 0; group < NCCL_WINDOWS_PROCESSOR_GROUP_COUNT; group++) {
+    if (affinity.masks[group] != 0) {
+      selectedGroup = group;
+      groupCount++;
+    }
+  }
+  if (groupCount != 1) {
+    WARN("SetThreadGroupAffinity requires exactly one non-empty processor group, found %d", groupCount);
+    return ncclInvalidArgument;
+  }
+
+  GROUP_AFFINITY groupAffinity = {};
+  groupAffinity.Group = selectedGroup;
+  groupAffinity.Mask = affinity.masks[selectedGroup];
+  BOOL result = SetThreadGroupAffinity(GetCurrentThread(), &groupAffinity, NULL);
   if (result == FALSE) {
-    WARN("SetProcessAffinityMask failed with error: %ld", GetLastError());
+    WARN("SetThreadGroupAffinity failed for group %u mask 0x%llx with error: %ld", (unsigned int)groupAffinity.Group,
+         (unsigned long long)groupAffinity.Mask, GetLastError());
     return ncclSystemError;
   }
   return ncclSuccess;
 }
 
 int ncclOsGetCpu() {
-  return GetCurrentProcessorNumber();
+  PROCESSOR_NUMBER processorNumber = {};
+  GetCurrentProcessorNumberEx(&processorNumber);
+  return processorNumber.Group * NCCL_WINDOWS_PROCESSORS_PER_GROUP + processorNumber.Number;
 }
 
 ncclResult_t ncclOsNvmlOpen(ncclOsLibraryHandle* handle) {
@@ -822,6 +865,17 @@ void ncclOsShmHandleInit(ncclShmDescriptor shmDesc, char* shmPath, size_t shmSiz
   }
 }
 
+static ncclResult_t ncclOsShmPathSubstituteRandomLetters(char* suffix) {
+  static const char randomChars[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  unsigned char randBytes[sizeof("XXXXXX") - 1];
+
+  NCCLCHECK(getRandomData(randBytes, sizeof(randBytes)));
+  for (int i = 0; i < (int)sizeof(randBytes); i++) {
+    suffix[i] = randomChars[randBytes[i] % (sizeof(randomChars) - 1)];
+  }
+  return ncclSuccess;
+}
+
 ncclResult_t ncclOsShmOpen(char* shmPath, size_t shmPathSize, size_t shmSize, void** shmPtr, void** devShmPtr,
                            int refcount, struct ncclShmHandleInternal** handle) {
   HANDLE hMapFile = NULL;
@@ -842,23 +896,45 @@ ncclResult_t ncclOsShmOpen(char* shmPath, size_t shmPathSize, size_t shmSize, vo
               fail);
 
   if (create) {
-    if (shmPath[0] == '\0') {
-      // Generate unique shared memory name using process ID and timestamp
-      uint64_t timestamp = clockNano();
-      snprintf(shmPath, shmPathSize, "Local\\nccl-shm-%llu-%llu", (unsigned long long)GetCurrentProcessId(),
-               (unsigned long long)timestamp);
+    bool randomPath = (shmPath[0] == '\0');
+    if (randomPath) {
+      if (shmPathSize < sizeof("Local\\nccl-shm-XXXXXX")) {
+        WARN("Error: shared memory path buffer too small, need %zu bytes but got %zu", sizeof("Local\\nccl-shm-XXXXXX"),
+             shmPathSize);
+        ret = ncclInvalidArgument;
+        goto fail;
+      }
+      snprintf(shmPath, shmPathSize, "Local\\nccl-shm-XXXXXX");
     }
 
-    // Create file mapping object
-    hMapFile = CreateFileMappingA(INVALID_HANDLE_VALUE,    // use paging file
-                                  NULL,                    // default security
-                                  PAGE_READWRITE,          // read/write access
-                                  (DWORD)((realShmSize >> 32) & 0xFFFFFFFF),  // high-order DWORD of size
-                                  (DWORD)(realShmSize & 0xFFFFFFFF),          // low-order DWORD of size
-                                  shmPath);                // name of mapping object
+    for (int attempt = 0; attempt < (randomPath ? 128 : 1); attempt++) {
+      if (randomPath) {
+        NCCLCHECKGOTO(ncclOsShmPathSubstituteRandomLetters(shmPath + sizeof("Local\\nccl-shm-") - 1), ret, fail);
+      }
+
+      SetLastError(ERROR_SUCCESS);
+      hMapFile = CreateFileMappingA(INVALID_HANDLE_VALUE,    // use paging file
+                                    NULL,                    // default security
+                                    PAGE_READWRITE,          // read/write access
+                                    (DWORD)((realShmSize >> 32) & 0xFFFFFFFF),  // high-order DWORD of size
+                                    (DWORD)(realShmSize & 0xFFFFFFFF),          // low-order DWORD of size
+                                    shmPath);                // name of mapping object
+      DWORD createError = GetLastError();
+      if (hMapFile == NULL) {
+        WARN("Error: failed to create shared memory mapping %s, error code: %lu", shmPath, createError);
+        ret = ncclSystemError;
+        goto fail;
+      }
+      if (!randomPath || createError != ERROR_ALREADY_EXISTS) {
+        break;
+      }
+
+      CloseHandle(hMapFile);
+      hMapFile = NULL;
+    }
 
     if (hMapFile == NULL) {
-      WARN("Error: failed to create shared memory mapping %s, error code: %lu", shmPath, GetLastError());
+      WARN("Error: failed to create unique shared memory mapping %s", shmPath);
       ret = ncclSystemError;
       goto fail;
     }
@@ -1424,9 +1500,11 @@ ncclResult_t ncclOsTopoGetStrFromSys(const char* path, const char* fileName, cha
 }
 
 /* NUMA and PCI device class functions */
-ncclResult_t ncclOsGetNumaNodeAffinity(unsigned int numaId, char* affinityStr, size_t maxLen) {
+ncclResult_t ncclOsGetNumaNodeAffinity(unsigned int numaId, char* affinityStr, size_t maxLen, int* cpuOffset) {
+  *cpuOffset = 0;
   GROUP_AFFINITY groupAffinity = {};
   if (GetNumaNodeProcessorMaskEx((USHORT)numaId, &groupAffinity)) {
+    *cpuOffset = groupAffinity.Group * NCCL_WINDOWS_PROCESSORS_PER_GROUP;
     KAFFINITY mask = groupAffinity.Mask;
     uint32_t hi = (uint32_t)((uint64_t)mask >> 32);
     uint32_t lo = (uint32_t)((uint64_t)mask & 0xFFFFFFFF);

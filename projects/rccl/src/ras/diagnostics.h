@@ -15,6 +15,7 @@
 #include "ras_internal.h"
 
 struct ncclComm;
+struct ncclTopoNetPropertiesSnapshot;
 
 typedef enum {
   RAS_DIAG_CHECK_GPU_MODEL = 0,
@@ -22,6 +23,13 @@ typedef enum {
   RAS_DIAG_CHECK_ECC = 2,
   RAS_DIAG_CHECK_NVLINK = 3,
   RAS_DIAG_CHECK_NCCL_ENV = 4,
+  RAS_DIAG_CHECK_RDMA_TOPO = 5,
+  RAS_DIAG_CHECK_IOMMU_MODE = 6,
+  RAS_DIAG_CHECK_ATS = 7,
+  RAS_DIAG_CHECK_XID_SXID = 8,
+  RAS_DIAG_CHECK_NVIDIA_DRIVER_VERSION = 9,
+  RAS_DIAG_CHECK_PATHS = 10,
+  RAS_DIAG_CHECK_NET_DEVICE = 11,
   // Must remain last. Add new check IDs above this sentinel and add the corresponding dispatch table entry.
   RAS_DIAG_CHECK_COUNT
 } rasDiagnosticsCheckId;
@@ -65,7 +73,8 @@ struct rasDiagnosticsRankHeader {
 };
 
 // Local-only view of a communicator. The collector builds this while holding ncclCommsMutex,
-// then check-specific code consumes it after the lock is released.
+// then check-specific code consumes it after the lock is released. Owned values only; nothing
+// points into the communicator, the plugin, or the topology.
 struct rasDiagnosticsCommSnapshot {
   struct rasDiagnosticsRankHeader rank;
   int cudaDev;
@@ -73,6 +82,10 @@ struct rasDiagnosticsCommSnapshot {
   int64_t busId;
   int localRank;
   int localRanks;
+  uint64_t hostHash;
+  bool netIbVerbs; // known verbs plugin (InfiniBand or RoCE), so sysfs describes its devices (comm lock held)
+  struct ncclTopoNetPropertiesSnapshot* netProps; // owned; properties of every device the plugin exposes
+  int nNetProps;
 };
 
 // One RAS diagnostics gather contribution from one peer:

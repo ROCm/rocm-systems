@@ -8,24 +8,18 @@
 #include "nccl.h"
 #include "comm.h"
 #include "checks.h"
-#include "net.h"
 #include "ras.h"
+#include "progress_monitor.h"
 #include "profiler.h"
 #include "env.h"
 #include "tuner.h"
 #include "gin/gin_host_win_stub.h"
+#include "dev_runtime.h"
 #include "rma.h"
 #include "device.h"
 
 #include <cstring>
 #include <cstdlib>
-#include <mutex>
-
-/* Cached socket transport device counts (populated during ncclNetInit) */
-static int winNetPhysDev = 0;
-static int winNetVirtDev = -1;  /* NCCL_UNDEF_DEV_COUNT */
-static bool winNetInitialized = false;
-static std::mutex winNetInitMutex;
 
 /* --------------------------------------------------------------------------
  * RAS (Linux-only) stubs
@@ -42,12 +36,12 @@ ncclResult_t ncclRasAddRanks(struct rasRankInit* ranks, int nranks) {
   return ncclSuccess;
 }
 
-ncclResult_t ncclRunDiagnosticsActive(struct ncclComm* comm) {
+ncclResult_t ncclRunDiagnostics(struct ncclComm* comm) {
   (void)comm;
   return ncclSuccess;
 }
 
-ncclResult_t ncclRunDiagnosticsPassive(struct ncclComm* comm) {
+ncclResult_t ncclRunRasDiagnostics(struct ncclComm* comm) {
   (void)comm;
   return ncclSuccess;
 }
@@ -57,49 +51,13 @@ ncclResult_t ncclRasCommFini(const struct ncclComm* comm) {
   return ncclSuccess;
 }
 
-/* --------------------------------------------------------------------------
- * Net plugin stubs: use built-in socket transport without plugin layer
- * -------------------------------------------------------------------------- */
-ncclResult_t ncclNetInit(struct ncclComm* comm) {
-  comm->ncclNet = &ncclNetSocket;
-  comm->ncclCollNet = nullptr;
-  comm->netPluginIndex = -1;
-
-  // Initialize the socket transport to enumerate network interfaces.
-  ncclNetCommConfig_t commConfig = {};
-  commConfig.trafficClass = NCCL_NET_TRAFFIC_CLASS_UNDEF;
-  NCCLCHECK(comm->ncclNet->init(&comm->netContext, comm->commHash, &commConfig, ncclDebugLog, NULL));
-
-  {
-    std::lock_guard<std::mutex> lock(winNetInitMutex);
-    if (!winNetInitialized) {
-      int ndev = 0;
-      NCCLCHECK(comm->ncclNet->devices(&ndev));
-      winNetPhysDev = ndev;
-      winNetInitialized = true;
-    }
-  }
-
+ncclResult_t ncclProgressCounterMonitorInit(struct ncclComm* comm) {
+  comm->nextProgressRegistration = nullptr;
   return ncclSuccess;
 }
 
-ncclResult_t ncclNetInitFromParent(struct ncclComm* comm, struct ncclComm* parent) {
-  comm->netContext = parent->netContext;
-  comm->collNetContext = parent->collNetContext;
-  comm->ncclNet = parent->ncclNet;
-  comm->ncclCollNet = parent->ncclCollNet;
-  comm->netPluginIndex = parent->netPluginIndex;
-  return ncclSuccess;
-}
-
-ncclResult_t ncclNetFinalize(struct ncclComm* comm) {
-  if (comm->ncclNet && comm->netContext) NCCLCHECK(comm->ncclNet->finalize(comm->netContext));
-  return ncclSuccess;
-}
-
-ncclResult_t ncclGpuGdrSupport(struct ncclComm* comm, int* gdrSupport) {
-  (void)comm;
-  *gdrSupport = 0;
+ncclResult_t ncclProgressCounterMonitorDestroy(struct ncclComm* comm) {
+  comm->nextProgressRegistration = nullptr;
   return ncclSuccess;
 }
 
@@ -116,35 +74,6 @@ ncclResult_t ncclEnvPluginInit(void) {
 
 const char* ncclEnvPluginGetEnv(const char* name) {
   return std::getenv(name);
-}
-
-/* --------------------------------------------------------------------------
- * Net/CollNet dev count stubs (plugin provides these on Linux)
- * -------------------------------------------------------------------------- */
-ncclResult_t ncclNetGetDevCount(int netPluginIndex, int* nPhysDev, int* nVirtDev) {
-  (void)netPluginIndex;
-  *nPhysDev = winNetPhysDev;
-  *nVirtDev = winNetVirtDev;
-  return ncclSuccess;
-}
-
-ncclResult_t ncclNetSetVirtDevCount(int netPluginIndex, int nVirtDev) {
-  (void)netPluginIndex;
-  winNetVirtDev = nVirtDev;
-  return ncclSuccess;
-}
-
-ncclResult_t ncclCollNetGetDevCount(int netPluginIndex, int* nPhysDev, int* nVirtDev) {
-  (void)netPluginIndex;
-  *nPhysDev = 0;
-  *nVirtDev = 0;
-  return ncclSuccess;
-}
-
-ncclResult_t ncclCollNetSetVirtDevCount(int netPluginIndex, int nVirtDev) {
-  (void)netPluginIndex;
-  (void)nVirtDev;
-  return ncclSuccess;
 }
 
 /* --------------------------------------------------------------------------
@@ -199,11 +128,18 @@ ncclResult_t ncclGinConnectOnce(struct ncclComm* comm) {
 }
 
 ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequirements const* reqs,
-                                 struct ncclDevComm* devComm, uint32_t deviceCodeVersion) {
+                                 struct ncclDevResourceRequirements* resReqs,
+                                 struct ncclGinBarrierReq const* barrierReqs, int nBarrierReqs,
+                                 struct ncclDevComm* devComm, uint32_t deviceCodeVersion,
+                                 struct ncclDevCommCompat const* devCompat) {
   (void)comm;
   (void)reqs;
+  (void)resReqs;
+  (void)barrierReqs;
+  (void)nBarrierReqs;
   (void)devComm;
   (void)deviceCodeVersion;
+  (void)devCompat;
   return ncclSuccess;
 }
 
@@ -213,15 +149,21 @@ ncclResult_t ncclGinDevCommFree(struct ncclComm* comm, struct ncclDevComm const*
   return ncclSuccess;
 }
 
+void ncclGinDevCommClearFields(struct ncclDevComm* devComm) {
+  (void)devComm;
+}
+
 ncclResult_t ncclGinRegister(struct ncclComm* comm, void* address, size_t size,
                              void* ginHostWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS],
                              ncclGinWindow_t ginDevWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS],
+                             uint32_t ginWinGenerations[NCCL_GIN_MAX_ACTIVE_BACKENDS],
                              int winFlags, bool multiSegment, int memType) {
   (void)comm;
   (void)address;
   (void)size;
   (void)ginHostWins;
   (void)ginDevWins;
+  (void)ginWinGenerations;
   (void)winFlags;
   (void)multiSegment;
   (void)memType;
@@ -229,9 +171,11 @@ ncclResult_t ncclGinRegister(struct ncclComm* comm, void* address, size_t size,
 }
 
 ncclResult_t ncclGinDeregister(struct ncclComm* comm,
-                               void* ginHostWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS]) {
+                               void* ginHostWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS],
+                               uint32_t const ginWinGenerations[NCCL_GIN_MAX_ACTIVE_BACKENDS]) {
   (void)comm;
   (void)ginHostWins;
+  (void)ginWinGenerations;
   return ncclSuccess;
 }
 
@@ -277,6 +221,10 @@ int64_t ncclParamRasDiagnostics() {
   return 0;
 }
 
+int64_t ncclParamRasEnable() {
+  return 0;
+}
+
 int64_t ncclParamDiagnostics() {
   return 0;
 }
@@ -284,13 +232,21 @@ int64_t ncclParamDiagnostics() {
 /* --------------------------------------------------------------------------
  * Profiler plugin stubs and globals
  * -------------------------------------------------------------------------- */
-thread_local ncclProfilerApiState_t ncclProfilerApiState = {0,       0,       ncclProfilerGroupApiStartStateReset,
-                                                            nullptr, nullptr, nullptr};
+thread_local ncclProfilerApiState_t ncclProfilerApiState = {};
 
 int ncclProfilerEventMask = 0;
 
+int ncclProfilerCurrentEventMask(void) {
+  return 0;
+}
+
 bool ncclProfilerPluginLoaded(void) {
   return false;
+}
+
+uint8_t ncclProfilerDeviceMode(int eActivationMask) {
+  (void)eActivationMask;
+  return ncclDevProfilerModeNone;
 }
 
 ncclResult_t ncclProfilerPluginInit(struct ncclComm* comm) {
@@ -407,13 +363,13 @@ ncclResult_t ncclProfilerStopProxyStepEvent(int sub, struct ncclProxyArgs* args,
   return ncclSuccess;
 }
 
-ncclResult_t ncclProfilerStartProxyCtrlEvent(void* profilerContext, void** eHandle) {
+ncclResult_t ncclProfilerStartProxyCtrlEvent(void* profilerContext, struct ncclProfilerEventRef* eHandle) {
   (void)profilerContext;
-  if (eHandle) *eHandle = nullptr;
+  if (eHandle) memset(eHandle, 0, sizeof(*eHandle));
   return ncclSuccess;
 }
 
-ncclResult_t ncclProfilerStopProxyCtrlEvent(void* eHandle) {
+ncclResult_t ncclProfilerStopProxyCtrlEvent(struct ncclProfilerEventRef* eHandle) {
   (void)eHandle;
   return ncclSuccess;
 }
@@ -446,7 +402,8 @@ ncclResult_t ncclProfilerRecordProxyStepEventState(int sub, struct ncclProxyArgs
   return ncclSuccess;
 }
 
-ncclResult_t ncclProfilerRecordProxyCtrlEventState(void* eHandle, int appended, ncclProfilerEventState_t eState) {
+ncclResult_t ncclProfilerRecordProxyCtrlEventState(struct ncclProfilerEventRef* eHandle, int appended,
+                                                   ncclProfilerEventState_t eState) {
   (void)eHandle;
   (void)appended;
   (void)eState;
@@ -491,15 +448,16 @@ ncclResult_t ncclProfilerStopCeCollEvent(struct ncclComm* comm, struct ncclCeCol
 }
 
 ncclResult_t ncclProfilerStartCeSyncEvent(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream,
-                                          void** ceSyncHandle) {
+                                          struct ncclProfilerEventRef* ceSyncHandle) {
   (void)comm;
   (void)args;
   (void)stream;
-  if (ceSyncHandle) *ceSyncHandle = nullptr;
+  if (ceSyncHandle) memset(ceSyncHandle, 0, sizeof(*ceSyncHandle));
   return ncclSuccess;
 }
 
-ncclResult_t ncclProfilerStopCeSyncEvent(struct ncclComm* comm, void* ceSyncHandle, cudaStream_t stream) {
+ncclResult_t ncclProfilerStopCeSyncEvent(struct ncclComm* comm, struct ncclProfilerEventRef* ceSyncHandle,
+                                         cudaStream_t stream) {
   (void)comm;
   (void)ceSyncHandle;
   (void)stream;
@@ -508,16 +466,17 @@ ncclResult_t ncclProfilerStopCeSyncEvent(struct ncclComm* comm, void* ceSyncHand
 
 ncclResult_t ncclProfilerStartCeBatchEvent(struct ncclComm* comm, struct ncclCeCollArgs* args,
                                            struct ncclCeBatchOpsParams* params, cudaStream_t stream,
-                                           void** ceBatchHandle) {
+                                           struct ncclProfilerEventRef* ceBatchHandle) {
   (void)comm;
   (void)args;
   (void)params;
   (void)stream;
-  if (ceBatchHandle) *ceBatchHandle = nullptr;
+  if (ceBatchHandle) memset(ceBatchHandle, 0, sizeof(*ceBatchHandle));
   return ncclSuccess;
 }
 
-ncclResult_t ncclProfilerStopCeBatchEvent(struct ncclComm* comm, void* ceBatchHandle, cudaStream_t stream) {
+ncclResult_t ncclProfilerStopCeBatchEvent(struct ncclComm* comm, struct ncclProfilerEventRef* ceBatchHandle,
+                                          cudaStream_t stream) {
   (void)comm;
   (void)ceBatchHandle;
   (void)stream;
@@ -553,6 +512,12 @@ ncclResult_t ncclGinQueryLastError(struct ncclGinState* ginState, bool* hasError
 
 ncclResult_t ncclGinInit(struct ncclComm* comm) {
   (void)comm;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclGinInitFromParent(struct ncclComm* comm, struct ncclComm* parent) {
+  (void)comm;
+  (void)parent;
   return ncclSuccess;
 }
 

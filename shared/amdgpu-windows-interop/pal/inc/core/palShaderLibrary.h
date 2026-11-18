@@ -60,17 +60,12 @@ union LibraryCreateFlags
     {
         uint32 clientInternal               : 1;  ///< Internal library not created by the application.
         uint32 isGraphics                   : 1;  ///< Whether it is a graphics library
-#if PAL_BUILD_CODE_OBJECT_INTERFACE
-        uint32 disableCodeObjectReferencing : 1;  ///< Indicates that this library will not manage the reference
-                                                  ///  counter for the pCodeObject.
-                                                  ///  It's the client's responsibility to ensure the pCodeObject stay
-                                                  ///  alive during library creation and execution.
-                                                  ///  This is useful for clients who want to manage the lifetime of the
-                                                  ///  code objects separately from the library.
+        uint32 condDebugUser                : 1;  ///< If set, waves launched from this library's shaders have debugging
+                                                  ///  unconditionally enabled: the DebugBreak() shader intrinsic always
+                                                  ///  triggers and code guarded by IsDebuggingEnabled() runs,
+                                                  ///  regardless of whether a debugger is attached (work-graph node
+                                                  ///  compute).
         uint32 reserved                     : 29; ///< Reserved for future use.
-#else
-        uint32 reserved                     : 30; ///< Reserved for future use.
-#endif
     };
     uint32 u32All;                  ///< Flags packed as 32-bit uint.
 };
@@ -108,7 +103,11 @@ public:
     /// @param hash         128-bit hash for ELF, base64-decoded from archive member name
     /// @param (out) pBlob  The returned ELF blob; must remain valid until CreatePipeline/CreateShaderLibrary returns.
     /// @returns            Success or error code
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1012
     virtual Result Get(const Hash128& hash, Util::Span<const void>* pBlob) = 0;
+#else
+    virtual Result Get(const Hash128& hash, Util::ConstByteSpan* pBlob) = 0;
+#endif
 };
 
 /// Specifies properties for creation of a compute @ref IShaderLibrary object.  Input structure to
@@ -122,7 +121,6 @@ struct ShaderLibraryCreateInfo
                                          ///  obtained via IDevice::LoadCodeObject().
                                          ///  The code-object ELF contains pre-compiled shaders, register values, and
                                          ///  additional metadata.
-    Util::Span<ICodeObject*> shaders;    ///< an array of Shader Object Elves
 #endif
     const void*          pCodeObject;    ///< Pointer to code-object ELF binary implementing the Pipeline ABI interface.
                                          ///  The code-object ELF contains pre-compiled shaders, register values, and
@@ -229,8 +227,17 @@ public:
     /// @returns Success if the library binaries were fetched successfully.
     ///          +ErrorUnavailable if a library binary was not fetched successfully.
     virtual Result GetCodeObjects(
+        uint32*                          pCount,
+        Util::Span<Util::ConstByteSpan>* pCodeObjects) const = 0;
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1012
+    Result GetCodeObjects(
         uint32*                             pCount,
-        Util::Span<Util::Span<const void>>* pCodeObjects) const = 0;
+        Util::Span<Util::Span<const void>>* pCodeObjects) const
+    {
+        static_assert(sizeof(Util::Span<const void>) == sizeof(Util::ConstByteSpan));
+        return GetCodeObjects(pCount, reinterpret_cast<Util::Span<Util::ConstByteSpan>*>(pCodeObjects));
+    }
+#endif
 
     /// Obtains the ICodeObjects used to create this shader library.
     ///

@@ -7,6 +7,7 @@
 
 #include "alloc.h"
 #include "collectives.h"
+#include "cudawrap.h"
 #include "common_kernel.h"
 #include <cuda_runtime.h>
 
@@ -82,7 +83,8 @@ __global__ __launch_bounds__(512, 1) void oneRankReduce(void* dst, void* src, vo
 } // namespace
 
 ncclResult_t ncclLaunchOneRank(void* dst, void const* src, size_t nElts, struct ncclDevRedOpFull redOp,
-                               ncclDataType_t eltType, cudaStream_t stream, void const* acc) {
+                               ncclDataType_t eltType, cudaStream_t stream, cudaEvent_t launchCompletionEvent,
+                               void const* acc) {
   size_t eltSize = ncclTypeSize(eltType);
 
   // handles all_reduce for non-PreMulSum ops
@@ -158,6 +160,70 @@ ncclResult_t ncclLaunchOneRank(void* dst, void const* src, size_t nElts, struct 
   void* mutableSrc = const_cast<void*>(src);
   void* mutableAcc = const_cast<void*>(acc);
   void* args[6] = {&dst, &mutableSrc, &mutableAcc, &nElts, &redOp.scalarArg, &redOp.scalarArgIsPtr};
+
+#if CUDART_VERSION >= 12030
+  if (launchCompletionEvent != nullptr) {
+    int driverVersion;
+    NCCLCHECK(ncclCudaDriverVersion(&driverVersion));
+    if (driverVersion >= 12030) {
+      cudaLaunchAttribute attr = {};
+      attr.id = cudaLaunchAttributeLaunchCompletionEvent;
+      attr.val.launchCompletionEvent.event = launchCompletionEvent;
+      attr.val.launchCompletionEvent.flags = 0;
+      cudaLaunchConfig_t config = {};
+      config.gridDim = grid;
+      config.blockDim = block;
+      config.stream = stream;
+      config.attrs = &attr;
+      config.numAttrs = 1;
+      CUDACHECK(cudaLaunchKernelExC(&config, kernel, args));
+      return ncclSuccess;
+    }
+  }
+#endif
+  if (launchCompletionEvent != nullptr) {
+    WARN("CUDA launch-completion events require CUDA 12.3 or newer; recording the user event before launch");
+    CUDACHECK(cudaEventRecord(launchCompletionEvent, stream));
+  }
   CUDACHECK(cudaLaunchKernel(kernel, grid, block, args, 0, stream));
+  return ncclSuccess;
+}
+
+// ---------------------------------------------------------------------------
+// Profiler GPU-clock probe.
+//
+// A 1-thread kernel that samples the GPU globaltimer -- the same
+// clock the device profiler stamps into KernelCh timestamps -- into a
+// host-visible location. The profiler thread launches this
+// around CPU clock reads to build a GPU->CPU time mapping, so it can
+// convert GPU-derived event timestamps (KernelCh, KernelPhase) to
+// CLOCK_MONOTONIC/CLOCK_REALTIME. Only used when a plugin asks for
+// NCCL-sourced timings.
+// ---------------------------------------------------------------------------
+namespace {
+__global__ void ncclProfClockProbeKernel(unsigned long long* out) {
+#if defined(__HIP_PLATFORM_AMD__)
+  // [RCCL] device/common.h's globaltimer() is wall_clock64() on AMD; that header is not included here.
+  *out = wall_clock64();
+#else
+  *out = globaltimer();
+#endif
+}
+} // namespace
+
+ncclResult_t ncclProfilerProbeGpuClock(unsigned long long* devOut, cudaStream_t stream) {
+  void* args[1] = {(void*)&devOut};
+  // Deliberately not CUDACHECK: this probe runs continuously on the
+  // profiler thread and is often the first CUDA call to observe a
+  // context poisoned by unrelated GPU work (e.g. a driver-contained
+  // NVLink/hardware fault). A WARN here would wrongly implicate the
+  // profiler during triage, so fail quietly, clear the sticky error,
+  // and let the caller skip this calibration anchor.
+  cudaError_t err =
+    cudaLaunchKernel((void const*)&ncclProfClockProbeKernel, dim3(1, 1, 1), dim3(1, 1, 1), args, 0, stream);
+  if (err != cudaSuccess) {
+    (void)cudaGetLastError();
+    return ncclUnhandledCudaError;
+  }
   return ncclSuccess;
 }

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 // Snapshot generated from the pinned AMDF headers. Do not edit by hand.
 // Compile and compare its layout values with the Rust bindings.
 #include <inttypes.h>
@@ -22,6 +25,9 @@ typedef __typeof__(((amdf_xdna_device_info_t *)0)->instruction) amdf_xdna_device
 int main(void) {
   printf("type amdf_input_structure_t %zu %zu\n", sizeof(amdf_input_structure_t), _Alignof(amdf_input_structure_t));
   printf("type amdf_output_structure_t %zu %zu\n", sizeof(amdf_output_structure_t), _Alignof(amdf_output_structure_t));
+  printf("type amdf_allocator_allocate_fn_t %zu %zu\n", sizeof(amdf_allocator_allocate_fn_t), _Alignof(amdf_allocator_allocate_fn_t));
+  printf("type amdf_allocator_resize_fn_t %zu %zu\n", sizeof(amdf_allocator_resize_fn_t), _Alignof(amdf_allocator_resize_fn_t));
+  printf("type amdf_allocator_free_fn_t %zu %zu\n", sizeof(amdf_allocator_free_fn_t), _Alignof(amdf_allocator_free_fn_t));
   printf("type amdf_allocator_t %zu %zu\n", sizeof(amdf_allocator_t), _Alignof(amdf_allocator_t));
   printf("type amdf_instance_create_info_t %zu %zu\n", sizeof(amdf_instance_create_info_t), _Alignof(amdf_instance_create_info_t));
   printf("type amdf_endpoint_id_t %zu %zu\n", sizeof(amdf_endpoint_id_t), _Alignof(amdf_endpoint_id_t));
@@ -51,6 +57,7 @@ int main(void) {
   printf("type amdf_memory_scope_info_t %zu %zu\n", sizeof(amdf_memory_scope_info_t), _Alignof(amdf_memory_scope_info_t));
   printf("type amdf_memory_create_info_t %zu %zu\n", sizeof(amdf_memory_create_info_t), _Alignof(amdf_memory_create_info_t));
   printf("type amdf_memory_info_t %zu %zu\n", sizeof(amdf_memory_info_t), _Alignof(amdf_memory_info_t));
+  printf("type amdf_memory_release_info_t %zu %zu\n", sizeof(amdf_memory_release_info_t), _Alignof(amdf_memory_release_info_t));
   printf("type amdf_memory_access_info_t %zu %zu\n", sizeof(amdf_memory_access_info_t), _Alignof(amdf_memory_access_info_t));
   printf("type amdf_memory_import_info_t %zu %zu\n", sizeof(amdf_memory_import_info_t), _Alignof(amdf_memory_import_info_t));
   printf("type amdf_memory_export_info_t %zu %zu\n", sizeof(amdf_memory_export_info_t), _Alignof(amdf_memory_export_info_t));
@@ -72,6 +79,8 @@ int main(void) {
   printf("type amdf_user_queue_status_t %zu %zu\n", sizeof(amdf_user_queue_status_t), _Alignof(amdf_user_queue_status_t));
   printf("type amdf_kernel_queue_info_t %zu %zu\n", sizeof(amdf_kernel_queue_info_t), _Alignof(amdf_kernel_queue_info_t));
   printf("type amdf_kernel_queue_status_t %zu %zu\n", sizeof(amdf_kernel_queue_status_t), _Alignof(amdf_kernel_queue_status_t));
+  printf("type amdf_native_event_payload_t %zu %zu\n", sizeof(amdf_native_event_payload_t), _Alignof(amdf_native_event_payload_t));
+  printf("type amdf_native_event_t %zu %zu\n", sizeof(amdf_native_event_t), _Alignof(amdf_native_event_t));
   printf("type amdf_api_t %zu %zu\n", sizeof(amdf_api_t), _Alignof(amdf_api_t));
   printf("type amdf_gpu_endpoint_info_t__gfx_ip %zu %zu\n", sizeof(amdf_gpu_endpoint_info_t__gfx_ip), _Alignof(amdf_gpu_endpoint_info_t__gfx_ip));
   printf("type amdf_gpu_endpoint_info_t__compute %zu %zu\n", sizeof(amdf_gpu_endpoint_info_t__compute), _Alignof(amdf_gpu_endpoint_info_t__compute));
@@ -110,9 +119,6 @@ int main(void) {
   printf("type amdf_structure_type_e %zu %zu\n", sizeof(enum amdf_structure_type_e), _Alignof(enum amdf_structure_type_e));
   printf("type amdf_extension_id_t %zu %zu\n", sizeof(amdf_extension_id_t), _Alignof(amdf_extension_id_t));
   printf("type amdf_extension_id_e %zu %zu\n", sizeof(enum amdf_extension_id_e), _Alignof(enum amdf_extension_id_e));
-  printf("type amdf_allocator_allocate_fn_t %zu %zu\n", sizeof(amdf_allocator_allocate_fn_t), _Alignof(amdf_allocator_allocate_fn_t));
-  printf("type amdf_allocator_resize_fn_t %zu %zu\n", sizeof(amdf_allocator_resize_fn_t), _Alignof(amdf_allocator_resize_fn_t));
-  printf("type amdf_allocator_free_fn_t %zu %zu\n", sizeof(amdf_allocator_free_fn_t), _Alignof(amdf_allocator_free_fn_t));
   printf("type amdf_native_lifetime_t %zu %zu\n", sizeof(amdf_native_lifetime_t), _Alignof(amdf_native_lifetime_t));
   printf("type amdf_native_lifetime_e %zu %zu\n", sizeof(enum amdf_native_lifetime_e), _Alignof(enum amdf_native_lifetime_e));
   printf("type amdf_engine_kind_t %zu %zu\n", sizeof(amdf_engine_kind_t), _Alignof(amdf_engine_kind_t));
@@ -206,13 +212,13 @@ int main(void) {
   printf("field amdf_input_structure_t.type %zu %zu %zu\n", offsetof(amdf_input_structure_t, type), sizeof(((amdf_input_structure_t *)0)->type), __alignof__(((amdf_input_structure_t *)0)->type));
   printf("field amdf_input_structure_t.structure_size %zu %zu %zu\n", offsetof(amdf_input_structure_t, structure_size), sizeof(((amdf_input_structure_t *)0)->structure_size), __alignof__(((amdf_input_structure_t *)0)->structure_size));
   printf("field amdf_input_structure_t.next %zu %zu %zu\n", offsetof(amdf_input_structure_t, next), sizeof(((amdf_input_structure_t *)0)->next), __alignof__(((amdf_input_structure_t *)0)->next));
-  printf("field amdf_output_structure_t.type %zu %zu %zu\n", offsetof(amdf_output_structure_t, type), sizeof(((amdf_output_structure_t *)0)->type), __alignof__(((amdf_output_structure_t *)0)->type));
-  printf("field amdf_output_structure_t.structure_size %zu %zu %zu\n", offsetof(amdf_output_structure_t, structure_size), sizeof(((amdf_output_structure_t *)0)->structure_size), __alignof__(((amdf_output_structure_t *)0)->structure_size));
-  printf("field amdf_output_structure_t.next %zu %zu %zu\n", offsetof(amdf_output_structure_t, next), sizeof(((amdf_output_structure_t *)0)->next), __alignof__(((amdf_output_structure_t *)0)->next));
   printf("field amdf_allocator_t.user_data %zu %zu %zu\n", offsetof(amdf_allocator_t, user_data), sizeof(((amdf_allocator_t *)0)->user_data), __alignof__(((amdf_allocator_t *)0)->user_data));
   printf("field amdf_allocator_t.allocate %zu %zu %zu\n", offsetof(amdf_allocator_t, allocate), sizeof(((amdf_allocator_t *)0)->allocate), __alignof__(((amdf_allocator_t *)0)->allocate));
   printf("field amdf_allocator_t.resize %zu %zu %zu\n", offsetof(amdf_allocator_t, resize), sizeof(((amdf_allocator_t *)0)->resize), __alignof__(((amdf_allocator_t *)0)->resize));
   printf("field amdf_allocator_t.free %zu %zu %zu\n", offsetof(amdf_allocator_t, free), sizeof(((amdf_allocator_t *)0)->free), __alignof__(((amdf_allocator_t *)0)->free));
+  printf("field amdf_output_structure_t.type %zu %zu %zu\n", offsetof(amdf_output_structure_t, type), sizeof(((amdf_output_structure_t *)0)->type), __alignof__(((amdf_output_structure_t *)0)->type));
+  printf("field amdf_output_structure_t.structure_size %zu %zu %zu\n", offsetof(amdf_output_structure_t, structure_size), sizeof(((amdf_output_structure_t *)0)->structure_size), __alignof__(((amdf_output_structure_t *)0)->structure_size));
+  printf("field amdf_output_structure_t.next %zu %zu %zu\n", offsetof(amdf_output_structure_t, next), sizeof(((amdf_output_structure_t *)0)->next), __alignof__(((amdf_output_structure_t *)0)->next));
   printf("field amdf_instance_create_info_t.type %zu %zu %zu\n", offsetof(amdf_instance_create_info_t, type), sizeof(((amdf_instance_create_info_t *)0)->type), __alignof__(((amdf_instance_create_info_t *)0)->type));
   printf("field amdf_instance_create_info_t.structure_size %zu %zu %zu\n", offsetof(amdf_instance_create_info_t, structure_size), sizeof(((amdf_instance_create_info_t *)0)->structure_size), __alignof__(((amdf_instance_create_info_t *)0)->structure_size));
   printf("field amdf_instance_create_info_t.next %zu %zu %zu\n", offsetof(amdf_instance_create_info_t, next), sizeof(((amdf_instance_create_info_t *)0)->next), __alignof__(((amdf_instance_create_info_t *)0)->next));
@@ -282,7 +288,7 @@ int main(void) {
   printf("field amdf_memory_construction_capabilities_t.byte_length_granularity %zu %zu %zu\n", offsetof(amdf_memory_construction_capabilities_t, byte_length_granularity), sizeof(((amdf_memory_construction_capabilities_t *)0)->byte_length_granularity), __alignof__(((amdf_memory_construction_capabilities_t *)0)->byte_length_granularity));
   printf("field amdf_memory_construction_capabilities_t.registered_host_pointer_alignment %zu %zu %zu\n", offsetof(amdf_memory_construction_capabilities_t, registered_host_pointer_alignment), sizeof(((amdf_memory_construction_capabilities_t *)0)->registered_host_pointer_alignment), __alignof__(((amdf_memory_construction_capabilities_t *)0)->registered_host_pointer_alignment));
   printf("field amdf_memory_construction_capabilities_t.registered_host_cacheability %zu %zu %zu\n", offsetof(amdf_memory_construction_capabilities_t, registered_host_cacheability), sizeof(((amdf_memory_construction_capabilities_t *)0)->registered_host_cacheability), __alignof__(((amdf_memory_construction_capabilities_t *)0)->registered_host_cacheability));
-  printf("field amdf_memory_construction_capabilities_t.reserved %zu %zu %zu\n", offsetof(amdf_memory_construction_capabilities_t, reserved), sizeof(((amdf_memory_construction_capabilities_t *)0)->reserved), __alignof__(((amdf_memory_construction_capabilities_t *)0)->reserved));
+  printf("field amdf_memory_construction_capabilities_t.placement_kinds %zu %zu %zu\n", offsetof(amdf_memory_construction_capabilities_t, placement_kinds), sizeof(((amdf_memory_construction_capabilities_t *)0)->placement_kinds), __alignof__(((amdf_memory_construction_capabilities_t *)0)->placement_kinds));
   printf("field amdf_memory_construction_capabilities_t.minimum_alignment %zu %zu %zu\n", offsetof(amdf_memory_construction_capabilities_t, minimum_alignment), sizeof(((amdf_memory_construction_capabilities_t *)0)->minimum_alignment), __alignof__(((amdf_memory_construction_capabilities_t *)0)->minimum_alignment));
   printf("field amdf_memory_construction_capabilities_t.maximum_alignment %zu %zu %zu\n", offsetof(amdf_memory_construction_capabilities_t, maximum_alignment), sizeof(((amdf_memory_construction_capabilities_t *)0)->maximum_alignment), __alignof__(((amdf_memory_construction_capabilities_t *)0)->maximum_alignment));
   printf("field amdf_memory_construction_capabilities_t.native_byte_length_granularity %zu %zu %zu\n", offsetof(amdf_memory_construction_capabilities_t, native_byte_length_granularity), sizeof(((amdf_memory_construction_capabilities_t *)0)->native_byte_length_granularity), __alignof__(((amdf_memory_construction_capabilities_t *)0)->native_byte_length_granularity));
@@ -313,7 +319,7 @@ int main(void) {
   printf("field amdf_host_mapping_capabilities_t.byte_offset_granularity %zu %zu %zu\n", offsetof(amdf_host_mapping_capabilities_t, byte_offset_granularity), sizeof(((amdf_host_mapping_capabilities_t *)0)->byte_offset_granularity), __alignof__(((amdf_host_mapping_capabilities_t *)0)->byte_offset_granularity));
   printf("field amdf_host_mapping_capabilities_t.byte_length_granularity %zu %zu %zu\n", offsetof(amdf_host_mapping_capabilities_t, byte_length_granularity), sizeof(((amdf_host_mapping_capabilities_t *)0)->byte_length_granularity), __alignof__(((amdf_host_mapping_capabilities_t *)0)->byte_length_granularity));
   printf("field amdf_host_mapping_capabilities_t.supported_access %zu %zu %zu\n", offsetof(amdf_host_mapping_capabilities_t, supported_access), sizeof(((amdf_host_mapping_capabilities_t *)0)->supported_access), __alignof__(((amdf_host_mapping_capabilities_t *)0)->supported_access));
-  printf("field amdf_host_mapping_capabilities_t.reserved %zu %zu %zu\n", offsetof(amdf_host_mapping_capabilities_t, reserved), sizeof(((amdf_host_mapping_capabilities_t *)0)->reserved), __alignof__(((amdf_host_mapping_capabilities_t *)0)->reserved));
+  printf("field amdf_host_mapping_capabilities_t.features %zu %zu %zu\n", offsetof(amdf_host_mapping_capabilities_t, features), sizeof(((amdf_host_mapping_capabilities_t *)0)->features), __alignof__(((amdf_host_mapping_capabilities_t *)0)->features));
   printf("field amdf_memory_profile_t.type %zu %zu %zu\n", offsetof(amdf_memory_profile_t, type), sizeof(((amdf_memory_profile_t *)0)->type), __alignof__(((amdf_memory_profile_t *)0)->type));
   printf("field amdf_memory_profile_t.structure_size %zu %zu %zu\n", offsetof(amdf_memory_profile_t, structure_size), sizeof(((amdf_memory_profile_t *)0)->structure_size), __alignof__(((amdf_memory_profile_t *)0)->structure_size));
   printf("field amdf_memory_profile_t.next %zu %zu %zu\n", offsetof(amdf_memory_profile_t, next), sizeof(((amdf_memory_profile_t *)0)->next), __alignof__(((amdf_memory_profile_t *)0)->next));
@@ -361,6 +367,8 @@ int main(void) {
   printf("field amdf_memory_info_t.native_allocation_byte_length %zu %zu %zu\n", offsetof(amdf_memory_info_t, native_allocation_byte_length), sizeof(((amdf_memory_info_t *)0)->native_allocation_byte_length), __alignof__(((amdf_memory_info_t *)0)->native_allocation_byte_length));
   printf("field amdf_memory_info_t.native_allocation_granularity %zu %zu %zu\n", offsetof(amdf_memory_info_t, native_allocation_granularity), sizeof(((amdf_memory_info_t *)0)->native_allocation_granularity), __alignof__(((amdf_memory_info_t *)0)->native_allocation_granularity));
   printf("field amdf_memory_info_t.physical_backing_id %zu %zu %zu\n", offsetof(amdf_memory_info_t, physical_backing_id), sizeof(((amdf_memory_info_t *)0)->physical_backing_id), __alignof__(((amdf_memory_info_t *)0)->physical_backing_id));
+  printf("field amdf_memory_release_info_t.status %zu %zu %zu\n", offsetof(amdf_memory_release_info_t, status), sizeof(((amdf_memory_release_info_t *)0)->status), __alignof__(((amdf_memory_release_info_t *)0)->status));
+  printf("field amdf_memory_release_info_t.abandoned_byte_length %zu %zu %zu\n", offsetof(amdf_memory_release_info_t, abandoned_byte_length), sizeof(((amdf_memory_release_info_t *)0)->abandoned_byte_length), __alignof__(((amdf_memory_release_info_t *)0)->abandoned_byte_length));
   printf("field amdf_memory_access_info_t.type %zu %zu %zu\n", offsetof(amdf_memory_access_info_t, type), sizeof(((amdf_memory_access_info_t *)0)->type), __alignof__(((amdf_memory_access_info_t *)0)->type));
   printf("field amdf_memory_access_info_t.structure_size %zu %zu %zu\n", offsetof(amdf_memory_access_info_t, structure_size), sizeof(((amdf_memory_access_info_t *)0)->structure_size), __alignof__(((amdf_memory_access_info_t *)0)->structure_size));
   printf("field amdf_memory_access_info_t.next %zu %zu %zu\n", offsetof(amdf_memory_access_info_t, next), sizeof(((amdf_memory_access_info_t *)0)->next), __alignof__(((amdf_memory_access_info_t *)0)->next));
@@ -414,14 +422,14 @@ int main(void) {
   printf("field amdf_host_mapping_info_t.byte_offset_granularity %zu %zu %zu\n", offsetof(amdf_host_mapping_info_t, byte_offset_granularity), sizeof(((amdf_host_mapping_info_t *)0)->byte_offset_granularity), __alignof__(((amdf_host_mapping_info_t *)0)->byte_offset_granularity));
   printf("field amdf_host_mapping_info_t.byte_length_granularity %zu %zu %zu\n", offsetof(amdf_host_mapping_info_t, byte_length_granularity), sizeof(((amdf_host_mapping_info_t *)0)->byte_length_granularity), __alignof__(((amdf_host_mapping_info_t *)0)->byte_length_granularity));
   printf("field amdf_host_mapping_info_t.cache_line_size %zu %zu %zu\n", offsetof(amdf_host_mapping_info_t, cache_line_size), sizeof(((amdf_host_mapping_info_t *)0)->cache_line_size), __alignof__(((amdf_host_mapping_info_t *)0)->cache_line_size));
-  printf("field amdf_host_mapping_info_t.reserved %zu %zu %zu\n", offsetof(amdf_host_mapping_info_t, reserved), sizeof(((amdf_host_mapping_info_t *)0)->reserved), __alignof__(((amdf_host_mapping_info_t *)0)->reserved));
+  printf("field amdf_host_mapping_info_t.features %zu %zu %zu\n", offsetof(amdf_host_mapping_info_t, features), sizeof(((amdf_host_mapping_info_t *)0)->features), __alignof__(((amdf_host_mapping_info_t *)0)->features));
   printf("field amdf_host_mapping_info_t.flush %zu %zu %zu\n", offsetof(amdf_host_mapping_info_t, flush), sizeof(((amdf_host_mapping_info_t *)0)->flush), __alignof__(((amdf_host_mapping_info_t *)0)->flush));
   printf("field amdf_host_mapping_info_t.invalidate %zu %zu %zu\n", offsetof(amdf_host_mapping_info_t, invalidate), sizeof(((amdf_host_mapping_info_t *)0)->invalidate), __alignof__(((amdf_host_mapping_info_t *)0)->invalidate));
   printf("field amdf_memory_site_t__value__device.memory %zu %zu %zu\n", offsetof(amdf_memory_site_t__value__device, memory), sizeof(((amdf_memory_site_t__value__device *)0)->memory), __alignof__(((amdf_memory_site_t__value__device *)0)->memory));
   printf("field amdf_memory_site_t__value__device.access_ordinal %zu %zu %zu\n", offsetof(amdf_memory_site_t__value__device, access_ordinal), sizeof(((amdf_memory_site_t__value__device *)0)->access_ordinal), __alignof__(((amdf_memory_site_t__value__device *)0)->access_ordinal));
   printf("field amdf_memory_site_t__value__device.queue_family_ordinal %zu %zu %zu\n", offsetof(amdf_memory_site_t__value__device, queue_family_ordinal), sizeof(((amdf_memory_site_t__value__device *)0)->queue_family_ordinal), __alignof__(((amdf_memory_site_t__value__device *)0)->queue_family_ordinal));
   printf("field amdf_memory_site_t__value.device %zu %zu %zu\n", offsetof(amdf_memory_site_t__value, device), sizeof(((amdf_memory_site_t__value *)0)->device), __alignof__(((amdf_memory_site_t__value *)0)->device));
-  printf("field amdf_memory_site_t__value.host_mapping %zu %zu %zu\n", offsetof(amdf_memory_site_t__value, host_mapping), sizeof(((amdf_memory_site_t__value *)0)->host_mapping), __alignof__(((amdf_memory_site_t__value *)0)->host_mapping));
+  printf("field amdf_memory_site_t__value.host %zu %zu %zu\n", offsetof(amdf_memory_site_t__value, host), sizeof(((amdf_memory_site_t__value *)0)->host), __alignof__(((amdf_memory_site_t__value *)0)->host));
   printf("field amdf_memory_site_t.type %zu %zu %zu\n", offsetof(amdf_memory_site_t, type), sizeof(((amdf_memory_site_t *)0)->type), __alignof__(((amdf_memory_site_t *)0)->type));
   printf("field amdf_memory_site_t.structure_size %zu %zu %zu\n", offsetof(amdf_memory_site_t, structure_size), sizeof(((amdf_memory_site_t *)0)->structure_size), __alignof__(((amdf_memory_site_t *)0)->structure_size));
   printf("field amdf_memory_site_t.next %zu %zu %zu\n", offsetof(amdf_memory_site_t, next), sizeof(((amdf_memory_site_t *)0)->next), __alignof__(((amdf_memory_site_t *)0)->next));
@@ -537,6 +545,7 @@ int main(void) {
   printf("field amdf_kernel_queue_info_t.command_type %zu %zu %zu\n", offsetof(amdf_kernel_queue_info_t, command_type), sizeof(((amdf_kernel_queue_info_t *)0)->command_type), __alignof__(((amdf_kernel_queue_info_t *)0)->command_type));
   printf("field amdf_kernel_queue_info_t.maximum_pending_submission_count %zu %zu %zu\n", offsetof(amdf_kernel_queue_info_t, maximum_pending_submission_count), sizeof(((amdf_kernel_queue_info_t *)0)->maximum_pending_submission_count), __alignof__(((amdf_kernel_queue_info_t *)0)->maximum_pending_submission_count));
   printf("field amdf_kernel_queue_info_t.maximum_command_count %zu %zu %zu\n", offsetof(amdf_kernel_queue_info_t, maximum_command_count), sizeof(((amdf_kernel_queue_info_t *)0)->maximum_command_count), __alignof__(((amdf_kernel_queue_info_t *)0)->maximum_command_count));
+  printf("field amdf_kernel_queue_info_t.notification_types %zu %zu %zu\n", offsetof(amdf_kernel_queue_info_t, notification_types), sizeof(((amdf_kernel_queue_info_t *)0)->notification_types), __alignof__(((amdf_kernel_queue_info_t *)0)->notification_types));
   printf("field amdf_kernel_queue_status_t.type %zu %zu %zu\n", offsetof(amdf_kernel_queue_status_t, type), sizeof(((amdf_kernel_queue_status_t *)0)->type), __alignof__(((amdf_kernel_queue_status_t *)0)->type));
   printf("field amdf_kernel_queue_status_t.structure_size %zu %zu %zu\n", offsetof(amdf_kernel_queue_status_t, structure_size), sizeof(((amdf_kernel_queue_status_t *)0)->structure_size), __alignof__(((amdf_kernel_queue_status_t *)0)->structure_size));
   printf("field amdf_kernel_queue_status_t.next %zu %zu %zu\n", offsetof(amdf_kernel_queue_status_t, next), sizeof(((amdf_kernel_queue_status_t *)0)->next), __alignof__(((amdf_kernel_queue_status_t *)0)->next));
@@ -544,6 +553,11 @@ int main(void) {
   printf("field amdf_kernel_queue_status_t.state %zu %zu %zu\n", offsetof(amdf_kernel_queue_status_t, state), sizeof(((amdf_kernel_queue_status_t *)0)->state), __alignof__(((amdf_kernel_queue_status_t *)0)->state));
   printf("field amdf_kernel_queue_status_t.reserved %zu %zu %zu\n", offsetof(amdf_kernel_queue_status_t, reserved), sizeof(((amdf_kernel_queue_status_t *)0)->reserved), __alignof__(((amdf_kernel_queue_status_t *)0)->reserved));
   printf("field amdf_kernel_queue_status_t.terminal_status %zu %zu %zu\n", offsetof(amdf_kernel_queue_status_t, terminal_status), sizeof(((amdf_kernel_queue_status_t *)0)->terminal_status), __alignof__(((amdf_kernel_queue_status_t *)0)->terminal_status));
+  printf("field amdf_native_event_payload_t.file_descriptor %zu %zu %zu\n", offsetof(amdf_native_event_payload_t, file_descriptor), sizeof(((amdf_native_event_payload_t *)0)->file_descriptor), __alignof__(((amdf_native_event_payload_t *)0)->file_descriptor));
+  printf("field amdf_native_event_payload_t.native_handle %zu %zu %zu\n", offsetof(amdf_native_event_payload_t, native_handle), sizeof(((amdf_native_event_payload_t *)0)->native_handle), __alignof__(((amdf_native_event_payload_t *)0)->native_handle));
+  printf("field amdf_native_event_t.type %zu %zu %zu\n", offsetof(amdf_native_event_t, type), sizeof(((amdf_native_event_t *)0)->type), __alignof__(((amdf_native_event_t *)0)->type));
+  printf("field amdf_native_event_t.reserved %zu %zu %zu\n", offsetof(amdf_native_event_t, reserved), sizeof(((amdf_native_event_t *)0)->reserved), __alignof__(((amdf_native_event_t *)0)->reserved));
+  printf("field amdf_native_event_t.payload %zu %zu %zu\n", offsetof(amdf_native_event_t, payload), sizeof(((amdf_native_event_t *)0)->payload), __alignof__(((amdf_native_event_t *)0)->payload));
   printf("field amdf_api_t.structure_size %zu %zu %zu\n", offsetof(amdf_api_t, structure_size), sizeof(((amdf_api_t *)0)->structure_size), __alignof__(((amdf_api_t *)0)->structure_size));
   printf("field amdf_api_t.abi_version %zu %zu %zu\n", offsetof(amdf_api_t, abi_version), sizeof(((amdf_api_t *)0)->abi_version), __alignof__(((amdf_api_t *)0)->abi_version));
   printf("field amdf_api_t.instance_create %zu %zu %zu\n", offsetof(amdf_api_t, instance_create), sizeof(((amdf_api_t *)0)->instance_create), __alignof__(((amdf_api_t *)0)->instance_create));
@@ -584,6 +598,8 @@ int main(void) {
   printf("field amdf_api_t.user_queue_destroy %zu %zu %zu\n", offsetof(amdf_api_t, user_queue_destroy), sizeof(((amdf_api_t *)0)->user_queue_destroy), __alignof__(((amdf_api_t *)0)->user_queue_destroy));
   printf("field amdf_api_t.memory_query_address %zu %zu %zu\n", offsetof(amdf_api_t, memory_query_address), sizeof(((amdf_api_t *)0)->memory_query_address), __alignof__(((amdf_api_t *)0)->memory_query_address));
   printf("field amdf_api_t.memory_scope_query_pair_info %zu %zu %zu\n", offsetof(amdf_api_t, memory_scope_query_pair_info), sizeof(((amdf_api_t *)0)->memory_scope_query_pair_info), __alignof__(((amdf_api_t *)0)->memory_scope_query_pair_info));
+  printf("field amdf_api_t.kernel_queue_refresh_status %zu %zu %zu\n", offsetof(amdf_api_t, kernel_queue_refresh_status), sizeof(((amdf_api_t *)0)->kernel_queue_refresh_status), __alignof__(((amdf_api_t *)0)->kernel_queue_refresh_status));
+  printf("field amdf_api_t.kernel_queue_request_notification %zu %zu %zu\n", offsetof(amdf_api_t, kernel_queue_request_notification), sizeof(((amdf_api_t *)0)->kernel_queue_request_notification), __alignof__(((amdf_api_t *)0)->kernel_queue_request_notification));
   printf("field amdf_gpu_endpoint_info_t__gfx_ip.major %zu %zu %zu\n", offsetof(amdf_gpu_endpoint_info_t__gfx_ip, major), sizeof(((amdf_gpu_endpoint_info_t__gfx_ip *)0)->major), __alignof__(((amdf_gpu_endpoint_info_t__gfx_ip *)0)->major));
   printf("field amdf_gpu_endpoint_info_t__gfx_ip.minor %zu %zu %zu\n", offsetof(amdf_gpu_endpoint_info_t__gfx_ip, minor), sizeof(((amdf_gpu_endpoint_info_t__gfx_ip *)0)->minor), __alignof__(((amdf_gpu_endpoint_info_t__gfx_ip *)0)->minor));
   printf("field amdf_gpu_endpoint_info_t__gfx_ip.stepping %zu %zu %zu\n", offsetof(amdf_gpu_endpoint_info_t__gfx_ip, stepping), sizeof(((amdf_gpu_endpoint_info_t__gfx_ip *)0)->stepping), __alignof__(((amdf_gpu_endpoint_info_t__gfx_ip *)0)->stepping));
@@ -624,7 +640,7 @@ int main(void) {
   printf("field amdf_gpu_user_queue_create_info_t.queue_family_ordinal %zu %zu %zu\n", offsetof(amdf_gpu_user_queue_create_info_t, queue_family_ordinal), sizeof(((amdf_gpu_user_queue_create_info_t *)0)->queue_family_ordinal), __alignof__(((amdf_gpu_user_queue_create_info_t *)0)->queue_family_ordinal));
   printf("field amdf_gpu_user_queue_create_info_t.priority %zu %zu %zu\n", offsetof(amdf_gpu_user_queue_create_info_t, priority), sizeof(((amdf_gpu_user_queue_create_info_t *)0)->priority), __alignof__(((amdf_gpu_user_queue_create_info_t *)0)->priority));
   printf("field amdf_gpu_user_queue_create_info_t.producer_mode %zu %zu %zu\n", offsetof(amdf_gpu_user_queue_create_info_t, producer_mode), sizeof(((amdf_gpu_user_queue_create_info_t *)0)->producer_mode), __alignof__(((amdf_gpu_user_queue_create_info_t *)0)->producer_mode));
-  printf("field amdf_gpu_user_queue_create_info_t.reserved %zu %zu %zu\n", offsetof(amdf_gpu_user_queue_create_info_t, reserved), sizeof(((amdf_gpu_user_queue_create_info_t *)0)->reserved), __alignof__(((amdf_gpu_user_queue_create_info_t *)0)->reserved));
+  printf("field amdf_gpu_user_queue_create_info_t.flags %zu %zu %zu\n", offsetof(amdf_gpu_user_queue_create_info_t, flags), sizeof(((amdf_gpu_user_queue_create_info_t *)0)->flags), __alignof__(((amdf_gpu_user_queue_create_info_t *)0)->flags));
   printf("field amdf_gpu_user_queue_create_info_t.required_capabilities %zu %zu %zu\n", offsetof(amdf_gpu_user_queue_create_info_t, required_capabilities), sizeof(((amdf_gpu_user_queue_create_info_t *)0)->required_capabilities), __alignof__(((amdf_gpu_user_queue_create_info_t *)0)->required_capabilities));
   printf("field amdf_gpu_user_queue_create_info_t.ring_byte_length %zu %zu %zu\n", offsetof(amdf_gpu_user_queue_create_info_t, ring_byte_length), sizeof(((amdf_gpu_user_queue_create_info_t *)0)->ring_byte_length), __alignof__(((amdf_gpu_user_queue_create_info_t *)0)->ring_byte_length));
   printf("field amdf_gpu_user_queue_create_info_t.scratch %zu %zu %zu\n", offsetof(amdf_gpu_user_queue_create_info_t, scratch), sizeof(((amdf_gpu_user_queue_create_info_t *)0)->scratch), __alignof__(((amdf_gpu_user_queue_create_info_t *)0)->scratch));
@@ -637,7 +653,7 @@ int main(void) {
   printf("field amdf_gpu_kernel_queue_create_info_t.structure_size %zu %zu %zu\n", offsetof(amdf_gpu_kernel_queue_create_info_t, structure_size), sizeof(((amdf_gpu_kernel_queue_create_info_t *)0)->structure_size), __alignof__(((amdf_gpu_kernel_queue_create_info_t *)0)->structure_size));
   printf("field amdf_gpu_kernel_queue_create_info_t.next %zu %zu %zu\n", offsetof(amdf_gpu_kernel_queue_create_info_t, next), sizeof(((amdf_gpu_kernel_queue_create_info_t *)0)->next), __alignof__(((amdf_gpu_kernel_queue_create_info_t *)0)->next));
   printf("field amdf_gpu_kernel_queue_create_info_t.queue_family_ordinal %zu %zu %zu\n", offsetof(amdf_gpu_kernel_queue_create_info_t, queue_family_ordinal), sizeof(((amdf_gpu_kernel_queue_create_info_t *)0)->queue_family_ordinal), __alignof__(((amdf_gpu_kernel_queue_create_info_t *)0)->queue_family_ordinal));
-  printf("field amdf_gpu_kernel_queue_create_info_t.reserved %zu %zu %zu\n", offsetof(amdf_gpu_kernel_queue_create_info_t, reserved), sizeof(((amdf_gpu_kernel_queue_create_info_t *)0)->reserved), __alignof__(((amdf_gpu_kernel_queue_create_info_t *)0)->reserved));
+  printf("field amdf_gpu_kernel_queue_create_info_t.maximum_pending_submission_count %zu %zu %zu\n", offsetof(amdf_gpu_kernel_queue_create_info_t, maximum_pending_submission_count), sizeof(((amdf_gpu_kernel_queue_create_info_t *)0)->maximum_pending_submission_count), __alignof__(((amdf_gpu_kernel_queue_create_info_t *)0)->maximum_pending_submission_count));
   printf("field amdf_gpu_kernel_queue_submission_info_t.type %zu %zu %zu\n", offsetof(amdf_gpu_kernel_queue_submission_info_t, type), sizeof(((amdf_gpu_kernel_queue_submission_info_t *)0)->type), __alignof__(((amdf_gpu_kernel_queue_submission_info_t *)0)->type));
   printf("field amdf_gpu_kernel_queue_submission_info_t.structure_size %zu %zu %zu\n", offsetof(amdf_gpu_kernel_queue_submission_info_t, structure_size), sizeof(((amdf_gpu_kernel_queue_submission_info_t *)0)->structure_size), __alignof__(((amdf_gpu_kernel_queue_submission_info_t *)0)->structure_size));
   printf("field amdf_gpu_kernel_queue_submission_info_t.next %zu %zu %zu\n", offsetof(amdf_gpu_kernel_queue_submission_info_t, next), sizeof(((amdf_gpu_kernel_queue_submission_info_t *)0)->next), __alignof__(((amdf_gpu_kernel_queue_submission_info_t *)0)->next));
@@ -708,7 +724,7 @@ int main(void) {
   printf("field amdf_xdna_kernel_queue_create_info_t.structure_size %zu %zu %zu\n", offsetof(amdf_xdna_kernel_queue_create_info_t, structure_size), sizeof(((amdf_xdna_kernel_queue_create_info_t *)0)->structure_size), __alignof__(((amdf_xdna_kernel_queue_create_info_t *)0)->structure_size));
   printf("field amdf_xdna_kernel_queue_create_info_t.next %zu %zu %zu\n", offsetof(amdf_xdna_kernel_queue_create_info_t, next), sizeof(((amdf_xdna_kernel_queue_create_info_t *)0)->next), __alignof__(((amdf_xdna_kernel_queue_create_info_t *)0)->next));
   printf("field amdf_xdna_kernel_queue_create_info_t.queue_family_ordinal %zu %zu %zu\n", offsetof(amdf_xdna_kernel_queue_create_info_t, queue_family_ordinal), sizeof(((amdf_xdna_kernel_queue_create_info_t *)0)->queue_family_ordinal), __alignof__(((amdf_xdna_kernel_queue_create_info_t *)0)->queue_family_ordinal));
-  printf("field amdf_xdna_kernel_queue_create_info_t.reserved %zu %zu %zu\n", offsetof(amdf_xdna_kernel_queue_create_info_t, reserved), sizeof(((amdf_xdna_kernel_queue_create_info_t *)0)->reserved), __alignof__(((amdf_xdna_kernel_queue_create_info_t *)0)->reserved));
+  printf("field amdf_xdna_kernel_queue_create_info_t.maximum_pending_submission_count %zu %zu %zu\n", offsetof(amdf_xdna_kernel_queue_create_info_t, maximum_pending_submission_count), sizeof(((amdf_xdna_kernel_queue_create_info_t *)0)->maximum_pending_submission_count), __alignof__(((amdf_xdna_kernel_queue_create_info_t *)0)->maximum_pending_submission_count));
   printf("field amdf_xdna_kernel_command_t.memory %zu %zu %zu\n", offsetof(amdf_xdna_kernel_command_t, memory), sizeof(((amdf_xdna_kernel_command_t *)0)->memory), __alignof__(((amdf_xdna_kernel_command_t *)0)->memory));
   printf("field amdf_xdna_kernel_command_t.access_ordinal %zu %zu %zu\n", offsetof(amdf_xdna_kernel_command_t, access_ordinal), sizeof(((amdf_xdna_kernel_command_t *)0)->access_ordinal), __alignof__(((amdf_xdna_kernel_command_t *)0)->access_ordinal));
   printf("field amdf_xdna_kernel_command_t.reserved %zu %zu %zu\n", offsetof(amdf_xdna_kernel_command_t, reserved), sizeof(((amdf_xdna_kernel_command_t *)0)->reserved), __alignof__(((amdf_xdna_kernel_command_t *)0)->reserved));
@@ -907,14 +923,26 @@ int main(void) {
   printf("constant AMDF_QUEUE_STATE_ACTIVE %" PRIu64 "\n", (uint64_t)AMDF_QUEUE_STATE_ACTIVE);
   printf("constant AMDF_QUEUE_STATE_FAILED %" PRIu64 "\n", (uint64_t)AMDF_QUEUE_STATE_FAILED);
   printf("constant AMDF_QUEUE_STATE_DEVICE_LOST %" PRIu64 "\n", (uint64_t)AMDF_QUEUE_STATE_DEVICE_LOST);
+  printf("constant AMDF_NATIVE_EVENT_TYPE_NONE %" PRIu64 "\n", (uint64_t)AMDF_NATIVE_EVENT_TYPE_NONE);
+  printf("constant AMDF_NATIVE_EVENT_TYPE_EVENTFD %" PRIu64 "\n", (uint64_t)AMDF_NATIVE_EVENT_TYPE_EVENTFD);
+  printf("constant AMDF_NATIVE_EVENT_TYPE_WIN32_EVENT %" PRIu64 "\n", (uint64_t)AMDF_NATIVE_EVENT_TYPE_WIN32_EVENT);
+  printf("constant AMDF_NATIVE_EVENT_TYPE_BIT_EVENTFD %" PRIu64 "\n", (uint64_t)AMDF_NATIVE_EVENT_TYPE_BIT_EVENTFD);
+  printf("constant AMDF_NATIVE_EVENT_TYPE_BIT_WIN32_EVENT %" PRIu64 "\n", (uint64_t)AMDF_NATIVE_EVENT_TYPE_BIT_WIN32_EVENT);
   printf("constant AMDF_GPU_DEVICE_FEATURE_HOST_REGISTRATION %" PRIu64 "\n", (uint64_t)AMDF_GPU_DEVICE_FEATURE_HOST_REGISTRATION);
   printf("constant AMDF_GPU_DEVICE_FEATURE_DEVICE_RECREATION %" PRIu64 "\n", (uint64_t)AMDF_GPU_DEVICE_FEATURE_DEVICE_RECREATION);
   printf("constant AMDF_GPU_DEVICE_FEATURE_LOCAL_MEMORY %" PRIu64 "\n", (uint64_t)AMDF_GPU_DEVICE_FEATURE_LOCAL_MEMORY);
   printf("constant AMDF_GPU_DEVICE_FEATURE_HOST_VISIBLE_LOCAL_MEMORY %" PRIu64 "\n", (uint64_t)AMDF_GPU_DEVICE_FEATURE_HOST_VISIBLE_LOCAL_MEMORY);
   printf("constant AMDF_GPU_PM4_FORMAT_FEATURE_ACQUIRE_MEM_GCR %" PRIu64 "\n", (uint64_t)AMDF_GPU_PM4_FORMAT_FEATURE_ACQUIRE_MEM_GCR);
-  printf("constant AMDF_GPU_SDMA_FORMAT_FEATURE_GCR %" PRIu64 "\n", (uint64_t)AMDF_GPU_SDMA_FORMAT_FEATURE_GCR);
+  printf("constant AMDF_GPU_PM4_FORMAT_FEATURE_DISPATCH_SCRATCH %" PRIu64 "\n", (uint64_t)AMDF_GPU_PM4_FORMAT_FEATURE_DISPATCH_SCRATCH);
+  printf("constant AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR %" PRIu64 "\n", (uint64_t)AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR);
   printf("constant AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_SYSTEM %" PRIu64 "\n", (uint64_t)AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_SYSTEM);
   printf("constant AMDF_GPU_SDMA_FORMAT_FEATURE_MEMORY_SCOPE %" PRIu64 "\n", (uint64_t)AMDF_GPU_SDMA_FORMAT_FEATURE_MEMORY_SCOPE);
+  printf("constant AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_MEMORY_TYPE %" PRIu64 "\n", (uint64_t)AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_MEMORY_TYPE);
+  printf("constant AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT %" PRIu64 "\n", (uint64_t)AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT);
+  printf("constant AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT_EXTENDED_Z %" PRIu64 "\n", (uint64_t)AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT_EXTENDED_Z);
+  printf("constant AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT_WIDE %" PRIu64 "\n", (uint64_t)AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT_WIDE);
+  printf("constant AMDF_GPU_SDMA_FORMAT_FEATURE_SUBMISSION_GCR %" PRIu64 "\n", (uint64_t)AMDF_GPU_SDMA_FORMAT_FEATURE_SUBMISSION_GCR);
+  printf("constant AMDF_GPU_AQL_FORMAT_FEATURE_BARRIER_VALUE %" PRIu64 "\n", (uint64_t)AMDF_GPU_AQL_FORMAT_FEATURE_BARRIER_VALUE);
   printf("constant AMDF_XDNA_ARCHITECTURE_UNKNOWN %" PRIu64 "\n", (uint64_t)AMDF_XDNA_ARCHITECTURE_UNKNOWN);
   printf("constant AMDF_XDNA_ARCHITECTURE_AIE2 %" PRIu64 "\n", (uint64_t)AMDF_XDNA_ARCHITECTURE_AIE2);
   printf("constant AMDF_XDNA_ARCHITECTURE_AIE2P %" PRIu64 "\n", (uint64_t)AMDF_XDNA_ARCHITECTURE_AIE2P);
@@ -928,6 +956,9 @@ int main(void) {
   printf("constant AMDF_ABI_VERSION_1 %" PRIu64 "\n", (uint64_t)AMDF_ABI_VERSION_1);
   printf("constant AMDF_ABI_VERSION_2 %" PRIu64 "\n", (uint64_t)AMDF_ABI_VERSION_2);
   printf("constant AMDF_ABI_VERSION_3 %" PRIu64 "\n", (uint64_t)AMDF_ABI_VERSION_3);
+  printf("constant AMDF_ABI_VERSION_4 %" PRIu64 "\n", (uint64_t)AMDF_ABI_VERSION_4);
+  printf("constant AMDF_ABI_VERSION_5 %" PRIu64 "\n", (uint64_t)AMDF_ABI_VERSION_5);
+  printf("constant AMDF_ABI_VERSION_12 %" PRIu64 "\n", (uint64_t)AMDF_ABI_VERSION_12);
   printf("constant AMDF_ABI_VERSION_LATEST %" PRIu64 "\n", (uint64_t)AMDF_ABI_VERSION_LATEST);
   printf("constant AMDF_ADDRESS_DOMAIN_ORDINAL_NONE %" PRIu64 "\n", (uint64_t)AMDF_ADDRESS_DOMAIN_ORDINAL_NONE);
   printf("constant AMDF_ENABLE_ASSERTS %" PRIu64 "\n", (uint64_t)AMDF_ENABLE_ASSERTS);
@@ -937,6 +968,8 @@ int main(void) {
   printf("constant AMDF_GPU_EXTENSION_VERSION_LATEST %" PRIu64 "\n", (uint64_t)AMDF_GPU_EXTENSION_VERSION_LATEST);
   printf("constant AMDF_GPU_PM4_QUEUE_FORMAT_VERSION_1 %" PRIu64 "\n", (uint64_t)AMDF_GPU_PM4_QUEUE_FORMAT_VERSION_1);
   printf("constant AMDF_GPU_SDMA_QUEUE_FORMAT_VERSION_1 %" PRIu64 "\n", (uint64_t)AMDF_GPU_SDMA_QUEUE_FORMAT_VERSION_1);
+  printf("constant AMDF_GPU_AQL_QUEUE_FORMAT_VERSION_1 %" PRIu64 "\n", (uint64_t)AMDF_GPU_AQL_QUEUE_FORMAT_VERSION_1);
+  printf("constant AMDF_GPU_KERNEL_QUEUE_DEFAULT_PENDING_SUBMISSION_COUNT %" PRIu64 "\n", (uint64_t)AMDF_GPU_KERNEL_QUEUE_DEFAULT_PENDING_SUBMISSION_COUNT);
   printf("constant AMDF_MEMORY_PROFILE_EXTERNAL_SUPPORT_CAPACITY %" PRIu64 "\n", (uint64_t)AMDF_MEMORY_PROFILE_EXTERNAL_SUPPORT_CAPACITY);
   printf("constant AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN %" PRIu64 "\n", (uint64_t)AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN);
   printf("constant AMDF_STATUS_OK %" PRIu64 "\n", (uint64_t)AMDF_STATUS_OK);
@@ -959,6 +992,7 @@ int main(void) {
   printf("constant AMDF_XDNA_EXTENSION_VERSION_LATEST %" PRIu64 "\n", (uint64_t)AMDF_XDNA_EXTENSION_VERSION_LATEST);
   printf("constant AMDF_XDNA_PHYSICAL_COLUMN_ORIGIN_ANY %" PRIu64 "\n", (uint64_t)AMDF_XDNA_PHYSICAL_COLUMN_ORIGIN_ANY);
   printf("constant AMDF_XDNA_QUEUE_FORMAT_VERSION_1 %" PRIu64 "\n", (uint64_t)AMDF_XDNA_QUEUE_FORMAT_VERSION_1);
+  printf("constant AMDF_XDNA_KERNEL_QUEUE_DEFAULT_PENDING_SUBMISSION_COUNT %" PRIu64 "\n", (uint64_t)AMDF_XDNA_KERNEL_QUEUE_DEFAULT_PENDING_SUBMISSION_COUNT);
   printf("constant AMDF_XDNA_TARGET_ID_CAPACITY %" PRIu64 "\n", (uint64_t)AMDF_XDNA_TARGET_ID_CAPACITY);
   printf("constant AMDF_XDNA_TRANSACTION_FORMAT_VERSION_0_1 %" PRIu64 "\n", (uint64_t)AMDF_XDNA_TRANSACTION_FORMAT_VERSION_0_1);
   printf("string AMDF_QUERY_API_SYMBOL %s\n", AMDF_QUERY_API_SYMBOL);

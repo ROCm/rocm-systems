@@ -1,8 +1,14 @@
-# Modification Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
-# SPDX-License-Identifier: MIT 
-
 #!/usr/bin/env python3
+
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# See LICENSE.txt for more license information
+# Modification Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 import os
+import platform
 import sys
 import shutil
 
@@ -26,6 +32,9 @@ if os.path.exists(gensrc):
       shutil.rmtree(path)
 else:
   os.mkdir(gensrc)
+
+# On Windows, GIN device code is excluded; do not generate or build any GIN kernels.
+exclude_gin = platform.system() == "Windows"
 
 def paste(sep, *args):
   return sep.join(args)
@@ -57,7 +66,11 @@ class Rec(object):
 reductions = ["AllReduce","ReduceScatter"]
 all_reds = ["sum", "avg"]
 all_tys = ["f32","f16","bf16","f8e4m3","f8e5m2"]
-gin_algos = ["RailA2A_LsaLD", "RailA2A_LsaLDMC", "RailRing_LsaSTMC"]
+gin_algos = ["RailA2A_LsaLD", "RailA2A_LsaLDMC", "RailRing_LsaST", "RailRing_LsaSTMC"]
+alltoall_gin_algos = ["LL"]
+
+def is_gin_kernel(k):
+  return k.algo in gin_algos or (k.coll == "AlltoAll" and k.algo in alltoall_gin_algos)
 
 nvls_algos_by_coll = {
   "AllReduce": ["AGxLLMC_R","RSxLDMC_AGxSTMC"],
@@ -68,6 +81,7 @@ ldmc_algos = ["RSxLDMC_AGxSTMC", "LDMC", "RailA2A_LsaLDMC"]
 coll_to_lower = {
   "AllGather": "all_gather",
   "AllReduce": "all_reduce",
+  "AlltoAll": "alltoall",
   "ReduceScatter": "reduce_scatter"
 }
 
@@ -96,20 +110,23 @@ ty_to_cxxtype = {
 }
 
 # The Tma* algos stage their tiles through a DMA engine rather than per-lane vector
-# loads (see NCCL_SYMK_ASYNC_TILE in src/device/symmetric/primitives.cuh). On ROCm
+# loads (see NCCL_SYMK_ASYNC_TILE in src/device/symmetric/symk.cuh). On ROCm
 # that engine is the gfx1250 Tensor Data Mover, so on any other target these kernels
 # would compile down to a duplicate of their vector counterpart -- emit them only
 # when a capable arch is in GPU_TARGETS.
 have_tdm = "gfx1250" in gpu_targets
 
 def enumerate_kernels():
-  ag_algos = ["LL","ST"] + (["TmaST"] if have_tdm else [])
+  ag_algos = ["LL","ST","RailRing_LsaST","HierLsaST"] + \
+             (["TmaST", "HierLsaTmaST"] if have_tdm else [])
   # AllGather_TmaSTMC and the other *MC algos need multimem, which ROCm has no
   # equivalent for, so they stay out regardless of the target.
   ar_algos = ["AGxLL_R","RSxLD_AGxST"] + (["RSxTmaLD_AGxTmaST"] if have_tdm else [])
-  rs_algos = ["LL","LD"] + (["TmaLD"] if have_tdm else [])
+  rs_algos = ["LL","LD","RailA2A_LsaLD"] + (["TmaLD"] if have_tdm else [])
   for algo in ag_algos:
     yield Rec(coll="AllGather", algo=algo)
+  for algo in ["LL"]:
+    yield Rec(coll="AlltoAll", algo=algo)
   for red in all_reds:
     for ty in all_tys:
       for algo in ar_algos:
@@ -119,9 +136,6 @@ def enumerate_kernels():
         yield Rec(coll="AllReduce", algo=algo, red=red, ty=ty)
       for algo in rs_algos:
         # ReduceScatter emits sum and avg for every float type.
-        yield Rec(coll="ReduceScatter", algo=algo, red=red, ty=ty)
-      # Multi-node GIN ReduceScatter; non-multicast only (no NVLS/multimem on ROCm).
-      for algo in ["RailA2A_LsaLD"]:
         yield Rec(coll="ReduceScatter", algo=algo, red=red, ty=ty)
 
 def required_cuda(k):
@@ -139,25 +153,31 @@ def required_cuda(k):
       if k.algo in ldmc_algos:
         cudart = 12070
         arch = None
-        specific_sms = ["100a", "101a", "100f", "101f", "120a", "121a"]
+        specific_sms = ["100a", "101a", "107", "100f", "101f", "120a", "121a"]
   return (cudart, arch, specific_sms)
 
 ################################################################################
 
-def kernel_fdep(k):
-  return coll_to_lower[k.coll] + '.cpp'
+def alltoall_gin_fbase(k):
+  if k.coll == "AlltoAll" and k.algo == "LL": return "alltoall_LL"
+  return None
+
+def kernel_fbase(k):
+  fbase = alltoall_gin_fbase(k)
+  if fbase is not None: return fbase
+  return coll_to_lower[k.coll] + ("_gin" if is_gin_kernel(k) else "")
 
 def kernel_fname(k):
+  fbase = alltoall_gin_fbase(k)
+  if fbase is not None: return fbase + '.cu'
+  parts = [coll_to_lower[k.coll]]
+  if is_gin_kernel(k): parts += ['gin']
   if k.coll in reductions:
-    # GIN algos compile a heavier device path; keep them in a separate TU.
-    if k.algo in gin_algos:
-      return paste('_', coll_to_lower[k.coll], 'gin', k.red, k.ty) + '.cpp'
     if k.algo in ldmc_algos and k.ty.startswith('f8'):
-      return paste('_', coll_to_lower[k.coll], k.red, k.ty, k.algo) + '.cpp'
+      parts += [k.red, k.ty, k.algo]
     else:
-      return paste('_', coll_to_lower[k.coll], k.red, k.ty) + '.cpp'
-  else:
-    return coll_to_lower[k.coll] + '.cpp'
+      parts += [k.red, k.ty]
+  return paste('_', *parts) + '.cpp'
 
 # Sibling .cpp holding the instrumented (_profile) instantiations, kept separate so
 # the build compiles the default and profile variants concurrently. RCCL emits
@@ -238,23 +258,27 @@ def partition(vals, keyfn):
     ans[k].append(x)
   return ans
 
-
-kernels_by_file = partition(enumerate_kernels(), lambda k: (kernel_fname(k), k.coll))
+# When exclude_gin (Windows), do not generate or reference any GIN kernels.
+# The opt-in AlltoAll_LL kernel (symmetric/alltoall_LL.cuh) is written in inline PTX with
+# no ROCm port yet, so it is not built; ncclSymkGetKernelIndex() returns -1 for it.
+kernels_to_build = [k for k in enumerate_kernels() if not (exclude_gin and is_gin_kernel(k)) and k.coll != "AlltoAll"]
+kernels_by_file = partition(kernels_to_build, lambda k: (kernel_fname(k), kernel_fbase(k)))
 
 # Add dependency only files (e.g. allreduce.cpp)
-for coll in set(k.coll for k in enumerate_kernels()):
-  fname = coll_to_lower[coll]+'.cpp'
-  if (fname, coll) not in kernels_by_file:
-    kernels_by_file[fname, coll] = []
+for coll in set(k.coll for k in kernels_to_build):
+  fbase = coll_to_lower[coll]
+  fname = fbase + '.cpp'
+  if (fname, fbase) not in kernels_by_file:
+    kernels_by_file[fname, fbase] = []
 
 files_to_print = ""
 # Generate each kernel instantiation file, plus a sibling _profile.cpp with the
 # instrumented variants so both compile concurrently.
-for (fname, coll), ks in kernels_by_file.items():
+for (fname, fbase), ks in kernels_by_file.items():
   files_to_print += fname + ";"
-  # GIN instantiation TUs need the *_gin.h header for the RailA2A/RailRing defs.
-  coll_include = '#include "symmetric/{coll}{gin}.h"'.format(
-    coll=coll_to_lower[coll], gin='_gin' if (ks and all(k.algo in gin_algos for k in ks)) else '')
+  # kernel_fbase() already carries the _gin suffix, so GIN instantiation TUs pick up
+  # the *_gin.h header holding the RailA2A/RailRing defs.
+  coll_include = '#include "symmetric/{fbase}.h"'.format(fbase=fbase)
   with open(os.path.join(gensrc, fname), "w") as f:
     print("-- Generating %s" % os.path.join(gensrc, fname))
     emitln(f, '#include "sym_kernels.h"')
@@ -280,7 +304,7 @@ with open(os.path.join(gensrc, "sym_kernels_host.cc"), "w") as f:
   emitln(f, '#include "device.h"')
   emitln(f, '')
 
-  kernel_list = list(enumerate_kernels())
+  kernel_list = kernels_to_build
   for k in kernel_list:
     emitln(f, prototype(k))
   emitln(f, '')
@@ -309,6 +333,7 @@ with open(os.path.join(gensrc, "sym_kernels_host.cc"), "w") as f:
   emitln(f, '')
 
   emitln(f, 'int ncclSymkKernelMaxDynamicSmem[%d];' % len(kernel_list))
+  emitln(f, 'int ncclSymkKernelMaxThreads[%d];' % len(kernel_list))
   emitln(f, '')
 
   emitln(f, 'int ncclSymkGetKernelIndex(ncclSymkKernelId id, int red, ncclDataType_t ty) {')

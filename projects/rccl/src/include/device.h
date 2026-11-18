@@ -91,6 +91,8 @@ extern const char* ncclProtoStr[NCCL_NUM_PROTOCOLS];
 #define NCCL_CUDA_ARCH_SPECIFIC 1010
 #elif __CUDA_ARCH_HAS_FEATURE__(SM120_ALL)
 #define NCCL_CUDA_ARCH_SPECIFIC 1200
+#elif __CUDA_ARCH_HAS_FEATURE__(RUBIN_ALL)
+#define NCCL_CUDA_ARCH_SPECIFIC 1070
 #else
 #define NCCL_CUDA_ARCH_SPECIFIC 0
 #endif
@@ -105,6 +107,8 @@ extern const char* ncclProtoStr[NCCL_NUM_PROTOCOLS];
 #endif
 
 #include "nccl_device/net_device.h"
+#include "nccl_device/impl/ll__types.h"
+#include "nccl_device/impl/ll128__types.h"
 
 enum ncclDevRedOp_t {
   ncclDevSum,
@@ -121,25 +125,11 @@ struct ncclDevRedOpFull {
   uint64_t scalarArg;
 };
 
-
 #include "nccl_device/rccl_ptr.h"
 
-union ncclLLFifoLine {
-  /* Flags have to be *after* data, because otherwise, an incomplete receive
-    from the network may receive the flag but not the data.
-    Note this is assuming that either we receive contiguous chunks of data
-    (sockets) or data is written with an atomicity of 8 bytes (IB/RDMA). */
-  struct {
-    uint32_t data1;
-    uint32_t flag1;
-    uint32_t data2;
-    uint32_t flag2;
-  };
-  uint64_t v[2];
-  int4 i4;
-  v4u v4u; /* same layout as data1,flag1,data2,flag2 for b128 load/store */
-};
-
+// ncclLLFifoLine now lives in nccl_device/impl/ll__types.h (included above). RCCL device code
+// (op128.h, prims_ll.h) relies on its v4u member for b128 loads/stores; the asserts below guard
+// the layout those accesses assume.
 static_assert(sizeof(union ncclLLFifoLine) == 16, "ncclLLFifoLine must stay 16 bytes");
 static_assert(alignof(union ncclLLFifoLine) == 16, "ncclLLFifoLine must stay 16-byte aligned");
 
@@ -182,22 +172,22 @@ static_assert(alignof(union ncclLLFifoLine) == 16, "ncclLLFifoLine must stay 16-
 #define CHANNELS_PER_MASK_WORD 64
 #define CHANNEL_LIMIT 16 // this is used to limit channels for pre MI3xx GPUs
 #define NCCL_MAX_CGA_CLUSTER_SIZE 8
-#define NCCL_MAX_LOCAL_RANKS 72
+#define NCCL_MAX_LOCAL_RANKS 144
 #define NCCL_MIN_NTHREADS (4 * WARP_SIZE)
 #define NCCL_SIMPLE_MAX_NTHREADS NCCL_MAX_NTHREADS
 #define NCCL_SIMPLE_EXTRA_GROUP_IF_NTHREADS_GE (3 * WARP_SIZE)
 #define NCCL_LL_MAX_NTHREADS NCCL_MAX_NTHREADS
-#define NCCL_LL_LINES_PER_THREAD 8
-#ifdef TEST_LL_CLEANUP
-#define NCCL_LL_CLEAN_MASK 0x078 // Set to 0x100 to disable cleanup
-#define NCCL_LL_FLAG_MAX 0x100
-#define NCCL_LL_FLAG(a) ((uint32_t)((a) % NCCL_LL_FLAG_MAX))
-#else
-#define NCCL_LL_CLEAN_MASK 0x7ffffff8
-#define NCCL_LL_FLAG(a) ((uint32_t)(a))
-#endif
 // Make sure the clean mask will last for at least NCCL_NSTEPS
 static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK value");
+
+/* RCCL: nccl_device/impl/ll128__types.h (included above) carries upstream's NVIDIA values
+ * (128-byte lines, 640 threads, 8 shmem elems). Replace them with RCCL's arch-dependent values. */
+#undef NCCL_LL128_LINESIZE
+#undef NCCL_LL128_MAX_NTHREADS
+#undef NCCL_LL128_SHMEM_ELEMS_PER_THREAD
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+#undef NCCL_LL128_ELEMS_PER_THREAD
+#endif
 
 /* Note regarding LL128 macros settings in RCCL below:
  * Device code: NCCL_LL128_LINESIZE is arch-dependent (128 for gfx1250, 64 otherwise).
@@ -214,8 +204,6 @@ static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK 
 #else
 #define NCCL_LL128_LINESIZE 64
 #endif
-#define NCCL_LL128_LINEELEMS (NCCL_LL128_LINESIZE / sizeof(uint64_t))
-#define NCCL_LL128_DATAELEMS (NCCL_LL128_LINEELEMS - 1)
 
 #define NCCL_LL128_MAX_NTHREADS 256
 #if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
@@ -240,12 +228,19 @@ static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK 
 #else
 #define NCCL_LL128_SHMEM_ELEMS_PER_THREAD 8
 #endif
-#define NCCL_LL128_SHMEM_SIZE (NCCL_LL128_SHMEM_ELEMS_PER_THREAD * NCCL_LL128_MAX_NTHREADS)
 
 #define NCCL_P2P_WRITE 0x01
 #define NCCL_P2P_READ 0x02
 #define NCCL_DIRECT_NIC 0x04
+#define NCCL_GPU_PRODUCER 0x40 // RCCL: a peer GPU kernel publishes this conn's head/tail steps, not a proxy or copy engine
 #define NCCL_NVLS_MIN_POLL 0x80
+static_assert((NCCL_GPU_PRODUCER & (NCCL_P2P_WRITE | NCCL_P2P_READ | NCCL_DIRECT_NIC | NCCL_NVLS_MIN_POLL)) == 0,
+              "NCCL_GPU_PRODUCER must not share a bit with another conn flag");
+
+// RCCL: gfx950 Simple polls a head/tail step with a sys-scope acquire unless a peer GPU kernel publishes it.
+__host__ __device__ constexpr bool ncclConnStepNeedsSysAcquire(int connFlags) {
+  return (connFlags & NCCL_GPU_PRODUCER) == 0;
+}
 
 #define NCCL_REGULAR_BUFFER 0x00
 #define NCCL_IPC_REG_BUFFER 0x01
@@ -269,9 +264,9 @@ struct ncclConnInfo {
   uint64_t* tail; // Local for recv, remote for send
   uint64_t* head; // Local for send, remote for recv
 
-  int flags; // Direct communication / other flags
-  int shared; // Buffers are shared
-  int stepSize; // Step size for the SIMPLE buffer
+  int flags;          // Direct communication / other flags
+  int shared;         // Buffers are shared
+  uint32_t stepSize;  // Step size in bytes for the SIMPLE buffer
   void** ptrExchange; // Pointer exchange for direct communication
   uint64_t* redOpArgExchange; // PreOp scaler exchange for direct pull case
 
@@ -286,7 +281,26 @@ struct ncclConnInfo {
   uint32_t* next_hdp_reg; // Next GPU in ring (for p2p transport use only)
   uint32_t* curr_hdp_reg; // Current GPU's HDP register
   ncclNetDeviceHandle_t netDeviceHandle;
+  // Net recv only: RO=0 GPU flags, one per QP, each written by the remote NIC
+  // after the payload it carried on that QP. When set, the GPU waits until the
+  // flags selected by gdrFlushSeq[step % NCCL_STEPS] reach its sequence instead
+  // of the proxy issuing a GDR flush. Both live in local VRAM.
+  uint64_t* gdrFlushFlag;
+  uint64_t* gdrFlushSeq;
 };
+
+// A gdrFlushSeq entry packs the flag value in its low bits with the per-QP
+// flags that must reach it: `count` consecutive flags starting at flag `first`.
+// Zero means nothing to wait for.
+#define NCCL_GDR_FLUSH_SEQ_BITS 48
+#define NCCL_GDR_FLUSH_SEQ_MASK ((1ULL << NCCL_GDR_FLUSH_SEQ_BITS) - 1)
+#define NCCL_GDR_FLUSH_FIRST_SHIFT 48
+#define NCCL_GDR_FLUSH_COUNT_SHIFT 56
+// Byte distance between per-QP flags: each flag sits alone in a GPU L2
+// cacheline so NIC writes and GPU polls of different QPs never share one.
+#define NCCL_GDR_FLUSH_FLAG_STRIDE 128
+// Most per-QP flags one step can wait on; the GPU polls them all at once.
+#define NCCL_GDR_FLUSH_MAX_WAIT_QPS 8
 
 struct ncclProxyConnector {
   bool initialized;
@@ -305,6 +319,7 @@ struct ncclConnector {
   int connected;
   int hasSeen;
   int p2pOnly;
+  bool useCe;
   struct ncclProxyConnector proxyConn;
   struct ncclTransportComm* transportComm;
   void* transportResources;
@@ -329,10 +344,18 @@ struct ncclRing {
 #define NCCL_MAX_TREE_ARITY_TOP 2
 // Nodes inside the binary tree can have to two nodes down (+1 intra-node).
 #define NCCL_MAX_TREE_ARITY 3
+// Connection index zero is used by the symmetric ring. Tree edges use stable reciprocal indices so compact peer
+// ordering may differ at the two endpoints without aliasing persistent Flow state.
+constexpr int ncclFlowTreeIndexChild0 = 1;
+constexpr int ncclFlowTreeIndexChild1 = 2;
+constexpr int ncclFlowTreeIndexIntra = 3;
+constexpr int ncclFlowTreeIndexCount = 4;
 struct ncclTree {
   int depth;
   int up;
   int down[NCCL_MAX_TREE_ARITY];
+  int upIndex;
+  int downIndices[NCCL_MAX_TREE_ARITY];
 };
 
 #define NCCL_MAX_DIRECT_ARITY 7
@@ -350,6 +373,7 @@ struct ncclDirect {
 };
 
 #define NCCL_CONN_IDX_P2P_NET 2
+#define NCCL_CONN_IDX_P2P_CE 3
 #define NCCL_MAX_NVLS_ARITY 32
 #define NCCL_MAX_NVLS_TREE_ARITY 3
 struct ncclNvls {
@@ -368,7 +392,7 @@ struct ncclNvls {
 #define NCCL_MAX_ARITY NCCL_MAX_DIRECT_ARITY
 #endif
 
-#define NCCL_MAX_CONNS 3
+#define NCCL_MAX_CONNS 4
 struct ncclChannelPeer {
   struct ncclConnector send[NCCL_MAX_CONNS];
   struct ncclConnector recv[NCCL_MAX_CONNS];
@@ -523,7 +547,7 @@ struct alignas(16) ncclDevWorkBcast {
   void* recvbuff;
   size_t bytes;
   size_t bytes_done;
-  uint8_t pad[8];
+  // Compiler will add any necessary padding at the end to ensure 16-byte size granularity.
 };
 
 __device__ constexpr int ncclProtoGrainSize(int proto) {
@@ -596,14 +620,28 @@ __host__ __device__ constexpr int ncclMaxDevWorkBatchBytes(int cudaArch = NCCL_C
 #define NCCL_MAX_DEV_WORK_BATCH_COLLS (NCCL_MAX_DEV_WORK_BATCH_BYTES / sizeof(ncclDevWorkColl))
 #define NCCL_MAX_DEV_WORK_P2P_PER_BATCH 2
 #define NCCL_MAX_DEV_WORK_P2P_ELEMENTS 2
+// RCCL: funcId needs 15 bits for the generated device function count (NCCL uses
+// 11). func carries the progress-counter slot so it arrives with the batch
+// descriptor the kernel already loads rather than costing a lookup in device
+// memory; RCCL's ncclNumFuncs + 1 slots need 5 bits. To keep the batch at 16
+// bytes, nextJump is narrowed to NCCL_DEV_WORK_BATCH_NEXT_JUMP_BITS, which only
+// has to span the batches that fit in the kernel args (asserted below).
+constexpr int NCCL_DEV_WORK_BATCH_NEXT_JUMP_BITS = 9;
+constexpr int NCCL_DEV_WORK_BATCH_FUNC_ID_BITS = 15;
+constexpr int NCCL_DEV_WORK_BATCH_FUNC_BITS = 5;
+static_assert(NCCL_NUM_PROGRESS_COUNTERS <= (1 << NCCL_DEV_WORK_BATCH_FUNC_BITS),
+              "Progress-counter slots must fit in ncclDevWorkBatch::func");
 struct alignas(16) ncclDevWorkBatch {
   union {
     struct {
       // nextExtends: should next one be merged into this one.
       // nextJump=0: end of this channel's batch list
       // nextJump>0: batches[thisIndex+nextJump] is next batch in this list
-      uint32_t nextJump:14, nextExtends:1;
-      uint32_t workType:2, funcId:15;
+      uint32_t nextJump : NCCL_DEV_WORK_BATCH_NEXT_JUMP_BITS, nextExtends:1;
+      // func is the ncclFunc_t this batch's completions are counted under; the
+      // device would otherwise have to translate funcId through a table in
+      // global memory on the batch-entry path.
+      uint32_t workType:2, funcId : NCCL_DEV_WORK_BATCH_FUNC_ID_BITS, func : NCCL_DEV_WORK_BATCH_FUNC_BITS;
     };
     // Unioning bitfields with underlying type hints compiler to emit the best
     // SASS LD/ST accesses.
@@ -663,12 +701,21 @@ struct ncclDevProfilerPhases {
   } data[MAX_PROFILER_EVENTS_PER_CHANNEL];
 };
 
+// Shared layout for device progress counters and their pinned host mirror.
+// Each channel owns one active-slot bitmask to avoid inter-channel atomics.
+struct ncclProgressCountersBlock {
+  uint64_t completedWorkCount[NCCL_NUM_PROGRESS_COUNTERS];
+  uint64_t completedTimeNs[NCCL_NUM_PROGRESS_COUNTERS];
+  uint64_t collOpActive[MAXCHANNELS];
+};
+
 struct ncclKernelComm {
   int rank;
   int nRanks;
   int node;
   int nNodes;
   int buffSizes[NCCL_NUM_PROTOCOLS];
+  int p2pLl128BuffSize;
   int p2pChunkSize;
   bool p2pCrossClique;
   int isAllNvlink;
@@ -676,6 +723,10 @@ struct ncclKernelComm {
   int cheapPostSendFenceOff; // RCCL: true if cheap post-peer fence is disabled (comm-global)
 #if ENABLE_TDM_SIMPLE
   int tdmSimpleEnable; // RCCL: route copy-shaped SIMPLE slices through the TDM mover
+  int tdmSimpleReduceEnable; // RCCL: route reduction-shaped SIMPLE slices through the TDM mover
+#endif
+#if ENABLE_TDM_PRIM_LL128
+  int tdmLl128Enable; // RCCL: route LL128 user-buffer legs through the async-to-LDS engine
 #endif
   int patSharedQps; // true if PAT ReduceScatter and AllGather share one connection set
   int p2pChannelShiftSize; // [RCCL] Modifies how parts are mapped to p2p channels
@@ -694,7 +745,9 @@ struct ncclKernelComm {
   // Profiler counters
   struct ncclDevProfiler* workStarted /*[MAXCHANNELS]*/;
   struct ncclDevProfiler* workCompleted /*[MAXCHANNELS]*/;
-  struct ncclDevProfilerPhases* workPhases /*[MAXCHANNELS]*/;
+
+  // GPU-resident progress-counter block; null when GPU progress counters are disabled.
+  struct ncclProgressCountersBlock* progressCounters;
 
 #ifdef ENABLE_FAULT_INJECTION
   uint64_t faults;
@@ -729,6 +782,31 @@ inline __host__ __device__ int countOneBits(struct channelMasks const& x) {
   return n;
 }
 
+// Channel of the channelOrdinal-th set bit of mask, or -1; needs 0 <= lane < WARP_SIZE.
+// Lane checks bits lane and WARP_SIZE + lane (wave32) per word.
+__device__ __forceinline__ int ncclChannelMaskNthChannelId(struct channelMasks const& mask, int channelOrdinal,
+                                                           int lane) {
+  int total = 0;
+  for (int i = 0; i < (int)(MAXCHANNELS / CHANNELS_PER_MASK_WORD); i++) {
+    const uint64_t word = mask.masks[i];
+    int bit = lane;
+    if ((word & (1ull << bit)) && total + __popcll(word & ((1ull << bit) - 1)) == channelOrdinal) {
+      return bit + i * CHANNELS_PER_MASK_WORD;
+    }
+    if (WARP_SIZE < 64) {
+      bit = WARP_SIZE + lane;
+      if ((word & (1ull << bit)) && total + __popcll(word & ((1ull << bit) - 1)) == channelOrdinal) {
+        return bit + i * CHANNELS_PER_MASK_WORD;
+      }
+    }
+    total += __popcll(word);
+  }
+  return -1;
+}
+
+#define RCCL_DEV_FLAG_PROFILER 0x1 // profiler plugin loaded
+#define RCCL_DEV_FLAG_PROGRESS 0x2 // comm->deviceCountersBlock is allocated iff device progress counters are enabled
+
 struct alignas(16) ncclDevKernelArgs {
   struct ncclKernelComm* comm;
 #ifdef ENABLE_WARP_SPEED
@@ -736,6 +814,7 @@ struct alignas(16) ncclDevKernelArgs {
 #endif
   struct channelMasks channelMask;
   enum ncclDevWorkStorageType workStorageType;
+  uint8_t devFlags; // RCCL_DEV_FLAG_* bits; uses the padding before workMask, so sizeof is unchanged
   uint32_t workMask;
   void* workBuf;
   // A channel's first batch is at `blockIdx.x`. Use `nextJump` to follow rest of list.
@@ -768,6 +847,9 @@ __host__ __device__ constexpr int ncclMaxKernelArgsSize(/*int cudaDriver, */ int
   // return (cudaArch < 700 || cudaDriver < 12010) ? 4<<10 : (32<<10)-4;
   return sizeof(ncclDevKernelArgsDefaultStorage);
 }
+static_assert(ncclMaxKernelArgsSize() / sizeof(struct ncclDevWorkBatch) <= (1 << NCCL_DEV_WORK_BATCH_NEXT_JUMP_BITS),
+              "ncclDevWorkBatch::nextJump must span every batch that fits in the kernel args");
+static_assert(sizeof(struct ncclDevWorkBatch) == 16, "ncclDevWorkBatch must stay 16 bytes");
 
 template <typename T>
 __host__ __device__ constexpr T min_constexpr(T a) {
@@ -862,7 +944,8 @@ extern bool const ncclDevKernelForFuncIsSpecialized[/*funcIndex*/];
 
 // Launch a one-rank reduction on stream.
 ncclResult_t ncclLaunchOneRank(void* dst, void const* src, size_t nElts, struct ncclDevRedOpFull redOp,
-                               ncclDataType_t type, cudaStream_t stream, void const* acc = nullptr);
+                               ncclDataType_t type, cudaStream_t stream, cudaEvent_t launchCompletionEvent,
+                               void const* acc = nullptr);
 
 // `ncclNvlsSupported()` needs to be in sync with "func_valid" in "src/device/generate.py"
 inline bool ncclNvlsSupported(int devRedOp, int type) {
@@ -910,7 +993,7 @@ extern bool const ncclDevFuncUnrollGenerated[NCCL_NUM_UNROLLS];
 // Arch each unroll factor's device functions were compiled for, or nullptr when
 // the unroll carries no arch restriction. Neither table implies the other, so both
 // have to be consulted: an entry names its arch even for an unroll this build left
-// out, and BUILD_ALL_UNROLLS clears every entry because it compiles them all.
+// out. BUILD_ALL_UNROLLS does not clear the pin.
 extern char const* const ncclDevFuncUnrollArch[NCCL_NUM_UNROLLS];
 
 // `ncclDevFuncId()` needs to be in sync with 'all_colls' in generate.py

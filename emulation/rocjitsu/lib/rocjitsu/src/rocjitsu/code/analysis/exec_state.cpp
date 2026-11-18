@@ -8,9 +8,9 @@
 #include "rocjitsu/isa/operand.h"
 
 #include <algorithm>
+#include <cassert>
 #include <deque>
 #include <optional>
-#include <stdexcept>
 #include <unordered_set>
 #include <vector>
 
@@ -235,8 +235,7 @@ ExecMaskAnalysis::ExecMaskAnalysis(KernelBlockScope blocks, uint8_t wave_size,
                                    std::span<const ScopedCfgEdge> extra_edges,
                                    std::span<const BasicBlock *const> entry_blocks)
     : wave_size_(wave_size) {
-  if (wave_size != 32 && wave_size != 64)
-    throw std::invalid_argument("ExecMaskAnalysis: wave_size must be 32 or 64");
+  assert((wave_size == 32 || wave_size == 64) && "ExecMaskAnalysis: wave_size must be 32 or 64");
   analyze(blocks, extra_edges, entry_blocks);
 }
 

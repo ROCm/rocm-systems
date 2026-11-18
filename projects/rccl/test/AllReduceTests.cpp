@@ -5,6 +5,8 @@
  ************************************************************************/
 #include "TestBed.hpp"
 #include "CallCollectiveForked.hpp"
+#include "SingleProcMemRegTestUtils.hpp"
+#include "StandaloneUtils.hpp"
 
 namespace RcclUnitTesting
 {
@@ -149,6 +151,32 @@ namespace RcclUnitTesting
     testBed.Finalize();
   }
 
+  TEST(AllReduce, SingleProcMemReg)
+  {
+    SingleProcMemRegTestConfig config;
+    config.mode = SingleProcMemRegMode::Enabled;
+    config.funcTypes = {ncclCollAllReduce};
+    config.dataTypes = {ncclFloat64, ncclFloat32, ncclFloat16,
+                        ncclBfloat16, ncclFloat8e4m3, ncclFloat8e5m2};
+    config.redOps = {ncclSum};
+    config.roots = {0};
+    // Unaligned element counts designed to break 16-byte alignment:
+    // - 1 elem of FP16 = 2 bytes   (NOT 16-byte aligned)
+    // - 3 elems of FP32 = 12 bytes (NOT 16-byte aligned)
+    // - 7 elems of FP16 = 14 bytes (NOT 16-byte aligned)
+    // - 4314 elems of FP16 = 8,628 bytes (8628 / 16 = 539.25 -> NOT 16-byte aligned)
+    // - 5003 elems of FP32 = 20,012 bytes (20012 / 16 = 1250.75 -> NOT 16-byte aligned)
+    config.numElements = {1, 3, 7, 4314, 5003, 10000001};
+    config.inPlaceList = {true, false};
+    config.useHipGraphList = {true, false};
+    RunSingleProcMemRegTest(config);
+  }
+
+  TEST(AllReduce, SingleProcMemRegDisabled)
+  {
+    RunSingleProcMemRegDisabledTest(ncclCollAllReduce, ncclFloat32, true);
+  }
+
   // This tests using custom pre-mult scalars reductions
   TEST(AllReduce, PreMultScalar)
   {
@@ -266,6 +294,53 @@ namespace RcclUnitTesting
         expected[i] = i * nranks;
     }
     callCollectiveForked(nranks, ncclCollAllReduce, sendBuff, recvBuff, expected, use_managed_mem);
+  }
+
+  // Out-of-place AllReduce on ncclCommRegister'd buffers driven through TestBed, so the
+  // separate input and output registrations and their deregistration are exercised.
+  TEST(AllReduce, UserBufferRegistrationTestBed)
+  {
+    TestBed testBed;
+    std::vector<ncclDataType_t> dataTypes;
+    testBed.GetSupportedDataTypes(dataTypes, {ncclInt32, ncclFloat32});
+    if (dataTypes.empty())
+      GTEST_SKIP() << "Skipping... test datatypes excluded by UT_DATATYPES.";
+
+    std::vector<int> const numElements    = {1048576, 1024};
+    bool             const inPlace        = false;
+    bool             const useManagedMem  = false;
+    bool             const userRegistered = true;
+    int              const totalRanks     = testBed.ev.maxGpus;
+    OptionalColArgs options;
+    options.redOp = ncclSum;
+
+    bool isCorrect = true;
+    for (int isMultiProcess = 0; isMultiProcess <= 1 && isCorrect; ++isMultiProcess)
+    {
+      if (!(testBed.ev.processMask & (1 << isMultiProcess))) continue;
+      int const numProcesses = isMultiProcess ? totalRanks : 1;
+      testBed.InitComms(TestBed::GetDeviceIdsList(numProcesses, totalRanks,
+                                                  testBed.ev.GetGpuPriorityOrder()));
+
+      for (size_t dtIdx = 0; dtIdx < dataTypes.size() && isCorrect; ++dtIdx)
+      for (size_t neIdx = 0; neIdx < numElements.size() && isCorrect; ++neIdx)
+      {
+        if (testBed.ev.showNames)
+          TEST_INFO("%s AllReduce UserBufferRegistration %s [%d elements]",
+                    isMultiProcess ? "MP" : "SP", ncclDataTypeNames[dataTypes[dtIdx]],
+                    numElements[neIdx]);
+        testBed.SetCollectiveArgs(ncclCollAllReduce, dataTypes[dtIdx],
+                                  numElements[neIdx], numElements[neIdx], options);
+        testBed.AllocateMem(inPlace, useManagedMem, -1, -1, -1, userRegistered);
+        testBed.PrepareData();
+        testBed.ExecuteCollectives();
+        testBed.ValidateResults(isCorrect);
+        testBed.DeallocateMem();
+      }
+      testBed.DestroyComms();
+    }
+    EXPECT_TRUE(isCorrect);
+    testBed.Finalize();
   }
 
   TEST(AllReduce, ROCTX)

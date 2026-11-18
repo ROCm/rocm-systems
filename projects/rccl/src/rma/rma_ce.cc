@@ -31,7 +31,7 @@ ncclResult_t ncclRmaCeInit(struct ncclComm* comm) {
   comm->rmaState.rmaCeState.rmaCeCtxCount = comm->config.numRmaCtx;
 
   // CE only targets intra-node (LSA) peers, so signals are indexed by LSA-local rank.
-  signalSlots = (size_t)comm->devrState.lsaSize * comm->config.numRmaSig;
+  signalSlots = (size_t)comm->devrState.lsaTeamSize * comm->config.numRmaSig;
 
   NCCLCHECKGOTO(ncclCalloc(&ackInitHost, signalSlots), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&comm->rmaState.rmaCeState.rmaCeCtxs, comm->rmaState.rmaCeState.rmaCeCtxCount), ret, fail);
@@ -170,8 +170,8 @@ static ncclResult_t ncclRmaCePutLaunchPersist(struct ncclComm* comm, struct nccl
   ncclResult_t ret = ncclSuccess;
   int nRmaTasksCe = plan->rmaArgs->nRmaTasksCe;
 
-  int lsaSize = comm->devrState.lsaSize;
-  int lsaSelf = comm->devrState.lsaSelf;
+  int lsaSize = comm->devrState.lsaTeamSize;
+  int lsaSelf = comm->devrState.lsaTeamSelf;
 
   // Reusable per-task batch params
   // signal and data operations can not be in the same batch as batched mem copy does not guarantee order of execution
@@ -260,8 +260,8 @@ static ncclResult_t ncclRmaCePutLaunchNonPersist(struct ncclComm* comm, struct n
   ncclResult_t ret = ncclSuccess;
   int nRmaTasksCe = plan->rmaArgs->nRmaTasksCe;
 
-  int lsaSize = comm->devrState.lsaSize;
-  int lsaSelf = comm->devrState.lsaSelf;
+  int lsaSize = comm->devrState.lsaTeamSize;
+  int lsaSelf = comm->devrState.lsaTeamSelf;
 
   // signal and data operations can not be in the same batch as batched mem copy does not guarantee order of execution
   // we can not have signal operations to the same physical address in the same batch as batched mem copy does not
@@ -273,6 +273,8 @@ static ncclResult_t ncclRmaCePutLaunchNonPersist(struct ncclComm* comm, struct n
   CUstreamBatchMemOpParams* seqStageOps = nullptr;
   struct ncclTaskRma* currentTask = nullptr;
   int nActivePeers = 0;
+  int nQueuedPeers = 0;
+  int selfPeer = -1;
 
   if (nRmaTasksCe == 0) goto exit;
 
@@ -291,10 +293,36 @@ static ncclResult_t ncclRmaCePutLaunchNonPersist(struct ncclComm* comm, struct n
     ncclIntruQueueEnqueue(&peerTaskQueues[peer], task);
   }
 
+  // Arrange independent peer heads in LSA-relative cyclic order. For a dense
+  // all-to-all, every descriptor position then targets a different rank on
+  // every sender, avoiding an application-order-induced destination incast.
+  nQueuedPeers = nActivePeers;
+  nActivePeers = 0;
+  for (int step = 1; step < lsaSize; step++) {
+    int peerLsaRank = (lsaSelf + step) % lsaSize;
+    int peer = comm->devrState.lsaTeamRankList[peerLsaRank];
+    if (!ncclIntruQueueEmpty(&peerTaskQueues[peer])) {
+      activePeers[nActivePeers++] = peer;
+    }
+  }
+  selfPeer = comm->devrState.lsaTeamRankList[lsaSelf];
+  if (!ncclIntruQueueEmpty(&peerTaskQueues[selfPeer])) {
+    activePeers[nActivePeers++] = selfPeer;
+  }
+  if (nActivePeers != nQueuedPeers) {
+    WARN("RMA CE: cyclic peer ordering lost active peers (%d of %d)", nActivePeers, nQueuedPeers);
+    ret = ncclInternalError;
+    goto fail;
+  }
+
   while (nActivePeers > 0) {
     int nNextActivePeers = 0;
     int nSeqStageOps = 0;
+    int nRemotePeers = 0;
+    size_t minRemoteBytes = (size_t)-1;
+    size_t maxRemoteBytes = 0;
     dataParams.numOps = 0;
+    dataParams.chunking = false;
     signalParams.numOps = 0;
 
     for (int i = 0; i < nActivePeers; i++) {
@@ -307,6 +335,11 @@ static ncclResult_t ncclRmaCePutLaunchNonPersist(struct ncclComm* comm, struct n
       NCCLCHECKGOTO(ncclDevrWorldToLsaRank(comm, currentTask->peer, &peerLsaRank), ret, fail);
 
       size_t bytes = currentTask->count * ncclTypeSize(currentTask->datatype);
+      if (peer != selfPeer) {
+        nRemotePeers++;
+        minRemoteBytes = std::min(minRemoteBytes, bytes);
+        maxRemoteBytes = std::max(maxRemoteBytes, bytes);
+      }
 
       // Data movement
       if (bytes > 0) {
@@ -365,6 +398,10 @@ static ncclResult_t ncclRmaCePutLaunchNonPersist(struct ncclComm* comm, struct n
       }
     }
 
+    // Only dense heterogeneous RMA data batches request CE chunking. The CE
+    // launcher owns the chunk size and round-robin wave construction.
+    dataParams.chunking = nRemotePeers > 0 && (nRemotePeers == lsaSize - 1) && minRemoteBytes != maxRemoteBytes;
+
     // Issue batches in stream order. Staging writes must precede the memcpy
     // batch because signal mem copies read the staged sequence slots.
     if (nSeqStageOps > 0) {
@@ -420,8 +457,8 @@ ncclResult_t ncclRmaCeWaitLaunch(struct ncclComm* comm, struct ncclKernelPlan* p
 
   bool persistent = plan->persistent;
 
-  int lsaSize = comm->devrState.lsaSize;
-  int lsaSelf = comm->devrState.lsaSelf;
+  int lsaSize = comm->devrState.lsaTeamSize;
+  int lsaSelf = comm->devrState.lsaTeamSelf;
 
   struct ncclTaskRma* task = ncclIntruQueueHead(&plan->rmaTaskQueueCe);
   ncclIntruQueueDequeue(&plan->rmaTaskQueueCe);
@@ -503,7 +540,7 @@ ncclResult_t ncclRmaCeWaitLaunch(struct ncclComm* comm, struct ncclKernelPlan* p
   ncclMemoryPoolFree(&comm->memPool_ncclTaskRma, task);
 
 exit:
-  if (batchParams) free(batchParams);
+  free(batchParams);
   ncclCeFreeBatchOpsParams(&ceParams);
   return ret;
 invalid_task:

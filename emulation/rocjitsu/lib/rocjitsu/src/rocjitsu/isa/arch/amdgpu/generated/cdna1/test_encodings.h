@@ -357,6 +357,8 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"v_cvt_norm_u16_f16", {0x7E009C00U, 0x00000000U}},
     {"v_sat_pk_u8_i16", {0x7E009E00U, 0x00000000U}},
     {"v_swap_b32", {0x7E00A200U, 0x00000000U}},
+    {"v_exp_legacy_f32", {0x7E009600U, 0x00000000U}},
+    {"v_log_legacy_f32", {0x7E009800U, 0x00000000U}},
     {"v_cmp_class_f32", {0x7C200000U, 0x00000000U}},
     {"v_cmpx_class_f32", {0x7C220000U, 0x00000000U}},
     {"v_cmp_class_f64", {0x7C240000U, 0x00000000U}},
@@ -1079,6 +1081,8 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"v_cmpx_ne_u64", {0xD0FD0000U, 0x00000000U}},
     {"v_cmpx_ge_u64", {0xD0FE0000U, 0x00000000U}},
     {"v_cmpx_t_u64", {0xD0FF0000U, 0x00000000U}},
+    {"v_exp_legacy_f32", {0xD18B0000U, 0x00000000U}},
+    {"v_log_legacy_f32", {0xD18C0000U, 0x00000000U}},
     {"ds_add_u32", {0xD8000000U, 0x00000000U}},
     {"ds_sub_u32", {0xD8020000U, 0x00000000U}},
     {"ds_rsub_u32", {0xD8040000U, 0x00000000U}},
@@ -1242,7 +1246,7 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"buffer_load_short_d16_hi", {0xE0940000U, 0x00000000U}},
     {"buffer_load_format_d16_hi_x", {0xE0980000U, 0x00000000U}},
     {"buffer_store_format_d16_hi_x", {0xE09C0000U, 0x00000000U}},
-    {"buffer_store_lds_dword", {0xE0F40000U, 0x00000000U}},
+    {"buffer_store_lds_dword", {0xE0F50000U, 0x00000000U}},
     {"buffer_wbinvl1", {0xE0F80000U, 0x00000000U}},
     {"buffer_wbinvl1_vol", {0xE0FC0000U, 0x00000000U}},
     {"buffer_atomic_swap", {0xE1000000U, 0x00000000U}},
@@ -1431,7 +1435,7 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"flat_atomic_dec_x2", {0xDDB00000U, 0x00000000U}},
 };
 
-inline constexpr size_t NUM_ENCODINGS = 1410;
+inline constexpr size_t NUM_ENCODINGS = 1414;
 
 } // namespace rocjitsu::cdna1::test_data
 

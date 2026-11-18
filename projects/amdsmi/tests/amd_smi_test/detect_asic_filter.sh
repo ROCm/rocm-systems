@@ -25,12 +25,6 @@ declare -A GFX_TO_ASIC=(
     [gfx941]=90401
     [gfx942]=90402
     [gfx1030]=sienna_cichlid
-    [gfx1100]=strix_point
-    [gfx1103]=gfx1103
-    [gfx1150]=gfx1150
-    [gfx1151]=gfx1151
-    [gfx1152]=gfx1152
-    [gfx1153]=gfx1153
 )
 
 # ---------- ASIC detection ----------

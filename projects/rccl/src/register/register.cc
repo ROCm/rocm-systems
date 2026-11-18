@@ -33,6 +33,8 @@ ncclResult_t ncclRegLocalIsValid(struct ncclReg* reg, bool* isValid) {
 ncclResult_t ncclRegister(struct ncclComm* comm, void* data, size_t size, bool isGraph, void** handle) {
   NCCLCHECK(CommCheck(comm, "ncclCommRegister", "comm"));
 
+  *handle = NULL;
+
   struct ncclRegCache* cache = &comm->regCache;
   uintptr_t pageSize = cache->pageSize;
   uintptr_t begAddr = (uintptr_t)data & -pageSize;
@@ -115,7 +117,7 @@ static ncclResult_t regCleanup(struct ncclComm* comm, struct ncclReg* reg) {
     struct ncclRegNetHandles* netHandlePrev;
     while (netHandle) {
       if (ncclNetDeregBuffer(comm, netHandle->proxyConn, netHandle->handle) != ncclSuccess) {
-        WARN("rank %d deregister NET buffer handle %p proxy rank %d failed", comm->rank, netHandle->handle,
+        ATTN("rank %d deregister NET buffer handle %p proxy rank %d failed", comm->rank, netHandle->handle,
              netHandle->proxyConn->rank);
       }
       netHandlePrev = netHandle;
@@ -124,16 +126,11 @@ static ncclResult_t regCleanup(struct ncclComm* comm, struct ncclReg* reg) {
     }
   }
   if (reg->state & NVLS_REG_COMPLETE) {
-    if (ncclNvlsDeregBuffer(comm, &reg->mcHandle, reg->regAddr, reg->dev, reg->regUCSize, reg->regMCSize) !=
-        ncclSuccess) {
-      WARN("rank %d deregister NVLS buffer %p dev %d ucsize %ld mcsize %ld failed", comm->rank, (void*)reg->regAddr,
-           reg->dev, reg->regUCSize, reg->regMCSize);
-    }
-    reg->regAddr = (CUdeviceptr)NULL;
+    NCCLCHECK(ncclNvlsUbDeregister(comm, reg));
   }
   if (reg->state & COLLNET_REG_COMPLETE) {
     if (ncclCollnetDeregBuffer(comm, reg->collnetProxyconn, reg->collnetHandle) != ncclSuccess) {
-      WARN("rank %d deregister COLLNET buffer handle %p proxy rank %d failed", comm->rank, reg->collnetHandle,
+      ATTN("rank %d deregister COLLNET buffer handle %p proxy rank %d failed", comm->rank, reg->collnetHandle,
            reg->collnetProxyconn->rank);
     }
   }
@@ -145,7 +142,7 @@ static ncclResult_t regCleanup(struct ncclComm* comm, struct ncclReg* reg) {
     for (int i = 0; i < reg->ipcInfosSize; ++i)
       if (reg->ipcInfos[i]) {
         if (ncclIpcDeregBuffer(comm, reg->ipcInfos[i]) != ncclSuccess) {
-          WARN("rank %d deregister IPC buffer %p peerRank %d failed", comm->rank, reg->ipcInfos[i]->baseAddr,
+          ATTN("rank %d deregister IPC buffer %p peerRank %d failed", comm->rank, reg->ipcInfos[i]->baseAddr,
                reg->ipcInfos[i]->peerRank);
         }
         free(reg->ipcInfos[i]);
@@ -174,6 +171,8 @@ NCCL_API(ncclResult_t, ncclCommRegister, const ncclComm_t comm, void* buff, size
 
 ncclResult_t ncclCommRegister_impl(const ncclComm_t comm, void* buff, size_t size, void** handle) {
   ncclResult_t ret = ncclSuccess;
+  // Validate before anything else: the recorder at `end` dereferences *handle.
+  NCCLCHECK(PtrCheck(handle, "ncclCommRegister", "handle"));
 
   if (!ncclParamLocalRegister()) *handle = NULL;
   else {
@@ -192,6 +191,8 @@ end:
 }
 
 ncclResult_t ncclCommGraphRegister(const ncclComm_t comm, void* buff, size_t size, void** handle) {
+  NCCLCHECK(PtrCheck(handle, "ncclCommGraphRegister", "handle"));
+
   if (ncclP2pUsesMemcpy()) {
     *handle = NULL;
     INFO(NCCL_REG, "Skipping graph registration for buffer %p size %zi (P2pUsesMemcpy=%d)", buff, size,

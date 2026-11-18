@@ -36,6 +36,18 @@ pulling updated MR ISA XML files.
 | Shared execute templates | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/shared/` | `codegen.py` |
 | Cross-ISA legalization tables | `lib/rocjitsu/src/rocjitsu/code/dbt/generated/` | `legalization_codegen.py` |
 | Encoding decode/encode functions | `lib/rocjitsu/src/rocjitsu/code/dbt/generated/` | `encoding_translator_codegen.py` |
+| Matrix lane-conversion catalog (`matrix_conversions.h`) | `lib/rocjitsu/src/rocjitsu/code/dbt/generated/` | `codegen/dbt/rule_gen.py` |
+
+The matrix header is regenerated during DBT generation from the explicit
+`_MATRIX_CONVERSION_PAIRS` inventory in `rule_gen.py` and the lane-layout formulas
+in `layout_catalog.py`. This catalog describes layout permutations; adding an
+entry does not implement a new instruction translation or establish its ISA
+availability.
+The preserved I8 destination, `V_WMMA_I32_16X16X32_I8`, is a historical
+layout-only placeholder absent from the pinned RDNA4 XML. The current
+`cdna4_to_rdna4.cpp` consumer selects by source mnemonic and emits a fixed F16
+WMMA instruction without validating the catalog's destination names. See
+[`docs/codegen.md`](../../codegen.md) for the catalog and output-helper details.
 
 Hand-written files (`isa.h`, `insts.h`, `mma_exec.h`, `addr_calc.h/.cpp`) are
 not overwritten by the generator.
@@ -56,7 +68,7 @@ python -m amdisa [--isa-additions NAME:XML]
 | `--isa-additions NAME:XML` | Apply an ISA additions XML file to the named ISA. May be repeated. |
 | `--isa-variants NAME:JSON` | Attach one target-feature and legality manifest to the named ISA. |
 | `--gen-isas` | Generate ISA C++ files (decoders, encodings, execute bodies). Enabled by default. |
-| `--gen-dbt` | Generate DBT legalization tables and encoding translators. Enabled by default. |
+| `--gen-dbt` | Generate DBT legalization tables, matrix layout conversions, and encoding translators. Enabled by default. |
 | `--isa-output DIR` | Output path for generated ISA C++ files. |
 | `--include-root DIR` | Compiler include root used to spell relocatable generated includes. |
 | `--dbt-output DIR` | Output directory for DBT tables. Defaults to `--isa-output`. |
@@ -67,9 +79,9 @@ When neither `--gen-isas` nor `--gen-dbt` is specified, both are generated.
 
 The repository helper is the authoritative whole-tree workflow. It derives the
 checked-in MR ISA inputs and output directories from its own location, verifies
-the public CDNA5 gfx1251 extension provenance, applies the CDNA5 additions and
-target-variant manifest, regenerates ISA and DBT output, and formats changed
-generated files.
+the public CDNA5 gfx1251 extension provenance, applies the CDNA1 through CDNA4
+legacy-math additions and CDNA5 additions and target-variant manifest,
+regenerates ISA and DBT output, and formats changed generated files.
 
 Activate a Python virtual environment containing the generator dependencies and
 `pre-commit`, then run this command from the `rocm-systems` repository root:
@@ -79,8 +91,9 @@ Activate a Python virtual environment containing the generator dependencies and
 ```
 
 Use the lower-level CLI only for focused generator development. Preserve the
-CDNA5 `--isa-additions` and `--isa-variants` inputs shown in the detailed
-`docs/codegen.md` documentation when generating CDNA5 output.
+CDNA1-4 legacy math additions and CDNA5 `--isa-additions` and
+`--isa-variants` inputs shown in the detailed
+`docs/codegen.md` documentation for the corresponding CDNA output.
 
 ## Workflow for modifying ISA semantics
 

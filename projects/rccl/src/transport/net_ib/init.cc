@@ -30,11 +30,13 @@ NCCL_PARAM(IbDisable, "IB_DISABLE", 0);
 NCCL_PARAM(IbMergeVfs, "IB_MERGE_VFS", 1);
 NCCL_PARAM(IbMergeNics, "IB_MERGE_NICS", 1);
 NCCL_PARAM(IbDevicePciOrder, "IB_DEVICE_PCI_ORDER", 1);
+// [RCCL] upstream defaults to 1 (CX9 plane ordering); off so fused-vNIC order and names are unchanged (rule #28).
+NCCL_PARAM(IbSortMergeNics, "IB_SORT_MERGE_NICS", 0);
 
 extern int64_t ncclParamIbArThreshold();
 
 // Returns 1 if this is the path of two VFs of the same physical device
-static int ncclIbMatchVfPath(char* path1, char* path2) {
+static int ncclIbMatchVfPath(const char* path1, const char* path2) {
   // Merge multi-port NICs into the same PCI device
   if (ncclParamIbMergeVfs()) {
     return strncmp(path1, path2, strlen(path1) - 4) == 0;
@@ -127,6 +129,16 @@ static int ncclIbCompareDevs(const void* dev1, const void* dev2) {
   pciPathToInt64(path2, &id2);
 
   return (id1 < id2) ? -1 : ((id1 == id2) ? 0 : 1);
+}
+
+static int ncclIbCompareVDevsByPlane(const void* a, const void* b) {
+  int idxA = *(const int*)a;
+  int idxB = *(const int*)b;
+  int16_t planeA = ncclIbDevs[idxA].planeId;
+  int16_t planeB = ncclIbDevs[idxB].planeId;
+  if (planeA != planeB) return (planeA < planeB) ? -1 : 1;
+  // Equal planes tie-break on PCIe BDF, same ordering as in the initial sort
+  return ncclIbCompareDevs(&ncclIbDevs[idxA], &ncclIbDevs[idxB]);
 }
 
 static ncclResult_t ncclIbGetPciPath(char* devName, char** path, char* fullPath) {
@@ -223,20 +235,26 @@ static int ncclIbRelaxedOrderingCapable(void) {
 
 static bool ncclMlx5dvDmaBufCapable(ibv_context* context) {
   ncclResult_t res;
-  int dev_fail = 0;
+  int ibvErrno = 0;
+  int mlxErrno = 0;
 
   struct ibv_pd* pd;
   NCCLCHECKGOTO(wrap_ibv_alloc_pd(&pd, context), res, failure);
-  // Test kernel DMA-BUF support with a dummy call (fd=-1)
+  // Sample the ibv probe before the mlx5 call overwrites errno. A missing
+  // mlx5dv_reg_dmabuf_mr is ENOSYS and means not data-direct. Kernel DMA-BUF
+  // support is ibvErrno. On libibverbs 39 the ibv dummy call sets EBADF itself,
+  // so this mlx errno does not reach ncclIbDmaBufSupport().
   (void)wrap_direct_ibv_reg_dmabuf_mr(pd, 0ULL /*offset*/, 0ULL /*len*/, 0ULL /*iova*/, -1 /*fd*/, 0 /*flags*/);
-  // ibv_reg_dmabuf_mr() will fail with EOPNOTSUPP/EPROTONOSUPPORT if not supported (EBADF otherwise)
+  ibvErrno = errno;
   (void)wrap_direct_mlx5dv_reg_dmabuf_mr(pd, 0ULL /*offset*/, 0ULL /*len*/, 0ULL /*iova*/, -1 /*fd*/, 0 /*flags*/,
                                          0 /* mlx5 flags*/);
-  // mlx5dv_reg_dmabuf_mr() will fail with EOPNOTSUPP/EPROTONOSUPPORT if not supported (EBADF otherwise)
-  dev_fail |= (errno == EOPNOTSUPP) || (errno == EPROTONOSUPPORT);
+  mlxErrno = errno;
   NCCLCHECKGOTO(wrap_ibv_dealloc_pd(pd), res, failure);
-  // stop the search and goto failure
-  if (dev_fail) goto failure;
+  errno = ibvErrno;
+  if (ibvErrno == EOPNOTSUPP || ibvErrno == EPROTONOSUPPORT) return false;
+  // Symbol absent: not a data-direct device. Kernel DMA-BUF support is ibvErrno.
+  if (mlxErrno == ENOSYS) return false;
+  if (mlxErrno == EOPNOTSUPP || mlxErrno == EPROTONOSUPPORT) return false;
   return true;
 failure:
   return false;
@@ -289,6 +307,13 @@ ncclResult_t ncclIbMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
   if (ncclNMergedIbDevs == MAX_IB_VDEVS) {
     WARN("NET/IB : Cannot allocate any more virtual devices (%d)", MAX_IB_VDEVS);
     return ncclInvalidUsage;
+  }
+
+  ncclNetVDeviceProps_t sortedProps = *props;
+  // Sort sub-devices by planeId so sub-device indices align by plane across all merged devices.
+  if (ncclParamIbSortMergeNics()) {
+    qsort(sortedProps.devs, sortedProps.ndevs, sizeof(int), ncclIbCompareVDevsByPlane);
+    props = &sortedProps;
   }
 
   // Always count up number of merged devices
@@ -388,6 +413,135 @@ const char* ibProviderName[] = {
 
 ncclResult_t ncclIbFinalizeDevices(void) {
   netRefCount--;
+  return ncclSuccess;
+}
+
+#if defined(__aarch64__)
+static const bool ncclIbCpuArchAarch64 = true;
+#else
+static const bool ncclIbCpuArchAarch64 = false;
+#endif
+
+static const uint32_t NCCL_IB_MLX_VENDOR_ID = 0x02c9;
+static const uint32_t NCCL_IB_CX9_PART_ID = 0x1025;
+static const uint32_t NCCL_IB_VF_PART_ID = 0x101e;
+static bool ncclIbIsCx9(const struct ncclIbDev* dev) {
+  return dev->vendorId == NCCL_IB_MLX_VENDOR_ID &&
+         (dev->vendorPartId == NCCL_IB_CX9_PART_ID || dev->vendorPartId == NCCL_IB_VF_PART_ID) &&
+         strncmp(dev->fwVer, "82.", 3) == 0;
+}
+static const int NCCL_IB_VR_SOCKET_COUNT = 2;
+static const int NCCL_IB_VR_RAILS_PER_SOCKET = 2;
+
+int ncclIbCx9RailId(enum ncclIbRailPolicy policy, int devId, int nDevs) {
+  if (nDevs <= 0 || nDevs % 8) {
+    INFO(NCCL_NET | NCCL_ENV,
+         "NET/IB: rail policy was set to CX9 but the number of CX9 found (=%d) is not a modulo of 8, ignoring.", nDevs);
+    return NCCL_NET_ID_UNDEF;
+  }
+  int nCx9PerSocket = nDevs / NCCL_IB_VR_SOCKET_COUNT;
+  int devIdLocal = devId % nCx9PerSocket;
+  int socketRail = (devId / nCx9PerSocket) * NCCL_IB_VR_RAILS_PER_SOCKET;
+  if (policy == NCCL_IB_RAIL_POLICY_CX9_ALT) {
+    // Alternate layout per socket = [0 1 0 1 ...]
+    return socketRail + (devIdLocal % NCCL_IB_VR_RAILS_PER_SOCKET);
+  }
+  if (policy == NCCL_IB_RAIL_POLICY_CX9_BLOCK) {
+    // Block layout per socket = [0 ... 0 1 ... 1]
+    int nCx9PerRailPerSocket = nCx9PerSocket / NCCL_IB_VR_RAILS_PER_SOCKET;
+    return socketRail + (devIdLocal / nCx9PerRailPerSocket);
+  }
+  // Flipped layout per socket = [0 1 | 1 0].
+  int groupLocalId = std::min(devIdLocal, (nCx9PerSocket - 1) - devIdLocal);
+  int nCx9PerRailPerGroup = divUp(nCx9PerSocket, 2) / NCCL_IB_VR_RAILS_PER_SOCKET;
+  return socketRail + (groupLocalId / nCx9PerRailPerGroup);
+}
+
+static void ncclIbGetRailPolicy(enum ncclIbRailPolicy* policy) {
+  static std::once_flag onceFlag;
+  static enum ncclIbRailPolicy railPolicy = NCCL_IB_RAIL_POLICY_CX9_FLIP;
+  std::call_once(onceFlag, [&]() {
+    const char* envStr = ncclGetEnv("NCCL_IB_RAIL_POLICY");
+    if (envStr == NULL || envStr[0] == '\0') return;
+    if (strcasecmp(envStr, "CX9") == 0 || strcasecmp(envStr, "CX9:FLIP") == 0) {
+      railPolicy = NCCL_IB_RAIL_POLICY_CX9_FLIP;
+    } else if (strcasecmp(envStr, "CX9:ALT") == 0) {
+      railPolicy = NCCL_IB_RAIL_POLICY_CX9_ALT;
+    } else if (strcasecmp(envStr, "CX9:BLOCK") == 0) {
+      railPolicy = NCCL_IB_RAIL_POLICY_CX9_BLOCK;
+    } else if (strcasecmp(envStr, "NONE") == 0) {
+      railPolicy = NCCL_IB_RAIL_POLICY_NONE;
+    } else {
+      INFO(NCCL_ENV | NCCL_NET, "NET/IB: Unrecognized NCCL_IB_RAIL_POLICY=%s, ignoring.", envStr);
+      return;
+    }
+    INFO(NCCL_ENV, "NET/IB: NCCL_IB_RAIL_POLICY set by environment to %s", envStr);
+  });
+  *policy = railPolicy;
+}
+
+// Returns the index of dev in the array of pci paths
+static int ncclIbGetPciIndex(int nPaths, const char** pciPaths, struct ncclIbDev* dev) {
+  int devId = 0;
+  while (devId < nPaths) {
+    if (dev->pciPath && pciPaths[devId] && ncclIbMatchVfPath(dev->pciPath, pciPaths[devId])) break;
+    devId++;
+  }
+  return devId;
+}
+
+// returns the policy and the total number of devices subject to the policy.
+static ncclResult_t ncclIbAutoPolicy(enum ncclIbRailPolicy* policy, int* nDevs) {
+  static int count = 0;
+  static std::once_flag onceFlag;
+  static ncclIbRailPolicy cache = NCCL_IB_RAIL_POLICY_NONE;
+
+  std::call_once(onceFlag, [&]() {
+    ncclIbGetRailPolicy(&cache);
+    if (ncclIbCpuArchAarch64 && (cache == NCCL_IB_RAIL_POLICY_CX9_BLOCK || cache == NCCL_IB_RAIL_POLICY_CX9_ALT ||
+                                 cache == NCCL_IB_RAIL_POLICY_CX9_FLIP)) {
+      count = 0;
+      const char* devPciPath[MAX_IB_DEVS] = {};
+      for (int d = 0; d < ncclNIbDevs; d++) {
+        struct ncclIbDev* dev = ncclIbDevs + d;
+        if (!ncclIbIsCx9(dev)) continue;
+        int devId = ncclIbGetPciIndex(count, devPciPath, dev);
+        if (devId == count) devPciPath[count++] = dev->pciPath;
+      }
+      if (count == 0) cache = NCCL_IB_RAIL_POLICY_NONE;
+    }
+  });
+  *policy = cache;
+  *nDevs = count;
+  return ncclSuccess;
+}
+
+// Attempt to assign a rail and plane ID for devices (after they have been sorted by PCIe path)
+static ncclResult_t ncclIbAutoAssignRailPlane(int d, const char** uniquePaths, int* uniqueCount) {
+  int nDevs;
+  enum ncclIbRailPolicy policy;
+  NCCLCHECK(ncclIbAutoPolicy(&policy, &nDevs));
+  if (policy == NCCL_IB_RAIL_POLICY_NONE || nDevs == 0) return ncclSuccess;
+  struct ncclIbDev* dev = ncclIbDevs + d;
+  if ((policy == NCCL_IB_RAIL_POLICY_CX9_ALT || policy == NCCL_IB_RAIL_POLICY_CX9_BLOCK ||
+       policy == NCCL_IB_RAIL_POLICY_CX9_FLIP) &&
+      ncclIbIsCx9(dev)) {
+    // Get the index of the corresponding CX9 device (CX9s are sorted by PCIe path)
+    int devId = ncclIbGetPciIndex(*uniqueCount, uniquePaths, dev);
+    int railId = ncclIbCx9RailId(policy, devId, nDevs);
+    if (railId == NCCL_NET_ID_UNDEF) return ncclSuccess;
+    if (devId == *uniqueCount) uniquePaths[(*uniqueCount)++] = dev->pciPath;
+
+    if (dev->railId == NCCL_NET_ID_UNDEF) dev->railId = railId;
+  }
+  // Regardless of the rail assignment, get the plane ID looking at the devices already assigned to the same rail.
+  if (dev->planeId == NCCL_NET_ID_UNDEF) {
+    dev->planeId = 0;
+    for (int i = 0; i < d; i++) {
+      struct ncclIbDev* prevDev = ncclIbDevs + i;
+      if (prevDev->railId == dev->railId) (dev->planeId)++;
+    }
+  }
   return ncclSuccess;
 }
 
@@ -500,7 +654,10 @@ ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
                 TRACE(NCCL_NET, "NET/IB: Device %s does not support Data Direct DMA.", devices[d]->name);
               } else {
                 WARN("NET/IB: Error in mlx5dv_get_data_direct_sysfs_path with device %s", devices[d]->name);
-                return res;
+                // No port of this device has been recorded yet, so the context is still ours to close.
+                (void)wrap_ibv_close_device(context);
+                ret = res;
+                goto fail;
               }
             }
           }
@@ -508,6 +665,11 @@ ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
             ncclIbDevs[ncclNIbDevs].device = d;
             ncclIbDevs[ncclNIbDevs].ibProvider = ibProvider;
             ncclIbDevs[ncclNIbDevs].guid = devAttr.sys_image_guid;
+            ncclIbDevs[ncclNIbDevs].vendorId = devAttr.vendor_id;
+            ncclIbDevs[ncclNIbDevs].vendorPartId = devAttr.vendor_part_id;
+            // fwVer has the same size as fw_ver: copy it in full and always NUL-terminate.
+            memcpy(ncclIbDevs[ncclNIbDevs].fwVer, devAttr.fw_ver, sizeof(ncclIbDevs[ncclNIbDevs].fwVer));
+            ncclIbDevs[ncclNIbDevs].fwVer[sizeof(ncclIbDevs[ncclNIbDevs].fwVer) - 1] = '\0';
             ncclIbDevs[ncclNIbDevs].portAttr = portAttr;
             ncclIbDevs[ncclNIbDevs].portNum = port_num;
             ncclIbDevs[ncclNIbDevs].link = portAttr.link_layer;
@@ -533,7 +695,7 @@ ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
                           ret, fail);
             if (dev == 1) {
               snprintf(ncclIbDevs[ncclNIbDevs].devName, MAXNAMESIZE, "%s_dma", devices[d]->name);
-              NCCLCHECK(ncclCalloc(&ncclIbDevs[ncclNIbDevs].pciPath, PATH_MAX));
+              NCCLCHECKGOTO(ncclCalloc(&ncclIbDevs[ncclNIbDevs].pciPath, PATH_MAX), ret, fail);
               strncpy(ncclIbDevs[ncclNIbDevs].pciPath, dataDirectDevicePath, PATH_MAX);
               ncclIbDevs[ncclNIbDevs].capsProvider.mlx5.dataDirect = 1;
             }
@@ -543,7 +705,7 @@ ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
             ncclIbDevs[ncclNIbDevs].mrCache.capacity = 0;
             ncclIbDevs[ncclNIbDevs].mrCache.population = 0;
             ncclIbDevs[ncclNIbDevs].mrCache.slots = NULL;
-            NCCLCHECK(ncclIbStatsInit(&ncclIbDevs[ncclNIbDevs].stats));
+            NCCLCHECKGOTO(ncclIbStatsInit(&ncclIbDevs[ncclNIbDevs].stats), ret, fail);
 
             ncclIbDevs[ncclNIbDevs].railId = (userIfId >= 0) ? userIfs[userIfId].rail : -1;
             ncclIbDevs[ncclNIbDevs].planeId = (userIfId >= 0) ? userIfs[userIfId].plane : -1;
@@ -562,10 +724,6 @@ ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
                  ncclIbDevs[ncclNIbDevs].speed, context, ncclIbDevs[ncclNIbDevs].pciPath, ncclIbDevs[ncclNIbDevs].ar,
                  ncclIbDevs[ncclNIbDevs].oooRqSize);
 
-            ncclIbAsyncThread = std::thread(ncclIbAsyncThreadMain, ncclIbDevs + ncclNIbDevs);
-            ncclSetThreadName(ncclIbAsyncThread, "NCCL IbAsync %2d", ncclNIbDevs);
-            ncclIbAsyncThread.detach();
-
             ncclNIbDevs++;
             nPorts++;
           }
@@ -576,9 +734,10 @@ ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
         }
       }
 
-      if (devices && (ncclSuccess != wrap_ibv_free_device_list(devices))) {
-        ret = ncclInternalError;
-        goto fail;
+      if (devices) {
+        // wrap_ibv_free_device_list never fails; clear devices so the fail path cannot free it twice
+        wrap_ibv_free_device_list(devices);
+        devices = NULL;
       }
     }
     if (ncclNIbDevs == 0) {
@@ -597,11 +756,20 @@ ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
     }
     // sort devices to ensure a consistent order across nodes
     if (ncclParamIbDevicePciOrder()) qsort(ncclIbDevs, ncclNIbDevs, sizeof(struct ncclIbDev), ncclIbCompareDevs);
+    // Start the async-event threads only once ncclIbDevs[] has its final, stable device order.
+    for (int d = 0; d < ncclNIbDevs; d++) {
+      ncclIbAsyncThread = std::thread(ncclIbAsyncThreadMain, ncclIbDevs + d);
+      ncclSetThreadName(ncclIbAsyncThread, "NCCL IbAsync %2d", d);
+      ncclIbAsyncThread.detach();
+    }
     // Once sorted, get the realPort ID, the plane index, and create the virtual devices.
     // Doing it after sorting ensures that devices will have consistent realPort IDs and plane indexes accross ranks.
     char line[2048] = "";
+    const char* pciPaths[MAX_IB_DEVS] = {};
+    int nPciPaths = 0;
     int16_t uniquePlaneCount = 1, uniquePlaneIds[NCCL_IB_PLANE_MAX_INDEX] = {NCCL_NET_ID_UNDEF};
     for (int d = 0; d < ncclNIbDevs; d++) {
+      NCCLCHECKGOTO(ncclIbAutoAssignRailPlane(d, pciPaths, &nPciPaths), ret, fail);
       NCCLCHECKGOTO(ncclIbGetPlaneIndex(ncclIbDevs[d].planeId, &uniquePlaneCount, uniquePlaneIds,
                                         &ncclIbDevs[d].planeIdx),
                     ret, fail);
@@ -626,26 +794,24 @@ ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
     }
     char addrline[SOCKET_NAME_MAXLEN + 1];
     INFO(NCCL_INIT | NCCL_NET, "NET/IB : Using%s %s; OOB %s:%s", line, ncclIbRelaxedOrderingEnabled ? "[RO]" : "",
-         ncclIbIfName, ncclSocketToString(&ncclIbIfAddr, addrline));
+         ncclIbIfName, ncclSocketToString(&ncclIbIfAddr, addrline, sizeof(addrline)));
   }
 exit:
   return ret;
 fail:
-  if (devices != NULL && ncclSuccess != wrap_ibv_free_device_list(devices)) {
-    WARN("NET/IB : Unable to free device list");
-  }
+  if (devices) wrap_ibv_free_device_list(devices);
   goto exit;
 }
 
 ncclResult_t ncclIbInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config, ncclDebugLogger_t logFunction,
                         ncclProfilerCallback_t profFunction) {
   ncclResult_t ret = ncclSuccess;
-  ncclNetCommConfig_t* netCommConfig = nullptr;
+  struct ncclIbNetCtx* netCtx = nullptr;
   NCCLCHECK(ncclIbInitDevices(logFunction, profFunction));
   NCCLCHECK(ncclIbPortRecoveryThreadStart());
-  NCCLCHECK(ncclCalloc(&netCommConfig, 1));
-  netCommConfig->trafficClass = config->trafficClass;
-  *ctx = (void*)netCommConfig;
+  NCCLCHECK(ncclCalloc(&netCtx, 1));
+  netCtx->config.trafficClass = config->trafficClass;
+  *ctx = (void*)netCtx;
   return ret;
 }
 

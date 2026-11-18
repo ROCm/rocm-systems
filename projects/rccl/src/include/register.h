@@ -13,6 +13,8 @@
 #include <cuda.h>
 #include <stdint.h>
 
+struct ncclMcArenaReg;
+
 int64_t ncclParamLocalRegister();
 int64_t ncclParamGraphRegister();
 
@@ -28,6 +30,8 @@ enum {
 struct ncclPeerRegIpcAddr {
   uintptr_t* devPeerRmtAddrs;
   uintptr_t* hostPeerRmtAddrs;
+  // hostPeerRmtAddrs holds entries devPeerRmtAddrs has not received yet.
+  bool devPeerRmtAddrsStale;
 };
 
 struct ncclRegNetHandles {
@@ -45,11 +49,8 @@ struct ncclReg {
   // net reg
   struct ncclRegNetHandles* netHandleHead;
   // nvls reg
-  CUdeviceptr regAddr;
-  size_t regUCSize, regMCSize;
-  int dev;
-  CUmemGenericAllocationHandle mcHandle;
-  uintptr_t caddrs[NCCL_MAX_LOCAL_RANKS]; /* use to check if NVLS buffers match among intra-node ranks */
+  // Committed arena registration, owned here: NVLS_REG_COMPLETE implies non-NULL.
+  struct ncclMcArenaReg* nvlsUbReg;
   // collnet reg
   void* collnetHandle;
   // gin reg
@@ -60,6 +61,8 @@ struct ncclReg {
   struct ncclPeerRegIpcAddr regIpcAddrs;
   struct ncclIpcRegInfo** ipcInfos;  // Dynamically allocated, sized to ipcInfosSize
   int ipcInfosSize;                  // Size of ipcInfos array (localRanks or nRanks for cross-clique)
+  // RCCL: NET segment cache, written only by rcclNetRegSegmentCount / rcclNetRegCommit (rccl_wrap.cc).
+  struct { int nSegments; bool allPeers; } rcclNet;
 };
 
 struct ncclRegCache {

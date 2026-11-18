@@ -1,0 +1,816 @@
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#include "cuid_util.h"
+
+#include <dirent.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+#include <algorithm>
+#include <cctype>
+#include <cerrno>
+#include <cstring>
+#include <fstream>
+#include <iostream>
+#include <mutex>
+#include <sstream>
+#include <vector>
+
+#include "cuid_device.h"
+#include "rocm/sha2/sha256.h"
+#include "smbios_util.h"
+
+const char* Logger::LogLevelName(LogLevel level) const {
+  switch (level) {
+    case DEBUG:
+      return "DEBUG";
+    case INFO:
+      return "INFO";
+    case WARN:
+      return "WARN";
+    case ERROR:
+      return "ERROR";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+void Logger::log(LogLevel level, const std::string& msg) const {
+  if (level < level_) return;
+  std::cerr << "[" << LogLevelName(level) << "] " << msg << std::endl;
+}
+
+// Helper to read a sysfs file into a string
+std::string CuidUtilities::errno_string(int err) {
+  char buf[256];
+#if defined(_WIN32)
+  if (strerror_s(buf, sizeof(buf), err) != 0) {
+    return "unknown error " + std::to_string(err);
+  }
+  return std::string(buf);
+#elif defined(_GNU_SOURCE)
+  // GNU strerror_r returns a pointer that may or may not point at buf.
+  const char* msg = strerror_r(err, buf, sizeof(buf));
+  return msg ? std::string(msg) : ("unknown error " + std::to_string(err));
+#else
+  // XSI strerror_r fills buf and returns 0 on success.
+  if (strerror_r(err, buf, sizeof(buf)) != 0) {
+    return "unknown error " + std::to_string(err);
+  }
+  return std::string(buf);
+#endif
+}
+
+std::string CuidUtilities::read_sysfs_file(const std::string& path) {
+  std::ifstream file(path);
+  if (!file.is_open()) return "";
+  std::stringstream ss;
+  ss << file.rdbuf();
+  std::string result = ss.str();
+  // Remove trailing newline if present
+  if (!result.empty() && result.back() == '\n') result.pop_back();
+  return result;
+}
+
+// Helper to get BDF from symlink, filter out non-PCI BDFs (e.g., USB like
+// 3-10.2:2.0)
+std::string CuidUtilities::readlink_bdf(const std::string& device_path) {
+  char buf[256];
+  ssize_t len = readlink(device_path.c_str(), buf, sizeof(buf) - 1);
+  if (len > 0) {
+    buf[len] = '\0';
+    // The symlink is typically ../../../0000:65:00.0 or ../../../3-10.2:2.0
+    const char* bdf = strrchr(buf, '/');
+    if (bdf && strlen(bdf + 1) < 32) {
+      std::string bdf_str = bdf + 1;
+      // Only accept PCI BDFs of the form "dddd:bb:dd.f"
+      // Example: 0000:65:00.0, or 10000:04:00.0 behind a VMD domain
+      if (is_valid_bdf(bdf_str)) {
+        return bdf_str;
+      }
+    }
+  }
+  return "";
+}
+
+// Helper to get device path from BDF based on device type
+// For GPUs: returns /sys/class/drm/renderDXXX/device or
+//           /sys/class/drm/cardN/device path
+// For NICs: returns /sys/class/net/<iface>/device path
+std::string CuidUtilities::bdf_to_device_path(const std::string& bdf,
+                                              amdcuid_device_type_t device_type) {
+  if (bdf.empty()) return "";
+
+  std::string pci_device_path = "/sys/bus/pci/devices/" + bdf;
+  std::string subsystem_dir;
+
+  if (device_type == AMDCUID_DEVICE_TYPE_GPU) {
+    subsystem_dir = pci_device_path + "/drm";
+    DIR* dir = opendir(subsystem_dir.c_str());
+    if (dir) {
+      struct dirent* entry;
+      std::string card_path;
+      // this call site owns its DIR*, which is all POSIX requires; readdir_r is deprecated and
+      // must not be adopted.
+      // NOLINTNEXTLINE(concurrency-mt-unsafe)
+      while ((entry = readdir(dir)) != nullptr) {
+        // Prefer renderD* nodes when available
+        if (strncmp(entry->d_name, "renderD", 7) == 0) {
+          std::string device_path = "/sys/class/drm/" + std::string(entry->d_name) + "/device";
+          closedir(dir);
+          return device_path;
+        }
+        // Track card entries as fallback (e.g., card0, card1)
+        // Exclude connector entries like card0-DP-1
+        if (strncmp(entry->d_name, "card", 4) == 0 && isdigit(entry->d_name[4])) {
+          bool all_digits = true;
+          for (size_t i = 4; entry->d_name[i] != '\0'; ++i) {
+            if (!isdigit(entry->d_name[i])) {
+              all_digits = false;
+              break;
+            }
+          }
+          if (all_digits && card_path.empty()) {
+            card_path = "/sys/class/drm/" + std::string(entry->d_name) + "/device";
+          }
+        }
+      }
+      closedir(dir);
+      // Fall back to card entry if no renderD node was found
+      // (e.g., when using GIM driver or for non-AMD GPUs)
+      if (!card_path.empty()) {
+        return card_path;
+      }
+    }
+  } else if (device_type == AMDCUID_DEVICE_TYPE_NIC) {
+    subsystem_dir = pci_device_path + "/net";
+    DIR* dir = opendir(subsystem_dir.c_str());
+    if (dir) {
+      struct dirent* entry;
+      // this call site owns its DIR*, which is all POSIX requires; readdir_r is deprecated and
+      // must not be adopted.
+      // NOLINTNEXTLINE(concurrency-mt-unsafe)
+      while ((entry = readdir(dir)) != nullptr) {
+        // Skip . and ..
+        if (entry->d_name[0] == '.') continue;
+        std::string device_path = "/sys/class/net/" + std::string(entry->d_name) + "/device";
+        closedir(dir);
+        return device_path;
+      }
+      closedir(dir);
+    }
+  } else if (device_type == AMDCUID_DEVICE_TYPE_NPU) {
+    subsystem_dir = pci_device_path + "/accel";
+    DIR* dir = opendir(subsystem_dir.c_str());
+    if (dir) {
+      struct dirent* entry;
+      // this call site owns its DIR*, which is all POSIX requires; readdir_r is deprecated and
+      // must not be adopted.
+      // NOLINTNEXTLINE(concurrency-mt-unsafe)
+      while ((entry = readdir(dir)) != nullptr) {
+        // Skip . and ..
+        if (entry->d_name[0] == '.') continue;
+        // Match accelN entries
+        if (strncmp(entry->d_name, "accel", 5) == 0 && isdigit(entry->d_name[5])) {
+          std::string device_path = "/sys/class/accel/" + std::string(entry->d_name) + "/device";
+          closedir(dir);
+          return device_path;
+        }
+      }
+      closedir(dir);
+    }
+    // Fallback: when /sys/class/accel/ is not populated (e.g., amdxdna
+    // driver not loaded), return the PCI device path itself if it exists.
+    if (access(pci_device_path.c_str(), F_OK) == 0) {
+      return pci_device_path;
+    }
+  }
+
+  return "";
+}
+
+std::string CuidUtilities::real_dev_path_from_fd(int fd) {
+  struct stat st;
+  if (fstat(fd, &st) != 0) {
+    return "";
+  }
+  if (!S_ISCHR(st.st_mode) && !S_ISBLK(st.st_mode)) return "";
+  dev_t dev = st.st_rdev;
+  uint32_t major_num = major(dev);
+  uint32_t minor_num = minor(dev);
+
+  const std::string sys_path =
+      std::string(S_ISCHR(st.st_mode) ? "/sys/dev/char/" : "/sys/dev/block/") +
+      std::to_string(major_num) + ":" + std::to_string(minor_num);
+  char buf[PATH_MAX];
+  if (realpath(sys_path.c_str(), buf) != nullptr) {
+    return std::string(buf) + "/device";
+  }
+  // If all fails, return empty string
+  return "";
+}
+
+std::string CuidUtilities::get_real_path(const std::string& path) {
+  char buf[PATH_MAX];
+  if (realpath(path.c_str(), buf) != nullptr) {
+    return std::string(buf) + "/device";
+  }
+  return "";
+}
+
+int CuidUtilities::extract_render_minor(const std::string& path) {
+  size_t render_pos = path.find("renderD");
+  if (render_pos == std::string::npos) return -1;
+
+  size_t num_start = render_pos + 7;  // length of "renderD"
+  size_t num_end = path.find('/', num_start);
+  std::string num_str = (num_end != std::string::npos) ? path.substr(num_start, num_end - num_start)
+                                                       : path.substr(num_start);
+  try {
+    return std::stoi(num_str);
+  } catch (...) {
+    return -1;
+  }
+}
+
+// Minimal structures matching the kernel DRM UAPI (stable ABI).
+// Only the fields up to ids_flags are needed for VF detection.
+// The kernel ioctl handler (amdgpu_info_ioctl) respects return_size via
+// copy_to_user(out, &dev_info, min(size, sizeof(dev_info))), so providing
+// a smaller buffer than the full drm_amdgpu_info_device is safe.
+namespace {
+
+struct cuid_drm_amdgpu_info {
+  uint64_t return_pointer;
+  uint32_t return_size;
+  uint32_t query;
+  uint8_t padding[16];  // matches the union in the kernel struct
+};
+
+struct cuid_amdgpu_dev_info {
+  uint32_t device_id;
+  uint32_t chip_rev;
+  uint32_t external_rev;
+  uint32_t pci_rev;
+  uint32_t family;
+  uint32_t num_shader_engines;
+  uint32_t num_shader_arrays_per_engine;
+  uint32_t gpu_counter_freq;
+  uint64_t max_engine_clock;
+  uint64_t max_memory_clock;
+  uint32_t cu_active_number;
+  uint32_t cu_ao_mask;
+  uint32_t cu_bitmap[4][4];
+  uint32_t enabled_rb_pipes_mask;
+  uint32_t num_rb_pipes;
+  uint32_t num_hw_gfx_contexts;
+  uint32_t pcie_gen;
+  uint64_t ids_flags;
+};
+
+constexpr uint32_t kAmdgpuInfoDevInfo = 0x16;
+constexpr uint32_t kAmdgpuIdsFlagsModeShift = 0x8;
+constexpr uint32_t kAmdgpuIdsFlagsModeVf = 0x1;
+
+// DRM_IOCTL_AMDGPU_INFO = _IOW('d', DRM_COMMAND_BASE + DRM_AMDGPU_INFO, ...)
+// DRM_COMMAND_BASE = 0x40, DRM_AMDGPU_INFO = 0x05
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define CUID_DRM_IOCTL_AMDGPU_INFO _IOW('d', 0x45, cuid_drm_amdgpu_info)
+
+bool is_gpu_vf_mode(int fd) {
+  cuid_drm_amdgpu_info info_req = {};
+  cuid_amdgpu_dev_info dev_info = {};
+
+  info_req.return_pointer = reinterpret_cast<uint64_t>(&dev_info);
+  info_req.return_size = sizeof(dev_info);
+  info_req.query = kAmdgpuInfoDevInfo;
+
+  if (ioctl(fd, CUID_DRM_IOCTL_AMDGPU_INFO, &info_req) != 0) {
+    return false;
+  }
+
+  uint32_t mode = (dev_info.ids_flags >> kAmdgpuIdsFlagsModeShift) & 0x3;
+  return mode == kAmdgpuIdsFlagsModeVf;
+}
+
+uint16_t get_vf_index_from_sysfs(const std::string& device_path) {
+  // device_path is /sys/class/drm/renderDXXX/device
+  // Check if physfn symlink exists (present on VFs visible from the host)
+  std::string physfn_path = device_path + "/physfn";
+
+  // Get our own BDF from the device symlink
+  char dev_link[PATH_MAX];
+  ssize_t len = readlink(device_path.c_str(), dev_link, sizeof(dev_link) - 1);
+  if (len <= 0) return 0;
+  dev_link[len] = '\0';
+
+  const char* our_bdf_ptr = strrchr(dev_link, '/');
+  if (our_bdf_ptr == nullptr) return 0;
+  std::string our_bdf(our_bdf_ptr + 1);
+
+  // Resolve PF sysfs path via physfn symlink
+  char pf_real[PATH_MAX];
+  if (realpath(physfn_path.c_str(), pf_real) == nullptr) return 0;
+  std::string pf_path(pf_real);
+
+  // Enumerate virtfnX symlinks on the PF to find our VF index
+  for (int idx = 0; idx < 256; ++idx) {
+    std::string virtfn_symlink = pf_path + "/virtfn" + std::to_string(idx);
+    char vfn_link[PATH_MAX];
+    len = readlink(virtfn_symlink.c_str(), vfn_link, sizeof(vfn_link) - 1);
+    if (len <= 0) break;  // no more VFs
+    vfn_link[len] = '\0';
+
+    const char* vfn_bdf_ptr = strrchr(vfn_link, '/');
+    if (vfn_bdf_ptr == nullptr) continue;
+    if (our_bdf == (vfn_bdf_ptr + 1)) {
+      return static_cast<uint16_t>(idx + 1);
+    }
+  }
+  return 0;
+}
+
+}  // anonymous namespace
+
+CuidUtilities::VfIdentity CuidUtilities::get_gpu_vf_identity(const std::string& device_path) {
+  VfIdentity id;
+
+  int render_minor = extract_render_minor(device_path);
+  if (render_minor < 0) return id;
+
+  std::string dev_node = "/dev/dri/renderD" + std::to_string(render_minor);
+
+  int fd = open(dev_node.c_str(), O_RDWR | O_CLOEXEC);
+  if (fd < 0) {
+    // Fall back to read-only if we lack write permission
+    fd = open(dev_node.c_str(), O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return id;
+  }
+
+  id.is_vf = is_gpu_vf_mode(fd);
+  close(fd);
+
+  if (!id.is_vf) return id;
+
+  // physfn is visible, so we know which share of the card this is. The index is
+  // 1-based, leaving 0 to mean the card as a whole -- the same encoding a
+  // spatial partition uses, so a device and its first sub-unit never collide.
+  const uint16_t vf_index = get_vf_index_from_sysfs(device_path);
+  if (vf_index > 0) {
+    id.index_known = true;
+    id.unit_id = vf_index;
+  }
+
+  // Otherwise index_known stays false: a VF we cannot name, which is what a
+  // guest sees, and whose caller must not fall back to the card's serial.
+  return id;
+}
+
+uint16_t CuidUtilities::segment_high_from_bdf(const std::string& bdf) {
+  unsigned int segment = 0, bus = 0, device = 0, function = 0;
+  // NOLINTNEXTLINE(cert-err34-c) - the return count is checked below.
+  if (std::sscanf(bdf.c_str(), "%x:%x:%x.%x", &segment, &bus, &device, &function) != 4) {
+    return 0;
+  }
+  return static_cast<uint16_t>(segment >> 16);
+}
+
+void CuidUtilities::set_pcie_routing(AuxiliaryInput& input, const std::string& bdf) {
+  input.routing_id = routing_id_from_bdf(bdf);
+  input.segment_high = segment_high_from_bdf(bdf);
+}
+
+uint32_t CuidUtilities::routing_id_from_bdf(const std::string& bdf) {
+  unsigned int segment = 0, bus = 0, device = 0, function = 0;
+  // NOLINTNEXTLINE(cert-err34-c) - the return count is checked below.
+  if (std::sscanf(bdf.c_str(), "%x:%x:%x.%x", &segment, &bus, &device, &function) != 4) {
+    return 0;
+  }
+  return ((segment & 0xFFFFU) << 16) | ((bus & 0xFFU) << 8) | ((device & 0x1FU) << 3) |
+         (function & 0x7U);
+}
+
+namespace {
+
+int hex_value(char c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'a' && c <= 'f') return (c - 'a') + 10;
+  if (c >= 'A' && c <= 'F') return (c - 'A') + 10;
+  return -1;
+}
+
+}  // namespace
+
+// The machine identity in every temporary CUID's input structure.
+//
+// False when this host has none, which is not a degraded-but-usable case:
+// without it the input reduces to format, routing ID, vendor/device/revision
+// and component type, all properties of the hardware model and its slot, so
+// two identically-configured hosts would emit the same temporary CUID for
+// different physical parts.
+//
+// /var/lib/dbus/machine-id is the older location and the only one populated on
+// some distributions and in containers where /etc/machine-id was never written.
+// An /etc/machine-id that exists is authoritative even when it is not valid:
+// empty, "uninitialized" or all zero is an image whose identity is not yet
+// set, and a D-Bus ID beside it came with the image.
+bool CuidUtilities::read_machine_id(const std::string& path, const std::string& fallback,
+                                    uint8_t out[16]) {
+  std::memset(out, 0, 16);
+  struct stat st{};
+  const bool absent = stat(path.c_str(), &st) != 0 && errno == ENOENT;
+  std::ifstream machine_id_file(absent ? fallback : path);
+  std::string line;
+  if (machine_id_file.is_open() && std::getline(machine_id_file, line) &&
+      parse_machine_id(line, out))
+    return true;
+  std::memset(out, 0, 16);
+  return false;
+}
+
+bool CuidUtilities::parse_machine_id(const std::string& line, uint8_t out[16]) {
+  if (line.size() != 32) return false;
+  uint8_t any = 0;
+  for (size_t i = 0; i < 16; ++i) {
+    const int hi = hex_value(line[2 * i]);
+    const int lo = hex_value(line[(2 * i) + 1]);
+    if (hi < 0 || lo < 0) return false;
+    out[i] = static_cast<uint8_t>((hi << 4) | lo);
+    any |= out[i];
+  }
+  return any != 0;
+}
+
+void CuidUtilities::pack_auxiliary_input(const AuxiliaryInput& input, const uint8_t machine_id[16],
+                                         uint8_t structure[32]) {
+  // Pack the 256-bit structure LSB-first into 32 octets. See AuxiliaryInput in
+  // cuid_util.h for the field positions.
+  std::memset(structure, 0, 32);
+  structure[0] = static_cast<uint8_t>(input.format & 0xFF);                // bits 0:15
+  structure[1] = static_cast<uint8_t>((input.format >> 8) & 0xFF);         //
+  std::memcpy(structure + 2, machine_id, 16);                              // bits 16:143
+  structure[18] = static_cast<uint8_t>(input.routing_id & 0xFF);           // bits 144:175
+  structure[19] = static_cast<uint8_t>((input.routing_id >> 8) & 0xFF);    //
+  structure[20] = static_cast<uint8_t>((input.routing_id >> 16) & 0xFF);   //
+  structure[21] = static_cast<uint8_t>((input.routing_id >> 24) & 0xFF);   //
+  structure[22] = input.revision_id;                                       // bits 176:183
+  structure[23] = static_cast<uint8_t>(input.device_id & 0xFF);            // bits 184:199
+  structure[24] = static_cast<uint8_t>((input.device_id >> 8) & 0xFF);     //
+  structure[25] = static_cast<uint8_t>(input.vendor_id & 0xFF);            // bits 200:215
+  structure[26] = static_cast<uint8_t>((input.vendor_id >> 8) & 0xFF);     //
+  structure[27] = input.component_type & 0x0F;                             // bits 216:219
+  structure[28] = static_cast<uint8_t>(input.unit_id & 0xFF);              // bits 224:239
+  structure[29] = static_cast<uint8_t>((input.unit_id >> 8) & 0x1F);       //
+  structure[30] = static_cast<uint8_t>(input.segment_high & 0xFF);         // bits 240:255
+  structure[31] = static_cast<uint8_t>((input.segment_high >> 8) & 0xFF);  //
+}
+
+amdcuid_status_t CuidUtilities::host_machine_id(uint8_t out[16]) {
+  return host_machine_id("/etc/machine-id", "/var/lib/dbus/machine-id", out);
+}
+
+// The warning is about the host, not about any one component, so it is given
+// once per process however many components ask.
+amdcuid_status_t CuidUtilities::host_machine_id(const std::string& path,
+                                                const std::string& fallback, uint8_t out[16]) {
+  if (!read_machine_id(path, fallback, out)) {
+    static std::once_flag warned;
+    std::call_once(warned, [] {
+      LOG(WARN,
+          "No machine identity (/etc/machine-id, /var/lib/dbus/machine-id): refusing to "
+          "emit a temporary CUID, which would collide with every identically-configured host");
+    });
+    return AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND;
+  }
+  return AMDCUID_STATUS_SUCCESS;
+}
+
+void CuidUtilities::temporary_cuid(const AuxiliaryInput& input, const uint8_t machine_id[16],
+                                   amdcuid_derived_id* out) {
+  uint8_t structure[32];
+  pack_auxiliary_input(input, machine_id, structure);
+  uint8_t digest[32];
+  rocm::sha2::hmac_sha256(structure, sizeof(structure), kCuidApplicationId,
+                          sizeof(kCuidApplicationId), digest);
+  rocm::sha2::secure_zero(structure, sizeof(structure));
+
+  // RFC 9562 version 8 and variant 10b, and payload bit 117, the Auxiliary
+  // Value Identifier, which remove_UUIDv8_bits() reads from octet 15 bit 7.
+  // The payload's reserved bits are left as the digest gives them: no reader
+  // checks them in a derived CUID.
+  uint8_t* b = out->UUIDv8_representation.bytes;
+  std::memcpy(b, digest, 16);
+  b[6] = static_cast<uint8_t>((b[6] & 0x0F) | 0x80);
+  b[8] = static_cast<uint8_t>((b[8] & 0x3F) | 0x80);
+  b[15] |= 0x80;
+  remove_UUIDv8_bits(&out->UUIDv8_representation, out->raw_bits);
+  cuid::get_hash_from_raw(out->raw_bits, out->hash);
+}
+
+amdcuid_status_t CuidUtilities::temporary_cuid(const AuxiliaryInput& input,
+                                               amdcuid_derived_id* out) {
+  if (!out) return AMDCUID_STATUS_INVALID_ARGUMENT;
+  uint8_t machine_id[16];
+  const amdcuid_status_t status = host_machine_id(machine_id);
+  if (status != AMDCUID_STATUS_SUCCESS) return status;
+  temporary_cuid(input, machine_id, out);
+  rocm::sha2::secure_zero(machine_id, sizeof(machine_id));
+  return AMDCUID_STATUS_SUCCESS;
+}
+
+amdcuid_status_t CuidUtilities::generate_derived_cuid(const amdcuid_primary_id* primary_id,
+                                                      amdcuid_derived_id* derived_id,
+                                                      cuid_hmac* hmac) {
+  if (!primary_id || !hmac) {
+    // Return invalid on null input
+    return AMDCUID_STATUS_INVALID_ARGUMENT;
+  }
+
+  uint8_t hash[hash_length];
+  size_t hash_len = 0;
+
+  amdcuid_status_t status = static_cast<amdcuid_status_t>(
+      hmac->generate_hmac_sha256(reinterpret_cast<const uint8_t*>(primary_id->raw_bits),
+                                 sizeof(primary_id->raw_bits), hash, &hash_len));
+  if (status != AMDCUID_STATUS_SUCCESS) {
+    LOG(ERROR, "Error generating HMAC: " << amdcuid_status_to_string(status));
+    return status;
+  }
+
+  // The derived payload carries 109 hash bits: hash[0:63] at payload 0:63 and
+  // hash[64:108] at payload 72:116, the latter being 45 bits, not 46. Payload
+  // bit 117 is the Auxiliary Value Identifier in the derived layout as well as
+  // the primary, so the top bit of the last hash octet has nowhere to go.
+  memcpy(derived_id->hash, hash, 14);
+  derived_id->hash[13] &= 0x1F;  // 00011111 - 45th and last hash bit
+
+  // Get the unit id parts from the primary ID
+  uint8_t reserved_2 = 0;
+  uint8_t reserved_1 = 0;
+  // Map the 256-bit hash to 122-bit CUID format
+  uint8_t id_bits[16] = {0};
+
+  // Copy first 8 bytes (64 bits) from hash
+  memcpy(id_bits, derived_id->hash, 8);
+
+  // insert reserved bits part 1 at bits 64-71
+  id_bits[8] = reserved_1;
+
+  // copy next 6 bytes (45 bits) from hash and mask off last 3 bits for bits
+  // 72-116
+  memcpy(id_bits + 9, derived_id->hash + 8, 6);
+  id_bits[14] &= 0x1F;
+
+  // Bit 117 is meaningful only in a constructed primary. For an adopted
+  // Platform UUID, raw_bits contains opaque firmware bytes.
+  if (is_constructed(&primary_id->UUIDv8_representation)) {
+    id_bits[14] |= (primary_id->raw_bits[14] & 0x20);
+  }
+
+  // bits 118-121: reserved bits part 2 (4 bits), placed by the same helper the
+  // primary packer uses. Bits 122-127 are padding and stay zero.
+  pack_component_type_bits(reserved_2, id_bits);
+
+  memcpy(derived_id->raw_bits, id_bits, 16);
+
+  // Apply UUIDv8 format according to RFC 9562
+  add_UUIDv8_bits(id_bits, &derived_id->UUIDv8_representation);
+
+  return AMDCUID_STATUS_SUCCESS;
+}
+
+amdcuid_status_t CuidUtilities::generate_primary_cuid(uint64_t serial_number, uint16_t unit_id,
+                                                      uint8_t revision_id, uint16_t device_id,
+                                                      uint16_t vendor_id,
+                                                      amdcuid_device_type_t device_type,
+                                                      amdcuid_primary_id* primary_id, bool temp) {
+  if (!primary_id) return AMDCUID_STATUS_INVALID_ARGUMENT;
+
+  // Refused rather than masked into the field; see kMaxUnitId.
+  if (unit_id > kMaxUnitId) {
+    LOG(ERROR, "UnitID " << unit_id << " exceeds the 13-bit field (max " << kMaxUnitId << ")");
+    return AMDCUID_STATUS_INVALID_ARGUMENT;
+  }
+
+  const uint8_t type_bits = static_cast<uint8_t>(device_type) & 0x0F;
+  // Build 122-bit value in little-endian order
+  uint8_t id_bits[16] = {0};  // 128 bits total (122 bits + 6 bits padding)
+
+  uint8_t unit_id_part1 = static_cast<uint8_t>(unit_id & 0xFF);
+  uint8_t unit_id_part2 = (unit_id >> 8) & 0x1F;
+
+  // Bits 0-63: Serial number (8 bytes)
+  for (int i = 0; i < 8; i++) id_bits[i] = (serial_number >> (8 * i)) & 0xFF;
+
+  // Bits 64-71: UnitID part 1 (1 byte)
+  id_bits[8] = unit_id_part1;
+
+  // Bits 72-79: RevisionID (1 byte)
+  id_bits[9] = revision_id;
+
+  // Bits 80-95: DeviceID (2 bytes); These format changes are necessary to make
+  // the final ID little Endian, as specified in the design
+  id_bits[10] = static_cast<uint8_t>(device_id & 0xFF);
+  id_bits[11] = static_cast<uint8_t>((device_id >> 8) & 0xFF);
+
+  // Bits 96-111: VendorID (2 bytes)
+  id_bits[12] = static_cast<uint8_t>(vendor_id & 0xFF);
+  id_bits[13] = static_cast<uint8_t>((vendor_id >> 8) & 0xFF);
+
+  // Bits 112-116: UnitID part 2 (5 bits) + Bit 117: Auxiliary Value Identifier
+  // (1 bit) + Bits 118-121: Component Type (4 bits), which straddles the octet
+  // boundary and so goes through pack_component_type_bits(). Bits 122:127 are
+  // padding and stay zero.
+  uint8_t temp_bit = temp ? 1 : 0;
+  id_bits[14] = static_cast<uint8_t>(unit_id_part2 | (temp_bit << 5));
+  pack_component_type_bits(type_bits, id_bits);
+
+  memcpy(primary_id->raw_bits, id_bits, 16);
+
+  // Apply UUIDv8 format according to RFC 9562
+
+  add_UUIDv8_bits(id_bits, &primary_id->UUIDv8_representation);
+
+  return AMDCUID_STATUS_SUCCESS;
+}
+
+bool CuidUtilities::is_constructed(const amdcuid_id_t* id) {
+  if (!id) return false;
+  // RFC 9562 puts the version in the high nibble of octet 6.
+  return ((id->bytes[6] >> 4) & 0x0F) == 0x8;
+}
+
+void CuidUtilities::remove_UUIDv8_bits(amdcuid_id_t* id, uint8_t out_raw_bits[16]) {
+  if (!id || !out_raw_bits) {
+    return;
+  }
+
+  // Reverse the UUIDv8 formatting to get back the original raw bits
+  // Bits 0-47: ID value part 1 (LSB)
+  out_raw_bits[0] = id->bytes[0];
+  out_raw_bits[1] = id->bytes[1];
+  out_raw_bits[2] = id->bytes[2];
+  out_raw_bits[3] = id->bytes[3];
+  out_raw_bits[4] = id->bytes[4];
+  out_raw_bits[5] = id->bytes[5];
+
+  // Bits 48-51: Version (8) + Bits 52-63: ID value part 2
+  out_raw_bits[6] =
+      static_cast<uint8_t>(((id->bytes[6] & 0x0F) << 4) | ((id->bytes[7] & 0xF0) >> 4));
+  out_raw_bits[7] =
+      static_cast<uint8_t>(((id->bytes[7] & 0x0F) << 4) | ((id->bytes[8] & 0x3C) >> 2));
+
+  // Bits 64-65: Variant (10b) + Bits 66-127: ID value part 3 (MSB)
+  out_raw_bits[8] =
+      static_cast<uint8_t>(((id->bytes[8] & 0x03) << 6) | ((id->bytes[9] & 0xFC) >> 2));
+  out_raw_bits[9] =
+      static_cast<uint8_t>(((id->bytes[9] & 0x03) << 6) | ((id->bytes[10] & 0xFC) >> 2));
+  out_raw_bits[10] =
+      static_cast<uint8_t>(((id->bytes[10] & 0x03) << 6) | ((id->bytes[11] & 0xFC) >> 2));
+  out_raw_bits[11] =
+      static_cast<uint8_t>(((id->bytes[11] & 0x03) << 6) | ((id->bytes[12] & 0xFC) >> 2));
+  out_raw_bits[12] =
+      static_cast<uint8_t>(((id->bytes[12] & 0x03) << 6) | ((id->bytes[13] & 0xFC) >> 2));
+  out_raw_bits[13] =
+      static_cast<uint8_t>(((id->bytes[13] & 0x03) << 6) | ((id->bytes[14] & 0xFC) >> 2));
+  out_raw_bits[14] =
+      static_cast<uint8_t>(((id->bytes[14] & 0x03) << 6) | ((id->bytes[15] & 0xFC) >> 2));
+  // The last two rendered bits are payload 120:121 (the Component Type's high
+  // two bits), which live in the low bits of raw[15]. Payload 122:127 are
+  // padding and are not carried in the rendered value at all.
+  out_raw_bits[15] = id->bytes[15] & 0x03;
+}
+
+void CuidUtilities::add_UUIDv8_bits(const uint8_t raw_bits[16], amdcuid_id_t* id) {
+  if (!raw_bits || !id) {
+    return;
+  }
+
+  // Apply UUIDv8 formatting according to RFC 9562
+  // Bits 0-47: ID value part 1 (LSB)
+  id->bytes[0] = raw_bits[0];
+  id->bytes[1] = raw_bits[1];
+  id->bytes[2] = raw_bits[2];
+  id->bytes[3] = raw_bits[3];
+  id->bytes[4] = raw_bits[4];
+  id->bytes[5] = raw_bits[5];
+
+  // Bits 48-51: Version (8) + Bits 52-63: ID value part 2
+  id->bytes[6] = ((raw_bits[6] & 0xF0) >> 4) | 0x80;  // Version 8 in upper 4 bits
+  id->bytes[7] = static_cast<uint8_t>(((raw_bits[6] & 0x0F) << 4) | ((raw_bits[7] & 0xF0) >> 4));
+
+  // Bits 64-65: Variant (10b) + Bits 66-127: ID value part 3 (MSB)
+  id->bytes[8] = static_cast<uint8_t>(0x80 | (raw_bits[7] & 0x0F) << 2 | (raw_bits[8] & 0xC0) >> 6);
+  // everything past here is now shifted by 6 bits
+  id->bytes[9] = static_cast<uint8_t>(((raw_bits[8] & 0x3F) << 2) | ((raw_bits[9] & 0xC0) >> 6));
+  id->bytes[10] = static_cast<uint8_t>(((raw_bits[9] & 0x3F) << 2) | ((raw_bits[10] & 0xC0) >> 6));
+  id->bytes[11] = static_cast<uint8_t>(((raw_bits[10] & 0x3F) << 2) | ((raw_bits[11] & 0xC0) >> 6));
+  id->bytes[12] = static_cast<uint8_t>(((raw_bits[11] & 0x3F) << 2) | ((raw_bits[12] & 0xC0) >> 6));
+  id->bytes[13] = static_cast<uint8_t>(((raw_bits[12] & 0x3F) << 2) | ((raw_bits[13] & 0xC0) >> 6));
+  id->bytes[14] = static_cast<uint8_t>(((raw_bits[13] & 0x3F) << 2) | ((raw_bits[14] & 0xC0) >> 6));
+  // The final octet takes payload 120:121 (the Component Type's high two bits)
+  // from the low bits of raw[15]. What falls off the end is payload 122:127,
+  // always zero padding, so the framing preserves payload 0:121 exactly.
+  id->bytes[15] = static_cast<uint8_t>(((raw_bits[14] & 0x3F) << 2) | (raw_bits[15] & 0x03));
+}
+
+std::string CuidUtilities::get_cuid_as_string(const amdcuid_id_t* id) {
+  // Format as UUIDv8 string: 8-4-4-4-12 hex digits from id->bytes[16]
+  // UUID: xxxxxxxx-xxxx-8xxx-yxxx-xxxxxxxxxxxx
+  char uuid_str[37];  // 36 chars + null
+  // 32 hex digits plus 4 hyphens is exactly 36 characters plus the NUL.
+  // NOLINTNEXTLINE(cert-err33-c)
+  snprintf(uuid_str, sizeof(uuid_str),
+           "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x", id->bytes[0],
+           id->bytes[1], id->bytes[2], id->bytes[3], id->bytes[4], id->bytes[5], id->bytes[6],
+           id->bytes[7], id->bytes[8], id->bytes[9], id->bytes[10], id->bytes[11], id->bytes[12],
+           id->bytes[13], id->bytes[14], id->bytes[15]);
+
+  return std::string(uuid_str);
+}
+
+amdcuid_status_t CuidUtilities::uuid_string_to_uint8(const std::string& uuid_str, uint8_t* uuid) {
+  if (!uuid) {
+    return AMDCUID_STATUS_INVALID_ARGUMENT;
+  }
+
+  // UUID format: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX (36 chars with hyphens)
+  // Remove hyphens and validate length
+  std::string hex_str;
+  for (char c : uuid_str) {
+    if (c != '-') {
+      if (!isxdigit(static_cast<unsigned char>(c))) {
+        LOG(DEBUG, "Invalid UUID format: non-hex character found");
+        return AMDCUID_STATUS_INVALID_ARGUMENT;
+      }
+      hex_str += c;
+    }
+  }
+
+  // UUID should be 128 bits = 32 hex characters
+  if (hex_str.length() != 32) {
+    LOG(DEBUG, "Invalid UUID length: expected 32 hex digits, got " << hex_str.length());
+    return AMDCUID_STATUS_INVALID_ARGUMENT;
+  }
+
+  // convert hex_str to uint8_t array
+  for (size_t i = 0; i < 16; ++i) {
+    std::string byte_str = hex_str.substr(i * 2, 2);
+    uuid[i] = static_cast<uint8_t>(std::stoul(byte_str, nullptr, 16));
+  }
+
+  return AMDCUID_STATUS_SUCCESS;
+}
+
+std::string CuidUtilities::device_type_to_string(amdcuid_device_type_t type) {
+  switch (type) {
+    case AMDCUID_DEVICE_TYPE_PLATFORM:
+      return "PLATFORM";
+    case AMDCUID_DEVICE_TYPE_CPU:
+      return "CPU";
+    case AMDCUID_DEVICE_TYPE_GPU:
+      return "GPU";
+    case AMDCUID_DEVICE_TYPE_NIC:
+      return "NIC";
+    case AMDCUID_DEVICE_TYPE_NPU:
+      return "NPU";
+    case AMDCUID_DEVICE_TYPE_STORAGE:
+      return "STORAGE";
+    case AMDCUID_DEVICE_TYPE_MEMORY:
+      return "MEMORY";
+    case AMDCUID_DEVICE_TYPE_GENPCIE:
+      return "GENPCIE";
+    case AMDCUID_DEVICE_TYPE_GENC:
+      return "GENC";
+    case AMDCUID_DEVICE_TYPE_RACKTRAY:
+      return "RACKTRAY";
+    case AMDCUID_DEVICE_TYPE_RACK:
+      return "RACK";
+    case AMDCUID_DEVICE_TYPE_OTHER:
+      return "OTHER";
+    // The 0xb-0xe range is reserved on the wire and NONE is not a Component
+    // Type at all; both belong in the same bucket as an out-of-range value.
+    case AMDCUID_DEVICE_TYPE_NONE:
+    default:
+      return "UNKNOWN";
+  }
+}
+
+bool CuidUtilities::is_valid_bdf(const std::string& bdf) {
+  // Expected format: DDDD:BB:SS.F (e.g. "0000:03:00.0"). The segment is 4 to 8
+  // hex digits: Linux names a VMD domain 10000 and up.
+  const size_t colon = bdf.find(':');
+  if (colon < 4 || colon > 8 || bdf.size() != colon + 8) return false;
+  auto is_hex = [](char c) { return std::isxdigit((unsigned char)c); };
+  for (size_t i = 0; i < colon; ++i) {
+    if (!is_hex(bdf[i])) return false;
+  }
+  const char* t = bdf.c_str() + colon;
+  return t[0] == ':' && is_hex(t[1]) && is_hex(t[2]) && t[3] == ':' && is_hex(t[4]) &&
+         is_hex(t[5]) && t[6] == '.' && is_hex(t[7]);
+}

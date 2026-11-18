@@ -5,51 +5,166 @@
  * See LICENSE.txt for more license information
  *************************************************************************/
 
+#include <algorithm>
 #include "dev_runtime_internal.h"
 #include "comm.h"
 #include "nccl_device/core.h"
 #include "device.h"
 #include "bootstrap.h"
+#include "transport.h"
 #include "argcheck.h"
 #include "param.h"
 
 NCCL_PARAM(CftEnable, "CFT_ENABLE", 1);
+NCCL_PARAM(CftUcTeamSize, "CFT_UC_TEAM_SIZE", 0);
+NCCL_PARAM(CftMcTeamSize, "CFT_MC_TEAM_SIZE", 0);
 
-ncclResult_t ncclGpuCftSupport(struct ncclComm* comm, int* gpuCftSupport) {
+ncclResult_t ncclGpuGetCliqueIds(CUdevice dev, uint32_t* unicastId, uint32_t* multicastId) {
+  *unicastId = UINT32_MAX;
+  *multicastId = UINT32_MAX;
+
+#if CUDA_VERSION >= 13040
+  if (CUPFN(cuDeviceGetCliqueCount) == nullptr || CUPFN(cuDeviceGetCliqueInfo) == nullptr) {
+    return ncclSuccess;
+  }
+
+  size_t count = 0;
+  CUresult cuRet = CUPFN(cuDeviceGetCliqueCount(&count, dev));
+  if (cuRet != CUDA_SUCCESS || count == 0) {
+    INFO(NCCL_INIT, "CUDA did not report clique information for device %d (cuDeviceGetCliqueCount returned %d)", dev,
+         cuRet);
+    return ncclSuccess;
+  }
+
+  ncclResult_t ret = ncclSuccess;
+  CUcliqueInfo* cliqueInfo = nullptr;
+  NCCLCHECKGOTO(ncclCalloc(&cliqueInfo, count), ret, exit);
+  cuRet = CUPFN(cuDeviceGetCliqueInfo(cliqueInfo, &count, dev));
+  if (cuRet != CUDA_SUCCESS) {
+    INFO(NCCL_INIT, "CUDA did not report clique information for device %d (cuDeviceGetCliqueInfo returned %d)", dev,
+         cuRet);
+    goto exit;
+  }
+  for (size_t i = 0; i < count; i++) {
+    if (cliqueInfo[i].type == CU_CLIQUE_TYPE_UNICAST_LOGICAL_ENDPOINT) *unicastId = cliqueInfo[i].id;
+    if (cliqueInfo[i].type == CU_CLIQUE_TYPE_MULTICAST_LOGICAL_ENDPOINT) *multicastId = cliqueInfo[i].id;
+  }
+
+exit:
+  free(cliqueInfo);
+  return ret;
+#endif
+
+  return ncclSuccess;
+}
+
+static int computeCftCliqueSize(struct ncclComm* comm, bool multicast) {
+  int size = 0;
+  int cliqueSize = 0;
+  uint32_t previousId = UINT32_MAX;
+  for (int rank = 0; rank < comm->nRanks; rank++) {
+    uint32_t id = multicast ? comm->peerInfo[rank].cftMulticastCliqueId : comm->peerInfo[rank].cftUnicastCliqueId;
+    if (id == UINT32_MAX) return 0;
+    if (id != previousId) {
+      size = gcd(size, cliqueSize);
+      cliqueSize = 0;
+      previousId = id;
+    }
+    cliqueSize++;
+  }
+  return gcd(size, cliqueSize);
+}
+
+ncclResult_t ncclGpuCftSupport(struct ncclComm* comm, int* gpuCftSupport, bool* gpuCftMulticastSupport,
+                               bool* gpuCftCountedSupport) {
   *gpuCftSupport = 0;
+  *gpuCftMulticastSupport = false;
+  *gpuCftCountedSupport = false;
 #if CUDA_VERSION >= 13030
   if (ncclParamCftEnable()) {
     int driverVersion;
     NCCLCHECK(ncclCudaDriverVersion(&driverVersion));
-    int unicastSupported = 0, multicastSupported = 0;
+    int unicastSupported = 0, multicastSupported = 0, countedSupported = 0;
     if (driverVersion >= 13030) {
       CUCHECK(cuDeviceGetAttribute(&unicastSupported, CU_DEVICE_ATTRIBUTE_LOGICAL_ENDPOINT_UNICAST_SUPPORTED,
                                    (CUdevice)comm->cudaDev));
       CUCHECK(cuDeviceGetAttribute(&multicastSupported, CU_DEVICE_ATTRIBUTE_LOGICAL_ENDPOINT_MULTICAST_SUPPORTED,
                                    (CUdevice)comm->cudaDev));
     }
-    if (unicastSupported && multicastSupported) *gpuCftSupport = std::min(CUDA_VERSION, driverVersion);
+    if (unicastSupported) {
+      *gpuCftSupport = std::min(CUDA_VERSION, driverVersion);
+    }
+    if (multicastSupported) {
+      *gpuCftMulticastSupport = (bool)multicastSupported;
+    }
+    if (unicastSupported || multicastSupported) {
+      CUCHECK(cuDeviceGetAttribute(&countedSupported, CU_DEVICE_ATTRIBUTE_LOGICAL_ENDPOINT_COUNTED_OPS_SUPPORTED,
+                                   (CUdevice)comm->cudaDev));
+      *gpuCftCountedSupport = (bool)countedSupported;
+    }
   }
 #endif
   return ncclSuccess;
 }
 
-int computeCftSize(struct ncclComm* comm) {
-  if (comm->devrState.bigSize != 0) return comm->devrState.cftSize;
-  int res = 1;
-  if (comm->gpuCftSupport >= 13030) res = computeLsaSize(comm);
-  return res;
-}
+ncclResult_t computeCftSizes(struct ncclComm* comm, int* cftSize, int* cftMcSize) {
+  int lsaSize = computeLsaTeamSize(comm);
+  *cftSize = lsaSize;
+  *cftMcSize = lsaSize;
+  if (comm->gpuCftSupport >= 13040) {
+    int ucCliqueSize = computeCftCliqueSize(comm, /*multicast=*/false);
+    int mcCliqueSize = comm->gpuCftMulticastSupport ? computeCftCliqueSize(comm, /*multicast=*/true) : 1;
+    if (ucCliqueSize != 0 && mcCliqueSize != 0) {
+      if (ucCliqueSize % lsaSize != 0 || ucCliqueSize % mcCliqueSize != 0) {
+        WARN("CUDA logical-endpoint clique sizes are incompatible with the CFT hierarchy: UC %d, MC %d, LSA %d",
+             ucCliqueSize, mcCliqueSize, lsaSize);
+        return ncclInternalError;
+      }
 
-int computeCftMcSize(struct ncclComm* comm) {
-  if (comm->devrState.bigSize != 0) return comm->devrState.cftMcSize;
-  int res = 1;
-  if (comm->gpuCftSupport >= 13030) res = computeLsaSize(comm);
-  return res;
+      *cftSize = ucCliqueSize;
+      *cftMcSize = mcCliqueSize;
+    } // else: fallback to the LSA sizes
+  }
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // [RCCL] ROCm has no logical endpoints: gpuCftSupport stays 0, the LE IDs stay NCCL_LE_ID_INVALID and the
+  // team LE setup is stubbed out, so a CFT team wider than one rank would have no usable addressing. Keep the
+  // one-rank team RCCL had before 2.32.6.
+  if (comm->gpuCftSupport == 0) {
+    *cftSize = 1;
+    *cftMcSize = 1;
+  }
+#endif
+
+  int64_t ucOverride = ncclParamCftUcTeamSize();
+  int64_t mcOverride = ncclParamCftMcTeamSize();
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // [RCCL] The overrides would rebuild the multi-rank CFT team the block above rules out: without logical
+  // endpoints it has no usable addressing. Ignore them; 1 is already the size they would set.
+  if (comm->gpuCftSupport == 0 && (ucOverride > 0 || mcOverride > 0)) {
+    if (ucOverride > 1 || mcOverride > 1) {
+      WARN("NCCL_CFT_UC_TEAM_SIZE/NCCL_CFT_MC_TEAM_SIZE (UC %ld, MC %ld) ignored: CFT teams keep one rank without "
+           "logical-endpoint support",
+           (long)ucOverride, (long)mcOverride);
+    }
+    ucOverride = mcOverride = 0;
+  }
+#endif
+  if (ucOverride > 0) *cftSize = ucOverride;
+  if (mcOverride > 0) *cftMcSize = mcOverride;
+  // [RCCL] Hold the overrides to the same hierarchy the detected clique sizes must follow.
+  if ((ucOverride > 0 || mcOverride > 0) &&
+      (comm->nRanks % *cftSize != 0 || (ucOverride > 0 && *cftSize % lsaSize != 0) || *cftSize % *cftMcSize != 0)) {
+    WARN("NCCL_CFT_UC_TEAM_SIZE/NCCL_CFT_MC_TEAM_SIZE give UC %d, MC %d: UC must divide nRanks %d%s and be a multiple "
+         "of MC",
+         *cftSize, *cftMcSize, comm->nRanks, ucOverride > 0 ? ", be a multiple of the LSA team size" : "");
+    return ncclInvalidUsage;
+  }
+  return ncclSuccess;
 }
 
 ncclResult_t symBindTeamLe(struct ncclComm* comm, struct ncclDevrMemory* mem, ncclCftLeId le) {
-  if (le != NCCL_LE_ID_INVALID && !mem->globalHasSysmemSegment) {
+  if (ncclDevrWinRegEnabled(mem->winFlags, ncclDevrRegisterCft) && le != NCCL_LE_ID_INVALID &&
+      !mem->globalHasSysmemSegment) {
 #if CUDA_VERSION >= 13030
     CUCHECK(cuLogicalEndpointBindAddr(le, (CUdevice)comm->cudaDev, mem->bigOffset, mem->primaryAddr, mem->lsaMinSize,
                                       0));
@@ -59,7 +174,8 @@ ncclResult_t symBindTeamLe(struct ncclComm* comm, struct ncclDevrMemory* mem, nc
 }
 
 ncclResult_t symUnbindTeamLe(struct ncclComm* comm, struct ncclDevrMemory* mem, ncclCftLeId le) {
-  if (le != NCCL_LE_ID_INVALID && !mem->globalHasSysmemSegment) {
+  if (ncclDevrWinRegEnabled(mem->winFlags, ncclDevrRegisterCft) && le != NCCL_LE_ID_INVALID &&
+      !mem->globalHasSysmemSegment) {
 #if CUDA_VERSION >= 13030
     CUCHECKIGNORE(cuLogicalEndpointUnbind(le, (CUdevice)comm->cudaDev, mem->bigOffset, mem->lsaMinSize));
 #endif
@@ -96,37 +212,49 @@ static ncclResult_t waitLeReady(ncclCftLeId le, uint32_t leCount) {
 }
 
 ncclResult_t symTeamObtainUcLe(struct ncclComm* comm, struct ncclDevrTeam* t, struct ncclDevrState* devr,
-                               bool* /*needBarrier*/) {
+                               bool* /*needBarrier*/, bool counted) {
   // No need to request a barrier: local completion of waitLeReady guarantees that the remote LE is ready.
   // Remote completion of the binding is guaranteed by the bootstrapAllGather.
   ncclResult_t ret = ncclSuccess;
-  struct ncclDevrStateCftUc* cftUc = &devr->le;
 
   // Always create the flat LE team to be stored in the devrState.
   ncclTeam_t flatTeam = ncclTeamCft(comm);
   int importedCount = 0, bindCount = 0, releaseCount = 0;
+  // Counted LEs are limited to 256GB in size
+  const size_t leSize = counted ? std::min(size_t(256ULL << 30), devr->bigSize) : devr->bigSize;
   ncclCftLeId leUcSelf = NCCL_LE_ID_INVALID;
   CUlogicalEndpointFabricHandle* leUcHandles = nullptr;
   int* cftRankList = nullptr;
-  if (cftUc->baseId == NCCL_LE_ID_INVALID) {
+  struct ncclDevrStateCftUc* cftUc = devr->le;
+  if (cftUc[counted].baseId == NCCL_LE_ID_INVALID) {
     CUlogicalEndpointProp prop = {};
     prop.type = CU_LOGICAL_ENDPOINT_TYPE_UNICAST;
-    prop.flags = CU_LOGICAL_ENDPOINT_FLAG_NONE;
+    prop.flags = counted ? CU_LOGICAL_ENDPOINT_FLAG_COUNTED_OPS : CU_LOGICAL_ENDPOINT_FLAG_NONE;
     prop.unicast.device = (CUdevice)comm->cudaDev;
     prop.ipcHandleTypes = CU_LOGICAL_ENDPOINT_IPC_HANDLE_TYPE_FABRIC;
-    prop.size = devr->bigSize;
-    NCCLCHECK(checkLeSize(prop, devr->bigSize));
+    prop.size = leSize;
+    NCCLCHECK(checkLeSize(prop, leSize));
     NCCLCHECKGOTO(ncclCalloc(&leUcHandles, flatTeam.nRanks), ret, fail);
     NCCLCHECKGOTO(ncclCalloc(&cftRankList, flatTeam.nRanks), ret, fail);
 
-    CUCHECKGOTO(cuLogicalEndpointIdReserve(&cftUc->baseId, flatTeam.nRanks), ret, fail);
-    releaseCount = flatTeam.nRanks;
-    CUCHECKGOTO(cuLogicalEndpointCreate(cftUc->baseId + flatTeam.rank, &prop), ret, fail);
-    // leUcSelf is set if creation was succesfull
-    leUcSelf = cftUc->baseId + flatTeam.rank;
+    // UC LD IDs are reserved in contiguous pairs, such that in devComm: counted ucLeId = devComm->ucLeId + nRanks
+    // Check if the other counted configuration was created.
+    bool ucLeIdsCreated = cftUc[!counted].baseId != NCCL_LE_ID_INVALID;
+    if (ucLeIdsCreated) {
+      cftUc[counted].baseId = counted ? cftUc[0].baseId + flatTeam.nRanks : cftUc[1].baseId - flatTeam.nRanks;
+    } else {
+      ncclCftLeId ucLeIdBase;
+      CUCHECKGOTO(cuLogicalEndpointIdReserve(&ucLeIdBase, flatTeam.nRanks * 2), ret, fail);
+      cftUc[counted].baseId = ucLeIdBase + (counted ? flatTeam.nRanks : 0);
+      releaseCount = flatTeam.nRanks * 2;
+    }
+    CUCHECKGOTO(cuLogicalEndpointCreate(cftUc[counted].baseId + flatTeam.rank, &prop), ret, fail);
+    // leUcSelf is set if creation was successful
+    leUcSelf = cftUc[counted].baseId + flatTeam.rank;
     NCCLCHECKGOTO(waitLeReady(leUcSelf, /*count=*/1), ret, fail);
     // bind all the windows already existing in the comm
     for (struct ncclDevrMemory* mem = devr->memHead; mem != nullptr; mem = mem->next) {
+      if ((bool)(mem->winFlags & NCCL_WIN_CFT_COUNTED) != counted) continue;
       NCCLCHECKGOTO(symBindTeamLe(comm, mem, leUcSelf), ret, fail);
       bindCount++;
     }
@@ -140,16 +268,16 @@ ncclResult_t symTeamObtainUcLe(struct ncclComm* comm, struct ncclDevrTeam* t, st
                   ret, fail);
     for (int r = 0; r < flatTeam.nRanks; r++) {
       if (r == flatTeam.rank) continue;
-      CUCHECKGOTO(cuLogicalEndpointImport(cftUc->baseId + r, &leUcHandles[r],
+      CUCHECKGOTO(cuLogicalEndpointImport(cftUc[counted].baseId + r, &leUcHandles[r],
                                           CU_LOGICAL_ENDPOINT_IPC_HANDLE_TYPE_FABRIC),
                   ret, fail);
       importedCount++;
     }
-    NCCLCHECKGOTO(waitLeReady(cftUc->baseId, flatTeam.nRanks), ret, fail);
+    NCCLCHECKGOTO(waitLeReady(cftUc[counted].baseId, flatTeam.nRanks), ret, fail);
     // no need of barrier, see above.
   }
   // Devr team stores the base LE for that specific team
-  t->ucLeId = cftUc->baseId + flatTeam.rank - t->team.rank * t->team.stride;
+  t->ucLeId[counted] = cftUc[counted].baseId + flatTeam.rank - t->team.rank * t->team.stride;
 
 exit:
   free(cftRankList);
@@ -158,45 +286,60 @@ exit:
 fail:
   for (int r = 0; r < flatTeam.nRanks && importedCount > 0; r++) {
     if (r == flatTeam.rank) continue;
-    CUCHECKIGNORE(cuLogicalEndpointDestroy(cftUc->baseId + r));
+    CUCHECKIGNORE(cuLogicalEndpointDestroy(cftUc[counted].baseId + r));
     importedCount--;
   }
   for (struct ncclDevrMemory* mem = devr->memHead; mem != nullptr && bindCount > 0; mem = mem->next) {
-    symUnbindTeamLe(comm, mem, leUcSelf);
+    NCCLCHECKIGNORE(symUnbindTeamLe(comm, mem, leUcSelf), ret);
     bindCount--;
   }
   if (leUcSelf != NCCL_LE_ID_INVALID) CUCHECKIGNORE(cuLogicalEndpointDestroy(leUcSelf));
-  if (releaseCount > 0) CUCHECKIGNORE(cuLogicalEndpointIdRelease(cftUc->baseId, releaseCount));
-  cftUc->baseId = NCCL_LE_ID_INVALID;
+  if (releaseCount > 0)
+    CUCHECKIGNORE(cuLogicalEndpointIdRelease(cftUc[counted].baseId - ncclCftLeId(counted) * flatTeam.nRanks,
+                                             releaseCount));
+  cftUc[counted].baseId = NCCL_LE_ID_INVALID;
   goto exit;
 }
 
 ncclResult_t symTeamObtainMcLe(struct ncclComm* comm, struct ncclDevrTeam* t, struct ncclDevrState* devr,
-                               bool* needBarrier) {
+                               bool* needBarrier, bool counted) {
+  if (!comm->gpuCftMulticastSupport) {
+    WARN("CFT multicast support requested, but not all ranks in the communicator support it.");
+    return ncclInvalidArgument;
+  }
   if (!comm->nvlsSupport) {
     WARN("CFT multicast support requested, but NVLS is disabled or unsupported.");
     return ncclInvalidArgument;
   }
 
   ncclResult_t ret = ncclSuccess;
-  ncclCftLeId leMcId = NCCL_LE_ID_INVALID;
+  ncclCftLeId mcLeIdBase = NCCL_LE_ID_INVALID;
   int bindCount = 0, releaseCount = 0;
+  // Counted LEs are limited to 256GB in size
+  const size_t leSize = counted ? std::min(size_t(256ULL << 30), devr->bigSize) : devr->bigSize;
 
   CUlogicalEndpointProp prop = {};
   prop.type = CU_LOGICAL_ENDPOINT_TYPE_MULTICAST;
-  prop.flags = CU_LOGICAL_ENDPOINT_FLAG_NONE;
+  prop.flags = counted ? CU_LOGICAL_ENDPOINT_FLAG_COUNTED_OPS : CU_LOGICAL_ENDPOINT_FLAG_NONE;
   prop.multicast.numDevices = t->team.nRanks;
   prop.ipcHandleTypes = CU_LOGICAL_ENDPOINT_IPC_HANDLE_TYPE_FABRIC;
-  prop.size = devr->bigSize;
-  NCCLCHECK(checkLeSize(prop, devr->bigSize));
-  CUCHECKGOTO(cuLogicalEndpointIdReserve(&leMcId, 1), ret, fail);
-  releaseCount = 1;
+  prop.size = leSize;
+  NCCLCHECK(checkLeSize(prop, leSize));
+  // MC LD IDs are reserved in contiguous pairs, such that in devComm: counted mcLeId = devComm->mcLeId + 1
+  bool mcLeIdsCreated = t->mcLeId[!counted] != NCCL_LE_ID_INVALID;
+  if (mcLeIdsCreated) {
+    mcLeIdBase = counted ? t->mcLeId[0] + 1 : t->mcLeId[1] - 1;
+  } else {
+    CUCHECKGOTO(cuLogicalEndpointIdReserve(&mcLeIdBase, 2), ret, fail);
+    mcLeIdBase += ncclCftLeId(counted);
+    releaseCount = 2;
+  }
 
   CUlogicalEndpointFabricHandle leMcHandle;
   if (t->team.rank == 0) {
-    CUCHECKGOTO(cuLogicalEndpointCreate(leMcId, &prop), ret, fail);
-    t->mcLeId = leMcId; // t->mcLeId is only set after creation is succesfull
-    CUCHECKGOTO(cuLogicalEndpointExport(&leMcHandle, leMcId, CU_LOGICAL_ENDPOINT_IPC_HANDLE_TYPE_FABRIC), ret, fail);
+    CUCHECKGOTO(cuLogicalEndpointCreate(mcLeIdBase, &prop), ret, fail);
+    CUCHECKGOTO(cuLogicalEndpointExport(&leMcHandle, mcLeIdBase, CU_LOGICAL_ENDPOINT_IPC_HANDLE_TYPE_FABRIC), ret,
+                fail);
     NCCLCHECKGOTO(bootstrapIntraNodeBroadcast(comm->bootstrap, t->worldRankList, t->team.rank, t->team.nRanks, 0,
                                               &leMcHandle, sizeof(CUlogicalEndpointFabricHandle)),
                   ret, fail);
@@ -204,43 +347,46 @@ ncclResult_t symTeamObtainMcLe(struct ncclComm* comm, struct ncclDevrTeam* t, st
     NCCLCHECKGOTO(bootstrapIntraNodeBroadcast(comm->bootstrap, t->worldRankList, t->team.rank, t->team.nRanks, 0,
                                               &leMcHandle, sizeof(CUlogicalEndpointFabricHandle)),
                   ret, fail);
-    CUCHECKGOTO(cuLogicalEndpointImport(leMcId, &leMcHandle, CU_LOGICAL_ENDPOINT_IPC_HANDLE_TYPE_FABRIC), ret, fail);
-    t->mcLeId = leMcId; // t->mcLeId is only set after import is succesfull
+    CUCHECKGOTO(cuLogicalEndpointImport(mcLeIdBase, &leMcHandle, CU_LOGICAL_ENDPOINT_IPC_HANDLE_TYPE_FABRIC), ret,
+                fail);
   }
   // LE is ready when all devices have joined the LE, it acts as a barrier
-  CUCHECKGOTO(cuLogicalEndpointAddDevice(leMcId, (CUdevice)comm->cudaDev), ret, fail);
-  NCCLCHECKGOTO(waitLeReady(leMcId, /*count=*/1), ret, fail);
+  CUCHECKGOTO(cuLogicalEndpointAddDevice(mcLeIdBase, (CUdevice)comm->cudaDev), ret, fail);
+  NCCLCHECKGOTO(waitLeReady(mcLeIdBase, /*count=*/1), ret, fail);
 
   for (struct ncclDevrMemory* mem = devr->memHead; mem != nullptr; mem = mem->next) {
-    NCCLCHECKGOTO(symBindTeamLe(comm, mem, leMcId), ret, fail);
+    if ((bool)(mem->winFlags & NCCL_WIN_CFT_COUNTED) != counted) continue;
+    NCCLCHECKGOTO(symBindTeamLe(comm, mem, mcLeIdBase), ret, fail);
     bindCount++;
   }
   // Barrier needed to guarantee that no peer will start using the MC LE before binding completes.
   if (needBarrier) *needBarrier = true;
+  t->mcLeId[counted] = mcLeIdBase; // t->mcLeId is only set after import is successful
 
 exit:
   return ret;
 fail:
   for (struct ncclDevrMemory* mem = devr->memHead; mem != nullptr && bindCount > 0; mem = mem->next) {
-    symUnbindTeamLe(comm, mem, leMcId);
+    if ((bool)(mem->winFlags & NCCL_WIN_CFT_COUNTED) != counted) continue;
+    NCCLCHECKIGNORE(symUnbindTeamLe(comm, mem, mcLeIdBase), ret);
     bindCount--;
   }
-  if (t->mcLeId != NCCL_LE_ID_INVALID) CUCHECKIGNORE(cuLogicalEndpointDestroy(t->mcLeId));
-  if (releaseCount > 0) CUCHECKIGNORE(cuLogicalEndpointIdRelease(leMcId, releaseCount));
-  t->mcLeId = NCCL_LE_ID_INVALID;
+  if (mcLeIdBase != NCCL_LE_ID_INVALID) CUCHECKIGNORE(cuLogicalEndpointDestroy(mcLeIdBase));
+  if (releaseCount > 0) CUCHECKIGNORE(cuLogicalEndpointIdRelease(mcLeIdBase - ncclCftLeId(counted), releaseCount));
+  t->mcLeId[counted] = NCCL_LE_ID_INVALID;
   goto exit;
 }
 
 #else // CUDA_VERSION >= 13030
 
 ncclResult_t symTeamObtainUcLe(struct ncclComm* comm, struct ncclDevrTeam* t, struct ncclDevrState* devr,
-                               bool* /*needBarrier*/) {
+                               bool* /*needBarrier*/, bool /*counted*/) {
   WARN("CFT unicast logical endpoints are not supported on this platform.");
   return ncclInvalidUsage;
 }
 
 ncclResult_t symTeamObtainMcLe(struct ncclComm* comm, struct ncclDevrTeam* t, struct ncclDevrState* devr,
-                               bool* /*needBarrier*/) {
+                               bool* /*needBarrier*/, bool /*counted*/) {
   WARN("CFT multicast logical endpoints are not supported on this platform.");
   return ncclInvalidUsage;
 }
@@ -257,6 +403,10 @@ ncclResult_t ncclGetMultimemDeviceLeInfo(ncclWindow_t window, size_t offset, ncc
   ncclComm_t comm = nullptr;
   struct ncclDevrWindow* winHost = nullptr;
   NCCLCHECK(findCommAndHostWindowFromDeviceWindow(window, &comm, &winHost));
+  if (!ncclDevrWinRegEnabled(winHost->winFlags, ncclDevrRegisterCft)) {
+    WARN("CFT access is disabled because the window was not registered for CFT.");
+    return ncclInvalidUsage;
+  }
   if (comm->gpuCftSupport == 0) {
     WARN("Using CFT query function without CFT support in the communicator.");
     return ncclInvalidArgument;
@@ -264,12 +414,13 @@ ncclResult_t ncclGetMultimemDeviceLeInfo(ncclWindow_t window, size_t offset, ncc
 
   struct ncclDevrTeam* tm;
   bool needBarrier = false;
+  bool counted = winHost->winFlags & NCCL_WIN_CFT_COUNTED;
   ncclTeam flatTeam = ncclTeamCftMultimem(comm);
-  NCCLCHECK(symTeamObtain(comm, flatTeam, /*multimem=*/false, /*uc=*/false, /*mc=*/true, &tm, &needBarrier));
+  NCCLCHECK(symTeamObtain(comm, flatTeam, /*multimem=*/false, counted, /*uc=*/false, /*mc=*/true, &tm, &needBarrier));
   if (needBarrier) {
     NCCLCHECK(bootstrapIntraNodeBarrier(comm->bootstrap, tm->worldRankList, flatTeam.rank, flatTeam.nRanks, 0xbeef));
   }
-  *leId = tm->mcLeId;
+  *leId = tm->mcLeId[counted];
   *leOffset = winHost->bigOffset + offset;
 
   return ncclSuccess;
@@ -287,13 +438,18 @@ ncclResult_t ncclGetCftDeviceLeInfo(ncclWindow_t window, size_t offset, int peer
   ncclComm_t comm = nullptr;
   struct ncclDevrWindow* winHost = nullptr;
   NCCLCHECK(findCommAndHostWindowFromDeviceWindow(window, &comm, &winHost));
+  if (!ncclDevrWinRegEnabled(winHost->winFlags, ncclDevrRegisterCft)) {
+    WARN("CFT access is disabled because the window was not registered for CFT.");
+    return ncclInvalidUsage;
+  }
 
   if (comm->gpuCftSupport == 0) {
     WARN("Using CFT query function without CFT support in the communicator.");
     return ncclInvalidArgument;
   }
 
-  ncclCftLeId baseLeId = comm->devrState.le.baseId;
+  bool counted = winHost->winFlags & NCCL_WIN_CFT_COUNTED;
+  ncclCftLeId baseLeId = comm->devrState.le[counted].baseId;
   if (baseLeId == NCCL_LE_ID_INVALID) {
     WARN("Querying CFT LE before LE creation. Create a CFT-enabled devComm first or enable hostCftMode.");
     return ncclInvalidUsage;
@@ -318,6 +474,10 @@ ncclResult_t ncclGetPeerDeviceLeInfo(ncclWindow_t window, size_t offset, int pee
   ncclComm_t comm = nullptr;
   struct ncclDevrWindow* winHost = nullptr;
   NCCLCHECK(findCommAndHostWindowFromDeviceWindow(window, &comm, &winHost));
+  if (!ncclDevrWinRegEnabled(winHost->winFlags, ncclDevrRegisterCft)) {
+    WARN("CFT access is disabled because the window was not registered for CFT.");
+    return ncclInvalidUsage;
+  }
 
   if (comm->gpuCftSupport == 0) {
     WARN("Using CFT query function without CFT support in the communicator.");
@@ -332,7 +492,8 @@ ncclResult_t ncclGetPeerDeviceLeInfo(ncclWindow_t window, size_t offset, int pee
     return ncclInvalidArgument;
   }
 
-  ncclCftLeId baseLeId = comm->devrState.le.baseId;
+  bool counted = winHost->winFlags & NCCL_WIN_CFT_COUNTED;
+  ncclCftLeId baseLeId = comm->devrState.le[counted].baseId;
   if (baseLeId == NCCL_LE_ID_INVALID) {
     WARN("Querying CFT LE before LE creation. Create a CFT-enabled devComm first or enable hostCftMode.");
     return ncclInvalidUsage;

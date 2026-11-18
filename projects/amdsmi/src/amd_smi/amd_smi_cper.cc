@@ -569,6 +569,11 @@ amdsmi_status_t amdsmi_get_gpu_cper_entries_by_path(const char* amdgpu_ring_cper
          << ", record_length:" << std::dec << header->record_length;
       LOG_DEBUG(ss);
     }
+    // Records an earlier call already returned take no room in this call's buffers.
+    if (*cursor != header_idx) {
+      ++header_idx;
+      continue;
+    }
     if ((*buf_size - data_idx) < header->record_length) {
       ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__
          << "[CPER] buffer filled up without copying all cper entries, buf_size: " << std::dec
@@ -587,10 +592,6 @@ amdsmi_status_t amdsmi_get_gpu_cper_entries_by_path(const char* amdgpu_ring_cper
       *entry_count = num_headers_copied;
       *buf_size = data_idx;
       return (data_idx == 0) ? AMDSMI_STATUS_OUT_OF_RESOURCES : AMDSMI_STATUS_MORE_DATA;
-    }
-    if (*cursor != header_idx) {
-      ++header_idx;
-      continue;
     }
     cper_hdrs[num_headers_copied] = reinterpret_cast<amdsmi_cper_hdr_t*>(&cper_data[data_idx]);
     ++num_headers_copied;

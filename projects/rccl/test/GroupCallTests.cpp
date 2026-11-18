@@ -360,15 +360,16 @@ namespace RcclUnitTesting
     bool                        const inPlace         = false;
     bool                        const useManagedMem   = false;
 
+    // Each collective uses its own datatype, so every one of them must survive the filter.
     std::vector<ncclDataType_t> dataTypes;
     testBed.GetSupportedDataTypes(dataTypes, testDataTypes);
-    if (dataTypes.empty()) {
+    if (dataTypes.size() != testDataTypes.size()) {
       GTEST_SKIP() << "Skipping... test datatypes excluded by UT_DATATYPES.";
     }
 
     std::vector<ncclRedOp_t> redOps;
     testBed.GetSupportedRedOps(redOps, testRedOps);
-    if (redOps.empty()) {
+    if (redOps.size() != testRedOps.size()) {
       GTEST_SKIP() << "Skipping... test reduction operations excluded by UT_REDOPS.";
     }
 
@@ -478,15 +479,16 @@ namespace RcclUnitTesting
     int                                  const numGroupCalls      = groupCalls.size();
     int                                  const numIterations      = 10;
 
+    // Each group call uses its own datatype and reduction op, so all of them must survive the filters.
     std::vector<ncclDataType_t> dataTypes;
     testBed.GetSupportedDataTypes(dataTypes, testDataTypes);
-    if (dataTypes.empty()) {
+    if (dataTypes.size() != testDataTypes.size()) {
       GTEST_SKIP() << "Skipping... test datatypes excluded by UT_DATATYPES.";
     }
 
     std::vector<ncclRedOp_t> redOps;
     testBed.GetSupportedRedOps(redOps, testRedOps);
-    if (redOps.empty()) {
+    if (redOps.size() != testRedOps.size()) {
       GTEST_SKIP() << "Skipping... test reduction operations excluded by UT_REDOPS.";
     }
 

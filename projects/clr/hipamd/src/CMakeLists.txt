@@ -7,41 +7,6 @@ include(GNUInstallDirs)
 set(VERSION_MAJOR_AMDHIP ${HIP_VERSION_MAJOR})
 set(VERSION_MINOR_AMDHIP ${HIP_VERSION_MINOR})
 
-if(NOT DEFINED THEROCK_SANITIZER)
-  set(THEROCK_SANITIZER)
-endif()
-
-if(ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
-  message(STATUS "Building with sanitizer")
-  set(ASAN_LINKER_FLAGS "-fsanitize=address")
-  set(ASAN_COMPILER_FLAGS "-fno-omit-frame-pointer -fsanitize=address")
-
-  if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    if(BUILD_SHARED_LIBS)
-      set(ASAN_COMPILER_FLAGS "${ASAN_COMPILER_FLAGS} -shared-libsan")
-      set(ASAN_LINKER_FLAGS "${ASAN_LINKER_FLAGS} -shared-libsan")
-    else()
-      set(ASAN_LINKER_FLAGS "${ASAN_LINKER_FLAGS} -static-libsan")
-    endif()
-  endif()
-
-  # If its being built by TheRock, CMAKE_<LANG>_FLAGS should have the sanitizer flags
-  # If not, we append it.
-  if(ADDRESS_SANITIZER)
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${ASAN_COMPILER_FLAGS}")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${ASAN_COMPILER_FLAGS}")
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${ASAN_LINKER_FLAGS} -s -Wl,--build-id=sha1")
-    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${ASAN_LINKER_FLAGS} -Wl,--build-id=sha1")
-  endif()
-endif()
-
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror")
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-error=deprecated-declarations")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=deprecated-declarations")
-endif()
-
 option(BUILD_SHARED_LIBS "Build the shared library" ON)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
@@ -182,6 +147,7 @@ target_compile_definitions(amdhip64 PRIVATE __HIP_PLATFORM_AMD__)
 target_compile_definitions(amdhip64 PRIVATE HIP_ABI_IMPL)
 target_link_libraries(amdhip64 PRIVATE ${OPENGL_LIBRARIES})
 target_link_libraries(amdhip64 PRIVATE ${CMAKE_DL_LIBS})
+target_link_libraries(amdhip64 PRIVATE $<BUILD_LOCAL_INTERFACE:clr::warnings>)
 # Add link to comgr, hsa-runtime and other required libraries in target files
 # This is required for static libraries
 if(NOT BUILD_SHARED_LIBS)
@@ -260,14 +226,14 @@ if(USE_PROF_API)
   set(PROF_API_LOG "${PROJECT_BINARY_DIR}/hip_prof_gen.log.txt")
   set(PROF_API_NEWHDR "${PROJECT_BINARY_DIR}/new_header.h")
 
-  execute_process(COMMAND ${Python3_EXECUTABLE} -c "import CppHeaderParser"
-                  RESULT_VARIABLE CPP_HEADER_PARSER
+  execute_process(COMMAND ${Python3_EXECUTABLE} -c "import cxxheaderparser"
+                  RESULT_VARIABLE CXX_HEADER_PARSER
                   OUTPUT_QUIET)
 
-  if(NOT ${CPP_HEADER_PARSER} EQUAL 0)
+  if(NOT ${CXX_HEADER_PARSER} EQUAL 0)
     message(FATAL_ERROR "\
-    The \"CppHeaderParser\" Python3 package is not installed. \
-    Please install it using the following command: \"pip3 install CppHeaderParser\".\
+    The \"cxxheaderparser\" Python3 package is not installed. \
+    Please install it using the following command: \"pip3 install cxxheaderparser\".\
   ")
   endif()
 

@@ -7,6 +7,7 @@
 #ifndef ROCJITSU_ISA_OPERAND_H_
 #define ROCJITSU_ISA_OPERAND_H_
 
+#include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/result.h"
@@ -188,6 +189,9 @@ public:
   /// parse the display string returned by name().
   [[nodiscard]] virtual std::optional<RegisterRef> to_register_ref() const;
 
+  /// @brief Whether encoding_value() belongs to the scalar/source selector namespace.
+  [[nodiscard]] virtual bool has_register_selector() const { return false; }
+
   /// @brief Map this operand to the architectural special register it denotes.
   ///
   /// @details Returns the special RegClass (EXEC/VCC/SCC/M0/PC) for a fieldless
@@ -215,10 +219,33 @@ public:
   /// default covers only the literal case; ISA subclasses override it to add
   /// inline-constant resolution. Useful for static analysis (e.g. detecting
   /// `s_mov exec, -1`) where no wavefront is available.
+  /// This is the raw scalar carrier, matching read_scalar(); precision-specific
+  /// lane formatting and numeric scalar F16 reads may interpret it differently.
   [[nodiscard]] virtual std::optional<uint64_t> const_value() const { return literal64_value(); }
 
   /// @brief Operand width in bits.
   int size_bits() const { return size_bits_; }
+
+  /// @brief Encoding-derived bytes used by a qualified sub-dword access plan.
+  uint8_t register_byte_mask() const { return register_byte_mask_; }
+  /// @brief Construction-only, after literal and extension operands are finalized.
+  void set_register_byte_mask(uint8_t mask) { register_byte_mask_ = mask; }
+
+  enum class LaneInlineFloatFormat : uint8_t { F16, F32, BF16 };
+
+  /// @brief Format used for floating inline selectors in 16-bit lane reads.
+  /// @details Set only during decoded-operand construction, after fixups.
+  /// Synthetic operands default to F16, preserving their width-based behavior.
+  /// Raw scalar reads, register carriers and literals are unaffected.
+  LaneInlineFloatFormat lane_inline_float_format() const { return lane_inline_float_format_; }
+  void set_lane_inline_float_format(LaneInlineFloatFormat format) {
+    lane_inline_float_format_ = format;
+  }
+
+  /// @brief Preserve bytes outside the decoded destination's register byte mask.
+  /// @details Construction-only; the decoder publishes immutable operands.
+  bool preserve_unwritten_bytes() const { return preserve_unwritten_bytes_; }
+  void set_preserve_unwritten_bytes() { preserve_unwritten_bytes_ = true; }
 
   /// @brief Whether this operand references a VGPR or AccVGPR.
   /// @details A construction-time capability flag. Field-bearing operands are
@@ -263,13 +290,34 @@ public:
     assert((reads_value || (!writable && !is_vgpr)) &&
            "fieldless caps: writable/is_vgpr require reads_value");
     fieldless_ = true;
+    decoded_vgpr_width_ = 0;
     reads_value_ = reads_value;
     writable_ = writable;
     is_vgpr_ = is_vgpr;
   }
 
+  /// @brief Whether this encoded operand is a wave mask: one bit per lane, so
+  /// one SGPR in Wave32 and an SGPR pair in Wave64.
+  /// @details A construction-time flag, generated from the MR ISA's
+  /// FMT_NUM_M64 data format on Wave32-capable targets (RDNA and gfx1250), for
+  /// a consumer that adjusts the operand's width to the wave size. The
+  /// encoding does not carry the wave size, so an RDNA decoder sizes the
+  /// operand for Wave64. Fieldless VCC and EXEC lane masks stay unmarked,
+  /// except a VOPC destination that SDWA sd=1 turns into an encoded SGPR, so
+  /// the flag does not find every lane-mask access: a VOPC e32 write of VCC
+  /// is a lane mask but unmarked. CDNA1-4 are Wave64-only and leave the flag
+  /// clear.
+  [[nodiscard]] bool is_wave_mask() const { return wave_mask_; }
+
+  /// @brief Mark this operand a wave mask.
+  /// @warning Construction-only, and after any reassignment of the operand,
+  /// which resets the flag.
+  void set_wave_mask() { wave_mask_ = true; }
+
   /// @brief Assign the GFX12 VGPR high-bank role for this operand.
   void set_vgpr_msb_role(amdgpu::VgprMsbRole role) { vgpr_msb_role_ = role; }
+  void set_vopd_source() { vopd_source_ = true; }
+  [[nodiscard]] bool is_vopd_source() const { return vopd_source_; }
 
   /// @brief Return the GFX12 VGPR high-bank role for this operand.
   [[nodiscard]] amdgpu::VgprMsbRole vgpr_msb_role() const { return vgpr_msb_role_; }
@@ -287,6 +335,14 @@ public:
     return static_cast<uint16_t>(encoding_value_);
   }
 
+  /// @brief Decoded VGPR identity, with ACC in the unified 256+ register range.
+  /// @details The current wave's MSB/GPR_IDX state is deliberately not applied here.
+  [[nodiscard]] std::optional<RegisterRef> decoded_vgpr() const {
+    if (!decoded_vgpr_width_)
+      return std::nullopt;
+    return RegisterRef{RegClass::VGPR, decoded_vgpr_index_, decoded_vgpr_width_};
+  }
+
   /// @brief Number of consecutive VGPRs this operand spans.
   [[nodiscard]] uint16_t vgpr_count() const {
     return static_cast<uint16_t>(std::max(1, (size_bits_ + 31) / 32));
@@ -297,6 +353,12 @@ private:
 
   // Value access is intentionally private. Instruction implementations use
   // RegisterAccess; Operand remains the ISA-specific resolver/backend.
+  // The concrete operand must implement each accessor used by its execution
+  // backend. Descriptor-only operands do not support value access, and staged
+  // source delegates do not support writes. Calling an unimplemented base
+  // accessor is a programmer error, not a rejected guest operand encoding.
+  // Missing concrete backends retain a wavefront execution error. Any returned
+  // scalar zero is a placeholder; direct callers must stop on that error.
 
   /// @brief Read this operand as a scalar 32-bit value.
   /// @param wf Wavefront providing register state.
@@ -352,6 +414,15 @@ public:
   /// cannot be skipped on exceptions or early returns.
   Operand *delegate() const { return delegate_; }
 
+  /// @brief Whether this operand and its read delegate support value access.
+  /// @details Generated execution callbacks check this when delegates are active,
+  /// before reading any values. Decoded operands otherwise retain the backend
+  /// captured alongside their instruction callback and must not be replaced.
+  /// Model-only operands remain usable for decoding and analysis. The base
+  /// descriptor has no value access; subclasses with value storage or callbacks
+  /// must opt in and check their delegate chain.
+  [[nodiscard]] virtual bool execution_backend_available() const { return false; }
+
   /// @brief Whether `read_lane_chunk` / `write_lane_chunk` produce correct,
   /// SIMD-friendly results for this operand.
   ///
@@ -402,8 +473,12 @@ public:
   int size_bits_ = 0;
   int encoding_value_ = 0;
   amdgpu::VgprMsbRole vgpr_msb_role_ = amdgpu::VgprMsbRole::None;
+  uint8_t register_byte_mask_ = 0xf;
 
 protected:
+  /// @brief Record MissingExecutionBackend on the wavefront without throwing.
+  static void report_missing_execution_backend(const amdgpu::Wavefront &wf);
+
   enum class EncodingError : uint8_t {
     None,
     InvalidSelector,
@@ -416,21 +491,33 @@ protected:
 
   void defer_encoding_error(EncodingError error) { encoding_error_ = error; }
 
-  /// @brief Capability/role flags, set once at construction and never
-  /// mutated afterward. Subclass constructors set is_vgpr_; fieldless
-  /// operands get their (reads_value, writable, is_vgpr) triple from
-  /// apply_fieldless_caps(). Kept out of the public interface so only
-  /// construction can flip them: readers do lockless bool loads on the CU
-  /// thread and rely on the flags being immutable post-construction. Query
-  /// through is_vgpr() / reads_value() / is_writable() / is_fieldless().
+  /// Construction-only normalization of a selector into its decoded register.
+  void initialize_vgpr_reference(uint16_t index) {
+    decoded_vgpr_index_ = index;
+    assert(size_bits_ >= 0);
+    decoded_vgpr_width_ = static_cast<uint8_t>(std::max(1u, unsigned(size_bits_) / 32));
+  }
+
+  /// @brief Capability/role flags, immutable after decoded operands are ready.
+  /// Subclass constructors set is_vgpr_; fieldless operands get their capability
+  /// triple from apply_fieldless_caps(), and generated constructors mark wave
+  /// masks with set_wave_mask(). Construction-only setters finish source formats
+  /// and write windows after literal/extension fixups. CU readers rely on these
+  /// flags remaining immutable once decoding publishes the operand.
   ///
   /// Defaults describe a normal field-bearing operand (readable, writable,
-  /// not fieldless).
-  bool is_vgpr_ = false;
-  bool reads_value_ = true;
-  bool writable_ = true;
-  bool fieldless_ = false;
+  /// not fieldless, not a wave mask).
+  uint16_t decoded_vgpr_index_ = 0;
+  uint8_t decoded_vgpr_width_ = 0;
+  bool is_vgpr_ : 1 = false;
+  bool reads_value_ : 1 = true;
+  bool writable_ : 1 = true;
+  bool fieldless_ : 1 = false;
+  bool wave_mask_ : 1 = false;
+  LaneInlineFloatFormat lane_inline_float_format_ : 2 = LaneInlineFloatFormat::F16;
+  bool preserve_unwritten_bytes_ : 1 = false;
   EncodingError encoding_error_ = EncodingError::None;
+  bool vopd_source_ = false;
 
 private:
   // Private SIMD fast-path backend for RegisterAccess.
@@ -591,6 +678,18 @@ private:
   Operand *delegate_ = nullptr;
 };
 
+/// @brief Return the register reference with a Wave32 SGPR wave mask narrowed
+///        to one register.
+/// @details A wave mask is one SGPR in Wave32, where decoders may name the
+/// Wave64 pair. Every other operand, and every operand in Wave64, keeps its
+/// decoded width.
+[[nodiscard]] inline RegisterRef wave_sized_register(const Operand &op, RegisterRef ref,
+                                                     uint32_t wave_size) {
+  if (wave_size == 32 && ref.cls == RegClass::SGPR && op.is_wave_mask())
+    ref.width = 1;
+  return ref;
+}
+
 /// @brief ISA-parameterized operand that adds an ISA-specific operand type tag.
 /// @tparam Isa ISA traits type providing an OperandType enum or type alias.
 template <typename Isa> class IsaOperand : public Operand {
@@ -673,6 +772,9 @@ private:
 ///
 /// Restores the previous delegate on scope exit, including exception and early
 /// return paths. A null delegate leaves the operand unchanged.
+/// @details Delegates may be installed before a decoded execution callback or
+/// temporarily inside execute_impl. Bindings and execution must stay on the same
+/// thread; the decoded instruction must not be used concurrently while bound.
 class ScopedOperandDelegate {
 public:
   ScopedOperandDelegate(Operand &operand, Operand *delegate) noexcept {
@@ -681,9 +783,13 @@ public:
     operand_ = &operand;
     previous_ = operand.delegate();
     operand.set_delegate(delegate);
+    ++active_count();
   }
 
   ~ScopedOperandDelegate() noexcept { restore(); }
+
+  /// @brief Whether this thread has bindings requiring execution preflight.
+  [[nodiscard]] static bool active() noexcept { return active_count() != 0; }
 
   ScopedOperandDelegate(const ScopedOperandDelegate &) = delete;
   ScopedOperandDelegate &operator=(const ScopedOperandDelegate &) = delete;
@@ -695,9 +801,12 @@ private:
     if (!operand_)
       return;
     operand_->set_delegate(previous_);
+    --active_count();
     operand_ = nullptr;
   }
 
+  // One exported accessor keeps module-local inline bindings visible to preflight.
+  RJ_API_EXPORT static size_t &active_count() noexcept;
   Operand *operand_ = nullptr;
   Operand *previous_ = nullptr;
 };

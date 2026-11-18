@@ -4,7 +4,6 @@
 #pragma once
 
 #include "common/synchronized.hpp"
-#include "core/perfetto.hpp"
 #include "core/timemory.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
 #include <cstdint>
@@ -41,7 +40,6 @@ struct counter_data_tag
 using counter_data_tracker = component::data_tracker<double, counter_data_tag>;
 using counter_storage_type = counter_data_tracker::storage_type;
 using counter_bundle_t     = tim::lightweight_tuple<counter_data_tracker>;
-using counter_track_type   = ::perfetto::CounterTrack;
 
 struct counter_event
 {
@@ -49,8 +47,7 @@ struct counter_event
     : record{ _v }
     {}
 
-    void operator()(const client_data* tool_data, counter_track_type*,
-                    const std::string& track_name, timing_interval _timing,
+    void operator()(const std::string& track_name, timing_interval _timing,
                     scope::config _scope) const;
 
     counter_dispatch_record record = {};
@@ -68,7 +65,6 @@ struct counter_storage
     std::string                           track_name;
     tim::manager::pointer_t               manager;
     std::unique_ptr<counter_storage_type> storage;
-    std::unique_ptr<counter_track_type>   track;
 
     counter_storage(const client_data* _tool_data, std::uint64_t _devid,
                     std::uint32_t _device_type_index, size_t _idx,
@@ -101,7 +97,7 @@ namespace tim::operation
 template <>
 struct set_storage<::rocprofsys::rocprofiler_sdk::counter_data_tracker>
 {
-    static constexpr size_t max_threads = 4096;
+    static constexpr size_t max_threads = ROCPROFSYS_MAX_THREADS;
     using type            = ::rocprofsys::rocprofiler_sdk::counter_data_tracker;
     using storage_array_t = std::array<storage<type>*, max_threads>;
     friend struct get_storage<rocprofsys::rocprofiler_sdk::counter_data_tracker>;

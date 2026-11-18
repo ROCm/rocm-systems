@@ -31,9 +31,9 @@ jobs:
         # with it, so each runs as its own matrix leg with the appropriate flag.
         sanitizer:
           - name: asan
-            cmake_flag: -DAIS_USE_SANITIZERS=ON
+            cmake_flag: -DHIPFILE_USE_SANITIZERS=ON
           - name: tsan
-            cmake_flag: -DAIS_USE_THREAD_SANITIZER=ON
+            cmake_flag: -DHIPFILE_USE_THREAD_SANITIZER=ON
     steps:
       - name: Set AIS CI container name
         # On non-pull_request triggering workflows, AIS_PR_NUMBER may be empty.

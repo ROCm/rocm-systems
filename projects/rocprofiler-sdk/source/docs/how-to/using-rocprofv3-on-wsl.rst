@@ -186,6 +186,23 @@ Linux:
 Tracing and counter collection were also exercised together in four different
 combinations of options, and neither perturbed the other's output.
 
+Thread trace (ATT)
+------------------
+
+``--att`` works on WSL2. On native Linux, GPUs that support it take the thread
+trace buffers, signals and copies directly from KFD; without ``/dev/kfd``
+ROCprofiler-SDK takes them from the HSA runtime instead, which needs no
+configuration. Restricting the capture to ROCTx-selected regions with
+``--selected-regions`` produced empty traces on WSL2 in testing.
+
+Decoding the captured data needs the ``rocprof-trace-decoder`` library, which is
+distributed separately. Point ``rocprofv3`` at the directory that holds
+``librocprof-trace-decoder.so`` with ``--att-library-path`` or the
+``ROCPROF_ATT_LIBRARY_PATH`` environment variable. When building the
+ROCprofiler-SDK tests and samples against a decoder that is not installed under
+``${ROCM_PATH}``, set ``ROCPROFILER_SDK_TRACE_DECODER_ROOT`` to it; the thread
+trace tests and samples are skipped when no decoder is found.
+
 Timestamps
 ----------
 
@@ -322,8 +339,8 @@ agents are unaffected.
 Not covered on WSL2
 ===================
 
-PC sampling, thread trace (ATT) and SPM are not covered by this page and were
-not verified in this configuration. Those paths reach the GPU through KFD
+PC sampling and SPM are not covered by this page and were not verified in this
+configuration. Those paths reach the GPU through KFD
 interfaces that WSL2 does not expose, and ROCprofiler-SDK gates them on the
 presence of the KFD device.
 

@@ -22,6 +22,7 @@
 
 import json
 import os
+import sqlite3
 
 import pytest
 
@@ -32,6 +33,12 @@ def pytest_addoption(parser):
         action="store",
         required=True,
         help="rocprofv3 results JSON produced by a --replay-mode kernel --kernel-replay-beta-enabled run",
+    )
+    parser.addoption(
+        "--rocpd-input",
+        action="store",
+        default=None,
+        help="rocpd database written by the same run as --json-input",
     )
     parser.addoption(
         "--passes",
@@ -47,6 +54,37 @@ def pytest_addoption(parser):
         default=["SQ_WAVES", "SQ_INSTS_VALU"],
         help="counters shared by every --pmc group; must be constant across a kernel's passes",
     )
+    parser.addoption(
+        "--expected-dispatch-count",
+        action="store",
+        type=int,
+        default=None,
+        help="optional exact number of logical dispatches expected in the counter records",
+    )
+    parser.addoption(
+        "--selected-kernel",
+        action="store",
+        default=None,
+        help="part of the kernel name whose launches --selected-launches counts",
+    )
+    parser.addoption(
+        "--selected-launches",
+        action="store",
+        nargs="+",
+        type=int,
+        default=None,
+        help="1-based launches of --selected-kernel, among those in the kernel trace, that the kernel filters must select",
+    )
+    parser.addoption("--n-elems", type=int, default=1048576)
+    parser.addoption("--baseline-json", help="optional 1-pass baseline JSON for scaling")
+    parser.addoption("--max-scaling-ratio", type=float, default=10.0)
+
+
+def pytest_generate_tests(metafunc):
+    if "common_counter" in metafunc.fixturenames:
+        metafunc.parametrize(
+            "common_counter", metafunc.config.getoption("--common-counters")
+        )
 
 
 @pytest.fixture
@@ -58,10 +96,36 @@ def json_data(request):
 
 
 @pytest.fixture
+def rocpd_db(request):
+    path = request.config.getoption("--rocpd-input")
+    if path is None:
+        pytest.skip("no --rocpd-input given")
+    assert os.path.isfile(path), f"missing rocpd input: {path}"
+    connection = sqlite3.connect(path)
+    yield connection
+    connection.close()
+
+
+@pytest.fixture
 def expected_passes(request):
     return request.config.getoption("--passes")
 
 
 @pytest.fixture
+def expected_dispatch_count(request):
+    return request.config.getoption("--expected-dispatch-count")
+
+
+@pytest.fixture
 def common_counters(request):
     return list(request.config.getoption("--common-counters"))
+
+
+@pytest.fixture
+def selected_kernel(request):
+    return request.config.getoption("--selected-kernel")
+
+
+@pytest.fixture
+def selected_launches(request):
+    return request.config.getoption("--selected-launches")

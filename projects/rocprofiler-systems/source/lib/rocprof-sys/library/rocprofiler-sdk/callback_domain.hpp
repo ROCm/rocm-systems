@@ -40,6 +40,14 @@ public:
         return m_definition.meta.name;
     }
 
+    void finalize()
+    {
+        if(m_definition.on_finalize)
+        {
+            m_definition.on_finalize();
+        }
+    }
+
 private:
     callback_domain_definition<SdkBackend>                m_definition;
     SdkBackend::context_id_t                              m_context;

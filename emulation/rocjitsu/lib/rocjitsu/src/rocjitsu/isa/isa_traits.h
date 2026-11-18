@@ -70,8 +70,8 @@ concept HasAsyncMma = GpuIsa<Isa> && requires { requires Isa::ASYNC_MMA_WAVE_SIZ
 
 /// @brief Derived concept: ISA has a dedicated AccVGPR register file.
 ///
-/// @details True for CDNA2/3/4 (`MAX_ACC_VGPRS_PER_WF > 0`).
-/// False for CDNA1 and all RDNA ISAs.
+/// @details True for CDNA1-4 (`MAX_ACC_VGPRS_PER_WF > 0`).
+/// False for RDNA and CDNA5 ISAs.
 template <typename Isa>
 concept HasAccVgpr = GpuIsa<Isa> && (Isa::MAX_ACC_VGPRS_PER_WF > 0);
 
@@ -106,6 +106,32 @@ template <GpuIsa Isa> inline constexpr bool supports_wave_size(uint32_t wf) {
   return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
          arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
          arch == ROCJITSU_CODE_ARCH_RDNA4;
+}
+
+/// @brief Return true when the architecture exposes image memory instructions.
+/// @details CDNA3 and later omit these instructions even where their descriptor
+/// layouts share fields with image-capable architectures.
+[[nodiscard]] inline constexpr bool arch_has_image_memory_instructions(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return true;
+  default:
+    return false;
+  }
+}
+
+/// @brief Non-architected flat scratch appends a private-segment wavefront byte offset SGPR.
+/// @details The kernel also uses this offset to rebase its private buffer descriptor.
+[[nodiscard]] inline constexpr bool
+arch_appends_private_segment_wave_offset_sgpr(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
 }
 
 /// @brief Return true when scalar selectors 102 and 103 name FLAT_SCRATCH.

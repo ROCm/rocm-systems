@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 //! Operating-system-specific topology extensions.
 //!
 //! The base [`Endpoint`](crate::topology::Endpoint) model intentionally avoids

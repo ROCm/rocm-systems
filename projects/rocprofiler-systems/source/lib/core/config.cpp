@@ -16,7 +16,7 @@
 #include "logger/logger.hpp"
 #include "mproc.hpp"
 #include "perf.hpp"
-#include "perfetto.hpp"
+#include "perfetto/category_registry.hpp"
 #include "sdk/tracing-config-deps.hpp"
 #include "sdk/tracing-config.hpp"
 #include "utility.hpp"
@@ -78,6 +78,7 @@
 #include <unistd.h>
 #include <unordered_set>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace rocprofsys
@@ -389,12 +390,10 @@ validate_config_file_values(const std::string& config_file, const std::string& t
         auto key       = std::string{};
         auto raw_value = std::string{};
 
-        if(auto const equal_pos = trimmed_line.find('='); equal_pos != std::string::npos)
+        if(auto const parsed = utility::string::split_key_value(trimmed_line))
         {
-            key = utility::string::trim(
-                std::string_view{ trimmed_line }.substr(0, equal_pos));
-            raw_value = utility::string::trim(
-                std::string_view{ trimmed_line }.substr(equal_pos + 1));
+            key       = utility::string::trim(parsed->key);
+            raw_value = utility::string::trim(parsed->value);
         }
         else
         {
@@ -790,14 +789,6 @@ configure_settings(bool _init)
                               "Enable perfetto backend for tracing", false, "backend",
                               "perfetto");
 
-    ROCPROFSYS_CONFIG_SETTING(bool, env_vars::TRACE_LEGACY,
-                              "[DEPRECATED] The new default option is to use data from "
-                              "cached buffer. When set to true system will use "
-                              "legacy direct mode for perfetto tracing instead of "
-                              "deferred trace generation. When false (default), uses "
-                              "cached mode with minimal runtime overhead.",
-                              false, "backend", "perfetto");
-
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_PERFETTO,
                               "[DEPRECATED] Renamed to ROCPROFSYS_TRACE", false,
                               "backend", "perfetto", "deprecated");
@@ -955,14 +946,14 @@ configure_settings(bool _init)
     ROCPROFSYS_CONFIG_SETTING(
         std::string, env_vars::TRACE_PERIOD_CLOCK_ID,
         "Clock used to measure delay and duration for ROCPROFSYS_TRACE_DELAY, "
-        "ROCPROFSYS_TRACE_DURATION, and ROCPROFSYS_TRACE_PERIODS.\n"
-        "  realtime (default) : wall-clock time. A 10-second delay waits for\n"
-        "    10 real seconds regardless of how many CPU cores are active.\n"
-        "  cputime : process CPU time (CLOCK_PROCESS_CPUTIME_ID). A 10-second\n"
-        "    delay waits until the process has consumed 10 CPU-seconds in total\n"
-        "    across all threads. Useful when you want to skip a fixed amount of\n"
-        "    computation rather than a fixed elapsed time. Note: rocprof-sys\n"
-        "    instrumentation itself contributes to the CPU-time counter.",
+        "ROCPROFSYS_TRACE_DURATION, and ROCPROFSYS_TRACE_PERIODS."
+        "  realtime (default) : wall-clock time. A 10-second delay waits for"
+        " 10 real seconds regardless of how many CPU cores are active."
+        "  cputime : process CPU time (CLOCK_PROCESS_CPUTIME_ID). A 10-second"
+        " delay waits until the process has consumed 10 CPU-seconds in total"
+        " across all threads. Useful when you want to skip a fixed amount of"
+        " computation rather than a fixed elapsed time. Note: rocprof-sys"
+        " instrumentation itself contributes to the CPU-time counter.",
         "realtime", "trace", "profile", "perfetto", "timemory")
         ->set_choices({ "realtime", "cputime" });
 
@@ -1275,7 +1266,7 @@ configure_settings(bool _init)
     ROCPROFSYS_CONFIG_SETTING(
         std::string, env_vars::TIMEMORY_COMPONENTS,
         "List of components to collect via timemory (see `rocprof-sys-avail -C`)",
-        "wall_clock", "timemory", "component");
+        std::string{}, "timemory", "component");
 
     ROCPROFSYS_CONFIG_SETTING(std::string, env_vars::OUTPUT_FILE,
                               "[DEPRECATED] See ROCPROFSYS_PERFETTO_FILE", std::string{},
@@ -1524,14 +1515,10 @@ configure_settings(bool _init)
     _add_advanced_category(env_vars::JSON_OUTPUT);
     _add_advanced_category(env_vars::TREE_OUTPUT);
     _add_advanced_category(env_vars::TEXT_OUTPUT);
-    _add_advanced_category(env_vars::DIFF_OUTPUT);
     _add_advanced_category(env_vars::DEBUG_MODE);
     _add_advanced_category(env_vars::LOG_LEVEL);
     _add_advanced_category(env_vars::ENABLE_SIGNAL_HANDLER);
     _add_advanced_category(env_vars::FLAT_PROFILE);
-    _add_advanced_category(env_vars::INPUT_EXTENSIONS);
-    _add_advanced_category(env_vars::INPUT_PATH);
-    _add_advanced_category(env_vars::INPUT_PREFIX);
     _add_advanced_category(env_vars::MAX_DEPTH);
     _add_advanced_category(env_vars::MAX_WIDTH);
     _add_advanced_category(env_vars::MEMORY_PRECISION);
@@ -1807,8 +1794,6 @@ configure_settings(bool _init)
                               std::string{ env_vars::LOG_LEVEL });
     handle_deprecated_setting(std::string{ env_vars::VERBOSE },
                               std::string{ env_vars::LOG_LEVEL });
-    handle_deprecated_setting(std::string{ env_vars::TRACE_LEGACY },
-                              std::string{ env_vars::TRACE });
     handle_deprecated_setting(std::string{ env_vars::USE_SHMEM },
                               std::string{ env_vars::USE_OPENSHMEM });
 
@@ -1926,17 +1911,18 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
 #if defined(ROCPROFSYS_BUILD_HIPFILE) && ROCPROFSYS_BUILD_HIPFILE == 1
     if(_config->get<bool>(std::string{ env_vars::USE_HIPFILE }))
     {
-        // hipFile already defaults HIPFILE_STATS_LEVEL to 1, so injecting "1" here is a
-        // no-op. Do not override an explicit 0 either: that is the user's choice to turn
-        // hipFile's stats server off. Warn, because the combination produces empty
-        // telemetry despite ROCPROFSYS_USE_HIPFILE=ON.
+        // hipFile already defaults HIPFILE_STATS_LEVEL to 1. An explicit 0 is the
+        // user's choice to turn the statistics server off; do not override it.
+        // hipFileGetStatsL3 still returns success and a zero-filled snapshot in that
+        // mode, so the collector has to be turned off or those zeros are stored.
         if(rocprofsys::get_env<int>(env_vars::HIPFILE_STATS_LEVEL, 1) == 0)
         {
             LOG_WARNING("ROCPROFSYS_USE_HIPFILE=ON but HIPFILE_STATS_LEVEL=0; hipFile's "
                         "statistics server is disabled, so no hipFile telemetry will be "
                         "recorded. Unset HIPFILE_STATS_LEVEL or set it to 1 or higher");
+            _set(env_vars::USE_HIPFILE, false);
         }
-        if(!_config->get<bool>(std::string{ env_vars::USE_PROCESS_SAMPLING }))
+        else if(!_config->get<bool>(std::string{ env_vars::USE_PROCESS_SAMPLING }))
         {
             LOG_WARNING(
                 "ROCPROFSYS_USE_HIPFILE=ON but ROCPROFSYS_USE_PROCESS_SAMPLING=OFF; "
@@ -2229,7 +2215,8 @@ configure_disabled_settings(const std::shared_ptr<settings>& _config)
         "FREQ|STACK_CLEARING|TARGET_PID|THROTTLE_(COUNT|VALUE)|(AUTO|FLAMEGRAPH)_"
         "OUTPUT|"
         "(ENABLE|DISABLE)_ALL_SIGNALS|ALLOW_SIGNAL_HANDLER|CTEST_NOTES|INSTRUCTION_"
-        "ROOFLINE|ADD_SECONDARY|MAX_THREAD_BOOKMARKS)$";
+        "ROOFLINE|ADD_SECONDARY|MAX_THREAD_BOOKMARKS|DIFF_OUTPUT|"
+        "INPUT_(PATH|PREFIX|EXTENSIONS))$";
 
     //  leading matches, e.g. ROCPROFSYS_MPI_[A-Z_]+
     const std::string _hidden_begin_re =
@@ -2348,12 +2335,13 @@ print_banner(std::ostream& _os)
             return _property_info;
         };
 
-    auto _properties =
-        _generate_properties({ { "rev", ROCPROFSYS_GIT_REVISION },
-                               { "tag", ROCPROFSYS_GIT_DESCRIBE },
-                               { "", ROCPROFSYS_LIBRARY_ARCH },
-                               { "compiler", ROCPROFSYS_COMPILER_STRING },
-                               { "rocm", "v" ROCPROFSYS_ROCM_VERSION_STRING } });
+    auto _properties = _generate_properties(
+        { { "rev", ROCPROFSYS_GIT_REVISION },
+          { "tag", ROCPROFSYS_GIT_DESCRIBE },
+          { "", ROCPROFSYS_LIBRARY_ARCH },
+          { "compiler", ROCPROFSYS_COMPILER_STRING },
+          { "rocm", "v" ROCPROFSYS_ROCM_VERSION_STRING },
+          { "profiler-hub", "v" ROCPROFSYS_PROFILER_HUB_VERSION_STRING } });
 
     // <NAME> <VERSION> (<PROPERTIES>)
     if(!_properties.empty())
@@ -2699,17 +2687,6 @@ get_verbose()
 {
     std::call_once(configure_once, []() { (void) get_config(); });
     return verbose_value();
-}
-
-bool&
-get_use_perfetto()
-{
-    static auto const _trace_setting  = get_config()->at(env_vars::TRACE);
-    static auto const _legacy_setting = get_config()->at(env_vars::TRACE_LEGACY);
-    auto const&       _trace = static_cast<tim::tsettings<bool>&>(*_trace_setting).get();
-    auto const& _legacy      = static_cast<tim::tsettings<bool>&>(*_legacy_setting).get();
-    static bool _v           = _trace && _legacy;
-    return _v;
 }
 
 bool&
@@ -3092,7 +3069,9 @@ get_perfetto_output_filename()
     auto basename = dynamic_cast<tim::tsettings<std::string>&>(*setting->second).get();
 
     auto dir = std::string{};
-    auto ext = std::string{ "pftrace" };
+    // Perfetto output is always .pftrace, regardless of what extension the user's
+    // basename implies.
+    const auto ext = std::string{ "pftrace" };
 
     if(const auto pos_dir = basename.find_last_of('/'); pos_dir != std::string::npos)
     {
@@ -3102,7 +3081,6 @@ get_perfetto_output_filename()
 
     if(const auto pos_ext = basename.find_last_of('.'); pos_ext + 1 < basename.length())
     {
-        ext      = basename.substr(pos_ext + 1);
         basename = basename.substr(0, pos_ext);
     }
 
@@ -3402,14 +3380,6 @@ get_use_tmp_files()
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
-bool
-get_merge_perfetto_files()
-{
-    static auto const _v =
-        get_config()->find(std::string{ env_vars::MERGE_PERFETTO_FILES });
-    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-}
-
 std::string
 get_tmpdir()
 {
@@ -3464,6 +3434,19 @@ reset_database_path_memo()
     s_db_path_memo.clear();
 }
 
+void
+refresh_output_format_settings()
+{
+    for(const auto* name : { env_vars::TRACE, env_vars::USE_ROCPD })
+    {
+        const auto value = rocprofsys::get_env<std::string>(name, "");
+        if(!value.empty())
+        {
+            set_setting_value(std::string{ name }, utility::string::to_bool(value));
+        }
+    }
+}
+
 std::string
 get_output_absolute_path(std::string_view basename, std::string_view extension,
                          std::string_view tag, std::string_view dir)
@@ -3507,9 +3490,16 @@ get_perfetto_output_filename_with_suffix(std::string_view suffix)
 
     LOG_DEBUG("Initial ROCPROFSYS_PERFETTO_FILE='{}', suffix='{}'", val, suffix);
 
-    // If absolute path is provided, return it as-is
+    // If absolute path is provided, enforce the .pftrace extension and
+    // return it as-is otherwise
     if(!val.empty() && val.at(0) == '/')
     {
+        const auto pos_ext = val.find_last_of('.');
+        if(pos_ext != std::string::npos)
+        {
+            val.resize(pos_ext);
+        }
+        val += ".pftrace";
         LOG_DEBUG("Absolute path, returning: '{}'", val);
         return val;
     }
@@ -3517,7 +3507,7 @@ get_perfetto_output_filename_with_suffix(std::string_view suffix)
     // Parse the filename into directory, basename, and extension
     auto const pos_dir = val.find_last_of('/');
     auto       dir     = std::string{};
-    auto       ext     = std::string{ "pftrace" };
+    const auto ext     = std::string{ "pftrace" };
 
     // If the filename contains a directory, extract it
     if(pos_dir != std::string::npos)
@@ -3530,7 +3520,6 @@ get_perfetto_output_filename_with_suffix(std::string_view suffix)
     auto const pos_ext = val.find_last_of('.');
     if(pos_ext != std::string::npos && pos_ext + 1 < val.length())
     {
-        ext = val.substr(pos_ext + 1);
         val = val.substr(0, pos_ext);
     }
 
@@ -3643,10 +3632,9 @@ get_ump_absolute_path()
     }
 
     // Co-locate UMP output with the active backend: rocpd's .db dir when
-    // rocpd is on and trace-cache Perfetto is not; otherwise the Perfetto
-    // file's dir (covers both trace-cache and legacy Perfetto).
+    // rocpd is on and Perfetto is not; otherwise the Perfetto file's dir.
     const auto source =
-        (get_use_rocpd() && !get_caching_perfetto())
+        (get_use_rocpd() && !get_use_perfetto())
             ? get_database_absolute_path("rocpd", std::to_string(process::get_id()))
             : get_perfetto_output_filename();
     return path::parent_path(source);
@@ -3666,15 +3654,11 @@ get_use_unified_memory_profiling()
     return static_cast<tim::tsettings<bool>&>(*_v).get();
 }
 
-bool&
-get_caching_perfetto()
+bool
+get_use_perfetto()
 {
-    static auto const _trace_setting  = get_config()->at(env_vars::TRACE);
-    static auto const _legacy_setting = get_config()->at(env_vars::TRACE_LEGACY);
-    auto const&       _trace = static_cast<tim::tsettings<bool>&>(*_trace_setting).get();
-    auto const& _legacy      = static_cast<tim::tsettings<bool>&>(*_legacy_setting).get();
-    static bool _v           = _trace && !_legacy;
-    return _v;
+    static auto const _trace_setting = get_config()->at(env_vars::TRACE);
+    return static_cast<tim::tsettings<bool>&>(*_trace_setting).get();
 }
 
 int
@@ -3743,25 +3727,41 @@ get_first_mpi_env_uint(const std::vector<std::string>& env_var_options,
     return std::nullopt;
 }
 
-[[nodiscard]] std::optional<std::uint64_t>
+#endif
+}  // namespace
+
+std::optional<std::uint64_t>
 get_mpi_rank_from_env()
 {
+#if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
     // global rank env-vars: user-provided, then runtime-specific
-    return get_first_mpi_env_uint({ get_rank_filter_id(), "MPI_RANKID", "PMI_RANK",
-                                    "MV2_COMM_WORLD_RANK", "OMPI_COMM_WORLD_RANK",
-                                    "SLURM_PROCID" },
-                                  "MPI rank");
+    auto env_var_options = std::vector<std::string>{ get_rank_filter_id() };
+    env_var_options.insert(env_var_options.end(), k_mpi_rank_env_names.begin(),
+                           k_mpi_rank_env_names.end());
+    return get_first_mpi_env_uint(env_var_options, "MPI rank");
+#else
+    return std::nullopt;
+#endif
 }
 
-[[nodiscard]] std::optional<std::uint64_t>
+std::optional<std::uint64_t>
 get_mpi_world_size_from_env()
 {
+#if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
     return get_first_mpi_env_uint({ "OMPI_COMM_WORLD_SIZE", "MV2_COMM_WORLD_SIZE",
                                     "PMI_SIZE", "SLURM_NTASKS", "SLURM_NPROCS" },
                                   "MPI world size");
-}
+#else
+    return std::nullopt;
 #endif
-}  // namespace
+}
+
+std::string
+get_output_process_suffix()
+{
+    return std::visit([](const auto& value) { return fmt::format("{}", value); },
+                      settings::default_process_suffix());
+}
 
 namespace output_filtering
 {

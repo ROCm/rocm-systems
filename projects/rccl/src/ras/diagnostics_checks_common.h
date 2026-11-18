@@ -25,6 +25,9 @@ void rasDiagnosticsCommSnapshotInit(struct rasDiagnosticsCommSnapshot* snapshot,
 int rasDiagnosticsCommIdCompare(const struct rasCommId* id1, const struct rasCommId* id2);
 bool rasDiagnosticsCommMatchesContext(const struct rasDiagnosticsContext* ctx, const struct ncclComm* comm);
 size_t rasDiagnosticsLocalRecordStride(size_t checkDataSize);
+ncclResult_t rasDiagnosticsCollectCommSnapshots(const struct rasDiagnosticsContext* ctx, bool collectNetDevices,
+                                                struct rasDiagnosticsCommSnapshot** snapshots, int* nSnapshots);
+void rasDiagnosticsFreeCommSnapshots(struct rasDiagnosticsCommSnapshot* snapshots, int nSnapshots);
 ncclResult_t rasDiagnosticsCollectLocalRecords(const struct rasDiagnosticsContext* ctx, size_t checkDataSize,
                                                rasDiagnosticsFillLocalDataFn fillCheckData,
                                                struct rasDiagnosticsLocalData* data);
@@ -35,5 +38,7 @@ ncclResult_t __attribute__((format(printf, 3, 4))) rasDiagnosticsReport(const st
                                                                         const char* tag, const char* fmt, ...);
 ncclResult_t rasDiagnosticsReportIncomplete(const struct rasDiagnosticsReporter* reporter, const char* checkName,
                                             const struct rasDiagnosticsRankHeader* rank, int gatheredRanks);
+ncclResult_t rasDiagnosticsReportTopologyNotReady(const struct rasDiagnosticsReporter* reporter, const char* checkName,
+                                                  const struct rasDiagnosticsRankHeader* rank, int unavailableRanks);
 
 #endif // NCCL_RAS_DIAGNOSTICS_CHECKS_COMMON_H_

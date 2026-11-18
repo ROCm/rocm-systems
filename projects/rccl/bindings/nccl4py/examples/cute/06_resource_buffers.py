@@ -56,12 +56,14 @@ INDEX = 0
 def resource_buffers_kernel(
     dev_comm: nccl_cute.DevComm,
     lsa_handle: nccl_cute.LsaBarrierHandle,
+    mm_handle: nccl_cute.MultimemHandle,
 ):
     """Translate one resource handle through every addressing mode.
 
     Args:
         dev_comm: CuTeDSL view of the NCCL device communicator.
         lsa_handle: LSA barrier handle whose ``buf_handle`` is translated.
+        mm_handle: the LSA team's host-passed multimem handle.
     """
     tidx, _, _ = cute.arch.thread_idx()
     coop = nccl_cute.cta()
@@ -83,7 +85,7 @@ def resource_buffers_kernel(
         # Multicast addresses: one store reaches every peer's copy.
         mm = cute.make_ptr(
             cutlass.Int8,
-            dev_comm.resource_buffer_multimem_pointer(handle, dev_comm.lsa_multimem)).toint()
+            dev_comm.resource_buffer_multimem_pointer(handle, mm_handle)).toint()
         lsa_mm = cute.make_ptr(
             cutlass.Int8,
             dev_comm.resource_buffer_lsa_multimem_pointer(handle)).toint()
@@ -92,33 +94,37 @@ def resource_buffers_kernel(
         cute.printf(f"resource buffer multimem={mm} lsa_multimem={lsa_mm}")
         cute.printf(f"local == lsa(self): {local == lsa}, local == peer(self): {local == peer}")
 
-    # Live barrier storage: reading it around a barrier shows NCCL updating
-    # it. Never write through it.
+    # Live barrier storage; never write through it. For this non-multimem
+    # session, destroy() writes the uint32 epoch at n_barriers + index.
     state = cute.make_tensor(
-        cute.make_ptr(cutlass.Uint64, dev_comm.resource_buffer_local_pointer(handle)),
-        cute.make_layout(1))
-    before = state[0]
+        cute.make_ptr(cutlass.Uint32, dev_comm.resource_buffer_local_pointer(handle)),
+        cute.make_layout(2 * lsa_handle.n_barriers))
+    epoch_slot = lsa_handle.n_barriers + INDEX
+    before = state[epoch_slot]
 
-    nccl_cute.lsa_session(
-        coop, dev_comm, dev_comm.team_lsa, lsa_handle, index=INDEX
-    ).sync(coop, nccl_cute.MemoryOrder.ACQ_REL)
+    bar = nccl_cute.lsa_session(
+        coop, dev_comm, dev_comm.team_lsa, lsa_handle, index=INDEX)
+    bar.sync(coop, nccl_cute.MemoryOrder.ACQ_REL)
+    bar.destroy()
 
     if 0 == tidx:
-        cute.printf(f"barrier state before={before} after={state[0]}")
+        cute.printf(f"barrier epoch before={before} after={state[epoch_slot]}")
 
 
 @cute.jit
 def resource_buffers(
     dev_comm: nccl_cute.DevComm,
     lsa_handle: nccl_cute.LsaBarrierHandle,
+    mm_handle: nccl_cute.MultimemHandle,
 ):
     """Launch :func:`resource_buffers_kernel` on a single CTA.
 
     Args:
         dev_comm: CuTeDSL view of the NCCL device communicator.
         lsa_handle: LSA barrier handle whose ``buf_handle`` is translated.
+        mm_handle: the LSA team's host-passed multimem handle.
     """
-    resource_buffers_kernel(dev_comm, lsa_handle).launch(
+    resource_buffers_kernel(dev_comm, lsa_handle, mm_handle).launch(
         grid=[1, 1, 1],
         block=[THREADS, 1, 1],
         cooperative=True,
@@ -129,12 +135,18 @@ def main():
     """Request an LSA barrier resource and translate its handle.
 
     Returns:
-        Exit code; 0 on success, 1 if the topology or multimem is missing.
+        Exit code; 1 on a wrong rank count or topology error, otherwise 0.
+        Missing multicast support is reported as a skipped run.
     """
     comm_mpi = MPI.COMM_WORLD
     rank = comm_mpi.Get_rank()
     nranks = comm_mpi.Get_size()
     root = 0
+
+    if nranks < 2:
+        if rank == root:
+            print(f"\n[{NAME}] ERROR: needs at least 2 ranks, got {nranks}")
+        return 1
 
     if rank == root:
         print(f"\n===== {NAME} =====", flush=True)
@@ -174,6 +186,7 @@ def main():
     )
     dev_comm_resource = nccl_comm.create_dev_comm(requirements=reqs)
     (lsa_handle,) = dev_comm_resource.resource_handles
+    mm_handle = dev_comm_resource.multimem_handle(nccl_comm.team_lsa)
 
     if rank == root:
         print(f"host: buf_handle={lsa_handle.buf_handle} "
@@ -182,6 +195,7 @@ def main():
     resource_buffers(
         nccl_cute.DevComm(dev_comm_resource),
         nccl_cute.LsaBarrierHandle(lsa_handle),
+        nccl_cute.MultimemHandle(mm_handle),
     )
     device.sync()
     comm_mpi.Barrier()

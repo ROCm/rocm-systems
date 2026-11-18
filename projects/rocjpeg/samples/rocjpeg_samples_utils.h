@@ -150,7 +150,7 @@ public:
                 }
                 if (num_threads != nullptr) {
                     *num_threads = atoi(argv[i]);
-                    if (*num_threads <= 0 || *num_threads > 32) {
+                    if (*num_threads <= 0 || *num_threads > 64) {
                         ShowHelpAndExit(argv[i], num_threads != nullptr, batch_size != nullptr);
                     }
                 }
@@ -310,6 +310,32 @@ public:
                 chroma_sub_sampling = "";
                 break;
         }
+    }
+
+    /**
+     * @brief Returns the decode parameters to use for an image, with the crop rectangle cleared if it does not fit.
+     *
+     * rocJPEG rejects a crop rectangle that does not lie within the image. The samples apply one -crop option to
+     * every image, so for an image the rectangle does not fit, the crop is dropped and the full image is decoded.
+     *
+     * @param decode_params The decode parameters from the command line.
+     * @param width The width of the image.
+     * @param height The height of the image.
+     * @param print_info Whether to print a message when the crop is dropped.
+     * @return The decode parameters for this image.
+     */
+    static RocJpegDecodeParams FitCropToImage(const RocJpegDecodeParams &decode_params, uint32_t width, uint32_t height, bool print_info = true) {
+        RocJpegDecodeParams image_decode_params = decode_params;
+        const auto &crop = decode_params.crop_rectangle;
+        bool no_crop = crop.left == 0 && crop.top == 0 && crop.right == 0 && crop.bottom == 0;
+        bool crop_fits = crop.left >= 0 && crop.top >= 0 && crop.left < crop.right && crop.top < crop.bottom &&
+                         static_cast<uint32_t>(crop.right) <= width && static_cast<uint32_t>(crop.bottom) <= height;
+        if (!no_crop && !crop_fits) {
+            if (print_info)
+                std::cout << "The crop rectangle does not lie within the " << width << "x" << height << " image, decoding the full image" << std::endl;
+            image_decode_params.crop_rectangle = {};
+        }
+        return image_decode_params;
     }
 
     /**
@@ -663,7 +689,7 @@ private:
         "-crop  [crop rectangle] - crop rectangle for output in a comma-separated format: left,top,right,bottom - [optional]\n"
         "-d     [device id] - specify the GPU device id for the desired device (use 0 for the first device, 1 for the second device, and so on) [optional - default: 0]\n";
         if (show_threads) {
-            std::cout << "-t     [threads] - number of threads (<= 32) for parallel JPEG decoding - [optional - default: 1]\n";
+            std::cout << "-t     [threads] - number of threads (<= 64) for parallel JPEG decoding - [optional - default: 1]\n";
         }
         if (show_batch_size) {
             std::cout << "-b     [batch_size] - decode images from input by batches of a specified size - [optional - default: 1]\n";

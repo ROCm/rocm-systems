@@ -80,18 +80,18 @@ The NCCL Device API enables GPU kernels to perform inter-GPU communication direc
 
 ```c
 ncclDevComm devComm;
-ncclDevCommRequirements requirements = {0};
-requirements.lsaBarrierCount = numBlocks;  // One barrier per thread block
+ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+reqs.lsaBarrierCount = NCCL_DEVICE_CTA_COUNT;  // One barrier per thread block
 
 // Create device communicator
-ncclDevCommCreate(&devComm, comm, &requirements);
+ncclDevCommCreate(comm, &reqs, &devComm);
 ```
 
 ### Symmetric Memory Windows (Host-side)
 
 The device API requires symmetric memory windows registered with
 `NCCL_WIN_COLL_SYMMETRIC`. See the [symmetric memory
-example](../../05_symmetric_memory/) for allocation and requirements details.
+example](../../../05_symmetric_memory/) for allocation and requirements details.
 
 ```c
 ncclWindow_t send_win, recv_win;
@@ -114,7 +114,7 @@ GPUs.
 // synchronize independently with their counterparts on other GPUs.
 ncclLsaBarrierSession<ncclCoopCta> bar {
     ncclCoopCta(),           // Barrier scope: entire CTA (thread block)
-    devComm, ncclTeamLsa(devComm), devComm.lsaBarrier,
+    devComm, ncclTeamTagLsa(),
     blockIdx.x               // Barrier index: matches our CTA index (0 to lsaBarrierCount-1)
 };
 
@@ -136,7 +136,7 @@ within the LSA team:
 
 ```cpp
 // Access peer memory directly using LSA (Load/Store Accessible) pointers
-float* peerPtr = (float*)ncclGetLsaPointer(sendwin, sendoffset, peer);
+float* sendPtr = (float*)ncclGetLsaPointer(sendwin, sendoffset, peer);
 ```
 
 ### Key advantages

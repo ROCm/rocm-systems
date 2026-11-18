@@ -13,7 +13,7 @@ so the resulting shim has no dependency on cuda-bindings, cuda-core,
 ``nvidia-*`` packages, or ``hip-python-as-cuda``.
 
 Scope: exactly the symbols imported by ``nccl/core/*.py`` (``Device``,
-``Stream``, ``Buffer``, ``MemoryResource``, ``system``, ``IsStreamType``,
+``Stream``, ``Event``, ``Buffer``, ``MemoryResource``, ``system``, ``IsStreamType``,
 ``DevicePointerType``, ``StridedMemoryView``,
 ``args_viewable_as_strided_memory``), each reachable under every spelling
 cuda.core has used for it. Anything outside that surface is
@@ -60,6 +60,10 @@ def _resolve_cuda_core(name: str) -> Any:
         from ._stream import Stream
 
         return Stream
+    if name == "Event":
+        from ._event import Event
+
+        return Event
     if name == "Buffer":
         from ._memory import Buffer
 

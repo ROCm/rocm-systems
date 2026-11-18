@@ -110,8 +110,14 @@ class Context {
                                            const int *status,
                                            int cmp, T* vals);
 
+  __device__ uint64_t signal_wait_until(uint64_t *sig_addr, int cmp,
+                                        uint64_t cmp_value);
+
   template <typename T>
   __device__ int test(T *ivars, int cmp, T val);
+
+  template <typename T>
+  __device__ int test_value(T value, int cmp, T cmp_value);
 
   __device__ void threadfence_system();
 
@@ -586,6 +592,12 @@ class Context {
                                         size_t nelems, uint64_t *sig_addr,
                                         uint64_t signal, int sig_op, int pe,
                                         hipStream_t stream);
+
+  __host__ void signal_add_on_stream(uint64_t *sig_addr, uint64_t signal,
+                                     int pe, hipStream_t stream);
+
+  __host__ void signal_set_on_stream(uint64_t *sig_addr, uint64_t signal,
+                                     int pe, hipStream_t stream);
 
   __host__ void signal_wait_until_on_stream(uint64_t *sig_addr, int cmp,
                                             uint64_t cmp_value,

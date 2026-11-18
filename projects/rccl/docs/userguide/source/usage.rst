@@ -32,3 +32,5 @@ The creation of a communicator is the first step needed before launching any com
    usage/cudagraph
    usage/bufferreg
    usage/deviceapi
+   usage/cft
+   usage/determinism

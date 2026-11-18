@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand.h"
+#include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include <array>
 
@@ -15,11 +16,35 @@ namespace cdna4 {
 namespace {
 
 template <typename Derived> void execute_with_backend(Instruction &instruction, void *context) {
+  auto &wf = *static_cast<Isa::Context *>(context);
+  // Decode captures immutable operands and this callback under the
+  // same backend scope. Only scoped delegates installed on this
+  // execution thread can introduce a different operand backend.
+  if (ScopedOperandDelegate::active()) {
+    for (int i = 0; i < instruction.num_src_operands(); ++i) {
+      if (!instruction.src_operand(i)->execution_backend_available()) {
+        wf.report_instruction_execution_error(
+            amdgpu::InstructionExecutionError::MissingExecutionBackend);
+        return;
+      }
+    }
+    for (int i = 0; i < instruction.num_dst_operands(); ++i) {
+      if (!instruction.dst_operand(i)->execution_backend_available()) {
+        wf.report_instruction_execution_error(
+            amdgpu::InstructionExecutionError::MissingExecutionBackend);
+        return;
+      }
+    }
+  }
   // execute_impl may construct temporary operands (for example,
   // indexed SOP1/VOP1 sources). Re-enter the ISA scope so those
   // operands capture the same backend as decode-time operands.
   ScopedIsaExecutionBackend scope(&execution_backend());
-  static_cast<Derived &>(instruction).execute_impl(*static_cast<Isa::Context *>(context));
+  if (instruction.is_memory_op() && wf.memory_destination_out_of_range(instruction)) [[unlikely]] {
+    execute_with_empty_memory_mask(static_cast<Derived &>(instruction), wf);
+    return;
+  }
+  static_cast<Derived &>(instruction).execute_impl(wf);
 }
 
 constexpr size_t kInstructionCallbackCount = static_cast<size_t>(InstructionExecutionId::Count);
@@ -375,6 +400,8 @@ constexpr InstructionCallbackTable kInstructionCallbacks{{
     &execute_with_backend<VPermlane16SwapB32Vop1>,
     &execute_with_backend<VPermlane32SwapB32Vop1>,
     &execute_with_backend<VCvtF32Bf16Vop1>,
+    &execute_with_backend<VExpLegacyF32Vop1>,
+    &execute_with_backend<VLogLegacyF32Vop1>,
     &execute_with_backend<VCmpClassF32Vopc>,
     &execute_with_backend<VCmpxClassF32Vopc>,
     &execute_with_backend<VCmpClassF64Vopc>,
@@ -1239,6 +1266,8 @@ constexpr InstructionCallbackTable kInstructionCallbacks{{
     &execute_with_backend<VCmpxNeU64Vop3>,
     &execute_with_backend<VCmpxGeU64Vop3>,
     &execute_with_backend<VCmpxTU64Vop3>,
+    &execute_with_backend<VExpLegacyF32Vop3>,
+    &execute_with_backend<VLogLegacyF32Vop3>,
     &execute_with_backend<VAddCoU32Vop3SdstEnc>,
     &execute_with_backend<VSubCoU32Vop3SdstEnc>,
     &execute_with_backend<VSubrevCoU32Vop3SdstEnc>,
@@ -1526,6 +1555,11 @@ constexpr InstructionCallbackTable kInstructionCallbacks{{
     &execute_with_backend<GlobalLoadLdsDwordFlat>,
     &execute_with_backend<GlobalLoadLdsDwordx4Flat>,
     &execute_with_backend<GlobalLoadLdsDwordx3Flat>,
+    &execute_with_backend<ScratchLoadLdsUbyteFlat>,
+    &execute_with_backend<ScratchLoadLdsSbyteFlat>,
+    &execute_with_backend<ScratchLoadLdsUshortFlat>,
+    &execute_with_backend<ScratchLoadLdsSshortFlat>,
+    &execute_with_backend<ScratchLoadLdsDwordFlat>,
 }};
 
 } // namespace

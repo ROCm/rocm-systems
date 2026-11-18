@@ -45,6 +45,7 @@
 
 #include <assert.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <getopt.h>
 
 #include <iostream>
@@ -53,6 +54,7 @@
 
 #include "suites/test_common/test_base.h"
 #include "suites/test_common/test_common.h"
+#include "common/os.h"
 #include "amd_smi/amdsmi.h"
 
 static const struct option long_options[] = {
@@ -121,6 +123,21 @@ uint32_t ProcessCmdline(RocrTstGlobals* test, int arg_cnt, char** arg_list) {
     }
   }
   return 0;
+}
+
+RestoreEnvironmentVariable::RestoreEnvironmentVariable(const char* name)
+    : name_(name), was_set_(false) {
+  const char* current = rocrtst::GetEnv(name_.c_str());
+  was_set_ = current != nullptr;
+  if (was_set_) saved_ = current;
+}
+
+RestoreEnvironmentVariable::~RestoreEnvironmentVariable() {
+  if (was_set_) {
+    rocrtst::SetEnv(name_.c_str(), saved_.c_str());
+  } else {
+    unsetenv(name_.c_str());
+  }
 }
 
 template<typename T>

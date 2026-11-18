@@ -247,11 +247,14 @@ public:
     {
         this->tracepool      = other.tracepool;
         this->packets        = other.packets;
+        this->owner          = other.owner;
         this->loaded_codeobj = other.loaded_codeobj;
     }
 
     aqlprofile_handle_t    GetHandle() const { return tracepool->handle; }
     rocprofiler_agent_id_t GetAgent() const { return tracepool->agent_id; }
+    uint64_t               GetOwner() const { return owner; }
+    void                   SetOwner(uint64_t value) { owner = value; }
 
     void populate_before() override
     {
@@ -271,6 +274,7 @@ public:
 protected:
     std::shared_ptr<TraceMemoryPool>     tracepool;
     aqlprofile_att_control_aql_packets_t packets;
+    uint64_t                             owner = 0;
 
     std::unordered_map<code_object_id_t, std::shared_ptr<CodeobjMarkerAQLPacket>> loaded_codeobj;
 };
@@ -282,6 +286,7 @@ struct sqtt_buffer_status_t
     uint64_t                     read_offset{};
     hsa_ext_amd_aql_pm4_packet_t packet{};
     bool                         gpu_full{};
+    int                          shader_engine_id{};
 };
 
 aqlprofile_att_gpu_clock_t

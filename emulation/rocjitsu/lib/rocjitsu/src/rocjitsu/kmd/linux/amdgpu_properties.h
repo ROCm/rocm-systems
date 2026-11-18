@@ -62,6 +62,18 @@ constexpr uint32_t make_gc_ip_version(uint32_t major, uint32_t minor, uint32_t r
 /// drivers/gpu/drm/amd/amdkfd/kfd_device.c).
 constexpr uint32_t gc_ip_version_for_gfx_target_version(uint32_t gfx_target_version) {
   switch (gfx_target_version) {
+  case 90000: // Vega10 / gfx900
+    return make_gc_ip_version(9, 0, 1);
+  case 90002: // Raven: GC 9.1.0 or 9.2.2, equivalent for these capability checks.
+    return make_gc_ip_version(9, 1, 0);
+  case 90004: // Vega12 / gfx904
+    return make_gc_ip_version(9, 2, 1);
+  case 90006: // Vega20 / gfx906
+    return make_gc_ip_version(9, 4, 0);
+  case 90008: // Arcturus / gfx908
+    return make_gc_ip_version(9, 4, 1);
+  case 90012: // Renoir / gfx90c
+    return make_gc_ip_version(9, 3, 0);
   case 90010: // Aldebaran / gfx90a  -> GC 9.4.2
     return make_gc_ip_version(9, 4, 2);
   case 90402: // MI300 / gfx942      -> GC 9.4.3
@@ -166,11 +178,16 @@ constexpr uint32_t num_hw_gfx_contexts_for_gfx_target_version(uint32_t gfx_targe
   return (ip.major >= 9 && ip.major <= 12) ? 8u : 1u;
 }
 
-// gb_addr_config is read by the kernel from the GB_ADDR_CONFIG register
-// (gfx_v11_0/gfx_v12_0 get_gb_addr_config). These constants were captured
-// from local W7900/R9700 hardware through AMDKFD_IOC_GET_TILE_CONFIG.
+// Representative GB_ADDR_CONFIG values for standalone architecture instances:
+// RDNA1/2 use the Navi10/Navi21 defaults from gc_10_1_0/gc_10_3_0_default.h.
+// RDNA3/4 use W7900/R9700 captures through AMDKFD_IOC_GET_TILE_CONFIG, whose
+// gfx_v11_0/gfx_v12_0 kernel implementations read the hardware register.
 constexpr uint32_t gb_addr_config_for_arch(rj_code_arch_t arch) {
   switch (arch) {
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return 0x44;
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return 0x444;
   case ROCJITSU_CODE_ARCH_RDNA3:
     return 0x545;
   case ROCJITSU_CODE_ARCH_RDNA4:

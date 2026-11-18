@@ -593,3 +593,103 @@ TEST_F(PathTest, CreateParentDirsAndOpenOfstream_TruncatesExistingFile)
     std::getline(in_fstream, content);
     EXPECT_EQ(content, "ab");
 }
+
+TEST_F(PathTest, IsMissingInTarget_FalseWhenFileExists)
+{
+    // using our own pid makes "/proc/<pid>/root" resolve to the real filesystem
+    // root, so a plain absolute path exercises the same lookup a genuine
+    // cross-namespace target would, without needing any test-only indirection
+    const std::string absolute_path =
+        m_test_dir + "/opt/rocprofiler-systems/lib/librocprof-sys-dl.so";
+    std::filesystem::create_directories(
+        std::filesystem::path{ absolute_path }.parent_path());
+    std::ofstream{ absolute_path } << "fake library contents";
+
+    EXPECT_FALSE(is_missing_in_target(getpid(), absolute_path));
+}
+
+TEST_F(PathTest, IsMissingInTarget_TrueWhenAbsent)
+{
+    const std::string absolute_path =
+        m_test_dir + "/opt/rocprofiler-systems/lib/librocprof-sys-dl.so";
+
+    EXPECT_TRUE(is_missing_in_target(getpid(), absolute_path));
+}
+
+TEST_F(PathTest, IsMissingInTarget_FalseWhenPathCannotBeChecked)
+{
+    // a path component longer than NAME_MAX (255 bytes on most Linux filesystems)
+    // fails with ENAMETOOLONG regardless of privilege level, which must not be
+    // mistaken for a missing file
+    const std::string too_long_path =
+        "/" + std::string(300, 'a') + "/librocprof-sys-dl.so";
+
+    EXPECT_FALSE(is_missing_in_target(getpid(), too_long_path));
+}
+
+TEST_F(PathTest, IsMissingInTarget_FalseForNonAbsolutePath)
+{
+    EXPECT_FALSE(is_missing_in_target(1, "librocprof-sys-dl.so"));
+}
+
+// the test binary itself is anchored on rather than a system library because system
+// library file names vary across distros (e.g. glibc < 2.34 maps libc-<version>.so)
+TEST_F(PathTest, FindLoadedLibraryDir_FindsLibraryMappedByProcess)
+{
+    const auto self_path = std::filesystem::canonical("/proc/self/exe");
+
+    EXPECT_EQ(find_loaded_library_dir(getpid(), self_path.filename().string()),
+              self_path.parent_path().string());
+}
+
+TEST_F(PathTest, FindLoadedLibraryDir_NulloptWhenNotMapped)
+{
+    EXPECT_FALSE(
+        find_loaded_library_dir(getpid(), "libnot-mapped-anywhere.so").has_value());
+}
+
+TEST_F(PathTest, FindLibraryInLoadedDir_FindsLibraryInLoadedDirectory)
+{
+    const auto self_path = std::filesystem::canonical("/proc/self/exe");
+    const auto self_name = self_path.filename().string();
+
+    EXPECT_EQ(find_library_in_loaded_dir(getpid(), self_name, self_name),
+              self_path.string());
+}
+
+TEST_F(PathTest, FindLibraryInLoadedDir_NulloptWhenLibraryAbsent)
+{
+    const auto self_name =
+        std::filesystem::canonical("/proc/self/exe").filename().string();
+
+    EXPECT_FALSE(
+        find_library_in_loaded_dir(getpid(), "librocprof-sys-missing.so", self_name)
+            .has_value());
+}
+
+TEST_F(PathTest, EnsureParentDirectory_CreatesMissingAncestors)
+{
+    auto const      file = m_test_dir + "/a/b/c/file.txt";
+    std::error_code error;
+    EXPECT_TRUE(ensure_parent_directory(file, error));
+    EXPECT_FALSE(error);
+    EXPECT_TRUE(std::filesystem::is_directory(m_test_dir + "/a/b/c"));
+    EXPECT_FALSE(std::filesystem::exists(file));
+}
+
+TEST_F(PathTest, EnsureParentDirectory_NoParentIsNoOp)
+{
+    std::error_code error;
+    EXPECT_TRUE(ensure_parent_directory("file.txt", error));
+    EXPECT_FALSE(error);
+}
+
+TEST_F(PathTest, EnsureParentDirectory_FailsWhenParentIsAFile)
+{
+    auto const blocker = m_test_dir + "/blocker";
+    std::ofstream{ blocker } << "x";
+
+    std::error_code error;
+    EXPECT_FALSE(ensure_parent_directory(blocker + "/file.txt", error));
+    EXPECT_TRUE(error);
+}

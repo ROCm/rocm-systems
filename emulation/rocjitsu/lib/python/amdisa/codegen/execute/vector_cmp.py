@@ -9,7 +9,7 @@ instructions: V_CMP_*, V_CMPX_*, V_CMP_CLASS_*, and V_ADD_CO_U32.
 
 from __future__ import annotations
 
-from amdisa.codegen.execute import float_compare
+from amdisa.codegen.execute import float_compare, input_policy
 from amdisa.codegen.execute.vop3_modifiers import (
     vop3_src_mod,
 )
@@ -22,6 +22,19 @@ def _write_explicit_lane_mask(
     if result_writer is not None:
         return [f'  {result_writer}({value});']
     return [f'  amdgpu::write_wave_mask_scalar({dst}, wf, {value});']
+
+
+def _write_cmpx_result(
+    dst: list[str], is_vop3: bool, cmpx_writes_vcc: bool, result_writer: str | None
+) -> list[str]:
+    writes = []
+    if cmpx_writes_vcc:
+        if dst and is_vop3:
+            writes.extend(_write_explicit_lane_mask(dst[0], 'result'))
+        else:
+            writes.append('  wf.set_vcc_mask(result);')
+    writes.append(f'  {result_writer or "wf.set_exec"}(result);')
+    return writes
 
 
 def gen_vector_cmp_class(
@@ -168,12 +181,7 @@ def gen_vector_cmp_class(
         L.append('    if (match) vcc |= (1ULL << lane);')
     L.append('  }')
     if is_cmpx:
-        if cmpx_writes_vcc:
-            L.append('  wf.set_vcc_mask(result);')
-        if result_writer is not None:
-            L.append(f'  {result_writer}(result);')
-        else:
-            L.append('  wf.set_exec(result);')
+        L.extend(_write_cmpx_result(dst, is_vop3, cmpx_writes_vcc, result_writer))
     elif dst:
         L.extend(_write_explicit_lane_mask(dst[0], 'vcc', result_writer))
     else:
@@ -318,7 +326,7 @@ def gen_vector_cmp(
     if _uses_vop3_true16_opsel(op, dtype, is_vop3):
         L.append('  uint32_t opsel = amdgpu::vop3_opsel(inst_);')
     if float_compare.is_float_relation(dtype, op):
-        L.append(float_compare.policy_decl(dtype))
+        L.append(input_policy.policy_decl(dtype))
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
 
@@ -362,7 +370,7 @@ def gen_vector_cmpx(
     if _uses_vop3_true16_opsel(op, dtype, is_vop3):
         L.append('  uint32_t opsel = amdgpu::vop3_opsel(inst_);')
     if float_compare.is_float_relation(dtype, op):
-        L.append(float_compare.policy_decl(dtype))
+        L.append(input_policy.policy_decl(dtype))
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
 
@@ -375,15 +383,7 @@ def gen_vector_cmpx(
         L.append(f'    if ({cond})')
         L.append('      result |= (1ULL << lane);')
     L.append('  }')
-    if cmpx_writes_vcc:
-        if dst and is_vop3:
-            L.extend(_write_explicit_lane_mask(dst[0], 'result'))
-        else:
-            L.append('  wf.set_vcc_mask(result);')
-    if result_writer is not None:
-        L.append(f'  {result_writer}(result);')
-    else:
-        L.append('  wf.set_exec(result);')
+    L.extend(_write_cmpx_result(dst, is_vop3, cmpx_writes_vcc, result_writer))
     return '\n'.join(L)
 
 

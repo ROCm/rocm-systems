@@ -29,8 +29,13 @@ ncclResult_t ncclSocketClose(ncclSocket*, bool) { return ncclSuccess; }
 ncclResult_t ncclSocketReady(ncclSocket*, int*) { return ncclSuccess; }
 ncclResult_t ncclSocketGetAddr(ncclSocket*, ncclSocketAddress*) { return ncclSuccess; }
 ncclResult_t ncclSocketGetAddrFromString(ncclSocketAddress*, char const*) { return ncclSuccess; }
-const char* ncclSocketToString(ncclSocketAddress const*, char* buf, int) { return buf; }
+const char* ncclSocketToString(ncclSocketAddress const*, char* buf, size_t, int) { return buf; }
 ncclResult_t ncclSocketMultiOp(ncclSocketOp*, int) { return ncclSuccess; }
+void ncclSocketMove(ncclSocket* dst, ncclSocket* src) { *dst = *src; }
+ncclResult_t ncclGetCryptConnectionMode(bool* encrypted) {
+  *encrypted = false;
+  return ncclSuccess;
+}
 
 ncclResult_t ncclFindInterfaces(char*, ncclSocketAddress*, int, int, int*) { return ncclSuccess; }
 ncclResult_t ncclFindInterfaceMatchSubnet(char*, ncclSocketAddress*, ncclSocketAddress*, int, int*) { return ncclSuccess; }
@@ -40,6 +45,7 @@ bool matchIfList(char const*, int, netIf*, int, bool, int*) { return false; }
 ncclResult_t ncclProxyInit(ncclComm*, ncclSocket*, ncclSocketAddress*, unsigned long*) { return ncclSuccess; }
 ncclResult_t ncclRasAddRanks(rasRankInit*, int) { return ncclSuccess; }
 ncclResult_t ncclRasCommInit(ncclComm*, rasRankInit*) { return ncclSuccess; }
+int64_t ncclParamRasEnable() { return 1; }
 
 ncclResult_t ncclOsSetFilesLimit() { return ncclSuccess; }
 uint64_t ncclOsGetPid() { return 0; }

@@ -9,9 +9,31 @@
 #include "checks.h"
 #include "os.h"
 #include <dlfcn.h>
+#include <string.h>
 
 static ncclRma_v14_t* ncclRma_v14;
 static ncclRma_t ncclRma;
+
+static ncclResult_t ncclRma_v14_getRmaProperties(void* collComm, ncclRmaProperties_t* rmaProps) {
+  (void)collComm;
+  rmaProps->flushesAllPutsOnAnySignal = false;
+  return ncclSuccess;
+}
+
+static ncclResult_t ncclRma_v14_connect(void* ctx, void* handles[], int nranks, int rank, void* listenComm,
+                                        void** collComm, volatile uint32_t* abortFlag) {
+  (void)abortFlag;
+  return ncclRma_v14->connect(ctx, handles, nranks, rank, listenComm, collComm);
+}
+
+static ncclResult_t ncclRma_v14_createContext(void* collComm, ncclRmaConfig_v17_t* config, void** rmaCtx) {
+  ncclRmaConfig_v14_t config_v14;
+  memset(&config_v14, 0, sizeof(config_v14));
+  config_v14.nContexts = config->nContexts;
+  config_v14.trafficClass = config->trafficClass;
+  config_v14.rankStride = 1;
+  return ncclRma_v14->createContext(collComm, &config_v14, rmaCtx);
+}
 
 static ncclResult_t ncclRma_v14_iput(void* rmaCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size,
                                      uint64_t dstOff, void* dstMhandle, uint32_t rank, uint32_t optFlags,
@@ -44,10 +66,11 @@ ncclRma_t* getNcclRma_v14(void* lib) {
     ncclRma.name = ncclRma_v14->name;
     ncclRma.init = ncclRma_v14->init;
     ncclRma.devices = ncclRma_v14->devices;
+    ncclRma.getRmaProperties = ncclRma_v14_getRmaProperties;
     ncclRma.getProperties = ncclRma_v14->getProperties;
     ncclRma.listen = ncclRma_v14->listen;
-    ncclRma.connect = ncclRma_v14->connect;
-    ncclRma.createContext = ncclRma_v14->createContext;
+    ncclRma.connect = ncclRma_v14_connect;
+    ncclRma.createContext = ncclRma_v14_createContext;
     ncclRma.regMrSym = ncclRma_v14->regMrSym;
     ncclRma.regMrSymDmaBuf = ncclRma_v14->regMrSymDmaBuf;
     ncclRma.deregMrSym = ncclRma_v14->deregMrSym;

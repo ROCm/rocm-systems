@@ -131,7 +131,6 @@ generate_device_level_metrics(const std::string& base_name, bool is_enabled,
     return entries;
 }
 
-// Mirrors addendum_blk lambda in perfetto_policy.hpp (lines 173-181)
 std::string
 format_perfetto_xcp_track(std::uint32_t device_id, const char* metric_name,
                           size_t xcp_idx, size_t engine_idx)

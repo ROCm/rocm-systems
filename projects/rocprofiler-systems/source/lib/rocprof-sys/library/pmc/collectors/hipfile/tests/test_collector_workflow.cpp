@@ -109,7 +109,6 @@ struct stub_settings
     inline static device_filter            gpu_filter{};
     inline static std::vector<std::size_t> visible_type_indices{};
     inline static enabled_metrics          hipfile_metrics{};
-    inline static bool                     perfetto_legacy = false;
 
     static void set_visible_identity(std::size_t n)
     {
@@ -126,7 +125,6 @@ struct stub_settings
         gpu_filter.mode = device_selection_mode::all;
         set_visible_identity(2);
         hipfile_metrics.value = ALL_HIPFILE_METRICS;
-        perfetto_legacy       = false;
     }
 
     static device_filter            get_gpu_device_filter() { return gpu_filter; }
@@ -135,28 +133,11 @@ struct stub_settings
         return visible_type_indices;
     }
     static enabled_metrics get_hipfile_enabled_metrics() { return hipfile_metrics; }
-    static bool            get_use_perfetto_legacy_metrics() { return perfetto_legacy; }
-};
-
-/// Counts the legacy Perfetto path, which must stay unused: hipFile tracks reach
-/// Perfetto through the PMC records, so a second producer here would double every value.
-struct stub_perfetto
-{
-    inline static std::size_t store_count = 0;
-
-    static void reset() { store_count = 0; }
-
-    static void store_sample(std::size_t /*device_id*/, const metrics& /*values*/,
-                             std::uint64_t /*timestamp*/)
-    {
-        ++store_count;
-    }
 };
 
 struct stub_config
 {
     using SettingsApi = stub_settings;
-    using PerfettoApi = stub_perfetto;
     using CacheApi    = stub_cache;
 };
 
@@ -180,7 +161,6 @@ protected:
     void SetUp() override
     {
         stub_cache::reset();
-        stub_perfetto::reset();
         stub_settings::reset();
         m_provider  = std::make_shared<mock_provider>();
         m_collector = std::make_unique<collector_t>(m_provider);
@@ -425,24 +405,6 @@ TEST_F(HipFileCollectorTest, devices_survive_an_unavailable_interval)
     m_collector->sample(static_cast<std::int64_t>(k_ts_2));
 
     EXPECT_FALSE(stub_cache::samples.empty());
-}
-
-// ── Perfetto ────────────────────────────────────────────────────────────────
-
-TEST_F(HipFileCollectorTest, enabling_perfetto_does_not_change_pmc_output)
-{
-    stub_settings::set_visible_identity(1);
-    stub_settings::perfetto_legacy = true;
-    setup_and_config();
-
-    m_collector->sample(static_cast<std::int64_t>(k_ts_1));
-
-    // base::collector routes to PerfettoApi once per device whenever the legacy path is
-    // on. hipFile plugs a no-op in there (perfetto_policy), because its tracks already
-    // reach Perfetto as PMC records; a real writer would put two producers on every
-    // track. What must hold either way is that the PMC output is unchanged.
-    EXPECT_EQ(stub_perfetto::store_count, 1U);
-    EXPECT_EQ(stub_cache::samples.size(), METRIC_TABLE.size());
 }
 
 // ── Pause ───────────────────────────────────────────────────────────────────

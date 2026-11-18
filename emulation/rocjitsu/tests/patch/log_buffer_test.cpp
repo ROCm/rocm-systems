@@ -3,31 +3,19 @@
 
 #include "rocjitsu/code/patch/log_buffer.h"
 
+#include "../log_buffer_test_access.h"
 #include "rocjitsu/code/patch/log_abi.h"
 
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstring>
 #include <set>
+#include <span>
 #include <string>
 #include <vector>
 
 namespace rocjitsu {
-
-// Test-only accessor. LogBuffer keeps its factory and raw header/record pointers
-// private because no production consumer defines their contract yet; the tests
-// reach those seams through this friend shim rather than through a public API
-// that would freeze prematurely. Must live in namespace rocjitsu (not the
-// anonymous namespace below) so it names the same type as the friend
-// declaration in LogBuffer.
-struct LogBufferTestAccess {
-  static std::unique_ptr<LogBuffer> create(uint32_t slot_count, std::string *error_out = nullptr) {
-    return LogBuffer::create(slot_count, error_out);
-  }
-  static RjLogBufferHeader *header(LogBuffer &buf) { return buf.header(); }
-  static RjLogRecord *records(LogBuffer &buf) { return buf.records(); }
-};
-
 namespace {
 
 // Simulate what a device producer does: write a record into the slot at the
@@ -106,6 +94,20 @@ TEST(LogBufferTest, RecordsRegionFollowsHeader) {
       reinterpret_cast<const char *>(LogBufferTestAccess::header(*buf)) + sizeof(RjLogBufferHeader);
   EXPECT_EQ(reinterpret_cast<const char *>(LogBufferTestAccess::records(*buf)), hdr_end);
   EXPECT_EQ(buf->total_bytes(), sizeof(RjLogBufferHeader) + 4u * sizeof(RjLogRecord));
+}
+
+// The raw image is what a device producer is handed: the header at offset 0,
+// then every record slot, and nothing past the last one.
+TEST(LogBufferTest, BytesSpanTheWholeImage) {
+  auto buf = LogBufferTestAccess::create(4);
+  ASSERT_NE(buf, nullptr);
+  const std::span<uint8_t> image = LogBufferTestAccess::bytes(*buf);
+  EXPECT_EQ(image.size(), buf->total_bytes());
+  EXPECT_EQ(static_cast<void *>(image.data()),
+            static_cast<void *>(LogBufferTestAccess::header(*buf)));
+  uint32_t magic = 0;
+  std::memcpy(&magic, image.data(), sizeof(magic));
+  EXPECT_EQ(magic, kRjLogMagic);
 }
 
 TEST(LogBufferTest, SyntheticDrainInOrder) {

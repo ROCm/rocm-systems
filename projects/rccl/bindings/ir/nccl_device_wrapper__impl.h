@@ -15,7 +15,15 @@
 // (always_inline, external) that the device-API definitions in nccl_device.h
 // below are then compiled with, so the library emits real symbols.
 #include "nccl_device_wrapper.h"
+// The bitcode library is device-only: suppress "nccl_device/host.h" by
+// pre-defining its include guard, so the host entrypoints never enter this TU.
+#define _NCCL_DEVICE_HOST_H_
 #include "nccl_device.h"
+#ifdef NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER
+#error "nccl_device/host.h leaked in: its include guard was renamed, update the #define above"
+#endif
+// [RCCL] util.h moved to src/ upstream; this file stays at the bindings/ir root.
+#include "src/util.h"
 #include <new>
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
@@ -96,6 +104,11 @@ NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE
 void ncclLsaBarrierSessionSync(ncclLsaBarrierSession_C* session, ncclCoopAny coop, cuda::memory_order order) {
     session->bar.sync(coop, order);
 }
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE
+void ncclLsaBarrierSessionDestroy(ncclLsaBarrierSession_C* session) {
+    using Session = ncclLsaBarrierSession<ncclCoopAny>;
+    session->bar.~Session();
+}
 
 /* GIN barrier session */
 NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinBarrierSessionInit(
@@ -105,7 +118,7 @@ NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinBarrierSessionInit(
     ncclTeam team,
     ncclGinBarrierHandle handle,
     uint32_t index) {
-    ::new (&(session->bar)) ncclGinBarrierSession<ncclCoopAny>(coop, reinterpret_cast<ncclGin const&>(*net), team, handle, index);
+    ::new (&(session->bar)) ncclGinBarrierSession<ncclCoopAny>(coop, static_cast<ncclGin const&>(*net), team, handle, index);
 }
 
 NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinBarrierSessionInitAllContexts(
@@ -125,6 +138,11 @@ NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinBarrierSessionSync(
     ncclGinFenceLevel fence) {
     session->bar.sync(coop, order, fence);
 }
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE
+void ncclGinBarrierSessionDestroy(ncclGinBarrierSession_C* session) {
+    using Session = ncclGinBarrierSession<ncclCoopAny>;
+    session->bar.~Session();
+}
 
 /* Barrier Session*/
 NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclBarrierSessionInit(
@@ -137,7 +155,7 @@ NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclBarrierSessionInit(
     ncclGinBarrierHandle const outerBarHandle,
     uint32_t index,
     bool multimem, ncclMultimemHandle const innerMmHandle) {
-    ::new (&(session->bar)) ncclBarrierSession<ncclCoopAny>(coop, innerTeam, outerTeam, reinterpret_cast<ncclGin const&>(*net),
+    ::new (&(session->bar)) ncclBarrierSession<ncclCoopAny>(coop, innerTeam, outerTeam, static_cast<ncclGin const&>(*net),
            innerBarHandle, outerBarHandle, index, multimem, innerMmHandle);
 }
 
@@ -148,6 +166,67 @@ NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclBarrierSessionSync(
     ncclGinFenceLevel fence) {
     session->bar.sync(coop, order, fence);
 }
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE
+void ncclBarrierSessionDestroy(ncclBarrierSession_C* session) {
+    using Session = ncclBarrierSession<ncclCoopAny>;
+    session->bar.~Session();
+}
+
+// ReduceCopy APIs
+#define NCCL_IR_DEFINE_ncclLsaReduceSum(suffix, type) \
+  NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclLsaReduceSum_##suffix( \
+      ncclCoopAny coop, ncclWindow_t srcWindow, size_t srcOffset, \
+      type* dst, size_t count, ncclTeam team) { \
+    ncclLsaReduceSum<type, ncclCoopAny, size_t>( \
+        coop, srcWindow, srcOffset, dst, count, team); \
+  }
+#define NCCL_IR_DEFINE_ncclMultimemReduceSum(suffix, type) \
+  NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclMultimemReduceSum_##suffix( \
+      ncclCoopAny coop, type* mcSrc, type* dst, size_t count) { \
+    ncclMultimemReduceSum<type, ncclCoopAny, size_t>( \
+        coop, mcSrc, dst, count); \
+  }
+#define NCCL_IR_DEFINE_ncclLsaCopy(suffix, type) \
+  NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclLsaCopy_##suffix( \
+      ncclCoopAny coop, type* src, ncclWindow_t dstWindow, \
+      size_t dstOffset, size_t count, ncclTeam team) { \
+    ncclLsaCopy<type, ncclCoopAny, size_t>( \
+        coop, src, dstWindow, dstOffset, count, team); \
+  }
+#define NCCL_IR_DEFINE_ncclMultimemCopy(suffix, type) \
+  NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclMultimemCopy_##suffix( \
+      ncclCoopAny coop, type* src, type* mcDst, size_t count) { \
+    ncclMultimemCopy<type, ncclCoopAny, size_t>( \
+        coop, src, mcDst, count); \
+  }
+#define NCCL_IR_DEFINE_ncclLsaReduceSumCopy(suffix, type) \
+  NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclLsaReduceSumCopy_##suffix( \
+      ncclCoopAny coop, ncclWindow_t srcWindow, size_t srcOffset, \
+      ncclWindow_t dstWindow, size_t dstOffset, size_t count, ncclTeam team) { \
+    ncclLsaReduceSumCopy<type, ncclCoopAny, size_t>( \
+        coop, srcWindow, srcOffset, dstWindow, dstOffset, count, team); \
+  }
+#define NCCL_IR_DEFINE_ncclMultimemReduceSumCopy(suffix, type) \
+  NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclMultimemReduceSumCopy_##suffix( \
+      ncclCoopAny coop, type* mcSrc, type* mcDst, size_t count) { \
+    ncclMultimemReduceSumCopy<type, ncclCoopAny, size_t>( \
+        coop, mcSrc, mcDst, count); \
+  }
+#define NCCL_IR_DEFINE_ncclLocalReduceSumCopy(suffix, type) \
+  NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclLocalReduceSumCopy_##suffix( \
+      ncclCoopAny coop, int nSrc, type* srcBase, size_t srcDispl, \
+      int nDst, type* dstBase, size_t dstDispl, size_t count) { \
+    ncclLocalReduceSumCopy<type, ncclCoopAny, size_t>( \
+        coop, nSrc, srcBase, srcDispl, nDst, dstBase, dstDispl, count); \
+  }
+
+NCCL_IR_DEFINE_API_ALL_TYPES(ncclLsaReduceSum)
+NCCL_IR_DEFINE_API_MULTIMEM_TYPES(ncclMultimemReduceSum)
+NCCL_IR_DEFINE_API_ALL_TYPES(ncclLsaCopy)
+NCCL_IR_DEFINE_API_MULTIMEM_TYPES(ncclMultimemCopy)
+NCCL_IR_DEFINE_API_ALL_TYPES(ncclLsaReduceSumCopy)
+NCCL_IR_DEFINE_API_MULTIMEM_TYPES(ncclMultimemReduceSumCopy)
+NCCL_IR_DEFINE_API_ALL_TYPES(ncclLocalReduceSumCopy)
 #endif //  __CUDACC__
 
 #endif // _NCCL_DEVICE_WRAPPER__IMPL_H_

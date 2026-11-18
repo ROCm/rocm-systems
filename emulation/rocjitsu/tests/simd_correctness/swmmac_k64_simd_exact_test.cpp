@@ -277,10 +277,10 @@ void expect_scalar_and_default(SwmmacFixture &fx, Instruction &instruction, cons
 uint32_t output_element(const Observation &observation, const SwmmacCase &test, uint32_t row,
                         uint32_t col) {
   if (test.output_kind == OutputKind::F32) {
-    const auto out = amdgpu::gfx12_wmma_output_loc_32(WF_SIZE, 16, 16, row, col);
+    const auto out = amdgpu::gfx12_wmma_output_loc_32<16, 16>(WF_SIZE, row, col);
     return observation.output[static_cast<size_t>(out.reg) * WF_SIZE + out.lane];
   }
-  const auto out = amdgpu::gfx12_wmma_output_loc_16(WF_SIZE, 16, 16, row, col);
+  const auto out = amdgpu::gfx12_wmma_output_loc_16<16, 16>(WF_SIZE, row, col);
   const uint32_t word = observation.output[static_cast<size_t>(out.reg) * WF_SIZE + out.lane];
   return (word >> (out.sub_element * 16)) & 0xFFFFu;
 }
@@ -326,10 +326,10 @@ void seed_bf16f32_contract_state(SwmmacFixture &fx, std::vector<uint32_t> &expec
   for (uint32_t row = 0; row < 16; ++row) {
     for (uint32_t col = 0; col < 16; ++col) {
       const float c = std::bit_cast<float>(C_BITS[(row * 16 + col) % C_BITS.size()]);
-      const auto c_loc = amdgpu::wmma_output_loc_32(16, 16, row, col);
+      const auto c_loc = amdgpu::wmma_output_loc_32<16, 16>(row, col);
       fx.cu->write_vgpr(fx.vbase + ACC_OFF + c_loc.reg, c_loc.lane, std::bit_cast<uint32_t>(c));
 
-      const auto d_loc = amdgpu::wmma_output_loc_16(16, 16, row, col);
+      const auto d_loc = amdgpu::wmma_output_loc_16<16, 16>(row, col);
       const size_t index = static_cast<size_t>(d_loc.reg) * WF_SIZE + d_loc.lane;
       const uint32_t shift = d_loc.sub_element * 16;
       expected[index] |= static_cast<uint32_t>(util::f32_to_bf16_rne(c)) << shift;
@@ -344,10 +344,30 @@ void seed_bf16f32_contract_state(SwmmacFixture &fx, std::vector<uint32_t> &expec
 
 } // namespace
 
+TEST(SwmmacK64SimdExact, IndexKeyUsesShiftedMetadataWord) {
+  SwmmacFixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  for (uint32_t low : {0x4444U, 0xeeeeU}) {
+    clear_state(fx);
+    // A[0,0]=2, B[2,0]=3. Only the upper metadata half selects dense K=2.
+    fx.cu->write_vgpr(fx.vbase + A_OFF, 0, 0x4000);
+    fx.cu->write_vgpr(fx.vbase + B_OFF + 1, 0, 0x4200);
+    fx.cu->write_vgpr(fx.vbase + INDEX_OFF, 0, 0xeeee0000U | low);
+    const auto words =
+        cdna5::build_vop3p(cdna5::kVSwmmacF3216x16x64F16Vop3p, {.vdst = ACC_OFF,
+                                                                .opsel = 1,
+                                                                .src0 = 256 + A_OFF,
+                                                                .src1 = 256 + B_OFF,
+                                                                .src2 = 256 + INDEX_OFF});
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
+    EXPECT_EQ(fx.cu->read_vgpr(fx.vbase + ACC_OFF, 0), 0x40c00000U);
+  }
+}
+
 TEST(SwmmacK64SimdExact, AllDecodedFormsMatchScalarForLegalMetadata) {
-  SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16)
-    GTEST_SKIP() << "the K=64 SWMMAC fast paths require 16-lane native SIMD";
 
   constexpr std::array MODES{Mode::RandomInt, Mode::Zeros, Mode::SignedZero, Mode::Cancel,
                              Mode::NaN,       Mode::Inf,   Mode::Denorm,     Mode::MaxFinite};
@@ -366,9 +386,6 @@ TEST(SwmmacK64SimdExact, AllDecodedFormsMatchScalarForLegalMetadata) {
 }
 
 TEST(SwmmacK64SimdExact, PackedF16SnapshotsAliasedInputsAndSupportsReuseHints) {
-  SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16)
-    GTEST_SKIP() << "the K=64 SWMMAC fast paths require 16-lane native SIMD";
 
   const auto &test = SWMMAC_CASES[2];
   constexpr std::array ALIASES{DstAlias::A, DstAlias::B, DstAlias::Index};
@@ -406,9 +423,9 @@ TEST(SwmmacK64SimdExact, Bf16ResultRoundsHalfwayToEven) {
   // 0x3f01 * 0x3f40 is exactly F32 0x3ec18000: halfway between BF16 0x3ec1
   // and 0x3ec2. The retained LSB is odd, so RNE must produce 0x3ec2.
   for (uint32_t row = 0; row < 16; ++row)
-    write_packed16(fx, A_OFF, amdgpu::swmmac_a_input_loc(WF_SIZE, 16, 64, row, 0, 16), 0x3F01u);
+    write_packed16(fx, A_OFF, amdgpu::swmmac_a_input_loc<16, 64>(WF_SIZE, row, 0, 16), 0x3F01u);
   for (uint32_t col = 0; col < 16; ++col)
-    write_packed16(fx, B_OFF, amdgpu::swmmac_b_input_loc(WF_SIZE, 16, 64, col, 0, 16), 0x3F40u);
+    write_packed16(fx, B_OFF, amdgpu::swmmac_b_input_loc<16, 64>(WF_SIZE, col, 0, 16), 0x3F40u);
 
   const auto &test = SWMMAC_CASES[3];
   const auto words = cdna5::build_vop3p(
@@ -520,11 +537,11 @@ TEST(SwmmacK64SimdExact, NaNPayloadPriorityIsBitExact) {
       ASSERT_NE(fx.wf, nullptr);
       clear_state(fx);
 
-      write_packed16(fx, A_OFF, amdgpu::swmmac_a_input_loc(WF_SIZE, 16, 64, 0, 0, 16), nan.a0);
-      write_packed16(fx, B_OFF, amdgpu::swmmac_b_input_loc(WF_SIZE, 16, 64, 0, 0, 16), nan.b0);
+      write_packed16(fx, A_OFF, amdgpu::swmmac_a_input_loc<16, 64>(WF_SIZE, 0, 0, 16), nan.a0);
+      write_packed16(fx, B_OFF, amdgpu::swmmac_b_input_loc<16, 64>(WF_SIZE, 0, 0, 16), nan.b0);
       if (nan.a1 != 0 || nan.b1 != 0) {
-        write_packed16(fx, A_OFF, amdgpu::swmmac_a_input_loc(WF_SIZE, 16, 64, 0, 1, 16), nan.a1);
-        write_packed16(fx, B_OFF, amdgpu::swmmac_b_input_loc(WF_SIZE, 16, 64, 0, 1, 16), nan.b1);
+        write_packed16(fx, A_OFF, amdgpu::swmmac_a_input_loc<16, 64>(WF_SIZE, 0, 1, 16), nan.a1);
+        write_packed16(fx, B_OFF, amdgpu::swmmac_b_input_loc<16, 64>(WF_SIZE, 0, 1, 16), nan.b1);
       }
       fx.cu->write_vgpr(fx.vbase + ACC_OFF, 0,
                         test.accumulator_fmt == Fmt::F32 ? static_cast<uint32_t>(nan.c) << 16
@@ -569,8 +586,8 @@ TEST(SwmmacK64SimdExact, F16NaNPayloadPriorityIsBitExact) {
       ASSERT_NE(fx.wf, nullptr);
       clear_state(fx);
 
-      write_packed16(fx, A_OFF, amdgpu::swmmac_a_input_loc(WF_SIZE, 16, 64, 0, 0, 16), nan.a);
-      write_packed16(fx, B_OFF, amdgpu::swmmac_b_input_loc(WF_SIZE, 16, 64, 0, 0, 16), nan.b);
+      write_packed16(fx, A_OFF, amdgpu::swmmac_a_input_loc<16, 64>(WF_SIZE, 0, 0, 16), nan.a);
+      write_packed16(fx, B_OFF, amdgpu::swmmac_b_input_loc<16, 64>(WF_SIZE, 0, 0, 16), nan.b);
       fx.cu->write_vgpr(fx.vbase + ACC_OFF, 0,
                         test.accumulator_fmt == Fmt::F32
                             ? std::bit_cast<uint32_t>(util::f16_to_f32(nan.c))
@@ -607,9 +624,9 @@ TEST(SwmmacK64SimdExact, Bf16f32HonorsFp16OvflAndClampsInfinity) {
   for (uint32_t row = 0; row < 16; ++row) {
     for (uint32_t col = 0; col < 16; ++col) {
       const size_t value_index = (row * 16 + col) % C_BITS.size();
-      const auto c_loc = amdgpu::wmma_output_loc_32(16, 16, row, col);
+      const auto c_loc = amdgpu::wmma_output_loc_32<16, 16>(row, col);
       fx.cu->write_vgpr(fx.vbase + ACC_OFF + c_loc.reg, c_loc.lane, C_BITS[value_index]);
-      const auto d_loc = amdgpu::wmma_output_loc_16(16, 16, row, col);
+      const auto d_loc = amdgpu::wmma_output_loc_16<16, 16>(row, col);
       const size_t word_index = static_cast<size_t>(d_loc.reg) * WF_SIZE + d_loc.lane;
       const uint32_t shift = d_loc.sub_element * 16;
       expected_clear[word_index] |= static_cast<uint32_t>(CLEAR_RESULTS[value_index]) << shift;
@@ -644,8 +661,8 @@ TEST(SwmmacK64SimdExact, Bf16f32ClampsFiniteArithmeticOverflow) {
     ASSERT_NE(fx.cu, nullptr);
     ASSERT_NE(fx.wf, nullptr);
     clear_state(fx);
-    write_packed16(fx, A_OFF, amdgpu::swmmac_a_input_loc(WF_SIZE, 16, 64, 0, 0, 16), overflow.a);
-    write_packed16(fx, B_OFF, amdgpu::swmmac_b_input_loc(WF_SIZE, 16, 64, 0, 0, 16), 0x4000u);
+    write_packed16(fx, A_OFF, amdgpu::swmmac_a_input_loc<16, 64>(WF_SIZE, 0, 0, 16), overflow.a);
+    write_packed16(fx, B_OFF, amdgpu::swmmac_b_input_loc<16, 64>(WF_SIZE, 0, 0, 16), 0x4000u);
     auto instruction = decode_case(test);
     ASSERT_NE(instruction, nullptr);
     const auto initial = fx.snapshot(0, STATE_REGS);
@@ -677,8 +694,8 @@ TEST(SwmmacK64SimdExact, PackedF16HonorsFp16OvflAndClampsInfinity) {
     ASSERT_NE(fx.cu, nullptr);
     ASSERT_NE(fx.wf, nullptr);
     clear_state(fx);
-    write_packed16(fx, A_OFF, amdgpu::swmmac_a_input_loc(WF_SIZE, 16, 64, 0, 0, 16), overflow.a);
-    write_packed16(fx, B_OFF, amdgpu::swmmac_b_input_loc(WF_SIZE, 16, 64, 0, 0, 16), overflow.b);
+    write_packed16(fx, A_OFF, amdgpu::swmmac_a_input_loc<16, 64>(WF_SIZE, 0, 0, 16), overflow.a);
+    write_packed16(fx, B_OFF, amdgpu::swmmac_b_input_loc<16, 64>(WF_SIZE, 0, 0, 16), overflow.b);
     auto instruction = decode_case(test);
     ASSERT_NE(instruction, nullptr);
     const auto initial = fx.snapshot(0, STATE_REGS);
@@ -715,8 +732,8 @@ TEST(SwmmacK64SimdExact, PackedBf16HonorsFp16OvflAndClampsInfinity) {
     ASSERT_NE(fx.cu, nullptr);
     ASSERT_NE(fx.wf, nullptr);
     clear_state(fx);
-    write_packed16(fx, A_OFF, amdgpu::swmmac_a_input_loc(WF_SIZE, 16, 64, 0, 0, 16), overflow.a);
-    write_packed16(fx, B_OFF, amdgpu::swmmac_b_input_loc(WF_SIZE, 16, 64, 0, 0, 16), overflow.b);
+    write_packed16(fx, A_OFF, amdgpu::swmmac_a_input_loc<16, 64>(WF_SIZE, 0, 0, 16), overflow.a);
+    write_packed16(fx, B_OFF, amdgpu::swmmac_b_input_loc<16, 64>(WF_SIZE, 0, 0, 16), overflow.b);
     fx.cu->write_vgpr(fx.vbase + ACC_OFF, 0, overflow.c);
     auto instruction = decode_case(test);
     ASSERT_NE(instruction, nullptr);
@@ -752,8 +769,8 @@ TEST(SwmmacSimdExact, K128DecodedF16HonorsFp16OvflAndClampsInfinity) {
   // BF8 +Inf * 1.0 produces +Inf in D[0,0]. The decoded instruction must
   // preserve infinity with MODE.FP16_OVFL clear and clamp it to MAX_F16 when
   // the mode bit is set.
-  write_packed8(fx, A_OFF, amdgpu::swmmac_a_input_loc(WF_SIZE, 16, 128, 0, 0, 8), 0x7Cu);
-  write_packed8(fx, B_OFF, amdgpu::swmmac_b_input_loc(WF_SIZE, 16, 128, 0, 0, 8), 0x3Cu);
+  write_packed8(fx, A_OFF, amdgpu::swmmac_a_input_loc<16, 128>(WF_SIZE, 0, 0, 8), 0x7Cu);
+  write_packed8(fx, B_OFF, amdgpu::swmmac_b_input_loc<16, 128>(WF_SIZE, 0, 0, 8), 0x3Cu);
 
   auto instruction = decode_case(test);
   ASSERT_NE(instruction, nullptr);

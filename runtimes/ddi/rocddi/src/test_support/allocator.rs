@@ -1,7 +1,10 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 //! Test callbacks deliberately bypass the Rust global allocator so metadata
 //! provenance and incidental standard-library allocations can be measured apart.
 #![allow(unsafe_code, clippy::unwrap_used)]
-use crate::host_storage::Allocator;
+use crate::memory::storage::Allocator;
 use core::ffi::c_void;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -17,6 +20,7 @@ pub(crate) struct State {
     pub allocations: AtomicUsize,
     pub frees: AtomicUsize,
     pub fail: AtomicBool,
+    pub fail_at: AtomicUsize,
 }
 impl State {
     /// The returned allocator must not outlive this stable-address test state.
@@ -26,7 +30,6 @@ impl State {
             Allocator::from_callbacks(
                 std::ptr::from_ref(self).cast_mut().cast(),
                 Some(allocate),
-                None,
                 Some(release),
             )
             .unwrap()
@@ -51,8 +54,8 @@ fn allocation_layout(size: u64, alignment: u64) -> Option<(Layout, usize)> {
 unsafe extern "C" fn allocate(data: *mut c_void, size: u64, alignment: u64) -> *mut c_void {
     // SAFETY: All test callbacks receive the stable State supplied above.
     let state = unsafe { &*data.cast::<State>() };
-    state.allocations.fetch_add(1, Ordering::Relaxed);
-    if state.fail.load(Ordering::Relaxed) {
+    let attempt = state.allocations.fetch_add(1, Ordering::Relaxed) + 1;
+    if state.fail.load(Ordering::Relaxed) || state.fail_at.load(Ordering::Relaxed) == attempt {
         return std::ptr::null_mut();
     }
     let Some((layout, prefix)) = allocation_layout(size, alignment) else {

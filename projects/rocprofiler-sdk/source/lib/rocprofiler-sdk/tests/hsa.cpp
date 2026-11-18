@@ -23,9 +23,14 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
+#include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
 #include <gtest/gtest.h>
+
+#include <cstddef>
+#include <memory>
 
 TEST(hsa, tables)
 {
@@ -104,3 +109,156 @@ TEST(hsa, tables)
     EXPECT_EQ(table.finalizer_ext_, fini_ext);
     EXPECT_EQ(table.image_ext_, img_ext);
 }
+
+TEST(hsa, async_copy_signal_lifecycle)
+{
+    namespace copy = ::rocprofiler::hsa::async_copy;
+    copy::clear_copy_time_cache();
+    auto signal = hsa_signal_t{1};
+    copy::create_copy_signal(signal);
+    EXPECT_FALSE(copy::find_copy_time(signal));
+
+    copy::record_copy_time(signal, HSA_STATUS_SUCCESS, {90, 100});
+    copy::retain_copy_signal(signal);
+    copy::retain_copy_signal(signal);
+    copy::release_copy_signal(signal);
+    copy::release_copy_signal(signal);
+    auto value = copy::find_copy_time(signal);
+    ASSERT_TRUE(value);
+    EXPECT_EQ(value->first, HSA_STATUS_SUCCESS);
+    EXPECT_EQ(value->second.start, 90);
+    EXPECT_EQ(value->second.end, 100);
+
+    copy::record_copy_time(signal, HSA_STATUS_SUCCESS, {190, 200});
+    copy::record_copy_time(signal, HSA_STATUS_SUCCESS, {140, 150});
+    copy::record_copy_time(signal, HSA_STATUS_ERROR, {});
+    value = copy::find_copy_time(signal);
+    ASSERT_TRUE(value);
+    EXPECT_EQ(value->second.end, 200);
+    copy::release_copy_signal(signal);
+    EXPECT_FALSE(copy::find_copy_time(signal));
+
+    copy::retain_copy_signal(signal);
+    copy::record_copy_time(signal, HSA_STATUS_SUCCESS, {290, 300});
+    copy::create_copy_signal(signal);
+    EXPECT_FALSE(copy::find_copy_time(signal));
+    copy::record_copy_time(signal, HSA_STATUS_SUCCESS, {390, 400});
+    copy::record_copy_time({2}, HSA_STATUS_ERROR, {});
+    copy::clear_copy_time_cache();
+    EXPECT_FALSE(copy::find_copy_time(signal));
+    EXPECT_FALSE(copy::find_copy_time({2}));
+    copy::create_copy_signal(signal);
+    EXPECT_FALSE(copy::find_copy_time(signal));
+    copy::release_copy_signal(signal);
+    EXPECT_FALSE(copy::find_copy_time(signal));
+
+    // IPC references can be retained before any copy records a timestamp.
+    copy::retain_copy_signal(signal);
+    copy::retain_copy_signal(signal);
+    copy::record_copy_time(signal, HSA_STATUS_SUCCESS, {490, 500});
+    copy::release_copy_signal(signal);
+    value = copy::find_copy_time(signal);
+    ASSERT_TRUE(value);
+    EXPECT_EQ(value->second.end, 500);
+    copy::release_copy_signal(signal);
+    EXPECT_FALSE(copy::find_copy_time(signal));
+}
+
+TEST(hsa, high_precision_timestamp_contexts)
+{
+    namespace ctx = ::rocprofiler::context;
+    using ::rocprofiler::hsa::needs_high_precision_timestamps;
+
+    EXPECT_FALSE(needs_high_precision_timestamps(nullptr));
+    auto config = ctx::context{};
+    EXPECT_FALSE(needs_high_precision_timestamps(&config));
+
+    config.callback_tracer = std::make_unique<ctx::callback_tracing_service>();
+    ASSERT_EQ(ctx::add_domain(config.callback_tracer->domains,
+                              ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API),
+              ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_FALSE(needs_high_precision_timestamps(&config));
+    ASSERT_EQ(ctx::add_domain(config.callback_tracer->domains,
+                              ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API),
+              ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_FALSE(needs_high_precision_timestamps(&config));
+
+    for(auto kind : {ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
+                     ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY,
+                     ROCPROFILER_CALLBACK_TRACING_HIP_EVENT,
+                     ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY})
+    {
+        auto gpu_config            = ctx::context{};
+        gpu_config.callback_tracer = std::make_unique<ctx::callback_tracing_service>();
+        ASSERT_EQ(ctx::add_domain(gpu_config.callback_tracer->domains, kind),
+                  ROCPROFILER_STATUS_SUCCESS);
+        EXPECT_TRUE(needs_high_precision_timestamps(&gpu_config)) << kind;
+    }
+    for(auto kind : {ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                     ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
+                     ROCPROFILER_BUFFER_TRACING_HIP_EVENT,
+                     ROCPROFILER_BUFFER_TRACING_HIP_GRAPH})
+    {
+        auto gpu_config            = ctx::context{};
+        gpu_config.buffered_tracer = std::make_unique<ctx::buffer_tracing_service>();
+        ASSERT_EQ(ctx::add_domain(gpu_config.buffered_tracer->domains, kind),
+                  ROCPROFILER_STATUS_SUCCESS);
+        EXPECT_TRUE(needs_high_precision_timestamps(&gpu_config)) << kind;
+    }
+
+    config.dispatch_counter_collection =
+        std::make_unique<ctx::dispatch_counter_collection_service>();
+    EXPECT_TRUE(needs_high_precision_timestamps(&config));
+}
+
+TEST(hsa, high_precision_timestamp_runtime_compatibility)
+{
+    using ::rocprofiler::hsa::enable_high_precision_timestamps;
+    EXPECT_FALSE(enable_high_precision_timestamps(nullptr));
+
+    auto table    = AmdExtTable{};
+    table.version = {
+        HSA_AMD_EXT_API_TABLE_MAJOR_VERSION, sizeof(table), HSA_AMD_EXT_API_TABLE_STEP_VERSION, 0};
+    EXPECT_FALSE(enable_high_precision_timestamps(&table));
+
+#if HSA_AMD_EXT_API_TABLE_MAJOR_VERSION >= 0x02 && HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x16
+    static size_t calls                               = 0;
+    calls                                             = 0;
+    table.hsa_amd_enable_high_precision_timestamps_fn = []() {
+        ++calls;
+        return HSA_STATUS_SUCCESS;
+    };
+
+    // An old or truncated runtime table must never expose the new slot to the SDK.
+    table.version.minor_id = offsetof(AmdExtTable, hsa_amd_enable_high_precision_timestamps_fn);
+    EXPECT_FALSE(enable_high_precision_timestamps(&table));
+    table.version.minor_id += sizeof(table.hsa_amd_enable_high_precision_timestamps_fn) - 1;
+    EXPECT_FALSE(enable_high_precision_timestamps(&table));
+    EXPECT_EQ(calls, 0);
+
+    table.version.minor_id = sizeof(table);
+    ++table.version.major_id;
+    EXPECT_FALSE(enable_high_precision_timestamps(&table));
+    EXPECT_EQ(calls, 0);
+    table.version.major_id = HSA_AMD_EXT_API_TABLE_MAJOR_VERSION;
+    EXPECT_TRUE(enable_high_precision_timestamps(&table));
+    EXPECT_EQ(calls, 1);
+
+    table.hsa_amd_enable_high_precision_timestamps_fn = []() {
+        ++calls;
+        return HSA_STATUS_ERROR;
+    };
+    EXPECT_FALSE(enable_high_precision_timestamps(&table));
+    EXPECT_EQ(calls, 2);
+#endif
+}
+
+#if HSA_AMD_EXT_API_TABLE_MAJOR_VERSION >= 0x02 && HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x16
+TEST(hsa, high_precision_timestamp_api_name)
+{
+    constexpr auto id   = ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_enable_high_precision_timestamps;
+    constexpr auto name = "hsa_amd_enable_high_precision_timestamps";
+    EXPECT_STREQ(::rocprofiler::hsa::name_by_id<ROCPROFILER_HSA_TABLE_ID_AmdExt>(id), name);
+    EXPECT_EQ(::rocprofiler::hsa::id_by_name<ROCPROFILER_HSA_TABLE_ID_AmdExt>(name), id);
+}
+#endif

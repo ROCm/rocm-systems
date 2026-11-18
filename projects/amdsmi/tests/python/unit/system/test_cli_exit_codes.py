@@ -733,11 +733,11 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
             helpers.error_collector.resolve_exit_code(), int(self.ExitCode.MIXED_DEVICE_ERRORS)
         )
 
-    def test_nic_and_switch_loops_record_device_failures_like_gpus(self):
-        """NIC and switch counterpart of the handle_gpus test above. These three
-        loops called the subcommand directly, so the first device-scoped failure
-        escaped: later devices were never visited, and the output already
-        buffered for the healthy ones died with the unreached final print.
+    def test_nic_loop_records_device_failures_like_gpus(self):
+        """NIC counterpart of the handle_gpus test above. The loop called the
+        subcommand directly, so the first device-scoped failure escaped: later
+        devices were never visited, and the output already buffered for the
+        healthy ones died with the unreached final print.
         """
         import argparse
         from unittest import mock
@@ -769,12 +769,6 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
         devices = list(device_failures)
 
         for handler, device_arg, processor_type in (
-            (
-                AMDSMIHelpers.handle_switchs,
-                "switch",
-                amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH,
-            ),
-            (AMDSMIHelpers.handle_brcm_nics, "nic", amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_BRCM_NIC),
             (AMDSMIHelpers.handle_ainics, "nic", amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_AMD_NIC),
         ):
             with self.subTest(handler=handler.__name__):
@@ -1123,6 +1117,9 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
             cli_exc.AmdSmiCommandNotSupportedException(command=text, outputformat="csv"),
             cli_exc.AmdSmiDeviceNotFoundException(
                 command=text, outputformat="csv", device_kind=cli_exc.AmdSmiDeviceKind.GPU
+            ),
+            cli_exc.AmdSmiDriverNotLoadedException(
+                subject=text, drivers=["amdgpu"], outputformat="csv"
             ),
             cli_exc.AmdSmiInvalidCommandException(command=text, outputformat="csv"),
             cli_exc.AmdSmiInvalidFilePathException(command=text, outputformat="csv"),
@@ -1697,6 +1694,26 @@ def _build_set_specs(set_value):
             "amdsmi_set_gpu_accelerator_partition_mem_alloc_mode": setfn
         }
 
+    def ampp_activate(cmd, mode):
+        setfn = _raise_not_supported if mode == "fail" else _noop
+        return "profile_0", {
+            "amdsmi_activate_ampp_profile": setfn,
+            # Hit by the except block's "available profiles" lookup; failing it
+            # too just degrades the error message, so NOT_SUPPORTED is fine here.
+            "amdsmi_get_ampp_profiles": _raise_not_supported,
+        }
+
+    def ampp_configure(cmd, mode):
+        AmppConfigureArgs = collections.namedtuple(
+            "ampp_configure_args", ["profile_name", "fields", "file_path"]
+        )
+        arg = AmppConfigureArgs("profile_0", [], None)
+        setfn = _raise_not_supported if mode == "fail" else _noop
+        return arg, {
+            "amdsmi_configure_ampp_profile": setfn,
+            "amdsmi_get_ampp_profiles": _raise_not_supported,
+        }
+
     return {
         "fan": fan,
         "perf_level": perf_level,
@@ -1714,6 +1731,8 @@ def _build_set_specs(set_value):
         "process_isolation": process_isolation,
         "mem_carveout": mem_carveout,
         "compute_partition_mem_alloc_mode": compute_partition_mem_alloc_mode,
+        "ampp_activate": ampp_activate,
+        "ampp_configure": ampp_configure,
     }
 
 

@@ -72,6 +72,7 @@ class IMsaaState;
 class IPerfExperiment;
 class IQueue;
 class IQueryPool;
+
 enum class PerfTraceMarkerType : uint32;
 enum class PointOrigin : uint32;
 
@@ -517,9 +518,13 @@ union CmdBufferBuildFlags
         /// placeholder
         uint32 placeholder1                    :  2;
 
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1011
         /// Enable TMZ mode to allow reading TMZ protected allocations. If this command buffer attempts to write
         /// non-TMZ memory, the results are undefined. Only valid for graphics and compute.
         uint32  enableTmz                      :  1;
+#else
+        uint32  placeholder2                   :  1;
+#endif
 
         /// @internal
         /// Build this command buffer in system memory
@@ -610,6 +615,13 @@ struct CmdBufferBuildInfo
 
     /// Client/app data handle. This can have an arbitrary value and is used to uniquely identify this command buffer.
     uint64 execMarkerClientHandle;
+
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 1011
+    /// Specify a supported TmzMode to allow access to TMZ protected allocations which use the given TmzMode. Note
+    /// that some modes will restrict access by specific queue types (e.g. HwdrmPlus has no shader access). If this
+    /// command buffer attempts to write non-TMZ memory, the results are undefined. Only valid for graphics and compute.
+    TmzMode tmzMode;
+#endif
 };
 
 /// Specifies info on how a compute shader should use resources.
@@ -736,6 +748,15 @@ struct DynamicGraphicsShaderInfos
     } enable;
 };
 
+/// Specifies parameters for binding a graphics pipeline.
+/// @see ICmdBuffer::CmdBindGraphicsPipeline
+struct GraphicsPipelineBindParams
+{
+    DynamicGraphicsShaderInfos gfxShaderInfo;
+    DynamicGraphicsState       gfxDynState;
+};
+
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1004
 /// Specifies parameters for binding a pipeline.
 /// @see ICmdBuffer::CmdBindPipeline
 struct PipelineBindParams
@@ -757,6 +778,7 @@ struct PipelineBindParams
         };
     };
 };
+#endif
 
 /// Specifies per-MRT color target view and current image state.  Used as input to ICmdBuffer::CmdBindTargets().
 struct ColorTargetBindInfo
@@ -1991,7 +2013,6 @@ struct CmdBufInfo
                                             ///  captureBegin or captureEnd is set. Otherwise set this to nullptr.
     const IGpuMemory*  pPrivFlipMemory;     ///< The gpu memory object of the private flip primary surface for the
                                             ///  DirectCapture feature.
-    const Util::Event* pEarlyPresentEvent;  ///< The 'early present' event object. This variable can be nullptr.
     uint64             frameIndex;          ///< The frame index of this command buffer. It is only required for the
                                             ///  DirectCapture feature
     uint32             vidPnSourceId;       ///< The display source id for the DirectCapture feature. Clients must set
@@ -2379,20 +2400,7 @@ public:
     ///          + ErrorUnknown if an internal PAL error occurs.
     virtual Result Reset(ICmdAllocator* pCmdAllocator, bool returnGpuMemory) = 0;
 
-    /// Queries how many DWORDs of embedded data the command buffer can allocate in one call to CmdAllocateEmbeddedData.
-    ///
-    /// This a property of the command buffer and its associated command allocator; it may change if the caller
-    /// specifies a different command allocator on Reset().
-    ///
-    /// @returns How many DWORDs of embedded data the command buffer can allocate at once.
-    virtual uint32 GetEmbeddedDataLimit() const = 0;
-
-    /// Queries how many DWORDs of embedded data the command buffer can allocate in one call to
-    /// CmdAllocateLargeEmbeddedData.
-    ///
-    /// @returns Number of DWORDs that can be allocated in one call to CmdAllocateLargeEmbeddedData
-    virtual uint32 GetLargeEmbeddedDataLimit() const = 0;
-
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1004
     /// Binds a graphics or compute pipeline to the current command buffer state.
     ///
     /// Graphics pipelines must be compiled for the PAL ABI. Compute pipelines must either be compiled for the PAL ABI
@@ -2404,8 +2412,58 @@ public:
     /// argument state, please read the @ref CmdSetUserData and @ref CmdSetKernelArguments documentation for details.
     ///
     /// @param [in] params Parameters necessary to manage dynamic pipeline shader information.
-    virtual void CmdBindPipeline(
-        const PipelineBindParams& params) = 0;
+    void CmdBindPipeline(
+        const PipelineBindParams& params)
+    {
+        if (params.pipelineBindPoint == PipelineBindPoint::Graphics)
+        {
+            GraphicsPipelineBindParams gfxParams = { };
+            gfxParams.gfxDynState                = params.gfxDynState;
+            gfxParams.gfxShaderInfo              = params.gfxShaderInfo;
+
+            CmdBindGraphicsPipeline(params.pPipeline, params.apiPsoHash, &gfxParams);
+        }
+        else
+        {
+            PAL_ASSERT(params.pipelineBindPoint == PipelineBindPoint::Compute);
+            CmdBindComputePipeline(params.pPipeline, params.apiPsoHash, &params.cs);
+        }
+    }
+#endif
+
+    /// Binds a graphics pipeline to the current command buffer state.
+    ///
+    /// Graphics pipelines must be compiled for the PAL ABI.
+    ///
+    /// PAL ABI pipelines use user data entries set by @ref CmdSetUserData.
+    ///
+    /// @param [in] pPipeline Pipeline object to bind. Can be nullptr.
+    /// @param [in] apiPsoHash API PSO hash value.
+    /// @param [in] params Parameters necessary to manage dynamic pipeline shader information, nullptr
+    ///                    is valid and means the same as a zero'd out params struct.
+    virtual void CmdBindGraphicsPipeline(
+        const IPipeline*                  pPipeline,
+        uint64                            apiPsoHash,
+        const GraphicsPipelineBindParams* pParams = nullptr) = 0;
+
+    /// Binds a compute pipeline to the current command buffer state.
+    ///
+    /// Compute pipelines must either be compiled for the PAL ABI or the HSA ABI, if it's supported.
+    /// HSA ABI support is indicated by supportHsaAbi in @ref DeviceProperties.
+    ///
+    /// PAL ABI pipelines and HSA ABI pipelines use different mechanisms to bind inputs and outputs. PAL ABI pipelines
+    /// use user data entries set by @ref CmdSetUserData. HSA ABI pipelines use kernel arguments set by @ref
+    /// CmdSetKernelArguments. Binding or unbinding a compute pipeline can implicitly modify the user data and kernel
+    /// argument state, please read the @ref CmdSetUserData and @ref CmdSetKernelArguments documentation for details.
+    ///
+    /// @param [in] pPipeline Pipeline object to bind. Can be nullptr.
+    /// @param [in] apiPsoHash API PSO hash value.
+    /// @param [in] csInfo Parameters necessary to manage dynamic pipeline shader information, nullptr is valid
+    ///                    and means the same as a zer'd out csInfo structure.
+    virtual void CmdBindComputePipeline(
+        const IPipeline*                pPipeline,
+        uint64                          apiPsoHash,
+        const DynamicComputeShaderInfo* pCsInfo = nullptr) = 0;
 
     /// Binds the specified MSAA state object to the current command buffer state.
     ///
@@ -4448,7 +4506,9 @@ public:
     /// The caller is responsible for avoiding deadlocks.
     ///
     /// An Engine must support @ref supportsGpuFence (@ref DeviceProperties::engineProperties::flags)
-    /// to support this call. Calling when missing engine support will cause undefined behavior.
+    /// to fully support gpuFences. Otherwise waits and signals from the CPU to this engine are not supported.
+    /// The engines can synchronize between themselves, just not the CPU.
+    /// Ignoring this restriction will cause undefined behavior
     ///
     /// Creation (@ref QueueSemaphoreCreateInfo)
     /// IQueueSemaphores must be created as fences on the GPU to be safely waited on. See flags.gpuFence
@@ -4468,7 +4528,9 @@ public:
     /// Sets a synchronization object's counter to a value on the GPU, then triggers interrupts to check on waiters.
     ///
     /// An Engine must support @ref supportsGpuFence (@ref DeviceProperties::engineProperties::flags)
-    /// to support this call. Calling when missing engine support will cause undefined behavior.
+    /// to fully support gpuFences. Otherwise waits and signals from the CPU to this engine are not supported.
+    /// The engines can synchronize between themselves, just not the CPU.
+    /// Ignoring this restriction will cause undefined behavior.
     ///
     /// Creation (@ref QueueSemaphoreCreateInfo)
     /// IQueueSemaphores must be created as fences on the GPU to be safely signaled. See flags.gpuFence.
@@ -4589,37 +4651,81 @@ public:
         const IGpuMemory&      dstGpuMemory,
         gpusize                dstOffset) = 0;
 
-    /// Allocates a chunk of command space that the client can use to embed constant data directly in the command
-    /// buffer's backing memory. The returned CPU address is valid until ICmdBuffer::End() is called. The GPU address
-    /// is valid until ICmdBuffer::Reset() or ICmdBuffer::Begin() and must only be referenced by work contained within
-    /// this command buffer (e.g., as an SRD table address).
+    /// Queries how many bytes of embedded data the command buffer can allocate in one call to CmdAllocateEmbeddedData.
     ///
-    /// @param [in]  sizeInDwords       Size of the embedded data space in DWORDs. It must be less than or equal to the
-    ///                                 value reported by GetEmbeddedDataLimit().
-    /// @param [in]  alignmentInDwords  Minimum GPU address alignment of the embedded space in DWORDs.
-    /// @param [out] pGpuAddress        The GPU address of the embedded space.
+    /// This a property of the command buffer and its associated command allocator; it may change if the caller
+    /// specifies a different command allocator on Reset().
     ///
-    /// @returns The DWORD-aligned CPU address of the embedded space.
-    virtual uint32* CmdAllocateEmbeddedData(
-        uint32   sizeInDwords,
-        uint32   alignmentInDwords,
-        gpusize* pGpuAddress) = 0;
+    /// @returns How many bytes of embedded data the command buffer can allocate at once.
+    virtual uint32 GetMaxEmbeddedDataSize() const = 0;
+
+    /// @deprecated This function is deprecated, use the new byte-based GetMaxEmbeddedDataSize() instead!
+    uint32 GetEmbeddedDataLimit() const { return GetMaxEmbeddedDataSize() / sizeof(uint32); }
+
+    /// @deprecated This function is deprecated, use the new byte-based GetMaxEmbeddedDataSize() instead!
+    uint32 GetLargeEmbeddedDataLimit() const { return GetEmbeddedDataLimit(); }
 
     /// Allocates a chunk of command space that the client can use to embed constant data directly in the command
-    /// buffer's backing memory. The returned CPU address is valid until ICmdBuffer::End() is called. The GPU address
-    /// is valid until ICmdBuffer::Reset() or ICmdBuffer::Begin() and must only be referenced by work contained within
-    /// this command buffer (e.g., as an SRD table address).
+    /// buffer's backing memory.
     ///
-    /// @param [in]  sizeInDwords       Size of the embedded data space in DWORDs. It must be less than or equal to the
-    ///                                 value reported by GetLargeEmbeddedDataLimit().
-    /// @param [in]  alignmentInDwords  Minimum GPU address alignment of the embedded space in DWORDs.
-    /// @param [out] pGpuAddress        The GPU address of the embedded space.
+    /// The CPU address is valid until ICmdBuffer::End() is called. The GPU address is valid until ICmdBuffer::Reset()
+    /// or ICmdBuffer::Begin() and must only be referenced by work contained within this command buffer (e.g., as an
+    /// SRD table address).
     ///
-    /// @returns The DWORD-aligned CPU address of the embedded space.
-    virtual uint32* CmdAllocateLargeEmbeddedData(
+    /// Note that the GPU address is guaranteed to reside in the DescriptorTable @ref VaRange.
+    ///
+    /// @param [in]  size       Size of the embedded data in bytes. It must be less than or equal to the
+    ///                         value reported by @ref GetMaxEmbeddedDataSize.
+    /// @param [in]  alignment  Minimum byte alignment of both the CPU address and the GPU address.
+    /// @param [out] pSpan      The allocated Span of aligned embedded data. Must not be nullptr.
+    ///
+    /// @returns The GPU address of the aligned embedded data.
+    virtual gpusize CmdAllocateEmbeddedData(
+        uint32          size,
+        uint32          alignment,
+        Util::ByteSpan* pSpan) = 0;
+
+    /// @deprecated This function is deprecated, use the Span variant of CmdAllocateEmbeddedData instead!
+    uint32* CmdAllocateEmbeddedData(
         uint32   sizeInDwords,
         uint32   alignmentInDwords,
-        gpusize* pGpuAddress) = 0;
+        gpusize* pGpuAddress)
+    {
+        Util::ByteSpan span;
+        *pGpuAddress = CmdAllocateEmbeddedData(sizeInDwords*sizeof(uint32), alignmentInDwords*sizeof(uint32), &span);
+        return reinterpret_cast<uint32*>(span.Data());
+    }
+
+    /// @deprecated This function is deprecated, use the Span variant of CmdAllocateEmbeddedData instead!
+    uint32* CmdAllocateLargeEmbeddedData(
+        uint32   sizeInDwords,
+        uint32   alignmentInDwords,
+        gpusize* pGpuAddress)
+    {
+        return CmdAllocateEmbeddedData(sizeInDwords, alignmentInDwords, pGpuAddress);
+    }
+
+    /// A convenient CmdAllocateEmbeddedData wrapper which allocates properly aligned space for one "T" value.
+    /// For example, the client might wish to allocate space for a struct which represents a shader's constant buffer.
+    /// This function automatically computes the correct embedded data size and alignment, and safely casts the Span.
+    ///
+    /// @param [out] ppValue    The CPU address of the embedded data is written here. Must not be nullptr.
+    /// @param [in]  alignment  Minimum GPU address alignment of the embedded data in bytes, defaults to "alignof(T)".
+    ///                         This should only be manually specified when the GPU requires higher alignment. The
+    ///                         provided alignment is always clamped to at least "alignof(T)" to satisfy CPU alignment.
+    ///
+    /// @returns The GPU address of the aligned embedded data.
+    template<typename T>
+    gpusize CmdAllocateEmbeddedValue(
+        T**    ppValue,
+        uint32 alignment = alignof(T))
+    {
+        Util::ByteSpan mappedMem;
+        const uint32   alignT  = Util::Max<uint32>(alignment, alignof(T));
+        const gpusize  gpuAddr = CmdAllocateEmbeddedData(sizeof(T), alignT, &mappedMem);
+        *ppValue = mappedMem.Cast<T>();
+        return gpuAddr;
+    }
 
     /// Get memory from scratch memory and bind to GPU event. For now only GpuEventPool and CmdBuffer's internal
     /// GpuEvent use this path to allocate and bind GPU memory. These usecases assume the bound GPU memory is GPU access

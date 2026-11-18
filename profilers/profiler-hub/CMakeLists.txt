@@ -2,7 +2,39 @@
 # SPDX-License-Identifier: MIT
 
 cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
-project(profiler-hub VERSION 0.2.0)
+
+# Version lives in VERSION file.
+file(
+    STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION"
+    FULL_VERSION_STRING
+    LIMIT_COUNT 1
+)
+
+# file(STRINGS) does not register its input as a configure dependency, so editing
+# VERSION alone would leave the old version baked into an existing build tree.
+set_property(
+    DIRECTORY
+    APPEND
+    PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION"
+)
+# Only MAJOR.MINOR.PATCH is passed to project(); any trailing pre-release suffix
+# stays in FULL_VERSION_STRING for reporting.
+if(NOT FULL_VERSION_STRING MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)")
+    message(
+        FATAL_ERROR
+        "VERSION must begin with MAJOR.MINOR.PATCH (found '${FULL_VERSION_STRING}')"
+    )
+endif()
+
+set(PROFILER_HUB_VERSION "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}.${CMAKE_MATCH_3}")
+
+project(profiler-hub VERSION ${PROFILER_HUB_VERSION})
+
+message(
+    STATUS
+    "[${PROJECT_NAME}] version ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH} (${FULL_VERSION_STRING})"
+)
+
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -37,9 +69,9 @@ include(GNUInstallDirs)
 # Version
 # ------------------------------------------------------------ #
 
-# Version is the single source of truth in `project(profiler-hub VERSION ...)`
-# above. CMake automatically populates profiler-hub_VERSION_{MAJOR,MINOR,PATCH}
-# and profiler-hub_VERSION from it.
+# The VERSION file is the single source of truth for the library version.
+# project() above is populated from that file, and CMake then sets
+# profiler-hub_VERSION_{MAJOR,MINOR,PATCH} and profiler-hub_VERSION.
 
 # ------------------------------------------------------------ #
 # Object Library (compiled once, used by both shared and static)
@@ -88,16 +120,21 @@ add_subdirectory(source)
 # Public API
 # ------------------------------------------------------------ #
 
-set(profiler-hub_public_headers
-    ${CMAKE_CURRENT_LIST_DIR}/include/writer.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/reader.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/storage.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/version.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/writer_types.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/reader_types.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/shared_types.hpp
+add_subdirectory(include/cpp)
+
+# Old-path forwarding headers; remove in a future release.
+list(
+    APPEND profiler-hub_public_headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/writer.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/reader.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/storage.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/version.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/writer_types.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/reader_types.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/shared_types.hpp
 )
 
+file(REMOVE_RECURSE ${CMAKE_BINARY_DIR}/include/profiler-hub)
 foreach(HEADER_FILE ${profiler-hub_public_headers})
     file(
         RELATIVE_PATH
@@ -199,7 +236,20 @@ endif()
 
 add_library(profiler-hub SHARED $<TARGET_OBJECTS:profiler-hub-objects>)
 add_library(profiler-hub-static STATIC $<TARGET_OBJECTS:profiler-hub-objects>)
-set_target_properties(profiler-hub-static PROPERTIES OUTPUT_NAME profiler-hub)
+if(WIN32)
+    set_target_properties(profiler-hub PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    # On MSVC, profiler-hub.lib is the DLL import library; keep the static
+    # archive under a distinct name so consumers link the shared library.
+    set_target_properties(
+        profiler-hub-static
+        PROPERTIES OUTPUT_NAME profiler-hub-static
+    )
+else()
+    set_target_properties(
+        profiler-hub-static
+        PROPERTIES OUTPUT_NAME profiler-hub
+    )
+endif()
 
 if(TARGET profiler-hub-sqlite3-shared)
     set_target_properties(profiler-hub PROPERTIES INSTALL_RPATH "$ORIGIN")
@@ -432,8 +482,11 @@ file(
     DESTINATION ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-set(CMAKE_EXPORT_PACKAGE_REGISTRY ON)
-export(PACKAGE ${PACKAGE_NAME})
+# Registry entries are for standalone builds; a parent project's build must not write one.
+if(PROJECT_IS_TOP_LEVEL)
+    set(CMAKE_EXPORT_PACKAGE_REGISTRY ON)
+    export(PACKAGE ${PACKAGE_NAME})
+endif()
 
 # ------------------------------------------------------------ #
 # Clang-Tidy Custom Target
@@ -459,6 +512,7 @@ if(CLANG_TIDY_EXE)
         clang-tidy
         COMMAND
             ${CLANG_TIDY_EXE} -p ${CMAKE_BINARY_DIR}
+            --extra-arg=-I${CMAKE_BINARY_DIR}/include
             --config-file=${CMAKE_SOURCE_DIR}/.clang-tidy
             ${PROFILER_HUB_CLANG_TIDY_SOURCES}
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
@@ -471,6 +525,7 @@ if(CLANG_TIDY_EXE)
         clang-tidy-fix
         COMMAND
             ${CLANG_TIDY_EXE} -p ${CMAKE_BINARY_DIR}
+            --extra-arg=-I${CMAKE_BINARY_DIR}/include
             --config-file=${CMAKE_SOURCE_DIR}/.clang-tidy --fix --fix-errors
             ${PROFILER_HUB_CLANG_TIDY_SOURCES}
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}

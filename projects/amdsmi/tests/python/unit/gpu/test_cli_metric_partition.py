@@ -53,7 +53,11 @@ class _FakeClkType:
     DF = "DF"
 
 
-class _FakeLibraryException(Exception):
+class _FakeAmdSmiException(Exception):
+    """Stands in for ``AmdSmiException``, the base metric.py catches on the header read."""
+
+
+class _FakeLibraryException(_FakeAmdSmiException):
     def __init__(self, message="mock error"):
         super().__init__(message)
         self._message = message
@@ -107,11 +111,18 @@ def _build_fake_amdsmi(**interface_overrides):
         amdsmi_get_clock_info=_get_clock_info,
         amdsmi_get_gpu_metrics_info=lambda _handle: {},
         _NA_amdsmi_get_gpu_metrics_info=lambda: {},
+        # An unmapped version, so unsupported-field filtering suppresses nothing and
+        # these tests see the partition behavior alone.
+        amdsmi_get_gpu_metrics_header_info=lambda _handle: {},
         # Set per-test; default keeps the partition path inert.
         amdsmi_get_gpu_partition_metrics_info=lambda _handle: None,
         **interface_overrides,
     )
-    exception = fake_module("amdsmi.amdsmi_exception", AmdSmiLibraryException=_FakeLibraryException)
+    exception = fake_module(
+        "amdsmi.amdsmi_exception",
+        AmdSmiException=_FakeAmdSmiException,
+        AmdSmiLibraryException=_FakeLibraryException,
+    )
     amdsmi_pkg = fake_module("amdsmi", amdsmi_interface=interface, amdsmi_exception=exception)
 
     return {
@@ -124,7 +135,7 @@ def _build_fake_amdsmi(**interface_overrides):
 
 
 def _load_metric_module():
-    return load_cli_module("metric_under_test", METRIC_PATH)
+    return load_cli_module("metric_under_test", METRIC_PATH, sys_path_dir=_CLI_DIR)
 
 
 class _FakeLogger:

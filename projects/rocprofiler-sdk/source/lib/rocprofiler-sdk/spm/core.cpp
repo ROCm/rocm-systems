@@ -22,7 +22,9 @@
 
 #include "lib/rocprofiler-sdk/spm/core.hpp"
 #include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/counters/ioctl.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/spm/dispatch_handlers.hpp"
@@ -31,7 +33,9 @@
 
 #include <atomic>
 #include <cstdint>
+#include <mutex>
 #include <stdexcept>
+#include <unordered_set>
 #include <vector>
 
 namespace rocprofiler
@@ -230,6 +234,7 @@ configure_callback_spm_dispatch(rocprofiler_context_id_t                       c
     if(ctx.pc_sampler) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
     if(ctx.dispatch_counter_collection) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
     if(ctx.device_counter_collection) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
+    if(ctx.device_spm) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
     if(!ctx.dispatch_spm)
         ctx.dispatch_spm =
             std::make_unique<rocprofiler::context::spm_dispatch_counter_collection_service>();
@@ -260,56 +265,32 @@ start_context(const context::context* ctx)
 
     auto* controller = hsa::get_queue_controller();
 
-    bool already_enabled = true;
-    CHECK_NOTNULL(controller)->enable_serialization();
+    // Scope serialization to the agents this context collects on. An empty set still means
+    // every agent, so an unrestricted context serializes the whole machine as before.
+    CHECK_NOTNULL(controller)->enable_serialization(ctx->dispatch_spm->agents);
     ctx->dispatch_spm->enabled.wlock([&](auto& enabled) {
         if(enabled) return;
-        already_enabled = false;
-        enabled         = true;
+        enabled = true;
     });
 
-    if(!already_enabled)
+    // Request the dispatch-mode perfmon enable (no-op on older Linux kernels that don't support
+    // it); stop_context() doesn't need a release to match: there is no unprivileged "off" ioctl,
+    // and the KFD only clears this when this process's KFD device context is torn down. Mirrors
+    // counters/core.cpp: SPM reads the same hardware counter blocks as PMC, so it needs the same
+    // perfmon clock forced on, and dispatch-scoped SPM is just as exclusivity-free as dispatch-
+    // scoped PMC counting. Scoped to this context's configured agents (collects_on(), empty set
+    // == every GPU agent) to match enable_serialization() above.
+    for(const auto& agent : agent::get_agents())
     {
-        // Insert our callbacks into HSA Interceptor. This
-        // turns on counter instrumentation.
-        for(auto& cb : ctx->dispatch_spm->callbacks)
+        if(agent->type == ROCPROFILER_AGENT_TYPE_GPU && ctx->dispatch_spm->collects_on(agent->id))
         {
-            if(cb->queue_id != rocprofiler::hsa::ClientID{-1}) continue;
-            cb->queue_id = controller->add_callback(
-                std::nullopt,
-                hsa::queue_callbacks_t{
-                    .batch_packets = []() { return false; },
-                    .write_interceptor =
-                        [=](const hsa::Queue&              q,
-                            const hsa::rocprofiler_packet& kern_pkt,
-                            rocprofiler_kernel_id_t        kernel_id,
-                            rocprofiler_dispatch_id_t      dispatch_id,
-                            rocprofiler_user_data_t*       user_data,
-                            const hsa::queue_info_session_t::external_corr_id_map_t&
-                                                           extern_corr_ids,
-                            const context::correlation_id* correlation_id) {
-                            return pre_kernel_call(ctx,
-                                                   cb,
-                                                   q,
-                                                   kern_pkt,
-                                                   kernel_id,
-                                                   dispatch_id,
-                                                   user_data,
-                                                   extern_corr_ids,
-                                                   correlation_id);
-                        },
-                    .signal_completion =
-                        [=](const hsa::Queue& /* q */,
-                            const hsa::rocprofiler_packet& /* kern_pkt */,
-                            std::shared_ptr<hsa::queue_info_session_t>& session,
-                            hsa::packet_data_t& /* pkt_data */,
-                            inst_pkt_t&                     aql,
-                            kernel_dispatch::profiling_time dispatch_time) {
-                            post_kernel_call(ctx, cb, session, aql, dispatch_time);
-                        }});
+            counters::counter_collection_dispatch_perfmon_enable(agent);
         }
     }
 
+    // SPM no longer registers a per-queue callback with the queue controller; the HSA write
+    // interceptor calls spm::kernel_dispatch_phase_enter_hook / kernel_dispatch_phase_exit_hook
+    // directly (see hsa/queue.cpp).
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
@@ -323,26 +304,131 @@ stop_context(const context::context* ctx)
 {
     if(!ctx || !ctx->dispatch_spm) return;
 
-    auto* controller = hsa::get_queue_controller();
+    auto* controller  = hsa::get_queue_controller();
+    bool  was_enabled = false;
 
     ctx->dispatch_spm->enabled.wlock([&](auto& enabled) {
         if(!enabled) return;
-        enabled = false;
+        was_enabled = true;
+        enabled     = false;
     });
 
-    if(controller)
+    if(controller && was_enabled)
     {
+        // Drain in-flight dispatches, then disable serialization. The review of #8887 asked for
+        // this sync to be kept and for SPM to stay visible to the enter hook and to serialization
+        // through a "draining" window until both this and disable_serialization() complete.
+        //
+        // The visibility half comes from ordering rather than a separate flag:
+        // context::stop_context calls this function while the context is still in the active list,
+        // so for the duration of the drain the enter hook still reaches pre_kernel_call, whose
+        // disabled path deliberately returns serialize=true to coordinate the
+        // serialized->unserialized transition. Only once this function returns does the active slot
+        // get cleared. Introducing a draining flag as well would duplicate that guarantee, but the
+        // ordering is load-bearing: if the slot were cleared first, the enter hook would go blind
+        // before disable_serialization() ran and a dispatch could be submitted unserialized while
+        // the serializer was still enabled.
+        //
+        // A removal of this sync was considered on the grounds that its two original purposes --
+        // avoiding dangling callback pointers once the per-queue callbacks were unregistered, and
+        // letting in-flight dispatches complete -- are both addressed by the migration and by
+        // routing completions over registered contexts. The first is genuinely gone. The second is
+        // weaker than it looks: provenance routing ensures a completion that arrives is delivered,
+        // whereas the drain bounds when completions arrive at all, which is what the rest of the
+        // teardown depends on. Keeping it.
         hsa::queue_controller_sync();
-        controller->disable_serialization();
-        for(auto& cb : ctx->dispatch_spm->callbacks)
-        {
-            if(cb->queue_id != rocprofiler::hsa::ClientID{-1})
-            {
-                controller->remove_callback(cb->queue_id);
-                cb->queue_id = rocprofiler::hsa::ClientID{-1};
-            }
-        }
+        controller->disable_serialization(ctx->dispatch_spm->agents);
+        // No per-queue callback to remove; spm::kernel_dispatch_phase_enter_hook no-ops once
+        // dispatch_spm is disabled above.
     }
+}
+
+rocprofiler_status_t
+set_dispatch_agents(rocprofiler_context_id_t      context_id,
+                    const rocprofiler_agent_id_t* agents,
+                    size_t                        num_agents)
+{
+    if(num_agents > 0 && agents == nullptr) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    // Held across the active-context check and the assignment below. start_context() reads this
+    // set to scope enable_serialization() and stop_context() reads it again to scope the matching
+    // disable_serialization(); if the set changed in between, the per-agent refcount for an agent
+    // that was enabled but not disabled never returns to zero and serialization stays on for the
+    // life of the process. The same mutex is what start_context() takes, so holding it here makes
+    // "the context is not active" and "the agent set is now this" one indivisible step.
+    auto _lk = std::unique_lock<std::mutex>{context::get_contexts_mutex()};
+    context::wait_for_stopping_contexts(_lk);
+
+    auto* ctx_p = context::get_mutable_registered_context(context_id);
+    if(!ctx_p) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
+    if(!ctx_p->dispatch_spm) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
+
+    for(const auto* itr : context::get_active_contexts())
+    {
+        if(itr && itr->context_idx == ctx_p->context_idx)
+            return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
+    }
+
+    auto selected = std::unordered_set<rocprofiler_agent_id_t>{};
+    selected.reserve(num_agents);
+    for(size_t i = 0; i < num_agents; ++i)
+    {
+        const auto* agent = rocprofiler::agent::get_agent(agents[i]);
+        if(!agent) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
+        if(agent->type != ROCPROFILER_AGENT_TYPE_GPU)
+            return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+        selected.emplace(agents[i]);
+    }
+
+    ctx_p->dispatch_spm->agents = std::move(selected);
+
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+rocprofiler_status_t
+configure_agent_collection(rocprofiler_context_id_t                 context_id,
+                           rocprofiler_buffer_id_t                  buffer_id,
+                           rocprofiler_agent_id_t                   agent_id,
+                           rocprofiler_device_counting_service_cb_t cb,
+                           void*                                    user_data)
+{
+    if(!is_spm_explicitly_enabled()) return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+
+    auto* ctx_p = rocprofiler::context::get_mutable_registered_context(context_id);
+    if(!ctx_p) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
+
+    auto& ctx = *ctx_p;
+
+    if(ctx.dispatch_counter_collection) return ROCPROFILER_STATUS_ERROR_AGENT_DISPATCH_CONFLICT;
+
+    if(ctx.device_counter_collection) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
+
+    if(ctx.pc_sampler) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
+
+    if(ctx.dispatch_spm) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
+
+    if(!rocprofiler::buffer::get_buffer(buffer_id))
+    {
+        return ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND;
+    }
+
+    if(!ctx.device_spm)
+    {
+        ctx.device_spm = std::make_unique<rocprofiler::context::spm_device_counting_service>();
+    }
+
+    if(ctx.device_spm->conf_agents.emplace(agent_id.handle).second == false)
+    {
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    ctx.device_spm->agent_data.emplace_back();
+    ctx.device_spm->agent_data.back().callback_data = rocprofiler_user_data_t{.ptr = user_data};
+    ctx.device_spm->agent_data.back().agent_id      = agent_id;
+    ctx.device_spm->agent_data.back().cb            = cb;
+    ctx.device_spm->agent_data.back().buffer        = buffer_id;
+
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 
 }  // namespace spm

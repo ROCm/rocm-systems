@@ -27,6 +27,7 @@ from amdisa import (
 )
 from amdisa import xml_schema as xs
 from amdisa.cross_isa import CrossIsaAnalyzer
+from amdisa.codegen.dbt.rule_gen import generate_matrix_conversions
 from amdisa.encoding_translator_codegen import (
     generate_encoding_fields,
     generate_encoding_translators,
@@ -321,7 +322,7 @@ def _run(args) -> None:
             writer._shared_execute_bodies = all_shared_bodies
             writer._write_shared_execute_templates()
 
-    # DBT legalization tables and encoding translators.
+    # DBT legalization tables, matrix layout conversions and encoding translators.
     if args.gen_dbt:
         if len(specs) < 2:
             print(
@@ -356,6 +357,9 @@ def _run(args) -> None:
                 file=sys.stderr,
             )
         print(f'Generated {len(generated)} files in {dbt_output}', file=sys.stderr)
+
+        matrix_header = generate_matrix_conversions(dbt_output)
+        print(f'Generated {matrix_header}', file=sys.stderr)
 
         generate_encoding_fields(specs, dbt_output)
         spec_map = {name: (spec, sem) for name, spec, sem in specs}
@@ -408,7 +412,8 @@ def main() -> None:
     arg_parser.add_argument(
         '--gen-dbt',
         action='store_true',
-        help='Generate DBT legalization tables and encoding translators.',
+        help='Generate DBT legalization tables, matrix layout conversions, '
+        'and encoding translators.',
     )
     arg_parser.add_argument(
         '--isa-output', help='Output path for generated ISA C++ files'

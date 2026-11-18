@@ -193,7 +193,7 @@ is_agent_supported_for_spm(const AgentInfo* agentInfo)
     // if the device is gfx90a, then spm is not supported
     if(strncmp(agentInfo->gfxip, "gfx90a", 6) == 0)
     {
-        printf("Streaming Performance Monitor (SPM) is not supported on gfx90a devices\n");
+        AQL_INFO << "Streaming Performance Monitor (SPM) is not supported on gfx90a devices";
         return false;
     }
     else if(strncmp(agentInfo->gfxip, "gfx942", 6) == 0)
@@ -201,8 +201,8 @@ is_agent_supported_for_spm(const AgentInfo* agentInfo)
         // if the device is gfx942, check if virtualization is enabled
         if(is_virtualization_enabled())
         {
-            printf("Streaming Performance Monitor (SPM) is not supported on gfx942 devices "
-                   "when GPU virtualization (SR-IOV) is enabled\n");
+            AQL_INFO << "Streaming Performance Monitor (SPM) is not supported on gfx942 devices "
+                        "when GPU virtualization (SR-IOV) is enabled";
             return false;
         }
     }
@@ -852,8 +852,11 @@ aqlprofile_spm_is_event_supported(aqlprofile_agent_handle_t agent, aqlprofile_pm
         return false;
     }
 
-    if(pm4_factory->GetGpuId() < aql_profile::MI200_GPU_ID ||
-       pm4_factory->GetGpuId() > aql_profile::MI350_GPU_ID)
+    const auto gpu_id = pm4_factory->GetGpuId();
+    // gfx1200 and gfx1201 share GFX12_GPU_ID. gfx1250 is MI450_GPU_ID.
+    if(gpu_id < aql_profile::MI200_GPU_ID ||
+       (gpu_id > aql_profile::MI350_GPU_ID && gpu_id != aql_profile::GFX12_GPU_ID &&
+        gpu_id != aql_profile::MI450_GPU_ID))
         return false;
 
     const GpuBlockInfo* block_info = pm4_factory->GetBlockInfo(event.block_name);

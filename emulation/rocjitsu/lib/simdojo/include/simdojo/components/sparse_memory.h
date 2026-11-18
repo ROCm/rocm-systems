@@ -12,6 +12,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <mutex>
 #include <shared_mutex>
 #include <span>
@@ -140,6 +141,30 @@ public:
     }
   }
 
+  /// @brief Allocate every sparse page a later write to this span may touch.
+  /// @details Missing pages are initialized to zero without changing any
+  /// existing byte. Pages are never removed, so a successful reservation lets
+  /// a later write to the same span avoid allocation. An allocation failure
+  /// may leave additional zero pages but cannot leave a partial byte write.
+  /// @returns False if the span exceeds the address space.
+  [[nodiscard]] bool reserve_write_pages(uint64_t addr, size_t size) {
+    if (size == 0)
+      return true;
+    if (size - 1 > std::numeric_limits<uint64_t>::max() - addr)
+      return false;
+    size_t visited = 0;
+    while (visited < size) {
+      const uint64_t ea = addr + visited;
+      auto &stripe = page_stripe(ea);
+      {
+        std::unique_lock<std::shared_mutex> lock(stripe.mutex);
+        (void)get_page_locked(stripe, ea);
+      }
+      visited += std::min(size - visited, PAGE_SIZE - (ea & PAGE_MASK));
+    }
+    return true;
+  }
+
   /// @brief Apply one indivisible mutation within a single sparse page.
   /// @details The callback runs while holding the same exclusive page-stripe
   /// lock used by ordinary reads and writes, so all SparseMemory accessors
@@ -213,7 +238,8 @@ public:
 private:
   static constexpr size_t NUM_PAGE_STRIPES = 1024;
 
-  struct PageStripe {
+  // Keep concurrent readers of neighboring stripes off the same host cache line.
+  struct alignas(64) PageStripe {
     mutable std::shared_mutex mutex;
     mutable std::unordered_map<uint64_t, Page> pages;
   };

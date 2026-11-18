@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 /* Qualification kernel for the direct AQL example. The host program controls
  * publication and completion; this kernel deliberately performs all work in
  * one work-item so result validation does not depend on scheduler ordering. */

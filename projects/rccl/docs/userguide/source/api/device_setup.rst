@@ -34,10 +34,15 @@ ncclDevComm
 
       Rank within the local :ref:`LSA <device_api_lsa>` team and its size (see :ref:`devapi_teams`).
 
-   .. c:member:: uint8_t ginContextCount
+   .. c:member:: uint32_t ginContextCount
 
-      The number of supported GIN contexts (see :cpp:class:`ncclGin`; available
-      since NCCL 2.28.7).
+      The number of GIN contexts actually allocated for this device communicator
+      (see :cpp:class:`ncclGin`; available since NCCL 2.28.7). This can be larger
+      than the ``ginContextCount`` request. RCCL rounds the
+      request up to a multiple of ``ginConnectionCount`` so every GIN
+      connection receives the same number of contexts, and this field reports
+      that rounded-up allocation (NCCL 2.31.2, NVIDIA/nccl#2301). Device code
+      must use this value, not the requested count, when indexing contexts.
 
 ncclDevCommCreate
 -----------------
@@ -91,6 +96,14 @@ ncclDevCommRequirements
 
       Specifies the number of network/rail hybrid barriers to allocate (see :cpp:class:`ncclBarrierSession`; available since NCCL 2.28.7).
 
+   .. c:member:: int ginContextCount
+
+      Requests a number of GIN contexts (default 4). This is a minimum request. The count
+      stored on the device communicator after creation is the request rounded
+      up to a multiple of the GIN connection count, so it may be larger than
+      the value set here. Available since NCCL 2.28.7; the rounded-up value
+      has been reported since NCCL 2.31.2.
+
    .. c:member:: int ginSignalCount
 
       Specifies the number of network signals to allocate (see :cpp:type:`ncclGinSignal_t`; available since NCCL 2.28.7).
@@ -102,22 +115,38 @@ ncclDevCommRequirements
    .. c:member:: bool ginForceEnable
 
       **Deprecated.** Forces GIN (GPU-Initiated Networking) support to be enabled by automatically setting
-      ``ginConnectionType`` to :c:macro:`NCCL_GIN_CONNECTION_FULL`. This field is deprecated in favor of explicitly
+      ``ginConnectionType`` to :c:enumerator:`NCCL_GIN_CONNECTION_FULL <ncclGinConnectionType_t.NCCL_GIN_CONNECTION_FULL>`. This field is deprecated in favor of explicitly
       setting :c:member:`ginConnectionType` to the desired value. When set to ``true``, it overrides the
       ``ginConnectionType`` field. New code should use :c:member:`ginConnectionType` directly instead of this field.
       Available since NCCL 2.28.7, deprecated since NCCL 2.29.7.
 
    .. c:member:: ncclGinConnectionType_t ginConnectionType
 
-      Specifies the type of GIN (GPU-Initiated Networking) connection to establish for the device communicator.
-      This field controls whether GIN is enabled and how it is configured. When set to :c:macro:`NCCL_GIN_CONNECTION_FULL`,
-      GIN is initialized and all ranks connect to all other ranks in the communicator. When set to :c:macro:`NCCL_GIN_CONNECTION_RAIL`,
-      GIN is initialized and each rank connects to other ranks in the same rail team. If GIN resources are requested via ``ginSignalCount``,
-      ``ginCounterCount``, ``barrierCount``, or ``railGinBarrierCount`` while this field is set to
-      :c:macro:`NCCL_GIN_CONNECTION_NONE`, device communicator creation will fail with :c:macro:`ncclInvalidArgument`.
-      Available since NCCL 2.29.7.
+      Specifies the type of GIN connection to establish (see :c:enum:`ncclGinConnectionType_t`).
+      If GIN resources are requested (e.g., ``ginSignalCount``, ``ginCounterCount``, ``barrierCount``, or
+      ``railGinBarrierCount``) while this field is :c:enumerator:`NCCL_GIN_CONNECTION_NONE <ncclGinConnectionType_t.NCCL_GIN_CONNECTION_NONE>`, device communicator
+      creation fails with :c:macro:`ncclInvalidArgument`. Available since NCCL 2.29.7.
 
-      See :c:type:`ncclGinConnectionType_t` for possible values.
+   .. c:member:: int ginCustomStride
+
+      Specifies the rank stride when :c:member:`ginConnectionType` is :c:enumerator:`NCCL_GIN_CONNECTION_CUSTOM_STRIDE <ncclGinConnectionType_t.NCCL_GIN_CONNECTION_CUSTOM_STRIDE>`.
+      Each rank is connected to ranks separated by this many communicator ranks.
+      The value must be positive, a multiple of :c:member:`ginMinStride`, and no greater than the rail-team stride.
+      A stride of ``0`` is rejected with :c:macro:`ncclInvalidUsage`. A stride larger than the rail team, or one that
+      is not a multiple of :c:member:`ginMinStride`, is rejected with :c:macro:`ncclInternalError`.
+      Available since NCCL 2.31.
+
+   .. c:member:: int* ginCustomArray
+
+      An array of length :c:member:`ginCustomArrayCount` which contains a list peers to connect to.
+      This array is only valid when :c:member:`ginConnectionType` is
+      :c:enumerator:`NCCL_GIN_CONNECTION_CUSTOM_ARRAY <ncclGinConnectionType_t.NCCL_GIN_CONNECTION_CUSTOM_ARRAY>`.
+      Connection requests must be bi-directional: if rank *j* appears in rank *i*'s array, rank *i* must also appear
+      in rank *j*'s array. Available since NCCL 2.32.4.
+
+   .. c:member:: int ginCustomArrayCount
+
+      Number of entries in :c:member:`ginCustomArray`. Defaults to ``0``. Available since NCCL 2.32.4.
 
    .. c:member:: ncclDevResourceRequirements_t* resourceRequirementsList
 
@@ -141,13 +170,47 @@ ncclDevCommRequirements
       Set to false if kernels using this communicator will not use strong signal operations
       (such as :cpp:struct:`ncclGin_StrongSignalInc` and :cpp:struct:`ncclGin_StrongVASignalAdd`).
       Default is true. Available since NCCL 2.30.5.
- 
+
 
    .. c:member:: bool ginVaSignalsRequired
 
       Specifies whether GIN VA signals are required. Set to false if kernels using this communicator
       do not use GIN VA signals (such as :cpp:struct:`ncclGin_WeakVASignalInc` and :cpp:struct:`ncclGin_StrongVASignalAdd`).
       Default is true. Available since NCCL 2.30.5.
+
+   .. c:member:: ncclGinType_t ginType
+
+      Requests that the device communicator be connected using a specific GIN backend (see
+      :c:enum:`ncclGinType_t`).
+      :c:func:`ncclDevCommCreate` fails if set to a specific backend that is not supported.
+      The default value is :c:enumerator:`NCCL_GIN_TYPE_NONE <ncclGinType_t.NCCL_GIN_TYPE_NONE>`,
+      which automatically selects a backend that is supported by the communicator.
+
+      Multiple GIN backends can be used at once by creating two device communicators, each with a different ginType.
+      See :ref:`deviceapi_gin_multi_backend` for a worked example. Available since NCCL 2.31.
+
+   .. c:member:: bool useRuntimeVersion
+
+      If ``true``, :c:func:`ncclDevCommCreate` initializes a device
+      communicator for device code built against the runtime NCCL version,
+      e.g., JIT-compiled device code. Allocate the output buffer passed to
+      :c:func:`ncclDevCommCreate` using
+      ``ncclCommProperties_t.devCommRuntimeVersionSize`` bytes. If ``false``,
+      the compile-time version is used. Available since
+      NCCL 2.31.
+
+   .. c:member:: int cftCaps
+
+      Bitmask of CFT capabilities requested for the device communicator (see :ref:`device_api_cft`).
+      Set :c:enumerator:`NCCL_CFT <ncclCftCap_t.NCCL_CFT>` for unicast CFT logical endpoint support,
+      :c:enumerator:`NCCL_CFT_MULTIMEM <ncclCftCap_t.NCCL_CFT_MULTIMEM>` for multicast CFT support, or
+      :c:enumerator:`NCCL_CFT_NONE <ncclCftCap_t.NCCL_CFT_NONE>` for no CFT support (default).
+      Available since NCCL 2.31.
+
+   .. c:member:: int cftBarrierCount
+
+      Specifies the number of CFT barriers to allocate (see :cpp:class:`ncclCftBarrierSession`).
+      Available since NCCL 2.31.
 
 ncclCommQueryProperties
 -----------------------
@@ -193,48 +256,112 @@ ncclCommProperties_t
 
    .. c:member:: ncclGinType_t ginType
 
-      The GIN type supported by the communicator. If equal to :c:macro:`NCCL_GIN_TYPE_NONE`, a
-      :c:type:`ncclDevComm` cannot be created with GIN connection type :c:macro:`NCCL_GIN_CONNECTION_FULL`.
+      **Deprecated.** The GIN type supported by the communicator. If equal to :c:enumerator:`NCCL_GIN_TYPE_NONE <ncclGinType_t.NCCL_GIN_TYPE_NONE>`, a
+      :c:type:`ncclDevComm` cannot be created with GIN connection type :c:enumerator:`NCCL_GIN_CONNECTION_FULL <ncclGinConnectionType_t.NCCL_GIN_CONNECTION_FULL>`.
+      Available since NCCL 2.29, deprecated since NCCL 2.31.
+      This field only reports a single GIN type and predates multi-backend GIN support. New code should use
+      :c:member:`ginConnectionType` together with :c:member:`ginSupport` instead.
 
    .. c:member:: int nLsaTeams
 
       The number of :ref:`LSA <device_api_lsa>` teams across the entire communicator. Available since NCCL 2.29.7.
 
+   .. c:member:: bool hostRmaSupport
+
+      Whether host-initiated RMA is supported by the communicator.
+
    .. c:member:: ncclGinType_t railedGinType
 
-      The railed GIN type supported by the communicator. If equal to :c:macro:`NCCL_GIN_TYPE_NONE`, a
-      :c:type:`ncclDevComm` cannot be created with GIN connection type :c:macro:`NCCL_GIN_CONNECTION_RAIL`.
-      Available since NCCL 2.29.7.
+      **Deprecated.** The railed GIN type supported by the communicator. If equal to :c:enumerator:`NCCL_GIN_TYPE_NONE <ncclGinType_t.NCCL_GIN_TYPE_NONE>`, a
+      :c:type:`ncclDevComm` cannot be created with GIN connection type :c:enumerator:`NCCL_GIN_CONNECTION_RAIL <ncclGinConnectionType_t.NCCL_GIN_CONNECTION_RAIL>`.
+      Available since NCCL 2.29.7, deprecated since NCCL 2.31.
+      This field only reports a single GIN type and predates multi-backend GIN support. New code should use
+      :c:member:`ginConnectionType` together with :c:member:`ginSupport` instead.
 
    .. c:member:: uint64_t commHash
 
       Communicator hash identifier shared across all ranks in the communicator. Available since NCCL 2.31.
 
+   .. c:member:: int ginMinStride
+
+      The minimum value allowed for :c:member:`ginCustomStride`. This value is based
+      on the network connectivity. For example, when :ref:`env_NCCL_CROSS_NIC` is ``0``, ``ginMinStride`` is increased so
+      that strides spanning rail boundaries are not possible. ``ginMinStride`` is ``INT_MAX`` if GIN connectivity
+      does not follow a uniform stride pattern, in which case :c:enumerator:`NCCL_GIN_CONNECTION_CUSTOM_STRIDE <ncclGinConnectionType_t.NCCL_GIN_CONNECTION_CUSTOM_STRIDE>` cannot
+      be used. Available since NCCL 2.31.
+
+   .. c:member:: ncclGinConnectionType_t ginConnectionType
+
+      The type of GIN connection established across the communicator (see :c:enum:`ncclGinConnectionType_t`).
+      This reflects the connectivity actually negotiated for the communicator (e.g.,
+      :c:enumerator:`NCCL_GIN_CONNECTION_NONE <ncclGinConnectionType_t.NCCL_GIN_CONNECTION_NONE>` if GIN is unavailable,
+      :c:enumerator:`NCCL_GIN_CONNECTION_FULL <ncclGinConnectionType_t.NCCL_GIN_CONNECTION_FULL>`, or
+      :c:enumerator:`NCCL_GIN_CONNECTION_RAIL <ncclGinConnectionType_t.NCCL_GIN_CONNECTION_RAIL>`). Use this field together with
+      :c:member:`ginSupport` to determine which GIN backends are available before setting
+      :c:member:`ginConnectionType <ncclDevCommRequirements.ginConnectionType>` on :c:type:`ncclDevCommRequirements_t`.
+      Available since NCCL 2.31.
+
+   .. c:member:: bool ginSupport[64]
+
+      Determines which GIN backends are supported.
+      If ``ginSupport[gin_type]`` is ``true``, then ``gin_type`` is supported by every rank of the communicator.
+      The value ``gin_type`` is one of the values from :c:type:`ncclGinType_t`.
+      See :ref:`deviceapi_gin_multi_backend`. Available since NCCL 2.31.
+
+   .. c:member:: size_t devCommRuntimeVersionSize
+
+      Number of bytes required for a device communicator targeting the runtime
+      NCCL version. This can differ from ``sizeof(ncclDevComm_t)`` when the
+      runtime NCCL version differs from the version used to compile the
+      application. Available since NCCL 2.31.
+
+   .. c:member:: bool cftSupport
+
+      Whether the communicator supports unicast CFT operations. Available
+      since NCCL 2.32.
+
+   .. c:member:: bool cftMulticastSupport
+
+      Whether the communicator supports multicast CFT operations. Available
+      since NCCL 2.32.
+
+   .. c:member:: bool cftCountedSupport
+
+      Whether the communicator supports counted CFT operations. Available
+      since NCCL 2.32.
+
 
 ncclGinType_t
 -------------
 
-.. c:type:: ncclGinType_t
+.. c:enum:: ncclGinType_t
 
    GIN type. Communication between different GIN types is not supported. Possible values include:
 
-   .. c:macro:: NCCL_GIN_TYPE_NONE
+   .. c:enumerator:: NCCL_GIN_TYPE_NONE
 
       GIN is not supported.
 
-   .. c:macro:: NCCL_GIN_TYPE_PROXY
+   .. c:enumerator:: NCCL_GIN_TYPE_PROXY
 
       Host Proxy GIN type.
 
-   .. c:macro:: NCCL_GIN_TYPE_GDAKI
+   .. c:enumerator:: NCCL_GIN_TYPE_GDAKI
 
       GPUDirect Async Kernel-Initiated (GDAKI) GIN type.
 
-   .. c:macro:: NCCL_GIN_TYPE_GPI
+   .. c:enumerator:: NCCL_GIN_TYPE_GPI
 
       GPU-Push Interface (GPI) GIN type. Requires SpectrumX - see
-      SpectrumX documentation for details. Added as an experimental
-      feature in NCCL 2.30.6.
+      `SpectrumX documentation <https://networking-docs.nvidia.com/hpcxum/2.51/spectrum-x-nccl-plugin#GPU-Initiated-Networking-(GIN)>`_
+      for details. Added as an experimental feature in NCCL 2.30.6.
+
+   .. c:enumerator:: NCCL_GIN_TYPE_EFA_GDA
+
+      AWS EFA GPUDirect Async (GDA) GIN type. Requires the AWS OFI plugin for NCCL -
+      see AWS EFA `documentation <https://github.com/aws/aws-ofi-nccl>`_ and
+      `getting started guide <https://github.com/aws/aws-ofi-nccl/blob/master/doc/gin-getting-started.md>`_
+      for details. Available since NCCL 2.31.
 
    .. c:macro:: NCCL_GIN_TYPE_EFA_GDA
 
@@ -249,26 +376,36 @@ ncclGinType_t
 
       AMD Anvil SDMA backend (value 7 as of NCCL 2.31; was 6 in 2.30.7).
 
+.. _device_api_gin_connection_type:
+
 ncclGinConnectionType_t
 -----------------------
 
-.. c:type:: ncclGinConnectionType_t
+.. c:enum:: ncclGinConnectionType_t
 
    Specifies the type of GIN connection for device communicators. This enum controls whether GIN (GPU-Initiated
    Networking) resources should be allocated and what connection type to use. Used in :c:type:`ncclDevCommRequirements`
    when creating device communicators. Available since NCCL 2.29.7.
 
-   .. c:macro:: NCCL_GIN_CONNECTION_NONE
+   .. c:enumerator:: NCCL_GIN_CONNECTION_NONE
 
       No GIN connectivity.
 
-   .. c:macro:: NCCL_GIN_CONNECTION_FULL
+   .. c:enumerator:: NCCL_GIN_CONNECTION_FULL
 
       Full GIN connectivity. Each rank is connected to all other ranks.
 
-   .. c:macro:: NCCL_GIN_CONNECTION_RAIL
+   .. c:enumerator:: NCCL_GIN_CONNECTION_RAIL
 
       Railed GIN connectivity. Each rank is connected to other ranks in the same rail team.
+
+   .. c:enumerator:: NCCL_GIN_CONNECTION_CUSTOM_STRIDE
+
+      Strided GIN connectivity. Each rank is connected to other ranks separated by a fixed stride. Available since NCCL 2.31.
+
+   .. c:enumerator:: NCCL_GIN_CONNECTION_CUSTOM_ARRAY
+
+      Custom GIN connectivity. Each rank is connected to an arbitrary, user-specified set of peers. Available since NCCL 2.32.4.
 
 .. _device_api_host_functions:
 
@@ -322,7 +459,7 @@ ncclGetLsaMultimemDevicePointer
 ncclGetMultimemDevicePointer
 ----------------------------
 
-.. c:function:: ncclResult_t ncclGetMultimemDevicePointer(ncclWindow_t window, size_t offset, ncclMultimemHandle multimem, void** outPtr)
+.. c:function:: ncclResult_t ncclGetMultimemDevicePointer(ncclWindow_t window, size_t offset, ncclMultimemHandle_t multimem, void** outPtr)
 
    Returns a multimem base pointer using a provided multimem handle instead of the window's internal multimem.
    This function enables using external or custom multimem handles for pointer calculation.
@@ -342,7 +479,7 @@ ncclGetMultimemDevicePointer
    .. code:: C
 
       // Get multimem handle from device communicator setup
-      ncclMultimemHandle customHandle;
+      ncclMultimemHandle_t customHandle;
       // ... (obtain handle)
 
       void* multimemPtr;

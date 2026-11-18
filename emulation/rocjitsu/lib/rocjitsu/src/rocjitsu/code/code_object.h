@@ -7,11 +7,15 @@
 #ifndef ROCJITSU_CODE_CODE_OBJECT_H_
 #define ROCJITSU_CODE_CODE_OBJECT_H_
 
+#include "rocjitsu/code/amdgpu_elf.h"
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -36,6 +40,10 @@ public:
   /// @brief Number of entries in the section header table.
   /// @returns Section header count.
   virtual int numSectionHeaders() const = 0;
+
+  /// @brief Byte stride between section-header table entries.
+  /// @returns Byte stride declared by e_shentsize.
+  virtual uint64_t sectionHeaderEntrySize() const = 0;
 
   /// @brief Index of the section header string table section.
   /// @returns Section index.
@@ -135,23 +143,13 @@ public:
   /// @returns The highest VA + size across all LOAD segments.
   std::size_t mem_size() const {
     uint64_t max_va = 0;
-    auto *ehdr = reinterpret_cast<const uint8_t *>(image_.data());
-    if (image_.size() < 64)
-      return image_.size();
-    uint64_t phoff = *reinterpret_cast<const uint64_t *>(ehdr + 32);
-    uint16_t phentsize = *reinterpret_cast<const uint16_t *>(ehdr + 54);
-    uint16_t phnum = *reinterpret_cast<const uint16_t *>(ehdr + 56);
-    if (phentsize == 0 || phoff + static_cast<uint64_t>(phnum) * phentsize > image_.size())
-      return image_.size(); // Malformed ELF — fall back to raw image size.
-    for (uint16_t i = 0; i < phnum; ++i) {
-      auto *ph = ehdr + phoff + i * phentsize;
-      uint32_t p_type = *reinterpret_cast<const uint32_t *>(ph);
-      if (p_type != 1)
-        continue; // PT_LOAD
-      uint64_t p_vaddr = *reinterpret_cast<const uint64_t *>(ph + 16);
-      uint64_t p_memsz = *reinterpret_cast<const uint64_t *>(ph + 40);
-      max_va = std::max(max_va, p_vaddr + p_memsz);
+    for (const Elf64_Phdr &phdr : program_headers_) {
+      if (phdr.p_type != PT_LOAD)
+        continue;
+      max_va = std::max(max_va, phdr.p_vaddr + phdr.p_memsz);
     }
+    if (max_va > std::numeric_limits<std::size_t>::max())
+      return image_.size();
     return max_va > 0 ? static_cast<std::size_t>(max_va) : image_.size();
   }
 
@@ -161,33 +159,33 @@ public:
   /// a different VA than file offset (common with AMDGPU code objects).
   /// @param memory Target memory to load into.
   /// @param base_addr Base address for loading.
-  template <typename Memory> void load_to_memory(Memory *memory, uint64_t base_addr) const {
-    auto *ehdr = reinterpret_cast<const uint8_t *>(image_.data());
-    if (image_.size() < 64) {
-      memory->load_image(reinterpret_cast<const uint8_t *>(image_.data()), image_.size(),
-                         base_addr);
-      return;
-    }
-    uint64_t phoff = *reinterpret_cast<const uint64_t *>(ehdr + 32);
-    uint16_t phentsize = *reinterpret_cast<const uint16_t *>(ehdr + 54);
-    uint16_t phnum = *reinterpret_cast<const uint16_t *>(ehdr + 56);
+  /// @returns False if adding the base address would overflow any load range;
+  ///          no memory writes occur in that case.
+  template <typename Memory> bool load_to_memory(Memory *memory, uint64_t base_addr) const {
     bool loaded_any = false;
-    for (uint16_t i = 0; i < phnum; ++i) {
-      auto *ph = ehdr + phoff + i * phentsize;
-      uint32_t p_type = *reinterpret_cast<const uint32_t *>(ph);
-      if (p_type != 1)
-        continue; // PT_LOAD
-      uint64_t p_offset = *reinterpret_cast<const uint64_t *>(ph + 8);
-      uint64_t p_vaddr = *reinterpret_cast<const uint64_t *>(ph + 16);
-      uint64_t p_filesz = *reinterpret_cast<const uint64_t *>(ph + 32);
-      if (p_filesz > 0 && p_offset + p_filesz <= image_.size())
-        memory->load_image(ehdr + p_offset, static_cast<std::size_t>(p_filesz),
-                           base_addr + p_vaddr);
+    for (const Elf64_Phdr &phdr : program_headers_) {
+      if (phdr.p_type != PT_LOAD)
+        continue;
+      if (phdr.p_vaddr > std::numeric_limits<uint64_t>::max() - base_addr ||
+          phdr.p_memsz > std::numeric_limits<uint64_t>::max() - base_addr - phdr.p_vaddr)
+        return false;
       loaded_any = true;
     }
-    if (!loaded_any)
+    if (!loaded_any) {
+      if (image_.size() > std::numeric_limits<uint64_t>::max() - base_addr)
+        return false;
       memory->load_image(reinterpret_cast<const uint8_t *>(image_.data()), image_.size(),
                          base_addr);
+      return true;
+    }
+
+    const auto *image = reinterpret_cast<const uint8_t *>(image_.data());
+    for (const Elf64_Phdr &phdr : program_headers_) {
+      if (phdr.p_type == PT_LOAD && phdr.p_filesz != 0)
+        memory->load_image(image + phdr.p_offset, static_cast<std::size_t>(phdr.p_filesz),
+                           base_addr + phdr.p_vaddr);
+    }
+    return true;
   }
 
   /// @brief Find the kernel descriptor symbol offset for a named kernel.
@@ -196,6 +194,32 @@ public:
   virtual uint64_t kernel_descriptor_offset(const std::string & /*kernel_name*/) const { return 0; }
 
 protected:
+  /// @brief Validate and retain program headers for device-image loading.
+  /// @returns False for unsupported strides, invalid table ranges, or LOAD
+  ///          segments whose file range or virtual-address arithmetic overflows.
+  bool load_program_headers(const Elf64_Ehdr &ehdr) {
+    // The patcher rewrites contiguous records and cannot preserve extensions.
+    if (ehdr.e_phnum != 0 && ehdr.e_phentsize != sizeof(Elf64_Phdr))
+      return false;
+    const std::span image(reinterpret_cast<const uint8_t *>(image_.data()), image_.size());
+    std::optional<std::vector<Elf64_Phdr>> phdrs =
+        read_elf_table<Elf64_Phdr>(image, ehdr.e_phoff, ehdr.e_phnum, ehdr.e_phentsize);
+    if (!phdrs)
+      return false;
+    for (const Elf64_Phdr &phdr : *phdrs) {
+      if (phdr.p_type != PT_LOAD)
+        continue;
+      if ((phdr.p_filesz != 0 &&
+           (phdr.p_offset > image_.size() || phdr.p_filesz > image_.size() - phdr.p_offset)) ||
+          phdr.p_filesz > phdr.p_memsz ||
+          phdr.p_memsz > std::numeric_limits<uint64_t>::max() - phdr.p_vaddr) {
+        return false;
+      }
+    }
+    program_headers_ = std::move(*phdrs);
+    return true;
+  }
+
   bool is_valid_ = true;
   std::vector<char> image_;
   std::unique_ptr<Header> header_;
@@ -203,6 +227,7 @@ protected:
   std::vector<const Section *> text_sections_;
   std::vector<const Section *> allocated_executable_sections_;
   std::vector<const Section *> rodata_sections_;
+  std::vector<Elf64_Phdr> program_headers_;
 };
 
 } // namespace rocjitsu

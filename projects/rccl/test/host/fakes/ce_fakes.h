@@ -24,6 +24,7 @@ struct ncclCeBatchOpsParams;
 struct ncclCeCollArgs;
 
 extern std::function<ncclResult_t(struct ncclComm*)> g_ncclCeInit;
+extern std::function<ncclResult_t(struct ncclComm*)> g_ncclCeEnsureAllReduceStaging;
 
 extern bool g_ceImplemented;
 extern bool g_ceAvailableValue;
@@ -47,6 +48,18 @@ extern std::function<ncclResult_t(struct ncclComm* /*comm*/,
                                   hipStream_t /*stream*/,
                                   struct ncclCeCollArgs* /*profilerArgs*/)>
     g_ceLaunchBatchOps;
+
+// AlltoAllv's CE gates and the CE AllReduce / ReduceScatter launchers. Fail loud until a test installs them.
+extern std::function<bool(struct ncclComm*, ncclDataType_t, ncclSymRegType_t, bool, bool)> g_ceAlltoAllvEligible;
+extern std::function<bool(struct ncclComm*, ncclDataType_t, ncclSymRegType_t, struct ncclDevrWindow*,
+                          struct ncclDevrWindow*, bool, bool)>
+    g_hierCeAlltoAllvEligible;
+extern std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t,
+                                  hipStream_t, struct ncclDevrWindow*, struct ncclCeCollArgs*)>
+    g_ceAllReduce;
+extern std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t,
+                                  hipStream_t, struct ncclDevrWindow*, struct ncclCeCollArgs*)>
+    g_ceReduceScatter;
 
 void ResetCeFakes();
 

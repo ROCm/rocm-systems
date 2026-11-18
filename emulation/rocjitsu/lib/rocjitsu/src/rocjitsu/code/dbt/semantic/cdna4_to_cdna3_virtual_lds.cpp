@@ -38,7 +38,6 @@ inline constexpr uint16_t kCdna3ScalarNull = 0x7F;
 inline constexpr uint16_t kCdnaWaitcntAll0 = 0x0000;
 inline constexpr uint32_t kFlatGlobalPositiveImm13Max = 4095;
 inline constexpr uint32_t kCdnaOrdinarySgprLimit = 102;
-inline constexpr uint32_t kCdnaSpecialSgprTailReserve = 8;
 inline constexpr uint32_t kCdnaSmemImmediateByteOffsetMax = 0x1FFFFF;
 
 /// @brief Common fields for CDNA3 FLAT instructions targeting global memory.
@@ -575,7 +574,7 @@ reserve_cdna3_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBloc
   static_assert(kCdnaOrdinarySgprLimit == REGISTER_SET_ALLOCATABLE_SGPRS,
                 "virtual-LDS reservation and the shared SGPR scan must agree on "
                 "where ordinary SGPRs end");
-  uint32_t ordinary_floor = explicit_ordinary_sgpr_bound(blocks);
+  uint32_t ordinary_floor = explicit_ordinary_sgpr_bound(blocks, translation.guest_wavefront_size);
 
   ordinary_floor = std::max<uint32_t>(ordinary_floor, translation.target_user_sgpr_count);
   auto include_sgpr = [&](int16_t sgpr, uint32_t width) {
@@ -599,7 +598,7 @@ reserve_cdna3_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBloc
   const uint32_t current = std::max(ordinary_floor, context.required_sgpr_count);
   const uint32_t base = (current + 1u) & ~1u;
   if (base + 4 <= kCdnaOrdinarySgprLimit) {
-    context.require_sgprs(base + 4 + kCdnaSpecialSgprTailReserve);
+    context.require_sgprs(base + 4 + kDbtCdnaSpecialSgprTailReserve);
     return VirtualLdsBaseSgprReservation{.base = static_cast<uint16_t>(base),
                                          .prologue_temp = static_cast<uint16_t>(base + 2)};
   }
@@ -611,7 +610,7 @@ reserve_cdna3_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBloc
 
   const uint32_t borrowed_temp = (allocated_ordinary - 2u) & ~1u;
   if (base + 2 <= kCdnaOrdinarySgprLimit) {
-    context.require_sgprs(base + 2 + kCdnaSpecialSgprTailReserve);
+    context.require_sgprs(base + 2 + kDbtCdnaSpecialSgprTailReserve);
     return VirtualLdsBaseSgprReservation{.base = static_cast<uint16_t>(base),
                                          .prologue_temp = static_cast<uint16_t>(borrowed_temp)};
   }
@@ -710,6 +709,8 @@ reserve_cdna3_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBloc
     translation.prologue_words.push_back(build_cdna3_s_add_u32(temp, temp, product));
   };
 
+  // The admission checks above bound every move operand to the scalar fields;
+  // CDNA3 has the required encoding, so these builder results are guaranteed.
   auto append_restore_guest_user_sgprs = [&]() {
     if (translation.source_has_kernarg_segment_ptr) {
       // The wrapper pointer is DBT-owned. Restore the source kernarg pointer
@@ -718,10 +719,11 @@ reserve_cdna3_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBloc
       append_smem_load_dwordx2(temp, state_sbase,
                                translation.kernarg_wrapper_original_pointer_offset);
       translation.prologue_words.push_back(
-          build_s_mov_b32(pointer_base_sgpr, temp, ROCJITSU_CODE_ARCH_CDNA3));
+          build_s_mov_b32(pointer_base_sgpr, temp, ROCJITSU_CODE_ARCH_CDNA3).value());
       translation.prologue_words.push_back(
           build_s_mov_b32(static_cast<uint16_t>(pointer_base_sgpr + 1),
-                          static_cast<uint16_t>(temp + 1), ROCJITSU_CODE_ARCH_CDNA3));
+                          static_cast<uint16_t>(temp + 1), ROCJITSU_CODE_ARCH_CDNA3)
+              .value());
     }
 
     // If DBT inserted a target-only kernarg segment pointer, CP shifted every
@@ -730,7 +732,8 @@ reserve_cdna3_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBloc
     for (uint16_t i = 0; i < translation.user_sgpr_repair_count; ++i) {
       const uint16_t dst = static_cast<uint16_t>(translation.user_sgpr_repair_start + i);
       const uint16_t src = static_cast<uint16_t>(dst + 2);
-      translation.prologue_words.push_back(build_s_mov_b32(dst, src, ROCJITSU_CODE_ARCH_CDNA3));
+      translation.prologue_words.push_back(
+          build_s_mov_b32(dst, src, ROCJITSU_CODE_ARCH_CDNA3).value());
     }
   };
 
@@ -739,7 +742,7 @@ reserve_cdna3_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBloc
   // stride fields:
   //   offset = wg_x * stride_x + wg_y * stride_y + wg_z * stride_z.
   translation.prologue_words.push_back(
-      build_s_mov_b32(temp, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA3));
+      build_s_mov_b32(temp, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA3).value());
   append_stride_term(translation.lds_overflow_workgroup_id_sgpr_x, kVirtualLdsStateStrideXOffset);
   append_stride_term(translation.lds_overflow_workgroup_id_sgpr_y, kVirtualLdsStateStrideYOffset);
   append_stride_term(translation.lds_overflow_workgroup_id_sgpr_z, kVirtualLdsStateStrideZOffset);
