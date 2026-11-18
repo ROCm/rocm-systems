@@ -771,6 +771,8 @@ class Device : public NullDevice {
   //! Returns value for corresponding Link Attributes in a vector, given other device
   virtual bool findLinkInfo(const amd::Device& other_device, std::vector<LinkAttrType>* link_attr) override;
 
+  bool HasAtomics64Link(amd::Memory& memory) override;
+
   //! Returns a GPU memory object from AMD memory object
   roc::Memory* getGpuMemory(amd::Memory* mem  //!< Pointer to AMD memory object
   ) const;

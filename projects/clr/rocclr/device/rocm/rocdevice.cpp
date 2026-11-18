@@ -4076,6 +4076,38 @@ bool Device::findLinkInfo(const amd::Device& other_device, std::vector<LinkAttrT
   return findLinkInfo((static_cast<const roc::Device*>(&other_device))->gpuvm_segment_, link_attrs);
 }
 
+bool Device::HasAtomics64Link(amd::Memory& memory) {
+  // The allocating device's view caches the agent that owns the pages, a peer for IPC imports
+  const auto* dev_mem = static_cast<const roc::Memory*>(
+      memory.getDeviceMemory(*memory.getContext().devices()[0], false));
+  if (dev_mem == nullptr) {
+    return true;
+  }
+  const hsa_agent_t owner = dev_mem->getOwningAgent();
+  hsa_device_type_t owner_type = HSA_DEVICE_TYPE_CPU;
+  if (owner.handle == bkendDevice_.handle || owner.handle == 0 ||
+      Hsa::agent_get_info(owner, HSA_AGENT_INFO_DEVICE, &owner_type) != HSA_STATUS_SUCCESS ||
+      owner_type != HSA_DEVICE_TYPE_GPU) {
+    return true;
+  }
+  // The owner may be a GPU this process doesn't expose as a device, so go by its memory pool
+  hsa_amd_memory_pool_t pool = {};
+  Hsa::agent_iterate_memory_pools(
+      owner,
+      [](hsa_amd_memory_pool_t candidate, void* data) {
+        hsa_region_segment_t segment = HSA_REGION_SEGMENT_READONLY;
+        Hsa::memory_pool_get_info(candidate, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment);
+        if (segment != HSA_REGION_SEGMENT_GLOBAL) {
+          return HSA_STATUS_SUCCESS;
+        }
+        *static_cast<hsa_amd_memory_pool_t*>(data) = candidate;
+        return HSA_STATUS_INFO_BREAK;
+      },
+      &pool);
+  std::vector<LinkAttrType> attrs{{kLinkAtomic64Support, 0}};
+  return findLinkInfo(pool, &attrs) && attrs[0].second == 1;
+}
+
 bool Device::findLinkInfo(const hsa_amd_memory_pool_t& pool,
                           std::vector<LinkAttrType>* link_attrs) {
   if ((!pool.handle) || (link_attrs == nullptr)) {

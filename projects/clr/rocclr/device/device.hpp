@@ -2503,6 +2503,9 @@ class Device : public RuntimeObject {
     return false;
   }
 
+  //! True unless the memory is owned by another device whose link lacks 64-bit atomics
+  virtual bool HasAtomics64Link(amd::Memory& memory) { return true; }
+
   //! Returns the queues that have at least one submitted command
   std::vector<amd::CommandQueue*> getActiveQueues();
 

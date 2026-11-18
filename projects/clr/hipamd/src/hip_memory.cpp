@@ -3383,15 +3383,8 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
               return hipErrorInvalidValue;
             }
             // A signal in another device's memory needs 64-bit atomics on the link to that device.
-            const int owner = mem->getUserData().deviceId;
-            if (atomic && getMemoryType(mem) == hipMemoryTypeDevice && owner != device_id) {
-              std::vector<amd::Device::LinkAttrType> attrs{
-                  {amd::Device::LinkAttribute::kLinkAtomic64Support, 0}};
-              if (!g_devices[device_id]->devices()[0]->findLinkInfo(
-                      *g_devices[owner]->devices()[0], &attrs) ||
-                  attrs[0].second != 1) {
-                return hipErrorNotSupported;
-              }
+            if (atomic && !g_devices[device_id]->devices()[0]->HasAtomics64Link(*mem)) {
+              return hipErrorNotSupported;
             }
             if (device::Memory* devMem = mem->getDeviceMemory(sdmaDev, false)) {
               addr = reinterpret_cast<void*>(devMem->virtualAddress() + offset);
