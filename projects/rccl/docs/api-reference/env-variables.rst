@@ -412,6 +412,24 @@ in the following table.
       - | ``0``: No output (default).
         | Non-zero: Enable tree edge logging.
 
+    * - | ``RCCL_ENABLE_PROXY_TRACE``
+        | Loads the proxy-trace profiler plugin
+          ``librccl-profiler-proxytrace.so`` from the directory containing
+          ``librccl.so``, when ``NCCL_PROFILER_PLUGIN`` is not set. If that
+          library is missing the setting has no effect and RCCL falls back to
+          the normal profiler plugin lookup. The plugin records the state of
+          every network proxy send and receive operation: channel, peer, step
+          counters (posted, transmitted, received, done) and timestamps. When a
+          communicator is destroyed, or when ``ncclCommDump()`` is called, it
+          writes all operations that are still active to the log at ``WARN``
+          level, which shows which connection and step a hung collective is
+          stuck on. An explicit
+          ``NCCL_PROFILER_PLUGIN=/path/to/librccl-profiler-proxytrace.so``
+          loads the same plugin and takes precedence over this variable. Only
+          one profiler plugin can be active at a time.
+      - | ``0``: Do not load the proxy-trace plugin (default).
+        | ``1``: Load the proxy-trace plugin.
+
 .. _check-mode:
 
 Validating collective arguments
@@ -1266,6 +1284,42 @@ in the following table.
       - | ``0``: Normal GDR selection (``peermem`` preferred, default).
         | ``1``: Force DMA-buf; skip ``peermem``.
 
+    * - | ``RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING``
+        | Selects the buffer used by the GPUDirect RDMA flush. Applies only to
+          the IB/RoCE transports (``net_ib`` and ``net_ib_cast``) when the GDR
+          flush is on, that is, ``peermem`` or DMA-buf is available and
+          ``NCCL_GDR_FLUSH_DISABLE=0``. After data arrives in GPU memory the
+          receiver posts an RDMA read, the flush, which completes only once the
+          NIC's earlier writes to the GPU are visible, so the GPU kernel never
+          sees partial data.
+      - | ``1``: For each NIC, RCCL allocates a 4-byte fine-grained or uncached
+          GPU buffer and registers it without relaxed ordering, and the flush
+          reads from that buffer (default). Because its memory region is not
+          relaxed-ordered, the read stays ordered behind the data writes even
+          when the data buffers use relaxed ordering
+          (``NCCL_IB_PCI_RELAXED_ORDERING``). The buffer is registered through
+          DMA-buf when that path is in use, otherwise through ``peermem``. If
+          allocation or registration fails, RCCL falls back to the ``0``
+          behavior for that NIC instead of failing the connection.
+        | ``0``: Legacy behavior. The flush reads directly from the last
+          received data buffer, using that buffer's own memory region. This
+          reduces each NIC's GPU-memory registrations by one, and is useful
+          when debugging or ruling out the scratchpad flush path.
+        | The flush reads into a 1-byte host buffer in both modes.
+
+    * - | ``RCCL_RMA_USE_DMABUF``
+        | Controls whether the RCCL RMA host-proxy path, used by GIN,
+          one-sided operations and hierarchical Copy Engine collectives, may
+          register its proxy memory through DMA-buf. Off by default because
+          the ``cpuAccessSignals`` and flush buffers may be host memory whose
+          DMA-buf export fails on ROCm. Symmetric-window registration can
+          still use DMA-buf independently when ``cuMem``/VMM is enabled.
+      - | ``0``: Disable DMA-buf registration for RMA proxy memory (default).
+        | ``1``: Let the RMA proxy register those buffers through DMA-buf when
+          the plugin and ROCr support it.
+        | Read under the ``RCCL_`` prefix only; ``NCCL_RMA_USE_DMABUF`` is not
+          read.
+
     * - | ``RCCL_NET_CONTIGUOUS_MEM``
         | Allocates GDR (GPU-side) network buffers with
           ``hipDeviceMallocContiguous`` instead of ``hipDeviceMallocUncached``.
@@ -1389,6 +1443,25 @@ collected in the following table.
         | Enables memory window registration in RCCL.
       - | ``0``: Disable window memory registration.
         | ``1``: Enable window memory registration (default).
+
+    * - | ``RCCL_INTRANET_THRESHOLD``
+        | Size cutoff for intra-node network use by collectives. When
+          intra-node NET channels are active, that is, the ring graph has
+          intra-NET channels and ``RCCL_P2P_NET_DISABLE=0``, Ring/Simple
+          collectives whose size is strictly greater than this value use the
+          NET connection. For ``AllGather`` and ``ReduceScatter`` the size is
+          the total across all ranks. See ``RCCL_ENABLE_INTRANET``.
+      - | Integer, bytes.
+        | Default: ``8388608`` (8 MiB).
+
+    * - | ``RCCL_PXN_OPT_QP_USAGE``
+        | Reduces queue-pair usage on AINIC systems with PXN enabled by
+          increasing the p2p channel batch stride from ``1`` to
+          ``comm->maxLocalRanks``, at the cost of potential performance
+          degradation. Has no effect when PXN is disabled or on non-AINIC
+          systems.
+      - | ``0``: Use the default batch stride (default).
+        | ``1``: Increase the batch stride to reduce QP usage.
 
 RCCL-specific optimizations
 ============================
