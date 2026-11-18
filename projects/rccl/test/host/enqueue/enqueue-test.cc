@@ -5068,6 +5068,33 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_PatUnsetMaxNchannelsDoesNotClamp) {
   EXPECT_EQ(8, task.nMaxChannels) << "the production -2 sentinel must leave PAT's channel count alone";
 }
 
+TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_TreeNanOnGfx1250RunsUpTo192ChannelsOtherTree64) {
+#ifdef ENABLE_WARP_SPEED
+  const int gfx1250NanMaxChannels = 64;  // WarpSpeed has no Tree support, so every Tree protocol keeps 64
+#else
+  const int gfx1250NanMaxChannels = 192;
+#endif
+  for (int cudaArch : {1250, 950}) {
+    for (int proto : {NCCL_PROTO_NAN, NCCL_PROTO_LL, NCCL_PROTO_LL128, NCCL_PROTO_SIMPLE}) {
+      for (int commChannels : {256, 128}) {
+        AlgoInfoComm cc;
+        cc.get()->cudaArch = cudaArch;
+        cc.get()->nChannels = commChannels;
+        auto task = CostTask(ncclFuncAllReduce);
+        CostTable tbl;
+        tbl.t[NCCL_ALGO_TREE][proto] = 0.5f;
+        ASSERT_EQ(ncclSuccess,
+                  topoGetAlgoInfo(cc.get(), &task, /*nBytes=*/64 << 20, tbl.ptr(), /*simInfo=*/nullptr));
+        ASSERT_EQ(NCCL_ALGO_TREE, task.algorithm);
+        ASSERT_EQ(proto, task.protocol);
+        const int cap = proto == NCCL_PROTO_NAN && cudaArch == 1250 ? gfx1250NanMaxChannels : 64;
+        EXPECT_EQ(std::min(commChannels, cap), task.nMaxChannels)
+            << "cudaArch " << cudaArch << ", proto " << proto << ", comm->nChannels=" << commChannels;
+      }
+    }
+  }
+}
+
 // Guards the fix for the &tablePtr defect: topoGetAlgoInfo must read the cost
 // table it was handed. updateCollCostTable is driven first because it owns the
 // only ncclTopoGetAlgoTime call site (:2539), so it is what makes the scripted
