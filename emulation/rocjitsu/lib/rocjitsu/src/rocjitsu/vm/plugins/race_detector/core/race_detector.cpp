@@ -448,11 +448,11 @@ void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes,
   }
 
   const auto check = [&](EventId eventId) {
-    if (!events_.writesLds(eventId) || events_.atomicLdsElementMatches(eventId, atomicBytes) ||
-        handedOffTo(wave, eventId))
+    if (!events_.writesLds(eventId) || events_.atomicLdsElementMatches(eventId, atomicBytes))
       return;
     // Report a byte both accesses touch, not the start of this access.
-    if (const auto byte = events_.ldsIntervals(eventId).firstOverlap(addr, addr + nBytes)) {
+    if (const auto byte = events_.ldsIntervals(eventId).firstOverlap(addr, addr + nBytes);
+        byte && !handedOffTo(wave, eventId)) {
       raceHandler(
           {RaceViolation::Space::LDS, *byte, wave.value, lane, false, workgroupId, eventId});
     }
@@ -493,11 +493,11 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
     }
   }
   const auto check = [&](EventId eventId) {
-    if (!events_.readsLds(eventId) || events_.atomicLdsElementMatches(eventId, atomicBytes) ||
-        handedOffTo(wave, eventId))
+    if (!events_.readsLds(eventId) || events_.atomicLdsElementMatches(eventId, atomicBytes))
       return;
     // Report a byte both accesses touch, not the start of this access.
-    if (const auto byte = events_.ldsIntervals(eventId).firstOverlap(addr, addr + nBytes)) {
+    if (const auto byte = events_.ldsIntervals(eventId).firstOverlap(addr, addr + nBytes);
+        byte && !handedOffTo(wave, eventId)) {
       raceHandler({RaceViolation::Space::LDS, *byte, wave.value, lane, true, workgroupId, eventId});
     }
   };
