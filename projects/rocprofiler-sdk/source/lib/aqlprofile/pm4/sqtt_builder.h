@@ -524,10 +524,14 @@ public:
 
         if(Primitives::GFXIP_LEVEL == 9)
         {
+            // GFX9 thread trace can hang if MODE is set to OFF while the trace is still
+            // active, so drain the pipeline on both sides of the MODE write.
+            builder.BuildWriteWaitIdlePacket(cmd_buffer);
             // Program the thread trace mode register to disable thread trace
             builder.BuildWriteUConfigRegPacket(cmd_buffer,
                                                Primitives::SQ_THREAD_TRACE_MODE_ADDR,
                                                Primitives::sqtt_mode_off_value());
+            builder.BuildWriteWaitIdlePacket(cmd_buffer);
 
             if(config->perfcounters.size()) StopPerfMon(cmd_buffer);
 
@@ -544,11 +548,6 @@ public:
 
                 // Program Grbm to direct writes to one SE
                 Select_GRBM_SE_SH0(cmd_buffer, se_index_xcc);
-
-                // Issue WaitRegMem command to wait until SQTT event has completed
-                const uint32_t mask_val      = Primitives::sqtt_busy_mask();
-                auto           status_offset = Primitives::SQ_THREAD_TRACE_STATUS_ADDR;
-                builder.BuildWaitRegMemCommand(cmd_buffer, false, status_offset, true, mask_val, 0);
 
                 ReadValues(cmd_buffer, config, se_index);
             }
