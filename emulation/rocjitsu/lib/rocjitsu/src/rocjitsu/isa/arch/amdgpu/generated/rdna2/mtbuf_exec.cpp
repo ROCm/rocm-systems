@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/mtbuf.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx10_cache_flags.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/gfx10_memory_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/buffer_format.h"
@@ -32,6 +33,11 @@ void TbufferLoadFormatXMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (!d->lds_dst && !wf.vgpr_alloc().contains(d->dst_reg_base, (vdata.size_bits() + 31) / 32)) {
+    d->wf_size = wf.wf_size();
+    set_data(std::move(d));
+    return;
+  }
   const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.srsrc * 4, inst_.format, 1);
   if (prepared.failed()) {
     wf.report_instruction_execution_error(
@@ -40,6 +46,8 @@ void TbufferLoadFormatXMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (prepared.value())
     mtbuf_calculate_addresses(inst_, wf, *d);
+  if (inst_.tfe)
+    amdgpu::prepare_buffer_tfe(wf, *d);
   set_data(std::move(d));
 }
 
@@ -50,6 +58,11 @@ void TbufferLoadFormatXyMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (!d->lds_dst && !wf.vgpr_alloc().contains(d->dst_reg_base, (vdata.size_bits() + 31) / 32)) {
+    d->wf_size = wf.wf_size();
+    set_data(std::move(d));
+    return;
+  }
   const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.srsrc * 4, inst_.format, 2);
   if (prepared.failed()) {
     wf.report_instruction_execution_error(
@@ -58,6 +71,8 @@ void TbufferLoadFormatXyMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (prepared.value())
     mtbuf_calculate_addresses(inst_, wf, *d);
+  if (inst_.tfe)
+    amdgpu::prepare_buffer_tfe(wf, *d);
   set_data(std::move(d));
 }
 
@@ -68,6 +83,11 @@ void TbufferLoadFormatXyzMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (!d->lds_dst && !wf.vgpr_alloc().contains(d->dst_reg_base, (vdata.size_bits() + 31) / 32)) {
+    d->wf_size = wf.wf_size();
+    set_data(std::move(d));
+    return;
+  }
   const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.srsrc * 4, inst_.format, 3);
   if (prepared.failed()) {
     wf.report_instruction_execution_error(
@@ -76,6 +96,8 @@ void TbufferLoadFormatXyzMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (prepared.value())
     mtbuf_calculate_addresses(inst_, wf, *d);
+  if (inst_.tfe)
+    amdgpu::prepare_buffer_tfe(wf, *d);
   set_data(std::move(d));
 }
 
@@ -86,6 +108,11 @@ void TbufferLoadFormatXyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (!d->lds_dst && !wf.vgpr_alloc().contains(d->dst_reg_base, (vdata.size_bits() + 31) / 32)) {
+    d->wf_size = wf.wf_size();
+    set_data(std::move(d));
+    return;
+  }
   const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.srsrc * 4, inst_.format, 4);
   if (prepared.failed()) {
     wf.report_instruction_execution_error(
@@ -94,6 +121,8 @@ void TbufferLoadFormatXyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (prepared.value())
     mtbuf_calculate_addresses(inst_, wf, *d);
+  if (inst_.tfe)
+    amdgpu::prepare_buffer_tfe(wf, *d);
   set_data(std::move(d));
 }
 
@@ -178,6 +207,11 @@ void TbufferLoadFormatD16XMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   d->buffer_d16 = true;
   d->d16_hi = false;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (!d->lds_dst && !wf.vgpr_alloc().contains(d->dst_reg_base, (vdata.size_bits() + 31) / 32)) {
+    d->wf_size = wf.wf_size();
+    set_data(std::move(d));
+    return;
+  }
   const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.srsrc * 4, inst_.format, 1);
   if (prepared.failed()) {
     wf.report_instruction_execution_error(
@@ -186,6 +220,8 @@ void TbufferLoadFormatD16XMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (prepared.value())
     mtbuf_calculate_addresses(inst_, wf, *d);
+  if (inst_.tfe)
+    amdgpu::prepare_buffer_tfe(wf, *d);
   set_data(std::move(d));
 }
 
@@ -198,6 +234,11 @@ void TbufferLoadFormatD16XyMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   d->buffer_d16 = true;
   d->d16_hi = false;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (!d->lds_dst && !wf.vgpr_alloc().contains(d->dst_reg_base, (vdata.size_bits() + 31) / 32)) {
+    d->wf_size = wf.wf_size();
+    set_data(std::move(d));
+    return;
+  }
   const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.srsrc * 4, inst_.format, 2);
   if (prepared.failed()) {
     wf.report_instruction_execution_error(
@@ -206,6 +247,8 @@ void TbufferLoadFormatD16XyMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (prepared.value())
     mtbuf_calculate_addresses(inst_, wf, *d);
+  if (inst_.tfe)
+    amdgpu::prepare_buffer_tfe(wf, *d);
   set_data(std::move(d));
 }
 
@@ -218,6 +261,11 @@ void TbufferLoadFormatD16XyzMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   d->buffer_d16 = true;
   d->d16_hi = false;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (!d->lds_dst && !wf.vgpr_alloc().contains(d->dst_reg_base, (vdata.size_bits() + 31) / 32)) {
+    d->wf_size = wf.wf_size();
+    set_data(std::move(d));
+    return;
+  }
   const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.srsrc * 4, inst_.format, 3);
   if (prepared.failed()) {
     wf.report_instruction_execution_error(
@@ -226,6 +274,8 @@ void TbufferLoadFormatD16XyzMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (prepared.value())
     mtbuf_calculate_addresses(inst_, wf, *d);
+  if (inst_.tfe)
+    amdgpu::prepare_buffer_tfe(wf, *d);
   set_data(std::move(d));
 }
 
@@ -238,6 +288,11 @@ void TbufferLoadFormatD16XyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   d->buffer_d16 = true;
   d->d16_hi = false;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (!d->lds_dst && !wf.vgpr_alloc().contains(d->dst_reg_base, (vdata.size_bits() + 31) / 32)) {
+    d->wf_size = wf.wf_size();
+    set_data(std::move(d));
+    return;
+  }
   const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.srsrc * 4, inst_.format, 4);
   if (prepared.failed()) {
     wf.report_instruction_execution_error(
@@ -246,6 +301,8 @@ void TbufferLoadFormatD16XyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (prepared.value())
     mtbuf_calculate_addresses(inst_, wf, *d);
+  if (inst_.tfe)
+    amdgpu::prepare_buffer_tfe(wf, *d);
   set_data(std::move(d));
 }
 

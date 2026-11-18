@@ -10,6 +10,7 @@
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
 #include "common/path.hpp"
+#include "common/string_utility.hpp"
 #include "core/agent.hpp"
 #include "core/agent_manager.hpp"
 #include "core/common.hpp"
@@ -32,15 +33,12 @@
 #include "library/rocprofiler-sdk/domain_selection.hpp"
 #include "library/rocprofiler-sdk/domain_service.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
-#include "library/thread_info.hpp"
 #include "library/tracing.hpp"
 #include "rocprofiler-sdk.hpp"
 
-#include <timemory/components/timing/wall_clock.hpp>
 #include <timemory/hash/types.hpp>
 #include <timemory/unwind/processed_entry.hpp>
 #include <timemory/utility/backtrace.hpp>
-#include <timemory/variadic/lightweight_tuple.hpp>
 
 #include <cstddef>
 #include <exception>
@@ -379,42 +377,6 @@ struct external_dependencies
         return trace_cache::get_buffer_storage();
     }
 
-    static std::string_view get_kernel_symbol_name(std::uint64_t kernel_id)
-    {
-        auto symbol = get_metadata_registry().get_kernel_symbol(kernel_id);
-        return symbol.has_value() ? std::string_view{ symbol->kernel_name }
-                                  : std::string_view{};
-    }
-
-    static std::optional<std::uint64_t> get_thread_info_sequent_tid(std::uint64_t tid)
-    {
-        const auto& thread_info_data =
-            thread_info::get(static_cast<std::int64_t>(tid), SystemTID);
-        if(!thread_info_data.has_value() || !thread_info_data->index_data.has_value())
-        {
-            return std::nullopt;
-        }
-
-        return thread_info_data->index_data->sequent_value;
-    }
-
-    static void write_timemory_bundle(std::string_view name, std::uint64_t tid,
-                                      std::uint64_t elapsed_ns)
-    {
-        using kernel_dispatch_bundle_t =
-            tim::lightweight_tuple<tim::component::wall_clock>;
-
-        auto kernel_dispatch_bundle_data = kernel_dispatch_bundle_t{ name };
-        kernel_dispatch_bundle_data.push(static_cast<std::int64_t>(tid)).start().stop();
-        kernel_dispatch_bundle_data.get(
-            [elapsed_ns](tim::component::wall_clock* wall_clock_data) {
-                wall_clock_data->set_value(static_cast<std::int64_t>(elapsed_ns));
-                wall_clock_data->set_accum(static_cast<std::int64_t>(elapsed_ns));
-            });
-
-        kernel_dispatch_bundle_data.pop();
-    }
-
     // ─── Members required by domains::callback::roctx::k_{core,control}_api ────────
     using rocm_marker_api_category = category::rocm_marker_api;
     using string_id_t              = tim::hash_value_t;
@@ -452,7 +414,7 @@ struct external_dependencies
 
     // Single source of truth is core/trace_cache/cacheable.hpp's ABSOLUTE constant;
     // kfd_events.hpp never includes that header, so the value is surfaced here.
-    static constexpr std::string_view k_pmc_value_type_absolute = trace_cache::ABSOLUTE;
+    static constexpr std::string_view k_pmc_value_type_absolute = trace_cache::k_absolute;
 
     // Single source of truth for these strings is core/categories.hpp's
     // trait::name<category::X>; kfd_events.hpp itself never includes
@@ -552,18 +514,18 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
             name_v              = itr.substr(0, pos);
             auto const dev_id_s = itr.substr(pos + device_qualifier.length());
 
-            if(dev_id_s.empty() ||
-               dev_id_s.find_first_not_of("0123456789") != std::string::npos)
+            auto const dev_id_parsed = rocprofsys::utility::string::safe_stoul(dev_id_s);
+            if(dev_id_parsed.is_error())
             {
                 LOG_CRITICAL("invalid device qualifier format (':device=N) "
-                             "where N is the GPU id: {}",
-                             itr);
+                             "where N is the GPU id: {} ({})",
+                             itr, dev_id_parsed.error());
                 ::rocprofsys::state::process::set(
                     ::rocprofsys::state::process::Finalized);
                 std::abort();
             }
 
-            auto dev_id_v = std::stoul(dev_id_s);
+            auto const dev_id_v = dev_id_parsed.value();
 
             LOG_DEBUG("tool agent device id={}, name={}, device_id={}",
                       agent_v.device_type_index, name_v, dev_id_v);
@@ -940,8 +902,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     using sdk_backend_t    = backends::rocprofiler_sdk::backend<wrapper>;
     using tracing_config_t = tracing_config<sdk_backend_t, default_externals>;
-
-    sdk_backend_t::check_version_compatibility();
 
     auto const _callback_domains = tracing_config_t::get_callback_domains();
     auto const _buffered_domain  = tracing_config_t::get_buffered_domains();

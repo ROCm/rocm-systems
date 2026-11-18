@@ -74,7 +74,7 @@ public:
                    util::DistributedSharedMutex *page_table_mutex,
                    const uint64_t *page_table_generation = nullptr,
                    std::shared_ptr<util::DistributedSharedMutex> request_mutex = {},
-                   std::shared_ptr<const std::atomic<uint64_t>> mutation_epoch = {},
+                   util::IntrusiveSharedPtr<const amdgpu::VmMutationEpoch> mutation_epoch = {},
                    std::shared_ptr<amdgpu::LegacyPageTableCacheState> page_table_cache_state = {}) {
     unregister_process(vmid);
     const amdgpu::AddressSpaceHandle handle = legacy_vm_.register_address_space(

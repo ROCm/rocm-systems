@@ -326,7 +326,7 @@ class CeReducePersistentContractTest(unittest.TestCase):
     def test_slot_constants_agree_with_ce_coll_h(self) -> None:
         with open(CE_COLL_H) as f:
             header = f.read()
-        for name in ("NCCL_CE_REDUCE_MAX_BLOCKS", "NCCL_CE_NUM_SLOTS"):
+        for name in ("NCCL_CE_REDUCE_MAX_BLOCKS", "NCCL_CE_NUM_SLOTS", "NCCL_CE_REDUCE_THREADS"):
             with self.subTest(constant=name):
                 pattern = r"#define\s+%s\s+(\d+)" % name
                 kernel_side = re.search(pattern, self.impl)
@@ -337,8 +337,8 @@ class CeReducePersistentContractTest(unittest.TestCase):
                 self.assertEqual(kernel_side.group(1), host_side.group(1))
 
     def test_launch_bounds_matches_launcher_thread_count(self) -> None:
-        bounds = re.search(r"__launch_bounds__\((\d+)\)", self.impl)
-        threads = re.search(r"const int threads\s*=\s*(\d+);", self.launcher)
+        bounds = re.search(r"__launch_bounds__\((\w+)\)", self.impl)
+        threads = re.search(r"const int threads\s*=\s*(\w+);", self.launcher)
         self.assertIsNotNone(bounds, "__launch_bounds__ not found in ce_reduce_impl.h")
         self.assertIsNotNone(threads, "thread count not found in the generated launcher")
         assert bounds is not None and threads is not None

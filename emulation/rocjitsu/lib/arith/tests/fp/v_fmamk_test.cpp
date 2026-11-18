@@ -5,7 +5,7 @@
 
 #include "fp/fma_reference.h"
 #include "fp/immediate_fma_test.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <gtest/gtest.h>
 #include <stdint.h>

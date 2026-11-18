@@ -88,11 +88,21 @@
       - | 0: Disable
         | 1: Enable
 
+    * - | ``HSA_ENABLE_YIELDING_POLL``
+        | When enabled, waits on signals that have no interrupt event (for example the completion signal of a host-device copy) spin for a short window and then sleep between polls with an increasing interval, instead of spinning for the whole wait. Lowers CPU use for long waits; a wait that completes within the window keeps its latency.
+        | The window is 200 us, or 10 ms for waits with the ``HSA_WAIT_STATE_ACTIVE`` hint (these also back off afterwards). After the window the sleep starts at 20 us and doubles up to 2 ms, so a completion is observed up to about 2 ms late; no sleep extends past the wait's timeout.
+        | HIP (clr) waits with the active hint by default and currently re-arms each wait after about 4 ms, inside the 10 ms window, so those waits keep spinning until clr re-arms after the intended 4 s.
+        | Only single-signal waits (``hsa_signal_wait_*``) back off. Multi-signal waits (``hsa_signal_wait_any``, ``hsa_amd_signal_wait_all``) still spin for the whole wait when any of the signals has no interrupt event.
+        | Linux only in practice: on Windows ``os::uSleep`` has millisecond granularity, so short sleeps become a yield and longer ones can overshoot by a timer tick.
+      - ``0``
+      - | 0: Disable
+        | 1: Enable
+
     * - | ``HSA_OVERRIDE_CPU_AFFINITY_DEBUG``
-        | Controls whether ROCm helper threads inherit the parent process's CPU affinity mask.
+        | Controls the CPU affinity of ROCm helper threads.
       - ``1``
-      - | 0: Enable inheritance. Helper threads use the parent process's core affinity mask, which should be set with enough cores for all threads.
-        | 1: Disable inheritance. Helper threads spawn on all available cores, ignoring the parent's affinity settings, which may affect performance in certain environments.
+      - | 0: Helper threads inherit the exact CPU affinity mask of the thread that creates them, which should include enough cores for all threads.
+        | 1: Helper threads may run on every CPU of the NUMA node(s) that the creating thread is allowed to run on. If the creating thread is unrestricted, helper threads may run on all CPUs. This keeps helper threads in the same NUMA domain(s) as an application that binds itself to specific cores.
 
     * - | ``HSA_ENABLE_DEBUG``
         | Enables additional debug information and validation in the runtime.
