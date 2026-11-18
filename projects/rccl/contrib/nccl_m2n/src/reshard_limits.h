@@ -28,7 +28,7 @@
  */
 
 /* RING (hierarchical) algorithm array sizes. */
-inline constexpr int MAX_SOURCES = 16;
+inline constexpr int MAX_SOURCES = 32;
 inline constexpr int MAX_TARGETS = 64;
 inline constexpr int MAX_LOCAL_FOLLOWERS = 128;
 inline constexpr int MAX_WARP_GROUPS = 15;
@@ -96,6 +96,7 @@ inline constexpr int STAGING_MAX_REMOTES = 32;
 inline constexpr int STAGING_LOCAL_FC_BASE = STAGING_MAX_REMOTES;
 inline constexpr int STAGING_CTRL_ENTRIES = STAGING_MAX_REMOTES + MAX_TARGETS;
 inline constexpr size_t STAGING_CTRL_REGION_SIZE = (size_t)STAGING_CTRL_ENTRIES * STAGING_CTRL_ENTRY_SIZE;
+static_assert(MAX_SOURCES <= STAGING_CTRL_ENTRIES, "each staging source owns one control entry on the destination");
 inline constexpr int STAGING_DEFAULT_CONTROL_SLOTS = 1;
 inline constexpr int STAGING_PIPE_CONTROL_SLOTS = 32;
 inline constexpr int STAGING_PIPE_GIN_PEERS_PER_SLOT = 16;
