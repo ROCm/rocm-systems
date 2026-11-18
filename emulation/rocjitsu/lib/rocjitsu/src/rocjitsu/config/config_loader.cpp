@@ -163,6 +163,44 @@ void LoadedConfig::override_cpu_dispatch_threads(uint32_t hardware_threads,
 
 namespace {
 
+util::FailureOr<StatisticsConfig> statistics_from_fb(const fb::StatisticsConfig *source,
+                                                     util::DiagnosticEmitter emit_error) {
+  StatisticsConfig result;
+  if (!source)
+    return result;
+  result.enabled = source->enabled();
+  result.max_dispatch_scopes = source->max_dispatch_scopes();
+  if (result.max_dispatch_scopes == 0)
+    return emit_error.emit() << "statistics.max_dispatch_scopes must be positive";
+  if (const auto *patterns = source->include()) {
+    for (const auto *pattern : *patterns) {
+      const std::string value = pattern->str();
+      const size_t wildcard = value.find('*');
+      if (value.empty() || (wildcard != std::string::npos && wildcard != value.size() - 1))
+        return emit_error.emit() << "statistics.include accepts names or trailing-* prefixes";
+      result.include.push_back(value);
+    }
+  }
+  if (const auto *scopes = source->scopes()) {
+    result.scopes.clear();
+    for (const auto *scope : *scopes) {
+      const std::string value = scope->str();
+      if (value != "component" && value != "dispatch")
+        return emit_error.emit() << "statistics.scopes accepts component or dispatch";
+      result.scopes.push_back(value);
+    }
+  }
+  if (const auto *output = source->output()) {
+    if (output->format())
+      result.format = output->format()->str();
+    if (output->directory())
+      result.directory = output->directory()->str();
+  }
+  if (result.format != "jsonl" || result.directory.empty())
+    return emit_error.emit() << "statistics requires jsonl output and a nonempty directory";
+  return result;
+}
+
 simdojo::SimulationEngine::Config
 engine_config_from_fb(const rocjitsu::fb::SimulationConfig *fb_config) {
   simdojo::SimulationEngine::Config cfg{};
@@ -1266,6 +1304,10 @@ build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint32_t host_thr
     cu_overrides["xcnt_diagnostics"] = *mode == WaitChecking::All ? "warn" : "off";
   }
   LoadedConfig result;
+  auto statistics = statistics_from_fb(fb_config->statistics(), emit_error);
+  if (statistics.failed())
+    return util::Result::failure();
+  result.statistics = std::move(statistics).value();
   auto system_graph = system_graph_from_fb(fb_config, emit_error);
   if (system_graph.failed())
     return util::Result::failure();
@@ -1487,11 +1529,15 @@ auto with_config_json(const std::string &json, const std::string &schema_text,
                       util::DiagnosticEmitter emit_error, Callback callback) {
   return with_parsed_simulation_config_json(
       json, schema_text, emit_error, [&](const fb::SimulationConfig *config) {
-        if (config->system())
-          return with_parsed_simulation_config_json(json, schema_text, emit_error, callback, false);
         if (config->arithmetic() &&
             validate_arithmetic_config_json(json, schema_text, emit_error).failed())
           return decltype(callback(config))(util::Result::failure());
+        if (config->statistics() &&
+            (validate_statistics_config_json(json, schema_text, emit_error).failed() ||
+             statistics_from_fb(config->statistics(), emit_error).failed()))
+          return decltype(callback(config))(util::Result::failure());
+        if (config->system())
+          return with_parsed_simulation_config_json(json, schema_text, emit_error, callback, false);
         return callback(config);
       });
 }

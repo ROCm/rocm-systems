@@ -65,6 +65,41 @@ VirtualMachine::~VirtualMachine() {
   driver_.reset();
   for (SoC *soc : socs_)
     soc->release_vm_resources();
+  if (statistics_) {
+    for (uint32_t index = 0; index < socs_.size(); ++index) {
+      for (amdgpu::Xcd *xcd : socs_[index]->xcds()) {
+        amdgpu::L2Cache *cache = xcd->l2_cache();
+        if (!cache)
+          continue;
+        auto scope = statistics_->scope(cache->full_path(), index);
+        if (!scope)
+          continue;
+        if (auto counter = scope->counter(
+                "cache.backing_read_attempts", "operations",
+                "Existing L2 backing-read transaction attempts, including failed attempts"))
+          counter->add(cache->backing_read_transactions());
+        if (auto counter = scope->counter(
+                "cache.backing_write_attempts", "operations",
+                "Existing L2 backing-write transaction attempts, including failed attempts"))
+          counter->add(cache->backing_write_transactions());
+      }
+    }
+    statistics_->finish();
+  }
+}
+
+util::Result VirtualMachine::initialize_statistics(const StatisticsConfig &config, std::string node,
+                                                   simdojo::ExecMode mode,
+                                                   util::DiagnosticEmitter emit_error) {
+  auto session = StatisticsSession::create(
+      config, std::move(node), mode == simdojo::ExecMode::FUNCTIONAL ? "functional" : "clocked",
+      emit_error);
+  if (session.failed())
+    return util::Result::failure();
+  statistics_ = std::move(session).value();
+  for (uint32_t index = 0; index < socs_.size(); ++index)
+    socs_[index]->set_statistics(statistics_, index);
+  return util::Result::success();
 }
 
 void VirtualMachine::install_peer_routes(config::SystemPeerRouteProjection routes,

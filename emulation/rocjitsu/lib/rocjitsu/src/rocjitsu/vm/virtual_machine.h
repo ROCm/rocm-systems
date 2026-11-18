@@ -66,6 +66,10 @@ public:
   const Config &config() const { return config_; }
 
   SimulatedKfd *driver() { return driver_.get(); }
+  const std::shared_ptr<StatisticsSession> &statistics() const { return statistics_; }
+  util::Result initialize_statistics(const StatisticsConfig &config, std::string node,
+                                     simdojo::ExecMode mode,
+                                     util::DiagnosticEmitter emit_error = {});
   FabricEndpoint *fabric_endpoint() { return fabric_endpoint_; }
   const FabricEndpoint *fabric_endpoint() const { return fabric_endpoint_; }
   const config::SystemPeerRouteProjection &peer_routes() const { return peer_routes_; }
@@ -77,6 +81,7 @@ public:
 
 private:
   Config config_;
+  std::shared_ptr<StatisticsSession> statistics_;
   SoC *soc_ = nullptr;
   std::vector<SoC *> socs_;
   std::unique_ptr<SimulatedKfd> driver_;

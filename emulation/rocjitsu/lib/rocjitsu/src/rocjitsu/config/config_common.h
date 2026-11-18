@@ -144,6 +144,20 @@ inline Result validate_arithmetic_config_json(const std::string &json,
   return Result::success();
 }
 
+/// @brief Reject misspelled statistics fields without changing legacy config compatibility.
+inline Result validate_statistics_config_json(const std::string &json,
+                                              const std::string &schema_text,
+                                              util::DiagnosticEmitter emit_error) {
+  auto statistics = json_top_level_field(json, "statistics", emit_error);
+  if (statistics.failed())
+    return Result::failure();
+  flatbuffers::Parser parser;
+  if (!parser.Parse(schema_text.c_str()) || !parser.SetRootType("rocjitsu.fb.StatisticsConfig") ||
+      !parser.Parse(statistics.value().c_str()))
+    return emit_error.emit() << "Invalid statistics config: " << parser.error_;
+  return Result::success();
+}
+
 /// @brief Convert a FlatBuffers PCI bus table into the runtime config form.
 ///
 /// @details A config that says nothing about the bus gets the defaults, which

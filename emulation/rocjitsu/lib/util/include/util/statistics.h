@@ -7,11 +7,21 @@
 #include "util/result.h"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <functional>
 #include <limits>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <ostream>
 #include <span>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -255,6 +265,184 @@ private:
   std::vector<double> upper_bounds_;
   std::vector<Counter> counts_;
   Summary summary_;
+};
+
+/// @brief Generic collection and JSONL export options, copied when a session is created.
+struct Config {
+  bool enabled = false;
+  std::vector<std::string> include{};
+  std::string directory = "stats";
+  std::string format = "jsonl";
+  std::string schema = "util.statistics.v1";
+  std::string default_domain = "events";
+};
+
+/// @brief Append application metadata as comma-prefixed JSON object members.
+/// @details Called synchronously during export while collection locks are held.
+/// Writers must emit valid JSON, avoid reserved record fields, and not reenter
+/// statistics objects. Scope writers are retained and must own their captures;
+/// run and footer writers only need to remain valid until finish() returns.
+using MetadataWriter = std::function<void(std::ostream &)>;
+
+/// @brief Encode a string as a quoted JSON value for application metadata writers.
+std::string json_string(std::string_view value);
+
+/// @brief A registered metric owns its descriptor and remains alive with its producer handle.
+class Metric {
+public:
+  Metric(std::string name, std::string unit, std::string description, std::string domain,
+         std::string kind, std::string value_type);
+  virtual ~Metric() = default;
+  const std::string &name() const { return name_; }
+  bool matches(std::string_view unit, std::string_view description, std::string_view domain,
+               std::string_view kind, std::string_view value_type) const;
+  bool reserves_name(std::string_view name) const;
+  virtual void write_descriptor(std::ostream &output, std::string_view scope_id) const;
+  virtual void write_sample(std::ostream &output, std::string_view scope_id) const = 0;
+
+protected:
+  std::string sample_prefix(std::string_view record, std::string_view scope_id,
+                            std::string_view suffix = {}) const;
+  void write_summary_descriptors(std::ostream &output, std::string_view scope_id) const;
+  void write_summary_samples(std::ostream &output, std::string_view scope_id,
+                             const SummarySnapshot &snapshot) const;
+
+private:
+  std::string name_;
+  std::string unit_;
+  std::string description_;
+  std::string domain_;
+  std::string kind_;
+  std::string value_type_;
+};
+
+/// @brief Concurrent saturating counter. A coherent multi-metric snapshot requires quiescence.
+class RegisteredCounter final : public Metric {
+public:
+  RegisteredCounter(std::string name, std::string unit, std::string description,
+                    std::string domain);
+  void increment() noexcept { add(1); }
+  void add(uint64_t amount) noexcept;
+  uint64_t value() const noexcept { return value_.load(std::memory_order_relaxed); }
+  bool overflowed() const noexcept { return overflowed_.load(std::memory_order_relaxed); }
+  void write_sample(std::ostream &output, std::string_view scope_id) const override;
+
+private:
+  std::atomic<uint64_t> value_{0};
+  std::atomic<bool> overflowed_{false};
+};
+
+/// @brief Signed current value; each scope owns its own gauge without implicit cross-scope
+/// reduction.
+class RegisteredGauge final : public Metric {
+public:
+  RegisteredGauge(std::string name, std::string unit, std::string description, std::string domain);
+  void add(int64_t amount) noexcept;
+  void set(int64_t value) noexcept { value_.store(value, std::memory_order_relaxed); }
+  int64_t value() const noexcept { return value_.load(std::memory_order_relaxed); }
+  void write_sample(std::ostream &output, std::string_view scope_id) const override;
+
+private:
+  std::atomic<int64_t> value_{0};
+  std::atomic<bool> overflowed_{false};
+};
+
+/// @brief Fixed buckets protected by a metric-local lock; recording never allocates.
+class RegisteredHistogram final : public Metric {
+public:
+  RegisteredHistogram(std::string name, std::string unit, std::string description,
+                      std::string domain, Histogram histogram);
+  void observe(double value) noexcept;
+  bool matches_bounds(std::span<const double> bounds) const;
+  void write_descriptor(std::ostream &output, std::string_view scope_id) const override;
+  void write_sample(std::ostream &output, std::string_view scope_id) const override;
+
+private:
+  mutable std::mutex mutex_;
+  Histogram histogram_;
+};
+
+/// @brief Concurrent sample moments exported as independently typed scalar quantities.
+class RegisteredSummary final : public Metric {
+public:
+  RegisteredSummary(std::string name, std::string unit, std::string description,
+                    std::string domain);
+  void observe(double value) noexcept;
+  void write_descriptor(std::ostream &output, std::string_view scope_id) const override;
+  void write_sample(std::ostream &output, std::string_view scope_id) const override;
+
+private:
+  mutable std::mutex mutex_;
+  Summary summary_;
+};
+
+/// @brief A component's bounded metrics. Registration is cold; update handles own their storage.
+class Scope {
+public:
+  Scope(std::string id, std::string name, std::shared_ptr<const Config> config,
+        MetadataWriter metadata = {});
+  std::shared_ptr<RegisteredCounter> counter(std::string name, std::string unit,
+                                             std::string description, std::string domain = {});
+  std::shared_ptr<RegisteredGauge> gauge(std::string name, std::string unit,
+                                         std::string description, std::string domain = {});
+  std::shared_ptr<RegisteredHistogram> histogram(std::string name, std::string unit,
+                                                 std::string description,
+                                                 std::span<const double> bounds,
+                                                 std::string domain = {});
+  std::shared_ptr<RegisteredSummary> summary(std::string name, std::string unit,
+                                             std::string description, std::string domain = {});
+  const std::string &name() const { return name_; }
+  void set_attribute(std::string key, std::string value);
+  bool registration_failed() const { return registration_failed_.load(std::memory_order_relaxed); }
+  void write_descriptors(std::ostream &output) const;
+  void write_samples(std::ostream &output) const;
+
+private:
+  bool selected(std::string_view name) const;
+  std::shared_ptr<Metric> find(std::string_view name) const;
+  bool can_register(std::string_view name, bool has_summary);
+  void reject_registration(std::string_view name);
+  std::string id_;
+  std::string name_;
+  std::shared_ptr<const Config> config_;
+  MetadataWriter metadata_;
+  mutable std::mutex mutex_;
+  std::vector<std::shared_ptr<Metric>> metrics_;
+  std::atomic<bool> registration_failed_{false};
+  std::map<std::string, std::string> attributes_;
+};
+
+/// @brief Owns selected scopes and one final, cumulative JSONL snapshot.
+/// @details Registration is cold. finish() requires all producers and metadata
+/// updates to have stopped; individual atomic or locked metrics do not establish
+/// a coherent multi-metric snapshot. Handles may outlive the session. Destruction
+/// closes the output file without implicitly taking a snapshot.
+class Session {
+public:
+  static util::FailureOr<std::shared_ptr<Session>> create(const Config &config,
+                                                          util::DiagnosticEmitter emit_error = {});
+  ~Session();
+  Session(const Session &) = delete;
+  Session &operator=(const Session &) = delete;
+  /// @brief Reuse an opaque key's scope, or register it with an owned display name.
+  /// @details The first registration defines the name and metadata for that key.
+  std::shared_ptr<Scope> scope(std::string key, std::string name, MetadataWriter metadata = {});
+  std::shared_ptr<Scope> find_scope(std::string_view key);
+  bool selected(std::string_view metric_name) const;
+  /// @brief Export once; registration failures also make the snapshot incomplete.
+  void finish(bool complete, MetadataWriter run_metadata = {}, MetadataWriter footer_metadata = {});
+  const std::string &output_path() const { return output_path_; }
+
+private:
+  explicit Session(const Config &config);
+  std::shared_ptr<const Config> config_;
+  std::string run_id_;
+  std::string output_path_;
+  std::FILE *output_ = nullptr;
+  std::mutex mutex_;
+  std::map<std::string, std::shared_ptr<Scope>, std::less<>> scopes_;
+  bool finished_ = false;
+  std::chrono::steady_clock::time_point begin_ = std::chrono::steady_clock::now();
 };
 
 } // namespace stats

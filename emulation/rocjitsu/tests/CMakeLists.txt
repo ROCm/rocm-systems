@@ -193,7 +193,24 @@ target_include_directories(
 rj_configure_target(rj_code_object_fuzz_test PRIVATE_INCLUDES WARNINGS)
 add_dependencies(rj_code_object_fuzz_test rj_code_object_fuzz)
 rj_add_gtest_tests(rj_code_object_fuzz_test)
+
+# Keep reusable statistics tests independent of rocjitsu headers and libraries.
+add_executable(
+    util_statistics_tests
+    util_statistics_test.cpp
+    util_statistics_session_test.cpp
+)
+target_link_libraries(util_statistics_tests PRIVATE util GTest::gtest_main)
+rj_configure_target(util_statistics_tests WARNINGS)
+rj_add_gtest_tests(util_statistics_tests)
+
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(
+    NAME StatisticsConverterTest
+    COMMAND
+        ${Python3_EXECUTABLE} -B
+        ${PROJECT_SOURCE_DIR}/tests/stats/test_stats_converter.py -v
+)
 add_test(
     NAME CodeObjectFuzzCliTest
     COMMAND
@@ -671,7 +688,8 @@ add_executable(
     util_observable_shared_mutex_test.cpp
     host_mapping_lock_test.cpp
     util_result_test.cpp
-    util_statistics_test.cpp
+    statistics_test.cpp
+    statistics_vm_test.cpp
     util_bit_test.cpp
     util_unique_handle_test.cpp
     util_intrusive_shared_ptr_test.cpp

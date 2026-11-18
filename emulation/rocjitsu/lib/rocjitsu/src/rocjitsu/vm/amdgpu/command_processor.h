@@ -207,6 +207,11 @@ public:
   /// @brief Whether an admitted AQL entry has workgroups left to launch or a signal to publish.
   [[nodiscard]] bool has_pending_aql_dispatch_work() const;
 
+  /// @brief Whether submitted queue work prevents a complete statistics export.
+  /// @details Includes unread rings, nested command streams and retained publications.
+  /// An unreadable cursor is conservatively treated as pending work.
+  [[nodiscard]] bool has_pending_statistics_work() const;
+
   /// @brief Compute queues whose root ring initially processes PM4.
   /// @details Test-only visibility for cross-layer teardown assertions.
   [[nodiscard]] size_t registered_pm4_queue_count_for_test() const;
@@ -982,7 +987,7 @@ private:
     uint64_t registration_id = 0;
     uint64_t value = 0;
   };
-  std::mutex doorbell_inbox_mutex_;
+  mutable std::mutex doorbell_inbox_mutex_;
   std::vector<DoorbellNotification> doorbell_inbox_;
   uint64_t next_queue_registration_id_ = 1;
   size_t active_queue_registrations_ = 0;

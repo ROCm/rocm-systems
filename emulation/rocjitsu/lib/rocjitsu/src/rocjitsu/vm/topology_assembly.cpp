@@ -88,6 +88,13 @@ assemble_virtual_machine_topology(config::LoadedConfig &loaded, simdojo::Topolog
       if (extra_soc)
         extra_soc->wire_backing(topology);
     }
+    if (machine_ptr
+            ->initialize_statistics(loaded.statistics, loaded.local_node_id, loaded.exec_mode,
+                                    emit_error)
+            .failed()) {
+      topology = simdojo::Topology{};
+      return util::Result::failure();
+    }
     return machine_ptr;
   }
 
@@ -102,6 +109,13 @@ assemble_virtual_machine_topology(config::LoadedConfig &loaded, simdojo::Topolog
     return util::Result::failure();
   }
   primary_soc->wire_backing(topology);
+  if (machine_ptr
+          ->initialize_statistics(loaded.statistics, loaded.local_node_id, loaded.exec_mode,
+                                  emit_error)
+          .failed()) {
+    topology = simdojo::Topology{};
+    return util::Result::failure();
+  }
   return machine_ptr;
 }
 

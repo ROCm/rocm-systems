@@ -159,6 +159,7 @@ workers. Scripts, tests, interactive shells, and notebooks use the same library.
 |---|---|
 | [Building](docs/building.md) | Build options, sanitizers, container setup |
 | [Benchmarking](docs/benchmarking.md) | Reproducible performance and memory measurement protocol |
+| [Statistics](docs/statistics.md) | Counters, histograms, configuration, and SQLite/CSV export |
 | [Configuration](docs/configuration.md) | JSON config format and topology |
 | [Two-node RCCL NET smoke](docs/rccl-scaleout.md) | Reproduce an unqualified gfx1250 daemon-mode control |
 | [QEMU VFIO-user compute](docs/qemu-vfio.md) | Run a gfx1250 guest and qualify a GEMM workload |

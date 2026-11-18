@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/stats/statistics.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device.h"
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -1460,6 +1461,8 @@ void GpuPciDevice::close_doorbell_admission_for_reset() {
   ++doorbell_reset_epoch_;
   if (doorbell_reset_epoch_ == 0)
     ++doorbell_reset_epoch_;
+  if ((!doorbell_inbox_.empty() || !doorbell_retry_inbox_.empty()) && soc_ && soc_->statistics())
+    soc_->statistics()->mark_incomplete();
   doorbell_inbox_.clear();
   doorbell_retry_inbox_.clear();
   doorbell_retry_wake_tick_.reset();
@@ -1567,6 +1570,8 @@ bool GpuPciDevice::program_shader_apertures(uint32_t vmid, uint64_t shared_base,
 void GpuPciDevice::reset(simdojo::ResetKind kind) {
   const std::lock_guard reset_lock(doorbell_reset_mutex_);
   close_doorbell_admission_for_reset();
+  if (soc_)
+    soc_->mark_statistics_incomplete_if_pending();
   const bool restart_transport = quiesce_transport_session();
   util::Logger::warn(std::format("{}: reset requested, kind {}", name(), static_cast<int>(kind)));
   try {
