@@ -18,11 +18,12 @@ namespace rocjitsu::amdgpu {
 /// under, the phase changes and the count is reloaded.
 ///
 /// The DS arrive instructions arrive once per active lane, each lane at its
-/// own address, as LDS atomics do (CDNA5 ISA 11.2.1). The ISA does not order the
-/// lanes; the simulator arrives, and reports, in lane order. A tensor DMA
-/// instruction whose descriptor
-/// requests it arrives once, after the transfer has moved its data (CDNA5 ISA
-/// 10.11.3). Each arrival is reported after the cell has been updated.
+/// own address, as LDS atomics do (CDNA5 ISA 11.2.1). The ISA does not order
+/// the lanes; the simulator arrives, and reports, in lane order. An update
+/// value of zero leaves the cell unchanged and is reported with `old_state ==
+/// new_state`. A tensor DMA instruction whose descriptor requests it arrives
+/// once, after the transfer has moved its data (CDNA5 ISA 10.11.3). Each
+/// arrival is reported after the cell has been updated.
 struct LdsBarrierArrivalObservation {
   /// What arrived, which determines the operations the arrival is ordered
   /// after.

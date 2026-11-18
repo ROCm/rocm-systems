@@ -3839,16 +3839,27 @@ TEST_F(LdsBarrierArriveTest, ArrivalIsNotReportedToAPluginThatDoesNotObserveIt) 
 
 // A tensor DMA instruction whose descriptor requests it arrives once, when the
 // transfer completes (CDNA5 ISA 10.11.3): after the issue observation and the
-// transfer's LDS writes, and before the completed-access observation.
+// transfer's LDS writes, and before the completed-access observation. "The
+// EXEC mask is ignored: tensor instructions are issued no matter if EXEC==0 or
+// not" (CDNA5 ISA 10.11.1), so the arrival is reported with EXEC zero too.
 TEST_F(LdsBarrierArriveTest, TensorTransferArrivesAfterItIssuesAndMovesItsData) {
   using Hook = LdsBarrierArrivalRecorder::Hook;
   constexpr uint64_t kGlobal = 0x1a0000;
   constexpr uint32_t kCell = 64;
   constexpr uint32_t kLoaded = 0x12345678u;
   constexpr uint32_t kStored = 0x9abcdef0u;
-  for (const bool store : {false, true}) {
-    SCOPED_TRACE(store ? "store" : "load");
+  struct Case {
+    bool store;
+    uint64_t exec;
+  };
+  constexpr Case kCases[] = {{.store = false, .exec = 1},
+                             {.store = true, .exec = 1},
+                             {.store = false, .exec = 0},
+                             {.store = true, .exec = 0}};
+  for (const auto [store, exec] : kCases) {
+    SCOPED_TRACE(testing::Message() << (store ? "store" : "load") << ", EXEC " << exec);
     auto &recorder = install_lds_barrier_arrival_recorder(sim);
+    wf->set_exec(exec);
     const uint64_t state = amdgpu::lds_barrier_cell_init_state(2);
     set_cell(kCell, state);
     write_global_u32(*sim.memory, kGlobal, kLoaded);
