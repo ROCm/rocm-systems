@@ -212,8 +212,10 @@ original descriptor.
 Most Linux descriptor and mapping calls and flags come from the `libc` crate.
 `src/os/linux/memory.rs` declares `getpagesize` and `madvise`, and
 `src/os/linux/memory/reservation.rs` defines `MAP_FIXED_NOREPLACE`; the crate
-does not expose these for the supported GNU targets. KFD and DRM calls remain in
-`src/driver/linux_kfd/{sys,drm}.rs`.
+does not expose these for the supported GNU targets. KFD ioctl dispatch lives in
+`src/driver/linux_kfd/connection/ioctl.rs`, and DRM calls live in
+`src/driver/linux_kfd/drm.rs`. The KFD connection and runtime transaction remain
+in `connection.rs`; sysfs directory traversal uses `sysfs/directory.rs`.
 The AMDF and HSA frontends export C ABI entry points and invoke documented
 caller-provided callbacks. These ABI calls do not import a native library.
 HSA has no `libdrm_amdgpu` link and obtains
