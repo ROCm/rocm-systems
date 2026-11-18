@@ -534,8 +534,10 @@ TEST(Vop3DivHelpersSimdCorrectness, DivFixupF16Family_OpSelHighHalves) {
   struct Op {
     uint32_t opcode;
     const char *name;
+    uint16_t high_half_after_low_write;
   };
-  for (const Op &o : {Op{519, "v_div_fixup_f16_vop3"}, Op{495, "v_div_fixup_legacy_f16_vop3"}}) {
+  for (const Op &o :
+       {Op{519, "v_div_fixup_f16_vop3", 0xCAFEu}, Op{495, "v_div_fixup_legacy_f16_vop3", 0u}}) {
     for (const bool force_scalar : {true, false}) {
       const auto normal = run_div_fixup_f16_opsel(force_scalar, o.opcode, util::f32_to_f16(2.0f),
                                                   util::f32_to_f16(3.0f), util::f32_to_f16(4.0f));
@@ -548,7 +550,7 @@ TEST(Vop3DivHelpersSimdCorrectness, DivFixupF16Family_OpSelHighHalves) {
           run_div_fixup_f16_opsel(force_scalar, o.opcode, util::f32_to_f16(2.0f),
                                   util::f32_to_f16(3.0f), util::f32_to_f16(4.0f), 0x7u);
       for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-        EXPECT_EQ(low_dst[lane], util::f32_to_f16(2.0f))
+        EXPECT_EQ(low_dst[lane], pack16(util::f32_to_f16(2.0f), o.high_half_after_low_write))
             << o.name << " low dst force_scalar=" << force_scalar << " lane " << lane;
       }
 

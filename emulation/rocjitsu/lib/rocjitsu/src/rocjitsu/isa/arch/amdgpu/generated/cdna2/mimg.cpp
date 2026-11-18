@@ -15,22 +15,34 @@
 namespace rocjitsu {
 namespace cdna2 {
 
+void Mimg::append_dst_operand(std::string &out, uint8_t index) const {
+  // LLVM spells only the payload when LWE appends a status DWORD.
+  if (flags_ & CONDITIONAL_LAST_VGPR_DEF) {
+    const auto *data = static_cast<const IsaOperand<Isa> *>(dst_operands_[index]);
+    out += Operand(data->size_bits() - 32, data->opr_type_, data->encoding_value()).name();
+  } else
+    Instruction::append_dst_operand(out, index);
+}
+
 namespace {
+template <typename MimgMachineInst>
+bool mimg_has_status(const MimgMachineInst *inst, bool sampler) {
+  // A dropped fetch with DMASK=0 cannot produce TFE status. LWE
+  // can still return status for samplers. Both share one DWORD.
+  bool status = false;
+  if constexpr (requires { inst->tfe; })
+    status = inst->tfe && inst->dmask;
+  if constexpr (requires { inst->lwe; })
+    status = status || (sampler && inst->lwe);
+  return status;
+}
 template <typename MimgMachineInst>
 uint32_t mimg_vdata_bits(const MimgMachineInst *inst, bool gather4, bool d16_allowed,
                          bool status_allowed, bool sampler) {
   uint32_t words = gather4 ? 4u : std::max(1, std::popcount(uint32_t{inst->dmask}));
   if (d16_allowed && inst->d16)
     words = (words + 1) / 2;
-  // A dropped fetch with DMASK=0 cannot produce TFE status. LWE
-  // can still return status for sampler operations. Both flags
-  // share one status word; stores do not consume that word.
-  bool status = false;
-  if constexpr (requires { inst->tfe; })
-    status = status_allowed && inst->tfe && inst->dmask;
-  if constexpr (requires { inst->lwe; })
-    status = status || (status_allowed && sampler && inst->lwe);
-  if (status)
+  if (status_allowed && mimg_has_status(inst, sampler))
     ++words;
   return words * 32;
 }
@@ -53,6 +65,8 @@ ImageLoadMimg::ImageLoadMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  if (mimg_has_status(&inst_, false))
+    flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -98,6 +112,8 @@ ImageLoadMipMimg::ImageLoadMipMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  if (mimg_has_status(&inst_, false))
+    flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -397,8 +413,8 @@ DecodeResult decodeImageStoreMipPckMimg(const MachineInst *opcode,
 } // namespace detail
 
 ImageGetResinfoMimg::ImageGetResinfoMimg(const MachineInst *inst)
-    : Mimg("image_get_resinfo", reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::ImageGetResinfoMimg)),
+    : ImageAddressInstruction("image_get_resinfo", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageGetResinfoMimg)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, false, false),
             OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
@@ -933,6 +949,8 @@ ImageSampleMimg::ImageSampleMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  if (mimg_has_status(&inst_, true))
+    flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;

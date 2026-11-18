@@ -1,12 +1,16 @@
-# rccl-UnitTestsMicroPlugin — shared/ctest schema.
-# Host-only micro-tests for src/plugin/net.cc, net/net_v*.cc and plugin_open.cc (no GPU, no librccl).
-# RCCL does not support Windows: exclude_windows matches all tests so generated suites are empty on Windows.
-
+# CTest categories for host-only src/plugin/ microtests.
+#
+# Suites start with their source unit's stem; those for net.cc, plugin_open.cc
+# and net/net_v<N>.cc start with Plugin.
 test_categories:
   quick: &micro_plugin_quick
-    description: "Smoke — host-only net plugin loader micro-tests, sub-second."
+    description: "Smoke - host-only src/plugin/ micro-tests, sub-second."
     test_patterns:
+      - "CsvTuner*"
+      - "Gin*"  # gin.cc's GinPluginInitTest and GinFinalizeTest
       - "Plugin*"
+      - "Profiler*"
+      - "Rma*"  # rma.cc's RmaPluginInitTest
     exclude_windows:
       - "*"
     labels:

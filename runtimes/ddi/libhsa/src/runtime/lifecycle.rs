@@ -39,6 +39,8 @@ thread_local! {
 pub(crate) struct LifecycleCallScope {
     /// Whether this scope set and must clear the thread-local entry flag.
     owns_flag: bool,
+    /// The thread-local entry flag must be cleared on its entering thread.
+    _thread_bound: std::marker::PhantomData<std::rc::Rc<()>>,
 }
 
 impl LifecycleCallScope {
@@ -49,7 +51,10 @@ impl LifecycleCallScope {
                 Err(INVALID_RUNTIME_STATE)
             } else {
                 active.set(true);
-                Ok(Self { owns_flag: true })
+                Ok(Self {
+                    owns_flag: true,
+                    _thread_bound: std::marker::PhantomData,
+                })
             }
         })
     }
@@ -65,7 +70,10 @@ impl LifecycleCallScope {
                 true
             }
         });
-        Self { owns_flag }
+        Self {
+            owns_flag,
+            _thread_bound: std::marker::PhantomData,
+        }
     }
 }
 
@@ -382,7 +390,7 @@ impl HsaLifecycle {
                 // This is the single public admission boundary for final
                 // shutdown. Existing leases finish before state is detached.
                 let runtime = self.state.as_ref().ok_or(ERROR)?;
-                runtime.request_stop();
+                runtime.request_shutdown();
                 self.references = 0;
                 self.phase = LifecyclePhase::Preparing(generation);
                 Ok(ShutdownWork::Prepare(generation))
@@ -412,7 +420,11 @@ impl HsaLifecycle {
         }
         // The caller closed and drained process admission before detaching
         // the generation. Keep that wait outside the lifecycle mutex.
-        debug_assert!(process_admission().is_closed_and_idle());
+        let runtime = self.state.as_ref().ok_or(ERROR)?;
+        debug_assert!(runtime.inflight.is_closed_and_idle());
+        // Tools may create cleanup work throughout Preparing. Close the core
+        // only after their cleanup window ends, while retaining failed owners.
+        runtime.begin_session_retirement()?;
         let runtime = self.state.take().ok_or(ERROR)?;
         self.phase = LifecyclePhase::Stopping(generation);
         Ok(runtime)
@@ -493,7 +505,7 @@ impl LifecycleTransition {
 impl Drop for LifecycleTransition {
     /// Rolls back an incomplete generation transition.
     fn drop(&mut self) {
-        if !self.armed {
+        if !self.armed || !crate::platform::process_is_current() {
             return;
         }
         let mut registry = LIFECYCLE
@@ -509,6 +521,9 @@ impl Drop for LifecycleTransition {
             // Some handle APIs intentionally bypass the registry mutex. Fence
             // those entry points when a failed transition retains live state.
             process_admission().close();
+            if let Some(state) = &registry.state {
+                state.request_stop();
+            }
             registry.quarantine = Some(match registry.state.take() {
                 Some(state) => Quarantine::RetainedGeneration {
                     _state: RetainOnDrop::new(state),
@@ -528,6 +543,9 @@ pub(crate) static LIFECYCLE_CONDVAR: Condvar = Condvar::new();
 
 /// Locks the process-global lifecycle state, handling poisoned locks.
 pub(crate) fn lock() -> Result<MutexGuard<'static, HsaLifecycle>, Status> {
+    if !crate::platform::process_is_current() {
+        return Err(NOT_INITIALIZED);
+    }
     LIFECYCLE.lock().map_err(|_| ERROR)
 }
 
@@ -558,10 +576,196 @@ pub(crate) fn initialized_mut(runtime: &mut HsaLifecycle) -> Result<&mut HsaStat
     runtime.as_mut().ok_or(NOT_INITIALIZED)
 }
 
+/// Admits synchronous v2 tool resource destruction after ordinary admission
+/// and callback producers have drained. The scope must end before legacy
+/// unload callbacks or generation detachment.
+#[cfg(all(hsa_tool_dispatch, not(test)))]
+pub(crate) fn enter_tool_cleanup() -> Result<ApiLeaseScope, Status> {
+    let registry = lock()?;
+    let LifecyclePhase::Preparing(generation) = registry.phase else {
+        return Err(INVALID_RUNTIME_STATE);
+    };
+    if registry.state.is_none() {
+        return Err(INVALID_RUNTIME_STATE);
+    }
+    let token = process_admission()
+        .enter_cleanup(generation)
+        .ok_or(INVALID_RUNTIME_STATE)?;
+    Ok(ApiLeaseScope::enter(token))
+}
+
+/// Opens explicit cleanup delegation while native and callback services live.
+#[cfg(all(hsa_tool_dispatch, not(test)))]
+pub(crate) fn begin_tool_preparation() -> Result<admission::ToolCleanupScope, Status> {
+    let registry = lock()?;
+    let LifecyclePhase::Preparing(generation) = registry.phase else {
+        return Err(INVALID_RUNTIME_STATE);
+    };
+    if registry
+        .state
+        .as_ref()
+        .is_none_or(|state| state.health.is_quarantined())
+    {
+        return Err(INVALID_RUNTIME_STATE);
+    }
+    process_admission()
+        .begin_cleanup(generation)
+        .ok_or(INVALID_RUNTIME_STATE)
+}
+
+/// Grants a worker access only to the currently preparing generation.
+#[cfg(all(hsa_tool_dispatch, not(test)))]
+pub(crate) fn enter_delegated_tool_cleanup(generation: u64) -> Result<ApiLeaseScope, Status> {
+    let registry = lock()?;
+    if registry
+        .state
+        .as_ref()
+        .is_none_or(|state| state.health.is_quarantined())
+    {
+        return Err(INVALID_RUNTIME_STATE);
+    }
+    let token = match registry.phase {
+        LifecyclePhase::Active(current) | LifecyclePhase::LoadingTools(current)
+            if current == generation =>
+        {
+            process_admission().enter_tool_work(generation)
+        }
+        LifecyclePhase::Preparing(current) if current == generation => {
+            if ApiLeaseScope::cleanup() {
+                // Final synchronous destruction may use the same executor.
+                // Its parent lease already retains this generation; this does
+                // not reopen delegation to another worker after preparation.
+                process_admission().enter_tool_work(generation)
+            } else {
+                process_admission().enter_delegated_cleanup(generation)
+            }
+        }
+        _ => None,
+    }
+    .ok_or(INVALID_RUNTIME_STATE)?;
+    Ok(ApiLeaseScope::enter(token))
+}
+
 #[cfg(test)]
 #[allow(clippy::panic, clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use rocddi::session::SessionState;
+    use rocddi::topology::host::{HostCaches, HostTopologyGraphSnapshot};
+
+    /// Builds a generation without discovery or native device acquisition.
+    fn state_without_devices(session: Session) -> HsaState {
+        let health = Arc::new(GenerationHealth::new());
+        let inflight = Arc::new(InFlightTracker::new_process());
+        inflight.open(1);
+        HsaState {
+            debugger: None,
+            sdma_enabled: false,
+            peer_sdma_enabled: false,
+            logging: Arc::new(LogOutput::new()),
+            next_handle: 0x4853_4101_0000_0000,
+            queue_state: QueueState::new(),
+            loader: LoaderState::new(),
+            image_state: ImageState::new(),
+            memory_state: MemoryState::new(health.clone()),
+            signal_state: SignalState::new(&session).unwrap(),
+            pc_sampling_state: PcSamplingState::new(health.clone()),
+            host_page_size: 4096,
+            system_alloc_max_bytes: 0,
+            cpus: Vec::new(),
+            full_profile: true,
+            disable_fragment_allocator: false,
+            vm_fault_details: None,
+            system_event_handlers: Vec::new(),
+            system_event_worker: None,
+            system_event_failed: Arc::new(AtomicBool::new(false)),
+            stop_workers: Arc::new(AtomicBool::new(false)),
+            cancel_work: Arc::new(AtomicBool::new(false)),
+            inflight,
+            health,
+            caches: Vec::new(),
+            topology: TopologyGraphSnapshot {
+                host: HostTopologyGraphSnapshot {
+                    memory_bytes: None,
+                    cpu: None,
+                    cpu_apic_ids: Vec::new(),
+                    online_cpus: None,
+                    caches: HostCaches {
+                        records: Vec::new(),
+                        complete: true,
+                    },
+                    domains: Vec::new(),
+                    domains_complete: true,
+                },
+                endpoints: Vec::new(),
+                sources: Vec::new(),
+                nodes: Vec::new(),
+                attachments: Vec::new(),
+                routes: Vec::new(),
+                caches: Vec::new(),
+                memory_locations: Vec::new(),
+                memory_banks: Vec::new(),
+            },
+            gpus: Vec::new(),
+            session: Some(session),
+        }
+    }
+
+    #[test]
+    fn prepared_shutdown_closes_core_after_cleanup_services_finish() {
+        let session = Session::new(DriverContextLifetime::Session).unwrap();
+        let observer = session.clone();
+        let mut lifecycle = HsaLifecycle::new();
+        lifecycle.state = Some(state_without_devices(session));
+        lifecycle.references = 1;
+        lifecycle.generation = 1;
+        lifecycle.phase = LifecyclePhase::Active(1);
+
+        assert!(matches!(
+            lifecycle.begin_shutdown().unwrap(),
+            ShutdownWork::Prepare(1)
+        ));
+        assert!(lifecycle.as_ref().unwrap().inflight.is_closed_and_idle());
+        assert_eq!(observer.state().unwrap(), SessionState::Open);
+        // Tool preparation can still acquire a core service after public HSA
+        // admission closes. Its owner must be released before final teardown.
+        drop(SignalState::new(&observer).unwrap());
+
+        let state = lifecycle.finish_prepare_shutdown(1).unwrap();
+        assert_eq!(observer.state().unwrap(), SessionState::Retiring);
+        assert!(SignalState::new(&observer).is_err());
+        assert_eq!(lifecycle.phase, LifecyclePhase::Stopping(1));
+        drop(observer);
+        let outcome = state.stop();
+        assert!(matches!(outcome, ShutdownOutcome::Complete));
+        lifecycle.finish_shutdown(1, outcome).unwrap();
+        assert_eq!(lifecycle.phase, LifecyclePhase::Inactive);
+    }
+
+    #[test]
+    fn uncertain_frontend_shutdown_retains_the_whole_generation() {
+        let session = Session::new(DriverContextLifetime::Session).unwrap();
+        let observer = session.clone();
+        let state = state_without_devices(session);
+        state.health.quarantine();
+        let outcome = state.stop();
+        assert!(matches!(
+            outcome,
+            ShutdownOutcome::RetainedGeneration { .. }
+        ));
+        assert_eq!(observer.state().unwrap(), SessionState::Retiring);
+
+        let mut lifecycle = HsaLifecycle::new();
+        lifecycle.generation = 1;
+        lifecycle.phase = LifecyclePhase::Stopping(1);
+        lifecycle.finish_shutdown(1, outcome).unwrap();
+        assert_eq!(lifecycle.phase, LifecyclePhase::Quarantined);
+        assert_eq!(lifecycle.begin_init().unwrap_err(), INVALID_RUNTIME_STATE);
+        assert!(matches!(
+            lifecycle.begin_shutdown(),
+            Err(INVALID_RUNTIME_STATE)
+        ));
+    }
 
     #[test]
     fn detached_retirement_keeps_owners_on_unwind() {
@@ -592,12 +796,12 @@ mod tests {
     fn failed_native_shutdown_retains_session_until_retry_succeeds() {
         let session = Session::new(DriverContextLifetime::Session).unwrap();
         let clone = session.clone();
-        let mut retirement = session.into_retirement();
-        let error = retirement.try_destroy().unwrap_err();
-        let outcome = ShutdownOutcome::NativeRetry {
-            status: map_error(error),
-            session: retirement,
-        };
+        // Direct teardown closes core admission even without the prepared
+        // shutdown path, then reports the surviving session borrow as Busy.
+        let outcome = state_without_devices(session).stop();
+        assert_eq!(outcome.status(), RESOURCE_BUSY);
+        assert_eq!(clone.state().unwrap(), SessionState::Retiring);
+        assert!(SignalState::new(&clone).is_err());
         let mut lifecycle = HsaLifecycle::new();
         lifecycle.generation = 1;
         lifecycle.phase = LifecyclePhase::Stopping(1);

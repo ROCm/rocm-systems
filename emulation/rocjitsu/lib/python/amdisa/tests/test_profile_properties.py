@@ -265,7 +265,7 @@ def test_dpp_suppressed_compare_policy(profile, expected):
         (CdnaProfile(), 32, DppOpcodeRule.ALLOW),
         (CdnaProfile(), 64, DppOpcodeRule.ROW_SELECT_ONLY),
         (Cdna1Profile(), 64, DppOpcodeRule.ALLOW),
-        (Cdna2Profile(), 64, DppOpcodeRule.ALLOW),
+        (Cdna2Profile(), 64, DppOpcodeRule.ROW_SELECT_ONLY),
     ],
 )
 def test_cdna_64bit_input_dpp_rule(profile, src0_size_bits, expected):
@@ -324,8 +324,9 @@ def test_cdna3_and_4_lane_special_opcodes_do_not_accept_dpp(opcode):
     ],
 )
 def test_legacy_dpp_prohibition_tables(profile, opcode):
+    encoding = 'ENC_VOPC' if opcode.startswith(('V_CMP_', 'V_CMPX_')) else 'ENC_VOP1'
     assert (
-        profile.dpp_opcode_rule('ENC_VOP1', opcode, src0_size_bits=64)
+        profile.dpp_opcode_rule(encoding, opcode, src0_size_bits=64)
         is DppOpcodeRule.FORBID
     )
 
@@ -369,7 +370,8 @@ def test_legacy_dpp_prohibition_tables_do_not_match_nearby_legal_opcodes(
     ('profile', 'wave', 'row_bcast', 'row_xmask'),
     [
         (CdnaProfile(), True, True, False),
-        (Rdna1Profile(), True, True, False),
+        (Rdna1Profile(), False, False, True),
+        (Rdna2Profile(), False, False, True),
         (Rdna3Profile(), False, False, True),
         (Rdna4Profile(), False, False, True),
         (Cdna5Profile(), False, False, True),
@@ -551,6 +553,7 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .supports_wgp_mode = false,\n'
         '        .mode_has_gpr_idx_en = true,\n'
         '        .descriptor_sgpr_count_encoded = true,\n'
+        '        .coincident_ds_ignores_data1 = true,\n'
         '        .uses_ttmp_workgroup_ids = false,\n'
         '        .uses_cluster_ttmp_workgroup_ids = false,\n'
         '        .float_dot_accumulation = FloatDotAccumulation::HostF32,\n'
@@ -572,6 +575,7 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .supports_wgp_mode = true,\n'
         '        .mode_has_gpr_idx_en = false,\n'
         '        .descriptor_sgpr_count_encoded = false,\n'
+        '        .coincident_ds_ignores_data1 = false,\n'
         '        .uses_ttmp_workgroup_ids = true,\n'
         '        .uses_cluster_ttmp_workgroup_ids = false,\n'
         '        .float_dot_accumulation = FloatDotAccumulation::Gfx12,\n'
@@ -593,6 +597,7 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .supports_wgp_mode = false,\n'
         '        .mode_has_gpr_idx_en = false,\n'
         '        .descriptor_sgpr_count_encoded = false,\n'
+        '        .coincident_ds_ignores_data1 = false,\n'
         '        .uses_ttmp_workgroup_ids = true,\n'
         '        .uses_cluster_ttmp_workgroup_ids = true,\n'
         '        .float_dot_accumulation = FloatDotAccumulation::HostF32,\n'
@@ -697,7 +702,10 @@ def test_gfx1250_operand_execution_backend_uses_separate_source(tmp_path):
     assert ': IsaOperand<Isa>(size_bits, opr_type, encoding_value)' in operand_cpp
     assert 'ROCJITSU_ISA_MODEL_ONLY' not in operand_cpp
     assert 'uint32_t Operand::read_scalar' in operand_cpp
-    assert 'current_isa_operand_backend()' in operand_cpp
+    assert 'detail::current_isa_operand_backend_inline()' in operand_cpp
+    assert 'struct UnpackedVgpr {};' in operand_h
+    assert 'UnpackedSource' not in operand_h
+    assert 'OperandType::OPR_SRC;' not in operand_cpp
     assert (
         'execution_backend_ ? execution_backend_->read_scalar : nullptr' in operand_cpp
     )
@@ -1670,3 +1678,22 @@ def test_unsplit_operand_retains_write_errors_and_checks_delegates(
         assert 'if (!is_writable())' in body
         assert 'InstructionExecutionError::UnsupportedOperandValue' in body
         assert 'throw ' not in body
+
+
+@pytest.mark.parametrize(
+    ('profile', 'clamp'),
+    [
+        (Cdna1Profile(), False),
+        (Cdna2Profile(), True),
+        (CdnaProfile(), True),
+        (Cdna4Profile(), False),
+        (Cdna5Profile(), False),
+        (Rdna1Profile(), False),
+        (Rdna2Profile(), True),
+        (Rdna3Profile(), False),
+        (Rdna3_5Profile(), False),
+        (Rdna4Profile(), False),
+    ],
+)
+def test_packed_u16_multiply_clamp(profile, clamp):
+    assert profile.packed_mul_lo_u16_clamp is clamp
