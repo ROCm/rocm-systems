@@ -1,22 +1,6 @@
 include_guard(GLOBAL)
 
-set(ROCPROFILER_DEFAULT_GPU_TARGETS
-    "gfx900"
-    "gfx906"
-    "gfx908"
-    "gfx90a"
-    "gfx942"
-    "gfx950"
-    "gfx1030"
-    "gfx1010"
-    "gfx1100"
-    "gfx1101"
-    "gfx1102"
-    "gfx1151"
-    "gfx1152"
-    "gfx1170"
-    "gfx1171"
-    "gfx1250")
+include("${CMAKE_CURRENT_LIST_DIR}/rocprofiler_default_gpu_targets.cmake")
 
 if(NOT GPU_TARGETS)
     set(GPU_TARGETS
