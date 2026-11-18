@@ -73,10 +73,10 @@ struct file_buffer
 
     void reset();
 
-    domain_type       domain = {};
-    uint64_t          nbytes = 0;
+    domain_type       domain    = {};
+    uint64_t          nbytes    = 0;
     bool              io_failed = false;
-    ring_buffer_t<Tp> buffer = {};
+    ring_buffer_t<Tp> buffer    = {};
     tmp_file          file;
 };
 
@@ -88,7 +88,7 @@ file_buffer<Tp>::reset()
     file.close();
     file.remove();  // Delete old file
     file.file_pos.clear();
-    nbytes = 0;
+    nbytes    = 0;
     io_failed = false;
     file.stream.clear();
     // Resolve a fresh path on the next session's first offload, after config refresh.
@@ -124,7 +124,7 @@ offload_buffer(domain_type type)
         return;
     }
 
-    auto                  _lk      = std::lock_guard<std::mutex>(filebuf->file.file_mutex);
+    auto _lk = std::lock_guard<std::mutex>(filebuf->file.file_mutex);
     if(!filebuf->io_failed)
     {
         try

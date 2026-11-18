@@ -126,8 +126,8 @@ get_output_stream(const output_config& cfg,
     else if(cfg_output_path.empty() || fname.empty())
         return {&std::clog, [](auto*&) {}};
 
-    auto  output_file = get_output_filename(cfg, fname, ext);
-    auto  _ofs        = std::make_unique<std::ofstream>(output_file, mode);
+    auto output_file = get_output_filename(cfg, fname, ext);
+    auto _ofs        = std::make_unique<std::ofstream>(output_file, mode);
     if(!*_ofs) throw std::runtime_error{fmt::format("Failed to open '{}' for output", output_file)};
 
     ROCP_ERROR << "Opened result file: " << output_file;
