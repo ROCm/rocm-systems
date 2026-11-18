@@ -595,7 +595,10 @@ TEST(ExecutionPluginTest, Gfx115ValuAllocationSuppressesTheIssueOrSelectsTheWhol
           constexpr auto c = amdgpu::WaitCounterKind::Load;
           state.add({state.issue(c), 0x100, 1, {RegClass::VGPR, reg, 1}, c, 0xf});
           state.check_instruction(inst, *wave);
-          EXPECT_EQ(warnings != 0, should_read) << reg;
+          // An admitted true16 destination also depends on its preserved half
+          // when a memory result for that physical register is pending.
+          const bool wait_read = should_read || (!suppressed && half && reg == dst);
+          EXPECT_EQ(warnings != 0, wait_read) << reg;
         }
       }
     }

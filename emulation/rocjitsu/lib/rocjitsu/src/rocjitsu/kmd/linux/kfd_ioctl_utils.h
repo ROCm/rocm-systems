@@ -5,6 +5,7 @@
 #define ROCJITSU_KMD_LINUX_KFD_IOCTL_UTILS_H_
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/gfx1250_apertures.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "uapi/linux/kfd_ioctl.h"
@@ -18,6 +19,14 @@ RJ_DIAGNOSTIC_POP
 #include <unistd.h>
 
 namespace rocjitsu {
+
+/// GC 12.1 uses a fixed 57-bit private aperture for globally addressable scratch.
+inline void set_gfx1250_shader_apertures(kfd_process_device_apertures &apertures) {
+  apertures.lds_base = amdgpu::kGfx1250SharedApertureBase;
+  apertures.lds_limit = amdgpu::kGfx1250SharedApertureLimit;
+  apertures.scratch_base = amdgpu::kGfx1250PrivateApertureBase;
+  apertures.scratch_limit = amdgpu::kGfx1250PrivateApertureLimit;
+}
 
 /// Copy an embedded userspace buffer without turning an invalid pointer into
 /// a simulator fault. Both the local driver and daemon client read their own

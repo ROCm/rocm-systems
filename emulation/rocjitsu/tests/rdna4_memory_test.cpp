@@ -177,7 +177,8 @@ TEST_F(Rdna4MemoryTest, GuardLdsRangeAndReturningAtomicResult) {
 }
 
 TEST_F(Rdna4MemoryTest, DirectRouteSuppressesUnallocatedAtomicBeforeLdsUpdate) {
-  // The direct route also accepts payloads from generated execution without
+  // Generated execution nullifies an unallocated result before reading its
+  // operands. The direct route also accepts this payload without
   // ComputeUnitCore::execute_instruction (instrumentation and embedded callers).
   wf_->lds().write32(8, 41);
   write_vector(2, 8);
@@ -188,7 +189,8 @@ TEST_F(Rdna4MemoryTest, DirectRouteSuppressesUnallocatedAtomicBeforeLdsUpdate) {
   auto inst = std::move(decoded).value();
   inst->execute(*inst, wf_);
   ASSERT_NE(inst->data(), nullptr);
-  ASSERT_EQ(inst->data_as<VectorMemState>()->lane_mask, 1u);
+  ASSERT_TRUE(inst->data_as<VectorMemState>()->nullified_result);
+  ASSERT_EQ(inst->data_as<VectorMemState>()->lane_mask, 0u);
   EXPECT_EQ(test::ComputeUnitTestAccess::route_memory_inst(*cu_, std::move(inst), *wf_),
             VmAccessOutcome::Complete);
   EXPECT_EQ(wf_->lds().read32(8), 41u);
@@ -315,14 +317,15 @@ TEST_F(Rdna4MemoryTest, WaitingForAnUnallocatedLoadResultHasNoRegisterDependency
   cu_->write_sgpr(sgpr_base + 1, 0);
   cu_->write_sgpr(sgpr_base + 2, 64);
   cu_->write_sgpr(sgpr_base + 3, (2u << 28) | (20u << 12));
-  for (bool tfe : {false, true}) {
-    for (uint8_t dst : {uint8_t{30}, uint8_t{31}}) {
-      SCOPED_TRACE(testing::Message() << tfe << ' ' << unsigned(dst));
+  for (unsigned kind = 0; kind < 3; ++kind) {
+    for (uint8_t dst : {uint8_t{30}, uint8_t{31}, uint8_t{32}}) {
+      SCOPED_TRACE(testing::Message() << kind << ' ' << unsigned(dst));
       auto words =
-          tfe ? rdna4::build_vbuffer(rdna4::kBufferLoadB32Vbuffer,
-                                     {.soffset = kModernNullSelector, .tfe = true, .vdata = dst})
-              : rdna4::build_vglobal(rdna4::kGlobalLoadB64Vglobal,
-                                     {.saddr = kModernNullSelector, .vdst = dst, .vaddr = 2});
+          kind == 0 ? rdna4::build_vglobal(rdna4::kGlobalLoadB64Vglobal,
+                                           {.saddr = kModernNullSelector, .vdst = dst, .vaddr = 2})
+                    : rdna4::build_vbuffer(
+                          rdna4::kBufferLoadB32Vbuffer,
+                          {.soffset = kModernNullSelector, .tfe = kind == 1, .vdata = dst});
       auto decoded = decoder_->decode(words.data());
       ASSERT_TRUE(decoded.succeeded());
       auto &wait = wf_->ensure_memory_wait_scoreboard();
@@ -331,9 +334,9 @@ TEST_F(Rdna4MemoryTest, WaitingForAnUnallocatedLoadResultHasNoRegisterDependency
       EXPECT_EQ(wait.outstanding(WaitCounterKind::Load), 1u);
       unsigned reports = 0;
       wait.bind(0x100, &reports, [](void *ptr, const auto &) { ++*static_cast<unsigned *>(ptr); });
-      // For VBUFFER the extra allocation word is reserved even when unwritten.
+      // TFE reserves an extra allocation word even when the status is unwritten.
       wait.access({RegClass::VGPR, dst, 1}, 1, 0xf, false);
-      EXPECT_EQ(reports, unsigned(dst == 30));
+      EXPECT_EQ(reports, unsigned(kind == 2 ? dst < 32 : dst == 30));
     }
   }
 }

@@ -381,20 +381,21 @@ following lifecycle:
    still pending, such as a global load waiting on `loadcnt`, keeps every
    later retired event in the registry.
 
-On RDNA and CDNA5 every issued generic `FLAT_*` instruction occupies a
-vector-memory and an LDS counter position, including when EXEC is empty. On
-RDNA1 through RDNA 3.5 a live destination needs sufficient waits on both
-counters. RDNA4 and CDNA5 track the returned lanes by their address domain.
-For CDNA1–4 the simulator models counter participation and
-result readiness by address domain. The CDNA3 and CDNA4 ISA guides, section
-10.2, describe joint VM and LGKM completion. CDNA hardware qualification is
-still needed to establish when one wait suffices. The conservative wait on
-gfx950 is `s_waitcnt vmcnt(0) lgkmcnt(0)`. LDS byte conflicts between waves
-also require workgroup synchronization.
+An active generic `FLAT_*` instruction occupies both vector-memory and LDS
+counter positions. On all targets, each returned lane follows its resolved
+route. With legacy counters, a global-only result is ready after `vmcnt(0)`,
+even while its unused LGKMCNT position remains. Gfx1250 uses the corresponding
+LOADCNT or DSCNT wait. An unused pre-gfx1250 credit alone does not prove that
+older work completed through counter-capacity pressure. The detector keeps
+these unused credits in bounded per-counter state, capped by the counter's
+capacity; a partial wait tightens that bound and a zero wait clears it.
+Ordered-class issue positions also include the credits, so partial waits can
+prove completion of older requests without treating the credits as capacity
+eligible. No race event is allocated for each unused credit.
+Empty-EXEC admission is target-specific. Validation on every physical GPU
+architecture is not established.
 
-Routing preserves the decoded completion ordering for each issued counter.
-Generated VMEM/FLAT stores and atomics do not carry an EXP completion
-obligation. CDNA4 FLAT completion stays unordered in the model.
+For example, gfx950's ROCr copy uses a global-only FLAT result after `vmcnt(0)`:
 
 On targets with conditional counter participation, functional counter acquisition
 and both runtime checkers use the selected domains. FLAT capacity constraints are
@@ -403,10 +404,25 @@ Before reading the address operands, neither domain is guaranteed to need a
 counter slot. A full LDS counter followed by a global-only FLAT therefore cannot
 prove an older LDS result complete.
 
-Global and scratch lanes share the VMEM domain. On RDNA1 through RDNA3.5 a FLAT
-result needs both counter waits. On targets with independent completion, each lane
-only waits for the pipeline that returned its result. Functional execution completes
-retryable global/scratch work before accessing LDS.
+An LDS-only gfx950 FLAT result follows LGKMCNT. Mixed-route returned lanes
+require both waits to cover the whole result. Newer targets use their
+corresponding split counters. Routing preserves decoded completion ordering and
+the obligations required by each target. Generated VMEM/FLAT stores and atomics
+do not carry an EXP completion obligation. CDNA4 FLAT completion stays unordered;
+a nonzero wait cannot prove a result ready.
+
+The core checker and race detector apply pre-gfx1250 FLAT capacity constraints
+after checking address operands and resolving requests. An incoming FLAT cannot
+prove an older address result ready before that read. On gfx1250, every FLAT
+instruction increments both DScnt and
+LOADcnt or STOREcnt when it issues (CDNA5 ISA 5.7.1.3), and the race detector
+counts it on both; see the gfx1250 capacity model below.
+
+A mixture of global and scratch lanes uses the same VMEM domain. The race plugin and
+the core checker's [FLAT register-readiness policy](memory-wait-counter-coverage.md#flat-register-readiness)
+track the LDS and global lane groups separately. Functional execution splits
+mixed requests by address space, completing retryable global/scratch work before
+accessing LDS.
 LDS validation and interval registration are bounded by the CU backing capacity.
 For RDNA4 FLAT LDS, they also stop at the captured workgroup allocation end,
 retaining only complete memory elements; a lane whose first element does not fit
@@ -478,13 +494,22 @@ s_waitcnt_vmcnt null, 0        ; standalone VMCNT form
 s_waitcnt_lgkmcnt null, 0      ; standalone LGKMCNT form
 ```
 
-On CDNA1 through CDNA4, VMCNT holds up to 63 positions and LGKMCNT up to 15.
-On RDNA1 through RDNA3.5, both hold up to 63. Vector stores use a separate VSCNT
-on these RDNA targets. On RDNA4 and CDNA5 the detector applies the limits of
-the individual counters used by the operation. LOADCNT, STORECNT, DSCNT,
-SAMPLECNT, ASYNCCNT and TENSORCNT hold up to 63 positions where implemented,
-KMCNT holds up to 31, and BVHCNT and EXPCNT hold up to 7. Generic FLAT
-uses the target-specific admission rules above.
+Counter-capacity backpressure is modeled for the VMCNT and LGKMCNT domains on
+CDNA1 through CDNA4 and GFX11. CDNA uses a four-bit LGKMCNT and six-bit VMCNT;
+GFX11 uses six-bit fields for both. GFX11 vector stores use the separate VSCNT
+domain and therefore do not create VMCNT pressure. An active generic FLAT
+occupies both vector and LDS positions on CDNA1–4 and GFX11 for explicit waits.
+Before gfx1250, the race detector applies capacity constraints after resolving
+addresses; an unused route credit cannot prove completion of older requests.
+
+On CDNA4, a buffer, global or scratch instruction issued with wave EXEC zero
+counts on VMCNT and completes in order with the wave's other vector memory
+instructions (CDNA4 ISA sections 3.3, 4.4 and 10.5). This was measured on
+MI355X for buffer and global loads to VGPRs, buffer and global stores, and
+buffer loads to LDS (ROCm/rocm-systems#15938). Such an instruction applies
+VMCNT backpressure and keeps a slot without registers or LDS bytes. A later
+`s_waitcnt vmcnt(N)` counts that slot. DS and FLAT instructions with EXEC zero
+were not measured on CDNA4, so this rule leaves their behavior unproven.
 
 On CDNA1 through CDNA4, the detector retains ordered VMCNT slots for buffer,
 global and scratch instructions issued with EXEC zero. These slots count

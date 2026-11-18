@@ -5298,7 +5298,7 @@ TEST(Gfx1251PackedU64ExecutionTest, ReadsVectorShiftPairsAndReplicatesScalarShif
       SpecialSourceCase{"ttmp", {0xcc7e4004u, 0x1c40d908u}, {11u, 17u}},
       SpecialSourceCase{"vcc", {0xcc7e4004u, 0x1c40d508u}, {11u, 17u}},
       SpecialSourceCase{"exec", {0xcc7e4004u, 0x1c40fd08u}, {11u, 17u}},
-      SpecialSourceCase{"flat-scratch", {0xcc7e4004u, 0x1c41cd08u}, {11u, 17u}},
+      SpecialSourceCase{"flat-scratch", {0xcc7e4004u, 0x1c41cd08u}, {39u, 59u}},
       SpecialSourceCase{"scc", {0xcc7e4004u, 0x1c41fb08u}, {11u, 17u}},
       SpecialSourceCase{"vgpr", {0xcc7e4004u, 0x1c421908u}, {11u, 23u}},
   };
@@ -5311,6 +5311,9 @@ TEST(Gfx1251PackedU64ExecutionTest, ReadsVectorShiftPairsAndReplicatesScalarShif
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
+  constexpr uint64_t private_base = uint64_t{1} << 60;
+  wf->set_apertures(0, 0, private_base, private_base + (uint64_t{1} << 57) - 1,
+                    /*override_launch=*/true);
 
   for (const auto &test_case : kCases) {
     SCOPED_TRACE(test_case.name);
@@ -5323,7 +5326,7 @@ TEST(Gfx1251PackedU64ExecutionTest, ReadsVectorShiftPairsAndReplicatesScalarShif
       wf->set_ttmp(1, high_word);
       wf->set_exec_raw(scalar_pair);
       wf->set_vcc_raw(scalar_pair);
-      wf->set_scratch_base(scalar_pair);
+      wf->set_scratch_base(test_case.name == "flat-scratch" ? 0x80 : scalar_pair);
       wf->write_scc(true);
       write_vgpr_packed_u64(*cu, *wf, 8, 0, {2u, 3u});
       write_vgpr_packed_u32(*cu, *wf, 12, 0, {1u, 2u});

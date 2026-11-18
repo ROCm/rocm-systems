@@ -393,7 +393,7 @@ void FlatAtomicSwapB32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->exec_mask;
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -419,7 +419,7 @@ void FlatAtomicCmpswapB32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->exec_mask;
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -447,7 +447,7 @@ void FlatAtomicAddU32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->exec_mask;
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -473,7 +473,7 @@ void FlatAtomicSubU32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->exec_mask;
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -499,7 +499,7 @@ void FlatAtomicSubClampU32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->exec_mask;
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -525,7 +525,7 @@ void FlatAtomicMinI32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->exec_mask;
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -551,7 +551,7 @@ void FlatAtomicMinU32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->exec_mask;
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -577,7 +577,7 @@ void FlatAtomicMaxI32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->exec_mask;
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -603,7 +603,7 @@ void FlatAtomicMaxU32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->exec_mask;
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -629,7 +629,7 @@ void FlatAtomicAndB32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->exec_mask;
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -655,7 +655,7 @@ void FlatAtomicOrB32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->exec_mask;
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -681,7 +681,7 @@ void FlatAtomicXorB32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->exec_mask;
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -707,7 +707,7 @@ void FlatAtomicIncU32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->exec_mask;
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -733,7 +733,7 @@ void FlatAtomicDecU32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->exec_mask;
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -759,7 +759,7 @@ void FlatAtomicSwapB64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->exec_mask;
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -787,7 +787,7 @@ void FlatAtomicCmpswapB64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->exec_mask;
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 16);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -819,7 +819,7 @@ void FlatAtomicAddU64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->exec_mask;
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -847,7 +847,7 @@ void FlatAtomicSubU64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->exec_mask;
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -875,7 +875,7 @@ void FlatAtomicMinI64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->exec_mask;
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -903,7 +903,7 @@ void FlatAtomicMinU64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->exec_mask;
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -931,7 +931,7 @@ void FlatAtomicMaxI64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->exec_mask;
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -959,7 +959,7 @@ void FlatAtomicMaxU64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->exec_mask;
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -987,7 +987,7 @@ void FlatAtomicAndB64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->exec_mask;
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1015,7 +1015,7 @@ void FlatAtomicOrB64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->exec_mask;
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1043,7 +1043,7 @@ void FlatAtomicXorB64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->exec_mask;
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1071,7 +1071,7 @@ void FlatAtomicIncU64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->exec_mask;
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1099,7 +1099,7 @@ void FlatAtomicDecU64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->exec_mask;
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1127,7 +1127,7 @@ void FlatAtomicCondSubU32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->exec_mask;
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1156,7 +1156,7 @@ void FlatAtomicMinNumF32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->exec_mask;
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1185,7 +1185,7 @@ void FlatAtomicMaxNumF32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->exec_mask;
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1215,7 +1215,7 @@ void FlatAtomicAddF32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->exec_mask;
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1242,7 +1242,7 @@ void FlatAtomicPkAddF16Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->exec_mask;
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1269,7 +1269,7 @@ void FlatAtomicPkAddBf16Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->exec_mask;
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {

@@ -47,6 +47,9 @@ void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront
 void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront &wf,
                                amdgpu::VectorMemState &d);
 
+bool nullify_formatted_buffer_load_before_format(amdgpu::Wavefront &wf, amdgpu::VectorMemState &d,
+                                                 uint32_t components, bool tfe);
+
 void ds_calculate_addresses(const VdsMachineInst &inst, amdgpu::Wavefront &wf,
                             amdgpu::VectorMemState &d);
 

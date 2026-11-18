@@ -8659,6 +8659,7 @@ def test_rdna4_vopd_template_uses_available_src_operand_type(tmp_path):
     assert 'v_dual_dot2acc_f32_f16' in cpp
     assert 'v_dual_max_num_f32' in cpp
     assert 'v_dual_max_f32' not in cpp
+    assert cpp.count('op->set_vopd_source();') == 1
 
 
 def test_rdna3_and_rdna35_vopd_generation_matches_common_profile(tmp_path):
@@ -8694,12 +8695,11 @@ def test_rdna3_and_rdna35_vopd_generation_matches_common_profile(tmp_path):
         arch: cpp.replace('rdna3_5', 'rdnaX').replace('rdna3', 'rdnaX')
         for arch, cpp in generated.items()
     }
-    # GFX11.5 tags the source operands whose out-of-range lookup preserves the bank.
-    plain = '    if (op)\n      src_operands_[num_src_++] = op;'
+    # GFX11 and GFX12 VOPD sources preserve the low two register-index bits.
     tagged = '    if (op) {\n      op->set_vopd_source();\n      src_operands_[num_src_++] = op;\n    }'
-    assert normalized['rdna3'].count(plain) == 1
+    assert normalized['rdna3'].count(tagged) == 1
     assert normalized['rdna3_5'].count(tagged) == 1
-    assert normalized['rdna3'].replace(plain, tagged) == normalized['rdna3_5']
+    assert normalized['rdna3'] == normalized['rdna3_5']
 
 
 def test_gfx1250_vopd_uses_plain_src_when_simple_src_operand_is_absent(tmp_path):
@@ -8720,6 +8720,7 @@ def test_gfx1250_vopd_uses_plain_src_when_simple_src_operand_is_absent(tmp_path)
     assert '[[maybe_unused]] bool vopd3' in cpp
     assert 'OperandType::OPR_SRC_SIMPLE' not in cpp
     assert 'return Operand(bits, OperandType::OPR_SRC, encoded);' in cpp
+    assert cpp.count('op->set_vopd_source();') == 1
 
 
 @pytest.mark.parametrize(
@@ -9726,12 +9727,12 @@ def test_buffer_payload_read_exec_policy_is_profile_owned(
         num_elems=1,
     )
 
-    for body in (
-        codegen._gen_buffer_store([], [], store),
-        codegen._gen_buffer_atomic([], [], atomic),
-    ):
-        assert f'uint64_t exec = {expected_exec};' in body
-        assert f'uint64_t exec = {unexpected_exec};' not in body
+    store_body = codegen._gen_buffer_store([], [], store)
+    atomic_body = codegen._gen_buffer_atomic([], [], atomic)
+    assert f'uint64_t exec = {expected_exec};' in store_body
+    assert f'uint64_t exec = {unexpected_exec};' not in store_body
+    assert f'uint64_t exec = d->nullified_result ? 0 : {expected_exec};' in atomic_body
+    assert f'uint64_t exec = {unexpected_exec};' not in atomic_body
 
 
 def test_gfx1250_buffer_u64_atomic_payload_width_uses_two_dwords():

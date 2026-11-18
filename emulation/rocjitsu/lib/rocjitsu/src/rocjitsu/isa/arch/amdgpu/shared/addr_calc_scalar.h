@@ -13,6 +13,7 @@
 /// with any ISA family whose encoding struct exposes the required field names.
 
 #include "rocjitsu/isa/arch/amdgpu/shared/buffer_address.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/memory_result_preflight.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -172,6 +173,9 @@ void ds_calculate_addresses(const DsInst &inst, amdgpu::Wavefront &wf, VectorMem
   d.wf_size = wf.wf_size();
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
+  if ((cu.arch() == ROCJITSU_CODE_ARCH_RDNA4 || cu.arch() == ROCJITSU_CODE_ARCH_CDNA5) &&
+      nullify_unallocated_load_before_address(wf, d))
+    return;
   const uint32_t ds_base = d.ds_base(wf.lds_base());
   uint32_t offset = (static_cast<uint32_t>(inst.offset1) << 8) | inst.offset0;
   RegisterAccess regs(cu);

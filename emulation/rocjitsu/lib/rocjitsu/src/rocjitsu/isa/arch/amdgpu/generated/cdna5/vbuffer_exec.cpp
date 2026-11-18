@@ -495,7 +495,7 @@ void BufferAtomicSwapB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -525,7 +525,7 @@ void BufferAtomicCmpswapB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -557,7 +557,7 @@ void BufferAtomicAddU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -587,7 +587,7 @@ void BufferAtomicSubU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -617,7 +617,7 @@ void BufferAtomicSubClampU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -647,7 +647,7 @@ void BufferAtomicMinI32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -677,7 +677,7 @@ void BufferAtomicMinU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -707,7 +707,7 @@ void BufferAtomicMaxI32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -737,7 +737,7 @@ void BufferAtomicMaxU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -767,7 +767,7 @@ void BufferAtomicAndB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -797,7 +797,7 @@ void BufferAtomicOrB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -827,7 +827,7 @@ void BufferAtomicXorB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -857,7 +857,7 @@ void BufferAtomicIncU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -887,7 +887,7 @@ void BufferAtomicDecU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -917,7 +917,7 @@ void BufferAtomicSwapB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -949,7 +949,7 @@ void BufferAtomicCmpswapB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -985,7 +985,7 @@ void BufferAtomicAddU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1017,7 +1017,7 @@ void BufferAtomicSubU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1049,7 +1049,7 @@ void BufferAtomicMinI64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1081,7 +1081,7 @@ void BufferAtomicMinU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1113,7 +1113,7 @@ void BufferAtomicMaxI64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1145,7 +1145,7 @@ void BufferAtomicMaxU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1177,7 +1177,7 @@ void BufferAtomicAndB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1209,7 +1209,7 @@ void BufferAtomicOrB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1241,7 +1241,7 @@ void BufferAtomicXorB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1273,7 +1273,7 @@ void BufferAtomicIncU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1305,7 +1305,7 @@ void BufferAtomicDecU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1337,7 +1337,7 @@ void BufferAtomicCondSubU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1370,7 +1370,7 @@ void BufferAtomicMinNumF32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1403,7 +1403,7 @@ void BufferAtomicMaxNumF32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1436,7 +1436,7 @@ void BufferAtomicAddF64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1471,7 +1471,7 @@ void BufferAtomicAddF32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1501,7 +1501,7 @@ void BufferAtomicPkAddF16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1531,7 +1531,7 @@ void BufferAtomicPkAddBf16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1564,7 +1564,7 @@ void BufferAtomicMinNumF64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());
@@ -1599,7 +1599,7 @@ void BufferAtomicMaxNumF64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = d->exec_mask;
+  uint64_t exec = d->nullified_result ? 0 : d->exec_mask;
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdata.opr_type_, vdata.encoding_value_, vdata.vgpr_msb_role());

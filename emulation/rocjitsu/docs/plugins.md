@@ -476,13 +476,26 @@ There are two memory hooks, and they see different things.
 `onAmdgpuRouteMemoryInstruction` fires before routing decides anything: the
 instruction still carries the address space it decoded as and the addresses it
 computed. `onAmdgpuMemoryAccessRouted` fires once routing has settled and
-reports the selected pipeline and effective addresses in a `MemoryAccessObservation`.
-The observation's scalar `wait_counter` field identifies the counter for that route. Mixed FLAT
-requests retain their VMEM counter in this field. For the full set of issued
-counters, use `onAmdgpuMemoryAccessRouted(access, inst, wf)`. For generic FLAT,
-`inst.data_as<VectorMemState>()->routed_issue_info->counter_obligations()` includes
-both VMEM and LDS on RDNA1–4 and CDNA5, even for uniform or empty requests.
-On CDNA1–4 each domain takes a position only when a lane requests it.
+reports a `MemoryAccessObservation` describing the access the memory system is
+actually about to be asked for — the pipeline it was issued to, its routing-selected
+counter, and its effective addresses. The scalar `wait_counter` names the selected
+pipeline counter. In the context-preserving callback, check the optional
+`VectorMemState::routed_issue_info` on a routed FLAT instruction with decoded
+issue metadata. When engaged, its `counter_obligations()` list physical counter
+positions charged at issue. Other vector accesses use
+`Instruction::amdgpu_memory_issue_info()` when available. Some FLAT targets
+charge both VMEM and LDS even when all requesting lanes use one domain. Count
+both positions for occupancy; an unused position is not a wait requirement for
+that lane's returned data.
+
+For requesting FLAT lanes, `flat_local_lane_mask` identifies LDS requests,
+`flat_dds_lane_mask` identifies DDS requests, and
+`request_lane_mask & ~(flat_local_lane_mask | flat_dds_lane_mask)` identifies
+VMEM/scratch requests. Use each lane's actual route for result readiness. On
+CDNA1/2 and RDNA1/2, an active private-OOB FLAT load can return zero without a
+byte request: that lane is absent from `request_lane_mask`, yet its result
+follows the VMEM position even though the instruction also charges LDS. A zero
+request mask alone does not prove the absence of a result dependency.
 
 When at least one FLAT lane requests memory and all requests use the shared
 aperture, routing selects the LDS pipeline and sets

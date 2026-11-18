@@ -18,6 +18,10 @@ class ExpExp : public Exp {
 public:
   ExpExp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  bool tracks_explicit_source(uint8_t index) const override {
+    const auto operands = amdgpu::ShaderExportOperands::decode_gfx10(inst_);
+    return index >= operands.sources.size() || operands.channel_enabled(index);
+  }
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.gfx10_export =
         amdgpu::Gfx10ShaderExportOperands{uint8_t(inst_.tgt), uint8_t(inst_.en), bool(inst_.compr),

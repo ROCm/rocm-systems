@@ -44,6 +44,42 @@ bool Wavefront::valu_destinations_allocated(const Instruction &inst) const {
 
 bool Wavefront::memory_destination_out_of_range(const Instruction &inst) const {
   const auto arch = cu_.arch();
+  // The functional memory path nullifies the whole returned tuple outside
+  // the dispatched allocation. Use that same extent before issuing wait tokens.
+  // Generated DS, FLAT, GLOBAL, SCRATCH, and BUFFER loads and returning atomics
+  // do not always carry SIMPLE_MEMORY_RESULT. They still nullify an
+  // unallocated result before reading any address or payload operand.
+  const auto mnemonic = inst.mnemonic();
+  const bool buffer_load =
+      mnemonic.starts_with("buffer_load_") || mnemonic.starts_with("tbuffer_load_");
+  // Block loads select destinations one dword at a time through M0. An
+  // unallocated trailing word does not nullify the earlier selected words.
+  const bool global_or_scratch_load =
+      (mnemonic.starts_with("global_load_") || mnemonic.starts_with("scratch_load_")) &&
+      !mnemonic.ends_with("_block");
+  if ((arch == ROCJITSU_CODE_ARCH_CDNA5 || arch == ROCJITSU_CODE_ARCH_RDNA4) &&
+      ((inst.flags() & SIMPLE_MEMORY_RESULT) ||
+       (inst.is_memory_op() && (mnemonic.starts_with("ds_") || mnemonic.starts_with("flat_") ||
+                                global_or_scratch_load || mnemonic.starts_with("global_atomic_") ||
+                                mnemonic.starts_with("buffer_atomic_") || buffer_load)))) {
+    const auto &allocation = vgpr_alloc();
+    RegisterModifiers modifiers;
+    inst.amdgpu_register_modifiers(modifiers);
+    for (int i = 0; i < inst.num_dst_operands(); ++i) {
+      const auto *dst = inst.dst_operand(i);
+      if (const auto reg = dst->decoded_vgpr()) {
+        const auto bank = arch == ROCJITSU_CODE_ARCH_CDNA5 ? vgpr_msb_for_role(dst->vgpr_msb_role()) : 0;
+        const uint32_t data_width =
+            wf_size() == 64 && (inst.flags() & COMPACT_WAVE64_MEMORY_RESULT)
+                ? std::max(1u, uint32_t{reg->width} / 2)
+                : reg->width;
+        const uint32_t width = data_width + (buffer_load && modifiers.buffer_tfe);
+        if (!allocation.contains(allocation.base + reg->index + bank * 256u, width))
+          return true;
+      }
+    }
+    return false;
+  }
   if (arch != ROCJITSU_CODE_ARCH_CDNA2 && arch != ROCJITSU_CODE_ARCH_CDNA3 &&
       arch != ROCJITSU_CODE_ARCH_CDNA4)
     return false;

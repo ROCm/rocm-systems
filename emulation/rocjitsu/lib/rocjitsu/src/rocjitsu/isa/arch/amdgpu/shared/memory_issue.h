@@ -32,6 +32,43 @@ namespace rocjitsu::amdgpu {
          arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
 }
 
+/// Active generic FLAT issues both VM/VS and LGKM on legacy targets.
+[[nodiscard]] constexpr bool legacy_flat_issues_both_counter_domains(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
+         arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+}
+
+/// The empty-EXEC rule has separate target evidence from active FLAT requests.
+[[nodiscard]] constexpr bool legacy_flat_issues_with_empty_exec(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+}
+
+/// GFX11/12 charge both domains for an issued FLAT. GFX11 results need both
+/// counter acknowledgments; split-counter GFX12 results follow their route.
+[[nodiscard]] constexpr bool flat_issues_both_routed_domains(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+}
+
+/// A zero-EXEC FLAT can be skipped only while the target-specific physical
+/// issue queues are idle. GFX11 checks VM/VS; RDNA4 checks VM/VS, DS, and
+/// SAMPLE; CDNA5 checks VM/VS, DS, ASYNC, and TENSOR. The last argument is
+/// SAMPLE on RDNA4 or ASYNC/TENSOR on CDNA5. A modeled BVH result alone does
+/// not establish physical queue occupancy in the simulator.
+[[nodiscard]] constexpr bool flat_issues_with_empty_exec(rj_code_arch_t arch, bool vmem_pending,
+                                                         bool ds_pending,
+                                                         bool other_issue_queue_pending) {
+  if (legacy_flat_issues_with_empty_exec(arch))
+    return true;
+  if (!flat_issues_both_routed_domains(arch))
+    return false;
+  if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5)
+    return vmem_pending;
+  return vmem_pending || ds_pending || other_issue_queue_pending;
+}
+
 /// @brief Completion ordering associated with an AMDGPU memory issue.
 /// @details Counter membership and completion ordering are separate: operations
 /// can share a wait counter without completing in one usable FIFO order.
@@ -98,13 +135,14 @@ private:
 /// Each obligation carries its own completion-order class because operations
 /// sharing one counter need not form one FIFO, and one instruction's different
 /// counter domains can have different ordering guarantees. Decoded FLAT metadata
-/// lists both domains. Address routing selects the obligations for each request.
-/// flat_issues_both_counter_domains() selects RDNA1–4 and CDNA5 for additional
-/// counter occupancy in unused domains. CDNA1–4 use the routed domains.
-/// The dynamic race detector requires every attached obligation for whole-event
-/// completion, including destination-register and memory dependencies. This API
-/// does not represent a separate source-register lifetime. The same obligations
-/// drive emulated counter increments and are exposed to execution plugins.
+/// lists possible domains. Address routing and the target determine the issued credits.
+/// One race-detector event requires every attached obligation for completion,
+/// including destination-register and memory dependencies. A mixed-route FLAT
+/// splits into per-route events via for_flat_memory_domains(), so a wait can
+/// release only the lanes on its completed route. The gfx1250 race detector
+/// also records counter slots for unused image domains. This API does not
+/// represent a separate source-register lifetime. The same obligations drive
+/// emulated counter increments and are exposed to execution plugins.
 /// exec_masked distinguishes ordinary vector memory operations from scalar
 /// memory and the few vector operations that execute independently of EXEC.
 ///
@@ -120,6 +158,19 @@ struct MemoryIssueInfo {
     return {counter_obligations_.data(), num_counter_obligations_};
   }
   [[nodiscard]] bool empty() const { return num_counter_obligations_ == 0; }
+
+  /// Select physical issue credits independently of the return route of each lane.
+  [[nodiscard]] MemoryIssueInfo for_flat_issue(rj_code_arch_t arch, uint64_t requests,
+                                               uint64_t shared, bool empty_exec,
+                                               bool issue_empty = false,
+                                               bool returned_without_request = false) const {
+    if ((legacy_flat_issues_both_counter_domains(arch) &&
+         (requests || returned_without_request)) ||
+        (legacy_flat_issues_with_empty_exec(arch) && empty_exec) ||
+        (flat_issues_both_routed_domains(arch) && (requests || (empty_exec && issue_empty))))
+      return *this;
+    return for_flat_memory_domains((requests & ~shared) != 0, (requests & shared) != 0);
+  }
 
   /// Select FLAT's VMEM and/or DS obligations for the resolved request domains.
   /// Preserve each selected obligation's counter increment and completion class,

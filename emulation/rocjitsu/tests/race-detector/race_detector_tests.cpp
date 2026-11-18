@@ -180,7 +180,9 @@ TEST(RaceDetector, UnorderedLdsWriteRequiresBothCounterWaits) {
   }
 }
 
-TEST(RaceDetector, MixedFlatKeepsOneCounterEntryAndAllRegisterLanes) {
+TEST(RaceDetector, LdsSubsetMaskPreservesFullRegisterLanes) {
+  constexpr std::array ds_obligations{
+      amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT, MemoryOrderClass::LDS}};
   for (uint64_t lds_mask : {0u, 1u, 2u, 5u}) {
     SCOPED_TRACE(lds_mask);
     std::vector<RaceViolation> violations;
@@ -190,10 +192,10 @@ TEST(RaceDetector, MixedFlatKeepsOneCounterEntryAndAllRegisterLanes) {
     auto &wave = detector.getWaveRaceState(0);
     const std::array<uint32_t, 32> addresses{64, 128, 256};
     for (uint32_t reg : {1u, 2u})
-      wave.registerLdsEvent(
-          testInstruction(reg), MemoryEventType::LDS_TO_VGPR, {reg}, /*execMask=*/3,
-          /*waveSize=*/32, addresses, /*bytesPerLane=*/4, 0xf,
-          kMixedOrderGenericFlatLoadObligations, MemoryOrderClass::UNORDERED, lds_mask);
+      wave.registerLdsEvent(testInstruction(reg), MemoryEventType::LDS_TO_VGPR, {reg},
+                            /*execMask=*/3,
+                            /*waveSize=*/32, addresses, /*bytesPerLane=*/4, 0xf, ds_obligations,
+                            MemoryOrderClass::LDS, lds_mask);
     const auto &events = detector.events();
     ASSERT_EQ(events.totalAllocated(), 2);
     for (const EventId event : {EventId{0}, EventId{1}}) {
@@ -201,11 +203,10 @@ TEST(RaceDetector, MixedFlatKeepsOneCounterEntryAndAllRegisterLanes) {
       EXPECT_EQ(events.ldsIntervals(event).contains(64), (lds_mask & 1) != 0);
       EXPECT_EQ(events.ldsIntervals(event).contains(128), (lds_mask & 2) != 0);
       EXPECT_FALSE(events.ldsIntervals(event).contains(256)); // Outside EXEC.
-      EXPECT_EQ(events.pendingCounterIncrement(event, amdgpu::WaitCounterType::LOADCNT), 1);
+      EXPECT_EQ(events.pendingCounterIncrement(event, amdgpu::WaitCounterType::LOADCNT), 0);
       EXPECT_EQ(events.pendingCounterIncrement(event, amdgpu::WaitCounterType::DSCNT), 1);
     }
     PendingWaitCount wait;
-    wait.add(amdgpu::WaitCounterType::LOADCNT, 1);
     wait.add(amdgpu::WaitCounterType::DSCNT, 1);
     wave.dispatch(wait);
     // A single-wave workgroup retires a completed event with LDS bytes at once;
@@ -224,7 +225,6 @@ TEST(RaceDetector, MixedFlatKeepsOneCounterEntryAndAllRegisterLanes) {
       violations.clear();
     }
     wait.updates.clear();
-    wait.add(amdgpu::WaitCounterType::LOADCNT, 0);
     wait.add(amdgpu::WaitCounterType::DSCNT, 0);
     wave.dispatch(wait);
     wave.checkVgprReadLanes(2, 3, 0xf);

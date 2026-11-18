@@ -6366,7 +6366,7 @@ kfd_process_device_apertures SimulatedKfd::gpu_apertures(uint32_t ordinal) const
   const uint64_t offset = gfx10 ? 0 : static_cast<uint64_t>(ordinal) * kApertureStride;
   const uint64_t lds_base = 0x1000000000000ULL + offset;
   const uint64_t scratch_base = 0x2000000000000ULL + offset;
-  return {
+  kfd_process_device_apertures apertures{
       .lds_base = lds_base,
       .lds_limit = lds_base + 0xFFFFFFFFULL,
       .scratch_base = scratch_base,
@@ -6378,6 +6378,9 @@ kfd_process_device_apertures SimulatedKfd::gpu_apertures(uint32_t ordinal) const
       .gpu_id = ordinal < gpus_.size() ? gpus_[ordinal].gpu_id : 0,
       .pad = 0,
   };
+  if (ordinal < gpus_.size() && gpus_[ordinal].soc->arch() == ROCJITSU_CODE_ARCH_CDNA5)
+    set_gfx1250_shader_apertures(apertures);
+  return apertures;
 }
 
 int SimulatedKfd::get_available_memory_ioctl(void *arg) {

@@ -21,6 +21,8 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 
@@ -1246,15 +1248,16 @@ void check_flat_lds_observation(rj_code_arch_t arch) {
   ASSERT_NE(race_state, nullptr);
   const auto &events = race_state->race_state->getDetector()->events();
   ASSERT_EQ(events.totalAllocated(), 2);
-  EXPECT_EQ(events.execMask(EventId{0}), 0x8u);
-  EXPECT_EQ(events.execMask(EventId{1}), 0x7u);
-  EXPECT_TRUE(events.ldsIntervals(EventId{0}).empty());
-  EXPECT_EQ(events.ldsIntervals(EventId{1}).getTotalBytes(), 12);
-  EXPECT_TRUE(events.ldsIntervals(EventId{1}).contains(own_base + 0x40));
-  EXPECT_TRUE(events.ldsIntervals(EventId{1}).contains(own_base + 0x47));
-  EXPECT_TRUE(events.ldsIntervals(EventId{1}).contains(end - 4));
-  EXPECT_TRUE(events.ldsIntervals(EventId{1}).contains(end - 1));
-  EXPECT_FALSE(events.ldsIntervals(EventId{1}).contains(end));
+  const EventId global_event{0}, lds_event{1};
+  EXPECT_EQ(events.execMask(global_event), 0x8u);
+  EXPECT_EQ(events.execMask(lds_event), 0x7u);
+  EXPECT_EQ(events.ldsIntervals(global_event).getTotalBytes(), 0);
+  EXPECT_EQ(events.ldsIntervals(lds_event).getTotalBytes(), 12);
+  EXPECT_TRUE(events.ldsIntervals(lds_event).contains(own_base + 0x40));
+  EXPECT_TRUE(events.ldsIntervals(lds_event).contains(own_base + 0x47));
+  EXPECT_TRUE(events.ldsIntervals(lds_event).contains(end - 4));
+  EXPECT_TRUE(events.ldsIntervals(lds_event).contains(end - 1));
+  EXPECT_FALSE(events.ldsIntervals(lds_event).contains(end));
   EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
   if (!cdna2_target) {
     // A native DS read retains its register dependency even when its second
@@ -1432,8 +1435,12 @@ TEST(RoutedMemoryObservationTest, MixedFlatReportsEffectiveAddressesWithoutChang
     scoreboard->wait(WaitCounterKind::Load, 0);
     const auto shared = access.flat_local_lane_mask | access.flat_dds_lane_mask;
     scoreboard->access({RegClass::VGPR, 2, 1}, access.request_lane_mask & ~shared, 0xf, false);
+    // gfx950 returns the global lane after VM zero while its LDS lane remains.
     EXPECT_EQ(cu->memory_wait_diagnostic_count(), 0u);
     scoreboard->access({RegClass::VGPR, 2, 1}, shared, 0xf, false);
+    EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
+    scoreboard->wait(WaitCounterKind::Ds, 0);
+    scoreboard->access({RegClass::VGPR, 2, 1}, access.request_lane_mask, 0xf, false);
     EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
   }
 }
@@ -2124,16 +2131,17 @@ TEST(RoutedMemoryObservationTest, AnUnroutableAccessIsReportedRatherThanDropped)
   EXPECT_TRUE(access.addresses.empty());
 }
 
-TEST(ExecutionPluginTest, MemoryPipelineFlatCountersFollowTargetIssuePolicy) {
+TEST(ExecutionPluginTest, MemoryPipelineFlatCounterCreditsByArchitecture) {
   enum class Operation { Load, Store, ReturningAtomic, Atomic };
-  enum class Space { Global, Lds, Scratch, GlobalAndScratch };
-  for (const std::string_view arch : {"cdna2", "cdna4", "rdna1", "rdna2", "rdna4", "cdna5"}) {
-    const bool gfx10 = arch == "rdna1" || arch == "rdna2";
+  enum class Space { Global, Lds, Scratch, GlobalAndScratch, GlobalAndLds };
+  for (const std::string_view arch :
+       {"cdna2", "cdna4", "rdna2", "rdna3", "rdna3_5", "rdna4", "cdna5"}) {
     for (const auto operation :
          {Operation::Load, Operation::Store, Operation::ReturningAtomic, Operation::Atomic}) {
-      for (const auto space :
-           {Space::Global, Space::Lds, Space::Scratch, Space::GlobalAndScratch}) {
-        if (gfx10 && (space == Space::Scratch || space == Space::GlobalAndScratch))
+      for (const auto space : {Space::Global, Space::Lds, Space::Scratch, Space::GlobalAndScratch,
+                               Space::GlobalAndLds}) {
+        // RDNA2's FLAT address calculator does not yet translate private pointers.
+        if (arch == "rdna2" && (space == Space::Scratch || space == Space::GlobalAndScratch))
           continue;
         for (const uint64_t exec : {0u, 2u, 3u}) {
           SCOPED_TRACE(arch);
@@ -2141,7 +2149,8 @@ TEST(ExecutionPluginTest, MemoryPipelineFlatCountersFollowTargetIssuePolicy) {
           SCOPED_TRACE(static_cast<int>(space));
           SCOPED_TRACE(exec);
           const bool cdna_legacy = arch == "cdna2" || arch == "cdna4";
-          const bool split = arch == "rdna4" || arch == "cdna5";
+          const bool gfx11 = arch == "rdna3" || arch == "rdna3_5";
+          const bool split = gfx11 || arch == "rdna4" || arch == "cdna5";
           const uint32_t wave_size = cdna_legacy ? 64 : 32;
           PluginFixture f;
           ASSERT_NO_FATAL_FAILURE(
@@ -2149,10 +2158,12 @@ TEST(ExecutionPluginTest, MemoryPipelineFlatCountersFollowTargetIssuePolicy) {
           auto *observer = f.attach_memory_observation_plugin();
           auto *cu = f.cu();
           constexpr uint64_t shared = 0x0001'0000'0000'0000ULL;
-          constexpr uint64_t private_base = 0x0002'0000'0000'0000ULL;
+          const bool gfx1250 = arch == "cdna5";
+          const uint64_t private_base = gfx1250 ? uint64_t{1} << 60 : uint64_t{2} << 48;
+          const uint64_t private_size = gfx1250 ? uint64_t{1} << 57 : 0x10000;
           constexpr uint64_t global = 0x400000;
           constexpr uint64_t scratch = 0x800000;
-          cu->set_apertures(shared, shared + 0xFFFF, private_base, private_base + 0xFFFF);
+          cu->set_apertures(shared, shared + 0xFFFF, private_base, private_base + private_size - 1);
           auto *wf = cu->dispatch_wf(0, 0x100, cdna_legacy ? 104 : 128, 256, wave_size);
           ASSERT_NE(wf, nullptr);
           wf->set_exec(exec);
@@ -2163,18 +2174,21 @@ TEST(ExecutionPluginTest, MemoryPipelineFlatCountersFollowTargetIssuePolicy) {
             const bool private_lane =
                 space == Space::Scratch || (space == Space::GlobalAndScratch && lane == 1);
             const uint64_t private_address =
-                arch == "cdna5" ? scratch + (uint64_t{lane} << 52) + 0x20 : private_base + 0x20;
-            const uint64_t address = space == Space::Lds ? shared + lane * 4
-                                     : private_lane      ? private_address
-                                                         : global + lane * 4;
+                private_base + 0x20 + (gfx1250 ? scratch / 32 + (uint64_t{lane} << 52) : 0);
+            const bool lds_lane =
+                space == Space::Lds || (space == Space::GlobalAndLds && lane == 1);
+            const uint64_t address = lds_lane       ? shared + lane * 4
+                                     : private_lane ? private_address
+                                                    : global + lane * 4;
             cu->write_vgpr(vb, lane, static_cast<uint32_t>(address));
             cu->write_vgpr(vb + 1, lane, address >> 32);
             cu->write_vgpr(vb + 4, lane, 1);
             const uint32_t value = 17;
             cu->lds().write32(wf->lds_base() + lane * 4, value);
-            const uint64_t backing = !private_lane     ? global + lane * 4
-                                     : arch == "rdna4" ? scratch + lane * 256 + 0x20
-                                                       : scratch + 8 * wave_size * 4 + lane * 4;
+            const uint64_t backing = !private_lane ? global + lane * 4
+                                     : (arch == "rdna4" || gfx11)
+                                         ? scratch + lane * 256 + 0x20
+                                         : scratch + 8 * wave_size * 4 + lane * 4;
             f.mem->load_image(reinterpret_cast<const uint8_t *>(&value), 4, backing);
           }
           auto decoder = Decoder::create(cu->arch());
@@ -2197,12 +2211,21 @@ TEST(ExecutionPluginTest, MemoryPipelineFlatCountersFollowTargetIssuePolicy) {
                 : store ? cdna4::kFlatStoreDwordFlat
                         : cdna4::kFlatAtomicAddFlat,
                 {.sc0 = returns, .addr = 0, .data = 4, .saddr = 0x7F, .vdst = 8}));
-          else if (gfx10)
+          else if (arch == "rdna2")
             decode(rdna2::build_flat(
                 load    ? rdna2::kFlatLoadDwordFlat
                 : store ? rdna2::kFlatStoreDwordFlat
                         : rdna2::kFlatAtomicAddFlat,
                 {.glc = returns, .addr = 0, .data = 4, .saddr = 0x7F, .vdst = 8}));
+          else if (gfx11)
+            decode(rdna3::build_flat(load    ? rdna3::kFlatLoadB32Flat
+                                     : store ? rdna3::kFlatStoreB32Flat
+                                             : rdna3::kFlatAtomicAddU32Flat,
+                                     {.glc = returns,
+                                      .addr = 0,
+                                      .data = 4,
+                                      .saddr = amdgpu::kModernNullSelector,
+                                      .vdst = 8}));
           else if (arch == "rdna4")
             decode(rdna4::build_vflat(load    ? rdna4::kFlatLoadB32Vflat
                                       : store ? rdna4::kFlatStoreB32Vflat
@@ -2233,17 +2256,61 @@ TEST(ExecutionPluginTest, MemoryPipelineFlatCountersFollowTargetIssuePolicy) {
           const bool result = load || returns;
           const auto vm_counter =
               split              ? (result ? WaitCounterType::LOADCNT : WaitCounterType::STORECNT)
-              : gfx10 && !result ? WaitCounterType::VSCNT
+              : arch == "rdna2" && !result ? WaitCounterType::VSCNT
                                  : WaitCounterType::VMCNT;
           const auto ds_counter = split ? WaitCounterType::DSCNT : WaitCounterType::LGKMCNT;
+          const bool charges_both = arch == "cdna2" || arch == "rdna2" ||
+                                    (exec && (arch == "cdna4" || split));
+          const uint64_t lds_lanes = space == Space::Lds            ? exec
+                                     : space == Space::GlobalAndLds ? exec & 2
+                                                                    : 0;
           EXPECT_EQ(std::ranges::count(counters, vm_counter),
-                    !cdna_legacy || (exec && space != Space::Lds) ? 1 : 0);
-          EXPECT_EQ(std::ranges::count(counters, ds_counter),
-                    !cdna_legacy || (exec && space == Space::Lds) ? 1 : 0);
+                    charges_both || ((exec & ~lds_lanes) != 0));
+          EXPECT_EQ(std::ranges::count(counters, ds_counter), charges_both || (lds_lanes != 0));
           EXPECT_EQ(std::ranges::count(counters, WaitCounterType::EXPCNT), exports);
         }
       }
     }
+  }
+}
+
+TEST(ExecutionPluginTest, Gfx11EmptyFlatStorePhysicalCreditsIgnorePendingDiagnostics) {
+  for (const std::string_view arch : {"rdna3", "rdna3_5"}) {
+    SCOPED_TRACE(arch);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(1, arch, 32, 128));
+    auto *observer = f.attach_memory_observation_plugin();
+    auto *cu = f.cu();
+    constexpr uint64_t shared = 0x0001'0000'0000'0000ULL;
+    constexpr uint64_t global = 0x400000;
+    cu->set_apertures(shared, shared + 0xFFFF, uint64_t{2} << 48, (uint64_t{2} << 48) + 0xFFFF);
+    auto *wf = cu->dispatch_wf(0, 0x100, 128, 256, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(1);
+    const auto vb = wf->vgpr_alloc().base;
+    cu->write_vgpr(vb, 0, static_cast<uint32_t>(global));
+    cu->write_vgpr(vb + 1, 0, 0);
+    auto decoder = Decoder::create(cu->arch());
+    const auto load_words = rdna3::build_flat(
+        rdna3::kFlatLoadB32Flat, {.addr = 0, .saddr = amdgpu::kModernNullSelector, .vdst = 8});
+    std::unique_ptr<Instruction> load(decode_valid(*decoder, load_words.data()));
+    ASSERT_NE(load, nullptr);
+    // The eager functional load has finished, while its diagnostic wait
+    // obligation is still pending. No physical wait counter is outstanding.
+    cu->track_memory_wait(*load, *wf);
+    ASSERT_GT(wf->memory_wait_scoreboard()->outstanding(WaitCounterKind::Load), 0u);
+    EXPECT_EQ(wf->wait_counters().vmcnt, 0u);
+    EXPECT_EQ(wf->wait_counters().vscnt, 0u);
+    EXPECT_EQ(wf->wait_counters().dscnt, 0u);
+    wf->set_exec(0);
+    const auto store_words = rdna3::build_flat(
+        rdna3::kFlatStoreB32Flat, {.addr = 0, .data = 4, .saddr = amdgpu::kModernNullSelector});
+    std::unique_ptr<Instruction> store(decode_valid(*decoder, store_words.data()));
+    ASSERT_NE(store, nullptr);
+    ASSERT_TRUE(cu->execute_instruction(store.get(), *wf).succeeded());
+    test::ComputeUnitTestAccess::route_memory_inst(*cu, std::move(store), *wf);
+    ASSERT_EQ(observer->accesses.size(), 1u);
+    EXPECT_TRUE(observer->accesses.front().issued_counters.empty());
   }
 }
 

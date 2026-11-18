@@ -12,10 +12,12 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <span>
 #include <string_view>
 
 namespace rocjitsu {
 class Instruction;
+class Operand;
 } // namespace rocjitsu
 
 namespace rocjitsu::amdgpu {
@@ -331,15 +333,22 @@ struct WaitCounterPolicy {
   counter_no_wait_value(rj_code_arch_t arch, WaitCounterKind counter);
 
   // Absent fields leave their counters unchanged. An engaged result with no
-  // active fields represents an explicit no-wait sentinel.
-  // Static analysis can prove a split wait with a NULL addend. Runtime
-  // checking uses executed_wait_fields() for a register-dependent limit.
+  // active fields can mean a no-wait sentinel or an unresolved GFX10 SOPK
+  // scalar operand. Runtime checking supplies the executed limit.
   [[nodiscard]] static util::FailureOr<std::optional<WaitFields>>
   explicit_wait_fields(const Instruction &inst, rj_code_arch_t arch);
   [[nodiscard]] static util::FailureOr<std::optional<WaitFields>>
   executed_wait_fields(const Instruction &inst, rj_code_arch_t arch,
                        const WaitFields &executed_limits);
   [[nodiscard]] static bool is_gfx10_sopk_wait(const Instruction &inst, rj_code_arch_t arch);
+  // Static analysis may supply reaching SGPR values for a guaranteed limit.
+  [[nodiscard]] static util::FailureOr<std::optional<WaitFields>>
+  explicit_wait_fields(const Instruction &inst, rj_code_arch_t arch,
+                       std::span<const uint32_t> relative_scalar_values);
+  /// GFX10 SOPK waits compare against (SGPR + SIMM16) modulo the counter width.
+  /// The null selector contributes zero and needs no register lookup.
+  [[nodiscard]] static const Operand *relative_wait_operand(const Instruction &inst,
+                                                            rj_code_arch_t arch);
 
   [[nodiscard]] static uint32_t depctr_field(uint32_t value, uint32_t shift, uint32_t width);
 };

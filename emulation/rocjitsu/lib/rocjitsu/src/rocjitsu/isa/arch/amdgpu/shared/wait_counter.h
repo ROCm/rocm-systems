@@ -8,6 +8,12 @@
 
 namespace rocjitsu::amdgpu {
 
+/// GFX10 SOPK waits add the scalar operand modulo the width of the counter.
+[[nodiscard]] constexpr uint32_t relative_wait_threshold(uint32_t scalar, uint32_t immediate,
+                                                         uint32_t counter_mask) {
+  return (scalar + immediate) & counter_mask;
+}
+
 /// @brief Counter types tracked by s_waitcnt and related instructions.
 ///
 /// GFX9 (CDNA1-4) uses VMCNT/LGKMCNT/EXPCNT. GFX10 and GFX11 add VSCNT

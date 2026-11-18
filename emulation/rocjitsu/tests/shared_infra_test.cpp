@@ -6757,24 +6757,27 @@ TEST(Gfx1250AddrCalcTest, FlatPrivateScratchDecodesLaneBits) {
   wf->set_exec(0x7ULL);
 
   constexpr uint64_t kScratchBase = 0x0002'0000'0000'0000ULL;
-  constexpr uint64_t kPrivateBase = 0x0007'0000'0000'0000ULL;
+  constexpr uint64_t kOtherScratchBase = kScratchBase + 0x10000;
+  constexpr uint64_t kPrivateBase = 0x1000'0000'0000'0000ULL;
   constexpr uint32_t kPrivateSegmentSize = 0x80;
   wf->set_scratch_base(kScratchBase);
   wf->set_scratch_lane_size(kPrivateSegmentSize);
   wf->set_apertures(0x0001'0000'0000'0000ULL, 0x0001'0000'ffff'ffffULL, kPrivateBase,
-                    kPrivateBase + 0xffff'ffffULL, /*override_launch=*/true);
+                    kPrivateBase + (uint64_t{1} << 57) - 1, /*override_launch=*/true);
 
   cdna5::Operand flat_scratch_base(
       64, cdna5::OperandType::OPR_SRC,
       static_cast<int>(cdna5::OpSelSrc::OPR_SRC_SRC_FLAT_SCRATCH_BASE_LO));
-  ASSERT_EQ(amdgpu::RegisterAccess(*wf).read_scalar64(flat_scratch_base), kScratchBase);
-
-  const uint64_t private_offsets[] = {0x10, 0x14, kPrivateSegmentSize + 0x20};
+  ASSERT_EQ(amdgpu::RegisterAccess(*wf).read_scalar64(flat_scratch_base),
+            kPrivateBase + kScratchBase / 32);
+  const uint64_t scratch_bases[] = {kScratchBase, kScratchBase, kOtherScratchBase};
+  const uint64_t private_offsets[] = {0x10, 0x14, 0x20};
+  const uint32_t target_lanes[] = {31, 5, 17};
   uint32_t vbase = wf->vgpr_alloc().base;
   for (uint32_t lane = 0; lane < 3; ++lane) {
     uint64_t private_offset = private_offsets[lane];
-    uint64_t flat_private_addr =
-        kScratchBase + (static_cast<uint64_t>(lane) << 52) + private_offset;
+    uint64_t flat_private_addr = kPrivateBase + scratch_bases[lane] / 32 +
+                                 (uint64_t{target_lanes[lane]} << 52) + private_offset;
     cu->write_vgpr(vbase, lane, static_cast<uint32_t>(flat_private_addr));
     cu->write_vgpr(vbase + 1, lane, static_cast<uint32_t>(flat_private_addr >> 32));
   }
@@ -6789,9 +6792,9 @@ TEST(Gfx1250AddrCalcTest, FlatPrivateScratchDecodesLaneBits) {
 
   for (uint32_t lane = 0; lane < 3; ++lane) {
     uint64_t private_offset = private_offsets[lane] + inst.ioffset;
-    uint64_t expected = kScratchBase + (private_offset / sizeof(uint32_t)) * 32 * sizeof(uint32_t) +
-                        static_cast<uint64_t>(lane) * sizeof(uint32_t) +
-                        private_offset % sizeof(uint32_t);
+    uint64_t expected =
+        scratch_bases[lane] + (private_offset / sizeof(uint32_t)) * 32 * sizeof(uint32_t) +
+        uint64_t{target_lanes[lane]} * sizeof(uint32_t) + private_offset % sizeof(uint32_t);
     EXPECT_EQ(d.per_lane_addr[lane], expected) << "lane " << lane;
   }
   EXPECT_TRUE(d.scratch_swizzle);

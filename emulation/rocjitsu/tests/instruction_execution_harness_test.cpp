@@ -1329,6 +1329,8 @@ TEST(Gfx1250MemoryExecutionHarness, B64AtomicsPreflightEveryParticipatingLane) {
       cfg.vgprs_per_wf = 32;
       cfg.lds_size_kb = 64;
       Gfx1250MemoryTestCu cu("atomic", cfg, &memory, &l2);
+      constexpr uint64_t private_base = uint64_t{1} << 60;
+      cu.set_apertures(0, 0, private_base, private_base + (uint64_t{1} << 57) - 1);
       auto *wf = cu.dispatch_wf(0, 0, 128, 32, 32);
       ASSERT_NE(wf, nullptr);
       wf->set_exec(3);
@@ -1339,7 +1341,10 @@ TEST(Gfx1250MemoryExecutionHarness, B64AtomicsPreflightEveryParticipatingLane) {
       constexpr uint64_t global = 0x2000;
       constexpr uint32_t lds_offset = 16;
       const uint64_t base = local ? lds_offset : global;
-      const uint64_t second = valid ? base + 8 : local ? base + 4 : (uint64_t{1} << 52) | 0x10000;
+      const uint64_t second =
+          valid ? base + 8
+                : local ? base + 4
+                        : private_base + wf->scratch_base() / 32 + (uint64_t{1} << 52) + 0x10000;
       const uint32_t vgpr = wf->vgpr_alloc().base;
       for (unsigned lane = 0; lane < 2; ++lane) {
         const uint64_t address = lane ? second : base;
@@ -1450,10 +1455,12 @@ TEST(Gfx1250MemoryExecutionHarness, MixedFlatLdsAndGlobalLanesPreserveEachResult
   }
 }
 
-template <typename Isa> void check_mixed_flat_global_scratch_lds(rj_code_arch_t arch) {
+template <typename Isa>
+void check_mixed_flat_global_scratch_lds(rj_code_arch_t arch, bool issuing_wave_has_scratch) {
   for (uint32_t first_space = 0; first_space < 3; ++first_space) {
     for (bool load : {false, true}) {
-      SCOPED_TRACE(testing::Message() << "first_space=" << first_space << " load=" << load);
+      SCOPED_TRACE(testing::Message() << "first_space=" << first_space << " load=" << load
+                                      << " issuing_wave_has_scratch=" << issuing_wave_has_scratch);
       amdgpu::GpuMemory memory("three_way_flat_memory");
       amdgpu::L2Cache l2("three_way_flat_l2");
       amdgpu::ComputeUnitCore::Config cfg{};
@@ -1464,12 +1471,15 @@ template <typename Isa> void check_mixed_flat_global_scratch_lds(rj_code_arch_t 
       cfg.lds_size_kb = 64;
       MemoryTestCu<Isa> cu("three_way_flat", cfg, &memory, &l2);
       constexpr uint64_t shared_base = uint64_t{1} << 48;
-      constexpr uint64_t private_base = uint64_t{2} << 48;
+      const bool is_cdna5 = arch == ROCJITSU_CODE_ARCH_CDNA5;
+      const uint64_t private_base = is_cdna5 ? uint64_t{1} << 60 : uint64_t{2} << 48;
+      const uint64_t private_size = is_cdna5 ? uint64_t{1} << 57 : 0x10000;
       constexpr uint64_t global_base = 0x4000;
       constexpr uint64_t scratch_base = 0x8000;
       constexpr uint32_t offset = 32;
       constexpr uint32_t canary = 0xdeadbeef;
-      cu.set_apertures(shared_base, shared_base + 0xffff, private_base, private_base + 0xffff);
+      cu.set_apertures(shared_base, shared_base + 0xffff, private_base,
+                       private_base + private_size - 1);
       auto *wf = cu.dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
       ASSERT_NE(wf, nullptr);
       ASSERT_EQ(wf->wf_size(), 32u);
@@ -1483,7 +1493,6 @@ template <typename Isa> void check_mixed_flat_global_scratch_lds(rj_code_arch_t 
       const uint32_t scratch_lane = (first_space + 1) % 3;
       const uint32_t shared_lane = (first_space + 2) % 3;
       const uint32_t vb = wf->vgpr_alloc().base;
-      const bool is_cdna5 = arch == ROCJITSU_CODE_ARCH_CDNA5;
       auto scratch_address = [&](uint32_t lane, uint32_t word) {
         // CDNA5 interleaves DWORDs across lanes; RDNA4 uses per-lane backing.
         return scratch_base + (word * wf->wf_size() + lane) * 4;
@@ -1501,7 +1510,7 @@ template <typename Isa> void check_mixed_flat_global_scratch_lds(rj_code_arch_t 
         // CDNA5 private pointers encode the lane above bit 51. RDNA4 pointers
         // instead identify the private aperture; the issuing lane selects backing.
         const uint64_t private_address =
-            is_cdna5 ? scratch_base + offset + (uint64_t{lane} << 52) : private_base + offset;
+            private_base + offset + (is_cdna5 ? scratch_base / 32 + (uint64_t{lane} << 52) : 0);
         const uint64_t address = lane == global_lane   ? global_base + lane * 128 + offset
                                  : lane == shared_lane ? shared_base + lane * 128 + offset
                                                        : private_address;
@@ -1519,6 +1528,12 @@ template <typename Isa> void check_mixed_flat_global_scratch_lds(rj_code_arch_t 
                                                 : global_base + lane * 128 + offset + word * 4,
                            initial(lane, word));
         }
+      }
+      // GFX1250 private pointers carry the backing address, so a wave without
+      // scratch allocation can still use one supplied by another wave.
+      if (!issuing_wave_has_scratch) {
+        wf->set_scratch_base(0);
+        wf->set_scratch_lane_size(0);
       }
       std::array<uint32_t, 3> words;
       if (is_cdna5)
@@ -1565,11 +1580,13 @@ template <typename Isa> void check_mixed_flat_global_scratch_lds(rj_code_arch_t 
 }
 
 TEST(Gfx1250MemoryExecutionHarness, MixedFlatGlobalScratchAndLdsPreserveCanaries) {
-  check_mixed_flat_global_scratch_lds<cdna5::Isa>(ROCJITSU_CODE_ARCH_CDNA5);
+  for (bool issuing_wave_has_scratch : {false, true})
+    check_mixed_flat_global_scratch_lds<cdna5::Isa>(ROCJITSU_CODE_ARCH_CDNA5,
+                                                    issuing_wave_has_scratch);
 }
 
 TEST(Rdna4MemoryExecutionHarness, MixedFlatGlobalScratchAndLdsPreserveCanaries) {
-  check_mixed_flat_global_scratch_lds<rdna4::Isa>(ROCJITSU_CODE_ARCH_RDNA4);
+  check_mixed_flat_global_scratch_lds<rdna4::Isa>(ROCJITSU_CODE_ARCH_RDNA4, true);
 }
 
 TEST(Gfx1250MemoryExecutionHarness, ExecutesRepresentativeValidAddressStores) {

@@ -18023,6 +18023,20 @@ protected:
                                        bool unmap_status_on_interrupt = false);
 };
 
+TEST_F(KfdIoctlCdna5Test, ReportsGloballyAddressableScratchAperture) {
+  kfd_process_device_apertures aperture{};
+  kfd_ioctl_get_process_apertures_new_args args{};
+  args.kfd_process_device_apertures_ptr = reinterpret_cast<uint64_t>(&aperture);
+  args.num_of_nodes = 1;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_GET_PROCESS_APERTURES_NEW, &args), 0);
+  ASSERT_EQ(args.num_of_nodes, 1u);
+  EXPECT_EQ(aperture.gpu_id, kCdna5GpuId);
+  EXPECT_EQ(aperture.lds_base, 0x2000'0000'0000'0000ULL);
+  EXPECT_EQ(aperture.lds_limit - aperture.lds_base, UINT32_MAX);
+  EXPECT_EQ(aperture.scratch_base, 0x1000'0000'0000'0000ULL);
+  EXPECT_EQ(aperture.scratch_limit - aperture.scratch_base, (uint64_t{1} << 57) - 1);
+}
+
 class KfdIoctlCdna3Test : public KfdIoctlTest {
 protected:
   void SetUp() override { SetUpWithConfig(CDNA3_CONFIG_PATH); }
@@ -29920,8 +29934,11 @@ void KfdIoctlTest::check_rejected_memory_violation(bool private_atomic) {
     wave->set_scratch_lane_size(64);
     wave->set_exec(1);
     const auto base = wave->vgpr_alloc().base;
-    cu->write_vgpr(base + 2, 0, scratch);
-    cu->write_vgpr(base + 3, 0, 1u << 20); // The gfx1250 scratch aperture begins at 1 << 52.
+    // Reference a different lane of the same wave's backing allocation.
+    const uint64_t aperture_pointer =
+        wave->private_aperture_base() + scratch / 32 + (uint64_t{1} << 52);
+    cu->write_vgpr(base + 2, 0, static_cast<uint32_t>(aperture_pointer));
+    cu->write_vgpr(base + 3, 0, static_cast<uint32_t>(aperture_pointer >> 32));
     cu->step();
     ASSERT_TRUE(wave->memory_trap_pending());
     cu->step();

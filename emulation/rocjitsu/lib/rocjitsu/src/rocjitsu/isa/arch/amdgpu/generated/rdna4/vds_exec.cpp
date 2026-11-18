@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/memory_result_preflight.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_ds_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
@@ -566,6 +567,10 @@ void DsAddRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::ADD;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -588,6 +593,10 @@ void DsSubRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::SUB;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -610,6 +619,10 @@ void DsRsubRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::RSUB;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -632,6 +645,10 @@ void DsIncRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::INC;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -654,6 +671,10 @@ void DsDecRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::DEC;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -676,6 +697,10 @@ void DsMinRtnI32Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::SMIN;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -698,6 +723,10 @@ void DsMaxRtnI32Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::SMAX;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -720,6 +749,10 @@ void DsMinRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::UMIN;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -742,6 +775,10 @@ void DsMaxRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::UMAX;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -764,6 +801,10 @@ void DsAndRtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::AND;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -786,6 +827,10 @@ void DsOrRtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::OR;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -808,6 +853,10 @@ void DsXorRtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::XOR;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -830,6 +879,10 @@ void DsMskorRtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::MSKOR;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t mask_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -855,6 +908,10 @@ void DsStorexchgRtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::SWAP;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -883,6 +940,10 @@ void DsStorexchg2addrRtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->wf_size = wf.wf_size();
   d->ds2_active = true;
   d->ds2_dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst + 1;
+  if (amdgpu::addr_calc::nullify_unallocated_load_before_address(wf, *d)) {
+    set_data(std::move(d));
+    return;
+  }
   d->store_data.resize(wf.wf_size() * 4);
   d->ds2_store_data.resize(wf.wf_size() * 4);
   uint32_t addr_base = wf.vgpr_alloc().base + inst_.addr;
@@ -917,6 +978,10 @@ void DsStorexchg2addrStride64RtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->wf_size = wf.wf_size();
   d->ds2_active = true;
   d->ds2_dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst + 1;
+  if (amdgpu::addr_calc::nullify_unallocated_load_before_address(wf, *d)) {
+    set_data(std::move(d));
+    return;
+  }
   d->store_data.resize(wf.wf_size() * 4);
   d->ds2_store_data.resize(wf.wf_size() * 4);
   uint32_t addr_base = wf.vgpr_alloc().base + inst_.addr;
@@ -945,6 +1010,10 @@ void DsCmpstoreRtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -973,6 +1042,10 @@ void DsMinNumRtnF32Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_legacy_minmax = false;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -998,6 +1071,10 @@ void DsMaxNumRtnF32Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_legacy_minmax = false;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -1040,6 +1117,10 @@ void DsLoad2addrB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->lane_mask = exec;
   d->ds2_active = true;
   d->ds2_dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst + 1;
+  if (amdgpu::addr_calc::nullify_unallocated_load_before_address(wf, *d)) {
+    set_data(std::move(d));
+    return;
+  }
   uint32_t addr_base = wf.vgpr_alloc().base + inst_.addr;
   auto calculate_addresses = [&](auto read_address) {
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1077,6 +1158,10 @@ void DsLoad2addrStride64B32Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->lane_mask = exec;
   d->ds2_active = true;
   d->ds2_dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst + 1;
+  if (amdgpu::addr_calc::nullify_unallocated_load_before_address(wf, *d)) {
+    set_data(std::move(d));
+    return;
+  }
   uint32_t addr_base = wf.vgpr_alloc().base + inst_.addr;
   auto calculate_addresses = [&](auto read_address) {
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1161,6 +1246,10 @@ void DsConsumeVds::execute_impl(amdgpu::Wavefront &wf) {
   d->lane_mask = exec;
   d->wg_id = wf.wg_id();
   d->wf_id = wf.wf_id();
+  if (amdgpu::addr_calc::nullify_unallocated_load_before_address(wf, *d)) {
+    set_data(std::move(d));
+    return;
+  }
   uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);
   uint64_t addr = uint64_t{wf.lds_base()} + wf.m0() + offset;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1183,6 +1272,10 @@ void DsAppendVds::execute_impl(amdgpu::Wavefront &wf) {
   d->lane_mask = exec;
   d->wg_id = wf.wg_id();
   d->wf_id = wf.wf_id();
+  if (amdgpu::addr_calc::nullify_unallocated_load_before_address(wf, *d)) {
+    set_data(std::move(d));
+    return;
+  }
   uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);
   uint64_t addr = uint64_t{wf.lds_base()} + wf.m0() + offset;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1726,6 +1819,10 @@ void DsAddRtnU64Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::ADD;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -1750,6 +1847,10 @@ void DsSubRtnU64Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::SUB;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -1774,6 +1875,10 @@ void DsRsubRtnU64Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::RSUB;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -1798,6 +1903,10 @@ void DsIncRtnU64Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::INC;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -1822,6 +1931,10 @@ void DsDecRtnU64Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::DEC;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -1846,6 +1959,10 @@ void DsMinRtnI64Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::SMIN;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -1870,6 +1987,10 @@ void DsMaxRtnI64Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::SMAX;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -1894,6 +2015,10 @@ void DsMinRtnU64Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::UMIN;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -1918,6 +2043,10 @@ void DsMaxRtnU64Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::UMAX;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -1942,6 +2071,10 @@ void DsAndRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::AND;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -1966,6 +2099,10 @@ void DsOrRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::OR;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -1990,6 +2127,10 @@ void DsXorRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::XOR;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -2014,6 +2155,10 @@ void DsMskorRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::MSKOR;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t mask_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -2043,6 +2188,10 @@ void DsStorexchgRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::SWAP;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -2073,6 +2222,10 @@ void DsStorexchg2addrRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->wf_size = wf.wf_size();
   d->ds2_active = true;
   d->ds2_dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst + 2;
+  if (amdgpu::addr_calc::nullify_unallocated_load_before_address(wf, *d)) {
+    set_data(std::move(d));
+    return;
+  }
   d->store_data.resize(wf.wf_size() * 8);
   d->ds2_store_data.resize(wf.wf_size() * 8);
   uint32_t addr_base = wf.vgpr_alloc().base + inst_.addr;
@@ -2111,6 +2264,10 @@ void DsStorexchg2addrStride64RtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->wf_size = wf.wf_size();
   d->ds2_active = true;
   d->ds2_dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst + 2;
+  if (amdgpu::addr_calc::nullify_unallocated_load_before_address(wf, *d)) {
+    set_data(std::move(d));
+    return;
+  }
   d->store_data.resize(wf.wf_size() * 8);
   d->ds2_store_data.resize(wf.wf_size() * 8);
   uint32_t addr_base = wf.vgpr_alloc().base + inst_.addr;
@@ -2143,6 +2300,10 @@ void DsCmpstoreRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -2175,6 +2336,10 @@ void DsMinNumRtnF64Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_legacy_minmax = false;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -2202,6 +2367,10 @@ void DsMaxNumRtnF64Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_legacy_minmax = false;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -2241,6 +2410,10 @@ void DsLoad2addrB64Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->lane_mask = exec;
   d->ds2_active = true;
   d->ds2_dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst + 2;
+  if (amdgpu::addr_calc::nullify_unallocated_load_before_address(wf, *d)) {
+    set_data(std::move(d));
+    return;
+  }
   uint32_t addr_base = wf.vgpr_alloc().base + inst_.addr;
   auto calculate_addresses = [&](auto read_address) {
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -2278,6 +2451,10 @@ void DsLoad2addrStride64B64Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->lane_mask = exec;
   d->ds2_active = true;
   d->ds2_dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst + 2;
+  if (amdgpu::addr_calc::nullify_unallocated_load_before_address(wf, *d)) {
+    set_data(std::move(d));
+    return;
+  }
   uint32_t addr_base = wf.vgpr_alloc().base + inst_.addr;
   auto calculate_addresses = [&](auto read_address) {
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -2315,6 +2492,10 @@ void DsAddRtnF32Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_legacy_minmax = false;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -2337,6 +2518,10 @@ void DsCondxchg32RtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::CONDXCHG32;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     d->per_lane_addr[lane] = wf.lds_base() + ((d->per_lane_addr[lane] - wf.lds_base()) & 0xfff8u);
   }
@@ -2566,6 +2751,10 @@ void DsCondSubRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::COND_SUB;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -2588,6 +2777,10 @@ void DsSubClampRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::SUB_CLAMP;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -2611,6 +2804,10 @@ void DsPkAddRtnF16Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->packed_denorm_mode = wf.fp_denorm_mode_f16_f64();
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -2634,6 +2831,10 @@ void DsPkAddRtnBf16Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->packed_denorm_mode = wf.fp_denorm_mode_f16_f64();
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
+  if (d->nullified_result) {
+    set_data(std::move(d));
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -2697,6 +2898,10 @@ void DsLoadAddtidB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
+  if (amdgpu::addr_calc::nullify_unallocated_load_before_address(wf, *d)) {
+    set_data(std::move(d));
+    return;
+  }
   {
     uint64_t exec = wf.exec();
     d->lane_mask = exec;

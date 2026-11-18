@@ -88,7 +88,7 @@ void SWaitcntSopp::execute_impl(amdgpu::Wavefront &wf) {
   uint8_t vm = (imm & 0xF) | ((imm >> 10) & 0x30);
   uint8_t exp = (imm >> 4) & 0x7;
   uint8_t lgkm = (imm >> 8) & Isa::WAITCNT_LGKMCNT_MASK;
-  wf.set_wait_target(vm, lgkm, exp);
+  wf.wait_for({.vmcnt = vm, .lgkmcnt = lgkm, .expcnt = exp});
 }
 
 void SSethaltSopp::execute_impl(amdgpu::Wavefront &wf) {

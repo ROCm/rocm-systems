@@ -37,7 +37,9 @@ struct InstructionTiming {
   /// per increment: the counter capacity to reserve before it issues. For FLAT
   /// this is an upper bound covering every memory domain the decoder allows;
   /// the counters actually charged are known only once the CU routes the
-  /// addresses, and may be fewer (see WavefrontSlot::issued_memory()).
+  /// addresses, and may be fewer (see WavefrontSlot::issued_memory()). An
+  /// active generic FLAT request on CDNA1-5 or RDNA1-4 still charges both
+  /// domains; an empty-EXEC request can charge fewer or none.
   MemoryPipeline::WaitCounterTokens counters;
 
   /// @brief The decoded instruction.

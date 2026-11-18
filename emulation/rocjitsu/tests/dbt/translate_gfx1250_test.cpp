@@ -15860,8 +15860,8 @@ TEST(BinaryTranslatorE2E, Gfx1250StagesFlatScratchBaseInDestinationWhenSgprsAreL
 }
 
 // The source and destination roles both select bank 1. Executing the translated
-// sequence proves that the two staging moves and the rewritten source all name
-// that physical bank, rather than merely agreeing in the encoded low byte.
+// sequence checks that the defined low word reaches that bank without clobbering
+// the matching low-bank registers.
 TEST(BinaryTranslatorE2E, Gfx1250DestinationStagingExecutesInMatchingNonzeroBank) {
   constexpr uint8_t kMatchingBankOneMode = 0x41;
   constexpr uint64_t kScratchBase = 0x1122334455667788ull;
@@ -15909,6 +15909,8 @@ TEST(BinaryTranslatorE2E, Gfx1250DestinationStagingExecutesInMatchingNonzeroBank
   wf->set_exec(1u);
   wf->set_scratch_base(kScratchBase);
   const uint32_t vb = wf->vgpr_alloc().base;
+  cu->write_vgpr(vb, 0, 0x13579bdfu);
+  cu->write_vgpr(vb + 1, 0, 0x2468ace0u);
   cu->write_vgpr(vb + 2, 0, 0u);
   cu->write_vgpr(vb + 3, 0, 0u);
 
@@ -15923,8 +15925,14 @@ TEST(BinaryTranslatorE2E, Gfx1250DestinationStagingExecutesInMatchingNonzeroBank
     offset += static_cast<size_t>(inst->size()) / sizeof(uint32_t);
   }
 
-  EXPECT_EQ(cu->read_vgpr(vb + 256, 0), static_cast<uint32_t>(kScratchBase));
-  EXPECT_EQ(cu->read_vgpr(vb + 257, 0), static_cast<uint32_t>(kScratchBase >> 32));
+  // The low word is the encoded private pointer, rather than its backing
+  // address. A 32-bit read of the high selector has no defined value.
+  constexpr uint64_t kScratchAddressMask = (uint64_t{1} << 57) - 1;
+  constexpr uint32_t kEncodedLow =
+      static_cast<uint32_t>((kScratchBase & kScratchAddressMask) >> 7 << 2);
+  EXPECT_EQ(cu->read_vgpr(vb + 256, 0), kEncodedLow);
+  EXPECT_EQ(cu->read_vgpr(vb, 0), 0x13579bdfu);
+  EXPECT_EQ(cu->read_vgpr(vb + 1, 0), 0x2468ace0u);
   EXPECT_EQ(wf->vgpr_msb_mode(), kMatchingBankOneMode);
 }
 

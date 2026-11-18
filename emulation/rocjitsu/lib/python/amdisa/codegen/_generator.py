@@ -3868,7 +3868,7 @@ class CodeGenerator:
                 '@VOPD_ADD_SOURCE@',
                 (
                     '    if (op) {\n      op->set_vopd_source();\n      src_operands_[num_src_++] = op;\n    }'
-                    if self.isa_spec.arch_name == 'rdna3_5'
+                    if self.isa_spec.arch_name in ('rdna3', 'rdna3_5', 'rdna4', 'cdna5')
                     else '    if (op)\n      src_operands_[num_src_++] = op;'
                 ),
             )
@@ -8573,7 +8573,12 @@ class CodeGenerator:
                 L.append('  uint8_t vm = (imm & 0xF) | ((imm >> 10) & 0x30);')
                 L.append('  uint8_t exp = (imm >> 4) & 0x7;')
                 L.append('  uint8_t lgkm = (imm >> 8) & Isa::WAITCNT_LGKMCNT_MASK;')
-            L.append('  wf.set_wait_target(vm, lgkm, exp);')
+            if wf in ('gfx10', 'gfx11'):
+                # A packed wait replaces the preceding split wait target;
+                # it does not inherit a VSCNT threshold from another instruction.
+                L.append('  wf.wait_for({.vmcnt = vm, .lgkmcnt = lgkm, .expcnt = exp});')
+            else:
+                L.append('  wf.set_wait_target(vm, lgkm, exp);')
             return '\n'.join(L)
 
         if cls == 'wait_counter':
@@ -10720,6 +10725,7 @@ class CodeGenerator:
         self._append_wait_counter_type(L, sem, 'global_load_addtid')
         L.append(f'  {self._memory_cache_policy()}')
         L.append('  d->non_temporal = 0;')
+        self._append_gfx12_result_guard(L)
         self._append_global_addtid_addresses(L)
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
@@ -10854,7 +10860,9 @@ class CodeGenerator:
         data_base = self._vgpr_base_expr(data_field)
         L.append('  flat_calculate_addresses(inst_, wf, *d);')
         L.append('  auto &cu = wf.cu();')
-        L.append('  uint64_t exec = wf.exec();')
+        # Address preparation can nullify a returning atomic with an
+        # unallocated destination. Its payload sources are inactive too.
+        L.append('  uint64_t exec = d->exec_mask;')
         L.append(f'  uint32_t data_base = {data_base};')
         stride = data_dwords * 4
         L.append(f'  d->store_data.resize(wf.wf_size() * {stride});')
@@ -10904,7 +10912,9 @@ class CodeGenerator:
         L.append(f'  d->non_temporal = {nt};')
         L.append('  mubuf_calculate_addresses(inst_, wf, *d);')
         L.append('  auto &cu = wf.cu();')
-        L.append(f'  uint64_t exec = {self._buffer_payload_exec_expr()};')
+        L.append(
+            f'  uint64_t exec = d->nullified_result ? 0 : {self._buffer_payload_exec_expr()};'
+        )
         L.append(f"  uint32_t data_base = {self._vgpr_base_expr('vdata')};")
         stride = data_dwords * 4
         L.append(f'  d->store_data.resize(wf.wf_size() * {stride});')
@@ -10980,6 +10990,26 @@ class CodeGenerator:
             '  }\n'
         )
 
+    def _append_gfx12_result_guard(
+        self, lines: list[str], *, address_checked: bool = False
+    ) -> None:
+        """Suppress operand reads after a GFX12 unallocated memory result."""
+        if self.isa_spec.profile.waitcnt_family != 'gfx12':
+            return
+        predicate = (
+            'd->nullified_result'
+            if address_checked
+            else 'amdgpu::addr_calc::nullify_unallocated_load_before_address(wf, *d)'
+        )
+        lines.extend(
+            [
+                f'  if ({predicate}) {{',
+                '    set_data(std::move(d));',
+                '    return;',
+                '  }',
+            ]
+        )
+
     def _gen_ds_atomic(
         self, dst: list[str], src: list[str], sem: InstructionSemantics
     ) -> str:
@@ -11018,6 +11048,8 @@ class CodeGenerator:
             L.append('  set_data(std::move(d));')
             return '\n'.join(L)
         L.append('  ds_calculate_addresses(inst_, wf, *d);')
+        if returns_data:
+            self._append_gfx12_result_guard(L, address_checked=True)
         if sem.operation == 'condxchg32':
             # Conditional exchange uses a qword-aligned 16-bit LDS address.
             L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
@@ -11108,6 +11140,7 @@ class CodeGenerator:
             f"  d->ds2_dst_reg_base = {self._vgpr_base_expr('vdst', role='Dst')} + "
             f'{dwords_per_access};'
         )
+        self._append_gfx12_result_guard(L)
         L.append(f'  d->store_data.resize(wf.wf_size() * {esz});')
         coalesces = self.isa_spec.profile.coincident_ds_ignores_data1
         if coalesces:
@@ -11181,6 +11214,8 @@ class CodeGenerator:
         L.append(f'  d->atomic_op = {op_enum};')
         self._append_wait_counter_type(L, sem, 'ds_mskor')
         L.append('  ds_calculate_addresses(inst_, wf, *d);')
+        if is_rtn:
+            self._append_gfx12_result_guard(L, address_checked=True)
         L.append('  auto &cu = wf.cu();')
         lanes = (
             'wf.memory_exec(*this)'
@@ -11242,6 +11277,7 @@ class CodeGenerator:
         L.append('  d->lane_mask = exec;')
         L.append('  d->wg_id = wf.wg_id();')
         L.append('  d->wf_id = wf.wf_id();')
+        self._append_gfx12_result_guard(L)
         L.append('  uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);')
         if self._uses_gds_m0_window('ds_append_consume'):
             L.append(
@@ -11278,6 +11314,7 @@ class CodeGenerator:
         )
         L.append('  ds_calculate_addresses(inst_, wf, *d);')
         if not is_async:
+            self._append_gfx12_result_guard(L, address_checked=True)
             L.append('  auto &cu = wf.cu();')
             L.append('  uint64_t exec = wf.exec();')
             L.append(
@@ -11472,6 +11509,13 @@ class CodeGenerator:
         if is_load:
             L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdata')};")
             self._append_buffer_load_bounds(L)
+            if self.isa_spec.arch_name == 'rdna4':
+                L.extend([
+                    f'  if (nullify_formatted_buffer_load_before_format(wf, *d, {sem.num_elems}, inst_.tfe)) {{',
+                    '    set_data(std::move(d));',
+                    '    return;',
+                    '  }',
+                ])
         L.append(
             f'  const auto prepared = amdgpu::prepare_buffer_format(wf, *d, {resource}, {fmt}, {sem.num_elems});'
         )
@@ -11721,6 +11765,7 @@ class CodeGenerator:
         L.append(f'  d->num_elems = {sem.num_elems};')
         L.append('  d->is_load = true;')
         self._append_wait_counter_type(L, sem, 'ds_read_addtid')
+        self._append_gfx12_result_guard(L)
         self._append_ds_addtid_addresses(L)
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
@@ -11957,6 +12002,7 @@ class CodeGenerator:
         L.append(
             f"  d->ds2_dst_reg_base = {self._vgpr_base_expr('vdst')} + {dwords_per_access};"
         )
+        self._append_gfx12_result_guard(L)
         L.append(
             f"  uint32_t addr_base = {self._vgpr_base_expr('addr', use_acc=False)};"
         )
@@ -13653,6 +13699,14 @@ class CodeGenerator:
                             access_conditions.append(
                                 'modifiers.gfx10_export = amdgpu::Gfx10ShaderExportOperands{uint8_t(inst_.tgt), uint8_t(inst_.en), bool(inst_.compr), amdgpu::shader_export_sources(inst_)};'
                             )
+                            public_members.append(
+                                cgen.Line(
+                                    'bool tracks_explicit_source(uint8_t index) const override {\n'
+                                    '  const auto operands = amdgpu::ShaderExportOperands::decode_gfx10(inst_);\n'
+                                    '  return index >= operands.sources.size() || operands.channel_enabled(index);\n'
+                                    '}'
+                                )
+                            )
                         if (
                             self.isa_spec.arch_name in ('rdna3', 'rdna3_5', 'rdna4')
                             and inst_sem.semantic_class == 'export'
@@ -13899,6 +13953,11 @@ class CodeGenerator:
                                     'modifiers.flat_offset = inst_.seg == 0 ? inst_.offset & 0x7ffu'
                                     ' : static_cast<int32_t>(inst_.offset << 20) >> 20;'
                                 )
+                            elif arch in ('cdna1', 'cdna2'):
+                                access_conditions.append(
+                                    f'modifiers.flat_access_bytes = {inst_sem.elem_size * (1 if arch == "cdna2" or inst_sem.semantic_class == "flat_atomic" else inst_sem.num_elems)};'
+                                )
+                                access_conditions.append('modifiers.flat_offset = inst_.offset & 0xfff;')
                             else:
                                 access_conditions.append(
                                     'modifiers.flat_offset = inst_.offset & 0xfff;'
@@ -17887,6 +17946,16 @@ class CodeGenerator:
                             ('memory', True),
                         ]
                     )
+                    if (
+                        enc.enc_name.upper() in ('ENC_VDS', 'ENC_VGLOBAL')
+                        and self.isa_spec.profile.waitcnt_family == 'gfx12'
+                    ):
+                        cpp_includes.append(
+                            (
+                                'rocjitsu/isa/arch/amdgpu/shared/memory_result_preflight.h',
+                                False,
+                            )
+                        )
                 if self.isa_spec.arch_name != 'cdna5' and enc.enc_name.upper() in (
                     'ENC_MUBUF',
                     'ENC_MTBUF',

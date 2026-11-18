@@ -47,6 +47,17 @@ Without a global override, memory-result diagnostics default to
 This is a core simulator feature and requires no plugin. XCNT replay-source
 diagnostics remain independently disabled by default, as described below.
 
+### Export grants
+
+GFX11 and RDNA4 exports read their enabled VGPR channels and EXEC when the export
+is granted. The checker protects these registers against overwrites until their
+export completes. A second read of an exported VGPR can proceed. Disabled export
+channels and inactive VGPR lanes add no source lock. Changing EXEC can still
+affect a pending DONE or POS0 export issued with an empty mask. Other GFX11/12
+exports skip when EXEC is zero. Typed EXP counters preserve
+the issue order within each target group. RDNA3 ISA §14.3 and RDNA4 ISA §5.7.1
+describe the grant timing and source lifetime.
+
 ## XCNT replay-source diagnostics
 
 On gfx1250, the core also warns when a memory instruction's source register is
@@ -70,10 +81,23 @@ hardware XNACK support. A global `wait_checking` override takes precedence over
 both per-CU keys. Without one, setting `memory_wait_diagnostics=off` leaves an
 explicitly enabled XCNT check active. Use `--wait-checking=off` to disable both.
 
-VMEM coverage is qualified for `MODE.REPLAY_MODE=1` (bit 25), the multi-group mode
-selected by LLVM at kernel entry. VMEM replay sources in single-group mode are
-not checked; scalar replay sources are checked in either mode. This is an explicit
-coverage boundary, not a claim that single-group kernels are replay-safe.
+The simulator checks VMEM replay sources when `MODE.REPLAY_MODE=1` (bit 25).
+LLVM's gfx1250 wait-insertion pass emits a mode write at kernel entry specifically
+to select this multi-group behavior. The ISA describes bit 25 as selecting single
+or multiple VMEM groups. It gives no exemption for overwriting an outstanding
+source in single-group mode. The simulator checks scalar replay sources in both
+modes. Its VMEM diagnostics cover multi-group execution.
+[LLVM mode setup](https://github.com/llvm/llvm-project/blob/254f05a4807997ae410e157f1673c8c26020a88c/llvm/lib/Target/AMDGPU/SIInsertWaitcnts.cpp#L3742-L3752)
+
+CDNA5 ISA §8.5 requires a full XCNT drain before an enabled scalar instruction
+or data prefetch. Bit 24 (`MODE.SCALAR_PREFETCH_EN`) clear makes the instruction
+a NOP. A prefetch adds no KM completion credit. Global/cluster asynchronous LDS
+transfers complete on ASYNCcnt. CDNA5 ISA §10.8 gives them global address
+operands and separate load and store completion ordering. LLVM omits them from
+its VMEM translation group. Their physical replay participation is unqualified.
+The checker protects their address operands and EXEC until the transfer completes
+or XCNT drains. An async transfer supplies no guaranteed younger X credit for
+another VMEM operation. An X wait alone leaves the LDS transfer outstanding. [LLVM async transfer definitions](https://github.com/llvm/llvm-project/blob/254f05a4807997ae410e157f1673c8c26020a88c/llvm/lib/Target/AMDGPU/FLATInstructions.td#L393-L441)
 
 Within the qualified model, X waits retire an ordered VMEM queue prefix. SMEM
 translation is unordered and requires a zero wait. A zero KM wait also releases
@@ -107,6 +131,11 @@ result ready only using younger operations in that same completion class. The
 [counter coverage document](memory-wait-counter-coverage.md) details producer families, multi-counter operations,
 instruction units, and exceptions.
 
+On RDNA1, the runtime checker keeps VM_VSRC scalar-source locks for VMEM and DS
+instructions until a source separator. A full LGKMCNT drain also releases the
+lock of an active native DS instruction whose issue was observed. It does not
+release VMEM, GDS, generic FLAT, or skipped DS locks.
+
 Finite counter capacity also proves completion. For example, admitting a 64th
 operation to a six-bit counter forces the oldest of 63 outstanding operations in
 one ordered class to complete. The checker applies capacity constraints before reading source
@@ -116,6 +145,19 @@ domains. Counter-only operations count, but unordered younger operations
 cannot establish FIFO completion of an older result. RDNA1 and RDNA2 GDS returns form
 their own ordered LGKM class. Scalar-memory results, GDS results on other
 targets, and legacy CDNA FLAT results require a zero wait.
+
+A modern buffer instruction with a known non-buffer descriptor has no memory
+effect. The ISA does not specify whether such an ignored instruction occupies a
+wait-counter slot. The runtime checker and race detector therefore do not use it
+as a younger completion credit for partial waits or counter capacity. This can
+leave an older result conservatively pending when hardware does count the ignored
+instruction.
+
+In GFX12 expert scheduling, a plain VALU with EXEC zero may be skipped and does
+not supply a younger VA_VDST completion credit. Scalar or VCC writers, WMMA,
+SWMMAC, and control VALUs that the ISA says must issue still supply their credit.
+On RDNA3/3.5/4 wave64, V_CMPX cannot skip both passes and also supplies a
+credit with EXEC zero. Wave32 V_CMPX has no such guaranteed issue.
 
 Completion dependencies survive ordinary branches and CU scheduling; branches
 implicitly drain XCNT. State is reset when a wave slot is freed and is not serialized

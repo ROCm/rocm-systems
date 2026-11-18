@@ -92,6 +92,8 @@ void flat_calculate_addresses(const VflatMachineInst &inst, amdgpu::Wavefront &w
   // GFX12 VFLAT: 24-bit signed offset, optional SGPR base via saddr.
   auto &cu = wf.cu();
   init_vector_mem_state(wf, d);
+  if (amdgpu::addr_calc::nullify_unallocated_load_before_address(wf, d))
+    return;
   uint64_t exec = d.exec_mask;
   d.flat_aperture_offset = static_cast<int32_t>(inst.ioffset << 8) >> 8;
   amdgpu::RegisterAccess regs(cu);
@@ -128,6 +130,8 @@ void flat_calculate_addresses(const VglobalMachineInst &inst, amdgpu::Wavefront 
   init_vector_mem_state(wf, d);
   if (d.transpose && !d.exec_mask)
     return;
+  if (amdgpu::addr_calc::nullify_unallocated_load_before_address(wf, d))
+    return;
   const uint64_t address_lanes = amdgpu::transpose_request_lane_mask(d, wf.wf_size());
   int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst.ioffset << 8) >> 8);
   amdgpu::RegisterAccess regs(cu);
@@ -162,6 +166,8 @@ void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront
   // (signed 32-bit) + optional signed saddr + signed 24-bit offset.
   auto &cu = wf.cu();
   init_vector_mem_state(wf, d);
+  if (amdgpu::addr_calc::nullify_unallocated_load_before_address(wf, d))
+    return;
   uint64_t exec = d.exec_mask;
   int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst.ioffset << 8) >> 8);
   uint64_t scratch_base = wf.scratch_base();
@@ -193,10 +199,25 @@ void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront
   }
 }
 
+bool nullify_formatted_buffer_load_before_format(amdgpu::Wavefront &wf, amdgpu::VectorMemState &d,
+                                                 uint32_t components, bool tfe) {
+  init_vector_mem_state(wf, d);
+  d.buffer_components = components;
+  if (amdgpu::addr_calc::nullify_unallocated_load_before_address(wf, d, tfe))
+    return true;
+  // Address calculation initializes the lane mask for a valid format. Leave it
+  // empty if format preparation rejects the descriptor before that step.
+  d.lane_mask = 0;
+  return false;
+}
+
 void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront &wf,
                                amdgpu::VectorMemState &d) {
   // GFX12 VBUFFER uses an unscaled SGPR selector and signed 24-bit IOFFSET.
   init_vector_mem_state(wf, d);
+  if (amdgpu::addr_calc::nullify_unallocated_load_before_address(
+          wf, d, d.atomic_op == amdgpu::AtomicOp::NONE && inst.tfe))
+    return;
   const uint32_t sb_sel = inst.rsrc;
   if (!amdgpu::addr_calc::buffer_resource_range_is_backed(wf, sb_sel)) {
     amdgpu::reject_vector_memory_access(d);

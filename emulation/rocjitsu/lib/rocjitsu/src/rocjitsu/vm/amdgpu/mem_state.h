@@ -254,6 +254,7 @@ public:
   uint32_t block_dword_mask = kUnmaskedBlockDwordMask;
   /// Block operands validate ownership per DWORD, including with all bits enabled.
   bool is_block_transfer = false;
+  bool nullified_result = false; ///< An unallocated result issues with the effective EXEC cleared.
   uint64_t exec_mask = 0; ///< Effective issue mask set by address calculation. This normally
                           ///< snapshots EXEC, but ISA exceptions may replace it (for example,
                           ///< CDNA5 DS transpose loads use an all-lanes mask), while
@@ -373,6 +374,8 @@ public:
   // scratch backing. Layout alone does not imply scratch address-space
   // provenance: buffer SRD swizzling still addresses the SRD's global base.
   bool requires_scratch_backing = false;
+  // GFX1250 FLAT pointers embed the backing address even for unrelated waves.
+  bool scratch_backing_from_address = false;
   uint64_t scratch_lane_mask = 0;
   uint32_t scratch_addr_stride = 0;
   uint32_t scratch_swizzle_unit = 4; ///< Bytes per swizzle unit; RDNA buffers can use 16.

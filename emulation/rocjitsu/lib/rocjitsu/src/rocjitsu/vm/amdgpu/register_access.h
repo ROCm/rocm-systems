@@ -25,6 +25,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/block_memory.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/result.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -1069,6 +1070,30 @@ public:
     bool valid_ = false;
   };
 
+  /// GFX10 SOPK waits read a scalar selector and add its value to the encoded threshold.
+  [[nodiscard]] static util::FailureOr<std::optional<WaitFields>>
+  explicit_wait_fields(const Instruction &inst, rj_code_arch_t arch, const Wavefront *wf) {
+    if (wf) {
+      if (const Operand *source = WaitCounterPolicy::relative_wait_operand(inst, arch)) {
+        // On GFX10, SGPR and TTMP operand reads notify plugins. Preflight runs
+        // before their instruction callback, and execution will report the actual read.
+        const uint32_t selector = source->encoding_value();
+        uint32_t value;
+        if (selector <= kScalarSgprSelectorLast) {
+          const auto reg = wf->sgpr_alloc().base + selector;
+          const RegisterAccess access(*wf);
+          value = access.owns_sgpr_range(reg, 1) ? access.cu_->read_sgpr_storage(reg) : 0;
+        } else if (selector >= kTtmpSelectorFirst && selector <= kTtmpSelectorLast) {
+          value = wf->shader_can_access_ttmp() ? wf->ttmp(selector - kTtmpSelectorFirst) : 0;
+        } else {
+          value = source->read_scalar(*wf);
+        }
+        return WaitCounterPolicy::explicit_wait_fields(inst, arch, std::span(&value, 1));
+      }
+    }
+    return WaitCounterPolicy::explicit_wait_fields(inst, arch);
+  }
+
   explicit RegisterAccess(ComputeUnitCore &cu) : cu_(&cu), mutable_cu_(&cu) {}
   explicit RegisterAccess(const ComputeUnitCore &cu) : cu_(&cu) {}
   explicit RegisterAccess(InstructionComputeUnitView &cu)
@@ -2057,24 +2082,37 @@ private:
                                                                 uint32_t words) const {
     const auto &wf = wavefront();
     const auto arch = cu_->arch();
+    const bool gfx12_vopd = arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+    const bool vopd_only = arch == ROCJITSU_CODE_ARCH_RDNA3 || gfx12_vopd;
     // CDNA2 resolves its unified VGPR/AccVGPR allocation in its operand backend.
     if ((arch != ROCJITSU_CODE_ARCH_CDNA1 && arch != ROCJITSU_CODE_ARCH_CDNA3 &&
-         arch != ROCJITSU_CODE_ARCH_CDNA4 && arch != ROCJITSU_CODE_ARCH_RDNA3_5) ||
-        op.vgpr_msb_role() == VgprMsbRole::None || !wf.num_vgprs())
+         arch != ROCJITSU_CODE_ARCH_CDNA4 && arch != ROCJITSU_CODE_ARCH_RDNA3 &&
+         arch != ROCJITSU_CODE_ARCH_RDNA3_5 && arch != ROCJITSU_CODE_ARCH_RDNA4 &&
+         arch != ROCJITSU_CODE_ARCH_CDNA5) ||
+        op.vgpr_msb_role() == VgprMsbRole::None || !wf.num_vgprs() ||
+        (vopd_only && !op.is_vopd_source()))
       return std::nullopt;
     const auto base = wf.vgpr_alloc().base;
-    if (wf.vgpr_bank(false).contains(reg - base, words))
+    if (!gfx12_vopd && wf.vgpr_bank(false).contains(reg - base, words))
       return std::nullopt;
     const auto ref = op.to_register_ref();
     if (!ref || (ref->cls != RegClass::VGPR && ref->cls != RegClass::ACC_VGPR))
       return std::nullopt;
+    if (gfx12_vopd) {
+      // VGPR_MSB forms the 10-bit logical address before its allocation
+      // check. An unallocated VOPD source selects its low two address bits.
+      if (wf.vgpr_alloc().contains(reg, words))
+        return std::nullopt;
+      const auto first = base + (reg - base) % 4;
+      return SourceWords{first, first + 1};
+    }
     auto bank = wf.vgpr_bank(ref->cls == RegClass::ACC_VGPR);
     bank.base += base;
     if (bank.contains(reg, words))
       return std::nullopt;
-    // A GFX11.5 VALU operand outside the allocation selects VGPR0 as its tuple base.
-    if (cu_->arch() == ROCJITSU_CODE_ARCH_RDNA3_5) {
-      // VOPD preserves the low two register-index bits.
+    // GFX11 VALU operands select VGPR0 as their tuple base. VOPD
+    // preserves the low two register-index bits.
+    if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5) {
       const auto first = bank.base + (op.is_vopd_source() ? (reg - bank.base) % 4 : 0);
       return SourceWords{first, first + 1};
     }

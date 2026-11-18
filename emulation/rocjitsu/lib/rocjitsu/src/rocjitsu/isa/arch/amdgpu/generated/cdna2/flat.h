@@ -20,6 +20,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 1;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -36,6 +37,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 1;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -52,6 +54,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 2;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -68,6 +71,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 2;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -84,6 +88,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 4;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -100,6 +105,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 4;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -116,6 +122,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 4;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -132,6 +139,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 4;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -148,6 +156,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 1;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand addr;
@@ -164,6 +173,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 1;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand addr;
@@ -180,6 +190,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 2;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand addr;
@@ -196,6 +207,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 2;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand addr;
@@ -212,6 +224,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 4;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand addr;
@@ -228,6 +241,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 4;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand addr;
@@ -244,6 +258,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 4;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand addr;
@@ -260,6 +275,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 4;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand addr;
@@ -276,6 +292,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 1;
     modifiers.flat_offset = inst_.offset & 0xfff;
     modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0x3;
   }
@@ -293,6 +310,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 1;
     modifiers.flat_offset = inst_.offset & 0xfff;
     modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0xc;
   }
@@ -310,6 +328,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 1;
     modifiers.flat_offset = inst_.offset & 0xfff;
     modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0x3;
   }
@@ -327,6 +346,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 1;
     modifiers.flat_offset = inst_.offset & 0xfff;
     modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0xc;
   }
@@ -344,6 +364,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 2;
     modifiers.flat_offset = inst_.offset & 0xfff;
     modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0x3;
   }
@@ -361,6 +382,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 2;
     modifiers.flat_offset = inst_.offset & 0xfff;
     modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0xc;
   }
@@ -378,6 +400,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 4;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -396,6 +419,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 4;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -414,6 +438,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 4;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -432,6 +457,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 4;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -450,6 +476,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 4;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -468,6 +495,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 4;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -486,6 +514,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 4;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -504,6 +533,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 4;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -522,6 +552,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 4;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -540,6 +571,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 4;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -558,6 +590,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 4;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -576,6 +609,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 4;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -594,6 +628,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 4;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -612,6 +647,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 8;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -630,6 +666,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 8;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -648,6 +685,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 8;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -666,6 +704,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 8;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -684,6 +723,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 8;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -702,6 +742,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 8;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -720,6 +761,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 8;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -738,6 +780,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 8;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -756,6 +799,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 8;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -774,6 +818,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 8;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -792,6 +837,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 8;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -810,6 +856,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 8;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -828,6 +875,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 8;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -846,6 +894,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 8;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -864,6 +913,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 8;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -882,6 +932,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 8;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -900,6 +951,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 4;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;
@@ -917,6 +969,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     modifiers.flat_address = &addr;
+    modifiers.flat_access_bytes = 4;
     modifiers.flat_offset = inst_.offset & 0xfff;
   }
   Operand vdst;

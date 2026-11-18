@@ -128,7 +128,8 @@ VmAccessOutcome MemoryPipeline::complete_entry(PipelineEntry entry) {
 }
 
 VmAccessOutcome MemoryPipeline::issue_impl(Instruction *inst, Wavefront &wf,
-                                           bool retain_unavailable, bool routing_observed) {
+                                           bool retain_unavailable, bool routing_observed,
+                                           bool vm_source_issued) {
   const WaitCounterTokens counters = issue_counters(*inst);
   acquire_wait_counters(wf, counters);
   const VmAccessOutcome access = initiate_access(*inst, wf);
@@ -138,7 +139,8 @@ VmAccessOutcome MemoryPipeline::issue_impl(Instruction *inst, Wavefront &wf,
                   .counters = counters,
                   .wave_generation = wf.dispatch_generation(),
                   .issue_pc = wf.pc,
-                  .routing_observed = routing_observed});
+                  .routing_observed = routing_observed,
+                  .vm_source_issued = vm_source_issued});
     wf.set_state(WfState::VM_RETRY);
     wf.cu().request_functional_yield();
     return VmAccessOutcome::Complete;
@@ -153,7 +155,8 @@ VmAccessOutcome MemoryPipeline::issue_impl(Instruction *inst, Wavefront &wf,
                                    .counters = counters,
                                    .wave_generation = wf.dispatch_generation(),
                                    .issue_pc = wf.pc,
-                                   .routing_observed = routing_observed});
+                                   .routing_observed = routing_observed,
+                                   .vm_source_issued = vm_source_issued});
       assert(cancelled && "Faulted memory issue has no matching wait-check producer");
     }
     release_wait_counters(wf, counters);
@@ -167,16 +170,17 @@ VmAccessOutcome MemoryPipeline::issue_impl(Instruction *inst, Wavefront &wf,
                          .counters = counters,
                          .wave_generation = wf.dispatch_generation(),
                          .issue_pc = wf.pc,
-                         .routing_observed = routing_observed});
+                         .routing_observed = routing_observed,
+                         .vm_source_issued = vm_source_issued});
 }
 
 VmAccessOutcome MemoryPipeline::issue(Instruction *inst, Wavefront &wf) {
-  return issue_impl(inst, wf, false, false);
+  return issue_impl(inst, wf, false, false, false);
 }
 
 VmAccessOutcome MemoryPipeline::issue_deferred(Instruction *inst, Wavefront &wf,
-                                               bool routing_observed) {
-  return issue_impl(inst, wf, true, routing_observed);
+                                               bool routing_observed, bool vm_source_issued) {
+  return issue_impl(inst, wf, true, routing_observed, vm_source_issued);
 }
 
 void MemoryPipeline::defer_unavailable(Instruction *inst, Wavefront &wf) {
@@ -249,13 +253,14 @@ bool MemoryPipeline::cancel_wait_check_issue(const PipelineEntry &entry) {
     // position. MODE gates VMEM groups; scalar loads always use their X group.
     if (scoreboard->outstanding(WaitCounterKind::X)) {
       const auto events =
-          waitcheck_detail::WaitcheckTarget::classify_events(*entry.inst, wf.cu().arch());
+          waitcheck_detail::RuntimeWaitTarget::classify_events(*entry.inst, wf.cu().arch());
       if (events.failed())
         return false;
       const auto xevent = std::ranges::find(events.value(), WaitCounterKind::X,
                                             &waitcheck_detail::ClassifiedEvent::counter);
       xcnt =
           xevent != events.value().end() &&
+          !waitcheck_detail::RuntimeWaitTarget::is_async_transfer_kind(xevent->kind) &&
           (xevent->kind == waitcheck_detail::WaitEventKind::Smem || (wf.mode_raw() & (1u << 25)));
     }
     WaitCounterTokens issued = entry.counters;
@@ -274,7 +279,7 @@ bool MemoryPipeline::cancel_wait_check_issue(const PipelineEntry &entry) {
       }
     }
     if (!scoreboard->cancel_last_issue(entry.issue_pc, std::span(issued.types).first(issued.size),
-                                       wf.cu().arch(), xcnt))
+                                       wf.cu().arch(), xcnt, entry.vm_source_issued))
       return false;
   }
   if (entry.routing_observed)
@@ -1974,7 +1979,8 @@ VmAccessOutcome GlobalMemPipeline::initiate_global_access(VectorMemState &d, Wav
 
 VmAccessOutcome GlobalMemPipeline::initiate_texel_access(VectorMemState &d, Wavefront &wf,
                                                          uint64_t request_lanes) {
-  if (d.requires_scratch_backing && (d.scratch_lane_mask & request_lanes) && wf.scratch_base() == 0)
+  if (d.requires_scratch_backing && !d.scratch_backing_from_address &&
+      (d.scratch_lane_mask & request_lanes) && wf.scratch_base() == 0)
     return VmAccessOutcome::Faulted;
 
   if (d.image_metadata || wf.address_space() || (has_ingress_handler() && wf.process_id() != 0)) {

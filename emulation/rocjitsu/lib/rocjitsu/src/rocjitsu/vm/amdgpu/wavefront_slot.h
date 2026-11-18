@@ -110,10 +110,10 @@ public:
   /// @details @p charged are the counters the CU's memory pipeline charged
   /// once it routed the request's addresses, as MemoryPipeline::issue_counters()
   /// derives them: a subset of the upper bound in InstructionTiming::counters
-  /// that reserve() took. Only @p charged go
-  /// outstanding; the rest of the reservation is released now, so a global-
-  /// only FLAT load does not hold DSCNT, and the response returns exactly
-  /// @p charged.
+  /// that reserve() took. An active generic FLAT request charges both memory
+  /// domains on CDNA1-5 and RDNA1-4 even when all lanes route to only one.
+  /// Only @p charged go outstanding; the rest of the reservation is released now, and the
+  /// response returns exactly @p charged.
   /// @param inst The issued instruction, as reserved.
   /// @param charged The counters the CU charged for it.
   void issued_memory(const InstructionTiming &inst,

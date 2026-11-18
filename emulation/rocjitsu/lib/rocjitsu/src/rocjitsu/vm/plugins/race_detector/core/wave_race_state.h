@@ -10,6 +10,8 @@
 #include "rocjitsu/vm/plugins/race_detector/core/instruction_snapshot.h"
 #include "rocjitsu/vm/plugins/race_detector/core/types.h"
 #include "util/result.h"
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -144,6 +146,12 @@ public:
   void lockGdsVgpr(InstructionSnapshot instruction, int reg, uint64_t lanes);
   void lockGdsExec(InstructionSnapshot instruction);
   void checkGdsExecWrite() const;
+  /// Keep unused pre-gfx1250 FLAT and RDNA4 EXEC-zero counter positions without
+  /// allocating an event for each loop iteration. Ordered credits occupy
+  /// positions used by explicit partial waits and can force a later empty-EXEC
+  /// issue. They are not capacity-eligible requests.
+  void recordOpaqueCounterCredit(amdgpu::WaitCounterType, MemoryOrderClass, uint8_t increment = 1);
+  [[nodiscard]] unsigned pendingOpaqueCounterCredits(amdgpu::WaitCounterType) const;
 
   /// Register an in-flight memory event that does not involve LDS.
   /// \param instruction Complete captured encoding and PC of the producing instruction.
@@ -176,9 +184,9 @@ public:
                         std::vector<uint32_t> registers, uint64_t execMask, int waveSize,
                         std::span<const uint32_t> laneBaseAddresses, int bytesPerLane,
                         uint8_t byteMask = 0xF);
-  /// ldsLaneMask restricts LDS intervals to a subset of execMask (for mixed
-  /// FLAT). Register dependencies still use all execMask lanes, and the whole
-  /// instruction occupies one event with one set of counter obligations.
+  /// ldsLaneMask restricts LDS intervals to a subset of execMask for this one
+  /// event. Register dependencies still use all execMask lanes. Mixed-route
+  /// FLAT uses separate VMEM and LDS events so each route retires independently.
   /// Bits outside execMask are ignored; zero records no LDS intervals.
   /// elementBytes selects the execution granularity at the backing boundary;
   /// zero treats the whole per-lane access as one element.
@@ -232,14 +240,14 @@ public:
   /// and, for FLAT, the workgroup allocation, with endpoints that fit in int.
   /// This does not clip ranges or validate conflicts; validate before registering.
   /// Empty intervals retain the event's register and counter dependencies.
-  /// @returns The allocated event ID, or an invalid ID if no event was created.
   EventId registerEventWithIntervals(InstructionSnapshot instruction, MemoryEventType,
                                      std::vector<uint32_t> registers, uint64_t execMask,
                                      uint8_t byteMask, IntervalSet ldsIntervals,
                                      std::span<const amdgpu::MemoryCounterObligation>,
                                      VgprWriteOrder writeOrder, uint8_t lastRegisterByteMask = 0,
                                      LdsAccess ldsAccess = {}, ConditionalVgprWrite feedback = {},
-                                     bool pendingLdsAccess = false);
+                                     bool pendingLdsAccess = false,
+                                     std::optional<VgprWriteOrder> registerWriteOrder = std::nullopt);
 
   /// Dispatch the counter thresholds changed by one wait instruction.
   void dispatch(const PendingWaitCount &);
@@ -292,6 +300,12 @@ private:
   void retireEventRegisters(EventId);
   void checkScalarAccess(RegisterRef reg, bool isWrite) const;
 
+  /// The counter whose capacity a token of `type` counts against: the split counter
+  /// itself when it has a capacity, else the combined counter it aliases.
+  amdgpu::WaitCounterType capacityCounterFor(amdgpu::WaitCounterType type) const;
+  /// Group aliases only when the architecture has that combined wait counter.
+  amdgpu::WaitCounterType orderedCounterFor(amdgpu::WaitCounterType type) const;
+
   template <typename Pred>
   void satisfyOldestCounterObligations(int count, amdgpu::WaitCounterType, Pred matches);
   void applyCounterConstraint(amdgpu::WaitCounterType type, int maximumRemaining,
@@ -327,6 +341,18 @@ private:
   std::unordered_map<uint32_t, uint8_t> directLdsReadWidths;
 
   CounterCapacities counterCapacities;
+  std::array<uint8_t, static_cast<size_t>(amdgpu::WaitCounterType::BVHCNT) + 1>
+      opaqueCounterCredits{};
+  std::optional<decltype(opaqueCounterCredits)> priorRoutedOpaqueCredits;
+  // Issued positions include real requests, unused FLAT credits, and RDNA4
+  // EXEC-zero credits. They prove explicit partial waits without making credits
+  // count as pending requests for capacity backpressure. Class entries are monotonic;
+  // no per-credit event is retained.
+  using OrderedIssueEnds =
+      std::array<std::array<uint64_t, static_cast<size_t>(MemoryOrderClass::UNORDERED) + 1>,
+                 static_cast<size_t>(amdgpu::WaitCounterType::BVHCNT) + 1>;
+  OrderedIssueEnds orderedIssueEnd{};
+  std::optional<OrderedIssueEnds> priorRoutedIssueEnd;
 
   WaveId waveId;
   RaceDetector *detector;

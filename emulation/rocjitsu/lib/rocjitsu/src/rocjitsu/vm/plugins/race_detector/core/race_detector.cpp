@@ -33,11 +33,12 @@ EventId RaceDetector::allocateEventId(
     WaveId waveId, InstructionSnapshot instruction, MemoryEventType type,
     std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
     std::span<const amdgpu::MemoryCounterObligation> counterObligations, VgprWriteOrder writeOrder,
-    uint8_t lastRegisterByteMask, LdsAccess ldsAccess) {
+    uint8_t lastRegisterByteMask, LdsAccess ldsAccess,
+    std::span<const uint64_t> counterIssueEnd, std::optional<VgprWriteOrder> registerWriteOrder) {
   bool hasLds = !ldsIntervals.empty();
   EventId eid = events_.add(waveId, instruction, type, std::move(registers), execMask, byteMask,
                             std::move(ldsIntervals), counterObligations, writeOrder,
-                            lastRegisterByteMask, ldsAccess);
+                            lastRegisterByteMask, ldsAccess, counterIssueEnd, registerWriteOrder);
   if (hasLds)
     indexLdsIntervals(eid);
   return eid;

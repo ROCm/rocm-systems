@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <span>
 #include <utility>
 #include <vector>
@@ -58,7 +59,8 @@ public:
                           IntervalSet ldsIntervals,
                           std::span<const amdgpu::MemoryCounterObligation> counterObligations,
                           VgprWriteOrder writeOrder, uint8_t lastRegisterByteMask = 0,
-                          LdsAccess ldsAccess = {});
+                          LdsAccess ldsAccess = {}, std::span<const uint64_t> counterIssueEnd = {},
+                          std::optional<VgprWriteOrder> registerWriteOrder = std::nullopt);
 
   /// Attach the LDS footprint after a mixed FLAT issue successfully translates its global lanes.
   void attachLdsIntervals(EventId event, IntervalSet intervals);

@@ -27,12 +27,14 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_flat.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/gfx1250_apertures.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
+#include "rocjitsu/vm/amdgpu/runtime_wait_target.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 
@@ -41,6 +43,7 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <string_view>
 #include <thread>
 #include <tuple>
 #include <utility>
@@ -432,7 +435,6 @@ TEST_F(MemoryWaitScoreboardTest, UnorderedProducerResultsRequireZeroWait) {
                                       {WaitCounterKind::Km, WaitEventKind::SqMessage},
                                       {WaitCounterKind::Km, WaitEventKind::SccWrite},
                                       {WaitCounterKind::Exp, WaitEventKind::Export},
-                                      {WaitCounterKind::Load, WaitEventKind::GlobalInv},
                                       {WaitCounterKind::Ds, WaitEventKind::Unknown}}) {
     SCOPED_TRACE(static_cast<unsigned>(kind));
     state.clear();
@@ -454,6 +456,21 @@ TEST_F(MemoryWaitScoreboardTest, UnorderedProducerResultsRequireZeroWait) {
     read(6);
     EXPECT_EQ(hazards.size(), 1u);
   }
+}
+
+TEST_F(MemoryWaitScoreboardTest, LegacyBufferWritebackOrdersOlderLoads) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
+                    ROCJITSU_CODE_ARCH_CDNA4})
+    for (unsigned threshold : {1u, 2u}) {
+      SCOPED_TRACE(testing::Message() << arch << " threshold=" << threshold);
+      state.clear();
+      hazards.clear();
+      load(5);
+      state.issue({WaitCounterKind::Load, waitcheck_detail::WaitEventKind::GlobalWb}, arch);
+      state.wait(WaitCounterKind::Load, threshold);
+      read(5);
+      EXPECT_EQ(hazards.size(), threshold > 1 ? 1u : 0u);
+    }
 }
 
 TEST_F(MemoryWaitScoreboardTest, AdmissionAtCapacityReleasesOnlyTheOldestOrderedResult) {
@@ -826,6 +843,47 @@ TEST_F(MemoryWaitScoreboardTest, ConcurrentWavesKeepIndependentPendingRegisters)
   EXPECT_TRUE(hazards.empty());
   read(5);
   ASSERT_EQ(hazards.size(), 1u);
+}
+
+TEST(MemoryWaitExecutionTest, ScratchAddressesUseVgprZeroOnlyWithVectorAddressEnabled) {
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+    SCOPED_TRACE(static_cast<unsigned>(arch));
+    GpuMemory memory("scratch_vaddr_wait_memory");
+    L2Cache l2("scratch_vaddr_wait_l2");
+    ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 128;
+    config.vgprs_per_wf = 32;
+    config.lds_size_kb = 64;
+    std::unique_ptr<ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "scratch_vaddr_wait_cu", config, &memory, &l2));
+    auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(1);
+
+    auto decoder = Decoder::create(arch);
+    auto &scoreboard = wf->ensure_memory_wait_scoreboard();
+    std::vector<MemoryWaitScoreboard::Hazard> hazards;
+    scoreboard.bind(0x200, &hazards, [](void *context, const auto &hazard) {
+      static_cast<decltype(hazards) *>(context)->push_back(hazard);
+    });
+    for (bool enabled : {false, true}) {
+      SCOPED_TRACE(enabled);
+      // scratch_load_b64 v[16:17], off/v0, off offset:16
+      const std::array<uint32_t, 2> words{0xdc550010u, enabled ? 0x10fc0000u : 0x107c0000u};
+      util::StringDiagnostic error;
+      auto decoded = decoder->decode_window(words, 0x200, error.emitter());
+      ASSERT_TRUE(decoded.succeeded()) << error.message();
+      scoreboard.clear();
+      hazards.clear();
+      scoreboard.add({scoreboard.issue(WaitCounterKind::Load), 0x100, 1,
+                      {RegClass::VGPR, 0, 1}, WaitCounterKind::Load, 0xf});
+      scoreboard.check_instruction(*decoded.value(), *wf);
+      EXPECT_EQ(hazards.size(), enabled ? 1u : 0u);
+    }
+  }
 }
 
 TEST(MemoryWaitExecutionTest, NsaImageChecksOnlyItsDecodedCoordinateRegisters) {
@@ -1575,6 +1633,146 @@ TEST(MemoryWaitExecutionTest, Cdna1DiscardedValuDoesNotAcquirePendingSources) {
       EXPECT_EQ(cu->read_vgpr(base + dst, 0), dst == 3 ? 0x12345678u : 0xcafe0000u);
     }
   }
+}
+
+TEST(MemoryWaitExecutionTest, Rdna1NativeDsDrainReleasesIssuedScalarSources) {
+  struct Case {
+    uint32_t separator;
+    bool active;
+    unsigned warnings;
+  };
+  for (const Case control : {Case{0xbf800000u, true, 1}, // No wait.
+                             Case{0xbf8c3f70u, true, 1}, // VMCNT(0) does not drain LDS.
+                             Case{0xbf8cc07fu, true, 0}, // LGKMCNT(0) drains the issued DS request.
+                             Case{0xbf8c0000u, true, 0}, // Full packed wait also drains VM_VSRC.
+                             Case{0xbf8cc07fu, false, 1}}) { // Empty EXEC cannot prove a DS issue.
+    SCOPED_TRACE(testing::Message()
+                 << "separator=" << std::hex << control.separator << " active=" << control.active);
+    GpuMemory memory("rdna1_ds_source_memory");
+    L2Cache l2("rdna1_ds_source_l2");
+    ComputeUnitCore::Config config{};
+    config.arch = ROCJITSU_CODE_ARCH_RDNA1;
+    config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 128;
+    config.vgprs_per_wf = 32;
+    config.lds_size_kb = 64;
+    config.functional_quantum = 1;
+    auto cu = ComputeUnitCore::create("rdna1_ds_source_cu", config, &memory, &l2);
+    ASSERT_NE(cu, nullptr);
+    constexpr uint64_t pc = 0x4000;
+    auto *wf = cu->dispatch_wf(0, pc, 128, 32, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(control.active ? 3 : 0);
+    wf->set_lds_size(256);
+    const auto base = wf->vgpr_alloc().base;
+    cu->write_vgpr(base, 0, 4);
+    cu->write_vgpr(base, 1, 4);
+    cu->lds().write32(4, 0x12345678);
+    memory.write32(pc, 0xd8d80000u); // ds_read_b32 v2, v0.
+    memory.write32(pc + 4, 0x02000000u);
+    memory.write32(pc + 8, control.separator);
+    memory.write32(pc + 12, 0xbefe0381u); // s_mov_b32 exec_lo, 1.
+    for (unsigned step = 0; step < 32 && wf->pc <= pc + 12; ++step)
+      ASSERT_TRUE(cu->step());
+    ASSERT_EQ(wf->pc, pc + 16);
+    EXPECT_EQ(wf->exec(), 1u);
+    EXPECT_EQ(cu->read_vgpr(base + 2, 0), control.active ? 0x12345678u : 0u);
+    EXPECT_EQ(cu->memory_wait_diagnostic_count(), control.warnings);
+  }
+}
+
+TEST(MemoryWaitExecutionTest, Gfx1250FlatLoadUsesOtherWaveScratchWithoutReaderAllocation) {
+  GpuMemory memory("gfx1250_cross_wave_scratch_memory");
+  L2Cache l2("gfx1250_cross_wave_scratch_l2");
+  l2.set_backing_memory(&memory);
+  ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 32;
+  config.lds_size_kb = 64;
+  std::unique_ptr<ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(
+      cu, "gfx1250_cross_wave_scratch_cu", config, &memory, &l2));
+  constexpr uint64_t pc = 0x4000;
+  const auto words =
+      cdna5::build_vflat(cdna5::kFlatLoadB32Vflat, {.saddr = 124, .vdst = 8, .vaddr = 0});
+  memory.load_image(reinterpret_cast<const uint8_t *>(words.data()), words.size() * 4, pc);
+  auto *wf = cu->dispatch_wf(0, pc, 106, 32, 32);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->scratch_base(), 0u);
+  constexpr uint64_t private_base = uint64_t{1} << 60;
+  constexpr uint64_t backing = 0x8000;
+  constexpr uint64_t target_lane = 17;
+  constexpr uint64_t pointer = private_base + (target_lane << 52) + (backing >> 5);
+  constexpr uint64_t ordinary = 0x9000;
+  wf->set_apertures(0, 0, private_base, private_base + (uint64_t{1} << 57) - 1, true);
+  wf->set_exec(3);
+  memory.write32(backing + target_lane * 4, 0x12345678u);
+  memory.write32(ordinary, 0xbeefcafeu);
+  const auto base = wf->vgpr_alloc().base;
+  cu->write_vgpr(base, 0, static_cast<uint32_t>(pointer));
+  cu->write_vgpr(base + 1, 0, pointer >> 32);
+  cu->write_vgpr(base, 1, ordinary);
+  cu->write_vgpr(base + 1, 1, 0);
+  for (unsigned step = 0; step < 16 && wf->pc == pc; ++step)
+    cu->step();
+  ASSERT_EQ(wf->pc, pc + words.size() * 4);
+  EXPECT_EQ(cu->read_vgpr(base + 8, 0), 0x12345678u);
+  EXPECT_EQ(cu->read_vgpr(base + 8, 1), 0xbeefcafeu);
+}
+
+TEST(MemoryWaitExecutionTest, Gfx1250StandaloneAqlScratchSelectorLoadsPrivateBacking) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize(memory_wait_test_config()));
+  // This VM has no KFD. Its CU still needs the device's private aperture before
+  // the CP allocates scratch and dispatches a wave.
+  constexpr uint64_t kScratch = 0x1'0000'0000ULL;
+  constexpr uint32_t kPrivateValue = 0xcafe1234u;
+  constexpr uint32_t kGlobalValue = 0xdeadbeefu;
+  const std::array<uint8_t, 2048> empty{};
+  sim.memory->load_image(empty.data(), empty.size(), kScratch);
+  sim.memory->write32(kScratch, kPrivateValue);
+  sim.memory->write32(kScratch >> 5, kGlobalValue);
+
+  std::vector<uint32_t> code;
+  // The 64-bit read of FLAT_SCRATCH_BASE_LO returns the complete pointer.
+  append_instruction(code, cdna5::build_sop1(cdna5::kSMovB64Sop1, {.ssrc0 = 230, .sdst = 4}));
+  append_instruction(code, cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 4, .vdst = 0}));
+  append_instruction(code, cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 5, .vdst = 1}));
+  append_instruction(
+      code, cdna5::build_vflat(cdna5::kFlatLoadB32Vflat, {.saddr = 124, .vdst = 8, .vaddr = 0}));
+  append_instruction(code, cdna5::build_sopp(cdna5::kSWaitLoadcntSopp, {.simm16 = 0}));
+  append_instruction(code, S_ENDPGM_GFX12);
+
+  constexpr uint64_t kKernel = 0x10000;
+  amdhsa::kernel_descriptor_t descriptor{};
+  descriptor.kernel_code_entry_byte_offset = sizeof(descriptor);
+  descriptor.private_segment_fixed_size = 16;
+  descriptor.compute_pgm_rsrc1 = 1;
+  sim.memory->load_image(reinterpret_cast<const uint8_t *>(&descriptor), sizeof(descriptor),
+                         kKernel);
+  sim.memory->load_image(reinterpret_cast<const uint8_t *>(code.data()), code.size() * 4,
+                         kKernel + sizeof(descriptor));
+  test::AqlQueue queue(sim.memory, sim.cp());
+  hsa_kernel_dispatch_packet_t packet{};
+  packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+  packet.setup = 1;
+  packet.grid_size_x = packet.workgroup_size_x = 32;
+  packet.grid_size_y = packet.grid_size_z = packet.workgroup_size_y = packet.workgroup_size_z = 1;
+  packet.kernel_object = kKernel;
+  packet.private_segment_size = 16;
+  queue.submit(packet);
+  step_until_halted(*sim.engine, *sim.cu());
+
+  ASSERT_EQ(sim.snapshot->snapshots().size(), 1u);
+  const auto &wave = sim.snapshot->snapshots().front();
+  constexpr uint64_t kPointer = kGfx1250PrivateApertureBase + (kScratch >> 5);
+  EXPECT_EQ(wave.vgpr(0, 0), static_cast<uint32_t>(kPointer));
+  EXPECT_EQ(wave.vgpr(1, 0), static_cast<uint32_t>(kPointer >> 32));
+  EXPECT_EQ(wave.vgpr(8, 0), kPrivateValue);
+  EXPECT_NE(wave.vgpr(8, 0), kGlobalValue);
 }
 
 TEST(MemoryWaitExecutionTest, SampleAndLoadWaitsAreIndependent) {
@@ -2569,7 +2767,7 @@ TEST(MemoryWaitExecutionTest, MessageResultsCheckM0AndOnlyConsumedExecWords) {
   }
 }
 
-TEST(MemoryWaitExecutionTest, CounterOnlyCacheOperationDoesNotProveOlderLoadComplete) {
+TEST(MemoryWaitExecutionTest, GlobalInvalidateAdvancesTheOlderLoadWithFullOrEmptyExec) {
   using namespace rocjitsu::amdhsa;
   for (bool zero_exec : {false, true}) {
     for (unsigned threshold : {0u, 1u, 2u}) {
@@ -2602,9 +2800,8 @@ TEST(MemoryWaitExecutionTest, CounterOnlyCacheOperationDoesNotProveOlderLoadComp
       step_until_halted(*sim.engine, *sim.cu());
       ASSERT_EQ(sim.snapshot->snapshots().size(), 1u);
       EXPECT_EQ(sim.snapshot->snapshots().front().vgpr(3, 0), 0x12345678u);
-      // Invalidation contributes to LOADcnt even with zero EXEC, but does not
-      // share the load's completion order. Only a zero wait proves it ready.
-      EXPECT_EQ(sim.cu()->memory_wait_diagnostic_count(), threshold != 0 ? 1u : 0u);
+      // Even with EXEC zero, the younger invalidation holds a LOADcnt slot.
+      EXPECT_EQ(sim.cu()->memory_wait_diagnostic_count(), threshold > 1 ? 1u : 0u);
     }
   }
 }
@@ -2805,14 +3002,13 @@ TEST(MemoryWaitExecutionTest, FlatLanesHaveSeparateDependenciesAndCounterPartici
         ASSERT_NO_FATAL_FAILURE(inst.initialize(2));
         cu->track_memory_wait(inst, *wf);
         auto &state = *wf->memory_wait_scoreboard();
+        const bool both = arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+                          arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+                          arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
         const bool dual_proof =
             arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
-        const bool both_issued =
-            dual_proof || arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
-        EXPECT_EQ(state.outstanding(WaitCounterKind::Load),
-                  both_issued || shared_lanes != 0b1111 ? 1u : 0u);
-        EXPECT_EQ(state.outstanding(WaitCounterKind::Ds),
-                  both_issued || shared_lanes != 0 ? 1u : 0u);
+        EXPECT_EQ(state.outstanding(WaitCounterKind::Load), both || shared_lanes != 0b1111);
+        EXPECT_EQ(state.outstanding(WaitCounterKind::Ds), both || shared_lanes != 0);
         std::vector<MemoryWaitScoreboard::Hazard> hazards;
         state.bind(0x200, &hazards, [](void *p, const auto &hazard) {
           static_cast<decltype(hazards) *>(p)->push_back(hazard);
@@ -2827,7 +3023,7 @@ TEST(MemoryWaitExecutionTest, FlatLanesHaveSeparateDependenciesAndCounterPartici
         state.wait(waited, 0);
         state.access(result, ready_lanes, 0xf, false);
         EXPECT_TRUE(hazards.empty());
-        EXPECT_EQ(state.outstanding(pending), both_issued || pending_lanes ? 1u : 0u);
+        EXPECT_EQ(state.outstanding(pending), both || pending_lanes);
         state.access(result, pending_lanes, 0xf, false);
         ASSERT_EQ(hazards.size(), pending_lanes ? 1u : 0u);
         if (pending_lanes) {
@@ -2963,13 +3159,18 @@ TEST(MemoryWaitExecutionTest, DecodedFlatPlansMatchExecutedAddressesBeforeAnyReg
           state.check_instruction(inst, *wf);
           cu->track_memory_wait(inst, *wf);
           EXPECT_EQ(observed->reads, 0u);
-          const bool dual_proof =
-              arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
-              arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
-          const bool both = dual_proof || arch == ROCJITSU_CODE_ARCH_RDNA4 || cdna5;
-          EXPECT_EQ(state.outstanding(WaitCounterKind::Ds), both || planned.shared ? 1u : 0u);
+          const bool gfx10 = arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+          const bool both =
+              (gfx10 && (planned.requests || !wf->memory_exec(inst))) ||
+              (legacy_cdna && planned.requests) ||
+              (planned.requests && (arch == ROCJITSU_CODE_ARCH_RDNA3 ||
+                                    arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+                                    arch == ROCJITSU_CODE_ARCH_RDNA4 || cdna5));
+          const bool dual_proof = gfx10 || arch == ROCJITSU_CODE_ARCH_RDNA3 ||
+                                  arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+          EXPECT_EQ(state.outstanding(WaitCounterKind::Ds), both || planned.shared);
           EXPECT_EQ(state.outstanding(WaitCounterKind::Load),
-                    both || (planned.requests & ~planned.shared) ? 1u : 0u);
+                    both || (planned.requests & ~planned.shared));
           inst.execute(inst, wf);
           ASSERT_NE(inst.data(), nullptr);
           const auto &data = *inst.data_as<VectorMemState>();
@@ -3085,7 +3286,7 @@ struct MemoryWaitOrderingTest : ::testing::Test {
   }
   void track(Instruction &inst) {
     auto &state = wf->ensure_memory_wait_scoreboard();
-    state.before(inst, cu->arch());
+    state.before(inst, cu->arch(), wf);
     state.check_instruction(inst, *wf);
     cu->track_memory_wait(inst, *wf);
     wf->pc += 8;
@@ -3122,17 +3323,18 @@ struct MemoryWaitOrderingTest : ::testing::Test {
       FAIL() << "unsupported test architecture";
     }
   }
-  void direct_load(bool parameter) {
+  void direct_load(bool parameter, uint8_t vdst = 2) {
     switch (cu->arch()) {
     case ROCJITSU_CODE_ARCH_RDNA3:
       return track(rdna3::build_ldsdir(
-          parameter ? rdna3::kLdsParamLoadLdsdir : rdna3::kLdsDirectLoadLdsdir, {.vdst = 2}));
+          parameter ? rdna3::kLdsParamLoadLdsdir : rdna3::kLdsDirectLoadLdsdir, {.vdst = vdst}));
     case ROCJITSU_CODE_ARCH_RDNA3_5:
       return track(rdna3_5::build_ldsdir(
-          parameter ? rdna3_5::kLdsParamLoadLdsdir : rdna3_5::kLdsDirectLoadLdsdir, {.vdst = 2}));
+          parameter ? rdna3_5::kLdsParamLoadLdsdir : rdna3_5::kLdsDirectLoadLdsdir,
+          {.vdst = vdst}));
     case ROCJITSU_CODE_ARCH_RDNA4:
       return track(rdna4::build_vdsdir(
-          parameter ? rdna4::kDsParamLoadVdsdir : rdna4::kDsDirectLoadVdsdir, {.vdst = 2}));
+          parameter ? rdna4::kDsParamLoadVdsdir : rdna4::kDsDirectLoadVdsdir, {.vdst = vdst}));
     default:
       FAIL() << "unsupported direct LDS architecture";
     }
@@ -3447,6 +3649,7 @@ TEST_F(MemoryWaitOrderingTest, NativeLdsDoesNotExemptUnqualifiedFlatWriteback) {
     set_test_flat_domains(*cu, *wf, 0b1111);
     flat_load();
     lds_load();
+    // GFX10 FLAT retains both VM and LDS completion obligations for its result.
     EXPECT_EQ(cu->memory_wait_diagnostic_count(), 2u);
   }
 }
@@ -3475,12 +3678,155 @@ TEST_F(MemoryWaitOrderingTest, NativeLdsOverwritesOnlyOrderedFlatLdsLanes) {
         const bool ordered_flat =
             arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
             arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
-        const bool dual_flat_result =
-            arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
-        const unsigned global_hazard = dual_flat_result || shared_lanes != 0b1111;
-        const unsigned lds_hazard = dual_flat_result || (!ordered_flat && shared_lanes != 0);
-        EXPECT_EQ(cu->memory_wait_diagnostic_count(), wait ? 0u : global_hazard + lds_hazard);
+        const bool gfx10 = arch == ROCJITSU_CODE_ARCH_RDNA1 ||
+                           arch == ROCJITSU_CODE_ARCH_RDNA2;
+        const unsigned global_hazard = gfx10 || shared_lanes != 0b1111;
+        const unsigned lds_hazard = !ordered_flat && (gfx10 || shared_lanes != 0);
+        EXPECT_EQ(cu->memory_wait_diagnostic_count(),
+                  wait ? 0u : global_hazard + lds_hazard);
       }
+}
+
+TEST_F(MemoryWaitOrderingTest, DualCounterFlatRetiresTheOlderOppositeRoute) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
+                    ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5})
+    for (bool older_shared : {false, true})
+      for (unsigned threshold : {3u, 4u}) {
+        SCOPED_TRACE(testing::Message()
+                     << arch << " older_shared=" << older_shared << " threshold=" << threshold);
+        ASSERT_NO_FATAL_FAILURE(setup(arch));
+        set_test_flat_domains(*cu, *wf, older_shared ? 0xf : 0);
+        flat_load(2);
+        set_test_flat_domains(*cu, *wf, older_shared ? 0 : 0xf);
+        for (uint8_t reg = 3; reg < 6; ++reg)
+          flat_load(reg);
+        auto &state = *wf->memory_wait_scoreboard();
+        EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 4u);
+        EXPECT_EQ(state.outstanding(WaitCounterKind::Ds), 4u);
+        state.wait(WaitCounterKind::Load, threshold);
+        state.wait(WaitCounterKind::Ds, threshold);
+        state.access({RegClass::VGPR, 2, 1}, 0xf, 0xf, false);
+        // The explicit partial wait counts both positions even though an
+        // unused route cannot supply a counter-capacity proof.
+        // On RDNA1 through RDNA3.5 the FLAT result retains both counter
+        // obligations, including its unused route's position.
+        const bool dual_result = amdgpu::flat_requires_both_counters(arch);
+        EXPECT_EQ(cu->memory_wait_diagnostic_count(),
+                  threshold == 4 ? (dual_result ? 2u : 1u) : 0u);
+      }
+}
+
+TEST_F(MemoryWaitOrderingTest, Gfx10FlatIssuesBothQueuePositionsWithEmptyExec) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+    SCOPED_TRACE(arch);
+    ASSERT_NO_FATAL_FAILURE(setup(arch));
+    wf->set_exec(0);
+    flat_load();
+    auto &state = wf->ensure_memory_wait_scoreboard();
+    EXPECT_EQ(state.outstanding(WaitCounterKind::Ds), 1u);
+    EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 1u);
+    state.access({RegClass::VGPR, 2, 1}, 0xf, 0xf, false);
+    EXPECT_EQ(cu->memory_wait_diagnostic_count(), 0u);
+  }
+}
+
+TEST_F(MemoryWaitOrderingTest, Gfx11FlatWithOnlyDsPendingMaySkipWhenExecIsEmpty) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5})
+    for (bool vm_busy : {false, true})
+      for (bool active : {false, true}) {
+        SCOPED_TRACE(testing::Message() << arch << " vm=" << vm_busy << " active=" << active);
+        ASSERT_NO_FATAL_FAILURE(setup(arch));
+        set_test_flat_domains(*cu, *wf, 0);
+        lds_load(2);
+        if (vm_busy)
+          track(std::array<uint32_t, 2>{0xdc520000, 0x080a0009}); // global_load_b32 v8,v9,s[10:11]
+        wf->set_exec(active);
+        track(std::array<uint32_t, 2>{0xdc680000, 0x007c0503}); // flat_store_b32 v[3:4],v5
+        auto &state = wf->ensure_memory_wait_scoreboard();
+        const bool issued = active || vm_busy;
+        EXPECT_EQ(state.outstanding(WaitCounterKind::Store), issued);
+        EXPECT_EQ(state.outstanding(WaitCounterKind::Ds), 1u + active);
+        state.wait(WaitCounterKind::Ds, 1);
+        state.access({RegClass::VGPR, 2, 1}, 1, 0xf, false);
+        EXPECT_EQ(cu->memory_wait_diagnostic_count(), !active);
+      }
+}
+
+TEST_F(MemoryWaitOrderingTest, Gfx11GlobalFlatDoesNotProveLdsAdmission) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5})
+    for (bool active : {false, true}) {
+      SCOPED_TRACE(testing::Message() << arch << " active=" << active);
+      ASSERT_NO_FATAL_FAILURE(setup(arch));
+      lds_load(2);
+      for (unsigned younger = 0; younger < 62; ++younger)
+        lds_load(7);
+      wf->set_exec(active);
+      track(std::array<uint32_t, 2>{0xdc680000, 0x007c0503}); // flat_store_b32 v[3:4],v5
+      auto &state = wf->ensure_memory_wait_scoreboard();
+      EXPECT_EQ(state.outstanding(WaitCounterKind::Store), active);
+      state.access({RegClass::VGPR, 2, 1}, 1, 0xf, false);
+      // An issued FLAT reserves the DS position before reading its address;
+      // admission at a full counter retires the oldest native LDS result.
+      // With empty EXEC and no VM work, the FLAT may skip its DS position.
+      EXPECT_EQ(cu->memory_wait_diagnostic_count(), active ? 0u : 1u);
+    }
+}
+
+TEST_F(MemoryWaitOrderingTest, Gfx11UnusedFlatCreditDoesNotRetireLaterDsResult) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+    SCOPED_TRACE(static_cast<unsigned>(arch));
+    ASSERT_NO_FATAL_FAILURE(setup(arch));
+    lds_load(20);
+    lds_load(21);
+    for (unsigned younger = 0; younger < 61; ++younger)
+      lds_load(7);
+    set_test_flat_domains(*cu, *wf, 0);
+    track(std::array<uint32_t, 2>{0xdc680000, 0x007c0503}); // global-route flat_store_b32
+    lds_load(9); // Admission can complete the oldest of 63 actual LDS requests.
+    auto &state = wf->ensure_memory_wait_scoreboard();
+    state.access({RegClass::VGPR, 20, 1}, 1, 0xf, false);
+    EXPECT_EQ(cu->memory_wait_diagnostic_count(), 0u);
+    state.access({RegClass::VGPR, 21, 1}, 1, 0xf, false);
+    EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
+  }
+}
+
+TEST_F(MemoryWaitOrderingTest, EmptyExecGfx11FlatStoreCannotCreditDsBehindAPendingLoad) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5})
+    for (bool pending : {false, true})
+      for (uint32_t ds : {1u, 2u}) {
+        SCOPED_TRACE(testing::Message() << arch << " pending=" << pending << " lgkm=" << ds);
+        ASSERT_NO_FATAL_FAILURE(setup(arch));
+        set_test_flat_domains(*cu, *wf, 0xf);
+        if (pending)
+          flat_load(2);
+        wf->set_exec(0);
+        const std::array<uint32_t, 2> store{0xdc680000, 0x007c0300}; // flat_store_b32 v[0:1],v3
+        track(store);
+        auto &state = wf->ensure_memory_wait_scoreboard();
+        EXPECT_EQ(state.outstanding(WaitCounterKind::Load), pending);
+        EXPECT_EQ(state.outstanding(WaitCounterKind::Store), pending);
+        EXPECT_EQ(state.outstanding(WaitCounterKind::Ds), pending ? 1u : 0u);
+        state.wait(WaitCounterKind::Load, 0);
+        state.wait(WaitCounterKind::Ds, ds);
+        state.access({RegClass::VGPR, 2, 1}, 0xf, 0xf, false);
+        EXPECT_EQ(cu->memory_wait_diagnostic_count(), pending);
+      }
+}
+
+TEST_F(MemoryWaitOrderingTest, ModeledBvhAloneCannotForceAnEmptyExecGfx12FlatIssue) {
+  for (auto extra : {WaitCounterKind::Bvh, WaitCounterKind::Sample}) {
+    SCOPED_TRACE(static_cast<unsigned>(extra));
+    ASSERT_NO_FATAL_FAILURE(setup(ROCJITSU_CODE_ARCH_RDNA4));
+    auto &state = wf->ensure_memory_wait_scoreboard();
+    state.issue(extra);
+    wf->set_exec(0);
+    track(rdna4::build_vflat(rdna4::kFlatStoreB32Vflat, {.saddr = 124, .vsrc = 3, .vaddr = 0}));
+    EXPECT_EQ(state.outstanding(extra), 1u);
+    EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 0u);
+    EXPECT_EQ(state.outstanding(WaitCounterKind::Store), extra == WaitCounterKind::Sample);
+    EXPECT_EQ(state.outstanding(WaitCounterKind::Ds), extra == WaitCounterKind::Sample);
+  }
 }
 
 TEST_F(MemoryWaitOrderingTest, PartialWaitRetiresFlatResultFromGfx10) {
@@ -3689,7 +4035,7 @@ TEST_F(MemoryWaitOrderingTest, GdsSourceLocksSurvivePartialWaitsAndDebuggerRepla
   track(words);
   ASSERT_TRUE(state.cancel_last_issue(pc, previous));
   ASSERT_EQ(state.events().size(), 4u);
-  EXPECT_EQ(state.issue_snapshot(), previous);
+  EXPECT_EQ(state.issue_snapshot().issued, previous.issued);
   state.wait(WaitCounterKind::Exp, 1);
   const auto restored = state.events();
   for (const auto &source : restored) {
@@ -3880,9 +4226,10 @@ TEST_F(MemoryWaitOrderingTest, FlatAndGlobalStoresShareCompletionOrderForReplay)
         ASSERT_EQ(state.outstanding(WaitCounterKind::X), 2u);
         state.wait(WaitCounterKind::Store, threshold);
         state.access({RegClass::VGPR, 0, 2}, 1, 0xf, true);
-        // An LDS-only FLAT allocates a STORE position. When it follows the
-        // global store, that position proves the older global translation
-        // complete at STORE=1. Its own replay sources follow the DS return.
+        // Both instructions take a STORE position, including an LDS-only FLAT.
+        // If the older FLAT used only LDS, an outstanding younger GLOBAL at
+        // threshold one does not prove the older translation completed. A
+        // completed younger GLOBAL at threshold zero proves the full X prefix.
         const bool translated =
             threshold == 0 || (threshold == 1 && (!flat_first || shared_lanes != 0b1111));
         EXPECT_EQ(cu->xcnt_diagnostic_count(), translated ? 0u : 1u);
@@ -4173,6 +4520,127 @@ TEST(MemoryWaitExecutionTest, LdsLoadsOverwriteInIssueOrder) {
         const bool ordered = sequence == Sequence::LdsThenLds;
         EXPECT_EQ(cu->memory_wait_diagnostic_count(), wait || ordered ? 0u : 1u);
       }
+}
+
+TEST(MemoryWaitExecutionTest, True16ValuWritesCheckPendingOtherHalfOnWideDependencyTargets) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4,
+                    ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(static_cast<unsigned>(arch));
+    GpuMemory memory("true16_valu_wait_memory");
+    L2Cache l2("true16_valu_wait_l2");
+    ComputeUnitCore::Config config{};
+    config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+    config.arch = arch;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 128;
+    config.vgprs_per_wf = 32;
+    config.lds_size_kb = 64;
+    std::unique_ptr<ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "true16_valu_wait_cu", config, &memory, &l2));
+    auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
+    ASSERT_NE(wf, nullptr);
+    auto decoder = Decoder::create(arch);
+    auto &state = wf->ensure_memory_wait_scoreboard();
+    std::vector<MemoryWaitScoreboard::Hazard> hazards;
+    state.bind(0x200, &hazards, [](void *context, const auto &hazard) {
+      static_cast<decltype(hazards) *>(context)->push_back(hazard);
+    });
+    for (bool pending_high : {false, true})
+      for (bool destination_high : {false, true})
+        for (bool waited : {false, true})
+          for (bool active : {false, true}) {
+            SCOPED_TRACE(pending_high);
+            SCOPED_TRACE(destination_high);
+            SCOPED_TRACE(waited);
+            SCOPED_TRACE(active);
+            const uint8_t destination = static_cast<uint8_t>(2 + (destination_high ? 128 : 0));
+            const auto words = [&]() -> std::array<uint32_t, 1> {
+              switch (arch) {
+              case ROCJITSU_CODE_ARCH_RDNA3:
+                return rdna3::build_vop1(rdna3::kVMovB16Vop1, {.src0 = 170, .vdst = destination});
+              case ROCJITSU_CODE_ARCH_RDNA3_5:
+                return rdna3_5::build_vop1(rdna3_5::kVMovB16Vop1,
+                                           {.src0 = 170, .vdst = destination});
+              case ROCJITSU_CODE_ARCH_RDNA4:
+                return rdna4::build_vop1(rdna4::kVMovB16Vop1, {.src0 = 170, .vdst = destination});
+              case ROCJITSU_CODE_ARCH_CDNA5:
+                return cdna5::build_vop1(cdna5::kVMovB16Vop1, {.src0 = 170, .vdst = destination});
+              default:
+                ADD_FAILURE() << "unexpected architecture";
+                return {};
+              }
+            }();
+            util::StringDiagnostic error;
+            auto decoded = decoder->decode_window(words, 0, error.emitter());
+            ASSERT_TRUE(decoded.succeeded()) << error.message();
+            const auto *dst = decoded.value()->dst_operand(0);
+            ASSERT_NE(dst, nullptr);
+            ASSERT_EQ(dst->register_byte_mask(), destination_high ? 0xc : 0x3);
+            state.clear();
+            hazards.clear();
+            wf->set_exec(active ? 1 : 0);
+            state.add({state.issue(WaitCounterKind::Ds),
+                       0x100,
+                       1,
+                       {RegClass::VGPR, 2, 1},
+                       WaitCounterKind::Ds,
+                       pending_high ? uint8_t{0xc} : uint8_t{0x3}});
+            if (waited)
+              state.wait(WaitCounterKind::Ds, 0);
+            state.check_instruction(*decoded.value(), *wf);
+            EXPECT_EQ(hazards.size(), active && !waited ? 1u : 0u);
+            if (!hazards.empty()) {
+              EXPECT_EQ(hazards.front().producer.reg, (RegisterRef{RegClass::VGPR, 2, 1}));
+              EXPECT_EQ(hazards.front().producer.counter, WaitCounterKind::Ds);
+              EXPECT_EQ(hazards.front().required_wait, 0u);
+              EXPECT_EQ(hazards.front().write, pending_high == destination_high);
+            }
+          }
+    // The other-half probe must not turn a pending asynchronous source read
+    // into a result dependency. The decoded write still protects a matching
+    // half from the real source-read hazard.
+    for (bool destination_high : {false, true})
+      for (bool source_high : {false, true})
+        for (bool expert_source : {false, true}) {
+          SCOPED_TRACE(destination_high);
+          SCOPED_TRACE(source_high);
+          SCOPED_TRACE(expert_source);
+          const uint8_t destination = static_cast<uint8_t>(2 + (destination_high ? 128 : 0));
+          const auto words = [&]() -> std::array<uint32_t, 1> {
+            switch (arch) {
+            case ROCJITSU_CODE_ARCH_RDNA3:
+              return rdna3::build_vop1(rdna3::kVMovB16Vop1, {.src0 = 170, .vdst = destination});
+            case ROCJITSU_CODE_ARCH_RDNA3_5:
+              return rdna3_5::build_vop1(rdna3_5::kVMovB16Vop1, {.src0 = 170, .vdst = destination});
+            case ROCJITSU_CODE_ARCH_RDNA4:
+              return rdna4::build_vop1(rdna4::kVMovB16Vop1, {.src0 = 170, .vdst = destination});
+            case ROCJITSU_CODE_ARCH_CDNA5:
+              return cdna5::build_vop1(cdna5::kVMovB16Vop1, {.src0 = 170, .vdst = destination});
+            default:
+              ADD_FAILURE() << "unexpected architecture";
+              return {};
+            }
+          }();
+          util::StringDiagnostic error;
+          auto decoded = decoder->decode_window(words, 0, error.emitter());
+          ASSERT_TRUE(decoded.succeeded()) << error.message();
+          state.clear();
+          hazards.clear();
+          wf->set_exec(1);
+          const auto counter = expert_source ? WaitCounterKind::VmVsrc : WaitCounterKind::X;
+          MemoryWaitScoreboard::Event pending{
+              state.issue(counter),   0x100,   1,
+              {RegClass::VGPR, 2, 1}, counter, source_high ? uint8_t{0xc} : uint8_t{0x3}};
+          if (!expert_source)
+            pending.async_replay_source = true;
+          state.add(pending);
+          state.check_instruction(*decoded.value(), *wf);
+          EXPECT_EQ(hazards.size(), source_high == destination_high ? 1u : 0u);
+          if (!hazards.empty())
+            EXPECT_TRUE(hazards.front().write);
+        }
+  }
 }
 
 TEST(MemoryWaitExecutionTest, BarrierObserversPreservePendingResults) {
@@ -4559,49 +5027,107 @@ TEST(MemoryWaitExecutionTest, VopdMoveChecksOnlyItsConsumedSources) {
   const uint32_t words[] = {0xca200003u, 0x03020c01u};
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4,
                     ROCJITSU_CODE_ARCH_CDNA5}) {
-    for (uint16_t pending_reg : {0, 6}) {
-      SCOPED_TRACE(static_cast<unsigned>(arch));
-      SCOPED_TRACE(pending_reg);
-      GpuMemory memory("vopd_memory");
-      L2Cache l2("vopd_l2");
-      ComputeUnitCore::Config config{};
-      config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
-      config.arch = arch;
-      config.num_wf_slots = 1;
-      config.sgprs_per_wf = 128;
-      config.vgprs_per_wf = 32;
-      config.lds_size_kb = 64;
-      std::unique_ptr<ComputeUnitCore> cu;
-      ASSERT_NO_FATAL_FAILURE(
-          rocjitsu::test::initialize_compute_unit(cu, "vopd_cu", config, &memory, &l2));
-      auto *wf = cu->dispatch_wf(0, 0x200, 128, 32, 32);
-      ASSERT_NE(wf, nullptr);
-      wf->set_exec(1);
-      cu->write_vgpr(wf->vgpr_alloc().base + 6, 0, 17);
-      auto &state = wf->ensure_memory_wait_scoreboard();
-      std::vector<MemoryWaitScoreboard::Hazard> hazards;
-      state.bind(wf->pc, &hazards, [](void *p, const auto &hazard) {
-        static_cast<decltype(hazards) *>(p)->push_back(hazard);
-      });
-      state.add({state.issue(WaitCounterKind::Load),
-                 0x100,
-                 1,
-                 {RegClass::VGPR, pending_reg, 1},
-                 WaitCounterKind::Load,
-                 0xf});
-      auto decoder = Decoder::create(arch);
-      util::StringDiagnostic error;
-      auto decoded = decoder->decode_window(words, 0, error.emitter());
-      ASSERT_TRUE(decoded.succeeded()) << error.message();
-      {
+    for (uint16_t pending_reg : {0, 2, 3, 6})
+      for (uint8_t pending_bytes : {uint8_t{0x3}, uint8_t{0xc}}) {
+        SCOPED_TRACE(static_cast<unsigned>(arch));
+        SCOPED_TRACE(pending_reg);
+        SCOPED_TRACE(pending_bytes);
+        GpuMemory memory("vopd_memory");
+        L2Cache l2("vopd_l2");
+        ComputeUnitCore::Config config{};
+        config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+        config.arch = arch;
+        config.num_wf_slots = 1;
+        config.sgprs_per_wf = 128;
+        config.vgprs_per_wf = 32;
+        config.lds_size_kb = 64;
+        std::unique_ptr<ComputeUnitCore> cu;
+        ASSERT_NO_FATAL_FAILURE(
+            rocjitsu::test::initialize_compute_unit(cu, "vopd_cu", config, &memory, &l2));
+        auto *wf = cu->dispatch_wf(0, 0x200, 128, 32, 32);
+        ASSERT_NE(wf, nullptr);
+        wf->set_exec(1);
+        cu->write_vgpr(wf->vgpr_alloc().base + 6, 0, 17);
+        auto &state = wf->ensure_memory_wait_scoreboard();
+        std::vector<MemoryWaitScoreboard::Hazard> hazards;
+        state.bind(wf->pc, &hazards, [](void *p, const auto &hazard) {
+          static_cast<decltype(hazards) *>(p)->push_back(hazard);
+        });
+        state.add({state.issue(WaitCounterKind::Load),
+                   0x100,
+                   1,
+                   {RegClass::VGPR, pending_reg, 1},
+                   WaitCounterKind::Load,
+                   pending_bytes});
+        auto decoder = Decoder::create(arch);
+        util::StringDiagnostic error;
+        auto decoded = decoder->decode_window(words, 0, error.emitter());
+        ASSERT_TRUE(decoded.succeeded()) << error.message();
+        {
+          auto &inst = *decoded.value();
+          state.check_instruction(inst, *wf);
+          inst.execute(inst, wf);
+        }
+        EXPECT_EQ(hazards.size(), pending_reg == 0 ? 0u : 1u);
+        if (!hazards.empty())
+          EXPECT_EQ(hazards.front().write, pending_reg != 6);
+        EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + 2, 0), 17u);
+      }
+  }
+}
+
+TEST(MemoryWaitExecutionTest, OutOfRangeVopdSourceUsesModuloFourRegister) {
+  // Y reads encoded v10 with only v0-v7 allocated. VOPD selects v2, not v0.
+  // v_dual_mov_b32 v3, s3 :: v_dual_add_nc_u32 v4, s1, v10
+  const uint32_t words[] = {0xca200003u, 0x03041401u};
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4,
+                    ROCJITSU_CODE_ARCH_CDNA5})
+    for (unsigned source_bank : {0u, 2u})
+      for (uint16_t pending_reg : {0u, 2u}) {
+        if (source_bank && arch != ROCJITSU_CODE_ARCH_CDNA5)
+          continue;
+        SCOPED_TRACE(std::format("arch={} source_bank={} pending=v{}", static_cast<unsigned>(arch),
+                                 source_bank, pending_reg));
+        GpuMemory memory("vopd_modulo_memory");
+        L2Cache l2("vopd_modulo_l2");
+        ComputeUnitCore::Config config{};
+        config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+        config.arch = arch;
+        config.num_wf_slots = 1;
+        config.sgprs_per_wf = 128;
+        config.vgprs_per_wf = 32;
+        config.lds_size_kb = 64;
+        std::unique_ptr<ComputeUnitCore> cu;
+        ASSERT_NO_FATAL_FAILURE(
+            rocjitsu::test::initialize_compute_unit(cu, "vopd_modulo_cu", config, &memory, &l2));
+        auto *wf = cu->dispatch_wf(0, 0x200, 128, 8, 32);
+        ASSERT_NE(wf, nullptr);
+        ASSERT_EQ(wf->num_vgprs(), 8u);
+        wf->set_exec(1);
+        wf->set_vgpr_msb_mode(static_cast<uint8_t>(source_bank << 2));
+        cu->write_vgpr(wf->vgpr_alloc().base, 0, 29);
+        cu->write_vgpr(wf->vgpr_alloc().base + 2, 0, 17);
+        auto &state = wf->ensure_memory_wait_scoreboard();
+        std::vector<MemoryWaitScoreboard::Hazard> hazards;
+        state.bind(wf->pc, &hazards, [](void *p, const auto &hazard) {
+          static_cast<decltype(hazards) *>(p)->push_back(hazard);
+        });
+        state.add({state.issue(WaitCounterKind::Load),
+                   0x100,
+                   1,
+                   {RegClass::VGPR, pending_reg, 1},
+                   WaitCounterKind::Load,
+                   0xf});
+        auto decoder = Decoder::create(arch);
+        util::StringDiagnostic error;
+        auto decoded = decoder->decode_window(words, 0, error.emitter());
+        ASSERT_TRUE(decoded.succeeded()) << error.message();
         auto &inst = *decoded.value();
         state.check_instruction(inst, *wf);
         inst.execute(inst, wf);
+        EXPECT_EQ(hazards.size(), pending_reg == 2 ? 1u : 0u);
+        EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + 4, 0), 17u);
       }
-      EXPECT_EQ(hazards.size(), pending_reg == 6 ? 1u : 0u);
-      EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + 2, 0), 17u);
-    }
-  }
 }
 
 TEST(MemoryWaitExecutionTest, VopdCndmaskChecksPendingVccOnlyForActiveLanes) {
@@ -4717,6 +5243,56 @@ TEST(MemoryWaitExecutionTest, NarrowStoresCheckOnlyConsumedBytes) {
         EXPECT_EQ(data.store_data[1], high ? 0x44 : 0x22);
       }
     }
+  }
+}
+
+TEST(MemoryWaitExecutionTest, Gfx1150FlatStoreCreditsLdsBeforeUsingAFlatLoad) {
+  constexpr uint64_t pc = 0x4000;
+  constexpr uint64_t shared = uint64_t{2} << 32;
+  constexpr uint32_t global = 0x8000;
+  for (uint32_t ds : {1u, 2u}) {
+    SCOPED_TRACE(ds);
+    GpuMemory memory("flat_pair_memory");
+    L2Cache l2("flat_pair_l2");
+    l2.set_backing_memory(&memory);
+    ComputeUnitCore::Config config{};
+    config.arch = ROCJITSU_CODE_ARCH_RDNA3_5;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 96;
+    config.vgprs_per_wf = 32;
+    config.lds_size_kb = 64;
+    config.functional_quantum = 1;
+    config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+    std::unique_ptr<ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "flat_pair_cu", config, &memory, &l2));
+    cu->set_apertures(shared, shared + UINT32_MAX, 0, 0);
+    auto *wf = cu->dispatch_wf(0, pc, 96, 32, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(1);
+    wf->set_lds_size(256);
+    cu->lds().write32(4, 0x12345678);
+    const auto base = wf->vgpr_alloc().base;
+    cu->write_vgpr(base, 0, 4);
+    cu->write_vgpr(base + 1, 0, 2);
+    cu->write_vgpr(base + 3, 0, 0x1234);
+    cu->write_vgpr(base + 4, 0, global);
+    const uint32_t words[] = {0xdc500000,
+                              0x027c0000, // flat_load_b32 v2,v[0:1] (LDS)
+                              0xdc680000,
+                              0x007c0304,             // flat_store_b32 v[4:5],v3 (global)
+                              0xbf890007 | (ds << 4), // s_waitcnt vmcnt(0) lgkmcnt(ds)
+                              0xdc680000,
+                              0x007c0204,  // flat_store_b32 v[4:5],v2 (consume LDS result)
+                              0xbfb00000}; // s_endpgm
+    for (unsigned i = 0; i < std::size(words); ++i)
+      memory.write32(pc + i * 4, words[i]);
+    const uint64_t end = pc + sizeof(words) - 4;
+    for (unsigned tick = 0; wf->pc < end && tick < 128; ++tick)
+      cu->step();
+    ASSERT_EQ(wf->pc, end);
+    EXPECT_EQ(cu->read_vgpr(base + 2, 0), 0x12345678u);
+    EXPECT_EQ(cu->memory_wait_diagnostic_count(), ds == 2);
   }
 }
 
@@ -5751,6 +6327,36 @@ void check_vector_footprints(rj_code_arch_t arch, unsigned wave_size, unsigned n
       const auto expected = observed->accesses;
       if (prepare)
         prepare(*wf);
+      // The observer records logical execution bytes. On these targets a
+      // true16 VALU write also depends on a pending memory result in the
+      // preserved half of its physical VGPR. Model that extra result check
+      // separately; a pending asynchronous source still uses only the
+      // observed write footprint below.
+      std::array<std::array<uint64_t, 4>, 1024> preserved_result{};
+      const bool wide_d16_dependency =
+          arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+          arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+      if (wide_d16_dependency && (inst.flags() & VALU)) {
+        const RegisterAccess registers(*wf);
+        for (int i = 0; i < inst.num_dst_operands(); ++i) {
+          const Operand *dst = inst.dst_operand(i);
+          if (!dst || dst->size_bits() != 16)
+            continue;
+          const uint8_t selected = dst->register_byte_mask();
+          if (selected != 0x3 && selected != 0xc)
+            continue;
+          const auto reg = registers.destination_register(*dst);
+          if (!reg || reg->cls != RegClass::VGPR || reg->width != 1 || reg->index >= num_vgprs)
+            continue;
+          uint64_t written_lanes = 0;
+          for (unsigned byte = 0; byte < 4; ++byte)
+            if (selected & (1u << byte))
+              written_lanes |= expected[reg->index].write[byte];
+          for (unsigned byte = 0; byte < 4; ++byte)
+            if (!(selected & (1u << byte)))
+              preserved_result[reg->index][byte] |= written_lanes;
+        }
+      }
       const auto callbacks_before = observed->callbacks;
       // These operations do not change EXEC or their lane-select operand.
       ASSERT_EQ(wf->exec_raw(), exec);
@@ -5772,12 +6378,16 @@ void check_vector_footprints(rj_code_arch_t arch, unsigned wave_size, unsigned n
                          counter,
                          static_cast<uint8_t>(1u << byte)});
               state.check_instruction(inst, *wf);
-              const auto lanes =
+              const auto logical_lanes =
                   expected[reg].write[byte] | (replay ? 0 : expected[reg].read[byte]);
+              const auto lanes = logical_lanes | (replay ? 0 : preserved_result[reg][byte]);
               const bool hazard = lanes & (uint64_t{1} << lane);
               if ((reports != 0) != hazard) {
                 ADD_FAILURE() << "v" << reg << " lane=" << lane << " byte=" << byte
                               << " replay=" << replay << " expected=" << hazard
+                              << " logical=" << bool(logical_lanes & (uint64_t{1} << lane))
+                              << " preserved="
+                              << bool(preserved_result[reg][byte] & (uint64_t{1} << lane))
                               << " reported=" << reports;
                 if (++mismatches == 8)
                   goto next_mask;
@@ -6922,7 +7532,7 @@ TEST(MemoryWaitExecutionTest, TransposePrecheckUsesExpandedExecutionLanes) {
   }
 }
 
-TEST(MemoryWaitExecutionTest, ModernVectorBufferTypeSuppressesWritebackButStillIssues) {
+TEST(MemoryWaitExecutionTest, ModernVectorBufferTypeSuppressesWritebackAndCompletionProof) {
   for (auto arch :
        {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
     GpuMemory memory("buffer_result_memory");
@@ -7022,7 +7632,9 @@ TEST(MemoryWaitExecutionTest, ModernVectorBufferTypeSuppressesWritebackButStillI
           wf->pc = pc;
           cu->run_issue_cycle(1);
           ASSERT_EQ(wf->pc, pc + words.size() * 4) << unsigned(wf->instruction_execution_error());
-          EXPECT_EQ(scoreboard.outstanding(WaitCounterKind::Load), 1u);
+          // The functional pipeline may acquire and retire a counter, but
+          // descriptor mismatch is not a proven younger completion position.
+          EXPECT_EQ(scoreboard.outstanding(WaitCounterKind::Load), unsigned(writes));
           const auto before = cu->memory_wait_diagnostic_count();
           for (unsigned tick = 0; wf->pc < next + 4 && tick < 32; ++tick)
             cu->run_issue_cycle(1);
@@ -9091,4 +9703,1655 @@ TEST(XcntExecutionTest, WordwiseBufferDataRetainsItsBackedReplaySource) {
       }
     EXPECT_EQ(recorded, exec);
   }
+}
+
+TEST(MemoryWaitExecutionTest, UnallocatedGlobalAndScratchD16LoadsSkipAddressReads) {
+  for (const auto arch : {ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(static_cast<unsigned>(arch));
+    GpuMemory memory("nullified_d16_memory");
+    L2Cache l2("nullified_d16_l2");
+    ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 128;
+    config.vgprs_per_wf = 32;
+    config.lds_size_kb = 64;
+    std::unique_ptr<ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "nullified_d16_cu", config, &memory, &l2));
+    auto *wf = cu->dispatch_wf(0, 0x100, 128, 32, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(1);
+    wf->set_scratch_base(0x400000);
+    wf->set_scratch_lane_size(256);
+    ASSERT_EQ(wf->vgpr_alloc().count, 32u);
+    auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    auto observer = std::make_unique<MemoryWaitFootprintObserver>();
+    auto *observed = observer.get();
+    group->add(std::move(observer));
+    cu->set_plugin_group(group);
+    group->onInit();
+    auto decoder = Decoder::create(arch);
+    for (bool scratch : {false, true})
+      for (unsigned encoding : {0u, 1u, 2u})
+        for (uint8_t destination : {uint8_t{16}, uint8_t{63}}) {
+          SCOPED_TRACE(testing::Message() << "scratch=" << scratch << " encoding=" << encoding
+                                          << " dst=" << unsigned(destination));
+          std::vector<uint32_t> words;
+          const auto encode = [&](const auto &encoded) {
+            words.assign(encoded.begin(), encoded.end());
+          };
+          if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+            if (scratch)
+              encode(cdna5::build_vscratch(
+                  encoding == 1   ? cdna5::kScratchLoadD16U8Vscratch
+                  : encoding == 2 ? cdna5::kScratchLoadD16HiU8Vscratch
+                                  : cdna5::kScratchLoadB32Vscratch,
+                  {.saddr = kModernNullSelector, .vdst = destination, .sve = 1, .vaddr = 8}));
+            else
+              encode(cdna5::build_vglobal(
+                  encoding == 1   ? cdna5::kGlobalLoadD16U8Vglobal
+                  : encoding == 2 ? cdna5::kGlobalLoadD16HiU8Vglobal
+                                  : cdna5::kGlobalLoadB32Vglobal,
+                  {.saddr = kModernNullSelector, .vdst = destination, .vaddr = 8}));
+          } else {
+            if (scratch)
+              encode(rdna4::build_vscratch(
+                  encoding == 1   ? rdna4::kScratchLoadD16U8Vscratch
+                  : encoding == 2 ? rdna4::kScratchLoadD16HiU8Vscratch
+                                  : rdna4::kScratchLoadB32Vscratch,
+                  {.saddr = kModernNullSelector, .vdst = destination, .sve = 1, .vaddr = 8}));
+            else
+              encode(rdna4::build_vglobal(
+                  encoding == 1   ? rdna4::kGlobalLoadD16U8Vglobal
+                  : encoding == 2 ? rdna4::kGlobalLoadD16HiU8Vglobal
+                                  : rdna4::kGlobalLoadB32Vglobal,
+                  {.saddr = kModernNullSelector, .vdst = destination, .vaddr = 8}));
+          }
+          util::StringDiagnostic error;
+          auto decoded = decoder->decode_window(words, 0, error.emitter());
+          ASSERT_TRUE(decoded.succeeded()) << error.message();
+          ASSERT_TRUE(decoded.value()->is_memory_op());
+          EXPECT_EQ(wf->memory_destination_out_of_range(*decoded.value()), destination == 63);
+          auto &state = wf->ensure_memory_wait_scoreboard();
+          state.clear();
+          unsigned reports = 0;
+          state.bind(0x200, &reports, [](void *p, const auto &) { ++*static_cast<unsigned *>(p); });
+          state.add({state.issue(WaitCounterKind::Load),
+                     0x100,
+                     1,
+                     {RegClass::VGPR, 8, 1},
+                     WaitCounterKind::Load,
+                     0xf});
+          state.check_instruction(*decoded.value(), *wf);
+          EXPECT_EQ(reports, destination == 63 ? 0u : 1u);
+          if (scratch && encoding) {
+            // Exercise the generated SCRATCH address helper as well as the
+            // scoreboarding preflight. Nullified D16 loads must not read v8.
+            observed->accesses = {};
+            ASSERT_TRUE(cu->execute_instruction(decoded.value().get(), *wf).succeeded());
+            uint64_t address_reads = 0;
+            for (const auto lanes : observed->accesses[8].read)
+              address_reads |= lanes;
+            EXPECT_EQ(address_reads & 1u, destination == 63 ? 0u : 1u);
+          }
+        }
+  }
+}
+
+class NamedRuntimeWaitInstruction : public Instruction {
+public:
+  explicit NamedRuntimeWaitInstruction(std::string_view name) : Instruction(name, nullptr) {}
+};
+
+
+
+TEST(RuntimeWaitTargetTest, OrdinaryEventsMatchTheDevelopClassifier) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5})
+    for (std::string_view name :
+         {"global_load_dword", "ds_read_b32", "s_load_dword", "s_sendmsg_rtn_b32"}) {
+      SCOPED_TRACE(testing::Message() << "arch=" << arch << " mnemonic=" << name);
+      NamedRuntimeWaitInstruction inst(name);
+      const auto base = waitcheck_detail::WaitcheckTarget::classify_events(inst, arch);
+      const auto runtime = waitcheck_detail::RuntimeWaitTarget::classify_events(inst, arch);
+      ASSERT_TRUE(base.succeeded());
+      ASSERT_TRUE(runtime.succeeded());
+      ASSERT_EQ(base.value().size(), runtime.value().size());
+      for (size_t i = 0; i < base.value().size(); ++i) {
+        EXPECT_EQ(base.value()[i].counter, runtime.value()[i].counter);
+        EXPECT_EQ(base.value()[i].kind, runtime.value()[i].kind);
+        EXPECT_EQ(base.value()[i].registers, runtime.value()[i].registers);
+        EXPECT_EQ(base.value()[i].check_uses, runtime.value()[i].check_uses);
+        EXPECT_EQ(base.value()[i].check_defs, runtime.value()[i].check_defs);
+      }
+    }
+}
+
+TEST(RuntimeWaitTargetTest, CacheAsyncAndExpertPoliciesKeepTheirRuntimePositions) {
+  for (std::string_view name : {"buffer_inv", "buffer_wbl2"}) {
+    NamedRuntimeWaitInstruction inst(name);
+    const auto events =
+        waitcheck_detail::RuntimeWaitTarget::classify_events(inst, ROCJITSU_CODE_ARCH_CDNA4);
+    ASSERT_TRUE(events.succeeded());
+    ASSERT_EQ(events.value().size(), 1u);
+    EXPECT_EQ(events.value()[0].counter, WaitCounterKind::Load);
+    EXPECT_EQ(events.value()[0].kind, name == "buffer_inv"
+                                          ? waitcheck_detail::WaitEventKind::GlobalInv
+                                          : waitcheck_detail::WaitEventKind::GlobalWb);
+    EXPECT_EQ(waitcheck_detail::RuntimeWaitTarget::completion_order_kind(
+                  events.value()[0].counter, events.value()[0].kind, ROCJITSU_CODE_ARCH_CDNA4),
+              0u);
+  }
+  NamedRuntimeWaitInstruction async("global_load_async_to_lds_b32");
+  const auto events =
+      waitcheck_detail::RuntimeWaitTarget::classify_events(async, ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_TRUE(events.succeeded());
+  ASSERT_EQ(events.value().size(), 2u);
+  EXPECT_EQ(events.value()[0].counter, WaitCounterKind::Async);
+  EXPECT_EQ(events.value()[1].counter, WaitCounterKind::X);
+  EXPECT_EQ(waitcheck_detail::RuntimeWaitTarget::completion_order_kind(
+                events.value()[0].counter, events.value()[0].kind, ROCJITSU_CODE_ARCH_CDNA5),
+            1u << static_cast<unsigned>(waitcheck_detail::WaitEventKind::AsyncLdsLoad));
+
+  NamedRuntimeWaitInstruction scale("v_wmma_scale_f32_16x16x128_f8f6f4");
+  NamedRuntimeWaitInstruction matrix("v_wmma_f16_16x16x32_f16");
+  const waitcheck_detail::ClassifiedEvent valu{WaitCounterKind::VaVdst,
+                                               waitcheck_detail::kValuMatrix};
+  EXPECT_EQ(waitcheck_detail::RuntimeWaitTarget::issue_units(scale, valu, ROCJITSU_CODE_ARCH_CDNA5),
+            2u);
+  EXPECT_EQ(
+      waitcheck_detail::RuntimeWaitTarget::issue_units(matrix, valu, ROCJITSU_CODE_ARCH_CDNA5), 1u);
+  EXPECT_EQ(waitcheck_detail::RuntimeWaitTarget::wmma_valu_wait_states(
+                scale, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_TARGET_GFX1250),
+            0u);
+  EXPECT_EQ(waitcheck_detail::RuntimeWaitTarget::wmma_valu_wait_states(
+                matrix, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_TARGET_GFX1250),
+            4u);
+}
+
+TEST_F(MemoryWaitScoreboardTest, MatrixOperandDiagnosticIncludesCompletedCorePositions) {
+  using waitcheck_detail::ClassifiedEvent;
+  using waitcheck_detail::WaitEventKind;
+  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr auto counter = WaitCounterKind::VaVdst;
+  const ClassifiedEvent matrix{counter, waitcheck_detail::kValuMatrix};
+  const ClassifiedEvent core{counter, waitcheck_detail::kValuCore};
+  const RegisterRef operand{RegClass::VGPR, 8, 1};
+  for (const uint32_t count : {0u, 2u, 3u}) {
+    SCOPED_TRACE(count);
+    state.clear();
+    hazards.clear();
+    const auto preceding_core = state.issue(core, arch, 4);
+    const auto producer = state.issue(matrix, arch);
+    MemoryWaitScoreboard::Event event{producer, 0x100, 1, operand, counter, 0xf};
+    event.valu_source = true;
+    event.wmma_wait_states = 4;
+    event.preceding_core_valu = preceding_core;
+    state.add(event);
+    state.issue(core, arch, 7);
+    state.wait(counter, count);
+    state.access(operand, 1, 0xf, true);
+    ASSERT_EQ(hazards.size(), unsigned(count > 2));
+    if (!hazards.empty())
+      EXPECT_EQ(hazards.front().required_wait, 2u);
+  }
+}
+
+TEST(RuntimeWaitTargetTest, ExpertVopcF64AndI64ComparesUseDpCompletionClass) {
+  const auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  for (const auto [opcode, dp] :
+       {std::pair{cdna5::kVCmpLtF64Vopc, true}, std::pair{cdna5::kVCmpxLtF64Vopc, true},
+        std::pair{cdna5::kVCmpLtI64Vopc, true}, std::pair{cdna5::kVCmpxLtI64Vopc, true},
+        std::pair{cdna5::kVCmpLtU64Vopc, true}, std::pair{cdna5::kVCmpxLtU64Vopc, true},
+        std::pair{cdna5::kVCmpClassF64Vopc, false}, std::pair{cdna5::kVCmpxClassF64Vopc, false}}) {
+    SCOPED_TRACE(opcode);
+    const auto words = cdna5::build_vopc(opcode, {.src0 = 256, .vsrc1 = 2});
+    util::StringDiagnostic error;
+    auto decoded = decoder->decode_window(words, 0, error.emitter());
+    ASSERT_TRUE(decoded.succeeded()) << error.message();
+    EXPECT_EQ(waitcheck_detail::RuntimeWaitTarget::expert_valu_kind(*decoded.value(),
+                                                                    ROCJITSU_CODE_ARCH_CDNA5),
+              dp ? waitcheck_detail::kValuDp : waitcheck_detail::kValuCore);
+  }
+}
+
+TEST(RuntimeWaitTargetTest, Cdna5F64TranscendentalRetainsExpertTransClass) {
+  const auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  for (const auto opcode :
+       {cdna5::kVExpF32Vop1, cdna5::kVRcpF64Vop1, cdna5::kVSqrtF64Vop1}) {
+    SCOPED_TRACE(opcode);
+    const auto words = cdna5::build_vop1(opcode, {.src0 = 256, .vdst = 2});
+    util::StringDiagnostic error;
+    auto decoded = decoder->decode_window(words, 0, error.emitter());
+    ASSERT_TRUE(decoded.succeeded()) << error.message();
+    ASSERT_TRUE(decoded.value()->is_transcendental());
+    EXPECT_EQ(waitcheck_detail::RuntimeWaitTarget::expert_valu_kind(*decoded.value(),
+                                                                    ROCJITSU_CODE_ARCH_CDNA5),
+              waitcheck_detail::kValuTrans);
+  }
+}
+
+TEST(MemoryWaitExecutionTest, Gfx1250ExpertVopcDpSourceNeedsPartialVaVdstWait) {
+  for (const auto opcode : {cdna5::kVCmpLtF64Vopc, cdna5::kVCmpLtI64Vopc, cdna5::kVCmpLtU64Vopc}) {
+    SCOPED_TRACE(opcode);
+    GpuMemory memory("expert_vopc_memory");
+    L2Cache l2("expert_vopc_l2");
+    l2.set_backing_memory(&memory);
+    ComputeUnitCore::Config config{};
+    config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+    config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+    config.target = ROCJITSU_CODE_TARGET_GFX1250;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 128;
+    config.vgprs_per_wf = 64;
+    config.lds_size_kb = 64;
+    config.functional_quantum = 1;
+    auto cu = ComputeUnitCore::create("expert_vopc_cu", config, &memory, &l2);
+    ASSERT_NE(cu, nullptr);
+    constexpr uint64_t pc = 0x4000;
+    auto *wf = cu->dispatch_wf(0, pc, 128, 32, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(1);
+    const auto base = wf->vgpr_alloc().base;
+    cu->write_vgpr(base + 8, 0, 0x8000);
+    memory.write32(0x8000, 0x12345678);
+    std::vector<uint32_t> program{0xb980081au, 2u}; // WAVE_SCHED_MODE = expert.
+    const auto compare = cdna5::build_vopc(opcode, {.src0 = 256, .vsrc1 = 2});
+    program.insert(program.end(), compare.begin(), compare.end());
+    program.push_back(0x7e1c030bu); // Younger core v_mov_b32 v14, v11.
+    program.push_back(0xbf881f9fu); // s_wait_alu depctr_va_vdst(1).
+    const auto load =
+        cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal, {.saddr = 124, .vdst = 0, .vaddr = 8});
+    program.insert(program.end(), load.begin(), load.end());
+    program.push_back(0xbfc00000u); // s_wait_loadcnt 0.
+    program.push_back(0xbfb00000u); // s_endpgm.
+    for (size_t i = 0; i < program.size(); ++i)
+      memory.write32(pc + i * 4, program[i]);
+    const uint64_t end = pc + (program.size() - 1) * 4;
+    for (unsigned step = 0; step < 64 && wf->pc != end; ++step)
+      cu->step();
+    ASSERT_EQ(wf->pc, end);
+    EXPECT_EQ(cu->read_vgpr(base, 0), 0x12345678u);
+    EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
+  }
+}
+
+TEST(MemoryWaitExecutionTest, Gfx12ExpertValuEmptyExecSkipsCompletionCredit) {
+  enum class Younger { Active, Masked, Absent, MustIssue };
+  for (const auto arch : {ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA4})
+    for (const auto younger :
+         {Younger::Active, Younger::Masked, Younger::Absent, Younger::MustIssue}) {
+      SCOPED_TRACE(testing::Message()
+                   << "arch=" << arch << " younger=" << static_cast<int>(younger));
+      GpuMemory memory("expert_valu_memory");
+      L2Cache l2("expert_valu_l2");
+      l2.set_backing_memory(&memory);
+      ComputeUnitCore::Config config{};
+      config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+      config.arch = arch;
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = 128;
+      config.vgprs_per_wf = 64;
+      config.lds_size_kb = 64;
+      config.functional_quantum = 1;
+      auto cu = ComputeUnitCore::create("expert_valu_cu", config, &memory, &l2);
+      ASSERT_NE(cu, nullptr);
+      constexpr uint64_t pc = 0x4000;
+      auto *wf = cu->dispatch_wf(0, pc, 128, 32, 32);
+      ASSERT_NE(wf, nullptr);
+      wf->set_exec(1);
+      const auto base = wf->vgpr_alloc().base;
+      cu->write_vgpr(base + 3, 0, 0x8000);
+      memory.write32(0x8000, 0x12345678);
+      const std::array program{
+          0xb980081au,
+          2u,          // s_setreg WAVE_SCHED_MODE[1:0] = expert.
+          0x7e100303u, // v_mov_b32 v8, v3.
+          0xbefe0080u | (younger == Younger::Active ||
+                         younger == Younger::Absent), // s_mov_b32 exec_lo, 0 or 1.
+          younger == Younger::Absent      ? 0xbf800000u
+          : younger == Younger::MustIssue ? 0x7e000000u
+                                          : 0x7e1c030bu, // s_nop or v_mov_b32 v14, v11.
+          0xbefe0081u,                                   // s_mov_b32 exec_lo, 1.
+          0xbf881f9fu,                                   // s_wait_alu depctr_va_vdst(1).
+          0xee05007cu,
+          4u,
+          8u,           // global_load_b32 v4, v[8:9].
+          0xbfc00000u,  // s_wait_loadcnt 0.
+          0xbfb00000u}; // s_endpgm.
+      for (size_t i = 0; i < program.size(); ++i)
+        memory.write32(pc + i * 4, program[i]);
+      for (size_t i = 0; i < program.size() - 1; ++i) {
+        const uint64_t end = pc + sizeof(program) - 4;
+        if (wf->pc == end)
+          break;
+        cu->step();
+      }
+      ASSERT_EQ(wf->pc, pc + sizeof(program) - 4);
+      ASSERT_EQ(wf->wave_sched_mode_raw() & 3u, 2u);
+      ASSERT_EQ(cu->read_vgpr(base + 4, 0), 0x12345678u);
+      EXPECT_EQ(cu->memory_wait_diagnostic_count(),
+                unsigned(younger == Younger::Masked || younger == Younger::Absent));
+    }
+}
+
+TEST(MemoryWaitExecutionTest, Gfx1201Wave64EmptyExecCmpxStillAdvancesValuOrder) {
+  constexpr uint32_t kScalarNop = 0xbf800000u;
+  constexpr uint32_t kVectorNop = 0x7e000000u;
+  constexpr uint32_t kCmpxEq = 0x7d94170bu; // v_cmpx_eq_u32 v11, v11.
+  for (unsigned wave_size : {32u, 64u})
+    for (uint32_t younger : {kScalarNop, kVectorNop, kCmpxEq}) {
+      SCOPED_TRACE(testing::Message() << "wave_size=" << wave_size << " younger=" << younger);
+      GpuMemory memory("expert_cmpx_memory");
+      L2Cache l2("expert_cmpx_l2");
+      l2.set_backing_memory(&memory);
+      ComputeUnitCore::Config config{};
+      config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+      config.arch = ROCJITSU_CODE_ARCH_RDNA4;
+      config.target = ROCJITSU_CODE_TARGET_GFX1201;
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = 128;
+      config.vgprs_per_wf = 64;
+      config.lds_size_kb = 64;
+      config.functional_quantum = 1;
+      auto cu = ComputeUnitCore::create("expert_cmpx_cu", config, &memory, &l2);
+      ASSERT_NE(cu, nullptr);
+      constexpr uint64_t pc = 0x4000;
+      auto *wf = cu->dispatch_wf(0, pc, 128, 32, wave_size);
+      ASSERT_NE(wf, nullptr);
+      wf->set_exec(1);
+      const auto base = wf->vgpr_alloc().base;
+      cu->write_vgpr(base + 3, 0, 0x8000);
+      memory.write32(0x8000, 0x12345678);
+      const std::array program{0xb980081au, 2u,     // WAVE_SCHED_MODE[1:0] = expert.
+                               0x7e100303u,         // v_mov_b32 v8, v3.
+                               0xbefe0080u,         // s_mov_b32 exec_lo, 0.
+                               younger,             // Optional younger VALU issue.
+                               0xbefe0081u,         // s_mov_b32 exec_lo, 1.
+                               0xbf881f9fu,         // s_wait_alu depctr_va_vdst(1).
+                               0xee05007cu, 4u, 8u, // global_load_b32 v4, v[8:9].
+                               0xbfc00000u,         // s_wait_loadcnt 0.
+                               0xbfb00000u};        // s_endpgm.
+      for (size_t i = 0; i < program.size(); ++i)
+        memory.write32(pc + i * 4, program[i]);
+      const uint64_t end = pc + sizeof(program) - 4;
+      for (unsigned step = 0; step < 64 && wf->pc != end; ++step)
+        cu->step();
+      ASSERT_EQ(wf->pc, end);
+      EXPECT_EQ(cu->read_vgpr(base + 4, 0), 0x12345678u);
+      const bool counted = younger == kVectorNop || (younger == kCmpxEq && wave_size == 64);
+      EXPECT_EQ(cu->memory_wait_diagnostic_count(), counted ? 0u : 1u);
+    }
+}
+
+TEST(MemoryWaitExecutionTest, Gfx12ExpertValuReadinessMatchesIssuedOperandAndMode) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (unsigned mode : {0u, 2u}) {
+      for (unsigned count : {0u, 1u, 2u, 15u}) {
+        SCOPED_TRACE(testing::Message() << arch << "/" << mode << "/" << count);
+        GpuMemory memory("expert_valu_memory");
+        L2Cache l2("expert_valu_l2");
+        l2.set_backing_memory(&memory);
+        ComputeUnitCore::Config config{};
+        config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+        config.arch = arch;
+        config.num_wf_slots = 1;
+        config.sgprs_per_wf = 128;
+        config.vgprs_per_wf = 64;
+        config.lds_size_kb = 64;
+        config.functional_quantum = 1;
+        auto cu = ComputeUnitCore::create("expert_valu_cu", config, &memory, &l2);
+        constexpr uint64_t pc = 0x4000;
+        auto *wf = cu->dispatch_wf(0, pc, 128, 32, 32);
+        ASSERT_NE(wf, nullptr);
+        wf->set_exec(1);
+        cu->write_vgpr(wf->vgpr_alloc().base + 3, 0, 0x8000);
+        memory.write32(0x8000, 0x12345678);
+        const std::array program{0xb980081au,
+                                 mode,                        // s_setreg WAVE_SCHED_MODE[1:0].
+                                 0x7e100303u,                 // v_mov_b32 v8, v3 (address low).
+                                 0x7e1c030bu,                 // v_mov_b32 v14, v11.
+                                 0xbf880f9fu | (count << 12), // s_wait_alu depctr_va_vdst.
+                                 0xee05007cu,
+                                 0x00000004u,
+                                 8u,           // global_load_b32 v4, v[8:9].
+                                 0xbfc00000u,  // s_wait_loadcnt 0.
+                                 0xbfb00000u}; // s_endpgm
+        for (size_t i = 0; i < program.size(); ++i)
+          memory.write32(pc + i * 4, program[i]);
+        const uint64_t end = pc + sizeof(program) - 4;
+        for (unsigned tick = 0; wf->pc != end && tick < 128; ++tick)
+          cu->step();
+        ASSERT_EQ(wf->pc, end);
+        EXPECT_EQ(wf->wave_sched_mode_raw() & 3u, mode);
+        EXPECT_EQ(cu->memory_wait_diagnostic_count(), unsigned(mode == 2 && count > 1));
+        EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + 4, 0), 0x12345678u);
+        cu->step();
+        EXPECT_TRUE(wf->is_halted());
+      }
+    }
+  }
+}
+
+TEST(MemoryWaitExecutionTest, Gfx1250DisabledXdlStallKeepsWmmaOperandPending) {
+  for (uint32_t mode : {2u, 6u}) {
+    SCOPED_TRACE(mode);
+    GpuMemory memory("wmma_wait_memory");
+    L2Cache l2("wmma_wait_l2");
+    l2.set_backing_memory(&memory);
+    ComputeUnitCore::Config config{};
+    config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+    config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+    config.target = ROCJITSU_CODE_TARGET_GFX1250;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 128;
+    config.vgprs_per_wf = 128;
+    config.lds_size_kb = 64;
+    config.functional_quantum = 1;
+    auto cu = ComputeUnitCore::create("wmma_wait_cu", config, &memory, &l2);
+    ASSERT_NE(cu, nullptr);
+    constexpr uint64_t pc = 0x4000;
+    auto *wf = cu->dispatch_wf(0, pc, 128, 128, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(1);
+    const auto base = wf->vgpr_alloc().base;
+    cu->write_vgpr(base + 8, 0, 0x8000);
+    memory.write32(0x8000, 0x12345678);
+    // WMMA reads v42. Six independent core VALU issues cover its normal
+    // arbiter window, but cannot do so with DISABLE_XDL_ARB_STALL set.
+    const std::array program{
+        0xb980101au, mode,         // s_setreg WAVE_SCHED_MODE[2:0].
+        0xcc600000u, 0x1c02e528u, // v_wmma_f32_16x16x32_f16.
+        0x7e18030bu, 0x7e18030bu, 0x7e18030bu, // v_mov_b32 v12, v11.
+        0x7e18030bu, 0x7e18030bu, 0x7e18030bu,
+        0xbf881f9fu,             // s_wait_alu depctr_va_vdst(1).
+        0xee05007cu, 42u, 8u,    // global_load_b32 v42, v[8:9].
+        0xbfc00000u,             // s_wait_loadcnt 0.
+        0xbfb00000u};            // s_endpgm.
+    for (size_t i = 0; i < program.size(); ++i)
+      memory.write32(pc + i * 4, program[i]);
+    const uint64_t end = pc + sizeof(program) - 4;
+    for (unsigned tick = 0; wf->pc != end && tick < 128; ++tick)
+      cu->step();
+    ASSERT_EQ(wf->pc, end);
+    EXPECT_EQ(wf->wave_sched_mode_raw() & 7u, mode);
+    EXPECT_EQ(cu->read_vgpr(base + 42, 0), 0x12345678u);
+    EXPECT_EQ(cu->memory_wait_diagnostic_count(), unsigned(mode == 6));
+  }
+}
+
+TEST(MemoryWaitExecutionTest, Gfx12DelayAluDoesNotReleaseVaVdstForMemoryConsumer) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (bool initial_load : {false, true}) {
+      for (bool delay : {false, true}) {
+        SCOPED_TRACE(testing::Message() << arch << "/" << initial_load << "/" << delay);
+        GpuMemory memory("expert_initial_delay_memory");
+        L2Cache l2("expert_initial_delay_cache");
+        l2.set_backing_memory(&memory);
+        ComputeUnitCore::Config config{};
+        config.arch = arch;
+        config.num_wf_slots = 1;
+        config.sgprs_per_wf = 96;
+        config.vgprs_per_wf = 32;
+        config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+        auto cu = ComputeUnitCore::create("expert_initial_delay_cu", config, &memory, &l2);
+        constexpr uint64_t pc = 0x4000;
+        auto *wave = cu->dispatch_wf(0, pc, 96, 32, 32);
+        ASSERT_NE(wave, nullptr);
+        wave->set_exec(1);
+        const auto base = wave->vgpr_alloc().base;
+        cu->write_vgpr(base + 3, 0, 0x8000u);
+        cu->write_sgpr(wave->sgpr_alloc().base, 0x8000u);
+        memory.write32(0x8000, 0xbeeff00d);
+        std::vector<uint32_t> words{0xb980081au, 2u}; // WAVE_SCHED_MODE = expert.
+        if (initial_load)
+          words.insert(words.end(),
+                       {0xf4002280u, 0xf8000000u, 0xbfc70000u}); // s_load_b64; KMCNT(0).
+        words.insert(
+            words.end(),
+            {delay ? 0xbf8700a0u : 0xbf800000u,     // S_DELAY_ALU skip_1 and VALU_DEP_1, or S_NOP.
+             0x7e100303u, 0xbf800000u, 0x7e18030bu, // v8=v3; s_nop; v12=v11.
+             0xee05007cu, 4u, 8u,                   // global_load_b32 v4,v[8:9],off.
+             0xbfc00000u, 0xbfb00000u});            // LOADCNT(0); end.
+        for (unsigned i = 0; i < words.size(); ++i)
+          memory.write32(pc + i * 4, words[i]);
+        const auto end = pc + words.size() * 4 - 4;
+        for (unsigned step = 0; step < 128 && wave->pc != end; ++step)
+          cu->step();
+        ASSERT_EQ(wave->pc, end);
+        // S_DELAY_ALU only schedules VALU execution; it cannot prove a
+        // completed VGPR write before the memory instruction reads v8.
+        EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
+        EXPECT_EQ(cu->read_vgpr(base + 4, 0), 0xbeeff00du);
+      }
+    }
+  }
+}
+
+TEST(MemoryWaitExecutionTest, Gfx1250TransNeedsOneIssuedIndependentValuSlot) {
+  enum class Gap {
+    NoGap,
+    ScalarNop,
+    Independent,
+    IndependentThenValuRead,
+    IndependentThenOverwrittenMemoryRead,
+    IndependentThenOverwrittenMemoryWrite,
+    IndependentTrans,
+    IndependentWmma,
+    SharedRead,
+    VectorNop,
+    DependentRead,
+    DependentTransRead,
+    DependentF64TransRead,
+    DependentTransWrite,
+    DependentTransOverwrite,
+    DependentWrite,
+    DependentOverwrite,
+    MaskedIndependent,
+    MaskedVccCompare,
+    MaskedVectorNop,
+    CoreProducer,
+    F64Producer
+  };
+  for (const auto gap :
+       {Gap::NoGap, Gap::ScalarNop, Gap::Independent, Gap::IndependentThenValuRead,
+        Gap::IndependentThenOverwrittenMemoryRead, Gap::IndependentThenOverwrittenMemoryWrite,
+        Gap::VectorNop,
+        Gap::IndependentTrans,
+        Gap::IndependentWmma, Gap::SharedRead, Gap::DependentRead, Gap::DependentTransRead,
+        Gap::DependentF64TransRead, Gap::DependentTransWrite, Gap::DependentTransOverwrite,
+        Gap::DependentWrite, Gap::DependentOverwrite, Gap::MaskedIndependent, Gap::MaskedVccCompare,
+        Gap::MaskedVectorNop, Gap::CoreProducer, Gap::F64Producer}) {
+    SCOPED_TRACE(static_cast<int>(gap));
+    GpuMemory memory("trans_gap_memory");
+    L2Cache l2("trans_gap_l2");
+    l2.set_backing_memory(&memory);
+    ComputeUnitCore::Config config{};
+    config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+    config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+    config.target = ROCJITSU_CODE_TARGET_GFX1250;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 128;
+    config.vgprs_per_wf = 128;
+    config.lds_size_kb = 64;
+    config.functional_quantum = 1;
+    auto cu = ComputeUnitCore::create("trans_gap_cu", config, &memory, &l2);
+    ASSERT_NE(cu, nullptr);
+    constexpr uint64_t pc = 0x4000;
+    auto *wf = cu->dispatch_wf(0, pc, 128, 128, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(1);
+    const auto base = wf->vgpr_alloc().base;
+    cu->write_vgpr(base + 7, 0, 0); // EXP(0) writes 1.0 to v6.
+    cu->write_vgpr(base + 8, 0, 0x8000);
+    memory.write32(0x8000, 0x12345678);
+
+    const uint32_t producer = gap == Gap::CoreProducer  ? 0x7e0c0307u  // v_mov_b32 v6, v7.
+                              : gap == Gap::F64Producer ? 0x7e0c5f08u  // v_rcp_f64 v[6:7], v[8:9].
+                                                        : 0x7e0c4b07u; // v_exp_f32 v6, v7.
+    std::vector<uint32_t> words{0xb980081au, 2u, producer};            // WAVE_SCHED_MODE = expert.
+    if (gap == Gap::MaskedIndependent || gap == Gap::MaskedVccCompare ||
+        gap == Gap::MaskedVectorNop)
+      words.push_back(0xbefe0080u); // EXEC_LO = 0.
+    switch (gap) {
+    case Gap::NoGap:
+      break;
+    case Gap::ScalarNop:
+      words.push_back(0xbf800000u); // s_nop 0 does not cover a VALU cycle.
+      break;
+    case Gap::Independent:
+    case Gap::IndependentThenValuRead:
+    case Gap::IndependentThenOverwrittenMemoryRead:
+    case Gap::IndependentThenOverwrittenMemoryWrite:
+    case Gap::MaskedIndependent:
+    case Gap::CoreProducer:
+    case Gap::F64Producer:
+      words.push_back(0x7e18030bu); // v_mov_b32 v12, v11.
+      break;
+    case Gap::IndependentTrans:
+      words.push_back(0x7e184b0bu); // v_exp_f32 v12, v11.
+      break;
+    case Gap::IndependentWmma:
+      words.push_back(0xcc600010u); // v_wmma_f32_16x16x32_f16 v[16:23],
+      words.push_back(0x1c42e528u); // v[40:47], v[114:121], v[16:23].
+      break;
+    case Gap::SharedRead:
+      words.push_back(0x7e180307u); // v_mov_b32 v12, v7: TRANS source read/read.
+      break;
+    case Gap::VectorNop:
+    case Gap::MaskedVectorNop:
+      words.push_back(0x7e000000u); // v_nop issues even when EXEC is zero.
+      break;
+    case Gap::MaskedVccCompare:
+      words.push_back(
+          cdna5::build_vopc(cdna5::kVCmpEqU32Vopc, {.src0 = 128, .vsrc1 = 0})[0]);
+      break;
+    case Gap::DependentRead:
+      words.push_back(0x7e180306u); // v_mov_b32 v12, v6: immediate TRANS RAW.
+      break;
+    case Gap::DependentTransRead:
+      words.push_back(0x7e184b06u); // v_exp_f32 v12, v6: immediate TRANS RAW.
+      break;
+    case Gap::DependentF64TransRead:
+      words.push_back(0x7e185f06u); // v_rcp_f64 v[12:13], v[6:7]: serialized TRANS RAW.
+      break;
+    case Gap::DependentTransWrite:
+      words.push_back(0x7e0e4b0bu); // v_exp_f32 v7, v11: serialized TRANS WAR.
+      break;
+    case Gap::DependentTransOverwrite:
+      words.push_back(0x7e0c4b0bu); // v_exp_f32 v6, v11: serialized TRANS WAW.
+      break;
+    case Gap::DependentWrite:
+      words.push_back(0x7e0e030bu); // v_mov_b32 v7, v11: immediate TRANS WAR.
+      break;
+    case Gap::DependentOverwrite:
+      words.push_back(0x7e0c030bu); // v_mov_b32 v6, v11: immediate TRANS WAW.
+      break;
+    }
+    if (gap == Gap::MaskedIndependent || gap == Gap::MaskedVccCompare ||
+        gap == Gap::MaskedVectorNop)
+      words.push_back(0xbefe0081u); // EXEC_LO = 1.
+    if (gap == Gap::IndependentThenOverwrittenMemoryRead ||
+        gap == Gap::IndependentThenOverwrittenMemoryWrite)
+      words.push_back(0x7e0c030bu); // v_mov_b32 v6, v11: full replacement.
+    if (gap == Gap::IndependentThenValuRead) {
+      words.push_back(0x7e180306u); // An ordinary VALU can consume the TRANS output.
+    } else if (gap == Gap::IndependentThenOverwrittenMemoryRead) {
+      append_instruction(words, cdna5::build_vglobal(cdna5::kGlobalStoreB32Vglobal,
+                                                    {.saddr = 0, .vsrc = 6, .vaddr = 8}));
+    } else if (gap != Gap::DependentRead && gap != Gap::DependentTransRead &&
+        gap != Gap::DependentF64TransRead &&
+        gap != Gap::DependentTransWrite && gap != Gap::DependentTransOverwrite &&
+        gap != Gap::DependentWrite &&
+        gap != Gap::DependentOverwrite) {
+      words.insert(words.end(), {0xee05007cu, 6u, 8u}); // global_load_b32 v6, v[8:9].
+      words.push_back(0xbfc00000u);                     // s_wait_loadcnt 0.
+    } else {
+      words.push_back(0xbf880f9fu); // s_wait_alu depctr_va_vdst(0).
+    }
+    words.push_back(0xbfb00000u); // s_endpgm.
+    for (size_t i = 0; i < words.size(); ++i)
+      memory.write32(pc + i * 4, words[i]);
+    const uint64_t end = pc + (words.size() - 1) * 4;
+    for (unsigned step = 0; step < 64 && wf->pc != end; ++step)
+      cu->step();
+    ASSERT_EQ(wf->pc, end);
+    const bool missing = gap != Gap::IndependentThenValuRead &&
+                         gap != Gap::DependentTransRead && gap != Gap::DependentF64TransRead &&
+                         gap != Gap::DependentTransWrite && gap != Gap::DependentTransOverwrite;
+    const unsigned expected = gap == Gap::IndependentThenOverwrittenMemoryWrite ? 2u
+                              : gap == Gap::IndependentThenOverwrittenMemoryRead ? 1u
+                                                                                : unsigned(missing);
+    EXPECT_EQ(cu->memory_wait_diagnostic_count(), expected);
+  }
+}
+
+TEST(MemoryWaitExecutionTest, ExpertFlatSourceWaitsRespectEachCompletionRoute) {
+  for (bool wait_ds : {false, true})
+    for (bool wait_store : {false, true}) {
+      SCOPED_TRACE(testing::Message() << "ds=" << wait_ds << " store=" << wait_store);
+      GpuMemory memory("expert_flat_source_memory");
+      L2Cache l2("expert_flat_source_cache");
+      l2.set_backing_memory(&memory);
+      ComputeUnitCore::Config config{};
+      config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = 96;
+      config.vgprs_per_wf = 64;
+      config.lds_size_kb = 64;
+      config.functional_quantum = 1;
+      config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+      auto cu = ComputeUnitCore::create("expert_flat_source_cu", config, &memory, &l2);
+      constexpr uint64_t pc = 0x4000;
+      auto *wf = cu->dispatch_wf(0, pc, 96, 32, 32);
+      ASSERT_NE(wf, nullptr);
+      wf->set_exec(1);
+      wf->set_lds_size(256);
+      constexpr uint64_t shared_base = uint64_t{2} << 60;
+      wf->set_apertures(shared_base, shared_base + UINT32_MAX, 0, 0, true);
+      const uint32_t base = wf->vgpr_alloc().base;
+      cu->write_vgpr(base + 0, 0, 0x2000);
+      cu->write_vgpr(base + 1, 0, 0);
+      cu->write_vgpr(base + 2, 0, 4);
+      cu->write_vgpr(base + 3, 0, shared_base >> 32);
+      cu->write_vgpr(base + 8, 0, 0xcaffe);
+      const auto global = cdna5::build_vflat(cdna5::kFlatStoreB32Vflat,
+                                             {.saddr = kModernNullSelector, .vsrc = 8, .vaddr = 0});
+      const auto lds = cdna5::build_vflat(cdna5::kFlatStoreB32Vflat,
+                                          {.saddr = kModernNullSelector, .vsrc = 8, .vaddr = 2});
+      const std::array program{0xb980081au,
+                               2u, // WAVE_SCHED_MODE = expert.
+                               global[0],
+                               global[1],
+                               global[2],
+                               lds[0],
+                               lds[1],
+                               lds[2],
+                               wait_ds ? 0xbfc60000u : 0xbf800000u,    // DSCNT(0) or NOP.
+                               wait_store ? 0xbfc10000u : 0xbf800000u, // STORECNT(0) or NOP.
+                               0x7e100280u,                            // v_mov_b32 v8, 0.
+                               0xbfb00000u};                           // ENDPGM.
+      for (unsigned i = 0; i < program.size(); ++i)
+        memory.write32(pc + i * 4, program[i]);
+      const uint64_t end = pc + sizeof(program) - 4;
+      for (unsigned step = 0; step < 128 && wf->pc != end; ++step)
+        cu->step();
+      ASSERT_EQ(wf->pc, end);
+      EXPECT_EQ(cu->read_vgpr(base + 8, 0), 0u);
+      EXPECT_EQ(cu->lds().read32(4), 0xcaffeu);
+      // A DS wait cannot release the older global source, and a STORE
+      // wait cannot release the younger LDS source.
+      EXPECT_EQ(cu->memory_wait_diagnostic_count(), unsigned(!wait_ds) + unsigned(!wait_store));
+    }
+}
+
+TEST(MemoryWaitExecutionTest, Gfx12ExpertMemorySourcesRespectFifoAndCompletion) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (unsigned mode : {0u, 2u}) {
+      for (bool complete : {false, true}) {
+        for (unsigned count : {0u, 1u, 2u, 7u}) {
+          SCOPED_TRACE(testing::Message()
+                       << arch << "/" << mode << "/" << complete << "/" << count);
+          GpuMemory memory("expert_source_memory");
+          L2Cache l2("expert_source_cache");
+          l2.set_backing_memory(&memory);
+          ComputeUnitCore::Config config{};
+          config.arch = arch;
+          config.num_wf_slots = 1;
+          config.sgprs_per_wf = 96;
+          config.vgprs_per_wf = 64;
+          config.lds_size_kb = 64;
+          config.functional_quantum = 1;
+          config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+          auto cu = ComputeUnitCore::create("expert_source_cu", config, &memory, &l2);
+          constexpr uint64_t pc = 0x4000;
+          auto *wf = cu->dispatch_wf(0, pc, 96, 32, 32);
+          ASSERT_NE(wf, nullptr);
+          wf->set_exec(1);
+          wf->set_lds_size(256);
+          cu->lds().write32(0, 0xabcdef01);
+          const std::array program{0xb980081au,
+                                   mode,
+                                   0xee05007cu,
+                                   22u,
+                                   16u, // global_load_b32 v22, v[16:17].
+                                   0xd8d80000u,
+                                   0x02000006u, // ds_load_b32 v2, v6.
+                                   0xd8d80000u,
+                                   0x03000007u,                          // ds_load_b32 v3, v7.
+                                   complete ? 0xbfc60000u : 0xbf800000u, // s_wait_dscnt 0 or s_nop.
+                                   0xbf88ff83u | (count << 2), // s_wait_alu depctr_vm_vsrc.
+                                   0xd8d80000u,
+                                   0x06000007u, // ds_load_b32 v6, v7.
+                                   0xbfc60000u,
+                                   0xbfb00000u};
+          for (unsigned i = 0; i < program.size(); ++i)
+            memory.write32(pc + 4 * i, program[i]);
+          const uint64_t end = pc + sizeof(program) - 4;
+          for (unsigned step = 0; step < 128 && wf->pc != end; ++step)
+            cu->step();
+          ASSERT_EQ(wf->pc, end);
+          EXPECT_EQ(cu->memory_wait_diagnostic_count(),
+                    unsigned(mode == 2 && !complete && count > 1));
+          EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + 6, 0), 0xabcdef01u);
+        }
+      }
+    }
+  }
+}
+
+TEST(MemoryWaitExecutionTest, Gfx1250ExpertSourceUsesEffectiveExecForBankedLoads) {
+  for (const unsigned allocated : {48u, 320u}) {
+    for (const unsigned bank : {0u, 64u}) {
+      for (const unsigned wait : {0u, 1u, 2u}) {
+        SCOPED_TRACE(testing::Message() << allocated << '/' << bank << '/' << wait);
+        GpuMemory memory("banked_source_memory");
+        L2Cache l2("banked_source_cache");
+        l2.set_backing_memory(&memory);
+        ComputeUnitCore::Config config{};
+        config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+        config.num_wf_slots = 1;
+        config.sgprs_per_wf = 96;
+        config.vgprs_per_wf = 320;
+        config.functional_quantum = 1;
+        config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+        auto cu = ComputeUnitCore::create("banked_source_cu", config, &memory, &l2);
+        constexpr uint64_t pc = 0x4000;
+        auto *wf = cu->dispatch_wf(0, pc, 96, allocated, 32);
+        ASSERT_NE(wf, nullptr);
+        wf->set_exec(1);
+        cu->write_vgpr(wf->vgpr_alloc().base, 0, 0x9000);
+        cu->write_vgpr(wf->vgpr_alloc().base + 20, 0, 0xa000);
+        memory.write32(0xa000, 0x12345678);
+        const std::array program{
+            0xb980081au, 2u,                       // WAVE_SCHED_MODE = expert
+            0xee06807cu, 0x05800000u, 0u,          // global_store_b32 v[0:1],v11,off
+            0xbfc50000u, 0xbf860000u | bank,       // XCNT(0), S_SET_VGPR_MSB
+            0xee05007cu, 4u, 20u,                  // global_load_b32 v4,v[20:21],off
+            0xbf860000u, 0xbfc50000u,              // back to bank zero, XCNT(0)
+            0xbf88ff83u | (wait << 2), 0x7e16030du, // VM_VSRC(wait), v_mov_b32 v11,v13
+            0xbfc00000u, 0xbfc10000u, 0xbfb00000u};
+        for (unsigned i = 0; i < program.size(); ++i)
+          memory.write32(pc + i * 4, program[i]);
+        const auto end = pc + sizeof(program) - 4;
+        for (unsigned i = 0; i < 100 && wf->pc != end; ++i)
+          cu->step();
+        ASSERT_EQ(wf->pc, end);
+        const bool fits = bank == 0 || allocated == 320;
+        EXPECT_EQ(cu->memory_wait_diagnostic_count(), unsigned(wait > unsigned(fits)));
+        if (fits)
+          EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + (bank ? 260 : 4), 0), 0x12345678u);
+      }
+    }
+  }
+}
+
+TEST(MemoryWaitExecutionTest, Gfx12ExpertLdsPermutationsRetainTheDataLanesReadAtIssue) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (bool fi : {false, true}) {
+      for (uint32_t address : {0u, 4u}) {
+        for (bool complete : {false, true}) {
+          SCOPED_TRACE(testing::Message()
+                       << arch << "/" << fi << "/" << address << "/" << complete);
+          GpuMemory memory("expert_permute_memory");
+          L2Cache l2("expert_permute_cache");
+          l2.set_backing_memory(&memory);
+          ComputeUnitCore::Config config{};
+          config.arch = arch;
+          config.num_wf_slots = 1;
+          config.sgprs_per_wf = 96;
+          config.vgprs_per_wf = 32;
+          config.lds_size_kb = 64;
+          config.functional_quantum = 1;
+          config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+          auto cu = ComputeUnitCore::create("expert_permute_cu", config, &memory, &l2);
+          constexpr uint64_t pc = 0x4000;
+          auto *wf = cu->dispatch_wf(0, pc, 96, 32, 32);
+          ASSERT_NE(wf, nullptr);
+          wf->set_exec(1);
+          wf->set_lds_size(256);
+          const auto base = wf->vgpr_alloc().base;
+          cu->write_vgpr(base + 6, 0, address);
+          cu->write_vgpr(base + 7, 0, 0x1234);
+          cu->write_vgpr(base + 7, 1, 0x5678);
+          const std::array words{0xb980081au,
+                                 2u, // WAVE_SCHED_MODE = expert.
+                                 fi ? 0xdb340000u : 0xdacc0000u,
+                                 0x02000706u, // ds_bpermute[_fi]_b32 v2,v6,v7.
+                                 complete ? 0xbfc60000u : 0xbf800000u, // s_wait_dscnt 0 or s_nop.
+                                 0xbfb00000u};
+          for (unsigned i = 0; i < words.size(); ++i)
+            memory.write32(pc + 4 * i, words[i]);
+          const uint64_t end = pc + sizeof(words) - 4;
+          for (unsigned step = 0; step < 128 && wf->pc != end; ++step)
+            cu->step();
+          ASSERT_EQ(wf->pc, end);
+          EXPECT_EQ(cu->read_vgpr(base + 2, 0), address == 0 ? 0x1234u : fi ? 0x5678u : 0u);
+          auto &score = wf->ensure_memory_wait_scoreboard();
+          for (unsigned lane : {0u, 1u}) {
+            unsigned warnings = 0;
+            score.bind(end, &warnings, [](void *ctx, const auto &hazard) {
+              if (hazard.producer.counter == WaitCounterKind::VmVsrc)
+                ++*static_cast<unsigned *>(ctx);
+            });
+            score.access({RegClass::VGPR, 7, 1}, uint64_t{1} << lane, 0xf, true);
+            EXPECT_EQ(warnings, unsigned(!complete && lane == address / 4 && (!address || fi)));
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST_F(MemoryWaitOrderingTest, Rdna1VectorMemoryRetainsItsScalarSourcesUntilASeparator) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+    ASSERT_NO_FATAL_FAILURE(setup(arch));
+    const auto check = [&](uint32_t word) {
+      auto &state = wf->ensure_memory_wait_scoreboard();
+      util::StringDiagnostic error;
+      const std::array words{word};
+      auto inst = Decoder::create(arch)->decode_window(words, wf->pc, error.emitter());
+      ASSERT_TRUE(inst.succeeded()) << error.message();
+      state.before(*inst.value(), arch, wf);
+      state.check_instruction(*inst.value(), *wf);
+      wf->pc += 4;
+    };
+    for (auto [separator, protects] :
+         {std::pair{0xbf800000u, false},   // S_NOP 0
+          std::pair{0xbfa3ff03u, true},    // DEPCTR_VM_VSRC(0)
+          std::pair{0xbfa3ff07u, false},   // DEPCTR_VM_VSRC(1)
+          std::pair{0xbf8c3f70u, false},   // VMCNT(0) alone
+          std::pair{0xbf8c0000u, true},    // fully drained packed S_WAITCNT
+          std::pair{0x7e080280u, true}}) { // V_MOV_B32 v4, 0
+      SCOPED_TRACE(arch);
+      SCOPED_TRACE(separator);
+      wf->ensure_memory_wait_scoreboard().clear();
+      const auto before = cu->memory_wait_diagnostic_count();
+      track(std::array{0xdc308000u, 0x02180000u}); // GLOBAL_LOAD_DWORD v2, v0, s[24:25]
+      check(separator);
+      check(0xbe9a0387u); // S_MOV_B32 s26, 7
+      EXPECT_EQ(cu->memory_wait_diagnostic_count(), before);
+      check(0xbe980387u); // S_MOV_B32 s24, 7
+      EXPECT_EQ(cu->memory_wait_diagnostic_count() - before,
+                unsigned(arch == ROCJITSU_CODE_ARCH_RDNA1 && !protects));
+    }
+  }
+}
+
+TEST_F(MemoryWaitOrderingTest, Rdna1DsDrainKeepsOlderGlobalScalarSource) {
+  ASSERT_NO_FATAL_FAILURE(setup(ROCJITSU_CODE_ARCH_RDNA1));
+  track(std::array{0xdc308000u, 0x02180000u}); // GLOBAL_LOAD_DWORD v2, v0, s[24:25].
+  lds_load(3);
+  auto &state = wf->ensure_memory_wait_scoreboard();
+  state.wait(WaitCounterKind::Ds, 0);
+  std::vector<MemoryWaitScoreboard::Hazard> hazards;
+  state.bind(wf->pc, &hazards, [](void *ctx, const auto &hazard) {
+    static_cast<decltype(hazards) *>(ctx)->push_back(hazard);
+  });
+  state.access({RegClass::EXEC, 0, 1}, ~uint64_t{0}, 0xf, true);
+  ASSERT_EQ(hazards.size(), 1u);
+  EXPECT_EQ(hazards.front().producer.pc, 0x100u);
+  EXPECT_EQ(hazards.front().producer.counter, WaitCounterKind::VmVsrc);
+}
+
+TEST_F(MemoryWaitOrderingTest, Rdna1DsDrainKeepsEarlierSkippedSourceAtSamePc) {
+  ASSERT_NO_FATAL_FAILURE(setup(ROCJITSU_CODE_ARCH_RDNA1));
+  wf->set_exec(0);
+  lds_load(2); // No DS request is proven to issue.
+  auto &state = wf->ensure_memory_wait_scoreboard();
+  ASSERT_EQ(state.outstanding(WaitCounterKind::Ds), 0u);
+  wf->pc = 0x100; // A later loop iteration executes the same instruction.
+  wf->set_exec(1);
+  lds_load(3);
+  ASSERT_EQ(state.outstanding(WaitCounterKind::Ds), 1u);
+  state.wait(WaitCounterKind::Ds, 0);
+  std::vector<MemoryWaitScoreboard::Hazard> hazards;
+  state.bind(wf->pc, &hazards, [](void *ctx, const auto &hazard) {
+    static_cast<decltype(hazards) *>(ctx)->push_back(hazard);
+  });
+  state.access({RegClass::EXEC, 0, 1}, ~uint64_t{0}, 0xf, true);
+  ASSERT_EQ(hazards.size(), 1u);
+  EXPECT_EQ(hazards.front().producer.sequence, 1u);
+}
+
+TEST_F(MemoryWaitOrderingTest, Rdna1RepeatedIssuedDsSourcesStayBoundedUntilDrain) {
+  ASSERT_NO_FATAL_FAILURE(setup(ROCJITSU_CODE_ARCH_RDNA1));
+  auto &state = wf->ensure_memory_wait_scoreboard();
+  for (unsigned i = 0; i < 512; ++i)
+    lds_load(2);
+  const auto native_sources = [&] {
+    return std::ranges::count_if(state.events(), [](const auto &event) {
+      return event.counter == WaitCounterKind::VmVsrc && event.gfx10_native_ds_issued;
+    });
+  };
+  EXPECT_GT(native_sources(), 0);
+  EXPECT_LE(native_sources(), 4);
+  const auto before = state.issue_snapshot();
+  const auto latest_pc = wf->pc;
+  lds_load(2);
+  ASSERT_TRUE(state.cancel_last_issue(latest_pc, before));
+  EXPECT_GT(native_sources(), 0);
+  EXPECT_LE(native_sources(), 4);
+  std::vector<MemoryWaitScoreboard::Hazard> hazards;
+  state.bind(wf->pc, &hazards, [](void *ctx, const auto &hazard) {
+    static_cast<decltype(hazards) *>(ctx)->push_back(hazard);
+  });
+  state.access({RegClass::EXEC, 0, 1}, ~uint64_t{0}, 0xf, true);
+  ASSERT_EQ(hazards.size(), 1u);
+  EXPECT_EQ(hazards.front().producer.counter, WaitCounterKind::VmVsrc);
+  hazards.clear();
+  state.wait(WaitCounterKind::Ds, 0);
+  EXPECT_EQ(native_sources(), 0);
+  state.access({RegClass::EXEC, 0, 1}, ~uint64_t{0}, 0xf, true);
+  EXPECT_TRUE(hazards.empty());
+}
+
+TEST_F(MemoryWaitOrderingTest, Rdna1DsDrainDoesNotReleaseGdsOrFlatScalarSources) {
+  for (bool flat : {false, true}) {
+    SCOPED_TRACE(flat);
+    ASSERT_NO_FATAL_FAILURE(setup(ROCJITSU_CODE_ARCH_RDNA1));
+    if (flat)
+      track(rdna1::build_flat(rdna1::kFlatLoadDwordFlat, {.addr = 0, .saddr = 127, .vdst = 2}));
+    else
+      track(rdna1::build_ds(rdna1::kDsReadB32Ds, {.gds = 1, .addr = 0, .vdst = 2}));
+    auto &state = wf->ensure_memory_wait_scoreboard();
+    ASSERT_NE(state.outstanding(WaitCounterKind::Ds), 0u);
+    state.wait(WaitCounterKind::Ds, 0);
+    std::vector<MemoryWaitScoreboard::Hazard> hazards;
+    state.bind(wf->pc, &hazards, [](void *ctx, const auto &hazard) {
+      static_cast<decltype(hazards) *>(ctx)->push_back(hazard);
+    });
+    state.access({RegClass::EXEC, 0, 1}, ~uint64_t{0}, 0xf, true);
+    EXPECT_TRUE(std::ranges::any_of(hazards, [](const auto &hazard) {
+      return hazard.producer.counter == WaitCounterKind::VmVsrc;
+    }));
+  }
+}
+
+TEST_F(MemoryWaitOrderingTest, EmptyExecAsyncArriveUsesPhysicalDsForItsIssueGate) {
+  ASSERT_NO_FATAL_FAILURE(setup(ROCJITSU_CODE_ARCH_CDNA5));
+  for (bool ds_pending : {false, true})
+    for (bool physical_ds_pending : {false, true})
+      for (bool active : {false, true}) {
+        SCOPED_TRACE(testing::Message() << "ds=" << ds_pending << " physical="
+                                        << physical_ds_pending << " active=" << active);
+        auto &state = wf->ensure_memory_wait_scoreboard();
+        state.clear();
+        wf->set_exec(1);
+        if (ds_pending)
+          lds_load();
+        track(std::array{0xee180000u, 0u, 0x800u}); // global_load_async_to_lds_b32
+        ASSERT_EQ(state.outstanding(WaitCounterKind::Async), 1u);
+        // Attach a witness to the oldest position, then fill the 63-entry FIFO.
+        // A skipped instruction cannot force that position through backpressure.
+        state.add({1,
+                   wf->pc - 8,
+                   1,
+                   {RegClass::VGPR, 31, 1},
+                   WaitCounterKind::Async,
+                   MemoryWaitScoreboard::kFullDwordByteMask});
+        for (unsigned i = 1; i < 63; ++i)
+          track(std::array{0xee180000u, 0u, 0x800u});
+        ASSERT_EQ(wf->wait_counters().dscnt, 0u);
+        if (physical_ds_pending)
+          wf->wait_counters().increment(WaitCounterType::DSCNT);
+        wf->set_exec(active);
+        track(std::array{0xd9580000u, 0u}); // ds_atomic_async_barrier_arrive_b64
+        // An issued arrival at capacity retires the oldest ASYNC position
+        // before taking its new position, so the queue remains at 63.
+        EXPECT_EQ(state.outstanding(WaitCounterKind::Async), 63u);
+        EXPECT_EQ(std::ranges::any_of(state.events(),
+                                      [](const auto &e) {
+                                        return e.counter == WaitCounterKind::Async &&
+                                               e.reg.index == 31;
+                                      }),
+                  !active && !physical_ds_pending);
+        if (physical_ds_pending)
+          wf->wait_counters().decrement(WaitCounterType::DSCNT);
+      }
+}
+
+TEST_F(MemoryWaitOrderingTest, AsyncReplayProtectsAddressesAndExecUntilTranslationOrCompletion) {
+  ASSERT_NO_FATAL_FAILURE(setup(ROCJITSU_CODE_ARCH_CDNA5, true));
+  auto &state = wf->ensure_memory_wait_scoreboard();
+  for (const auto opcode :
+       {cdna5::kGlobalLoadAsyncToLdsB32Vglobal, cdna5::kGlobalStoreAsyncFromLdsB32Vglobal,
+        cdna5::kClusterLoadAsyncToLdsB32Vglobal}) {
+    for (bool multigroup : {false, true}) {
+      for (const auto wait : {WaitCounterKind::X, WaitCounterKind::Async, WaitCounterKind::Load}) {
+        for (unsigned threshold : {0u, 1u}) {
+          SCOPED_TRACE(testing::Message() << opcode << ", multi=" << multigroup << ", wait="
+                                          << static_cast<unsigned>(wait) << ", n=" << threshold);
+          state.clear();
+          wf->set_mode_raw(unsigned(multigroup) << 25);
+          track(cdna5::build_vglobal(opcode, {.saddr = 2, .vdst = 6, .vsrc = 6, .vaddr = 8}));
+          ASSERT_EQ(state.outstanding(WaitCounterKind::Async), 1u);
+          EXPECT_EQ(state.outstanding(WaitCounterKind::X), 0u);
+          state.wait(wait, threshold);
+          EXPECT_EQ(state.outstanding(WaitCounterKind::Async),
+                    wait == WaitCounterKind::Async && threshold == 0 ? 0u : 1u);
+          const bool hazard = multigroup && (threshold || wait == WaitCounterKind::Load);
+          for (const auto reg :
+               {RegisterRef{RegClass::VGPR, 6, 1}, RegisterRef{RegClass::VGPR, 8, 1},
+                RegisterRef{RegClass::SGPR, 2, 1}, RegisterRef{RegClass::EXEC, 0, 1}}) {
+            const auto before = cu->xcnt_diagnostic_count();
+            state.access(reg, 1, 0xf, true);
+            EXPECT_EQ(cu->xcnt_diagnostic_count() - before, hazard ? 1u : 0u) << reg.index;
+          }
+        }      }
+    }
+  }
+}
+
+TEST_F(MemoryWaitOrderingTest, AsyncReplaySuppliesNoOrdinaryTranslationCreditOrGroupSwitch) {
+  ASSERT_NO_FATAL_FAILURE(setup(ROCJITSU_CODE_ARCH_CDNA5, true));
+  wf->set_mode_raw(1u << 25);
+  auto &state = wf->ensure_memory_wait_scoreboard();
+  const auto async_load = cdna5::build_vglobal(cdna5::kGlobalLoadAsyncToLdsB32Vglobal,
+                                               {.saddr = 0, .vdst = 6, .vaddr = 8});
+  for (bool scalar : {false, true}) {
+    state.clear();
+    if (scalar)
+      track(make_s_load_b32_scaled_imm(16, 0, 0));
+    else
+      track(
+          cdna5::build_vglobal(cdna5::kGlobalStoreB32Vglobal, {.saddr = 0, .vsrc = 3, .vaddr = 2}));
+    track(async_load);
+    state.wait(WaitCounterKind::X, 1);
+    const auto before = cu->xcnt_diagnostic_count();
+    state.access(scalar ? RegisterRef{RegClass::SGPR, 0, 1} : RegisterRef{RegClass::VGPR, 3, 1}, 1,
+                 0xf, true);
+    EXPECT_GT(cu->xcnt_diagnostic_count(), before);
+  }
+
+  state.clear();
+  track(async_load);
+  track(cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal, {.saddr = 0, .vdst = 10, .vaddr = 12}));
+  state.wait(WaitCounterKind::Load, 0);
+  track(make_s_load_b32_scaled_imm(16, 0, 0));
+  state.wait(WaitCounterKind::Km, 0);
+  const auto before = cu->xcnt_diagnostic_count();
+  state.access({RegClass::VGPR, 6, 1}, 1, 0xf, true);
+  EXPECT_EQ(cu->xcnt_diagnostic_count(), before + 1);
+}
+
+TEST_F(MemoryWaitOrderingTest, PartialAsyncCompletionReleasesOnlyMatchingReplaySources) {
+  ASSERT_NO_FATAL_FAILURE(setup(ROCJITSU_CODE_ARCH_CDNA5, true));
+  wf->set_mode_raw(1u << 25);
+  auto &state = wf->ensure_memory_wait_scoreboard();
+  for (bool mixed : {false, true}) {
+    state.clear();
+    track(cdna5::build_vglobal(cdna5::kGlobalLoadAsyncToLdsB32Vglobal,
+                               {.saddr = 0, .vdst = 6, .vaddr = 8}));
+    track(cdna5::build_vglobal(mixed ? cdna5::kGlobalStoreAsyncFromLdsB32Vglobal
+                                     : cdna5::kGlobalLoadAsyncToLdsB32Vglobal,
+                               {.saddr = 0, .vdst = 7, .vsrc = 7, .vaddr = 8}));
+    state.wait(WaitCounterKind::Async, 1);
+    auto before = cu->xcnt_diagnostic_count();
+    state.access({RegClass::VGPR, 6, 1}, 1, 0xf, true);
+    EXPECT_EQ(cu->xcnt_diagnostic_count() - before, mixed ? 1u : 0u);
+    before = cu->xcnt_diagnostic_count();
+    state.access({RegClass::VGPR, 7, 1}, 1, 0xf, true);
+    EXPECT_EQ(cu->xcnt_diagnostic_count() - before, 1u);
+  }
+}
+
+TEST_F(MemoryWaitOrderingTest, AtomicSingleAccessChecksOnlyLiveOrdinaryTranslations) {
+  setup(ROCJITSU_CODE_ARCH_CDNA5, true);
+  for (bool multi_group : {false, true}) {
+    for (int wait : {-1, 0, 1, 2}) {
+      auto &state = wf->ensure_memory_wait_scoreboard();
+      state.clear();
+      wf->set_exec(1);
+      wf->set_mode_raw(unsigned(multi_group) << 25);
+      const auto before = cu->xcnt_diagnostic_count();
+      track(std::array{0xee050000u, 4u, 8u}); // global_load_b32 v4, v8, s[0:1]
+      if (wait == 2)
+        state.wait(WaitCounterKind::Load, 0);
+      else if (wait >= 0)
+        state.wait(WaitCounterKind::X, wait);
+      const std::array no_return{0xee0d4000u, 0x03080000u, 8u};
+      track(no_return);
+      EXPECT_EQ(cu->xcnt_diagnostic_count() - before, multi_group && (wait == -1 || wait == 1));
+      state.wait(WaitCounterKind::X, 0);
+      track(no_return);
+      track(no_return);
+      EXPECT_EQ(cu->xcnt_diagnostic_count() - before, multi_group && (wait == -1 || wait == 1));
+    }
+  }
+}
+
+TEST_F(MemoryWaitOrderingTest, ReturningAtomicOrdersOnlyTheCoveredVmemTranslations) {
+  ASSERT_NO_FATAL_FAILURE(setup(ROCJITSU_CODE_ARCH_CDNA5, true));
+  wf->set_exec(1);
+  wf->set_mode_raw(1u << 25);
+  auto &state = wf->ensure_memory_wait_scoreboard();
+  const auto load = [&](uint8_t destination, uint8_t address) {
+    track(cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal,
+                               {.saddr = 0, .vdst = destination, .vaddr = address}));
+  };
+  for (uint8_t destination : {0, 10, 11}) {
+    for (int wait : {-1, 0, 1, 2}) {
+      SCOPED_TRACE(testing::Message() << unsigned(destination) << ' ' << wait);
+      state.clear();
+      load(4, 10);
+      load(2, 0);
+      if (wait >= 0)
+        state.wait(WaitCounterKind::X, wait);
+      const auto before = cu->xcnt_diagnostic_count();
+      // LLVM's GLOBAL_LOAD v2, v0 followed by a returning atomic writing v0.
+      track(
+          cdna5::build_vglobal(cdna5::kGlobalAtomicAddU32Vglobal,
+                               {.saddr = 0, .vdst = destination, .th = 1, .vsrc = 1, .vaddr = 0}));
+      EXPECT_EQ(cu->xcnt_diagnostic_count() - before, wait != 0 && destination != 0);
+      // Translation progress does not retire either outstanding LOAD result.
+      EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 3u);
+    }
+  }
+  for (bool drain_async : {false, true}) {
+    state.clear();
+    track(cdna5::build_vglobal(cdna5::kGlobalLoadAsyncToLdsB32Vglobal,
+                               {.saddr = 2, .vdst = 6, .vaddr = 8}));
+    load(2, 0);
+    if (drain_async)
+      state.wait(WaitCounterKind::Async, 0);
+    const auto before = cu->xcnt_diagnostic_count();
+    track(cdna5::build_vglobal(cdna5::kGlobalAtomicAddU32Vglobal,
+                               {.saddr = 0, .vdst = 0, .th = 1, .vsrc = 1, .vaddr = 0}));
+    EXPECT_EQ(cu->xcnt_diagnostic_count() - before, drain_async ? 0u : 1u);
+  }
+}
+
+TEST_F(MemoryWaitOrderingTest, FlatReturningAtomicOrdersOnlyActiveVmemRoutedWrites) {
+  ASSERT_NO_FATAL_FAILURE(setup(ROCJITSU_CODE_ARCH_CDNA5, true));
+  wf->set_mode_raw(1u << 25);
+  auto &state = wf->ensure_memory_wait_scoreboard();
+  constexpr uint64_t shared = uint64_t{2} << 32;
+  constexpr uint64_t scratch = uint64_t{4} << 32;
+  wf->set_apertures(shared, shared + UINT32_MAX, scratch, scratch + UINT32_MAX, true);
+  for (uint64_t route : {uint64_t{0}, scratch, shared}) {
+    for (uint64_t active : {0u, 1u, 2u, 3u}) {
+      for (bool drain : {false, true}) {
+        SCOPED_TRACE(testing::Message() << route << ' ' << active << ' ' << drain);
+        state.clear();
+        // Lane 0 is the only active source of the prior VMEM translation.
+        wf->set_exec(1);
+        track(cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal,
+                                   {.saddr = 0, .vdst = 4, .vaddr = 8}));
+        if (drain)
+          state.wait(WaitCounterKind::X, 0);
+        const auto base = wf->vgpr_alloc().base;
+        cu->write_vgpr(base + 10, 0, 0);
+        cu->write_vgpr(base + 11, 0, route >> 32);
+        cu->write_vgpr(base + 10, 1, 0);
+        cu->write_vgpr(base + 11, 1, 0);
+        wf->set_exec(active);
+        const auto before = cu->xcnt_diagnostic_count();
+        track(cdna5::build_vflat(cdna5::kFlatAtomicAddU32Vflat,
+                                 {.saddr = 124, .vdst = 8, .th = 1, .vsrc = 3, .vaddr = 10}));
+        const bool ordered = (active & 1) && route != shared;
+        EXPECT_EQ(cu->xcnt_diagnostic_count() > before, active && !ordered && !drain);
+      }
+    }
+  }
+}
+
+TEST_F(MemoryWaitOrderingTest, FlatLoadOrdersWrittenReplaySourcesOnlyOnVmemLanes) {
+  ASSERT_NO_FATAL_FAILURE(setup(ROCJITSU_CODE_ARCH_CDNA5, true));
+  wf->set_mode_raw(1u << 25);
+  auto &scoreboard = wf->ensure_memory_wait_scoreboard();
+  constexpr uint64_t shared = uint64_t{2} << 32;
+  constexpr uint64_t scratch = uint64_t{4} << 32;
+  wf->set_apertures(shared, shared + UINT32_MAX, scratch, scratch + UINT32_MAX, true);
+  for (uint64_t route : {uint64_t{0}, shared, scratch}) {
+    for (bool drained : {false, true}) {
+      scoreboard.clear();
+      wf->set_exec(1);
+      track(cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal,
+                                 {.saddr = 0, .vdst = 4, .vaddr = 8}));
+      if (drained)
+        scoreboard.wait(WaitCounterKind::X, 0);
+      const auto base = wf->vgpr_alloc().base;
+      cu->write_vgpr(base + 10, 0, 0);
+      cu->write_vgpr(base + 11, 0, route >> 32);
+      const auto before = cu->xcnt_diagnostic_count();
+      track(cdna5::build_vflat(cdna5::kFlatLoadB32Vflat,
+                               {.saddr = 124, .vdst = 8, .vaddr = 10}));
+      EXPECT_EQ(cu->xcnt_diagnostic_count() - before, unsigned(route == shared && !drained));
+    }
+  }
+}
+
+TEST_F(MemoryWaitOrderingTest, DisabledScalarPrefetchDoesNotEvictOldestTranslation) {
+  setup(ROCJITSU_CODE_ARCH_CDNA5, true);
+  wf->set_mode_raw(1u << 25); // Replay on, prefetch off.
+  track(std::array{0xee050000u, 4u, 8u}); // global_load_b32 v4, v8, s[0:1]
+  for (unsigned i = 0; i < 31; ++i) {
+    track(std::array{0xee050000u, 16u, 10u});
+    track(std::array{0xee068000u, 0x01800000u, 10u});
+  }
+  auto &state = wf->ensure_memory_wait_scoreboard();
+  ASSERT_EQ(state.outstanding(WaitCounterKind::X), 63u);
+  track(std::array{0xf404c000u, 0u});
+  EXPECT_EQ(state.outstanding(WaitCounterKind::X), 63u);
+  const auto prior = cu->xcnt_diagnostic_count();
+  track(std::array{0x7e10020au}); // v_mov_b32 v8, s10
+  EXPECT_EQ(cu->xcnt_diagnostic_count(), prior + 1);
+}
+
+TEST_F(MemoryWaitOrderingTest, RelativeWaitReadsItsSelectorBeforeRetiringTheScalarLoad) {
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+    for (bool drained : {false, true}) {
+      ASSERT_NO_FATAL_FAILURE(setup(arch));
+      track(std::array{0xf4000100u, 0xfa000004u}); // s_load_dword s4, s[0:1], 4
+      if (drained)
+        track(std::array{0xbf8cc07fu}); // s_waitcnt lgkmcnt(0)
+      cu->write_sgpr(wf->sgpr_alloc().base + 4, 0);
+      const auto before = cu->memory_wait_diagnostic_count();
+      track(std::array{0xbd040000u}); // s_waitcnt_lgkmcnt s4, 0
+      EXPECT_EQ(cu->memory_wait_diagnostic_count() - before, drained ? 0u : 1u);
+      EXPECT_EQ(wf->ensure_memory_wait_scoreboard().outstanding(WaitCounterKind::Ds), 0u);
+    }
+  }
+}
+
+TEST_F(MemoryWaitOrderingTest, ScalarPrefetchRequiresDrainOnlyWhenEnabled) {
+  setup(ROCJITSU_CODE_ARCH_CDNA5, true);
+  for (bool enabled : {false, true}) {
+    for (bool drained : {false, true}) {
+      auto &state = wf->ensure_memory_wait_scoreboard();
+      state.clear();
+      wf->set_mode_raw((1u << 25) | (unsigned(enabled) << 24));
+      const auto before = cu->xcnt_diagnostic_count();
+      track(std::array{0xee05007cu, 5u, 0u}); // global_load_b32 v5, v[0:1], off
+      if (drained)
+        state.wait(WaitCounterKind::X, 0);
+      track(std::array{0xf404c000u, 0u}); // s_prefetch_data
+      EXPECT_EQ(cu->xcnt_diagnostic_count() - before, enabled && !drained ? 1u : 0u);
+      if (!enabled && !drained)
+        EXPECT_TRUE(std::ranges::any_of(state.events(), [](const auto &e) {
+          return e.counter == WaitCounterKind::X && e.reg.cls == RegClass::VGPR;
+        }));
+    }
+  }
+}
+
+TEST_F(MemoryWaitOrderingTest, Gfx9FlatResultFollowsRouteWithBothCredits) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2})
+    for (bool shared : {false, true})
+      for (uint32_t lanes : {0u, 0xfu}) {
+        SCOPED_TRACE(testing::Message() << arch << " shared=" << shared << " exec=" << lanes);
+        ASSERT_NO_FATAL_FAILURE(setup(arch));
+        set_test_flat_domains(*cu, *wf, shared ? 0xf : 0);
+        wf->set_exec(lanes);
+        flat_load(2);
+        flat_load(3);
+        auto &state = wf->ensure_memory_wait_scoreboard();
+        EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 2u);
+        EXPECT_EQ(state.outstanding(WaitCounterKind::Ds), 2u);
+        state.wait(WaitCounterKind::Load, 1);
+        state.wait(WaitCounterKind::Ds, 1);
+        state.access({RegClass::VGPR, 2, 1}, lanes, 0xf, false);
+        EXPECT_EQ(cu->memory_wait_diagnostic_count(), lanes != 0 ? 1u : 0u);
+      }
+}
+
+TEST_F(MemoryWaitOrderingTest, Gfx950FlatResultFollowsRouteWhileBothCountersIssue) {
+  for (bool lds : {false, true}) {
+    SCOPED_TRACE(lds);
+    ASSERT_NO_FATAL_FAILURE(setup(ROCJITSU_CODE_ARCH_CDNA4));
+    set_test_flat_domains(*cu, *wf, lds ? 0xf : 0);
+    flat_load(2);
+    auto &state = wf->ensure_memory_wait_scoreboard();
+    EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 1u);
+    EXPECT_EQ(state.outstanding(WaitCounterKind::Ds), 1u);
+    state.wait(lds ? WaitCounterKind::Ds : WaitCounterKind::Load, 0);
+    const auto before = cu->memory_wait_diagnostic_count();
+    state.access({RegClass::VGPR, 2, 1}, 0xf, 0xf, false);
+    EXPECT_EQ(cu->memory_wait_diagnostic_count(), before);
+    EXPECT_EQ(state.outstanding(lds ? WaitCounterKind::Load : WaitCounterKind::Ds), 1u);
+  }
+}
+
+TEST_F(MemoryWaitOrderingTest, LegacyFlatChargesBothIssueDomainsAcrossAddressRoutes) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_RDNA1,
+                    ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_CDNA3,
+                    ROCJITSU_CODE_ARCH_CDNA4}) {
+    ASSERT_NO_FATAL_FAILURE(setup(arch));
+    std::array<uint32_t, 2> words{};
+    switch (arch) {
+    case ROCJITSU_CODE_ARCH_CDNA1:
+      words = cdna1::build_flat(cdna1::kFlatLoadDwordFlat, {.addr = 0, .saddr = 127, .vdst = 2});
+      break;
+    case ROCJITSU_CODE_ARCH_CDNA2:
+      words = cdna2::build_flat(cdna2::kFlatLoadDwordFlat, {.addr = 0, .saddr = 127, .vdst = 2});
+      break;
+    case ROCJITSU_CODE_ARCH_CDNA3:
+      words = cdna3::build_flat(cdna3::kFlatLoadDwordFlat, {.addr = 0, .saddr = 127, .vdst = 2});
+      break;
+    case ROCJITSU_CODE_ARCH_CDNA4:
+      words = cdna4::build_flat(cdna4::kFlatLoadDwordFlat, {.addr = 0, .saddr = 127, .vdst = 2});
+      break;
+    case ROCJITSU_CODE_ARCH_RDNA1:
+      words = rdna1::build_flat(rdna1::kFlatLoadDwordFlat, {.addr = 0, .saddr = 127, .vdst = 2});
+      break;
+    case ROCJITSU_CODE_ARCH_RDNA2:
+      words = rdna2::build_flat(rdna2::kFlatLoadDwordFlat, {.addr = 0, .saddr = 127, .vdst = 2});
+      break;
+    default:
+      FAIL() << "unsupported legacy FLAT target";
+    }
+    util::StringDiagnostic error;
+    auto decoded = Decoder::create(arch)->decode_window(words, 0, error.emitter());
+    ASSERT_TRUE(decoded.succeeded()) << error.message();
+    const auto *info = decoded.value()->amdgpu_memory_issue_info();
+    ASSERT_NE(info, nullptr);
+    for (uint64_t shared : {0u, 1u, 3u})
+      EXPECT_EQ(info->for_flat_issue(arch, 3, shared, false).counter_obligations().size(), 2u);
+    const bool counted_empty = arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4;
+    EXPECT_EQ(info->for_flat_issue(arch, 0, 0, true).counter_obligations().size(),
+              counted_empty ? 2u : 0u);
+    EXPECT_TRUE(info->for_flat_issue(arch, 0, 0, false).empty());
+    if (arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
+        arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2)
+      EXPECT_EQ(info->for_flat_issue(arch, 0, 0, false, false, true)
+                    .counter_obligations()
+                    .size(),
+                2u);
+    for (bool shared : {false, true})
+      for (auto waited : {WaitCounterKind::Load, WaitCounterKind::Ds}) {
+        ASSERT_NO_FATAL_FAILURE(setup(arch));
+        set_test_flat_domains(*cu, *wf, shared ? 0xf : 0);
+        flat_load(2);
+        auto &score = wf->ensure_memory_wait_scoreboard();
+        score.wait(waited, 0);
+        score.access({RegClass::VGPR, 2, 1}, 0xf, 0xf, false);
+        // RDNA1/2 FLAT completion requires both counter domains, including
+        // the position for the route that returned no data.
+        const bool routed_result_ready =
+            (arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
+             arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+            waited == (shared ? WaitCounterKind::Ds : WaitCounterKind::Load);
+        EXPECT_EQ(cu->memory_wait_diagnostic_count(), routed_result_ready ? 0u : 1u);
+      }
+  }
+}
+
+TEST_F(MemoryWaitOrderingTest, Gfx10SopkWaitAddsMaskedScalarAndImmediate) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2})
+    for (const uint32_t scalar : {0u, 1u, 63u})
+      for (uint16_t immediate : {0u, 1u}) {
+        ASSERT_NO_FATAL_FAILURE(setup(arch));
+        cu->write_sgpr(wf->sgpr_alloc().base + 10, scalar);
+        auto &state = wf->ensure_memory_wait_scoreboard();
+        state.issue(WaitCounterKind::Load);
+        wf->wait_counters().increment(WaitCounterType::VMCNT);
+        const auto words =
+            rdna1::build_sopk(rdna1::kSWaitcntVmcntSopk, {.simm16 = immediate, .sdst = 10});
+        util::StringDiagnostic error;
+        auto decoded = Decoder::create(arch)->decode_window(words, 0, error.emitter());
+        ASSERT_TRUE(decoded.succeeded()) << error.message();
+        track(*decoded.value());
+        ASSERT_TRUE(cu->execute_instruction(decoded.value().get(), *wf).succeeded());
+        const uint32_t threshold = (scalar + immediate) & 63u;
+        EXPECT_EQ(wf->wait_target().vmcnt, threshold);
+        EXPECT_EQ(wf->state() == WfState::WAITCNT, threshold == 0);
+        EXPECT_EQ(state.outstanding(WaitCounterKind::Load), threshold != 0);
+      }
+}
+
+TEST_F(MemoryWaitOrderingTest, Gfx11SopkNullSelectorUsesLiteralThreshold) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5})
+    for (uint16_t opcode : {24u, 25u, 26u, 27u}) {
+      SCOPED_TRACE(testing::Message() << arch << " op=" << opcode);
+      ASSERT_NO_FATAL_FAILURE(setup(arch));
+      constexpr uint16_t immediate = 0xc1d1;
+      constexpr uint8_t null_selector = 124;
+      const auto words = arch == ROCJITSU_CODE_ARCH_RDNA3
+                             ? rdna3::build_sopk(opcode, {.simm16 = immediate, .sdst = null_selector})
+                             : rdna3_5::build_sopk(opcode,
+                                                   {.simm16 = immediate, .sdst = null_selector});
+      util::StringDiagnostic error;
+      auto decoded = Decoder::create(arch)->decode_window(words, 0, error.emitter());
+      ASSERT_TRUE(decoded.succeeded()) << error.message();
+      EXPECT_EQ(WaitCounterPolicy::relative_wait_operand(*decoded.value(), arch), nullptr);
+      auto fields = WaitCounterPolicy::explicit_wait_fields(*decoded.value(), arch);
+      ASSERT_TRUE(fields.succeeded() && fields.value());
+      const auto counter = opcode == 24   ? WaitCounterKind::Store
+                           : opcode == 25 ? WaitCounterKind::Load
+                           : opcode == 26 ? WaitCounterKind::Exp
+                                          : WaitCounterKind::Ds;
+      EXPECT_EQ((*fields.value())[static_cast<size_t>(counter)],
+                opcode == 26 ? 1u : 17u);
+      // A prior split wait must not leave its other thresholds active.
+      wf->wait_for({.vmcnt = 0, .lgkmcnt = 0, .expcnt = 0, .vscnt = 0});
+      if (opcode == 27)
+        wf->wait_counters().vmcnt = 1; // A younger VM request must not delay the LGKM wait.
+      ASSERT_TRUE(cu->execute_instruction(decoded.value().get(), *wf).succeeded());
+      const auto &target = wf->wait_target();
+      const auto actual = opcode == 24   ? target.vscnt
+                          : opcode == 25 ? target.vmcnt
+                          : opcode == 26 ? target.expcnt
+                                         : target.lgkmcnt;
+      EXPECT_EQ(actual, opcode == 26 ? 1u : 17u);
+      EXPECT_EQ(target.vscnt, opcode == 24 ? 17u : WaitCounters::VSCNT_MAX);
+      EXPECT_EQ(target.vmcnt, opcode == 25 ? 17u : WaitCounters::VMCNT_MAX);
+      EXPECT_EQ(target.expcnt, opcode == 26 ? 1u : WaitCounters::EXPCNT_MAX);
+      EXPECT_EQ(target.lgkmcnt, opcode == 27 ? 17u : WaitCounters::LGKMCNT_MAX);
+      if (opcode == 27)
+        EXPECT_EQ(wf->state(), WfState::RUNNING);
+
+      // GFX11's ISA XML and LLVM allow only null in this SOPK operand.
+      const auto sgpr_words = arch == ROCJITSU_CODE_ARCH_RDNA3
+                                  ? rdna3::build_sopk(opcode, {.simm16 = immediate, .sdst = 10})
+                                  : rdna3_5::build_sopk(opcode, {.simm16 = immediate, .sdst = 10});
+      util::StringDiagnostic invalid_error;
+      auto invalid = Decoder::create(arch)->decode_window(sgpr_words, 0, invalid_error.emitter());
+      EXPECT_TRUE(invalid.failed());
+    }
+}
+
+TEST_F(MemoryWaitOrderingTest, PackedWaitDoesNotInheritPriorSplitStoreTarget) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
+                    ROCJITSU_CODE_ARCH_RDNA3_5})
+    for (bool vm_pending : {false, true}) {
+      SCOPED_TRACE(testing::Message() << arch << " vm_pending=" << vm_pending);
+      ASSERT_NO_FATAL_FAILURE(setup(arch));
+      const auto split_word =
+          arch == ROCJITSU_CODE_ARCH_RDNA1
+              ? rdna1::build_sopk(rdna1::kSWaitcntVscntSopk, {.simm16 = 0, .sdst = 10})[0]
+          : arch == ROCJITSU_CODE_ARCH_RDNA2
+              ? rdna2::build_sopk(rdna2::kSWaitcntVscntSopk, {.simm16 = 0, .sdst = 10})[0]
+          : arch == ROCJITSU_CODE_ARCH_RDNA3
+              ? rdna3::build_sopk(rdna3::kSWaitcntVscntSopk, {.simm16 = 0, .sdst = 124})[0]
+              : rdna3_5::build_sopk(rdna3_5::kSWaitcntVscntSopk, {.simm16 = 0, .sdst = 124})[0];
+      const auto packed_word =
+          arch == ROCJITSU_CODE_ARCH_RDNA1
+              ? rdna1::build_sopp(rdna1::kSWaitcntSopp, {.simm16 = 0x3f70})[0]
+          : arch == ROCJITSU_CODE_ARCH_RDNA2
+              ? rdna2::build_sopp(rdna2::kSWaitcntSopp, {.simm16 = 0x3f70})[0]
+          : arch == ROCJITSU_CODE_ARCH_RDNA3
+              ? rdna3::build_sopp(rdna3::kSWaitcntSopp, {.simm16 = 0x3f7})[0]
+              : rdna3_5::build_sopp(rdna3_5::kSWaitcntSopp, {.simm16 = 0x3f7})[0];
+      auto decoder = Decoder::create(arch);
+      auto execute_wait = [&](uint32_t word) {
+        const std::array<uint32_t, 1> words{word};
+        util::StringDiagnostic error;
+        auto decoded = decoder->decode_window(words, 0, error.emitter());
+        ASSERT_TRUE(decoded.succeeded()) << error.message();
+        ASSERT_TRUE(cu->execute_instruction(decoded.value().get(), *wf).succeeded());
+      };
+      cu->write_sgpr(wf->sgpr_alloc().base + 10, 0);
+      execute_wait(split_word);
+      ASSERT_EQ(wf->state(), WfState::RUNNING);
+      ASSERT_EQ(wf->wait_target().vscnt, 0);
+
+      // The first wait completed. A younger store may still be pending when
+      // a packed VM wait executes; only its encoded counters may stall it.
+      wf->wait_counters().increment(WaitCounterType::VSCNT);
+      if (vm_pending)
+        wf->wait_counters().increment(WaitCounterType::VMCNT);
+      execute_wait(packed_word);
+      EXPECT_EQ(wf->wait_target().vscnt, WaitCounters::VSCNT_MAX);
+      EXPECT_EQ(wf->wait_target().vmcnt, 0);
+      EXPECT_EQ(wf->state(), vm_pending ? WfState::WAITCNT : WfState::RUNNING);
+    }
+}
+
+TEST_F(MemoryWaitOrderingTest, Gfx10CompressedExportReadsOnlyEnabledPackedSources) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2})
+    for (uint32_t lanes : {0u, 1u}) {
+      ASSERT_NO_FATAL_FAILURE(setup(arch));
+      wf->set_exec(lanes);
+      auto &state = wf->ensure_memory_wait_scoreboard();
+      // With COMPR and EN=0xc, VSRC1 supplies BA. VSRC0 and VSRC2 are unused.
+      track(rdna1::build_exp({.en = 0xc, .compr = 1, .vsrc0 = 4, .vsrc1 = 5, .vsrc2 = 6}));
+      EXPECT_EQ(state.outstanding(WaitCounterKind::Exp), 1u);
+      state.access({RegClass::VGPR, 4, 1}, 1, 0xf, true);
+      state.access({RegClass::VGPR, 6, 1}, 1, 0xf, true);
+      EXPECT_EQ(cu->memory_wait_diagnostic_count(), 0u);
+      state.access({RegClass::VGPR, 5, 1}, 1, 0xf, true);
+      state.access({RegClass::EXEC, 0, 1}, ~uint64_t{0}, 0xf, true);
+      EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u + (lanes != 0));
+    }
+}
+
+TEST_F(MemoryWaitOrderingTest, ExportGrantLocksEnabledSourcesAndExec) {
+  setup(ROCJITSU_CODE_ARCH_RDNA4);
+  auto &state = wf->ensure_memory_wait_scoreboard();
+  for (uint64_t lanes : {0u, 1u}) {
+    for (bool drained : {false, true}) {
+      state.clear();
+      wf->set_exec(lanes);
+      const auto before = cu->memory_wait_diagnostic_count();
+      // DONE keeps this MRT export live even when EXEC is zero.
+      track(rdna4::build_vexport({.en = 1, .done = 1, .vsrc0 = 4}));
+      if (drained)
+        state.wait(WaitCounterKind::Exp, 0);
+      state.access({RegClass::VGPR, 4, 1}, 1, 0xf, false);
+      state.access({RegClass::VGPR, 5, 1}, 1, 0xf, true);
+      state.access({RegClass::VGPR, 4, 1}, 2, 0xf, true);
+      EXPECT_EQ(cu->memory_wait_diagnostic_count(), before);
+      state.access({RegClass::VGPR, 4, 1}, 1, 0xf, true);
+      state.access({RegClass::EXEC, 0, 1}, ~uint64_t{0}, 0xf, true);
+      EXPECT_EQ(cu->memory_wait_diagnostic_count() - before, drained ? 0u : 1u + lanes);
+    }
+  }
+}
+
+TEST_F(MemoryWaitOrderingTest, EmptyExecExportSkipsUnlessDoneOrPositionZero) {
+  for (auto arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(arch);
+    ASSERT_NO_FATAL_FAILURE(setup(arch));
+    wf->set_exec(0);
+    auto &state = wf->ensure_memory_wait_scoreboard();
+    for (const auto &[target, done, issues] :
+         {std::tuple{uint8_t{0}, false, false}, std::tuple{uint8_t{0}, true, true},
+          std::tuple{ShaderExportOperands::kFirstPosition, false, true}}) {
+      SCOPED_TRACE(testing::Message() << "target=" << unsigned(target) << " done=" << done);
+      state.clear();
+      const auto before = cu->memory_wait_diagnostic_count();
+      if (arch == ROCJITSU_CODE_ARCH_RDNA3)
+        track(rdna3::build_exp(
+            {.en = 1, .tgt = target, .done = static_cast<uint8_t>(done), .vsrc0 = 4}));
+      else if (arch == ROCJITSU_CODE_ARCH_RDNA3_5)
+        track(rdna3_5::build_exp(
+            {.en = 1, .tgt = target, .done = static_cast<uint8_t>(done), .vsrc0 = 4}));
+      else
+        track(rdna4::build_vexport(
+            {.en = 1, .tgt = target, .done = static_cast<uint8_t>(done), .vsrc0 = 4}));
+      EXPECT_EQ(state.outstanding(WaitCounterKind::Exp), issues ? 1u : 0u);
+      state.access({RegClass::EXEC, 0, 1}, ~uint64_t{0}, 0xf, true);
+      EXPECT_EQ(cu->memory_wait_diagnostic_count() - before, issues ? 1u : 0u);
+    }
+  }
+}
+
+TEST_F(MemoryWaitOrderingTest, SkippedEmptyExecExportCannotReleaseFullExpQueue) {
+  for (auto arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4})
+    for (bool exp_wait : {false, true}) {
+      SCOPED_TRACE(std::format("arch={} exp_wait={}", static_cast<unsigned>(arch), exp_wait));
+      ASSERT_NO_FATAL_FAILURE(setup(arch));
+      for (uint8_t vdst = 8; vdst != 15; ++vdst)
+        direct_load(false, vdst);
+      auto &state = *wf->memory_wait_scoreboard();
+      ASSERT_EQ(state.outstanding(WaitCounterKind::Exp), 7u);
+      wf->set_exec(0);
+      if (arch == ROCJITSU_CODE_ARCH_RDNA3)
+        track(rdna3::build_exp({.en = 1, .tgt = 0, .vsrc0 = 4}));
+      else if (arch == ROCJITSU_CODE_ARCH_RDNA3_5)
+        track(rdna3_5::build_exp({.en = 1, .tgt = 0, .vsrc0 = 4}));
+      else
+        track(rdna4::build_vexport({.en = 1, .tgt = 0, .vsrc0 = 4}));
+      EXPECT_EQ(state.outstanding(WaitCounterKind::Exp), 7u);
+      wf->set_exec(0b1111);
+      if (exp_wait)
+        state.wait(WaitCounterKind::Exp, 0);
+      const auto before = cu->memory_wait_diagnostic_count();
+      state.access({RegClass::VGPR, 8, 1}, 0b1111, 0xf, false);
+      EXPECT_EQ(cu->memory_wait_diagnostic_count() - before, exp_wait ? 0u : 1u);
+    }
 }

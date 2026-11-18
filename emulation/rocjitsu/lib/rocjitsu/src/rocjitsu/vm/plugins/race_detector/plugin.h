@@ -110,6 +110,9 @@ struct RaceWavefrontState : WavefrontState {
     uint32_t lane;
   };
   std::vector<LdsOperandRead> lds_operand_reads;
+  // A true16 VALU write also reads the preserved half of its destination.
+  // Record the decoded destinations until their actual write callbacks arrive.
+  std::vector<std::pair<uint16_t, uint8_t>> partial_valu_destinations;
 
   struct MixedLdsAccess {
     struct Lane {

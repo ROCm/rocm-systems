@@ -318,7 +318,9 @@ TEST(ScalarSccTest, Gfx10WaitRegisterValueIsDynamicAndWraps) {
     const auto unknown = WaitCounterPolicy::explicit_wait_fields(*dynamic, profile.arch);
     ASSERT_TRUE(unknown.succeeded());
     // Without the executing wave's SGPR, a static checker cannot prove a threshold.
-    EXPECT_FALSE(unknown.value());
+    ASSERT_TRUE(unknown.value());
+    for (const auto &field : *unknown.value())
+      EXPECT_FALSE(field);
     const auto zero = WaitCounterPolicy::explicit_wait_fields(*immediate, profile.arch);
     ASSERT_TRUE(zero.succeeded() && zero.value());
     const auto load = static_cast<size_t>(WaitCounterKind::Load);

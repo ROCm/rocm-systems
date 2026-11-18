@@ -5,9 +5,11 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_flat.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/flat_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/memory_result_preflight.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
@@ -118,6 +120,8 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
   }
   if (d.transpose && !d.exec_mask)
     return;
+  if (amdgpu::addr_calc::nullify_unallocated_load_before_address(wf, d))
+    return;
   uint64_t exec = d.exec_mask;
   int64_t offset = static_cast<int64_t>(signed_ioffset(inst.ioffset));
   bool saddr_present = has_saddr(inst.saddr);
@@ -160,6 +164,7 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
         addr = translated.value;
         d.scratch_swizzle = true;
         d.requires_scratch_backing = true;
+        d.scratch_backing_from_address = true;
         d.scratch_addr_stride = wf.wf_size() * sizeof(uint32_t);
         d.scratch_lane_mask |= uint64_t{1} << lane;
       }
@@ -185,7 +190,7 @@ BufferResource decode_buffer_resource(uint32_t srd0, uint32_t srd1, uint32_t srd
   resource.stride = resource.raw_stride * kStrideMultipliers[resource.stride_scale_encoding];
   resource.swizzle_enabled = ((srd3 >> 28) & 0x1u) != 0;
   resource.oob_select = ((srd3 >> 29) & 0x1u) != 0;
-  resource.type = amdgpu::addr_calc::cdna5_buffer_resource_type(srd3);
+  resource.type = amdgpu::addr_calc::modern_buffer_resource_type(srd3);
   return resource;
 }
 
@@ -277,6 +282,8 @@ void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront
   // them, including the optional payload scaling of the VGPR operand.
   auto &cu = wf.cu();
   init_vector_mem_state(wf, d);
+  if (amdgpu::addr_calc::nullify_unallocated_load_before_address(wf, d))
+    return;
   uint64_t exec = d.exec_mask;
   int64_t offset = static_cast<int64_t>(signed_ioffset(inst.ioffset));
   uint64_t scratch_base = wf.scratch_base();
@@ -325,6 +332,9 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
                                amdgpu::VectorMemState &d) {
   auto &cu = wf.cu();
   init_vector_mem_state(wf, d);
+  if (amdgpu::addr_calc::nullify_unallocated_load_before_address(
+          wf, d, d.atomic_op == amdgpu::AtomicOp::NONE && inst.tfe))
+    return;
   uint64_t exec = d.exec_mask;
   // Read through the scalar selector rather than the SGPR allocation: a
   // descriptor sourced from TTMPs lives in the trap-temporary file, and
@@ -460,6 +470,8 @@ void ds_calculate_addresses_masked(const VdsMachineInst &inst, amdgpu::Wavefront
   init_vector_mem_state(wf, d);
   d.lane_mask = lane_mask;
   d.exec_mask = lane_mask;
+  if (amdgpu::addr_calc::nullify_unallocated_load_before_address(wf, d))
+    return;
   uint32_t addr_base = resolved_vgpr_base(wf, inst.addr, amdgpu::VgprMsbRole::Src0);
   uint32_t offset = (static_cast<uint32_t>(inst.offset1) << 8) | inst.offset0;
   amdgpu::RegisterAccess regs(cu);

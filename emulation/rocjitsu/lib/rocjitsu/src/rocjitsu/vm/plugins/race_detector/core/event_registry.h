@@ -54,8 +54,10 @@ class EventRegistry {
     MemoryEventType type;
     std::array<amdgpu::MemoryCounterObligation, amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS>
         counterObligations;
+    std::array<uint64_t, amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS> counterIssueEnd;
     uint8_t numCounterObligations;
     uint8_t satisfiedCounterMask;
+    MemoryOrderClass memoryOrder;
     VgprWriteOrder writeOrder;
     LdsAccess ldsAccess;
     bool ldsPublished;
@@ -120,18 +122,22 @@ public:
               IntervalSet ldsIntervals,
               std::span<const amdgpu::MemoryCounterObligation> counterObligations,
               VgprWriteOrder writeOrder, uint8_t lastRegisterByteMask = 0,
-              LdsAccess ldsAccess = {}) {
+              LdsAccess ldsAccess = {}, std::span<const uint64_t> counterIssueEnd = {},
+              std::optional<VgprWriteOrder> registerWriteOrder = std::nullopt) {
     int id = base_offset_ + static_cast<int>(entries_.size());
     assert(!counterObligations.empty() ||
            (isFromLds(type) && registers.empty() && !ldsIntervals.empty()));
     assert(counterObligations.size() <= amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS);
+    assert(counterIssueEnd.empty() || counterIssueEnd.size() == counterObligations.size());
     EventInfo event{waveId,
                     instruction,
                     type,
                     {},
+                    {},
                     static_cast<uint8_t>(counterObligations.size()),
                     0,
-                    writeOrder,
+                    writeOrder.completion,
+                    registerWriteOrder.value_or(writeOrder),
                     ldsAccess,
                     false,
                     counterObligations.empty() ? EventStatus::WAVE_COMPLETE : EventStatus::ACTIVE,
@@ -141,6 +147,7 @@ public:
                     std::move(registers),
                     std::move(ldsIntervals)};
     std::ranges::copy(counterObligations, event.counterObligations.begin());
+    std::ranges::copy(counterIssueEnd, event.counterIssueEnd.begin());
     entries_.push_back(std::move(event));
 
     // To prevent the number of events recorded growing indefinitely, we try to
@@ -216,6 +223,23 @@ public:
     }
     return false;
   }
+  /// The end of the pending obligation's position in its ordered class.
+  /// A covered multi-obligation event is left unproved here so that a wait
+  /// cannot retire an unrelated obligation through a shared counter alias.
+  std::optional<uint64_t> pendingCounterIssueEnd(EventId id,
+                                                 amdgpu::WaitCounterType waitType) const {
+    const auto &event = get(id);
+    std::optional<uint64_t> result;
+    for (uint8_t i = 0; i < event.numCounterObligations; ++i) {
+      if ((event.satisfiedCounterMask & (uint8_t{1} << i)) != 0 ||
+          !amdgpu::wait_counter_covers(waitType, event.counterObligations[i].wait_counter_type()))
+        continue;
+      if (result)
+        return std::nullopt;
+      result = event.counterIssueEnd[i];
+    }
+    return result;
+  }
   int pendingCounterIncrement(EventId id, amdgpu::WaitCounterType waitType) const {
     const auto &event = get(id);
     for (uint8_t i = 0; i < event.numCounterObligations; ++i) {
@@ -271,7 +295,7 @@ public:
     return conflicts(MemoryOrderClass::LDS, lanes & *incoming.flat_lds_lanes) |
            conflicts(MemoryOrderClass::VMEM, lanes & ~*incoming.flat_lds_lanes);
   }
-  MemoryOrderClass memoryOrder(EventId id) const { return get(id).writeOrder.completion; }
+  MemoryOrderClass memoryOrder(EventId id) const { return get(id).memoryOrder; }
   bool readsLds(EventId id) const {
     const auto &e = get(id);
     return e.ldsAccess.read_modify_write || isFromLds(e.type);
@@ -285,7 +309,7 @@ public:
   }
   MemoryOrderClass ldsOrder(EventId id) const {
     const auto &e = get(id);
-    return e.ldsAccess.order(e.writeOrder.completion);
+    return e.ldsAccess.order(e.memoryOrder);
   }
   bool usesFlatLds(EventId id) const { return get(id).ldsAccess.uses_flat_lds; }
   bool ldsAccessComplete(EventId id) const {

@@ -33,6 +33,10 @@ void BufferLoadFormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (nullify_formatted_buffer_load_before_format(wf, *d, 1, inst_.tfe)) {
+    set_data(std::move(d));
+    return;
+  }
   const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, -1, 1);
   if (prepared.failed()) {
     wf.report_instruction_execution_error(
@@ -51,6 +55,10 @@ void BufferLoadFormatXyVbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (nullify_formatted_buffer_load_before_format(wf, *d, 2, inst_.tfe)) {
+    set_data(std::move(d));
+    return;
+  }
   const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, -1, 2);
   if (prepared.failed()) {
     wf.report_instruction_execution_error(
@@ -69,6 +77,10 @@ void BufferLoadFormatXyzVbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (nullify_formatted_buffer_load_before_format(wf, *d, 3, inst_.tfe)) {
+    set_data(std::move(d));
+    return;
+  }
   const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, -1, 3);
   if (prepared.failed()) {
     wf.report_instruction_execution_error(
@@ -87,6 +99,10 @@ void BufferLoadFormatXyzwVbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (nullify_formatted_buffer_load_before_format(wf, *d, 4, inst_.tfe)) {
+    set_data(std::move(d));
+    return;
+  }
   const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, -1, 4);
   if (prepared.failed()) {
     wf.report_instruction_execution_error(
@@ -179,6 +195,10 @@ void BufferLoadD16FormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->buffer_d16 = true;
   d->d16_hi = false;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (nullify_formatted_buffer_load_before_format(wf, *d, 1, inst_.tfe)) {
+    set_data(std::move(d));
+    return;
+  }
   const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, -1, 1);
   if (prepared.failed()) {
     wf.report_instruction_execution_error(
@@ -199,6 +219,10 @@ void BufferLoadD16FormatXyVbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->buffer_d16 = true;
   d->d16_hi = false;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (nullify_formatted_buffer_load_before_format(wf, *d, 2, inst_.tfe)) {
+    set_data(std::move(d));
+    return;
+  }
   const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, -1, 2);
   if (prepared.failed()) {
     wf.report_instruction_execution_error(
@@ -219,6 +243,10 @@ void BufferLoadD16FormatXyzVbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->buffer_d16 = true;
   d->d16_hi = false;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (nullify_formatted_buffer_load_before_format(wf, *d, 3, inst_.tfe)) {
+    set_data(std::move(d));
+    return;
+  }
   const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, -1, 3);
   if (prepared.failed()) {
     wf.report_instruction_execution_error(
@@ -239,6 +267,10 @@ void BufferLoadD16FormatXyzwVbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->buffer_d16 = true;
   d->d16_hi = false;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (nullify_formatted_buffer_load_before_format(wf, *d, 4, inst_.tfe)) {
+    set_data(std::move(d));
+    return;
+  }
   const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, -1, 4);
   if (prepared.failed()) {
     wf.report_instruction_execution_error(
@@ -749,6 +781,10 @@ void BufferLoadD16HiFormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->buffer_d16 = true;
   d->d16_hi = true;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (nullify_formatted_buffer_load_before_format(wf, *d, 1, inst_.tfe)) {
+    set_data(std::move(d));
+    return;
+  }
   const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, -1, 1);
   if (prepared.failed()) {
     wf.report_instruction_execution_error(
@@ -794,7 +830,7 @@ void BufferAtomicSwapB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->nullified_result ? 0 : wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -820,7 +856,7 @@ void BufferAtomicCmpswapB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->nullified_result ? 0 : wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -848,7 +884,7 @@ void BufferAtomicAddU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->nullified_result ? 0 : wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -874,7 +910,7 @@ void BufferAtomicSubU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->nullified_result ? 0 : wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -900,7 +936,7 @@ void BufferAtomicSubClampU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->nullified_result ? 0 : wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -926,7 +962,7 @@ void BufferAtomicMinI32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->nullified_result ? 0 : wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -952,7 +988,7 @@ void BufferAtomicMinU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->nullified_result ? 0 : wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -978,7 +1014,7 @@ void BufferAtomicMaxI32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->nullified_result ? 0 : wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1004,7 +1040,7 @@ void BufferAtomicMaxU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->nullified_result ? 0 : wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1030,7 +1066,7 @@ void BufferAtomicAndB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->nullified_result ? 0 : wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1056,7 +1092,7 @@ void BufferAtomicOrB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->nullified_result ? 0 : wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1082,7 +1118,7 @@ void BufferAtomicXorB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->nullified_result ? 0 : wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1108,7 +1144,7 @@ void BufferAtomicIncU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->nullified_result ? 0 : wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1134,7 +1170,7 @@ void BufferAtomicDecU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->nullified_result ? 0 : wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1160,7 +1196,7 @@ void BufferAtomicSwapB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->nullified_result ? 0 : wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1188,7 +1224,7 @@ void BufferAtomicCmpswapB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->nullified_result ? 0 : wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 16);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1220,7 +1256,7 @@ void BufferAtomicAddU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->nullified_result ? 0 : wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1248,7 +1284,7 @@ void BufferAtomicSubU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->nullified_result ? 0 : wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1276,7 +1312,7 @@ void BufferAtomicMinI64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->nullified_result ? 0 : wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1304,7 +1340,7 @@ void BufferAtomicMinU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->nullified_result ? 0 : wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1332,7 +1368,7 @@ void BufferAtomicMaxI64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->nullified_result ? 0 : wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1360,7 +1396,7 @@ void BufferAtomicMaxU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->nullified_result ? 0 : wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1388,7 +1424,7 @@ void BufferAtomicAndB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->nullified_result ? 0 : wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1416,7 +1452,7 @@ void BufferAtomicOrB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->nullified_result ? 0 : wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1444,7 +1480,7 @@ void BufferAtomicXorB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->nullified_result ? 0 : wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1472,7 +1508,7 @@ void BufferAtomicIncU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->nullified_result ? 0 : wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1500,7 +1536,7 @@ void BufferAtomicDecU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->nullified_result ? 0 : wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1528,7 +1564,7 @@ void BufferAtomicCondSubU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->nullified_result ? 0 : wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1557,7 +1593,7 @@ void BufferAtomicMinNumF32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->nullified_result ? 0 : wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1586,7 +1622,7 @@ void BufferAtomicMaxNumF32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->nullified_result ? 0 : wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1616,7 +1652,7 @@ void BufferAtomicAddF32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->nullified_result ? 0 : wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1643,7 +1679,7 @@ void BufferAtomicPkAddF16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->nullified_result ? 0 : wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1670,7 +1706,7 @@ void BufferAtomicPkAddBf16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  uint64_t exec = d->nullified_result ? 0 : wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1689,6 +1725,10 @@ void TbufferLoadFormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (nullify_formatted_buffer_load_before_format(wf, *d, 1, inst_.tfe)) {
+    set_data(std::move(d));
+    return;
+  }
   const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, inst_.format, 1);
   if (prepared.failed()) {
     wf.report_instruction_execution_error(
@@ -1707,6 +1747,10 @@ void TbufferLoadFormatXyVbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (nullify_formatted_buffer_load_before_format(wf, *d, 2, inst_.tfe)) {
+    set_data(std::move(d));
+    return;
+  }
   const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, inst_.format, 2);
   if (prepared.failed()) {
     wf.report_instruction_execution_error(
@@ -1725,6 +1769,10 @@ void TbufferLoadFormatXyzVbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (nullify_formatted_buffer_load_before_format(wf, *d, 3, inst_.tfe)) {
+    set_data(std::move(d));
+    return;
+  }
   const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, inst_.format, 3);
   if (prepared.failed()) {
     wf.report_instruction_execution_error(
@@ -1743,6 +1791,10 @@ void TbufferLoadFormatXyzwVbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (nullify_formatted_buffer_load_before_format(wf, *d, 4, inst_.tfe)) {
+    set_data(std::move(d));
+    return;
+  }
   const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, inst_.format, 4);
   if (prepared.failed()) {
     wf.report_instruction_execution_error(
@@ -1835,6 +1887,10 @@ void TbufferLoadD16FormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->buffer_d16 = true;
   d->d16_hi = false;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (nullify_formatted_buffer_load_before_format(wf, *d, 1, inst_.tfe)) {
+    set_data(std::move(d));
+    return;
+  }
   const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, inst_.format, 1);
   if (prepared.failed()) {
     wf.report_instruction_execution_error(
@@ -1855,6 +1911,10 @@ void TbufferLoadD16FormatXyVbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->buffer_d16 = true;
   d->d16_hi = false;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (nullify_formatted_buffer_load_before_format(wf, *d, 2, inst_.tfe)) {
+    set_data(std::move(d));
+    return;
+  }
   const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, inst_.format, 2);
   if (prepared.failed()) {
     wf.report_instruction_execution_error(
@@ -1875,6 +1935,10 @@ void TbufferLoadD16FormatXyzVbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->buffer_d16 = true;
   d->d16_hi = false;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (nullify_formatted_buffer_load_before_format(wf, *d, 3, inst_.tfe)) {
+    set_data(std::move(d));
+    return;
+  }
   const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, inst_.format, 3);
   if (prepared.failed()) {
     wf.report_instruction_execution_error(
@@ -1895,6 +1959,10 @@ void TbufferLoadD16FormatXyzwVbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->buffer_d16 = true;
   d->d16_hi = false;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (nullify_formatted_buffer_load_before_format(wf, *d, 4, inst_.tfe)) {
+    set_data(std::move(d));
+    return;
+  }
   const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.rsrc, inst_.format, 4);
   if (prepared.failed()) {
     wf.report_instruction_execution_error(

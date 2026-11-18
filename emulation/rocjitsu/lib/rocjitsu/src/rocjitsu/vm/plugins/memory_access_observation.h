@@ -154,10 +154,16 @@ struct MemoryAccessObservation {
   /// @brief The routing-selected counter for this access.
   ///
   /// @details Uniform shared FLAT selects its LDS counter. Mixed FLAT retains
-  /// its VMEM counter here, while @ref VectorMemState::routed_issue_info carries
-  /// both VMEM and LDS obligations. This scalar field does not describe the
-  /// complete wait requirement; for mixed FLAT, consult the routed issue's
-  /// counter_obligations().
+  /// its VMEM counter here. In the context-preserving callback, check the
+  /// optional @ref VectorMemState::routed_issue_info for a routed FLAT with
+  /// decoded issue metadata. When engaged, it lists physical counter positions
+  /// charged at issue, possibly both VMEM and LDS for a uniform FLAT route.
+  /// Other vector accesses use decoded issue metadata when available.
+  /// Those positions are not a conjunction of per-lane return waits. Derive
+  /// requesting-lane readiness from the request, FLAT LDS, and DDS masks and
+  /// the target's return rules. An active legacy private-OOB FLAT load can
+  /// return zero without a byte request; that result follows the VMEM
+  /// position even though the instruction also charges LDS.
   WaitCounterType wait_counter = WaitCounterType::VMCNT;
 
   /// @brief Lanes in the issuing wavefront; 1 for scalar, 0 when the route is

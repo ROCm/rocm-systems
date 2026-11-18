@@ -2649,6 +2649,7 @@ class Rdna3Profile(_AmdgpuProfileBase):
     - Reserved field omissions (version 1.0.0): synthesized by the parser.
     """
 
+    scratch_has_vaddr_expr = 'inst_.sve != 0'
     gfx11_memory_cache_policy = True
     gfx11_buffer_tfe = True
     check_buffer_load_result_bounds = True

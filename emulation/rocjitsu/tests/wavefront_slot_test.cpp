@@ -60,9 +60,8 @@ InstructionTiming classify_rdna4(Decoder &decoder, std::array<uint32_t, 4> encod
   return timing ? std::move(*timing) : InstructionTiming{};
 }
 
-/// The counters the CU charges for a FLAT request once it has routed its
-/// lanes, as MemoryPipeline::issue_counters() derives them.
-MemoryPipeline::WaitCounterTokens routed_flat_counters(const InstructionTiming &flat, bool global,
+/// The counters the CU charges for an active FLAT request after routing.
+MemoryPipeline::WaitCounterTokens issued_flat_counters(const InstructionTiming &flat, bool global,
                                                        bool lds) {
   MemoryPipeline::WaitCounterTokens tokens;
   const auto *issue = flat.instruction().amdgpu_memory_issue_info();
@@ -70,7 +69,10 @@ MemoryPipeline::WaitCounterTokens routed_flat_counters(const InstructionTiming &
   if (!issue)
     return tokens;
   // Hold the routed info: counter_obligations() is a view into it.
-  const MemoryIssueInfo routed = issue->for_flat_memory_domains(global, lds);
+  const uint64_t requests = (global ? 1u : 0u) | (lds ? 2u : 0u);
+  const uint64_t shared = lds ? 2u : 0u;
+  const MemoryIssueInfo routed =
+      issue->for_flat_issue(ROCJITSU_CODE_ARCH_RDNA4, requests, shared, false);
   for (const auto obligation : routed.counter_obligations())
     for (uint8_t i = 0; i < obligation.counter_increment(); ++i)
       tokens.types[tokens.size++] = obligation.wait_counter_type();
@@ -378,30 +380,28 @@ TEST_F(WavefrontSlotsTest, CounterWaitHoldsUntilTheMemoryResponseReturns) {
   EXPECT_FALSE(slot.has_hazard(valu(5, 4), 20));
 }
 
-/// Issue a FLAT load routed to @p global and/or @p lds, and check that only the
-/// counters of the routed domain go outstanding and return.
-void expect_flat_charges_only_its_route(WavefrontSlot &slot, const InstructionTiming &flat,
-                                        bool global, bool lds) {
-  const auto charged = routed_flat_counters(flat, global, lds);
-  ASSERT_EQ(charged.size, 1u);
+/// An active GFX12 FLAT load holds both issue credits regardless of its route.
+void expect_flat_charges_both_domains(WavefrontSlot &slot, const InstructionTiming &flat,
+                                      bool global, bool lds) {
+  const auto charged = issued_flat_counters(flat, global, lds);
+  ASSERT_EQ(charged.size, 2u);
 
   slot.reserve(flat, 1);
   EXPECT_EQ(slot.memory_tokens, 2u);
   slot.issued(1);
   slot.issued_memory(flat, charged);
-  // The unused domain's reservation is released at issue.
-  EXPECT_EQ(slot.memory_tokens, 1u);
-  EXPECT_EQ(slot.outstanding.vmcnt, global ? 1u : 0u);
-  EXPECT_EQ(slot.outstanding.dscnt, lds ? 1u : 0u);
+  EXPECT_EQ(slot.memory_tokens, 2u);
+  EXPECT_EQ(slot.outstanding.vmcnt, 1u);
+  EXPECT_EQ(slot.outstanding.dscnt, 1u);
 
-  // A wait on the other domain's counter does not stall behind this load.
+  // Either wait sees its issue credit, including the unused route.
   WaitTarget other;
   if (global)
     other.dscnt = 0;
   else
     other.vmcnt = 0;
   slot.waiting = other;
-  EXPECT_FALSE(slot.waiting_on_counters());
+  EXPECT_TRUE(slot.waiting_on_counters());
 
   WaitTarget own;
   if (global)
@@ -418,16 +418,16 @@ void expect_flat_charges_only_its_route(WavefrontSlot &slot, const InstructionTi
   EXPECT_FALSE(slot.waiting_on_counters());
 }
 
-TEST_F(WavefrontSlotsTest, GlobalOnlyFlatChargesOnlyLoadcnt) {
+TEST_F(WavefrontSlotsTest, GlobalOnlyFlatStillChargesBothCounters) {
   ASSERT_NE(dispatch(), nullptr);
   const auto flat = classify({kFlatLoadV4[0], kFlatLoadV4[1], kFlatLoadV4[2], 0});
-  expect_flat_charges_only_its_route((*slots)[0], flat, /*global=*/true, /*lds=*/false);
+  expect_flat_charges_both_domains((*slots)[0], flat, /*global=*/true, /*lds=*/false);
 }
 
-TEST_F(WavefrontSlotsTest, LdsOnlyFlatChargesOnlyDscnt) {
+TEST_F(WavefrontSlotsTest, LdsOnlyFlatStillChargesBothCounters) {
   ASSERT_NE(dispatch(), nullptr);
   const auto flat = classify({kFlatLoadV4[0], kFlatLoadV4[1], kFlatLoadV4[2], 0});
-  expect_flat_charges_only_its_route((*slots)[0], flat, /*global=*/false, /*lds=*/true);
+  expect_flat_charges_both_domains((*slots)[0], flat, /*global=*/false, /*lds=*/true);
 }
 
 TEST_F(WavefrontSlotsTest, ScalarMessageReturnHoldsAKmcntWait) {

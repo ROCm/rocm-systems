@@ -234,6 +234,15 @@ public:
   bool row_from_m0;
   std::array<uint8_t, 4> sources;
 
+  /// GFX10 compressed exports read RG from VSRC0 and BA from VSRC1.
+  template <typename Encoding> static ShaderExportOperands decode_gfx10(const Encoding &inst) {
+    auto components = static_cast<uint8_t>(inst.en);
+    if (inst.compr)
+      components = (components & 1u) | ((components >> 1u) & 2u);
+    return {static_cast<uint8_t>(inst.tgt), components, bool(inst.done), false,
+            shader_export_sources(inst)};
+  }
+
   /// Decode the shared GFX11 EXP and GFX12 VEXPORT operand layout.
   template <typename Encoding> static ShaderExportOperands decode(const Encoding &inst) {
     return {static_cast<uint8_t>(inst.tgt), static_cast<uint8_t>(inst.en), bool(inst.done),

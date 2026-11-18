@@ -17,6 +17,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/flat_address.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -34,12 +35,15 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -52,6 +56,8 @@ constexpr uint32_t kKernelAddr = 0x1000;
 constexpr uint32_t kTrapHandlerAddr = 0x2000;
 constexpr uint32_t kSTrapBreakpoint = 0xBF920001u; // s_trap 1 (rocm-dbgapi breakpoint)
 constexpr uint32_t kSTrapSeven = 0xBF92AB07u;      // s_trap 0xab07 (trap id is low 8 bits)
+constexpr uint32_t kGfx11STrapTwo = 0xBF900002u;   // s_trap 2
+constexpr uint32_t kGfx11STrapThree = 0xBF900003u; // s_trap 3
 constexpr uint32_t kGfx12STrap = 0xBF900003u;      // s_trap 3 on gfx12+
 constexpr uint32_t kSEndpgm = 0xBF810000u;         // s_endpgm
 
@@ -179,6 +185,59 @@ TEST(WaveDebugTest, Gfx10TrapDrainsBeforeEnteringPrivilegedHandler) {
   }
 }
 
+TEST(WaveDebugTest, Gfx1100PrivilegedTrapTwoFallsThroughWithoutDraining) {
+  for (uint32_t word : {kGfx11STrapTwo, kGfx11STrapTwo | 0x100u}) {
+    SCOPED_TRACE(word);
+    WaveDebugFixture fixture(ROCJITSU_CODE_ARCH_RDNA3, 1, 1);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
+    fixture.gpu_mem.write32(kKernelAddr, word);
+    fixture.gpu_mem.write32(kKernelAddr + 4, kSEndpgm);
+    fixture.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
+      return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerAddr, 0, true};
+    });
+
+    auto *wave = fixture.dispatch(kKernelAddr);
+    ASSERT_NE(wave, nullptr);
+    auto execution_effect = std::make_shared<std::atomic_bool>(false);
+    wave->set_execution_effect_guard(execution_effect);
+    wave->set_status_raw(wave->status_raw() | amdgpu::Wavefront::kStatusPrivMask);
+    wave->wait_counters().increment(amdgpu::WaitCounterType::VMCNT);
+
+    fixture.cu->step();
+    EXPECT_EQ(wave->pc, kKernelAddr + 4);
+    EXPECT_FALSE(wave->in_trap_handler());
+    EXPECT_EQ(wave->wait_counters().vmcnt, 1u);
+    EXPECT_FALSE(execution_effect->load());
+  }
+}
+
+TEST(WaveDebugTest, OtherTrapConditionsStillEnterHandler) {
+  struct TrapCase {
+    rj_code_arch_t arch;
+    bool privileged;
+    uint32_t word;
+  };
+  for (const auto &[arch, privileged, word] :
+       std::array{TrapCase{ROCJITSU_CODE_ARCH_RDNA3, false, kGfx11STrapTwo},
+                  TrapCase{ROCJITSU_CODE_ARCH_RDNA3, true, kGfx11STrapThree},
+                  TrapCase{ROCJITSU_CODE_ARCH_RDNA3_5, true, kGfx11STrapTwo}}) {
+    WaveDebugFixture fixture(arch, 1, 1);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
+    fixture.gpu_mem.write32(kKernelAddr, word);
+    fixture.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
+      return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerAddr, 0, true};
+    });
+
+    auto *wave = fixture.dispatch(kKernelAddr);
+    ASSERT_NE(wave, nullptr);
+    if (privileged)
+      wave->set_status_raw(wave->status_raw() | amdgpu::Wavefront::kStatusPrivMask);
+    fixture.cu->step();
+    EXPECT_EQ(wave->pc, kTrapHandlerAddr);
+    EXPECT_TRUE(wave->in_trap_handler());
+  }
+}
+
 TEST(WaveDebugTest, Gfx10TracePriorityAndOrderedEndReportTheIssuingWave) {
   WaveDebugFixture f(ROCJITSU_CODE_ARCH_RDNA1);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
@@ -220,6 +279,24 @@ TEST(WaveDebugTest, Gfx10TracePriorityAndOrderedEndReportTheIssuingWave) {
   f.cu->step();
   EXPECT_EQ(messages, 1u);
   EXPECT_TRUE(wave->is_halted());
+}
+
+TEST(WaveDebugTest, Gfx10CodeEndRaisesIllegalInstruction) {
+  WaveDebugFixture f(ROCJITSU_CODE_ARCH_RDNA1);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
+  f.gpu_mem.write32(kKernelAddr, 0xbf9f0000u);
+  uint32_t interrupts = 0;
+  f.cu->set_illegal_inst_handler([&](amdgpu::Wavefront &wave) {
+    ++interrupts;
+    wave.set_debug_halted(true);
+    return true;
+  });
+  auto *wave = f.dispatch(kKernelAddr);
+  ASSERT_NE(wave, nullptr);
+  f.cu->step();
+  EXPECT_EQ(interrupts, 1u);
+  EXPECT_EQ(wave->pc, kKernelAddr);
+  EXPECT_TRUE(wave->debug_halted());
 }
 
 TEST(WaveDebugTest, Gfx10SethaltStopsIssueAndCodeEndRaisesIllegalInstruction) {
@@ -1392,6 +1469,10 @@ TEST(WaveDebugTest, FlatB64AtomicPreservesPrivateDwordsAndNeighboringLane) {
         arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
     const bool encoded_scratch = arch == ROCJITSU_CODE_ARCH_CDNA5;
     const uint64_t global = encoded_scratch ? 0x200050000ull : 0x50000;
+    const uint64_t aperture_base = encoded_scratch ? uint64_t{1} << 60 : private_base;
+    const uint64_t aperture_limit = encoded_scratch
+                                        ? aperture_base + (uint64_t{1} << 57) - 1
+                                        : aperture_base + UINT32_MAX;
     for (bool private_lane : {false, true}) {
       for (const auto &[global_mapped, shader] : {std::pair{false, false}, std::pair{true, false},
                                                   std::pair{false, true}, std::pair{true, true}}) {
@@ -1403,7 +1484,7 @@ TEST(WaveDebugTest, FlatB64AtomicPreservesPrivateDwordsAndNeighboringLane) {
         WaveDebugFixture fx(arch);
         ASSERT_NE(fx.cu, nullptr);
         fx.l2.set_backing_memory(&fx.gpu_mem);
-        fx.cu->set_apertures(0, 0, private_base, private_base + UINT32_MAX);
+        fx.cu->set_apertures(0, 0, aperture_base, aperture_limit);
         KfdProcess::PageTable pages;
         util::DistributedSharedMutex mutex;
         std::vector<uint8_t> code(size), scratch_page(size), global_page(size);
@@ -1423,13 +1504,14 @@ TEST(WaveDebugTest, FlatB64AtomicPreservesPrivateDwordsAndNeighboringLane) {
         fx.gpu_mem.write32(second_dword, 73, pid);
         fx.gpu_mem.write32(scratch + 4, 53, pid);
         wf->set_process_id(pid);
-        wf->set_apertures(0, 0, private_base, private_base + UINT32_MAX,
-                          /*override_launch=*/true);
+        wf->set_apertures(0, 0, aperture_base, aperture_limit, /*override_launch=*/true);
         wf->set_scratch_base(scratch);
         wf->set_scratch_lane_size(256);
         wf->set_exec(private_lane ? 3 : 2);
         for (unsigned lane = 0; lane < 2; ++lane) {
-          const uint64_t address = lane ? global : (encoded_scratch ? scratch : private_base);
+          const uint64_t address = lane ? global
+                                        : (encoded_scratch ? amdgpu::gfx1250_flat_scratch_base(*wf)
+                                                           : private_base);
           const auto base = wf->vgpr_alloc().base;
           fx.cu->write_vgpr(base + 2, lane, uint32_t(address));
           fx.cu->write_vgpr(base + 3, lane, uint32_t(address >> 32));

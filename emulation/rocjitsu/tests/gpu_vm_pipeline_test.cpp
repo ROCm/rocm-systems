@@ -302,8 +302,9 @@ public:
   amdgpu::Wavefront *wf = nullptr;
   amdgpu::AddressSpaceHandle address_space;
 
-  void initialize(bool legacy_cache_compatible = false, bool xcnt_checks = false) {
-    if (xcnt_checks) {
+  void initialize(bool legacy_cache_compatible = false, bool xcnt_checks = false,
+                  bool expert_sources = false) {
+    if (xcnt_checks || expert_sources) {
       std::ifstream file(kGfx1250ConfigPath);
       ASSERT_TRUE(file.is_open());
       std::string config(std::istreambuf_iterator<char>{file}, {});
@@ -311,7 +312,10 @@ public:
       ASSERT_NE(cu_config, std::string::npos);
       const auto parameters = config.find('[', config.find("\"config\"", cu_config));
       ASSERT_NE(parameters, std::string::npos);
-      config.insert(parameters + 1, R"({"key":"xcnt_diagnostics","value":"warn"},)");
+      if (xcnt_checks)
+        config.insert(parameters + 1, R"({"key":"xcnt_diagnostics","value":"warn"},)");
+      if (expert_sources)
+        config.insert(parameters + 1, R"({"key":"memory_wait_diagnostics","value":"warn"},)");
       ASSERT_NO_FATAL_FAILURE(sim.initialize(config));
     } else {
       ASSERT_NO_FATAL_FAILURE(sim.initialize());
@@ -1391,130 +1395,201 @@ TEST(GpuVmPipeline, DeferredScalarFaultRetainsTheIssuingPc) {
 
 enum class RetainedFaultPath { Immediate, Deferred, SnapshotRetry, DebuggerProbe };
 
-TEST(GpuVmPipeline, ClaimedFaultResumesWithoutStaleMemoryWaits) {
-  for (bool scalar : {false, true}) {
-    for (const auto path : {RetainedFaultPath::Immediate, RetainedFaultPath::Deferred,
-                            RetainedFaultPath::SnapshotRetry, RetainedFaultPath::DebuggerProbe}) {
-      SCOPED_TRACE(scalar);
-      SCOPED_TRACE(static_cast<unsigned>(path));
-      TranslatedPipelineContext context;
-      ASSERT_NO_FATAL_FAILURE(context.initialize(/*legacy_cache_compatible=*/false,
-                                                 /*xcnt_checks=*/true));
-      ASSERT_NE(context.wf, nullptr);
-      auto &wave = *context.wf;
-      constexpr uint64_t kCode = 0x1000, kData = 0x2000, kUnmapped = 0x20000;
-      constexpr uint32_t kDestination = 4, kValue = 0x12345678;
-      const auto scalar_load = cdna5::build_smem(
-          cdna5::kSLoadB32Smem, {.sbase = 0, .sdata = kDestination, .soffset = 124});
-      const auto vector_load =
-          cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal,
-                               {.saddr = 0, .vdst = kDestination, .vaddr = 0, .ioffset = 0});
-      const auto load =
-          scalar ? std::span<const uint32_t>(scalar_load) : std::span<const uint32_t>(vector_load);
-      for (size_t i = 0; i < load.size(); ++i)
-        context.external->store(kCode + i * sizeof(uint32_t), load[i]);
-      const uint64_t next_pc = kCode + load.size_bytes();
-      context.external->store(
-          next_pc, cdna5::build_sopp(scalar ? cdna5::kSWaitKmcntSopp : cdna5::kSWaitLoadcntSopp,
-                                     {.simm16 = 0}));
-      context.external->store(next_pc + sizeof(uint32_t), S_ENDPGM_GFX12);
-      context.external->store(kData, kValue);
-      wave.pc = kCode;
-      wave.set_queue_id(1);
-      wave.set_exec(1);
-      if (!scalar)
-        wave.set_mode_raw(wave.mode_raw() | (1u << 25));
-      const auto issuing_mode = wave.mode_raw();
-      context.cu->write_sgpr(wave.sgpr_alloc().base,
-                             path == RetainedFaultPath::DebuggerProbe ? kUnmapped : kData);
-      context.cu->write_sgpr(wave.sgpr_alloc().base + 1, 0);
-      context.cu->write_vgpr(wave.vgpr_alloc().base, 0, 0);
-      // An earlier eagerly completed load still needs a software wait. Fault
-      // cleanup must preserve that producer while removing only the new one.
-      const auto counter = scalar ? amdgpu::WaitCounterKind::Km : amdgpu::WaitCounterKind::Load;
-      auto &scoreboard = wave.ensure_memory_wait_scoreboard();
-      const auto older_sequence = scoreboard.issue(counter, scalar);
-      scoreboard.add({older_sequence,
-                      kCode - 4,
-                      scalar ? ~uint64_t{0} : 1,
-                      {scalar ? RegClass::SGPR : RegClass::VGPR, 6, 1},
-                      counter,
-                      0xf});
-      std::vector<uint64_t> issued_x_positions;
-      auto observer = std::make_unique<InstructionVmPlugin>();
-      observer->before_instruction = [&](amdgpu::Wavefront &observed) {
-        if (observed.pc == kCode)
-          issued_x_positions.push_back(scoreboard.outstanding(amdgpu::WaitCounterKind::X));
-      };
-      ASSERT_TRUE(context.sim.plugin_group->add(std::move(observer)));
-      context.sim.soc->set_plugin_group(context.sim.plugin_group);
-      // The first read fetches code; the second is the data access.
-      if (path == RetainedFaultPath::DebuggerProbe)
-        context.cu->set_debug_active(true);
-      else if (path == RetainedFaultPath::Immediate)
-        context.external->faulted_read_call = 2;
-      else
-        context.external->unavailable_read_call = 2;
-      uint32_t faults = 0;
-      context.cu->set_memory_violation_handler(
-          [&](amdgpu::Wavefront &faulted, uint64_t, bool, uint64_t issue_pc) {
-            EXPECT_EQ(&faulted, &wave);
-            EXPECT_EQ(issue_pc, kCode);
-            EXPECT_EQ(faulted.pc, next_pc);
-            ++faults;
-            faulted.pc = issue_pc;
-            faulted.set_debug_suspended(true);
-            // A claimant may change MODE before returning. Cancellation must
-            // still remove the issuing instruction's replay position.
-            if (path == RetainedFaultPath::DebuggerProbe)
-              faulted.set_mode_raw(faulted.mode_raw() & ~(1u << 25));
-            return true;
-          });
+TEST(GpuVmPipeline, FaultingAsyncTransferKeepsOlderReplayTranslation) {
+  for (bool deferred : {false, true}) {
+    SCOPED_TRACE(deferred);
+    TranslatedPipelineContext context;
+    ASSERT_NO_FATAL_FAILURE(context.initialize(false, true));
+    ASSERT_NE(context.wf, nullptr);
+    auto &wave = *context.wf;
+    constexpr uint64_t code = 0x1000, ordinary_data = 0x2000, async_data = 0x20000;
+    constexpr auto load =
+        cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal, {.saddr = 0, .vdst = 4, .vaddr = 0});
+    constexpr auto async_load = cdna5::build_vglobal(cdna5::kGlobalLoadAsyncToLdsB32Vglobal,
+                                                     {.saddr = 2, .vdst = 1, .vaddr = 0});
+    constexpr uint64_t async_pc = code + sizeof(load);
+    context.external->store(code, load);
+    context.external->store(async_pc, async_load);
+    context.external->store(async_pc + sizeof(async_load), S_ENDPGM_GFX12);
+    context.external->store(ordinary_data, uint32_t{0xabcdef});
+    wave.pc = code;
+    wave.set_exec(1);
+    wave.set_mode_raw(wave.mode_raw() | (1u << 25));
+    wave.set_lds_base(context.cu->allocate_lds(256));
+    wave.set_lds_size(256);
+    const uint32_t sb = wave.sgpr_alloc().base, vb = wave.vgpr_alloc().base;
+    context.cu->write_sgpr(sb, ordinary_data);
+    context.cu->write_sgpr(sb + 1, 0);
+    context.cu->write_sgpr(sb + 2, async_data);
+    context.cu->write_sgpr(sb + 3, 0);
+    context.cu->write_vgpr(vb, 0, 0);
+    context.cu->write_vgpr(vb + 1, 0, 0);
+
+    unsigned faults = 0;
+    context.cu->set_memory_violation_handler(
+        [&](amdgpu::Wavefront &faulted, uint64_t, bool, uint64_t issue_pc) {
+          EXPECT_EQ(issue_pc, async_pc);
+          ++faults;
+          faulted.set_debug_suspended(true);
+          return true;
+        });
+    ASSERT_TRUE(context.cu->step());
+    ASSERT_EQ(wave.pc, async_pc);
+    auto &score = wave.ensure_memory_wait_scoreboard();
+    ASSERT_EQ(score.outstanding(amdgpu::WaitCounterKind::X), 1u);
+    if (deferred) {
+      context.external->unavailable_translation_address = async_data;
       context.cu->step();
-      ASSERT_EQ(issued_x_positions, (std::vector<uint64_t>{1}));
-      if (path == RetainedFaultPath::Deferred || path == RetainedFaultPath::SnapshotRetry) {
-        ASSERT_EQ(wave.state(), amdgpu::WfState::VM_RETRY);
+      ASSERT_EQ(wave.state(), amdgpu::WfState::VM_RETRY);
+      ASSERT_EQ(score.outstanding(amdgpu::WaitCounterKind::Async), 1u);
+      context.external->unavailable_translation_address.reset();
+    }
+    context.cu->step();
+    ASSERT_EQ(faults, 1u);
+    EXPECT_EQ(score.outstanding(amdgpu::WaitCounterKind::Async), 0u);
+    EXPECT_EQ(score.outstanding(amdgpu::WaitCounterKind::X), 1u);
+    EXPECT_TRUE(std::ranges::any_of(score.events(), [&](const auto &event) {
+      return event.pc == code && event.counter == amdgpu::WaitCounterKind::X;
+    }));
+  }
+}
+
+TEST(GpuVmPipeline, ClaimedFaultResumesWithoutStaleMemoryWaits) {
+  for (bool expert_sources : {false, true}) {
+    for (bool scalar : {false, true}) {
+      for (const auto path : {RetainedFaultPath::Immediate, RetainedFaultPath::Deferred,
+                              RetainedFaultPath::SnapshotRetry, RetainedFaultPath::DebuggerProbe}) {
+        SCOPED_TRACE(scalar);
+        SCOPED_TRACE(expert_sources);
+        SCOPED_TRACE(static_cast<unsigned>(path));
+        TranslatedPipelineContext context;
+        ASSERT_NO_FATAL_FAILURE(context.initialize(/*legacy_cache_compatible=*/false,
+                                                   /*xcnt_checks=*/true, expert_sources));
+        ASSERT_NE(context.wf, nullptr);
+        auto &wave = *context.wf;
+        constexpr uint64_t kCode = 0x1000, kData = 0x2000, kUnmapped = 0x20000;
+        constexpr uint32_t kDestination = 4, kValue = 0x12345678;
+        const auto scalar_load = cdna5::build_smem(
+            cdna5::kSLoadB32Smem, {.sbase = 0, .sdata = kDestination, .soffset = 124});
+        const auto vector_load =
+            cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal,
+                                 {.saddr = 0, .vdst = kDestination, .vaddr = 0, .ioffset = 0});
+        const auto load = scalar ? std::span<const uint32_t>(scalar_load)
+                                 : std::span<const uint32_t>(vector_load);
+        for (size_t i = 0; i < load.size(); ++i)
+          context.external->store(kCode + i * sizeof(uint32_t), load[i]);
+        const uint64_t next_pc = kCode + load.size_bytes();
+        context.external->store(
+            next_pc, cdna5::build_sopp(scalar ? cdna5::kSWaitKmcntSopp : cdna5::kSWaitLoadcntSopp,
+                                       {.simm16 = 0}));
+        context.external->store(next_pc + sizeof(uint32_t), S_ENDPGM_GFX12);
+        context.external->store(kData, kValue);
+        wave.pc = kCode;
+        wave.set_queue_id(1);
+        wave.set_exec(1);
+        if (expert_sources)
+          wave.set_wave_sched_mode_raw(2);
+        if (!scalar)
+          wave.set_mode_raw(wave.mode_raw() | (1u << 25));
+        const auto issuing_mode = wave.mode_raw();
+        context.cu->write_sgpr(wave.sgpr_alloc().base,
+                               path == RetainedFaultPath::DebuggerProbe ? kUnmapped : kData);
+        context.cu->write_sgpr(wave.sgpr_alloc().base + 1, 0);
+        context.cu->write_vgpr(wave.vgpr_alloc().base, 0, 0);
+        // An earlier eagerly completed load still needs a software wait. Fault
+        // cleanup must preserve that producer while removing only the new one.
+        const auto counter = scalar ? amdgpu::WaitCounterKind::Km : amdgpu::WaitCounterKind::Load;
+        auto &scoreboard = wave.ensure_memory_wait_scoreboard();
+        const auto older_sequence = scoreboard.issue(counter, scalar);
+        scoreboard.add({older_sequence,
+                        kCode - 4,
+                        scalar ? ~uint64_t{0} : 1,
+                        {scalar ? RegClass::SGPR : RegClass::VGPR, 6, 1},
+                        counter,
+                        0xf});
+        std::vector<uint64_t> issued_x_positions;
+        auto observer = std::make_unique<InstructionVmPlugin>();
+        observer->before_instruction = [&](amdgpu::Wavefront &observed) {
+          if (observed.pc == kCode)
+            issued_x_positions.push_back(scoreboard.outstanding(amdgpu::WaitCounterKind::X));
+        };
+        ASSERT_TRUE(context.sim.plugin_group->add(std::move(observer)));
+        context.sim.soc->set_plugin_group(context.sim.plugin_group);
+        // The first read fetches code; the second is the data access.
+        if (path == RetainedFaultPath::DebuggerProbe)
+          context.cu->set_debug_active(true);
+        else if (path == RetainedFaultPath::Immediate)
+          context.external->faulted_read_call = 2;
+        else
+          context.external->unavailable_read_call = 2;
+        uint32_t faults = 0;
+        context.cu->set_memory_violation_handler(
+            [&](amdgpu::Wavefront &faulted, uint64_t, bool, uint64_t issue_pc) {
+              EXPECT_EQ(&faulted, &wave);
+              EXPECT_EQ(issue_pc, kCode);
+              EXPECT_EQ(faulted.pc, next_pc);
+              ++faults;
+              faulted.pc = issue_pc;
+              faulted.set_debug_suspended(true);
+              // A claimant may change MODE before returning. Cancellation must
+              // still remove the issuing instruction's replay position.
+              if (path == RetainedFaultPath::DebuggerProbe)
+                faulted.set_mode_raw(faulted.mode_raw() & ~(1u << 25));
+              return true;
+            });
+        context.cu->step();
+        ASSERT_EQ(issued_x_positions, (std::vector<uint64_t>{1}));
+        if (path == RetainedFaultPath::Deferred || path == RetainedFaultPath::SnapshotRetry) {
+          ASSERT_EQ(wave.state(), amdgpu::WfState::VM_RETRY);
+          EXPECT_EQ(scoreboard.outstanding(counter), 2u);
+          EXPECT_EQ(scoreboard.outstanding(amdgpu::WaitCounterKind::X), 1u);
+          context.external->faulted_read_call = context.external->read_calls + 1;
+          if (path == RetainedFaultPath::SnapshotRetry) {
+            wave.set_runtime_suspended(true);
+            context.cu->retry_paused_queue_memory(77, 1, false);
+          } else {
+            context.cu->step();
+          }
+        }
+        ASSERT_EQ(faults, 1u);
+        EXPECT_EQ(wave.state(), amdgpu::WfState::RUNNING);
+        EXPECT_TRUE(wave.wait_counters().empty());
+        EXPECT_EQ(scoreboard.events().size(), 1u);
+        if (scoreboard.events().size() == 1) {
+          EXPECT_EQ(scoreboard.events().front().pc, kCode - 4);
+          EXPECT_EQ(scoreboard.events().front().sequence, older_sequence);
+        }
+        EXPECT_EQ(scoreboard.outstanding(counter), 1u);
+        EXPECT_EQ(scoreboard.outstanding(amdgpu::WaitCounterKind::X), 0u);
+        EXPECT_EQ(scoreboard.outstanding(amdgpu::WaitCounterKind::VmVsrc), 0u);
+        if (expert_sources && !scalar) {
+          scoreboard.access({RegClass::VGPR, 0, 1}, 1, 0xf, true);
+          EXPECT_EQ(context.cu->memory_wait_diagnostic_count(), 0u);
+        }
+        // Repair the backing and release both owners' gates without changing the
+        // scheduler state. Replaying the load must not report a false overwrite.
+        context.external->faulted_read_call = 0;
+        context.cu->write_sgpr(wave.sgpr_alloc().base, kData);
+        wave.set_mode_raw(issuing_mode);
+        wave.set_debug_suspended(false);
+        wave.set_runtime_suspended(false);
+        context.cu->step();
+        EXPECT_EQ(wave.pc, next_pc);
+        EXPECT_EQ(scalar ? wave.debug_read_sgpr(kDestination)
+                         : context.cu->read_vgpr_storage(wave.vgpr_alloc().base + kDestination, 0),
+                  kValue);
         EXPECT_EQ(scoreboard.outstanding(counter), 2u);
         EXPECT_EQ(scoreboard.outstanding(amdgpu::WaitCounterKind::X), 1u);
-        context.external->faulted_read_call = context.external->read_calls + 1;
-        if (path == RetainedFaultPath::SnapshotRetry) {
-          wave.set_runtime_suspended(true);
-          context.cu->retry_paused_queue_memory(77, 1, false);
-        } else {
+        EXPECT_EQ(scoreboard.outstanding(amdgpu::WaitCounterKind::VmVsrc),
+                  expert_sources && !scalar ? 1u : 0u);
+        EXPECT_EQ(issued_x_positions, (std::vector<uint64_t>{1, 1}));
+        for (unsigned i = 0; i < 16 && !wave.is_halted(); ++i)
           context.cu->step();
-        }
+        EXPECT_TRUE(wave.is_halted());
+        EXPECT_EQ(faults, 1u);
+        EXPECT_EQ(context.cu->memory_wait_diagnostic_count(), 0u);
+        EXPECT_EQ(context.cu->xcnt_diagnostic_count(), 0u);
       }
-      ASSERT_EQ(faults, 1u);
-      EXPECT_EQ(wave.state(), amdgpu::WfState::RUNNING);
-      EXPECT_TRUE(wave.wait_counters().empty());
-      EXPECT_EQ(scoreboard.events().size(), 1u);
-      if (scoreboard.events().size() == 1) {
-        EXPECT_EQ(scoreboard.events().front().pc, kCode - 4);
-        EXPECT_EQ(scoreboard.events().front().sequence, older_sequence);
-      }
-      EXPECT_EQ(scoreboard.outstanding(counter), 1u);
-      EXPECT_EQ(scoreboard.outstanding(amdgpu::WaitCounterKind::X), 0u);
-      // Repair the backing and release both owners' gates without changing the
-      // scheduler state. Replaying the load must not report a false overwrite.
-      context.external->faulted_read_call = 0;
-      context.cu->write_sgpr(wave.sgpr_alloc().base, kData);
-      wave.set_mode_raw(issuing_mode);
-      wave.set_debug_suspended(false);
-      wave.set_runtime_suspended(false);
-      context.cu->step();
-      EXPECT_EQ(wave.pc, next_pc);
-      EXPECT_EQ(scalar ? wave.debug_read_sgpr(kDestination)
-                       : context.cu->read_vgpr_storage(wave.vgpr_alloc().base + kDestination, 0),
-                kValue);
-      EXPECT_EQ(scoreboard.outstanding(counter), 2u);
-      EXPECT_EQ(scoreboard.outstanding(amdgpu::WaitCounterKind::X), 1u);
-      EXPECT_EQ(issued_x_positions, (std::vector<uint64_t>{1, 1}));
-      for (unsigned i = 0; i < 16 && !wave.is_halted(); ++i)
-        context.cu->step();
-      EXPECT_TRUE(wave.is_halted());
-      EXPECT_EQ(faults, 1u);
-      EXPECT_EQ(context.cu->memory_wait_diagnostic_count(), 0u);
-      EXPECT_EQ(context.cu->xcnt_diagnostic_count(), 0u);
     }
   }
 }

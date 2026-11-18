@@ -1593,6 +1593,8 @@ kfd_process_device_apertures GuestKfd::guest_apertures() const {
   apertures.gpuvm_base = 0x1000000000ULL;
   apertures.gpuvm_limit = 0x3FFFFFFFFFFFULL;
   apertures.gpu_id = guest_.gpu_id;
+  if (ip.major == 12 && ip.minor == 5)
+    set_gfx1250_shader_apertures(apertures);
   return apertures;
 }
 
