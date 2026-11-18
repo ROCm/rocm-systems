@@ -4827,7 +4827,7 @@ static ncclResult_t rawTaskAppend(struct ncclComm* comm, struct ncclInfo* info) 
     t = ncclMemoryPoolAlloc<struct ncclRawTask>(&comm->memPool_ncclRawTask, &comm->memPermanent);
     t->kind = ncclTaskKindSendRecv;
     t->sendRecv.func = info->coll;
-    t->sendRecv.collAPI = info->coll;
+    t->sendRecv.collAPI = (comm->p2pFromAlltoAllv) ? ncclFuncAlltoAllv : info->coll;
     t->sendRecv.buff = info->recvbuff;
     t->sendRecv.count = info->count;
     t->sendRecv.datatype = info->datatype;
@@ -4952,7 +4952,10 @@ static void ncclRecordCollConfigLaunchCompletionEvent(struct ncclComm* comm) {
 // Converts `info` to a task and adds it to `comm->planner`. Single-rank collectives
 // execute immediately and do not need a task.
 static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
-  ncclFunc_t collAPI = info->coll;
+  // AlltoAllv lowers to Send/Recv. Keep that collective's part count, which is the halved one.
+  ncclFunc_t collAPI = (comm->p2pFromAlltoAllv && (info->coll == ncclFuncSend || info->coll == ncclFuncRecv))
+                         ? ncclFuncAlltoAllv
+                         : info->coll;
   bool hasLaunchCompletionEvent = ncclInfoHasLaunchCompletionEvent(info);
 
   if (ncclParamEnqueueRearchEnable()) {
