@@ -96,8 +96,8 @@ TEST(rocprofiler_lib, agent_abi)
     EXPECT_EQ(offsetof(rocprofiler_agent_t, num_cp_queues), 132) << msg;
     EXPECT_EQ(offsetof(rocprofiler_agent_t, max_engine_clk_ccompute), 136) << msg;
     EXPECT_EQ(offsetof(rocprofiler_agent_t, max_engine_clk_fcompute), 140) << msg;
-    EXPECT_EQ(offsetof(rocprofiler_agent_t, fw_version), 144) << msg;
-    EXPECT_EQ(offsetof(rocprofiler_agent_t, gfxip_version), 148) << msg;
+    EXPECT_EQ(offsetof(rocprofiler_agent_t, sdma_fw_version), 144) << msg;
+    EXPECT_EQ(offsetof(rocprofiler_agent_t, fw_version), 148) << msg;
     EXPECT_EQ(offsetof(rocprofiler_agent_t, capability), 152) << msg;
     EXPECT_EQ(offsetof(rocprofiler_agent_t, cu_per_engine), 156) << msg;
     EXPECT_EQ(offsetof(rocprofiler_agent_t, max_waves_per_cu), 160) << msg;
@@ -121,9 +121,10 @@ TEST(rocprofiler_lib, agent_abi)
     EXPECT_EQ(offsetof(rocprofiler_agent_t, logical_node_type_id), 288) << msg;
     EXPECT_EQ(offsetof(rocprofiler_agent_t, runtime_visibility), 292) << msg;
     EXPECT_EQ(offsetof(rocprofiler_agent_t, uuid), 296) << msg;
+    EXPECT_EQ(offsetof(rocprofiler_agent_t, gfxip_version), 312) << msg;
     // Add test for offset of new field above this. Do NOT change any existing values!
 
-    constexpr auto expected_rocp_agent_size = 312;
+    constexpr auto expected_rocp_agent_size = 320;
     // If a new field is added, increase this value by the size of the new field(s)
     EXPECT_EQ(sizeof(rocprofiler_agent_t), expected_rocp_agent_size)
         << "ABI break. If you added a new field, make sure that this is the only new check that "
@@ -326,8 +327,9 @@ TEST(rocprofiler_lib, agent)
             // HSA lib doesn't set family ID for CPU-only but we do
             EXPECT_EQ(agent->family_id, hsa_agent->family_id) << msg;
         }
-        EXPECT_EQ(agent->fw_version.uCodeCompute, hsa_agent->ucode_version) << msg;
-        EXPECT_EQ(agent->fw_version.uCodeSDMA, hsa_agent->sdma_ucode_version) << msg;
+        EXPECT_EQ(agent->fw_version.ui32.uCode, hsa_agent->ucode_version & 0x3ff) << msg;
+        EXPECT_EQ(agent->sdma_fw_version.uCodeCompute, hsa_agent->ucode_version & 0xfff) << msg;
+        EXPECT_EQ(agent->sdma_fw_version.uCodeSDMA, hsa_agent->sdma_ucode_version) << msg;
 
         if(hsa_agent->shader_engs > 0)
         {

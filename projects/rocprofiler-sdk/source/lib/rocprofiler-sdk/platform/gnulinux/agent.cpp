@@ -645,8 +645,11 @@ enumerate()
             read_property(properties, "fw_version", fw_version);
             read_property(properties, "capability", agent_info.capability.Value);
             read_property(properties, "sdma_fw_version", sdma_fw_version);
-            agent_info.fw_version.uCodeCompute = fw_version & 0xfff;
-            agent_info.fw_version.uCodeSDMA    = sdma_fw_version & 0x3ff;
+            // fw_version keeps the historical 10-bit microcode. Bits above that
+            // stay zero, which is what masking the whole word with 0x3ff did.
+            agent_info.fw_version.Value = fw_version & 0x3ff;
+            agent_info.sdma_fw_version.uCodeSDMA    = sdma_fw_version & 0x3ff;
+            agent_info.sdma_fw_version.uCodeCompute = fw_version & 0xfff;
             agent_info.gfxip_version.ui32.Major =
                 (agent_info.gfx_target_version / 10000) % 100;
             agent_info.gfxip_version.ui32.Minor = (agent_info.gfx_target_version / 100) % 100;

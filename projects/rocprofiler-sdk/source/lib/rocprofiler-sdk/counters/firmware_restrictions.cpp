@@ -164,8 +164,8 @@ check_agents_against_restrictions(const std::vector<FirmwareRestriction>& restri
             if(!affects(restriction, agent_arch)) continue;
 
             auto agent_fw_version = firmware_version(restriction.firmware_type,
-                                                      agent->fw_version.uCodeCompute,
-                                                      agent->fw_version.uCodeSDMA);
+                                                      agent->sdma_fw_version.uCodeCompute,
+                                                      agent->sdma_fw_version.uCodeSDMA);
             if(!agent_fw_version)
             {
                 ROCP_WARNING << "Unknown firmware type '" << restriction.firmware_type
@@ -319,8 +319,8 @@ agent_supports_feature(const rocprofiler_agent_t* agent, std::string_view featur
     return evaluate_feature_support(
         *restrictions,
         agent->name,
-        agent->fw_version.uCodeCompute,
-        agent->fw_version.uCodeSDMA,
+        agent->sdma_fw_version.uCodeCompute,
+        agent->sdma_fw_version.uCodeSDMA,
         feature);
 }
 

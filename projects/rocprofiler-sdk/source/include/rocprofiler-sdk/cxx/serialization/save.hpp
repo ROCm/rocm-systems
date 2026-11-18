@@ -1121,6 +1121,16 @@ save(ArchiveT& ar, HSA_ENGINE_VERSION data)
 
 template <typename ArchiveT>
 void
+save(ArchiveT& ar, HSA_ENGINE_ID data)
+{
+    ROCP_SDK_SAVE_DATA_BITFIELD("uCode", ui32.uCode);
+    ROCP_SDK_SAVE_DATA_BITFIELD("Major", ui32.Major);
+    ROCP_SDK_SAVE_DATA_BITFIELD("Minor", ui32.Minor);
+    ROCP_SDK_SAVE_DATA_BITFIELD("Stepping", ui32.Stepping);
+}
+
+template <typename ArchiveT>
+void
 save(ArchiveT& ar, HSA_GFXIP_VERSION data)
 {
     ROCP_SDK_SAVE_DATA_BITFIELD("Major", ui32.Major);
@@ -1385,8 +1395,8 @@ save(ArchiveT& ar, const rocprofiler_agent_v0_t& data)
     ROCP_SDK_SAVE_DATA_FIELD(num_cp_queues);
     ROCP_SDK_SAVE_DATA_FIELD(max_engine_clk_ccompute);
     ROCP_SDK_SAVE_DATA_FIELD(max_engine_clk_fcompute);
+    ROCP_SDK_SAVE_DATA_FIELD(sdma_fw_version);
     ROCP_SDK_SAVE_DATA_FIELD(fw_version);
-    ROCP_SDK_SAVE_DATA_FIELD(gfxip_version);
     ROCP_SDK_SAVE_DATA_FIELD(capability);
     ROCP_SDK_SAVE_DATA_FIELD(cu_per_engine);
     ROCP_SDK_SAVE_DATA_FIELD(max_waves_per_cu);
@@ -1407,6 +1417,7 @@ save(ArchiveT& ar, const rocprofiler_agent_v0_t& data)
     ROCP_SDK_SAVE_DATA_FIELD(logical_node_type_id);
     ROCP_SDK_SAVE_DATA_FIELD(runtime_visibility);
     ROCP_SDK_SAVE_DATA_FIELD(uuid);
+    ROCP_SDK_SAVE_DATA_FIELD(gfxip_version);
 
     auto generate = [&](auto name, const auto* value, uint64_t size) {
         using value_type = std::remove_const_t<std::remove_pointer_t<decltype(value)>>;

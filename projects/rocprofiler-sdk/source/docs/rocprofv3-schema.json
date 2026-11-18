@@ -189,9 +189,9 @@
                                     "type": "integer",
                                     "description": "Maximum engine clock for F compute"
                                 },
-                                "fw_version": {
+                                "sdma_fw_version": {
                                     "type": "object",
-                                    "description": "SDMA firmware version",
+                                    "description": "SDMA and Compute firmware versions",
                                     "properties": {
                                         "uCodeSDMA": {
                                             "type": "integer",
@@ -207,24 +207,29 @@
                                         "uCodeCompute"
                                     ]
                                 },
-                                "gfxip_version": {
+                                "fw_version": {
                                     "type": "object",
-                                    "description": "GFXIP version",
+                                    "description": "Legacy firmware version. uCode is the low 10 bits of the compute microcode",
                                     "properties": {
+                                        "uCode": {
+                                            "type": "integer",
+                                            "description": "Microcode version"
+                                        },
                                         "Major": {
                                             "type": "integer",
-                                            "description": "GFXIP major version"
+                                            "description": "Major version"
                                         },
                                         "Minor": {
                                             "type": "integer",
-                                            "description": "GFXIP minor version"
+                                            "description": "Minor version"
                                         },
                                         "Stepping": {
                                             "type": "integer",
-                                            "description": "GFXIP stepping"
+                                            "description": "Stepping version"
                                         }
                                     },
                                     "required": [
+                                        "uCode",
                                         "Major",
                                         "Minor",
                                         "Stepping"
@@ -356,6 +361,29 @@
                                         "CoherentHostAccess",
                                         "DebugSupportedFirmware",
                                         "Reserved"
+                                    ]
+                                },
+                                "gfxip_version": {
+                                    "type": "object",
+                                    "description": "GFXIP version",
+                                    "properties": {
+                                        "Major": {
+                                            "type": "integer",
+                                            "description": "GFXIP major version"
+                                        },
+                                        "Minor": {
+                                            "type": "integer",
+                                            "description": "GFXIP minor version"
+                                        },
+                                        "Stepping": {
+                                            "type": "integer",
+                                            "description": "GFXIP stepping"
+                                        }
+                                    },
+                                    "required": [
+                                        "Major",
+                                        "Minor",
+                                        "Stepping"
                                     ]
                                 }
                             },

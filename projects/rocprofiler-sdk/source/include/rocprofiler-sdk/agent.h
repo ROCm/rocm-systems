@@ -29,6 +29,21 @@
 
 #include <stdint.h>
 
+// Historical layout of rocprofiler_agent_v0_t::fw_version. hsakmt no longer
+// publishes this type; the agent field stays so existing offsets and readers
+// of uCode/Major/Minor/Stepping do not move.
+typedef union
+{
+    HSAuint32 Value;
+    struct
+    {
+        unsigned int uCode    : 10;  // ucode packet processor version
+        unsigned int Major    :  6;  // GFXIP Major engine version
+        unsigned int Minor    :  8;  // GFXIP Minor engine version
+        unsigned int Stepping :  8;  // GFXIP Stepping info
+    } ui32;
+} HSA_ENGINE_ID;
+
 ROCPROFILER_EXTERN_C_INIT
 
 /**
@@ -182,8 +197,8 @@ typedef struct rocprofiler_agent_v0_t
                                           ///< capabilities
     uint32_t max_engine_clk_fcompute;    ///< GPU only. Maximum engine clocks for GPU, including any
                                          ///< boost capabilities
-    HSA_ENGINE_VERSION fw_version;       ///< GPU only. SDMA and compute microcode
-    HSA_GFXIP_VERSION  gfxip_version;    ///< GPU only. GFXIP version, may be 0
+    HSA_ENGINE_VERSION sdma_fw_version;  ///< GPU only. SDMA and compute microcode
+    HSA_ENGINE_ID      fw_version;       ///< GPU only. Legacy 10-bit compute microcode
     HSA_CAPABILITY     capability;        ///< GPU only
     uint32_t           cu_per_engine;     ///< computed
     uint32_t           max_waves_per_cu;  ///< computed
@@ -210,10 +225,16 @@ typedef struct rocprofiler_agent_v0_t
     int32_t                               logical_node_type_id;
     rocprofiler_agent_runtime_visiblity_t runtime_visibility;
     rocprofiler_uuid_t                    uuid;  ///< GPU only. Universally unique identifier.
+    HSA_GFXIP_VERSION                     gfxip_version;  ///< GPU only. GFXIP version, may be 0
 
+    /// @var fw_version
+    /// @brief GPU only. Legacy identifier (rev) of the GPU uEngine or Firmware.
+    /// uCode is the low 10 bits of the compute microcode. Major, Minor, and
+    /// Stepping are zero. The 12-bit compute microcode is
+    /// sdma_fw_version.uCodeCompute, and GFXIP is gfxip_version. May be 0.
+    ///
     /// @var gfxip_version
-    /// @brief GPU only. GFXIP major, minor, and stepping. Compute microcode is
-    /// fw_version.uCodeCompute. May be 0.
+    /// @brief GPU only. GFXIP major, minor, and stepping. May be 0.
     ///
     /// @var hive_id
     /// @brief XGMI Hive the GPU node belongs to in the system. It is an opaque and
