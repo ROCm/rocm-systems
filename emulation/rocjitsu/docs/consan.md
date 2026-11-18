@@ -216,6 +216,10 @@ instructions can overwrite it.
 Barrier qualification recognizes an original LDS drain followed by a
 full-workgroup barrier: `s_barrier` on gfx942/gfx950/gfx1100, or a matching
 signal/wait pair on gfx1201/gfx1250. It requires at least two waves per workgroup.
+Legacy barriers require an original `s_waitcnt` with a zero LGKM threshold
+immediately before `s_barrier`. Preparation rejects sequences with an intervening
+instruction, including a global store or `s_waitcnt_vscnt`, even if an earlier
+wait drained LDS.
 Split-barrier drains may use `s_wait_dscnt` or a combined load/DS or store/DS
 wait, provided the DS threshold is zero. The additional load/store threshold
 may be nonzero.
