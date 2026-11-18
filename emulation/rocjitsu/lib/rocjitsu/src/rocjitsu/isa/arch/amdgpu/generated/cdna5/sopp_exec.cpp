@@ -186,45 +186,47 @@ void SIcacheInvSopp::execute_impl(amdgpu::Wavefront &wf) {
 void SSetprioIncWgSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 void SWaitLoadcntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_loadcnt", cnt);
+  const uint16_t imm = static_cast<uint16_t>(simm16.encoding_value_);
+  wf.wait_for({.vmcnt = static_cast<uint8_t>(imm & amdgpu::WaitCounters::VMCNT_MAX)});
 }
 
 void SWaitStorecntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_storecnt", cnt);
+  const uint16_t imm = static_cast<uint16_t>(simm16.encoding_value_);
+  wf.wait_for({.vscnt = static_cast<uint8_t>(imm & amdgpu::WaitCounters::VSCNT_MAX)});
 }
 
 void SWaitXcntSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 void SWaitDscntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_dscnt", cnt);
+  const uint16_t imm = static_cast<uint16_t>(simm16.encoding_value_);
+  wf.wait_for({.dscnt = static_cast<uint8_t>(imm & amdgpu::WaitCounters::DSCNT_MAX)});
 }
 
 void SWaitKmcntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_kmcnt", cnt);
+  const uint16_t imm = static_cast<uint16_t>(simm16.encoding_value_);
+  wf.wait_for({.kmcnt = static_cast<uint8_t>(imm & amdgpu::WaitCounters::KMCNT_MAX)});
 }
 
 void SWaitLoadcntDscntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_loadcnt_dscnt", cnt);
+  const uint16_t imm = static_cast<uint16_t>(simm16.encoding_value_);
+  wf.wait_for({.vmcnt = static_cast<uint8_t>((imm >> 8) & amdgpu::WaitCounters::VMCNT_MAX),
+               .dscnt = static_cast<uint8_t>(imm & amdgpu::WaitCounters::DSCNT_MAX)});
 }
 
 void SWaitStorecntDscntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_storecnt_dscnt", cnt);
+  const uint16_t imm = static_cast<uint16_t>(simm16.encoding_value_);
+  wf.wait_for({.vscnt = static_cast<uint8_t>((imm >> 8) & amdgpu::WaitCounters::VSCNT_MAX),
+               .dscnt = static_cast<uint8_t>(imm & amdgpu::WaitCounters::DSCNT_MAX)});
 }
 
 void SWaitAsynccntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_asynccnt", cnt);
+  const uint16_t imm = static_cast<uint16_t>(simm16.encoding_value_);
+  wf.wait_for({.asynccnt = static_cast<uint8_t>(imm & amdgpu::WaitCounters::ASYNCCNT_MAX)});
 }
 
 void SWaitTensorcntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_tensorcnt", cnt);
+  const uint16_t imm = static_cast<uint16_t>(simm16.encoding_value_);
+  wf.wait_for({.tensorcnt = static_cast<uint8_t>(imm & amdgpu::WaitCounters::TENSORCNT_MAX)});
 }
 
 } // namespace cdna5

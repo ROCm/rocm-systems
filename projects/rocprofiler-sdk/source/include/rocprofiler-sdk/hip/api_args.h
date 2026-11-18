@@ -3743,6 +3743,14 @@ typedef union rocprofiler_hip_api_args_t
         unsigned int*  graphId;
     } hipGraphExecGetId;
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 43
+    struct
+    {
+        int*                pi;
+        hipExecAffinityType type;
+        hipDevice_t         dev;
+    } hipDeviceGetExecAffinitySupport;
+#endif
 } rocprofiler_hip_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI

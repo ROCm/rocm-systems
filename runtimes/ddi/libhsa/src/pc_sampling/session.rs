@@ -485,16 +485,12 @@ impl Resources {
             }
         }
         if self.trap_may_be_installed {
-            let address = match self
+            if let Err(status) = self
                 .restore
                 .as_ref()
                 .ok_or(ERROR)
-                .and_then(|restore| restore.address(&self.device))
+                .and_then(|restore| restore.restore(&self.device))
             {
-                Ok(address) => address,
-                Err(status) => return status,
-            };
-            if let Err(status) = self.set_handler(address, 0) {
                 return status;
             }
             self.trap_may_be_installed = false;

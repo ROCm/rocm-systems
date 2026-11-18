@@ -159,10 +159,25 @@ published into the runtime registry afterward.
 The session owns a registry of driver instances. A passive endpoint names its
 driver instance; activation retains that exact instance with the resulting
 device state. Resource owners retain their concrete driver's cleanup state.
-Session shutdown first checks that no device or resource still borrows any
-driver instance. If one driver shutdown fails, the registry retains unfinished
-instances for retry and never replays a successful shutdown. Linux KFD
-memory and GPU operations accept only activated KFD state.
+The session owns one admission controller shared by its drivers, separately
+from the registry to avoid an ownership cycle. One atomic transition
+linearizes `Open` to `Retiring` against new operations and notification
+leases. An operation retains its admission through native effects and owner
+publication; nested calls on the admitting thread remain part of that
+transaction. Resource leases cover native notification owners that do not
+retain a driver. All process checks precede admission state access.
+
+`begin_retirement` stops new acquisitions and submissions through retained
+core handles. It does not revoke published raw producer addresses or prove
+GPU completion. Freeing, unmapping, stopping, destroying, and required
+completion queries remain available while retiring. Frontends still stop
+their external producers and callback workers before releasing native backing.
+`try_close` checks admitted work, notification leases, session clones, and
+driver owners. An open session stays open on `Busy`; native cleanup starts
+only after the ownership and admission preflight succeeds. If one driver
+shutdown fails, the registry retains unfinished instances for retry and never
+replays a successful shutdown. Only discharged session obligations allow
+`Closed`. Linux KFD memory and GPU operations accept only activated KFD state.
 An adapter that detaches its public runtime before native shutdown can move its
 session into `SessionRetirement`. Failed destruction keeps that owner for a
 later attempt; dropping an unfinished retirement retains its driver state
@@ -175,8 +190,8 @@ context, one Linux KFD connection, and the exact DRM VM bindings acquired for
 each GPU. A process owner allocated with the Rust system allocator retains
 these driver handles through process exit. A session joins the process owner before any KFD call
 that might enable runtime state. The last joined session disables KFD runtime
-enablement under the owner's lock. Failure leaves the session joined so its
-destruction can be retried. The shared image is marked `NODELETE`, including
+enablement as a serialized transaction. Failure leaves a pending disable that
+must finish before another session joins. The shared image is marked `NODELETE`, including
 after both public ABIs shut down, because a later activation must reuse the
 same DRM file object.
 
