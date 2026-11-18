@@ -191,3 +191,12 @@ in modes 2 and 3.
 The old true16-dot emitter loses its last production users and is deleted.
 Its semantic classes now route directly to the shared library binding, along
 with the migrated HostF32 packed and accumulating forms on CDNA1/2 and RDNA2.
+
+## gfx1150 scalar floating point
+
+All 58 scalar FP forms used by Rocjitsu support Loose and Compatibility.
+Compatibility preserves the inherited software model, including guest rounding,
+IEEE-dependent NaNs and FP status. The 30 gfx1150-specific arithmetic, selection,
+rounding and conversion entry points do not advertise new empirical qualification;
+comparisons share the existing raw-bit predicates. Scalar operations have one
+SGPR value per operand, so there is no lane-vector SIMD backend to select.
