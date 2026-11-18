@@ -7,7 +7,7 @@ import sys
 import tempfile
 import unittest.mock
 # The nosec markers below are safe only while these calls run fixed commands
-# (./rocm-debug-agent-test, readelf) without a shell or outside input.
+# (./rocm-debug-agent-test, readelf, ldd) without a shell or outside input.
 from subprocess import (
     CalledProcessError,
     PIPE,
@@ -26,6 +26,11 @@ DEFAULT_TIMEOUT = 60
 
 AGENT_LIBRARY = "librocm-debug-agent.so.2"
 
+# Line of the LDS (local memory) dump holding lds_check, which the test kernels fill
+# with 0x1111111122222222. Device ASAN moves LDS variables to global memory, so
+# the pattern is dropped for those builds, see without_lds_dump_pattern().
+LDS_DUMP_PATTERN = r"0x0000: 22222222 11111111"
+
 # Output of the assert trap (test binary case 1), however the agent is loaded.
 ASSERT_TRAP_PATTERNS = [
     r"HSA_STATUS_ERROR_EXCEPTION: An HSAIL operation resulted in a hardware exception\.",
@@ -33,7 +38,7 @@ ASSERT_TRAP_PATTERNS = [
     r"exec: (00000000)?00000001",
     r"s0:",
     r"v0:",
-    r"0x0000: 22222222 11111111",
+    LDS_DUMP_PATTERN,
     r"Disassembly for function vector_add_assert_trap\(int\*, int\*, int\*\)",
 ]
 
@@ -86,7 +91,7 @@ def run_and_communicate(
             else {}
         ),
     ):
-        p = Popen(cmd, stdout=PIPE, stderr=PIPE)  # nosec B603
+        p = Popen(cmd, stdout=PIPE, stderr=PIPE, env=test_program_env())  # nosec B603
 
         def handle_failure(reason):
             logger().info("Test %s FAIL: %s", test_name, reason)
@@ -139,6 +144,144 @@ def filter_warnings(err_str):
     )
 
 
+def find_hip_library():
+    """Return the libamdhip64 that the test program loads, or None.
+
+    The sanitizer setup of a ROCm stack is read from that library, as the ROCgdb
+    testsuite does (ROCm/ROCgdb PR 474). The test program itself is not
+    expected to be built with a sanitizer."""
+    if not shutil.which("ldd"):
+        return None
+    result = run(  # nosec B603 B607
+        ["ldd", "./rocm-debug-agent-test"],
+        stdout=PIPE,
+        stderr=PIPE,
+        universal_newlines=True,
+        check=False,
+    )
+    match = re.search(r"libamdhip64\.so\S*\s+=>\s+(/\S+)", result.stdout)
+    return match.group(1) if match else None
+
+
+def stack_sanitizer_runtimes(hip_library):
+    """Return the sanitizer runtimes that libamdhip64 depends on, or [] if the
+    ROCm stack is not built with a sanitizer.
+
+    A program that loads sanitizer instrumented libraries needs the sanitizer
+    runtime first in its initial library list. The test program is not built
+    with a sanitizer, so the runtime has to be preloaded when it is started."""
+    result = run(  # nosec B603 B607
+        ["ldd", hip_library],
+        stdout=PIPE,
+        stderr=PIPE,
+        universal_newlines=True,
+        check=False,
+    )
+    runtimes = []
+    for match in re.finditer(
+        r"(libclang_rt\.(?:asan|hwasan|lsan|msan|tsan|ubsan)\S*)\s+=>\s+(/\S+|not found)",
+        result.stdout,
+    ):
+        lib, path = match.groups()
+        if path == "not found":
+            print(
+                f"WARNING: {lib} is needed by {hip_library} but was not found, "
+                "is LD_LIBRARY_PATH set to include its directory?",
+                file=sys.stderr,
+            )
+        else:
+            runtimes.append(path)
+    return runtimes
+
+
+def stack_has_device_asan(hip_library):
+    """Return True if libamdhip64 was built with device side ASAN.
+
+    That runtime refers to __asan_report_nonself_error and
+    __asan_report_nonself_leak. One with host side ASAN only does not, which is
+    what separates a full ASAN stack from a host-only one. Assume device ASAN if
+    readelf is not available."""
+    if not shutil.which("readelf"):
+        return True
+    result = run(  # nosec B603 B607
+        ["readelf", "-W", "--dyn-syms", hip_library],
+        stdout=PIPE,
+        stderr=PIPE,
+        universal_newlines=True,
+        check=False,
+    )
+    return any(
+        "UND" in line and "__asan_report_nonself_" in line
+        for line in result.stdout.splitlines()
+    )
+
+
+def configure_sanitizer_environment():
+    """Set up the environment for a ROCm stack built with sanitizers.
+
+    Fills sanitizer_runtimes, which test_program_env() preloads, and picks
+    HSA_XNACK: 1 for full (device) ASAN and 0 for host-only ASAN. Other stacks
+    are left alone, and so is a value the caller already set for HSA_XNACK, with
+    a warning when the stack uses ASAN.
+
+    Returns True when the stack is a full (device) ASAN build."""
+    global sanitizer_runtimes
+    hip_library = find_hip_library()
+    if not hip_library:
+        return False
+    sanitizer_runtimes = stack_sanitizer_runtimes(hip_library)
+    if not any(
+        "libclang_rt.asan" in os.path.basename(lib) for lib in sanitizer_runtimes
+    ):
+        return False
+    device_asan = stack_has_device_asan(hip_library)
+    expected = "1" if device_asan else "0"
+    current = os.environ.get("HSA_XNACK")
+    if current is None:
+        os.environ["HSA_XNACK"] = expected
+    else:
+        print(
+            f"WARNING: HSA_XNACK={current} is already set, keeping it "
+            f"(this ASAN stack would use HSA_XNACK={expected}).",
+            file=sys.stderr,
+        )
+    return device_asan
+
+
+def test_program_env():
+    """Return the environment for the test program: the current one with the
+    sanitizer runtimes of the ROCm stack first in LD_PRELOAD. Only the test
+    program gets them, not the helper tools the tests run."""
+    env = dict(os.environ)
+    preload = list(sanitizer_runtimes)
+    if env.get("LD_PRELOAD"):
+        preload.append(env["LD_PRELOAD"])
+    if preload:
+        env["LD_PRELOAD"] = ":".join(preload)
+    return env
+
+
+def without_lds_dump_pattern(test_def):
+    """Return test_def without the LDS dump pattern, for device ASAN builds.
+
+    Device ASAN may re-shuffle LDS storage: static LDS variables move to global
+    memory and LDS keeps only a small pointer block, so the LDS contents these
+    tests look for are not in the wave dump. The other patterns still apply."""
+    patterns = test_def.get("patterns")
+    if not patterns or LDS_DUMP_PATTERN not in patterns:
+        return test_def
+    logger().info(
+        "%s: not checking the LDS dump, device ASAN may re-shuffle LDS storage",
+        test_def["name"],
+    )
+    return dict(test_def, patterns=[p for p in patterns if p != LDS_DUMP_PATTERN])
+
+
+# Set during setup below: the sanitizer runtimes of the ROCm stack, and whether it is
+# a full (host and device) ASAN build.
+sanitizer_runtimes = []
+device_asan = False
+
 # set up
 if len(sys.argv) != 2:
     raise Exception(
@@ -153,6 +296,7 @@ else:
         os.environ["LD_LIBRARY_PATH"] += ":" + agent_library_directory
     os.environ["HSA_TOOLS_LIB"] = AGENT_LIBRARY
     os.chdir(test_binary_directory)
+    device_asan = configure_sanitizer_environment()
 
     # Set up file-only logging for diagnostic output (stdout/stderr dumps).
     # The script may be installed under a read-only ROCm prefix, so prefer the
@@ -463,7 +607,12 @@ def test_sigquit(*, args, patterns=(), **_):
 
     LOOP_TIMEOUT = DEFAULT_TIMEOUT  # seconds
 
-    p = Popen(["./rocm-debug-agent-test", args], stdout=PIPE, stderr=PIPE)  # nosec B603
+    p = Popen(  # nosec B603
+        ["./rocm-debug-agent-test", args],
+        stdout=PIPE,
+        stderr=PIPE,
+        env=test_program_env(),
+    )
 
     kernel_started = False
     wave_seen = False
@@ -710,9 +859,13 @@ def test_sigquit_resumes(*, name, args, patterns=(), **_):
     expect the program to finish: the agent resumes the waves it stopped."""
     check_list = [re.compile(s) for s in patterns]
     _log = logger()
-    p = Popen(
-        ["./rocm-debug-agent-test", args], stdin=PIPE, stdout=PIPE, stderr=PIPE
-    )  # nosec B603
+    p = Popen(  # nosec B603
+        ["./rocm-debug-agent-test", args],
+        stdin=PIPE,
+        stdout=PIPE,
+        stderr=PIPE,
+        env=test_program_env(),
+    )
 
     lock = threading.Lock()
     collected = {"out": b"", "err": b""}
@@ -823,7 +976,7 @@ TEST_DEFINITIONS = [
             r"exec: (ffffffff)?ffffffff",
             r"s0:",
             r"v0:",
-            r"0x0000: 22222222 11111111",
+            LDS_DUMP_PATTERN,
             r"Disassembly for function vector_add_memory_fault\(int\*, int\*, int\*\)",
         ],
     },
@@ -853,7 +1006,7 @@ TEST_DEFINITIONS = [
         'patterns': [
             r"s0:",
             r"v0:",
-            r"0x0000: 22222222 11111111",
+            LDS_DUMP_PATTERN,
             r"Disassembly for function vector_add_assert_trap\(int\*, int\*, int\*\)",
         ],
     },
@@ -865,7 +1018,7 @@ TEST_DEFINITIONS = [
         'patterns': [
             r"s0:",
             r"v0:",
-            r"0x0000: 22222222 11111111",
+            LDS_DUMP_PATTERN,
             r"Disassembly for function vector_add_assert_trap\(int\*, int\*, int\*\)",
         ],
     },
@@ -1034,6 +1187,8 @@ for deferred_loading in (None, "1", "0"):
             label = f"{name}: {desc} [{mode_label}]"
 
             log_test_header(label)
+            if device_asan:
+                test_def = without_lds_dump_pattern(test_def)
             result = run_test(test_def)
 
             func = test_def.get('function')
