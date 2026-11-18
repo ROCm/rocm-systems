@@ -237,7 +237,8 @@ public:
   /// @details Acquires every domain and cache lock before publishing dirty
   /// state. All memory-side lines are written before any L2 dirty runs, even
   /// when the caches belong to different domains. This legacy overload rejects
-  /// dirty nonzero-VMID lines before any backing write.
+  /// dirty nonzero-VMID lines with CacheMaintenanceUnavailable before any
+  /// backing write, allowing the prepared overload to retry a concurrent writer.
   /// Distinct domains claiming the same VMID-zero backing line also fail
   /// before writeback because their dirty-writer order is unknown.
   /// Domains must be non-null and distinct. Release the returned leases in

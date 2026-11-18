@@ -316,8 +316,8 @@ std::vector<DeviceCacheMaintenanceLease> DeviceCacheCoherence::acquire_cache_mai
       const auto collect_line = [&dirty_lines](const DomainLocks &entry, GpuMemory *memory,
                                                const simdojo::CacheTag &tag, uint64_t line_addr) {
         if (tag.vmid != 0)
-          throw util::Exception(
-              std::string_view("group maintenance requires prepared nonzero-VMID writeback"));
+          throw CacheMaintenanceUnavailable(
+              "group maintenance requires prepared nonzero-VMID writeback");
         // A resident dirty line is one bounded candidate writer. Keep its
         // backing identity rather than comparing virtual addresses alone.
         dirty_lines.push_back({memory, line_addr, entry.owner.get()});

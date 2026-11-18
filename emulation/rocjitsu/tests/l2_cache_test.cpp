@@ -1849,7 +1849,7 @@ TEST(DeviceCacheCoherenceTest, GroupMaintenanceDistinguishesSeparateBackingMemor
   EXPECT_EQ(second_memory.read8(kAddress), 0x66u);
 }
 
-TEST(DeviceCacheCoherenceTest, GroupPreflightRejectsDirtyNonzeroVmidBeforeAnyWrite) {
+TEST(DeviceCacheCoherenceTest, GroupPreflightRetriesDirtyNonzeroVmidBeforeAnyWrite) {
   using rocjitsu::amdgpu::L2CacheTestAccess;
   using rocjitsu::amdgpu::MemorySideCacheTestAccess;
 
@@ -1885,7 +1885,7 @@ TEST(DeviceCacheCoherenceTest, GroupPreflightRejectsDirtyNonzeroVmidBeforeAnyWri
             rocjitsu::amdgpu::DeviceCacheCoherence::acquire_cache_maintenance_group(
                 domains, rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate);
       },
-      util::Exception);
+      rocjitsu::amdgpu::CacheMaintenanceUnavailable);
   EXPECT_EQ(memory.read8(kFirstAddress), 0u);
   EXPECT_EQ(first_domain->current_epoch(), first_epoch);
   EXPECT_EQ(second_domain->current_epoch(), second_epoch);

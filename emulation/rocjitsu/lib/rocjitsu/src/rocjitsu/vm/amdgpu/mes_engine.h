@@ -264,7 +264,7 @@ private:
                                                      const GpuVmAccess &gart_access);
   [[nodiscard]] VmAccessOutcome publish_mes_frame(PendingMesFrame &pending);
   [[nodiscard]] VmAccessOutcome remove_queue(uint64_t doorbell_offset);
-  [[nodiscard]] VmAccessOutcome commit_queue(Queue queue, bool created_address_space);
+  [[nodiscard]] VmAccessOutcome commit_queue(Queue queue);
   void release_unused_address_space(uint32_t process_id);
   void reap_orphaned_address_spaces();
   void rollback_created_address_space(const Queue &queue, bool created_address_space);

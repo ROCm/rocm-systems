@@ -3014,10 +3014,12 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
   if (execution_result.failed()) [[unlikely]] {
     // GWS rejection already cancels the dispatch and publishes its failure.
     // Its retained error belongs to the halted slot, whose identity was reset.
-    if (active->is_halted())
+    if (active->is_halted()) {
+      execution_failure_detail_.clear();
       return_decoded.discard();
-    else
+    } else {
       fail_current_instruction();
+    }
     return IssueOutcome::Issued;
   }
 

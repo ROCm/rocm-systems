@@ -84,7 +84,8 @@ struct SdmaPacketRegisterReadResult {
 };
 
 /// @brief Narrow environment hooks for operations outside the GPU virtual address space.
-/// @details Callbacks must not throw; report expected failures through their returned outcomes.
+/// @details Report expected failures through returned outcomes. Only cache maintenance may
+/// throw CacheMaintenanceUnavailable to request a retry before any protected effect.
 class SdmaPacketCallbacks {
 public:
   /// Non-Complete must mean that no externally visible callback effect occurred.
@@ -98,8 +99,9 @@ public:
   std::function<VmAccessOutcome(uint32_t data)> deliver_interrupt;
   /// The returned lease spans every direct memory effect. It is released when
   /// execution yields and reacquired before the effect resumes.
-  /// Failure is terminal and stops before the protected effect. A packet with
-  /// an already committed prefix retires; otherwise retirement is held.
+  /// CacheMaintenanceUnavailable preserves the continuation for retry without
+  /// a protected effect. A returned failure is terminal: a packet with an already
+  /// committed prefix retires; otherwise retirement is held before the effect.
   /// Either terminal disposition clears the continuation.
   std::function<util::FailureOr<SdmaCacheLease>(SdmaCacheOperation operation)>
       acquire_cache_maintenance;
