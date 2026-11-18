@@ -90,8 +90,11 @@ use crate::{Error, ErrorKind};
 
 /// Inert constructors for the driver backends compiled into this target.
 /// Each session constructs fresh instances from this immutable catalog.
-pub(crate) type DriverFactory =
-    fn(DriverContextLifetime, crate::os::ProcessIdentity) -> Result<DriverInstance, Error>;
+pub(crate) type DriverFactory = fn(
+    DriverContextLifetime,
+    crate::os::ProcessIdentity,
+    crate::session::SessionAdmission,
+) -> Result<DriverInstance, Error>;
 
 pub(crate) const BUILTIN_DRIVER_FACTORIES: &[DriverFactory] = &[
     #[cfg(all(
@@ -108,9 +111,10 @@ pub(crate) const BUILTIN_DRIVER_FACTORIES: &[DriverFactory] = &[
 fn new_linux_kfd(
     lifetime: DriverContextLifetime,
     process: crate::os::ProcessIdentity,
+    admission: crate::session::SessionAdmission,
 ) -> Result<DriverInstance, Error> {
     Ok(DriverInstance::LinuxKfd(Shared::new(
-        KfdDriver::with_context_lifetime(lifetime, process),
+        KfdDriver::with_admission(lifetime, process, admission),
     )?))
 }
 
@@ -155,6 +159,8 @@ pub(crate) trait CachedInfo {
 pub(crate) trait Driver: Send + Sync {
     /// State retained for one endpoint activated through this driver instance.
     type DeviceState: Clone + Send + Sync;
+    /// Session admission shared by every native owner derived from this driver.
+    fn admission(&self) -> &crate::session::SessionAdmission;
     /// Returns the identity stamped into this driver's passive endpoints.
     fn driver_instance(&self) -> DriverInstanceId;
     /// Returns the context policy fixed when this driver was constructed.
