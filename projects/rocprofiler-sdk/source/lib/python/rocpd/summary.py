@@ -264,23 +264,27 @@ def generate_summary_query(
         # If by_rank_env_var is found, include it in the select and join clauses; otherwise, only include Process_Id and Hostname
         if by_rank_env_var is not None:
             rank_column_name = by_rank_env_var
-            rank_alias = "Rank"
-            additional_select_columns = "json_extract(PI.environment, '$.{rank_column_name}') AS {rank_alias}, AD.pid AS Process_Id, P.hostname AS Hostname,".format(
-                rank_column_name=rank_column_name, rank_alias=rank_alias
+            additional_select_columns = "json_extract(PI.environment, '$.{rank_column_name}') AS Rank, AD.pid AS Process_Id, N.hostname AS Hostname,".format(
+                rank_column_name=rank_column_name
             )
             total_duration_join = (
                 "JOIN total_duration TD ON AD.guid = TD.guid "
-                "JOIN processes P ON AD.pid = P.pid AND AD.guid = P.guid "
+                "JOIN rocpd_info_node N ON AD.nid = N.id AND AD.guid = N.guid "
                 "JOIN rocpd_info_process PI ON AD.pid = PI.pid AND AD.guid = PI.guid"
             )
+            # Rank is text from json_extract, so cast it. Duration stays descending
+            # so the busiest name in a rank still comes first.
+            order_by = (
+                "CAST(json_extract(PI.environment, '$.{rank_column_name}') AS INTEGER), "
+                "AD.pid, AD.total_duration DESC"
+            ).format(rank_column_name=rank_column_name)
         else:
-            rank_column_name = ""
-            rank_alias = ""
-            additional_select_columns = "AD.pid AS Process_Id, P.hostname AS Hostname,"
+            additional_select_columns = "AD.pid AS Process_Id, N.hostname AS Hostname,"
             total_duration_join = (
                 "JOIN total_duration TD ON AD.guid = TD.guid "
-                "JOIN processes P ON AD.pid = P.pid AND AD.guid = P.guid"
+                "JOIN rocpd_info_node N ON AD.nid = N.id AND AD.guid = N.guid"
             )
+            order_by = "AD.pid, AD.total_duration DESC"
     else:
         view_suffix = "_summary"
         group_by_columns = name_column
@@ -290,6 +294,8 @@ def generate_summary_query(
         additional_aggregated_columns = ""
         join_condition = "T.{name_column} = A.name".format(name_column=name_column)
         total_duration_join = "CROSS JOIN total_duration TD"
+        # aggregated_data has no pid column in the combined summary.
+        order_by = "AD.total_duration DESC"
 
     full_view_name = f"{view_name}{view_suffix}"
 
@@ -351,7 +357,7 @@ def generate_summary_query(
             aggregated_data AD
             {total_duration_join}
         ORDER BY
-            {"AD.pid," if by_rank else ""} AD.total_duration DESC
+            {order_by}
     """
 
     return (full_view_name, summary_query)
@@ -402,20 +408,22 @@ def generate_domain_query(
         additional_group_columns = "guid, Process_Id, Hostname,"
         grouped_domains_group_by = "domain, guid, Process_Id, Hostname"
         total_duration_group_by = "GROUP BY guid, Process_Id"
-        order_by = "ORDER BY GD.Process_Id, GD.guid"
+        order_by = 'ORDER BY GD.Process_Id, GD.guid, GD."DURATION (nsec)" DESC'
         if by_rank_env_var is not None:
             rank_column_name = by_rank_env_var
-            rank_alias = "Rank"
-            additional_select_columns = "json_extract(PI.environment, '$.{rank_column_name}') AS {rank_alias}, GD.Process_Id, GD.Hostname,".format(
-                rank_column_name=rank_column_name, rank_alias=rank_alias
+            additional_select_columns = "json_extract(PI.environment, '$.{rank_column_name}') AS Rank, GD.Process_Id, GD.Hostname,".format(
+                rank_column_name=rank_column_name
             )
             join_condition = (
                 "JOIN total_duration TD ON GD.guid = TD.guid AND GD.Process_Id = TD.Process_Id "
                 "JOIN rocpd_info_process PI ON GD.Process_Id = PI.pid AND GD.guid = PI.guid"
             )
+            # Rank is text from json_extract, so cast it to sort 2 before 10.
+            order_by = (
+                "ORDER BY CAST(json_extract(PI.environment, '$.{rank_column_name}') AS INTEGER), "
+                'GD.Process_Id, GD.guid, GD."DURATION (nsec)" DESC'
+            ).format(rank_column_name=rank_column_name)
         else:
-            rank_column_name = ""
-            rank_alias = ""
             additional_select_columns = "GD.Process_Id, GD.Hostname,"
             join_condition = "JOIN total_duration TD ON GD.guid = TD.guid AND GD.Process_Id = TD.Process_Id"
     else:
@@ -660,7 +668,7 @@ def create_summary_region_queries(
     category_map = {
         cat: [c[0] for c in categories if c[0] == cat or c[0].startswith(cat + "_")]
         for cat in region_categories
-        if "MARKER" not in cat.upper()
+        if "marker" not in cat
     }
 
     queries = {}

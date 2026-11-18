@@ -423,6 +423,15 @@ def add_args(parser):
         type=str,
         required=False,
     )
+    package_options.add_argument(
+        "--output-path",
+        dest="output_path",
+        action=output_config._DeprecatedOutputPath,
+        help=argparse.SUPPRESS,
+        default=argparse.SUPPRESS,  # keeps the --output-directory / ROCPD_OUTPUT_PATH default intact
+        type=str,
+        required=False,
+    )
 
     def process_args(input, args):
         valid_args = [
