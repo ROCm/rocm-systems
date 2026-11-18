@@ -17,6 +17,13 @@ pub struct ProcessTrap {
 }
 
 impl ProcessTrap {
+    /// Wraps a successfully published trap and its retained native backing.
+    pub(crate) fn from_native(
+        inner: crate::memory::storage::Shared<crate::driver::KfdProcessTrap>,
+    ) -> Self {
+        Self { inner }
+    }
+
     /// Returns the saved address only for the same live native GPU VM.
     ///
     /// # Errors
@@ -24,6 +31,34 @@ impl ProcessTrap {
     pub fn address(&self, gpu: &GpuDevice<'_>) -> Result<u64, Error> {
         match gpu.driver {
             GpuDriverRef::LinuxKfd { state, .. } => self.inner.address(state),
+            #[cfg(test)]
+            GpuDriverRef::Test { .. } => Err(Error::Operation {
+                kind: crate::ErrorKind::Unsupported,
+                detail: "process trap requires a Linux KFD GPU",
+            }),
+        }
+    }
+
+    /// Restores this saved normal trap in its exact live GPU VM.
+    ///
+    /// This cleanup operation remains available after session retirement
+    /// begins. It can only bind the already published code retained by this
+    /// token, and does not acquire new trap backing or admit new device work.
+    ///
+    /// # Errors
+    /// Rejects another VM/provider, inherited state, unavailable backing or
+    /// device loss, and reports native binding failures without releasing code.
+    ///
+    /// # Safety
+    /// The caller must coordinate trap-binding changes with other clients of
+    /// the shared process context. It must retain the displaced handler's code
+    /// and arguments until every wave already using them retires, including
+    /// after an ambiguous native result. Restoration alone does not retire
+    /// those waves.
+    #[allow(unsafe_code)]
+    pub unsafe fn restore(&self, gpu: &GpuDevice<'_>) -> Result<(), Error> {
+        match gpu.driver {
+            GpuDriverRef::LinuxKfd { state, .. } => self.inner.restore(state),
             #[cfg(test)]
             GpuDriverRef::Test { .. } => Err(Error::Operation {
                 kind: crate::ErrorKind::Unsupported,
@@ -54,6 +89,7 @@ impl GpuDevice<'_> {
         code: &[u8],
         cancel: &std::sync::atomic::AtomicBool,
     ) -> Result<ProcessTrap, Error> {
+        let _operation = self.driver.admit()?;
         match self.driver {
             GpuDriverRef::LinuxKfd { driver, state } => {
                 let inner = driver.install_process_trap(
@@ -62,7 +98,7 @@ impl GpuDevice<'_> {
                     code,
                     |address, length| self.invalidate_code_cache(address, length, cancel),
                 )?;
-                Ok(ProcessTrap { inner })
+                Ok(ProcessTrap::from_native(inner))
             }
             #[cfg(test)]
             GpuDriverRef::Test { .. } => Err(Error::Operation {
@@ -83,6 +119,7 @@ impl GpuDevice<'_> {
         address: usize,
         setup_ttmp: bool,
     ) -> Result<bool, Error> {
+        let _operation = self.driver.admit()?;
         match self.driver {
             GpuDriverRef::LinuxKfd { state, .. } => {
                 state.debugger_registration_matches(address, setup_ttmp)
@@ -127,6 +164,7 @@ pub unsafe fn adopt(
     request: PcSamplingRequest,
     trace_id: KfdPcSamplingTraceId,
 ) -> Result<PcSampling, Error> {
+    let _operation = gpu.driver.admit()?;
     match gpu.driver {
         GpuDriverRef::LinuxKfd { driver, state } => {
             let native = driver.adopt_pc_sampling(state, request, trace_id.0)?;

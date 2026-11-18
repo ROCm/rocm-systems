@@ -8478,25 +8478,47 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'wait_counter':
-            # RDNA4 split-wait instructions: the immediate operand is
-            # the counter threshold directly (no bit-packing).
-            L.append(
-                f'  uint16_t cnt = static_cast<uint16_t>({src_ops[0]}.encoding_value_);'
-            )
-            if op == 'waitcnt_vscnt':
-                L.append('  wf.set_wait_target_vscnt(static_cast<uint8_t>(cnt));')
-            elif op == 'waitcnt_vmcnt':
-                L.append('  wf.set_wait_target_loadcnt(static_cast<uint8_t>(cnt));')
-            elif op == 'waitcnt_expcnt':
-                L.append('  wf.set_wait_counter("wait_expcnt", cnt);')
-            elif op == 'waitcnt_lgkmcnt':
-                L.append('  const auto current_wait = wf.wait_target();')
-                L.append(
-                    '  wf.set_wait_target(current_wait.vmcnt, static_cast<uint8_t>(cnt), current_wait.expcnt);'
+            if op.startswith('waitcnt_'):
+                field = op.removeprefix('waitcnt_')
+                # RDNA1 and RDNA2 ISA, SOPK S_WAITCNT_*: the comparison is
+                # counter-width (three or six bits), without clamping on carry.
+                # On GFX11 the encoding requires the NULL scalar operand.
+                mask = f'amdgpu::WaitCounters::{field.upper()}_MAX'
+                scalar_part = (
+                    'amdgpu::RegisterAccess(wf).read_scalar(sdst) + '
+                    if self.isa_spec.profile.waitcnt_family == 'gfx10'
+                    else ''
                 )
-            else:
-                L.append(f'  wf.set_wait_counter("{op}", cnt);')
-            return '\n'.join(L)
+                return (
+                    '  const uint32_t threshold = '
+                    + scalar_part
+                    + 'static_cast<uint32_t>(simm16.encoding_value_);\n'
+                    f'  wf.wait_for({{.{field} = static_cast<uint8_t>(threshold & {mask})}});'
+                )
+            # GFX12 encodes the sole or final threshold in the low byte.
+            # Combined waits encode the load/store threshold in the high byte.
+            fields = {
+                'wait_loadcnt': (('vmcnt', 0),),
+                'wait_storecnt': (('vscnt', 0),),
+                'wait_expcnt': (('expcnt', 0),),
+                'wait_dscnt': (('dscnt', 0),),
+                'wait_kmcnt': (('kmcnt', 0),),
+                'wait_tensorcnt': (('tensorcnt', 0),),
+                'wait_asynccnt': (('asynccnt', 0),),
+                'wait_samplecnt': (('samplecnt', 0),),
+                'wait_bvhcnt': (('bvhcnt', 0),),
+                'wait_loadcnt_dscnt': (('vmcnt', 8), ('dscnt', 0)),
+                'wait_storecnt_dscnt': (('vscnt', 8), ('dscnt', 0)),
+            }[op]
+            targets = []
+            for field, shift in fields:
+                value = f'(imm >> {shift})' if shift else 'imm'
+                mask = f'amdgpu::WaitCounters::{field.upper()}_MAX'
+                targets.append(f'.{field} = static_cast<uint8_t>({value} & {mask})')
+            return (
+                f'  const uint16_t imm = static_cast<uint16_t>({src_ops[0]}.encoding_value_);\n'
+                f'  wf.wait_for({{{", ".join(targets)}}});'
+            )
 
         if cls == 'tensor_load_to_lds':
             return (
@@ -11863,25 +11885,6 @@ class CodeGenerator:
             vop3p_local_simd_probe_line,
         )
 
-        if self.isa_spec.arch_name == 'cdna1':
-            result = {
-                'v_mad_mix_f32': 'F32',
-                'v_mad_mixlo_f16': 'F16_LO',
-                'v_mad_mixhi_f16': 'F16_HI',
-            }.get(inst.mnemonic)
-            if result:
-                return (
-                    f'  if (amdgpu::try_execute_vop3p_fma_mix_simd<amdgpu::FmaMixDst::{result}, '
-                    'true, true>(inst, wf)) return;'
-                )
-        if self.isa_spec.profile.generated_dir_name == 'cdna5':
-            mixed = {
-                'v_fma_mix_f32': 'F32',
-                'v_fma_mixlo_f16': 'F16_LO',
-                'v_fma_mixhi_f16': 'F16_HI',
-            }.get(inst.mnemonic)
-            if mixed:
-                return f'  ROCJITSU_TRY_SIMD_FUSED_MIX({mixed});'
         return vop3p_local_simd_probe_line(
             f'{inst.mnemonic}_{enc_key}',
             self.isa_spec.profile.vop3p_opsel_fields,
@@ -17512,6 +17515,24 @@ class CodeGenerator:
                     'cdna4',
                     'cdna5',
                 ) and any(i.name in float_names for i in all_insts):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
+                    )
+                if self.isa_spec.arch_name in (
+                    'cdna1',
+                    'cdna2',
+                    'rdna1',
+                    'rdna3_5',
+                ) and any(
+                    i.name in {'V_PK_FMA_F16', 'V_PK_FMAC_F16'} for i in all_insts
+                ):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
+                    )
+                if self.isa_spec.arch_name in ('cdna1', 'cdna2') and any(
+                    i.name in {'V_MAD_MIX_F32', 'V_MAD_MIXLO_F16', 'V_MAD_MIXHI_F16'}
+                    for i in all_insts
+                ):
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
                     )
