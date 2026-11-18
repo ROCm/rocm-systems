@@ -344,10 +344,13 @@ protected:
                 return;
         }
 
-        const bool peerPar = shardBytes * static_cast<size_t>(nRanks_)
-                             <= rcclDdaFabricRsLL128PeerMaxBytes(getActiveCommunicator());
         EXPECT_TRUE(logContains(*logCtx_, kLl128LaunchNeedle))
             << "Rank " << rank_ << " did not launch the ReduceScatter LL128 kernel";
+        // RCCL_DDA_LL128_RS_PEER_MAX_BYTES overrides the table cap, so the kernel choice is only checked without it.
+        if(std::getenv("RCCL_DDA_LL128_RS_PEER_MAX_BYTES") != nullptr)
+            return;
+        const bool peerPar = shardBytes * static_cast<size_t>(nRanks_)
+                             <= rcclDdaFabricRsLL128PeerMaxBytes(getActiveCommunicator());
         EXPECT_TRUE(logContains(*logCtx_, peerPar ? kPeerParNeedle : kBatchedNeedle))
             << "Rank " << rank_ << " did not run the " << (peerPar ? "peer-parallel" : "batched") << " kernel";
     }
