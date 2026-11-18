@@ -1,3 +1,2 @@
-* Added `RCCL_DDA_LL128_BC_THREADS`: overrides the thread count used by the DDA fabric Broadcast LL128 two-shot scatter and gather kernels on gfx1250.
-  Must be a positive multiple of the LL128 warp size and no greater than 512; invalid values fall back to the default of 512.
+* Added `RCCL_DDA_LL128_BC_THREADS`: overrides the thread count per block for the DDA fabric Broadcast LL128 two-shot kernel on gfx1250. Must be a multiple of 32 (the LL128 warp size) between 32 and 512 inclusive; e.g. `RCCL_DDA_LL128_BC_THREADS=256`. Out-of-range or non-multiple values are silently ignored and 512 is used instead.
 * Added `RCCL_DDA_LL128_BC_FANOUT`: controls the fan-out degree of the scatter phase of the DDA fabric Broadcast LL128 two-shot collective on gfx1250 (default 0, which uses a flat scatter to all peers).
