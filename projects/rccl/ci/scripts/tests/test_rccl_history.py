@@ -161,6 +161,22 @@ class ReleaseFingerprint(unittest.TestCase):
             "2.28.3-HEAD:3309c61")
 
 
+class LegArtifactsDir(unittest.TestCase):
+    """The legs of one sweep share GITHUB_RUN_ID and the workload."""
+
+    def leg_dir(self, label: str) -> Path:
+        with mock.patch.dict(os.environ, {"RUN_LABEL": label}):
+            return tm.leg_artifacts_dir(Path("/r"), "42", "llama-3.1-70b-training", "baseline")
+
+    def test_the_run_label_keeps_legs_apart(self):
+        self.assertEqual(self.leg_dir("release-10.1.0"),
+                         Path("/r/runs/42/llama-3.1-70b-training-release-10.1.0/baseline"))
+        self.assertNotEqual(self.leg_dir("release-10.1.0"), self.leg_dir("run-300"))
+
+    def test_an_unlabelled_leg_is_named_by_its_workload(self):
+        self.assertEqual(self.leg_dir(""), Path("/r/runs/42/llama-3.1-70b-training/baseline"))
+
+
 @unittest.skipIf(yaml is None, "PyYAML not installed")
 class Workflows(unittest.TestCase):
     def setUp(self):

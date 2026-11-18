@@ -2999,6 +2999,15 @@ def resolve_baseline(
     return build
 
 
+def leg_artifacts_dir(results_dir: Path, run_id: str, workload: str, phase: str) -> Path:
+    """Where one phase of this leg keeps its perf files."""
+    # Matrix legs share GITHUB_RUN_ID, so the workload keeps them apart,
+    # and RUN_LABEL legs of one workload.
+    run_label = os.environ.get("RUN_LABEL", "")
+    leg = f"{workload}-{run_label}" if run_label else workload
+    return results_dir / "runs" / run_id / leg / phase
+
+
 def send_report(args: argparse.Namespace, report: str, exit_code: int) -> None:
     """Send *report* to the email and Teams channel the run was given."""
     status = "PASSED" if exit_code == 0 else "FAILED"
@@ -3347,11 +3356,7 @@ def main() -> None:
                   if workload_config["type"] == "inference" else None),
         )
 
-        # Matrix legs share GITHUB_RUN_ID, so the workload keeps them apart,
-        # and RUN_LABEL legs of one workload.
-        run_label = os.environ.get("RUN_LABEL", "")
-        leg = f"{args.workload}-{run_label}" if run_label else args.workload
-        run_artifacts = results_dir / "runs" / run_id / leg / phase
+        run_artifacts = leg_artifacts_dir(results_dir, run_id, args.workload, phase)
         try:
             run_artifacts.mkdir(parents=True, exist_ok=True)
             for f in ["perf.csv", "perf_entry_super.csv", "perf_entry_super.json"]:
