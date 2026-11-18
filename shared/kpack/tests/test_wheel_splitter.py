@@ -1326,6 +1326,24 @@ class TestWheelSplitterIntegration:
                     assert name in produced, (key, line)
                     assert version == "2.10.0+rocm7.1", (key, line)
 
+        # `pip install torch[device-gfx1100]` and installing the target
+        # wheel alone pull in the same device wheels.
+        host_metadata = (
+            result.host_wheel_path / "torch-2.10.0+rocm7.1.dist-info" / "METADATA"
+        ).read_text()
+        extra_names = {
+            line[len("Requires-Dist: ") :].partition(" == ")[0]
+            for line in host_metadata.splitlines()
+            if line.startswith("Requires-Dist: amd-torch-device-")
+            and line.endswith('extra == "device-gfx1100"')
+        }
+        target_names = {
+            line[len("Requires-Dist: ") :].partition(" == ")[0]
+            for line in target_metadata.splitlines()
+            if line.startswith("Requires-Dist: amd-torch-device-")
+        }
+        assert extra_names == {"amd-torch-device-gfx1100"} | target_names
+
     def test_split_parallel(self, fat_binary_wheel: Path, toolchain, tmp_path: Path):
         """Test that parallel splitting (jobs=2) produces correct results."""
         output_dir = tmp_path / "output"

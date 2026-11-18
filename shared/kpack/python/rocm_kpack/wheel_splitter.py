@@ -20,6 +20,7 @@ import stat
 import time
 import zipfile
 from collections import defaultdict
+from collections.abc import Collection
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from email.parser import HeaderParser
@@ -319,12 +320,38 @@ def _bundle_key_to_dist_name(device_package_prefix: str, bundle_key: str) -> str
     return rocm_bootstrap.device_dist_name(device_package_prefix, bundle)
 
 
+def _chain_dist_names(
+    target: str, bundle_keys: Collection[str], device_package_prefix: str
+) -> list[str]:
+    """Dist names of the device wheels a target needs that a split produces.
+
+    Walks the target's packaging chain (target, sub-family, family) and keeps
+    the bundles in ``bundle_keys``. The host wheel's ``device-<target>`` extra
+    and the target wheel's own Requires-Dist both come from here, so the two
+    always name the same set of wheels.
+
+    Args:
+        target: Target bundle key, e.g. "gfx1201".
+        bundle_keys: Bundle keys that get a device wheel from the split.
+        device_package_prefix: Package name prefix, e.g. "amd-torch-device".
+
+    Returns:
+        Dist names, most specific first, e.g.
+        ["amd-torch-device-gfx1201", "amd-torch-device-gfx12-0"].
+    """
+    return [
+        rocm_bootstrap.device_dist_name(device_package_prefix, chain_bundle)
+        for chain_bundle in rocm_bootstrap.packaging_chain(target)
+        if chain_bundle.key in bundle_keys
+    ]
+
+
 def generate_device_metadata(
     host_identity: WheelIdentity,
     bundle_key: str,
     device_package_prefix: str,
     device_requires_dist: list[str],
-    split_bundle_keys: set[str] | None = None,
+    split_bundle_keys: Collection[str] | None = None,
 ) -> str:
     """Generate METADATA content for a device wheel.
 
@@ -337,7 +364,11 @@ def generate_device_metadata(
             same split. A target wheel requires the sub-family and family
             wheels of its packaging chain that are in this set, because they
             hold the rest of that target's device files (e.g. the AOTriton
-            images in amd-torch-device-gfx12-0 for gfx1201).
+            images in amd-torch-device-gfx12-0 for gfx1201). A package index
+            that ships a target wheel must ship these too: tools that publish
+            a subset of archs (TheRock's promote_packages.py
+            --multi-arch-targets) have to keep the wheels a kept target wheel
+            requires.
 
     Returns:
         METADATA file content.
@@ -352,16 +383,11 @@ def generate_device_metadata(
         f"Requires-Dist: {host_identity.name} == {host_identity.version}",
     ]
     if bundle.level == rocm_bootstrap.PackagingLevel.TARGET and split_bundle_keys:
-        for chain_bundle in rocm_bootstrap.packaging_chain(bundle_key):
-            if (
-                chain_bundle.key == bundle_key
-                or chain_bundle.key not in split_bundle_keys
-            ):
-                continue
-            chain_name = rocm_bootstrap.device_dist_name(
-                device_package_prefix, chain_bundle
-            )
-            lines.append(f"Requires-Dist: {chain_name} == {host_identity.version}")
+        for chain_name in _chain_dist_names(
+            bundle_key, split_bundle_keys, device_package_prefix
+        ):
+            if chain_name != device_name:
+                lines.append(f"Requires-Dist: {chain_name} == {host_identity.version}")
     for dep in device_requires_dist:
         if "@GFXARCH@" in dep and bundle.level != rocm_bootstrap.PackagingLevel.TARGET:
             # `@GFXARCH@` deps name per-target packages (e.g.
@@ -955,15 +981,11 @@ class WheelSplitter:
         # SDK + PyTorch stack.
         all_device_dist_names: set[str] = set()
         for amdgpu_target in target_keys:
-            chain = rocm_bootstrap.packaging_chain(amdgpu_target)
             lines.append(f"Provides-Extra: device-{amdgpu_target}")
 
-            for chain_bundle in chain:
-                if chain_bundle.key not in bundle_keys:
-                    continue
-                dist_name = rocm_bootstrap.device_dist_name(
-                    self.device_package_prefix, chain_bundle
-                )
+            for dist_name in _chain_dist_names(
+                amdgpu_target, bundle_keys, self.device_package_prefix
+            ):
                 all_device_dist_names.add(dist_name)
                 # NOTE: This format is parsed verbatim by
                 # _add_variant_markers_to_metadata(). If you change it,
