@@ -226,8 +226,16 @@ class AMDSMIHelpers:
 
     @staticmethod
     def _is_module_live(module):
+        """Returns True when *module* is a live loadable module or built into the kernel.
+
+        Only loadable modules have an initstate file; a built-in driver has just its
+        /sys/module directory, or only its PCI driver directory when it has no parameters.
+        """
+        module_dir = Path("/sys/module") / module
         try:
-            return (Path("/sys/module") / module / "initstate").read_text().strip() == "live"
+            return (module_dir / "initstate").read_text().strip() == "live"
+        except FileNotFoundError:
+            return module_dir.is_dir() or (Path("/sys/bus/pci/drivers") / module).is_dir()
         except OSError:
             return False
 
