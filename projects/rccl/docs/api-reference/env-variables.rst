@@ -734,7 +734,10 @@ in the following table.
     * - | ``NCCL_IB_QPS_PER_CONNECTION``
         | Sets the number of InfiniBand/RoCE queue pairs to create for each
           connection between two ranks. Increasing the QP count can improve
-          routing entropy on multi-level fabrics.
+          routing entropy on multi-level fabrics. For peer-to-peer connections,
+          ``RCCL_IB_QPS_PER_P2P`` overrides this value when set to a positive
+          number. GIN connections use one QP per device and ignore this
+          variable.
       - | ``1``–``128``. Default: ``1``.
 
     * - | ``NCCL_IB_SPLIT_DATA_ON_QPS``
@@ -759,9 +762,15 @@ in the following table.
     * - | ``NCCL_IB_ADAPTIVE_ROUTING``
         | Controls whether the IB Verbs transport may use adaptive-routing-capable
           data transfers. Adaptive routing must also be enabled by the network
-          configuration (for example, through ``NCCL_IB_SL``).
+          configuration (for example, through ``NCCL_IB_SL``). This variable does
+          not configure adaptive routing in the switch fabric or HCA.
           When ``NCCL_IB_OOO_RQ=0``, only messages larger than
-          ``NCCL_IB_AR_THRESHOLD`` use adaptive routing.
+          ``NCCL_IB_AR_THRESHOLD`` (default ``8192``) use adaptive routing;
+          setting ``NCCL_IB_AR_THRESHOLD`` above ``NCCL_BUFFSIZE`` therefore
+          disables the threshold-based path. When ``NCCL_IB_OOO_RQ=1`` and
+          out-of-order receive queues are supported and enabled on both
+          endpoints, ``NCCL_IB_AR_THRESHOLD`` is ignored. All physical devices
+          forming a merged network device must have adaptive routing enabled.
       - | ``0``: Disable adaptive routing.
         | ``1``: Enable adaptive routing.
         | Default: ``1`` for InfiniBand links; ``0`` for RoCE links.
@@ -1021,7 +1030,9 @@ in the following table.
     * - | ``NCCL_OOB_NET_ENABLE``
         | Controls whether RCCL uses the net plugin transport for bootstrap
           out-of-band communication during communicator initialization, instead
-          of the socket bootstrap path.
+          of the socket bootstrap path. The net OOB path additionally requires
+          at least three ranks; below that, RCCL always uses the socket
+          bootstrap path regardless of this setting.
       - | ``-1``: Auto-select when ``nranks >= NCCL_BOOTSTRAP_BIDIR_THRESHOLD``.
         | ``0``: Use socket bootstrap (default).
         | ``1``: Force net OOB bootstrap.
@@ -1289,7 +1300,11 @@ in the following table.
     * - | ``NCCL_NET_GDR_READ``
         | Controls whether RCCL uses ROCm GPUDirect RDMA reads for network
           send operations when the GPU-NIC distance is within
-          ``NCCL_NET_GDR_LEVEL``.
+          ``NCCL_NET_GDR_LEVEL``. When left unset, RCCL enables GDR reads
+          wherever GDR is supported and the distance check passes; the
+          upstream NCCL restriction that limits unset-default GDR reads to
+          NVLink platforms applies only to pre-Ampere NVIDIA GPUs and has no
+          effect on ROCm.
       - | ``0``: Disable network GDR reads for sends.
         | ``1``: Force network GDR reads when topology and device support allow.
         | Default: enabled when GDR is supported.
