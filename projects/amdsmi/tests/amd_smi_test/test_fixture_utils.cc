@@ -325,6 +325,57 @@ void WriteIoLink(FakeSysfsTree& tree, uint32_t node_idx, uint32_t link_idx, uint
                  props.str());
 }
 
+ScopedTempDir::ScopedTempDir() {
+  const char* tmp = std::getenv("TMPDIR");
+  std::string tmpl = std::string(tmp && tmp[0] ? tmp : "/tmp") + "/amdsmi-test-XXXXXX";
+  std::vector<char> buf(tmpl.begin(), tmpl.end());
+  buf.push_back('\0');
+  if (mkdtemp(buf.data())) path_ = buf.data();
+}
+
+ScopedTempDir::~ScopedTempDir() {
+  if (!path_.empty()) {
+    std::error_code ignored;
+    std::filesystem::remove_all(path_, ignored);
+  }
+}
+
+namespace {
+
+void WritePathFile(const std::filesystem::path& p, const std::string& content) {
+  std::filesystem::create_directories(p.parent_path());
+  std::ofstream f(p);
+  f << content;
+}
+
+}  // namespace
+
+void WriteGpuId(const std::filesystem::path& kfd_root, uint32_t node_idx, uint64_t gpu_id) {
+  WritePathFile(kfd_root / std::to_string(node_idx) / "gpu_id", std::to_string(gpu_id) + "\n");
+}
+
+void WriteNodeProperties(const std::filesystem::path& kfd_root, uint32_t node_idx) {
+  WritePathFile(kfd_root / std::to_string(node_idx) / "properties",
+                "hive_id 0\nsimd_arrays_per_engine 1\narray_count 1\ncu_per_simd_array 1\n"
+                "location_id " +
+                    std::to_string((node_idx + 1) << kBusShift) + "\ndomain 0\n");
+}
+
+void WriteIoLink(const std::filesystem::path& kfd_root, uint32_t node_idx, uint32_t link_idx,
+                 uint32_t node_to, amd::smi::IO_LINK_TYPE type, uint64_t weight) {
+  std::ostringstream props;
+  props << "type " << static_cast<uint64_t>(type) << "\n"
+        << "node_from " << node_idx << "\n"
+        << "node_to " << node_to << "\n"
+        << "weight " << weight << "\n"
+        << "flags 1\n"
+        << "min_bandwidth 100\n"
+        << "max_bandwidth 200\n";
+  WritePathFile(
+      kfd_root / std::to_string(node_idx) / "io_links" / std::to_string(link_idx) / "properties",
+      props.str());
+}
+
 FakeKfdTopology::FakeKfdTopology(FakeSysfsTree& tree)
     : kfd_root_guard_(amd::smi::test_hooks::KfdNodesPathRoot,
                       amd::smi::test_hooks::SetKfdNodesPathRoot, tree.root()),

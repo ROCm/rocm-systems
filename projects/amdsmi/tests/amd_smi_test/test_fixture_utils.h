@@ -9,6 +9,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <limits>
 #include <map>
@@ -17,6 +18,7 @@
 #include <utility>
 
 #include "amd_smi/amdsmi.h"
+#include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 
 namespace amd::smi {
@@ -281,3 +283,44 @@ class FakeKfdTopology {
   amd::smi::testing::ScopedOverride<std::string> tmp_dir_guard_;
   std::map<uint32_t, amdsmi_processor_handle> handles_;
 };
+
+// A private directory under TMPDIR, removed when the test finishes.
+// path() returns std::filesystem::path, suitable for use with the path-based
+// KFD write helpers below.
+class ScopedTempDir {
+ public:
+  ScopedTempDir();
+  ~ScopedTempDir();
+
+  ScopedTempDir(const ScopedTempDir&) = delete;
+  ScopedTempDir& operator=(const ScopedTempDir&) = delete;
+
+  const std::filesystem::path& path() const { return path_; }
+
+ private:
+  std::filesystem::path path_;
+};
+
+// RAII: overrides the KFD nodes path root for the duration of a test so that
+// tests targeting KFDNode directly (not via FakeKfdTopology/amdsmi_init) can
+// point it at a hand-crafted directory tree.
+class ScopedKfdRootOverride {
+ public:
+  explicit ScopedKfdRootOverride(const std::string& root)
+      : guard_(amd::smi::test_hooks::KfdNodesPathRoot, amd::smi::test_hooks::SetKfdNodesPathRoot,
+               root) {}
+
+  ScopedKfdRootOverride(const ScopedKfdRootOverride&) = delete;
+  ScopedKfdRootOverride& operator=(const ScopedKfdRootOverride&) = delete;
+
+ private:
+  amd::smi::testing::ScopedOverride<std::string> guard_;
+};
+
+// Path-based helpers for writing KFD topology files directly into a directory,
+// for tests that target KFDNode::Initialize() without going through amdsmi_init().
+// kfd_root is passed to SetKfdNodesPathRoot() (via ScopedKfdRootOverride).
+void WriteGpuId(const std::filesystem::path& kfd_root, uint32_t node_idx, uint64_t gpu_id);
+void WriteNodeProperties(const std::filesystem::path& kfd_root, uint32_t node_idx);
+void WriteIoLink(const std::filesystem::path& kfd_root, uint32_t node_idx, uint32_t link_idx,
+                 uint32_t node_to, amd::smi::IO_LINK_TYPE type, uint64_t weight);
