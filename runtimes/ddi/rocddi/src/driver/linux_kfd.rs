@@ -79,6 +79,8 @@ pub(crate) use vmem::{
 /// establishes VM bindings, and enables the runtime under the connection's
 /// locks. Process-lifetime sessions share one process-local connection.
 pub(crate) struct LinuxKfdDriver {
+    /// Common session lifecycle, separate from native process-context ownership.
+    pub(super) admission: crate::session::SessionAdmission,
     /// Distinguishes this wrapper from other sessions' KFD drivers.
     driver_instance: crate::driver::DriverInstanceId,
     /// Rejects inherited state before accessing locks or native handles.
@@ -460,11 +462,22 @@ impl LinuxKfdDriver {
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn with_context_lifetime(
         lifetime: DriverContextLifetime,
         process: ProcessIdentity,
     ) -> Self {
+        let admission = crate::session::SessionAdmission::new(process.clone());
+        Self::with_admission(lifetime, process, admission)
+    }
+
+    pub(crate) fn with_admission(
+        lifetime: DriverContextLifetime,
+        process: ProcessIdentity,
+        admission: crate::session::SessionAdmission,
+    ) -> Self {
         Self {
+            admission,
             driver_instance: crate::driver::new_driver_instance(),
             process: process.clone(),
             closing: false,
@@ -522,6 +535,10 @@ impl LinuxKfdDriver {
 
 impl Driver for LinuxKfdDriver {
     type DeviceState = DeviceState;
+
+    fn admission(&self) -> &crate::session::SessionAdmission {
+        &self.admission
+    }
 
     fn driver_instance(&self) -> crate::driver::DriverInstanceId {
         self.driver_instance

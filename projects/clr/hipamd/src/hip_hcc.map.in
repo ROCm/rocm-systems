@@ -716,6 +716,7 @@ global:
     hipGraphNodeGetToolsId;
     hipGraphGetId;
     hipGraphExecGetId;
+    hipDeviceGetExecAffinitySupport;
 local:
     *;
 } hip_7.17;
