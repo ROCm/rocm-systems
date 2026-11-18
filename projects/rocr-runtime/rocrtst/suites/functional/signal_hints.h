@@ -16,7 +16,7 @@
 
 // Checks that the CP honors each completion signal handle hint (amd_hsa_signal.h) in the AQL
 // packets it processes. Skipped on an agent that does not report
-// HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED.
+// HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS in HSA_AMD_AGENT_INFO_AQL_EXTENSIONS.
 class SignalHintsTest : public TestBase {
  public:
   SignalHintsTest(void);

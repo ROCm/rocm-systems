@@ -5,11 +5,10 @@
 // Owns public entry points and their validation/dispatch policy.
 
 // Table extraction follows rocjitsu's execute_v_trig_preop_f64_vop3.
-// GFX1201 captures establish a 1184-bit table and pre-scaling OMOD flush.
+// GFX1201 captures establish a 1184-bit table; gfx1201 and gfx1100 flush before OMOD.
 
 #include "math/trig_preop.h"
 #include "common/validation.h"
-#include "fp/float_output.h"
 #include "rj_arith/detail/rj_arith_math.h"
 
 #include <stdint.h>
@@ -122,19 +121,13 @@ int run(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
                            rocjitsu::arith::minimum(shift, valid_bits)];
     unsigned omod = (mode >> 6) & 3;
     if (omod) {
-      if constexpr (Rdna3) {
-        value = rocjitsu::arith::division_scale_bits<64>(value, omod == 3 ? -1 : int(omod));
-        if (!(value >> 52)) {
-          value = 0;
-        }
+      // gfx1100 and gfx1201 both flush a subnormal table value before scaling.
+      if (!(value >> 52)) {
+        value = 0;
       } else {
+        value += uint64_t(int64_t(omod == 3 ? -1 : int(omod)) * (INT64_C(1) << 52));
         if (!(value >> 52)) {
           value = 0;
-        } else {
-          value += uint64_t(int64_t(omod == 3 ? -1 : int(omod)) * (INT64_C(1) << 52));
-          if (!(value >> 52)) {
-            value = 0;
-          }
         }
       }
     }

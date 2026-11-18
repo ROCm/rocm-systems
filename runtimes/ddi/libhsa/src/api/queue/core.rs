@@ -9,19 +9,15 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use crate::callback_arg::CallbackArg;
 use crate::ffi::*;
 use crate::queue::*;
-use crate::runtime::{
-    CallbackScope, InFlightGeneration, boundary, initialized_mut, lock, map_error,
-};
+use crate::runtime::{CallbackScope, boundary, initialized_mut, lock, map_error};
 use crate::signal::AsyncCopyClock;
-use rocddi::device::gpu::queue::{
-    AqlControlRegion, QueuePriority, QueueRingMemory, SdmaEngineSelection,
-};
+use rocddi::device::gpu::queue::{AqlControlRegion, QueueRingMemory, SdmaEngineSelection};
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_queue_create")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Creates a hardware-backed HSA queue.
 pub unsafe extern "C" fn hsa_queue_create(
     agent: HsaAgent,
@@ -34,62 +30,40 @@ pub unsafe extern "C" fn hsa_queue_create(
     queue: *mut *mut HsaQueue,
 ) -> Status {
     boundary(|| {
-        if queue.is_null()
-            || size == 0
-            || !size.is_power_of_two()
-            || !matches!(
-                queue_type,
-                QUEUE_TYPE_MULTI | QUEUE_TYPE_SINGLE | QUEUE_TYPE_COOPERATIVE
-            )
-        {
+        if queue.is_null() {
             return INVALID_ARGUMENT;
         }
-        let mut created_log = None;
-        // SAFETY: The HSA caller supplies writable queue output and retains callback data.
-        let status = unsafe {
-            create_hardware_queue(
-                None,
-                agent,
-                size,
-                queue_type,
-                QueuePriority::Normal,
-                callback,
-                // SAFETY: The C caller retains and synchronizes callback data
-                // through queue destruction and the last event callback.
-                CallbackArg::new(data),
-                private_segment_size,
-                QueueRingMemory::System,
-                None,
-                queue,
-                &mut created_log,
-            )
+        let kind = match AqlQueueKind::from_abi(queue_type) {
+            Some(kind) => kind,
+            None => return INVALID_ARGUMENT,
         };
-        let log = created_log.and_then(|(id, public)| {
-            lock().ok().and_then(|guard| {
-                guard.as_ref().and_then(|runtime| {
-                    runtime.prepare_log(
-                        AMD_LOG_FLAG_INFO,
-                        format_args!(
-                            "created AQL queue id={id} agent=0x{:x} address=0x{public:x} packets={}",
-                            agent.handle,
-                            size.max(64)
-                        ),
-                    )
-                })
-            })
-        });
-        if let Some(log) = log {
-            log.write();
+        let request = AqlQueueRequest {
+            agent,
+            size,
+            kind,
+            callback,
+            // SAFETY: The caller retains and synchronizes callback data through
+            // queue destruction and completion of the last callback.
+            data: unsafe { CallbackArg::new(data) },
+            private_segment_size,
+        };
+        // SAFETY: The callback and its data obey the queue lifetime contract.
+        match unsafe { crate::queue::create(request) } {
+            Ok(created) => {
+                // SAFETY: The caller supplied writable output storage.
+                unsafe { queue.write(created.as_ptr()) };
+                SUCCESS
+            }
+            Err(status) => status,
         }
-        status
     })
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_counted_queue_acquire")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Acquires a counted queue backed by a shared hardware queue.
 pub unsafe extern "C" fn hsa_amd_counted_queue_acquire(
     agent: HsaAgent,
@@ -163,6 +137,7 @@ pub unsafe extern "C" fn hsa_amd_counted_queue_acquire(
             let status = unsafe {
                 create_hardware_queue(
                     Some(generation),
+                    false,
                     agent,
                     counted_queue_size,
                     queue_type,
@@ -171,6 +146,7 @@ pub unsafe extern "C" fn hsa_amd_counted_queue_acquire(
                     // SAFETY: The C caller retains the callback argument.
                     CallbackArg::new(data),
                     0,
+                    QueueRingMemory::System,
                     QueueRingMemory::System,
                     None,
                     &raw mut created,
@@ -270,10 +246,10 @@ pub unsafe extern "C" fn hsa_amd_counted_queue_acquire(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_counted_queue_release")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Releases the counted queue resource.
 pub unsafe extern "C" fn hsa_amd_counted_queue_release(queue: *mut HsaQueue) -> Status {
     boundary(|| {
@@ -315,10 +291,10 @@ pub unsafe extern "C" fn hsa_amd_counted_queue_release(queue: *mut HsaQueue) -> 
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_soft_queue_create")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Creates a host-managed queue with direct index control.
 pub unsafe extern "C" fn hsa_soft_queue_create(
     region: HsaRegion,
@@ -410,15 +386,29 @@ pub unsafe extern "C" fn hsa_soft_queue_create(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_queue_create")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Creates an AMD queue from an engine-specific descriptor.
 pub unsafe extern "C" fn hsa_amd_queue_create(
     agent: HsaAgent,
     descriptors: *mut HsaAmdQueueCreateDesc,
     descriptor_count: u32,
+) -> Status {
+    // SAFETY: The shared implementation consumes the same public descriptor ABI.
+    unsafe { create_amd_queues(agent, descriptors, descriptor_count, false) }
+}
+
+/// Shared descriptor validation/publication for native and tooling proxy queues.
+/// # Safety
+/// The caller supplies `descriptor_count` readable descriptors with writable queue
+/// outputs, and retains callback arguments until the final queue callback.
+pub(crate) unsafe fn create_amd_queues(
+    agent: HsaAgent,
+    descriptors: *mut HsaAmdQueueCreateDesc,
+    descriptor_count: u32,
+    intercept: bool,
 ) -> Status {
     boundary(|| {
         if descriptors.is_null() || descriptor_count == 0 {
@@ -473,17 +463,18 @@ pub unsafe extern "C" fn hsa_amd_queue_create(
                 fail(INVALID_ARGUMENT);
                 continue;
             }
-            if input.flags & AMD_QUEUE_CREATE_DEVICE_MEM_DESCRIPTOR != 0 {
-                fail(INVALID_QUEUE_CREATION);
-                continue;
-            }
+            let control_memory = if input.flags & AMD_QUEUE_CREATE_DEVICE_MEM_DESCRIPTOR != 0 {
+                QueueRingMemory::HostVisibleLocal
+            } else {
+                QueueRingMemory::System
+            };
             let ring_memory = if input.flags & AMD_QUEUE_CREATE_DEVICE_MEM_RING != 0 {
                 QueueRingMemory::HostVisibleLocal
             } else {
                 QueueRingMemory::System
             };
             if input.engine_type == AMD_QUEUE_ENGINE_SDMA {
-                if input.priority != AMD_QUEUE_PRIORITY_NORMAL || input.callback.is_some() {
+                if input.priority != AMD_QUEUE_PRIORITY_NORMAL {
                     fail(INVALID_QUEUE_CREATION);
                     continue;
                 }
@@ -510,6 +501,9 @@ pub unsafe extern "C" fn hsa_amd_queue_create(
                         input.queue_size_bytes,
                         selection,
                         ring_memory,
+                        control_memory,
+                        input.callback,
+                        CallbackArg::new(input.callback_data),
                         output,
                         &mut created_log,
                     )
@@ -574,6 +568,7 @@ pub unsafe extern "C" fn hsa_amd_queue_create(
             let status = unsafe {
                 create_hardware_queue(
                     Some(generation),
+                    intercept,
                     agent,
                     packet_count,
                     compute.queue_type,
@@ -584,6 +579,7 @@ pub unsafe extern "C" fn hsa_amd_queue_create(
                     CallbackArg::new(input.callback_data),
                     compute.private_segment_size,
                     ring_memory,
+                    control_memory,
                     cu_mask,
                     output,
                     &mut created_log,
@@ -613,10 +609,10 @@ pub unsafe extern "C" fn hsa_amd_queue_create(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_queue_cu_set_mask")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Sets the compute-unit mask used by a queue.
 pub unsafe extern "C" fn hsa_amd_queue_cu_set_mask(
     queue: *const HsaQueue,
@@ -663,13 +659,21 @@ pub unsafe extern "C" fn hsa_amd_queue_cu_set_mask(
                 Err(status) => return status,
             }
         };
+        let (selected, clipped) = match crate::queue::constrain_cu_mask(
+            &runtime.gpus[gpu_index].info(),
+            runtime.gpus[gpu_index].global_cu_mask.as_deref(),
+            Some(&selected),
+        ) {
+            Ok(result) => result,
+            Err(status) => return status,
+        };
         let Some(record) = runtime.queue_state.queues.get_mut(&hardware_key) else {
             return INVALID_QUEUE;
         };
         match record.native.set_cu_mask(&selected) {
             Ok(()) => {
                 record.cu_mask = selected;
-                SUCCESS
+                if clipped { CU_MASK_REDUCED } else { SUCCESS }
             }
             Err(error) => map_error(error),
         }
@@ -677,10 +681,10 @@ pub unsafe extern "C" fn hsa_amd_queue_cu_set_mask(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_queue_cu_get_mask")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Copies the queue compute-unit mask into caller storage.
 pub unsafe extern "C" fn hsa_amd_queue_cu_get_mask(
     queue: *const HsaQueue,
@@ -728,10 +732,10 @@ pub unsafe extern "C" fn hsa_amd_queue_cu_get_mask(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_queue_set_priority")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Changes a queue’s native scheduling priority.
 pub unsafe extern "C" fn hsa_amd_queue_set_priority(queue: *mut HsaQueue, priority: u32) -> Status {
     boundary(|| {
@@ -807,10 +811,10 @@ pub(crate) fn inactivate_unintercepted_queue(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_queue_inactivate")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Stops a queue from accepting further packet submissions.
 pub unsafe extern "C" fn hsa_queue_inactivate(queue: *mut HsaQueue) -> Status {
     boundary(|| {
@@ -862,186 +866,28 @@ pub unsafe extern "C" fn hsa_queue_inactivate(queue: *mut HsaQueue) -> Status {
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_queue_destroy")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Stops a queue worker and retires its native queue.
 pub unsafe extern "C" fn hsa_queue_destroy(queue: *mut HsaQueue) -> Status {
     boundary(|| {
-        #[allow(
-            clippy::large_enum_variant,
-            reason = "queue teardown transfers owners on the stack without allocating"
-        )]
-        enum RemovedQueue {
-            Aql(Queue),
-            Sdma(SdmaQueue),
-        }
-
-        if queue.is_null() {
+        let Some(queue) = std::ptr::NonNull::new(queue) else {
             return INVALID_ARGUMENT;
-        }
-        if CallbackScope::active() {
-            return INVALID_RUNTIME_STATE;
-        }
-        let intercept = {
-            let guard = match lock() {
-                Ok(guard) => guard,
-                Err(status) => return status,
-            };
-            let runtime = match guard.as_ref() {
-                Some(runtime) => runtime,
-                None => return NOT_INITIALIZED,
-            };
-            runtime
-                .queue_state
-                .intercept_queues
-                .get(&(queue as usize))
-                .cloned()
-                .map(|owner| runtime.inflight.enter().map(|token| (owner, token)))
         };
-        if let Some(intercept) = intercept {
-            let Some((intercept, _in_flight)) = intercept else {
-                return INVALID_RUNTIME_STATE;
-            };
-            return crate::queue_intercept::destroy(&intercept);
-        }
-        let key = queue as usize;
-        let (mut record, cooperative_agent, in_flight) = {
-            let mut guard = match lock() {
-                Ok(guard) => guard,
-                Err(status) => return status,
-            };
-            let Some(generation) = guard.active_generation() else {
-                return NOT_INITIALIZED;
-            };
-            let runtime = match initialized_mut(&mut guard) {
-                Ok(runtime) => runtime,
-                Err(status) => return status,
-            };
-            let cooperative_agent = if let Some(record) = runtime.queue_state.queues.get_mut(&key) {
-                if record.public_handle != key {
-                    return INVALID_QUEUE;
-                }
-                if record.counted_pool_key.is_some() {
-                    return INVALID_QUEUE;
-                }
-                if record.cooperative_refs > 1 {
-                    record.cooperative_refs -= 1;
-                    return SUCCESS;
-                }
-                (record.cooperative_refs == 1).then_some(record.agent.handle)
-            } else {
-                None
-            };
-            let in_flight =
-                match InFlightGeneration::enter(generation, &runtime.inflight, &runtime.health) {
-                    Ok(in_flight) => in_flight,
-                    Err(status) => return status,
-                };
-            if let Some(agent) = cooperative_agent {
-                if runtime
-                    .queue_state
-                    .cooperative_teardown
-                    .try_reserve(1)
-                    .is_err()
-                {
-                    return OUT_OF_RESOURCES;
-                }
-                runtime.queue_state.cooperative_teardown.insert(agent);
-            }
-            let record = if let Some(record) = runtime.queue_state.queues.remove(&key) {
-                RemovedQueue::Aql(record)
-            } else if let Some(record) = runtime.queue_state.sdma_queues.remove(&key) {
-                RemovedQueue::Sdma(record)
-            } else {
-                return if let Some(soft) = runtime.queue_state.soft_queues.remove(&key) {
-                    runtime
-                        .signal_state
-                        .release_async_signal(soft.doorbell_signal);
-                    SUCCESS
-                } else {
-                    INVALID_QUEUE
-                };
-            };
-            (record, cooperative_agent, in_flight)
-        };
-        let result = match &mut record {
-            RemovedQueue::Aql(queue) => destroy_runtime_queue(queue),
-            RemovedQueue::Sdma(queue) => destroy_runtime_sdma_queue(queue),
-        };
-        match result {
-            Ok(()) => {
-                let engine = match record {
-                    RemovedQueue::Aql(_) => "AQL",
-                    RemovedQueue::Sdma(_) => "SDMA",
-                };
-                let log = lock().ok().and_then(|mut guard| {
-                    in_flight.is_current(&guard).then_some(())?;
-                    guard.as_mut().and_then(|runtime| {
-                        if let Some(agent) = cooperative_agent {
-                            runtime.queue_state.cooperative_teardown.remove(&agent);
-                        }
-                        runtime.prepare_log(
-                            AMD_LOG_FLAG_INFO,
-                            format_args!("destroyed {engine} queue address=0x{key:x}"),
-                        )
-                    })
-                });
-                if let Some(log) = log {
-                    log.write();
-                }
-                SUCCESS
-            }
-            Err(error) => {
-                let status = map_error(error);
-                let Ok(mut guard) = lock() else {
-                    in_flight.quarantine();
-                    std::mem::forget(record);
-                    return status;
-                };
-                if !in_flight.is_current(&guard) {
-                    in_flight.quarantine();
-                    std::mem::forget(record);
-                    return status;
-                }
-                let Some(runtime) = guard.as_mut() else {
-                    in_flight.quarantine();
-                    std::mem::forget(record);
-                    return status;
-                };
-                // A native teardown may partially release an ID. Never
-                // replace a queue created under the same public key while
-                // this owner was outside the registry lock.
-                if runtime.queue_state.queues.contains_key(&key)
-                    || runtime.queue_state.sdma_queues.contains_key(&key)
-                {
-                    in_flight.quarantine();
-                    std::mem::forget(record);
-                    return INVALID_RUNTIME_STATE;
-                }
-                if let Some(agent) = cooperative_agent {
-                    runtime.queue_state.cooperative_teardown.remove(&agent);
-                }
-                match record {
-                    RemovedQueue::Aql(record) => {
-                        runtime.queue_state.queues.insert(key, record);
-                    }
-                    RemovedQueue::Sdma(record) => {
-                        runtime.queue_state.sdma_queues.insert(key, record);
-                    }
-                }
-                status
-            }
+        match crate::queue::destroy(queue) {
+            Ok(()) => SUCCESS,
+            Err(status) => status,
         }
     })
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_profiling_set_profiler_enabled")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Enables or disables dispatch profiling on a queue.
 pub unsafe extern "C" fn hsa_amd_profiling_set_profiler_enabled(
     queue: *mut HsaQueue,
@@ -1075,10 +921,10 @@ pub unsafe extern "C" fn hsa_amd_profiling_set_profiler_enabled(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_queue_get_info")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Writes the requested queue property or native status.
 pub unsafe extern "C" fn hsa_amd_queue_get_info(
     queue: *mut HsaQueue,
@@ -1198,10 +1044,10 @@ pub unsafe extern "C" fn hsa_amd_queue_get_info(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_queue_signal_external_semaphore")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Enqueues a signal operation for an external semaphore.
 pub unsafe extern "C" fn hsa_amd_queue_signal_external_semaphore(
     queue: *mut HsaQueue,
@@ -1230,10 +1076,10 @@ pub unsafe extern "C" fn hsa_amd_queue_signal_external_semaphore(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_queue_wait_external_semaphore")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Waits for queue external semaphore under the requested wait policy.
 pub unsafe extern "C" fn hsa_amd_queue_wait_external_semaphore(
     queue: *mut HsaQueue,
@@ -1262,10 +1108,10 @@ pub unsafe extern "C" fn hsa_amd_queue_wait_external_semaphore(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_profiling_get_dispatch_time")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Writes the recorded start and end timestamps of a dispatch.
 pub unsafe extern "C" fn hsa_amd_profiling_get_dispatch_time(
     agent: HsaAgent,
@@ -1319,10 +1165,10 @@ pub unsafe extern "C" fn hsa_amd_profiling_get_dispatch_time(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_profiling_get_async_copy_time")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Writes timestamps recorded for an asynchronous copy.
 pub unsafe extern "C" fn hsa_amd_profiling_get_async_copy_time(
     signal: HsaSignal,

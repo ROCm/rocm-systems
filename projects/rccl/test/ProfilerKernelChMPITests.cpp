@@ -819,9 +819,11 @@ INSTANTIATE_TEST_SUITE_P(Share, ProfilerKernelChSplitMPITest, ::testing::Values(
 
 // Aborting with work in flight must let the thread drain and exit: abort joins
 // it, so a thread stuck waiting on counters that will never advance hangs abort.
-// The core drops ops whose kernels will never finish without stopping their
-// KernelCh, so after the abort a KernelCh may be left unstopped, but none may be
-// stopped twice. Abort is only supported on non-blocking communicators.
+// Since NCCL 2.32.6 the core stops the KernelCh of an op it drains because its
+// kernel will never finish, without the KernelChStop state (there is no device
+// timer to carry). So after the abort every started KernelCh is stopped exactly
+// once, with or without a timer, and none gets a state after its stop. Abort is
+// only supported on non-blocking communicators.
 TEST_F(ProfilerKernelChMPITest, AbortWithWorkInFlightReturns)
 {
     RECORDER_REQUIRE(recorder_);
@@ -847,16 +849,23 @@ TEST_F(ProfilerKernelChMPITest, AbortWithWorkInFlightReturns)
     double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
     forgetOwnedComm(comm);  // aborted; TearDown must not destroy it again
     EXPECT_LT(secs, 60.0) << "ncclCommAbort took " << secs << " s with KernelCh work in flight";
-    EXPECT_EQ(0u, recorder_.Anomalies()) << "recorder saw unbalanced calls around abort";
-    size_t unstopped = 0;
+    size_t unstopped = 0, stoppedWithoutTimer = 0;
     for(const auto& r : snapshot())
     {
         if(r.type != ncclProfileKernelCh) continue;
         EXPECT_LE(r.stopEvents, 1) << "KernelCh on channel " << r.channelId << " stopped " << r.stopEvents
                                    << " times around abort";
+        EXPECT_LE(r.stopStates, 1) << "KernelCh on channel " << r.channelId << " got " << r.stopStates
+                                   << " stop states around abort";
         if(r.stopEvents == 0) ++unstopped;
+        else if(r.stopStates == 0) ++stoppedWithoutTimer;
     }
-    RecordProperty("UnstoppedKernelChAfterAbort", (int)unstopped);
+    // The recorder counts a timed event stopped without its stop state as an anomaly. Only the drained
+    // KernelCh may account for any here: a double stop, a state after the stop, or a KernelPhase stopped
+    // without its state still shows up as a difference.
+    EXPECT_EQ((uint64_t)stoppedWithoutTimer, recorder_.Anomalies()) << "recorder saw unbalanced calls around abort";
+    EXPECT_EQ(0u, unstopped) << "abort left " << unstopped << " started KernelCh events unstopped";
+    RecordProperty("DrainedKernelChAfterAbort", (int)stoppedWithoutTimer);
     (void)hipStreamSynchronize(stream);
     freeBuffers();
 }

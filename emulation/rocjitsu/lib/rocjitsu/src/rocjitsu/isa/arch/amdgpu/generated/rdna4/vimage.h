@@ -21,13 +21,15 @@ public:
   ImageLoadVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_transfer_dim = inst_.dim;
+    modifiers.image_resource = &rsrc;
+    modifiers.image_reads_address = inst_.dmask;
     modifiers.image_address = &vaddr;
     modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
     if (inst_.d16)
-      modifiers.set_packed_image_result(std::popcount(uint32_t{inst_.dmask}),
-                                        vdata.size_bits() / 32);
+      modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
   }
   bool should_print_src_operand(uint8_t operand_index) const override;
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
@@ -44,13 +46,14 @@ public:
   ImageLoadMipVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_resource = &rsrc;
+    modifiers.image_reads_address = inst_.dmask;
     modifiers.image_address = &vaddr;
     modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
     if (inst_.d16)
-      modifiers.set_packed_image_result(std::popcount(uint32_t{inst_.dmask}),
-                                        vdata.size_bits() / 32);
+      modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, true));
   }
   bool should_print_src_operand(uint8_t operand_index) const override;
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
@@ -103,6 +106,10 @@ public:
   ImageStoreVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_store_data = &vdata;
+    modifiers.image_transfer_dim = inst_.dim;
+    modifiers.image_resource = &rsrc;
+    modifiers.image_reads_address = inst_.dmask;
     modifiers.image_address = &vaddr;
     modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
     modifiers.image_a16 = inst_.a16;
@@ -124,6 +131,9 @@ public:
   ImageStoreMipVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_store_data = &vdata;
+    modifiers.image_resource = &rsrc;
+    modifiers.image_reads_address = inst_.dmask;
     modifiers.image_address = &vaddr;
     modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
     modifiers.image_a16 = inst_.a16;
@@ -320,6 +330,13 @@ class ImageGetResinfoVimage
 public:
   ImageGetResinfoVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_resource_info = true;
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates[0] = inst_.vaddr0;
+    modifiers.image_coordinate_count = inst_.dmask != 0;
+    modifiers.image_a16 = inst_.a16;
+  }
   void append_src_operand(std::string &out, uint8_t index) const override {
     if (index == 1 && inst_.r128) {
       out += Operand(256, OperandType::OPR_SREG, src_operand(1)->encoding_value()).name();
