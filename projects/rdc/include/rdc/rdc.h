@@ -1670,7 +1670,8 @@ typedef int (*rdc_policy_register_callback)(rdc_policy_callback_response_t* user
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  *  @retval ::RDC_ST_CONFLICT On a handle from rdc_connect(): a callback is
- *  already registered for the group.
+ *  already registered for the group, or rdc_policy_unregister() for the group
+ *  has not returned yet.
  *  @retval ::RDC_ST_INSUFF_RESOURCES On a handle from rdc_connect(): the
  *  thread for the callback could not start.
  */
@@ -1682,8 +1683,9 @@ rdc_status_t rdc_policy_register(rdc_handle_t p_rdc_handle, rdc_gpu_group_t grou
  *
  *  @details Un-register the policy callback for a condition. On a handle from
  *  rdc_connect(), it waits for a running callback of the group to return.
- *  Called from a callback, it does not wait, and the callback of the group
- *  may run again until rdc_disconnect() returns.
+ *  Called from a callback, it does not wait: a callback of the group that is
+ *  running or about to run can still run after it returns, also once the
+ *  group is registered again.
  *
  *  @param[in] p_rdc_handle The RDC handler.
  *

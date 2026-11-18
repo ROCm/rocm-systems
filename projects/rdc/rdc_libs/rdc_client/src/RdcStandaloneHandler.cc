@@ -23,6 +23,7 @@ THE SOFTWARE.
 
 #include <grpcpp/grpcpp.h>
 
+#include <algorithm>
 #include <future>
 
 #include "rdc.grpc.pb.h"  // NOLINT
@@ -88,6 +89,21 @@ RdcStandaloneHandler::~RdcStandaloneHandler() {
 void RdcStandaloneHandler::stop_policy_stream(policy_stream* stream) {
   stream->stop = true;
   stream->context.TryCancel();
+}
+
+void RdcStandaloneHandler::join_done_readers() {
+  std::vector<std::shared_ptr<policy_stream>> done;
+  {
+    std::lock_guard<std::mutex> guard(policy_streams_mutex_);
+    auto first_done = std::partition(draining_.begin(), draining_.end(),
+                                     [](const auto& stream) { return !stream->done; });
+    done.assign(first_done, draining_.end());
+    draining_.erase(first_done, draining_.end());
+  }
+  // Their readers have left their loops, so these joins do not wait for a callback.
+  for (auto& stream : done) {
+    stream->reader.join();
+  }
 }
 
 rdc_status_t RdcStandaloneHandler::error_handle(::grpc::Status status, uint32_t rdc_status) {
@@ -939,8 +955,9 @@ rdc_status_t RdcStandaloneHandler::rdc_policy_delete(rdc_gpu_group_t group_id,
 
 rdc_status_t RdcStandaloneHandler::rdc_policy_register(rdc_gpu_group_t group_id,
                                                        rdc_policy_register_callback callback) {
+  join_done_readers();
   std::lock_guard<std::mutex> guard(policy_streams_mutex_);
-  if (policy_streams_.count(group_id) != 0) {
+  if (policy_streams_.count(group_id) != 0 || unregistering_.count(group_id) != 0) {
     return RDC_ST_CONFLICT;
   }
 
@@ -979,6 +996,7 @@ rdc_status_t RdcStandaloneHandler::rdc_policy_register(rdc_gpu_group_t group_id,
       }
 
       reader->Finish();
+      s->done = true;
     });
   } catch (...) {  // std::system_error or std::bad_alloc
     policy_streams_.erase(group_id);
@@ -995,11 +1013,12 @@ rdc_status_t RdcStandaloneHandler::rdc_policy_unregister(rdc_gpu_group_t group_i
 
   // A callback cannot wait for its own reader, or for another reader that
   // may be waiting for it, so from a callback the stream goes to draining_
-  // for the destructor to join.
+  // for rdc_policy_register() or the destructor to join.
   const bool from_callback = t_in_policy_reader;
   std::shared_ptr<policy_stream> stream;
   {
     std::lock_guard<std::mutex> guard(policy_streams_mutex_);
+    ++unregistering_[group_id];
     auto it = policy_streams_.find(group_id);
     if (it != policy_streams_.end()) {
       stream = it->second;
@@ -1018,6 +1037,13 @@ rdc_status_t RdcStandaloneHandler::rdc_policy_unregister(rdc_gpu_group_t group_i
     stop_policy_stream(stream.get());
     if (!from_callback && stream->reader.joinable()) {
       stream->reader.join();
+    }
+  }
+  {
+    std::lock_guard<std::mutex> guard(policy_streams_mutex_);
+    auto it = unregistering_.find(group_id);
+    if (--it->second == 0) {
+      unregistering_.erase(it);
     }
   }
 

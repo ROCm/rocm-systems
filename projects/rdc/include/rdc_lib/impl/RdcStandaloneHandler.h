@@ -157,17 +157,23 @@ class RdcStandaloneHandler : public RdcHandler {
   // callback. The thread holds a reference, so the stream outlives it.
   struct policy_stream {
     std::atomic<bool> stop{false};
+    std::atomic<bool> done{false};  // the reader has left its loop
     ::grpc::ClientContext context;  // TryCancel() ends a blocked Read()
     std::thread reader;
   };
   // Makes the reader leave its loop; it does not wait for it.
   static void stop_policy_stream(policy_stream* stream);
+  // Joins the readers in draining_ that are done.
+  void join_done_readers();
 
-  // Guards policy_streams_ and draining_. A stream is in one of them, or
-  // held by the rdc_policy_unregister() call that joins it.
+  // Guards policy_streams_, unregistering_ and draining_. A stream is in
+  // policy_streams_ or draining_, or held by the call that joins it.
   std::mutex policy_streams_mutex_;
   std::map<uint32_t, std::shared_ptr<policy_stream>> policy_streams_;
-  // Streams unregistered from a callback, joined by the destructor.
+  // Per group, the rdc_policy_unregister() calls that have not returned. rdcd
+  // unregisters by group, so the group cannot be registered again until then.
+  std::map<uint32_t, int> unregistering_;
+  // Streams unregistered from a callback, joined once done or by the destructor.
   std::vector<std::shared_ptr<policy_stream>> draining_;
 };
 

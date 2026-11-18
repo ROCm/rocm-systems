@@ -17,6 +17,7 @@ import pytest
 from test_fake_gpu import FACTOR, PREFIX, Rdcd, _created_id, tools  # noqa: F401 (fixture)
 
 NOTIFICATION = "A Temperature Limit exceeds the threshold 1 with the value"
+RDC_ST_CONFLICT = 7  # rdc_status_t in include/rdc/rdc.h
 
 
 @pytest.fixture
@@ -97,10 +98,8 @@ def test_registered_rdci_exits_cleanly_on_sigint(rdcd):
 CALLBACK = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)
 
 
-def test_callbacks_can_unregister_groups(rdcd):
-    """Through the C API: a callback unregisters its own group, then two
-    callbacks unregister each other's group at the same time, then
-    rdc_disconnect() runs while a callback is registered. None may hang."""
+def _connect(d):
+    """librdc_bootstrap through ctypes, and a handle connected to `d`."""
     lib = ctypes.CDLL(os.path.join(PREFIX, "lib", "librdc_bootstrap.so"))
     lib.rdc_init.argtypes = [ctypes.c_uint64]
     lib.rdc_connect.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_void_p)] + [
@@ -109,11 +108,19 @@ def test_callbacks_can_unregister_groups(rdcd):
     lib.rdc_policy_register.argtypes = [ctypes.c_void_p, ctypes.c_uint32, CALLBACK]
     lib.rdc_policy_unregister.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
     lib.rdc_disconnect.argtypes = [ctypes.c_void_p]
-    a, b = _policy_group(rdcd), _policy_group(rdcd)
     handle = ctypes.c_void_p()
     assert lib.rdc_init(0) == 0
-    host = f"127.0.0.1:{rdcd.port}".encode()
+    host = f"127.0.0.1:{d.port}".encode()
     assert lib.rdc_connect(host, ctypes.byref(handle), None, None, None) == 0
+    return lib, handle
+
+
+def test_callbacks_can_unregister_groups(rdcd):
+    """Through the C API: a callback unregisters its own group, then two
+    callbacks unregister each other's group at the same time, then
+    rdc_disconnect() runs while a callback is registered. None may hang."""
+    a, b = _policy_group(rdcd), _policy_group(rdcd)
+    lib, handle = _connect(rdcd)
     callbacks, results = [], {}  # callbacks must outlive their registration
     wait = 10 * FACTOR
 
@@ -165,3 +172,90 @@ def test_callbacks_can_unregister_groups(rdcd):
         # Also after a failure: the readers stop before the callbacks go away.
         disconnected = lib.rdc_disconnect(handle)
     assert disconnected == 0
+
+
+def test_registering_waits_for_an_unregister_to_return(rdcd):
+    """Through the C API: while rdc_policy_unregister() waits for a running
+    callback of the group, registering the group fails with RDC_ST_CONFLICT.
+    rdcd unregisters by group, so the old unregister could otherwise end the
+    new stream. Once it returns, registering works."""
+    group = _policy_group(rdcd)
+    lib, handle = _connect(rdcd)
+    wait = 10 * FACTOR
+    in_callback, release, called_again = threading.Event(), threading.Event(), threading.Event()
+
+    def blocking(_):
+        if not in_callback.is_set():
+            in_callback.set()
+            release.wait(wait)
+        return 0
+
+    callbacks = [
+        CALLBACK(blocking),
+        CALLBACK(lambda _: 0),
+        CALLBACK(lambda _: called_again.set() or 0),
+    ]
+    results = {}
+    unregistering = threading.Thread(
+        target=lambda: results.update(unregister=lib.rdc_policy_unregister(handle, group))
+    )
+    disconnected = None
+    try:
+        assert lib.rdc_policy_register(handle, group, callbacks[0]) == 0
+        assert in_callback.wait(wait), "no callback"
+        unregistering.start()
+        time.sleep(1 * FACTOR)  # rdcd ends the stream; the unregister waits for the callback
+        results["register"] = lib.rdc_policy_register(handle, group, callbacks[1])
+        release.set()
+        unregistering.join(wait)
+        assert results == {"register": RDC_ST_CONFLICT, "unregister": 0}, results
+        assert lib.rdc_policy_register(handle, group, callbacks[2]) == 0
+        assert called_again.wait(wait), "no callback after registering again"
+    finally:
+        release.set()
+        disconnected = lib.rdc_disconnect(handle)
+    assert disconnected == 0
+
+
+def test_readers_unregistered_from_callbacks_are_joined(rdcd):
+    """Through the C API: a group registered again and again, whose callback
+    unregisters it. rdc_policy_register() joins the readers of those streams
+    once they are done, so their thread stacks do not pile up until
+    rdc_disconnect()."""
+    group = _policy_group(rdcd)
+    lib, handle = _connect(rdcd)
+    wait = 10 * FACTOR
+    callbacks, results = [], []
+
+    def cycle():
+        unregistered = threading.Event()
+
+        def callback(_):
+            if not unregistered.is_set():
+                results.append(lib.rdc_policy_unregister(handle, group))
+                unregistered.set()
+            return 0
+
+        callbacks.append(CALLBACK(callback))
+        assert lib.rdc_policy_register(handle, group, callbacks[-1]) == 0
+        assert unregistered.wait(wait), "no callback"
+
+    def guard_pages():
+        # glibc puts a PROT_NONE guard page below each thread stack.
+        with open("/proc/self/maps") as f:
+            return sum(1 for line in f if line.split()[1] == "---p")
+
+    disconnected = None
+    try:
+        for _ in range(4):
+            cycle()
+        before = guard_pages()
+        for _ in range(16):
+            cycle()
+        grown = guard_pages() - before
+    finally:
+        disconnected = lib.rdc_disconnect(handle)
+    assert disconnected == 0
+    assert results == [0] * 20, results
+    if "asan" not in os.environ.get("LD_PRELOAD", ""):  # ASan maps memory per thread too
+        assert grown < 6, f"{grown} more guard pages after 16 more registrations"
