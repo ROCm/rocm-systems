@@ -538,7 +538,8 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_TwoShotGridFollowsShardPackets) {
   EXPECT_EQ(RunOneLL(8 * 1536).grid.x, 1u);
 }
 
-// Two-shot LL above 8 MiB: a block per 1024 packets of one shard, which the reporter also returns.
+// Two-shot LL above 8 MiB, or above 4 MiB once a shard reaches 1 MiB: a block per 1024 packets of one shard, which
+// the reporter also returns.
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_TwoShotWideBlocksAbove8MiB) {
   g_rcclDdaLLTwoShotThreshold = [](const ncclComm*) { return size_t{64} << 20; };
   comm().ddaScratchBytes = 1u << 30;
@@ -553,6 +554,11 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_TwoShotWideBlocksAbove8MiB) {
   EXPECT_EQ(Only().grid.x, 65u);
   EXPECT_EQ(ncclAllReduceDdaFabricLLBlocks(mock_.get(), above, ncclFloat32), 65u);
   EXPECT_EQ(RunOneLL(above, ncclFloat32, {0, 256}).block.x, 256u) << "a thread cap still narrows it";
+  comm().nRanks = 8;
+  EXPECT_EQ(RunOneLL(at).block.x, 1024u) << "8 ranks: 1 MiB shards at 8 MiB";
+  EXPECT_EQ(RunOneLL(Floats(4 << 20)).block.x, 256u) << "8 ranks: 512 KiB shards";
+  comm().nRanks = 4;
+  EXPECT_EQ(RunOneLL(Floats(4 << 20)).block.x, 256u) << "4 ranks: 1 MiB shards at 4 MiB";
 }
 
 // With no ddaNarrowThreads (DPX, larger SPX comms, no table) every tier keeps its wide blocks: 512 one-shot, 1024

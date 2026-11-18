@@ -61,9 +61,13 @@ constexpr unsigned kDdaArLLOneShotThreads = 512;
 constexpr unsigned kDdaArLLTwoShotThreads = 1024;
 constexpr unsigned kDdaArLL128Threads = 512;
 
-// Two-shot messages above this keep kDdaArLLTwoShotThreads under ddaNarrowThreads: on 16 ranks, 1024 beats 256 by 7%
-// at 16M, while 256 beats 1024 by 5-44% from 2M to 8M on 4, 8 and 16 ranks.
+// Under ddaNarrowThreads the two-shot runs narrow blocks up to kDdaArLLTwoShotNarrowAllBytes, then up to
+// kDdaArLLTwoShotNarrowMaxBytes while a rank's shard is below kDdaArLLTwoShotNarrowMaxShardBytes, else
+// kDdaArLLTwoShotThreads: 1024 beats 256 by 7% at 16M on 16 ranks and 4% at 8M on 8, while 256 beats 1024 by 5-44% at
+// 2M-4M on 4-32 ranks and at 8M on 16 and 32.
+constexpr size_t kDdaArLLTwoShotNarrowAllBytes = 4 * 1024 * 1024;
 constexpr size_t kDdaArLLTwoShotNarrowMaxBytes = 8 * 1024 * 1024;
+constexpr size_t kDdaArLLTwoShotNarrowMaxShardBytes = 1024 * 1024;
 
 static inline unsigned ddaArLLOneShotThreads(const ncclComm* comm) {
   const int narrow = rcclDdaFabricNarrowThreads(comm);
@@ -91,9 +95,11 @@ static inline std::pair<dim3, dim3> ddaArLLOneShotGeom(const ncclComm* comm, siz
 // LL two-shot: 8-byte packets of one shard, one thread each.
 static inline std::pair<dim3, dim3> ddaArLLTwoShotGeom(const ncclComm* comm, size_t bytes, rcclDdaLaunchCap cap) {
   const int narrow = rcclDdaFabricNarrowThreads(comm);
-  const unsigned threads =
-    narrow > 0 && bytes <= kDdaArLLTwoShotNarrowMaxBytes ? (unsigned)narrow : kDdaArLLTwoShotThreads;
-  return ddaArFabricLLGrid(comm, (bytes >> 3) / (size_t)std::max(comm->nRanks, 1), threads, 1, cap);
+  const size_t nRanks = (size_t)std::max(comm->nRanks, 1);
+  const bool narrowFits = bytes <= kDdaArLLTwoShotNarrowAllBytes ||
+                          (bytes <= kDdaArLLTwoShotNarrowMaxBytes && bytes / nRanks < kDdaArLLTwoShotNarrowMaxShardBytes);
+  const unsigned threads = narrow > 0 && narrowFits ? (unsigned)narrow : kDdaArLLTwoShotThreads;
+  return ddaArFabricLLGrid(comm, (bytes >> 3) / nRanks, threads, 1, cap);
 }
 
 // LL128 one-shot: slices of the whole message, one warp each.
