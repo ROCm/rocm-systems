@@ -182,7 +182,7 @@ typedef struct rocprofiler_agent_v0_t
                                           ///< capabilities
     uint32_t max_engine_clk_fcompute;    ///< GPU only. Maximum engine clocks for GPU, including any
                                          ///< boost capabilities
-    HSA_ENGINE_VERSION sdma_fw_version;  ///< GPU only. SDMA and compute microcode
+    HSA_ENGINE_VERSION fw_version;       ///< GPU only. SDMA and compute microcode
     HSA_GFXIP_VERSION  gfxip_version;    ///< GPU only. GFXIP version, may be 0
     HSA_CAPABILITY     capability;        ///< GPU only
     uint32_t           cu_per_engine;     ///< computed
@@ -213,7 +213,7 @@ typedef struct rocprofiler_agent_v0_t
 
     /// @var gfxip_version
     /// @brief GPU only. GFXIP major, minor, and stepping. Compute microcode is
-    /// sdma_fw_version.uCodeCompute. May be 0.
+    /// fw_version.uCodeCompute. May be 0.
     ///
     /// @var hive_id
     /// @brief XGMI Hive the GPU node belongs to in the system. It is an opaque and

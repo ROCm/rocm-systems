@@ -189,7 +189,7 @@
                                     "type": "integer",
                                     "description": "Maximum engine clock for F compute"
                                 },
-                                "sdma_fw_version": {
+                                "fw_version": {
                                     "type": "object",
                                     "description": "SDMA firmware version",
                                     "properties": {

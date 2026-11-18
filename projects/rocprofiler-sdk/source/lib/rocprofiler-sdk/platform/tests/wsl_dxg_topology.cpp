@@ -151,8 +151,8 @@ TEST(wsl_dxg_topology, identity_fields_are_copied)
     EXPECT_EQ(info.gfxip_version.ui32.Major, 11u);
     EXPECT_EQ(info.gfxip_version.ui32.Minor, 5u);
     EXPECT_EQ(info.gfxip_version.ui32.Stepping, 0u);
-    EXPECT_EQ(info.sdma_fw_version.uCodeCompute, 42u);
-    EXPECT_EQ(info.sdma_fw_version.uCodeSDMA, 17u);
+    EXPECT_EQ(info.fw_version.uCodeCompute, 42u);
+    EXPECT_EQ(info.fw_version.uCodeSDMA, 17u);
     EXPECT_EQ(info.max_engine_clk_fcompute, 2900u);
 
     auto uuid_low = uint64_t{0};
