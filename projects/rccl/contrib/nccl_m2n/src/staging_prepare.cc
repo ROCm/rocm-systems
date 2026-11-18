@@ -536,11 +536,15 @@ ncclResult_t buildStagingTransferDescriptor(
 
       int numSourcesToDstShard = 0;
       int myPosition = 0;
+      int firstSourceShard = -1;
       for (int ss = 0; ss < srcShardCount; ss++) {
         ncclReshardTransferPlan check;
         NCCL_M2N_CHECK(computeTransferPlanChecked(srcDims, srcStrides, srcShardLayout, ss, dstDims, dstStrides,
                                                   dstShardLayout, dstShard, ndims, epc_dummy, &check));
         if (check.totalInnerTransfers > 0) {
+          if (firstSourceShard < 0) {
+            firstSourceShard = ss;
+          }
           if (ss < srcInfo.shardIdx) {
             myPosition++;
           }
@@ -584,6 +588,7 @@ ncclResult_t buildStagingTransferDescriptor(
 
       desc->destNumSources[ti] = numSourcesToDstShard;
       desc->sourceIndexOnDest[ti] = myPosition;
+      desc->destChannelGroupBase[ti] = firstSourceShard + dstShard;
       desc->destNumRdmaSources[ti] = leaderSourceEnd - leaderSourceStart;
       desc->rdmaSourceIndexOnDest[ti] = myPosition - leaderSourceStart;
 
@@ -671,6 +676,7 @@ ncclResult_t buildStagingTransferDescriptor(
                     "MAX_SOURCES",
                     numAllSources, MAX_SOURCES);
     }
+    desc->channelGroupBase = (numAllSources > 0 ? allSourceShards[0] : 0) + dstInfo.shardIdx;
 
     int mySourceStart = 0, mySourceEnd = 0;
     int sourceRepSlots = firstNodeLocalReps > 0 ? firstNodeLocalReps : numLocalReps;
@@ -848,23 +854,6 @@ ncclResult_t buildStagingTransferDescriptor(
       }
     }
 
-    auto sourceTargetIndexForDstShard = [&](int ss, int targetDstShard) -> int {
-      int srcTargetCount = 0;
-      for (int ds = 0; ds < dstShardCount; ds++) {
-        ncclReshardTransferPlan dsPlan;
-        computeTransferPlan(srcDims, srcStrides, srcShardLayout, ss, dstDims, dstStrides, dstShardLayout, ds, ndims,
-                            epc_dummy, &dsPlan);
-        if (dsPlan.totalInnerTransfers == 0) {
-          continue;
-        }
-        if (ds == targetDstShard) {
-          return srcTargetCount;
-        }
-        srcTargetCount++;
-      }
-      return 0;
-    };
-
     /* Populate sources[] in shard order, classifying RDMA vs LSA. */
     desc->numSources = 0;
     for (int idx = 0; idx < numAllSources; idx++) {
@@ -927,7 +916,6 @@ ncclResult_t buildStagingTransferDescriptor(
           int ringPrevLsaCount = ringPrevNumRdma * (ringPrevNumLocalReps - 1);
           desc->targetIndexOnSource[si] = ringPrevLsaCount + k;
           desc->rdmaTargetIndexOnSource[si] = k;
-          desc->channelTargetIndexOnSource[si] = sourceTargetIndexForDstShard(ss, dstInfo.shardIdx);
           desc->sourceNumTargets[si] = ringPrevNumRdma * ringPrevNumLocalReps;
           desc->sourceNumRdmaTargets[si] = ringPrevNumRdma;
         } else {
@@ -994,7 +982,6 @@ ncclResult_t buildStagingTransferDescriptor(
           sourceNumTargetsCount = srcTargetCount;
           desc->targetIndexOnSource[si] = myTargetIdxOnSource;
           desc->rdmaTargetIndexOnSource[si] = myTargetIdxOnSource;
-          desc->channelTargetIndexOnSource[si] = desc->targetIndexOnSource[si];
           desc->sourceNumTargets[si] = sourceNumTargetsCount;
           desc->sourceNumRdmaTargets[si] = sourceNumTargetsCount;
         }
@@ -1066,8 +1053,6 @@ ncclResult_t buildStagingTransferDescriptor(
         }
 
         desc->targetIndexOnSource[si] = handlerTargetIdxOnSource;
-        desc->channelTargetIndexOnSource[si] =
-          (ringPrevRank != -1) ? sourceTargetIndexForDstShard(ss, dstInfo.shardIdx) : handlerTargetIdxOnSource;
         desc->sourceNumTargets[si] = providerNumRdma * std::max(0, numLocalReps - 1);
         desc->sourceLsaHeadIndexOnProvider[si] = lsaTargetIdxOnProvider;
       }
@@ -1121,6 +1106,7 @@ ncclResult_t buildStagingTransferDescriptor(
 
         desc->destNumSources[ti] = numAllSources;
         desc->sourceIndexOnDest[ti] = idx;
+        desc->destChannelGroupBase[ti] = desc->channelGroupBase;
 
         RESHARD_TRACE(worldRank,
                       "  DST lsa_target[%d]: repRank=%d "
@@ -1156,6 +1142,7 @@ ncclResult_t buildStagingTransferDescriptor(
 
         desc->destNumSources[ti] = numAllSources;
         desc->sourceIndexOnDest[ti] = idx;
+        desc->destChannelGroupBase[ti] = desc->channelGroupBase;
         desc->destNumRdmaSources[ti] = ringNextNumRdma;
         desc->rdmaSourceIndexOnDest[ti] = idx - ringNextSrcStart;
         NCCL_M2N_CHECK_ARG(
@@ -1370,7 +1357,6 @@ ncclResult_t buildStagingDirectTransferDescriptor(ncclComm_t globalComm, void* s
 
       desc->targetIndexOnSource[si] = overlappingBeforeMe * numTargetReps + (dstInfo.repIdx - targetRepStart);
       desc->rdmaTargetIndexOnSource[si] = desc->targetIndexOnSource[si];
-      desc->channelTargetIndexOnSource[si] = desc->targetIndexOnSource[si];
       desc->sourceNumTargets[si] = totalOverlapping * numTargetReps;
       desc->sourceNumRdmaTargets[si] = desc->sourceNumTargets[si];
     }

@@ -387,13 +387,16 @@ struct StagingTransferDescriptor {
   int sourceIndexOnDest[MAX_TARGETS];
   int destNumRdmaSources[MAX_TARGETS];
   int rdmaSourceIndexOnDest[MAX_TARGETS];
+  /* PIPE channel group of the edge from a dest shard's s-th source is
+   * (s + base) % groups, base = the dest's first source shard + dest shard.
+   * base is constant on a receiver; for contiguous sources s + base = source
+   * shard + dest shard, which keeps a source shard's edges in distinct groups. */
+  int destChannelGroupBase[MAX_TARGETS];
+  int channelGroupBase;
   /* targetIndexOnSource is the remote producer's full target slot for data
-   * placement; rdmaTargetIndexOnSource is its compact GIN ordinal.
-   * channelTargetIndexOnSource is the producer-side edge used for channel
-   * grouping; ring forwarding needs these to differ. */
+   * placement; rdmaTargetIndexOnSource is its compact GIN ordinal. */
   int targetIndexOnSource[MAX_SOURCES];
   int rdmaTargetIndexOnSource[MAX_SOURCES];
-  int channelTargetIndexOnSource[MAX_SOURCES];
   int sourceNumTargets[MAX_SOURCES];
   int sourceNumRdmaTargets[MAX_SOURCES];
   int sourceLsaHeadIndexOnProvider[MAX_SOURCES];
