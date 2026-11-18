@@ -538,6 +538,7 @@ BlitKernel::BlitKernel(core::Queue* queue)
       kernarg_async_(NULL),
       kernarg_async_mask_(0),
       kernarg_async_counter_(0),
+      kernarg_payload_(NULL),
       bytes_queued_(0),
       last_queued_(0),
       pending_search_index_(0),
@@ -580,7 +581,8 @@ hsa_status_t BlitKernel::Initialize(const core::Agent& agent) {
   static const KernelShader kernel_shaders[] = {{KernelType::CopyAligned, "CopyAligned"},
                                                 {KernelType::CopyMisaligned, "CopyMisaligned"},
                                                 {KernelType::Fill, "Fill"},
-                                                {KernelType::SwapCopy, "SwapCopy"}};
+                                                {KernelType::SwapCopy, "SwapCopy"},
+                                                {KernelType::BroadcastCopy, "BroadcastCopy"}};
 
   for (const KernelShader& kernel_shader : kernel_shaders) {
     if (!gpuAgent->IsShaderAvailable(kernel_shader.name)) continue;
@@ -622,6 +624,12 @@ hsa_status_t BlitKernel::Destroy() {
 
   if (kernarg_async_ != NULL) {
     gpuAgent->system_deallocator()(kernarg_async_);
+  }
+
+  void* kernarg_payload = kernarg_payload_.load(std::memory_order_relaxed);
+  if (kernarg_payload != NULL) {
+    gpuAgent->system_deallocator()(kernarg_payload);
+    kernarg_payload_.store(NULL, std::memory_order_relaxed);
   }
 
   if (completion_signal_.handle != 0) {
@@ -706,7 +714,19 @@ void BlitKernel::SubmitDependentSignalBarriers(uint64_t barrier_start_index,
       std::atomic_thread_fence(std::memory_order_acquire);
       queue_buffer[(barrier_index)&queue_bitmask_] = barrier_packet;
       std::atomic_thread_fence(std::memory_order_release);
-      queue_buffer[(barrier_index)&queue_bitmask_].header = kBarrierPacketHeader;
+      if (queue_->IsDeviceMemRingBuf() && queue_->needsPcieOrdering()) {
+        // Ensure the packet body is written as header may get reordered when writing over PCIE
+        store_fence();
+      }
+      // Orders the dependent signal handles ahead of the header that makes this
+      // slot a live barrier, and keeps the store itself indivisible.
+#if defined(__linux__)
+      __atomic_store_n(&(queue_buffer[(barrier_index)&queue_bitmask_].header), kBarrierPacketHeader,
+                       __ATOMIC_RELEASE);
+#else
+      std::atomic_ref<uint16_t> atomic_header(queue_buffer[(barrier_index)&queue_bitmask_].header);
+      atomic_header.store(kBarrierPacketHeader, std::memory_order_release);
+#endif
 
       LogPrint(HSA_AMD_LOG_FLAG_AQL,
       "HWq=%p, id=%lu, Barrier Header = "
@@ -1008,13 +1028,17 @@ void BlitKernel::PopulateQueue(uint64_t index, uint64_t code_handle, void* args,
     completion_signal.handle, queue_->LoadReadIndexRelaxed(), index);
 }
 
-BlitKernel::KernelArgs* BlitKernel::ObtainAsyncKernelCopyArg() {
-  const uint32_t index =
-      atomic::Add(&kernarg_async_counter_, 1U, std::memory_order_acquire) & kernarg_async_mask_;
+BlitKernel::KernelArgs* BlitKernel::ObtainAsyncKernelCopyArg(uint32_t& index) {
+  index = atomic::Add(&kernarg_async_counter_, 1U, std::memory_order_acquire) & kernarg_async_mask_;
 
   KernelArgs* arg = &kernarg_async_[index];
   assert(IsMultipleOf(arg, 16));
   return arg;
+}
+
+BlitKernel::KernelArgs* BlitKernel::ObtainAsyncKernelCopyArg() {
+  uint32_t index;
+  return ObtainAsyncKernelCopyArg(index);
 }
 
 void BlitKernel::RecordBlitHistory(uint64_t size, uint64_t index) {
@@ -1148,6 +1172,214 @@ hsa_status_t BlitKernel::DeferUntilDepsResolved(const std::vector<core::Signal*>
   for (size_t i = 0; i < pending_deps.size(); ++i) {
     core::Runtime::runtime_singleton_->SetAsyncSignalHandler(
         core::Signal::Convert(pending_deps[i]), HSA_SIGNAL_CONDITION_EQ, 0, handler, op);
+  }
+
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t BlitKernel::EnsureKernargPayloadRing(void*& ring) {
+  ring = kernarg_payload_.load(std::memory_order_acquire);
+  if (ring != NULL) return HSA_STATUS_SUCCESS;
+
+  std::lock_guard<std::mutex> guard(kernarg_payload_lock_);
+  ring = kernarg_payload_.load(std::memory_order_relaxed);
+  if (ring != NULL) return HSA_STATUS_SUCCESS;
+
+  // One slot per kernarg ring entry, so a slot is recycled on exactly the
+  // bound that makes kernarg reuse safe and on no stronger one: the queue's
+  // read index has to pass the owning dispatch first. Allocated on first use
+  // because most agents never run an
+  // operation that needs a payload and the ring is not small.
+  const size_t ring_size = size_t(kernarg_async_mask_ + 1) * kKernargPayloadBytesPerSlot;
+
+  const AMD::GpuAgent* gpuAgent = static_cast<const AMD::GpuAgent*>(agent_);
+  void* buf = gpuAgent->system_allocator()(ring_size, 16, core::MemoryRegion::AllocateNoFlags);
+  if (buf == NULL) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+  ring = buf;
+  kernarg_payload_.store(ring, std::memory_order_release);
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t BlitKernel::SubmitBroadcastCopyCommand(const void* src, void* const* dst_list,
+                                                    uint32_t num_destinations, size_t size,
+                                                    std::vector<core::Signal*>& dep_signals,
+                                                    core::Signal& out_signal) {
+  // Initialize() registers a kernel only where its shader is built for this
+  // ISA, so presence is the capability.
+  if (kernels_.count(KernelType::BroadcastCopy) == 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  if (src == NULL || dst_list == NULL || num_destinations == 0 ||
+      num_destinations > kMaxBroadcastDestinations) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  for (uint32_t i = 0; i < num_destinations; ++i) {
+    if (dst_list[i] == NULL) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // Rejected rather than completed as a no-op, so that this agrees with the
+  // SDMA broadcast, which refuses a zero-sized transfer. Serving it here would
+  // make the same request succeed or fail according to the engine selected.
+  // The public entry point rejects it before reaching any engine; this keeps
+  // the two paths consistent for an internal caller as well.
+  if (size == 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  void* payload_ring = NULL;
+  hsa_status_t status = EnsureKernargPayloadRing(payload_ring);
+  if (status != HSA_STATUS_SUCCESS) return status;
+
+  // A dispatch covers at most kMaxBroadcastDstPerDispatch destinations and at
+  // most kMaxBroadcastBytesPerDispatch bytes of each, so a request is split
+  // along both axes. Splitting rather than rejecting keeps both the accepted
+  // destination count and the accepted transfer size the same as the SDMA
+  // routing's, so an application does not see a broadcast succeed or fail
+  // depending on which engine served it.
+  const uint64_t dst_groups =
+      (num_destinations + kMaxBroadcastDstPerDispatch - 1) / kMaxBroadcastDstPerDispatch;
+  const uint64_t size_slices =
+      (size + kMaxBroadcastBytesPerDispatch - 1) / kMaxBroadcastBytesPerDispatch;
+  const uint64_t total_dispatches = dst_groups * size_slices;
+
+  // Not reachable with any transfer a host can address - it needs a size above
+  // 2^58 bytes - but the dispatch count is carried in 32-bit quantities below
+  // and must not be allowed to wrap into a short submission.
+  if (total_dispatches > UINT32_MAX) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+  // Dispatch g drives destination group (g / size_slices) over the byte range
+  // of slice (g % size_slices). Grouping the slices of one destination group
+  // together keeps the destination list of consecutive dispatches identical
+  // apart from the offset applied to it.
+  struct Slice {
+    uint32_t first_dst;
+    uint32_t dst_count;
+    size_t offset;
+    size_t bytes;
+  };
+  const auto slice_at = [&](uint64_t g) {
+    Slice s;
+    s.first_dst = uint32_t(g / size_slices) * kMaxBroadcastDstPerDispatch;
+    s.dst_count = std::min(kMaxBroadcastDstPerDispatch, num_destinations - s.first_dst);
+    s.offset = size_t(g % size_slices) * kMaxBroadcastBytesPerDispatch;
+    s.bytes = std::min(kMaxBroadcastBytesPerDispatch, size - s.offset);
+    return s;
+  };
+
+  const uint32_t num_barrier_packet = uint32_t((dep_signals.size() + 4) / 5);
+
+  // As in the swap path, a batch that spans reservations must not also carry
+  // dependency barriers - see DeferUntilDepsResolved for why the combination
+  // cannot make progress. A broadcast needs over a thousand destinations per
+  // queue slot to reach this bound at all, so the direct path keeps the
+  // overwhelming majority of them either way.
+  //
+  // Every dependency is deferred on, including any that currently reads zero,
+  // for the same reason as the swap path: testing the value here would be
+  // reading a signal another thread is free to re-raise, and the batch would
+  // then emit barriers it had decided it did not need and spin forever
+  // acquiring its second reservation.
+  if (total_dispatches > MaxDispatchesPerReservation(num_barrier_packet) &&
+      !dep_signals.empty()) {
+    // The destination list is copied because it now outlives this call. The
+    // ring is already allocated above, so the resubmission below is past
+    // every path that could still fail and has no caller left to tell.
+    std::vector<void*> dsts(dst_list, dst_list + num_destinations);
+    core::Signal* out = &out_signal;
+    return DeferUntilDepsResolved(
+        dep_signals,
+        [this, src, dsts, size, out]() {
+          std::vector<core::Signal*> no_deps;
+          SubmitBroadcastCopyCommand(src, dsts.data(), uint32_t(dsts.size()), size, no_deps,
+                                     *out);
+        },
+        // Nothing was submitted and nothing raised the signal, so the caller's
+        // own count of one is all that stands between it and completion.
+        [out]() { out->SubRelease(1); });
+  }
+
+  // No reservation the loop takes can be larger than this. Checking it once up
+  // front means the loop cannot fail part way and leave the completion signal
+  // raised for a dispatch that was never submitted.
+  if (!ReservationFits(num_barrier_packet + MaxDispatchesPerReservation(num_barrier_packet)))
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+  // Every dispatch carries out_signal and so decrements it once on retirement.
+  // The caller has set it to 1, so raise it by the extra dispatches before any
+  // packet is made visible to the packet processor. Relaxed is sufficient: the
+  // release fence in ReleaseWriteIndex orders this ahead of the doorbell, and
+  // no dispatch exists to observe it before then.
+  if (total_dispatches > 1)
+    out_signal.AddRelaxed(hsa_signal_value_t(total_dispatches - 1));
+
+  // All validation is done above, so the loop below cannot fail part way and
+  // leave the signal raised for a dispatch that was never submitted.
+  uint64_t dispatched = 0;
+  bool barriers_pending = (num_barrier_packet != 0);
+
+  while (dispatched < total_dispatches) {
+    const uint32_t barriers_now = barriers_pending ? num_barrier_packet : 0;
+    const uint32_t dispatches_now = uint32_t(std::min<uint64_t>(
+        total_dispatches - dispatched, MaxDispatchesPerReservation(barriers_now)));
+    const uint32_t total_num_packet = barriers_now + dispatches_now;
+
+    // The bytes this reservation moves, summed from the same slice function the
+    // dispatch loop below uses so the two cannot disagree.
+    uint64_t bytes_now = 0;
+    for (uint32_t d = 0; d < dispatches_now; ++d) {
+      const Slice s = slice_at(dispatched + d);
+      bytes_now += uint64_t(s.bytes) * s.dst_count;
+    }
+
+    uint64_t write_index;
+    {
+      std::lock_guard<std::mutex> lock(reservation_lock_);
+      write_index = AcquireWriteIndex(total_num_packet);
+      RecordBlitHistory(bytes_now, write_index + total_num_packet - 1);
+    }
+
+    if (barriers_now != 0) {
+      SubmitDependentSignalBarriers(write_index, dep_signals);
+      barriers_pending = false;
+    }
+
+    for (uint32_t d = 0; d < dispatches_now; ++d) {
+      const Slice slice = slice_at(dispatched + d);
+
+      // One workgroup of kBroadcastWorkgroupSize threads per destination: the
+      // shader keys its destination off workgroup_id_x, and every workgroup
+      // reads this slice of the source in full.
+      const uint32_t total_workitems = kBroadcastWorkgroupSize * slice.dst_count;
+
+      // The destination list travels in the slot of the kernarg ring that this
+      // dispatch owns, so it stays alive exactly as long as the kernarg does
+      // and needs no completion callback to reclaim it.
+      uint32_t kernarg_index;
+      KernelArgs* args = ObtainAsyncKernelCopyArg(kernarg_index);
+      static_assert(size_t(kMaxBroadcastDstPerDispatch) * sizeof(uint64_t) <=
+                        kKernargPayloadBytesPerSlot,
+                    "a broadcast destination list must fit one payload slot");
+      uint64_t* dst_list_gpu =
+          static_cast<uint64_t*>(KernargPayload(payload_ring, kernarg_index));
+
+      // Each address is advanced to this slice's byte range, which is what
+      // lets the shader keep describing a slice with a 32-bit copy_size.
+      for (uint32_t i = 0; i < slice.dst_count; ++i) {
+        dst_list_gpu[i] =
+            reinterpret_cast<uint64_t>(dst_list[slice.first_dst + i]) + slice.offset;
+      }
+
+      args->broadcast.src_addr = reinterpret_cast<uint64_t>(src) + slice.offset;
+      args->broadcast.dst_list_addr = reinterpret_cast<uint64_t>(dst_list_gpu);
+      args->broadcast.num_destinations = slice.dst_count;
+      args->broadcast.copy_size = static_cast<uint32_t>(slice.bytes);
+
+      PopulateQueue(write_index + barriers_now + d,
+                    uintptr_t(kernels_[KernelType::BroadcastCopy].code_buf_), args,
+                    total_workitems, core::Signal::Convert(&out_signal));
+    }
+
+    ReleaseWriteIndex(write_index, total_num_packet);
+    dispatched += dispatches_now;
   }
 
   return HSA_STATUS_SUCCESS;
