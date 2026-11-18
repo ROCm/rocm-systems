@@ -265,23 +265,43 @@ bool rcclHostHierAllReduceFusedWindow(int nHosts, int ranksPerHost, size_t bytes
   return ranksPerHost == 8 && nHosts <= 2 && bytes >= 4 * MiB && bytes <= 128 * MiB;
 }
 
+bool rcclHostHierAllReduceAutoType(int ranksPerHost, ncclDataType_t datatype, ncclRedOp_t op) {
+  const bool fp8 = datatype == ncclFloat8e4m3 || datatype == ncclFloat8e5m2;
+  const bool byteInt = datatype == ncclInt8 || datatype == ncclUint8;
+  if (ranksPerHost == 8) {
+    return op == ncclSum && (datatype == ncclFloat32 || datatype == ncclFloat16 || datatype == ncclBfloat16 || fp8);
+  }
+  if (ranksPerHost != 4) return false;
+  switch (op) {
+  case ncclSum:
+    return true;
+  case ncclProd:
+    return !fp8;
+  case ncclMax:
+  case ncclMin:
+    return !fp8 && !byteInt;
+  case ncclAvg:
+    return !fp8;
+  default:
+    return false;
+  }
+}
+
 bool rcclHostHierAllReduceEligible(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op,
                                    bool registeredBuffers) {
   const int64_t mode = rcclParamHostHierAllReduce();
   if (mode == 0) return false;
   if (count == 0 || !opSplitsAcrossStages(op, datatype)) return false;
   const bool forced = mode == 1;
-  const bool halfType = datatype == ncclFloat16 || datatype == ncclBfloat16;
   // Registered windows are left to the symmetric and CE paths: the child comms do not see the registrations.
-  if (!forced &&
-      (registeredBuffers || !(ncclDdaUseFabricPath(comm) && (datatype == ncclFloat32 || halfType) && op == ncclSum))) {
+  if (!forced && (registeredBuffers || !(ncclDdaUseFabricPath(comm) && (rcclHostHierAllReduceAutoType(8, datatype, op) ||
+                                                                       rcclHostHierAllReduceAutoType(4, datatype, op))))) {
     return false;
   }
   const struct rcclHostLayout* layout = rcclHostHierGetLayout(comm);
   if (layout == nullptr || count % layout->ranksPerHost != 0) return false;
   if (forced) return true;
-  // FP16 and BF16 were measured on two hosts only.
-  if (halfType && layout->nHosts != 2) return false;
+  if (!rcclHostHierAllReduceAutoType(layout->ranksPerHost, datatype, op)) return false;
   return rcclHostHierAllReduceAutoWindow(layout->nHosts, layout->ranksPerHost, count * ncclTypeSize(datatype));
 }
 

@@ -526,14 +526,18 @@ collected in the following table.
           inside a group or a graph capture, while ``NCCL_ALGO`` is set, or
           while a backend is forced. The first eligible call splits the
           communicator, so all ranks must use the same value.
-      - | ``-1``: Auto (default). On gfx1250 with MNNVL, used for ``ncclSum``
-          on buffers outside registered windows, with these layouts and
-          message sizes. With eight ranks per host: 2 to 128 MiB on two hosts
-          for ``ncclFloat32``, ``ncclFloat16`` and ``ncclBfloat16``, and for
-          ``ncclFloat32`` only, 2 MiB to 1 GiB on four hosts and 2 MiB to
-          2 GiB on eight hosts. With four ranks per host, for ``ncclFloat32``
-          only: 2 to 32 MiB on four hosts and 2 to 256 MiB on eight hosts. Not
-          used with other layouts.
+      - | ``-1``: Auto (default). On gfx1250 with MNNVL, used on buffers
+          outside registered windows with these layouts, message sizes and
+          operations. With eight ranks per host: 2 to
+          128 MiB on two hosts, 2 MiB to 1 GiB on four hosts and 2 MiB to
+          2 GiB on eight hosts, for ``ncclSum`` on ``ncclFloat32``,
+          ``ncclFloat16``, ``ncclBfloat16``, ``ncclFloat8e4m3`` and
+          ``ncclFloat8e5m2``. With four ranks per host: 2 to 32 MiB on four
+          hosts and 2 to 256 MiB on eight hosts, for ``ncclSum`` on every
+          type, ``ncclProd`` on every type except FP8, ``ncclMax`` and
+          ``ncclMin`` on every type except FP8, ``ncclInt8`` and
+          ``ncclUint8``, and ``ncclAvg`` on ``ncclFloat16``, ``ncclFloat32``,
+          ``ncclFloat64`` and ``ncclBfloat16``. Not used with other layouts.
         | ``0``: Disabled.
         | ``1``: Enabled for every eligible AllReduce.
 

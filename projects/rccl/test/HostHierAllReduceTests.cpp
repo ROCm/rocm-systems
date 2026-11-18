@@ -245,6 +245,31 @@ TEST(HostHierAllReduce, FusedWindowEdges)
         EXPECT_FALSE(rcclHostHierAllReduceFusedWindow(nHosts, 8, 16 * kMiB)) << nHosts << " hosts";
 }
 
+TEST(HostHierAllReduce, AutoTypes)
+{
+    const ncclDataType_t all[] = {ncclInt8,     ncclUint8,   ncclInt32,   ncclUint32,
+                                  ncclInt64,    ncclUint64,  ncclFloat16, ncclFloat32,
+                                  ncclFloat64,  ncclBfloat16, ncclFloat8e4m3, ncclFloat8e5m2};
+    for(ncclDataType_t t : all)
+    {
+        const bool fp8      = t == ncclFloat8e4m3 || t == ncclFloat8e5m2;
+        const bool byteInt  = t == ncclInt8 || t == ncclUint8;
+        const bool dpxFloat = fp8 || t == ncclFloat32 || t == ncclFloat16 || t == ncclBfloat16;
+        EXPECT_TRUE(rcclHostHierAllReduceAutoType(4, t, ncclSum)) << t;
+        EXPECT_EQ(!fp8, rcclHostHierAllReduceAutoType(4, t, ncclProd)) << t;
+        EXPECT_EQ(!fp8 && !byteInt, rcclHostHierAllReduceAutoType(4, t, ncclMax)) << t;
+        EXPECT_EQ(!fp8 && !byteInt, rcclHostHierAllReduceAutoType(4, t, ncclMin)) << t;
+        EXPECT_EQ(!fp8, rcclHostHierAllReduceAutoType(4, t, ncclAvg)) << t;
+
+        EXPECT_EQ(dpxFloat, rcclHostHierAllReduceAutoType(8, t, ncclSum)) << t;
+        for(ncclRedOp_t op : {ncclProd, ncclMax, ncclMin, ncclAvg})
+            EXPECT_FALSE(rcclHostHierAllReduceAutoType(8, t, op)) << t << " op " << op;
+
+        for(int ranksPerHost : {2, 16})
+            EXPECT_FALSE(rcclHostHierAllReduceAutoType(ranksPerHost, t, ncclSum)) << t << " " << ranksPerHost;
+    }
+}
+
 // RCCL_HOST_HIER_ALLREDUCE is cached on first read, so each mode runs in its own process.
 TEST(HostHierAllReduce, EligibilityPerMode_Isolated)
 {
@@ -274,11 +299,20 @@ TEST(HostHierAllReduce, EligibilityPerMode_Isolated)
             EXPECT_FALSE(eligible(blockHosts(4, 4), floats(64 * kMiB))) << "four hosts of four ranks, above";
             EXPECT_TRUE(eligible(blockHosts(8, 4), floats(256 * kMiB))) << "eight hosts of four ranks";
             EXPECT_FALSE(eligible(blockHosts(8, 4), floats(kMiB))) << "eight hosts of four ranks, below";
-            EXPECT_FALSE(eligible(blockHosts(4, 4), 8 * kMiB, ncclBfloat16)) << "bf16, four hosts of four ranks";
+            EXPECT_TRUE(eligible(blockHosts(4, 4), 8 * kMiB, ncclBfloat16)) << "bf16, four hosts of four ranks";
+            EXPECT_TRUE(eligible(blockHosts(8, 4), 16 * kMiB, ncclInt32, ncclMax)) << "int32 max, SPX";
+            EXPECT_TRUE(eligible(blockHosts(4, 4), 2 * kMiB, ncclFloat64, ncclAvg)) << "fp64 avg, SPX";
+            EXPECT_FALSE(eligible(blockHosts(4, 4), 64 * kMiB, ncclInt32, ncclMax)) << "int32 max, SPX, above";
+            EXPECT_FALSE(eligible(blockHosts(8, 4), 16 * kMiB, ncclFloat8e4m3, ncclAvg)) << "fp8 avg, SPX";
+            EXPECT_FALSE(eligible(blockHosts(8, 4), 16 * kMiB, ncclUint8, ncclMin)) << "uint8 min, SPX";
+            EXPECT_FALSE(eligible(blockHosts(8, 4), 4 * kMiB, ncclInt32, ncclAvg)) << "int32 avg, SPX";
+            EXPECT_FALSE(eligible(blockHosts(4, 8), floats(16 * kMiB), ncclFloat32, ncclMax)) << "fp32 max, DPX";
             EXPECT_TRUE(eligible(blockHosts(2, 8), kMiB, ncclBfloat16)) << "bf16, 2 MiB";
             EXPECT_TRUE(eligible(blockHosts(2, 8), 64 * kMiB, ncclFloat16)) << "fp16, 128 MiB";
             EXPECT_FALSE(eligible(blockHosts(2, 8), kMiB - 8, ncclBfloat16)) << "bf16 below the window";
-            EXPECT_FALSE(eligible(blockHosts(4, 8), 8 * kMiB, ncclBfloat16)) << "bf16 on four hosts";
+            EXPECT_TRUE(eligible(blockHosts(4, 8), 8 * kMiB, ncclBfloat16)) << "bf16 on four hosts";
+            EXPECT_TRUE(eligible(blockHosts(8, 8), 8 * kMiB, ncclFloat8e4m3)) << "fp8 sum on eight hosts";
+            EXPECT_FALSE(eligible(blockHosts(2, 8), 8 * kMiB, ncclInt32)) << "int32 sum, DPX";
             EXPECT_FALSE(eligible(blockHosts(2, 8), kMiB, ncclFloat64)) << "fp64";
             EXPECT_FALSE(eligible(blockHosts(2, 8), floats(2 * kMiB), ncclFloat32, ncclMax)) << "max";
             EXPECT_FALSE(eligible(blockHosts(2, 8), floats(2 * kMiB), ncclFloat32, ncclSum, "gfx950")) << "gfx950";
