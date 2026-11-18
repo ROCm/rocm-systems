@@ -148,7 +148,8 @@ ROCSHMEM_TILE_BROADCAST
 
 **Description:**
 Broadcasts the tile region ``[start_coord, boundary)`` from the root PE's ``src``
-tensor to all other PEs' ``dst`` tensors in the team.
+tensor to every PE's ``dst`` tensor in the team, including the root's own ``dst``
+(when ``dst`` and ``src`` are different buffers on the root).
 
 -------------------------------
 Reduction routines

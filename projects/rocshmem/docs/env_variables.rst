@@ -119,12 +119,22 @@ control the behavior of rocSHMEM.
       - * ``0``: Use IPC when available.
         * ``1``: Force network conduit.
 
+    * - ``ROCSHMEM_HOST_TRANSPORT``
+
+        Selects the transport backing the host-initiated API (requires rocSHMEM
+        built with ``-DUSE_HOST_VERBS=ON``). The default (empty) keeps the
+        MPI-window host path.
+      - `` ``
+      - * `` `` (default): Use the MPI-window host path.
+        * ``verbs``: Use the native host-verbs stack.
+
     * - ``ROCSHMEM_USE_IB_HCA``
 
         Forces the NIC that this PE uses. When this value is set NIC
         auto-detection and mapping is disabled, the NIC specified in the variable
-        will be selected. The default value is an empty string and rocSHMEM
-        auto-detects the most appropriate NIC.
+        will be selected. Also used to select the NIC for the host-verbs
+        transport (``ROCSHMEM_HOST_TRANSPORT=verbs``). The default value is an
+        empty string and rocSHMEM auto-detects the most appropriate NIC.
       - `` ``
       - Example value: ``bnxt_re0``
 

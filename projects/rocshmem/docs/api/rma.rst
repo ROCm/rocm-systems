@@ -250,32 +250,38 @@ The following table lists the supported RMA data types:
       - Yes
     * - int8_t
       - int8
-      - No
+      - Yes
     * - int16_t
       - int16
-      - No
+      - Yes
     * - int32_t
       - int32
-      - No
+      - Yes
     * - int64_t
       - int64
       - Yes
     * - uint8_t
       - uint8
-      - No
+      - Yes
     * - uint16_t
       - uint16
-      - No
+      - Yes
     * - uint32_t
       - uint32
-      - No
+      - Yes
     * - uint64_t
       - uint64
-      - No
+      - Yes
     * - size_t
       - size
-      - No
+      - Yes
     * - ptrdiff_t
       - ptrdiff
-      - No
+      - Yes
+    * - __half
+      - half
+      - Yes
+    * - __hip_bfloat16
+      - bfloat16
+      - Yes
 

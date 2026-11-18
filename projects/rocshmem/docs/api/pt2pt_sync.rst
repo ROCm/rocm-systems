@@ -41,7 +41,7 @@ This routine blocks the caller until the condition ``(*ivars cmp val)`` is true.
 
 Valid ``cmp`` values are listed in :ref:`CMP_VALUES`.
 
-Valid ``TYPENAME`` and ``TYPE`` values are listed in :ref:`STANDARD_AMO_TYPES`.
+Valid ``TYPENAME`` and ``TYPE`` values are listed in :ref:`WAIT_TEST_TYPES`.
 
 ROCSHMEM_WAIT_UNTIL_ALL
 -----------------------
@@ -60,7 +60,7 @@ This routine blocks the caller until the condition ``(ivars[i] cmp val)`` is tru
 
 Valid ``cmp`` values are listed in :ref:`CMP_VALUES`.
 
-Valid ``TYPENAME`` and ``TYPE`` values are listed in :ref:`STANDARD_AMO_TYPES`.
+Valid ``TYPENAME`` and ``TYPE`` values are listed in :ref:`WAIT_TEST_TYPES`.
 
 ROCSHMEM_WAIT_UNTIL_ANY
 -----------------------
@@ -78,7 +78,7 @@ This routine blocks the caller until any of the condition ``(ivars[i] cmp val)``
 
 Valid ``cmp`` values are listed in :ref:`CMP_VALUES`.
 
-Valid ``TYPENAME`` and ``TYPE`` values are listed in :ref:`STANDARD_AMO_TYPES`.
+Valid ``TYPENAME`` and ``TYPE`` values are listed in :ref:`WAIT_TEST_TYPES`.
 
 ROCSHMEM_WAIT_UNTIL_SOME
 ------------------------
@@ -98,7 +98,7 @@ This routine blocks the caller until any of the conditions ``(ivars[i] cmp val)`
 
 Valid ``cmp`` values are listed in :ref:`CMP_VALUES`.
 
-Valid ``TYPENAME`` and ``TYPE`` values are listed in :ref:`STANDARD_AMO_TYPES`.
+Valid ``TYPENAME`` and ``TYPE`` values are listed in :ref:`WAIT_TEST_TYPES`.
 
 ROCSHMEM_WAIT_UNTIL_ALL_VECTOR
 ------------------------------
@@ -125,7 +125,7 @@ its own value rather than against a single scalar.
 
 Valid ``cmp`` values are listed in :ref:`CMP_VALUES`.
 
-Valid ``TYPENAME`` and ``TYPE`` values are listed in :ref:`STANDARD_AMO_TYPES`.
+Valid ``TYPENAME`` and ``TYPE`` values are listed in :ref:`WAIT_TEST_TYPES`.
 
 ROCSHMEM_WAIT_UNTIL_ANY_VECTOR
 ------------------------------
@@ -152,7 +152,7 @@ is true for at least one element in the wait set.
 
 Valid ``cmp`` values are listed in :ref:`CMP_VALUES`.
 
-Valid ``TYPENAME`` and ``TYPE`` values are listed in :ref:`STANDARD_AMO_TYPES`.
+Valid ``TYPENAME`` and ``TYPE`` values are listed in :ref:`WAIT_TEST_TYPES`.
 
 ROCSHMEM_WAIT_UNTIL_SOME_VECTOR
 -------------------------------
@@ -178,7 +178,7 @@ every element that currently satisfies it.
 
 Valid ``cmp`` values are listed in :ref:`CMP_VALUES`.
 
-Valid ``TYPENAME`` and ``TYPE`` values are listed in :ref:`STANDARD_AMO_TYPES`.
+Valid ``TYPENAME`` and ``TYPE`` values are listed in :ref:`WAIT_TEST_TYPES`.
 
 ROCSHMEM_TEST
 -------------
@@ -193,6 +193,8 @@ ROCSHMEM_TEST
 
 **Description:**
 This routine tests if the condition ``(*ivars cmp val)`` is true.
+
+Valid ``TYPENAME`` and ``TYPE`` values are listed in :ref:`WAIT_TEST_TYPES`.
 
 ROCSHMEM_SIGNAL_WAIT_UNTIL_ON_STREAM
 -------------------------------------
@@ -238,3 +240,65 @@ The following table lists the point-to-point comparison constants:
       - Less than
     * - ROCSHMEM_CMP_LE
       - Less than or equal to
+
+.. _WAIT_TEST_TYPES:
+
+Supported wait/test data types
+-------------------------------
+
+.. list-table:: Wait/Test Data Types
+    :widths: 20 20
+    :header-rows: 1
+
+    * - TYPE
+      - TYPENAME
+    * - float
+      - float
+    * - double
+      - double
+    * - char
+      - char
+    * - signed char
+      - schar
+    * - short
+      - short
+    * - int
+      - int
+    * - long
+      - long
+    * - long long
+      - longlong
+    * - unsigned char
+      - uchar
+    * - unsigned short
+      - ushort
+    * - unsigned int
+      - uint
+    * - unsigned long
+      - ulong
+    * - unsigned long long
+      - ulonglong
+    * - __half
+      - half
+    * - __hip_bfloat16
+      - bfloat16
+    * - int8_t
+      - int8
+    * - int16_t
+      - int16
+    * - int32_t
+      - int32
+    * - int64_t
+      - int64
+    * - uint8_t
+      - uint8
+    * - uint16_t
+      - uint16
+    * - uint32_t
+      - uint32
+    * - uint64_t
+      - uint64
+    * - size_t
+      - size
+    * - ptrdiff_t
+      - ptrdiff

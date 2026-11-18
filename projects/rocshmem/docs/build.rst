@@ -131,6 +131,15 @@ the following flag to the build configuration scripts ``-DUSE_EXTERNAL_MPI=OFF``
 However, this will disable the functional and unit
 tests, as they require MPI to run.
 
+.. note::
+
+  The scripts in ``scripts/build_configs`` configure with the ``Ninja``
+  generator when ``ninja`` is found on ``PATH`` (falling back to CMake's
+  default generator otherwise), and build with
+  ``min(nproc, 32)`` parallel jobs by default. Set the ``BUILD_JOBS``
+  environment variable to override the job count, for example
+  ``BUILD_JOBS=16 ../scripts/build_configs/all_backends``.
+
 Memory allocator options
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -488,6 +497,14 @@ Code generation and tuning options
       - ``AUTO``
       - Link against an external MPI. Set to ``OFF`` to build without MPI,
         which also disables the functional and unit tests.
+
+    * - ``ROCSHMEM_NATIVE_LINK_JOBS``
+      - ``31``
+      - Number of parallel jobs used for the final device link of each
+        rocSHMEM executable (maps to the HIP ``--offload-jobs`` link flag).
+        Falls back to a single job, with a warning, when the HIP toolchain
+        does not support parallel offload jobs. Ignored, with a warning, when
+        ``HIP_CLANG_NUM_PARALLEL_JOBS`` already sets ``--offload-jobs``.
 
 Tests, tools, and examples
 """"""""""""""""""""""""""

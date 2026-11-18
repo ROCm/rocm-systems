@@ -363,12 +363,12 @@ Supported reduction types and operations
       - Supported
     * - char
       - char
-      - max, min, sum, prod
-      - No
+      - and, or, xor, max, min, sum, prod
+      - Yes
     * - signed char
       - schar
-      - max, min, sum, prod
-      - No
+      - and, or, xor, max, min, sum, prod
+      - Yes
     * - short
       - short
       - and, or, xor, max, min, sum, prod
@@ -387,70 +387,78 @@ Supported reduction types and operations
       - Yes
     * - ptrdiff_t
       - ptrdiff
-      - max, min, sum, prod
-      - No
+      - and, or, xor, max, min, sum, prod
+      - Yes
     * - unsigned char
       - uchar
       - and, or, xor, max, min, sum, prod
-      - No
+      - Yes
     * - unsigned short
       - ushort
       - and, or, xor, max, min, sum, prod
-      - No
+      - Yes
     * - unsigned int
       - uint
       - and, or, xor, max, min, sum, prod
-      - No
+      - Yes
     * - unsigned long
       - ulong
       - and, or, xor, max, min, sum, prod
-      - No
+      - Yes
     * - unsigned long long
       - ulonglong
       - and, or, xor, max, min, sum, prod
-      - No
+      - Yes
     * - int8_t
       - int8
       - and, or, xor, max, min, sum, prod
-      - No
+      - Yes
     * - int16_t
       - int16
       - and, or, xor, max, min, sum, prod
-      - No
+      - Yes
     * - int32_t
       - int32
       - and, or, xor, max, min, sum, prod
-      - No
+      - Yes
     * - int64_t
       - int64
       - and, or, xor, max, min, sum, prod
-      - No
+      - Yes
     * - uint8_t
       - uint8
       - and, or, xor, max, min, sum, prod
-      - No
+      - Yes
     * - uint16_t
       - uint16
       - and, or, xor, max, min, sum, prod
-      - No
+      - Yes
     * - uint32_t
       - uint32
       - and, or, xor, max, min, sum, prod
-      - No
+      - Yes
     * - uint64_t
       - uint64
       - and, or, xor, max, min, sum, prod
-      - No
+      - Yes
     * - size_t
       - size
       - and, or, xor, max, min, sum, prod
-      - No
+      - Yes
     * - float
       - float
       - max, min, sum, prod
       - Yes
     * - double
       - double
+      - max, min, sum, prod
+      - Yes
+    * - __half
+      - half
+      - max, min, sum, prod
+      - Yes
+    * - __hip_bfloat16
+      - bfloat16
       - max, min, sum, prod
       - Yes
     * - long double
