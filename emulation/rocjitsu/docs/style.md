@@ -76,29 +76,40 @@ private:
 
 ## Namespaces
 
-- Use the existing namespace for the owning module/library, named after that
-  library (matching its `lib/<name>/` directory). For example, `rocjitsu`,
-  `simdojo`, and `util` each live in their own top-level namespace.
-- Do not introduce new namespaces. Reuse the existing namespace hierarchy,
-  including established sub-namespaces such as `rocjitsu::amdgpu`.
+- Choose namespaces around cohesive packages and their APIs. A namespace does
+  not need to match a directory or CMake target, and the same rule applies to
+  header-only and compiled code.
+- Reuse the existing namespace when extending a package, including `rocjitsu`,
+  `simdojo`, and established sub-namespaces such as `rocjitsu::amdgpu`.
+- Give a cohesive generic package its own namespace when it provides useful
+  context for its related types. For example, the statistics package uses
+  `stats::Counter` and `stats::Histogram` while living under `lib/util/` and
+  linking through the `util` target.
+- Keep miscellaneous helpers in `util`. A separate header alone does not
+  establish a package boundary or require a namespace.
 
 ```cpp
-// Reuse the owning library's existing top-level namespace:
-//   lib/rocjitsu/ -> namespace rocjitsu
-//   lib/simdojo/  -> namespace simdojo
-//   lib/util/     -> namespace util
+// Extend the existing simulation package:
 namespace simdojo {
 
 // simdojo module code lives here
 
 } // namespace simdojo
 
-// Reuse existing sub-namespaces for architecture-specific code:
+// Reuse the architecture-specific namespace:
 namespace rocjitsu::amdgpu {
 
 // gfx-specific code lives here
 
 } // namespace rocjitsu::amdgpu
+
+// The generic statistics package lives in lib/util/include/util/statistics.h:
+namespace stats {
+
+class Counter;
+class Histogram;
+
+} // namespace stats
 ```
 
 ## Language, STL & Preprocessor
