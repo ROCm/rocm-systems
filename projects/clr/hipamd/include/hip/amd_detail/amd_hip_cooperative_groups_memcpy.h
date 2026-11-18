@@ -27,10 +27,10 @@ struct can_group_do_tdm_copy<cooperative_groups::thread_block_tile<32, TyPar>>
 template <> struct can_group_do_tdm_copy<cooperative_groups::thread_block> : public std::true_type {
 };
 
-__CG_STATIC_QUALIFIER__ unsigned long long tdm_uniform_address(unsigned long long value) {
+__CG_STATIC_QUALIFIER__ uintptr_t tdm_uniform_address(uintptr_t value) {
   const unsigned int lo = __builtin_amdgcn_readfirstlane(static_cast<unsigned int>(value));
   const unsigned int hi = __builtin_amdgcn_readfirstlane(static_cast<unsigned int>(value >> 32));
-  return (static_cast<unsigned long long>(hi) << 32) | lo;
+  return (static_cast<uintptr_t>(hi) << 32) | lo;
 }
 
 template <typename TyGroup, typename TyElem>
@@ -53,7 +53,7 @@ __CG_STATIC_QUALIFIER__ bool dispatch_tdm_memcpy(const TyGroup& group, TyElem* _
     return false;
   }
   if (count > UINT32_MAX ||
-      ((reinterpret_cast<unsigned long long>(src) | reinterpret_cast<unsigned long long>(dst)) &
+      ((reinterpret_cast<uintptr_t>(src) | reinterpret_cast<uintptr_t>(dst)) &
        (alignment_bytes - 1))) {
     return false;
   }
@@ -71,21 +71,19 @@ __CG_STATIC_QUALIFIER__ bool dispatch_tdm_memcpy(const TyGroup& group, TyElem* _
   const unsigned int offset = bytes_per_wave * wave_rank;
   const unsigned int bytes = wave_rank == waves_in_flight - 1 ? last_wave_bytes : bytes_per_wave;
 
-  typedef int __attribute__((ext_vector_type(4))) vint4;
-  typedef int __attribute__((ext_vector_type(8))) vint8;
   const TyElem* global_ptr = src_is_shared ? dst : src;
   const TyElem* local_ptr = src_is_shared ? src : dst;
-  const unsigned long long global_address =
-      tdm_uniform_address(reinterpret_cast<unsigned long long>(
+    const uintptr_t global_address =
+      tdm_uniform_address(reinterpret_cast<uintptr_t>(
           (const __attribute__((address_space(1))) TyElem*)global_ptr)) +
       offset;
-  const unsigned long long local_address =
-      tdm_uniform_address(reinterpret_cast<unsigned long long>(
+    const uintptr_t local_address =
+      tdm_uniform_address(reinterpret_cast<uintptr_t>(
           (const __attribute__((address_space(3))) TyElem*)local_ptr)) +
       offset;
   gfx1250_TDM_GROUP0 group0;
   group0.ldsAddr(static_cast<uint32_t>(local_address));
-  group0.globalAddr(static_cast<uintptr_t>(global_address));
+  group0.globalAddr(global_address);
   gfx1250_TDM_GROUP1 group1;
   group1.dataSize(0);
   group1.tileDim0(bytes);
@@ -93,13 +91,12 @@ __CG_STATIC_QUALIFIER__ bool dispatch_tdm_memcpy(const TyGroup& group, TyElem* _
   group1.tensorDim0(bytes);
   group1.tensorDim1(1);
   group1.tensorDim0Stride(bytes);
-  const vint8 encoded_group1 = __builtin_convertvector(group1.m_bitfield, vint8);
   if (src_is_shared) {
-    __builtin_amdgcn_tensor_store_from_lds(group0.m_bitfield, encoded_group1, vint4{}, vint4{},
-                                           vint8{}, 0);
+    __builtin_amdgcn_tensor_store_from_lds(group0.m_bitfield, group1.m_bitfield, __hip_uint32x4{},
+                                         __hip_uint32x4{}, __hip_uint32x8{}, 0);
   } else {
-    __builtin_amdgcn_tensor_load_to_lds(group0.m_bitfield, encoded_group1, vint4{}, vint4{},
-                                        vint8{}, 0);
+    __builtin_amdgcn_tensor_load_to_lds(group0.m_bitfield, group1.m_bitfield, __hip_uint32x4{},
+                                      __hip_uint32x4{}, __hip_uint32x8{}, 0);
   }
   return true;
 }
