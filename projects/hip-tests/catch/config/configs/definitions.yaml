@@ -52,7 +52,7 @@ features:
 # ==============================================================================
 # LEVEL PARAMETERS - Test parameters for each level
 # These are converted to C++ compile-time constants at build time
-#
+# 
 # memory_sizes:
 # [TODO]
 # block_sizes:
@@ -71,7 +71,7 @@ features:
 # Maximum amount of memory to use for math accuracy tests
 # math_reduction_factor:
 # Percentage of test data to be actually tested
-#
+# 
 # [TODO] The values below are example defaults and should be replaced with the actual values.
 # ==============================================================================
 cmd_options:
