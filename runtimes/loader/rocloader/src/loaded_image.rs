@@ -6,10 +6,11 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering, fence};
 
+use crate::elf::{LoadSegment, align_up};
+use crate::target::gfx1250::TrampolinePlan;
 use rocddi::device::Device;
 use rocddi::device::gpu::CopyFailure;
 use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
-use rocelf::{Gfx1250TrampolinePlan, LoadSegment, align_up};
 
 use crate::{CodeObject, Error, Symbol, SymbolKind, SymbolLinkage, SymbolTableOrder, Target};
 
@@ -147,7 +148,7 @@ pub struct LoadedSegment {
 ///
 /// # Errors
 /// Returns `InvalidObject` when the source extents cannot be represented.
-pub fn loaded_segments(
+fn loaded_segments(
     loads: &[LoadSegment],
     device_base: u64,
     virtual_base: u64,
@@ -326,7 +327,7 @@ fn install_gfx1250_trampolines(
                     .is_some_and(|extension| extension.eq_ignore_ascii_case("kd"))
         })
         .map(|symbol| symbol.value);
-    let plan = Gfx1250TrampolinePlan::new(image, virtual_base, descriptors)?;
+    let plan = TrampolinePlan::new(image, virtual_base, descriptors)?;
     if plan.is_empty() {
         return Ok(None);
     }
@@ -473,7 +474,7 @@ fn load_image_impl(
     }
     let object = CodeObject::parse(&code_object)?;
     object.validate_target(target)?;
-    let plan = rocelf::LoadPlan::new(&code_object, object.layout(), CODE_ALIGNMENT)?;
+    let plan = crate::elf::LoadPlan::new(&code_object, object.layout(), CODE_ALIGNMENT)?;
     let virtual_base = plan.virtual_base();
     let virtual_end = plan.virtual_end();
     let load_size = object.load_size()?;
@@ -604,6 +605,46 @@ mod tests {
     }
 
     #[test]
+    /// Checks reporting of one combined segment for a loaded object.
+    fn reports_one_combined_segment_for_load_extent() {
+        let loads = [
+            LoadSegment {
+                file_offset: 0,
+                virtual_address: 0,
+                file_size: 0x17c0,
+                memory_size: 0x17c0,
+            },
+            LoadSegment {
+                file_offset: 0x1800,
+                virtual_address: 0x2800,
+                file_size: 0x6c8,
+                memory_size: 0x6c8,
+            },
+            LoadSegment {
+                file_offset: 0x1ec8,
+                virtual_address: 0x3ec8,
+                file_size: 0x70,
+                memory_size: 0x138,
+            },
+            LoadSegment {
+                file_offset: 0x1f38,
+                virtual_address: 0x4f38,
+                file_size: 4,
+                memory_size: 4,
+            },
+        ];
+        let segments = loaded_segments(&loads, 0x0010_0000, 0);
+        assert!(segments.is_ok());
+        let Some(segments) = segments.ok() else {
+            return;
+        };
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].storage_offset, 0);
+        assert_eq!(segments[0].address, 0x0010_0000);
+        assert_eq!(segments[0].size, 0x4f3c);
+    }
+
+    #[test]
     fn retired_publication_retries_but_completed_work_does_not_repeat() {
         let state = AtomicU8::new(PUBLICATION_PENDING);
         assert!(matches!(
@@ -649,6 +690,25 @@ mod tests {
         ));
         assert!(!retried);
         assert_eq!(state.load(Ordering::Acquire), PUBLICATION_UNCERTAIN);
+    }
+
+    #[test]
+    fn interrupted_publication_cannot_be_retried_as_retired_work() {
+        let state = AtomicU8::new(PUBLICATION_PENDING);
+        let result = std::panic::catch_unwind(|| {
+            publish_once(&state, || std::panic::resume_unwind(Box::new(())))
+        });
+        assert!(result.is_err());
+        assert_eq!(state.load(Ordering::Acquire), PUBLICATION_ACTIVE);
+        let mut retried = false;
+        assert!(matches!(
+            publish_once(&state, || {
+                retried = true;
+                Ok(())
+            }),
+            Err(Error::Busy)
+        ));
+        assert!(!retried);
     }
 
     #[test]
