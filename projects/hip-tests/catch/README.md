@@ -152,8 +152,8 @@ like a `disabled`/`unsupported` match: they get the `[disabled]` tag, plus a
 `[missing_<feature>]` tag for every missing feature. The resulting binaries are
 therefore specific to the build machine. This mode needs a working GPU at build time.
 
-Features can also be listed as `disabled`/`unsupported` targets, for test cases that
-cannot run when a feature *is* available:
+Features can also be listed as `unsupported` targets, for test cases that cannot run
+when a feature *is* available:
 ```yaml
 memory:
   Unit_hipStreamAttachMemAsync_Positive_AttachHost:
