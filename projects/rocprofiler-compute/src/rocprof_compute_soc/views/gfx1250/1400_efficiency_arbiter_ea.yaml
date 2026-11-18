@@ -1,0 +1,73 @@
+view: Efficiency Arbiter (EA)
+alias: ea
+tables:
+- title: EA Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: ea.util
+    label: Utilization
+- title: EA Traffic Bandwidth
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: ea.dram_rd_bw
+  - metric: ea.dram_wr_bw
+  - metric: ea.io_bw_rd
+  - metric: ea.io_bw_wr
+  - metric: ea.hdm_bw_rd
+  - metric: ea.hdm_bw_wr
+  - metric: ea.gmi_bw_rd
+  - metric: ea.gmi_bw_wr
+- title: EA-SDP Interface - Outstanding Requests
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: ea.outstanding_req
+    label: Outstanding Requests
+  - metric: ea.outstanding_req_io_rd
+    label: Outstanding Requests - IO Read
+  - metric: ea.outstanding_req_io_wr
+    label: Outstanding Requests - IO Write
+  - metric: ea.outstanding_req_dram_rd
+    label: Outstanding Requests - DRAM Read
+  - metric: ea.outstanding_req_dram_wr
+    label: Outstanding Requests - DRAM Write
+  - metric: ea.outstanding_req_gmi_rd
+    label: Outstanding Requests - GMI Read
+  - metric: ea.outstanding_req_gmi_wr
+    label: Outstanding Requests - GMI Write
+  - metric: ea.outstanding_req_hdm_rd
+    label: Outstanding Requests - HDM Read
+  - metric: ea.outstanding_req_hdm_wr
+    label: Outstanding Requests - HDM Write
+  - metric: ea.outstanding_req_probe_req
+    label: Outstanding Requests - Probe Request
+  - metric: ea.outstanding_req_probe_response
+    label: Outstanding Requests - Probe Response
+- title: EA-SDP Interface - Stalls
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: ea.stalled_by_sdp
+  - metric: ea.stalled_by_sdp_io_rd
+  - metric: ea.stalled_by_sdp_io_wr
+  - metric: ea.stalled_by_sdp_dram
+  - metric: ea.stalled_by_sdp_gmi
+  - metric: ea.stalled_by_sdp_hdm

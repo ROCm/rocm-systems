@@ -1,0 +1,50 @@
+view: Roofline
+alias: roof
+tables:
+- title: Roofline Performance Rates
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+    peak: Peak (Empirical)
+  metrics:
+  - metric: compute.valu_flops_f16
+    peak: empirical
+  - metric: compute.valu_flops_f32
+    peak: empirical
+  - metric: compute.valu_flops_f64
+    peak: empirical
+  - metric: compute.mfma_flops_f64
+    peak: empirical
+  - metric: compute.mfma_flops_f32
+    peak: empirical
+  - metric: compute.mfma_flops_f16
+    peak: empirical
+  - metric: compute.mfma_flops_bf16
+    peak: empirical
+  - metric: compute.mfma_iops_int8
+    peak: empirical
+  - metric: fabric.hbm_bw
+    peak: empirical
+  - metric: vl1d.l2_bw
+    label: L2 Cache Bandwidth
+    peak: empirical
+  - metric: vl1d.cache_bw
+    peak: empirical
+  - metric: lds.theoretical_bw
+    peak: empirical
+- title: Roofline Plot Points
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: fabric.ai_hbm
+    label: AI HBM
+  - metric: l2.ai
+    label: AI L2
+  - metric: vl1d.ai
+    label: AI L1
+  - metric: lds.ai
+    label: AI LDS
+  - metric: compute.total_flops

@@ -1,0 +1,36 @@
+view: Roofline
+alias: roof
+tables:
+- title: Roofline Performance Rates
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+    peak: Peak (Empirical)
+  metrics:
+  - metric: compute.valu_flops
+    peak: empirical
+  - metric: compute.wmma_flops_f16_16x16x16
+    label: WMMA FLOPs (FP16)
+    peak: empirical
+  - metric: compute.valu_flops_f64
+    peak: empirical
+  - metric: gl0.bw
+    peak: empirical
+  - metric: lds.theoretical_bw
+    peak: empirical
+  - metric: gl2.memory_bw
+    peak: empirical
+- title: Roofline Plot Points
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: gl0.ai
+    label: AI L0
+  - metric: lds.ai
+    label: AI LDS
+  - metric: gl2.memory_ai
+    label: AI VRAM
+  - metric: compute.total_flops

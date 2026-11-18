@@ -1,0 +1,53 @@
+view: Compute Units - Compute Pipeline
+alias: cu_pipe
+tables:
+- title: Compute Speed-of-Light
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+    peak: Peak
+    pct_of_peak: Percent of Peak
+  metrics:
+  - metric: compute.valu_flops
+  - metric: compute.mfma_flops_f8
+  - metric: compute.mfma_flops_bf16
+  - metric: compute.mfma_flops_f16
+  - metric: compute.mfma_flops_f32
+  - metric: compute.mfma_flops_f64
+  - metric: compute.mfma_iops_int8
+- title: Pipeline Statistics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.ipc
+  - metric: compute.ipc_issued
+  - metric: compute.salu_util
+  - metric: compute.valu_util
+  - metric: compute.vmem_util
+  - metric: compute.branch_util
+  - metric: compute.valu_active_threads
+  - metric: compute.mfma_util
+  - metric: compute.mfma_inst_cycles
+  - metric: compute.vmem_lat
+  - metric: compute.smem_lat
+- title: Arithmetic Operations
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.flops_per_norm
+  - metric: compute.iops_per_norm
+  - metric: compute.f8_ops
+  - metric: compute.f16_ops
+  - metric: compute.bf16_ops
+  - metric: compute.f32_ops
+  - metric: compute.f64_ops
+  - metric: compute.int8_ops

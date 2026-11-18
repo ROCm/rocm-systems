@@ -1,0 +1,78 @@
+view: Memory Chart
+alias: memchart
+tables:
+- title: Instruction Cache
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: l1i.req
+  - metric: l1i.hits_per_req
+- title: Scalar Data Cache
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: sl1d.req
+  - metric: sl1d.hits_per_req
+  - metric: sl1d.load_bw
+- title: GL0 Cache (Vector L0)
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: gl0.hit_rate
+- title: LDS (Local Data Share)
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: compute.insts_lds
+    label: LDS Instructions
+  - metric: lds.util
+  - metric: lds.bank_conflict_rate
+  - metric: lds.bw
+- title: GL2 Cache (L2)
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: gl2.hit_rate
+    label: GL2 Hit Rate
+- title: L2 to Memory
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: gl2.ea_rd_req_dram
+    label: Memory Read Requests
+  - metric: gl2.ea_wr_req_dram
+    label: Memory Write Requests
+  - metric: gl2.memory_rd_bw
+  - metric: gl2.memory_wr_bw
+- title: Workgroup Processors (WGPs)
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: wave.occupancy_pct
+    label: Wavefront Occupancy
+    round: 1
+  - metric: dispatch.vgprs
+    round: 0
+  - metric: dispatch.sgprs
+    round: 0
+  - metric: dispatch.lds_allocation
+    round: 0
+  - metric: dispatch.scratch_allocation_per_wave
+    round: 3
+  - metric: dispatch.workgroups_per_wgp
+    label: Workgroups
+    round: 1

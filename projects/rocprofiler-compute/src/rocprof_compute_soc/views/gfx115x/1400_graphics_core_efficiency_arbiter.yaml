@@ -1,0 +1,54 @@
+view: Graphics Core Efficiency Arbiter (GCEA)
+alias: gcea
+tables:
+- title: DRAM Read Interface
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gcea.dram_rd_req
+  - metric: gcea.dram_rd_chained_req
+  - metric: gcea.dram_rd_banks_active
+  - metric: gcea.dram_rd_size_32b_increments
+- title: DRAM Write Interface
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gcea.dram_wr_req
+  - metric: gcea.dram_wr_chained_req
+  - metric: gcea.dram_wr_banks_active
+  - metric: gcea.dram_wr_size_32b_increments
+- title: System Arbiter (SARB)
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gcea.sarb_busy
+  - metric: gcea.sarb_stalled
+  - metric: gcea.sarb_starving
+  - metric: gcea.sarb_total_req
+  - metric: gcea.sarb_dram_req
+- title: Return Interface
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gcea.rd_returns
+    label: Read Returns
+  - metric: gcea.wr_returns
+    label: Write Returns
+  - metric: gcea.probe_req
+    label: Probe Requests

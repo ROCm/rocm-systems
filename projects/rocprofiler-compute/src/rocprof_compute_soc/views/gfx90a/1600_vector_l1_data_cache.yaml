@@ -1,0 +1,164 @@
+view: Vector L1 Data Cache
+alias: vl1d
+tables:
+- title: vL1D Speed-of-Light
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: vl1d.hit_rate
+    label: Hit rate
+  - metric: vl1d.bw_util
+    label: Bandwidth Utilization
+  - metric: vl1d.util
+    label: Utilization
+  - metric: vl1d.coalescing
+    label: Coalescing
+- title: vL1D cache stall metrics
+  header:
+    metric: Metric
+    expr: Expression
+  metrics:
+  - metric: vl1d.stalled_on_l2_data
+    label: Stalled on L2 Data
+  - metric: vl1d.stalled_on_l2_req
+    label: Stalled on L2 Req
+  - metric: vl1d.tag_ram_stall_rd
+    label: Tag RAM Stall (Read)
+  - metric: vl1d.tag_ram_stall_wr
+    label: Tag RAM Stall (Write)
+  - metric: vl1d.tag_ram_stall_atomic
+    label: Tag RAM Stall (Atomic)
+- title: vL1D cache access metrics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: vl1d.total_req
+    label: Total Req
+  - metric: vl1d.rd_req
+    label: Read Req
+  - metric: vl1d.wr_req
+    label: Write Req
+  - metric: vl1d.atomic_req
+    label: Atomic Req
+  - metric: vl1d.cache_bw
+    label: Cache Bandwidth
+  - metric: vl1d.hit_rate
+    label: Cache Hit Rate
+  - metric: vl1d.cache_accesses
+    label: Cache Accesses
+  - metric: vl1d.cache_hits
+    label: Cache Hits
+  - metric: vl1d.invalidations
+    label: Invalidations
+  - metric: vl1d.l2_bw
+  - metric: vl1d.l2_rd_req
+    label: L1-L2 Read
+  - metric: vl1d.l2_wr_req
+    label: L1-L2 Write
+  - metric: vl1d.l2_atomic_req
+    label: L1-L2 Atomic
+  - metric: vl1d.access_lat
+  - metric: vl1d.l2_rd_lat
+  - metric: vl1d.l2_wr_lat
+- title: L1D - L2 Transactions
+  header:
+    metric: Metric
+    xfer: Xfer
+    coherency: Coherency
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: vl1d.nc_rd
+    label: NC - Read
+    values:
+      xfer: Read
+      coherency: NC
+  - metric: vl1d.uc_rd
+    label: UC - Read
+    values:
+      xfer: Read
+      coherency: UC
+  - metric: vl1d.cc_rd
+    label: CC - Read
+    values:
+      xfer: Read
+      coherency: CC
+  - metric: vl1d.rw_rd
+    label: RW - Read
+    values:
+      xfer: Read
+      coherency: RW
+  - metric: vl1d.rw_wr
+    label: RW - Write
+    values:
+      xfer: Write
+      coherency: RW
+  - metric: vl1d.nc_wr
+    label: NC - Write
+    values:
+      xfer: Write
+      coherency: NC
+  - metric: vl1d.uc_wr
+    label: UC - Write
+    values:
+      xfer: Write
+      coherency: UC
+  - metric: vl1d.cc_wr
+    label: CC - Write
+    values:
+      xfer: Write
+      coherency: CC
+  - metric: vl1d.nc_atomic
+    label: NC - Atomic
+    values:
+      xfer: Atomic
+      coherency: NC
+  - metric: vl1d.uc_atomic
+    label: UC - Atomic
+    values:
+      xfer: Atomic
+      coherency: UC
+  - metric: vl1d.cc_atomic
+    label: CC - Atomic
+    values:
+      xfer: Atomic
+      coherency: CC
+  - metric: vl1d.rw_atomic
+    label: RW - Atomic
+    values:
+      xfer: Atomic
+      coherency: RW
+- title: L1 Unified Translation Cache (UTCL1)
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: vl1d.req
+    label: Req
+  - metric: vl1d.hit_ratio
+    label: Hit Ratio
+  - metric: vl1d.hits
+    label: Hits
+  - metric: vl1d.translation_misses
+    label: Translation Misses
+  - metric: vl1d.permission_misses
+    label: Permission Misses
+- title: L1D Addr Translation Stalls
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics: []
