@@ -115,7 +115,7 @@ __gcov_dump(void);
 #endif
 #if defined(ROCPROFILER_LLVM_COVERAGE) && ROCPROFILER_LLVM_COVERAGE > 0
 extern int
-__llvm_profile_write_file(void);
+__llvm_profile_dump(void);
 #endif
 }
 
@@ -1212,7 +1212,7 @@ finalize()
     if(get_fini_status() > 0) __gcov_dump();
 #endif
 #if defined(ROCPROFILER_LLVM_COVERAGE) && ROCPROFILER_LLVM_COVERAGE > 0
-    if(get_fini_status() > 0) (void) __llvm_profile_write_file();
+    if(get_fini_status() > 0) (void) __llvm_profile_dump();
 #endif
 
     if(get_fini_status() > 0)
@@ -1272,7 +1272,7 @@ finalize()
     __gcov_dump();
 #endif
 #if defined(ROCPROFILER_LLVM_COVERAGE) && ROCPROFILER_LLVM_COVERAGE > 0
-    (void) __llvm_profile_write_file();
+    (void) __llvm_profile_dump();
 #endif
 }
 

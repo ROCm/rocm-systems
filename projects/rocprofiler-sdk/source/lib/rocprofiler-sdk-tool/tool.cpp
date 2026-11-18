@@ -135,7 +135,7 @@ __gcov_dump(void);
 #if defined(ROCPROFILER_LLVM_COVERAGE) && ROCPROFILER_LLVM_COVERAGE > 0
 extern "C" {
 extern int
-__llvm_profile_write_file(void);
+__llvm_profile_dump(void);
 }
 #endif
 
@@ -4614,7 +4614,7 @@ tool_fini(void* /*tool_data*/)
     __gcov_dump();
 #endif
 #if defined(ROCPROFILER_LLVM_COVERAGE) && ROCPROFILER_LLVM_COVERAGE > 0
-    (void) __llvm_profile_write_file();
+    (void) __llvm_profile_dump();
 #endif
 }
 

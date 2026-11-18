@@ -11,7 +11,9 @@ project(
 find_package(rocprofiler-sdk REQUIRED)
 
 set(PYTEST_ARGS)
-if(ROCPROFILER_MEMCHECK MATCHES "(Address|Thread)Sanitizer")
+if(ROCPROFILER_MEMCHECK MATCHES "(Address|Thread)Sanitizer"
+   OR ROCPROFILER_BUILD_CODECOV
+   OR ROCPROFILER_BUILD_LLVM_COVERAGE)
     set(PYTEST_ARGS -k "not test_total_runtime")
 endif()
 
@@ -47,7 +49,6 @@ rocprofiler_add_integration_execute_test(
     PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>" "${PRELOAD_ENV}"
     ENVIRONMENT "${openmp-tools-env}"
     DISABLED "${IS_DISABLED}"
-    DISABLED_CODECOV
     FIXTURES_SETUP openmp-tools)
 
 rocprofiler_add_integration_validate_test(
@@ -59,6 +60,5 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 45
     FIXTURES_REQUIRED openmp-tools
     DISABLED "${IS_DISABLED}"
-    DISABLED_CODECOV
     ARGS ${PYTEST_ARGS} --input ${CMAKE_CURRENT_BINARY_DIR}/openmp-tools-test.json
     DISCOVERY_ARGS ${PYTEST_ARGS})

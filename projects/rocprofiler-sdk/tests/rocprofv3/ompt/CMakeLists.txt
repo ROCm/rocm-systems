@@ -13,7 +13,9 @@ find_package(rocprofiler-sdk REQUIRED)
 rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py)
 
 set(PYTEST_ARGS)
-if(ROCPROFILER_MEMCHECK MATCHES "(Address|Thread)Sanitizer")
+if(ROCPROFILER_MEMCHECK MATCHES "(Address|Thread)Sanitizer"
+   OR ROCPROFILER_BUILD_CODECOV
+   OR ROCPROFILER_BUILD_LLVM_COVERAGE)
     set(PYTEST_ARGS -k "not test_total_runtime")
 endif()
 
@@ -83,8 +85,7 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "${ompt-tracing-env}"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-ompt-tracing
-    DISABLED "${IS_DISABLED}"
-    DISABLED_CODECOV)
+    DISABLED "${IS_DISABLED}")
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-ompt-tracing
@@ -100,8 +101,7 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 45
     LABELS "integration-tests;openmp-target"
     FIXTURES_REQUIRED rocprofv3-test-ompt-tracing
-    DISABLED "${IS_DISABLED}"
-    DISABLED_CODECOV)
+    DISABLED "${IS_DISABLED}")
 
 # Granular-target test: both OMPT execute tests use the same openmp-target binary so %tag%
 # would collide. Use a literal output directory that matches what the validate test reads
@@ -120,8 +120,7 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "${ompt-tracing-env}"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-ompt-granular-target
-    DISABLED "${IS_DISABLED}"
-    DISABLED_CODECOV)
+    DISABLED "${IS_DISABLED}")
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-ompt-granular-target
@@ -134,8 +133,7 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 45
     LABELS "integration-tests;openmp-target"
     FIXTURES_REQUIRED rocprofv3-test-ompt-granular-target
-    DISABLED "${IS_DISABLED}"
-    DISABLED_CODECOV)
+    DISABLED "${IS_DISABLED}")
 
 # Default --ompt-trace on a host-only OpenMP program: asserts the parallel region /
 # implicit-task / work events a user expects to see are recorded.
@@ -155,8 +153,7 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "${ompt-host-env}"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-ompt-host
-    DISABLED "${IS_HOST_DISABLED}"
-    DISABLED_CODECOV)
+    DISABLED "${IS_HOST_DISABLED}")
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-ompt-host
@@ -169,8 +166,7 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 45
     LABELS "integration-tests;openmp-host"
     FIXTURES_REQUIRED rocprofv3-test-ompt-host
-    DISABLED "${IS_HOST_DISABLED}"
-    DISABLED_CODECOV)
+    DISABLED "${IS_HOST_DISABLED}")
 
 # Host-side granular filter: --ompt-trace parallel must record only the parallel-category
 # operations (no task/sync/mutex/target leakage).
@@ -187,8 +183,7 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "${ompt-host-env}"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-ompt-host-parallel
-    DISABLED "${IS_HOST_DISABLED}"
-    DISABLED_CODECOV)
+    DISABLED "${IS_HOST_DISABLED}")
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-ompt-host-parallel
@@ -201,8 +196,7 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 45
     LABELS "integration-tests;openmp-host"
     FIXTURES_REQUIRED rocprofv3-test-ompt-host-parallel
-    DISABLED "${IS_HOST_DISABLED}"
-    DISABLED_CODECOV)
+    DISABLED "${IS_HOST_DISABLED}")
 
 # Host-side granular filter: --ompt-trace task must record only the task-category
 # operations (no parallel/sync/mutex/target leakage). Uses 4 threads so that tasks are
@@ -227,8 +221,7 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "${ompt-host-task-env}"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-ompt-host-task
-    DISABLED "${IS_HOST_DISABLED}"
-    DISABLED_CODECOV)
+    DISABLED "${IS_HOST_DISABLED}")
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-ompt-host-task
@@ -241,8 +234,7 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 45
     LABELS "integration-tests;openmp-host"
     FIXTURES_REQUIRED rocprofv3-test-ompt-host-task
-    DISABLED "${IS_HOST_DISABLED}"
-    DISABLED_CODECOV)
+    DISABLED "${IS_HOST_DISABLED}")
 
 # Explicit "trace everything" form
 set(ompt-all-output-dir ${CMAKE_CURRENT_BINARY_DIR}/openmp-target-all-trace)
@@ -258,8 +250,7 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "${ompt-tracing-env}"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-ompt-all
-    DISABLED "${IS_DISABLED}"
-    DISABLED_CODECOV)
+    DISABLED "${IS_DISABLED}")
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-ompt-all
@@ -272,8 +263,7 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 45
     LABELS "integration-tests;openmp-target"
     FIXTURES_REQUIRED rocprofv3-test-ompt-all
-    DISABLED "${IS_DISABLED}"
-    DISABLED_CODECOV)
+    DISABLED "${IS_DISABLED}")
 
 # --sys-trace implicit OMPT: profiling with --sys-trace (no explicit --ompt-trace) must
 # still enable OMPT tracing, so the rocpd output contains OMPT records. OMPT is a
@@ -292,8 +282,7 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "${ompt-host-env}"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-ompt-sys-trace
-    DISABLED "${IS_HOST_DISABLED}"
-    DISABLED_CODECOV)
+    DISABLED "${IS_HOST_DISABLED}")
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-ompt-sys-trace
@@ -306,5 +295,4 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 45
     LABELS "integration-tests;openmp-host"
     FIXTURES_REQUIRED rocprofv3-test-ompt-sys-trace
-    DISABLED "${IS_HOST_DISABLED}"
-    DISABLED_CODECOV)
+    DISABLED "${IS_HOST_DISABLED}")
