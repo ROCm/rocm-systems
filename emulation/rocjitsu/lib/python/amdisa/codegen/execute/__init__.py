@@ -85,7 +85,6 @@ def _register_handlers() -> None:
         gen_vector_movrel,
         gen_vector_swaprel,
         gen_vector_sat_pack,
-        gen_vector_mullit,
         gen_vector_perm_pk16,
         gen_vector_qsad,
         gen_vector_trig_preop,
@@ -163,9 +162,6 @@ def _register_handlers() -> None:
         c.src_ops,
         c.op,
         true16_dst=c.is_vop3 and c.profile.uses_true16_vop3_opsel,
-    )
-    DISPATCH['vector_mullit'] = lambda c: gen_vector_mullit(
-        c.dst_ops, c.src_ops, c.is_vop3, c.has_abs
     )
     DISPATCH['vector_perm_pk16'] = lambda c: gen_vector_perm_pk16(
         c.dst_ops, c.src_ops, c.op, c.profile.uses_vgpr_msb_indexing

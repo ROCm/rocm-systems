@@ -25,7 +25,6 @@ from amdisa.codegen.execute.vector_special import (
     gen_vector_cvt_pk,
     gen_vector_div_fixup,
     gen_vector_movrel,
-    gen_vector_mullit,
     gen_vector_perm_pk16,
     gen_vector_permlane,
     gen_vector_qsad,
@@ -158,31 +157,8 @@ def test_unsupported_vector_special_operations_fail_during_generation(generator,
         generator(*args)
 
 
-def test_mullit_and_trig_preop_preserve_special_fp_rules():
-    mullit = gen_vector_mullit(
-        ['vdst'], ['src0', 'src1', 'src2'], is_vop3=True, has_abs=True
-    )
+def test_trig_preop_preserves_special_fp_rules():
     trig = gen_vector_trig_preop(['vdst'], ['src0', 'src1'], is_vop3=True, has_abs=True)
-
-    # ABS/NEG on the raw bits, then the MODE-aware helper, then OMOD and CLAMP
-    # on the result bits. The helper owns input flushing and output rounding.
-    for i in range(3):
-        assert (
-            f'amdgpu::source_modifier::apply<amdgpu::fp_format::F32>('
-            f'amdgpu::RegisterAccess(wf).read_lane(src{i}, lane), {i}, inst_.abs, '
-            'inst_.neg)'
-        ) in mullit
-    assert (
-        'amdgpu::output_modifier_policy<amdgpu::fp_format::F32>'
-        '(wf, inst_.omod, inst_.clamp)'
-    ) in mullit
-    assert (
-        'amdgpu::output_modifier::apply<amdgpu::fp_format::F32>('
-        'amdgpu::fp_mode::mullit_f32(s0, s1, s2, wf.fp_round_mode_f32(), '
-        'wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode(), '
-        'output_policy.omod != 0), output_policy)'
-    ) in mullit
-    assert 'std::isnan' not in mullit
     assert '0xA2F983u' in trig
     assert 'kTwoOverPiChunks' in trig
     assert 'kChunkBits = 24u' in trig

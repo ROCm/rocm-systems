@@ -33,7 +33,6 @@ from amdisa.codegen.execute.floating_policy import (
     F16_TRANSCENDENTAL_OPS,
 )
 
-from amdisa.codegen.execute.cube import CUBE_OPERATIONS, cube_expression, cube_omod
 from amdisa.codegen.execute.fp8_formats import uses_shared_fp8_widening
 
 # Operation and operands of each F32 binary functor. SUB and SUBREV add the
@@ -1542,15 +1541,6 @@ SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
     'v_fma_dx9_zero_f32_vop3': (
         '[&wf](auto a, auto b, auto c) { return amdgpu::fma_dx9_zero_f32_simd_unscoped(a, b, c, wf); }'
     ),
-    # Cube applies OMOD itself; false leaves only CLAMP to the operand glue.
-    **{
-        f'v_{op}_f32_vop3': (
-            '[&inst, &wf](auto x, auto y, auto z) { return '
-            + cube_omod(cube_expression(op, 'x', 'y', 'z'), 'inst.inst_')
-            + '; }, false'
-        )
-        for op in CUBE_OPERATIONS
-    },
     # Share the bit-level fixup and guest MODE policy with the scalar executor.
     # FIXUP rounds OMOD explicitly; operand glue still applies CLAMP.
     'v_div_fixup_f32_vop3': (
