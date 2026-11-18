@@ -524,8 +524,14 @@ warnings have their own suppression mechanism, described under
   suggestions that are right for the files you touch, and ignore the ones
   that are wrong. Fix a suggestion that names a library's internal header,
   rather than its public one, with a mapping in a `cmake/iwyu-*.imp` file,
-  as [`cmake/iwyu-libc.imp`](cmake/iwyu-libc.imp) does. Nothing in CI runs
-  IWYU.
+  as [`cmake/iwyu-libc.imp`](cmake/iwyu-libc.imp) does. CMake hides IWYU's
+  own failures, so to check that IWYU ran cleanly, build through
+  [`util/iwyu-wrapper.sh`](util/iwyu-wrapper.sh) and check the result with
+  [`util/check-iwyu.sh`](util/check-iwyu.sh) (the wrapper's comments show
+  how). CI:
+  [hipfile-iwyu.yml](../../.github/workflows/hipfile-iwyu.yml), which fails
+  only when IWYU itself fails, and lists its suggestions without acting on
+  them.
 - **Sanitizer-clean**: the unit tests must run without a report from any
   sanitizer, and any change that involves pointers, memory, or concurrency
   must be tested this way. The sanitizers need Clang (`amdclang++` or
