@@ -50,7 +50,9 @@ TOOL_SUBDIR = "rocprofiler-sdk"
 TOOL_BASENAME = "librocprofiler-sdk-tool.so"
 EXTRA_COUNTERS_FILE_ENV = "ROCPROF_EXTRA_COUNTERS_FILE"
 EXTRA_COUNTERS_CONTENTS_ENV = "ROCPROF_EXTRA_COUNTERS_CONTENTS"
-REGISTER_SCOPED_ENVIRONMENT_MARKER = b"ROCPROFILER_REGISTER_SCOPED_ATTACH_ENVIRONMENT_V1"
+REGISTER_TRANSIENT_EXTRA_COUNTERS_MARKER = (
+    b"ROCPROFILER_REGISTER_TRANSIENT_EXTRA_COUNTERS_V1"
+)
 
 _SDK_LIBRARY_RE = re.compile(
     r"^(?P<name>librocprofiler-sdk(?:-attach|-tool)?)\.so(?P<suffix>(?:\.\d+)*)$"
@@ -283,7 +285,7 @@ def environment_entry_bytes(name, value):
     return len(os.fsencode(f"{name}={value}")) + 1
 
 
-def target_register_supports_scoped_environment(pid, sdk):
+def target_register_supports_transient_extra_counters(pid, sdk):
     if not sdk.maps_readable:
         return (False, "its memory maps are not readable")
     if not sdk.register_libs:
@@ -294,9 +296,12 @@ def target_register_supports_scoped_environment(pid, sdk):
             return (False, f"{library.path} has been deleted")
         try:
             if not _contains_bytes(
-                _target_view(pid, library.path), REGISTER_SCOPED_ENVIRONMENT_MARKER
+                _target_view(pid, library.path), REGISTER_TRANSIENT_EXTRA_COUNTERS_MARKER
             ):
-                return (False, f"{library.path} predates scoped attach environments")
+                return (
+                    False,
+                    f"{library.path} predates transient extra-counter transport",
+                )
         except OSError as error:
             return (False, f"{library.path} could not be inspected: {error}")
     return (True, None)
@@ -307,7 +312,7 @@ def check_extra_counter_environment_compatibility(pid, sdk):
     if contents is None:
         return
 
-    supported, reason = target_register_supports_scoped_environment(pid, sdk)
+    supported, reason = target_register_supports_transient_extra_counters(pid, sdk)
     if supported:
         return
 

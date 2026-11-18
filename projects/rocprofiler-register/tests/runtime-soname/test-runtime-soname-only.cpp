@@ -122,8 +122,10 @@ make_extra_counters_environment_buffer()
         std::string{ "rocprofiler-register-sensitive-extra-counter-contents" } +
         std::string(256 * 1024 + 1, 'x');
     append_string(contents);
+    append_string("ROCPROFILER_TEST_FORWARDING");
+    append_string("preserved");
 
-    constexpr uint32_t pair_count = 2;
+    constexpr uint32_t pair_count = 3;
     std::memcpy(buffer.data(), &pair_count, sizeof(pair_count));
     return buffer;
 }
@@ -136,25 +138,32 @@ make_invalid_environment_buffer()
         buffer.insert(buffer.end(), input.begin(), input.end());
         buffer.emplace_back('\0');
     };
-    append_string("ROCPROFILER_TEST_SCOPED_ENV");
+    append_string("ROCPROF_EXTRA_COUNTERS_FILE");
+    append_string("");
+    append_string("ROCPROF_EXTRA_COUNTERS_CONTENTS");
+    append_string("temporary-extra-counter-contents");
+    append_string("ROCPROFILER_TEST_FORWARDING");
     append_string("temporary");
     append_string("INVALID=ENVIRONMENT=NAME");
     append_string("rejected");
 
-    constexpr uint32_t pair_count = 2;
+    constexpr uint32_t pair_count = 4;
     std::memcpy(buffer.data(), &pair_count, sizeof(pair_count));
     return buffer;
 }
 
 bool
-attach_environment_is_restored()
+attachment_environment_has_expected_lifetimes(std::string_view expected_forwarding)
 {
-    const auto* file = std::getenv("ROCPROF_EXTRA_COUNTERS_FILE");
-    const auto* tool = std::getenv("ROCP_TOOL_LIBRARIES");
+    const auto* file       = std::getenv("ROCPROF_EXTRA_COUNTERS_FILE");
+    const auto* attached   = std::getenv("ROCPROFILER_REGISTER_TOOL_ATTACHED");
+    const auto* tool       = std::getenv("ROCP_TOOL_LIBRARIES");
+    const auto* forwarding = std::getenv("ROCPROFILER_TEST_FORWARDING");
     return file != nullptr && std::string_view{ file } == "original-file" &&
            std::getenv("ROCPROF_EXTRA_COUNTERS_CONTENTS") == nullptr &&
-           std::getenv("ROCPROFILER_REGISTER_TOOL_ATTACHED") == nullptr &&
-           tool != nullptr && std::string_view{ tool } == "original-tool";
+           attached != nullptr && std::string_view{ attached } == "1" && tool != nullptr &&
+           std::string_view{ tool } == "runtime-soname-unused-tool" && forwarding != nullptr &&
+           std::string_view{ forwarding } == expected_forwarding;
 }
 
 bool
@@ -218,6 +227,7 @@ run_child(std::string_view mode,
         if(setenv("ROCPROF_EXTRA_COUNTERS_FILE", "original-file", 1) != 0 ||
            unsetenv("ROCPROF_EXTRA_COUNTERS_CONTENTS") != 0 ||
            unsetenv("ROCPROFILER_REGISTER_TOOL_ATTACHED") != 0 ||
+           unsetenv("ROCPROFILER_TEST_FORWARDING") != 0 ||
            setenv("ROCP_TOOL_LIBRARIES", "original-tool", 1) != 0)
         {
             std::cerr << "Test FAILED: could not prepare attachment environment\n";
@@ -232,10 +242,11 @@ run_child(std::string_view mode,
         }
         if(!verify_loaded_library("rocprofiler_set_api_table", expected_sdk_library))
             return 1;
-        if(!attach_environment_is_restored() || !exec_true_succeeds())
+        if(!attachment_environment_has_expected_lifetimes("preserved") ||
+           !exec_true_succeeds())
         {
             std::cerr
-                << "Test FAILED: target environment was not restored after attach\n";
+                << "Test FAILED: attachment environment has incorrect post-attach lifetimes\n";
             return 1;
         }
 
@@ -244,13 +255,14 @@ run_child(std::string_view mode,
             std::cerr << "Test FAILED: rocprofiler_register_detach failed\n";
             return 1;
         }
-        if(!attach_environment_is_restored() || !exec_true_succeeds())
+        if(!attachment_environment_has_expected_lifetimes("preserved") ||
+           !exec_true_succeeds())
         {
             std::cerr << "Test FAILED: target environment changed after detach\n";
             return 1;
         }
 
-        if(setenv("ROCPROFILER_TEST_SCOPED_ENV", "original", 1) != 0)
+        if(setenv("ROCPROFILER_TEST_FORWARDING", "original", 1) != 0)
         {
             std::cerr << "Test FAILED: could not prepare setenv failure test\n";
             return 1;
@@ -262,11 +274,13 @@ run_child(std::string_view mode,
             std::cerr << "Test FAILED: invalid environment name was accepted\n";
             return 1;
         }
-        const auto* restored = std::getenv("ROCPROFILER_TEST_SCOPED_ENV");
-        if(restored == nullptr || std::string_view{ restored } != "original" ||
-           !attach_environment_is_restored() || !exec_true_succeeds())
+        const auto* forwarding = std::getenv("ROCPROFILER_TEST_FORWARDING");
+        if(forwarding == nullptr || std::string_view{ forwarding } != "temporary" ||
+           !attachment_environment_has_expected_lifetimes("temporary") ||
+           !exec_true_succeeds())
         {
-            std::cerr << "Test FAILED: partial environment update was not restored\n";
+            std::cerr
+                << "Test FAILED: partial environment update has incorrect lifetimes\n";
             return 1;
         }
     }

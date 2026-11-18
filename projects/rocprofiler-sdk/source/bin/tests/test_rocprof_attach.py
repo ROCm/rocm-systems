@@ -139,10 +139,10 @@ class FakeTarget:
         self.map(attach)
         self.map(core)
 
-    def run_register(self, rocprof_attach, libdir, version="0.7.0", scoped=True):
+    def run_register(self, rocprof_attach, libdir, version="0.7.0", transient=True):
         content = b"\x7fELF"
-        if scoped:
-            content += b" " + rocprof_attach.REGISTER_SCOPED_ENVIRONMENT_MARKER
+        if transient:
+            content += b" " + rocprof_attach.REGISTER_TRANSIENT_EXTRA_COUNTERS_MARKER
         path = self.add_file(f"{libdir}/librocprofiler-register.so.{version}", content)
         self.map(path)
         return path
@@ -556,7 +556,7 @@ def test_large_extra_counter_file_is_materialized_for_older_target_tool(
     rocprof_attach, target, fake_rocattach, monkeypatch, tmp_path, capsys
 ):
     target.run_sdk(OTHER_LIBDIR, version="1.4.1")
-    target.run_register(rocprof_attach, OTHER_LIBDIR, scoped=True)
+    target.run_register(rocprof_attach, OTHER_LIBDIR, transient=True)
     target.add_thread(PID + 1, "rocp-bg-attach")
     definitions_file = tmp_path / "large extra counters.yaml"
     contents = "# extra counters\n" + ("x" * (256 * 1024))
@@ -585,7 +585,7 @@ def test_large_extra_counter_file_rejects_old_target_register_before_rocattach(
 ):
     target.run_sdk(OTHER_LIBDIR, version="1.4.1")
     register_path = target.run_register(
-        rocprof_attach, OTHER_LIBDIR, version="0.6.0", scoped=False
+        rocprof_attach, OTHER_LIBDIR, version="0.6.0", transient=False
     )
     target.add_thread(PID + 1, "rocp-bg-attach")
     definitions_file = tmp_path / "large.yaml"
@@ -607,7 +607,7 @@ def test_small_extra_counter_file_warns_for_old_target_register_without_leaking(
     rocprof_attach, target, fake_rocattach, monkeypatch, tmp_path, capsys
 ):
     target.run_sdk(OTHER_LIBDIR, version="1.4.1")
-    target.run_register(rocprof_attach, OTHER_LIBDIR, version="0.6.0", scoped=False)
+    target.run_register(rocprof_attach, OTHER_LIBDIR, version="0.6.0", transient=False)
     target.add_thread(PID + 1, "rocp-bg-attach")
     definitions_file = tmp_path / "small.yaml"
     contents = "sensitive-inline-counter-definition"

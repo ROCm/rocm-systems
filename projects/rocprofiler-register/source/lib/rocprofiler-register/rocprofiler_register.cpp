@@ -166,8 +166,8 @@ constexpr auto shared_library_prefix =
 constexpr auto shared_library_suffix =
     std::string_view{ ROCPROFILER_REGISTER_SHARED_LIBRARY_SUFFIX };
 #if defined(__GNUC__) || defined(__clang__)
-__attribute__((used)) const char scoped_attach_environment_marker[] =
-    "ROCPROFILER_REGISTER_SCOPED_ATTACH_ENVIRONMENT_V1";
+__attribute__((used)) const char transient_extra_counters_marker[] =
+    "ROCPROFILER_REGISTER_TRANSIENT_EXTRA_COUNTERS_V1";
 #endif
 
 std::string
@@ -912,22 +912,33 @@ log_attachment_environment(std::string_view name, std::string_view value)
     }
 }
 
-class scoped_attach_environment
+bool
+is_transient_extra_counter_environment(std::string_view name)
+{
+    return name == "ROCPROF_EXTRA_COUNTERS_FILE" ||
+           name == "ROCPROF_EXTRA_COUNTERS_CONTENTS";
+}
+
+class scoped_extra_counter_environment
 {
 public:
-    scoped_attach_environment() = default;
-    ~scoped_attach_environment() { restore(); }
+    scoped_extra_counter_environment() = default;
+    ~scoped_extra_counter_environment() { restore(); }
 
-    scoped_attach_environment(const scoped_attach_environment&) = delete;
-    scoped_attach_environment(scoped_attach_environment&&)      = delete;
-    scoped_attach_environment& operator=(const scoped_attach_environment&) = delete;
-    scoped_attach_environment& operator=(scoped_attach_environment&&) = delete;
+    scoped_extra_counter_environment(const scoped_extra_counter_environment&) = delete;
+    scoped_extra_counter_environment(scoped_extra_counter_environment&&)      = delete;
+    scoped_extra_counter_environment& operator=(const scoped_extra_counter_environment&) = delete;
+    scoped_extra_counter_environment& operator=(scoped_extra_counter_environment&&) = delete;
 
     bool set(std::string_view name, std::string_view value, bool log_value = false)
     {
-        auto previous = std::optional<std::string>{};
-        if(const auto* current = std::getenv(name.data())) previous = current;
-        m_previous.emplace_back(saved_value{ std::string{ name }, std::move(previous) });
+        const auto restore_after_attach = is_transient_extra_counter_environment(name);
+        if(restore_after_attach)
+        {
+            auto previous = std::optional<std::string>{};
+            if(const auto* current = std::getenv(name.data())) previous = current;
+            m_previous.emplace_back(saved_value{ std::string{ name }, std::move(previous) });
+        }
 
         errno = 0;
         if(::setenv(name.data(), value.data(), 1) != 0)
@@ -936,7 +947,7 @@ public:
             LOG(ERROR) << "Attachment failed to set environment variable " << name << ": "
                        << ((error_number != 0) ? std::strerror(error_number)
                                                : "unknown error");
-            m_previous.pop_back();
+            if(restore_after_attach) m_previous.pop_back();
             return false;
         }
 
@@ -1376,10 +1387,10 @@ rocprofiler_register_attach(const char* environment_buffer, const char* tool_lib
     LOG(INFO) << "rocprofiler_register_attach started with tool_lib_path: "
               << tool_lib_path;
 
-    // Tool discovery, rocprofiler_configure/tool_init, and tool_attach all complete
-    // synchronously below. Keep the injected environment alive only across those calls so
-    // later target-side execs never inherit attachment payloads.
-    auto       attach_environment = scoped_attach_environment{};
+    // Extra-counter FILE/CONTENTS are synchronous transport values and must not remain in the
+    // target environment. Other forwarded ROCP* values intentionally retain their established
+    // post-attach lifetime.
+    auto       attach_environment = scoped_extra_counter_environment{};
     const auto finish = [&attach_environment](rocprofiler_register_error_code_t status) {
         return attach_environment.restore() ? status : ROCP_REG_ROCPROFILER_ERROR;
     };
