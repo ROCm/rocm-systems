@@ -123,6 +123,15 @@ automatically based on the services your tool enables.
         If you set this to ``true`` while a context that requires the legacy
         path (counter collection, ATT, or PC sampling) is registered, the SDK
         logs a warning and falls back to the legacy path anyway.
+    * - ``ROCPROFILER_DEVICE_SIGNALS``
+      - ``true``
+      - Boolean (``true``/``false``). With inline queue interposition, gives the
+        dispatches the SDK adds a completion signal to a signal in the GPU's own
+        memory, except the last dispatch of each submitted batch, so the command
+        processor's completion write does not cross PCIe. Applies only where
+        ``hsa_amd_signal_batch_create`` reports a signal-capable pool of GPU
+        memory (large-BAR gfx94x, gfx95x and gfx125x); elsewhere host signals
+        are used as before. Read once, when the SDK initializes HSA.
 
 Kernel dispatch timestamp source
 --------------------------------
