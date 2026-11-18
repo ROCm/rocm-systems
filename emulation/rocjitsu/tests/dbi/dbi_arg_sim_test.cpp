@@ -335,9 +335,11 @@ TEST(DbiAfterInstSim, ProbeObservesTheResultAndPreservesLiveGuestDefinitions) {
                                            test::make_mov_vgpr_inline(0, kAnchorResult), kMovV1V0,
                                            guest_move.value(), endpgm.value()};
       const bool wave32 = arch.arch == ROCJITSU_CODE_ARCH_RDNA4;
+      const uint32_t granulated_sgpr_count =
+          arch.arch == ROCJITSU_CODE_ARCH_CDNA3 ? test::kCallableProbeGranulatedSgprCount : 3u;
       const std::vector<uint8_t> image =
           wave32 ? test::make_gfx1200_wave32_kernel_elf(guest, 64, 3)
-                 : test::make_amdgpu_kernel_elf(guest, 64, 3, arch.e_flags);
+                 : test::make_amdgpu_kernel_elf(guest, 64, granulated_sgpr_count, arch.e_flags);
       const std::vector<uint8_t> target = test::with_descriptor_metadata(image, arch.arch);
       const std::vector<uint8_t> probe = test::make_amdgpu_probe_elf(
           "after_result",

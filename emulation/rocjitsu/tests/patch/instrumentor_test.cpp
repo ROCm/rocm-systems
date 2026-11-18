@@ -2645,18 +2645,22 @@ TEST(InstrumentorProbePatch, Cdna3ReturnLinkUsesEveryKernelThatCanReachTheSite) 
   const AmdGpuCodeObject probe_object(probe.data(), probe.size());
   struct Flow {
     std::vector<uint32_t> entry;
-    bool disjoint;
+    std::string_view error;
   };
+  constexpr std::string_view kAliasedLink = "overlaps VCC or FLAT_SCRATCH";
+  constexpr std::string_view kUnprovenMode = "probe observation may inherit enabled GPR indexing";
   constexpr uint32_t call = 0xba840001u, ret = 0xbe801d04u, end = 0xbf810000u;
   const Flow paths[] = {
-      {{0xbf800000u, end}, true},
-      {{0xbf800000u, 0xbf82003eu}, false}, // Direct branch to the other kernel.
-      {{0xbf800000u, indirect.value()}, false},
-      {{call, end, ret}, true},
-      {{call, end, 0xbf850001u, 0xbf800000u, ret}, true}, // Two paths preserve the link.
-      {{call, end, 0xbe840080u, ret}, false},             // Overwrite the low or high link word.
-      {{call, end, 0xbe850080u, ret}, false},
-      {{0xbf850002u, call, end, ret}, false}, // One path enters the return without a call.
+      {.entry = {0xbf800000u, end}, .error = ""},
+      {.entry = {0xbf800000u, 0xbf82003eu}, .error = kAliasedLink}, // Branch to the other kernel.
+      // Unproven MODE is rejected before per-site SGPR ownership is checked.
+      {.entry = {0xbf800000u, indirect.value()}, .error = kUnprovenMode},
+      {.entry = {call, end, ret}, .error = ""},
+      {.entry = {call, end, 0xbf850001u, 0xbf800000u, ret}, .error = kUnprovenMode},
+      {.entry = {call, end, 0xbe840080u, ret},
+       .error = kUnprovenMode}, // Overwrite either link word.
+      {.entry = {call, end, 0xbe850080u, ret}, .error = kUnprovenMode},
+      {.entry = {0xbf850002u, call, end, ret}, .error = kUnprovenMode}, // Return without a call.
   };
   for (const auto &path : paths) {
     SCOPED_TRACE(testing::PrintToString(path.entry));
@@ -2684,13 +2688,12 @@ TEST(InstrumentorProbePatch, Cdna3ReturnLinkUsesEveryKernelThatCanReachTheSite) 
     point.probe_symbol = "return_probe";
     instrumentor.add_point(point);
     const auto result = instrumentor.patch_with_debug_summaries();
-    if (path.disjoint) {
+    if (path.error.empty()) {
       ASSERT_TRUE(result.errors.empty()) << result.errors.front();
       EXPECT_EQ(result.patches.size(), 1u);
     } else {
       ASSERT_FALSE(result.errors.empty());
-      EXPECT_NE(result.errors.front().find("overlaps VCC or FLAT_SCRATCH"), std::string::npos)
-          << result.errors.front();
+      EXPECT_NE(result.errors.front().find(path.error), std::string::npos) << result.errors.front();
       EXPECT_TRUE(result.patches.empty());
     }
   }
@@ -6321,10 +6324,13 @@ void expect_hazard_patch(rj_code_arch_t arch, uint32_t flags, std::vector<uint32
   guest.push_back(end.value());
   probe_words.push_back(ret.value());
   const bool wave32 = arch == ROCJITSU_CODE_ARCH_CDNA5 || arch == ROCJITSU_CODE_ARCH_RDNA4;
-  const std::vector<uint8_t> image =
-      test::with_resource_metadata(make_amdgpu_kernel_elf(guest, 64, 3, flags, 7, wave32 ? 0 : 7,
-                                                          false, false, false, false, wave32),
-                                   {{"test_kernel", 0, 32, wave32 ? 64u : 32u, 0}});
+  const uint32_t granulated_sgpr_count =
+      arch == ROCJITSU_CODE_ARCH_CDNA3 ? test::kCallableProbeGranulatedSgprCount : 3u;
+  const uint32_t sgpr_count = (granulated_sgpr_count + 1) * 8;
+  const std::vector<uint8_t> image = test::with_resource_metadata(
+      make_amdgpu_kernel_elf(guest, 64, granulated_sgpr_count, flags, 7, wave32 ? 0 : 7, false,
+                             false, false, false, wave32),
+      {{"test_kernel", 0, sgpr_count, wave32 ? 64u : 32u, 0}});
   const std::vector<uint8_t> body = make_amdgpu_probe_elf("hazard_probe", probe_words, flags);
   const AmdGpuCodeObject object(image.data(), image.size());
   const AmdGpuCodeObject probe(body.data(), body.size());
