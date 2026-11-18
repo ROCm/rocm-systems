@@ -7,10 +7,10 @@
 
 // Multi-GPU end-to-end dispatch and combine for rccl_ep.
 //
-// The single-GPU tests in device/RcclEpTests.cpp cover the wave primitives and the window layout arithmetic. Everything
-// below needs peer memory and a communicator, so it runs one process per rank under MPI, in the same shape as
-// SymmetricWindowMPITests.cpp. Dispatch and combine move data over LSA peer memory, so the eight ranks have to share a
-// node.
+// The single-GPU tests in device/RcclEpTests.cpp cover the wave primitives, the combine reduce and the window layout
+// arithmetic. Everything below needs peer memory and a communicator, so it runs one process per rank under MPI, in the
+// same shape as SymmetricWindowMPITests.cpp. Dispatch and combine move data over LSA peer memory, so the eight ranks
+// have to share a node.
 //
 // Build and run:
 //   ./install.sh --debug -t --enable-mpi-tests --enable-rccl-ep-tests

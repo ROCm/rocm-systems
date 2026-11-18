@@ -28,19 +28,21 @@ __host__ __device__ inline int align_count(int n, int a) {
   return a <= 1 ? n : ((n + a - 1) / a) * a;
 }
 
-// Count, per local expert, how many (token, slot) pairs select it.
+// Count, per local expert, how many (token, slot) pairs select it. One CTA per expert.
 __global__ void k_expand_count(EpConfig cfg,
                                const int32_t* __restrict__ recv_topk,  // [nrecv, num_topk] local ids
                                int num_recv,
-                               int32_t* __restrict__ counts) {         // [experts_per_rank]
+                               int32_t* __restrict__ counts) {  // [experts_per_rank]
   const int e = blockIdx.x;
   const int epr = cfg.experts_per_rank();
   if (e >= epr) return;
 
   int n = 0;
-  for (int i = threadIdx.x; i < num_recv; i += blockDim.x)
-    for (int k = 0; k < cfg.num_topk; ++k)
+  for (int i = threadIdx.x; i < num_recv; i += blockDim.x) {
+    for (int k = 0; k < cfg.num_topk; ++k) {
       if (recv_topk[(size_t)i * cfg.num_topk + k] == e) ++n;
+    }
+  }
 
   // reduce across the whole CTA
   __shared__ int sh[64];
@@ -125,45 +127,29 @@ __global__ void k_expand_map(EpConfig cfg, const int32_t* __restrict__ recv_topk
       }
       // rank of this slot among the same token's earlier slots on the same expert
       int within = 0;
-      for (int k2 = 0; k2 < k; ++k2)
+      for (int k2 = 0; k2 < k; ++k2) {
         if (recv_topk[i * K + k2] == e) ++within;
+      }
       out_map[i * K + k] = offsets[e] + base[i * epr + e] + within;
     }
   }
 }
 
-// Scatter payload and per-row weight into the mapped rows. bf16 path.
+// Scatter each received row's payload, and its weight for the row's slot, into the mapped rows.
+// T is the payload type; an fp8 row also scatters its per-128-element scales, to a destination
+// layout given by `sf_row_stride` / `sf_col_stride` (a column-major one is honoured as a strided
+// write). bf16 has no scales: recv_sf and out_sf are unused.
+template <typename T>
 __global__ void k_expand_scatter(EpConfig cfg,
-                                 const bf16_t* __restrict__ recv_x,     // [nrecv, hidden]
-                                 const float* __restrict__ recv_w,      // [nrecv, num_topk]
-                                 const int32_t* __restrict__ row_map,   // [nrecv, num_topk]
+                                 const T* __restrict__ recv_x,         // [nrecv, hidden]
+                                 const float* __restrict__ recv_sf,    // [nrecv, hidden_sf], fp8 only
+                                 const float* __restrict__ recv_w,     // [nrecv, num_topk]
+                                 const int32_t* __restrict__ row_map,  // [nrecv, num_topk]
                                  int num_recv,
-                                 bf16_t* __restrict__ out_x,            // [total_rows, hidden]
-                                 float* __restrict__ out_w) {           // [total_rows]
-  const int warp = get_warp_idx(), nwarps = get_num_warps(), lane = get_lane_idx();
-  const int K = cfg.num_topk;
-  const size_t n = (size_t)num_recv * K;
-
-  for (size_t p = (size_t)blockIdx.x * nwarps + warp; p < n; p += (size_t)gridDim.x * nwarps) {
-    const int row = row_map[p];
-    if (row < 0) continue;
-    const size_t i = p / K;
-    wave_copy_bf16(out_x + (size_t)row * cfg.hidden, recv_x + i * cfg.hidden, cfg.hidden);
-    if (out_w && lane == 0) out_w[row] = recv_w[p];
-  }
-}
-
-// FP8 payload plus per-128-element scales.
-//
-// `sf_row_stride` / `sf_col_stride` describe the destination scale layout. The
-// caller asks for TMA-aligned column-major scales; there is no TMA on AMD, but
-// the column-major *layout* is still what a downstream GEMM wants, so it is
-// honoured as a strided write rather than silently ignored.
-__global__ void k_expand_scatter_fp8(EpConfig cfg, const fp8_t* __restrict__ recv_x,
-                                     const float* __restrict__ recv_sf,   // [nrecv, hidden_sf]
-                                     const float* __restrict__ recv_w, const int32_t* __restrict__ row_map,
-                                     int num_recv, fp8_t* __restrict__ out_x, float* __restrict__ out_sf,
-                                     int sf_row_stride, int sf_col_stride, float* __restrict__ out_w) {
+                                 T* __restrict__ out_x,       // [total_rows, hidden]
+                                 float* __restrict__ out_sf,  // fp8 only
+                                 int sf_row_stride, int sf_col_stride,
+                                 float* __restrict__ out_w) {  // [total_rows] or nullptr
   const int warp = get_warp_idx(), nwarps = get_num_warps(), lane = get_lane_idx();
   const int K = cfg.num_topk, nsf = cfg.hidden_sf();
   const size_t n = (size_t)num_recv * K;
@@ -172,10 +158,12 @@ __global__ void k_expand_scatter_fp8(EpConfig cfg, const fp8_t* __restrict__ rec
     const int row = row_map[p];
     if (row < 0) continue;
     const size_t i = p / K;
-    wave_copy_bytes((uint8_t*)(out_x + (size_t)row * cfg.hidden), (const uint8_t*)(recv_x + i * cfg.hidden),
-                    cfg.hidden);
-    for (int j = lane; j < nsf; j += kWarpSize)
-      out_sf[(size_t)row * sf_row_stride + (size_t)j * sf_col_stride] = recv_sf[i * nsf + j];
+    wave_copy_local<false, 4>(out_x + (size_t)row * cfg.hidden, recv_x + i * cfg.hidden, cfg.hidden);
+    if constexpr (kIsFp8<T>) {
+      for (int j = lane; j < nsf; j += kWarpSize) {
+        out_sf[(size_t)row * sf_row_stride + (size_t)j * sf_col_stride] = recv_sf[i * nsf + j];
+      }
+    }
     if (out_w && lane == 0) out_w[row] = recv_w[p];
   }
 }

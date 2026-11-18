@@ -21,64 +21,105 @@ namespace rccl_ep {
 // B0, A1, B2, A3, interleaved across ranks. Pre-reducing reorders that, and
 // float addition is not associative, so bit-exactness fails.
 
-// Sum `nrow` rows of `src`, named by `rows` and applied in the order given,
-// into the single row `dst`, seeded by up to two optional bias rows. All four
-// pointers address a ROW, not a tensor -- the caller has already applied its
-// own token stride.
+// The combine reduce: the one place its bit-exactness contract is written down, and the one
+// implementation both combine paths reduce through -- the sender's grouped partials and the
+// origin's reduce epilogue (reduce_rows) -- so that they agree bit for bit.
 //
-// Both combine paths reduce exactly this way and under the same contract:
-// accumulate in fp32, round once at the end, and apply the terms as bias0,
-// bias1, then rows in ascending k. That order is the bit-exactness guarantee,
-// so it is defined here once rather than in each path.
+// The contract: accumulate in fp32 starting from 0.f, apply the terms in a fixed order -- bias0,
+// bias1, then the rows in the order the caller lists them -- and round to bf16 once, at the end.
+// The order is what the bit-exactness guarantee rests on; reordering it changes the result.
 //
-// Vectorised at dwordx4: scalar 2-byte loads are an 8x loss of load width, and
-// the split changes only which lane owns which element, never the order of
-// additions applied to any single element.
-__device__ __forceinline__ void reduce_rows_bf16(bf16_t* dst,
-                                                 const bf16_t* __restrict__ src,
-                                                 const int32_t* rows, int nrow,
-                                                 const bf16_t* __restrict__ bias0,
-                                                 const bf16_t* __restrict__ bias1,
-                                                 int hidden, int lane) {
-  constexpr int kPerVec = 8; // 8 bf16 = 16 B
-  const int nvec = hidden / kPerVec;
+// Vectorised at dwordx4, kVecElems bf16 per lane: scalar 2-byte loads are an 8x loss of load width,
+// and the split changes only which lane owns which element, never the order of additions applied to
+// any single element. Precondition: hidden % kVecElems == 0, which ep_create enforces (it rejects
+// any other hidden), so there is no scalar tail.
+constexpr int kVecElems = 8;
+static_assert(kVecElems * sizeof(bf16_t) == sizeof(uint4), "one vector of a row is one dwordx4");
+
+// acc += the kVecElems bf16 of `y`.
+__device__ __forceinline__ void add_vec(float (&acc)[kVecElems], const uint4& y) {
+  const bf16_t* yy = reinterpret_cast<const bf16_t*>(&y);
+#pragma unroll
+  for (int u = 0; u < kVecElems; ++u) acc[u] += __bfloat162float(yy[u]);
+}
+
+// Rounds acc to bf16, the contract's one rounding, and stores it as one dwordx4 at p.
+__device__ __forceinline__ void store_vec(bf16_t* p, const float (&acc)[kVecElems]) {
+  uint4 o;
+  bf16_t* oo = reinterpret_cast<bf16_t*>(&o);
+#pragma unroll
+  for (int u = 0; u < kVecElems; ++u) oo[u] = __float2bfloat16(acc[u]);
+  *reinterpret_cast<uint4*>(p) = o;
+}
+
+// The contract for one row: dst = bf16(bias0 + bias1 + the nrow rows src + rows[j] * hidden), one
+// vector per lane per trip. dst addresses the output row; bias0 and bias1 are bias TENSORS, either
+// may be null, and the token's bias row starts bias_off elements in.
+//
+// kMaxRows > 0: at most kMaxRows rows, in fixed-size arrays the caller fills, which stay in
+// registers, and every row load of a vector is issued before the first add rather than one at a
+// time. Unrolling the trip loop would double the live row loads and push a 1024-thread block past
+// its 128-VGPR budget into spills. kMaxRows == 0: any number of rows, loaded one at a time; the
+// out-of-line paths take it, for tokens with more than 8 rows.
+template <int kMaxRows>
+__device__ __forceinline__ void reduce_rows(bf16_t* dst, const bf16_t* __restrict__ src, const int32_t* rows, int nrow,
+                                            const bf16_t* __restrict__ bias0, const bf16_t* __restrict__ bias1,
+                                            size_t bias_off, int hidden, int lane) {
+  EP_DEBUG_ASSERT(hidden % kVecElems == 0);
+  const int nvec = hidden / kVecElems;
+#pragma unroll 1
   for (int v = lane; v < nvec; v += kWarpSize) {
-    float acc[kPerVec];
-    const int h0 = v * kPerVec;
+    const int h0 = v * kVecElems;
+    uint4 y[kMaxRows > 0 ? kMaxRows : 1];
+    if constexpr (kMaxRows > 0) {
 #pragma unroll
-    for (int u = 0; u < kPerVec; ++u) acc[u] = 0.f;
-    if (bias0) {
-      const uint4 b = *reinterpret_cast<const uint4*>(bias0 + h0);
-      const bf16_t* bb = reinterpret_cast<const bf16_t*>(&b);
-#pragma unroll
-      for (int u = 0; u < kPerVec; ++u) acc[u] += __bfloat162float(bb[u]);
+      for (int j = 0; j < kMaxRows; ++j) {
+        if (j < nrow) y[j] = *reinterpret_cast<const uint4*>(src + (size_t)rows[j] * hidden + h0);
+      }
     }
-    if (bias1) {
-      const uint4 b = *reinterpret_cast<const uint4*>(bias1 + h0);
-      const bf16_t* bb = reinterpret_cast<const bf16_t*>(&b);
+    float acc[kVecElems];
 #pragma unroll
-      for (int u = 0; u < kPerVec; ++u) acc[u] += __bfloat162float(bb[u]);
+    for (int u = 0; u < kVecElems; ++u) acc[u] = 0.f;
+    if (bias0) add_vec(acc, *reinterpret_cast<const uint4*>(bias0 + bias_off + h0));
+    if (bias1) add_vec(acc, *reinterpret_cast<const uint4*>(bias1 + bias_off + h0));
+    if constexpr (kMaxRows > 0) {
+#pragma unroll
+      for (int j = 0; j < kMaxRows; ++j) {
+        if (j < nrow) add_vec(acc, y[j]);
+      }
+    } else {
+      for (int j = 0; j < nrow; ++j) add_vec(acc, *reinterpret_cast<const uint4*>(src + (size_t)rows[j] * hidden + h0));
     }
-    for (int j = 0; j < nrow; ++j) { // ascending k, as strict order requires
-      const uint4 y = *reinterpret_cast<const uint4*>(src + (size_t)rows[j] * hidden + h0);
-      const bf16_t* yy = reinterpret_cast<const bf16_t*>(&y);
-#pragma unroll
-      for (int u = 0; u < kPerVec; ++u) acc[u] += __bfloat162float(yy[u]);
-    }
-    uint4 o;
-    bf16_t* oo = reinterpret_cast<bf16_t*>(&o);
-#pragma unroll
-    for (int u = 0; u < kPerVec; ++u) oo[u] = __float2bfloat16(acc[u]);
-    *reinterpret_cast<uint4*>(dst + h0) = o;
+    store_vec(dst + h0, acc);
   }
-  // scalar tail when hidden is not a multiple of 8
-  for (int h = nvec * kPerVec + lane; h < hidden; h += kWarpSize) {
-    float acc = 0.f;
-    if (bias0) acc += __bfloat162float(bias0[h]);
-    if (bias1) acc += __bfloat162float(bias1[h]);
-    for (int j = 0; j < nrow; ++j) acc += __bfloat162float(src[(size_t)rows[j] * hidden + h]);
-    dst[h] = __float2bfloat16(acc);
+}
+
+// The grouped push's ownership rule for one token. Lane k (k < num_topk) holds slot k's local
+// expert `e`, -1 for another rank's. owns_any_slot: this rank owns a slot of the token, so the
+// origin reads this rank's row, which is therefore written even when no slot resolved to an input
+// row (as zeros).
+__device__ __forceinline__ bool owns_any_slot(int e) {
+  return __ballot(e >= 0) != 0;
+}
+
+// combine_impl's reduce for a token with more than 8 rows on this rank. Out of line so
+// its runtime-indexed arrays do not count against the fast path's register budget.
+__device__ __noinline__ void reduce_token_rows_any(const bf16_t* __restrict__ in_y,
+                                                   const int32_t* __restrict__ recv_topk,
+                                                   const int32_t* __restrict__ row_map, int i, int K, bf16_t* dst,
+                                                   int hidden, int lane) {
+  // Row bases hoisted out of the element loop, in ascending k.
+  int32_t row[kMaxTopk];
+  int nrow = 0;
+  for (int k = 0; k < K; ++k) {
+    if (recv_topk[(size_t)i * K + k] < 0) continue;
+    const int r = row_map[(size_t)i * K + k];
+    if (r >= 0) row[nrow++] = r;
   }
+  // No bias on this side; the origin seeds its own. The store goes to a
+  // PEER, where narrow stores cost more than against local HBM, which is
+  // the other reason the reduce keeps them at dwordx4.
+  reduce_rows<0>(dst, in_y, row, nrow, nullptr, nullptr, 0, hidden, lane);
 }
 
 // Expert side: push locally-owned values back to the origin, preserving slot k
@@ -97,7 +138,7 @@ __global__ void combine_impl(EpConfig cfg,
   // loaded once per CTA and every write goes to a single peer. Parallelism is
   // gridDim.y * nwarps and only gridDim.y follows the budget; see kEpWaves.
   const int src_rank = blockIdx.x;
-  if (src_rank >= cfg.num_ranks) return;   // block-uniform, so the barrier below is safe
+  if (src_rank >= cfg.num_ranks) return;  // block-uniform, so the barrier below is safe
   const int warp = get_warp_idx(), nwarps = get_num_warps(), lane = get_lane_idx();
   const int K = cfg.num_topk;
 
@@ -128,35 +169,40 @@ __global__ void combine_impl(EpConfig cfg,
       // here, summing this rank's owned rows in ascending k into one row. The
       // origin folds that row at the last top-k position this rank owns. fp32
       // with a single rounding at the end; bf16 accumulation would not match.
-      const int kl = last_local_slot(recv_topk, i, K);
-      if (kl >= 0) {
-        // Row bases hoisted out of the element loop.
-        int32_t row[kMaxTopk];
-        int nrow = 0;
-        for (int k = 0; k < K; ++k) {
-          if (recv_topk[(size_t)i * K + k] < 0) continue;
-          const int r = row_map[(size_t)i * K + k];
-          if (r >= 0) row[nrow++] = r;
-        }
-        // No bias on this side; the origin seeds its own. The store goes to a
-        // PEER, where narrow stores cost more than against local HBM, which is
-        // the other reason reduce_rows_bf16 keeps them at dwordx4.
-        reduce_rows_bf16(w.y() + slot * cfg.hidden, in_y, row, nrow,
-                         /*bias0=*/nullptr, /*bias1=*/nullptr, cfg.hidden, lane);
+      // Lane k resolves slot k, and its rank among the valid lanes is its
+      // position in that order.
+      int e = -1, r = -1;
+      if (lane < K) {
+        e = recv_topk[(size_t)i * K + lane];
+        if (e >= 0) r = row_map[(size_t)i * K + lane];
       }
-      if (in_w) {
-        for (int k = 0; k < K; ++k) {
-          if (recv_topk[(size_t)i * K + k] < 0) continue;
-          const int row = row_map[(size_t)i * K + k];
-          if (row >= 0 && lane == 0) w.cw()[slot * K + k] = in_w[row];
+      const bool valid = r >= 0;  // r >= 0 implies lane < K and e >= 0
+      const unsigned long long vm = __ballot(valid);
+      const int nrow = __popcll(vm);
+      const bool owns = owns_any_slot(e);  // false implies nrow == 0
+      if (owns && nrow <= 8) {
+        const int pos = __popcll(vm & __lanemask_lt());
+        int32_t rows8[8];
+#pragma unroll
+        for (int j = 0; j < 8; ++j) {
+          // src is wave-uniform (from a ballot), so readlane leaves the row in a scalar
+          // register, off the vector budget the reduce needs for its loads.
+          const unsigned long long mj = __ballot(valid && pos == j);
+          const int src = mj ? __builtin_ctzll(mj) : 0;
+          rows8[j] = __builtin_amdgcn_readlane(r, src);
         }
+        reduce_rows<8>(w.y() + slot * cfg.hidden, in_y, rows8, nrow, nullptr, nullptr, 0, cfg.hidden, lane);
+      } else if (owns) {
+        reduce_token_rows_any(in_y, recv_topk, row_map, i, K, w.y() + slot * cfg.hidden, cfg.hidden, lane);
       }
+      if (in_w && valid) w.cw()[slot * K + lane] = in_w[r];
     } else if (grouped) {
       // Grouped mode sends ONE row per token, so index by slot rather than by
       // (slot, k). The expanded layout is K times larger, and scattering single
       // rows across it is far slower than a dense write.
-      const int kl = last_local_slot(recv_topk, i, K);
-      if (kl >= 0) wave_copy_bf16(w.y() + slot * cfg.hidden, in_y + (size_t)i * cfg.hidden, cfg.hidden);
+      if (owns_any_slot(lane < K ? recv_topk[(size_t)i * K + lane] : -1)) {
+        wave_copy(w.y() + slot * cfg.hidden, in_y + (size_t)i * cfg.hidden, cfg.hidden);
+      }
       // The origin needs its own top-k weights back; every rank that received
       // this token holds an identical copy of the full row, so whichever
       // arrives last wins and the result is the same either way.
@@ -168,7 +214,7 @@ __global__ void combine_impl(EpConfig cfg,
         if (recv_topk[(size_t)i * K + k] < 0) continue;  // not ours
         const int row = row_map ? row_map[(size_t)i * K + k] : (int)(i * K + k);
         if (row < 0) continue;
-        wave_copy_bf16(w.y() + (slot * K + k) * cfg.hidden, in_y + (size_t)row * cfg.hidden, cfg.hidden);
+        wave_copy(w.y() + (slot * K + k) * cfg.hidden, in_y + (size_t)row * cfg.hidden, cfg.hidden);
         if (in_w && lane == 0) w.cw()[slot * K + k] = in_w[row];
       }
     }
@@ -178,10 +224,89 @@ __global__ void combine_impl(EpConfig cfg,
   // a token only reaches a rank that owns one of its experts.
 }
 
-// Origin side: accumulate across topk slots in strict order, in float32.
+// Origin-side reduce for a token with more than 8 contributing rows. Out of line so
+// its runtime-indexed arrays do not count against the fast path's register budget.
+__device__ __noinline__ void reduce_token_any_rows(EpConfig cfg, WindowView self, const int32_t* __restrict__ topk_idx,
+                                                   int t, int grouped, const bf16_t* __restrict__ bias0,
+                                                   const bf16_t* __restrict__ bias1, bf16_t* __restrict__ out,
+                                                   int lane) {
+  const int K = cfg.num_topk;
+  const size_t tbase = (size_t)t * cfg.hidden;
+  // Which slots carry a value, and the row base of each, decided once per token rather than
+  // re-derived for every element of hidden: recomputing owner and slot per element cost a
+  // topk_idx load and an integer divide for every one of hidden x K accesses. Packed rather than
+  // indexed by k, so the reduction carries no per-element branch; ascending k is preserved, which
+  // is the part the bit-exactness contract cares about.
+  int32_t row[kMaxTopk];
+  int nrow = 0;
+  for (int k = 0; k < K; ++k) {
+    // owner_of bounds the id on both sides: e / epr reaches num_ranks for an
+    // out-of-range id, and slot() would then index a whole rank-region past
+    // the end of the window.
+    const int owner = owner_of(cfg, topk_idx[(size_t)t * K + k]);
+    if (owner < 0) continue;
+    if (grouped) {  // the sender pushed the owner's row to its last slot
+      bool later = false;
+      for (int k2 = k + 1; k2 < K && !later; ++k2) later = owner_of(cfg, topk_idx[(size_t)t * K + k2]) == owner;
+      if (later) continue;
+    }
+    const size_t slot = EpWindowLayout::slot(cfg, owner, t);
+    // Must mirror the sender's layout: one row per slot when grouped, one
+    // per (slot, k) when reading the expanded layout.
+    row[nrow++] = (int32_t)(grouped ? slot : (slot * K + k));
+  }
+
+  reduce_rows<0>(out + tbase, self.y(), row, nrow, bias0, bias1, tbase, cfg.hidden, lane);
+}
+
+// Origin side for token t: accumulate across topk slots in strict order, in float32.
 // bias0/bias1 are the accumulator's initial value and must seed it BEFORE the
 // topk sum so they share the rounding sequence.
 // `grouped` mirrors the sender: only the owner's last slot is populated.
+__device__ __forceinline__ void combine_reduce_token(const EpConfig& cfg, const WindowView& self,
+                                                     const int32_t* __restrict__ topk_idx, int t, int grouped,
+                                                     const bf16_t* __restrict__ bias0, const bf16_t* __restrict__ bias1,
+                                                     bf16_t* __restrict__ out, float* __restrict__ out_w, int lane) {
+  const int K = cfg.num_topk;
+  const size_t tbase = (size_t)t * cfg.hidden;
+
+  // Lane k decides slot k by the same rules as reduce_token_any_rows: the expert id
+  // is in range and, when grouped, no LATER slot has the same owner (the sender
+  // pushed that owner's row to its last slot). The ballot keeps ascending k.
+  const int own = owner_of(cfg, lane < K ? topk_idx[(size_t)t * K + lane] : -1);
+  bool take_k = own >= 0;
+  if (grouped) {
+    for (int d = 1; d < K; ++d) {
+      const int later = __shfl(own, lane + d, kWarpSize);
+      if (lane + d < K && later == own) take_k = false;
+    }
+  }
+  const size_t my_slot = take_k ? EpWindowLayout::slot(cfg, own, t) : 0;
+  const int32_t my_row = (int32_t)(grouped ? my_slot : (my_slot * K + lane));
+  unsigned long long pending = __ballot(take_k);
+  const int nrow_fast = __popcll(pending);
+  if (nrow_fast <= 8) {
+    int32_t rows8[8];
+#pragma unroll
+    for (int j = 0; j < 8; ++j) {
+      rows8[j] = __shfl(my_row, pending ? __builtin_ctzll(pending) : 0, kWarpSize);
+      pending &= pending - 1;
+    }
+    reduce_rows<8>(out + tbase, self.y(), rows8, nrow_fast, bias0, bias1, tbase, cfg.hidden, lane);
+  } else {
+    reduce_token_any_rows(cfg, self, topk_idx, t, grouped, bias0, bias1, out, lane);
+  }
+
+  if (out_w) {
+    for (int k = lane; k < K; k += kWarpSize) {
+      // Any owner of this token has the full weight row; a -1 or out-of-range slot was
+      // never sent anywhere, so its weight is written as zero.
+      const int owner = owner_of(cfg, topk_idx[(size_t)t * K + k]);
+      out_w[(size_t)t * K + k] = (owner >= 0) ? self.cw()[EpWindowLayout::slot(cfg, owner, t) * K + k] : 0.f;
+    }
+  }
+}
+
 __global__ void combine_reduce_epilogue_impl(EpConfig cfg, WindowView self,
                                              const int32_t* __restrict__ topk_idx, // [ntok, num_topk] GLOBAL expert ids
                                              int num_tokens,
@@ -192,61 +317,13 @@ __global__ void combine_reduce_epilogue_impl(EpConfig cfg, WindowView self,
                                              float* __restrict__ out_w) { // [ntok, num_topk] or nullptr
   const int warp = get_warp_idx(), nwarps = get_num_warps(), lane = get_lane_idx();
   const int stride = nwarps * gridDim.x;
-  const int K = cfg.num_topk;
-
   // One wave per token, so gridDim.x * nwarps waves chase num_tokens, and this
   // loop is sensitive in BOTH directions: too few waves and each serialises
   // many tokens, too many and most retire without work while the block still
   // pays for them. Launched at kEpWaves, which is sized for the many-token
   // case; python/rccl_ep_capi.hip records what that costs when tokens are few.
   for (int t = blockIdx.x * nwarps + warp; t < num_tokens; t += stride) {
-    // Decide once per token which slots carry a value, rather than re-deriving
-    // it for every element of hidden. owner_of bounds the id on both sides:
-    // e / epr reaches num_ranks for an out-of-range id, and slot() would then
-    // index a whole rank-region past the end of the window.
-    int owner[kMaxTopk];
-    bool take[kMaxTopk];
-    for (int k = 0; k < K; ++k) owner[k] = owner_of(cfg, topk_idx[(size_t)t * K + k]);
-    for (int k = 0; k < K; ++k) {
-      take[k] = owner[k] >= 0;
-      if (take[k] && grouped) {
-        for (int k2 = k + 1; k2 < K; ++k2) {
-          if (owner[k2] == owner[k]) {
-            take[k] = false;
-            break;
-          }
-        }
-      }
-    }
-
-    // Row base for each contributing slot, hoisted out of the element loop.
-    // Recomputing owner and slot per element cost a topk_idx load and an
-    // integer divide for every one of hidden x K accesses. Packed rather than
-    // indexed by k, so the reduction carries no per-element branch; ascending k
-    // is preserved, which is the part the bit-exactness contract cares about.
-    int32_t row[kMaxTopk];
-    int nrow = 0;
-    for (int k = 0; k < K; ++k) {
-      if (!take[k]) continue;
-      const size_t slot = EpWindowLayout::slot(cfg, owner[k], t);
-      // Must mirror the sender's layout: one row per slot when grouped, one
-      // per (slot, k) when reading the expanded layout.
-      row[nrow++] = (int32_t)(grouped ? slot : (slot * K + k));
-    }
-
-    const size_t tbase = (size_t)t * cfg.hidden;
-    reduce_rows_bf16(out + tbase, self.y(), row, nrow,
-                     bias0 ? bias0 + tbase : nullptr,
-                     bias1 ? bias1 + tbase : nullptr, cfg.hidden, lane);
-
-    if (out_w) {
-      for (int k = lane; k < K; k += kWarpSize) {
-        // Any owner of this token has the full weight row; a -1 or out-of-range slot was
-        // never sent anywhere, so its weight is written as zero.
-        const int o = owner_of(cfg, topk_idx[(size_t)t * K + k]);
-        out_w[(size_t)t * K + k] = (o >= 0) ? self.cw()[EpWindowLayout::slot(cfg, o, t) * K + k] : 0.f;
-      }
-    }
+    combine_reduce_token(cfg, self, topk_idx, t, grouped, bias0, bias1, out, out_w, lane);
   }
 }
 

@@ -9,16 +9,20 @@
 //
 // These cover the parts of the module that need neither peer memory nor a
 // communicator, so they run on a single GPU: the wave64 primitives every kernel
-// is built on, the two window helpers, and the layout arithmetic that decides
-// where each region lands. Dispatch and combine need more than one rank and
-// symmetric memory, so they are out of scope for this single-GPU binary.
+// is built on, the wave copy, combine's per-token ownership rule and its reduce's
+// bit-exactness contract, and the layout arithmetic that decides
+// where each region lands. Dispatch and combine
+// need more than one rank and symmetric memory, so they are out of scope for this
+// single-GPU binary.
 
 #include "DeviceTestBase.hpp"
 #include <hip/hip_bf16.h>
+#include <cmath>
 #include <cstring>
 #include <numeric>
 #include <vector>
 
+#include "device/combine.h"
 #include "device/ep_common.h"
 #include "device/hip_prims.h"
 #include "include/ep_arch.h"
@@ -151,43 +155,152 @@ TEST_F(RcclEpWaveTest, InclusiveAndExclusiveSums) {
 }
 
 // ---------------------------------------------------------------------------
-// Window helpers
+// Combine ownership
 // ---------------------------------------------------------------------------
 
-__global__ void kernelLastLocalSlot(const int32_t* __restrict__ topk, int rows, int numTopk,
-                                    int* __restrict__ out) {
-  for (int r = 0; r < rows; ++r) out[r] = rccl_ep::last_local_slot(topk, r, numTopk);
+// One token per block, one wave: lane k gets slot k's local expert (-1: another rank's), and
+// every lane joins the ballot, as in combine's grouped push.
+__global__ void kernelOwnsAnySlot(const int32_t* __restrict__ experts, int numTopk, int* __restrict__ owns) {
+  const int t    = static_cast<int>(blockIdx.x);
+  const int lane = rccl_ep::get_lane_idx();
+  const bool o   = rccl_ep::owns_any_slot(lane < numTopk ? experts[t * numTopk + lane] : -1);
+  if (lane == 0) owns[t] = o ? 1 : 0;
 }
 
-TEST_F(RcclEpWaveTest, LastLocalSlotFindsHighestOwnedPosition) {
+TEST_F(RcclEpWaveTest, OwnsAnySlotOfTheToken) {
   constexpr int kTopk = 4;
-  // -1 means "not owned by this rank". The helper returns the largest owned
-  // position, which is where the origin rank -- the rank a token was routed
-  // from -- folds this rank's partial sum.
-  const std::vector<int32_t> h_topk = {
-      3, -1, -1, -1,   // only position 0
-      -1, -1, -1, 7,   // only position 3
-      1, -1, 5, -1,    // highest owned is 2
+  // A rank owns a token when any slot names one of its experts, wherever that slot is: the
+  // origin then reads this rank's row, so the grouped push writes it.
+  const std::vector<int32_t> h_experts = {
+      3,  -1, -1, -1,  // only slot 0
+      -1, -1, -1, 7,   // only slot 3
       -1, -1, -1, -1,  // none owned
-      0, 1, 2, 3,      // all owned
+      1,  5,  2,  0,   // all owned
+      6,  6,  -1, -1,  // an expert id repeated within the token
   };
-  const std::vector<int> expected = {0, 3, 2, -1, 3};
-  const int rows                  = static_cast<int>(expected.size());
+  const std::vector<int> want = {1, 1, 0, 1, 1};
+  const int tokens            = static_cast<int>(want.size());
 
-  DeviceBuffer<int32_t> d_topk(h_topk.size());
-  DeviceBuffer<int> d_out(rows);
-  d_topk.copyFrom(h_topk);
-
-  kernelLastLocalSlot<<<1, 1>>>(d_topk.ptr, rows, kTopk, d_out.ptr);
+  DeviceBuffer<int32_t> d_experts(h_experts.size());
+  DeviceBuffer<int> d_owns(tokens);
+  d_experts.copyFrom(h_experts);
+  kernelOwnsAnySlot<<<tokens, rccl_ep::kWarpSize>>>(d_experts.ptr, kTopk, d_owns.ptr);
   syncAndCheck();
+  const std::vector<int> owns = d_owns.copyTo();
+  for (int t = 0; t < tokens; ++t) EXPECT_EQ(owns[t], want[t]) << "token " << t;
+}
 
-  const std::vector<int> h_out = d_out.copyTo();
-  for (int r = 0; r < rows; ++r) EXPECT_EQ(h_out[r], expected[r]) << "row " << r;
+// ---------------------------------------------------------------------------
+// The combine reduce's bit-exactness contract (reduce_rows)
+// ---------------------------------------------------------------------------
+
+// One wave reduces `nrow` rows of `src`, listed in `rows`, into dst, as both combine paths do.
+template <int kMaxRows>
+__global__ void kernelReduceRows(rccl_ep::bf16_t* __restrict__ dst, const rccl_ep::bf16_t* __restrict__ src,
+                                 const int32_t* __restrict__ rows, int nrow, const rccl_ep::bf16_t* __restrict__ bias0,
+                                 const rccl_ep::bf16_t* __restrict__ bias1, int hidden) {
+  int32_t r[rccl_ep::kMaxTopk];
+  for (int j = 0; j < rccl_ep::kMaxTopk; ++j) r[j] = j < nrow ? rows[j] : 0;
+  rccl_ep::reduce_rows<kMaxRows>(dst, src, r, nrow, bias0, bias1, 0, hidden, rccl_ep::get_lane_idx());
+}
+
+// Source rows of very different binades and signs, exact in bf16. Row 3 is the exact negative of
+// row 0, and both sit near 2^20, far above the rest, so reordering the adds or rounding more than
+// once changes the bf16 result.
+static float reduceSrcValue(int r, int h) {
+  static const int kExp[16] = {20, 1, -2, 20, 3, 0, -4, 2, -1, 4, -3, 1, -6, 5, 0, -5};
+  const int rr = r == 3 ? 0 : r;
+  const float m = 1.0f + static_cast<float>((rr * 13 + h * 7) % 128) / 128.0f;
+  float v = m * std::ldexp(1.0f, kExp[rr] + (rr == 0 ? h % 2 : 0));
+  if (rr != 0 && (r + h) % 3 == 0) v = -v;
+  return r == 3 ? -v : v;
+}
+
+// The contract, on the host: fp32 from 0, bias0, bias1, then the rows in the order listed; one
+// rounding to bf16 at the end.
+static float reduceReference(const std::vector<rccl_ep::bf16_t>& src, const int32_t* rows, int nrow,
+                             const std::vector<rccl_ep::bf16_t>* bias0, const std::vector<rccl_ep::bf16_t>* bias1,
+                             int h, int hidden) {
+  float acc = 0.f;
+  if (bias0) acc += __bfloat162float((*bias0)[h]);
+  if (bias1) acc += __bfloat162float((*bias1)[h]);
+  for (int j = 0; j < nrow; ++j) acc += __bfloat162float(src[static_cast<size_t>(rows[j]) * hidden + h]);
+  return __bfloat162float(__float2bfloat16(acc));
+}
+
+TEST_F(RcclEpWaveTest, ReduceRowsFollowsTheContract) {
+  constexpr int kHidden  = 512;  // one 8-element vector per lane
+  constexpr int kSrcRows = 16;
+  const int32_t kRows[12] = {5, 0, 9, 3, 12, 1, 7, 14, 2, 11, 4, 15};
+
+  std::vector<rccl_ep::bf16_t> h_src(static_cast<size_t>(kSrcRows) * kHidden), h_b0(kHidden), h_b1(kHidden);
+  for (int r = 0; r < kSrcRows; ++r) {
+    for (int h = 0; h < kHidden; ++h) {
+      h_src[static_cast<size_t>(r) * kHidden + h] = __float2bfloat16(reduceSrcValue(r, h));
+    }
+  }
+  for (int h = 0; h < kHidden; ++h) {
+    h_b0[h] = __float2bfloat16(std::ldexp(1.0f + static_cast<float>(h % 64) / 64.0f, -3));
+    h_b1[h] = __float2bfloat16(-std::ldexp(1.0f + static_cast<float>(h % 32) / 32.0f, -5));
+  }
+
+  DeviceBuffer<rccl_ep::bf16_t> d_src(h_src.size()), d_b0(kHidden), d_b1(kHidden), d_out(kHidden);
+  DeviceBuffer<int32_t> d_rows(12);
+  d_src.copyFrom(h_src);
+  d_b0.copyFrom(h_b0);
+  d_b1.copyFrom(h_b1);
+  d_rows.copyFrom(std::vector<int32_t>(kRows, kRows + 12));
+
+  struct Case {
+    const char* what;
+    int maxRows;  // 8: the register fast path; 0: any number of rows
+    bool biases;
+    int nrow;
+  };
+  const Case cases[] = {
+      {"8 rows, biases", 8, true, 8},
+      {"3 rows", 8, false, 3},
+      {"no rows, biases only", 8, true, 0},
+      {"12 rows, biases", 0, true, 12},
+      {"12 rows", 0, false, 12},
+  };
+  for (const Case& c : cases) {
+    SCOPED_TRACE(c.what);
+    const rccl_ep::bf16_t* b0 = c.biases ? d_b0.ptr : nullptr;
+    const rccl_ep::bf16_t* b1 = c.biases ? d_b1.ptr : nullptr;
+    d_out.zero();
+    using Kernel = void (*)(rccl_ep::bf16_t*, const rccl_ep::bf16_t*, const int32_t*, int, const rccl_ep::bf16_t*,
+                            const rccl_ep::bf16_t*, int);
+    const Kernel kernel = c.maxRows == 8 ? kernelReduceRows<8> : kernelReduceRows<0>;
+    hipLaunchKernelGGL(kernel, dim3(1), dim3(rccl_ep::kWarpSize), 0, 0, d_out.ptr, d_src.ptr, d_rows.ptr, c.nrow, b0,
+                       b1, kHidden);
+    syncAndCheck();
+    const std::vector<rccl_ep::bf16_t> h_out = d_out.copyTo();
+    int mismatches = 0;
+    for (int h = 0; h < kHidden; ++h) {
+      const float want =
+          reduceReference(h_src, kRows, c.nrow, c.biases ? &h_b0 : nullptr, c.biases ? &h_b1 : nullptr, h, kHidden);
+      if (!(__bfloat162float(h_out[h]) == want) && mismatches++ < 8) {
+        ADD_FAILURE() << "element " << h << ": got " << __bfloat162float(h_out[h]) << ", expected " << want;
+      }
+    }
+    EXPECT_EQ(mismatches, 0);
+  }
+
+  // The data does tell orders apart: the eight rows summed in reverse differ from the contract's
+  // result somewhere.
+  int reversed = 0;
+  const int32_t kReversed[8] = {kRows[7], kRows[6], kRows[5], kRows[4], kRows[3], kRows[2], kRows[1], kRows[0]};
+  for (int h = 0; h < kHidden; ++h) {
+    reversed += reduceReference(h_src, kRows, 8, nullptr, nullptr, h, kHidden) !=
+                reduceReference(h_src, kReversed, 8, nullptr, nullptr, h, kHidden);
+  }
+  EXPECT_GT(reversed, 0);
 }
 
 __global__ void kernelWaveCopy(const rccl_ep::bf16_t* __restrict__ src, rccl_ep::bf16_t* __restrict__ dst,
                                int n) {
-  rccl_ep::wave_copy_bf16(dst, src, n);
+  rccl_ep::wave_copy(dst, src, n);
 }
 
 TEST_F(RcclEpWaveTest, WaveCopyMovesEveryElement) {
@@ -301,7 +414,6 @@ TEST(RcclEpLayoutTest, RegionsAreAlignedOrderedAndDisjoint) {
   };
   const Region regions[] = {
       {"counts",   l.off_counts,   R * sizeof(int32_t)},
-      {"flags",    l.off_flags,    R * sizeof(uint32_t)},
       {"x",        l.off_x,        slots * c.hidden * elemBytes},
       {"sf",       l.off_sf,       slots * c.hidden_sf() * sizeof(float)},
       {"topk_idx", l.off_topk_idx, slots * c.num_topk * sizeof(int32_t)},
