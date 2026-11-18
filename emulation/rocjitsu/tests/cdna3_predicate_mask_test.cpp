@@ -93,6 +93,23 @@ struct Fixture {
   }
 };
 
+TEST(Cdna3VectorStateTest, ConditionalSdwaPreservesUnselectedBytesAndLanes) {
+  Fixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  fx.wf->write_exec(1);
+  fx.write_vgpr(0, 0, 0x11223344);
+  fx.write_vgpr(1, 0, 0xaabbcc55);
+  fx.write_vgpr(2, 1, 0xdeadbeef);
+  for (uint64_t condition : {0ULL, 1ULL}) {
+    fx.wf->set_vcc(condition);
+    fx.write_vgpr(2, 0, 0xdeadbeef);
+    // v_cndmask_b32 v2, v0, v1; BYTE_1, UNUSED_PRESERVE, DWORD sources.
+    fx.execute({0x000402f9, 0x06061100});
+    EXPECT_EQ(fx.read_vgpr(2, 0), condition ? 0xdead55efU : 0xdead44efU);
+    EXPECT_EQ(fx.read_vgpr(2, 1), 0xdeadbeefU);
+  }
+}
+
 TEST(Cdna3VectorStateTest, AccumulatorMovesKeepTheSourceBankAcrossModifiers) {
   Fixture fx;
   ASSERT_NE(fx.wf, nullptr);

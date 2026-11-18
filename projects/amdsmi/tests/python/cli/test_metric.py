@@ -43,3 +43,13 @@ class TestMetric(TestCliBase):
         gpu_ids = [int(row["gpu"]) for row in csv_rows]
         self.assertEqual(len(gpu_ids), len(set(gpu_ids)), f"GPU rows repeated: {gpu_ids}")
         self.assert_gpu_ids(gpu_ids, "amd-smi metric --csv")
+        
+    def test_repeated_gpu_selection(self):
+        self.common.print_func_name("")
+        if len(self.list_data) < 2:
+            self.skipTest("Requires at least two GPUs")
+        first, second = (gpu["gpu"] for gpu in self.list_data[:2])
+        cmd = f"amd-smi metric -u -g={first} -g={second} -g={first} --json"
+        rc, data, std_err = self.util.RunCmdSync(cmd)
+        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed: {std_err or data}")
+        self.assertEqual([gpu["gpu"] for gpu in json.loads(data)["gpu_data"]], [first, second])

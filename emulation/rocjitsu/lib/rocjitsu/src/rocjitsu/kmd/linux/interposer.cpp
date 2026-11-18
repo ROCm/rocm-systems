@@ -204,14 +204,14 @@ bool is_proc_maps_path(const char *path) {
   return name.ends_with("/maps") || name.ends_with("/smaps");
 }
 
-int open_proc_maps_snapshot(const char *path, int flags) {
+std::optional<int> open_proc_maps_snapshot(const char *path, int flags) {
   if (!is_proc_maps_path(path) || (flags & O_ACCMODE) != O_RDONLY)
-    return -1;
+    return std::nullopt;
 
   auto &libc = rocjitsu::libc_passthrough();
   int source = libc.openat(AT_FDCWD, path, flags, 0);
   if (source < 0)
-    return -1;
+    return std::nullopt;
   std::string contents;
   std::array<char, 16384> buffer{};
   while (true) {
@@ -229,7 +229,7 @@ int open_proc_maps_snapshot(const char *path, int flags) {
       contents.find(rocjitsu::kmd::kDeviceBackingNamePrefix) == std::string::npos &&
       contents.find(token_marker) == std::string::npos) {
     errno = read_errno;
-    return -1;
+    return std::nullopt;
   }
 
   constexpr std::string_view marker = "/memfd:rocjitsu_remote_kfd (deleted)";
@@ -277,10 +277,10 @@ int open_proc_maps_snapshot(const char *path, int flags) {
     }
   }
 
-  int snapshot = libc.memfd_create("rocjitsu_proc_maps", MFD_CLOEXEC);
+  int snapshot = rocjitsu::create_scratch_fd("rocjitsu_proc_maps");
   if (snapshot < 0)
     return -1;
-  if (rocjitsu::populate_backing_file(snapshot, contents.data(), contents.size()) != 0) {
+  if (rocjitsu::populate_backing_file(snapshot, contents.data(), contents.size(), true) != 0) {
     int saved_errno = errno;
     libc.close(snapshot);
     errno = saved_errno;
@@ -4495,7 +4495,7 @@ static SyntheticDrmOpenResult open_synthetic_drm_fd(const char *path) {
 
   // Descriptor identity is tracked explicitly; moving it to a high number only
   // forces the host to grow its descriptor table after threads have started.
-  const int drm_fd = InterposerContext::real().memfd_create("rocjitsu_drm", MFD_CLOEXEC);
+  const int drm_fd = rocjitsu::create_scratch_fd("rocjitsu_drm");
   if (drm_fd < 0)
     return {true, -1};
 
@@ -4821,8 +4821,8 @@ RJ_INTERPOSER_EXPORT int open(const char *path, int flags, ...) {
   if (!p || InterposerContext::in_construction)
     return InterposerContext::real().openat(AT_FDCWD, path, flags, mode);
 
-  if (int snapshot = open_proc_maps_snapshot(path, flags); snapshot >= 0)
-    return snapshot;
+  if (auto snapshot = open_proc_maps_snapshot(path, flags))
+    return *snapshot;
 
   if (auto drm_fd = open_synthetic_drm_fd(path); drm_fd.handled)
     return drm_fd.fd;
@@ -4907,8 +4907,8 @@ RJ_INTERPOSER_EXPORT int openat(int dirfd, const char *path, int flags, ...) {
     return InterposerContext::real().openat(dirfd, path, flags, mode);
 
   if (path[0] == '/') {
-    if (int snapshot = open_proc_maps_snapshot(path, flags); snapshot >= 0)
-      return snapshot;
+    if (auto snapshot = open_proc_maps_snapshot(path, flags))
+      return *snapshot;
 
     if (auto drm_fd = open_synthetic_drm_fd(path); drm_fd.handled)
       return drm_fd.fd;
@@ -6394,8 +6394,17 @@ RJ_INTERPOSER_EXPORT FILE *fopen(const char *path, const char *mode) {
     return nullptr;
 
   int open_flags = InterposerContext::fopen_flags_from_mode(mode);
-  if (int snapshot = open_proc_maps_snapshot(path, open_flags); snapshot >= 0)
-    return fdopen(snapshot, mode);
+  if (auto snapshot = open_proc_maps_snapshot(path, open_flags)) {
+    if (*snapshot < 0)
+      return nullptr;
+    FILE *stream = fdopen(*snapshot, mode);
+    if (!stream) {
+      const int error = errno;
+      rocjitsu::host_close_fd(*snapshot);
+      errno = error;
+    }
+    return stream;
+  }
 
   const char *actual = path;
   std::string redirected;
@@ -6852,7 +6861,7 @@ static std::string redirect_canonical_path(const char *path) {
 RJ_INTERPOSER_EXPORT char *realpath(const char *path, char *resolved_path) {
   auto &real = InterposerContext::real();
   if (!real.ready()) {
-    auto fn = util::lookup_symbol<char *(*)(const char *, char *)>(RTLD_NEXT, "realpath");
+    auto fn = rocjitsu::resolve_host_realpath();
     return fn ? fn(path, resolved_path) : nullptr;
   }
   if (!rj_owns_interposer_state() || InterposerContext::in_construction)

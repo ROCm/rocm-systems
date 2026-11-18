@@ -51,6 +51,12 @@ int sad(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
     return RJ_ARITH_SUCCESS;
   }
   const bool clamp = mode & RJ_ARITH_ALU_CLAMP;
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    rocjitsu::arith::sad_x86_64_v4<Op>(exec_mask, clamp, d, a, b[0], c);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
     rocjitsu::arith::sad_x86_64_v3<Op>(exec_mask, clamp, d, a, b[0], c);

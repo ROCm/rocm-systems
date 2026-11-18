@@ -1047,6 +1047,9 @@ TEST(Gfx1250SimulationTest, VMovDppReadsSelectedHighVgprBank) {
   raw.vdst = kDst;
   raw.dpp_ctrl = 0xB1; // quad_perm:[1,0,3,2]
   raw.bound_ctrl = 1;
+  // Preserve legacy gfx1250 bit-move handling: DPP sign bits are ignored.
+  raw.src0_neg = 1;
+  wf->set_m0(0);
   raw.bank_mask = 0xF;
   raw.row_mask = 0xF;
 
@@ -1060,13 +1063,21 @@ TEST(Gfx1250SimulationTest, VMovDppReadsSelectedHighVgprBank) {
       cu.write_vgpr(vb + kHighBank + kDst, lane, 0u);
     }
 
-    cdna5::VMovB32Vop1 inst(reinterpret_cast<const cdna5::MachineInst *>(&raw));
-    inst.execute_impl(*wf);
+    for (bool relative : {false, true}) {
+      if (relative) {
+        cdna5::VMovrelsB32Vop1 inst(reinterpret_cast<const cdna5::MachineInst *>(&raw));
+        inst.execute_impl(*wf);
+      } else {
+        cdna5::VMovB32Vop1 inst(reinterpret_cast<const cdna5::MachineInst *>(&raw));
+        inst.execute_impl(*wf);
+      }
 
-    const uint32_t dst_bank = (mode >> 6) & 0x3u;
-    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
-      EXPECT_EQ(cu.read_vgpr(vb + dst_bank * kHighBank + kDst, lane), kHighValueBase + (lane ^ 1u))
-          << "lane " << lane;
+      const uint32_t dst_bank = (mode >> 6) & 0x3u;
+      for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+        EXPECT_EQ(cu.read_vgpr(vb + dst_bank * kHighBank + kDst, lane),
+                  kHighValueBase + (lane ^ 1u))
+            << "lane " << lane;
+      }
     }
   }
 }

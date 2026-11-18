@@ -184,6 +184,9 @@ protected:
   PeerCacheReadHandler peer_cache_read_handler_;
 };
 
+/// Remove sparse texel misses from the request using the instruction's VM snapshot.
+VmAccessOutcome qualify_image_feedback(VectorMemState &state, const GpuVmAccess &vm);
+
 /// Suppress only buffer TFE elements inside published nonresident PRT ranges.
 void qualify_buffer_residency(VectorMemState &state, const GpuVmAccess &vm);
 
@@ -209,6 +212,13 @@ private:
 /// @brief Global memory pipeline (V$ → L2 → HBM).
 class GlobalMemPipeline : public MemoryPipeline {
 public:
+  // May conservatively admit the bounding interval of a vector operation.
+  // Declining leaves exact per-lane classification and ingress to the caller.
+  using LocalRangeHandler = std::function<std::optional<MemoryIngressAdmission>(
+      uint32_t, const GpuVmAccess &, MemoryIngressSpan)>;
+  void set_local_range_handler(LocalRangeHandler handler) {
+    local_range_handler_ = std::move(handler);
+  }
   using PreparedAtomicBoundaryHandler =
       std::function<std::optional<DeviceCacheMaintenanceLease>(uint32_t vmid)>;
 
@@ -235,11 +245,13 @@ private:
   // translated; sampling swaps each tap's versions around this call. The other
   // request fields must be shared by every tap. Translation may refresh an
   // unready request snapshot, so each tap retains its own translation progress.
+  VmAccessOutcome initiate_image_metadata_access(VectorMemState &d, Wavefront &wf);
   VmAccessOutcome initiate_texel_access(VectorMemState &state, Wavefront &wf,
                                         uint64_t request_lanes);
   L1VectorCache *l1_;
   L2Cache *l2_;
   PreparedAtomicBoundaryHandler prepared_atomic_boundary_handler_;
+  LocalRangeHandler local_range_handler_;
 };
 
 /// @brief Local memory pipeline (LDS).

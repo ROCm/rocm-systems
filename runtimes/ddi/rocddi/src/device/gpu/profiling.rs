@@ -5,6 +5,8 @@
 //!
 //! These types describe implementation-neutral profiling operations. Native
 //! registration state remains privately owned by the selected platform driver.
+//! A retained sampling registration cannot restart after session retirement;
+//! stopping, destroying, and relinquishing registrations remain available.
 
 use crate::Error;
 use crate::device::gpu::GpuDevice;
@@ -180,18 +182,16 @@ pub(crate) struct DriverPcSampling<D: Driver, P: PcSamplingResource> {
     /// Native registration dropped before its creating driver.
     inner: Owned<P>,
     /// Exact driver instance retained through cleanup.
-    _driver: Shared<D>,
+    driver: Shared<D>,
 }
 
 impl<D: Driver, P: PcSamplingResource> DriverPcSampling<D, P> {
     pub(crate) fn new(driver: Shared<D>, inner: Owned<P>) -> Self {
-        Self {
-            inner,
-            _driver: driver,
-        }
+        Self { inner, driver }
     }
 
     pub(crate) fn start(&mut self) -> Result<(), Error> {
+        let _operation = self.driver.admission().enter()?;
         self.inner.start()
     }
 
@@ -292,8 +292,9 @@ impl GpuDevice<'_> {
     /// valid trap instructions, and a nonzero memory address must refer to the
     /// writable argument record required by those instructions. The caller
     /// must keep both allocations live and unchanged while the handler can
-    /// run, including after an ambiguous native result, until a successful
-    /// removal or conclusive device teardown.
+    /// run, including after an ambiguous native result. Successful removal
+    /// prevents future entry but does not retire waves already in the handler;
+    /// those waves must also finish before backing is reclaimed.
     #[doc(hidden)]
     #[allow(unsafe_code)]
     pub unsafe fn set_trap_handler(
@@ -302,7 +303,7 @@ impl GpuDevice<'_> {
         memory_address: u64,
     ) -> Result<(), Error> {
         // SAFETY: The public caller retains the handler code and argument
-        // storage until successful removal or conclusive device teardown.
+        // storage until removal and retirement of all handler users.
         unsafe {
             self.driver
                 .set_trap_handler(handler_address, memory_address)
@@ -352,8 +353,55 @@ impl GpuDevice<'_> {
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
-mod clock_tests {
+mod tests {
     use super::*;
+    use crate::ErrorKind;
+
+    #[test]
+    fn retirement_blocks_sampling_restart_but_preserves_stop_and_destroy() {
+        use crate::driver::test_driver::TestDriver;
+        use crate::session::DriverContextLifetime;
+        use crate::topology::EndpointKind;
+        use std::sync::{Arc, Mutex};
+
+        struct NativeSampling(Arc<Mutex<Vec<&'static str>>>);
+        impl PcSamplingResource for NativeSampling {
+            fn start(&mut self) -> Result<(), Error> {
+                self.0.lock().unwrap().push("start");
+                Ok(())
+            }
+            fn stop(&mut self) -> Result<(), Error> {
+                self.0.lock().unwrap().push("stop");
+                Ok(())
+            }
+            fn destroy(&mut self) -> Result<(), Error> {
+                self.0.lock().unwrap().push("destroy");
+                Ok(())
+            }
+            fn relinquish_adopted(&mut self) -> Result<(), Error> {
+                self.0.lock().unwrap().push("relinquish");
+                Ok(())
+            }
+        }
+
+        let driver = Shared::new(TestDriver::new(
+            [1; 16],
+            EndpointKind::Npu,
+            DriverContextLifetime::Session,
+        ))
+        .unwrap();
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let mut sampling = DriverPcSampling::new(
+            driver.clone(),
+            Owned::new(NativeSampling(calls.clone())).unwrap(),
+        );
+        sampling.start().unwrap();
+        driver.admission().begin_retirement().unwrap();
+        assert_eq!(sampling.start().unwrap_err().kind(), ErrorKind::Unsupported);
+        sampling.stop().unwrap();
+        sampling.destroy().unwrap();
+        assert_eq!(*calls.lock().unwrap(), ["start", "stop", "destroy"]);
+    }
 
     #[test]
     fn correlation_uses_primary_host_domain_without_an_auxiliary_clock() {
