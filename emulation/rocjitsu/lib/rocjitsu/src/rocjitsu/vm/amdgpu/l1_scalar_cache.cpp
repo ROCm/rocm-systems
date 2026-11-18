@@ -61,20 +61,31 @@ bool L1ScalarCache::try_read_peer_cached(uint64_t addr, std::span<uint8_t> dst, 
                  : (admission_generation == 0 || cache_identity == 0)))
     return false;
 
+  statistics_.request(dst.size());
+
   auto l1_access = DeviceCacheCoherence::try_acquire_l1_access(registered_domain_.get());
-  if (registered_domain_ && !l1_access.owns_lock())
+  if (registered_domain_ && !l1_access.owns_lock()) {
+    statistics_.peer_probe_unavailable();
     return false;
+  }
   std::unique_lock lock(maintenance_mutex_, std::try_to_lock);
-  if (!lock.owns_lock())
+  if (!lock.owns_lock()) {
+    statistics_.peer_probe_unavailable();
     return false;
-  if (l2_ == nullptr)
+  }
+  if (l2_ == nullptr) {
+    statistics_.peer_probe_unavailable();
     return false;
+  }
   synchronize_epoch();
   const simdojo::CacheTag *tag = cache_.peek(addr, vmid);
   if (tag == nullptr || tag->admission_generation != admission_generation ||
       tag->cache_identity != cache_identity ||
-      !CacheStore::bytes_valid(*tag, offset, static_cast<uint32_t>(dst.size())))
+      !CacheStore::bytes_valid(*tag, offset, static_cast<uint32_t>(dst.size()))) {
+    statistics_.miss();
     return false;
+  }
+  statistics_.hit();
   cache_.read_line(addr, dst.data(), offset, static_cast<uint32_t>(dst.size()), vmid);
   return true;
 }
@@ -435,6 +446,7 @@ VmAccessOutcome L1ScalarCache::load(uint64_t addr, uint32_t num_dwords, uint32_t
     return VmAccessOutcome::Complete;
   if (num_dwords > UINT32_MAX / sizeof(uint32_t))
     return VmAccessOutcome::Malformed;
+  statistics_.request(static_cast<uint64_t>(num_dwords) * sizeof(uint32_t));
   const VmAccessAdmission admission =
       admit_access(addr, num_dwords * sizeof(uint32_t), vmid, VmAccessKind::Read);
   if (!admission)
@@ -458,12 +470,16 @@ VmAccessOutcome L1ScalarCache::load(uint64_t addr, uint32_t num_dwords, uint32_t
         if (allow_private_batch && i == 0 && copied == 0 && num_dwords >= 2 && num_dwords <= 16 &&
             (addr & 3) == 0 && num_dwords * 4 <= CacheStore::LINE_SIZE - line_offset &&
             mtypes.cached_private_uc_hint(addr) &&
-            l2_->try_read_scalar_ram(addr, dst, num_dwords, vmid))
+            l2_->try_read_scalar_ram(addr, dst, num_dwords, vmid)) {
+          statistics_.bypass(num_dwords);
           return VmAccessOutcome::Complete;
+        }
+        statistics_.bypass();
         const VmAccessOutcome outcome = l2_->read(chunk_addr, buf + copied, chunk, Mtype::UC, vmid);
         if (outcome != VmAccessOutcome::Complete)
           return outcome;
       } else if (mtype == Mtype::CC || force_l1_bypass) {
+        statistics_.bypass();
         flush_line(chunk_addr, vmid);
         const VmAccessOutcome outcome = l2_->read(chunk_addr, buf + copied, chunk, mtype, vmid);
         if (outcome != VmAccessOutcome::Complete)
@@ -478,6 +494,7 @@ VmAccessOutcome L1ScalarCache::load(uint64_t addr, uint32_t num_dwords, uint32_t
                          VmAccessKind::Read, /*report_fault=*/false);
         if (!line_admission || !line_admission.cacheable ||
             line_admission.generation != chunk_admission.generation) {
+          statistics_.bypass();
           flush_line(chunk_addr, vmid);
           const VmAccessOutcome outcome = l2_->read(chunk_addr, buf + copied, chunk, mtype, vmid);
           if (outcome != VmAccessOutcome::Complete)
@@ -490,9 +507,11 @@ VmAccessOutcome L1ScalarCache::load(uint64_t addr, uint32_t num_dwords, uint32_t
             resident->admission_generation == chunk_admission.generation &&
             resident->cache_identity == current_cache_identity(vmid) &&
             CacheStore::bytes_valid(*resident, line_offset, chunk)) {
+          statistics_.hit();
           cache_.read_line(chunk_addr, buf + copied, line_offset, chunk, vmid);
         } else if (!l2_->can_fetch_range(CacheStore::line_address(chunk_addr),
                                          CacheStore::LINE_SIZE, vmid)) {
+          statistics_.miss();
           const uint64_t cache_identity = current_cache_identity(vmid);
           const VmAccessOutcome outcome = l2_->read(chunk_addr, buf + copied, chunk, mtype, vmid);
           if (outcome != VmAccessOutcome::Complete)
@@ -502,6 +521,7 @@ VmAccessOutcome L1ScalarCache::load(uint64_t addr, uint32_t num_dwords, uint32_t
           copied += chunk;
           continue;
         } else {
+          statistics_.miss();
           const VmAccessOutcome outcome = ensure_line(chunk_addr, vmid, chunk_admission.generation);
           if (outcome != VmAccessOutcome::Complete)
             return outcome;
@@ -522,6 +542,7 @@ VmAccessOutcome L1ScalarCache::load_bytes(uint64_t addr, uint32_t num_bytes, uin
   std::lock_guard lock(maintenance_mutex_);
   if (num_bytes == 0)
     return VmAccessOutcome::Complete;
+  statistics_.request(num_bytes);
   const VmAccessAdmission admission = admit_access(addr, num_bytes, vmid, VmAccessKind::Read);
   if (!admission)
     return admission.outcome;
@@ -536,11 +557,13 @@ VmAccessOutcome L1ScalarCache::load_bytes(uint64_t addr, uint32_t num_bytes, uin
     const Mtype mtype = mtypes.at(ea);
 
     if (mtype == Mtype::UC) {
+      statistics_.bypass();
       flush_line(ea, vmid);
       const VmAccessOutcome outcome = l2_->read(ea, dst + copied, chunk, Mtype::UC, vmid);
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
     } else if (mtype == Mtype::CC || force_l1_bypass) {
+      statistics_.bypass();
       flush_line(ea, vmid);
       const VmAccessOutcome outcome = l2_->read(ea, dst + copied, chunk, mtype, vmid);
       if (outcome != VmAccessOutcome::Complete)
@@ -554,6 +577,7 @@ VmAccessOutcome L1ScalarCache::load_bytes(uint64_t addr, uint32_t num_bytes, uin
                        VmAccessKind::Read, /*report_fault=*/false);
       if (!line_admission || !line_admission.cacheable ||
           line_admission.generation != chunk_admission.generation) {
+        statistics_.bypass();
         flush_line(ea, vmid);
         const VmAccessOutcome outcome = l2_->read(ea, dst + copied, chunk, mtype, vmid);
         if (outcome != VmAccessOutcome::Complete)
@@ -566,8 +590,10 @@ VmAccessOutcome L1ScalarCache::load_bytes(uint64_t addr, uint32_t num_bytes, uin
           resident->admission_generation == chunk_admission.generation &&
           resident->cache_identity == current_cache_identity(vmid) &&
           CacheStore::bytes_valid(*resident, line_offset, chunk)) {
+        statistics_.hit();
         cache_.read_line(ea, dst + copied, line_offset, chunk, vmid);
       } else if (!l2_->can_fetch_range(CacheStore::line_address(ea), CacheStore::LINE_SIZE, vmid)) {
+        statistics_.miss();
         const uint64_t cache_identity = current_cache_identity(vmid);
         const VmAccessOutcome outcome = l2_->read(ea, dst + copied, chunk, mtype, vmid);
         if (outcome != VmAccessOutcome::Complete)
@@ -577,6 +603,7 @@ VmAccessOutcome L1ScalarCache::load_bytes(uint64_t addr, uint32_t num_bytes, uin
         copied += chunk;
         continue;
       } else {
+        statistics_.miss();
         const VmAccessOutcome outcome = ensure_line(ea, vmid, chunk_admission.generation);
         if (outcome != VmAccessOutcome::Complete)
           return outcome;

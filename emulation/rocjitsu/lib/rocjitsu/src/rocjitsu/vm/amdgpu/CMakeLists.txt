@@ -55,7 +55,7 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     xcd.cpp
 )
 
-target_link_libraries(rocjitsu_vm_amdgpu PUBLIC rj_arith)
+target_link_libraries(rocjitsu_vm_amdgpu PUBLIC rj_arith util)
 
 # Share ISA wait decoding with the offline checker, without its dataflow state.
 # Final VM consumers need the objects; transitive object-library linking alone

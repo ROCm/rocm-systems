@@ -49,6 +49,16 @@ SoC::~SoC() { release_vm_resources(); }
 void SoC::set_statistics(std::shared_ptr<StatisticsSession> session, uint32_t gpu_index) {
   statistics_ = std::move(session);
   statistics_gpu_index_ = gpu_index;
+  const auto scope = [&](std::string path) {
+    return statistics_ ? statistics_->scope(std::move(path), gpu_index) : nullptr;
+  };
+  for (amdgpu::Xcd *xcd : xcds_)
+    if (amdgpu::L2Cache *cache = xcd->l2_cache())
+      cache->set_statistics(scope(cache->full_path()));
+  for (amdgpu::ComputeUnitCore *cu : all_cus()) {
+    cu->l1_scalar().set_statistics(scope(cu->full_path() + ".l1_scalar"));
+    cu->l1_vector().set_statistics(scope(cu->full_path() + ".l1_vector"));
+  }
 }
 
 void SoC::mark_statistics_incomplete_if_pending() {

@@ -439,6 +439,7 @@ L2Cache::read_translated_local(const GpuVmAccess &access, uint64_t addr, std::sp
       !access.supports_translated_local_cache() || access.cache_identity() == 0)
     return VmAccessOutcome::Malformed;
 
+  statistics_.request(dst.size());
   MemoryIngressAdmission transport = access.admit_pt_rewalk();
   if (transport.outcome != VmAccessOutcome::Complete)
     return transport.outcome;
@@ -452,8 +453,10 @@ L2Cache::read_translated_local(const GpuVmAccess &access, uint64_t addr, std::sp
       access.admit_access(line_address, LINE_SIZE, VmAccessKind::Read, false);
   if (!admission)
     return admission.outcome;
-  if (!admission.cacheable)
+  if (!admission.cacheable) {
+    statistics_.bypass();
     return access.read(addr, std::as_writable_bytes(dst));
+  }
 
   const uint64_t identity = access.cache_identity();
   const uint64_t backing_epoch = coherence_->current_local_backing_epoch();
@@ -472,11 +475,13 @@ L2Cache::read_translated_local(const GpuVmAccess &access, uint64_t addr, std::sp
                                                           access.cache_namespace());
     if (!current)
       return VmAccessOutcome::Unavailable;
+    statistics_.hit();
     cache_.lookup(addr, nullptr, 0, identity);
     cache_.read_line(addr, dst.data(), offset, dst.size(), 0, identity);
     return VmAccessOutcome::Complete;
   }
 
+  statistics_.miss();
   std::array<uint8_t, LINE_SIZE> line_bytes{};
   const VmAccessOutcome fetched =
       access.read(line_address, std::as_writable_bytes(std::span<uint8_t>(line_bytes)));
@@ -549,19 +554,28 @@ bool L2Cache::try_read_peer_cached(uint64_t addr, std::span<uint8_t> dst, uint32
                  : (admission_generation == 0 || cache_identity == 0)))
     return false;
 
+  statistics_.request(dst.size());
+
   // This optional probe can run under a KFD page-table lease. Do not wait for
   // a cache owner that may need that lease to complete its own operation.
   auto access_lock = try_acquire_peer_cache_access();
-  if (!access_lock.owns_lock())
+  if (!access_lock.owns_lock()) {
+    statistics_.peer_probe_unavailable();
     return false;
+  }
   std::unique_lock set_lock(set_mutex(addr), std::try_to_lock);
-  if (!set_lock.owns_lock())
+  if (!set_lock.owns_lock()) {
+    statistics_.peer_probe_unavailable();
     return false;
+  }
   const simdojo::CacheTag *tag = cache_.peek(addr, vmid);
   if (tag == nullptr || tag->admission_generation != admission_generation ||
       tag->cache_identity != cache_identity ||
-      !CacheStore::bytes_valid(*tag, offset, static_cast<uint32_t>(dst.size())))
+      !CacheStore::bytes_valid(*tag, offset, static_cast<uint32_t>(dst.size()))) {
+    statistics_.miss();
     return false;
+  }
+  statistics_.hit();
   cache_.read_line(addr, dst.data(), offset, static_cast<uint32_t>(dst.size()), vmid);
   return true;
 }
@@ -816,14 +830,19 @@ VmAccessOutcome L2Cache::send_atomic_backing(uint64_t addr, uint32_t size,
 }
 
 VmAccessOutcome L2Cache::ensure_line(uint64_t addr, uint32_t vmid, uint64_t admission_generation,
-                                     bool fetch_on_miss) {
+                                     bool fetch_on_miss, bool observe_read) {
   const VmAccessOutcome stale_outcome = discard_stale_line_locked(addr, vmid, admission_generation);
   if (stale_outcome != VmAccessOutcome::Complete)
     return stale_outcome;
   simdojo::CacheTag *resident = nullptr;
   if (cache_.lookup(addr, &resident, vmid)) {
-    if (!fetch_on_miss || CacheStore::bytes_valid(*resident, 0, LINE_SIZE))
+    if (!fetch_on_miss || CacheStore::bytes_valid(*resident, 0, LINE_SIZE)) {
+      if (observe_read)
+        statistics_.hit();
       return VmAccessOutcome::Complete;
+    }
+    if (observe_read)
+      statistics_.miss();
 
     uint8_t line_buf[LINE_SIZE];
     const VmAccessOutcome outcome = send_backing(CacheStore::line_address(addr), line_buf,
@@ -834,6 +853,8 @@ VmAccessOutcome L2Cache::ensure_line(uint64_t addr, uint32_t vmid, uint64_t admi
     return VmAccessOutcome::Complete;
   }
 
+  if (observe_read)
+    statistics_.miss();
   if (guarded_dirty_allocation_victim(addr))
     return VmAccessOutcome::Unavailable;
   uint64_t line_addr = CacheStore::line_address(addr);
@@ -962,8 +983,11 @@ bool L2Cache::try_read_scalar_ram(uint64_t addr, uint32_t *dst, uint32_t num_dwo
       return false;
     const bool copied =
         access->try_read_uncached_ram(addr, std::as_writable_bytes(std::span(dst, num_dwords)));
-    if (copied)
+    if (copied) {
+      statistics_.request(static_cast<uint64_t>(num_dwords) * sizeof(uint32_t));
+      statistics_.bypass();
       diagnostics(addr).backing_reads.fetch_add(1, std::memory_order_relaxed);
+    }
     return copied;
   });
 }
@@ -985,6 +1009,7 @@ VmAccessOutcome L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype 
                               uint32_t vmid) {
   if (size == 0)
     return VmAccessOutcome::Complete;
+  statistics_.request(size);
   const VmAccessAdmission admission = admit_access(addr, size, vmid, VmAccessKind::Read);
   if (!admission)
     return admission.outcome;
@@ -999,6 +1024,7 @@ VmAccessOutcome L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype 
       if (!chunk_admission)
         return chunk_admission.outcome;
 
+      statistics_.bypass();
       std::lock_guard set_lock(set_mutex(ea));
       const VmAccessOutcome flush_outcome = flush_line_locked(ea, vmid);
       if (flush_outcome != VmAccessOutcome::Complete)
@@ -1028,6 +1054,7 @@ VmAccessOutcome L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype 
     std::lock_guard set_lock(set_mutex(ea));
 
     if (!cache_line) {
+      statistics_.bypass();
       const VmAccessOutcome flush_outcome = flush_line_locked(ea, vmid);
       if (flush_outcome != VmAccessOutcome::Complete)
         return flush_outcome;
@@ -1044,6 +1071,7 @@ VmAccessOutcome L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype 
       return stale_outcome;
 
     if (mtype == Mtype::CC) {
+      statistics_.bypass();
       // Coherently Cacheable: invalidate L2 line before refetch, mirroring
       // the L1 CC behavior. This ensures cross-XCD store visibility when
       // different L2s share a backing store. Dirty data is flushed first.
@@ -1055,11 +1083,14 @@ VmAccessOutcome L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype 
     simdojo::CacheTag *resident = nullptr;
     if (cache_.lookup(ea, &resident, vmid) &&
         CacheStore::bytes_valid(*resident, line_offset, chunk)) {
+      statistics_.hit();
       cache_.read_line(ea, dst + copied, line_offset, chunk, vmid);
       copied += chunk;
       continue;
     }
 
+    if (mtype != Mtype::CC)
+      statistics_.miss();
     if (!can_fetch_range(CacheStore::line_address(ea), LINE_SIZE, vmid)) {
       const VmAccessOutcome outcome =
           send_backing(ea, dst + copied, chunk, simdojo::MessageOp::READ, vmid);
@@ -1262,6 +1293,7 @@ VmAccessOutcome L2Cache::write_impl(uint64_t addr, const uint8_t *src, uint32_t 
 
 VmAccessOutcome L2Cache::fetch_line(uint64_t addr, uint8_t *line_buf, uint32_t vmid,
                                     const VmLocalGrantView *local) {
+  statistics_.request(LINE_SIZE);
   const uint64_t line_addr = CacheStore::line_address(addr);
   const bool same_grant = local && local->covers(line_addr, LINE_SIZE) &&
                           current_cache_identity(vmid) == local->identity();
@@ -1273,6 +1305,7 @@ VmAccessOutcome L2Cache::fetch_line(uint64_t addr, uint8_t *line_buf, uint32_t v
   auto maintenance_lock = acquire_cache_access();
   std::lock_guard set_lock(set_mutex(addr));
   if (!admission.cacheable) {
+    statistics_.bypass();
     const VmAccessOutcome flush_outcome = flush_line_locked(line_addr, vmid);
     if (flush_outcome != VmAccessOutcome::Complete)
       return flush_outcome;
@@ -1285,11 +1318,13 @@ VmAccessOutcome L2Cache::fetch_line(uint64_t addr, uint8_t *line_buf, uint32_t v
              CacheStore::bytes_valid(tag, 0, LINE_SIZE) && local->covers(line_addr, LINE_SIZE);
     });
     if (data) {
+      statistics_.hit();
       std::memcpy(line_buf, data, LINE_SIZE);
       return VmAccessOutcome::Complete;
     }
   }
-  const VmAccessOutcome outcome = ensure_line(line_addr, vmid, admission.generation);
+  const VmAccessOutcome outcome = ensure_line(line_addr, vmid, admission.generation,
+                                              /*fetch_on_miss=*/true, /*observe_read=*/true);
   if (outcome != VmAccessOutcome::Complete)
     return outcome;
   cache_.read_line(line_addr, line_buf, 0, LINE_SIZE, vmid);

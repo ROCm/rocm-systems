@@ -5,6 +5,60 @@ of its host execution. The measurement domain and unit travel with each metric.
 Functional scheduler steps are not GPU cycles, and host elapsed time is not
 modeled GPU execution time.
 
+## Configuration
+
+Statistics are disabled by default. Add this object to a simulation configuration:
+
+```json
+{
+  "statistics": {
+    "enabled": true,
+    "include": ["cache.*"],
+    "scopes": ["component"],
+    "max_dispatch_scopes": 1024,
+    "output": {"format": "jsonl", "directory": "stats"}
+  }
+}
+```
+
+This is a configuration fragment; the usual VM and topology configuration is
+still required. `include` accepts exact metric names or prefixes with a trailing
+`*`; an omitted or empty list selects every available metric. Select a histogram
+or summary by its base name to include all its derived scalar fields. Scopes
+default to `component` and `dispatch`. The dispatch scope limit bounds output
+cardinality across the session; excess scopes are counted in
+`dropped_dispatch_scopes`, and completeness is false when details were dropped.
+
+Configuration loading validates statistics fields without creating files.
+Creating the VM activates one session shared by its GPUs. Output files have
+unique names and are created exclusively; existing files are never truncated.
+The current producer writes one final snapshot after producer teardown. A run
+that never starts, is interrupted, or leaves active waves or dispatches is
+marked incomplete. The generic reader also accepts multiple completed snapshots.
+
+## Cache observations
+
+Each CU's scalar and vector L1 caches and each XCD's L2 cache have separate
+component scopes, including the GPU ordinal. The first cache producers expose:
+
+| Metric | Meaning |
+|---|---|
+| `cache.read_requests`, `cache.read_bytes` | Attempted incoming read spans and bytes, including retries |
+| `cache.read_size` | Histogram of attempted span sizes in bytes |
+| `cache.read_hit_chunks` | Demand chunks served from resident bytes |
+| `cache.read_miss_chunks` | Demand lookups without usable resident bytes |
+| `cache.read_bypass_chunks` | Chunks bypassing lookup or forcing coherent refetch |
+| `cache.peer_probe_unavailable` | Peer probes refused before lookup |
+| `cache.backing_read_attempts`, `cache.backing_write_attempts` | Existing L2 backing transaction totals, captured after teardown |
+
+L1 vector spans follow coalescing. Scalar dword loads classify dword chunks;
+scalar byte loads and L2 classify line chunks. A request crossing a line can
+contain several chunks. Admission can fail before classification, and a miss
+can subsequently retry, so request totals are not the sum of chunk totals.
+Stores, cache maintenance, and the memory-side cache do not currently have a
+full hit/miss metric family. Cache observations describe the functional model;
+they do not claim measured hardware misses or modeled cache latency.
+
 ## Library ownership
 
 `lib/util/include/util/statistics.h` contains both owner-local accumulators and

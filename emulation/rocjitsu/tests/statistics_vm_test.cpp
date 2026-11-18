@@ -14,6 +14,7 @@
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <sstream>
 
 namespace {
 
@@ -198,6 +199,73 @@ TEST(StatisticsVmTest, SuccessfulRequestedExitRemainsExplicitlyIncomplete) {
   std::ifstream input(output_path);
   const std::string output{std::istreambuf_iterator<char>(input), {}};
   EXPECT_NE(output.find("\"record\":\"session_end\",\"complete\":false"), std::string::npos);
+}
+
+TEST(StatisticsVmTest, DisablingSessionUnbindsEveryGpuCacheAndComputeUnit) {
+  rocjitsu::test::ScopedTempDirectory temporary;
+  ASSERT_TRUE(temporary.initialize("rocjitsu-stats-disable-existing-"));
+  const std::string json = statistics_vm_config(temporary.path());
+  rj_vm_t *raw = nullptr;
+  ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
+            ROCJITSU_STATUS_SUCCESS);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw, rj_vm_destroy);
+  const std::shared_ptr<rocjitsu::StatisticsSession> session = vm->vm->statistics();
+  std::vector<std::shared_ptr<stats::Scope>> scopes;
+  for (uint32_t gpu = 0; gpu < vm->vm->num_socs(); ++gpu) {
+    rocjitsu::SoC *soc = vm->vm->soc(gpu);
+    for (rocjitsu::amdgpu::Xcd *xcd : soc->xcds())
+      scopes.push_back(session->scope(xcd->l2_cache()->full_path(), gpu));
+    for (rocjitsu::amdgpu::ComputeUnitCore *cu : soc->all_cus()) {
+      scopes.push_back(session->scope(cu->full_path(), gpu));
+      scopes.push_back(session->scope(cu->full_path() + ".l1_scalar", gpu));
+      scopes.push_back(session->scope(cu->full_path() + ".l1_vector", gpu));
+    }
+  }
+  const auto access = [&] {
+    constexpr uint64_t kAddress = 0x1000;
+    constexpr uint32_t kValue = 42;
+    for (uint32_t gpu = 0; gpu < vm->vm->num_socs(); ++gpu) {
+      rocjitsu::SoC *soc = vm->vm->soc(gpu);
+      soc->memory()->write32(kAddress, kValue);
+      for (rocjitsu::amdgpu::Xcd *xcd : soc->xcds()) {
+        uint32_t observed = 0;
+        ASSERT_EQ(xcd->l2_cache()->read(kAddress, reinterpret_cast<uint8_t *>(&observed),
+                                        sizeof(observed)),
+                  rocjitsu::amdgpu::VmAccessOutcome::Complete);
+        EXPECT_EQ(observed, kValue);
+      }
+      for (rocjitsu::amdgpu::ComputeUnitCore *cu : soc->all_cus()) {
+        uint32_t observed = 0;
+        ASSERT_EQ(cu->l1_scalar().load(kAddress, 1, &observed),
+                  rocjitsu::amdgpu::VmAccessOutcome::Complete);
+        EXPECT_EQ(observed, kValue);
+        observed = 0;
+        ASSERT_EQ(cu->l1_vector().load(&kAddress, 1, sizeof(observed), 1,
+                                       reinterpret_cast<uint8_t *>(&observed),
+                                       rocjitsu::amdgpu::Mtype::RW, false, false, 0),
+                  rocjitsu::amdgpu::VmAccessOutcome::Complete);
+        EXPECT_EQ(observed, kValue);
+        cu->step();
+      }
+    }
+  };
+  const auto snapshot = [&] {
+    std::ostringstream output;
+    for (const std::shared_ptr<stats::Scope> &scope : scopes)
+      scope->write_samples(output);
+    return output.str();
+  };
+  ASSERT_NO_FATAL_FAILURE(access());
+  const std::string before_disable = snapshot();
+  EXPECT_NE(before_disable.find("cache.read_requests"), std::string::npos);
+  rocjitsu::StatisticsConfig disabled;
+  ASSERT_TRUE(
+      vm->vm->initialize_statistics(disabled, "node", simdojo::ExecMode::FUNCTIONAL).succeeded());
+  EXPECT_EQ(vm->vm->statistics(), nullptr);
+  for (uint32_t gpu = 0; gpu < vm->vm->num_socs(); ++gpu)
+    EXPECT_EQ(vm->vm->soc(gpu)->statistics(), nullptr);
+  ASSERT_NO_FATAL_FAILURE(access());
+  EXPECT_EQ(snapshot(), before_disable);
 }
 
 } // namespace
