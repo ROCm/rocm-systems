@@ -779,19 +779,16 @@ uint64_t WriteBarrierAndToQueue(hsa_queue_t* queue, hsa_signal_t dependency,
   return index;
 }
 
-hsa_amd_memory_pool_t FindExtendedFineGrainedPool(hsa_agent_t agent) {
+hsa_amd_memory_pool_t FindSignalCapablePool(hsa_agent_t agent) {
   hsa_amd_memory_pool_t found_pool = {0};
   hsa_amd_agent_iterate_memory_pools(
       agent,
       [](hsa_amd_memory_pool_t pool, void* data) {
-        hsa_amd_segment_t segment;
-        uint32_t global_flags = 0;
-        hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment);
-        if (segment != HSA_AMD_SEGMENT_GLOBAL) return HSA_STATUS_SUCCESS;
-        hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &global_flags);
-        if (!(global_flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED)) {
-          return HSA_STATUS_SUCCESS;
-        }
+        bool signal_capable = false;
+        hsa_amd_memory_pool_get_info(
+            pool, static_cast<hsa_amd_memory_pool_info_t>(HSA_AMD_MEMORY_POOL_INFO_SIGNAL_CAPABLE),
+            &signal_capable);
+        if (!signal_capable) return HSA_STATUS_SUCCESS;
         *static_cast<hsa_amd_memory_pool_t*>(data) = pool;
         return HSA_STATUS_INFO_BREAK;
       },

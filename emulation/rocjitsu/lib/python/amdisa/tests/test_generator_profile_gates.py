@@ -258,6 +258,55 @@ def _profile_for_arch(arch_name: str):
     return profile_types[arch_name]()
 
 
+@pytest.mark.parametrize('arch', ['rdna1', 'rdna2', 'rdna3', 'rdna3_5'])
+def test_sopk_wait_threshold_uses_the_architectural_operands(
+    arch, amdgpu_generated_root
+):
+    source = (amdgpu_generated_root / arch / 'sopk_exec.cpp').read_text()
+    for counter in ('vmcnt', 'vscnt', 'expcnt', 'lgkmcnt'):
+        body = _generated_function_body(
+            source, f'void SWaitcnt{counter.capitalize()}Sopk::execute_impl('
+        )
+        assert ('read_scalar(sdst) +' in body) == (arch in ('rdna1', 'rdna2'))
+        assert (
+            f'.{counter} = static_cast<uint8_t>(threshold & amdgpu::WaitCounters::{counter.upper()}_MAX)'
+            in body
+        )
+
+
+@pytest.mark.parametrize('arch', ['rdna4', 'cdna5'])
+def test_combined_wait_decodes_each_counter_from_its_encoded_byte(
+    arch, amdgpu_generated_root
+):
+    spec = Parser(
+        str(_mrisa_dir() / f'amdgpu_isa_{arch}.xml'), _profile_for_arch(arch)
+    ).parse()
+    semantics = derive_all_semantics(spec)
+    generator = CodeGenerator(spec, '', semantics)
+    sopp = next(
+        encoding for encoding in spec.inst_encodings if encoding.enc_name == 'ENC_SOPP'
+    )
+    source = (amdgpu_generated_root / arch / 'sopp_exec.cpp').read_text()
+    for op, cls, counter in (
+        ('S_WAIT_LOADCNT_DSCNT', 'SWaitLoadcntDscntSopp', 'vmcnt'),
+        ('S_WAIT_STORECNT_DSCNT', 'SWaitStorecntDscntSopp', 'vscnt'),
+    ):
+        inst = next(inst for inst in sopp.insts if inst.name == op)
+        emitted = generator._gen_execute_body(
+            inst, semantics.instructions[op], sopp.enc_name
+        )
+        body = _generated_function_body(source, f'void {cls}::execute_impl(')
+        assert ''.join(emitted.split()) in ''.join(body.split())
+        assert (
+            f'.{counter} = static_cast<uint8_t>((imm >> 8) & amdgpu::WaitCounters::{counter.upper()}_MAX)'
+            in body
+        )
+        assert (
+            '.dscnt = static_cast<uint8_t>(imm & amdgpu::WaitCounters::DSCNT_MAX)'
+            in body
+        )
+
+
 @pytest.mark.parametrize(
     'arch_name',
     (
@@ -3870,10 +3919,11 @@ def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
 
     rdna2_vop3 = (amdgpu_generated_root / 'rdna2' / 'vop3_exec.cpp').read_text()
     ternary = _generated_function_body(rdna2_vop3, 'void VFmaF16Vop3::execute_impl')
-    assert 'ROCJITSU_TRY_SIMD_FMA_VOP3_TRUE16_FP16' in ternary
-    assert 'fp_mode::fma_f16' in ternary
-    assert 'read_vop3_true16_src' in ternary
-    assert 'write_vop3_true16_dst' in ternary
+    assert 'arith::execute_float_ternary16' in ternary
+    assert 'rj_arith_v_fma_f16_w32' in ternary
+    assert 'fp_mode::fma_f16' not in ternary
+    assert 'read_vop3_true16_src' not in ternary
+    assert 'write_vop3_true16_dst' not in ternary
 
     true16_unary = _generated_method_body(
         gfx1250_vop3_alu, 'VCeilF16Vop3', 'VTruncF16Vop3'

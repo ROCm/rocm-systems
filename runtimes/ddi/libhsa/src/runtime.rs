@@ -29,8 +29,10 @@ use rocddi::device::event::{
     GpuMemoryFaultCause, GpuResetCause, subscribe,
 };
 use rocddi::device::gpu::profiling::{PcSamplingConfiguration, PcSamplingConfigurationSet};
+#[cfg(target_os = "linux")]
+use rocddi::driver::linux_kfd::{KfdConfiguration, XnackModeRequest};
 use rocddi::memory::device::Allocation;
-use rocddi::session::{DriverContextLifetime, Session, SessionRetirement};
+use rocddi::session::{DriverContextLifetime, RetirementOutcome, Session, SessionRetirement};
 use rocddi::topology::host::{CpuCacheKind, CpuInfo};
 use rocddi::topology::{
     CacheAssociations, Endpoint, GpuInfo, MemoryBank, MemoryBankKind, MemoryLinkInfo,
@@ -40,7 +42,7 @@ use rocddi::topology::{
 use crate::callback_arg::CallbackArg;
 use crate::debugger::PendingDebugger;
 use crate::ffi::*;
-use crate::image_abi::ImageState;
+use crate::image::ImageState;
 use crate::isa::isa_name;
 use crate::loader::LoaderState;
 use crate::memory::{CpuPoolKind, GpuPoolKind, MemoryState, POOL_HANDLE_STRIDE};
@@ -114,14 +116,20 @@ impl From<Status> for InitFailure {
 
 /// Minimal cleanup contract shared by real and test session owners.
 trait RetireSession {
+    /// Closes admission before rollback releases any resource owner.
+    fn begin_retirement(&self) -> bool;
     /// Releases native resources and reports whether cleanup was conclusive.
     fn retire(&mut self) -> bool;
 }
 
 impl RetireSession for Session {
+    fn begin_retirement(&self) -> bool {
+        Session::begin_retirement(self).is_ok()
+    }
+
     /// Destroys the native session and reports whether cleanup succeeded.
     fn retire(&mut self) -> bool {
-        self.destroy().is_ok()
+        matches!(self.try_close(), RetirementOutcome::Closed)
     }
 }
 
@@ -136,17 +144,23 @@ struct PendingInit<S: RetireSession = Session, G = Gpu> {
 }
 
 impl<S: RetireSession, G> PendingInit<S, G> {
-    /// Drops activated GPUs before retiring the pending native session.
+    /// Closes admission, then drops activated GPUs before native retirement.
     fn cleanup(&mut self) -> bool {
-        // Normal traps remain in the process context for other runtime clients.
-        // Uncertain publication queues retain their own session dependencies.
-        self.debugger = None;
-        // Device and MMIO owners must release their session borrows first.
-        self.gpus.clear();
         let Some(session) = self.session.take() else {
             return true;
         };
+        // Retain the full rollback graph if admission closure fails or unwinds.
         let mut session = RetainOnDrop::new(session);
+        let debugger = RetainOnDrop::new(self.debugger.take());
+        let gpus = RetainOnDrop::new(std::mem::take(&mut self.gpus));
+        if !session.begin_retirement() {
+            return false;
+        }
+        // Normal traps remain in the process context for other runtime clients.
+        // Uncertain publication queues retain their own session dependencies.
+        drop(debugger.into_inner());
+        // Device and MMIO owners must release their session borrows first.
+        drop(gpus.into_inner());
         if !session.retire() {
             // A failed native close may retain a VM or KFD runtime state.
             // Keep its owning controller alive until process teardown.
@@ -319,9 +333,13 @@ impl ShutdownOutcome {
 
     /// Retries a native session after all HSA objects have retired.
     pub(crate) fn retry(mut retirement: SessionRetirement) -> Self {
-        match retirement.try_destroy() {
-            Ok(()) => Self::Complete,
-            Err(error) => Self::NativeRetry {
+        match retirement.try_close() {
+            RetirementOutcome::Closed => Self::Complete,
+            RetirementOutcome::Busy => Self::NativeRetry {
+                status: RESOURCE_BUSY,
+                session: retirement,
+            },
+            RetirementOutcome::Failed(error) => Self::NativeRetry {
                 status: map_error(error),
                 session: retirement,
             },
@@ -367,6 +385,15 @@ impl HsaState {
     /// Borrows the native session while this HSA generation is published.
     pub(crate) fn session(&self) -> Option<&Session> {
         self.session.as_ref()
+    }
+
+    /// Closes core admission after tool cleanup has finished using services.
+    fn begin_session_retirement(&self) -> Result<(), Status> {
+        self.session
+            .as_ref()
+            .ok_or(ERROR)?
+            .begin_retirement()
+            .map_err(map_error)
     }
 
     /// Checks whether the caller is one of this runtime’s callback workers.
@@ -438,20 +465,7 @@ impl HsaState {
         // Clean HSA generations rejoin the exact retained native process VM.
         // Native process ownership validates identity, loss and prior disable;
         // the HSA lifecycle gate prevents rejoining an uncertain generation.
-        let mut session = Session::new(DriverContextLifetime::Process).map_err(map_error)?;
-        #[cfg(target_os = "linux")]
-        if let Ok(value) = std::env::var("HSA_XNACK") {
-            let requested = match value.as_str() {
-                "0" => Some(false),
-                "1" => Some(true),
-                _ => None,
-            };
-            if let Some(enabled) = requested {
-                session
-                    .request_xnack_mode(rocddi::session::XnackModeRequest::Prefer(enabled))
-                    .map_err(map_error)?;
-            }
-        }
+        let session = Session::new(DriverContextLifetime::Process).map_err(map_error)?;
         let mut pending = PendingInit {
             debugger: None,
             session: Some(session),
@@ -513,9 +527,27 @@ impl HsaState {
         host: &CpuInfo,
         topology: TopologyGraphSnapshot,
     ) -> Result<Self, Status> {
-        pending.debugger = Some(PendingDebugger::new(
-            pending.session.as_mut().ok_or(ERROR)?,
-        )?);
+        #[cfg(target_os = "linux")]
+        {
+            let xnack = std::env::var("HSA_XNACK")
+                .ok()
+                .and_then(|value| match value.as_str() {
+                    "0" => Some(XnackModeRequest::Prefer(false)),
+                    "1" => Some(XnackModeRequest::Prefer(true)),
+                    _ => None,
+                });
+            let configuration = KfdConfiguration {
+                xnack,
+                debugger: Some(PendingDebugger::registration()?),
+            };
+            pending
+                .session
+                .as_mut()
+                .ok_or(ERROR)?
+                .configure(configuration)
+                .map_err(map_error)?;
+        }
+        pending.debugger = Some(PendingDebugger::default());
         let session = pending.session.as_ref().ok_or(ERROR)?;
         let discovered = topology
             .endpoints
@@ -952,6 +984,11 @@ impl HsaState {
         // A panic after detachment must never drop owners that native work may
         // still reach. Only the proved-clean path extracts and drops this state.
         let mut state = RetainOnDrop::new(self);
+        // Prepared shutdown already closed core admission after tool unload.
+        // Repeat idempotently for direct teardown before releasing any owners.
+        if let Err(status) = state.begin_session_retirement() {
+            return ShutdownOutcome::RetainedGeneration { status, state };
+        }
         state.logging.stop();
         if state.running_on_worker() || CallbackScope::active() {
             // Releasing signal storage from its own callback worker is unsafe.
@@ -1020,15 +1057,9 @@ impl HsaState {
                 state,
             };
         };
-        let mut retirement = session.into_retirement();
+        let retirement = session.into_retirement();
         drop(state.into_inner());
-        match retirement.try_destroy() {
-            Ok(()) => ShutdownOutcome::Complete,
-            Err(error) => ShutdownOutcome::NativeRetry {
-                status: map_error(error),
-                session: retirement,
-            },
-        }
+        ShutdownOutcome::retry(retirement)
     }
 }
 
