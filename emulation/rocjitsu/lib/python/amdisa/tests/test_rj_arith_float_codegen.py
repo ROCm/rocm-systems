@@ -564,7 +564,7 @@ def test_half_selection_uses_architecture_specific_names_and_all_bodies(
     assert checked == count
 
 
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+@pytest.mark.parametrize('arch', ['rdna1', 'rdna2', 'rdna3_5', 'rdna3', 'rdna4'])
 @pytest.mark.parametrize(
     'name', ['V_FMA_F16', 'V_FMAC_F16', 'V_FMAAK_F16', 'V_FMAMK_F16']
 )
@@ -591,9 +591,6 @@ def test_half_fma_explicit_accumulator_literal_order_and_modifiers(arch, name):
     elif name == 'V_FMA_F16':
         assert '((opsel & 4) ? RJ_ARITH_ALU_HIGH_C' in body
         assert 'RJ_ARITH_ALU_NEG_C' in body and 'RJ_ARITH_ALU_ABS_C' in body
-    assert (
-        gen_float_fma16(context('rdna3_5', name, ['d'], inputs, is_vop3=False)) is None
-    )
 
 
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
@@ -2021,7 +2018,7 @@ def test_cdna_legacy_half_fma_reuses_architectural_model(arch, name):
         assert 'd, a, b, d' in body
 
 
-@pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'cdna3', 'cdna4'])
 @pytest.mark.parametrize('name', ['V_MAD_F16', 'V_MAD_LEGACY_F16'])
 def test_cdna_half_mad_preserves_its_distinct_intermediate(arch, name):
     from amdisa.codegen.execute.rj_arith_float import gen_float_fma16
@@ -2034,7 +2031,7 @@ def test_cdna_half_mad_preserves_its_distinct_intermediate(arch, name):
     assert 'd, a, b, c, true, true' in body
 
 
-@pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'cdna3', 'cdna4'])
 @pytest.mark.parametrize('name', ['V_MADMK_F16', 'V_MADAK_F16'])
 def test_cdna_literal_half_mad_reuses_mad_arithmetic(arch, name):
     from amdisa.codegen.execute.rj_arith_float import gen_float_fma16
@@ -2520,3 +2517,119 @@ def test_mixed_fma_has_no_legacy_dispatch_for_any_registered_profile():
                 )
             )
             assert body and 'arith::execute_mixed_' in body, (arch, name)
+
+
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'])
+def test_older_native_half_fma_routes_and_qualification(arch):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_fma16
+
+    for name, inputs in [
+        ('V_FMA_F16', ['a', 'b', 'c']),
+        ('V_FMA_LEGACY_F16', ['a', 'b', 'c']),
+        ('V_FMAC_F16', ['a', 'b']),
+    ]:
+        if ('LEGACY' in name) != arch.startswith('cdna') and name != 'V_FMA_F16':
+            continue
+        body = gen_float_fma16(context(arch, name, ['d'], inputs, is_vop3=True))
+        assert 'execute_float_ternary16' in body
+        for wave in (32, 64):
+            assert f'rj_arith_v_fma_f16_w{wave}' in body
+        assert body.index('if (!wf.exec())') < body.index('const uint64_t semantics')
+        assert 'RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS' in body
+        assert 'RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL)' in body
+        assert ('const uint32_t opsel = 0;' in body) == (
+            arch in ('rdna1', 'rdna2') and name == 'V_FMAC_F16'
+        )
+
+
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'])
+def test_generated_older_native_half_fma_has_no_legacy_bypass(arch):
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    names = {'VFmaF16Vop3'}
+    if arch.startswith('cdna'):
+        names.add('VFmaLegacyF16Vop3')
+        if arch == 'cdna1':
+            names |= {'VMacF16Vop2', 'VMacF16Vop3'}
+    else:
+        names |= {'VFmacF16Vop2', 'VFmacF16Vop3', 'VFmamkF16Vop2', 'VFmaakF16Vop2'}
+    found = set()
+    for encoding in ('vop2', 'vop3'):
+        source = (root / f'{encoding}_exec.cpp').read_text()
+        for match in re.finditer(
+            r'void (\w+)::execute(?:_modifier)?_impl\([^)]*\)\s*\{', source
+        ):
+            if match[1] not in names:
+                continue
+            end, depth = match.end(), 1
+            while depth:
+                depth += (source[end] == '{') - (source[end] == '}')
+                end += 1
+            body = source[match.end() : end - 1]
+            assert 'arith::execute_float_ternary16' in body
+            assert 'fp_mode::fma_f16' not in body
+            assert 'ROCJITSU_TRY_SIMD' not in body
+            assert 'execute_v_' not in body
+            found.add(match[1])
+    assert found == names
+
+
+def test_generated_gfx908_half_mad_has_no_legacy_bypass():
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/cdna1'
+    )
+    names = {'VMadF16Vop3', 'VMadLegacyF16Vop3', 'VMadmkF16Vop2', 'VMadakF16Vop2'}
+    found = set()
+    for encoding in ('vop2', 'vop3'):
+        source = (root / f'{encoding}_exec.cpp').read_text()
+        for match in re.finditer(
+            r'void (\w+)::execute(?:_modifier)?_impl\([^)]*\)\s*\{', source
+        ):
+            if match[1] not in names:
+                continue
+            end, depth = match.end(), 1
+            while depth:
+                depth += (source[end] == '{') - (source[end] == '}')
+                end += 1
+            body = source[match.end() : end - 1]
+            assert 'arith::execute_float_ternary16' in body
+            assert 'rj_arith_v_mad_' in body
+            assert 'rj_arith_v_fma_' not in body
+            assert 'ROCJITSU_TRY_SIMD' not in body
+            found.add(match[1])
+    assert found == names
+
+
+@pytest.mark.parametrize('encoding', ['ENC_VOP2', 'ENC_VOP3'])
+def test_cdna2_half_mac_keeps_its_separate_rounding(encoding):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_fma16
+
+    body = gen_float_fma16(
+        context(
+            'cdna2',
+            'V_MAC_F16',
+            ['d'],
+            ['a', 'b'],
+            enc_name=encoding,
+            is_vop3=encoding == 'ENC_VOP3',
+        )
+    )
+    assert 'rj_arith_v_mad_f16_w64_gfx90a' in body
+    assert 'd, a, b, d, true, true' in body
+
+
+def test_cdna2_half_mad_has_no_retired_evaluator():
+    generated = (
+        Path(__file__).resolve().parents[3] / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu'
+    )
+    # The production generated bindings, not just an emitter result, use the new API.
+    for encoding in ('vop2', 'vop3'):
+        text = (generated / f'generated/cdna2/{encoding}_exec.cpp').read_text()
+        assert 'rj_arith_v_mad_f16_w64_gfx90a' in text
+        assert 'execute_cdna2_mad_f16' not in text
+        assert 'MadVop2::Accumulate, true' not in text
+    assert 'cdna2_mad_f16' not in (generated / 'shared/simd_glue.h').read_text()
