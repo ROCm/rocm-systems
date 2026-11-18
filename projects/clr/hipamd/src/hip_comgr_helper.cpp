@@ -5,6 +5,7 @@
  */
 
 #include "hip_comgr_helper.hpp"
+#include <algorithm>
 #include <atomic>
 #if defined(_WIN32)
 #include <process.h>
@@ -428,6 +429,20 @@ void GenerateUniqueFileName(std::string& name) {
   }
   name += std::to_string(static_cast<int64_t>(pid)) + "_" +
           std::to_string(counter.fetch_add(1, std::memory_order_relaxed));
+}
+
+std::string comgrDataName(const std::string& name) {
+  // Comgr writes a data object to a file named after it in its temporary
+  // directory, and rejects names that contain ':', such as a Windows path with
+  // a drive letter ("C:\src\k.cu"). For such a name keep only the file name
+  // (the part after the last '/' or '\') and replace any ':' left in it.
+  if (name.find(':') == std::string::npos) {
+    return name;
+  }
+  const size_t sep = name.find_last_of("/\\");
+  std::string fileName = (sep == std::string::npos) ? name : name.substr(sep + 1);
+  std::replace(fileName.begin(), fileName.end(), ':', '_');
+  return fileName;
 }
 
 bool demangleName(const std::string& mangledName, std::string& demangledName) {
@@ -950,7 +965,8 @@ bool LinkProgram::AddLinkerFile(const std::string& file_path, hipJitInputType in
 bool LinkProgram::AddLinkerData(const void* image_ptr, size_t image_size,
                                 const std::string& link_file_name, hipJitInputType input_type) {
   std::string_view llvm_code_object_view(static_cast<const char*>(image_ptr), image_size);
-  return AddLinkerDataImpl(llvm_code_object_view, input_type, link_file_name);
+  return AddLinkerDataImpl(llvm_code_object_view, input_type,
+                           helpers::comgrDataName(link_file_name));
 }
 
 bool LinkProgram::LinkComplete(void** bin_out, size_t* size_out) {

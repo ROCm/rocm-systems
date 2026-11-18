@@ -12,6 +12,9 @@ rtc:
   Unit_hiprtc_functional:
     <<: *level_default
     tags: [compile]
+  Unit_hiprtc_name_with_drive_letter:
+    <<: *level_default
+    tags: [compile]
   Unit_hipStreamCaptureRtc:
     <<: *level_default
     tags: [integration]
@@ -58,6 +61,9 @@ rtc:
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [link]
   Unit_RTC_LinkerAPI:
+    <<: *level_default
+    tags: [link]
+  Unit_RTC_LinkerAPI_DriveLetterNames:
     <<: *level_default
     tags: [link]
   Unit_RTC_LinkAddFile_Negative:

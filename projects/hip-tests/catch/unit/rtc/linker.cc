@@ -151,6 +151,29 @@ HIP_TEST_CASE(Unit_RTC_LinkerAPI) {
   }
 }
 
+// Program and link input names with a Windows drive letter (ROCm/TheRock#9848).
+HIP_TEST_CASE(Unit_RTC_LinkerAPI_DriveLetterNames) {
+  const char* options[]{"-fgpu-rdc"};
+  std::vector<char> code = createBitcodeFromSource(src, "C:\\src\\saxpy.cu", 1, options);
+
+  hiprtcLinkState linkstate;
+  HIPRTC_CHECK(hiprtcLinkCreate(0, nullptr, nullptr, &linkstate));
+  HIPRTC_CHECK(hiprtcLinkAddData(linkstate, HIPRTC_JIT_INPUT_LLVM_BITCODE, code.data(), code.size(),
+                                 "C:\\src\\saxpy.bc", 0, nullptr, nullptr));
+
+  void* finaldata;
+  size_t finalsize = 0;
+  HIPRTC_CHECK(hiprtcLinkComplete(linkstate, &finaldata, &finalsize));
+  REQUIRE(finalsize > 0);
+
+  hipModule_t module;
+  hipFunction_t kernel;
+  HIP_CHECK(hipModuleLoadData(&module, finaldata));
+  HIP_CHECK(hipModuleGetFunction(&kernel, module, "saxpy"));
+  HIP_CHECK(hipModuleUnload(module));
+  HIPRTC_CHECK(hiprtcLinkDestroy(linkstate));
+}
+
 HIP_TEST_CASE(Unit_RTC_LinkAddFile_Negative) {
   static constexpr hiprtcJITInputType input_type = HIPRTC_JIT_INPUT_LLVM_BITCODE;
   static constexpr const char* file_name = "bitcode_file";

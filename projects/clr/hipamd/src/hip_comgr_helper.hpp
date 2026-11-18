@@ -114,6 +114,7 @@ std::string handleMangledName(std::string loweredName);
 bool fillMangledNames(const std::vector<char>& executable,
                       std::map<std::string, std::string>& mangledNames, bool isBitcode);
 void GenerateUniqueFileName(std::string& name);
+std::string comgrDataName(const std::string& name);
 
 bool CheckIfBundled(std::string_view llvm_bitcode);
 

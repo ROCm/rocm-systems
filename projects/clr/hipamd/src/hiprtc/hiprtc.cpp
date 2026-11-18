@@ -74,7 +74,9 @@ hiprtcResult hiprtcCreateProgram(hiprtcProgram* prog, const char* src, const cha
     HIPRTC_RETURN(HIPRTC_ERROR_PROGRAM_CREATION_FAILURE);
   }
 
-  if (name == nullptr || strlen(name) == 0) {
+  // The program keeps the name it was given; comgr gets a name it accepts.
+  progName = hip::helpers::comgrDataName(progName);
+  if (progName.empty()) {
     progName = "CompileSourceXXXXXX";
     hip::helpers::GenerateUniqueFileName(progName);
   }

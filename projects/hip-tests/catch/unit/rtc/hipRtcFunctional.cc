@@ -8,6 +8,7 @@
  * hipRTC program should be created even if the name passed is empty or null
  * hipRTC program compilation should succeed even if gpu arch is not specified in the options
  * hipRTC should be able to compile kernels using  __forceinline__ keyword
+ * hipRTC program compilation should succeed when the name is a path with a Windows drive letter
  */
 #include <hip_test_common.hh>
 
@@ -68,4 +69,28 @@ HIP_TEST_CASE(Unit_hiprtc_functional) {
 #if HT_NVIDIA
   HIPCHECK(hipCtxDestroy(ctx));
 #endif
+}
+
+// The program name is only a name. Libraries such as CuPy pass the full path of
+// a cache file, which on Windows starts with a drive letter (ROCm/TheRock#9848).
+HIP_TEST_CASE(Unit_hiprtc_name_with_drive_letter) {
+  using namespace std;
+  const char* name = GENERATE("C:\\src\\testinline.cu", "C:/src/testinline.cu", "C:testinline.cu");
+  INFO("program name: " << name);
+  hiprtcProgram prog;
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, code, name, 0, nullptr, nullptr));
+
+  hiprtcResult compileResult{hiprtcCompileProgram(prog, 0, 0)};
+  size_t logSize;
+  HIPRTC_CHECK(hiprtcGetProgramLogSize(prog, &logSize));
+  if (logSize) {
+    string log(logSize, '\0');
+    HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
+    cout << log << '\n';
+  }
+  REQUIRE(compileResult == HIPRTC_SUCCESS);
+  size_t codeSize;
+  HIPRTC_CHECK(hiprtcGetCodeSize(prog, &codeSize));
+  REQUIRE(codeSize > 0);
+  HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
 }
