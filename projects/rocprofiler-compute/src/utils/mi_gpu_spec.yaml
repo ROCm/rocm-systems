@@ -12,7 +12,7 @@
 #           |-- perfmon_config, copy from aqlprofile from gfxip/gfx<version>/gfx<version>_block_info.h block counter registers
 #           |-- gpu model
 #           |-- chip_ids: chip id is specific to the environment the gpu is being used on
-#               | -- physical
+#               | -- physical # One chip id, or a list of ids for boards that share a model
 #               | -- virtual # The pattern is physical + 16
 #           |-- partition_mode:
 #               | -- compute partition mode:
@@ -504,7 +504,8 @@ mi_gpu_spec:
             design:
               memory_levels: ["LDS", "L0", "L1", "L2", "MALL", "VRAM"]
             chip_ids:
-              physical: 30032  # 0x7550, Radeon RX 9070 and RX 9070 XT
+              # 0x7550 Radeon RX 9070 and RX 9070 XT, 0x7551 Radeon AI PRO R9700
+              physical: [30032, 30033]
 
   #########################################################
   # gfx1250 family
