@@ -198,7 +198,6 @@ class XgmiCommands:
                     "max_bandwidth": "N/A",
                     "link_type": "N/A",
                     "links": [],
-                    "cpu_links": [],
                 }
                 xgmi_metrics_info = link_metrics_by_bdf.get(src_gpu_bdf, {"links": []})
 
@@ -298,8 +297,12 @@ class XgmiCommands:
                     # (labeled by real physical package id). Only one aggregate XGMI
                     # read/write counter exists per GPU, so the connected CPU
                     # column(s) reuse it; unconnected columns show "N/A".
+                    xgmi_dict["link_metrics"]["cpu_links"] = []
                     read_val, write_val = "N/A", "N/A"
-                    if xgmi_metrics_info["links"]:
+                    # links[0] is only the CPU link's counter when no GPU-GPU
+                    # destination resolved on this host; when one did, links[0] is
+                    # a real GPU-GPU port and must not be misread as the CPU link.
+                    if xgmi_metrics_info["links"] and not gpu_gpu_resolvable:
                         data_unit = "KB"
                         raw_read = xgmi_metrics_info["links"][0]["read"]
                         raw_write = xgmi_metrics_info["links"][0]["write"]
@@ -535,13 +538,15 @@ class XgmiCommands:
 
                 if distinct_package_ids:
                     # CPU-only columns: always "N/A" (no live status telemetry).
+                    # Not appended to json_status -- that array's shape is keyed to
+                    # the GPU destination columns, and a CPU entry there would
+                    # change its length/shape for every host with a CPU link.
                     for package_id in distinct_package_ids:
                         cpu_col_key = f"CPU(PKG{package_id})"
                         if self.logger.is_human_readable_format():
                             row_dict[cpu_col_key.ljust(14)] = "N/A".ljust(14)
                         else:
                             row_dict[cpu_col_key] = "N/A"
-                        json_status.append("N/A")
 
                 tabular_output.append(row_dict)
                 if self.logger.is_json_format():

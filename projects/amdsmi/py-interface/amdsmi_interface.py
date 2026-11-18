@@ -4909,20 +4909,22 @@ def amdsmi_get_gpu_cpu_links(processor_handle: processor_handle_t):
     num_cpu_links = ctypes.c_uint32(0)
     null_ptr = ctypes.POINTER(amdsmi_wrapper.amdsmi_cpu_link_t)()
     _check_res(
-        amdsmi_wrapper.amdsmi_get_gpu_cpu_links(
+        _amdsmi_entry_point("amdsmi_get_gpu_cpu_links")(
             processor_handle, ctypes.byref(num_cpu_links), null_ptr
         )
     )
 
     cpu_links = (amdsmi_wrapper.amdsmi_cpu_link_t * num_cpu_links.value)()
     _check_res(
-        amdsmi_wrapper.amdsmi_get_gpu_cpu_links(
+        _amdsmi_entry_point("amdsmi_get_gpu_cpu_links")(
             processor_handle, ctypes.byref(num_cpu_links), cpu_links
         )
     )
 
     links = []
-    for i in range(num_cpu_links.value):
+    # num_cpu_links.value may have grown since the first call (live topology,
+    # not a snapshot), past the capacity cpu_links was allocated with.
+    for i in range(min(num_cpu_links.value, len(cpu_links))):
         links.append({"package_id": cpu_links[i].package_id, "link_type": cpu_links[i].link_type})
 
     return links

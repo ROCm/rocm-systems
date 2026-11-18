@@ -257,15 +257,28 @@ std::vector<uint32_t> AMDSmiSystem::get_cpu_sockets_from_numa_node(int32_t numa_
 
   if (node_info.is_open()) {
     std::getline(node_info, info);
-    std::istringstream iss(info);
-    uint32_t index;
-    while (iss >> index) {
-      std::ifstream cpu_info(root + "/cpu/cpu" + std::to_string(index) +
-                             "/topology/physical_package_id");
-      if (cpu_info.is_open()) {
-        uint32_t socket;
-        cpu_info >> socket;
-        sockets.push_back(socket);
+    // cpulist is a comma-separated list of indices and/or "first-last" ranges
+    // (e.g. "0-31,64-95"), not a flat whitespace-separated list of indices.
+    std::istringstream list(info);
+    std::string range;
+    while (std::getline(list, range, ',')) {
+      std::istringstream range_stream(range);
+      uint32_t first = 0;
+      uint32_t last = 0;
+      range_stream >> first;
+      last = first;
+      if (range_stream.peek() == '-') {
+        range_stream.ignore();
+        range_stream >> last;
+      }
+      for (uint32_t index = first; index <= last; ++index) {
+        std::ifstream cpu_info(root + "/cpu/cpu" + std::to_string(index) +
+                               "/topology/physical_package_id");
+        if (cpu_info.is_open()) {
+          uint32_t socket;
+          cpu_info >> socket;
+          sockets.push_back(socket);
+        }
       }
     }
   }

@@ -372,6 +372,7 @@ set(CMN_INC_LIST
     "${ROCM_INC_DIR}/rocm_smi_kfd.h"
     "${ROCM_INC_DIR}/rocm_smi_kfd_data_manager.h"
     "${ROCM_INC_DIR}/rocm_smi_io_link.h"
+    "${ROCM_INC_DIR}/rocm_smi_cpu_link.h"
     "${ROCM_INC_DIR}/rocm_smi_gpu_metrics.h"
     "${ROCM_INC_DIR}/rocm_smi_dyn_gpu_metrics.h"
     "${ROCM_INC_DIR}/rocm_smi.h"

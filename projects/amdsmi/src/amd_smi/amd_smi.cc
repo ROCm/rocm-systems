@@ -3939,6 +3939,10 @@ amdsmi_status_t amdsmi_get_gpu_cpu_links(amdsmi_processor_handle processor_handl
   if (raw_count > 0) {
     rstatus = rsmi_topo_get_cpu_links(device->get_gpu_id(), &raw_count, rsmi_links.data());
     if (rstatus != RSMI_STATUS_SUCCESS) return amd::smi::rsmi_to_amdsmi_status(rstatus);
+    // raw_count may have changed since the first call (live topology, not a
+    // snapshot); re-clamp so a shrunk count doesn't iterate the now-stale,
+    // zeroed-out tail of rsmi_links below.
+    rsmi_links.resize(std::min<size_t>(rsmi_links.size(), raw_count));
   }
 
   std::vector<amdsmi_cpu_link_t> resolved;

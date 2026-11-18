@@ -185,8 +185,8 @@ class TestCliXgmiCpuColumns(unittest.TestCase):
 
     def test_tabular_keys_do_not_collide_between_gpu0_and_pkg0(self):
         # GPU id 0 and a connected CPU's package id 0 must not share a
-        # tabular-output key: GPU0's own "Read"/"Write" row carries both an
-        # (unresolved, self) "bdf_0" GPU column and a real "pkg_0" CPU column.
+        # tabular-output key: GPU0's own "Read"/"Write" row carries both a
+        # "bdf_0" GPU column and a "pkg_0" CPU column, under distinct keys.
         gpu0, gpu1 = object(), object()
         bdf0, bdf1 = "0000:01:00.0", "0000:02:00.0"
 
@@ -230,14 +230,22 @@ class TestCliXgmiCpuColumns(unittest.TestCase):
         # metrics (which only lists a link to GPU1), so its GPU column is N/A.
         self.assertEqual(gpu0_read["bdf_0"], "N/A")
         self.assertEqual(gpu0_write["bdf_0"], "N/A")
-        # The CPU column (package 0) carries GPU0's real counters, in a
-        # distinct key -- not merged into / overwriting the GPU column above.
-        self.assertEqual(gpu0_read["pkg_0"], "1024000B")
-        self.assertEqual(gpu0_write["pkg_0"], "2048000B")
+        # GPU0's one links[] entry is a resolved GPU-GPU destination (to GPU1),
+        # not a CPU link counter, and a resolved GPU-GPU link anywhere on the
+        # host means no links[] entry can be safely attributed to a CPU link
+        # (see xgmi.py's gpu_gpu_resolvable guard) -- so the CPU column is N/A
+        # too, under its own distinct key, not merged into / overwriting the
+        # GPU column above.
+        self.assertEqual(gpu0_read["pkg_0"], "N/A")
+        self.assertEqual(gpu0_write["pkg_0"], "N/A")
 
     def test_uint64_max_counter_renders_as_na(self):
         # links[] is a fixed-size array; an unpopulated slot reads back as
-        # the driver's UINT64_MAX sentinel, which must map to "N/A".
+        # the driver's UINT64_MAX sentinel, which must map to "N/A". The
+        # link's bdf deliberately doesn't match any known GPU (a CPU
+        # destination isn't one), so gpu_gpu_resolvable stays False and this
+        # entry's counter is read as the CPU link's, exercising the sentinel
+        # check below rather than short-circuiting to "N/A" some other way.
         gpu0 = object()
         commands = self._run_xgmi(
             handles=[gpu0],
@@ -247,7 +255,7 @@ class TestCliXgmiCpuColumns(unittest.TestCase):
             get_link_metrics=lambda _h: {
                 "links": [
                     {
-                        "bdf": "0000:01:00.0",
+                        "bdf": "0000:ff:00.0",
                         "bit_rate": 100,
                         "max_bandwidth": 200,
                         "read": _UINT64_MAX,
@@ -260,7 +268,3 @@ class TestCliXgmiCpuColumns(unittest.TestCase):
         cpu_link = commands.logger.multiple_device_output[0]["link_metrics"]["cpu_links"][0]
         self.assertEqual(cpu_link["read"], "N/A")
         self.assertEqual(cpu_link["write"], "N/A")
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -98,6 +98,26 @@ TEST(SystemUnit, CpuSocketsFromNumaNodeDedupsSamePackage) {
   EXPECT_EQ(sockets[0], 3u);
 }
 
+TEST(SystemUnit, CpuSocketsFromNumaNodeParsesRangesAndCommas) {
+  ScopedTempDir root;
+  ASSERT_FALSE(root.path().empty());
+  ScopedSysRootOverride root_override(root.path().string());
+
+  // A comma-separated mix of ranges and single indices, as real cpulist files use
+  // (e.g. "0-31,64-95"): every member CPU must be visited, not just the first.
+  WriteCpulist(root.path(), 0, "0-1,3");
+  WritePhysicalPackageId(root.path(), 0, 3);
+  WritePhysicalPackageId(root.path(), 1, 5);
+  WritePhysicalPackageId(root.path(), 3, 7);
+
+  auto sockets = amd::smi::AMDSmiSystem::getInstance().get_cpu_sockets_from_numa_node(0);
+
+  ASSERT_EQ(sockets.size(), 3u);
+  EXPECT_EQ(sockets[0], 3u);
+  EXPECT_EQ(sockets[1], 5u);
+  EXPECT_EQ(sockets[2], 7u);
+}
+
 TEST(SystemUnit, CpuSocketsFromNumaNodeUnresolvedIsEmpty) {
   ScopedTempDir root;
   ASSERT_FALSE(root.path().empty());
