@@ -14,7 +14,6 @@ Panel Config:
         max: Max
         unit: Unit
       metric:
-        # Denominator: GRBM_GUI_ACTIVE_sum * se_per_gpu / num_xcd.
         SPI Utilization:
           avg: 100 * SUM(SPI_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum * $se_per_gpu / $num_xcd)
           min: 100 * MIN(SPI_BUSY_sum / (GRBM_GUI_ACTIVE_sum * $se_per_gpu / $num_xcd))
