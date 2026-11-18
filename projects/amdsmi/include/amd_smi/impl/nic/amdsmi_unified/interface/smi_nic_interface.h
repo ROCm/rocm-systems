@@ -13,6 +13,8 @@ extern "C" {
 #include <stddef.h>
 #include <stdint.h>
 
+#include "amd_smi/amdsmi.h"
+
 #define SMI_NIC_MAX_STRING_LENGTH 256
 #define SMI_NIC_MAX_DEVICES 64
 #define SMI_NIC_MAX_STATISTICS 256
@@ -21,15 +23,18 @@ extern "C" {
 #define SMI_NIC_MAX_RDMA_DEV 32
 
 typedef enum {
-  SMI_NIC_STATUS_SUCCESS = 0,          /**< API completed successfully */
-  SMI_NIC_STATUS_ERROR = 1,            /**< Generic error */
-  SMI_NIC_STATUS_WRONG_PARAM = 2,      /**< Wrong parameter provided */
-  SMI_NIC_STATUS_NOT_FOUND = 3,        /**< NIC not found */
-  SMI_NIC_STATUS_NO_RESOURCE = 4,      /**< Memory allocation failed */
-  SMI_NIC_STATUS_NOT_SUPPORTED = 5,    /**< API not supported */
-  SMI_NIC_STATUS_NOT_INIT = 6,         /**< Not initialized */
-  SMI_NIC_STATUS_NO_DATA = 7,          /**< Requested data not found */
-  SMI_NIC_STATUS_DRIVER_NOT_LOADED = 8 /**< Required driver not loaded */
+  SMI_NIC_STATUS_SUCCESS = 0,           /**< API completed successfully */
+  SMI_NIC_STATUS_ERROR = 1,             /**< Generic error */
+  SMI_NIC_STATUS_WRONG_PARAM = 2,       /**< Wrong parameter provided */
+  SMI_NIC_STATUS_NOT_FOUND = 3,         /**< NIC not found */
+  SMI_NIC_STATUS_NO_RESOURCE = 4,       /**< Memory allocation failed */
+  SMI_NIC_STATUS_NOT_SUPPORTED = 5,     /**< API not supported */
+  SMI_NIC_STATUS_NOT_INIT = 6,          /**< Not initialized */
+  SMI_NIC_STATUS_NO_DATA = 7,           /**< Requested data not found */
+  SMI_NIC_STATUS_DRIVER_NOT_LOADED = 8, /**< Required driver not loaded */
+  SMI_NIC_STATUS_MORE_DATA = 9,         /**< More data available; call again with returned cursor */
+  SMI_NIC_STATUS_FILE_NOT_FOUND = 10,   /**< debugfs path absent */
+  SMI_NIC_STATUS_NO_PERM = 11           /**< Insufficient privilege */
 } smi_nic_status_t;
 
 /**
@@ -501,6 +506,29 @@ smi_nic_status_t smi_get_nic_rdma_port_statistics_list(smi_nic_ctx_t ctx, uint64
                                                        uint32_t port_index, uint32_t ib_index,
                                                        uint32_t rdma_port_index,
                                                        smi_nic_stat_info_t* stats);
+
+/**
+ * @brief Retrieve CPER entries for an AI-NIC device via the pds_core debugfs ring.
+ *
+ * @param ctx    Context returned by ::smi_nic_create_context.
+ * @param device Packed BDF, in the ::amdsmi_bdf_t as_uint encoding.
+ * @param severity_mask Bitmask of severity levels (1 << AMDSMI_CPER_SEV_*).
+ * @param cper_data     Caller-allocated buffer for raw CPER data.
+ * @param buf_size      [in] buffer size in bytes; [out] bytes written.
+ * @param cper_hdrs     Caller-allocated array of pointers; filled with parsed headers.
+ * @param entry_count   [in] array capacity, must be in [1, 4096]; [out] entries returned.
+ * @param cursor        [in] cursor from previous call (0 = start); [out] cursor for next call.
+ * @return ::SMI_NIC_STATUS_SUCCESS on success with no more data,
+ *         ::SMI_NIC_STATUS_MORE_DATA if more entries remain,
+ *         ::SMI_NIC_STATUS_FILE_NOT_FOUND if pds_core debugfs path is absent,
+ *         ::SMI_NIC_STATUS_NO_PERM if not running with sufficient privilege,
+ *         ::SMI_NIC_STATUS_WRONG_PARAM if any pointer is null or entry_count is 0,
+ *         ::SMI_NIC_STATUS_NO_RESOURCE if buffer too small, non-zero on other failures.
+ */
+smi_nic_status_t smi_get_nic_cper_entries(smi_nic_ctx_t ctx, uint64_t device,
+                                          uint32_t severity_mask, char* cper_data,
+                                          uint64_t* buf_size, amdsmi_cper_hdr_t** cper_hdrs,
+                                          uint64_t* entry_count, uint64_t* cursor);
 
 #ifdef __cplusplus
 }  // extern "C"
