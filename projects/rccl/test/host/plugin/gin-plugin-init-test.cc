@@ -35,7 +35,7 @@
 #include "gin/gin_anvil_reach.h"
 
 #include "../common/ScopedEnv.hpp"
-#include "fakes/dev_runtime_micro_fakes.h"
+#include "fakes/bootstrap_stubs.h"
 #include "fakes/nccl_fakes.h"
 
 #ifdef ENABLE_ROCSHMEM_GIN
@@ -206,7 +206,7 @@ class GinFinalizeTest : public GinPluginInitTest {
     peerPodOptIn_ = true;
     podVotes_ = 0;
     // Peers vote peerPodOptIn_ in the pod opt-in allgather.
-    g_devrBootstrapAllGather = [this](void*, void* buf, int bytes) {
+    g_bootstrapAllGather = [this](void*, void* buf, int bytes) {
       if (bytes != static_cast<int>(sizeof(int))) return ncclInternalError;
       ++podVotes_;
       int* votes = static_cast<int*>(buf);
@@ -221,7 +221,7 @@ class GinFinalizeTest : public GinPluginInitTest {
     g_anvilFabricMem = false;
     g_anvilCrossNic = true;
     g_anvilPodOptIn = false;
-    g_devrBootstrapAllGather = [](void*, void*, int) { return ncclSuccess; };
+    ResetBootstrapStubs();
     std::memset(pluginLibs, 0, sizeof(pluginLibs));
     GinPluginInitTest::TearDown();
   }
@@ -425,7 +425,9 @@ TEST(GinTypeListTest, EmptyGinTypeCountsAsUnset) {
 // Which communicators keep Anvil SDMA next to PROXY (gin_anvil_reach.h): every
 // single-host communicator, and across hosts only a fabric pod within Anvil's
 // peer table size whose ranks all opted in. MI300X and MI350 never form a pod:
-// ginAnvilFabricMemCapable needs gfx1250 with MNNVL.
+// ginAnvilFabricMemCapable needs gfx1250 with MNNVL. MNNVL is set per rank, so
+// a rank outside the pod (fabricMem false) still takes the vote its peers take
+// and votes no; otherwise they would wait for it in the allgather.
 struct AnvilReachCase {
   const char* name;
   int nHosts;
@@ -480,7 +482,8 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(
         AnvilReachCase{"SingleHost", 1, 8, false, false, false, true, 0},
         AnvilReachCase{"SingleHostWithFabricMem", 1, 4, true, true, true, true, 0},
-        AnvilReachCase{"MultiHostOutsidePod", 2, 16, false, true, true, false, 0},
+        AnvilReachCase{"MultiHostOutsidePod", 2, 16, false, true, true, false, 1},
+        AnvilReachCase{"FabricPodWithoutThisRank", 2, 8, false, true, true, false, 1},
         AnvilReachCase{"FabricPodWithoutOptIn", 2, 8, true, false, false, false, 1},
         AnvilReachCase{"FabricPod", 2, 8, true, true, true, true, 1},
         AnvilReachCase{"FabricPodOnlyPeersOptIn", 2, 8, true, false, true, false, 1},
@@ -557,7 +560,7 @@ TEST_F(GinFinalizeTest, AnvilSdma_FabricPodVoteFailurePropagates) {
   comm_.nRanks = 8;
   g_anvilFabricMem = true;
   g_anvilPodOptIn = true;
-  g_devrBootstrapAllGather = [](void*, void*, int) { return ncclSystemError; };
+  g_bootstrapAllGather = [](void*, void*, int) { return ncclSystemError; };
 
   EXPECT_EQ(ncclGinSetDefaultBackend(&comm_, BIT(NCCL_GIN_TYPE_ANVIL_SDMA)), ncclSystemError);
   EXPECT_EQ(ginState->numActiveBackends, 1);
@@ -575,11 +578,14 @@ TEST_F(GinFinalizeTest, AnvilSdmaOnly_MultiHostClearsSupported) {
   struct ncclGinState* ginState = &comm_.ginState;
   ginState->backends[0].ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
   topo_->nHosts = 2;
+  comm_.nRanks = 16;
 
   EXPECT_EQ(ncclGinSetDefaultBackend(&comm_, BIT(NCCL_GIN_TYPE_ANVIL_SDMA)), ncclSuccess);
   EXPECT_FALSE(ginState->supported);
   EXPECT_EQ(ginState->numActiveBackends, 0);
   EXPECT_EQ(fake_.finalizeCalls, 1);
+  // Not in a pod, this rank still takes the vote and votes no.
+  EXPECT_EQ(podVotes_, 1);
 }
 
 // Success path: keep the context, mark the plugin enabled, do not finalize.

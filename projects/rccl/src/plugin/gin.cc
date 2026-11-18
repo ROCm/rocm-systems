@@ -504,20 +504,22 @@ ncclResult_t ncclGinSetDefaultBackend(struct ncclComm* comm, uint64_t globalBitM
   // and do not re-arm supported, which would let a new shared split reconnect.
   if (ginState->finalized) return ncclSuccess;
 
-  // Anvil SDMA reach is in gin_anvil_reach.h. The pod opt-in vote is a bootstrap
+  // Anvil SDMA reach is in gin_anvil_reach.h. The pod vote is a bootstrap
   // allgather, so it runs before pluginMutex, and only where the all-ranks mask
-  // and the topology, which every rank shares, allow a pod.
-  const GinAnvilSdmaReach anvilCapable = ginAnvilSdmaReachCapable(comm);
-  GinAnvilSdmaReach anvilReach = anvilCapable;
-  if (anvilCapable == GinAnvilSdmaReach::FabricPod && (BIT(NCCL_GIN_TYPE_ANVIL_SDMA) & globalBitMask)) {
+  // and ginAnvilFabricPodVotePredicate, which every rank shares, allow a pod.
+  // Whether this rank is in the pod (MNNVL, clique, cuMem) and opted in goes
+  // into its vote: comm->MNNVL is set per rank, so it must not gate the vote.
+  GinAnvilSdmaReach anvilReach = ginAnvilSdmaReachCapable(comm);
+  if ((BIT(NCCL_GIN_TYPE_ANVIL_SDMA) & globalBitMask) &&
+      ginAnvilFabricPodVotePredicate(comm->topo->nHosts, comm->nRanks, ginAnvilCrossNic(comm))) {
     const int localPod = ginAnvilUseFabricPod(comm) ? 1 : 0;
     int allPod = 0;
     NCCLCHECK(ncclGinBootstrapAgreeAll(comm, localPod, &allPod));
     if (localPod && !allPod) {
-      WARN("GIN backend ANVIL_SDMA: RCCL_GIN_ANVIL_FABRIC_POD=1 and RCCL_GIN_ANVIL_FABRIC_MEM=1 are not set on "
-           "every rank; keeping it off across hosts");
+      WARN("GIN backend ANVIL_SDMA: not every rank is in the fabric pod with RCCL_GIN_ANVIL_FABRIC_POD=1 and "
+           "RCCL_GIN_ANVIL_FABRIC_MEM=1; keeping it off across hosts");
     }
-    if (!allPod) anvilReach = GinAnvilSdmaReach::None;
+    anvilReach = allPod ? GinAnvilSdmaReach::FabricPod : GinAnvilSdmaReach::None;
   }
 
   std::lock_guard<std::mutex> lock(pluginMutex);

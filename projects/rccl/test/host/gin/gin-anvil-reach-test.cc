@@ -164,6 +164,24 @@ TEST_F(GinAnvilReachMicrotest, FabricPod_NeedsCrossNicOnEveryRank) {
   EXPECT_EQ(ginAnvilSdmaReachCapable(host.comm.get()), GinAnvilSdmaReach::Host);
 }
 
+// comm->MNNVL follows this rank's NCCL_MNNVL_ENABLE, so a rank without it is not
+// in the pod by its own reach, yet it must take the pod vote its peers take and
+// vote no.
+TEST_F(GinAnvilReachMicrotest, FabricPodVote_IgnoresThisRanksMnnvl) {
+  ReachComm rc("gfx1250", /*mnnvl=*/0, 8, 8, /*nHosts=*/2);
+  EXPECT_EQ(ginAnvilSdmaReachCapable(rc.comm.get()), GinAnvilSdmaReach::None);
+  EXPECT_FALSE(ginAnvilUseFabricPod(rc.comm.get()));
+  EXPECT_TRUE(ginAnvilFabricPodVotePredicate(rc.topo->nHosts, rc.comm->nRanks, ginAnvilCrossNic(rc.comm.get())));
+}
+
+TEST(GinAnvilReachMicrotestPredicate, FabricPodVoteOnlyAcrossHostsWithinPeerTableOverAFullConnection) {
+  EXPECT_FALSE(ginAnvilFabricPodVotePredicate(1, 8, true));
+  EXPECT_TRUE(ginAnvilFabricPodVotePredicate(2, 8, true));
+  EXPECT_TRUE(ginAnvilFabricPodVotePredicate(4, kGinAnvilIpcMaxRanks, true));
+  EXPECT_FALSE(ginAnvilFabricPodVotePredicate(4, kGinAnvilIpcMaxRanks + 1, true));
+  EXPECT_FALSE(ginAnvilFabricPodVotePredicate(2, 8, false));
+}
+
 TEST(GinAnvilReachMicrotestPredicate, SingleHostAlwaysReached) {
   EXPECT_EQ(ginAnvilSdmaReachPredicate(1, 8, false, false), GinAnvilSdmaReach::Host);
   EXPECT_EQ(ginAnvilSdmaReachPredicate(1, 64, true, true), GinAnvilSdmaReach::Host);
