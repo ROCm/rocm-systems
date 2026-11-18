@@ -115,15 +115,15 @@ using node_info_list_t = std::vector<node_info_ptr_t>;
 
 struct process_info_t
 {
-    std::optional<size_t> ppid{};
+    std::optional<size_t> ppid;
     size_t                pid{};
-    std::optional<size_t> init{};
-    std::optional<size_t> fini{};
-    std::optional<size_t> start{};
-    std::optional<size_t> end{};
-    std::string           command{};
-    std::string           environment{};
-    std::string           extdata{};
+    std::optional<size_t> init;
+    std::optional<size_t> fini;
+    std::optional<size_t> start;
+    std::optional<size_t> end;
+    std::string           command;
+    std::string           environment;
+    std::string           extdata;
 
     std::shared_ptr<node_info_t> node_info;
 };
@@ -135,15 +135,15 @@ struct agent_info_t
 {
     std::string           agent_type;
     size_t                type_index;
-    std::optional<size_t> absolute_index{};
-    std::optional<size_t> logical_index{};
+    std::optional<size_t> absolute_index;
+    std::optional<size_t> logical_index;
     std::optional<size_t> uuid;
     std::string           name;
     std::string           model_name;
     std::string           vendor_name;
     std::string           product_name;
     std::string           user_name;
-    std::string           extdata{};
+    std::string           extdata;
 
     std::shared_ptr<node_info_t>    node_info;
     std::shared_ptr<process_info_t> process_info;
@@ -154,23 +154,23 @@ using agent_info_list_t = std::vector<agent_info_ptr_t>;
 
 struct pmc_info_t
 {
-    std::string                   name{};
+    std::string                   name;
     std::shared_ptr<agent_info_t> agent_info;
 
-    std::string           target_arch{};
-    std::optional<size_t> event_code{};
-    std::optional<size_t> instance_id{};
-    std::string           symbol{};
-    std::string           description{};
-    std::string           long_description{};
-    std::string           component{};
-    std::string           units{};
-    std::string           value_type{};
-    std::string           block{};
-    std::string           expression{};
-    std::optional<size_t> is_constant{};
-    std::optional<size_t> is_derived{};
-    std::string           extdata{};
+    std::string           target_arch;
+    std::optional<size_t> event_code;
+    std::optional<size_t> instance_id;
+    std::string           symbol;
+    std::string           description;
+    std::string           long_description;
+    std::string           component;
+    std::string           units;
+    std::string           value_type;
+    std::string           block;
+    std::string           expression;
+    std::optional<size_t> is_constant;
+    std::optional<size_t> is_derived;
+    std::string           extdata;
 
     std::shared_ptr<node_info_t>    node_info;
     std::shared_ptr<process_info_t> process_info;
@@ -181,12 +181,12 @@ using pmc_info_list_t = std::vector<pmc_info_ptr_t>;
 
 struct thread_info_t
 {
-    std::optional<size_t> parent_process_id{};
+    std::optional<size_t> parent_process_id;
     size_t                thread_id{};
-    std::string           name{};
-    std::optional<size_t> start{};
-    std::optional<size_t> end{};
-    std::string           extdata{};
+    std::string           name;
+    std::optional<size_t> start;
+    std::optional<size_t> end;
+    std::string           extdata;
 
     std::shared_ptr<node_info_t>    node_info;
     std::shared_ptr<process_info_t> process_info;
@@ -198,8 +198,8 @@ using thread_info_list_t = std::vector<thread_info_ptr_t>;
 struct stream_info_t
 {
     size_t      stream_id{};
-    std::string name{};
-    std::string extdata{};
+    std::string name;
+    std::string extdata;
 
     std::shared_ptr<node_info_t>    node_info;
     std::shared_ptr<process_info_t> process_info;
@@ -211,8 +211,8 @@ using stream_info_list_t = std::vector<stream_info_ptr_t>;
 struct queue_info_t
 {
     size_t      queue_id{};
-    std::string name{};
-    std::string extdata{};
+    std::string name;
+    std::string extdata;
 
     std::shared_ptr<node_info_t>    node_info;
     std::shared_ptr<process_info_t> process_info;
@@ -224,12 +224,12 @@ using queue_info_list_t = std::vector<queue_info_ptr_t>;
 struct code_object_info_t
 {
     size_t                id{};
-    std::string           uri{};
-    std::optional<size_t> load_base{};
-    std::optional<size_t> load_size{};
-    std::optional<size_t> load_delta{};
-    std::string           storage_type{};
-    std::string           extdata{};
+    std::string           uri;
+    std::optional<size_t> load_base;
+    std::optional<size_t> load_size;
+    std::optional<size_t> load_delta;
+    std::string           storage_type;
+    std::string           extdata;
 
     std::shared_ptr<node_info_t>    node_info;
     std::shared_ptr<process_info_t> process_info;
@@ -242,17 +242,17 @@ using code_object_info_list_t = std::vector<code_object_info_ptr_t>;
 struct kernel_symbol_info_t
 {
     size_t                id{};
-    std::string           name{};
-    std::string           display_name{};
-    std::optional<size_t> kernel_object{};
-    std::optional<size_t> kernarg_segment_size{};
-    std::optional<size_t> kernarg_segment_alignment{};
-    std::optional<size_t> group_segment_size{};
-    std::optional<size_t> private_segment_size{};
-    std::optional<size_t> sgpr_count{};
-    std::optional<size_t> arch_vgpr_count{};
-    std::optional<size_t> accum_vgpr_count{};
-    std::string           extdata{};
+    std::string           name;
+    std::string           display_name;
+    std::optional<size_t> kernel_object;
+    std::optional<size_t> kernarg_segment_size;
+    std::optional<size_t> kernarg_segment_alignment;
+    std::optional<size_t> group_segment_size;
+    std::optional<size_t> private_segment_size;
+    std::optional<size_t> sgpr_count;
+    std::optional<size_t> arch_vgpr_count;
+    std::optional<size_t> accum_vgpr_count;
+    std::string           extdata;
 
     std::shared_ptr<node_info_t>        node_info;
     std::shared_ptr<process_info_t>     process_info;
@@ -264,8 +264,8 @@ using kernel_symbol_info_list_t = std::vector<kernel_symbol_info_ptr_t>;
 
 struct track_info_t
 {
-    std::string name{};
-    std::string extdata{};
+    std::string name;
+    std::string extdata;
 
     std::shared_ptr<node_info_t>    node_info;
     std::shared_ptr<process_info_t> process_info;
@@ -392,9 +392,8 @@ struct kernel_dispatch_data_t
     timestamp_ns_t start_timestamp{};  ///< Kernel start time (nanoseconds)
     timestamp_ns_t end_timestamp{};    ///< Kernel end time (nanoseconds)
 
-    std::optional<size_t>
-        private_segment_size{};                  ///< Private memory per work-item (bytes)
-    std::optional<size_t> group_segment_size{};  ///< LDS memory per workgroup (bytes)
+    std::optional<size_t> private_segment_size;  ///< Private memory per work-item (bytes)
+    std::optional<size_t> group_segment_size;    ///< LDS memory per workgroup (bytes)
     size_t                workgroup_size_x{};    ///< Workgroup size in X dimension
     size_t                workgroup_size_y{};    ///< Workgroup size in Y dimension
     size_t                workgroup_size_z{};    ///< Workgroup size in Z dimension

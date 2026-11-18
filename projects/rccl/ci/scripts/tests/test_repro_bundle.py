@@ -22,9 +22,12 @@ CI_ENV = {
     "GITHUB_RUN_ATTEMPT": "1",
     "GITHUB_SHA": "2b88119d18cf83a0b4127ad441b5ec813bd93580",
     "ARTIFACT_RUN_ID": "38523607643",
+    "BASELINE_ARTIFACT_RUN_ID": "38400000001",
     "SLURM_TMPDIR": "/var/tmp",
 }
 FINGERPRINT = {"md5": "1f9f7bd1a083f5c3184ade694bb984ae", "version": "2.32.3-develop:2b88119"}
+BASELINE_FINGERPRINT = {"md5": "0e8e6ac0b972e4b2073bdd583aa873bd",
+                        "version": "2.32.3-develop:1a77008"}
 
 
 def build_info_resolves(manifest: dict, cwd: Path) -> tuple[Path, Path]:
@@ -50,34 +53,32 @@ class WorkDir:
         self.config = tm.WORKLOAD_CONFIGS[workload]
         family = self.config.get("family", "megatron")
         ctx = self.path / tm.OVERLAY_CTX
-        libs = ctx / "rccl_libs"
-        (libs / ".kpack").mkdir(parents=True)
-        lib = b"\x7fELF librccl" * 1000
-        for name in ("librccl.so", "librccl.so.1", "librccl.so.1.0"):
-            (libs / name).write_bytes(lib)
-        (libs / ".kpack" / "rccl_lib_gfx950.kpack").write_bytes(b"kpack")
-        (ctx / tm.OVERLAY_DOCKERFILE).write_text("FROM base\nCOPY rccl_libs/ /tmp/rccl_ci/\n")
+        for phase, name in tm.OVERLAY_LIBS.items():
+            libs = ctx / name
+            (libs / ".kpack").mkdir(parents=True)
+            lib = f"\x7fELF librccl {phase}".encode() * 1000
+            for so in ("librccl.so", "librccl.so.1", "librccl.so.1.0"):
+                (libs / so).write_bytes(lib)
+            (libs / ".kpack" / "rccl_lib_gfx950.kpack").write_bytes(b"kpack")
+            (ctx / tm.OVERLAY_DOCKERFILES[phase]).write_text(
+                f"FROM base\nCOPY {name}/ /tmp/rccl_ci/\n")
         scripts = "jax-maxtext" if family == "maxtext" else "primus_megatron-lm"
         (self.path / "scripts" / scripts).mkdir(parents=True)
         (self.path / "scripts" / scripts / "run.sh").write_text("#!/bin/bash\n")
         if family == "maxtext":
-            (ctx / tm.MAXTEXT_BASELINE_DOCKERFILE).write_text("FROM base\n")
             (ctx / "Primus").mkdir()
             (ctx / "Primus" / "primus-cli").write_text("#!/bin/bash\n")
 
-        self.images = {tm.BASELINE: "base:tag" if family != "maxtext" else "base-primus",
-                       tm.CANDIDATE: "base:tag-rccl-gfx950-run38523607643"}
+        self.images = {phase: f"base:tag-rccl-gfx950-run38523607643-{phase}"
+                       for phase in (tm.BASELINE, tm.CANDIDATE)}
         self.phase_dirs = {}
         for phase in (tm.BASELINE, tm.CANDIDATE):
             run_dir = tm.prepare_phase_dir(self.path, phase)
-            maxtext_baseline = family == "maxtext" and phase == tm.BASELINE
             tm.generate_manifest(
                 workload, self.config, RUBY, self.images[phase],
                 self.config.get("required_nodes", 2), self.path,
                 run_dir=run_dir,
-                pull_only=family != "maxtext" and phase == tm.BASELINE,
-                dockerfile_name=(tm.MAXTEXT_BASELINE_DOCKERFILE if maxtext_baseline
-                                 else tm.OVERLAY_DOCKERFILE),
+                dockerfile_name=tm.OVERLAY_DOCKERFILES[phase],
             )
             self.phase_dirs[phase] = run_dir
 
@@ -86,6 +87,7 @@ class WorkDir:
             self.path, self.phase_dirs, self.workload, self.config, RUBY,
             self.config.get("required_nodes", 2), FINGERPRINT, self.images,
             base_digest="rocm/primus:v26.4@sha256:8c8ecc6f", env=CI_ENV,
+            baseline_fingerprint=BASELINE_FINGERPRINT,
         )
 
 
@@ -104,11 +106,11 @@ class ReproManifestTest(unittest.TestCase):
                          "/w/overlay_ctx/Dockerfile.rccl-overlay")
         self.assertNotIn("dockercontext", manifest["built_models"]["overlay"])
 
-    def test_pull_only_and_foreign_dockerfiles_are_left_alone(self):
+    def test_prebuilt_and_foreign_dockerfiles_are_left_alone(self):
         work = Path("/w")
-        pull_only = {"built_images": {"overlay": {"docker_image": "rocm/primus:v26.4"}},
-                     "built_models": {"overlay": {}}}
-        self.assertEqual(tm.repro_manifest(pull_only, work), pull_only)
+        prebuilt = {"built_images": {"overlay": {"docker_image": "rocm/primus:v26.4"}},
+                    "built_models": {"overlay": {}}}
+        self.assertEqual(tm.repro_manifest(prebuilt, work), prebuilt)
         foreign = {"built_images": {"overlay": {"dockerfile": "/elsewhere/Dockerfile"}},
                    "built_models": {"overlay": {}}}
         self.assertEqual(tm.repro_manifest(foreign, work), foreign)
@@ -118,17 +120,22 @@ class CopyOverlayCtxTest(unittest.TestCase):
     def test_drops_only_byte_identical_librccl_copies(self):
         with tempfile.TemporaryDirectory() as tmp:
             src, dst = Path(tmp) / "src", Path(tmp) / "dst"
-            libs = src / "rccl_libs"
-            (libs / ".kpack").mkdir(parents=True)
-            (libs / "librccl.so").write_bytes(b"A" * 64)
-            (libs / "librccl.so.1").write_bytes(b"A" * 64)
-            (libs / "librccl.so.1.0").write_bytes(b"B" * 64)
-            (libs / ".kpack" / "rccl.kpack").write_bytes(b"K")
+            for name in tm.OVERLAY_LIBS.values():
+                libs = src / name
+                (libs / ".kpack").mkdir(parents=True)
+                (libs / "librccl.so").write_bytes(b"A" * 64)
+                (libs / "librccl.so.1").write_bytes(b"A" * 64)
+                (libs / "librccl.so.1.0").write_bytes(b"B" * 64)
+                (libs / ".kpack" / "rccl.kpack").write_bytes(b"K")
             (src / "Dockerfile").write_text("FROM x\n")
             tm.copy_overlay_ctx(src, dst)
             kept = sorted(p.relative_to(dst).as_posix() for p in dst.rglob("*") if p.is_file())
-            self.assertEqual(kept, ["Dockerfile", "rccl_libs/.kpack/rccl.kpack",
-                                    "rccl_libs/librccl.so", "rccl_libs/librccl.so.1.0"])
+            self.assertEqual(kept, ["Dockerfile",
+                                    "rccl_libs/.kpack/rccl.kpack",
+                                    "rccl_libs/librccl.so", "rccl_libs/librccl.so.1.0",
+                                    "rccl_libs_baseline/.kpack/rccl.kpack",
+                                    "rccl_libs_baseline/librccl.so",
+                                    "rccl_libs_baseline/librccl.so.1.0"])
 
 
 class WriteReproBundleTest(unittest.TestCase):
@@ -146,36 +153,33 @@ class WriteReproBundleTest(unittest.TestCase):
                              "the CI manifests must not change")
         self.assertTrue((bundle / "scripts").is_dir())
         self.assertTrue((bundle / "REPRO.md").is_file())
-        self.assertFalse((bundle / tm.OVERLAY_CTX / "rccl_libs" / "librccl.so.1").exists())
-        self.assertTrue((bundle / tm.OVERLAY_CTX / "rccl_libs" / ".kpack").is_dir())
+        for phase, name in tm.OVERLAY_LIBS.items():
+            self.assertFalse((bundle / tm.OVERLAY_CTX / name / "librccl.so.1").exists())
+            self.assertTrue((bundle / tm.OVERLAY_CTX / name / ".kpack").is_dir())
 
-        candidate = json.loads((bundle / tm.REPRO_MANIFESTS[tm.CANDIDATE]).read_text())
-        dockerfile, context = build_info_resolves(candidate, bundle)
-        self.assertEqual(dockerfile, bundle / tm.OVERLAY_CTX / tm.OVERLAY_DOCKERFILE)
-        self.assertTrue(dockerfile.is_file())
-        self.assertEqual(context, bundle / tm.OVERLAY_CTX)
-        script = candidate["built_models"]["overlay"]["scripts"]
-        self.assertTrue((bundle / script).is_file(), script)
+            # Each phase builds its own recipe, which copies its own library.
+            manifest = json.loads((bundle / tm.REPRO_MANIFESTS[phase]).read_text())
+            dockerfile, context = build_info_resolves(manifest, bundle)
+            self.assertEqual(dockerfile, bundle / tm.OVERLAY_CTX / tm.OVERLAY_DOCKERFILES[phase])
+            self.assertIn(f"COPY {name}/", dockerfile.read_text())
+            self.assertEqual(context, bundle / tm.OVERLAY_CTX)
+            script = manifest["built_models"]["overlay"]["scripts"]
+            self.assertTrue((bundle / script).is_file(), script)
         return bundle, work
 
     def test_megatron_bundle(self):
-        bundle, _ = self.check_bundle("llama-3.1-70b-training")
-        baseline = json.loads((bundle / tm.REPRO_MANIFESTS[tm.BASELINE]).read_text())
-        self.assertNotIn("dockerfile", baseline["built_images"]["overlay"])
-        self.assertNotIn("dockercontext", baseline["built_models"]["overlay"])
+        self.check_bundle("llama-3.1-70b-training")
 
-    def test_maxtext_baseline_keeps_its_own_dockerfile(self):
+    def test_maxtext_bundle_carries_primus(self):
         bundle, _ = self.check_bundle("llama-3.1-405b-maxtext")
-        baseline = json.loads((bundle / tm.REPRO_MANIFESTS[tm.BASELINE]).read_text())
-        dockerfile, context = build_info_resolves(baseline, bundle)
-        self.assertEqual(dockerfile, bundle / tm.OVERLAY_CTX / tm.MAXTEXT_BASELINE_DOCKERFILE)
-        self.assertEqual(context, bundle / tm.OVERLAY_CTX)
         self.assertTrue((bundle / tm.OVERLAY_CTX / "Primus" / "primus-cli").is_file())
 
     def test_repro_env_sources_and_carries_provenance(self):
         bundle, _ = self.check_bundle("llama-3.1-70b-training")
         names = ["CI_RUN_URL", "RCCL_ARTIFACTS_S3", "RCCL_MD5", "MAD_REF", "MADENGINE_REF",
-                 "BASE_DIGEST", "SLURM_TMPDIR", "REPRO_PARTITION", "REPRO_NODES"]
+                 "BASE_DIGEST", "SLURM_TMPDIR", "REPRO_PARTITION", "REPRO_NODES",
+                 "BASELINE_ARTIFACT_RUN_ID", "BASELINE_RCCL_ARTIFACTS_URL",
+                 "BASELINE_RCCL_MD5"]
         script = "source repro.env; " + "; ".join(f'echo "{n}=${n}"' for n in names)
         out = subprocess.run(["bash", "-c", script], cwd=bundle, check=True,
                              capture_output=True, text=True).stdout
@@ -185,6 +189,11 @@ class WriteReproBundleTest(unittest.TestCase):
         self.assertEqual(got["RCCL_ARTIFACTS_S3"],
                          "s3://therock-ci-artifacts-external/ROCm-rocm-systems/38523607643-linux/")
         self.assertEqual(got["RCCL_MD5"], FINGERPRINT["md5"])
+        self.assertEqual(got["BASELINE_ARTIFACT_RUN_ID"], "38400000001")
+        self.assertEqual(got["BASELINE_RCCL_ARTIFACTS_URL"],
+                         "https://therock-ci-artifacts-external.s3.amazonaws.com/"
+                         "ROCm-rocm-systems/38400000001-linux/")
+        self.assertEqual(got["BASELINE_RCCL_MD5"], BASELINE_FINGERPRINT["md5"])
         self.assertEqual(got["MAD_REF"], tm.MAD_REF)
         self.assertEqual(got["MADENGINE_REF"], tm.MADENGINE_REF)
         self.assertEqual(got["BASE_DIGEST"], "rocm/primus:v26.4@sha256:8c8ecc6f")
