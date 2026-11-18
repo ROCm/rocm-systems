@@ -7,6 +7,7 @@
 #include "hip_comgr_helper.hpp"
 #include <algorithm>
 #include <atomic>
+#include <cstring>
 #if defined(_WIN32)
 #include <process.h>
 #else
@@ -431,21 +432,56 @@ void GenerateUniqueFileName(std::string& name) {
           std::to_string(counter.fetch_add(1, std::memory_order_relaxed));
 }
 
-std::string comgrDataName(const std::string& name) {
+namespace {
+constexpr char kPathSeparators[] = "/\\";
+
+// A character Windows does not allow in a file name, other than a path separator.
+bool isInvalidFileNameChar(char c) {
+  return static_cast<unsigned char>(c) < 0x20 || std::strchr("<>:\"|?*", c) != nullptr;
+}
+
+// Whether comgr can use name as a file name in its temporary directory: not
+// empty, no character Windows does not allow, no "." or ".." component and no
+// trailing path separator.
+bool isUsableFileName(const std::string& name) {
+  if (std::any_of(name.begin(), name.end(), isInvalidFileNameChar)) {
+    return false;
+  }
+  size_t start = 0;
+  while (true) {
+    const size_t end = name.find_first_of(kPathSeparators, start);
+    const std::string_view component(name.data() + start,
+                                     (end == std::string::npos ? name.size() : end) - start);
+    if (component == "." || component == "..") {
+      return false;
+    }
+    if (end == std::string::npos) {
+      return !component.empty();
+    }
+    start = end + 1;
+  }
+}
+}  // namespace
+
+std::string comgrDataName(const std::string& name, const std::string& fallback) {
   // Comgr writes a data object to a file named after it in its temporary
-  // directory, and rejects names that contain ':', such as a Windows path with
-  // a drive letter ("C:\src\k.cu"). For such a name keep only the file name
-  // (the part after the last '/' or '\') and replace any ':' left in it. An
-  // empty result, also for "." or "..", tells the caller to generate a name.
-  if (name.find(':') == std::string::npos) {
+  // directory, and rejects names that contain ':'. Callers pass names that are
+  // only names: CuPy, for example, passes the full path of a cache file, which
+  // on Windows starts with a drive letter ("C:\src\k.cu"). A name comgr cannot
+  // use as a file name is replaced by its file name part (after the last '/' or
+  // '\') with each character Windows does not allow replaced by '_'. When that
+  // leaves no file name, as for "C:\src\" or "C:\src\..", a unique name is made
+  // from fallback, a GenerateUniqueFileName template.
+  if (isUsableFileName(name)) {
     return name;
   }
-  const size_t sep = name.find_last_of("/\\");
+  const size_t sep = name.find_last_of(kPathSeparators);
   std::string fileName = (sep == std::string::npos) ? name : name.substr(sep + 1);
-  if (fileName == "." || fileName == "..") {
-    return std::string();
+  std::replace_if(fileName.begin(), fileName.end(), isInvalidFileNameChar, '_');
+  if (fileName.empty() || fileName == "." || fileName == "..") {
+    fileName = fallback;
+    GenerateUniqueFileName(fileName);
   }
-  std::replace(fileName.begin(), fileName.end(), ':', '_');
   return fileName;
 }
 
@@ -895,6 +931,27 @@ amd_comgr_data_kind_t LinkProgram::GetCOMGRDataKind(hipJitInputType input_type) 
 }
 
 
+std::string LinkProgram::UniqueLinkInputName(const std::string& name) {
+  // Comgr may write each input to a file named after it (AMD_COMGR_SAVE_TEMPS),
+  // so two inputs must not share a name, as "C:\a\k.bc" and "D:\b\k.bc" would
+  // after comgrDataName. A repeated name gets "_<n>" before its extension.
+  if (link_input_names_.insert(name).second) {
+    return name;
+  }
+  const size_t sep = name.find_last_of("/\\");
+  const size_t fileStart = (sep == std::string::npos) ? 0 : sep + 1;
+  size_t dot = name.rfind('.');
+  if (dot == std::string::npos || dot <= fileStart) {
+    dot = name.size();
+  }
+  for (size_t i = 1;; ++i) {
+    std::string unique = name.substr(0, dot) + "_" + std::to_string(i) + name.substr(dot);
+    if (link_input_names_.insert(unique).second) {
+      return unique;
+    }
+  }
+}
+
 bool LinkProgram::AddLinkerDataImpl(std::string_view link_data, hipJitInputType input_type,
                                     const std::string& link_file_name) {
   std::vector<char> llvm_code_object_storage;  // Temporary storage for bundled JIT input.
@@ -935,7 +992,8 @@ bool LinkProgram::AddLinkerDataImpl(std::string_view link_data, hipJitInputType 
     return false;
   }
 
-  if (!helpers::addCodeObjData(link_input_, llvm_code_object_view, link_file_name, data_kind_)) {
+  if (!helpers::addCodeObjData(link_input_, llvm_code_object_view,
+                               UniqueLinkInputName(link_file_name), data_kind_)) {
     LogError("Error in hip Linker: unable to add linked code object");
     return false;
   }
@@ -970,7 +1028,7 @@ bool LinkProgram::AddLinkerData(const void* image_ptr, size_t image_size,
                                 const std::string& link_file_name, hipJitInputType input_type) {
   std::string_view llvm_code_object_view(static_cast<const char*>(image_ptr), image_size);
   return AddLinkerDataImpl(llvm_code_object_view, input_type,
-                           helpers::comgrDataName(link_file_name));
+                           helpers::comgrDataName(link_file_name, "LinkerDataXXXXXX"));
 }
 
 bool LinkProgram::LinkComplete(void** bin_out, size_t* size_out) {

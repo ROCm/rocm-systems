@@ -75,11 +75,7 @@ hiprtcResult hiprtcCreateProgram(hiprtcProgram* prog, const char* src, const cha
   }
 
   // The program keeps the name it was given; comgr gets a name it accepts.
-  progName = hip::helpers::comgrDataName(progName);
-  if (progName.empty()) {
-    progName = "CompileSourceXXXXXX";
-    hip::helpers::GenerateUniqueFileName(progName);
-  }
+  progName = hip::helpers::comgrDataName(progName, "CompileSourceXXXXXX");
 
   if (!rtcProgram->addSource(std::string(src), progName)) {
     delete rtcProgram;

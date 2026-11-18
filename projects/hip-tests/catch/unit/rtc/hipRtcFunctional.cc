@@ -8,7 +8,8 @@
  * hipRTC program should be created even if the name passed is empty or null
  * hipRTC program compilation should succeed even if gpu arch is not specified in the options
  * hipRTC should be able to compile kernels using  __forceinline__ keyword
- * hipRTC program compilation should succeed when the name is a path with a Windows drive letter
+ * hipRTC program compilation should succeed when the name is not a valid file name, such as a path
+ *   with a Windows drive letter or a name with characters Windows does not allow in file names
  */
 #include <hip_test_common.hh>
 
@@ -72,12 +73,15 @@ HIP_TEST_CASE(Unit_hiprtc_functional) {
 }
 
 // The program name is only a name. Libraries such as CuPy pass the full path of
-// a cache file, which on Windows starts with a drive letter (ROCm/TheRock#9848).
-HIP_TEST_CASE(Unit_hiprtc_name_with_drive_letter) {
+// a cache file, which on Windows starts with a drive letter (ROCm/TheRock#9848),
+// and a name may hold characters Windows does not allow in file names.
+HIP_TEST_CASE(Unit_hiprtc_name_not_a_file_name) {
   using namespace std;
-  // "C:\src\" and "C:\src\.." leave no file name; hiprtc then generates one.
+  // "C:\src\", "C:\src\..", "src/" and ".." leave no file name; hiprtc then generates one.
   const char* name = GENERATE("C:\\src\\testinline.cu", "C:/src/testinline.cu", "C:testinline.cu",
-                              "/tmp/a:b/testinline.cu", "C:\\src\\", "C:\\src\\..");
+                              "/tmp/a:b/testinline.cu", "C:\\src\\", "C:\\src\\..",
+                              "testinline<float>.cu", "a|b.cu", "what?.cu", "k*.cu", "\"k\".cu",
+                              "tab\tname.cu", "C:\\src\\k<1>.cu", "../../../../k.cu", "src/", "..");
   INFO("program name: " << name);
   hiprtcProgram prog;
   HIPRTC_CHECK(hiprtcCreateProgram(&prog, code, name, 0, nullptr, nullptr));

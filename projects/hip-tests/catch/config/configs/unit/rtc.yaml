@@ -12,7 +12,7 @@ rtc:
   Unit_hiprtc_functional:
     <<: *level_default
     tags: [compile]
-  Unit_hiprtc_name_with_drive_letter:
+  Unit_hiprtc_name_not_a_file_name:
     <<: *level_default
     tags: [compile]
   Unit_hipStreamCaptureRtc:
@@ -63,7 +63,7 @@ rtc:
   Unit_RTC_LinkerAPI:
     <<: *level_default
     tags: [link]
-  Unit_RTC_LinkerAPI_DriveLetterNames:
+  Unit_RTC_LinkerAPI_NamesNotFileNames:
     <<: *level_default
     tags: [link]
   Unit_RTC_LinkAddFile_Negative:
