@@ -710,6 +710,17 @@ class Device : public NullDevice {
   // User enabled peer devices
   const bool isP2pEnabled() const { return (enabled_p2p_devices_.size() > 0) ? true : false; }
 
+  //! Returns true if uncached device allocations must pass HSA_AMD_MEMORY_POOL_UNCACHED_FLAG
+  //! (KFD maps them MTYPE UC) instead of relying on the extended-scope fine-grained pool alone.
+  //! - gfx120x does not support extended-scope fine-grained memory.
+  //! - gfx950: KFD maps local extended-scope fine-grained VRAM as MTYPE CC. A CC mapping of VRAM
+  //!   that a freed MTYPE RW (coarse- or fine-grained) allocation wrote with ordinary stores can
+  //!   return that old data to the owning GPU after a peer GPU's first write.
+  bool forceUncachedMtype() const {
+    return (isa().versionMajor() == 12 && isa().versionMinor() == 0) ||
+           (isa().versionMajor() == 9 && isa().versionMinor() == 5);
+  }
+
   // Update the global free memory size
   void updateFreeMemory(size_t size, bool free);
 
