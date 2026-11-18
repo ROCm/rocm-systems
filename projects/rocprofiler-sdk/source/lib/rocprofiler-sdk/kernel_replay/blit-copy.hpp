@@ -29,6 +29,8 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace rocprofiler
@@ -57,6 +59,11 @@ prepare(const hsa::Queue& queue);
 // one, a failure in prepare() is a failure to load it.
 bool
 has_code_object(const hsa::Queue& queue);
+
+// The path of the code object for a GPU such as gfx942, or empty without one. They are installed
+// in share/rocprofiler-sdk/kernel-replay beside the library's lib directory.
+std::string
+find_code_object(std::string_view gpu_name);
 
 class packet_info
 {

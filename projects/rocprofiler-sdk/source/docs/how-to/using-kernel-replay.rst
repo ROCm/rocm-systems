@@ -262,7 +262,9 @@ host memory instead, by setting ``replay_options`` during ``CONFIG`` ``PHASE_ENT
    * - ``ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DEVICE``
      - Device memory only, as much as the snapshot needs, leaving the application 5% of what is
        free (memory kept from earlier replays counts as free) for the replayed kernel's scratch.
-       This needs the SDK's copy kernels for the GPU.
+       This needs the SDK's copy kernels for the GPU. They are built for the GPUs in
+       ``GPU_TARGETS`` and ``ROCPROFILER_KERNEL_REPLAY_BLIT_DEFAULT_TARGETS`` that its compiler
+       supports, and installed in ``share/rocprofiler-sdk/kernel-replay``.
 
 With one flag, the SDK applies no limit of its own beyond that reserve, so the tool decides whether
 the application can spare the memory. The SDK frees that memory when the replay ends, including

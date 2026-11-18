@@ -22,6 +22,8 @@
 
 #include "lib/rocprofiler-sdk/kernel_replay/blit-copy.hpp"
 
+#include "lib/common/dl.hpp"
+#include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
@@ -209,17 +211,18 @@ states()
     return *value;
 }
 
+// share/rocprofiler-sdk/kernel-replay beside the lib directory of the library this code is in. The
+// function has internal linkage, so dladdr names this library rather than another copy of the SDK
+// loaded first.
 std::string
-find_code_object(const hsa::AgentCache& agent)
+code_object_directory()
 {
-    const auto filename = fmt::format("{}_kernel_replay_blit.hsaco", agent.name());
-    for(const auto* directory :
-        {ROCPROFILER_KERNEL_REPLAY_BLIT_BUILD_DIR, ROCPROFILER_KERNEL_REPLAY_BLIT_INSTALL_DIR})
-    {
-        auto path = fmt::format("{}/{}", directory, filename);
-        if(access(path.c_str(), R_OK) == 0) return path;
-    }
-    return {};
+    const auto library = common::dl::get_symbol_path(
+        {}, "code_object_directory", reinterpret_cast<const void*>(&code_object_directory), true);
+    if(!library) return {};
+    return (common::filesystem::path{*library}.parent_path().parent_path() /
+            "share/rocprofiler-sdk/kernel-replay")
+        .string();
 }
 
 hsa_status_t
@@ -265,11 +268,12 @@ initialize_state(const hsa::AgentCache& agent, kernel_state_t& state)
     auto* ext  = hsa::get_amd_ext_table();
     if(!core || !ext || !ext->hsa_amd_signal_create_fn) return HSA_STATUS_ERROR;
 
-    const auto path = find_code_object(agent);
+    const auto path = find_code_object(agent.name());
     if(path.empty())
     {
-        ROCP_ERROR << fmt::format("kernel replay blit: no code object for agent '{}'",
-                                  agent.name());
+        ROCP_ERROR << fmt::format("kernel replay blit: no code object for agent '{}' in '{}'",
+                                  agent.name(),
+                                  code_object_directory());
         return HSA_STATUS_ERROR;
     }
 
@@ -513,7 +517,18 @@ prepare(const hsa::Queue& queue)
 bool
 has_code_object(const hsa::Queue& queue)
 {
-    return !find_code_object(queue.get_agent()).empty();
+    return !find_code_object(queue.get_agent().name()).empty();
+}
+
+std::string
+find_code_object(std::string_view gpu_name)
+{
+    const auto directory = code_object_directory();
+    if(directory.empty()) return {};
+
+    auto path = fmt::format("{}/{}_kernel_replay_blit.hsaco", directory, gpu_name);
+    if(access(path.c_str(), R_OK) == 0) return path;
+    return {};
 }
 
 struct packet_info::implementation

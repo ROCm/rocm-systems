@@ -125,10 +125,15 @@ rocprofiler_add_unit_test(
         "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${ROCM_PATH}/lib:$ENV{LD_LIBRARY_PATH}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
-# The tile arithmetic the blit kernels share with the host, checked without a GPU.
+# The tile arithmetic the blit kernels share with the host, and where the SDK finds their
+# code objects, checked without a GPU.
 add_executable(kernel-replay-blit-copy-test)
 target_sources(kernel-replay-blit-copy-test PRIVATE blit_copy.cpp)
 
+string(REPLACE ";" "," kernel_replay_blit_gpu_names "${kernel_replay_blit_targets}")
+target_compile_definitions(
+    kernel-replay-blit-copy-test
+    PRIVATE KERNEL_REPLAY_BLIT_GPU_NAMES="${kernel_replay_blit_gpu_names}")
 target_link_libraries(
     kernel-replay-blit-copy-test
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
@@ -171,7 +176,7 @@ target_include_directories(kernel-replay-blit-kernels-test
                            PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../../..)
 target_compile_definitions(
     kernel-replay-blit-kernels-test
-    PRIVATE KERNEL_REPLAY_BLIT_CODE_OBJECT_DIR="${CMAKE_CURRENT_BINARY_DIR}/..")
+    PRIVATE KERNEL_REPLAY_BLIT_CODE_OBJECT_DIR="${kernel_replay_blit_dir}")
 target_link_libraries(
     kernel-replay-blit-kernels-test PRIVATE rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
                                             GTest::gtest GTest::gtest_main)
