@@ -21,11 +21,10 @@ protected:
   }
   void TearDown() override { gReshardEnableExperimental = savedExperimental; }
 
-  static ncclResult_t check(ReshardCopyAlgorithm algo, int ginType, int cudaDev = 0) {
+  static ncclResult_t check(ReshardCopyAlgorithm algo, int ginType) {
     ncclCommProperties props = NCCL_COMM_PROPERTIES_INITIALIZER;
     props.ginType = static_cast<ncclGinType_t>(ginType);
-    props.cudaDev = cudaDev;
-    return reshardCheckValidatedConfig("test", 0, algo, ncclSuccess, &props, cudaDev);
+    return reshardCheckValidatedConfig("test", 0, algo, ncclSuccess, &props);
   }
 };
 
@@ -33,11 +32,6 @@ TEST_F(ValidatedConfigTest, PackAndDirectWithProxyGinPass) {
   EXPECT_EQ(ncclSuccess, check(RESHARD_COPY_ALGO_PACK, NCCL_GIN_TYPE_PROXY));
   EXPECT_EQ(ncclSuccess, check(RESHARD_COPY_ALGO_DIRECT, NCCL_GIN_TYPE_PROXY));
   EXPECT_EQ(ncclSuccess, check(RESHARD_COPY_ALGO_PACK, NCCL_GIN_TYPE_NONE));
-}
-
-TEST_F(ValidatedConfigTest, DirectWithSeveralDevicesOnlyWarns) {
-  EXPECT_EQ(ncclSuccess, check(RESHARD_COPY_ALGO_DIRECT, NCCL_GIN_TYPE_PROXY, 0));
-  EXPECT_EQ(ncclSuccess, check(RESHARD_COPY_ALGO_DIRECT, NCCL_GIN_TYPE_PROXY, 1));
 }
 
 #if defined(__HIP_PLATFORM_AMD__)

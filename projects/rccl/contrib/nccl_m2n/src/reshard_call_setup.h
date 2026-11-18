@@ -66,11 +66,9 @@ ncclResult_t reshardComputeStagingGinCounts(int logRank, int numCtas, size_t max
 
 /* On ROCm, fail with ncclInvalidUsage on configurations that are not validated yet: the PIPE copy
  * algorithm and a GIN backend other than the proxy. NCCL_M2N_ENABLE_EXPERIMENTAL=1 runs them with a
- * warning instead. DIRECT only warns, also when one process drives several GPUs: a rank cannot tell
- * this consistently with its peers, and failing on some ranks only would hang the others. */
+ * warning instead. */
 ncclResult_t reshardCheckValidatedConfig(const char* apiName, int logRank, ReshardCopyAlgorithm copyAlgo,
-                                         ncclResult_t propsResult, const ncclCommProperties* commProps,
-                                         int cudaDev);
+                                         ncclResult_t propsResult, const ncclCommProperties* commProps);
 
 ncclResult_t reshardGetOrCreateDevComm(ncclComm_t comm, int numCtas, int ginSignalCount, int ginCounterCount,
                                        ReshardDevCommBarrierKind barrierKind, int ginContextCount, cudaStream_t stream,

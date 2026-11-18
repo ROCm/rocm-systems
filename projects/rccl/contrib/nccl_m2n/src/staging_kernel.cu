@@ -459,6 +459,24 @@ __global__ __launch_bounds__(DIRECT_TOTAL_WARPS * STAGING_WARP_SIZE, 1) void Sta
           chunks_done += (size_t)batch;
         }
       }
+
+      /* Drain after every target is posted: the counters are per target, so
+       * waiting inside the loop would delay the next target's first put. */
+      if (lane_id == 0) {
+        for (int t = my_tgt_start; t < my_tgt_end; t++) {
+          const StagingTransferPlan& plan = params->rdmaTargets[channel_id][t].plan;
+          const size_t total_chunks = (plan.totalBytes + chunkSize - 1) / chunkSize;
+          const size_t my_num_chunks = (total_chunks * (size_t)(channel_id + 1)) / (size_t)numChannels -
+                                       (total_chunks * (size_t)channel_id) / (size_t)numChannels;
+          if (my_num_chunks == 0) {
+            continue;
+          }
+          const uint64_t puts_done = local_put_counter_base[t] + (uint64_t)my_num_chunks;
+          while (gin.readCounter(params->localRdmaFc[channel_id][t].localPutCounter) < puts_done) {
+          }
+        }
+      }
+      __syncwarp();
     }
 
   } // end source side

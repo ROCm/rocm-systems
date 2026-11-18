@@ -144,14 +144,10 @@ ncclResult_t reshardComputeStagingGinCounts(int logRank, int numCtas, size_t max
 }
 
 ncclResult_t reshardCheckValidatedConfig(const char* apiName, int logRank, ReshardCopyAlgorithm copyAlgo,
-                                         ncclResult_t propsResult, const ncclCommProperties* commProps,
-                                         int cudaDev) {
+                                         ncclResult_t propsResult, const ncclCommProperties* commProps) {
 #if defined(__HIP_PLATFORM_AMD__)
   static std::atomic<bool> warnedPipe{false};
   static std::atomic<bool> warnedGin{false};
-  static std::atomic<bool> warnedDirect{false};
-  static std::atomic<bool> warnedDirectMultiGpu{false};
-  static std::atomic<uint64_t> devicesSeen{0};
   const bool experimental = gReshardEnableExperimental;
 
   if (copyAlgo == RESHARD_COPY_ALGO_PIPE) {
@@ -181,27 +177,12 @@ ncclResult_t reshardCheckValidatedConfig(const char* apiName, int logRank, Resha
                             "(NCCL_M2N_ENABLE_EXPERIMENTAL=1)", apiName, (int)commProps->ginType);
     }
   }
-
-  uint64_t seen = devicesSeen.load(std::memory_order_relaxed);
-  if (cudaDev >= 0 && cudaDev < 64) {
-    seen = devicesSeen.fetch_or(1ull << cudaDev, std::memory_order_relaxed) | (1ull << cudaDev);
-  }
-  if (copyAlgo == RESHARD_COPY_ALGO_DIRECT && !warnedDirect.exchange(true)) {
-    RESHARD_WARN(logRank, "%s: DIRECT can hang on back-to-back calls on ROCm; PACK is the validated default",
-                 apiName);
-  }
-  if (copyAlgo == RESHARD_COPY_ALGO_DIRECT && (seen & (seen - 1)) != 0 && !warnedDirectMultiGpu.exchange(true)) {
-    RESHARD_WARN(logRank, "%s: DIRECT with several GPUs in one process is not validated on ROCm yet and can run "
-                          "out of staging buffers or hang on back-to-back calls; use one process per GPU or PACK",
-                 apiName);
-  }
 #else
   (void)apiName;
   (void)logRank;
   (void)copyAlgo;
   (void)propsResult;
   (void)commProps;
-  (void)cudaDev;
 #endif
   return ncclSuccess;
 }

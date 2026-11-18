@@ -2719,8 +2719,7 @@ extern "C" ncclResult_t ncclReshard(ncclM2nHandle_t handle, ncclComm_t comm, con
   ncclCommProperties commProps = NCCL_COMM_PROPERTIES_INITIALIZER;
   ncclResult_t propsResult = ncclSuccess;
   NCCL_M2N_CHECK(reshardMatchCommCudaDevice(comm, &currentCudaDev, &commProps, &propsResult));
-  NCCL_M2N_CHECK(reshardCheckValidatedConfig("ncclReshard", world_rank, copyAlgo, propsResult, &commProps,
-                                             propsResult == ncclSuccess ? commProps.cudaDev : currentCudaDev));
+  NCCL_M2N_CHECK(reshardCheckValidatedConfig("ncclReshard", world_rank, copyAlgo, propsResult, &commProps));
   NCCL_M2N_CHECK(reshardRejectGraphCapture("ncclReshard", stream));
 
   /* Stream pool for default-stream callers. */

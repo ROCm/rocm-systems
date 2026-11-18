@@ -217,6 +217,9 @@ add_test(NAME basic_api_test_local
 add_test(NAME basic_api_pack_local
          COMMAND basic_api_test_local --api default --copy-algorithm pack
          WORKING_DIRECTORY "${NCCL_M2N_RUNTIME_DIR}")
+add_test(NAME basic_api_direct_local
+         COMMAND basic_api_test_local --algorithm direct --gtest_filter=-ThreadedDirectTest.*
+         WORKING_DIRECTORY "${NCCL_M2N_RUNTIME_DIR}")
 add_test(NAME basic_api_threaded_direct_local
          COMMAND basic_api_test_local --algorithm direct --gtest_filter=ThreadedDirectTest.*
          WORKING_DIRECTORY "${NCCL_M2N_RUNTIME_DIR}")
