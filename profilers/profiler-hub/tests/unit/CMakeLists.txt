@@ -42,6 +42,16 @@ target_compile_definitions(
     PUBLIC ROCPD_DB_PATH="${ROCPD_DB_PATH}"
 )
 
+# Same values storage_impl.cpp reports from get_storage_version(). Both come from
+# the VERSION file via project(), so a version bump does not require a test edit.
+target_compile_definitions(
+    profiler-hub_unit_tests
+    PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:PROFILER_HUB_VERSION_MAJOR=${profiler-hub_VERSION_MAJOR}>
+        $<$<COMPILE_LANGUAGE:CXX>:PROFILER_HUB_VERSION_MINOR=${profiler-hub_VERSION_MINOR}>
+        $<$<COMPILE_LANGUAGE:CXX>:PROFILER_HUB_VERSION_PATCH=${profiler-hub_VERSION_PATCH}>
+)
+
 add_dependencies(profiler-hub_unit_tests profiler-hub)
 
 target_include_directories(

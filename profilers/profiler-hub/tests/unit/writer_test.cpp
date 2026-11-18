@@ -68,9 +68,10 @@ TEST_F(writer_test, get_storage_version_returns_library_version)
     const storage_t storage{ m_db_path, m_uuid, version_t{ 3, 0, 0 } };
 
     const auto version = storage.get_storage_version();
-    EXPECT_EQ(version.major, 0);
-    EXPECT_EQ(version.minor, 2);
-    EXPECT_EQ(version.patch, 0);
+    // Macros are set from the VERSION file, the same source get_storage_version() uses.
+    EXPECT_EQ(version.major, PROFILER_HUB_VERSION_MAJOR);
+    EXPECT_EQ(version.minor, PROFILER_HUB_VERSION_MINOR);
+    EXPECT_EQ(version.patch, PROFILER_HUB_VERSION_PATCH);
 }
 
 TEST_F(writer_test, get_writer_schema_version_defaults_to_3_0_1_when_not_specified)
