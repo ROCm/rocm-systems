@@ -855,9 +855,18 @@ in the following table.
       - | Integer milliseconds. Default: ``5000``.
 
     * - | ``NCCL_IB_QP_SCHED_ENABLE``
-        | Master enable for the ``net_ib_cast`` queue-pair (QP) scheduler.
-          By default (``-1``) it is enabled when ``NCCL_NET=IB-CAST`` is set,
-          and disabled on AINIC otherwise. Also readable as
+        | Master enable for the ``net_ib_cast`` queue-pair (QP) scheduler,
+          which measures per-QP round-trip time and spreads traffic across QPs
+          accordingly. By default (``-1``) it is enabled when
+          ``NCCL_NET=IB-CAST`` is set, and disabled on AINIC otherwise,
+          including ``NCCL_NET=ROCM-IB``. It is not enabled automatically when
+          ``NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=2`` (BY_ORDER); forcing it on
+          in that case logs a warning and leaves WRR and split-data as no-ops.
+          Even when set to ``1`` it is turned off if
+          ``NCCL_IB_RESILIENCY_PORT_FAILOVER``,
+          ``NCCL_IB_RESILIENCY_PORT_RECOVERY`` or ``RCCL_IB_QP_SHARING_ENABLE``
+          is enabled -- load-balancer integration with those features is still
+          pending. Enabling it on AINIC turns off CTS offload. Also readable as
           ``RCCL_IB_QP_SCHED_ENABLE``.
       - | ``-1`` or unset: automatic behavior (default).
         | ``0``: Disable the QP scheduler.
@@ -865,8 +874,10 @@ in the following table.
 
     * - | ``NCCL_IB_QP_SCHED_LOG_INTERVAL``
         | Controls how often the ``net_ib_cast`` QP scheduler writes
-          scheduler-state log snapshots. Works only when the scheduler is
-          enabled and ``RCCL_IB_QP_SCHED_LOG_PATH`` is set.
+          scheduler-state log snapshots (per-QP min/current/max weight and
+          latency). Works only when the scheduler is enabled and
+          ``RCCL_IB_QP_SCHED_LOG_PATH`` is set; the log is written to
+          ``<path>/cast_log_<host>_<pid>``.
           Also readable as ``RCCL_IB_QP_SCHED_LOG_INTERVAL``.
       - | Integer, microseconds, ``1``–``60000000``. Default: ``1000000`` (1 s).
 
@@ -1354,14 +1365,20 @@ in the following table.
           effective if the HDP register was mapped for the connection.
       - | ``0`` (default) or ``1``.
 
-    * - | ``RCCL_GFX9_CHEAP_FENCE_OFF``
-        | Selects the memory fence that LL128 and Simple primitives use after
-          the sender GPU finishes a batch of writes. ``0`` is
-          architecture-tuned auto mode (cheap fence on for ``gfx942``/MI300 and
-          ``gfx1250``/MI450; off for ``gfx950``/MI350 and others).
-      - | ``0``: Architecture-tuned auto mode (default).
+    * - | ``RCCL_CHEAP_POST_SEND_FENCE_OFF``
+        | Selects the memory fence the sender GPU uses after finishing a batch
+          of writes to the receiver GPU. The cheap fence replaces
+          ``__threadfence_system()`` with a wait on outstanding stores, which
+          avoids an expensive L2 writeback on the generations that support it.
+          Applies to the Simple protocol; LL128 honours it only on
+          ``gfx1250`` and otherwise always uses the full fence.
+      - | ``0``: Architecture-tuned auto mode (default) -- cheap fence on for
+          ``gfx942``/MI300 and ``gfx1250``/MI450, off for ``gfx950``/MI350 and
+          everything else.
         | ``1``: Force ``__threadfence_system()``.
-        | ``2``: Force cheap fence on (including on ``gfx950``).
+        | ``2``: Force the cheap fence on, including on ``gfx950``, but only
+          when cache-bypassing load/store builtins are available.
+        | Renamed from ``RCCL_GFX9_CHEAP_FENCE_OFF``, which is no longer read.
 
     * - | ``HSA_FORCE_FINE_GRAIN_PCIE``
         | Controls an AMD ROCm/HSA runtime setting for fine-grain PCIe
