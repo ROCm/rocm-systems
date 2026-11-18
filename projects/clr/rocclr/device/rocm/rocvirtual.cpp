@@ -106,6 +106,13 @@ static constexpr hsa_barrier_and_packet_t kBarrierReleasePacket = {
 
 static constexpr uint16_t kBarrierBit = 1 << HSA_PACKET_HEADER_BARRIER;
 
+// A barrier-AND header with the barrier bit and fence scopes of the given header
+static constexpr uint16_t BarrierAndHeader(uint16_t header) {
+  constexpr uint16_t kTypeMask = ((1 << HSA_PACKET_HEADER_WIDTH_TYPE) - 1)
+                                 << HSA_PACKET_HEADER_TYPE;
+  return (header & ~kTypeMask) | (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE);
+}
+
 namespace {
 
 void CL_CALLBACK ReleasePinnedMemoryCallback(cl_event event, int32_t command_exec_status,
@@ -1017,6 +1024,8 @@ void VirtualGPU::RetiringSignalTracker::RecycleParked() {
   // submission that triggers it. A bounded number per call keeps pace with the parking, which is
   // at most kArmBatch per Reclaim too.
   const size_t num_scans = std::min(parked_signals_.size(), kArmBatch);
+  ProfilingSignal* free_signals[kArmBatch];
+  size_t num_free = 0;
   for (size_t scan = 0; scan < num_scans; ++scan) {
     ProfilingSignal* signal = parked_signals_.front();
     parked_signals_.pop_front();
@@ -1025,6 +1034,11 @@ void VirtualGPU::RetiringSignalTracker::RecycleParked() {
       continue;
     }
     ProcessSignalTiming(signal);
+    free_signals[num_free++] = signal;
+  }
+  // As in Reclaim, the arms follow the timing work and its locks
+  for (size_t free_idx = 0; free_idx < num_free; ++free_idx) {
+    ProfilingSignal* signal = free_signals[free_idx];
     StoreValue(signal, kInitSignalValueOne);
     signal->armed_ = true;
     // ActiveSignal swaps interrupt and host-memory signals in from their own pools
@@ -1075,6 +1089,10 @@ void VirtualGPU::RetiringSignalTracker::Reclaim() {
   }
   // A Timestamp still listing a signal reads its timestamps, which the next use overwrites
   CacheRetiredTiming(retired, num_retired);
+  // The arms follow all the timing work: ProcessSignalTiming takes a lock, and a locked
+  // instruction waits for every earlier non-temporal store to device memory to land
+  ProfilingSignal* arm_signals[kArmBatch];
+  size_t num_arms = 0;
   for (size_t retired_idx = 0; retired_idx < num_retired; ++retired_idx) {
     const size_t slot = retired[retired_idx].slot;
     ProfilingSignal* signal = signal_list_[slot];
@@ -1088,9 +1106,12 @@ void VirtualGPU::RetiringSignalTracker::Reclaim() {
       }
     } else {
       ProcessSignalTiming(signal);
-      StoreValue(signal, kInitSignalValueOne);
-      signal->armed_ = true;
+      arm_signals[num_arms++] = signal;
     }
+  }
+  for (size_t arm_idx = 0; arm_idx < num_arms; ++arm_idx) {
+    StoreValue(arm_signals[arm_idx], kInitSignalValueOne);
+    arm_signals[arm_idx]->armed_ = true;
   }
   // One flush publishes every arm before any of the slots is handed to a packet
   FlushStores();
@@ -3051,6 +3072,38 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
 }
 
 // ================================================================================================
+bool VirtualGPU::PlaceBarrierWaits(hsa_amd_barrier_value_packet_t& value_packet,
+                                   hsa_barrier_and_packet_t& and_packet) {
+  constexpr uint32_t kMaxBarrierDeps = 5;
+  auto wait_signals = Barriers().WaitingSignal();
+  // DEBUG_CLR_GRAPH_FAST_LAUNCH: 2 to 5 waits fit one barrier-AND with the same scopes
+  // and completion signal, instead of a nop barrier-AND and the barrier-value
+  if (DEBUG_CLR_GRAPH_FAST_LAUNCH && (wait_signals.size() >= 2) &&
+      (wait_signals.size() <= kMaxBarrierDeps)) {
+    for (uint32_t wait_idx = 0; wait_idx < wait_signals.size(); ++wait_idx) {
+      and_packet.dep_signal[wait_idx] = wait_signals[wait_idx];
+    }
+    return true;
+  }
+  if (wait_signals.size() > 0) {
+    value_packet.signal = wait_signals[0];
+    value_packet.value = kInitSignalValueOne;
+    value_packet.mask = std::numeric_limits<int64_t>::max();
+    value_packet.cond = HSA_SIGNAL_CONDITION_LT;
+    for (uint32_t wait_idx = 1; wait_idx < wait_signals.size(); ++wait_idx) {
+      const uint32_t dep_slot = (wait_idx - 1) % kMaxBarrierDeps;
+      barrier_packet_.dep_signal[dep_slot] = wait_signals[wait_idx];
+      constexpr bool kSkipSignal = true;
+      // If runtime reached the packet limit or the count limit, then flush the barrier
+      if ((dep_slot == kMaxBarrierDeps - 1) || ((wait_idx + 1) == wait_signals.size())) {
+        dispatchBarrierPacket(kNopPacketHeader, kSkipSignal);
+      }
+    }
+  }
+  return false;
+}
+
+// ================================================================================================
 void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveDepSignal,
                                             hsa_signal_t signal, hsa_signal_value_t value,
                                             hsa_signal_value_t mask, hsa_signal_condition32_t cond,
@@ -3066,39 +3119,12 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
 
   // Dependent signal and external signal cant be true at the same time
   assert((resolveDepSignal && (signal.handle != 0)) == false);
-  if (resolveDepSignal) {
-    auto wait_signals = Barriers().WaitingSignal();
-    // DEBUG_CLR_GRAPH_FAST_LAUNCH: 2 to 5 waits fit one barrier-AND with the same scopes
-    // and completion signal, instead of a nop barrier-AND and the barrier-value
-    if (DEBUG_CLR_GRAPH_FAST_LAUNCH && (wait_signals.size() >= 2) &&
-        (wait_signals.size() <= 5)) {
-      for (uint32_t i = 0; i < wait_signals.size(); ++i) {
-        barrier_packet_.dep_signal[i] = wait_signals[i];
-      }
-      constexpr uint16_t kTypeMask = ((1 << HSA_PACKET_HEADER_WIDTH_TYPE) - 1)
-                                     << HSA_PACKET_HEADER_TYPE;
-      const uint16_t header = (packetHeader & ~kTypeMask) |
-                              (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE);
-      constexpr bool kDepSignalsSet = true;
-      dispatchBarrierPacket(header, false, completionSignal, kDepSignalsSet, skipTs);
-      barrier_value_packet_.signal = hsa_signal_t{};
-      return;
-    }
-    if (wait_signals.size() > 0) {
-      barrier_value_packet_.signal = wait_signals[0];
-      barrier_value_packet_.value = kInitSignalValueOne;
-      barrier_value_packet_.mask = std::numeric_limits<int64_t>::max();
-      barrier_value_packet_.cond = HSA_SIGNAL_CONDITION_LT;
-      for (uint32_t i = 1; i < wait_signals.size(); ++i) {
-        uint32_t j = (i - 1) % 5;
-        barrier_packet_.dep_signal[j] = wait_signals[i];
-        constexpr bool kSkipSignal = true;
-        // If runtime reached the packet limit or the count limit, then flush the barrier
-        if ((j == 4) || ((i + 1) == wait_signals.size())) {
-          dispatchBarrierPacket(kNopPacketHeader, kSkipSignal);
-        }
-      }
-    }
+  if (resolveDepSignal && PlaceBarrierWaits(barrier_value_packet_, barrier_packet_)) {
+    constexpr bool kDepSignalsSet = true;
+    dispatchBarrierPacket(BarrierAndHeader(packetHeader), false, completionSignal, kDepSignalsSet,
+                          skipTs);
+    barrier_value_packet_.signal = hsa_signal_t{};
+    return;
   }
 
   setFenceDirty(true);
@@ -6275,6 +6301,73 @@ void VirtualGPU::CompleteCpuWait(amd::Command& cmd) {
 }
 
 // ================================================================================================
+ProfilingSignal* VirtualGPU::dispatchSplitEndMarker() {
+  alignas(64) hsa_amd_barrier_value_packet_t wait_value_packet{};
+  alignas(64) hsa_barrier_and_packet_t wait_and_packet{};
+  wait_value_packet.header.header = kInvalidAql;
+  wait_and_packet.header = kInvalidAql;
+  const bool waits_on_barrier_and = PlaceBarrierWaits(wait_value_packet, wait_and_packet);
+  uint16_t wait_header = waits_on_barrier_and
+                             ? BarrierAndHeader(kBarrierVendorPacketNopScopeHeader)
+                             : kBarrierVendorPacketNopScopeHeader;
+  alignas(64) hsa_barrier_and_packet_t nop_packet{};
+  nop_packet.header = kInvalidAql;
+  // Keeps its barrier bit: the interrupt signal must not complete before the waits resolve
+  const uint16_t nop_header = kNopPacketHeader;
+
+  AqlSlotReservation reservation = ReserveAqlSlots(2);
+  const uint64_t wait_index = reservation.start_slot;
+  const uint64_t nop_index = wait_index + 1;
+  OptimizeStreamOrderingBarrier(wait_header, reservation);
+  RecordAqlPacketHeader(reservation, 0, wait_header);
+  RecordAqlPacketHeader(reservation, 1, nop_header);
+  CompleteAqlSubmission(reservation);
+  setFenceDirty(true);
+
+  Barriers().ActiveSignal(kInitSignalValueOne, nullptr, true, wait_index,
+                          (wait_header & kBarrierBit) != 0);
+  ProfilingSignal* waits_resolved = Barriers().GetLastSignal();
+  const hsa_signal_t wait_completion = waits_resolved->PacketHandle(false);
+  Barriers().ActiveSignal(kInitSignalValueOne, timestamp_, true, nop_index, true);
+  ProfilingSignal* nop_signal = Barriers().GetLastSignal();
+  nop_packet.completion_signal = nop_signal->PacketHandle(BarrierTimestamps());
+  TrackQueueProgress(nop_packet.completion_signal, nop_index);
+
+  const uint32_t queue_mask = gpu_queue_->size - 1;
+  metadata_preloader_.SetCompletionEventId(waits_resolved->event_id_);
+  if (waits_on_barrier_and) {
+    wait_and_packet.completion_signal = wait_completion;
+    auto* wait_slot = &reinterpret_cast<hsa_barrier_and_packet_t*>(
+        gpu_queue_->base_address)[wait_index & queue_mask];
+    writePacketToRingBuffer(wait_slot, &wait_and_packet, wait_header, uint16_t{0},
+                            wait_index & queue_mask);
+  } else {
+    wait_value_packet.completion_signal = wait_completion;
+    auto* wait_slot = &reinterpret_cast<hsa_amd_barrier_value_packet_t*>(
+        gpu_queue_->base_address)[wait_index & queue_mask];
+    writePacketToRingBuffer(wait_slot, &wait_value_packet, wait_header,
+                            uint16_t{HSA_AMD_PACKET_TYPE_BARRIER_VALUE}, wait_index & queue_mask);
+  }
+  metadata_preloader_.SetCompletionEventId(nop_signal->event_id_);
+  auto* nop_slot =
+      &reinterpret_cast<hsa_barrier_and_packet_t*>(gpu_queue_->base_address)[nop_index & queue_mask];
+  writePacketToRingBuffer(nop_slot, &nop_packet, nop_header, uint16_t{0}, nop_index & queue_mask);
+  ringQueueDoorbell(nop_index);
+
+  if (IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) {
+    if (waits_on_barrier_and) {
+      logAqlBarrierPacket(roc_device_, gpu_queue_, wait_header, &wait_and_packet, wait_index,
+                          priority_);
+    } else {
+      logAqlBarrierValuePacket(roc_device_, gpu_queue_, wait_header, &wait_value_packet,
+                               wait_index, priority_);
+    }
+    logAqlBarrierPacket(roc_device_, gpu_queue_, nop_header, &nop_packet, nop_index, priority_);
+  }
+  return waits_resolved;
+}
+
+// ================================================================================================
 void VirtualGPU::submitAccumulate(amd::AccumulateCommand& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
   std::scoped_lock lock(execution());
@@ -6289,18 +6382,12 @@ void VirtualGPU::submitAccumulate(amd::AccumulateCommand& vcmd) {
   // Only a launch with segments on other queues has such waiters; a single-stream launch keeps
   // the single packet
   const bool split_end_marker =
-      DEBUG_CLR_GRAPH_FAST_LAUNCH && vcmd.multiStream() && settings.barrier_value_packet_ &&
+      DEBUG_CLR_GRAPH_FAST_LAUNCH && vcmd.multiStream() && settings.split_end_marker_ &&
       dev().ActiveWait() && (timestamp_ != nullptr) &&
       ((vcmd.Callback() != nullptr) || (vcmd.GetBatchHead() != nullptr)) &&
       !vcmd.CpuWaitRequested();
   if (split_end_marker) {
-    constexpr bool kSkipTs = true;
-    dispatchBarrierValuePacket(kBarrierVendorPacketNopScopeHeader, true, hsa_signal_t{0}, 0, 0,
-                               HSA_SIGNAL_CONDITION_EQ, kSkipTs);
-    ProfilingSignal* waits_resolved = Barriers().GetLastSignal();
-    // No waits left: in order after the first packet, it completes the batch with the interrupt
-    dispatchBarrierPacket(kNopPacketHeader, false);
-    AttachHwEvent(&vcmd, waits_resolved);
+    AttachHwEvent(&vcmd, dispatchSplitEndMarker());
   } else if (settings.barrier_value_packet_) {
     dispatchBarrierValuePacket(kBarrierVendorPacketNopScopeHeader, true);
   } else {
