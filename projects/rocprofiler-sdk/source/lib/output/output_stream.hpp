@@ -28,6 +28,7 @@
 #include <array>
 #include <iostream>
 #include <mutex>
+#include <optional>
 #include <ostream>
 #include <sstream>
 #include <stdexcept>
@@ -113,6 +114,12 @@ struct output_stream
 
 bool
 is_standard_stream(std::string_view name);
+
+// Returns the directory that stops get_output_filename from writing this
+// artifact, or nothing when no directory collision is found. Creates nothing;
+// actual creation and output can still fail after this check.
+std::optional<std::string>
+check_output_path(const output_config& cfg, std::string_view fname, std::string_view ext);
 
 std::string
 get_output_filename(const output_config& cfg, std::string_view fname, std::string_view ext);

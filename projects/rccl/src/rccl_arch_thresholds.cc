@@ -31,7 +31,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     64ULL*1024,          // [2] AllGather         // [2] AllGather
-    1ULL*1024*1024,      // [3] ReduceScatter -- LL ends here; LL128 starts on the next byte
+    4ULL*1024*1024,      // [3] ReduceScatter   -- LL beats LL128 to 4M at 4 ranks; nRanks x 1M below 4 ranks
     32ULL*1024*1024,     // [4] AllReduce
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
@@ -44,13 +44,13 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     128ULL*1024*1024,    // [2] AllGather       -- beats Ring at 128M on 8-64 ranks (AICOMRCCL-2876)
-    64ULL*1024*1024,     // [3] ReduceScatter   -- LL128 through 64M total
+    224ULL*1024*1024,    // [3] ReduceScatter   -- LL128 through 224M total below 8 ranks
     256ULL*1024*1024,    // [4] AllReduce       -- two-shot beats Ring to 256M (AICOMRCCL-2875); its scratch
                          //                        slot reaches 256M from 32 ranks, ~128M at 2-8, 240M at 16
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
-    1ULL*1024*1024,      // [8] AlltoAll
+    8ULL*1024*1024,      // [8] AlltoAll        -- beats Direct p2p to 8M
   },
   // ddaVmmMax: DDA VMM (fabric simple) tier ceiling per collective.
   // Messages above this fall to Ring/CE (or sym kernel for R2).
@@ -67,8 +67,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   },
   // ddaVmmMaxR2: DDA VMM cap when recv buffer is registered (R2 mode).
   // DDA is gated on !symEligible (AR: !symkRequested) on every arch, including
-  // gfx1250 fabric; R2 sum/avg never takes DDA. A non-zero entry only shortens
-  // DDA when recv is registered and that gate still passes. 0 means use ddaVmmMax.
+  // gfx1250 fabric; R2 sum takes DDA below symMinR2, on a GIN yield, and when symkWithdrawn (rccl_wrap.cc).
+  // A non-zero entry only shortens DDA when recv is registered and that gate still passes. 0 means use ddaVmmMax.
   .ddaVmmMaxR2 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
@@ -153,7 +153,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                    // [0] Broadcast      -- not used on gfx1250
     0,                    // [1] Reduce          -- not used on gfx1250
     2ULL*1024*1024,       // [2] AllGather
-    kThreshUnlimited,     // [3] ReduceScatter
+    0,                    // [3] ReduceScatter   -- symk loses 2-5x to DDA / Ring from 2M up (4 ranks)
     0,                    // [4] AllReduce
     0,                    // [5] SendRecv        -- not used on gfx1250
     0,                    // [6] Send            -- not used on gfx1250
@@ -167,7 +167,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                    // [0] Broadcast      -- not used on gfx1250
     0,                    // [1] Reduce          -- not used on gfx1250
     2ULL*1024*1024,       // [2] AllGather
-    kThreshUnlimited,     // [3] ReduceScatter
+    0,                    // [3] ReduceScatter   -- symk loses 2-5x to DDA / Ring from 2M up (4 ranks)
     0,                    // [4] AllReduce
     0,                    // [5] SendRecv        -- not used on gfx1250
     0,                    // [6] Send            -- not used on gfx1250
@@ -187,6 +187,12 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     kThreshUnlimited,     // [7] Recv            -- not used on gfx1250
     kThreshUnlimited,     // [8] AlltoAll        -- not used on gfx1250
   },
+  // symTdm*: [2] AllGather -- TDM beats DDA LL128 from 64M; eagerly CE-registered wins past 128M.
+  // Under graph capture TDM beats Ring to 4G in one tray and to 512M across trays.
+  .symTdmMinR2 = {0, 0, 64ULL*1024*1024, 0, 0, 0, 0, 0, 0},
+  .symTdmMaxR2 = {0, 0, 128ULL*1024*1024, 0, 0, 0, 0, 0, 0},
+  .symTdmMaxR2Graph = {0, 0, 4096ULL*1024*1024, 0, 0, 0, 0, 0, 0},
+  .symTdmCrossTrayMaxR2 = {0, 0, 512ULL*1024*1024, 0, 0, 0, 0, 0, 0},
   // Rank-scaled caps from the 8-64 rank H13 sweep, AICOMRCCL-1756. The
   // crossovers move with the per-rank share, so on 8+ rank comms these replace the
   // totals above (which stay in force for smaller comms).
@@ -194,7 +200,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     16ULL*1024,          // [2] AllGather       -- LL beats LL128 to 128K/256K/512K/1M at 8/16/32/64
-    256ULL*1024,         // [3] ReduceScatter   -- LL past 2M/4M/8M/16M at 8/16/32/64 trails LL128 up to 2x
+    1ULL*1024*1024,      // [3] ReduceScatter   -- nRanks x 1M from 8 ranks; LL beats LL128 to 8M/16M at 8/16
     1ULL*1024*1024,      // [4] AllReduce       -- LL two-shot beats LL128 1.4-1.9x to 8M/16M/32M/64M
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
@@ -205,7 +211,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     16ULL*1024*1024,     // [2] AllGather       -- 128M at 8 ranks, 256M (clipped) from 16
-    2ULL*1024*1024,      // [3] ReduceScatter   -- nRanks x 2M from 8 ranks
+    15ULL*512*1024,      // [3] ReduceScatter   -- nRanks x 7.5M from 8 ranks: one 1920B slice per warp at 256 blocks
     0,                   // [4] AllReduce       -- ddaLL128Max total
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
@@ -229,6 +235,12 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ddaArVmmFirstMinRanks = 32,
   .ddaArVmmFirstMinBytes = 2ULL*1024*1024,
   .ddaArVmmFirstMaxPerRank = 512ULL*1024,
+  // Registered sum AllReduce past symMinR2: DDA beats Ring in capture to max(32M, n x 2M)
+  // and CE-registered eager on whole 512K-1M shards.
+  .ddaArRegCaptureMinBytes = 32ULL*1024*1024,
+  .ddaArRegCapturePerRankBytes = 2ULL*1024*1024,
+  .ddaArRegEagerMinShardBytes = 512ULL*1024,
+  .ddaArRegEagerMaxShardBytes = 1ULL*1024*1024,
   // VMM peaks at 128 / 128 / 64 / 32 blocks on 8 / 16 / 32 / 64 ranks.
   .ddaVmmBlockBudget = 2048,
   .ddaVmmMinBlocks = 32,
@@ -247,6 +259,9 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   // CE-Scratch trails the DDA / Ring / Direct kernels it displaces between the DDA
   // ceiling and the scratch size (nRanks x 64 MiB) (AICOMRCCL-2876).
   .forceCeScratch = false,
+  // Zero: keep tuning_model_11's per-rank broadcast ranges.
+  .bcRingLLMaxBytes = 0,
+  .bcRingLL128MaxBytes = 0,
 };
 
 // gfx1250 in DPX mode (each GPU split into two partitions), picked by
@@ -269,7 +284,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
-    2ULL*1024*1024,      // [8] AlltoAll        -- LL beats Direct 1.2-4.3x to 2M at 8/16/32 (DPX)
+    128ULL*1024,         // [8] AlltoAll        -- LL128 takes over from 256K (DPX)
   },
   // ddaLL128Max: DDA LL128 tier ceiling per collective.
   // RCCL_PARAM(DdaLL128, ...) defaults to 1 (enabled); set RCCL_DDA_LL128=0 to disable.
@@ -284,7 +299,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
-    1ULL*1024*1024,      // [8] AlltoAll
+    16ULL*1024*1024,     // [8] AlltoAll        -- LL128 above the 128K LL ceiling, DDA VMM above 16M (DPX)
   },
   // ddaVmmMax: DDA VMM (fabric simple) tier ceiling per collective.
   // Messages above this fall to Ring/CE (or sym kernel for R2).
@@ -298,12 +313,12 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
-    0,                   // [8] AlltoAll        -- 0 = disabled
+    256ULL*1024*1024,    // [8] AlltoAll        -- 256MB
   },
   // ddaVmmMaxR2: DDA VMM cap when recv buffer is registered (R2 mode).
   // DDA is gated on !symEligible (AR: !symkRequested) on every arch, including
-  // gfx1250 fabric; R2 sum/avg never takes DDA. A non-zero entry only shortens
-  // DDA when recv is registered and that gate still passes. 0 means use ddaVmmMax.
+  // gfx1250 fabric; R2 sum takes DDA below symMinR2, on a GIN yield, and when symkWithdrawn (rccl_wrap.cc).
+  // A non-zero entry only shortens DDA when recv is registered and that gate still passes. 0 means use ddaVmmMax.
   .ddaVmmMaxR2 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
@@ -455,10 +470,27 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   .ddaArVmmFirstMinRanks = 32,
   .ddaArVmmFirstMinBytes = 2ULL*1024*1024,
   .ddaArVmmFirstMaxPerRank = 256ULL*1024,
+  // Registered sum AllReduce re-route to DDA: not measured on DPX, so it stays off.
+  .ddaArRegCaptureMinBytes = 0,
+  .ddaArRegCapturePerRankBytes = 0,
+  .ddaArRegEagerMinShardBytes = 0,
+  .ddaArRegEagerMaxShardBytes = 0,
   // VMM peaks at 128 / 128 / 64 / 32 blocks on 8 / 16 / 32 / 64 ranks.
   .ddaVmmBlockBudget = 2048,
   .ddaVmmMinBlocks = 32,
   .ddaVmmMaxBlocks = 128,
+  // AllGather LL128 block size and block cap (DPX).
+  .ddaAgLL128Threads = 256,
+  .ddaAgLL128ThreadsMinBytes = 4ULL*1024*1024,
+  .ddaAgLL128ThreadsMaxBytes = 32ULL*1024*1024,
+  .ddaAgLL128MaxBlocks = 75,
+  .ddaAgLL128MaxBlocksMinBytes = 1ULL*1024*1024,
+  .ddaAgLL128MaxBlocksMaxBytes = 32ULL*1024*1024,
+  // AllToAll LL128 block cap from 256 KiB to 16 MiB. Rounded to a multiple of the peer count:
+  // 70 / 60 / 62 / 63 blocks at 8 / 16 / 32 / 64 ranks (DPX).
+  .ddaA2aLL128MaxBlocks = 72,
+  .ddaA2aLL128MaxBlocksMinBytes = 256ULL*1024,
+  .ddaA2aLL128MaxBlocksMaxBytes = 16ULL*1024*1024,
   // Ring / Tree crossovers, same sweep (AllReduce LL128: AICOMRCCL-2874/2875).
   .arRingLL128MaxPerRank = 16ULL*1024*1024,       // Ring Simple beats LL128 1.1-1.3x from 256M/512M/1G
                                                   // at 8/16/32 (DPX)
@@ -478,6 +510,9 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   // CE-Scratch trails the DDA / Ring / Direct kernels it displaces between the DDA
   // ceiling and the scratch size (nRanks x 64 MiB) (AICOMRCCL-2876).
   .forceCeScratch = false,
+  // Total message bytes at every node count. See rcclArchThresholds.
+  .bcRingLLMaxBytes = 16ULL*1024,
+  .bcRingLL128MaxBytes = 512ULL*1024*1024,
 };
 
 // gfx950: DDA-IPC cap is 64 MiB for AG, 128 MiB for AR/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
@@ -628,6 +663,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
     0,                    // [8] AlltoAll        -- not used
   },
   .forceCeScratch = true,
+  .bcRingLLMaxBytes = 0,
+  .bcRingLL128MaxBytes = 0,
 };
 
 // gfx942: DDA-IPC cap is 8 MiB for AR/AG/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
@@ -778,6 +815,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx942 = {
     0,                    // [8] AlltoAll        -- not used
   },
   .forceCeScratch = true,
+  .bcRingLLMaxBytes = 0,
+  .bcRingLL128MaxBytes = 0,
 };
 
 bool rcclWindowFits(size_t totalBytes, size_t minBytes, size_t maxBytes) {

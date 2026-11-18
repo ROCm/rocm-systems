@@ -1,0 +1,2 @@
+GRBM_GUI_ACTIVE_PER_XCD:
+  formula: GRBM_GUI_ACTIVE / $num_xcd

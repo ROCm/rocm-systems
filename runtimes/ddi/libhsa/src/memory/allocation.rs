@@ -47,9 +47,12 @@ pub(crate) unsafe fn memory_pool_allocate(
             };
             let cpu_pool_index = runtime.decode_cpu_pool(pool).map(|(index, _)| index);
             let (device_index, kind) = if let Some(cpu_index) = cpu_pool_index {
+                let Some(lifetime) = runtime.session().map(Session::driver_context_lifetime) else {
+                    return ERROR;
+                };
                 (
                     runtime.gpu_for_cpu(cpu_index),
-                    cpu_pool_memory_kind(pool, runtime.lifetime, flags),
+                    cpu_pool_memory_kind(pool, lifetime, flags),
                 )
             } else if let Some((index, pool_kind)) = runtime.decode_gpu_pool(pool) {
                 if pool_kind == GpuPoolKind::Group {
@@ -103,10 +106,11 @@ pub(crate) unsafe fn memory_pool_allocate(
                 DeviceAccess::READ | DeviceAccess::WRITE
             };
             let uncached = flags & ALLOC_UNCACHED != 0 || matches!(kind, MemoryKind::System);
-            let in_flight = match InFlightGeneration::enter(generation, &runtime.inflight) {
-                Ok(in_flight) => in_flight,
-                Err(status) => return status,
-            };
+            let in_flight =
+                match InFlightGeneration::enter(generation, &runtime.inflight, &runtime.health) {
+                    Ok(in_flight) => in_flight,
+                    Err(status) => return status,
+                };
             (
                 runtime.gpus[device_index].device.clone(),
                 kind,

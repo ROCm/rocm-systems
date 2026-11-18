@@ -1,4 +1,4 @@
-# rccl-UnitTestsMicro — shared/ctest schema.
+# Root binaries without their own yaml — shared/ctest schema.
 # Host-only micro-tests (no GPU, no librccl/HIP runtime); build in Release and Debug.
 # RCCL does not support Windows: exclude_windows matches all tests so generated suites are empty on Windows.
 #
@@ -12,81 +12,8 @@ test_categories:
   quick: &micro_quick
     description: "Smoke — host-only micro-tests, sub-second."
     # A trailing '.*' anchors the end of the suite name. Dropping the dot widens instead
-    # ("Devcomm*" matches all five Devcomm suites).
+    # ("Group*" matches all eight Group* suites).
     test_patterns:
-      # transport/p2p.cc
-      - "P2pMicrotest.*"
-      - "P2pMicrotestIsolated.*"
-      - "P2pCanConnectMicrotest.*"
-      - "P2pCanConnectMicrotestIsolated.*"
-      - "P2pSetupMicrotest.*"
-      - "P2pFreeMicrotest.*"
-      - "P2pShareableBufferMicrotest.*"
-      - "P2pRegisterFamilyMicrotest.*"
-      - "P2pMultiSegmentMicrotest.*"
-      - "P2pProxyRegisterMicrotest.*"
-      - "P2pProxyDeregisterMicrotest.*"
-      - "P2pProxyLifecycleMicrotest.*"
-      - "P2pProxyCeMicrotestIsolated.*"
-      - "GuardOperands/P2pAllocateSkipMarkExport.*"
-      - "MappingStages/P2pImportMapStageFails.*"
-      - "FreshRegistrationMicrotest.*"
-      - "FreshRegistrationLegacyIpcSucceedsFixture.*"
-      - "ConnStepAcquireMicrotest.*"
-      # ras/ras.cc
-      - "RasMicrotest.*"
-      # ras/diagnostics_checks_common.cc
-      - "RasDiagnosticsCommonMicrotest.*"
-      # ras/collectives.cc
-      - "RasCollectivesMicrotest.*"
-      # ras/diagnostics.cc
-      - "RasDiagnosticsMicrotest.*"
-      # ras/rasnet.cc
-      - "RasNetMicrotest.*"
-      # ras/diagnostics_gpu.cc
-      - "RasDiagnosticsGpuMicrotest.*"
-      # ras/peers.cc
-      - "RasPeersMicrotest.*"
-      # ras/diagnostics_env.cc
-      - "RasDiagnosticsEnvMicrotest.*"
-      # ras/client.cc
-      - "RasClientMicrotest.*"
-      # ras/client_support.cc
-      - "RasClientSupportMicrotest.*"
-      - "Commands/RasClientSupportEnqueueFailureMicrotest.*"
-      # ras/ras_param.cc
-      - "RasParamMicrotest.*"
-      # rma/rma_proxy_launch.cc
-      - "RmaProxyBatchMemOpTest.*"
-      - "RmaProxyDescriptorTest.*"
-      - "RmaProxyLaunchTest.*"
-      - "RmaProxyQueueTest.*"
-      - "RmaProxyParamsTest.*"
-      - "RmaProxyReclaimTest.*"
-      # rma/rma_proxy_progress.cc
-      - "RmaProxyProgressTest.*"
-      # rma/rma_ce.cc
-      - "RmaCeLaunchTest.*"
-      - "RmaCeInitTest.*"
-      - "RmaCeFinalizeTest.*"
-      - "RmaCePutLaunchTest.*"
-      - "RmaCeNonPersistTest.*"
-      - "RmaCePersistTest.*"
-      - "RmaCeWaitLaunchTest.*"
-      # rma/rma.cc
-      - "RmaWaitSignalTest.*"
-      - "RmaPutTest.*"
-      - "RmaLaunchTest.*"
-      - "RmaScheduleTest.*"
-      - "RmaDebugLoggingTest.*"
-      - "RmaProxyGatingTest.*"
-      - "RmaProxyReadyTest.*"
-      # tuning/tuning_general.cc
-      - "TuningGeneralMicrotest.*"
-      # tuning/tuning.cc
-      - "TuningMicrotest.*"
-      # plugin/tuner/csv_tuner.cc
-      - "CsvTunerMicrotest.*"
       # commDump.cc
       - "CommDumpMicrotest.*"
       # include/timer.h
@@ -95,8 +22,6 @@ test_categories:
       - "ParamUtilsMicrotest.*"
       # include/param/parser_{default,enum,bitset,list}.h
       - "ParamParsersMicrotest.*"
-      # param/param_registry.cc
-      - "ParamRegistryMicrotest.*"
       # group.cc
       - "GroupEndInternalTest.*"
       - "GroupCommHeadChainTest.*"
@@ -110,31 +35,16 @@ test_categories:
       - "MgmtTaskJobFuncTest.*"
       - "GroupRegisterSymmetricCeInitTest.*"
       - "GroupRegisterSymmetricTest.*"
+      - "GroupRegisterSymmetricDevCommTest.*"
       - "GroupCleanupTest.*"
       - "AsyncJobLaunchDirectTest.*"
       # rccl_wrap.cc
       - "WrapMicrotest.*"
       - "WrapMicrotestIsolated.*"
-      # misc/gdr_probe.cc
-      - "GdrProbeTest.*"
-      # misc/ionicdvsymbols.cc, misc/mlx5dvsymbols.cc
-      - "DvSymbolsTestIsolated.*"
-      # ce_coll.cc (rccl-UnitTestsMicroCe)
-      - "CeCollMicrotest.*"
+      # ce_coll.cc (rccl-UnitTestsMicroCeColl)
+      - "CeColl*"
+      - "CeInit*"
       - "LaunchPaths/CeAlltoAllvSyncMicrotest.*"
-      # graph/rccl_graph_gen.cc
-      - "GraphGenPermuteTest.*"
-      - "GraphGenIsPrimeTest.*"
-      - "NodeCounts/GraphGenWaleckiTest.*"
-      - "EvenNodeCounts/GraphGenWaleckiEvenTest.*"
-      - "GraphGenWaleckiGuardTest.*"
-      - "Tables/GraphGenFixedRingTableTest.*"
-      - "PrimeNodeCounts/GraphGenPrimeRingTest.*"
-      - "GraphGenPrimeRingGuardTest.*"
-      - "GraphGenGreedyTest.*"
-      - "GraphGenGenerateRingsTest.*"
-      - "Constructions/GraphGenDispatchTest.*"
-      - "GraphGenCutIndicesTest.*"
       # dev_runtime.cc
       - "Alloc*"
       - "Comm*"
@@ -147,6 +57,8 @@ test_categories:
       - "Win*"
       # test/common/ProcessIsolatedTestRunner.cpp
       - "ProcessIsolatedRunnerMicrotest.*"
+      # test/host/host_test_dispatch.cc (rccl-UnitTestsMicroHostTestDispatch)
+      - "HostDispatch*"
     exclude_windows:
       - "*"
     labels:

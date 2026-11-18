@@ -13,8 +13,12 @@
 #include "debug.h"
 #include "algorithms/dda/dda_init_detail.h"
 #include "algorithms/dda/ipc/ipc_mem_handler.h"
+#include "bootstrap.h"
 
 #include <cuda_runtime.h>
+
+#include <algorithm>
+#include <vector>
 
 using nccl_dda_detail::DdaIpcBarrierState;
 using nccl_dda_detail::ddaMaxNBlocksForScratch;
@@ -29,10 +33,21 @@ using nccl_dda_detail::kDdaNranks;
     } \
   } while (0)
 
-ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
+namespace {
+
+bool ddaIpcCommEligible(const ncclComm* comm) {
   if (comm == nullptr) {
-    return ncclSuccess;
+    return false;
   }
+  const bool ddaArchSupported =
+    comm->archName != nullptr && (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950"));
+  return comm->nRanks == kDdaNranks && comm->nNodes == 1 && comm->bootstrap != nullptr && !comm->directMode &&
+         !comm->MNNVL && ddaArchSupported;
+}
+
+} // namespace
+
+ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   // Skip DDA if:
   // - nRanks is not exactly kDdaNranks (currently hardcoded to 8)
   // - multi-node runs
@@ -44,10 +59,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   //   scratch/barrier here is not necessary. On gfx12xx (RDNA4) the
   //   uncached-memory IPC export fails (hipIpcGetMemHandle -> hipErrorInvalidValue),
   //   which aborts comm init entirely. Gate init to match dispatch.
-  const bool ddaArchSupported =
-    comm->archName != nullptr && (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950"));
-  if (comm->nRanks != kDdaNranks || comm->nNodes != 1 || comm->bootstrap == nullptr || comm->directMode ||
-      comm->MNNVL || !ddaArchSupported) {
+  if (!ddaIpcCommEligible(comm)) {
     return ncclSuccess;
   }
 
@@ -163,37 +175,102 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   const int nBlocksMax = ddaMaxNBlocksForScratch();
   auto barrierPair = dda::common::IpcGpuBarrier::mallocAndInit(kDdaNranks, nBlocksMax, comm->rank, comm->bootstrap,
                                                                dda::common::DdaKernelParams{comm->abortFlagDev});
+  // From here on every rank reaches the ready allgather below, so a local failure cannot leave peers on DDA.
+  DdaIpcBarrierState* barrierState = nullptr;
   if (!barrierPair.first) {
-    free(comm->ddaPeerPtrsHost);
-    comm->ddaPeerPtrsHost = nullptr;
-    CUDACHECKIGNORE(cudaFree(peerDev));
-    delete handler;
-    CUDACHECKIGNORE(cudaFree(scratch));
     WARN("ncclDdaIpcCommInit: IpcGpuBarrier::mallocAndInit failed");
-    return ncclSuccess;
+  } else if ((barrierState = new (std::nothrow) DdaIpcBarrierState()) == nullptr) {
+    WARN("ncclDdaIpcCommInit: OOM allocating DdaIpcBarrierState");
+  } else {
+    barrierState->resources = std::move(barrierPair.first);
+    barrierState->barrierHost = barrierPair.second;
   }
 
-  auto* barrierState = new (std::nothrow) DdaIpcBarrierState();
-  if (barrierState == nullptr) {
+  // LL epoch cells (DDA broadcast LL); optional, a failure only disables that tier.
+  // Sized for the CU-derived cap so the Broadcast grid is not limited by the cells.
+  const size_t epochLen = nccl_dda_detail::ddaLLEpochCount(
+    kDdaNranks, nccl_dda_detail::ddaFabricMaxNBlocksForScratch(comm->cuCount, nullptr));
+  uint32_t* epochDev = nullptr;
+  if (barrierState != nullptr && (cudaMalloc(&epochDev, epochLen * sizeof(uint32_t)) != cudaSuccess ||
+                                  cudaMemset(epochDev, 0, epochLen * sizeof(uint32_t)) != cudaSuccess)) {
+    (void)cudaGetLastError(); // clear the sticky error
+    CUDACHECKIGNORE(cudaFree(epochDev));
+    epochDev = nullptr;
+  }
+
+  // Rank-uniform outcome, else ranks pick different backends and hang. 0: no DDA IPC, 1: no LL epoch cells, 2: all.
+  int ready = barrierState == nullptr ? 0 : (epochDev == nullptr ? 1 : 2);
+  std::vector<int> allReady(kDdaNranks, 0);
+  allReady[comm->rank] = ready;
+  if (bootstrapAllGather(comm->bootstrap, allReady.data(), sizeof(int)) != ncclSuccess) {
+    ready = 0;
+  } else {
+    ready = *std::min_element(allReady.begin(), allReady.end());
+  }
+  if (ready < 2 && epochDev != nullptr) {
+    CUDACHECKIGNORE(cudaFree(epochDev));
+    epochDev = nullptr;
+  }
+  if (ready == 0) {
+    delete barrierState;
     barrierPair.first.reset();
     free(comm->ddaPeerPtrsHost);
     comm->ddaPeerPtrsHost = nullptr;
     CUDACHECKIGNORE(cudaFree(peerDev));
     delete handler;
     CUDACHECKIGNORE(cudaFree(scratch));
-    WARN("ncclDdaIpcCommInit: OOM allocating DdaIpcBarrierState");
+    ATTN("DDA IPC setup failed on a rank; skipping the DDA IPC path");
     return ncclSuccess;
   }
-  barrierState->resources = std::move(barrierPair.first);
-  barrierState->barrierHost = barrierPair.second;
+  if (ready == 1) {
+    ATTN("LL epoch cells unavailable on a rank; DDA Broadcast disabled");
+  }
 
   comm->ddaIpcMemHandler = handler;
   comm->ddaScratch = scratch;
   comm->ddaScratchBytes = bytes;
   comm->ddaPeerPtrsDev = peerDev;
   comm->ddaIpcBarrierState = barrierState;
+  comm->ddaLLEpochDev = epochDev;
+  comm->ddaLLEpochLen = epochDev != nullptr ? (int)epochLen : 0;
   INFO(NCCL_INIT, "ncclDdaIpcCommInit: scratch %zu bytes, IpcGpuBarrier nBlocks=%d, peer IPC table on device", bytes,
        nBlocksMax);
+  return ncclSuccess;
+}
+
+ncclResult_t ncclDdaIpcCommClosePeerMappings(ncclComm* comm) {
+  if (comm == nullptr) {
+    return ncclSuccess;
+  }
+
+  auto* barrierState = comm->ddaIpcBarrierState;
+  const bool hasBarrierMappings = barrierState != nullptr && barrierState->resources != nullptr &&
+                                  barrierState->resources->ipcMemHandler != nullptr;
+  if ((hasBarrierMappings || comm->ddaIpcMemHandler != nullptr) && comm->doneEvent != nullptr) {
+    // DDA kernels and CE-scratch copies run on the user stream, which the
+    // hostStream/deviceStream syncs in commDestroySync do not cover. doneEvent
+    // is recorded after every kernel and CE launch, so waiting on it keeps
+    // in-flight work off unmapped peers.
+    cudaError_t syncErr = cudaEventSynchronize(comm->doneEvent);
+    if (syncErr != cudaSuccess) {
+      WARN("ncclDdaIpcCommClosePeerMappings: doneEvent sync failed (%s); continuing cleanup",
+           cudaGetErrorString(syncErr));
+    }
+  }
+  if (hasBarrierMappings) {
+    ncclResult_t closeResult = barrierState->resources->ipcMemHandler->closePeerMappings();
+    if (closeResult != ncclSuccess) {
+      WARN("ncclDdaIpcCommClosePeerMappings: barrier peer mapping close failed (%d); continuing cleanup",
+           closeResult);
+    }
+  }
+  if (comm->ddaIpcMemHandler != nullptr) {
+    ncclResult_t closeResult = comm->ddaIpcMemHandler->closePeerMappings();
+    if (closeResult != ncclSuccess) {
+      WARN("ncclDdaIpcCommClosePeerMappings: scratch peer mapping close failed (%d); continuing cleanup",
+           closeResult);
+    }
+  }
   return ncclSuccess;
 }
 
@@ -201,14 +278,25 @@ ncclResult_t ncclDdaIpcCommFini(ncclComm* comm) {
   if (comm == nullptr) {
     return ncclSuccess;
   }
+
+  // commFree must remain non-collective. Destroy and abort close mappings in
+  // commDestroySync and revoke closes them in commReclaim, before the serial
+  // commFree loop; this idempotent call is the local backstop for init-failure
+  // and other direct commFree paths.
+  ncclResult_t closeResult = ncclSuccess;
+  NCCLCHECKIGNORE(ncclDdaIpcCommClosePeerMappings(comm), closeResult);
+
   if (comm->ddaIpcBarrierState != nullptr) {
-    delete static_cast<DdaIpcBarrierState*>(comm->ddaIpcBarrierState);
+    delete comm->ddaIpcBarrierState;
     comm->ddaIpcBarrierState = nullptr;
   }
   CUDACHECKIGNORE(cudaFree(comm->ddaPeerPtrsDev));
   comm->ddaPeerPtrsDev = nullptr;
   free(comm->ddaPeerPtrsHost);
   comm->ddaPeerPtrsHost = nullptr;
+  CUDACHECKIGNORE(cudaFree(comm->ddaLLEpochDev));
+  comm->ddaLLEpochDev = nullptr;
+  comm->ddaLLEpochLen = 0;
   if (comm->ddaIpcMemHandler != nullptr) {
     delete comm->ddaIpcMemHandler;
     comm->ddaIpcMemHandler = nullptr;

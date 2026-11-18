@@ -77,6 +77,7 @@
 #include <rocprofiler-sdk/ompt.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/version.h>
+#include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 #include <rocprofiler-sdk/cxx/utility.hpp>
 
 #include <fmt/format.h>
@@ -368,6 +369,7 @@ struct client_library
     rocprofiler_client_id_t                     internal_client_id      = {};
     rocprofiler_client_id_t                     mutable_client_id       = {};
     bool                                        attached                = false;
+    bool                                        configured_by_attach    = false;
 
     std::string_view get_name() const
     {
@@ -442,12 +444,27 @@ emplace_client(Tp&                                 data,
     return client;
 }
 
+// set when a ROCP_TOOL_LIBRARIES library could not be loaded. It is never reset: the clients are
+// found once per process (get_clients) and rocprofiler-register requires the same tool library on
+// every attach, so a later attach cannot load a different set of libraries.
+bool&
+get_tool_library_load_failed()
+{
+    static auto _v = false;
+    return _v;
+}
+
 client_library_vec_t
 find_clients()
 {
     auto data = client_library_vec_t{};
 
-    auto is_unique_configure_func = [&data](auto* _cfg_func) {
+    // configure functions of ROCP_TOOL_LIBRARIES libraries which are not used because another
+    // library in the list could not be loaded
+    auto rejected_configure_funcs = std::unordered_set<rocprofiler_configure_func_t>{};
+
+    auto is_unique_configure_func = [&data, &rejected_configure_funcs](auto* _cfg_func) {
+        if(rejected_configure_funcs.count(_cfg_func) > 0) return false;
         for(const auto& itr : data)
         {
             if(itr && itr->configure_func && itr->configure_func == _cfg_func) return false;
@@ -495,30 +512,8 @@ find_clients()
             return std::vector<std::string>{};
         }
 
-        auto       val       = common::get_env("ROCP_TOOL_LIBRARIES", std::string{});
-        auto       val_arr   = std::vector<std::string>{};
-        size_t     pos       = 0;
-        const auto delimiter = std::string_view{":"};
-        auto       token     = std::string{};
-
-        if(val.empty())
-        {
-            // do nothing
-        }
-        else if(val.find(delimiter) == std::string::npos)
-        {
-            val_arr.emplace_back(val);
-        }
-        else
-        {
-            while((pos = val.find(delimiter)) != std::string::npos)
-            {
-                token = val.substr(0, pos);
-                if(!token.empty()) val_arr.emplace_back(token);
-                val.erase(0, pos + delimiter.length());
-            }
-        }
-        return val_arr;
+        return rocprofiler::sdk::parse::tokenize(
+            common::get_env("ROCP_TOOL_LIBRARIES", std::string{}), ":");
     };
 
     auto env = get_env_libs();
@@ -528,6 +523,9 @@ find_clients()
 
     if(!env.empty())
     {
+        // ROCP_TOOL_LIBRARIES libraries which were loaded
+        auto env_handles = std::vector<std::pair<std::string, void*>>{};
+
         for(const auto& itr : env)
         {
             ROCP_INFO << "[ROCP_TOOL_LIBRARIES] searching " << itr << " for rocprofiler_configure";
@@ -560,9 +558,35 @@ find_clients()
 
             if(!handle)
             {
-                ROCP_FATAL << "[ROCP_TOOL_LIBRARIES] error dlopening '" << itr << "'";
+                const auto* _err = dlerror();
+                ROCP_ERROR << "[ROCP_TOOL_LIBRARIES] error dlopening '" << itr
+                           << "': " << ((_err) ? _err : "unknown error");
+                get_tool_library_load_failed() = true;
+                continue;
             }
 
+            env_handles.emplace_back(itr, handle);
+        }
+
+        // A library which could not be loaded fails the whole list: none of the libraries are
+        // used as tools, but the application continues
+        if(get_tool_library_load_failed())
+        {
+            ROCP_ERROR << "[ROCP_TOOL_LIBRARIES] no tool library in '"
+                       << common::get_env("ROCP_TOOL_LIBRARIES", std::string{})
+                       << "' will be used because at least one could not be loaded";
+
+            for(const auto& [itr, handle] : env_handles)
+            {
+                if(auto _sym = rocprofiler_configure_dlsym(handle))
+                    rejected_configure_funcs.emplace(_sym);
+            }
+            env_handles.clear();
+        }
+
+        for(const auto& [itr, env_handle] : env_handles)
+        {
+            auto* handle = env_handle;
             for(const auto& ditr : data)
             {
                 if(ditr->dlhandle && ditr->dlhandle == handle)
@@ -750,6 +774,12 @@ invoke_client_configure(std::optional<client_library>& itr)
     {
         itr->configure_result = new rocprofiler_tool_configure_result_t{*_result};
 
+        // rocprofiler-register sets ROCPROFILER_REGISTER_TOOL_ATTACHED before it propagates the
+        // API tables during an attach, so a client configured while it is set was loaded by that
+        // attach. A client which declined configuration was not attached.
+        itr->configured_by_attach =
+            common::get_env_optional("ROCPROFILER_REGISTER_TOOL_ATTACHED").has_value();
+
         if(itr->configure_attach_func)
         {
             auto* _attach_result =
@@ -908,17 +938,39 @@ invoke_client_attaches()
     ROCP_INFO << "Calling tool_attach for all registered clients. # of clients: "
               << get_num_clients();
     if(!get_clients()) return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
-    auto ret = ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+    auto       ret = ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
     const bool was_attached =
         get_attach_status() && get_attach_status()->is_attached.load(std::memory_order_acquire);
     std::vector<client_library*> attempted;
+    bool                         invoked_attaches = false;
     for(auto& itr : *get_clients())
     {
-        if(!itr || !itr->configure_attach_result || !itr->configure_attach_result->tool_attach)
+        if(!itr) continue;
+        if(!itr->configure_attach_result || !itr->configure_attach_result->tool_attach)
+        {
+            if(itr->configured_by_attach)
+            {
+                // A tool configured by this attachment can succeed once without attach callbacks.
+                ROCP_WARNING << fmt::format(
+                    "rocprofiler-sdk client '{}' does not implement tool_attach. It was configured "
+                    "when it was loaded by this attach, but it does not support detach or reattach",
+                    itr->get_name());
+                itr->configured_by_attach = false;
+                ret                       = ROCPROFILER_STATUS_SUCCESS;
+            }
+            else
+            {
+                ROCP_WARNING << fmt::format(
+                    "rocprofiler-sdk client '{}' does not implement tool_attach and does not "
+                    "support attach",
+                    itr->get_name());
+            }
             continue;
+        }
         if(itr->attached)
         {
-            ret = ROCPROFILER_STATUS_SUCCESS;
+            ret              = ROCPROFILER_STATUS_SUCCESS;
+            invoked_attaches = true;
             continue;
         }
         auto contexts = context::get_client_contexts(itr->internal_client_id);
@@ -945,10 +997,11 @@ invoke_client_attaches()
                 get_attach_status()->is_attached.store(was_attached, std::memory_order_release);
             return ROCPROFILER_STATUS_ERROR;
         }
-        itr->attached = true;
-        ret           = ROCPROFILER_STATUS_SUCCESS;
+        itr->attached    = true;
+        invoked_attaches = true;
+        ret              = ROCPROFILER_STATUS_SUCCESS;
     }
-    if(ret == ROCPROFILER_STATUS_SUCCESS && get_attach_status())
+    if(invoked_attaches && get_attach_status())
         get_attach_status()->is_attached.store(true, std::memory_order_release);
     return ret;
 }
@@ -961,7 +1014,16 @@ invoke_client_detaches()
     auto ret = ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
     for(auto& itr : *get_clients())
     {
-        if(!itr || !itr->attached) continue;
+        if(!itr) continue;
+        if(!itr->configure_attach_result || !itr->configure_attach_result->tool_detach)
+        {
+            ROCP_WARNING << fmt::format(
+                "rocprofiler-sdk client '{}' does not implement tool_detach and does not "
+                "support detach. It remains active",
+                itr->get_name());
+            continue;
+        }
+        if(!itr->attached) continue;
         auto status = detach_client(*itr);
         if(status != ROCPROFILER_STATUS_SUCCESS || ret == ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED)
             ret = status;
@@ -1172,25 +1234,25 @@ finalize()
     if(get_fini_status() > 0) __gcov_dump();
 #endif
 
-    if(get_fini_status() != 0)
+    if(get_fini_status() > 0)
     {
         ROCP_INFO << "ignoring finalization request (value=" << get_fini_status() << ")";
         return;
     }
 
-    static auto _sync = std::atomic_flag{};
-    if(_sync.test_and_set())
+    static thread_local bool _finalizing = false;
+    if(_finalizing)
     {
-        ROCP_INFO << "ignoring finalization request [already finalized] (value="
-                  << get_fini_status() << ")";
+        ROCP_INFO << "ignoring re-entrant finalization request (value=" << get_fini_status() << ")";
         return;
     }
-    // above returns true for all invocations after the first one
 
     ROCP_INFO << "finalizing rocprofiler (value=" << get_fini_status() << ")";
 
     static auto _once = std::once_flag{};
     std::call_once(_once, []() {
+        auto finalizing_scope =
+            common::scope_destructor{[]() { _finalizing = false; }, []() { _finalizing = true; }};
         auto num_clients = get_num_clients();
         set_fini_status(-1);
 
@@ -1233,6 +1295,14 @@ finalize()
 rocprofiler_status_t
 attach()
 {
+    if(get_clients() && get_tool_library_load_failed())
+    {
+        ROCP_ERROR << "attach failed because a ROCP_TOOL_LIBRARIES library could not be loaded "
+                      "when this process first configured rocprofiler-sdk. Restart the process "
+                      "to retry";
+        return ROCPROFILER_STATUS_ERROR;
+    }
+
     return invoke_client_attaches();
 }
 
@@ -1459,16 +1529,15 @@ rocprofiler_set_api_table(const char* name,
         // the potential loss of some API calls.
         rocprofiler::hip::restore_table(hip_runtime_api_table, lib_instance);
 
-        // any internal modifications to the HipDispatchTable need to be done before we make the
-        // copy or else those modifications will be lost when HIP API tracing is enabled
-        // because the HIP API tracing invokes the function pointers from the copy below
+        // store a reference of the HipDispatchTable implementations for invoking these
+        // functions without going through tracing wrappers
+        rocprofiler::hip::copy_table(hip_runtime_api_table, lib_instance);
+
         rocprofiler::hip::graph::update_table(hip_runtime_api_table);
         rocprofiler::hip::event::update_table(hip_runtime_api_table);
 
-        rocprofiler::hip::copy_table(hip_runtime_api_table, lib_instance);
-
         // install rocprofiler API wrappers
-        rocprofiler::hip::update_table(hip_runtime_api_table);
+        rocprofiler::hip::update_table(hip_runtime_api_table, lib_instance);
 
         // Tracing notifications the runtime has initialized
         rocprofiler::runtime_init::initialize(
@@ -1510,15 +1579,14 @@ rocprofiler_set_api_table(const char* name,
         // the potential loss of some API calls.
         rocprofiler::hip::restore_table(hip_compiler_api_table, lib_instance);
 
-        // any internal modifications to the HipCompilerDispatchTable need to be done before we make
-        // the copy or else those modifications will be lost when HIP API tracing is enabled because
-        // the HIP API tracing invokes the function pointers from the copy below
+        // store a reference of the HipCompilerDispatchTable implementations for invoking these
+        // functions without going through tracing wrappers
         rocprofiler::hip::copy_table(hip_compiler_api_table, lib_instance);
 
         rocprofiler::code_object::initialize(hip_compiler_api_table);
 
         // install rocprofiler API wrappers
-        rocprofiler::hip::update_table(hip_compiler_api_table);
+        rocprofiler::hip::update_table(hip_compiler_api_table, lib_instance);
 
         // allow tools to install API wrappers
         rocprofiler::intercept_table::notify_intercept_table_registration(

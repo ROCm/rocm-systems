@@ -37,7 +37,8 @@ _common_therock_regex_excludes: &_common_therock_regex_excludes
   - "jacobi-usm-sys-run"
   - "jacobi-roctx.*"
   - "matrix-exponential.*"
-  - "scratch-memory.*"
+  - "scratch-memory.*"  # Does not run in docker
+  - "sdma-usage.*"      # Does not run in docker
   - "shmem-pingpong.*"
   - "video-decode.*"
 

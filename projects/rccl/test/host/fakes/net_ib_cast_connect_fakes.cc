@@ -119,6 +119,7 @@ ASSERT_HOOK_MATCHES_PROD(g_ibCastCloseListen, IbCastCloseListen);
 ASSERT_HOOK_MATCHES_PROD(g_ibCastGetGidIndex, IbCastGetGidIndex);
 ASSERT_HOOK_MATCHES_PROD(g_ibCastGidInfoQuery, IbCastGidInfoQuery);
 ASSERT_HOOK_MATCHES_PROD(g_ibCastSetTrafficClass, IbCastSetTrafficClass);
+ASSERT_HOOK_MATCHES_PROD(g_rcclCastNetP2pPolicy, rcclCastNetP2pPolicy);
 
 ncclResult_t IbCastQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* attr) { return g_ibCastQpCreate(qp, attr); }
 void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, struct ncclIbQpCreateAttr* out) {
@@ -161,6 +162,12 @@ ncclResult_t IbCastGidInfoQuery(struct ibv_context* context, uint8_t portNum, st
 void IbCastSetTrafficClass(void* ctx, int trafficClass) { g_ibCastSetTrafficClass(ctx, trafficClass); }
 void IbCastReportMatchingScheme() { g_ibCastReportMatchingSchemeCalls++; }
 
+static ncclResult_t DefaultCastNetP2pPolicy(void*, int) {
+  FailLoudUnfaked("net_ib_cast_connect_fakes", "rcclCastNetP2pPolicy");
+}
+std::function<ncclResult_t(void*, int)> g_rcclCastNetP2pPolicy = DefaultCastNetP2pPolicy;
+ncclResult_t rcclCastNetP2pPolicy(void* handle, int isP2p) { return g_rcclCastNetP2pPolicy(handle, isP2p); }
+
 void ResetNetIbCastConnectFakes() {
   g_ibCastQpCreate = DefaultIbCastQpCreate;
   g_ibCastBuildDataQpCreateAttr = DefaultIbCastBuildDataQpCreateAttr;
@@ -182,4 +189,5 @@ void ResetNetIbCastConnectFakes() {
   g_ibCastGidInfoQuery = DefaultIbCastGidInfoQuery;
   g_ibCastSetTrafficClass = DefaultIbCastSetTrafficClass;
   g_ibCastReportMatchingSchemeCalls = 0;
+  g_rcclCastNetP2pPolicy = DefaultCastNetP2pPolicy;
 }

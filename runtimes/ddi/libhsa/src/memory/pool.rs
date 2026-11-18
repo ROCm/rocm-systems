@@ -237,11 +237,8 @@ pub(crate) fn agent_pool_relationship(
                 runtime.gpu_index(agent).and_then(|index| {
                     runtime
                         .topology
-                        .nodes_for_endpoint(&runtime.gpus[index].endpoint)
-                        .find(|node| {
-                            runtime.topology.sources[node.source.0].kind
-                                == rocddi::topology::SourceKind::LinuxKfd
-                        })
+                        .native_nodes_for_endpoint(&runtime.gpus[index].endpoint)
+                        .next()
                         .map(|node| node.id)
                 })
             })
@@ -265,10 +262,12 @@ pub(crate) fn agent_pool_relationship(
             (Some(requester), Some(owner))
                 if matches!(storage, PoolStorage::LocalCoarse | PoolStorage::LocalFine) =>
             {
-                runtime.session.can_access_local_memory(
-                    &runtime.gpus[requester].endpoint,
-                    &runtime.gpus[owner].endpoint,
-                )
+                runtime.session().is_some_and(|session| {
+                    session.can_access_local_memory(
+                        &runtime.gpus[requester].endpoint,
+                        &runtime.gpus[owner].endpoint,
+                    )
+                })
             }
             _ => link.is_some_and(|link| link.hop_count() != 0),
         };

@@ -70,9 +70,16 @@ impl SignalState {
 
     /// Joins the callback worker after the shared stop request is published.
     pub(crate) fn join_worker(&mut self) {
-        if let Some(dispatcher) = self.async_dispatcher.take() {
-            let _ = dispatcher.worker.join();
+        if let Some(worker) = self.take_worker() {
+            let _ = worker.join();
         }
+    }
+
+    /// Detaches the callback worker for joining outside the lifecycle lock.
+    pub(crate) fn take_worker(&mut self) -> Option<thread::JoinHandle<()>> {
+        self.async_dispatcher
+            .take()
+            .map(|dispatcher| dispatcher.worker)
     }
 
     /// Starts the dispatcher if needed and enqueues a callback request.
@@ -81,6 +88,9 @@ impl SignalState {
         request: AsyncRequest,
         stop_workers: &Arc<AtomicBool>,
     ) -> Status {
+        if stop_workers.load(Ordering::Acquire) {
+            return INVALID_RUNTIME_STATE;
+        }
         if self.async_dispatcher.is_none() {
             let (sender, receiver) = std::sync::mpsc::channel();
             let stop = stop_workers.clone();
@@ -154,6 +164,10 @@ pub(super) fn run_async_dispatcher(
 ) {
     let mut handlers = Vec::new();
     while !stop.load(Ordering::Acquire) {
+        let Some(_lease) = crate::runtime::enter_runtime_service() else {
+            thread::sleep(Duration::from_millis(1));
+            continue;
+        };
         if handlers.is_empty() {
             match receiver.recv_timeout(Duration::from_millis(1)) {
                 Ok(request) => {

@@ -15,16 +15,21 @@ class Fp8Policy(Enum):
     FNUZ = auto()
     # OCP encodings through util's helpers.
     OCP_UTIL = auto()
+    # OCP encodings through util, except for non-scaled F32-to-OCP narrowing.
+    OCP_SHARED_NARROWING = auto()
     # OCP encodings through shared/conversion.h, matching gfx1201 captures.
     OCP_SHARED = auto()
 
 
-# CDNA4 and CDNA5 keep util's helpers: their manuals saturate an infinity under
-# FP16_OVFL, which gfx1201 does not, and neither target has captures.
+# CDNA5 defaults to util for widening, scaled conversions and E5M3. For
+# non-scaled F32-to-OCP FP8/BF8, CDNA5 Table 7 (p. 22) preserves true infinity
+# outside WMMA, while section 7.6.2 (p. 81) saturates it when FP16_OVFL is set.
+# Pending a gfx1250 measurement, gfx1201 hardware is the proxy. It gives
+# the same infinity conversion result with either setting.
 _FP8_POLICIES = {
     'cdna3': Fp8Policy.FNUZ,
     'cdna4': Fp8Policy.OCP_UTIL,
-    'cdna5': Fp8Policy.OCP_UTIL,
+    'cdna5': Fp8Policy.OCP_SHARED_NARROWING,
     'rdna4': Fp8Policy.OCP_SHARED,
 }
 
@@ -59,8 +64,16 @@ def uses_fnuz_fp8(arch_name: str | None) -> bool:
     return fp8_policy(arch_name) is Fp8Policy.FNUZ
 
 
-def uses_shared_fp8(arch_name: str | None) -> bool:
-    """Whether a target's F32<->FP8/BF8 conversions use shared/conversion.h."""
+def uses_shared_fp8_narrowing(arch_name: str | None) -> bool:
+    """Whether non-scaled F32-to-OCP FP8/BF8 conversions use shared/conversion.h."""
+    return fp8_policy(arch_name) in (
+        Fp8Policy.OCP_SHARED_NARROWING,
+        Fp8Policy.OCP_SHARED,
+    )
+
+
+def uses_shared_fp8_widening(arch_name: str | None) -> bool:
+    """Whether OCP FP8/BF8-to-F32 conversions use shared/conversion.h."""
     return fp8_policy(arch_name) is Fp8Policy.OCP_SHARED
 
 

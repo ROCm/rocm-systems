@@ -36,6 +36,7 @@ set(AMD_TEST_SRC
     hipRtcSpirvCompilation.cc
     hiprtc_fp4.cc
     hiprtc_fp6.cc
+    hiprtcProfileRuntimeLink.cc
 )
 
 add_custom_target(copyRtcHeaders ALL

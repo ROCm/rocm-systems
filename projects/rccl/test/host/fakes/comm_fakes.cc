@@ -10,7 +10,9 @@
 
 #include "nccl.h"
 #include "nccl_fakes.h"  // g_loadParam, for the NCCL_PARAM defaults this stands in for
+#include "alloc.h"
 #include "comm.h"
+#include "gdrwrap.h"
 #include "utils.h"
 #include "profiler.h"
 
@@ -71,6 +73,9 @@ std::function<ncclResult_t(struct ncclComm*, struct ncclCeCollArgs*, hipStream_t
 std::function<ncclResult_t(struct ncclComm*, struct ncclCeCollArgs*, hipStream_t)> g_profilerStopCeCollEvent =
     DefaultProfilerCeCollEvent;
 
+// alloc.h per-device allocation counters, defined in src/init.cc.
+struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
+
 void ResetCommFakes() {
   g_commSetAsyncError = DefaultCommSetAsyncError;
   g_commCount = DefaultCommCount;
@@ -79,10 +84,12 @@ void ResetCommFakes() {
   g_profilerStopCeCollEvent = DefaultProfilerCeCollEvent;
   g_commEnsureReadyResult = ncclSuccess;
   g_envCtaPolicy = NCCL_CONFIG_UNDEF_INT;
+  ncclGdrCopy = nullptr;
 }
 
 // --- Comm globals (real in init.cc) ---------------------------------------
 enum ncclLaunchMode ncclParamLaunchMode = ncclLaunchModeParallel;
+gdr_t ncclGdrCopy = nullptr;
 
 // The per-launch resource params init.cc declares. collTaskAppend resolves the
 // task's CTA counts through them (env > per-call > comm), so they are referenced
@@ -111,20 +118,31 @@ ncclResult_t ncclProfilerRecordGroupApiEventState(ncclProfilerEventState_t) { re
 ncclResult_t ncclProfilerStopGroupApiEvent() { return ncclSuccess; }
 ncclResult_t ncclProfilerStartCollApiEvent(struct ncclInfo*, bool) { return ncclSuccess; }
 ncclResult_t ncclProfilerStopCollApiEvent() { return ncclSuccess; }
+ncclResult_t ncclProfilerStartP2pApiEvent(struct ncclInfo*, bool) {
+  return ncclSuccess;
+}
+ncclResult_t ncclProfilerStopP2pApiEvent() {
+  return ncclSuccess;
+}
 ncclResult_t ncclProfilerStartCeCollEvent(struct ncclComm* comm, struct ncclCeCollArgs* args, hipStream_t stream) {
   return g_profilerStartCeCollEvent(comm, args, stream);
 }
 ncclResult_t ncclProfilerStopCeCollEvent(struct ncclComm* comm, struct ncclCeCollArgs* args, hipStream_t stream) {
   return g_profilerStopCeCollEvent(comm, args, stream);
 }
-ncclResult_t ncclProfilerStartCeSyncEvent(struct ncclComm*, struct ncclCeCollArgs*, hipStream_t, void** handle) {
-  *handle = nullptr;
+ncclResult_t ncclProfilerStartCeSyncEvent(struct ncclComm*, struct ncclCeCollArgs*, hipStream_t,
+                                          struct ncclProfilerEventRef* handle) {
+  *handle = ncclProfilerEventRef{};
   return ncclSuccess;
 }
-ncclResult_t ncclProfilerStopCeSyncEvent(struct ncclComm*, void*, hipStream_t) { return ncclSuccess; }
+ncclResult_t ncclProfilerStopCeSyncEvent(struct ncclComm*, struct ncclProfilerEventRef*, hipStream_t) {
+  return ncclSuccess;
+}
 ncclResult_t ncclProfilerStartCeBatchEvent(struct ncclComm*, struct ncclCeCollArgs*, struct ncclCeBatchOpsParams*,
-                                           hipStream_t, void** handle) {
-  *handle = nullptr;
+                                           hipStream_t, struct ncclProfilerEventRef* handle) {
+  *handle = ncclProfilerEventRef{};
   return ncclSuccess;
 }
-ncclResult_t ncclProfilerStopCeBatchEvent(struct ncclComm*, void*, hipStream_t) { return ncclSuccess; }
+ncclResult_t ncclProfilerStopCeBatchEvent(struct ncclComm*, struct ncclProfilerEventRef*, hipStream_t) {
+  return ncclSuccess;
+}
