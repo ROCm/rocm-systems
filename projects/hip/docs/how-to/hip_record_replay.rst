@@ -69,7 +69,7 @@ Recording a workload
   ``HIP_HRR_CAPTURE_OUTPUT`` has no effect with it. To record a workload, build
   ``amdhip64`` from the ROCm sources with ``-DHIP_HRR_CAPTURE_ENABLED`` added to
   ``CMAKE_CXX_FLAGS``, and load that build ahead of the installed runtime. The
-  `HRR tests README <https://github.com/ROCm/rocm-systems/blob/develop/projects/hrr/tests/README.md>`_
+  `HRR tests README <https://github.com/ROCm/rocm-systems/blob/release/therock-10.2/projects/hrr/tests/README.md>`_
   shows the build commands.
 
 Set ``HIP_HRR_CAPTURE_OUTPUT`` to the archive you want written, and run the
