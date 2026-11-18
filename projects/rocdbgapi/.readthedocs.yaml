@@ -21,5 +21,5 @@ build:
    jobs:
       post_system_dependencies:
          - mkdir -p $HOME/.local/bin /tmp/doxygen
-         - curl -fsSL https://api.github.com/repos/doxygen/doxygen/releases/latest | jq -r '.assets[] | select(.name | test("linux\\.bin\\.tar\\.gz")) | .browser_download_url' | xargs curl -fsSL | tar xz -C /tmp/doxygen --strip-components=1
+         - curl -fsSL https://github.com/doxygen/doxygen/releases/download/Release_1_16_0/doxygen-1.16.0.linux.bin.tar.gz | tar xz -C /tmp/doxygen --strip-components=1
          - cp /tmp/doxygen/bin/doxygen $HOME/.local/bin/doxygen
