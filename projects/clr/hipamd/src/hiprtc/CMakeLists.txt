@@ -246,7 +246,16 @@ target_compile_definitions(hiprtc PRIVATE __HIP_ENABLE_RTC)
 
 add_dependencies(hiprtc hiprtc-builtins)
 
+# Only a shared hiprtc-builtins is loaded at runtime by hiprtc, so only then is it
+# exported as hiprtc::hiprtc-builtins. A static build folds it into hiprtc.
+if(BUILD_SHARED_LIBS)
+  set(HIPRTC_BUILTINS_EXPORT EXPORT hiprtc-targets)
+else()
+  set(HIPRTC_BUILTINS_EXPORT)
+endif()
+
 install(TARGETS hiprtc-builtins
+  ${HIPRTC_BUILTINS_EXPORT}
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})

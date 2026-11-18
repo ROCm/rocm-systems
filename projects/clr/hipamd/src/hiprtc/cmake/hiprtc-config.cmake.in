@@ -20,3 +20,10 @@ if(WIN32)
   endif()
 endif()
 include("${CMAKE_CURRENT_LIST_DIR}/hiprtc-targets.cmake")
+
+# For shared builds, hiprtc::hiprtc-builtins describes the hiprtc-builtins library, which hiprtc
+# loads at runtime. Do not link to it. Use it to locate the library, e.g.
+# $<TARGET_FILE:hiprtc::hiprtc-builtins> (full path),
+# $<TARGET_FILE_NAME:hiprtc::hiprtc-builtins> (file name) or
+# $<TARGET_FILE_DIR:hiprtc::hiprtc-builtins> (install directory),
+# for example to install it next to the client application.
