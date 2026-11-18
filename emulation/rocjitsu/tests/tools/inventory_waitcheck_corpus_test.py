@@ -105,6 +105,19 @@ class InventoryWaitcheckCorpusTest(unittest.TestCase):
                 self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(),
                                  artifact["artifact_sha256"])
 
+            other_target_artifact = Path(artifacts[1]["artifact"])
+            original_bytes = other_target_artifact.read_bytes()
+            rejected = subprocess.run(
+                [sys.executable, str(SCRIPT), str(container), "--waitcheck",
+                 str(WAITCHECK), "--project", "pytorch", "--source", "test-fixture",
+                 "--provenance", "llvm", "--extract-dir", str(extracted),
+                 "--target", "gfx942", "--output", str(other_target_artifact)],
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(rejected.returncode, 2, rejected.stderr)
+            self.assertIn("manifest output aliases", rejected.stderr)
+            self.assertEqual(other_target_artifact.read_bytes(), original_bytes)
+
     def test_direct_inventory_filters_other_targets_before_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

@@ -346,29 +346,34 @@ def main() -> int:
                 return 2
             files = [path for path in files if not paths_alias(args.output, path)]
 
+    extracted_paths: list[Path] = []
     if args.extract_dir:
         args.extract_dir.mkdir(parents=True, exist_ok=True)
 
-        def extract_input(path: Path) -> list[Artifact]:
+        def extract_input(path: Path) -> tuple[list[Artifact], list[Path]]:
             extracted = extract_code_objects_with_waitcheck(
                 args.waitcheck, path, args.extract_dir, args.target
             )
             if not extracted:
                 extracted = extract_code_objects(path, args.extract_dir)
+                protected = [artifact.path for artifact in extracted]
                 if args.target:
                     selected = []
                     for artifact in extracted:
                         if artifact_matches_target(args.waitcheck, artifact, args.target):
                             selected.append(artifact)
                     extracted = selected
-            return extracted
+            else:
+                protected = [artifact.path for artifact in extracted]
+            return extracted, protected
 
         # One waitcheck process parses each container; at most four large
         # containers are in memory at once, even when --jobs requests more.
         try:
             with ThreadPoolExecutor(max_workers=min(args.jobs, 4)) as executor:
-                artifacts = [artifact for group in executor.map(extract_input, files)
-                             for artifact in group]
+                groups = list(executor.map(extract_input, files))
+            artifacts = [artifact for selected, _ in groups for artifact in selected]
+            extracted_paths = [path for _, protected in groups for path in protected]
         except (OSError, RuntimeError, ValueError) as error:
             print(error, file=sys.stderr)
             return 1
@@ -397,7 +402,7 @@ def main() -> int:
 
     if args.output and any(
         paths_alias(args.output, protected)
-        for protected in [*files, *(artifact.path for artifact in artifacts)]
+        for protected in [*files, *extracted_paths, *(artifact.path for artifact in artifacts)]
     ):
         print("manifest output aliases an input or selected artifact", file=sys.stderr)
         return 2

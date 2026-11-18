@@ -95,7 +95,7 @@ rj_waitcheck /path/to/site-packages/torch \
 | `--diagnostics-jsonl PATH` | Losslessly write one JSON object per retained per-kernel diagnostic. Requires `--all-code-objects` or `--exhaustive`. |
 | `--check-counter-parity` | Compare encoded wait fields with modeled required counts. |
 | `--counter-parity-jsonl PATH` | Write counter-parity findings as JSONL. Requires `--all-code-objects` or `--exhaustive`. |
-| `--skip-unsupported` | Skip unparsable inputs, inputs with no supported code object, or unsupported analysis failures. |
+| `--skip-unsupported` | Skip unparsable inputs, inputs with no supported code object, or unsupported analysis failures. Hazards from completed entries in a partially analyzed object still appear in counts and output. |
 | `--max-diagnostics N` | Limit collected and printed diagnostics. Use `0` to suppress diagnostic payloads while preserving counts. |
 | `--stop-after-first-diagnostic` | Stop each code object after the first observed hazard. |
 | `--summary-only` | Print only final batch totals. |

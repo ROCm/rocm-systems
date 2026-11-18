@@ -798,8 +798,8 @@ private:
   auto index =
       count("--code-object-index", "Code-object index for the selected target (default: 0)",
             "code-object index", 0, UINT32_MAX);
-  auto entry = count("--kernel-entry", "Analyze kernels at this .text byte offset", "kernel entry",
-                     0, UINT64_MAX);
+  auto entry = count("--kernel-entry", "Select a .text entry for merged descriptor-group analysis",
+                     "kernel entry", 0, UINT64_MAX);
   auto wave = text_flag("--wave-size", "32|64",
                         "With --kernel-entry, select a descriptor wave size or supply one for a "
                         "descriptorless entry");
@@ -1057,17 +1057,26 @@ private:
           }
         }
         // A repeated recursive sweep can write into its own corpus directory.
-        // Skip an existing non-GPU report, but retain a code object at that
-        // path so the later output-alias check rejects its replacement.
+        // Skip only a prior waitcheck JSONL stream. Other files, including
+        // standalone HIP bundles, stay in the input-alias protection set.
+        bool reusable_report = false;
         if (previous_report) {
-          Executable candidate(it->path().string());
-          if (!candidate.is_valid() && !candidate.gpu_payload_recognized() &&
-              !candidate.read_failed()) {
-            it.increment(ec);
-            continue;
+          std::ifstream stream(it->path(), std::ios::binary);
+          if (stream) {
+            constexpr std::string_view diagnostic_prefix =
+                "{\"schema\":\"rj-waitcheck-diagnostic-v1\",";
+            constexpr std::string_view parity_prefix =
+                "{\"schema\":\"rj-waitcheck-counter-parity-v1\",";
+            std::array<char, 64> prefix{};
+            stream.read(prefix.data(), prefix.size());
+            const std::string_view head(prefix.data(), static_cast<size_t>(stream.gcount()));
+            reusable_report = (head.empty() && stream.eof()) ||
+                              head.starts_with(diagnostic_prefix) ||
+                              head.starts_with(parity_prefix);
           }
         }
-        directory_files.push_back(it->path().string());
+        if (!reusable_report)
+          directory_files.push_back(it->path().string());
       }
       if (ec && options.exhaustive) {
         error = it->path().string() + ": failed to inspect directory entry: " + ec.message();
@@ -1820,27 +1829,37 @@ void print_slowest_kernels(const ScanTotals &totals) {
       }
     }
     if (!result.report.supported || !result.report.complete) {
-      // Shared parity requires one whole-object analysis. If that analysis is
-      // incomplete, recover ordinary JSONL hazards from complete entries so
-      // the summary matches the rows actually published. Parity-only scans
-      // still skip the incomplete object without claiming a hazard result.
-      if (diagnostic_writer && options.check_counter_parity && task.kernels.size() > 1) {
+      // A failed whole-object or batch analysis can hide completed entries.
+      // Recover ordinary hazards per entry when no JSONL writer already
+      // published them, or when shared parity required whole-object analysis.
+      if ((!diagnostic_writer || options.check_counter_parity) && !task.kernels.empty()) {
         CliOptions hazard_options = options;
         hazard_options.check_counter_parity = false;
+        hazard_options.stop_after_first_diagnostic = false;
+        size_t recovered_kernels = 0;
         for (const WaitcheckKernelInfo &kernel : task.kernels) {
           const CodeObjectAnalysis partial = run_kernel_batch_analysis(
               hazard_options, input_path, task.target, task.index, *task.code_object,
               std::span<const WaitcheckKernelInfo>{&kernel, 1}, nullptr);
           if (!partial.report.supported || !partial.report.complete)
             continue;
+          recovered_kernels += partial.report.kernels_analyzed;
           if (diagnostic_writer)
             diagnostic_writer->write(input_path, task.target, task.index,
                                      std::span<const WaitcheckKernelInfo>{&kernel, 1},
                                      partial.report.diagnostics);
+          else if (!options.summary_only)
+            print_diagnostics(input_path, task.target, task.index, partial.report,
+                              options.max_diagnostics);
           totals.diagnostics += partial.report.diagnostics_observed;
           totals.hazards = totals.hazards || partial.report.diagnostics_observed != 0;
           totals.diagnostics_lower_bound = true;
         }
+        // The ordinary fallback covers groups after an earlier parity decode
+        // failure. It also revisits groups completed before that failure, so
+        // take the larger count rather than summing both passes.
+        result.report.kernels_analyzed =
+            std::max(result.report.kernels_analyzed, recovered_kernels);
       } else if (diagnostic_writer) {
         // A completed kernel may already have emitted a valid JSONL finding
         // before another kernel made the containing object incomplete.

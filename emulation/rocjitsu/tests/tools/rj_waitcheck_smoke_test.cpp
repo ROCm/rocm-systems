@@ -685,8 +685,8 @@ TEST(RjWaitcheck, CompletedKernelHazardSurvivesIncompleteObjectSkip) {
       shell_quote(g_waitcheck_tool.string()) + " " + shell_quote(input.string()) +
       " --all-code-objects --skip-unsupported --check-counter-parity > " +
       shell_quote(output.string());
-  EXPECT_TRUE(command_succeeded(std::system(parity_only.c_str()))) << read_text_file(output);
-  EXPECT_TRUE(contains(read_text_file(output), "skipped=1 code-objects=0 diagnostics=0"))
+  EXPECT_TRUE(command_exited_with(std::system(parity_only.c_str()), 4)) << read_text_file(output);
+  EXPECT_TRUE(contains(read_text_file(output), "skipped=1 code-objects=0 diagnostics=>=1"))
       << read_text_file(output);
 
   for (bool check_parity : {false, true}) {
@@ -696,6 +696,34 @@ TEST(RjWaitcheck, CompletedKernelHazardSurvivesIncompleteObjectSkip) {
         shell_quote(diagnostics.string()) + (check_parity ? " --check-counter-parity" : "") +
         " > " + shell_quote(output.string());
     EXPECT_TRUE(command_exited_with(std::system(exhaustive.c_str()), 2)) << read_text_file(output);
+    EXPECT_TRUE(contains(read_text_file(output), "code-objects=0/1 kernels=1/2"))
+        << read_text_file(output);
+    const std::string rows = read_text_file(diagnostics);
+    EXPECT_EQ(std::count(rows.begin(), rows.end(), '\n'), 1) << rows;
+    EXPECT_TRUE(contains(rows, "\"kernel_name\":\"hazard\"")) << rows;
+  }
+}
+
+TEST(RjWaitcheck, ParityFallbackCountsKernelAfterIncompleteEntry) {
+  const TempDir temp_dir(
+      std::filesystem::temp_directory_path() /
+      ("rj_waitcheck_smoke_" + std::to_string(static_cast<long long>(getpid()))));
+  const auto input = temp_dir.path / "mixed-gfx1201.co";
+  const auto output = temp_dir.path / "stdout.txt";
+  const auto diagnostics = temp_dir.path / "diagnostics.jsonl";
+  const auto image = rocjitsu::waitcheck_test::make_gfx_multi_kernel_code_object(
+      {{"incomplete", {0x00800000U}},
+       {"hazard", {0xEE05007CU, 0x00000000U, 0x00000008U, 0x7E020300U, 0xBFB00000U}}},
+      rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  ASSERT_TRUE(write_binary_file(input, image));
+
+  for (bool check_parity : {false, true}) {
+    const std::string command =
+        shell_quote(g_waitcheck_tool.string()) + " " + shell_quote(input.string()) +
+        " --exhaustive --target gfx1201 --summary-only --no-fail --diagnostics-jsonl " +
+        shell_quote(diagnostics.string()) + (check_parity ? " --check-counter-parity" : "") +
+        " > " + shell_quote(output.string());
+    EXPECT_TRUE(command_exited_with(std::system(command.c_str()), 2)) << read_text_file(output);
     EXPECT_TRUE(contains(read_text_file(output), "code-objects=0/1 kernels=1/2"))
         << read_text_file(output);
     const std::string rows = read_text_file(diagnostics);
@@ -1138,9 +1166,18 @@ TEST(RjWaitcheck, SkippedBatchCountsOnlyEmittedDiagnostics) {
                                    " --all-code-objects --target gfx1201 --skip-unsupported";
   const std::string skipped_command =
       base_command + " > " + shell_quote(output.string());
-  EXPECT_TRUE(command_succeeded(std::system(skipped_command.c_str()))) << read_text_file(output);
-  EXPECT_TRUE(contains(read_text_file(output), "skipped=1 code-objects=0 diagnostics=0"))
+  EXPECT_TRUE(command_exited_with(std::system(skipped_command.c_str()), 4))
       << read_text_file(output);
+  EXPECT_TRUE(contains(read_text_file(output), "skipped=1 code-objects=0 diagnostics=>=1"))
+      << read_text_file(output);
+  EXPECT_TRUE(contains(read_text_file(output), "missing s_wait")) << read_text_file(output);
+
+  const std::string count_only = base_command +
+                                 " --max-diagnostics 0 --stop-after-first-diagnostic "
+                                 "--summary-only > " +
+                                 shell_quote(output.string());
+  EXPECT_TRUE(command_exited_with(std::system(count_only.c_str()), 4)) << read_text_file(output);
+  EXPECT_TRUE(contains(read_text_file(output), "diagnostics=>=1")) << read_text_file(output);
 
   const std::string jsonl_command =
       base_command + " --diagnostics-jsonl " + shell_quote(diagnostics.string()) + " > " +
@@ -1404,6 +1441,15 @@ TEST(RjWaitcheck, RecursiveSweepReusesItsReportWithoutReplacingCodeObject) {
   EXPECT_TRUE(command_exited_with(std::system(alias.c_str()), 2));
   EXPECT_TRUE(contains(read_text_file(error), "aliases an input")) << read_text_file(error);
   EXPECT_EQ(read_binary_file(input), image);
+
+  std::filesystem::remove(report);
+  const auto bundle = corpus / "standalone.hip_fatbin";
+  const auto bundle_bytes = make_clang_offload_bundle(image);
+  ASSERT_TRUE(write_binary_file(bundle, bundle_bytes));
+  std::filesystem::create_hard_link(bundle, report);
+  EXPECT_TRUE(command_exited_with(std::system(command.c_str()), 2));
+  EXPECT_TRUE(contains(read_text_file(error), "aliases an input")) << read_text_file(error);
+  EXPECT_EQ(read_binary_file(bundle), bundle_bytes);
 }
 
 TEST(RjWaitcheck, DanglingReportSymlinkCannotAliasSecondWriter) {

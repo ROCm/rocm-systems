@@ -77,6 +77,10 @@ RUN set -e; \
 FROM builder-base AS rocjitsu-builder
 ARG RJ_LOG_GROUPS
 
+# The base image carries zlib headers but not the zstd development package.
+# rocjitsu's code-object loader requires both at CMake configure time.
+RUN dnf install -y libzstd-devel && dnf clean all
+
 # Only the rocjitsu subtree is needed; copying it alone keeps this stage's
 # cache valid when only mirage sources change.
 COPY rocjitsu /src/rocjitsu
