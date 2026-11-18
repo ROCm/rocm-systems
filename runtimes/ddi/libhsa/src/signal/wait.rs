@@ -4,7 +4,6 @@
 //! Signal waits, groups, retained wait registrations, and timeout clocks.
 
 use super::*;
-use crate::api::signal::wait::hsa_amd_signal_wait_any;
 
 /// Time spent spinning before a blocked wait yields the CPU.
 const BLOCKED_SPIN_BUDGET: Duration = Duration::from_micros(200);
@@ -188,12 +187,12 @@ pub(crate) unsafe fn signal_group_wait_any(
     signal: *mut HsaSignal,
     value: *mut SignalValue,
 ) -> Status {
-    let signals = {
-        let guard = match lock() {
+    let prepared = {
+        let mut guard = match lock() {
             Ok(guard) => guard,
             Err(status) => return status,
         };
-        let Some(runtime) = guard.as_ref() else {
+        let Some(runtime) = guard.as_mut() else {
             return NOT_INITIALIZED;
         };
         if conditions.is_null() || compare_values.is_null() || signal.is_null() || value.is_null() {
@@ -202,26 +201,33 @@ pub(crate) unsafe fn signal_group_wait_any(
         let Some(signals) = runtime.signal_state.signal_groups.get(&group.handle) else {
             return INVALID_SIGNAL_GROUP;
         };
-        signals.clone()
+        // SAFETY: The caller supplies one condition/value for every signal in
+        // the group. Copy the arrays before any result can alias their storage.
+        let Some(inputs) = (unsafe {
+            signal_wait_inputs(
+                signals.len() as u32,
+                signals.as_ptr(),
+                conditions,
+                compare_values,
+            )
+        }) else {
+            return INVALID_ARGUMENT;
+        };
+        // SAFETY: The registry lock covers validation and signal retention.
+        let Some(prepared) = (unsafe { inputs.prepare(runtime) }) else {
+            return INVALID_ARGUMENT;
+        };
+        prepared
     };
-    // SAFETY: The group retains signals.len() handles and the caller supplies
-    // matching condition/value arrays and writable outputs.
-    let index = unsafe {
-        hsa_amd_signal_wait_any(
-            signals.len() as u32,
-            signals.as_ptr(),
-            conditions,
-            compare_values,
-            u64::MAX,
-            wait_state_hint,
-            value,
-        )
-    };
-    let Some(satisfied) = signals.get(index as usize) else {
+    let Some(satisfied) = prepared.wait_any(u64::MAX, wait_state_hint) else {
         return INVALID_ARGUMENT;
     };
-    // SAFETY: The caller supplied writable output storage.
-    unsafe { signal.write(*satisfied) };
+    // SAFETY: The caller supplied writable result storage; input snapshots no
+    // longer borrow those addresses.
+    unsafe {
+        value.write(satisfied.value);
+        signal.write(satisfied.signal);
+    }
     SUCCESS
 }
 
@@ -233,6 +239,77 @@ pub(crate) struct WaitInputs {
     pub(crate) conditions: Vec<u32>,
     /// Comparison value for each signal.
     pub(crate) values: Vec<SignalValue>,
+}
+
+/// A wait owns both its input snapshot and the matching signal registrations.
+pub(crate) struct PreparedWait {
+    /// Immutable arrays keep each condition paired with its retained signal.
+    inputs: WaitInputs,
+    /// Signals and generation stay live until polling completes.
+    registration: WaitRegistration,
+}
+
+/// The signal and value that satisfied one retained wait.
+pub(crate) struct SatisfiedSignal {
+    /// Original input position, including skipped invalid handles.
+    pub(crate) index: u32,
+    /// Handle retained by the wait while its value was observed.
+    pub(crate) signal: HsaSignal,
+    /// Observed value satisfying the corresponding condition.
+    pub(crate) value: SignalValue,
+}
+
+impl WaitInputs {
+    /// Retains matching signals for a wait that can leave the registry lock.
+    ///
+    /// # Safety
+    /// The caller holds the process HSA registry lock until preparation returns.
+    pub(crate) unsafe fn prepare(self, runtime: &mut HsaState) -> Option<PreparedWait> {
+        if self.signals.len() != self.conditions.len() || self.signals.len() != self.values.len() {
+            return None;
+        }
+        // SAFETY: Exclusive runtime access protects each validated signal until
+        // registration takes its own reference and in-flight generation lease.
+        let registration = unsafe { prepare_multi_wait(runtime, &self.signals) }?;
+        Some(PreparedWait {
+            inputs: self,
+            registration,
+        })
+    }
+}
+
+impl PreparedWait {
+    /// Polls retained signals without holding the HSA registry lock or exposing
+    /// foreign output pointers to the wait mechanism.
+    pub(crate) fn wait_any(
+        &self,
+        timeout_hint: u64,
+        wait_state_hint: u32,
+    ) -> Option<SatisfiedSignal> {
+        let mut value = 0;
+        // SAFETY: The registration retains every signal slot through this call,
+        // input lengths match, and the stack result is writable.
+        let index = unsafe {
+            signal_wait_any_open(
+                &self.registration.entries,
+                &self.inputs.conditions,
+                &self.inputs.values,
+                timeout_hint,
+                wait_state_hint,
+                &raw mut value,
+                &self.registration.stop,
+            )
+        };
+        self.inputs
+            .signals
+            .get(index as usize)
+            .copied()
+            .map(|signal| SatisfiedSignal {
+                index,
+                signal,
+                value,
+            })
+    }
 }
 
 /// Copies wait input after validating its source and destination.

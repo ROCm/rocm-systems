@@ -123,7 +123,8 @@ Notes:
 
 - The default build type is `RelWithDebInfo`, and `BUILD_TESTING` is on by
   default.
-- `HIPFILE_CXX_STANDARD` selects C++20 (the default), 23, or 26.
+- `HIPFILE_CXX_STANDARD` selects C++20 (the default), 23, or 26. C++26
+  needs CMake 3.30 or later; configuring fails with older versions.
 - CI's build workflow
   ([hipfile-build.yml](../../.github/workflows/hipfile-build.yml), started
   by [hipfile-ci-toplevel.yml](../../.github/workflows/hipfile-ci-toplevel.yml))
@@ -131,7 +132,9 @@ Notes:
   distributions and ROCm versions (the matrix is in
   `hipfile-ci-toplevel.yml`). Each job builds `Debug` and
   `Release`, both with `-DCMAKE_CXX_FLAGS=-Werror`, runs the unit tests in
-  each, then packages the Debug build with `cpack` and installs the package.
+  each, then packages the Debug build with `cpack`, installs the package,
+  and builds the installed examples against it
+  ([`util/ci-build-installed-examples.sh`](util/ci-build-installed-examples.sh)).
   The CI images are built from
   [`util/docker`](util/docker).
 - One fixed image also runs the sanitizer builds
@@ -259,7 +262,9 @@ Notes:
   C++17 against the installed hipFile, so keep them to C++17. Add a new
   example directory to `HIPFILE_EXAMPLE_DIRS` in
   [`cmake/HipFileInstall.cmake`](cmake/HipFileInstall.cmake) and to the
-  top-level `CMakeLists.txt`.
+  top-level `CMakeLists.txt`. CI builds the installed copies, with warnings
+  as errors, and fails if an example directory is installed without its
+  `CMakeLists.txt`.
 
 ## Thread safety
 

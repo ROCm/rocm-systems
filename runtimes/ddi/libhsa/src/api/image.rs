@@ -16,3 +16,12 @@ pub(crate) use query::*;
 pub(crate) use sampler::*;
 #[cfg(any(test, not(hsa_tool_dispatch)))]
 pub(crate) use transfer::*;
+
+#[cfg(any(test, not(hsa_tool_dispatch)))]
+mod table;
+#[cfg(any(test, not(hsa_tool_dispatch)))]
+pub(crate) use table::image_extension_table;
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests;
