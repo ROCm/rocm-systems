@@ -1,0 +1,5 @@
+# Generated and patch files must stay byte-identical to update.py's output on
+# every platform, so Git never converts their line endings.
+/elfio/** -text
+/patches/*.patch -text
+/LICENSE.txt -text

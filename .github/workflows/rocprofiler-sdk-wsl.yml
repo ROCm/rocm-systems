@@ -22,6 +22,7 @@ on:
       - 'projects/rocr-runtime/runtime/hsa-runtime/core/util/**'
       - 'shared/amdgpu-windows-interop/wkmi/**'
       - 'shared/sha256/**'
+      - 'shared/elfio/**'
       - '!**/*.md'
       - '!**/*.rst'
       - '!**/*.rtf'
@@ -36,6 +37,7 @@ on:
       - 'projects/rocr-runtime/runtime/hsa-runtime/core/util/**'
       - 'shared/amdgpu-windows-interop/wkmi/**'
       - 'shared/sha256/**'
+      - 'shared/elfio/**'
       - '!**/*.md'
       - '!**/*.rst'
       - '!**/*.rtf'
@@ -118,6 +120,7 @@ jobs:
             projects/rocr-runtime
             shared/amdgpu-windows-interop/wkmi
             shared/sha256
+            shared/elfio
             .dvc
           sparse-checkout-cone-mode: true
           submodules: false

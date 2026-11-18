@@ -21,6 +21,7 @@ on:
       - '!projects/rocprofiler-sdk/CODEOWNERS'
       - '!projects/rocprofiler-sdk/source/docs/**'
       - 'shared/sha256/**'
+      - 'shared/elfio/**'
   pull_request:
     paths:
       - '.github/workflows/rocprofiler-sdk-rocm_release_compatibility.yml'
@@ -35,6 +36,7 @@ on:
       - '!projects/rocprofiler-sdk/CODEOWNERS'
       - '!projects/rocprofiler-sdk/source/docs/**'
       - 'shared/sha256/**'
+      - 'shared/elfio/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

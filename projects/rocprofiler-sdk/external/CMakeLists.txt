@@ -210,21 +210,24 @@ target_link_libraries(
 
 # ELFIO
 if(ROCPROFILER_BUILD_ELFIO)
-    rocprofiler_checkout_git_submodule(
-        RECURSIVE
-        RELATIVE_PATH external/elfio
-        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-        REPO_URL https://github.com/serge1/ELFIO.git
-        REPO_BRANCH "Release_3.12")
-
-    set(ELFIO_BUILD_EXAMPLES OFF)
-    set(ELFIO_BUILD_TESTS OFF)
-    add_subdirectory(elfio EXCLUDE_FROM_ALL)
-    if(TARGET rocprofiler-sdk-elfio)
-        get_target_property(ELFIO_INCLUDE_DIR elfio::elfio INTERFACE_INCLUDE_DIRECTORIES)
-        target_include_directories(rocprofiler-sdk-elfio SYSTEM
-                                   INTERFACE ${ELFIO_INCLUDE_DIR})
+    # ELFIO comes from shared/elfio, the one copy maintained for rocm-systems projects.
+    # The cache variable is project-prefixed so it cannot collide with the equivalent
+    # entry in another rocm-systems project configured in the same build.
+    set(ROCPROFILER_SDK_ROCM_ELFIO_DIR
+        "${PROJECT_SOURCE_DIR}/../../shared/elfio"
+        CACHE PATH "Path to the shared ELFIO component")
+    if(NOT TARGET rocm-elfio)
+        if(NOT EXISTS "${ROCPROFILER_SDK_ROCM_ELFIO_DIR}/CMakeLists.txt")
+            message(
+                FATAL_ERROR
+                    "Shared ELFIO not found at ${ROCPROFILER_SDK_ROCM_ELFIO_DIR}. Set "
+                    "ROCPROFILER_SDK_ROCM_ELFIO_DIR when building rocprofiler-sdk outside "
+                    "the rocm-systems tree, or use ROCPROFILER_BUILD_ELFIO=OFF.")
+        endif()
+        add_subdirectory(${ROCPROFILER_SDK_ROCM_ELFIO_DIR}
+                         ${CMAKE_CURRENT_BINARY_DIR}/rocm-elfio EXCLUDE_FROM_ALL)
     endif()
+    target_link_libraries(rocprofiler-sdk-elfio INTERFACE $<BUILD_INTERFACE:rocm-elfio>)
 else()
     find_package(elfio REQUIRED GLOBAL)
     target_link_libraries(rocprofiler-sdk-elfio INTERFACE elfio::elfio)

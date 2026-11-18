@@ -79,6 +79,7 @@
 "project: rocprofiler-sdk":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocprofiler-sdk/**/*'
+  - any-glob-to-any-file: 'shared/elfio/**/*'
 
 "project: rocprofiler-systems":
 - changed-files:

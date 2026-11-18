@@ -177,6 +177,7 @@ jobs:
             .github/actions/rocprofiler-sdk-util
             projects/rocprofiler-sdk
             shared/sha256
+            shared/elfio
             projects/aqlprofile
             projects/rocprofiler-register
             projects/rocprof-trace-decoder

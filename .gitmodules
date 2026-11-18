@@ -43,9 +43,6 @@
 [submodule "projects/rocprofiler-sdk/external/perfetto"]
 	path = projects/rocprofiler-sdk/external/perfetto
 	url = https://github.com/google/perfetto
-[submodule "projects/rocprofiler-sdk/external/elfio"]
-	path = projects/rocprofiler-sdk/external/elfio
-	url = https://github.com/serge1/ELFIO.git
 [submodule "projects/rocprofiler-sdk/external/yaml-cpp"]
 	path = projects/rocprofiler-sdk/external/yaml-cpp
 	url = https://github.com/jbeder/yaml-cpp.git

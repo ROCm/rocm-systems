@@ -344,16 +344,6 @@ endif()
 
 # ----------------------------------------------------------------------------------------#
 #
-# ELFIO library
-#
-# ----------------------------------------------------------------------------------------#
-
-# get_target_property(ELFIO_INCLUDE_DIR elfio::elfio INTERFACE_INCLUDE_DIRECTORIES)
-# target_include_directories(rocprofiler-sdk-elfio SYSTEM INTERFACE ${ELFIO_INCLUDE_DIR})
-target_link_libraries(rocprofiler-sdk-elfio INTERFACE elfio::elfio)
-
-# ----------------------------------------------------------------------------------------#
-#
 # OTF2
 #
 # ----------------------------------------------------------------------------------------#
