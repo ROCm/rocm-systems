@@ -1079,11 +1079,6 @@ completion_monitor_loop(completion_monitor& mon)
         conds.clear();
         values.clear();
 
-        const auto reserve_size = mon.active.size() + 2;  // +2 for wake signal and null signal
-        signals.reserve(reserve_size);
-        conds.reserve(reserve_size);
-        values.reserve(reserve_size);
-
         for(const auto& pending : mon.active)
         {
             signals.emplace_back(pending.completion_signal);

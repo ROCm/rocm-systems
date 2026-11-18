@@ -325,12 +325,6 @@ rocprofiler_create_buffer(rocprofiler_context_id_t        context,
         return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
     }
 
-    if(watermark == 0)
-    {
-        ROCP_CI_LOG(WARNING) << fmt::format("watermark ({}) cannot be zero", watermark);
-        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-    }
-
     auto opt_buff_id = rocprofiler::buffer::allocate_buffer();
     if(!opt_buff_id) return ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND;
     buffer_id->handle = opt_buff_id->handle;
