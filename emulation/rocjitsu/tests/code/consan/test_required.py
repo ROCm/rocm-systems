@@ -18,9 +18,9 @@ from run_required import (
 def paired_registrations():
     tests = []
     for name in sorted(physical_names()):
-        # The validator owns agreement, not the CMake scenario's geometry or
-        # fixture mapping. Use arbitrary shared values instead of repeating it.
-        _, gpu, _, _, _ = name.split('.')
+        # Pin the named workgroup count, but leave fixture and thread mappings
+        # arbitrary instead of repeating CMake's scenario table.
+        gpu = name.split('.')[1]
         command = [
             'python3',
             'driver.py',
@@ -35,6 +35,9 @@ def paired_registrations():
             '--case',
             'shared-fixture',
         ]
+        suffix = name.rsplit('.', 1)[-1]
+        if suffix.startswith('groups'):
+            command.extend(['--workgroups', suffix.removeprefix('groups')])
         tests.append(
             {
                 'name': name,
@@ -66,6 +69,11 @@ def paired_registrations():
             }
         )
     return tests
+
+
+def selected_registrations(tests):
+    available = {test['name']: test for test in tests}
+    return [available.get(name, {'name': name}) for name in required_names()]
 
 
 def set_property(test, name, value):
@@ -195,11 +203,68 @@ class RequiredCoverage(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'required simulator twin missing'):
             validate_physical_registrations(tests)
 
+    def test_geometry_suffixes_keep_their_target_and_application_contract(self):
+        tests = paired_registrations()
+        physical = dict(tests[0])
+        twin = dict(tests[1])
+        for test in (physical, twin):
+            test['name'] += '.groups4'
+            test['command'] = [*test['command'], '--workgroups', '4']
+        tests.extend((physical, twin))
+        validate_physical_registrations(tests)
+        twin['command'][-1] = '16'
+        with self.assertRaisesRegex(
+            ValueError, 'command differs from required simulator twin'
+        ):
+            validate_physical_registrations(tests)
+        twin['command'][-1] = '4'
+        set_property(physical, 'RESOURCE_LOCK', ['consan-wrong-target'])
+        with self.assertRaisesRegex(
+            ValueError, 'invalid physical execution properties'
+        ):
+            validate_physical_registrations(tests)
+
+    def test_workgroup_suffix_requires_the_effective_count(self):
+        for groups, arguments, valid in (
+            (16, [], False),
+            (16, ['--workgroups', '4'], False),
+            (16, ['--workgroups=4'], False),
+            (16, ['--workgroups', '16', '--workgroups', '1'], False),
+            (16, ['--workgroups'], False),
+            (16, ['--workgroups', 'invalid'], False),
+            (16, ['--workgroups', '16'], True),
+            (16, ['--workgroups=16'], True),
+            (16, ['--workgroups', '1', '--workgroups', '16'], True),
+            (1, [], True),
+        ):
+            tests = paired_registrations()
+            fixture = 'grouped_disjoint' if groups == 1 else 'grouped_race'
+            suffix = f'.assembly.{fixture}.groups{groups}'
+            twins = [test for test in tests if test['name'].endswith(suffix)]
+            self.assertEqual(len(twins), 2)
+            for test in twins:
+                command = test['command']
+                index = command.index('--workgroups')
+                del command[index : index + 2]
+                command.extend(arguments)
+            for validate, registrations in (
+                (validate_selected, selected_registrations(tests)),
+                (validate_physical_registrations, tests),
+            ):
+                with self.subTest(
+                    groups=groups, arguments=arguments, validator=validate.__name__
+                ):
+                    if valid:
+                        validate(registrations)
+                    else:
+                        with self.assertRaisesRegex(ValueError, 'workgroups'):
+                            validate(registrations)
+
     def test_missing_or_empty_selection_fails(self):
         for names in (set(), required_names() - {next(iter(required_names()))}):
             with self.assertRaises(ValueError):
                 validate_selected([{'name': name} for name in names])
-        validate_selected([{'name': name} for name in required_names()])
+        validate_selected(selected_registrations(paired_registrations()))
 
     def test_missing_or_skipped_execution_fails(self):
         root = ET.Element('testsuite')

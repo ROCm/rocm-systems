@@ -20,12 +20,13 @@ bool all_zero(std::span<const uint8_t> bytes) {
   return std::ranges::all_of(bytes, [](uint8_t value) { return value == 0; });
 }
 
-void issue(LdsRaceExecutionResult &result, uint32_t wave, uint32_t site, const char *reason) {
+void issue(LdsRaceExecutionResult &result, uint32_t wave, uint32_t site, const char *reason,
+           uint32_t workgroup = UINT32_MAX) {
   result.coverage_complete = false;
   result.ordering_uncertain = true;
   ++result.integrity_events;
   if (result.issues.size() < kMaxIntegrityIssueExamples)
-    result.issues.push_back({wave, site, reason});
+    result.issues.push_back({wave, site, reason, workgroup});
 }
 
 struct Observation {
@@ -66,12 +67,14 @@ struct WaveEvidence {
 };
 
 void read_wave(const Manifest &facts, const CapturedExecution &execution,
-               const LaunchLayout &layout, uint32_t wave, LdsRaceExecutionResult &result,
+               const LaunchLayout &layout, uint32_t row_index, LdsRaceExecutionResult &result,
                std::vector<Observation> &observations, std::vector<WaveEvidence> &completions) {
+  const uint32_t wave = row_index % layout.waves_per_workgroup;
+  const uint32_t workgroup = row_index / layout.waves_per_workgroup;
   const size_t first_observation = observations.size();
   const std::span<const uint8_t> row =
       std::span(execution.report)
-          .subspan(kReportHeaderBytes + wave * layout.row_stride, layout.row_stride);
+          .subspan(kReportHeaderBytes + row_index * layout.row_stride, layout.row_stride);
   const uint32_t status = *wire::read_u32(row, wire::kRowStatus);
   const uint32_t loss = *wire::read_u32(row, wire::kRowLoss);
   const uint32_t final = *wire::read_u32(row, wire::kRowFinalSequence);
@@ -79,19 +82,20 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
   if (wire::read_u64(row, wire::kRowSerial) != execution.serial ||
       wire::read_u32(row, wire::kRowEntry) != facts.entry.id ||
       wire::read_u32(row, wire::kRowWave) != wave ||
+      wire::read_u32(row, wire::kRowWorkgroupX) != workgroup ||
       (status != kCompletedRowStatus && status != (kCompletedRowStatus | wire::kRowExhausted)) ||
       !all_zero(row.subspan(wire::kRowReservedBegin, kRowHeaderBytes - wire::kRowReservedBegin)) ||
       final > facts.sites.size() || loss > final ||
       (((status & wire::kRowExhausted) != 0) != (loss > 0))) {
-    issue(result, wave, UINT32_MAX, "invalid_row_identity_status_or_sequence");
+    issue(result, wave, UINT32_MAX, "invalid_row_identity_status_or_sequence", workgroup);
     return;
   }
   const uint32_t final_phase = *wire::read_u32(row, wire::kRowFinalPhase);
-  WaveEvidence &evidence = completions[wave];
+  WaveEvidence &evidence = completions[row_index];
   evidence.complete =
       final_phase == facts.barriers.size() && wire::read_u32(row, wire::kRowSyncLoss) == 0;
   if (!evidence.complete)
-    issue(result, wave, UINT32_MAX, "invalid_final_barrier_phase_or_loss");
+    issue(result, wave, UINT32_MAX, "invalid_final_barrier_phase_or_loss", workgroup);
   if (!facts.barriers.empty()) {
     uint32_t previous_sequence = 0;
     for (uint32_t slot = 0; slot < kSyncCapacity; ++slot) {
@@ -100,7 +104,7 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
       if (slot >= facts.barriers.size()) {
         if (!all_zero(record)) {
           evidence.complete = false;
-          issue(result, wave, UINT32_MAX, "unexpected_barrier_completion");
+          issue(result, wave, UINT32_MAX, "unexpected_barrier_completion", workgroup);
         }
         continue;
       }
@@ -112,10 +116,10 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
           completion.group != slot || completion.occurrence != 1 || completion.phase != slot + 1 ||
           completion.phase > final_phase || completion.sequence > final ||
           completion.sequence < previous_sequence ||
-          wire::read_u32(record, wire::kSyncParticipants) != layout.wave_count ||
+          wire::read_u32(record, wire::kSyncParticipants) != layout.waves_per_workgroup ||
           !all_zero(record.subspan(wire::kSyncReservedBegin))) {
         evidence.complete = false;
-        issue(result, wave, UINT32_MAX, "missing_or_invalid_barrier_completion");
+        issue(result, wave, UINT32_MAX, "missing_or_invalid_barrier_completion", workgroup);
         continue;
       }
       previous_sequence = completion.sequence;
@@ -124,7 +128,7 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
   }
   result.lost_occurrences += loss;
   if (loss != 0)
-    issue(result, wave, UINT32_MAX, "range_reservation_exhausted");
+    issue(result, wave, UINT32_MAX, "range_reservation_exhausted", workgroup);
   std::map<uint32_t, SiteGroup> groups;
   for (const SiteFacts &site : facts.sites) {
     SiteGroup &group = groups[site.id];
@@ -154,22 +158,22 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
           sequence > final || width != site.width || mask == 0 || (mask & ~active_mask) != 0 ||
           !all_zero(record.subspan(wire::kRecordReservedBegin))) {
         ++result.rejected_records;
-        issue(result, wave, site.id, "invalid_record_commit_identity_mask_or_sequence");
+        issue(result, wave, site.id, "invalid_record_commit_identity_mask_or_sequence", workgroup);
         continue;
       }
       if (flags != wire::kExactGuestMask || offset > execution.group_bytes ||
           width > execution.group_bytes - offset) {
         ++result.rejected_records;
-        issue(result, wave, site.id, "invalid_or_out_of_bounds_effective_range");
+        issue(result, wave, site.id, "invalid_or_out_of_bounds_effective_range", workgroup);
         continue;
       }
       if ((offset % width) != 0) {
         ++result.rejected_records;
-        issue(result, wave, site.id, "unaligned_lds_alignment_mode_unavailable");
+        issue(result, wave, site.id, "unaligned_lds_alignment_mode_unavailable", workgroup);
         continue;
       }
       if (vacant)
-        issue(result, wave, site.id, "record_after_vacant_reservation");
+        issue(result, wave, site.id, "record_after_vacant_reservation", workgroup);
       if ((group.sequence != 0 && group.sequence != sequence) || (group.mask & mask) != 0 ||
           !group.offsets.insert(offset).second)
         group.ambiguous = true;
@@ -182,10 +186,10 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
           }));
       const bool phase_valid = phase == expected_phase && phase <= final_phase;
       if (!phase_valid)
-        issue(result, wave, site.id, "access_phase_contradicts_qualified_program");
-      group.records.push_back(
-          {{wave, site.id, sequence, mask, offset, width, site.original_offset, site.access, phase},
-           phase_valid});
+        issue(result, wave, site.id, "access_phase_contradicts_qualified_program", workgroup);
+      group.records.push_back({{wave, site.id, sequence, mask, offset, width, site.original_offset,
+                                site.access, phase, workgroup},
+                               phase_valid});
     }
   }
   std::map<uint32_t, std::vector<uint32_t>> occurrences;
@@ -213,11 +217,11 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
     previous = it;
   }
   if (occurrences.size() != final)
-    issue(result, wave, UINT32_MAX, "missing_observed_occurrence");
+    issue(result, wave, UINT32_MAX, "missing_observed_occurrence", workgroup);
   for (const auto &[site, group] : groups) {
     if (group.ambiguous) {
       result.rejected_records += group.records.size();
-      issue(result, wave, site, "ambiguous_instruction_group_ownership");
+      issue(result, wave, site, "ambiguous_instruction_group_ownership", workgroup);
     } else
       observations.insert(observations.end(), group.records.begin(), group.records.end());
   }
@@ -240,7 +244,7 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
         // sequence agree. Its independently checked range/mask remain usable.
         observation.phase_valid = false;
         consistent = false;
-        issue(result, wave, access.site, "access_sequence_contradicts_barrier_phase");
+        issue(result, wave, access.site, "access_sequence_contradicts_barrier_phase", workgroup);
       }
     }
   }
@@ -434,22 +438,14 @@ LdsRaceExecutionResult analyze_lds_race_execution(const Manifest &facts,
     result.required_barrier_waves = layout.value().wave_count;
   for (uint32_t wave = 0; wave < layout.value().wave_count; ++wave)
     read_wave(facts, execution, layout.value(), wave, result, observations, completions);
-  const bool complete = std::ranges::all_of(completions, &WaveEvidence::complete);
-  uint32_t complete_witnesses = 0;
-  for (uint32_t slot = 0; slot < kSyncCapacity; ++slot) {
-    const std::optional<Completion> &first = completions.front().journal[slot];
-    if (first && std::ranges::all_of(completions, [&](const WaveEvidence &wave) {
-          const std::optional<Completion> &other = wave.journal[slot];
-          return other && other->group == first->group && other->occurrence == first->occurrence;
-        }))
-      complete_witnesses |= 1u << slot;
-  }
   result.valid_observations = observations.size();
   using RangeBuckets = std::map<std::pair<uint32_t, uint32_t>, Bucket>;
-  RangeBuckets ranges;
+  result.workgroup_count = layout.value().workgroup_count;
+  result.waves_per_workgroup = layout.value().waves_per_workgroup;
+  std::map<uint32_t, RangeBuckets> domains;
   for (const Observation &observation : observations) {
     const LdsRaceParticipant &participant = observation.participant;
-    Bucket &bucket = ranges[{participant.offset, participant.width}];
+    Bucket &bucket = domains[participant.workgroup][{participant.offset, participant.width}];
     Bucket::Wave &wave = bucket.waves[participant.wave];
     (participant.access == AccessKind::Write ? wave.writes : wave.reads).push_back(&observation);
     if (participant.access == AccessKind::Write && observation.lanes() > 1) {
@@ -468,34 +464,50 @@ LdsRaceExecutionResult analyze_lds_race_execution(const Manifest &facts,
     uint32_t end;
     const Bucket *bucket;
   };
-  std::vector<ActiveRange> active;
-  for (const auto &[range, bucket] : ranges) {
-    std::erase_if(active, [&](const ActiveRange &prior) { return prior.end <= range.first; });
-    for (const ActiveRange &prior : active)
-      for (const auto &[prior_wave, prior_accesses] : prior.bucket->waves)
-        for (const auto &[wave, accesses] : bucket.waves) {
-          if (prior_wave == wave)
-            continue;
-          compare(prior_accesses.writes, accesses.writes, examples, facts.scope, completions,
-                  complete_witnesses, complete, result);
-          compare(prior_accesses.writes, accesses.reads, examples, facts.scope, completions,
-                  complete_witnesses, complete, result);
-          compare(prior_accesses.reads, accesses.writes, examples, facts.scope, completions,
-                  complete_witnesses, complete, result);
-        }
-    std::vector<const Observation *> prior_reads, prior_writes;
-    for (const auto &[wave, accesses] : bucket.waves) {
-      (void)wave;
-      compare(prior_writes, accesses.writes, examples, facts.scope, completions, complete_witnesses,
-              complete, result);
-      compare(prior_writes, accesses.reads, examples, facts.scope, completions, complete_witnesses,
-              complete, result);
-      compare(prior_reads, accesses.writes, examples, facts.scope, completions, complete_witnesses,
-              complete, result);
-      prior_writes.insert(prior_writes.end(), accesses.writes.begin(), accesses.writes.end());
-      prior_reads.insert(prior_reads.end(), accesses.reads.begin(), accesses.reads.end());
+  for (const auto &[workgroup, ranges] : domains) {
+    const std::span<const WaveEvidence> domain_completions =
+        std::span(completions)
+            .subspan(workgroup * layout.value().waves_per_workgroup,
+                     layout.value().waves_per_workgroup);
+    const bool complete = std::ranges::all_of(domain_completions, &WaveEvidence::complete);
+    uint32_t complete_witnesses = 0;
+    for (uint32_t slot = 0; slot < kSyncCapacity; ++slot) {
+      const std::optional<Completion> &first = domain_completions.front().journal[slot];
+      if (first && std::ranges::all_of(domain_completions, [&](const WaveEvidence &wave) {
+            const std::optional<Completion> &other = wave.journal[slot];
+            return other && other->group == first->group && other->occurrence == first->occurrence;
+          }))
+        complete_witnesses |= 1u << slot;
     }
-    active.push_back({range.first + range.second, &bucket});
+    std::vector<ActiveRange> active;
+    for (const auto &[range, bucket] : ranges) {
+      std::erase_if(active, [&](const ActiveRange &prior) { return prior.end <= range.first; });
+      for (const ActiveRange &prior : active)
+        for (const auto &[prior_wave, prior_accesses] : prior.bucket->waves)
+          for (const auto &[wave, accesses] : bucket.waves) {
+            if (prior_wave == wave)
+              continue;
+            compare(prior_accesses.writes, accesses.writes, examples, facts.scope,
+                    domain_completions, complete_witnesses, complete, result);
+            compare(prior_accesses.writes, accesses.reads, examples, facts.scope,
+                    domain_completions, complete_witnesses, complete, result);
+            compare(prior_accesses.reads, accesses.writes, examples, facts.scope,
+                    domain_completions, complete_witnesses, complete, result);
+          }
+      std::vector<const Observation *> prior_reads, prior_writes;
+      for (const auto &[wave, accesses] : bucket.waves) {
+        (void)wave;
+        compare(prior_writes, accesses.writes, examples, facts.scope, domain_completions,
+                complete_witnesses, complete, result);
+        compare(prior_writes, accesses.reads, examples, facts.scope, domain_completions,
+                complete_witnesses, complete, result);
+        compare(prior_reads, accesses.writes, examples, facts.scope, domain_completions,
+                complete_witnesses, complete, result);
+        prior_writes.insert(prior_writes.end(), accesses.writes.begin(), accesses.writes.end());
+        prior_reads.insert(prior_reads.end(), accesses.reads.begin(), accesses.reads.end());
+      }
+      active.push_back({range.first + range.second, &bucket});
+    }
   }
   return result;
 }

@@ -531,6 +531,30 @@ TEST_P(ConSanTargetStatic, HipWorkloadsMustContainQualifiedNativeLdsSites) {
   }
 }
 
+TEST(ConSanBoundedStatic, BindOriginalWorkgroupInputAndRejectForgedIdentityFacts) {
+  for (const char *fixture : {"native-2", "native-no-workgroup-id"}) {
+    const std::vector<uint8_t> original =
+        test::read_fixture(test::target_fixture_path({"gfx1250", 32}, fixture));
+    ASSERT_FALSE(original.empty());
+    InputError error;
+    const FailureOr<PreparedArtifact> artifact =
+        prepare(original, *target_profile("gfx1250"), "lds_producer_consumer", error);
+    ASSERT_TRUE(artifact.succeeded()) << error.message;
+    const bool identity = std::string_view(fixture) == "native-2";
+    EXPECT_EQ(artifact.value().manifest.entry.workgroup_id_scalar, identity ? 117u : UINT32_MAX);
+    ContractError contract_error;
+    EXPECT_EQ(plan_launch(artifact.value().manifest, {{260, 1, 1}, {65, 1, 1}}, 8, 0).succeeded(),
+              identity);
+    EXPECT_TRUE(plan_launch(artifact.value().manifest, {{65, 1, 1}, {65, 1, 1}}, 8, 0).succeeded());
+    Manifest forged = artifact.value().manifest;
+    forged.entry.workgroup_id_scalar = identity ? UINT32_MAX : 117;
+    ASSERT_TRUE(match_images(forged, original, artifact.value().image).succeeded());
+    EXPECT_TRUE(
+        verify_artifact_images(forged, original, artifact.value().image, &contract_error).failed());
+    EXPECT_EQ(contract_error.code, ContractErrorCode::IdentityMismatch);
+  }
+}
+
 INSTANTIATE_TEST_SUITE_P(ConSanTargets, ConSanTargetStatic, ::testing::ValuesIn(test::kTargetModes),
                          [](const auto &info) {
                            return std::string(info.param.target) + "Wave" +

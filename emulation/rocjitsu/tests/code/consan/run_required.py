@@ -6,6 +6,7 @@
 import argparse
 import json
 from pathlib import Path
+import re
 import subprocess
 import xml.etree.ElementTree as ET
 
@@ -106,6 +107,26 @@ def required_names():
         'ConSanHsaPlugin.RejectedNonDispatchPacketDoesNotModifyATrackedSignal',
         'ConSanHsaPlugin.IndividualBarriersStillPassThroughWithoutDispatchAdmission',
     }
+    for groups in (1, 4, 16):
+        for case in ('grouped_disjoint', 'grouped_barrier', 'grouped_empty'):
+            names.add(
+                f'ConSanSimProductionE2E.gfx1250.wave32.assembly.{case}.groups{groups}'
+            )
+    for groups in (4, 16):
+        for case in ('grouped_race', 'grouped_read_read', 'grouped_isolation'):
+            names.add(
+                f'ConSanSimProductionE2E.gfx1250.wave32.assembly.{case}.groups{groups}'
+            )
+    for case, groups in (
+        ('grouped_repeat', 4),
+        ('grouped_oversized', 17),
+        ('grouped_edge', 4),
+        ('grouped_missing_id', 4),
+    ):
+        names.add(f'ConSanSimE2E.gfx1250.wave32.assembly.{case}.groups{groups}')
+    names.add(
+        'ConSanSimProductionE2E.gfx1250.wave32.assembly.single_missing_id.groups1'
+    )
     for gpu, wave_size in MODES:
         suffix = f'{gpu}Wave{wave_size}'
         width_cases = GFX1250_WIDTH_CASES if gpu == 'gfx1250' else CORE_WIDTH_CASES
@@ -174,6 +195,26 @@ def validate_selected(tests):
         raise ValueError(
             'Required ConSan registrations missing:\n' + '\n'.join(sorted(missing))
         )
+    for test in tests:
+        validate_workgroup_count(test)
+
+
+def validate_workgroup_count(test):
+    suffix = re.search(r'\.groups([0-9]+)$', test['name'])
+    if suffix is None:
+        return
+    expected = int(suffix.group(1))
+    parser = argparse.ArgumentParser(add_help=False, exit_on_error=False)
+    parser.add_argument('--workgroups', type=int, default=1)
+    try:
+        args, _ = parser.parse_known_args(test.get('command', []))
+    except argparse.ArgumentError as error:
+        raise ValueError(f"{test['name']}: invalid --workgroups: {error}") from error
+    if args.workgroups != expected:
+        raise ValueError(
+            f"{test['name']}: effective --workgroups {args.workgroups} "
+            f'does not match .groups{expected}'
+        )
 
 
 def physical_names():
@@ -222,7 +263,7 @@ def validate_physical_registrations(tests):
         test = available[name]
         if not name.startswith('ConSanPhysical'):
             raise ValueError(f'{name}: physical test has no simulator twin')
-        _, gpu, _, _, _ = name.split('.')
+        gpu = name.split('.')[1]
         properties = {
             item['name']: item['value'] for item in test.get('properties', [])
         }
@@ -261,6 +302,8 @@ def validate_physical_registrations(tests):
             raise ValueError(
                 f'{name}: command differs from required simulator twin {twin_name}'
             )
+        validate_workgroup_count(test)
+        validate_workgroup_count(twin)
 
 
 def validate_results(root):
