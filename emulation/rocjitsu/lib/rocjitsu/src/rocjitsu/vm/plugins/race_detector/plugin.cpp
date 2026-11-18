@@ -515,6 +515,11 @@ namespace {
 // resolve differently, and scalar and direct-to-LDS loads can read scratch.
 std::string_view event_description(const EventRegistry &events, EventId event,
                                    RaceViolation::Space space) {
+  // A barrier arrive is an atomic update that is kept as a read only.
+  if (space == RaceViolation::Space::LDS && events.barrierArrive(event))
+    return events.type(event) == MemoryEventType::LDS_TO_VGPR
+               ? "arrival at an LDS barrier cell returning the cell to VGPRs"
+               : "arrival at an LDS barrier cell";
   if (space == RaceViolation::Space::LDS && events.readsLds(event) && events.writesLds(event))
     return events.registers(event).empty() ? "atomic update of LDS"
                                            : "atomic update of LDS returning values to VGPRs";
