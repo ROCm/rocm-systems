@@ -62,6 +62,7 @@ import os
 import re
 import struct
 import subprocess
+import tempfile
 import sys
 from dataclasses import dataclass, field
 
@@ -123,12 +124,17 @@ class VerifyError(Exception):
     """The rewritten code object failed a check (exit status 4)."""
 
 
-@dataclass
+@dataclass(slots=True)
 class Insn:
     addr: int
     words: list[int]
     text: str
     function: str = ""
+    mnemonic: str = ""  # filled in from text when not given
+
+    def __post_init__(self):
+        if not self.mnemonic:
+            self.mnemonic = self.text.split(None, 1)[0]
 
     @property
     def size(self) -> int:
@@ -137,10 +143,6 @@ class Insn:
     @property
     def end(self) -> int:
         return self.addr + self.size
-
-    @property
-    def mnemonic(self) -> str:
-        return self.text.split()[0]
 
 
 @dataclass
@@ -230,26 +232,57 @@ def probe_target(llvm: str, cpu: str) -> Target:
     )
 
 
-def disassemble(llvm: str, path: str) -> tuple[list[Insn], dict[int, str]]:
-    """Instructions in .text (address, encoding words, text) and labels by address."""
-    out = run([f"{llvm}/llvm-objdump", "-d", "-z", "--section=.text", path], check=True).stdout
-    insns = []
-    labels = {}
-    # e.g. "\tds_load_b32 v4, v4   // 000000001D3C: D8D80000 04000004"
-    # Branches end with the target, e.g. "BF88007B <Cijk_H_GA+0x230>".
-    pattern = re.compile(
-        r"^\s+(\S.*?)\s*//\s*([0-9A-Fa-f]+):\s*((?:[0-9A-Fa-f]{8}\s*)+)(?:<[^>]*>)?\s*$"
-    )
-    # e.g. "0000000000001900 <_Z12lds_conflictPfii>:"
-    label = re.compile(r"^([0-9a-f]+) <([^>]+)>:$")
+def disassemble(llvm: str, path: str, start: int | None = None) -> tuple[list[Insn], dict[int, str]]:
+    """Instructions in .text (address, encoding words, text) and labels by address,
+    optionally only from address start onwards."""
+    cmd = [f"{llvm}/llvm-objdump", "-d", "-z", "--section=.text", path]
+    if start is not None:
+        cmd.append(f"--start-address={start:#x}")
+    # Through a temporary file, read line by line: faster than a large pipe,
+    # and the whole listing is never in memory at once.
+    with tempfile.TemporaryFile("w+") as f:
+        res = subprocess.run(cmd, stdout=f, stderr=subprocess.PIPE, text=True)
+        if res.returncode:
+            raise subprocess.CalledProcessError(res.returncode, cmd, stderr=res.stderr)
+        f.seek(0)
+        return _parse_listing(line.rstrip("\n") for line in f)
+
+
+def _parse_listing(lines) -> tuple[list[Insn], dict[int, str]]:
+    """Parse llvm-objdump lines.
+
+    Instruction lines, e.g. "\\tds_load_b32 v4, v4   // 000000001D3C: D8D80000 04000004";
+    branches end with the target, e.g. "BF88007B <Cijk_H_GA+0x230>".
+    Label lines, e.g. "0000000000001900 <_Z12lds_conflictPfii>:".
+    """
+    hexdigits = set("0123456789abcdefABCDEF")
+    insns: list[Insn] = []
+    labels: dict[int, str] = {}
     current = ""
-    for line in out.splitlines():
-        if m := pattern.match(line):
-            words = [int(w, 16) for w in m.group(3).split()]
-            insns.append(Insn(int(m.group(2), 16), words, m.group(1), current))
-        elif m := label.match(line):
-            current = m.group(2)
-            labels[int(m.group(1), 16)] = current
+    for line in lines:
+        if line[:1] in ("\t", " "):
+            c = line.rfind("//")
+            if c < 0:
+                continue
+            text = line[:c].strip()
+            rest = line[c + 2 :]
+            colon = rest.find(":")
+            if not text or colon < 0:
+                continue
+            tail = rest[colon + 1 :]
+            lt = tail.find("<")
+            if lt >= 0:
+                tail = tail[:lt]
+            fields = tail.split()
+            if not fields or any(len(w) != 8 or not set(w) <= hexdigits for w in fields):
+                continue
+            insn = Insn(int(rest[:colon], 16), [int(w, 16) for w in fields], text, current)
+            insns.append(insn)
+        elif line.endswith(">:") and " <" in line:
+            addr, _, name = line.partition(" <")
+            if addr and set(addr) <= hexdigits:
+                current = name[:-2]
+                labels[int(addr, 16)] = current
     return insns, labels
 
 
@@ -521,17 +554,20 @@ def pc_flow(insns: list[Insn], roots: set[int], pc_refs: list["PcRef"]) -> PcFlo
     lit_adds: dict[int, LitAdd] = {}
     escapes: set[int] = set()
     reachable: set[int] = set()
-    work = [(index[a], {}) for a in sorted(roots) if a in index]
+    empty: dict = {}  # shared: most instructions track nothing
+    work = [(index[a], empty) for a in sorted(roots) if a in index]
 
     def merge(old: dict | None, new: dict) -> dict:
         if old is None:
             return new
+        if not old or not new:
+            return empty
         out = {}
         for reg in old.keys() & new.keys():
             union = old[reg] | new[reg]
             if len(union) <= 16:
                 out[reg] = union
-        return out
+        return out or empty
 
     while work:
         k, incoming = work.pop()
@@ -540,6 +576,21 @@ def pc_flow(insns: list[Insn], roots: set[int], pc_refs: list["PcRef"]) -> PcFlo
             continue
         state[k] = merged
         reachable.add(k)
+        if not merged and k not in pattern_end and insns[k].mnemonic != "s_getpc_b64":
+            # Nothing tracked here: only follow the control flow.
+            insn = insns[k]
+            mn = insn.mnemonic
+            fall = not TERMINATOR_MNEMONICS.match(mn) or mn == "s_swappc_b64"
+            if DIRECT_BRANCH.match(mn):
+                t = branch_target(insn.addr, insn.words[0])
+                if t in index:
+                    work.append((index[t], empty))
+                fall = fall or mn == "s_call_b64"
+            if mn == "s_swappc_b64":
+                fall = True
+            if fall and k + 1 < n:
+                work.append((k + 1, empty))
+            continue
         # Recognised pattern: jump over it with the formed address.
         if k in pattern_end and pattern_end[k][2] is not None:
             last, ref, pair = pattern_end[k]
@@ -633,6 +684,129 @@ def pc_flow(insns: list[Insn], roots: set[int], pc_refs: list["PcRef"]) -> PcFlo
         for j in succ:
             work.append((j, out))
     return PcFlow(reachable, jumps, lit_adds, escapes)
+
+
+def flow_successors(insns: list[Insn], flow: PcFlow, k: int, index: dict[int, int]):
+    """(successor indices, leaves to unknown code?) of a reachable instruction."""
+    insn = insns[k]
+    mn = insn.mnemonic
+    succ, unknown = [], False
+    fall = not TERMINATOR_MNEMONICS.match(mn)
+    if DIRECT_BRANCH.match(mn):
+        t = branch_target(insn.addr, insn.words[0])
+        if t in index:
+            succ.append(index[t])
+        if mn == "s_call_b64":
+            fall = True
+    if mn == "s_setpc_b64":
+        if k in flow.jumps:
+            succ += [index[t] for t in flow.jumps[k] if t in index]
+        else:
+            unknown = True  # a return or a jump the scan could not resolve
+    if mn == "s_swappc_b64":
+        fall = True
+    if fall and k + 1 < len(insns):
+        succ.append(k + 1)
+    return succ, unknown
+
+
+def loop_depths(insns: list[Insn], flow: PcFlow, sites: list[int]) -> list[int]:
+    """How many loops (backward branches or resolved backward jumps in
+    reachable code) contain each of the given instruction indices."""
+    index = {i.addr: k for k, i in enumerate(insns)}
+    events = []
+    for k in flow.reachable:
+        for j in flow_successors(insns, flow, k, index)[0]:
+            if j <= k:  # back edge: the loop is [j, k]
+                events += [(j, 1), (k + 1, -1)]
+    events.sort()
+    starts = [e[0] for e in events]
+    prefix, total = [], 0
+    for _, d in events:
+        total += d
+        prefix.append(total)
+    return [prefix[bisect.bisect_right(starts, s) - 1] if bisect.bisect_right(starts, s) else 0 for s in sites]
+
+
+ALL_SGPRS = (1 << 106) - 1
+# Instructions that write their first operand (an SGPR or SGPRs). Anything not
+# listed is treated as only reading its SGPR operands, which can only make a
+# register look live, never dead.
+SGPR_WRITERS = re.compile(
+    r"^(s_(mov|cmov|add|sub|mul|and|or|xor|nand|nor|xnor|andn2|orn2|lshl|lshr|ashr|bfe|bfm|"
+    r"bitset|brev|bcnt|ff0|ff1|flbit|sext|not|wqm|quadmask|abs|min|max|cselect|getpc|load|"
+    r"buffer_load|getreg|absdiff|pack|cvt|ctz|clz|cls|bitreplicate|movk|cmovk|addk|mulk|"
+    r"memtime|memrealtime|sendmsg_rtn)\w*|v_readlane\w*|v_readfirstlane\w*|v_cmp_\w*_e64)$"
+)
+# Writers that also read their destination (conditional or read-modify-write).
+SGPR_RMW = re.compile(r"^s_(cmov|cmovk|addk|mulk|bitset)\w*$")
+
+
+def sgpr_mask(regs: set[int]) -> int:
+    mask = 0
+    for r in regs:
+        mask |= 1 << r
+    return mask
+
+
+def sgpr_def_use(insn: Insn) -> tuple[int, int]:
+    """(SGPRs certainly written, SGPRs possibly read) as bit masks."""
+    mn = insn.mnemonic
+    ops = operands(insn)
+    if "movrel" in mn:
+        return 0, ALL_SGPRS  # indexed access: may read any SGPR
+    if mn in ("s_swappc_b64", "s_call_b64"):
+        return (sgpr_mask(sgprs_of(ops[0])) if ops else 0), ALL_SGPRS  # the callee may read any
+    if not ops:
+        return 0, 0
+    first = sgpr_mask(sgprs_of(ops[0]))
+    rest = 0
+    for op in ops[1:]:
+        rest |= sgpr_mask(sgprs_of(op))
+    if SGPR_WRITERS.match(mn) and not mn.startswith("s_movrel"):
+        return first, rest | (first if SGPR_RMW.match(mn) else 0)
+    return 0, first | rest
+
+
+def sgpr_liveness(insns: list[Insn], flow: PcFlow) -> list[int]:
+    """SGPRs live on entry to each reachable instruction (bit masks).
+
+    Backward data flow over the reachable code. Returns, jumps the scan could
+    not resolve and calls count as reading every SGPR, so a register is only
+    reported dead when every path writes it before reading it (or ends).
+    """
+    n = len(insns)
+    index = {i.addr: k for k, i in enumerate(insns)}
+    succ: dict[int, list[int]] = {}
+    preds: dict[int, list[int]] = {}
+    unknown: set[int] = set()
+    du: dict[int, tuple[int, int]] = {}
+    for k in flow.reachable:
+        s, u = flow_successors(insns, flow, k, index)
+        succ[k] = s
+        if u:
+            unknown.add(k)
+        for j in s:
+            preds.setdefault(j, []).append(k)
+        du[k] = sgpr_def_use(insns[k])
+    live = [0] * n
+    work = sorted(flow.reachable)
+    pending = set(work)
+    while work:
+        k = work.pop()
+        pending.discard(k)
+        out = ALL_SGPRS if k in unknown else 0
+        for j in succ[k]:
+            out |= live[j]
+        d, u = du[k]
+        new = u | (out & ~d)
+        if new != live[k]:
+            live[k] = new
+            for p in preds.get(k, []):
+                if p not in pending:
+                    pending.add(p)
+                    work.append(p)
+    return live
 
 
 def gfx9_sgpr_granules(sgprs: int) -> int:
@@ -819,6 +993,8 @@ class Relayout:
     lit_refs: list = field(default_factory=list)  # (LitAdd, new base, new target if inside)
     # Pinned s_getpc: original address -> (words inserted after it, literal index).
     pins: dict = field(default_factory=dict)
+    island_words: dict = field(default_factory=dict)  # island start -> words
+    island_branch: dict = field(default_factory=dict)  # island branch address -> its target
 
     @property
     def size(self) -> int:
@@ -947,6 +1123,7 @@ def verify(
     planned: set[int],
     relayouts: list[Relayout],
     lit_checks: list[tuple[int, int | None, int | None, int, int]],
+    ref_checks: list[tuple["PcRef", int]],
 ) -> None:
     """Check the rewritten bytes against the plan; raise VerifyError on any mismatch."""
 
@@ -980,16 +1157,21 @@ def verify(
         if word(out, a) != w:
             fail(f"PC-relative literal at {a:#x} not adjusted as planned")
     island_ranges = [(r.start, r.cursor) for r in islands if r.cursor > r.start]
-    for a in range(t_addr, t_addr + t_size, 4):
-        before, after = word(original, a), word(out, a)
-        if before == after:
-            continue
-        why = allowed.get(a)
-        if why is None:
-            if not any(s <= a < e for s, e in island_ranges):
-                fail(f"unplanned change at {a:#x}")
-            if before not in target.padding:
-                fail(f"island word at {a:#x} was not padding")
+    old_bytes = original[t_off : t_off + t_size]
+    new_bytes = out[t_off : t_off + t_size]
+    for blk in range(0, t_size, 4096):
+        if old_bytes[blk : blk + 4096] == new_bytes[blk : blk + 4096]:
+            continue  # unchanged block
+        for a in range(t_addr + blk, min(t_addr + blk + 4096, t_addr + t_size), 4):
+            before, after = word(original, a), word(out, a)
+            if before == after:
+                continue
+            why = allowed.get(a)
+            if why is None:
+                if not any(s <= a < e for s, e in island_ranges):
+                    fail(f"unplanned change at {a:#x}")
+                if before not in target.padding:
+                    fail(f"island word at {a:#x} was not padding")
     for s, e in island_ranges:
         if s >= t_addr + t_size:
             continue  # stub space carved from the pool, not original padding
@@ -1054,8 +1236,16 @@ def verify(
             fail(f"relaid-out kernel at {rl.new:#x} does not start at its entry")
         markers_at = {m[3]: m for m in rl.markers}
         pos, group, seen = rl.new, {}, 0
+        islands_left = dict(rl.island_words)
         for k, a in enumerate(olds):
             size = (olds[k + 1] if k + 1 < len(olds) else rl.end) - a
+            while pos in islands_left:
+                iw = islands_left.pop(pos)
+                if [word(out, pos + 4 * j) for j in range(len(iw))] != iw:
+                    fail(f"branch island at {pos:#x} has the wrong words")
+                if len(iw) == 2 and branch_target(pos, iw[0]) != pos + 8:
+                    fail(f"branch island at {pos:#x} does not skip itself")
+                pos += 4 * len(iw)
             group[a] = pos
             while pos in markers_at:
                 m = markers_at.pop(pos)
@@ -1083,16 +1273,42 @@ def verify(
                 if pin[li] != (rl.new_at[a] - a) & 0xFFFFFFFF:
                     fail(f"pin after s_getpc at {a:#x} subtracts the wrong distance")
                 pos += 4 * len(pin)
-        if pos != rl.new + rl.size or markers_at or seen != len(rl.markers):
-            fail(f"relaid-out kernel at {rl.new:#x}: layout and markers disagree")
+        if pos != rl.new + rl.size or markers_at or islands_left or seen != len(rl.markers):
+            fail(f"relaid-out kernel at {rl.new:#x}: layout, markers and islands disagree")
+
+        def landing(at: int) -> int:
+            """Where a branch at this address ends up, following branch islands."""
+            dest = branch_target(at, word(out, at))
+            for _ in range(64):
+                if dest not in rl.island_branch:
+                    return dest
+                dest = branch_target(dest, word(out, dest))
+            fail(f"branch island chain from {at:#x} too long")
+
+        for at, dest in rl.island_branch.items():
+            if not target.is_branch(word(out, at)) or branch_target(at, word(out, at)) != dest:
+                fail(f"branch island at {at:#x} is not the planned s_branch")
         for a in rl.branches:
             t = branch_target(a, word(original, a))
             want = group.get(t) if rl.start <= t < rl.end else t
-            if branch_target(rl.new_at[a], word(out, rl.new_at[a])) != want:
+            if landing(rl.new_at[a]) != want:
                 fail(f"relaid-out branch from {a:#x} lands at the wrong place")
 
     # 2d. Every PC-relative add (original code, copies, relayouts), read back
     # from the output bytes, points where it should.
+    # Recognised s_getpc patterns in the original code, decoded from the output bytes.
+    for ref, want in ref_checks:
+        if ref.lits is not None:
+            value = word(out, ref.lits[1]) << 32 | word(out, ref.lits[0])
+            offset = value - (1 << 64) if value >> 63 else value
+        elif ref.lit32 is not None:
+            addr, other, backward = ref.lit32
+            v = sext32(word(out, addr) + other)
+            offset = -abs(v) if backward else v
+        else:
+            continue  # not adjustable: its words are unchanged (checked in step 1)
+        if ref.base + offset != want:
+            fail(f"s_getpc at {ref.getpc:#x} points at {ref.base + offset:#x}, planned {want:#x}")
     for lo_a, hi_a, hi_inline, base, want in lit_checks:
         hi = word(out, hi_a) if hi_a is not None else (hi_inline or 0) & 0xFFFFFFFF
         value = hi << 32 | word(out, lo_a)
@@ -1162,12 +1378,15 @@ def tool_check(
     placements: list[Placement],
     expected_pc: dict[int, int],
     expected_mnemonics: dict[int, str],
+    new_code: int,
 ) -> None:
     """llvm-readelf and llvm-objdump must read the output without new complaints.
 
-    Also re-decodes the output and checks that every recognised s_getpc (in the
-    original code, kernel copies and relaid-out kernels) points where it
-    should, and that relaid-out code decodes to the planned instructions.
+    Also decodes the new code (from new_code, the end of the original .text,
+    onwards) and checks that every recognised s_getpc in it (kernel copies and
+    relaid-out kernels) points where it should, that relaid-out code decodes to
+    the planned instructions, and that stubs hold their original instruction.
+    The original code's patched words are checked byte by byte in verify().
     """
 
     def complaints(path: str) -> set[str]:
@@ -1179,22 +1398,21 @@ def tool_check(
     if extra:
         raise VerifyError("llvm-readelf: " + "; ".join(sorted(extra))[:500])
     try:
-        out_insns, _ = disassemble(llvm, rewritten)
+        out_insns, _ = disassemble(llvm, rewritten, start=new_code)
     except subprocess.CalledProcessError as e:
         raise VerifyError("llvm-objdump failed: " + (e.stderr or "")[:300])
     by_addr = {i.addr: i.mnemonic for i in out_insns}
-    if expected_pc:
-        out_refs, _ = pc_references(out_insns)
-        by_base = {r.base: r.target for r in out_refs}
-        for base, want in expected_pc.items():
-            if by_base.get(base) != want:
-                raise VerifyError(f"objdump: s_getpc at {base - 4:#x} points at the wrong address")
+    out_refs, _ = pc_references(out_insns)
+    by_base = {r.base: r.target for r in out_refs}
+    for base, want in expected_pc.items():
+        if base >= new_code and by_base.get(base) != want:
+            raise VerifyError(f"objdump: s_getpc at {base - 4:#x} points at the wrong address")
     for addr, mnemonic in expected_mnemonics.items():
         if by_addr.get(addr) != mnemonic:
             raise VerifyError(f"objdump: {by_addr.get(addr)} at {addr:#x}, planned {mnemonic}")
     for p in placements:
-        if by_addr.get(p.insn.addr) != "s_branch":
-            raise VerifyError(f"objdump: site {p.insn.addr:#x} is not an s_branch")
+        if p.stub < new_code:
+            continue  # a stub in padding inside the original .text: checked in verify()
         if by_addr.get(p.back_branch) != "s_branch":
             raise VerifyError(f"objdump: stub at {p.stub:#x} does not end in s_branch")
         if by_addr.get(p.stub + 4 * (len(p.stub_words) - len(p.insn.words))) != p.insn.mnemonic:
@@ -1315,39 +1533,67 @@ def rewrite(args) -> int:
     if not sites:
         raise Unchanged("no sites to mark")
 
-    # Marker templates. Without s_ttracedata_imm every marker needs M0 and a
-    # free SGPR; with it, only IDs past MAX_IMM_ID do.
+    index_of = {i.addr: k for k, i in enumerate(insns)}
+
+    # Marker IDs: one-instruction markers (IDs 1..MAX_IMM_ID, gfx10+) go to the
+    # sites in the most deeply nested loops, where marker cost matters most.
+    depth = loop_depths(insns, flow, [index_of[s[0].addr] for s in sites])
+    order = sorted(range(len(sites)), key=lambda j: (-depth[j], sites[j][0].addr))
+    site_id = {sites[j][0].addr: rank + 1 for rank, j in enumerate(order)}
+
+    # The SGPR that saves M0 (and SCC for pinned s_getpc): one above every SGPR
+    # the code names if there is one; otherwise, per site, an SGPR the kernel
+    # names but that is dead at the site (register liveness over all paths).
     spare = free_sgpr(insns, target.max_sgpr)
-    if spare is None:
-        if target.s_ttracedata_imm is None:
-            raise Unchanged("no free SGPR to save M0 in, and this target has no s_ttracedata_imm")
-        if len(sites) > MAX_IMM_ID:
-            print(
-                f"no free SGPR for M0 markers: at most {MAX_IMM_ID} of {len(sites)} sites",
-                file=sys.stderr,
+    live_in: list[int] | None = None
+    kernel_named: dict = {}
+
+    def free_at(k: int, exclude: int = 0) -> int | None:
+        """A spare SGPR usable just before instruction k, or None."""
+        nonlocal live_in
+        if spare is not None:
+            return spare
+        if live_in is None:
+            live_in = sgpr_liveness(insns, flow)
+        rng = kernel_range(insns[k].addr)
+        if rng not in kernel_named:
+            lo, hi = (index_of[rng[0]], bisect.bisect_left(insn_addrs, rng[1])) if rng else (k, k + 1)
+            named = 0
+            for j in range(lo, hi):
+                d, u = sgpr_def_use(insns[j])
+                named |= d | u
+            kernel_named[rng] = named & ((1 << (target.max_sgpr + 1)) - 1)
+        dead = kernel_named[rng] & ~live_in[k] & ~exclude
+        return dead.bit_length() - 1 if dead else None
+
+    m0_templates: dict[int, list[list[int]]] = {}
+
+    def m0_template(reg: int) -> list[list[int]] | None:
+        if reg not in m0_templates:
+            enc = mc_encode(
+                args.llvm,
+                target.cpu,
+                [f"s_mov_b32 s{reg}, m0", "s_mov_b32 m0, 0x12345678", f"s_nop {target.m0_wait}",
+                 f"s_mov_b32 m0, s{reg}"],
             )
-    m0 = None
-    if spare is not None:
-        enc = mc_encode(
-            args.llvm,
-            target.cpu,
-            [f"s_mov_b32 s{spare}, m0", "s_mov_b32 m0, 0x12345678", f"s_nop {target.m0_wait}",
-             f"s_mov_b32 m0, s{spare}"],
-        )
-        if len(enc) != 4:
-            raise Unchanged("llvm-mc could not encode the M0 marker")
-        m0 = list(enc.values())
+            if len(enc) != 4:
+                raise Unchanged("llvm-mc could not encode the M0 marker")
+            m0_templates[reg] = list(enc.values())
+        return m0_templates[reg]
 
     def uses_m0(marker_id: int) -> bool:
         return target.s_ttracedata_imm is None or marker_id > MAX_IMM_ID
 
-    def marker_words(marker_id: int) -> list[int] | None:
+    def marker_words(marker_id: int, site: int) -> list[int] | None:
+        """The marker for a site (original address), or None if it needs M0
+        and no SGPR is free there."""
         encoded = marker_id << 2
         if not uses_m0(marker_id):
             return [target.s_ttracedata_imm | encoded]
-        if m0 is None:
+        reg = free_at(index_of[site])
+        if reg is None:
             return None
-        save, set_m0, nop, restore = m0
+        save, set_m0, nop, restore = m0_template(reg)
         # Waits after each M0 write keep s_ttracedata and later M0 readers safe.
         return save + [set_m0[0], encoded] + nop + [target.s_ttracedata] + nop + restore + nop
 
@@ -1383,9 +1629,10 @@ def rewrite(args) -> int:
         print("PC-derived values used in ways not followed: later segments stay put", file=sys.stderr)
     capacity = 1 << 40 if movable else max(0, limit - stub_base - PREFETCH_GUARD)
 
+    island_spans = [] if args.no_islands else [(r.start, r.end) for r in find_islands(target, insns, labels)]
+
     def new_placer() -> Placer:
-        islands = [] if args.no_islands else find_islands(target, insns, labels)
-        return Placer(islands, Region(stub_base, stub_base + capacity, pool=True))
+        return Placer([Region(s, e) for s, e in island_spans], Region(stub_base, stub_base + capacity, pool=True))
 
     def relocation_blocker(start: int, end: int) -> str | None:
         """Why a kernel's code cannot run from new code, or None if it can."""
@@ -1407,33 +1654,38 @@ def rewrite(args) -> int:
                 return f"PC-relative add at {insns[la.lo].addr:#x} leaves the kernel"
         return None
 
-    pin_template: dict[int, tuple[list[int], int]] = {}
+    pin_template: dict[tuple[int, int], tuple[list[int], int]] = {}
 
-    def pin_words(a: int) -> tuple[list[int], int] | None:
-        """Words that turn the PC in s[a:a+1] back into the original code's PC
-        (subtract a literal, filled in per site), keeping SCC, and the index of
-        the literal word. Uses the spare SGPR to save SCC."""
-        if spare is None:
+    def pin_words(getpc: int) -> tuple[list[int], int] | None:
+        """Words that turn the PC written by the s_getpc at this address back
+        into the original code's PC (subtract a literal, filled in per site),
+        keeping SCC, and the index of the literal word. A free SGPR saves SCC."""
+        k = index_of[getpc]
+        a = pair_of(operands(insns[k])[0])
+        if a is None or k + 1 >= len(insns):
             return None
-        if a not in pin_template:
+        reg = free_at(k + 1, exclude=sgpr_mask({a, a + 1}))
+        if reg is None:
+            return None
+        if (a, reg) not in pin_template:
             wait = re.fullmatch(r"gfx1[12]\d\w*", target.cpu) is not None
             lines = [
-                f"s_cselect_b32 s{spare}, 1, 0",
+                f"s_cselect_b32 s{reg}, 1, 0",
                 f"s_sub_u32 s{a}, s{a}, 0x12345678",
                 f"s_subb_u32 s{a + 1}, s{a + 1}, 0",
-                f"s_cmp_lg_u32 s{spare}, 0",
+                f"s_cmp_lg_u32 s{reg}, 0",
             ] + (["s_waitcnt_depctr depctr_sa_sdst(0)"] if wait else [])
             enc = mc_encode(args.llvm, target.cpu, lines)
             if len(enc) != len(lines):
                 return None
-            cselect, sub, subb, cmp_ = (list(enc.values())[k] for k in range(4))
+            cselect, sub, subb, cmp_ = (list(enc.values())[j] for j in range(4))
             waits = list(enc.values())[4] if wait else []
             # SGPR writes are waited for before anything reads them (gfx11+).
             words = cselect + waits + sub + subb + cmp_ + waits
-            pin_template[a] = (words, len(cselect + waits) + 1)
-        return pin_template[a]
+            pin_template[(a, reg)] = (words, len(cselect + waits) + 1)
+        return pin_template[(a, reg)]
 
-    def build_relayout(start: int, end: int, base: int, todo, first_id: int):
+    def build_relayout(start: int, end: int, base: int, todo):
         """The kernel [start, end) laid out at base with each site's marker
         inline, or (None, reason). Sites inside an s_clause get their marker
         before the clause, so the clause stays intact.
@@ -1452,42 +1704,114 @@ def rewrite(args) -> int:
                 return None, f"{insn.mnemonic} at {insn.addr:#x}"
         pins: dict[int, tuple[list[int], int]] = {}
         for g in sorted(g for g in flow.escapes if start <= g < end):
-            a = pair_of(operands(insns[bisect.bisect_left(insn_addrs, g)])[0])
-            template = None if a is None else pin_words(a)
+            template = pin_words(g)
             if template is None:
-                return None, f"s_getpc at {g:#x} cannot be pinned (no spare SGPR)"
+                return None, f"s_getpc at {g:#x} cannot be pinned (no free SGPR)"
             pins[g] = template
         before: dict[int, list] = {}
-        marker_id = first_id
         for insn, kind in todo:
-            marker = marker_words(marker_id)
+            marker_id = site_id[insn.addr]
+            marker = marker_words(marker_id, insn.addr)
             if marker is None:
-                break  # the caller reports the sites left over
+                continue  # no free SGPR here: the caller reports it as skipped
             anchor = insns[clause_of[insn.addr]].addr if insn.addr in clause_of else insn.addr
             before.setdefault(anchor, []).append((marker_id, kind, insn.addr, marker))
-            marker_id += 1
-        group, new_at, pos = {}, {}, base
-        for insn in body:
-            group[insn.addr] = pos
-            pos += sum(4 * len(m[3]) for m in before.get(insn.addr, []))
-            new_at[insn.addr] = pos
-            pos += insn.size + 4 * len(pins[insn.addr][0] if insn.addr in pins else [])
+        # Layout. A branch whose target ends up out of s_branch reach goes
+        # through an island: one s_branch placed between live instructions part
+        # of the way there (plus an s_branch over it if code can fall into it).
+        # Islands are added until every branch reaches; they need no registers
+        # and leave SCC alone.
+        live_branches = [i for i in body if i.addr in live and DIRECT_BRANCH.match(i.mnemonic)]
+        body_pos = {insn.addr: j for j, insn in enumerate(body)}
+        anchors_ok = [
+            insn.addr for j, insn in enumerate(body)
+            if insn.addr in live and (lo + j) not in owner  # never inside an s_clause group
+        ]
+        islands: list[dict] = []  # {"anchor": addr, "dest": ("insn", addr) | ("isl", i), "skip": bool}
+        at_anchor: dict[int, list[int]] = {}
+        redirect: dict[int, tuple[str, int]] = {}  # branch address -> ("isl", i)
+        for _ in range(64):
+            group, new_at, isl_at, pos = {}, {}, {}, base
+            for insn in body:
+                for i in at_anchor.get(insn.addr, []):
+                    isl_at[i] = pos + (4 if islands[i]["skip"] else 0)  # its branch to dest
+                    pos += 8 if islands[i]["skip"] else 4
+                group[insn.addr] = pos
+                pos += sum(4 * len(m[3]) for m in before.get(insn.addr, []))
+                new_at[insn.addr] = pos
+                pos += insn.size + 4 * len(pins[insn.addr][0] if insn.addr in pins else [])
+
+            def resolve(dest: tuple[str, int]) -> int | None:
+                return group.get(dest[1]) if dest[0] == "insn" else isl_at[dest[1]]
+
+            far = []
+            for insn in live_branches:
+                t = branch_target(insn.addr, insn.words[0])
+                if not start <= t < end:
+                    if not reach(new_at[insn.addr], t):
+                        return None, f"branch at {insn.addr:#x} to {t:#x} out of reach"
+                    continue
+                if group.get(t) is None:
+                    return None, f"branch at {insn.addr:#x} lands inside an instruction"
+                dest = redirect.get(insn.addr, ("insn", t))
+                if not reach(new_at[insn.addr], resolve(dest)):
+                    far.append((("br", insn.addr), new_at[insn.addr], dest))
+            for i, isl in enumerate(islands):
+                if not reach(isl_at[i], resolve(isl["dest"])):
+                    far.append((("isl", i), isl_at[i], isl["dest"]))
+            if not far:
+                break
+            by_pos = sorted((group[a], a) for a in anchors_ok)
+            positions = [p for p, _ in by_pos]
+            for who, frm, dest in far:
+                to = resolve(dest)
+                goal = frm + max(-0x18000, min(0x18000, to - frm))  # within reach, toward the target
+                j = bisect.bisect_left(positions, goal)
+                choices = [by_pos[x] for x in range(max(0, j - 64), min(len(by_pos), j + 64))]
+                choices = [c for c in choices if reach(frm, c[0]) and abs(c[0] - goal) < 0x4000]
+                if not choices:
+                    return None, f"no place for a branch island near {goal:#x}"
+
+                def falls_in(anchor: int) -> bool:
+                    k = body_pos[anchor]
+                    prev = body[k - 1] if k else None
+                    return prev is not None and prev.addr in live and not TERMINATOR_MNEMONICS.match(prev.mnemonic)
+
+                # Prefer a place nothing falls into (after s_branch, s_endpgm, ...).
+                choices.sort(key=lambda c: (falls_in(c[1]), abs(c[0] - goal)))
+                anchor = choices[0][1]
+                i = len(islands)
+                islands.append({"anchor": anchor, "dest": dest, "skip": falls_in(anchor)})
+                at_anchor.setdefault(anchor, []).append(i)
+                if who[0] == "br":
+                    redirect[who[1]] = ("isl", i)
+                else:
+                    islands[who[1]]["dest"] = ("isl", i)
+        else:
+            return None, "branches still out of reach after adding islands"
+
         words: list[int] = []
         pinned: dict[int, tuple[list[int], int]] = {}
+        island_words: dict[int, list[int]] = {}  # island start -> its words
+        island_branch: dict[int, int] = {}  # island branch address -> where it jumps
         markers, branches = [], set()
         for insn in body:
+            for i in at_anchor.get(insn.addr, []):
+                here = base + 4 * len(words)
+                to = resolve(islands[i]["dest"])
+                iw = ([target.branch(here, here + 8)] if islands[i]["skip"] else [])
+                iw.append(target.branch(isl_at[i], to))
+                island_words[here] = iw
+                island_branch[isl_at[i]] = to
+                words += iw
             for m_id, kind, site, marker in before.get(insn.addr, []):
                 markers.append((m_id, kind, site, base + 4 * len(words), marker))
                 words += marker
             w = list(insn.words)
             if insn.addr in live and DIRECT_BRANCH.match(insn.mnemonic):
                 t = branch_target(insn.addr, w[0])
-                nt = group.get(t) if start <= t < end else t
                 at = new_at[insn.addr]
-                if nt is None:
-                    return None, f"branch at {insn.addr:#x} lands inside an instruction"
-                if not reach(at, nt):
-                    return None, f"branch at {insn.addr:#x} out of reach once markers are inserted"
+                nt = resolve(redirect.get(insn.addr, ("insn", t))) if start <= t < end else t
                 w[0] = (w[0] & 0xFFFF0000) | (((nt - at - 4) // 4) & 0xFFFF)
                 branches.add(insn.addr)
             words += w
@@ -1546,21 +1870,23 @@ def rewrite(args) -> int:
         rl = Relayout(start, end, base, words, group, new_at, markers, refs, branches, literals)
         rl.lit_refs = lit_refs
         rl.pins = pinned
+        rl.island_words = island_words
+        rl.island_branch = island_branch
         return rl, None
 
-    def stub_bytes(marker_id: int, insn: Insn) -> int:
-        marker = marker_words(marker_id)
+    def stub_bytes(insn: Insn) -> int:
+        marker = marker_words(site_id[insn.addr], insn.addr)
         return 0 if marker is None else 4 * len(marker) + insn.size + 4
 
     relayouts: list[Relayout] = []
-    inline_count = [0]  # sites marked inline in relayouts, for marker numbering
+    inline_count = [0]  # sites marked inline in relayouts
 
     def try_sites(placer: Placer, todo, placements: list, skipped: list, delta: int = 0) -> None:
         for insn, kind in todo:
-            marker_id = len(placements) + inline_count[0] + 1
-            marker = marker_words(marker_id)
+            marker_id = site_id[insn.addr]
+            marker = marker_words(marker_id, insn.addr)
             if marker is None:
-                skipped.append((insn, "no marker ID left without a free SGPR"))
+                skipped.append((insn, "no free SGPR for its M0 marker"))
                 continue
             moved = Insn(insn.addr + delta, insn.words, insn.text, insn.function)
             p = placer.place(moved, kind, marker_id, marker + insn.words)
@@ -1604,15 +1930,14 @@ def rewrite(args) -> int:
             pool = placer.pool
             if not args.relocate:
                 pad = (-pool.cursor) % 256  # kernel entries are 256-byte aligned
-                first_id = len(placements) + inline_count[0] + 1
-                rl, reason = build_relayout(start, end, pool.cursor + pad, todo, first_id)
+                rl, reason = build_relayout(start, end, pool.cursor + pad, todo)
                 if rl is not None and pool.free >= pad + rl.size + PREFETCH_GUARD:
                     placer.take(pool, pad)
                     placer.take(pool, rl.size)
                     relayouts.append(rl)
                     inline_count[0] += len(rl.markers)
                     marked = {m[2] for m in rl.markers}
-                    skipped += [(i, "no marker ID left") for i, _ in todo if i.addr not in marked]
+                    skipped += [(i, "no free SGPR for its M0 marker") for i, _ in todo if i.addr not in marked]
                     continue
                 print(f"kernel at {start:#x} not relaid out: {reason or 'no room'}", file=sys.stderr)
             # An unchanged copy cannot pin an s_getpc, so values used in ways not
@@ -1625,12 +1950,7 @@ def rewrite(args) -> int:
             # Stubs for sites in the first half go just before the copy, the
             # rest just after it, so both halves stay within s_branch reach.
             size = end - start
-            n = len(placements) + inline_count[0]
-            first = sum(
-                stub_bytes(n + 1 + j, insn)
-                for j, (insn, _) in enumerate(todo)
-                if insn.addr - start < size // 2
-            )
+            first = sum(stub_bytes(insn) for insn, _ in todo if insn.addr - start < size // 2)
             pool = placer.pool
             pad = (-(pool.cursor + first)) % 256  # kernel entries are 256-byte aligned
             if pool.free < first + pad + size + PREFETCH_GUARD:
@@ -1660,7 +1980,7 @@ def rewrite(args) -> int:
     # gfx9: make sure every kernel that can run a stub with an M0 marker has
     # the spare SGPR (plus VCC, FLAT_SCRATCH, XNACK_MASK) allocated.
     bumped: dict[str, int] = {}
-    if target.gfx9 and any(uses_m0(m[0]) for m in marked):
+    if target.gfx9 and spare is not None and any(uses_m0(m[0]) for m in marked):
         want = gfx9_sgpr_granules(spare + 1 + 6)
         # Only kernels that own a site, unless code can call across kernels
         # (then a site in one kernel's range may run under another's descriptor).
@@ -1894,6 +2214,7 @@ def rewrite(args) -> int:
     verify(
         target, data, bytes(out), placements, clause_insns, islands, pool, bumped, pc_fixes,
         relocations, moved_entries, set(words_at), relayouts, lit_checks,
+        [(r, expected_pc[r.base]) for r in pc_refs if r.base in expected_pc],
     )
     # What relaid-out code must decode to: the original instruction at its new
     # address, and the first instruction of each marker.
@@ -1906,11 +2227,14 @@ def rewrite(args) -> int:
             expected_mnemonics[maddr] = "s_mov_b32" if uses_m0(m_id) else "s_ttracedata_imm"
         for g in rl.pins:
             expected_mnemonics[rl.new_at[g] + 4] = "s_cselect_b32"
+        for start_at, iw in rl.island_words.items():
+            for j in range(len(iw)):
+                expected_mnemonics[start_at + 4 * j] = "s_branch"
     tmp = f"{args.output}.tmp{os.getpid()}"
     try:
         with open(tmp, "wb") as f:
             f.write(out)
-        tool_check(args.llvm, args.input, tmp, placements, expected_pc, expected_mnemonics)
+        tool_check(args.llvm, args.input, tmp, placements, expected_pc, expected_mnemonics, text_end)
         os.replace(tmp, args.output)
     finally:
         if os.path.exists(tmp):
@@ -1925,10 +2249,12 @@ def rewrite(args) -> int:
         + (f" ({len(skipped)} skipped)" if skipped else "")
         + (f"; {unreached} unreachable LDS instructions left alone" if unreached else "")
         + f"; {len(marked) - m0_sites} imm, {m0_sites} via M0"
-        + (f" saved in s{spare}" if m0_sites else "")
+        + ((f" saved in s{spare}" if spare is not None else " saved in per-site dead SGPRs") if m0_sites else "")
         + f"; stubs: {in_islands} in islands, {len(placements) - in_islands} in pool"
         + (
-            f"; {len(relayouts)} kernels relaid out ({inline_count[0]} markers inline)"
+            f"; {len(relayouts)} kernels relaid out ({inline_count[0]} markers inline"
+            + (f", {sum(len(r.island_branch) for r in relayouts)} branch islands" if any(r.island_branch for r in relayouts) else "")
+            + ")"
             if relayouts
             else ""
         )

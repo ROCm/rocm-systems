@@ -28,8 +28,11 @@ Available examples:
 - `sqtt_site_rewrite.py` adds site markers to an already-compiled code object,
   so kernels can be profiled with `counter_fit.py` without rebuilding them with
   the sqtt-marker plugin. A `.sqtt_funcmap` section maps marker IDs to source
-  lines. Works for gfx9 (all markers through `M0`, SGPR allocation raised if
-  needed) and gfx10+ (`s_ttracedata_imm` for IDs 1..63, `M0` above that).
+  lines. Works for gfx9 (all markers through `M0`) and gfx10+
+  (`s_ttracedata_imm` for IDs 1..63, given to the sites in the most deeply
+  nested loops; `M0` above that). `M0` is saved in an SGPR above every SGPR
+  the code names (SGPR allocation raised on gfx9 if needed) or, when there is
+  none, in an SGPR that register liveness shows is dead at the site.
   - In place (default): each LDS instruction becomes an `s_branch` to a stub
     (marker, the original instruction, `s_branch` back). Stubs go in unused
     padding between functions or after `.text`; out-of-reach stubs are reached
@@ -37,8 +40,9 @@ Available examples:
     can be adjusted.
   - Relayout (`--relayout`, and automatically when stubs are out of reach): a
     kernel is laid out again after `.text` with each marker inline before its
-    instruction; branches and PC-relative constants are re-aimed and the
-    kernel descriptor points at the new code. An `s_getpc` whose value is used
+    instruction; branches and PC-relative constants are re-aimed (through
+    branch islands when a branch ends up out of reach) and the kernel
+    descriptor points at the new code. An `s_getpc` whose value is used
     in ways that cannot be re-aimed is pinned to the original code. If a
     kernel cannot be relaid out, an unchanged copy marked with stubs is used.
   - Only instructions reachable from kernel and function entries are marked
@@ -59,7 +63,8 @@ Available examples:
   `SQTT_SITE_REWRITE` to the script; `SQTT_SITE_ARGS="--kernel <regex>"`
   limits rewriting to matching kernels. The original code object is loaded
   whenever the rewriter fails, finds nothing to mark, exceeds
-  `SQTT_SITE_TIMEOUT` seconds (default 300), or the runtime rejects the
+  `SQTT_SITE_TIMEOUT` seconds (default 600; a 60 MB library takes about 3
+  minutes), or the runtime rejects the
   rewritten object. It works alongside rocprofv3, which appends its own tool
   library.
 

@@ -25,7 +25,7 @@
 //   SQTT_SITE_ARGS="--kernel lds_conflict"     (optional rewriter arguments)
 //   rocprofv3 --att ... -- ./app
 // Optional: SQTT_SITE_PYTHON (default python3), SQTT_SITE_TIMEOUT (seconds,
-// default 300), SQTT_SITE_KEEP=1 to keep the temporary files.
+// default 600), SQTT_SITE_KEEP=1 to keep the temporary files.
 
 #include <rocprofiler-sdk/intercept_table.h>
 #include <rocprofiler-sdk/registration.h>
@@ -128,7 +128,7 @@ int run_rewriter(const char* script, const std::string& in, const std::string& o
   posix_spawnattr_destroy(&attr);
   if (rc != 0) return -1;
 
-  const double timeout = std::atof(env_or("SQTT_SITE_TIMEOUT", "300"));
+  const double timeout = std::atof(env_or("SQTT_SITE_TIMEOUT", "600"));
   const auto deadline = std::chrono::steady_clock::now() +
                         std::chrono::milliseconds(static_cast<long>(timeout * 1000));
   int status = 0;
