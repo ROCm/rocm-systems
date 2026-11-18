@@ -8,6 +8,7 @@
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
+#include "rocjitsu/vm/graphics/image_address.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 
 #include <gtest/gtest.h>
@@ -1860,6 +1861,121 @@ TEST(GpuVmPipeline, FullyMaskedScalarStoreDoesNotAcquireRevokedAddressSpace) {
   EXPECT_EQ(context.external->write_calls, 0u);
 }
 
+TEST(GpuVmPipeline, DeferredImageMetadataResumesThroughTheFinalTexel) {
+  constexpr uint64_t metadata = 0x10000;
+  constexpr uint32_t texel_bytes = 8;
+  constexpr std::array<uint32_t, 2> clear{0x11223344, 0x55667788};
+  constexpr std::array<uint32_t, 2> original{0xaa55aa55, 0xff00ff00};
+  constexpr std::array<uint32_t, 2> stored{0x87654321, 0x12345678};
+  constexpr uint32_t peer_write = 0xfedcba98;
+  const auto first = amdgpu::gfx11_image_address(0, 0, 0, 2, texel_bytes, 27);
+  const auto second = amdgpu::gfx11_image_address(0, 1, 0, 2, texel_bytes, 27);
+  ASSERT_TRUE(first && second);
+  for (auto [expand, deferred] :
+       {std::pair{false, true}, std::pair{true, true}, std::pair{true, false}}) {
+    for (bool load : {false, true}) {
+      SCOPED_TRACE(testing::Message()
+                   << "expand=" << expand << " load=" << load << " deferred=" << deferred);
+      rocjitsu::test::AsyncVmHarness owner;
+      Gfx1250Sim sim;
+      ASSERT_NO_FATAL_FAILURE(sim.initialize());
+      auto memory = std::make_shared<rocjitsu::test::AsyncVmMemory>(*owner.owner, metadata + 16, 0,
+                                                                    deferred ? metadata + 16 : 0);
+      const auto space = sim.soc->gpu_vm().register_translated(77, memory, memory);
+      auto *cu = sim.cu();
+      cu->set_gpu_vm(&sim.soc->gpu_vm());
+      // A deferred owner can reenter the coherence domain while accepting a request.
+      memory->backing->submit_probe = [&] {
+        auto boundary = cu->l2()->coherence_domain()->acquire_atomic_boundary();
+        EXPECT_EQ(boundary.outcome(), amdgpu::VmAccessOutcome::Complete);
+      };
+      auto *wave = sim.dispatch_scratch_wf();
+      ASSERT_NE(wave, nullptr);
+      wave->set_address_space(space);
+      wave->set_process_id(77);
+      wave->set_exec(1);
+      const uint8_t key = expand ? 1 : 0xff;
+      memory->store(metadata, std::as_bytes(std::span{&key, 1}));
+      memory->store(*first, std::as_bytes(std::span{clear}));
+      memory->store(*second, std::as_bytes(std::span{original}));
+      auto state = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+      state->is_load = load;
+      state->wf_size = wave->wf_size();
+      state->lane_mask = state->exec_mask = 1;
+      state->num_elems = 1;
+      state->elem_size = texel_bytes;
+      state->per_lane_addr[0] = *second;
+      state->dst_reg_base = wave->vgpr_alloc().base + 8;
+      if (!load) {
+        state->store_data.resize(state->wf_size * texel_bytes);
+        std::memcpy(state->store_data.data(), stored.data(), texel_bytes);
+      }
+      state->image_metadata = std::make_unique<amdgpu::ImageMetadataAccess>();
+      auto &image = *state->image_metadata;
+      image.metadata = metadata;
+      image.width = 2;
+      image.height = 1;
+      image.swizzle = 27;
+      image.coordinates[0] = 1;
+      amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), cu->l2());
+      const auto epoch = cu->l2()->coherence_domain()->current_epoch();
+      ASSERT_EQ(pipeline.issue_deferred(new TestMemoryInstruction(std::move(state)), *wave),
+                amdgpu::VmAccessOutcome::Complete);
+      if (deferred) {
+        ASSERT_EQ(wave->state(), amdgpu::WfState::VM_RETRY);
+        ASSERT_EQ(memory->backing->posts, 1u);
+        ASSERT_EQ(memory->backing->read_effects, 0u);
+        // Both wave bindings are live. A retained instruction must finish on the original one.
+        auto replacement = std::make_shared<rocjitsu::test::AsyncVmMemory>(
+            *owner.owner, metadata + 16, 0, metadata + 16);
+        wave->set_address_space(
+            sim.soc->gpu_vm().register_translated(78, replacement, replacement));
+        wave->set_process_id(78);
+        bool changed_prefix = false;
+        for (unsigned tick = 0; tick < 40 && !pipeline.empty(); ++tick) {
+          pipeline.tick();
+          if (memory->backing->posts >
+              memory->backing->read_effects + memory->backing->write_effects) {
+            ASSERT_TRUE(owner.engine.step());
+          }
+          if (expand && memory->backing->write_effects == 1 && !changed_prefix) {
+            // The first DWORD completed. A retry of the clear must leave this peer update intact.
+            memory->store(*first, std::as_bytes(std::span{&peer_write, 1}));
+            changed_prefix = true;
+          }
+          if (expand && memory->backing->write_effects <= 4) {
+            EXPECT_EQ(memory->load(metadata, 1).front(), std::byte{1});
+          }
+        }
+        EXPECT_EQ(replacement->backing->posts, 0u);
+        EXPECT_EQ(memory->backing->posts, expand ? 10u : 3u);
+        EXPECT_EQ(memory->backing->read_effects, 1u + (expand ? 2u : 0u) + (load ? 2u : 0u));
+        EXPECT_EQ(memory->backing->write_effects, (expand ? 5u : 0u) + (load ? 0u : 2u));
+      } else {
+        // Reading the clear value, expanding the block, publishing its key and accessing
+        // the final texel share a single cache boundary on synchronous backing.
+        EXPECT_EQ(cu->l2()->coherence_domain()->current_epoch(), epoch + 1);
+        EXPECT_EQ(memory->backing->posts, 0u);
+      }
+      ASSERT_TRUE(pipeline.empty());
+      EXPECT_TRUE(wave->wait_counters().empty());
+      EXPECT_EQ(wave->state(), amdgpu::WfState::RUNNING);
+      EXPECT_EQ(memory->load(metadata, 1).front(), std::byte{0xff});
+      auto verify = [&](uint64_t address, const std::array<uint32_t, 2> &expected) {
+        const auto bytes = std::as_bytes(std::span{expected});
+        EXPECT_EQ(memory->load(address, bytes.size()),
+                  (std::vector<std::byte>(bytes.begin(), bytes.end())));
+      };
+      verify(*first, {expand && deferred ? peer_write : clear[0], clear[1]});
+      verify(*second, load ? (expand ? clear : original) : stored);
+      if (load) {
+        EXPECT_EQ(wave->debug_read_vgpr(8, 0), (expand ? clear : original)[0]);
+        EXPECT_EQ(wave->debug_read_vgpr(9, 0), (expand ? clear : original)[1]);
+      }
+    }
+  }
+}
+
 TEST(GpuVmPipeline, OwnedOwnerEventRetiresScalarLoadAndStoreOnce) {
   rocjitsu::test::AsyncVmHarness owner_sim;
   Gfx1250Sim sim;
@@ -2128,6 +2244,83 @@ TEST(GpuVmPipeline, LegacyVectorPeerLaneUsesOneDeferredOwnerEffect) {
   EXPECT_EQ(cu->read_vgpr_storage(wf->vgpr_alloc().base + 10, 1), kStored[1]);
   EXPECT_EQ(cu->read_vgpr_storage(wf->vgpr_alloc().base + 10, 2), kStored[2]);
   EXPECT_EQ(memory->backing->posts, 2u);
+}
+
+TEST(GpuVmPipeline, GraphicsSampleRoutesOnlyContributingTapsBeforeLoading) {
+  constexpr uint64_t first = 0x340, second = 0x680, inactive = 0x900;
+  constexpr uint32_t first_value = 0x12345678, second_value = 0xabcdef01;
+  class Pipeline : public amdgpu::GlobalMemPipeline {
+  public:
+    using GlobalMemPipeline::GlobalMemPipeline;
+    using GlobalMemPipeline::initiate_access;
+  };
+  for (bool legacy : {false, true}) {
+    SCOPED_TRACE(legacy);
+    TranslatedPipelineContext context;
+    ASSERT_NO_FATAL_FAILURE(context.initialize(legacy));
+    context.external->store(first, first_value);
+    context.external->store(second, second_value);
+    auto sample = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    sample->is_load = true;
+    sample->elem_size = sizeof(uint32_t);
+    sample->num_elems = 1;
+    sample->mtype = amdgpu::Mtype::UC;
+    sample->wf_size = context.wf->wf_size();
+    sample->exec_mask = sample->lane_mask = 1;
+    sample->graphics_sample = std::make_unique<amdgpu::GraphicsSampleAccess>();
+    auto &graphics = *sample->graphics_sample;
+    graphics.tap_count = 3;
+    graphics.taps[0].addresses[0] = first;
+    graphics.taps[0].lane_mask = 1;
+    graphics.taps[1].addresses[0] = inactive;
+    graphics.taps[2].addresses[0] = second;
+    graphics.taps[2].lane_mask = 1;
+    auto &state = *sample;
+    TestMemoryInstruction instruction(std::move(sample));
+    Pipeline pipeline(&context.cu->l1_vector(), context.cu->l2());
+    bool open = false;
+    std::vector<uint64_t> routed, admitted;
+    context.external->data_route = [&](uint64_t address, size_t bytes, amdgpu::VmAccessKind kind) {
+      EXPECT_EQ(bytes, sizeof(uint32_t));
+      EXPECT_EQ(kind, amdgpu::VmAccessKind::Read);
+      routed.push_back(address);
+      return amdgpu::VmDataRoute::Local;
+    };
+    pipeline.set_ingress_handler([&](uint32_t, const amdgpu::GpuVmAccess &,
+                                     std::span<const amdgpu::MemoryIngressSpan> spans) {
+      for (const auto &span : spans)
+        admitted.push_back(span.address);
+      return amdgpu::MemoryIngressAdmission{.outcome = open ? amdgpu::VmAccessOutcome::Complete
+                                                            : amdgpu::VmAccessOutcome::Unavailable,
+                                            .permit = {}};
+    });
+    if (legacy) {
+      EXPECT_EQ(pipeline.initiate_access(instruction, *context.wf),
+                amdgpu::VmAccessOutcome::Unavailable);
+      EXPECT_TRUE(state.response_data.empty());
+      EXPECT_EQ(routed, (std::vector<uint64_t>{first, second}));
+      EXPECT_EQ(admitted, routed);
+    } else {
+      context.external->unavailable_translation_address = second;
+      EXPECT_EQ(pipeline.initiate_access(instruction, *context.wf),
+                amdgpu::VmAccessOutcome::Unavailable);
+      EXPECT_EQ(state.translated.request_index, 1u);
+      context.external->unavailable_translation_address.reset();
+    }
+    open = true;
+    EXPECT_EQ(pipeline.initiate_access(instruction, *context.wf),
+              amdgpu::VmAccessOutcome::Complete);
+    ASSERT_EQ(state.response_data.size(), 3u * state.wf_size * sizeof(uint32_t));
+    auto tap = [&](unsigned index) {
+      uint32_t value;
+      std::memcpy(&value, state.response_data.data() + index * state.wf_size * sizeof(value),
+                  sizeof(value));
+      return value;
+    };
+    EXPECT_EQ(tap(0), first_value);
+    EXPECT_EQ(tap(1), 0u);
+    EXPECT_EQ(tap(2), second_value);
+  }
 }
 
 TEST(GpuVmPipeline, LegacyVectorAndAtomicIngressRetryBeforeAnyLocalEffect) {

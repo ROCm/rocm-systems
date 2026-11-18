@@ -24,6 +24,8 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/rpc.h"
@@ -5496,6 +5498,64 @@ TEST(CheckpointTest, PreservesRequestedVgprsAcrossWaveArchitectures) {
       EXPECT_EQ(other->num_vgprs(), requested);
       wave->halt();
     }
+  }
+}
+
+TEST(CheckpointTest, PreservesRdna4ImageStoreVgprZeroSubstitution) {
+  auto json = functional_quantum_checkpoint_config(1, 1);
+  ASSERT_TRUE(replace_exactly_once(json, "cdna3", "rdna4"));
+  rj_vm_t *raw = nullptr;
+  ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
+            ROCJITSU_STATUS_SUCCESS);
+  using Vm = std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)>;
+  Vm original(raw, &rj_vm_destroy);
+  auto cu = [](const Vm &vm) { return vm->soc->xcd(0)->shader_engine(0)->compute_unit(0); };
+  constexpr uint64_t kernel = 0x1000, texel = 0x10000;
+  const auto store = rdna4::build_vimage(
+      rdna4::kImageStoreVimage, {.dim = 1, .dmask = 7, .vdata = 31, .vaddr0 = 4, .vaddr1 = 5});
+  auto *memory = original->soc->memory();
+  memory->load_image(reinterpret_cast<const uint8_t *>(store.data()), sizeof(store), kernel);
+  const std::array<uint32_t, 2> finish{0xbfc10000, 0xbfb00000}; // s_wait_storecnt 0; s_endpgm
+  memory->load_image(reinterpret_cast<const uint8_t *>(finish.data()), sizeof(finish),
+                     kernel + sizeof(store));
+  auto *wave = cu(original)->dispatch_wf(0, kernel, 16, 32, 32);
+  ASSERT_NE(wave, nullptr);
+  const std::array<uint32_t, 8> descriptor{uint32_t(texel >> 8),
+                                           (61u << 17) | (2u << 30),
+                                           1u << 14,
+                                           (9u << 28) | (4 | (5 << 3) | (6 << 6) | (7 << 9)),
+                                           63,
+                                           0,
+                                           0,
+                                           0};
+  for (unsigned i = 0; i < descriptor.size(); ++i)
+    cu(original)->write_sgpr(wave->sgpr_alloc().base + i, descriptor[i]);
+  wave->set_exec(1);
+  const auto base = wave->vgpr_alloc().base;
+  cu(original)->write_vgpr(base + 4, 0, 0);
+  cu(original)->write_vgpr(base + 5, 0, 0);
+  cu(original)->write_vgpr(base + 31, 0, 0x11112222);
+  cu(original)->write_vgpr(base, 0, 0x33334444);
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rocjitsu-rdna4-image-store-vgprs-"));
+  ASSERT_EQ(rj_vm_save_checkpoint(original.get(), file.path().c_str(), 0), ROCJITSU_STATUS_SUCCESS);
+  rj_vm_t *loaded = nullptr;
+  ASSERT_EQ(rj_vm_restore_checkpoint(file.path().c_str(), &loaded), ROCJITSU_STATUS_SUCCESS);
+  Vm restored(loaded, &rj_vm_destroy);
+  for (const auto *machine : {&original, &restored}) {
+    auto *unit = cu(*machine);
+    auto *resident = unit->wf(0);
+    ASSERT_NE(resident, nullptr);
+    EXPECT_EQ(resident->num_vgprs(), 32u);
+    for (unsigned i = 0; i < 64 && !resident->is_halted(); ++i)
+      ASSERT_EQ(rj_vm_step(machine->get(), nullptr), ROCJITSU_STATUS_SUCCESS);
+    ASSERT_TRUE(resident->is_halted());
+    unit->l1_vector().flush_all();
+    unit->l2()->flush_all();
+    const auto *output = (*machine)->soc->memory();
+    EXPECT_EQ(output->read32(texel), 0x11112222u);
+    EXPECT_EQ(output->read32(texel + 4), 0x33334444u);
+    EXPECT_EQ(output->read32(texel + 8), 0x33334444u);
   }
 }
 
