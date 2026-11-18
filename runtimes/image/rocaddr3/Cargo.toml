@@ -3,7 +3,7 @@
 
 [package]
 name = "rocaddr3"
-description = "GFX12 surface layouts through AMD AddrLib3"
+description = "GFX9–GFX12 surface layouts through AMD AddrLib2 and AddrLib3"
 publish = false
 version.workspace = true
 edition.workspace = true
