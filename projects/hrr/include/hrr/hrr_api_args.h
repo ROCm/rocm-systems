@@ -98,8 +98,11 @@
  * v14: hipMemcpyWithAttributesAsync, hipMemcpy3DWithAttributesAsync and
  * hipArrayGetSparseProperties were appended to HipDispatchTable, shifting
  * the compiler API IDs up by three. A v13 reader would decode those events
- * as the wrong API. */
-#define HRR_VERSION ((uint16_t)14u)
+ * as the wrong API.
+ * v15: four graph ID queries were appended to HipDispatchTable, shifting the
+ * compiler API IDs up by four. A v14 reader would decode those events as the
+ * wrong API. */
+#define HRR_VERSION ((uint16_t)15u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
@@ -5976,6 +5979,38 @@ typedef struct {
     uint64_t array;
 } hrr_args_hipArrayGetSparseProperties;
 
+/* hipError_t hipGraphNodeGetLocalId(hipGraphNode_t node, unsigned int* nodeId) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t node;
+    uint64_t nodeId;
+} hrr_args_hipGraphNodeGetLocalId;
+
+/* hipError_t hipGraphNodeGetToolsId(hipGraphNode_t node, unsigned long long* toolsId) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t node;
+    uint64_t toolsId;
+} hrr_args_hipGraphNodeGetToolsId;
+
+/* hipError_t hipGraphGetId(hipGraph_t graph, unsigned int* graphId) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t graph;
+    uint64_t graphId;
+} hrr_args_hipGraphGetId;
+
+/* hipError_t hipGraphExecGetId(hipGraphExec_t graphExec, unsigned int* graphId) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t graphExec;
+    uint64_t graphId;
+} hrr_args_hipGraphExecGetId;
+
 /* ---- API id enumeration ---- */
 typedef enum hrr_api_id {
     HRR_API_HIPAPINAME = 0,
@@ -6531,16 +6566,20 @@ typedef enum hrr_api_id {
     HRR_API_HIPMEMCPYWITHATTRIBUTESASYNC = 550,
     HRR_API_HIPMEMCPY3DWITHATTRIBUTESASYNC = 551,
     HRR_API_HIPARRAYGETSPARSEPROPERTIES = 552,
-    HRR_API_HIPPOPCALLCONFIGURATION = 553,
-    HRR_API_HIPPUSHCALLCONFIGURATION = 554,
-    HRR_API_HIPREGISTERFATBINARY = 555,
-    HRR_API_HIPREGISTERFUNCTION = 556,
-    HRR_API_HIPREGISTERMANAGEDVAR = 557,
-    HRR_API_HIPREGISTERSURFACE = 558,
-    HRR_API_HIPREGISTERTEXTURE = 559,
-    HRR_API_HIPREGISTERVAR = 560,
-    HRR_API_HIPUNREGISTERFATBINARY = 561,
-    HRR_API_COUNT = 562
+    HRR_API_HIPGRAPHNODEGETLOCALID = 553,
+    HRR_API_HIPGRAPHNODEGETTOOLSID = 554,
+    HRR_API_HIPGRAPHGETID = 555,
+    HRR_API_HIPGRAPHEXECGETID = 556,
+    HRR_API_HIPPOPCALLCONFIGURATION = 557,
+    HRR_API_HIPPUSHCALLCONFIGURATION = 558,
+    HRR_API_HIPREGISTERFATBINARY = 559,
+    HRR_API_HIPREGISTERFUNCTION = 560,
+    HRR_API_HIPREGISTERMANAGEDVAR = 561,
+    HRR_API_HIPREGISTERSURFACE = 562,
+    HRR_API_HIPREGISTERTEXTURE = 563,
+    HRR_API_HIPREGISTERVAR = 564,
+    HRR_API_HIPUNREGISTERFATBINARY = 565,
+    HRR_API_COUNT = 566
 } hrr_api_id_t;
 
 /* Array of API names indexed by hrr_api_id_t */
@@ -7099,6 +7138,10 @@ const char* const hrr_api_names[HRR_API_COUNT] = {
     "hipMemcpyWithAttributesAsync",
     "hipMemcpy3DWithAttributesAsync",
     "hipArrayGetSparseProperties",
+    "hipGraphNodeGetLocalId",
+    "hipGraphNodeGetToolsId",
+    "hipGraphGetId",
+    "hipGraphExecGetId",
     "__hipPopCallConfiguration",
     "__hipPushCallConfiguration",
     "__hipRegisterFatBinary",

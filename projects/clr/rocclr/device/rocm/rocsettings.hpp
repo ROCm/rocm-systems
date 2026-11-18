@@ -38,7 +38,8 @@ class Settings : public device::Settings {
       uint blocking_blit_ : 1;         //!< Blit ops can be blocking on CPU
       uint queue_pipe_dist_ : 1;       //!< Queue pipe distribution
       uint aql_barrier_opt_ : 1;       //!< Per-stream barrier-bit optimization
-      uint reserved_ : 18;
+      uint split_end_marker_ : 1;      //!< Graph end markers resolve waits on a packet of their own
+      uint reserved_ : 17;
     };
     uint value_;
   };
