@@ -20,6 +20,15 @@ from consan_runtime_e2e import (
 )
 
 
+def clear_examples(result):
+    """Normalize a result for comparison with --examples 0."""
+    for execution in result['executions']:
+        execution['cross_wave_examples'] = []
+        execution['collision_examples'] = []
+        execution['ordered_examples'] = []
+        execution['unresolved_examples'] = []
+
+
 class AnalysisDriver(Driver):
     def prepare_original(self, fixture, original):
         self.entry = super().prepare_original(fixture, original)
@@ -57,7 +66,9 @@ class AnalysisDriver(Driver):
         assert not (self.directory / 'original.hsaco').exists()
         case = self.args.case
         pairs = (
-            1 if case in ('race', 'high_lane') else (2 if case == 'repeat_race' else 0)
+            1
+            if case in ('race', 'high_lane', 'barrier_missing_second')
+            else (2 if case == 'repeat_race' else 0)
         )
         collisions = 1 if case == 'collision' else 0
         status = 1 if pairs or collisions else 0
@@ -81,6 +92,9 @@ class AnalysisDriver(Driver):
         assert result['wave_size'] == self.args.wave_size
         assert result['entry'] == self.entry, (result['entry'], self.entry)
         assert result['cross_wave_pairs'] == pairs
+        assert result['ordered_pairs'] == sum(
+            execution['ordered_pairs'] for execution in result['executions']
+        )
         assert result['collision_groups'] == collisions
         assert result['coverage_complete'] == (case != 'exhausted')
         assert result['verdict'] == ('findings' if status else 'no_observed_findings')
@@ -96,7 +110,10 @@ class AnalysisDriver(Driver):
             assert analyzed['lost_occurrences'] == (1 if case == 'exhausted' else 0)
             assert analyzed['ordering_uncertain'] == (case == 'exhausted')
             assert analyzed['cross_wave_pairs'] == (
-                1 if case in ('race', 'repeat_race', 'high_lane') else 0
+                1
+                if case
+                in ('race', 'repeat_race', 'high_lane', 'barrier_missing_second')
+                else 0
             )
             assert analyzed['collision_groups'] == collisions
             if case in ('race', 'repeat_race', 'high_lane'):
@@ -115,6 +132,47 @@ class AnalysisDriver(Driver):
                 for participant in (finding['first'], finding['second']):
                     site = raw['sites'][participant['site']]
                     assert participant['original_offset'] == site['original_offset']
+            if case.startswith('barrier'):
+                assert result['scope'] == 'native_lds_b32_epoch_workgroup_barriers'
+                assert analyzed['ordered_pairs'] == (
+                    2 if case == 'barrier_multiple' else 1
+                )
+                assert analyzed['ordering_unresolved_pairs'] == 0
+                assert analyzed['required_barrier_waves'] == len(observed['rows'])
+                assert analyzed['completed_barrier_waves'] == len(observed['rows'])
+                certificate = analyzed['ordered_examples'][0]
+                assert certificate['ordering'] == 'ordered'
+                assert certificate['first']['wave'] == 0
+                assert certificate['second']['wave'] == 1
+                mask = (1 << 31) if case == 'barrier_high' else 1
+                assert (
+                    certificate['first']['mask']
+                    == certificate['second']['mask']
+                    == mask
+                )
+                assert (
+                    certificate['first']['offset']
+                    == certificate['second']['offset']
+                    == 0
+                )
+            if case in ('barrier_multiple', 'barrier_missing_second'):
+                assert [
+                    (finding['first']['site'], finding['second']['site'])
+                    for finding in analyzed['ordered_examples']
+                ] == ([(0, 1), (2, 1)] if case == 'barrier_multiple' else [(0, 1)])
+                assert [
+                    (finding['first']['site'], finding['second']['site'])
+                    for finding in analyzed['cross_wave_examples']
+                ] == ([(2, 1)] if case == 'barrier_missing_second' else [])
+                if case == 'barrier_missing_second':
+                    reuse = analyzed['cross_wave_examples'][0]
+                    assert reuse['ordering'] == 'unordered'
+                    assert reuse['first']['access'] == 'write'
+                    assert reuse['first']['wave'] == 0 and reuse['first']['phase'] == 1
+                    assert reuse['second']['access'] == 'read'
+                    assert (
+                        reuse['second']['wave'] == 1 and reuse['second']['phase'] == 1
+                    )
             if case == 'collision':
                 finding = analyzed['collision_examples'][0]
                 assert finding['first']['mask'] == 3 and finding['lane_pairs'] == 1
@@ -126,9 +184,7 @@ class AnalysisDriver(Driver):
                 status,
             )
         )
-        for execution in result['executions']:
-            execution['cross_wave_examples'] = []
-            execution['collision_examples'] = []
+        clear_examples(result)
         assert (
             result == hidden
         ), 'example limit changed full semantic counts or coverage'
