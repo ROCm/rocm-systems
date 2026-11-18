@@ -130,6 +130,13 @@ The available features are declared, with a short description of each, under
 `features` in `configs/definitions.yaml`. Naming a feature that is not declared
 there fails the build (and `check_config.py`).
 
+Features are capabilities that can be queried through the HIP API on the machine
+the tests run on (including `multi_gpu` and `p2p`). They are only allowed in
+`requires`, which is just a list of the features a case needs.
+The environment a build targets (platform, OS, architecture, ASAN) is not a feature
+and is only allowed as a `disabled`/`unsupported` target; conversely, listing a
+feature as a `disabled`/`unsupported` target fails the build (and `check_config.py`).
+
 Every feature in `requires` is emitted as a `[requires_<feature>]` tag. By default
 that is all it does: the binaries are built to run on any machine, so a test must
 still skip itself at runtime (e.g. with `CHECK_IMAGE_SUPPORT`) when a feature is
@@ -151,20 +158,6 @@ Test cases that require an unavailable feature are still compiled, but are disab
 like a `disabled`/`unsupported` match: they get the `[disabled]` tag, plus a
 `[missing_<feature>]` tag for every missing feature. The resulting binaries are
 therefore specific to the build machine. This mode needs a working GPU at build time.
-
-Features can also be listed as `unsupported` targets, for test cases that cannot run
-when a feature *is* available:
-```yaml
-memory:
-  Unit_hipStreamAttachMemAsync_Positive_AttachHost:
-    <<: *level_default
-    unsupported:
-      targets: [concurrent_managed_access]
-      reason: "..."
-```
-In a tailored build such a target matches when the feature is available, just like a
-platform or architecture target matches the build. Otherwise feature targets never
-match, so the test must still skip itself at runtime.
 
 The probe must report exactly the features declared in `definitions.yaml`; any
 difference fails the build. To add a feature, declare it in `definitions.yaml` and

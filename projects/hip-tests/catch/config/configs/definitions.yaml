@@ -27,6 +27,11 @@ definitions:
 # when every visible device supports it. Each feature is also emitted as a
 # [requires_<feature>] tag on the test case.
 #
+# A feature must be something that can be queried through the HIP API on the
+# machine the tests run on. The environment a build targets (platform, OS,
+# architecture) is not a feature: it belongs in 'disabled'/'unsupported'
+# targets, which in turn may not name features.
+#
 # This list is the single source of truth: 'requires' may only name features
 # listed here, and config/sysinfo/hip_tests_sysinfo.cc must report exactly
 # these features. Both are enforced at build time.

@@ -93,6 +93,31 @@ def check_requires_field(value, known_features):
     return None
 
 
+def check_skip_targets(field, targets, known_features):
+    """Check that a 'disabled'/'unsupported' field names no device features.
+
+    Device features are only allowed in 'requires'; skip targets name the
+    environment (platform, OS, architecture, ASAN) instead.
+
+    Args:
+        field: Name of the skip field ('disabled' or 'unsupported')
+        targets: The targets listed in the skip field
+        known_features: Set of feature names declared in definitions.yaml
+
+    Returns:
+        An error message, or None if the targets are valid
+    """
+    if not isinstance(targets, list):
+        return None
+    features = sorted(set(targets) & known_features)
+    if features:
+        return (
+            f"'{field}' names device features, which are only allowed in "
+            f"'requires': {', '.join(features)}"
+        )
+    return None
+
+
 def load_config(file_path, definitions_text):
     with open(file_path) as file:
         content = file.read()

@@ -8,11 +8,13 @@ import sys
 
 from common import (
     check_requires_field,
+    check_skip_targets,
     iter_group_configs,
     load_feature_names,
     ERROR,
     RESET,
 )
+
 
 # Known Jira project keys accepted in a skip 'reason'. Add a new key here when
 # a new project starts tracking hip-tests skips.
@@ -42,6 +44,7 @@ def main():
     missing_reasons = []
     missing_jira = []
     invalid_requires = []
+    feature_skip_targets = []
 
     known_features = load_feature_names(configs_path)
 
@@ -71,6 +74,9 @@ def main():
                 else:
                     invalid_skip_fields.append(f"  {group}/{case_name}: '{field}'")
                     continue
+                error = check_skip_targets(field, targets, known_features)
+                if error:
+                    feature_skip_targets.append(f"  {group}/{case_name}: {error}")
                 # A populated skip section (non-empty targets) must record a
                 # non-empty string 'reason'; a non-scalar (list/mapping) or
                 # non-string reason is treated as missing. An empty section
@@ -117,6 +123,15 @@ def main():
             file=sys.stderr,
         )
         for entry in invalid_requires:
+            print(f"[check_config] {ERROR}{entry}{RESET}", file=sys.stderr)
+        sys.exit(1)
+
+    if feature_skip_targets:
+        print(
+            f"[check_config] {ERROR}ERROR: The following test cases list device features as 'disabled'/'unsupported' targets. Device features are only allowed in 'requires'; skip targets name the platform, OS, architecture or ASAN:{RESET}",
+            file=sys.stderr,
+        )
+        for entry in feature_skip_targets:
             print(f"[check_config] {ERROR}{entry}{RESET}", file=sys.stderr)
         sys.exit(1)
 

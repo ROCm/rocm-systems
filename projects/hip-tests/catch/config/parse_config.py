@@ -10,6 +10,7 @@ import yaml
 
 from common import (
     check_requires_field,
+    check_skip_targets,
     iter_group_configs,
     load_definitions,
     load_feature_names,
@@ -171,15 +172,9 @@ def create_test_definition(
     #   {arch}                  any platform and OS
     #   {os_name}_{arch}        linux_<arch>, windows_<arch>
     #   asan                    ASAN builds only
-    #   <feature>               a device feature from definitions.yaml that is
-    #                           available on the machine the build is tailored to;
-    #                           meant for 'unsupported', since 'disabled' tracks
-    #                           environments (HW generation, OS) rather than features
     disable_keys = {f"{platform}_{os_name}", arch, f"{os_name}_{arch}"}
     if asan:
         disable_keys.add("asan")
-    if available_features is not None:
-        disable_keys.update(f for f, available in available_features.items() if available)
 
 
     tags_str = ""
@@ -391,24 +386,28 @@ def main():
     if args.features_file:
         available_features = load_available_features(args.features_file, known_features)
 
-    # Validate every 'requires' field before generating anything, so a typo in
-    # a feature name fails the build instead of silently disabling a test.
+    # Validate before generating anything, so a typo in a feature name fails
+    # the build instead of silently disabling a test: 'requires' may only name
+    # declared device features, and 'disabled'/'unsupported' may name none.
     all_cases = [
         (group, case_name, case_config)
         for group, cases in iter_group_configs(configs_path)
         for case_name, case_config in cases.items()
     ]
-    invalid_requires = []
+    invalid_fields = []
     for group, case_name, case_config in all_cases:
-        if "requires" not in case_config:
-            continue
-        error = check_requires_field(case_config["requires"], known_features)
-        if error:
-            invalid_requires.append(f"{group}/{case_name}: {error}")
-    if invalid_requires:
+        errors = []
+        if "requires" in case_config:
+            errors.append(check_requires_field(case_config["requires"], known_features))
+        for field in ("disabled", "unsupported"):
+            targets = _skip_targets(case_config.get(field, []))
+            errors.append(check_skip_targets(field, targets, known_features))
+        invalid_fields += [f"{group}/{case_name}: {e}" for e in errors if e]
+    if invalid_fields:
         fail(
-            "The following test cases have an invalid 'requires' field:",
-            invalid_requires,
+            "The following test cases have invalid 'requires', 'disabled' or "
+            "'unsupported' fields:",
+            invalid_fields,
         )
 
     test_macros = []
