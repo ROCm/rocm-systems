@@ -312,13 +312,6 @@ ncclResult_t ncclGinConnectOnce(struct ncclComm* comm) { return g_devrGinConnect
 // ncclDevrCommCreateInternal calls this after swapping the thread into relaxed
 // stream-capture mode. The default succeeds; a test that needs GIN setup to fail
 // installs its own so the capture-mode restore can be observed.
-//
-// The real ncclGinDevCommSetup records a non-zero ginContextCount and a valid
-// ginHandles[0] on success. The create-failure path frees GIN only once setup has
-// succeeded (ginDevCommSetupDone); ginContextCount stays non-zero so the
-// ncclGinDevCommClearFields check has something to clear. The default mirrors
-// that contract so a test driving the create path past the GIN gate can observe
-// the leak-release.
 static ncclResult_t DefaultGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*,
                                            struct ncclDevResourceRequirements*, struct ncclGinBarrierReq const*, int,
                                            struct ncclDevComm* devComm, uint32_t, struct ncclDevCommCompat const*) {
@@ -346,9 +339,6 @@ std::function<ncclResult_t(struct ncclComm*, struct ncclDevComm const*)> g_devrG
 ncclResult_t ncclGinDevCommFree(struct ncclComm* comm, struct ncclDevComm const* devComm) {
   return g_devrGinDevCommFree(comm, devComm);
 }
-// The create-failure path clears the devComm's GIN fields after a successful
-// free. dev-runtime-test.cc #includes the real dev_runtime.cc, so this symbol
-// must resolve; zero the fields the real one does.
 void ncclGinDevCommClearFields(struct ncclDevComm* devComm) {
   devComm->ginContextCount = 0;
   for (auto& handle : devComm->ginHandles) handle = nullptr;
