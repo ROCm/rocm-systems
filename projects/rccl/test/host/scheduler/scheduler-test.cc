@@ -209,6 +209,20 @@ constexpr int kSymSchedBigBatchChannels = 100;
 constexpr int kSymSchedBigBatchTasks = SymSchedMaxWorksIn4K(kSymSchedBigBatchChannels, false);
 static_assert(kSymSchedBigBatchTasks > 1 && kSymSchedBigBatchTasks < kSymSchedBigBatchChannels,
               "big batch must hold several works and leave channel headroom");
+// A channel count whose fullest batch lands on exactly 4 KB, so the guard's `>` boundary is exercised.
+constexpr int SymSchedExact4KChannels() {
+  for (int c = 2; c <= MAXCHANNELS; c++) {
+    int n = SymSchedMaxWorksIn4K(c, false);
+    if (n > 1 && n < c && ncclSymkDevWorkArgs::calcArgsSize(c, n, false) == sizeof(ncclSymkDevWorkArgs4K)) return c;
+  }
+  return 0;
+}
+constexpr int kSymSchedExact4KChannels = SymSchedExact4KChannels();
+static_assert(kSymSchedExact4KChannels > 0, "no channel count fills the 4 KB symmetric argument exactly");
+constexpr int kSymSchedExact4KTasks = SymSchedMaxWorksIn4K(kSymSchedExact4KChannels, false);
+static_assert(ncclSymkDevWorkArgs::calcArgsSize(kSymSchedExact4KChannels, kSymSchedExact4KTasks, false) ==
+                sizeof(ncclSymkDevWorkArgs4K),
+              "exact-fill batch must be exactly 4 KB");
 
 // Counts ncclSymkMakeDevWork calls, i.e. the works the scheduler packed into its one batch.
 std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, struct ncclSymkDevWork*)>
@@ -2883,11 +2897,12 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsSize_FloorWins_BelowCalcAr
   EXPECT_EQ(scene.plan->kernelArgsSize, sizeof(ncclSymkDevWorkArgs4K));
 }
 
-// A batch filled exactly to the 4 KB symmetric kernel argument is accepted; packing it must not overrun calloc.
+// A batch whose args are exactly 4 KB is accepted; packing it must not overrun calloc.
 TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsSize_ExactlyFillsSymkArg_Accepted) {
   SymmetricTaskScheduler_Scene scene;
-  auto tasks = SymmetricTaskScheduler_EnqueueBatch(&scene.symTaskQueue, kSymSchedBigBatchTasks,
+  auto tasks = SymmetricTaskScheduler_EnqueueBatch(&scene.symTaskQueue, kSymSchedExact4KTasks,
                                                     ncclSymkKernelId_AllGather_LL, /*lastIsSymLast=*/1);
+  for (auto& t : tasks) t.nMaxChannels = kSymSchedExact4KChannels;
   EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
   EXPECT_EQ(scene.plan->kernelArgsSize, sizeof(ncclSymkDevWorkArgs4K));
 }
