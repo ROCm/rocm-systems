@@ -108,10 +108,11 @@ def _get_text(url: str) -> str | None:
         raise
 
 
-def _exists(url: str) -> bool:
+def url_exists(url: str, timeout: int = TIMEOUT) -> bool:
+    """Whether *url* is there; an error other than 403 or 404 is raised."""
     try:
         with urllib.request.urlopen(urllib.request.Request(url, method="HEAD"),
-                                    timeout=TIMEOUT):
+                                    timeout=timeout):
             return True
     except urllib.error.HTTPError as exc:
         if exc.code in (403, 404):
@@ -194,7 +195,7 @@ def resolve(spec: str, family: str) -> dict:
             prefix = f"therock-dist-linux-{family}-"
             if not name.startswith(prefix):
                 raise ValueError(f"{spec!r}: not a {family} dist tarball")
-            if not _exists(value):
+            if not url_exists(value):
                 raise RuntimeError(f"{spec}: not found")
             return _tarball_plan(spec, name[len(prefix):-len(".tar.gz")], value)
         lib_url, version = value, name.split("-")[1]
@@ -205,7 +206,7 @@ def resolve(spec: str, family: str) -> dict:
         # one directory per project.
         siblings = (urllib.parse.urljoin(value, device_name),
                     urllib.parse.urljoin(value, f"../{device_project.replace('_', '-')}/{device_name}"))
-        device = next((url for url in siblings if _exists(url)), None)
+        device = next((url for url in siblings if url_exists(url)), None)
     else:
         channel, version = CHANNELS[kind], value
         lib_url = device = None
@@ -216,7 +217,7 @@ def resolve(spec: str, family: str) -> dict:
                 break
         tarball = f"{channel['tarballs']}therock-dist-linux-{family}-{version}.tar.gz"
         if lib_url is None:
-            if _exists(tarball):
+            if url_exists(tarball):
                 return _tarball_plan(spec, version, tarball)
             raise RuntimeError(f"{spec}: no {LIBRARIES} {version} wheel in "
                                f"{', '.join(channel['wheels'])}, nor {tarball}")
@@ -228,7 +229,7 @@ def resolve(spec: str, family: str) -> dict:
             if WHEEL_KPACK.format(gfx=gfx) in wheel.namelist():
                 return {"source": spec, "version": version, "archive": "wheel",
                         "lib_url": lib_url, "kpack_url": device}
-    if tarball and _exists(tarball):
+    if tarball and url_exists(tarball):
         log.info("%s: no RCCL kpack in its %s wheel; using %s", spec, device_project, tarball)
         return _tarball_plan(spec, version, tarball)
     # The base image keeps its own RCCL's kpack under the same kernel name, so

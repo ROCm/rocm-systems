@@ -56,7 +56,7 @@ class Remote:
     def __enter__(self):
         self.patches = [
             mock.patch.object(fb, "_get_text", self.pages.get),
-            mock.patch.object(fb, "_exists", lambda url: url in self.files),
+            mock.patch.object(fb, "url_exists", lambda url: url in self.files),
             mock.patch.object(fb, "_open_zip", self.open_zip),
             mock.patch.object(fb, "_open_stream", self.open_stream),
         ]

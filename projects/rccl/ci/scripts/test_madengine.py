@@ -2690,14 +2690,7 @@ def rccl_artifact_url(build: str, gpu_target: str, repo: str) -> str:
 
 
 def rccl_artifact_exists(build: str, gpu_target: str, repo: str, timeout: int = 30) -> bool:
-    request = urllib.request.Request(rccl_artifact_url(build, gpu_target, repo), method="HEAD")
-    try:
-        with urllib.request.urlopen(request, timeout=timeout):
-            return True
-    except urllib.error.HTTPError as exc:
-        if exc.code in (403, 404):
-            return False
-        raise
+    return fetch_rccl_build.url_exists(rccl_artifact_url(build, gpu_target, repo), timeout)
 
 
 def previous_scheduled_build(
