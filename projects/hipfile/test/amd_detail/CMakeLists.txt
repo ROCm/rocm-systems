@@ -194,3 +194,12 @@ foreach(_kernel IN ITEMS after during)
         ENVIRONMENT "HIPFILE_FORCE_COMPAT_MODE=true"
     )
 endforeach()
+
+hipfile_add_test_executable(
+    NAME hipfilewrite-visibility
+    DEPS hipfile
+    SRCS "hipfilewrite-visibility.cpp" "hipfilewrite-visibility-kernel.hip"
+    SYSINCLS ${HIPFILE_AMD_SOURCE_PATH} ${HIPFILE_INCLUDE_PATH} ${HIPFILE_TEST_COMMON_PATH} ${HIPFILE_THIRD_PARTY_PATH}
+)
+
+target_link_libraries(hipfilewrite-visibility PRIVATE Threads::Threads)
