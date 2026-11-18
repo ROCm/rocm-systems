@@ -83,6 +83,16 @@ repos:
         stages: [manual]
         verbose: true
 
+  - repo: local
+    hooks:
+      - id: no-hip-atomic-builtins
+        name: no __hip_atomic_* builtins (use __scoped_atomic_*)
+        language: pygrep
+        entry: '\b__hip_atomic_(load|store|exchange|compare_exchange_(weak|strong)|fetch_(add|sub|and|or|xor|min|max))\b'
+        files: ^projects/rccl/.*\.(c|cc|cpp|cu|cuh|h|hpp)$
+        # The poison header spells the names in order to poison them.
+        exclude: ^projects/rccl/src/include/poison_hip_atomics\.h$
+
   # Python linting, advisory only.
   - repo: local
     hooks:
