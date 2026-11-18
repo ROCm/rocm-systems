@@ -282,7 +282,7 @@ TEST_F(DdaBroadcastFabricLL128Microtest, Launch_ThreadsDefaultIs512) {
 }
 
 TEST_F(DdaBroadcastFabricLL128Microtest, Launch_ThreadsEnvVarOverridesDefault) {
-  ScopedEnv envGuard("RCCL_DDA_LL128_BC_THREADS", nullptr);
+  ScopedEnv envGuard("RCCL_DDA_LL128_BC_THREADS", "");
   const std::pair<int64_t, unsigned> cases[] = {
       {256, 256}, {32, 32}, {512, 512},
       {16,  512},   // not a warp multiple -> fall back
@@ -302,7 +302,7 @@ TEST_F(DdaBroadcastFabricLL128Microtest, Launch_ArchTableThreadsUsedWhenEnvAbsen
 }
 
 TEST_F(DdaBroadcastFabricLL128Microtest, Launch_EnvVarOverridesArchTable) {
-  ScopedEnv envGuard("RCCL_DDA_LL128_BC_THREADS", nullptr);
+  ScopedEnv envGuard("RCCL_DDA_LL128_BC_THREADS", "");
   g_rcclDdaFabricBcLL128Threads = [](const ncclComm*) { return 256; };
   params_["RCCL_DDA_LL128_BC_THREADS"] = 384;
   EXPECT_EQ(RunOne(4).block.x, 384u);
@@ -316,7 +316,7 @@ TEST_F(DdaBroadcastFabricLL128Microtest, Launch_ArchTableZeroFallsBackToDefault)
 TEST_F(DdaBroadcastFabricLL128Microtest, Launch_ThreadCountAffectsBlocksPerPeer) {
   // 256 threads = 8 warps, nPeers=3: bpp = ceil(ceil(totalSlices/3) / 8).
   // Transition at totalSlices=25: cs=9 -> bpp=2; at 24: cs=8 -> bpp=1.
-  ScopedEnv envGuard("RCCL_DDA_LL128_BC_THREADS", nullptr);
+  ScopedEnv envGuard("RCCL_DDA_LL128_BC_THREADS", "");
   params_["RCCL_DDA_LL128_BC_THREADS"] = 256;
   EXPECT_EQ(RunOne(25 * kSliceData / 4).grid.y, 2u);
   EXPECT_EQ(RunOne(24 * kSliceData / 4).grid.y, 1u);
