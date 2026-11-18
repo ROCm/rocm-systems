@@ -43,7 +43,9 @@
 #ifndef HSA_RUNTIME_CORE_INC_AMD_BLIT_KERNEL_H_
 #define HSA_RUNTIME_CORE_INC_AMD_BLIT_KERNEL_H_
 
+#include <functional>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <vector>
 #include <atomic>
@@ -115,9 +117,33 @@ class BlitKernel : public core::Blit {
   virtual void GangLeader(bool gang_leader) override {}
   virtual bool GangLeader() const override { return false; }
 
+  /// @brief Submit a batch of swap copy commands. Entries and oversized
+  /// entries are split across dispatches; all of them share @p out_signal.
+  virtual hsa_status_t SubmitSwapCopyCommand(
+      uint32_t num_entries, void* const* addr_a_list, void* const* addr_b_list,
+      const size_t* size_list, std::vector<core::Signal*>& dep_signals,
+      core::Signal& out_signal) override;
+
+  /// Keep the base class' single-pair convenience overload visible; declaring
+  /// the N-entry override above would otherwise hide it for callers holding a
+  /// BlitKernel rather than a core::Blit.
+  using core::Blit::SubmitSwapCopyCommand;
+
   const uint16_t kInvalidPacketHeader = HSA_PACKET_TYPE_INVALID;
 
+  /// Bytes one swap dispatch exchanges. KernelArgs::swap::swap_size is a
+  /// uint32_t, and the bound is rounded down to a multiple of the shader's
+  /// 16-byte chunk so every chunk boundary stays 16-byte aligned - the shader
+  /// splits its grid into a 16-byte phase and a trailing-byte phase, and a
+  /// boundary that was not a multiple of 16 would give the tail of one chunk
+  /// and the head of the next inconsistent phase assignments.
+  static constexpr size_t kMaxSwapBytesPerDispatch = size_t(UINT32_MAX) & ~size_t(15);
+
  private:
+  /// Divides the ring size to give the largest reservation a splittable
+  /// submission may take. See MaxReservationPackets.
+  static constexpr uint32_t kReservationRingDivisor = 2;
+
   union KernelArgs {
     struct __ALIGNED__(16) {
       uint64_t phase1_src_start;
@@ -150,6 +176,12 @@ class BlitKernel : public core::Blit {
       uint32_t fill_value;
       uint32_t num_workitems;
     } fill;
+
+    struct __ALIGNED__(16) {
+      uint64_t addr_a;     // First buffer address
+      uint64_t addr_b;     // Second buffer address
+      uint32_t swap_size;  // Size to swap in bytes
+    } swap;
   };
 
   // Index after which bytes will have been written.
@@ -158,8 +190,14 @@ class BlitKernel : public core::Blit {
     uint64_t bytes;
   };
 
+  /// True when the ring is large enough to hold num_packet packets at once.
+  /// A reservation that fails this can never be satisfied, so the submission
+  /// has to be rejected rather than waited on.
+  bool ReservationFits(uint32_t num_packet) const;
+
   /// Reserve a slot in the queue buffer. The call will wait until the queue
-  /// buffer has a room.
+  /// buffer has a room. Must only be called for a reservation that satisfies
+  /// ReservationFits.
   uint64_t AcquireWriteIndex(uint32_t num_packet);
 
   /// Update the queue doorbell register with ::write_index. This
@@ -170,6 +208,57 @@ class BlitKernel : public core::Blit {
   void PopulateQueue(uint64_t index, uint64_t code_handle, void* args,
                      uint32_t grid_size_x, hsa_signal_t completion_signal);
 
+  /// Emit BARRIER_AND packets to gate the following dispatch on @p dep_signals.
+  /// Packets are written starting at @p barrier_start_index (one packet per up
+  /// to five dependent signals). Shared by the linear and swap copy submit
+  /// paths. @p completion_signal is attached to the last barrier packet;
+  /// pass a zero handle when a following dispatch carries the signal instead.
+  void SubmitDependentSignalBarriers(uint64_t barrier_start_index,
+                                     std::vector<core::Signal*>& dep_signals,
+                                     hsa_signal_t completion_signal = {0});
+
+  /// Complete a zero-byte copy. Still honors @p dep_signals: @p out_signal is
+  /// only released once they have fired.
+  hsa_status_t SubmitEmptyCopyCommand(std::vector<core::Signal*>& dep_signals,
+                                      core::Signal& out_signal);
+
+  /// Largest reservation, in packets, that a splittable submission may take.
+  /// At most half the ring, and never zero.
+  uint32_t MaxReservationPackets() const;
+
+  /// Dispatch packets that still fit in one reservation once
+  /// @p num_barrier_packet barrier packets have taken their place in it.
+  /// A request needing more than this is split across reservations.
+  /// Never returns zero.
+  uint32_t MaxDispatchesPerReservation(uint32_t num_barrier_packet) const;
+
+  /// Run @p submit on a runtime handler thread once every signal in
+  /// @p pending_deps has reached zero, and return immediately.
+  ///
+  /// AcquireWriteIndex blocks the calling thread until the packet processor
+  /// retires enough earlier packets to free queue space. That is only safe
+  /// while those packets can retire unaided. Dependency barriers break that:
+  /// they sit at the head of the first reservation waiting on signals that
+  /// only the caller can satisfy, so a batch large enough to need a second
+  /// reservation would spin forever inside the very call the caller has to
+  /// return from in order to satisfy them.
+  ///
+  /// Deferring keeps the two mutually exclusive. A batch that fits in one
+  /// reservation carries its barriers in it as before; one that does not waits
+  /// off-queue instead and is then submitted with nothing left to gate it, so
+  /// its reservations drain on GPU progress alone. @p submit must therefore
+  /// not carry dependencies, and must already be past every failure path -
+  /// there is no caller left to return a status to.
+  ///
+  /// @p abandon runs instead of @p submit if the blit is destroyed before the
+  /// dependencies resolve, and must release the completion signal. This call
+  /// reports success to its caller, so the copy may already have a thread
+  /// waiting on that signal; dropping the work without releasing it would
+  /// leave the waiter blocked forever rather than merely losing the copy.
+  hsa_status_t DeferUntilDepsResolved(const std::vector<core::Signal*>& pending_deps,
+                                      std::function<void()> submit,
+                                      std::function<void()> abandon);
+
   KernelArgs* ObtainAsyncKernelCopyArg();
 
   void RecordBlitHistory(uint64_t size, uint64_t index);
@@ -179,6 +268,7 @@ class BlitKernel : public core::Blit {
     CopyAligned,
     CopyMisaligned,
     Fill,
+    SwapCopy,
   };
 
   struct KernelCode {
@@ -220,6 +310,23 @@ class BlitKernel : public core::Blit {
 
   /// Lock to synchronize access to kernarg_ and completion_signal_
   std::mutex lock_;
+
+  /// Shared between this blit and every submission it has deferred.
+  ///
+  /// A deferred submission is owned by the runtime's async handler threads,
+  /// which Runtime::Unload only stops after Agent::ReleaseResources has already
+  /// destroyed the blits and their queues. A handler that fired in that window
+  /// would submit against a destroyed queue, so it has to be able to ask
+  /// whether the blit is still alive without touching the blit itself. Holding
+  /// this separately and by shared_ptr keeps that question answerable for as
+  /// long as any deferred submission survives.
+  struct DeferralGuard {
+    /// Held across both the flag write and the deferred submission, so the two
+    /// cannot interleave.
+    std::mutex lock;
+    bool blit_destroyed = false;
+  };
+  std::shared_ptr<DeferralGuard> deferral_guard_;
 
   /// Number of CUs on the underlying agent.
   int num_cus_;
