@@ -647,10 +647,10 @@ enumerate()
             read_property(properties, "sdma_fw_version", sdma_fw_version);
             agent_info.sdma_fw_version.uCodeCompute = fw_version & 0xfff;
             agent_info.sdma_fw_version.uCodeSDMA    = sdma_fw_version & 0x3ff;
-            agent_info.fw_version.ui32.Major =
+            agent_info.gfxip_version.ui32.Major =
                 (agent_info.gfx_target_version / 10000) % 100;
-            agent_info.fw_version.ui32.Minor = (agent_info.gfx_target_version / 100) % 100;
-            agent_info.fw_version.ui32.Stepping = agent_info.gfx_target_version % 100;
+            agent_info.gfxip_version.ui32.Minor = (agent_info.gfx_target_version / 100) % 100;
+            agent_info.gfxip_version.ui32.Stepping = agent_info.gfx_target_version % 100;
             agent_info.workgroup_max_size = workgrp_max;  // hardcoded in hsa-runtime
             agent_info.workgroup_max_dim  = {workgrp_max, workgrp_max, workgrp_max};
             agent_info.grid_max_size      = grid_max;  // hardcoded in hsa-runtime

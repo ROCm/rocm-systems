@@ -207,7 +207,7 @@
                                         "uCodeCompute"
                                     ]
                                 },
-                                "fw_version": {
+                                "gfxip_version": {
                                     "type": "object",
                                     "description": "GFXIP version",
                                     "properties": {

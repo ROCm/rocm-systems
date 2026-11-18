@@ -148,9 +148,9 @@ TEST(wsl_dxg_topology, identity_fields_are_copied)
     EXPECT_EQ(info.location_id, 0x0300u);
     EXPECT_EQ(info.family_id, 145u);
     // Read back out of the same union bit-fields the thunk fills in.
-    EXPECT_EQ(info.fw_version.ui32.Major, 11u);
-    EXPECT_EQ(info.fw_version.ui32.Minor, 5u);
-    EXPECT_EQ(info.fw_version.ui32.Stepping, 0u);
+    EXPECT_EQ(info.gfxip_version.ui32.Major, 11u);
+    EXPECT_EQ(info.gfxip_version.ui32.Minor, 5u);
+    EXPECT_EQ(info.gfxip_version.ui32.Stepping, 0u);
     EXPECT_EQ(info.sdma_fw_version.uCodeCompute, 42u);
     EXPECT_EQ(info.sdma_fw_version.uCodeSDMA, 17u);
     EXPECT_EQ(info.max_engine_clk_fcompute, 2900u);
