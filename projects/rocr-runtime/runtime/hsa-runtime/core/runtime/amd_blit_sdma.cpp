@@ -215,8 +215,22 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::Initialize(const core::Agent& agent,
     broadcast_supported_ = true;
   } else if (major == 9) {
     broadcast_supported_ = (minor >= 4) || (minor == 0 && stepping >= 10);
-    swap_supported_ = (minor >= 4);
   }
+
+  // Swap linear copy: claimed on gfx94x+ only, the parts on which the packet
+  // has been exercised on hardware.
+  //
+  // The claim is deliberately narrower than the packet definition. A part may
+  // encode a swap sub-op without the engine retiring it, and an engine that
+  // accepts a swap it never completes stalls the queue instead of returning a
+  // status the caller can act on - so an over-broad claim costs a copy engine
+  // rather than an error.
+  //
+  // This flag gates the swap sub-op alone. gfx125+ reaches the packet through a
+  // separate condition in SubmitBodies and so does not depend on it; every other
+  // part that does not claim it is served by the shader blit (see
+  // GpuAgent::DmaCopySwap).
+  swap_supported_ = (major == 9 && minor >= 4);
 
   // Allocate queue buffer.
   // NonPaged: queue buffer, resolved via amdgpu_vm_bo_lookup_mapping().
