@@ -1046,10 +1046,6 @@ endfunction()
 # ----------------------------------------------------------------------------
 # Adds a unit test subdirectory
 #
-# HELPERS names executables or shared libraries the test runs or loads from its own
-# directory. They are built before the test and placed beside it in both the build tree
-# and the install tree.
-#
 
 function(rocprofiler_add_unit_test)
     cmake_policy(PUSH)
@@ -1070,7 +1066,7 @@ function(rocprofiler_add_unit_test)
         "SKIP_REGULAR_EXPRESSION"
         "RESOURCE_LOCK")
     set(_MULTI_OPTS "SOURCES" "LABELS" "ENVIRONMENT" "DISABLE_TESTS" "DATA"
-                    "CONFIGURE_FILES" "SPM_TESTS" "HELPERS")
+                    "CONFIGURE_FILES" "SPM_TESTS")
 
     cmake_parse_arguments(RAUT "${_FLAG_OPTS}" "${_SINGLE_OPTS}" "${_MULTI_OPTS}" ${ARGN})
 
@@ -1175,18 +1171,6 @@ function(rocprofiler_add_unit_test)
         DESTINATION ${_INSTALL_RUNTIME_OUTPUT_DIRECTORY}
         COMPONENT tests
         EXPORT rocprofiler-sdk-tests-targets)
-
-    if(RAUT_HELPERS)
-        add_dependencies(${RAUT_TARGET} ${RAUT_HELPERS})
-        set_target_properties(
-            ${RAUT_HELPERS}
-            PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${_BUILD_RUNTIME_OUTPUT_DIRECTORY}
-                       LIBRARY_OUTPUT_DIRECTORY ${_BUILD_RUNTIME_OUTPUT_DIRECTORY})
-        install(
-            TARGETS ${RAUT_HELPERS}
-            DESTINATION ${_INSTALL_RUNTIME_OUTPUT_DIRECTORY}
-            COMPONENT tests)
-    endif()
 
     get_property(
         _ROCP_SDK_TEST_TARGETS

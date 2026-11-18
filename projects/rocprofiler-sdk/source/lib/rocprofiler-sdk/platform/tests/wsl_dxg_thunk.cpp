@@ -35,8 +35,7 @@
 // FakeLoader is keyed by the exact string passed to dlopen, so it pins
 // candidate order and handle balance only. It does not model the real glibc
 // search, SONAME or file identity, RTLD_NOLOAD aliasing, NODELETE, or how
-// librocdxg is packaged. wsl_dxg_loader.cpp covers that behavior against real
-// ELF objects in subprocesses.
+// librocdxg is packaged, and none of that is covered here.
 
 #include "lib/rocprofiler-sdk/platform/wsl/dxg_thunk.hpp"
 
@@ -260,8 +259,7 @@ operator<<(std::ostream& os, const OpenCall& call)
 // dlopen, so the candidate order can be pinned. `hsa_dirs` is what the
 // libhsa-runtime64 directory query returns. Records every symbol asked for so
 // the resolved set can be pinned exactly, and counts closes. Nothing here
-// resolves paths, reads SONAMEs or aliases one name to another; see
-// wsl_dxg_loader.cpp for that behavior against the real loader.
+// resolves paths, reads SONAMEs or aliases one name to another.
 struct FakeLoader
 {
     std::vector<OpenCall>    opens;
@@ -609,8 +607,7 @@ TEST(wsl_dxg_thunk, a_thunk_agreeing_on_the_record_size_is_read)
 // candidate strings are tried and that each handle obtained is closed once.
 // What "resident" or "loadable" means in a real process - SONAME matching,
 // RTLD_NOLOAD aliasing, NODELETE, the glibc search path, packaging - is not
-// modeled; wsl_dxg_loader.cpp runs the lookup against real ELF objects in
-// subprocesses for that.
+// modeled.
 
 // The versioned name is the one the HSA runtime asks for first, and it carries
 // the major of the hsakmt rocdxg_version.h this build compiled against.
