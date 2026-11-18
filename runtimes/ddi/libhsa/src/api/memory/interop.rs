@@ -8,17 +8,15 @@ use std::ffi::c_void;
 use crate::ffi::*;
 use crate::memory::interop::*;
 use crate::memory::*;
-use crate::platform::memory as linux_interop;
-use crate::platform::memory::{
-    AisFileOperation as AisOperation, KfdIpcMemoryHandle as IpcMemoryHandle,
-};
+use crate::platform::memory as native_memory;
+use crate::platform::{AisOperation, ais_file_io};
 use crate::runtime::{boundary, initialized_mut, lock, map_error};
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_ipc_memory_create")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Exports a tracked allocation as an IPC memory handle.
 pub unsafe extern "C" fn hsa_amd_ipc_memory_create(
     pointer: *mut c_void,
@@ -43,8 +41,8 @@ pub unsafe extern "C" fn hsa_amd_ipc_memory_create(
         }) else {
             return INVALID_ARGUMENT;
         };
-        let exported = match linux_interop::export_kfd_ipc_memory(&memory.allocation) {
-            Ok(handle) => handle.words,
+        let exported = match native_memory::export_ipc_memory(&memory.allocation) {
+            Ok(handle) => handle,
             Err(error) => return map_error(error),
         };
         // SAFETY: The caller supplied writable output storage and publication
@@ -55,10 +53,10 @@ pub unsafe extern "C" fn hsa_amd_ipc_memory_create(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_ipc_memory_attach")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Attaches shared memory from an exported IPC handle.
 pub unsafe extern "C" fn hsa_amd_ipc_memory_attach(
     handle: *const HsaAmdIpcMemory,
@@ -142,19 +140,18 @@ pub unsafe extern "C" fn hsa_amd_ipc_memory_attach(
             let Some(session) = runtime.session() else {
                 return ERROR;
             };
-            match linux_interop::import_kfd_ipc_memory(
+            match native_memory::import_ipc_memory(
                 session,
                 &devices,
                 &mapping_devices,
-                IpcMemoryHandle { words },
+                words,
                 size as u64,
             ) {
                 Ok(allocation) => allocation,
                 Err(error) => {
                     return match error.kind() {
-                        rocddi::ErrorKind::InvalidArgument | rocddi::ErrorKind::Unsupported => {
-                            INVALID_ARGUMENT
-                        }
+                        rocddi::ErrorKind::InvalidArgument => INVALID_ARGUMENT,
+                        rocddi::ErrorKind::Unsupported => NOT_SUPPORTED,
                         rocddi::ErrorKind::ResourceExhausted => OUT_OF_RESOURCES,
                         _ => ERROR,
                     };
@@ -190,10 +187,10 @@ pub unsafe extern "C" fn hsa_amd_ipc_memory_attach(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_ipc_memory_detach")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Detaches an imported IPC memory mapping.
 pub extern "C" fn hsa_amd_ipc_memory_detach(mapped_pointer: *mut c_void) -> Status {
     boundary(|| {
@@ -230,10 +227,10 @@ pub extern "C" fn hsa_amd_ipc_memory_detach(mapped_pointer: *mut c_void) -> Stat
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_external_semaphore_handle_open")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Imports an external semaphore handle for HSA queue use.
 pub unsafe extern "C" fn hsa_amd_external_semaphore_handle_open(
     agent: HsaAgent,
@@ -259,10 +256,10 @@ pub unsafe extern "C" fn hsa_amd_external_semaphore_handle_open(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_external_semaphore_handle_close")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Releases an imported external semaphore handle.
 pub extern "C" fn hsa_amd_external_semaphore_handle_close(
     _semaphore: HsaAmdExternalSemaphore,
@@ -280,10 +277,10 @@ pub extern "C" fn hsa_amd_external_semaphore_handle_close(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_ais_file_write")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Writes memory contents to an AIS file handle.
 pub unsafe extern "C" fn hsa_amd_ais_file_write(
     handle: HsaAmdAisFileHandle,
@@ -310,10 +307,10 @@ pub unsafe extern "C" fn hsa_amd_ais_file_write(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_ais_file_read")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Reads an AIS file handle into HSA-visible memory.
 pub unsafe extern "C" fn hsa_amd_ais_file_read(
     handle: HsaAmdAisFileHandle,
@@ -340,10 +337,10 @@ pub unsafe extern "C" fn hsa_amd_ais_file_read(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_portable_export_dmabuf")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Exports an allocation as a portable DMA-BUF descriptor.
 pub unsafe extern "C" fn hsa_amd_portable_export_dmabuf(
     pointer: *const c_void,
@@ -358,10 +355,10 @@ pub unsafe extern "C" fn hsa_amd_portable_export_dmabuf(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_portable_export_dmabuf_v2")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Exports an allocation as a DMA-BUF with version-two options.
 pub unsafe extern "C" fn hsa_amd_portable_export_dmabuf_v2(
     pointer: *const c_void,
@@ -377,27 +374,27 @@ pub unsafe extern "C" fn hsa_amd_portable_export_dmabuf_v2(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_portable_close_dmabuf")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Closes an exported portable DMA-BUF descriptor.
 pub extern "C" fn hsa_amd_portable_close_dmabuf(descriptor: i32) -> Status {
     boundary(|| {
         // SAFETY: The ABI transfers responsibility for closing this descriptor.
-        if unsafe { linux_interop::close_owned_descriptor(descriptor) }.is_ok() {
-            SUCCESS
-        } else {
-            RESOURCE_FREE
+        match unsafe { native_memory::close_owned_descriptor(descriptor) } {
+            Ok(()) => SUCCESS,
+            Err(error) if error.kind() == rocddi::ErrorKind::Unsupported => NOT_SUPPORTED,
+            Err(_) => RESOURCE_FREE,
         }
     })
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_memory_lock")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Pins host memory and makes it accessible to HSA agents.
 pub unsafe extern "C" fn hsa_amd_memory_lock(
     host_ptr: *mut c_void,
@@ -414,10 +411,10 @@ pub unsafe extern "C" fn hsa_amd_memory_lock(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_memory_lock_to_pool")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Pins host memory using a selected memory pool.
 pub unsafe extern "C" fn hsa_amd_memory_lock_to_pool(
     host_ptr: *mut c_void,
@@ -446,10 +443,10 @@ pub unsafe extern "C" fn hsa_amd_memory_lock_to_pool(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_memory_unlock")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Unpins a previously locked host memory range.
 pub unsafe extern "C" fn hsa_amd_memory_unlock(host_ptr: *mut c_void) -> Status {
     boundary(|| {
@@ -497,10 +494,10 @@ pub unsafe extern "C" fn hsa_amd_memory_unlock(host_ptr: *mut c_void) -> Status 
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_interop_map_buffer")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Maps an external graphics buffer for HSA access.
 pub unsafe extern "C" fn hsa_amd_interop_map_buffer(
     num_agents: u32,
@@ -531,10 +528,10 @@ pub unsafe extern "C" fn hsa_amd_interop_map_buffer(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_interop_map_buffer_with_size")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Maps an external graphics buffer with an explicit size.
 pub unsafe extern "C" fn hsa_amd_interop_map_buffer_with_size(
     num_agents: u32,
@@ -566,10 +563,10 @@ pub unsafe extern "C" fn hsa_amd_interop_map_buffer_with_size(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_interop_unmap_buffer")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Unmaps a graphics buffer imported through interop.
 pub extern "C" fn hsa_amd_interop_unmap_buffer(pointer: *mut c_void) -> Status {
     boundary(|| {

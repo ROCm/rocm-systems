@@ -4,6 +4,7 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_MEMORY_ISSUE_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_MEMORY_ISSUE_H_
 
+#include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter.h"
 
 #include <array>
@@ -13,6 +14,23 @@
 #include <span>
 
 namespace rocjitsu::amdgpu {
+
+/// RDNA and gfx1250 allocate a vector-memory and an LDS counter position
+/// for every generic FLAT, even when all requesting lanes resolve to one space.
+/// CDNA1–4 use address-domain participation as an unverified model. CDNA3/4
+/// ISA section 10.2 describes joint VM and LGKM completion.
+[[nodiscard]] constexpr bool flat_issues_both_counter_domains(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+}
+
+/// With the GFX10/GFX11 wait counters, each generic FLAT result needs both
+/// domains. Split-counter targets can establish completion per lane and space.
+[[nodiscard]] constexpr bool flat_requires_both_counters(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+}
 
 /// @brief Completion ordering associated with an AMDGPU memory issue.
 /// @details Counter membership and completion ordering are separate: operations
@@ -24,6 +42,10 @@ enum class MemoryCompletionClass : uint8_t {
   GDS,
   ASYNC_LOAD,
   ASYNC_STORE,
+  /// Tensor DMA transfers, which complete on TENSORCNT in issue order. Tensor
+  /// DMA instructions carry no MemoryIssueInfo, so no instruction metadata uses
+  /// this class yet.
+  TENSOR,
   UNORDERED,
 };
 
@@ -64,7 +86,7 @@ private:
                                 static_cast<uint8_t>(wait_counter_type));
   }
 
-  static_assert(static_cast<uint8_t>(WaitCounterType::ASYNCCNT) < 16);
+  static_assert(static_cast<uint8_t>(WaitCounterType::BVHCNT) < 16);
   static_assert(static_cast<uint8_t>(MemoryCompletionClass::UNORDERED) < 8);
   uint8_t encoded_ = 0;
 };
@@ -76,7 +98,9 @@ private:
 /// Each obligation carries its own completion-order class because operations
 /// sharing one counter need not form one FIFO, and one instruction's different
 /// counter domains can have different ordering guarantees. Decoded FLAT metadata
-/// lists possible domains; address routing selects the domains actually used.
+/// lists both domains. Address routing selects the obligations for each request.
+/// flat_issues_both_counter_domains() selects RDNA1–4 and CDNA5 for additional
+/// counter occupancy in unused domains. CDNA1–4 use the routed domains.
 /// The dynamic race detector requires every attached obligation for whole-event
 /// completion, including destination-register and memory dependencies. This API
 /// does not represent a separate source-register lifetime. The same obligations

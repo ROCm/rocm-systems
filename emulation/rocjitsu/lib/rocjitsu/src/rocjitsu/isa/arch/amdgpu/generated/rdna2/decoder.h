@@ -21,7 +21,7 @@ namespace rdna2 {
 
 class Decoder {
 public:
-  static constexpr std::size_t kMaxInstructionWords = 3;
+  static constexpr std::size_t kMaxInstructionWords = 5;
   static DecodeResult decode(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 };
 

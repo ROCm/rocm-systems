@@ -28,11 +28,12 @@ use std::sync::{Mutex, MutexGuard};
 
 use super::errno;
 use super::uapi;
+use super::{DebuggerRegistration, DebuggerRegistrationMode, XnackModeRequest};
+use crate::os::ProcessIdentity;
 use crate::os::linux::{
     file::{close_descriptor, close_file},
     invalid_data,
     memory::{Reservation, page_size},
-    process_identity::check_process,
 };
 use crate::session::DriverContextLifetime;
 
@@ -112,7 +113,7 @@ pub(super) struct Kfd {
     /// Exact native descriptor used for this context.
     file: Option<File>,
     /// Creating process identity checked before native calls.
-    process: u32,
+    process: ProcessIdentity,
     /// Serialized context selection and runtime enablement.
     runtime: Mutex<RuntimeControl>,
     /// Optional unit-test replacement for native ioctls.
@@ -144,6 +145,8 @@ struct RuntimeControl {
     context: ContextState,
     /// Last known native runtime enablement state.
     enable: RuntimeState,
+    /// Registration carried by the current or pending enable transaction.
+    debugger: Option<DebuggerRegistration>,
 }
 
 /// Guard retaining exclusive access to one runtime-enable transaction.
@@ -153,13 +156,14 @@ pub(super) struct RuntimeGuard<'a> {
 }
 
 impl Kfd {
-    pub(super) fn new(file: File) -> Self {
+    pub(super) fn new(file: File, process: ProcessIdentity) -> Self {
         Self {
             file: Some(file),
-            process: std::process::id(),
+            process,
             runtime: Mutex::new(RuntimeControl {
                 context: ContextState::Primary,
                 enable: RuntimeState::Disabled,
+                debugger: None,
             }),
             #[cfg(test)]
             hook: None,
@@ -167,13 +171,15 @@ impl Kfd {
     }
 
     #[cfg(test)]
+    #[allow(clippy::expect_used)]
     pub(super) fn with_hook(file: File, hook: IoctlHook) -> Self {
         Self {
             file: Some(file),
-            process: std::process::id(),
+            process: ProcessIdentity::capture().expect("test process identity"),
             runtime: Mutex::new(RuntimeControl {
                 context: ContextState::Primary,
                 enable: RuntimeState::Disabled,
+                debugger: None,
             }),
             hook: Some(hook),
         }
@@ -186,7 +192,7 @@ impl Kfd {
     }
 
     pub(super) fn check_process(&self) -> io::Result<()> {
-        check_process(self.process)
+        self.process.check()
     }
 
     fn call(&self, call: Call<'_>) -> io::Result<()> {
@@ -392,6 +398,47 @@ impl Kfd {
         }
     }
 
+    /// Applies a requested mode while serialized with VM acquisition and enable.
+    /// Matching active modes need only a query: KFD rejects even an identical
+    /// set request while queues exist. A conflicting active mode is never changed.
+    pub(super) fn configure_xnack_mode_locked(
+        &self,
+        runtime: &mut RuntimeGuard<'_>,
+        request: XnackModeRequest,
+    ) -> io::Result<()> {
+        let (enabled, required) = match request {
+            XnackModeRequest::Require(enabled) => (enabled, true),
+            XnackModeRequest::Prefer(enabled) => (enabled, false),
+        };
+        if runtime.state.context == ContextState::SelectionUncertain {
+            return Err(invalid_data(
+                "KFD context selection outcome requires teardown",
+            ));
+        }
+        if self.xnack_enabled()? == enabled {
+            return Ok(());
+        }
+        if runtime.state.enable != RuntimeState::Disabled {
+            return if required {
+                Err(io::Error::from_raw_os_error(errno::EBUSY))
+            } else {
+                Ok(())
+            };
+        }
+        let selected = self.call(Call::XnackMode(&mut uapi::XnackMode {
+            xnack_enabled: i32::from(enabled),
+        }));
+        if required {
+            selected?;
+        }
+        // Even an interrupted or rejected set requires a fresh query. A
+        // preferred request never turns an unknown effective mode into success.
+        if self.xnack_enabled()? != enabled && required {
+            return Err(invalid_data("KFD did not select the requested XNACK mode"));
+        }
+        Ok(())
+    }
+
     pub(super) fn tile_config(&self, gpu_id: u32) -> io::Result<uapi::TileConfig> {
         if gpu_id == 0 {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
@@ -514,6 +561,54 @@ impl Kfd {
         self.enable_runtime_locked(&mut runtime)
     }
 
+    /// Binds debugger policy to the exact serialized runtime enable transaction.
+    /// A native-only session may join an existing registration without replacing
+    /// it; an explicit incompatible registration requires the old runtime to end.
+    pub(super) fn configure_debugger_locked(
+        &self,
+        runtime: &mut RuntimeGuard<'_>,
+        registration: Option<DebuggerRegistration>,
+    ) -> io::Result<bool> {
+        self.check_process()?;
+        if runtime.state.context == ContextState::SelectionUncertain {
+            return Err(invalid_data(
+                "KFD context selection outcome requires teardown",
+            ));
+        }
+        if runtime.state.enable == RuntimeState::Disabled {
+            runtime.state.debugger = registration;
+            return Ok(true);
+        }
+        if let Some(request) = registration {
+            let matches = runtime.state.debugger.is_some_and(|active| {
+                (active.address, active.setup_ttmp) == (request.address, request.setup_ttmp)
+            });
+            if !matches {
+                return if request.mode == DebuggerRegistrationMode::Prefer {
+                    Ok(false)
+                } else {
+                    Err(io::Error::from_raw_os_error(errno::EBUSY))
+                };
+            }
+        }
+        Ok(true)
+    }
+
+    /// Reports the effective registration after activation, including lost races
+    /// between advisory configuration and another shared context's activation.
+    pub(super) fn debugger_registration_matches(
+        &self,
+        address: u64,
+        setup_ttmp: bool,
+    ) -> io::Result<bool> {
+        let runtime = self.runtime_guard()?;
+        Ok(runtime.state.enable == RuntimeState::Enabled
+            && runtime
+                .state
+                .debugger
+                .is_some_and(|active| (active.address, active.setup_ttmp) == (address, setup_ttmp)))
+    }
+
     pub(super) fn enable_runtime_locked(&self, runtime: &mut RuntimeGuard<'_>) -> io::Result<()> {
         if runtime.state.context == ContextState::SelectionUncertain {
             return Err(invalid_data(
@@ -530,7 +625,14 @@ impl Kfd {
             RuntimeState::Disabled | RuntimeState::EnableInterrupted => {}
         }
         let result = self.call(Call::RuntimeEnable(&mut uapi::RuntimeEnable {
-            mode_mask: 1,
+            mode_mask: 1
+                | (u32::from(
+                    runtime
+                        .state
+                        .debugger
+                        .is_some_and(|record| record.setup_ttmp),
+                ) << 1),
+            r_debug: runtime.state.debugger.map_or(0, |record| record.address),
             ..uapi::RuntimeEnable::default()
         }));
         runtime.state.enable = match &result {
@@ -549,10 +651,12 @@ impl Kfd {
     pub(super) fn disable_runtime(&self) -> io::Result<()> {
         let mut runtime = self.runtime_guard()?;
         if runtime.state.enable == RuntimeState::Disabled {
+            runtime.state.debugger = None;
             return Ok(());
         }
         let result = self.call(Call::RuntimeEnable(&mut uapi::RuntimeEnable::default()));
         runtime.state.enable = if result.is_ok() {
+            runtime.state.debugger = None;
             RuntimeState::Disabled
         } else {
             RuntimeState::CleanupRequired

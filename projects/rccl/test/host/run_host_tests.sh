@@ -32,7 +32,8 @@
 #   run             run the suite (timestamped log + JUnit XML). Always emits
 #                   llvm source-based coverage profiles (*.profraw) into
 #                   <BUILD_DIR>/coverage (requires the host tests to be built
-#                   with -DHOST_TEST_COVERAGE=ON, the default). Also runs the
+#                   with -DENABLE_CODE_COVERAGE=ON, which the `configure` phase
+#                   passes explicitly; it is OFF by default). Also runs the
 #                   checks in the `guards` phase above.
 #   coverage        turn the per-binary *.profraw profiles from `run` into
 #                   reports: a per-binary text/HTML report + lcov tracefile
@@ -112,7 +113,8 @@ do_hipify() {
 do_configure() {
   echo "==> Configure host tests  (BUILD_TYPE=$BUILD_TYPE  ROCM_PATH=$ROCM_PATH)"
   cmake -S "$SCRIPT_DIR" -B "$BUILD_DIR" \
-    -DCMAKE_BUILD_TYPE="$BUILD_TYPE" -DROCM_PATH="$ROCM_PATH"
+    -DCMAKE_BUILD_TYPE="$BUILD_TYPE" -DROCM_PATH="$ROCM_PATH" \
+    -DENABLE_CODE_COVERAGE=ON
 }
 
 do_build() {
@@ -164,7 +166,7 @@ do_host_tests() {
       binaries+=("$bin:$XML_FILE")
       continue
     fi
-    # rccl-UnitTestsMicroDdaColl -> host_tests_micro_dda_coll.xml
+    # rccl-UnitTestsMicroDdaAllGatherFabricLl -> host_tests_micro_dda_all_gather_fabric_ll.xml
     xml_stem="$(printf '%s' "${bin#rccl-UnitTests}" | sed 's/\([a-z0-9]\)\([A-Z]\)/\1_\2/g; s/-/_/g' \
       | tr '[:upper:]' '[:lower:]')"
     binaries+=("$bin:$SCRIPT_DIR/host_tests_${xml_stem}.xml")
@@ -394,6 +396,12 @@ do_coverage() {
       -format=lcov > "$dir/coverage.lcov" \
       || { echo "    error: llvm-cov export failed for $name" >&2; rc=1; continue; }
 
+    # A binary that only tests test/ code exports no records, and lcov rejects an empty tracefile.
+    if ! grep -q '^SF:' "$dir/coverage.lcov"; then
+      echo "    $name: no src/ lines covered, left out of the overall report"
+      continue
+    fi
+
     echo "    $name text report: $dir/coverage.txt"
     echo "    $name html report: $dir/html/index.html"
     tracefiles+=("$dir/coverage.lcov")
@@ -402,8 +410,9 @@ do_coverage() {
   if [ "${#tracefiles[@]}" -eq 0 ]; then
     echo "error: no .profraw files found under $COVERAGE_DIR --" >&2
     echo "       run the 'run' phase first. If you did, the tests were built" >&2
-    echo "       with -DHOST_TEST_COVERAGE=OFF, which produces no profiles" >&2
-    echo "       (coverage is on by default; drop that flag to re-enable it)" >&2
+    echo "       with -DENABLE_CODE_COVERAGE=OFF, which produces no profiles" >&2
+    echo "       (the default; re-run the 'configure' phase of this script," >&2
+    echo "        which passes -DENABLE_CODE_COVERAGE=ON)" >&2
     exit 1
   fi
 

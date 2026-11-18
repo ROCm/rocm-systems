@@ -147,8 +147,10 @@ impl VmBindings {
         &self,
         kfd: &Shared<sys::Kfd>,
         node: &sysfs::KfdNode,
+        xnack_requested: Option<super::XnackModeRequest>,
+        debugger: Option<super::DebuggerRegistration>,
     ) -> Result<Shared<DeviceVm>, Error> {
-        self.device_with_render(kfd, node, sysfs::open_render)
+        self.device_with_render(kfd, node, xnack_requested, debugger, sysfs::open_render)
     }
 
     // Supplying the opener lets tests exercise concurrent initialization and
@@ -161,6 +163,8 @@ impl VmBindings {
         &self,
         kfd: &Shared<sys::Kfd>,
         node: &sysfs::KfdNode,
+        xnack_requested: Option<super::XnackModeRequest>,
+        debugger: Option<super::DebuggerRegistration>,
         open_render: impl FnOnce(u32) -> io::Result<File>,
     ) -> Result<Shared<DeviceVm>, Error> {
         kfd.check_process()
@@ -168,6 +172,12 @@ impl VmBindings {
         let mut runtime = kfd
             .runtime_guard()
             .map_err(|source| native_error("KFD runtime serialization", source))?;
+        kfd.configure_debugger_locked(&mut runtime, debugger)
+            .map_err(|source| native_error("KFD debugger registration", source))?;
+        if let Some(request) = xnack_requested {
+            kfd.configure_xnack_mode_locked(&mut runtime, request)
+                .map_err(|source| native_error("KFD XNACK configuration", source))?;
+        }
         let process = std::process::id();
         let owner = self
             .process
@@ -321,6 +331,10 @@ pub(crate) struct DeviceVm {
 }
 
 impl DeviceVm {
+    pub(crate) fn event_origin_id(&self) -> crate::device::event::DeviceEventOriginId {
+        crate::device::event::DeviceEventOriginId::from_driver_key(u64::from(self.gpu_id))
+    }
+
     pub(super) fn render(&self) -> Result<&File, Error> {
         self.render
             .as_ref()
@@ -810,6 +824,9 @@ impl LossEvent {
                 exception.gpu_id,
                 DeviceEvent::GpuHardwareException(GpuHardwareException {
                     endpoint_id: None,
+                    origin_id: Some(crate::device::event::DeviceEventOriginId::from_driver_key(
+                        u64::from(exception.gpu_id),
+                    )),
                     scope: if exception.reset_type == 0 {
                         GpuResetScope::WholeGpu
                     } else {
@@ -1355,7 +1372,14 @@ impl KfdAllocation {
                 "scratch address exceeds the host address width",
             ));
         };
-        let reservation = os_memory::Reservation::view_with_poison(address_usize, size, poison);
+        let reservation =
+            match os_memory::Reservation::view_with_poison(address_usize, size, poison) {
+                Ok(reservation) => reservation,
+                Err(source) => {
+                    vm.release_scratch(address, desc.size)?;
+                    return Err(native_error("scratch reservation process identity", source));
+                }
+            };
         let mut allocation = owner.write(Self {
             vm: vm.clone(),
             peers,

@@ -22,6 +22,8 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
+#include <hip/hip_version.h>
+
 using namespace rocshmem;
 
 /*
@@ -77,6 +79,10 @@ TEAM_INT_REDUCE_SCATTER_WAVE_DEF_GEN(long, long)
 TEAM_INT_REDUCE_SCATTER_WAVE_DEF_GEN(long long, longlong)
 TEAM_FLOAT_REDUCE_SCATTER_WAVE_DEF_GEN(float, float)
 TEAM_FLOAT_REDUCE_SCATTER_WAVE_DEF_GEN(double, double)
+TEAM_FLOAT_REDUCE_SCATTER_WAVE_DEF_GEN(__half, half)
+#if !(HIP_VERSION_MAJOR == 7 && (HIP_VERSION_MINOR == 16 || HIP_VERSION_MINOR == 17))
+TEAM_FLOAT_REDUCE_SCATTER_WAVE_DEF_GEN(__hip_bfloat16, bfloat16)
+#endif
 
 /******************************************************************************
  * DEVICE TEST KERNEL
@@ -105,6 +111,9 @@ __global__ void TeamReduceScatterWaveTest(int loop, int skip,
                                 &ctx_array[wf_i]);
     __syncthreads();
   }
+
+  uint8_t *tdm_lds = reinterpret_cast<uint8_t*>(&ctx_array[num_waves_per_wg]);
+  rocshmem_set_lds_stage(tdm_lds, rocshmem_query_lds_stage_bytes());
 
   int n_pes = rocshmem_ctx_n_pes(ctx_array[wf_id]);
 
@@ -195,7 +204,8 @@ void TeamReduceScatterWaveTester<T1, T2>::launchKernel(dim3 gridSize,
                                                         dim3 blockSize,
                                                         int loop,
                                                         uint64_t size) {
-  size_t shared_bytes = num_warps * sizeof(rocshmem_ctx_t);
+  size_t shared_bytes = num_warps * sizeof(rocshmem_ctx_t) +
+                        rocshmem_query_lds_stage_bytes();
 
   hipLaunchKernelGGL(HIP_KERNEL_NAME(TeamReduceScatterWaveTest<T1, T2>),
                      gridSize, blockSize, shared_bytes, stream, loop, args.skip,

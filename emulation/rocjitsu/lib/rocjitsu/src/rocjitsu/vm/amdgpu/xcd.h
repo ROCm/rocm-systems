@@ -55,7 +55,11 @@ public:
   /// @brief Set typed child pointers after the builder populates children.
   void set_command_processor(CommandProcessor *cp) { cp_ = cp; }
   void set_l2_cache(L2Cache *l2);
-  void set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence);
+  /// @brief Rebind to a device-local coherence domain before use.
+  /// @details A null domain fails without changing registration.
+  /// @param emit_error Destination for failure diagnostics.
+  util::Result set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence,
+                                    util::DiagnosticEmitter emit_error = {});
   void add_shader_engine(ShaderEngine *se) { shader_engines_.push_back(se); }
 
   /// @brief Point every CU the command processor can dispatch to at this XCD's
@@ -82,9 +86,20 @@ public:
 
   /// @brief Set flat-address-space aperture boundaries on all CUs via their SPIs.
   void set_apertures(uint64_t shared_base, uint64_t shared_limit, uint64_t private_base,
-                     uint64_t private_limit) {
+                     uint64_t private_limit, bool ptr32 = false) {
     for (auto *se : shader_engines_)
-      se->spi().set_apertures(shared_base, shared_limit, private_base, private_limit);
+      se->spi().set_apertures(shared_base, shared_limit, private_base, private_limit, ptr32);
+  }
+
+  void set_vmid_apertures(uint32_t vmid, uint64_t shared_base, uint64_t shared_limit,
+                          uint64_t private_base, uint64_t private_limit) {
+    for (auto *se : shader_engines_)
+      se->spi().set_vmid_apertures(vmid, shared_base, shared_limit, private_base, private_limit);
+  }
+
+  void clear_vmid_apertures() {
+    for (auto *se : shader_engines_)
+      se->spi().clear_vmid_apertures();
   }
 
   /// @brief Set the execution plugin group on CP and all CUs (shared ownership).

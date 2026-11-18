@@ -53,9 +53,9 @@
       ]
     },
     {
-      "id": "kb-kernel-name-filter",
+      "id": "kb-kernel-name-filter-gfx115x",
       "skill_should_trigger": true,
-      "prompt": "profile only the kernels whose names end in bound in my ROCm application\n\nThe application is ./occupancy.hip.",
+      "prompt": "profile only the kernels whose names start with global in my ROCm application\n\nThe application is ./vmem.hip.",
       "workspace": "evals/samples",
       "expected_behavior": [
         "uses rocprof-compute profile -k to filter by kernel name",
@@ -66,13 +66,11 @@
     {
       "id": "kb-cuda-application",
       "skill_should_trigger": false,
-      "note": "Profiling request, but CUDA tooling is out of scope.",
       "prompt": "profile my CUDA application with nsys"
     },
     {
       "id": "kb-windows-request",
       "skill_should_trigger": false,
-      "note": "rocprof-compute is named, but the platform is unsupported.",
       "prompt": "profile my application on Windows with rocprof-compute"
     },
     {
@@ -83,7 +81,6 @@
     {
       "id": "kb-write-a-kernel",
       "skill_should_trigger": false,
-      "note": "GPU performance adjacent, but this skill does not author kernel source.",
       "prompt": "write me a faster HIP matrix multiply kernel"
     }
   ]

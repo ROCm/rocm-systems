@@ -1,0 +1,52 @@
+{
+  "evaluations": [
+    {
+      "id": "mem-cache-hit-rates",
+      "skill_should_trigger": true,
+      "prompt": "what are my L2 and vL1D hit rates for this kernel and are they bad?\n\nThe application is ./vsequential_access.cpp.",
+      "workspace": "evals/samples",
+      "expected_behavior": [
+        "opens the l2 and vl1d blocks for a single kernel id",
+        "judges the rates against what the algorithm should do rather than a fixed cutoff"
+      ],
+      "unexpected_behavior": [
+        "applies a remembered threshold such as L2 below 50% being bad, as if the tool defined one"
+      ],
+      "logs_contain": ["-b"]
+    },
+    {
+      "id": "mem-lds-bank-conflicts",
+      "skill_should_trigger": true,
+      "prompt": "does my kernel have LDS bank conflicts?\n\nThe application is ./lds.hip.",
+      "workspace": "evals/samples",
+      "expected_behavior": [
+        "opens the lds block for the selected kernel",
+        "reads the bank conflict counters from the report"
+      ],
+      "logs_contain": ["lds"]
+    },
+    {
+      "id": "mem-bandwidth-bound",
+      "skill_should_trigger": true,
+      "prompt": "this kernel looks memory bound, where is the bandwidth going?\n\nThe application is ./vcopy.cpp.",
+      "workspace": "evals/samples",
+      "expected_behavior": [
+        "walks the hierarchy from the memory chart down to the level responsible",
+        "distinguishes traffic that caches absorbed from traffic that reached HBM"
+      ],
+      "logs_contain": ["memchart"]
+    },
+    {
+      "id": "mem-membw-analysis-gfx950",
+      "skill_should_trigger": true,
+      "prompt": "run the guided memory bandwidth analysis on my MI350 workload\n\nThe application is ./gl2_backpressure.hip.",
+      "workspace": "evals/samples",
+      "expected_behavior": [
+        "profiles only blocks 3 and 30 with --experimental --membw-analysis",
+        "notes that the analysis is experimental and shipped for gfx950",
+        "reports the guidance the tool produced rather than substituting its own cutoffs"
+      ],
+      "logs_contain": ["--membw-analysis"]
+    }
+  ]
+}

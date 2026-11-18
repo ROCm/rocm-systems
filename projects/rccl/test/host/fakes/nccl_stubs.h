@@ -34,6 +34,7 @@ extern std::function<ncclResult_t(int /*cudaArch*/, int /*maxSharedMem*/, size_t
 
 // src/misc/coll_trace.cc: comm teardown tears the trace ring down through this.
 extern std::function<ncclResult_t(struct ncclComm*)> g_collTraceDestroy;
+extern std::function<ncclResult_t(struct ncclComm*)> g_ncclDdaIpcCommClosePeerMappings;
 
 extern std::function<ncclResult_t(struct ncclComm*)> g_ncclProfilerThreadDestroy;
 extern std::function<ncclResult_t(struct ncclComm*)> g_ncclProfilerPluginFinalize;

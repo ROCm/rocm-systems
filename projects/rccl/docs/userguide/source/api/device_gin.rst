@@ -8,6 +8,14 @@ GIN
 
 **Device functions.** The following are callable from device (GPU) code only. GIN is supported since NCCL 2.28.7.
 
+Types and limits
+----------------
+
+.. cpp:type:: ncclGinRequest_t
+
+   Opaque request storage initialized by a GIN operation (e.g., :cpp:func:`ncclGin::flushAsync`) and
+   consumed by :cpp:func:`ncclGin::wait`.
+
 ncclGin
 -------
 
@@ -20,8 +28,10 @@ ncclGin
       Initializes a new ``ncclGin`` object. *comm* is the device communicator created using :c:func:`ncclDevCommCreate`.
       *contextIndex* is the index of the GIN context -- a network communication channel.  Using multiple GIN contexts allows
       the implementation to spread traffic onto multiple connections, avoiding locking and bottlenecks.  Therefore,
-      performance-oriented kernels should cycle among the available contexts to improve resource utilization (the number of
-      available contexts is available via :c:macro:`ginContextCount`).
+      performance-oriented kernels should cycle among the available contexts to improve resource utilization. The number of
+      available contexts is ``comm.ginContextCount`` on the device communicator. That value is the allocated count,
+      rounded up to a multiple of the GIN connection count, and may be larger than the count requested at
+      :c:func:`ncclDevCommCreate`.
 
       ``ncclGin`` always represents one specific context. To run a barrier whose fence covers every GIN context on the comm
       (useful when operations have been sharded across multiple contexts -- e.g. multi-NIC), pass
@@ -73,6 +83,8 @@ ncclGin
       *peer* must be a rank separated from the local rank by a multiple of ``ginCustomStride``.
       *bufType* specifies the physical memory composition of the source and destination buffers (see
       :ref:`devapi_segment_types`); it defaults to ``ncclGin_SegmentDevice``.
+      *optFlags* is a bitwise OR of optional flags to the backend (see :ref:`gin_opt_flags`); it defaults to
+      ``ncclGinOptFlagsDefault``.
 
    .. cpp:function:: void flush(Coop coop, cuda::memory_order ord = cuda::memory_order_acquire)
 
@@ -298,6 +310,10 @@ ncclGinBarrierSession
 
       Same fence contract as the overload without a timeout. Returns ``ncclTimeout`` if not every team member arrives
       within *timeoutCycles*. The fence still applies when the call returns success.
+
+.. c:type:: ncclGinBarrierHandle_t
+
+   Opaque handle that identifies a set of GIN barriers. It is valid until the device communicator is destroyed.
 
 ncclBarrierSession
 ------------------

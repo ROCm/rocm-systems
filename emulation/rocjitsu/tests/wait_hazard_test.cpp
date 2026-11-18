@@ -5,6 +5,7 @@
 /// @brief Shared wait-retirement and register-readiness tests for the core
 /// scoreboard and race plugin.
 
+#include "compute_unit_test_util.h"
 #include "race-detector/race_test_instruction.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 #include "rocjitsu/isa/decoder.h"
@@ -51,8 +52,6 @@ void with_wait(rj_code_arch_t arch, std::span<const uint32_t> words, Consume con
 
 class CoreWaitBackend {
 public:
-  static constexpr bool supports_embedded_waits = true;
-
   explicit CoreWaitBackend(rj_code_arch_t arch) : arch_(arch) {
     state_.bind(0x1000, &reports_,
                 [](void *context, const auto &) { ++*static_cast<unsigned *>(context); });
@@ -95,8 +94,6 @@ private:
 
 class RaceWaitBackend {
 public:
-  static constexpr bool supports_embedded_waits = false;
-
   explicit RaceWaitBackend(rj_code_arch_t arch) {
     ComputeUnitCore::Config config{};
     config.arch = arch;
@@ -105,7 +102,7 @@ public:
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
     config.memory_wait_diagnostics = MemoryWaitDiagnostics::Off;
-    cu_ = ComputeUnitCore::create("shared_wait_cu", config, &memory_, &l2_);
+    rocjitsu::test::initialize_compute_unit(cu_, "shared_wait_cu", config, &memory_, &l2_);
     if (!cu_)
       return;
     PluginSinkConfig sinks;
@@ -316,7 +313,7 @@ TYPED_TEST(WaitHazardTest, UnmappedWaitPreservesPendingOrdinaryLoads) {
   }
 }
 
-TYPED_TEST(WaitHazardTest, EmbeddedExpcntWaitIsCurrentlyCoreOnly) {
+TYPED_TEST(WaitHazardTest, EmbeddedExpcntWaitRetiresOnlyTheSpecifiedExports) {
   for (const auto arch :
        {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
     for (const uint32_t threshold : {0u, 1u, 7u}) {
@@ -339,10 +336,8 @@ TYPED_TEST(WaitHazardTest, EmbeddedExpcntWaitIsCurrentlyCoreOnly) {
         if (explicit_wait)
           backend.wait(arch == ROCJITSU_CODE_ARCH_RDNA4 ? 0xbfc40000u   // s_wait_expcnt 0.
                                                         : 0xbd7c0000u); // s_waitcnt_expcnt null, 0.
-        EXPECT_EQ(backend.reports(5),
-                  !explicit_wait && (!TypeParam::supports_embedded_waits || threshold == 7));
-        EXPECT_EQ(backend.reports(6),
-                  !explicit_wait && (!TypeParam::supports_embedded_waits || threshold != 0));
+        EXPECT_EQ(backend.reports(5), !explicit_wait && threshold == 7);
+        EXPECT_EQ(backend.reports(6), !explicit_wait && threshold != 0);
         EXPECT_TRUE(backend.reports(7));
         EXPECT_TRUE(backend.reports(8));
       }

@@ -77,6 +77,15 @@ public:
   /// the same path from its destructor.
   void release_vm_resources();
 
+  /// Move the GPU component tree into a VM wrapper, retaining its traversal root.
+  void move_components_to(simdojo::CompositeComponent &owner) {
+    owner.adopt_children(*this);
+    component_root_ = &owner;
+  }
+
+  /// Return this GPU's component tree, including components outside the XCD hierarchy.
+  const simdojo::CompositeComponent &component_root() const { return *component_root_; }
+
   uint32_t gpu_id() const { return gpu_id_; }
 
   /// @brief Attach an XCD during topology construction, before its CUs can execute.
@@ -89,9 +98,18 @@ public:
 
   /// @brief Set flat-address-space aperture boundaries on all CUs via the SPI hierarchy.
   void set_apertures(uint64_t shared_base, uint64_t shared_limit, uint64_t private_base,
-                     uint64_t private_limit) {
+                     uint64_t private_limit, bool ptr32 = false) {
     for (auto *xcd : xcds_)
-      xcd->set_apertures(shared_base, shared_limit, private_base, private_limit);
+      xcd->set_apertures(shared_base, shared_limit, private_base, private_limit, ptr32);
+  }
+  void set_vmid_apertures(uint32_t vmid, uint64_t shared_base, uint64_t shared_limit,
+                          uint64_t private_base, uint64_t private_limit) {
+    for (auto *xcd : xcds_)
+      xcd->set_vmid_apertures(vmid, shared_base, shared_limit, private_base, private_limit);
+  }
+  void clear_vmid_apertures() {
+    for (auto *xcd : xcds_)
+      xcd->clear_vmid_apertures();
   }
   /// @brief Install legacy backing during configuration.
   /// @details A non-null backing cannot be replaced with a different object.
@@ -181,6 +199,14 @@ public:
     for (auto *xcd_ptr : xcds_)
       if (auto *cp = xcd_ptr->command_processor())
         fn(cp);
+  }
+
+  /// @brief Apply a function to every compute unit without exposing queue owners.
+  template <typename Fn> void for_each_cu(Fn &&fn) {
+    for_each_cp([&](amdgpu::CommandProcessor *cp) {
+      for (auto *cu : cp->compute_units())
+        fn(cu);
+    });
   }
 
   /// @brief Update every queue owner that scans a process doorbell page.
@@ -289,6 +315,7 @@ private:
   [[nodiscard]] std::optional<amdgpu::ComputeQueueBindingPlan>
   make_pm4(uint32_t queue_ordinal, amdgpu::Pm4PacketCallbacks callbacks) override;
 
+  const simdojo::CompositeComponent *component_root_ = this;
   static inline std::atomic<uint32_t> next_gpu_id_{0};
   uint32_t gpu_id_ = next_gpu_id_++;
   rj_code_arch_t arch_ = ROCJITSU_CODE_ARCH_INVALID;
