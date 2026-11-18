@@ -23,6 +23,7 @@ set(_MICRO_MISC_DEFS
   DV_PROVIDER_FAKE_IONIC_NAME="$<TARGET_FILE_NAME:rccl-micro-dv-provider-fake-ionic>"
   DV_PROVIDER_FAKE_IONIC_NO_GDA_NAME="$<TARGET_FILE_NAME:rccl-micro-dv-provider-fake-ionic-no-gda>"
   DV_PROVIDER_FAKE_MLX5_NAME="$<TARGET_FILE_NAME:rccl-micro-dv-provider-fake-mlx5>"
+  RCCL_TEST_INSTALL_LIBDIR="${CMAKE_INSTALL_LIBDIR}"
   GDR_PEERMEM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/gdr_peermem.cc"
   GDR_PROBE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/gdr_probe.cc"
   IBVSYMBOLS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/ibvsymbols.cc"
@@ -190,7 +191,11 @@ rccl_add_misc_micro_binary(rccl-UnitTestsMicroMiscLatencyProfilerCollTrace laten
     fakes/strongstream_stubs.cc)
 
 # Fake ibverbs provider dv libraries for dvsymbols-test.cc; the SONAME is what the builders' dlopen matches.
-# The test finds them beside its own executable, in the build tree and in an install.
+# In the build tree the fakes sit beside the test binary; in an install they go in a
+# private test directory under the library directory. FakeProviderPath() checks both.
+# They must not land in the main library directory: their SONAMEs are the real provider
+# names (libionic.so, libmlx5.so), so ldconfig would link those names to the fakes and
+# a runtime lookup of ncclDvDlopen("libionic.so") could resolve to one.
 foreach(_fake ionic ionic-no-gda mlx5)
   string(REGEX REPLACE "-.*" "" _dv "${_fake}")
   add_library(rccl-micro-dv-provider-fake-${_fake} SHARED fakes/dv_provider_fake.cc)
@@ -199,7 +204,7 @@ foreach(_fake ionic ionic-no-gda mlx5)
   target_link_options(rccl-micro-dv-provider-fake-${_fake} PRIVATE -no-hip-rt -Wl,-soname,lib${_dv}.so)
   add_dependencies(rccl-UnitTestsMicroMiscDvsymbols rccl-micro-dv-provider-fake-${_fake})
   if(BUILD_TESTS)
-    install(TARGETS rccl-micro-dv-provider-fake-${_fake} LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT tests)
+    install(TARGETS rccl-micro-dv-provider-fake-${_fake} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rccl/test COMPONENT tests)
   endif()
 endforeach()
 target_compile_definitions(rccl-micro-dv-provider-fake-ionic-no-gda PRIVATE DV_PROVIDER_FAKE_IONIC_NO_GDA)
