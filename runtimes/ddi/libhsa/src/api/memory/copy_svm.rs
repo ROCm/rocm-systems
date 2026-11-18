@@ -29,72 +29,11 @@ pub unsafe extern "C" fn hsa_memory_copy(
     size: usize,
 ) -> Status {
     boundary(|| {
-        let mut guard = match lock() {
-            Ok(guard) => guard,
-            Err(status) => return status,
-        };
-        let runtime = match initialized_mut(&mut guard) {
-            Ok(runtime) => runtime,
-            Err(status) => return status,
-        };
-        match memory_copy_has_work(dst, src, size) {
-            Ok(false) => return SUCCESS,
-            Ok(true) => {}
-            Err(status) => return status,
+        // SAFETY: The public caller retains both complete ranges through the copy.
+        match unsafe { crate::memory::copy(dst, src, size) } {
+            Ok(()) => SUCCESS,
+            Err(status) => status,
         }
-        let host_destination = host_copy_address(runtime, dst as usize, size, ACCESS_PERMISSION_WO);
-        let host_source = host_copy_address(runtime, src as usize, size, ACCESS_PERMISSION_RO);
-        if let (Ok(destination), Ok(source)) = (host_destination, host_source) {
-            // SAFETY: HSA requires both ranges to be valid for size bytes.
-            // ptr::copy tolerates overlap. The registry lock retains owned
-            // backing throughout this host copy.
-            unsafe { std::ptr::copy(source as *const u8, destination as *mut u8, size) };
-            fence(Ordering::SeqCst);
-            return SUCCESS;
-        }
-
-        let resolved = match resolve_sync_gpu_copy(
-            runtime,
-            dst as usize,
-            src as usize,
-            size,
-            host_destination,
-            host_source,
-        ) {
-            Ok(resolved) => resolved,
-            Err(status) => return status,
-        };
-        let Some(_inflight) = runtime.inflight.enter() else {
-            return OUT_OF_RESOURCES;
-        };
-        let mut retained = [None; 2];
-        for (slot, base) in retained.iter_mut().zip(resolved.borrowed_memory) {
-            if let Some(base) = base {
-                if let Err(status) = runtime.memory_state.retain_copy_borrow(base) {
-                    for base in retained.into_iter().flatten() {
-                        runtime.memory_state.release_copy_borrow(base);
-                    }
-                    return status;
-                }
-                *slot = Some(base);
-            }
-        }
-        let stop = runtime.operation_stop();
-        let health = runtime.health.clone();
-        drop(guard);
-
-        let (status, may_be_live) = match execute_sync_gpu_copy(resolved.route, &stop) {
-            Ok(SyncGpuCopyOutcome::Done) => (SUCCESS, false),
-            Ok(SyncGpuCopyOutcome::LoadedDestination { address, bytes }) => {
-                (write_loaded_copy_destination(address, &bytes), false)
-            }
-            Err(failure) => (failure.status, failure.operands_may_be_live),
-        };
-        if may_be_live {
-            health.quarantine();
-        }
-        release_async_resources(&[], &retained, may_be_live);
-        status
     })
 }
 

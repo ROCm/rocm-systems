@@ -62,7 +62,7 @@ pub unsafe extern "C" fn hsa_code_object_deserialize(
         };
         runtime.loader.code_objects.insert(
             handle,
-            CodeObject {
+            CodeObjectRecord {
                 bytes: bytes.into(),
                 names: HashMap::new(),
                 symbol_handles: Vec::new(),

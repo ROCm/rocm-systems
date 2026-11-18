@@ -194,16 +194,9 @@ pub extern "C" fn hsa_amd_signal_batch_destroy(batch: HsaAmdSignalBatch) -> Stat
 #[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Invalidates a signal and retires its backing safely.
 pub unsafe extern "C" fn hsa_signal_destroy(signal: HsaSignal) -> Status {
-    boundary(|| {
-        let mut guard = match lock() {
-            Ok(guard) => guard,
-            Err(status) => return status,
-        };
-        let runtime = match initialized_mut(&mut guard) {
-            Ok(runtime) => runtime,
-            Err(status) => return status,
-        };
-        runtime.signal_state.destroy_signal(signal)
+    boundary(|| match crate::signal::destroy(signal) {
+        Ok(()) => SUCCESS,
+        Err(status) => status,
     })
 }
 

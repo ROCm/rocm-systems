@@ -10,10 +10,11 @@ use super::output::write_value;
 #[cfg(all(hsa_tool_dispatch, not(test)))]
 use crate::api_trace;
 use crate::ffi::{self, *};
-use crate::runtime::{boundary, lock, map_error, plain_boundary};
+use crate::image::descriptor as image_descriptor;
 #[cfg(not(all(hsa_tool_dispatch, not(test))))]
-use crate::{image_abi, loader};
-use crate::{image_gfx12, runtime};
+use crate::loader;
+use crate::runtime;
+use crate::runtime::{boundary, lock, map_error, plain_boundary};
 
 /// Minor version of the HSA runtime ABI reported to clients.
 pub(crate) const HSA_RUNTIME_VERSION_MINOR: u16 = 21;
@@ -86,7 +87,7 @@ pub unsafe extern "C" fn hsa_system_get_info(attribute: u32, value: *mut c_void)
                         runtime
                             .gpus
                             .iter()
-                            .any(|gpu| image_gfx12::supported_gpu(&gpu.info())),
+                            .any(|gpu| image_descriptor::supported_gpu(&gpu.info())),
                         runtime.gpus.iter().any(|gpu| gpu.pc_sampling_supported),
                     ),
                 ),
@@ -279,7 +280,7 @@ pub unsafe extern "C" fn hsa_system_extension_supported(
                 EXTENSION_IMAGES => runtime
                     .gpus
                     .iter()
-                    .any(|gpu| image_gfx12::supported_gpu(&gpu.info())),
+                    .any(|gpu| image_descriptor::supported_gpu(&gpu.info())),
                 EXTENSION_AMD_PC_SAMPLING => {
                     runtime.gpus.iter().any(|gpu| gpu.pc_sampling_supported)
                 }
@@ -321,7 +322,7 @@ pub unsafe extern "C" fn hsa_system_major_extension_supported(
                 EXTENSION_IMAGES => runtime
                     .gpus
                     .iter()
-                    .any(|gpu| image_gfx12::supported_gpu(&gpu.info())),
+                    .any(|gpu| image_descriptor::supported_gpu(&gpu.info())),
                 EXTENSION_AMD_PC_SAMPLING => {
                     runtime.gpus.iter().any(|gpu| gpu.pc_sampling_supported)
                 }
@@ -406,14 +407,14 @@ pub unsafe extern "C" fn hsa_system_get_major_extension_table(
                 if !runtime
                     .gpus
                     .iter()
-                    .any(|gpu| image_gfx12::supported_gpu(&gpu.info()))
+                    .any(|gpu| image_descriptor::supported_gpu(&gpu.info()))
                 {
                     return NOT_SUPPORTED;
                 }
                 #[cfg(all(hsa_tool_dispatch, not(test)))]
                 let functions = api_trace::image_extension_table();
                 #[cfg(not(all(hsa_tool_dispatch, not(test))))]
-                let functions = image_abi::image_extension_table();
+                let functions = crate::api::image::image_extension_table();
                 #[cfg(all(hsa_tool_dispatch, not(test)))]
                 if functions.contains(&0) {
                     return ERROR;
