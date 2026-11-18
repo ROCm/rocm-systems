@@ -11,8 +11,6 @@
 #include "graph.h"
 #include "transport.h"
 #include "register_inline.h"
-#include "gin/gin_anvil_reach.h"
-#include "gin/gin_bootstrap_agree.h"
 #include "gin/gin_host.h"
 #include "gin/gin_host_proxy.h"
 #include "dev_runtime.h"
@@ -49,12 +47,28 @@ ncclResult_t ncclGetRailedGinType(struct ncclComm* comm, ncclGinType_t* ginType)
   return ncclSuccess;
 }
 
+// ginInstance[] was initialized on the sharedRes owner and copied into each
+// splitShare child by ncclGinInitFromParent; the plugins keep the owner's
+// bootstrap and rank numbering.
+static bool ginCommMatchesOwnerRanks(const struct ncclComm* comm) {
+  const struct ncclSharedResources* sharedRes = comm->sharedRes;
+  if (sharedRes == nullptr || sharedRes->owner == comm) return true;
+  if (comm->nRanks != sharedRes->tpNRanks) return false;
+  for (int r = 0; r < comm->nRanks; r++) {
+    if (comm->topParentRanks[r] != r) return false;
+  }
+  return true;
+}
+
 bool ncclGinTypeActive(struct ncclComm* comm, ncclGinType_t ginType) {
   if (comm == nullptr) return false;
   if (comm->globalGinSupport != NCCL_GIN_CONNECTION_FULL) return false;
 
   struct ncclGinState* ginState = &comm->ginState;
   if (ginState->finalized) return false;
+  // ncclGinConnectOnce rejects Anvil SDMA on a child off the owner's rank map,
+  // so callers that pick a backend by type fall back instead of failing there.
+  if (ginType == NCCL_GIN_TYPE_ANVIL_SDMA && !ginCommMatchesOwnerRanks(comm)) return false;
   for (int i = 0; i < ginState->numActiveBackends; i++) {
     if (ginState->backends[i].ginType == ginType) return true;
   }
@@ -124,43 +138,19 @@ static ncclResult_t ginBackendCloseConnections(struct ncclGinBackendState* backe
   return ret;
 }
 
-// ginInstance[] was initialized on the sharedRes owner and copied into each
-// splitShare child by ncclGinInitFromParent; the plugins keep the owner's
-// bootstrap and rank numbering.
-static bool ginCommMatchesOwnerRanks(const struct ncclComm* comm) {
-  const struct ncclSharedResources* sharedRes = comm->sharedRes;
-  if (sharedRes->owner == comm) return true;
-  if (comm->nRanks != sharedRes->tpNRanks) return false;
-  for (int r = 0; r < comm->nRanks; r++) {
-    if (comm->topParentRanks[r] != r) return false;
-  }
-  return true;
-}
-
-// Anvil SDMA fabric registration allgathers on the owner's bootstrap, so a
-// splitShare child that does not span the owner's ranks in order would wait
-// alone in regMrSym. Fabric registration needs RCCL_GIN_ANVIL_FABRIC_MEM, so
-// topology alone does not block a child: a rank of the child must have opted
-// in, or the owner must have voted fabric memory on. The owner's vote covers a
-// 1-rank child, which returns before MNNVL is set and then registers through
-// the owner's context. The opt-in is per rank, so the child's ranks OR their
-// answers over the child's own bootstrap and all take the same branch.
-static ncclResult_t ginSplitShareChildBlocked(struct ncclComm* comm, bool* blocked) {
-  *blocked = false;
-  if (ginCommMatchesOwnerRanks(comm)) return ncclSuccess;
+// Anvil SDMA connects through the owner's plugin context, and both its connect
+// and its window registration allgather on the owner's bootstrap, indexed by
+// the owner's ranks. A splitShare child that does not span those ranks in order
+// would wait there alone, or read its peers' slots under the wrong ranks,
+// whether or not fabric memory is on. The answer depends only on the child's
+// rank map, so every rank of the child rejects it without a collective.
+static bool ginSplitShareChildBlocked(struct ncclComm* comm) {
+  if (ginCommMatchesOwnerRanks(comm)) return false;
   struct ncclGinState* ginState = &comm->ginState;
-  bool anvil = false;
   for (int i = 0; i < ginState->numActiveBackends; i++) {
-    if (ginState->backends[i].ginType == NCCL_GIN_TYPE_ANVIL_SDMA) anvil = true;
+    if (ginState->backends[i].ginType == NCCL_GIN_TYPE_ANVIL_SDMA) return true;
   }
-  if (!anvil) return ncclSuccess;
-  const int localFabricMem = (ginAnvilUseFabricMem(comm) || comm->sharedRes->ginAnvilFabricMem) ? 1 : 0;
-  int anyFabricMem = 0;
-  NCCLCHECK(ncclGinBootstrapAgree(comm, localFabricMem, [&anyFabricMem](int const* votes, int n) {
-    for (int i = 0; i < n; i++) anyFabricMem |= votes[i];
-  }));
-  *blocked = anyFabricMem != 0;
-  return ncclSuccess;
+  return false;
 }
 
 ncclResult_t ncclGinConnectOnce(struct ncclComm* comm) {
@@ -169,12 +159,9 @@ ncclResult_t ncclGinConnectOnce(struct ncclComm* comm) {
 
   if (ginState->connected) return ncclSuccess;
 
-  bool splitShareBlocked = false;
-  NCCLCHECK(ginSplitShareChildBlocked(comm, &splitShareBlocked));
-  if (splitShareBlocked) {
-    WARN("GIN Anvil SDMA with fabric memory on a communicator that shares resources requires the parent's full "
-         "rank set in the parent's order (nRanks %d, parent nRanks %d). Split with splitShare=0 to use GIN on this "
-         "communicator.",
+  if (ginSplitShareChildBlocked(comm)) {
+    WARN("GIN Anvil SDMA on a communicator that shares resources requires the parent's full rank set in the "
+         "parent's order (nRanks %d, parent nRanks %d). Split with splitShare=0 to use GIN on this communicator.",
          comm->nRanks, comm->sharedRes->tpNRanks);
     return ncclInvalidUsage;
   }

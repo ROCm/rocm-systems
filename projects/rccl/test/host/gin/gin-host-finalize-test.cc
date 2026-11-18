@@ -66,14 +66,10 @@ ncclResult_t ncclTopoGetLocalGinDevs(struct ncclComm*, int* localGinDevs, int* l
   return ncclSuccess;
 }
 
-// Slots for the next int allgather only; any other allgather leaves the buffer
-// as the caller filled it.
-static std::vector<int> g_nextIntAllGather;
-ncclResult_t bootstrapAllGather(void*, void* data, int size) {
-  if (size == static_cast<int>(sizeof(int)) && !g_nextIntAllGather.empty()) {
-    std::memcpy(data, g_nextIntAllGather.data(), g_nextIntAllGather.size() * sizeof(int));
-    g_nextIntAllGather.clear();
-  }
+// Counted so a test can check that a rejected comm ran no collective.
+static int g_allGatherCalls = 0;
+ncclResult_t bootstrapAllGather(void*, void*, int) {
+  g_allGatherCalls++;
   return ncclSuccess;
 }
 
@@ -90,11 +86,6 @@ ncclResult_t ncclGinBarrierSizeRequirement(struct ncclComm*, struct ncclGinBacke
   ADD_FAILURE() << "ncclGinBarrierSizeRequirement reached with no barrier requirements";
   return ncclInternalError;
 }
-
-static bool g_anvilFabricMemCapable = false;
-static bool g_anvilFabricMemOptIn = false;
-bool ginAnvilFabricMemCapable(struct ncclComm*) { return g_anvilFabricMemCapable; }
-bool ginAnvilUseFabricMem(struct ncclComm*) { return g_anvilFabricMemCapable && g_anvilFabricMemOptIn; }
 
 #include "fakes/gin_vtable_fake.h"
 
@@ -117,9 +108,7 @@ class GinHostFinalizeTest : public ::testing::Test {
     FakeGinVtable::setCurrent(&fake_);
     gin_ = fake_.vtable();
     g_localGinDevCount = 2;
-    g_anvilFabricMemCapable = false;
-    g_anvilFabricMemOptIn = false;
-    g_nextIntAllGather.clear();
+    g_allGatherCalls = 0;
     // Both are already value-initialized (make_unique, and `ncclComm comm_{}`);
     // do not memset either. ginState embeds std::thread / mutex / atomic, and
     // ncclComm embeds ncclRmaState, which holds a thread, mutex and condvar.
@@ -333,22 +322,16 @@ TEST_F(GinHostFinalizeTest, DeregisterSkipsWindowStampedByAnotherGeneration) {
 
 // A splitShare child copies the owner's GIN backends, ginInstance included, with
 // no connections (ncclGinInitFromParent), then connects its own team through the
-// owner's plugin context. Anvil SDMA fabric registration allgathers on the
-// owner's bootstrap, so there a child that does not span the owner's ranks in
-// order would wait alone. That includes a 1-rank child, which is not
-// fabric-capable itself once the owner has voted fabric memory on. Other
-// backends, and Anvil SDMA without the opt-in or that vote, keep the develop
+// owner's plugin context. Anvil SDMA allgathers on the owner's bootstrap there,
+// so a child that does not span the owner's ranks in order is rejected before
+// any collective, with or without fabric memory. Other backends keep the develop
 // behavior.
 class GinHostSplitShareTest : public GinHostFinalizeTest {
  protected:
   std::unique_ptr<ncclComm> child_ = std::make_unique<ncclComm>();
   std::vector<int> childTopParentRanks_;
 
-  void useAnvilFabric() {
-    backend()->ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
-    g_anvilFabricMemCapable = true;
-    g_anvilFabricMemOptIn = true;
-  }
+  void useAnvil() { backend()->ginType = NCCL_GIN_TYPE_ANVIL_SDMA; }
 
   void makeChild(int ownerNRanks, std::vector<int> topParentRanks) {
     sharedRes_->tpNRanks = ownerNRanks;
@@ -373,10 +356,13 @@ class GinHostSplitShareTest : public GinHostFinalizeTest {
 
   struct ncclGinState* childGinState() { return &child_->ginState; }
 
-  void expectRejectedWithoutConnecting() {
+  void expectRejectedWithoutACollective() {
     EXPECT_EQ(ncclGinConnectOnce(child_.get()), ncclInvalidUsage);
+    EXPECT_EQ(g_allGatherCalls, 0);
     EXPECT_EQ(fake_.listenCalls, 0);
     EXPECT_FALSE(childGinState()->connected);
+    // The GIN SDMA collectives pick Anvil SDMA by type, so they fall back.
+    EXPECT_FALSE(ncclGinTypeActive(child_.get(), NCCL_GIN_TYPE_ANVIL_SDMA));
   }
 
   // bootstrapAllGather is a no-op here, so a multi-rank child reads 0 for its
@@ -399,36 +385,37 @@ class GinHostSplitShareTest : public GinHostFinalizeTest {
   }
 };
 
-TEST_F(GinHostSplitShareTest, AnvilFabric_SubsetChildIsRejectedWithoutConnecting) {
-  useAnvilFabric();
-  makeChild(/*ownerNRanks=*/2, {1});
+TEST_F(GinHostSplitShareTest, Anvil_SubsetChildIsRejected) {
+  useAnvil();
+  makeChild(/*ownerNRanks=*/3, {0, 2});
 
-  expectRejectedWithoutConnecting();
+  expectRejectedWithoutACollective();
   expectOwnerConnectionsUntouched();
 }
 
-TEST_F(GinHostSplitShareTest, AnvilFabric_SubsetChildIsRejectedBeforeOwnerConnects) {
-  useAnvilFabric();
+TEST_F(GinHostSplitShareTest, Anvil_OneRankChildIsRejectedBeforeOwnerConnects) {
+  useAnvil();
   ginState()->connected = false;
   backend()->ginComms[0] = nullptr;
   backend()->ginComms[1] = nullptr;
   makeChild(/*ownerNRanks=*/2, {0});
 
-  expectRejectedWithoutConnecting();
+  expectRejectedWithoutACollective();
   EXPECT_FALSE(ginState()->connected);
 }
 
-TEST_F(GinHostSplitShareTest, AnvilFabric_ReorderedChildIsRejected) {
-  useAnvilFabric();
+TEST_F(GinHostSplitShareTest, Anvil_ReorderedChildIsRejected) {
+  useAnvil();
   makeChild(/*ownerNRanks=*/2, {1, 0});
 
-  expectRejectedWithoutConnecting();
+  expectRejectedWithoutACollective();
 }
 
-TEST_F(GinHostSplitShareTest, AnvilFabric_FullRankSetChildConnects) {
-  useAnvilFabric();
+TEST_F(GinHostSplitShareTest, Anvil_FullRankSetChildConnects) {
+  useAnvil();
   makeChild(/*ownerNRanks=*/2, {0, 1});
 
+  EXPECT_TRUE(ncclGinTypeActive(child_.get(), NCCL_GIN_TYPE_ANVIL_SDMA));
   expectConnectsThroughOwnerContext();
   expectOwnerConnectionsUntouched();
 }
@@ -436,70 +423,9 @@ TEST_F(GinHostSplitShareTest, AnvilFabric_FullRankSetChildConnects) {
 // ncclSymkInitOnce reaches ncclGinConnectOnce from ncclCommSplit for a
 // multi-node child, so rejecting here would fail the split itself.
 TEST_F(GinHostSplitShareTest, OtherBackend_SubsetChildConnects) {
-  g_anvilFabricMemCapable = true;
-  g_anvilFabricMemOptIn = true;
   makeChild(/*ownerNRanks=*/2, {1});
 
-  expectConnectsThroughOwnerContext();
-  expectOwnerConnectionsUntouched();
-}
-
-TEST_F(GinHostSplitShareTest, AnvilWithoutFabricMem_SubsetChildConnects) {
-  backend()->ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
-  makeChild(/*ownerNRanks=*/2, {1, 0});
-
-  expectConnectsThroughOwnerContext();
-}
-
-// MI450 with MNNVL, one clique and cuMem is capable on default runs. Without
-// RCCL_GIN_ANVIL_FABRIC_MEM nothing registers through fabric memory, so a
-// subset child keeps the develop behavior.
-TEST_F(GinHostSplitShareTest, AnvilCapableWithoutOptIn_SubsetChildConnects) {
-  backend()->ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
-  g_anvilFabricMemCapable = true;
-  makeChild(/*ownerNRanks=*/2, {1});
-
-  expectConnectsThroughOwnerContext();
-  expectOwnerConnectionsUntouched();
-}
-
-TEST_F(GinHostSplitShareTest, AnvilCapableWithoutOptIn_ReorderedChildConnects) {
-  backend()->ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
-  g_anvilFabricMemCapable = true;
-  makeChild(/*ownerNRanks=*/2, {1, 0});
-
-  expectConnectsThroughOwnerContext();
-}
-
-// The opt-in is per rank. A peer that opted in would reject the child, so this
-// rank, which did not, must reject it too rather than wait for that peer.
-TEST_F(GinHostSplitShareTest, AnvilFabric_PeerOptInRejectsTheWholeChild) {
-  backend()->ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
-  g_anvilFabricMemCapable = true;
-  makeChild(/*ownerNRanks=*/2, {1, 0});
-  g_nextIntAllGather = {0, 1};
-
-  expectRejectedWithoutConnecting();
-}
-
-// A 1-rank child never sets MNNVL, so ginAnvilUseFabricMem is false. After
-// the owner has voted fabric registration on, the child still registers
-// through that context and would allgather alone.
-TEST_F(GinHostSplitShareTest, AnvilFabric_OneRankChildIsRejectedAfterOwnerVote) {
-  backend()->ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
-  g_anvilFabricMemCapable = false;
-  sharedRes_->ginAnvilFabricMem = true;
-  makeChild(/*ownerNRanks=*/2, {0});
-
-  expectRejectedWithoutConnecting();
-  expectOwnerConnectionsUntouched();
-}
-
-TEST_F(GinHostSplitShareTest, AnvilWithoutFabricVote_OneRankChildConnects) {
-  backend()->ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
-  g_anvilFabricMemCapable = false;
-  makeChild(/*ownerNRanks=*/2, {0});
-
+  EXPECT_TRUE(ncclGinTypeActive(child_.get(), NCCL_GIN_TYPE_PROXY));
   expectConnectsThroughOwnerContext();
   expectOwnerConnectionsUntouched();
 }

@@ -476,10 +476,6 @@ static ncclResult_t ginAnvilConnect(void* ctx, void* handles[], int nranks, int 
 
   INFO(NCCL_INIT, "GIN anvil-sdma: standalone SDMA queues (%d ranks, %d ch, spread=%d)", nranks, cctx->numChannels,
        cctx->sdmaChannelStride);
-  // Publish the vote on sharedRes. A later splitShare child may not look
-  // fabric-capable itself and would otherwise join this allgather alone.
-  if (cctx->comm != nullptr && cctx->comm->sharedRes != nullptr)
-    cctx->comm->sharedRes->ginAnvilFabricMem = cctx->fabricMem;
   *collComm = cctx;
   return ncclSuccess;
 }
