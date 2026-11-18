@@ -133,7 +133,6 @@ get_output_stream(const output_config& cfg,
     ROCP_ERROR << "Opened result file: " << output_file;
 
     return {_ofs.release(), [](std::ostream*& v) {
-                if(v) dynamic_cast<std::ofstream*>(v)->close();
                 delete v;
                 v = nullptr;
             }};

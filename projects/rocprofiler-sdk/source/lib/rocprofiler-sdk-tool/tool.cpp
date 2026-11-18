@@ -144,12 +144,10 @@ rocprofv3_error_signal_handler(int signo, siginfo_t*, void*);
 
 namespace
 {
-// Thread for safe cleanup output generation
-auto output_generation_thread = common::Synchronized<std::optional<std::thread>>{};
-
-// Tracks whether tool_detach produced output for the current attach session.
-// Set true by tool_detach, reset false by tool_attach (new session), read by tool_fini.
-std::atomic<bool> detach_output_generated = false;
+// Serialize attach, detach output, and finalization while they use the tool's shared buffers.
+std::mutex output_mutex;
+bool       tool_finalized          = false;
+bool       detach_output_generated = false;
 
 using sigaction_t      = struct sigaction;
 using signal_func_t    = sighandler_t (*)(int signum, sighandler_t handler);
@@ -2746,18 +2744,6 @@ get_tracing_callbacks()
     return tracing_callbacks_t{use_real_callbacks};
 }
 
-void
-reset_output_thread(std::optional<std::thread>& thread_ptr)
-{
-    if(thread_ptr.has_value())
-    {
-        ROCP_TRACE << "finalize output thread started...";
-        if(thread_ptr->joinable()) thread_ptr->join();
-        thread_ptr.reset();
-        ROCP_TRACE << "finalize output thread exiting...";
-    }
-}
-
 namespace
 {
 constexpr auto attach_session_file_perms =
@@ -2898,13 +2884,9 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
             uint64_t                  context_ids_length,
             void* /*tool_data*/)
 {
-    // Reset the detach output flag for this new session. If the process exits during this
-    // attach (without a corresponding tool_detach), tool_fini will see false and generate
-    // output for whatever was captured. tool_detach sets it true when it produces output.
+    auto lock = std::lock_guard<std::mutex>{output_mutex};
+    if(tool_finalized) return -1;
     detach_output_generated = false;
-
-    // Reset any existing output thread from prior tool usage.
-    ::output_generation_thread.wlock([](auto& thread_ptr) { reset_output_thread(thread_ptr); });
 
     // save the existing config for comparison
     auto original_config = tool::get_config();
@@ -4512,6 +4494,8 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
 void
 tool_detach(void* /*tool_data*/)
 {
+    auto lock = std::lock_guard<std::mutex>{output_mutex};
+    if(tool_finalized) return;
     detach_output_generated = true;
 
     auto _detach_timer = common::simple_timer{"[rocprofv3] tool detachment"};
@@ -4529,42 +4513,22 @@ tool_detach(void* /*tool_data*/)
     if(tool_metadata->process_end_ns == 0)
         rocprofiler_get_timestamp(&(tool_metadata->process_end_ns));
 
-    // Check configuration to decide between async or sync output generation
+    auto write_output = [] { generate_output(cleanup_mode::reset); };
     if(tool::get_config().attach_output_generation_sync)
-    {
-        // Synchronous output generation - complete before returning
-        // This ensures output files are fully written before detach returns
-        ::output_generation_thread.wlock([](auto& thread_ptr) { reset_output_thread(thread_ptr); });
-        generate_output(cleanup_mode::reset);
-    }
+        write_output();
     else
-    {
-        // Keep worker-based generation, but wait for its result before reporting success.
-        // packaged_task transfers worker exceptions to the existing SDK detach boundary.
-        auto output_task =
-            std::packaged_task<void()>{[]() { generate_output(cleanup_mode::reset); }};
-        auto output_result = output_task.get_future();
-        ::output_generation_thread.wlock([&](auto& thread_ptr) {
-            reset_output_thread(thread_ptr);
-            thread_ptr.emplace(std::move(output_task));
-            reset_output_thread(thread_ptr);
-        });
-        output_result.get();
-    }
+        std::async(std::launch::async, write_output).get();
 }
 
 void
 tool_fini(void* /*tool_data*/)
 {
-    static bool _first = true;
-    if(!_first) return;
-    _first = false;
+    auto lock = std::lock_guard<std::mutex>{output_mutex};
+    if(tool_finalized) return;
+    tool_finalized = true;
 
     client_identifier = nullptr;
     client_finalizer  = nullptr;
-
-    // Join the cleanup thread if it exists and is active
-    ::output_generation_thread.wlock([](auto& thread_ptr) { reset_output_thread(thread_ptr); });
 
     auto _fini_timer = common::simple_timer{"[rocprofv3] tool finalization"};
 
@@ -4579,8 +4543,7 @@ tool_fini(void* /*tool_data*/)
     if(tool_metadata->process_end_ns == 0)
         rocprofiler_get_timestamp(&(tool_metadata->process_end_ns));
 
-    // If tool_detach ran before us (sync or async — the thread join above ensures it finished),
-    // skip output generation here to avoid overwriting files the detach phase already wrote.
+    // Preserve the files from the last completed detach.
     const bool skip_output = detach_output_generated;
 
     try

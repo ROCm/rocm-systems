@@ -82,28 +82,26 @@ struct output_stream
     // Explicit completion can report I/O failure; destruction remains non-throwing.
     void close_checked()
     {
-        if(!stream) return;
-        if(writes_to_file()) stream->exceptions(std::ios::goodbit);
-        stream->flush();
-        if(auto* file = dynamic_cast<std::ofstream*>(stream)) file->close();
-        const bool failed = stream->fail();
-        close();
-        if(failed) throw std::runtime_error{"Failed to write or close profiling output"};
+        if(!close()) throw std::runtime_error{"Failed to write or close profiling output"};
     }
 
-    void close() noexcept
+    bool close() noexcept
     {
-        if(!stream) return;
-        // Owned file streams throw while writing, but destruction must never terminate a target.
-        if(writes_to_file()) stream->exceptions(std::ios::goodbit);
+        if(!stream) return true;
+        bool success = false;
         try
         {
-            (*stream) << std::flush;
+            if(auto* file = dynamic_cast<std::ofstream*>(stream))
+                file->close();  // Also flushes buffered file output.
+            else
+                stream->flush();
+            success = !stream->fail();
         } catch(...)
         {}
         if(dtor) dtor(stream);
         stream = nullptr;
         dtor   = nullptr;
+        return success;
     }
 
     bool writes_to_file() const { return (dynamic_cast<std::ofstream*>(stream) != nullptr); }
