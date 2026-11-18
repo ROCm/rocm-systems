@@ -2051,8 +2051,10 @@ capture owns the evidence needed for replay; analysis needs neither the
 original code-object files nor live HSA state.</p>
 <h2 id="available-analysis">Available analysis<a class="headerlink" href="#available-analysis" title="Permanent link">&para;</a></h2>
 <p><code>LdsRaceDetection</code> is the only implemented analysis. It checks ordinary native
-32-bit LDS reads/writes at naturally aligned addresses, using the same
-observations for two checks:</p>
+LDS reads/writes at naturally aligned addresses, using the same observations
+for two checks. All supported targets admit ordinary single-range b16, b32,
+b64, and b128: gfx942/gfx950 wave64, gfx1100/gfx1201 wave32 or wave64, and
+gfx1250 wave32.</p>
 <table>
 <thead>
 <tr>
@@ -2063,11 +2065,11 @@ observations for two checks:</p>
 <tbody>
 <tr>
 <td>Cross-wave conflict</td>
-<td>Address-group records from different waves access the same LDS word, with at least one write. Read/read pairs do not conflict.</td>
+<td>Address-group records from different waves access overlapping half-open byte ranges, with at least one write. Read/read pairs do not conflict.</td>
 </tr>
 <tr>
 <td>Same-instruction ordinary-store collision</td>
-<td>Multiple lanes of one store observation write the same LDS word.</td>
+<td>Multiple lanes of one store observation write the same LDS range.</td>
 </tr>
 </tbody>
 </table>
@@ -2080,6 +2082,28 @@ and <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjits
 <p>The input code object must contain exactly one kernel, matching the requested
 entry. Selecting an entry does not exclude sibling kernels from this requirement;
 provide a code object containing only the selected kernel.</p>
+<p>The forms are <code>ds_store_b16</code>, <code>ds_load_u16</code>, <code>ds_load_i16</code>, and
+<code>ds_store_b32/b64/b128</code> or <code>ds_load_b32/b64/b128</code> on gfx1100/gfx1201/gfx1250.
+gfx942/gfx950 use the corresponding <code>ds_write_*</code> and <code>ds_read_*</code> names.
+The b16 loads write a whole 32-bit result with unsigned or signed extension. Access probes
+capture addresses before an aliased load can overwrite them, record actual byte
+widths and byte immediates, and preserve every guest result word. b8/b96,
+partial-register subword loads, dual-range, transpose, FLAT, and atomic forms
+remain unsupported. The existing minimum fixed LDS extent remains four bytes.</p>
+<p>Access widths are measured in bytes. <code>NativeLdsAccess::width</code> and
+<code>SiteFacts::width</code> default to zero, meaning unspecified and invalid. Producers
+must explicitly supply 2, 4, 8, or 16; zero never implies b32 or a zero-length
+access. Manifest admission rejects zero, and a committed observation must match
+its site's width. An all-zero uncommitted report slot still represents vacant
+storage, not an access.</p>
+<p>Range admission checks bounds by subtraction before calculating ends. Diagnosis
+sweeps checked ranges, retaining grouped counts for identical ranges, excluding
+Read/Read and same-wave pairs, and treating adjacent ranges as disjoint. Natural
+alignment and the admitted widths bound active range shapes. Widths share the
+same four-address-group quota, loss rules, exact collision masks, and qualified
+barrier certificates. The compatibility token/options reject older b32-only
+producer interpretations and target-specific width restrictions. Geometry remains
+one workgroup in this change.</p>
 <p>The barrier profile requires at least two waves in one complete 1D workgroup
 and a closed forward CFG. Preparation and facts admission reject a declared maximum
 workgroup size no larger than one wave, since no valid dispatch could use it.
