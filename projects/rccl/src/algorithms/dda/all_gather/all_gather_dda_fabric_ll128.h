@@ -32,22 +32,11 @@ constexpr size_t ddaLL128AgSlotWords(size_t bankSize, int nRanks) {
   return ddaLL128SlotWords(bankSize, nRanks, 1);
 }
 
-// Use message-sized peer slots instead of spreading transfers across the bank.
-// Whole-MiB rounding is tuned for gfx1250; keep full slots if it exceeds capacity.
-constexpr size_t ddaLL128AgActiveSlotWords(size_t bankSize, int nRanks, size_t slices) {
-  const size_t capacityWords = ddaLL128AgSlotWords(bankSize, nRanks);
-  const size_t capacitySlices = capacityWords / (size_t)kDdaLL128WireWordsPerSlice;
-  constexpr size_t slicesPerMiB = (size_t{1} << 20) / (size_t)kDdaLL128WireBytesPerSlice;
-  const size_t units = slices / slicesPerMiB + (slices % slicesPerMiB != 0);
-  if (units > capacitySlices / slicesPerMiB) return capacityWords;
-  return units * slicesPerMiB * (size_t)kDdaLL128WireWordsPerSlice;
-}
-
 // LL128 all-gather. 2D grid: grid.x == nRanks - 1 places one column per remote
 // peer; grid.y splits that peer's slices across blocks, one
 // warp per slice. Each column packs this rank's payload into its peer's slot,
 // then polls its own slot for that peer's payload and unpacks it.
-template <typename T, int NRANKS_CT>
+template <typename T, int NRANKS_CT, bool SKIP_INPLACE = false>
 #if defined(USE_ROCM)
 __launch_bounds__(1024)
 #endif
@@ -78,7 +67,7 @@ __launch_bounds__(1024)
   const int total = (int)(gridDim.x * gridDim.y);
   const uint32_t flag32 = ddaGetLLEpochInc(epochDev, flatBlockId, 1);
   const uint64_t flag = ((uint64_t)flag32 << 32) | (uint64_t)flag32;
-  const size_t slotWords = ddaLL128AgActiveSlotWords(bankSize, nRanks, slicesTotal);
+  const size_t slotWords = ddaLL128AgSlotWords(bankSize, nRanks);
   // Bank 1 sits at bankSize rather than right after the slots, so every DDA LL
   // tier sharing this scratch and epoch counter banks at the same byte offsets.
   const uint64_t bankWords = (uint64_t)(flag32 & 1u) * (uint64_t)(bankSize / sizeof(uint64_t));
@@ -107,9 +96,9 @@ __launch_bounds__(1024)
   }
 
   // Local copy from sendbuff to this rank's output slot.
-  // In-place calls already have the input there, so skip the copy.
+  // The tuned specialization skips in-place calls, whose input is already there.
   char* localRecv = reinterpret_cast<char*>(recvbuff) + (size_t)selfRank * perRankBytes;
-  if (reinterpret_cast<const char*>(sendbuff) != localRecv) {
+  if (!SKIP_INPLACE || reinterpret_cast<const char*>(sendbuff) != localRecv) {
     v4u_gptr s4 = (v4u_gptr)sendbuff;
     v4u_gptr d4 = (v4u_gptr)localRecv;
     const size_t nVec = perRankBytes >> 4; // 16B chunks

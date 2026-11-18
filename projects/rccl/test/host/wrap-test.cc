@@ -8930,6 +8930,112 @@ TEST(WrapMicrotestIsolated, DdaFabricAgLL128Shape_FromDpxTable) {
       });
 }
 
+TEST(WrapMicrotestIsolated, DdaFabricAgLL128SkipInPlace_ExactRanksAndTableWindows) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaFabricAgLL128SkipInPlace_ExactRanksAndTableWindows",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        struct Case {
+          rcclTuningPartition tuning;
+          rcclComputePartition physical;
+          int ranks;
+          size_t maxBytes;
+        };
+        const Case cases[] = {{RCCL_TUNING_PARTITION_SPX, RCCL_COMPUTE_PARTITION_SPX, 4, 128 * kMiB},
+                              {RCCL_TUNING_PARTITION_DPX, RCCL_COMPUTE_PARTITION_DPX, 8, 64 * kMiB}};
+        for (const Case& tc : cases) {
+          const rcclArchThresholds* table = real_arch_thresholds::rcclGetArchThresholds("gfx1250", tc.tuning);
+          ASSERT_NE(nullptr, table);
+          g_archThresholdsTable[tc.tuning] = table;
+          comm->archThresholds = table;
+          comm->computePartition = tc.physical;
+          comm->nRanks = tc.ranks;
+          const std::pair<size_t, bool> sizes[] = {
+              {4 * kMiB - 1, false}, {4 * kMiB, true}, {8 * kMiB, true},
+              {tc.maxBytes, true}, {tc.maxBytes + 1, false}};
+          for (const auto& [bytes, expected] : sizes) {
+            EXPECT_EQ(expected, rcclDdaFabricAgLL128SkipInPlace(comm, bytes)) << tc.ranks << " ranks, " << bytes;
+          }
+          for (int ranks : {2, 3, 4, 6, 8, 9, 16}) {
+            comm->nRanks = ranks;
+            EXPECT_EQ(ranks == tc.ranks, rcclDdaFabricAgLL128SkipInPlace(comm, 8 * kMiB)) << ranks;
+          }
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, DdaFabricAgLL128SkipInPlace_RequiresKnownMatchingPhysicalModeAndOneNode) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaFabricAgLL128SkipInPlace_RequiresKnownMatchingPhysicalModeAndOneNode",
+      []() {
+        int64_t ignoreTable = 0;
+        g_loadParam = [&ignoreTable](const char* env, int64_t def) -> int64_t {
+          return std::strcmp(env, "RCCL_IGNORE_ARCH_TABLE") == 0 ? ignoreTable : def;
+        };
+        const rcclArchThresholds* spx = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        const rcclArchThresholds* dpx = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+        g_archThresholdsTable[RCCL_TUNING_PARTITION_SPX] = spx;
+        g_archThresholdsTable[RCCL_TUNING_PARTITION_DPX] = dpx;
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->nRanks = 4;
+        comm->archThresholds = spx;
+        EXPECT_FALSE(rcclDdaFabricAgLL128SkipInPlace(comm, 8 * kMiB)) << "unknown physical mode";
+        comm->computePartition = RCCL_COMPUTE_PARTITION_DPX;
+        EXPECT_FALSE(rcclDdaFabricAgLL128SkipInPlace(comm, 8 * kMiB)) << "SPX table on physical DPX";
+        comm->computePartition = RCCL_COMPUTE_PARTITION_SPX;
+        EXPECT_TRUE(rcclDdaFabricAgLL128SkipInPlace(comm, 8 * kMiB));
+        comm->nNodes = 2;
+        EXPECT_FALSE(rcclDdaFabricAgLL128SkipInPlace(comm, 8 * kMiB));
+        comm->nNodes = 1;
+        comm->archThresholds = dpx;
+        comm->nRanks = 8;
+        EXPECT_FALSE(rcclDdaFabricAgLL128SkipInPlace(comm, 8 * kMiB)) << "DPX table on physical SPX";
+        comm->computePartition = RCCL_COMPUTE_PARTITION_DPX;
+        EXPECT_TRUE(rcclDdaFabricAgLL128SkipInPlace(comm, 8 * kMiB));
+        ignoreTable = 1;
+        EXPECT_FALSE(rcclDdaFabricAgLL128SkipInPlace(comm, 8 * kMiB));
+        ignoreTable = 0;
+        EXPECT_FALSE(rcclDdaFabricAgLL128SkipInPlace(nullptr, 8 * kMiB));
+        comm->archThresholds = nullptr;
+        g_archThresholdsTable[RCCL_TUNING_PARTITION_SPX] = nullptr;
+        EXPECT_FALSE(rcclDdaFabricAgLL128SkipInPlace(comm, 8 * kMiB));
+        DeleteCommWithArch(comm);
+        for (const char* arch : {"gfx942", "gfx950", "gfx1100"}) {
+          comm = MakeCommWithArch(arch);
+          comm->archThresholds = dpx;
+          comm->nRanks = 8;
+          comm->computePartition = RCCL_COMPUTE_PARTITION_DPX;
+          EXPECT_FALSE(rcclDdaFabricAgLL128SkipInPlace(comm, 8 * kMiB)) << arch;
+          DeleteCommWithArch(comm);
+        }
+      });
+}
+
+TEST(WrapMicrotestIsolated, DdaFabricAgLL128SkipInPlace_DisabledAndMalformedWindows) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaFabricAgLL128SkipInPlace_DisabledAndMalformedWindows",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        rcclArchThresholds table{};
+        comm->archThresholds = &table;
+        comm->nRanks = 4;
+        comm->computePartition = RCCL_COMPUTE_PARTITION_SPX;
+        g_archThresholdsTable[RCCL_TUNING_PARTITION_SPX] = &table;
+        EXPECT_FALSE(rcclDdaFabricAgLL128SkipInPlace(comm, 8 * kMiB));
+        table.ddaAgLL128SkipInPlaceMinBytes = 4 * kMiB;
+        table.ddaAgLL128SkipInPlaceMaxBytes = 128 * kMiB;
+        EXPECT_FALSE(rcclDdaFabricAgLL128SkipInPlace(comm, 8 * kMiB)) << "zero ranks disables";
+        table.ddaAgLL128SkipInPlaceRanks = 4;
+        EXPECT_TRUE(rcclDdaFabricAgLL128SkipInPlace(comm, 8 * kMiB));
+        table.ddaAgLL128SkipInPlaceMaxBytes = 0;
+        EXPECT_FALSE(rcclDdaFabricAgLL128SkipInPlace(comm, 8 * kMiB)) << "zero maximum disables";
+        table.ddaAgLL128SkipInPlaceMaxBytes = 2 * kMiB;
+        EXPECT_FALSE(rcclDdaFabricAgLL128SkipInPlace(comm, 3 * kMiB)) << "inverted window disables";
+        DeleteCommWithArch(comm);
+      });
+}
+
 // DDA LL128 AlltoAll reads its own ddaA2aLL128* window, inclusive at both ends; a synthetic table pins
 // the accessors. The real tables and no table keep 0 threads; SPX and no table keep the init cap, and DPX
 // caps the grid at 72 blocks from 256 KiB to 16 MiB, where DPX runs LL128 (LL stops at 128 KiB).

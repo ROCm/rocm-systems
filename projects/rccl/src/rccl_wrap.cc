@@ -1384,6 +1384,22 @@ int rcclDdaFabricVmmBlocks(const ncclComm* comm) {
   return std::min(cap, want);
 }
 
+bool rcclDdaFabricAgLL128SkipInPlace(const ncclComm* comm, size_t totalBytes) {
+  if (comm == nullptr || comm->nNodes != 1 || comm->archName == nullptr || !IsArchMatch(comm->archName, "gfx1250"))
+    return false;
+  rcclTuningPartition partition;
+  switch (comm->computePartition) {
+  case RCCL_COMPUTE_PARTITION_SPX: partition = RCCL_TUNING_PARTITION_SPX; break;
+  case RCCL_COMPUTE_PARTITION_DPX: partition = RCCL_TUNING_PARTITION_DPX; break;
+  default: return false;
+  }
+  const rcclArchThresholds* table = extAlgoArchTable(comm);
+  // A tuning override must not enable an unmeasured physical-mode/rank combination.
+  return table != nullptr && table == rcclGetArchThresholds(comm->archName, partition) &&
+         table->ddaAgLL128SkipInPlaceRanks > 0 && comm->nRanks == table->ddaAgLL128SkipInPlaceRanks &&
+         rcclWindowFits(totalBytes, table->ddaAgLL128SkipInPlaceMinBytes, table->ddaAgLL128SkipInPlaceMaxBytes);
+}
+
 int rcclDdaFabricAgLL128Threads(const ncclComm* comm, size_t totalBytes) {
   const rcclArchThresholds* table = extAlgoArchTable(comm);
   if (table == nullptr ||

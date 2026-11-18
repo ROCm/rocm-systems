@@ -29,7 +29,6 @@ RCCL_PARAM(DdaLL128AGThreads, "DDA_LL128_AG_THREADS", 0);
 namespace {
 
 using dda::common::ddaBankSize;
-using dda::common::ddaLL128AgActiveSlotWords;
 using dda::common::ddaLL128AgSlotWords;
 using dda::common::ddaLL128Slices;
 using dda::common::kDdaLL128DataBytesPerSlice;
@@ -81,7 +80,7 @@ static inline std::pair<dim3, dim3> ddaAllGatherFabricLL128Geom(ncclComm* comm, 
   return std::make_pair(dim3((unsigned)nPeers, blocksPerPeer), dim3(threads));
 }
 
-template <typename T>
+template <typename T, bool SKIP_INPLACE>
 static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
   const void* sendbuff, void* recvbuff,
   size_t sendcount, // per-rank element count of T (== bytes when T == int8_t)
@@ -102,29 +101,31 @@ static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
 
   INFO(NCCL_COLL,
        "DDA fabric AllGather LL128: nRanks=%d perRankBytes=%zu slices=%zu grid=%ux%u block=%u "
-       "(warp-per-slice, bpp=%u, slotWords=%zu, capacitySlotWords=%zu)",
+       "(warp-per-slice, bpp=%u, slotWords=%zu, skipInPlace=%d)",
        nRanks, perRankBytes, slices, grid.x, grid.y, block.x, blocksPerPeer,
-       ddaLL128AgActiveSlotWords(bankSize, nRanks, slices),
-       ddaLL128AgSlotWords(bankSize, nRanks));
+       ddaLL128AgSlotWords(bankSize, nRanks), (int)SKIP_INPLACE);
 
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   // NRANKS_CT 4/8: unrolled; 0: runtime fallback.
   switch (nRanks) {
   case 4:
-    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
-                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize, params);
+    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 4, SKIP_INPLACE>), grid, block, 0, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff),
+                          static_cast<const T*>(sendbuff), perRankBytes, comm->rank, nRanks, epochDev, epochLen,
+                          slices, bankSize, params);
     break;
   case 8:
-    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 8>), grid, block, 0, stream, /*startEvent=*/nullptr,
-                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize, params);
+    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 8, SKIP_INPLACE>), grid, block, 0, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff),
+                          static_cast<const T*>(sendbuff), perRankBytes, comm->rank, nRanks, epochDev, epochLen,
+                          slices, bankSize, params);
     break;
   default:
-    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 0>), grid, block, 0, stream, /*startEvent=*/nullptr,
-                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize, params);
+    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 0, SKIP_INPLACE>), grid, block, 0, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff),
+                          static_cast<const T*>(sendbuff), perRankBytes, comm->rank, nRanks, epochDev, epochLen,
+                          slices, bankSize, params);
     break;
   }
 
@@ -185,8 +186,13 @@ ncclResult_t ncclAllGatherDdaFabricLL128(const void* sendbuff, void* recvbuff, s
   if (!rcclDdaDatatypeSupported(comm, datatype)) {
     return ncclInvalidArgument;
   }
-  // AllGather is a pure copy, so the payload moves as raw bytes: instantiate the
-  // kernel once for int8_t and scale the count, like ncclAllGatherDdaFabricLL.
+  // AllGather is a pure copy, so both variants move raw bytes as int8_t and scale
+  // the count, like ncclAllGatherDdaFabricLL.
   const int typeSize = ncclTypeSize(datatype);
-  return ncclAllGatherDdaFabricLL128Typed<int8_t>(sendbuff, recvbuff, sendcount * typeSize, comm, stream);
+  const size_t perRankBytes = sendcount * typeSize;
+  const char* localRecv = static_cast<char*>(recvbuff) + (size_t)comm->rank * perRankBytes;
+  if (sendbuff == localRecv && rcclDdaFabricAgLL128SkipInPlace(comm, perRankBytes * (size_t)comm->nRanks)) {
+    return ncclAllGatherDdaFabricLL128Typed<int8_t, true>(sendbuff, recvbuff, perRankBytes, comm, stream);
+  }
+  return ncclAllGatherDdaFabricLL128Typed<int8_t, false>(sendbuff, recvbuff, perRankBytes, comm, stream);
 }

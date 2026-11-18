@@ -141,6 +141,12 @@ struct rcclArchThresholds {
   size_t ddaAgLL128MaxBlocksMinBytes;
   size_t ddaAgLL128MaxBlocksMaxBytes;
 
+  // In-place LL128 AllGather local-copy skip: exact rank count and inclusive total-byte window.
+  // 0 ranks or a 0 maximum disables it; the host also requires a matching physical partition.
+  int ddaAgLL128SkipInPlaceRanks;
+  size_t ddaAgLL128SkipInPlaceMinBytes;
+  size_t ddaAgLL128SkipInPlaceMaxBytes;
+
   // DDA LL128 AllToAll block size and block cap, as the AllGather pair above. 0 keeps 256 threads
   // and the init block cap.
   int ddaA2aLL128Threads;
@@ -185,6 +191,14 @@ struct rcclArchThresholds {
 enum rcclTuningPartition {
   RCCL_TUNING_PARTITION_SPX = 0,
   RCCL_TUNING_PARTITION_DPX = 1,
+};
+
+// Recognized physical compute partition, independent of RCCL_TUNING_PARTITION_MODE.
+// Unsupported or unreported modes stay unknown, including on zero-initialized comms.
+enum rcclComputePartition {
+  RCCL_COMPUTE_PARTITION_UNKNOWN = 0,
+  RCCL_COMPUTE_PARTITION_SPX,
+  RCCL_COMPUTE_PARTITION_DPX,
 };
 
 const rcclArchThresholds* rcclGetArchThresholds(const char* gcn,

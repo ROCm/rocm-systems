@@ -2122,6 +2122,34 @@ TEST_F(InitMicrotest, FillInfo_TuningPartitionRequest) {
   }
 }
 
+TEST_F(InitMicrotest, FillInfo_CachesPhysicalPartitionIndependentOfTuningOverride) {
+  struct Case {
+    const char* gpu;
+    rcclComputePartition expected;
+  };
+  const Case cases[] = {{"SPX", RCCL_COMPUTE_PARTITION_SPX},
+                        {"dpx", RCCL_COMPUTE_PARTITION_DPX},
+                        {"CPX", RCCL_COMPUTE_PARTITION_UNKNOWN},
+                        {"", RCCL_COMPUTE_PARTITION_UNKNOWN},
+                        {"QPX", RCCL_COMPUTE_PARTITION_UNKNOWN}};
+  for (const char* overrideMode : {"SPX", "DPX"}) {
+    SetMicroEnv("RCCL_TUNING_PARTITION_MODE", overrideMode);
+    for (const Case& tc : cases) {
+      SCOPED_TRACE(std::string(overrideMode) + " table, physical mode '" + tc.gpu + "'");
+      FillInfoComm c;
+      EXPECT_EQ(RCCL_COMPUTE_PARTITION_UNKNOWN, c.get()->computePartition);
+      c.get()->busId = kAliasBusId;
+      g_pciComputePartition = tc.gpu;
+      g_pciComputePartitionCalls = 0;
+      ncclPeerInfo info{};
+      ASSERT_EQ(ncclSuccess, fillInfo(c.get(), &info, 0));
+      EXPECT_EQ(tc.expected, c.get()->computePartition);
+      EXPECT_EQ(1, g_pciComputePartitionCalls);
+      EXPECT_EQ("0000:11:00.0", g_lastPciComputePartitionBusId);
+    }
+  }
+}
+
 // An unknown value is ignored with one notice per process, and the GPU's mode decides. Isolated:
 // the report-once flag is a function-local static.
 TEST_F(InitMicrotestIsolated, FillInfo_InvalidTuningPartitionMode_ReportsOnceAndFollowsGpuMode) {

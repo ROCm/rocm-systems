@@ -245,6 +245,10 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ddaVmmBlockBudget = 2048,
   .ddaVmmMinBlocks = 32,
   .ddaVmmMaxBlocks = 128,
+  // In-place AllGather copy skip, four SPX ranks: 1-32 MiB input per rank.
+  .ddaAgLL128SkipInPlaceRanks = 4,
+  .ddaAgLL128SkipInPlaceMinBytes = 4ULL*1024*1024,
+  .ddaAgLL128SkipInPlaceMaxBytes = 128ULL*1024*1024,
   // Ring / Tree crossovers, same sweep (AllReduce LL128: AICOMRCCL-2874/2875).
   .arRingLL128MaxPerRank = 32ULL*1024*1024,       // Ring LL128 beats Simple to 256M/512M/1G/2G at 8-64
   .arTreeLL128Unlimited = true,                   // Tree LL128 beats Tree Simple 1.3-2.9x at 32M-16G
@@ -486,6 +490,10 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   .ddaAgLL128MaxBlocks = 75,
   .ddaAgLL128MaxBlocksMinBytes = 1ULL*1024*1024,
   .ddaAgLL128MaxBlocksMaxBytes = 32ULL*1024*1024,
+  // In-place AllGather copy skip, eight DPX ranks: 512 KiB-8 MiB input per rank.
+  .ddaAgLL128SkipInPlaceRanks = 8,
+  .ddaAgLL128SkipInPlaceMinBytes = 4ULL*1024*1024,
+  .ddaAgLL128SkipInPlaceMaxBytes = 64ULL*1024*1024,
   // AllToAll LL128 block cap from 256 KiB to 16 MiB. Rounded to a multiple of the peer count:
   // 70 / 60 / 62 / 63 blocks at 8 / 16 / 32 / 64 ranks (DPX).
   .ddaA2aLL128MaxBlocks = 72,
