@@ -42,6 +42,7 @@
 // HIP runtime internals
 #include "../hip_global.hpp"       // hip::asKernel()
 #include "../hip_internal.hpp"
+#include "../hip_graph_internal.hpp"
 #include "hip/amd_detail/hip_api_trace.hpp"
 #include "utils/flags.hpp"         // HIP_HRR_CAPTURE_OUTPUT flag
 
@@ -60,6 +61,7 @@
 #include <cctype>
 #include <cerrno>
 #include <climits>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -71,9 +73,15 @@
 #include <map>
 #include <memory>
 #include <new>
+#include <thread>
 #include <tuple>
 #include <unordered_map>
 #include <vector>
+#ifdef __linux__
+#include <pthread.h>
+#include <sched.h>
+#include <unistd.h>
+#endif
 
 #if !defined(_WIN32)
 #include <fcntl.h>
@@ -291,10 +299,12 @@ const char* hip_capture_output_dir() {
 // build (DEBUG from rocclr/utils/macros.hpp, the macro that picks debug() over
 // release() there) honours it; any other build ignores it, because the dumps put
 // a second copy of the workload's kernel arguments in the log, where log
-// collection picks them up. HIP_HRR_HOST_SNAPSHOTS and
-// HIP_HRR_HOST_SNAPSHOT_MAX_MB are not in flags.hpp: they only tune capture, so
-// they are read here (hrr_host_snapshots_enabled, hrr_host_snapshot_cap_bytes)
-// and stay with the HRR code and its reviewers.
+// collection picks them up. HIP_HRR_HOST_SNAPSHOTS, HIP_HRR_HOST_SNAPSHOT_MAX_MB,
+// HIP_HRR_HOST_SNAPSHOT_CHUNK_KB and HIP_HRR_HOST_SNAPSHOT_HELPERS are not in
+// flags.hpp: they only tune capture, so they are read here
+// (hrr_host_snapshots_enabled, hrr_host_snapshot_cap_bytes,
+// hrr_host_snapshot_chunk_bytes, pinned_hash_pool) and stay with the HRR code
+// and its reviewers.
 static bool hrr_dbg_args_enabled() {
 #if defined(DEBUG)
   return HIP_HRR_DEBUG_ARGS;
@@ -335,65 +345,118 @@ static bool parse_kernel_extra(void** extra, const void*& out_buf, size_t& out_s
 // A kernel can read pinned host memory the host filled with plain stores, which
 // no HIP call records. Before each launch, the 8-byte-aligned words of its
 // arguments are looked up in the tracked pinned allocations (hipHostMalloc,
-// hipHostRegister). Each allocation hit is written whole as a
-// blob, and named by a record in the launch event unless its hash and stream
-// equal those of the last record for it. Replay copies the blob back when the
+// hipHostRegister and the other pinned allocators). Each chunk of an allocation
+// hit is written as a blob, and named by a record in the launch event unless its
+// hash and stream equal those of the last record for it. Replay copies the blobs back when the
 // stream reaches the launch. The copy is taken at enqueue, without waiting for
 // the stream: bytes that queued GPU work has yet to write are restored as they
 // were before it. See DESIGN.md, "Pinned host snapshots".
 // ---------------------------------------------------------------------------
 
 namespace {
+// An allocation is snapshotted in chunks (HIP_HRR_HOST_SNAPSHOT_CHUNK_KB), each
+// its own blob and record, so a launch after a few host stores writes only the
+// chunks they touched. A large allocation gets bigger chunks, so no allocation
+// needs more than kPinnedMaxChunks records.
+constexpr size_t kPinnedMaxChunks = 1024;
+
+struct PinnedChunk {
+  hrr_cap::Hash128 last{};         // blob of the last record, {0,0} before the first
+  bool             changed = false;  // the last snapshot found bytes not in the archive
+};
 struct PinnedAlloc {
-  size_t           size = 0;
-  hrr_cap::Hash128 last{};  // blob of the last record, {0,0} before the first
-  hipStream_t      last_stream = nullptr;  // and its launch stream
+  size_t                   size = 0, chunk = 0;
+  std::vector<PinnedChunk> chunks;
+  hipStream_t              last_stream = nullptr;  // launch stream of the last record
+  unsigned                 readers = 0;  // snapshots reading the bytes; a free waits for 0
+  bool                     record_all = false;  // the last launch left records out
+};
+struct SnapChunk {
+  hrr_cap::Hash128 hash{}, last{};
+  bool             record = false;   // contents or stream differ from the last record
+  bool             changed = false;  // in: the last snapshot's flag; out: this one's
+  bool             taken = false;    // hash names the bytes
+  bool             copy = false;     // new bytes, written from a copy
+  size_t           at = 0;           // where in the copy
 };
 struct HostSnap {
-  uint64_t         base = 0, size = 0;
-  hrr_cap::Hash128 hash{}, last{};
-  hipStream_t      last_stream = nullptr;
-  bool             record = false;  // contents or stream differ from the last record
-  std::unique_ptr<uint8_t[]> copy;  // the bytes, until hashed and written
+  uint64_t               base = 0, size = 0, chunk = 0;
+  std::vector<SnapChunk> chunks;
+  hipStream_t            last_stream = nullptr;
+  bool                   reading = false;     // counted in the allocation's readers
+  bool                   record_all = false;  // in: record every chunk, whatever the stream
+  bool                   dropped = false;     // out: a record over the event's cap was left out
 };
-std::mutex                       g_pinned_mu;  // also held while a snapshot copies
+std::mutex                       g_pinned_mu;
+std::condition_variable          g_pinned_cv;  // signalled when readers drops
 std::map<uintptr_t, PinnedAlloc> g_pinned;
 std::atomic<size_t>              g_pinned_count{0};
 // The pinned allocations the launch this thread is making points into.
 thread_local std::vector<HostSnap> t_snaps;
+// Helper threads that hash chunks of a large allocation. A forked child has
+// none of them, so it leaves the parent's pool alone and makes its own.
+struct PinnedHashPool;
+std::atomic<PinnedHashPool*> g_hash_pool{nullptr};
+std::atomic<bool>            g_hash_pool_made{false};
 }  // namespace
+
+static size_t hrr_host_snapshot_chunk_bytes();
 
 static void pinned_track(void* p, size_t size) {
   if (!p || size == 0) return;
+  size_t chunk = hrr_host_snapshot_chunk_bytes();
+  while (size > chunk * kPinnedMaxChunks) chunk *= 2;
+  std::vector<PinnedChunk> chunks((size + chunk - 1) / chunk);
   std::lock_guard<std::mutex> lk(g_pinned_mu);
-  g_pinned[reinterpret_cast<uintptr_t>(p)] = PinnedAlloc{size, {}};
+  PinnedAlloc& a = g_pinned[reinterpret_cast<uintptr_t>(p)];
+  const unsigned readers = a.readers;
+  a = PinnedAlloc{};
+  a.size = size;
+  a.chunk = chunk;
+  a.chunks = std::move(chunks);
+  a.readers = readers;
   g_pinned_count.store(g_pinned.size(), std::memory_order_relaxed);
 }
 
-// Called before the memory is released, so no snapshot reads it afterwards.
+// Called before the memory is released. A snapshot reads an allocation
+// without g_pinned_mu, so this waits until no snapshot reads it.
 static void pinned_untrack(void* p) {
   if (!p || g_pinned_count.load(std::memory_order_relaxed) == 0) return;
-  std::lock_guard<std::mutex> lk(g_pinned_mu);
-  g_pinned.erase(reinterpret_cast<uintptr_t>(p));
+  const auto key = reinterpret_cast<uintptr_t>(p);
+  std::unique_lock<std::mutex> lk(g_pinned_mu);
+  g_pinned_cv.wait(lk, [&] {
+    auto it = g_pinned.find(key);
+    return it == g_pinned.end() || it->second.readers == 0;
+  });
+  g_pinned.erase(key);
   g_pinned_count.store(g_pinned.size(), std::memory_order_relaxed);
 }
 
 // fork() takes g_pinned_mu before the writer's locks, the order a launch takes
-// them in, so a child never inherits it held by a snapshot on a thread it does
-// not have. Registered after writer::open() registers the writer's handlers:
-// prepare handlers run in reverse order of registration.
+// them in, so a child never inherits it held by a thread it does not have.
+// The child has none of the threads that were reading allocations, so it
+// clears their counts, or its frees would wait forever, and none of the hash
+// helpers, so it makes a pool of its own when it needs one. Registered after
+// writer::open() registers the writer's handlers: prepare handlers run in
+// reverse order of registration.
 static void pinned_install_atfork() {
 #ifndef _WIN32
   static std::once_flag once;
   std::call_once(once, [] {
     pthread_atfork([] { g_pinned_mu.lock(); }, [] { g_pinned_mu.unlock(); },
-                   [] { g_pinned_mu.unlock(); });
+                   [] {
+                     for (auto& e : g_pinned) e.second.readers = 0;
+                     g_hash_pool.store(nullptr, std::memory_order_relaxed);
+                     g_hash_pool_made.store(false, std::memory_order_relaxed);
+                     g_pinned_mu.unlock();
+                   });
   });
 #endif
 }
 
 // HIP_HRR_HOST_SNAPSHOTS, on unless set to something other than "true" or a
-// non-zero number, and HIP_HRR_HOST_SNAPSHOT_MAX_MB, 64 unless set. Parsed as
+// non-zero number, HIP_HRR_HOST_SNAPSHOT_MAX_MB, 64 unless set, and
+// HIP_HRR_HOST_SNAPSHOT_CHUNK_KB, 64 unless set to a non-zero number. Parsed as
 // the CLR flags registry parses a bool and a uint, and read once: every launch
 // asks.
 static bool hrr_host_snapshots_enabled() {
@@ -413,6 +476,15 @@ static size_t hrr_host_snapshot_cap_bytes() {
   return cap;
 }
 
+static size_t hrr_host_snapshot_chunk_bytes() {
+  static const size_t chunk = [] {
+    const char* v = std::getenv("HIP_HRR_HOST_SNAPSHOT_CHUNK_KB");
+    const unsigned int kb = v ? static_cast<unsigned int>(std::atoi(v)) : 0u;
+    return static_cast<size_t>(kb ? kb : 64u) << 10;
+  }();
+  return chunk;
+}
+
 static void pinned_scan_locked(const uint8_t* bytes, size_t sz) {
   const size_t cap = hrr_host_snapshot_cap_bytes();
   for (size_t j = 0; bytes && j + sizeof(uint64_t) <= sz; j += sizeof(uint64_t)) {
@@ -425,7 +497,9 @@ static void pinned_scan_locked(const uint8_t* bytes, size_t sz) {
         std::any_of(t_snaps.begin(), t_snaps.end(),
                     [&](const HostSnap& s) { return s.base == it->first; }))
       continue;
-    HostSnap s;
+    // Push before taking a reader count: if an allocation throws, no count leaks.
+    t_snaps.emplace_back();
+    HostSnap& s = t_snaps.back();
     s.base = it->first;
     s.size = it->second.size;
     if (s.size > cap) {
@@ -433,58 +507,449 @@ static void pinned_scan_locked(const uint8_t* bytes, size_t sz) {
           "pinned host snapshot",
           "a pinned allocation larger than HIP_HRR_HOST_SNAPSHOT_MAX_MB was not recorded");
     } else {
-      // Hashed and written from the copy, after the lock, so the blob holds
-      // the bytes its hash names.
-      s.copy.reset(new (std::nothrow) uint8_t[s.size]);
-      if (s.copy) {
-        std::memcpy(s.copy.get(), reinterpret_cast<const void*>(s.base), s.size);
-        s.last        = it->second.last;
-        s.last_stream = it->second.last_stream;
-      } else {
-        hrr_cap::writer::note_unreplayable("pinned host snapshot",
-                                           "no memory to copy a pinned allocation");
+      // Read after the lock is released. The count keeps a free from
+      // releasing the memory meanwhile.
+      const PinnedAlloc& a = it->second;
+      s.chunk = a.chunk;
+      s.chunks.resize(a.chunks.size());
+      for (size_t i = 0; i < a.chunks.size(); ++i) {
+        s.chunks[i].last    = a.chunks[i].last;
+        s.chunks[i].changed = a.chunks[i].changed;
+      }
+      s.last_stream = a.last_stream;
+      s.record_all  = a.record_all;
+      s.reading     = true;
+      ++it->second.readers;
+    }
+  }
+}
+
+static bool pinned_snapshots_active() {
+  return hrr_host_snapshots_enabled() &&
+         g_pinned_count.load(std::memory_order_relaxed) != 0;
+}
+
+// Caller holds g_pinned_mu. `kbuf` is a packed argument buffer; otherwise each
+// parameter is a separate allocation named by `params`.
+static void pinned_scan_function_locked(hipFunction_t f, void** params, void** extra,
+                                        const void* kbuf = nullptr, size_t ksz = 0) {
+  if (!f || !hip::asKernel(f)) return;
+  if (!params && !kbuf && extra) parse_kernel_extra(extra, kbuf, ksz);
+  const amd::KernelSignature& sig = hip::asKernel(f)->signature();
+  uint32_t param_idx = 0;
+  for (uint32_t i = 0; i < sig.numParametersAll(); i++) {
+    const auto& d = sig.at(i);
+    if (d.info_.hidden_) continue;
+    const uint8_t* bytes = nullptr;
+    if (kbuf && d.offset_ + d.size_ <= ksz)
+      bytes = static_cast<const uint8_t*>(kbuf) + d.offset_;
+    else if (!kbuf && params)
+      bytes = static_cast<const uint8_t*>(params[param_idx]);
+    param_idx++;
+    if (d.offset_ % sizeof(uint64_t) == 0) pinned_scan_locked(bytes, d.size_);
+  }
+}
+
+// Ends this thread's read of an allocation and wakes a free waiting for it.
+static void pinned_end_read(HostSnap& s) {
+  {
+    std::lock_guard<std::mutex> lk(g_pinned_mu);
+    auto it = g_pinned.find(s.base);
+    if (it != g_pinned.end() && it->second.readers != 0) --it->second.readers;
+  }
+  s.reading = false;
+  g_pinned_cv.notify_all();
+}
+
+// Drops every count a scan took. A scan that throws, e.g. bad_alloc in
+// push_back, calls this so a later free does not wait forever.
+static void pinned_drop_reads_locked() {
+  for (HostSnap& s : t_snaps) {
+    if (!s.reading) continue;
+    auto it = g_pinned.find(s.base);
+    if (it != g_pinned.end() && it->second.readers != 0) --it->second.readers;
+    s.reading = false;
+  }
+  g_pinned_cv.notify_all();
+}
+
+static bool hash_eq(hrr_cap::Hash128 a, hrr_cap::Hash128 b) {
+  return a.lo == b.lo && a.hi == b.hi;
+}
+
+static size_t pinned_chunk_len(const HostSnap& s, size_t i) {
+  return std::min<size_t>(s.chunk, s.size - i * s.chunk);
+}
+
+// One core hashes about 20 GB/s, so a launch that reads a 16 MiB allocation
+// spends ~0.8 ms on the hash alone. At least kPinnedSharedChunks chunks are
+// hashed, or written, with helper threads named hrr-pin-hash: one per 8 CPUs
+// the process's main thread may run on, at most 7, unless
+// HIP_HRR_HOST_SNAPSHOT_HELPERS says how many. One job is open to them at a
+// time; a launch that finds one open works on its own thread.
+constexpr size_t kPinnedSharedChunks = 16;
+
+namespace {
+// Hashes the chunks of `snap` in place, or, given the copy of its new chunks,
+// hashes and writes those.
+struct PinnedHashJob {
+  HostSnap*           snap = nullptr;
+  const uint8_t*      copy = nullptr;
+  std::atomic<size_t> next{0};
+  std::atomic<bool>   lost{false};  // a new chunk could not be stored
+  unsigned            active = 0;   // helpers inside it, under the pool's mu
+};
+struct PinnedHashPool {
+  std::mutex              mu;
+  std::condition_variable wake, idle;
+  PinnedHashJob*          job = nullptr;  // open to helpers
+  uint64_t                generation = 0;
+#ifdef __linux__
+  cpu_set_t               cpus;  // the main thread's, not the first launcher's
+#endif
+};
+}  // namespace
+
+// A new chunk is named by the hash of its copy, so a host store after the
+// read cannot leave a blob that differs from its name.
+static bool pinned_store_chunk(SnapChunk& c, size_t len, const uint8_t* copy) {
+  try {
+    const hrr_cap::Hash128 h = hrr_cap::writer::hash_bytes(copy, len);
+    c.changed = !hash_eq(h, c.last) && !hrr_cap::writer::blob_written(h, len);
+    c.hash    = c.changed ? hrr_cap::writer::write_blob_hashed(copy, len, h) : h;
+    c.taken   = true;
+    return true;
+  } catch (...) {
+    c = SnapChunk{};
+    return false;
+  }
+}
+
+// Works through the chunks until none are left. In place, a chunk equal to
+// its last record, or to a blob the archive holds, is taken; any other is
+// marked to be copied, as is one the last snapshot found new.
+static void pinned_hash_chunks(PinnedHashJob& j) {
+  HostSnap& s = *j.snap;
+  const auto* src = reinterpret_cast<const uint8_t*>(s.base);
+  for (size_t i; (i = j.next.fetch_add(1, std::memory_order_relaxed)) < s.chunks.size();) {
+    SnapChunk& c = s.chunks[i];
+    if (j.copy) {
+      if (c.copy && !pinned_store_chunk(c, pinned_chunk_len(s, i), j.copy + c.at))
+        j.lost.store(true, std::memory_order_relaxed);
+      continue;
+    }
+    if (!c.changed) {
+      const size_t len = pinned_chunk_len(s, i);
+      try {
+        c.hash = hrr_cap::writer::hash_bytes(src + i * s.chunk, len);
+        if (hash_eq(c.hash, c.last) || hrr_cap::writer::blob_written(c.hash, len)) {
+          c.taken = true;
+          continue;
+        }
+      } catch (...) {
       }
     }
-    t_snaps.push_back(std::move(s));
+    c.copy = true;
+  }
+}
+
+static void pinned_hash_helper(PinnedHashPool* p) {
+  uint64_t seen = 0;
+  std::unique_lock<std::mutex> lk(p->mu);
+  for (;;) {
+    p->wake.wait(lk, [&] { return p->job && p->generation != seen; });
+    seen = p->generation;
+    PinnedHashJob* j = p->job;
+    ++j->active;
+    lk.unlock();
+    pinned_hash_chunks(*j);
+    lk.lock();
+    if (--j->active == 0) p->idle.notify_all();
+  }
+}
+
+static PinnedHashPool* pinned_hash_pool() {
+  if (PinnedHashPool* p = g_hash_pool.load(std::memory_order_acquire)) return p;
+  if (g_hash_pool_made.exchange(true)) return nullptr;
+  auto* p = new (std::nothrow) PinnedHashPool;
+  if (!p) return nullptr;
+  unsigned cpus = std::thread::hardware_concurrency();
+#ifdef __linux__
+  // The process id names the main thread; a launching thread may be pinned narrower.
+  if (sched_getaffinity(getpid(), sizeof(p->cpus), &p->cpus) == 0) cpus = CPU_COUNT(&p->cpus);
+  else CPU_ZERO(&p->cpus);
+#endif
+  // HIP_HRR_HOST_SNAPSHOT_HELPERS sets the count; 0 keeps the work on the launching thread.
+  const char* env = std::getenv("HIP_HRR_HOST_SNAPSHOT_HELPERS");
+  const int asked = env ? std::atoi(env) : 0;
+  const unsigned helpers = !env ? std::min(cpus / 8, 7u)
+                           : asked <= 0 ? 0u
+                                        : std::min(static_cast<unsigned>(asked), 64u);
+  if (helpers == 0) {
+    delete p;
+    return nullptr;
+  }
+  unsigned started = 0;
+  try {
+    for (; started < helpers; ++started) {
+      std::thread t(pinned_hash_helper, p);
+#ifdef __linux__
+      // Named and placed here, so both hold before any launch can use the thread.
+      pthread_setname_np(t.native_handle(), "hrr-pin-hash");
+      pthread_setaffinity_np(t.native_handle(), sizeof(p->cpus), &p->cpus);
+#endif
+      t.detach();
+    }
+  } catch (...) {
+  }
+  if (started == 0) {
+    delete p;
+    return nullptr;
+  }
+  g_hash_pool.store(p, std::memory_order_release);
+  return p;
+}
+
+// Runs a job over the chunks of `s`, with the helpers when there are `work`
+// chunks or more and they are free. False when a new chunk could not be
+// stored; the caller notes that, since a note is staged on the thread that
+// writes the launch's event.
+static bool pinned_run_chunks(HostSnap& s, const uint8_t* copy, size_t work) {
+  PinnedHashJob j;
+  j.snap = &s;
+  j.copy = copy;
+  PinnedHashPool* p = work >= kPinnedSharedChunks ? pinned_hash_pool() : nullptr;
+  bool shared = false;
+  if (p) {
+    std::lock_guard<std::mutex> lk(p->mu);
+    if (!p->job) {
+      p->job = &j;
+      ++p->generation;
+      shared = true;
+    }
+  }
+  if (shared) p->wake.notify_all();
+  pinned_hash_chunks(j);
+  if (shared) {
+    // No helper joins after this, and the job lives until every one has left.
+    // Another launch may open its job meanwhile, to helpers that are free.
+    std::unique_lock<std::mutex> lk(p->mu);
+    p->job = nullptr;
+    p->idle.wait(lk, [&] { return j.active == 0; });
+  }
+  return !j.lost.load(std::memory_order_relaxed);
+}
+
+// Names the bytes of each chunk of one allocation by a blob, without
+// g_pinned_mu. A chunk equal to its last record needs nothing more, and most
+// chunks of most launches are. A chunk the last snapshot found new is likely
+// new again, so it is copied without hashing it in place first. New bytes are
+// copied while the allocation is read, and the read ends before they are
+// hashed again and written, so a free does not wait for the files.
+static void pinned_snapshot_one(HostSnap& s) {
+  const auto* src = reinterpret_cast<const uint8_t*>(s.base);
+  pinned_run_chunks(s, nullptr, s.chunks.size());
+  size_t fresh_bytes = 0, fresh = 0;
+  for (size_t i = 0; i < s.chunks.size(); ++i)
+    if (s.chunks[i].copy) {
+      s.chunks[i].at = fresh_bytes;
+      fresh_bytes += pinned_chunk_len(s, i);
+      ++fresh;
+    }
+  std::unique_ptr<uint8_t[]> copy;
+  if (fresh_bytes) {
+    copy.reset(new (std::nothrow) uint8_t[fresh_bytes]);
+    for (size_t i = 0; copy && i < s.chunks.size(); ++i)
+      if (s.chunks[i].copy)
+        std::memcpy(copy.get() + s.chunks[i].at, src + i * s.chunk, pinned_chunk_len(s, i));
+  }
+  pinned_end_read(s);
+  if (fresh_bytes && !copy) {
+    for (SnapChunk& c : s.chunks)
+      if (c.copy) c = SnapChunk{};
+    hrr_cap::writer::note_unreplayable("pinned host snapshot",
+                                       "no memory to copy a pinned allocation");
+    return;
+  }
+  if (fresh && !pinned_run_chunks(s, copy.get(), fresh))
+    hrr_cap::writer::note_unreplayable("pinned host snapshot",
+                                       "a changed pinned chunk could not be stored");
+}
+
+static void pinned_finish_snapshots() {
+  bool any = false;
+  for (HostSnap& s : t_snaps) {
+    if (!s.reading) continue;
+    any = true;
+    pinned_snapshot_one(s);
+    // A chunk write_blob() leaves out, as over HIP_HRR_CAPTURE_MAX_BLOB_MB, is
+    // recorded with hash {0,0} on every launch. Replay refuses such a launch
+    // unless it goes into a stream capture, where it restores nothing.
+    for (SnapChunk& c : s.chunks)
+      c.record = c.taken && (!(c.hash.lo || c.hash.hi) || !hash_eq(c.hash, c.last));
+  }
+  if (!any) return;
+  std::lock_guard<std::mutex> lk(g_pinned_mu);
+  for (const HostSnap& s : t_snaps) {
+    auto it = g_pinned.find(s.base);
+    if (s.chunks.empty() || it == g_pinned.end() || it->second.chunks.size() != s.chunks.size())
+      continue;
+    for (size_t i = 0; i < s.chunks.size(); ++i) it->second.chunks[i].changed = s.chunks[i].changed;
+  }
+}
+
+// One kernel of a graph, resolved before the tracking lock is taken. The
+// exec's GetNodes() is empty until the first launch, so this walks the cloned
+// vertices. The parameter pointers stay valid through the launch.
+struct PinnedGraphKernel {
+  hipFunction_t f = nullptr;
+  void** params = nullptr;
+  void** extra = nullptr;
+};
+
+static void pinned_collect_graph(hip::Graph* graph, std::vector<hip::Graph*>& seen,
+                                 std::vector<PinnedGraphKernel>& out) {
+  if (!graph || std::find(seen.begin(), seen.end(), graph) != seen.end()) return;
+  seen.push_back(graph);
+  for (hip::GraphNode* node : graph->GetNodes()) {
+    if (!node) continue;
+    if (node->GetType() == hipGraphNodeTypeKernel) {
+      auto* kn = static_cast<hip::GraphKernelNode*>(node);
+      hipKernelNodeParams kp{};
+      kn->GetParams(&kp);
+      PinnedGraphKernel k;
+      k.f = hip::GraphKernelNode::getFunc(kp, static_cast<unsigned>(kn->GetDeviceId()));
+      k.params = kp.kernelParams;
+      k.extra = kp.extra;
+      out.push_back(k);
+    } else if (node->GetType() == hipGraphNodeTypeGraph) {
+      pinned_collect_graph(static_cast<hip::ChildGraphNode*>(node), seen, out);
+    }
   }
 }
 
 // Takes the snapshot of one launch before the real call and drops it after,
-// whether or not the launch was recorded.
+// whether or not the launch was recorded. A graph exec is snapshotted the same
+// way, at hipGraphLaunch.
 struct PinnedSnapshot {
   PinnedSnapshot(hipFunction_t f, void** params, void** extra,
                  const void* kbuf = nullptr, size_t ksz = 0) {
     t_snaps.clear();
-    if (!f || !hrr_host_snapshots_enabled() || g_pinned_count.load(std::memory_order_relaxed) == 0)
-      return;
-    if (!params && !kbuf && extra) parse_kernel_extra(extra, kbuf, ksz);
-    const amd::KernelSignature& sig = hip::asKernel(f)->signature();
+    if (!f || !pinned_snapshots_active()) return;
     std::unique_lock<std::mutex> lk(g_pinned_mu);
-    uint32_t param_idx = 0;
-    for (uint32_t i = 0; i < sig.numParametersAll(); i++) {
-      const auto& d = sig.at(i);
-      if (d.info_.hidden_) continue;
-      const uint8_t* bytes = nullptr;
-      if (kbuf && d.offset_ + d.size_ <= ksz)
-        bytes = static_cast<const uint8_t*>(kbuf) + d.offset_;
-      else if (!kbuf && params)
-        bytes = static_cast<const uint8_t*>(params[param_idx]);
-      param_idx++;
-      if (d.offset_ % sizeof(uint64_t) == 0) pinned_scan_locked(bytes, d.size_);
+    try {
+      pinned_scan_function_locked(f, params, extra, kbuf, ksz);
+    } catch (...) {
+      pinned_drop_reads_locked();
+      throw;
     }
     lk.unlock();
-    for (HostSnap& s : t_snaps) {
-      if (!s.copy) continue;
-      s.hash = hrr_cap::writer::write_blob(s.copy.get(), s.size);
-      s.copy.reset();
-      // A snapshot write_blob() leaves out, as over HIP_HRR_CAPTURE_MAX_BLOB_MB, is
-      // recorded with hash {0,0} on every launch. Replay refuses such a launch
-      // unless it goes into a stream capture, where it restores nothing.
-      s.record = !(s.hash.lo || s.hash.hi) || s.hash.lo != s.last.lo || s.hash.hi != s.last.hi;
+    pinned_finish_snapshots();
+  }
+  explicit PinnedSnapshot(hipGraphExec_t exec) {
+    t_snaps.clear();
+    if (!exec || !pinned_snapshots_active()) return;
+    auto* gexec = reinterpret_cast<hip::GraphExecBase*>(exec);
+    if (!hip::GraphExecBase::isGraphExecValid(gexec)) return;
+    std::vector<hip::Graph*> seen;
+    std::vector<PinnedGraphKernel> kernels;
+    pinned_collect_graph(gexec, seen, kernels);
+    std::unique_lock<std::mutex> lk(g_pinned_mu);
+    try {
+      for (const PinnedGraphKernel& k : kernels)
+        pinned_scan_function_locked(k.f, k.params, k.extra);
+    } catch (...) {
+      pinned_drop_reads_locked();
+      throw;
     }
+    lk.unlock();
+    pinned_finish_snapshots();
   }
   ~PinnedSnapshot() { t_snaps.clear(); }
 };
+
+// The stream a launch ran on. The null stream of an _spt call and
+// hipStreamPerThread both mean this thread's default stream.
+static hipStream_t pinned_stream(hipStream_t stream, bool spt) {
+  if (spt && !stream) stream = hipStreamPerThread;
+  hip::getStreamPerThread(stream);
+  return stream;
+}
+
+// Replay restores a record on its launch's stream, so a launch on another
+// stream needs a record of every chunk, as does one after a launch that left
+// records out.
+static void pinned_mark_stream(hipStream_t stream) {
+  for (HostSnap& s : t_snaps) {
+    if (s.last_stream == stream && !s.record_all) continue;
+    for (SnapChunk& c : s.chunks)
+      if (c.taken && (c.hash.lo || c.hash.hi)) c.record = true;
+  }
+}
+
+// One event names at most UINT16_MAX records. A launch that reads more chunks
+// than that keeps the first. The next launch that reads an allocation that lost
+// a record records all of it, on whichever stream.
+static uint16_t pinned_record_count() {
+  size_t n = 0;
+  for (HostSnap& s : t_snaps)
+    for (SnapChunk& c : s.chunks) {
+      if (!c.record) continue;
+      if (n == UINT16_MAX) {
+        c.record = false;
+        s.dropped = true;
+        hrr_cap::writer::note_unreplayable(
+            "pinned host snapshot", "a launch read more pinned chunks than one event can name");
+        continue;
+      }
+      ++n;
+    }
+  return static_cast<uint16_t>(n);
+}
+
+// Calls emit(base, offset, length, hash) for each record, in event order.
+template <typename Emit>
+static void pinned_for_each_record(Emit&& emit) {
+  for (const HostSnap& s : t_snaps)
+    for (size_t i = 0; i < s.chunks.size(); ++i)
+      if (s.chunks[i].record)
+        emit(s.base, i * s.chunk, std::min<uint64_t>(s.chunk, s.size - i * s.chunk),
+             s.chunks[i].hash);
+}
+
+static bool pinned_stream_is_capturing(hipStream_t stream) {
+  hipStream_t cs = stream;
+  hip::getStreamPerThread(cs);
+  return cs && cs != hipStreamLegacy &&
+         reinterpret_cast<hip::Stream*>(cs)->GetCaptureStatus() != hipStreamCaptureStatusNone;
+}
+
+// Writes the event and updates each allocation's last record under the same
+// lock, so both happen in one order. A launch under stream capture updates
+// nothing: replay restores nothing for it, and the graph launch records the bytes.
+static void pinned_write_event(uint16_t api, void* payload, uint32_t size,
+                               hipStream_t stream) {
+  const bool capturing = pinned_stream_is_capturing(stream);
+  std::unique_lock<std::mutex> lk(g_pinned_mu, std::defer_lock);
+  if (!t_snaps.empty()) lk.lock();
+  hrr_cap::writer::write_event_raw(api, reinterpret_cast<hrr_event_header*>(payload), size);
+  if (capturing) return;
+  for (const HostSnap& s : t_snaps) {
+    auto it = g_pinned.find(s.base);
+    if (it == g_pinned.end() || it->second.chunks.size() != s.chunks.size()) continue;
+    bool recorded = false;
+    for (size_t i = 0; i < s.chunks.size(); ++i) {
+      if (!s.chunks[i].record) continue;
+      it->second.chunks[i].last = s.chunks[i].hash;
+      recorded = true;
+    }
+    if (recorded) it->second.last_stream = stream;
+    // Only a launch that saw the flag recorded every chunk; one that ran
+    // alongside it did not.
+    if (s.dropped) it->second.record_all = true;
+    else if (s.record_all) it->second.record_all = false;
+  }
+}
 
 // The kernel behind a host stub, looked up before the launch only when there
 // is pinned memory to snapshot, without changing the application's last error.
@@ -525,9 +990,9 @@ static hipFunction_t pinned_stub_fn(const void* stub) {
 //       u16   n_ptrs
 //       u16[] ptr_offset (n_ptrs entries: byte offset of each 8-byte gpu ptr,
 //             or pointer into a pinned allocation in t_snaps)
-//   for each snapshot (v10):
+//   for each snapshot (v10; one per chunk since v13):
 //     u64  ptr_handle (capture-time base of the pinned allocation)
-//     u64  offset (0), u64 length (the allocation size)
+//     u64  offset, u64 length (the chunk within the allocation)
 //     u64  hash_lo, u64 hash_hi (blob with the bytes before the launch)
 //     u8   direction (0)
 //   u32  num_attrs, u32 attr stride, num_attrs * stride bytes
@@ -722,12 +1187,11 @@ static void serialize_kernel_launch(
       if (!sig.at(i).info_.hidden_) num_args++;
   }
   push_u16(num_args);
-  // Replay restores a record on its launch's stream, so a launch on another
-  // stream than the last record's needs its own.
-  for (HostSnap& s : t_snaps)
-    if (s.last_stream != stream && (s.hash.lo || s.hash.hi)) s.record = true;
-  push_u16(static_cast<uint16_t>(std::count_if(
-      t_snaps.begin(), t_snaps.end(), [](const HostSnap& s) { return s.record; })));
+  const hipStream_t pin_stream =
+      pinned_stream(stream, api_id == HRR_API_HIPLAUNCHKERNEL_SPT ||
+                                api_id == HRR_API_HIPLAUNCHCOOPERATIVEKERNEL_SPT);
+  pinned_mark_stream(pin_stream);
+  push_u16(pinned_record_count());
 
   // HIP_HRR_DEBUG_ARGS dumps every captured arg (kind, size, full bytes,
   // detected embedded-pointer offsets) — used to confirm pointer layout. Use the
@@ -827,11 +1291,10 @@ static void serialize_kernel_launch(
     }
   }
 
-  for (const HostSnap& s : t_snaps) {
-    if (!s.record) continue;
-    push_u64(s.base); push_u64(0); push_u64(s.size);
-    push_u64(s.hash.lo); push_u64(s.hash.hi); push_u8(0);
-  }
+  pinned_for_each_record([&](uint64_t base, uint64_t off, uint64_t len, hrr_cap::Hash128 h) {
+    push_u64(base); push_u64(off); push_u64(len);
+    push_u64(h.lo); push_u64(h.hi); push_u8(0);
+  });
 
   // Launch-attribute tail. Written for every launch so the payload has one
   // shape: a plain launch records a count of zero. The stride lets replay
@@ -865,22 +1328,7 @@ static void serialize_kernel_launch(
   // A record becomes the allocation's last only once its event is written, in
   // the same order as the events. Replay restores nothing for a launch into a
   // stream capture, so a record written for one does not become the last.
-  hipStream_t cs = stream;
-  hip::getStreamPerThread(cs);
-  const bool capturing = cs && cs != hipStreamLegacy &&
-      reinterpret_cast<hip::Stream*>(cs)->GetCaptureStatus() != hipStreamCaptureStatusNone;
-  std::unique_lock<std::mutex> lk(g_pinned_mu, std::defer_lock);
-  if (!t_snaps.empty()) lk.lock();
-  hrr_cap::writer::write_event_raw(api_id,
-                                   reinterpret_cast<hrr_event_header*>(payload.data()),
-                                   static_cast<uint32_t>(payload.size()));
-  for (const HostSnap& s : t_snaps) {
-    auto it = g_pinned.find(s.base);
-    if (s.record && !capturing && it != g_pinned.end()) {
-      it->second.last        = s.hash;
-      it->second.last_stream = stream;
-    }
-  }
+  pinned_write_event(api_id, payload.data(), static_cast<uint32_t>(payload.size()), pin_stream);
 }
 
 static hrr_cap::Hash128 kernel_code_object_hash(amd::Kernel* kernel);
@@ -1961,16 +2409,58 @@ hipError_t capture_hipHostUnregister(void* hostPtr) {
   return r;
 }
 
-// hipHostMalloc, hipMallocHost and the frees are recorded by generated shims.
-// These wrappers sit in front of them in g_cap_table and keep g_pinned current;
-// hipFree can release pinned memory too. hipHostAlloc and hipMemAllocHost are
-// not tracked: replay makes no buffer for them.
+// A graph launch event is the fixed hrr_args struct, u16 num_snapshots, then
+// one 41-byte record per snapshot, in the kernel-launch layout.
+template <typename Args>
+static hipError_t capture_graph_launch(uint16_t api, hipGraphExec_t graphExec, hipStream_t stream,
+                                      hipError_t (*real)(hipGraphExec_t, hipStream_t)) {
+  PinnedSnapshot snap(graphExec);
+  hipError_t r = real(graphExec, stream);
+  if (r != hipSuccess) return r;
+  Args a{};
+  a.ret       = static_cast<int32_t>(r);
+  a.graphExec = reinterpret_cast<uint64_t>(graphExec);
+  a.stream    = reinterpret_cast<uint64_t>(stream);
+  const hipStream_t pin_stream = pinned_stream(stream, api == HRR_API_HIPGRAPHLAUNCH_SPT);
+  pinned_mark_stream(pin_stream);
+  const uint16_t n = pinned_record_count();
+  std::vector<uint8_t> payload(sizeof(a));
+  std::memcpy(payload.data(), &a, sizeof(a));
+  payload.push_back(static_cast<uint8_t>(n));
+  payload.push_back(static_cast<uint8_t>(n >> 8));
+  auto push_u64 = [&](uint64_t v) {
+    for (int i = 0; i < 8; i++) payload.push_back(static_cast<uint8_t>(v >> (i * 8)));
+  };
+  pinned_for_each_record([&](uint64_t base, uint64_t off, uint64_t len, hrr_cap::Hash128 h) {
+    push_u64(base); push_u64(off); push_u64(len);
+    push_u64(h.lo); push_u64(h.hi);
+    payload.push_back(0);
+  });
+  pinned_write_event(api, payload.data(), static_cast<uint32_t>(payload.size()), pin_stream);
+  return r;
+}
+
+hipError_t capture_hipGraphLaunch(hipGraphExec_t graphExec, hipStream_t stream) {
+  return capture_graph_launch<hrr_args_hipGraphLaunch>(
+      HRR_API_HIPGRAPHLAUNCH, graphExec, stream, g_real_table.hipGraphLaunch_fn);
+}
+
+hipError_t capture_hipGraphLaunch_spt(hipGraphExec_t graphExec, hipStream_t stream) {
+  return capture_graph_launch<hrr_args_hipGraphLaunch_spt>(
+      HRR_API_HIPGRAPHLAUNCH_SPT, graphExec, stream, g_real_table.hipGraphLaunch_spt_fn);
+}
+
+// hipHostMalloc, hipMallocHost, hipHostAlloc, hipMemAllocHost and the frees are
+// recorded by generated shims. These wrappers sit in front of them in
+// g_cap_table and keep g_pinned current; hipFree can release pinned memory too.
 namespace {
-decltype(HipDispatchTable::hipHostMalloc_fn) g_next_hipHostMalloc = nullptr;
-decltype(HipDispatchTable::hipMallocHost_fn) g_next_hipMallocHost = nullptr;
-decltype(HipDispatchTable::hipHostFree_fn)   g_next_hipHostFree   = nullptr;
-decltype(HipDispatchTable::hipFreeHost_fn)   g_next_hipFreeHost   = nullptr;
-decltype(HipDispatchTable::hipFree_fn)       g_next_hipFree       = nullptr;
+decltype(HipDispatchTable::hipHostMalloc_fn)  g_next_hipHostMalloc  = nullptr;
+decltype(HipDispatchTable::hipMallocHost_fn)  g_next_hipMallocHost  = nullptr;
+decltype(HipDispatchTable::hipHostAlloc_fn)   g_next_hipHostAlloc   = nullptr;
+decltype(HipDispatchTable::hipMemAllocHost_fn) g_next_hipMemAllocHost = nullptr;
+decltype(HipDispatchTable::hipHostFree_fn)    g_next_hipHostFree    = nullptr;
+decltype(HipDispatchTable::hipFreeHost_fn)    g_next_hipFreeHost    = nullptr;
+decltype(HipDispatchTable::hipFree_fn)        g_next_hipFree        = nullptr;
 }  // namespace
 
 static hipError_t pinned_hipHostMalloc(void** ptr, size_t size, unsigned int flags) {
@@ -1980,6 +2470,16 @@ static hipError_t pinned_hipHostMalloc(void** ptr, size_t size, unsigned int fla
 }
 static hipError_t pinned_hipMallocHost(void** ptr, size_t size) {
   hipError_t r = g_next_hipMallocHost(ptr, size);
+  if (r == hipSuccess && ptr) pinned_track(*ptr, size);
+  return r;
+}
+static hipError_t pinned_hipHostAlloc(void** ptr, size_t size, unsigned int flags) {
+  hipError_t r = g_next_hipHostAlloc(ptr, size, flags);
+  if (r == hipSuccess && ptr) pinned_track(*ptr, size);
+  return r;
+}
+static hipError_t pinned_hipMemAllocHost(void** ptr, size_t size) {
+  hipError_t r = g_next_hipMemAllocHost(ptr, size);
   if (r == hipSuccess && ptr) pinned_track(*ptr, size);
   return r;
 }
@@ -1996,6 +2496,8 @@ static void pinned_wrap_table() {
   g_cap_table.api##_fn = pinned_##api;
   HRR_PINNED_WRAP(hipHostMalloc)
   HRR_PINNED_WRAP(hipMallocHost)
+  HRR_PINNED_WRAP(hipHostAlloc)
+  HRR_PINNED_WRAP(hipMemAllocHost)
   HRR_PINNED_WRAP(hipHostFree)
   HRR_PINNED_WRAP(hipFreeHost)
   HRR_PINNED_WRAP(hipFree)

@@ -191,7 +191,7 @@ class GinFinalizeTest : public GinPluginInitTest {
 
   // Stands in for a backend record left by ncclGinPluginAssignToComm.
   void addActiveBackend(void* ginInstance) {
-    struct ncclGinState* ginState = &sharedRes_->ginState;
+    struct ncclGinState* ginState = &comm_.ginState;
     int idx = ginState->numActiveBackends++;
     ginState->backends[idx].pluginIndex = 0;
     ginState->backends[idx].ginInstance = ginInstance;
@@ -213,7 +213,7 @@ TEST_F(GinFinalizeTest, ConnectedBackend_FinalizesContextAndDropsRefCount) {
 }
 
 TEST_F(GinFinalizeTest, NeverConnected_NoBackendsIsANoOp) {
-  ASSERT_EQ(sharedRes_->ginState.numActiveBackends, 0);
+  ASSERT_EQ(comm_.ginState.numActiveBackends, 0);
 
   EXPECT_EQ(ncclGinFinalize(&comm_), ncclSuccess);
   EXPECT_EQ(fake_.finalizeCalls, 0);
@@ -227,7 +227,7 @@ TEST_F(GinFinalizeTest, FinalizedBackends_SetDefaultBackendLeavesThemForGinFinal
   void* ctx = std::malloc(8);
   fake_.lastCtx = ctx;
   addActiveBackend(ctx);
-  struct ncclGinState* ginState = &sharedRes_->ginState;
+  struct ncclGinState* ginState = &comm_.ginState;
   ginState->backends[0].ginType = NCCL_GIN_TYPE_PROXY;
   ginState->finalized = true;
   ginState->supported = false;
@@ -247,7 +247,7 @@ TEST_F(GinFinalizeTest, LiveBackend_SetDefaultBackendArmsSupported) {
   void* ctx = std::malloc(8);
   fake_.lastCtx = ctx;
   addActiveBackend(ctx);
-  struct ncclGinState* ginState = &sharedRes_->ginState;
+  struct ncclGinState* ginState = &comm_.ginState;
   ginState->backends[0].ginType = NCCL_GIN_TYPE_PROXY;
 
   EXPECT_EQ(ncclGinSetDefaultBackend(&comm_, BIT(NCCL_GIN_TYPE_PROXY)), ncclSuccess);
@@ -261,7 +261,7 @@ TEST_F(GinFinalizeTest, LiveBackend_SetDefaultBackendArmsSupported) {
 TEST_F(GinFinalizeTest, AssignToComm_HonorsGinTypesList) {
   ScopedEnv ty("NCCL_GIN_TYPE", nullptr);
   fake_.netDeviceType = NCCL_NET_DEVICE_GIN_PROXY;
-  struct ncclGinState* ginState = &sharedRes_->ginState;
+  struct ncclGinState* ginState = &comm_.ginState;
   bool isAssigned = true;
   {
     ScopedEnv list("RCCL_GIN_TYPE_LIST", "6,7");
@@ -286,7 +286,7 @@ TEST_F(GinFinalizeTest, AssignToComm_EmptyGinType_StillHonorsGinTypesList) {
   bool isAssigned = true;
   ASSERT_EQ(ncclGinPluginAssignToComm(&comm_, 0, nullptr, &isAssigned), ncclSuccess);
   EXPECT_FALSE(isAssigned);
-  EXPECT_EQ(sharedRes_->ginState.numActiveBackends, 0);
+  EXPECT_EQ(comm_.ginState.numActiveBackends, 0);
 }
 
 #ifdef ENABLE_ROCSHMEM_GIN
@@ -294,7 +294,7 @@ TEST_F(GinFinalizeTest, AssignToComm_EmptyGinType_StillHonorsGinTypesList) {
 TEST_F(GinFinalizeTest, SetDefaultBackend_OrdersSdmaThenGdaThenProxy) {
   ncclGinType_t order[] = {NCCL_GIN_TYPE_PROXY, NCCL_GIN_TYPE_ROCSHMEM_GDA, NCCL_GIN_TYPE_ANVIL_SDMA};
   const uint64_t all = BIT(NCCL_GIN_TYPE_PROXY) | BIT(NCCL_GIN_TYPE_ROCSHMEM_GDA) | BIT(NCCL_GIN_TYPE_ANVIL_SDMA);
-  struct ncclGinState* ginState = &sharedRes_->ginState;
+  struct ncclGinState* ginState = &comm_.ginState;
   std::sort(std::begin(order), std::end(order));
   do {
     ginState->numActiveBackends = 0;
@@ -390,7 +390,7 @@ TEST_F(GinFinalizeTest, AnvilSdma_KeptWithProxyOnSingleHost) {
   fake_.lastCtx = anvil;
   addActiveBackend(anvil);
   addActiveBackend(proxy);
-  struct ncclGinState* ginState = &sharedRes_->ginState;
+  struct ncclGinState* ginState = &comm_.ginState;
   ginState->backends[0].ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
   ginState->backends[1].ginType = NCCL_GIN_TYPE_PROXY;
   topo_->nHosts = 1;
@@ -414,7 +414,7 @@ TEST_F(GinFinalizeTest, AnvilSdma_DroppedOnMultiHostKeepsProxy) {
   fake_.lastCtx = anvil;
   addActiveBackend(anvil);
   addActiveBackend(proxy);
-  struct ncclGinState* ginState = &sharedRes_->ginState;
+  struct ncclGinState* ginState = &comm_.ginState;
   ginState->backends[0].ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
   ginState->backends[1].ginType = NCCL_GIN_TYPE_PROXY;
   topo_->nHosts = 2;
@@ -436,7 +436,7 @@ TEST_F(GinFinalizeTest, AnvilSdmaOnly_MultiHostClearsSupported) {
   void* anvil = std::malloc(8);
   fake_.lastCtx = anvil;
   addActiveBackend(anvil);
-  struct ncclGinState* ginState = &sharedRes_->ginState;
+  struct ncclGinState* ginState = &comm_.ginState;
   ginState->backends[0].ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
   topo_->nHosts = 2;
 

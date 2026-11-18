@@ -1187,3 +1187,38 @@ TEST(s_maximum_f16, Gfx1201Captures) {
       },
       s_maximum_f16_captures, 16, 16, /*rounded=*/false);
 }
+
+// Literal causes come from the inherited shared/scalar_fp.h model. Numerical
+// capture tests above independently cover its rounding and exceptional results.
+TEST(ScalarCompatibility, PreservesAndAccumulatesStatus) {
+  using Binary = int (*)(uint64_t, uint64_t, uint32_t *, uint32_t, uint32_t, uint32_t *);
+  struct Case {
+    Binary call;
+    uint32_t a, b, result, causes;
+  };
+  const Case cases[] = {
+      {rj_arith_s_add_f32, 0x3f800000, 0x33800000, 0x3f800000, 0x20},
+      {rj_arith_s_add_f32, 1, 0x3f800000, 0x3f800000, 0x22},
+      {rj_arith_s_mul_f32, 0x7f7fffff, 0x40000000, 0x7f800000, 0x28},
+      {rj_arith_s_sub_f32, 0, 0x7f800001, 0xffc00001, 1},
+      {rj_arith_s_min_num_f32, 0x7f800000, 1, 1, 0},
+      {rj_arith_s_add_f16, 0x3c00, 0x1000, 0x3c00, 0x20},
+      {rj_arith_s_mul_f16, 0x7bff, 0x4000, 0x7c00, 0x28},
+      {rj_arith_s_cmp_eq_f32, 0x7fc00001, 1, 0, 0},
+      {rj_arith_s_cmp_eq_f16, 0x7c01, 0x3c00, 0, 1},
+  };
+  for (auto cpu : rocjitsu::arith::test::supported_cpu_levels()) {
+    for (const auto &test : cases) {
+      uint32_t d = 0xdeadbeef, status = 0x80;
+      ASSERT_EQ(test.call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY, 0, &d, test.a, test.b, &status),
+                RJ_ARITH_SUCCESS);
+      EXPECT_EQ(d, test.result);
+      EXPECT_EQ(status, 0x80U | test.causes);
+      status = 0x80;
+      ASSERT_EQ(test.call(cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS, 0, &d, test.a,
+                          test.b, &status),
+                RJ_ARITH_SUCCESS);
+      EXPECT_EQ(status, 0x80U);
+    }
+  }
+}

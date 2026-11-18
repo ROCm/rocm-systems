@@ -3,8 +3,12 @@
 
 // Tests for packed FP16 addition and multiplication.
 
+#include "common/cpu.h"
 #include "fp/binary_arithmetic_test.h"
+#include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_fp.h"
+#include <algorithm>
+#include <random>
 
 #include <gtest/gtest.h>
 
@@ -428,4 +432,111 @@ TEST(FpPackedBinaryF16, Gfx1100Captures) {
 TEST(FpPackedBinaryF16, Gfx1201Captures) {
   check_packed_captures(rj_arith_v_pk_add_f16_w32_gfx12, pk_add_gfx12, false);
   check_packed_captures(rj_arith_v_pk_mul_f16_w32_gfx12, pk_mul_gfx12, false);
+}
+
+// The SIMD backends retain the inherited scalar Compatibility model across guest modes.
+TEST(HalfArithmetic, SimdGuestModes) {
+  struct Case {
+    decltype(&rj_arith_v_add_f16_w32) call;
+    bool packed, legacy;
+  };
+  const Case cases[] = {{rj_arith_v_add_f16_w32, false, true},
+                        {rj_arith_v_sub_f16_w32, false, true},
+                        {rj_arith_v_subrev_f16_w32, false, true},
+                        {rj_arith_v_mul_f16_w32, false, true},
+                        {rj_arith_v_add_f16_w32_gfx12, false, false},
+                        {rj_arith_v_sub_f16_w32_gfx12, false, false},
+                        {rj_arith_v_subrev_f16_w32_gfx12, false, false},
+                        {rj_arith_v_mul_f16_w32_gfx12, false, false},
+                        {rj_arith_v_pk_add_f16_w32, true, true},
+                        {rj_arith_v_pk_mul_f16_w32, true, true},
+                        {rj_arith_v_pk_add_f16_w32_gfx12, true, false},
+                        {rj_arith_v_pk_mul_f16_w32_gfx12, true, false}};
+  const auto levels = rocjitsu::arith::test::supported_cpu_levels();
+  std::minstd_rand random;
+  const uint32_t special[] = {0x00008000, 0x80000000, 0x000103ff,
+                              0x7bff7bff, 0x7c00fc00, 0x7d237e12};
+  for (const auto &test : cases) {
+    for (unsigned rounding = 0; rounding < 4; ++rounding) {
+      for (unsigned control = 0; control < 16; ++control) {
+        const uint64_t flags = RJ_ARITH_SEMANTICS_COMPATIBILITY | (uint64_t(rounding) << 24) |
+                               (control & 1 ? RJ_ARITH_FP_FLUSH_INPUT_DENORMALS : 0) |
+                               (control & 2 ? RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS : 0) |
+                               (control & 4 ? RJ_ARITH_FP16_OVFL : 0) |
+                               (control & 8 && test.legacy ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0);
+        for (unsigned variant = 0; variant < 8; ++variant) {
+          const uint32_t modifiers =
+              test.packed ? (variant & 1 ? RJ_ARITH_PK_NEG_LO_A | RJ_ARITH_PK_NEG_HI_B : 0) |
+                                (variant & 2 ? RJ_ARITH_PK_CLAMP : 0) |
+                                (variant & 4 ? RJ_ARITH_PK_LO_A_HIGH | RJ_ARITH_PK_HI_B_LOW : 0)
+                          : (variant % 4) * RJ_ARITH_ALU_OMOD_2 |
+                                (variant & 4 ? RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B |
+                                                   RJ_ARITH_ALU_HIGH_D | RJ_ARITH_ALU_NEG_A |
+                                                   RJ_ARITH_ALU_CLAMP
+                                             : 0);
+          for (int batch = 0; batch < 4; ++batch) {
+            uint32_t a[32], b[32], reference[32], actual[32];
+            for (int lane = 0; lane < 32; ++lane) {
+              a[lane] = lane < 6 ? special[lane]
+                                 : (uint32_t(random() >> 15) << 16) | uint16_t(random() >> 15);
+              b[lane] = lane < 6 ? special[(lane + batch) % 6]
+                                 : (uint32_t(random() >> 15) << 16) | uint16_t(random() >> 15);
+              reference[lane] = a[lane];
+            }
+            const uint32_t *x = a, *y = b;
+            uint32_t *d = reference, status = 0x80;
+            const uint32_t exec_mask = batch & 1 ? 0xa5555555U : 0xffffffffU;
+            ASSERT_EQ(test.call(flags, exec_mask, modifiers, &d, &x, &y, &status),
+                      RJ_ARITH_SUCCESS);
+            for (uint64_t cpu : levels) {
+              std::copy(a, a + 32, actual);
+              d = actual;
+              x = actual;
+              ASSERT_EQ(test.call(flags | cpu, exec_mask, modifiers, &d, &x, &y, &status),
+                        RJ_ARITH_SUCCESS);
+              for (int lane = 0; lane < 32; ++lane) {
+                ASSERT_EQ(actual[lane], reference[lane])
+                    << int(&test - cases) << '/' << cpu << '/' << rounding << '/' << control << '/'
+                    << variant << '/' << batch << '/' << lane;
+              }
+              EXPECT_EQ(status, 0x80U);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+// CDNA Compatibility flushes after FP16 rounding and scales SDWA before narrowing.
+TEST(PackedHalfArithmetic, CdnaCompatibilityOutputStages) {
+  for (uint64_t cpu : rocjitsu::arith::test::supported_cpu_levels()) {
+    for (auto call : {rj_arith_v_pk_mul_f16_w32_gfx942, rj_arith_v_pk_mul_f16_w32_gfx1250}) {
+      uint32_t a[32] = {0x3bff3bff}, b[32] = {0x04000400}, d[32] = {};
+      const uint32_t *pa = a, *pb = b;
+      uint32_t *pd = d;
+      ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS, 1,
+                     0, &pd, &pa, &pb, nullptr),
+                RJ_ARITH_SUCCESS);
+      EXPECT_EQ(d[0], 0x04000400U);
+    }
+    struct Case {
+      decltype(&rj_arith_v_add_f16_w32_gfx942) call;
+      uint32_t a, b, omod, expected;
+    };
+    const Case cases[] = {
+        {rj_arith_v_add_f16_w32_gfx942, 0x7bff, 0x7bff, RJ_ARITH_ALU_OMOD_HALF, 0x7bff},
+        {rj_arith_v_mul_f16_w32_gfx942, 0x0400, 0x3800, RJ_ARITH_ALU_OMOD_4, 0x0800},
+        {rj_arith_v_mul_f16_w32_gfx942, 0x3bff, 0x0400, 0, 0x0400}};
+    for (const auto &test : cases) {
+      uint32_t a[32] = {test.a}, b[32] = {test.b}, d[32] = {0xdead0000};
+      const uint32_t *pa = a, *pb = b;
+      uint32_t *pd = d;
+      ASSERT_EQ(
+          test.call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS, 1,
+                    test.omod | RJ_ARITH_ALU_SDWA, &pd, &pa, &pb, nullptr),
+          RJ_ARITH_SUCCESS);
+      EXPECT_EQ(d[0], 0xdead0000U | test.expected);
+    }
+  }
 }
