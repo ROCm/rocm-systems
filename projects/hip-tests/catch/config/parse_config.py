@@ -147,15 +147,8 @@ def load_categories(categories_path):
 
 
 def create_test_definition(
-    group,
-    case_name,
-    case_config,
-    platform,
-    os_name,
-    arch,
-    categories,
-    asan=False,
-    available_features=None,
+    group, case_name, case_config, platform, os_name, arch, categories, asan=False,
+    available_features=None
 ):
     levels = case_config.get("level", [0, 1, 2])
     if not isinstance(levels, list):
@@ -187,6 +180,7 @@ def create_test_definition(
         disable_keys.add("asan")
     if available_features is not None:
         disable_keys.update(f for f, available in available_features.items() if available)
+
 
     tags_str = ""
 
@@ -243,7 +237,7 @@ def generate_parameter_header(cmd_options, categories, output_path):
         categories: Dict of category name -> set of levels from test_categories.yaml
         output_path: Path to write hip_test_parameters.hh
     """
-    with open(output_path, "w") as f:
+    with open(output_path, 'w') as f:
         f.write("// Auto-generated from definitions.yaml\n")
         f.write("// DO NOT EDIT - This file is generated at build time\n")
         f.write("// Contains compile-time test parameters for each level\n\n")
@@ -254,83 +248,65 @@ def generate_parameter_header(cmd_options, categories, output_path):
         f.write("#include <cstdint>\n")
         f.write("#include <string>\n")
         f.write("#include <map>\n\n")
-
+        
         f.write("namespace TestParameters {\n\n")
-
+        
         levels_found = []
-
+        
         for level_name, options in cmd_options.items():
             levels_found.append(level_name)
             f.write(f"// {'=' * 76}\n")
             f.write(f"// {level_name.upper()} PARAMETERS\n")
             f.write(f"// {'=' * 76}\n\n")
-
+            
             # Memory sizes
             if "memory_sizes" in options:
                 sizes = [parse_size_string(s) for s in options["memory_sizes"]]
-                f.write(
-                    f"inline constexpr std::array<size_t, {len(sizes)}> {level_name}_memory_sizes = {{\n"
-                )
+                f.write(f"inline constexpr std::array<size_t, {len(sizes)}> {level_name}_memory_sizes = {{\n")
                 f.write("    " + ",\n    ".join(str(s) for s in sizes) + "\n")
                 f.write("};\n\n")
-
+            
             # Block sizes
             if "block_sizes" in options:
                 sizes = options["block_sizes"]
-                f.write(
-                    f"inline constexpr std::array<int, {len(sizes)}> {level_name}_block_sizes = {{\n"
-                )
+                f.write(f"inline constexpr std::array<int, {len(sizes)}> {level_name}_block_sizes = {{\n")
                 f.write("    " + ", ".join(str(s) for s in sizes) + "\n")
                 f.write("};\n\n")
-
+            
             # Iterations
             if "iterations" in options:
-                f.write(
-                    f"inline constexpr int {level_name}_iterations = {options['iterations']};\n\n"
-                )
-
+                f.write(f"inline constexpr int {level_name}_iterations = {options['iterations']};\n\n")
+            
             # Warmups
             if "warmups" in options:
-                f.write(
-                    f"inline constexpr int {level_name}_warmups = {options['warmups']};\n\n"
-                )
-
+                f.write(f"inline constexpr int {level_name}_warmups = {options['warmups']};\n\n")
+            
             # CG iterations
             if "cg_iterations" in options:
-                f.write(
-                    f"inline constexpr int {level_name}_cg_iterations = {options['cg_iterations']};\n\n"
-                )
+                f.write(f"inline constexpr int {level_name}_cg_iterations = {options['cg_iterations']};\n\n")
 
             # Math accuracy iterations
             if "math_accuracy_iterations" in options:
-                f.write(
-                    f"inline constexpr uint64_t {level_name}_math_accuracy_iterations = {options['math_accuracy_iterations']}ULL;\n\n"
-                )
+                f.write(f"inline constexpr uint64_t {level_name}_math_accuracy_iterations = {options['math_accuracy_iterations']}ULL;\n\n")
 
             # Math accuracy max memory percentage
             if "math_accuracy_max_memory_percentage" in options:
-                f.write(
-                    f"inline constexpr int {level_name}_math_accuracy_max_memory_percentage = {options['math_accuracy_max_memory_percentage']};\n\n"
-                )
+                f.write(f"inline constexpr int {level_name}_math_accuracy_max_memory_percentage = {options['math_accuracy_max_memory_percentage']};\n\n")
 
             # Math max memory
             if "math_max_memory" in options:
                 math_max_mem = parse_size_string(str(options["math_max_memory"]))
-                f.write(
-                    f"inline constexpr size_t {level_name}_math_max_memory = {math_max_mem};\n\n"
-                )
+                f.write(f"inline constexpr size_t {level_name}_math_max_memory = {math_max_mem};\n\n")
 
             # Math reduction factor
             if "math_reduction_factor" in options:
-                f.write(
-                    f"inline constexpr double {level_name}_math_reduction_factor = {options['math_reduction_factor']};\n\n"
-                )
-
+                f.write(f"inline constexpr double {level_name}_math_reduction_factor = {options['math_reduction_factor']};\n\n")
+        
         # Generate LevelParameters struct and initialization function
         f.write(f"// {'=' * 76}\n")
         f.write("// LEVEL REGISTRY - Maps level names to their parameters\n")
         f.write(f"// {'=' * 76}\n\n")
-
+        
         f.write("struct LevelParameters {\n")
         f.write("    std::vector<size_t> memory_sizes;\n")
         f.write("    std::vector<int> block_sizes;\n")
@@ -342,23 +318,17 @@ def generate_parameter_header(cmd_options, categories, output_path):
         f.write("    size_t math_max_memory = 0;\n")
         f.write("    double math_reduction_factor = 0.0;\n")
         f.write("};\n\n")
-
-        f.write(
-            "inline std::map<std::string, LevelParameters> initializeLevelParameters() {\n"
-        )
+        
+        f.write("inline std::map<std::string, LevelParameters> initializeLevelParameters() {\n")
         f.write("    std::map<std::string, LevelParameters> params;\n\n")
-
+        
         for level_name in levels_found:
             f.write(f"    // {level_name}\n")
-            f.write(f'    params["{level_name}"] = {{\n')
-            f.write(
-                f"        std::vector<size_t>({level_name}_memory_sizes.begin(), "
-                f"{level_name}_memory_sizes.end()),\n"
-            )
-            f.write(
-                f"        std::vector<int>({level_name}_block_sizes.begin(), "
-                f"{level_name}_block_sizes.end()),\n"
-            )
+            f.write(f"    params[\"{level_name}\"] = {{\n")
+            f.write(f"        std::vector<size_t>({level_name}_memory_sizes.begin(), "
+                    f"{level_name}_memory_sizes.end()),\n")
+            f.write(f"        std::vector<int>({level_name}_block_sizes.begin(), "
+                    f"{level_name}_block_sizes.end()),\n")
             f.write(f"        {level_name}_iterations,\n")
             f.write(f"        {level_name}_warmups,\n")
             f.write(f"        {level_name}_cg_iterations,\n")
@@ -367,7 +337,7 @@ def generate_parameter_header(cmd_options, categories, output_path):
             f.write(f"        {level_name}_math_max_memory,\n")
             f.write(f"        {level_name}_math_reduction_factor\n")
             f.write(f"    }};\n\n")
-
+        
         f.write("    return params;\n")
         f.write("}\n\n")
 
@@ -384,22 +354,16 @@ def generate_parameter_header(cmd_options, categories, output_path):
 
         for name, levels in categories.items():
             values = ", ".join(str(level) for level in sorted(levels))
-            f.write(
-                f"inline constexpr std::array<int, {len(levels)}> "
-                f"{category_identifier(name)} = {{{values}}};\n"
-            )
+            f.write(f"inline constexpr std::array<int, {len(levels)}> "
+                    f"{category_identifier(name)} = {{{values}}};\n")
         f.write("\n")
 
-        f.write(
-            "inline std::map<std::string, std::vector<int>> initializeTestCategories() {\n"
-        )
+        f.write("inline std::map<std::string, std::vector<int>> initializeTestCategories() {\n")
         f.write("    std::map<std::string, std::vector<int>> categories;\n\n")
         for name in categories:
-            f.write(
-                f'    categories["{name}"] = std::vector<int>('
-                f"{category_identifier(name)}.begin(), "
-                f"{category_identifier(name)}.end());\n"
-            )
+            f.write(f'    categories["{name}"] = std::vector<int>('
+                    f"{category_identifier(name)}.begin(), "
+                    f"{category_identifier(name)}.end());\n")
         f.write("\n    return categories;\n")
         f.write("}\n\n")
         f.write("} // namespace TestCategories\n")
@@ -452,15 +416,8 @@ def main():
     for group, case_name, case_config in all_cases:
         test_macros.append(
             create_test_definition(
-                group,
-                case_name,
-                case_config,
-                platform,
-                os_name,
-                arch,
-                categories,
-                asan,
-                available_features,
+                group, case_name, case_config, platform, os_name, arch,
+                categories, asan, available_features
             )
         )
 
@@ -470,7 +427,7 @@ def main():
         for test_macro in test_macros:
             file.write(test_macro)
             file.write("\n")
-
+    
     print(f"[parse_config] Generated test definitions: {header_path}")
     print(f"[parse_config]   Test cases: {len(test_macros)}")
     if available_features is not None:
