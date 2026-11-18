@@ -50,7 +50,6 @@ struct BarrierImage {
   int selfRank;
   std::array<DeviceMailbox, kRanks> mailboxes;
   DdaKernelParams params;
-  bool aborted;
 };
 static_assert(sizeof(MailboxImage) == sizeof(DeviceMailbox), "DeviceMailbox layout changed");
 static_assert(sizeof(BarrierImage) == sizeof(IpcGpuBarrier), "IpcGpuBarrier layout changed");
@@ -65,7 +64,7 @@ DeviceMailbox makeMailbox(uint32_t* flags) {
 }
 
 IpcGpuBarrier makeBarrier(int selfRank, const std::vector<DeviceMailbox>& mailboxes, DdaKernelParams params = {}) {
-  BarrierImage img{kBlocks, selfRank, {}, params, false};
+  BarrierImage img{kBlocks, selfRank, {}, params};
   for (int r = 0; r < kRanks; ++r) {
     img.mailboxes[r] = mailboxes[r];
   }
