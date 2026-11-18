@@ -1667,6 +1667,9 @@ std::optional<uint32_t> completion_order_kind(const waitcheck_detail::Classified
                                               rj_code_arch_t arch) {
   using namespace waitcheck_detail;
   const auto model = waitcnt_model(arch).value();
+  // GLOBAL_INV occupies a LOADcnt slot in order with VMEM on gfx1250.
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5 && event.kind == WaitEventKind::GlobalInv)
+    return uint32_t{1} << static_cast<unsigned>(WaitEventKind::VmemNoSamplerLoad);
   const bool legacy_flat =
       model == WaitcntModel::LegacyNoVscnt &&
       (event.kind == WaitEventKind::FlatLoad || event.kind == WaitEventKind::FlatStore);
@@ -1985,7 +1988,32 @@ void MemoryWaitScoreboard::xcnt_ordered_write(RegisterRef reg, uint64_t lanes, u
          static_cast<uint32_t>(issued_[static_cast<size_t>(WaitCounterKind::X)] - through));
 }
 
-void MemoryWaitScoreboard::before(const Instruction &inst, rj_code_arch_t arch) {
+bool MemoryWaitScoreboard::counts_memory_counter(const Instruction &inst, const Wavefront &wave,
+                                                 WaitCounterKind counter) {
+  // Replay-source lifetime is independent of completion-counter occupancy.
+  if (counter == WaitCounterKind::X)
+    return true;
+  const auto *info = inst.amdgpu_memory_issue_info();
+  if (!info)
+    return true;
+  const auto arch = wave.cu().arch();
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5 && (inst.flags() & CONDITIONAL_MEMORY_LANES)) {
+    RegisterModifiers modifiers;
+    inst.amdgpu_register_modifiers(modifiers);
+    if (addr_calc::cdna5_ignores_buffer_resource(modifiers, wave))
+      return false;
+  }
+  if (!info->exec_masked || wave.memory_exec(inst) != 0)
+    return true;
+  const auto counted = info->for_exec_zero(arch, inst.mnemonic());
+  const auto model = waitcnt_model(arch).value();
+  return std::ranges::any_of(counted.counter_obligations(), [&](const auto obligation) {
+    return canonical_wait_counter(obligation.wait_counter_type(), model) == counter;
+  });
+}
+
+void MemoryWaitScoreboard::before(const Instruction &inst, rj_code_arch_t arch,
+                                  const Wavefront *wave) {
   using namespace waitcheck_detail;
   // Most kernels wait well before a queue is full. Avoid classifying the
   // incoming instruction twice unless some ordered class can force progress.
@@ -2002,6 +2030,8 @@ void MemoryWaitScoreboard::before(const Instruction &inst, rj_code_arch_t arch) 
     const auto events = WaitcheckTarget::classify_events(inst, arch);
     if (events.succeeded())
       for (const auto &event : events.value()) {
+        if (wave && !counts_memory_counter(inst, *wave, event.counter))
+          continue;
         // Fixed-domain FLAT reserves both counter slots before reading its address.
         // Targets with address-dependent counters apply capacity after routing.
         if (!flat_issues_both_counter_domains(arch) &&

@@ -6,12 +6,14 @@
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter.h"
+#include "rocjitsu/isa/isa_traits.h"
 
 #include <array>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string_view>
 
 namespace rocjitsu::amdgpu {
 
@@ -120,6 +122,36 @@ struct MemoryIssueInfo {
     return {counter_obligations_.data(), num_counter_obligations_};
   }
   [[nodiscard]] bool empty() const { return num_counter_obligations_ == 0; }
+
+  /// @brief Counter slots guaranteed by a memory instruction with EXEC zero.
+  /// @details CDNA5 ISA 3.2.2.1 permits skipping VMEM only when its vector
+  /// counters are empty, LDS when DScnt is empty, and FLAT when both are empty.
+  /// Other counters, such as an LDS barrier's ASYNCcnt, prove no progress.
+  /// RDNA retains its counter positions; CDNA1–4 retain non-FLAT VMCNT issues.
+  [[nodiscard]] MemoryIssueInfo for_exec_zero(rj_code_arch_t arch,
+                                              std::string_view mnemonic) const {
+    if (!exec_masked || arch_is_rdna(arch))
+      return *this;
+    MemoryIssueInfo result;
+    result.exec_masked = exec_masked;
+    if (arch != ROCJITSU_CODE_ARCH_CDNA5 && !arch_is_cdna_4_or_lower(arch))
+      return result;
+    const bool lds = mnemonic.starts_with("ds_");
+    const bool flat = mnemonic.starts_with("flat_");
+    for (const auto obligation : counter_obligations()) {
+      const auto counter = obligation.wait_counter_type();
+      const bool counts = counter == WaitCounterType::DSCNT
+                              ? lds || flat
+                              : !lds && (counter == WaitCounterType::LOADCNT ||
+                                         counter == WaitCounterType::STORECNT ||
+                                         counter == WaitCounterType::ASYNCCNT ||
+                                         counter == WaitCounterType::TENSORCNT ||
+                                         (counter == WaitCounterType::VMCNT && !flat));
+      if (counts)
+        result.counter_obligations_[result.num_counter_obligations_++] = obligation;
+    }
+    return result;
+  }
 
   /// Select FLAT's VMEM and/or DS obligations for the resolved request domains.
   /// Preserve each selected obligation's counter increment and completion class,

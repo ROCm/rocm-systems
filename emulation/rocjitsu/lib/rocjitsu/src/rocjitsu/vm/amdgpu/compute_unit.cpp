@@ -2023,6 +2023,8 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf,
       const auto counter = scalar                                     ? smem_wait_counter(model)
                            : completion == MemoryCompletionClass::LDS ? WaitCounterKind::Ds
                                                                       : WaitCounterKind::Load;
+      if (!MemoryWaitScoreboard::counts_memory_counter(inst, wf, counter))
+        return;
       const auto kind = scalar ? WaitEventKind::Smem
                         : completion == MemoryCompletionClass::LDS
                             ? WaitEventKind::Ds
@@ -2276,6 +2278,8 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf,
   std::optional<WaitCounterKind> xcnt_completion;
   for (const auto &event : classified) {
     const auto counter = event.counter;
+    if (!MemoryWaitScoreboard::counts_memory_counter(inst, wf, counter))
+      continue;
     if (is_flat_memory_counter(counter) && !issues_flat_counter(counter))
       continue;
     if (counter == WaitCounterKind::X) {
@@ -3163,7 +3167,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
         (inst->has_embedded_memory_wait() || inst->is_memory_wait_producer() ||
          (config_.arch == ROCJITSU_CODE_ARCH_CDNA5 &&
           waitcheck_detail::WaitcheckTarget::is_xcnt_drain(*inst))))
-      wait_state->before(*inst, config_.arch);
+      wait_state->before(*inst, config_.arch, active);
     wait_state->bind(active->pc, active, &ComputeUnitCore::report_memory_wait);
   }
   const bool deferred_texel_feedback =
@@ -3229,7 +3233,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
       wait_state->check_instruction(*inst, *active);
     // An explicit wait reads its threshold operands before it can retire producers.
     if (inst->is_waitcnt() && !WaitCounterPolicy::is_gfx10_sopk_wait(*inst, config_.arch))
-      wait_state->before(*inst, config_.arch);
+      wait_state->before(*inst, config_.arch, active);
   }
 
   struct ProbeWaitIssue {

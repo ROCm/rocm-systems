@@ -208,7 +208,11 @@ public:
   /// may issue before cancelling that instruction with this snapshot.
   IssueSnapshot issue_snapshot() const { return issued_; }
   bool cancel_last_issue(uint64_t pc, const IssueSnapshot &before);
-  void before(const Instruction &inst, rj_code_arch_t arch);
+  /// Wave state qualifies EXEC-zero and ignored-resource admission. Counter-only
+  /// clients may omit it when their instruction is already known to issue.
+  void before(const Instruction &inst, rj_code_arch_t arch, const Wavefront *wave = nullptr);
+  static bool counts_memory_counter(const Instruction &inst, const Wavefront &wave,
+                                    WaitCounterKind counter);
   /// Return whether address preparation can change which lanes supply VDATA.
   static bool needs_prepared_payload_lanes(const Instruction &inst, rj_code_arch_t arch);
   void check_instruction(const Instruction &inst, Wavefront &wf);
