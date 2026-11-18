@@ -21,6 +21,7 @@ Imported by every functional/unit leaf test and by all three runners
 """
 
 import contextlib
+import functools
 import importlib.util
 import inspect
 import io
@@ -797,6 +798,73 @@ def _filter_suite_exclude(suite, pattern):
         elif pattern not in test.id():
             filtered.addTest(test)
     return filtered
+
+
+_PERF_LEVEL_PREFIX = "AMDSMI_DEV_PERF_LEVEL_"
+
+
+def _perf_level_from_name(name):
+    """Map an ``amdsmi_get_gpu_perf_level`` string to ``AmdSmiDevPerfLevel`` (None if unmappable)."""
+    if name.startswith(_PERF_LEVEL_PREFIX):
+        name = name[len(_PERF_LEVEL_PREFIX) :]
+    level = amdsmi.AmdSmiDevPerfLevel.__members__.get(name)
+    return None if level is None or level == amdsmi.AmdSmiDevPerfLevel.UNKNOWN else level
+
+
+def restores_gpu_perf_level(test_method):
+    """Decorator for a test that can change a GPU's performance level.
+
+    Anything that writes clocks, PCIe masks, power profiles, overdrive or the level
+    itself can leave the driver on MANUAL. The test is responsible for handing the
+    device back as it found it, so wrap it with this instead of relying on the runner.
+    The level is read before the test body and written back afterwards (even when the
+    body fails or skips), while the library is still initialized; a GPU whose level
+    cannot be read is left alone. The restore is best-effort: a failure is printed but
+    never changes the test's outcome.
+    """
+
+    @functools.wraps(test_method)
+    def wrapper(self, *args, **kwargs):
+        # The benchmark suite refreshes its handles on the TestCase (self.common's are
+        # stale there); every other suite keeps them on self.common.
+        processors = getattr(self, "processors", None) or getattr(self.common, "processors", [])
+        saved = []
+        starting = []
+        for index, gpu in enumerate(processors):
+            try:
+                level = _perf_level_from_name(amdsmi.amdsmi_get_gpu_perf_level(gpu))
+            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException):
+                level = None
+            starting.append(f"GPU {index}={level.name if level is not None else 'N/A'}")
+            if level is not None:
+                saved.append((gpu, level))
+        self.common.print(f"\tperf level before test: {', '.join(starting)}")
+        try:
+            return test_method(self, *args, **kwargs)
+        finally:
+            for index, (gpu, level) in enumerate(saved):
+                current = None
+                try:
+                    current = _perf_level_from_name(amdsmi.amdsmi_get_gpu_perf_level(gpu))
+                    if current != level:
+                        amdsmi.amdsmi_set_gpu_perf_level(gpu, level)
+                except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
+                    reason = (
+                        e.get_error_info(detailed=False) if hasattr(e, "get_error_info") else str(e)
+                    )
+                    if current is None:
+                        self.common.print(
+                            f"[WARNING] GPU {index}: perf level was {level.name} before the test "
+                            f"but could not be read afterwards, so it was not restored: {reason}"
+                        )
+                    else:
+                        self.common.print(
+                            f"[WARNING] GPU {index}: perf level changed {level.name} -> "
+                            f"{current.name} during the test; "
+                            f"restoring {level.name} failed: {reason}"
+                        )
+
+    return wrapper
 
 
 def run_test_dir(subdir, title, top_level_dir):
