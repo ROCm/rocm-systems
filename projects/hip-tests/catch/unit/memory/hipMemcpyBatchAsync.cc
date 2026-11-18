@@ -1861,10 +1861,12 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_LargeBatch) {
  *  - HIP_VERSION >= 7.1
  */
 HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_ManyBroadcasts) {
-  // Twice the ring's 16 x ROC_SIGNAL_POOL_SIZE signals (default pool 64).
+  // Eight times the ring's 16 x ROC_SIGNAL_POOL_SIZE signals (RetiringSignalTracker::max_signals_):
+  // 16384 copies with the default pool of 64.
   const char* poolEnv = std::getenv("ROC_SIGNAL_POOL_SIZE");
-  const size_t pool = poolEnv != nullptr ? std::max(std::strtoul(poolEnv, nullptr, 10), 1ul) : 64;
-  const size_t kSources = 2 * 16 * pool;
+  const size_t pool =
+      poolEnv != nullptr ? std::clamp<size_t>(std::strtoul(poolEnv, nullptr, 10), 1, 1024) : 64;
+  const size_t kSources = 8 * 16 * pool;
   constexpr size_t kDstsPerSource = 2;
   const size_t kCopyCount = kSources * kDstsPerSource;
   constexpr size_t kCopySize = 64;
