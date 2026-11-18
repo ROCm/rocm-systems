@@ -7549,8 +7549,8 @@ private:
     auto full_trans_output_overwrite = [&](const CfgInstructionView &view,
                                            const InstDefUse &du) {
       const Instruction &inst = *view.instruction;
-      if (!track_trans_overwrite || !trans_output || !(inst.flags() & VALU) ||
-          !(inst.flags() & DIRECT_REGISTER_ACCESSES) ||
+      if (!track_trans_overwrite || isa_properties(arch).mode_has_gpr_idx_en || !trans_output ||
+          !(inst.flags() & VALU) || !(inst.flags() & DIRECT_REGISTER_ACCESSES) ||
           (inst.flags() & (MATRIX_REGISTER_ACCESSES | IGNORES_EXEC | PREDICATED_DEF)) ||
           inst.is_transcendental() || view.vector_skip != false || !view.vgpr_msb.known ||
           du.uses.contains(*trans_output) || !du.defs.contains(*trans_output))

@@ -6748,6 +6748,20 @@ def test_gfx1250_vop3p_rejects_unencoded_literal64_selectors(
     assert 'LiteralSupport::Literal32);' in fma_body
 
 
+@pytest.mark.parametrize('arch', ('cdna2', 'cdna3', 'cdna4', 'cdna5'))
+def test_packed_fma_declares_its_complete_pair_register_footprint(
+    amdgpu_generated_root: Path, arch: str
+) -> None:
+    source = (amdgpu_generated_root / arch / 'vop3p.cpp').read_text()
+    body = _generated_constructor_body(source, 'VPkFmaF32Vop3p')
+    assert 'vdst(64,' in body
+    for operand in ('src0', 'src1', 'src2'):
+        assert f'{operand}(64,' in body
+    assert 'num_src_ = 3;' in body
+    assert 'num_dst_ = 1;' in body
+    assert body.count('flags_ |= DIRECT_REGISTER_ACCESSES;') == 1
+
+
 def test_split_execution_ids_name_and_match_callbacks(
     amdgpu_generated_root: Path,
 ) -> None:

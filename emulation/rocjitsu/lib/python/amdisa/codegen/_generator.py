@@ -15807,6 +15807,7 @@ class CodeGenerator:
                         'vector_cmp',
                         'vector_cndmask',
                         'vector_add_co',
+                        'pk_ternary_f32',
                         'mfma',
                     )
                     direct_memory = _mem_sem and _mem_sem.semantic_class in (

@@ -10255,6 +10255,58 @@ TEST(WaitcheckTest, Gfx1250FullValuOverwriteCoversOnlyProvenExecLanes) {
   }
 }
 
+TEST(WaitcheckTest, Gfx1250PackedFmaFullOverwriteCoversOnlyItsWrittenWordsAndLanes) {
+  enum class Variation {
+    LowWord,
+    HighWord,
+    NoPriorSlot,
+    ReadsOldOutput,
+    MaskedOverwrite,
+    DifferentDestinationBank,
+    MemoryDef,
+  };
+  for (const auto variation :
+       {Variation::LowWord, Variation::HighWord, Variation::NoPriorSlot, Variation::ReadsOldOutput,
+        Variation::MaskedOverwrite, Variation::DifferentDestinationBank, Variation::MemoryDef}) {
+    SCOPED_TRACE(static_cast<int>(variation));
+    const unsigned output = variation == Variation::LowWord ? 6 : 7;
+    std::vector<uint32_t> code;
+    append_inst(code, s_setreg_imm32_b32(hwreg(26, 0, 2), 2));
+    const auto producer = code.size() * sizeof(uint32_t);
+    append_inst(code, v_exp_f32(output, 3));
+    if (variation != Variation::NoPriorSlot)
+      append_inst(code, v_mov_b32(12, 11));
+    if (variation == Variation::MaskedOverwrite)
+      code.push_back(0xbe842006u); // s_and_saveexec_b32 s4,s6 narrows EXEC.
+    if (variation == Variation::DifferentDestinationBank)
+      append_inst(code, s_set_vgpr_msb(vgpr_msb_mode(0, 0, 0, 1)));
+    const auto packed = cdna5::build_vop3p(
+        cdna5::kVPkFmaF32Vop3p,
+        {.vdst = 6,
+         .src0 = cdna5::OPR_SRC_VGPR_MIN + 40,
+         .src1 = cdna5::OPR_SRC_VGPR_MIN + 42,
+         .src2 = static_cast<uint16_t>(cdna5::OPR_SRC_VGPR_MIN +
+                                       (variation == Variation::ReadsOldOutput ? 6 : 44))});
+    append_inst(code, packed);
+    if (variation == Variation::MaskedOverwrite)
+      code.push_back(0x8c7e047eu); // Restore lanes omitted by the overwrite.
+    const auto consumer = code.size() * sizeof(uint32_t);
+    append_inst(code, global_load_b32(variation == Variation::MemoryDef ? output : 4,
+                                      variation == Variation::MemoryDef ? 8 : output));
+    append_inst(code, s_endpgm());
+    const auto report = analyze_gfx12_with_vgpr_allocation(
+        code, EF_AMDGPU_MACH_AMDGCN_GFX1250, ROCJITSU_CODE_ARCH_CDNA5, true,
+        variation == Variation::DifferentDestinationBank ? 272 : 128);
+    ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+    const bool warning = std::ranges::any_of(report.diagnostics, [&](const auto &d) {
+      return d.counter == WaitCounterKind::VaVdst && d.producer_section_offset == producer &&
+             d.section_offset == consumer && d.reg.index == output;
+    });
+    EXPECT_EQ(warning, variation != Variation::LowWord && variation != Variation::HighWord)
+        << diagnostic_summary(report);
+  }
+}
+
 TEST(WaitcheckTest, Gfx1250TransOverwriteMustCoverEveryLoopBackedge) {
   for (const bool skip_overwrite : {false, true}) {
     std::vector<uint32_t> code;

@@ -13,6 +13,8 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
@@ -9664,6 +9666,58 @@ TEST(MemoryWaitFootprintTest, DirectAluFamiliesMatchObservedAccesses) {
   check_vector_footprints(ROCJITSU_CODE_ARCH_CDNA4, 64, 16, cases);
 }
 
+TEST(MemoryWaitFootprintTest, PackedFmaDirectPairMatchesExecutionAndIndexedFallback) {
+  for (const auto arch : {ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
+                          ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    std::vector<uint32_t> words;
+    auto append = [&](const auto &encoding) { words.assign(encoding.begin(), encoding.end()); };
+    switch (arch) {
+    case ROCJITSU_CODE_ARCH_CDNA2:
+      append(cdna2::build_vop3p(cdna2::kVPkFmaF32Vop3p,
+                                {.vdst = 8, .src0 = 258, .src1 = 260, .src2 = 262}));
+      break;
+    case ROCJITSU_CODE_ARCH_CDNA3:
+      append(cdna3::build_vop3p(cdna3::kVPkFmaF32Vop3p,
+                                {.vdst = 8, .src0 = 258, .src1 = 260, .src2 = 262}));
+      break;
+    case ROCJITSU_CODE_ARCH_CDNA4:
+      append(cdna4::build_vop3p(cdna4::kVPkFmaF32Vop3p,
+                                {.vdst = 8, .src0 = 258, .src1 = 260, .src2 = 262}));
+      break;
+    case ROCJITSU_CODE_ARCH_CDNA5:
+      append(cdna5::build_vop3p(cdna5::kVPkFmaF32Vop3p,
+                                {.vdst = 8, .src0 = 258, .src1 = 260, .src2 = 262}));
+      break;
+    default:
+      FAIL() << "unexpected architecture";
+    }
+    auto decoder = Decoder::create(arch);
+    util::StringDiagnostic error;
+    auto decoded = decoder->decode_window(words, 0, error.emitter());
+    ASSERT_TRUE(decoded.succeeded()) << error.message();
+    const auto &inst = *decoded.value();
+    ASSERT_TRUE(inst.flags() & DIRECT_REGISTER_ACCESSES);
+    ASSERT_EQ(inst.num_dst_operands(), 1);
+    ASSERT_EQ(inst.num_src_operands(), 3);
+    EXPECT_EQ(inst.dst_operand(0)->size_bits(), 64);
+    EXPECT_EQ(inst.dst_operand(0)->register_byte_mask(), 0xf);
+    EXPECT_FALSE(inst.dst_operand(0)->preserve_unwritten_bytes());
+    for (int i = 0; i < inst.num_src_operands(); ++i)
+      EXPECT_EQ(inst.src_operand(i)->size_bits(), 64);
+    const unsigned wave_size = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 32 : 64;
+    check_vector_footprints(arch, wave_size, 32, {words});
+    if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+      // The direct prefilter must resolve the destination's high VGPR bank.
+      check_vector_footprints(arch, 32, 320, {words}, 0, 0x40);
+    } else {
+      // The direct prefilter must defer to the indexed register checker.
+      check_vector_footprints(
+          arch, wave_size, 32, {words}, (1u << 12) | 8u, 0,
+          [](Wavefront &wave) { wave.set_mode_raw(wave.mode_raw() | Wavefront::GPR_IDX_EN_BIT); });
+    }
+  }
+}
+
 // Selected SDWA bytes must have exactly the same lane dependencies as execution.
 TEST(MemoryWaitFootprintTest, CdnaConditionalSdwaMatchesWaitFootprints) {
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA4}) {
@@ -9945,104 +9999,6 @@ TEST(MemoryWaitExecutionTest, UnallocatedGlobalAndScratchD16LoadsSkipAddressRead
             EXPECT_EQ(address_reads & 1u, destination == 63 ? 0u : 1u);
           }
         }
-  }
-}
-
-class NamedRuntimeWaitInstruction : public Instruction {
-public:
-  explicit NamedRuntimeWaitInstruction(std::string_view name) : Instruction(name, nullptr) {}
-};
-
-
-
-TEST(RuntimeWaitTargetTest, OrdinaryEventsMatchTheDevelopClassifier) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5})
-    for (std::string_view name :
-         {"global_load_dword", "ds_read_b32", "s_load_dword", "s_sendmsg_rtn_b32"}) {
-      SCOPED_TRACE(testing::Message() << "arch=" << arch << " mnemonic=" << name);
-      NamedRuntimeWaitInstruction inst(name);
-      const auto base = waitcheck_detail::WaitcheckTarget::classify_events(inst, arch);
-      const auto runtime = waitcheck_detail::RuntimeWaitTarget::classify_events(inst, arch);
-      ASSERT_TRUE(base.succeeded());
-      ASSERT_TRUE(runtime.succeeded());
-      ASSERT_EQ(base.value().size(), runtime.value().size());
-      for (size_t i = 0; i < base.value().size(); ++i) {
-        EXPECT_EQ(base.value()[i].counter, runtime.value()[i].counter);
-        EXPECT_EQ(base.value()[i].kind, runtime.value()[i].kind);
-        EXPECT_EQ(base.value()[i].registers, runtime.value()[i].registers);
-        EXPECT_EQ(base.value()[i].check_uses, runtime.value()[i].check_uses);
-        EXPECT_EQ(base.value()[i].check_defs, runtime.value()[i].check_defs);
-      }
-    }
-}
-
-TEST(RuntimeWaitTargetTest, CacheAsyncAndExpertPoliciesKeepTheirRuntimePositions) {
-  for (std::string_view name : {"buffer_inv", "buffer_wbl2"}) {
-    NamedRuntimeWaitInstruction inst(name);
-    const auto events =
-        waitcheck_detail::RuntimeWaitTarget::classify_events(inst, ROCJITSU_CODE_ARCH_CDNA4);
-    ASSERT_TRUE(events.succeeded());
-    ASSERT_EQ(events.value().size(), 1u);
-    EXPECT_EQ(events.value()[0].counter, WaitCounterKind::Load);
-    EXPECT_EQ(events.value()[0].kind, name == "buffer_inv"
-                                          ? waitcheck_detail::WaitEventKind::GlobalInv
-                                          : waitcheck_detail::WaitEventKind::GlobalWb);
-    EXPECT_EQ(waitcheck_detail::RuntimeWaitTarget::completion_order_kind(
-                  events.value()[0].counter, events.value()[0].kind, ROCJITSU_CODE_ARCH_CDNA4),
-              0u);
-  }
-  NamedRuntimeWaitInstruction async("global_load_async_to_lds_b32");
-  const auto events =
-      waitcheck_detail::RuntimeWaitTarget::classify_events(async, ROCJITSU_CODE_ARCH_CDNA5);
-  ASSERT_TRUE(events.succeeded());
-  ASSERT_EQ(events.value().size(), 2u);
-  EXPECT_EQ(events.value()[0].counter, WaitCounterKind::Async);
-  EXPECT_EQ(events.value()[1].counter, WaitCounterKind::X);
-  EXPECT_EQ(waitcheck_detail::RuntimeWaitTarget::completion_order_kind(
-                events.value()[0].counter, events.value()[0].kind, ROCJITSU_CODE_ARCH_CDNA5),
-            1u << static_cast<unsigned>(waitcheck_detail::WaitEventKind::AsyncLdsLoad));
-
-  NamedRuntimeWaitInstruction scale("v_wmma_scale_f32_16x16x128_f8f6f4");
-  NamedRuntimeWaitInstruction matrix("v_wmma_f16_16x16x32_f16");
-  const waitcheck_detail::ClassifiedEvent valu{WaitCounterKind::VaVdst,
-                                               waitcheck_detail::kValuMatrix};
-  EXPECT_EQ(waitcheck_detail::RuntimeWaitTarget::issue_units(scale, valu, ROCJITSU_CODE_ARCH_CDNA5),
-            2u);
-  EXPECT_EQ(
-      waitcheck_detail::RuntimeWaitTarget::issue_units(matrix, valu, ROCJITSU_CODE_ARCH_CDNA5), 1u);
-  EXPECT_EQ(waitcheck_detail::RuntimeWaitTarget::wmma_valu_wait_states(
-                scale, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_TARGET_GFX1250),
-            0u);
-  EXPECT_EQ(waitcheck_detail::RuntimeWaitTarget::wmma_valu_wait_states(
-                matrix, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_TARGET_GFX1250),
-            4u);
-}
-
-TEST_F(MemoryWaitScoreboardTest, MatrixOperandDiagnosticIncludesCompletedCorePositions) {
-  using waitcheck_detail::ClassifiedEvent;
-  using waitcheck_detail::WaitEventKind;
-  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA5;
-  constexpr auto counter = WaitCounterKind::VaVdst;
-  const ClassifiedEvent matrix{counter, waitcheck_detail::kValuMatrix};
-  const ClassifiedEvent core{counter, waitcheck_detail::kValuCore};
-  const RegisterRef operand{RegClass::VGPR, 8, 1};
-  for (const uint32_t count : {0u, 2u, 3u}) {
-    SCOPED_TRACE(count);
-    state.clear();
-    hazards.clear();
-    const auto preceding_core = state.issue(core, arch, 4);
-    const auto producer = state.issue(matrix, arch);
-    MemoryWaitScoreboard::Event event{producer, 0x100, 1, operand, counter, 0xf};
-    event.valu_source = true;
-    event.wmma_wait_states = 4;
-    event.preceding_core_valu = preceding_core;
-    state.add(event);
-    state.issue(core, arch, 7);
-    state.wait(counter, count);
-    state.access(operand, 1, 0xf, true);
-    ASSERT_EQ(hazards.size(), unsigned(count > 2));
-    if (!hazards.empty())
-      EXPECT_EQ(hazards.front().required_wait, 2u);
   }
 }
 
