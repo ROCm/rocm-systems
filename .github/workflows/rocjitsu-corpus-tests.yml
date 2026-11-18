@@ -456,6 +456,7 @@ jobs:
 
           # Let Ninja and CTest choose their default CPU parallelism.
           cmake --build "${ROCJITSU_BUILD_DIR}" -j
+          echo "built=true" >> "${GITHUB_OUTPUT}"
 
           if [[ "${{ matrix.name }}" == release ]]; then
             VFIO_DISCOVERY="$(ctest --test-dir "${ROCJITSU_BUILD_DIR}" -N -R '^Vfio(TargetGrants|DeviceHost)')"
@@ -998,8 +999,9 @@ jobs:
           retention-days: 7
 
       # All consumers of the interposed build finish before its mode changes.
+      # The explicit build can reuse the tree even if a default test failed.
       - name: Test explicit library embedding
-        if: ${{ !cancelled() && steps.build_rocjitsu.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.build_rocjitsu.outputs.built == 'true' }}
         shell: bash
         run: |
           ROCM_PATH="$(rocm-sdk path --root)" \
