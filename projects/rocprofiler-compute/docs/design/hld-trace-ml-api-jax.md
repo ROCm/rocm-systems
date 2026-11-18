@@ -79,9 +79,9 @@
     and clearing that flag, happen in `try` / `finally` so an exception still
     balances the marker.
 - Kernels join to the marker on `Correlation_ID` when the launch is on the
-  thread that opened the range (verified for single-device `jax.jit`).
-  Multi-device `pmap` / `shard_map` launch compute kernels from worker
-  threads, so they need the fallback under "Where the range is marked".
+  thread that opened the range. Multi-device `pmap` / `shard_map` launch
+  compute kernels from worker threads, so they need the fallback under
+  "Where the range is marked".
 
 ### At a glance
 
@@ -151,18 +151,17 @@
   ([Asynchronous dispatch](https://docs.jax.dev/en/latest/async_dispatch.html)).
   - The range encloses the host-side launch enqueue, not GPU completion.
   - An enqueue on the thread that opened the range inherits the marker's
-    correlation id. Verified for single-device `jax.jit`, including when the
-    range closes before `block_until_ready`.
-  - An enqueue on another thread does not inherit that id. Verified on
-    2× MI300X: `pmap` and `shard_map` launch each GPU's compute kernels from
-    a per-device worker thread. The marker's `Correlation_Id` matches the
+    correlation id, including when the range closes before
+    `block_until_ready`.
+  - An enqueue on another thread does not inherit that id. Multi-device
+    `pmap` and `shard_map` launch each GPU's compute kernels from a
+    per-device worker thread: the marker's `Correlation_Id` matches the
     host copies only; the compute kernels keep their own ids.
   - Those unmatched kernels are attributed by following
     `hipModuleLaunchKernel` (same `Correlation_Id` as the kernel) and
     assigning the kernel to the JAX marker whose time window contains that
-    launch, in the same process and `GUID`. Verified on the same 2× MI300X
-    run: every compute launch fell inside its `pmap` or `shard_map` window,
-    and setup launches before any marker stayed unmatched.
+    launch, in the same process and `GUID`. Setup launches outside any
+    marker stay unmatched.
   - `GUID` is the rocprofiler-sdk database/import identifier
     ([rocpd schema](https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-sdk/source/lib/python/rocpd/README.md)).
     All marker and kernel rows from that instance share it.
@@ -171,11 +170,10 @@
     another instance does not match.
   - The first call with a new signature compiles inside the range, and XLA
     GPU autotuning launches many candidate kernels on helper threads. Those
-    candidates do not share the marker id. Two fresh processes can disagree
-    on the full kernel list, which aborts analyze. Multi-pass profiles pin
+    candidates do not share the marker id. Different runs can disagree on
+    the kernel list, which aborts analyze. Multi-pass profiles pin
     autotuning (`XLA_FLAGS=--xla_gpu_autotune_level=0`) or share a
-    compilation cache. With that pin, two processes on one GPU produced the
-    same kernel list.
+    compilation cache so those lists match.
 
 ```
 time →
