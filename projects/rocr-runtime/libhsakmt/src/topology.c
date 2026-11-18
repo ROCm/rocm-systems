@@ -1302,19 +1302,19 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(HsaKFDContext *ctx,
 				ret = HSAKMT_STATUS_ERROR;
 				goto out;
 			}
-			props->OverrideEngineId.ui32.Major = major & 0x3f;
-			props->OverrideEngineId.ui32.Minor = minor & 0xff;
-			props->OverrideEngineId.ui32.Stepping = step & 0xff;
+			props->OverrideGfxIpVersion.ui32.Major = major & 0x3f;
+			props->OverrideGfxIpVersion.ui32.Minor = minor & 0xff;
+			props->OverrideGfxIpVersion.ui32.Stepping = step & 0xff;
                 }
 
 		if (hsa_gfxip) {
-			props->EngineId.ui32.Major = hsa_gfxip->major & 0x3f;
-			props->EngineId.ui32.Minor = hsa_gfxip->minor & 0xff;
-			props->EngineId.ui32.Stepping = hsa_gfxip->stepping & 0xff;
+			props->GfxIpVersion.ui32.Major = hsa_gfxip->major & 0x3f;
+			props->GfxIpVersion.ui32.Minor = hsa_gfxip->minor & 0xff;
+			props->GfxIpVersion.ui32.Stepping = hsa_gfxip->stepping & 0xff;
 		} else {
-			props->EngineId.ui32.Major = gfxv_major & 0x3f;
-			props->EngineId.ui32.Minor = gfxv_minor & 0xff;
-			props->EngineId.ui32.Stepping = gfxv_stepping & 0xff;
+			props->GfxIpVersion.ui32.Major = gfxv_major & 0x3f;
+			props->GfxIpVersion.ui32.Minor = gfxv_minor & 0xff;
+			props->GfxIpVersion.ui32.Stepping = gfxv_stepping & 0xff;
 		}
 
 		/* Set the CAL name of the node. If DID-based hsa_gfxip lookup was
@@ -1325,7 +1325,7 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(HsaKFDContext *ctx,
 					sizeof(props->AMDName)-1);
 		else
 			snprintf((char *)props->AMDName, sizeof(props->AMDName)-1, "GFX%06x",
-					HSA_GET_GFX_VERSION_FULL(props->EngineId.ui32));
+					HSA_GET_GFX_VERSION_FULL(props->GfxIpVersion.ui32));
 
 		/* Is dGPU Node, not APU
 		 * Retrieve the marketing name of the node.
@@ -1359,8 +1359,8 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(HsaKFDContext *ctx,
 		}
 
 		/* Get VGPR/SGPR size in byte per CU */
-		props->SGPRSizePerCU = hsakmt_get_sgpr_size_per_cu(HSA_GET_GFX_VERSION_FULL(props->EngineId.ui32));
-		props->VGPRSizePerCU = hsakmt_get_vgpr_size_per_cu(HSA_GET_GFX_VERSION_FULL(props->EngineId.ui32));
+		props->SGPRSizePerCU = hsakmt_get_sgpr_size_per_cu(HSA_GET_GFX_VERSION_FULL(props->GfxIpVersion.ui32));
+		props->VGPRSizePerCU = hsakmt_get_vgpr_size_per_cu(HSA_GET_GFX_VERSION_FULL(props->GfxIpVersion.ui32));
 
 	} else if (props->DeviceId)
 		/* still return success */
@@ -1368,7 +1368,7 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(HsaKFDContext *ctx,
 				props->DeviceId);
 
 	if (props->NumFComputeCores)
-		assert(props->EngineId.ui32.Major && "HSA_OVERRIDE_GFX_VERSION may be needed");
+		assert(props->GfxIpVersion.ui32.Major && "HSA_OVERRIDE_GFX_VERSION may be needed");
 
 	/* On Older kernels, num_xcc may not be present in system properties.
 	 * Set it to 1 if system properties do not report num_xcc.
@@ -2471,7 +2471,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeMemoryPropertiesCtx(HsaKFDContext *ctx,
 	}
 
 	/* Add SVM aperture */
-	if (hsakmt_topology_is_svm_needed(node_props[NodeId].node.EngineId) && i < NumBanks &&
+	if (hsakmt_topology_is_svm_needed(node_props[NodeId].node.GfxIpVersion) && i < NumBanks &&
 	    hsakmt_fmm_get_aperture_base_and_limit(ctx,
 		    FMM_SVM, gpu_id, &MemoryProperties[i].VirtualBaseAddress,
 		    &aperture_limit) == HSAKMT_STATUS_SUCCESS) {
@@ -2587,7 +2587,7 @@ out:
 uint32_t hsakmt_get_gfxv_by_node_id(HsaKFDContext *ctx, HSAuint32 node_id)
 {
 	struct hsa_kfd_topology_context *topology_ctx = ctx->topology_context;
-	return HSA_GET_GFX_VERSION_FULL(topology_ctx->node_props[node_id].node.EngineId.ui32);
+	return HSA_GET_GFX_VERSION_FULL(topology_ctx->node_props[node_id].node.GfxIpVersion.ui32);
 }
 
 uint16_t hsakmt_get_device_id_by_node_id(HsaKFDContext *ctx, HSAuint32 node_id)
