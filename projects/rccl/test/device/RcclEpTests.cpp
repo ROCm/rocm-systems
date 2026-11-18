@@ -324,6 +324,20 @@ TEST(RcclEpLayoutTest, RegionsAreAlignedOrderedAndDisjoint) {
   EXPECT_EQ(l.total_bytes % rccl_ep::kAlign, 0u);
 }
 
+TEST(RcclEpLayoutTest, OwnerOfBoundsTheExpertId) {
+  const rccl_ep::EpConfig c = makeConfig(8, 128, 1024, 4);  // 256 experts, 32 per rank
+
+  EXPECT_EQ(rccl_ep::owner_of(c, 0), 0);
+  EXPECT_EQ(rccl_ep::owner_of(c, 31), 0);
+  EXPECT_EQ(rccl_ep::owner_of(c, 32), 1);
+  EXPECT_EQ(rccl_ep::owner_of(c, 255), 7);
+  // Out of range on either side: no owner, rather than a rank past the last.
+  EXPECT_EQ(rccl_ep::owner_of(c, 256), -1);
+  EXPECT_EQ(rccl_ep::owner_of(c, 1 << 30), -1);
+  EXPECT_EQ(rccl_ep::owner_of(c, -1), -1);
+  EXPECT_EQ(rccl_ep::owner_of(c, -33), -1);
+}
+
 TEST(RcclEpLayoutTest, SlotIsRankMajorAndInjective) {
   const rccl_ep::EpConfig c = makeConfig(4, 16, 128, 2);
 

@@ -16,6 +16,10 @@ if(BUILD_TESTS)
   if(ENABLE_MPI_TESTS)
     message("MPI-based tests are enabled")
   endif()
+  # The rccl_ep tests are MPI tests: without ENABLE_MPI_TESTS they would silently not be built.
+  if(ENABLE_RCCL_EP_TESTS AND NOT ENABLE_MPI_TESTS)
+    message(FATAL_ERROR "ENABLE_RCCL_EP_TESTS needs ENABLE_MPI_TESTS=ON: the rccl_ep tests are MPI tests")
+  endif()
 
   # CPU-only generator unit test: guards the -fgpu-rdc device-function dispatch
   # codegen in src/device/generate.py. Needs no GPU and no built library.
