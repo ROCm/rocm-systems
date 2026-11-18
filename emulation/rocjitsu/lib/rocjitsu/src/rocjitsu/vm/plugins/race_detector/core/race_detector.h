@@ -160,14 +160,21 @@ public:
                      MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS,
                      uint8_t atomicBytes = 0) const;
 
-  /// @brief Conservatively check an instruction's LDS intervals for conflicts.
+  /// @brief Check an instruction's LDS intervals for conflicts, once for all
+  /// its lanes.
   /// @details The intervals must describe valid LDS byte ranges. False proves
   /// that validateRead (or validateWrite, when isWrite) would report nothing
   /// for any access by `wave` within `accessed`, so per-lane validation can be
-  /// skipped. Visits the 16-byte chunks of each interval, without scanning gaps
-  /// between intervals. Separate intervals can visit the same chunk.
+  /// skipped. First visits the 16-byte chunks of each interval, without
+  /// scanning gaps between intervals; when a chunk has live bytes, scans the
+  /// events the per-lane checks would scan, by the same rules, against the
+  /// whole of `accessed`.
+  /// `atomicBytes` is nonzero only when every lane of the access is a naturally
+  /// aligned atomic of that width, as validateRead and validateWrite take it
+  /// for one lane. With zero no event is exempted as an atomic of matching
+  /// width, so true can be returned for an access whose lanes all pass.
   bool mayConflict(const IntervalSet &accessed, WaveId wave, bool isWrite,
-                   MemoryOrderClass currentMemoryOrder) const;
+                   MemoryOrderClass currentMemoryOrder, uint8_t atomicBytes = 0) const;
 
   /// SRC2 reads a second LDS operand and updates its first address atomically.
   /// Both ranges share the issuing instruction's wait and barrier lifetime.
@@ -285,13 +292,27 @@ private:
     return acquired_[static_cast<size_t>(accessor.value) * clockSize() + owner.value];
   }
 
-  /// Call `visit` with candidate events of other waves whose LDS access
-  /// completed in an epoch `accessor` has not acquired. Histories with bounds
-  /// disjoint from [start, end) are skipped. A wave's history is in epoch
-  /// order, so these are a suffix of it, and the events a barrier has ordered
-  /// before `accessor`'s access are never visited.
-  template <typename Visit>
-  void forEachUnacquiredLdsEvent(WaveId accessor, int start, int end, Visit visit) const;
+  /// Whether `matches` holds for any event an LDS access by `accessor` in
+  /// `currentMemoryOrder` has to be checked against: the events whose LDS
+  /// access is in flight, except the accessor's own that are ordered with the
+  /// access, and each event of another wave whose LDS access completed in an
+  /// epoch `accessor` has not acquired. A wave's history is in epoch order, so
+  /// those are a suffix of it, and the events a barrier has ordered before the
+  /// access are never visited, nor is a history whose bounds are disjoint
+  /// from [start, end), which must cover the access. A write is checked
+  /// against reads and a read against writes. Stops at the first event for
+  /// which `matches` returns true.
+  template <typename Matches>
+  bool anyCheckedLdsEvent(WaveId accessor, bool isWrite, MemoryOrderClass currentMemoryOrder,
+                          int start, int end, Matches matches) const;
+
+  /// Whether `matches` holds for any LDS source-operand read that a write by
+  /// `accessor` has to be checked against: all but the accessor's own that are
+  /// ordered with the write, and another wave's that a barrier has ordered
+  /// before it. Stops at the first read for which `matches` returns true.
+  template <typename Matches>
+  bool anyCheckedSrc2Read(WaveId accessor, MemoryOrderClass currentMemoryOrder,
+                          Matches matches) const;
 
   /// Whether a barrier has ordered another wave's completed event before
   /// `accessor`'s access.
