@@ -73,7 +73,14 @@ public:
                                 : sqlite_api_policy::open(path.c_str(), &m_db);
         if(rc != sqlite_api_policy::result_ok || m_db == nullptr)
         {
-            throw std::runtime_error("SQLite database could not be opened: " + path);
+            // A failed open still returns a handle. The destructor does not run
+            // when this constructor throws, so the handle has to be closed here.
+            const std::string reason =
+                m_db != nullptr ? sqlite_api_policy::errmsg(m_db) : "no database handle";
+            if(m_db != nullptr) sqlite_api_policy::close(m_db);
+            m_db = nullptr;
+            throw std::runtime_error("SQLite database could not be opened: " + path +
+                                     " (" + reason + ")");
         }
     }
 
@@ -307,6 +314,14 @@ trim_trace_files(const std::vector<trim_source_t>& inputs,
 
     std::filesystem::remove(output_path, error);
     if(error) return PH_RESULT_INVALID_FILE;
+
+    // sqlite3_open_v2 creates a missing file, but not a missing parent directory.
+    const std::filesystem::path parent = std::filesystem::path{ output_path }.parent_path();
+    if(!parent.empty())
+    {
+        std::filesystem::create_directories(parent, error);
+        if(error) return PH_RESULT_INVALID_FILE;
+    }
 
     try
     {
