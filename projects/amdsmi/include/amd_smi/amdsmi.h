@@ -3919,12 +3919,12 @@ typedef struct {
  * @brief CPU identity information.
  */
 typedef struct {
-    char model_name[AMDSMI_MAX_STRING_LENGTH];
-    char bios_model_name[AMDSMI_MAX_STRING_LENGTH];
-    uint32_t cores_per_socket;
-    uint32_t family;
-    uint32_t model;
-    uint32_t stepping;   //!< CPU stepping (from /proc/cpuinfo)
+  char model_name[AMDSMI_MAX_STRING_LENGTH];
+  char bios_model_name[AMDSMI_MAX_STRING_LENGTH];
+  uint32_t cores_per_socket;
+  uint32_t family;
+  uint32_t model;
+  uint32_t stepping;  //!< CPU stepping (from /proc/cpuinfo)
 } amdsmi_cpu_identity_t;
 
 /**
@@ -10220,7 +10220,7 @@ amdsmi_status_t amdsmi_get_cpu_enabled_commands(amdsmi_processor_handle processo
  *         An unexpected error occurred while retrieving CPU information.
  */
 amdsmi_status_t amdsmi_get_cpu_identity_info(amdsmi_processor_handle processor_handle,
-                                             amdsmi_cpu_identity_t *identity);
+                                             amdsmi_cpu_identity_t* identity);
 /** @} End tagEsmiCPUAuxiliary */
 
 #endif

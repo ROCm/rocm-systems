@@ -2556,7 +2556,11 @@ def amdsmi_get_cpu_identity_info(processor_handle: processor_handle_t):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     identity = amdsmi_wrapper.amdsmi_cpu_identity_t()
-    _check_res(amdsmi_wrapper.amdsmi_get_cpu_identity_info(processor_handle, ctypes.byref(identity)))
+    _check_res(
+        _amdsmi_entry_point("amdsmi_get_cpu_identity_info")(
+            processor_handle, ctypes.byref(identity)
+        )
+    )
     return {
         "model_name": identity.model_name.decode("utf-8"),
         "bios_model_name": identity.bios_model_name.decode("utf-8"),

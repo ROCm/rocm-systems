@@ -71,7 +71,9 @@ _stubs = {}
 if _CLI_DIR and "amdsmi_init" not in sys.modules:
     _stubs["amdsmi_init"] = _amdsmi_init_stub()
 if "_version" not in sys.modules:
-    _stubs.update(generated_version_stub())
+    # Left in place on purpose: test modules imported after this one expect the
+    # version stub to still exist when they run, so it is not part of the restore set.
+    sys.modules.update(generated_version_stub())
 _restore_stubs = stub_modules_at_import(_stubs) if _stubs else None
 
 _CLI_IMPORT_ERROR: Any = None
@@ -217,7 +219,14 @@ class TestCliListCpuIdentification(unittest.TestCase):
         module.amdsmi_interface.amdsmi_get_cpu_identity_info = _raise
         args = argparse.Namespace(gpu=None, cpu=[_FakeHandle(1)], core=None, enumeration=True)
         commands.list_devices(args)
-        for key in ("model_name", "bios_model_name", "cores_per_socket", "family", "model", "stepping"):
+        for key in (
+            "model_name",
+            "bios_model_name",
+            "cores_per_socket",
+            "family",
+            "model",
+            "stepping",
+        ):
             self.assertEqual(commands.logger.stored[key], "N/A")
 
     def test_cpu_flag_reports_model_name_bios_model_name_and_cores(self):

@@ -61,7 +61,9 @@ if _CLI_DIR and "amdsmi_init" not in sys.modules:
         amdsmi_exception=_amdsmi_exception,
     )
 if "_version" not in sys.modules:
-    _stubs.update(generated_version_stub())
+    # Left in place on purpose: test modules imported after this one expect the
+    # version stub to still exist when they run, so it is not part of the restore set.
+    sys.modules.update(generated_version_stub())
 _restore_stubs = stub_modules_at_import(_stubs) if _stubs else None
 
 AMDSMIParser: Any = None

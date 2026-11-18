@@ -41,6 +41,7 @@ DRIVER_DEVICES = {
 }
 HSMP_ACPI_DEVICES = Path("/sys/bus/acpi/devices")
 
+
 class AMDSMIHelpers:
     """Helper functions that aren't apart of the AMDSMI API
     Useful for determining platform and device identifiers

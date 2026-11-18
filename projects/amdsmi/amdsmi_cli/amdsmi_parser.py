@@ -992,9 +992,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 # Remember an explicit "--cpu all" (not bare --cpu) so commands such
                 # as `list` can reject it.
                 setattr(
-                    args,
-                    "cpu_all_requested",
-                    any(str(v).lower() == "all" for v in (values or [])),
+                    args, "cpu_all_requested", any(str(v).lower() == "all" for v in (values or []))
                 )
                 # Bare --cpu (nargs="*") selects every CPU
                 if not values:
@@ -1994,7 +1992,9 @@ class AMDSMIParser(argparse.ArgumentParser):
             )
 
         # Add Universal Arguments
-        self._add_device_arguments(firmware_parser, required=False, nic=True, cpu_core_supported=False)
+        self._add_device_arguments(
+            firmware_parser, required=False, nic=True, cpu_core_supported=False
+        )
         self._add_command_modifiers(firmware_parser)
 
     def _add_bad_pages_parser(self, subparsers: argparse._SubParsersAction, func):

@@ -228,11 +228,18 @@ class TestMissingDriverErrors(unittest.TestCase):
         self.assertIsNone(args.gpu)
         self.assertEqual(args.note_drivers, ("amdgpu", "ionic", "bnxt_en"))
 
+    def test_list_runs_with_only_a_cpu_driver(self) -> None:
+        # `list --cpu` reports CPU identity, so the HSMP driver alone is enough.
+        args = _parse(["list"], loaded=("hsmp_acpi",))
+        self.assertIsNone(args.gpu)
+
     def test_list_names_every_missing_driver_with_hardware(self) -> None:
-        exc = self._error("list", loaded=("hsmp_acpi",))
+        exc = self._error("list", loaded=())
         self.assertIsInstance(exc, cli_exc.AmdSmiDriverNotLoadedException)
-        self.assertEqual(exc.drivers, ["amdgpu", "ionic"])
-        self.assertIn("requires the amdgpu or ionic driver but none is loaded", str(exc))
+        self.assertEqual(exc.drivers, ["amdgpu", "hsmp_acpi", "ionic"])
+        self.assertIn(
+            "requires the amdgpu or hsmp_acpi or ionic driver but none is loaded", str(exc)
+        )
 
     def test_options_name_their_driver(self) -> None:
         for argv, loaded, driver in (
