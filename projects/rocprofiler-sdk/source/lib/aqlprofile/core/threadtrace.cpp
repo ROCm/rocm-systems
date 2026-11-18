@@ -205,8 +205,9 @@ _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t            handle,
 
     // The landing buffer is allocated through the caller's allocator so that it is
     // GPU-accessible: the copy callback can then write trace data into it directly.
-    auto  host_buffer = memorymgr->AllocHostBuffer(max_sample_size + gfx9_header_size);
-    auto* cpu_sample  = static_cast<char*>(host_buffer.get());
+    auto  host_buffer_lock = std::unique_lock{memorymgr->host_buffer_mutex};
+    auto* cpu_sample =
+        static_cast<char*>(memorymgr->GetHostBuffer(max_sample_size + gfx9_header_size));
 
     // The samples sizes are returned in the control buffer
     for(uint64_t se_index = 0; se_index < se_number_total; se_index++)
