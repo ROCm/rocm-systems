@@ -57,8 +57,9 @@ class TestCliModuleResolution(unittest.TestCase):
             [sys.executable, *python_flags, "-c", child],
             cwd=self.tmp_dir,
             env=env,
-            capture_output=True,
-            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
         )
 
     def test_rocm_env_vars_do_not_override_own_install(self):

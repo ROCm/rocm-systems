@@ -6,7 +6,7 @@
 use std::ffi::c_void;
 
 use crate::ffi::*;
-use crate::image_abi::{
+use crate::image::{
     IMAGE_LAYOUT_LINEAR, IMAGE_LAYOUT_OPAQUE, get_info, image_capability, native_mip_data_info,
 };
 use crate::runtime::{boundary, lock};

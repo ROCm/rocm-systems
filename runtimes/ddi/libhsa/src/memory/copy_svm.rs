@@ -5,6 +5,75 @@
 
 use super::*;
 
+/// Copies a complete range using the HSA memory owner's selected host/GPU route.
+///
+/// The caller is already admitted to the HSA generation. This operation retains
+/// registry backing and an in-flight lease before releasing the registry lock.
+/// An uncertain native outcome quarantines the generation and retains operands.
+///
+/// # Safety
+/// Both ranges must remain valid for `size` bytes through completion. The source
+/// must be readable and the destination writable under the HSA memory contract.
+/// If native retirement is uncertain, external backing must remain live until
+/// conclusive native teardown.
+pub(crate) unsafe fn copy(dst: *mut c_void, src: *const c_void, size: usize) -> Result<(), Status> {
+    let mut guard = lock()?;
+    let runtime = initialized_mut(&mut guard)?;
+    if !memory_copy_has_work(dst, src, size)? {
+        return Ok(());
+    }
+    let host_destination = host_copy_address(runtime, dst as usize, size, ACCESS_PERMISSION_WO);
+    let host_source = host_copy_address(runtime, src as usize, size, ACCESS_PERMISSION_RO);
+    if let (Ok(destination), Ok(source)) = (host_destination, host_source) {
+        // SAFETY: The caller retains both ranges. The registry lock retains
+        // owned backing through this overlapping host copy.
+        unsafe { std::ptr::copy(source as *const u8, destination as *mut u8, size) };
+        fence(Ordering::SeqCst);
+        return Ok(());
+    }
+    let resolved = resolve_sync_gpu_copy(
+        runtime,
+        dst as usize,
+        src as usize,
+        size,
+        host_destination,
+        host_source,
+    )?;
+    let _inflight = runtime.inflight.enter().ok_or(OUT_OF_RESOURCES)?;
+    let mut retained = [None; 2];
+    for (slot, base) in retained.iter_mut().zip(resolved.borrowed_memory) {
+        if let Some(base) = base {
+            if let Err(status) = runtime.memory_state.retain_copy_borrow(base) {
+                for base in retained.into_iter().flatten() {
+                    runtime.memory_state.release_copy_borrow(base);
+                }
+                return Err(status);
+            }
+            *slot = Some(base);
+        }
+    }
+    let stop = runtime.operation_stop();
+    let health = runtime.health.clone();
+    drop(guard);
+
+    let (status, may_be_live) = match execute_sync_gpu_copy(resolved.route, &stop) {
+        Ok(SyncGpuCopyOutcome::Done) => (SUCCESS, false),
+        Ok(SyncGpuCopyOutcome::LoadedDestination { address, bytes }) => {
+            (write_loaded_copy_destination(address, &bytes), false)
+        }
+        Err(failure) => (failure.status, failure.operands_may_be_live),
+    };
+    if may_be_live {
+        health.quarantine();
+    }
+    release_async_resources(&[], &retained, may_be_live);
+    if status == SUCCESS {
+        Ok(())
+    } else {
+        Err(status)
+    }
+}
+
 /// Converts a pointer and size into a checked SVM address range.
 pub(crate) fn svm_range(pointer: *mut c_void, size: usize) -> Result<(u64, u64), Status> {
     if pointer.is_null() || size == 0 {

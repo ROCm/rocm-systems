@@ -40,6 +40,8 @@ mod ipc;
 use asynchronous::AsyncDispatcher;
 #[cfg(test)]
 use asynchronous::*;
+mod value;
+pub(crate) use value::store;
 pub(crate) mod wait;
 #[cfg(test)]
 use crate::api::signal::wait::*;
@@ -48,6 +50,17 @@ use crate::api::signal::{atomic::*, core::*};
 use ipc::{ImportedIpcSignal, OwnedIpcSignal};
 #[cfg(test)]
 use wait::*;
+
+/// Destroys an HSA signal through its registry owner in an admitted generation.
+/// Native failures preserve the registered owner for retry.
+pub(crate) fn destroy(signal: HsaSignal) -> Result<(), Status> {
+    let mut guard = lock()?;
+    let runtime = crate::runtime::initialized_mut(&mut guard)?;
+    match runtime.signal_state.destroy_signal(signal) {
+        SUCCESS => Ok(()),
+        status => Err(status),
+    }
+}
 
 /// Signal size in bytes.
 const SIGNAL_BYTES: usize = 64;

@@ -6,7 +6,10 @@
 #
 # https://gcc.gnu.org/onlinedocs/gcc/Warning-Options.html
 
-function(get_hipfile_gnu_warning_flags outvar compiler_version)
+include(HipFileFortifySource)
+
+# The flags are for sources in ``language`` (CXX or HIP)
+function(get_hipfile_gnu_warning_flags outvar language compiler_version)
 
     # Warning flags for g++ 9 and earlier
     set(flags
@@ -92,13 +95,11 @@ function(get_hipfile_gnu_warning_flags outvar compiler_version)
         )
 
         # Only use _FORTIFY_SOURCE if the optimization level is -O2, -O3, or -Os
-        string(JOIN " " MYCXXFLAGS ${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}})
-        if(MYCXXFLAGS MATCHES "-O[2-3s]")
-            set(flags
-                -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3
-                ${flags}
-            )
-        endif()
+        hipfile_get_fortify_flags(fortify_flags ${language})
+        set(flags
+            ${fortify_flags}
+            ${flags}
+        )
     endif()
 
     if(compiler_version VERSION_GREATER_EQUAL 13)
