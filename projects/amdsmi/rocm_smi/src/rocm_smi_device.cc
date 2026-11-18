@@ -816,6 +816,14 @@ static const std::set<DevInfoTypes> kDevPartitionParentFiles = {
     kDevMemoryPartition,  kDevAvailableMemoryPartition,  kDevProcessIsolation,
 };
 
+static thread_local bool t_own_partition_files = false;
+
+ScopedOwnPartitionFiles::ScopedOwnPartitionFiles() : previous_(t_own_partition_files) {
+  t_own_partition_files = true;
+}
+
+ScopedOwnPartitionFiles::~ScopedOwnPartitionFiles() { t_own_partition_files = previous_; }
+
 // The PCI device directory of a secondary compute partition, or "" for any other device. KFD
 // reports a partition at the address of its GPU, with the partition index in the function bits.
 static std::string partition_parent_dir(const std::string& path, uint64_t bdfid) {
@@ -880,7 +888,8 @@ int Device::openSysfsFileStream(DevInfoTypes type, T* fs, const char* str) {
         LOG_ERROR(ss);
         return ret;
       }
-    } else if (std::is_same_v<T, std::ifstream> && kDevPartitionParentFiles.count(type) != 0) {
+    } else if (std::is_same_v<T, std::ifstream> && !t_own_partition_files &&
+               kDevPartitionParentFiles.count(type) != 0) {
       const std::string parent = partition_parent_dir(path_, bdfid_);
       if (!parent.empty()) {
         sysfs_path = parent + "/" + kDevAttribNameMap.at(type);

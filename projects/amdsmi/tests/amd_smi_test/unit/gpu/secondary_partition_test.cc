@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_test_overrides.h"
@@ -56,9 +57,9 @@ void WriteParent(FakeSysfsTree& tree, const std::string& mode, const std::string
 
 class PciRoot {
  public:
-  explicit PciRoot(const FakeSysfsTree& tree)
+  explicit PciRoot(const FakeSysfsTree& tree, const std::string& dir = "pci")
       : guard_(amd::smi::test_hooks::SysfsPciDevicesRoot,
-               amd::smi::test_hooks::SetSysfsPciDevicesRoot, tree.root() + "/pci") {}
+               amd::smi::test_hooks::SetSysfsPciDevicesRoot, tree.root() + "/" + dir) {}
 
  private:
   ScopedOverride<std::string> guard_;
@@ -110,17 +111,39 @@ TEST(GpuUnit, SecondaryCpxPartitionCountsThePartitionsOfItsGpu) {
   EXPECT_EQ(profile.num_partitions, 8u);
 }
 
-// A set on a secondary partition must not write the mode of the whole GPU.
-TEST(GpuUnit, SecondaryPartitionDoesNotSetTheModeOfItsGpu) {
+// A set on a secondary partition returns what it returned before the partition read the attributes
+// of its GPU, also for the GPU's current mode, and does not write the GPU's attributes.
+TEST(GpuUnit, SecondaryPartitionSetsFailAsBefore) {
   FakeSysfsTree tree;
   WriteSecondaryPartition(tree);
   WriteParent(tree, "DPX", "0 0");
-  PciRoot pci(tree);
   FakeKfdTopology topology(tree);
+  const amdsmi_processor_handle handle = topology.handle(kNode);
+  const auto set_all = [handle] {
+    return std::vector<amdsmi_status_t>{
+        amdsmi_set_gpu_compute_partition(handle, AMDSMI_COMPUTE_PARTITION_DPX),
+        amdsmi_set_gpu_compute_partition(handle, AMDSMI_COMPUTE_PARTITION_SPX),
+        amdsmi_set_gpu_accelerator_partition_profile(handle, 1),
+        amdsmi_set_gpu_memory_partition_mode(handle, AMDSMI_MEMORY_PARTITION_NPS1),
+        amdsmi_set_gpu_process_isolation(handle, 1),
+    };
+  };
 
-  EXPECT_NE(amdsmi_set_gpu_compute_partition(topology.handle(kNode), AMDSMI_COMPUTE_PARTITION_SPX),
-            AMDSMI_STATUS_SUCCESS);
+  std::vector<amdsmi_status_t> without_gpu_files;
+  {
+    PciRoot no_pci(tree, "no_pci");
+    without_gpu_files = set_all();
+  }
+  PciRoot pci(tree);
+  const std::vector<amdsmi_status_t> with_gpu_files = set_all();
+
+  EXPECT_EQ(with_gpu_files, without_gpu_files);
+  for (const amdsmi_status_t status : with_gpu_files) {
+    EXPECT_NE(status, AMDSMI_STATUS_SUCCESS);
+  }
   EXPECT_EQ(tree.ReadFile(std::string(kParent) + "current_compute_partition"), "DPX");
+  EXPECT_EQ(tree.ReadFile(std::string(kParent) + "current_memory_partition"), "NPS1");
+  EXPECT_EQ(tree.ReadFile(std::string(kParent) + "enforce_isolation"), "0 0");
   EXPECT_FALSE(fs::exists(tree.root() + "/amdgpu_xcp_3/current_compute_partition"));
 }
 
