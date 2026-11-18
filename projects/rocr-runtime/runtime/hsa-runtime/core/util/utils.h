@@ -49,6 +49,7 @@
 #include "stddef.h"
 #include "stdlib.h"
 #include "stdarg.h"
+#include "string.h"
 #if defined(__linux__)
 #include "unistd.h"
 #endif
@@ -462,6 +463,21 @@ static __forceinline void memory_fence() {
 #endif
 }
 
+/// @brief: Copies @p size bytes, a multiple of 16, to the 16-byte aligned @p dst without
+/// allocating its lines in the CPU cache. Ordered only by a later store_fence().
+static __forceinline void nontemporal_copy(void* dst, const void* src, size_t size) {
+  assert((reinterpret_cast<uintptr_t>(dst) & 15) == 0 && (size & 15) == 0 &&
+         "nontemporal_copy needs a 16-byte aligned dst and a multiple of 16 bytes");
+#if defined(_MSC_VER) || defined(__x86_64__) || defined(__i386__) || defined(__powerpc64__)
+  auto* dst_chunks = static_cast<__m128i*>(dst);
+  auto* src_chunks = static_cast<const __m128i*>(src);
+  for (size_t chunk_idx = 0; chunk_idx < size / sizeof(__m128i); ++chunk_idx)
+    _mm_stream_si128(&dst_chunks[chunk_idx], _mm_loadu_si128(&src_chunks[chunk_idx]));
+#else
+  memcpy(dst, src, size);
+#endif
+}
+
 static __forceinline void cacheline_flush(const void* p) {
 #if defined(_MSC_VER) || defined(__x86_64__) || defined(__i386__) || defined(__powerpc64__)
   _mm_clflush(p);
@@ -470,6 +486,28 @@ static __forceinline void cacheline_flush(const void* p) {
 #else
 #warning "No cacheline_flush() implementation for this processor"
   (void)p;
+#endif
+}
+
+/// @brief: Evicts the cache line holding @p p from the CPU caches without waiting for it:
+/// CLFLUSHOPT where @p clflushopt says the CPU has it, which later loads and stores don't wait
+/// for, else CLFLUSH.
+static __forceinline void cacheline_evict(const void* p, bool clflushopt) {
+#if defined(_MSC_VER)
+  if (clflushopt)
+    _mm_clflushopt(const_cast<void*>(p));
+  else
+    _mm_clflush(p);
+#elif defined(__x86_64__) || defined(__i386__)
+  if (clflushopt) {
+    auto* line = static_cast<volatile char*>(const_cast<void*>(p));
+    __asm__ __volatile__("clflushopt %0" : "+m"(*line));
+  } else {
+    _mm_clflush(p);
+  }
+#else
+  (void)clflushopt;
+  cacheline_flush(p);
 #endif
 }
 

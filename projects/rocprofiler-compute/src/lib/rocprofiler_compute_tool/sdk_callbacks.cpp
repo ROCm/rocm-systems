@@ -63,15 +63,14 @@ void SdkCallbacksImpl::dispatch_callback(rocprofiler_dispatch_counting_service_d
 
     auto set_config_from_cache = [&]()
     {
-        if (tool->iteration_multiplexing_mode != iteration_multiplexing_mode_t::DISABLED &&
-            m_iteration_multiplexing_per_agent.find(agent_id) == m_iteration_multiplexing_per_agent.end())
+        if (!search_profile_cache())
+            return;
+        const auto& profiles = m_profile_cache_per_agent[agent_id];
+
+        if (!tool->iteration_multiplexing)
         {
-            // First time setting up iteration multiplexing data for this agent
-            m_iteration_multiplexing_per_agent[agent_id] = iteration_multiplexing_dispatch_record_t{};
-            if (tool->iteration_multiplexing_mode == iteration_multiplexing_mode_t::SIMPLE)
-            {
-                m_iteration_multiplexing_per_agent[agent_id].config = -1;  // so first increment sets to 0
-            }
+            *config = profiles[0];
+            return;
         }
 
         kernel_dispatch_info_t dispatch_info{dispatch_data.dispatch_info.kernel_id,
@@ -79,65 +78,14 @@ void SdkCallbacksImpl::dispatch_callback(rocprofiler_dispatch_counting_service_d
                                              dispatch_data.dispatch_info.workgroup_size,
                                              dispatch_data.dispatch_info.grid_size,
                                              dispatch_data.dispatch_info.group_segment_size};
-        switch (tool->iteration_multiplexing_mode)
-        {
-        case iteration_multiplexing_mode_t::DISABLED:
-            if (search_profile_cache())
-            {
-                *config = m_profile_cache_per_agent[agent_id][0];
-            }
-            return;
-
-        case iteration_multiplexing_mode_t::SIMPLE:
-            m_iteration_multiplexing_per_agent[agent_id].config =
-                (m_iteration_multiplexing_per_agent[agent_id].config + 1) %
-                m_profile_cache_per_agent[agent_id].size();
-            *config =
-                m_profile_cache_per_agent[agent_id][m_iteration_multiplexing_per_agent[agent_id].config];
-            return;
-
-        case iteration_multiplexing_mode_t::KERNEL:
-            if (m_iteration_multiplexing_per_agent[agent_id].kernel_id_to_profile_index.find(kernel_id) ==
-                m_iteration_multiplexing_per_agent[agent_id].kernel_id_to_profile_index.end())
-            {
-                // First time seeing this kernel_id for this agent
-                m_iteration_multiplexing_per_agent[agent_id].kernel_id_to_profile_index[kernel_id] =
-                    -1;  // so first increment sets to 0
-            }
-            m_iteration_multiplexing_per_agent[agent_id].kernel_id_to_profile_index[kernel_id] =
-                (m_iteration_multiplexing_per_agent[agent_id].kernel_id_to_profile_index[kernel_id] + 1) %
-                m_profile_cache_per_agent[agent_id].size();
-            *config = m_profile_cache_per_agent[agent_id][m_iteration_multiplexing_per_agent[agent_id]
-                                                              .kernel_id_to_profile_index[kernel_id]];
-            return;
-
-        case iteration_multiplexing_mode_t::LAUNCH:
-            if (m_iteration_multiplexing_per_agent[agent_id].kernel_params_to_profile_index.find(
-                    dispatch_info) ==
-                m_iteration_multiplexing_per_agent[agent_id].kernel_params_to_profile_index.end())
-            {
-                // First time seeing this dispatch_info for this agent
-                m_iteration_multiplexing_per_agent[agent_id].kernel_params_to_profile_index[dispatch_info] =
-                    -1;  // so first increment sets to 0
-            }
-            m_iteration_multiplexing_per_agent[agent_id].kernel_params_to_profile_index[dispatch_info] =
-                (m_iteration_multiplexing_per_agent[agent_id].kernel_params_to_profile_index[dispatch_info] +
-                 1) %
-                m_profile_cache_per_agent[agent_id].size();
-            *config = m_profile_cache_per_agent[agent_id][m_iteration_multiplexing_per_agent[agent_id]
-                                                              .kernel_params_to_profile_index[dispatch_info]];
-            return;
-
-        default:
-            throw std::runtime_error("[" + std::string(__FUNCTION__) +
-                                     "] Unsupported iteration multiplexing mode");
-        }
+        auto& profile_index = m_iteration_multiplexing_per_agent[agent_id][dispatch_info];
+        *config             = profiles[profile_index];
+        profile_index       = (profile_index + 1) % profiles.size();
     };
 
     {
         auto rlock = std::shared_lock{m_mutex};
-        if ((tool->iteration_multiplexing_mode == iteration_multiplexing_mode_t::DISABLED) &&
-            search_profile_cache())
+        if (!tool->iteration_multiplexing && search_profile_cache())
         {
             *config = m_profile_cache_per_agent[agent_id][0];
             return;
@@ -369,9 +317,12 @@ void SdkCallbacksImpl::tool_tracing_callback(rocprofiler_callback_tracing_record
         auto symbol              = kernel_symbol_record_t{};
         symbol.kernel_name       = format_kernel_name(data->kernel_name);
         symbol.kernel_short_name = truncate_name(symbol.kernel_name);
-        symbol.arch_vgpr_count   = data->arch_vgpr_count;
-        symbol.accum_vgpr_count  = data->accum_vgpr_count;
-        symbol.sgpr_count        = data->sgpr_count;
+        if (data->kernel_name)
+            symbol.mangled_name = std::string{strip_kernel_descriptor_suffix(data->kernel_name)};
+        symbol.code_object_id   = data->code_object_id;
+        symbol.arch_vgpr_count  = data->arch_vgpr_count;
+        symbol.accum_vgpr_count = data->accum_vgpr_count;
+        symbol.sgpr_count       = data->sgpr_count;
 
         // check if regex can be found in kernel name matches regex from tool data,
         // if matches store kernel id

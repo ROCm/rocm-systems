@@ -365,7 +365,9 @@ public:
   }
 
   [[nodiscard]] VmMtypeSnapshot snapshot_mtype(uint64_t address) const override {
-    auto guard = address_space_->acquire_page_table_request(vmid_);
+    // The binding retains its registration's request mutex. Acquiring it
+    // directly still revalidates the VMID before exposing page-table state.
+    auto guard = address_space_->acquire_page_table_request(vmid_, original_request_mutex_);
     if (!mutation_epoch_ || !guard.cacheable())
       return {.mtype = guard.owns_lock() ? address_space_->pte_mtype(address, guard)
                                          : query_mtype(address)};
@@ -816,6 +818,15 @@ const LegacyAddressSpace *LegacyGpuVmAdapter::address_space(uint32_t vmid) const
 }
 
 std::shared_ptr<LegacyAddressSpace> LegacyGpuVmAdapter::address_space_snapshot(uint32_t vmid) {
+  {
+    std::shared_lock lock(mutex_);
+    if (!has_stale_locked()) {
+      const std::unordered_map<uint32_t, Entry>::iterator found = bindings_.find(vmid);
+      return found == bindings_.end() ? nullptr : found->second.binding->address_space_snapshot();
+    }
+  }
+  // Preserve cleanup of every observed stale binding before this call returns.
+  // Release shared ownership before the mutating sweep, then refind the target.
   std::lock_guard lock(mutex_);
   remove_stale_locked();
   const auto found = bindings_.find(vmid);
@@ -824,7 +835,7 @@ std::shared_ptr<LegacyAddressSpace> LegacyGpuVmAdapter::address_space_snapshot(u
 
 std::shared_ptr<const LegacyAddressSpace>
 LegacyGpuVmAdapter::address_space_snapshot(uint32_t vmid) const {
-  std::lock_guard lock(mutex_);
+  std::shared_lock lock(mutex_);
   const auto found = bindings_.find(vmid);
   return found == bindings_.end() || !gpu_vm_->lookup(found->second.handle).has_value()
              ? nullptr
@@ -834,6 +845,15 @@ LegacyGpuVmAdapter::address_space_snapshot(uint32_t vmid) const {
 void LegacyGpuVmAdapter::revoke_binding(const std::shared_ptr<Binding> &binding) {
   if (binding != nullptr)
     binding->set_fault_reporter(nullptr);
+}
+
+bool LegacyGpuVmAdapter::has_stale_locked() const {
+  for (const auto &[vmid, entry] : bindings_) {
+    (void)vmid;
+    if (!gpu_vm_->lookup(entry.handle).has_value())
+      return true;
+  }
+  return false;
 }
 
 void LegacyGpuVmAdapter::remove_stale_locked() {
