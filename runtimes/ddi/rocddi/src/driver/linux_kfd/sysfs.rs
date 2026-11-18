@@ -71,7 +71,11 @@ pub(crate) struct KfdQueueProperties {
     pub xcc_count: u32,
     /// Shader engines per XCC.
     pub shader_engine_count_per_xcc: u32,
-    /// Native context-save allocation size.
+    /// SIMD arrays per shader engine reported by KFD.
+    pub simd_arrays_per_engine: u32,
+    /// Local data share extent per compute unit in bytes.
+    pub local_data_share_byte_length: u64,
+    /// Native context-save allocation size per XCC; zero when absent.
     pub context_size: u32,
     /// Native control-stack allocation size.
     pub control_stack_size: u32,
@@ -1085,10 +1089,10 @@ fn read_node(
     })?;
     let context = p.optional_u32("cwsr_size")?;
     let stack = p.optional_u32("ctl_stack_size")?;
-    if context.is_some() != stack.is_some() {
+    if context.is_some() != stack.is_some() || context == Some(0) || stack == Some(0) {
         return Err(error(
             ErrorKind::InvalidData,
-            "incomplete KFD queue context metadata",
+            "incomplete or zero KFD queue context metadata",
         ));
     }
     let sdma = p.optional_u32("num_sdma_engines")?;
@@ -1143,6 +1147,8 @@ fn read_node(
         wavefront_size: wave_size,
         xcc_count: xcc,
         shader_engine_count_per_xcc: arrays / arrays_per_xcc,
+        simd_arrays_per_engine: arrays_per_engine,
+        local_data_share_byte_length: u64::from(lds) * 1024,
         context_size: context.unwrap_or(0),
         control_stack_size: stack.unwrap_or(0),
         sdma_engines: sdma.unwrap_or(0),
@@ -1654,6 +1660,48 @@ mod tests {
         assert_eq!(banks[1].capacity_bytes, 1_048_576);
         assert_eq!(banks[1].width_bits, Some(384));
         assert_eq!(banks[1].maximum_clock_mhz, Some(1400));
+    }
+
+    #[test]
+    fn context_size_metadata_distinguishes_absent_from_partial_or_zero() {
+        let fixture = Fixture::new();
+        let (root, drm) = fixture.roots();
+        let path = fixture.0.join("topology/nodes/1/properties");
+        let properties = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(
+            &path,
+            properties.replace("cwsr_size 65536\nctl_stack_size 4096\n", ""),
+        )
+        .unwrap();
+        let endpoint = read_node(&root, &drm, DriverInstanceId::TEST, 1)
+            .unwrap()
+            .unwrap();
+        let crate::driver::EndpointSelector::LinuxKfd { native, .. } = endpoint.endpoint.selector
+        else {
+            unreachable!("expected KFD selector")
+        };
+        assert_eq!(native.queues.context_size, 0);
+        assert_eq!(native.queues.control_stack_size, 0);
+        assert_eq!(native.queues.simd_arrays_per_engine, 2);
+        assert_eq!(native.queues.local_data_share_byte_length, 65536);
+        for invalid in [
+            properties.replace("cwsr_size 65536\n", ""),
+            properties.replace("ctl_stack_size 4096\n", ""),
+            properties.replace("cwsr_size 65536", "cwsr_size 0"),
+            properties.replace("ctl_stack_size 4096", "ctl_stack_size 0"),
+            properties
+                .replace("cwsr_size 65536", "cwsr_size 0")
+                .replace("ctl_stack_size 4096", "ctl_stack_size 0"),
+        ] {
+            std::fs::write(&path, invalid).unwrap();
+            assert_eq!(
+                read_node(&root, &drm, DriverInstanceId::TEST, 1)
+                    .err()
+                    .unwrap()
+                    .kind(),
+                ErrorKind::InvalidData
+            );
+        }
     }
 
     #[test]
