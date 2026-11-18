@@ -54,9 +54,9 @@ to_json_string(const rocprofiler_agent_v0_t& agent_data)
     data["sdma_fw_version"]["uCodeSDMA"]    = agent_data.sdma_fw_version.uCodeSDMA;
     data["sdma_fw_version"]["uCodeCompute"] = agent_data.sdma_fw_version.uCodeCompute;
 
-    data["fw_version"]["Major"]    = agent_data.fw_version.ui32.Major;
-    data["fw_version"]["Minor"]    = agent_data.fw_version.ui32.Minor;
-    data["fw_version"]["Stepping"] = agent_data.fw_version.ui32.Stepping;
+    data["fw_version"]["Major"]    = agent_data.gfxip_version.ui32.Major;
+    data["fw_version"]["Minor"]    = agent_data.gfxip_version.ui32.Minor;
+    data["fw_version"]["Stepping"] = agent_data.gfxip_version.ui32.Stepping;
 
     data["capability"]["HotPluggable"]  = agent_data.capability.ui32.HotPluggable;
     data["capability"]["HSAMMUPresent"] = agent_data.capability.ui32.HSAMMUPresent;

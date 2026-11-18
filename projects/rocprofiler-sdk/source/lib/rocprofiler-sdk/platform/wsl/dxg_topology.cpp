@@ -649,14 +649,14 @@ apply_node_topology(const DxgNode& node, rocprofiler_agent_t& info)
     info.capability.Value          = props.Capability.Value;
     info.hive_id                   = props.HiveID;
     info.gpu_id                    = props.KFDGpuID;
-    // fw_version is the GFXIP version, resolved the same way resolve_gfx_name() does,
-    // so an HSA_OVERRIDE_GFX_VERSION override wins over the reported version.
+    // gfxip_version is resolved the same way resolve_gfx_name() does, so an
+    // HSA_OVERRIDE_GFX_VERSION override wins over the reported version.
     const auto& gfxip = (props.OverrideGfxIpVersion.ui32.Major != 0)
                             ? props.OverrideGfxIpVersion.ui32
                             : props.GfxIpVersion.ui32;
-    info.fw_version.ui32.Major         = gfxip.Major;
-    info.fw_version.ui32.Minor         = gfxip.Minor;
-    info.fw_version.ui32.Stepping      = gfxip.Stepping;
+    info.gfxip_version.ui32.Major      = gfxip.Major;
+    info.gfxip_version.ui32.Minor      = gfxip.Minor;
+    info.gfxip_version.ui32.Stepping   = gfxip.Stepping;
     info.sdma_fw_version.uCodeCompute  = props.uCodeEngineVersions.uCodeCompute;
     info.sdma_fw_version.uCodeSDMA     = props.uCodeEngineVersions.uCodeSDMA;
 

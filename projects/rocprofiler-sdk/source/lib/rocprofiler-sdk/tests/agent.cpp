@@ -97,7 +97,7 @@ TEST(rocprofiler_lib, agent_abi)
     EXPECT_EQ(offsetof(rocprofiler_agent_t, max_engine_clk_ccompute), 136) << msg;
     EXPECT_EQ(offsetof(rocprofiler_agent_t, max_engine_clk_fcompute), 140) << msg;
     EXPECT_EQ(offsetof(rocprofiler_agent_t, sdma_fw_version), 144) << msg;
-    EXPECT_EQ(offsetof(rocprofiler_agent_t, fw_version), 148) << msg;
+    EXPECT_EQ(offsetof(rocprofiler_agent_t, gfxip_version), 148) << msg;
     EXPECT_EQ(offsetof(rocprofiler_agent_t, capability), 152) << msg;
     EXPECT_EQ(offsetof(rocprofiler_agent_t, cu_per_engine), 156) << msg;
     EXPECT_EQ(offsetof(rocprofiler_agent_t, max_waves_per_cu), 160) << msg;

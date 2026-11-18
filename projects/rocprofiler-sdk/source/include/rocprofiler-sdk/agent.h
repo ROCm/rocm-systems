@@ -183,7 +183,7 @@ typedef struct rocprofiler_agent_v0_t
     uint32_t max_engine_clk_fcompute;    ///< GPU only. Maximum engine clocks for GPU, including any
                                          ///< boost capabilities
     HSA_ENGINE_VERSION sdma_fw_version;  ///< GPU only. SDMA and compute microcode
-    HSA_GFXIP_VERSION  fw_version;       ///< GPU only. GFXIP version, may be 0
+    HSA_GFXIP_VERSION  gfxip_version;    ///< GPU only. GFXIP version, may be 0
     HSA_CAPABILITY     capability;        ///< GPU only
     uint32_t           cu_per_engine;     ///< computed
     uint32_t           max_waves_per_cu;  ///< computed
@@ -211,7 +211,7 @@ typedef struct rocprofiler_agent_v0_t
     rocprofiler_agent_runtime_visiblity_t runtime_visibility;
     rocprofiler_uuid_t                    uuid;  ///< GPU only. Universally unique identifier.
 
-    /// @var fw_version
+    /// @var gfxip_version
     /// @brief GPU only. GFXIP major, minor, and stepping. Compute microcode is
     /// sdma_fw_version.uCodeCompute. May be 0.
     ///

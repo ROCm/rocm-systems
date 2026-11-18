@@ -284,7 +284,7 @@ load(ArchiveT& ar, rocprofiler_agent_v0_t& data)
     ROCP_SDK_LOAD_DATA_FIELD(max_engine_clk_ccompute);
     ROCP_SDK_LOAD_DATA_FIELD(max_engine_clk_fcompute);
     ROCP_SDK_LOAD_DATA_FIELD(sdma_fw_version);
-    ROCP_SDK_LOAD_DATA_FIELD(fw_version);
+    ROCP_SDK_LOAD_DATA_FIELD(gfxip_version);
     ROCP_SDK_LOAD_DATA_FIELD(capability);
     ROCP_SDK_LOAD_DATA_FIELD(cu_per_engine);
     ROCP_SDK_LOAD_DATA_FIELD(max_waves_per_cu);
