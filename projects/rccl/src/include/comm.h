@@ -890,8 +890,6 @@ struct ncclComm {
   // Per-arch DDA/CE dispatch thresholds -- populated at comm init from rcclGetArchThresholds().
   // NULL on architectures without a dedicated threshold table (falls back to env-var params).
   const struct rcclArchThresholds* archThresholds;
-  // This GPU's recognized physical mode, cached during the existing partition probe at init.
-  rcclComputePartition computePartition;
   // Every rank can use RCCL_IB_GDR_FLUSH_FLAG, so net receives use it and tuning may assume it.
   bool ibGdrFlushFlag;
 

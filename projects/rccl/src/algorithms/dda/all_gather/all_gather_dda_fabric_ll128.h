@@ -36,7 +36,7 @@ constexpr size_t ddaLL128AgSlotWords(size_t bankSize, int nRanks) {
 // peer; grid.y splits that peer's slices across blocks, one
 // warp per slice. Each column packs this rank's payload into its peer's slot,
 // then polls its own slot for that peer's payload and unpacks it.
-template <typename T, int NRANKS_CT, bool SKIP_INPLACE = false>
+template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
 __launch_bounds__(1024)
 #endif
@@ -96,9 +96,9 @@ __launch_bounds__(1024)
   }
 
   // Local copy from sendbuff to this rank's output slot.
-  // The tuned specialization skips in-place calls, whose input is already there.
+  // In-place calls already have the input there, so skip the copy.
   char* localRecv = reinterpret_cast<char*>(recvbuff) + (size_t)selfRank * perRankBytes;
-  if (!SKIP_INPLACE || reinterpret_cast<const char*>(sendbuff) != localRecv) {
+  if (reinterpret_cast<const char*>(sendbuff) != localRecv) {
     v4u_gptr s4 = (v4u_gptr)sendbuff;
     v4u_gptr d4 = (v4u_gptr)localRecv;
     const size_t nVec = perRankBytes >> 4; // 16B chunks

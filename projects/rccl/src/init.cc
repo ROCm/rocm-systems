@@ -1462,9 +1462,6 @@ static ncclResult_t fillInfo(struct ncclComm* comm, struct ncclPeerInfo* info, u
     (void)ncclOsGetPciDeviceComputePartitionByBusId(physBusIdStr, partition, sizeof(partition));
   }
   info->tuningPartition = rcclTuningPartitionRequest(partition);
-  comm->computePartition = strcasecmp(partition, "SPX") == 0 ? RCCL_COMPUTE_PARTITION_SPX
-                         : strcasecmp(partition, "DPX") == 0 ? RCCL_COMPUTE_PARTITION_DPX
-                                                             : RCCL_COMPUTE_PARTITION_UNKNOWN;
   if (info->mloPart == NCCL_TOPO_UNDEF) {
     int fn = (int)(info->busId & 0xf);
     if (fn < NCCL_TOPO_MLOPART_DEV_MAX) {

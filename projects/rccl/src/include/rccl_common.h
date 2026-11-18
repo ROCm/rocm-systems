@@ -403,8 +403,6 @@ int rcclDdaFabricVmmBlocks(const ncclComm* comm);
 int rcclDdaFabricAgLL128Threads(const ncclComm* comm, size_t totalBytes);
 // Blocks the DDA LL128 AllGather may launch for this total: the init cap, lowered by the arch table.
 int rcclDdaFabricAgLL128Blocks(const ncclComm* comm, size_t totalBytes);
-// Whether this LL128 AllGather may skip its in-place local copy on the current hardware and total.
-bool rcclDdaFabricAgLL128SkipInPlace(const ncclComm* comm, size_t totalBytes);
 // DDA LL128 AllToAll block size for this total from the arch table, or 0 when it sets none.
 int rcclDdaFabricA2aLL128Threads(const ncclComm* comm, size_t totalBytes);
 // Blocks the DDA LL128 AllToAll may launch for this total: the init cap, lowered by the arch table.

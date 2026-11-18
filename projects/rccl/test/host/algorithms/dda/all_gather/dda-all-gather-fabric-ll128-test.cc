@@ -5,7 +5,7 @@
  ************************************************************************/
 
 // Host-only microtests for src/algorithms/dda/all_gather/dda_all_gather_fabric_ll128.cu: eligibility against the
-// LL128 threshold and slot, arch-table geometry, and copy-skip specialization without changing the wire layout.
+// LL128 threshold and slot, the block size and grid budget from the arch table, the peer-column grid, and the launch.
 
 #include <gtest/gtest.h>
 
@@ -39,9 +39,9 @@ constexpr size_t kMiB = size_t{1} << 20;
 // fp32 count per rank that gathers totalBytes across the fixture's four ranks.
 constexpr size_t CountFor(size_t totalBytes) { return totalBytes / (4 * sizeof(float)); }
 
-template <int N, bool SKIP_INPLACE = false>
+template <int N>
 const void* Kernel() {
-  return KernelPtr(&dda::common::ddaAllGatherFabricLL128<int8_t, N, SKIP_INPLACE>);
+  return KernelPtr(&dda::common::ddaAllGatherFabricLL128<int8_t, N>);
 }
 
 class DdaAllGatherFabricLL128Microtest : public ::testing::Test {
@@ -72,8 +72,8 @@ class DdaAllGatherFabricLL128Microtest : public ::testing::Test {
     return ncclAllGatherDdaFabricLL128Eligible(mock_.get(), sendbuff, recvbuff, sendcount, datatype);
   }
 
-  ncclResult_t Run(size_t sendcount, ncclDataType_t datatype = ncclFloat32, const void* sendbuff = kSendbuff) {
-    return ncclAllGatherDdaFabricLL128(sendbuff, kRecvbuff, sendcount, datatype, mock_.get(), kStream);
+  ncclResult_t Run(size_t sendcount, ncclDataType_t datatype = ncclFloat32) {
+    return ncclAllGatherDdaFabricLL128(kSendbuff, kRecvbuff, sendcount, datatype, mock_.get(), kStream);
   }
 
   const DdaLaunch& RunOne(size_t sendcount) {
@@ -197,96 +197,6 @@ TEST_F(DdaAllGatherFabricLL128Microtest, Launch_FourAndEightRanksUnrolledOthersR
     EXPECT_EQ(launch.kernel, kernel) << "nRanks " << nRanks;
     EXPECT_EQ(launch.grid.x, static_cast<unsigned>(nRanks - 1));
     EXPECT_EQ(launch.Arg<int>(5), nRanks);
-  }
-}
-
-TEST_F(DdaAllGatherFabricLL128Microtest, Launch_CopySkipRequiresPolicyAndThisRanksInputSlot) {
-  bool permit = false;
-  size_t seenTotal = 0;
-  g_rcclDdaFabricAgLL128SkipInPlace = [&](const ncclComm* c, size_t totalBytes) {
-    EXPECT_EQ(c, mock_.get());
-    seenTotal = totalBytes;
-    return permit;
-  };
-  // Different element sizes must ask the policy about the same gathered bytes.
-  for (ncclDataType_t datatype : {ncclFloat16, ncclBfloat16, ncclFloat32, ncclFloat8e4m3}) {
-    for (int nRanks : {4, 8}) {
-      comm().nRanks = nRanks;
-      for (int rank : {0, nRanks - 1}) {
-        comm().rank = rank;
-        const void* sendbuff = reinterpret_cast<const void*>(reinterpret_cast<uintptr_t>(kRecvbuff) + rank * 16);
-        for (bool allowed : {false, true}) {
-          permit = allowed;
-          g_ddaLaunches.clear();
-          seenTotal = 0;
-          ASSERT_EQ(Run(16 / ncclTypeSize(datatype), datatype, sendbuff), ncclSuccess);
-          ASSERT_EQ(g_ddaLaunches.size(), 1u);
-          const DdaLaunch& launch = g_ddaLaunches.front();
-          const void* expected = nRanks == 4 ? (allowed ? Kernel<4, true>() : Kernel<4>())
-                                             : (allowed ? Kernel<8, true>() : Kernel<8>());
-          EXPECT_EQ(launch.kernel, expected);
-          EXPECT_EQ(seenTotal, size_t(nRanks) * 16);
-          EXPECT_EQ(launch.Arg<size_t>(3), 16u);
-          EXPECT_EQ(launch.Arg<int>(4), rank);
-        }
-      }
-    }
-  }
-}
-
-TEST_F(DdaAllGatherFabricLL128Microtest, Launch_OutOfPlaceAlwaysUsesOriginalCopy) {
-  g_rcclDdaFabricAgLL128SkipInPlace = [](const ncclComm*, size_t) {
-    ADD_FAILURE() << "out-of-place calls do not need the copy-skip policy";
-    return true;
-  };
-  for (int nRanks : {4, 8}) {
-    comm().nRanks = nRanks;
-    comm().rank = 2;
-    // Matching the receive base is not in-place when this rank's slot has a nonzero offset.
-    for (const void* sendbuff : {kSendbuff, kRecvbuff}) {
-      g_ddaLaunches.clear();
-      ASSERT_EQ(Run(4, ncclFloat32, sendbuff), ncclSuccess);
-      ASSERT_EQ(g_ddaLaunches.size(), 1u);
-      EXPECT_EQ(g_ddaLaunches.front().kernel, nRanks == 4 ? Kernel<4>() : Kernel<8>());
-    }
-  }
-}
-
-TEST_F(DdaAllGatherFabricLL128Microtest, Launch_CopySkipPreservesGeometryBankEpochAndStopEvent) {
-  comm().nRanks = 8;
-  const size_t perRankBytes = kMiB;
-  const void* sendbuff = reinterpret_cast<const void*>(reinterpret_cast<uintptr_t>(kRecvbuff) +
-                                                      comm().rank * perRankBytes);
-  bool permit = false;
-  g_rcclDdaFabricAgLL128SkipInPlace = [&](const ncclComm*, size_t) { return permit; };
-  for (size_t scratchBytes : {256 * kMiB, size_t{20} * 1024 * kMiB}) {
-    comm().ddaScratchBytes = scratchBytes;
-    DdaLaunch baseline{};
-    for (bool allowed : {false, true}) {
-      permit = allowed;
-      comm().addonStopEvent = kStopEvent;
-      g_ddaLaunches.clear();
-      ASSERT_EQ(Run(perRankBytes / sizeof(float), ncclFloat32, sendbuff), ncclSuccess);
-      ASSERT_EQ(g_ddaLaunches.size(), 1u);
-      const DdaLaunch& launch = g_ddaLaunches.front();
-      EXPECT_EQ(launch.kernel, (allowed ? Kernel<8, true>() : Kernel<8>()));
-      EXPECT_EQ(launch.stopEvent, kStopEvent);
-      EXPECT_EQ(comm().addonStopEvent, nullptr);
-      ASSERT_EQ(launch.args.size(), 11u);
-      EXPECT_EQ(launch.Arg<size_t>(9), scratchBytes / 2);
-      EXPECT_EQ(launch.Arg<uint32_t*>(6), comm().ddaLLEpochDev);
-      EXPECT_EQ(launch.Arg<int>(7), comm().ddaLLEpochLen);
-      if (!allowed) {
-        baseline = launch;
-      } else {
-        EXPECT_EQ(launch.grid.x, baseline.grid.x);
-        EXPECT_EQ(launch.grid.y, baseline.grid.y);
-        EXPECT_EQ(launch.block.x, baseline.block.x);
-        EXPECT_EQ(launch.Arg<size_t>(8), baseline.Arg<size_t>(8));
-        EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(10).flag,
-                  baseline.Arg<dda::common::DdaKernelParams>(10).flag);
-      }
-    }
   }
 }
 
