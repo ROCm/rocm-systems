@@ -1459,10 +1459,12 @@ rj_configure_target(waitcheck_hooks_unit_test PRIVATE_INCLUDES WARNINGS)
 rj_add_gtest_tests(waitcheck_hooks_unit_test)
 if(RJ_INSTALL_TESTS)
     file(APPEND "${RJ_INSTALL_CTEST_FILE}" "include(\"waitcheck_hooks_unit_test.cmake\")\n")
+    install(TARGETS waitcheck_prior_queue_tool_stub
+        LIBRARY DESTINATION ${RJ_INSTALL_TEST_BIN_DIR})
     file(RELATIVE_PATH _waitcheck_hooks_test_libdir
         "${CMAKE_INSTALL_FULL_DATADIR}/rocjitsu/tests/bin" "${CMAKE_INSTALL_FULL_LIBDIR}")
     set_target_properties(waitcheck_hooks_unit_test PROPERTIES
-        INSTALL_RPATH "$ORIGIN/${_waitcheck_hooks_test_libdir}")
+        INSTALL_RPATH "$ORIGIN;$ORIGIN/${_waitcheck_hooks_test_libdir}")
 endif()
 add_executable(rj_waitcheck_smoke_test tools/rj_waitcheck_smoke_test.cpp)
 add_test(
@@ -4881,7 +4883,8 @@ if(RJ_ENABLE_HIP_TESTS)
                 ENVIRONMENT ${_waitcheck_disabled_env} "DEBUG_CLR_DIRECT_DOORBELL=1"
                 REQUIRED_OUTPUT "summary loads=[1-9][0-9]* dispatches=0 checked=0"
             )
-            rj_add_hip_test(hip_waitcheck_hazard_test ARCH ${RJ_HIP_TEST_ARCH})
+            rj_add_hip_test(hip_waitcheck_hazard_test ARCH ${RJ_HIP_TEST_ARCH}
+                EXTRA_LIBS ${HSA_RUNTIME64})
             set(_waitcheck_hazard_fixture
                 ${CMAKE_CURRENT_BINARY_DIR}/hip_waitcheck_hazard_fixture.hsaco)
             set(_waitcheck_hazard_bundle
@@ -4903,12 +4906,34 @@ if(RJ_ENABLE_HIP_TESTS)
             )
             add_custom_target(hip_waitcheck_hazard_fixture_target
                 DEPENDS ${_waitcheck_hazard_fixture})
+            set(_waitcheck_clean_fixture
+                ${CMAKE_CURRENT_BINARY_DIR}/hip_waitcheck_clean_fixture.hsaco)
+            set(_waitcheck_clean_bundle
+                ${CMAKE_CURRENT_BINARY_DIR}/hip_waitcheck_clean_fixture.bundle.o)
+            add_custom_command(
+                OUTPUT ${_waitcheck_clean_fixture}
+                BYPRODUCTS ${_waitcheck_clean_bundle}
+                COMMAND ${AMDCXX} -x hip --offload-device-only
+                    --offload-arch=${RJ_HIP_TEST_ARCH} --rocm-path=${ROCM_PATH}
+                    -std=c++20 -O2 -c -o ${_waitcheck_clean_bundle}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/hip_waitcheck_clean_fixture.hip
+                COMMAND ${ROCM_PATH}/lib/llvm/bin/clang-offload-bundler
+                    --unbundle --type=o
+                    --targets=hipv4-amdgcn-amd-amdhsa--${RJ_HIP_TEST_ARCH}
+                    --input=${_waitcheck_clean_bundle}
+                    --output=${_waitcheck_clean_fixture}
+                DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/hip_waitcheck_clean_fixture.hip ${AMDCXX}
+                VERBATIM
+            )
+            add_custom_target(hip_waitcheck_clean_fixture_target
+                DEPENDS ${_waitcheck_clean_fixture})
             add_dependencies(
                 hip_waitcheck_hazard_test_target
                 rocjitsu_waitcheck_hooks hip_waitcheck_hazard_fixture_target
+                hip_waitcheck_clean_fixture_target
             )
             if(RJ_INSTALL_TESTS)
-                install(FILES ${_waitcheck_hazard_fixture}
+                install(FILES ${_waitcheck_hazard_fixture} ${_waitcheck_clean_fixture}
                     DESTINATION ${RJ_INSTALL_TEST_BIN_DIR})
             endif()
             rj_add_hip_test_case(
@@ -4937,6 +4962,39 @@ if(RJ_ENABLE_HIP_TESTS)
                     "ROCJITSU_WAITCHECK_MODE=eager"
                 REQUIRED_OUTPUT "loaded code object image is unavailable; check unavailable"
             )
+            foreach(_waitcheck_mode eager dispatch)
+                rj_add_hip_test_case(
+                    hip_waitcheck_hazard_test
+                    "HipWaitcheckHazardTest.CleanFileReaderLoadsWithWaitChecking"
+                    NAME "WaitcheckHsaToolsHipTest.CleanFileReader.${_waitcheck_mode}"
+                    CONFIG ${RJ_HIP_TEST_CONFIG}
+                    ENVIRONMENT ${_waitcheck_env}
+                        "ROCJITSU_WAITCHECK_MODE=${_waitcheck_mode}"
+                    REQUIRED_OUTPUT "summary loads=[1-9][0-9]*.*unavailable=0"
+                )
+                rj_add_hip_test_case(
+                    hip_waitcheck_hazard_test
+                    "HipWaitcheckHazardTest.CleanPathModuleLoadsWithWaitChecking"
+                    NAME "WaitcheckHsaToolsHipTest.CleanPathModule.${_waitcheck_mode}"
+                    CONFIG ${RJ_HIP_TEST_CONFIG}
+                    ENVIRONMENT ${_waitcheck_env}
+                        "ROCJITSU_WAITCHECK_MODE=${_waitcheck_mode}"
+                    REQUIRED_OUTPUT "summary loads=[1-9][0-9]*.*unavailable=0"
+                )
+                rj_add_hip_test_case(
+                    hip_waitcheck_hazard_test
+                    "HipWaitcheckHazardTest.FileReaderSubstitutionIsUnavailable"
+                    NAME "WaitcheckHsaToolsHipTest.FileReaderSubstitution.${_waitcheck_mode}"
+                    CONFIG ${RJ_HIP_TEST_CONFIG}
+                    ENVIRONMENT
+                        "HSA_TOOLS_DISABLE_REGISTER=1"
+                        "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_waitcheck_hooks>"
+                        "ROCJITSU_WAITCHECK=1"
+                        "ROCJITSU_WAITCHECK_FAIL=0"
+                        "ROCJITSU_WAITCHECK_MODE=${_waitcheck_mode}"
+                    REQUIRED_OUTPUT "loaded code object image is unavailable; check unavailable"
+                )
+            endforeach()
             rj_add_hip_test_case(
                 hip_waitcheck_hazard_test "HipWaitcheckHazardTest.DispatchRejectsBeforeSubmission"
                 NAME WaitcheckHsaToolsHipTest.DispatchRejectsBeforeSubmission

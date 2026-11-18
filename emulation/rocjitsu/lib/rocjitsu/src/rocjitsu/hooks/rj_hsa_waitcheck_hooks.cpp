@@ -15,6 +15,7 @@
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/isa/target_registry.h"
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cerrno>
 #include <condition_variable>
@@ -35,7 +36,10 @@
 #include <vector>
 
 #include <dlfcn.h>
+#include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/sysmacros.h>
+#include <unistd.h>
 
 namespace {
 
@@ -82,6 +86,11 @@ struct ReaderEntry {
   const uint8_t *bytes = nullptr;
   size_t size = 0;
   rocjitsu::CodeObjectFileSnapshot owned;
+  bool file_backed = false;
+  dev_t file_device = 0;
+  ino_t file_inode = 0;
+  size_t file_offset = 0;
+  std::string file_path;
   std::vector<uint8_t> analyzed_bytes;
   AnalysisResult result;
 };
@@ -326,11 +335,27 @@ public:
     entries_.insert_or_assign(reader.handle, std::move(entry));
   }
 
-  void store_owned(hsa_code_object_reader_t reader, rocjitsu::CodeObjectFileSnapshot bytes) {
+  void store_owned(hsa_code_object_reader_t reader, rocjitsu::CodeObjectFileSnapshot bytes,
+                   int file, size_t offset) {
     auto entry = std::make_shared<ReaderEntry>();
     entry->owned = std::move(bytes);
     entry->bytes = entry->owned->data();
     entry->size = entry->owned->size();
+    struct stat status{};
+    if (fstat(file, &status) == 0 && S_ISREG(status.st_mode)) {
+      entry->file_backed = true;
+      entry->file_device = status.st_dev;
+      entry->file_inode = status.st_ino;
+      entry->file_offset = offset;
+      char fd_path[64] = {};
+      const int length = std::snprintf(fd_path, sizeof(fd_path), "/proc/self/fd/%d", file);
+      if (length > 0 && static_cast<size_t>(length) < sizeof(fd_path)) {
+        std::array<char, 4096> path{};
+        const ssize_t path_length = ::readlink(fd_path, path.data(), path.size());
+        if (path_length > 0 && static_cast<size_t>(path_length) < path.size())
+          entry->file_path.assign(path.data(), static_cast<size_t>(path_length));
+      }
+    }
     std::lock_guard lock(mutex_);
     entries_.insert_or_assign(reader.handle, std::move(entry));
   }
@@ -978,12 +1003,107 @@ template <typename FunctionPointer>
 
 enum class LoadedImageIdentity { Same, Changed, Unavailable };
 
+[[nodiscard]] bool maps_path_matches(const char *encoded, std::string_view expected) {
+  if (encoded == nullptr)
+    return false;
+  const size_t encoded_size = std::strcspn(encoded, "\n");
+  size_t position = 0;
+  for (size_t i = 0; i < encoded_size; ++i) {
+    unsigned char byte = static_cast<unsigned char>(encoded[i]);
+    if (byte == '\\' && i + 3 < encoded_size && encoded[i + 1] >= '0' && encoded[i + 1] <= '7' &&
+        encoded[i + 2] >= '0' && encoded[i + 2] <= '7' && encoded[i + 3] >= '0' &&
+        encoded[i + 3] <= '7') {
+      byte = static_cast<unsigned char>((encoded[i + 1] - '0') * 64 + (encoded[i + 2] - '0') * 8 +
+                                        encoded[i + 3] - '0');
+      i += 3;
+    }
+    if (position >= expected.size() || byte != static_cast<unsigned char>(expected[position++]))
+      return false;
+  }
+  return position == expected.size();
+}
+
+[[nodiscard]] bool maps_to_reader_file(const ReaderEntry &reader, uintptr_t base, size_t size) {
+  if (!reader.file_backed || base > std::numeric_limits<uintptr_t>::max() - size)
+    return false;
+
+  FILE *maps = std::fopen("/proc/self/maps", "r");
+  if (maps == nullptr)
+    return false;
+  char *line = nullptr;
+  size_t capacity = 0;
+  bool matches = false;
+  while (::getline(&line, &capacity, maps) >= 0) {
+    unsigned long long begin = 0, end = 0, offset = 0, inode = 0;
+    unsigned int device_major = 0, device_minor = 0;
+    char permissions[5] = {};
+    if (std::sscanf(line, "%llx-%llx %4s %llx %x:%x %llu", &begin, &end, permissions, &offset,
+                    &device_major, &device_minor, &inode) != 7 ||
+        base < begin || base >= end)
+      continue;
+    const auto delta = static_cast<unsigned long long>(base - begin);
+    const bool same_device =
+        device_major == major(reader.file_device) && device_minor == minor(reader.file_device);
+    // Some syscall emulators report a synthetic st_dev for fstat while maps
+    // exposes the host device. Match the procfs fd path as a second witness.
+    const bool same_path =
+        !reader.file_path.empty() && maps_path_matches(std::strchr(line, '/'), reader.file_path);
+    matches = permissions[0] == 'r' && permissions[3] == 'p' && (same_device || same_path) &&
+              inode == reader.file_inode && end - base >= size &&
+              delta <= std::numeric_limits<size_t>::max() &&
+              offset <= std::numeric_limits<size_t>::max() - delta &&
+              offset + delta == reader.file_offset;
+    break;
+  }
+  std::free(line);
+  std::fclose(maps);
+  return matches;
+}
+
+[[nodiscard]] LoadedImageIdentity mapped_file_image_identity(const ReaderEntry &reader,
+                                                             uintptr_t base,
+                                                             const uint8_t *analyzed_bytes,
+                                                             size_t size) {
+  if (!maps_to_reader_file(reader, base, size) ||
+      base > static_cast<uintptr_t>(std::numeric_limits<off_t>::max()) ||
+      size > static_cast<size_t>(std::numeric_limits<off_t>::max() - base))
+    return LoadedImageIdentity::Unavailable;
+
+  // The loader can report a dangling pointer to a temporary substitution
+  // buffer. A read through procfs fails for an unmapped range without touching
+  // that pointer in this process. The file mapping check also rejects a live
+  // substitution buffer with the same size as the reader's original image.
+  const int memory = ::open("/proc/self/mem", O_RDONLY | O_CLOEXEC);
+  if (memory < 0)
+    return LoadedImageIdentity::Unavailable;
+  std::array<uint8_t, 16384> chunk{};
+  size_t done = 0;
+  LoadedImageIdentity identity = LoadedImageIdentity::Same;
+  while (done < size) {
+    const size_t remaining = std::min(chunk.size(), size - done);
+    const ssize_t read = ::pread(memory, chunk.data(), remaining, static_cast<off_t>(base + done));
+    if (read < 0 && errno == EINTR)
+      continue;
+    if (read <= 0) {
+      identity = LoadedImageIdentity::Unavailable;
+      break;
+    }
+    if (std::memcmp(chunk.data(), analyzed_bytes + done, static_cast<size_t>(read)) != 0) {
+      identity = LoadedImageIdentity::Changed;
+      break;
+    }
+    done += static_cast<size_t>(read);
+  }
+  ::close(memory);
+  return identity;
+}
+
 [[nodiscard]] LoadedImageIdentity loaded_image_identity(hsa_loaded_code_object_t loaded,
-                                                        const uint8_t *reader_bytes,
+                                                        const ReaderEntry &reader,
                                                         const uint8_t *analyzed_bytes,
                                                         size_t size) {
   auto *get_info = resolve_loaded_code_object_get_info();
-  if (get_info == nullptr || reader_bytes == nullptr || analyzed_bytes == nullptr || size == 0)
+  if (get_info == nullptr || reader.bytes == nullptr || analyzed_bytes == nullptr || size == 0)
     return LoadedImageIdentity::Unavailable;
   uint32_t storage_type = 0;
   if (get_info(loaded, kLoadedCodeObjectInfoStorageType, &storage_type) != HSA_STATUS_SUCCESS)
@@ -999,11 +1119,14 @@ enum class LoadedImageIdentity { Same, Changed, Unavailable };
     if (loaded_size != size)
       return LoadedImageIdentity::Changed;
     // The loader's reported base can refer to temporary substitution storage
-    // that is already gone when the load returns. Only the original reader
-    // buffer has a lifetime guaranteed by the HSA reader contract.
-    if (base != reinterpret_cast<uintptr_t>(reader_bytes))
-      return LoadedImageIdentity::Unavailable;
-    return std::memcmp(reader_bytes, analyzed_bytes, size) == 0 ? LoadedImageIdentity::Same
+    // that is already gone when the load returns. A memory reader's original
+    // buffer is directly comparable; a file reader has a separate private map
+    // that needs its own provenance and readable-copy checks.
+    if (base != reinterpret_cast<uintptr_t>(reader.bytes))
+      return reader.file_backed ? mapped_file_image_identity(reader, static_cast<uintptr_t>(base),
+                                                             analyzed_bytes, size)
+                                : LoadedImageIdentity::Unavailable;
+    return std::memcmp(reader.bytes, analyzed_bytes, size) == 0 ? LoadedImageIdentity::Same
                                                                 : LoadedImageIdentity::Changed;
   }
   if (storage_type == 1) { // HSA file reader
@@ -1142,7 +1265,7 @@ hsa_status_t HSA_API waitcheck_reader_create_from_file(hsa_file_t file,
     bytes = rocjitsu::snapshot_code_object_file(file);
   const hsa_status_t status = original(file, reader);
   if (status == HSA_STATUS_SUCCESS && reader != nullptr && bytes)
-    ReaderRegistry::instance().store_owned(*reader, std::move(bytes));
+    ReaderRegistry::instance().store_owned(*reader, std::move(bytes), file, 0);
   return status;
 }
 
@@ -1170,7 +1293,7 @@ hsa_status_t HSA_API waitcheck_reader_create_from_file_with_offset_size(
     bytes = rocjitsu::snapshot_code_object_file_range(file, offset, size);
   const hsa_status_t status = original(file, offset, size, reader);
   if (status == HSA_STATUS_SUCCESS && reader != nullptr && bytes)
-    ReaderRegistry::instance().store_owned(*reader, std::move(bytes));
+    ReaderRegistry::instance().store_owned(*reader, std::move(bytes), file, offset);
   return status;
 }
 
@@ -1231,8 +1354,8 @@ hsa_status_t HSA_API waitcheck_executable_load_agent_code_object(
     }
     const auto &checked_image = *prepared.entry->kernels.front()->code_object;
     const auto identity = loaded_image_identity(
-        *runtime_output, entry->bytes,
-        reinterpret_cast<const uint8_t *>(checked_image.image_data()), checked_image.image_size());
+        *runtime_output, *entry, reinterpret_cast<const uint8_t *>(checked_image.image_data()),
+        checked_image.image_size());
     if (identity != LoadedImageIdentity::Same) {
       registry.complete(prepared, {}, false);
       return unchecked_loaded_image_status(identity);
@@ -1269,7 +1392,7 @@ hsa_status_t HSA_API waitcheck_executable_load_agent_code_object(
     if (status != HSA_STATUS_SUCCESS || !env_enabled("ROCJITSU_WAITCHECK", true))
       return status;
     const auto identity = loaded_image_identity(
-        *runtime_output, entry->bytes, entry->analyzed_bytes.data(), entry->analyzed_bytes.size());
+        *runtime_output, *entry, entry->analyzed_bytes.data(), entry->analyzed_bytes.size());
     return identity == LoadedImageIdentity::Same ? status : unchecked_loaded_image_status(identity);
   } else if (env_enabled("ROCJITSU_WAITCHECK", true)) {
     g_stats.unavailable.fetch_add(1, std::memory_order_relaxed);

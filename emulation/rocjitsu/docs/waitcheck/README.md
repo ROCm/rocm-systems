@@ -523,13 +523,17 @@ HSA queue.
 After a successful load, the hook verifies the selected image against the
 reader bytes it checked. For a memory reader it only reads the reader-owned
 buffer; a different loader memory base may point to expired storage and is
-reported as unavailable without dereferencing it. A file reader is compared
-through a fresh file snapshot. If another loader layer substitutes an image,
-or the selected bytes cannot be verified, the hook discards the pending
-dispatch mapping and reports that checking is unavailable. With
-`ROCJITSU_WAITCHECK_FAIL=1`,
-the process aborts before freeze because ROCR may already have published
-symbols from the selected image. Eager mode and dispatch mode with an
+reported as unavailable without dereferencing it. For a file reader, ROCr
+currently reports a private file mapping as a memory base. The hook checks
+that mapping's file identity and offset, then reads it through procfs and
+compares it with the analyzed snapshot. This check requires one readable
+private mapping to cover the image. A runtime that reports file storage is
+checked through a fresh file snapshot. If procfs access fails, the mapping
+cannot be verified, or another loader layer substitutes an image, the hook
+discards the pending dispatch mapping and reports that checking is unavailable.
+With `ROCJITSU_WAITCHECK_FAIL=1`, the process aborts before freeze because
+ROCr may already have published symbols from the selected image. Eager mode
+and dispatch mode with an
 active cooperative queue can conservatively reject a hazardous caller reader
 before a later loader layer substitutes it; that diagnostic describes the
 caller reader, not the selected image.

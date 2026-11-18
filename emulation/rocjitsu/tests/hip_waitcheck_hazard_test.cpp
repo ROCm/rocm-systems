@@ -12,8 +12,11 @@
 #include <string>
 #include <vector>
 
+#include <fcntl.h>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
+#include <hsa/hsa.h>
+#include <unistd.h>
 
 // Keep the producer and consumer in one inline-assembly block so LLVM cannot
 // repair the deliberately missing lgkmcnt wait between them. The kernel is
@@ -27,6 +30,7 @@ __global__ void missing_smem_wait_kernel() {
 }
 
 std::filesystem::path g_hazard_fixture;
+std::filesystem::path g_clean_fixture;
 
 std::vector<char> read_hazard_fixture() {
   std::ifstream input(g_hazard_fixture, std::ios::binary);
@@ -63,6 +67,58 @@ TEST(HipWaitcheckHazardTest, SameSizeLoaderSubstitutionDoesNotReadTemporaryImage
   EXPECT_EQ(hipModuleUnload(module), hipSuccess);
 }
 
+void check_clean_file_reader_load() {
+  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+  hsa_agent_t gpu{};
+  ASSERT_EQ(hsa_iterate_agents(
+                [](hsa_agent_t agent, void *data) {
+                  hsa_device_type_t type{};
+                  if (hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type) ==
+                          HSA_STATUS_SUCCESS &&
+                      type == HSA_DEVICE_TYPE_GPU && static_cast<hsa_agent_t *>(data)->handle == 0)
+                    *static_cast<hsa_agent_t *>(data) = agent;
+                  return HSA_STATUS_SUCCESS;
+                },
+                &gpu),
+            HSA_STATUS_SUCCESS);
+  ASSERT_NE(gpu.handle, 0u);
+
+  const int file = ::open(g_clean_fixture.c_str(), O_RDONLY | O_CLOEXEC);
+  ASSERT_GE(file, 0) << g_clean_fixture;
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(hsa_code_object_reader_create_from_file(file, &reader), HSA_STATUS_SUCCESS);
+  hsa_executable_t executable{};
+  ASSERT_EQ(hsa_executable_create_alt(HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT,
+                                      nullptr, &executable),
+            HSA_STATUS_SUCCESS);
+  hsa_loaded_code_object_t loaded{};
+  EXPECT_EQ(hsa_executable_load_agent_code_object(executable, gpu, reader, nullptr, &loaded),
+            HSA_STATUS_SUCCESS);
+  EXPECT_NE(loaded.handle, 0u);
+  EXPECT_EQ(hsa_executable_freeze(executable, nullptr), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_executable_destroy(executable), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_code_object_reader_destroy(reader), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(::close(file), 0);
+  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
+}
+
+TEST(HipWaitcheckHazardTest, CleanFileReaderLoadsWithWaitChecking) {
+  check_clean_file_reader_load();
+}
+
+TEST(HipWaitcheckHazardTest, CleanPathModuleLoadsWithWaitChecking) {
+  hipModule_t module = nullptr;
+  ASSERT_EQ(hipModuleLoad(&module, g_clean_fixture.c_str()), hipSuccess);
+  ASSERT_NE(module, nullptr);
+  EXPECT_EQ(hipModuleUnload(module), hipSuccess);
+}
+
+TEST(HipWaitcheckHazardTest, FileReaderSubstitutionIsUnavailable) {
+  const std::string option = "-substitute:1=" + g_clean_fixture.string();
+  ASSERT_EQ(setenv("LOADER_OPTIONS_APPEND", option.c_str(), 1), 0);
+  check_clean_file_reader_load();
+}
+
 TEST(HipWaitcheckHazardTest, DispatchRejectsBeforeSubmission) {
   ::testing::FLAGS_gtest_death_test_style = "threadsafe";
   EXPECT_EXIT(
@@ -77,8 +133,9 @@ TEST(HipWaitcheckHazardTest, DispatchRejectsBeforeSubmission) {
 }
 
 int main(int argc, char **argv) {
-  g_hazard_fixture = std::filesystem::canonical("/proc/self/exe").parent_path() /
-                     "hip_waitcheck_hazard_fixture.hsaco";
+  const auto fixture_dir = std::filesystem::canonical("/proc/self/exe").parent_path();
+  g_hazard_fixture = fixture_dir / "hip_waitcheck_hazard_fixture.hsaco";
+  g_clean_fixture = fixture_dir / "hip_waitcheck_clean_fixture.hsaco";
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
