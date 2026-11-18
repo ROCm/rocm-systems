@@ -18,7 +18,6 @@
 #include <fstream>
 #include <limits>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -82,7 +81,7 @@ typed_scalar(const schema_param& param, const nlohmann::json& value)
 
 /// An array's items are joined as the tokens of a command-line list option are.
 std::optional<std::string>
-joined_array(const nlohmann::json& value, std::string_view separator)
+joined_array(const nlohmann::json& value)
 {
     std::vector<std::string> items;
     items.reserve(value.size());
@@ -95,7 +94,7 @@ joined_array(const nlohmann::json& value, std::string_view separator)
         }
         items.push_back(std::move(*text));
     }
-    return join_list(items, separator);
+    return join_list(items, k_list_separator);
 }
 
 struct decoded_value
@@ -116,8 +115,7 @@ decode_value(const schema_param& param, const nlohmann::json& value)
                      .text           = std::nullopt,
                      .array_rejected = true };
         }
-        return { .typed = std::nullopt,
-                 .text  = joined_array(value, list_separator(param)) };
+        return { .typed = std::nullopt, .text = joined_array(value) };
     }
     if(auto typed = typed_scalar(param, value))
     {
@@ -297,6 +295,14 @@ private:
     const schema& m_schema;
     parse_result& m_result;
 };
+
+parse_result
+read_failure(std::string message)
+{
+    parse_result result{};
+    result.errors.push_back(std::move(message));
+    return result;
+}
 }  // namespace
 
 nlohmann::json
@@ -331,17 +337,15 @@ file_parser::parse_file(const schema& config_schema, const std::string& filepath
     std::error_code directory_error;
     if(std::filesystem::is_directory(filepath, directory_error))
     {
-        throw std::runtime_error(
+        return read_failure(
             fmt::format("configuration path '{}' is a directory", filepath));
     }
 
     std::ifstream input{ filepath };
     if(!input.is_open())
     {
-        parse_result result{};
-        result.errors.push_back(
+        return read_failure(
             fmt::format("failed to open configuration file '{}'", filepath));
-        return result;
     }
 
     nlohmann::json document;
@@ -352,10 +356,8 @@ file_parser::parse_file(const schema& config_schema, const std::string& filepath
     {
         // A malformed document throws parse_error; a number too large for a double,
         // such as 1e400, throws out_of_range.
-        parse_result result{};
-        result.errors.push_back(fmt::format("failed to parse configuration file '{}': {}",
-                                            filepath, error.what()));
-        return result;
+        return read_failure(fmt::format("failed to parse configuration file '{}': {}",
+                                        filepath, error.what()));
     }
     return parse(config_schema, document);
 }

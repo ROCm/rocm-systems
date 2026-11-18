@@ -12,7 +12,7 @@
 #include "parser/value_text.hpp"
 
 #include <gtest/gtest.h>
-#include <nlohmann/json.hpp>  // NOLINT(misc-include-cleaner): json::parse
+#include <nlohmann/json.hpp>
 #include <nlohmann/json_fwd.hpp>
 
 #include <algorithm>
@@ -33,8 +33,6 @@ using namespace rocprofsys::parser;
 
 namespace
 {
-constexpr double k_frequency_limit = 3.0;
-
 schema_param
 make_param(std::string param_id, param_type type)
 {
@@ -65,6 +63,8 @@ int_value(std::int64_t value)
 schema
 make_schema()
 {
+    constexpr double k_frequency_limit = 3.0;
+
     schema value{};
     auto   trace        = make_param("trace", param_type::boolean);
     trace.category      = "tracing";
@@ -301,18 +301,14 @@ TEST(parser_file, rejects_an_environment_name_and_a_misplaced_parameter)
     expect_mentions(parsed.errors, "not in category");
 }
 
-TEST(parser_file, a_directory_path_throws)
+TEST(parser_file, a_directory_path_is_reported)
 {
     const auto directory = std::filesystem::temp_directory_path().string();
-    try
-    {
-        const auto parsed = file_parser{}.parse_file(make_schema(), directory);
-        static_cast<void>(parsed);
-        FAIL() << "a directory path must throw";
-    } catch(const std::runtime_error& error)
-    {
-        EXPECT_NE(std::string{ error.what() }.find(directory), std::string::npos);
-    }
+    const auto parsed    = file_parser{}.parse_file(make_schema(), directory);
+    EXPECT_TRUE(parsed.values.empty());
+    ASSERT_EQ(parsed.errors.size(), 1U);
+    EXPECT_EQ(parsed.errors.front(),
+              "configuration path '" + directory + "' is a directory");
 }
 
 TEST(parser_file, catalog_document_omits_defaults_and_round_trips)
@@ -371,6 +367,34 @@ TEST(parser_file, reads_ids_that_start_with_an_underscore)
     EXPECT_TRUE(parsed.errors.empty());
     EXPECT_EQ(parsed.values,
               (typed_values_t{ { "_hidden", int_value(1) }, { "shown", int_value(2) } }));
+}
+
+// A parameter with no category has no place in a document grouped by category, so
+// catalog_document leaves it out instead of writing it under an empty key.
+TEST(parser_file, catalog_document_omits_an_uncategorized_parameter)
+{
+    auto config_schema = make_schema();
+    add_param(config_schema, make_param("loose", param_type::integer));
+    const auto resolved = resolved_config{
+        { "loose",
+          resolved_value{ .value = int_value(1), .source = config_source::file } },
+    };
+
+    EXPECT_TRUE(catalog_document(config_schema, resolved).empty());
+}
+
+// A parameter with no category has an empty category string, so an empty key must not
+// be taken as the name of the category that holds it.
+TEST(parser_file, an_empty_category_key_does_not_name_uncategorized_parameters)
+{
+    auto config_schema = make_schema();
+    add_param(config_schema, make_param("loose", param_type::integer));
+    const auto document = nlohmann::json::parse(R"({ "": { "loose": 1 } })");
+
+    const auto parsed = file_parser{}.parse(config_schema, document);
+    EXPECT_TRUE(parsed.values.empty());
+    ASSERT_EQ(parsed.errors.size(), 1U);
+    expect_mentions(parsed.errors, "unknown category");
 }
 
 TEST(parser_preset, maps_environment_settings_to_parameters)
@@ -451,6 +475,41 @@ TEST(parser_precedence, preset_overrides_file_and_environment)
     EXPECT_EQ(resolved.at("freq").source, config_source::environment);
 }
 
+TEST(parser_precedence, later_source_of_equal_rank_wins)
+{
+    const auto first_then_second = resolve_precedence({
+        source_with(config_source::file, { { "trace", str_value("first") } }),
+        source_with(config_source::file, { { "trace", str_value("second") } }),
+    });
+    EXPECT_EQ(format_value(first_then_second.at("trace").value), "second");
+
+    const auto second_then_first = resolve_precedence({
+        source_with(config_source::file, { { "trace", str_value("second") } }),
+        source_with(config_source::file, { { "trace", str_value("first") } }),
+    });
+    EXPECT_EQ(format_value(second_then_first.at("trace").value), "first");
+}
+
+// Enough equal-rank sources that an unstable sort would reorder them. A short input
+// can pass by accident, because small ranges are often sorted by a stable insertion sort.
+TEST(parser_precedence, equal_rank_sources_keep_their_input_order)
+{
+    constexpr std::int64_t k_source_count = 64;
+
+    std::vector<sourced_values> sources;
+    for(std::int64_t i = 0; i < k_source_count; ++i)
+    {
+        sources.push_back(
+            source_with(config_source::environment, { { "freq", int_value(i) } }));
+        sources.push_back(
+            source_with(config_source::default_value, { { "freq", int_value(-i) } }));
+    }
+
+    const auto resolved = resolve_precedence(std::move(sources));
+    EXPECT_EQ(resolved.at("freq").source, config_source::environment);
+    EXPECT_EQ(resolved.at("freq").value, int_value(k_source_count - 1));
+}
+
 TEST(parser_precedence, apply_resolved_keeps_the_winning_source)
 {
     auto       store    = config_store{ make_schema() };
@@ -479,4 +538,49 @@ TEST(parser_precedence, apply_resolved_writes_nothing_when_a_value_is_invalid)
     EXPECT_THROW(apply_resolved(store, resolved), std::runtime_error);
     EXPECT_FALSE(store.contains("trace"));
     EXPECT_FALSE(store.contains("freq"));
+}
+
+// An id that is not in the store's schema is rejected by name. The valid value beside
+// it is not written, because every value is checked before the first write.
+TEST(parser_precedence, apply_resolved_rejects_an_unknown_parameter)
+{
+    auto       store    = config_store{ make_schema() };
+    const auto resolved = resolved_config{
+        { "bogus",
+          resolved_value{ .value = int_value(1), .source = config_source::file } },
+        { "trace", resolved_value{ .value  = config_value_t{ true },
+                                   .source = config_source::file } },
+    };
+    try
+    {
+        apply_resolved(store, resolved);
+        FAIL() << "an unknown parameter must throw";
+    } catch(const std::runtime_error& error)
+    {
+        EXPECT_NE(std::string{ error.what() }.find("unknown parameter 'bogus'"),
+                  std::string::npos);
+    }
+    EXPECT_FALSE(store.contains("trace"));
+}
+
+// The exception lists every rejected value, in id order and separated by "; ", not
+// only the first one.
+TEST(parser_precedence, apply_resolved_reports_every_rejection)
+{
+    auto       store    = config_store{ make_schema() };
+    const auto resolved = resolved_config{
+        { "bogus",
+          resolved_value{ .value = int_value(1), .source = config_source::file } },
+        { "freq",
+          resolved_value{ .value = int_value(9), .source = config_source::file } },
+    };
+    try
+    {
+        apply_resolved(store, resolved);
+        FAIL() << "rejected values must throw";
+    } catch(const std::runtime_error& error)
+    {
+        EXPECT_EQ(std::string{ error.what() },
+                  "unknown parameter 'bogus'; invalid value '9' for parameter 'freq'");
+    }
 }

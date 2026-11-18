@@ -10,7 +10,6 @@
 #include <fmt/ranges.h>
 
 #include <algorithm>
-#include <cstdint>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -20,12 +19,6 @@ namespace rocprofsys::parser
 {
 namespace
 {
-[[nodiscard]] constexpr std::uint8_t
-source_rank(config_source source) noexcept
-{
-    return static_cast<std::uint8_t>(source);
-}
-
 /// Values are already typed by their parser, so only ids and types are checked here.
 std::vector<std::string>
 rejection_messages(const schema& config_schema, const resolved_config& resolved)
@@ -52,12 +45,7 @@ rejection_messages(const schema& config_schema, const resolved_config& resolved)
 resolved_config
 resolve_precedence(std::vector<sourced_values> sources)
 {
-    // libstdc++ has no std::ranges::stable_sort.
-    std::stable_sort(  // NOLINT(modernize-use-ranges)
-        sources.begin(), sources.end(),
-        [](const sourced_values& lhs, const sourced_values& rhs) {
-            return source_rank(lhs.source) < source_rank(rhs.source);
-        });
+    std::ranges::stable_sort(sources, {}, &sourced_values::source);
 
     resolved_config resolved;
     for(const auto& item : sources)

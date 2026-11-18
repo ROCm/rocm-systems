@@ -38,8 +38,16 @@ using resolved_config = std::map<std::string, resolved_value, std::less<>>;
 [[nodiscard]] resolved_config
 resolve_precedence(std::vector<sourced_values> sources);
 
-/// Store each resolved value under the source that supplied it.
-/// Every value is checked before the first write. A rejection leaves the store unchanged.
+/**
+ * Store each resolved value under the source that supplied it.
+ *
+ * Every value is checked before the first write. A rejection leaves the store
+ * unchanged.
+ *
+ * @throws std::runtime_error if the store has no schema, or if any value is
+ * rejected; the message lists every rejection, separated by "; ".
+ * Any exception a change callback throws also propagates.
+ */
 void
 apply_resolved(config_store& store, const resolved_config& resolved);
 

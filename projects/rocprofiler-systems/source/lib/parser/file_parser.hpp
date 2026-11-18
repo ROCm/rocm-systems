@@ -35,6 +35,13 @@ public:
     [[nodiscard]] parse_result parse(const schema&         config_schema,
                                      const nlohmann::json& document) const;
 
+    /**
+     * Read the JSON file at @p filepath, then read its document as parse() does.
+     *
+     * A directory, a file that cannot be opened, and a document that is not valid
+     * JSON, including a number too large for a double such as 1e400, are reported in
+     * the result's errors, which name the path.
+     */
     [[nodiscard]] parse_result parse_file(const schema&      config_schema,
                                           const std::string& filepath) const;
 };
