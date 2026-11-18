@@ -1119,10 +1119,12 @@ namespace {
 
 // A direct call initializes its even SGPR pair to one of this kernel's decoded
 // continuations. A SETPC is bounded only if every path still carries such a link.
-bool cdna3_kernel_has_unknown_target(BasicBlock &entry, const KernelScopeSpec &spec,
-                                     const BlockOffsetIndex &offsets,
-                                     const std::unordered_set<BasicBlock *> &reachable,
-                                     uint32_t sgpr_count) {
+bool kernel_has_unknown_target(BasicBlock &entry, const KernelScopeSpec &spec,
+                               const BlockOffsetIndex &offsets,
+                               const std::unordered_set<BasicBlock *> &reachable,
+                               uint32_t ordinary_sgpr_count,
+                               const std::unordered_set<const BasicBlock *> &proven_reentries = {},
+                               bool allow_implicit_exit = false) {
   if (std::ranges::none_of(reachable, [](const BasicBlock *block) {
         return block->successor_issue() != BasicBlock::SuccessorIssue::None;
       }))
@@ -1145,10 +1147,9 @@ bool cdna3_kernel_has_unknown_target(BasicBlock &entry, const KernelScopeSpec &s
   merge(&entry, 0);
   for (uint64_t offset : spec.own_entries)
     merge(block_for_offset(offsets, offset), 0);
-  const auto pair_bit = [sgpr_count](unsigned reg) -> uint64_t {
+  const auto pair_bit = [ordinary_sgpr_count](unsigned reg) -> uint64_t {
     // Firmware's aliased scalar tail can also be written by implicit operands.
-    if ((reg & 1u) || reg >= 128 ||
-        reg + 1 >= cdna3::flat_scratch_base(cdna3::sgpr_alias_end(sgpr_count)))
+    if ((reg & 1u) || reg >= 128 || reg + 1 >= ordinary_sgpr_count)
       return 0;
     return uint64_t{1} << (reg / 2);
   };
@@ -1170,7 +1171,11 @@ bool cdna3_kernel_has_unknown_target(BasicBlock &entry, const KernelScopeSpec &s
           links &= ~pair_bit(first);
       }
     }
-    if (block->successor_issue() != BasicBlock::SuccessorIssue::None) {
+    const BasicBlock::SuccessorIssue issue = block->successor_issue();
+    const bool implicit_exit =
+        allow_implicit_exit && issue == BasicBlock::SuccessorIssue::MissingFallthrough;
+    if (issue != BasicBlock::SuccessorIssue::None && !implicit_exit &&
+        !proven_reentries.contains(block)) {
       const Instruction *term = block->terminator();
       if (block->successor_issue() != BasicBlock::SuccessorIssue::IndirectControlFlow || !term ||
           term->mnemonic() != "s_setpc_b64" || !term->num_src_operands())
@@ -1192,6 +1197,52 @@ bool cdna3_kernel_has_unknown_target(BasicBlock &entry, const KernelScopeSpec &s
     }
   }
   return false;
+}
+
+// Omitted but bounded call/return edges cannot introduce set VSKIP when
+// every instruction in the inspected text leaves it clear. This establishes
+// only the MODE precondition, never EXEC or interprocedural register liveness.
+bool vskip_is_preserved_in_closed_text(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+                                       std::span<const KernelDescriptorInfo> kernels,
+                                       std::span<const uint8_t> text, rocjitsu::IsaFamily arch) {
+  std::unordered_set<const BasicBlock *> proven_reentries;
+  for (const std::unique_ptr<BasicBlock> &block : blocks) {
+    for (const Instruction &inst : block->instructions()) {
+      if (may_enable_vskip(inst, text, arch) || inst.mnemonic().starts_with("s_rfe"))
+        return false;
+      if ((inst.flags() & INDIRECT_CALL) &&
+          (&inst != block->terminator() || block->call_edges().empty()))
+        return false;
+    }
+    if (static_pc_reentry_target(*block, kernels))
+      proven_reentries.insert(block.get());
+    for (const BasicBlock::CallEdge &edge : block->call_edges()) {
+      if (callee_reentry_target(edge, kernels))
+        proven_reentries.insert(edge.callee);
+    }
+  }
+  const BlockOffsetIndex offsets = build_block_offset_index(blocks);
+  const BlockPositionIndex positions = build_block_position_index(blocks);
+  for (const KernelDescriptorInfo &kernel : kernels) {
+    BasicBlock *entry = block_for_offset(offsets, kernel.entry_text_offset);
+    const std::optional<uint32_t> count =
+        AmdGpuCodeObject::min_kernel_sgpr_count(arch, std::span(&kernel, 1));
+    if (entry == nullptr || !count)
+      return false;
+    KernelScopeSpec spec;
+    if (kernarg_preload_length(kernel.descriptor))
+      spec.own_entries.insert(kernel.entry_text_offset + 256);
+    const std::vector<BasicBlock *> reached =
+        reachable_kernel_blocks(blocks, offsets, positions, *entry, spec);
+    const std::unordered_set<BasicBlock *> reachable(reached.begin(), reached.end());
+    const uint32_t ordinary = arch == rocjitsu::IsaFamily::Cdna3
+                                  ? cdna3::flat_scratch_base(cdna3::sgpr_alias_end(*count))
+                                  : ordinary_sgpr_bound(arch, *count);
+    if (kernel_has_unknown_target(*entry, spec, offsets, reachable, ordinary, proven_reentries,
+                                  true))
+      return false;
+  }
+  return !kernels.empty();
 }
 
 // Shared code must satisfy every kernel that can execute a probe. Keep an
@@ -1218,7 +1269,8 @@ cdna3_probe_sgpr_counts(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
       reached = reachable_kernel_blocks(blocks, offsets, positions, *entry, spec);
     const std::unordered_set<BasicBlock *> reachable(reached.begin(), reached.end());
     const bool incomplete =
-        !entry || cdna3_kernel_has_unknown_target(*entry, spec, offsets, reachable, count);
+        !entry || kernel_has_unknown_target(*entry, spec, offsets, reachable,
+                                            cdna3::flat_scratch_base(cdna3::sgpr_alias_end(count)));
     for (const auto &site : sites) {
       if (site.is_probe_call() &&
           (incomplete || reachable.contains(block_for_offset(offsets, site.anchor_offset))))
@@ -1523,8 +1575,14 @@ private:
       incomplete |=
           issue != BasicBlock::SuccessorIssue::None && !known_returns.contains(block->terminator());
     }
-    const bool closed_state = incomplete && callable_state_is_preserved_in_closed_text(
-                                                blocks, kernels, text, arch, state);
+    // The general proof models straight-line callees. VSKIP alone can also
+    // use the bounded return-link proof; this does not relax the other states
+    // or the stricter post-anchor completeness checks below.
+    const bool closed_state =
+        incomplete &&
+        (callable_state_is_preserved_in_closed_text(blocks, kernels, text, arch, state) ||
+         (state == CallableState::Vskip &&
+          vskip_is_preserved_in_closed_text(blocks, kernels, text, arch)));
 
     // Each bit denotes a possible incoming state; zero has no proven source.
     // Constant writes seed the worklist even inside cycles. Ordinary edges join
@@ -1944,6 +2002,9 @@ bool Instrumentor::ensure_liveness_built(uint8_t wave_size,
         can_analyze_exec = false;
     }
   }
+  // VSKIP is clear on dispatch. Keep this entry proof separate from EXEC,
+  // whose dispatch mask can be partial, and merge it with guest backedges.
+  options.vskip_clear_entry_blocks = entries;
   std::unique_ptr<ExecMaskAnalysis> exec;
   if (can_analyze_exec)
     exec = std::make_unique<ExecMaskAnalysis>(KernelBlockScope(scope), wave_size, edges, entries);
