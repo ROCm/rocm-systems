@@ -150,6 +150,21 @@ private:
   std::function<void()> release_;
 };
 
+/// @brief Whether cache maintenance acquired leases or needs another attempt.
+enum class CacheMaintenanceOutcome { Complete, Retry };
+
+/// @brief One maintenance lease, or a retry before the protected effect.
+struct CacheMaintenanceResult {
+  DeviceCacheMaintenanceLease lease{};
+  CacheMaintenanceOutcome outcome = CacheMaintenanceOutcome::Complete;
+};
+
+/// @brief Group maintenance leases, or a retry before the protected effect.
+struct CacheMaintenanceGroupResult {
+  std::vector<DeviceCacheMaintenanceLease> leases{};
+  CacheMaintenanceOutcome outcome = CacheMaintenanceOutcome::Complete;
+};
+
 /// @brief Coordinates functional cache state at device-wide atomic boundaries.
 ///
 /// An atomic RMW holds the exclusive guard while dirty L2 state is published
@@ -257,14 +272,12 @@ public:
                                   DeviceCacheOperation operation,
                                   const PreparedWritebackResolver &resolve_writeback);
   /// @brief Return expected prepared backing failures without throwing.
-  /// @details Still throws CacheMaintenanceUnavailable to request a retry.
+  /// @details Retry returns no leases and emits no terminal diagnostic.
   /// Configuration errors and internal cache invariant failures retain their
   /// legacy exceptions.
-  [[nodiscard]] static util::FailureOr<std::vector<DeviceCacheMaintenanceLease>>
-  acquire_cache_maintenance_group(std::span<const DeviceCacheDomain> domains,
-                                  DeviceCacheOperation operation,
-                                  const PreparedWritebackResolver &resolve_writeback,
-                                  util::DiagnosticEmitter emit_error);
+  [[nodiscard]] static util::FailureOr<CacheMaintenanceGroupResult> acquire_cache_maintenance_group(
+      std::span<const DeviceCacheDomain> domains, DeviceCacheOperation operation,
+      const PreparedWritebackResolver &resolve_writeback, util::DiagnosticEmitter emit_error);
   /// @brief Publish dirty state and the data epoch before a CU atomic's first lane.
   /// @details The returned leases retain all cache locks and prepared grants
   /// through every lane. Release publishes only the instruction epoch, so one
@@ -395,7 +408,12 @@ private:
   static constexpr size_t kLocalLineEpochSlots = 8192;
   [[nodiscard]] static size_t local_line_slot(uint64_t backing_address);
 
-  [[nodiscard]] static util::FailureOr<std::vector<DeviceCacheMaintenanceLease>>
+  [[nodiscard]] static util::FailureOr<CacheMaintenanceGroupResult>
+  acquire_legacy_cache_maintenance_group(
+      std::span<const std::shared_ptr<DeviceCacheCoherence>> domains,
+      DeviceCacheOperation operation, util::DiagnosticEmitter emit_error);
+
+  [[nodiscard]] static util::FailureOr<CacheMaintenanceGroupResult>
   acquire_prepared_cache_maintenance_group(
       std::span<const DeviceCacheDomain> domains, DeviceCacheOperation operation,
       const PreparedWritebackResolver &resolve_writeback, util::DiagnosticEmitter emit_error,

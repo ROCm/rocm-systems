@@ -1248,8 +1248,8 @@ TEST(SdmaQueueSchedulerCacheMaintenanceTest, PreEffectRefusalBlocksAndRetriesSam
     EXPECT_EQ(operation, SdmaCacheOperation::WritebackInvalidate);
     attempts.fetch_add(1, std::memory_order_relaxed);
     if (!allow_maintenance.load(std::memory_order_acquire))
-      throw CacheMaintenanceUnavailable("prepared writeback is unavailable");
-    return SdmaCacheLease{};
+      return CacheMaintenanceResult{.outcome = CacheMaintenanceOutcome::Retry};
+    return CacheMaintenanceResult{};
   };
   SdmaQueueScheduler scheduler(gpu_vm);
   const SdmaQueueScheduler::Handle queue = scheduler.attach(
@@ -1324,7 +1324,11 @@ TEST(SdmaQueueSchedulerCacheMaintenanceTest, FailedWritebackFaultsQueueBeforePac
   SdmaQueueScheduler scheduler(gpu_vm, coherence);
   SdmaPacketCallbacks callbacks;
   callbacks.acquire_cache_maintenance = [coherence](SdmaCacheOperation operation) {
-    return coherence->acquire_cache_maintenance(operation);
+    auto acquired = coherence->acquire_cache_maintenance(operation);
+    if (acquired.failed())
+      return util::FailureOr<CacheMaintenanceResult>(util::Result::failure());
+    return util::FailureOr<CacheMaintenanceResult>(
+        CacheMaintenanceResult{.lease = std::move(acquired.value())});
   };
   const SdmaQueueScheduler::Handle queue = scheduler.attach(
       {.ring = {.address_space = queue_address_space,
@@ -1396,7 +1400,11 @@ TEST_P(SdmaCacheInvalidateTest, DiscardsDirtyStateBeforeWritebackOrAtomic) {
 
   SdmaPacketCallbacks callbacks;
   callbacks.acquire_cache_maintenance = [coherence](SdmaCacheOperation operation) {
-    return coherence->acquire_cache_maintenance(operation);
+    auto acquired = coherence->acquire_cache_maintenance(operation);
+    if (acquired.failed())
+      return util::FailureOr<CacheMaintenanceResult>(util::Result::failure());
+    return util::FailureOr<CacheMaintenanceResult>(
+        CacheMaintenanceResult{.lease = std::move(acquired.value())});
   };
   SdmaPacketProcessor first(SdmaPacketDialect::Gfx1250, callbacks);
   SdmaPacketProcessor second(SdmaPacketDialect::Gfx1250, callbacks);

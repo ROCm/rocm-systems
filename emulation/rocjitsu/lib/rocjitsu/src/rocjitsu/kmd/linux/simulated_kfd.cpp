@@ -7758,7 +7758,7 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
             callbacks.acquire_cache_maintenance =
                 [ingress_access, cache_coherence, gpu_id, context,
                  resolve_writeback](amdgpu::SdmaCacheOperation operation)
-                -> util::FailureOr<amdgpu::SdmaCacheLease> {
+                -> util::FailureOr<amdgpu::CacheMaintenanceResult> {
               auto report = [context](std::string_view message) {
                 util::Logger::warn(
                     std::format("SDMA{} queue {}:{} stopped after cache maintenance failure: {}",
@@ -7780,9 +7780,13 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
                   domains, operation, resolve_writeback, emit_error);
               if (leases.failed())
                 return util::Result::failure();
-              if (leases.value().size() != domains.size())
+              if (leases.value().outcome == amdgpu::CacheMaintenanceOutcome::Retry)
+                return amdgpu::CacheMaintenanceResult{.outcome =
+                                                          amdgpu::CacheMaintenanceOutcome::Retry};
+              if (leases.value().leases.size() != domains.size())
                 throw util::Exception(std::string_view("KFD SDMA cache lease is missing"));
-              return std::move(leases.value().front());
+              return amdgpu::CacheMaintenanceResult{.lease =
+                                                        std::move(leases.value().leases.front())};
             };
             callbacks.admit_memory_ingress = [ingress_access, gpu_id,
                                               process_id = context.process_id](
