@@ -61,8 +61,10 @@ inline constexpr int kBarrierCellBytes = 8;
 /// determines the pending operations the arrival is ordered after. Mirrors
 /// amdgpu::LdsBarrierArrivalObservation::Source.
 enum class BarrierCellArrival {
-  /// ds_atomic_barrier_arrive_rtn_b64: in order with the wave's LDS
-  /// operations. It returns the cell, so it also reads it.
+  /// ds_atomic_barrier_arrive_rtn_b64: in order with the wave's DS operations
+  /// and the LDS lanes of its FLAT operations (CDNA5 ISA 5.7.1.3, 5.7.1.4). It
+  /// returns the cell as it was before the arrival (CDNA5 ISA 11.2.2, "returns
+  /// pre-op barrier value"), so it also reads it.
   Ds,
   /// ds_atomic_async_barrier_arrive_b64: in order with the wave's async loads
   /// to LDS (CDNA5 ISA 10.8).
