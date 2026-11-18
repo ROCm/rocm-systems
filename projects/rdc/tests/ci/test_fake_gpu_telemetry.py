@@ -44,7 +44,7 @@ def test_telemetry_module_gtest():
     )
 
 
-def test_more_gpus_and_partitions_than_rdc_lists(tools, tmp_path):
+def test_more_gpus_and_partitions_than_rdc_lists(tools, tmp_path):  # noqa: F811 (the fixture)
     # 256 GPU partitions; RDC lists RDC_MAX_NUM_DEVICES of them. rdcd wrote all 256 into
     # an array of 128 for discovery and for a job's start.
     d = Rdcd(tools, tmp_path, gpus=128, RDC_FAKE_PARTITIONS=2).start()
@@ -69,7 +69,7 @@ def test_more_gpus_and_partitions_than_rdc_lists(tools, tmp_path):
     assert code == 0, f"rdcd exited with {code}\n{d.output()}"
 
 
-def test_two_watches_of_8192_fields(tools, tmp_path):
+def test_two_watches_of_8192_fields(tools, tmp_path):  # noqa: F811 (the fixture)
     # Both watches due in one update hand 16,384 fields to the amd-smi library at once.
     # rdcd crashed in some runs, when the two came due together.
     d = Rdcd(tools, tmp_path, gpus=128).start()
