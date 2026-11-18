@@ -244,7 +244,7 @@ __launch_bounds__(kDdaLLSpreadThreads)
     if (aborted) {
       ldsAborted = 1;
     }
-    ddaLLSpreadLdsBarrier();
+    ddaLdsBarrier();
     aborted = aborted || ldsAborted != 0;
     // Partial sums: skip the fold, my recvbuff shard and the publish. aborted is uniform here, so no barrier is split.
     if (aborted) {
@@ -273,7 +273,7 @@ __launch_bounds__(kDdaLLSpreadThreads)
       out[w + 1] = acc1;
       ldsAcc[k] = make_uint2(acc0, acc1);
     }
-    ddaLLSpreadLdsBarrier();
+    ddaLdsBarrier();
 
     for (size_t u = tid; u < pollUnits; u += nthr) {
       const int peer = unitPeer(u, plen32);

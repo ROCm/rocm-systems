@@ -60,6 +60,13 @@ __host__ __device__ constexpr int ddaLL128ArPeerWarps(int nRanks, int nwarps) {
   return nRanks < nwarps ? nRanks : nwarps;
 }
 
+// This thread's warp. When a warp is one wave its index is wave-uniform, so readfirstlane keeps the scratch
+// addresses derived from it scalar; on a wider wave two warps share it, and the index stays per lane.
+__device__ __forceinline__ int ddaLL128ArWarp() {
+  const int warp = threadIdx.x / kDdaLL128Warp;
+  return __builtin_amdgcn_wavefrontsize() == kDdaLL128Warp ? __builtin_amdgcn_readfirstlane(warp) : warp;
+}
+
 // Packed add of two 16B pairs, word by word.
 template <typename T>
 __device__ __forceinline__ DdaLL128Pair ddaLL128ArAddPair(const DdaLL128Pair& a, const DdaLL128Pair& b) {
@@ -86,8 +93,10 @@ __device__ __forceinline__ bool ddaLL128ArPeerPoll(const uint64_t* wire, uint64_
 // again.
 //
 // The barriers are block-wide, so every warp of the block calls this the same
-// number of times; `live` is false for a warp with no slice. Returns false, on
-// every warp alike, if a poll saw the abort flag.
+// number of times; `live` is false for a warp with no slice. Only LDS crosses
+// them, so they are ddaLdsBarrier: on gfx1250 they do not wait for the fabric
+// stores in flight. Returns false, on every warp alike, if a poll saw the abort
+// flag.
 template <typename T, int NRANKS_CT>
 __device__ __forceinline__ bool ddaLL128ArPeerFold(DdaLL128Pair (*lds)[kDdaLL128PairsPerSlice], int& aborted,
                                                    bool live, int nRanks, int selfRank, int P, int warp,
@@ -118,7 +127,7 @@ __device__ __forceinline__ bool ddaLL128ArPeerFold(DdaLL128Pair (*lds)[kDdaLL128
         lds[warp][u * kDdaLL128Warp + lane] = {vr[2 * u], vr[2 * u + 1]};
       }
     }
-    __syncthreads();
+    ddaLdsBarrier();
     if (aborted) {
       return false;
     }
@@ -148,7 +157,7 @@ __device__ __forceinline__ bool ddaLL128ArPeerFold(DdaLL128Pair (*lds)[kDdaLL128
       }
     }
     // Ends the round: the next one overwrites lds, and the caller reads the sum.
-    __syncthreads();
+    ddaLdsBarrier();
   }
   return true;
 }
@@ -188,12 +197,7 @@ __launch_bounds__(kDdaLL128ArPeerMaxThreads)
 
   const int tid = threadIdx.x;
   const int lane = tid % kDdaLL128Warp;
-#if defined(__gfx1250__) || defined(__gfx1250_strict__)
-  // Wave32: a warp is one wave, so its index is wave-uniform and the scratch addresses stay scalar.
-  const int warp = __builtin_amdgcn_readfirstlane(tid / kDdaLL128Warp);
-#else
-  const int warp = tid / kDdaLL128Warp;
-#endif
+  const int warp = ddaLL128ArWarp();
   const int nwarps = blockDim.x / kDdaLL128Warp;
   const bool flagLane = ddaLL128IsFlagLane(lane);
 
@@ -312,12 +316,7 @@ __launch_bounds__(kDdaLL128ArPeerMaxThreads)
 
   const int tid = threadIdx.x;
   const int lane = tid % kDdaLL128Warp;
-#if defined(__gfx1250__) || defined(__gfx1250_strict__)
-  // Wave32: a warp is one wave, so its index is wave-uniform and the scratch addresses stay scalar.
-  const int warp = __builtin_amdgcn_readfirstlane(tid / kDdaLL128Warp);
-#else
-  const int warp = tid / kDdaLL128Warp;
-#endif
+  const int warp = ddaLL128ArWarp();
   const int nwarps = blockDim.x / kDdaLL128Warp;
   const bool flagLane = ddaLL128IsFlagLane(lane);
 
@@ -391,7 +390,7 @@ __launch_bounds__(kDdaLL128ArPeerMaxThreads)
       }
     }
     // Every warp of the group has read the sum before the store warp parks its next copy over it.
-    __syncthreads();
+    ddaLdsBarrier();
     if (live) {
       // Publish before the local unpack: it is what the peers are spinning on, and
       // ddaLL128StoreRegs rewrites acc in place when it reverses the flag-lane shuffle.

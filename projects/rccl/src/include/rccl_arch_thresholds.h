@@ -123,6 +123,11 @@ struct rcclArchThresholds {
   size_t ddaArVmmFirstMinBytes;
   size_t ddaArVmmFirstMaxPerRank;
 
+  // AllReduce only: with the peer-parallel LL128 kernels (RCCL_DDA_LL128_AR_PEER_PARALLEL) the LL128 one-shot runs
+  // to min(RCCL_DDA_LL128_ONESHOT_THRESHOLD's default, this / nRanks), since it moves (nRanks - 1) x the message per
+  // rank. 0 = that default at every rank count.
+  size_t ddaArLL128OneShotRankBytes;
+
   // AllReduce only: registered sum calls symkWithdrawn hands to DDA (rccl_wrap.cc). 0 turns that re-route off.
   size_t ddaArRegCaptureMinBytes;      // graph capture: DDA instead of Ring up to max(this, nRanks x the next)
   size_t ddaArRegCapturePerRankBytes;  // per-rank part of the capture bound
