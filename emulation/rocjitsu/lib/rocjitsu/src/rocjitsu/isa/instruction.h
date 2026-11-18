@@ -7,16 +7,22 @@
 #ifndef ROCJITSU_ISA_INSTRUCTION_H_
 #define ROCJITSU_ISA_INSTRUCTION_H_
 
+#include "rocjitsu/isa/arch/amdgpu/shared/execution_block.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/memory_issue.h"
 #include "rocjitsu/isa/operand.h"
+#include "rocjitsu/result.h"
 #include "util/intrusive_list.h"
 
 #include <array>
 #include <cassert>
 #include <cstdint>
+#include <initializer_list>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -47,7 +53,102 @@ enum InstFlags : uint64_t {
   /// @brief AccVGPR move instruction (v_accvgpr_write, v_accvgpr_read, v_accvgpr_mov).
   ACCVGPR = (1ULL << 10),
   /// @brief Destination update is conditional and must not kill the old value.
-  PREDICATED_DEF = (1ULL << 11)
+  PREDICATED_DEF = (1ULL << 11),
+  /// @brief Executes regardless of the EXEC mask (e.g. branches).
+  IGNORES_EXEC = (1ULL << 12),
+  /// @brief May write the EXEC mask regardless of DST operands.
+  WRITES_EXEC = (1ULL << 13),
+  /// @brief The destination value is a scalar plain copy of a single source operand
+  /// (e.g. s_mov). Lets EXEC-state analysis prove an all-ones EXEC write from an
+  /// all-ones source.
+  RESULT_COPY = (1ULL << 14),
+  /// @brief The destination value is the scalar bitwise pure OR of the source operands
+  /// (e.g. s_or, s_or_saveexec). Pure OR with an all-ones operand is all-ones
+  /// regardless of the others.
+  RESULT_OR = (1ULL << 15),
+  /// @brief Candidate for an asynchronous memory completion counter, including
+  /// instructions with no memory payload or register result.
+  MEMORY_WAIT_PRODUCER = (1ULL << 16),
+  /// @brief Instruction contains an embedded memory-completion wait field.
+  EMBEDDED_MEMORY_WAIT = (1ULL << 17),
+  /// @brief Non-control-flow instruction that implicitly drains gfx1250 XCNT.
+  XCNT_DRAIN = (1ULL << 19),
+  /// @brief This ISA suppresses issue of this instruction while MODE.VSKIP is set.
+  VSKIP_AFFECTED = (1ULL << 20),
+  /// @brief Listed operands cover all possible VGPR accesses, including partial writes.
+  DIRECT_REGISTER_ACCESSES = (1ULL << 21),
+  /// @brief Unconditional full-dword memory results described by the decoded destinations.
+  SIMPLE_MEMORY_RESULT = (1ULL << 22),
+  /// @brief Uses the CDNA1-4 conditional branch stack (S_CBRANCH_{G,I}_FORK,
+  /// S_CBRANCH_JOIN). Its entries live in SGPRs selected by MODE.CSP at run time;
+  /// uniform forks and joins that fall through leave the stack unchanged.
+  /// @details implicit_uses() and implicit_defs() report the static s[0:31] superset
+  /// for analysis. fork_stack_access() and join_stack_access() in shared/branch_stack.h
+  /// report the entry touched by one execution for the memory-wait scoreboard.
+  BRANCH_STACK = (1ULL << 23),
+  /// @brief Memory result lanes depend on controls beyond EXEC and issue masking.
+  CONDITIONAL_MEMORY_LANES = (1ULL << 24),
+  /// @brief Matrix execution accesses register lanes independently of EXEC.
+  MATRIX_REGISTER_ACCESSES = (1ULL << 25),
+  /// @brief Decoded MFMA broadcast size exceeds its architectural block count.
+  INVALID_MFMA_BROADCAST = (1ULL << 26),
+  /// @brief Decoded VOPD operands violate a qualified bank or source restriction.
+  INVALID_VOPD_OPERANDS = (1ULL << 27),
+  /// @brief IU DOT/WMMA has undefined NEG[2] or NEG_HI modifiers.
+  INVALID_IU_MODIFIERS = (1ULL << 28),
+  /// @brief A qualified scalar data tuple violates its ISA alignment requirement.
+  MISALIGNED_SCALAR_DATA = (1ULL << 29),
+  /// @brief Encoded for the scalar ALU (SOP1, SOP2, SOPC, SOPK, SOPP), including
+  /// waits, barriers, messages, no-ops and the PC writers.
+  /// @details SALU, VALU, SMEM, VMEM and LDS classify the encoding: the generator
+  /// sets at most one of them, from the encoding alone. amdgpu_execution_block()
+  /// applies policy on top of them; see amdgpu::ExecutionBlock.
+  SALU = (1ULL << 30),
+  /// @brief Encoded for the vector ALU (VOP*, VOPD, VINTERP), including matrix and
+  /// transcendental operations.
+  VALU = (1ULL << 31),
+  /// @brief Encoded for scalar memory (SMEM), including scalar cache maintenance
+  /// and the SMEM timestamp reads.
+  SMEM = (1ULL << 32),
+  /// @brief Encoded for vector memory: buffer, flat, global, scratch, image and
+  /// tensor.
+  VMEM = (1ULL << 33),
+  /// @brief Encoded for LDS (DS, LDS-direct), including GWS and the DS no-op.
+  LDS = (1ULL << 34),
+  /// @brief Evaluated by the VALU transcendental unit: rcp, rsq, sqrt, exp, log,
+  /// sin, cos and tanh, including their pseudo-scalar forms.
+  /// @details An operation (unit) classification, not the S_DELAY_ALU TRANS
+  /// dependency class. It covers every data width, so F64 forms such as
+  /// v_rcp_f64 are included although the ISA tracks them as ordinary VALU for
+  /// delay purposes, and matrix operations are excluded although CDNA5 tracks
+  /// small-data WMMA as TRANS. A consumer that needs the delay class must apply
+  /// those target-specific rules itself.
+  TRANSCENDENTAL = (1ULL << 35),
+  /// @brief May sleep or halt its wave (s_sleep, s_sleep_var, s_monitor_sleep,
+  /// s_sethalt, s_sendmsghalt).
+  /// @details Whether it does depends on operands and execution state; for
+  /// example, s_sethalt 0 clears the halt bit.
+  SUSPENDS_WAVE = (1ULL << 36),
+  /// @brief Marks architectural PC writers, including trap entry and return.
+  /// @details Direct conditional branches additionally carry COND_BRANCH and a
+  /// decoded displacement. Query writes_pc() for the combined classification.
+  WRITES_PC = (1ULL << 37),
+  /// @brief Software trap instruction (s_trap).
+  SOFTWARE_TRAP = (1ULL << 38),
+  /// @brief The trailing DWORD of the VGPR result can preserve the shader's incoming value,
+  /// even at full EXEC. Memory feedback writes only lanes with a fault or warning.
+  CONDITIONAL_LAST_VGPR_DEF = (1ULL << 44),
+  /// @brief The memory result requires one additional allocated VGPR which it never writes.
+  /// A dropped texture fetch with TFE and no LWE checks this slot at issue.
+  RESERVES_UNWRITTEN_VGPR = (1ULL << 39),
+  /// Global transpose addresses come from lanes 0-31. Each wave64 lane gets half the encoded width.
+  COMPACT_WAVE64_MEMORY_RESULT = (1ULL << 41),
+  /// Global load-transpose instructions acquire no register operands when EXEC is zero.
+  GLOBAL_TRANSPOSE_LOAD = (1ULL << 43),
+  /// CDNA5 packed widening disallows overlap after applying each operand's VGPR bank.
+  CHECK_CVT_SCALE_OVERLAP = (1ULL << 45),
+  /// CDNA5 Table 37 reserves FP8/BF8 scale selectors 12..15.
+  RESERVED_CVT_SCALE_SELECTOR = (1ULL << 46)
 };
 
 class BasicBlock;
@@ -87,14 +188,72 @@ public:
   virtual ~Instruction() = default;
 
   /// @brief Pool allocator hooks, set by the decoder's enable_pool().
-  /// Thread-local because each CU partition thread has its own decoder/pool.
-  /// Instructions are wholly owned by their CU and always allocated/freed
-  /// on the same thread.
+  /// @details Pool users must allocate and free on the bound thread while their
+  /// pool is active, with the decoder outliving its pooled instructions.
+  /// CU execution instead forces heap allocation so instructions can survive
+  /// quanta and worker migration.
   using AllocFn = void *(*)(void *pool, size_t size);
   using DeallocFn = void (*)(void *pool, void *ptr);
   static thread_local inline AllocFn alloc_fn_;
   static thread_local inline DeallocFn dealloc_fn_;
   static thread_local inline void *alloc_pool_;
+
+  /// @brief Temporarily force instruction allocations onto the heap.
+  ///
+  /// @details C ABI entry points use this guard when instructions can outlive
+  /// the decoder that produced them. It preserves the ambient allocator hooks
+  /// and restores them on scope exit. Decoder destruction invalidates matching
+  /// saved hooks so a scope never restores a pointer to a dead pool.
+  class ScopedHeapAllocation {
+  public:
+    ScopedHeapAllocation()
+        : saved_alloc_fn_(alloc_fn_), saved_dealloc_fn_(dealloc_fn_),
+          saved_alloc_pool_(alloc_pool_), previous_scope_(active_scope_) {
+      active_scope_ = this;
+      alloc_fn_ = nullptr;
+      dealloc_fn_ = nullptr;
+      alloc_pool_ = nullptr;
+    }
+
+    ~ScopedHeapAllocation() {
+      assert(active_scope_ == this && "allocation guards must be destroyed in stack order");
+      alloc_fn_ = saved_alloc_fn_;
+      dealloc_fn_ = saved_dealloc_fn_;
+      alloc_pool_ = saved_alloc_pool_;
+      active_scope_ = previous_scope_;
+    }
+
+    ScopedHeapAllocation(const ScopedHeapAllocation &) = delete;
+    ScopedHeapAllocation &operator=(const ScopedHeapAllocation &) = delete;
+    ScopedHeapAllocation(ScopedHeapAllocation &&) = delete;
+    ScopedHeapAllocation &operator=(ScopedHeapAllocation &&) = delete;
+
+  private:
+    friend class Instruction;
+
+    static thread_local inline ScopedHeapAllocation *active_scope_;
+    AllocFn saved_alloc_fn_;
+    DeallocFn saved_dealloc_fn_;
+    void *saved_alloc_pool_;
+    ScopedHeapAllocation *previous_scope_;
+  };
+
+  /// @brief Remove every active or saved reference to an allocator pool.
+  /// @param[in] pool Pool that is being disabled or destroyed.
+  static void invalidate_allocator_pool(void *pool) {
+    if (alloc_pool_ == pool) {
+      alloc_fn_ = nullptr;
+      dealloc_fn_ = nullptr;
+      alloc_pool_ = nullptr;
+    }
+    for (auto *scope = ScopedHeapAllocation::active_scope_; scope; scope = scope->previous_scope_) {
+      if (scope->saved_alloc_pool_ != pool)
+        continue;
+      scope->saved_alloc_fn_ = nullptr;
+      scope->saved_dealloc_fn_ = nullptr;
+      scope->saved_alloc_pool_ = nullptr;
+    }
+  }
 
   static void *operator new(size_t size) {
     if (alloc_fn_)
@@ -120,6 +279,17 @@ public:
   /// Each derived instruction class sets this to a trampoline that calls
   /// its ``execute_impl()`` method. In a model-only DBT image this is nullptr
   /// and must not be called. No virtual dispatch.
+  /// This is a low-level backend callback. AMDGPU callers should use the CU's
+  /// execute_instruction() API to reset and check simulator execution failures.
+  /// @details Decoded operands are immutable after construction, except for
+  /// temporary read delegation through ScopedOperandDelegate on the execution
+  /// thread. The decoded instruction must not execute concurrently while bound.
+  /// Decoded non-memory instructions without DynamicInstState may be
+  /// reused across waves without a reset. Executors must read register values,
+  /// EXEC and other execution state from the current context, and restore any
+  /// temporary operand delegates before returning. Put persistent per-issue
+  /// state in DynamicInstState; its presence excludes decoded reuse. Any
+  /// per-execution member flags must be assigned on every execution.
   const ExecuteFn execute;
 
   /// @brief Access the attached dynamic state, or nullptr if none.
@@ -142,11 +312,12 @@ public:
   }
 
   /// @brief Attach dynamic state to this instruction (transfers ownership).
+  /// @details An instruction retaining this state cannot enter a decoded cache.
   /// @param[in] d Dynamic state (ownership transferred).
   void set_data(std::unique_ptr<DynamicInstState> d) { data_ = std::move(d); }
 
-  /// @brief The instruction's human-readable mnemonic.
-  /// @returns Reference to the mnemonic string.
+  /// @brief The instruction's canonical semantic mnemonic.
+  /// @returns Reference to the mnemonic used by analysis and execution consumers.
   std::string_view mnemonic() const { return mnemonic_; }
 
   /// @brief The instruction's total number of operands.
@@ -212,8 +383,32 @@ public:
   /// @retval true The instruction has the MEMORY_OP flag set.
   /// @retval false The instruction is not a memory operation.
   bool is_memory_op() const { return flags_ & MEMORY_OP; }
+  /// @brief Whether MODE.VSKIP prevents this instruction from being issued.
+  bool is_vskip_affected() const { return flags_ & VSKIP_AFFECTED; }
+  /// An empty transpose suppresses register and memory accesses but can occupy LOADCNT.
+  bool is_empty_global_transpose(uint64_t exec) const {
+    return (flags_ & GLOBAL_TRANSPOSE_LOAD) && !exec;
+  }
+  /// @brief Whether this instruction can increment a memory completion counter.
+  bool is_memory_wait_producer() const { return flags_ & MEMORY_WAIT_PRODUCER; }
+  /// @brief Whether the instruction includes a memory completion wait field.
+  bool has_embedded_memory_wait() const { return flags_ & EMBEDDED_MEMORY_WAIT; }
+
+  /// @brief Return decoded AMDGPU memory-issue metadata, when present.
+  /// @details AMDGPU generated memory-instruction constructors populate this
+  /// descriptor. Other architectures and non-memory instructions return nullptr.
+  [[nodiscard]] const amdgpu::MemoryIssueInfo *amdgpu_memory_issue_info() const {
+    return memory_issue_info_.empty() ? nullptr : &memory_issue_info_;
+  }
 
   uint64_t flags() const { return flags_; }
+
+  /// Size an explicit destination according to the issuing wave's width.
+  RegisterRef wave_sized_destination(const Operand &op, RegisterRef ref, uint8_t wave_size) const {
+    if (ref.cls == RegClass::VGPR && wave_size == 64 && (flags_ & COMPACT_WAVE64_MEMORY_RESULT))
+      ref.width /= 2;
+    return wave_sized_register(op, ref, wave_size);
+  }
 
   bool is_waitcnt() const { return flags_ & WAITCNT; }
 
@@ -223,12 +418,62 @@ public:
 
   bool is_accvgpr() const { return flags_ & ACCVGPR; }
 
+  /// @brief Whether this instruction ends the program (e.g. s_endpgm).
+  bool is_program_terminator() const { return flags_ & PROGRAM_TERMINATOR; }
+
+  /// @brief Whether this instruction may leave the PC somewhere other than the
+  /// next instruction.
+  /// @details The control-flow flags plus WRITES_PC. s_setpc, s_swappc and
+  /// s_call carry INDIRECT_BRANCH or INDIRECT_CALL.
+  bool writes_pc() const {
+    constexpr uint64_t pc_flags =
+        BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR | WRITES_PC;
+    return (flags_ & pc_flags) != 0;
+  }
+
+  /// @brief Whether this is an AMDGPU VALU transcendental. See TRANSCENDENTAL.
+  bool is_transcendental() const { return flags_ & TRANSCENDENTAL; }
+
+  /// @brief Whether this instruction may sleep or halt its wave. See SUSPENDS_WAVE.
+  bool suspends_wave() const { return flags_ & SUSPENDS_WAVE; }
+
+  /// @brief The AMDGPU block this instruction issues to.
+  /// @details The generated encoding sets exactly one of the block flags, or
+  /// none for exports. Every PC writer reports BRANCH, overriding its SALU
+  /// encoding; see amdgpu::ExecutionBlock for that contract and for when to use
+  /// plugins::classify_instruction() instead.
+  [[nodiscard]] amdgpu::ExecutionBlock amdgpu_execution_block() const {
+    using amdgpu::ExecutionBlock;
+    if (flags_ & LDS)
+      return ExecutionBlock::LDS;
+    if (flags_ & VMEM)
+      return ExecutionBlock::VMEM;
+    if (flags_ & SMEM)
+      return ExecutionBlock::SMEM;
+    if (writes_pc())
+      return ExecutionBlock::BRANCH;
+    if (flags_ & SALU)
+      return ExecutionBlock::SALU;
+    if (flags_ & VALU)
+      return ExecutionBlock::VALU;
+    return ExecutionBlock::UNKNOWN;
+  }
+
   /// @brief Signed byte offset for a direct branch target.
   ///
   /// @details Generated ISA subclasses override this for direct branches whose
   /// label operand is a signed instruction-count delta. Indirect branches and
   /// non-branches return nullopt.
   [[nodiscard]] virtual std::optional<int64_t> branch_offset_bytes() const { return std::nullopt; }
+
+  /// @brief Whether an explicit source operand contributes its ordinary register dependency.
+  /// @details Encodings with non-contiguous source tuples can suppress the
+  /// placeholder tuple and report the actual registers through implicit_uses().
+  /// An instruction that ignores an encoded source (s_rfe_restore_b64's second
+  /// operand) suppresses it here too.
+  [[nodiscard]] virtual bool tracks_explicit_source(uint8_t /*operand_index*/) const {
+    return true;
+  }
 
   /// @brief Add registers implicitly read by this instruction.
   ///
@@ -249,6 +494,18 @@ public:
   /// instruction's lifetime.
   virtual void implicit_use_operands(std::vector<const Operand *> & /*operands*/) const {}
 
+  /// @brief Add implicit uses that only preserve an unwritten destination portion.
+  ///
+  /// @details These uses matter to liveness but do not consume a pending memory
+  /// result. Keeping them separate lets memory-wait checking retain genuine
+  /// implicit reads, such as image coordinate registers.
+  /// @returns True when the instruction distinguishes preservation-only uses
+  /// from genuine implicit reads, even if this encoding has no preservation use.
+  virtual bool implicit_preservation_uses(RegisterSet & /*uses*/) const { return false; }
+
+  /// @brief Query already-decoded modifiers only when a register may be pending.
+  virtual void amdgpu_register_modifiers(amdgpu::RegisterModifiers & /*modifiers*/) const {}
+
   /// @brief Add registers implicitly written by this instruction.
   virtual void implicit_defs(RegisterSet & /*defs*/) const {}
 
@@ -262,37 +519,69 @@ public:
   /// @brief Opcode within the encoding format.
   [[nodiscard]] uint16_t opcode() const { return opcode_; }
 
+  /// @brief Target feature bits required to decode this instruction form.
+  ///
+  /// The generated constructor records both mnemonic-wide and encoding-form
+  /// requirements. Decoder instances compare this mask with the immutable
+  /// feature set of their concrete GPU target before exposing the instruction.
+  [[nodiscard]] uint64_t required_isa_features() const { return required_isa_features_; }
+
   /// @brief Produce the disassembly string for this instruction.
   ///
-  /// @details On first call, generates and caches the disassembly string. Subsequent
-  /// calls return the cached string.
-  /// @returns Reference to the disassembly string.
-  const std::string &disassemble() const {
-    if (disassembly_.empty()) {
-      disassembly_ = mnemonic_;
-      bool first = true;
-      // TODO: Include explicit fieldless operands (and/or implicit ones too).
-      for (uint8_t i = 0; i < num_dst_; ++i) {
-        if (dst_operands_[i]->is_fieldless())
-          continue;
-        disassembly_ += (first ? " " : ", ");
-        disassembly_ += dst_operands_[i]->name();
-        first = false;
-      }
-      for (uint8_t i = 0; i < num_src_; ++i) {
-        if (src_operands_[i]->size_bits() == 0 || src_operands_[i]->is_fieldless())
-          continue;
-        disassembly_ += (first ? " " : ", ");
-        disassembly_ += src_operands_[i]->name();
-        first = false;
-      }
-      build_modifiers(disassembly_);
+  /// @returns Text owned by the caller, independent of this instruction's lifetime.
+  virtual std::string disassemble() const {
+    std::string out;
+    append_mnemonic(out);
+    bool first = true;
+    // TODO: Include explicit fieldless operands (and/or implicit ones too).
+    for (uint8_t operand_index = 0; operand_index < num_dst_; ++operand_index) {
+      if (!should_print_dst_operand(operand_index))
+        continue;
+      out += (first ? " " : ", ");
+      append_dst_operand(out, operand_index);
+      first = false;
     }
-    return disassembly_;
+    for (uint8_t operand_index = 0; operand_index < num_src_; ++operand_index) {
+      if (!should_print_src_operand(operand_index))
+        continue;
+      if (omit_repeated_destination_sources_) {
+        bool repeats_dst = false;
+        for (uint8_t dst_index = 0; dst_index < num_dst_; ++dst_index)
+          repeats_dst |= should_print_dst_operand(dst_index) &&
+                         src_operands_[operand_index] == dst_operands_[dst_index];
+        if (repeats_dst)
+          continue;
+      }
+      out += (first ? " " : ", ");
+      append_src_operand(out, operand_index);
+      first = false;
+    }
+    build_modifiers(out);
+    return out;
   }
 
 protected:
   friend class Decoder;
+
+  void
+  set_memory_issue_info(std::initializer_list<amdgpu::MemoryCounterObligation> counter_obligations,
+                        bool exec_masked = true) {
+    memory_issue_info_ = {};
+    memory_issue_info_.exec_masked = exec_masked;
+    for (const auto obligation : counter_obligations) {
+      if (!obligation.valid())
+        continue;
+      if (memory_issue_info_.num_counter_obligations_ ==
+          amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS) {
+        assert(false && "too many memory counter obligations");
+        break;
+      }
+      memory_issue_info_.counter_obligations_[memory_issue_info_.num_counter_obligations_++] =
+          obligation;
+    }
+    assert(!memory_issue_info_.empty());
+    flags_ |= MEMORY_OP;
+  }
 
   /// @brief Size of the instruction's encoding in bytes.
   int size_ = 0;
@@ -305,12 +594,38 @@ protected:
   /// CodeGenerator._DST_OPERANDS_CAPACITY; resize both together.
   std::array<Operand *, 3> dst_operands_{};
   uint8_t num_dst_ = 0;
-  /// @brief Append modifier flags to the disassembly string (e.g. " sc0 sc1").
-  /// Overridden by memory encoding bases that have flag bits to display.
+  /// @brief Whether read/write operands are rendered only in destination position.
+  bool omit_repeated_destination_sources_ = false;
+  static_assert(sizeof(amdgpu::MemoryIssueInfo) <= 6,
+                "memory issue metadata must fit Instruction's existing padding");
+  /// @brief AMDGPU issue metadata; kept here to use padding before flags_.
+  amdgpu::MemoryIssueInfo memory_issue_info_;
+  /// @brief Append the encoding-specific mnemonic spelling used by disassembly.
+  /// The default matches mnemonic(); encoding decorations may override it.
+  virtual void append_mnemonic(std::string &out) const { out += mnemonic_; }
+  /// @brief Append encoding attributes to the disassembly string (e.g. cache flags or DPP state).
+  /// Overridden by encoding bases that have instruction attributes to display.
   /// Default: no modifiers. Called lazily by disassemble().
   virtual void build_modifiers(std::string & /*out*/) const {}
-  /// @brief Cached disassembly string.
-  mutable std::string disassembly_;
+  /// @brief Whether a destination has its own textual operand.
+  /// Analysis-only result views may share an encoded source operand.
+  virtual bool should_print_dst_operand(uint8_t operand_index) const {
+    return !dst_operands_[operand_index]->is_fieldless();
+  }
+  /// @brief Append one destination operand to textual disassembly.
+  virtual void append_dst_operand(std::string &out, uint8_t operand_index) const {
+    out += dst_operands_[operand_index]->name();
+  }
+  /// @brief Whether a source has its own textual operand.
+  /// Encoding-specific overrides may expose a decoded view of a fieldless source.
+  virtual bool should_print_src_operand(uint8_t operand_index) const {
+    return src_operands_[operand_index]->size_bits() != 0 &&
+           !src_operands_[operand_index]->is_fieldless();
+  }
+  /// @brief Append one source operand to textual disassembly.
+  virtual void append_src_operand(std::string &out, uint8_t operand_index) const {
+    out += src_operands_[operand_index]->name();
+  }
   /// @brief Instruction property flags bitmask.
   uint64_t flags_ = 0;
   std::unique_ptr<DynamicInstState> data_;
@@ -320,6 +635,11 @@ protected:
   uint16_t encoding_id_ = 0;
   /// @brief Opcode within the encoding format.
   uint16_t opcode_ = 0;
+  /// @brief Feature mask emitted from the ISA-variant manifest.
+  // A 32-bit mask fits in the alignment padding before src_loc_. Keep this
+  // compact: Instruction is on decode/simulation hot paths and every generated
+  // instruction derives from it.
+  uint32_t required_isa_features_ = 0;
   /// @brief Source byte offset assigned at construction or by Decoder::decode().
   uint64_t src_loc_ = 0;
 
@@ -344,6 +664,12 @@ public:
   IsaInstruction(std::string_view mnemonic, ExecuteFn exec_fn, uint64_t src_loc = 0)
       : Instruction(mnemonic, exec_fn, src_loc) {}
 
+  /// @brief Accept encodings for formats without additional validation.
+  template <typename... Args>
+  static constexpr Result validate_encoding([[maybe_unused]] Args &&...args) noexcept {
+    return Result::success();
+  }
+
   /// @brief Helper to create an execute dispatch trampoline for a concrete type.
   ///
   /// The returned function pointer casts the base ``Instruction&`` to the
@@ -362,6 +688,13 @@ public:
   /// @brief Select a callback from the active immutable per-ISA table.
   static ExecuteFn selected_exec_fn(size_t instruction_id) {
     return current_instruction_execute(instruction_id);
+  }
+
+  /// @brief Select a callback using a generated, named execution ID.
+  template <typename ExecutionId>
+    requires std::is_enum_v<ExecutionId>
+  static ExecuteFn selected_exec_fn(ExecutionId instruction_id) {
+    return current_instruction_execute(static_cast<size_t>(instruction_id));
   }
 };
 

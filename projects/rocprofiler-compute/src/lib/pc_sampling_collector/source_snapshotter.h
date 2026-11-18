@@ -5,6 +5,7 @@
 #include "filesystem_wrapper.h"
 
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -32,15 +33,20 @@ public:
                   const std::filesystem::path&           destination_root) override;
 
 private:
-    std::optional<std::filesystem::path> get_destination_path(
-        const std::filesystem::path& absolute_source_path,
-        const std::filesystem::path& destination_root) const;
+    // Each raw DWARF path from the disassembly, against the canonical path its
+    // snapshot copy is filed under. Only files that were copied appear.
+    using source_path_map_t = std::map<std::filesystem::path, std::filesystem::path>;
+
+    std::optional<std::filesystem::path> get_canonical_source_path(
+        const std::filesystem::path& absolute_source_path) const;
 
     bool is_copyable(const std::filesystem::path& source_path,
                      std::filesystem::path&       absolute_source_path);
     bool create_destination_parent_directory(const std::filesystem::path& destination_path);
-    void copy_source(const std::filesystem::path& source_path,
+    bool copy_source(const std::filesystem::path& source_path,
                      const std::filesystem::path& destination_path);
+    void write_source_path_map(const source_path_map_t&     source_path_map,
+                               const std::filesystem::path& destination_root);
 
     filesystem_wrapper_t::ptr m_filesystem;
 };

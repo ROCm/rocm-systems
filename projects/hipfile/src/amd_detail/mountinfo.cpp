@@ -9,6 +9,8 @@
 #include <cstring>
 #include <libmount/libmount.h>
 #include <stdexcept>
+#include <string_view>
+#include <system_error>
 
 struct libmnt_context;
 struct libmnt_fs;
@@ -64,6 +66,7 @@ std::optional<MountInfo>
 LibMountHelper::getMountInfo(dev_t dev) const
 {
     auto libmount{Context<LibMount>::get()};
+    int  libmount_err;
 
     auto mnt_ctx{libmount->mnt_new_context()};
     if (!mnt_ctx) {
@@ -71,9 +74,11 @@ LibMountHelper::getMountInfo(dev_t dev) const
     }
 
     struct libmnt_table *mnt_tbl{};
-    if (libmount->mnt_context_get_mtab(mnt_ctx, &mnt_tbl) != 0) {
+    libmount_err = libmount->mnt_context_get_mtab(mnt_ctx, &mnt_tbl);
+    if (libmount_err) {
         libmount->mnt_free_context(mnt_ctx);
-        throw std::runtime_error("libmount: Could not get mount table");
+        throw std::system_error(-libmount_err, std::generic_category(),
+                                "libmount: Could not get mount table");
     }
 
     struct libmnt_fs *mnt_fs{libmount->mnt_table_find_devno(mnt_tbl, dev, MNT_ITER_FORWARD)};
@@ -114,6 +119,39 @@ LibMountHelper::getMountInfo(dev_t dev) const
     }
     else if (fstype && !strcmp(fstype, "xfs")) {
         mountinfo.type = FilesystemType::xfs;
+    }
+    else if (fstype && (!strcmp(fstype, "nfs") || !strcmp(fstype, "nfs4"))) {
+        mountinfo.type        = FilesystemType::nfs;
+        mountinfo.options.nfs = {NfsProto::unknown};
+
+        char  *value{};
+        size_t length{};
+        int    result = libmount->mnt_fs_get_option(mnt_fs, "proto", &value, &length);
+        if (result < 0) {
+            libmount->mnt_free_context(mnt_ctx);
+            throw std::runtime_error("libmount: Could not get mount option: proto");
+        }
+        if (result == 0 && value) {
+            std::string_view proto(value, length);
+            if (proto == "tcp") {
+                mountinfo.options.nfs.proto = NfsProto::tcp;
+            }
+            else if (proto == "tcp6") {
+                mountinfo.options.nfs.proto = NfsProto::tcp6;
+            }
+            else if (proto == "udp") {
+                mountinfo.options.nfs.proto = NfsProto::udp;
+            }
+            else if (proto == "udp6") {
+                mountinfo.options.nfs.proto = NfsProto::udp6;
+            }
+            else if (proto == "rdma") {
+                mountinfo.options.nfs.proto = NfsProto::rdma;
+            }
+            else if (proto == "rdma6") {
+                mountinfo.options.nfs.proto = NfsProto::rdma6;
+            }
+        }
     }
     else {
         mountinfo.type = FilesystemType::other;

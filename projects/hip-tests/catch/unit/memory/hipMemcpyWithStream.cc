@@ -36,13 +36,6 @@ HIP_TEST_CASE(Unit_hipMemcpy_Positive_Synchronization_Behavior) {
 
   // For transfers from device memory to device memory, no host-side synchronization is performed.
   SECTION("Device memory to device memory") {
-    // This behavior differs on NVIDIA and AMD, on AMD the hipMemcpy calls is synchronous with
-    // respect to the host
-#if HT_AMD
-    WARN(
-        "EXSWCPHIPT-127 - Memcpy from device to device memory behavior differs on AMD and Nvidia");
-    return;
-#endif
     MemcpyDtoDSyncBehavior(std::bind(hipMemcpy, _1, _2, _3, hipMemcpyDeviceToDevice), false);
   }
 

@@ -1,7 +1,7 @@
 #
 # rocprofv3 tool tests for kernel renaming
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(
     rocprofiler-sdk-tests-rocprofv3-kernel-rename
@@ -40,6 +40,7 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:transpose>
     DEPENDS transpose
     TIMEOUT 45
+    WSL_TIMEOUT_SCALE
     LABELS "integration-tests"
     ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-kernel-rename-cmd-line)
@@ -72,6 +73,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR}/input-kernel-rename.yml -- $<TARGET_FILE:transpose>
     DEPENDS transpose
     TIMEOUT 45
+    WSL_TIMEOUT_SCALE
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-kernel-rename-inp-yaml)

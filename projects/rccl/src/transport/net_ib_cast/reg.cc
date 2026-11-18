@@ -7,8 +7,10 @@
 
 #include "common_cast.h"
 
-ncclResult_t ncclIbRegMrDmaBufInternal2(ncclIbNetCommDevBase* base, void* data, size_t size, int type, uint64_t offset,
-                                        int fd, uint64_t mrFlags, ibv_mr** mhandle) {
+// File-local helper. IB-CAST is a self-contained fork of net_ib; mark static so
+// it does not collide with net_ib/reg.cc's identically-named definition at link time.
+static ncclResult_t ncclIbRegMrDmaBufInternal2(ncclIbNetCommDevBase* base, void* data, size_t size, int type,
+                                               uint64_t offset, int fd, uint64_t mrFlags, ibv_mr** mhandle) {
   static thread_local uintptr_t pageSize = 0;
   if (pageSize == 0) pageSize = sysconf(_SC_PAGESIZE);
   struct ncclIbMrCache* cache = &IbCastDevs[base->ibDevN].mrCache;
@@ -28,13 +30,11 @@ ncclResult_t ncclIbRegMrDmaBufInternal2(ncclIbNetCommDevBase* base, void* data, 
       bool relaxedOrdering = IbCastRelaxedOrderingEnabled && (mrFlags & NCCL_NET_MR_FLAG_FORCE_SO) == 0;
       if (relaxedOrdering) flags |= IBV_ACCESS_RELAXED_ORDERING;
       if (fd != -1) {
-        /* DMA-BUF support */
-        if (!IbCastDevs[base->ibDevN].capsProvider.mlx5.dataDirect) {
-          NCCLCHECK(wrap_ibv_reg_dmabuf_mr(&mr, base->pd, offset, pages * pageSize, addr, fd, flags));
-        } else {
-          NCCLCHECK(wrap_mlx5dv_reg_dmabuf_mr(&mr, base->pd, offset, pages * pageSize, addr, fd, flags,
-                                              MLX5DV_REG_DMABUF_ACCESS_DATA_DIRECT));
-        }
+        /* DMA-BUF fd. Only an mlx5 data-direct device tries mlx5 first.
+           capsProvider is a union, so an AINIC udmaCount must not be read as dataDirect. */
+        NCCLCHECK(wrap_reg_dmabuf_mr(&mr, base->pd, offset, pages * pageSize, addr, fd, flags,
+                                     IbCastDevs[base->ibDevN].ibProvider == IB_PROVIDER_MLX5 &&
+                                         IbCastDevs[base->ibDevN].capsProvider.mlx5.dataDirect));
       } else {
         if (relaxedOrdering) {
           // Use IBVERBS_1.8 API - needed for IBV_ACCESS_RELAXED_ORDERING support
@@ -68,7 +68,15 @@ ncclResult_t ncclIbRegMrDmaBufInternal2(ncclIbNetCommDevBase* base, void* data, 
 ncclResult_t IbCastRegMrDmaBufInternal(void* comm, void* data, size_t size, int type, uint64_t offset, int fd,
                                        uint64_t mrFlags, void** mhandle) {
   ncclResult_t ret = ncclSuccess;
-  assert(size > 0);
+  // A caller that lost its connection reaches here with a null comm, and reading
+  // the device list off it segfaults inside the plugin instead of telling the
+  // caller what was wrong. size == 0 hit the same fate below via the page-count
+  // math, so it is reported the same way rather than left as a release-build
+  // assert.
+  if (comm == NULL || mhandle == NULL || size == 0) {
+    WARN("NET/IB-CAST: regMr/regMrDmaBuf called with comm=%p mhandle=%p size=%zu", comm, (void*)mhandle, size);
+    return ncclInvalidArgument;
+  }
   struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*)comm;
   struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*)malloc(sizeof(struct ncclIbMrHandle));
   if (mhandleWrapper == nullptr) {
@@ -120,6 +128,10 @@ ncclResult_t IbCastDeregMrInternal(ncclIbNetCommDevBase* base, ibv_mr* mhandle) 
 
 ncclResult_t IbCastDeregMr(void* comm, void* mhandle) {
   if (mhandle == NULL) return ncclSuccess;
+  if (comm == NULL) {
+    WARN("NET/IB-CAST: deregMr called with a null comm");
+    return ncclInvalidArgument;
+  }
 
   struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*)mhandle;
   struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*)comm;

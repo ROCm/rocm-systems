@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "amd_smi/impl/amd_smi_utils.h"
 
@@ -43,19 +24,23 @@
 #include <iterator>
 #include <limits>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <regex>
 #include <sstream>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 
+#include "amd_smi/impl/amd_smi_clk_testing.h"
 #include "amd_smi/impl/amd_smi_common.h"
 #include "amd_smi/impl/amd_smi_gpu_mutex.h"
 #include "amd_smi/impl/amd_smi_system.h"
+#include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "amd_smi/impl/scoped_fd.h"
+#include "rocm_smi/rocm_smi.h"
+#include "rocm_smi/rocm_smi_io_link.h"
+#include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_logger.h"
+#include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_utils.h"
 
 std::string leftTrim(const std::string& s) {
@@ -102,7 +87,8 @@ std::string_view trim(std::string_view str) {
   auto last_itr = std::find_if_not(str.rbegin(), str.rend(),
                                    [](unsigned char character) { return std::isspace(character); });
 
-  return str.substr(first_itr - str.begin(), last_itr.base() - first_itr);
+  return str.substr(static_cast<size_t>(first_itr - str.begin()),
+                    static_cast<size_t>(last_itr.base() - first_itr));
 }
 
 // Given original string and string to remove (removeMe)
@@ -195,7 +181,7 @@ amdsmi_status_t smi_amdgpu_find_hwmon_dir(amd::smi::AMDSmiGPUDevice* device,
   SMIGPUDEVICE_MUTEX(device->get_mutex())
   DIR* dh;
   struct dirent* contents;
-  std::string device_path = "/sys/class/drm/" + device->get_gpu_path();
+  std::string device_path = amd::smi::test_hooks::SysfsDrmRoot() + "/" + device->get_gpu_path();
   std::string directory_path = device_path + "/device/hwmon/";
 
   if (!isAMDGPU(device_path)) {
@@ -224,16 +210,16 @@ amdsmi_status_t smi_amdgpu_find_hwmon_dir(amd::smi::AMDSmiGPUDevice* device,
 amdsmi_status_t smi_amdgpu_get_board_info(amd::smi::AMDSmiGPUDevice* device,
                                           amdsmi_board_info_t* info) {
   SMIGPUDEVICE_MUTEX(device->get_mutex())
-  std::string model_number_path =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/product_number");
-  std::string product_serial_path =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/serial_number");
-  std::string fru_id_path =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/fru_id");
-  std::string manufacturer_name_path =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/manufacturer");
-  std::string product_name_path =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/product_name");
+  std::string model_number_path = amd::smi::test_hooks::SysfsDrmRoot() + "/" +
+                                  device->get_gpu_path() + std::string("/device/product_number");
+  std::string product_serial_path = amd::smi::test_hooks::SysfsDrmRoot() + "/" +
+                                    device->get_gpu_path() + std::string("/device/serial_number");
+  std::string fru_id_path = amd::smi::test_hooks::SysfsDrmRoot() + "/" + device->get_gpu_path() +
+                            std::string("/device/fru_id");
+  std::string manufacturer_name_path = amd::smi::test_hooks::SysfsDrmRoot() + "/" +
+                                       device->get_gpu_path() + std::string("/device/manufacturer");
+  std::string product_name_path = amd::smi::test_hooks::SysfsDrmRoot() + "/" +
+                                  device->get_gpu_path() + std::string("/device/product_name");
 
   auto ret_mod =
       openFileAndModifyBuffer(model_number_path, info->model_number, AMDSMI_MAX_STRING_LENGTH);
@@ -246,8 +232,7 @@ amdsmi_status_t smi_amdgpu_get_board_info(amd::smi::AMDSmiGPUDevice* device,
                                           AMDSMI_MAX_STRING_LENGTH, false);
 
   std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "[Before correction] "
-     << "Returning status = AMDSMI_STATUS_SUCCESS"
+  ss << __PRETTY_FUNCTION__ << "[Before correction] " << "Returning status = AMDSMI_STATUS_SUCCESS"
      << " | model_number_path = |" << model_number_path << "|\n"
      << "; info->model_number: |" << info->model_number << "|\n"
      << "; ret_mod = " << ret_mod << "|\n"
@@ -261,8 +246,8 @@ amdsmi_status_t smi_amdgpu_get_board_info(amd::smi::AMDSmiGPUDevice* device,
      << "; info->manufacturer_name: |" << info->manufacturer_name << "|\n"
      << "; ret_man = " << ret_man << "|\n"
      << "\n product_name_path = |" << product_name_path << "|\n"
-     << "; info->product_name: |" << info->product_name << "|"
-     << "; ret_prod = " << ret_prod << "|\n";
+     << "; info->product_name: |" << info->product_name << "|" << "; ret_prod = " << ret_prod
+     << "|\n";
   LOG_INFO(ss);
 
   return AMDSMI_STATUS_SUCCESS;
@@ -296,27 +281,158 @@ amdsmi_status_t smi_amdgpu_get_power_cap(amd::smi::AMDSmiGPUDevice* device, uint
   return AMDSMI_STATUS_SUCCESS;
 }
 
+bool smi_amdgpu_parse_od_clk_range(std::istream& od_stream, amdsmi_clk_type_t domain,
+                                   unsigned int* max_freq, unsigned int* min_freq) {
+  // Section header (and its GFXCLK/MCLK/FCLK alias) whose levels feed this
+  // domain's user-defined range.
+  const char* od_header = nullptr;
+  const char* alias_header = nullptr;
+  switch (domain) {
+    case AMDSMI_CLK_TYPE_GFX:
+      od_header = "OD_SCLK:";
+      alias_header = "GFXCLK:";
+      break;
+    case AMDSMI_CLK_TYPE_MEM:
+      od_header = "OD_MCLK:";
+      alias_header = "MCLK:";
+      break;
+    case AMDSMI_CLK_TYPE_DF:
+      od_header = "OD_FCLK:";
+      alias_header = "FCLK:";
+      break;
+    default:
+      return false;
+  }
+
+  unsigned int max = 0;
+  unsigned int min = UINT_MAX;
+  bool in_domain = false;
+  bool found = false;
+  char str[10];
+  unsigned int dpm_level, freq;
+  for (std::string line; getline(od_stream, line);) {
+    // Section headers end with ':'. This domain's header (or its alias) starts
+    // capture; any other header ends it, so an adjacent section such as
+    // OD_VDDC_CURVE is not folded into the range.
+    if (!line.empty() && line.back() == ':') {
+      in_domain = line.compare(od_header) == 0 || line.compare(alias_header) == 0;
+      continue;
+    }
+    if (!in_domain) {
+      continue;
+    }
+    if (sscanf(line.c_str(), "%u: %u%9s", &dpm_level, &freq, str) <= 2) {
+      continue;  // skip lines that don't conform to the format
+    }
+    found = true;
+    if (freq > max) max = freq;
+    if (freq < min) min = freq;
+  }
+
+  if (!found || max == 0) {
+    return false;
+  }
+  *max_freq = max;
+  *min_freq = min;
+  return true;
+}
+
+// Finish smi_amdgpu_get_ranges() from an already-open pp_dpm_* stream: fold the
+// dpm levels (and the optional "S:" sleep line) into the SmiAmdgpuClkRanges
+// output. Split out as a library-local test seam (see amd_smi_clk_testing.h) so
+// the folding and the bounds guard can be exercised over in-memory streams.
+//
+// od_range carries the pp_od_clk_voltage range the caller parsed; when it is not
+// present, min/max are derived from the dpm levels instead. A domain with no
+// minimum level or no sleep state keeps its UINT_MAX "unavailable" sentinel,
+// which callers surface as the unavailable marker; only genuinely out-of-range
+// (> INT_MAX and not the sentinel) values are rejected.
+amdsmi_status_t smi_amdgpu_parse_dpm_ranges(std::istream& dpm_stream,
+                                            const SmiAmdgpuOdClkRange& od_range,
+                                            SmiAmdgpuClkRanges& ranges) {
+  unsigned int max = od_range.present ? od_range.max : 0;
+  unsigned int min = od_range.present ? od_range.min : UINT_MAX;
+  unsigned int dpm = 0;
+  unsigned int sleep_freq = UINT_MAX;
+  unsigned int current_freq = 0;
+  char str[10];
+  char single_char;
+  for (std::string line; getline(dpm_stream, line);) {
+    unsigned int dpm_level, freq;
+
+    char firstChar = line[0];
+    if (firstChar == 'S') {
+      if (sscanf(line.c_str(), "%c: %u%9s", &single_char, &sleep_freq, str) <= 2) {
+        return AMDSMI_STATUS_NO_DATA;
+      }
+    } else {
+      /**
+       * if the first line contains '*', then
+       * we are saving that value as current_freq then checking
+       * for other dpm levels if none are found then we
+       * set min and max to current_freq as per Driver
+       * We then skip to the next line to avoid getting
+       * incorrect min value.
+       */
+
+      if (sscanf(line.c_str(), "%u: %u%c", &dpm_level, &freq, str) <= 2) {
+        return AMDSMI_STATUS_IO;
+      }
+
+      char lastChar = line.back();
+      if (lastChar == '*') {
+        current_freq = freq;
+      }
+
+      // Domains without an OD range derive min/max from the dpm levels here.
+      if (!od_range.present) {
+        max = freq > max ? freq : max;
+        min = freq < min ? freq : min;
+      }
+      dpm = dpm_level > dpm ? dpm_level : dpm;
+    }
+  }
+  if (dpm == 0 && current_freq > 0) {
+    // if the dpm level is 0, then the current frequency is the min/max frequency
+    max = current_freq;
+    min = current_freq;
+  }
+  // Reject genuinely out-of-range values, but let the UINT_MAX "unavailable"
+  // sentinel through: a domain with no minimum level or no sleep state keeps it,
+  // and callers (e.g. amdsmi_get_clock_info) surface it as the unavailable marker.
+  if ((dpm != UINT_MAX && dpm > static_cast<unsigned int>(INT_MAX)) ||
+      (max != UINT_MAX && max > static_cast<unsigned int>(INT_MAX)) ||
+      (min != UINT_MAX && min > static_cast<unsigned int>(INT_MAX)) ||
+      (sleep_freq != UINT_MAX && sleep_freq > static_cast<unsigned int>(INT_MAX))) {
+    return AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS;
+  }
+  ranges.max_freq = static_cast<int>(max);
+  ranges.min_freq = static_cast<int>(min);
+  ranges.num_dpm = static_cast<int>(dpm);
+  ranges.sleep_state_freq = static_cast<int>(sleep_freq);
+  return AMDSMI_STATUS_SUCCESS;
+}
+
 amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_clk_type_t domain,
                                       int* max_freq, int* min_freq, int* num_dpm,
                                       int* sleep_state_freq) {
   SMIGPUDEVICE_MUTEX(device->get_mutex())
-  std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device";
+  std::string fullpath =
+      amd::smi::test_hooks::SysfsDrmRoot() + "/" + device->get_gpu_path() + "/device";
 
   std::string smclk_min_max_fullpath = "";
 
-  bool sclk = false;
-  bool mclk = false;
-  bool fclk = false;
+  bool use_od_range = false;
   switch (domain) {
     case AMDSMI_CLK_TYPE_GFX:
       smclk_min_max_fullpath = fullpath + "/pp_od_clk_voltage";
       fullpath += "/pp_dpm_sclk";
-      sclk = true;
+      use_od_range = true;
       break;
     case AMDSMI_CLK_TYPE_MEM:
       smclk_min_max_fullpath = fullpath + "/pp_od_clk_voltage";
       fullpath += "/pp_dpm_mclk";
-      mclk = true;
+      use_od_range = true;
       break;
     case AMDSMI_CLK_TYPE_VCLK0:
       fullpath += "/pp_dpm_vclk";
@@ -336,7 +452,7 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
     case AMDSMI_CLK_TYPE_DF:
       smclk_min_max_fullpath = fullpath + "/pp_od_clk_voltage";
       fullpath += "/pp_dpm_fclk";
-      fclk = true;
+      use_od_range = true;
       break;
     default:
       return AMDSMI_STATUS_INVAL;
@@ -347,132 +463,32 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
 
-  unsigned int max, min, dpm, sleep_freq, current_freq;
-  char str[10];
-  char single_char;
-  max = 0;
-  min = UINT_MAX;
-  dpm = 0;
-  sleep_freq = UINT_MAX;
-  current_freq = 0;
-  // if getting sclk, mclk or fclk info, read pp_od_clk_voltage for min and max info
-  if (sclk || mclk || fclk) {
+  SmiAmdgpuOdClkRange od_range;
+  // GFX/MEM/DF expose a user-defined range in pp_od_clk_voltage; when it omits
+  // this domain's section (e.g. no OD_FCLK on MI45x) fall back to the pp_dpm_*
+  // levels parsed by smi_amdgpu_parse_dpm_ranges().
+  if (use_od_range) {
     std::ifstream smclk_ranges(smclk_min_max_fullpath.c_str());
-    unsigned int smax = 0;
-    unsigned int mmax = 0;
-    unsigned int fmax = 0;
-    unsigned int smin = UINT_MAX;
-    unsigned int mmin = UINT_MAX;
-    unsigned int fmin = UINT_MAX;
-
-    // if pp_od_clk_voltage is not found, then go back to using the original pp_dpm files
-    if (!smclk_ranges.is_open()) {
-      sclk = false;
-      mclk = false;
-      fclk = false;
-    } else {
-      // using enum to switch between recording for sclk, mclk, or fclk
-      enum ClkType { PARSING_SCLK = 0, PARSING_MCLK = 1, PARSING_FCLK = 2 };
-      ClkType current_clk_type = PARSING_SCLK;
-      unsigned int dpm_level, freq;
-      for (std::string line; getline(smclk_ranges, line);) {
-        if (line.compare("GFXCLK:") == 0 || line.compare("OD_SCLK:") == 0) {
-          current_clk_type = PARSING_SCLK;
-          continue;
-        } else if (line.compare("MCLK:") == 0 || line.compare("OD_MCLK:") == 0) {
-          current_clk_type = PARSING_MCLK;
-          continue;
-        } else if (line.compare("FCLK:") == 0 || line.compare("OD_FCLK:") == 0) {
-          current_clk_type = PARSING_FCLK;
-          continue;
-        }
-        if (sscanf(line.c_str(), "%u: %d%9s", &dpm_level, &freq, str) <= 2) {
-          // skip lines that don't conform to the format
-          continue;
-        }
-        if (current_clk_type == PARSING_SCLK) {
-          if (freq > smax) smax = freq;
-          if (freq < smin) smin = freq;
-        } else if (current_clk_type == PARSING_MCLK) {
-          if (freq > mmax) mmax = freq;
-          if (freq < mmin) mmin = freq;
-        } else if (current_clk_type == PARSING_FCLK) {
-          if (freq > fmax) fmax = freq;
-          if (freq < fmin) fmin = freq;
-        }
-      }
-
-      if (sclk) {
-        max = smax;
-        min = smin;
-      } else if (mclk) {
-        max = mmax;
-        min = mmin;
-      } else if (fclk) {
-        max = fmax;
-        min = fmin;
-      }
-
-      smclk_ranges.close();
-    }
+    od_range.present =
+        smi_amdgpu_parse_od_clk_range(smclk_ranges, domain, &od_range.max, &od_range.min);
   }
-  // obtain rest of info from regular pp_dpm_* files.
-  for (std::string line; getline(ranges, line);) {
-    unsigned int dpm_level, freq;
-
-    char firstChar = line[0];
-    if (firstChar == 'S') {
-      if (sscanf(line.c_str(), "%c: %d%9s", &single_char, &sleep_freq, str) <= 2) {
-        ranges.close();
-        return AMDSMI_STATUS_NO_DATA;
-      }
-    } else {
-      /**
-       * if the first line contains '*', then
-       * we are saving that value as current_freq then checking
-       * for other dpm levels if none are found then we
-       * set min and max to current_freq as per Driver
-       * We then skip to the next line to avoid getting
-       * incorrect min value.
-       */
-
-      if (sscanf(line.c_str(), "%u: %d%c", &dpm_level, &freq, str) <= 2) {
-        ranges.close();
-        return AMDSMI_STATUS_IO;
-      }
-
-      char lastChar = line.back();
-      if (lastChar == '*') {
-        current_freq = freq;
-      }
-
-      // not * was detected so check for the min max if not sclk, mclk, or fclk, which are user
-      // defined
-      if (!sclk && !mclk && !fclk) {
-        max = freq > max ? freq : max;
-        min = freq < min ? freq : min;
-      }
-      dpm = dpm_level > dpm ? dpm_level : dpm;
-    }
+  SmiAmdgpuClkRanges parsed;
+  amdsmi_status_t status = smi_amdgpu_parse_dpm_ranges(ranges, od_range, parsed);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    return status;
   }
-  if (dpm == 0 && current_freq > 0) {
-    // if the dpm level is 0, then the current frequency is the min/max frequency
-    max = current_freq;
-    min = current_freq;
-  }
-  if (num_dpm) *num_dpm = dpm;
-  if (max_freq) *max_freq = max;
-  if (min_freq) *min_freq = min;
-  if (sleep_state_freq) *sleep_state_freq = sleep_freq;
-
-  ranges.close();
+  if (max_freq) *max_freq = parsed.max_freq;
+  if (min_freq) *min_freq = parsed.min_freq;
+  if (num_dpm) *num_dpm = parsed.num_dpm;
+  if (sleep_state_freq) *sleep_state_freq = parsed.sleep_state_freq;
   return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t smi_amdgpu_get_enabled_blocks(amd::smi::AMDSmiGPUDevice* device,
                                               uint64_t* enabled_blocks) {
   SMIGPUDEVICE_MUTEX(device->get_mutex())
-  std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device/ras/features";
+  std::string fullpath =
+      amd::smi::test_hooks::SysfsDrmRoot() + "/" + device->get_gpu_path() + "/device/ras/features";
   std::ifstream f(fullpath.c_str());
   std::string tmp_str;
 
@@ -488,14 +504,28 @@ amdsmi_status_t smi_amdgpu_get_enabled_blocks(amd::smi::AMDSmiGPUDevice* device,
   f1 >> tmp_str;  // ignore
   f1 >> tmp_str;  // ignore
   f1 >> tmp_str;
-
-  *enabled_blocks = strtoul(tmp_str.c_str(), nullptr, 16);
   f.close();
 
-  if (*enabled_blocks == 0 || *enabled_blocks == ULONG_MAX) {
+  // strtoul() alone can't tell "parsed 0" from "parsed nothing" -- both leave
+  // the result at 0 -- so confirm real hex digits were consumed via endptr. A
+  // cleanly-parsed 0 is a legitimate "no blocks enabled" mask, not a failure.
+  // ULONG_MAX stays a failure sentinel regardless: no real ASIC defines all 64
+  // mask bits (see AMDSMI_GPU_BLOCK_LAST), so a full set of 1s means a garbled
+  // read, not a plausible value.
+  char* endptr = nullptr;
+  unsigned long parsed = strtoul(tmp_str.c_str(), &endptr, 16);
+  bool parse_failed = endptr == tmp_str.c_str() || *endptr != '\0';
+  if (parse_failed || parsed == ULONG_MAX) {
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << " | " << fullpath << " line: \"" << line << "\""
+       << "; parsed token: \"" << tmp_str << "\""
+       << "; reason: " << (parse_failed ? "unparsable token" : "implausible all-bits-set value")
+       << "; returning AMDSMI_STATUS_API_FAILED";
+    LOG_DEBUG(ss);
     return AMDSMI_STATUS_API_FAILED;
   }
 
+  *enabled_blocks = parsed;
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -505,8 +535,8 @@ amdsmi_status_t smi_amdgpu_get_bad_page_info(amd::smi::AMDSmiGPUDevice* device, 
   std::string line;
   std::vector<std::string> badPagesVec;
 
-  std::string fullpath =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/ras/gpu_vram_bad_pages");
+  std::string fullpath = amd::smi::test_hooks::SysfsDrmRoot() + "/" + device->get_gpu_path() +
+                         std::string("/device/ras/gpu_vram_bad_pages");
   std::ifstream fs(fullpath.c_str());
 
   if (fs.fail()) {
@@ -599,35 +629,6 @@ amdsmi_status_t smi_amdgpu_validate_ras_eeprom(amd::smi::AMDSmiGPUDevice* device
   return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 
-amdsmi_status_t smi_amdgpu_get_ecc_error_count(amd::smi::AMDSmiGPUDevice* device,
-                                               amdsmi_error_count_t* err_cnt) {
-  SMIGPUDEVICE_MUTEX(device->get_mutex())
-  char str[10];
-
-  std::string fullpath =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/ras/umc_err_count");
-  std::ifstream f(fullpath.c_str());
-
-  if (f.fail()) {
-    // fall back to aca file
-    fullpath = "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/ras/aca_umc");
-    f.open(fullpath.c_str());
-    if (f.fail()) {
-      return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
-  }
-
-  std::string line;
-  getline(f, line);
-  sscanf(line.c_str(), "%9s%ld", str, &(err_cnt->uncorrectable_count));
-
-  getline(f, line);
-  sscanf(line.c_str(), "%9s%ld", str, &(err_cnt->correctable_count));
-
-  f.close();
-
-  return AMDSMI_STATUS_SUCCESS;
-}
 amdsmi_status_t smi_amdgpu_get_driver_version(amd::smi::AMDSmiGPUDevice* device, int* length,
                                               char* version) {
   SMIGPUDEVICE_MUTEX(device->get_mutex())
@@ -648,6 +649,17 @@ amdsmi_status_t smi_amdgpu_get_driver_version(amd::smi::AMDSmiGPUDevice* device,
   }
 
   return status;
+}
+
+amdsmi_status_t smi_amdgpu_plx_temp_from_metrics(const amdsmi_gpu_metrics_t& metrics,
+                                                 int64_t* temperature) {
+  // A max-value reading is the not-applicable sentinel (e.g. an APU with no
+  // PLX/VRSOC sensor); surface it as unsupported instead of a bogus reading.
+  if (metrics.temperature_vrsoc == std::numeric_limits<uint16_t>::max()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+  *temperature = metrics.temperature_vrsoc;
+  return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t smi_amdgpu_get_pcie_speed_from_pcie_type(uint16_t pcie_type, uint32_t* pcie_speed) {
@@ -676,6 +688,23 @@ amdsmi_status_t smi_amdgpu_get_pcie_speed_from_pcie_type(uint16_t pcie_type, uin
   return AMDSMI_STATUS_SUCCESS;
 }
 
+bool smi_amdgpu_has_xgmi_host_link(amd::smi::AMDSmiGPUDevice* device) {
+  uint64_t kfd_gpu_id = 0;
+  const rsmi_status_t status = rsmi_dev_guid_get(device->get_gpu_id(), &kfd_gpu_id);
+  const auto& kfd_nodes = amd::smi::RocmSMI::getInstance().kfd_node_map();
+  const auto node = status == RSMI_STATUS_SUCCESS ? kfd_nodes.find(kfd_gpu_id) : kfd_nodes.end();
+  if (node == kfd_nodes.end()) {
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << " | GPU " << device->get_gpu_id() << ": rsmi_dev_guid_get "
+       << amd::smi::getRSMIStatusString(status, false);
+    if (status == RSMI_STATUS_SUCCESS) ss << ", gpu_id " << kfd_gpu_id << " has no KFD node";
+    ss << "; keeping the PCIe link values";
+    LOG_INFO(ss);
+    return false;
+  }
+  return node->second->numa_node_type() == amd::smi::IOLINK_TYPE_XGMI;
+}
+
 amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice* device,
                                                        char* market_name) {
   SMIGPUDEVICE_MUTEX(device->get_mutex())
@@ -689,7 +718,7 @@ amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice
   std::ostringstream ss;
   std::string render_name = device->get_gpu_path();
   std::string path = "/dev/dri/" + render_name;
-  if (render_name.empty()) {
+  if (render_name.empty() || !device->has_libdrm()) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
 
@@ -777,8 +806,8 @@ amdsmi_status_t smi_amdgpu_is_gpu_power_management_enabled(amd::smi::AMDSmiGPUDe
   }
 
   SMIGPUDEVICE_MUTEX(device->get_mutex())
-  std::string fullpath =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/pp_features");
+  std::string fullpath = amd::smi::test_hooks::SysfsDrmRoot() + "/" + device->get_gpu_path() +
+                         std::string("/device/pp_features");
   std::ifstream fs(fullpath.c_str());
 
   if (fs.fail()) {
@@ -806,7 +835,8 @@ amdsmi_status_t smi_amdgpu_get_vcn_busy_percent(amd::smi::AMDSmiGPUDevice* devic
   }
 
   SMIGPUDEVICE_MUTEX(device->get_mutex())
-  std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device/vcn_busy_percent";
+  std::string fullpath = amd::smi::test_hooks::SysfsDrmRoot() + "/" + device->get_gpu_path() +
+                         "/device/vcn_busy_percent";
 
   std::ifstream fs(fullpath.c_str());
   if (fs.fail()) {
@@ -816,7 +846,7 @@ amdsmi_status_t smi_amdgpu_get_vcn_busy_percent(amd::smi::AMDSmiGPUDevice* devic
   std::string line;
   if (std::getline(fs, line)) {
     try {
-      uint32_t line_value = std::stoul(std::string(trim(line)));
+      uint32_t line_value = static_cast<uint32_t>(std::stoul(std::string(trim(line))));
       if (line_value > 100) {
         // max of uint32_t is used to indicate the erroneous value
         *vcn_busy_percent = std::numeric_limits<uint32_t>::max();
@@ -886,21 +916,7 @@ std::string smi_amdgpu_get_status_string(amdsmi_status_t ret, bool fullStatus = 
   return std::string(err_str);
 }
 
-uint32_t smi_brcm_get_value_u32(const std::string& folder, const std::string& file_name) {
-  std::string file_path = folder + "/" + file_name;
-  std::ifstream file(file_path.c_str(), std::ifstream::in);
-  if (!file.is_open()) {
-    return 0xFFFF;
-  } else {
-    std::string line;
-    getline(file, line);
-    return static_cast<uint32_t>(stoi(line));
-  }
-
-  return 0;
-}
-
-std::string smi_brcm_get_value_string(const std::string& folder, const std::string& file_name) {
+std::string smi_read_sysfs_string(const std::string& folder, const std::string& file_name) {
   std::stringstream temp;
   std::string file_path = folder + "/" + file_name;
   std::ifstream file(file_path.c_str(), std::ifstream::in);
@@ -917,27 +933,6 @@ std::string smi_brcm_get_value_string(const std::string& folder, const std::stri
   }
 
   return temp.str();
-}
-
-amdsmi_status_t smi_brcm_execute_cmd_get_data(const std::string& command, std::string* data) {
-  std::string result;
-  char buffer[128];
-
-  // Open a pipe to execute the command
-  std::shared_ptr<FILE> pipe(popen(command.c_str(), "r"), [](FILE* f) {
-    if (f) pclose(f);
-  });
-  if (!pipe) {
-    return AMDSMI_STATUS_API_FAILED;
-  }
-
-  // Read the output of the command into the buffer
-  while (fgets(buffer, sizeof(buffer), pipe.get()) != nullptr) {
-    result += buffer;
-  }
-  *data = result;
-
-  return AMDSMI_STATUS_SUCCESS;
 }
 
 // TODO(amdsmi_team): Do we want to include these functions in header?
@@ -1371,8 +1366,8 @@ amdsmi_status_t smi_amdgpu_read_clk_freq_from_pp_dpm(amd::smi::AMDSmiGPUDevice* 
   }
 
   uint32_t drm_render = device->get_drm_render_minor();
-  std::string sysfs_path =
-      "/sys/class/drm/renderD" + std::to_string(drm_render) + "/device/" + pp_dpm_file;
+  std::string sysfs_path = amd::smi::test_hooks::SysfsDrmRoot() + "/renderD" +
+                           std::to_string(drm_render) + "/device/" + pp_dpm_file;
 
   std::ifstream file(sysfs_path);
   if (!file.good()) {
@@ -1451,60 +1446,32 @@ const char* smi_amdgpu_pp_dpm_filename_for_clk_type(amdsmi_clk_type_t clk_type) 
   }
 }
 
-// Gfx activity can be silenced (forced to the uint-max N/A sentinel). The
-// affected graphics/RLC-firmware combo is flagged once per handle and cached.
-namespace {
-constexpr uint64_t kFlaggedGfxVersion = 0x1250;  // gfx1250
-constexpr uint64_t kFlaggedRlcFwMin = 0x18;      // RLC fw 24..29
-constexpr uint64_t kFlaggedRlcFwMax = 0x1d;
-
-bool has_flagged_gfx_fw(amdsmi_processor_handle processor_handle) {
-  static std::unordered_map<amdsmi_processor_handle, bool> cache;
-  static std::mutex mtx;
-  std::lock_guard<std::mutex> lock(mtx);
-  auto it = cache.find(processor_handle);
-  if (it != cache.end()) return it->second;
-
-  bool flagged = false;
-  amdsmi_asic_info_t asic{};
-  if (amdsmi_get_gpu_asic_info(processor_handle, &asic) == AMDSMI_STATUS_SUCCESS &&
-      asic.target_graphics_version == kFlaggedGfxVersion) {
-    amdsmi_fw_info_t fw{};
-    if (amdsmi_get_fw_info(processor_handle, &fw) == AMDSMI_STATUS_SUCCESS) {
-      for (uint8_t i = 0; i < fw.num_fw_info; ++i) {
-        if (fw.fw_info_list[i].fw_id == AMDSMI_FW_ID_RLC) {
-          uint64_t rlc = fw.fw_info_list[i].fw_version;
-          flagged = rlc >= kFlaggedRlcFwMin && rlc <= kFlaggedRlcFwMax;
-          break;
-        }
-      }
-    }
+void init_asic_info_defaults(amdsmi_asic_info_t* info) {
+  if (info == nullptr) {
+    return;
   }
-  cache[processor_handle] = flagged;
-  return flagged;
-}
-}  // namespace
-
-bool is_gfx_activity_silenced(amdsmi_processor_handle processor_handle) {
-  const char* v = std::getenv("AMDSMI_SILENCE_GFX_ACTIVITY");
-  if (v != nullptr) return std::string(v) == "1";
-  return has_flagged_gfx_fw(processor_handle);
+  std::memset(info, 0, sizeof(*info));
+  info->vendor_id = std::numeric_limits<uint32_t>::max();
+  info->subvendor_id = std::numeric_limits<uint32_t>::max();
+  info->device_id = std::numeric_limits<uint64_t>::max();
+  info->rev_id = std::numeric_limits<uint32_t>::max();
+  std::snprintf(info->asic_serial, AMDSMI_MAX_STRING_LENGTH, "ffffffffffffffff");
+  info->oam_id = std::numeric_limits<uint32_t>::max();
+  info->num_of_compute_units = std::numeric_limits<uint32_t>::max();
+  info->target_graphics_version = std::numeric_limits<uint64_t>::max();
+  info->subsystem_id = std::numeric_limits<uint32_t>::max();
+  info->physical_acc_id = std::numeric_limits<uint32_t>::max();
+  info->chip_rev_id = std::numeric_limits<uint32_t>::max();
+  info->external_rev_id = std::numeric_limits<uint32_t>::max();
 }
 
-void apply_gfx_activity_overrides(amdsmi_processor_handle processor_handle,
-                                  amdsmi_gpu_metrics_t* metrics) {
-  if (metrics == nullptr) return;
-  if (!is_gfx_activity_silenced(processor_handle)) return;
-
-  metrics->average_gfx_activity = std::numeric_limits<uint16_t>::max();
-  metrics->gfx_activity_acc = std::numeric_limits<uint32_t>::max();
-  // Per-XCP busy fields read the same source as the whole-GPU value.
-  for (auto& xcp : metrics->xcp_stats) {
-    for (auto& busy_inst : xcp.gfx_busy_inst) {
-      busy_inst = std::numeric_limits<uint32_t>::max();
-    }
-    for (auto& busy_acc : xcp.gfx_busy_acc) {
-      busy_acc = std::numeric_limits<uint64_t>::max();
-    }
+auto smi_amdgpu_format_driver_date(std::string_view drm_date) -> std::string {
+  if (drm_date == "0") {
+    return {};
   }
+  if (drm_date.size() == 8) {
+    return std::string{drm_date.substr(0, 4)} + "/" + std::string{drm_date.substr(4, 2)} + "/" +
+           std::string{drm_date.substr(6, 2)} + " 00:00";
+  }
+  return std::string{drm_date};
 }

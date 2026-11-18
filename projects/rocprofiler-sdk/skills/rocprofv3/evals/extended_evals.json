@@ -1,0 +1,39 @@
+{
+  "evaluations": [
+    {
+      "id": "rocprofv3-att-strided-copy-hotspots",
+      "skill_should_trigger": true,
+      "note": "The strided load at app.hip line 34 and its s_waitcnt vmcnt(0) hold over 90% of traced latency on MI300-class GPUs. Kept out of the amd/skills catalog, which does not run extended datasets, because the dedicated thread-trace skill owns these prompts there.",
+      "prompt": "Thread-trace the strided_copy kernel in this HIP app and tell me which instructions and source lines stall the most and why. Build with make and run ./app. Write the findings to att_findings.md.",
+      "workspace": "evals/files/hip-app",
+      "expected_behavior": [
+        "Run rocprofv3 --att restricted to strided_copy with --kernel-include-regex (optionally skipping the first instance with --kernel-iteration-range)",
+        "Summarize the stats_*.csv output with the skill's analyze_att_stats.py script",
+        "Identify the strided global_load and the s_waitcnt vmcnt wait on the strided read line as the hotspot and explain it as uncoalesced memory access, with a concrete fix"
+      ],
+      "unexpected_behavior": [
+        "Run --att without any kernel filter",
+        "Claim instruction-level results without producing a thread trace"
+      ],
+      "logs_contain": [
+        "--att",
+        "analyze_att_stats.py"
+      ],
+      "files_exist": [
+        "att_findings.md"
+      ]
+    },
+    {
+      "id": "rocprofv3-att-compute-viewer-input",
+      "skill_should_trigger": true,
+      "prompt": "How do I generate the data that ROCprof Compute Viewer opens for my Triton kernel on an MI355X?",
+      "note": "Kept out of the amd/skills catalog, which does not run extended datasets, because the dedicated thread-trace skill owns these prompts there."
+    },
+    {
+      "id": "rocprofv3-att-empty-stats",
+      "skill_should_trigger": true,
+      "prompt": "rocprofv3 --att finished but the stats csv for my small kernel shows Hitcount 0 everywhere. What went wrong?",
+      "note": "Kept out of the amd/skills catalog, which does not run extended datasets, because the dedicated thread-trace skill owns these prompts there."
+    }
+  ]
+}

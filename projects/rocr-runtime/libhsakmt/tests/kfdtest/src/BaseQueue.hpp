@@ -43,9 +43,12 @@ class BaseQueue {
     /** Create the queue.
      *  @see hsaKmtCreateQueue
      *  @param pointers is used only for creating AQL queues. Otherwise it is omitted.
+     *  @param queuePercentage Queue percentage. For PM4 queues bits 8-15 select
+     *      the target XCC (pm4_target_xcc) on multi-XCC nodes.
      */
     virtual HSAKMT_STATUS Create(unsigned int NodeId, unsigned int size = DEFAULT_QUEUE_SIZE,
-                                 HSAuint64 *pointers = NULL);
+                                 HSAuint64 *pointers = NULL,
+                                 unsigned int queuePercentage = DEFAULT_QUEUE_PERCENTAGE);
     /** Update the queue.
      *  @see hsaKmtUpdateQueue
      *  @param percent New queue percentage

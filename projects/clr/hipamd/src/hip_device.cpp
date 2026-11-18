@@ -13,9 +13,6 @@
 #include "hip_mempool_impl.hpp"
 #include "hip_platform.hpp"
 
-#undef hipGetDeviceProperties
-#undef hipDeviceProp_t
-
 namespace hip {
 
 // ================================================================================================
@@ -146,6 +143,7 @@ void Device::Reset() {
     }
   }
   flags_ = hipDeviceScheduleSpin;
+  devices()[0]->UpdateGroupMemCarveout(-1);
   destroyAllStreams();
 
   // Clear hostcall allocations to avoid ~Device() accessing freed Memory objects later.
@@ -160,19 +158,34 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
   amd::Command::EventWaitList eventWaitList(0);
   bool submitMarker = false;
   std::vector<amd::CommandQueue*> activeQueues;
+  void* wait_signal = nullptr;
 
-  auto waitForStream = [&submitMarker, &eventWaitList](hip::Stream* stream) {
+  auto waitForStream = [&](hip::Stream* stream) {
     if (amd::Command* command = stream->getLastQueuedCommand(true)) {
       amd::Event& event = command->event();
-      // Check HW status of the ROCclr event.
+      // Check the HW status of the ROCclr event only when the command isn't known complete: a
+      // signal in device memory takes a read across the bus, and the last command of an idle
+      // stream stays queued, so every launch checks it again.
       // Note: not all ROCclr modes support HW status
-      bool ready = stream->device().IsHwEventReady(event);
+      bool ready = (command->status() == CL_COMPLETE);
       if (!ready) {
-        ready = (command->status() == CL_COMPLETE);
+        ready = stream->device().IsHwEventReady(event);
       }
+      // Cache maintenance, not ordering: never skipped by the blocking tracker.
       submitMarker |= stream->vdev()->isFenceDirty();
       if (!ready) {
         command->notifyCmdQueue();
+        if (wait_null_stream) {
+          // The HW signal the marker below would wait on (as in IsHwEventReady).
+          void* signal =
+              (event.NotifyEvent() != nullptr) ? event.NotifyEvent()->HwEvent() : event.HwEvent();
+          if (blocking_stream->IsBlockedOn(signal)) {
+            // This stream already waits on the same signal; skip the redundant marker.
+            command->release();
+            return;
+          }
+          wait_signal = signal;
+        }
         eventWaitList.push_back(command);
       } else {
         command->release();
@@ -186,7 +199,11 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
       waitForStream(null_stream_);
     }
   } else {
-    activeQueues = blocking_stream->device().getActiveQueues();
+    // Wait on the active streams of this device, not blocking_stream->device().
+    // blocking_stream is only where the barrier gets enqueued and it can be on a
+    // different device. (e.g. hipMemcpyPeer is the cross-device caller waiting on peer
+    // device while enqueuing the barrier on the current device's null stream).
+    activeQueues = devices()[0]->getActiveQueues();
     for (const auto& queue : activeQueues) {
       auto* active_stream = static_cast<hip::Stream*>(queue);
       // Only wait on blocking (non-nonblocking) streams other than the current one
@@ -202,6 +219,11 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
     auto* marker = new amd::Marker(*blocking_stream, kMarkerDisableFlush, eventWaitList);
     marker->enqueue();
     marker->release();
+  }
+
+  // Publish only once the marker is queued, so a racing launch can't skip ahead of it
+  if (wait_signal != nullptr) {
+    blocking_stream->SetBlockedOn(wait_signal);
   }
 
   // Release all active commands; safe after the marker was enqueued
@@ -564,7 +586,7 @@ hipError_t hipDeviceGetName(char* name, int len, hipDevice_t device) {
 
   // Only copy partial name if size of `dest` is smaller than size of `src` including
   // trailing zero byte
-  const auto memcpySize = (len <= (nameLen + 1) ? (len - 1) : nameLen);
+  const auto memcpySize = (static_cast<size_t>(len) <= (nameLen + 1) ? (len - 1) : nameLen);
   ::memcpy(name, info.boardName_, memcpySize);
   name[memcpySize] = '\0';
 
@@ -591,7 +613,65 @@ hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t device) {
 }
 
 // ================================================================================================
-hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
+hipError_t hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMask, hipDevice_t device) {
+  HIP_INIT_API(hipDeviceGetLuid, reinterpret_cast<void*>(luid),
+               reinterpret_cast<void*>(deviceNodeMask), device);
+
+  if (device < 0 || static_cast<size_t>(device) >= g_devices.size()) {
+    HIP_RETURN(hipErrorInvalidDevice);
+  }
+
+  if (luid == nullptr || deviceNodeMask == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  auto* deviceHandle = g_devices[device]->devices()[0];
+  const auto& info = deviceHandle->info();
+
+  // No WDDM/DXGI adapter behind this device, so no LUID to report.
+  if (info.luidLowPart_ == 0 && info.luidHighPart_ == 0) {
+    HIP_RETURN(hipErrorNotSupported);
+  }
+
+  // The LUID is an 8-byte value formed from the low and high parts reported by the backend.
+  static_assert(sizeof(info.luidLowPart_) + sizeof(info.luidHighPart_) == 8,
+                "LUID is expected to be 8 bytes");
+  memcpy(&luid[0], &info.luidLowPart_, sizeof(info.luidLowPart_));
+  memcpy(&luid[sizeof(info.luidLowPart_)], &info.luidHighPart_, sizeof(info.luidHighPart_));
+  *deviceNodeMask = info.luidDeviceNodeMask_;
+
+  HIP_RETURN(hipSuccess);
+}
+
+// ================================================================================================
+hipError_t hipDeviceGetExecAffinitySupport(int* pi, hipExecAffinityType type, hipDevice_t dev) {
+  HIP_INIT_API(hipDeviceGetExecAffinitySupport, pi, type, dev);
+  if (pi == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (dev < 0 || static_cast<size_t>(dev) >= g_devices.size()) {
+    HIP_RETURN(hipErrorInvalidDevice);
+  }
+  auto* deviceHandle = g_devices[dev]->devices()[0];
+  const bool isWgp = deviceHandle->settings().enableWgpMode_;
+  switch (type) {
+    case hipExecAffinityTypeCUCount:
+      *pi = 1;
+      break;
+    case hipExtExecAffinityTypeGranularityCU:
+      *pi = isWgp ? 0 : 1;
+      break;
+    case hipExtExecAffinityTypeGranularityWGP:
+      *pi = isWgp ? 1 : 0;
+      break;
+    default:
+      HIP_RETURN(hipErrorInvalidValue);
+  }
+  HIP_RETURN(hipSuccess);
+}
+
+// ================================================================================================
+hipError_t ihipGetDeviceProperties(hipDeviceProp_t* props, int device) {
   if (props == nullptr) {
     return hipErrorInvalidValue;
   }
@@ -603,11 +683,11 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
 
   constexpr auto kPixelSizeMax = 16;
   constexpr auto kInt32Max = static_cast<uint64_t>(std::numeric_limits<int32_t>::max());
-  hipDeviceProp_tR0600 deviceProps = {0};
+  hipDeviceProp_tR0600 deviceProps = {};
 
   const auto& info = deviceHandle->info();
   const auto& isa = deviceHandle->isa();
-  ::strncpy(deviceProps.name, info.boardName_, sizeof(info.boardName_));
+  ::snprintf(deviceProps.name, sizeof(deviceProps.name), "%s", info.boardName_);
   memcpy(deviceProps.uuid.bytes, info.uuid_, sizeof(info.uuid_));
   deviceProps.totalGlobalMem = info.globalMemSize_;
   const size_t ldsPerMultiprocessor = static_cast<size_t>(info.localMemSizePerCU_) *
@@ -734,7 +814,7 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   // Caching behavior
   deviceProps.globalL1CacheSupported = 1;
   deviceProps.localL1CacheSupported = 1;
-  deviceProps.persistingL2CacheMaxSize = info.l2CacheSize_;
+  deviceProps.persistingL2CacheMaxSize = info.persistingL2CacheMaxSize_;
   deviceProps.reservedSharedMemPerBlock = 0;
   deviceProps.sharedMemPerBlockOptin = info.localMemSizePerCU_;
 
@@ -772,9 +852,19 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   // Mapping HIP array
   deviceProps.deferredMappingHipArraySupported = 0;
   // RDMA options
-  deviceProps.gpuDirectRDMASupported = 0;
-  deviceProps.gpuDirectRDMAFlushWritesOptions = 0;
-  deviceProps.gpuDirectRDMAWritesOrdering = 0;
+  // Set option if we have a HDP register
+  deviceProps.gpuDirectRDMAFlushWritesOptions =
+      hip::ihipRdmaFlushWritesOptions(info.hdpMemFlushCntl);
+  deviceProps.gpuDirectRDMAWritesOrdering = hip::ihipRdmaWritesOrdering();
+  // RDMA is only usable if an inbound write can be made visible, either by native ordering or
+  // by a flush.
+  const bool rdmaVisibilityPath =
+      (deviceProps.gpuDirectRDMAWritesOrdering != hipGPUDirectRDMAWritesOrderingNone) ||
+      (deviceProps.gpuDirectRDMAFlushWritesOptions != 0);
+  deviceProps.gpuDirectRDMASupported =
+      (info.dmabufSupported_ && info.largeBar_ && rdmaVisibilityPath) ? 1 : 0;
+  // The LUID is a Windows/DXGI adapter concept; the backend reports a zero LUID
+  // and zero node mask on platforms without a WDDM adapter.
   *reinterpret_cast<uint32_t*>(&deviceProps.luid[0]) = info.luidLowPart_;
   *reinterpret_cast<uint32_t*>(&deviceProps.luid[sizeof(uint32_t)]) = info.luidHighPart_;
   deviceProps.luidDeviceNodeMask = info.luidDeviceNodeMask_;
@@ -793,6 +883,8 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
 hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_tR0600* prop, int device) {
   HIP_INIT_API(hipGetDevicePropertiesR0600, prop, device);
 
+  // For now, we can forward to the internal/unstable API. In the future, if
+  // hipDeviceProp_t is different, this will fail to compile.
   HIP_RETURN(ihipGetDeviceProperties(prop, device));
 }
 
@@ -811,7 +903,7 @@ hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop, int device) {
 
   constexpr auto kPixelSizeMax = 16;
   constexpr auto kInt32Max = static_cast<uint64_t>(std::numeric_limits<int32_t>::max());
-  hipDeviceProp_tR0000 deviceProps = {0};
+  hipDeviceProp_tR0000 deviceProps = {};
 
   const auto& info = deviceHandle->info();
   const auto& isa = deviceHandle->isa();
@@ -988,8 +1080,3 @@ hipError_t hipGetProcAddress_spt(const char* symbol, void** pfn, int hipVersion,
 }
 
 }  // namespace hip
-
-// ================================================================================================
-extern "C" hipError_t hipGetDeviceProperties(hipDeviceProp_tR0000* props, hipDevice_t device) {
-  return hip::hipGetDevicePropertiesR0000(props, device);
-}

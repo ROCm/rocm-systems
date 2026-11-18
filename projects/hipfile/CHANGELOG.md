@@ -1,20 +1,95 @@
 # Changelog for hipFile
 
-## (Unreleased) hipFile 0.5.0
+## (Unreleased) hipFile 0.7.0 
 
 ### Added
 
+* Added a Host backend that enables file I/O using host memory. `hipFileBufRegister` now accepts host memory.
+* MD and LVM software RAID arrays running pass-through personalities whose member devices are all local NVMe are now fastpath capable, and `ais-check` reports them as such.
+* Added the `HIPFILE_DEVICE_STREAM_POOL_SIZE` environment variable, which sets the number of streams in the per-GPU pool that fallback I/O uses for its device copies. The default is 4; setting it to 0 selects the default.
+
 ### Changed
+
+* Fallback I/O operations now perform their device copies on a pool of per-GPU non-blocking streams instead of the default stream, so they no longer serialize against other work on the GPU's default (null) stream.
+* hipFile now requires CMake 3.25.2 or later, instead of 3.21, to build hipFile, its Python bindings, and the installed examples. Earlier versions couldn't fetch GoogleTest or rocm-cmake, and before 3.22.1, `find_library()` couldn't find system libraries when building with amdclang. Some distributions ship an older CMake, such as Ubuntu 22.04 (3.22.1) and Debian 12 (3.25.1); install a newer one there, for example with `pip install cmake` or from Kitware's APT repository.
+
+### Fixed
+
+* `ais-check` no longer reports an LVM parity RAID logical volume (`raid4`, `raid5`, `raid6`) as fastpath capable.
+* Per-GPU I/O statistics are now attributed to the GPU that owns the I/O buffer instead of the caller's active HIP device. Previously, `hipFileGetStatsL3()` and `ais-stats` could report counters against the wrong GPU when the active device differed from the buffer's device.
+* `hipfile.h` now includes `<time.h>`, which declares the `struct timespec` used by `hipFileBatchIOGetStatus()`. Previously, C code that included `<time.h>` after `hipfile.h` got an incompatible pointer type error or warning when passing a `struct timespec *` to `hipFileBatchIOGetStatus()`.
+* Configuring hipFile with `HIPFILE_CXX_STANDARD=26` and a CMake older than 3.30, which C++26 requires, now fails with an error that names `HIPFILE_CXX_STANDARD` and the CMake version needed. Previously, the error only said that CMake didn't know the `cxx_std_26` compiler feature.
+* Building hipFile with GCC 15 or later no longer warns about every line indented with spaces. The build now uses `-Wleading-whitespace=spaces`, which warns about tabs in indentation, instead of `-Wleading-whitespace=tabs`.
+* Optimized builds now correctly enable `_FORTIFY_SOURCE=3` for hipFile when compiling with `-O2`, `-O3`, or `-Os` (i.e., the `Release`, `RelWithDebInfo`, and `MinSizeRel` build types). This applies when using Clang, or GCC 12 or later. Previously, the build checked the wrong CMake variable to detect the build type's optimization level, so `_FORTIFY_SOURCE` only activated when `-O2`, `-O3`, or `-Os` appeared directly in `CMAKE_CXX_FLAGS`.  This also meant multi-config generators (e.g., Ninja Multi-Config) were never handled. The check now runs per-configuration, covering all standard optimized build types and multi-config generators. With Clang and glibc 2.40 or later, fortified builds turn off `-Wused-but-marked-unused`, which glibc's fortified `printf`-family functions trigger.
 
 ### Removed
 
 ### Known issues
+
+* The bandwidth reported by `ais-stats` and the Stats API is derived from the sum of the per-operation latencies instead of the elapsed wall-clock time, so when several threads issue I/O concurrently, the reported bandwidth is understated by roughly the number of concurrent threads. See [issue #11919](https://github.com/ROCm/rocm-systems/issues/11919).
+* Asynchronous fastpath I/O, added in hipFile 0.5.0 for ROCm 10.1.0, performs poorly. The ROCm runtime serializes all stream host functions onto a single thread, so asynchronous fastpath operations cannot run concurrently.
+
+## hipFile 0.6.0 for ROCm 10.2.0
+
+### Added
+
+* `hipFileGetStatsL3()` now populates the `uuid` field of each `hipFilePerGpuStats` entry with the raw 16-byte GPU UUID, zero-filled when the device cannot report one.
+* Added a batch API example, `batch-roundtrip`.
+* Added reference documentation for the Stats API.
+* Added a documentation page listing frameworks and applications that use hipFile, including LMCache, fastsafetensors, rocAL, PyTorch, fio, and IOR.
+
+### Changed
+
+* The hipFile CMake options have been renamed from `AIS_*` to `HIPFILE_*` (e.g., `AIS_CXX_STANDARD` is now `HIPFILE_CXX_STANDARD`). The old `AIS_*` names still work but are deprecated and emit a CMake deprecation warning.
+* The `HIPFILE_WARN_UNSAFE_BUFFER_OPS` CMake option now defaults to `OFF`.
+* Documented that Linux kernels built with `CONFIG_PCI_P2PDMA=y` are required for fastpath.
+
+### Fixed
+
+* On Windows Subsystem for Linux (WSL2), hipFile now sends all I/O to the fallback backend, since the fastpath is not yet implemented on WSL.
+* Asynchronous fastpath operations now fail over to the fallback backend on `ENODEV` or `EREMOTEIO`, matching the synchronous and batch paths.
+* hipFile now returns `hipFileGetNewFDFailed` instead of `hipFileInternalError` when the process or system runs out of file descriptors. API calls that need a new file descriptor, such as `hipFileHandleRegister()`, can return this error.
+* The `HIPFILE_WARN_UNSAFE_BUFFER_OPS` CMake option now applies the clang `-Wunsafe-buffer-usage` and `-fsafe-buffer-usage-suggestions` flags to C++ sources. Previously, the flags were never passed to the compiler.
+
+### Removed
+
+### Known issues
+
+* The bandwidth reported by `ais-stats` and the Stats API is derived from the sum of the per-operation latencies instead of the elapsed wall-clock time, so when several threads issue I/O concurrently, the reported bandwidth is understated by roughly the number of concurrent threads. See [issue #11919](https://github.com/ROCm/rocm-systems/issues/11919).
+* Asynchronous fastpath I/O, added in hipFile 0.5.0 for ROCm 10.1.0, performs poorly. The ROCm runtime serializes all stream host functions onto a single thread, so asynchronous fastpath operations cannot run concurrently.
+
+## hipFile 0.5.0 for ROCm 10.1.0
+
+### Added
+
+* Added a Stats API for querying hipFile I/O statistics. `hipFileGetStatsL1()`, `hipFileGetStatsL2()`, and `hipFileGetStatsL3()` return progressively more detailed counters: basic I/O and operation counts (Level 1), I/O size histograms (Level 2), and per-GPU statistics (Level 3).
+* `ais-check` now detects SR-IOV virtual function (VF) GPUs via `amd-smi` and warns when one is present. hipFile's fastpath is only supported on GPU physical functions (PFs); on a VF, I/O falls back to the compatibility path. The check is skipped if `amd-smi` is unavailable.
+* `hipFileReadAsync()` and `hipFileWriteAsync()` now support the AIS fastpath backend, enabling asynchronous GPU-direct I/O enqueued on a HIP stream. Transparent async backend failover to the slowpath is not currently supported for async fastpath operations.
+* Batch operations now execute on an internal thread pool, enabling batch API support on the AMD backend. Together with async fastpath support, this resolves the 0.3.0 limitation where batch and async API calls were unsupported on the AMD backend.
+* Added the `HIPFILE_ASYNC_BUFFER_SIZE` environment variable to control the size of the host bounce buffer used for asynchronous fallback I/O. The default size is 16 MiB; setting it to `0` uses the default.
+* `ais-check` now reports whether an LVM logical volume supports fastpath.
+
+### Changed
+
+* The synchronous fallback I/O path now sets the active HIP device to the buffer's GPU before `hipMemcpy` and restores the caller's device afterward, fixing copies that could run against the wrong device context.
+* Asynchronous fallback I/O now reuses a single per-stream bounce buffer, splitting large transfers into chunks that fit the buffer, to reduce the memory footprint of asynchronous workloads.
+
+### Fixed
+
+* Corrected CMake ROCm path detection so out-of-tree builds locate the correct ROCm installation.
+
+### Removed
+
+### Known issues
+
+* Asynchronous operations that use the fastpath backend will not retry on the fallback backend. If asynchronous operations have proper alignment, they now run on the fastpath backend. If the fastpath device lookup fails or the P2P DMA transfer is not supported between the devices, the asynchronous operation will now fail.
 
 ## hipFile 0.4.0 for ROCm 10.0.0
 
 ### Added
 
 * A KFD-based alternative check for P2P DMA support was added to `ais-check`. This inspects the `capability` property under `/sys/class/kfd/kfd/topology/nodes/*/properties`.
+* Added support for Logical Volume Manager (LVM) volumes with a maximum of 16 extents
 * Added guides for setting up storage targets to the documentation
 
 ### Changed
@@ -22,6 +97,7 @@
 * `ais-check` now lists the AIS-capable file system mounts detected on the system and fails if none are found.
 * Fastpath-only tests are now automatically skipped on systems that do not support the AIS fastpath instead of failing. Running ctest in verbose mode (`ctest -V`) will provide the reason why the test was skipped.
 * Updated INSTALL.md to point to official install docs
+* hipFileRead and hipFileWrite now return -1 with `errno` set to `EINVAL` for negative offsets instead of returning `-hipFileInternalError`
 
 ### Removed
 

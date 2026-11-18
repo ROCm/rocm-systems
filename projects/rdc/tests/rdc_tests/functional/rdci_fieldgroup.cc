@@ -132,4 +132,15 @@ void TestRdciFieldgroup::Run(void) {
 
   result = rdc_group_field_destroy(rdc_handle, field_group_id);
   ASSERT_EQ(result, RDC_ST_OK);
+
+  // The destroyed field group no longer exists. rdc_group_field_add_field() checks the field ID
+  // before the field group, so pass a valid field.
+  result = rdc_group_field_get_info(rdc_handle, field_group_id, &group_info);
+  ASSERT_EQ(result, RDC_ST_FLDGROUP_NOT_FOUND);
+
+  result = rdc_group_field_add_field(rdc_handle, field_group_id, RDC_FI_GPU_UTIL);
+  ASSERT_EQ(result, RDC_ST_FLDGROUP_NOT_FOUND);
+
+  result = rdc_group_field_destroy(rdc_handle, field_group_id);
+  ASSERT_EQ(result, RDC_ST_FLDGROUP_NOT_FOUND);
 }

@@ -5,16 +5,30 @@
 /// @brief Client-side RPC stub for the rocjitsu daemon.
 
 #include "rocjitsu/kmd/linux/remote_driver.h"
+#include "rocjitsu/kmd/linux/host_mapping_lock.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
+#include "rocjitsu/kmd/linux/libc_passthrough.h"
+#include "rocjitsu/kmd/linux/linux_kfd.h"
+#include "rocjitsu/kmd/linux/memory_backing.h"
 #include "rocjitsu/kmd/linux/rpc.h"
+#include "rocjitsu/vm/amdgpu/mtype.h"
+#include "util/log.h"
+#include "util/unique_handle.h"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cerrno>
+#include <charconv>
 #include <chrono>
 #include <cstring>
 #include <fcntl.h>
+#include <format>
+#include <fstream>
 #include <linux/mman.h>
+#include <optional>
+#include <string_view>
+#include <utility>
 #ifndef MADV_POPULATE_WRITE
 #define MADV_POPULATE_WRITE 23
 #endif
@@ -22,11 +36,19 @@
 #include <poll.h>
 #include <sys/eventfd.h>
 #include <sys/mman.h>
+#include <sys/prctl.h>
+#ifndef PR_SET_PTRACER
+// Yama's ptrace-scope exception list. Absent from some libc header sets even
+// where the running kernel implements it, so the call below is worth keeping
+// unconditional; the kernel answers EINVAL when it is genuinely unsupported.
+#define PR_SET_PTRACER 0x59616d61
+#endif
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/un.h>
+#include <system_error>
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -34,9 +56,20 @@
 namespace rocjitsu {
 namespace {
 
+// Reply descriptors are temporary driver-owned aliases. Cleanup must preserve
+// the errno from a failed RPC, size check, or mapping without re-entering hooks.
+struct MmapReplyFdTraits : PassthroughFdTraits {
+  static void close(int fd) noexcept {
+    const int saved_errno = errno;
+    PassthroughFdTraits::close(fd);
+    errno = saved_errno;
+  }
+};
+
 constexpr bool has_embedded_pointers(unsigned long request) {
   switch (canonical_ioctl_request(request)) {
   case AMDKFD_IOC_WAIT_EVENTS:
+  case AMDKFD_IOC_SET_CU_MASK:
   case AMDKFD_IOC_MAP_MEMORY_TO_GPU:
   case AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU:
   case AMDKFD_IOC_GET_PROCESS_APERTURES_NEW:
@@ -66,13 +99,132 @@ int transport_errno() {
   return err > 0 ? -err : -EIO;
 }
 
-/// @brief Safe wrapper around syscall(SYS_mmap, ...) that avoids UB from
-/// casting negative return values through uintptr_t/pointer types.
+/// @brief Permit the daemon on @p socket to read and write this address space.
+///
+/// @details Host memory that never became a daemon mapping is reachable only by
+/// the daemon reaching into this process. Its memory bridge already assumes it
+/// can, through process_vm_readv/writev, and GPU access to such memory is
+/// serviced no other way -- pageable buffers the runtime pinned through the KFD
+/// SVM API, above all, since that registration produces no shared backing the
+/// way a USERPTR allocation does. Those calls are nonetheless refused by
+/// default: the daemon is forked as this process's child, and Yama's default
+/// ptrace_scope admits a ptracer only over its own descendants, never over its
+/// own ancestor. Naming the daemon a permitted ptracer restores the access the
+/// bridge was written to have; without it every such access fails EPERM and the
+/// SDMA copy that needed it never completes.
+///
+/// The peer PID comes from the kernel rather than from the daemon, so this
+/// names exactly the process on the other end of this socket. The grant widens
+/// nothing that was not already true: the daemon's own client library is this
+/// LD_PRELOAD, and is already executing inside this address space.
+///
+/// @brief The daemon PID this client's launcher forked, if it had one.
+/// @details Read from the environment rather than the socket on purpose: the
+/// socket answers who is connected, and this answers who was supposed to be.
+std::optional<pid_t> launched_daemon_pid() {
+  const char *raw = getenv(kRpcDaemonPidEnv);
+  if (raw == nullptr || *raw == '\0')
+    return std::nullopt;
+  pid_t parsed = 0;
+  const char *end = raw + std::strlen(raw);
+  const auto [stop, error] = std::from_chars(raw, end, parsed);
+  if (error != std::errc{} || stop != end || parsed <= 0)
+    return std::nullopt;
+  return parsed;
+}
+
+/// @brief Contents of Yama's ptrace_scope, or nullopt when it does not exist.
+std::optional<std::string> read_ptrace_scope() {
+  std::ifstream file("/proc/sys/kernel/yama/ptrace_scope");
+  if (!file)
+    return std::nullopt;
+  std::string contents;
+  std::getline(file, contents);
+  return contents;
+}
+
+/// @brief Why a peer was refused, for the log line that reports it.
+std::string_view describe(PtracerGrantVerdict verdict) {
+  switch (verdict) {
+  case PtracerGrantVerdict::Grant:
+    return "the peer is the daemon this client's launcher started";
+  case PtracerGrantVerdict::GrantUnverifiedPeer:
+    return "no launcher named a daemon, so the socket's owner is trusted";
+  case PtracerGrantVerdict::RefusedNoPeer:
+    return "the socket reports no usable peer credentials";
+  case PtracerGrantVerdict::RefusedForeignUser:
+    return "the peer belongs to another user";
+  case PtracerGrantVerdict::RefusedPeerMismatch:
+    return "the peer is not the daemon this client's launcher started";
+  }
+  return "unrecognized";
+}
+
+/// Called only once the handshake has succeeded. Before that this process has
+/// no evidence the peer speaks the protocol at all, and a grant is the one step
+/// here that outlives the connection.
+///
+/// @param[in] socket Connected daemon socket.
+/// @returns The trust decision, whether or not a syscall followed from it.
+PtracerGrantVerdict authorize_daemon_address_space_access(int socket) {
+  ucred peer{};
+  socklen_t peer_size = sizeof(peer);
+  const bool have_peer = getsockopt(socket, SOL_SOCKET, SO_PEERCRED, &peer, &peer_size) == 0 &&
+                         peer_size == sizeof(peer) && peer.pid > 0;
+
+  const PtracerGrantVerdict verdict =
+      have_peer ? ptracer_grant_verdict(launched_daemon_pid(), peer.pid, peer.uid, geteuid())
+                : PtracerGrantVerdict::RefusedNoPeer;
+  if (!grants(verdict)) {
+    // Reported rather than dropped. A refusal is not a failure in itself, but
+    // it decides whether pageable transfers above the pinning threshold can
+    // complete, and a caller left wondering why an SDMA copy never retires has
+    // no other way to find out.
+    util::Logger::warn(
+        std::format("daemon: not authorizing peer to read this address space ({}); transfers "
+                    "that rely on process_vm_readv/writev will fail",
+                    describe(verdict)));
+    return verdict;
+  }
+  if (verdict == PtracerGrantVerdict::GrantUnverifiedPeer) {
+    // Attach mode can legitimately lack a launcher-provided PID. Keep this
+    // accepted trust decision in opt-in tracing so normal launches stay quiet.
+    util::Logger::driver(
+        std::format("daemon: authorizing pid {} to read this address space; no launcher named a "
+                    "daemon for this client, so nothing here identifies it further",
+                    peer.pid));
+  }
+
+  const PtraceScopePolicy policy = ptrace_scope_policy_from_text(read_ptrace_scope());
+  if (policy == PtraceScopePolicy::Absent || policy == PtraceScopePolicy::Disabled)
+    return verdict; // Already permitted; the grant would be a no-op.
+  if (policy == PtraceScopePolicy::AdminOnly || policy == PtraceScopePolicy::NoAttach) {
+    util::Logger::warn(
+        "daemon: ptrace_scope forbids attaching regardless of a permitted-ptracer grant, so "
+        "transfers that rely on process_vm_readv/writev will fail");
+    return verdict;
+  }
+
+  // Process-wide, single-valued, and unreadable: PR_SET_PTRACER holds one PID
+  // with no PR_GET_PTRACER to inspect it, so this necessarily overwrites
+  // whatever was there. That is why it is narrowed as far as it is -- issued
+  // only for a handshaked peer that the launcher named, and only in the one
+  // scope where it changes anything. A reconnect re-issues it for the new
+  // daemon, which is correct: the previous one is the process this client is no
+  // longer being served by. A debugger or rocSHMEM grant taken beforehand is
+  // displaced, and cannot be restored afterwards because it cannot be read.
+  if (prctl(PR_SET_PTRACER, static_cast<unsigned long>(peer.pid), 0, 0, 0) != 0) {
+    util::Logger::warn(std::format(
+        "daemon: could not authorize pid {} to read this address space ({}); transfers that "
+        "rely on process_vm_readv/writev will fail",
+        peer.pid, std::strerror(errno)));
+  }
+  return verdict;
+}
+
+/// @brief Map driver backing without re-entering the interposer.
 void *safe_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
-  long rc = syscall(SYS_mmap, addr, length, prot, flags, fd, offset);
-  if (rc < 0)
-    return MAP_FAILED;
-  return reinterpret_cast<void *>(static_cast<uintptr_t>(rc));
+  return map_memory_backing(addr, length, prot, flags, fd, offset);
 }
 
 Sysfs::GpuInfo gpu_info_from_rpc(const RpcGpuInfo &src) {
@@ -99,6 +251,9 @@ Sysfs::GpuInfo gpu_info_from_rpc(const RpcGpuInfo &src) {
   gpu.num_xcc = src.num_xcc;
   gpu.max_slots_scratch_cu = src.max_slots_scratch_cu;
   gpu.local_mem_size = src.local_mem_size;
+  gpu.visible_vram_size = src.visible_vram_size;
+  gpu.control_stack_size = src.control_stack_size;
+  gpu.context_save_size = src.context_save_size;
   gpu.vram_type = src.vram_type;
   gpu.lds_size_kb = src.lds_size_kb;
   gpu.mem_width = src.mem_width;
@@ -127,21 +282,54 @@ Sysfs::GpuInfo gpu_info_from_rpc(const RpcGpuInfo &src) {
   return gpu;
 }
 
-/// @brief Ceiling on the device count a snapshot request may reserve room for.
+/// @brief Ceiling on the entry count a snapshot request may reserve room for.
 ///
 /// @details Two orders of magnitude above anything a KFD enumerates (the
 /// driver's own MAX_GPU_INSTANCE and libhsakmt's NUM_OF_SUPPORTED_GPUS are both
 /// 64), so it can never truncate a real answer, while keeping the reserved tail
-/// at half a megabyte instead of the whole payload budget.
-inline constexpr uint32_t kMaxSnapshotDevices = 4096;
+/// at half a megabyte instead of the whole payload budget. The same ceiling
+/// bounds the queue snapshot: a process with more than 4096 live queues has
+/// exhausted the driver's own doorbell budget long before it gets here.
+inline constexpr uint32_t kMaxSnapshotEntries = 4096;
+
+/// @brief The request fields shared by the two DBG_TRAP snapshot ops.
+struct SnapshotFields {
+  // __u64/__u32 rather than uint64_t/uint32_t: these alias the uapi struct's
+  // own fields, and __u64 is unsigned long long where uint64_t is unsigned long.
+  __u64 *buf_ptr;
+  __u32 *count;
+  __u32 *entry_size;
+  uint32_t struct_size;
+};
+
+/// @brief Bind the snapshot request fields of @p dbg for its op.
+///
+/// @details GET_DEVICE_SNAPSHOT and GET_QUEUE_SNAPSHOT differ only in which
+/// sub-struct of kfd_ioctl_dbg_trap_args carries the caller's buffer, entry
+/// count and stride, and in the entry struct the driver fills. Binding them in
+/// one place lets the request clamp and the strided copy-back below serve both
+/// ops instead of drifting into two divergent copies of the same reasoning.
+///
+/// @p op is passed separately rather than read from @p dbg because the reply
+/// path runs against an arg struct the daemon echoed back; the op that selects
+/// the union member has to be the one *we* sent, not one a peer could vary.
+///
+/// @pre @p op is GET_DEVICE_SNAPSHOT or GET_QUEUE_SNAPSHOT.
+SnapshotFields snapshot_fields(kfd_ioctl_dbg_trap_args *dbg, uint32_t op) {
+  if (op == KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT)
+    return {&dbg->device_snapshot.snapshot_buf_ptr, &dbg->device_snapshot.num_devices,
+            &dbg->device_snapshot.entry_size, sizeof(kfd_dbg_device_info_entry)};
+  return {&dbg->queue_snapshot.snapshot_buf_ptr, &dbg->queue_snapshot.num_queues,
+          &dbg->queue_snapshot.entry_size, sizeof(kfd_queue_snapshot_entry)};
+}
 
 /// @brief Clamp a DBG_TRAP device-snapshot request to a transmittable size.
 ///
 /// @details The snapshot buffer is pure ioctl output, so the request carries an
-/// inline tail of @p num_devices * @p entry_size zero bytes purely to reserve
-/// room for the daemon's reply. num_devices is caller-controlled, and callers
-/// are entitled to oversize it: the uapi contract is that KFD fills only the
-/// devices that exist and reports the true total back, so libhsakmt's
+/// inline tail of @p count * @p entry_size zero bytes purely to reserve room
+/// for the daemon's reply. The count is caller-controlled, and callers are
+/// entitled to oversize it: the uapi contract is that KFD fills only the
+/// entries that exist and reports the true total back, so libhsakmt's
 /// hsaKmtDbgGetDeviceDataCtx() just passes UINT32_MAX. Taken literally that
 /// reserves UINT32_MAX * sizeof(kfd_dbg_device_info_entry) bytes (120 B/entry,
 /// so ~480 GiB); the resize throws std::bad_alloc out of an interposed ioctl()
@@ -149,47 +337,103 @@ inline constexpr uint32_t kMaxSnapshotDevices = 4096;
 ///
 /// Clamping the transmitted count keeps the ioctl's semantics rather than
 /// failing a request the kernel would have served: the daemon still reports the
-/// true device total in num_devices(OUT), and the ceiling is far above any
-/// device count a KFD can enumerate, so it cannot drop an entry the daemon
+/// true total in the count(OUT) field, and the ceiling is far above any device
+/// or queue count a KFD can enumerate, so it cannot drop an entry the daemon
 /// could have returned.
 ///
-/// The ceiling is @ref kMaxSnapshotDevices rather than the transport's raw
+/// The ceiling is @ref kMaxSnapshotEntries rather than the transport's raw
 /// capacity. Filling the whole payload budget would be correct but ruinous: at
 /// 120 B/entry it reserves ~16 MiB of zeros in the request and makes the daemon
 /// echo ~16 MiB back (rj_daemon replies with the buffer it received), i.e. ~32
 /// MiB moved under rpc_mutex_ on every debugger attach to describe one GPU.
 ///
-/// A zero return for a non-zero @p num_devices means not even one entry fits;
-/// the caller must fail the ioctl rather than transmit the count, because
-/// num_devices(IN) == 0 is the count-only probe the daemon answers with success.
+/// A zero return for a non-zero @p count means not even one entry fits; the
+/// caller must fail the ioctl rather than transmit the count, because
+/// count(IN) == 0 is the count-only probe the daemon answers with success.
 ///
-/// @returns the device count to transmit, whose tail is guaranteed to fit
+/// @returns the entry count to transmit, whose tail is guaranteed to fit
 /// within @ref kMaxPayloadBytes alongside @p arg_size bytes of ioctl args.
-uint32_t clamp_snapshot_devices(uint32_t num_devices, uint32_t entry_size, size_t arg_size) {
+uint32_t clamp_snapshot_entries(uint32_t count, uint32_t entry_size, size_t arg_size) {
   // A zero stride reserves nothing whatever the count is, so pass the caller's
   // count through untouched. The driver does not reject a zero stride: its
   // per-entry copy_to_user() moves entry_size(OUT) == 0 bytes and succeeds, so
   // the call reports the device total and writes nothing
   // (DbgTrapDeviceSnapshotZeroStrideReportsCountAndWritesNothing pins that
-  // locally). num_devices(IN) is still what the driver clamps its fill count
-  // against, and it is echoed back as part of the request, so rewriting it to
-  // zero here would hand the daemon a different request than the caller made.
+  // locally). count(IN) is still what the driver clamps its fill count against,
+  // and it is echoed back as part of the request, so rewriting it to zero here
+  // would hand the daemon a different request than the caller made.
   if (entry_size == 0)
-    return num_devices;
+    return count;
 
   const size_t overhead = sizeof(RpcIoctlRequest) + arg_size;
   if (overhead >= kMaxPayloadBytes)
     return 0;
   const size_t max_entries =
-      std::min<size_t>(kMaxSnapshotDevices, (kMaxPayloadBytes - overhead) / entry_size);
-  return static_cast<uint32_t>(std::min<size_t>(num_devices, max_entries));
+      std::min<size_t>(kMaxSnapshotEntries, (kMaxPayloadBytes - overhead) / entry_size);
+  return static_cast<uint32_t>(std::min<size_t>(count, max_entries));
 }
 
 } // namespace
 
-RemoteDriver::MemfdLookup RemoteDriver::find_memfd_for_addr(void *addr, size_t length,
-                                                            int *memfd_out, off_t *offset_out) {
-  *memfd_out = -1;
+PtraceScopePolicy ptrace_scope_policy_from_text(const std::optional<std::string> &contents) {
+  if (!contents)
+    return PtraceScopePolicy::Absent;
+  std::string_view text = *contents;
+  while (!text.empty() && (text.front() == ' ' || text.front() == '\t'))
+    text.remove_prefix(1);
+  while (!text.empty() &&
+         (text.back() == ' ' || text.back() == '\t' || text.back() == '\n' || text.back() == '\r'))
+    text.remove_suffix(1);
+  int value = 0;
+  const auto [stop, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+  if (error != std::errc{} || stop != text.data() + text.size())
+    return PtraceScopePolicy::Unknown;
+  switch (value) {
+  case 0:
+    return PtraceScopePolicy::Disabled;
+  case 1:
+    return PtraceScopePolicy::Relational;
+  case 2:
+    return PtraceScopePolicy::AdminOnly;
+  case 3:
+    return PtraceScopePolicy::NoAttach;
+  default:
+    // A scope this build does not know is assumed to restrict at least as much
+    // as the one it does, so the grant is still attempted rather than skipped.
+    return PtraceScopePolicy::Unknown;
+  }
+}
+
+PtracerGrantVerdict ptracer_grant_verdict(std::optional<pid_t> launched_daemon_pid, pid_t peer_pid,
+                                          uid_t peer_uid, uid_t self_uid) {
+  if (peer_pid <= 0)
+    return PtracerGrantVerdict::RefusedNoPeer;
+  // A cross-user peer could not attach even if named here, because PR_SET_PTRACER
+  // relaxes Yama alone and the ordinary ptrace credential check still stands
+  // behind it. Refused anyway, so the exception list never holds a process this
+  // client did not expect to be served by.
+  if (peer_uid != self_uid)
+    return PtracerGrantVerdict::RefusedForeignUser;
+  // SO_PEERCRED says who is connected, which is a weaker claim than it appears:
+  // the socket path is well known, so any process of this user can be listening
+  // on it, and same-user peers are exactly what Yama's relationship check exists
+  // to separate. Where a launcher named a process, that name decides.
+  if (launched_daemon_pid) {
+    return *launched_daemon_pid == peer_pid ? PtracerGrantVerdict::Grant
+                                            : PtracerGrantVerdict::RefusedPeerMismatch;
+  }
+  // No launcher named one: attach mode, or a bare LD_PRELOAD against a running
+  // daemon. Nothing here can identify the peer, and no check could be added that
+  // would: a secret shared with the daemon authenticates nothing against an
+  // attacker of this UID, who reads whatever this client can. The peer is
+  // trusted, and each such grant is logged only when DRIVER tracing is enabled.
+  return PtracerGrantVerdict::GrantUnverifiedPeer;
+}
+
+RemoteDriver::BackingLookup RemoteDriver::find_backing_for_addr(void *addr, size_t length,
+                                                                int *backing_out,
+                                                                off_t *offset_out) {
+  *backing_out = -1;
   *offset_out = 0;
   auto target = reinterpret_cast<uint64_t>(addr);
   std::lock_guard<std::mutex> lock(rpc_mutex_);
@@ -198,14 +442,14 @@ RemoteDriver::MemfdLookup RemoteDriver::find_memfd_for_addr(void *addr, size_t l
     // [r.va, r.va+r.size). Rearranged to subtraction so neither target+length
     // nor r.va+r.size can wrap uint64_t and admit an out-of-range address.
     if (target >= r.va && length <= r.size && target - r.va <= r.size - length) {
-      // Return a DUP of the memfd, not the stored fd, so the caller owns a
+      // Return a DUP of the backing descriptor, not the stored fd, so the caller owns a
       // descriptor whose lifetime is independent of this RemoteDriver. Without
       // this, a concurrent last-close -> RemoteDriver::close() (which closes the
-      // stored handle_memfds_ fds) could close the fd between this return and the
-      // caller's ftruncate/fallocate/mmap, operating on a closed/reused fd. The
+      // stored handle_backings_ fds) could close the fd between this return and the
+      // caller's backing lookup/mmap, operating on a closed/reused fd. The
       // dup is taken under rpc_mutex_, the same lock close() holds, so the stored
       // fd is guaranteed still open here. The caller MUST close the returned fd.
-      int dup_fd = static_cast<int>(syscall(SYS_fcntl, r.memfd, F_DUPFD_CLOEXEC, 0));
+      int dup_fd = static_cast<int>(syscall(SYS_fcntl, r.backing_fd, F_DUPFD_CLOEXEC, 0));
       if (dup_fd < 0) {
         // The range matched but we could not hand out a descriptor. Report this
         // distinctly so the caller fails the mmap rather than silently falling
@@ -214,25 +458,31 @@ RemoteDriver::MemfdLookup RemoteDriver::find_memfd_for_addr(void *addr, size_t l
         // that runs before this returns is the rpc_mutex_ lock_guard unlock, and
         // pthread_mutex_unlock does not touch errno on success. Do not add any
         // errno-setting call after this point without saving/restoring it.
-        return MemfdLookup::kDupFailed;
+        return BackingLookup::kDupFailed;
       }
-      *memfd_out = dup_fd;
+      *backing_out = dup_fd;
       *offset_out = static_cast<off_t>(target - r.va);
-      return MemfdLookup::kFound;
+      return BackingLookup::kFound;
     }
   }
-  return MemfdLookup::kNotFound;
+  return BackingLookup::kNotFound;
 }
 
-RemoteDriver::RemoteDriver(int sock_fd) : sock_(sock_fd) {
+RemoteDriver::RemoteDriver(int sock_fd, std::function<void()> on_disconnect)
+    : sock_(sock_fd), on_disconnect_(std::move(on_disconnect)) {
   shutdown_efd_ = static_cast<int>(syscall(SYS_eventfd2, 0, EFD_CLOEXEC | EFD_NONBLOCK));
 }
 
 RemoteDriver::~RemoteDriver() {
-  for (auto &[handle, fd] : handle_memfds_) {
+  request_close();
+  if (disconnect_monitor_.joinable())
+    disconnect_monitor_.join();
+  for (auto &[handle, fd] : handle_backings_) {
     if (fd >= 0)
       syscall(SYS_close, fd);
   }
+  if (kfd_marker_ != nullptr)
+    syscall(SYS_munmap, kfd_marker_, kfd_marker_size_);
   if (sock_ >= 0)
     syscall(SYS_close, sock_);
   if (shutdown_efd_ >= 0)
@@ -246,11 +496,32 @@ int RemoteDriver::poison_stream() {
   return -EPROTO;
 }
 
+void RemoteDriver::watch_disconnect(int socket) {
+  // Clients can spin on shared-memory signals without issuing another RPC.
+  // Observe hangup independently of those waits and of the serialized RPC path.
+  std::array<pollfd, 2> fds{{{socket, POLLRDHUP, 0}, {shutdown_efd_, POLLIN, 0}}};
+  for (;;) {
+    const long rc = syscall(SYS_ppoll, fds.data(), fds.size(), nullptr, nullptr, 0);
+    if (rc < 0 && errno == EINTR)
+      continue;
+    if (closing_.load(std::memory_order_acquire))
+      return;
+    if (rc < 0 || (fds[0].revents & (POLLRDHUP | POLLHUP | POLLERR | POLLNVAL))) {
+      protocol_failed_.store(true, std::memory_order_release);
+      bool expected = false;
+      if (closing_.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+        on_disconnect_();
+      return;
+    }
+  }
+}
+
 int RemoteDriver::open() {
   assert(sock_ >= 0 && "open called on disconnected RemoteDriver");
+  ptracer_verdict_.reset();
   closing_.store(false, std::memory_order_release);
-  has_gpu_info_ = false;
-  gpu_info_ = {};
+  gpu_infos_.clear();
+  strict_render_minor_ = false;
   topology_path_.clear();
   drm_path_.clear();
   // Drain the shutdown eventfd so it doesn't immediately wake pollers.
@@ -259,6 +530,8 @@ int RemoteDriver::open() {
     syscall(SYS_read, shutdown_efd_, &val, sizeof(val));
   }
   std::lock_guard<std::mutex> lock(rpc_mutex_);
+  potential_host_svm_ranges_.clear();
+  unbounded_host_svm_policy_ = false;
 
   RpcHeader hdr = {};
   hdr.opcode = RPC_HANDSHAKE;
@@ -287,6 +560,11 @@ int RemoteDriver::open() {
   if (resp.result != 0)
     return resp.result;
 
+  if (resp.payload_bytes < sizeof(RpcHandshakeResponse) || resp.payload_bytes > kMaxPayloadBytes) {
+    poison_stream();
+    return -1;
+  }
+
   RpcHandshakeResponse hs = {};
   if (!rpc_recv_exact(sock_, &hs, sizeof(hs))) {
     poison_stream();
@@ -295,20 +573,23 @@ int RemoteDriver::open() {
 
   // Every rejection from here on abandons path bytes the reply header already
   // declared, which is the same misalignment as a short read.
-  if (hs.version != kRpcProtocolVersion) {
+  if (hs.version != kRpcProtocolVersion || hs.strict_render_minor > 1) {
     poison_stream();
     return -1;
   }
-
-  has_gpu_info_ = hs.gpu_info.present != 0;
-  if (has_gpu_info_)
-    gpu_info_ = gpu_info_from_rpc(hs.gpu_info);
 
   constexpr uint32_t kMaxPathLen = 4096;
-  if (hs.topology_path_len > kMaxPathLen) {
+  const uint64_t expected_bytes = sizeof(hs) + uint64_t{hs.topology_path_len} + hs.drm_path_len +
+                                  uint64_t{hs.extra_gpu_infos} * sizeof(RpcGpuInfo);
+  if (hs.topology_path_len > kMaxPathLen || hs.drm_path_len > kMaxPathLen ||
+      expected_bytes != resp.payload_bytes ||
+      (hs.extra_gpu_infos != 0 && hs.gpu_info.present == 0)) {
     poison_stream();
     return -1;
   }
+  if (hs.gpu_info.present != 0)
+    gpu_infos_.push_back(gpu_info_from_rpc(hs.gpu_info));
+  strict_render_minor_ = hs.strict_render_minor != 0;
   if (hs.topology_path_len > 0) {
     topology_path_.resize(hs.topology_path_len);
     if (!rpc_recv_exact(sock_, topology_path_.data(), hs.topology_path_len)) {
@@ -317,10 +598,6 @@ int RemoteDriver::open() {
     }
   }
 
-  if (hs.drm_path_len > kMaxPathLen) {
-    poison_stream();
-    return -1;
-  }
   if (hs.drm_path_len > 0) {
     drm_path_.resize(hs.drm_path_len);
     if (!rpc_recv_exact(sock_, drm_path_.data(), hs.drm_path_len)) {
@@ -328,8 +605,53 @@ int RemoteDriver::open() {
       return -1;
     }
   }
+  for (uint32_t i = 0; i < hs.extra_gpu_infos; ++i) {
+    RpcGpuInfo extra{};
+    if (!rpc_recv_exact(sock_, &extra, sizeof(extra)) || extra.present == 0 ||
+        std::ranges::any_of(gpu_infos_, [&](const Sysfs::GpuInfo &gpu) {
+          return gpu.drm_render_minor == extra.drm_render_minor;
+        })) {
+      poison_stream();
+      return -1;
+    }
+    gpu_infos_.push_back(gpu_info_from_rpc(extra));
+  }
 
-  return reissue_synthetic_kfd_fd();
+  // Only here, with the handshake complete. Everything above can fail on a peer
+  // that never proved it speaks this protocol, and the grant is the one step in
+  // open() whose effect outlives the connection that prompted it.
+  ptracer_verdict_ = authorize_daemon_address_space_access(sock_);
+
+  const int fd = reissue_synthetic_kfd_fd();
+  if (fd < 0 || !on_disconnect_)
+    return fd;
+  if (shutdown_efd_ < 0) {
+    syscall(SYS_close, fd);
+    errno = EMFILE;
+    return -1;
+  }
+  try {
+    disconnect_monitor_ = std::thread([this, socket = sock_] { watch_disconnect(socket); });
+  } catch (const std::system_error &error) {
+    syscall(SYS_close, fd);
+    errno = error.code().value();
+    return -1;
+  }
+  return fd;
+}
+
+const Sysfs::GpuInfo *RemoteDriver::gpu_info_for_render_minor(uint32_t minor) const {
+  if (gpu_infos_.empty())
+    return nullptr;
+  if (!strict_render_minor_ && gpu_infos_.size() == 1)
+    return &gpu_infos_.front();
+  const auto it = std::ranges::find_if(
+      gpu_infos_, [minor](const Sysfs::GpuInfo &gpu) { return gpu.drm_render_minor == minor; });
+  return it == gpu_infos_.end() ? nullptr : &*it;
+}
+
+bool RemoteDriver::handles_drm_render_minor(uint32_t minor) const {
+  return gpu_infos_.empty() || gpu_info_for_render_minor(minor) != nullptr;
 }
 
 int RemoteDriver::reissue_synthetic_kfd_fd() {
@@ -341,31 +663,67 @@ int RemoteDriver::reissue_synthetic_kfd_fd() {
   int fd_min = static_cast<int>(rl.rlim_cur) - 64;
   if (fd_min < 256)
     fd_min = 256;
-  auto raw_fd = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_remote_kfd", MFD_CLOEXEC));
+  // Keep the proc-maps marker separate from the KFD descriptor. The marker is
+  // a mapped backing descriptor because the interposer rewrites its path to /dev/kfd for
+  // debugger compatibility; the descriptor itself must be an eventfd so its
+  // readiness follows debug notifications rather than regular-file semantics.
+  if (kfd_marker_ == nullptr) {
+    auto marker_fd =
+        static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_remote_kfd", MFD_CLOEXEC));
+    if (marker_fd < 0)
+      return -1;
+    constexpr size_t kMarkerSize = 4096;
+    // PROT_NONE is only a pathname marker; mapping beyond EOF needs no file
+    // growth and remains valid even when RLIMIT_FSIZE is zero.
+    {
+      void *marker = reinterpret_cast<void *>(
+          syscall(SYS_mmap, nullptr, kMarkerSize, PROT_NONE, MAP_SHARED, marker_fd, 0));
+      if (marker != MAP_FAILED) {
+        kfd_marker_ = marker;
+        kfd_marker_size_ = kMarkerSize;
+      }
+    }
+    syscall(SYS_close, marker_fd);
+  }
+  auto raw_fd = static_cast<int>(syscall(SYS_eventfd2, 0, EFD_CLOEXEC | EFD_NONBLOCK));
   if (raw_fd < 0)
     return -1;
   // Use the raw syscall, not fcntl(): this shared object exports an interposed
   // fcntl with default visibility, so an unqualified call would re-enter the
-  // shim (reserve_dup_backend/untrack_dup, fd_mutex_) for a plain memfd dup.
+  // shim (reserve_dup_backend/untrack_dup, fd_mutex_) for a plain eventfd dup.
   int fd = static_cast<int>(syscall(SYS_fcntl, raw_fd, F_DUPFD_CLOEXEC, fd_min));
   syscall(SYS_close, raw_fd);
   return fd;
 }
 
-int RemoteDriver::close() {
+void RemoteDriver::request_close() {
   closing_.store(true, std::memory_order_release);
   if (shutdown_efd_ >= 0) {
     uint64_t val = 1;
     syscall(SYS_write, shutdown_efd_, &val, sizeof(val));
   }
+}
 
+int RemoteDriver::close() {
+  request_close();
+  int result = 0;
   {
     std::lock_guard<std::mutex> lock(rpc_mutex_);
+    if (disconnect_monitor_.joinable())
+      disconnect_monitor_.join();
     if (sock_ >= 0) {
       RpcHeader hdr{};
       hdr.opcode = RPC_CLOSE;
       hdr.request_id = next_id_++;
-      rpc_send_exact(sock_, &hdr, sizeof(hdr));
+      RpcHeader response{};
+      if (!rpc_send_exact(sock_, &hdr, sizeof(hdr)) ||
+          !rpc_recv_exact(sock_, &response, sizeof(response)) || response.opcode != RPC_CLOSE ||
+          response.request_id != hdr.request_id || response.reserved != 0 ||
+          response.payload_bytes != 0 || response.result > 0) {
+        result = -EIO;
+      } else {
+        result = response.result;
+      }
     }
 
     if (sock_ >= 0) {
@@ -373,14 +731,14 @@ int RemoteDriver::close() {
       sock_ = -1;
     }
 
-    for (auto &[handle, fd] : handle_memfds_) {
+    for (auto &[handle, fd] : handle_backings_) {
       if (fd >= 0)
         syscall(SYS_close, fd);
     }
-    handle_memfds_.clear();
+    handle_backings_.clear();
     alloc_ranges_.clear();
     // Deliberately do NOT clear the handshake metadata (topology_path_,
-    // drm_path_, gpu_info_, has_gpu_info_). It is written once during open() and
+    // drm_path_, gpu_infos_). It is written once during open() and
     // is immutable for the rest of the object's life. The interposer publishes
     // this RemoteDriver via an atomic shared_ptr and lets lock-free readers take
     // snapshots that call the accessors (topology_path(), drm_path(),
@@ -391,10 +749,14 @@ int RemoteDriver::close() {
     // reclaimed when the last shared_ptr drops.
   }
 
-  return 0;
+  return result;
 }
 
-int RemoteDriver::ioctl(unsigned long request, void *arg) {
+int RemoteDriver::ioctl(unsigned long request, void *arg) { return ioctl(request, arg, {}); }
+
+int RemoteDriver::ioctl(unsigned long request, void *arg,
+                        const std::function<std::shared_ptr<LinuxKfd>()> &current_local_driver,
+                        uint32_t *export_mapping_flags) {
   assert(arg && "ioctl called with null arg");
   // Do NOT assert(sock_ >= 0) here: sock_ is guarded by rpc_mutex_ and a
   // concurrent teardown_remote() -> close() can set it to -1 while another
@@ -408,7 +770,7 @@ int RemoteDriver::ioctl(unsigned long request, void *arg) {
   // poll goes through RPC, the rpc_mutex_ is held for the round-trip duration,
   // starving the main init thread's ioctls and mmaps.
   //
-  // The signal page IS shared via memfd (same inode in both processes). The
+  // The signal page IS shared via backing descriptor (same inode in both processes). The
   // daemon's signal_interrupt writes to the signal page slot. The client polls
   // the slot directly — no RPC round-trip, no mutex contention.
   //
@@ -418,7 +780,7 @@ int RemoteDriver::ioctl(unsigned long request, void *arg) {
     auto *wait_args = static_cast<kfd_ioctl_wait_events_args *>(arg);
     uint32_t original_timeout = wait_args->timeout;
     // timeout=0: return immediately without RPC. Signal values live in shared
-    // memory (memfd) — ROCR reads them directly, so the WAIT_EVENTS ioctl
+    // memory (backing descriptor) — ROCR reads them directly, so the WAIT_EVENTS ioctl
     // only needs to check for non-signal KFD events. Avoid the RPC round-trip
     // and rpc_mutex_ contention that starves the init thread.
     if (original_timeout == 0) {
@@ -432,7 +794,7 @@ int RemoteDriver::ioctl(unsigned long request, void *arg) {
     // This avoids both the shutdown ordering deadlock (ROCR joins signal
     // threads before calling close) AND arbitrary time-based workarounds.
     auto deadline =
-        (original_timeout >= 0xFFFFFFFEu)
+        (original_timeout == kWaitEventsInfiniteMs)
             ? std::chrono::steady_clock::time_point::max()
             : std::chrono::steady_clock::now() + std::chrono::milliseconds(original_timeout);
 
@@ -465,10 +827,12 @@ int RemoteDriver::ioctl(unsigned long request, void *arg) {
     return 0;
   }
 
-  return send_ioctl(request, arg);
+  return send_ioctl(request, arg, current_local_driver, export_mapping_flags);
 }
 
-int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
+int RemoteDriver::send_ioctl(unsigned long request, void *arg,
+                             const std::function<std::shared_ptr<LinuxKfd>()> &current_local_driver,
+                             uint32_t *export_mapping_flags) {
   std::lock_guard<std::mutex> lock(rpc_mutex_);
   // The stream is misaligned past a rejected reply; every later header would be
   // parsed out of stale bytes. Fail closed instead of returning bogus results.
@@ -482,27 +846,66 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   if (!validate_ioctl_arg_size(request, arg, arg_size))
     return -EINVAL;
 
+  // The daemon rewrites mmap_offset to the allocation handle in its reply.
+  // Preserve the caller's USERPTR CPU address for the client-side promotion.
+  uint64_t userptr_cpu_address = 0;
+  if (request == AMDKFD_IOC_ALLOC_MEMORY_OF_GPU) {
+    const auto *alloc = static_cast<const kfd_ioctl_alloc_memory_of_gpu_args *>(arg);
+    if (alloc->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) {
+      userptr_cpu_address = alloc->mmap_offset;
+      if (userptr_cpu_address == 0)
+        return -EINVAL;
+    }
+  }
+
+  std::optional<std::pair<uint64_t, uint64_t>> new_host_svm_range;
+  if (is_svm_ioctl(request)) {
+    const auto *svm = static_cast<const kfd_ioctl_svm_args *>(arg);
+    if (svm->op == KFD_IOCTL_SVM_OP_SET_ATTR &&
+        std::ranges::any_of(svm->attrs, svm->attrs + svm->nattr, [](const auto &attr) {
+          return attr.type == KFD_IOCTL_SVM_ATTR_ACCESS ||
+                 attr.type == KFD_IOCTL_SVM_ATTR_ACCESS_IN_PLACE ||
+                 attr.type == KFD_IOCTL_SVM_ATTR_NO_ACCESS;
+        }))
+      new_host_svm_range = std::pair{svm->start_addr, svm->size};
+  }
+
   // Save original embedded pointers before serialization. The daemon rewrites
   // these to point at its own buffer; we must restore the client-side originals
   // before copying inline response data back.
   uint64_t saved_events_ptr = 0;
+  uint64_t saved_cu_mask_ptr = 0;
   uint64_t saved_apertures_ptr = 0;
   uint64_t saved_device_ids_ptr = 0;
   uint64_t saved_dbg_rinfo_ptr = 0;
   uint32_t saved_dbg_rinfo_size = 0;
+  uint32_t saved_dbg_op = 0;
   uint64_t saved_dbg_snapshot_ptr = 0;
-  // The response overwrites num_devices/entry_size with the daemon's outputs,
-  // so the request's own count and stride have to be kept to reproduce the
-  // driver's strided write on copy-back. Together they are also the caller's
-  // declared buffer capacity.
-  uint32_t saved_dbg_snapshot_devices = 0;
+  // The response overwrites the count/entry_size pair with the daemon's
+  // outputs, so the request's own count and stride have to be kept to reproduce
+  // the driver's strided write on copy-back. Together they are also the
+  // caller's declared buffer capacity.
+  uint32_t saved_dbg_snapshot_count = 0;
   uint32_t saved_dbg_snapshot_stride = 0;
   // The stride actually put on the wire, which is the caller's clamped to the
   // struct the daemon fills. Entries arrive packed at this pitch and are
   // scattered out at the caller's, so the two cannot be conflated.
   uint32_t saved_dbg_snapshot_wire_stride = 0;
+  // SUSPEND/RESUME_QUEUES carry an inbound array of queue ids the daemon
+  // rewrites to its own tail, and report per-queue status back through it.
+  uint64_t saved_dbg_queue_array_ptr = 0;
+  uint32_t saved_dbg_queue_count = 0;
   if (has_embedded_pointers(request)) {
     switch (request) {
+    case AMDKFD_IOC_SET_CU_MASK: {
+      const auto *mask = static_cast<const kfd_ioctl_set_cu_mask_args *>(arg);
+      if (mask->num_cu_mask == 0 || mask->num_cu_mask % 32 != 0)
+        return -EINVAL;
+      if (mask->cu_mask_ptr == 0)
+        return -EFAULT;
+      saved_cu_mask_ptr = mask->cu_mask_ptr;
+      break;
+    }
     case AMDKFD_IOC_WAIT_EVENTS:
       saved_events_ptr = static_cast<kfd_ioctl_wait_events_args *>(arg)->events_ptr;
       break;
@@ -517,6 +920,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
       break;
     case AMDKFD_IOC_DBG_TRAP: {
       auto *dbg = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
+      saved_dbg_op = dbg->op;
       switch (dbg->op) {
       case KFD_IOC_DBG_TRAP_ENABLE:
         saved_dbg_rinfo_ptr = dbg->enable.rinfo_ptr;
@@ -535,8 +939,32 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
         if (dbg->device_snapshot.snapshot_buf_ptr == 0)
           return -EINVAL;
         saved_dbg_snapshot_ptr = dbg->device_snapshot.snapshot_buf_ptr;
-        saved_dbg_snapshot_devices = dbg->device_snapshot.num_devices;
+        saved_dbg_snapshot_count = dbg->device_snapshot.num_devices;
         saved_dbg_snapshot_stride = dbg->device_snapshot.entry_size;
+        break;
+      case KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT:
+        // Deliberately no null-buffer rejection here, unlike the device op
+        // above. The local path answers a null buffer with success when the
+        // process has no queues to report and only -EFAULT when it has some
+        // (SimulatedKfd::debug_queue_snapshot), and the client cannot know that
+        // count before it asks. The verdict is reconstructed on copy-back
+        // instead, from the queue total the daemon reports.
+        saved_dbg_snapshot_ptr = dbg->queue_snapshot.snapshot_buf_ptr;
+        saved_dbg_snapshot_count = dbg->queue_snapshot.num_queues;
+        saved_dbg_snapshot_stride = dbg->queue_snapshot.entry_size;
+        break;
+      case KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO:
+        saved_dbg_snapshot_ptr = dbg->query_exception_info.info_ptr;
+        saved_dbg_snapshot_count = 1;
+        saved_dbg_snapshot_stride = dbg->query_exception_info.info_size;
+        break;
+      case KFD_IOC_DBG_TRAP_SUSPEND_QUEUES:
+        saved_dbg_queue_array_ptr = dbg->suspend_queues.queue_array_ptr;
+        saved_dbg_queue_count = dbg->suspend_queues.num_queues;
+        break;
+      case KFD_IOC_DBG_TRAP_RESUME_QUEUES:
+        saved_dbg_queue_array_ptr = dbg->resume_queues.queue_array_ptr;
+        saved_dbg_queue_count = dbg->resume_queues.num_queues;
         break;
       default:
         break;
@@ -556,6 +984,15 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   if (has_embedded_pointers(request)) {
     auto *args_base = buf.data() + prefix;
     switch (request) {
+    case AMDKFD_IOC_SET_CU_MASK: {
+      const auto *mask = reinterpret_cast<const kfd_ioctl_set_cu_mask_args *>(args_base);
+      const size_t bytes = (std::min(mask->num_cu_mask, 1024u) / 32) * sizeof(uint32_t);
+      const size_t offset = buf.size();
+      buf.resize(offset + bytes);
+      if (copy_ioctl_user_buffer(buf.data() + offset, saved_cu_mask_ptr, bytes) != 0)
+        return -EFAULT;
+      break;
+    }
     case AMDKFD_IOC_WAIT_EVENTS: {
       auto *wait_args = reinterpret_cast<kfd_ioctl_wait_events_args *>(args_base);
       const auto *events = reinterpret_cast<const void *>(wait_args->events_ptr);
@@ -568,11 +1005,16 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
     case AMDKFD_IOC_MAP_MEMORY_TO_GPU:
     case AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU: {
       auto *map_args = reinterpret_cast<kfd_ioctl_map_memory_to_gpu_args *>(args_base);
-      const auto *device_ids = reinterpret_cast<const void *>(map_args->device_ids_array_ptr);
-      const size_t inline_size = map_args->n_devices * sizeof(uint32_t);
+      const size_t payload_so_far = buf.size() - sizeof(RpcHeader);
+      if (payload_so_far > kMaxPayloadBytes ||
+          map_args->n_devices > (kMaxPayloadBytes - payload_so_far) / sizeof(uint32_t))
+        return -E2BIG;
+      const size_t inline_size = static_cast<size_t>(map_args->n_devices) * sizeof(uint32_t);
       size_t inline_offset = buf.size();
       buf.resize(inline_offset + inline_size);
-      std::memcpy(buf.data() + inline_offset, device_ids, inline_size);
+      if (inline_size != 0 && copy_ioctl_user_buffer(buf.data() + inline_offset,
+                                                     saved_device_ids_ptr, inline_size) != 0)
+        return -EFAULT;
       break;
     }
     case AMDKFD_IOC_GET_PROCESS_APERTURES_NEW: {
@@ -588,12 +1030,13 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
         inline_size =
             std::min(static_cast<size_t>(dbg->enable.rinfo_size), sizeof(kfd_runtime_info));
         break;
-      case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT: {
+      case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
+      case KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT: {
         // Rewrite the transmitted count, not just the tail length: the daemon
-        // recomputes num_devices * entry_size and disconnects any client whose
+        // recomputes count * entry_size and disconnects any client whose
         // payload does not match it exactly (validate_ioctl_payload). Only the
         // serialized copy is edited — the caller's args keep the original
-        // request until the reply overwrites them with the true device total.
+        // request until the reply overwrites them with the true total.
         //
         // Transmit a compact stride rather than the caller's. entry_size(IN) is
         // documented as the caller's buffer stride and is allowed to exceed the
@@ -604,25 +1047,53 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
         // produced would come back as success over an untouched buffer. The
         // daemon fills at this stride; the copy-back scatters each entry into
         // the caller's own wider slot.
-        const uint32_t wire_stride =
-            std::min<uint32_t>(dbg->device_snapshot.entry_size, sizeof(kfd_dbg_device_info_entry));
-        const uint32_t requested = dbg->device_snapshot.num_devices;
-        const uint32_t devices = clamp_snapshot_devices(requested, wire_stride, arg_size);
+        const SnapshotFields snap = snapshot_fields(dbg, dbg->op);
+        const uint32_t wire_stride = std::min(*snap.entry_size, snap.struct_size);
+        const uint32_t requested = *snap.count;
+        const uint32_t entries = clamp_snapshot_entries(requested, wire_stride, arg_size);
         // A single compact entry not fitting would mean kMaxPayloadBytes is
         // smaller than one struct; fail rather than degrade to the count probe.
-        if (devices == 0 && requested != 0 && wire_stride != 0)
+        if (entries == 0 && requested != 0 && wire_stride != 0)
           return -ENOMEM;
-        dbg->device_snapshot.num_devices = devices;
-        dbg->device_snapshot.entry_size = wire_stride;
+        *snap.count = entries;
+        *snap.entry_size = wire_stride;
         saved_dbg_snapshot_wire_stride = wire_stride;
-        inline_size = static_cast<size_t>(devices) * wire_stride;
+        inline_size = static_cast<size_t>(entries) * wire_stride;
         break;
       }
+      case KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO:
+        inline_size = dbg->query_exception_info.info_size;
+        break;
+      case KFD_IOC_DBG_TRAP_SUSPEND_QUEUES:
+        inline_size = static_cast<size_t>(dbg->suspend_queues.num_queues) * sizeof(uint32_t);
+        break;
+      case KFD_IOC_DBG_TRAP_RESUME_QUEUES:
+        inline_size = static_cast<size_t>(dbg->resume_queues.num_queues) * sizeof(uint32_t);
+        break;
       default:
         break;
       }
-      if (inline_size > 0)
+      // QUERY_EXCEPTION_INFO takes info_size straight from the caller, and
+      // SUSPEND/RESUME derive theirs from num_queues; none of the three is
+      // clamped the way snapshot requests are. Bound them by the same protocol
+      // ceiling the daemon enforces, before resize() and the memcpy above run:
+      // UINT32_MAX alone still admits a multi-gigabyte allocation, a
+      // std::bad_alloc, or a huge read from the caller's buffer, all of which
+      // happen before the daemon ever sees the frame and rejects it.
+      //
+      // Fail rather than clamp. The daemon recomputes the expected tail from
+      // the echoed args, so a clamped tail with an unclamped count is a
+      // mismatch and drops the connection.
+      const size_t payload_so_far = buf.size() - sizeof(RpcHeader);
+      if (payload_so_far >= kMaxPayloadBytes || inline_size > kMaxPayloadBytes - payload_so_far)
+        return -E2BIG;
+      if (inline_size > 0) {
+        const size_t inline_offset = buf.size();
         buf.resize(buf.size() + inline_size);
+        if (saved_dbg_queue_array_ptr != 0)
+          std::memcpy(buf.data() + inline_offset,
+                      reinterpret_cast<const void *>(saved_dbg_queue_array_ptr), inline_size);
+      }
       break;
     }
     default:
@@ -645,11 +1116,41 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   // dbg_fd so the driver can wake the debugger when a wave stops — the same fd
   // the real kernel would receive through the ioctl. KFD_INVALID_FD (0xffffffff)
   // casts to -1 and is not sent.
-  int send_fd = -1;
+  int send_fds[3] = {-1, -1, -1};
+  size_t num_send_fds = 0;
+  // Owned only for the duration of the send: SCM_RIGHTS installs the daemon's
+  // own copies, so ours are released on every path out of here, including the
+  // early returns below.
+  //
+  // These remain util::UniqueHandle (closing via ::close, i.e. through the
+  // interposer's own close hook) because RemoteDriver descriptors are the daemon
+  // client's own and the interposer's close hook classifies them as untracked and
+  // passes them through. Driver-owned fds on the LOCAL path use UniqueDriverFd
+  // instead; see PassthroughFdTraits.
+  util::UniqueHandle target_mem_fd;
+  util::UniqueHandle target_proc_fd;
   if (request == AMDKFD_IOC_DBG_TRAP) {
     auto *dbg = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
-    if (dbg->op == KFD_IOC_DBG_TRAP_ENABLE && static_cast<int>(dbg->enable.dbg_fd) >= 0)
-      send_fd = static_cast<int>(dbg->enable.dbg_fd);
+    if (dbg->op == KFD_IOC_DBG_TRAP_ENABLE && static_cast<int>(dbg->enable.dbg_fd) >= 0) {
+      if (::fcntl(static_cast<int>(dbg->enable.dbg_fd), F_GETFD) < 0)
+        return transport_errno();
+      // The daemon cannot reach the debuggee's address space on its own: it is
+      // not the ptrace parent, so process_vm_readv/writev are refused. We are,
+      // so open the target's memory here and transfer the authorization along
+      // with the notifier. The directory fd pins the identity, so the daemon
+      // can tell a target that exited from one whose pid was reused.
+      const std::string proc_path = std::format("/proc/{}", dbg->pid);
+      target_proc_fd =
+          util::UniqueHandle(::open(proc_path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
+      if (!target_proc_fd)
+        return transport_errno();
+      target_mem_fd = util::UniqueHandle(::openat(target_proc_fd.get(), "mem", O_RDWR | O_CLOEXEC));
+      if (!target_mem_fd)
+        return transport_errno();
+      send_fds[num_send_fds++] = static_cast<int>(dbg->enable.dbg_fd);
+      send_fds[num_send_fds++] = target_mem_fd.get();
+      send_fds[num_send_fds++] = target_proc_fd.get();
+    }
   }
   // A send that fails without putting a byte on the wire is recoverable: the
   // daemon never saw a frame, so the stream is still aligned and the caller just
@@ -657,11 +1158,11 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   // daemon is left waiting on the rest of a frame that will never arrive, and
   // will parse our next request as its tail. Those two have to be told apart,
   // hence the byte counts.
-  if (send_fd >= 0) {
+  if (num_send_fds > 0) {
     // sendmsg() on a stream socket may accept only part of the buffer; the
-    // ancillary fd rides on the first byte, so a short send is a truncated frame
-    // with the descriptor already handed over.
-    const auto sent = rpc_send_msg(sock_, buf.data(), buf.size(), &send_fd, 1);
+    // ancillary fds ride on the first byte, so a short send is a truncated frame
+    // with the descriptors already handed over.
+    const auto sent = rpc_send_msg(sock_, buf.data(), buf.size(), send_fds, num_send_fds);
     if (sent > 0 && static_cast<size_t>(sent) != buf.size())
       return poison_stream();
     if (sent <= 0) {
@@ -679,7 +1180,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
     }
   }
 
-  // Receive response — may include a memfd via SCM_RIGHTS for ALLOC_MEMORY.
+  // Receive response — may include a backing descriptor via SCM_RIGHTS for ALLOC_MEMORY.
   uint8_t resp_header_buf[sizeof(RpcHeader)];
   int received_fds[1] = {-1};
   size_t num_fds = 1;
@@ -695,6 +1196,8 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   auto poison_reply = [&] {
     if (num_fds > 0 && received_fds[0] >= 0)
       syscall(SYS_close, received_fds[0]);
+    if (request == AMDKFD_IOC_EXPORT_DMABUF)
+      static_cast<kfd_ioctl_export_dmabuf_args *>(arg)->dmabuf_fd = static_cast<uint32_t>(-1);
     return poison_stream();
   };
 
@@ -726,6 +1229,15 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
     if (!rpc_recv_exact(sock_, payload.data(), resp->payload_bytes))
       return poison_reply();
 
+    // The daemon's numeric fd has no meaning in this process. Refuse an
+    // incomplete export reply before copying that number into caller memory.
+    if (request == AMDKFD_IOC_EXPORT_DMABUF && resp->result == 0 &&
+        (resp->payload_bytes != arg_size + sizeof(uint32_t) || num_fds != 1 || received_fds[0] < 0))
+      return poison_reply();
+
+    if (request == AMDKFD_IOC_EXPORT_DMABUF && resp->result == 0 && export_mapping_flags)
+      std::memcpy(export_mapping_flags, payload.data() + arg_size, sizeof(uint32_t));
+
     size_t copy_size = std::min(arg_size, static_cast<size_t>(resp->payload_bytes));
     std::memcpy(arg, payload.data(), copy_size);
 
@@ -733,6 +1245,9 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
     // daemon's response (daemon rewrites them to point at its own buffer).
     if (has_embedded_pointers(request)) {
       switch (request) {
+      case AMDKFD_IOC_SET_CU_MASK:
+        static_cast<kfd_ioctl_set_cu_mask_args *>(arg)->cu_mask_ptr = saved_cu_mask_ptr;
+        break;
       case AMDKFD_IOC_WAIT_EVENTS:
         static_cast<kfd_ioctl_wait_events_args *>(arg)->events_ptr = saved_events_ptr;
         break;
@@ -747,15 +1262,17 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
         break;
       case AMDKFD_IOC_DBG_TRAP: {
         auto *dbg = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
-        switch (dbg->op) {
+        switch (saved_dbg_op) {
         case KFD_IOC_DBG_TRAP_ENABLE:
           dbg->enable.rinfo_ptr = saved_dbg_rinfo_ptr;
           break;
         case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
-          dbg->device_snapshot.snapshot_buf_ptr = saved_dbg_snapshot_ptr;
-          // num_devices and entry_size are inputs the request rewrote to the
+        case KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT: {
+          const SnapshotFields snap = snapshot_fields(dbg, saved_dbg_op);
+          *snap.buf_ptr = saved_dbg_snapshot_ptr;
+          // The count and entry_size are inputs the request rewrote to the
           // compact wire values, and the daemon echoes back whatever it was
-          // sent. On success that echo is the answer (the device total and the
+          // sent. On success that echo is the answer (the true total and the
           // bytes filled), but on failure it would hand the caller our internal
           // values instead of leaving the inputs alone: libhsakmt's UINT32_MAX
           // probe comes back as the 4096 clamp and its stride as the struct
@@ -763,9 +1280,28 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
           // (SimulatedKfd::debug_device_snapshot), so a failed op leaves both
           // fields exactly as the caller set them; match that.
           if (resp->result != 0) {
-            dbg->device_snapshot.num_devices = saved_dbg_snapshot_devices;
-            dbg->device_snapshot.entry_size = saved_dbg_snapshot_stride;
+            *snap.count = saved_dbg_snapshot_count;
+            *snap.entry_size = saved_dbg_snapshot_stride;
+            break;
           }
+          // The queue op does not reject a null output buffer on the request
+          // path, because whether one is required depends on the queue total
+          // only the driver knows. Now that the total is back, apply the local
+          // path's verdict: entries to report and nowhere to put them is
+          // -EFAULT, no entries is success (SimulatedKfd::debug_queue_snapshot).
+          if (saved_dbg_op == KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT && saved_dbg_snapshot_ptr == 0 &&
+              saved_dbg_snapshot_count > 0 && *snap.count > 0)
+            resp->result = -EFAULT;
+          break;
+        }
+        case KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO:
+          dbg->query_exception_info.info_ptr = saved_dbg_snapshot_ptr;
+          break;
+        case KFD_IOC_DBG_TRAP_SUSPEND_QUEUES:
+          dbg->suspend_queues.queue_array_ptr = saved_dbg_queue_array_ptr;
+          break;
+        case KFD_IOC_DBG_TRAP_RESUME_QUEUES:
+          dbg->resume_queues.queue_array_ptr = saved_dbg_queue_array_ptr;
           break;
         default:
           break;
@@ -798,7 +1334,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
         auto *dbg = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
         void *dst = nullptr;
         size_t copy_len = 0;
-        switch (dbg->op) {
+        switch (saved_dbg_op) {
         case KFD_IOC_DBG_TRAP_ENABLE:
           // Only propagate runtime-info bytes on success; a failed op (e.g.
           // -EBADF from a rejected notifier fd) must not mutate caller memory
@@ -809,37 +1345,41 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
                                 std::min(static_cast<size_t>(dbg->enable.rinfo_size), extra));
           }
           break;
-        case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT: {
+        case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
+        case KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT: {
           // Only propagate snapshot bytes on success; a failed op (e.g. -ENOSYS)
           // must not mutate caller memory or dereference the saved output
           // pointer.
           if (resp->result != 0)
             break;
-          // Belt and braces: the request path already rejects a null output
-          // buffer with -EINVAL, so this is unreachable. Keep it so the memcpy
-          // below can never run through a null pointer if that check moves.
+          // The device op's request path rejects a null output buffer with
+          // -EINVAL, and the queue op's reply path above turns a null with
+          // entries to report into -EFAULT. A null that reaches here is
+          // therefore a queue snapshot with nothing to report, which writes
+          // nothing anyway — but keep the guard so the memcpy below can never
+          // run through a null pointer if either check moves.
           if (saved_dbg_snapshot_ptr == 0)
             break;
           // Replay the driver's write pattern instead of bulk-copying the tail.
-          // amdkfd fills min(num_devices(IN), device total) entries, writing
+          // amdkfd fills min(count(IN), true total) entries, writing
           // entry_size(OUT) bytes at entry_size(IN) stride, and leaves the rest
-          // of the caller's buffer alone — both the entries past the device
-          // count and, when the caller's stride is wider than the current
-          // struct, the padding inside each entry. A bulk copy of the declared
-          // capacity would instead zero all of that (the request tail is sent
-          // empty, so the daemon fills only what it enumerates), diverging from
-          // what SimulatedKfd writes on the local path. It would also trust
-          // num_devices(IN) as a real allocation size, which callers are
-          // entitled to oversize.
+          // of the caller's buffer alone — both the entries past the total and,
+          // when the caller's stride is wider than the current struct, the
+          // padding inside each entry. A bulk copy of the declared capacity
+          // would instead zero all of that (the request tail is sent empty, so
+          // the daemon fills only what it enumerates), diverging from what
+          // SimulatedKfd writes on the local path. It would also trust
+          // count(IN) as a real allocation size, which callers are entitled to
+          // oversize.
           //
-          // num_devices(IN) is the caller's declared capacity in entries, so
-          // capping the loop at it is the same bound the driver applies; the
-          // per-entry `extra` test additionally refuses to read past the tail
-          // the daemon actually sent.
+          // count(IN) is the caller's declared capacity in entries, so capping
+          // the loop at it is the same bound the driver applies; the per-entry
+          // `extra` test additionally refuses to read past the tail the daemon
+          // actually sent.
           if (saved_dbg_snapshot_stride == 0 || saved_dbg_snapshot_wire_stride == 0)
             break;
-          const uint32_t entries =
-              std::min(saved_dbg_snapshot_devices, dbg->device_snapshot.num_devices);
+          const SnapshotFields snap = snapshot_fields(dbg, saved_dbg_op);
+          const uint32_t entries = std::min(saved_dbg_snapshot_count, *snap.count);
           // Two pitches: the tail is packed at the stride we transmitted, the
           // caller's buffer is laid out at the stride it declared.
           const size_t src_stride = saved_dbg_snapshot_wire_stride;
@@ -848,9 +1388,8 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
           // clamps it to the struct it actually fills, so apply the same bound
           // here: an inflated value would pull the neighbouring entries' bytes
           // into the padding the caller's wider stride leaves between entries.
-          const size_t written = std::min<size_t>(
-              std::min<size_t>(dbg->device_snapshot.entry_size, sizeof(kfd_dbg_device_info_entry)),
-              std::min(src_stride, dst_stride));
+          const size_t written = std::min<size_t>(std::min(*snap.entry_size, snap.struct_size),
+                                                  std::min(src_stride, dst_stride));
           // A zero-width entry writes nothing, so the loop has nothing to do —
           // and the `src + written > extra` bound below degenerates into a bare
           // offset test that lets a daemon-reported entry_size(OUT) of 0 spin
@@ -861,13 +1400,30 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
           auto *snapshot_out = reinterpret_cast<uint8_t *>(saved_dbg_snapshot_ptr);
           for (uint32_t i = 0; i < entries; ++i) {
             const size_t src = static_cast<size_t>(i) * src_stride;
-            const size_t dst = static_cast<size_t>(i) * dst_stride;
+            const size_t dst_offset = static_cast<size_t>(i) * dst_stride;
             if (src + written > extra)
               break;
-            std::memcpy(snapshot_out + dst, payload.data() + arg_size + src, written);
+            std::memcpy(snapshot_out + dst_offset, payload.data() + arg_size + src, written);
           }
           break;
         }
+        case KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO:
+          if (resp->result == 0) {
+            dst = reinterpret_cast<void *>(saved_dbg_snapshot_ptr);
+            copy_len = std::min(static_cast<size_t>(saved_dbg_snapshot_stride), extra);
+          }
+          break;
+        case KFD_IOC_DBG_TRAP_SUSPEND_QUEUES:
+        case KFD_IOC_DBG_TRAP_RESUME_QUEUES:
+          // KFD returns a non-negative queue count on success and annotates
+          // every requested ID with ERROR/INVALID status bits in the same
+          // caller-owned array.
+          if (resp->result >= 0) {
+            dst = reinterpret_cast<void *>(saved_dbg_queue_array_ptr);
+            copy_len =
+                std::min(static_cast<size_t>(saved_dbg_queue_count) * sizeof(uint32_t), extra);
+          }
+          break;
         default:
           break;
         }
@@ -881,18 +1437,15 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
     }
   }
 
-  auto register_allocation = [&](uint64_t handle, uint64_t va_addr, uint64_t size, int memfd) {
-    handle_memfds_[handle] = memfd;
+  auto register_allocation = [&](uint64_t handle, uint64_t va_addr, uint64_t size, int backing_fd) {
+    handle_backings_[handle] = backing_fd;
     if (va_addr != 0 && size > 0)
-      alloc_ranges_.push_back({va_addr, size, memfd});
+      alloc_ranges_.push_back({va_addr, size, backing_fd});
   };
 
-  auto promote_userptr = [&](uint64_t va_addr, uint64_t size, int memfd) {
+  auto promote_userptr = [&](uint64_t handle, uint64_t va_addr, uint64_t size, int backing_fd) {
     auto *va = reinterpret_cast<void *>(va_addr);
     auto length = static_cast<size_t>(size);
-
-    [[maybe_unused]] auto ft_rc = ftruncate(memfd, static_cast<off_t>(length));
-    fallocate(memfd, 0, 0, static_cast<off_t>(length));
 
     constexpr size_t page_size = 4096;
     size_t num_pages = (length + page_size - 1) / page_size;
@@ -900,7 +1453,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
     auto mc_rc = syscall(SYS_mincore, va, length, resident.data());
 
     auto *temp =
-        static_cast<uint8_t *>(safe_mmap(nullptr, length, PROT_WRITE, MAP_SHARED, memfd, 0));
+        static_cast<uint8_t *>(safe_mmap(nullptr, length, PROT_WRITE, MAP_SHARED, backing_fd, 0));
     if (temp != MAP_FAILED) {
       if (mc_rc == 0) {
         auto *src = static_cast<uint8_t *>(va);
@@ -915,21 +1468,38 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
       syscall(SYS_munmap, temp, length);
     }
 
-    auto *mapped = safe_mmap(va, length, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, memfd, 0);
+    void *mapped = MAP_FAILED;
+    const std::array replaced{std::pair{va_addr, size}};
+    const auto bare_mapping_change = [&] {
+      auto host_lock = host_mapping_lock().lock_exclusive();
+      mapped = safe_mmap(va, length, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, backing_fd, 0);
+      return mapped != MAP_FAILED;
+    };
+    if (auto local = current_local_driver ? current_local_driver() : nullptr)
+      local->run_host_vma_replacement(replaced, bare_mapping_change);
+    else
+      (void)bare_mapping_change();
+    if (mapped != MAP_FAILED)
+      (void)send_host_vma_replaced_locked(va_addr, size, handle);
     if (mapped != MAP_FAILED)
       syscall(SYS_madvise, mapped, length, MADV_POPULATE_WRITE);
   };
 
-  // Store memfd received from ALLOC_MEMORY for use in the subsequent mmap().
+  // Store backing descriptor received from ALLOC_MEMORY for use in the subsequent mmap().
   // Also register the address range for anonymous MAP_FIXED interception.
   if (request == AMDKFD_IOC_ALLOC_MEMORY_OF_GPU && resp->result == 0) {
     auto *alloc_args = static_cast<kfd_ioctl_alloc_memory_of_gpu_args *>(arg);
+    // A later FREE may leave a host-backed tombstone. USERPTR's CPU VMA can
+    // differ from the GPU VA returned by the daemon.
+    remember_host_svm_range_locked(alloc_args->va_addr, alloc_args->size);
+    if (alloc_args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR)
+      remember_host_svm_range_locked(userptr_cpu_address, alloc_args->size);
     if (num_fds > 0 && received_fds[0] >= 0) {
       register_allocation(alloc_args->handle, alloc_args->va_addr, alloc_args->size,
                           received_fds[0]);
 
       if (alloc_args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR)
-        promote_userptr(alloc_args->va_addr, alloc_args->size, received_fds[0]);
+        promote_userptr(alloc_args->handle, userptr_cpu_address, alloc_args->size, received_fds[0]);
     }
   }
 
@@ -938,33 +1508,44 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
     if (num_fds > 0 && received_fds[0] >= 0) {
       uint64_t size = 0;
       struct stat st {};
-      if (fstat(received_fds[0], &st) == 0)
+      if (stat_memory_backing(received_fds[0], &st) == 0)
         size = static_cast<uint64_t>(st.st_size);
+      // Imported views can also be freed while their client VA remains mapped.
+      remember_host_svm_range_locked(import_args->va_addr, size);
       register_allocation(import_args->handle, import_args->va_addr, size, received_fds[0]);
     }
   }
 
   if (request == AMDKFD_IOC_EXPORT_DMABUF && resp->result == 0) {
     auto *export_args = static_cast<kfd_ioctl_export_dmabuf_args *>(arg);
-    if (num_fds > 0 && received_fds[0] >= 0)
-      export_args->dmabuf_fd = received_fds[0];
+    if (num_fds != 1 || received_fds[0] < 0)
+      return poison_reply();
+    export_args->dmabuf_fd = received_fds[0];
   }
 
   if (request == AMDKFD_IOC_FREE_MEMORY_OF_GPU && resp->result == 0) {
     auto *free_args = static_cast<kfd_ioctl_free_memory_of_gpu_args *>(arg);
-    if (auto it = handle_memfds_.find(free_args->handle); it != handle_memfds_.end()) {
-      int freed_memfd = it->second;
+    if (auto it = handle_backings_.find(free_args->handle); it != handle_backings_.end()) {
+      int freed_backing = it->second;
       std::erase_if(alloc_ranges_,
-                    [freed_memfd](const AllocRange &r) { return r.memfd == freed_memfd; });
-      syscall(SYS_close, freed_memfd);
-      handle_memfds_.erase(it);
+                    [freed_backing](const AllocRange &r) { return r.backing_fd == freed_backing; });
+      syscall(SYS_close, freed_backing);
+      handle_backings_.erase(it);
     }
   }
+
+  if (new_host_svm_range && resp->result == 0)
+    remember_host_svm_range_locked(new_host_svm_range->first, new_host_svm_range->second);
 
   return resp->result;
 }
 
 void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t offset) {
+  return mmap(addr, length, prot, flags, offset, {});
+}
+
+void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t offset,
+                         const std::function<std::shared_ptr<LinuxKfd>()> &current_local_driver) {
   std::lock_guard<std::mutex> lock(rpc_mutex_);
   // Same fail-closed contract as send_ioctl(), and for the same reason: a
   // poisoned stream would hand back some other exchange's result. Answering with
@@ -978,11 +1559,10 @@ void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t o
   }
 
   // Send the mmap RPC so the daemon creates its own mapping for GPU simulation.
-  int memfd = -1;
-  int rc = send_mmap(addr, length, prot, flags, offset, &memfd);
+  int backing_fd = -1;
+  int rc = send_mmap(addr, length, prot, flags, offset, &backing_fd);
+  const util::BasicUniqueHandle<MmapReplyFdTraits> reply_fd{backing_fd};
   if (rc != 0) {
-    if (memfd >= 0)
-      syscall(SYS_close, memfd);
     // send_mmap() reports a negative errno, but only its transport failures
     // leave errno set as a side effect; the poison paths and the daemon's own
     // result do not, so without this the caller would read whatever errno this
@@ -998,20 +1578,43 @@ void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t o
     return MAP_FAILED;
   }
 
+  const auto map_client = [&](int mapping_flags, int mapping_fd) {
+    void *mapped = MAP_FAILED;
+    const auto bare_mapping_change = [&] {
+      auto host_lock = host_mapping_lock().lock_exclusive();
+      mapped = safe_mmap(addr, length, PROT_READ | PROT_WRITE, mapping_flags, mapping_fd, 0);
+      return mapped != MAP_FAILED;
+    };
+    if ((flags & MAP_FIXED) && addr) {
+      const std::array replaced{
+          std::pair{reinterpret_cast<uint64_t>(addr), static_cast<uint64_t>(length)}};
+      if (auto local = current_local_driver ? current_local_driver() : nullptr)
+        local->run_host_vma_replacement(replaced, bare_mapping_change);
+      else
+        (void)bare_mapping_change();
+      if (mapped != MAP_FAILED)
+        (void)send_host_vma_replaced_locked(replaced[0].first, replaced[0].second);
+    } else {
+      (void)bare_mapping_change();
+    }
+    return mapped;
+  };
+
   // Resolve the memfd for this allocation: prefer the mmap response fd, fall
   // back to the stored ALLOC_MEMORY fd (same underlying file, different fd).
-  int mapping_memfd = memfd;
+  int mapping_backing = reply_fd.get();
   uint64_t type = static_cast<uint64_t>(offset) & (0x3ULL << 62);
-  if (mapping_memfd < 0 && type == 0) {
+  if (mapping_backing < 0 && type == 0) {
     uint64_t handle = static_cast<uint64_t>(offset) >> 12;
-    if (auto it = handle_memfds_.find(handle); it != handle_memfds_.end())
-      mapping_memfd = it->second;
+    if (auto it = handle_backings_.find(handle); it != handle_backings_.end())
+      mapping_backing = it->second;
   }
-  if (mapping_memfd >= 0) {
-    [[maybe_unused]] auto ft_rc2 = ftruncate(mapping_memfd, static_cast<off_t>(length));
+  if (mapping_backing >= 0) {
+    if (check_memory_backing_size(mapping_backing, length) != 0)
+      return MAP_FAILED;
 
     // Pre-copy committed pages (code objects) from the existing anonymous
-    // reservation into the memfd before MAP_FIXED replaces them. Uses a temp
+    // reservation into the backing descriptor before MAP_FIXED replaces them. Uses a temp
     // mapping outside the GPUVM range for the copy target.
     if ((flags & MAP_FIXED) && addr != nullptr) {
       auto prot_rc = syscall(SYS_mprotect, addr, length, PROT_READ | PROT_WRITE);
@@ -1021,7 +1624,7 @@ void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t o
         std::vector<uint8_t> page_resident(num_pages);
         auto mc_rc = syscall(SYS_mincore, addr, length, page_resident.data());
         auto *temp = static_cast<uint8_t *>(
-            safe_mmap(nullptr, length, PROT_WRITE, MAP_SHARED, mapping_memfd, 0));
+            safe_mmap(nullptr, length, PROT_WRITE, MAP_SHARED, mapping_backing, 0));
         if (temp != MAP_FAILED) {
           if (mc_rc == 0) {
             auto *src = static_cast<uint8_t *>(addr);
@@ -1038,32 +1641,32 @@ void *RemoteDriver::mmap(void *addr, size_t length, int prot, int flags, off_t o
       }
     }
 
-    // QEMU vhost-user pattern: per-allocation memfd with F_SEAL_SHRINK (set at
-    // creation in alloc_memory_ioctl), MAP_SHARED|MAP_FIXED, then
+    // Map the per-allocation backing through its adapter, then use
     // MADV_POPULATE_WRITE to pre-fault pages. This surfaces any shmem ENOSPC
     // as errno rather than deferred SIGBUS on page fault.
     int mflags = MAP_SHARED;
     if (flags & MAP_FIXED)
       mflags |= MAP_FIXED;
-    auto *mapped = safe_mmap(addr, length, PROT_READ | PROT_WRITE, mflags, mapping_memfd, 0);
+    auto *mapped = map_client(mflags, mapping_backing);
     if (mapped != MAP_FAILED)
       syscall(SYS_madvise, mapped, length, MADV_POPULATE_WRITE);
+    if (mapped != MAP_FAILED && rocjitsu::kmd::is_device_memory_backing(mapping_backing))
+      syscall(SYS_madvise, mapped, length, MADV_DONTDUMP);
 
-    if (memfd >= 0 && memfd != mapping_memfd)
-      syscall(SYS_close, memfd);
     return mapped;
   }
 
-  // No memfd — anonymous fallback for doorbell/event pages.
-  if (memfd >= 0)
-    syscall(SYS_close, memfd);
+  // No backing descriptor — anonymous fallback for doorbell/event pages.
   int mflags = MAP_ANONYMOUS | MAP_PRIVATE;
   if (flags & MAP_FIXED)
     mflags |= MAP_FIXED;
-  return safe_mmap(addr, length, PROT_READ | PROT_WRITE, mflags, -1, 0);
+  return map_client(mflags, -1);
 }
 
-int RemoteDriver::munmap(void *addr, size_t length) {
+int RemoteDriver::munmap(void *addr, size_t length) { return munmap(addr, length, {}); }
+
+int RemoteDriver::munmap(void *addr, size_t length,
+                         const std::function<std::shared_ptr<LinuxKfd>()> &current_local_driver) {
   std::lock_guard<std::mutex> lock(rpc_mutex_);
   // Fail closed on a poisoned stream rather than unmapping on the strength of a
   // reply that belongs to some other exchange.
@@ -1098,18 +1701,212 @@ int RemoteDriver::munmap(void *addr, size_t length) {
   // waiting to be misparsed as the next call's header.
   if (!rpc_recv_exact(sock_, &resp, sizeof(resp)))
     return poison_stream();
+  if (resp.opcode != hdr.opcode || resp.request_id != hdr.request_id || resp.reserved != 0 ||
+      resp.payload_bytes != 0 || resp.result > 0)
+    return poison_stream();
 
-  if (resp.result == 0)
-    syscall(SYS_munmap, addr, length);
+  if (resp.result == 0) {
+    int host_result = -1;
+    int host_errno = 0;
+    const auto bare_mapping_change = [&] {
+      auto host_lock = host_mapping_lock().lock_exclusive();
+      host_result = static_cast<int>(syscall(SYS_munmap, addr, length));
+      host_errno = errno;
+      return host_result == 0;
+    };
+    const std::array replaced{
+        std::pair{reinterpret_cast<uint64_t>(addr), static_cast<uint64_t>(length)}};
+    if (auto local = current_local_driver ? current_local_driver() : nullptr)
+      local->run_host_vma_replacement(replaced, bare_mapping_change);
+    else
+      (void)bare_mapping_change();
+    if (host_result != 0)
+      return -host_errno;
+    (void)send_host_vma_replaced_locked(replaced[0].first, replaced[0].second);
+  }
 
   return resp.result;
 }
 
+int RemoteDriver::send_host_vma_replaced_locked(uint64_t address, uint64_t length,
+                                                uint64_t preserve_userptr_handle) {
+  if (protocol_failed_.load(std::memory_order_acquire))
+    return -EPROTO;
+  RpcHostVmaReplacedRequest request{
+      .addr = address, .length = length, .preserve_userptr_handle = preserve_userptr_handle};
+  RpcHeader header{};
+  header.opcode = RPC_HOST_VMA_REPLACED;
+  header.request_id = next_id_++;
+  header.payload_bytes = sizeof(request);
+  uint8_t frame[sizeof(header) + sizeof(request)];
+  std::memcpy(frame, &header, sizeof(header));
+  std::memcpy(frame + sizeof(header), &request, sizeof(request));
+  if (!rpc_send_exact(sock_, frame, sizeof(frame)))
+    return poison_stream();
+  RpcHeader response{};
+  if (!rpc_recv_exact(sock_, &response, sizeof(response)) || response.opcode != header.opcode ||
+      response.request_id != header.request_id || response.reserved != 0 ||
+      response.payload_bytes != 0 || response.result != 0)
+    return poison_stream();
+  return 0;
+}
+
+int RemoteDriver::gem_va_preflight(uint64_t drm_file_id, uint64_t va_address, uint64_t map_size) {
+  return send_gem_va(RPC_GEM_VA_PREFLIGHT, nullptr, drm_file_id, va_address, 0, map_size, 0);
+}
+
+int RemoteDriver::gem_va_map(const WithBackingFd &with_backing_fd, uint64_t drm_file_id,
+                             uint64_t va_address, uint64_t offset_in_bo, uint64_t map_size,
+                             uint32_t alloc_flags, bool replace) {
+  return send_gem_va(replace ? RPC_GEM_VA_REPLACE : RPC_GEM_VA_MAP, &with_backing_fd, drm_file_id,
+                     va_address, offset_in_bo, map_size, alloc_flags);
+}
+
+int RemoteDriver::gem_va_unmap(uint64_t drm_file_id, uint64_t va_address, uint64_t map_size) {
+  return send_gem_va(RPC_GEM_VA_UNMAP, nullptr, drm_file_id, va_address, 0, map_size, 0);
+}
+
+int RemoteDriver::query_mtype_for_testing(uint64_t va_address) {
+  std::lock_guard lock(rpc_mutex_);
+  if (protocol_failed_.load(std::memory_order_acquire))
+    return -EPROTO;
+  if (sock_ < 0)
+    return -ENODEV;
+  RpcQueryMtypeRequest request{.va_address = va_address};
+  RpcHeader header{};
+  header.opcode = RPC_QUERY_MTYPE;
+  header.request_id = next_id_++;
+  header.payload_bytes = sizeof(request);
+  uint8_t frame[sizeof(header) + sizeof(request)];
+  std::memcpy(frame, &header, sizeof(header));
+  std::memcpy(frame + sizeof(header), &request, sizeof(request));
+  size_t sent = 0;
+  if (!rpc_send_exact(sock_, frame, sizeof(frame), &sent))
+    return sent > 0 ? poison_stream() : transport_errno();
+  RpcHeader response{};
+  if (!rpc_recv_exact(sock_, &response, sizeof(response)) || response.opcode != header.opcode ||
+      response.request_id != header.request_id || response.reserved != 0 ||
+      response.payload_bytes != 0 || response.result > static_cast<int>(amdgpu::Mtype::NT))
+    return poison_stream();
+  return response.result;
+}
+
+int RemoteDriver::send_gem_va(uint32_t operation, const WithBackingFd *with_backing_fd,
+                              uint64_t drm_file_id, uint64_t va_address, uint64_t offset_in_bo,
+                              uint64_t map_size, uint32_t alloc_flags) {
+  std::lock_guard lock(rpc_mutex_);
+  if (protocol_failed_.load(std::memory_order_acquire))
+    return -EPROTO;
+  if (sock_ < 0)
+    return -ENODEV;
+
+  RpcGemVaRequest request{.operation = operation,
+                          .alloc_flags = alloc_flags,
+                          .drm_file_id = drm_file_id,
+                          .va_address = va_address,
+                          .map_size = map_size,
+                          .offset_in_bo = offset_in_bo};
+  RpcHeader header{};
+  header.opcode = RPC_GEM_VA;
+  header.request_id = next_id_++;
+  header.payload_bytes = sizeof(request);
+  uint8_t frame[sizeof(header) + sizeof(request)];
+  std::memcpy(frame, &header, sizeof(header));
+  std::memcpy(frame + sizeof(header), &request, sizeof(request));
+
+  size_t sent = 0;
+  if (operation == RPC_GEM_VA_MAP || operation == RPC_GEM_VA_REPLACE) {
+    if (with_backing_fd == nullptr || !*with_backing_fd)
+      return -EBADF;
+    ssize_t first = -1;
+    do {
+      first = (*with_backing_fd)([&](int backing_fd) {
+        if (backing_fd < 0) {
+          errno = EBADF;
+          return ssize_t{-1};
+        }
+        return rpc_send_msg(sock_, frame, sizeof(frame), &backing_fd, 1);
+      });
+    } while (first < 0 && errno == EINTR);
+    if (first <= 0)
+      return transport_errno();
+    sent = static_cast<size_t>(first);
+    if (sent < sizeof(frame) && !rpc_send_exact(sock_, frame + sent, sizeof(frame) - sent))
+      return poison_stream();
+  } else if (!rpc_send_exact(sock_, frame, sizeof(frame), &sent)) {
+    return sent > 0 ? poison_stream() : transport_errno();
+  }
+
+  RpcHeader response{};
+  if (!rpc_recv_exact(sock_, &response, sizeof(response)) || response.opcode != header.opcode ||
+      response.request_id != header.request_id || response.reserved != 0 ||
+      response.payload_bytes != 0 || response.result > 0)
+    return poison_stream();
+  return response.result;
+}
+
+void RemoteDriver::remember_host_svm_range_locked(uint64_t address, uint64_t length) noexcept {
+  if (length == 0)
+    return;
+  if (length > UINT64_MAX - address) {
+    unbounded_host_svm_policy_ = true;
+    return;
+  }
+  try {
+    uint64_t start = address;
+    uint64_t end = address + length;
+    auto first = std::lower_bound(
+        potential_host_svm_ranges_.begin(), potential_host_svm_ranges_.end(), start,
+        [](const auto &range, uint64_t value) { return range.second < value; });
+    auto last = first;
+    while (last != potential_host_svm_ranges_.end() && last->first <= end) {
+      start = std::min(start, last->first);
+      end = std::max(end, last->second);
+      ++last;
+    }
+    first = potential_host_svm_ranges_.erase(first, last);
+    potential_host_svm_ranges_.insert(first, {start, end});
+  } catch (...) {
+    unbounded_host_svm_policy_ = true;
+  }
+}
+
+bool RemoteDriver::may_have_host_svm_policy_locked(uint64_t address, uint64_t length) const {
+  if (length == 0)
+    return false;
+  if (unbounded_host_svm_policy_)
+    return true;
+  static const long page_size = ::sysconf(_SC_PAGESIZE);
+  if (page_size <= 0 || length > UINT64_MAX - static_cast<uint64_t>(page_size - 1))
+    return true;
+  const uint64_t page = static_cast<uint64_t>(page_size);
+  const uint64_t rounded = ((length + page - 1) / page) * page;
+  if (rounded > UINT64_MAX - address)
+    return true;
+  const auto it = std::lower_bound(
+      potential_host_svm_ranges_.begin(), potential_host_svm_ranges_.end(), address,
+      [](const auto &range, uint64_t value) { return range.second <= value; });
+  return it != potential_host_svm_ranges_.end() && it->first < address + rounded;
+}
+
+void RemoteDriver::run_host_vma_replacement(std::span<const std::pair<uint64_t, uint64_t>> ranges,
+                                            const std::function<bool()> &bare_mapping_change) {
+  // A concurrent SVM ioctl uses this same lock, so it cannot install a new
+  // denial between the host syscall and the daemon's cleanup publication.
+  std::lock_guard lock(rpc_mutex_);
+  if (!bare_mapping_change())
+    return;
+  for (const auto &[address, length] : ranges)
+    if (length != 0 && may_have_host_svm_policy_locked(address, length) &&
+        send_host_vma_replaced_locked(address, length) != 0)
+      return;
+}
+
 int RemoteDriver::send_mmap(void *addr, size_t length, int prot, int flags, off_t offset,
-                            int *memfd_out) {
+                            int *backing_out) {
   // rpc_mutex_ is already held by the caller (mmap()), which has also already
   // rejected a poisoned stream.
-  *memfd_out = -1;
+  *backing_out = -1;
   RpcMmapRequest req = {};
   req.addr = reinterpret_cast<uint64_t>(addr);
   req.length = length;
@@ -1142,8 +1939,8 @@ int RemoteDriver::send_mmap(void *addr, size_t length, int prot, int flags, off_
   // The daemon frames every mmap reply as header + RpcMmapResponse, so anything
   // shorter is a desynced stream — and reading result out of it would take the
   // value from whatever was on the stack, then hand the caller a mapping (or a
-  // failure) decided by uninitialized memory. Any memfd that arrived on the
-  // truncated reply is dropped: the caller sees rc != 0 with *memfd_out still
+  // failure) decided by uninitialized memory. Any backing descriptor that arrived on the
+  // truncated reply is dropped: the caller sees rc != 0 with *backing_out still
   // -1, so nothing downstream would ever close it.
   auto poison_reply = [&] {
     if (num_fds > 0 && received_fds[0] >= 0)
@@ -1156,7 +1953,7 @@ int RemoteDriver::send_mmap(void *addr, size_t length, int prot, int flags, off_
     return poison_reply();
 
   auto *resp = reinterpret_cast<RpcHeader *>(response_buffer);
-  *memfd_out = (num_fds > 0) ? received_fds[0] : -1;
+  *backing_out = (num_fds > 0) ? received_fds[0] : -1;
   return resp->result;
 }
 

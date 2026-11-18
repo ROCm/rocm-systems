@@ -5,6 +5,8 @@
 
 """Create compact Markdown summaries from JUnit XML artifacts."""
 
+from __future__ import annotations
+
 import argparse
 import glob
 import json
@@ -13,7 +15,7 @@ import sys
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence
+from typing import Iterable, Sequence
 
 BUILD_GROUP_LABELS = {
     "ubuntu-22.04": "Ubuntu 22.04",
@@ -33,7 +35,6 @@ SANITIZER_ORDER = ("thread", "undefined", "address")
 
 @dataclass
 class FailedTest:
-    workflow: str
     artifact: str
     name: str
 
@@ -46,9 +47,9 @@ class Summary:
     skipped: int = 0
     failed: int = 0
     time_seconds: float = 0.0
-    failed_tests: List[FailedTest] = field(default_factory=list)
+    failed_tests: list[FailedTest] = field(default_factory=list)
 
-    def add(self, result: "JUnitResult") -> None:
+    def add(self, result: JUnitResult) -> None:
         self.runs += 1
         self.tests += result.tests
         self.skipped += result.skipped
@@ -67,7 +68,7 @@ class JUnitResult:
     skipped: int
     failed: int
     time_seconds: float
-    failed_tests: List[FailedTest]
+    failed_tests: list[FailedTest]
 
 
 @dataclass
@@ -76,7 +77,7 @@ class SanitizerStatus:
     status: str
 
 
-def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Summarize rocprofiler-systems JUnit artifacts as Markdown."
     )
@@ -117,8 +118,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def collect_paths(patterns: Iterable[str]) -> List[Path]:
-    paths: List[Path] = []
+def collect_paths(patterns: Iterable[str]) -> list[Path]:
+    paths: list[Path] = []
     seen: set[Path] = set()
     for pattern in patterns:
         for item in glob.glob(pattern, recursive=True):
@@ -145,7 +146,7 @@ def float_attr(element: ET.Element, name: str) -> float:
         return 0.0
 
 
-def suites_from_root(root: ET.Element) -> List[ET.Element]:
+def suites_from_root(root: ET.Element) -> list[ET.Element]:
     if root.tag == "testsuite":
         return [root]
     if root.tag == "testsuites":
@@ -186,7 +187,7 @@ def testcase_name(testcase: ET.Element) -> str:
     return name or classname or "<unnamed test>"
 
 
-def parse_junit(path: Path, mode: str) -> Optional[JUnitResult]:
+def parse_junit(path: Path, mode: str) -> JUnitResult | None:
     artifact = artifact_name(path)
     if mode == "sanitizer":
         group_key = sanitizer_from_artifact(artifact)
@@ -207,7 +208,7 @@ def parse_junit(path: Path, mode: str) -> Optional[JUnitResult]:
         int_attr(suite, "failures") + int_attr(suite, "errors") for suite in suites
     )
     time_seconds = sum(float_attr(suite, "time") for suite in suites)
-    failed_tests: List[FailedTest] = []
+    failed_tests: list[FailedTest] = []
 
     for testcase in root.findall(".//testcase"):
         has_failure = testcase.find("failure") is not None
@@ -215,7 +216,6 @@ def parse_junit(path: Path, mode: str) -> Optional[JUnitResult]:
         if has_failure or has_error:
             failed_tests.append(
                 FailedTest(
-                    workflow=group_label,
                     artifact=artifact,
                     name=testcase_name(testcase),
                 )
@@ -241,7 +241,7 @@ def format_count(value: int) -> str:
 def format_duration(seconds: float) -> str:
     if seconds <= 0:
         return "0s"
-    rounded = int(round(seconds))
+    rounded = round(seconds)
     minutes, secs = divmod(rounded, 60)
     hours, minutes = divmod(minutes, 60)
     if hours:
@@ -257,8 +257,8 @@ def average_duration(summary: Summary) -> str:
     return format_duration(summary.time_seconds / summary.runs)
 
 
-def summarize_by_group(results: Iterable[JUnitResult]) -> Dict[str, Summary]:
-    summaries: Dict[str, Summary] = {}
+def summarize_by_group(results: Iterable[JUnitResult]) -> dict[str, Summary]:
+    summaries: dict[str, Summary] = {}
     for result in results:
         summary = summaries.setdefault(
             result.group_key, Summary(label=result.group_label)
@@ -275,7 +275,6 @@ def total_summary(summaries: Iterable[Summary]) -> Summary:
         total.skipped += summary.skipped
         total.failed += summary.failed
         total.time_seconds += summary.time_seconds
-        total.failed_tests.extend(summary.failed_tests)
     return total
 
 
@@ -287,25 +286,34 @@ def summary_row(summary: Summary) -> str:
     )
 
 
-def build_failed_tests_section(failed_tests: Sequence[FailedTest]) -> List[str]:
+def build_failed_test_group(summary: Summary) -> list[str]:
+    """Render one workflow group's failures as a collapsible <details> block."""
+    lines = [
+        (
+            f"<details><summary>{summary.label} "
+            f"({format_count(len(summary.failed_tests))} failed)</summary>"
+        ),
+        "",
+        "| Artifact | Failed Test |",
+        "|---|---|",
+    ]
+    for failed_test in summary.failed_tests[:50]:
+        lines.append(f"| `{failed_test.artifact}` | `{failed_test.name}` |")
+    if len(summary.failed_tests) > 50:
+        lines.append(f"| ... | {len(summary.failed_tests) - 50} more failed tests |")
+    lines.extend(["", "</details>", ""])
+    return lines
+
+
+def build_failed_tests_section(summaries: Sequence[Summary]) -> list[str]:
     lines = ["### Failed Tests", ""]
-    if not failed_tests:
+    groups_with_failures = [summary for summary in summaries if summary.failed_tests]
+    if not groups_with_failures:
         lines.append("No failed tests reported.")
         return lines
 
-    lines.extend(
-        [
-            "| Workflow | Artifact | Failed Test |",
-            "|---|---|---|",
-        ]
-    )
-    for failed_test in failed_tests[:50]:
-        lines.append(
-            f"| {failed_test.workflow} | `{failed_test.artifact}` | "
-            f"`{failed_test.name}` |"
-        )
-    if len(failed_tests) > 50:
-        lines.append(f"| ... | ... | {len(failed_tests) - 50} more failed tests |")
+    for summary in groups_with_failures:
+        lines.extend(build_failed_test_group(summary))
     return lines
 
 
@@ -342,13 +350,13 @@ def render_build_summary(
         "",
         f"Workflow jobs covered: **{total.runs}**",
         "",
-        "| Workflow | Runs | Avg Time | Tests | Skipped | Failed |",
+        "| Workflow | Runs | Avg Test Time | Tests | Skipped | Failed |",
         "|---|---:|---:|---:|---:|---:|",
     ]
     lines.extend(summary_row(summary) for summary in ordered_summaries)
     lines.append(summary_row(total))
     lines.append("")
-    lines.extend(build_failed_tests_section(total.failed_tests))
+    lines.extend(build_failed_tests_section(ordered_summaries))
     return "\n".join(lines) + "\n"
 
 
@@ -365,8 +373,8 @@ def normalize_status(status: str) -> str:
     return status.strip().title() or "Unknown"
 
 
-def read_statuses(paths: Iterable[Path]) -> Dict[str, SanitizerStatus]:
-    statuses: Dict[str, SanitizerStatus] = {}
+def read_statuses(paths: Iterable[Path]) -> dict[str, SanitizerStatus]:
+    statuses: dict[str, SanitizerStatus] = {}
     for path in paths:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -383,11 +391,11 @@ def read_statuses(paths: Iterable[Path]) -> Dict[str, SanitizerStatus]:
 
 
 def render_sanitizer_summary(
-    results: Sequence[JUnitResult], statuses: Dict[str, SanitizerStatus]
+    results: Sequence[JUnitResult], statuses: dict[str, SanitizerStatus]
 ) -> str:
     summaries = summarize_by_group(results)
     columns = [SANITIZER_LABELS[key] for key in SANITIZER_ORDER]
-    values: List[str] = []
+    values: list[str] = []
 
     for key in SANITIZER_ORDER:
         status = statuses.get(key)
@@ -415,7 +423,7 @@ def render_sanitizer_summary(
     )
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     junit_paths = collect_paths(args.junit_glob)
     status_paths = collect_paths(args.status_glob)

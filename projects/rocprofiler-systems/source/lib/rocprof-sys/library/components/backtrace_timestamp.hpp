@@ -9,15 +9,12 @@
 #include "core/timemory.hpp"
 
 #include <timemory/components/base.hpp>
-#include <timemory/macros/language.hpp>
 #include <timemory/mpl/concepts.hpp>
 
 #include <chrono>
 #include <cstdint>
 
-namespace rocprofsys
-{
-namespace component
+namespace rocprofsys::component
 {
 struct backtrace_timestamp : comp::empty_base
 {
@@ -49,5 +46,4 @@ private:
     std::int64_t  m_tid  = 0;
     std::uint64_t m_real = 0;
 };
-}  // namespace component
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component

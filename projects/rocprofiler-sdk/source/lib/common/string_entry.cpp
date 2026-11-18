@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -69,6 +69,12 @@ get_string_entry(std::string_view name)
     return get_string_array()
         ->emplace(_hash_v, std::make_unique<std::string>(name))
         .first->second.get();
+}
+
+const std::string*
+get_string_entry(const char* name)
+{
+    return get_string_entry(std::string_view{name ? name : "(null)"});
 }
 
 const std::string*

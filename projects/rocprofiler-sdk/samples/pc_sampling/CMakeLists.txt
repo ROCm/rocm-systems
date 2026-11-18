@@ -1,7 +1,7 @@
 #
 #
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 if(NOT CMAKE_HIP_COMPILER)
     find_program(
@@ -60,6 +60,8 @@ set_tests_properties(
                45
                LABELS
                "samples;pc-sampling"
+               RUN_SERIAL
+               ON
                ENVIRONMENT
                "${pc-sampling-env}"
                FAIL_REGULAR_EXPRESSION

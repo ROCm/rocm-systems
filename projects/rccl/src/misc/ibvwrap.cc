@@ -128,6 +128,7 @@ ncclResult_t wrap_ibv_symbols(void) {
 NCCL_PARAM(IbMQpRetryAll, "IB_MQP_RETRY_ALL", 0);
 NCCL_PARAM(IbMQpRetryCnt, "IB_MQP_RETRY_CNT", 34);
 NCCL_PARAM(IbMQpRetryTimeout, "IB_MQP_RETRY_SLEEP_MSEC", 100); // in milliseconds
+NCCL_PARAM(IbQueryPortSpeed, "IB_QUERY_PORT_SPEED", 1);
 
 #define IBV_ERR_EQ(e, code) (e == code || e == (-code))
 #define IBV_MQP_RETRY_ERRNO(e) (IBV_ERR_EQ(e, ETIMEDOUT))
@@ -231,6 +232,11 @@ ncclResult_t wrap_ibv_query_gid(struct ibv_context* context, uint8_t port_num, i
                           "ibv_query_gid");
 }
 
+ncclResult_t wrap_ibv_query_pkey(struct ibv_context* context, uint8_t port_num, int index, uint16_t* pkey) {
+  IBV_INT_CHECK_RET_ERRNO(ibvSymbols, ibv_internal_query_pkey, ibv_internal_query_pkey(context, port_num, index, pkey),
+                          0, "ibv_query_pkey");
+}
+
 ncclResult_t wrap_ibv_query_qp(struct ibv_qp* qp, struct ibv_qp_attr* attr, int attr_mask,
                                struct ibv_qp_init_attr* init_attr) {
   IBV_INT_CHECK_RET_ERRNO(ibvSymbols, ibv_internal_query_qp, ibv_internal_query_qp(qp, attr, attr_mask, init_attr), 0,
@@ -269,6 +275,14 @@ ncclResult_t wrap_ibv_reg_mr_iova2(struct ibv_mr** ret, struct ibv_pd* pd, void*
   } // Assume dummy call
   IBV_PTR_CHECK_ERRNO(ibvSymbols, ibv_internal_reg_mr_iova2, ibv_internal_reg_mr_iova2(pd, addr, length, iova, access),
                       *ret, NULL, "ibv_reg_mr_iova2");
+}
+
+struct ibv_mr* wrap_direct_ibv_reg_mr_iova2(struct ibv_pd* pd, void* addr, size_t length, uint64_t iova, int access) {
+  if (ibvSymbols.ibv_internal_reg_mr_iova2 == NULL) {
+    WARN("lib wrapper not initialized.");
+    return NULL;
+  }
+  return ibvSymbols.ibv_internal_reg_mr_iova2(pd, addr, length, iova, access);
 }
 
 /* DMA-BUF support */
@@ -426,6 +440,25 @@ print:
   return;
 }
 
+static void printIbModifyQpHint(int status) {
+  switch (status) {
+  case ETIMEDOUT:
+    INFO(NCCL_NET, "HINT: In many cases this error indicates that the NICs are not cross-rail connected.");
+    INFO(NCCL_NET, "HINT: To confirm, set NCCL_CROSS_NIC=0 to disable cross-rail communication (see "
+                   "https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html#nccl-cross-nic).");
+    return;
+  case EINVAL:
+    INFO(NCCL_NET, "HINT: In many cases this error indicates that an incorrect GID index is forced by "
+                   "NCCL_IB_GID_INDEX, or that a NIC's GID changed mid-run.");
+    INFO(NCCL_NET, "HINT: To confirm, set NCCL_IB_GID_INDEX=-1 to enable automatic detection and check "
+                   "'dmesg | grep -i gid' for GID changes (see "
+                   "https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html#nccl-ib-gid-index).");
+    return;
+  default:
+    break;
+  }
+}
+
 ncclResult_t wrap_ibv_modify_qp(struct ibv_qp* qp, struct ibv_qp_attr* attr, int attr_mask) {
   char qpMsg[1024];
   int ret = 0, attempts = 0;
@@ -447,6 +480,7 @@ ncclResult_t wrap_ibv_modify_qp(struct ibv_qp* qp, struct ibv_qp_attr* attr, int
   if (ret != 0) {
     ibvModifyQpLog(qp, attr->qp_state, attr, attr_mask, qpMsg, sizeof(qpMsg));
     WARN("Call to ibv_modify_qp failed with %d %s, %s", ret, strerror(ret), qpMsg);
+    printIbModifyQpHint(ret);
     return ncclSystemError;
   }
   return ncclSuccess;
@@ -466,9 +500,104 @@ ncclResult_t wrap_ibv_set_ece(
                                    supported);
 }
 
+ncclResult_t wrap_ibv_query_port_speed(struct ibv_context* context, uint8_t port_num, uint64_t* speed) {
+  if (!ncclParamIbQueryPortSpeed() || ibvSymbols.ibv_internal_query_port_speed == NULL) {
+    return ncclSystemError;
+  }
+  IBV_INT_CHECK_RET_ERRNO(ibvSymbols, ibv_internal_query_port_speed,
+                          ibv_internal_query_port_speed(context, port_num, speed), 0, "ibv_query_port_speed");
+}
+
 ncclResult_t wrap_ibv_event_type_str(char** ret, enum ibv_event_type event) {
   *ret = (char*)ibvSymbols.ibv_internal_event_type_str(event);
   return ncclSuccess;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Extended verbs used by the GIN QP factory.
+///////////////////////////////////////////////////////////////////////////////
+
+ncclResult_t wrap_ibv_create_cq_ex(struct ibv_cq_ex** ret, struct ibv_context* context,
+                                   struct ibv_cq_init_attr_ex* cq_attr) {
+  // create_cq_ex / alloc_parent_domain / create_qp_ex are rdma-core verbs.h
+  // inlines that dispatch through the provider's verbs_context op table, not
+  // dlsym'able symbols; these wrappers mirror the inline via verbs_get_ctx_op.
+  struct verbs_context* vctx = verbs_get_ctx_op(context, create_cq_ex);
+  if (vctx == NULL) {
+    errno = EOPNOTSUPP;
+    WARN("Call to ibv_create_cq_ex failed: provider does not support extended CQ creation");
+    return ncclSystemError;
+  }
+  *ret = vctx->create_cq_ex(context, cq_attr);
+  if (*ret == NULL) {
+    WARN("Call to ibv_create_cq_ex failed with error %s", strerror(errno));
+    return ncclSystemError;
+  }
+  return ncclSuccess;
+}
+
+struct ibv_cq* wrap_ibv_cq_ex_to_cq(struct ibv_cq_ex* cq) {
+  // ibv_cq is the leading sub-object of ibv_cq_ex (same initial layout), so the
+  // public ibv_cq_ex_to_cq() is just a cast. Mirror that here with no load.
+  return (struct ibv_cq*)cq;
+}
+
+ncclResult_t wrap_ibv_alloc_parent_domain(struct ibv_pd** ret, struct ibv_context* context,
+                                          struct ibv_parent_domain_init_attr* attr) {
+  struct verbs_context* vctx = verbs_get_ctx_op(context, alloc_parent_domain);
+  if (vctx == NULL) {
+    errno = EOPNOTSUPP;
+    WARN("Call to ibv_alloc_parent_domain failed: provider does not support parent domains");
+    return ncclSystemError;
+  }
+  *ret = vctx->alloc_parent_domain(context, attr);
+  if (*ret == NULL) {
+    WARN("Call to ibv_alloc_parent_domain failed with error %s", strerror(errno));
+    return ncclSystemError;
+  }
+  return ncclSuccess;
+}
+
+ncclResult_t wrap_ibv_create_qp_ex(struct ibv_qp** ret, struct ibv_context* context,
+                                   struct ibv_qp_init_attr_ex* qp_init_attr_ex) {
+  // PD-only request falls back to the basic create_qp path.
+  if (qp_init_attr_ex->comp_mask == IBV_QP_INIT_ATTR_PD) {
+    return wrap_ibv_create_qp(ret, qp_init_attr_ex->pd, (struct ibv_qp_init_attr*)qp_init_attr_ex);
+  }
+  struct verbs_context* vctx = verbs_get_ctx_op(context, create_qp_ex);
+  if (!vctx) {
+    errno = EOPNOTSUPP;
+    WARN("Call to ibv_create_qp_ex failed: provider does not support extended QP creation");
+    return ncclSystemError;
+  }
+  *ret = vctx->create_qp_ex(context, qp_init_attr_ex);
+  if (*ret == NULL) {
+    WARN("Call to ibv_create_qp_ex failed with error %s", strerror(errno));
+    return ncclSystemError;
+  }
+  return ncclSuccess;
+}
+
+ssize_t wrap_ibv_query_gid_table(struct ibv_context* context, struct ibv_gid_entry* entries, size_t max_entries,
+                                 uint32_t flags) {
+  if (ibvSymbols.ibv_internal_query_gid_table == NULL) {
+    WARN("ibv_query_gid_table not available in the loaded libibverbs");
+    return -1;
+  }
+  return ibvSymbols.ibv_internal_query_gid_table(context, entries, max_entries, flags, sizeof(*entries));
+}
+
+int wrap_ibv_is_dmabuf_supported(struct ibv_pd* pd) {
+  // rccl-native probe (same technique as net_ib_cast/gdr.cc): issue a dummy
+  // ibv_reg_dmabuf_mr with fd=-1. A device/kernel without DMA-BUF support fails
+  // with EOPNOTSUPP/EPROTONOSUPPORT before validating the fd; a supporting one
+  // gets past that check and fails later (EBADF) on the bogus fd. Either way no
+  // MR is created, so there is nothing to free.
+  if (pd == NULL) return 0;
+  errno = 0;
+  (void)wrap_direct_ibv_reg_dmabuf_mr(pd, 0ULL /*offset*/, 0ULL /*len*/, 0ULL /*iova*/, -1 /*fd*/, 0 /*access*/);
+  if (errno == EOPNOTSUPP || errno == EPROTONOSUPPORT) return 0;
+  return 1;
 }
 
 // Helper function to convert IB work completion status to string

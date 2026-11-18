@@ -1,23 +1,7 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """GPU device identity: ASIC info, board info, IDs, BDF, UUID, firmware, VBIOS, enumeration."""
 
 import unittest
@@ -73,7 +57,31 @@ class TestGpuIdentity(unittest.TestCase):
 
     def test_get_gpu_device_uuid(self):
         self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(amdsmi_get_gpu_device_uuid=amdsmi.amdsmi_get_gpu_device_uuid)
+        # Devices with no real ASIC serial (e.g. gfx1151/WSL) now correctly
+        # refuse to synthesize a placeholder UUID, so NOT_SUPPORTED is expected
+        # alongside SUCCESS here.
+        accept = [amdsmi.AmdSmiStatus.SUCCESS, amdsmi.AmdSmiStatus.NOT_SUPPORTED]
+        with self.common.status_sweep():
+            for i, gpu in enumerate(self.common.processors):
+                self.common.print_device_header(i)
+                msg = f"\t### amdsmi_get_gpu_device_uuid(gpu={i}):"
+                with self.common.expect_status(msg, accept):
+                    amdsmi.amdsmi_get_gpu_device_uuid(gpu)
+                self.common.print("")
+
+        # Invalid gpu handle: kept on the check_ret path since it raises
+        # AmdSmiParameterException, which expect_status cannot classify
+        # (no get_error_code()).
+        raise_exception = None
+        msg = "\t### amdsmi_get_gpu_device_uuid(gpu=invalid):"
+        try:
+            amdsmi.amdsmi_get_gpu_device_uuid(self.common.bad_gpu)
+            self.common.check_ret("", "", self.common.FAIL)
+        except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
+            if self.common.check_ret(msg, e, self.common.FAIL):
+                raise_exception = e
+        if raise_exception:
+            raise raise_exception
         return
 
     def test_get_gpu_device_cuid(self):

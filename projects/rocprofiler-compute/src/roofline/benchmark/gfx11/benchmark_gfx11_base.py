@@ -21,26 +21,12 @@ class Bench_gfx11(benchmark_base.Bench_base):
         # TODO: there is potential wavefront size could be set to 64,
         # but default for gfx11 is 32
         self.WAVEFRONT_SIZE = 32
-        self.MATRIX_OPS_TYPE = "WMMA"
-
-        self.unsupported_data_types = [
-            "HBM",
-            "WMMA-F4",
-            "WMMA-F6",
-            "WMMA-F6F4",
-            "WMMA-F8",
-            "WMMA-F16",
-            "WMMA-BF16",
-            "WMMA-F32",
-            "WMMA-F64",
-            "WMMA-I8",
-        ]
 
         self.matrix_kernel_selector = {}
         self.matrix_ops = {}
 
         self.tests = {
-            "HBM": super().hbm_bw_benchmark,
+            "HBM": super().device_memory_bw_benchmark,
             "MALL": super().mall_bw_bench,
             "L2": super().l2_bw_bench,
             "L1": super().l1_bw_bench,
@@ -56,37 +42,13 @@ class Bench_gfx11(benchmark_base.Bench_base):
             "WMMA-F4": super().matrix_f4_bench,
             "WMMA-F6": super().matrix_f6_bench,
             "WMMA-F6F4": super().matrix_f6f4_bench,
+            "WMMA-MXF8": super().matrix_mxf8_bench,
             "WMMA-F8": super().matrix_f8_bench,
             "WMMA-F16": super().matrix_f16_bench,
             "WMMA-BF16": super().matrix_bf16_bench,
             "WMMA-F32": super().matrix_f32_bench,
             "WMMA-F64": super().matrix_f64_bench,
             "WMMA-I8": super().matrix_i8_bench,
-        }
-
-        self.csv_cols_map = {
-            "HBM": "HBMBw",
-            "MALL": "MALLBw",
-            "L2": "L2Bw",
-            "L1": "L1Bw",
-            "L0": "L0Bw",
-            "LDS": "LDSBw",
-            "F16": "FP16Flops",
-            "BF16": "BF16Flops",
-            "F32": "FP32Flops",
-            "F64": "FP64Flops",
-            "I8": "I8Ops",
-            "I32": "I32Ops",
-            "I64": "I64Ops",
-            "WMMA-F4": "WMMAF4Flops",
-            "WMMA-F6": "WMMAF6Flops",
-            "WMMA-F6F4": "WMMAF6F4Flops",
-            "WMMA-F8": "WMMAF8Flops",
-            "WMMA-F16": "WMMAF16Flops",
-            "WMMA-BF16": "WMMABF16Flops",
-            "WMMA-F32": "WMMAF32Flops",
-            "WMMA-F64": "WMMAF64Flops",
-            "WMMA-I8": "WMMAI8Ops",
         }
 
     # -----------------------------------------------------------------------------
@@ -104,8 +66,8 @@ class Bench_gfx11(benchmark_base.Bench_base):
         # ----------------------------------------
         # All other cache and FLOPs definitions are completed in the Bench_base
         # class set_kernel_source()
-        # HBM Bandwidth benchmark
-        self.hbm_bw_src = """"""
+        # gfx115x has no device-memory roof.
+        self.device_memory_bw_src = """"""
 
         # BF16 uses a separate dot-product kernel for VALU flops measurement because:
         # -> __hip_bfloat16 is not a valid ext_vector_type element.

@@ -1,0 +1,34 @@
+/*************************************************************************
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
+
+// Implementation of the GIN fakes. See gin_fakes.h.
+
+#include "gin_fakes.h"
+
+// src/plugin/gin.cc
+ncclResult_t g_ncclGinInitResult = ncclSuccess;
+ncclResult_t ncclGinInit(struct ncclComm*) { return g_ncclGinInitResult; }
+ncclResult_t ncclGinInitFromParent(struct ncclComm*, struct ncclComm*) { return g_ncclGinInitResult; }
+
+// src/gin/gin_host.cc. rccl-UnitTestsMicroGinHost compiles the real TU and does
+// not link this file, so the fake is not guarded.
+bool g_ginHasError = false;
+ncclResult_t ncclGinQueryLastError(struct ncclGinState*, bool* hasError) {
+  if (hasError) *hasError = g_ginHasError;
+  return ncclSuccess;
+}
+static ncclGinType_t DefaultRailedGinType(ncclComm*) { return NCCL_GIN_TYPE_NONE; }
+std::function<ncclGinType_t(ncclComm*)> g_railedGinType = DefaultRailedGinType;
+ncclResult_t ncclGetRailedGinType(struct ncclComm* comm, ncclGinType_t* ginType) {
+  *ginType = g_railedGinType(comm);
+  return ncclSuccess;
+}
+
+void ResetGinFakes() {
+  g_ncclGinInitResult = ncclSuccess;
+  g_ginHasError = false;
+  g_railedGinType = DefaultRailedGinType;
+}

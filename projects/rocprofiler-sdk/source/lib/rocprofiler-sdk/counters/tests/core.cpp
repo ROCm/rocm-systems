@@ -26,6 +26,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/dispatch_handlers.hpp"
 #include "lib/rocprofiler-sdk/counters/id_decode.hpp"
+#include "lib/rocprofiler-sdk/counters/ioctl.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 #include "lib/rocprofiler-sdk/counters/tests/hsa_tables.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
@@ -560,17 +561,11 @@ TEST(core, start_stop_buffered_ctx)
     ASSERT_TRUE(ctx.dispatch_counter_collection->callbacks.at(0)->buffer);
     EXPECT_EQ(*ctx.dispatch_counter_collection->callbacks.at(0)->buffer, opt_buff_id);
 
+    // Counter collection no longer registers a per-queue callback; a started service is
+    // observable via its enabled flag. counters::is_any_active() is a different question (is the
+    // context in the active list), and the two disagree while stop_context() drains.
     bool found = false;
     ctx.dispatch_counter_collection->enabled.rlock([&](const auto& data) { found = data; });
-    EXPECT_TRUE(found);
-
-    found = false;
-    hsa::get_queue_controller()->iterate_callbacks([&](auto cid, const auto&) {
-        if(cid == ctx.dispatch_counter_collection->callbacks.at(0)->queue_id)
-        {
-            found = true;
-        }
-    });
     EXPECT_TRUE(found);
 
     /**
@@ -627,17 +622,11 @@ TEST(core, start_stop_callback_ctx)
               (void*) 0x54321);
     EXPECT_EQ(ctx.dispatch_counter_collection->callbacks.at(0)->context, get_client_ctx());
 
+    // Counter collection no longer registers a per-queue callback; a started service is
+    // observable via its enabled flag. counters::is_any_active() is a different question (is the
+    // context in the active list), and the two disagree while stop_context() drains.
     bool found = false;
     ctx.dispatch_counter_collection->enabled.rlock([&](const auto& data) { found = data; });
-    EXPECT_TRUE(found);
-
-    found = false;
-    hsa::get_queue_controller()->iterate_callbacks([&](auto cid, const auto&) {
-        if(cid == ctx.dispatch_counter_collection->callbacks.at(0)->queue_id)
-        {
-            found = true;
-        }
-    });
     EXPECT_TRUE(found);
 
     /**
@@ -794,6 +783,8 @@ rocprofiler-sdk:
           - gfx1151
           - gfx1152
           - gfx1153
+          - gfx1170
+          - gfx1171
           - gfx908
           - gfx90a
           - gfx9
@@ -849,6 +840,8 @@ rocprofiler-sdk:
           - gfx1151
           - gfx1152
           - gfx1153
+          - gfx1170
+          - gfx1171
           - gfx940
           - gfx908
           - gfx900
@@ -881,6 +874,8 @@ rocprofiler-sdk:
           - gfx1151
           - gfx1152
           - gfx1153
+          - gfx1170
+          - gfx1171
           - gfx908
           - gfx90a
           - gfx9
@@ -952,4 +947,59 @@ TEST(core, create_counter)
             }
         }
     }
+}
+
+// The perfmon-clock-forcing behavior was introduced at KFD profiler interface version 2 (see the
+// KFD_IOC_PROFILER_VERSION_NUM history in kfd_ioctl.h) and, being cumulative, remains supported by
+// any version >= 2 -- not just an exact match (a future kernel reporting a newer version must not
+// disable it). This threshold is pinned to the literal 2 rather than KFD_IOC_PROFILER_VERSION_NUM:
+// that macro is the latest version the header knows about and will keep climbing for unrelated
+// ops, so comparing against it here would mask the exact bug these tests guard against (the SDK
+// built against a newer header incorrectly requiring a newer kernel than this feature needs).
+TEST(kfd_profiler_version, perfmon_clock_not_supported_below_threshold)
+{
+    EXPECT_FALSE(counters::perfmon_clock_supported_for_version(0));
+    EXPECT_FALSE(counters::perfmon_clock_supported_for_version(1));
+}
+
+TEST(kfd_profiler_version, perfmon_clock_supported_at_threshold)
+{
+    EXPECT_TRUE(counters::perfmon_clock_supported_for_version(2));
+}
+
+TEST(kfd_profiler_version, perfmon_clock_supported_above_threshold)
+{
+    EXPECT_TRUE(counters::perfmon_clock_supported_for_version(3));
+    EXPECT_TRUE(counters::perfmon_clock_supported_for_version(100));
+}
+
+// The kernel's amdgpu_gfx_perfmon_clk_override() is wired up (gfx_funcs->set_perfmon_clk_override)
+// starting at GFX11 (gfx_v11_0.c, gfx_v12_0.c, gfx_v12_1.c), with no upper cutoff coded anywhere in
+// the kernel -- support is determined per-ASIC by which gfx_v*_0.c file implements the callback,
+// not by a version range check. So the SDK-side gate below is an open-ended floor, not a range:
+// below it the ioctl returns -EOPNOTSUPP rather than silently no-op'ing, but above it there is no
+// known ceiling (a hypothetical future GFX13+ ASIC that wires up the callback should just work).
+TEST(kfd_profiler_version, perfmon_clk_override_not_supported_below_gfx11)
+{
+    rocprofiler_agent_t agent{};
+    agent.gfx_target_version = 109999;
+    EXPECT_FALSE(counters::perfmon_clk_override_supported_for_agent(&agent));
+}
+
+TEST(kfd_profiler_version, perfmon_clk_override_supported_at_gfx11_floor)
+{
+    rocprofiler_agent_t agent{};
+    agent.gfx_target_version = 110000;
+    EXPECT_TRUE(counters::perfmon_clk_override_supported_for_agent(&agent));
+}
+
+TEST(kfd_profiler_version, perfmon_clk_override_supported_above_gfx11_floor_is_open_ended)
+{
+    rocprofiler_agent_t agent{};
+
+    agent.gfx_target_version = 120500;  // gfx1250
+    EXPECT_TRUE(counters::perfmon_clk_override_supported_for_agent(&agent));
+
+    agent.gfx_target_version = 999999;  // hypothetical future ASIC; no ceiling is coded
+    EXPECT_TRUE(counters::perfmon_clk_override_supported_for_agent(&agent));
 }

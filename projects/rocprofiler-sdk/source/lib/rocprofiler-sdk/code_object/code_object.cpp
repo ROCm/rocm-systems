@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -34,6 +34,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
+#include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -917,6 +918,14 @@ get_hip_register_fatbinary_function()
 }
 
 auto&
+get_hip_unregister_fatbinary_function()
+{
+    static decltype(::std::declval<HipCompilerDispatchTable>().__hipUnregisterFatBinary_fn) _v =
+        nullptr;
+    return _v;
+}
+
+auto&
 get_hip_register_function_function()
 {
     static decltype(::std::declval<HipCompilerDispatchTable>().__hipRegisterFunction_fn) _v =
@@ -1086,9 +1095,13 @@ executable_freeze_internal(hsa_executable_t executable)
                                     // when kernel_symbol_device_map kernels are not present in
                                     // host_function_map, skip.
                                     if(host_data.device_function == nullptr) return;
-                                    host_data.code_object_id   = sym_data.code_object_id;
-                                    host_data.kernel_id        = sym_data.kernel_id;
-                                    host_data.host_function_id = ++get_host_function_id();
+                                    host_data.code_object_id = sym_data.code_object_id;
+                                    host_data.kernel_id      = sym_data.kernel_id;
+                                    // the id identifies the symbol, not this notification, so
+                                    // allocate it on the first context and reuse it for the rest
+                                    if(sitr->host_function_id == 0)
+                                        sitr->host_function_id = ++get_host_function_id();
+                                    host_data.host_function_id = sitr->host_function_id;
                                     auto hip_record = rocprofiler_callback_tracing_record_t{
                                         .context_id = rocprofiler_context_id_t{citr->context_idx},
                                         .thread_id  = tidx,
@@ -1208,10 +1221,42 @@ hip_register_fat_binary(const void* data)
     {
         CHECK_NOTNULL(get_hip_register_data())
             ->wlock([fbwrapper](hip::hip_register_data& reg_data) {
-                reg_data.fat_binary = fbwrapper->binary;
+                reg_data.fat_binary         = fbwrapper->binary;
+                reg_data.fat_binary_modules = nullptr;
             });
     }
-    return CHECK_NOTNULL(get_hip_register_fatbinary_function())(data);
+
+    auto** modules = CHECK_NOTNULL(get_hip_register_fatbinary_function())(data);
+
+    // remember the handle HIP passes to __hipUnregisterFatBinary for this fat binary. A fat binary
+    // that HIP failed to register is never unregistered, so it is not kept.
+    if(hip::has_hip_fat_binary_payload(*fbwrapper))
+    {
+        CHECK_NOTNULL(get_hip_register_data())
+            ->wlock([fbwrapper, modules](hip::hip_register_data& reg_data) {
+                if(reg_data.fat_binary != fbwrapper->binary) return;
+                if(modules == nullptr) reg_data.fat_binary = nullptr;
+                reg_data.fat_binary_modules = modules;
+            });
+    }
+    return modules;
+}
+
+void
+hip_unregister_fat_binary(void** modules)
+{
+    // HIP unregisters a fat binary when the library containing it is unloaded, after which the
+    // fat binary is no longer mapped and must not be parsed by initialize_hip_binary_data. This
+    // can be invoked from library destructors after the static objects have been destroyed.
+    if(auto* register_data = get_hip_register_data())
+    {
+        register_data->wlock([modules](hip::hip_register_data& reg_data) {
+            if(modules == nullptr || reg_data.fat_binary_modules != modules) return;
+            reg_data.fat_binary         = nullptr;
+            reg_data.fat_binary_modules = nullptr;
+        });
+    }
+    CHECK_NOTNULL(get_hip_unregister_fatbinary_function())(modules);
 }
 
 void
@@ -1265,9 +1310,13 @@ shutdown(hsa_executable_t executable)
 
     auto _unloaded = code_object::get_unloaded_code_objects(executable);
 
-    // Code-object unload callbacks often invalidate tool-side kernel symbol metadata. Drain inline
-    // queue-interposition completion records first so pending dispatch records are delivered while
-    // that metadata is still valid.
+    // No signal-less-specific hook at code-object unload: a late signal-less completion
+    // is memory-safe (the payload carries copies, no code-object-owned pointer is
+    // dereferenced), so the only residual is a tool-semantic/buffered-tracing
+    // inconsistency, which is explicitly acceptable per the success criterion.
+
+    // Unloading invalidates tool-side kernel symbol metadata, so drain in-flight
+    // queue-interposition completions first while that metadata is still valid.
     ::rocprofiler::hsa::queue_interposition::interposition_sync();
 
     constexpr auto CODE_OBJECT_KIND = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
@@ -1403,11 +1452,15 @@ initialize(HsaApiTable* table)
 void
 initialize(HipCompilerDispatchTable* table)
 {
-    get_hip_register_fatbinary_function() = CHECK_NOTNULL(table->__hipRegisterFatBinary_fn);
-    get_hip_register_function_function()  = CHECK_NOTNULL(table->__hipRegisterFunction_fn);
-    table->__hipRegisterFatBinary_fn      = hip_register_fat_binary;
-    table->__hipRegisterFunction_fn       = hip_register_function;
+    get_hip_register_fatbinary_function()   = CHECK_NOTNULL(table->__hipRegisterFatBinary_fn);
+    get_hip_unregister_fatbinary_function() = CHECK_NOTNULL(table->__hipUnregisterFatBinary_fn);
+    get_hip_register_function_function()    = CHECK_NOTNULL(table->__hipRegisterFunction_fn);
+    table->__hipRegisterFatBinary_fn        = hip_register_fat_binary;
+    table->__hipUnregisterFatBinary_fn      = hip_unregister_fat_binary;
+    table->__hipRegisterFunction_fn         = hip_register_function;
     ROCP_FATAL_IF(get_hip_register_fatbinary_function() == table->__hipRegisterFatBinary_fn)
+        << "infinite recursion";
+    ROCP_FATAL_IF(get_hip_unregister_fatbinary_function() == table->__hipUnregisterFatBinary_fn)
         << "infinite recursion";
     ROCP_FATAL_IF(get_hip_register_function_function() == table->__hipRegisterFunction_fn)
         << "infinite recursion";
@@ -1428,6 +1481,11 @@ get_kernel_id(uint64_t kernel_object)
 void
 finalize()
 {
+    // Same mutex executable_destroy_internal() holds across shutdown(), so a runtime-thread
+    // destroy cannot run the unload callbacks concurrently with finalization. is_shutdown is
+    // both tested and set under the lock, so a destroy arriving afterwards observes it.
+    auto _lk = std::unique_lock{get_destroy_mutex()};
+
     if(is_shutdown.load(std::memory_order_acquire) || !get_executables() || !get_code_objects())
         return;
 

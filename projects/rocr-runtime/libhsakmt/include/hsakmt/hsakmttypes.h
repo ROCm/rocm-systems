@@ -232,7 +232,8 @@ typedef union
     {
         unsigned int PerSDMAQueueResetSupported : 1;  // Indicates per-sdma queue reset supported
         unsigned int AqlEmulationPm4_ : 1;            // Indicates device uses AQL emulation via PM4 packets
-        unsigned int Reserved : 30; // Reserved
+        unsigned int StallOnRetryFault : 1;           // Node runs in recoverable-fault mode
+        unsigned int Reserved : 29; // Reserved
     } ui32;
 } HSA_CAPABILITY2;
 
@@ -361,6 +362,9 @@ typedef struct _HsaNodeProperties
     HSAuint64       WallClockKHz;      // Wall Clock Frequency in KHz
 
     HSAuint32       FabricHandleSupported; // 0 - not supported, 1 - supported
+
+    HSAuint32       NativeSDMASupported;   // 0 - not supported, 1 - device provides the native SDMA user queue
+    HSAuint32       NativeSDMAEpilogueBytes; // Per-doorbell epilogue size in the native SDMA user queue
 } HsaNodeProperties;
 
 
@@ -454,6 +458,7 @@ typedef struct _HaCacheProperties
     HSAuint32    CacheLatency;     // Cache latency in ns
     HsaCacheType CacheType;
     HSAuint32    SiblingMap[HSA_CPU_SIBLINGS];
+    HSAuint32    PersistingCacheSizeMax; //Maximum persisting cache size in L2 Cache topology.
 } HsaCacheProperties;
 
 
@@ -616,6 +621,25 @@ typedef struct _HsaGraphicsResourceInfo {
     HSAuint32  NodeId;              // GPU exported the buffer
     HSAuint64  SizeHintInBytes;     // Caller-provided size hint for foreign (non-ROCr) resources (IN, 0 if unknown)
 } HsaGraphicsResourceInfo;
+
+// Windows-only metadata populated in HsaGraphicsResourceInfo::Metadata when the imported
+// resource's VCAM_SURFACE_DESC is available. Provides swizzle mode as a fallback for when
+// the DXX extension (CLQueryResource11/CLQueryResource) or GL extension(wglResourceAttachAMD)
+// is not available.
+// The interop layer (clr) copies this blob opaquely into the ROCr image descriptor's data[] dwords
+// (starting at data[0]) when a full SRD is not available (Windows Vulkan image interop). clr does NOT
+// interpret any field — it stamps the descriptor's version with
+// HSA_AMD_IMAGE_DESC_VERSION_WDDM_SURFACE_METADATA (defined in hsa_ext_amd.h) and memcpy's the bytes.
+// The gfx image managers cast data[] back to HsaWddmSurfaceMetadata and interpret the surface fields
+// to reconstruct the SRD. The `version` field below is unused (retained for ABI stability).
+typedef struct _HsaWddmSurfaceMetadata {
+    HSAuint32 version;           // Unused. clr stamps the descriptor version directly.
+    HSAuint32 swizzle_mode;      // VCAM_SURFACE_DESC.swizzleMode (union value)
+    HSAuint32 tile_swizzle;      // VCAM_SURFACE_DESC.ulTileSwizzle (pipe-bank XOR)
+    HSAuint32 compression_mode;  // VCAM_SURFACE_DESC.ulCompressionMode (0 = uncompressed). gfx12+.
+    HSAuint32 max_comp_blk;      // VCAM_SURFACE_DESC.maxCompressedBlockSize. gfx12+.
+    HSAuint32 max_uncomp_blk;    // VCAM_SURFACE_DESC.maxUncompressedBlockSize. gfx12+.
+} HsaWddmSurfaceMetadata;
 
 typedef enum _HSA_CACHING_TYPE
 {
@@ -1512,12 +1536,14 @@ typedef enum _HsaAisFlags {
 /* memory object handle used for translating drm BO object*/
 typedef struct _HsaMemoryObjectHandle* HsaMemoryObjectHandle;
 
-/* Access Permissions for memory mapping */
+/* Access Permissions for memory mapping.
+ * Read, write, and execute are independent bits and may be combined. */
 typedef enum _HsaMemoryMapFlags {
     HSA_MEMORY_ACCESS_NONE = 0,
-    HSA_MEMORY_ACCESS_RO   = 1,
-    HSA_MEMORY_ACCESS_WO   = 2,
-    HSA_MEMORY_ACCESS_RW   = 3
+    HSA_MEMORY_ACCESS_RO   = 1 << 0,
+    HSA_MEMORY_ACCESS_WO   = 1 << 1,
+    HSA_MEMORY_ACCESS_RW   = (1 << 0) | (1 << 1),
+    HSA_MEMORY_ACCESS_EX   = 1 << 2
 } HsaMemoryMapFlags;
 
 /* Handle type for import */
@@ -1555,6 +1581,12 @@ typedef struct _HsaHandleImportFlags {
         unsigned int Reserved       : 29;
     } ui32;
 } HsaHandleImportFlags;
+
+typedef struct _HsaDmaBufInfo {
+    HSAuint64 Size;             // allocation size in bytes
+    HSAuint32 GpuId;            // KFD id of the node owning the buffer object
+    HSAuint32 IsDeviceMemory;   // non-zero when device-local (VRAM), zero for host (GTT/USERPTR)
+} HsaDmaBufInfo;
 
 typedef struct _HsaStructureSizes {
   HSAuint16 StructureSizes;           // sizeof(HsaStructureSizes) used for check overflow

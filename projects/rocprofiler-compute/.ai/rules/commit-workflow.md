@@ -27,7 +27,8 @@ and wait for approval before proceeding. Do NOT commit without confirmation.
 
 **Commit message rules for this repo:**
 
-- First line: concise summary under 72 characters
+- First line: concise summary under 72 characters, in the same
+  `<type>(rocprofiler-compute): ` form as PR titles (see [`pr-workflow.md`](pr-workflow.md))
 - Body: explain the "why", not the "what" — the diff shows the what
 - Separate logical points as bullet list items
 - Highlight bugfixes explicitly and distinctly from feature changes
@@ -50,7 +51,7 @@ and wait for approval before proceeding. Do NOT commit without confirmation.
 
 ```bash
 git commit -m "$(cat <<'EOF'
-[rocprofiler-compute] Your title here
+<type>(rocprofiler-compute): Your title here
 
 - Bullet point one
 - Bullet point two
@@ -61,6 +62,25 @@ EOF
 ```
 
 ### 5. Handle pre-commit hooks
+
+Every commit must pass the pre-commit hooks. Never commit while a hook fails or
+while hooks are skipped because pre-commit is missing.
+
+- Use `projects/rocprofiler-compute/.pre-commit-config.yaml`. The repo-root
+  config excludes this project's path, so running it here checks nothing and
+  still reports success.
+- If pre-commit is not installed, or `.git/hooks/pre-commit` is missing, stop and
+  install it from the repository root before committing:
+
+  ```bash
+  pre-commit install --config projects/rocprofiler-compute/.pre-commit-config.yaml
+  ```
+
+- To check files before committing:
+
+  ```bash
+  pre-commit run --config projects/rocprofiler-compute/.pre-commit-config.yaml --files <paths>
+  ```
 
 - If pre-commit hooks fail (e.g., ruff, formatting), read the output to
   understand what was auto-fixed or what needs manual fixing.
@@ -76,7 +96,9 @@ EOF
 
 ## Branch safety
 
-- Never commit directly to `develop` and `rocprofiler-compute-develop`
+- Never commit directly to `develop` or `rocprofiler-compute-develop`; commit on a
+  feature branch and open a PR. PRs target `rocprofiler-compute-develop`; target
+  `develop` only for an urgent hotfix that must go into the upcoming release.
 - Always check current branch and apply commit over there, unless user specifies another branch
 - If a commit was accidentally made on the wrong branch, move it:
   1. `git branch <correct-branch>` (create branch at current HEAD)
@@ -85,8 +107,7 @@ EOF
 
 ## What NOT to do
 
-- Do not use `--no-verify` to bypass hooks.
-- Do not use `--no-gpg-sign` to disable commit signing to remote unless explicitly asked.
-- Do not use `--no-verify` or `--no-gpg-sign` to bypass hooks.
+- Do not use `--no-verify` to bypass hooks or `--no-gpg-sign` to skip signing.
+- Do not commit when pre-commit is unavailable. Install it first.
 - Do not create empty commits.
 - Do not batch multiple unrelated changes into one commit.

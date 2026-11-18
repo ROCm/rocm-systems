@@ -22,9 +22,21 @@
 #include "utils.h"
 
 #include "ProcessIsolatedTestRunner.hpp"
+#include "ResourceGuards.hpp"
 
 namespace RcclUnitTesting
 {
+
+// NCCL 2.31 split ncclMemUntrack into dynamic vs persist. Tests still exercise
+// both through this local wrapper (same pattern as SuspendResumeMPITests.cpp).
+static ncclResult_t ncclMemUntrack(struct ncclMemManager* manager, void* ptr, size_t size)
+{
+    struct ncclMemUntrackInfo info = {};
+    ncclResult_t r = ncclMemUntrackDynamic(manager, ptr, &info);
+    if (r != ncclSuccess) return r;
+    if (info.memType == ncclMemPersist) return ncclMemUntrackPersist(manager, ptr, size);
+    return ncclSuccess;
+}
 
 // Synthetic constants used by pure-state tests. The manager only stores and
 // compares ptr / handle, so any sufficiently distinct value works.
@@ -150,6 +162,44 @@ TEST_F(MemManagerTest, Init_Success)
     EXPECT_EQ(m->totalOffload, 0u);
     EXPECT_EQ(m->totalOffloadImported, 0u);
     EXPECT_EQ(m->cpuBackupUsage, 0u);
+}
+
+TEST_F(MemManagerTest, NotInitialized_GuardsAllEntryPoints)
+{
+    ASSERT_EQ(ncclMemManagerInit(comm), ncclSuccess);
+    ncclMemManager* m = comm->memManager;
+
+    // Whitebox-clear the initialized flag without going through Destroy, so the
+    // manager struct stays alive and every guarded entry point can be probed.
+    // Production reads this field via COMPILER_ATOMIC_LOAD; a plain store is
+    // fine here because the fixture is single-threaded.
+    m->initialized = 0;
+
+    // Destroy's guard (probed below) detaches the manager from comm without
+    // freeing it, and TearDown only frees when comm->memManager is non-null --
+    // so from here on an early return or a thrown exception would leak the
+    // manager. Re-arm and reattach on scope exit instead of at the end of the
+    // body, so the fixture always runs the real teardown.
+    auto restoreManager = RCCLTestGuards::makeScopeGuard([&]() {
+        m->initialized  = 1;
+        comm->memManager = m;
+    });
+
+    EXPECT_EQ(ncclMemTrack(m, fakePtr(1), 4096, fakeHandle(), kFakeHandleType, ncclMemScratch),
+              ncclInternalError);
+    EXPECT_EQ(ncclMemUntrack(m, fakePtr(1), 4096), ncclInternalError);
+    EXPECT_EQ(ncclDynMemMarkExportToPeer(m, fakePtr(1), /*peerRank=*/1), ncclInternalError);
+    EXPECT_EQ(m->numEntries, 0);
+    EXPECT_EQ(m->entries, nullptr);
+
+    // Destroy's guard takes a different path: it treats an uninitialized
+    // manager as already-torn-down, detaches it from comm, and succeeds
+    // without freeing (avoids a double free if Destroy already ran once).
+    EXPECT_EQ(ncclMemManagerDestroy(comm), ncclSuccess);
+    EXPECT_EQ(comm->memManager, nullptr);
+
+    // restoreManager reattaches `m` here, so the fixture's TearDown runs the
+    // real teardown path: destroy the placement-new mutex, then free.
 }
 
 TEST_F(MemManagerTest, Init_NullComm)

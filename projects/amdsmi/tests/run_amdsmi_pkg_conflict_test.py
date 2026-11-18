@@ -1,23 +1,6 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 """
 run_amdsmi_pkg_conflict_test.py
@@ -26,16 +9,18 @@ run_amdsmi_pkg_conflict_test.py
 Sanity-check that the system-package shared object and the pip wheel's
 bundled shared object ship under DIFFERENT SONAMEs, so a process that
 somehow has both installed cannot accidentally double-load the same
-library and crash during static C++ initialisation.
+library and crash during static C++ initialisation. Also check that
+neither library resolves its own exports at runtime, which would let
+another libamd_smi loaded earlier with RTLD_GLOBAL capture those calls.
 
-This is the only multi-package invariant we still validate. amd-smi
+These are the only multi-package invariants we still validate. amd-smi
 follows an "either you install the rpm/deb OR you install the wheel"
 model -- the loader in py-interface/amdsmi_wrapper.py picks one .so
 based solely on whether libamd_smi_python.so sits next to the wrapper
 file, with no path-walking, no env-var ladders, and no .pth tricks.
 
 Run it from inside a freshly-built tree where both artifacts exist:
-    $ROCM_PATH/lib/libamd_smi.so.<MAJOR>          (system rpm/deb; /opt/rocm default)
+    <build>/.../libamd_smi.so.<MAJOR>             (system rpm/deb; else $ROCM_PATH/lib)
     <build>/.../libamd_smi_python.so.<MAJOR>      (wheel)
 """
 
@@ -60,17 +45,38 @@ def _version_key(lib_path: Path) -> tuple:
     return tuple(int(d) for d in digits)
 
 
-def soname(lib_path: Path) -> str:
+def _readelf(lib_path: Path, *args: str) -> str:
     if shutil.which("readelf") is None:
         sys.exit("readelf not found; install binutils to run this check.")
     try:
-        out = subprocess.check_output(["readelf", "-d", str(lib_path)], text=True)
+        return subprocess.check_output(["readelf", *args, str(lib_path)], text=True)
     except subprocess.CalledProcessError as exc:
         sys.exit(f"readelf failed on {lib_path} (exit {exc.returncode}): {exc}")
-    for line in out.splitlines():
+
+
+def soname(lib_path: Path) -> str:
+    for line in _readelf(lib_path, "-d").splitlines():
         if "(SONAME)" in line:
             return line.split("[", 1)[1].rstrip("]\n ")
     return ""
+
+
+def self_bound_exports(lib_path: Path) -> list:
+    """Exported functions that the library's own dynamic relocations name.
+
+    The dynamic linker resolves those to the first loaded library exporting
+    the name; -Bsymbolic-functions resolves them inside the library instead.
+    """
+    exports = set()
+    for fields in (line.split() for line in _readelf(lib_path, "--dyn-syms", "-W").splitlines()):
+        if len(fields) >= 8 and fields[3] == "FUNC" and fields[4] in ("GLOBAL", "WEAK"):
+            if fields[6] != "UND":
+                exports.add(fields[7].split("@")[0])
+    referenced = set()
+    for fields in (line.split() for line in _readelf(lib_path, "-r", "-W").splitlines()):
+        if len(fields) >= 5 and fields[2].startswith("R_"):
+            referenced.add(fields[4].split("@")[0])
+    return sorted(exports & referenced)
 
 
 def _rocm_lib_dir() -> Path:
@@ -80,23 +86,21 @@ def _rocm_lib_dir() -> Path:
 
 
 def find_system_lib(build_root: Path) -> Path:
-    # Prefer the installed system library (rpm/deb layout). When it is absent
-    # -- e.g. the manylinux wheel job builds both libraries but installs no
-    # system package -- fall back to the build tree, which holds the same
-    # libamd_smi.so.<MAJOR> the package would ship.
-    lib_dir = _rocm_lib_dir()
+    # Prefer the build tree, which holds the libamd_smi.so.<MAJOR> the rpm/deb
+    # ships; an installed ROCm under /opt/rocm may be another build entirely.
+    # Fall back to the installed library when the build tree has none.
     candidates = sorted(
-        (c for c in lib_dir.glob("libamd_smi.so.*") if not c.is_symlink()), key=_version_key
+        (c for c in build_root.glob("**/libamd_smi.so.*") if not c.is_symlink()), key=_version_key
     )
+    lib_dir = _rocm_lib_dir()
     if not candidates:
         candidates = sorted(
-            (c for c in build_root.glob("**/libamd_smi.so.*") if not c.is_symlink()),
-            key=_version_key,
+            (c for c in lib_dir.glob("libamd_smi.so.*") if not c.is_symlink()), key=_version_key
         )
     if not candidates:
         sys.exit(
-            f"System libamd_smi.so not found under {lib_dir} or the build tree "
-            f"({build_root}); install the rpm/deb or build first."
+            f"System libamd_smi.so not found in the build tree ({build_root}) or under "
+            f"{lib_dir}; build first or install the rpm/deb."
         )
     return candidates[-1]
 
@@ -144,6 +148,15 @@ def main() -> int:
         )
 
     print("PASS: distinct SONAMEs; system and wheel cannot accidentally double-load.")
+
+    for lib in (sys_lib, wheel_lib):
+        bound = self_bound_exports(lib)
+        if bound:
+            sys.exit(
+                f"{lib} resolves {len(bound)} of its own exports at runtime "
+                f"(e.g. {', '.join(bound[:3])}); link it with -Bsymbolic-functions."
+            )
+    print("PASS: neither library resolves its own exports at runtime.")
     return 0
 
 

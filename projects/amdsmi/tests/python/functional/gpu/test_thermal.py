@@ -1,23 +1,7 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """GPU thermal: fan speed set."""
 
 import unittest
@@ -89,19 +73,10 @@ class TestGpuThermal(unittest.TestCase):
                 self.assertGreater(
                     fan_speed_max, 0, f"Max fan speed must be > 0, got {fan_speed_max}"
                 )
-                # Detect gpu_od interface to set appropriate max threshold
-                gpu_bdf = amdsmi.amdsmi_get_gpu_device_bdf(gpu)
-                has_gpu_od = common.has_gpu_od_interface(gpu_bdf)
-                if has_gpu_od:
-                    self.assertLessEqual(
-                        fan_speed_max,
-                        100,
-                        f"gpu_od max fan speed must be <= 100, got {fan_speed_max}",
-                    )
-                else:
-                    self.assertLessEqual(
-                        fan_speed_max, 255, f"Max fan speed must be <= 255, got {fan_speed_max}"
-                    )
+                # max fan speed is the hwmon pwm1_max ceiling on every interface
+                self.assertLessEqual(
+                    fan_speed_max, 255, f"Max fan speed must be <= 255, got {fan_speed_max}"
+                )
             except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
                 if self.common.check_ret(msg, e, self.common.PASS):
                     self.raise_exception = e
@@ -110,12 +85,10 @@ class TestGpuThermal(unittest.TestCase):
             if found_error:
                 continue
 
-            # Calculate a safe mid-range value based on actual hardware limits.
-            # This avoids hardcoding and works with any OD_RANGE configuration.
-            # For legacy hwmon: min=0, max=255 -> mid=127
-            # For gpu_od: min=0 (conservative), max from API -> mid dynamically calculated
-            min_value = 0  # Conservative minimum (works for both legacy and gpu_od)
-            max_value = fan_speed_max
+            # amdsmi_set_gpu_fan_speed() validates against the gpu_od OD_RANGE where
+            # present, which fan_speed_max does not describe
+            gpu_bdf = amdsmi.amdsmi_get_gpu_device_bdf(gpu)
+            min_value, max_value = common.get_fan_speed_set_range(gpu_bdf)
             fan_speed = min_value + ((max_value - min_value) // 2)
 
             # Set fan speed

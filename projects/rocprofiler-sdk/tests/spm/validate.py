@@ -61,6 +61,41 @@ def test_spm_counter_values(input_data):
         _validate_callback_counter_values(data)
 
 
+def test_spm_counter_consistency(input_data):
+
+    data = input_data["rocprofiler-sdk-json-tool"]
+
+    if is_buffered(input_data):
+        return
+
+    counter_info = data["counter_info"]
+    counter_data = data["callback_records"]["spm_records"]
+
+    def get_name(counter_id):
+        for itr in counter_info:
+            if itr["id"]["handle"] == counter_id:
+                return itr["name"]
+
+    dispatch_counter_map = defaultdict(dict)
+    for record in counter_data:
+        dispatch_id = record["dispatch_id"]
+        counter_name = get_name(record["counter_id"]["handle"])
+        _accumulate_counter(
+            dispatch_counter_map[dispatch_id], counter_name, record["value"]
+        )
+
+    assert len(dispatch_counter_map) > 0, "No SPM dispatch data found"
+
+    counter_name = "TA_TA_BUSY"
+    for dispatch_id, counter_map in dispatch_counter_map.items():
+        assert (
+            counter_name in counter_map
+        ), f"Dispatch {dispatch_id} missing {counter_name}"
+        assert (
+            counter_map[counter_name]["value"] > 0
+        ), f"Dispatch {dispatch_id} has zero {counter_name}"
+
+
 def _get_counter_value(counters, name):
     for itr in counters:
         if itr["name"] == name:
@@ -76,12 +111,12 @@ def _validate_dispatch_counters(dispatch_id, counters):
         100
         * _get_counter_value(counters, "SQC_ICACHE_MISSES")
         / _get_counter_value(counters, "SQC_ICACHE_REQ")
-    ) < 100
+    ) <= 100
     assert (
         100
         * _get_counter_value(counters, "SQC_ICACHE_HITS")
         / _get_counter_value(counters, "SQC_ICACHE_REQ")
-    ) < 100
+    ) <= 100
 
 
 def _accumulate_counter(counter_map, name, value):

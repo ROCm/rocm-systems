@@ -12,6 +12,7 @@ at install time, the .kpack/ directory merges with the host package tree.
 
 import hashlib
 import json
+import filecmp
 import os
 import re
 import shutil
@@ -26,10 +27,11 @@ from pathlib import Path
 
 try:
     import rocm_bootstrap
+    from rocm_bootstrap.package_metadata import package_owner
 except ModuleNotFoundError as e:
     raise ModuleNotFoundError(
         "rocm-bootstrap is required for wheel splitting.\n"
-        "Install it with: pip install rocm-bootstrap"
+        "Install it with: pip install 'rocm-kpack[split]'"
     ) from e
 
 from rocm_kpack.artifact_splitter import ExtractedKernel
@@ -58,18 +60,19 @@ def _normalize_arch(arch: str) -> str:
 
 
 def _arch_to_bundle_key(arch: str) -> str:
-    """Strip xnack suffix to get the bare architecture (bundle key).
+    """Resolve package ownership without changing individual payload names.
 
     xnack+/- variants collapse into the same device wheel as the bare arch.
     The individual kpack files preserve the full arch name.
 
     Examples:
-        gfx942:xnack+ → gfx942
-        gfx90a:xnack- → gfx90a
-        gfx1100       → gfx1100
-        gfx11         → gfx11
+        gfx942:xnack+  → gfx942
+        gfx90a:xnack-  → gfx90a
+        gfx1250-strict → gfx1250
+        gfx1100        → gfx1100
+        gfx11          → gfx11
     """
-    return re.sub(r":xnack[+-]$", "", arch)
+    return package_owner(arch)
 
 
 class WheelSplitError(Exception):
@@ -830,7 +833,10 @@ class WheelSplitter:
 
         # Rewrite host METADATA (classic: extras only, no variant markers)
         self._rewrite_host_metadata(
-            host_staging, identity, set(bundle_keys), include_variant_markers=False
+            host_staging,
+            identity,
+            set(bundle_keys),
+            include_variant_markers=False,
         )
 
         # Regenerate RECORD for host wheel
@@ -913,7 +919,7 @@ class WheelSplitter:
         version = identity.version
 
         # Add rocm-bootstrap dependency
-        lines.append("Requires-Dist: rocm-bootstrap")
+        lines.append("Requires-Dist: rocm-bootstrap >= 0.3.0")
 
         # Collect target-level bundle keys (those are the ones we generate
         # extras and variant markers for).
@@ -1123,13 +1129,17 @@ class WheelSplitter:
     ) -> None:
         """Write variant.json to the dist-info directory.
 
-        Contains PEP 817 variant provider and property metadata.
+        Contains PEP 817 variant provider and property metadata. Values identify
+        package owners; they do not describe which target payloads were supplied.
         """
-        target_keys = []
-        for key in sorted(bundle_keys):
-            bundle = rocm_bootstrap.lookup_bundle(key)
-            if bundle.level == rocm_bootstrap.PackagingLevel.TARGET:
-                target_keys.append(key)
+        target_keys = sorted(
+            {
+                key
+                for key in bundle_keys
+                if rocm_bootstrap.lookup_bundle(key).level
+                == rocm_bootstrap.PackagingLevel.TARGET
+            }
+        )
 
         variants = {}
         for target in target_keys:
@@ -1597,20 +1607,46 @@ class WheelSplitter:
             shutil.rmtree(staging)
         staging.mkdir()
 
-        # Place kpack file(s) under overlay_root/.kpack/
-        # Multiple entries when xnack variants (gfx942, gfx942:xnack+, etc.)
-        # collapse into the same bundle key.
-        for arch, kpack_path in kpack_entries:
-            kpack_dest_dir = staging / self.overlay_root / ".kpack"
-            kpack_dest_dir.mkdir(parents=True, exist_ok=True)
-            kpack_dest = kpack_dest_dir / f"{group_name}_{arch}.kpack"
-            shutil.copy2(kpack_path, kpack_dest)
-
-        # Copy database files preserving their overlay-relative paths
-        for ref in db_refs:
-            dest = staging / self.overlay_root / ref.overlay_relative_path
+        # Validate the complete merge before any payload copy. Retain source
+        # provenance so equal paths cannot silently replace another target.
+        sources: dict[Path, Path] = {}
+        payloads = [
+            (Path(self.overlay_root) / ".kpack" / f"{group_name}_{arch}.kpack", path)
+            for arch, path in kpack_entries
+        ]
+        payloads.extend(
+            (Path(self.overlay_root) / ref.overlay_relative_path, ref.absolute_path)
+            for ref in db_refs
+        )
+        for relative, source in payloads:
+            if relative.is_absolute() or ".." in relative.parts:
+                raise WheelSplitError(f"Invalid device payload path: {relative}")
+            previous = sources.get(relative)
+            if previous is not None:
+                same_type = previous.is_symlink() == source.is_symlink()
+                same_link = (
+                    not source.is_symlink() or previous.readlink() == source.readlink()
+                )
+                if not (
+                    same_type
+                    and same_link
+                    and filecmp.cmp(previous, source, shallow=False)
+                ):
+                    raise WheelSplitError(
+                        f"Conflicting device path {relative}: {previous} and {source}"
+                    )
+            else:
+                sources[relative] = source
+        for relative in sources:
+            for parent in relative.parents:
+                if parent in sources:
+                    raise WheelSplitError(
+                        f"Conflicting device entry types: {sources[parent]} and {sources[relative]}"
+                    )
+        for relative, source in sources.items():
+            dest = staging / relative
             dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(ref.absolute_path, dest)
+            shutil.copy2(source, dest)
 
         # Create dist-info
         dist_info_dir = staging / device_dist_info

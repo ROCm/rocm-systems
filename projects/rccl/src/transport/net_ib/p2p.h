@@ -23,13 +23,16 @@ static inline ncclResult_t ncclIbRecvCommGetQpForCts(struct ncclIbRecvComm* recv
   int devIndex = id % recvComm->base.vProps.ndevs;
   // CTS message is always posted the first QP on the device
   int qpIndex = 0;
-  ncclIbCommBaseGetQpByIndex(&recvComm->base, devIndex, qpIndex, qp);
-  assert(*qp != NULL);
+  NCCLCHECK(ncclIbCommBaseGetQpByIndex(&recvComm->base, devIndex, qpIndex, qp));
+  if (*qp == NULL) {
+    WARN("NET/IB: CTS QP is NULL for request id %u", id);
+    return ncclInternalError;
+  }
   return ncclSuccess;
 }
 
 static inline ncclResult_t ncclIbRequestRetrieveAsIndex(ncclIbRequest* reqs, uint32_t reqIndex, ncclIbRequest** req) {
-  if (reqIndex < 0 || reqIndex >= NET_IB_MAX_REQUESTS) {
+  if (reqIndex >= NET_IB_MAX_REQUESTS) {
     WARN("NET/IB: %s: Invalid request index %d. Not in the range [%d, %d). Cannot retrieve request.", __func__,
          reqIndex, 0, NET_IB_MAX_REQUESTS);
     return ncclInternalError;

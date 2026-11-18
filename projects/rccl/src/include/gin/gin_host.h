@@ -9,65 +9,125 @@
 #define _NCCL_GIN_HOST_H_
 
 #include "allocator.h"
+#include "bitops.h"
 #include "nccl.h"
 #include "nccl_gin.h"
 #include "nccl_device/core_tmp.h"
+#include "os.h"
 #include "nccl_device/gin/gin_device_host_common.h"
+#include <atomic>
+#include <shared_mutex>
 #include <thread>
-#include <mutex>
-#include <condition_variable>
 
 struct ncclGinStateDevComm {
   int contextCount;
+  int backendIndex;  // index into ncclGinState::backends[] for the backend that owns these contexts
   void* ginCtx[NCCL_GIN_MAX_CONNECTIONS];
   ncclNetDeviceHandle_t* devHandles[NCCL_GIN_MAX_CONNECTIONS];
   struct ncclGinStateDevComm* next;
 };
 
-struct ncclGinState {
+struct ncclGinBackendState {
+  ncclGinType_t ginType;      // GIN backend type.
   ncclGin_t* ncclGin;
-  void* ginInstance;
-  bool connected;
-  ncclGinType_t ginType;
+  void* ginInstance;          // Plugin's per-comm opaque context.
+  int pluginIndex;            // Index into pluginLibs[].
   int ginCommCount;
   void* ginComms[NCCL_GIN_MAX_CONNECTIONS];
   ncclNetProperties_t ginProps[NCCL_GIN_MAX_CONNECTIONS];
-  int needsProxyProgress;  // Whether we need to progress GIN operations with the proxy
-  int ginProgress;         // GIN progress is enabled
-  std::thread thread;
-  std::mutex mutex;
-  std::condition_variable cond;
+  bool supportsStrongSignals;
+  bool supportsVASignals;
+  ncclGinBarrierOptions_t barrierOptions;
+  // False exactly while ginComms[] hold live handles. Set before closeColl by
+  // ncclGinHostFinalize and by ncclGinConnectOnce's failure path: register /
+  // deregister / DevCommSetup must not walk ginComms[] once they are NULLed.
+  // ncclGinConnectOnce clears it when a retry repopulates them.
+  bool closed;
+  // Bumped on each successful connect, so a window records which generation of
+  // ginComms[] it was registered against. ginComms[] belong to this comm, which
+  // connects successfully at most once, so the two should always agree;
+  // ncclGinDeregister still compares them rather than pair a collComm with a
+  // mhandle from another connection. 0 means never connected, which no
+  // registered window can carry.
+  uint32_t connectGeneration;
+};
+
+struct ncclGinState {
+  ncclAffinity cpuAffinity;
+  bool connected;
+  bool supported;              // True if any backend is loaded on this comm.
+  int proxyNthreads;           // Number of GIN progress threads.
+  bool proxyThreadsCreated;     // Set once the GIN progress thread is spawned.
+  std::atomic<bool> proxyThreadStopSignal;  // Signals the GIN progress thread to exit.
+  // Use std::shared_timed_mutex (C++14) rather than std::shared_mutex (C++17)
+  // because NCCL targets C++14 for CUDA < 13.
+  std::shared_timed_mutex devCommRwMutex;  // Readers: proxy threads; Writer: main thread (setup/free).
+  // When true, readers skip locking devCommRwMutex. Prevents writer starvation.
+  std::atomic<bool> writePending;
+  std::thread thread[NCCL_GIN_MAX_CONNECTIONS];
   ncclResult_t asyncResult;
-  int ginVersion;
 
   struct ncclGinStateDevComm* devComms;
   ncclGinConnectionType_t ginConnectionType;
+
+  // Set by ncclGinHostFinalize and never cleared. backends[] then survives only
+  // for ncclGinFinalize, which runs on whichever comm drops the last sharedRes
+  // reference: a ginInstance can come from another comm's ncclGinInit (copied by
+  // ncclGinInitFromParent), and that comm may already be freed, so this comm must
+  // not advertise, select or reconnect these backends.
+  bool finalized;
+  int numActiveBackends;
+  struct ncclGinBackendState backends[NCCL_GIN_MAX_ACTIVE_BACKENDS];
 };
+
+// The ginContextCount a devComm gets from a backend with ginCommCount connections.
+// ncclDevrCommCreateInternal sizes per-context resource regions from the
+// ginContextCount ncclGinDevCommSetup returns, so the two must not diverge.
+static inline int ncclGinContextCount(int nGinContextsRequested, int ginCommCount) {
+  // ginContextCount is a hint; 0 is the documented "use a default" value. A 0
+  // request would size the context table and the per-context resource regions to
+  // 0 (heap corruption), so promote it to one context per GIN connection.
+  if (nGinContextsRequested < 1) nGinContextsRequested = 1;
+  return ROUNDUP(nGinContextsRequested, ginCommCount);
+}
 
 extern int64_t ncclParamGinType();
 
-// Sets the local GIN type for comm. The GIN type that is set for comm is the
-// GIN type supported by the call process itself, without taking into account
-// (1) GIN support of other ranks, and (2) additional local constraints like
-// cross-NIC
-ncclResult_t setLocalGinType(struct ncclComm* comm);
 // Get the GIN type from comm. ginType is set to the GIN type that can be used
 // by the comm to communicate with other nodes.
-ncclResult_t getGlobalGinType(struct ncclComm* comm, ncclGinType_t* ginType);
-ncclResult_t getGlobalRailedGinType(struct ncclComm* comm, ncclGinType_t* ginType);
+ncclResult_t ncclGetGinType(struct ncclComm* comm, ncclGinType_t* ginType);
+ncclResult_t ncclGetRailedGinType(struct ncclComm* comm, ncclGinType_t* ginType);
+// True if ginType is among the comm's active backends, whether or not it is the
+// default that ncclGetGinType reports. Same connectivity and finalize gates.
+bool ncclGinTypeActive(struct ncclComm* comm, ncclGinType_t ginType);
 
 // FIXME change to ncclGinState instead of ncclComm, no need to pass comm
 ncclResult_t ncclGinConnectOnce(struct ncclComm* comm);
 ncclResult_t ncclGinHostFinalize(struct ncclComm* comm);
+struct ncclDevCommCompat;
+struct ncclDevResourceRequirements;
+struct ncclGinBarrierReq;
 ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequirements const* reqs,
-                                 struct ncclDevComm* devComm);
+                                 struct ncclDevResourceRequirements* resReqs,
+                                 struct ncclGinBarrierReq const* barrierReqs, int nBarrierReqs,
+                                 struct ncclDevComm* devComm, uint32_t deviceCodeVersion,
+                                 struct ncclDevCommCompat const* devCompat);
 ncclResult_t ncclGinDevCommFree(struct ncclComm* comm, struct ncclDevComm const* devComm);
+// Zero the GIN fields ncclGinDevCommSetup filled in. ncclGinDevCommFree matches a
+// devComm by ginHandles[0], so a devComm whose contexts were freed must be cleared
+// before anything can pass it to ncclGinDevCommFree again.
+void ncclGinDevCommClearFields(struct ncclDevComm* devComm);
 ncclResult_t ncclGinRegister(struct ncclComm* comm, void* address, size_t size,
-                             void* ginHostWins[NCCL_GIN_MAX_CONNECTIONS],
-                             ncclGinWindow_t ginDevWins[NCCL_GIN_MAX_CONNECTIONS], int winFlags,
-                             bool multiSegment = false, int memType = NCCL_PTR_CUDA);
-ncclResult_t ncclGinDeregister(struct ncclComm* comm, void* ginHostWins[NCCL_GIN_MAX_CONNECTIONS]);
+                             void* ginHostWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS],
+                             ncclGinWindow_t ginDevWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS],
+                             uint32_t ginWinGenerations[NCCL_GIN_MAX_ACTIVE_BACKENDS],
+                             int winFlags, bool multiSegment = false, int memType = NCCL_PTR_CUDA);
+ncclResult_t ncclGinDeregister(struct ncclComm* comm,
+                               void* ginHostWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS],
+                               uint32_t const ginWinGenerations[NCCL_GIN_MAX_ACTIVE_BACKENDS]);
 
 ncclResult_t ncclGinQueryLastError(struct ncclGinState* ginState, bool* hasError);
+
+ncclResult_t ncclGinSetDefaultBackend(struct ncclComm* comm, uint64_t globalBitmask);
 
 #endif

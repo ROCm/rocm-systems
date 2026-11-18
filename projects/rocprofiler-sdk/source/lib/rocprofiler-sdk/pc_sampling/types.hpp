@@ -57,7 +57,6 @@ struct PCSAgentSession
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
     hsa_ven_amd_pcs_t hsa_pc_sampling = {};
 #endif
-    hsa::ClientID intercept_cb_id = -1;
     // ioctl relevant information
     uint32_t ioctl_pcs_id = 0;
     // PC sampling parser

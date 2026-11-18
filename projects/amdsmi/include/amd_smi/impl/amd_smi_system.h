@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #ifndef AMD_SMI_INCLUDE_AMD_SMI_SYSTEM_H_
 #define AMD_SMI_INCLUDE_AMD_SMI_SYSTEM_H_
@@ -33,12 +14,11 @@
 #include <set>
 #include <vector>
 
-#ifdef BRCM_NIC
-#include "amd_smi/impl/nic/amd_smi_no_drm_nic.h"
-#include "amd_smi/impl/nic/amd_smi_no_drm_switch.h"
-#endif  // BRCM_NIC
-
 namespace amd::smi {
+
+namespace testing {
+class ScopedProcessorRegistration;
+}  // namespace testing
 
 // Singleton: Only one system in an application
 class AMDSmiSystem {
@@ -69,10 +49,19 @@ class AMDSmiSystem {
 
   std::vector<uint32_t> get_cpu_sockets_from_numa_node(int32_t numa_node);
 
-  const auto& get_ai_nic_info() const;
+  // NIC discovery context, for the C++-only entry points that read through the
+  // discovered SmiNic rather than a value copied out through the C ABI.
+  smi_nic_ctx_t get_ainic_ctx() const { return ainic_ctx_; }
 
  private:
-  AMDSmiSystem() : init_flag_(AMDSMI_INIT_AMD_GPUS) {}
+  friend class testing::ScopedProcessorRegistration;
+
+  // Test seam: registers/unregisters a synthetic processor by its type. Not
+  // exported from libamd_smi.so (no "amdsmi_" prefix); only the friend may call these.
+  void register_processor_for_testing(AMDSmiProcessor* processor);
+  void unregister_processor_for_testing(AMDSmiProcessor* processor);
+
+  AMDSmiSystem() : init_flag_(AMDSMI_INIT_AMD_GPUS), ainic_ctx_(nullptr) {}
 
   /* The GPU socket id is used to identify the socket, so that the XCDs
   on the same physical device will be collected under the same socket.
@@ -82,20 +71,13 @@ class AMDSmiSystem {
   amdsmi_status_t populate_amd_gpu_devices();
   amdsmi_status_t populate_amd_cpus();
   amdsmi_status_t populate_amd_ainic_devices();
-  amdsmi_status_t populate_brcm_nic_devices();
-  amdsmi_status_t populate_brcm_switch_devices();
+  // Backing storage lookup for register/unregister_processor_for_testing().
+  std::set<AMDSmiProcessor*>& set_for_type_for_testing(amdsmi_processor_type_t type);
   uint64_t init_flag_;
   AMDSmiDrm drm_;
   smi_nic_ctx_t ainic_ctx_;
-  std::vector<AMDSmiAINICDevice::AINICInfo> ai_nic_info_;
-#ifdef BRCM_NIC
-  AMDSmiNoDrmNIC no_drm_nic_;
-  AMDSmiNoDrmSwitch no_drm_switch_;
-#endif  // BRCM_NIC
   std::vector<AMDSmiSocket*> sockets_;
-  std::set<AMDSmiProcessor*> processors_;         // Track valid processors
-  std::set<AMDSmiProcessor*> nic_processors_;     // Track valid nic processors
-  std::set<AMDSmiProcessor*> switch_processors_;  // Track valid switch processors
+  std::set<AMDSmiProcessor*> processors_;  // Track valid processors
   std::set<AMDSmiProcessor*> ainic_processors_;
 };
 }  // namespace amd::smi

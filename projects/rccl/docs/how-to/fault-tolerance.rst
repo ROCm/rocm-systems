@@ -117,6 +117,34 @@ asynchronous errors at the same time, instead of blocking in
        }
    }
 
+.. _ft-symmetric-abort:
+
+Aborting symmetric-memory collectives
+=====================================
+
+Collectives that run on symmetric memory are served by the built-in symmetric
+kernels, which exchange data directly between peer GPUs instead of going through
+a proxy thread. A rank that never reaches the collective therefore leaves its
+peers parked inside a device-side spin loop, where the host cannot see them.
+
+Because there is no proxy thread and no device-side timeout on this path, neither
+:cpp:func:`ncclCommGetAsyncError` nor a communicator timeout will ever report the
+missing peer. Deciding when to give up is therefore the caller's responsibility:
+drive the abort from your own deadline or an out-of-band watchdog, not from a loop
+waiting for an async error that never arrives.
+
+:cpp:func:`ncclCommAbort` releases the parked kernels and the stream drains, with
+a short delay because the abort flag is only sampled periodically. The same rules
+as in :ref:`ft-recovery` apply: the communicator must be non-blocking and no
+thread may be inside an RCCL call when :cpp:func:`ncclCommAbort` is invoked.
+
+.. note::
+
+   Symmetric memory requires ``NCCL_CUMEM_ENABLE=1`` and a host platform that
+   supports virtual memory management. When symmetric memory is unavailable,
+   collectives fall back to the general kernels, whose abort path is handled by
+   the proxy thread instead.
+
 .. _ft-recovery:
 
 Recovering from a failure

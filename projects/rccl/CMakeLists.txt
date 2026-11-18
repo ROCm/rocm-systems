@@ -80,16 +80,42 @@ include(cmake/NcclCompat.cmake)
 rccl_define_nccl_compat_options()
 
 option(BUILD_ADDRESS_SANITIZER                 "Enable address sanitizer"                      ${RCCL_DEFAULT_BUILD_ADDRESS_SANITIZER})
+option(BUILD_ALL_UNROLLS                       "Also generate unroll factors 8 and 16 on top of the per-arch default set" OFF)
 option(BUILD_BFD                               "Enable custom backtrace (if bfd.h exists)"     OFF)
 option(BUILD_LOCAL_GPU_TARGET_ONLY             "Build only for GPUs detected on this machine"  OFF)
 option(BUILD_SHARED_LIBS                       "Build as shared library"                       ON)
 option(BUILD_TESTS                             "Build unit test programs"                      OFF)
-option(BUILD_PLUGIN_EXAMPLES                      "Build plugin example libraries (net, tuner, profiler, env)" OFF)
+option(BUILD_PROFILER_ACCL                     "Build the ACCL timing-decomposition profiler"  ${NCCL_OS_LINUX})
+option(BUILD_PROFILER_INSPECTOR                "Build the NCCL Inspector profiler plugin"      ${BUILD_TESTS})
+option(BUILD_PLUGIN_EXAMPLES                   "Build plugin example libraries (net, tuner, profiler, env, gin, mixed, proxytrace)" OFF)
 option(DUMP_ASM                                "Disassemble and dump"                          OFF)
 option(ENABLE_CODE_COVERAGE                    "Enable code coverage"                          OFF)
+set(ENABLE_FULL_COVERAGE "OFF" CACHE STRING
+  "Enable host and device coverage: AUTO, ON, or OFF")
+set_property(CACHE ENABLE_FULL_COVERAGE PROPERTY STRINGS AUTO ON OFF)
+string(TOUPPER "${ENABLE_FULL_COVERAGE}" ENABLE_FULL_COVERAGE)
+set(_enable_full_coverage_request "${ENABLE_FULL_COVERAGE}")
+if(NOT ENABLE_FULL_COVERAGE MATCHES "^(AUTO|ON|OFF)$")
+  message(FATAL_ERROR
+    "ENABLE_FULL_COVERAGE must be AUTO, ON, or OFF; "
+    "received '${ENABLE_FULL_COVERAGE}'.")
+endif()
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
+option(ENABLE_NET_PROFILING                    "Emit NET_IB/NET_SOCK profiler events"          OFF)
 option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract device linker"     ON)
-option(EMIT_LLVM_IR                            "Emit LLVM IR/bitcode for nccl_device APIs"     OFF)
+# EMIT_LLVM_IR is the name before NCCL 2.32.6. Consume it on every configure, so it still works in a build
+# directory that already caches NCCL_EMIT_LLVM_IR. An entry left by the old option() carries its help string;
+# it only seeds NCCL_EMIT_LLVM_IR. A value given with -DEMIT_LLVM_IR always wins, also over a -DNCCL_EMIT_LLVM_IR
+# on the same command line, because CMake cannot tell that from a value cached by an earlier configure.
+if(DEFINED EMIT_LLVM_IR)
+  get_property(_emitLlvmIrHelp CACHE EMIT_LLVM_IR PROPERTY HELPSTRING)
+  if(NOT (DEFINED NCCL_EMIT_LLVM_IR AND _emitLlvmIrHelp STREQUAL "Emit LLVM IR/bitcode for nccl_device APIs"))
+    set(NCCL_EMIT_LLVM_IR ${EMIT_LLVM_IR} CACHE BOOL "Emit LLVM IR/bitcode for nccl_device APIs" FORCE)
+  endif()
+  unset(EMIT_LLVM_IR CACHE)
+endif()
+option(NCCL_EMIT_LLVM_IR                       "Emit LLVM IR/bitcode for nccl_device APIs"     OFF)
+option(NCCL_EMIT_LTO_IR                        "Emit LTO IR for nccl_device APIs"              OFF)
 option(DISABLE_KERNARG_PRELOAD                 "Disable amdgpu-kernarg-preload-count compile/link flag" OFF)
 option(BUILD_NCCL4PY                           "Build the nccl4py Python bindings wheel"       OFF)
 # Move .hip_fatbin to the end of librccl.so so that small-code-model host
@@ -99,19 +125,47 @@ option(BUILD_NCCL4PY                           "Build the nccl4py Python binding
 # layout for diagnostics.  See cmake/linker_scripts/hip_fatbin_tail.ld.
 option(RCCL_HIP_FATBIN_AT_TAIL                 "Place .hip_fatbin at the end of librccl.so"    ON)
 option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             ON)
+option(ENABLE_TDM_SIMPLE                       "Build the experimental gfx1250 TDM SIMPLE copy and reduce paths" OFF)
+option(ENABLE_TDM_PRIM_LL128                   "Build the experimental gfx1250 TDM LL128 user-buffer path" OFF)
+option(ENABLE_STORE_FREE_STEP_BARRIER          "gfx1250 LL and LL128 step barriers skip waiting for remote stores" ON)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
 option(ROCTX                                   "Enable ROCTX"                                  ${RCCL_DEFAULT_ROCTX})
+option(SQTT_ENABLED                            "Enable SQTT instrumentation"                   OFF)
 option(TIMETRACE                               "Enable time-trace during compilation"          OFF)
 option(TRACE                                   "Enable additional tracing"                     OFF)
 option(QP_TRACKING                             "Enable per-device QP tracking"                 OFF)
 option(FAULT_INJECTION                         "Enable fault injection"                        ON)
 option(QUIET_WARNINGS                          "Supress compiler warnings"                     OFF)
+option(RCCL_POISON_HIP_ATOMICS                 "Reject __hip_atomic_* builtins in RCCL sources" ON)
 option(DWORDX4_INTRINSICS                      "Turn off compilation with dwordx4 intrinsics"  ON)
-option(ENABLE_ROCSHMEM                         "Link librocshmem.a into librccl.so (full rocSHMEM device+host integration)" OFF)
-option(ENABLE_ROCSHMEM_GIN                     "Compile GIN rocshmem plugins; symbols resolved at runtime by the executable" OFF)
-option(GIN_ANVIL_UNIT_TESTS                    "Build GIN Anvil device unit tests with ENABLE_ROCSHMEM on test targets only (no full librocshmem in librccl)" OFF)
+if(ENABLE_TDM_SIMPLE)
+  add_compile_definitions(ENABLE_TDM_SIMPLE=1)
+endif()
+
+if(ENABLE_TDM_PRIM_LL128)
+  add_compile_definitions(ENABLE_TDM_PRIM_LL128=1)
+endif()
+
+if(NOT ENABLE_STORE_FREE_STEP_BARRIER)
+  add_compile_definitions(RCCL_DISABLE_STORE_FREE_STEP_BARRIER=1)
+endif()
+# rocSHMEM integration (mutually exclusive — enabling both causes duplicate
+# rocshmem state between librccl.so and the executable at runtime):
+#   ENABLE_ROCSHMEM: alltoall_wg offload.  Links librocshmem.a into librccl.so
+#     via -fgpu-rdc --hip-link.  Does not enable GIN plugins.
+#   ENABLE_ROCSHMEM_GIN: GIN plugins (GDA, SDMA).  Device symbols (QueuePair)
+#     resolved via per-arch bitcode injection; host symbols resolved at runtime
+#     from the executable.  Does not enable alltoall_wg offload.
+option(ENABLE_ROCSHMEM                         "Full rocSHMEM: link librocshmem.a into librccl.so (alltoall_wg offload)" OFF)
+option(ENABLE_ROCSHMEM_GIN                     "GIN plugins: device bitcode injected at build, host resolved at runtime" OFF)
+if(ENABLE_ROCSHMEM AND ENABLE_ROCSHMEM_GIN)
+  message(FATAL_ERROR "ENABLE_ROCSHMEM and ENABLE_ROCSHMEM_GIN are mutually exclusive")
+endif()
+set(ROCSHMEM_CMAKE_OPTIONS "" CACHE STRING     "Extra cmake options passed to the rocSHMEM ExternalProject build")
 option(ENABLE_WARP_SPEED                       "Enable WARP_SPEED optimizations"               OFF)
+option(ENABLE_RCCL_EP_TESTS                    "Build rccl_ep multi-GPU tests; needs ENABLE_MPI_TESTS and a runtime with working cuMem symmetric memory" OFF)
+option(ENABLE_RCCL_EP_IN_LIBRCCL               "Compile rccl_ep into librccl.so instead of the standalone librccl_ep.so; gfx9 only" OFF)
 
 # Default GPU architectures to build
 #==================================================================================================
@@ -164,26 +218,36 @@ endif()
 set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if GPU_TARGETS is not defined.")
 
 
-# Modify GPU architectures for Address Sanitizer builds by appending "xnack+"
+# Adjust GPU architectures for Address Sanitizer builds; per-family rules are
+# in cmake/AsanGpuTargets.cmake.
 if (BUILD_ADDRESS_SANITIZER)
-  execute_process(
-    COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libclang_rt.asan-x86_64.so
-    OUTPUT_VARIABLE ASAN_RUNTIME_PATH OUTPUT_STRIP_TRAILING_WHITESPACE)
-  get_filename_component(ASAN_RUNTIME_DIR "${ASAN_RUNTIME_PATH}" DIRECTORY)
-  message(STATUS "ASAN runtime directory: ${ASAN_RUNTIME_DIR}")
-
-  SET(amdgpu_targets "")
-  foreach(amdgpu_target IN LISTS GPU_TARGETS)
-    if(NOT amdgpu_target STREQUAL "")
-      string(FIND "${amdgpu_target}" ":xnack+" HAS_XNACK_SUFFIX)
-      if(HAS_XNACK_SUFFIX EQUAL -1)
-        list(APPEND amdgpu_targets "${amdgpu_target}:xnack+")
-      else()
-        list(APPEND amdgpu_targets "${amdgpu_target}")
-      endif()
+  include(cmake/AsanGpuTargets.cmake)
+  set(_suffix "asan")
+  set(_clang_rt_names "libclang_rt.${_suffix}.so" "libclang_rt.${_suffix}-x86_64.so")
+  foreach(_clang_rt_name ${_clang_rt_names})
+    execute_process(
+      COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=${_clang_rt_name}
+      OUTPUT_VARIABLE _clang_rt_path OUTPUT_STRIP_TRAILING_WHITESPACE)
+    # If _clang_rt_path is libclang_rt.asan-x86_64.so
+    # rather than /path/to/libclang_rt.asan-x86_64.so then
+    # we failed to locate it.
+    if(IS_ABSOLUTE "${_clang_rt_path}" AND EXISTS "${_clang_rt_path}")
+      get_filename_component(ASAN_RUNTIME_DIR "${_clang_rt_path}" DIRECTORY)
+      break()
     endif()
   endforeach()
-  SET(GPU_TARGETS "${amdgpu_targets}")
+  if(NOT ASAN_RUNTIME_DIR)
+    message(FATAL_ERROR "Failed to locate libclang_rt.asan-x86_64.so or libclang_rt.asan.so")
+  endif()
+  message(STATUS "ASAN runtime directory: ${ASAN_RUNTIME_DIR}")
+
+  # Guarded so that "no targets at all" still reaches the curated diagnostic
+  # below. rocm_local_targets() reports failure as the literal "NOTFOUND",
+  # which if() treats as false along with the empty case.
+  if(GPU_TARGETS)
+    rccl_asan_adjust_gpu_targets(GPU_TARGETS ${GPU_TARGETS})
+    message(STATUS "ASAN: GPU targets = ${GPU_TARGETS}")
+  endif()
 endif()
 
 # Check if clang compiler can offload to GPU_TARGETS
@@ -194,6 +258,10 @@ else()
   message(WARNING "Unable to check for supported GPU targets. Falling back to default GPUs.")
   set(SUPPORTED_GPUS ${DEFAULT_GPUS})
 endif()
+
+# TLS backend for socket encryption (empty = disabled; OPENSSL3 = headers only, libssl is dlopen'd at runtime)
+set(TLS_BACKEND "$ENV{TLS_BACKEND}" CACHE STRING "TLS backend (empty or OPENSSL3)")
+set_property(CACHE TLS_BACKEND PROPERTY STRINGS "" OPENSSL3)
 
 set(GPU_TARGETS "${SUPPORTED_GPUS}")
 
@@ -236,13 +304,8 @@ elseif("${CMAKE_CXX_COMPILER}" MATCHES ".*clang\\+\\+")
   set(COMPILER_EXE_NAME clang++)
   set(COMPILER_GREP_STRING "AMD clang version")
   set(COMPILER_AWK_CMD "awk -F\" \" '{ printf $4}'")
-elseif("${CMAKE_CXX_COMPILER}" MATCHES ".*hipcc$")
-  message(STATUS "Compiling with hipcc")
-  set(COMPILER_EXE_NAME hipcc)
-  set(COMPILER_GREP_STRING "HIP version")
-  set(COMPILER_AWK_CMD "awk -F\" \" '{ printf $3}' | awk -F\"-\" '{ printf $1}'")
 else()
-  message(FATAL_ERROR "RCCL can be built only with hipcc or amdclang++")
+  message(FATAL_ERROR "RCCL can be built only with amdclang++")
 endif()
 
 # Set CMAKE flags
@@ -277,7 +340,10 @@ if(NOT "${HIP_COMPILER}" MATCHES "clang")
 endif()
 
 ## Check for compiler version
-find_program(compiler_executable ${COMPILER_EXE_NAME})
+# Keep version detection on the same toolchain selected for the build.
+get_filename_component(_cxx_compiler_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+find_program(compiler_executable ${COMPILER_EXE_NAME}
+  HINTS "${_cxx_compiler_dir}")
 message(STATUS "${COMPILER_EXE_NAME} executable: ${compiler_executable}")
 execute_process(
   COMMAND         bash "-c" "${compiler_executable} --version | grep \"${COMPILER_GREP_STRING}\" | ${COMPILER_AWK_CMD}"
@@ -285,11 +351,8 @@ execute_process(
 message(STATUS "${COMPILER_EXE_NAME} version:    ${compiler_version_string}")
 
 ## Check for HIP version
-find_program(hipconfig_executable hipconfig)
-message(STATUS "hipconfig executable: ${hipconfig_executable}")
-execute_process(
-  COMMAND         bash "-c" "${hipconfig_executable} -v | awk -F\"-\" '{ printf $1 }'"
-  OUTPUT_VARIABLE hip_version_string)
+# Use hip_VERSION from find_package(hip) above
+string(REGEX MATCH "^([0-9]+\\.[0-9]+\\.[0-9]+)" hip_version_string "${hip_VERSION}")
 message(STATUS "${COMPILER_EXE_NAME} HIP version:    ${hip_version_string}")
 
 ## Check for ROCm version
@@ -315,6 +378,22 @@ else()
   message(FATAL_ERROR "Could not determine ROCM version (set EXPLICIT_ROCM_VERSION or set ROCM_PATH to a valid installation)")
 endif()
 string(REGEX MATCH "([0-9]+)\\.([0-9]+)\\.([0-9]+)" rocm_version_matches ${rocm_version_string})
+set(RCCL_DEVICE_PROFILE_RT "")
+set(RCCL_HOST_ROCM_PROFILE_RT "")
+set(_device_coverage_capability_error "")
+if(NOT _enable_full_coverage_request STREQUAL "OFF")
+  include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/DeviceCoverage.cmake")
+  if(ENABLE_DEVICE_LINKER)
+    rccl_find_device_profile_runtime(
+      "${CMAKE_CXX_COMPILER}"
+      RCCL_DEVICE_PROFILE_RT
+      _device_coverage_capability_error)
+    rccl_find_host_rocm_profile_runtime(
+      "${CMAKE_CXX_COMPILER}"
+      RCCL_HOST_ROCM_PROFILE_RT)
+  endif()
+endif()
+
 if (rocm_version_matches)
     set(ROCM_MAJOR_VERSION ${CMAKE_MATCH_1})
     set(ROCM_MINOR_VERSION ${CMAKE_MATCH_2})
@@ -325,8 +404,61 @@ if (rocm_version_matches)
     # Convert the version components to int for comparison
     math(EXPR ROCM_VERSION "(10000 * ${ROCM_MAJOR_VERSION}) + (100 * ${ROCM_MINOR_VERSION}) + ${ROCM_PATCH_VERSION}")
     add_definitions("-DROCM_VERSION=${ROCM_VERSION}")
+
+    # SQTT instrumentation requires ROCm >= 7.13
+    if(SQTT_ENABLED)
+      set(ROCM_VERSION_STRING "${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}")
+      if(ROCM_VERSION_STRING VERSION_LESS "7.13")
+        message(WARNING "SQTT instrumentation requires ROCm version >= 7.13. Current version: ${ROCM_VERSION_STRING}. Disabling SQTT_ENABLED.")
+        set(SQTT_ENABLED OFF CACHE BOOL "Enable SQTT instrumentation" FORCE)
+      else()
+        message(STATUS "SQTT instrumentation enabled (ROCm ${ROCM_VERSION_STRING})")
+        add_definitions("-DSQTT_ENABLED=1")
+      endif()
+    endif()
+
 else()
     message(WARNING "Failed to extract ROCm version.")
+endif()
+
+set(_full_coverage_resolved "${ENABLE_FULL_COVERAGE}")
+set(_full_coverage_blocker "")
+if(NOT _enable_full_coverage_request STREQUAL "OFF")
+  rccl_resolve_full_coverage(
+    "${_enable_full_coverage_request}"
+    "${ENABLE_DEVICE_LINKER}"
+    "${rocm_version_matches}"
+    "${ROCM_VERSION}"
+    "${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}.${ROCM_PATCH_VERSION}"
+    "${_device_coverage_capability_error}"
+    _full_coverage_resolved
+    _full_coverage_blocker)
+endif()
+
+if(ENABLE_FULL_COVERAGE STREQUAL "AUTO")
+  # FORCE the resolved ON/OFF into the cache so cmake -LAH matches the build.
+  # Keep AUTO in _enable_full_coverage_request; a later cmake on this tree
+  # without -DENABLE_FULL_COVERAGE=AUTO reads the answer, not the request.
+  set(ENABLE_FULL_COVERAGE "${_full_coverage_resolved}" CACHE STRING
+    "Enable host and device coverage: AUTO, ON, or OFF" FORCE)
+  if(_full_coverage_blocker)
+    message(STATUS
+      "Full coverage is unavailable because ${_full_coverage_blocker}. "
+      "Falling back to host-only coverage.")
+  else()
+    message(STATUS
+      "Full coverage is supported by ROCm "
+      "${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}.${ROCM_PATCH_VERSION}; "
+      "device profile runtime: ${RCCL_DEVICE_PROFILE_RT}")
+    if(RCCL_HOST_ROCM_PROFILE_RT)
+      message(STATUS "Host ROCm profile runtime: ${RCCL_HOST_ROCM_PROFILE_RT}")
+    endif()
+  endif()
+endif()
+
+if(NOT _enable_full_coverage_request STREQUAL "OFF" AND NOT ENABLE_CODE_COVERAGE)
+  message(STATUS "Full coverage request implies ENABLE_CODE_COVERAGE=ON")
+  set(ENABLE_CODE_COVERAGE ON CACHE BOOL "Enable code coverage" FORCE)
 endif()
 
 ### Required for checking HIP device symbols when building with amdclang++
@@ -370,6 +502,17 @@ check_cxx_source_compiles("
     return 0;
   }
 " HIP_VMM_UNCACHED_MEMORY_AVAILABLE)
+
+### Check for host VMM location types (hipMemLocationTypeHost). Stock ROCm 7.0.2
+### shares the 7.0.2.x backport's HIP_VERSION but does not declare them.
+check_cxx_source_compiles("
+  #include <hip/hip_runtime_api.h>
+  int main() {
+    hipMemLocationType t = hipMemLocationTypeHost;
+    (void)t;
+    return 0;
+  }
+" HIP_MEM_LOCATION_TYPE_HOST)
 
 unset(CMAKE_REQUIRED_LIBRARIES)
 
@@ -434,22 +577,39 @@ if(ROCM_VERSION VERSION_GREATER_EQUAL "71100")
     message(STATUS "Found amd_smi at ${SMI_INCLUDE_DIR}")
     set(SMI_LIBRARIES amd_smi)
 
-    ### Check whether the installed amdsmi headers expose the UALoE fabric struct
-    ### (amdsmi_fabric_info_t). The probe compiles against the struct only — no
-    ### link-time dependency on amdsmi_get_gpu_fabric_info — because amdsmi is
-    ### loaded lazily at runtime via dlopen. If the struct is absent, the compat
-    ### types in amdsmi_wrap.h must be compiled in.
+    ### Check whether the installed amdsmi headers expose UALoE fabric types.
+    ### Classic UALoE headers define AMDSMI_FABRIC_MAX_LOCAL_GPUS plus
+    ### amdsmi_fabric_info_t. ROCm 7.14 can ship fabric telemetry enumerators
+    ### without that macro; requiring the macro then leaves AMDSMI_FABRIC_DIRECT
+    ### off and amdsmi_wrap.h redefines the system enums.
     set(CMAKE_REQUIRED_INCLUDES "${SMI_INCLUDE_DIR}")
+    unset(AMDSMI_HEADER_HAS_FABRIC_TELEMETRY CACHE)
     check_cxx_source_compiles("
       #include <amd_smi/amdsmi.h>
       int main() {
+        amdsmi_fabric_telemetry_category_t cat = AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN;
+        (void)cat;
+        return 0;
+      }
+    " AMDSMI_HEADER_HAS_FABRIC_TELEMETRY)
+    check_cxx_source_compiles("
+      #include <amd_smi/amdsmi.h>
+      #if !defined(AMDSMI_FABRIC_MAX_LOCAL_GPUS)
+      #error amdsmi.h has no UALoE fabric types
+      #endif
+      int main() {
         amdsmi_fabric_info_t info{};
+        amdsmi_fabric_info_v1_t v1{};
         (void)info;
+        (void)v1;
         return 0;
       }
     " AMDSMI_FABRIC_API)
     unset(CMAKE_REQUIRED_INCLUDES)
-    if(AMDSMI_FABRIC_API)
+    if(AMDSMI_HEADER_HAS_FABRIC_TELEMETRY AND NOT AMDSMI_FABRIC_API)
+      set(AMDSMI_FABRIC_API TRUE)
+      message(STATUS "amdsmi fabric telemetry types found (no AMDSMI_FABRIC_MAX_LOCAL_GPUS) - enabling AMDSMI_FABRIC_DIRECT")
+    elseif(AMDSMI_FABRIC_API)
       message(STATUS "amdsmi UALoE fabric API found - enabling AMDSMI_FABRIC_DIRECT")
     else()
       message(STATUS "amdsmi UALoE fabric API not found - using compat types")
@@ -492,6 +652,17 @@ set(USE_AMDSMI ON CACHE INTERNAL "Force enable AMD SMI path since we use lazy lo
 #     set(HAVE_ROCM_SMI_THREAD_ONLY_MUTEX True)
 #   endif ()
 # endif()
+
+## Check for TLS backend (socket encryption, see src/misc/crypt.cc)
+set(NCCL_TLS_INCLUDE_DIRS)
+if(TLS_BACKEND STREQUAL "OPENSSL3")
+  find_package(OpenSSL 3.0 REQUIRED COMPONENTS SSL Crypto)
+  add_compile_definitions(NCCL_TLS_BACKEND_OPENSSL3=1)
+  list(APPEND NCCL_TLS_INCLUDE_DIRS ${OPENSSL_INCLUDE_DIR})
+  include_directories(${NCCL_TLS_INCLUDE_DIRS})
+elseif(NOT TLS_BACKEND STREQUAL "")
+  message(FATAL_ERROR "Unsupported TLS_BACKEND '${TLS_BACKEND}'; expected OPENSSL3 or empty")
+endif()
 
 ## Check for BFD library if custom backtrace is requested
 if(BUILD_BFD)
@@ -647,24 +818,85 @@ file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/include/rccl")
 configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/rccl/rccl.h) # For external linking
 configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/nccl.h)      # Used by some internal files
 
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+if (NOT Python3_FOUND)
+  message(FATAL_ERROR "RCCL requires Python3 for generating host/device tables")
+endif()
+
+## Compile tuner/*.csv into librccl.so so the built-in CSV tuner works without
+## the files being staged on every node. Disk locations remain as overrides.
+set(RCCL_EMBEDDED_TUNER_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/tuner/embed_tuner_configs.py)
+set(RCCL_EMBEDDED_TUNER_HEADER ${PROJECT_BINARY_DIR}/include/rccl_tuner_embedded_configs.h)
+# Always run, like update_git_version: an OUTPUT/DEPENDS command re-runs only
+# when an input is newer than the output, so deleting a CSV would leave it
+# embedded. The script rewrites the header only when the content changes, so
+# running every build does not churn rebuilds.
+add_custom_target(rccl_embedded_tuner_configs
+  ALL
+  COMMAND ${Python3_EXECUTABLE} ${RCCL_EMBEDDED_TUNER_SCRIPT}
+          ${CMAKE_CURRENT_SOURCE_DIR}/tuner
+          ${RCCL_EMBEDDED_TUNER_HEADER}
+  DEPENDS ${RCCL_EMBEDDED_TUNER_SCRIPT}
+  BYPRODUCTS ${RCCL_EMBEDDED_TUNER_HEADER}
+  COMMENT "Embedding RCCL tuner configurations"
+  VERBATIM)
+
+# Example plugins are C sources
+if(BUILD_TESTS AND BUILD_PLUGIN_EXAMPLES)
+  enable_language(C)
+endif()
+
 # Add subdirectories
 #==================================================================================================
 # Source directory contains library creation
+# ENABLE_MPI_TESTS is consumed here as well as under test/: MPI tests poke
+# librccl internals, so Release builds must export those symbols.
+option(ENABLE_MPI_TESTS "Enable MPI-based tests" OFF)
 add_subdirectory(src)
+
+# ACCL timing-decomposition profiler plugin. This is a separately loaded,
+# host-only shared library, so building it for every RCCL package does not add
+# instrumentation or runtime overhead to librccl.so. Set BUILD_PROFILER_ACCL=OFF
+# for installations that do not want to ship the optional plugin.
+if(BUILD_PROFILER_ACCL)
+  add_subdirectory(plugins/profiler/accl)
+endif()
+
+# NCCL Inspector profiler plugin. Built as its own .so and loaded at runtime via
+# NCCL_PROFILER_PLUGIN; the MPI tests pick up the in-tree build automatically.
+if(BUILD_PROFILER_INSPECTOR)
+  add_subdirectory(plugins/profiler/inspector)
+endif()
 
 # LLVM IR / bitcode for nccl_device APIs (HIP / AMDGPU)
 #==================================================================================================
-# When EMIT_LLVM_IR=ON, build a standalone LLVM bitcode artifact (librccl_device.bc)
+# When NCCL_EMIT_LLVM_IR=ON, build a standalone LLVM bitcode artifact (librccl_device.bc)
 # plus a C wrapper header (nccl_device_wrapper.h) from src/include/nccl_device/.
 # The bitcode is generated from the hipify-staged headers that librccl.so itself
 # is compiled from, so the IR is guaranteed to match the host library.
-if(EMIT_LLVM_IR)
+#
+# When NCCL_EMIT_LTO_IR=ON, build librccl_device.ltoir from the same sources:
+# the same public surface, but with the optimizer not yet run, so inlining is
+# deferred to the consumer's device link. The two knobs are independent; either,
+# both, or neither may be set.
+if(NCCL_EMIT_LLVM_IR OR NCCL_EMIT_LTO_IR)
   add_subdirectory(bindings/ir)
+endif()
+if(NCCL_EMIT_LLVM_IR)
   # bindings/ir/ reads headers out of ${PROJECT_BINARY_DIR}/hipify, which is
   # populated by the copy_nccl_device_headers target defined in src/CMakeLists.txt.
-  add_dependencies(llvm_ir copy_nccl_device_headers)
+  # nccl_device_header_symlinks provides the un-suffixed core.h/comm.h/gin.h
+  # aliases (hipify renames them to *_tmp.h) that the verbatim IR wrapper needs.
+  add_dependencies(llvm_ir copy_nccl_device_headers nccl_device_header_symlinks)
   # Convenience aggregate target: builds librccl.so together with the bitcode.
   add_custom_target(rccl_with_ir ALL DEPENDS rccl llvm_ir)
+endif()
+if(NCCL_EMIT_LTO_IR)
+  # Same staged-header dependency as llvm_ir: the LTO IR is compiled from the
+  # identical translation unit, so it needs the hipify pass to have run too.
+  add_dependencies(ltoir copy_nccl_device_headers nccl_device_header_symlinks)
+  # Convenience aggregate target: builds librccl.so together with the LTO IR.
+  add_custom_target(rccl_with_ltoir ALL DEPENDS rccl ltoir)
 endif()
 
 # nccl4py Python bindings (opt-in)
@@ -695,13 +927,23 @@ rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/nccl.h
              DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 rocm_install(DIRECTORY   ${PROJECT_BINARY_DIR}/include/nccl_device/
              DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/nccl_device)
-## Optional: install LLVM bitcode artifacts when EMIT_LLVM_IR is enabled.
-## librccl_device.bc, nccl_device_wrapper.h, hipified nccl_device headers,
-## and nccl.h (same as rccl.h; nccl_device #includes <nccl.h>) are produced
-## before install because rccl_with_ir is part of ALL.
-if(EMIT_LLVM_IR)
-  rocm_install(FILES       ${PROJECT_BINARY_DIR}/lib/librccl_device.bc
-               DESTINATION ${CMAKE_INSTALL_LIBDIR}/rccl)
+# Install SDMA device headers so consumers can compile GIN SDMA device templates
+# without depending on ROCSHMEM_SOURCE_DIR.
+if(ENABLE_ROCSHMEM_GIN AND ROCSHMEM_SOURCE_DIR)
+  rocm_install(FILES
+    ${ROCSHMEM_SOURCE_DIR}/src/sdma/anvil_device.hpp
+    ${ROCSHMEM_SOURCE_DIR}/src/sdma/sdma_opcodes.h
+    ${ROCSHMEM_SOURCE_DIR}/src/sdma/sdma_pkt_struct.h
+    ${ROCSHMEM_SOURCE_DIR}/src/sdma/sdma_pkt_struct_mi4.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/nccl_device/gin/anvil_sdma/sdma)
+endif()
+## Optional: install device IR artifacts when NCCL_EMIT_LLVM_IR and/or
+## NCCL_EMIT_LTO_IR is enabled. librccl_device.bc, librccl_device.ltoir,
+## nccl_device_wrapper.h, hipified nccl_device headers, and nccl.h (same as
+## rccl.h; nccl_device #includes <nccl.h>) are produced before install because
+## rccl_with_ir / rccl_with_ltoir are part of ALL.
+if(NCCL_EMIT_LLVM_IR OR NCCL_EMIT_LTO_IR)
+  ## Header surface is identical for both artifacts, so install it once.
   rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/nccl_device_wrapper.h
                            ${PROJECT_BINARY_DIR}/include/nccl_device.h
                            ${PROJECT_BINARY_DIR}/include/nccl.h
@@ -709,9 +951,23 @@ if(EMIT_LLVM_IR)
   rocm_install(DIRECTORY   ${PROJECT_BINARY_DIR}/include/nccl_device
                DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl)
 endif()
-## Install tuner config directory for CSV-based tuner
-file(COPY tuner DESTINATION ${PROJECT_BINARY_DIR})
-rocm_install(DIRECTORY ${PROJECT_BINARY_DIR}/tuner DESTINATION ${CMAKE_INSTALL_DATADIR}/rccl)
+if(NCCL_EMIT_LLVM_IR)
+  rocm_install(FILES       ${PROJECT_BINARY_DIR}/lib/librccl_device.bc
+               DESTINATION ${CMAKE_INSTALL_LIBDIR}/rccl)
+endif()
+if(NCCL_EMIT_LTO_IR)
+  rocm_install(FILES       ${PROJECT_BINARY_DIR}/lib/librccl_device.ltoir
+               DESTINATION ${CMAKE_INSTALL_LIBDIR}/rccl)
+endif()
+## tuner/*.csv is compiled into librccl.so (see rccl_embedded_tuner_configs above),
+## so nothing is copied to the build tree or installed. A CSV placed in
+## <libdir>/tuner/ or share/rccl/tuner/ still overrides the embedded defaults.
+##
+## Migration: dropping these rules does not delete copies an earlier build or
+## install already wrote, and those still win over the embedded map. Package
+## upgrades remove the installed copy, but `cmake --install` over an existing
+## prefix does not, and an incremental build tree keeps <builddir>/tuner/ next
+## to librccl.so. Delete those by hand to pick up the embedded defaults.
 rocm_export_targets(
   NAMESPACE roc::
   TARGETS   rccl
@@ -774,6 +1030,11 @@ if(BUILD_TESTS)
     add_subdirectory(plugins/tuner/example)
     add_subdirectory(plugins/profiler/example)
     add_subdirectory(plugins/profiler/proxytrace)
+    add_subdirectory(plugins/env/example)
+    add_subdirectory(plugins/env/json)
+    add_subdirectory(plugins/gin/example)
+    add_subdirectory(plugins/mixed/example)
+    add_subdirectory(plugins/rma/example)
   endif()
   add_subdirectory(test)
 
@@ -789,6 +1050,12 @@ rccl_add_nccl_compat_package_targets()
 
 if(GENERATE_SYM_KERNELS)
   target_compile_definitions(rccl PRIVATE GENERATE_SYM_KERNELS)
+endif()
+
+# Off by default: the NET_IB/NET_SOCK profiler events instrument the network
+# data path, so they are opt-in rather than always compiled in.
+if(ENABLE_NET_PROFILING)
+  target_compile_definitions(rccl PRIVATE NCCL_ENABLE_NET_PROFILING)
 endif()
 
 # Keep librccl outputs in the top-level build dir for existing scripts.

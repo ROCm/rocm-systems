@@ -89,7 +89,7 @@ HIP_TEST_CASE(Unit_hipStreamEndCapture_Positive_GraphDestroy) {
 }
 
 static void thread_func_neg(hipStream_t stream, hipGraph_t graph) {
-  HIP_ASSERT(hipErrorStreamCaptureWrongThread == hipStreamEndCapture(stream, &graph));
+  REQUIRE_THREAD(hipErrorStreamCaptureWrongThread == hipStreamEndCapture(stream, &graph));
 }
 
 /**
@@ -124,6 +124,7 @@ HIP_TEST_CASE(Unit_hipStreamEndCapture_Negative_Thread) {
 
   std::thread t(thread_func_neg, stream, graph);
   t.join();
+  HIP_CHECK_THREAD_FINALIZE();
 
 #if HT_AMD
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
@@ -133,7 +134,7 @@ HIP_TEST_CASE(Unit_hipStreamEndCapture_Negative_Thread) {
 }
 
 static void thread_func_pos(hipStream_t stream, hipGraph_t* graph) {
-  HIP_CHECK(hipStreamEndCapture(stream, graph));
+  HIP_CHECK_THREAD(hipStreamEndCapture(stream, graph));
 }
 
 /**
@@ -169,6 +170,7 @@ HIP_TEST_CASE(Unit_hipStreamEndCapture_Positive_Thread) {
 
   std::thread t(thread_func_pos, stream, &graph);
   t.join();
+  HIP_CHECK_THREAD_FINALIZE();
   // Validate end capture is successful
   REQUIRE(graph != nullptr);
 

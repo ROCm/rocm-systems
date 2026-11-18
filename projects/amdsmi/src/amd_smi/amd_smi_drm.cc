@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "amd_smi/impl/amd_smi_drm.h"
 
@@ -30,6 +11,7 @@
 #include <memory>
 #include <regex>
 
+#include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/xf86drm.h"
 #include "impl/scoped_fd.h"
@@ -56,21 +38,19 @@ std::string AMDSmiDrm::find_file_in_folder(const std::string& folder, const std:
   return file_name;
 }
 
-amdsmi_status_t AMDSmiDrm::init() {
-  amdsmi_status_t status = lib_loader_.load(libdrm_amdgpu_sonames());
-  if (status != AMDSMI_STATUS_SUCCESS) {
-    return status;
-  }
+amdsmi_status_t AMDSmiDrm::init(const std::vector<const char*>& libdrm_names) {
+  // libdrm only supplies vendor_id; the render node and BDF below come from sysfs
+  // and must be filled in even when libdrm cannot be loaded.
+  amdsmi_status_t status = lib_loader_.load(libdrm_names);
 
   typedef int (*drmCommandWrite_t)(int fd, unsigned long drmCommandIndex, void* data,
                                    unsigned long size);
   drmCommandWrite_t drmCommandWrite = nullptr;
 
   // load symbol from libdrm
-  status = lib_loader_.load_symbol(reinterpret_cast<drmCommandWrite_t*>(&drmCommandWrite),
-                                   "drmCommandWrite");
-  if (status != AMDSMI_STATUS_SUCCESS) {
-    return status;
+  if (status == AMDSMI_STATUS_SUCCESS) {
+    status = lib_loader_.load_symbol(reinterpret_cast<drmCommandWrite_t*>(&drmCommandWrite),
+                                     "drmCommandWrite");
   }
 
   typedef int (*drmGetDevice_t)(int fd, drmDevicePtr* device);  // drmGetDevice
@@ -85,27 +65,23 @@ amdsmi_status_t AMDSmiDrm::init() {
   typedef void (*drmFreeVersion_t)(drmVersionPtr version);  // drmFreeVersion
   drmFreeVersion_t drm_free_version = nullptr;
 
-  status = lib_loader_.load_symbol(reinterpret_cast<drmGetVersion_t*>(&drm_get_version),
-                                   "drmGetVersion");
-  if (status != AMDSMI_STATUS_SUCCESS) {
-    return status;
+  if (status == AMDSMI_STATUS_SUCCESS) {
+    status = lib_loader_.load_symbol(reinterpret_cast<drmGetVersion_t*>(&drm_get_version),
+                                     "drmGetVersion");
   }
-  status = lib_loader_.load_symbol(reinterpret_cast<drmGetVersion_t*>(&drm_free_version),
-                                   "drmFreeVersion");
-  if (status != AMDSMI_STATUS_SUCCESS) {
-    return status;
+  if (status == AMDSMI_STATUS_SUCCESS) {
+    status = lib_loader_.load_symbol(reinterpret_cast<drmGetVersion_t*>(&drm_free_version),
+                                     "drmFreeVersion");
   }
-
-  status =
-      lib_loader_.load_symbol(reinterpret_cast<drmGetDevice_t*>(&drm_get_device), "drmGetDevice");
-  if (status != AMDSMI_STATUS_SUCCESS) {
-    return status;
+  if (status == AMDSMI_STATUS_SUCCESS) {
+    status =
+        lib_loader_.load_symbol(reinterpret_cast<drmGetDevice_t*>(&drm_get_device), "drmGetDevice");
   }
-  status = lib_loader_.load_symbol(reinterpret_cast<drmFreeDevice_t*>(&drm_free_device),
-                                   "drmFreeDevice");
-  if (status != AMDSMI_STATUS_SUCCESS) {
-    return status;
+  if (status == AMDSMI_STATUS_SUCCESS) {
+    status = lib_loader_.load_symbol(reinterpret_cast<drmFreeDevice_t*>(&drm_free_device),
+                                     "drmFreeDevice");
   }
+  has_libdrm_ = (status == AMDSMI_STATUS_SUCCESS);
 
   /* Need to map the /dev/dri/render* file to /sys/class/drm/card*
      The former is for drm fd and the latter is used for rocm-smi gpu index.
@@ -119,26 +95,27 @@ amdsmi_status_t AMDSmiDrm::init() {
     drmDevicePtr device;
 
     const std::string regex("renderD([0-9]+)");
-    const std::string renderD_folder =
-        "/sys/class/drm/card" + std::to_string(rocm_smi_device->index()) + "/../";
+    const std::string renderD_folder = amd::smi::test_hooks::SysfsDrmRoot() + "/card" +
+                                       std::to_string(rocm_smi_device->index()) + "/../";
 
     // looking for /sys/class/drm/card0/../renderD*
     std::string render_name = find_file_in_folder(renderD_folder, regex);
     drm_paths_.push_back(render_name);
 
-    std::string name = "/dev/dri/" + render_name;
-    ScopedFD fd(name.c_str(), O_RDWR | O_CLOEXEC | O_NONBLOCK);
-
     amdsmi_bdf_t bdf;
-    if (fd.valid()) {
-      // Clear O_NONBLOCK now that open() succeeded so ioctls behave normally
-      fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK);
-      auto version = drm_get_version(fd);
-      if (drm_get_device(fd, &device) == 0) {
-        vendor_id = device->deviceinfo.pci->vendor_id;
-        drm_free_device(&device);
+    if (has_libdrm_) {
+      std::string name = "/dev/dri/" + render_name;
+      ScopedFD fd(name.c_str(), O_RDWR | O_CLOEXEC | O_NONBLOCK);
+      if (fd.valid()) {
+        // Clear O_NONBLOCK now that open() succeeded so ioctls behave normally
+        fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK);
+        auto version = drm_get_version(fd);
+        if (drm_get_device(fd, &device) == 0) {
+          vendor_id = device->deviceinfo.pci->vendor_id;
+          drm_free_device(&device);
+        }
+        drm_free_version(version);
       }
-      drm_free_version(version);
     }
 
     uint64_t bdfid = 0;
@@ -156,7 +133,7 @@ amdsmi_status_t AMDSmiDrm::init() {
     drm_bdfs_.push_back(bdf);
   }
 
-  return AMDSMI_STATUS_SUCCESS;
+  return status;
 }
 
 amdsmi_status_t AMDSmiDrm::cleanup() {
@@ -167,6 +144,7 @@ amdsmi_status_t AMDSmiDrm::cleanup() {
     drm_bdfs_.clear();
   }
   lib_loader_.unload();
+  has_libdrm_ = false;
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -181,7 +159,7 @@ amdsmi_status_t AMDSmiDrm::get_bdf_by_index(uint32_t gpu_index, amdsmi_bdf_t* bd
 amdsmi_status_t AMDSmiDrm::amdgpu_query_cpu_affinity(const std::string& device_path,
                                                      std::string& cpu_affinity) {
   std::string cpu_aff_file = "cpulistaffinity";
-  cpu_affinity = smi_brcm_get_value_string(device_path, cpu_aff_file);
+  cpu_affinity = smi_read_sysfs_string(device_path, cpu_aff_file);
 
   return AMDSMI_STATUS_SUCCESS;
 }

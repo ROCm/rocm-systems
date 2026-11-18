@@ -285,8 +285,11 @@ class ArtifactCombiner:
             return False
 
         # Copy files that contain the architecture in their name
-        # (e.g., TensileLibrary_gfx1100.dat, Kernels_gfx1101.so)
-        return arch in file_path.name
+        # (e.g., TensileLibrary_gfx1100.dat, Kernels_gfx1101.so). Also accept
+        # the underscore-sanitized spelling of variant arches, e.g.
+        # libdevice_conv_operations_gfx1250_strict.a for gfx1250-strict.
+        name = file_path.name
+        return arch in name or arch.replace("-", "_") in name
 
     def _copy_arch_specific_files(
         self, src_dir: Path, dst_dir: Path, arch: str

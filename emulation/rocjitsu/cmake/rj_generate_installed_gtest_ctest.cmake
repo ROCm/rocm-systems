@@ -12,9 +12,23 @@
 #   TEST_EXECUTABLE      Build-tree executable used for --gtest_list_tests.
 #   INSTALLED_EXECUTABLE Path CTest should run from the installed test dir.
 #   OUTPUT_FILE          Generated CTest fragment path.
+#
+# Optional variables:
+#   TEST_FILTER          --gtest_filter for discovery. Must be the SAME filter the
+#                        build tree uses, or a case excluded there is discovered here
+#                        and collides with its own manual registration.
+#   TEST_PREFIX/SUFFIX   Name decoration for separately registered variants.
+#   TEST_ENVIRONMENT     Additional environment entries applied to every case.
 function(rj_generate_installed_gtest_ctest)
-    set(oneValueArgs TEST_EXECUTABLE INSTALLED_EXECUTABLE OUTPUT_FILE)
-    cmake_parse_arguments(ARG "" "${oneValueArgs}" "" ${ARGN})
+    set(oneValueArgs
+        TEST_EXECUTABLE
+        INSTALLED_EXECUTABLE
+        OUTPUT_FILE
+        TEST_FILTER
+        TEST_PREFIX
+        TEST_SUFFIX
+    )
+    cmake_parse_arguments(ARG "" "${oneValueArgs}" "ENVIRONMENT" ${ARGN})
 
     if(NOT ARG_TEST_EXECUTABLE)
         message(FATAL_ERROR "TEST_EXECUTABLE is required")
@@ -26,12 +40,17 @@ function(rj_generate_installed_gtest_ctest)
         message(FATAL_ERROR "OUTPUT_FILE is required")
     endif()
 
-    # RequestExitWakesAllPartitions is registered manually with a short
-    # timeout because its expected regression mode is a deadlocked process.
+    # Tests whose expected regression mode is a deadlocked process are registered
+    # manually with a short timeout, so discovery must exclude them here exactly as
+    # it does in the build tree. The caller passes that one filter through; only a
+    # target that registers nothing manually falls back to dropping benchmarks.
+    if(NOT ARG_TEST_FILTER)
+        set(ARG_TEST_FILTER "-*Benchmark*")
+    endif()
     execute_process(
         COMMAND
             "${ARG_TEST_EXECUTABLE}" --gtest_list_tests
-            "--gtest_filter=-*Benchmark*:*RequestExitWakesAllPartitions*"
+            "--gtest_filter=${ARG_TEST_FILTER}"
         RESULT_VARIABLE _result
         OUTPUT_VARIABLE _tests
         ERROR_VARIABLE _errors
@@ -43,6 +62,13 @@ function(rj_generate_installed_gtest_ctest)
         )
     endif()
 
+    set(_environment
+        "ROCJITSU_CONFIG_DIR=\${RJ_INSTALLED_CONFIG_DIR}"
+        "ROCJITSU_KERNEL_DIR=\${RJ_INSTALLED_KERNEL_DIR}"
+        ${ARG_ENVIRONMENT}
+    )
+    string(REPLACE "\\" "\\\\" _escaped_environment "${_environment}")
+    string(REPLACE "\"" "\\\"" _escaped_environment "${_escaped_environment}")
     file(WRITE "${ARG_OUTPUT_FILE}" "# Installed GoogleTest CTest tests\n")
     set(_suite)
     string(REPLACE "\n" ";" _lines "${_tests}")
@@ -68,7 +94,9 @@ function(rj_generate_installed_gtest_ctest)
                     "${_case_name}"
                 )
             endif()
-            set(_test_name "${_suite}.${_pretty_case_name}")
+            set(_test_name
+                "${ARG_TEST_PREFIX}${_suite}.${_pretty_case_name}${ARG_TEST_SUFFIX}"
+            )
             set(_test_filter "${_suite}.${_case_name}")
             string(REPLACE "\\" "\\\\" _escaped_name "${_test_name}")
             string(REPLACE "\"" "\\\"" _escaped_name "${_escaped_name}")
@@ -79,7 +107,7 @@ function(rj_generate_installed_gtest_ctest)
                 "add_test(\"${_escaped_name}\" \"${ARG_INSTALLED_EXECUTABLE}\" \"--gtest_filter=${_escaped_filter}\")\n"
                 "set_tests_properties(\"${_escaped_name}\" PROPERTIES\n"
                 "  SKIP_REGULAR_EXPRESSION [=[\\[  SKIPPED \\]]=]\n"
-                "  ENVIRONMENT \"ROCJITSU_CONFIG_DIR=\${RJ_INSTALLED_CONFIG_DIR};ROCJITSU_KERNEL_DIR=\${RJ_INSTALLED_KERNEL_DIR}\")\n\n"
+                "  ENVIRONMENT \"${_escaped_environment}\")\n\n"
             )
         elseif(_line MATCHES "^Running main\\(\\) from .*/gtest_main\\.cc$")
             # GoogleTest's gtest_main emits this banner before the test list.
@@ -96,4 +124,8 @@ rj_generate_installed_gtest_ctest(
     TEST_EXECUTABLE "${TEST_EXECUTABLE}"
     INSTALLED_EXECUTABLE "${INSTALLED_EXECUTABLE}"
     OUTPUT_FILE "${OUTPUT_FILE}"
+    TEST_FILTER "${TEST_FILTER}"
+    TEST_PREFIX "${TEST_PREFIX}"
+    TEST_SUFFIX "${TEST_SUFFIX}"
+    ENVIRONMENT ${TEST_ENVIRONMENT}
 )

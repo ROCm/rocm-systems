@@ -12,7 +12,7 @@ to filter validation rules in tests.
 Uses 'amd-smi metric --json' per category (-u, -t, -p, -P) for
 fine-grained sub-metric detection matching the C++ PMC collector.
 Uses 'amd-smi monitor --json' for mem_usage (separate API in C++).
-Uses 'amd-smi metric -x' for XGMI (only CLI source for XGMI presence).
+Uses 'amd-smi xgmi --json' for XGMI link metrics.
 
 Usage:
     # Query live GPU(s)
@@ -22,8 +22,9 @@ Usage:
     python3 check_amd_smi_metrics.py --json
 """
 
+from __future__ import annotations
+
 import json
-import re
 import subprocess
 import sys
 from dataclasses import asdict, dataclass
@@ -64,7 +65,7 @@ class GpuMetricAvailability:
     mem_usage: bool = False  # from amd-smi monitor (separate API in C++)
     vcn_activity: bool = False  # device-level Radeon (mutually exclusive w/ vcn_busy)
     jpeg_activity: bool = False  # device-level Radeon (mutually exclusive w/ jpeg_busy)
-    xgmi: bool = False  # from amd-smi metric -x (XGMI_ERR heuristic)
+    xgmi: bool = False  # from amd-smi xgmi (link bit rate/bandwidth/accumulators)
     pcie: bool = False  # from amd-smi metric -P --json
     # sdma_usage is not reported by amd-smi CLI; it is a compile-time
     # feature (AMD_SMI_SDMA_SUPPORTED) and cannot be detected here.
@@ -119,7 +120,9 @@ def _run_command(cmd: list[str], exit_on_failure: bool = True) -> str | None:
     If False, returns None on error (for graceful fallback).
     """
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=30, check=False
+        )
         if result.returncode != 0:
             if exit_on_failure:
                 print(
@@ -301,6 +304,15 @@ def detect_power_metrics(gpus: list[GpuMetricAvailability]) -> None:
         ) or _is_available(power.get("average_socket_power"))
 
 
+def _clock_domain_available(clock: dict, prefix: str) -> bool:
+    for key, val in clock.items():
+        if not key.startswith(prefix):
+            continue
+        if isinstance(val, dict) and _is_available(val.get("clk")):
+            return True
+    return False
+
+
 def detect_clock_metrics(gpus: list[GpuMetricAvailability]) -> None:
     """Detect clock metrics from 'amd-smi metric -c --json'.
 
@@ -324,16 +336,8 @@ def detect_clock_metrics(gpus: list[GpuMetricAvailability]) -> None:
         if not isinstance(clock, dict):
             continue
 
-        def _domain_available(prefix: str) -> bool:
-            for key, val in clock.items():
-                if not key.startswith(prefix):
-                    continue
-                if isinstance(val, dict) and _is_available(val.get("clk")):
-                    return True
-            return False
-
-        gpu.gfx_clock = _domain_available("gfx")
-        gpu.mem_clock = _domain_available("mem")
+        gpu.gfx_clock = _clock_domain_available(clock, "gfx")
+        gpu.mem_clock = _clock_domain_available(clock, "mem")
 
 
 def detect_pcie_metrics(gpus: list[GpuMetricAvailability]) -> None:
@@ -366,35 +370,81 @@ def detect_pcie_metrics(gpus: list[GpuMetricAvailability]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# XGMI detection (kept from original - text parsing of amd-smi metric -x)
+# XGMI detection (link metrics from 'amd-smi xgmi')
 # ---------------------------------------------------------------------------
 
+# 'amd-smi xgmi' reads the same gpu_metrics table as the sampler: the CLI calls
+# amdsmi_get_link_metrics(), which returns the xgmi_read_data_acc/
+# xgmi_write_data_acc fields the collector samples. 'amd-smi metric -x' is
+# --xgmi-err, an error counter that is unrelated to the sampled metrics and
+# reads N/A on parts whose XGMI accumulators work, so it must not be used here.
 
-def _parse_xgmi_metric(text: str) -> dict[int, bool]:
-    """Parse 'amd-smi metric -x' output. Returns {gpu_id: xgmi_available}."""
+
+def _collect_dicts(payload) -> list[dict]:
+    """Collect every dict in a nested list structure, preserving order."""
+    entries: list[dict] = []
+
+    def _walk(item) -> None:
+        if isinstance(item, list):
+            for element in item:
+                _walk(element)
+        elif isinstance(item, dict):
+            entries.append(item)
+
+    _walk(payload)
+    return entries
+
+
+def _parse_xgmi_json(data: dict) -> dict[int, bool]:
+    """Parse 'amd-smi xgmi --json' output. Returns {gpu_id: xgmi_available}.
+
+    Mirrors the C++ OR logic for bits.xgmi in device.hpp: link speed/width and
+    the per-link read/write accumulators.
+    """
     result: dict[int, bool] = {}
-    current_gpu = None
 
-    for line in text.splitlines():
-        gpu_match = re.match(r"^GPU:\s*(\d+)", line.strip())
-        if gpu_match:
-            current_gpu = int(gpu_match.group(1))
+    for entry in _collect_dicts(data.get("xgmi_metric", [])):
+        gpu_id = entry.get("gpu")
+        link_metrics = entry.get("link_metrics")
+        if not isinstance(gpu_id, int) or not isinstance(link_metrics, dict):
             continue
-        if current_gpu is not None:
-            m = re.match(r"^\s+XGMI_ERR:\s*(.+)$", line)
-            if m:
-                result[current_gpu] = m.group(1).strip() != "N/A"
-                current_gpu = None
+
+        # link_type comes from amdsmi_topo_get_link_type(), not from the metric
+        # fields below, and stays "N/A" when that topology query fails or finds
+        # no peer link. Only a positive "PCIE" reading rules XGMI out.
+        available = False
+        link_type = link_metrics.get("link_type")
+        if not (isinstance(link_type, str) and link_type.strip().upper() == "PCIE"):
+            available = _is_available(link_metrics.get("bit_rate")) or _is_available(
+                link_metrics.get("max_bandwidth")
+            )
+            for link in _collect_dicts(link_metrics.get("links", [])):
+                available = (
+                    available
+                    or _is_available(link.get("read"))
+                    or _is_available(link.get("write"))
+                )
+
+        result[gpu_id] = result.get(gpu_id, False) or available
 
     return result
 
 
 def run_amd_smi_xgmi() -> dict[int, bool]:
-    """Run 'amd-smi metric -x' and return {gpu_id: xgmi_available}."""
-    stdout = _run_command(["amd-smi", "metric", "-x"], exit_on_failure=False)
+    """Run 'amd-smi xgmi --json' and return {gpu_id: xgmi_available}."""
+    stdout = _run_command(["amd-smi", "xgmi", "--json"], exit_on_failure=False)
     if stdout is None:
         return {}
-    return _parse_xgmi_metric(stdout)
+
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {}
+
+    if not isinstance(data, dict):
+        return {}
+
+    return _parse_xgmi_json(data)
 
 
 # ---------------------------------------------------------------------------
@@ -568,7 +618,7 @@ def main():
             print(f"  mem_usage:            {gpu.mem_usage}")
             print(f"  xgmi:                 {gpu.xgmi}")
             print(f"  pcie:                 {gpu.pcie}")
-            print(f"  ---")
+            print("  ---")
             print(f"  busy (derived):       {gpu.busy}")
             print(f"  temp (derived):       {gpu.temp}")
             print(f"  power (derived):      {gpu.power}")

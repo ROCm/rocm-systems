@@ -3,6 +3,333 @@
 Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/).
 
 
+## ROCm Compute Profiler 3.11.0 for ROCm 10.3.0
+
+### Added
+
+* Added a *Limited by* mode to the *AI axis* selector in the standalone roofline HTML. It shows each kernel at its limiting memory-level point, falling back to the leftmost point for compute-bound or unknown kernels.
+
+* `--attach-pid` now works for a process that runs in a container. Run ROCm Compute Profiler on the host, and pass the process ID that the host shows.
+
+* Added Data Fabric to MALL bandwidth arrows to the CDNA (gfx9) Memory Chart. On gfx940–gfx942 these report estimated HBM bandwidth, derived from a 64B-per-request approximation, through the new `Estimated HBM Read BW` and `Estimated HBM Write and Atomic BW` metrics. On gfx950 they use the existing `HBM Read BW` and the new `HBM Write and Atomic BW` metric.
+
+* Added the `VL1 Coalesce` metric to the VL1D panel of the CDNA (gfx9) Memory Chart.
+
+* Added the xGMI block to the gfx908, gfx90a, and gfx940–gfx942 Memory Charts, which previously showed it only on gfx950. The block is drawn without bandwidth counters on these architectures.
+
+* Added metrics to the gfx1250 Memory Chart:
+  * Instruction cache utilization, latency, and stall rate.
+  * Scalar data cache utilization, latency, stall rate, and bandwidth.
+  * GL1 request latency.
+
+* Added PC sampling counts per source line.
+  * `rocprof-compute analyze --output-format csv` writes `<file>_pc_sampling.csv` beside each captured source file. It lists every source line of the file with the samples of the instructions compiled from it, and where those instructions sit in the per-kernel ISA files.
+  * The analysis database stores the per-source-line counts in `compute_pc_sample_state`, next to the per-instruction counts.
+  * If some instructions of a source file have no source line number, the file's CSV starts with an `Unattributable instructions` row. It counts the samples lost because the compiler wrote no source line number for those instructions.
+
+* Added `--speed-of-light`, `--memory-chart`, and `--roofline` options to profile and analyze modes.
+  * They are aliases of `-b 2`, `-b 3`, and `-b 4`.
+  * They can be combined with each other and with `-b`. For example, `--speed-of-light --roofline` is the same as `-b 2 4`.
+
+* Added debug options for troubleshooting ROCm Compute Profiler itself. `--help` lists them only with `--debug`.
+  * `--debug-list-metrics-gfx-id <arch>`: with `--list-metrics`, list the blocks and metrics of another GPU.
+  * `analyze --debug-metric-expression`: print each metric's expression and inputs.
+  * `analyze --debug-table-view`: print every block as plain tables.
+  * `analyze --debug-verify-deps`: check that the Python dependencies of analyze mode are installed, then exit.
+
+* Added GPU metrics, the Memory Chart and the roofline for gfx1201.
+  * gfx1201 support is experimental and requires the `--experimental` option.
+  * Set the GPU performance level to `STABLE_STD` before profiling, as described in [Setting GPU performance level for PMC profiling](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#setting-gpu-performance-level-for-pmc-profiling).
+
+### Changed
+
+* Improved the standalone roofline HTML kernel hover tooltip: it now shows the limiting roof, percent of roofline, achieved and peak bandwidth per memory level, dispatch count and share of total application dispatches, and kernel duration and share of total application time. Kernel names longer than 200 characters are truncated in the sidebar, with the full name shown on hover.
+
+* The roofline benchmark now reports the peak measured sample across runs instead of the mean.
+
+* The roofline benchmark now reports higher FP16 and BF16 MFMA peaks on gfx950 (MI350 series), closer to the hardware's theoretical peak.
+
+* Renamed the Memory Chart left-hand panel from "Kernel" to "Compute Units" on CDNA (gfx9) and to "WGPs" on gfx115x and gfx1250. The panel now shows resource allocation stats: Wave Occupancy as a percent of the maximum wavefronts per CU (gfx9) or per WGP (gfx115x, gfx1250), vGPRs, sGPRs, Scratch in KB per wave, LDS Allocation, and Workgroups per active CU (gfx9) or per WGP (gfx115x, gfx1250).
+
+* All Memory Chart bandwidth values now use uniform fixed-point GB/s formatting (3 decimal places) for easy cross-level comparison.
+
+* Memory Chart consistency improvements across architectures.
+  * Panel and arrow sizes now follow their content.
+  * The gfx115x SQC panel shows separate instruction and scalar data cache read bandwidth to GL1.
+  * The LDS instruction arrow uses the default color.
+  * Block labels such as the memory type are part of the block title, for example `DRAM (DDR5/LPDDR5)` on gfx115x and `HDM (CXL)` on gfx1250.
+  * Percent values, including stall rates, show a progress bar, and missing values show `N/A`, on every architecture.
+
+* Every CDNA (gfx9) Memory Chart metric now reports a unit, and the Memory Chart metric descriptions in the documentation link to the related hardware sections.
+
+* `GPU_ID` in analyze output and the `--gpu-id` filter count every GPU on the node in topology order, not only the GPUs that ran kernels. A run on only the fourth GPU now reports and filters as `GPU_ID` 3 instead of 0.
+
+* Renamed the PC sampling analyze table columns `count_issued` and `count_stalled` to `issue_count` and `stall_count`, so the terminal table uses the same column names as `pc_sampling_summary.csv` and `compute_pc_sampling_summary_view`.
+
+* Renamed the `Active count` column of the per-kernel PC sampling ISA CSV files to `Issue count`, to match `issue_count` in the analyze table, `pc_sampling_summary.csv`, and `compute_pc_sampling_summary_view`.
+
+* The PC sampling analyze table, `compute_pc_sampling_summary_view`, and `pc_sampling_summary.csv` now show one row per kernel instead of one row per instruction.
+  * `--pc-sampling-rows` now sets the number of kernels shown.
+  * Per-instruction counts are in the per-kernel ISA CSV files.
+
+* `--list-metrics` no longer takes a GPU architecture. It lists the blocks of the current GPU, or the metrics of the blocks and metrics you name, for example `rocprof-compute --list-metrics sol`. Use `--debug-list-metrics-gfx-id <arch>` to list another GPU.
+
+* `--block` 30 metric IDs (e.g. 30.1.7) now refer to different metrics following the removal of unnecessary gfx950 Memory Bandwidth Analysis metrics.
+
+* The experimental ML API tracing now uses one set of options for all frameworks.
+  * Profile with `--trace-ml-api`, for example `--trace-ml-api torch triton`. With no values, it traces every supported framework.
+  * `--trace-ml-api` now also traces user ROCTx regions.
+  * List the traced operators and user ROCTx regions with `--list-operators`, for example `--list-operators torch user`.
+  * Filter them with `--operator`, for example `--operator 'torch:*conv*'`. A `user:` pattern selects a user ROCTx region with all the operators and kernels inside it.
+  * Operator call trees now show each operator's arguments.
+  * `--trace-ml-api triton` does not capture the Triton kernels that `torch.compile` generates. Use `--trace-ml-api torch` for those kernels.
+
+* The profile and analyze help is easier to read. Each option shows what value it takes, the values it accepts, and its default.
+
+* Top-level options such as `--list-metrics` can no longer be abbreviated (for example `--list-metr`), matching profile and analyze options.
+
+* `--specs-correction` takes `name:value` pairs separated by spaces instead of commas, for example `--specs-correction num_xcd:4 cu_per_gpu:64`.
+
+* Renamed the roofline options to start with `--roofline`. The old names still work for now but print a warning, so update your commands:
+  * `--roof-only` → `--roofline`
+  * `--bench-only` → `--roofline-bench-only`
+  * `--device` → `--roofline-device`
+
+* Roofline metric ids such as `-b 4.1` now count as selecting roofline, like `-b 4` and `-b roof`. In profile mode they run the roofline benchmark, and in analyze mode they show the roofline section.
+
+* `rocprof-compute profile` collects all counters of a metric in the same replay when they fit, so metric values are more accurate. Profiling can take more replays.
+
+### Removed
+
+* Removed the "Counter variance corrected" warning and the clamping it reported. Each metric now reads its counters from the same replay, so a counter difference no longer goes negative from replay-to-replay variation.
+
+* Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.
+  * The `dash`, `dash-bootstrap-components`, `dash-svg`, `textual`, and `textual_plotext` dependencies are no longer installed.
+
+* Removed the unused `compute_workload_roofline_data` table from the analysis database.
+
+* Removed the `--config-dir` option, which loaded custom panel configs.
+
+* Removed the HBM and remote traffic percentage metrics from the gfx908–gfx942 Memory Chart. On gfx940–gfx942 the new Data Fabric to MALL arrows report estimated HBM bandwidth instead.
+
+* Removed Memory Chart metrics that the panel YAMLs defined but never rendered, across all CDNA architectures. The remaining Memory Chart metrics are renumbered, so `3.1.N` metric IDs used with `--block` now refer to different metrics.
+
+* Removed the `analyze --dependency` and `profile --target` options, which had no effect, and the undocumented `analyze --report-diff` and `profile --kokkos-trace` options.
+
+* Removed the roofline plot from CLI analyze output. The HTML roofline plot is unaffected and continues to be written to disk.
+  * The `plotext` dependency is no longer installed.
+
+* Removed the `analyze --sort`, `analyze --mem-level`, and `analyze --roofline-data-type` options.
+  * These options were utilized solely by roofline plot in CLI analyze output block 4.3, which has been removed. The roofline HTML output shows every memory level and precision, and you can filter them in the browser.
+
+* Removed the `--include-cols` and `--cols` analyze options.
+
+* Removed the `analyze --pc-sampling-sorting-type` option. The PC sampling table is always sorted by sample count.
+
+* Removed unnecessary gfx950 Memory Bandwidth Analysis (block 30) metrics. Block 30 now shows only the L1 cache, L2 bottleneck, and EA bottleneck indicators, as tables 30.1, 30.2, and 30.3.
+
+* Removed support for the gfx940 and gfx941 architectures (MI300A A0 and MI300X A0). MI300A and MI300X on gfx942 remain supported.
+
+* Removed the experimental `--torch-trace`, `--triton-trace`, `--ml-api-trace`, `--list-torch-operators`, `--list-triton-operators`, `--torch-operator`, and `--triton-operator` options. Use `--trace-ml-api`, `--list-operators`, and `--operator` instead.
+
+* Removed the `-g`, `--view table`, and `--verify-deps` analyze options. Use `--debug-metric-expression`, `--debug-table-view`, and `--debug-verify-deps` instead.
+
+* Removed the `kernel` policy of `--iteration-multiplexing`. The option no longer takes a value and always spreads counters over repeated dispatches of each kernel with the same launch parameters, as it did by default.
+
+### Optimized
+
+* Profile mode collects only the counters that metric equations use, which can reduce the number of profiling passes.
+
+* PC sampling now writes disassembly only for dispatched kernels, so profiling output is much smaller.
+
+### Resolved issues
+
+* Fixed a `KeyError: 'title'` when combining `analyze --list-stats` with `--output-format csv` or `--output-format db`. These unsupported combinations now report a clear error during option validation.
+
+* Fixed `--torch-trace` errors in models that use lazy layers such as `nn.LazyLinear`.
+
+* Fixed measured zero HBM bandwidth rendering as `N/A` on the CDNA (gfx9) Memory Chart Data Fabric to MALL arrows. It now reports `0.000 GB/s`.
+* Fixed dispatch IDs not always following kernel launch order.
+
+* Fixed the Memory Chart tables printing without their titles or panel heading when analyzing more than one workload (baseline comparison).
+
+* Fixed JAX and PyTorch PC sampling finalization failures when GPU code object addresses are reused.
+
+* Fixed the aggregate L2 cache hit rate in the L2 Cache (per Channel) panel on AMD Instinct MI100 and MI200 Series.
+
+* Fixed PC sampling stall reasons counting samples where the wave issued an instruction.
+
+* Fixed the aggregate L2 cache hit rate in the L2 Cache (per Channel) panel counting only the first 16 L2 channels on AMD Instinct MI300 and MI350 Series.
+
+* Fixed the Cache Lookup Hit Rate and Cache Sector Lookup Hit Rate averages in the GL0 Cache and LDS panel on gfx1250, which showed negative values.
+
+* Fixed `-b 21` and `-b 30` rejecting `--experimental` when it comes before the mode, as in `rocprof-compute --experimental profile --pc-sampling -b 21`.
+
+### Upcoming changes
+
+* `--list-blocks` and `--list-available-metrics` will be removed in a future release.
+
+* The old roofline option names (`--roof-only`, `--bench-only`, and `--device`) will be removed in a future release. Use the new `--roofline-*` names instead.
+
+* `--no-roof` is deprecated and will be removed in a future release. To skip roofline, select blocks with `-b` or `--set` that do not include block 4.
+
+### Known issues
+
+## ROCm Compute Profiler 3.10.0 for ROCm 10.2.0
+
+### Added
+
+* Added the `LDS Utilization` metric to the gfx115x Memory Chart.
+
+* Added two wave utilization metrics to PC sampling analysis.
+  * `active_thread_percent` is the percent of a wave's lanes that were active at an instruction, so a low value points at control flow divergence. Both sampling methods report it.
+  * `wave_occupancy_percent` is the percent of the machine's wave slots that held a wave. Only stochastic sampling reports it, because a host-trap record carries no wave count.
+  * Both appear in the analyze terminal table and in each kernel's `per_kernel_pc_sampling/` CSV.
+
+* Added the two wave utilization metrics to the analysis database summary view, so `compute_pc_sampling_summary_view` and the `pc_sampling_summary.csv` export carry them alongside the sample counts.
+
+* Added a profile-mode warning on gfx115x when the `AUTO` performance level can gate the perfmon clock and zero PMC counters such as `TCP_REQ`, with a link to the ROCprofiler-SDK `STABLE_STD` workaround.
+
+* Added CLI guidance for viewing the wide memory chart without line wrapping (`less -RS` or `code -`).
+
+* Added Python 3.14 support.
+
+* Added an analyze-only install path. `pip install "rocm-profiler[compute-analyze]"` into a virtual environment installs the analysis dependencies for you.
+
+* Added `rocprof-compute analyze --verify-deps`, which reports any missing analysis dependencies.
+
+* Added Memory Bandwidth Analysis for gfx950 under `--experimental --membw-analysis`. Profile with the flag to collect block 30 counters; analyze detects the data automatically and annotates active GL1/GL2/EA stall bottlenecks on the memory chart with a guidance panel.
+
+* Added the rocprof-compute Agent Skills and the documentation they link to to the install under `share/rocprofiler-compute/`, with an `install-skills.sh` script that installs or removes them for Claude Code, Codex, or Cursor. `rocprof-compute --help` shows where to find them.
+
+### Changed
+
+* Dispatch IDs now start at 1 instead of 0.
+
+* Renamed the profile-mode dispatch filter to `--kernel-iteration-range`, matching the rocprofv3 option it drives. Update any profile command by replacing `-d/--dispatch` with `--kernel-iteration-range` to select dispatches.
+  * `--dispatch` is no longer accepted in profile-mode.
+  * `-d` is now the short form of `--output-directory` in profile-mode, also matching rocprofv3.
+
+* gfx115x Memory Chart improvements.
+  * Renamed memory chart metric names for more clarity.
+  * Each edge now reports the traffic measured at the interface it represents.
+  * Updated arrows, labels, and the legend in the memory chart to better represent their meaning.
+
+* The Torch trace collector now ships prebuilt for PyTorch 2.13 and 2.14, so
+  `--torch-trace` traces operators on every thread, including the autograd
+  threads that run the backward pass.
+
+* Named each per-kernel PC sampling folder `<short_name>_uuid_<kernel_uuid>` instead of `kernel_<kernel_uuid>`, and added the matching `short_name` column to `kernel.csv`. The short name is the demangled identifier captured while profiling.
+
+* Redesigned the CDNA (gfx9) Memory Chart with a new Rich-based layout that improves readability in the terminal. Added Non-buffer/Buffer request breakdowns (Read/Write/Atomic wavefronts) and L2-Fabric bandwidth metrics across all CDNA architectures.
+  * gfx908–gfx942: added HBM and remote traffic percentages.
+  * gfx950: added LDS Read/Write/Atomic instruction counts and per-channel bandwidth for HBM, xGMI, and PCIe.
+
+* Analyze mode now auto-detects memory bandwidth analysis data from the profiling output. The `--membw-analysis` analyze option has been removed; use `--membw-analysis` only at profile time.
+
+* Renamed gfx1250 metric labels for clarity.
+  * `VMEM Atomic RTN` to `VMEM Atomic Return` and `VMEM Atomic NORTN` to `VMEM Atomic Non-Return` in the WGP VMEM Instruction Mix panel.
+  * `LDS Atomic RTN` to `LDS Atomic Return` and `LDS Atomic NORTN` to `LDS Atomic Non-Return` in the WGP LDS Instruction Mix panel.
+  * `Total Requests - Sectors` to `Total GL0 Sectors`, `Total Requests - Sector Reads` to `GL0 Read Sectors`, and `Total Requests - Sector Writes` to `GL0 Write Sectors` in the GL0 Cache and LDS panel.
+
+### Removed
+
+* Removed the `--kernel-verbose` analyze option and the kernel name shortener it drove. The option had no effect on any output.
+
+* Removed the Nuitka standalone binary build (`STANDALONEBINARY`, `STANDALONEBINARY_EXTRACT_DIR`), its RHEL 8 docker recipe, and the `--call-binary` pytest option that exercised it.
+
+* Removed the `SKIP_NATIVE_TOOL_BUILD` build option. The counter collection tool is always built, and its sources are no longer installed for runtime compilation.
+
+* Removed the deprecated `Active CUs` metric from the System Speed-of-Light panel and the Memory Chart SVG for all CDNA architectures (gfx908, gfx90a, gfx940, gfx941, gfx942, gfx950). Use `CU Utilization` instead.
+
+### Optimized
+
+* HBM and remote traffic percentages are now more accurate, with all their counters collected in a single profiling pass.
+
+* Analyze mode produces less warning noise. Repeated warnings are de-duplicated, and messages for metrics that evaluate to N/A moved to debug level.
+
+* Analyze mode uses less disk space. It reads the profiling output directly instead of writing an extra merged copy of all counter data into the workload directory.
+
+* Analyze mode now stops as soon as it finds unreadable profiling data, instead of continuing with an incomplete set of counters.
+
+* Improved the profiling failure message when the workload and the profiler load different ROCm installations. The error now points to the PyTorch and `rocm[profiler]` install instructions instead of only showing the LLVM abort.
+
+### Resolved issues
+
+* Fixed the standalone roofline HTML so it always opens with the same axes for a given GPU, which makes two runs comparable. The axes come from the benchmarked bandwidth and compute ceilings, not from the kernels in the run.
+
+* Fixed `L2 Cache (per Channel)` labels to use a `Metric` column and numbered `Channel` row labels in CLI, TUI, and analysis database output.
+
+* Fixed `--set` running the roofline microbenchmark, which is never part of a metric set.
+
+* Fixed PC sampling source snapshots to use canonical paths and include source contents and checksums in analysis exports.
+
+* Fixed false `0` values in the gfx115x Memory Chart; missing counter data now reports `N/A`.
+
+* Fixed `GL2-Fabric Write BW` understating write bandwidth on gfx115x in the System Speed-of-Light and Memory Chart panels.
+
+* Fixed `profile -b 3 --experimental --membw-analysis` not collecting memory bandwidth analysis counters.
+
+* Fixed `analyze -b` crashing when only the gfx950 LDS bandwidth metrics are selected.
+
+### Upcoming changes
+
+* The analyze-mode `--gui` and `--tui` options are deprecated and will be removed in a future release. Use the default CLI analysis instead.
+
+### Known issues
+
+* On gfx115x, `TCP_REQ*` counters and the `GL0` metrics derived from them can read zero because the perfmon clock is power-gated at the `AUTO` performance level.
+
+## ROCm Compute Profiler 3.9.0 for ROCm 10.1.0
+
+### Added
+
+* Added GPU benchmarking and roofline profiling/analysis support for gfx1153 hardware.
+
+* Added per-kernel PC sampling analysis.
+  * `rocprof-compute analyze --output-format csv` writes each kernel's disassembly under `per_kernel_pc_sampling/`, with the sample and stall counts on every instruction and the source it was compiled from.
+  * The analysis database records the same per-instruction data, so `--output-format db` can be queried for it.
+
+* Added multi-process PC sampling across profile and analyze modes.
+  * Profile mode writes one PID-prefixed `<pid>_ps_file_results.json` per process.
+  * Analyze mode reports every process in a single run, with a `pid` column
+    identifying each one.
+
+* Redesigned the standalone roofline HTML to improve user experience and interactivity.
+
+* Added a profile-mode warning reporting the active compute and memory partition
+  modes on partition-capable accelerators, noting that analysis derives logical
+  XCD, L2 channel, and HBM channel counts from them.
+
+* Added a guide for profiling vLLM workloads and its caveats.
+
+### Changed
+
+* Renamed the PC sampling analysis output: `pc_sampling.csv` is now `pc_sampling_summary.csv`, and the `compute_pc_sampling_view` view is now `compute_pc_sampling_summary_view`.
+
+* ML API tracing options (--torch-trace/--triton-trace/--ml-api-trace) are no longer allowed with PC-sampling-only profiling; the run now fails with an error telling the user to drop the ML API tracing flag or add a counter block, since without counters there is nothing to correlate the markers against.
+
+### Removed
+
+* Removed the CSV profile output backend and the `--format-rocprof-output` profile mode option. Profiling now always uses the `rocpd` output format, which was already the default.
+  * Removed the `--join-type` profile mode option, which only affected the CSV output format.
+
+* Removed analyze support for workloads produced by the CSV profile backend. Such workloads are now rejected with an error telling you to re-profile with a current release.
+
+### Optimized
+
+* Reduced profile-mode peak memory when writing counter data on large workloads.
+
+* Profile mode now gzip-compresses large counter CSV artifacts to reduce workload directory size.
+
+### Resolved issues
+
+* Corrected the VGPR allocation label from `RVGPRseq` to `VGPRs` in gfx9 memory charts
+
+### Upcoming changes
+
+### Known issues
+
 ## ROCm Compute Profiler 3.8.0 for ROCm 10.0.0
 
 ### Added

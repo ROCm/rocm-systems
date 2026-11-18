@@ -341,39 +341,12 @@ public:
     static uint64_t Submit(hsa_queue_t* queue, const void* packet);
     static uint64_t Submit(hsa_queue_t* queue, const void* packet, size_t size_bytes);
 
-    // Return AqlProfile API table
-    typedef hsa_ven_amd_aqlprofile_pfn_t aqlprofile_pfn_t;
-    const aqlprofile_pfn_t*              AqlProfileApi() const { return &aqlprofile_api_; }
-
-    // Return Loader API table
-    const hsa_ven_amd_loader_1_00_pfn_t* LoaderApi() const { return &loader_api_; }
-
-    // Methods for system-clock/ns conversion and timestamp in 'ns'
-    timestamp_t SysclockToNs(const timestamp_t& sysclock) const
-    {
-        return timer_->sysclock_to_ns(sysclock);
-    }
-    timestamp_t NsToSysclock(const timestamp_t& time) const { return timer_->ns_to_sysclock(time); }
-    timestamp_t TimestampNs() const { return timer_->timestamp_ns(); }
-
-    timestamp_t        GetSysTimeout() const { return timeout_; }
-    static timestamp_t GetTimeoutNs() { return timeout_ns_; }
-    static void        SetTimeoutNs(const timestamp_t& time)
-    {
-        std::lock_guard<mutex_t> lck(mutex_);
-        timeout_ns_ = time;
-        if(instance_ != nullptr) instance_->timeout_ = instance_->timer_->ns_to_sysclock(time);
-    }
-
 private:
     // System agents iterating callback
     static hsa_status_t GetHsaAgentsCallback(hsa_agent_t agent, void* data);
 
     // Callback function to find and bind kernarg region of an agent
     static hsa_status_t FindMemRegionsCallback(hsa_region_t region, void* data);
-
-    // Load AQL profile HSA extension library directly
-    static hsa_status_t LoadAqlProfileLib(aqlprofile_pfn_t* api);
 
     // Constructor of the class. Will initialize the Hsa Runtime and
     // query the system topology to get the list of Cpu and Gpu devices
@@ -389,8 +362,6 @@ private:
     static constexpr bool  CMD_MEMORY_MMAP = false;
     static HsaRsrcFactory* instance_;
     static mutex_t         mutex_;
-    // System timeout, ns
-    static timestamp_t timeout_ns_;
 
     // HSA was initialized
     const bool initialize_hsa_ = false;
@@ -405,18 +376,6 @@ private:
 
     // System agents map
     std::map<hsa_agent_handle_t, const AgentInfo*> agent_map_ = {};
-
-    // AqlProfile API table
-    aqlprofile_pfn_t aqlprofile_api_ = {};
-
-    // Loader API table
-    hsa_ven_amd_loader_1_00_pfn_t loader_api_ = {};
-
-    // System timeout, sysclock
-    timestamp_t timeout_ = HsaTimer::TIMESTAMP_MAX;
-
-    // HSA timer
-    HsaTimer* timer_ = nullptr;
 
     // CPU/kern-arg memory pools
     hsa_amd_memory_pool_t* cpu_pool_      = nullptr;

@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #ifndef AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_
 #define AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_
@@ -29,6 +10,7 @@
 #include <cctype>
 #include <charconv>
 #include <cstdint>
+#include <iosfwd>
 #include <limits>
 #include <optional>
 #include <string>
@@ -57,11 +39,17 @@ amdsmi_status_t smi_amdgpu_get_bad_page_info(amd::smi::AMDSmiGPUDevice* device, 
 amdsmi_status_t smi_amdgpu_get_bad_page_threshold(amd::smi::AMDSmiGPUDevice* device,
                                                   uint32_t* threshold);
 amdsmi_status_t smi_amdgpu_validate_ras_eeprom(amd::smi::AMDSmiGPUDevice* device);
-amdsmi_status_t smi_amdgpu_get_ecc_error_count(amd::smi::AMDSmiGPUDevice* device,
-                                               amdsmi_error_count_t* err_cnt);
 amdsmi_status_t smi_amdgpu_get_driver_version(amd::smi::AMDSmiGPUDevice* device, int* length,
                                               char* version);
 amdsmi_status_t smi_amdgpu_get_pcie_speed_from_pcie_type(uint16_t pcie_type, uint32_t* pcie_speed);
+// True when KFD reports the GPU's link to the CPU as xGMI: the GPU has no PCIe host link, and
+// the PCIe link in its config space is emulated. False otherwise, including when the lookup fails.
+bool smi_amdgpu_has_xgmi_host_link(amd::smi::AMDSmiGPUDevice* device);
+// PLX temperature is carried in gpu_metrics rather than hwmon. Reports
+// NOT_SUPPORTED when the reading holds the not-applicable sentinel (an APU has
+// no such sensor), otherwise writes *temperature.
+amdsmi_status_t smi_amdgpu_plx_temp_from_metrics(const amdsmi_gpu_metrics_t& metrics,
+                                                 int64_t* temperature);
 amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice* device,
                                                        char* market_name);
 amdsmi_status_t smi_amdgpu_is_gpu_power_management_enabled(amd::smi::AMDSmiGPUDevice* device,
@@ -72,9 +60,7 @@ std::string smi_amdgpu_split_string(std::string str, char delim);
 std::vector<std::string> split_string(const std::string& line, char delim);
 std::string smi_amdgpu_get_status_string(amdsmi_status_t ret, bool fullStatus);
 
-uint32_t smi_brcm_get_value_u32(const std::string& folder, const std::string& file_name);
-std::string smi_brcm_get_value_string(const std::string& folder, const std::string& file_name);
-amdsmi_status_t smi_brcm_execute_cmd_get_data(const std::string& command, std::string* data);
+std::string smi_read_sysfs_string(const std::string& folder, const std::string& file_name);
 
 amdsmi_status_t smi_clear_char_and_reinitialize(char buffer[], uint32_t len, std::string newString);
 
@@ -318,19 +304,21 @@ amdsmi_status_t smi_amdgpu_read_clk_freq_from_pp_dpm(amd::smi::AMDSmiGPUDevice* 
 const char* smi_amdgpu_pp_dpm_filename_for_clk_type(amdsmi_clk_type_t clk_type);
 
 /**
- *  @brief Whether gfx activity should be reported as N/A for this GPU.
+ *  @brief Reset amdsmi_asic_info_t to its not-supported state.
  *
- *  AMDSMI_SILENCE_GFX_ACTIVITY overrides everything ("1" silences, any other
- *  value shows). When unset, silencing auto-enables for GPUs whose graphics and
- *  RLC firmware versions fall in the affected ranges.
+ *  Backends call this before filling in what they can, so a field a backend
+ *  does not know about reports N/A rather than a plausible zero.
+ *
+ *  @param[out] info Structure to reset to its not-supported state.
  */
-bool is_gfx_activity_silenced(amdsmi_processor_handle processor_handle);
+void init_asic_info_defaults(amdsmi_asic_info_t* info);
 
 /**
- *  @brief Force the gfx activity fields of @p metrics to the uint-max N/A
- *  sentinel when silenced (whole-GPU and per-XCP busy values). No-op otherwise.
+ *  @brief Format a DRM driver date such as ``20150101`` as ``2015/01/01 00:00``.
+ *
+ *  Returns an empty string (N/A) for ``0``, which kernels without a DRM driver
+ *  date report.
  */
-void apply_gfx_activity_overrides(amdsmi_processor_handle processor_handle,
-                                  amdsmi_gpu_metrics_t* metrics);
+auto smi_amdgpu_format_driver_date(std::string_view drm_date) -> std::string;
 
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_

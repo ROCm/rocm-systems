@@ -83,8 +83,11 @@ public:
 class memory_error_t : public api_error_t
 {
 private:
+  /* The address space is held by pointer rather than by reference to avoid a
+     -Wsfinae-incomplete warning on GCC, as address_space_t is incomplete at
+     this point.  */
   std::optional<
-    std::pair<const address_space_t &, amd_dbgapi_segment_address_t>>
+    std::pair<const address_space_t *, amd_dbgapi_segment_address_t>>
     m_address;
 
 protected:

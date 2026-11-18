@@ -7,13 +7,30 @@
 
 #pragma once
 
+#include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/simd.h"
 
 #include <gtest/gtest.h>
 
+#include <array>
+#include <cstdint>
 #include <random>
+#include <utility>
 
 namespace mma_test {
+
+// Execute a decoded matrix instruction against the fixture's existing register state.
+inline void execute(rocjitsu::amdgpu::ComputeUnitCore &cu, rocjitsu::amdgpu::Wavefront &wave,
+                    std::array<uint32_t, 2> words) {
+  const std::array<uint32_t, 4> code{words[0], words[1], 0, 0};
+  auto decoded = rocjitsu::Decoder::create(cu.arch())->decode(code.data());
+  ASSERT_TRUE(decoded.succeeded());
+  auto instruction = std::move(decoded).value();
+  ASSERT_TRUE(cu.execute_instruction(instruction.get(), wave).succeeded());
+}
 
 // Wavefront sizes for the two MMA families (differ by design, so they are named
 // rather than a single shared WF_SIZE).
@@ -25,6 +42,30 @@ constexpr uint32_t WMMA_WF_SIZE = 32; // gfx1250 / RDNA WMMA is wave32.
 constexpr uint32_t SGPRS_PER_WF = 106;
 constexpr uint32_t VGPRS_PER_WF = 256;
 constexpr int BENCH_ITERATIONS = 4000;
+
+constexpr std::array<uint32_t, 4>
+make_cdna4_mfma_scale_words(uint32_t op, uint32_t abid, uint32_t scale_a, uint32_t scale_b,
+                            uint32_t a_byte = 0, uint32_t b_byte = 0, uint32_t cbsz = 4,
+                            uint32_t blgp = 4, uint32_t vdst = 64, uint32_t src0 = 256,
+                            uint32_t src1 = 272, uint32_t src2 = 288) {
+  const uint32_t op_sel = (a_byte & 1u) | ((b_byte & 1u) << 1);
+  const uint32_t op_sel_hi = ((a_byte >> 1) & 1u) | (((b_byte >> 1) & 1u) << 1);
+  return {0xD3AC0000u | (op_sel << 11),
+          (scale_a & 0x1FFu) | ((scale_b & 0x1FFu) << 9) | (op_sel_hi << 27),
+          (vdst & 0xFFu) | ((cbsz & 0x7u) << 8) | ((abid & 0xFu) << 11) | ((op & 0x7Fu) << 16) |
+              (423u << 23),
+          (src0 & 0x1FFu) | ((src1 & 0x1FFu) << 9) | ((src2 & 0x1FFu) << 18) |
+              ((blgp & 0x7u) << 29)};
+}
+
+constexpr std::array<uint32_t, 4>
+make_cdna5_wmma_scale_words(uint32_t format_a, uint32_t format_b, uint32_t scale_a,
+                            uint32_t scale_b, uint32_t vdst = 64, uint32_t src0 = 256,
+                            uint32_t src1 = 288, uint32_t src2 = 320) {
+  return {0xCC350000u, (scale_a & 0x1ffu) | ((scale_b & 0x1ffu) << 9) | (256u << 18),
+          0xCC330000u | vdst | (format_a << 11) | ((format_b >> 2) << 14),
+          src0 | (src1 << 9) | (src2 << 18) | ((format_b & 3u) << 27)};
+}
 
 // Small finite generator: values in roughly [-1, 1], deterministic per call.
 struct SmallGen {

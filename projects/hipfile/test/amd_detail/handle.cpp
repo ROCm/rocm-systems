@@ -279,6 +279,42 @@ TEST_F(HipFileHandle, RocfileHandleRegisterLibMountError)
     ASSERT_EQ(hipFileHandleRegister(&fh, &rfd), HipFileOpError(hipFileInternalError));
 }
 
+struct ErrnoParam {
+    int         value;
+    const char *name;
+};
+
+// Readable test parameter in gtest/ctest output
+static void
+PrintTo(const ErrnoParam &param, std::ostream *os)
+{
+    *os << param.name;
+}
+
+struct HipFileHandleOutOfFds : public HipFileHandle, public WithParamInterface<ErrnoParam> {};
+
+// If reopening the file during registration fails because the process or
+// system is out of file descriptors return hipFileGetNewFDFailed
+TEST_P(HipFileHandleOutOfFds, hipfileHandleRegisterReopenError)
+{
+    hipFileHandle_t fh{};
+    hipFileDescr_t  rfd{};
+    rfd.type      = hipFileHandleTypeOpaqueFD;
+    rfd.handle.fd = 0xBADF00D;
+
+    // Deliberately test the registering non-O_DIRECT path as it catches std::system_error.
+    ExpectUnregisteredFileBuilder(msys, mlibmounthelper)
+        .fd_flags(~O_DIRECT)
+        .open_throws(GetParam().value)
+        .build();
+
+    ASSERT_EQ(hipFileHandleRegister(&fh, &rfd), HipFileOpError(hipFileGetNewFDFailed));
+}
+
+INSTANTIATE_TEST_SUITE_P(, HipFileHandleOutOfFds,
+                         Values(ErrnoParam{EMFILE, "EMFILE"}, ErrnoParam{ENFILE, "ENFILE"}),
+                         PrintToStringParamName());
+
 TEST_F(HipFileHandle, register_handle_linux_fd_already_registered)
 {
     hipFileHandle_t fh{};
@@ -808,6 +844,89 @@ TEST_F(HipFileHandle, OnXfsReturnsFalseForOtherFileSystem)
     auto file{Context<DriverState>::get()->getFile(fh)};
 
     EXPECT_FALSE(file->onXfs());
+}
+
+TEST_F(HipFileHandle, OnNfsRdmaReturnsTrueForNfsRdma)
+{
+    int client_fd{0xBADF00D};
+    int open_fd{eventfd(0, 0)};
+    ASSERT_NE(open_fd, -1);
+
+    MountInfo mountinfo{};
+    mountinfo.type        = FilesystemType::nfs;
+    mountinfo.options.nfs = {NfsProto::rdma};
+
+    ExpectUnregisteredFileBuilder(msys, mlibmounthelper)
+        .fd_flags(O_DIRECT)
+        .mountinfo(mountinfo)
+        .open_fd(open_fd)
+        .build();
+    auto file_handle{Context<DriverState>::get()->registerFile(client_fd)};
+    auto file{Context<DriverState>::get()->getFile(file_handle)};
+
+    EXPECT_TRUE(file->onNfsRdma());
+}
+
+TEST_F(HipFileHandle, OnNfsRdmaReturnsTrueForNfsRdma6)
+{
+    int client_fd{0xBADF00D};
+    int open_fd{eventfd(0, 0)};
+    ASSERT_NE(open_fd, -1);
+
+    MountInfo mountinfo{};
+    mountinfo.type        = FilesystemType::nfs;
+    mountinfo.options.nfs = {NfsProto::rdma6};
+
+    ExpectUnregisteredFileBuilder(msys, mlibmounthelper)
+        .fd_flags(O_DIRECT)
+        .mountinfo(mountinfo)
+        .open_fd(open_fd)
+        .build();
+    auto file_handle{Context<DriverState>::get()->registerFile(client_fd)};
+    auto file{Context<DriverState>::get()->getFile(file_handle)};
+
+    EXPECT_TRUE(file->onNfsRdma());
+}
+
+TEST_F(HipFileHandle, OnNfsRdmaReturnsFalseForNfsWithoutRdma)
+{
+    int client_fd{0xBADF00D};
+    int open_fd{eventfd(0, 0)};
+    ASSERT_NE(open_fd, -1);
+
+    MountInfo mountinfo{};
+    mountinfo.type        = FilesystemType::nfs;
+    mountinfo.options.nfs = {NfsProto::tcp};
+
+    ExpectUnregisteredFileBuilder(msys, mlibmounthelper)
+        .fd_flags(O_DIRECT)
+        .mountinfo(mountinfo)
+        .open_fd(open_fd)
+        .build();
+    auto file_handle{Context<DriverState>::get()->registerFile(client_fd)};
+    auto file{Context<DriverState>::get()->getFile(file_handle)};
+
+    EXPECT_FALSE(file->onNfsRdma());
+}
+
+TEST_F(HipFileHandle, OnNfsRdmaReturnsFalseForOtherFileSystem)
+{
+    int client_fd{0xBADF00D};
+    int open_fd{eventfd(0, 0)};
+    ASSERT_NE(open_fd, -1);
+
+    MountInfo mountinfo{};
+    mountinfo.type = FilesystemType::other;
+
+    ExpectUnregisteredFileBuilder(msys, mlibmounthelper)
+        .fd_flags(O_DIRECT)
+        .mountinfo(mountinfo)
+        .open_fd(open_fd)
+        .build();
+    auto file_handle{Context<DriverState>::get()->registerFile(client_fd)};
+    auto file{Context<DriverState>::get()->getFile(file_handle)};
+
+    EXPECT_FALSE(file->onNfsRdma());
 }
 
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON

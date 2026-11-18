@@ -23,6 +23,9 @@ add_executable(minimal-pthreads ${CMAKE_CURRENT_SOURCE_DIR}/pthreads.cpp)
 target_link_libraries(minimal-pthreads PRIVATE Threads::Threads)
 list(APPEND MINIMAL_EXAMPLES minimal-pthreads)
 
+add_executable(minimal-sleep-interrupts ${CMAKE_CURRENT_SOURCE_DIR}/sleep_interrupts.cpp)
+list(APPEND MINIMAL_EXAMPLES minimal-sleep-interrupts)
+
 foreach(MINIMAL_EXAMPLE IN LISTS MINIMAL_EXAMPLES)
     if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET ${MINIMAL_EXAMPLE})
         install(

@@ -30,7 +30,15 @@
 using namespace hipFile;
 using namespace std;
 
+static bool
+fastpathFallbackEligibleErrno(int err)
+{
+    return err == ENODEV || err == EREMOTEIO;
+}
+
 /* The fastpath backend is used when:
+ *  - Configuration::fastpath() is true. Among other things, this is false when
+ *    ROCr is running on WSL2 (/dev/dxg), where AIS is not implemented
  *  - The file has been opened with the O_DIRECT flag
  *  - if statx contains direct io information
  *      - statx indicates the file descriptor supports direct IO (see statx (2))
@@ -60,8 +68,6 @@ using namespace std;
  *        header so hipGetProcAddress() is used to lookup each function's function
  *        pointer
  *      - returns
- *          - hipSuccess if size is zero
- *              - This check should be removed
  *          - hipErrorInvalidDevice if unable to lookup current device
  *          - hipErrorUnknown if rocr runtime does not return success
  *  - ROCR Runtime (userspace)
@@ -78,8 +84,6 @@ using namespace std;
  *      - hsa_amd_ais_file_read(...), hsa_amd_ais_file_write(...)
  *      - status and size_coppied untouched
  *      - returns
- *          - HSA_STATUS_ERROR_INVALID_ARGUMENT if size is zero
- *              - This check should be be removed
  *          - HSA_STATUS_ERROR_INVALID_ARGUMENT if devicePtr is NULL
  *              - This check should be be removed
  *          - HSA_STATUS_ERROR if hsaKmtAisReadWriteFile(...) does not return success
@@ -150,9 +154,10 @@ Fastpath::score(const shared_ptr<IFile> &file, const shared_ptr<IBuffer> &buffer
     bool is_block_device{file->isBlockDevice()};
     bool on_ext4_ordered{file->onExt4Ordered()};
     bool on_xfs{file->onXfs()};
+    bool on_nfs_rdma{file->onNfsRdma()};
     bool unsupported_file_systems{Context<Configuration>::get()->unsupportedFileSystems()};
-    accept_io &=
-        is_block_device || (is_regular_file && (unsupported_file_systems || on_ext4_ordered || on_xfs));
+    accept_io &= is_block_device ||
+                 (is_regular_file && (unsupported_file_systems || on_ext4_ordered || on_xfs || on_nfs_rdma));
 
     const uint32_t dio_offset_align{file->dioOffsetAlign()};
     accept_io &= dio_offset_align && !(file_offset & (dio_offset_align - 1));
@@ -172,7 +177,7 @@ ssize_t
 Fastpath::_io_impl(IoType type, shared_ptr<IFile> file, shared_ptr<IBuffer> buffer, size_t size,
                    hoff_t file_offset, hoff_t buffer_offset)
 {
-    StatsIoTracker ioTracker{type, StatsBackend::Fastpath};
+    StatsIoTracker ioTracker{type, StatsBackend::Fastpath, buffer->getGpuId()};
     if (!Context<Configuration>::get()->fastpath()) {
         throw BackendDisabled();
     }
@@ -217,16 +222,17 @@ Fastpath::_io_impl(IoType type, shared_ptr<IFile> file, shared_ptr<IBuffer> buff
         }
     }
     catch (...) {
-        Context<StatsCollection>::get()->error(type, StatsBackend::Fastpath, size);
+        Context<StatsCollection>::get()->error(type, StatsBackend::Fastpath, size, buffer->getGpuId());
         throw;
     }
     return static_cast<ssize_t>(nbytes);
 }
 
 void
-Fastpath::async_io(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer, size_t *size_p,
-                   hoff_t *file_offset_p, hoff_t *buffer_offset_p, ssize_t *bytes_transferred_p,
-                   std::shared_ptr<IStream> stream)
+Fastpath::enqueueAsyncIo(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer,
+                         size_t *size_p, hoff_t *file_offset_p, hoff_t *buffer_offset_p,
+                         ssize_t *bytes_transferred_p, std::shared_ptr<IStream> stream,
+                         std::shared_ptr<AsyncFailoverState> failover)
 {
     size_t limited_size = min(*size_p, hipFile::getMaxRwCount());
 
@@ -240,8 +246,9 @@ Fastpath::async_io(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBu
 
     *bytes_transferred_p = 0;
 
-    auto op = std::shared_ptr<AsyncOp>(new AsyncOp(type, std::move(file), buffer, stream, size_p,
-                                                   file_offset_p, buffer_offset_p, bytes_transferred_p));
+    auto op      = std::shared_ptr<AsyncOp>(new AsyncOp(type, std::move(file), buffer, stream, size_p,
+                                                        file_offset_p, buffer_offset_p, bytes_transferred_p));
+    op->failover = std::move(failover);
     Context<AsyncMonitor>::get()->addOp(op);
 
     try {
@@ -270,15 +277,7 @@ Fastpath::is_fallback_eligible(std::exception_ptr e_ptr, ssize_t nbytes) const
         std::rethrow_exception(e_ptr);
     }
     catch (const std::system_error &sys_err) {
-        switch (sys_err.code().value()) {
-            case ENODEV:
-                return true;
-            case EREMOTEIO:
-                return true;
-            default:
-                // System error not eligible for fallback.
-                return false;
-        }
+        return fastpathFallbackEligibleErrno(sys_err.code().value());
     }
     catch (...) {
         // Thrown exception not eligible for fallback.
@@ -331,6 +330,12 @@ async_fastpath_copy(void *userArgs)
                 return;
         }
         op->bytes_transferred_internal = nbytes;
+    }
+    catch (const std::system_error &sys_err) {
+        op->bytes_transferred_internal = -hipFileInternalError;
+        if (op->failover && fastpathFallbackEligibleErrno(sys_err.code().value())) {
+            op->failover->fallback_needed = true;
+        }
     }
     catch (...) {
         op->bytes_transferred_internal = -hipFileInternalError;

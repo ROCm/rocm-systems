@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -37,6 +37,11 @@
 
 namespace rocprofiler
 {
+namespace context
+{
+struct context;
+}
+
 namespace hsa
 {
 struct tracing_table
@@ -151,6 +156,13 @@ get_hsa_status_string(hsa_status_t _status);
 uint64_t
 get_hsa_timestamp_period();
 
+bool
+needs_high_precision_timestamps(const context::context* ctx);
+
+// Uses the incoming runtime table so an older runtime's shorter table is respected.
+bool
+enable_high_precision_timestamps(hsa_amd_ext_table_t* table);
+
 template <size_t TableIdx>
 const char*
 name_by_id(uint32_t id);
@@ -174,6 +186,10 @@ iterate_args(uint32_t                                           id,
              rocprofiler_callback_tracing_operation_args_cb_t   callback,
              int32_t                                            max_deref,
              void*                                              user_data);
+
+template <typename TableT>
+void
+restore_table(TableT* _orig, uint64_t _tbl_instance);
 
 template <typename TableT>
 void

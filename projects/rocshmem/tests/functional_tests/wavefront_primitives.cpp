@@ -33,10 +33,11 @@ using namespace rocshmem;
 /******************************************************************************
  * DEVICE TEST KERNEL
  *****************************************************************************/
+template <TestType Type>
 __global__ void WaveFrontPrimitiveTest(int loop, int skip,
                                        long long int *start_time,
                                        long long int *end_time, char *source,
-                                       char *dest, size_t size, TestType type,
+                                       char *dest, size_t size,
                                        ShmemContextType ctx_type,
                                        int wf_size, int batch,
                                        int *grid_psync) {
@@ -44,6 +45,12 @@ __global__ void WaveFrontPrimitiveTest(int loop, int skip,
   int wg_id = get_flat_grid_id();
 
   rocshmem_wg_ctx_create(ctx_type, &ctx);
+
+  // Opt into the LDS-staged copy path for wave put/get on gfx1250 builds
+  // with USE_LDS_STAGE/USE_TDM; rocshmem_query_lds_stage_bytes() returns 0
+  // otherwise.
+  extern __shared__ uint8_t tdm_lds[];
+  rocshmem_set_lds_stage(tdm_lds, rocshmem_query_lds_stage_bytes());
 
   // Calculate start index for each wavefront
   int wf_id = get_flat_block_id() / wf_size;
@@ -74,21 +81,14 @@ __global__ void WaveFrontPrimitiveTest(int loop, int skip,
       }
     }
 
-    switch (type) {
-      case WAVEGetTestType:
-        rocshmem_ctx_getmem_wave(ctx, dest + offset, source + offset, size, 1);
-        break;
-      case WAVEGetNBITestType:
-        rocshmem_ctx_getmem_nbi_wave(ctx, dest + offset, source + offset, size, 1);
-        break;
-      case WAVEPutTestType:
-        rocshmem_ctx_putmem_wave(ctx, dest + offset, source + offset, size, 1);
-        break;
-      case WAVEPutNBITestType:
-        rocshmem_ctx_putmem_nbi_wave(ctx, dest + offset, source + offset, size, 1);
-        break;
-      default:
-        break;
+    if constexpr (Type == WAVEGetTestType) {
+      rocshmem_ctx_getmem_wave(ctx, dest + offset, source + offset, size, 1);
+    } else if constexpr (Type == WAVEGetNBITestType) {
+      rocshmem_ctx_getmem_nbi_wave(ctx, dest + offset, source + offset, size, 1);
+    } else if constexpr (Type == WAVEPutTestType) {
+      rocshmem_ctx_putmem_wave(ctx, dest + offset, source + offset, size, 1);
+    } else if constexpr (Type == WAVEPutNBITestType) {
+      rocshmem_ctx_putmem_nbi_wave(ctx, dest + offset, source + offset, size, 1);
     }
   }
 
@@ -109,10 +109,12 @@ WaveFrontPrimitiveTester::WaveFrontPrimitiveTester(TesterArguments args)
   char *local = (char *) alloc_test_buffer(buff_size, args.local_buf_type);
   char *remote = (char *) alloc_test_buffer(buff_size);
   CHECK_HIP(hipMalloc(&grid_psync, sizeof(int)));
+  size_t lds_bytes = rocshmem_query_lds_stage_bytes();
 
   int max_co_resident_wgs_per_cu = 0;
   CHECK_HIP(hipOccupancyMaxActiveBlocksPerMultiprocessor(
-      &max_co_resident_wgs_per_cu, WaveFrontPrimitiveTest, args.wg_size, 0));
+      &max_co_resident_wgs_per_cu, WaveFrontPrimitiveTest<WAVEPutTestType>,
+      args.wg_size, lds_bytes));
   const int max_sustainable_wgs =
       max_co_resident_wgs_per_cu * deviceProps.multiProcessorCount;
   if (args.num_wgs > static_cast<unsigned>(max_sustainable_wgs)) {
@@ -172,12 +174,41 @@ void WaveFrontPrimitiveTester::resetBuffers(size_t size) {
 
 void WaveFrontPrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize,
                                            int loop, size_t size) {
-  size_t shared_bytes = 0;
+  // Dynamic LDS for the LDS-staged copy path (0 when not built with
+  // USE_LDS_STAGE/USE_TDM); see
+  // rocshmem_query_lds_stage_bytes() / rocshmem_set_lds_stage() in the kernel.
+  size_t shared_bytes = rocshmem_query_lds_stage_bytes();
 
-  hipLaunchKernelGGL(WaveFrontPrimitiveTest, gridSize, blockSize, shared_bytes,
-                     stream, loop, args.skip, start_time, end_time,
-                     source, dest, size, _type, _shmem_context,
-                     wf_size, batch_size, grid_psync);
+  switch (_type) {
+    case WAVEGetTestType:
+      hipLaunchKernelGGL(WaveFrontPrimitiveTest<WAVEGetTestType>,
+                         gridSize, blockSize, shared_bytes, stream, loop,
+                         args.skip, start_time, end_time, source, dest, size,
+                         _shmem_context, wf_size, batch_size, grid_psync);
+      break;
+    case WAVEGetNBITestType:
+      hipLaunchKernelGGL(WaveFrontPrimitiveTest<WAVEGetNBITestType>,
+                         gridSize, blockSize, shared_bytes, stream, loop,
+                         args.skip, start_time, end_time, source, dest, size,
+                         _shmem_context, wf_size, batch_size, grid_psync);
+      break;
+    case WAVEPutTestType:
+      hipLaunchKernelGGL(WaveFrontPrimitiveTest<WAVEPutTestType>,
+                         gridSize, blockSize, shared_bytes, stream, loop,
+                         args.skip, start_time, end_time, source, dest, size,
+                         _shmem_context, wf_size, batch_size, grid_psync);
+      break;
+    case WAVEPutNBITestType:
+      hipLaunchKernelGGL(WaveFrontPrimitiveTest<WAVEPutNBITestType>,
+                         gridSize, blockSize, shared_bytes, stream, loop,
+                         args.skip, start_time, end_time, source, dest, size,
+                         _shmem_context, wf_size, batch_size, grid_psync);
+      break;
+    default:
+      std::cerr << "Invalid Test: unhandled TestType " << _type
+                << " in WaveFrontPrimitiveTester::launchKernel" << std::endl;
+      exit(-1);
+  }
 
   num_msgs = (loop + args.skip) * gridSize.x * num_warps;
   num_timed_msgs = loop * gridSize.x * num_warps;

@@ -8,7 +8,7 @@ if(BUILD_TESTS)
   option(OPENMP_TESTS_ENABLED "Enable OpenMP for unit tests" OFF)
   option(ENABLE_MPI_TESTS "Enable MPI-based tests" OFF)
   #Automatically enabled when MPI-based tests available
-  option(RCCL_HAS_GIN_IB_PROXY "Build the IB Proxy GIN transport-level tests" ON)
+  option(RCCL_HAS_RMA_IB_PROXY "Build the IB Proxy RMA transport-level tests" ON)
   option(ENABLE_HOST_API_TESTS "Build the host-API tests" ON)
 
 
@@ -19,6 +19,10 @@ if(BUILD_TESTS)
 
   # CPU-only generator unit test: guards the -fgpu-rdc device-function dispatch
   # codegen in src/device/generate.py. Needs no GPU and no built library.
+  #
+  # Registered here for local `ctest` runs only. Nothing in RCCL CI runs ctest, so
+  # what actually gates this suite is the `guards` phase of
+  # test/host/run_host_tests.sh, which invokes it directly.
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
   add_test(
     NAME rccl-generate-device-table
@@ -26,12 +30,57 @@ if(BUILD_TESTS)
             "${PROJECT_SOURCE_DIR}/src/device/test_generate_device_table.py"
   )
 
+  # CPU-only generator unit test: guards src/device/ce_reduce/generate.py's
+  # per-instantiation TU splitting (ce_reduce_impl.h.in / ce_reduce_launcher.cpp.in
+  # template expansion). Needs no GPU and no built library.
+  add_test(
+    NAME rccl-generate-ce-reduce
+    COMMAND "${Python3_EXECUTABLE}"
+            "${PROJECT_SOURCE_DIR}/src/device/ce_reduce/test_generate_ce_reduce.py"
+  )
+
+  # CPU-only Makefile scan: NCCL PR #1806 (-M -> -MM) must stay in force.
+  # Registered here for local `ctest` only; CI gates via the `guards` phase of
+  # test/host/run_host_tests.sh.
+  add_test(
+    NAME rccl-makefile-depflags
+    COMMAND "${Python3_EXECUTABLE}"
+            "${PROJECT_SOURCE_DIR}/test/test_makefile_depflags.py"
+  )
+
+  # The kernel-count leak guards and the __hip_atomic_* poison probe
+  # (src/include/test_poison_hip_atomics.py) are intentionally NOT registered as
+  # ctest cases here: nothing in RCCL CI runs `ctest`, so an add_test() would
+  # never gate. They run in CI via the CPU-only host-test pipeline instead --
+  # see test/host/run_host_tests.sh (the `guards` phase, folded into `run`).
+
+  # CPU-only net_telemetry unit test: net_telemetry.cc depends only on libc and
+  # pthread, so this compiles it directly with its own harness (no GPU, no gtest,
+  # no librccl) and runs under CTest, returning non-zero on any failed CHECK.
+  find_package(Threads REQUIRED)
+  add_executable(rccl-UnitTestsNetTelemetry
+    ${PROJECT_SOURCE_DIR}/test/net_telemetry_test.cpp
+    ${PROJECT_SOURCE_DIR}/src/transport/net_telemetry.cc
+  )
+  target_include_directories(rccl-UnitTestsNetTelemetry PRIVATE
+    ${PROJECT_SOURCE_DIR}/src/include)
+  target_link_libraries(rccl-UnitTestsNetTelemetry PRIVATE Threads::Threads)
+  add_test(NAME rccl-UnitTestsNetTelemetry COMMAND rccl-UnitTestsNetTelemetry)
+  rocm_install(TARGETS rccl-UnitTestsNetTelemetry COMPONENT tests)
+
   if (ENABLE_CODE_COVERAGE)
     add_compile_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
     add_link_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
     # Allow ProcessIsolatedTestRunner.cpp to call __llvm_profile_write_file()
     # explicitly before _exit() so child-process coverage data is flushed.
     add_compile_definitions(RCCL_TEST_CODE_COVERAGE=1)
+  endif()
+  # -fgpu-rdc TUs skip host coverage: clang 24 rejects -fgpu-rdc plus
+  # -fprofile-instr-generate on TUs with dynamic initializers.
+  set(RCCL_TEST_GPU_RDC_COMPILE_OPTIONS -fgpu-rdc)
+  if (ENABLE_CODE_COVERAGE)
+    # Revert once the coverage nightly moves to ROCm 10.3, which has the clang fix.
+    list(APPEND RCCL_TEST_GPU_RDC_COMPILE_OPTIONS -fno-profile-instr-generate -fno-coverage-mapping)
   endif()
 
   find_package(hsa-runtime64 PATHS /opt/rocm )
@@ -84,8 +133,19 @@ if(BUILD_TESTS)
         message(FATAL_ERROR "Could not find MPI library (libmpi.so) in ${MPI_PATH}/lib or ${MPI_PATH}/lib64")
     endif()
 
+    # OpenMPI C++ bindings live in libmpi_cxx (Debian/Ubuntu) and are required
+    # when test code includes <mpi.h> from C++ (MPI::Comm, MPI::Op, ...).
+    find_library(MPI_CXX_BINDING_LIBRARY
+        NAMES mpi_cxx mpi++
+        PATHS ${MPI_PATH}/lib ${MPI_PATH}/lib64
+        NO_DEFAULT_PATH
+    )
+
     # Set up MPI variables
     set(MPI_CXX_LIBRARIES ${MPI_LIBRARY})
+    if(MPI_CXX_BINDING_LIBRARY)
+        list(APPEND MPI_CXX_LIBRARIES ${MPI_CXX_BINDING_LIBRARY})
+    endif()
     set(MPI_CXX_INCLUDE_DIRS ${MPI_PATH}/include)
     set(MPI_CXX_LINK_FLAGS "-L${MPI_PATH}/lib -Wl,-rpath,${MPI_PATH}/lib")
     set(MPIEXEC_EXECUTABLE ${MPI_PATH}/bin/mpirun CACHE FILEPATH "MPI executable")
@@ -109,8 +169,9 @@ if(BUILD_TESTS)
     ${PROJECT_BINARY_DIR}/hipify/gensrc # for rccl_bfloat16.h
     ${PROJECT_BINARY_DIR}/hipify/src # for graph/topo.h
     ${PROJECT_BINARY_DIR}/hipify/src/include/plugin # for recorder tests, nccl_tuner.h
-    ${PROJECT_BINARY_DIR}/hipify/src/transport/net_ib_cast # for net_ib_fault_inject.h, net_ib_cast_inspect.h
+    ${PROJECT_BINARY_DIR}/hipify/src/transport/net_ib_cast # for net_ib_fault_inject.h, net_ib_cast_inspect.h, net_ib_qp_sharing_inspect.h
     ${PROJECT_BINARY_DIR}/hipify/src/transport             # for net_ib_limits.h
+    ${PROJECT_BINARY_DIR}/hipify/src/gin                   # for gin_rocshmem_gda_inspect.h
     ${ROCM_PATH}/include
     ${ROCM_PATH}
   )
@@ -118,6 +179,21 @@ if(BUILD_TESTS)
   # Add MPI include directories if MPI tests are enabled
   if(ENABLE_MPI_TESTS AND MPI_CXX_INCLUDE_DIRS)
     list(APPEND RCCL_COMMON_INCLUDE_DIRS ${MPI_CXX_INCLUDE_DIRS})
+  endif()
+
+  # Full-rocSHMEM only: its device collectives compile against rocSHMEM headers,
+  # so re-derive the include dir here.
+  if(ENABLE_ROCSHMEM)
+    if(NOT ROCSHMEM_INSTALL_DIR)
+      set(ROCSHMEM_INSTALL_DIR "${CMAKE_SOURCE_DIR}/ext/rocshmem")
+    endif()
+    if(NOT ROCSHMEM_INCLUDE_DIR)
+      set(ROCSHMEM_INCLUDE_DIR "${ROCSHMEM_INSTALL_DIR}/include")
+    endif()
+    # Ahead of ${ROCM_PATH}/include, so the tests see the headers of the rocSHMEM
+    # librccl.so links rather than any rocSHMEM installed there.
+    list(FIND RCCL_COMMON_INCLUDE_DIRS "${ROCM_PATH}/include" _rocm_inc_idx)
+    list(INSERT RCCL_COMMON_INCLUDE_DIRS ${_rocm_inc_idx} ${ROCSHMEM_INCLUDE_DIR})
   endif()
 
   # Common compile definitions
@@ -130,8 +206,8 @@ if(BUILD_TESTS)
   endif()
   if(ENABLE_MPI_TESTS)
     list(APPEND RCCL_COMMON_COMPILE_DEFS MPI_TESTS_ENABLED)
-    if(RCCL_HAS_GIN_IB_PROXY)
-      list(APPEND RCCL_COMMON_COMPILE_DEFS RCCL_HAS_GIN_IB_PROXY)
+    if(RCCL_HAS_RMA_IB_PROXY)
+      list(APPEND RCCL_COMMON_COMPILE_DEFS RCCL_HAS_RMA_IB_PROXY)
     endif()
     if(ENABLE_HOST_API_TESTS)
       list(APPEND RCCL_COMMON_COMPILE_DEFS RCCL_ENABLE_HOST_API_TESTS)
@@ -152,8 +228,29 @@ if(BUILD_TESTS)
     dl
     fmt::fmt-header-only
   )
+
+  # Link libs for the host-only micro-test binary (test/host). Deliberately no
+  # HIP runtime on the link line, so any un-shimmed HIP API call surfaces as an
+  # undefined-symbol link error instead of silently binding to libamdhip64.so.
+  # HIP's *compile* requirements (device intrinsics, gfx codegen, headers) are
+  # applied in test/host/CMakeLists.txt via $<TARGET_PROPERTY:hip::*,...> (a
+  # CMake 3.16-safe stand-in for $<COMPILE_ONLY:hip::*>, which needs 3.27).
+  set(MICRO_TEST_LINK_LIBS
+    ${GTEST_BOTH_LIBRARIES}
+    Threads::Threads
+    dl
+    fmt::fmt-header-only
+  )
+  set(RCCL_COMMON_BUILD_RPATH "")
   if(OPENMP_TESTS_ENABLED)
-    list(APPEND RCCL_COMMON_LINK_LIBS "${OpenMP_CXX_FLAGS}")
+    list(APPEND RCCL_COMMON_LINK_LIBS OpenMP::OpenMP_CXX)
+    foreach(openmpLibrary IN LISTS OpenMP_CXX_LIBRARIES)
+      if(IS_ABSOLUTE "${openmpLibrary}" AND NOT "${openmpLibrary}" MATCHES "\\.a$")
+        get_filename_component(openmpLibraryDir "${openmpLibrary}" DIRECTORY)
+        list(APPEND RCCL_COMMON_BUILD_RPATH "${openmpLibraryDir}")
+      endif()
+    endforeach()
+    list(REMOVE_DUPLICATES RCCL_COMMON_BUILD_RPATH)
   endif()
   if(ENABLE_MPI_TESTS AND MPI_CXX_LIBRARIES)
     list(APPEND RCCL_COMMON_LINK_LIBS ${MPI_CXX_LIBRARIES})
@@ -173,6 +270,13 @@ if(BUILD_TESTS)
     list(APPEND RCCL_COMMON_COMPILE_DEFS ${RCCL_INTERFACE_COMPILE_DEFINITIONS})
   endif()
 
+  if(AMDSMI_HEADER_HAS_FABRIC_TELEMETRY)
+    list(APPEND RCCL_COMMON_COMPILE_DEFS AMDSMI_HEADER_HAS_FABRIC_TELEMETRY)
+  endif()
+  if(AMDSMI_FABRIC_API)
+    list(APPEND RCCL_COMMON_COMPILE_DEFS AMDSMI_FABRIC_DIRECT)
+  endif()
+
   # Collect testing framework source files
   set(TEST_SOURCE_FILES
     AllGatherTests.cpp
@@ -181,35 +285,57 @@ if(BUILD_TESTS)
     AllToAllVTests.cpp
     AsymmetricVisibilityTests.cpp
     BroadcastTests.cpp
+    CollImplInfoTests.cpp
+    DeviceResourceRequirementTests.cpp
+    DiagnosticsTests.cpp
     DoneEventOrderingTests.cpp
+    Fp8VerifiableTests.cpp
     GatherTests.cpp
+    GraphCaptureStreamOrderingTests.cpp
     GroupCallTests.cpp
     NonBlockingTests.cpp
+    RasDiagnosticsTests.cpp
     RasJsonTests.cpp
     ReduceScatterTests.cpp
     ReduceTests.cpp
     RegisterTests.cpp
     ScatterTests.cpp
+    TeamTopologyTests.cpp
     P2pChannelScalingTests.cpp
+    PipeUtilsTests.cpp
     VersionGateTests.cpp
     SendRecvTests.cpp
+    SendRecvSingleRankTests.cpp
     StandaloneTests.cpp
+    SymmetricInPlaceSliceTests.cpp
     DdaIpcTests.cpp
+    # Also in rccl-UnitTestsFixtures; built here without DWORDX4_INTRINSICS_FORCE_OFF, so it runs the b128 re-read.
+    device/DdaReduceScatterFabricLLTests.cpp
+    device/DdaAllReduceFabricLLTests.cpp
     NetPluginReloadTests.cpp
+    GinPluginInitFailTests.cpp
     plugin/net_reload_plugin.cpp
+    ProfilerPluginCloseTests.cpp
+    InspectorRingDropTests.cpp
+    ProfilerApiEventRankTests.cpp
+    TunerPluginConstantsTests.cpp
     CpuAffinityTests.cpp
     TeardownStressTests.cpp
     _RecorderTests.cpp
+    IbvSymbolsEnvTests.cpp
     common/main.cpp
     common/CallCollectiveForked.cpp
     common/CollectiveArgs.cpp
     common/EnvVars.cpp
     common/PrepDataFuncs.cpp
     common/PtrUnion.cpp
+    common/GpuCountProbe.cpp
     common/ProcessIsolatedTestRunner.cpp
     common/TestBed.cpp
     common/TestBedChild.cpp
     common/StandaloneUtils.cpp
+    common/VerifiableData.cpp
+    common/VerifiableFp8.cpp
     proxy_trace/ProxyTraceUnitTests.cpp
     ../src/misc/proxy_trace/proxy_trace.cc
     latency_profiler/LatencyProfilerUnitTest.cpp
@@ -223,6 +349,7 @@ if(BUILD_TESTS)
     list(APPEND TEST_SOURCE_FILES
       ../src/misc/recorder.cc
       ../src/misc/proxy_trace/proxy_trace.cc
+      ../src/misc/ibvsymbols.cc  # buildIbvSymbols() is hidden in librccl; compile it in for IbvSymbolsEnvTests
     )
   endif()
 
@@ -231,16 +358,51 @@ if(BUILD_TESTS)
   # Create rccl-UnitTests binary
   add_executable(rccl-UnitTests ${TEST_SOURCE_FILES})
 
-  # AICOMRCCL-1534: net_reload_plugin.cpp is compiled into rccl-UnitTests and loaded
-  # in-process via NCCL_NET_PLUGIN=STATIC_PLUGIN (dlopen(NULL)), so no external .so.
+  # AICOMRCCL-1534 / net-plugin assignment tests: net_reload_plugin.cpp is compiled into
+  # rccl-UnitTests and loaded in-process via NCCL_NET_PLUGIN=STATIC_PLUGIN (dlopen(NULL)).
   # Scope its headers to the file so the generic example headers don't shadow others.
   set_source_files_properties(plugin/net_reload_plugin.cpp PROPERTIES
     INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/../plugins/net/example/nccl)
 
   # dlsym(dlopen(NULL), ...) only finds symbols present in the dynamic symbol table;
-  # export just the one plugin symbol (narrow, unlike a broad -rdynamic).
+  # export only the plugin symbols the tests need (narrow, unlike a broad -rdynamic).
   target_link_options(rccl-UnitTests PRIVATE
-    "LINKER:--export-dynamic-symbol=ncclNetPlugin_v10")
+    "LINKER:--export-dynamic-symbol=ncclNetPlugin_v12"
+    "LINKER:--export-dynamic-symbol=ncclGinPlugin_v13"
+    "LINKER:--export-dynamic-symbol=ncclTunerPlugin_v7"
+    "LINKER:--export-dynamic-symbol=ncclProfiler_v7")
+
+  # AICOMRCCL-2183: RcclMockFuncs.hpp's empty ncclDebugLog, needed to link the Release-only
+  # sources above, overrides librccl.so's own in Debug and silences all library logging. Hidden
+  # keeps it linkable here but out of .dynsym, as rccl-UnitTestsFixturesDebug does below.
+  target_compile_options(rccl-UnitTests PRIVATE
+    -fvisibility=hidden -fvisibility-inlines-hidden)
+
+  # A real shared library, unlike the net plugin above: ProfilerPluginCloseTests checks
+  # that RCCL unloads an external profiler plugin, so it needs a separately loadable
+  # object. It lands beside rccl-UnitTests in the build tree and is installed beside it
+  # too, so the test can find it by name relative to its own executable.
+  add_library(rccl-test-profiler-stub SHARED plugin/profiler_stub_plugin.cpp)
+  add_dependencies(rccl-UnitTests rccl-test-profiler-stub)
+  target_compile_definitions(rccl-UnitTests PRIVATE
+    RCCL_TEST_PROFILER_STUB_NAME="$<TARGET_FILE_NAME:rccl-test-profiler-stub>")
+
+  # The test suite also runs from an install: TheRock CI executes the packaged
+  # rccl-UnitTests with no build tree present, so the stub has to ship with it.
+  # Deliberately not rocm_install(): that sends libraries to the library directory and
+  # adds them to the package export set, while this stub has to ship beside the test
+  # binaries that rocm_install() puts in CMAKE_INSTALL_BINDIR.
+  install(TARGETS rccl-test-profiler-stub
+    LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR}
+    COMPONENT tests)
+
+  # InspectorRingDropTests loads the in-tree Inspector plugin; it skips when there is none.
+  # Scoped to that file so the path does not rebuild the rest of rccl-UnitTests.
+  if(TARGET rccl-profiler-inspector)
+    add_dependencies(rccl-UnitTests rccl-profiler-inspector)
+    set_source_files_properties(InspectorRingDropTests.cpp PROPERTIES COMPILE_DEFINITIONS
+      "RCCL_INSPECTOR_PLUGIN_SO=\"$<TARGET_FILE:rccl-profiler-inspector>\"")
+  endif()
 
   # rccl-UnitTestsFixtures: Tests that only use header-only internal dependencies
   # (inline, static, constexpr, template functions) and can run in both Release and Debug.
@@ -249,38 +411,75 @@ if(BUILD_TESTS)
 
     set(TEST_FIXTURE_SOURCE_FILES
       BitOpsTests.cpp
+      NcclUtilityTests.cpp
       IommuPassthrough_test.cpp
       MatchSubnet_test.cpp
       MiscTests.cpp
       RomeTopoConsensusTests.cpp
       EnqueueCountTests.cpp
       DdaCollCommonTests.cpp
+      CheapPostSendFenceTests.cpp
+      Gfx1250SendRecvLl128WindowTests.cpp
+      ProfilerOverheadTests.cpp
       VersionInfoTests.cpp
       device/TestOp128.cpp
+      device/TestFp8Reduce.cpp
+      device/RcclEpTests.cpp
+      device/LlFifoSysScopeTests.cpp
+      device/DdaIpcGpuBarrierOrderingTests.cpp
+      device/DdaReduceScatterFabricLLTests.cpp
+      device/DdaAllReduceFabricLLTests.cpp
+      device/DdaAllReduceFabricLL128TwoShotTests.cpp
+      device/DdaVecElementAddTests.cpp
+      device/DdaLL128PollWireTests.cpp
+      device/DdaLL128ArchGeometryTests.cpp
+      device/TestTDM.cpp
+      device/TestTdmCopy.cpp
+      device/TestTdmReduceCopy.cpp
+      device/TestAsyncCopy.cpp
+      device/TestLdsTransfer.cpp
       device/GinDeviceTests.cpp
-      device/GinAnvilIpcDevice_test.cpp
+      device/GinBackendMaskDispatch_test.cpp
+      device/HierarchicalShuffleTests.cpp
+      device/NcclUtilityDeviceTests.cpp
+      device/SymkWorldPointerGetterTests.cpp
+      device/ChannelMaskMapTests.cpp
+      device/CoopApplicationBuildTests.cpp
       DeviceApiTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
+      common/GpuCountProbe.cpp
       common/ProcessIsolatedTestRunner.cpp
       common/TestChecks.cpp
       ../src/misc/kernel_config.cc
     )
 
-  if(ENABLE_ROCSHMEM_GIN)
-    list(APPEND TEST_FIXTURE_SOURCE_FILES
-      gin/GinAnvilIpcTableHost_test.cpp
-      ../src/gin/gin_anvil_ipc_table_host.cc
-    )
-  endif()
-
-  if(ENABLE_ROCSHMEM_GIN AND (ENABLE_ROCSHMEM OR GIN_ANVIL_UNIT_TESTS))
-    list(APPEND TEST_FIXTURE_SOURCE_FILES
-      device/GinAnvilSdmaTemplate_test.cpp
-    )
-  endif()
+    if(ENABLE_ROCSHMEM_GIN)
+      # Anvil-dependent fixtures: they include the anvil_sdma backend headers
+      # unconditionally, so they only build when ENABLE_ROCSHMEM_GIN puts those
+      # headers in the in-tree include path. Keeping them in the base list let a
+      # foreign -I (e.g. an unrelated /opt/rocm rccl) satisfy the include and mask
+      # a genuinely non-GIN build.
+      list(APPEND TEST_FIXTURE_SOURCE_FILES
+        gin/GinAnvilIpcTableHost_test.cpp
+        ../src/gin/gin_anvil_ipc_table_host.cc
+        device/sdma/anvil_stub_quiet_count.cpp
+        device/GinAnvilIpcDevice_test.cpp
+        device/GinRocshmemGdaTemplate_test.cpp
+        device/GinAnvilSdmaTemplate_test.cpp
+      )
+    endif()
 
     add_executable(rccl-UnitTestsFixtures ${TEST_FIXTURE_SOURCE_FILES})
+
+    # ProfilerOverheadTests loads its in-binary profiler via NCCL_PROFILER_PLUGIN=STATIC_PLUGIN,
+    # i.e. dlsym(dlopen(NULL), ...), which only sees the dynamic symbol table.
+    target_link_options(rccl-UnitTestsFixtures PRIVATE "LINKER:--export-dynamic-symbol=ncclProfiler_v7")
+
+    # Unit tests pass generic hipMalloc pointers into load16global/store16global.
+    # The gfx942 b128 global-aperture builtins fault on those pointers; use the
+    # nontemporal dword-pair fallback in op128.h for this target only.
+    target_compile_definitions(rccl-UnitTestsFixtures PRIVATE DWORDX4_INTRINSICS_FORCE_OFF)
 
     target_include_directories(rccl-UnitTestsFixtures PRIVATE
       ${PROJECT_BINARY_DIR}/hipify/src/device
@@ -288,33 +487,41 @@ if(BUILD_TESTS)
       ${PROJECT_BINARY_DIR}/hipify/src/include/nccl_device
     )
 
+    # device/TestTdmCopy.cpp exercises tdm/tdmCopy.h, which detects TDM toolchain
+    # support via __has_include(<hip/amd_detail/amd_gfx1250_TDM.h>). An SDK that omits
+    # that descriptor header compiles every tdm:: entry point to a deleted stub and
+    # IsTdmCopySupported() reports the GPU as unsupported, so warn rather than let the
+    # TDM coverage silently degrade to no-ops.
+    find_path(RCCL_GFX1250_TDM_HEADER
+      NAMES hip/amd_detail/amd_gfx1250_TDM.h
+      PATHS ${RCCL_COMMON_INCLUDE_DIRS} "${ROCM_PATH}/include")
+    if(NOT RCCL_GFX1250_TDM_HEADER)
+      message(WARNING "SDK lacks hip/amd_detail/amd_gfx1250_TDM.h; tdm:: entry points will compile to no-op stubs and device/TestTdmCopy.cpp will report TDM as unsupported")
+    endif()
+
+    # rccl_ep is header-only and is not hipified, so its tests include it
+    # straight from the source tree. Scope it to the one file: its device/ and
+    # include/ header names are generic enough to shadow src/ for other TUs.
+    set_source_files_properties(device/RcclEpTests.cpp PROPERTIES
+      INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/../src/algorithms/rccl_ep)
+
+    # device/TestTdmReduceCopy.cpp and device/SymkWorldPointerGetterTests.cpp drive
+    # common_kernel.h (directly or via symk.cuh), whose common.h includes the generated
+    # device_table.h.
+    set_source_files_properties(device/TestTdmReduceCopy.cpp device/SymkWorldPointerGetterTests.cpp PROPERTIES
+      INCLUDE_DIRECTORIES ${PROJECT_BINARY_DIR}/hipify/gensrc)
+
   if(ENABLE_ROCSHMEM_GIN)
     target_compile_definitions(rccl-UnitTestsFixtures PRIVATE ENABLE_ROCSHMEM_GIN)
   endif()
 
-  if(ENABLE_ROCSHMEM_GIN AND (ENABLE_ROCSHMEM OR GIN_ANVIL_UNIT_TESTS))
+  # Match librccl.so ABI: ENABLE_ROCSHMEM changes ncclComm/ncclProxyState layout.
+  if(ENABLE_ROCSHMEM)
     target_compile_definitions(rccl-UnitTestsFixtures PRIVATE ENABLE_ROCSHMEM)
   endif()
 
-  if(ENABLE_ROCSHMEM_GIN OR GIN_ANVIL_UNIT_TESTS)
-    if(ROCSHMEM_INCLUDE_DIR)
-      target_include_directories(rccl-UnitTestsFixtures PRIVATE ${ROCSHMEM_INCLUDE_DIR})
-    elseif(ROCSHMEM_INSTALL_DIR)
-      target_include_directories(rccl-UnitTestsFixtures PRIVATE
-        "${ROCSHMEM_INSTALL_DIR}/include")
-    endif()
-    if(ROCSHMEM_SOURCE_DIR)
-      target_include_directories(rccl-UnitTestsFixtures PRIVATE
-        "${ROCSHMEM_SOURCE_DIR}/src"
-        "${ROCSHMEM_SOURCE_DIR}/include")
-    endif()
-    if(ROCSHMEM_BUILD_DIR)
-      target_include_directories(rccl-UnitTestsFixtures PRIVATE ${ROCSHMEM_BUILD_DIR})
-    endif()
-  endif()
-
   if(ENABLE_ROCSHMEM_GIN AND ROCM_VERSION VERSION_GREATER_EQUAL "60400")
-    list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsGinAnvilPlugin)
+    list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsGinAnvilPlugin rccl-UnitTestsGinRocshmemGdaPlugin)
 
     add_executable(rccl-UnitTestsGinAnvilPlugin
       gin/GinAnvilPlugin_test.cpp
@@ -324,24 +531,291 @@ if(BUILD_TESTS)
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/TestChecks.cpp
+      common/GpuCountProbe.cpp
+      common/ProcessIsolatedTestRunner.cpp
+    )
+    target_compile_definitions(rccl-UnitTestsGinAnvilPlugin PRIVATE ENABLE_FAULT_INJECTION)
+
+    add_executable(rccl-UnitTestsGinRocshmemGdaPlugin
+      gin/GinRocshmemGdaPlugin_test.cpp
+      gin/gin_rocshmem_gda_plugin_test_stubs.cc
+      ../src/gin/gin_plugin_rocshmem_gda.cc
+      common/main_fixtures.cpp
+      common/EnvVars.cpp
+      common/TestChecks.cpp
+      common/GpuCountProbe.cpp
       common/ProcessIsolatedTestRunner.cpp
     )
 
-    target_include_directories(rccl-UnitTestsGinAnvilPlugin PRIVATE
+    foreach(_gin_plugin_test rccl-UnitTestsGinAnvilPlugin rccl-UnitTestsGinRocshmemGdaPlugin)
+      target_include_directories(${_gin_plugin_test} PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/include/gin
+        ${PROJECT_BINARY_DIR}/hipify/src/include
+        ${PROJECT_BINARY_DIR}/hipify/src/include/nccl_device
+        ${CMAKE_CURRENT_SOURCE_DIR}/gin
+      )
+
+      target_compile_definitions(${_gin_plugin_test} PRIVATE ENABLE_ROCSHMEM_GIN)
+
+      # No rccl link below, so the implicit ordering after hipify has to be explicit.
+      add_dependencies(${_gin_plugin_test} hipify_all copy_nccl_device_headers)
+      if(TARGET copy_rocshmem_headers)
+        add_dependencies(${_gin_plugin_test} copy_rocshmem_headers)
+      endif()
+      add_test(NAME ${_gin_plugin_test} COMMAND ${_gin_plugin_test})
+      set_tests_properties(${_gin_plugin_test} PROPERTIES LABELS "unit;gpu")
+    endforeach()
+
+    # Exercise the production HIP launchers and kernels independently of the
+    # host-plugin stubs above.
+    add_executable(rccl-UnitTestsGinAnvilConnCheckDevice
+      gin/gin_anvil_conn_check_device_test.cpp
+      ../src/gin/gin_anvil_conn_check_device.cc)
+    set_source_files_properties(
+      gin/gin_anvil_conn_check_device_test.cpp
+      ../src/gin/gin_anvil_conn_check_device.cc
+      PROPERTIES LANGUAGE CXX)
+    target_include_directories(rccl-UnitTestsGinAnvilConnCheckDevice PRIVATE
+      ${CMAKE_SOURCE_DIR}/src/include)
+    target_compile_definitions(rccl-UnitTestsGinAnvilConnCheckDevice PRIVATE ENABLE_ROCSHMEM_GIN)
+    set(_gin_conn_check_offload "")
+    foreach(_g IN LISTS GPU_TARGETS)
+      if(_g)
+        list(APPEND _gin_conn_check_offload "--offload-arch=${_g}")
+      endif()
+    endforeach()
+    if(_gin_conn_check_offload)
+      target_compile_options(rccl-UnitTestsGinAnvilConnCheckDevice PRIVATE ${_gin_conn_check_offload})
+      target_link_options(rccl-UnitTestsGinAnvilConnCheckDevice PRIVATE ${_gin_conn_check_offload})
+    endif()
+    target_link_libraries(rccl-UnitTestsGinAnvilConnCheckDevice PRIVATE
+      ${GTEST_BOTH_LIBRARIES} hip::host hip::device Threads::Threads)
+    set_target_properties(rccl-UnitTestsGinAnvilConnCheckDevice PROPERTIES
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test"
+      CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+    add_test(NAME rccl-UnitTestsGinAnvilConnCheckDevice COMMAND rccl-UnitTestsGinAnvilConnCheckDevice)
+    set_tests_properties(rccl-UnitTestsGinAnvilConnCheckDevice PROPERTIES LABELS "unit;gpu")
+    rocm_install(TARGETS rccl-UnitTestsGinAnvilConnCheckDevice COMPONENT tests)
+  endif()
+
+  # rccl-UnitTestsGinAnvilSdmaFactory: exercises the real gin_anvil_sdma_factory
+  # Self-contained SDMA factory test: compiles gin_anvil_sdma_factory.cc +
+  # anvil.cpp directly (no librccl.so link). HW-dependent tests skip via
+  # GTEST_SKIP when probe() fails.
+  if(ENABLE_ROCSHMEM_GIN)
+    list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsGinAnvilSdmaFactory)
+
+    add_executable(rccl-UnitTestsGinAnvilSdmaFactory
+      gin/GinAnvilSdmaFactory_test.cpp
+      ../src/gin/gin_anvil_sdma_factory.cc
+      common/main_fixtures.cpp
+      common/EnvVars.cpp
+    )
+    # Source the rccl-copied (sed-rewritten) anvil.cpp from the build tree, the
+    # same TU the main librccl build compiles — not the raw rocSHMEM source. Its
+    # includes resolve from the rccl-copied nccl_device/anvil tree.
+    # GENERATED: the copy custom-command produces this at build time, so it does
+    # not exist at configure. copy_rocshmem_headers orders it before this compile.
+    set_source_files_properties("${PROJECT_BINARY_DIR}/gin/sdma/anvil.cpp" PROPERTIES
+      GENERATED TRUE
+      INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/../src/gin;${PROJECT_BINARY_DIR}/gin/sdma;${PROJECT_BINARY_DIR}/include;${ROCM_PATH}/include")
+    target_sources(rccl-UnitTestsGinAnvilSdmaFactory PRIVATE
+      "${PROJECT_BINARY_DIR}/gin/sdma/anvil.cpp")
+    add_dependencies(rccl-UnitTestsGinAnvilSdmaFactory copy_rocshmem_headers)
+
+    target_include_directories(rccl-UnitTestsGinAnvilSdmaFactory PRIVATE
+      ${PROJECT_BINARY_DIR}/hipify/src/include
+      # ${PROJECT_BINARY_DIR}/gin so "sdma/anvil.hpp" resolves from the rccl-copied
+      # tree (same as the main librccl build), not the rocSHMEM source.
+      ${PROJECT_BINARY_DIR}/gin
+    )
+    target_compile_definitions(rccl-UnitTestsGinAnvilSdmaFactory PRIVATE ENABLE_ROCSHMEM_GIN)
+    add_dependencies(rccl-UnitTestsGinAnvilSdmaFactory hipify_all)
+    # This target compiles anvil.cpp directly (not via librccl) and links the
+    # static libhsakmt.a, so the linker must resolve hsakmt's drm*/numa_* refs at
+    # link time from libs on this line — hsakmt/numa/drm/drm_amdgpu are all
+    # required here (unlike targets that link librccl, which resolves them).
+    find_library(_GIN_DRM        NAMES drm        HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
+    find_library(_GIN_DRM_AMDGPU NAMES drm_amdgpu HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
+    if(NOT _GIN_DRM)
+      set(_GIN_DRM drm)
+    endif()
+    if(NOT _GIN_DRM_AMDGPU)
+      set(_GIN_DRM_AMDGPU drm_amdgpu)
+    endif()
+    target_link_libraries(rccl-UnitTestsGinAnvilSdmaFactory PRIVATE
+      hsakmt numa ${_GIN_DRM} ${_GIN_DRM_AMDGPU})
+  endif()
+  endif()
+
+  # rccl-UnitTestsDevRuntime: self-contained host micro-test that #includes the
+  # hipified src/dev_runtime.cc directly to reach its file-static symMemory*
+  # helpers. Links no librccl.so; dependencies come from DevRuntimeTestsStubs.cc.
+  if (ROCM_VERSION VERSION_GREATER_EQUAL "60400")
+    list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsDevRuntime)
+
+    set(DEV_RUNTIME_SEGMENTS_CC
+      ${PROJECT_BINARY_DIR}/hipify/src/dev_runtime_segments.cc
+      ${PROJECT_BINARY_DIR}/hipify/src/rccl_dev_runtime.cc)
+    set_source_files_properties(${DEV_RUNTIME_SEGMENTS_CC} PROPERTIES
+      GENERATED TRUE
+      LANGUAGE CXX)
+
+    add_executable(rccl-UnitTestsDevRuntime
+      gin_teardown_test.cpp
+      DevRuntimeTestsStubs.cc
+      ${DEV_RUNTIME_SEGMENTS_CC}
+      common/main_fixtures.cpp
+      common/EnvVars.cpp
+      common/TestChecks.cpp
+      common/GpuCountProbe.cpp
+      common/ProcessIsolatedTestRunner.cpp
+    )
+
+    target_include_directories(rccl-UnitTestsDevRuntime PRIVATE
+      ${PROJECT_BINARY_DIR}/hipify/src
       ${PROJECT_BINARY_DIR}/hipify/src/include
       ${PROJECT_BINARY_DIR}/hipify/src/include/nccl_device
-      ${CMAKE_CURRENT_SOURCE_DIR}/gin
+      ${PROJECT_BINARY_DIR}/hipify/src/device
     )
-    if(ROCSHMEM_SOURCE_DIR)
-      target_include_directories(rccl-UnitTestsGinAnvilPlugin PRIVATE
-        ${ROCSHMEM_SOURCE_DIR}/include)
-    else()
-      target_include_directories(rccl-UnitTestsGinAnvilPlugin PRIVATE
-        ${CMAKE_SOURCE_DIR}/../rocshmem/include)
-    endif()
 
-    target_compile_definitions(rccl-UnitTestsGinAnvilPlugin PRIVATE ENABLE_ROCSHMEM_GIN)
+    set_source_files_properties(gin_teardown_test.cpp PROPERTIES
+      COMPILE_DEFINITIONS
+        "DEV_RUNTIME_CC_PATH=\"${PROJECT_BINARY_DIR}/hipify/src/dev_runtime.cc\"")
+
+    # The included source and its headers live in the hipify-staged tree.
+    add_dependencies(rccl-UnitTestsDevRuntime
+      hipify_all copy_nccl_device_headers
+      net_ib_header_symlinks rma_header_symlinks)
   endif()
+
+  # GIN Anvil-SDMA put-segmentation and AllReduce size-policy host unit tests (no
+  # GPU). Pure host C++: the segment-math header
+  # (nccl_device/gin/anvil_sdma/gin_anvil_sdma_put_policy.h) and
+  # algorithms/gin/gin_all_reduce_policy.h are compiled with GIN_SDMA_HOST_ONLY
+  # so they need neither a built librccl nor device codegen. Runs under
+  # `ctest -L unit`.
+  add_executable(rccl-UnitTestsGinSdmaPolicy
+    gin/gin_sdma_policy_test.cpp
+    gin/gin_all_reduce_policy_test.cpp)
+  set_source_files_properties(gin/gin_sdma_policy_test.cpp gin/gin_all_reduce_policy_test.cpp PROPERTIES LANGUAGE CXX)
+  target_include_directories(rccl-UnitTestsGinSdmaPolicy PRIVATE
+    ${PROJECT_SOURCE_DIR}/src/include
+    ${PROJECT_SOURCE_DIR}/src)
+  target_compile_definitions(rccl-UnitTestsGinSdmaPolicy PRIVATE GIN_SDMA_HOST_ONLY)
+  target_link_libraries(rccl-UnitTestsGinSdmaPolicy PRIVATE ${GTEST_BOTH_LIBRARIES} Threads::Threads)
+  set_target_properties(rccl-UnitTestsGinSdmaPolicy PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
+  add_test(NAME rccl-UnitTestsGinSdmaPolicy COMMAND rccl-UnitTestsGinSdmaPolicy)
+  set_tests_properties(rccl-UnitTestsGinSdmaPolicy PROPERTIES LABELS "unit")
+
+  # GinScatter local reduce on one GPU. Runs ginScatterReduceChunk against a fake
+  # scratch and a host sum, for staged and full-column layouts, including
+  # multi-rank sums at 64 MiB and 1 GiB. No librccl. Skips when no GPU is visible.
+  # Registered in the test-runner configs so CI runs it with the other unit tests.
+  add_executable(rccl-UnitTestsGinScatterReduceGpu gin/gin_scatter_reduce_gpu_test.cpp)
+  set_source_files_properties(gin/gin_scatter_reduce_gpu_test.cpp PROPERTIES LANGUAGE CXX)
+  target_include_directories(rccl-UnitTestsGinScatterReduceGpu PRIVATE
+    ${PROJECT_SOURCE_DIR}/src/include
+    ${PROJECT_SOURCE_DIR}/src)
+  set(_gin_scatter_gpu_offload "")
+  foreach(_g IN LISTS GPU_TARGETS)
+    if(_g)
+      list(APPEND _gin_scatter_gpu_offload "--offload-arch=${_g}")
+    endif()
+  endforeach()
+  if(_gin_scatter_gpu_offload)
+    target_compile_options(rccl-UnitTestsGinScatterReduceGpu PRIVATE ${_gin_scatter_gpu_offload})
+    target_link_options(rccl-UnitTestsGinScatterReduceGpu PRIVATE ${_gin_scatter_gpu_offload})
+  endif()
+  target_link_libraries(rccl-UnitTestsGinScatterReduceGpu PRIVATE
+    ${GTEST_BOTH_LIBRARIES} hip::host hip::device Threads::Threads)
+  set_target_properties(rccl-UnitTestsGinScatterReduceGpu PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test"
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+  add_test(NAME rccl-UnitTestsGinScatterReduceGpu COMMAND rccl-UnitTestsGinScatterReduceGpu)
+  set_tests_properties(rccl-UnitTestsGinScatterReduceGpu PROPERTIES LABELS "unit;gpu")
+
+  # utility.h as plain C++ for its !NCCL_DEVICE_COMPILE branches; not with CXX=hipcc, which defines __HIPCC__ and fails strict CI.
+  add_executable(rccl-UnitTestsUtilityHostOnly NcclUtilityHostOnlyTests.cpp)
+  set_source_files_properties(NcclUtilityHostOnlyTests.cpp PROPERTIES LANGUAGE CXX)
+  target_include_directories(rccl-UnitTestsUtilityHostOnly PRIVATE ${PROJECT_SOURCE_DIR}/src/include)
+  target_compile_definitions(rccl-UnitTestsUtilityHostOnly PRIVATE __HIP_PLATFORM_AMD__)
+  target_link_libraries(rccl-UnitTestsUtilityHostOnly PRIVATE ${GTEST_BOTH_LIBRARIES} Threads::Threads)
+  set_target_properties(rccl-UnitTestsUtilityHostOnly PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
+  add_test(NAME rccl-UnitTestsUtilityHostOnly COMMAND rccl-UnitTestsUtilityHostOnly)
+  set_tests_properties(rccl-UnitTestsUtilityHostOnly PROPERTIES LABELS "unit")
+
+  # GIN Anvil-SDMA hybrid AllGather (-D 3) policy host unit test (no GPU).
+  # Compiles gin_sdma_allgather_policy.h from the sibling rccl-tests project with
+  # GIN_SDMA_HOST_ONLY (no librccl / device codegen needed), validating the exact
+  # chunk sizing, LSA<->SDMA tier crossover, context-threshold fallback and
+  # bandwidth math the GinHybridAllGatherKernel relies on. Skip the target if the
+  # rccl-tests checkout is absent so a standalone rccl build still configures.
+  # Runs under `ctest -L unit`.
+  set(_gin_sdma_ag_hdr_dir "${PROJECT_SOURCE_DIR}/../rccl-tests/src")
+  if (EXISTS "${_gin_sdma_ag_hdr_dir}/gin_sdma_allgather_policy.h")
+    add_executable(rccl-UnitTestsGinSdmaAllGatherPolicy gin/gin_sdma_allgather_policy_test.cpp)
+    set_source_files_properties(gin/gin_sdma_allgather_policy_test.cpp PROPERTIES LANGUAGE CXX)
+    target_include_directories(rccl-UnitTestsGinSdmaAllGatherPolicy PRIVATE
+      "${_gin_sdma_ag_hdr_dir}")
+    target_compile_definitions(rccl-UnitTestsGinSdmaAllGatherPolicy PRIVATE GIN_SDMA_HOST_ONLY)
+    target_link_libraries(rccl-UnitTestsGinSdmaAllGatherPolicy PRIVATE ${GTEST_BOTH_LIBRARIES} Threads::Threads)
+    set_target_properties(rccl-UnitTestsGinSdmaAllGatherPolicy PROPERTIES
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
+    add_test(NAME rccl-UnitTestsGinSdmaAllGatherPolicy COMMAND rccl-UnitTestsGinSdmaAllGatherPolicy)
+    set_tests_properties(rccl-UnitTestsGinSdmaAllGatherPolicy PROPERTIES LABELS "unit")
+
+    # GIN-SDMA AllGather ON-GPU correctness test. AllGather has no reduction, so
+    # this validates the LSA<->SDMA tier predicate device-vs-host and the
+    # direct-LSA gather addressing (the pointer-arithmetic core of
+    # AllGatherLsaDirect) on real hardware, self-contained (no librccl / GIN
+    # comm). Requires a visible GPU at run time (skips cleanly otherwise), so it
+    # carries a "gpu" label alongside "unit".
+    add_executable(rccl-UnitTestsGinSdmaAllGatherGpu gin/gin_sdma_allgather_gpu_test.cpp)
+    set_source_files_properties(gin/gin_sdma_allgather_gpu_test.cpp PROPERTIES LANGUAGE CXX)
+    target_include_directories(rccl-UnitTestsGinSdmaAllGatherGpu PRIVATE
+      "${_gin_sdma_ag_hdr_dir}")
+    # Offload for the configured GPU arch(s); hipcc (the CXX compiler) handles the
+    # HIP language, so no separate enable_language(HIP) is needed.
+    set(_gin_sdma_ag_gpu_offload "")
+    foreach(_g IN LISTS GPU_TARGETS)
+      if(_g)
+        list(APPEND _gin_sdma_ag_gpu_offload "--offload-arch=${_g}")
+      endif()
+    endforeach()
+    if(_gin_sdma_ag_gpu_offload)
+      target_compile_options(rccl-UnitTestsGinSdmaAllGatherGpu PRIVATE ${_gin_sdma_ag_gpu_offload})
+      target_link_options(rccl-UnitTestsGinSdmaAllGatherGpu PRIVATE ${_gin_sdma_ag_gpu_offload})
+    endif()
+    target_link_libraries(rccl-UnitTestsGinSdmaAllGatherGpu PRIVATE
+      ${GTEST_BOTH_LIBRARIES} hip::host hip::device Threads::Threads)
+    set_target_properties(rccl-UnitTestsGinSdmaAllGatherGpu PROPERTIES
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test"
+      CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+    add_test(NAME rccl-UnitTestsGinSdmaAllGatherGpu COMMAND rccl-UnitTestsGinSdmaAllGatherGpu)
+    set_tests_properties(rccl-UnitTestsGinSdmaAllGatherGpu PROPERTIES LABELS "unit;gpu")
+  endif()
+
+  # GIN Anvil-SDMA hybrid Broadcast (-D 3) policy host unit test (no GPU).
+  # Compiles gin_sdma_broadcast_policy.h from the sibling rccl-tests project with
+  # GIN_SDMA_HOST_ONLY (no librccl / device codegen needed), validating the exact
+  # LSA<->GIN threshold + LL-cap resolution, tier-selection predicates (LL / LSA /
+  # flat / scatter+allgather / ring), scatter/ring chunk math and signal-count
+  # sizing that broadcast.cu relies on. Skip the target if the rccl-tests checkout
+  # is absent so a standalone rccl build still configures. Runs under `ctest -L unit`.
+  if (EXISTS "${_gin_sdma_ag_hdr_dir}/gin_sdma_broadcast_policy.h")
+    add_executable(rccl-UnitTestsGinSdmaBroadcastPolicy gin/gin_sdma_broadcast_policy_test.cpp)
+    set_source_files_properties(gin/gin_sdma_broadcast_policy_test.cpp PROPERTIES LANGUAGE CXX)
+    target_include_directories(rccl-UnitTestsGinSdmaBroadcastPolicy PRIVATE
+      "${_gin_sdma_ag_hdr_dir}")
+    target_compile_definitions(rccl-UnitTestsGinSdmaBroadcastPolicy PRIVATE GIN_SDMA_HOST_ONLY)
+    target_link_libraries(rccl-UnitTestsGinSdmaBroadcastPolicy PRIVATE ${GTEST_BOTH_LIBRARIES} Threads::Threads)
+    set_target_properties(rccl-UnitTestsGinSdmaBroadcastPolicy PROPERTIES
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
+    add_test(NAME rccl-UnitTestsGinSdmaBroadcastPolicy COMMAND rccl-UnitTestsGinSdmaBroadcastPolicy)
+    set_tests_properties(rccl-UnitTestsGinSdmaBroadcastPolicy PROPERTIES LABELS "unit")
   endif()
 
   # rccl-UnitTestsFixturesDebug: Tests that access internal symbols compiled into
@@ -353,44 +827,73 @@ if(BUILD_TESTS)
       AllocTests.cpp
       ParamTests.cpp
       ParameterApiTests.cpp
+      CollConfigTests.cpp
+      EnvPluginTests.cpp
       ArgCheckTests.cpp
       BootstrapBidirTests.cpp
+      ChannelDefaultsTests.cpp
       DdaAlltoAllThresholdTests.cpp
       DdaIpcEligibilityTests.cpp
       DdaFabricEligibilityTests.cpp
+      CeAllReduceEligibilityTests.cpp
+      CeReduceScatterEligibilityTests.cpp
+      CeAlltoAllvEligibilityTests.cpp
+      GinAlltoAllEligibilityTests.cpp
+      GinAllReduceEligibilityTests.cpp
       EnqueueTests.cpp
-      LL128RegVariantKernelTests.cpp
+      LL128RegVariantKernel_test.cpp
       IpcsocketTests.cpp
       TopoEnvPolicyTests.cpp
+      P2pCeChannelCap_test.cpp
+      P2pMaxNchannelsTests.cpp
       TopoNicFusionTests.cpp
       NetSocketTests.cpp
+      PluginCompatV10_test.cpp
       PluginCompatV11_test.cpp
       ProxyTests.cpp
+      PatAlgorithmTests.cpp
       RcclWrapTests.cpp
+      SymkBlockWidthTests.cpp
+      SocketCryptTests.cpp
       SocketPollTests.cpp
       TransportTests.cpp
       TimeoutTests.cpp
       mem_manager/MemManagerTests.cpp
       graph/SearchTests.cpp
+      graph/TuningTests.cpp
       graph/XmlTests.cpp
       graph/NetDevsPolicyP2pNetTests.cpp
+      graph/P2pPxnLevel1NetIdTests.cpp
+      graph/TopoGpuDevTests.cpp
       graph/TopoTests.cpp
+      graph/Mi350pPcieTopoTests.cpp
+      transport/NetIbCast/NetIbCastPlaneSubnetTests.cpp
+      transport/NetIbCast/NetIbCastMultiplaneTests.cpp
+      transport/NetIbCast/NetIbCastUdmaTests.cpp
+      transport/Gin/GinMtuNegotiationTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
+      common/GpuCountProbe.cpp
       common/ProcessIsolatedTestRunner.cpp
     )
 
     add_executable(rccl-UnitTestsFixturesDebug ${TEST_FIXTURE_DEBUG_SOURCE_FILES})
 
+    if(TARGET rccl-env-json)
+      add_dependencies(rccl-UnitTestsFixturesDebug rccl-env-json)
+    endif()
+    if(TARGET rccl-env-example)
+      add_dependencies(rccl-UnitTestsFixturesDebug rccl-env-example)
+    endif()
+
     # Hide the test executable's own symbols so it does NOT interpose
     # librccl.so's weak alloc.h template/global symbols (e.g.
-    # ncclCudaHostCallocDebug<>, ncclDebugLevel) at load time. Without this,
+    # ncclCudaHostCallocDebug<>, ncclDebugLevelMask) at load time. Without this,
     # those interposed-but-mismatched definitions corrupt the heap during a
     # full ncclCommInit* in this binary. The test still imports librccl's
     # internal (Debug-visible) symbols normally.
     target_compile_options(rccl-UnitTestsFixturesDebug PRIVATE
       -fvisibility=hidden -fvisibility-inlines-hidden)
-    # NetDevsPolicyTests and NetDevsPolicyP2pNetTests load a topology XML fixture
     # SearchTests.cpp #includes the hipify-generated copy of src/graph/search.cc
     # directly (via #include SEARCH_CC_PATH) so it can exercise search.cc's
     # internal symbols in the same TU. Pass the absolute path as a source-scoped
@@ -400,15 +903,47 @@ if(BUILD_TESTS)
       COMPILE_DEFINITIONS
         "SEARCH_CC_PATH=\"${PROJECT_BINARY_DIR}/hipify/src/graph/search.cc\"")
 
-    # TopoEnvPolicyTests and NetDevsPolicyP2pNetTests load a topology XML fixture
-    # from the source tree (tools/topo_expl/models). Expose the test source dir
-    # so they can build the path.
-    target_compile_definitions(rccl-UnitTestsFixturesDebug PRIVATE
-      RCCL_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    # Stage the topo_expl fixtures beside the binary (build and install); common/TopoFixtures.hpp finds them.
+    set(RCCL_TEST_TOPO_FIXTURE_NAMES
+      topo_8p6l_5nic.xml
+      topo_8p_ts1.xml
+      topo_8p_950_pcie.xml)
+    set(RCCL_TEST_TOPO_FIXTURE_DIR "${CMAKE_CURRENT_BINARY_DIR}/rccl-test-topo-models")
+    set(RCCL_TEST_TOPO_FIXTURES)
+    set(RCCL_TEST_TOPO_FIXTURES_STAGED)
+    foreach(fixture ${RCCL_TEST_TOPO_FIXTURE_NAMES})
+      list(APPEND RCCL_TEST_TOPO_FIXTURES "${PROJECT_SOURCE_DIR}/tools/topo_expl/models/${fixture}")
+      list(APPEND RCCL_TEST_TOPO_FIXTURES_STAGED "${RCCL_TEST_TOPO_FIXTURE_DIR}/${fixture}")
+    endforeach()
+    add_custom_command(
+      OUTPUT ${RCCL_TEST_TOPO_FIXTURES_STAGED}
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${RCCL_TEST_TOPO_FIXTURE_DIR}"
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different ${RCCL_TEST_TOPO_FIXTURES}
+        "${RCCL_TEST_TOPO_FIXTURE_DIR}"
+      DEPENDS ${RCCL_TEST_TOPO_FIXTURES}
+      COMMENT "Staging RCCL test topology fixtures"
+      VERBATIM)
+    add_custom_target(rccl-test-topo-fixtures DEPENDS ${RCCL_TEST_TOPO_FIXTURES_STAGED})
+    add_dependencies(rccl-UnitTestsFixturesDebug rccl-test-topo-fixtures)
+    # Pin the binary to this directory, where the fixtures are staged and where this
+    # target already lands. In an RCCL top-level build that is ${CMAKE_BINARY_DIR}/test.
+    set_target_properties(rccl-UnitTestsFixturesDebug PROPERTIES
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+    install(FILES ${RCCL_TEST_TOPO_FIXTURES}
+      DESTINATION ${CMAKE_INSTALL_BINDIR}/rccl-test-topo-models
+      COMPONENT tests)
 
-    # PluginCompatV11_test.cpp resolves its in-process mock plugin symbols via
-    # dlsym(dlopen(NULL), ...), which only sees the executable's dynamic symbols.
+    # GinAllReduceEligibilityTests.cpp calls ncclAllReduceGinSdmaEligible() only
+    # when ENABLE_ROCSHMEM_GIN is defined (otherwise it GTEST_SKIPs). Match librccl.
+    if(ENABLE_ROCSHMEM_GIN)
+      target_compile_definitions(rccl-UnitTestsFixturesDebug PRIVATE ENABLE_ROCSHMEM_GIN)
+    endif()
+
+    # PluginCompatV10_test.cpp / PluginCompatV11_test.cpp resolve their in-process
+    # mock plugin symbols via dlsym(dlopen(NULL), ...), which only sees the
+    # executable's dynamic symbols.
     target_link_options(rccl-UnitTestsFixturesDebug PRIVATE
+      -Wl,--export-dynamic-symbol=ncclNetPlugin_v10
       -Wl,--export-dynamic-symbol=ncclNetPlugin_v11
       -Wl,--export-dynamic-symbol=ncclCollNetPlugin_v11)
   endif()
@@ -424,6 +959,7 @@ if(BUILD_TESTS)
       AltRsmiTests.cpp
       ../src/misc/alt_rsmi.cc
       common/main_altrsmi.cpp
+      common/GpuCountProbe.cpp
       common/ProcessIsolatedTestRunner.cpp
     )
 
@@ -458,7 +994,8 @@ if(BUILD_TESTS)
   # rccl-UnitTestsAmdSmi: tests for the amdsmi_wrap layer.
   #
   # AmdSmiFabricTests.cpp covers the fabric predicates and struct layout pinned in
-  # amdsmi_wrap.h. Those are header-inline, so they need no librccl.so symbols and
+  # amdsmi_wrap.h, and AmdSmiFabricTelemetryTests.cpp the telemetry sample reduction
+  # beside them. Those are header-inline, so they need no librccl.so symbols and
   # run in both Release and Debug.
   #
   # AmdSmiWrapTests.cpp drives the amd_smi_* API itself, so it needs symbols that
@@ -470,12 +1007,14 @@ if(BUILD_TESTS)
     # main_altrsmi.cpp is a plain InitGoogleTest/RUN_ALL_TESTS entry point, reused here.
     set(TEST_AMDSMI_SOURCE_FILES
       AmdSmiFabricTests.cpp
+      AmdSmiFabricTelemetryTests.cpp
       common/main_altrsmi.cpp
     )
 
     if(CMAKE_BUILD_TYPE MATCHES "Debug")
       list(APPEND TEST_AMDSMI_SOURCE_FILES
         AmdSmiWrapTests.cpp
+        common/GpuCountProbe.cpp
         common/ProcessIsolatedTestRunner.cpp
       )
 
@@ -529,6 +1068,31 @@ if(BUILD_TESTS)
     if(AMDSMI_FABRIC_API)
       target_compile_definitions(rccl-UnitTestsAmdSmi PRIVATE AMDSMI_FABRIC_DIRECT)
     endif()
+    if(AMDSMI_HEADER_HAS_FABRIC_TELEMETRY)
+      target_compile_definitions(rccl-UnitTestsAmdSmi PRIVATE AMDSMI_HEADER_HAS_FABRIC_TELEMETRY)
+    endif()
+  endif()
+
+  # Build the GIN example plugin for host-API custom-plugin regression tests.
+  if(ENABLE_MPI_TESTS AND ENABLE_HOST_API_TESTS)
+    set(RCCL_GIN_EXAMPLE_PLUGIN_DIR "${CMAKE_BINARY_DIR}/test/unit/plugins")
+    set(RCCL_GIN_EXAMPLE_PLUGIN "${RCCL_GIN_EXAMPLE_PLUGIN_DIR}/librccl-gin-example.so")
+    if(NOT TARGET rccl-gin-example)
+      find_program(RCCL_GIN_EXAMPLE_CC NAMES gcc cc REQUIRED)
+      add_custom_command(
+        OUTPUT "${RCCL_GIN_EXAMPLE_PLUGIN}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${RCCL_GIN_EXAMPLE_PLUGIN_DIR}"
+        COMMAND ${RCCL_GIN_EXAMPLE_CC}
+                -I${PROJECT_SOURCE_DIR}/plugins/gin/example/nccl
+                -fPIC -shared
+                -o "${RCCL_GIN_EXAMPLE_PLUGIN}"
+                ${PROJECT_SOURCE_DIR}/plugins/gin/example/plugin.c
+        DEPENDS ${PROJECT_SOURCE_DIR}/plugins/gin/example/plugin.c
+        COMMENT "Building librccl-gin-example.so for Host API regression tests"
+        VERBATIM
+      )
+      add_custom_target(rccl-gin-example DEPENDS "${RCCL_GIN_EXAMPLE_PLUGIN}")
+    endif()
   endif()
 
   # Create separate MPI test binary if MPI tests are enabled
@@ -539,48 +1103,209 @@ if(BUILD_TESTS)
       common/MPITestCore.cpp
       common/MPIEnvironment.cpp
       common/TestChecks.cpp
+      common/VerifiableFp8.cpp
       transport/TransportMPIBase.cpp
       transport/P2pMPITests.cpp
       transport/NetMPITests.cpp
+      transport/NetLl128MPITests.cpp
+      transport/LlStepBarrierMPITests.cpp
       transport/ShmMPITests.cpp
       transport/NetIbMPI/GeneralTests.cpp
+      transport/NetIbMPI/GdrFlushTests.cpp
+      transport/NetIbMPI/GdrFlushFlagTests.cpp
       transport/NetIbMPI/NicFusionTests.cpp
       transport/NetIbMPI/CastTests.cpp
+      transport/NetIbMPI/OptRecvCompletionTests.cpp
       transport/NetIbMPI/FaultInjectTests.cpp
+      transport/NetIbMPI/GidChangeTests.cpp
       transport/NetIbMPI/OpsFaultUnitTests.cpp
-      transport/GinMPI/GinMPITests.cpp
+      transport/NetIbMPI/GinProxyErrorPathTests.cpp
+      transport/NetIbMPI/NetIbWqeLatMonUnitTests.cpp
+      transport/NetIbMPI/NetIbWqeLatMonTests.cpp
+      transport/RmaMPI/RmaMPITests.cpp
       transport/NetIbMPI/StressTests.cpp
+      transport/NetIbMPI/QpSharingTests.cpp
       transport/GinDeviceMPITests.cpp
+      transport/GinNicFusionMPITests.cpp
       WarpSpeedMPITests.cpp
       ImplicitLaunchOrderMPITests.cpp
       CommMPITests.cpp
+      PatForcedMPITests.cpp
+      BootstrapTlsMPITests.cpp
+      BootstrapStrayPeerMPITests.cpp
       NChannelsPerNetPeerMPITests.cpp
+      MaxP2pPeersMPITests.cpp
+      GdrFlushFlagProtoSwitchMPITests.cpp
       RegistrationMPITests.cpp
       HostApiMPITests.cpp
+      HostApiCustomGinPluginMPITests.cpp
+      GinConnectLeakMPITests.cpp
+      RmaExternalPluginPutSignalMPITests.cpp
+      plugin/net_reload_plugin.cpp
       mem_manager/SuspendResumeMPITests.cpp
       RevokeMPITests.cpp
       ce/CeMPITests.cpp
       ce/CeInternalMPITests.cpp
       GrowMPITests.cpp
       GinNcclTimeoutMPITests.cpp
+      InspectorPromP2pMPITests.cpp
+      ProfilerKernelChMPITests.cpp
       SymmetricKernelMPITests.cpp
       SymmetricWindowMPITests.cpp
+      SymmetricAllGatherTdmMPITests.cpp
       DeviceApiMPITests.cpp
       CommNetMismatchMPITests.cpp
+      test_sparse_send_recv.cpp
+      DdaAllReduceMPITests.cpp
+      DdaReduceScatterMPITests.cpp
+      DdaReduceScatterLL128MPITests.cpp
+      DdaBroadcastMPITests.cpp
+      DdaCollOpCountMPI_test.cpp
+      DdaFabricSimpleMPITests.cpp
+      DdaIpcIndexDataMPITests.cpp
+      DdaFp8MPITests.cpp
+      DdaAlltoAllInPlaceMPITests.cpp
+      SymmetricAbortCheckModeMPITests.cpp
     )
 
+    # rccl_ep has no library target by default, so the test binary compiles its
+    # C ABI directly; that also keeps the tests independent of the option.
+    if(ENABLE_RCCL_EP_TESTS)
+      list(APPEND MPI_TEST_SOURCE_FILES
+        RcclEpDispatchCombineMPITests.cpp
+        ../src/algorithms/rccl_ep/python/rccl_ep_capi.hip
+      )
+      # The project is declared project(rccl CXX) with no enable_language(HIP), so CMake
+      # silently drops a .hip source from the target unless it is marked as CXX.
+      set_source_files_properties(
+        ../src/algorithms/rccl_ep/python/rccl_ep_capi.hip
+        PROPERTIES LANGUAGE CXX)
+      set_source_files_properties(
+        RcclEpDispatchCombineMPITests.cpp
+        ../src/algorithms/rccl_ep/python/rccl_ep_capi.hip
+        PROPERTIES INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/../src/algorithms/rccl_ep)
+    endif()
+
     add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})
+
+    # plugin/net_reload_plugin.cpp is compiled into rccl-UnitTestsMPI so
+    # RmaExternalPluginPutSignalMPITests can load its ncclRmaPlugin_v13 in-process
+    # via STATIC_PLUGIN (dlopen(NULL))
+    target_link_options(rccl-UnitTestsMPI PRIVATE
+      "LINKER:--export-dynamic-symbol=ncclGinPlugin_v13"
+      "LINKER:--export-dynamic-symbol=ncclRmaPlugin_v13")
+
+    # The NetIbMPI connection-setup helpers are [[nodiscard]] so that dropping
+    # their result is caught rather than reviewed for. On its own that is only a
+    # warning, and WERROR defaults to OFF, so a bare SetupConnection(...) would
+    # still build and carry on with the comms the helper just closed. Promoting
+    # the warning to an error here is the whole of the enforcement: nothing
+    # checks the call sites but the compiler, and nothing keeps the attribute on
+    # the helpers but review.
+    #
+    # Scoped to the NetIbMPI sources rather than the whole target: other MPI
+    # tests discard [[nodiscard]] results of their own, and reworking those is
+    # not this change's business.
+    set(NETIBMPI_TEST_SOURCE_FILES ${MPI_TEST_SOURCE_FILES})
+    list(FILTER NETIBMPI_TEST_SOURCE_FILES INCLUDE REGEX "transport/NetIbMPI/")
+    set_source_files_properties(${NETIBMPI_TEST_SOURCE_FILES}
+      PROPERTIES COMPILE_OPTIONS -Werror=unused-result)
+
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsMPI)
+
+    # Recorder profiler plugin for ProfilerKernelChMPITests and PatForcedMPITests. Unlike
+    # rccl-test-profiler-stub it is a working profiler: it records what RCCL
+    # delivers so the test can check it. It builds against the standalone headers
+    # an external plugin ships with rather than RCCL's own, and it lands and
+    # installs beside the test binary, which is where the test looks for it.
+    add_library(rccl-test-profiler-kch-recorder SHARED plugin/profiler_kernelch_recorder.cpp)
+    target_include_directories(rccl-test-profiler-kch-recorder PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/../plugins/profiler/example/nccl
+      ${CMAKE_CURRENT_SOURCE_DIR}/plugin)
+    set_target_properties(rccl-test-profiler-kch-recorder PROPERTIES
+      CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+    add_dependencies(rccl-UnitTestsMPI rccl-test-profiler-kch-recorder)
+    # The recorder's query header is included as "plugin/profiler_kernelch_recorder.h".
+    target_include_directories(rccl-UnitTestsMPI PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(rccl-UnitTestsMPI PRIVATE
+      RCCL_TEST_KCH_RECORDER_NAME="$<TARGET_FILE_NAME:rccl-test-profiler-kch-recorder>")
+    install(TARGETS rccl-test-profiler-kch-recorder
+      LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR}
+      COMPONENT tests)
+
+    # Loadable GIN plugin for GinConnectLeakMPITest, built and installed beside the test binary.
+    add_library(rccl-test-gin-fault-plugin SHARED plugin/gin_fault_plugin.cpp)
+    target_include_directories(rccl-test-gin-fault-plugin PRIVATE ${RCCL_COMMON_INCLUDE_DIRS})
+    target_link_libraries(rccl-test-gin-fault-plugin PRIVATE hip::host)
+    if(TARGET rccl)
+      add_dependencies(rccl-test-gin-fault-plugin rccl)
+    endif()
+    add_dependencies(rccl-UnitTestsMPI rccl-test-gin-fault-plugin)
+    target_compile_definitions(rccl-UnitTestsMPI PRIVATE
+      RCCL_TEST_GIN_FAULT_PLUGIN_NAME="$<TARGET_FILE_NAME:rccl-test-gin-fault-plugin>")
+    install(TARGETS rccl-test-gin-fault-plugin
+      LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR}
+      COMPONENT tests)
+
+    # Hand the in-tree Inspector plugin to InspectorPromP2pMPITests so it can
+    # load a profiler without the caller setting NCCL_INSPECTOR_PLUGIN_SO.
+    if(TARGET rccl-profiler-inspector)
+      add_dependencies(rccl-UnitTestsMPI rccl-profiler-inspector)
+      target_compile_definitions(rccl-UnitTestsMPI PRIVATE
+        RCCL_INSPECTOR_PLUGIN_SO="$<TARGET_FILE:rccl-profiler-inspector>")
+    endif()
+
+    if(ENABLE_HOST_API_TESTS)
+      add_dependencies(rccl-UnitTestsMPI rccl-gin-example)
+      target_compile_definitions(rccl-UnitTestsMPI PRIVATE
+        RCCL_GIN_EXAMPLE_PLUGIN_DIR="${RCCL_GIN_EXAMPLE_PLUGIN_DIR}"
+      )
+
+      # Minimal MPI binary for NCCL 2.30.7 custom-GIN-plugin regression only.
+      # Avoids compiling the full rccl-UnitTestsMPI suite, which may lag API
+      # updates on in-progress NCCL sync branches.
+      add_executable(rccl-HostApiCustomGinPluginMPI
+        common/main_mpi.cpp
+        common/MPIHelpers.cpp
+        common/MPITestCore.cpp
+        common/MPIEnvironment.cpp
+        common/TestChecks.cpp
+        common/MPIHostUtils.cc
+        HostApiCustomGinPluginMPITests.cpp
+      )
+      list(APPEND RCCL_TEST_EXECUTABLES rccl-HostApiCustomGinPluginMPI)
+      add_dependencies(rccl-HostApiCustomGinPluginMPI rccl-gin-example)
+      target_compile_definitions(rccl-HostApiCustomGinPluginMPI PRIVATE
+        RCCL_GIN_EXAMPLE_PLUGIN_DIR="${RCCL_GIN_EXAMPLE_PLUGIN_DIR}"
+      )
+    endif()
   endif()
+
+  # Targets wired up with the sdma stub headers below; everything else opts out.
+  set(RCCL_ANVIL_SDMA_STUB_TARGETS rccl-UnitTestsFixtures rccl-UnitTestsGinAnvilPlugin
+      rccl-UnitTestsGinRocshmemGdaPlugin)
 
   foreach(test_executable IN LISTS RCCL_TEST_EXECUTABLES)
     target_include_directories(${test_executable} PRIVATE ${RCCL_COMMON_INCLUDE_DIRS})
     target_compile_definitions(${test_executable} PRIVATE ${RCCL_COMMON_COMPILE_DEFS})
+
+    # The NCCL_GIN_{ANVIL_SDMA,ROCSHMEM_GDA}_ENABLE gates in gin_device_common.h
+    # are __has_include-based, so a stray backend header on the include path (e.g.
+    # an unrelated /opt/rocm rccl) flips them on and pulls backend code a host-only
+    # test cannot resolve. Pin them to 0 for every non-stub target, and for every
+    # target in a non-GIN build, so only targets that truly compile the backend
+    # (the GIN stub targets) keep the self-detect at 1.
+    if(NOT ENABLE_ROCSHMEM_GIN OR NOT "${test_executable}" IN_LIST RCCL_ANVIL_SDMA_STUB_TARGETS)
+      target_compile_definitions(${test_executable} PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0 NCCL_GIN_ROCSHMEM_GDA_ENABLE=0)
+    endif()
     if(ENABLE_DEVICE_LINKER)
       # Mirror the rccl library define so device-linker-specific test expectations compile in.
       target_compile_definitions(${test_executable} PRIVATE RCCL_DEVICE_LINKER)
     endif()
     target_link_libraries(${test_executable} PRIVATE ${RCCL_COMMON_LINK_LIBS})
+    if(RCCL_COMMON_BUILD_RPATH)
+      set_property(TARGET ${test_executable} APPEND PROPERTY BUILD_RPATH ${RCCL_COMMON_BUILD_RPATH})
+    endif()
     if(BUILD_ADDRESS_SANITIZER)
       target_compile_options(${test_executable} PRIVATE -fsanitize=address)
       target_link_options(${test_executable} PRIVATE -fsanitize=address -shared-libasan)
@@ -598,7 +1323,18 @@ if(BUILD_TESTS)
         set_target_properties(${test_executable} PROPERTIES LINK_FLAGS "${MPI_CXX_LINK_FLAGS}")
       endif()
     endif()
-    if(BUILD_SHARED_LIBS)
+    # These are white-box unit tests: they compile the production source under test
+    # directly into the executable and replace its collaborators with their own
+    # stubs (bootstrap/devr/factory internals). They must NOT link librccl.so —
+    # doing so would both duplicate the compiled-in symbols and pull the real
+    # collaborators, defeating the stubs.
+    if(test_executable STREQUAL "rccl-UnitTestsGinAnvilPlugin" OR
+       test_executable STREQUAL "rccl-UnitTestsGinRocshmemGdaPlugin" OR
+       test_executable STREQUAL "rccl-UnitTestsGinAnvilSdmaFactory" OR
+       test_executable STREQUAL "rccl-UnitTestsDevRuntime")
+      # Intentionally no rccl link; needed symbols come from the compiled-in
+      # source(s) + stubs and RCCL_COMMON_LINK_LIBS (hip/hsa/gtest/dl).
+    elseif(BUILD_SHARED_LIBS)
       target_link_libraries(${test_executable} PRIVATE rccl)
       if(${HOST_OS_ID} STREQUAL "debian")
         set_property(TARGET ${test_executable} PROPERTY INSTALL_RPATH "${CMAKE_BINARY_DIR}")
@@ -610,46 +1346,55 @@ if(BUILD_TESTS)
       target_link_libraries(${test_executable} PRIVATE dl rt numa -lrccl -L${CMAKE_BINARY_DIR} -lrocm_smi64 -L${ROCM_PATH}/lib -L${ROCM_PATH}/rocm_smi/lib)
     endif()
 
-    # Link the GIN device backend library and device-link its rdc code (-fgpu-rdc
-    # --hip-link --offload-arch=... -rdynamic) so GIN device tests can run.
-    if(ENABLE_ROCSHMEM_GIN AND ROCSHMEM_INSTALL_DIR AND "${test_executable}" STREQUAL "rccl-UnitTestsMPI")
-      set(_ROCSHMEM_OFFLOAD_FLAGS "")
-      foreach(_g IN LISTS GPU_TARGETS)
-        if(_g)
-          list(APPEND _ROCSHMEM_OFFLOAD_FLAGS "--offload-arch=${_g}")
-        endif()
-      endforeach()
-      # Fall back to linking by bare name if the hint lookup misses (avoids injecting <VAR>-NOTFOUND into the link line).
-      find_library(_ROCSHMEM_DRM        NAMES drm        HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
-      find_library(_ROCSHMEM_DRM_AMDGPU NAMES drm_amdgpu HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
-      if(NOT _ROCSHMEM_DRM)
-        set(_ROCSHMEM_DRM drm)
-      endif()
-      if(NOT _ROCSHMEM_DRM_AMDGPU)
-        set(_ROCSHMEM_DRM_AMDGPU drm_amdgpu)
-      endif()
-      # Enable the GIN device backend in the test kernels so ncclGinCall has a
-      # dispatch case for the corresponding runtime GIN type.
-      target_compile_definitions(${test_executable} PRIVATE NCCL_GIN_ROCSHMEM_GDA_ENABLE=1)
-      target_compile_options(${test_executable} PRIVATE -fgpu-rdc)
-      target_link_libraries(${test_executable} PRIVATE
-          ${ROCSHMEM_INSTALL_DIR}/lib/librocshmem.a
-          ibverbs hsa-runtime64 hsakmt numa ${_ROCSHMEM_DRM} ${_ROCSHMEM_DRM_AMDGPU})
-      target_link_options(${test_executable} PRIVATE -fgpu-rdc --hip-link ${_ROCSHMEM_OFFLOAD_FLAGS} -rdynamic)
+    if(ENABLE_ROCSHMEM_GIN AND "${test_executable}" STREQUAL "rccl-UnitTestsMPI")
+      # Re-enable the GIN backends in the TU that launches their kernels (-U first
+      # since the target opted out with =0; a second -D warns under -Wmacro-redefined).
+      set_source_files_properties(transport/GinDeviceMPITests.cpp PROPERTIES
+          COMPILE_OPTIONS "-UNCCL_GIN_ANVIL_SDMA_ENABLE;-DNCCL_GIN_ANVIL_SDMA_ENABLE=1;-UNCCL_GIN_ROCSHMEM_GDA_ENABLE;-DNCCL_GIN_ROCSHMEM_GDA_ENABLE=1")
+      # No system libs are linked: this target links librccl, which already resolves
+      # ibverbs/hsa/drm/numa transitively
     endif()
 
     rocm_install(TARGETS ${test_executable} COMPONENT tests)
   endforeach()
 
+  # Suite G: prefer RCCL's GDA headers over rocSHMEM's (higher-priority include path).
+  #          GDA test stubs are used by defining GDA_QUEUEPAIR_MOCK.
   # Suite H: shadow rocSHMEM sdma headers with no-op test stubs (higher-priority include path).
-  if(ENABLE_ROCSHMEM_GIN AND (ENABLE_ROCSHMEM OR GIN_ANVIL_UNIT_TESTS))
-    if(ROCSHMEM_SOURCE_DIR)
-      target_include_directories(rccl-UnitTestsFixtures PRIVATE ${ROCSHMEM_SOURCE_DIR}/src)
-    else()
-      target_include_directories(rccl-UnitTestsFixtures PRIVATE ${CMAKE_SOURCE_DIR}/../rocshmem/src)
-    endif()
+  # Gated on ENABLE_ROCSHMEM_GIN because that is what now turns on NCCL_GIN_ANVIL_SDMA_ENABLE,
+  # and these are the only two test targets that define it.
+  if(ENABLE_ROCSHMEM_GIN)
     target_include_directories(rccl-UnitTestsFixtures BEFORE PRIVATE
-      ${CMAKE_CURRENT_SOURCE_DIR}/device)
+      ${CMAKE_CURRENT_SOURCE_DIR}/device
+      ${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda
+    )
+    target_compile_definitions(rccl-UnitTestsFixtures PRIVATE GDA_QUEUEPAIR_MOCK)
+    # Suite G is relocatable too. Without RDC, a -O0 build rejects the QueuePairMock scoped atomics (invalid addrspacecast).
+    set_source_files_properties(
+      ${CMAKE_CURRENT_SOURCE_DIR}/device/GinAnvilIpcDevice_test.cpp
+      ${CMAKE_CURRENT_SOURCE_DIR}/device/GinRocshmemGdaTemplate_test.cpp
+      ${CMAKE_CURRENT_SOURCE_DIR}/device/GinAnvilSdmaTemplate_test.cpp
+      ${CMAKE_CURRENT_SOURCE_DIR}/device/sdma/anvil_stub_quiet_count.cpp
+      PROPERTIES COMPILE_OPTIONS "${RCCL_TEST_GPU_RDC_COMPILE_OPTIONS}")
+    # Device-link the fixtures binary (-fgpu-rdc --hip-link) so the cross-TU
+    # __device__ g_sdmaStubQuietCount resolves.
+    set(_GIN_FIXTURES_RDC_OFFLOAD_FLAGS "")
+    foreach(_g IN LISTS GPU_TARGETS)
+      if(_g)
+        list(APPEND _GIN_FIXTURES_RDC_OFFLOAD_FLAGS "--offload-arch=${_g}")
+      endif()
+    endforeach()
+    target_link_options(rccl-UnitTestsFixtures PRIVATE
+      -fgpu-rdc --hip-link ${_GIN_FIXTURES_RDC_OFFLOAD_FLAGS})
+    foreach(_gin_plugin_test rccl-UnitTestsGinAnvilPlugin rccl-UnitTestsGinRocshmemGdaPlugin)
+      if(TARGET ${_gin_plugin_test})
+        target_include_directories(${_gin_plugin_test} BEFORE PRIVATE
+          ${CMAKE_CURRENT_SOURCE_DIR}/device
+          ${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda
+        )
+        target_compile_definitions(${_gin_plugin_test} PRIVATE GDA_QUEUEPAIR_MOCK)
+      endif()
+    endforeach()
   endif()
 
   # Create install-time test file for distribution
@@ -762,5 +1507,24 @@ if(BUILD_TESTS)
     COMPONENT tests
     RENAME "CTestTestfile.cmake"
   )
+
+  # Host-only micro-test binaries (rccl-UnitTestsMicro). The host/ CMakeLists
+  # is dual-mode: under BUILD_TESTS it builds only the in-RCCL-build micro-test
+  # target and returns; invoked standalone it builds rccl-HostUnitTests too.
+  add_subdirectory(host)
+
+  # Those headers are installed by the rocSHMEM sub-build, and targets that do
+  # not link rccl are otherwise not ordered after it.
+  if(ENABLE_ROCSHMEM AND TARGET rocshmem_static)
+    foreach(_dir ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/host)
+      get_property(_tgts DIRECTORY ${_dir} PROPERTY BUILDSYSTEM_TARGETS)
+      foreach(_tgt IN LISTS _tgts)
+        get_target_property(_type ${_tgt} TYPE)
+        if(NOT _type MATCHES "^(INTERFACE_LIBRARY|UTILITY)$")
+          add_dependencies(${_tgt} rocshmem_static)
+        endif()
+      endforeach()
+    endforeach()
+  endif()
 
 endif()

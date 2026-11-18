@@ -22,9 +22,14 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#include "gda/backend_gda.hpp"
+#include <new>
+
 #include "log.hpp"
 #include "util.hpp"
+#include "gda/backend_gda.hpp"
+#include "gda/ionic/provider_gda_ionic.hpp"
+#include "gda/ionic/queue_pair_ionic.hpp"
+#include "gda/queue_pair_provider.hpp"
 
 namespace rocshmem {
 
@@ -41,10 +46,8 @@ void GDABackend::ionic_create_cqs(int ncqes) {
   cq_attr.comp_mask     = IBV_CQ_INIT_ATTR_MASK_PD;
 
   memset(&ionic_cq_attr, 0, sizeof(ionic_cq_attr));
-  if (ionic_dv.create_cq_ex) {
-    ionic_cq_attr.comp_mask = IONIC_CQ_INIT_ATTR_MASK_FLAGS;
-    ionic_cq_attr.flags = IONIC_CQ_INIT_ATTR_CCQE;
-  }
+  ionic_cq_attr.flags     = IONIC_CQ_INIT_ATTR_CCQE;
+  ionic_cq_attr.comp_mask = IONIC_CQ_INIT_ATTR_MASK_FLAGS;
 
   for (size_t i = 0; i < qps.size(); i++) {
     NicDevice &nic = nic_for_qp(i);
@@ -52,15 +55,8 @@ void GDABackend::ionic_create_cqs(int ncqes) {
 
     cq_attr.parent_domain = nic.pd_uxdma[i & 1];
 
-    if (ionic_dv.create_cq_ex) {
-      cq_ex = ionic_dv.create_cq_ex(nic.context, &cq_attr, &ionic_cq_attr);
-      // If cq_ex is nullptr, fallback to ibv_create_cq_ex below.
-    }
-
-    if (!cq_ex) {
-      cq_ex = ibv_create_cq_ex(nic.context, &cq_attr);
-      CHECK_NNULL(cq_ex, "ibv_create_cq_ex");
-    }
+    cq_ex = ionic_dv.create_cq_ex(nic.context, &cq_attr, &ionic_cq_attr);
+    CHECK_NNULL(cq_ex, "ionic_dv_create_cq_ex");
 
     cqs[i] = ibv.cq_ex_to_cq(cq_ex);
     CHECK_NNULL(cqs[i], "ibv_cq_ex_to_cq");
@@ -68,7 +64,9 @@ void GDABackend::ionic_create_cqs(int ncqes) {
 }
 
 void GDABackend::ionic_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
-  NicDevice &nic = nic_for_qp(conn_num);
+  ibv_qp* qp = qps[conn_num];
+  const NicDevice& nic = nic_for_qp(conn_num);
+
   ionic_dv_ctx dvctx;
   ionic_dv.get_ctx(&dvctx, nic.context);
 
@@ -86,40 +84,30 @@ void GDABackend::ionic_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   gpu_db_cq = &gpu_db_ptr[dvctx.cq_qtype];
   gpu_db_sq = &gpu_db_ptr[dvctx.sq_qtype];
 
-  uint8_t udma_idx = ionic_dv.qp_get_udma_idx(qps[conn_num]);
+  uint8_t udma_idx = ionic_dv.qp_get_udma_idx(qp);
 
   ionic_dv_cq dvcq;
   ionic_dv.get_cq(&dvcq, cqs[conn_num], udma_idx);
 
-  gpu_qp->cq_dbreg = gpu_db_cq;
-  gpu_qp->cq_dbval = dvcq.q.db_val;
-  gpu_qp->cq_mask = dvcq.q.mask;
-
-  gpu_qp->ionic_cq_buf = reinterpret_cast<ionic_v1_cqe*>(dvcq.q.ptr);
-
   ionic_dv_qp dvqp;
-  ionic_dv.get_qp(&dvqp, qps[conn_num]);
+  ionic_dv.get_qp(&dvqp, qp);
 
-  gpu_qp->sq_dbreg = gpu_db_sq;
-  gpu_qp->sq_dbval = dvqp.sq.db_val;
-  gpu_qp->sq_mask = dvqp.sq.mask;
-  gpu_qp->ionic_sq_buf = reinterpret_cast<ionic_v1_wqe *>(dvqp.sq.ptr);
+  ionic_v1_wqe* sq_buf   = reinterpret_cast<ionic_v1_wqe*>(dvqp.sq.ptr);
+  uint64_t*     sq_dbreg = gpu_db_sq;
+  uint64_t      sq_dbval = dvqp.sq.db_val;
+  uint16_t      sq_mask  = dvqp.sq.mask;
 
-  strncpy(gpu_qp->dev_name,
-          qps[conn_num]->context->device->name,
-          sizeof(gpu_qp->dev_name));
-  gpu_qp->dev_name[sizeof(gpu_qp->dev_name) - 1] = 0;
+  ionic_v1_cqe* cq_buf   = reinterpret_cast<ionic_v1_cqe*>(dvcq.q.ptr);
+  uint64_t*     cq_dbreg = gpu_db_cq;
+  uint64_t      cq_dbval = dvcq.q.db_val;
+  uint16_t      cq_mask  = dvcq.q.mask;
 
-  gpu_qp->qp_num = qps[conn_num]->qp_num;
-  int pe = conn_num % num_pes;
-  int nic_idx = nic_idx_for_qp(conn_num);
-  gpu_qp->lkey = nic.heap_mr->lkey;
-  gpu_qp->rkey = heap_rkey[pe * num_nics_ + nic_idx];
-  gpu_qp->inline_threshold = 32;
-
-  /* Base Heap information */
-  gpu_qp->base_heap = (uintptr_t) heap.get_local_heap_base();
-  gpu_qp->base_heap_size = heap.get_size();
+  /* QueuePair is either QueuePairIONIC or QueuePairMux
+   * both have a constructor that accepts rvalue reference QueuePairIONIC&&,
+   * so just use that instead of trying to figure out which one we're using */
+  new (gpu_qp) QueuePair{QueuePairIONIC{qp->qp_num, gpu_qp_init_info(conn_num),
+                                        ionic_device_sq{sq_buf, sq_dbreg, sq_dbval, sq_mask},
+                                        ionic_device_cq{cq_buf, cq_dbreg, cq_dbval, cq_mask}}};
 }
 
 void GDABackend::ionic_setup_parent_domain(NicDevice &nic, struct ibv_parent_domain_init_attr* pattr) {
@@ -161,7 +149,7 @@ int GDABackend::ionic_dv_dl_init() {
   DLSYM_HELPER(ionic_dv, ionic_dv_, ionicdv_handle_, pd_set_sqcmb);
   DLSYM_HELPER(ionic_dv, ionic_dv_, ionicdv_handle_, pd_set_rqcmb);
   DLSYM_HELPER(ionic_dv, ionic_dv_, ionicdv_handle_, pd_set_udma_mask);
-  DLSYM_OPT_HELPER(ionic_dv, ionic_dv_, ionicdv_handle_, create_cq_ex);
+  DLSYM_HELPER(ionic_dv, ionic_dv_, ionicdv_handle_, create_cq_ex);
 
   return ROCSHMEM_SUCCESS;
 }

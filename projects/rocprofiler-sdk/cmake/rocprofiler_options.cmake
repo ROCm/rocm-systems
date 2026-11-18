@@ -69,6 +69,12 @@ rocprofiler_add_option(ROCPROFILER_BUILD_GOTCHA
                        "Enable building gotcha library internally" ON)
 rocprofiler_add_option(ROCPROFILER_BUILD_YAML_CPP
                        "Enable building yaml-cpp library internally" ON)
+rocprofiler_add_option(ROCPROFILER_BUILD_ELFIO "Enable building ELFIO library internally"
+                       ON)
+rocprofiler_add_option(ROCPROFILER_BUILD_OTF2 "Enable building OTF2 library internally"
+                       ON)
+rocprofiler_add_option(ROCPROFILER_BUILD_JSON "Enable building JSON library internally"
+                       ON)
 if(ROCPROFILER_BUILD_TESTS)
     rocprofiler_add_option(
         ROCPROFILER_BUILD_GTEST
@@ -163,7 +169,7 @@ include(rocprofiler_memcheck)
 
 # default FAIL_REGULAR_EXPRESSION for tests
 set(ROCPROFILER_DEFAULT_FAIL_REGEX
-    "threw an exception|Permission denied|failed with error code|Subprocess aborted"
+    "threw an exception|Permission denied|failed with error code|Subprocess aborted|Failed to resolve rocprofiler-sdk shared library path"
     CACHE INTERNAL "Default FAIL_REGULAR_EXPRESSION for tests" FORCE)
 
 # this should be defaulted to OFF by ROCm 7.0.1 or 7.1 this should only used to disable

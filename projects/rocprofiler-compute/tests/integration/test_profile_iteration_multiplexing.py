@@ -1,0 +1,284 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
+"""Integration tests for iteration multiplexing."""
+
+import os
+
+import common
+import pandas as pd
+import pytest
+
+from tests.integration import common as integration_common
+from tests.integration.common import (
+    CSVS,
+    are_deterministic_counters_equal,
+    are_stochastic_counters_similar,
+    config,
+    num_devices,
+    num_kernels,
+    skip_unsupported_roofline_soc,
+)
+
+
+@pytest.mark.iteration_multiplexing_1
+def test_profiler_options(binary_handler_profile_rocprof_compute):
+    options = ["--no-native-tool", "--iteration-multiplexing"]
+    workload_dir = common.get_output_dir()
+    code = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=False
+    )
+    assert code == 1
+
+
+@pytest.mark.iteration_multiplexing_1
+def test_iteration_multiplexing(binary_handler_profile_rocprof_compute):
+    options = ["--iteration-multiplexing"]
+    workload_dir = common.get_output_dir()
+    _ = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=True, roof=False
+    )
+
+    file_dict = integration_common.check_csv_files(
+        workload_dir, num_devices, num_kernels
+    )
+    assert sorted(list(file_dict.keys())) == CSVS
+
+    common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.iteration_multiplexing_2
+@pytest.mark.xfail(
+    reason="Multiple profiling workloads mapped to the same GPU corrupts the counters"
+)
+def test_iteration_multiplexing_deterministic_counter_accuracy(
+    binary_handler_profile_rocprof_compute,
+):
+    skip_unsupported_roofline_soc()
+
+    # These metrics should cover the deterministic counters being checked
+    # Block 4 (roofline) included to verify roofline counters under multiplexing
+    options = ["--block", "4", "6.1.5", "6.1.6", "7.2.2", "10.1"]
+    workload_dir = common.get_output_dir(param_id="no_iter_mplx")
+    workload_dirs = [workload_dir]
+    try:
+        _ = binary_handler_profile_rocprof_compute(
+            config,
+            workload_dir,
+            options,
+            check_success=True,
+            roof=False,
+            app_name="app_laplace_eqn",
+        )
+        integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
+        counters_no_multiplexing = integration_common.read_counter_results(workload_dir)
+
+        options = [
+            "--block",
+            "4",
+            "6.1.5",
+            "6.1.6",
+            "7.2.2",
+            "10.1",
+            "--iteration-multiplexing",
+        ]
+        workload_dir_multiplexed = common.get_output_dir(param_id="iter_mplx")
+        workload_dirs.append(workload_dir_multiplexed)
+        _ = binary_handler_profile_rocprof_compute(
+            config,
+            workload_dir_multiplexed,
+            options,
+            check_success=True,
+            roof=True,
+            app_name="app_laplace_eqn_iter",
+        )
+        integration_common.check_csv_files(
+            workload_dir_multiplexed, num_devices, num_kernels
+        )
+        counters_multiplexed = integration_common.read_counter_results(
+            workload_dir_multiplexed
+        )
+
+        assert are_deterministic_counters_equal(
+            [counters_multiplexed], counters_no_multiplexing
+        )
+
+        assert os.path.exists(f"{workload_dir_multiplexed}/roofline.csv")
+        roofline_df = pd.read_csv(f"{workload_dir_multiplexed}/roofline.csv")
+        assert len(roofline_df) >= num_devices
+    finally:
+        for output_dir in workload_dirs:
+            common.clean_output_dir(config["cleanup"], output_dir)
+
+
+@pytest.mark.iteration_multiplexing_stochastic
+def test_iteration_multiplexing_stochastic_counter_accuracy(
+    binary_handler_profile_rocprof_compute,
+    soc,
+):
+    skip_unsupported_roofline_soc()
+
+    if not soc or ("MI300" not in soc and "MI350" not in soc):
+        pytest.skip("Skipping stochastic iteration multiplexing for non-CDNA socs.")
+
+    workload_dir = common.get_output_dir(param_id="no_iter_mplx")
+    workload_dirs = [workload_dir]
+    # These metrics should cover the L1 cache stochastic counters
+    # Block 4 (roofline) included to verify roofline counters under multiplexing
+    options = ["--block", "4", "16.1", "16.3"]
+    try:
+        _ = binary_handler_profile_rocprof_compute(
+            config,
+            workload_dir,
+            options,
+            check_success=True,
+            roof=False,
+            app_name="app_laplace_eqn",
+        )
+        integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
+        counters_no_multiplexing = integration_common.read_counter_results(workload_dir)
+
+        options = [
+            "--block",
+            "4",
+            "16.1",
+            "16.3",
+            "--iteration-multiplexing",
+        ]
+        workload_dir_multiplexed = common.get_output_dir(param_id="iter_mplx")
+        workload_dirs.append(workload_dir_multiplexed)
+        _ = binary_handler_profile_rocprof_compute(
+            config,
+            workload_dir_multiplexed,
+            options,
+            check_success=True,
+            roof=True,
+            app_name="app_laplace_eqn_iter",
+        )
+        integration_common.check_csv_files(
+            workload_dir_multiplexed, num_devices, num_kernels
+        )
+        counters_multiplexed = integration_common.read_counter_results(
+            workload_dir_multiplexed
+        )
+
+        assert are_stochastic_counters_similar(
+            [counters_multiplexed], counters_no_multiplexing
+        )
+
+        assert os.path.exists(f"{workload_dir_multiplexed}/roofline.csv")
+        roofline_df = pd.read_csv(f"{workload_dir_multiplexed}/roofline.csv")
+        assert len(roofline_df) >= num_devices
+    finally:
+        for output_dir in workload_dirs:
+            common.clean_output_dir(config["cleanup"], output_dir)
+
+
+# Not part of automated test runs since testing all counters is expensive
+
+
+def test_iteration_multiplexing_all_counter_accuracy(
+    binary_handler_profile_rocprof_compute,
+):
+    workload_dir = common.get_output_dir(param_id="no_iter_mplx")
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        check_success=True,
+        roof=False,
+        app_name="app_laplace_eqn",
+    )
+    integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
+    counters_no_multiplexing = integration_common.read_counter_results(workload_dir)
+    common.clean_output_dir(config["cleanup"], workload_dir)
+
+    options = ["--iteration-multiplexing"]
+    workload_dir = common.get_output_dir(param_id="iter_mplx")
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_laplace_eqn_iter",
+    )
+    integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
+    counters_multiplexed = integration_common.read_counter_results(workload_dir)
+    common.clean_output_dir(config["cleanup"], workload_dir)
+
+    assert are_deterministic_counters_equal(
+        [counters_multiplexed], counters_no_multiplexing
+    )
+    assert are_stochastic_counters_similar(
+        [counters_multiplexed], counters_no_multiplexing
+    )
+
+
+@pytest.mark.iteration_multiplexing_2
+def test_iteration_multiplexing_insufficient_dispatches(
+    binary_handler_profile_rocprof_compute,
+    binary_handler_analyze_rocprof_compute,
+    capsys,
+):
+    """Verify graceful degradation when dispatches are too few for full
+    counter coverage under iteration multiplexing.
+    """
+    options = ["--iteration-multiplexing"]
+    workload_dir = common.get_output_dir(param_id="iter_mplx_insufficient")
+    binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_laplace_eqn_insufficient",
+    )
+
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        workload_dir,
+    ])
+    assert code == 0
+
+    captured = capsys.readouterr()
+    assert "missing counter data" in captured.out
+
+    common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.iteration_multiplexing_2
+def test_iteration_multiplexing_roofline(
+    binary_handler_profile_rocprof_compute,
+    binary_handler_analyze_rocprof_compute,
+):
+    """Verify roofline analysis on iteration-multiplexed profiling data."""
+    skip_unsupported_roofline_soc()
+
+    options = [
+        "--block",
+        "4",
+        "--iteration-multiplexing",
+    ]
+    workload_dir = common.get_output_dir(param_id="iter_mplx_roofline")
+    binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=True,
+        app_name="app_laplace_eqn",
+    )
+
+    assert os.path.exists(f"{workload_dir}/roofline.csv")
+    roofline_df = pd.read_csv(f"{workload_dir}/roofline.csv")
+    assert len(roofline_df) >= num_devices
+
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        workload_dir,
+    ])
+    assert code == 0
+
+    common.clean_output_dir(config["cleanup"], workload_dir)

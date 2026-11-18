@@ -1,6 +1,6 @@
 [package]
 name = "rocjitsu_sys"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 
 [lib]
@@ -8,3 +8,54 @@ path = "src/lib.rs"
 
 [dependencies]
 libloading = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+# `rocjitsu_sys` is the FFI binding layer to `librocjitsu.so`, so it is the
+# one crate in the workspace that is allowed to write `unsafe`. The
+# workspace lint table forbids it, and `forbid` cannot be relaxed by a
+# later `allow`, so this crate carries an equivalent table of its own
+# instead of inheriting with `workspace = true`.
+#
+# Every other line of the workspace policy is repeated below, and it has
+# to stay that way: a lint added to `[workspace.lints]` and not to this
+# table silently exempts the one crate that most needs it, and the
+# `cargo_clippy` ctest cannot catch that drift because a missing lint
+# produces no diagnostic. `tests/lint_policy.rs` reads both manifests and
+# fails when this table is missing a lint the workspace sets, or sets one
+# more loosely, so the check is derived rather than done by eye.
+#
+# The exception runs in the strict direction too: `unsafe_op_in_unsafe_fn`
+# is denied here and nowhere else, because an `unsafe fn` body does not
+# get to be implicitly unsafe in the crate where every `unsafe` lives.
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+unused_must_use = "deny"
+unused_qualifications = "warn"
+unreachable_pub = "warn"
+missing_debug_implementations = "warn"
+rust_2018_idioms = { level = "deny", priority = -1 }
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+mem_forget = "deny"
+panic = "deny"
+exit = "deny"
+await_holding_lock = "deny"
+let_underscore_future = "deny"
+# This crate documents safety at *function* granularity: every `unsafe fn`
+# carries a `# Safety` section stating the C API contract its body relies
+# on, and the body is a single call honouring exactly that contract.
+# Requiring a per-block comment as well would mean forty restatements of
+# the sentence directly above each one, which makes the genuinely
+# interesting safety arguments — the ones in `daemon.rs`, where an
+# invariant is upheld across calls — harder to pick out rather than
+# easier.
+undocumented_unsafe_blocks = "allow"

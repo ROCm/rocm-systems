@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # The wheel bundles a prebuilt libamd_smi_python.so and loads it via ctypes.
 # It carries no Python C-extension, so it is ABI-independent across CPython
 # versions (py3-none) but platform-specific (the .so is glibc/arch bound).

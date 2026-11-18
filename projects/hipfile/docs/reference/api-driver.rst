@@ -19,6 +19,7 @@ properties. See the Doxygen descriptions for current implementation status.
 
 .. doxygengroup:: driver
    :content-only:
+   :members:
 
 Core versioning and configuration
 ====================================
@@ -29,3 +30,4 @@ parameters.
 
 .. doxygengroup:: core
    :content-only:
+   :members:

@@ -1,24 +1,6 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 #include "device_cuid_read.h"
 
 #include <gtest/gtest.h>
@@ -98,6 +80,11 @@ void TestDeviceCuidRead::Run(void) {
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
     if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) { std::cout << "\t**CUID not supported on this device." << std::endl; }
+    } else if (err == AMDSMI_STATUS_NO_PERM) {
+      // An unreadable required snapshot field leaves no CUID to compare.
+      IF_VERB(STANDARD) {
+        std::cout << "\t**CUID needs privilege on this node; run as root." << std::endl;
+      }
     } else {
       CHK_ERR_ASRT(err)
       IF_VERB(STANDARD) {

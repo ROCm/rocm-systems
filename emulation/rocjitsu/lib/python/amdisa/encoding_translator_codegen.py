@@ -18,10 +18,10 @@ Fields are classified as:
 Usage::
 
     from amdisa import Parser
-    from amdisa.isa_profile import CdnaProfile, Rdna4Profile
+    from amdisa.isa_profile import Cdna4Profile, Rdna4Profile
     from amdisa.encoding_translator_codegen import generate_encoding_translators
 
-    cdna4 = Parser('amdgpu_isa_cdna4.xml', CdnaProfile()).parse()
+    cdna4 = Parser('amdgpu_isa_cdna4.xml', Cdna4Profile()).parse()
     rdna4 = Parser('amdgpu_isa_rdna4.xml', Rdna4Profile()).parse()
     generate_encoding_translators(cdna4, rdna4, 'cdna4', 'rdna4', 'output/')
 """
@@ -34,6 +34,8 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from amdisa.codegen.config import CodegenConfig
 
 
 def _clang_format(path: Path) -> None:
@@ -476,7 +478,7 @@ def _all_field_names_from_encodings(encodings):
     multiple ISAs' encodings for the same format.
 
     Returned sorted alphabetically so the emitted struct layout is stable
-    across `--multi` argument orderings. Field order in these structs is
+    across ISA argument orderings. Field order in these structs is
     cosmetic (every read/write in the generated code is by name) but a
     deterministic order avoids gratuitous diff churn on regeneration.
     """
@@ -725,7 +727,7 @@ def _emit_encode_fn(trans, dst_ns, dst_name):
     return lines
 
 
-def _emit_dispatch(translations, src_name, dst_name):
+def _emit_dispatch(translations, src_name, dst_name, src_spec, dst_spec):
     val_groups: dict[int, list[EncodingTranslation]] = {}
     for t in translations:
         val_groups.setdefault(t.src_dt_index, []).append(t)
@@ -775,8 +777,41 @@ def _emit_dispatch(translations, src_name, dst_name):
                 if t.src_bit_cnt <= 32
                 else ('w0, w1' if t.src_bit_cnt == 64 else 'w0, w1, w2')
             )
-            lines.append(f'    case kEnc_{cn}:')
-            lines.append(f'        return {enc_fn}({dec_fn}({args}), dst_op);')
+            swap_compare_data = (
+                t.src_enc_name in ('ENC_DS', 'ENC_VDS')
+                and src_spec.profile.ds_compare_store_compare_first
+                != dst_spec.profile.ds_compare_store_compare_first
+            )
+            if swap_compare_data:
+                opcodes = sorted(
+                    {
+                        inst.opcode
+                        for inst in src_spec.encoding_map[t.src_enc_name].insts
+                        if inst.name.startswith(('DS_CMPST_', 'DS_CMPSTORE_'))
+                    }
+                )
+                fields_type = _fields_struct_name(t.src_enc_name)
+                lines.append(f'    case kEnc_{cn}: {{')
+                lines.append(f'        {fields_type} fields = {dec_fn}({args});')
+                lines.append('        switch (fields.op) {')
+                for opcode in opcodes:
+                    lines.append(f'        case {opcode}:')
+                if opcodes:
+                    lines.append('        {')
+                    lines.append(
+                        '            const uint32_t comparison = fields.data0;'
+                    )
+                    lines.append('            fields.data0 = fields.data1;')
+                    lines.append('            fields.data1 = comparison;')
+                    lines.append('            break;')
+                    lines.append('        }')
+                lines.append('        default: break;')
+                lines.append('        }')
+                lines.append(f'        return {enc_fn}(fields, dst_op);')
+                lines.append('    }')
+            else:
+                lines.append(f'    case kEnc_{cn}:')
+                lines.append(f'        return {enc_fn}({dec_fn}({args}), dst_op);')
         else:
             lines.append(f'    case kEnc_{cn}: {{')
             lines.append(f'        const uint8_t seg = (w0 >> 14) & 0x3;')
@@ -859,7 +894,15 @@ def _extract_enc_field_values(spec, enc_names):
 # ---------------------------------------------------------------------------
 
 
-def generate_encoding_translators(src_spec, dst_spec, src_name, dst_name, output_dir):
+def generate_encoding_translators(
+    src_spec,
+    dst_spec,
+    src_name,
+    dst_name,
+    output_dir,
+    config: CodegenConfig | None = None,
+):
+    config = config if config is not None else CodegenConfig()
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -938,9 +981,9 @@ def generate_encoding_translators(src_spec, dst_spec, src_name, dst_name, output
         '#include <cstdint>',
         '#include <cstring>',
         '',
-        f'#include "rocjitsu/isa/arch/amdgpu/{src_name}/machine_insts.h"',
-        f'#include "rocjitsu/isa/arch/amdgpu/{dst_name}/builders.h"',
-        f'#include "rocjitsu/isa/arch/amdgpu/{dst_name}/machine_insts.h"',
+        f'#include "{config.generated_include(src_name, "machine_insts.h")}"',
+        f'#include "{config.generated_include(dst_name, "builders.h")}"',
+        f'#include "{config.generated_include(dst_name, "machine_insts.h")}"',
         '#include "rocjitsu/code/dbt/encoding_translator.h"',
         '#include "encoding_fields.h"',
         '',
@@ -957,7 +1000,9 @@ def generate_encoding_translators(src_spec, dst_spec, src_name, dst_name, output
         pair_lines.extend(_emit_decode_fn(t, src_ns, src_name))
     for t in translations:
         pair_lines.extend(_emit_encode_fn(t, dst_ns, dst_name))
-    pair_lines.extend(_emit_dispatch(translations, src_name, dst_name))
+    pair_lines.extend(
+        _emit_dispatch(translations, src_name, dst_name, src_spec, dst_spec)
+    )
 
     pair_lines += [
         f'}}  // namespace {src_name}_to_{dst_name}',

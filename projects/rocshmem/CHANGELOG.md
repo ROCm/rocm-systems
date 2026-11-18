@@ -1,5 +1,174 @@
 # Changelog for rocSHMEM
-## Unreleased - rocSHMEM 3.6.0 for ROCm x.x.x
+## Unreleased - rocSHMEM 3.9.0 for ROCm 10.3
+
+### Fixed
+* Fixed `rocshmem_tile_broadcast` (and `_wave`, `_wg` variants) on the IPC and GDA backends: the root PE's destination buffer was not written when `dst != src`, leaving it uninitialised while non-root PEs received the correct data via `tile_get`. The root PE now performs a local tile copy at the appropriate scope when `dst_data != src_data`, matching the nvshmem reference behaviour.
+* Fixed `rocshmem_ctx_tile_*` collective operations (allgather, broadcast, sum/max/min reduce, collective_wait) silently discarding the caller-supplied `rocshmem_ctx_t` context. The context was accepted but not forwarded to the internal bitcode layer, which always used `ROCSHMEM_CTX_DEFAULT` instead. The context is now threaded through correctly.
+
+### Added
+* Extended the tile API to support **3D and 4D tensors** (in addition to the existing 1D and 2D support) for both the IPC and GDA backends. The `TileView` internal structure now uses fixed-size arrays of `MAX_NDIM=4`, `tile_make_view` uses a generic loop over all dimensions, and `tile_memcpy_rma` includes an N-dimensional strided copy path. The `ndim > 2` guards in the IPC and GDA RMA and reduction operations have been relaxed to `ndim > TileView::MAX_NDIM`. The GDA lane-level `tile_put`/`tile_get` and the `tile_put_gda_workers`/`tile_get_gda_workers` helpers include N-dimensional element-by-element and contiguous paths for ranks 3 and 4.
+* Added standalone signal APIs:
+    * `rocshmem_signal_add_on_stream` and `rocshmem_signal_set_on_stream`
+* Merged the TDM (Tensor Data Mover) LDS-staged IPC copy path with a new, non-TDM async
+  LDS-staged copy backend (sized `global_load_async_to_lds_b32`/
+  `global_store_async_from_lds_b32`-class instructions) into a single mechanism. Both
+  backends are gfx1250-only; every other architecture is unaffected.
+  * New primary build option `USE_LDS_STAGE` (selects the async backend on gfx1250).
+    `USE_TDM` selects the TDM backend specifically and is independent of
+    `USE_LDS_STAGE`: setting `USE_TDM=ON` alone is enough to build and use the
+    TDM path.
+  * Public API renamed: `rocshmem_set_tdm_lds()` -> `rocshmem_set_lds_stage()`,
+    `rocshmem_query_tdm_lds_bytes()` -> `rocshmem_query_lds_stage_bytes()`.
+  * Env vars renamed: `ROCSHMEM_TDM_TILE_BYTES`/`ROCSHMEM_TDM_PUT_THRESHOLD`/
+    `ROCSHMEM_TDM_GET_THRESHOLD` -> `ROCSHMEM_LDS_STAGE_TILE_BYTES`/
+    `ROCSHMEM_LDS_STAGE_PUT_THRESHOLD`/`ROCSHMEM_LDS_STAGE_GET_THRESHOLD`.
+* Type Support:
+    * `half`, `bfloat16`, `int8`, `int16`, `int32`, `int64`,
+      `uint8`, `uint16`, `uint32`, `uint64`, `size_t`, `ptrdiff_t`:
+        * RMA:
+             * `rocshmem_{ctx_}<TYPE>_{put,get,p,g}{_nbi}{_wave}{_wg}`
+        * RMA with signal:
+             * `rocshmem_{ctx_}<TYPE>_put_signal{_nbi}{_wave}{_wg}`
+        * Point-to-point synchronization:
+             * `rocshmem_{ctx_}<TYPE>_{wait_until,test}{_all,_any,_some}{_vector}`
+        * Collectives:
+             * `rocshmem_{ctx_}<TYPE>_{broadcast,fcollect,alltoall}{_wave}{_wg}`
+             * `rocshmem_{ctx_}<TYPE>_alltoallv_wg`
+             * `rocshmem_{ctx_}<TYPE>_{and,or,xor,min,max,sum,prod}_reduce{_scatter}{_wave}{_wg}`
+                * Note: `rocshmem_{ctx_}bfloat16_{and,or,xor,min,max,sum,prod}_reduce{_scatter}{_wave}{_wg}` are unsupported on ROCm versions 10.0, 10.1, and 10.2
+
+### Resolved issues
+* Fixed `rocshmem_fence` on the RO backend taking a host proxy round trip from every calling thread.
+  A fence now skips the proxy when every non-blocking network operation queued on its context is already covered
+  by a completed fence or quiet, and otherwise sends one proxy fence per wavefront.
+  The `fence_*` functional tests now run on RO.
+* Fixed lost updates and hangs on the RO backend when more blocking operations
+  are in flight on one context than its proxy queue holds. A blocking call now
+  waits on its own status flag instead of re-reading it from the queue slot,
+  which the host may already have handed to another thread.
+  The `amo_add`, `amo_fadd`, `amo_inc`, `amo_finc` and
+  `putmem_signal_on_stream` functional tests now run on RO.
+
+### Deprecated
+* Deprecated `rocshmem_set_tdm_lds()` and `rocshmem_query_tdm_lds_bytes()`.
+  Use `rocshmem_set_lds_stage()` and `rocshmem_query_lds_stage_bytes()` instead.
+
+### Changed
+* SDMA transport is now built by default when IPC is enabled (`USE_SDMA` defaults to `ON`
+  when `USE_IPC=ON`). SDMA is disabled at runtime by default; set
+  `ROCSHMEM_SDMA_ENABLED=1` to activate it. This allows SDMA to be used without
+  rebuilding the library.
+* `ROCSHMEM_SDMA_THRESHOLD` default changed from 256 to 1024 bytes.
+  Wave and workgroup operations automatically scale the threshold by the wavefront size,
+  avoiding SDMA for small-to-medium transfers where parallel IPC copy is faster.
+
+## rocSHMEM 3.8.0 for ROCm 10.2
+
+### Fixed
+* Fixed tile RMA operations (`rocshmem_tile_put`, `rocshmem_tile_get`) to correctly apply non-zero `start_coord` values to both the source and destination tensors; previously only the remote tensor was offset, causing incorrect data movement when `start_coord != 0`.
+  Fully-packed column-major tiles are now also classified as `Contiguous`, enabling a single flat memcpy instead of per-column copies.
+
+### Added
+* GDA device code refactor (#7217)
+  * Core GDA device code is now header-only.
+  * Removed indirection and branching when compiled for a single GDA provider.
+  * Significantly reduced size of device code GDA Queue Pair management objects.
+  * Reduced latency of `rocshmem_quiet` for AMD Pensando IONIC provider.
+    This also reduces the latency of blocking communication calls.
+  * Communications using the GDA backend can now selectively choose at compilation time
+    to reduce the internal GDA Queue Pair object correctness and safety constraints,
+    improving application performance when such relaxations are known to be safe by the caller.
+    These relaxations can be applied independently at each call site.
+    This is currently an internal mechanism and is not exposed by the public rocSHMEM APIs.
+* Added standalone signal APIs:
+    * `rocshmem_signal_add` and `rocshmem_ctx_signal_add`
+    * `rocshmem_signal_set` and `rocshmem_ctx_signal_set`
+    * `rocshmem_signal_wait_until`
+* Type Support:
+    * `half`, `bfloat16`, `int8`, `int16`, `int32`, `int64`,
+      `uint8`, `uint16`, `uint32`, `uint64`, `size_t`, `ptrdiff_t`:
+        * RMA:
+             * `rocshmem_{ctx_}<TYPE>_{put,get,p,g}{_nbi}{_wave}{_wg}`
+        * RMA with signal:
+             * `rocshmem_{ctx_}<TYPE>_put_signal{_nbi}{_wave}{_wg}`
+        * Point-to-point synchronization:
+             * `rocshmem_{ctx_}<TYPE>_{wait_until,test}{_all,_any,_some}{_vector}`
+        * Collectives:
+             * `rocshmem_{ctx_}<TYPE>_{broadcast,fcollect,alltoall}{_wave}{_wg}`
+             * `rocshmem_{ctx_}<TYPE>_alltoallv_wg`
+             * `rocshmem_{ctx_}<TYPE>_{and,or,xor,min,max,sum,prod}_reduce{_scatter}{_wave}{_wg}`
+
+### Deprecated
+* Deprecated `rocshmem_signal_fetch_wg` and `rocshmem_signal_fetch_wave`.
+  Use `rocshmem_signal_fetch` instead.
+
+### Changed
+* The AMD Pensando IONIC GDA provider now requires
+  network driver and firmware support for CQ collapsing.
+## rocSHMEM 3.7.0 for ROCm 10.1
+
+### Added
+* Added new APIs (#8350):
+    * `rocshmem_tile_{min, max, sum}_reduce{_wave}{_wg}` variants for the IPC backend
+    * `rocshmem_ctx_tile_{min, max, sum}_reduce{_wave}{_wg}` variants for the IPC backend
+* Added tile RMA and collectives support for GDA backend (#10056)
+* Added `--num_wf` argument to functional test harness for runtime wavefront size detection on architectures with wave size 32 (gfx1100, gfx1201, gfx1250) (#9312)
+* Added LTO inline-remarks comparison toolset and interactive resource-usage dashboards under `scripts/analysis/` (#10872)
+* Optimized device API wrappers to remove double-indirection in cross-TU calls, enabling more reliable LTO inlining (#9729)
+* Reduced IPC RMA latency by caching symmetric heap base/size in device constant memory, removing hot-path heap metadata loads in `ipcPeerPtr()` (#9872)
+
+### Changed
+* **Breaking build-system change**: The five compile-time CMake options
+  `USE_HEAP_DEVICE_FINEGRAIN`, `USE_HEAP_DEVICE_UNCACHED`,
+  `USE_HEAP_DEVICE_COARSEGRAIN`, `USE_HEAP_DEVICE_VMM_POSIX`, and
+  `USE_HEAP_DEVICE_VMM_FABRIC` have been removed. Heap allocator
+  selection is now a runtime decision via the environment variable:
+  ```
+  ROCSHMEM_HEAP_ALLOCATOR_TYPE=<uncached|finegrained|coarsegrained|vmm_posix|vmm_fabric>
+  ```
+  The default is architecture-dependent: `finegrained` for gfx1100/gfx1201,
+  `uncached` for all other targets. The VMM allocator sources are now compiled
+  unconditionally (when ROCm ≥ 7.2 / AMD SMI fabric handle support is
+  detected) rather than behind build flags. (#9432)
+
+### Resolved Issues
+* Fixed `reduce_wg` and `reduce_wave` operations producing incorrect results for some scenarios
+* Fixed compilation of rocSHMEM when using clang++ instead of hipcc
+* Fixed team-relative PE rank computation in GDA alltoallv
+* Fixed `USE_SDMA=ON` builds failing for GDA+IPC with messages >128B
+* Fixed libverbs/libmlx5 discovery using `.so.1` versioned symlinks in GDA backend
+* Fixed Broadcom NIC (bnxt) dmabuf CQ/SQ creation (#9465)
+* Fixed ASAN build: correct string size for socket, exclude libhsa (#10507)
+
+## rocSHMEM 3.6.0 for ROCm 10.0
+
+### Added
+* Added new APIs:
+   * `rocshmem_broadcast_wave`
+   * `rocshmem_fcollect_wave`
+   * `rocshmem_alltoall_wave`
+   * `rocshmem_reduce_wave`
+   * `rocshmem_reducescatter_wave`
+* Added support for some tile-granular collectives for the IPC backend:
+   * `rocshmem_tile_broadcast`
+   * `rocshmem_tile_broadcast_wave`
+   * `rocshmem_tile_broadcast_wg`
+   * `rocshmem_ctx_tile_broadcast`
+   * `rocshmem_ctx_tile_broadcast_wave`
+   * `rocshmem_ctx_tile_broadcast_wg`
+   * `rocshmem_tile_allgather`
+   * `rocshmem_tile_allgather_wave`
+   * `rocshmem_tile_allgather_wg`
+   * `rocshmem_ctx_tile_allgather`
+   * `rocshmem_ctx_tile_allgather_wave`
+   * `rocshmem_ctx_tile_allgather_wg`
+* Added single node support for gfx1250 / MI455X
+* Added support for HIP Fabric Handles
+
+### Changed
+* Drop LLC dependency when compiling HSCO objects
+
+
 ## rocSHMEM 3.5.0 for ROCm 7.14
 
 ### Added

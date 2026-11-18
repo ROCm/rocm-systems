@@ -24,9 +24,6 @@
 
 import sys
 import pytest
-import json
-
-from collections import defaultdict
 
 
 # helper function
@@ -60,9 +57,8 @@ def test_rocjpeg(json_data):
 
     _, bf_op_names = get_operation(data, "ROCJPEG_API")
 
-    assert len(bf_op_names) == 9
+    assert len(bf_op_names) == 14
 
-    rocjpeg_reported_agent_ids = set()
     # check buffering data
     for node in rocjpeg_data:
         assert "size" in node

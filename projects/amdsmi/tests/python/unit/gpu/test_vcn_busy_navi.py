@@ -1,23 +1,6 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 """Mock-based unit tests for the vcn_busy sysfs fallback on non-XCP devices.
 
@@ -37,16 +20,16 @@ These tests exercise:
 """
 
 import argparse
-import importlib.util
 import os
-import sys
 import types
 import unittest
 
-from common.common import amdsmi_path
+from common.common import amdsmi_path, cli_search_order, find_cli_dir, load_cli_module, stub_modules
 
-_ROCM_ROOT = os.path.dirname(os.path.dirname(amdsmi_path))
-METRIC_PATH = os.path.join(_ROCM_ROOT, "libexec", "amdsmi_cli", "subcommands", "metric.py")
+# Locate the CLI dir; cli_search_order() decides whether the install or this
+# checkout wins. None -> setUpClass skips.
+_CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
+METRIC_PATH = os.path.join(_CLI_DIR, "subcommands", "metric.py") if _CLI_DIR else None
 
 
 class _FakeClkType:
@@ -88,7 +71,7 @@ def _patch(testcase, obj, **overrides):
         testcase.addCleanup(_restore_attr, obj, name, original)
 
 
-def _install_fake_amdsmi():
+def _build_fake_amdsmi():
     amdsmi_pkg = types.ModuleType("amdsmi")
     interface = types.ModuleType("amdsmi.amdsmi_interface")
     exception = types.ModuleType("amdsmi.amdsmi_exception")
@@ -108,6 +91,9 @@ def _install_fake_amdsmi():
         "jpeg_activity": "N/A",
     }
     interface._NA_amdsmi_get_gpu_metrics_info = lambda: {}
+    # An unmapped version, so unsupported-field filtering suppresses nothing and
+    # these tests see the vcn_busy behavior alone.
+    interface.amdsmi_get_gpu_metrics_header_info = lambda _h: {}
     interface.amdsmi_get_gpu_partition_metrics_info = lambda _h: None
     interface.amdsmi_get_gpu_activity = lambda _h: {"gfx_activity": 30}
     interface.amdsmi_get_vcn_busy_percent = lambda _h: 42
@@ -117,17 +103,15 @@ def _install_fake_amdsmi():
     amdsmi_pkg.amdsmi_interface = interface
     amdsmi_pkg.amdsmi_exception = exception
 
-    sys.modules["amdsmi"] = amdsmi_pkg
-    sys.modules["amdsmi.amdsmi_interface"] = interface
-    sys.modules["amdsmi.amdsmi_exception"] = exception
-    return interface
+    return {
+        "amdsmi": amdsmi_pkg,
+        "amdsmi.amdsmi_interface": interface,
+        "amdsmi.amdsmi_exception": exception,
+    }
 
 
 def _load_metric_module():
-    spec = importlib.util.spec_from_file_location("metric_under_test_vcn", METRIC_PATH)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_cli_module("metric_under_test_vcn", METRIC_PATH, sys_path_dir=_CLI_DIR)
 
 
 class _FakeLogger:
@@ -254,9 +238,13 @@ class TestVcnBusyNaviFallback(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        if not os.path.isfile(METRIC_PATH):
-            raise unittest.SkipTest(f"amd-smi CLI metric.py not found at {METRIC_PATH}")
-        cls.interface = _install_fake_amdsmi()
+        if not METRIC_PATH or not os.path.isfile(METRIC_PATH):
+            raise unittest.SkipTest(
+                f"amd-smi CLI metric.py not found (looked in {_CLI_DIR or amdsmi_path})"
+            )
+        modules = _build_fake_amdsmi()
+        stub_modules(cls, modules)
+        cls.interface = modules["amdsmi.amdsmi_interface"]
         cls.metric_module = _load_metric_module()
 
     def test_navi_vcn_busy_reads_sysfs(self):
@@ -348,7 +336,3 @@ class TestVcnBusyNaviFallback(unittest.TestCase):
         self.assertIsInstance(vcn, dict)
         self.assertIn("xcp_0", vcn)
         self.assertIn("xcp_1", vcn)
-
-
-if __name__ == "__main__":
-    unittest.main()

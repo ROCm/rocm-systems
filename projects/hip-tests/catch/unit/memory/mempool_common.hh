@@ -11,7 +11,7 @@
 #include <hip_test_process.hh>
 #include <resource_guards.hh>
 #include <utils.hh>
-
+#include <ipc_socket_com.hh>
 #include <chrono>
 #include <thread>
 
@@ -304,12 +304,25 @@ class streamMemAllocTest {
   size_t byte_size;
   hipMemPool_t mem_pool;
   bool threadSafe;
+  int seed;  //!< Offsets this instance's data so it differs from every other instance
+  // Details of the first mismatch seen by validateResult*(), for reporting.
+  int mismatch_count = 0;
+  int mismatch_index = -1;
+  int mismatch_expected = 0;
+  int mismatch_actual = 0;
 
  public:
-  explicit streamMemAllocTest(int N, bool threadSafe = false)
-      : size(N), threadSafe(threadSafe) {
+  // @param seed makes the data of concurrent instances distinct. Instances that
+  // share a memory pool must use different seeds, otherwise every instance
+  // computes identical values and a buffer handed to two users at once produces
+  // the expected result anyway.
+  explicit streamMemAllocTest(int N, bool threadSafe = false, int seed = 0)
+      : size(N), threadSafe(threadSafe), seed(seed) {
     byte_size = N*sizeof(int);
+    A_h = B_h = C_h = nullptr;
+    A_d = B_d = C_d = nullptr;
   }
+  void setThreadSafe(bool ts) { threadSafe = ts; }
   // Create host buffers and initialize them with input data
   void createHostBufferWithData() {
     A_h = reinterpret_cast<int*>(malloc(byte_size));
@@ -318,10 +331,15 @@ class streamMemAllocTest {
     REQUIRE_OPT_THREAD(threadSafe, B_h != nullptr);
     C_h = reinterpret_cast<int*>(malloc(byte_size));
     REQUIRE_OPT_THREAD(threadSafe, C_h != nullptr);
+    // In threadSafe mode REQUIRE_THREAD records the failure but does not abort
+    // execution, so guard against dereferencing a failed allocation below.
+    if ((A_h == nullptr) || (B_h == nullptr) || (C_h == nullptr)) {
+      return;
+    }
     // set data to host
     for (int i = 0; i < size; i++) {
-      A_h[i] = 2*i + 1;  // Odd
-      B_h[i] = 2*i;      // Even
+      A_h[i] = 2*i + 1 + seed;  // Odd, based on the seed
+      B_h[i] = 2*i;             // Even
       C_h[i] = 0;
     }
   }
@@ -354,8 +372,18 @@ class streamMemAllocTest {
       HIP_CHECK_OPT_THREAD(threadSafe, hipMemPoolSetAttribute(mem_pool, attr, &value));
     }
   }
+  // True once createHostBufferWithData() has allocated every host buffer.
+  bool hasHostBufs() const {
+    return (A_h != nullptr) && (B_h != nullptr) && (C_h != nullptr);
+  }
+  // True once allocFromMempool()/allocFromDefMempool() has allocated every device buffer.
+  bool hasDevBufs() const {
+    return (A_d != nullptr) && (B_d != nullptr) && (C_d != nullptr);
+  }
   // allocate device memory from mempool.
   void allocFromMempool(hipStream_t stream) {
+    // Reset before allocating.
+    A_d = B_d = C_d = nullptr;
     HIP_CHECK_OPT_THREAD(threadSafe, hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d),
               byte_size, mem_pool, stream));
     HIP_CHECK_OPT_THREAD(threadSafe, hipMallocFromPoolAsync(reinterpret_cast<void**>(&B_d),
@@ -372,6 +400,7 @@ class streamMemAllocTest {
   }
   // allocate from default mempool.
   void allocFromDefMempool(hipStream_t stream) {
+    A_d = B_d = C_d = nullptr;
     HIP_CHECK_OPT_THREAD(threadSafe, hipMallocAsync(reinterpret_cast<void**>(&A_d),
               byte_size, stream));
     HIP_CHECK_OPT_THREAD(threadSafe, hipMallocAsync(reinterpret_cast<void**>(&B_d),
@@ -381,6 +410,11 @@ class streamMemAllocTest {
   }
   // Execute Kernel to process input data and wait for it.
   void runKernel(hipStream_t stream) {
+    // bail out here and let the caller report the error.
+    REQUIRE_OPT_THREAD(threadSafe, hasDevBufs());
+    if (!hasDevBufs()) {
+      return;
+    }
     int blocks = (size % THREADS_PER_BLOCK == 0) ? (size / THREADS_PER_BLOCK)
                                                  : ((size / THREADS_PER_BLOCK) + 1);
     hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(THREADS_PER_BLOCK), 0, stream,
@@ -395,6 +429,7 @@ class streamMemAllocTest {
   }
   // Validate the data returned from device.
   bool validateResult() {
+    REQUIRE(hasHostBufs());
     for (int i = 0; i < size; i++) {
       auto res = A_h[i] + B_h[i];
       REQUIRE(res == C_h[i]);
@@ -404,14 +439,28 @@ class streamMemAllocTest {
   // Thread-safe variant of validateResult(): returns a bool instead of using a
   // Catch2 macro, so it is safe to call from worker threads.
   bool validateResultThreadSafe() {
+    mismatch_count = 0;
+    mismatch_index = -1;
+    if (!hasHostBufs()) {
+      return false;
+    }
     for (int i = 0; i < size; i++) {
       auto res = A_h[i] + B_h[i];
       if (res != C_h[i]) {
-        return false;
+        if (mismatch_count == 0) {
+          mismatch_index = i;
+          mismatch_expected = res;
+          mismatch_actual = C_h[i];
+        }
+        mismatch_count++;
       }
     }
-    return true;
+    return (mismatch_count == 0);
   }
+  int mismatchCount() const { return mismatch_count; }
+  int mismatchIndex() const { return mismatch_index; }
+  int mismatchExpected() const { return mismatch_expected; }
+  int mismatchActual() const { return mismatch_actual; }
   // Free device memory
   void freeDevBuf(hipStream_t stream) {
     HIP_CHECK_OPT_THREAD(threadSafe, hipFreeAsync(reinterpret_cast<void*>(A_d), stream));
@@ -427,6 +476,7 @@ class streamMemAllocTest {
     free(A_h);
     free(B_h);
     free(C_h);
+    A_h = B_h = C_h = nullptr;
   }
 };
 
@@ -444,7 +494,6 @@ typedef int64_t hipShareableHdl;
 typedef int hipShareableHdl;
 #endif
 #endif
-
 class SharedMemory {
   void* addr_ = nullptr;
   size_t size_ = 0;
@@ -567,308 +616,9 @@ struct mempoolIpcShmStruct {
   int device;
   std::atomic<int> barrier;
   std::atomic<int> sense;
-};
-
-struct ipcHdl {
-#if HT_WIN
-    HANDLE mailslot;
-#else
-    int socket;
-#endif
-    char *name;
-};
-
-class ipcSocketCom {
-  ipcHdl *handle;
-
-  int createSocket() {
-#if HT_WIN
-    handle = new ipcHdl;
-    if (nullptr == handle) {
-      perror("Socket failure: Handle memory allocation failed");
-      return -1;
-    }
-    handle->mailslot = INVALID_HANDLE_VALUE;
-    handle->name = NULL;
-    return 0;
-#else
-    int server_fd;
-    struct sockaddr_un servaddr;
-
-    char name[16];
-    sprintf(name, "%u", getpid());
-
-    handle = new ipcHdl;
-    if (nullptr == handle) {
-      perror("Socket failure: Handle memory allocation failed");
-      return -1;
-    }
-
-    memset(handle, 0, sizeof(*handle));
-    handle->socket = -1;
-    handle->name = NULL;
-
-    if ((server_fd = socket(AF_UNIX, SOCK_DGRAM, 0)) < 0) {
-      perror("Socket failure: Socket creation failed");
-      return -1;
-    }
-
-    unlink(name);
-    bzero(&servaddr, sizeof(servaddr));
-    servaddr.sun_family = AF_UNIX;
-
-    size_t len = strlen(name);
-    if (len > (sizeof(servaddr.sun_path) - 1)) {
-      perror("Socket failure: Cannot bind provided name to socket. Name too large");
-      return -1;
-    }
-
-    strncpy(servaddr.sun_path, name, len);
-
-    if (bind(server_fd, (struct sockaddr *)&servaddr, SUN_LEN(&servaddr)) < 0) {
-      perror("Socket failure: Binding socket failed");
-      return -1;
-    }
-
-    handle->name = new char[strlen(name) + 1];
-    strcpy(handle->name, name);
-    handle->socket = server_fd;
-    return 0;
-#endif
-  }
-
-  int openSocket() {
-#if HT_WIN
-    handle = new ipcHdl;
-    if (nullptr == handle) {
-      perror("Socket failure: Handle memory allocation failed");
-      return -1;
-    }
-    memset(handle, 0, sizeof(*handle));
-    handle->mailslot = INVALID_HANDLE_VALUE;
-    handle->name = nullptr;
-    char name[128];
-    sprintf(name, "\\\\.\\mailslot\\hipMemPoolIPC_%lu",
-            (unsigned long)GetCurrentProcessId());
-    handle->mailslot = CreateMailslot(name, 0, MAILSLOT_WAIT_FOREVER, NULL);
-    if (handle->mailslot == INVALID_HANDLE_VALUE) {
-      fprintf(stderr, "CreateMailslot failed (%lu)\n", GetLastError());
-      if (handle->name) delete[] handle->name;
-      delete handle;
-      handle = nullptr;
-      return -1;
-    }
-    handle->name = new char[strlen(name) + 1];
-    strcpy(handle->name, name);
-    return 0;
-#else
-    int sock = 0;
-    struct sockaddr_un cliaddr;
-
-    handle = new ipcHdl;
-    if (nullptr == handle) {
-      perror("Socket failure: Handle memory allocation failed");
-      return -1;
-    }
-    memset(handle, 0, sizeof(*handle));
-
-    if ((sock = socket(AF_UNIX, SOCK_DGRAM, 0)) < 0) {
-      perror("IPC failure:Socket creation error");
-      return -1;
-    }
-
-    bzero(&cliaddr, sizeof(cliaddr));
-    cliaddr.sun_family = AF_UNIX;
-    char name[16];
-
-    sprintf(name, "%u", getpid());
-
-    strcpy(cliaddr.sun_path, name);
-    if (bind(sock, (struct sockaddr *)&cliaddr, sizeof(cliaddr)) < 0) {
-      perror("Socket failure: Binding socket failed");
-      return -1;
-    }
-
-    handle->socket = sock;
-    handle->name = new char[strlen(name) + 1];
-    strcpy(handle->name, name);
-
-    return 0;
-#endif
-  }
-
-  int closeSocket() {
-#if HT_WIN
-    if (!handle) return -1;
-    if (handle->mailslot != INVALID_HANDLE_VALUE) {
-      CloseHandle(handle->mailslot);
-    }
-    if (handle->name) delete[] handle->name;
-    delete handle;
-    handle = nullptr;
-    return 0;
-#else
-    if (!handle) {
-      return -1;
-    }
-
-    if (handle->name) {
-      unlink(handle->name);
-      delete[] handle->name;
-    }
-    close(handle->socket);
-    delete handle;
-    return 0;
-#endif
-  }
-
-public:
-  ipcSocketCom() = default;
-  ipcSocketCom(bool isServer) {
-    if (isServer) {
-      checkSysCallErrors(createSocket());
-    } else {
-      checkSysCallErrors(openSocket());
-    }
-  }
-  ~ipcSocketCom() {
-  }
-  int closeThisSock() {
-    return closeSocket();
-  }
-
-  int recvShareableHdl(hipShareableHdl *shHandle) {
-#if HT_WIN
-    DWORD cbRead = 0;
-    if (!ReadFile(handle->mailslot, shHandle, sizeof(*shHandle), &cbRead, NULL)) {
-      fprintf(stderr, "ReadFile failed (%lu)\n", GetLastError());
-      return -1;
-    }
-    if (cbRead != sizeof(*shHandle)) {
-      fprintf(stderr, "ReadFile returned unexpected size (%lu, expected %zu)\n",
-              cbRead, sizeof(*shHandle));
-      return -1;
-    }
-    return 0;
-#else
-    struct msghdr msg = {};
-    struct iovec iov[1];
-
-    union {
-      struct cmsghdr cm;
-      char control[CMSG_SPACE(sizeof(int))];
-    } control_un = {};
-
-    struct cmsghdr *cmptr;
-    ssize_t n;
-    int receivedfd;
-    int dummy_data;
-
-    msg.msg_name = NULL;
-    msg.msg_namelen = 0;
-    msg.msg_control = control_un.control;
-    msg.msg_controllen = sizeof(control_un.control);
-    iov[0].iov_base = &dummy_data;
-    iov[0].iov_len = sizeof(dummy_data);
-    msg.msg_iov = iov;
-    msg.msg_iovlen = 1;
-
-    if ((n = recvmsg(handle->socket, &msg, 0)) <= 0) {
-      perror("Socket failure: Receiving data over socket failed");
-      return -1;
-    }
-
-    if (((cmptr = CMSG_FIRSTHDR(&msg)) != NULL) &&
-       (cmptr->cmsg_len == CMSG_LEN(sizeof(int)))) {
-      if ((cmptr->cmsg_level != SOL_SOCKET) || (cmptr->cmsg_type != SCM_RIGHTS)) {
-        return -1;
-      }
-
-      memmove(&receivedfd, CMSG_DATA(cmptr), sizeof(receivedfd));
-      *(int *)shHandle = receivedfd;
-    } else {
-      return -1;
-    }
-
-    return 0;
-#endif
-  }
-
-  int sendShareableHdl(hipShareableHdl shareableHdl, Process process) {
-#if HT_WIN
-    HANDLE hProcess = OpenProcess(PROCESS_DUP_HANDLE, FALSE, process.dwProcessId);
-    if (hProcess == NULL) {
-      fprintf(stderr, "OpenProcess failed (%lu)\n", GetLastError());
-      return -1;
-    }
-    HANDLE hDup = INVALID_HANDLE_VALUE;
-    if (!DuplicateHandle(GetCurrentProcess(), shareableHdl, hProcess,
-                         &hDup, 0, FALSE, DUPLICATE_SAME_ACCESS)) {
-      CloseHandle(hProcess);
-      fprintf(stderr, "DuplicateHandle failed (%lu)\n", GetLastError());
-      return -1;
-    }
-    CloseHandle(hProcess);
-
-    char slotName[128];
-    sprintf(slotName, "\\\\.\\mailslot\\hipMemPoolIPC_%lu",
-            (unsigned long)process.dwProcessId);
-    HANDLE hFile = CreateFile(slotName, GENERIC_WRITE, FILE_SHARE_READ,
-                              NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (hFile == INVALID_HANDLE_VALUE) {
-      fprintf(stderr, "CreateFile for mailslot failed (%lu)\n", GetLastError());
-      return -1;
-    }
-    DWORD cbWritten;
-    if (!WriteFile(hFile, &hDup, sizeof(hDup), &cbWritten, NULL)) {
-      CloseHandle(hFile);
-      fprintf(stderr, "WriteFile failed (%lu)\n", GetLastError());
-      return -1;
-    }
-    CloseHandle(hFile);
-    return 0;
-#else
-    struct msghdr msg = {};
-    struct iovec iov[1];
-    int dummy_data = 0;
-
-    union {
-      struct cmsghdr cm;
-      char control[CMSG_SPACE(sizeof(int))];
-    } control_un = {};
-
-    struct cmsghdr *cmptr;
-    struct sockaddr_un cliaddr;
-
-    bzero(&cliaddr, sizeof(cliaddr));
-    cliaddr.sun_family = AF_UNIX;
-    strcpy(cliaddr.sun_path, std::to_string(process).c_str());
-
-    int sendfd = (int)shareableHdl;
-
-    msg.msg_control = control_un.control;
-    msg.msg_controllen = sizeof(control_un.control);
-
-    cmptr = CMSG_FIRSTHDR(&msg);
-    cmptr->cmsg_len = CMSG_LEN(sizeof(int));
-    cmptr->cmsg_level = SOL_SOCKET;
-    cmptr->cmsg_type = SCM_RIGHTS;
-
-    memmove(CMSG_DATA(cmptr), &sendfd, sizeof(sendfd));
-
-    msg.msg_name = (void *)&cliaddr;
-    msg.msg_namelen = sizeof(struct sockaddr_un);
-    iov[0].iov_base = &dummy_data;
-    iov[0].iov_len = sizeof(dummy_data);
-    msg.msg_iov = iov;
-    msg.msg_iovlen = 1;
-
-    ssize_t sendResult = sendmsg(handle->socket, &msg, 0);
-    if (sendResult <= 0) {
-      perror("Socket failure: Sending data over socket failed");
-      return -1;
-    }
-    return 0;
-#endif
-  }
+  // The IPC object name generated by ipcSocketCom<>::generateIPCObjPrefix() may contain an
+  // embedded '\0' (abstract socket names do), so it can't be stored as a C string; keep
+  // the length alongside the raw bytes.
+  char socketName[128];
+  size_t socketNameLen;
 };

@@ -15,6 +15,7 @@
 #include "transport.h"
 #include "utils.h"
 #include "ras_internal.h"
+#include "diagnostics.h"
 
 // The number of recent collectives to keep track of.  Completely arbitrary.
 #define COLL_HISTORY_SIZE 64
@@ -43,6 +44,7 @@ static ncclResult_t rasLinkSendCollReq(struct rasLink* link, struct rasCollectiv
                                        const struct rasCollRequest* req, size_t reqLen, struct rasConnection* fromConn);
 static ncclResult_t rasConnSendCollReq(struct rasConnection* conn, const struct rasCollRequest* req, size_t reqLen);
 static ncclResult_t rasCollReadyResp(struct rasCollective* coll);
+static void rasCollHistoryAdd(const union ncclSocketAddress* rootAddr, uint64_t rootId);
 static ncclResult_t rasConnSendCollResp(struct rasConnection* conn, const union ncclSocketAddress* rootAddr,
                                         uint64_t rootId, const union ncclSocketAddress* peers, int nPeers,
                                         const char* data, int nData, int nLegTimeouts);
@@ -67,6 +69,7 @@ static int rasCollCommsMissingRankSearch(const void* k, const void* e);
 static ncclResult_t getNewCollEntry(struct rasCollective** pColl) {
   struct rasCollective* coll;
   int nRasConns;
+  ncclResult_t ret = ncclSuccess;
 
   NCCLCHECK(ncclCalloc(&coll, 1));
 
@@ -75,7 +78,7 @@ static ncclResult_t getNewCollEntry(struct rasCollective** pColl) {
   // We are unlikely to use the whole array, but at least we won't need to realloc.
   nRasConns = 0;
   for (struct rasConnection* conn = rasConnsHead; conn; conn = conn->next) nRasConns++;
-  NCCLCHECK(ncclCalloc(&coll->fwdConns, nRasConns));
+  NCCLCHECKGOTO(ncclCalloc(&coll->fwdConns, nRasConns), ret, fail);
 
   if (rasCollectivesHead) {
     rasCollectivesTail->next = coll;
@@ -87,6 +90,10 @@ static ncclResult_t getNewCollEntry(struct rasCollective** pColl) {
 
   *pColl = coll;
   return ncclSuccess;
+fail:
+  free(coll->fwdConns);
+  free(coll);
+  return ret;
 }
 
 // Initializes a collective request by giving it a unique ID.
@@ -123,21 +130,30 @@ ncclResult_t rasNetSendCollReq(const struct rasCollRequest* req, bool* pAllDone,
       coll->nPeers = 1;
     }
 
-    // Collective-specific initialization of accumulated data (using local data for now).
+    // Collective-specific initialization of accumulated data (using local data for now). If initialization fails, keep
+    // the collective alive and continue with an empty local response so duplicate requests are suppressed and upstream
+    // peers do not have to wait for a timeout.
     if (req->type == RAS_COLL_CONNS) (void)rasCollConnsInit(&reqMod, &reqLen, &coll->data, &coll->nData);
     else if (req->type == RAS_COLL_COMMS) (void)rasCollCommsInit(&reqMod, &reqLen, &coll->data, &coll->nData);
-  } else { // req->type < RAS_COLL_CONNS
+    else if (req->type == RAS_COLL_DIAG) {
+      ncclResult_t ret = rasCollDiagInit(&reqMod, &reqLen, &coll->data, &coll->nData);
+      if (ret != ncclSuccess) {
+        WARN("RAS diagnostics collective initialization failed (%d); continuing with empty local response", ret);
+      }
+    }
+  } else {
+    // req->type < RAS_COLL_CONNS
     // Add the info to the collective message history.
-    nRasCollHistory = std::min(nRasCollHistory + 1, COLL_HISTORY_SIZE);
-    memcpy(&rasCollHistory[rasCollHistNextIdx].rootAddr, &req->rootAddr,
-           sizeof(rasCollHistory[rasCollHistNextIdx].rootAddr));
-    rasCollHistory[rasCollHistNextIdx].rootId = req->rootId;
-    rasCollHistNextIdx = (rasCollHistNextIdx + 1) % COLL_HISTORY_SIZE;
+    rasCollHistoryAdd(&req->rootAddr, req->rootId);
 
     // Collective-specific message handling.
     if (req->type == RAS_BC_DEADPEER) {
       bool done = false;
       rasMsgHandleBCDeadPeer(&reqMod, &reqLen, &done);
+      if (done) goto exit;
+    } else if (req->type == RAS_BC_PROFILER_MASK) {
+      bool done = false;
+      rasMsgHandleBCProfilerMask(&reqMod, &reqLen, &done);
       if (done) goto exit;
     }
   } // req->type < RAS_COLL_CONNS
@@ -163,8 +179,9 @@ static ncclResult_t rasLinkSendCollReq(struct rasLink* link, struct rasCollectiv
       // We send collective messages through fully established and operational connections only.
       if (linkConn->conn->sock && linkConn->conn->sock->status == RAS_SOCK_READY &&
           !linkConn->conn->experiencingDelays) {
-        if (rasConnSendCollReq(linkConn->conn, req, reqLen) == ncclSuccess && coll != nullptr)
+        if (rasConnSendCollReq(linkConn->conn, req, reqLen) == ncclSuccess && coll != nullptr) {
           coll->fwdConns[coll->nFwdSent++] = linkConn->conn;
+        }
       } // linkConn->conn is fully established and operational.
       linkConn->conn->linkFlag = true;
     } // if (linkConn->conn && linkConn->conn != fromConn && !linkConn->con->linkFlag)
@@ -195,9 +212,10 @@ ncclResult_t rasMsgHandleCollReq(struct rasMsg* msg, struct rasSocket* sock) {
   struct rasCollective* coll = nullptr;
   char line[SOCKET_NAME_MAXLEN + 1];
 
-  INFO(NCCL_RAS, "RAS handling collReq from %s (root %s:%" PRIu64 ", timeout %" PRId64 ", type %d)",
-       ncclSocketToString(&sock->sock.addr, rasLine), ncclSocketToString(&msg->collReq.rootAddr, line),
-       msg->collReq.rootId, (int64_t)(msg->collReq.timeout / CLOCK_UNITS_PER_SEC), msg->collReq.type);
+  INFO(NCCL_RAS, "RAS handling collReq from %s (root %s:%" PRIu64 ", timeout %gs, type %d)",
+       ncclSocketToString(&sock->sock.addr, rasLine, sizeof(rasLine)),
+       ncclSocketToString(&msg->collReq.rootAddr, line, sizeof(line)), msg->collReq.rootId,
+       (double)msg->collReq.timeout / CLOCK_UNITS_PER_SEC, msg->collReq.type);
   if (sock->conn == nullptr) {
     INFO(NCCL_RAS, "RAS socket lacks a connection: status %d -- internal error?", sock->status);
     return ncclInternalError;
@@ -271,15 +289,11 @@ static ncclResult_t rasCollReadyResp(struct rasCollective* coll) {
                                   coll->nData, coll->nLegTimeouts));
 
     // Add the identifying info to the collective message history.
-    nRasCollHistory = std::min(nRasCollHistory + 1, COLL_HISTORY_SIZE);
-    memcpy(&rasCollHistory[rasCollHistNextIdx].rootAddr, &coll->rootAddr,
-           sizeof(rasCollHistory[rasCollHistNextIdx].rootAddr));
-    rasCollHistory[rasCollHistNextIdx].rootId = coll->rootId;
-    rasCollHistNextIdx = (rasCollHistNextIdx + 1) % COLL_HISTORY_SIZE;
+    rasCollHistoryAdd(&coll->rootAddr, coll->rootId);
 
     rasCollFree(coll);
   } else {
-    // For locally-initiated collectives, invoke the client code again (which will release it, once finished).
+    // For locally-initiated collectives, resume the owning client (which releases coll once finished).
     NCCLCHECK(rasClientResume(coll));
   }
   return ncclSuccess;
@@ -323,8 +337,9 @@ ncclResult_t rasMsgHandleCollResp(struct rasMsg* msg, struct rasSocket* sock) {
   char line[SOCKET_NAME_MAXLEN + 1];
 
   INFO(NCCL_RAS, "RAS handling collResp from %s (root %s:%" PRIu64 ", nPeers %d, nData %d, nLegTimeouts %d)",
-       ncclSocketToString(&sock->sock.addr, rasLine), ncclSocketToString(&msg->collResp.rootAddr, line),
-       msg->collResp.rootId, msg->collResp.nPeers, msg->collResp.nData, msg->collResp.nLegTimeouts);
+       ncclSocketToString(&sock->sock.addr, rasLine, sizeof(rasLine)),
+       ncclSocketToString(&msg->collResp.rootAddr, line, sizeof(line)), msg->collResp.rootId, msg->collResp.nPeers,
+       msg->collResp.nData, msg->collResp.nLegTimeouts);
 
   for (coll = rasCollectivesHead; coll; coll = coll->next) {
     if (memcmp(&msg->collResp.rootAddr, &coll->rootAddr, sizeof(msg->collResp.rootAddr)) == 0 &&
@@ -354,6 +369,7 @@ ncclResult_t rasMsgHandleCollResp(struct rasMsg* msg, struct rasSocket* sock) {
     // Collective-specific merging of the response into locally accumulated data.
     if (coll->type == RAS_COLL_CONNS) NCCLCHECK(rasCollConnsMerge(coll, msg));
     else if (coll->type == RAS_COLL_COMMS) NCCLCHECK(rasCollCommsMerge(coll, msg));
+    else if (coll->type == RAS_COLL_DIAG) NCCLCHECK(rasCollDiagMerge(coll, msg));
   }
   // We merge the peers after merging the data, so that the data merge function can rely on peers being unchanged.
   if (msg->collResp.nPeers > 0) {
@@ -376,7 +392,8 @@ void rasCollsPurgeConn(struct rasConnection* conn) {
     char line[SOCKET_NAME_MAXLEN + 1];
     if (coll->fromConn == conn) {
       INFO(NCCL_RAS, "RAS purging collective %s:%" PRIu64 " because it comes from %s",
-           ncclSocketToString(&coll->rootAddr, line), coll->rootId, ncclSocketToString(&conn->addr, rasLine));
+           ncclSocketToString(&coll->rootAddr, line, sizeof(line)), coll->rootId,
+           ncclSocketToString(&conn->addr, rasLine, sizeof(rasLine)));
       rasCollFree(coll);
     } else {
       for (int i = 0; i < coll->nFwdSent; i++) {
@@ -387,8 +404,9 @@ void rasCollsPurgeConn(struct rasConnection* conn) {
           INFO(NCCL_RAS,
                "RAS not waiting for response from %s to collective %s:%" PRIu64 " "
                "(nFwdSent %d, nFwdRecv %d, nLegTimeouts %d)",
-               ncclSocketToString(&conn->addr, rasLine), ncclSocketToString(&coll->rootAddr, line), coll->rootId,
-               coll->nFwdSent, coll->nFwdRecv, coll->nLegTimeouts);
+               ncclSocketToString(&conn->addr, rasLine, sizeof(rasLine)),
+               ncclSocketToString(&coll->rootAddr, line, sizeof(line)), coll->rootId, coll->nFwdSent, coll->nFwdRecv,
+               coll->nLegTimeouts);
           if (coll->nFwdSent == coll->nFwdRecv) (void)rasCollReadyResp(coll);
           break;
         }
@@ -396,6 +414,20 @@ void rasCollsPurgeConn(struct rasConnection* conn) {
     } // coll->fromConn != conn
     coll = collNext;
   } // for (coll)
+}
+
+// Adds a collective id to the duplicate-suppression history.
+static void rasCollHistoryAdd(const union ncclSocketAddress* rootAddr, uint64_t rootId) {
+  nRasCollHistory = std::min(nRasCollHistory + 1, COLL_HISTORY_SIZE);
+  memcpy(&rasCollHistory[rasCollHistNextIdx].rootAddr, rootAddr, sizeof(rasCollHistory[rasCollHistNextIdx].rootAddr));
+  rasCollHistory[rasCollHistNextIdx].rootId = rootId;
+  rasCollHistNextIdx = (rasCollHistNextIdx + 1) % COLL_HISTORY_SIZE;
+}
+
+// Records a locally abandoned collective so later duplicate requests are suppressed.
+void rasCollRecordHistory(const struct rasCollective* coll) {
+  if (coll == nullptr) return;
+  rasCollHistoryAdd(&coll->rootAddr, coll->rootId);
 }
 
 // Frees a rasCollective entry and any memory associated with it.
@@ -431,9 +463,9 @@ void rasCollsHandleTimeouts(int64_t now, int64_t* nextWakeup) {
       if (now - coll->startTime > coll->timeout) {
         // We've exceeded the leg timeout.  For all outstanding responses, check their connections.
         if (!coll->timeoutWarned) {
-          INFO(NCCL_RAS, "RAS collective %s:%" PRIu64 " timeout warning (%" PRId64 "s) -- %d responses missing",
-               ncclSocketToString(&coll->rootAddr, rasLine), coll->rootId,
-               (int64_t)((now - coll->startTime) / CLOCK_UNITS_PER_SEC), coll->nFwdSent - coll->nFwdRecv);
+          INFO(NCCL_RAS, "RAS collective %s:%" PRIu64 " timeout warning (%gs) -- %d responses missing",
+               ncclSocketToString(&coll->rootAddr, rasLine, sizeof(rasLine)), coll->rootId,
+               (double)(now - coll->startTime) / CLOCK_UNITS_PER_SEC, coll->nFwdSent - coll->nFwdRecv);
           coll->timeoutWarned = true;
         }
         for (int i = 0; i < coll->nFwdSent; i++) {
@@ -450,8 +482,9 @@ void rasCollsHandleTimeouts(int64_t now, int64_t* nextWakeup) {
             INFO(NCCL_RAS,
                  "RAS not waiting for response from %s to collective %s:%" PRIu64 " "
                  "(nFwdSent %d, nFwdRecv %d, nLegTimeouts %d)",
-                 ncclSocketToString(&conn->addr, rasLine), ncclSocketToString(&coll->rootAddr, line), coll->rootId,
-                 coll->nFwdSent, coll->nFwdRecv, coll->nLegTimeouts);
+                 ncclSocketToString(&conn->addr, rasLine, sizeof(rasLine)),
+                 ncclSocketToString(&coll->rootAddr, line, sizeof(line)), coll->rootId, coll->nFwdSent, coll->nFwdRecv,
+                 coll->nLegTimeouts);
             coll->fwdConns[i] = nullptr;
             coll->nFwdRecv++;
             coll->nLegTimeouts++;
@@ -466,10 +499,9 @@ void rasCollsHandleTimeouts(int64_t now, int64_t* nextWakeup) {
           if (now - coll->startTime > coll->timeout + RAS_COLLECTIVE_EXTRA_TIMEOUT) {
             // We've exceeded even the longer timeout, which is unexpected.  Try to return whatever we have (though
             // the originator of the collective, if it's not us, may have timed out already anyway).
-            INFO(NCCL_RAS,
-                 "RAS collective %s:%" PRIu64 " timeout error (%" PRId64 "s) -- giving up on %d missing responses",
-                 ncclSocketToString(&coll->rootAddr, rasLine), coll->rootId,
-                 (int64_t)((now - coll->startTime) / CLOCK_UNITS_PER_SEC), coll->nFwdSent - coll->nFwdRecv);
+            INFO(NCCL_RAS, "RAS collective %s:%" PRIu64 " timeout error (%gs) -- giving up on %d missing responses",
+                 ncclSocketToString(&coll->rootAddr, rasLine, sizeof(rasLine)), coll->rootId,
+                 (double)(now - coll->startTime) / CLOCK_UNITS_PER_SEC, coll->nFwdSent - coll->nFwdRecv);
             coll->nLegTimeouts += coll->nFwdSent - coll->nFwdRecv;
             coll->nFwdRecv = coll->nFwdSent;
             (void)rasCollReadyResp(coll);
@@ -544,11 +576,29 @@ static ncclResult_t rasCollConnsInit(struct rasCollRequest** pReq, size_t* pReqL
 static ncclResult_t rasCollConnsMerge(struct rasCollective* coll, struct rasMsg* msg) {
   struct rasCollConns* collData;
   struct rasCollConns* msgData;
+  int avail; // Payload bytes available after the fixed part of rasCollConns.
   int dataOffset = rasMsgLength(RAS_MSG_COLLRESP) + msg->collResp.nPeers * sizeof(*msg->collResp.peers);
   ALIGN_SIZE(dataOffset, alignof(int64_t));
 
   msgData = (struct rasCollConns*)(((char*)msg) + dataOffset);
   collData = (struct rasCollConns*)coll->data;
+
+  // nData is the authority for how much of the payload was actually received, so it has to cover the fixed
+  // part before any field of it may be read.
+  avail = msg->collResp.nData - (int)sizeof(*msgData);
+  if (avail < 0) {
+    WARN("RAS received a COLLRESP message with truncated connection data (%d bytes)", msg->collResp.nData);
+    return ncclRemoteError;
+  }
+
+  // The count inside the payload comes from the peer, and it sizes both the merged buffer and the copy
+  // below, so it must fit within what the peer actually sent.
+  if (msgData->nNegativeMins < 0 ||
+      (int64_t)msgData->nNegativeMins * sizeof(*msgData->negativeMins) > avail) {
+    WARN("RAS received a COLLRESP message with an invalid negative minimums count (%d for %d bytes of data)",
+         msgData->nNegativeMins, msg->collResp.nData);
+    return ncclRemoteError;
+  }
 
   // Merge the stats.
   if (collData->travelTimeMin > msgData->travelTimeMin) collData->travelTimeMin = msgData->travelTimeMin;
@@ -607,8 +657,10 @@ static ncclResult_t rasCollCommsInit(struct rasCollRequest** pReq, size_t* pReqL
     ncclCommsSorted = true;
   }
   for (int commIdx = 0; commIdx < nNcclComms; commIdx++) {
-    if (ncclComms[commIdx] == nullptr) // nullptr's are always at the end after sorting.
+    if (ncclComms[commIdx] == nullptr) {
+      // nullptr's are always at the end after sorting.
       break;
+    }
     if (!COMPILER_ATOMIC_LOAD(&ncclComms[commIdx]->peerInfoValid, std::memory_order_acquire)) {
       // Critical data is not yet initialized -- ignore the communicator.
       continue;
@@ -692,10 +744,11 @@ static ncclResult_t rasCollCommsInit(struct rasCollRequest** pReq, size_t* pReqL
       // always 0.  It will increase after we send this response back to the peer we got the request from.
       rank->peerIdx = 0;
       memcpy(rank->collOpCounts, ncclComm->seqNumber, sizeof(rank->collOpCounts));
-      rank->status.initState = ncclComm->initState;
+      rank->status.initState = COMPILER_ATOMIC_LOAD(&ncclComm->initState, std::memory_order_acquire);
       rank->status.asyncError = COMPILER_ATOMIC_LOAD(&ncclComm->asyncResult, std::memory_order_acquire);
-      if (rank->status.asyncError == ncclSuccess && ncclComm->proxyState)
+      if (rank->status.asyncError == ncclSuccess && ncclComm->proxyState) {
         rank->status.asyncError = COMPILER_ATOMIC_LOAD(&ncclComm->proxyState->asyncResult, std::memory_order_acquire);
+      }
       rank->status.finalizeCalled = (ncclComm->finalizeCalled != 0);
       rank->status.destroyFlag = (ncclComm->destroyFlag != 0);
       rank->status.abortFlag = (COMPILER_ATOMIC_LOAD(ncclComm->abortFlag, std::memory_order_acquire) != 0);
@@ -774,6 +827,43 @@ fail:
   goto ret;
 }
 
+// Verifies that the peer-supplied comm records of a RAS_COLL_COMMS payload stay within the nData bytes the
+// peer actually sent.  The merge below sizes its copies from these counts, so a count that is negative or
+// that overruns the payload has to be rejected before it is used.  nPeers is the peer count the same message
+// carries; the ranks' peerIdx values index that array (after the merge shifts them by coll->nPeers), and the
+// client code indexes arrays of that size with them, so they are range-checked here as well.
+static ncclResult_t rasCollCommsCheck(const struct rasCollComms* data, int nData, int nPeers) {
+  int offset = offsetof(struct rasCollComms, comms);
+
+  if (nData < offset || data->nComms < 0) return ncclRemoteError;
+
+  for (int commIdx = 0; commIdx < data->nComms; commIdx++) {
+    const struct rasCollComms::comm* comm;
+    int64_t commBytes;
+
+    if (nData - offset < (int)sizeof(*comm)) return ncclRemoteError;
+    comm = (const struct rasCollComms::comm*)(((const char*)data) + offset);
+    if (comm->nRanks < 0 || comm->nMissingRanks < 0) return ncclRemoteError;
+    // commNRanks is what the merge clamps a rank count to, and it ends up in the merged buffer that the
+    // reporting code iterates, so hold the peer to the invariant the struct documents.  The sum is widened
+    // because both counts are the peer's and each can reach INT_MAX, which overflows an int addition before
+    // the commBytes check below gets a chance to reject them.
+    if (comm->commNRanks < (int64_t)comm->nRanks + comm->nMissingRanks) return ncclRemoteError;
+
+    commBytes = (int64_t)sizeof(*comm) + (int64_t)comm->nRanks * sizeof(*comm->ranks) +
+                (int64_t)comm->nMissingRanks * sizeof(struct rasCollCommsMissingRank);
+    if (commBytes > nData - offset) return ncclRemoteError;
+
+    // Only safe to walk the ranks now that commBytes has confirmed they are all within the payload.
+    for (int rankIdx = 0; rankIdx < comm->nRanks; rankIdx++)
+      if (comm->ranks[rankIdx].peerIdx < 0 || comm->ranks[rankIdx].peerIdx >= nPeers) return ncclRemoteError;
+
+    offset += (int)commBytes;
+  }
+
+  return ncclSuccess;
+}
+
 // Merges incoming collective RAS_COLL_COMMS response message into the local accumulated data.
 static ncclResult_t rasCollCommsMerge(struct rasCollective* coll, struct rasMsg* msg) {
   struct rasCollComms* collData; // Data previously stored (locally) by our process.
@@ -785,6 +875,11 @@ static ncclResult_t rasCollCommsMerge(struct rasCollective* coll, struct rasMsg*
 
   msgData = (struct rasCollComms*)(((char*)msg) + dataOffset);
   collData = (struct rasCollComms*)coll->data;
+
+  if (rasCollCommsCheck(msgData, msg->collResp.nData, msg->collResp.nPeers) != ncclSuccess) {
+    WARN("RAS received a COLLRESP message with malformed communicator data (%d bytes)", msg->collResp.nData);
+    return ncclRemoteError;
+  }
 
   if (msgData->nComms > 0) {
     struct rasCollComms* newData = nullptr; // Destination buffer for the merged data.
@@ -822,7 +917,8 @@ static ncclResult_t rasCollCommsMerge(struct rasCollective* coll, struct rasMsg*
                                           msgComm->nMissingRanks * sizeof(struct rasCollCommsMissingRank) -
                                           (char*)msgData >
                                         msg->collResp.nData) {
-        // Should never happen.
+        // Should never happen: rasCollCommsCheck has already walked exactly this chain and rejected the
+        // message if any record overran nData.  Kept as a belt-and-braces guard on the loop's own arithmetic.
         INFO(NCCL_RAS, "RAS overflow of msgData: msgIdx %d, nComms %d, nData %d, needs %td -- internal error?", msgIdx,
              msgData->nComms, msg->collResp.nData,
              (char*)(msgComm + 1) + msgComm->nRanks * sizeof(*msgComm->ranks) +
@@ -830,9 +926,9 @@ static ncclResult_t rasCollCommsMerge(struct rasCollective* coll, struct rasMsg*
         break;
       }
 
-      if (collIdx < collData->nComms && msgIdx < msgData->nComms)
+      if (collIdx < collData->nComms && msgIdx < msgData->nComms) {
         cmp = rasCommIdCompare(&collComm->commId, &msgComm->commId);
-      else cmp = (collIdx < collData->nComms ? -1 : 1);
+      } else cmp = (collIdx < collData->nComms ? -1 : 1);
 
       if (cmp == 0 && collComm->commNRanks != msgComm->commNRanks) {
         INFO(NCCL_RAS,
@@ -859,8 +955,12 @@ static ncclResult_t rasCollCommsMerge(struct rasCollective* coll, struct rasMsg*
         } else {
           newComm->nRanks = collComm->nRanks + msgComm->nRanks;
         }
-        // Merge the ranks.
-        for (int newRankIdx = 0, collRankIdx = 0, msgRankIdx = 0;
+        // Merge the ranks.  newRankIdx outlives the loop: the loop can write fewer ranks than the count
+        // above anticipates (a duplicate rank consumes two inputs for one output, and the skips below bail
+        // out early), and a count that overstates what was written would break the
+        // commNRanks >= nRanks + nMissingRanks invariant for the next hop, which rejects the whole response.
+        int newRankIdx = 0;
+        for (int collRankIdx = 0, msgRankIdx = 0;
              collRankIdx < collComm->nRanks || msgRankIdx < msgComm->nRanks; newRankIdx++) {
           int cmpRank;
           if (newRankIdx == newComm->commNRanks) break; // Short of failing, the best we can do is skip...
@@ -914,6 +1014,7 @@ static ncclResult_t rasCollCommsMerge(struct rasCollective* coll, struct rasMsg*
             } // if (collComm->nMissingRanks > 0)
           } // if (cmpRank > 0)
         } // for (newRankIdx)
+        newComm->nRanks = newRankIdx;
         if (collComm->nMissingRanks > 0) {
           // Copy the missingRanks to newComm, skipping over any no longer needed entries.
           struct rasCollCommsMissingRank* collMissingRanks;
@@ -972,7 +1073,8 @@ static ncclResult_t rasCollCommsMerge(struct rasCollective* coll, struct rasMsg*
         newComm = (struct rasCollComms::comm*)(((char*)(newComm)) + commSize);
         collComm = (struct rasCollComms::comm*)(((char*)(collComm)) + commSize);
         collIdx++;
-      } else { // cmp > 0
+      } else {
+        // cmp > 0
         // Copy from msgComm.
         int commSize = sizeof(*msgComm) + msgComm->nRanks * sizeof(*msgComm->ranks) +
                        msgComm->nMissingRanks * sizeof(struct rasCollCommsMissingRank);

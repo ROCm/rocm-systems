@@ -4,34 +4,14 @@
 #ifndef ROCJITSU_VM_AMDGPU_WAIT_COUNTERS_H_
 #define ROCJITSU_VM_AMDGPU_WAIT_COUNTERS_H_
 
+#include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
+
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
 
 namespace rocjitsu {
 namespace amdgpu {
-
-/// @brief Counter types tracked by s_waitcnt and related instructions.
-///
-/// GFX9 (CDNA1-4) and GFX10 (RDNA1/2) use VMCNT/LGKMCNT/EXPCNT.
-/// GFX10 adds VSCNT for store-only tracking (S_WAITCNT_VSCNT).
-/// GFX11 (RDNA3/3.5) and GFX12 (RDNA4) use fine-grained counters:
-///   LOADCNT (≡ VMCNT for loads), STORECNT (≡ VSCNT), DSCNT (DS subset
-///   of LGKMCNT), KMCNT (scalar/constant subset of LGKMCNT), EXPCNT.
-/// GFX12.5 also adds TENSORCNT for tensor data mover operations and ASYNCCNT
-/// for async global/cluster transfers to or from LDS.
-enum class WaitCounterType : uint8_t {
-  VMCNT,     ///< Vector memory count (global loads; GFX9/10 stores too).
-  LGKMCNT,   ///< LDS/GDS/K(Constant)/Message count.
-  EXPCNT,    ///< Export count.
-  VSCNT,     ///< Vector store count (GFX10 only — S_WAITCNT_VSCNT).
-  LOADCNT,   ///< Vector load count (GFX11+; alias of VMCNT for loads).
-  STORECNT,  ///< Vector store count (GFX11+; alias of VSCNT).
-  DSCNT,     ///< DS (LDS/GDS) count (GFX11+; subset of LGKMCNT).
-  KMCNT,     ///< Scalar/constant memory count (GFX11+; subset of LGKMCNT).
-  TENSORCNT, ///< Tensor data mover count (GFX12.5).
-  ASYNCCNT,  ///< Async global/cluster LDS transfer count (GFX12.5).
-};
 
 /// @brief Outstanding memory operation counters for a wavefront.
 ///
@@ -40,6 +20,8 @@ enum class WaitCounterType : uint8_t {
 /// fine-grained counters (loadcnt/storecnt/dscnt/kmcnt/expcnt) which
 /// are stored in the same fields as aliases:
 ///   loadcnt → vmcnt, storecnt → vscnt, dscnt + kmcnt → lgkmcnt.
+///
+/// RDNA4 additionally exposes samplecnt for sampler instructions.
 ///
 /// For RDNA3+, the split counters (dscnt, kmcnt) are tracked independently
 /// but their sum is also reflected in lgkmcnt for backward compatibility
@@ -56,14 +38,18 @@ struct WaitCounters {
   uint8_t kmcnt = 0;     ///< Scalar/constant memory count (GFX11+).
   uint8_t tensorcnt = 0; ///< Tensor data mover count (GFX12.5).
   uint8_t asynccnt = 0;  ///< Async global/cluster LDS transfer count (GFX12.5).
+  uint8_t samplecnt = 0; ///< Image sample/gather count (GFX12).
+
+  uint8_t bvhcnt = 0; ///< Ray-intersection count (GFX12).
 
   /// @brief Check whether all counters are zero (no outstanding memory ops).
   bool empty() const {
     return vmcnt == 0 && lgkmcnt == 0 && expcnt == 0 && vscnt == 0 && dscnt == 0 && kmcnt == 0 &&
-           tensorcnt == 0 && asynccnt == 0;
+           tensorcnt == 0 && asynccnt == 0 && samplecnt == 0 && bvhcnt == 0;
   }
 
-  /// Hardware saturation limits for each counter type.
+  /// Storage maxima covering every supported ISA. Architecture-specific
+  /// VMCNT/LGKMCNT issue capacities live in generated IsaProperties.
   static constexpr uint8_t VMCNT_MAX = 63;
   static constexpr uint8_t LGKMCNT_MAX = 63;
   static constexpr uint8_t EXPCNT_MAX = 7;
@@ -72,6 +58,8 @@ struct WaitCounters {
   static constexpr uint8_t KMCNT_MAX = 31;
   static constexpr uint8_t TENSORCNT_MAX = 63;
   static constexpr uint8_t ASYNCCNT_MAX = 63;
+  static constexpr uint8_t SAMPLECNT_MAX = 63;
+  static constexpr uint8_t BVHCNT_MAX = 7;
 
   void increment(WaitCounterType type) {
     switch (type) {
@@ -102,6 +90,12 @@ struct WaitCounters {
       break;
     case WaitCounterType::ASYNCCNT:
       asynccnt = std::min<uint8_t>(asynccnt + 1, ASYNCCNT_MAX);
+      break;
+    case WaitCounterType::BVHCNT:
+      bvhcnt = std::min<uint8_t>(bvhcnt + 1, BVHCNT_MAX);
+      break;
+    case WaitCounterType::SAMPLECNT:
+      samplecnt = std::min<uint8_t>(samplecnt + 1, SAMPLECNT_MAX);
       break;
     }
   }
@@ -146,6 +140,14 @@ struct WaitCounters {
       assert(asynccnt > 0 && "ASYNCCNT underflow");
       --asynccnt;
       break;
+    case WaitCounterType::BVHCNT:
+      assert(bvhcnt > 0 && "BVHCNT underflow");
+      --bvhcnt;
+      break;
+    case WaitCounterType::SAMPLECNT:
+      assert(samplecnt > 0 && "SAMPLECNT underflow");
+      --samplecnt;
+      break;
     }
   }
 };
@@ -163,12 +165,28 @@ struct WaitTarget {
   uint8_t kmcnt = WaitCounters::KMCNT_MAX;
   uint8_t tensorcnt = WaitCounters::TENSORCNT_MAX;
   uint8_t asynccnt = WaitCounters::ASYNCCNT_MAX;
+  uint8_t samplecnt = WaitCounters::SAMPLECNT_MAX;
+  uint8_t bvhcnt = WaitCounters::BVHCNT_MAX;
+
+  /// Architectural limits installed by a GFX10 SOPK wait after reading SDST.
+  [[nodiscard]] WaitFields gfx10_wait_fields() const {
+    WaitFields fields{};
+    if (vmcnt < WaitCounters::VMCNT_MAX)
+      fields[static_cast<size_t>(WaitCounterKind::Load)] = vmcnt;
+    if (vscnt < WaitCounters::VSCNT_MAX)
+      fields[static_cast<size_t>(WaitCounterKind::Store)] = vscnt;
+    if (lgkmcnt < WaitCounters::LGKMCNT_MAX)
+      fields[static_cast<size_t>(WaitCounterKind::Ds)] = lgkmcnt;
+    if (expcnt < WaitCounters::EXPCNT_MAX)
+      fields[static_cast<size_t>(WaitCounterKind::Exp)] = expcnt;
+    return fields;
+  }
 
   /// @brief Check whether the given counters satisfy all thresholds.
   bool satisfied(const WaitCounters &c) const {
     return c.vmcnt <= vmcnt && c.lgkmcnt <= lgkmcnt && c.expcnt <= expcnt && c.vscnt <= vscnt &&
            c.dscnt <= dscnt && c.kmcnt <= kmcnt && c.tensorcnt <= tensorcnt &&
-           c.asynccnt <= asynccnt;
+           c.asynccnt <= asynccnt && c.samplecnt <= samplecnt && c.bvhcnt <= bvhcnt;
   }
 };
 

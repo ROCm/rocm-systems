@@ -3,19 +3,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Optional
 import functools
 import os
+import re
 import shutil
 import subprocess
-import re
+from dataclasses import dataclass, field
+from pathlib import Path
 
 from .cache import persistent_cache, persistent_cached_property
 
 
-def _get_amdsmi_version_output(rocm_path: Optional[Path] = None) -> Optional[str]:
+def _get_amdsmi_version_output(rocm_path: Path | None = None) -> str | None:
     """Return combined stdout/stderr of ``amd-smi version`` if available, else None."""
     amdsmi_exe = None
     if rocm_path is not None:
@@ -37,13 +36,14 @@ def _get_amdsmi_version_output(rocm_path: Optional[Path] = None) -> Optional[str
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
         )
         return (result.stdout or "") + " " + (result.stderr or "")
     except (subprocess.SubprocessError, OSError):
         return None
 
 
-def get_amdsmi_version(rocm_path: Optional[Path] = None) -> Optional[tuple[int, int]]:
+def get_amdsmi_version(rocm_path: Path | None = None) -> tuple[int, int] | None:
     """Return (major, minor) of amd-smi if available, else None."""
     raw = _get_amdsmi_version_output(rocm_path)
     if raw is None:
@@ -56,8 +56,8 @@ def get_amdsmi_version(rocm_path: Optional[Path] = None) -> Optional[tuple[int, 
 
 
 def get_amdgpu_version(
-    rocm_path: Optional[Path] = None,
-) -> Optional[tuple[int, int, int]]:
+    rocm_path: Path | None = None,
+) -> tuple[int, int, int] | None:
     """Return (major, minor, patch) of the amdgpu driver if available, else None."""
     raw = _get_amdsmi_version_output(rocm_path)
     if raw is None:
@@ -70,6 +70,53 @@ def get_amdgpu_version(
         patch = int(m.group(3)) if m.group(3) is not None else 0
         return (int(m.group(1)), int(m.group(2)), patch)
     return None
+
+
+# capchk builds its capability table behind #if defined(CAP_*), so a capability
+# newer than the kernel headers it was compiled against is reported as unknown
+# rather than absent.
+#
+# The list here is the set of capabilities capchk may legitimately not know
+# about; any other unknown name is a typo in the caller.
+_OPTIONAL_CAPABILITIES = frozenset({"CAP_PERFMON"})  # Introduced in kernel 5.8
+
+
+def find_roctx_site_packages(rocm_path: Path | None, python_version: str) -> Path | None:
+    """Return the ROCm-provided roctx site-packages directory for a Python version.
+
+    rocprofiler-sdk builds and installs its ``roctx`` Python bindings
+    (``libpyroctx.<abi>.so``) per interpreter into a versioned directory under
+    the ROCm install tree, e.g. ``<rocm_path>/lib/python3.11/site-packages``.
+    Unlike rocprofsys's own bindings, these are not consolidated into a single
+    ABI-agnostic directory, so the correct versioned directory must be
+    resolved per Python version.
+
+    Args:
+        rocm_path: Path to the ROCm installation, or None.
+        python_version: Python version string, e.g. "3.11".
+
+    Returns:
+        Path to the site-packages directory containing the ``roctx`` package
+        for the given version, or None if not found.
+    """
+    if not rocm_path:
+        return None
+    candidates = (
+        rocm_path / lib_name / f"python{python_version}" / "site-packages" / "roctx"
+        for lib_name in ("lib", "lib64")
+    )
+    # The package directory alone isn't sufficient: some ROCm packaging variants
+    # ship the __init__.py without the compiled extension it imports
+    # (libpyroctx.<abi>.so), which would still raise on import.
+    return next(
+        (
+            roctx_dir.parent
+            for roctx_dir in candidates
+            if (roctx_dir / "__init__.py").is_file()
+            and any(roctx_dir.glob("libpyroctx.*"))
+        ),
+        None,
+    )
 
 
 @dataclass
@@ -85,10 +132,10 @@ class SystemCapabilities:
     rocprofsys_examples_dir: Path
     rocprofsys_avail: Path
     is_installed: bool
-    rocm_path: Optional[Path]
-    rocprofsys_site_packages: Optional[Path]
-    _python_versions_hint: Optional[list[str]] = field(default=None, repr=False)
-    _python_root_dirs_hint: Optional[list[Path]] = field(default=None, repr=False)
+    rocm_path: Path | None
+    rocprofsys_site_packages: Path | None
+    _python_versions_hint: list[str] | None = field(default=None, repr=False)
+    _python_root_dirs_hint: list[Path] | None = field(default=None, repr=False)
 
     @classmethod
     def from_config(cls, config) -> SystemCapabilities:
@@ -126,6 +173,7 @@ class SystemCapabilities:
                     capture_output=True,
                     text=True,
                     timeout=10,
+                    check=False,
                 )
                 return result.stdout if result.returncode == 0 else ""
             except (subprocess.SubprocessError, OSError):
@@ -145,7 +193,7 @@ class SystemCapabilities:
         return "unknown"
 
     @persistent_cached_property
-    def default_nic(self) -> Optional[str]:
+    def default_nic(self) -> str | None:
         """Get the name of the default NIC
 
         Returns: Result of executing the get_default_nic.sh script
@@ -159,6 +207,7 @@ class SystemCapabilities:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                check=False,
             )
             if result.returncode != 0:
                 return None
@@ -185,6 +234,7 @@ class SystemCapabilities:
                 capture_output=True,
                 text=True,
                 timeout=15,
+                check=False,
             )
             if result.returncode != 0:
                 return []
@@ -203,7 +253,7 @@ class SystemCapabilities:
             return []
 
     @persistent_cached_property
-    def papi_nic_events(self) -> Optional[str]:
+    def papi_nic_events(self) -> str | None:
         """Get the list of all events that we want PAPI to record.
 
         Returns: Result of executing the generate_papi_nic_events.sh script
@@ -219,6 +269,7 @@ class SystemCapabilities:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                check=False,
             )
             if result.returncode != 0:
                 return None
@@ -253,6 +304,7 @@ class SystemCapabilities:
                 text=True,
                 timeout=10,
                 env=ucx_env,
+                check=False,
             )
             if result.returncode != 0:
                 return False
@@ -290,12 +342,17 @@ class SystemCapabilities:
         return count if count > 0 else 2
 
     @persistent_cached_property
-    def ptrace_scope(self) -> int:
-        """Get the value of the ptrace_scope kernel parameter."""
-        if not Path("/proc/sys/kernel/yama/ptrace_scope").exists():
-            return 3
+    def ptrace_scope(self) -> int | None:
+        """Get the value of the yama ``ptrace_scope`` kernel parameter.
+
+        Returns ``None`` when the sysctl does not exist, which means the yama
+        LSM is not active and therefore places no restriction on ptrace.
+        """
+        scope_path = Path("/proc/sys/kernel/yama/ptrace_scope")
+        if not scope_path.exists():
+            return None
         try:
-            return int(Path("/proc/sys/kernel/yama/ptrace_scope").read_text().strip())
+            return int(scope_path.read_text().strip())
         except (OSError, ValueError):
             return 3
 
@@ -309,44 +366,63 @@ class SystemCapabilities:
         except (OSError, ValueError):
             return 4
 
-    @persistent_cached_property
-    def cap_sys_admin(self) -> bool:
-        """Get the value of the CAP_SYS_ADMIN capability."""
+    # Results for the relevant caps are cached in functions below
+    def _has_capability(self, name: str, capability_set: str = "effective") -> bool:
+        """Return True if this process holds *name* in *capability_set*.
+
+        Exit codes of rocprof-sys-capchk, which is where its answer lives:
+
+          - 0: the capability is held
+          - 1: the capability is absent
+          - 2: the capability name is unknown
+          - 3: the capability set name is unknown
+
+        2 and 3 mean the caller asked for something that does not exist, so they
+        raise rather than report the capability as absent and silently skip the
+        tests that need it. The exception is a capability newer than the kernel
+        headers capchk was built against, which is a real system difference
+        rather than a mistake; see ``_OPTIONAL_CAPABILITIES``.
+
+        Stdout is a human-readable sentence and must never be parsed
+        Changes here should be reflected in tests/rocprof-sys-capchk.cpp
+        """
         capchk = self.rocprofsys_tests_dir / "rocprof-sys-capchk"
         if not capchk.exists():
             return False
         try:
             result = subprocess.run(
-                [capchk, "CAP_SYS_ADMIN", "effective"],
+                [capchk, name, capability_set],
                 capture_output=True,
                 text=True,
                 timeout=10,
+                check=False,
             )
-            if result.returncode != 0:
-                return False
-            return result.stdout.strip() == "1"
         except (subprocess.SubprocessError, OSError):
             return False
+
+        if result.returncode == 3:
+            raise ValueError(
+                f"rocprof-sys-capchk does not support capability set "
+                f"{capability_set!r}"
+            )
+        if result.returncode == 2 and name.upper() not in _OPTIONAL_CAPABILITIES:
+            raise ValueError(f"rocprof-sys-capchk does not support capability {name!r}")
+        return result.returncode == 0
+
+    @persistent_cached_property
+    def cap_sys_admin(self) -> bool:
+        """Whether CAP_SYS_ADMIN is in the effective capability set."""
+        return self._has_capability("CAP_SYS_ADMIN")
 
     @persistent_cached_property
     def cap_perfmon(self) -> bool:
-        """Get the value of the CAP_PERFMON capability."""
-        capchk = self.rocprofsys_tests_dir / "rocprof-sys-capchk"
-        if not capchk.exists():
-            return False
-        try:
-            result = subprocess.run(
-                [capchk, "CAP_PERFMON", "effective"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if result.returncode != 0:
-                return False
+        """Whether CAP_PERFMON is in the effective capability set."""
+        return self._has_capability("CAP_PERFMON")
 
-            return result.stdout.strip() == "1"
-        except (subprocess.SubprocessError, OSError):
-            return False
+    @persistent_cached_property
+    def cap_sys_ptrace(self) -> bool:
+        """Whether CAP_SYS_PTRACE is in the effective capability set."""
+        return self._has_capability("CAP_SYS_PTRACE")
 
     @persistent_cached_property
     def perf_events_usable(self) -> bool:
@@ -354,12 +430,9 @@ class SystemCapabilities:
 
         This gates anything that opens Linux perf events, including PAPI
         hardware/software counters and overflow sampling. It mirrors the
-        runtime gate in ``source/lib/core/config.cpp``, which disables PAPI
-        when ``/proc/sys/kernel/perf_event_paranoid`` is greater than 2 unless
-        ``CAP_SYS_ADMIN`` is held. Note the runtime does not consult
-        ``CAP_PERFMON``, so it is intentionally not checked here.
+        runtime gate in ``source/lib/core/config.cpp``
         """
-        return self.perf_event_paranoid <= 2 or self.cap_sys_admin
+        return self.perf_event_paranoid <= 2 or self.cap_perfmon or self.cap_sys_admin
 
     @persistent_cached_property
     def papi_availability(self) -> bool:
@@ -373,6 +446,7 @@ class SystemCapabilities:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                check=False,
             )
             if result.returncode != 0:
                 return False
@@ -390,6 +464,40 @@ class SystemCapabilities:
         except (subprocess.SubprocessError, OSError, subprocess.TimeoutExpired):
             return False
 
+    @persistent_cached_property
+    def max_threads(self) -> int:
+        """Compile-time limit on the total number of threads profiled per process.
+
+        The limit is cumulative over the lifetime of the process rather than a
+        cap on concurrency: every thread that is created consumes a slot, and
+        that slot is not reused when the thread exits.
+
+        This is the ``ROCPROFSYS_MAX_THREADS`` CMake constant baked into the
+        binaries at build time. It is queried from
+        ``rocprof-sys-avail --max-threads``
+
+        Returns 0 when the value cannot be determined, so callers degrade
+        gracefully instead of aborting the whole configuration step.
+        """
+        try:
+            result = subprocess.run(
+                [str(self.rocprofsys_avail), "--max-threads"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            if result.returncode != 0:
+                return 0
+        except (subprocess.SubprocessError, OSError):
+            return 0
+        # Must stay in sync with the exact line printed by rocprof-sys-avail's
+        # `--max-threads` action (source/bin/rocprof-sys-avail/avail.cpp).
+        match = re.search(
+            r"total number of threads \(ROCPROFSYS_MAX_THREADS\):\s*(\d+)", result.stdout
+        )
+        return int(match.group(1)) if match else 0
+
     # ---------------------------------------------------------------------------
     # Do NOT make this a persistent_cached_property: the result depends on the
     # per-process --python-versions / --python-root-dirs hints, so it must not be
@@ -397,7 +505,7 @@ class SystemCapabilities:
     @functools.cached_property
     def _supported_python_versions_and_executables(
         self,
-    ) -> tuple[Optional[list[str]], Optional[list[Path]]]:
+    ) -> tuple[list[str] | None, list[Path] | None]:
         """Return the list of supported python versions and executables"""
         return _get_supported_python_versions_and_executables(
             self.rocprofsys_site_packages,
@@ -406,12 +514,12 @@ class SystemCapabilities:
         )
 
     @property
-    def supported_python_versions(self) -> Optional[list[str]]:
+    def supported_python_versions(self) -> list[str] | None:
         """Return the list of supported python versions"""
         return self._supported_python_versions_and_executables[0]
 
     @property
-    def supported_python_executables(self) -> Optional[list[Path]]:
+    def supported_python_executables(self) -> list[Path] | None:
         """Return the list of supported python executables"""
         return self._supported_python_versions_and_executables[1]
 
@@ -431,6 +539,72 @@ class SystemCapabilities:
                 f"Python version '{version}' not found. Available: {', '.join(self.supported_python_versions)}"
             )
 
+    def roctx_site_packages(self, python_version: str) -> Path | None:
+        """ROCm's roctx site-packages directory for ``python_version``, if usable.
+
+        See :func:`find_roctx_site_packages`.
+        """
+        return find_roctx_site_packages(self.rocm_path, python_version)
+
+    def python_lib_dir(self, python_version: str) -> Path | None:
+        """Return the interpreter's own ``lib`` directory, or None if absent.
+
+        On some rocprofiler-sdk builds the compiled ``libpyroctx.<abi>.so``
+        extension resolves ``libpython<version>.so`` through the loader search
+        path rather than through an rpath/``$ORIGIN`` entry, so this directory
+        has to be on ``LD_LIBRARY_PATH`` for the import to succeed even though
+        every file is present on disk.
+        """
+        try:
+            python_executable = self.get_python_executable(python_version)
+        except FileNotFoundError:
+            return None
+        # Typical layout: <env_root>/bin/python3.X -> <env_root>/lib
+        lib_dir = python_executable.parent.parent / "lib"
+        return lib_dir if lib_dir.is_dir() else None
+
+    @persistent_cache("cap.roctx_available_for", method=True)
+    def roctx_available_for(self, python_version: str) -> bool:
+        """Return whether ROCm's roctx Python bindings are installed AND
+        importable for this version.
+
+        File presence alone isn't sufficient, so this invokes the target
+        interpreter with the same roctx site-packages and interpreter lib
+        directory that ``PythonRunner`` adds for the real test run. Only the
+        base environment differs - the probe extends this process's
+        environment, the runner extends its layered one - and the runner's
+        search paths are a superset, so a negative here is conservative.
+        """
+        site_packages = self.roctx_site_packages(python_version)
+        if site_packages is None:
+            return False
+        try:
+            python_executable = self.get_python_executable(python_version)
+        except FileNotFoundError:
+            return False
+
+        env = os.environ.copy()
+        env["PYTHONPATH"] = os.pathsep.join(
+            p for p in (env.get("PYTHONPATH", ""), str(site_packages)) if p
+        )
+        lib_dir = self.python_lib_dir(python_version)
+        if lib_dir is not None:
+            env["LD_LIBRARY_PATH"] = os.pathsep.join(
+                p for p in (env.get("LD_LIBRARY_PATH", ""), str(lib_dir)) if p
+            )
+        try:
+            result = subprocess.run(
+                [str(python_executable), "-c", "import roctx"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                env=env,
+                check=False,
+            )
+            return result.returncode == 0
+        except (subprocess.SubprocessError, OSError):
+            return False
+
     # ---------------------------------------------------------------------------
 
     @persistent_cached_property
@@ -448,13 +622,13 @@ class SystemCapabilities:
         return False
 
     @persistent_cached_property
-    def oshrun_exec(self) -> Optional[Path]:
+    def oshrun_exec(self) -> Path | None:
         """Get the path to the oshrun executable."""
         result = shutil.which("oshrun")
         return Path(result) if result else None
 
     @persistent_cached_property
-    def oshrun_version(self) -> Optional[tuple[int, ...]]:
+    def oshrun_version(self) -> tuple[int, ...] | None:
         """Get the parsed version of oshrun as a tuple (major, minor)"""
         if not self.oshrun_exec:
             return None
@@ -464,6 +638,7 @@ class SystemCapabilities:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                check=False,
             )
             if result.returncode != 0:
                 return None
@@ -502,7 +677,9 @@ class SystemCapabilities:
                     + extra
                     + ["-n", "1", probe_path, "--", "SENTINEL"]
                 )
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                result = subprocess.run(
+                    cmd, capture_output=True, text=True, timeout=30, check=False
+                )
                 if result.returncode == 0:
                     return result.stdout.strip() == "SENTINEL"
             return False
@@ -512,7 +689,7 @@ class SystemCapabilities:
             os.unlink(probe_path)
 
     @persistent_cached_property
-    def rocprofiler_sdk_version(self) -> Optional[tuple[int, int, int]]:
+    def rocprofiler_sdk_version(self) -> tuple[int, int, int] | None:
         """Return rocprofiler-sdk (major, minor, patch) from ``version.h`` under ROCm.
 
         ROCm root resolution: configured ``rocm_path`` when set, else the
@@ -533,13 +710,13 @@ class SystemCapabilities:
         )
 
     @persistent_cached_property
-    def julia_exec(self) -> Optional[Path]:
+    def julia_exec(self) -> Path | None:
         """Get the path to the Julia executable."""
         path = shutil.which("julia")
         return Path(path) if path else None
 
     @persistent_cached_property
-    def mpiexec_exec(self) -> Optional[Path]:
+    def mpiexec_exec(self) -> Path | None:
         """Find MPI launcher executable."""
         for candidate in ["mpiexec", "mpirun"]:
             path = shutil.which(candidate)
@@ -566,6 +743,7 @@ class SystemCapabilities:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                check=False,
             )
             if result.returncode != 0:
                 return False
@@ -574,12 +752,12 @@ class SystemCapabilities:
             return False
 
     @persistent_cached_property
-    def amdsmi_version(self) -> Optional[tuple[int, int]]:
+    def amdsmi_version(self) -> tuple[int, int] | None:
         """Get (major, minor) version of amd-smi, or None if not available."""
         return get_amdsmi_version(self.rocm_path)
 
     @persistent_cached_property
-    def amdgpu_version(self) -> Optional[tuple[int, int, int]]:
+    def amdgpu_version(self) -> tuple[int, int, int] | None:
         """Get (major, minor, patch) of the amdgpu driver, or None if not available."""
         return get_amdgpu_version(self.rocm_path)
 
@@ -590,7 +768,7 @@ _ROCPROFILER_SDK_VERSION_H_RE = re.compile(
 )
 
 
-def _rocprofiler_sdk_version_from_version_h(path: Path) -> Optional[tuple[int, int, int]]:
+def _rocprofiler_sdk_version_from_version_h(path: Path) -> tuple[int, int, int] | None:
     if not path.is_file():
         return None
     try:
@@ -603,7 +781,7 @@ def _rocprofiler_sdk_version_from_version_h(path: Path) -> Optional[tuple[int, i
     return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
 
 
-def _get_python_version(executable: Path) -> Optional[str]:
+def _get_python_version(executable: Path) -> str | None:
     """Get major.minor Python version from an executable."""
     try:
         result = subprocess.run(
@@ -611,6 +789,7 @@ def _get_python_version(executable: Path) -> Optional[str]:
             capture_output=True,
             text=True,
             timeout=10,
+            check=False,
         )
         if result.returncode == 0:
             output = result.stdout.strip() or result.stderr.strip()
@@ -622,7 +801,7 @@ def _get_python_version(executable: Path) -> Optional[str]:
     return None
 
 
-def _find_python_in_dirs(version: str, root_dirs: list[Path]) -> Optional[Path]:
+def _find_python_in_dirs(version: str, root_dirs: list[Path]) -> Path | None:
     """Search for a specific Python version across multiple root directories."""
     for root_dir in root_dirs:
         for name in [f"python{version}", "python3", "python"]:
@@ -637,10 +816,10 @@ def _find_python_in_dirs(version: str, root_dirs: list[Path]) -> Optional[Path]:
 
 
 def _get_supported_python_versions_and_executables(
-    rocprofsys_site_packages: Optional[Path],
-    python_versions_hint: Optional[list[str]],
-    python_root_dirs_hint: Optional[list[Path]],
-) -> tuple[Optional[list[str]], Optional[list[Path]]]:
+    rocprofsys_site_packages: Path | None,
+    python_versions_hint: list[str] | None,
+    python_root_dirs_hint: list[Path] | None,
+) -> tuple[list[str] | None, list[Path] | None]:
     """Return the list of supported python versions and executables
 
     A supported python version is one that has a corresponding libpyrocprofsys.<IMPL>-<VERSION>-<ARCH>-<OS>-<ABI>.so.
@@ -657,7 +836,7 @@ def _get_supported_python_versions_and_executables(
 
     if python_versions_hint:
         for version in python_versions_hint:
-            found: Optional[Path] = None
+            found: Path | None = None
             if python_root_dirs_hint:
                 found = _find_python_in_dirs(version, python_root_dirs_hint)
             if found is None:

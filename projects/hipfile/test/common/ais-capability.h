@@ -39,8 +39,9 @@ private:
     enum class IoProbeResult {
         NotRun,        // zero-sized I/O probe unavailable (ROCm < 7.14)
         Ok,            // zero-sized read returned 0
-        NoDevice,      // -1/ENODEV: one of buffer not on NVMe device (e.g. lvm volume or md device), AIS not
-                       // initialized on device, or p2pdma not ready
+        NoDevice,      // -1/ENODEV: one of the buffers not on an NVMe device (e.g. an LVM or MD volume with a
+                       // non-NVMe member, or a parity MD array), AIS not initialized on device, or
+                       // p2pdma not ready
         InternalError, // -hipFileInternalError: usually a fastpath score() rejection
         OtherError,    // any other result
     };

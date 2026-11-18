@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@
 #include "lib/common/defines.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/mpl.hpp"
+#include "lib/common/string_entry.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -122,15 +123,19 @@ convert_arg_type(Tp&& val)
     {
         return rocprofiler_dim3_t{val.x, val.y, val.z};
     }
+    else if constexpr(std::is_same<data_type, const char*>::value)
+    {
+        return common::get_string_entry(val)->c_str();
+    }
     else
     {
         return std::forward<Tp>(val);
     }
 }
-}  // namespace
 
+template <typename TableT>
 hip_api_table_t&
-get_table()
+get_table_impl()
 {
     static auto _compiler = hip_compiler_api_table_t{};
     static auto _runtime  = hip_runtime_api_table_t{};
@@ -141,6 +146,19 @@ get_table()
         return _val;
     }();
     return _v;
+}
+}  // namespace
+
+hip_api_table_t&
+get_table()
+{
+    return get_table_impl<internal_table>();
+}
+
+hip_api_table_t&
+get_tracing_table()
+{
+    return get_table_impl<tracing_table>();
 }
 
 template <size_t TableIdx, size_t OpIdx>
@@ -231,12 +249,14 @@ hip_api_impl<TableIdx, OpIdx>::functor(Args... args)
             return;
     }
 
-    auto  buffer_record    = common::init_public_api_struct(buffered_api_data_t{});
-    auto  extended_record  = common::init_public_api_struct(buffered_ext_data_t{});
-    auto  tracer_data      = common::init_public_api_struct(callback_api_data_t{});
-    auto* corr_id          = tracing::correlation_service::construct(ref_count);
-    auto  internal_corr_id = corr_id->internal;
-    auto  ancestor_corr_id = corr_id->ancestor;
+    auto  buffer_record   = common::init_public_api_struct(buffered_api_data_t{});
+    auto  extended_record = common::init_public_api_struct(buffered_ext_data_t{});
+    auto  tracer_data     = common::init_public_api_struct(callback_api_data_t{});
+    auto* corr_id         = tracing::correlation_service::construct(ref_count);
+    RETURN_UNTRACED_ON_NULL_CORRELATION_ID(
+        corr_id, RetT, exec(info_type::get_table_func(), std::forward<Args>(args)...));
+    auto internal_corr_id = corr_id->internal;
+    auto ancestor_corr_id = corr_id->ancestor;
 
     tracing::populate_external_correlation_ids(external_corr_ids,
                                                thr_id,
@@ -487,7 +507,61 @@ should_wrap_functor(rocprofiler_callback_tracing_kind_t _callback_domain,
     return false;
 }
 
-template <size_t TableIdx, typename Tp, size_t OpIdx>
+template <size_t TableIdx, typename LookupT = internal_table, typename Tp, size_t OpIdx>
+void
+restore_table(Tp* _orig, uint64_t _tbl_instance, std::integral_constant<size_t, OpIdx>)
+{
+    using table_type = typename hip_table_lookup<TableIdx>::type;
+
+    common::consume_args(_tbl_instance);  // currently unused
+
+    if constexpr(std::is_same<table_type, Tp>::value)
+    {
+        auto _info = hip_api_info<TableIdx, OpIdx>{};
+
+        // make sure we don't access a field that doesn't exist in input table
+        if(_info.offset() >= _orig->size) return;
+
+        // retrieve the function pointer to the implementation
+        auto& _copy_table = _info.get_table(hip_table_lookup<TableIdx>{}(LookupT{}));
+        auto& _copy_func  = _info.get_table_func(_copy_table);
+
+        // _copy_func will only be non-null after a call to copy_table has been made
+        if(_copy_func != nullptr)
+        {
+            // retrieve the current function pointer in the dispatch table
+            auto& _curr_table = _info.get_table(_orig);
+            auto& _curr_func  = _info.get_table_func(_curr_table);
+
+            if(_curr_func == nullptr)  // this really shouldn't happen
+            {
+                ROCP_CI_LOG(WARNING) << fmt::format(
+                    "current function pointer for '{}' is null... cannot restore to implementation",
+                    _info.name);
+            }
+            else if(_curr_func == _copy_func)
+            {
+                ROCP_TRACE << fmt::format("current function pointer for '{}' is already the "
+                                          "implementation... nothing to restore",
+                                          _info.name);
+            }
+            else if(_copy_func != nullptr)
+            {
+                ROCP_TRACE << fmt::format("restoring function pointer for '{}' to implementation",
+                                          _info.name);
+                _curr_func = _copy_func;
+            }
+        }
+        else
+        {
+            ROCP_TRACE << fmt::format(
+                "function pointer to implementation of '{}' is null... nothing to restore",
+                _info.name);
+        }
+    }
+}
+
+template <size_t TableIdx, typename LookupT = internal_table, typename Tp, size_t OpIdx>
 void
 copy_table(Tp* _orig, uint64_t _tbl_instance, std::integral_constant<size_t, OpIdx>)
 {
@@ -507,12 +581,8 @@ copy_table(Tp* _orig, uint64_t _tbl_instance, std::integral_constant<size_t, OpI
         // 3. get the sub-table containing the function pointer in saved table
         // 4. get reference to function pointer in sub-table in saved table
         // 5. save the original function in the saved table
-        auto& _copy_table = _info.get_table(get_table());
+        auto& _copy_table = _info.get_table(hip_table_lookup<TableIdx>{}(LookupT{}));
         auto& _copy_func  = _info.get_table_func(_copy_table);
-
-        ROCP_FATAL_IF(_copy_func && _tbl_instance == 0)
-            << _info.name << " has non-null function pointer " << _copy_func
-            << " despite this being the first instance of the library being copies";
 
         if(!_copy_func)
         {
@@ -561,13 +631,30 @@ update_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
     }
 }
 
-template <size_t TableIdx, typename Tp, size_t OpIdx, size_t... OpIdxTail>
+template <size_t TableIdx,
+          typename LookupT = internal_table,
+          typename Tp,
+          size_t OpIdx,
+          size_t... OpIdxTail>
+void
+restore_table(Tp* _orig, uint64_t _tbl_instance, std::index_sequence<OpIdx, OpIdxTail...>)
+{
+    restore_table<TableIdx, LookupT>(_orig, _tbl_instance, std::integral_constant<size_t, OpIdx>{});
+    if constexpr(sizeof...(OpIdxTail) > 0)
+        restore_table<TableIdx, LookupT>(_orig, _tbl_instance, std::index_sequence<OpIdxTail...>{});
+}
+
+template <size_t TableIdx,
+          typename LookupT = internal_table,
+          typename Tp,
+          size_t OpIdx,
+          size_t... OpIdxTail>
 void
 copy_table(Tp* _orig, uint64_t _tbl_instance, std::index_sequence<OpIdx, OpIdxTail...>)
 {
-    copy_table<TableIdx>(_orig, _tbl_instance, std::integral_constant<size_t, OpIdx>{});
+    copy_table<TableIdx, LookupT>(_orig, _tbl_instance, std::integral_constant<size_t, OpIdx>{});
     if constexpr(sizeof...(OpIdxTail) > 0)
-        copy_table<TableIdx>(_orig, _tbl_instance, std::index_sequence<OpIdxTail...>{});
+        copy_table<TableIdx, LookupT>(_orig, _tbl_instance, std::index_sequence<OpIdxTail...>{});
 }
 
 template <size_t TableIdx, typename Tp, size_t OpIdx, size_t... OpIdxTail>
@@ -652,36 +739,52 @@ iterate_args(uint32_t                                       id,
 
 template <typename TableT>
 void
-copy_table(TableT* _orig, uint64_t _tbl_instance)
+restore_table(TableT* _orig, uint64_t _tbl_instance)
 {
     constexpr auto TableIdx = hip_table_id_lookup<TableT>::value;
     if(_orig)
-        copy_table<TableIdx>(
+        restore_table<TableIdx, internal_table>(
             _orig, _tbl_instance, std::make_index_sequence<hip_domain_info<TableIdx>::last>{});
 }
 
 template <typename TableT>
 void
-update_table(TableT* _orig)
+copy_table(TableT* _orig, uint64_t _tbl_instance)
 {
     constexpr auto TableIdx = hip_table_id_lookup<TableT>::value;
     if(_orig)
+        copy_table<TableIdx, internal_table>(
+            _orig, _tbl_instance, std::make_index_sequence<hip_domain_info<TableIdx>::last>{});
+}
+
+template <typename TableT>
+void
+update_table(TableT* _orig, uint64_t _tbl_instance)
+{
+    constexpr auto TableIdx = hip_table_id_lookup<TableT>::value;
+    if(_orig)
+    {
+        copy_table<TableIdx, tracing_table>(
+            _orig, _tbl_instance, std::make_index_sequence<hip_domain_info<TableIdx>::last>{});
+
         update_table<TableIdx>(_orig, std::make_index_sequence<hip_domain_info<TableIdx>::last>{});
+    }
 }
 
 using hip_api_data_t   = rocprofiler_hip_api_args_t;
 using hip_op_args_cb_t = rocprofiler_callback_tracing_operation_args_cb_t;
 using hip_op_args_bf_t = rocprofiler_buffer_tracing_operation_args_cb_t;
 
-#define INSTANTIATE_HIP_TABLE_FUNC(TABLE_TYPE, TABLE_IDX)                                          \
-    template void                     copy_table<TABLE_TYPE>(TABLE_TYPE * _tbl, uint64_t _instv);  \
-    template void                     update_table<TABLE_TYPE>(TABLE_TYPE * _tbl);                 \
-    template const char*              name_by_id<TABLE_IDX>(uint32_t);                             \
-    template uint32_t                 id_by_name<TABLE_IDX>(const char*);                          \
-    template std::vector<uint32_t>    get_ids<TABLE_IDX>();                                        \
-    template std::vector<const char*> get_names<TABLE_IDX>();                                      \
-    template void                     iterate_args<TABLE_IDX>(                                     \
-        uint32_t, const hip_api_data_t&, hip_op_args_cb_t, int32_t, void*);    \
+#define INSTANTIATE_HIP_TABLE_FUNC(TABLE_TYPE, TABLE_IDX)                                            \
+    template void                     restore_table<TABLE_TYPE>(TABLE_TYPE * _tbl, uint64_t _instv); \
+    template void                     copy_table<TABLE_TYPE>(TABLE_TYPE * _tbl, uint64_t _instv);    \
+    template void                     update_table<TABLE_TYPE>(TABLE_TYPE * _tbl, uint64_t _instv);  \
+    template const char*              name_by_id<TABLE_IDX>(uint32_t);                               \
+    template uint32_t                 id_by_name<TABLE_IDX>(const char*);                            \
+    template std::vector<uint32_t>    get_ids<TABLE_IDX>();                                          \
+    template std::vector<const char*> get_names<TABLE_IDX>();                                        \
+    template void                     iterate_args<TABLE_IDX>(                                       \
+        uint32_t, const hip_api_data_t&, hip_op_args_cb_t, int32_t, void*);      \
     template void iterate_args<TABLE_IDX>(uint32_t, const hip_api_data_t&, hip_op_args_bf_t, void*);
 
 INSTANTIATE_HIP_TABLE_FUNC(hip_runtime_api_table_t, ROCPROFILER_HIP_TABLE_ID_Runtime)

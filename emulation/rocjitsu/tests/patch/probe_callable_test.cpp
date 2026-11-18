@@ -7,20 +7,34 @@
 // fabricate the symbol directly and only need a minimal ELF carrying the body
 // words in an executable .text (plus an optional .rela.text).
 //
-// Instruction encodings below are gfx90a ground truth captured from
-// `llvm-mc -arch=amdgcn -mcpu=gfx90a -show-encoding`.
+// Instruction encodings below are ground truth captured from
+// `llvm-mc -arch=amdgcn -mcpu=<gfx90a|gfx1200> -show-encoding`.
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/patch/probe_symbol.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
+#include "rocjitsu/isa/register_set.h"
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdint>
 #include <cstring>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
@@ -36,6 +50,19 @@ constexpr uint32_t kScratchLoadLo = 0xdc504000;  // scratch_load_dword v0, off, 
 constexpr uint32_t kScratchLoadHi = 0x00000000;  // ... (word 1)
 constexpr uint32_t kSScratchLoadLo = 0xc0140000; // s_scratch_load_dword (SMEM, word 0)
 constexpr uint32_t kSScratchLoadHi = 0x00000000; // ... (word 1)
+
+// gfx1200 encodings. RDNA4 global memory instructions (VGLOBAL) are 96-bit.
+constexpr uint32_t kGfx12GlobalStoreW0 = 0xee068002; // global_store_b32 v0, v1, s[2:3] (word 0)
+constexpr uint32_t kGfx12GlobalStoreW1 = 0x00800000; // ... (word 1)
+constexpr uint32_t kGfx12GlobalStoreW2 = 0x00000000; // ... (word 2)
+constexpr uint32_t kGfx12SSetpcS30S31 = 0xbe80481e;  // s_setpc_b64 s[30:31]
+constexpr uint32_t kGfx12ScratchLoadW0 = 0xed05007c; // scratch_load_b32 v1, off, off offset:16
+constexpr uint32_t kGfx12ScratchLoadW1 = 0x00000001; // ... (word 1)
+constexpr uint32_t kGfx12ScratchLoadW2 = 0x00001000; // ... (word 2)
+// image_store v[0:3], [v4, v5, v6], s[8:15] dmask:0xf dim:SQ_RSRC_IMG_3D
+constexpr std::array<uint32_t, 3> kGfx12ImageStore{0xd3c18002, 0x00001000, 0x00060504};
+// image_sample v[0:3], [v4, v5], s[8:15], s[16:19] dmask:0xf dim:SQ_RSRC_IMG_2D
+constexpr std::array<uint32_t, 3> kGfx12ImageSample{0xe7c6c001, 0x08001000, 0x00000504};
 
 // .text placement. Virtual address and file offset differ so the body's value
 // range (used by the relocation check) is distinct from its file offset.
@@ -54,11 +81,13 @@ uint32_t add_name(std::vector<uint8_t> &names, std::string_view name) {
   return offset;
 }
 
-// Build a minimal gfx90a ET_DYN ELF: one executable .text holding @p body, an
-// optional .rela.text whose entries' r_offset values are @p reloc_voffsets
-// (in the same virtual-address space as st_value), and a .shstrtab.
+// Build a minimal ET_DYN ELF for the target @p e_flags names: one executable
+// .text holding @p body, an optional .rela.text whose entries' r_offset values
+// are @p reloc_voffsets (in the same virtual-address space as st_value), and a
+// .shstrtab.
 std::vector<uint8_t> make_elf(const std::vector<uint32_t> &body,
-                              const std::vector<uint64_t> &reloc_voffsets = {}) {
+                              const std::vector<uint64_t> &reloc_voffsets = {},
+                              uint32_t e_flags = EF_AMDGPU_MACH_AMDGCN_GFX90A) {
   const bool has_rela = !reloc_voffsets.empty();
   const uint16_t shstrtab_index = static_cast<uint16_t>(has_rela ? 3 : 2);
   const uint16_t section_count = static_cast<uint16_t>(has_rela ? 4 : 3);
@@ -96,7 +125,7 @@ std::vector<uint8_t> make_elf(const std::vector<uint32_t> &body,
   ehdr.e_machine = EM_AMDGPU;
   ehdr.e_version = 1;
   ehdr.e_shoff = shoff;
-  ehdr.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX90A;
+  ehdr.e_flags = e_flags;
   ehdr.e_ehsize = sizeof(Elf64_Ehdr);
   ehdr.e_shentsize = sizeof(Elf64_Shdr);
   ehdr.e_shnum = section_count;
@@ -155,14 +184,109 @@ TEST(ProbeCallableTest, BuildsNopProbe) {
   AmdGpuCodeObject obj(image.data(), image.size());
 
   std::string err;
-  const auto callable =
-      build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2, &err);
+  const auto callable = build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+                                             /*num_arg_dwords=*/0, &err);
   ASSERT_TRUE(callable.has_value()) << err;
   EXPECT_EQ(callable->symbol, "rj_probe");
   EXPECT_EQ(callable->arch, ROCJITSU_CODE_ARCH_CDNA2);
-  EXPECT_EQ(callable->cc, ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31);
+  EXPECT_EQ(callable->target, ROCJITSU_CODE_TARGET_GFX90A);
+  EXPECT_EQ(callable->abi, *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31));
   EXPECT_EQ(callable->body_words, body);
   EXPECT_EQ(callable->output_text_offset, 0u); // assigned by a later layout step.
+}
+
+TEST(ProbeCallableTest, TranscendentalCompletionAdmissionIsTargetSpecific) {
+  struct Case {
+    rj_code_arch_t arch;
+    uint32_t flags;
+    uint32_t instruction;
+    bool accepted;
+  };
+  const uint32_t cdna_exp = cdna4::build_vop1(cdna4::kVExpF32Vop1, {.src0 = 256, .vdst = 1})[0];
+  const uint32_t cdna5_exp = cdna5::build_vop1(cdna5::kVExpF32Vop1, {.src0 = 256, .vdst = 1})[0];
+  const std::array<Case, 6> cases = {{
+      {.arch = ROCJITSU_CODE_ARCH_CDNA3,
+       .flags = EF_AMDGPU_MACH_AMDGCN_GFX942,
+       .instruction = cdna_exp,
+       .accepted = true},
+      {.arch = ROCJITSU_CODE_ARCH_CDNA4,
+       .flags = EF_AMDGPU_MACH_AMDGCN_GFX950,
+       .instruction = cdna_exp,
+       .accepted = true},
+      {.arch = ROCJITSU_CODE_ARCH_CDNA5,
+       .flags = EF_AMDGPU_MACH_AMDGCN_GFX1250,
+       .instruction = cdna5_exp,
+       .accepted = false},
+      {.arch = ROCJITSU_CODE_ARCH_CDNA5,
+       .flags = EF_AMDGPU_MACH_AMDGCN_GFX1251,
+       .instruction = cdna5_exp,
+       .accepted = false},
+      {.arch = ROCJITSU_CODE_ARCH_RDNA3,
+       .flags = EF_AMDGPU_MACH_AMDGCN_GFX1100,
+       .instruction = rdna3::build_vop1(rdna3::kVSqrtF32Vop1, {.src0 = 256, .vdst = 1})[0],
+       .accepted = true},
+      {.arch = ROCJITSU_CODE_ARCH_RDNA4,
+       .flags = EF_AMDGPU_MACH_AMDGCN_GFX1200,
+       .instruction = rdna4::build_vop1(rdna4::kVExpF32Vop1, {.src0 = 256, .vdst = 1})[0],
+       .accepted = true},
+  }};
+  for (const Case &test_case : cases) {
+    SCOPED_TRACE(test_case.flags);
+    const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, test_case.arch);
+    ASSERT_TRUE(ret.succeeded());
+    const std::vector<uint32_t> body = {test_case.instruction, ret.value()};
+    const std::vector<uint8_t> image = make_elf(body, {}, test_case.flags);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    std::string error;
+    const std::optional<ProbeCallable> callable =
+        build_probe_callable(object, whole_body_symbol(body), test_case.arch, 1, &error);
+    EXPECT_EQ(callable.has_value(), test_case.accepted) << error;
+    if (!test_case.accepted) {
+      EXPECT_NE(error.find("completion"), std::string::npos) << error;
+    }
+  }
+}
+
+TEST(ProbeCallableTest, CarriesTheDeclaredArgumentCountIntoTheAbi) {
+  const std::vector<uint32_t> body{kSWaitcnt0, kSSetpcS30S31};
+  const auto image = make_elf(body);
+  AmdGpuCodeObject obj(image.data(), image.size());
+
+  std::string err;
+  const auto callable = build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+                                             /*num_arg_dwords=*/2, &err);
+  ASSERT_TRUE(callable.has_value()) << err;
+  EXPECT_EQ(callable->abi, *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31,
+                                             /*num_arg_dwords=*/2));
+  EXPECT_EQ(callable->abi.num_arg_vgprs, 2);
+  // The body is the same one BuildsNopProbe accepts: the count is a property of
+  // the call, and nothing in the body has to change to carry it.
+  EXPECT_EQ(callable->body_words, body);
+}
+
+TEST(ProbeCallableTest, RejectsMoreArgumentsThanFitInRegisters) {
+  const std::vector<uint32_t> body{kSWaitcnt0, kSSetpcS30S31};
+  const auto image = make_elf(body);
+  AmdGpuCodeObject obj(image.data(), image.size());
+
+  std::string err;
+  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+                                    kMaxProbeArgVgprs + 1, &err)
+                   .has_value());
+  EXPECT_NE(err.find("argument dwords"), std::string::npos) << err;
+}
+
+TEST(ProbeCallableTest, ReportsRejectedEncodingAndWordOffset) {
+  const std::vector<uint32_t> body{0xffffffffu, kSSetpcS30S31};
+  const auto image = make_elf(body);
+  AmdGpuCodeObject obj(image.data(), image.size());
+
+  std::string err;
+  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+                                    /*num_arg_dwords=*/0, &err)
+                   .has_value());
+  EXPECT_NE(err.find("word 0"), std::string::npos) << err;
+  EXPECT_NE(err.find("Invalid instruction opcode"), std::string::npos) << err;
 }
 
 TEST(ProbeCallableTest, RejectsBodyWithCall) {
@@ -171,7 +295,8 @@ TEST(ProbeCallableTest, RejectsBodyWithCall) {
   AmdGpuCodeObject obj(image.data(), image.size());
 
   std::string err;
-  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2, &err)
+  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+                                    /*num_arg_dwords=*/0, &err)
                    .has_value());
   EXPECT_NE(err.find("call"), std::string::npos) << err;
 }
@@ -182,7 +307,8 @@ TEST(ProbeCallableTest, RejectsScratchAccess) {
   AmdGpuCodeObject obj(image.data(), image.size());
 
   std::string err;
-  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2, &err)
+  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+                                    /*num_arg_dwords=*/0, &err)
                    .has_value());
   EXPECT_NE(err.find("scratch"), std::string::npos) << err;
 }
@@ -193,9 +319,82 @@ TEST(ProbeCallableTest, RejectsSmemScratchAccess) {
   AmdGpuCodeObject obj(image.data(), image.size());
 
   std::string err;
-  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2, &err)
+  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+                                    /*num_arg_dwords=*/0, &err)
                    .has_value());
   EXPECT_NE(err.find("scratch"), std::string::npos) << err;
+}
+
+TEST(ProbeCallableTest, RejectsProbeBodyThatMayEnableVskip) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint16_t kModeBit28 = amdgpu::MODE_HWREG | (28u << 6);
+  constexpr uint16_t kWholeMode = amdgpu::MODE_HWREG | (31u << 11);
+  constexpr util::FailureOr<uint32_t> setpc = build_s_setpc_b64(30, kArch);
+  static_assert(setpc.succeeded());
+  const std::vector<std::vector<uint32_t>> writes = {
+      {cdna4::build_sopc(cdna4::kSSetvskipSopc, {.ssrc0 = 129, .ssrc1 = 128})[0]},
+      {cdna4::build_sopc(cdna4::kSSetvskipSopc, {.ssrc0 = 4, .ssrc1 = 128})[0]},
+      {cdna4::build_sopk(cdna4::kSSetregB32Sopk, {.simm16 = kModeBit28, .sdst = 4})[0]},
+      {cdna4::build_sopk(cdna4::kSSetregImm32B32Sopk, {.simm16 = kModeBit28})[0], 1},
+      {cdna4::build_sopk(cdna4::kSSetregImm32B32Sopk, {.simm16 = kWholeMode})[0], 1u << 28}};
+  for (const std::vector<uint32_t> &write : writes) {
+    SCOPED_TRACE(write.front());
+    // Keep the write away from body offset zero: immediate MODE decoding must
+    // read its own literal, rather than treating the body's second word as one.
+    std::vector<uint32_t> body = {kSNop0};
+    body.insert(body.end(), write.begin(), write.end());
+    body.push_back(setpc.value());
+    const std::vector<uint8_t> image = make_elf(body, {}, EF_AMDGPU_MACH_AMDGCN_GFX950);
+    const AmdGpuCodeObject object(image.data(), image.size());
+
+    std::string error;
+    EXPECT_FALSE(build_probe_callable(object, whole_body_symbol(body), kArch, 0, &error));
+    EXPECT_NE(error.find("VSKIP"), std::string::npos) << error;
+  }
+}
+
+TEST(ProbeCallableTest, AcceptsProbeBodyThatOnlyClearsVskip) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint16_t kModeBit28 = amdgpu::MODE_HWREG | (28u << 6);
+  constexpr uint16_t kWholeMode = amdgpu::MODE_HWREG | (31u << 11);
+  constexpr util::FailureOr<uint32_t> setpc = build_s_setpc_b64(30, kArch);
+  static_assert(setpc.succeeded());
+  const std::vector<std::vector<uint32_t>> writes = {
+      {cdna4::build_sopc(cdna4::kSSetvskipSopc, {.ssrc0 = 128, .ssrc1 = 128})[0]},
+      // Select bit one of inline constant one: the selected bit is clear.
+      {cdna4::build_sopc(cdna4::kSSetvskipSopc, {.ssrc0 = 129, .ssrc1 = 129})[0]},
+      {cdna4::build_sopk(cdna4::kSSetregImm32B32Sopk, {.simm16 = kModeBit28})[0], 0},
+      // Nonzero MODE writes that leave VSKIP clear are also admissible.
+      {cdna4::build_sopk(cdna4::kSSetregImm32B32Sopk, {.simm16 = kWholeMode})[0], 1u << 5}};
+  for (const std::vector<uint32_t> &write : writes) {
+    SCOPED_TRACE(write.front());
+    std::vector<uint32_t> body = {kSNop0};
+    body.insert(body.end(), write.begin(), write.end());
+    body.push_back(setpc.value());
+    const std::vector<uint8_t> image = make_elf(body, {}, EF_AMDGPU_MACH_AMDGCN_GFX950);
+    const AmdGpuCodeObject object(image.data(), image.size());
+
+    std::string error;
+    const std::optional<ProbeCallable> callable =
+        build_probe_callable(object, whole_body_symbol(body), kArch, 0, &error);
+    ASSERT_TRUE(callable) << error;
+    EXPECT_EQ(callable->body_words, body);
+  }
+}
+
+TEST(ProbeCallableTest, AcceptsModeBit28WriteOnAnArchitectureWithoutVskip) {
+  constexpr uint16_t kModeBit28 = amdgpu::MODE_HWREG | (28u << 6);
+  const std::vector<uint32_t> body = {
+      rdna4::build_sopk(rdna4::kSSetregImm32B32Sopk, {.simm16 = kModeBit28})[0], 1,
+      kGfx12SSetpcS30S31};
+  const std::vector<uint8_t> image = make_elf(body, {}, EF_AMDGPU_MACH_AMDGCN_GFX1200);
+  const AmdGpuCodeObject object(image.data(), image.size());
+
+  std::string error;
+  const std::optional<ProbeCallable> callable =
+      build_probe_callable(object, whole_body_symbol(body), ROCJITSU_CODE_ARCH_RDNA4, 0, &error);
+  ASSERT_TRUE(callable) << error;
+  EXPECT_EQ(callable->body_words, body);
 }
 
 TEST(ProbeCallableTest, RejectsMissingReturn) {
@@ -204,7 +403,8 @@ TEST(ProbeCallableTest, RejectsMissingReturn) {
   AmdGpuCodeObject obj(image.data(), image.size());
 
   std::string err;
-  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2, &err)
+  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+                                    /*num_arg_dwords=*/0, &err)
                    .has_value());
   EXPECT_NE(err.find("s_setpc_b64"), std::string::npos) << err;
 }
@@ -216,7 +416,8 @@ TEST(ProbeCallableTest, RejectsWrongReturnRegister) {
   AmdGpuCodeObject obj(image.data(), image.size());
 
   std::string err;
-  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2, &err)
+  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+                                    /*num_arg_dwords=*/0, &err)
                    .has_value());
   EXPECT_NE(err.find("s_setpc_b64"), std::string::npos) << err;
 }
@@ -228,7 +429,8 @@ TEST(ProbeCallableTest, RejectsRelocationInBody) {
   AmdGpuCodeObject obj(image.data(), image.size());
 
   std::string err;
-  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2, &err)
+  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+                                    /*num_arg_dwords=*/0, &err)
                    .has_value());
   EXPECT_NE(err.find("relocation"), std::string::npos) << err;
 }
@@ -240,10 +442,10 @@ TEST(ProbeCallableTest, AcceptsRelocationOutsideBody) {
   AmdGpuCodeObject obj(image.data(), image.size());
 
   std::string err;
-  const auto callable =
-      build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2, &err);
+  const auto callable = build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+                                             /*num_arg_dwords=*/0, &err);
   ASSERT_TRUE(callable.has_value()) << err;
-  EXPECT_EQ(callable->cc, ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31);
+  EXPECT_EQ(callable->abi, *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31));
 }
 
 TEST(ProbeCallableTest, RejectsNonDwordBodySize) {
@@ -255,7 +457,8 @@ TEST(ProbeCallableTest, RejectsNonDwordBodySize) {
   sym.body_size = 6; // not a multiple of 4.
 
   std::string err;
-  EXPECT_FALSE(build_probe_callable(obj, sym, ROCJITSU_CODE_ARCH_CDNA2, &err).has_value());
+  EXPECT_FALSE(build_probe_callable(obj, sym, ROCJITSU_CODE_ARCH_CDNA2, /*num_arg_dwords=*/0, &err)
+                   .has_value());
   EXPECT_NE(err.find("multiple of 4"), std::string::npos) << err;
 }
 
@@ -269,7 +472,8 @@ TEST(ProbeCallableTest, RejectsBodyPastImage) {
   sym.body_size = 8;
 
   std::string err;
-  EXPECT_FALSE(build_probe_callable(obj, sym, ROCJITSU_CODE_ARCH_CDNA2, &err).has_value());
+  EXPECT_FALSE(build_probe_callable(obj, sym, ROCJITSU_CODE_ARCH_CDNA2, /*num_arg_dwords=*/0, &err)
+                   .has_value());
   EXPECT_NE(err.find("past end of image"), std::string::npos) << err;
 }
 
@@ -284,8 +488,208 @@ TEST(ProbeCallableTest, RejectsStValueOverflow) {
   sym.st_value = UINT64_MAX; // st_value + body_size overflows.
 
   std::string err;
-  EXPECT_FALSE(build_probe_callable(obj, sym, ROCJITSU_CODE_ARCH_CDNA2, &err).has_value());
+  EXPECT_FALSE(build_probe_callable(obj, sym, ROCJITSU_CODE_ARCH_CDNA2, /*num_arg_dwords=*/0, &err)
+                   .has_value());
   EXPECT_NE(err.find("overflow"), std::string::npos) << err;
+}
+
+// A probe that writes memory on RDNA4 needs a 12-byte instruction, since every
+// global store there is one and there are no scalar stores.
+TEST(ProbeCallableTest, AcceptsATwelveByteInstruction) {
+  const std::vector<uint32_t> body{kGfx12GlobalStoreW0, kGfx12GlobalStoreW1, kGfx12GlobalStoreW2,
+                                   kGfx12SSetpcS30S31};
+  const auto image = make_elf(body, /*reloc_voffsets=*/{}, EF_AMDGPU_MACH_AMDGCN_GFX1200);
+  AmdGpuCodeObject obj(image.data(), image.size());
+
+  std::string err;
+  const auto callable = build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_RDNA4,
+                                             /*num_arg_dwords=*/0, &err);
+  ASSERT_TRUE(callable.has_value()) << err;
+  EXPECT_EQ(callable->body_words, body);
+}
+
+// RDNA4 scratch instructions are 12 bytes too, so once the width is accepted
+// the scratch check alone is what keeps them out of a probe body.
+TEST(ProbeCallableTest, RejectsATwelveByteScratchAccess) {
+  const std::vector<uint32_t> body{kGfx12ScratchLoadW0, kGfx12ScratchLoadW1, kGfx12ScratchLoadW2,
+                                   kGfx12SSetpcS30S31};
+  const auto image = make_elf(body, /*reloc_voffsets=*/{}, EF_AMDGPU_MACH_AMDGCN_GFX1200);
+  AmdGpuCodeObject obj(image.data(), image.size());
+
+  std::string err;
+  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_RDNA4,
+                                    /*num_arg_dwords=*/0, &err)
+                   .has_value());
+  EXPECT_NE(err.find("scratch"), std::string::npos) << err;
+}
+
+// RDNA4 image instructions are 12 bytes too. Their decoders name no address
+// register, so a probe reading undefined address registers would pass the
+// live-in check; they are refused instead. One per encoding, VIMAGE and VSAMPLE.
+TEST(ProbeCallableTest, RejectsAnRdna4ImageInstruction) {
+  for (const auto &[encoding, inst] :
+       {std::pair{"VIMAGE", kGfx12ImageStore}, std::pair{"VSAMPLE", kGfx12ImageSample}}) {
+    SCOPED_TRACE(encoding);
+    std::vector<uint32_t> body(inst.begin(), inst.end());
+    body.push_back(kGfx12SSetpcS30S31);
+    const auto image = make_elf(body, /*reloc_voffsets=*/{}, EF_AMDGPU_MACH_AMDGCN_GFX1200);
+    AmdGpuCodeObject obj(image.data(), image.size());
+
+    std::string err;
+    EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_RDNA4,
+                                      /*num_arg_dwords=*/0, &err)
+                     .has_value());
+    EXPECT_NE(err.find("image instruction"), std::string::npos) << err;
+  }
+}
+
+// The body ends one word into a 12-byte store. Decoding must stop at the body's
+// end rather than read the two missing words from past it.
+TEST(ProbeCallableTest, RejectsAnInstructionRunningPastTheBody) {
+  const std::vector<uint32_t> body{kGfx12GlobalStoreW0};
+  const auto image = make_elf(body, /*reloc_voffsets=*/{}, EF_AMDGPU_MACH_AMDGCN_GFX1200);
+  AmdGpuCodeObject obj(image.data(), image.size());
+
+  std::string err;
+  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_RDNA4,
+                                    /*num_arg_dwords=*/0, &err)
+                   .has_value());
+  EXPECT_NE(err.find("word 0"), std::string::npos) << err;
+  EXPECT_NE(err.find("truncated"), std::string::npos) << err;
+}
+
+//==============================================================================
+// ProbeAbi: the convention's register locations, and what it supplies.
+//==============================================================================
+
+TEST(ProbeAbiTest, DerivesTheLinkPairFromTheConvention) {
+  const std::optional<ProbeAbi> abi =
+      derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31);
+  ASSERT_TRUE(abi.has_value());
+  EXPECT_EQ(abi->cc, ProbeCallingConvention::AmdGpuFuncReturnS30S31);
+  EXPECT_EQ(abi->link_pair_base, 30);
+}
+
+TEST(ProbeAbiTest, RejectsAnUnrecognizedConvention) {
+  EXPECT_FALSE(derive_probe_abi(ProbeCallingConvention::Unknown).has_value());
+}
+
+TEST(ProbeAbiTest, SuppliesExactlyTheLinkPair) {
+  const std::optional<ProbeAbi> abi =
+      derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31);
+  ASSERT_TRUE(abi.has_value());
+
+  RegisterSet expected;
+  expected.expand(RegisterRef{RegClass::SGPR, 30, 2});
+  EXPECT_EQ(supplied_registers(*abi), expected);
+}
+
+TEST(ProbeAbiTest, ADerivedAbiIsValid) {
+  const std::optional<ProbeAbi> abi =
+      derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31);
+  ASSERT_TRUE(abi.has_value());
+  EXPECT_TRUE(is_valid_probe_abi(*abi));
+}
+
+TEST(ProbeAbiTest, ADefaultConstructedAbiIsInvalid) {
+  // Both halves of the default are individually disqualifying, so neither check
+  // is load-bearing alone.
+  EXPECT_EQ(ProbeAbi{}.link_pair_base, kUnsetLinkPairBase);
+  EXPECT_FALSE(is_valid_probe_abi(ProbeAbi{}));
+}
+
+TEST(ProbeAbiTest, RejectsAnOddLinkPairBase) {
+  // A 64-bit scalar operand must name an even-aligned pair, so an odd base
+  // cannot have come from a convention even with one named.
+  EXPECT_FALSE(is_valid_probe_abi(
+      ProbeAbi{.cc = ProbeCallingConvention::AmdGpuFuncReturnS30S31, .link_pair_base = 31}));
+}
+
+TEST(ProbeAbiTest, RejectsALinkPairBaseTheConventionDoesNotChoose) {
+  // Even and paired with a recognized convention, but not the pair that
+  // convention names. A screen that only checked alignment would admit it, and
+  // the trampoline would then call through s[40:41] while the body returns
+  // through s[30:31].
+  EXPECT_FALSE(is_valid_probe_abi(
+      ProbeAbi{.cc = ProbeCallingConvention::AmdGpuFuncReturnS30S31, .link_pair_base = 40}));
+}
+
+TEST(ProbeAbiTest, RejectsAnEvenLinkPairBaseWithNoConvention) {
+  EXPECT_FALSE(
+      is_valid_probe_abi(ProbeAbi{.cc = ProbeCallingConvention::Unknown, .link_pair_base = 30}));
+}
+
+TEST(ProbeAbiTest, AnInvalidAbiSuppliesNothing) {
+  // Reporting a pair here would let a live-in subtraction excuse a register
+  // nothing had committed to writing.
+  EXPECT_TRUE(supplied_registers(ProbeAbi{}).none());
+  EXPECT_TRUE(supplied_registers(ProbeAbi{.cc = ProbeCallingConvention::AmdGpuFuncReturnS30S31,
+                                          .link_pair_base = 31})
+                  .none());
+}
+
+TEST(ProbeAbiTest, PlacesArgumentsInConsecutiveVgprsFromV0) {
+  const std::optional<ProbeAbi> abi =
+      derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31, /*num_arg_dwords=*/3);
+  ASSERT_TRUE(abi.has_value());
+  EXPECT_EQ(abi->arg_vgpr_base, 0);
+  EXPECT_EQ(abi->num_arg_vgprs, 3);
+
+  RegisterSet expected;
+  expected.expand(RegisterRef{RegClass::VGPR, 0, 3});
+  EXPECT_EQ(arg_registers(*abi), expected);
+}
+
+TEST(ProbeAbiTest, SuppliesTheLinkPairAndTheArgumentVgprs) {
+  const std::optional<ProbeAbi> abi =
+      derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31, /*num_arg_dwords=*/2);
+  ASSERT_TRUE(abi.has_value());
+
+  RegisterSet expected;
+  expected.expand(RegisterRef{RegClass::SGPR, 30, 2});
+  expected.expand(RegisterRef{RegClass::VGPR, 0, 2});
+  EXPECT_EQ(supplied_registers(*abi), expected);
+}
+
+// RegisterRef floors a zero width at one, so a set built without guarding the
+// count would claim v0 for a probe passed nothing.
+TEST(ProbeAbiTest, ZeroArgumentsClaimsNoVgpr) {
+  const std::optional<ProbeAbi> abi =
+      derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31, /*num_arg_dwords=*/0);
+  ASSERT_TRUE(abi.has_value());
+  EXPECT_TRUE(arg_registers(*abi).none());
+
+  RegisterSet link_pair_only;
+  link_pair_only.expand(RegisterRef{RegClass::SGPR, 30, 2});
+  EXPECT_EQ(supplied_registers(*abi), link_pair_only);
+}
+
+TEST(ProbeAbiTest, RejectsMoreArgumentsThanFitInRegisters) {
+  EXPECT_TRUE(derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31, kMaxProbeArgVgprs)
+                  .has_value());
+  EXPECT_FALSE(
+      derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31, kMaxProbeArgVgprs + 1)
+          .has_value());
+}
+
+// is_valid_probe_abi re-derives from the ABI's own count. Keyed on the
+// convention alone it would accept any count at all, and a declared count would
+// stop being screened.
+TEST(ProbeAbiTest, ValidityIsKeyedOnTheDeclaredArgumentCount) {
+  const std::optional<ProbeAbi> two_args =
+      derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31, /*num_arg_dwords=*/2);
+  ASSERT_TRUE(two_args.has_value());
+  EXPECT_TRUE(is_valid_probe_abi(*two_args));
+
+  ProbeAbi over_limit = *two_args;
+  over_limit.num_arg_vgprs = kMaxProbeArgVgprs + 1;
+  EXPECT_FALSE(is_valid_probe_abi(over_limit));
+
+  // A window the convention does not choose, at a legal count.
+  ProbeAbi rebased = *two_args;
+  rebased.arg_vgpr_base = 8;
+  EXPECT_FALSE(is_valid_probe_abi(rebased));
+  EXPECT_TRUE(arg_registers(rebased).none());
 }
 
 } // namespace

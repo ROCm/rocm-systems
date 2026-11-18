@@ -15,20 +15,26 @@ set(TEST_SRC
     hipGetDeviceAttribute.cc
     hipGetDeviceCount.cc
     hipGetDeviceProperties.cc
+    hipGetDeviceProperties_R0000.cc
     hipRuntimeGetVersion.cc
     hipGetSetDeviceFlags.cc
     hipSetGetDevice.cc
     hipDeviceGetUuid.cc
+    hipDeviceGetLuid.cc
+    hipDeviceGetExecAffinitySupport.cc
     hipDeviceAPUCheck.cc
+    hipDeviceFlushGPUDirectRDMAWrites.cc
     hipDeviceGetDefaultMemPool.cc
     hipDeviceCanAccessPeer.cc
     hipDeviceEnableDisablePeerAccess.cc
     hipExtGetLinkTypeAndHopCount.cc
     hipDeviceSetGetLimit.cc
+    hipDevicePersistingL2Cache.cc
     hipDeviceSetGetSharedMemConfig.cc
     hipDeviceReset.cc
     hipDeviceSetGetMemPool.cc
     hipInit.cc
+    hipInitDevice.cc
     hipDriverGetVersion.cc
     hipSetValidDevices.cc
     hipIpcOpenMemHandle.cc
@@ -41,7 +47,7 @@ if(HIP_PLATFORM MATCHES "amd" AND BUILD_SHARED_LIBS)
       hipGetProcAddressDevMgmt.cc
       hipGetDriverEntryPoint.cc)
   if(UNIX)
-    set(AMD_SRC ${AMD_SRC} hipGetProcAddressIpcApis.cc)
+    set(AMD_SRC ${AMD_SRC} hipGetProcAddressIpcApis.cc hipAmdFileIo.cc)
   endif()
   set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
 endif()
@@ -116,4 +122,14 @@ if(HIP_PLATFORM MATCHES "amd")
   add_dependencies(DeviceTest hipDeviceSetGetScratchExe)
   set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipDeviceSetGetScratchExe)
   set_source_files_properties(hipDeviceSetGetScratchExe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+endif()
+
+if(HIP_PLATFORM MATCHES "amd" AND BUILD_SHARED_LIBS AND UNIX)
+  add_executable(hipGetProcAddressIpcEventImport EXCLUDE_FROM_ALL
+                 hipGetProcAddressIpcEventImport_Exe.cc)
+  set_source_files_properties(hipGetProcAddressIpcEventImport_Exe.cc
+                              PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+  target_link_libraries(hipGetProcAddressIpcEventImport ${GPGPU_LINKER_LIBRARIES})
+  add_dependencies(DeviceTest hipGetProcAddressIpcEventImport)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipGetProcAddressIpcEventImport)
 endif()

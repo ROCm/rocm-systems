@@ -7,6 +7,7 @@
 #include <hip_test_common.hh>
 #include <hip_test_defgroups.hh>
 #include <utils.hh>
+#include <chrono>
 #include <vector>
 
 /**
@@ -408,6 +409,68 @@ HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_StreamOrdering) {
   }
 
   HIP_CHECK(hipFree(managed_ptr));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Blocks the stream with a kernel that spins until the host sets a release flag.
+ * - Enqueues a discard behind the kernel and verifies that hipStreamQuery reports
+ *   hipErrorNotReady until the host releases the kernel.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemDiscardBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.2
+ *  - Device supports managed memory, concurrent managed access and pageable memory access
+ */
+HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_Sync_Behavior) {
+  if (!HmmSupported()) {
+    HIP_SKIP_TEST("HMM/managed memory not supported");
+    return;
+  }
+  // The discard is rejected at submission without XNACK, which completes the command at once
+  if (!DeviceAttributesSupport(0, hipDeviceAttributePageableMemoryAccess)) {
+    HIP_SKIP_TEST("PageableMemoryAccess not supported");
+    return;
+  }
+
+  constexpr size_t kSize = 4096;
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  int* release = nullptr;
+  HIP_CHECK(hipHostMalloc(&release, sizeof(int)));
+  *release = 0;
+  void* managed_ptr = nullptr;
+  HIP_CHECK(hipMallocManaged(&managed_ptr, kSize));
+
+  void* ptrs[1] = {managed_ptr};
+  size_t sizes[1] = {kSize};
+  HIP_CHECK(hipMemDiscardBatchAsync(ptrs, sizes, 1, 0, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  WaitForHostRelease<<<1, 1, 0, stream>>>(release);
+  HIP_CHECK(hipGetLastError());
+
+  const auto discard_error = hipMemDiscardBatchAsync(ptrs, sizes, 1, 0, stream);
+
+  auto query_while_blocked = hipErrorNotReady;
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds{100};
+  while (query_while_blocked == hipErrorNotReady && std::chrono::steady_clock::now() < deadline) {
+    query_while_blocked = hipStreamQuery(stream);
+  }
+
+  __atomic_store_n(release, 1, __ATOMIC_RELEASE);
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  HIP_CHECK(discard_error);
+  REQUIRE(query_while_blocked == hipErrorNotReady);
+
+  HIP_CHECK(hipFree(managed_ptr));
+  HIP_CHECK(hipHostFree(release));
   HIP_CHECK(hipStreamDestroy(stream));
 }
 

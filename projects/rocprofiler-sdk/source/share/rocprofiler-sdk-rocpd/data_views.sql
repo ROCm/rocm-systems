@@ -164,6 +164,29 @@ FROM
 
 --
 -- Samples
+-- Raw PC samples with recording-scoped event, blob, and optional code-object metadata.
+CREATE VIEW IF NOT EXISTS
+    `pc_samples` AS
+SELECT
+    S.*,
+    E.stack_id,
+    E.parent_stack_id,
+    E.parent_id,
+    B.schema_id,
+    B.blob,
+    A.absolute_index AS agent_abs_index,
+    C.uri AS code_object_uri
+FROM
+    `rocpd_gpu_pc_sample` S
+    LEFT JOIN `rocpd_event` E ON E.id = S.event_id
+    AND E.guid = S.guid
+    LEFT JOIN `rocpd_blob_event` B ON B.event_id = S.event_id
+    AND B.guid = S.guid
+    LEFT JOIN `rocpd_info_agent` A ON A.id = S.agent_id
+    AND A.guid = S.guid
+    LEFT JOIN `rocpd_info_code_object` C ON C.id = S.code_object_id
+    AND C.guid = S.guid;
+
 CREATE VIEW IF NOT EXISTS
     `samples` AS
 SELECT
@@ -400,7 +423,9 @@ SELECT
     K.end,
     (K.end - K.start) AS duration,
     PMC_I.name AS counter_name,
-    PMC_E.value AS counter_value
+    PMC_E.value AS counter_value,
+    -- Kernel-replay pass that collected the value. Rows without the tag are pass 0.
+    COALESCE(json_extract(PMC_E.extdata, '$.replay_pass'), 0) AS replay_pass
 FROM
     `rocpd_pmc_event` PMC_E
     INNER JOIN `rocpd_info_pmc` PMC_I ON PMC_I.id = PMC_E.pmc_id
@@ -530,6 +555,60 @@ FROM
     AND P.guid = M.guid
     INNER JOIN `rocpd_info_thread` T ON T.id = M.tid
     AND T.guid = M.guid;
+
+--
+-- HIP event barrier records
+CREATE VIEW IF NOT EXISTS
+    `hip_events` AS
+SELECT
+    H.id,
+    H.guid,
+    (
+        SELECT
+            string
+        FROM
+            `rocpd_string` RS
+        WHERE
+            RS.id = E.category_id
+            AND RS.guid = E.guid
+    ) AS category,
+    H.nid,
+    P.pid,
+    T.tid,
+    H.start,
+    H.end,
+    (H.end - H.start) AS duration,
+    S.string AS name,
+    H.stream_id,
+    H.queue_id,
+    ST.name AS stream_name,
+    Q.name AS queue_name,
+    agent.name AS device,
+    agent.absolute_index AS agent_abs_index,
+    agent.logical_index AS agent_log_index,
+    agent.type_index AS agent_type_index,
+    agent.type AS agent_type,
+    H.hip_event_handle,
+    H.source_queue_id,
+    E.stack_id,
+    E.parent_stack_id,
+    E.correlation_id AS corr_id
+FROM
+    `rocpd_hip_event` H
+    INNER JOIN `rocpd_string` S ON S.id = H.name_id
+    AND S.guid = H.guid
+    LEFT JOIN `rocpd_info_agent` agent ON agent.id = H.agent_id
+    AND agent.guid = H.guid
+    LEFT JOIN `rocpd_info_queue` Q ON Q.id = H.queue_id
+    AND Q.guid = H.guid
+    LEFT JOIN `rocpd_info_stream` ST ON ST.id = H.stream_id
+    AND ST.guid = H.guid
+    INNER JOIN `rocpd_event` E ON E.id = H.event_id
+    AND E.guid = H.guid
+    INNER JOIN `rocpd_info_process` P ON P.id = H.pid
+    AND P.guid = H.guid
+    INNER JOIN `rocpd_info_thread` T ON T.id = H.tid
+    AND T.guid = H.guid;
 
 --
 -- HIP graph launch summary records
@@ -730,7 +809,12 @@ SELECT
     PMC_I.expression,
     PMC_I.value_type,
     PMC_I.id AS counter_id,
-    SUM(PMC_E.value) AS value,
+    -- Kernel replay records every pass of a dispatch under the same event and tags passes after
+    -- the first with extdata.replay_pass. Sum the instances of each pass, then average over the
+    -- passes that collected the counter instead of adding the passes together.
+    SUM(PMC_E.value) / COUNT(
+        DISTINCT COALESCE(json_extract(PMC_E.extdata, '$.replay_pass'), 0)
+    ) AS value,
     K.start,
     K.end,
     PMC_I.is_constant,
@@ -825,9 +909,11 @@ SELECT
     PMC_I.expression,
     PMC_I.value_type,
     PMC_I.id AS counter_id,
-    PMC_E.xcc,
-    PMC_E.shader_engine,
-    PMC_E.instance,
+    PMC_I.xcc,
+    PMC_I.shader_engine,
+    PMC_I.shader_array,
+    PMC_I.wgp,
+    PMC_I.instance,
     PMC_E.value,
     S.timestamp,
     PMC_I.is_constant,

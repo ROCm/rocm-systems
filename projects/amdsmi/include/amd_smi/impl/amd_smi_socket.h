@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #ifndef AMD_SMI_INCLUDE_AMD_SMI_SOCKET_H_
 #define AMD_SMI_INCLUDE_AMD_SMI_SOCKET_H_
@@ -49,12 +30,6 @@ class AMDSmiSocket {
       case AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE:
         cpu_core_processors_.push_back(processor);
         break;
-      case AMDSMI_PROCESSOR_TYPE_BRCM_NIC:
-        nic_processors_.push_back(processor);
-        break;
-      case AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH:
-        switch_processors_.push_back(processor);
-        break;
       case AMDSMI_PROCESSOR_TYPE_AMD_NIC:
         ainic_processors_.push_back(processor);
         break;
@@ -74,9 +49,8 @@ class AMDSmiSocket {
       case AMDSMI_PROCESSOR_TYPE_AMD_NIC:
         return ainic_processors_;
       case AMDSMI_PROCESSOR_TYPE_BRCM_NIC:
-        return nic_processors_;
       case AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH:
-        return switch_processors_;
+        return deprecated_type_processors_;
       default:
         return processors_;
     }
@@ -92,8 +66,8 @@ class AMDSmiSocket {
   std::vector<AMDSmiProcessor*> cpu_processors_;
   std::vector<AMDSmiProcessor*> cpu_core_processors_;
   std::vector<AMDSmiProcessor*> ainic_processors_;
-  std::vector<AMDSmiProcessor*> nic_processors_;
-  std::vector<AMDSmiProcessor*> switch_processors_;
+  // Always empty: the deprecated Broadcom types must not fall through to the GPU list.
+  std::vector<AMDSmiProcessor*> deprecated_type_processors_;
 };
 
 }  // namespace amd::smi

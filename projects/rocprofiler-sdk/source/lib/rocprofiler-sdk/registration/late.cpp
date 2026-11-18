@@ -63,7 +63,10 @@ invoke_register_propagation()
 {
     ROCP_INFO << "Invoking rocprofiler-register to re-propagate all registered API tables";
 
-    auto registered_tables = registration::iterate::get_runtime_registrations();
+    // dlopen rocprofiler-register with RTLD_GLOBAL + RTLD_NOLOAD to promote symbol visibility
+    auto* handle = dlopen("librocprofiler-register.so", RTLD_GLOBAL | RTLD_LAZY | RTLD_NOLOAD);
+
+    auto registered_tables = registration::iterate::get_runtime_registrations(handle);
 
     if(!registered_tables.has_value())
     {
@@ -82,7 +85,7 @@ invoke_register_propagation()
     // Step 3: Get the rocprofiler_register_invoke_all_registrations function
     // This function re-propagates all stored API table registrations to rocprofiler-sdk
     auto* invoke_all_fn = reinterpret_cast<rocprofiler_register_invoke_all_fn_t>(
-        dlsym(nullptr, "rocprofiler_register_invoke_all_registrations"));
+        dlsym(handle, "rocprofiler_register_invoke_all_registrations"));
 
     if(!invoke_all_fn)
     {

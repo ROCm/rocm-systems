@@ -28,9 +28,6 @@ struct mpi_gotcha : comp::base<mpi_gotcha, void>
     static void configure();
     static void shutdown();
 
-    static void pause();
-    static void resume();
-
     // called right before MPI_Init with that functions arguments
     static void audit(const gotcha_data_t& _data, audit::incoming, int*, char***);
 
@@ -70,8 +67,6 @@ private:
 
     static std::mutex                                           s_on_init_callbacks_mutex;
     static std::vector<std::function<void(int rank, int size)>> s_on_init_callbacks;
-
-    static std::mutex s_mutex;
 };
 }  // namespace component
 

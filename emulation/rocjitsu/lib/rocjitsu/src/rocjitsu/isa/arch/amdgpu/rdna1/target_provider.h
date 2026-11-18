@@ -4,18 +4,15 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_RDNA1_TARGET_PROVIDER_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_RDNA1_TARGET_PROVIDER_H_
 
+#include "rocjitsu/isa/arch/amdgpu/rdna1/target_descriptor.h"
 #include "rocjitsu/isa/target_registry.h"
 
 namespace rocjitsu::rdna1 {
 
 std::unique_ptr<rocjitsu::Decoder> create_target_decoder();
 
-inline constexpr IsaTargetDescriptor kTargetDescriptor{
-    .id = "rdna1",
-    .architecture_id = ROCJITSU_CODE_ARCH_RDNA1,
-    .decoder_factory = &create_target_decoder,
-    .supports_execution = true,
-};
+inline constexpr IsaTargetDescriptor kTargetDescriptor =
+    make_target_descriptor(true, &create_target_decoder);
 
 } // namespace rocjitsu::rdna1
 

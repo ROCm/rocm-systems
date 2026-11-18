@@ -4,6 +4,7 @@
 /// @file isa_registry_composition_test.cpp
 /// @brief Multi-component static ISA registry composition tests.
 
+#include "decode_test_util.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/target_registry.h"
@@ -32,7 +33,7 @@ TEST(IsaRegistryCompositionTest, ComponentsKeepIndependentStaticSubsets) {
   constexpr uint32_t kSNop = 0xBF800000u;
   std::unique_ptr<Decoder> full_decoder = Decoder::create(full, "gfx1250");
   ASSERT_NE(full_decoder, nullptr);
-  std::unique_ptr<Instruction> full_instruction(full_decoder->decode(&kSNop));
+  std::unique_ptr<Instruction> full_instruction(decode_valid(*full_decoder, &kSNop));
   ASSERT_NE(full_instruction, nullptr);
   EXPECT_NE(full_instruction->execute, nullptr);
 

@@ -472,12 +472,14 @@ static void threadStrmCaptureFunc(hipStream_t stream, int* inputVec_d, int* outp
   constexpr auto threadsPerBlock = 256;
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, size);
   // Capture stream
-  HIP_CHECK(hipStreamBeginCapture(stream, mode));
-  HIP_CHECK(hipMemcpyAsync(inputVec_d, inputVec_h, sizeof(int) * size, hipMemcpyDefault, stream));
+  HIP_CHECK_THREAD(hipStreamBeginCapture(stream, mode));
+  HIP_CHECK_THREAD(hipMemcpyAsync(inputVec_d, inputVec_h, sizeof(int) * size, hipMemcpyDefault,
+                                  stream));
   HipTest::vector_square<int>
       <<<blocks, threadsPerBlock, 0, stream>>>(inputVec_d, outputVec_d, size);
-  HIP_CHECK(hipMemcpyAsync(outputVec_h, outputVec_d, sizeof(int) * size, hipMemcpyDefault, stream));
-  HIP_CHECK(hipStreamEndCapture(stream, graph));
+  HIP_CHECK_THREAD(hipMemcpyAsync(outputVec_h, outputVec_d, sizeof(int) * size, hipMemcpyDefault,
+                                  stream));
+  HIP_CHECK_THREAD(hipStreamEndCapture(stream, graph));
 }
 /* Local Function for multithreaded tests
  */
@@ -502,6 +504,7 @@ static void multithreadedTest(hipStreamCaptureMode mode) {
                  outputVec_h2, &graph2, size, mode);
   t1.join();
   t2.join();
+  HIP_CHECK_THREAD_FINALIZE();
   // Create Executable Graphs
   HIP_CHECK(hipGraphInstantiate(&graphExec1, graph1, nullptr, nullptr, 0));
   HIP_CHECK(hipGraphInstantiate(&graphExec2, graph2, nullptr, nullptr, 0));

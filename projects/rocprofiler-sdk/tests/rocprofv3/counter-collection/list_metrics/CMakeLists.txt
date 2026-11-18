@@ -1,7 +1,7 @@
 #
 # rocprofv3 tool test
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(
     rocprofiler-sdk-tests-counter-collection-list-metrics
@@ -52,6 +52,7 @@ rocprofiler_add_integration_execute_test(
         --sys-trace --log-level warning -- $<TARGET_FILE:transpose>
     DEPENDS transpose
     TIMEOUT 60
+    WSL_TIMEOUT_SCALE
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "ROCPD_LOG_LEVEL=info")

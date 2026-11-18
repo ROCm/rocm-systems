@@ -1,24 +1,6 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 #include "perf_cntr_read_write.h"
 
 #include <gtest/gtest.h>
@@ -102,11 +84,16 @@ void TestPerfCntrReadWrite::CountEvents(amdsmi_processor_handle dv_ind, amdsmi_e
   ret = amdsmi_gpu_control_counter(evt_handle, AMDSMI_CNTR_CMD_START, nullptr);
   DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
   if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
+    // The caller skips unsupported events, so free the counter first. Don't
+    // check the result: stopping a counter that never started fails, but the
+    // counter is freed anyway.
+    amdsmi_gpu_destroy_counter(evt_handle);
     throw AMDSMI_STATUS_NOT_SUPPORTED;
   } else {
     CHK_ERR_ASRT(ret)
   }
-  sleep(sleep_sec);
+  if (sleep_sec < 0) sleep_sec = 0;
+  sleep(static_cast<uint32_t>(sleep_sec));
 
   DISPLAY_AMDSMI_API("amdsmi_gpu_read_counter", "", VERB(STANDARD));
   ret = amdsmi_gpu_read_counter(evt_handle, val);
@@ -324,12 +311,12 @@ void TestPerfCntrReadWrite::Run(void) {
           break;
 
         default:
-          std::cout << "Unexpected exception caught with amdsmi "
-                       "return value of "
-                    << r << std::endl;
+          FAIL() << "Unexpected exception caught with amdsmi "
+                    "return value of "
+                 << r;
       }
     } catch (...) {
-      ASSERT_FALSE("Unexpected exception caught");
+      FAIL() << "Unexpected exception caught";
     }
   }
 }

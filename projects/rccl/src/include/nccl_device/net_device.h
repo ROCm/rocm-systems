@@ -20,9 +20,20 @@ typedef enum {
   NCCL_NET_DEVICE_UNPACK = 1,
   NCCL_NET_DEVICE_GIN_PROXY = 2,
   NCCL_NET_DEVICE_GIN_GDAKI = 3,
-  NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA = 4,
-  NCCL_NET_DEVICE_GIN_ANVIL_SDMA = 5,
+  NCCL_NET_DEVICE_GIN_GPI = 4,
+  NCCL_NET_DEVICE_GIN_EFA_GDA = 5,
+  // RCCL backends; must stay in sync with ncclGinType_t in nccl_device/core.h
+  NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA = 6,
+  NCCL_NET_DEVICE_GIN_ANVIL_SDMA = 7,
 } ncclNetDeviceType;
+
+// Barrier preference a GIN backend reports in ncclGinProperties_t::barrierOptions (plugin API v15+). NCCL
+// picks the barrier algorithm that satisfies it and may change that choice between releases. The device code
+// NCCL compiles in for the backend type must make the same choice (ncclGinApi_BarrierOptions<backend>).
+typedef enum {
+  NCCL_GIN_BARRIER_DEFAULT = 0,          // NCCL's default barrier; may use one signal per rank per barrier.
+  NCCL_GIN_BARRIER_SIGNAL_EFFICIENT = 1, // When possible, choose a barrier algo that uses fewer signals
+} ncclGinBarrierOptions_t;
 
 typedef struct {
   ncclNetDeviceType netDeviceType; // Network offload type

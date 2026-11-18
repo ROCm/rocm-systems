@@ -4,8 +4,16 @@
 rocprofiler_deactivate_clang_tidy()
 
 include(GoogleTest)
+include(rocprofiler-sdk-utilities)
 
 set(ROCPROFILER_LIB_PLATFORM_TEST_SOURCES platform_dispatch.cpp)
+
+rocprofiler_sdk_dxg_topology_supported(ROCPROFILER_SDK_DXG_TOPOLOGY_SUPPORTED)
+
+if(ROCPROFILER_SDK_DXG_TOPOLOGY_SUPPORTED)
+    list(APPEND ROCPROFILER_LIB_PLATFORM_TEST_SOURCES wsl_dxg_topology.cpp
+         wsl_dxg_thunk.cpp)
+endif()
 
 add_executable(platform-dispatch-tests)
 target_sources(platform-dispatch-tests PRIVATE ${ROCPROFILER_LIB_PLATFORM_TEST_SOURCES})

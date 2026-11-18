@@ -95,6 +95,10 @@ public:
                               core::MemoryRegion::AllocateFlags alloc_flags, size_t size,
                               uint32_t node_id, core::DriverMemoryHandle* handle) override;
   hsa_status_t FreeMemory(const core::DriverMemoryHandle& handle) override;
+  hsa_status_t QueryPointerInfo(const void* ptr, const core::MemoryRegion* region,
+                                core::MemoryRegion::AllocateFlags alloc_flags,
+                                const core::DriverMemoryHandle* handle,
+                                HsaPointerInfo* info) const override;
   hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
                            HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id, void* queue_addr,
                            uint64_t queue_size_bytes, uint64_t queue_metadata_size_bytes, HsaEvent* event,
@@ -111,6 +115,7 @@ public:
   hsa_status_t ImportMemoryHandle(const core::Agent& agent, core::DriverMemoryHandle* handle,
                                   core::ShareType type, void* import_handle,
                                   void* mem = nullptr) override;
+  hsa_status_t QueryDmaBufInfo(int dmabuf_fd, core::DmaBufInfo* info) const override;
   hsa_status_t Map(const core::DriverMemoryHandle& handle, void *mem, size_t offset,
                    size_t size, hsa_access_permission_t perms,uint32_t node_id) override;
   hsa_status_t Unmap(const core::DriverMemoryHandle& handle, void *mem, size_t offset,
@@ -158,6 +163,8 @@ public:
 
   hsa_status_t CheckAcceleratorReadiness(core::Agent& agent, bool* ready) const override;
 
+  hsa_status_t SetPersistingCacheSize(uint32_t node_id, uint64_t cache_size) override;
+
  private:
   /// @brief Flags for @ref ExportMemoryHandleImpl.
   enum ExportMemoryFlags : uint32_t {
@@ -187,6 +194,19 @@ public:
   /// It is legal for a system with Xnack ON to have devices that do not support
   /// Xnack functionality.
   static bool BindXnackMode();
+
+  /// @brief Take the one topology snapshot reference this driver owns.
+  hsa_status_t AcquireTopologySnapshot() const;
+
+  /// @brief Release this driver's topology snapshot reference, if held.
+  hsa_status_t ReleaseTopologySnapshot();
+
+  /// @brief Disable the KFD runtime if Init() enabled it.
+  hsa_status_t DisableRuntime();
+
+  mutable bool topology_snapshot_acquired_ = false;
+  bool runtime_enabled_ = false;
+  mutable HsaSystemProperties sys_props_{};
 
   // Minimum acceptable KFD version numbers.
   static const uint32_t kfd_version_major_min = 0;

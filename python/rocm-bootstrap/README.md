@@ -49,8 +49,8 @@ Detected 2 AMD GPU(s):
     family: gfx12 (RDNA4)
 
   Node 2: gfx1100  major=11 minor=0 stepping=0  PCI=0x7448
-    sub-family: gfx110x (RDNA3)
-    family: gfx11 (RDNA3)  generic: gfx11-generic
+    sub-family: gfx110x (RDNA3)  generic: gfx11-generic
+    family: gfx11 (RDNA3)
 ```
 
 ### Environment variables
@@ -101,7 +101,7 @@ t = lookup_target("gfx942")
 b = lookup_bundle("gfx115x")
 # TargetBundle(key='gfx115x', level=SUB_FAMILY, ...)
 # b.members -> (gfx1150, gfx1151, gfx1152, gfx1153)
-# b.llvm_generic -> None  (gfx11-generic is at family level)
+# b.llvm_generic -> "gfx11-generic"
 ```
 
 Enumerate all bundles:
@@ -148,3 +148,26 @@ faked sysfs content:
 pip install rocm-bootstrap[dev]
 pytest --pyargs rocm_bootstrap.tests
 ```
+
+## Shared package selection
+
+The variant provider reports package owners in its `gfx_arch` values. Most
+targets map to a package with the same name. Both `gfx1250` and `gfx1250-strict`
+map to the shared `gfx1250` package, which may contain payloads for either
+target or both. Kpack's wheel splitter uses the same ownership mapping for
+variant metadata and dependency markers.
+
+Selecting this shared owner does not guarantee that a particular target's
+payload is present. The build and publication must supply the appropriate
+contents. Kpack archive names and runtime payload lookup retain their target
+identities.
+
+Numeric target detection for `120500` continues to report `gfx1250`; explicit
+target names, including `ROCM_BOOTSTRAP_FORCE_GFX_ARCH=gfx1250-strict`, retain
+their identity until the provider maps them to package owners. No detected
+targets means no supported variants; an explicit override supplies targets
+without requiring hardware detection. Disabling detection takes precedence
+over the override.
+
+Bootstrap is required by kpack's optional wheel-splitting functionality. Core
+kpack archive operations and runtime loading do not depend on bootstrap.

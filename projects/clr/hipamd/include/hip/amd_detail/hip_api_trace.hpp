@@ -48,7 +48,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 1
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 31
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 43
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -99,7 +99,7 @@ typedef hipError_t (*t_hipBindTextureToArray)(const textureReference* tex, hipAr
 typedef hipError_t (*t_hipBindTextureToMipmappedArray)(const textureReference* tex,
                                                        hipMipmappedArray_const_t mipmappedArray,
                                                        const hipChannelFormatDesc* desc);
-typedef hipError_t (*t_hipChooseDevice)(int* device, const hipDeviceProp_t* prop);
+typedef hipError_t (*t_hipChooseDevice)(int* device, const hipDeviceProp_tR0600* prop);
 typedef hipError_t (*t_hipChooseDeviceR0000)(int* device, const hipDeviceProp_tR0000* properties);
 typedef hipError_t (*t_hipConfigureCall)(dim3 gridDim, dim3 blockDim, size_t sharedMem,
                                          hipStream_t stream);
@@ -141,6 +141,8 @@ typedef hipError_t (*t_hipDeviceGetDefaultMemPool)(hipMemPool_t* mem_pool, int d
 typedef hipError_t (*t_hipDeviceGetGraphMemAttribute)(int device, hipGraphMemAttributeType attr,
                                                       void* value);
 typedef hipError_t (*t_hipDeviceGetLimit)(size_t* pValue, enum hipLimit_t limit);
+typedef hipError_t (*t_hipDeviceGetLuid)(char* luid, unsigned int* deviceNodeMask,
+                                         hipDevice_t device);
 typedef hipError_t (*t_hipDeviceGetMemPool)(hipMemPool_t* mem_pool, int device);
 typedef hipError_t (*t_hipDeviceGetName)(char* name, int len, hipDevice_t device);
 typedef hipError_t (*t_hipDeviceGetP2PAttribute)(int* value, hipDeviceP2PAttr attr, int srcDevice,
@@ -431,6 +433,7 @@ typedef hipError_t (*t_hipImportExternalMemory)(hipExternalMemory_t* extMem_out,
 typedef hipError_t (*t_hipImportExternalSemaphore)(
     hipExternalSemaphore_t* extSem_out, const hipExternalSemaphoreHandleDesc* semHandleDesc);
 typedef hipError_t (*t_hipInit)(unsigned int flags);
+typedef hipError_t (*t_hipInitDevice)(int device, unsigned int deviceFlags, unsigned int flags);
 typedef hipError_t (*t_hipIpcCloseMemHandle)(void* devPtr);
 typedef hipError_t (*t_hipIpcGetEventHandle)(hipIpcEventHandle_t* handle, hipEvent_t event);
 typedef hipError_t (*t_hipIpcGetMemHandle)(hipIpcMemHandle_t* handle, void* devPtr);
@@ -1090,9 +1093,22 @@ typedef hipError_t (*t_hipModuleLoadFatBinary)(hipModule_t* module, const void* 
 typedef hipError_t (*t_hipMemcpyBatchAsync)(void** dsts, void** srcs, size_t* sizes, size_t count,
                                             hipMemcpyAttributes* attrs, size_t* attrsIdxs,
                                             size_t numAttrs, size_t* failIdx, hipStream_t stream);
+typedef hipError_t (*t_hipExtMemcpyBatchAsync)(void** dsts, void** srcs,
+                                               size_t* sizes, size_t* sizesDst,
+                                               hipExtMemcpyWait* waits,
+                                               hipExtMemcpySignal* signals,
+                                               size_t count,
+                                               hipExtMemcpyAttributes* attrs, size_t* attrsIdxs,
+                                               size_t numAttrs, hipStream_t stream);
 typedef hipError_t (*t_hipMemcpy3DBatchAsync)(size_t numOps, struct hipMemcpy3DBatchOp* opList,
                                               size_t* failIdx, unsigned long long flags,
                                               hipStream_t stream);
+typedef hipError_t (*t_hipMemcpyWithAttributesAsync)(void* dst, const void* src, size_t size,
+                                                     hipMemcpyAttributes* attr,
+                                                     hipStream_t stream);
+typedef hipError_t (*t_hipMemcpy3DWithAttributesAsync)(struct hipMemcpy3DBatchOp* op,
+                                                       unsigned long long flags,
+                                                       hipStream_t stream);
 typedef hipError_t (*t_hipMemcpy3DPeer)(hipMemcpy3DPeerParms* p);
 typedef hipError_t (*t_hipMemcpy3DPeerAsync)(hipMemcpy3DPeerParms* p, hipStream_t stream);
 
@@ -1148,6 +1164,8 @@ typedef hipError_t (*t_hipMemGetMemPool)(hipMemPool_t* pool, hipMemLocation* loc
                                          hipMemAllocationType type);
 typedef hipError_t (*t_hipMipmappedArrayGetMemoryRequirements)(
     hipArrayMemoryRequirements* memoryRequirements, hipMipmappedArray_t mipmap, hipDevice_t device);
+typedef hipError_t (*t_hipArrayGetSparseProperties)(hipArraySparseProperties* sparseProperties,
+                                                    hipArray_t array);
 typedef hipError_t (*t_hipGreenCtxCreate)(hipExecutionCtx_t* ctx, hipDevResourceDesc_t desc, int device,
                                          unsigned int flags);
 typedef hipError_t (*t_hipExecutionCtxDestroy)(hipExecutionCtx_t ctx);
@@ -1180,6 +1198,26 @@ typedef hipError_t (*t_hipExecutionCtxWaitEvent)(hipExecutionCtx_t ctx, hipEvent
 
 typedef hipError_t (*t_hipMemGetDefaultMemPool)(hipMemPool_t* memPool, hipMemLocation* location,
                                                 hipMemAllocationType type);
+typedef hipError_t (*t_hipModuleEnumerateFunctions)(hipFunction_t* functions,
+                                                    unsigned int numFunctions, hipModule_t module);
+// The enum keyword is required: this header is reached from C translation units (e.g. via
+// rocprofiler-sdk/hip/api_args.h), and these enums are declared without a typedef.
+typedef hipError_t (*t_hipDeviceFlushGPUDirectRDMAWrites)(
+    enum hipFlushGPUDirectRDMAWritesTarget target, enum hipFlushGPUDirectRDMAWritesScope scope);
+
+typedef hipError_t (*t_hipLibraryGetModule)(hipModule_t* pMod, hipLibrary_t library);
+typedef hipError_t (*t_hipKernelSetAttributeForDevice)(hipKernel_t kernel, hipFuncAttribute attr,
+                                                        int value, int device);
+typedef hipError_t (*t_hipKernelSetCacheConfig)(hipKernel_t kernel, hipFuncCache_t config,
+                                                hipDevice_t dev);
+typedef hipError_t (*t_hipGraphNodeGetLocalId)(hipGraphNode_t node, unsigned int* nodeId);
+typedef hipError_t (*t_hipGraphNodeGetToolsId)(hipGraphNode_t node, unsigned long long* toolsId);
+typedef hipError_t (*t_hipGraphGetId)(hipGraph_t graph, unsigned int* graphId);
+typedef hipError_t (*t_hipGraphExecGetId)(hipGraphExec_t graphExec, unsigned int* graphId);
+typedef hipError_t (*t_hipDeviceGetExecAffinitySupport)(int* pi, hipExecAffinityType type,
+                                                        hipDevice_t dev);
+
+
 // HIP Compiler dispatch table
 struct HipCompilerDispatchTable {
   // HIP_COMPILER_API_TABLE_STEP_VERSION == 0
@@ -1827,8 +1865,48 @@ struct HipDispatchTable {
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 31
   t_hipMemGetDefaultMemPool hipMemGetDefaultMemPool_fn;
 
-  // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 32
+  t_hipDeviceGetLuid hipDeviceGetLuid_fn;
+
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 33
+  t_hipInitDevice hipInitDevice_fn;
+
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 34
+  t_hipModuleEnumerateFunctions hipModuleEnumerateFunctions_fn;
+
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 35
+  t_hipDeviceFlushGPUDirectRDMAWrites hipDeviceFlushGPUDirectRDMAWrites_fn;
+
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 36
+  t_hipLibraryGetModule hipLibraryGetModule_fn;
+
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 37
+  t_hipKernelSetAttributeForDevice hipKernelSetAttributeForDevice_fn;
+
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 38
+  t_hipKernelSetCacheConfig hipKernelSetCacheConfig_fn;
+
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 39
+  t_hipExtMemcpyBatchAsync hipExtMemcpyBatchAsync_fn;
+
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 40
+  t_hipMemcpyWithAttributesAsync hipMemcpyWithAttributesAsync_fn;
+  t_hipMemcpy3DWithAttributesAsync hipMemcpy3DWithAttributesAsync_fn;
+
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 41
+  t_hipArrayGetSparseProperties hipArrayGetSparseProperties_fn;
+
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 42
+  t_hipGraphNodeGetLocalId hipGraphNodeGetLocalId_fn;
+  t_hipGraphNodeGetToolsId hipGraphNodeGetToolsId_fn;
+  t_hipGraphGetId hipGraphGetId_fn;
+  t_hipGraphExecGetId hipGraphExecGetId_fn;
+
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 43
+  t_hipDeviceGetExecAffinitySupport hipDeviceGetExecAffinitySupport_fn;
+
+  // DO NOT EDIT ABOVE!
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 44
 
   // ******************************************************************************************* //
   //

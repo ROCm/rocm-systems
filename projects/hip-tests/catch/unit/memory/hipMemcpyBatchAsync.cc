@@ -6,7 +6,13 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -121,15 +127,15 @@ void VerifyArrayFromBothEnds(const int* values, size_t copy_elements, int expect
     const size_t front_index = offset;
     const size_t back_index = copy_elements - 1 - offset;
 
-    INFO("Array failure at copy index " << copy_index << ", element " << front_index);
-    REQUIRE(values[front_index] == expected);
-
-    if (front_index == back_index) {
-      continue;
+    if (values[front_index] != expected) {
+      INFO("Array failure at copy index " << copy_index << ", element " << front_index);
+      REQUIRE(values[front_index] == expected);
     }
 
-    INFO("Array failure at copy index " << copy_index << ", element " << back_index);
-    REQUIRE(values[back_index] == expected);
+    if (front_index != back_index && values[back_index] != expected) {
+      INFO("Array failure at copy index " << copy_index << ", element " << back_index);
+      REQUIRE(values[back_index] == expected);
+    }
   }
 }
 
@@ -221,9 +227,11 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Negative) {
 
   SECTION("Null source element") {
     src_ptrs[1] = nullptr;
+    size_t fail_idx = 0;
     HIP_CHECK_ERROR(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), kCount,
-                                        nullptr, attrs_idxs, 0, nullptr, stream_guard.stream()),
+                                        nullptr, attrs_idxs, 0, &fail_idx, stream_guard.stream()),
                     hipErrorInvalidValue);
+    REQUIRE(fail_idx == 1);
   }
 
   SECTION("Zero size first copy") {
@@ -305,10 +313,12 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Attrs_Negative) {
   std::array<size_t, 3> attrs_idxs{0, 1, 2};
 
   SECTION("Null attrs with nonzero numAttrs") {
+    size_t fail_idx = 0;
     HIP_CHECK_ERROR(
         hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), kCount, nullptr,
-                            attrs_idxs.data(), 1, nullptr, stream_guard.stream()),
+                            attrs_idxs.data(), 1, &fail_idx, stream_guard.stream()),
         hipErrorInvalidValue);
+    REQUIRE(fail_idx == SIZE_MAX);  // batch-wide error
   }
 
   SECTION("Null attrsIdxs with nonzero numAttrs") {
@@ -565,8 +575,8 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2H_Functional) {
 /**
  * Test Description
  * ------------------------
- * - Verifies H2H batch copies across generated host allocation types, copy
- * counts, and copy sizes.
+ * - Verifies H2H batch copies across independently generated source and
+ * destination host allocation types and copy counts.
  * Test source
  * ------------------------
  * - catch/unit/memory/hipMemcpyBatchAsync.cc
@@ -575,14 +585,15 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2H_Functional) {
  *  - HIP_VERSION >= 7.1
  */
 HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_H2H_Functional) {
-  const LinearAllocs host_alloc_type = GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc);
+  const LinearAllocs src_alloc_type = GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc);
+  const LinearAllocs dst_alloc_type = GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc);
   const size_t copy_count = GENERATE(1, 8);
   const size_t copy_size = kSmallCopySize;
 
   BatchConfig config{copy_count, copy_size};
   StreamGuard stream_guard(Streams::created);
-  std::vector<LinearAllocGuard<int>> src = AllocateBatchBuffers(host_alloc_type, config);
-  std::vector<LinearAllocGuard<int>> dst = AllocateBatchBuffers(host_alloc_type, config);
+  std::vector<LinearAllocGuard<int>> src = AllocateBatchBuffers(src_alloc_type, config);
+  std::vector<LinearAllocGuard<int>> dst = AllocateBatchBuffers(dst_alloc_type, config);
   std::vector<void*> src_ptrs = MakeBatchPtrs(src);
   std::vector<void*> dst_ptrs = MakeBatchPtrs(dst);
   std::vector<size_t> sizes(config.copy_count, config.copy_size);
@@ -851,6 +862,108 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap) {
   }
 }
 
+/**
+ * A misaligned swap is rejected, reported through failIdx, and nothing in the batch runs.
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap_Misaligned) {
+  constexpr size_t kSizeInBytes = 4096;
+  constexpr size_t kMisalignment = 16;  // Below every swap granularity.
+  const bool misalignA = GENERATE(true, false);
+  const bool misalignB = GENERATE(true, false);
+  if (!misalignA && !misalignB) {
+    return;
+  }
+  CAPTURE(misalignA, misalignB);
+
+  const hipError_t expectedError =
+      getSwapExpectedReturn(LinearAllocs::hipMalloc, LinearAllocs::hipMalloc) == hipSuccess
+          ? hipErrorInvalidValue
+          : hipErrorNotSupported;
+
+  HIP_CHECK(hipSetDevice(0));
+  StreamGuard stream_guard(Streams::created);
+  const std::vector<unsigned char> initialValuesA(kSizeInBytes + kMisalignment, 10);
+  const std::vector<unsigned char> initialValuesB(kSizeInBytes + kMisalignment, 4);
+  LinearAllocGuard<unsigned char> allocA(LinearAllocs::hipMalloc, initialValuesA.size());
+  LinearAllocGuard<unsigned char> allocB(LinearAllocs::hipMalloc, initialValuesB.size());
+  fillBuffer(allocA.ptr(), initialValuesA, LinearAllocs::hipMalloc);
+  fillBuffer(allocB.ptr(), initialValuesB, LinearAllocs::hipMalloc);
+
+  // A valid copy ahead of the swap, so failIdx must point past it.
+  const std::vector<unsigned char> initialValuesCopy(kSizeInBytes, 7);
+  LinearAllocGuard<unsigned char> copySrc(LinearAllocs::hipMalloc, kSizeInBytes);
+  LinearAllocGuard<unsigned char> copyDst(LinearAllocs::hipMalloc, kSizeInBytes);
+  HIP_CHECK(hipMemset(copySrc.ptr(), 1, kSizeInBytes));
+  fillBuffer(copyDst.ptr(), initialValuesCopy, LinearAllocs::hipMalloc);
+
+  void* dsts[2] = {copyDst.ptr(), allocA.ptr() + (misalignA ? kMisalignment : 0)};
+  void* srcs[2] = {copySrc.ptr(), allocB.ptr() + (misalignB ? kMisalignment : 0)};
+  size_t sizes[2] = {kSizeInBytes, kSizeInBytes};
+  hipMemcpyAttributes attrs[2] = {{hipMemcpySrcAccessOrderStream, {}, {}, 0},
+                                  {hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtOpSwap}};
+  size_t attrs_idxs[2] = {0, 1};
+  size_t fail_idx = 0;
+
+  HIP_CHECK_ERROR(hipMemcpyBatchAsync(dsts, srcs, sizes, 2, attrs, attrs_idxs, 2, &fail_idx,
+                                      stream_guard.stream()),
+                  expectedError);
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+
+  // An unsupported swap is rejected for the whole batch, not for one entry.
+  REQUIRE(fail_idx == (expectedError == hipErrorInvalidValue ? 1 : SIZE_MAX));
+  requireBufferEquals(copyDst.ptr(), initialValuesCopy, LinearAllocs::hipMalloc);
+  requireBufferEquals(allocA.ptr(), initialValuesA, LinearAllocs::hipMalloc);
+  requireBufferEquals(allocB.ptr(), initialValuesB, LinearAllocs::hipMalloc);
+}
+
+/**
+ * Swaps a range at an offset into each buffer; only that range is exchanged.
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap_Offsets) {
+  constexpr size_t kAllocSize = 8192;
+  constexpr size_t kSwapSize = 4096;
+  const LinearAllocs allocTypeB = GENERATE(LinearAllocs::hipMalloc, LinearAllocs::hipHostMalloc);
+  const auto [offsetA, offsetB] = GENERATE(table<size_t, size_t>(
+      {{0x0, 0x0}, {0x40, 0x40}, {0x0, 0x100}, {0x80, 0x180}, {0x0, 0x40}, {0xc0, 0x40}}));
+  CAPTURE(allocTypeB, offsetA, offsetB);
+
+  HIP_CHECK(hipSetDevice(0));
+  if (getSwapExpectedReturn(LinearAllocs::hipMalloc, allocTypeB) != hipSuccess) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kSdmaSwapUnsupported);
+    return;
+  }
+
+  std::vector<unsigned char> initialA(kAllocSize);
+  std::vector<unsigned char> initialB(kAllocSize);
+  for (size_t i = 0; i < kAllocSize; ++i) {
+    initialA[i] = static_cast<unsigned char>(i ^ (i >> 8));
+    initialB[i] = static_cast<unsigned char>(~(i ^ (i >> 8)));
+  }
+
+  StreamGuard stream_guard(Streams::created);
+  LinearAllocGuard<unsigned char> allocA(LinearAllocs::hipMalloc, kAllocSize);
+  LinearAllocGuard<unsigned char> allocB(allocTypeB, kAllocSize);
+  fillBuffer(allocA.ptr(), initialA, LinearAllocs::hipMalloc);
+  fillBuffer(allocB.ptr(), initialB, allocTypeB);
+
+  void* dsts[] = {allocA.ptr() + offsetA};
+  void* srcs[] = {allocB.ptr() + offsetB};
+  size_t sizes[] = {kSwapSize};
+  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtOpSwap};
+  size_t attrs_idxs[1] = {0};
+
+  HIP_CHECK(hipMemcpyBatchAsync(dsts, srcs, sizes, 1, &attr, attrs_idxs, 1, nullptr,
+                                stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+
+  std::vector<unsigned char> expectedA = initialA;
+  std::vector<unsigned char> expectedB = initialB;
+  std::copy_n(initialB.begin() + offsetB, kSwapSize, expectedA.begin() + offsetA);
+  std::copy_n(initialA.begin() + offsetA, kSwapSize, expectedB.begin() + offsetB);
+  requireBufferEquals(allocA.ptr(), expectedA, LinearAllocs::hipMalloc);
+  requireBufferEquals(allocB.ptr(), expectedB, allocTypeB);
+}
+
 // Batched multicast copy: one shared source, multiple destinations.
 static void RunMulticastCopyTest(size_t count, size_t size_in_bytes, LinearAllocs srcAllocType,
                                  LinearAllocs dstAllocType) {
@@ -968,54 +1081,52 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_MixedMulticastSources) {
   }
 }
 
-/**
- * Test Description
- * ------------------------
- * - Verifies H2D hipMemcpyBatchAsync with hipMemcpyFlagExtOpIndirectSrc copies
- * from the host buffer referenced by a pinned pointer slot.
- * Test source
- * ------------------------
- * - catch/unit/memory/hipMemcpyBatchAsync.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 7.1
- */
-HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_IndirectSrc) {
-  constexpr size_t copy_size = kSmallCopySize;
+static void RunIndirectCopyTest(unsigned int flags, size_t count, size_t size_in_bytes,
+                                LinearAllocs alloc_type_src, LinearAllocs alloc_type_dst) {
+  const bool is_indirect_src = flags & hipMemcpyFlagExtOpIndirectSrc;
+  const bool is_indirect_dst = flags & hipMemcpyFlagExtOpIndirectDst;
+  const hipError_t expected_error = getIndirectExpectedReturn(alloc_type_src, alloc_type_dst);
+
+  IndirectCopyBuffers buffers =
+      makeIndirectCopyBuffers(count, size_in_bytes, alloc_type_src, alloc_type_dst);
+
+  for (size_t i = 0; i < count; ++i) {
+    if (is_indirect_src) {
+      buffers.batch_src_ptrs[i] =
+          addPointerSlot(buffers.slots, buffers.src_ptrs[i], alloc_type_src);
+    }
+
+    if (is_indirect_dst) {
+      buffers.batch_dst_ptrs[i] =
+          addPointerSlot(buffers.slots, buffers.dst_ptrs[i], alloc_type_dst);
+    }
+  }
 
   StreamGuard stream_guard(Streams::created);
-  LinearAllocGuard<int> src(LinearAllocs::hipHostMalloc, copy_size);
-  LinearAllocGuard<int> dst(LinearAllocs::hipMalloc, copy_size);
-  LinearAllocGuard<char> src_slot(LinearAllocs::hipHostMalloc, sizeof(void*));
+  std::vector<size_t> sizes(count, size_in_bytes);
+  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, flags};
+  size_t attrs_idxs[1] = {0};
 
-  const size_t copy_elements = copy_size / sizeof(int);
-  std::fill_n(src.host_ptr(), copy_elements, kPatternValue);
+  HIP_CHECK_ERROR(hipMemcpyBatchAsync(buffers.batch_dst_ptrs.data(), buffers.batch_src_ptrs.data(),
+                                      sizes.data(), count, &attr, attrs_idxs, 1, nullptr,
+                                      stream_guard.stream()),
+                  expected_error);
 
-  void* src_ptr = src.ptr();
-  std::memcpy(src_slot.ptr(), &src_ptr, sizeof(void*));
-
-  std::vector<void*> dst_ptrs{dst.ptr()};
-  std::vector<void*> src_ptrs{src_slot.ptr()};
-  std::vector<size_t> sizes{copy_size};
-  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtOpIndirectSrc};
-  size_t attrs_idx = 0;
-
-  hipError_t status = hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), 1, &attr,
-                                          &attrs_idx, 1, nullptr, stream_guard.stream());
-  if (status == hipErrorNotSupported) {
-    SUCCEED("hipMemcpyFlagExtOpIndirectSrc is not supported on this device");
-  } else {
-    HIP_CHECK(status);
+  // Unsupported allocation combinations are asserted to fail above; only the supported ones move
+  // data worth verifying.
+  if (expected_error == hipSuccess) {
     HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
-    VerifyDeviceBuffers(dst_ptrs, copy_size);
+    for (size_t i = 0; i < count; ++i) {
+      requireBufferEquals(buffers.dst_ptrs[i], buffers.initial_values[i], alloc_type_dst);
+    }
   }
 }
 
 /**
  * Test Description
  * ------------------------
- * - Verifies D2H hipMemcpyBatchAsync with hipMemcpyFlagExtOpIndirectDst copies
- * into the host buffer referenced by a pinned pointer slot.
+ * - Verifies batched copies that reach their buffers through pointer slots across generated
+ * indirect flag combinations, copy counts, sizes and per-side allocation types.
  * Test source
  * ------------------------
  * - catch/unit/memory/hipMemcpyBatchAsync.cc
@@ -1023,36 +1134,716 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_IndirectSrc) {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_IndirectDst) {
-  constexpr size_t copy_size = kSmallCopySize;
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_IndirectCopy) {
+  const unsigned int flags =
+      GENERATE(as<unsigned int>{}, hipMemcpyFlagExtOpIndirectSrc, hipMemcpyFlagExtOpIndirectDst,
+               hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst);
+  const size_t count = GENERATE(1, 3, 8);
+  const size_t size_in_bytes = GENERATE(as<size_t>{}, 1, 63, 4096);
+  const LinearAllocs alloc_type_src =
+      GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc, LinearAllocs::hipMalloc);
+  const LinearAllocs alloc_type_dst =
+      GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc, LinearAllocs::hipMalloc);
+  CAPTURE(flags, count, size_in_bytes, alloc_type_src, alloc_type_dst);
+
+  RunIndirectCopyTest(flags, count, size_in_bytes, alloc_type_src, alloc_type_dst);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Verifies that hipMemcpyBatchAsync rejects the ExtOp attribute combinations that no device
+ * accepts: swap paired with an indirect flag in one entry, and a pointer slot too small to hold a
+ * pointer.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_ExtOp_Negative) {
+  constexpr size_t kSizeInBytes = 4096;
 
   StreamGuard stream_guard(Streams::created);
-  LinearAllocGuard<int> src(LinearAllocs::hipMalloc, copy_size);
-  LinearAllocGuard<int> dst(LinearAllocs::hipHostMalloc, copy_size);
-  LinearAllocGuard<char> dst_slot(LinearAllocs::hipHostMalloc, sizeof(void*));
+  LinearAllocGuard<unsigned char> src(LinearAllocs::hipHostMalloc, kSizeInBytes);
+  LinearAllocGuard<unsigned char> dst(LinearAllocs::hipMalloc, kSizeInBytes);
 
-  const size_t copy_elements = copy_size / sizeof(int);
-  std::vector<int> host_pattern(copy_elements, kPatternValue);
-  HIP_CHECK(hipMemcpy(src.ptr(), host_pattern.data(), copy_size, hipMemcpyHostToDevice));
-  std::fill_n(dst.host_ptr(), copy_elements, 0);
+  std::array<void*, 1> src_ptrs{src.ptr()};
+  std::array<void*, 1> dst_ptrs{dst.ptr()};
+  std::array<size_t, 1> sizes{kSizeInBytes};
+  std::array<hipMemcpyAttributes, 1> attrs{
+      hipMemcpyAttributes{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagDefault}};
+  std::array<size_t, 1> attrs_idxs{0};
 
-  void* dst_ptr = dst.ptr();
-  std::memcpy(dst_slot.ptr(), &dst_ptr, sizeof(void*));
+  SECTION("Swap combined with indirect in one attribute entry") {
+    const unsigned int indirect_flags =
+        GENERATE(as<unsigned int>{}, hipMemcpyFlagExtOpIndirectSrc, hipMemcpyFlagExtOpIndirectDst,
+                 hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst);
+    attrs[0].flags = hipMemcpyFlagExtOpSwap | indirect_flags;
+    HIP_CHECK_ERROR(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(),
+                                        dst_ptrs.size(), attrs.data(), attrs_idxs.data(),
+                                        attrs.size(), nullptr, stream_guard.stream()),
+                    hipErrorInvalidValue);
+  }
 
-  std::vector<void*> src_ptrs{src.ptr()};
-  std::vector<void*> dst_ptrs{dst_slot.ptr()};
-  std::vector<size_t> sizes{copy_size};
-  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtOpIndirectDst};
+  // An indirect side is range-checked against sizeof(void*) rather than against the copy size, so
+  // this is rejected for holding less than a pointer even though it is smaller than the copy too.
+  SECTION("Pointer slot smaller than a pointer") {
+    LinearAllocGuard<unsigned char> short_slot(LinearAllocs::hipHostMalloc, sizeof(void*) / 2);
+    src_ptrs[0] = short_slot.ptr();
+    attrs[0].flags = hipMemcpyFlagExtOpIndirectSrc;
+    HIP_CHECK_ERROR(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(),
+                                        dst_ptrs.size(), attrs.data(), attrs_idxs.data(),
+                                        attrs.size(), nullptr, stream_guard.stream()),
+                    hipErrorInvalidValue);
+  }
+}
+
+/**
+ * An indirect copy larger than a single SDMA packet can carry is rejected up front.
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Indirect_TooLarge) {
+  constexpr size_t kSizeInBytes = size_t{1} << 30;  // One byte over the SDMA limit.
+
+  const hipError_t expectedError =
+      getIndirectExpectedReturn(LinearAllocs::hipMalloc, LinearAllocs::hipMalloc) == hipSuccess
+          ? hipErrorInvalidValue
+          : hipErrorNotSupported;
+
+  HIP_CHECK(hipSetDevice(0));
+  StreamGuard stream_guard(Streams::created);
+  // Both sides indirect, so only the pointer slots are range-checked and allocated.
+  LinearAllocGuard<unsigned char> srcSlot(LinearAllocs::hipMalloc, sizeof(void*));
+  LinearAllocGuard<unsigned char> dstSlot(LinearAllocs::hipMalloc, sizeof(void*));
+  HIP_CHECK(hipMemset(srcSlot.ptr(), 0, sizeof(void*)));
+  HIP_CHECK(hipMemset(dstSlot.ptr(), 0, sizeof(void*)));
+
+  void* srcPtr = srcSlot.ptr();
+  void* dstPtr = dstSlot.ptr();
+  size_t size = kSizeInBytes;
+  constexpr unsigned int kFlags = hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst;
+  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, kFlags};
+  size_t attrs_idxs[1] = {0};
+  size_t fail_idx = 1;
+
+  HIP_CHECK_ERROR(hipMemcpyBatchAsync(&dstPtr, &srcPtr, &size, 1, &attr, attrs_idxs, 1, &fail_idx,
+                                      stream_guard.stream()),
+                  expectedError);
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+
+  REQUIRE(fail_idx == (expectedError == hipErrorInvalidValue ? 0 : SIZE_MAX));
+}
+
+/**
+ * With SDMA disabled ROCr rejects indirect copies; the shader fallback must not copy the pointer
+ * slot in their place. Runs the child test case in a process with HSA_ENABLE_SDMA=0.
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Indirect_SdmaDisabled) {
+  if (getIndirectExpectedReturn(LinearAllocs::hipMalloc, LinearAllocs::hipMalloc) != hipSuccess) {
+    HIP_SKIP_TEST("SDMA indirect copies are not supported on this device.");
+  }
+
+  hip::SpawnProc proc(getSelfExePath());
+  proc.setEnv("HSA_ENABLE_SDMA", "0");
+  REQUIRE(proc.run("Unit_hipMemcpyBatchAsync_Indirect_SdmaDisabled_Child") == 0);
+}
+
+/**
+ * Child of Unit_hipMemcpyBatchAsync_Indirect_SdmaDisabled, not meant to run on its own.
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Indirect_SdmaDisabled_Child) {
+  const char* enableSdma = std::getenv("HSA_ENABLE_SDMA");
+  if (enableSdma == nullptr || std::string(enableSdma) != "0") {
+    HIP_SKIP_TEST("Only run by Unit_hipMemcpyBatchAsync_Indirect_SdmaDisabled.");
+  }
+
+  constexpr size_t kSizeInBytes = 4096;
+  const unsigned int flag = GENERATE(hipMemcpyFlagExtOpIndirectSrc, hipMemcpyFlagExtOpIndirectDst);
+  const bool indirectSrc = flag == hipMemcpyFlagExtOpIndirectSrc;
+  CAPTURE(indirectSrc);
+
+  HIP_CHECK(hipSetDevice(0));
+  StreamGuard stream_guard(Streams::created);
+  const std::vector<unsigned char> srcValues(kSizeInBytes, 10);
+  const std::vector<unsigned char> dstValues(kSizeInBytes, 0);
+  std::vector<LinearAllocGuard<unsigned char>> allocations;
+  void* src = addBuffer(allocations, srcValues, LinearAllocs::hipMalloc);
+  void* dst = addBuffer(allocations, dstValues, LinearAllocs::hipMalloc);
+
+  // As large as the copy, so a linear copy of it stays in bounds; the bytes after the pointer are a
+  // canary.
+  void* target = indirectSrc ? src : dst;
+  std::vector<unsigned char> slotValues(kSizeInBytes, 0xEE);
+  std::memcpy(slotValues.data(), &target, sizeof(target));
+  void* slot = addBuffer(allocations, slotValues, LinearAllocs::hipMalloc);
+
+  void* srcPtr = indirectSrc ? slot : src;
+  void* dstPtr = indirectSrc ? dst : slot;
+  size_t size = kSizeInBytes;
+  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, flag};
+  size_t attrs_idxs[1] = {0};
+
+  // The batch fails after the call returns, so only the memory is checked.
+  HIP_CHECK(hipMemcpyBatchAsync(&dstPtr, &srcPtr, &size, 1, &attr, attrs_idxs, 1, nullptr,
+                                stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+
+  requireBufferEquals(slot, slotValues, LinearAllocs::hipMalloc);
+  requireBufferEquals(src, srcValues, LinearAllocs::hipMalloc);
+  requireBufferEquals(dst, dstValues, LinearAllocs::hipMalloc);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * Verifies that an indirect copy dereferences its pointer slot on the device when the copy runs,
+ * not on the host when hipMemcpyBatchAsync is called. The other indirect tests fill their slots
+ * before the call and so pass under either behavior; here the batch is enqueued behind a stream
+ * wait and a second stream publishes the real buffer addresses into the slots afterwards, so only
+ * a copy that reads its slot at execution time finds them.
+ *
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_IndirectCopy_StreamOrderedPointer) {
+  int wait_value_supported = 0;
+  HIP_CHECK(
+      hipDeviceGetAttribute(&wait_value_supported, hipDeviceAttributeCanUseStreamWaitValue, 0));
+  if (wait_value_supported == 0) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
+  }
+
+  const size_t count = GENERATE(1, 8);
+  const unsigned int flags =
+      GENERATE(as<unsigned int>{}, hipMemcpyFlagExtOpIndirectSrc, hipMemcpyFlagExtOpIndirectDst,
+               hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst);
+
+  const LinearAllocs alloc_type_src =
+      GENERATE(LinearAllocs::hipHostMalloc, LinearAllocs::hipMalloc);
+  const LinearAllocs alloc_type_dst =
+      GENERATE(LinearAllocs::hipHostMalloc, LinearAllocs::hipMalloc);
+  CAPTURE(count, flags, alloc_type_src, alloc_type_dst);
+
+  constexpr size_t kSizeInBytes = 4096;
+  constexpr uint64_t kBlocked = 1;
+  constexpr uint64_t kReleased = 0;
+
+  const bool is_indirect_src = flags & hipMemcpyFlagExtOpIndirectSrc;
+  const bool is_indirect_dst = flags & hipMemcpyFlagExtOpIndirectDst;
+  const hipError_t expected_return = getIndirectExpectedReturn(alloc_type_src, alloc_type_dst);
+
+  IndirectCopyBuffers buffers =
+      makeIndirectCopyBuffers(count, kSizeInBytes, alloc_type_src, alloc_type_dst);
+
+  const std::vector<unsigned char> decoy_values(kSizeInBytes, 0xCD);
+  // Each entry pairs a slot with the real address it must receive once the batch is enqueued.
+  std::vector<std::pair<void*, void*>> slots_to_publish;
+
+  for (size_t i = 0; i < count; ++i) {
+    // The slots start out pointing at decoys instead of the real buffers, so a slot read taken
+    // before the addresses are published gives a wrong result rather than a crash.
+    if (is_indirect_src) {
+      LinearAllocGuard<unsigned char> decoy(alloc_type_src, kSizeInBytes);
+      fillBuffer(decoy.ptr(), decoy_values, alloc_type_src);
+      buffers.batch_src_ptrs[i] = addPointerSlot(buffers.slots, decoy.ptr(), alloc_type_src);
+      slots_to_publish.emplace_back(buffers.batch_src_ptrs[i], buffers.src_ptrs[i]);
+      buffers.allocations.push_back(std::move(decoy));
+    }
+
+    if (is_indirect_dst) {
+      LinearAllocGuard<unsigned char> decoy(alloc_type_dst, kSizeInBytes);
+      buffers.batch_dst_ptrs[i] = addPointerSlot(buffers.slots, decoy.ptr(), alloc_type_dst);
+      slots_to_publish.emplace_back(buffers.batch_dst_ptrs[i], buffers.dst_ptrs[i]);
+      buffers.allocations.push_back(std::move(decoy));
+    }
+  }
+
+  StreamGuard copy_stream(Streams::created);
+  StreamGuard publish_stream(Streams::created);
+
+  // The value hipStreamWaitValue64 polls has to live in signal memory.
+  uint64_t* signal = nullptr;
+  HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&signal), sizeof(uint64_t),
+                                  hipMallocSignalMemory));
+  __atomic_store_n(signal, kBlocked, __ATOMIC_RELEASE);
+
+  std::vector<size_t> sizes(count, kSizeInBytes);
+  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, flags};
+  size_t attrs_idxs[1] = {0};
+
+  // The publishing writes have to be submitted only after hipMemcpyBatchAsync has returned.
+  // Submitting them first would let them land before the call, and a slot read at call time would
+  // then find the real address anyway. Blocking copy_stream is what keeps the batch from running
+  // before writes.
+  HIP_CHECK(hipStreamWaitValue64(copy_stream.stream(), signal, kReleased, hipStreamWaitValueEq));
+
+  const hipError_t batch_status =
+      hipMemcpyBatchAsync(buffers.batch_dst_ptrs.data(), buffers.batch_src_ptrs.data(),
+                          sizes.data(), count, &attr, attrs_idxs, 1, nullptr, copy_stream.stream());
+
+  hipError_t publish_status = hipSuccess;
+  for (const auto& [slot, buffer] : slots_to_publish) {
+    if (publish_status != hipSuccess) break;
+    const uint64_t address = static_cast<uint64_t>(reinterpret_cast<std::uintptr_t>(buffer));
+    publish_status =
+        hipStreamWriteValue64(publish_stream.stream(), slot, address, hipStreamWriteValueDefault);
+  }
+  const hipError_t publish_sync_status = hipStreamSynchronize(publish_stream.stream());
+
+  // Signal memory is host accessible, so releasing from the host cannot fail and cannot throw. The
+  // publishing writes have already landed because publish_stream has drained.
+  __atomic_store_n(signal, kReleased, __ATOMIC_RELEASE);
+
+  const hipError_t copy_sync_status = hipStreamSynchronize(copy_stream.stream());
+  HIP_CHECK(hipFree(signal));
+
+  HIP_CHECK(publish_status);
+  HIP_CHECK(publish_sync_status);
+  HIP_CHECK(copy_sync_status);
+  HIP_CHECK_ERROR(batch_status, expected_return);
+
+  if (expected_return == hipSuccess) {
+    for (size_t i = 0; i < count; ++i) {
+      requireBufferEquals(buffers.dst_ptrs[i], buffers.initial_values[i], alloc_type_dst);
+    }
+  }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * Verifies one batch that carries plain copies, swaps and indirect-source copies, each kind under
+ * its own attribute entry spanning several copies.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_MixedAttributes_DefaultSwapIndirect) {
+  constexpr size_t kSizeInBytes = 4096;
+  constexpr size_t kCopiesPerAttr = 2;
+
+  const hipError_t swap_error =
+      getSwapExpectedReturn(LinearAllocs::hipMalloc, LinearAllocs::hipHostMalloc);
+  const hipError_t indirect_error =
+      getIndirectExpectedReturn(LinearAllocs::hipHostMalloc, LinearAllocs::hipMalloc);
+  const hipError_t expected_error = (swap_error == hipSuccess && indirect_error == hipSuccess)
+                                        ? hipSuccess
+                                        : hipErrorNotSupported;
+
+  HIP_CHECK(hipSetDevice(0));
+  StreamGuard stream_guard(Streams::created);
+
+  struct Expectation {
+    void* buffer;
+    LinearAllocs alloc_type;
+    std::vector<unsigned char> contents;
+  };
+
+  std::vector<LinearAllocGuard<unsigned char>> allocations;
+  std::vector<LinearAllocGuard<void*>> slots;
+  std::vector<void*> src_ptrs;
+  std::vector<void*> dst_ptrs;
+  std::vector<Expectation> expectations;
+
+  const std::vector<unsigned char> zeros(kSizeInBytes, 0);
+
+  for (size_t i = 0; i < kCopiesPerAttr; ++i) {
+    const std::vector<unsigned char> pattern(kSizeInBytes, static_cast<unsigned char>(10 + i));
+    src_ptrs.push_back(addBuffer(allocations, pattern, LinearAllocs::hipMalloc));
+    dst_ptrs.push_back(addBuffer(allocations, zeros, LinearAllocs::hipMalloc));
+    expectations.push_back({dst_ptrs.back(), LinearAllocs::hipMalloc, pattern});
+  }
+
+  for (size_t i = 0; i < kCopiesPerAttr; ++i) {
+    const std::vector<unsigned char> device_pattern(kSizeInBytes,
+                                                    static_cast<unsigned char>(20 + i));
+    const std::vector<unsigned char> host_pattern(kSizeInBytes, static_cast<unsigned char>(30 + i));
+    dst_ptrs.push_back(addBuffer(allocations, device_pattern, LinearAllocs::hipMalloc));
+    src_ptrs.push_back(addBuffer(allocations, host_pattern, LinearAllocs::hipHostMalloc));
+    expectations.push_back({dst_ptrs.back(), LinearAllocs::hipMalloc, host_pattern});
+    expectations.push_back({src_ptrs.back(), LinearAllocs::hipHostMalloc, device_pattern});
+  }
+
+  for (size_t i = 0; i < kCopiesPerAttr; ++i) {
+    const std::vector<unsigned char> pattern(kSizeInBytes, static_cast<unsigned char>(40 + i));
+    void* indirect_src = addBuffer(allocations, pattern, LinearAllocs::hipHostMalloc);
+    src_ptrs.push_back(addPointerSlot(slots, indirect_src, LinearAllocs::hipHostMalloc));
+    dst_ptrs.push_back(addBuffer(allocations, zeros, LinearAllocs::hipMalloc));
+    expectations.push_back({dst_ptrs.back(), LinearAllocs::hipMalloc, pattern});
+  }
+
+  std::vector<size_t> sizes(dst_ptrs.size(), kSizeInBytes);
+  std::array<hipMemcpyAttributes, 3> attrs{
+      hipMemcpyAttributes{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagDefault},
+      hipMemcpyAttributes{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtOpSwap},
+      hipMemcpyAttributes{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtOpIndirectSrc},
+  };
+  std::array<size_t, 3> attrs_idxs{0, kCopiesPerAttr, 2 * kCopiesPerAttr};
+
+  HIP_CHECK_ERROR(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(),
+                                      dst_ptrs.size(), attrs.data(), attrs_idxs.data(),
+                                      attrs.size(), nullptr, stream_guard.stream()),
+                  expected_error);
+
+  if (expected_error == hipSuccess) {
+    HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+    for (const Expectation& expectation : expectations) {
+      requireBufferEquals(expectation.buffer, expectation.contents, expectation.alloc_type);
+    }
+  }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Verifies batches issued back to back on one stream with no synchronization in between, each
+ * mixing pinned host-to-device, device-to-pinned host and device-to-device copies. Two device
+ * sources each feed two destinations on the copy engines, so those copies alone become two
+ * operations, and one more device-to-device copy runs as a shader copy. Every operation of a batch
+ * waits on the stream's prior work while the stream's completion signals are reused many times
+ * over. The sources alternate between two patterns from batch to batch, so the final contents
+ * show that the last batch landed after all the others.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_MixedDirections_BackToBack) {
+  if (RunInEachSignalTracker("Unit_hipMemcpyBatchAsync_MixedDirections_BackToBack")) {
+    return;
+  }
+  constexpr size_t kNumPatterns = 2;
+  const auto pattern = [](size_t source_idx, size_t pattern_idx) {
+    return std::vector<unsigned char>(
+        kBackToBackCopySize,
+        static_cast<unsigned char>(1 + source_idx * kNumPatterns + pattern_idx));
+  };
+
+  // Each source is copied to num_dsts destinations. The copies that prefer the copy engines
+  // follow the others, so a second attribute covers them.
+  struct SourceCopies {
+    LinearAllocs src_type;
+    LinearAllocs dst_type;
+    size_t num_dsts;
+    bool prefer_copy_engine;
+  };
+  const std::array<SourceCopies, 5> sources{
+      {{LinearAllocs::hipHostMalloc, LinearAllocs::hipMalloc, 1, false},
+       {LinearAllocs::hipMalloc, LinearAllocs::hipHostMalloc, 1, false},
+       {LinearAllocs::hipMalloc, LinearAllocs::hipMalloc, 1, false},
+       {LinearAllocs::hipMalloc, LinearAllocs::hipMalloc, 2, true},
+       {LinearAllocs::hipMalloc, LinearAllocs::hipMalloc, 2, true}}};
+
+  StreamGuard stream_guard(Streams::created);
+  std::vector<LinearAllocGuard<unsigned char>> allocations;
+  const std::vector<unsigned char> zeros(kBackToBackCopySize, 0);
+  std::array<std::vector<void*>, kNumPatterns> batch_srcs;
+  std::vector<void*> dst_ptrs;
+  std::vector<size_t> dst_source_idxs;
+  size_t first_copy_engine_idx = 0;
+  for (size_t source_idx = 0; source_idx < sources.size(); ++source_idx) {
+    const SourceCopies& source = sources[source_idx];
+    if (!source.prefer_copy_engine) {
+      first_copy_engine_idx += source.num_dsts;
+    }
+    std::array<void*, kNumPatterns> src_ptrs;
+    for (size_t pattern_idx = 0; pattern_idx < kNumPatterns; ++pattern_idx) {
+      src_ptrs[pattern_idx] =
+          addBuffer(allocations, pattern(source_idx, pattern_idx), source.src_type);
+    }
+    for (size_t i = 0; i < source.num_dsts; ++i) {
+      dst_ptrs.push_back(addBuffer(allocations, zeros, source.dst_type));
+      dst_source_idxs.push_back(source_idx);
+      for (size_t pattern_idx = 0; pattern_idx < kNumPatterns; ++pattern_idx) {
+        batch_srcs[pattern_idx].push_back(src_ptrs[pattern_idx]);
+      }
+    }
+  }
+
+  std::vector<size_t> sizes(dst_ptrs.size(), kBackToBackCopySize);
+  std::array<hipMemcpyAttributes, 2> attrs{
+      {{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagDefault},
+       {hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtPreferCE}}};
+  std::array<size_t, 2> attrs_idxs{0, first_copy_engine_idx};
+  HIP_CHECK(hipDeviceSynchronize());
+
+  for (size_t iteration = 0; iteration < kBackToBackIterations; ++iteration) {
+    std::vector<void*>& iteration_srcs = batch_srcs[iteration % kNumPatterns];
+    HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), iteration_srcs.data(), sizes.data(),
+                                  sizes.size(), attrs.data(), attrs_idxs.data(), attrs.size(),
+                                  nullptr, stream_guard.stream()));
+  }
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+
+  const size_t last_pattern_idx = (kBackToBackIterations - 1) % kNumPatterns;
+  for (size_t i = 0; i < dst_ptrs.size(); ++i) {
+    INFO("Destination " << i);
+    const size_t source_idx = dst_source_idxs[i];
+    requireBufferEquals(dst_ptrs[i], pattern(source_idx, last_pattern_idx),
+                        sources[source_idx].dst_type);
+  }
+}
+
+namespace {
+// Lets a host function block its stream until the host opens the gate
+struct HostFuncGate {
+  int open = 0;
+  int passed = 0;
+};
+
+// A host that never opens the gate must not keep the stream, and the process, stuck for good
+constexpr int kGateDeadlineSeconds = 10;
+
+void HoldUntilGateOpens(void* arg) {
+  auto* gate = static_cast<HostFuncGate*>(arg);
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(kGateDeadlineSeconds);
+  while (__atomic_load_n(&gate->open, __ATOMIC_ACQUIRE) == 0 &&
+         std::chrono::steady_clock::now() < deadline) {
+  }
+  __atomic_store_n(&gate->passed, 1, __ATOMIC_RELEASE);
+}
+
+// Opens the gate and releases the spinning kernels when the test leaves, also through a failed
+// check, so that the streams can drain before their guards destroy them
+struct ReleaseOnExit {
+  HostFuncGate* gate;
+  int* release;
+  ~ReleaseOnExit() {
+    __atomic_store_n(&gate->open, 1, __ATOMIC_RELEASE);
+    __atomic_store_n(release, 1, __ATOMIC_RELEASE);
+  }
+};
+__global__ void NopKernel() {}
+
+// Runs batches whose shader copy waits on the stream's prior work behind other streams' spin
+// kernels on the shared hardware queue (see the test cases below). launch_barriers also queues two
+// kernels on every other stream before each batch.
+void RunQueuedShaderWaitBackToBack(const bool launch_barriers) {
+  // More streams than hardware queues, so some stream shares the tested stream's queue
+  constexpr size_t kNumSpinStreams = 16;
+  constexpr size_t kHeldIteration = 2;
+  // Once the stream's signals wrapped around, so the second host function reuses the interrupt
+  // signals the first one returned
+  constexpr size_t kSecondHostFuncIteration = kHeldIteration + 100;
+  // Few enough that the queued batches do not exhaust the stream's signals while held. The
+  // barrier variant queues two kernels on every spin stream per batch, which needs fewer still, and
+  // more batches than the tracker lets pins wait for a fence (64)
+  const size_t kIterations = launch_barriers ? 100 : 200;
+  constexpr int kWatchdogSeconds = 10;
+  constexpr size_t kNumPatterns = 2;
+  const auto pattern = [](size_t copy_idx, size_t pattern_idx) {
+    return std::vector<unsigned char>(
+        kBackToBackCopySize, static_cast<unsigned char>(1 + copy_idx * kNumPatterns + pattern_idx));
+  };
+  // The host-to-device copy runs on the copy engines and the device-to-device copy as a shader copy
+  // The barrier variant has shader copies only: the consecutive barrier packets of a copy engine
+  // copy keep their barrier bit, which retires the waits of the earlier batches
+  const std::array<std::pair<LinearAllocs, LinearAllocs>, 2> copies{
+      {{launch_barriers ? LinearAllocs::hipMalloc : LinearAllocs::hipHostMalloc,
+        LinearAllocs::hipMalloc},
+       {LinearAllocs::hipMalloc, LinearAllocs::hipMalloc}}};
+
+  StreamGuard stream_guard(Streams::created);
+  std::vector<StreamGuard> spin_streams;
+  for (size_t i = 0; i < kNumSpinStreams; ++i) {
+    spin_streams.emplace_back(Streams::created);
+  }
+  LinearAllocGuard<int> release(LinearAllocs::hipHostMalloc, sizeof(int));
+  *release.ptr() = 0;
+  std::vector<LinearAllocGuard<unsigned char>> allocations;
+  const std::vector<unsigned char> zeros(kBackToBackCopySize, 0);
+  std::array<std::vector<void*>, kNumPatterns> batch_srcs;
+  std::vector<void*> dst_ptrs;
+  for (size_t copy_idx = 0; copy_idx < copies.size(); ++copy_idx) {
+    for (size_t pattern_idx = 0; pattern_idx < kNumPatterns; ++pattern_idx) {
+      batch_srcs[pattern_idx].push_back(
+          addBuffer(allocations, pattern(copy_idx, pattern_idx), copies[copy_idx].first));
+    }
+    dst_ptrs.push_back(addBuffer(allocations, zeros, copies[copy_idx].second));
+  }
+
+  std::vector<size_t> sizes(dst_ptrs.size(), kBackToBackCopySize);
+  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagDefault};
+  size_t attrs_idx = 0;
+  const long long timeout_ticks =
+      static_cast<long long>(kWatchdogSeconds) * 1000000 * SpinTicksPerUs();
+  HostFuncGate gate;
+  ReleaseOnExit release_on_exit{&gate, release.ptr()};
+  HIP_CHECK(hipDeviceSynchronize());
+
+  std::chrono::steady_clock::time_point spin_start;
+  for (size_t iteration = 0; iteration < kIterations; ++iteration) {
+    if (iteration == kHeldIteration) {
+      HIP_CHECK(hipLaunchHostFunc(stream_guard.stream(), HoldUntilGateOpens, &gate));
+      spin_start = std::chrono::steady_clock::now();
+      for (StreamGuard& spin_stream : spin_streams) {
+        WaitForHostReleaseWithTimeout<<<1, 1, 0, spin_stream.stream()>>>(release.ptr(),
+                                                                         timeout_ticks);
+      }
+    }
+    if (iteration == kSecondHostFuncIteration) {
+      HIP_CHECK(hipLaunchHostFunc(stream_guard.stream(), [](void*) {}, nullptr));
+    }
+    if (launch_barriers && iteration > kHeldIteration) {
+      // The first kernel of a stream after the tested stream's last packet has no barrier bit,
+      // since that packet already orders it, and the second keeps it. That barrier packet follows
+      // the tested stream's last packet on a shared hardware queue, so the barrier-bit
+      // optimization drops the barrier bit of the tested stream's next packet
+      for (StreamGuard& spin_stream : spin_streams) {
+        NopKernel<<<1, 1, 0, spin_stream.stream()>>>();
+        NopKernel<<<1, 1, 0, spin_stream.stream()>>>();
+      }
+    }
+    const hipError_t batch_status = hipMemcpyBatchAsync(
+        dst_ptrs.data(), batch_srcs[iteration % kNumPatterns].data(), sizes.data(), sizes.size(),
+        &attr, &attrs_idx, 1, nullptr, stream_guard.stream());
+    if (iteration == kHeldIteration) {
+      // Completes the prior work only after the batch waits on it, then lets the copy engine copy
+      // finish before the stream's signals wrap around
+      __atomic_store_n(&gate.open, 1, __ATOMIC_RELEASE);
+      const auto deadline =
+          std::chrono::steady_clock::now() + std::chrono::seconds(kGateDeadlineSeconds);
+      while (__atomic_load_n(&gate.passed, __ATOMIC_ACQUIRE) == 0 &&
+             std::chrono::steady_clock::now() < deadline) {
+      }
+      REQUIRE(__atomic_load_n(&gate.passed, __ATOMIC_ACQUIRE) == 1);
+    }
+    HIP_CHECK(batch_status);
+  }
+  const double held_seconds =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - spin_start).count();
+  __atomic_store_n(release.ptr(), 1, __ATOMIC_RELEASE);
+  HIP_CHECK(hipGetLastError());
+  // A stream that hangs on a re-armed signal fails the check below after the deadline
+  const auto sync_deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(kWatchdogSeconds);
+  hipError_t stream_status = hipStreamQuery(stream_guard.stream());
+  while (stream_status == hipErrorNotReady && std::chrono::steady_clock::now() < sync_deadline) {
+    std::this_thread::yield();
+    stream_status = hipStreamQuery(stream_guard.stream());
+  }
+  INFO("The stream did not complete within " << kWatchdogSeconds << " s of the release");
+  HIP_CHECK(stream_status);
+  HIP_CHECK(hipDeviceSynchronize());
+  // The spin kernels end by themselves after the watchdog, which releases the held waits early and
+  // lets the test pass without the case it is meant to cover
+  INFO("The batches were queued for " << held_seconds << " s, more than the spin kernels' "
+                                      << kWatchdogSeconds << " s watchdog allows");
+  REQUIRE(held_seconds < kWatchdogSeconds);
+
+  const size_t last_pattern_idx = (kIterations - 1) % kNumPatterns;
+  for (size_t copy_idx = 0; copy_idx < copies.size(); ++copy_idx) {
+    INFO("Copy " << copy_idx);
+    requireBufferEquals(dst_ptrs[copy_idx], pattern(copy_idx, last_pattern_idx),
+                        copies[copy_idx].second);
+  }
+}
+}  // namespace
+
+/**
+ * Test Description
+ * ------------------------
+ * - Verifies a batch whose shader copy waits on the stream's prior work behind another stream's
+ * kernel on the shared hardware queue. Each batch copies pinned host memory to the device on the
+ * copy engines and copies within the device as a shader copy, and both wait on the stream's prior
+ * work, here a host function that holds it until the batch is enqueued. Kernels spinning on a host
+ * flag on many other streams are launched between them, so one lands on the stream's hardware
+ * queue ahead of the shader copy's wait and holds that wait queued. The copy engine copy then
+ * finishes while the wait is still queued, and about two hundred more batches and another host
+ * function follow before the host releases the kernels, so the stream's completion signals are
+ * reused several times over meanwhile. The sources alternate between two patterns from batch to
+ * batch, so the final contents show that the last batch landed after all the others.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Mixed_QueuedShaderWait_BackToBack) {
+  if (RunInEachSignalTracker("Unit_hipMemcpyBatchAsync_Mixed_QueuedShaderWait_BackToBack")) {
+    return;
+  }
+  RunQueuedShaderWaitBackToBack(false);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Same as Unit_hipMemcpyBatchAsync_Mixed_QueuedShaderWait_BackToBack with shader copies only,
+ * a hundred batches, and two kernels queued on every other stream before each batch. The second
+ * kernel keeps its barrier bit and lands on the stream's hardware queue after its last packet, so
+ * the barrier-bit optimization clears the barrier bit of the stream's next packet. No packet of
+ * the stream then retires the waits of its earlier shader copies, and more of them pile up than
+ * the runtime keeps before it forces a barrier bit. The batches must neither hang the stream nor
+ * change the copies' results.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Mixed_QueuedShaderWait_OtherStreamBarriers) {
+  if (RunInEachSignalTracker("Unit_hipMemcpyBatchAsync_Mixed_QueuedShaderWait_OtherStreamBarriers")) {
+    return;
+  }
+  RunQueuedShaderWaitBackToBack(true);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Verifies a large D2D batch through the shader and SDMA copy paths.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_LargeBatch) {
+  constexpr size_t copy_count = 1024 * 32;
+  constexpr size_t copy_size = 64;
+  constexpr size_t total_size = copy_count * copy_size;
+  constexpr size_t copy_elements = copy_size / sizeof(int);
+  const hipMemcpyFlags flag = GENERATE(hipMemcpyFlagDefault, hipMemcpyFlagExtPreferCE);
+
+  StreamGuard stream_guard(Streams::created);
+  LinearAllocGuard<int> src(LinearAllocs::hipMalloc, total_size);
+  LinearAllocGuard<int> dst(LinearAllocs::hipMalloc, total_size);
+  std::vector<void*> src_ptrs(copy_count);
+  std::vector<void*> dst_ptrs(copy_count);
+  std::vector<size_t> sizes(copy_count, copy_size);
+  std::vector<int> values(total_size / sizeof(int));
+  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderAny, {}, {}, static_cast<unsigned int>(flag)};
   size_t attrs_idx = 0;
 
-  hipError_t status = hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), 1, &attr,
-                                          &attrs_idx, 1, nullptr, stream_guard.stream());
-  if (status == hipErrorNotSupported) {
-    SUCCEED("hipMemcpyFlagExtOpIndirectDst is not supported on this device");
-  } else {
-    HIP_CHECK(status);
-    HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
-    VerifyArrayFromBothEnds(dst.host_ptr(), copy_elements, kPatternValue, 0);
+  for (size_t i = 0; i < copy_count; ++i) {
+    src_ptrs[i] = reinterpret_cast<char*>(src.ptr()) + i * copy_size;
+    dst_ptrs[i] = reinterpret_cast<char*>(dst.ptr()) + i * copy_size;
+    std::fill_n(values.data() + i * copy_elements, copy_elements,
+                kPatternValue + static_cast<int>(i));
+  }
+  HIP_CHECK(hipMemcpy(src.ptr(), values.data(), total_size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), copy_count, &attr,
+                                &attrs_idx, 1, nullptr, stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+  HIP_CHECK(hipMemcpy(values.data(), dst.ptr(), total_size, hipMemcpyDeviceToHost));
+  for (size_t i = 0; i < copy_count; ++i) {
+    VerifyArrayFromBothEnds(values.data() + i * copy_elements, copy_elements,
+                            kPatternValue + static_cast<int>(i), i);
   }
 }
 #endif

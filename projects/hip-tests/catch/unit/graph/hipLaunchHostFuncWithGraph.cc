@@ -110,9 +110,9 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_Positive_Functional) {
   HIP_CHECK(hipGraphDestroy(graph));
 }
 
-static void thread_func_pos(hipStream_t* stream, hipHostFn_t fn, float** data){
-
-    HIP_CHECK(hipLaunchHostFunc(*stream, fn, static_cast<void*>(data)))}
+static void thread_func_pos(hipStream_t* stream, hipHostFn_t fn, float** data) {
+  HIP_CHECK_THREAD(hipLaunchHostFunc(*stream, fn, static_cast<void*>(data)));
+}
 
 /**
  * Test Description
@@ -145,6 +145,7 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_Positive_Thread) {
   float* data[2] = {A_h.host_ptr(), B_h.host_ptr()};
   std::thread t(thread_func_pos, &stream, fn, data);
   t.join();
+  HIP_CHECK_THREAD_FINALIZE();
 
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
   // Validate end capture is successful
@@ -192,8 +193,11 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_H2D_Kernel_D2H_Capture) {
   double* d_arrayA = nullptr;
   std::vector<double> h_array(arraySize);
 
-  hipStream_t captureStream{};
-  HIP_CHECK(hipStreamCreate(&captureStream));
+  // Guarded so the stream is destroyed during unwind if a check below throws.
+  // Global-mode capture blocks allocation process-wide, so a leaked capture
+  // fails every later test that allocates.
+  StreamGuard stream_guard(Streams::created);
+  hipStream_t captureStream = stream_guard.stream();
 
   // Begin stream capture
   HIP_CHECK(hipStreamBeginCapture(captureStream, hipStreamCaptureModeGlobal));
@@ -240,7 +244,6 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_H2D_Kernel_D2H_Capture) {
 
   // Cleanup
   HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipStreamDestroy(captureStream));
 }
 
 

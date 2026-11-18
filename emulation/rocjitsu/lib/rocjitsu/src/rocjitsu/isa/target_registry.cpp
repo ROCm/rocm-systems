@@ -30,7 +30,7 @@ constexpr bool is_public_architecture_key(rj_code_arch_t key) {
 constexpr bool is_public_gpu_target_key(rj_code_target_id_t key) {
   const std::underlying_type_t<rj_code_target_id_t> value = enum_value(key);
   return value >= enum_value(ROCJITSU_CODE_TARGET_GFX90A) &&
-         value < enum_value(ROCJITSU_CODE_TARGET_INVALID);
+         value < enum_value(ROCJITSU_CODE_TARGET_NUM_TARGETS);
 }
 
 bool contains_id(const IsaTargetDescriptor &descriptor, std::string_view id) {
@@ -93,6 +93,20 @@ IsaTargetRegistryError validate_descriptor(const IsaTargetDescriptor &descriptor
   if (!descriptor.gpu_targets.empty() && descriptor.architecture_id == ROCJITSU_CODE_ARCH_INVALID)
     return registry_error("ISA target '" + std::string(descriptor.id) +
                           "' with GPU bindings must have an architecture ID");
+  if (descriptor.variant_decoder_factory != nullptr) {
+    if (descriptor.default_gpu_target == ROCJITSU_CODE_TARGET_INVALID)
+      return registry_error("ISA target '" + std::string(descriptor.id) +
+                            "' with a variant decoder factory has no default GPU target");
+    bool found_default = false;
+    for (const IsaGpuTargetDescription &binding : descriptor.gpu_targets)
+      found_default |= binding.public_id == descriptor.default_gpu_target;
+    if (!found_default)
+      return registry_error("ISA target '" + std::string(descriptor.id) +
+                            "' default GPU target is not one of its bindings");
+  } else if (descriptor.default_gpu_target != ROCJITSU_CODE_TARGET_INVALID) {
+    return registry_error("ISA target '" + std::string(descriptor.id) +
+                          "' has a default GPU target but no variant decoder factory");
+  }
   return std::nullopt;
 }
 
@@ -198,6 +212,35 @@ IsaTargetRegistry::find_gpu_target_by_code_object_id(std::string_view id) const 
       if (gpu_target.code_object_id == id)
         return &gpu_target;
     }
+  }
+  return nullptr;
+}
+
+const IsaGpuTargetDescription *
+IsaTargetRegistry::find_gpu_target(rj_code_target_id_t gpu_target_id) const {
+  if (!ok() || !is_public_gpu_target_key(gpu_target_id))
+    return nullptr;
+  for (const IsaTargetDescriptor &target : targets_) {
+    for (const IsaGpuTargetDescription &gpu_target : target.gpu_targets) {
+      if (gpu_target.public_id == gpu_target_id)
+        return &gpu_target;
+    }
+  }
+  return nullptr;
+}
+
+const IsaGpuTargetDescription *
+IsaTargetRegistry::find_default_gpu_target(const IsaTargetDescriptor &descriptor) const {
+  if (!ok() || descriptor.default_gpu_target == ROCJITSU_CODE_TARGET_INVALID)
+    return nullptr;
+  for (const IsaTargetDescriptor &registered : targets_) {
+    if (&registered != &descriptor)
+      continue;
+    for (const IsaGpuTargetDescription &binding : registered.gpu_targets) {
+      if (binding.public_id == registered.default_gpu_target)
+        return &binding;
+    }
+    return nullptr;
   }
   return nullptr;
 }

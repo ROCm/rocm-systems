@@ -19,10 +19,10 @@
 #include "common.h"
 #include "version.h"
 
-#define MAX_CHANNELS                     64
+#define MAX_CHANNELS                     256 // RCCL MAXCHANNELS
 
 // Bump when ncclProfiler_t alias changes to a new interface version.
-#define NCCL_PROFILER_INTERFACE_VERSION 5
+#define NCCL_PROFILER_INTERFACE_VERSION 8
 
 #define INS_CHK(call)                                                   \
   do {                                                                  \
@@ -146,6 +146,7 @@ struct inspectorCompletedOpInfo {
   bool isP2p;
   ncclFunc_t func;
   uint64_t sn;
+  uint64_t timestampUsec;
   size_t msgSizeBytes;
   uint64_t execTimeUsecs;
   inspectorTimingSource_t timingSource;
@@ -154,6 +155,7 @@ struct inspectorCompletedOpInfo {
   const char* algo;   // coll only (nullptr for P2P)
   const char* proto;  // coll only (nullptr for P2P)
   int peer;           // P2P only (unused for coll)
+  uint64_t userTag;   // per-call user profiler tag (0 == untagged)
   struct inspectorEventTrkOpInfo evtTrk;
 };
 
@@ -197,6 +199,8 @@ struct deviceFlushInfo {
 struct inspectorDumpThread {
   bool run{false};
   bool threadStarted{false};
+  // Sticky: stopThread() clears threadStarted before the destructor runs.
+  bool periodicDumpRan{false};
   jsonFileOutput* jfo;
   char* outputRoot;
   int64_t sampleIntervalUsecs;
@@ -228,6 +232,7 @@ struct inspectorDumpThread {
   inspectorResult_t inspectorStateDump(const char* output_root);
   inspectorResult_t inspectorStateDumpJSON(const char* output_root);
   inspectorResult_t inspectorStateDumpProm(const char* output_root);
+  inspectorResult_t inspectorStateDumpOtel(const char* output_root);
   static void* dumpMain(void* arg);
 };
 
@@ -251,6 +256,7 @@ struct inspectorCollInfo {
   const char* algo;
   const char* proto;
   uint64_t sn;
+  uint64_t userTag;   // per-call user profiler tag (0 == untagged)
   size_t msgSizeBytes;
   uint64_t tsStartUsec;
   uint64_t tsCompletedUsec;
@@ -268,6 +274,7 @@ struct inspectorP2pInfo {
   struct inspectorCommInfo *commInfo;
   const char* func;
   uint64_t sn;
+  uint64_t userTag;   // per-call user profiler tag (0 == untagged)
   size_t msgSizeBytes;
   uint64_t tsStartUsec;
   uint64_t tsCompletedUsec;
@@ -333,6 +340,9 @@ inline int ncclTypeSize(ncclDataType_t type) {
 // Global flag to control P2P tracking
 extern bool enableNcclInspectorP2p;
 extern bool requireKernelTiming;
+extern bool useNcclSourcedTimings;
+// Opt-in flag for extra per-device Prometheus stats metrics (totals + drops)
+extern bool enableNcclInspectorPromStats;
 // Minimum message size (bytes) to be `tracked by inspector
 extern size_t ncclInspectorDumpMinSizeBytes;
 
@@ -347,8 +357,13 @@ inspectorResult_t inspectorLockWr(pthread_rwlock_t* lockRef);
 inspectorResult_t inspectorUnlockRWLock(pthread_rwlock_t* lockRef);
 inspectorResult_t inspectorGlobalInit(int rank);
 inspectorResult_t inspectorGlobalFinalize();
+inspectorResult_t inspectorDumpNow();
 uint64_t inspectorGetTime();
 inspectorResult_t inspectorGetTimeUTC(char* buffer, size_t bufferSize);
+// Scheduler job id for Prometheus slurm_job_id and default dump-dir names.
+const char* inspectorGetJobId();
+// Cluster name for the Prometheus cluster label.
+const char* inspectorGetCluster();
 inspectorResult_t inspectorAddComm(struct inspectorCommInfo **commInfo,
                                    const char* commName, uint64_t commHash,
                                    int nNodes, int nranks, int rank);

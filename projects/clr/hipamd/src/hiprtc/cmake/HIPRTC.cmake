@@ -25,6 +25,9 @@ function(get_hiprtc_macros HIPRTC_DEFINES)
 #else\n\
 #define __hip_img_chk__\n\
 #endif\n\
+#if __clang_major__ >= 25\n\
+#define __launch_bounds__(...) __attribute__((launch_bounds(__VA_ARGS__)))\n\
+#else\n\
 #define launch_bounds_impl0(requiredMaxThreadsPerBlock)                                       \\\n\
     __attribute__((amdgpu_flat_work_group_size(1, requiredMaxThreadsPerBlock)))\n\
 #define launch_bounds_impl1(requiredMaxThreadsPerBlock, minBlocksPerMultiprocessor)           \\\n\
@@ -33,6 +36,7 @@ function(get_hiprtc_macros HIPRTC_DEFINES)
 #define select_impl_(_1, _2, impl_, ...) impl_\n\
 #define __launch_bounds__(...)                                                                \\\n\
     select_impl_(__VA_ARGS__, launch_bounds_impl1, launch_bounds_impl0)(__VA_ARGS__)           \n\
+#endif\n\
 #define HIP_INCLUDE_HIP_HIP_RUNTIME_H\n\
 #define _HIP_BFLOAT16_H_\n\
 #define HIP_INCLUDE_HIP_MATH_FUNCTIONS_H\n\

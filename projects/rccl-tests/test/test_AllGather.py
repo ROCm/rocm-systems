@@ -20,19 +20,32 @@
 ################################################################################
 
 import os
+import re
+import shlex
 import subprocess
 import itertools
 import math
 
 import pytest
 
-ngpus = 0
-if os.environ.get('ROCR_VISIBLE_DEVICES') is not None:
-    ngpus = len(os.environ['ROCR_VISIBLE_DEVICES'].split(","))
-elif os.environ.get('HIP_VISIBLE_DEVICES') is not None:
-    ngpus = len(os.environ['HIP_VISIBLE_DEVICES'].split(","))
-else:
-    ngpus = int(subprocess.check_output("rocminfo | grep \"Device Type:.\s*.GPU\" | wc -l",shell=True))
+from .gin_sdma_harness import (
+    GiB,
+    MiB,
+    detect_ngpus,
+    env_int,
+    gin_env_xflags,
+    gin_hang_msg,
+    gin_perf_argv,
+    launch_mpi_shell,
+    mpi_launch_prefix,
+    run_with_conn_gate_retry,
+)
+
+try:
+    _detected_ngpus = detect_ngpus()
+except RuntimeError:
+    _detected_ngpus = 0
+ngpus = max(1, _detected_ngpus)
 log_ngpus = int(math.log2(ngpus))
 
 nthreads = ["1"]
@@ -70,6 +83,157 @@ def test_AllGatherSingleProcess(nthreads, ngpus_single, byte_range, op, step_fac
         pytest.fail("AllGather test error(s) detected.")
 
     assert rccl_test.returncode == 0
+
+
+# ---------------------------------------------------------------------------
+# GIN-SDMA AllGather multi-segment regression tests (parity with the >1 GiB
+# SDMA hang fix validated for AllToAll in test_AllToAll.py / PR #9927).
+#
+# These drive the real GinHybridAllGatherKernel (deviceImpl 3, NCCL_GIN_TYPE=7)
+# at per-rank chunk sizes that cross the two single-descriptor limits the
+# 128 MiB SDMA copy clamp guards. That clamp lives in the Anvil-SDMA backend
+# Put (ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>), which segments every
+# gin.put() into <=128 MiB SDMA copies with the completion signal carried only
+# on the FINAL segment. Correctness of the single-final-signal scheme relies on
+# every segment of a message serializing on one in-order SDMA queue; the backend
+# forces a single SDMA channel (numChannels==1, NCCL_GIN_ANVIL_SDMA_NUM_CHANNELS
+# is ignored), so this holds structurally. The AllGather kernel just calls plain
+# gin.put(), so it inherits the segmentation + single-channel guarantee.
+#
+# For AllGather, -e is the TOTAL gathered size and each rank contributes
+# total/NP bytes, so the per-rank gin.put() to every peer is total/NP:
+#
+#   1. per-rank > 128 MiB -- exercises the multi-segment put loop.
+#   2. per-rank >   1 GiB -- more than the 30-bit (1 GiB) single-copy count
+#                            bound would allow unsegmented; each 128 MiB segment
+#                            stays well under it, so a stale/truncated tail here
+#                            would surface as a data-check failure.
+#   3. 4 GiB total        -- multi-segment completion guard; a subprocess timeout
+#                            turns a reintroduced SDMA hang into a test failure
+#                            instead of stalling the runner forever.
+#
+# Exact-integer datatypes are used so a truncated or stale tail cannot be masked
+# by floating-point tolerance; the perf binary's built-in data check (-c 1) sets
+# a non-zero exit code on any wrong element. The SDMA (large) tier is forced for
+# every size via NCCL_GIN_ANVIL_SDMA_THRESHOLD=0.
+#
+# These require an 8x MI355X (or similar) node, an MPI launcher, and a
+# GIN-SDMA-capable RCCL build, so they are skipped unless RCCL_TESTS_GIN_SDMA_AG
+# is set. Configuration mirrors test_AllToAll.py:
+#   RCCL_TESTS_AG_NP         MPI ranks (default: detected GPU count)
+#   RCCL_TESTS_MPI_LAUNCHER  launcher binary (default: mpirun)
+#   RCCL_TESTS_MPI_OPTS      extra launcher opts (e.g. --allow-run-as-root -mca ...)
+#   RCCL_TESTS_AG_XENV       extra "-x K=V" env the backend needs on this cluster
+#   RCCL_TESTS_AG_EXE        path to all_gather_perf (default: ../build/all_gather_perf)
+#   RCCL_TESTS_AG_CTAS       device CTA count (-V) (default: 8)
+#   RCCL_TESTS_AG_TIMEOUT_S  per-run hang timeout in seconds (default: 900)
+#   RCCL_TESTS_AG_CONN_RETRIES  re-launches on the intermittent gfx950 cuMem-VMM
+#                            connectivity-gate abort (default: 5); a genuine data
+#                            check mismatch is never retried.
+#
+# Verified on 8x MI355X (ROCm 7.13, NCCL_GIN_TYPE=7, force-single-channel):
+# 256/512 MiB per-rank (2/4 segments) and 2 GiB total all pass with #wrong=0,
+# no hang (busbw ~421-427 GB/s).
+
+_ag_enabled = os.environ.get("RCCL_TESTS_GIN_SDMA_AG", "") not in ("", "0", "false", "False")
+
+AG_NP = env_int("RCCL_TESTS_AG_NP", 0) or (
+    detect_ngpus() if _ag_enabled else _detected_ngpus
+)
+AG_LAUNCHER = os.environ.get("RCCL_TESTS_MPI_LAUNCHER", "mpirun")
+AG_CTAS = os.environ.get("RCCL_TESTS_AG_CTAS", "8")
+AG_TIMEOUT_S = env_int("RCCL_TESTS_AG_TIMEOUT_S", 900)
+AG_CONN_RETRIES = env_int("RCCL_TESTS_AG_CONN_RETRIES", 5)
+AG_MPI_OPTS = shlex.split(os.environ.get("RCCL_TESTS_MPI_OPTS", ""))
+AG_XENV = shlex.split(os.environ.get("RCCL_TESTS_AG_XENV", ""))
+AG_EXE = os.environ.get(
+    "RCCL_TESTS_AG_EXE", os.path.join(path, "..", "build", "all_gather_perf"))
+
+_ag_skip = pytest.mark.skipif(
+    not _ag_enabled,
+    reason="GIN-SDMA AllGather tests are opt-in; set RCCL_TESTS_GIN_SDMA_AG=1 on "
+           "a GIN-SDMA-capable (e.g. 8x MI355X) node to enable.")
+
+
+_AG_DEVTIME_TIER_RE = re.compile(r"#\[ag-devtime\].*tier\s+(LSA|SDMA)", re.I)
+
+
+def _launch_ag_gin_sdma(request, total_bytes, dtype, force_sdma_tier=True, device_timing=False):
+    """Launch all_gather_perf -D 3 once at a fixed TOTAL gathered size."""
+    size = str(int(total_bytes))
+    gin_kv = ["NCCL_GIN_ENABLE=1", "NCCL_GIN_TYPE=7"] + AG_XENV
+    if force_sdma_tier:
+        gin_kv += [
+            "NCCL_GIN_ANVIL_SDMA_THRESHOLD=0",
+            "NCCL_GIN_ANVIL_SDMA_THRESHOLD_ALLGATHER=0",
+        ]
+
+    extra = ["-A", "1"]
+    args = (
+        mpi_launch_prefix(request, AG_LAUNCHER, AG_NP, AG_MPI_OPTS)
+        + gin_env_xflags(gin_kv)
+        + gin_perf_argv(AG_EXE, size, dtype, AG_CTAS, extra=extra)
+    )
+    if device_timing:
+        args += ["-B", "1"]
+    cmd = " ".join(shlex.quote(a) for a in args)
+    hang_msg = gin_hang_msg(
+        "AllGather",
+        AG_TIMEOUT_S,
+        size,
+        dtype,
+        "{} MiB/rank".format(total_bytes // AG_NP // MiB),
+    )
+    return launch_mpi_shell(cmd, AG_TIMEOUT_S, hang_msg)
+
+
+def _run_ag_gin_sdma(request, total_bytes, dtype, **launch_kw):
+    if AG_NP < 2:
+        pytest.skip("need >= 2 ranks/GPUs for GIN-SDMA AllGather")
+    return run_with_conn_gate_retry(
+        lambda: _launch_ag_gin_sdma(request, total_bytes, dtype, **launch_kw),
+        AG_CONN_RETRIES,
+    )
+
+
+# (items 1 + 2) Multi-segment loop and the 1 GiB single-copy boundary. per_rank
+# is each rank's contribution (the gin.put() to every peer); total = per_rank*NP.
+@_ag_skip
+@pytest.mark.parametrize("per_rank_mib", [256, 2048])  # 256 MiB (2 seg), 2 GiB (16 seg)
+@pytest.mark.parametrize("dtype", ["int32", "int64", "uint8"])
+def test_AllGatherGinSdmaLargeSegmented(request, per_rank_mib, dtype):
+    total = per_rank_mib * MiB * AG_NP
+    rc, _ = _run_ag_gin_sdma(request, total, dtype)
+    assert rc == 0, "AllGather data check failed (nonzero exit) at {} MiB/rank, dtype={}".format(
+        per_rank_mib, dtype)
+
+
+# (item 3) 4 GiB-total completion guard. At 8 ranks this is 512 MiB/rank -- distinct
+# from the 256 MiB/rank parametrized case above; a reintroduced hang trips the timeout.
+@_ag_skip
+def test_AllGatherGinSdma4GiBTotalHangGuard(request):
+    rc, _ = _run_ag_gin_sdma(request, 4 * GiB, "int32")
+    assert rc == 0, "AllGather 4 GiB-total data check failed (nonzero exit)"
+
+
+# Default-threshold tier crossover (compiled 32 KiB/rank): 16 KiB/rank -> LSA,
+# 64 KiB/rank -> SDMA. Does not force threshold=0 so the compiled default applies.
+@_ag_skip
+def test_AllGatherGinSdmaTierCrossover(request):
+    cases = [
+        (AG_NP * 16 * 1024, "LSA"),   # 16 KiB/rank <= 32 KiB default
+        (AG_NP * 64 * 1024, "SDMA"),  # 64 KiB/rank > 32 KiB default
+    ]
+    for total, expect_tier in cases:
+        rc, out = _run_ag_gin_sdma(
+            request, total, "int8", force_sdma_tier=False, device_timing=True)
+        assert rc == 0, "AllGather tier crossover failed at total={} bytes".format(total)
+        m = _AG_DEVTIME_TIER_RE.search(out or "")
+        assert m, "missing #[ag-devtime] tier line at total={} bytes".format(total)
+        assert m.group(1).upper() == expect_tier, (
+            "expected tier {} at total={} bytes, got {} in:\n{}".format(
+                expect_tier, total, m.group(1), (out or "")[-1500:]))
+
 
 @pytest.mark.parametrize("nthreads, nprocs, ngpus_mpi, byte_range, op, step_factor, datatype",
     itertools.product(nthreads, nprocs, ngpus_mpi, byte_range, op, step_factor, datatype))

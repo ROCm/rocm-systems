@@ -1,0 +1,918 @@
+#!/usr/bin/env python3
+
+# MIT License
+#
+# Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+"""Create a minimal rocpd SQLite database for a given schema version.
+
+This script is called by CTest execute tests defined in CMakeLists.txt; it is
+not intended to be imported as a Python module.
+
+Usage:
+    python3 make_db.py --version 3.0.0 --output /path/to/schema_3_0_0.db
+
+The database contains the minimum number of rows required to exercise all rocpd
+conversion paths (CSV, Perfetto, OTF2) without a real GPU trace.
+"""
+
+import argparse
+import os
+import sqlite3
+import sys
+
+# ---------------------------------------------------------------------------
+# Row-ID constants for the minimal test DB
+# ---------------------------------------------------------------------------
+
+_NID = 1
+_PID = 100
+_TID = 200
+_AGENT_ID = 1
+_QUEUE_ID = 1
+_STREAM_ID = 1
+_CODE_OBJ_ID = 1
+_KERNEL_SYM_ID = 1
+_T_START = 1_000_000_000
+_T_END = 2_000_000_000
+
+_STR_EMPTY = 1
+_STR_KERNEL_NAME = 2
+_STR_REGION_NAME = 3
+_STR_MEM_COPY = 4
+_STR_CATEGORY = 5
+_STR_SPM = 6
+_STR_HIP_EVENT_RECORD = 7
+
+_EVT_REGION_1 = 1
+_EVT_REGION_2 = 2
+_EVT_REGION_3 = 3
+_EVT_KERNEL_1 = 4
+_EVT_KERNEL_2 = 5
+_EVT_GRAPH_1 = 6
+_EVT_GRAPH_2 = 7
+_EVT_GRAPH_3 = 8
+_EVT_HIP_EVENT_1 = 9
+_EVT_PC_HOST_TRAP = 10
+_EVT_PC_STOCHASTIC = 11
+
+_PC_SCHEMA_HOST_TRAP = 1
+_PC_SCHEMA_STOCHASTIC = 2
+_PC_FULL_EXEC_MASK = "18446744073709551615"
+_PC_HOST_TRAP_OFFSET = 0x100
+_PC_STOCHASTIC_OFFSET = 0x104
+
+_PMC_NO_SPM_ID = 1
+_PMC_SPM_ID = 2
+_PMC_GRBM_COUNT_ID = 3
+_PMC_SQ_INSTS_SALU_ID = 4
+_TRACK_SPM_ID = 1
+_SAMPLE_SPM_ID = 1
+
+
+# ---------------------------------------------------------------------------
+# UUID / GUID helpers
+# ---------------------------------------------------------------------------
+
+
+def guid_for_version(version: str) -> str:
+    """Return a deterministic GUID string for the given schema version string."""
+    return f"00ecde8307b8_SCHEMA_{version.replace('.', '_')}"
+
+
+def uuid_for_version(version: str) -> str:
+    """Return a deterministic UUID string (GUID prefixed with '_')."""
+    return f"_{guid_for_version(version)}"
+
+
+# ---------------------------------------------------------------------------
+# Minimal-data insertion
+# ---------------------------------------------------------------------------
+
+
+def insert_minimal_data(
+    conn: sqlite3.Connection, uuid: str, guid: str, version: str
+) -> None:
+    """Insert minimum rows needed to exercise all rocpd conversion paths.
+
+    Foreign-key enforcement is disabled so rows can be inserted in any order.
+    Commit is the caller's responsibility.
+
+    Note: ``region_name_id`` is set on ``rocpd_kernel_dispatch`` so that the
+    ``kernels`` view INNER JOIN on ``rocpd_string`` returns rows.
+    """
+
+    def tbl(name: str) -> str:
+        return f"`{name}{uuid}`"
+
+    ver = tuple(int(x) for x in version.split("."))
+
+    conn.execute("PRAGMA foreign_keys = OFF")
+
+    conn.executemany(
+        f"INSERT INTO {tbl('rocpd_string')} (id, guid, string) VALUES (?,?,?)",
+        [
+            (_STR_EMPTY, guid, ""),
+            (_STR_KERNEL_NAME, guid, "myKernel"),
+            (_STR_REGION_NAME, guid, "myRegion"),
+            (_STR_MEM_COPY, guid, "Pageable to Device"),
+            (_STR_CATEGORY, guid, "MARKER"),
+            (_STR_SPM, guid, "SPM"),
+            (_STR_HIP_EVENT_RECORD, guid, "HIP_EVENT_RECORD"),
+        ],
+    )
+
+    conn.execute(
+        f"INSERT INTO {tbl('rocpd_info_node')} "
+        "(id, guid, hash, machine_id, system_name, hostname, release, version, hardware_name, domain_name) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (
+            _NID,
+            guid,
+            0,
+            "test-machine",
+            "Linux",
+            "testhost",
+            "6.8.0",
+            "#1",
+            "x86_64",
+            "none",
+        ),
+    )
+
+    conn.execute(
+        f"INSERT INTO {tbl('rocpd_info_process')} "
+        "(id, guid, nid, ppid, pid, init, fini, start, end, command) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (
+            _PID,
+            guid,
+            _NID,
+            1,
+            _PID,
+            _T_START - 1_000_000,
+            _T_END + 1_000_000,
+            _T_START - 1_000_000,
+            _T_END + 1_000_000,
+            "test_program",
+        ),
+    )
+
+    conn.execute(
+        f"INSERT INTO {tbl('rocpd_info_thread')} "
+        "(id, guid, nid, ppid, pid, tid) VALUES (?,?,?,?,?,?)",
+        (_TID, guid, _NID, 1, _PID, _TID),
+    )
+
+    conn.executemany(
+        f"INSERT INTO {tbl('rocpd_info_agent')} "
+        "(id, guid, nid, pid, type, absolute_index, logical_index, type_index) "
+        "VALUES (?,?,?,?,?,?,?,?)",
+        [
+            (0, guid, _NID, _PID, "CPU", 0, 0, 0),
+            (_AGENT_ID, guid, _NID, _PID, "GPU", 1, 0, 0),
+        ],
+    )
+
+    conn.execute(
+        f"INSERT INTO {tbl('rocpd_info_queue')} (id, guid, nid, pid, name) VALUES (?,?,?,?,?)",
+        (_QUEUE_ID, guid, _NID, _PID, "Queue 0"),
+    )
+    conn.execute(
+        f"INSERT INTO {tbl('rocpd_info_stream')} (id, guid, nid, pid, name) VALUES (?,?,?,?,?)",
+        (_STREAM_ID, guid, _NID, _PID, "Stream 0"),
+    )
+
+    conn.execute(
+        f"INSERT INTO {tbl('rocpd_info_code_object')} "
+        "(id, guid, nid, pid, agent_id, uri, load_base, load_size, load_delta) "
+        "VALUES (?,?,?,?,?,?,?,?,?)",
+        (_CODE_OBJ_ID, guid, _NID, _PID, _AGENT_ID, "file:///test#offset=0", 0, 4096, 0),
+    )
+    conn.execute(
+        f"INSERT INTO {tbl('rocpd_info_kernel_symbol')} "
+        "(id, guid, nid, pid, code_object_id, kernel_name, display_name) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (_KERNEL_SYM_ID, guid, _NID, _PID, _CODE_OBJ_ID, "myKernel.kd", "myKernel"),
+    )
+
+    for eid in (
+        _EVT_REGION_1,
+        _EVT_REGION_2,
+        _EVT_REGION_3,
+        _EVT_KERNEL_1,
+        _EVT_KERNEL_2,
+    ):
+        conn.execute(
+            f"INSERT INTO {tbl('rocpd_event')} "
+            "(id, guid, category_id, stack_id, parent_stack_id, correlation_id) "
+            "VALUES (?,?,?,?,?,?)",
+            (eid, guid, _STR_CATEGORY, eid, 0, 0),
+        )
+
+    if ver >= (3, 0, 2):
+        conn.executemany(
+            f"INSERT INTO {tbl('rocpd_kernel_dispatch')} "
+            "(id, guid, nid, pid, tid, agent_id, kernel_id, dispatch_id, queue_id, stream_id, "
+            "start, end, workgroup_size_x, workgroup_size_y, workgroup_size_z, "
+            "grid_size_x, grid_size_y, grid_size_z, graph_exec_id, graph_node_id, "
+            "region_name_id, event_id) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            [
+                (
+                    1,
+                    guid,
+                    _NID,
+                    _PID,
+                    _TID,
+                    _AGENT_ID,
+                    _KERNEL_SYM_ID,
+                    1,
+                    _QUEUE_ID,
+                    _STREAM_ID,
+                    _T_START,
+                    _T_START + 100_000,
+                    256,
+                    1,
+                    1,
+                    1024,
+                    1,
+                    1,
+                    1,
+                    1,
+                    _STR_EMPTY,
+                    _EVT_KERNEL_1,
+                ),
+                (
+                    2,
+                    guid,
+                    _NID,
+                    _PID,
+                    _TID,
+                    _AGENT_ID,
+                    _KERNEL_SYM_ID,
+                    2,
+                    _QUEUE_ID,
+                    _STREAM_ID,
+                    _T_START + 200_000,
+                    _T_START + 300_000,
+                    256,
+                    1,
+                    1,
+                    1024,
+                    1,
+                    1,
+                    2,
+                    2,
+                    _STR_EMPTY,
+                    _EVT_KERNEL_2,
+                ),
+            ],
+        )
+    else:
+        conn.executemany(
+            f"INSERT INTO {tbl('rocpd_kernel_dispatch')} "
+            "(id, guid, nid, pid, tid, agent_id, kernel_id, dispatch_id, queue_id, stream_id, "
+            "start, end, workgroup_size_x, workgroup_size_y, workgroup_size_z, "
+            "grid_size_x, grid_size_y, grid_size_z, region_name_id, event_id) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            [
+                (
+                    1,
+                    guid,
+                    _NID,
+                    _PID,
+                    _TID,
+                    _AGENT_ID,
+                    _KERNEL_SYM_ID,
+                    1,
+                    _QUEUE_ID,
+                    _STREAM_ID,
+                    _T_START,
+                    _T_START + 100_000,
+                    256,
+                    1,
+                    1,
+                    1024,
+                    1,
+                    1,
+                    _STR_EMPTY,
+                    _EVT_KERNEL_1,
+                ),
+                (
+                    2,
+                    guid,
+                    _NID,
+                    _PID,
+                    _TID,
+                    _AGENT_ID,
+                    _KERNEL_SYM_ID,
+                    2,
+                    _QUEUE_ID,
+                    _STREAM_ID,
+                    _T_START + 200_000,
+                    _T_START + 300_000,
+                    256,
+                    1,
+                    1,
+                    1024,
+                    1,
+                    1,
+                    _STR_EMPTY,
+                    _EVT_KERNEL_2,
+                ),
+            ],
+        )
+
+    conn.executemany(
+        f"INSERT INTO {tbl('rocpd_region')} "
+        "(id, guid, nid, pid, tid, start, end, name_id, event_id) "
+        "VALUES (?,?,?,?,?,?,?,?,?)",
+        [
+            (
+                1,
+                guid,
+                _NID,
+                _PID,
+                _TID,
+                _T_START - 500_000,
+                _T_END + 500_000,
+                _STR_REGION_NAME,
+                _EVT_REGION_1,
+            ),
+            (
+                2,
+                guid,
+                _NID,
+                _PID,
+                _TID,
+                _T_START - 100_000,
+                _T_START + 500_000,
+                _STR_REGION_NAME,
+                _EVT_REGION_2,
+            ),
+            (
+                3,
+                guid,
+                _NID,
+                _PID,
+                _TID,
+                _T_START + 100_000,
+                _T_END - 100_000,
+                _STR_REGION_NAME,
+                _EVT_REGION_3,
+            ),
+        ],
+    )
+
+    # graph_launch data was introduced in schema 3.0.2. Add some dummy data for it.
+    if ver >= (3, 0, 2):
+        for eid in (_EVT_GRAPH_1, _EVT_GRAPH_2, _EVT_GRAPH_3):
+            conn.execute(
+                f"INSERT INTO {tbl('rocpd_event')} "
+                "(id, guid, category_id, stack_id, parent_stack_id, correlation_id) "
+                "VALUES (?,?,?,?,?,?)",
+                (eid, guid, _STR_CATEGORY, eid, 0, 0),
+            )
+        conn.executemany(
+            f"INSERT INTO {tbl('rocpd_graph_launch')} "
+            "(id, guid, nid, pid, tid, agent_id, queue_id, start, end, "
+            "graph_exec_id, kernel_dispatch_count, event_id) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            [
+                (
+                    1,
+                    guid,
+                    _NID,
+                    _PID,
+                    _TID,
+                    _AGENT_ID,
+                    _QUEUE_ID,
+                    _T_START,
+                    _T_START + 200_000,
+                    1,
+                    2,
+                    _EVT_GRAPH_1,
+                ),
+                (
+                    2,
+                    guid,
+                    _NID,
+                    _PID,
+                    _TID,
+                    _AGENT_ID,
+                    _QUEUE_ID,
+                    _T_START + 500_000,
+                    _T_START + 700_000,
+                    2,
+                    2,
+                    _EVT_GRAPH_2,
+                ),
+                (
+                    3,
+                    guid,
+                    _NID,
+                    _PID,
+                    _TID,
+                    _AGENT_ID,
+                    _QUEUE_ID,
+                    _T_START + 1_000_000,
+                    _T_START + 1_200_000,
+                    3,
+                    2,
+                    _EVT_GRAPH_3,
+                ),
+            ],
+        )
+
+    # SPM counter data was introduced in schema 3.0.3.
+    if ver >= (3, 0, 3):
+        _SQ_WAVES_DESC = (
+            "Count number of waves sent to distributed sequencers (SQs). "
+            "This value represents the number of waves that are sent to each SQ."
+        )
+
+        conn.executemany(
+            f"INSERT INTO {tbl('rocpd_info_pmc')} "
+            "(id, guid, nid, pid, agent_id, target_arch, name, symbol, description, "
+            "component, value_type, block, expression, is_constant, is_derived, "
+            "spm_support, extdata) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            [
+                (
+                    _PMC_NO_SPM_ID,
+                    guid,
+                    _NID,
+                    _PID,
+                    _AGENT_ID,
+                    "GPU",
+                    "SQ_WAVES",
+                    "SQ_WAVES",
+                    _SQ_WAVES_DESC,
+                    "rocm",
+                    "ABS",
+                    "SQ",
+                    "",
+                    0,
+                    0,
+                    None,  # spm_support = NULL (not SPM-capable)
+                    "{}",
+                ),
+                (
+                    _PMC_SPM_ID,
+                    guid,
+                    _NID,
+                    _PID,
+                    _AGENT_ID,
+                    "GPU",
+                    "SQ_WAVES",
+                    "SQ_WAVES",
+                    _SQ_WAVES_DESC,
+                    "rocm",
+                    "ABS",
+                    "SQ",
+                    "",
+                    0,
+                    0,
+                    1,  # spm_support = 1 (SPM-capable)
+                    "{}",
+                ),
+            ],
+        )
+
+        conn.execute(
+            f"INSERT INTO {tbl('rocpd_track')} "
+            "(id, guid, nid, pid, tid, name_id, extdata) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (_TRACK_SPM_ID, guid, _NID, _PID, _TID, _STR_SPM, "{}"),
+        )
+
+        conn.execute(
+            f"INSERT INTO {tbl('rocpd_sample')} "
+            "(id, guid, track_id, timestamp, event_id, extdata) "
+            "VALUES (?,?,?,?,?,?)",
+            (_SAMPLE_SPM_ID, guid, _TRACK_SPM_ID, _T_START + 50_000, _EVT_KERNEL_1, "{}"),
+        )
+
+        if ver >= (3, 0, 5):
+            # One info row per location. Event rows store only that pmc id.
+            _PMC_LOC_SE0 = 0x7100000000000001
+            _PMC_LOC_SE1 = 0x7100000000000002
+            conn.executemany(
+                f"INSERT INTO {tbl('rocpd_info_pmc')} "
+                "(id, guid, nid, pid, agent_id, target_arch, name, symbol, description, "
+                "component, value_type, block, expression, is_constant, is_derived, "
+                "spm_support, xcc, shader_engine, shader_array, wgp, instance, extdata) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                [
+                    (
+                        _PMC_LOC_SE0,
+                        guid,
+                        _NID,
+                        _PID,
+                        _AGENT_ID,
+                        "GPU",
+                        "SQ_WAVES",
+                        "SQ_WAVES",
+                        _SQ_WAVES_DESC,
+                        "rocm",
+                        "ABS",
+                        "SQ",
+                        "",
+                        0,
+                        0,
+                        1,
+                        None,  # xcc is absent on a single-XCC agent
+                        0,  # shader_engine
+                        1,  # shader_array
+                        2,  # wgp
+                        0,  # instance
+                        "{}",
+                    ),
+                    (
+                        _PMC_LOC_SE1,
+                        guid,
+                        _NID,
+                        _PID,
+                        _AGENT_ID,
+                        "GPU",
+                        "SQ_WAVES",
+                        "SQ_WAVES",
+                        _SQ_WAVES_DESC,
+                        "rocm",
+                        "ABS",
+                        "SQ",
+                        "",
+                        0,
+                        0,
+                        1,
+                        None,  # xcc is absent on a single-XCC agent
+                        1,
+                        0,
+                        3,
+                        0,
+                        "{}",
+                    ),
+                ],
+            )
+            conn.executemany(
+                f"INSERT INTO {tbl('rocpd_pmc_event')} "
+                "(id, guid, event_id, sample_id, pmc_id, value) "
+                "VALUES (?,?,?,?,?,?)",
+                [
+                    (1, guid, _EVT_KERNEL_1, _SAMPLE_SPM_ID, _PMC_LOC_SE0, 16.0),
+                    (2, guid, _EVT_KERNEL_1, _SAMPLE_SPM_ID, _PMC_LOC_SE1, 16.0),
+                ],
+            )
+        else:
+            conn.executemany(
+                f"INSERT INTO {tbl('rocpd_pmc_event')} "
+                "(id, guid, event_id, sample_id, pmc_id, value, xcc, shader_engine, instance) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                [
+                    (1, guid, _EVT_KERNEL_1, _SAMPLE_SPM_ID, _PMC_SPM_ID, 16.0, 0, 0, 0),
+                    (2, guid, _EVT_KERNEL_1, _SAMPLE_SPM_ID, _PMC_SPM_ID, 16.0, 0, 1, 0),
+                ],
+            )
+
+    # HIP event barrier data was introduced in schema 3.0.4.
+    if ver >= (3, 0, 4):
+        conn.execute(
+            f"INSERT INTO {tbl('rocpd_event')} "
+            "(id, guid, category_id, stack_id, parent_stack_id, correlation_id) "
+            "VALUES (?,?,?,?,?,?)",
+            (_EVT_HIP_EVENT_1, guid, _STR_CATEGORY, _EVT_HIP_EVENT_1, 0, 1),
+        )
+        conn.execute(
+            f"INSERT INTO {tbl('rocpd_hip_event')} "
+            "(id, guid, nid, pid, tid, start, end, name_id, agent_id, queue_id, stream_id, "
+            "hip_event_handle, source_queue_id, event_id, extdata) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                1,
+                guid,
+                _NID,
+                _PID,
+                _TID,
+                _T_START,
+                _T_START + 50_000,
+                _STR_HIP_EVENT_RECORD,
+                _AGENT_ID,
+                _QUEUE_ID,
+                _STREAM_ID,
+                123456789,  # dummy hip_event_handle pointer value
+                _QUEUE_ID,  # source_queue_id == queue_id for a RECORD operation
+                _EVT_HIP_EVENT_1,
+                "{}",
+            ),
+        )
+
+    # Replay-aware counter views were introduced in schema 3.0.6.
+    if ver >= (3, 0, 6):
+        # Kernel-replay dispatch counters. Dispatch 1 is replayed three times: SQ_WAVES has two
+        # instances in every pass, with per-pass sums 16, 18 and 20; GRBM_COUNT is collected by
+        # pass 0 only; SQ_INSTS_SALU by passes 1 and 2 only, with per-pass sums 5 and 6. Passes
+        # after the first carry replay_pass in extdata, as rocprofv3 writes them. Dispatch 2 has
+        # untagged SQ_WAVES rows, like a run without kernel replay.
+        conn.executemany(
+            f"INSERT INTO {tbl('rocpd_info_pmc')} "
+            "(id, guid, nid, pid, agent_id, target_arch, name, symbol, description, "
+            "component, value_type, block, expression, is_constant, is_derived, "
+            "spm_support, extdata) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            [
+                (
+                    _PMC_GRBM_COUNT_ID,
+                    guid,
+                    _NID,
+                    _PID,
+                    _AGENT_ID,
+                    "GPU",
+                    "GRBM_COUNT",
+                    "GRBM_COUNT",
+                    "Tie High - Count Number of Clocks",
+                    "rocm",
+                    "ABS",
+                    "GRBM",
+                    "",
+                    0,
+                    0,
+                    None,
+                    "{}",
+                ),
+                (
+                    _PMC_SQ_INSTS_SALU_ID,
+                    guid,
+                    _NID,
+                    _PID,
+                    _AGENT_ID,
+                    "GPU",
+                    "SQ_INSTS_SALU",
+                    "SQ_INSTS_SALU",
+                    "Number of SALU instructions issued",
+                    "rocm",
+                    "ABS",
+                    "SQ",
+                    "",
+                    0,
+                    0,
+                    None,
+                    "{}",
+                ),
+            ],
+        )
+
+        def replay_pass(index):
+            return "{}" if index == 0 else f'{{"replay_pass":{index}}}'
+
+        conn.executemany(
+            f"INSERT INTO {tbl('rocpd_pmc_event')} "
+            "(id, guid, event_id, pmc_id, value, extdata) VALUES (?,?,?,?,?,?)",
+            [
+                (3, guid, _EVT_KERNEL_1, _PMC_NO_SPM_ID, 8.0, replay_pass(0)),
+                (4, guid, _EVT_KERNEL_1, _PMC_NO_SPM_ID, 8.0, replay_pass(0)),
+                (5, guid, _EVT_KERNEL_1, _PMC_GRBM_COUNT_ID, 1000.0, replay_pass(0)),
+                (6, guid, _EVT_KERNEL_1, _PMC_NO_SPM_ID, 9.0, replay_pass(1)),
+                (7, guid, _EVT_KERNEL_1, _PMC_NO_SPM_ID, 9.0, replay_pass(1)),
+                (8, guid, _EVT_KERNEL_1, _PMC_NO_SPM_ID, 10.0, replay_pass(2)),
+                (9, guid, _EVT_KERNEL_1, _PMC_NO_SPM_ID, 10.0, replay_pass(2)),
+                (10, guid, _EVT_KERNEL_2, _PMC_NO_SPM_ID, 4.0, "{}"),
+                (11, guid, _EVT_KERNEL_2, _PMC_NO_SPM_ID, 4.0, "{}"),
+                (12, guid, _EVT_KERNEL_1, _PMC_SQ_INSTS_SALU_ID, 2.0, replay_pass(1)),
+                (13, guid, _EVT_KERNEL_1, _PMC_SQ_INSTS_SALU_ID, 3.0, replay_pass(1)),
+                (14, guid, _EVT_KERNEL_1, _PMC_SQ_INSTS_SALU_ID, 3.0, replay_pass(2)),
+                (15, guid, _EVT_KERNEL_1, _PMC_SQ_INSTS_SALU_ID, 3.0, replay_pass(2)),
+            ],
+        )
+
+    # PC sampling (blob tables, rocpd_gpu_pc_sample, rocpd_disassembly_data, and
+    # rocpd_event.parent_id) was introduced in schema 3.1.0.
+    if ver >= (3, 1, 0):
+        conn.executemany(
+            f"INSERT INTO {tbl('rocpd_info_blob_schema')} "
+            "(id, guid, nid, pid, name, source_table, byte_order, alignment, "
+            "struct_size, version) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            [
+                (
+                    _PC_SCHEMA_HOST_TRAP,
+                    guid,
+                    _NID,
+                    _PID,
+                    "pc_sample_extdata_hosttrap",
+                    "rocpd_gpu_pc_sample",
+                    "little",
+                    1,
+                    2,
+                    2,
+                ),
+                (
+                    _PC_SCHEMA_STOCHASTIC,
+                    guid,
+                    _NID,
+                    _PID,
+                    "pc_sample_extdata_stochastic",
+                    "rocpd_gpu_pc_sample",
+                    "little",
+                    1,
+                    3,
+                    2,
+                ),
+            ],
+        )
+        conn.executemany(
+            f"INSERT INTO {tbl('rocpd_info_blob_field')} "
+            "(guid, schema_id, name, offset, size, data_type, is_signed) "
+            "VALUES (?,?,?,?,?,?,?)",
+            [
+                (guid, _PC_SCHEMA_HOST_TRAP, "hw_id_wave_id", 0, 1, "uint8_t", 0),
+                (guid, _PC_SCHEMA_HOST_TRAP, "wave_in_group", 1, 1, "uint8_t", 0),
+                (guid, _PC_SCHEMA_STOCHASTIC, "hw_id_wave_id", 0, 1, "uint8_t", 0),
+                (guid, _PC_SCHEMA_STOCHASTIC, "wave_in_group", 1, 1, "uint8_t", 0),
+                (guid, _PC_SCHEMA_STOCHASTIC, "arb_state_issue_valu", 2, 1, "uint8_t", 0),
+            ],
+        )
+        # Each sample event is a child of the first kernel dispatch event.
+        for event_id, correlation_id in ((_EVT_PC_HOST_TRAP, 1), (_EVT_PC_STOCHASTIC, 2)):
+            conn.execute(
+                f"INSERT INTO {tbl('rocpd_event')} "
+                "(id, guid, category_id, stack_id, parent_stack_id, correlation_id, parent_id) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (
+                    event_id,
+                    guid,
+                    _STR_CATEGORY,
+                    event_id,
+                    0,
+                    correlation_id,
+                    _EVT_KERNEL_1,
+                ),
+            )
+        conn.executemany(
+            f"INSERT INTO {tbl('rocpd_blob_event')} "
+            "(guid, nid, pid, event_id, schema_id, blob) VALUES (?,?,?,?,?,?)",
+            [
+                (
+                    guid,
+                    _NID,
+                    _PID,
+                    _EVT_PC_HOST_TRAP,
+                    _PC_SCHEMA_HOST_TRAP,
+                    bytes([3, 7]),
+                ),
+                (
+                    guid,
+                    _NID,
+                    _PID,
+                    _EVT_PC_STOCHASTIC,
+                    _PC_SCHEMA_STOCHASTIC,
+                    bytes([4, 9, 1]),
+                ),
+            ],
+        )
+        conn.executemany(
+            f"INSERT INTO {tbl('rocpd_gpu_pc_sample')} "
+            "(id, guid, timestamp, nid, pid, tid, agent_id, event_id, dispatch_id, "
+            "correlation_id, exec_mask, code_object_id, code_object_offset, "
+            "wave_issued, inst_type, stall_reason, wave_count) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            [
+                (
+                    1,
+                    guid,
+                    _T_START + 10_000,
+                    _NID,
+                    _PID,
+                    _TID,
+                    _AGENT_ID,
+                    _EVT_PC_HOST_TRAP,
+                    1,
+                    1,
+                    _PC_FULL_EXEC_MASK,
+                    _CODE_OBJ_ID,
+                    _PC_HOST_TRAP_OFFSET,
+                    None,  # host-trap samples have no stochastic fields
+                    None,
+                    None,
+                    None,
+                ),
+                (
+                    2,
+                    guid,
+                    _T_START + 20_000,
+                    _NID,
+                    _PID,
+                    _TID,
+                    _AGENT_ID,
+                    _EVT_PC_STOCHASTIC,
+                    1,
+                    2,
+                    "255",
+                    _CODE_OBJ_ID,
+                    _PC_STOCHASTIC_OFFSET,
+                    1,  # wave_issued
+                    1,  # inst_type: ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_VALU
+                    None,
+                    4,  # wave_count
+                ),
+            ],
+        )
+        # Stored text for the host-trap PC; the stochastic PC is decoded lazily.
+        conn.execute(
+            f"INSERT INTO {tbl('rocpd_disassembly_data')} "
+            "(guid, nid, pid, code_object_id, code_object_offset, instruction, comment) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (
+                guid,
+                _NID,
+                _PID,
+                _CODE_OBJ_ID,
+                _PC_HOST_TRAP_OFFSET,
+                "s_nop 0",
+                "kernel.cpp:10",
+            ),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--version", required=True, help="Schema version, e.g. 3.0.0")
+    parser.add_argument(
+        "--output", required=True, help="Destination path for the .db file"
+    )
+    args = parser.parse_args()
+
+    output_path = os.path.abspath(args.output)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+    if os.path.exists(output_path):
+        os.remove(output_path)
+
+    from rocpd.schema import RocpdSchema
+
+    guid = guid_for_version(args.version)
+    uuid = uuid_for_version(args.version)
+
+    schema = RocpdSchema(uuid=uuid, guid=guid, version=args.version)
+
+    conn = sqlite3.connect(output_path)
+    schema.write_schema(conn)
+    conn.close()
+
+    # Fail fast if the wrong schema SQL was loaded (e.g. system rocpd + stale
+    # ROCPD_SCHEMA_PATH). Archival schemas must not expose replay_pass; 3.0.6+
+    # must.
+    conn = sqlite3.connect(output_path)
+    pmc_columns = [row[1] for row in conn.execute("PRAGMA table_info(pmc_events)")]
+    expect_replay_pass = tuple(int(part) for part in args.version.split(".")) >= (
+        3,
+        0,
+        6,
+    )
+    has_replay_pass = "replay_pass" in pmc_columns
+    if has_replay_pass != expect_replay_pass:
+        conn.close()
+        raise RuntimeError(
+            "schema {version} pmc_events columns unexpected after write_schema: "
+            "replay_pass present={present}, expected={expected}. columns={columns}. "
+            "ROCPD_SCHEMA_PATH={schema_path}".format(
+                version=args.version,
+                present=has_replay_pass,
+                expected=expect_replay_pass,
+                columns=pmc_columns,
+                schema_path=os.environ.get("ROCPD_SCHEMA_PATH", "<unset>"),
+            )
+        )
+
+    insert_minimal_data(conn, uuid, guid, args.version)
+    conn.commit()
+    conn.close()
+
+    print(f"Created: {output_path}", flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

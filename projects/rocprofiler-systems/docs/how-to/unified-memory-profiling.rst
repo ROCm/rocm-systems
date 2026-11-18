@@ -143,13 +143,13 @@ After a successful run, look in the ROCm Systems Profiler output directory for:
        migration trigger counts.
    * - ``unified_memory-<pid>.json``
      - Structured summary with ``devices`` and ``summary`` objects.
-   * - ``perfetto-trace-<pid>.proto``
+   * - ``perfetto-trace-<pid>.pftrace``
      - Perfetto trace with unified memory page-fault counters and migration
        throughput counters when migration events are present.
 
 When ``ROCPROFSYS_USE_PID=NO`` is set, the unified memory report filenames are
 ``unified_memory.txt`` and ``unified_memory.json``. The Perfetto trace filename
-is also written without a PID suffix as ``perfetto-trace.proto``.
+is also written without a PID suffix as ``perfetto-trace.pftrace``.
 
 .. note::
 
@@ -249,7 +249,7 @@ When ``ROCPROFSYS_TRACE=ON`` is set, the Perfetto trace can include:
   page-migration events are present.
 
 Open the generated Perfetto trace file, for example
-``perfetto-trace-<pid>.proto``, in the Perfetto UI to compare page-fault
+``perfetto-trace-<pid>.pftrace``, in the Perfetto UI to compare page-fault
 activity, migration-throughput samples, HIP API calls, kernels, and memory
 copies on one timeline.
 

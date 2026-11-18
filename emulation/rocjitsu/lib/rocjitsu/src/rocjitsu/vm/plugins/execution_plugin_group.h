@@ -11,16 +11,21 @@
 /// sink, so construction order and lifetime are explicit in the type.
 ///
 /// When a plugin is added via add(), the group constructs an internal fanout sink
-/// combining all configured sinks + an optional per-plugin FileSink, and
-/// assigns it to the plugin.
+/// combining configured sinks + an optional per-plugin FileSink, and
+/// assigns it to the plugin. Loader-created groups defer file opening until
+/// onInit(), after the outgoing group has shut down and been destroyed.
+/// Every fanout in one group shares a sink mutex so
+/// asynchronous plugin writers cannot concurrently enter a configured sink.
 
 #pragma once
 
+#include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
 
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <span>
 #include <string>
 #include <string_view>
@@ -30,11 +35,15 @@
 
 namespace rocjitsu {
 
+namespace test {
+class ExecutionPluginGroupTestAccess;
+}
+
 /// @brief Deleter for owned plugin instances.
 ///
 /// Every plugin instance is freed through a destroy function, so allocation and
-/// deallocation always stay on the same side of the plugin ABI boundary. For
-/// plugins loaded across the C ABI, @c destroyFn is the plugin library's
+/// deallocation always stay on the same side of the plugin library boundary. For
+/// dynamically loaded plugins, @c destroyFn is the plugin library's
 /// `rocjitsu_plugin_destroy` export. For in-tree plugins created with `new`, it
 /// is a small host trampoline that `delete`s the instance (see
 /// delete_execution_plugin()). The pointer is only ever handed back to the
@@ -75,12 +84,32 @@ private:
   std::string file_directory_;
 };
 
-class ExecutionPluginGroup {
+/// @brief Immutable-after-publication collection of execution plugins.
+///
+/// Configure sinks at construction and call add() before handing the group to
+/// simulation components. add() is not thread-safe; after publication, the
+/// plugin collection and sampled hook policy must remain immutable while
+/// callbacks may dispatch concurrently.
+class ExecutionPluginGroup final {
 public:
   explicit ExecutionPluginGroup(PluginSinkConfig config)
       : configured_sinks_(std::move(config.sinks_)), sink_dir_(std::move(config.file_directory_)) {}
 
-  virtual ~ExecutionPluginGroup() = default;
+  ~ExecutionPluginGroup() = default;
+
+  /// Defer file creation until plugin admission is complete. Call before add().
+  void defer_file_sinks() { file_sinks_deferred_ = !sink_dir_.empty(); }
+
+  /// Open deferred files after outgoing group destruction, before initialization.
+  void activate_file_sinks() {
+    if (!file_sinks_deferred_)
+      return;
+    file_sinks_deferred_ = false;
+    for (auto &entry : plugins_) {
+      entry.sink = build_sink_bundle(entry.plugin->name() + ".log");
+      entry.plugin->sink_ = entry.sink.get();
+    }
+  }
 
   /// Add a plugin owned with a boundary-aware deleter (see OwnedPlugin).
   bool add(OwnedPlugin p) {
@@ -90,10 +119,41 @@ public:
       if (existing.plugin->name() == p->name())
         return false;
     p->slot_index_ = static_cast<uint32_t>(plugins_.size());
+    const bool observes_before_execute_instruction = p->observes_before_execute_instruction();
+    const bool observes_after_execute_instruction = p->observes_after_execute_instruction();
+    const bool observes_async_instruction_issued = p->observes_async_instruction_issued();
+    const bool observes_memory_instruction_routing = p->observes_memory_instruction_routing();
+    const bool observes_vgpr_reads = p->observes_vgpr_reads();
+    const bool observes_vgpr_writes = p->observes_vgpr_writes();
+    const bool observes_sgpr_reads = p->observes_sgpr_reads();
+    const bool observes_scalar_register_writes = p->observes_scalar_register_writes();
+    const bool observes_memory_routing = p->observes_memory_routing();
+    const bool observes_lds_direct_reads = p->observes_lds_direct_reads();
+    observes_lds_direct_reads_ |= observes_lds_direct_reads;
+    const bool observes_tensor_dma_memory_access = p->observes_tensor_dma_memory_access();
+    const bool observes_tensor_dma_issue = p->observes_tensor_dma_issue();
+    serialize_hot_hooks_ |= p->requires_serial_hot_hooks();
+    observes_before_execute_instruction_ |= observes_before_execute_instruction;
+    observes_after_execute_instruction_ |= observes_after_execute_instruction;
+    observes_async_instruction_issued_ |= observes_async_instruction_issued;
+    observes_memory_instruction_routing_ |= observes_memory_instruction_routing;
+    observes_vgpr_reads_ |= observes_vgpr_reads;
+    observes_vgpr_writes_ |= observes_vgpr_writes;
+    observes_sgpr_reads_ |= observes_sgpr_reads;
+    observes_scalar_register_writes_ |= observes_scalar_register_writes;
+    observes_memory_routing_ |= observes_memory_routing;
+    observes_tensor_dma_memory_access_ |= observes_tensor_dma_memory_access;
+    observes_tensor_dma_issue_ |= observes_tensor_dma_issue;
+    supports_async_instructions_ &= p->supports_async_instructions();
     SinkBundle sink = build_sink_bundle(p->name() + ".log");
     if (auto *configured_sink = sink.get())
       p->sink_ = configured_sink;
-    plugins_.push_back(PluginEntry{std::move(sink), std::move(p)});
+    plugins_.push_back(PluginEntry{
+        std::move(sink), observes_before_execute_instruction, observes_after_execute_instruction,
+        observes_async_instruction_issued, observes_memory_instruction_routing, observes_vgpr_reads,
+        observes_vgpr_writes, observes_sgpr_reads, observes_scalar_register_writes,
+        observes_memory_routing, observes_tensor_dma_memory_access, observes_tensor_dma_issue,
+        observes_lds_direct_reads, std::move(p)});
     return true;
   }
 
@@ -105,95 +165,433 @@ public:
   uint32_t num_plugins() const { return static_cast<uint32_t>(plugins_.size()); }
   bool empty() const { return plugins_.empty(); }
 
-  // -- Lifecycle --
-  virtual void onInit() {
-    for (auto &entry : plugins_)
-      entry.plugin->onInit();
+  /// True only when every plugin opts into the async observation contract.
+  bool supports_async_instructions() const { return supports_async_instructions_; }
+
+  /// Whether high-frequency callbacks are serialized for this group. Plugin
+  /// policy is sampled when each plugin is added so hot dispatch stays O(1).
+  bool requires_serial_hot_hooks() const { return serialize_hot_hooks_; }
+
+  bool observes_before_execute_instruction() const { return observes_before_execute_instruction_; }
+  bool observes_after_execute_instruction() const { return observes_after_execute_instruction_; }
+  bool observes_async_instruction_issued() const { return observes_async_instruction_issued_; }
+  bool observes_memory_instruction_routing() const { return observes_memory_instruction_routing_; }
+  bool observes_vgpr_reads() const { return observes_vgpr_reads_; }
+  bool observes_vgpr_writes() const { return observes_vgpr_writes_; }
+  bool observes_scalar_register_writes() const { return observes_scalar_register_writes_; }
+
+  /// @brief Whether any contained plugin consumes the routed-memory hook.
+  /// @details False for an empty group, so the caller's guard covers both.
+  bool observes_memory_routing() const { return observes_memory_routing_; }
+
+  /// @brief Whether any contained plugin consumes the tensor-DMA memory hook.
+  /// @details False for an empty group, so the caller's guard covers both.
+  bool observes_tensor_dma_memory_access() const { return observes_tensor_dma_memory_access_; }
+
+  /// @brief Whether any contained plugin consumes the tensor-DMA issue hook.
+  /// @details False for an empty group, so the caller's guard covers both.
+  bool observes_tensor_dma_issue() const { return observes_tensor_dma_issue_; }
+
+  /// Whether any contained plugin observes SGPR reads. Plugin policy is
+  /// sampled when each plugin is added so SGPR access stays O(1).
+  bool observes_sgpr_reads() const { return observes_sgpr_reads_; }
+
+  // -- Lifecycle (non-virtual) --
+  // The host calls these outside the simulation-callback interval: onInit()
+  // completes before callbacks start, and onShutdown() starts after they stop.
+  // callback_mutex_ orders simulation callbacks, not lifecycle teardown.
+  void onInit() {
+    activate_file_sinks();
+    dispatch_with_plugin_lock([&]() {
+      for (auto &entry : plugins_)
+        entry.plugin->onInit();
+    });
   }
 
-  virtual void onShutdown() {
-    for (auto &entry : plugins_)
-      entry.plugin->onShutdown();
+  void onShutdown() {
+    dispatch_with_plugin_lock([&]() {
+      for (auto &entry : plugins_)
+        entry.plugin->onShutdown();
+    });
   }
 
-  // -- AMDGPU (virtual) --
-  virtual void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
-                                                amdgpu::Wavefront &wf) {
-    for (auto &entry : plugins_)
-      entry.plugin->onAmdgpuBeforeExecuteInstruction(pc, inst, wf);
+  // -- AMDGPU (non-virtual) --
+  void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
+                                        amdgpu::Wavefront &wf) {
+    if (!observes_before_execute_instruction_)
+      return;
+    dispatch_wave_hot_hook(&wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_before_execute_instruction &&
+            plugin_observes_hot_hooks(index, &wf, cached))
+          entry.plugin->onAmdgpuBeforeExecuteInstruction(pc, inst, wf);
+      }
+    });
   }
 
-  virtual void onAmdgpuAfterExecuteInstruction(uint64_t pc, const Instruction &inst,
-                                               amdgpu::Wavefront &wf) {
-    for (auto &entry : plugins_)
-      entry.plugin->onAmdgpuAfterExecuteInstruction(pc, inst, wf);
+  void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst, amdgpu::Wavefront &wf,
+                                        std::span<const uint32_t> fetch_window) {
+    if (!observes_before_execute_instruction_)
+      return;
+    dispatch_wave_hot_hook(&wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_before_execute_instruction &&
+            plugin_observes_hot_hooks(index, &wf, cached))
+          entry.plugin->onAmdgpuBeforeExecuteInstruction(pc, inst, wf, fetch_window);
+      }
+    });
   }
 
-  virtual void onAmdgpuRouteMemoryInstruction(const Instruction &inst, amdgpu::Wavefront &wf) {
-    for (auto &entry : plugins_)
-      entry.plugin->onAmdgpuRouteMemoryInstruction(inst, wf);
+  void onAmdgpuAfterExecuteInstruction(uint64_t pc, const Instruction &inst,
+                                       amdgpu::Wavefront &wf) {
+    if (!observes_after_execute_instruction_)
+      return;
+    dispatch_wave_hot_hook(&wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_after_execute_instruction &&
+            plugin_observes_hot_hooks(index, &wf, cached))
+          entry.plugin->onAmdgpuAfterExecuteInstruction(pc, inst, wf);
+      }
+    });
   }
 
-  virtual void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) {
-    for (auto &entry : plugins_)
-      entry.plugin->onAmdgpuDispatchPacketProcessed(info);
+  void onAmdgpuAsyncInstructionIssued(uint64_t pc, const Instruction &inst, amdgpu::Wavefront &wf) {
+    if (!observes_async_instruction_issued_)
+      return;
+    dispatch_async_hook(
+        &wf, [&](ExecutionPlugin &plugin) { plugin.onAmdgpuAsyncInstructionIssued(pc, inst, wf); });
   }
 
-  virtual void onAmdgpuDispatchExecutionBegin(uint32_t dispatch_id) {
-    for (auto &entry : plugins_)
-      entry.plugin->onAmdgpuDispatchExecutionBegin(dispatch_id);
+  void onAmdgpuRouteMemoryInstruction(const Instruction &inst, amdgpu::Wavefront &wf) {
+    if (!observes_memory_instruction_routing_)
+      return;
+    dispatch_wave_hot_hook(&wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_memory_instruction_routing &&
+            plugin_observes_hot_hooks(index, &wf, cached))
+          entry.plugin->onAmdgpuRouteMemoryInstruction(inst, wf);
+      }
+    });
   }
 
-  virtual void onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
-    for (auto &entry : plugins_)
-      entry.plugin->onAmdgpuDispatchExecutionEnd(dispatch_id);
+  /// Whether any memory-routing observer is subscribed to this wavefront.
+  bool observes_memory_routing(const amdgpu::Wavefront &wf) const {
+    const bool cached = has_hot_hook_subscription_cache(&wf);
+    for (size_t index = 0; index != plugins_.size(); ++index) {
+      const auto &entry = plugins_[index];
+      if (entry.observes_memory_routing && plugin_observes_hot_hooks(index, &wf, cached))
+        return true;
+    }
+    return false;
   }
 
-  virtual void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
-                                           uint32_t physical_vgpr_count, uint32_t sgpr_count,
-                                           std::span<amdgpu::Wavefront *> wavefronts) {
-    for (auto &entry : plugins_)
-      entry.plugin->onAmdgpuWorkgroupDispatched(dispatch_id, wg_id, physical_vgpr_count, sgpr_count,
-                                                wavefronts);
+  void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access) {
+    dispatch_with_optional_plugin_lock([&]() {
+      for (auto &entry : plugins_)
+        if (entry.observes_memory_routing)
+          entry.plugin->onAmdgpuMemoryAccessRouted(access);
+    });
   }
 
-  virtual void onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32_t wg_id) {
-    for (auto &entry : plugins_)
-      entry.plugin->onAmdgpuWorkgroupCompleted(dispatch_id, wg_id);
+  void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
+                                  const Instruction &inst, amdgpu::Wavefront &wf) {
+    dispatch_wave_hot_hook(&wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_memory_routing && plugin_observes_hot_hooks(index, &wf, cached))
+          entry.plugin->onAmdgpuMemoryAccessRouted(access, inst, wf);
+      }
+    });
   }
 
-  virtual void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
-    for (auto &entry : plugins_)
-      entry.plugin->onAmdgpuWavefrontDispatched(wf);
+  void onAmdgpuMemoryAccessCancelled(const Instruction &inst, amdgpu::Wavefront &wf) {
+    if (!observes_memory_routing_)
+      return;
+    dispatch_wave_hot_hook(&wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_memory_routing && plugin_observes_hot_hooks(index, &wf, cached)) {
+          if (auto *observer = dynamic_cast<AmdgpuMemoryCancellationObserver *>(entry.plugin.get()))
+            observer->onAmdgpuMemoryAccessCancelled(inst, wf);
+        }
+      }
+    });
   }
 
-  virtual void onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
-    for (auto &entry : plugins_)
-      entry.plugin->onAmdgpuWavefrontHalted(wf);
+  void onAmdgpuMixedFlatLdsAccess(const Instruction &inst, amdgpu::Wavefront &wf) {
+    if (!observes_memory_routing_)
+      return;
+    dispatch_wave_hot_hook(&wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_memory_routing && plugin_observes_hot_hooks(index, &wf, cached)) {
+          if (auto *observer = dynamic_cast<AmdgpuMixedFlatLdsObserver *>(entry.plugin.get()))
+            observer->onAmdgpuMixedFlatLdsAccess(inst, wf);
+        }
+      }
+    });
   }
 
-  virtual void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
-                                     uint64_t lane_mask,
-                                     uint8_t byte_mask = ExecutionPlugin::kFullByteMask) {
-    for (auto &entry : plugins_)
-      entry.plugin->onAmdgpuReadVgprLanes(wf, physical_reg, lane_mask, byte_mask);
+  void onAmdgpuImageFeedbackQualified(const Instruction &inst, amdgpu::Wavefront &wf) {
+    if (!observes_memory_routing_)
+      return;
+    dispatch_wave_hot_hook(&wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_memory_routing && plugin_observes_hot_hooks(index, &wf, cached)) {
+          if (auto *observer = dynamic_cast<AmdgpuImageFeedbackObserver *>(entry.plugin.get()))
+            observer->onAmdgpuImageFeedbackQualified(inst, wf);
+        }
+      }
+    });
   }
 
-  virtual void onAmdgpuWriteVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
-                                      uint64_t lane_mask,
-                                      uint8_t byte_mask = ExecutionPlugin::kFullByteMask) {
-    for (auto &entry : plugins_)
-      entry.plugin->onAmdgpuWriteVgprLanes(wf, physical_reg, lane_mask, byte_mask);
+  void onAmdgpuLdsDirectRead(const amdgpu::Wavefront &wf, uint32_t address, uint32_t bytes,
+                             uint32_t lane) {
+    if (!observes_lds_direct_reads_ || wf.observing_lds_direct_read_)
+      return;
+    // An observer may inspect this same operand while handling the notification.
+    class Restore {
+    public:
+      explicit Restore(bool &flag) : flag_(flag) { flag_ = true; }
+      ~Restore() { flag_ = false; }
+
+    private:
+      bool &flag_;
+    } restore(wf.observing_lds_direct_read_);
+    dispatch_wave_hot_hook(&wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        const auto &entry = plugins_[index];
+        if (entry.observes_lds_direct_reads && plugin_observes_hot_hooks(index, &wf, cached))
+          entry.plugin->onAmdgpuLdsDirectRead(wf, address, bytes, lane);
+      }
+    });
   }
 
-  virtual void onAmdgpuReadSgpr(const amdgpu::Wavefront *wf, uint32_t physical_reg) {
-    for (auto &entry : plugins_)
-      entry.plugin->onAmdgpuReadSgpr(wf, physical_reg);
+  /// Whether any tensor-DMA observer is subscribed to this wavefront.
+  bool observes_tensor_dma_memory_access(const amdgpu::Wavefront &wf) const {
+    const bool cached = has_hot_hook_subscription_cache(&wf);
+    for (size_t index = 0; index != plugins_.size(); ++index) {
+      const auto &entry = plugins_[index];
+      if (entry.observes_tensor_dma_memory_access && plugin_observes_hot_hooks(index, &wf, cached))
+        return true;
+    }
+    return false;
   }
 
-  virtual void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts) {
-    for (auto &entry : plugins_)
-      entry.plugin->onAmdgpuBarrierResolved(wavefronts);
+  void onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access) {
+    dispatch_with_optional_plugin_lock([&]() {
+      for (auto &entry : plugins_)
+        if (entry.observes_tensor_dma_memory_access)
+          entry.plugin->onAmdgpuTensorDmaMemoryAccess(access);
+    });
+  }
+
+  void onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access,
+                                     const amdgpu::Wavefront &wf) {
+    dispatch_wave_hot_hook(&wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_tensor_dma_memory_access &&
+            plugin_observes_hot_hooks(index, &wf, cached))
+          entry.plugin->onAmdgpuTensorDmaMemoryAccess(access, wf);
+      }
+    });
+  }
+
+  /// Whether any tensor-DMA issue observer is subscribed to this wavefront.
+  bool observes_tensor_dma_issue(const amdgpu::Wavefront &wf) const {
+    const bool cached = has_hot_hook_subscription_cache(&wf);
+    for (size_t index = 0; index != plugins_.size(); ++index) {
+      const auto &entry = plugins_[index];
+      if (entry.observes_tensor_dma_issue && plugin_observes_hot_hooks(index, &wf, cached))
+        return true;
+    }
+    return false;
+  }
+
+  void onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObservation &issue,
+                               const amdgpu::Wavefront &wf) {
+    dispatch_wave_hot_hook(&wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_tensor_dma_issue && plugin_observes_hot_hooks(index, &wf, cached))
+          entry.plugin->onAmdgpuTensorDmaIssued(issue, wf);
+      }
+    });
+  }
+
+  void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) {
+    dispatch_with_plugin_lock([&]() {
+      for (auto &entry : plugins_)
+        entry.plugin->onAmdgpuDispatchPacketProcessed(info);
+    });
+  }
+
+  void onAmdgpuDispatchExecutionBegin(uint32_t dispatch_id) {
+    dispatch_with_plugin_lock([&]() {
+      for (auto &entry : plugins_)
+        entry.plugin->onAmdgpuDispatchExecutionBegin(dispatch_id);
+    });
+  }
+
+  /// Publish a shared dispatch begin only for the producer that wins @p claim.
+  /// The claim runs under the same lock as every infrequent callback, so a peer
+  /// producer cannot observe a won claim and publish workgroup or wave callbacks
+  /// before the corresponding begin callback has finished.
+  template <typename Claim>
+  void onAmdgpuDispatchExecutionBeginOnce(uint32_t dispatch_id, Claim &&claim) {
+    dispatch_with_plugin_lock([&]() {
+      if (!claim())
+        return;
+      for (auto &entry : plugins_)
+        entry.plugin->onAmdgpuDispatchExecutionBegin(dispatch_id);
+    });
+  }
+
+  void onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
+    dispatch_with_plugin_lock([&]() {
+      for (auto &entry : plugins_)
+        entry.plugin->onAmdgpuDispatchExecutionEnd(dispatch_id);
+    });
+  }
+
+  void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
+                                   uint32_t physical_vgpr_count, uint32_t physical_sgpr_count,
+                                   std::span<amdgpu::Wavefront *> wavefronts) {
+    dispatch_with_plugin_lock([&]() {
+      for (auto &entry : plugins_)
+        entry.plugin->onAmdgpuWorkgroupDispatched(dispatch_id, wg_id, physical_vgpr_count,
+                                                  physical_sgpr_count, wavefronts);
+    });
+  }
+
+  void onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32_t wg_id) {
+    dispatch_with_plugin_lock([&]() {
+      for (auto &entry : plugins_)
+        entry.plugin->onAmdgpuWorkgroupCompleted(dispatch_id, wg_id);
+    });
+  }
+
+  void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
+    invalidate_hot_hook_subscription_cache(wf);
+    dispatch_with_plugin_lock([&]() {
+      for (auto &entry : plugins_)
+        entry.plugin->onAmdgpuWavefrontDispatched(wf);
+      publish_hot_hook_subscription_cache(wf);
+    });
+  }
+
+  void onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
+    // Halt callbacks still see live registers. Invalidate first so a reentrant
+    // hot hook observes the plugin's current state rather than a stale decision.
+    invalidate_hot_hook_subscription_cache(wf);
+    dispatch_with_plugin_lock([&]() {
+      for (auto &entry : plugins_)
+        entry.plugin->onAmdgpuWavefrontHalted(wf);
+    });
+  }
+
+  void onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wf) {
+    invalidate_hot_hook_subscription_cache(wf);
+    dispatch_with_plugin_lock([&]() {
+      for (auto &entry : plugins_)
+        entry.plugin->onAmdgpuWavefrontCancelled(wf);
+    });
+  }
+
+  void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg, uint64_t lane_mask,
+                             uint8_t byte_mask = ExecutionPlugin::kFullByteMask) {
+    if (!observes_vgpr_reads_)
+      return;
+    dispatch_wave_hot_hook(wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_vgpr_reads && plugin_observes_hot_hooks(index, wf, cached))
+          entry.plugin->onAmdgpuReadVgprLanes(wf, physical_reg, lane_mask, byte_mask);
+      }
+    });
+  }
+
+  void onAmdgpuWriteVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
+                              uint64_t lane_mask,
+                              uint8_t byte_mask = ExecutionPlugin::kFullByteMask) {
+    if (!observes_vgpr_writes_)
+      return;
+    dispatch_wave_hot_hook(wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_vgpr_writes && plugin_observes_hot_hooks(index, wf, cached))
+          entry.plugin->onAmdgpuWriteVgprLanes(wf, physical_reg, lane_mask, byte_mask);
+      }
+    });
+  }
+
+  void onAmdgpuReadSgpr(const amdgpu::Wavefront *wf, uint32_t physical_reg) {
+    if (!observes_sgpr_reads_)
+      return;
+    dispatch_wave_hot_hook(wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_sgpr_reads && plugin_observes_hot_hooks(index, wf, cached))
+          entry.plugin->onAmdgpuReadSgpr(wf, physical_reg);
+      }
+    });
+  }
+
+  void onAmdgpuReadScalarRegister(const amdgpu::Wavefront *wf, RegisterRef reg) {
+    if (!observes_sgpr_reads_)
+      return;
+    dispatch_wave_hot_hook(wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_sgpr_reads && plugin_observes_hot_hooks(index, wf, cached))
+          entry.plugin->onAmdgpuReadScalarRegister(wf, reg);
+      }
+    });
+  }
+
+  void onAmdgpuWriteScalarRegister(const amdgpu::Wavefront *wf, RegisterRef reg) {
+    if (!observes_scalar_register_writes_)
+      return;
+    dispatch_wave_hot_hook(wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_scalar_register_writes && plugin_observes_hot_hooks(index, wf, cached))
+          entry.plugin->onAmdgpuWriteScalarRegister(wf, reg);
+      }
+    });
+  }
+
+  void onAmdgpuTrapEntered(amdgpu::Wavefront &wf) {
+    dispatch_with_plugin_lock([&]() {
+      for (auto &entry : plugins_) {
+        if (auto *observer = dynamic_cast<AmdgpuTrapEntryObserver *>(entry.plugin.get()))
+          observer->onAmdgpuTrapEntered(wf);
+      }
+    });
+  }
+
+  void onAmdgpuImplicitMemoryWait(amdgpu::Wavefront &wf, const amdgpu::WaitFields &fields) {
+    dispatch_wave_hot_hook(&wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto *observer =
+            dynamic_cast<AmdgpuImplicitMemoryWaitObserver *>(plugins_[index].plugin.get());
+        if (observer && plugin_observes_hot_hooks(index, &wf, cached))
+          observer->onAmdgpuImplicitMemoryWait(wf, fields);
+      }
+    });
+  }
+
+  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts, BarrierKind kind) {
+    dispatch_with_plugin_lock([&]() {
+      for (auto &entry : plugins_)
+        entry.plugin->onAmdgpuBarrierResolved(wavefronts, kind);
+    });
   }
 
   static std::shared_ptr<ExecutionPluginGroup> empty_group() {
@@ -216,24 +614,133 @@ public:
   }
 
 private:
+  friend class test::ExecutionPluginGroupTestAccess;
+
+  // Keep mutex handling out of the callbacks that run without serialization.
+  template <typename Callback> RJ_NOINLINE void dispatch_with_plugin_lock(Callback &&callback) {
+    if (plugins_.empty())
+      return;
+    std::lock_guard<std::recursive_mutex> lock(callback_mutex_);
+    ++callback_lock_acquisitions_;
+    std::forward<Callback>(callback)();
+  }
+
+  template <typename Callback> void dispatch_with_optional_plugin_lock(Callback &&callback) {
+    if (plugins_.empty())
+      return;
+    if (serialize_hot_hooks_)
+      dispatch_with_plugin_lock(std::forward<Callback>(callback));
+    else
+      std::forward<Callback>(callback)();
+  }
+
+  template <typename Callback>
+  void dispatch_async_hook(const amdgpu::Wavefront *wf, Callback &&callback) {
+    dispatch_wave_hot_hook(wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        const auto &entry = plugins_[index];
+        if (entry.observes_async_instruction_issued && plugin_observes_hot_hooks(index, wf, cached))
+          callback(*entry.plugin);
+      }
+    });
+  }
+
+  [[nodiscard]] bool has_hot_hook_subscription_cache(const amdgpu::Wavefront *wf) const {
+    return wf != nullptr && wf->hot_hook_subscriptions_valid_ &&
+           wf->hot_hook_subscriptions_.size() == plugins_.size();
+  }
+
+  [[nodiscard]] bool plugin_observes_hot_hooks(size_t index, const amdgpu::Wavefront *wf,
+                                               bool cached) const {
+    if (cached)
+      return wf->hot_hook_subscriptions_[index] != 0;
+    return plugins_[index].plugin->observes_hot_hooks_for_wavefront(wf);
+  }
+
+  static void invalidate_hot_hook_subscription_cache(amdgpu::Wavefront &wf) {
+    wf.hot_hook_subscriptions_valid_ = false;
+    wf.hot_hook_observer_count_ = 0;
+  }
+
+  void publish_hot_hook_subscription_cache(amdgpu::Wavefront &wf) const {
+    wf.hot_hook_subscriptions_.resize(plugins_.size());
+    uint32_t observers = 0;
+    for (size_t index = 0; index != plugins_.size(); ++index) {
+      const bool observes = plugins_[index].plugin->observes_hot_hooks_for_wavefront(&wf);
+      wf.hot_hook_subscriptions_[index] = static_cast<uint8_t>(observes);
+      observers += static_cast<uint32_t>(observes);
+    }
+    wf.hot_hook_observer_count_ = observers;
+    wf.hot_hook_subscriptions_valid_ = true;
+  }
+
+  template <typename Callback>
+  void dispatch_wave_hot_hook(const amdgpu::Wavefront *wf, Callback &&callback) {
+    if (plugins_.empty())
+      return;
+    const bool cached = has_hot_hook_subscription_cache(wf);
+    if (cached) {
+      if (wf->hot_hook_observer_count_ == 0)
+        return;
+    } else {
+      bool observed = false;
+      for (const auto &entry : plugins_) {
+        if (entry.plugin->observes_hot_hooks_for_wavefront(wf)) {
+          observed = true;
+          break;
+        }
+      }
+      if (!observed)
+        return;
+    }
+    if (serialize_hot_hooks_)
+      dispatch_with_plugin_lock([&]() { std::forward<Callback>(callback)(cached); });
+    else
+      std::forward<Callback>(callback)(cached);
+  }
+
+  // Infrequent hooks may synchronously fire hot register hooks. Recursive
+  // acquisition preserves one cross-hook serialization domain without
+  // deadlocking that same-thread re-entry.
+  std::recursive_mutex callback_mutex_;
+  // Read only through the friend test seam. The mutex protects increments;
+  // empty groups return before touching either the mutex or this counter.
+  uint64_t callback_lock_acquisitions_ = 0;
+  bool serialize_hot_hooks_ = false;
+  bool observes_before_execute_instruction_ = false;
+  bool observes_after_execute_instruction_ = false;
+  bool observes_async_instruction_issued_ = false;
+  bool observes_memory_instruction_routing_ = false;
+  bool observes_vgpr_reads_ = false;
+  bool observes_vgpr_writes_ = false;
+  bool observes_memory_routing_ = false;
+  bool observes_lds_direct_reads_ = false;
+  bool observes_tensor_dma_memory_access_ = false;
+  bool observes_tensor_dma_issue_ = false;
+  bool observes_sgpr_reads_ = false;
+  bool observes_scalar_register_writes_ = false;
+  bool supports_async_instructions_ = true;
+
   /// Internal fanout over sinks whose lifetime is guaranteed by the owning
   /// group or SinkBundle. It is deliberately not part of the public sink API.
   class FanoutSink final : public PluginSink {
   public:
-    void add(PluginSink &sink) { children_.push_back(&sink); }
+    explicit FanoutSink(std::mutex &mutex) : mutex_(mutex) {}
 
+    void add(PluginSink &sink) { children_.push_back(&sink); }
     void write(std::string_view msg) override {
+      std::lock_guard<std::mutex> lock(mutex_);
       for (auto *sink : children_)
         sink->write(msg);
     }
-
     bool empty() const { return children_.empty(); }
 
   private:
+    std::mutex &mutex_;
     std::vector<PluginSink *> children_;
   };
 
-protected:
+private:
   /// Owns one fanout sink and any per-fanout child sinks. Member order ensures
   /// the fanout is destroyed before the children it references.
   class SinkBundle {
@@ -250,13 +757,13 @@ protected:
 
   /// Build a sink combining configured sinks + optional file sink.
   /// Returns an empty bundle if no sinks are configured.
-  [[nodiscard]] SinkBundle build_sink_bundle(const std::string &file_name) const {
-    bool has_file = !sink_dir_.empty() && !file_name.empty();
-    if (configured_sinks_.empty() && !has_file)
+  [[nodiscard]] SinkBundle build_sink_bundle(const std::string &file_name) {
+    bool has_file = !file_sinks_deferred_ && !sink_dir_.empty() && !file_name.empty();
+    if (configured_sinks_.empty() && !has_file && !file_sinks_deferred_)
       return {};
 
     SinkBundle result;
-    auto fanout = std::make_unique<FanoutSink>();
+    auto fanout = std::make_unique<FanoutSink>(sink_mutex_);
     for (const auto &s : configured_sinks_)
       fanout->add(*s);
     if (has_file) {
@@ -277,16 +784,28 @@ protected:
     return result;
   }
 
-private:
   // These sinks are declared before plugin entries so plugins and their local
   // fanouts are destroyed before the configured sinks they reference.
+  std::mutex sink_mutex_;
   std::vector<std::unique_ptr<PluginSink>> configured_sinks_;
   std::string sink_dir_;
-
+  bool file_sinks_deferred_ = false;
   /// Owns the sink assigned to one plugin. The plugin is declared last and is
   /// therefore destroyed before its sink bundle.
   struct PluginEntry {
     SinkBundle sink;
+    bool observes_before_execute_instruction = true;
+    bool observes_after_execute_instruction = true;
+    bool observes_async_instruction_issued = true;
+    bool observes_memory_instruction_routing = true;
+    bool observes_vgpr_reads = true;
+    bool observes_vgpr_writes = true;
+    bool observes_sgpr_reads = true;
+    bool observes_scalar_register_writes = true;
+    bool observes_memory_routing = false;
+    bool observes_tensor_dma_memory_access = false;
+    bool observes_tensor_dma_issue = false;
+    bool observes_lds_direct_reads = false;
     OwnedPlugin plugin;
   };
 

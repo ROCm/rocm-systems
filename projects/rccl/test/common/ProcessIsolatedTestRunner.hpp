@@ -20,6 +20,29 @@ namespace RcclUnitTesting
 {
 
 /**
+ * @brief Shrinks a detected GPU pool to the number of devices HIP can open.
+ *
+ * Both pool sources over-report. KFD topology sysfs is not namespaced per
+ * container, so a partitioned CI slot still sees the host's GPUs, and an
+ * inherited HIP_VISIBLE_DEVICES is just whatever the caller set. Handing a
+ * child an ordinal HIP cannot open fails it with hipErrorNoDevice instead of
+ * running or skipping it.
+ *
+ * Clamping is by *length*, not by discarding ids >= @p hipDeviceCount. The
+ * pool holds absolute device ids in whatever order its source gave them, and
+ * HIP makes visible the longest valid prefix of HIP_VISIBLE_DEVICES and
+ * reports its length, so the leading @p hipDeviceCount entries are exactly
+ * the openable ones. Dropping ids by value would instead empty a legitimate
+ * pool: HIP_VISIBLE_DEVICES=4,5,6,7 on an 8-GPU host reports 4 devices even
+ * though every id in it is >= 4.
+ *
+ * A non-positive @p hipDeviceCount means the probe failed or HIP opened no
+ * device; the pool is returned unchanged, since an empty pool is a hard
+ * pool-detection failure in the runner.
+ */
+std::vector<int> clampPoolToDeviceCount(std::vector<int> pool, int hipDeviceCount);
+
+/**
  * @brief Generic thread-safe process isolated test runner
  *
  * This class provides a framework for running tests in isolated processes
@@ -325,6 +348,13 @@ public:
      * @return Number of registered tests
      */
     static size_t getTestCount();
+
+    /**
+     * @brief Flush stdio and coverage data, then _exit() with the given code
+     * @note Use in forked or re-exec'd children: _exit() skips the atexit
+     *       handlers that would otherwise write coverage data.
+     */
+    [[noreturn]] static void exitChild(int code);
 };
 
 // Macros for Simplified Usage

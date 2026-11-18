@@ -168,7 +168,7 @@ class ROContext : public Context {
 
   __device__ void broadcastmem_wg(rocshmem_team_t team, void *dest, const void *source,
                             int nelems, int pe_root);
-                            
+
   template <typename T>
   __device__ int broadcast_wave(rocshmem_team_t team,
                                 T *dest, const T* source, int nelems, int PE_root);
@@ -191,10 +191,10 @@ class ROContext : public Context {
                             const size_t source_displs[]);
 
   template <typename T>
-  __device__ int alltoall_wave(rocshmem_team_t team, T* dest, 
+  __device__ int alltoall_wave(rocshmem_team_t team, T* dest,
                                   const T* source, int nelems);
 
-  __device__ int alltoallmem_wave(rocshmem_team_t team, void* dest, 
+  __device__ int alltoallmem_wave(rocshmem_team_t team, void* dest,
                                   const void* source, int nelems);
 
   template <typename T>
@@ -408,6 +408,14 @@ class ROContext : public Context {
   __device__ uint64_t *get_g_ret_buf();
 
   __device__ volatile char *get_status_flag();
+
+  __device__ void post_network_nbi(ro_net_cmds cmd, void *dest, const void *source, size_t nelems, int pe);
+
+  __device__ bool elect_queue_lane();
+
+  __device__ void proxy_fence();
+
+  __device__ void record_nbi_fenced(uint64_t posted);
 
   BlockHandle *block_handle{nullptr};
 

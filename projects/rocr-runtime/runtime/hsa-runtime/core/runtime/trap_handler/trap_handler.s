@@ -344,9 +344,13 @@ trap_entry:
 .endif
 
 .not_host_trap:
-  // It's an s_trap; advance the PC
+  // We have an s_trap.  We should advance the PC past the trap instruction
+  // except for s_trap 2 (TRAP_ID_ABORT).
+  s_cmp_eq_u32                          ttmp2, TRAP_ID_ABORT
+  s_cbranch_scc1                        .skip_advance_pc
   s_add_u32                             ttmp0, ttmp0, 0x4
   s_addc_u32                            ttmp1, ttmp1, 0x0
+.skip_advance_pc:
 
   // If llvm.debugtrap and debugger is not attached.
   s_cmp_eq_u32                          ttmp2, TRAP_ID_DEBUGTRAP
@@ -455,7 +459,7 @@ trap_entry:
 
   // ttmp2=local_entry, ttmp7=buf_to_use (also in bit31 of TTMP_REG2), TTMP_REG1=buf_size
   // ttmp[14:15] is tma->host_trap_buffers. Available: ttmp3, ttmp[4:5]
-.if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor == 4)
+.if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)
   s_mul_i32                             ttmp6, ttmp6, ttmp7             // ttmp[4:5]=buf_size if ...
   s_mul_i32                             ttmp4, ttmp6, 0x40              // buf_to_use=1, 0 otherwise
   s_mul_hi_u32                          ttmp5, ttmp6, 0x40

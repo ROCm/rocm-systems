@@ -8,10 +8,65 @@ from __future__ import annotations
 import ast
 import re
 
-import astunparse
-
+from utils.logger import console_warning
 from utils.utils_common import SUPPORTED_FIELD
-from utils.utils_counter_defs import SUPPORTED_DENOM
+from utils.utils_counter_defs import AMMOLITE_VAR_RE, SUPPORTED_DENOM
+
+RAW_PMC_COLUMN_RE = re.compile(r"raw_pmc_df\[['\"]([^'\"]+)['\"]\]")
+
+
+class InvalidExpressionError(ValueError):
+    """Raised when a metric formula contains disallowed AST constructs."""
+
+
+# ast.Attribute is deliberately omitted — it enables dunder-chain escapes.
+ALLOWED_AST_NODES: frozenset[type] = frozenset({
+    ast.Module,
+    ast.Expr,
+    ast.Expression,
+    ast.Constant,
+    ast.Name,
+    ast.Tuple,
+    ast.List,
+    ast.BinOp,
+    ast.UnaryOp,
+    ast.Compare,
+    ast.BoolOp,
+    ast.IfExp,
+    ast.Call,
+    ast.keyword,
+    ast.Subscript,
+    ast.Slice,
+    ast.Load,
+    ast.Add,
+    ast.Sub,
+    ast.Mult,
+    ast.Div,
+    ast.FloorDiv,
+    ast.Mod,
+    ast.Pow,
+    ast.BitOr,
+    ast.BitAnd,
+    ast.BitXor,
+    ast.LShift,
+    ast.RShift,
+    ast.Invert,
+    ast.USub,
+    ast.UAdd,
+    ast.Not,
+    ast.Eq,
+    ast.NotEq,
+    ast.Lt,
+    ast.Gt,
+    ast.LtE,
+    ast.GtE,
+    ast.In,
+    ast.NotIn,
+    ast.Is,
+    ast.IsNot,
+    ast.And,
+    ast.Or,
+})
 
 SUPPORTED_CALL: dict[str, str] = {
     # If the below has a single arg, like(expr), it is an aggr,
@@ -30,32 +85,37 @@ SUPPORTED_CALL: dict[str, str] = {
     "ROUND": "to_round",
     "QUANTILE": "to_quantile",
     "MOD": "to_mod",
-    # Concat operation from the memory chart "active cus"
+    # String concatenation operation
     "CONCAT": "to_concat",
-    # Threshold-based clamping for multi-pass profiling noise
-    "NOISE_CLAMP": "to_noise_clamp",
 }
 
 
 class CodeTransformer(ast.NodeTransformer):
     """Python AST visitor to transform user equation strings to df format."""
 
+    def generic_visit(self, node: ast.AST) -> ast.AST:
+        if type(node) not in ALLOWED_AST_NODES:
+            raise InvalidExpressionError(
+                f"Disallowed expression element: {type(node).__name__}"
+            )
+        return super().generic_visit(node)
+
     def visit_Call(self, node: ast.Call) -> ast.Call:
-        self.generic_visit(node)
         if isinstance(node.func, ast.Name):
-            if node.func.id in SUPPORTED_CALL:
-                node.func.id = SUPPORTED_CALL[node.func.id]
-            else:
-                raise Exception("Unknown call:", node.func.id)
+            if node.func.id not in SUPPORTED_CALL:
+                raise InvalidExpressionError(f"Unsupported call: {node.func.id}")
+            self.generic_visit(node)
+            node.func.id = SUPPORTED_CALL[node.func.id]
+        else:
+            self.generic_visit(node)
         return node
 
     def visit_IfExp(self, node: ast.IfExp) -> ast.Expr:
         self.generic_visit(node)
 
         if isinstance(node.body, ast.Constant):
-            raise Exception(
-                "Don't support body of IF with number only! Has to be expr with "
-                "df['column']."
+            raise InvalidExpressionError(
+                "IF body must contain a df['column'] expression, not a literal"
             )
 
         new_node = ast.Expr(
@@ -86,6 +146,23 @@ class CodeTransformer(ast.NodeTransformer):
                 ctx=ast.Load(),
             )
         return node
+
+
+def transform_expression(
+    ast_node: ast.AST,
+    source: str,
+) -> bool:
+    """Run CodeTransformer on *ast_node*, warning on invalid formulas.
+
+    Returns True on success, False when the expression was rejected.
+    """
+    transformer = CodeTransformer()
+    try:
+        transformer.visit(ast_node)
+    except InvalidExpressionError as exc:
+        console_warning(f"Invalid metric expression '{source}': {exc}")
+        return False
+    return True
 
 
 def build_eval_string(equation: str) -> str:
@@ -142,16 +219,33 @@ def build_eval_string(equation: str) -> str:
 
     # convert equation string to intermediate expression in df array format
     ast_node = ast.parse(equation_string)
-    transformer = CodeTransformer()
-    transformer.visit(ast_node)
+    if not transform_expression(ast_node, equation):
+        return ""
 
-    equation_string = astunparse.unparse(ast_node)
+    equation_string = ast.unparse(ast_node)
 
     # correct column name/label in df with [], such as TCC_HIT[0],
     # the target is df['TCC_HIT[0]']
     equation_string = re.sub(r"\'\]\[(\d+)\]", r"[\g<1>]']", equation_string)
 
     return equation_string
+
+
+def columns_read(eval_string: str, build_in_vars: dict[str, str]) -> set[str]:
+    """Return the raw_pmc_df columns an eval string reads. Columns that its
+    built-in variables read count too."""
+    columns = set(RAW_PMC_COLUMN_RE.findall(eval_string))
+    pending = set(AMMOLITE_VAR_RE.findall(eval_string))
+    seen: set[str] = set()
+    while pending:
+        name = pending.pop()
+        seen.add(name)
+        if name not in build_in_vars:
+            continue
+        builtin_string = build_eval_string(build_in_vars[name])
+        columns.update(RAW_PMC_COLUMN_RE.findall(builtin_string))
+        pending.update(set(AMMOLITE_VAR_RE.findall(builtin_string)) - seen)
+    return columns
 
 
 def update_denominator_string(equation: str, normal_unit: str) -> str:
@@ -184,75 +278,6 @@ def update_normal_unit_string(equation: str, normal_unit: str) -> str:
         rf"\g<PREFIX> {re.sub('_', ' ', normal_unit)}",
         str(equation),
     )
-
-
-def gen_counter_list(formula: str) -> tuple[bool, list[str]]:
-    function_filter = {
-        "MIN": None,
-        "MAX": None,
-        "AVG": None,
-        "ROUND": None,
-        "TO_INT": None,
-        "GB": None,
-        "STD": None,
-        "GFLOP": None,
-        "GOP": None,
-        "OP": None,
-        "CU": None,
-        "NC": None,
-        "UC": None,
-        "CC": None,
-        "RW": None,
-        "GIOP": None,
-        "GFLOPs": None,
-        "CONCAT": None,
-        "MOD": None,
-    }
-
-    built_in_counter = [
-        "LDS_Per_Workgroup",
-        "Grid_Size",
-        "Workgroup_Size",
-        "Arch_VGPR",
-        "Accum_VGPR",
-        "SGPR",
-        "Scratch_Per_Workitem",
-        "Start_Timestamp",
-        "End_Timestamp",
-    ]
-
-    visited = False
-    counters: list[str] = []
-    if not isinstance(formula, str):
-        return visited, counters
-    try:
-        tree = ast.parse(
-            formula
-            .replace("$normUnit", "SQ_WAVES")
-            .replace("$denom", "SQ_WAVES")
-            .replace(
-                "$numActiveCUs",
-                "TO_INT(MIN((((ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / "
-                "$GRBM_GUI_ACTIVE_PER_XCD})), 0) / $maxWavesPerCU) * 8) + "
-                "MIN(MOD(ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / "
-                "$GRBM_GUI_ACTIVE_PER_XCD)), 0), $maxWavesPerCU), 8)), $numCU))",
-            )
-            .replace("$", "")
-        )
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Name):
-                val = (
-                    str(node.id)[:-4] if str(node.id).endswith("_sum") else str(node.id)
-                )
-                if val.isupper() and val not in function_filter:
-                    counters.append(val)
-                    visited = True
-                if val in built_in_counter:
-                    visited = True
-    except Exception:
-        pass
-
-    return visited, counters
 
 
 def build_metric_value_string(

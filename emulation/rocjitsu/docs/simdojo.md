@@ -16,19 +16,19 @@ event loop via the `Functional<Base>` CRTP mixin.
 | `component.h` | Node, Component, CompositeComponent, Link, Port, QueuedLink |
 | `component.cpp` | Implementation for Component, CompositeComponent, Link |
 | `clock_domain.h` | ClockDomain (frequency, period, phase offset) |
-| `clocked.h` | Clocked\<Base\> Curiously Recurring Template Pattern (CRTP) mixin for clock-driven components |
+| `clocked.h` | `Clocked<Base>` Curiously Recurring Template Pattern (CRTP) mixin for clock-driven components |
 | `topology.h` | Topology, Partition, AdjacencyGraph, Partitioner |
 | `topology.cpp` | Topology wiring, graph construction, multilevel Fiduccia-Mattheyses (FM) partitioning |
-| `functional.h` | Functional\<Base\> CRTP mixin for untimed components |
-| `exec_mode.h` | ExecMode enum (FUNCTIONAL, CLOCKED) and ExecBase\<Mode, Base\> alias |
+| `functional.h` | `Functional<Base>` CRTP mixin for untimed components |
+| `exec_mode.h` | ExecMode enum (FUNCTIONAL, CLOCKED) and `ExecBase<Mode, Base>` alias |
 | `pacing_controller.h` | PacingController - PI-controlled wall-clock pacing with token bucket burst absorption |
 | `simulation.h` | PartitionContext, SimulationEngine |
 | `simulation.cpp` | Engine run loop, event dispatch, LBTS computation (multi-threaded) |
 | `components/memory_interface.h` | MemoryInterface - abstract byte-addressed memory controller |
-| `components/cache.h` | Cache\<NumSets, Assoc, LineSizeBits\> - set-associative cache template |
+| `components/cache.h` | `Cache<NumSets, Assoc, LineSizeBits>` - set-associative cache template |
 | `components/sparse_memory.h` | SparseMemory - page-allocated flat address space |
 | `components/register_file.h` | RegisterFile - typed register storage with read/write interface |
-| `components/vector_reg.h` | VectorReg\<N, T\> - SIMD-width vector register type |
+| `components/vector_reg.h` | `VectorReg<N, T>` - SIMD-width vector register type |
 | *(uses `util/debug_print.h`)* | Conditional debug output (`util::debug` namespace) |
 
 ---
@@ -209,6 +209,98 @@ controllers.
 indexed read/write access. **VectorReg** (`vector_reg.h`) models a
 SIMD-width vector register with per-element access.
 
+### Register-file storage
+
+The functional GPU model provisions vector-register storage for every fixed
+wavefront slot in each simulated compute unit. Slots are independent of
+hardware occupancy: a wave that uses many registers still occupies one
+simulator slot, and register pressure does not reduce the number of admitted
+waves. For the shipped gfx942 configuration, the vector backing has the
+following dimensions:
+
+| Quantity                  | Value                                      |
+|---------------------------|--------------------------------------------|
+| Simulated compute units   | 320                                        |
+| Wavefront slots per CU    | 32                                         |
+| Registers per slot        | 512 combined VGPR and AGPR entries         |
+| Register width            | 64 lanes × 4 bytes                         |
+| Complete vector backing   | 1,280 MiB                                  |
+
+`RegisterFile` divides the physical VGPR index space into fixed 4 KiB chunks.
+An untouched chunk is represented by a null entry and reads as zero; its
+storage is allocated and zero-initialized on the first mutable access. Retiring
+a wave makes wholly covered chunks logically absent and clears any shared
+boundary chunk. Each lazy register file retains up to 64 KiB of retired chunks,
+which are zeroed when reused; excess chunks release their allocations.
+`materialized_chunk_count()` excludes these retained spares.
+The implementation uses only portable C++ allocation and does not require
+virtual-memory APIs. Mutable handles and handles into materialized registers
+remain stable until their allocation retires, but the complete register file is
+deliberately not contiguous. Const access to an unmaterialized register observes
+its logical zero value through shared immutable backing without allocating a
+chunk. That read-only handle is an ephemeral value observation, not a persistent
+storage identity, and need not observe a later write through another handle.
+
+This is a functional storage model, not a model of a physical register file.
+In particular, filling all 32 simulator slots with high-pressure waves can
+represent an occupancy that hardware could not admit. That distinction is
+important when interpreting memory measurements or using register pressure to
+approximate hardware throughput.
+
+#### Representative workloads
+
+The fixed-topology and IREE measurements were collected on 2026-08-10 from
+rocjitsu revision `49e6ddafeb9fd8cadda1c78b891466fd498ec676`. Fixed topology
+reports the median of six processes; IREE reports the median of five processes,
+all of which matched the checked-in output exactly. The CTS rows report the
+median of three source-identical processes from rocjitsu revision
+`4d5779c15beb0d9495b319dce5d906e966275e23` and test-corpus revision
+`ce5da512188dd40de0bc7da298ec11b587d8fdd3`; all tests passed. Every build was
+Release, pinned to CPU 8, and used an AMD EPYC 9554 host running Linux 6.8.
+
+| Workload                             | Eager runtime | Software runtime | Eager peak RSS | Software peak RSS | Effect                              |
+|--------------------------------------|--------------:|-----------------:|---------------:|------------------:|-------------------------------------|
+| Fixed topology, no kernel            |        0.87 s |          0.125 s |  1,511,424 KiB |       201,728 KiB | 85.6% faster, 86.7% less RSS        |
+| IREE softmax, exact output            |        2.50 s |           0.99 s |  1,630,208 KiB |       326,656 KiB | 60.4% faster, 80.0% less RSS        |
+| CTS math                             |       28.37 s |          27.94 s |  2,235,924 KiB |       926,788 KiB | 1.5% faster, 58.5% less RSS         |
+| CTS MFMA                             |      151.40 s |         150.78 s |  2,235,392 KiB |       926,720 KiB | 0.4% faster, 58.5% less RSS         |
+
+Unlike fixed topology and the shorter IREE workload, the CTS suites are
+dominated by simulated instruction execution and therefore amortize the fixed
+initialization work that lazy storage eliminates. Across three runs, the
+startup proxy (whole-process wall time minus test-body time) fell from about
+1.29 seconds to 0.54 seconds. Test-body time increased by 1.2% for math and was
+unchanged to measurement precision for MFMA (+0.1%). The result is a smaller
+end-to-end runtime improvement even as peak RSS falls by 58.5%.
+
+#### Worst-case saturation validation
+
+The qualified gfx942 saturation workload was measured on 2026-08-10 from
+rocjitsu revision `49e6ddafeb9fd8cadda1c78b891466fd498ec676`. The
+representative case places eight waves on each of one XCD's 40 CUs and reports
+three-launch medians. The all-slot case deliberately fills all 32 functional
+simulator slots on all 320 CUs with 253-VGPR waves—an occupancy that hardware
+could not admit—and reports one checksum-validated launch.
+
+| Saturation runtime                          |       Eager | Software lazy | Change      |
+|---------------------------------------------|------------:|--------------:|-------------|
+| 253-VGPR initialization-only median launch  |  156.201 ms |    157.479 ms | 0.8% slower |
+| 253-VGPR eight-update median launch         | 1,332.955 ms |  1,335.671 ms | 0.2% slower |
+| All-slot 253-VGPR eight-update timed launch |    48.127 s |      48.780 s | 1.4% slower |
+
+Peak RSS is a process-wide high-water measurement. The representative sweep
+therefore has one result covering all 9--253-VGPR pressure points rather than
+separate values for its individual launch timings.
+
+| Saturation peak RSS                |          Eager | Software lazy | Change         |
+|------------------------------------|---------------:|--------------:|----------------|
+| Complete 9--253-VGPR sweep         | 1,609,728 KiB  |  318,280 KiB  | 80.2% less RSS |
+| All slots, 253 VGPR, eight updates | 1,622,016 KiB  |  967,064 KiB  | 40.4% less RSS |
+
+The qualified workload, complete methodology, and reproduction commands are
+pinned at rocjitsu test corpus revision
+[`b3f5fa8a263ee2cd83666a62bc18731b09b1166a`](https://github.com/ROCm/rocjitsu-test-corpus/tree/b3f5fa8a263ee2cd83666a62bc18731b09b1166a/corpus/kernels/benchmarks/vgpr_saturation).
+
 ---
 
 ## Messages and Events
@@ -231,8 +323,11 @@ priority (highest priority first):
 
 1. `TIMER_CALLBACK` - scheduled timer/tick callback (used by `Clocked`)
 2. `MESSAGE_ARRIVAL` - a message arrived at a port
-3. `SIM_EXIT` - simulation exit sentinel (lowest priority, ensures all real
-   events at `max_ticks` fire before the exit)
+3. `SIM_EXIT` - lowest-priority exit sentinel scheduled at a positive
+   `max_ticks` by single-threaded `run()` or the first `step()`. Queued timers
+   and messages at that tick have priority over the exit. The
+   [partitioned engine](#multi-threaded-path) enforces the limit at its epoch
+   barrier, before processing the epoch at `max_ticks`.
 
 Events with the same timestamp are ordered by type priority, then by
 sequence number for deterministic tie-breaking.
@@ -275,7 +370,12 @@ building and wiring a model.
 SimulationEngine engine({.max_ticks = 10000, .num_threads = 4});
 
 // Create clock domains.
-auto *core_clk = engine.topology().add_clock_domain("core", 1'000'000'000);
+util::StringDiagnostic diagnostic;
+auto maybe_core_clk =
+    engine.topology().add_clock_domain("core", 1'000'000'000, 0, diagnostic.emitter());
+if (maybe_core_clk.failed())
+  return; // report diagnostic.message()
+auto *core_clk = maybe_core_clk.value();
 
 // Build the component tree.
 auto root = std::make_unique<CompositeComponent>("soc");
@@ -288,8 +388,10 @@ engine.topology().set_root(std::move(root));
 engine.topology().add_link(pipe_req_port, mem_req_port, /*latency=*/10);
 engine.topology().add_link(mem_resp_port, pipe_resp_port, /*latency=*/5);
 
-engine.topology().partition_balanced(4);
-engine.create();
+if (engine.topology().partition_balanced(4, diagnostic.emitter()).failed())
+  return; // report diagnostic.message()
+if (engine.create(diagnostic.emitter()).failed())
+  return; // report diagnostic.message()
 auto exit = engine.run();
 ```
 
@@ -319,8 +421,8 @@ scheduling events during `startup()`:
 - A `Clocked` component schedules clock-edge events (timing simulation).
 - A `Functional` component self-schedules a timer callback and re-enqueues
   after each `advance()` (untimed simulation within the event loop).
-- If no events are ever scheduled and no primaries are registered, the
-  simulation terminates via quiescence.
+- If no events are scheduled and no primaries are registered, the simulation
+  terminates via quiescence unless it is configured to await the first primary.
 
 ### Single-Threaded Path
 
@@ -333,10 +435,10 @@ structure. When the queue empties:
 3. Run service callbacks
 4. Drain async event buffers
 5. If new events appeared, continue processing
-6. Check termination (quiescence or all primaries done)
-7. If primaries are active, pause the pacing clock and block on `idle_cv_`
-   until an async event or shutdown arrives (with a timed wait when pacing
-   is enabled)
+6. Check the termination conditions in the [primary protocol](#primary-component-protocol)
+7. If the protocol calls for waiting, pause the pacing clock and use
+   `idle_wait_quiescent()` until an async event or shutdown arrives (with a timed
+   wait when pacing is enabled)
 8. After wake, resume the pacing clock and drain async events
 
 ### Multi-Threaded Path
@@ -355,15 +457,17 @@ Phase 4: Arrive at barrier (completion function computes new global_lbts)
 ```
 
 The **barrier completion function** runs exactly once after all threads
-arrive. It computes `global_lbts = min(local_next[i])` across all
-partitions, updates `current_time_`, runs service callbacks periodically,
-and checks termination conditions.
+arrive. It drains buffered async events before advancing simulation time.
+The new `global_lbts` is the minimum of the published partition bounds
+and the resulting event queue heads. The function then updates
+`current_time_` and checks termination conditions.
 
 The barrier provides a consistent global snapshot without per-channel null
 messages or vector clocks.
 
-**Quiescence detection** is trivial: if `global_lbts = TICK_MAX` after
-a barrier, all partitions are idle and the simulation terminates.
+**Quiescence detection**: if `global_lbts = TICK_MAX` after a barrier, all
+partitions are idle. The [primary protocol](#primary-component-protocol)
+determines whether the engine waits or stops.
 
 **Termination after primaries**: when all registered primaries have
 signaled `primary_release()`, the barrier completion function checks
@@ -371,8 +475,12 @@ signaled `primary_release()`, the barrier completion function checks
 drained) before terminating, ensuring in-flight cross-partition messages
 are fully delivered.
 
-**max_ticks**: in multi-threaded mode, checked by the barrier completion
-function when `global_lbts >= max_ticks`.
+In a finite run, once the next event reaches or exceeds `max_ticks`, the engine exits with
+`ExitCause::MAX_TICKS` at `max_ticks` without processing that epoch. If new
+async work arrived during the barrier's drain, it keeps the previous bound
+until the next epoch can account for that work. In the
+single-threaded loop, a callback at that tick can run before the limit sentinel.
+If the partitions become idle before the limit, the primary protocol applies.
 
 ### Wall-Clock Pacing
 
@@ -436,8 +544,9 @@ reporting.
 The simulation reports its termination reason through `ExitStatus`, a
 first-class value type.
 
-- `ExitReason::COMPLETED` - normal completion (all primaries done or
-  max_ticks reached)
+- `ExitReason::COMPLETED` - a successful engine stop; `ExitStatus::cause`
+  distinguishes all primaries done, ordinary quiescence, `max_ticks`, and a
+  finite-run active-primary stall
 - `ExitReason::EXIT_REQUEST` - a component called `request_exit()`
 - `ExitReason::INTERRUPTED` - external interrupt (ctrl-C, watchdog)
 
@@ -465,18 +574,27 @@ engine()->primary_release();
 engine()->primary_retain();
 ```
 
-The simulation ends gracefully when **all** registered primaries have
-called `primary_release()`. This is checked via a unified
-`check_termination()` helper alongside `max_ticks` and quiescence
-detection. The exit reason is `COMPLETED` with a descriptive message
-distinguishing the trigger.
+An unlimited simulation ends gracefully when **all** registered primaries
+have called `primary_release()`. This is checked via a unified
+`check_termination()` helper alongside `max_ticks` and quiescence detection.
+Successful exits use `ExitReason::COMPLETED`; `ExitStatus::cause` distinguishes
+primary completion, ordinary quiescence, tick exhaustion, and a finite-run
+active-primary stall without depending on the diagnostic message.
 
-Primaries also suppress quiescence termination: if any primary is registered
-but has not yet signaled OK, the engine will not exit when the event queue
-is empty. In single-threaded mode, the worker blocks on a condition variable
-until an async event or shutdown arrives. In multi-threaded mode, the
-barrier continues cycling and `check_termination()` defers exit until all
-primaries signal done AND the system is fully quiescent.
+When all partitions are idle, the engine handles primaries as follows:
+
+- With an active primary, an unlimited run waits for an async event or shutdown.
+  A finite run that becomes idle before `max_ticks` returns
+  `ExitCause::ACTIVE_PRIMARY_STALL` at the last processed tick.
+- With `await_primaries` set and no primary registered yet, both finite and
+  unlimited runs wait for an async event or shutdown. A finite run keeps its
+  tick budget while waiting.
+- With all registered primaries released, the engine returns
+  `ExitCause::ALL_PRIMARIES_COMPLETED` once pending work is drained. If no primary
+  ever registered and `await_primaries` is clear, it returns
+  `ExitCause::QUIESCENCE`.
+
+Reaching the tick limit returns `ExitCause::MAX_TICKS`.
 
 This complements `request_exit()`: primaries are the cooperative
 termination path (consensus); `request_exit()` is the unilateral force
@@ -490,11 +608,12 @@ partition's queue safely. Events are buffered in a per-partition
 event queue at the next safe point:
 
 - In `worker_loop` (single-threaded): after the queue empties
-- In `worker_loop` (multi-threaded): at Phase 1 of each barrier epoch
+- In `worker_loop` (multi-threaded): at Phase 1 of each epoch and in the barrier completion function
 - In `step()`: at the start of each call, before processing
 
-In multi-threaded mode, async event timestamps are floored at the global
-LBTS to ensure they are not placed before the already-committed safe time.
+In multi-threaded mode, async event timestamps are floored at the last
+committed simulation tick or the receiving partition's current tick,
+whichever is later. This floor still applies when all partitions are idle.
 
 `schedule_event_now()` is the preferred API for external stimulus. It
 translates the current wall time to a simulation tick (via
@@ -508,8 +627,10 @@ For GUI, debugger, or test harness use. Single-threaded only. On the first
 call, starts all components (initialization happens in `create()`). Each
 subsequent call drains async events and advances to the next event time,
 processing all events at that timestamp. Ticks without scheduled events
-are skipped. Returns true if the simulation can continue. If the queue is
-empty but primaries are registered, returns true so the caller can poll.
+are skipped. Returns true if the simulation can continue. When idle, `step()`
+uses the same primary protocol and returns true in the waiting cases so the
+caller can poll. It returns false when the engine stops. Inspect
+`last_exit().cause` to distinguish the outcomes.
 
 ---
 
@@ -517,10 +638,13 @@ empty but primaries are registered, returns true so the caller can poll.
 
 ```cpp
 SimulationEngine engine({.max_ticks = 10000, .num_threads = 4});
+util::StringDiagnostic diagnostic;
 engine.topology().set_root(std::move(my_model));
 engine.topology().add_link(src_port, dst_port, latency);
-engine.topology().partition_balanced(4);
-engine.create();       // validates partitions, initializes components
+if (engine.topology().partition_balanced(4, diagnostic.emitter()).failed())
+  return; // report diagnostic.message()
+if (engine.create(diagnostic.emitter()).failed())
+  return; // report diagnostic.message()
 // (user enqueues work via CP)
 auto exit = engine.run();   // starts up components, runs to completion
 engine.shutdown();    // called automatically by destructor if needed

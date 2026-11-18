@@ -14,10 +14,12 @@
 /// EXPECT_EQ (util::set_force_scalar_for_testing flips the gate in-process).
 /// In-process inactive SGPR-pair bits must be zeroed.
 
+#include "compute_unit_test_util.h"
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -106,7 +108,9 @@ struct Fixture {
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_vopc_vop3_fp16", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_vopc_vop3_fp16", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
     decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -123,7 +127,7 @@ struct Fixture {
 
   uint64_t run(Instruction *inst, uint32_t rot, uint64_t exec, uint64_t vcc_in) {
     seed_inputs(rot, exec, vcc_in);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     return wf->vcc();
   }
 };
@@ -145,11 +149,13 @@ void check_case(const Case &c, uint64_t exec) {
                       uint64_t vcc_in) -> uint64_t {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_cmp_encode(c.opcode, /*vdst=*/kVccSdst, /*src0=*/256, /*src1=*/257, abs, neg, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed (abs=" << abs << " neg=" << neg << ")";
     uint64_t vcc = fx.run(inst, rot, exec, vcc_in);
     delete inst;

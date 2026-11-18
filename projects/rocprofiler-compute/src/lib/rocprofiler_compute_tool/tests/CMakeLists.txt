@@ -12,6 +12,17 @@ add_executable(
     test_sdk_callbacks.cpp
     test_environ_cache.h
     test_environ_cache.cpp
+    test_counters_writer.h
+    test_counters_writer.cpp
+    test_output_registry.h
+    test_output_registry.cpp
+    test_kernel_name.cpp
+    test_dispatch_writer.h
+    test_dispatch_writer.cpp
+    test_kernel_symbols_writer.h
+    test_kernel_symbols_writer.cpp
+    test_agent_writer.h
+    test_agent_writer.cpp
     mocks.h
     mocks.cpp
     main.cpp
@@ -26,6 +37,15 @@ target_link_libraries(
         gsl_assert
         fmt::fmt
         asan_build_dependencies
+)
+
+# TheRock's post-hook overwrites INSTALL_RPATH with its own computed value, so
+# this only takes effect in standalone TEST_FROM_INSTALL builds, where nothing
+# else stamps an RPATH and librocprofiler-compute-tool.so is otherwise unfound.
+set_target_properties(
+    ${target}
+    PROPERTIES
+        INSTALL_RPATH "$ORIGIN/../../../${CMAKE_INSTALL_LIBDIR}/${CMAKE_PROJECT_NAME}"
 )
 
 if(INSTALL_TESTS)

@@ -3,9 +3,18 @@
 
 """Shared metric-evaluation helpers used by evaluation_pipeline and analysis_db."""
 
+import builtins
+from typing import Any, Dict
+
 import pandas as pd
 
 from utils.logger import console_warning
+
+# numpy's C-level warning machinery lazily imports using the caller's frame
+# globals, so an empty __builtins__ raises KeyError: '__import__' instead of
+# warning. Exposing __import__ alone keeps every other builtin (open, exec,
+# getattr, ...) out of metric expressions.
+EVAL_BUILTINS: Dict[str, Any] = {"__import__": builtins.__import__}
 
 
 class ValuDualIssueDetector:

@@ -305,9 +305,16 @@ protected:
     int MarkOutputPictures();
 
     /*! \brief Function to find a free buffer in the decode buffer pool
+     * \param [out] p_dec_buf_idx Index of the free buffer found
      *  \return <tt>ParserResult</tt>
      */
-    ParserResult FindFreeInDecBufPool();
+    ParserResult FindFreeInDecBufPool(int *p_dec_buf_idx);
+
+    /*! \brief Function to find a free buffer in DPB. The buffer is not marked as used.
+     * \param [out] p_index Index of the free buffer found
+     * \return <tt>ParserResult</tt>
+     */
+    ParserResult FindFreeInDpb(int *p_index);
 
     /*! \brief Function to find a free buffer in DPB for the current picture and mark it. Additional picture
      *         bumping is done if needed. C.5.2.3.
@@ -315,8 +322,30 @@ protected:
      */
     ParserResult FindFreeInDpbAndMark();
 
+    /*! \brief 8.3.3.1. Generate the unavailable reference pictures for the RefPicSetStFoll and RefPicSetLtFoll
+     *         entries equal to "no reference picture". Invoked once per coded picture when the current picture
+     *         is a BLA picture or a CRA picture with NoRaslOutputFlag equal to 1. An entry that cannot be
+     *         backed by a buffer is left as HEVC_NO_REF_PIC rather than failing the picture.
+     * \return <tt>ParserResult</tt>
+     */
+    ParserResult GenerateUnavailableRefPics();
+
+    /*! \brief 8.3.3.2. Store one generated unavailable picture in the DPB. The sample generation of 8.3.3.2 is
+     *         not performed: the parser hands out decode buffer indices but has no access to the surfaces
+     *         themselves, so the picture keeps whatever the surface already held instead of the mid-grey the
+     *         specification describes. Per the note in 8.3.3.1 this is unobservable, as the only pictures that
+     *         may reference a generated picture are RASL pictures that are never output.
+     * \param [in] poc PicOrderCntVal of the generated picture
+     * \param [in] poc_lsb Inferred slice_pic_order_cnt_lsb, used to identify long term reference pictures
+     * \param [in] ref_marking kUsedForShortTerm or kUsedForLongTerm
+     * \param [out] p_dpb_index DPB index of the generated picture
+     * \return <tt>ParserResult</tt>
+     */
+    ParserResult StoreUnavailableRefPic(int32_t poc, uint32_t poc_lsb, uint32_t ref_marking, int *p_dpb_index);
+
     /*! \brief Function to bump one picture out of DPB. C.5.2.4.
-     * \return Code in ParserResult form.
+     * \return Code in ParserResult form. PARSER_NOT_FOUND if no picture needs to be output, in which case
+     *         nothing was freed and the caller must not keep bumping.
      */
     int BumpPicFromDpb();
 
@@ -349,6 +378,14 @@ private:
      * \return Return code in ParserResult form
      */
     int SendPicForDecode();
+
+    /*! \brief Fill one entry of the decode picture parameter reference list from a DPB index.
+     * \param [out] pic_param_ptr Picture parameters to fill
+     * \param [in] ref_idx Entry in pic_param_ptr->ref_frames[] to fill
+     * \param [in] buf_idx DPB buffer index, or HEVC_NO_REF_PIC for "no reference picture"
+     * \param [in] flags RocdecHevcPicture_* flags to set for a resolved entry
+     */
+    void FillRefFrameEntry(RocdecHevcPicParams *pic_param_ptr, int ref_idx, uint8_t buf_idx, uint32_t flags);
 
     bool IsIdrPic(HevcNalUnitHeader *nal_header_ptr);
     bool IsCraPic(HevcNalUnitHeader *nal_header_ptr);

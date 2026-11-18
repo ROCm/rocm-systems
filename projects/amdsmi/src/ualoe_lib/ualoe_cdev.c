@@ -1,30 +1,13 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "ualoe_cdev.h"
 
 #include <cbl_cfg/uapi.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -32,16 +15,22 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <sys/queue.h>
 #include <unistd.h>
 
 #include "ualoe_cb.h"
 #include "ualoe_lib.h"
 #include "ualoe_log.h"
+#include "ualoe_telem.h"
 
 struct ualoe_cdev_handle {
   int fd;
   int dev_id;
+  bool use_mmap;
+  bool telem_allocated;
+  unsigned category_mask;
+  size_t snap_size;
   LIST_ENTRY(ualoe_cdev_handle) lentry;
 };
 
@@ -90,6 +79,12 @@ _Static_assert(offsetof(struct cfg_l2ping_netport_result, resp_failures) ==
 _Static_assert(offsetof(struct cfg_l2ping_netport_result, non_ifoe_failures) ==
                    offsetof(ualoe_ping_netport_result_t, non_ifoe_failures),
                "non_ifoe_failures field offset mismatch");
+_Static_assert(offsetof(struct cfg_l2ping_netport_result, flags) ==
+                   offsetof(ualoe_ping_netport_result_t, flags),
+               "flags field offset mismatch");
+_Static_assert(CFG_L2PING_NETPORT_INVALID_RESULT == UALOE_PING_NETPORT_INVALID_RESULT,
+               "INVALID_RESULT flag value mismatch between kernel UAPI and "
+               "library headers");
 
 /* Validate that cfg_l2ping_accel_result and ualoe_ping_accel_result_t
  * have the same memory layout so we can cast between them */
@@ -103,29 +98,70 @@ _Static_assert(offsetof(struct cfg_l2ping_accel_result, netports) ==
                    offsetof(ualoe_ping_accel_result_t, netports),
                "netports field offset mismatch");
 
-static int ualoe_cdev_find(const char* pci_addr, char** cdev_name) {
-  /* TODO: define proper method of mapping from GPU UUID to char device
-   * name. For testing just guess name.
-   */
-  *cdev_name = "/dev/cbl-cfg-ifoe.cfg.0";
-  return 0;
+/**
+ * ualoe_cdev_find_any - Find any cbl-cfg misc device path
+ *
+ * Scans /sys/class/misc/ for the first entry matching "cbl-cfg-*" and
+ * returns its /dev path. This device is used temporarily to issue a
+ * CFG_CONNECT ioctl and discover the dev_id for a given PCI address.
+ *
+ * On success, *cdev_name points into a thread-local static buffer that is
+ * valid until the next call to this function on the same thread.
+ *
+ * Returns ENODEV if sysfs is unavailable or no matching device is found.
+ */
+static int ualoe_cdev_find_any(char** cdev_name) {
+  static __thread char devpath[PATH_MAX];
+  struct dirent* ent;
+  DIR* dir;
+
+  dir = opendir("/sys/class/misc");
+  if (!dir) return ENODEV;
+
+  while ((ent = readdir(dir)) != NULL) {
+    if (strncmp(ent->d_name, "cbl-cfg-", 8) != 0) continue;
+
+    snprintf(devpath, sizeof(devpath), "/dev/%s", ent->d_name);
+    closedir(dir);
+    *cdev_name = devpath;
+    return 0;
+  }
+  closedir(dir);
+  return ENODEV;
 }
 
 int ualoe_cdev_open(const char* pci_addr, ualoe_handle_t* handle) {
   struct ualoe_cdev_handle* cdev_handle;
-  char* cdev_name;
-  int rc;
+  int ctrl_fd, dev_id, rc;
+  char devpath[PATH_MAX];
+  char* ctrl_cdev;
 
-  cdev_handle = malloc(sizeof(*cdev_handle));
+  cdev_handle = calloc(1, sizeof(*cdev_handle));
   if (!cdev_handle) return ENOMEM;
 
-  rc = ualoe_cdev_find(pci_addr, &cdev_name);
+  /* Open any cbl-cfg cdev to issue CFG_CONNECT and discover dev_id */
+  rc = ualoe_cdev_find_any(&ctrl_cdev);
   if (rc) {
     free(cdev_handle);
-    return ENOENT;
+    return ENODEV;
   }
 
-  rc = open(cdev_name, O_RDWR);
+  ctrl_fd = open(ctrl_cdev, O_RDWR);
+  if (ctrl_fd == -1) {
+    free(cdev_handle);
+    return errno;
+  }
+
+  rc = ualoe_cdev_connect(ctrl_fd, pci_addr, &dev_id);
+  close(ctrl_fd);
+  if (rc) {
+    free(cdev_handle);
+    return rc;
+  }
+
+  snprintf(devpath, sizeof(devpath), "/dev/cbl-cfg-ifoe.cfg.%d", dev_id);
+
+  rc = open(devpath, O_RDWR);
   if (rc == -1) {
     free(cdev_handle);
     return errno;
@@ -264,10 +300,10 @@ int ualoe_cdev_set_ifoe_config(ualoe_handle_t handle, ifoe_virt_mode_e virt_mode
   struct cfg_ifoe_config config;
   int rc;
 
-  config.v_mode = virt_mode;
-  config.e_type = encap_type;
-  config.f_mode = failover_mode;
-  config.loopback_mode = loopback_mode;
+  config.v_mode = (enum cfg_ifoe_virt_mode)virt_mode;
+  config.e_type = (enum cfg_ifoe_encap_type)encap_type;
+  config.f_mode = (enum cfg_ifoe_failover_mode)failover_mode;
+  config.loopback_mode = (enum cfg_ifoe_loopback_mode)loopback_mode;
 
   rc = ioctl(handle, CFG_SET_IFOE_CONFIG, &config);
   if (rc == -1) return errno;
@@ -279,7 +315,7 @@ int ualoe_cdev_next_config_phase(ualoe_handle_t handle, ualoe_config_phase_e nex
   enum cfg_config_phase n_phase;
   int rc;
 
-  n_phase = next_phase;
+  n_phase = (enum cfg_config_phase)next_phase;
   rc = ioctl(handle, CFG_NEXT_CONFIG_PHASE, &n_phase);
   if (rc == -1) return errno;
 
@@ -293,7 +329,7 @@ int ualoe_cdev_get_current_config_phase(ualoe_handle_t handle, ualoe_config_phas
   rc = ioctl(handle, CFG_GET_CURRENT_CONFIG_PHASE, &curr_phase);
   if (rc == -1) return errno;
 
-  *phase = curr_phase;
+  *phase = (ualoe_config_phase_e)curr_phase;
   return 0;
 }
 
@@ -440,16 +476,23 @@ int ifoe_cdev_netport_get_state(ualoe_handle_t handle, unsigned netport_idx,
   return 0;
 }
 
+_Static_assert((int)UALOE_TELEMETRY_CATEGORY_MAX >= (int)CFG_TELEMETRY_CATEGORY_MAX,
+               "UALOE_TELEMETRY_CATEGORY_MAX must be >= CFG_TELEMETRY_CATEGORY_MAX");
+
 int ualoe_cdev_telemetry_alloc(ualoe_handle_t handle, unsigned category_mask,
                                ualoe_telemetry_t** telemetry) {
   struct ualoe_cdev_handle* cdev_handle;
   ualoe_telemetry_dataset_t* dset;
   ualoe_telemetry_instance_t* instance;
   struct cfg_set_telemetry cfg_set_tele;
+  long page_size;
   int i, j, rc;
+  void* probe;
 
   rc = ualoe_cdev_find_handle(handle, &cdev_handle);
   if (rc) return rc;
+
+  if (cdev_handle->use_mmap && cdev_handle->category_mask != 0) return EINVAL;
 
   /* 1) allocate ualoe_telemetry_*t */
   *telemetry = calloc(1, sizeof(ualoe_telemetry_t));
@@ -484,7 +527,6 @@ int ualoe_cdev_telemetry_alloc(ualoe_handle_t handle, unsigned category_mask,
     }
   }
 
-  /* 2) call driver to 'select' and 'dma_cfg' */
   cfg_set_tele.dev_id = cdev_handle->dev_id;
   cfg_set_tele.category_mask = category_mask;
   rc = ioctl(handle, CFG_SET_TELEMETRY, &cfg_set_tele);
@@ -493,6 +535,43 @@ int ualoe_cdev_telemetry_alloc(ualoe_handle_t handle, unsigned category_mask,
     goto free_dsets;
   }
 
+  /* Probe mmap to decide whether mmap is supported. */
+  page_size = ualoe_get_page_size();
+  probe = mmap(NULL, page_size, PROT_READ, MAP_SHARED, handle, 0);
+  if (probe != MAP_FAILED) {
+    /* mmap path: read snapshot header to learn full size */
+    const struct cfg_telem_snapshot_hdr* snap_hdr = probe;
+    size_t const_end, dyn_end, total;
+
+    if (ADD_OVERFLOW((size_t)snap_hdr->const_offset, (size_t)snap_hdr->const_size, &const_end) ||
+        ADD_OVERFLOW((size_t)snap_hdr->dyn_offset, (size_t)snap_hdr->dyn_size, &dyn_end)) {
+      munmap(probe, page_size);
+      ualoe_log_error("mmap probe: snapshot header offsets overflow\n");
+      rc = EIO;
+      goto free_dsets;
+    }
+
+    total = const_end > dyn_end ? const_end : dyn_end;
+
+    /* PAGE_ALIGN: round up to page boundary */
+    total = (total + page_size - 1) & ~(page_size - 1);
+
+    munmap(probe, page_size);
+
+    if (total == 0) {
+      ualoe_log_error("mmap probe: snapshot header has zero size\n");
+      rc = EIO;
+      goto free_dsets;
+    }
+
+    cdev_handle->use_mmap = true;
+    cdev_handle->category_mask = category_mask;
+    cdev_handle->snap_size = total;
+  } else {
+    cdev_handle->use_mmap = false;
+  }
+
+  cdev_handle->telem_allocated = true;
   return 0;
 
 free_dsets:
@@ -506,18 +585,36 @@ free_dsets:
     }
   }
   free(*telemetry);
+  /* clear the out-parameter so callers that key cleanup off a non-NULL
+   * telemetry pointer (e.g. `if (telemetry != NULL) ualoe_telemetry_free()`)
+   * do not invoke free on this just-freed allocation and walk freed memory.
+   */
+  *telemetry = NULL;
   return rc;
 }
 
-int ualoe_cdev_telemetry_get(ualoe_handle_t handle, ualoe_telemetry_t* telemetry) {
-  struct ualoe_cdev_handle* cdev_handle;
-  struct cfg_telemetry cfg_tele;  // TODO how to specify number of categories?
+static int ualoe_cdev_telemetry_mmap_get(ualoe_handle_t handle, ualoe_telemetry_t* telemetry,
+                                         struct ualoe_cdev_handle* cdev_handle) {
+  void* buf;
+  int rc;
+
+  /* Telemetry has not been allocated beforehand */
+  if (cdev_handle->category_mask == 0 || cdev_handle->snap_size == 0) return EINVAL;
+
+  buf = mmap(NULL, cdev_handle->snap_size, PROT_READ, MAP_SHARED, handle, 0);
+  if (buf == MAP_FAILED) return errno;
+
+  rc = ualoe_telem_parse(buf, cdev_handle->snap_size, cdev_handle->category_mask, telemetry);
+  munmap(buf, cdev_handle->snap_size);
+  return rc;
+}
+
+static int ualoe_cdev_telemetry_ioctl_get(ualoe_handle_t handle, ualoe_telemetry_t* telemetry,
+                                          struct ualoe_cdev_handle* cdev_handle) {
+  struct cfg_telemetry cfg_tele;
   int i, j, rc;
 
-  rc = ualoe_cdev_find_handle(handle, &cdev_handle);
-  if (rc) return rc;
-
-  cfg_tele.datasets = calloc(UALOE_TELEMETRY_CATEGORY_MAX, sizeof(struct cfg_telemetry_dataset));
+  cfg_tele.datasets = calloc(CFG_TELEMETRY_CATEGORY_MAX, sizeof(struct cfg_telemetry_dataset));
   if (!cfg_tele.datasets) return ENOMEM;
 
   for (i = 0; i < CFG_TELEMETRY_CATEGORY_MAX; i++) {
@@ -546,7 +643,7 @@ int ualoe_cdev_telemetry_get(ualoe_handle_t handle, ualoe_telemetry_t* telemetry
   }
 
   /* Validate telemetry structure matches driver response */
-  for (i = 0; i < UALOE_TELEMETRY_CATEGORY_MAX; i++) {
+  for (i = 0; i < CFG_TELEMETRY_CATEGORY_MAX; i++) {
     /* Check if firmware returned unrequested category */
     if (cfg_tele.datasets[i].instance_count > 0 && telemetry->datasets[i] == NULL) {
       ualoe_log_error(
@@ -569,11 +666,11 @@ int ualoe_cdev_telemetry_get(ualoe_handle_t handle, ualoe_telemetry_t* telemetry
   }
 
   /* copy driver cfg_tele into userspace telemetry */
-  for (i = 0; i < UALOE_TELEMETRY_CATEGORY_MAX; i++) {
+  for (i = 0; i < CFG_TELEMETRY_CATEGORY_MAX; i++) {
     /* Skip NULL datasets (filtered categories) */
     if (telemetry->datasets[i] == NULL) continue;
 
-    telemetry->datasets[i]->category = cfg_tele.datasets[i].category;
+    telemetry->datasets[i]->category = (ualoe_telemetry_category_e)cfg_tele.datasets[i].category;
     telemetry->datasets[i]->generation_count = cfg_tele.datasets[i].generation_count;
     telemetry->datasets[i]->timestamp = cfg_tele.datasets[i].timestamp;
     telemetry->datasets[i]->instance_count = cfg_tele.datasets[i].instance_count;
@@ -601,12 +698,28 @@ int ualoe_cdev_telemetry_get(ualoe_handle_t handle, ualoe_telemetry_t* telemetry
 
 out_free_instances:
   for (i = 0; i < CFG_TELEMETRY_CATEGORY_MAX; i++) {
-    for (j = 0; j < CFG_TELEMETRY_MAX_INSTANCES; j++) free(cfg_tele.datasets[i].instances[j].items);
-    free(cfg_tele.datasets[i].instances);
+    if (cfg_tele.datasets[i].instances != NULL) {
+      for (j = 0; j < CFG_TELEMETRY_MAX_INSTANCES; j++)
+        free(cfg_tele.datasets[i].instances[j].items);
+      free(cfg_tele.datasets[i].instances);
+    }
   }
   free(cfg_tele.datasets);
 
   return rc;
+}
+
+int ualoe_cdev_telemetry_get(ualoe_handle_t handle, ualoe_telemetry_t* telemetry) {
+  struct ualoe_cdev_handle* cdev_handle;
+  int rc;
+
+  rc = ualoe_cdev_find_handle(handle, &cdev_handle);
+  if (rc) return rc;
+
+  if (cdev_handle->use_mmap)
+    return ualoe_cdev_telemetry_mmap_get(handle, telemetry, cdev_handle);
+  else
+    return ualoe_cdev_telemetry_ioctl_get(handle, telemetry, cdev_handle);
 }
 
 int ualoe_cdev_telemetry_free(ualoe_handle_t handle, ualoe_telemetry_t* telemetry) {
@@ -617,8 +730,16 @@ int ualoe_cdev_telemetry_free(ualoe_handle_t handle, ualoe_telemetry_t* telemetr
   rc = ualoe_cdev_find_handle(handle, &cdev_handle);
   if (rc) return rc;
 
-  rc = ioctl(handle, CFG_FREE_TELEMETRY, &cdev_handle->dev_id);
-  if (rc == -1) return errno;
+  if (cdev_handle->use_mmap) {
+    if (cdev_handle->category_mask == 0) return EINVAL;
+    cdev_handle->category_mask = 0;
+  } else {
+    /* ioctl fallback: tell driver to free DMA resources */
+    rc = ioctl(handle, CFG_FREE_TELEMETRY, &cdev_handle->dev_id);
+    if (rc == -1) return errno;
+  }
+
+  cdev_handle->telem_allocated = false;
 
   for (i = UALOE_TELEMETRY_CATEGORY_MAX - 1; i >= 0; i--) {
     /* Skip NULL datasets (filtered categories) */
@@ -631,6 +752,13 @@ int ualoe_cdev_telemetry_free(ualoe_handle_t handle, ualoe_telemetry_t* telemetr
   free(telemetry);
 
   return 0;
+}
+
+bool ualoe_cdev_is_telem_allocated(ualoe_handle_t handle) {
+  struct ualoe_cdev_handle* cdev_handle;
+
+  if (ualoe_cdev_find_handle(handle, &cdev_handle)) return false;
+  return cdev_handle->telem_allocated;
 }
 
 int ualoe_cdev_l2ping_start(ualoe_handle_t handle, ualoe_ping_spec_t* spec, ualoe_ping_t** ping) {
@@ -817,5 +945,5 @@ int ualoe_cdev_register_event_callback(ualoe_handle_t handle, ualoe_event_callba
 
   rc = ualoe_cdev_find_handle(handle, &cdev_handle);
   if (rc) return rc;
-  return ualoe_cb_init(handle, cdev_handle->dev_id, callback, user_context);
+  return ualoe_cb_init(handle, cdev_handle->dev_id, handle, callback, user_context);
 }

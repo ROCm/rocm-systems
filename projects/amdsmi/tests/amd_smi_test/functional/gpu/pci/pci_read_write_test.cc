@@ -1,24 +1,6 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 #include "pci_read_write.h"
 
 #include <gtest/gtest.h>
@@ -167,6 +149,18 @@ void TestPciReadWrite::Run(void) {
 
     // Then, set the bitmask to all bandwidths besides the initial BW
     freq_bitmask ^= (1 << bw.transfer_rate.current);
+    if (freq_bitmask == 0) {
+      // With a single bandwidth level the mask selects nothing settable,
+      // which the API rejects before it changes any setting.
+      DISPLAY_AMDSMI_API("amdsmi_set_gpu_pci_bandwidth(empty mask)",
+                         "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
+      ret = amdsmi_set_gpu_pci_bandwidth(processor_handles_[dv_ind], freq_bitmask);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
+      if (ret != AMDSMI_STATUS_NOT_SUPPORTED && ret != AMDSMI_STATUS_NO_PERM) {
+        ASSERT_EQ(ret, AMDSMI_STATUS_INVAL);
+      }
+      continue;
+    }
 
     std::string freq_bm_str = std::bitset<AMDSMI_MAX_NUM_FREQUENCIES>(freq_bitmask).to_string();
 

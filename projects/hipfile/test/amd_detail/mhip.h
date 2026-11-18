@@ -24,7 +24,14 @@ struct MHip : Hip {
     MOCK_METHOD(hipPointerAttribute_t, hipPointerGetAttributes, (const void *ptr), (const override));
     MOCK_METHOD(void, hipMemcpy, (void *dst, const void *src, size_t sizeBytes, hipMemcpyKind kind),
                 (const, override));
+    MOCK_METHOD(void, hipMemcpyWithStream,
+                (void *dst, const void *src, size_t sizeBytes, hipMemcpyKind kind, hipStream_t stream),
+                (const, override));
     MOCK_METHOD(void, hipStreamSynchronize, (hipStream_t stream), (const, override));
+    MOCK_METHOD(hipStream_t, hipStreamCreateWithPriority, (unsigned int flags, int priority),
+                (const, override));
+    MOCK_METHOD(HipStreamPriorityRange, hipDeviceGetStreamPriorityRange, (), (const, override));
+    MOCK_METHOD(void, hipStreamDestroy, (hipStream_t stream), (const, override));
     MOCK_METHOD(void *, hipHostMalloc, (size_t size, unsigned int flags), (const, override));
     MOCK_METHOD(void, hipHostFree, (void *ptr), (const, override));
     MOCK_METHOD(void *, hipHostGetDevicePointer, (void *hstPtr, unsigned int flags), (const, override));
@@ -50,6 +57,8 @@ struct MHip : Hip {
     MOCK_METHOD(hipDevice_t, hipStreamGetDevice, (hipStream_t stream), (const, override));
     MOCK_METHOD(void, hipInit, (), (const, override));
     MOCK_METHOD(int, hipGetDevice, (), (const, override));
+    MOCK_METHOD(void, hipSetDevice, (int device_id), (const, override));
     MOCK_METHOD(int, hipGetDeviceCount, (), (const, override));
+    MOCK_METHOD(hipUUID, hipDeviceGetUuid, (int device_id), (const, override));
 };
 }

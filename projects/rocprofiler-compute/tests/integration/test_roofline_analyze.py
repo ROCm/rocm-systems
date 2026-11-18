@@ -1,0 +1,188 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
+"""Roofline coverage for the ``analyze`` roofline path.
+
+MI200 (gfx90a) tests run through the ``analyze`` CLI and assert that roofline
+HTML is generated, including the per-datatype VALU/MFMA legend.
+"""
+
+import json
+import re
+import shutil
+import tempfile
+from collections.abc import Callable
+from pathlib import Path
+
+import common
+import pytest
+
+from tests.integration import common as integration_common
+
+config = {}
+config["cleanup"] = True
+
+roofline_dir = "tests/workloads/mem_levels_HBM/MI200"
+
+
+def embedded_roofline_model(document: str) -> dict:
+    """Parse the JSON model from a standalone roofline document."""
+    match = re.search(
+        r'<script id="roofline-model" type="application/json">(.*?)</script>',
+        document,
+        re.DOTALL,
+    )
+    assert match is not None
+    return json.loads(match.group(1))
+
+
+# Roofline HTML generation
+
+
+def test_analyze_generates_roofline_html(
+    binary_handler_analyze_rocprof_compute: Callable[[list[str]], int],
+) -> None:
+    """
+    Analyze generates roofline HTML from existing workload data.
+    Uses MI200 workload with roofline.csv.
+    """
+    workload_dir = integration_common.setup_workload_dir(roofline_dir)
+    try:
+        assert (Path(workload_dir) / "roofline.csv").exists()
+
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+        ])
+        assert code == 0
+
+        html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
+        assert [html_file.name for html_file in html_files] == ["empirRoof_gpu-0.html"]
+
+        html_text = html_files[0].read_text(encoding="utf-8")
+        assert 'id="roofline-precision-btn"' in html_text
+        model = embedded_roofline_model(html_text)
+        assert "FP32" in model["precisions"]
+        assert model["frame"] == {
+            "x": [0.01, 1000.0],
+            "y": [10.0, 1000000.0],
+        }
+    finally:
+        common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+def test_analyze_missing_roofline_csv_graceful(
+    binary_handler_analyze_rocprof_compute: Callable[[list[str]], int],
+) -> None:
+    """
+    Analyze without roofline.csv should not crash.
+    Uses a workload directory that has sysinfo.csv but no roofline.csv.
+    """
+    workload_dir = integration_common.setup_workload_dir(roofline_dir)
+    roofline_csv = Path(workload_dir) / "roofline.csv"
+    if roofline_csv.exists():
+        roofline_csv.unlink()
+
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        workload_dir,
+    ])
+    assert code == 0
+
+    common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+def test_analyze_roofline_idempotent(
+    binary_handler_analyze_rocprof_compute: Callable[[list[str]], int],
+) -> None:
+    """
+    Running analyze twice on the same profiling output should produce
+    consistent results without errors.
+    """
+    workload_dir = integration_common.setup_workload_dir(roofline_dir)
+
+    assert (Path(workload_dir) / "roofline.csv").exists()
+
+    analyze_args = [
+        "analyze",
+        "--path",
+        workload_dir,
+    ]
+
+    code1 = binary_handler_analyze_rocprof_compute(analyze_args)
+    assert code1 == 0
+
+    code2 = binary_handler_analyze_rocprof_compute(analyze_args)
+    assert code2 == 0
+
+    html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
+    assert len(html_files) > 0, "Analyze should generate roofline HTML files"
+
+    common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+def test_analyze_corrupted_roofline_csv_graceful(
+    binary_handler_analyze_rocprof_compute: Callable[[list[str]], int],
+) -> None:
+    """
+    Analyze with a corrupted roofline.csv should handle gracefully.
+    """
+    with tempfile.TemporaryDirectory() as temp_dir:
+        workload_dir = Path(temp_dir) / "corrupted_workload"
+        shutil.copytree(roofline_dir, workload_dir)
+
+        roofline_csv = workload_dir / "roofline.csv"
+        roofline_csv.write_text("this,is,bad,csv")
+
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "-b",
+            "4",
+            "--path",
+            str(workload_dir),
+        ])
+        assert code == 0
+
+
+# Per-datatype HTML output validation
+
+# Each datatype must take the correct roofline branch:
+DATATYPE_LEGEND_CASES = {
+    "FP64": {"present": ["Peak VALU-FP64", "Peak MFMA-FP64"], "absent": []},
+    "BF16": {"present": ["Peak MFMA-BF16"], "absent": ["Peak VALU-BF16"]},
+}
+
+
+@pytest.mark.parametrize("dtype", list(DATATYPE_LEGEND_CASES))
+def test_analyze_roofline_datatype_html_legend(
+    binary_handler_analyze_rocprof_compute: Callable[[list[str]], int],
+    dtype: str,
+) -> None:
+    """The roofline HTML embeds the expected VALU/MFMA legend for each datatype.
+
+    FP8/FP4/FP6 are intentionally excluded: they are unsupported on the
+    available gfx90a (MI200) test data and are covered by the unit tests.
+    """
+    workload_dir = integration_common.setup_workload_dir(roofline_dir, param_id=dtype)
+
+    assert (Path(workload_dir) / "roofline.csv").exists()
+
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        workload_dir,
+    ])
+    assert code == 0
+
+    html_path = Path(workload_dir) / "empirRoof_gpu-0.html"
+    assert html_path.is_file(), "Analyze should generate the roofline HTML"
+
+    html_text = html_path.read_text(encoding="utf-8")
+    for legend in DATATYPE_LEGEND_CASES[dtype]["present"]:
+        assert legend in html_text, f"{dtype} HTML should contain '{legend}'"
+    for legend in DATATYPE_LEGEND_CASES[dtype]["absent"]:
+        assert legend not in html_text, f"{dtype} HTML should not contain '{legend}'"
+
+    common.clean_output_dir(config["cleanup"], workload_dir)

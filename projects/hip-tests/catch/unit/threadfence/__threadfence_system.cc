@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include <cmd_options.hh>
 #include <hip_test_common.hh>
+#include <hip_test_params.hh>
 #include <resource_guards.hh>
 
 #include "threadfence_common.hh"
@@ -45,6 +45,8 @@ __global__ void ReadKernel(int* out, int* in) {
  *    - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Unit___threadfence_system_Positive_Basic_Peer) {
+  const auto iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
@@ -63,7 +65,7 @@ HIP_TEST_CASE(Unit___threadfence_system_Positive_Basic_Peer) {
 
   LinearAllocGuard<int> out_host(LinearAllocs::hipHostMalloc, 2 * sizeof(int));
 
-  for (int i = 0; i < cmd_options.iterations; ++i) {
+  for (int i = 0; i < iterations; ++i) {
     HIP_CHECK(hipMemsetD32((hipDeviceptr_t)(&(in_dev.ptr()[0])), kInitVal1, 1));
     HIP_CHECK(hipMemsetD32((hipDeviceptr_t)(&(in_dev.ptr()[1])), kInitVal2, 1));
 
@@ -96,10 +98,12 @@ HIP_TEST_CASE(Unit___threadfence_system_Positive_Basic_Peer) {
  *    - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Unit___threadfence_system_Positive_Basic_Host) {
+  const auto iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+
   LinearAllocGuard<int> in_host(LinearAllocs::hipHostMalloc, 2 * sizeof(int));
   LinearAllocGuard<int> out_host(LinearAllocs::hipHostMalloc, 2 * sizeof(int));
 
-  for (int i = 0; i < cmd_options.iterations; ++i) {
+  for (int i = 0; i < iterations; ++i) {
     in_host.host_ptr()[0] = kInitVal1;
     in_host.host_ptr()[1] = kInitVal2;
 

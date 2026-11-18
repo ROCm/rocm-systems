@@ -3,8 +3,13 @@
 
 #include <gtest/gtest.h>
 
-#include "hsa/hsa_api_trace_minimal.h"
+#include "hsa/hsa_api_trace.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/rj_gfx1250_b0_to_a0.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "support/gfx1250_test_code_object.h"
 
 #include <array>
 #include <atomic>
@@ -13,15 +18,18 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iterator>
 #include <mutex>
-#include <new>
+#include <optional>
 #include <regex>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <thread>
+#include <unistd.h>
 #include <unordered_map>
 #include <vector>
 
@@ -30,6 +38,9 @@ extern "C" void OnUnload();
 extern "C" size_t rj_test_retained_executable_buffer_count();
 extern "C" void rj_test_clear_retained_storage();
 extern "C" void rj_test_log_translation(uint64_t source_id, size_t changed);
+extern "C" void
+rj_test_log_translation_diagnostic(uint64_t source_id,
+                                   const rj_gfx1250_b0_to_a0_diagnostic_t *diagnostic);
 extern "C" uint64_t rj_test_translation_count();
 extern "C" uint64_t rj_test_translation_memo_bytes();
 extern "C" void rj_test_set_translation_memo_capacity(uint64_t bytes);
@@ -37,12 +48,13 @@ extern "C" void rj_test_close_translation_gate();
 extern "C" void rj_test_open_translation_gate();
 extern "C" uint64_t rj_test_translation_waiters();
 extern "C" void rj_test_force_next_translation_status(int status);
+extern "C" uint64_t rj_test_dump_path_count();
 extern "C" uint64_t rj_test_sample_fingerprint(const void *bytes, size_t size);
 extern "C" void rj_test_retain_completed_claims(bool retain);
-extern "C" void rj_test_fail_next_memo_admission(int stage);
+extern "C" void rj_test_set_pretranslation_root(const char *root);
+extern "C" uint64_t rj_test_pretranslation_hits();
 
 namespace {
-
 constexpr hsa_agent_t kA0Agent{1250};
 constexpr hsa_executable_t kExecutable{42};
 constexpr uint32_t kAsicRevisionAttribute = 0xA012;
@@ -80,7 +92,6 @@ int g_vendor_reader_calls = 0;
 hsa_file_t g_vendor_file = -1;
 size_t g_vendor_offset = 0;
 size_t g_vendor_size = 0;
-bool g_throw_from_deprecated_load = false;
 
 void reset_fakes() {
   g_next_reader = 1;
@@ -100,7 +111,6 @@ void reset_fakes() {
   g_vendor_file = -1;
   g_vendor_offset = 0;
   g_vendor_size = 0;
-  g_throw_from_deprecated_load = false;
 }
 
 hsa_status_t HSA_API fake_iterate_agents(hsa_status_t (*callback)(hsa_agent_t, void *),
@@ -200,8 +210,6 @@ hsa_status_t HSA_API fake_load_program(hsa_executable_t, hsa_code_object_reader_
 hsa_status_t HSA_API fake_load_deprecated(hsa_executable_t, hsa_agent_t, hsa_code_object_t,
                                           const char *) {
   ++g_load_deprecated_calls;
-  if (g_throw_from_deprecated_load)
-    throw std::bad_alloc();
   return HSA_STATUS_SUCCESS;
 }
 
@@ -240,6 +248,60 @@ std::vector<uint8_t> make_invalid_gfx1250_elf() {
   return image;
 }
 
+/// @brief A directory that exists for one test case.
+class ScopedTempDirectory {
+public:
+  ScopedTempDirectory() {
+    char pattern[] = "/tmp/rocjitsu-hotswap-dump-XXXXXX";
+    const char *created = mkdtemp(pattern);
+    if (created != nullptr)
+      path_ = created;
+  }
+  ScopedTempDirectory(const ScopedTempDirectory &) = delete;
+  ScopedTempDirectory &operator=(const ScopedTempDirectory &) = delete;
+  ~ScopedTempDirectory() {
+    if (path_.empty())
+      return;
+    std::error_code error;
+    std::filesystem::remove_all(path_, error);
+  }
+
+  const std::string &path() const { return path_; }
+
+private:
+  std::string path_;
+};
+
+size_t count_occurrences(const std::string &text, std::string_view needle) {
+  size_t count = 0;
+  for (size_t at = text.find(needle); at != std::string::npos;
+       at = text.find(needle, at + needle.size()))
+    ++count;
+  return count;
+}
+
+/// @brief An invalid object whose identity differs from every other salt.
+std::vector<uint8_t> make_invalid_gfx1250_elf(uint8_t salt) {
+  std::vector<uint8_t> image = make_invalid_gfx1250_elf();
+  image.push_back(salt);
+  return image;
+}
+
+void expect_failure_dump(const std::string &log_text, const std::vector<uint8_t> &source) {
+  std::smatch match;
+  const std::regex path_pattern(
+      R"(path=([^;\s]+); please file a bug report and attach this code object)");
+  ASSERT_TRUE(std::regex_search(log_text, match, path_pattern)) << log_text;
+  const std::string path = match[1].str();
+  std::ifstream input(path, std::ios::binary);
+  ASSERT_TRUE(input) << path;
+  const std::vector<uint8_t> dumped((std::istreambuf_iterator<char>(input)),
+                                    std::istreambuf_iterator<char>());
+  EXPECT_EQ(dumped, source);
+  input.close();
+  EXPECT_EQ(unlink(path.c_str()), 0) << path;
+}
+
 #ifdef GFX1250_B0_TO_A0_FIXTURE
 std::vector<uint8_t> read_translation_fixture() {
   std::ifstream input(GFX1250_B0_TO_A0_FIXTURE, std::ios::binary);
@@ -276,15 +338,51 @@ struct FakeApi {
 class HsaHotswapHookTest : public ::testing::Test {
 protected:
   void SetUp() override {
+    for (const char *name : kIsolatedEnvironment) {
+      const char *value = std::getenv(name);
+      saved_environment_.emplace_back(name, value != nullptr ? std::optional<std::string>(value)
+                                                             : std::nullopt);
+      (void)unsetenv(name);
+    }
     OnUnload();
     // Production storage is process-lifetime (not freed on reinstall), so clear it
     // here to isolate the retention lifecycle between test cases.
     rj_test_clear_retained_storage();
     reset_fakes();
   }
-  void TearDown() override { OnUnload(); }
+  void TearDown() override {
+    OnUnload();
+    rj_test_clear_retained_storage();
+    for (const auto &[name, value] : saved_environment_) {
+      if (value)
+        (void)setenv(name, value->c_str(), 1);
+      else
+        (void)unsetenv(name);
+    }
+    saved_environment_.clear();
+  }
+
+  // Loads @p source through a fresh reader, the way a caller that re-registers
+  // the same object does -- a new handle every time, so nothing but the content
+  // itself can connect one load to the next.
+  hsa_status_t load_through_new_reader(const std::vector<uint8_t> &source,
+                                       hsa_executable_t executable = kExecutable) {
+    hsa_code_object_reader_t reader{};
+    const hsa_status_t create_status = api.core.hsa_code_object_reader_create_from_memory_fn(
+        source.data(), source.size(), &reader);
+    if (create_status != HSA_STATUS_SUCCESS)
+      return create_status;
+    return api.core.hsa_executable_load_agent_code_object_fn(executable, kA0Agent, reader, nullptr,
+                                                             nullptr);
+  }
+
+  // Every case runs with these cleared and gets whatever the process had back,
+  // so one case cannot decide what a later one observes.
+  static constexpr std::array<const char *, 4> kIsolatedEnvironment = {
+      "HSA_HOTSWAP_VERBOSE", "HSA_HOTSWAP_DUMP_SOURCE", "HSA_HOTSWAP_DUMP_DIR", "TMPDIR"};
 
   FakeApi api;
+  std::vector<std::pair<const char *, std::optional<std::string>>> saved_environment_;
 };
 
 TEST_F(HsaHotswapHookTest, InstallsOnlyTheEightEntryEagerSurface) {
@@ -347,10 +445,8 @@ TEST_F(HsaHotswapHookTest, EmitsConcurrentTranslationRecordsAtomically) {
   EXPECT_EQ(record_count, kThreadCount * kRecordsPerThread);
 }
 
-// A rejected install must not leave the hook stuck. install() commits g_state.core
-// only AFTER its one fallible step (building the saved-table snapshot), so a
-// rejected or throwing install cannot latch core non-null and permanently reject
-// every later install. A failed OnLoad is followed by a successful one here.
+// A rejected install must not leave the hook stuck. A failed OnLoad is followed
+// by a successful one here.
 TEST_F(HsaHotswapHookTest, RejectedInstallLeavesHookInstallable) {
   // Missing a required lower entry makes install() reject before committing state.
   FakeApi incomplete;
@@ -438,11 +534,96 @@ TEST_F(HsaHotswapHookTest, TranslationFailureDoesNotLoadOrRetain) {
   ASSERT_EQ(
       api.core.hsa_code_object_reader_create_from_memory_fn(source.data(), source.size(), &reader),
       HSA_STATUS_SUCCESS);
+  ScopedTempDirectory capture_directory;
+  ASSERT_FALSE(capture_directory.path().empty());
+  ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
+  ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", capture_directory.path().c_str(), 1), 0);
+  testing::internal::CaptureStderr();
   EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kExecutable, kA0Agent, reader,
                                                               nullptr, nullptr),
             HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  const std::string log_text = testing::internal::GetCapturedStderr();
   EXPECT_EQ(g_load_agent_calls, 0);
   EXPECT_EQ(rj_test_retained_executable_buffer_count(), 0u);
+  EXPECT_NE(log_text.find("[hsa-hotswap-rj] error: eager translation "), std::string::npos)
+      << log_text;
+  EXPECT_NE(log_text.find("[hsa-hotswap-rj] error: translation diagnostic "), std::string::npos)
+      << log_text;
+  EXPECT_NE(log_text.find(" severity=error kind=input-invalid-code-object "), std::string::npos)
+      << log_text;
+  EXPECT_NE(log_text.find(" message=source is not a valid gfx1250 AMDGPU code object"),
+            std::string::npos)
+      << log_text;
+  EXPECT_NE(log_text.find(" outcome=translation_failed "), std::string::npos) << log_text;
+  EXPECT_NE(log_text.find(" translation_status="), std::string::npos) << log_text;
+  EXPECT_NE(log_text.find(" status="), std::string::npos) << log_text;
+  expect_failure_dump(log_text, source);
+}
+
+TEST_F(HsaHotswapHookTest, RendersTranslatorDiagnosticsAndDumpsFailedSource) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  constexpr auto conversion =
+      rocjitsu::cdna5::build_sop1(rocjitsu::cdna5::kSBarrierSignalIsfirstSop1, {.ssrc0 = 195});
+  constexpr uint32_t kEndpgm = 0xBFB00000u;
+  const std::array<uint32_t, 2> text = {conversion[0], kEndpgm};
+  const auto source = rocjitsu::test_support::make_gfx1250_code_object(text);
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(
+      api.core.hsa_code_object_reader_create_from_memory_fn(source.data(), source.size(), &reader),
+      HSA_STATUS_SUCCESS);
+
+  ScopedTempDirectory capture_directory;
+  ASSERT_FALSE(capture_directory.path().empty());
+  ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
+  ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", capture_directory.path().c_str(), 1), 0);
+  testing::internal::CaptureStderr();
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kExecutable, kA0Agent, reader,
+                                                              nullptr, nullptr),
+            HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  const std::string log_text = testing::internal::GetCapturedStderr();
+  EXPECT_EQ(g_load_agent_calls, 0);
+  EXPECT_NE(log_text.find("[hsa-hotswap-rj] error: translation diagnostic "), std::string::npos)
+      << log_text;
+  EXPECT_NE(log_text.find(" severity=error kind=translator-expand-failed "), std::string::npos)
+      << log_text;
+  EXPECT_NE(log_text.find(" guest_offset=.text+0x0 mnemonic=s_barrier_signal_isfirst "),
+            std::string::npos)
+      << log_text;
+  EXPECT_NE(log_text.find(" message="), std::string::npos) << log_text;
+  EXPECT_NE(log_text.find(" required=Use a different barrier id, or signal it without the first-"
+                          "signal form."),
+            std::string::npos)
+      << log_text;
+  expect_failure_dump(log_text, source);
+}
+
+TEST_F(HsaHotswapHookTest, DiagnosticPrefixMatchesWarningSeverity) {
+  const rj_gfx1250_b0_to_a0_diagnostic_t diagnostic{
+      "warning", "translator-data-only", 0, 0, "", "test warning", 0,
+  };
+  testing::internal::CaptureStderr();
+  rj_test_log_translation_diagnostic(0x1234, &diagnostic);
+  const std::string log_text = testing::internal::GetCapturedStderr();
+  EXPECT_NE(log_text.find("[hsa-hotswap-rj] warning: translation diagnostic "), std::string::npos)
+      << log_text;
+  EXPECT_NE(log_text.find(" severity=warning kind=translator-data-only "), std::string::npos)
+      << log_text;
+  EXPECT_EQ(log_text.find("[hsa-hotswap-rj] error:"), std::string::npos) << log_text;
+}
+
+TEST_F(HsaHotswapHookTest, RendersRequiredWorkDiagnostic) {
+  const rj_gfx1250_b0_to_a0_diagnostic_t diagnostic{
+      "error", "translator-expand-missing", 1, 8, "v_test", "required step", 1,
+  };
+  testing::internal::CaptureStderr();
+  rj_test_log_translation_diagnostic(0x1234, &diagnostic);
+  const std::string log_text = testing::internal::GetCapturedStderr();
+  EXPECT_NE(log_text.find(" severity=error kind=translator-expand-missing "), std::string::npos)
+      << log_text;
+  EXPECT_NE(log_text.find(" guest_offset=.text+0x8 mnemonic=v_test "), std::string::npos)
+      << log_text;
+  EXPECT_NE(log_text.find(" required=required step"), std::string::npos) << log_text;
+  EXPECT_EQ(log_text.find(" message="), std::string::npos) << log_text;
 }
 
 // The translated backing storage retained for an A0 load must SURVIVE OnUnload()
@@ -453,6 +634,221 @@ TEST_F(HsaHotswapHookTest, TranslationFailureDoesNotLoadOrRetain) {
 // atexit -- can still reference these bytes, so a reinstall must not free them. They
 // are released only at executable destroy (or process exit). Regression guard for
 // the process-lifetime storage-retention lifecycle.
+TEST_F(HsaHotswapHookTest, FailedTranslationWritesNothingByDefault) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::vector<uint8_t> source = make_invalid_gfx1250_elf();
+
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(
+      api.core.hsa_code_object_reader_create_from_memory_fn(source.data(), source.size(), &reader),
+      HSA_STATUS_SUCCESS);
+  testing::internal::CaptureStderr();
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kExecutable, kA0Agent, reader,
+                                                              nullptr, nullptr),
+            HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  const std::string log_text = testing::internal::GetCapturedStderr();
+
+  // Nothing was written, and the report says how to ask for the artifact.
+  EXPECT_EQ(log_text.find("; please file a bug report and attach this code object"),
+            std::string::npos)
+      << log_text;
+  EXPECT_NE(log_text.find("set HSA_HOTSWAP_DUMP_SOURCE=1 to save the source code object"),
+            std::string::npos)
+      << log_text;
+  EXPECT_EQ(rj_test_dump_path_count(), 0u);
+}
+
+TEST_F(HsaHotswapHookTest, CapturedSourceHonorsTheConfiguredDirectory) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::vector<uint8_t> source = make_invalid_gfx1250_elf();
+  ScopedTempDirectory directory;
+  ASSERT_FALSE(directory.path().empty());
+  ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
+  ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", directory.path().c_str(), 1), 0);
+
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(
+      api.core.hsa_code_object_reader_create_from_memory_fn(source.data(), source.size(), &reader),
+      HSA_STATUS_SUCCESS);
+  testing::internal::CaptureStderr();
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kExecutable, kA0Agent, reader,
+                                                              nullptr, nullptr),
+            HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  const std::string log_text = testing::internal::GetCapturedStderr();
+
+  std::smatch match;
+  const std::regex path_pattern(
+      R"(path=([^;\s]+); please file a bug report and attach this code object)");
+  ASSERT_TRUE(std::regex_search(log_text, match, path_pattern)) << log_text;
+  EXPECT_EQ(match[1].str().rfind(directory.path() + "/", 0), 0u) << match[1].str();
+  expect_failure_dump(log_text, source);
+}
+
+TEST_F(HsaHotswapHookTest, RepeatedEnvironmentalFailuresCaptureOneArtifact) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::vector<uint8_t> source = make_invalid_gfx1250_elf();
+  ScopedTempDirectory capture_directory;
+  ASSERT_FALSE(capture_directory.path().empty());
+  ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
+  ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", capture_directory.path().c_str(), 1), 0);
+  constexpr size_t kLoads = 8;
+
+  // An environmental translation failure is not remembered, so every load translates again.
+  // Capture must still leave exactly one file behind.
+  for (size_t load = 0; load < kLoads; ++load) {
+    rj_test_force_next_translation_status(1 /* ROCJITSU_STATUS_ERROR */);
+    hsa_code_object_reader_t reader{};
+    ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(source.data(), source.size(),
+                                                                    &reader),
+              HSA_STATUS_SUCCESS);
+    EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kExecutable, kA0Agent, reader,
+                                                                nullptr, nullptr),
+              HSA_STATUS_ERROR_INVALID_CODE_OBJECT)
+        << load;
+  }
+
+  // The point of the case: every load really did translate again, and the eight
+  // attempts still left one artifact.
+  EXPECT_EQ(rj_test_translation_count(), kLoads);
+  EXPECT_EQ(rj_test_dump_path_count(), 1u);
+}
+
+TEST_F(HsaHotswapHookTest, AnOutOfResourcesFailureCapturesNothing) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::vector<uint8_t> source = make_invalid_gfx1250_elf();
+  ScopedTempDirectory capture_directory;
+  ASSERT_FALSE(capture_directory.path().empty());
+  ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
+  ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", capture_directory.path().c_str(), 1), 0);
+  rj_test_force_next_translation_status(3 /* ROCJITSU_STATUS_OUT_OF_RESOURCES */);
+
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(
+      api.core.hsa_code_object_reader_create_from_memory_fn(source.data(), source.size(), &reader),
+      HSA_STATUS_SUCCESS);
+  testing::internal::CaptureStderr();
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kExecutable, kA0Agent, reader,
+                                                              nullptr, nullptr),
+            HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  const std::string log_text = testing::internal::GetCapturedStderr();
+
+  // Copying a large input after an allocation failure adds pressure without
+  // diagnosing anything: the bytes are not why it failed.
+  EXPECT_EQ(rj_test_dump_path_count(), 0u);
+  EXPECT_EQ(log_text.find("; please file a bug report and attach this code object"),
+            std::string::npos)
+      << log_text;
+}
+
+TEST_F(HsaHotswapHookTest, EnablingCaptureAfterAHintStillProducesTheArtifact) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::vector<uint8_t> source = make_invalid_gfx1250_elf();
+
+  // The hint names the variable that turns capture on. Acting on it inside the
+  // same process must work: a hint that consumed the source's one capture slot
+  // would tell the operator to do something that then cannot succeed. Both
+  // attempts force a status the memo refuses to remember, so the second load
+  // really translates again instead of replaying the first verdict.
+  rj_test_force_next_translation_status(1 /* ROCJITSU_STATUS_ERROR */);
+  testing::internal::CaptureStderr();
+  EXPECT_EQ(load_through_new_reader(source), HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  const std::string hint_text = testing::internal::GetCapturedStderr();
+  ASSERT_NE(hint_text.find("set HSA_HOTSWAP_DUMP_SOURCE=1 to save the source code object"),
+            std::string::npos)
+      << hint_text;
+  ASSERT_EQ(rj_test_dump_path_count(), 0u);
+
+  ScopedTempDirectory capture_directory;
+  ASSERT_FALSE(capture_directory.path().empty());
+  ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
+  ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", capture_directory.path().c_str(), 1), 0);
+  rj_test_force_next_translation_status(1 /* ROCJITSU_STATUS_ERROR */);
+  testing::internal::CaptureStderr();
+  EXPECT_EQ(load_through_new_reader(source), HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  const std::string capture_text = testing::internal::GetCapturedStderr();
+
+  EXPECT_EQ(rj_test_dump_path_count(), 1u);
+  expect_failure_dump(capture_text, source);
+}
+
+TEST_F(HsaHotswapHookTest, CorrectingTheCaptureDirectoryRetriesTheArtifact) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::vector<uint8_t> source = make_invalid_gfx1250_elf();
+  ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
+  ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", "/nonexistent-rocjitsu-hotswap-dump", 1), 0);
+
+  // Forced so the memo does not remember it: every load below translates again
+  // and retries the write, which is what makes the reporting bound matter.
+  constexpr size_t kFailedLoads = 4;
+  testing::internal::CaptureStderr();
+  for (size_t load = 0; load < kFailedLoads; ++load) {
+    rj_test_force_next_translation_status(1 /* ROCJITSU_STATUS_ERROR */);
+    EXPECT_EQ(load_through_new_reader(source), HSA_STATUS_ERROR_INVALID_CODE_OBJECT) << load;
+  }
+  const std::string failed_text = testing::internal::GetCapturedStderr();
+  // The destination stays broken, so the write keeps being retried -- but the
+  // operator is told about it once, not once per load.
+  EXPECT_EQ(count_occurrences(failed_text, "could not be saved"), 1u) << failed_text;
+  ASSERT_EQ(rj_test_dump_path_count(), 0u);
+
+  // A capture that could not be written must not spend the source's slot: the
+  // operator fixes the destination and the next failure produces the artifact.
+  ScopedTempDirectory directory;
+  ASSERT_FALSE(directory.path().empty());
+  ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", directory.path().c_str(), 1), 0);
+  rj_test_force_next_translation_status(1 /* ROCJITSU_STATUS_ERROR */);
+  testing::internal::CaptureStderr();
+  EXPECT_EQ(load_through_new_reader(source), HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  const std::string capture_text = testing::internal::GetCapturedStderr();
+
+  EXPECT_EQ(rj_test_dump_path_count(), 1u);
+  expect_failure_dump(capture_text, source);
+}
+
+TEST_F(HsaHotswapHookTest, CaptureFallsBackToTmpdirWhenNoDirectoryIsNamed) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::vector<uint8_t> source = make_invalid_gfx1250_elf();
+  ScopedTempDirectory directory;
+  ASSERT_FALSE(directory.path().empty());
+  // HSA_HOTSWAP_DUMP_DIR stays unset: TMPDIR is the next choice, and /tmp only
+  // after that.
+  ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
+  ASSERT_EQ(setenv("TMPDIR", directory.path().c_str(), 1), 0);
+
+  testing::internal::CaptureStderr();
+  EXPECT_EQ(load_through_new_reader(source), HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  const std::string log_text = testing::internal::GetCapturedStderr();
+
+  std::smatch match;
+  const std::regex path_pattern(
+      R"(path=([^;\s]+); please file a bug report and attach this code object)");
+  ASSERT_TRUE(std::regex_search(log_text, match, path_pattern)) << log_text;
+  EXPECT_EQ(match[1].str().rfind(directory.path() + "/", 0), 0u) << match[1].str();
+  expect_failure_dump(log_text, source);
+}
+
+TEST_F(HsaHotswapHookTest, CaptureStopsAtTheSourceCapAndSaysWhy) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  ScopedTempDirectory capture_directory;
+  ASSERT_FALSE(capture_directory.path().empty());
+  ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_SOURCE", "1", 1), 0);
+  ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", capture_directory.path().c_str(), 1), 0);
+  // kMaxCapturedSources in the hook. One more source than the registry holds.
+  constexpr size_t kCap = 32;
+
+  testing::internal::CaptureStderr();
+  for (size_t index = 0; index <= kCap; ++index) {
+    const std::vector<uint8_t> source = make_invalid_gfx1250_elf(static_cast<uint8_t>(index));
+    EXPECT_EQ(load_through_new_reader(source), HSA_STATUS_ERROR_INVALID_CODE_OBJECT) << index;
+  }
+  const std::string log_text = testing::internal::GetCapturedStderr();
+
+  // Refusing silently would be indistinguishable from a capture the operator
+  // then cannot find, so the cap explains itself -- once.
+  EXPECT_EQ(rj_test_dump_path_count(), kCap);
+  EXPECT_EQ(count_occurrences(log_text, "have already been captured"), 1u) << log_text;
+}
+
 TEST_F(HsaHotswapHookTest, RetainedStorageSurvivesUnloadAndReinstall) {
   ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
   ASSERT_EQ(rj_test_retained_executable_buffer_count(), 0u);
@@ -682,16 +1078,6 @@ TEST_F(HsaHotswapHookTest, RefusesAgentlessAndDeprecatedA0Loads) {
   EXPECT_EQ(g_load_deprecated_calls, 0);
 }
 
-TEST_F(HsaHotswapHookTest, ContainsExceptionsAtTheHsaBoundary) {
-  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
-  g_asic_revision = 1;
-  g_throw_from_deprecated_load = true;
-  EXPECT_EQ(api.core.hsa_executable_load_code_object_fn(kExecutable, kA0Agent, hsa_code_object_t{1},
-                                                        nullptr),
-            HSA_STATUS_ERROR_OUT_OF_RESOURCES);
-  EXPECT_EQ(g_load_deprecated_calls, 1);
-}
-
 TEST_F(HsaHotswapHookTest, CallbackApiSnapshotIsSafeDuringUnload) {
   ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
   auto create = api.core.hsa_code_object_reader_create_from_memory_fn;
@@ -725,9 +1111,6 @@ TEST_F(HsaHotswapHookTest, CallbackApiSnapshotIsSafeDuringUnload) {
 // distinguishes reuse from repetition.
 class HsaHotswapMemoTest : public HsaHotswapHookTest {
 protected:
-  // Loads @p source through a fresh reader, the way a caller that re-registers the
-  // same object does -- a new handle every time, so nothing but the content itself
-  // can connect one load to the next.
   // Spin until @p expected threads are asleep on an in-flight translation, or a
   // generous deadline passes. Returns what was actually observed so the caller can
   // release the gate before asserting on it.
@@ -739,6 +1122,18 @@ protected:
       waiters = rj_test_translation_waiters();
     }
     return waiters;
+  }
+
+  // Publishing a claim lets peers wait before its owner reaches the translation
+  // gate. Observe the owner's progress separately before sampling the count.
+  static uint64_t wait_for_translations(uint64_t expected) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    uint64_t translations = rj_test_translation_count();
+    while (translations < expected && std::chrono::steady_clock::now() < deadline) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      translations = rj_test_translation_count();
+    }
+    return translations;
   }
 
   // Build a second object of the SAME size as @p base whose sampled windows are
@@ -803,34 +1198,45 @@ protected:
     }
     return {};
   }
-
-  hsa_status_t load_through_new_reader(const std::vector<uint8_t> &source,
-                                       hsa_executable_t executable = kExecutable) {
-    hsa_code_object_reader_t reader{};
-    const hsa_status_t create_status = api.core.hsa_code_object_reader_create_from_memory_fn(
-        source.data(), source.size(), &reader);
-    if (create_status != HSA_STATUS_SUCCESS)
-      return create_status;
-    return api.core.hsa_executable_load_agent_code_object_fn(executable, kA0Agent, reader, nullptr,
-                                                             nullptr);
-  }
 };
 
 // The ticket this exists for: a caller registered two distinct code objects 509
 // times each across four devices and paid for 2036 translations.
 TEST_F(HsaHotswapMemoTest, RemembersARefusalInsteadOfRepeatingIt) {
   ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  ASSERT_EQ(unsetenv("HSA_HOTSWAP_VERBOSE"), 0);
   const std::vector<uint8_t> source = make_invalid_gfx1250_elf();
   constexpr size_t kLoads = 256;
 
+  testing::internal::CaptureStderr();
   for (size_t load = 0; load < kLoads; ++load)
-    ASSERT_EQ(load_through_new_reader(source), HSA_STATUS_ERROR_INVALID_CODE_OBJECT) << load;
+    EXPECT_EQ(load_through_new_reader(source), HSA_STATUS_ERROR_INVALID_CODE_OBJECT) << load;
+  const std::string log_text = testing::internal::GetCapturedStderr();
 
   // A refusal is a property of the bytes: reaching it once is enough, and every
   // later load must reach the same answer without re-deriving it.
   EXPECT_EQ(rj_test_translation_count(), 1u);
   EXPECT_EQ(g_load_agent_calls, 0);
   EXPECT_EQ(rj_test_retained_executable_buffer_count(), 0u);
+  // The refusal is reported the once it is reached. The 255 reuses that follow
+  // are the memo working, not new failures, so they stay on the verbose channel.
+  EXPECT_EQ(count_occurrences(log_text, " outcome=translation_failed "), 1u) << log_text;
+  EXPECT_EQ(count_occurrences(log_text, " outcome=reused_failure "), 0u) << log_text;
+}
+
+TEST_F(HsaHotswapMemoTest, VerboseLoggingStillShowsEveryRememberedRefusal) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  ASSERT_EQ(setenv("HSA_HOTSWAP_VERBOSE", "1", 1), 0);
+  const std::vector<uint8_t> source = make_invalid_gfx1250_elf();
+  constexpr size_t kLoads = 4;
+
+  testing::internal::CaptureStderr();
+  for (size_t load = 0; load < kLoads; ++load)
+    EXPECT_EQ(load_through_new_reader(source), HSA_STATUS_ERROR_INVALID_CODE_OBJECT) << load;
+  const std::string log_text = testing::internal::GetCapturedStderr();
+
+  EXPECT_EQ(count_occurrences(log_text, " outcome=translation_failed "), 1u) << log_text;
+  EXPECT_EQ(count_occurrences(log_text, " outcome=reused_failure "), kLoads - 1) << log_text;
 }
 
 #ifdef GFX1250_B0_TO_A0_FIXTURE
@@ -859,28 +1265,26 @@ TEST_F(HsaHotswapMemoTest, RepeatedLoadsOfOneObjectTranslateOnce) {
   EXPECT_EQ(rj_test_translation_memo_bytes(), source.size() + first_output.size());
 }
 
-// Identity is exact. Two objects that a sampled fingerprint could plausibly place
-// in the same bucket -- same size, differing in one interior byte -- must not be
-// mistaken for each other, because the consequence is running the wrong code.
-TEST_F(HsaHotswapMemoTest, ObjectsDifferingInOneInteriorByteAreNotConfused) {
+// Identity is exact. Two objects the sampling cannot tell apart -- same size, same
+// fingerprint, different bytes -- must not be mistaken for each other, because the
+// consequence is running the wrong code. The count is the whole check: a confused
+// pair is served from the memo and never reaches a second translation.
+TEST_F(HsaHotswapMemoTest, ObjectsInOneFingerprintBucketAreNotConfused) {
   ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
   const std::vector<uint8_t> base = read_translation_fixture();
   ASSERT_FALSE(base.empty()) << GFX1250_B0_TO_A0_FIXTURE;
 
   std::vector<uint8_t> altered = base;
-  ASSERT_GT(altered.size(), 2048u);
-  altered[altered.size() / 2] = static_cast<uint8_t>(altered[altered.size() / 2] ^ 0xff);
+  altered.resize(base.size() + 4096, 0);
+  const std::vector<uint8_t> twin = make_fingerprint_twin(base);
+  ASSERT_FALSE(twin.empty()) << "no colliding twin found; the sampling changed";
+  ASSERT_EQ(altered.size(), twin.size());
+  ASSERT_NE(altered, twin);
+  ASSERT_EQ(rj_test_sample_fingerprint(altered.data(), altered.size()),
+            rj_test_sample_fingerprint(twin.data(), twin.size()));
 
-  ASSERT_EQ(load_through_new_reader(base), HSA_STATUS_SUCCESS);
-  const std::vector<uint8_t> base_output = g_loaded_bytes;
-
-  g_loaded_bytes.clear();
-  const hsa_status_t altered_status = load_through_new_reader(altered);
-  // Whatever the altered object translates to, it must not be served the entry
-  // that belongs to the original.
-  if (altered_status == HSA_STATUS_SUCCESS) {
-    EXPECT_NE(g_loaded_bytes, base_output);
-  }
+  ASSERT_EQ(load_through_new_reader(altered), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(load_through_new_reader(twin), HSA_STATUS_SUCCESS);
   EXPECT_EQ(rj_test_translation_count(), 2u);
 }
 
@@ -953,7 +1357,7 @@ TEST_F(HsaHotswapMemoTest, ConcurrentLoadsOfOneObjectTranslateOnce) {
   // here while threads were still held would abort the process instead of failing
   // the case.
   const uint64_t waiters = wait_for_memo_waiters(kThreadCount - 1);
-  const uint64_t translations_while_held = rj_test_translation_count();
+  const uint64_t translations_while_held = wait_for_translations(1);
   rj_test_open_translation_gate();
   for (auto &worker : workers)
     worker.join();
@@ -1002,10 +1406,7 @@ TEST_F(HsaHotswapMemoTest, ObjectsThatShareAFingerprintDoNotWaitForEachOther) {
 
   // Both should reach the gate, so two translations are in flight and nobody is
   // waiting. Sample, then release regardless of what was seen.
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-  while (rj_test_translation_count() < 2 && std::chrono::steady_clock::now() < deadline)
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  const uint64_t translations_while_held = rj_test_translation_count();
+  const uint64_t translations_while_held = wait_for_translations(2);
   const uint64_t waiters = rj_test_translation_waiters();
   rj_test_open_translation_gate();
   for (auto &worker : workers)
@@ -1053,12 +1454,10 @@ TEST_F(HsaHotswapMemoTest, WaitersResumeWhenAClaimIsReleasedWithoutPublishing) {
   EXPECT_GE(rj_test_translation_count(), 2u);
 }
 
-// The two ways a real translation fails, told apart by what they imply about the
-// input. A body the translator renders non-dispatchable is a verdict on the bytes
-// and is remembered; a body that makes it throw promises nothing and is not. The
+// Deterministic failures are verdicts on the bytes and are remembered. The
 // header-only object used above never reaches translation at all, so it cannot
-// exercise either.
-TEST_F(HsaHotswapMemoTest, ANonDispatchableObjectIsRememberedButAThrowingOneIsNot) {
+// exercise either path.
+TEST_F(HsaHotswapMemoTest, NonDispatchableAndInvalidInstructionVerdictsAreRemembered) {
   ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
   const std::vector<uint8_t> base = read_translation_fixture();
   ASSERT_FALSE(base.empty()) << GFX1250_B0_TO_A0_FIXTURE;
@@ -1071,14 +1470,15 @@ TEST_F(HsaHotswapMemoTest, ANonDispatchableObjectIsRememberedButAThrowingOneIsNo
         << load;
   EXPECT_EQ(rj_test_translation_count(), 1u) << "a verdict on the bytes was re-derived";
 
-  // An all-ones opcode makes the translator throw, which says nothing about the
-  // input, so every load has to try again.
+  // An invalid instruction is now a structured, deterministic translation
+  // diagnostic, so repeated loads reuse the same negative verdict.
   rj_test_clear_retained_storage();
-  const std::vector<uint8_t> throwing = patch_first_instruction(base, 0xffffffffu);
-  ASSERT_FALSE(throwing.empty());
+  const std::vector<uint8_t> invalid_instruction = patch_first_instruction(base, 0xffffffffu);
+  ASSERT_FALSE(invalid_instruction.empty());
   for (size_t load = 0; load < 4; ++load)
-    ASSERT_EQ(load_through_new_reader(throwing), HSA_STATUS_ERROR_INVALID_CODE_OBJECT) << load;
-  EXPECT_EQ(rj_test_translation_count(), 4u) << "an unattributable failure was remembered";
+    ASSERT_EQ(load_through_new_reader(invalid_instruction), HSA_STATUS_ERROR_INVALID_CODE_OBJECT)
+        << load;
+  EXPECT_EQ(rj_test_translation_count(), 1u) << "an invalid-instruction verdict was re-derived";
 }
 
 // A failure that says nothing about the bytes must not become a verdict on them.
@@ -1227,53 +1627,6 @@ TEST_F(HsaHotswapMemoTest, ALateLoadTakesAResultThatIsStillDraining) {
   EXPECT_EQ(rj_test_translation_count(), 1u) << "a ready result was ignored";
 }
 
-// Admitting an entry allocates twice, and either allocation can come up short --
-// most plausibly right after a translation that peaked at 15.9 GB. Neither
-// failure may cost the waiters their answer: they would translate the same object
-// one at a time, N x 197 s, which is the convoy in a new place.
-class HsaHotswapAdmissionFaultTest : public HsaHotswapMemoTest,
-                                     public ::testing::WithParamInterface<int> {};
-
-TEST_P(HsaHotswapAdmissionFaultTest, AFailedAdmissionStillServesTheCohort) {
-  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
-  const std::vector<uint8_t> source = read_translation_fixture();
-  ASSERT_FALSE(source.empty()) << GFX1250_B0_TO_A0_FIXTURE;
-  constexpr size_t kThreadCount = 6;
-
-  // Room to spare, so the entry would be admitted if the allocation succeeded.
-  rj_test_close_translation_gate();
-  rj_test_fail_next_memo_admission(GetParam());
-
-  std::atomic<int> failures{0};
-  std::vector<std::thread> workers;
-  workers.reserve(kThreadCount);
-  for (size_t thread_index = 0; thread_index < kThreadCount; ++thread_index) {
-    workers.emplace_back([&] {
-      if (load_through_new_reader(source) != HSA_STATUS_SUCCESS)
-        failures.fetch_add(1, std::memory_order_relaxed);
-    });
-  }
-  const uint64_t waiters = wait_for_memo_waiters(kThreadCount - 1);
-  rj_test_open_translation_gate();
-  for (auto &worker : workers)
-    worker.join();
-
-  EXPECT_EQ(waiters, kThreadCount - 1);
-  // Every load succeeded, and exactly one translation served all of them.
-  EXPECT_EQ(failures.load(std::memory_order_relaxed), 0);
-  EXPECT_EQ(rj_test_translation_count(), 1u) << "the cohort was made to translate again";
-  // Nothing was cached, which is the cost of the failed admission and all of it.
-  EXPECT_EQ(rj_test_translation_memo_bytes(), 0u);
-
-  // A later load finds no entry and translates, confirming the memo really is
-  // empty rather than holding something unreachable.
-  ASSERT_EQ(load_through_new_reader(source), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(rj_test_translation_count(), 2u);
-}
-
-INSTANTIATE_TEST_SUITE_P(ListNodeAndIndexNode, HsaHotswapAdmissionFaultTest,
-                         ::testing::Values(1, 2));
-
 // Eviction has to run to the ceiling in one go, however many entries that takes.
 // Stopping part way -- as it would if anything in the loop could fail -- leaves
 // the memo over its limit with nothing that will ever retry it, because a hit
@@ -1357,6 +1710,126 @@ TEST_F(HsaHotswapMemoTest, ReuseIsReportedAgainstTheSameSourceObject) {
       ++reuse_records;
   }
   EXPECT_EQ(reuse_records, 1u);
+}
+#endif
+
+#if defined(GFX1250_B0_TO_A0_FIXTURE) && defined(RJ_PRETRANSLATE_TOOL)
+/// @brief A private pre-translated tier for one test.
+///
+/// @details A failed mkdtemp points the store at a path that cannot exist rather
+/// than passing nullptr, which would restore the REAL install tier: on a machine
+/// where someone had pre-translated, a test could then pass without ever touching
+/// its own directory.
+class ScopedPretranslationRoot {
+public:
+  static constexpr const char *kUnusableRoot = "/dev/null/rj-fixture-has-no-root";
+
+  ScopedPretranslationRoot() {
+    std::strcpy(path_, "/tmp/rj-hotswap-aot-XXXXXX");
+    if (mkdtemp(path_) == nullptr)
+      path_[0] = '\0';
+    rj_test_set_pretranslation_root(path_[0] == '\0' ? kUnusableRoot : path_);
+  }
+  ~ScopedPretranslationRoot() {
+    rj_test_set_pretranslation_root(nullptr);
+    if (path_[0] != '\0')
+      std::filesystem::remove_all(path_);
+  }
+  ScopedPretranslationRoot(const ScopedPretranslationRoot &) = delete;
+  ScopedPretranslationRoot &operator=(const ScopedPretranslationRoot &) = delete;
+
+  [[nodiscard]] bool has_root() const { return path_[0] != '\0'; }
+  [[nodiscard]] const char *path() const { return path_; }
+
+  /// @brief Re-run the tier's checks after filling its directory.
+  /// @details It opens once and holds the descriptor, so a tier populated after
+  /// the first lookup would otherwise stay closed.
+  void reopen() const { rj_test_set_pretranslation_root(path_); }
+
+private:
+  char path_[64] = {};
+};
+
+class HsaHotswapPretranslationTest : public HsaHotswapHookTest {
+protected:
+  void SetUp() override {
+    HsaHotswapHookTest::SetUp();
+    ASSERT_TRUE(store_root.has_root()) << "fixture could not create its private store root";
+    ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+    source = read_translation_fixture();
+    ASSERT_FALSE(source.empty()) << GFX1250_B0_TO_A0_FIXTURE;
+  }
+
+  /// @brief Run one A0 load of @p bytes and return what reached the loader.
+  std::vector<uint8_t> load(const std::vector<uint8_t> &bytes) {
+    hsa_code_object_reader_t reader{};
+    EXPECT_EQ(
+        api.core.hsa_code_object_reader_create_from_memory_fn(bytes.data(), bytes.size(), &reader),
+        HSA_STATUS_SUCCESS);
+    EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kExecutable, kA0Agent, reader,
+                                                                nullptr, nullptr),
+              HSA_STATUS_SUCCESS);
+    const std::vector<uint8_t> loaded = g_loaded_bytes;
+    EXPECT_EQ(api.core.hsa_executable_destroy_fn(kExecutable), HSA_STATUS_SUCCESS);
+    return loaded;
+  }
+
+  /// @brief Fill the tier by running the real tool over @p bytes.
+  void pretranslate(const std::vector<uint8_t> &bytes) {
+    const std::filesystem::path input = std::filesystem::path(store_root.path()) / "source.co";
+    {
+      std::ofstream out(input, std::ios::binary);
+      out.write(reinterpret_cast<const char *>(bytes.data()),
+                static_cast<std::streamsize>(bytes.size()));
+      ASSERT_TRUE(out.good());
+    }
+    const std::string command = std::string(RJ_PRETRANSLATE_TOOL) + " --store-root '" +
+                                store_root.path() + "' '" + input.string() + "' > /dev/null 2>&1";
+    ASSERT_EQ(std::system(command.c_str()), 0) << command;
+    std::filesystem::remove(input);
+    store_root.reopen();
+  }
+
+  ScopedPretranslationRoot store_root;
+  std::vector<uint8_t> source;
+};
+
+// The tier is only worth anything if a DIFFERENT program can fill it. Both sides
+// key entries on the portable-prebuilt contract and locate the tree relative to
+// the same shared object, so they agree by construction -- but nothing reports
+// a disagreement. A tool writing keys the hook never computes would produce no
+// error, no warning, and no reuse whatsoever.
+//
+// So this runs the real tool as a separate process rather than writing entries
+// through a test seam. A seam would exercise the hook's own key derivation twice
+// and prove nothing about the pair.
+TEST_F(HsaHotswapPretranslationTest, WhatTheToolWritesAheadOfTimeServesALoad) {
+  pretranslate(source);
+
+  const std::vector<uint8_t> loaded = load(source);
+  ASSERT_FALSE(loaded.empty());
+  EXPECT_EQ(rj_test_pretranslation_hits(), 1u);
+
+  // Nothing was added to the tier: it is read-only to this process, so a runtime
+  // never writes back what it was handed.
+  size_t objects = 0;
+  for (const auto &item : std::filesystem::recursive_directory_iterator(store_root.path()))
+    objects += item.path().extension() == ".obj" ? 1 : 0;
+  EXPECT_EQ(objects, 1u);
+}
+
+TEST_F(HsaHotswapPretranslationTest, APreTranslatedObjectIsWhatTranslatingWouldHaveProduced) {
+  // Reuse is only correct if it is indistinguishable from doing the work. The
+  // tool and the hook run the same translator, so this should hold trivially --
+  // which is exactly why it is worth an assertion rather than an assumption.
+  const std::vector<uint8_t> translated = load(source);
+  ASSERT_FALSE(translated.empty());
+  rj_test_clear_retained_storage();
+
+  pretranslate(source);
+
+  EXPECT_EQ(load(source), translated);
+  EXPECT_EQ(rj_test_pretranslation_hits(), 1u);
 }
 #endif
 

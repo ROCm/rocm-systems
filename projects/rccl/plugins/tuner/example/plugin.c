@@ -1,5 +1,6 @@
 /*************************************************************************
  * Copyright (c) 2015-2019, NVIDIA CORPORATION. All rights reserved.
+ * Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -210,11 +211,9 @@ static ncclResult_t loadConfig(TunerContext* ctx, const char* filename) {
     strncpy(lineCopy, line, sizeof(lineCopy));
     lineCopy[sizeof(lineCopy) - 1] = '\0';
 
-    // Tokenize by comma. Use strtok_r (reentrant): strtok keeps parser state in
-    // a shared static, so concurrent multi-comm init would corrupt each other's
-    // parse and load a partial config set, causing per-rank algo split-brain.
-    char* saveptr = NULL;
-    token = strtok_r(lineCopy, ",", &saveptr);
+    // Tokenize by comma
+    char* savePtr = NULL;
+    token = strtok_r(lineCopy, ",", &savePtr);
     while (token != NULL && tokenCount < CONFIG_FIELDS_MAX) {
       // Trim whitespace
       while (*token == ' ' || *token == '\t') token++;
@@ -224,7 +223,7 @@ static ncclResult_t loadConfig(TunerContext* ctx, const char* filename) {
         end--;
       }
       tokens[tokenCount++] = token;
-      token = strtok_r(NULL, ",", &saveptr);
+      token = strtok_r(NULL, ",", &savePtr);
     }
 
     // Validate field count: support required fields (8), with pipeOps (9), or with regBuff (10)
@@ -367,9 +366,6 @@ __hidden ncclResult_t pluginGetCollInfo(void* context, ncclFunc_t collType, size
                      collTypeToString(collType), nBytes, numPipeOps, regBuff, ctx->numConfigs);
   }
 
-  // Cast the collCostTable pointer to a 2D array to fix the segmentation fault
-  float (*table)[NCCL_NUM_PROTOCOLS] = (float (*)[NCCL_NUM_PROTOCOLS])collCostTable;
-
   // Look for matching configuration
   for (int i = 0; i < ctx->numConfigs; i++) {
     TuningConfig* config = &ctx->configs[i];
@@ -442,7 +438,12 @@ __hidden ncclResult_t pluginGetCollInfo(void* context, ncclFunc_t collType, size
       }
     } else {
       if (ctx->logFunction) {
-        ctx->logFunction(NCCL_LOG_INFO, NCCL_TUNING, __FILE__, __LINE__,
+        // TRACE, like the other per-config diagnostics above: this fires once
+        // per config per collective, so at INFO a config file that matches
+        // nothing turned a single test into tens of MB of log (a 30-config file
+        // over a size sweep produced 265k of these lines / 57 MB). The
+        // per-callback outcome is still reported at INFO below.
+        ctx->logFunction(NCCL_LOG_TRACE, NCCL_TUNING, __FILE__, __LINE__,
                          "TUNER/ExamplePlugin: Config does not match - collType match=%d, size match=%d, nodes match=%d, ranks match=%d, pipeOps match=%d, regBuff match=%d",
                          config->collType == collType,
                          (nBytes >= config->minBytes && nBytes <= config->maxBytes),

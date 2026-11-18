@@ -1,30 +1,18 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #ifndef INCLUDE_ROCM_SMI_ROCM_SMI_MAIN_H_
 #define INCLUDE_ROCM_SMI_ROCM_SMI_MAIN_H_
 
 #include <cstdint>
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
 #include <functional>
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 #include <limits>
 #include <map>
 #include <memory>
@@ -53,12 +41,8 @@ class RocmSMI {
   void Cleanup(void);
 
   std::vector<std::shared_ptr<Device>>& devices() { return devices_; }
-  std::vector<std::shared_ptr<Device>>& nic_devices() { return nic_devices_; }
-  std::vector<std::shared_ptr<Device>>& switch_devices() { return switch_devices_; }
 
   uint32_t DiscoverAmdgpuDevices(void);
-  uint32_t DiscoverBRCMnicDevices(void);
-  uint32_t DiscoverBRCMswitchDevices(void);
   int DiscoverAMDPowerMonitors(bool force_update = false);
 
   // Will execute "func" for every Device object known about, or until func
@@ -95,19 +79,13 @@ class RocmSMI {
 
  private:
   std::vector<std::shared_ptr<Device>> devices_;
-  std::vector<std::shared_ptr<Device>> nic_devices_;
-  std::vector<std::shared_ptr<Device>> switch_devices_;
   std::map<uint64_t, std::shared_ptr<KFDNode>> kfd_node_map_;
   std::vector<std::shared_ptr<Monitor>> monitors_;
-  std::vector<std::shared_ptr<Monitor>> nic_monitors_;
-  std::vector<std::shared_ptr<Monitor>> switch_monitors_;
   std::vector<std::shared_ptr<PowerMon>> power_mons_;
   std::set<std::string> amd_monitor_types_;
   std::map<std::pair<uint32_t, uint32_t>, std::shared_ptr<IOLink>> io_link_map_;
   std::map<uint32_t, uint32_t> dev_ind_to_node_ind_map_;
   void AddToDeviceList(const std::string& dev_name, uint64_t bdfid = 0);
-  void AddToNICDeviceList(const std::string& dev_name, uint64_t bdfid = 0, uint32_t card_indx = 0);
-  void AddToSWITCHDeviceList(const std::string& dev_name, uint64_t bdfid = 0);
 
   typedef struct rsmi_device_enumeration_t {
     uint32_t card_index = std::numeric_limits<uint32_t>::max();

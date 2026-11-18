@@ -751,7 +751,10 @@ HIP_TEST_CASE(Unit_hipHostRegister_Negative) {
   SECTION("hipHostRegister Negative Test - invalid memory size") {
     INFO("Trying to allocate: " << memFree);
     INFO("Host: " << hostMemFree << " device: " << devMemFree);
-    HIP_CHECK_ERROR(hipHostRegister(hostPtr, memFree, 0), hipErrorInvalidValue);
+    // The huge range could overlaps an already-mapped region as
+    // hipErrorHostMemoryAlreadyRegistered.
+    HIP_CHECK_ERRORS(hipHostRegister(hostPtr, memFree, 0), hipErrorInvalidValue,
+                     hipErrorHostMemoryAlreadyRegistered);
   }
 
   free(hostPtr);

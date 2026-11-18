@@ -1,4 +1,17 @@
 //! Profile: a reusable bundle of emulator configuration.
+//!
+//! Extra profile fields are normalized into the emulator configuration and
+//! passed through to the backend. Agent fields are retained recursively.
+//! Mirage-owned container and system-topology controls still reject unknown
+//! fields because they cannot be delegated to the emulator.
+//!
+//! Delegating is not the same as accepting, and this layer cannot tell
+//! the two apart: [`EmulatorDef::extra`] is one map on a definition
+//! shared by every backend, but only `rocjitsu` merges it into a
+//! configuration. A backend with nowhere to forward these keys refuses
+//! them from its own `validate_profile`, which the CLI and the daemon
+//! both run before a profile is written — see
+//! [`EmulatorDef::reject_extra`].
 
 use serde::{Deserialize, Serialize};
 
@@ -11,6 +24,7 @@ use crate::emulator::EmulatorDef;
 /// therefore live on the profile, so a profile fully describes how its
 /// sessions are containerised.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FileMount {
     /// Path to the file or directory on the host.
     pub host_path: String,
@@ -84,6 +98,7 @@ impl FileMount {
 /// [`ContainerizedDef`] and therefore live on the profile, so a profile
 /// fully describes which container ports it exposes on the host.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PortMapping {
     /// Port published on the host.
     pub host_port: u16,
@@ -121,9 +136,18 @@ impl PortMapping {
             None => (spec, None),
         };
 
+        // Zero is rejected rather than passed through. Docker reads a host
+        // port of 0 as "pick any free one", but mirage never tells the
+        // user which one was picked, so the mapping would be unusable —
+        // and a *container* port of 0 means nothing at all. The message
+        // has always promised 1-65535; this is the code agreeing with it.
         let parse_port = |s: &str| -> Result<u16, String> {
-            s.parse::<u16>()
-                .map_err(|_| format!("invalid port {s:?} in {spec:?} (expected a number 1-65535)"))
+            match s.parse::<u16>() {
+                Ok(0) | Err(_) => Err(format!(
+                    "invalid port {s:?} in {spec:?} (expected a number 1-65535)"
+                )),
+                Ok(p) => Ok(p),
+            }
         };
 
         let (host_port, container_port) = match ports.split_once(':') {
@@ -217,10 +241,29 @@ impl Hack {
     }
 }
 
+/// The hacks a derivative image is really built from: each distinct hack
+/// once, in slug order.
+///
+/// Hacks are a set, not a sequence — each is an idempotent upgrade of the
+/// base image, and `--hack X --hack X` asks for X, not for X twice. The
+/// tag was already computed from the sorted, deduplicated slugs, so it is
+/// the *Dockerfile* that has to agree: two orderings that share a tag must
+/// share a build, and a repeated hack must not be applied (and paid for)
+/// twice under a tag saying it happened once. Both callers therefore
+/// normalise here rather than each in its own way.
+fn distinct_hacks(hacks: &[Hack]) -> Vec<Hack> {
+    let mut out = hacks.to_vec();
+    out.sort_unstable_by_key(|h| h.slug());
+    out.dedup();
+    out
+}
+
 /// Generate the Dockerfile that builds a derivative of `base` with each
-/// of `hacks` applied as an additional layer, in order. Returns `None`
-/// when `hacks` is empty (no derivative image is needed).
+/// distinct hack in `hacks` applied as an additional layer, in the order
+/// `distinct_hacks` fixes. Returns `None` when `hacks` is empty (no
+/// derivative image is needed).
 pub fn hacks_dockerfile(base: &str, hacks: &[Hack]) -> Option<String> {
+    let hacks = distinct_hacks(hacks);
     if hacks.is_empty() {
         return None;
     }
@@ -238,14 +281,13 @@ pub fn hacks_dockerfile(base: &str, hacks: &[Hack]) -> Option<String> {
 /// built image instead of rebuilding it. Returns `None` when `hacks` is
 /// empty.
 pub fn hacks_image_tag(base: &str, hacks: &[Hack]) -> Option<String> {
+    let hacks = distinct_hacks(hacks);
     if hacks.is_empty() {
         return None;
     }
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
-    let mut slugs: Vec<&str> = hacks.iter().map(|h| h.slug()).collect();
-    slugs.sort_unstable();
-    slugs.dedup();
+    let slugs: Vec<&str> = hacks.iter().map(|h| h.slug()).collect();
     let mut hasher = DefaultHasher::new();
     base.hash(&mut hasher);
     slugs.hash(&mut hasher);
@@ -261,6 +303,7 @@ pub fn hacks_image_tag(base: &str, hacks: &[Hack]) -> Option<String> {
 /// runtime types and `mirage_container` for the engine that drives the
 /// provider CLI.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ContainerizedDef {
     /// Provider binary to drive: `"podman"`, `"docker"`, or an absolute
     /// path. `None` auto-detects (preferring podman, then docker).
@@ -299,7 +342,7 @@ pub struct ContainerizedDef {
 
 /// A profile is a named, on-disk emulator preset that can be referenced
 /// by sessions. Profiles live in `$XDG_CONFIG_HOME/mirage/profile/`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProfileDef {
     /// The profile's name (also used as the filename, `<name>.json`).
     pub name: String,
@@ -317,9 +360,174 @@ pub struct ProfileDef {
     pub containerize: Option<ContainerizedDef>,
 }
 
+impl<'de> Deserialize<'de> for ProfileDef {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Fields {
+            name: String,
+            #[serde(default)]
+            description: Option<String>,
+            emulator: EmulatorDef,
+            #[serde(default)]
+            containerize: Option<ContainerizedDef>,
+            #[serde(flatten)]
+            extra: serde_json::Map<String, serde_json::Value>,
+        }
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let name = value["name"].as_str().unwrap_or("<unnamed>").to_string();
+        // Only the fields a document may legally leave out are worth a
+        // warning. `name`, `emulator`, `emulator.emulator` and
+        // `emulator.topology` are required, so the parse below fails on
+        // them a line later and names them itself — warning first would
+        // just report the same omission twice, once under the wrong
+        // profile name for a document whose `name` is not a string.
+        for path in [
+            "/emulator/plugins",
+            "/emulator/exec_mode",
+            "/emulator/options",
+        ] {
+            if value.pointer(path).is_none() {
+                tracing::warn!("profile {name:?} is missing field {path}");
+            }
+        }
+        let mut fields: Fields = serde_json::from_value(value).map_err(serde::de::Error::custom)?;
+        for (key, value) in fields.extra {
+            if matches!(
+                key.as_str(),
+                "plugins" | "exec_mode" | "options" | "topology"
+            ) {
+                return Err(serde::de::Error::custom(format!(
+                    "profile field {key:?} belongs inside emulator"
+                )));
+            }
+            if fields.emulator.extra.contains_key(&key) {
+                return Err(serde::de::Error::custom(format!(
+                    "RocJITsu field {key:?} is specified both on the profile and its emulator"
+                )));
+            }
+            // Say so. A root key mirage does not recognise is forwarded
+            // to the emulator, and the emulator drops what *it* does not
+            // recognise without a word — so a misspelled mirage field
+            // (`containerise`, `descriptoin`) otherwise disappears
+            // between the two with nothing anywhere to explain why the
+            // profile did not do what it says. This is the last layer
+            // that still knows which file the key came from.
+            tracing::warn!(
+                "profile {name:?} field {key:?} is not a mirage field; \
+                 forwarding it to the emulator, which ignores what it does not know"
+            );
+            fields.emulator.extra.insert(key, value);
+        }
+        Ok(Self {
+            name: fields.name,
+            description: fields.description,
+            emulator: fields.emulator,
+            containerize: fields.containerize,
+        })
+    }
+}
+
+impl ProfileDef {
+    /// Ask this profile's emulator backend whether it can run it.
+    ///
+    /// A profile names a backend, and only that backend knows whether the
+    /// rest of the document makes sense to it — an agent it has no model
+    /// for, an option it does not accept, a runtime asset it needs and
+    /// cannot find. Checked when the profile is written rather than when
+    /// a session first tries to use it, so the failure lands on the
+    /// command that could still fix it.
+    ///
+    /// # Errors
+    ///
+    /// Returns the backend's own explanation, or a rejection naming the
+    /// emulator if no backend by that name is compiled into this build.
+    pub fn validate(&self) -> Result<(), String> {
+        let kind = &self.emulator.emulator;
+        match crate::emulator::get_emulator_backend(kind) {
+            Some(backend) => backend.validate_profile(self),
+            None => Err(format!(
+                "unknown emulator {kind:?}; run `mirage emulators` for the \
+                 backends this build has"
+            )),
+        }
+    }
+
+    /// The agent every GPU in this profile instantiates, when the profile
+    /// is resolved. See [`crate::emulator::EmulatorDef::agent`].
+    #[must_use]
+    pub fn agent(&self) -> Option<&crate::agent::AgentDef> {
+        self.emulator.agent()
+    }
+
+    /// The gfx target a session on this profile presents to the
+    /// workload's ROCm runtime, or `None` when there is nothing for that
+    /// runtime to recognise.
+    ///
+    /// Two things have to be true for there to be an answer: the agent
+    /// has to name a GPU, and the backend has to be one that stands a
+    /// synthetic GPU up rather than retargeting onto the host's real one
+    /// (see
+    /// [`EmulatorBackend::presents_emulated_device`](crate::emulator::EmulatorBackend::presents_emulated_device)).
+    /// `None` on every other path, including a profile whose references
+    /// have not been followed and a backend this build was not compiled
+    /// with — the callers of this are diagnostics, and a diagnostic that
+    /// guesses is worse than one that stays quiet.
+    #[must_use]
+    pub fn emulated_gfx_target(&self) -> Option<crate::hardware::GfxTarget> {
+        let backend = crate::emulator::get_emulator_backend(&self.emulator.emulator)?;
+        backend.presents_emulated_device().then_some(())?;
+        self.agent()?.gfx_target()
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+    /// Port 0 was accepted while the error message promised 1-65535 --
+    /// so `--port 0:8000` produced a mapping the user could never reach.
+    #[test]
+    fn port_zero_is_rejected_on_both_sides() {
+        for spec in ["0", "0:8000", "8000:0", "0:0", "0/tcp", "0:8000/udp"] {
+            let e = PortMapping::parse(spec).expect_err(&format!("{spec:?} should be rejected"));
+            assert!(e.contains("1-65535"), "{spec:?}: {e}");
+        }
+    }
+
+    /// The boundary the message names must itself be accepted, or the
+    /// fix above would have traded one wrong answer for another.
+    #[test]
+    fn the_advertised_port_range_is_accepted() {
+        for spec in ["1", "65535", "1:65535", "65535:1/udp"] {
+            PortMapping::parse(spec).unwrap_or_else(|e| panic!("{spec:?} rejected: {e}"));
+        }
+    }
+
     use super::*;
+
+    #[test]
+    fn profile_extras_round_trip_through_emulator() {
+        let profile: ProfileDef = serde_json::from_value(serde_json::json!({
+            "name": "extended", "max_ticks": 123,
+            "emulator": {"emulator": "rocjitsu", "topology": "t", "vm": {"future": [1, 2]}}
+        }))
+        .unwrap();
+        let json = serde_json::to_value(&profile).unwrap();
+        assert_eq!(json["emulator"]["max_ticks"], 123);
+        assert_eq!(json["emulator"]["vm"]["future"], serde_json::json!([1, 2]));
+        assert_eq!(serde_json::from_value::<ProfileDef>(json).unwrap(), profile);
+        for extra in [
+            serde_json::json!({"exec_mode": "clocked"}),
+            serde_json::json!({"vm": {}}),
+        ] {
+            let mut invalid = serde_json::to_value(&profile).unwrap();
+            invalid
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            assert!(serde_json::from_value::<ProfileDef>(invalid).is_err());
+        }
+    }
 
     #[test]
     fn mount_parse_host_only() {
@@ -375,6 +583,30 @@ mod tests {
         assert_eq!(p.container_port, 53);
         assert_eq!(p.protocol.as_deref(), Some("udp"));
         assert_eq!(p.to_publish_arg(), "53:53/udp");
+    }
+
+    #[test]
+    fn a_repeated_hack_is_built_once_because_the_tag_says_it_was() {
+        // The tag deduplicated the slugs and the Dockerfile did not, so
+        // `--hack X --hack X` layered X twice — an apt upgrade paid for
+        // twice — and cached the result under a tag meaning "X, once".
+        let once = hacks_dockerfile("rocm/dev", &[Hack::UpdateGccViaPpa]).unwrap();
+        let twice =
+            hacks_dockerfile("rocm/dev", &[Hack::UpdateGccViaPpa, Hack::UpdateGccViaPpa]).unwrap();
+        assert_eq!(once, twice);
+        assert_eq!(
+            twice
+                .matches(Hack::UpdateGccViaPpa.dockerfile_step())
+                .count(),
+            1,
+            "{twice}"
+        );
+        assert_eq!(
+            hacks_image_tag("rocm/dev", &[Hack::UpdateGccViaPpa]),
+            hacks_image_tag("rocm/dev", &[Hack::UpdateGccViaPpa, Hack::UpdateGccViaPpa]),
+            "the tag was already order- and duplicate-independent"
+        );
+        assert_eq!(hacks_dockerfile("rocm/dev", &[]), None);
     }
 
     #[test]

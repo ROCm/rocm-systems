@@ -25,7 +25,33 @@ from utils.metrics.aggregation import (
     to_std,
     to_sum,
 )
-from utils.metrics.noise_clamper import to_noise_clamp
+from utils.metrics.common import EVAL_BUILTINS
+from utils.metrics.expression import columns_read
+
+
+def counter_table_index(
+    eval_string: object,
+    tables: list[pd.DataFrame],
+    build_in_vars: dict[str, str],
+) -> int:
+    """Return the index of the table an eval string should read.
+
+    Callers list the pass tables first and the merged table last. The first
+    pass table that has every column the eval string reads wins. Otherwise
+    the merged table wins.
+    """
+    if isinstance(eval_string, str):
+        for index, table in enumerate(tables[:-1]):
+            if table_holds(eval_string, table, build_in_vars):
+                return index
+    return len(tables) - 1
+
+
+def table_holds(
+    eval_string: str, table: pd.DataFrame, build_in_vars: dict[str, str]
+) -> bool:
+    """Return whether table has every column the eval string reads."""
+    return columns_read(eval_string, build_in_vars) <= set(table.columns)
 
 
 class MetricEvaluator:
@@ -63,14 +89,13 @@ class MetricEvaluator:
                 "to_quantile": to_quantile,
                 "to_mod": to_mod,
                 "to_concat": to_concat,
-                "to_noise_clamp": to_noise_clamp,
             })
 
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always", RuntimeWarning)
                 eval_result = eval(
                     compile(expr, "<string>", "eval"),
-                    {},
+                    {"__builtins__": EVAL_BUILTINS},
                     local_expr_context,
                 )
             # RuntimeWarnings (e.g. divide-by-zero) are surfaced only under --verbose
@@ -96,7 +121,7 @@ class MetricEvaluator:
                         f"Expression '{expr}' evaluated to None - explicitly specified."
                     )
                 elif not caught:
-                    console_warning(
+                    console_debug(
                         f"Expression '{expr}' evaluated to N/A "
                         "(divide-by-zero or empty counter data)."
                     )
@@ -106,22 +131,35 @@ class MetricEvaluator:
 
         except (TypeError, NameError, KeyError) as exception:
             if "empirical_peak" in str(exception):
-                console_warning(f"Missing empirical peak data: {exception}.")
+                console_warning(
+                    f"Missing empirical peak data: "
+                    f"{type(exception).__name__}: {exception}."
+                )
                 return "N/A"
             else:
-                console_warning(f"Failed to evaluate expression '{expr}': {exception}.")
+                console_warning(
+                    f"Failed to evaluate expression '{expr}': "
+                    f"{type(exception).__name__}: {exception}."
+                )
                 return "N/A"
 
         except AttributeError as attribute_error:
             console_warning(
-                f"Failed to evaluate expression '{expr}': {attribute_error}."
+                f"Failed to evaluate expression '{expr}': "
+                f"{type(attribute_error).__name__}: {attribute_error}."
             )
             return "N/A"
 
         except pd.errors.IntCastingNaNError as exception:
-            console_warning(f"Failed to evaluate expression '{expr}': {exception}.")
+            console_warning(
+                f"Failed to evaluate expression '{expr}': "
+                f"{type(exception).__name__}: {exception}."
+            )
             return "N/A"
 
         except ValueError as value_error:
-            console_warning(f"Failed to evaluate expression '{expr}': {value_error}.")
+            console_warning(
+                f"Failed to evaluate expression '{expr}': "
+                f"{type(value_error).__name__}: {value_error}."
+            )
             return "N/A"

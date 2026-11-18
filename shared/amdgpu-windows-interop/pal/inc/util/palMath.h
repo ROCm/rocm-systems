@@ -235,5 +235,17 @@ constexpr uint64 MulU32AsU64(uint32 a, uint32 b)
     return static_cast<uint64>(a) * static_cast<uint64>(b);
 }
 
+/// @brief Multiplies two 32-bit unsigned integers as size_t (platform-dependent) integers and returns the result
+///        as a size_t integer.
+///
+/// @param [in] a   First 32-bit unsigned integer.
+/// @param [in] b   Second 32-bit unsigned integer.
+///
+/// @return size_t integer result of the multiplication.
+constexpr size_t MulU32AsSizeT(uint32 a, uint32 b)
+{
+    return static_cast<size_t>(a) * static_cast<size_t>(b);
+}
+
 } // Math
 } // Util

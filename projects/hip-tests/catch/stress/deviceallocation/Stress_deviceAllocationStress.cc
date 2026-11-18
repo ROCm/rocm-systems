@@ -7,7 +7,9 @@
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 // Size Macros
 #define MEMORY_CHUNK_SIZE (1024 * 1024)
 #define MEMORY_CHUNK_SIZE_ODD (1025 * 1025)

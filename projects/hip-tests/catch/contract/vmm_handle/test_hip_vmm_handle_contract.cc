@@ -220,6 +220,86 @@ HIP_TEST_CASE(Contract_VmmHandle_HipMemGetHandleForAddressRange_DmaBufFd_IsQuery
 #endif  // _WIN32
 }
 
+// BACKEND-DIFF: hipMemRangeFlagDmaBufMappingTypePcie is declared inside the
+// AMD-only section of hip/hip_runtime_api.h, so the NVIDIA backend is not
+// guaranteed to expose the mapping-type flag at all. Parity would require the
+// NVIDIA header to surface an equivalent flag for the dma-buf export path.
+#if HT_AMD
+
+// @asserts: hipMemGetHandleForAddressRange - a PCIe-mapped dma-buf export is accepted or reported unsupported, never rejected as an invalid argument
+// PLATFORM-DIFF: hipMemGetHandleForAddressRange is not exported from the Windows
+// HIP runtime, so this contract is exercised only on non-Windows, matching the
+// sibling dma-buf export case above.
+HIP_TEST_CASE(Contract_VmmHandle_HipMemGetHandleForAddressRange_PcieMappingFlag_IsAcceptedOrReportsNotSupported) {
+#if defined(_WIN32)
+  HIP_SKIP_TEST("hipMemGetHandleForAddressRange is not exported from the Windows HIP runtime; the "
+                "dma-buf handle-export contract cannot be linked or exercised there.");
+#else
+  SkipIfVmmUnsupported();
+  // alloc must be declared BEFORE cleanup: the cleanup guard's teardown lambdas
+  // capture &alloc and read its fields (handle/address/mapped) as they run. Locals
+  // are destroyed in reverse declaration order, so declaring alloc first means it
+  // outlives cleanup and is still alive when ~ContractCleanup executes the lambdas.
+  MappedAllocation alloc;
+  hip::contract::ContractCleanup cleanup;
+
+  if (!CreateMappedAllocation(cleanup, &alloc)) {
+    HIP_SKIP_TEST("VMM create/map is not supported by this device/runtime path.");
+  }
+
+  // Requesting the PCIe mapping type asks for a dma-buf that a third-party PCIe
+  // device can reach, which needs a peer-visible BAR aperture. Whether a device
+  // has one is a capability, not a property of the call — the request itself is
+  // well formed. So the runtime must either honor it or report
+  // hipErrorNotSupported. Reporting hipErrorInvalidValue would make a capability
+  // gap indistinguishable from a caller passing a bad pointer, which is the
+  // distinction the sibling rejection case below pins.
+  int fd = -1;
+  const hipError_t status = hipMemGetHandleForAddressRange(
+      &fd, reinterpret_cast<hipDeviceptr_t>(alloc.address), alloc.size,
+      hipMemRangeHandleTypeDmaBufFd, hipMemRangeFlagDmaBufMappingTypePcie);
+  REQUIRE(((status == hipSuccess) || (status == hipErrorNotSupported)));
+
+  if (status == hipErrorNotSupported) {
+    (void)hipGetLastError();
+    HIP_SKIP_TEST("PCIe-mapped dma-buf export is not supported by this device; it has no "
+                  "peer-reachable BAR aperture for a third-party device.");
+  }
+
+  cleanup.Add([fd] { CloseFd(fd); });
+  REQUIRE(fd >= 0);
+#endif  // _WIN32
+}
+
+// @asserts: hipMemGetHandleForAddressRange - a pointer that is not a device allocation is rejected with hipErrorInvalidValue
+// PLATFORM-DIFF: see the PCIe mapping-flag case above; the API is not exported
+// from the Windows HIP runtime.
+HIP_TEST_CASE(Contract_VmmHandle_HipMemGetHandleForAddressRange_HostPointer_ReturnsInvalidValue) {
+#if defined(_WIN32)
+  HIP_SKIP_TEST("hipMemGetHandleForAddressRange is not exported from the Windows HIP runtime; the "
+                "dma-buf handle-export contract cannot be linked or exercised there.");
+#else
+  // A host pointer is not a device allocation, so the export must be rejected as
+  // an invalid argument. This is the other half of the contract above: the two
+  // codes have to stay distinct, with hipErrorNotSupported meaning "this device
+  // cannot do that" and hipErrorInvalidValue meaning "this call is wrong".
+  //
+  // Flags are deliberately left at 0. With the PCIe flag set, a device that has
+  // no peer-reachable BAR short-circuits to hipErrorNotSupported before the
+  // pointer is ever looked up, so the argument check would not be reached and the
+  // expected code would depend on the host's GPU.
+  int host_buffer[64] = {};
+  int fd = -1;
+  const hipError_t status = hipMemGetHandleForAddressRange(
+      &fd, reinterpret_cast<hipDeviceptr_t>(host_buffer), sizeof(host_buffer),
+      hipMemRangeHandleTypeDmaBufFd, 0);
+  REQUIRE(status == hipErrorInvalidValue);
+  (void)hipGetLastError();
+#endif  // _WIN32
+}
+
+#endif  // HT_AMD
+
 // @asserts: hipMemExportToShareableHandle - an exported POSIX-fd shareable handle imports back into a usable allocation handle within the same process
 // PLATFORM-DIFF: This contract exercises the POSIX file-descriptor shareable-handle path,
 // which is Linux-specific. The Windows runtime rejects the POSIX-fd path with

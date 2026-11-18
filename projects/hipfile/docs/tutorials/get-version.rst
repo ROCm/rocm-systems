@@ -71,51 +71,53 @@ The following program prints the hipFile version using both methods. This code i
 Step-by-step walkthrough
 ========================
 
-Include the header
-------------------
+The walkthrough queries the hipFile version at compile time and runtime. It
+starts with the API header and version macros, then calls
+``hipFileGetVersion()`` and checks both error fields before using the returned
+version components.
 
-.. code-block:: cpp
+#. **Include the header**
 
-   #include <hipfile.h>
+   .. code-block:: cpp
 
-The ``hipfile.h`` header declares the version macros, ``hipFileGetVersion()``, error types, and all other hipFile API functions. Including this single header gives you access to everything in the hipFile C API.
+      #include <hipfile.h>
 
-Print the compile-time version
-------------------------------
+   The ``hipfile.h`` header declares the version macros, ``hipFileGetVersion()``, error types, and all other hipFile API functions. Including this single header gives you access to everything in the hipFile C API.
 
-.. code-block:: cpp
+#. **Print the compile-time version**
 
-   printf("Version from the header symbols (major.minor.patch): %d.%d.%d\n",
-          HIPFILE_VERSION_MAJOR,
-          HIPFILE_VERSION_MINOR,
-          HIPFILE_VERSION_PATCH);
+   .. code-block:: cpp
 
-``HIPFILE_VERSION_MAJOR``, ``HIPFILE_VERSION_MINOR``, and ``HIPFILE_VERSION_PATCH`` are integer-valued preprocessor macros. Because they are resolved at compile time, you can also use them in preprocessor conditionals:
+      printf("Version from the header symbols (major.minor.patch): %d.%d.%d\n",
+             HIPFILE_VERSION_MAJOR,
+             HIPFILE_VERSION_MINOR,
+             HIPFILE_VERSION_PATCH);
 
-.. code-block:: cpp
+   ``HIPFILE_VERSION_MAJOR``, ``HIPFILE_VERSION_MINOR``, and ``HIPFILE_VERSION_PATCH`` are integer-valued preprocessor macros. Because they are resolved at compile time, you can also use them in preprocessor conditionals:
 
-   #if HIPFILE_VERSION_MAJOR >= 1
-   // Use a feature introduced in version 1.0.0
-   #endif
+   .. code-block:: cpp
 
-Query the runtime version
--------------------------
+      #if HIPFILE_VERSION_MAJOR >= 1
+      // Use a feature introduced in version 1.0.0
+      #endif
 
-.. code-block:: cpp
+#. **Query the runtime version**
 
-   hipFileError_t err;
-   unsigned major = 0, minor = 0, patch = 0;
+   .. code-block:: cpp
 
-   err = hipFileGetVersion(&major, &minor, &patch);
-   if (err.err != hipFileSuccess || err.hip_drv_err != hipSuccess)
-       return EXIT_FAILURE;
+      hipFileError_t err;
+      unsigned major = 0, minor = 0, patch = 0;
 
-``hipFileGetVersion()`` writes the major, minor, and patch components of the running library's version into the provided output parameters. It returns a ``hipFileError_t`` struct containing two fields:
+      err = hipFileGetVersion(&major, &minor, &patch);
+      if (err.err != hipFileSuccess || err.hip_drv_err != hipSuccess)
+          return EXIT_FAILURE;
 
-- ``err``: a ``hipFileOpError_t`` value indicating a hipFile-specific error.
-- ``hip_drv_err``: a ``hipError_t`` value indicating a GPU driver error.
+   ``hipFileGetVersion()`` writes the major, minor, and patch components of the running library's version into the provided output parameters. It returns a ``hipFileError_t`` struct containing two fields:
 
-Always check both fields before using the output values.
+   - ``err``: a ``hipFileOpError_t`` value indicating a hipFile-specific error.
+   - ``hip_drv_err``: a ``hipError_t`` value indicating a GPU driver error.
+
+   Always check both fields before using the output values.
 
 Build the example
 ===================

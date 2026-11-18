@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -69,6 +69,7 @@ ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KIND_STRING(ROCJPEG_API)
 ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KIND_STRING(MARKER_CORE_RANGE_API)
 ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KIND_STRING(ROCSHMEM_API)
 ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KIND_STRING(HIPFILE_API)
+ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KIND_STRING(HIP_EVENT)
 
 #undef ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KIND_STRING
 

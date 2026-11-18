@@ -8,12 +8,18 @@ FROM opensuse/leap:${SUSE_MAJOR_VERSION}.${SUSE_MINOR_VERSION} AS base
 LABEL org.opencontainers.image.source=https://github.com/ROCm/hipFile
 ARG SUSE_MAJOR_VERSION
 ARG SUSE_MINOR_VERSION
-ARG ROCM_VERSION=7.2.2
+ARG ROCM_VERSION=7.14.0
 
 # If the target ROCm Version on the package repository is non-standard, you can forcibly
 # set the ROCm version used in the package repo URL.
 # Ex. Package 7.0_alpha installs 7.0.0
 ARG ROCM_PKG_REPO_OVERRIDE
+
+# Nightly ROCm build id (YYYYMMDD-<gha_run_id>). When set, ROCm is installed from
+# the unsigned nightly repo at
+# nightly.repo.amd.com/rocm/core/packages/<distro>/<ROCM_NIGHTLY_BUILD>
+# and ROCM_VERSION is expected to be the clean MAJOR.MINOR.PATCH that build pins.
+ARG ROCM_NIGHTLY_BUILD
 
 # The initial pull takes some time. Expect ~2.5 minutes to complete.
 RUN zypper refresh
@@ -35,19 +41,73 @@ RUN zypper refresh
 #     dnf install -y ./amdgpu_install.rpm
 # Method 2: Manually create repo file.
 
-# ROCM_PKG_REPO_VERSION normalizes the ROCm version used in the package repo URL.
-# If the PATCH component is 0, the PATCH of the version is dropped. Otherwise no
-# modification is made.
-RUN ROCM_PKG_REPO_VERSION="$(echo ${ROCM_PKG_REPO_OVERRIDE:-$ROCM_VERSION} | sed -E 's|([^.]+\.[^.]+)\.0$|\1|')"; \
-    cat <<EOF > /etc/zypp/repos.d/rocm.repo
-[ROCm-${ROCM_VERSION}]
-name=ROCm${ROCM_VERSION}
-baseurl=https://repo.radeon.com/rocm/zyp/${ROCM_PKG_REPO_VERSION}/main
-enabled=1
-priority=50
-gpgcheck=1
-gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
-EOF
+# Cache MAJOR/MINOR and the ROCm build type for use by later RUN steps.
+# ROCm 7.11+ ships from repo.amd.com/stable.repo.amd.com to
+# /opt/rocm/core-<MAJOR>.<MINOR>, split across three release bands:
+#   7.11-7.12  repo.amd.com/rocm/packages
+#   7.13-7.14  repo.amd.com/rocm/packages-multi-arch
+#   10.0+      stable.repo.amd.com/rocm/core/packages  (ROCm jumped 7.14 -> 10.0)
+# Earlier releases ship from repo.radeon.com to /opt/rocm (legacy symlink).
+# A non-empty ROCM_NIGHTLY_BUILD selects the nightly repo and shares the 7.11+
+# install layout (ROCM_VERSION must be the clean version that build pins).
+RUN ROCM_MAJOR=$(echo "${ROCM_VERSION}" | cut -d. -f1); \
+    ROCM_MINOR=$(echo "${ROCM_VERSION}" | cut -d. -f2); \
+    ROCM_INSTALL_PATH="/opt/rocm/core-${ROCM_MAJOR}.${ROCM_MINOR}"; \
+    if [ -n "${ROCM_NIGHTLY_BUILD}" ]; then \
+        ROCM_BUILD_TYPE=nightly; \
+    elif [ "${ROCM_MAJOR}" -gt 7 ]; then \
+        ROCM_BUILD_TYPE=stable; \
+    elif [ "${ROCM_MAJOR}" -eq 7 ] && [ "${ROCM_MINOR}" -ge 13 ]; then \
+        ROCM_BUILD_TYPE=multiarch; \
+    elif [ "${ROCM_MAJOR}" -eq 7 ] && [ "${ROCM_MINOR}" -ge 11 ]; then \
+        ROCM_BUILD_TYPE=packages; \
+    else \
+        ROCM_BUILD_TYPE=legacy; \
+        ROCM_INSTALL_PATH="/opt/rocm"; \
+    fi; \
+    printf 'ROCM_MAJOR=%s\nROCM_MINOR=%s\nROCM_BUILD_TYPE=%s\nROCM_INSTALL_PATH=%s\nROCM_NIGHTLY_BUILD=%s\n' \
+        "${ROCM_MAJOR}" "${ROCM_MINOR}" "${ROCM_BUILD_TYPE}" "${ROCM_INSTALL_PATH}" "${ROCM_NIGHTLY_BUILD}" \
+        > /etc/rocm-build.env
+
+# Manually setup ROCm Package Repos. The 7.11+ bands and nightly serve a flat
+# <base>/sles15/x86_64 tree; only the legacy repo carries a version component in
+# the URL. ROCM_PKG_REPO_VERSION normalizes that legacy version: if the PATCH
+# component is 0, the PATCH is dropped. Otherwise no modification is made.
+# ROCM_PKG_REPO_OVERRIDE applies to the legacy repo only.
+#
+# The stable-band packages are signed (each serves repodata/repomd.xml.asc);
+# the nightly packages are not, so it sets gpgcheck=0.
+RUN . /etc/rocm-build.env && \
+    ROCM_SLUG="sles${SUSE_MAJOR_VERSION}" && \
+    case "${ROCM_BUILD_TYPE}" in \
+        packages) \
+            ROCM_REPO_URL="https://repo.amd.com/rocm/packages/${ROCM_SLUG}/x86_64"; \
+            ROCM_GPG_URL="https://repo.amd.com/rocm/packages/gpg/rocm.gpg";; \
+        multiarch) \
+            ROCM_REPO_URL="https://repo.amd.com/rocm/packages-multi-arch/${ROCM_SLUG}/x86_64"; \
+            ROCM_GPG_URL="https://repo.amd.com/rocm/packages-multi-arch/gpg/rocm.gpg";; \
+        stable) \
+            ROCM_REPO_URL="https://stable.repo.amd.com/rocm/core/packages/${ROCM_SLUG}/x86_64"; \
+            ROCM_GPG_URL="https://stable.repo.amd.com/rocm/gpg/packages.gpg";; \
+        nightly) \
+            ROCM_REPO_URL="https://nightly.repo.amd.com/rocm/core/packages/${ROCM_SLUG}/${ROCM_NIGHTLY_BUILD}/x86_64"; \
+            ROCM_GPG_URL="";; \
+        legacy) \
+            ROCM_PKG_REPO_VERSION="$(echo ${ROCM_PKG_REPO_OVERRIDE:-$ROCM_VERSION} | sed -E 's|([^.]+\.[^.]+)\.0$|\1|')"; \
+            ROCM_REPO_URL="https://repo.radeon.com/rocm/zyp/${ROCM_PKG_REPO_VERSION}/main"; \
+            ROCM_GPG_URL="https://repo.radeon.com/rocm/rocm.gpg.key";; \
+    esac && \
+    { echo "[ROCm-${ROCM_VERSION}]"; \
+      echo "name=ROCm${ROCM_VERSION}"; \
+      echo "baseurl=${ROCM_REPO_URL}"; \
+      echo "enabled=1"; \
+      echo "priority=50"; \
+      if [ -n "${ROCM_GPG_URL}" ]; then \
+          echo "gpgcheck=1"; \
+          echo "gpgkey=${ROCM_GPG_URL}"; \
+      else \
+          echo "gpgcheck=0"; \
+      fi; } > /etc/zypp/repos.d/rocm.repo
 
 RUN zypper --gpg-auto-import-keys refresh
 
@@ -64,26 +124,51 @@ RUN zypper install -y \
         gdb \
         git \
         graphviz \
-        hip-devel \
         libmount-devel \
         llvm19-devel \
         python312-devel \
-        rocm-device-libs \
         rpm-build
 
-# Configure system linker for ROCm
-RUN cat <<EOF > /etc/ld.so.conf.d/rocm.conf
-/opt/rocm/lib
-/opt/rocm/lib64
-EOF
-RUN ldconfig
+# Install ROCm dev runtime packages.
+# Every 7.11+ and nightly ships as amdrocm-runtime-devel<MAJOR>.<MINOR> package;
+# hip-devel & rocm-device-libs exists on the legacy repo only.
+RUN . /etc/rocm-build.env && \
+    if [ "${ROCM_BUILD_TYPE}" = "legacy" ]; then \
+        zypper install -y \
+            hip-devel \
+            rocm-device-libs; \
+    else \
+        zypper install -y \
+            amdrocm-runtime-devel${ROCM_MAJOR}.${ROCM_MINOR}; \
+    fi
 
-# Add ROCm bin directory to the path
-ENV PATH=/opt/rocm/bin:${PATH}
+# Configure system linker for ROCm
+RUN . /etc/rocm-build.env && \
+    { echo "${ROCM_INSTALL_PATH}/lib"; \
+      echo "${ROCM_INSTALL_PATH}/lib64"; } \
+        > /etc/ld.so.conf.d/rocm.conf && \
+    ldconfig
 
 # Environment Build Arg for ROCm Packaging
 ENV ROCM_VERSION="${ROCM_VERSION}"
 ENV SLES_BUILD_ID_PREFIX="opensuse${SUSE_MAJOR_VERSION}${SUSE_MINOR_VERSION}."
+
+# Write a /etc/profile.d script exporting ROCM_PATH and PATH for the install layout.
+RUN . /etc/rocm-build.env && \
+    printf 'export ROCM_PATH=%s\nexport PATH=%s/bin:$PATH\n' \
+        "${ROCM_INSTALL_PATH}" "${ROCM_INSTALL_PATH}" \
+        > /etc/profile.d/rocm.sh && \
+    chmod +x /etc/profile.d/rocm.sh
+
+# /etc/profile already iterates /etc/profile.d/*.sh for login shells. The
+# iterator script below applies the same behavior to interactive non-login
+# bash (via /etc/bash.bashrc) and non-interactive bash (via BASH_ENV).
+RUN printf '%s\n' \
+        'for _f in /etc/profile.d/*.sh; do [ -r "$_f" ] && . "$_f"; done' \
+        'unset _f' \
+        > /etc/bash_env.sh && \
+    echo '. /etc/bash_env.sh' >> /etc/bash.bashrc
+ENV BASH_ENV="/etc/bash_env.sh"
 
 # Configure SUSE to use GCC-13 by default
 RUN update-alternatives \

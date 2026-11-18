@@ -3,8 +3,9 @@
 
 /// @file vop3_fmac_simd_correctness_test.cpp
 /// @brief Bit-identity check (SIMD fast path vs scalar body) for the
-/// dst-accumulate FMA / MAC VOP3 forms on CDNA4 (v_fmac_f32, v_mac_f16,
-/// v_fmac_f64). Per-isa codegen classes for these ops only initialize
+/// dst-accumulate FMA VOP3 forms on CDNA4 (V_FMAC_F32 and MODE-aware
+/// V_FMAC_F64). Per-isa codegen
+/// classes for these ops only initialize
 /// src0+src1+vdst — the third FMA operand IS vdst. The new accumulate-form
 /// glue (try_execute_fmac_vop3_fp*_simd) reads inst.vdst as the third operand
 /// and applies abs/neg only to src0/src1, matching the scalar body. The process
@@ -19,10 +20,12 @@
 /// These ops are NOT benched: looping the same instruction creates a loop-
 /// carried RAW dep on the accumulator that serializes both modes to ~1x.
 
+#include "compute_unit_test_util.h"
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -73,9 +76,8 @@ struct Case {
   Kind kind;
 };
 
-const std::array<Case, 3> kCases = {{
+const std::array<Case, 2> kCases = {{
     {"v_fmac_f32_vop3", 315, Kind::F32},
-    {"v_mac_f16_vop3", 291, Kind::F16},
     {"v_fmac_f64_vop3", 260, Kind::F64},
 }};
 
@@ -150,7 +152,9 @@ struct Fixture {
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_vop3_fmac", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_vop3_fmac", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
     decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -180,7 +184,7 @@ struct Fixture {
 
   std::array<uint64_t, WF_SIZE> run(Instruction *inst, Kind k, uint32_t rot, uint64_t exec) {
     seed_inputs(k, rot, exec);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint64_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
@@ -219,13 +223,15 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
   auto run_mode = [&](bool force_scalar, uint32_t rot) -> std::array<uint64_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     const uint32_t src1_v = (c.kind == Kind::F64) ? 2u : 1u;
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_encode(c.opcode, /*vdst=*/kAccVgpr, /*src0=*/256, /*src1=*/256 + src1_v, abs, neg, omod,
                 clamp, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
     auto out = fx.run(inst, c.kind, rot, exec);
     delete inst;
@@ -289,10 +295,12 @@ TEST(Vop3FmacSimdCorrectness, VMacF16LowDstZeroesHighHalf) {
   auto run_mode = [](bool force_scalar) -> std::array<uint64_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_encode(/*op=*/291, /*vdst=*/kAccVgpr, /*src0=*/256, /*src1=*/257, /*abs=*/0, /*neg=*/0,
                 /*omod=*/0, /*clamp=*/0, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << "v_mac_f16_vop3 decode failed";
     auto out = fx.run(inst, Kind::F16, /*rot=*/0, /*exec=*/~0ULL);
     delete inst;

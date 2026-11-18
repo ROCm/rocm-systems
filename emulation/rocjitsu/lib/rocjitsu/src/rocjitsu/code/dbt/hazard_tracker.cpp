@@ -3,8 +3,8 @@
 
 #include "rocjitsu/code/dbt/hazard_tracker.h"
 
-#include "rocjitsu/isa/arch/amdgpu/rdna4/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 
 namespace rocjitsu {
 

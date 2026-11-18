@@ -1,23 +1,7 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """GPU RAS: ECC count/status/enabled, RAS block features, total ECC count, EEPROM validation, counters."""
 
 import unittest
@@ -95,8 +79,38 @@ class TestGpuRas(unittest.TestCase):
 
     def test_get_gpu_total_ecc_count(self):
         self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_gpu_total_ecc_count=amdsmi.amdsmi_get_gpu_total_ecc_count
+        # amdsmi_get_gpu_total_ecc_count() reads ras/features once per call and returns:
+        #   SUCCESS       - mask read and parsed
+        #   NOT_SUPPORTED - RAS unsupported on this ASIC (ras/features absent)
+        # AMDSMI_STATUS_API_FAILED (a malformed/unreadable mask) is deliberately not
+        # accepted: on present, real hardware that would mean the mask-read fix this
+        # suite guards has regressed, not an outcome to tolerate.
+        accept = [amdsmi.AmdSmiStatus.SUCCESS, amdsmi.AmdSmiStatus.NOT_SUPPORTED]
+        with self.common.status_sweep():
+            for i, gpu in enumerate(self.common.processors):
+                self.common.print_device_header(i)
+                msg = f"\t### amdsmi_get_gpu_total_ecc_count(gpu={i}):"
+                data = "N/A"
+                with self.common.expect_status(msg, accept):
+                    data = amdsmi.amdsmi_get_gpu_total_ecc_count(gpu)
+                self.common.print(f"\t\tamdsmi_get_gpu_total_ecc_count(gpu={i}): {data}")
+                self.common.print("")
+        return
+
+    def test_get_gpu_total_ecc_count_rejects_non_handle(self):
+        self.common.print_func_name("")
+        # A non-handle fails the Python-side isinstance check before any library
+        # call happens, so it is not a status expect_status can judge.
+        self.common.print('\t### amdsmi_get_gpu_total_ecc_count(processor_handle="not_a_handle"):')
+        with self.assertRaises(amdsmi.AmdSmiParameterException) as cm:
+            amdsmi.amdsmi_get_gpu_total_ecc_count("not_a_handle")
+        # Confirms it is *this* isinstance check that fired, not some other
+        # AmdSmiParameterException raised earlier/elsewhere for a different reason.
+        self.assertEqual(cm.exception.expectedType, amdsmi.amdsmi_wrapper.amdsmi_processor_handle)
+        self.common.print(
+            f"\tTEST SUCCESS, raised {type(cm.exception).__name__}, "
+            f"actual type {cm.exception.actualType.__name__}, "
+            f"expected type {cm.exception.expectedType.__name__}"
         )
         return
 

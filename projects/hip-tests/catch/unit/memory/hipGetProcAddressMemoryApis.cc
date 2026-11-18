@@ -9,6 +9,11 @@
 #include <utils.hh>
 #include "../device/hipGetProcAddressHelpers.hh"
 
+static void CheckPitchAlignmentForArch(const hipDeviceProp_t& props, size_t pitchAlign) {
+  INFO("gfx major=" << props.major << " texturePitchAlignment=" << pitchAlign);
+  REQUIRE(pitchAlign == ((props.major >= 12) ? 128u : 256u));
+}
+
 /**
  * Test Description
  * ------------------------
@@ -83,11 +88,6 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMallocFree) {
   hipError_t (*dyn_hipMemAllocPitch_ptr)(hipDeviceptr_t*, size_t*, size_t, size_t, unsigned int) =
       reinterpret_cast<hipError_t (*)(hipDeviceptr_t*, size_t*, size_t, size_t, unsigned int)>(
           hipMemAllocPitch_ptr);
-  hipError_t (*dyn_hipFreeHost_ptr)(void*) =
-      reinterpret_cast<hipError_t (*)(void*)>(hipFreeHost_ptr);
-  hipError_t (*dyn_hipHostFree_ptr)(void*) =
-      reinterpret_cast<hipError_t (*)(void*)>(hipHostFree_ptr);
-
   // Validating hipMalloc and hipFree APIs
   {
     void* d_ptr = nullptr;
@@ -256,18 +256,29 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMallocFree) {
     }
   }
 
+  // A pitched row is rounded up to the device's reported texturePitchAlignment, which is not the
+  // same on every ASIC (128 bytes from gfx12 on, 256 before it).
+  int pitchDevice = 0;
+  HIP_CHECK(hipGetDevice(&pitchDevice));
+  hipDeviceProp_t pitchProps;
+  HIP_CHECK(hipGetDeviceProperties(&pitchProps, pitchDevice));
+  const size_t pitchAlign = pitchProps.texturePitchAlignment;
+  CheckPitchAlignmentForArch(pitchProps, pitchAlign);
+
   // Validating hipMallocPitch API
   {
     void* pitchedMem_ptr = nullptr;
     size_t pitch_ptr = -1;
     int width1 = 260;
     int height1 = 2;
+    const size_t expectedPitch = ((width1 + pitchAlign - 1) / pitchAlign) * pitchAlign;
 
     HIP_CHECK(dyn_hipMallocPitch_ptr(&pitchedMem_ptr, &pitch_ptr, width1, height1));
 
+    REQUIRE(pitch_ptr == expectedPitch);
     size_t pitchedMem_sizeptr = -1;
     HIP_CHECK(hipMemPtrGetInfo(pitchedMem_ptr, &pitchedMem_sizeptr));
-    REQUIRE(pitchedMem_sizeptr == 1024);
+    REQUIRE(pitchedMem_sizeptr == expectedPitch * height1);
 
     HIP_CHECK(hipFree(pitchedMem_ptr));
   }
@@ -280,6 +291,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMallocFree) {
     int height = 2;
     unsigned int groupOfElementSizeBytes[] = {4, 8, 16};
     size_t pitchedMem_sizeptr = -1;
+    const size_t expectedPitch = ((width + pitchAlign - 1) / pitchAlign) * pitchAlign;
 
     for (auto elementSizeBytes : groupOfElementSizeBytes) {
       pitchedMem_ptr = nullptr;
@@ -288,10 +300,10 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMallocFree) {
       HIP_CHECK(
           dyn_hipMemAllocPitch_ptr(&pitchedMem_ptr, &pitch_ptr, width, height, elementSizeBytes));
 
-      REQUIRE(pitch_ptr == 512);
+      REQUIRE(pitch_ptr == expectedPitch);
       pitchedMem_sizeptr = -1;
       HIP_CHECK(hipMemPtrGetInfo(pitchedMem_ptr, &pitchedMem_sizeptr));
-      REQUIRE(pitchedMem_sizeptr == 1024);
+      REQUIRE(pitchedMem_sizeptr == expectedPitch * height);
 
       HIP_CHECK(hipFree(pitchedMem_ptr));
     }
@@ -299,6 +311,11 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMallocFree) {
 
   // Skip these if we have address sanitizer enable because free might not actually free it
 #if !defined(ENABLE_ADDRESS_SANITIZER)
+  hipError_t (*dyn_hipFreeHost_ptr)(void*) =
+      reinterpret_cast<hipError_t (*)(void*)>(hipFreeHost_ptr);
+  hipError_t (*dyn_hipHostFree_ptr)(void*) =
+      reinterpret_cast<hipError_t (*)(void*)>(hipHostFree_ptr);
+
   // Validating hipFreeHost API
   {
     void* h_ptr = nullptr;
@@ -777,19 +794,31 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisArrayRelated) {
   HIP_CHECK(hipMalloc3D(&p_array3d, p_extent3d));
   HIP_CHECK(dyn_hipMalloc3D_ptr(&p_array3d_ptr, p_extent3d));
 
+  // The row pitch follows the device's texturePitchAlignment, which differs per ASIC (128 bytes
+  // from gfx12 on, 256 before it), so derive the expected pitch and size instead of hard-coding.
+  int pitchDevice = 0;
+  HIP_CHECK(hipGetDevice(&pitchDevice));
+  hipDeviceProp_t pitchProps;
+  HIP_CHECK(hipGetDeviceProperties(&pitchProps, pitchDevice));
+  const size_t pitchAlign = pitchProps.texturePitchAlignment;
+  CheckPitchAlignmentForArch(pitchProps, pitchAlign);
+  const size_t expectedPitch =
+      ((p_extent3d.width + pitchAlign - 1) / pitchAlign) * pitchAlign;
+  const size_t expectedSize = expectedPitch * p_extent3d.height * p_extent3d.depth;
+
   REQUIRE(p_array3d.ptr != nullptr);
   size_t p_size = -1;
   HIP_CHECK(hipMemPtrGetInfo(p_array3d.ptr, &p_size));
-  REQUIRE(p_size == 65536);
-  REQUIRE(p_array3d.pitch == 512);
+  REQUIRE(p_size == expectedSize);
+  REQUIRE(p_array3d.pitch == expectedPitch);
   REQUIRE(p_array3d.xsize == 260);
   REQUIRE(p_array3d.ysize == 16);
 
   REQUIRE(p_array3d_ptr.ptr != nullptr);
   size_t p_size_ptr = -1;
   HIP_CHECK(hipMemPtrGetInfo(p_array3d_ptr.ptr, &p_size_ptr));
-  REQUIRE(p_size_ptr == 65536);
-  REQUIRE(p_array3d_ptr.pitch == 512);
+  REQUIRE(p_size_ptr == expectedSize);
+  REQUIRE(p_array3d_ptr.pitch == expectedPitch);
   REQUIRE(p_array3d_ptr.xsize == 260);
   REQUIRE(p_array3d_ptr.ysize == 16);
 
@@ -1447,7 +1476,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
     REQUIRE(hostMem != nullptr);
     fillHostArray(hostMem, N, value);
 
-    hipStream_t stream[Ns];
+    std::vector<hipStream_t> stream(Ns);
     for (int s = 0; s < Ns; s++) {
       HIP_CHECK(hipStreamCreate(&stream[s]));
     }
@@ -1481,7 +1510,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
     REQUIRE(devMem != nullptr);
     fillDeviceArray(devMem, N, value);
 
-    hipStream_t stream[Ns];
+    std::vector<hipStream_t> stream(Ns);
     for (int s = 0; s < Ns; s++) {
       HIP_CHECK(hipStreamCreate(&stream[s]));
     }
@@ -1515,7 +1544,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
     REQUIRE(devMem != nullptr);
     fillDeviceArray(devMem, N, value);
 
-    hipStream_t stream[Ns];
+    std::vector<hipStream_t> stream(Ns);
     for (int s = 0; s < Ns; s++) {
       HIP_CHECK(hipStreamCreate(&stream[s]));
     }
@@ -1552,7 +1581,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(hostMem != nullptr);
       fillHostArray(hostMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1585,7 +1614,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(hostMem != nullptr);
       fillHostArray(hostMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1619,7 +1648,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1653,7 +1682,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1688,7 +1717,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1722,7 +1751,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(hostMem != nullptr);
       fillHostArray(hostMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1755,7 +1784,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(hostMem != nullptr);
       fillHostArray(hostMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1789,7 +1818,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1823,7 +1852,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1861,7 +1890,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(hostMem != nullptr);
       fillHostArray(hostMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1894,7 +1923,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(hostMem != nullptr);
       fillHostArray(hostMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1928,7 +1957,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1962,7 +1991,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -1997,7 +2026,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -2032,7 +2061,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(hostMem != nullptr);
       fillHostArray(hostMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -2065,7 +2094,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(hostMem != nullptr);
       fillHostArray(hostMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -2099,7 +2128,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -2133,7 +2162,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       REQUIRE(devMem != nullptr);
       fillDeviceArray(devMem, N, value);
 
-      hipStream_t stream[Ns];
+      std::vector<hipStream_t> stream(Ns);
       for (int s = 0; s < Ns; s++) {
         HIP_CHECK(hipStreamCreate(&stream[s]));
       }
@@ -2294,7 +2323,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset) {
     HIP_CHECK(hipMalloc(&devMem, Nbytes));
     REQUIRE(devMem != nullptr);
 
-    hipStream_t stream[Ns];
+    std::vector<hipStream_t> stream(Ns);
     for (int s = 0; s < Ns; s++) {
       HIP_CHECK(hipStreamCreate(&stream[s]));
     }
@@ -2332,7 +2361,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset) {
     HIP_CHECK(hipMalloc(&devMem, Nbytes));
     REQUIRE(devMem != nullptr);
 
-    hipStream_t stream[Ns];
+    std::vector<hipStream_t> stream(Ns);
     for (int s = 0; s < Ns; s++) {
       HIP_CHECK(hipStreamCreate(&stream[s]));
     }
@@ -2370,7 +2399,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset) {
     HIP_CHECK(hipMalloc(&devMem, Nbytes));
     REQUIRE(devMem != nullptr);
 
-    hipStream_t stream[Ns];
+    std::vector<hipStream_t> stream(Ns);
     for (int s = 0; s < Ns; s++) {
       HIP_CHECK(hipStreamCreate(&stream[s]));
     }
@@ -2429,7 +2458,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset) {
     HIP_CHECK(hipMalloc(&devMem, Nbytes));
     REQUIRE(devMem != nullptr);
 
-    hipStream_t stream[Ns];
+    std::vector<hipStream_t> stream(Ns);
     for (int s = 0; s < Ns; s++) {
       HIP_CHECK(hipStreamCreate(&stream[s]));
     }
@@ -2541,7 +2570,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset2D3D) {
     HIP_CHECK(dyn_hipMemset2DAsync_ptr(devMem, pitch, 5, width, height, 0));
     HIP_CHECK(hipStreamSynchronize(0));
 
-    hipStream_t stream[Ns];
+    std::vector<hipStream_t> stream(Ns);
     for (int s = 0; s < Ns; s++) {
       HIP_CHECK(hipStreamCreate(&stream[s]));
     }
@@ -6102,6 +6131,11 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisPeerToPeer) {
     HIP_CHECK(hipMalloc(&srcDevPtr, Nbytes));
     REQUIRE(srcDevPtr != nullptr);
     fillDeviceArray(srcDevPtr, N, value);
+    // srcDevPtr is filled by a kernel on srcDevice's null stream, but the copy below is
+    // on a user stream created on the peer device. hipMemcpyPeerAsync is not serialized
+    // against pending work on srcDevice, so the fill could still be running when the copy
+    // reads srcDevPtr. Synchronize the fill first.
+    HIP_CHECK(hipDeviceSynchronize());
 
     HIP_CHECK(hipSetDevice(peerDeviceId));
 

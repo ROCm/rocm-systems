@@ -50,35 +50,44 @@ struct TraceConfig
     // GC configurations used by both TT and SPM
     uint32_t se_number  = 0;
     uint32_t sa_number  = 0;
+    uint32_t wgp_per_sa = 1;
     uint32_t xcc_number = 0;
     // SPM mode
-    bool     spm_sq_32bit_mode    = true;
-    bool     spm_has_core1        = false;
-    uint32_t spm_sample_delay_max = 0;
+    bool     spm_has_core1                = false;
+    bool     spm_force_sample_before_stop = false;
+    uint32_t spm_sample_delay_max         = 0;
+    // SPM sample interval type: 0 = GFXCLK/SCLK, 1 = GPUCLK/REFCLK interval
+    uint32_t spm_sample_interval_type = 0;
 
-    void*    control_buffer_ptr  = nullptr;
-    uint32_t control_buffer_size = 0;
-    void*    data_buffer_ptr     = nullptr;
-    uint64_t data_buffer_size    = 0;
+    void*    control_buffer_ptr   = nullptr;
+    uint32_t control_buffer_size  = 0;
+    void*    data_buffer_ptr      = nullptr;
+    uint64_t data_buffer_size     = 0;
+    void*    spm_sample_count_ptr = nullptr;
 
     // concurrent kernels mode
     uint32_t concurrent = 0;
     // SE mask for tracing; note -> replicated for all XCCs
-    uint64_t se_mask = 0x11;
+    uint64_t se_mask   = 0x11;
+    uint64_t active_se = 2;
 
     // Maps shader engine IDs to list of buffers
     std::unordered_map<int, std::vector<void*>> buffer_data{};
 
-    uint64_t                          capacity_per_se          = 0x1000;
-    uint64_t                          capacity_per_disabled_se = 0;
-    std::unordered_map<int, int>      target_cu_per_se{};
-    std::unordered_map<int, uint64_t> se_base_addresses{};
+    uint64_t                     capacity_per_se          = 0x1000;
+    uint64_t                     capacity_per_disabled_se = 0;
+    std::unordered_map<int, int> target_cu_per_se{};
 
     bool enable_rt_timestamp{false};
+    bool texec{false};  // Enable trace exec mask
 
     int      GetTargetCU(int SE) const { return target_cu_per_se.at(SE); };
     uint64_t GetSEmask() const { return se_mask; };
-    uint64_t GetSEBaseAddr(int SE) const { return se_base_addresses.at(SE); }
+    void*    GetSEBaseAddr(int SE) const
+    {
+        auto& buffer = buffer_data.at(SE);
+        return buffer.at(buffer.size() - 1);
+    }
     uint64_t GetCapacity(int SE) const
     {
         return (GetTargetCU(SE) >= 0) ? capacity_per_se : capacity_per_disabled_se;

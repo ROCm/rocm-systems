@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "core/perfetto/packet_framing.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -26,18 +28,24 @@ struct append_mode_config
 append_seq_id_base_for_rank(
     std::uint32_t rank, std::uint32_t rank_stride = MERGED_SEQ_ID_RANK_STRIDE) noexcept
 {
-    if(rank_stride == 0) return std::nullopt;
-
-    constexpr auto max_exclusive =
-        static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max()) + 1;
+    if(rank_stride == 0)
+    {
+        return std::nullopt;
+    }
 
     const auto base = static_cast<std::uint64_t>(rank) * rank_stride;
-    if(base > std::numeric_limits<std::uint32_t>::max()) return std::nullopt;
+    if(base > std::numeric_limits<std::uint32_t>::max())
+    {
+        return std::nullopt;
+    }
 
     // set_append_mode starts the process slice at base+1, so a full rank window
     // is valid only when the last possible id (base + rank_stride) is still a
     // std::uint32_t value.
-    if(base + rank_stride >= max_exclusive) return std::nullopt;
+    if(base + rank_stride >= TRUSTED_SEQ_ID_MAX_EXCLUSIVE)
+    {
+        return std::nullopt;
+    }
 
     return static_cast<std::uint32_t>(base);
 }

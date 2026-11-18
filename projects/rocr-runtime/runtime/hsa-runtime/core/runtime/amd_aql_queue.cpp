@@ -332,8 +332,14 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
   }
 
   // Allocate IB for icache flushes.
-  pm4_ib_buf_ =
-      agent_->system_allocator()(pm4_ib_size_b_, 0x1000, core::MemoryRegion::AllocateExecutable);
+  // NonPaged: the CP executes this IB, so it has to stay BO-backed.
+  // GTTAccess + this agent's node: create the BO through this GPU so its pages
+  // land on this GPU's NUMA node (see the host AQL ring allocation below).
+  pm4_ib_buf_ = core::Runtime::runtime_singleton_->system_allocator()(
+      pm4_ib_size_b_, 0x1000,
+      core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateNonPaged |
+          core::MemoryRegion::AllocateGTTAccess,
+      agent_->node_id());
   if (pm4_ib_buf_ == nullptr)
     throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES, "PM4 IB allocation failed.\n");
 
@@ -485,7 +491,7 @@ void AqlQueue::StoreRelaxed(hsa_signal_value_t value) {
     HSAKMT_CALL(hsaKmtQueueRingDoorbell(queue_id_, value));
   } else {
     // Hardware doorbell supports AQL semantics.
-    _mm_sfence();
+    store_fence();
     *(signal_.hardware_doorbell_ptr) = uint64_t(value);
     /* signal_ is allocated as uncached so we do not need read-back to flush WC */
   }
@@ -625,20 +631,57 @@ void AqlQueue::AllocRegisteredRingBuffer(uint32_t queue_size_pkts) {
         ring_buf_alloc_bytes_ + ring_buf_metadata_alloc_bytes_,
         core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateUncached);
   } else {
-    ring_buf_ = agent_->system_allocator()(
+    // NonPaged: kfd_queue_buffer_get() needs a BO mapping, it has no SVM fallback.
+    //
+    // GTTAccess + this agent's node: a non-paged system allocation is a GTT BO
+    // whose pages TTM places on the NUMA node of the GPU the BO is created
+    // through; mbind() and the process memory policy do not apply. Without a GPU
+    // node the thunk creates the BO through the first GPU in the topology, which
+    // puts every queue's ring on that GPU's socket and makes the CP read packets
+    // across sockets for GPUs on other nodes. Create it through this queue's GPU.
+    ring_buf_ = core::Runtime::runtime_singleton_->system_allocator()(
         ring_buf_alloc_bytes_ + ring_buf_metadata_alloc_bytes_, 0x1000,
-        core::MemoryRegion::AllocateExecutable);
+        core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateNonPaged |
+            core::MemoryRegion::AllocateGTTAccess,
+        agent_->node_id());
   }
 
   assert(ring_buf_ != NULL && "AQL queue memory allocation failure");
+  if (ring_buf_metadata_alloc_bytes_)
+    ring_buf_metadata_ = reinterpret_cast<uint8_t*>(ring_buf_) + ring_buf_alloc_bytes_;
+
+  if (IsDeviceMemRingBuf()) {
+    // Fill the ring buffers with whole invalid packets in non-temporal stores. A host that maps
+    // device memory write-back (coherent xGMI) would otherwise keep every line of the ring in its
+    // cache, and the CP would have to snoop the host for each packet of the first lap. Whole lines
+    // also reach a write-combined BAR as full writes instead of one partial write per header.
+    core::AqlPacket invalid_packet = {};
+    invalid_packet.dispatch.header = HSA_PACKET_TYPE_INVALID;
+    auto* packets = static_cast<core::AqlPacket*>(ring_buf_);
+    for (uint32_t pkt_id = 0; pkt_id < queue_size_pkts; ++pkt_id)
+      nontemporal_copy(&packets[pkt_id], &invalid_packet, sizeof(invalid_packet));
+
+    if (ring_buf_metadata_alloc_bytes_) {
+      core::AqlMetadataPrefetchPacket invalid_metadata_packet = {};
+      invalid_metadata_packet.packet.header0.type = HSA_PACKET_TYPE_INVALID;
+      invalid_metadata_packet.packet.header1.type = HSA_PACKET_TYPE_INVALID;
+      invalid_metadata_packet.packet.header2.type = HSA_PACKET_TYPE_INVALID;
+      invalid_metadata_packet.packet.header3.type = HSA_PACKET_TYPE_INVALID;
+      auto* metadata_packets = static_cast<core::AqlMetadataPrefetchPacket*>(ring_buf_metadata_);
+      for (uint32_t pkt_id = 0; pkt_id < queue_size_pkts; ++pkt_id)
+        nontemporal_copy(&metadata_packets[pkt_id], &invalid_metadata_packet,
+                         sizeof(invalid_metadata_packet));
+    }
+    store_fence();
+    return;
+  }
+
   // Fill the ring buffer with invalid packet headers.
   // Leave packet content uninitialized to help track errors.
   for (uint32_t pkt_id = 0; pkt_id < queue_size_pkts; ++pkt_id)
     (((core::AqlPacket*)ring_buf_)[pkt_id]).dispatch.header = HSA_PACKET_TYPE_INVALID;
 
   if (ring_buf_metadata_alloc_bytes_) {
-    ring_buf_metadata_ = reinterpret_cast<uint8_t*>(ring_buf_) + ring_buf_alloc_bytes_;
-
     // Fill the metadata ring buffer with invalid packet headers.
     for (uint32_t pkt_id = 0; pkt_id < queue_size_pkts; ++pkt_id) {
       ((((core::AqlMetadataPrefetchPacket*)ring_buf_metadata_)[pkt_id]).packet.header0).type = HSA_PACKET_TYPE_INVALID;
@@ -1562,8 +1605,10 @@ hsa_status_t AqlQueue::SetCUMasking(uint32_t num_cu_mask_count, const uint32_t* 
       }
     }
 
-    return agent_->driver().SetQueueCUMask(queue_id_, mask.size() * 32,
-                                           reinterpret_cast<HSAuint32*>(&mask[0]));
+    hsa_status_t status = agent_->driver().SetQueueCUMask(
+        queue_id_, mask.size() * 32, reinterpret_cast<HSAuint32*>(&mask[0]));
+    // On failure leave cu_mask_ describing the mask the driver still has.
+    if (status != HSA_STATUS_SUCCESS) return status;
   }
 
   // update current cu masking tracking.
@@ -1585,7 +1630,22 @@ hsa_status_t AqlQueue::GetCUMasking(uint32_t num_cu_mask_count, uint32_t* cu_mas
 }
 
 void AqlQueue::SetProfiling(bool enabled) {
+  bool need_update = false;
+  const bool cur = AMD_HSA_BITS_GET(amd_queue_.queue_properties,
+    AMD_QUEUE_PROPERTIES_ENABLE_PROFILING) != 0;
+
+  if (cur != enabled && LoadWriteIndexRelaxed() != 0) {
+    // If the queue is already enabled/disabled, we need to update the queue properties and we have already submitted packets,
+    // then we need to unmap and remap the queue for CP FW to re-read the queue properties.
+    need_update = true;
+  }
+
   Queue::SetProfiling(enabled);
+
+  if (need_update) {
+    Suspend();
+    Resume();
+  }
 
   if (enabled) agent_->CheckClockTicks();
   return;
@@ -1717,7 +1777,7 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
   memcpy(&queue_slot[1], &slot_data[1], slot_size_b - sizeof(uint32_t));
   if (IsDeviceMemRingBuf() && needsPcieOrdering()) {
     // Ensure the packet body is written as header may get reordered when writing over PCIE
-    _mm_sfence();
+    store_fence();
   }
   atomic::Store(&queue_slot[0], slot_data[0], std::memory_order_release);
 

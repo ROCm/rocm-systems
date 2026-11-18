@@ -8,7 +8,9 @@
 #ifndef __COMMON_H__
 #define __COMMON_H__
 
-#define NCCL_TESTS_VERSION "2.18.3"
+#define NCCL_TESTS_VERSION "2.19.6"
+// Socket encryption pre-shared key; util.cu redacts it from the JSON report by this name.
+#define NCCL_TESTS_TLS_PSK_ENV "NCCL_TESTS_TLS_PSK"
 
 #include "rccl/rccl.h"
 // nccl_device.h provides the device-API public types referenced below
@@ -20,17 +22,26 @@
     || NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
 #include "nccl_device.h"
 #endif
+// For a GIN put that carries its own signal, where the receiver counts one
+// signal per put. Legacy ncclGin_SignalInc follows ginStrongSignalsRequired
+// (strong by default), which on Anvil SDMA drains every queue to the peer.
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,30,7)
+#define TEST_GIN_WEAK_SIGNAL_INC(sig) ncclGin_WeakSignalInc{sig}
+#else
+#define TEST_GIN_WEAK_SIGNAL_INC(sig) ncclGin_SignalInc{sig}
+#endif
 #include <stdio.h>
 #include <cstdint>
 #include <cstring>
 #include <algorithm>
+#include <thread>
 #ifdef MPI_SUPPORT
 #include "mpi.h"
 #endif
-#include <pthread.h>
 #include "nccl1_compat.h"
 #include "rccl_compat.h"  // Weak symbols forward declarations
 #include "timer.h"
+#include "os.h"
 #include <string>
 #include <fstream>
 #include <iostream>
@@ -96,11 +107,30 @@ typedef enum {
     char hostname[1024];                            \
     getHostName(hostname, 1024);                    \
     printf(" .. %s pid %d: Test failure %s:%d\n",   \
-         hostname, getpid(),                        \
+         hostname, ncclTestGetPid(),                \
         __FILE__,__LINE__);                         \
     return r;                                       \
   }                                                 \
 } while(0)
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0) && defined(NCCL_GIN_BACKEND_MASK_ALL)
+// NCCL_GIN_BACKEND_MASK_ALL is computed from the GIN device headers that the
+// rccl install shipped (the rocshmem GDA/SDMA backends self-detect via
+// __has_include), so it must expand in the translation unit that compiles the
+// GIN kernels: keep this static. A backend missing from the mask is not caught on
+// the device; its context is dispatched as another backend's and faults.
+static inline testResult_t testCheckGinBackendCompiled(ncclGinType_t ginType) {
+  if (ginType == NCCL_GIN_TYPE_NONE) return testSuccess;
+  if ((NCCL_GIN_BACKEND_MASK_ALL >> (unsigned)ginType) & 1u) return testSuccess;
+  fprintf(stderr, "The communicator uses GIN type %d (NCCL_GIN_TYPE), but this binary's device code "
+                  "was built without that backend (compiled-in backend mask 0x%x). "
+                  "NCCL_GIN_TYPE_ROCSHMEM_GDA (%d) and NCCL_GIN_TYPE_ANVIL_SDMA (%d) need an rccl "
+                  "built with the CMake option ENABLE_ROCSHMEM_GIN=ON (install.sh --rocshmem-gin).\n",
+          (int)ginType, (unsigned)(NCCL_GIN_BACKEND_MASK_ALL),
+          (int)NCCL_GIN_TYPE_ROCSHMEM_GDA, (int)NCCL_GIN_TYPE_ANVIL_SDMA);
+  return testInvalidUsage;
+}
+#endif
 
 struct testColl {
   const char name[20];
@@ -110,11 +140,38 @@ struct testColl {
       size_t count, size_t eltSize, int nranks);
   testResult_t (*initData)(struct threadArgs* args, ncclDataType_t type,
       ncclRedOp_t op, int root, int rep, int in_place);
-  void (*getBw)(size_t count, int typesize, double sec, double* algBw, double* busBw, int nranks);
+  void (*getBw)(size_t count, size_t typesize, double sec, double* algBw, double* busBw, int nranks);
   testResult_t (*runColl)(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset,
       size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int implIndex, void* bias);
   testResult_t (*getAlgoProtoChannels)(ncclComm_t comm, size_t count, ncclDataType_t type, int* algo, int* proto, int* nchannels);
   testResult_t (*getSymkInfo)(ncclComm_t comm, size_t count, ncclDataType_t type, ncclRedOp_t op, int* algo, int* proto, int* nchannels);
+  // Reports the actual backend RCCL will dispatch (CE / DDA / symmetric / kernel),
+  // op/buffer/graph-capture aware, via rcclGetCollImplInfo. NULL when the collective
+  // does not wire it or the library lacks the symbol (older librccl).
+  testResult_t (*getCollImplInfo)(ncclComm_t comm, size_t count, ncclDataType_t type, ncclRedOp_t op,
+      const void* sendbuff, void* recvbuff, int graphCapturing, int* algo, int* proto, int* nchannels);
+  // Optional device-side (in-kernel wall_clock64) timing hook. Non-null only for
+  // collectives that implement it (AllToAll, AllGather). Driven by BenchTime via
+  // --device_timing (0=off, 1=augment, 2=device-time-only):
+  //   - outDeltaSec == nullptr (mode 1): prints an extra device-only
+  //     latency/busbw line alongside the normal graph/hipEvent numbers (report,
+  //     not replace).
+  //   - outDeltaSec != nullptr (mode 2): stores the measured per-iteration
+  //     device latency (seconds, max across ranks) in *outDeltaSec; BenchTime
+  //     then reports that as THE metric, having skipped the graph/hipEvent
+  //     timed loop.
+  // Other collectives leave it nullptr via aggregate initialization, so no other
+  // struct needs to change.
+  testResult_t (*deviceTime)(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place, double* outDeltaSec);
+  // Optional: for -D != 0 runs, report which device-kernel tier actually serves a
+  // message of `count` elements, given the env-resolved thresholds the kernel uses.
+  // Writes both columns (each <=8 chars, fitting the fixed layout): algo names the
+  // movement pattern with a "T-" prefix marking a rccl-Test device kernel (e.g.
+  // T-DIRECT / T-SAG / T-RING), proto names the transport (GIN / LSA / LL /
+  // LSA/GIN). NULL for collectives without a tiered device kernel. deviceImpl is
+  // the -D value.
+  testResult_t (*getDeviceImplInfo)(int deviceImpl, size_t count, ncclDataType_t type,
+      int nRanks, int lsaSize, char* algoOut, char* protoOut);
 };
 extern struct testColl allReduceTest;
 extern struct testColl allGatherTest;
@@ -156,11 +213,18 @@ struct testEngine {
 #endif
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
-  testResult_t (*getDevCommRequirements)(int deviceImpl, ncclDevCommRequirements* reqs, ncclCommProperties_t* commProperties);
+  testResult_t (*getDevCommRequirements)(int deviceImpl, ncclDevCommRequirements* reqs, ncclComm_t comm);
+  /* Optional: fills up to testMaxDevComms reqs (preset to NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER) for
+   * one communicator; *nReqs == 0 skips, testNotImplemented falls back to getDevCommRequirements. */
+  testResult_t (*getMultiDevCommRequirements)(int deviceImpl, ncclDevCommRequirements* reqs, int* nReqs, ncclComm_t comm);
 #elif defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
   bool (*getDevCommRequirements)(int deviceImpl, ncclDevCommRequirements* reqs);
 #endif
 };
+
+// DevComm slots per GPU: threadArgs::devComms holds gpu i's DevComms at
+// [i*testMaxDevComms, i*testMaxDevComms + nDevComms).
+constexpr int testMaxDevComms = 2;
 
 extern struct testEngine ncclTestEngine;
 
@@ -192,9 +256,12 @@ struct threadArgs {
   ncclComm_t* comms;
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
   ncclDevComm* devComms;
+  int nDevComms;  // DevComms created per GPU; 0 when the device implementation skipped
 #endif
   cudaStream_t* streams;
   void** bias;
+  cudaEvent_t* events;
+  float* ms;
 
   void** expected;
   size_t expectedBytes;
@@ -217,11 +284,22 @@ struct threadArgs {
   void** recvRegHandles;
   void** biasRegHandles;
 #endif
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
+  // Mode-1 device-timing augment line (#[a2a-devtime]); buffered here and
+  // flushed after writeBenchmarkLineTerminator so it does not split the row.
+  char devtimeAugmentLine[512];
+#endif
 };
+
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+static inline ncclDevComm* testDevComms(struct threadArgs* args, int gpu) {
+  return args->devComms + gpu * testMaxDevComms;
+}
+#endif
 
 typedef testResult_t (*threadFunc_t)(struct threadArgs* args);
 struct testThread {
-  pthread_t thread;
+  std::thread thread;
   threadFunc_t func;
   struct threadArgs args;
   testResult_t ret;
@@ -229,16 +307,19 @@ struct testThread {
 
 // Provided by common.cu
 extern void Barrier(struct threadArgs* args);
+extern testResult_t testStreamSynchronize(int ngpus, cudaStream_t* streams, ncclComm_t* comms);
+// Inter-thread/process reduce: average 0=bcast(r0),1=avg,2=min,3=max,4=sum.
+// Serializes MPI to the last thread (MPI is MPI_THREAD_SINGLE) and writes the
+// combined value back to every thread. Instantiated for double / long long.
+template<typename T> void Allreduce(struct threadArgs* args, T* value, int average);
 extern testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* typeName, ncclRedOp_t op,  const char* opName, int root);
 extern testResult_t InitDataReduce(void* data, const size_t count, const size_t offset, ncclDataType_t type, ncclRedOp_t op, const uint64_t seed, const int nranks);
 extern testResult_t InitDataApplyBias(void* expected, void* bias, const size_t count, const size_t offset, ncclDataType_t type, ncclRedOp_t op);
 extern testResult_t InitData(void* data, const size_t count, size_t offset, ncclDataType_t type, ncclRedOp_t op, const uint64_t seed, const int nranks, const int rank);
 extern testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, size_t recvBytes, void **expected, size_t nbytes, void **bias);
 
-#include <unistd.h>
-
 static void getHostName(char* hostname, int maxlen) {
-  gethostname(hostname, maxlen);
+  ncclTestGetHostname(hostname, maxlen);
   for (int i=0; i< maxlen; i++) {
     if (hostname[i] == '\0') {
       return;
@@ -250,46 +331,16 @@ static void getHostName(char* hostname, int maxlen) {
   }
 }
 
-#include <stdint.h>
-
-static uint64_t getHash(const char* string, size_t n) {
-  // Based on DJB2a, result = result * 33 ^ char
-  uint64_t result = 5381;
-  for (size_t c = 0; c < n; c++) {
-    result = ((result << 5) + result) ^ string[c];
-  }
-  return result;
-}
-
 /* Generate a hash of the unique identifying string for this host
  * that will be unique for both bare-metal and container instances
  * Equivalent of a hash of;
  *
- * $(hostname)$(cat /proc/sys/kernel/random/boot_id)
+ * $(hostname)$(cat /proc/sys/kernel/random/boot_id)       [Linux]
+ * $(hostname)$(MachineGuid from registry)                 [Windows]
  *
  */
-#define HOSTID_FILE "/proc/sys/kernel/random/boot_id"
 static uint64_t getHostHash(const char* hostname) {
-  char hostHash[1024];
-
-  // Fall back is the hostname if something fails
-  (void) strncpy(hostHash, hostname, sizeof(hostHash));
-  int offset = strlen(hostHash);
-
-  FILE *file = fopen(HOSTID_FILE, "r");
-  if (file != NULL) {
-    char *p;
-    if (fscanf(file, "%ms", &p) == 1) {
-        strncpy(hostHash+offset, p, sizeof(hostHash)-offset-1);
-        free(p);
-    }
-  }
-  fclose(file);
-
-  // Make sure the string is terminated
-  hostHash[sizeof(hostHash)-1]='\0';
-
-  return getHash(hostHash, strlen(hostHash));
+  return ncclTestGetHostHash(hostname);
 }
 
 #if NCCL_MAJOR >= 2 && RCCL_BFLOAT16 == 1
@@ -357,6 +408,23 @@ typedef enum { ncclCoarse        = 0,
                nccl_NUM_MTYPES   = 4 } ncclMemoryType_t;
 extern const char *test_memorytypes[nccl_NUM_MTYPES];
 extern int deviceCtaCount; // number of CTAs for device implementation
+extern int deviceImpl;     // selected -D device implementation (0 = host); lets per-collective
+                           // device-timing hooks pick the matching timed kernel.
+// In-kernel device timing (AllToAll -D 3/4): --device_timing 0=off, 1=augment, 2=device-only.
+extern int deviceTimingMode;
+extern int devtimeLoop;       // --devtime_loop (default 10)
+extern int devtimeSkip;       // --devtime_skip (default 10)
+extern int devtimeLoopMid;    // --devtime_loop_mid: loop at per-peer >= 8 MiB (0=disabled)
+extern int devtimeLoopLarge;  // --devtime_loop_large: loop at per-peer >= 64 MiB (0=disabled)
+extern int devtimeSkipMid;    // --devtime_skip_mid (-1: min(base skip, 2))
+extern int devtimeSkipLarge;  // --devtime_skip_large (-1: min(base skip, 1))
+extern int devtimeCheck;      // --devtime_check: validate timed-kernel output
+// --gin_resource_sharing: resource-sharing mode the GIN device testers pass to the
+// ncclGin constructor. 0=thread (default; exclusive QP, drops the SQ lock on the
+// rocshmem-GDA bnxt/mlx5 post path), 1=CTA, 2=device (GPU-shared, keeps the lock).
+// Note the CLI numbering is NOT the enum numbering (enum GPU=0, CTA=1, THREAD=2);
+// gin_devtime::ginResourceSharingModeFromCli() maps CLI -> enum.
+extern int ginResourceSharingMode;
 constexpr int test_opNumMax = (int)ncclNumOps + (NCCL_VERSION_CODE >= NCCL_VERSION(2,11,0) ? 1 : 0);
 extern int test_opnum;
 extern int test_typenum;
@@ -444,18 +512,30 @@ testResult_t testLaunchDeviceKernel(F kernel, void* sendbuff, size_t sendoffset,
 #define SPECIALIZE_KERNEL(kernel, type, op) nullptr
 #endif
 
+// Must match librccl's internal ncclFunc_t (src/include/nccl_common.h): these
+// values cross the rcclGetAlgoInfo / rcclSymKGetInfo / rcclGetCollImplInfo ABI,
+// so a renumbering here silently mislabels results instead of failing to build.
 typedef enum {
   ncclFuncBroadcast = 0,
   ncclFuncReduce = 1,
   ncclFuncAllGather = 2,
   ncclFuncReduceScatter = 3,
   ncclFuncAllReduce = 4,
-  ncclFuncAllReduceWithBias = 5,
-  ncclFuncSendRecv = 6,
-  ncclFuncSend = 7,
-  ncclFuncRecv = 8,
-  ncclFuncAllToAllPivot = 9,
-  ncclNumFuncs = 10
+  ncclFuncSendRecv = 5,
+  ncclFuncSend = 6,
+  ncclFuncRecv = 7,
+  ncclFuncAlltoAll = 8,
+  ncclFuncScatter = 9,
+  ncclFuncGather = 10,
+  ncclFuncAllToAllPivot = 11,
+  ncclFuncAlltoAllGda = 12,
+  ncclFuncAlltoAllvGda = 13,
+  ncclFuncAllGatherV = 14,
+  ncclFuncPutSignal = 15,
+  ncclFuncSignal = 16,
+  ncclFuncWaitSignal = 17,
+  ncclFuncAlltoAllv = 18,
+  ncclNumFuncs = 19
 } ncclFunc_t;
 
 typedef ncclResult_t (*rcclTestsGetAlgoInfo_t)(struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,
@@ -465,11 +545,15 @@ typedef ncclResult_t (*rcclTestsGetAlgoName_t)(int algo, const char** algoName);
 typedef ncclResult_t (*rcclTestsGetProtocolName_t)(int protocol, const char** protocolName);
 typedef ncclResult_t (*rcclTestsGetSymkInfo_t)(struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType, ncclRedOp_t op,
     int* algo, int* protocol, int* maxChannels);
+// Newer librccl: reports the backend actually dispatched (CE/DDA/symmetric/kernel).
+typedef ncclResult_t (*rcclTestsGetCollImplInfo_t)(struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,
+    ncclRedOp_t op, const void* sendbuff, void* recvbuff, int graphCapturing, int* algo, int* protocol, int* maxChannels);
 
 extern rcclTestsGetAlgoInfo_t rcclTestsGetAlgoInfo;
 extern rcclTestsGetProtocolName_t rcclTestsGetProtocolName;
 extern rcclTestsGetAlgoName_t rcclTestsGetAlgoName;
 extern rcclTestsGetSymkInfo_t rcclTestsGetSymkInfo;
+extern rcclTestsGetCollImplInfo_t rcclTestsGetCollImplInfo;
 
 // Network counter collector (self-contained, see collector.h for full API)
 #include "collector.h"

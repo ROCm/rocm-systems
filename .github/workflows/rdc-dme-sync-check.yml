@@ -10,9 +10,15 @@ on:
       - 'projects/rdc/tools/dme_rdc_metric_mapping.json'
       - 'projects/rdc/tools/dme_rdc_metric_sync_check.py'
 
+permissions:
+  contents: read
+
 jobs:
   sync-check:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
     steps:
       - name: Checkout rocm-systems
         uses: actions/checkout@v4

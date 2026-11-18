@@ -22,6 +22,7 @@ packages = ["rocm_kpack"]
 "" = "python"
 
 [project.optional-dependencies]
+split = ["rocm-bootstrap>=0.3.0"]
 dev = ["pytest"]
 
 [tool.pytest.ini_options]

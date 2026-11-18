@@ -10,6 +10,7 @@ all subsequent tests in this module are skipped.
 """
 
 from __future__ import annotations
+
 import pytest
 from conftest import RocprofsysTest
 
@@ -51,36 +52,30 @@ def ucx_base_env() -> dict[str, str]:
 @pytest.fixture
 def ucx_active_messages_env(ucx_base_env) -> dict[str, str]:
     """UCX active messages environment."""
-    env = ucx_base_env.copy()
-    env.update(
-        {
-            "OMPI_MCA_btl": "^vader,tcp,openib,uct",
-        }
-    )
+    env = {
+        **ucx_base_env,
+        "OMPI_MCA_btl": "^vader,tcp,openib,uct",
+    }
     return env
 
 
 @pytest.fixture
 def ucx_mpip_env(ucx_base_env) -> dict[str, str]:
     """UCX MPIP environment."""
-    env = ucx_base_env.copy()
-    env.update(
-        {
-            "ROCPROFSYS_USE_MPIP": "ON",
-        }
-    )
+    env = {
+        **ucx_base_env,
+        "ROCPROFSYS_USE_MPIP": "ON",
+    }
     return env
 
 
 @pytest.fixture
 def ucx_env(ucx_base_env) -> dict[str, str]:
     """UCX environment."""
-    env = ucx_base_env.copy()
-    env.update(
-        {
-            "ROCPROFSYS_PERFETTO_COMBINE_TRACES": "ON",
-        }
-    )
+    env = {
+        **ucx_base_env,
+        "ROCPROFSYS_PERFETTO_COMBINE_TRACES": "ON",
+    }
     return env
 
 
@@ -90,10 +85,10 @@ def ucx_env(ucx_base_env) -> dict[str, str]:
 
 
 class TestUCX(RocprofsysTest):
-    UCX_PASS_REGEX = [
+    UCX_PASS_REGEX = (
         "Shutting down UCX tracing",  # Emitted by rocprof-sys (requires debug logging)
         r"pml.*ucx",  # Emitted by program when UCX logging is enabled
-    ]
+    )
 
     @pytest.mark.parametrize("mode", ["binary_rewrite", "sys_run"])
     @pytest.mark.parametrize(
@@ -136,7 +131,7 @@ class TestUCX(RocprofsysTest):
         if mode == "sys_run":
             self.assert_perfetto(
                 result,
-                perfetto_file="merged.proto",
+                perfetto_file="merged.pftrace",
                 categories=["ucx"],
                 counter_names=["UCX Comm Recv", "UCX Comm Send"],
             )
@@ -172,7 +167,7 @@ class TestUCX(RocprofsysTest):
         if mode == "sys_run":
             self.assert_perfetto(
                 result,
-                perfetto_file="merged.proto",
+                perfetto_file="merged.pftrace",
                 categories=["ucx"],
                 counter_names=["UCX Comm Recv", "UCX Comm Send"],
             )

@@ -314,6 +314,10 @@ public:
     Gfx12CmdBuilder(const reg_base_offset_table* _table)
     : CmdBuilder(_table){};
 
+    // The uint32_t override below hides the base's other BuildCopyRegDataPacket
+    // overloads, re-expose them
+    using CmdBuilder::BuildCopyRegDataPacket;
+
     static constexpr bool IsPrivilegedConfigReg(uint32_t addr)
     {
         return ((addr >= CONFIG_SPACE_START) && (addr <= CONFIG_SPACE_END));
@@ -333,7 +337,7 @@ public:
         APPEND_COMMAND_WRAPPER(cmdBuf, pm4mec_event_write_cmd);
     }
 
-    void BuildThreadTraceEventFinish(CmdBuffer* cmdBuf)
+    void BuildThreadTraceEventFinish(CmdBuffer* cmdBuf) override
     {
         BuildThreadTraceCommand(cmdBuf, THREAD_TRACE_FINISH);
     }
@@ -357,7 +361,7 @@ public:
         APPEND_COMMAND_WRAPPER(cmdBuf, pm4mec_event_write_cmd);
     }
 
-    void BuildWriteWaitIdlePacket(CmdBuffer* cmdbuf) { BuildBarrierCommand(cmdbuf); }
+    void BuildWriteWaitIdlePacket(CmdBuffer* cmdbuf) override { BuildBarrierCommand(cmdbuf); }
 
     void BuildCacheFlushPacket(CmdBuffer* cmdbuf, size_t addr, size_t size)
     {
@@ -500,7 +504,7 @@ public:
         return BuildWritePConfigRegPacketImpl(cmdbuf, get_addr(reg), value, chiplet, write_to_aid);
     }
 
-    void BuildWriteConfigRegPacket(CmdBuffer* cmdbuf, uint32_t addr, uint32_t value)
+    void BuildWriteConfigRegPacket(CmdBuffer* cmdbuf, uint32_t addr, uint32_t value) override
     {
         return IsPrivilegedConfigReg(addr) ? BuildWritePConfigRegPacket(cmdbuf, addr, value)
                                            : BuildWriteUConfigRegPacket(cmdbuf, addr, value);
@@ -634,7 +638,7 @@ public:
         }
     }
 
-    void BuildNopPacket(CmdBuffer* cmdbuf, uint32_t num_dwords)
+    void BuildNopPacket(CmdBuffer* cmdbuf, uint32_t num_dwords) override
     {
         uint32_t header = MakePacket3Header(PACKET3_NOP, num_dwords * sizeof(uint32_t));
         APPEND_COMMAND_WRAPPER(cmdbuf, header);
@@ -645,7 +649,9 @@ public:
         }
     }
 
-    void BuildIndirectBufferCmd(CmdBuffer* cmdbuf, const void* cmd_addr, std::size_t cmd_size)
+    void BuildIndirectBufferCmd(CmdBuffer*  cmdbuf,
+                                const void* cmd_addr,
+                                std::size_t cmd_size) override
     {
         // Verify the address is 4-byte aligned
         assert(!(uintptr_t(cmd_addr) & 0x3) && "IndirectBuffer address must be 4 byte aligned");
@@ -795,6 +801,23 @@ public:
                                 bool            wait)
     {
         BuildCopyRegDataPacket(cmd, get_addr(reg), dst_addr, size, wait);
+    }
+
+    void BuildReadGPUClockPacket(CmdBuffer* cmd_buffer, uint64_t* dst) override
+    {
+        uint32_t header = MakePacket3Header(PACKET3_COPY_DATA, 6 * sizeof(uint32_t));
+        uint32_t control =
+            PACKET3_COPY_DATA__SRC_SEL(PACKET3_COPY_DATA__SRC_SEL__GPU_CLOCK_COUNT) |
+            PACKET3_COPY_DATA__SRC_TEMPORAL(PACKET3_COPY_DATA__SRC_TEMPORAL__LU) |
+            PACKET3_COPY_DATA__DST_SEL(PACKET3_COPY_DATA__DST_SEL__TC_L2) |
+            PACKET3_COPY_DATA__DST_TEMPORAL(PACKET3_COPY_DATA__DST_TEMPORAL__LU) |
+            PACKET3_COPY_DATA__WR_CONFIRM(PACKET3_COPY_DATA__WR_CONFIRM__WAIT_FOR_CONFIRMATION) |
+            PACKET3_COPY_DATA__COUNT_SEL(PACKET3_COPY_DATA__COUNT_SEL__64_BITS_OF_DATA);
+        uint32_t dst_lo = PACKET3_COPY_DATA__DST_64B_ADDR_LO(PtrLow32(dst) >> 3);
+        uint32_t dst_hi = PACKET3_COPY_DATA__DST_ADDR_HI(PtrHigh32(dst));
+
+        uint32_t packet[6] = {header, control, 0, 0, dst_lo, dst_hi};
+        APPEND_COMMAND_WRAPPER(cmd_buffer, packet);
     }
 };
 

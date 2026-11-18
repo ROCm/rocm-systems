@@ -62,7 +62,7 @@ if(HIP_FOUND AND rocjpeg_FOUND AND rocprofiler-register_FOUND)
 
     list(APPEND SOURCES ${PROJECT_SOURCE_DIR} jpegdecode.cpp)
     add_executable(${PROJECT_NAME} ${SOURCES})
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++17")
+    target_compile_options(${PROJECT_NAME} PRIVATE -std=gnu++17)
     target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
 else()
     message("-- ERROR!: ${PROJECT_NAME} excluded! unmet dependencies")

@@ -44,7 +44,19 @@ namespace rocpd
 {
 namespace tool = ::rocprofiler::tool;
 
+constexpr auto required_view = true;
+constexpr auto optional_view = false;
+
+template <typename Tp, bool RequireView = required_view>
+struct sql_generator;
+
 template <typename Tp>
+using required_sql_generator = sql_generator<Tp, required_view>;
+
+template <typename Tp>
+using optional_sql_generator = sql_generator<Tp, optional_view>;
+
+template <typename Tp, bool RequireView>
 struct sql_generator : public tool::generator<Tp>
 {
     using base_type = tool::generator<Tp>;
@@ -82,9 +94,9 @@ private:
     archive_t           m_archive;
 };
 
-template <typename Tp>
+template <typename Tp, bool RequireView>
 std::string
-sql_generator<Tp>::sanitize_query(std::string_view query)
+sql_generator<Tp, RequireView>::sanitize_query(std::string_view query)
 {
     if(auto pos = query.find(';'); pos != std::string_view::npos)
         return std::string{query.substr(0, pos)};
@@ -92,27 +104,27 @@ sql_generator<Tp>::sanitize_query(std::string_view query)
     return std::string{query};
 }
 
-template <typename Tp>
+template <typename Tp, bool RequireView>
 int64_t
-sql_generator<Tp>::compute_chunk_size()
+sql_generator<Tp, RequireView>::compute_chunk_size()
 {
     return (16 * ::rocprofiler::common::units::get_page_size()) / sizeof(Tp);
 }
 
-template <typename Tp>
-sql_generator<Tp>::sql_generator(sqlite3*         conn,
-                                 std::string_view query,
-                                 std::string_view order_by,
-                                 int64_t          chunk_size)
+template <typename Tp, bool RequireView>
+sql_generator<Tp, RequireView>::sql_generator(sqlite3*         conn,
+                                              std::string_view query,
+                                              std::string_view order_by,
+                                              int64_t          chunk_size)
 : base_type{tool::defer_size{}}
 , m_conn{conn}
 , m_query{sanitize_query(query)}
 , m_order{(order_by.empty()) ? std::string{}
                              : fmt::format(" ORDER BY {}", sanitize_query(order_by))}
 , m_chunk_size{chunk_size}
-, m_num_entries{tool::sql::extract_row_count(m_conn, sanitize_query(query))}
+, m_num_entries{tool::sql::extract_row_count<RequireView>(m_conn, sanitize_query(query))}
 , m_num_chunks{(m_num_entries / m_chunk_size) + ((m_num_entries % m_chunk_size) > 0 ? 1 : 0)}
-, m_archive{m_conn, fmt::format("{}{}", m_query, m_order), m_num_entries, m_chunk_size}
+, m_archive{m_conn, fmt::format("{}{}", m_query, m_order), m_num_entries, m_chunk_size, RequireView}
 {
     base_type::resize(m_num_chunks);
 
@@ -125,9 +137,9 @@ sql_generator<Tp>::sql_generator(sqlite3*         conn,
                               fmt::join(m_expected.begin(), m_expected.end(), ", "));
 }
 
-template <typename Tp>
+template <typename Tp, bool RequireView>
 std::vector<Tp>
-sql_generator<Tp>::get(size_t idx) const
+sql_generator<Tp, RequireView>::get(size_t idx) const
 {
     auto _data = std::vector<Tp>{};
 

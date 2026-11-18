@@ -12,17 +12,18 @@
 #include "nccl.h"
 #include "nccl_common.h"
 
+#include "tuner/tuner_v7.h"
 #include "tuner/tuner_v6.h"
 #include "tuner/tuner_v5.h"
 #include "tuner/tuner_v4.h"
 #include "tuner/tuner_v3.h"
 #include "tuner/tuner_v2.h"
 
-typedef ncclTuner_v6_t ncclTuner_t;
-typedef ncclTunerConstants_v5_t ncclTunerConstants_t;
-typedef ncclNvlDomainInfo_v6_t ncclNvlDomainInfo_t;
+typedef ncclTuner_v7_t ncclTuner_t;
+typedef ncclTunerConstants_v7_t ncclTunerConstants_t;
+typedef ncclNvlDomainInfo_v7_t ncclNvlDomainInfo_t;
 
-#define NCCL_TUNER_PLUGIN_SYMBOL "ncclTunerPlugin_v6"
+#define NCCL_TUNER_PLUGIN_SYMBOL "ncclTunerPlugin_v7"
 
 #define NCCL_ALGO_UNDEF -1
 #define NCCL_ALGO_TREE 0
@@ -40,7 +41,8 @@ typedef ncclNvlDomainInfo_v6_t ncclNvlDomainInfo_t;
 #define NCCL_PROTO_SIMPLE 2
 #define NCCL_NUM_PROTOCOLS NCCL_NUM_PROTOCOLS_V5 // Simple/LL/LL128
 
-#define NCCL_ALGO_PROTO_IGNORE -1.0
+#define NCCL_TUNING_IGNORE -1.0
+#define NCCL_ALGO_PROTO_IGNORE NCCL_TUNING_IGNORE
 
 #define NCCL_NUM_UNROLLS 6 // 1/2/4/8/16/32
 #define NCCL_UNROLL_1 0
@@ -61,7 +63,8 @@ typedef ncclNvlDomainInfo_v6_t ncclNvlDomainInfo_t;
 #define NCCL_AMPERE_COMPCAP_IDX 1
 #define NCCL_HOPPER_COMPCAP_IDX 2
 #define NCCL_BLACKWELL_COMPCAP_IDX 3
-#define NCCL_NUM_COMPCAPS NCCL_NUM_COMPCAPS_V5
+#define NCCL_RUBIN_COMPCAP_IDX 4
+#define NCCL_NUM_COMPCAPS NCCL_NUM_COMPCAPS_V7
 
 #define NCCL_TUNING_SCALE_1NODE 0
 #define NCCL_TUNING_SCALE_2NODES 1

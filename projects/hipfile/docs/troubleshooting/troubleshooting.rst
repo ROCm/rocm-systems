@@ -25,7 +25,9 @@ fallback path instead.
   MOUNTPOINT  FSTYPE          DEVICE  BACKING  O_DIRECT  HIPFILE
   /           ext4 (ordered)  nvme0n1  nvme     yes       yes
   /home       xfs             nvme1n1  nvme     yes       yes
-  /data       ext4 (ordered)  dm-0     lvm      yes       no
+  /data       ext4 (ordered)  dm-0     lvm      yes       yes
+  /mnt/raid10 xfs             md0      md       yes       yes
+  /mnt/raid5  xfs             md1      md       yes       no
 
   AIS support in:
           Kernel P2PDMA support   : True
@@ -40,6 +42,52 @@ resolve that issue first before investigating further.
 For the full list of fastpath prerequisites, how to run ``ais-check``, and how
 to interpret its output, see :doc:`/how-to/checking-system-compatibility`.
 
+Kernel P2PDMA support
+=====================
+
+hipFile's fastpath requires a Linux kernel built with ``CONFIG_PCI_P2PDMA=y``.
+A kernel without it can't perform peer-to-peer DMA between the GPU and the
+storage device, so every I/O request falls back to the slower compatibility
+path without reporting any errors or warnings.
+
+This is a common cause of unexpected fallback-path use, because a distribution
+supported by ROCm doesn't necessarily ship a kernel with the option enabled. The
+Ubuntu 22.04 LTS default 5.15 kernel is one such case.
+
+``ais-check`` will report the problem as ``Kernel P2PDMA support : False``:
+
+.. code-block:: none
+
+  Mounted volumes:
+  MOUNTPOINT  FSTYPE          DEVICE  BACKING  O_DIRECT  HIPFILE
+  /           ext4 (ordered)  nvme0n1  nvme     yes       yes
+
+  AIS support in:
+          Kernel P2PDMA support   : False
+          HIP runtime             : True
+          amdgpu                  : True
+          hipFile-capable volume  : True
+
+Confirm the kernel configuration directly:
+
+.. code-block:: none
+
+  $ grep CONFIG_PCI_P2PDMA /boot/config-$(uname -r)
+  # CONFIG_PCI_P2PDMA is not set
+
+For a worked example of booting a kernel that has the option, see
+:ref:`hipfile-ubuntu-2204-fastpath`. For the other locations to check when
+``/boot/config-$(uname -r)`` is missing, see :ref:`hipfile-check-p2pdma`. For
+the list of tested distribution kernels, see
+:doc:`/reference/hipFile-kernel-p2pdma-support`.
+
+.. note::
+
+   If ``ais-check`` prints ``No kernel config files found!`` to stderr, it could
+   not locate a kernel configuration at ``/boot/config-$(uname -r)``,
+   ``/lib/modules/$(uname -r)/build/.config``, or ``/proc/config.gz``. In that
+   case P2PDMA support is unverified rather than known to be missing.
+
 Backing Storage
 ===============
 
@@ -49,6 +97,14 @@ uses one of the following storage configurations:
 * raw NVMe block device (without multipathing)
 * ext4 on an NVMe block device mounted with ``data=ordered``
 * xfs on an NVMe block device
+* an LVM logical volume whose physical volumes are all local NVMe and which is
+  linear, striped, or a ``raid0``, ``raid1``, or ``raid10`` RAID LV
+* an MD software RAID array running a ``linear``, ``raid0``, ``raid1``, or
+  ``raid10`` personality whose member devices are all local NVMe
+
+Parity RAID (``raid4``, ``raid5``, ``raid6``) is not supported, as an MD array
+or as an LVM RAID LV. It stages the transfer in the MD stripe cache instead of
+handing it to a member device.
 
 If the target file or device is backed by any other storage configuration,
 hipFile uses the fallback path.

@@ -25,9 +25,7 @@
 // status,
 //                int flags);
 
-namespace rocprofsys
-{
-namespace component
+namespace rocprofsys::component
 {
 namespace
 {
@@ -48,7 +46,10 @@ numa_gotcha::configure()
         for(size_t i = 0; i < numa_gotcha_t::capacity(); ++i)
         {
             auto* itr = numa_gotcha_t::at(i);
-            if(itr) itr->verbose = -1;
+            if(itr)
+            {
+                itr->verbose = -1;
+            }
         }
     }
 
@@ -83,14 +84,14 @@ std::mutex numa_gotcha::s_mutex = {};
 void
 numa_gotcha::pause()
 {
-    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    const std::scoped_lock<std::mutex> _lk{ s_mutex };
     numa_gotcha_t::set_ready(false);
 }
 
 void
 numa_gotcha::resume()
 {
-    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    const std::scoped_lock<std::mutex> _lk{ s_mutex };
     numa_gotcha_t::set_ready(true);
 }
 
@@ -198,7 +199,6 @@ numa_gotcha::audit(const gotcha_data& _data, audit::outgoing, void* ret)
     category_region<category::numa>::stop(std::string_view{ _data.tool_id }, "return",
                                           ret);
 }
-}  // namespace component
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component
 
 TIMEMORY_STORAGE_INITIALIZER(rocprofsys::component::numa_gotcha)

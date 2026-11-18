@@ -134,12 +134,11 @@ protected:
 
 TEST_F(ImplicitLaunchOrderMPITest, MultiCommunicatorChain)
 {
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI,
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI,
                                           kNoProcessLimit,
                                           kNoPowerOfTwoRequired,
                                           1,
-                                          kRequireSingleNode))
-        << "Test requirements not met";
+                                          kRequireSingleNode);
 
     bool implicit_order_enabled = isImplicitLaunchOrderEnabled();
 

@@ -4,20 +4,29 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_RDNA2_ADDR_CALC_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_RDNA2_ADDR_CALC_H_
 
-#include "rocjitsu/isa/arch/amdgpu/rdna2/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/machine_insts.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 
 #include <cstdint>
+#include <optional>
 
 namespace rocjitsu {
+class Instruction;
 namespace amdgpu {
+enum MemPipelineTag : uint8_t;
 class Wavefront;
-struct VectorMemState;
+class VectorMemState;
+class ScalarMemState;
 } // namespace amdgpu
 
 namespace rdna2 {
 
-uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf);
+/// Suppress a memory instruction whose decoded return tuple crosses the wave allocation.
+bool nullify_unallocated_memory_return(Instruction &inst, const amdgpu::Wavefront &wf,
+                                       amdgpu::MemPipelineTag pipeline);
+
+std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf,
+                                               amdgpu::ScalarMemState *state = nullptr);
 
 void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf,
                               amdgpu::VectorMemState &d);

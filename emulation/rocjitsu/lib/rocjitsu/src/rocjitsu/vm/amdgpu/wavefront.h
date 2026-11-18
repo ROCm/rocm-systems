@@ -4,43 +4,85 @@
 /// @file wavefront.h
 /// @brief AMDGPU wavefront execution state and ISA-parameterized wavefront.
 
-#ifndef ROCJITSU_VM_AMDGPU_WAVEFRONT_H_
-#define ROCJITSU_VM_AMDGPU_WAVEFRONT_H_
+#pragma once
 
 #include "rocjitsu/base/api.h"
-#include "rocjitsu/isa/arch/amdgpu/vgpr_msb.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 #include "rocjitsu/isa/isa_traits.h"
+#include "rocjitsu/vm/amdgpu/gpu_handles.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm_access.h"
 #include "rocjitsu/vm/amdgpu/instruction_compute_unit_view.h"
+#include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 #include "rocjitsu/vm/plugins/wavefront_state.h"
 #include "rocjitsu/vm/thread_context.h"
+#include "util/diagnostic.h"
 
+#include <algorithm>
+#include <array>
+#include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
 namespace rocjitsu {
+class ExecutionPluginGroup;
+namespace config {
+class Gfx10CheckpointResources;
+class Gfx10CheckpointScheduler;
+} // namespace config
+
 namespace amdgpu {
+
+struct Pm4FailureState;
 
 // Forward declaration - wavefront accesses registers through its CU.
 class ComputeUnitCore;
 class Lds;
+enum class VmAccessOutcome : uint8_t;
 
 /// @brief Wavefront execution state.
 enum class WfState : uint8_t {
-  HALTED,  ///< Slot is currently unused and is available for dispatch.
-  RUNNING, ///< In a running state and can be considered for scheduling.
-  WAITCNT, ///< Stalled at a waitcnt.
-  BARRIER, ///< Stalled at a barrier.
-  ENDING,  ///< s_endpgm executed but outstanding memory ops are draining.
+  HALTED,      ///< Slot is currently unused and is available for dispatch.
+  RUNNING,     ///< In a running state and can be considered for scheduling.
+  WAITCNT,     ///< Stalled at a waitcnt.
+  VM_RETRY,    ///< A prepared memory operation is waiting for backing availability.
+  BARRIER,     ///< Stalled at a barrier.
+  GWS_WAIT,    ///< Parked at a Global Wave Sync rendezvous (device-global).
+  ENDING,      ///< s_endpgm executed but outstanding memory ops are draining.
+  MEMORY_TRAP, ///< An enabled address violation completed; trap before the next issue.
+};
+
+/// @brief Execution failures returned to the CU for exception delivery or diagnostics.
+enum class InstructionExecutionError : uint8_t {
+  None,
+  InvalidInstructionEncoding,
+  UnsupportedOperandValue,
+  MissingExecutionBackend,
+  InvalidRegisterAccess,
+  UnimplementedInstruction,
+  DecodeFailure,
+  IllegalInstruction,
+  PluginFailure,
 };
 
 /// @brief Allocation slice within a register file.
 struct RegAllocation {
   uint32_t base = 0;  ///< First register index in the physical file.
   uint32_t count = 0; ///< Number of registers allocated.
+
+  [[nodiscard]] constexpr bool contains(uint32_t physical_base, uint32_t physical_count = 1) const {
+    if (physical_count == 0 || physical_base < base)
+      return false;
+    const uint32_t offset = physical_base - base;
+    return offset < count && physical_count <= count - offset;
+  }
 };
 
 /// @brief AMDGPU wavefront execution state.
@@ -55,9 +97,12 @@ struct RegAllocation {
 /// cycles. Dynamic dispatch state (wg_id, pc, register allocations,
 /// execution masks) is set when the slot is activated and reset by reset().
 ///
-/// Plugin state (plugin_states_) is NOT cleared by reset(). Plugins must
-/// set their per-wavefront state in onAmdgpuWorkgroupDispatched, which
-/// fires before the wavefront's first instruction.
+/// Plugin state (plugin_states_) is not cleared by reset(). Plugins initialize
+/// it in onAmdgpuWorkgroupDispatched or onAmdgpuWavefrontDispatched, before the
+/// first instruction of each wave incarnation. onAmdgpuWavefrontHalted or
+/// onAmdgpuWavefrontCancelled ends that incarnation, including a cluster
+/// placement rolled back before retry in the same slot. See the cancellation
+/// contract in execution_plugin.h for terminal-hook and retry semantics.
 ///
 /// A slot is considered dispatched (active) when it has a nonzero register
 /// allocation (sgpr_alloc_.count > 0). After clear(), the slot is idle.
@@ -73,8 +118,11 @@ public:
   ~Wavefront() override = default;
 
   /// @brief Return the number of lanes per wavefront.
-  /// @returns Lanes per wavefront (ISA-fixed).
+  /// @returns Lanes in this dispatched architectural wavefront.
   uint32_t wf_size() const { return wf_size_; }
+
+  /// @brief Return the descriptor-selected architectural wave width.
+  uint32_t kernel_wave_size() const { return wf_size_; }
 
   /// @brief Return the ISA maximum SGPRs per wavefront.
   /// @returns Maximum scalar registers.
@@ -88,17 +136,60 @@ public:
   /// @returns Per-dispatch SGPR allocation count.
   uint32_t num_sgprs() const { return num_sgprs_; }
 
+  /// CDNA1–4 allocate ordinary SGPRs in 16-register blocks.
+  static constexpr uint32_t rounded_sgpr_count(uint32_t requested, uint32_t capacity) {
+    const uint64_t rounded = (uint64_t{requested} + 15) & ~uint64_t{15};
+    return static_cast<uint32_t>(std::min<uint64_t>(rounded, capacity));
+  }
+
+  bool exceeds_rounded_sgpr_allocation(uint32_t index, uint32_t width = 1) const {
+    if (!arch_is_cdna_4_or_lower(cu().arch()))
+      return false;
+    const auto count = rounded_sgpr_count(num_sgprs_, cu().sgprs_per_wf());
+    return !RegAllocation{0, count}.contains(index, width);
+  }
+
   /// @brief Return the number of allocated vector registers.
   /// @returns Per-dispatch VGPR allocation count.
   uint32_t num_vgprs() const { return num_vgprs_; }
+  uint32_t accum_vgpr_base() const { return accum_vgpr_base_; }
+  void set_accum_vgpr_base(uint32_t base) { accum_vgpr_base_ = base; }
+
+  /// GFX90A places AccVGPRs after this many ordinary VGPRs in the unified allocation.
+  void set_accum_offset(uint32_t offset) { set_accum_vgpr_base(offset); }
+  /// Architectural VGPR or AccVGPR range in the wave's logical register file. CDNA2–4
+  /// descriptors split the total allocation at ACCUM_OFFSET; direct dispatch can omit it.
+  RegAllocation vgpr_bank(bool acc) const {
+    const auto ordinary = accum_vgpr_base_ ? std::min(num_vgprs_, accum_vgpr_base_) : num_vgprs_;
+    const auto count = acc && accum_vgpr_base_ ? num_vgprs_ - ordinary : ordinary;
+    return {acc ? ACC_VGPR_OFFSET : 0u, std::min(count, ACC_VGPR_OFFSET)};
+  }
+  bool unified_vgpr_range_is_allocated(uint32_t index, uint32_t words) const {
+    return vgpr_bank(index >= ACC_VGPR_OFFSET).contains(index, words);
+  }
+  bool memory_destination_out_of_range(const Instruction &inst) const;
 
   /// @brief Read the raw status register value.
   /// @returns Status register as a raw uint32_t.
-  virtual uint32_t status_raw() const = 0;
+  uint32_t status_raw() const { return status_raw_; }
 
   /// @brief Write the raw status register value.
   /// @param val New status register value.
-  virtual void set_status_raw(uint32_t val) = 0;
+  void set_status_raw(uint32_t val) {
+    const bool halt_changed =
+        ((status_raw_ ^ val) & (kStatusHaltMask | kStatusFatalHaltMask | kStatusPrivMask)) != 0;
+    if (!halt_changed) {
+      status_raw_ = val;
+      return;
+    }
+    const bool was_runnable = !is_halted() && !debug_paused();
+    status_raw_ = val;
+    if (was_runnable != (!is_halted() && !debug_paused()))
+      update_activity_counts(!is_halted(), was_runnable);
+  }
+
+  uint32_t ib_sts2_gfx11() const { return ib_sts2_gfx11_ | (uint32_t(wf_size() == 64) << 11); }
+  void set_ib_sts2_gfx11(uint32_t value) { ib_sts2_gfx11_ = value; }
 
   /// @brief Read the raw MODE register value.
   uint32_t mode_raw() const { return mode_raw_; }
@@ -121,36 +212,80 @@ public:
     mode_raw_ = (mode_raw_ & ~VGPR_MSB_MODE_MASK) | mode_bits;
   }
 
+  /// @brief Arm the gfx1250 hazard for the instruction immediately following
+  /// an S_SETREG_IMM32_B32 write to MODE.
+  void arm_setreg_vgpr_msb_hazard() { setreg_vgpr_msb_hazard_ = true; }
+
+  /// @brief Whether the next adjacent instruction is in the gfx1250 hazard window.
+  bool setreg_vgpr_msb_hazard() const { return setreg_vgpr_msb_hazard_; }
+
+  /// @brief Consume whether the immediately preceding instruction armed the
+  /// gfx1250 S_SET_VGPR_MSB drop hazard.
+  bool consume_setreg_vgpr_msb_hazard() {
+    const bool armed = setreg_vgpr_msb_hazard_;
+    setreg_vgpr_msb_hazard_ = false;
+    return armed;
+  }
+
+  /// @brief Clear the adjacency hazard when an instruction bypasses the normal
+  /// execution callback path.
+  void clear_setreg_vgpr_msb_hazard() { setreg_vgpr_msb_hazard_ = false; }
+
   /// @brief Reserved raw WAVE_SCHED_MODE state for future WGP scheduling model.
   uint32_t wave_sched_mode_raw() const { return wave_sched_mode_raw_; }
 
   /// @brief Reserved raw WAVE_SCHED_MODE state for future WGP scheduling model.
   void set_wave_sched_mode_raw(uint32_t val) { wave_sched_mode_raw_ = val; }
 
+  /// @brief Raw GFX12 exception flags that have no legacy TRAPSTS slot.
+  uint32_t gfx12_excp_flag_user_extra_raw() const { return gfx12_excp_flag_user_extra_raw_; }
+
+  /// @brief Set GFX12 exception flags that have no legacy TRAPSTS slot.
+  void set_gfx12_excp_flag_user_extra_raw(uint32_t val) { gfx12_excp_flag_user_extra_raw_ = val; }
+
+  /// @brief Whether this wave uses GFX12's dedicated TRAP_CTRL register.
+  bool uses_separate_trap_ctrl() const;
+
+  /// @brief Raw GFX12 trap enables, architecturally separate from MODE.
+  uint32_t gfx12_trap_ctrl_raw() const { return gfx12_trap_ctrl_raw_; }
+
+  /// @brief Set the raw GFX12 trap enables without changing MODE.VGPR_MSB.
+  void set_gfx12_trap_ctrl_raw(uint32_t val) { gfx12_trap_ctrl_raw_ = val; }
+
+  /// @brief Raw gfx12.5 XNACK replay state preserved by the trap handler.
+  uint32_t gfx1250_xnack_state_priv_raw() const { return gfx1250_xnack_state_priv_raw_; }
+
+  /// @brief Set the raw gfx12.5 XNACK replay state.
+  void set_gfx1250_xnack_state_priv_raw(uint32_t val) { gfx1250_xnack_state_priv_raw_ = val; }
+
+  /// @brief Raw gfx12.5 XNACK lane mask.
+  uint32_t gfx1250_xnack_mask_raw() const { return gfx1250_xnack_mask_raw_; }
+
+  /// @brief Set the raw gfx12.5 XNACK lane mask.
+  void set_gfx1250_xnack_mask_raw(uint32_t val) { gfx1250_xnack_mask_raw_ = val; }
+
   /// @brief Return the two-bit VGPR high-bank selector for an operand role.
   uint32_t vgpr_msb_for_role(VgprMsbRole role) const {
-    switch (role) {
-    case VgprMsbRole::Src0:
-      return vgpr_msb_mode_ & 0x3u;
-    case VgprMsbRole::Src1:
-      return (vgpr_msb_mode_ >> 2) & 0x3u;
-    case VgprMsbRole::Src2:
-      return (vgpr_msb_mode_ >> 4) & 0x3u;
-    case VgprMsbRole::Dst:
-      return (vgpr_msb_mode_ >> 6) & 0x3u;
-    case VgprMsbRole::None:
+    const unsigned field = static_cast<unsigned>(role);
+    if (field > static_cast<unsigned>(VgprMsbRole::Dst))
       return 0;
-    }
-    return 0;
+    // The zero field for None precedes Src0/Src1/Src2/Dst. Padding the byte
+    // with that field makes every role one shift without a selector switch.
+    return ((uint32_t{vgpr_msb_mode_} << 2) >> (field * 2)) & 3u;
   }
 
   /// @brief Return the wavefront slot index within the CU.
   /// @returns Permanent slot index.
   uint32_t wf_id() const { return wf_id_; }
 
+  /// @brief Generation of the current occupant of this reusable wave slot.
+  uint64_t dispatch_generation() const { return dispatch_generation_; }
+
   /// @brief Return the workgroup ID assigned at dispatch.
   /// @returns Workgroup ID.
   uint32_t wg_id() const { return wg_id_; }
+  const std::array<uint32_t, 3> &wg_coord() const { return wg_coord_; }
+  void set_wg_coord(uint32_t x, uint32_t y, uint32_t z) { wg_coord_ = {x, y, z}; }
 
   /// @brief Return the dispatch ID assigned at dispatch.
   uint32_t dispatch_id() const { return dispatch_id_; }
@@ -158,17 +293,169 @@ public:
   /// @brief Set the dispatch ID (called by DispatchController).
   void set_dispatch_id(uint32_t id) { dispatch_id_ = id; }
 
-  /// @brief Return the owning process ID (PASID analog).
+  void set_workgroup_dispatch(uint32_t id, uint32_t wave_count) {
+    set_dispatch_id(id);
+    set_status_raw((status_raw() & ~kStatusInTgMask) | (wave_count > 1 ? kStatusInTgMask : 0u));
+  }
+
+  /// @brief Return the wrapped AQL ring slot associated with this wave.
+  /// @details ROCdbgapi reconstructs its monotonic dispatch index from the
+  /// consumer cursor and this slot (TTMP11[6:30] on gfx9.4).
+  uint32_t queue_packet_id() const { return queue_packet_id_; }
+
+  /// @brief Set the wrapped AQL ring slot (called at dispatch).
+  void set_queue_packet_id(uint32_t id) { queue_packet_id_ = id; }
+
+  /// @brief GPU load bias for code-object-relative function addresses.
+  uint64_t code_load_bias() const { return code_load_bias_; }
+  void set_code_load_bias(uint64_t bias) { code_load_bias_ = bias; }
+
+  /// @brief Return this wave's position within its workgroup (0-based).
+  uint32_t wave_in_group() const { return wave_in_group_; }
+
+  /// @brief Set this wave's position within its workgroup (called at dispatch).
+  void set_wave_in_group(uint32_t pos) { wave_in_group_ = pos; }
+
+  /// @brief Return the KFD queue ID that launched this wave.
+  uint32_t queue_id() const { return queue_id_; }
+
+  /// @brief Set the KFD queue ID (called by the command processor at dispatch).
+  /// @details Used by the debugger path to correlate a stopped wave with the
+  /// queue whose context-save-restore area holds its saved state.
+  void set_queue_id(uint32_t id) { queue_id_ = id; }
+
+  /// @brief Return the dispatch's VMID or PASID, according to its identity kind.
   uint32_t process_id() const { return process_id_; }
 
-  /// @brief Set the owning process ID at dispatch time.
-  void set_process_id(uint32_t id) { process_id_ = id; }
+  /// @brief Set the owning VMID or PASID at dispatch time.
+  /// @details The default kind identifies a PASID.
+  void set_process_id(uint32_t id, ProcessIdentityKind kind = ProcessIdentityKind::Pasid);
+
+  /// @brief Return the generation-safe identity of the owning GPU address space.
+  AddressSpaceHandle address_space() const { return address_space_; }
+
+  /// @brief Set the owning GPU address space at dispatch time.
+  void set_address_space(AddressSpaceHandle address_space) {
+    if (address_space_ != address_space) {
+      vm_access_.reset();
+      execution_root_access_.reset();
+    }
+    address_space_ = address_space;
+  }
+
+  /// @brief Return the immutable VM snapshot captured when this wave was admitted.
+  const GpuVmAccess *vm_access() const { return vm_access_ ? &vm_access_->value : nullptr; }
+
+  /// @brief Share the dispatch-scoped VM snapshot with this wave.
+  void set_vm_access(util::IntrusiveSharedPtr<const GpuVmAccessSnapshot> access) {
+    if (access && !execution_root_access_)
+      execution_root_access_ = access;
+    vm_access_ = std::move(access);
+  }
+  [[nodiscard]] bool same_execution_root(const GpuVmAccess &access) const {
+    return !execution_root_access_ || execution_root_access_->value.same_root_lineage(access);
+  }
+  void set_execution_effect_guard(std::shared_ptr<std::atomic_bool> marker) {
+    execution_effect_possible_ = std::move(marker);
+    execution_effect_marked_ = false;
+  }
+  [[nodiscard]] bool needs_execution_effect_mark() const {
+    return execution_effect_possible_ && !execution_effect_marked_;
+  }
+  void note_potential_execution_effect() {
+    if (needs_execution_effect_mark()) {
+      execution_effect_possible_->store(true, std::memory_order_release);
+      execution_effect_marked_ = true;
+    }
+  }
+  /// @brief Use host monotonic time for a live queue or model time for a standalone wave.
+  void set_system_clock(bool enabled) { use_system_clock_ = enabled; }
+  void set_drm_shader_addresses(bool enabled) { drm_shader_addresses_ = enabled; }
+  /// @brief Address of this instruction in the GPU VM. PM4 indirect branches
+  /// leave a raw PC, while DRM maps the high half at sign-extended addresses.
+  uint64_t vm_instruction_pc() const {
+    if (!drm_shader_addresses_ || pc < (uint64_t{1} << 47))
+      return pc;
+    const unsigned bits = cu().arch() == ROCJITSU_CODE_ARCH_CDNA5 ? 57 : 48;
+    return (pc >> (bits - 1)) == 1 ? pc | (~uint64_t{0} << bits) : pc;
+  }
+  /// @brief Read nanoseconds from the selected realtime clock.
+  uint64_t realtime_timestamp() const;
+  uint64_t shader_cycles() const;
+  /// Read the fixed-frequency SMEM clock in units of 1 / frequency_mhz microseconds.
+  uint64_t realtime_clock() const;
+  /// @brief Bind wave errors to the PM4 submission that launched this wave.
+  void set_pm4_failure(std::shared_ptr<Pm4FailureState> failure) {
+    pm4_failure_ = std::move(failure);
+  }
+  /// @brief Report a failed shader to its PM4 queue; returns false for an AQL wave.
+  bool fail_pm4_submission();
+  /// @brief Retain a PM4 scratch slot until this wave retires.
+  void set_scratch_lease(std::shared_ptr<uint32_t> lease) { scratch_lease_ = std::move(lease); }
 
   /// @brief Return the per-WG LDS base offset assigned at dispatch.
   uint32_t lds_base() const { return lds_base_; }
 
   /// @brief Set the per-WG LDS base offset.
   void set_lds_base(uint32_t base) { lds_base_ = base; }
+
+  /// @brief Initialize a workgroup named barrier from an ISA barrier operand.
+  void barrier_init(int32_t barrier_id, uint32_t member_count);
+
+  /// @brief Join one workgroup named barrier.
+  void barrier_join(int32_t barrier_id);
+
+  /// @brief Signal a barrier and report whether this is its first signal.
+  bool barrier_signal(int32_t barrier_id, uint32_t member_count);
+
+  /// @brief Read the packed architectural state of a barrier.
+  uint32_t barrier_state(int32_t barrier_id) const;
+
+  uint8_t checkpoint_waiting_barrier() const {
+    return waiting_barrier_bit_ == kNoBarrierWait ? 0 : waiting_barrier_bit_;
+  }
+  void restore_rdna4_checkpoint_barriers(uint8_t complete_mask, uint8_t waiting);
+
+  bool workgroup_barrier_complete() const;
+  bool trap_barrier_complete() const;
+  void set_workgroup_barrier_complete(bool complete);
+
+  /// @brief Wait on a named, workgroup, trap, or cluster barrier.
+  void barrier_wait(int32_t barrier_id);
+
+  /// @brief Leave the currently joined named barrier.
+  bool barrier_leave();
+
+  /// @brief Seed a Global Wave Sync resource's shared barrier/semaphore counter.
+  void gws_init(uint32_t rid, uint32_t count);
+
+  /// @brief Arrive at a GWS barrier; may park the wave. The resource is process-
+  /// global and accepts arrivals across dispatches (see GwsDevice for the policy).
+  void gws_barrier_arrive(uint32_t rid, uint32_t count);
+
+  /// @brief Signal (V) a GWS semaphore, releasing one waiter if present.
+  void gws_sema_v(uint32_t rid);
+
+  /// @brief Wait (P) on a GWS semaphore; may park this wave when no credit.
+  void gws_sema_p(uint32_t rid);
+
+  /// @brief Bulk-signal (BR) a GWS semaphore, releasing up to @p count waiters.
+  void gws_sema_br(uint32_t rid, uint32_t count);
+
+  /// @brief Release all waiters parked on a GWS resource.
+  void gws_sema_release_all(uint32_t rid);
+
+  /// @brief Return the aligned LDS allocation size for this workgroup.
+  uint32_t lds_size() const { return lds_size_; }
+
+  /// Whether a complete access lies inside this workgroup's LDS allocation.
+  bool contains_lds_range(uint64_t address, uint32_t bytes) const {
+    const uint64_t end = uint64_t{lds_base_} + lds_size_;
+    return address >= lds_base_ && address <= end && bytes <= end - address;
+  }
+
+  /// @brief Set the aligned LDS allocation size for this workgroup.
+  void set_lds_size(uint32_t size) { lds_size_ = size; }
 
   /// @brief Return the LDS backing selected for this workgroup placement.
   ///
@@ -180,6 +467,33 @@ public:
   /// @brief Override the LDS backing for this workgroup placement.
   /// Passing nullptr restores the owning CU's LDS.
   void set_lds(Lds *lds) { lds_ = lds; }
+
+  /// @brief Return whether this wave's compute unit has GPU memory backing.
+  bool has_gpu_memory() const;
+
+  /// @brief Capture the current translated address-space view for one operation.
+  /// @details The returned access retains the translator, physical backing, and
+  /// invalidation generation needed to resume an unavailable operation without
+  /// exposing the owning compute unit or reclassifying the address through the
+  /// legacy memory path.
+  [[nodiscard]] std::optional<GpuVmAccess> snapshot_vm_access() const;
+
+  /// @brief Disassemble captured instruction bytes with this CU's target decoder.
+  /// @details Call on the CU execution thread with a complete instruction encoding.
+  /// Standalone plugin modules do not link the simulator, so they reach the CU's
+  /// decoder through this virtual call. It is pure virtual because an out-of-line
+  /// definition would become Wavefront's key function, and plugins could then no
+  /// longer emit Wavefront's type information themselves.
+  /// Returns failure and emits a diagnostic if the encoding is empty, truncated, or undecodable.
+  virtual util::FailureOr<std::string>
+  disassemble_instruction(std::span<const uint32_t> encoding, uint64_t pc,
+                          util::DiagnosticEmitter diagnostic = {}) const = 0;
+
+  /// @brief Read GPU memory in this wave's process address space.
+  [[nodiscard]] VmAccessOutcome read_gpu_memory(uint64_t addr, std::span<uint8_t> dst) const;
+
+  /// @brief Write GPU memory in this wave's process address space.
+  [[nodiscard]] VmAccessOutcome write_gpu_memory(uint64_t addr, std::span<const uint8_t> src);
 
   /// @brief Return this workgroup's rank within its cluster.
   uint32_t cluster_rank() const { return cluster_rank_; }
@@ -200,6 +514,23 @@ public:
   /// @brief Return the VGPR register file allocation.
   /// @returns Const reference to the VGPR allocation slice.
   const RegAllocation &vgpr_alloc() const { return vgpr_alloc_; }
+  /// Check vector destination tuples against the dispatched wave's logical register count.
+  bool valu_destinations_allocated(const Instruction &inst) const;
+
+  /// Whether every decoded VGPR result lies in the dispatched wave's allocation.
+  bool vgpr_destinations_allocated(const Instruction &inst) const;
+
+  /// VALU issue, including any scalar side results, depends on its destination allocation.
+  bool discards_valu_result(const Instruction &inst) const;
+
+  /// Active lanes for memory planning, including GFX10 destination suppression.
+  uint64_t memory_exec(const Instruction &inst) const;
+  void observe_lds_direct_read(uint32_t address, uint32_t bytes, uint32_t lane) const;
+
+  /// Resolve one RDNA2 DS input word against the logical VGPR allocation.
+  [[nodiscard]] uint32_t ds_source_vgpr(uint32_t physical_reg) const {
+    return vgpr_alloc_.contains(physical_reg) ? physical_reg : vgpr_alloc_.base;
+  }
 
   /// @brief Return the instruction-facing compute-unit service view.
   /// @returns Narrow view over the owning compute unit.
@@ -224,18 +555,69 @@ public:
   ///
   /// Wave32 leaves EXEC_HI available as scalar scratch. Vector instructions
   /// that update the execution mask must therefore preserve the non-lane bits.
-  void set_exec(uint64_t val) { exec_ = (exec_ & ~lane_mask()) | (val & lane_mask()); }
+  void set_exec(uint64_t val) {
+    exec_ = (exec_ & ~lane_mask()) | (val & lane_mask());
+    exec_written_words_ |= wf_size_ == 64 ? 3 : 1;
+  }
 
-  /// @brief Set the raw architectural EXEC register pair.
+  /// @brief Write both architectural EXEC words as a scalar instruction result.
+  void write_exec(uint64_t val) {
+    exec_ = val;
+    exec_written_words_ = 3;
+  }
+
+  /// Write only EXEC_LO, including when both halves contain active lanes.
+  void write_exec_lo(uint32_t val) {
+    exec_ = (exec_ & 0xffffffff00000000ULL) | val;
+    exec_written_words_ |= 1;
+  }
+
+  /// Write only EXEC_HI, including when it is scalar scratch in wave32.
+  void write_exec_hi(uint32_t val) {
+    exec_ = (exec_ & 0xffffffffu) | (uint64_t{val} << 32);
+    exec_written_words_ |= 2;
+  }
+
+  /// Restore raw EXEC without recording an instruction write.
   void set_exec_raw(uint64_t val) { exec_ = val; }
 
-  /// @brief Return the VCC scalar register pair.
-  /// @returns Raw VCC register value.
-  uint64_t vcc() const { return vcc_; }
+  /// @brief Return the execution-local mask applied to VGPR write effects.
+  /// @details DPP semantic helpers still evaluate every active lane so scalar
+  /// side results see the complete operation. This mask suppresses both the
+  /// architectural VGPR commit and its plugin observation for row/bank-masked
+  /// or invalid-source lanes.
+  uint64_t vgpr_write_mask() const { return vgpr_write_mask_ & lane_mask(); }
 
-  /// @brief Set the VCC scalar register pair.
-  /// @param val New VCC value.
-  void set_vcc(uint64_t val) { vcc_ = val; }
+  /// @brief Set the execution-local VGPR write-effect mask.
+  void set_vgpr_write_mask(uint64_t val) { vgpr_write_mask_ = val & lane_mask(); }
+
+  /// @brief Return the raw architectural VCC register pair.
+  /// @returns Raw VCC register value, including non-lane bits in wave32 mode.
+  uint64_t vcc() const { return read_sgpr_pair(vcc_); }
+
+  /// @brief Return the active-lane portion of the VCC register pair.
+  /// @returns VCC mask with non-lane bits cleared.
+  uint64_t vcc_mask() const { return vcc() & lane_mask(); }
+
+  /// @brief Set the active-lane portion of the VCC register pair.
+  /// @param val New VCC mask value.
+  ///
+  /// Wave32 leaves VCC_HI available as scalar state. Mask-producing writes
+  /// must therefore preserve the non-lane bits, matching set_exec().
+  void set_vcc(uint64_t val) {
+    set_vcc_raw(wf_size_ == 64 ? val : (vcc() & ~lane_mask()) | (val & lane_mask()));
+  }
+
+  /// @brief Set the raw architectural VCC register pair.
+  void set_vcc_raw(uint64_t val) { write_sgpr_pair(vcc_, val); }
+
+  /// @brief Commit a wave-sized implicit VCC result.
+  /// @details Vector mask-producing instructions write only the lanes present
+  /// in the current wave. In Wave32, VCC_HI remains separately addressable
+  /// scalar state and must not be clobbered by a low-half compare or carry
+  /// result.
+  /// @param val New per-lane VCC result.
+  void set_vcc_mask(uint64_t val) { set_vcc(val); }
 
   /// @brief Return the M0 special register.
   /// @returns M0 register value.
@@ -246,26 +628,68 @@ public:
   void set_m0(uint32_t val) { m0_ = val; }
 
   static constexpr uint32_t DX10_CLAMP_BIT = 1u << 8;
+  static constexpr uint32_t IEEE_BIT = 1u << 9;
   static constexpr uint32_t GPR_IDX_EN_BIT = 1u << 27;
+  static constexpr uint32_t kRdna2MemoryViolationEnable = 1u << 20;
+  static constexpr uint32_t VSKIP_BIT = 1u << 28;
   static constexpr uint32_t FP16_OVFL_BIT = 1u << 23;
+  /// Short for conditional stack pointer, used by fork/join instructions
+  static constexpr uint32_t CSP_SHIFT = 29;
+  static constexpr uint32_t CSP_MASK = 7u << CSP_SHIFT;
+  /// MODE.FP_ROUND field (bits 3:0) and MODE.FP_DENORM field (bits 7:4).
+  static constexpr uint32_t FP_ROUND_MASK = 0xFu;
+  static constexpr uint32_t FP_DENORM_SHIFT = 4;
+  static constexpr uint32_t FP_DENORM_MASK = 0xFu << FP_DENORM_SHIFT;
+
+  /// STATUS.HALT. Bit 13 on every modelled architecture -- see StatusReg::HALT
+  /// in each arch's isa.h, which all spell it member<13, 13>.
+  static constexpr uint32_t kStatusInTgMask = 1u << 11;
+  static constexpr uint32_t kStatusPrivMask = 1u << 5;
+  static constexpr uint32_t kStatusFatalHaltMask = 1u << 23;
+  static constexpr uint32_t kStatusHaltMask = 1u << 13;
 
   bool dx10_clamp() const { return (mode_raw_ & DX10_CLAMP_BIT) != 0; }
+  bool ieee_mode() const { return (mode_raw_ & IEEE_BIT) != 0; }
   bool gpr_idx_en() const { return mode_has_gpr_idx_en_ && ((mode_raw_ & GPR_IDX_EN_BIT) != 0); }
   bool fp16_ovfl() const { return (mode_raw_ & FP16_OVFL_BIT) != 0; }
+
+  /// @brief Return MODE.CSP, the number of pending fork stack entries.
+  uint32_t cond_stack_ptr() const { return (mode_raw_ & CSP_MASK) >> CSP_SHIFT; }
+
+  /// @brief Set MODE.CSP, leaving every other MODE bit unchanged.
+  /// @param csp New stack depth; only the lowest 3 bits are used.
+  void set_cond_stack_ptr(uint32_t csp) {
+    set_mode_raw((mode_raw_ & ~CSP_MASK) | (csp << CSP_SHIFT));
+  }
+
+  /// @brief Set MODE.FP_ROUND (bits 3:0) from a packed 4-bit value,
+  /// leaving every other MODE bit unchanged.
+  /// @param val Packed rounding modes; only the lowest 4 bits are used.
+  void set_fp_round_mode(uint32_t val) {
+    set_mode_raw((mode_raw_ & ~FP_ROUND_MASK) | (val & FP_ROUND_MASK));
+  }
+
+  /// @brief Set MODE.FP_DENORM (bits 7:4) from a packed 4-bit value,
+  /// leaving every other MODE bit unchanged.
+  /// @param val Packed denorm modes; only the lowest 4 bits are used.
+  void set_fp_denorm_mode(uint32_t val) {
+    set_mode_raw((mode_raw_ & ~FP_DENORM_MASK) | ((val << FP_DENORM_SHIFT) & FP_DENORM_MASK));
+  }
+
   uint32_t fp_round_mode_f32() const { return mode_raw_ & 0x3u; }
   uint32_t fp_round_mode_f16_f64() const { return (mode_raw_ >> 2) & 0x3u; }
-  uint32_t fp_denorm_mode_f32() const { return (mode_raw_ >> 4) & 0x3u; }
-  uint32_t fp_denorm_mode_f16_f64() const { return (mode_raw_ >> 6) & 0x3u; }
-  uint32_t gpr_idx_offset() const { return m0_ & 0xFF; }
-  uint32_t gpr_idx_mode() const { return (m0_ >> 8) & 0xF; }
+  uint32_t fp_denorm_mode_f32() const { return (mode_raw_ >> FP_DENORM_SHIFT) & 0x3u; }
+  uint32_t fp_denorm_mode_f16_f64() const { return (mode_raw_ >> (FP_DENORM_SHIFT + 2)) & 0x3u; }
+  uint32_t gpr_idx_offset() const { return m0() & 0xFF; }
+  uint32_t gpr_idx_mode() const { return (m0() >> 12) & 0xF; }
 
   /// @brief Return the per-wavefront scratch (private segment) base address.
   /// @returns Byte address in GPU memory where this wavefront's scratch starts.
-  uint64_t scratch_base() const { return scratch_base_; }
+  uint64_t scratch_base() const { return read_sgpr_pair(scratch_base_); }
 
   /// @brief Set the per-wavefront scratch base address.
   /// @param val Scratch base byte address (set at dispatch by CP).
-  void set_scratch_base(uint64_t val) { scratch_base_ = val; }
+  void set_scratch_base(uint64_t val) { write_sgpr_pair(scratch_base_, val); }
 
   /// @brief Return the per-lane private scratch allocation size in bytes.
   uint32_t scratch_lane_size() const { return scratch_lane_size_; }
@@ -273,15 +697,43 @@ public:
   /// @brief Set the per-lane private scratch allocation size in bytes.
   void set_scratch_lane_size(uint32_t val) { scratch_lane_size_ = val; }
 
+  /// @brief Return this wave's scratch scoreboard id (its slot in the queue's
+  /// scratch allocation). rocm-dbgapi multiplies it by COMPUTE_TMPRING_SIZE's
+  /// per-wave size to locate each wave's private memory.
+  uint32_t scratch_scoreboard_id() const { return scratch_scoreboard_id_; }
+
+  /// @brief Set this wave's scratch scoreboard id (set at dispatch by the CP).
+  void set_scratch_scoreboard_id(uint32_t val) { scratch_scoreboard_id_ = val; }
+
+  /// @brief Return the physical shader engine containing this wave.
+  uint32_t shader_engine_id() const { return shader_engine_id_; }
+
+  /// @brief Set the physical shader engine containing this wave.
+  void set_shader_engine_id(uint32_t val) { shader_engine_id_ = val; }
+
   uint64_t shared_aperture_base() const { return shared_aperture_base_; }
   uint64_t shared_aperture_limit() const { return shared_aperture_limit_; }
   uint64_t private_aperture_base() const { return private_aperture_base_; }
+  bool flat_pointer32() const { return flat_pointer32_; }
   uint64_t private_aperture_limit() const { return private_aperture_limit_; }
-  void set_apertures(uint64_t sb, uint64_t sl, uint64_t pb, uint64_t pl) {
+  bool use_wave_apertures() const { return flat_pointer32_ || aperture_override_; }
+  void set_apertures(uint64_t sb, uint64_t sl, uint64_t pb, uint64_t pl, bool override_launch) {
+    aperture_override_ = override_launch;
     shared_aperture_base_ = sb;
     shared_aperture_limit_ = sl;
     private_aperture_base_ = pb;
     private_aperture_limit_ = pl;
+  }
+
+  /// Diagnostic readiness is independent of eager functional writeback.
+  bool memory_wait_checks_enabled() const { return memory_wait_checks_enabled_; }
+  const MemoryWaitShadow &memory_wait_shadow() const { return memory_wait_shadow_; }
+  MemoryWaitScoreboard *memory_wait_scoreboard() const { return memory_wait_scoreboard_.get(); }
+  MemoryWaitScoreboard &ensure_memory_wait_scoreboard() {
+    assert(memory_wait_checks_enabled_ && "memory wait checking is disabled");
+    if (!memory_wait_scoreboard_)
+      memory_wait_scoreboard_ = std::make_unique<MemoryWaitScoreboard>(memory_wait_shadow_);
+    return *memory_wait_scoreboard_;
   }
 
   /// @brief Return the wait counters for outstanding memory operations.
@@ -294,125 +746,35 @@ public:
   /// @brief Retire one outstanding wait-counter operation and wake the wave if ready.
   void release_wait_counter(WaitCounterType type);
 
-  /// @brief Set the s_waitcnt target thresholds and stall if not yet satisfied.
-  ///
-  /// @details Used by GFX9 (CDNA1-4), GFX10 (RDNA1/2), and GFX11 (RDNA3/3.5)
-  /// for the monolithic S_WAITCNT instruction.  Sets vmcnt, lgkmcnt, expcnt
-  /// thresholds and transitions to WAITCNT if any counter currently exceeds
-  /// its target.
-  /// @param vmcnt VM counter threshold.
-  /// @param lgkmcnt LGKM counter threshold.
-  /// @param expcnt Export counter threshold.
+  /// Thresholds installed by the current wait instruction.
   const WaitTarget &wait_target() const { return wait_target_; }
 
+  /// Install the thresholds of the current wait instruction. Unspecified
+  /// counters use their no-wait values, even if a previous wait used them.
+  void wait_for(WaitTarget target) {
+    wait_target_ = target;
+    if (!wait_satisfied())
+      set_state(WfState::WAITCNT);
+  }
+
+  /// Wait for every modeled memory pipeline, including stores and async DMA.
+  void set_wait_all() {
+    wait_for({.vmcnt = 0,
+              .lgkmcnt = 0,
+              .expcnt = 0,
+              .vscnt = 0,
+              .dscnt = 0,
+              .kmcnt = 0,
+              .tensorcnt = 0,
+              .asynccnt = 0,
+              .samplecnt = 0,
+              .bvhcnt = 0});
+  }
+
+  /// Install the monolithic S_WAITCNT thresholds for GFX9 through GFX11.
+  /// This resets VSCNT and every split counter to its no-wait value.
   void set_wait_target(uint8_t vmcnt, uint8_t lgkmcnt, uint8_t expcnt) {
-    wait_target_.vmcnt = vmcnt;
-    wait_target_.lgkmcnt = lgkmcnt;
-    wait_target_.expcnt = expcnt;
-    if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
-  }
-
-  /// @brief Set the VSCNT target (GFX10 S_WAITCNT_VSCNT).
-  void set_wait_target_vscnt(uint8_t threshold) {
-    wait_target_.vscnt = threshold;
-    if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
-  }
-
-  /// @brief Set the LOADCNT target (GFX11+ S_WAITCNT_VMCNT / S_WAIT_LOADCNT).
-  void set_wait_target_loadcnt(uint8_t threshold) {
-    wait_target_.vmcnt = threshold;
-    if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
-  }
-
-  /// @brief Set the STORECNT target (GFX11+ S_WAITCNT_VSCNT / S_WAIT_STORECNT).
-  void set_wait_target_storecnt(uint8_t threshold) {
-    wait_target_.vscnt = threshold;
-    if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
-  }
-
-  /// @brief Set the DSCNT target (GFX11+ S_WAITCNT_LGKMCNT / S_WAIT_DSCNT).
-  void set_wait_target_dscnt(uint8_t threshold) {
-    wait_target_.dscnt = threshold;
-    if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
-  }
-
-  /// @brief Set the KMCNT target (GFX11+ S_WAIT_KMCNT).
-  void set_wait_target_kmcnt(uint8_t threshold) {
-    wait_target_.kmcnt = threshold;
-    if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
-  }
-
-  /// @brief Set the TENSORCNT target (GFX12.5 S_WAIT_TENSORCNT).
-  void set_wait_target_tensorcnt(uint8_t threshold) {
-    wait_target_.tensorcnt = threshold;
-    if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
-  }
-
-  /// @brief Set the ASYNCCNT target (GFX12.5 S_WAIT_ASYNCCNT).
-  void set_wait_target_asynccnt(uint8_t threshold) {
-    wait_target_.asynccnt = threshold;
-    if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
-  }
-
-  /// @brief Set combined STORECNT + DSCNT targets (GFX12 S_WAIT_STORECNT_DSCNT).
-  void set_wait_target_storecnt_dscnt(uint8_t storecnt, uint8_t dscnt) {
-    wait_target_.vscnt = storecnt;
-    wait_target_.dscnt = dscnt;
-    if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
-  }
-
-  /// @brief Set combined LOADCNT + DSCNT targets (GFX12 S_WAIT_LOADCNT_DSCNT).
-  void set_wait_target_loadcnt_dscnt(uint8_t loadcnt, uint8_t dscnt) {
-    wait_target_.vmcnt = loadcnt;
-    wait_target_.dscnt = dscnt;
-    if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
-  }
-
-  /// @brief Set a single split-wait counter threshold by name.
-  ///
-  /// Used by the generated S_WAIT_* / S_WAITCNT_* instruction execute()
-  /// bodies.  Maps the instruction's semantic name to the correct target.
-  void set_wait_counter(const char *counter_name, uint16_t threshold) {
-    using namespace std::string_view_literals;
-    std::string_view name{counter_name};
-    auto t = static_cast<uint8_t>(threshold);
-    if (name == "wait_loadcnt")
-      set_wait_target_loadcnt(t);
-    else if (name == "wait_storecnt")
-      set_wait_target_storecnt(t);
-    else if (name == "wait_dscnt")
-      set_wait_target_dscnt(t);
-    else if (name == "wait_kmcnt")
-      set_wait_target_kmcnt(t);
-    else if (name == "wait_tensorcnt")
-      set_wait_target_tensorcnt(t);
-    else if (name == "wait_asynccnt")
-      set_wait_target_asynccnt(t);
-    else if (name == "wait_expcnt") {
-      wait_target_.expcnt = static_cast<uint8_t>(threshold & 0x07);
-      if (!wait_satisfied())
-        state_ = WfState::WAITCNT;
-    } else if (name == "wait_samplecnt" || name == "wait_bvhcnt") {
-      wait_target_.vmcnt = t; // map to vmcnt
-      if (!wait_satisfied())
-        state_ = WfState::WAITCNT;
-    } else if (name == "wait_loadcnt_dscnt") {
-      set_wait_target_loadcnt_dscnt(static_cast<uint8_t>((threshold >> 8) & 0x3F),
-                                    static_cast<uint8_t>(threshold & 0x3F));
-    } else if (name == "wait_storecnt_dscnt") {
-      set_wait_target_storecnt_dscnt(static_cast<uint8_t>((threshold >> 8) & 0x3F),
-                                     static_cast<uint8_t>(threshold & 0x3F));
-    }
+    wait_for({.vmcnt = vmcnt, .lgkmcnt = lgkmcnt, .expcnt = expcnt});
   }
 
   /// @brief Check whether all wait counter thresholds are satisfied.
@@ -432,34 +794,430 @@ public:
     set_status_raw(val ? (s | 1u) : (s & ~1u));
   }
 
+  /// @brief STATUS.HALT, the architectural "this wave is halted" bit.
+  /// @details Bit 13 on every architecture this emulator models (StatusReg::HALT
+  /// in each arch's isa.h). s_sendmsghalt sets it and s_rfe reads it to decide
+  /// whether the wave stays stopped on the way out of the trap handler, so it is
+  /// live wave state that a debugger resume has to clear -- not a private flag.
+  /// Named here so the bit position is written once instead of at each user.
+  bool status_halt() const { return (status_raw() & kStatusHaltMask) != 0; }
+
+  /// @brief Set or clear STATUS.HALT.
+  /// @param val New STATUS.HALT value.
+  void set_status_halt(bool val) {
+    const uint32_t s = status_raw();
+    set_status_raw(val ? (s | kStatusHaltMask) : (s & ~kStatusHaltMask));
+  }
+
   /// @brief Return the current execution state.
   /// @returns Current WfState.
   WfState state() const { return state_; }
 
   /// @brief Set the execution state.
   /// @param s New execution state.
-  void set_state(WfState s) { state_ = s; }
+  void set_state(WfState s) {
+    const bool was_active = !is_halted();
+    state_ = s;
+    if (was_active != !is_halted())
+      update_activity_counts(was_active, was_active && !debug_paused());
+  }
 
   /// @brief Check whether this wavefront slot is halted.
   /// @retval true Slot is halted and available for dispatch.
   /// @retval false Slot is active (running, waiting, or at a barrier).
   bool is_halted() const { return state_ == WfState::HALTED; }
 
+  /// @brief Warn about qualified ISA undefined behavior on the issuing thread.
+  void report_undefined_behavior(std::string_view reason) const;
+
+  /// @brief Record a fail-closed instruction execution error.
+  /// @details Execution callbacks use this for inputs whose architectural
+  /// behavior is not implemented, or for invalid register-view operations.
+  /// Callers must not treat it as a hardware trap. Detail must have static lifetime.
+  void report_instruction_execution_error(InstructionExecutionError error,
+                                          const char *detail = nullptr) const {
+    instruction_execution_error_ = error;
+    instruction_execution_error_detail_ = detail;
+  }
+
+  InstructionExecutionError instruction_execution_error() const {
+    return instruction_execution_error_;
+  }
+
+  const char *instruction_execution_error_detail() const {
+    return instruction_execution_error_detail_;
+  }
+
+  bool instruction_execution_failed() const {
+    return instruction_execution_error_ != InstructionExecutionError::None;
+  }
+
+  /// @brief Preserve the diagnostic name before a failed pipeline destroys its instruction.
+  void preserve_instruction_execution_error_mnemonic(std::string_view mnemonic) const {
+    instruction_execution_error_mnemonic_ = mnemonic;
+  }
+
+  std::string_view instruction_execution_error_mnemonic() const {
+    return instruction_execution_error_mnemonic_;
+  }
+
+  void clear_instruction_execution_error() {
+    instruction_execution_error_ = InstructionExecutionError::None;
+    instruction_execution_error_detail_ = nullptr;
+    instruction_execution_error_mnemonic_.clear();
+  }
+
+  struct LdsSourceRead {
+    uint32_t address;
+    uint32_t bytes;
+  };
+
+  void begin_instruction_execution() {
+    clear_instruction_execution_error();
+    lds_source_read_.bytes = 0;
+    exec_written_words_ = 0;
+  }
+
+  /// EXEC words actually written by this instruction, even when the values agree.
+  std::optional<RegisterRef> instruction_exec_write() const {
+    if (!exec_written_words_)
+      return std::nullopt;
+    return RegisterRef{RegClass::EXEC, static_cast<uint16_t>(exec_written_words_ == 2),
+                       static_cast<uint8_t>(exec_written_words_ == 3 ? 2 : 1)};
+  }
+
+  /// The GFX10 direct operand broadcasts one range. Repeated lane evaluations
+  /// describe the same synchronous read to after-execute observers.
+  void record_lds_source_read(uint32_t address, uint32_t bytes) const {
+    lds_source_read_ = {address, bytes};
+  }
+  LdsSourceRead lds_source_read() const { return lds_source_read_; }
+
+  // -- KFD debugger (trap) state --
+  //
+  // These model the wave-level state the AMD trap handler maintains for
+  // rocm-dbgapi: the trap temporary registers (TTMP0-15), the trap status
+  // register (TRAPSTS), and the debug halt/single-step bits.
+
+  /// @brief Read a trap temporary register (TTMP0-15).
+  uint32_t ttmp(uint32_t idx) const { return idx < 16 ? ttmp_[idx] : 0; }
+
+  /// @brief Write a trap temporary register (TTMP0-15).
+  void set_ttmp(uint32_t idx, uint32_t val) {
+    if (idx < 16)
+      ttmp_[idx] = val;
+  }
+
+  void delay_nop_issue(uint32_t extra_cycles) {
+    nop_ready_cycle_ = shader_cycles() + extra_cycles + 1;
+  }
+
+  /// @brief Cycles this wave still owes an in-flight s_sleep.
+  /// @details S_SLEEP is a delay and nothing else: it has no register result,
+  /// so retiring it in a single step gives it no architectural effect at all.
+  /// A spin loop then runs at full speed and spends its time spread evenly
+  /// over its own instructions rather than parked at the sleep, which changes
+  /// where an asynchronous debugger suspend lands inside it.
+  uint32_t sleep_cycles() const { return sleep_cycles_; }
+  void set_sleep_cycles(uint32_t cycles) { sleep_cycles_ = cycles; }
+  static constexpr bool supports_sleep_wakeup_credit(rj_code_arch_t arch) {
+    return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+  }
+  bool supports_sleep_wakeup_credit() const { return supports_sleep_wakeup_credit(cu().arch()); }
+  bool sleep_wakeup() const { return sleep_wakeup_; }
+  void set_sleep_wakeup(bool credit) { sleep_wakeup_ = credit; }
+  void issue_sleep_with_credit(uint32_t delay) {
+    // A failed S_SLEEP_VAR operand read must leave its one-shot credit intact.
+    if (instruction_execution_failed())
+      return;
+    sleep_cycles_ = sleep_wakeup_ ? 0 : delay;
+    sleep_wakeup_ = false;
+  }
+  static constexpr uint32_t kSleepForever = UINT32_MAX;
+  void tick_sleep() {
+    if (sleep_cycles_ != kSleepForever)
+      --sleep_cycles_;
+  }
+  bool shader_can_write_ttmp() const {
+    return in_trap_handler() || (status_raw() & kStatusPrivMask);
+  }
+
+  /// @brief Whether the wave is currently fetching from its configured TBA.
+  bool in_trap_handler() const { return in_trap_handler_; }
+  void set_in_trap_handler(bool value);
+  void return_from_trap();
+  bool shader_can_access_ttmp() const {
+    const auto arch = cu().arch();
+    return (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4 &&
+            arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5) ||
+           in_trap_handler() || (status_raw() & kStatusPrivMask);
+  }
+  void set_user_priority(uint32_t priority) {
+    set_status_raw((status_raw() & ~(3u << 3)) | ((priority & 3u) << 3));
+  }
+
+  bool trap_interrupt_sent() const { return trap_interrupt_sent_; }
+  void set_trap_interrupt_sent(bool value) { trap_interrupt_sent_ = value; }
+
+  uint64_t trap_queue_exception_status() const { return trap_queue_exception_status_; }
+  void add_trap_queue_exception_status(uint64_t status) { trap_queue_exception_status_ |= status; }
+  uint64_t trap_runtime_exception_status() const { return trap_runtime_exception_status_; }
+  void add_trap_runtime_exception_status(uint64_t status) {
+    trap_runtime_exception_status_ |= status;
+  }
+  void clear_trap_exception_status() {
+    trap_queue_exception_status_ = 0;
+    trap_runtime_exception_status_ = 0;
+  }
+
+  /// @brief Whether the live STATUS.HALT was raised by the wave's own
+  /// s_sendmsghalt rather than by the trap handler's s_setreg.
+  ///
+  /// @details Both halt the wave inside the handler and both look identical in
+  /// the CWSR record, but a debugger resume has to treat them oppositely. The
+  /// ROCr handler's s_setreg raises HALT and *then* returns, so the bit is the
+  /// handler's request that the wave stay stopped: clearing it on a resume
+  /// loses the breakpoint. A wave halted at s_sendmsghalt has already reported
+  /// and is waiting to be let go, so leaving the bit set is what strands it.
+  /// The record cannot tell them apart, so record the provenance here at the
+  /// point where it is still known.
+  bool self_halted() const { return self_halted_; }
+  void set_self_halted(bool value) { self_halted_ = value; }
+  uint32_t trap_saved_status() const { return trap_saved_status_; }
+  void set_trap_saved_status(uint32_t value) { trap_saved_status_ = value; }
+  uint64_t trap_saved_exec() const { return trap_saved_exec_; }
+  void set_trap_saved_exec(uint64_t value) { trap_saved_exec_ = value; }
+  void apply_trap_resume_exec(uint64_t value) {
+    if (value != trap_saved_exec_) {
+      trap_saved_exec_ = value;
+      trap_resume_exec_edited_ = true;
+    }
+  }
+
+  /// @brief Record the trap id supplied by hardware trap entry.
+  void set_trap_id(uint32_t value) { trap_id_ = value; }
+
+  /// @brief Read the trap status register (TRAPSTS / EXCP flags).
+  uint32_t trapsts() const { return trapsts_; }
+
+  /// Completing a faulting memory response latches MEM_VIOL independently of trap delivery.
+  void latch_memory_violation() { trapsts_ |= 1u << 8; }
+  /// A CDNA2 FLAT memory response latches TRAPSTS even when delivery is masked.
+  /// Sample the exception enable at completion; save the resume PC at trap entry.
+  void complete_flat_memory_violation() {
+    trapsts_ |= 1u << 8;
+    if ((mode_raw() & (1u << 20)) && !in_trap_handler())
+      pending_memory_trap_ = MemoryTrapDelivery::TrapShaderOnly;
+  }
+  /// A scratch B64 atomic raises an unmaskable aperture violation at VMEM completion.
+  void request_unmaskable_memory_trap() { pending_memory_trap_ = MemoryTrapDelivery::Unmaskable; }
+
+  /// @brief Write the trap status register.
+  void set_trapsts(uint32_t val) { trapsts_ = val; }
+
+  /// @brief Accept MEM_VIOL on an RDNA2 memory instruction's completion bus.
+  void record_rdna2_memory_violation() {
+    trapsts_ |= 1u << 8;
+    if (mode_raw() & kRdna2MemoryViolationEnable)
+      set_state(WfState::MEMORY_TRAP);
+  }
+
+  /// @brief EXCP causes raised by the instruction currently executing.
+  /// @details TRAPSTS.EXCP is a sticky accumulator: hardware records a cause
+  /// there and never clears it on its own, so it cannot say whether *this*
+  /// instruction raised the cause. Trap delivery depends on that, and on
+  /// hardware it depends only on the cause occurring while MODE.EXCP_EN has
+  /// the bit set -- not on the sticky bit changing. Cause classifiers report
+  /// here as well as into TRAPSTS so the CU has the transient mask.
+  uint32_t pending_alu_causes() const { return pending_alu_causes_; }
+
+  /// @brief Clear the transient mask, before executing the next instruction.
+  void clear_pending_alu_causes() { pending_alu_causes_ = 0; }
+
+  /// @brief Record EXCP causes raised by the instruction currently executing.
+  void raise_alu_causes(uint32_t causes) { pending_alu_causes_ |= causes; }
+
+  /// @brief Whether the debugger has stopped this wave (trapped or suspended).
+  /// @details A debug-halted wave keeps its slot and all register state; the
+  /// scheduler skips it so the CU can go quiescent without retiring the wave.
+  bool debug_halted() const { return debug_halted_; }
+  void set_debug_halted(bool v) {
+    const bool was_runnable = !is_halted() && !debug_paused();
+    debug_halted_ = v;
+    if (was_runnable != (!is_halted() && !debug_paused()))
+      update_activity_counts(!is_halted(), was_runnable);
+  }
+
+  /// @brief Whether KFD has temporarily suspended this wave's queue.
+  /// @details Queue suspension freezes execution for a stable CWSR snapshot,
+  /// but unlike debug_halted it does not imply an architectural stop reason.
+  bool debug_suspended() const { return debug_suspended_; }
+  void set_debug_suspended(bool v) {
+    const bool was_runnable = !is_halted() && !debug_paused();
+    debug_suspended_ = v;
+    if (was_runnable != (!is_halted() && !debug_paused()))
+      update_activity_counts(!is_halted(), was_runnable);
+  }
+  /// @brief Runtime-suspended: the queue's queue_percentage went to zero.
+  /// @details A separate reason from the debugger's, because the two overlap.
+  /// Sharing one bit let a runtime resume clear a debugger pause, and a
+  /// debugger or CWSR resume clear an active runtime pause.
+  bool runtime_suspended() const { return runtime_suspended_; }
+  void set_runtime_suspended(bool v) {
+    const bool was_runnable = !is_halted() && !debug_paused();
+    runtime_suspended_ = v;
+    if (was_runnable != (!is_halted() && !debug_paused()))
+      update_activity_counts(!is_halted(), was_runnable);
+  }
+
+  /// @brief Whether a *debugger* currently holds this wave stopped.
+  /// @details Deliberately excludes runtime_suspended_: KFD uses this to decide
+  /// which waves it may serialize into a CWSR record, count in the SUSPEND /
+  /// RESUME_QUEUES stopped set, and refuse to checkpoint. A queue the runtime
+  /// throttled to queue_percentage 0 is none of those things, and folding it in
+  /// makes RESUME_QUEUES fail its stopped-vs-restored count and publishes waves
+  /// to rocm-dbgapi that no debugger ever stopped. Ask debug_paused() instead
+  /// when the question is "may the scheduler issue this wave".
+  bool debug_stopped() const { return debug_halted_ || debug_suspended_; }
+
+  /// @brief Whether any reason currently keeps this wave from being issued.
+  bool debug_paused() const {
+    if (debug_stopped() || runtime_suspended_)
+      return true;
+    const uint32_t status = status_raw();
+    if (!(status & (kStatusHaltMask | kStatusFatalHaltMask)))
+      return false;
+    return (status & kStatusFatalHaltMask) || (!in_trap_handler_ && !(status & kStatusPrivMask));
+  }
+  bool memory_trap_pending() const { return pending_memory_trap_ != MemoryTrapDelivery::None; }
+  bool fatal_exception_pending() const { return fatal_exception_pending_; }
+  void set_fatal_exception_pending(bool pending) { fatal_exception_pending_ = pending; }
+  bool fatal_exception_cwsr_valid() const { return fatal_exception_cwsr_valid_; }
+  void set_fatal_exception_cwsr_valid(bool valid) { fatal_exception_cwsr_valid_ = valid; }
+
+  /// @brief Whether a future debugger resume should request single-step mode.
+  bool debug_single_step() const { return single_step_; }
+  void set_debug_single_step(bool v) { single_step_ = v; }
+
+  /// @brief The trap id recorded by the last s_trap (breakpoint = 1).
+  uint32_t trap_id() const { return trap_id_; }
+
+  /// @brief Stable, unique debugger wave id (planted into TTMP4:5 on stop).
+  /// @details Zero until assigned. rocm-dbgapi reads this from the CWSR area as
+  /// the wave's identity, so it must be stable across re-serialization of the
+  /// same wave. Assigned lazily by the driver on the first stop.
+  uint64_t debug_wave_id() const { return debug_wave_id_; }
+  void set_debug_wave_id(uint64_t id) { debug_wave_id_ = id; }
+
+  /// @brief Read an SGPR relative to this wave's physical register base.
+  /// @details Reads storage without notifying execution plugins. Returns zero
+  /// when the resulting index is outside the physical register file.
+  uint32_t debug_read_sgpr(uint32_t reg) const;
+
+  /// Number of physical SGPRs backed by this live wave's simulator block.
+  uint32_t debug_sgpr_capacity() const;
+
+  /// @brief Read a VGPR lane relative to this wave's physical register base.
+  /// @details Reads storage without notifying execution plugins. Returns zero
+  /// for an index outside the physical register file or a lane outside the
+  /// stored lane range.
+  uint32_t debug_read_vgpr(uint32_t reg, uint32_t lane) const;
+
+  /// @brief Write one allocated SGPR from debugger state restore.
+  void debug_write_sgpr(uint32_t reg, uint32_t value);
+
+  /// @brief Write one allocated VGPR lane from debugger state restore.
+  void debug_write_vgpr(uint32_t reg, uint32_t lane, uint32_t value);
+
+  /// @brief Stop this wave in the debugger (models the trap handler entry).
+  /// @param trap_id Trap id from the s_trap immediate (breakpoint = 1).
+  /// @details Records the trap id and halts the wave for debugger inspection.
+  /// The PC is advanced past the s_trap by the caller (issue_instruction), so
+  /// the saved PC points just after the trap, matching the ROCr trap handler.
+  void debug_trap(uint32_t trap_id) {
+    if (supports_sleep_wakeup_credit())
+      set_sleep_cycles(0);
+    trap_id_ = trap_id;
+    set_debug_halted(true);
+    single_step_ = false;
+  }
+
+  /// @brief The wave state a debug stop mutates, captured so it can be undone.
+  ///
+  /// @details A driver stop is claimed before the CWSR record that describes it
+  /// can be written, because the serializer selects waves by debug_stopped().
+  /// If publication then fails there is no debugger-visible record, so the stop
+  /// has to be rolled back rather than left in place: a halted wave with no
+  /// record is one the debugger cannot see, resume, or be told about, and the
+  /// compute unit has already been told the access was handled.
+  struct DebugStopState {
+    uint32_t trapsts = 0;
+    uint32_t mode_raw = 0;
+    uint32_t gfx12_trap_ctrl_raw = 0;
+    uint32_t trap_id = 0;
+    uint32_t sleep_cycles = 0;
+    bool debug_halted = false;
+    bool single_step = false;
+    bool fatal_exception_pending = false;
+    bool fatal_exception_cwsr_valid = false;
+  };
+
+  /// @brief Capture the fields @ref restore_debug_stop_state puts back.
+  DebugStopState debug_stop_state() const {
+    return DebugStopState{trapsts_,
+                          mode_raw_,
+                          gfx12_trap_ctrl_raw_,
+                          trap_id_,
+                          sleep_cycles_,
+                          debug_halted_,
+                          single_step_,
+                          fatal_exception_pending_,
+                          fatal_exception_cwsr_valid_};
+  }
+
+  /// @brief Undo a debug stop captured by @ref debug_stop_state.
+  void restore_debug_stop_state(const DebugStopState &saved) {
+    trapsts_ = saved.trapsts;
+    set_mode_raw(saved.mode_raw);
+    gfx12_trap_ctrl_raw_ = saved.gfx12_trap_ctrl_raw;
+    trap_id_ = saved.trap_id;
+    sleep_cycles_ = saved.sleep_cycles;
+    set_debug_halted(saved.debug_halted);
+    single_step_ = saved.single_step;
+    fatal_exception_pending_ = saved.fatal_exception_pending;
+    fatal_exception_cwsr_valid_ = saved.fatal_exception_cwsr_valid;
+  }
+
   /// @brief Halt this wavefront and notify the CU for WG completion tracking.
   /// @details Transitions to HALTED and decrements the CU's per-WG refcount.
   /// When the refcount reaches zero (all WFs in the WG halted), the CU fires
   /// notify_wg_complete to the CP. This is the sole completion detection path —
   /// driven entirely by s_endpgm → end() → halt().
-  void halt();
+  /// @brief Whether halting should tell the command processor the workgroup
+  /// finished.
+  ///
+  /// @details Suppressed only when the CP is already tearing the queue down and
+  /// is holding, or about to take, hw_queue_mutex_. Notifying from there would
+  /// make the caller acquire hw_queue_mutex_ while it holds the CU's wave-state
+  /// lock, which is the reverse of the order handle_doorbell() uses
+  /// (hw_queue_mutex_ -> dispatch_wf -> wave_state_mutex_) and deadlocks the
+  /// two threads against each other.
+  enum class CpCompletionNotice : uint8_t { Send, Suppress };
 
-  /// @brief End program execution. If all memory ops are drained, halts
-  /// immediately. Otherwise, transitions to ENDING and lets the memory
-  /// pipeline drain remaining ops before halting.
-  void end() {
+  void halt(CpCompletionNotice notice = CpCompletionNotice::Send);
+
+  enum class EndReason : uint8_t { None, Normal, Saved, OrderedPsDone };
+  EndReason end_reason() const { return end_reason_; }
+  void end_ordered_ps(uint32_t instruction_size);
+
+  /// End program execution. Halt immediately if memory has drained, or enter
+  /// ENDING until the memory pipeline completes the outstanding work.
+  void end(EndReason reason = EndReason::Normal) {
+    end_reason_ = reason;
     if (wait_counters_.empty())
       halt();
     else
-      state_ = WfState::ENDING;
+      set_state(WfState::ENDING);
   }
 
   /// @brief Log instruction count at end for trace/debug.
@@ -471,33 +1229,106 @@ public:
   /// to defaults. Does not change permanent bindings (cu_, wf_id_) or ISA-fixed
   /// properties (wf_size_, max_sgprs_, max_vgprs_) or the status register.
   void reset() {
+    // A slot can be reused for a different dispatch and plugin selection.
+    // Retain the vector allocation, but never retain a published decision.
+    hot_hook_subscriptions_valid_ = false;
+    hot_hook_observer_count_ = 0;
     pc = 0;
     wg_id_ = 0;
+    wg_coord_ = {};
     dispatch_id_ = 0;
+    queue_packet_id_ = 0;
+    code_load_bias_ = 0;
+    wave_in_group_ = 0;
+    address_space_ = {};
+    vm_access_.reset();
+    execution_root_access_.reset();
+    execution_effect_possible_.reset();
+    execution_effect_marked_ = false;
     process_id_ = 0;
+    use_system_clock_ = false;
+    drm_shader_addresses_ = false;
+    scratch_lease_.reset();
+    pm4_failure_.reset();
     lds_base_ = 0;
+    lds_size_ = 0;
     lds_ = nullptr;
     cluster_rank_ = 0;
     cluster_size_ = 1;
     num_sgprs_ = 0;
     num_vgprs_ = 0;
+    accum_vgpr_base_ = 0;
     sgpr_alloc_ = {};
     vgpr_alloc_ = {};
+    wf_size_ = default_wf_size_;
     exec_ = lane_mask();
-    vcc_ = 0;
+    vgpr_write_mask_ = lane_mask();
+    vcc_ = {};
     m0_ = 0;
     set_mode_raw(0);
+    setreg_vgpr_msb_hazard_ = false;
     set_wave_sched_mode_raw(0);
-    scratch_base_ = 0;
+    gfx12_excp_flag_user_extra_raw_ = 0;
+    gfx12_trap_ctrl_raw_ = 0;
+    gfx1250_xnack_state_priv_raw_ = 0;
+    gfx1250_xnack_mask_raw_ = 0;
+    scratch_base_ = {};
     scratch_lane_size_ = 0;
+    scratch_scoreboard_id_ = 0;
+    shader_engine_id_ = 0;
     shared_aperture_base_ = 0;
     shared_aperture_limit_ = 0;
     private_aperture_base_ = 0;
     private_aperture_limit_ = 0;
+    flat_pointer32_ = false;
+    aperture_override_ = false;
+    named_barrier_id_ = 0;
+    barrier_complete_.fill(false);
+    waiting_barrier_bit_ = kNoBarrierWait;
+    gws_wait_rid_ = kNoGwsWait;
+    gws_wait_is_barrier_ = false;
+    gws_wait_generation_ = 0;
+    gws_wait_seq_ = 0;
+    gws_wait_steps_ = 0;
+    gws_wait_progress_ = 0;
+    if (memory_wait_scoreboard_)
+      memory_wait_scoreboard_->clear();
     wait_counters_ = {};
+    end_reason_ = EndReason::None;
     wait_target_ = {};
     ready_cycle_ = 0;
-    state_ = WfState::HALTED;
+    nop_ready_cycle_ = 0;
+    set_state(WfState::HALTED);
+    for (auto &t : ttmp_)
+      t = 0;
+    trapsts_ = 0;
+    pending_alu_causes_ = 0;
+    lds_source_read_ = {};
+    exec_written_words_ = 0;
+    pending_memory_trap_ = MemoryTrapDelivery::None;
+    instruction_execution_error_ = InstructionExecutionError::None;
+    instruction_execution_error_detail_ = nullptr;
+    instruction_execution_error_mnemonic_.clear();
+    sleep_cycles_ = 0;
+    sleep_wakeup_ = false;
+    in_trap_handler_ = false;
+
+    ib_sts2_gfx11_ = 0;
+    trap_interrupt_sent_ = false;
+    clear_trap_exception_status();
+    self_halted_ = false;
+    trap_saved_status_ = 0;
+    trap_saved_exec_ = 0;
+    trap_resume_exec_edited_ = false;
+    debug_halted_ = false;
+    debug_suspended_ = false;
+    runtime_suspended_ = false;
+    fatal_exception_pending_ = false;
+    fatal_exception_cwsr_valid_ = false;
+    single_step_ = false;
+    trap_id_ = 0;
+    debug_wave_id_ = 0;
+    queue_id_ = 0;
   }
 
 protected:
@@ -508,27 +1339,54 @@ protected:
   /// @param max_sgprs Maximum SGPRs per wavefront (ISA-fixed).
   /// @param max_vgprs Maximum VGPRs per wavefront (ISA-fixed).
   /// @param mode_has_gpr_idx_en Whether MODE bit 27 enables GPR indexing.
-  Wavefront(ComputeUnitCore &cu, uint32_t wf_id, uint32_t wf_size, uint32_t max_sgprs,
-            uint32_t max_vgprs, bool mode_has_gpr_idx_en)
-      : cu_(cu), cu_view_(cu), wf_id_(wf_id), wf_size_(wf_size), max_sgprs_(max_sgprs),
-        max_vgprs_(max_vgprs), mode_has_gpr_idx_en_(mode_has_gpr_idx_en) {}
+  Wavefront(ComputeUnitCore &cu, uint32_t wf_id, uint32_t default_wf_size, uint32_t max_wf_size,
+            uint32_t max_sgprs, uint32_t max_vgprs, bool mode_has_gpr_idx_en);
+
+  void update_activity_counts(bool was_active, bool was_runnable);
+  bool activity_tracked_ = false;
 
   ComputeUnitCore &cu_; ///< Parent CU (permanent, set at construction).
   InstructionComputeUnitView cu_view_;
-  uint32_t wf_id_ = 0;        ///< Slot index within the CU (permanent).
-  uint32_t wg_id_ = 0;        ///< Workgroup ID (set per dispatch).
-  uint32_t dispatch_id_ = 0;  ///< Dispatch ID (set per dispatch, unique per dispatch).
-  uint32_t process_id_ = 0;   ///< Owning process ID (PASID analog, set per dispatch).
+  uint32_t wf_id_ = 0;               ///< Slot index within the CU (permanent).
+  uint64_t dispatch_generation_ = 0; ///< Incremented whenever this slot is dispatched.
+  uint32_t wg_id_ = 0;               ///< Workgroup ID (set per dispatch).
+  std::array<uint32_t, 3> wg_coord_{};
+  uint32_t dispatch_id_ = 0;     ///< Dispatch ID (set per dispatch, unique per dispatch).
+  uint32_t queue_packet_id_ = 0; ///< Wrapped AQL ring slot of the dispatch (debugger correlation).
+  uint64_t code_load_bias_ = 0;  ///< GPU load bias for code-object-relative call targets.
+  uint32_t wave_in_group_ = 0;   ///< Position of this wave within its workgroup (debugger).
+  AddressSpaceHandle address_space_; ///< Generation-safe GPU address-space identity.
+  util::IntrusiveSharedPtr<const GpuVmAccessSnapshot>
+      vm_access_; ///< Dispatch-scoped immutable VM snapshot.
+  util::IntrusiveSharedPtr<const GpuVmAccessSnapshot>
+      execution_root_access_; ///< Root retained across revocation.
+  std::shared_ptr<std::atomic_bool> execution_effect_possible_;
+  bool execution_effect_marked_ = false;
+  uint32_t process_id_ = 0; ///< Dispatch VMID or PASID, selected by the identity kind.
+
+  bool use_system_clock_ = false; ///< Live queue timestamps use host monotonic time.
+  bool drm_shader_addresses_ = false;
+  std::shared_ptr<Pm4FailureState> pm4_failure_; ///< Null for AQL launches.
+  std::shared_ptr<uint32_t> scratch_lease_;      ///< Resident PM4 scratch slot.
+  uint32_t queue_id_ = 0; ///< KFD queue ID that launched this wave (debugger correlation).
+  mutable InstructionExecutionError instruction_execution_error_ = InstructionExecutionError::None;
+  uint8_t exec_written_words_ = 0;
+  mutable const char *instruction_execution_error_detail_ = nullptr;
+  mutable std::string instruction_execution_error_mnemonic_;
   uint32_t lds_base_ = 0;     ///< Per-WG LDS base offset (set per dispatch).
+  uint32_t lds_size_ = 0;     ///< Aligned per-WG LDS allocation size.
   Lds *lds_ = nullptr;        ///< Placement-selected LDS backing; nullptr means CU-local LDS.
   uint32_t cluster_rank_ = 0; ///< Workgroup rank inside the dispatch cluster.
   uint32_t cluster_size_ = 1; ///< Number of workgroups in the dispatch cluster.
 
-  uint32_t wf_size_ = 0;   ///< Lanes per wavefront (ISA-fixed).
-  uint32_t num_sgprs_ = 0; ///< Allocated scalar registers (set at dispatch).
-  uint32_t num_vgprs_ = 0; ///< Allocated vector registers (set at dispatch).
-  uint32_t max_sgprs_ = 0; ///< ISA maximum SGPRs per wavefront.
-  uint32_t max_vgprs_ = 0; ///< ISA maximum VGPRs per wavefront.
+  uint32_t wf_size_ = 0;         ///< Lanes in the current dispatched wavefront.
+  uint32_t default_wf_size_ = 0; ///< ISA default wavefront width.
+  uint32_t max_wf_size_ = 0;     ///< Maximum wavefront width supported by the ISA.
+  uint32_t num_sgprs_ = 0;       ///< Allocated scalar registers (set at dispatch).
+  uint32_t accum_vgpr_base_ = 0; ///< CDNA4 descriptor split. Zero for descriptor-less waves.
+  uint32_t num_vgprs_ = 0;       ///< Allocated vector registers (set at dispatch).
+  uint32_t max_sgprs_ = 0;       ///< ISA maximum SGPRs per wavefront.
+  uint32_t max_vgprs_ = 0;       ///< ISA maximum VGPRs per wavefront.
 
   RegAllocation sgpr_alloc_; ///< Slice in CU's SGPR file.
   RegAllocation vgpr_alloc_; ///< Slice in CU's VGPR file.
@@ -537,23 +1395,103 @@ private:
   ComputeUnitCore &raw_cu() { return cu_; }
   const ComputeUnitCore &raw_cu() const { return cu_; }
 
+  /// @brief Check only the scalar words consumed by a wave mask operation.
+  /// Raw access remains available for preserving the other half and observers.
+
   uint64_t lane_mask() const { return wf_size_ >= 64 ? ~0ULL : ((1ULL << wf_size_) - 1ULL); }
 
   uint64_t exec_ = ~0ULL;            ///< EXEC mask -- one bit per lane (1 = active).
-  uint64_t vcc_ = 0;                 ///< Vector condition code (per-lane comparison result).
-  uint32_t m0_ = 0;                  ///< M0 special register (misc addressing).
+  uint64_t vgpr_write_mask_ = ~0ULL; ///< Execution-local architectural and plugin write mask.
+  // A synthetic CU's register block can end within or before an alias.
+  // Keep the unbacked part of that register in the wave itself.
+  struct SgprPair {
+    uint64_t local = 0;
+    uint32_t physical_base = 0;
+    uint8_t backed_words = 0;
+  };
+  uint64_t read_sgpr_pair(const SgprPair &pair) const {
+    return pair.backed_words ? read_backed_sgpr_pair(pair) : pair.local;
+  }
+  void write_sgpr_pair(SgprPair &pair, uint64_t value) {
+    if (pair.backed_words)
+      write_backed_sgpr_pair(pair, value);
+    else
+      pair.local = value;
+  }
+  uint64_t read_backed_sgpr_pair(const SgprPair &pair) const;
+  void write_backed_sgpr_pair(SgprPair &pair, uint64_t value);
+  SgprPair vcc_;
+  uint32_t m0_ = 0; ///< M0 special register (misc addressing).
+  uint32_t ib_sts2_gfx11_ = 0;
+  uint32_t status_raw_ = 0;          ///< STATUS register state.
   uint32_t mode_raw_ = 0;            ///< MODE register state.
   bool mode_has_gpr_idx_en_ = false; ///< True when MODE[27] is GPR_IDX_EN.
-  uint8_t vgpr_msb_mode_ = 0;        ///< S_SET_VGPR_MSB layout for MODE VGPR_MSB bits.
-  uint32_t wave_sched_mode_raw_ = 0; ///< WAVE_SCHED_MODE register state.
-  uint64_t scratch_base_ = 0;        ///< Per-wavefront scratch (private segment) base address.
-  uint32_t scratch_lane_size_ = 0;   ///< Per-lane private scratch allocation size in bytes.
+  // Immutable across wave reuse and helper execution. Disabled accesses skip
+  // register indexing and shadow loads before consulting diagnostic state.
+  const bool memory_wait_checks_enabled_;
+  uint8_t vgpr_msb_mode_ = 0;           ///< S_SET_VGPR_MSB layout for MODE VGPR_MSB bits.
+  bool setreg_vgpr_msb_hazard_ = false; ///< Drop an immediately following S_SET_VGPR_MSB.
+  uint32_t wave_sched_mode_raw_ = 0;    ///< WAVE_SCHED_MODE register state.
+  uint32_t gfx12_excp_flag_user_extra_raw_ = 0;
+  uint32_t gfx12_trap_ctrl_raw_ = 0;
+  uint32_t gfx1250_xnack_state_priv_raw_ = 0;
+  uint32_t gfx1250_xnack_mask_raw_ = 0;
+  SgprPair scratch_base_;          ///< Per-wavefront scratch (private segment) base address.
+  uint32_t scratch_lane_size_ = 0; ///< Per-lane private scratch allocation size in bytes.
+  /// Scratch slot within @ref shader_engine_id_ (debugger private-memory mapping).
+  uint32_t scratch_scoreboard_id_ = 0;
+  uint32_t shader_engine_id_ = 0; ///< Physical shader engine used by the scratch mapping.
   uint64_t shared_aperture_base_ = 0;
   uint64_t shared_aperture_limit_ = 0;
   uint64_t private_aperture_base_ = 0;
   uint64_t private_aperture_limit_ = 0;
+  bool flat_pointer32_ = false;
+  bool aperture_override_ = false;
+  static constexpr uint8_t kNoBarrierWait = 0xff;
+  uint32_t named_barrier_id_ = 0; ///< Currently joined named barrier.
+  /// Completion bits: named, workgroup, workgroup trap, cluster, cluster trap.
+  std::array<bool, 5> barrier_complete_{};
+  uint8_t waiting_barrier_bit_ = kNoBarrierWait; ///< Completion bit awaited by split wait.
+  static constexpr uint32_t kNoGwsWait = 0xffffffff;
+  uint32_t gws_wait_rid_ = kNoGwsWait; ///< GWS resource id this wave is parked on.
+  bool gws_wait_is_barrier_ = false;   ///< Parked at a GWS barrier (vs a semaphore P).
+  uint64_t gws_wait_generation_ = 0;   ///< Resource release generation observed at park.
+  /// Device-global arrival order stamped on a parked semaphore P-waiter. The GWS
+  /// store releases a V/BR credit to the oldest queued waiter first (across all
+  /// CUs), so a later P cannot jump an earlier parked one (see GwsDevice). Unused
+  /// by barrier waiters (they wake via the release generation).
+  uint64_t gws_wait_seq_ = 0;
+  uint64_t gws_wait_progress_ = 0; ///< Last observed process instruction progress.
+  uint32_t gws_wait_steps_ =
+      0; ///< Unpaused CU steps since this process last executed an instruction.
   WfState state_ = WfState::HALTED; ///< Current execution state.
-  WaitCounters wait_counters_;      ///< Outstanding memory operation counters.
+  MemoryWaitShadow memory_wait_shadow_;
+  std::unique_ptr<MemoryWaitScoreboard> memory_wait_scoreboard_;
+  WaitCounters wait_counters_; ///< Outstanding memory operation counters.
+
+  uint32_t ttmp_[16] = {};          ///< Trap temporary registers (TTMP0-15).
+  uint32_t trapsts_ = 0;            ///< Trap status register (EXCP flags).
+  uint32_t pending_alu_causes_ = 0; ///< EXCP causes from the current instruction.
+  uint32_t sleep_cycles_ = 0;       ///< Cycles left on an in-flight S_SLEEP.
+  enum class MemoryTrapDelivery : uint8_t { None, TrapShaderOnly, Unmaskable };
+  MemoryTrapDelivery pending_memory_trap_ = MemoryTrapDelivery::None;
+  bool sleep_wakeup_ = false;
+  bool in_trap_handler_ = false;               ///< Executing the configured trap-handler shader.
+  bool trap_resume_exec_edited_ = false;       ///< Debugger supplied a new application EXEC.
+  bool trap_interrupt_sent_ = false;           ///< Handler issued MSG_INTERRUPT for this entry.
+  uint64_t trap_queue_exception_status_ = 0;   ///< Queue-exception bits reported by the handler.
+  uint64_t trap_runtime_exception_status_ = 0; ///< Bits already forwarded to ROCr.
+  bool self_halted_ = false;                   ///< STATUS.HALT came from this wave's s_sendmsghalt.
+  uint32_t trap_saved_status_ = 0; ///< Interrupted STATUS restored after handler completion.
+  uint64_t trap_saved_exec_ = 0; ///< Application EXEC published in the CWSR while the handler runs.
+  bool debug_halted_ = false;    ///< Stopped by the debugger (skipped by scheduler).
+  bool debug_suspended_ = false; ///< Queue-suspended for a stable CWSR snapshot.
+  bool runtime_suspended_ = false; ///< Queue-suspended by the runtime (queue_percentage 0).
+  bool fatal_exception_pending_ = false;
+  bool fatal_exception_cwsr_valid_ = false;
+  bool single_step_ = false;   ///< Execute one instruction on resume, then re-stop.
+  uint32_t trap_id_ = 0;       ///< Trap id from the last s_trap (breakpoint = 1).
+  uint64_t debug_wave_id_ = 0; ///< Stable debugger wave id (TTMP4:5); 0 until assigned.
 
 public:
   uint32_t trace_inst_count_ = 0; ///< Debug: instruction count for trace.
@@ -566,10 +1504,17 @@ public:
     assert(slot < plugin_states_.size());
     return plugin_states_[slot].get();
   }
+  bool has_plugin_state(uint32_t slot) const {
+    return slot < plugin_states_.size() && plugin_states_[slot] != nullptr;
+  }
   void set_plugin_state(uint32_t slot, std::unique_ptr<WavefrontState> s) {
     if (plugin_states_.size() <= slot)
       plugin_states_.resize(slot + 1);
     plugin_states_[slot] = std::move(s);
+  }
+  void clear_plugin_state(uint32_t slot) {
+    if (slot < plugin_states_.size())
+      plugin_states_[slot].reset();
   }
 
 private:
@@ -578,58 +1523,96 @@ private:
   // const (it doesn't alter GPU state), but plugins need to update their own
   // tracking during reads.
   mutable std::vector<std::unique_ptr<WavefrontState>> plugin_states_;
+  // ExecutionPluginGroup publishes one stable hot-hook decision per plugin
+  // after all wave-dispatch callbacks have completed. Storage is retained
+  // across slot reuse to avoid allocation on every dispatched wave.
+  std::vector<uint8_t> hot_hook_subscriptions_;
+  uint32_t hot_hook_observer_count_ = 0;
+  bool hot_hook_subscriptions_valid_ = false;
+  mutable bool observing_lds_direct_read_ = false;
   uint64_t ready_cycle_ = 0;
-  WaitTarget wait_target_; ///< Current s_waitcnt thresholds.
+  uint64_t nop_ready_cycle_ = 0;
+  EndReason end_reason_ = EndReason::None;
+  WaitTarget wait_target_;                  ///< Current s_waitcnt thresholds.
+  mutable LdsSourceRead lds_source_read_{}; ///< Valid for one instruction when bytes is nonzero.
 
+  friend class ::rocjitsu::config::Gfx10CheckpointResources;
+  friend class ::rocjitsu::config::Gfx10CheckpointScheduler;
   friend class ComputeUnitCore; // CU sets allocation fields during dispatch.
+  friend class GwsDevice;       // Device-global GWS store parks/wakes this wave.
+  friend class ::rocjitsu::ExecutionPluginGroup;
+  // Reads VCC and FLAT_SCRATCH storage inline for self-contained plugins (see
+  // RegisterAccess::read_scalar_unobserved()).
+  friend class RegisterAccess;
 
   // Memory pipelines complete deferred VM loads into physical SGPR/VGPR
   // storage. They intentionally bypass instruction read-observation because
   // completion writes produced memory results rather than instruction source
   // reads.
+  friend class MemoryPipeline;
   friend class GlobalMemPipeline;
   friend class LocalMemPipeline;
   friend class ScalarMemPipeline;
 };
 
-inline uint32_t apply_gpr_idx(const Wavefront &wf, uint32_t vgpr_off, bool is_dst) {
-  uint32_t mode = wf.gpr_idx_mode();
-  if ((!is_dst && (mode & 0x7)) || (is_dst && (mode & 0x8)))
-    return vgpr_off + wf.gpr_idx_offset();
-  return vgpr_off;
+template <typename Inst> inline void execute_with_empty_memory_mask(Inst &inst, Wavefront &wf) {
+  // The normal memory issue path captures the empty mask, addressing mode and counter.
+  class RestoreExec {
+  public:
+    explicit RestoreExec(Wavefront &wave) : wave_(wave), saved_(wave.exec_raw()) {
+      wave_.set_exec_raw(0);
+    }
+    ~RestoreExec() { wave_.set_exec_raw(saved_); }
+
+  private:
+    Wavefront &wave_;
+    uint64_t saved_;
+  } restore(wf);
+  inst.execute_impl(wf);
 }
 
-/// @brief ISA-parameterized concrete wavefront with ISA-specific status register.
+/// @brief Return whether an M0 GPR_IDX selector enables one operand role.
+[[nodiscard]] constexpr bool gpr_idx_role_enabled(uint32_t mode, VgprMsbRole role) {
+  const std::optional<size_t> index = vgpr_msb_role_index(role);
+  return index && (mode & (1u << *index));
+}
+
+/// @brief Apply the wave's GPR_IDX offset to one logical VALU operand role.
+inline uint32_t apply_gpr_idx(const Wavefront &wf, uint32_t vgpr_off, VgprMsbRole role) {
+  const bool cdna2 = wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA2;
+  // Relative indexing applies to architectural VGPRs. Accumulator selectors
+  // retain their register number, including on ACCVGPR_MOV/READ/WRITE.
+  if (cdna2 && vgpr_off >= ACC_VGPR_OFFSET)
+    return vgpr_off;
+  const uint32_t offset = wf.gpr_idx_en() && gpr_idx_role_enabled(wf.gpr_idx_mode(), role)
+                              ? vgpr_off + wf.gpr_idx_offset()
+                              : vgpr_off;
+  // MI200 §3.6.1 redirects an out-of-allocation source to v0.
+  if (cdna2 && role != VgprMsbRole::Dst && role != VgprMsbRole::None &&
+      (offset >= ACC_VGPR_OFFSET || !wf.unified_vgpr_range_is_allocated(offset, 1)))
+    return 0;
+  return offset;
+}
+
+/// @brief ISA-parameterized concrete wavefront with fixed register limits.
 ///
-/// @details The Isa trait provides WF_SIZE, MAX_SGPRS_PER_WF, MAX_VGPRS_PER_WF, and StatusReg.
-/// Register storage lives in the parent ComputeUnit's physical register files;
-/// this class only adds the ISA-specific status register type.
+/// @details The Isa trait provides wave widths, register limits, and MODE capabilities.
+/// Register storage lives in the parent ComputeUnit's physical register files.
 ///
 /// @tparam Isa ISA traits struct satisfying the GpuIsa concept.
 template <GpuIsa Isa> class IsaWavefront final : public Wavefront {
 public:
-  using StatusType = typename Isa::StatusReg;
-
   /// @brief Construct a wavefront bound to a CU slot.
   /// @param cu Parent compute unit.
   /// @param wf_id Slot index within the CU.
   IsaWavefront(ComputeUnitCore &cu, uint32_t wf_id)
-      : Wavefront(cu, wf_id, Isa::WF_SIZE, Isa::MAX_SGPRS_PER_WF, Isa::MAX_VGPRS_PER_WF,
-                  Isa::MODE_HAS_GPR_IDX_EN) {}
+      : Wavefront(cu, wf_id, Isa::WF_SIZE, Isa::WF_SIZE_MAX, Isa::MAX_SGPRS_PER_WF,
+                  Isa::MAX_VGPRS_PER_WF, Isa::MODE_HAS_GPR_IDX_EN) {}
 
-  /// @brief Return the raw status register value.
-  /// @returns Raw status register value.
-  uint32_t status_raw() const override { return static_cast<uint32_t>(status); }
-
-  /// @brief Set the raw status register value.
-  /// @param[in] val New raw status register value.
-  void set_status_raw(uint32_t val) override { status = val; }
-
-  /// @brief ISA-specific status register (SCC, EXECZ, VCCZ, HALT, etc.).
-  StatusType status{0};
+  util::FailureOr<std::string>
+  disassemble_instruction(std::span<const uint32_t> encoding, uint64_t pc,
+                          util::DiagnosticEmitter diagnostic = {}) const override;
 };
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_WAVEFRONT_H_

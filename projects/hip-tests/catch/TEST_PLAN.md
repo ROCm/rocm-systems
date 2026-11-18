@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 604 | 604 | 0 |
-| **total** | **604** | **604** | **0** |
+| `contract` | 654 | 654 | 0 |
+| **total** | **654** | **654** | **0** |
 
 ## Tier: `contract`
 
@@ -135,11 +135,25 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_Copy3D_HipMemcpy3D_Default_HostDeviceRoundTripsExtent` | hipMemcpy3D | a full-extent H2D then D2H 3D copy round-trips all bytes unchanged |
 | `Contract_Copy3D_HipMemcpy3D_Default_SingleSliceRoundTripsBytes` | hipMemcpy3D | a single-slice (depth=1) H2D then D2H 3D copy round-trips that slice's bytes |
 
-### `device` (7 cases)
+### `device` (21 cases)
 
 | Case | API | Asserts |
 |---|---|---|
+| `Contract_Device_HipDeviceFlushGPUDirectRDMAWrites_InvalidScope_IsRejected` | hipDeviceFlushGPUDirectRDMAWrites | an out-of-range scope is rejected as an invalid argument |
+| `Contract_Device_HipDeviceFlushGPUDirectRDMAWrites_InvalidTarget_IsRejected` | hipDeviceFlushGPUDirectRDMAWrites | an out-of-range target is rejected as an invalid argument |
+| `Contract_Device_HipDeviceFlushGPUDirectRDMAWrites_ToAllDevices_AcceptedOrUnsupported` | hipDeviceFlushGPUDirectRDMAWrites | a flush to all-devices scope is accepted or reports unsupported |
+| `Contract_Device_HipDeviceFlushGPUDirectRDMAWrites_ToOwner_AcceptedOrUnsupported` | hipDeviceFlushGPUDirectRDMAWrites | a flush to owner scope is accepted or reports unsupported |
 | `Contract_Device_HipDeviceGetAttribute_WarpSize_MatchesProperties` | hipDeviceGetAttribute | hipDeviceAttributeWarpSize matches the warp size from hipGetDeviceProperties |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_CuCountType_IsAlwaysSupported` | hipDeviceGetExecAffinitySupport | CU-count affinity is supported on every AMD device |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_CuCountType_ReportsBooleanFlag` | hipDeviceGetExecAffinitySupport | a CU-count query reports a boolean flag or unsupported |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_CuGranularityType_ReportsBooleanFlag` | hipDeviceGetExecAffinitySupport | a CU-granularity query reports a boolean flag or unsupported |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_MaskGranularity_IsExactlyOneType` | hipDeviceGetExecAffinitySupport | exactly one masking granularity is supported |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_NegativeDevice_IsRejected` | hipDeviceGetExecAffinitySupport | a negative device ordinal is rejected as an invalid device |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_NullOutPointer_IsRejected` | hipDeviceGetExecAffinitySupport | a null out-pointer is rejected as an invalid argument |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_OutOfRangeDevice_IsRejected` | hipDeviceGetExecAffinitySupport | an out-of-range device is rejected as an invalid device |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_OutOfRangeType_IsRejected` | hipDeviceGetExecAffinitySupport | an out-of-range type is rejected as an invalid argument |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_SentinelType_IsRejected` | hipDeviceGetExecAffinitySupport | the type sentinel is rejected as an invalid argument |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_WgpGranularityType_ReportsBooleanFlag` | hipDeviceGetExecAffinitySupport | a WGP-granularity query reports a boolean flag or unsupported |
 | `Contract_Device_HipGetDeviceProperties_GetProperties_SucceedsForCurrentDevice` | hipGetDeviceProperties | succeeds in populating properties for the current device |
 | `Contract_Device_HipGetDeviceProperties_MultiProcessorCount_IsPositive` | hipGetDeviceProperties | reported multiprocessor count is positive |
 | `Contract_Device_HipGetDeviceProperties_Name_IsNonEmpty` | hipGetDeviceProperties | the device name string is non-empty |
@@ -147,18 +161,19 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_Device_HipGetDeviceProperties_WarpSize_IsPositive` | hipGetDeviceProperties | reported warp size is positive |
 | `Contract_Device_HipGetDevice_CurrentOrdinal_IsWithinDeviceCount` | hipGetDevice | the current device ordinal is in range [0, device_count) |
 
-### `device_config` (6 cases)
+### `device_config` (7 cases)
 
 | Case | API | Asserts |
 |---|---|---|
 | `Contract_DeviceConfig_HipDeviceGetCacheConfig_Default_ReturnsEnumValue` | hipDeviceGetCacheConfig | the queried cache preference is one of the documented hipFuncCache_t enumerators |
-| `Contract_DeviceConfig_HipDeviceGetLimit_Default_ReportsStackAndHeapAndRejectsInvalid` | hipDeviceGetLimit | stack and heap limits resolve or report unsupported, and an out-of-range limit is not accepted |
+| `Contract_DeviceConfig_HipDeviceGetLimit_Default_ReportsStackAndHeapAndRejectsInvalid` | hipDeviceGetLimit | stack, heap, and persisting L2 limits resolve or report unsupported, and an out-of-range limit is not accepted |
 | `Contract_DeviceConfig_HipDeviceGetSharedMemConfig_Default_ReturnsEnumValue` | hipDeviceGetSharedMemConfig | when supported, reports one of the documented hipSharedMemConfig enumerators |
 | `Contract_DeviceConfig_HipDeviceSetCacheConfig_Default_IsAcceptedOrUnsupported` | hipDeviceSetCacheConfig | setting the cache preference either succeeds or reports NotSupported |
 | `Contract_DeviceConfig_HipDeviceSetLimit_Default_RoundTripsOrIsUnsupported` | hipDeviceSetLimit | setting the heap limit back to its current value succeeds or reports unsupported |
+| `Contract_DeviceConfig_HipDeviceSetLimit_PersistingL2_RoundTripsAndRejectsOverMax` | hipDeviceSetLimit | persisting L2 cache set/get round-trips, and exceeding the max is rejected |
 | `Contract_DeviceConfig_HipGetDeviceFlags_AndStreamPriorityRange_AreConsistent` | hipGetDeviceFlags | the schedule subfield is a documented mode and greatest stream priority <= least |
 
-### `device_identity` (7 cases)
+### `device_identity` (9 cases)
 
 | Case | API | Asserts |
 |---|---|---|
@@ -169,14 +184,18 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_DeviceIdentity_HipDeviceGetByPCIBusId_Default_RoundTripsWithGetPCIBusId` | hipDeviceGetByPCIBusId | the PCI bus id from hipDeviceGetPCIBusId round-trips back to the same device ordinal |
 | `Contract_DeviceIdentity_HipDeviceGetByPCIBusId_InvalidString_IsRejected` | hipDeviceGetByPCIBusId | empty and malformed PCI bus id strings are rejected with a non-success status |
 | `Contract_DeviceIdentity_HipDeviceGetByPCIBusId_NullArgs_AreRejected` | hipDeviceGetByPCIBusId | a null device out-pointer or null bus-id string is rejected with a non-success status |
+| `Contract_DeviceIdentity_HipDeviceGetLuid_Default_AcceptedOrUnsupported` | hipDeviceGetLuid | a well-formed query returns hipSuccess or the documented hipErrorNotSupported |
+| `Contract_DeviceIdentity_HipDeviceGetLuid_NullArgs_AreRejected` | hipDeviceGetLuid | a null luid or node-mask out-pointer is rejected with a non-success status |
 
-### `device_lifecycle` (5 cases)
+### `device_lifecycle` (7 cases)
 
 | Case | API | Asserts |
 |---|---|---|
 | `Contract_DeviceLifecycle_HipDevicePrimaryCtxReset_Default_LeavesDeviceUsable` | hipDevicePrimaryCtxReset | after resetting the primary context the device still serves fresh allocations |
 | `Contract_DeviceLifecycle_HipDevicePrimaryCtxSetFlags_Default_IsAcceptedOrInUse` | hipDevicePrimaryCtxSetFlags | setting primary-context flags is accepted or reports context-already-in-use |
 | `Contract_DeviceLifecycle_HipDeviceSetSharedMemConfig_Default_RoundTripsCurrentConfig` | hipDeviceSetSharedMemConfig | setting back the currently-reported shared-mem config is accepted or unsupported |
+| `Contract_DeviceLifecycle_HipInitDevice_Default_AcceptsVisibleDevice` | hipInitDevice | initializing a visible device with no flags is accepted or reported unsupported |
+| `Contract_DeviceLifecycle_HipInitDevice_InvalidDevice_IsRejected` | hipInitDevice | an out-of-range device ordinal is rejected with a defined error |
 | `Contract_DeviceLifecycle_HipSetDeviceFlags_Default_AcceptsCurrentFlags` | hipSetDeviceFlags | writing back the currently-active device flags is accepted or reported not-settable |
 | `Contract_DeviceLifecycle_HipSetValidDevices_Default_AcceptsFullDeviceList` | hipSetValidDevices | presenting the full set of visible device ordinals is accepted or reported unsupported |
 
@@ -372,7 +391,7 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Case | API | Asserts |
 |---|---|---|
-| `Contract_FuncAttributes_HipFuncGetAttribute_s_MatchesScalarGetAttribute` | hipFuncGetAttribute | scalar max-threads-per-block query agrees with the struct query for the same function |
+| `Contract_FuncAttributes_HipFuncGetAttribute_Scalar_MatchesScalarGetAttribute` | hipFuncGetAttribute | scalar max-threads-per-block query agrees with the struct query for the same function |
 | `Contract_FuncAttributes_HipFuncGetAttributes_Default_ReturnsSaneStruct` | hipFuncGetAttributes | populates a sane attribute struct with positive max-threads and non-negative resource/version fields |
 | `Contract_FuncAttributes_HipFuncGetAttributes_NullAttr_IsRejected` | hipFuncGetAttributes | a null output struct is rejected with a non-success status |
 | `Contract_FuncAttributes_HipFuncSetAttribute_MaxDynamicSharedMemory_IsAccepted` | hipFuncSetAttribute | an in-range max-dynamic-shared-memory hint is accepted |
@@ -404,7 +423,7 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Case | API | Asserts |
 |---|---|---|
-| `Contract_GraphCapture_HipStreamBeginCapture_dMemcpy_RoundTripsBytes` | hipStreamBeginCapture | a captured H2D/D2H memcpy graph, once instantiated and launched, round-trips bytes intact |
+| `Contract_GraphCapture_HipStreamBeginCapture_Memcpy_RoundTripsBytes` | hipStreamBeginCapture | a captured H2D/D2H memcpy graph, once instantiated and launched, round-trips bytes intact |
 | `Contract_GraphCapture_HipStreamEndCapture_BeginEndEmptyStream_ProducesGraph` | hipStreamEndCapture | begin/end capture over an empty stream produces a non-null graph |
 | `Contract_GraphCapture_HipStreamGetCaptureInfo_Default_ReturnsActiveState` | hipStreamGetCaptureInfo | reports Active status and a nonzero capture id while a stream is capturing |
 | `Contract_GraphCapture_HipStreamIsCapturing_Default_ReportsActiveDuringCapture` | hipStreamIsCapturing | reports capture status Active on a stream between begin and end capture |
@@ -465,6 +484,19 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_GraphHost_HipGraphAddHostNode_Default_InvokesCallbackOnLaunch` | hipGraphAddHostNode | a host node's callback runs exactly once when the instantiated graph is launched |
 | `Contract_GraphHost_HipGraphHostNodeGetParams_Default_RoundTripsFnAndUserData` | hipGraphHostNodeGetParams | retrieved host-node params round-trip the callback fn and userData pointers |
 | `Contract_GraphHost_HipGraphNodeGetType_NodeType_ReportsHost` | hipGraphNodeGetType | a node added via hipGraphAddHostNode reports type hipGraphNodeTypeHost |
+
+### `graph_id` (8 cases)
+
+| Case | API | Asserts |
+|---|---|---|
+| `Contract_GraphId_HipGraphExecGetId_NullArguments_ReturnInvalidValue` | hipGraphExecGetId | returns hipErrorInvalidValue when either argument is null |
+| `Contract_GraphId_HipGraphExecGetId_SameExecSameId_OtherExecOtherId` | hipGraphExecGetId | repeated calls return the same ID and different executable graphs have different IDs |
+| `Contract_GraphId_HipGraphGetId_NullArguments_ReturnInvalidValue` | hipGraphGetId | returns hipErrorInvalidValue when either argument is null |
+| `Contract_GraphId_HipGraphGetId_SameGraphSameId_OtherGraphOtherId` | hipGraphGetId | repeated calls return the same ID and different graphs have different IDs |
+| `Contract_GraphId_HipGraphNodeGetLocalId_NullArguments_ReturnInvalidValue` | hipGraphNodeGetLocalId | returns hipErrorInvalidValue when either argument is null |
+| `Contract_GraphId_HipGraphNodeGetLocalId_SameNodeSameId_OtherNodeOtherId` | hipGraphNodeGetLocalId | repeated calls return the same ID and different nodes have different IDs |
+| `Contract_GraphId_HipGraphNodeGetToolsId_NullArguments_ReturnInvalidValue` | hipGraphNodeGetToolsId | returns hipErrorInvalidValue when either argument is null |
+| `Contract_GraphId_HipGraphNodeGetToolsId_SameNodeSameId_OtherNodeOtherId` | hipGraphNodeGetToolsId | repeated calls return the same ID and different nodes have different IDs |
 
 ### `graph_instantiate_params` (2 cases)
 
@@ -696,15 +728,19 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_KernelNameRef_HipKernelNameRef_ByFunction_NamesResolvedKernel` | hipKernelNameRef | resolves a hipFunction_t (from hipGetFuncBySymbol) to a non-empty name mentioning the kernel identifier |
 | `Contract_KernelNameRef_HipKernelNameRef_NvidiaUnsupported_IsSkipped` | hipKernelNameRef | NVIDIA backend does not expose this API family; the contract is skipped until backend parity exists |
 
-### `kernel_object_attributes` (3 cases)
+### `kernel_object_attributes` (7 cases)
 
 | Case | API | Asserts |
 |---|---|---|
 | `Contract_KernelObjectAttributes_HipKernelGetAttribute_Default_ReturnsSaneValues` | hipKernelGetAttribute | reports a positive max-threads-per-block and non-negative static resource usage for a loaded kernel |
 | `Contract_KernelObjectAttributes_HipKernelGetParamInfo_Default_ReturnsFirstParamLayout` | hipKernelGetParamInfo | reports the first parameter at offset zero with size at least that of a device pointer |
+| `Contract_KernelObjectAttributes_HipKernelSetAttributeForDevice_NonCurrentDevice_PreservesCurrentAndReadsBack` | hipKernelSetAttributeForDevice | preserves current device and target value |
+| `Contract_KernelObjectAttributes_HipKernelSetAttributeForDevice_NvidiaPre128Unsupported_IsSkipped` | hipKernelSetAttributeForDevice | unavailable before CUDA 12.8 |
 | `Contract_KernelObjectAttributes_HipKernelSetAttribute_SetMaxDynamicSharedMemory_IsAcceptedOrUnsupported` | hipKernelSetAttribute | setting max dynamic shared memory to zero is either accepted or reported as unsupported, never another error |
+| `Contract_KernelObjectAttributes_HipKernelSetCacheConfig_NvidiaPre120Unsupported_IsSkipped` | hipKernelSetCacheConfig | unavailable before CUDA 12.0 |
+| `Contract_KernelObjectAttributes_HipKernelSetCacheConfig_Values_AreSupported` | hipKernelSetCacheConfig | all hipFuncCache_t values are supported and kernel |
 
-### `library` (14 cases)
+### `library` (21 cases)
 
 | Case | API | Asserts |
 |---|---|---|
@@ -720,6 +756,13 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_Library_HipLibraryGetKernel_Default_ResolvesKnownSymbol` | hipLibraryGetKernel | an existing symbol resolves to a non-null kernel handle |
 | `Contract_Library_HipLibraryGetKernel_LoadDataValidImage_CanResolveKernel` | hipLibraryGetKernel | a loaded valid image resolves a known kernel symbol to a non-null kernel handle |
 | `Contract_Library_HipLibraryGetKernel_UnknownSymbol_IsRejected` | hipLibraryGetKernel | resolving an undefined symbol fails with a non-success status instead of a bogus handle |
+| `Contract_Library_HipLibraryGetModule_Default_ModuleGlobalMatchesLibraryGlobal` | hipLibraryGetModule | a global resolved through the library and through its own module reports the same size |
+| `Contract_Library_HipLibraryGetModule_Default_ModuleResolvesAndLaunchesKernel` | hipLibraryGetModule | the returned module resolves a library kernel that launches and observably writes |
+| `Contract_Library_HipLibraryGetModule_Default_RepeatedQueryIsStable` | hipLibraryGetModule | repeated queries on one library return the same stable module handle |
+| `Contract_Library_HipLibraryGetModule_Default_ReturnsNonNullModule` | hipLibraryGetModule | a loaded library resolves to a non-null module handle |
+| `Contract_Library_HipLibraryGetModule_ModuleUnload_IsRejected` | hipLibraryGetModule | a module obtained from a library cannot be released with hipModuleUnload |
+| `Contract_Library_HipLibraryGetModule_NullLibrary_IsRejected` | hipLibraryGetModule | a null library handle is rejected with a non-success status |
+| `Contract_Library_HipLibraryGetModule_NullModuleOut_IsRejected` | hipLibraryGetModule | a null module out-parameter is rejected with a non-success status |
 | `Contract_Library_HipLibraryLoadData_FromRtc_Succeeds` | hipLibraryLoadData | a HIPRTC-produced code object loads into a non-null library handle and unloads cleanly |
 | `Contract_Library_HipLibraryLoadData_NullImage_IsRejected` | hipLibraryLoadData | rejects a null image with a non-success status rather than silently succeeding |
 
@@ -769,10 +812,11 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_MemAdviseV2_HipMemAdviseV2_SetReadMostly_IsAcceptedOrUnsupported` | hipMemAdvise_v2 | the location-based set-read-mostly hint on managed memory is accepted or reported unsupported |
 | `Contract_MemAdviseV2_HipMemPrefetchAsyncV2_PrefetchAsync_IsAcceptedOrUnsupported` | hipMemPrefetchAsync_v2 | a location-based prefetch either completes after stream sync or is reported unsupported |
 
-### `mem_batch_copy` (3 cases)
+### `mem_batch_copy` (4 cases)
 
 | Case | API | Asserts |
 |---|---|---|
+| `Contract_MemBatchCopy_HipExtMemcpyBatchAsync_TwoOps_RoundTripBytes` | hipExtMemcpyBatchAsync | a two-op batch with all extended parameters null (no asymmetric swap or wait/signal) and default attributes delivers each source to its destination after synchronize (or reports unsupported) |
 | `Contract_MemBatchCopy_HipMemcpyBatchAsync_NullDestination_IsRejected` | hipMemcpyBatchAsync | a batch with a null destination never returns hipSuccess (or reports unsupported) |
 | `Contract_MemBatchCopy_HipMemcpyBatchAsync_TwoOps_RoundTripBytes` | hipMemcpyBatchAsync | a two-op batch delivers each source to its matching destination after synchronize (or reports unsupported) |
 | `Contract_MemBatchCopy_HipMemcpyBatchAsync_WithAttributes_RoundTripBytes` | hipMemcpyBatchAsync | a per-copy attribute (access order, location hints) does not change the copied bytes (or reports unsupported) |
@@ -798,6 +842,15 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_MemBatchDiscard_HipMemPrefetchBatchAsync_NvidiaPrefetchBatchUnsupported_IsSkipped` | hipMemPrefetchBatchAsync | NVIDIA CUDA versions before 13.0 do not expose the batch prefetch API; the contract is skipped until backend parity exists |
 | `Contract_MemBatchDiscard_HipMemPrefetchBatchAsync_PrefetchBatch_IsAcceptedOrUnsupported` | hipMemPrefetchBatchAsync | prefetching a batch of managed ranges to the current device is accepted or reported unsupported |
 
+### `mem_copy_with_attributes` (4 cases)
+
+| Case | API | Asserts |
+|---|---|---|
+| `Contract_MemCopyWithAttributes_HipMemcpy3DWithAttributesAsync_HostDeviceHostRoundTrip_IsVisibleAfterSync` | hipMemcpy3DWithAttributesAsync | a single stream-ordered pointer copy round-trips bytes after stream sync |
+| `Contract_MemCopyWithAttributes_HipMemcpy3DWithAttributesAsync_NullOpAndReservedFlags_ReturnInvalidValue` | hipMemcpy3DWithAttributesAsync | a null operation pointer and a reserved nonzero flags value are rejected with hipErrorInvalidValue |
+| `Contract_MemCopyWithAttributes_HipMemcpyWithAttributesAsync_HostDeviceHostRoundTrip_IsVisibleAfterSync` | hipMemcpyWithAttributesAsync | a stream-ordered host->device->host copy round-trips bytes after stream sync |
+| `Contract_MemCopyWithAttributes_HipMemcpyWithAttributesAsync_NullAttributes_ReturnsInvalidValue` | hipMemcpyWithAttributesAsync | a null attributes pointer is rejected with hipErrorInvalidValue |
+
 ### `mem_location_pool` (4 cases)
 
 | Case | API | Asserts |
@@ -807,10 +860,11 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_MemLocationPool_HipMemGetMemPool_Default_ReturnsPoolForDeviceLocation` | hipMemGetMemPool | a location-based pool query returns a non-null pool for a valid device location |
 | `Contract_MemLocationPool_HipMemSetMemPool_Default_RoundTripsThroughGetMemPool` | hipMemSetMemPool | a pool set for a location round-trips through a subsequent hipMemGetMemPool query |
 
-### `mem_map_array` (2 cases)
+### `mem_map_array` (3 cases)
 
 | Case | API | Asserts |
 |---|---|---|
+| `Contract_MemMapArray_HipArrayGetSparseProperties_InvalidArgs_AreRejected` | hipArrayGetSparseProperties | rejects a null properties-out pointer, a null array handle, or a non-sparse array with a non-success status |
 | `Contract_MemMapArray_HipMemMapArrayAsync_NullMapList_IsRejected` | hipMemMapArrayAsync | rejects a null map-info list with a non-success status |
 | `Contract_MemMapArray_HipMemMapArrayAsync_ZeroCount_IsRejected` | hipMemMapArrayAsync | rejects a zero operation count with a non-success status |
 
@@ -892,10 +946,14 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_Module_HipModuleLoadData_FromRtc_Succeeds` | hipModuleLoadData | a HIPRTC-produced code object loads into a non-null module handle and unloads without error |
 | `Contract_Module_HipModuleLoadData_NullImage_IsRejected` | hipModuleLoadData | loading from a null image is rejected with a non-success status |
 
-### `module_exec` (8 cases)
+### `module_exec` (12 cases)
 
 | Case | API | Asserts |
 |---|---|---|
+| `Contract_ModuleExec_HipModuleEnumerateFunctions_Default_IncludesKnownSymbol` | hipModuleEnumerateFunctions | every enumerated function handle is non-null and includes the known module symbol |
+| `Contract_ModuleExec_HipModuleEnumerateFunctions_NullFunctions_IsRejected` | hipModuleEnumerateFunctions | a null functions out-pointer is rejected with a non-success status |
+| `Contract_ModuleExec_HipModuleEnumerateFunctions_NullModule_IsRejected` | hipModuleEnumerateFunctions | a null module handle is rejected with a non-success status |
+| `Contract_ModuleExec_HipModuleEnumerateFunctions_ZeroMax_LeavesBufferUntouched` | hipModuleEnumerateFunctions | enumerating with a max of zero writes nothing into the caller buffer |
 | `Contract_ModuleExec_HipModuleGetFunctionCount_Default_ReturnsPositiveCount` | hipModuleGetFunctionCount | a module defining at least one kernel reports a function count of at least one |
 | `Contract_ModuleExec_HipModuleGetFunctionCount_NullCount_IsRejected` | hipModuleGetFunctionCount | a null count out-pointer is rejected with a non-success status |
 | `Contract_ModuleExec_HipModuleLaunchCooperativeKernel_Default_WritesExpectedValue` | hipModuleLaunchCooperativeKernel | a cooperative launch of a module function executes and deterministically publishes the expected value |
@@ -1203,12 +1261,14 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_Vmm_HipMemMap_MapUnmap_SucceedsWhenSupported` | hipMemMap | mapping a handle into a reserved address range succeeds and unmaps cleanly when supported |
 | `Contract_Vmm_HipMemSetAccess_Default_AllowsRoundTripWhenSupported` | hipMemSetAccess | granting read-write access to mapped VMM memory allows a host round-trip through it |
 
-### `vmm_handle` (4 cases)
+### `vmm_handle` (6 cases)
 
 | Case | API | Asserts |
 |---|---|---|
 | `Contract_VmmHandle_HipMemExportToShareableHandle_ExportImportShareableHandle_RoundTrips` | hipMemExportToShareableHandle | an exported POSIX-fd shareable handle imports back into a usable allocation handle within the same process |
 | `Contract_VmmHandle_HipMemGetAllocationPropertiesFromHandle_GetAllocationProperties_RoundTripsFromHandle` | hipMemGetAllocationPropertiesFromHandle | properties queried from the handle reflect the pinned type and device location it was created with |
 | `Contract_VmmHandle_HipMemGetHandleForAddressRange_DmaBufFd_IsQueryableWhenSupported` | hipMemGetHandleForAddressRange | a dma-buf fd export yields a non-negative descriptor when supported, else reports non-success and skips |
+| `Contract_VmmHandle_HipMemGetHandleForAddressRange_HostPointer_ReturnsInvalidValue` | hipMemGetHandleForAddressRange | a pointer that is not a device allocation is rejected with hipErrorInvalidValue |
+| `Contract_VmmHandle_HipMemGetHandleForAddressRange_PcieMappingFlag_IsAcceptedOrReportsNotSupported` | hipMemGetHandleForAddressRange | a PCIe-mapped dma-buf export is accepted or reported unsupported, never rejected as an invalid argument |
 | `Contract_VmmHandle_HipMemRetainAllocationHandle_ByAddress_Succeeds` | hipMemRetainAllocationHandle | retaining the handle for a mapped address yields a usable handle releasable independently of the original |
 

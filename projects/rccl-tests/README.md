@@ -29,6 +29,13 @@ $ make MPI=1 NAME_SUFFIX=_mpi MPI_HOME=/path/to/mpi HIP_HOME=/path/to/hip NCCL_H
 
 This will generate test binaries with names such as `all_reduce_perf_mpi`.
 
+Set `DSO=1` to build and dynamically link `libverifiable.so` instead of
+statically linking the verification implementation:
+
+```shell
+$ make -j DSO=1 NCCL_HOME=/path/to/rccl
+```
+
 RCCL Tests can also be built using cmake. A typical sequence will be:
 
 ```shell
@@ -118,6 +125,35 @@ For MPI (using MPICH), you need to use a command similar to the following:
 mpirun.mpich -np 8 -env NCCL_DEBUG=VERSION -env HSA_NO_SCRATCH_RECLAIM=1 ./build/all_reduce_perf -b 8M -e 128M -i 8388608 -g 1 -d bfloat16
 ```
 
+#### Socket encryption (TLS)
+
+`NCCL_TESTS_TLS_PSK=<key>` makes every process call `ncclSetEncryption()` with this pre-shared key
+before the communicator is created, so RCCL's bootstrap, proxy and socket-transport TCP traffic is
+TLS-encrypted. The key must be at least 32 bytes and identical on all ranks, and RCCL must be
+built with `-DTLS_BACKEND=OPENSSL3` (otherwise communicator creation fails instead of falling back
+to plaintext). Requires RCCL 2.32 or newer, both at build time and at run time; with older
+headers or an older library the test exits with an error. The variable must reach every rank:
+if only some ranks have the key, bootstrap hangs instead of failing.
+
+```shell
+NCCL_TESTS_TLS_PSK=<key> mpirun -np 8 -x NCCL_TESTS_TLS_PSK ./build/all_reduce_perf -b 8 -e 128M -f 2
+```
+
+#### Grouped-broadcast (AllGatherV) mode
+
+`RCCL_TESTS_ALLGATHERV_ENABLE=1` makes `broadcast_perf` issue `nranks` broadcasts with distinct
+roots inside one `ncclGroupStart`/`ncclGroupEnd`, which RCCL fuses into a single AllGatherV ring
+kernel when `NCCL_ALLGATHERV_ENABLE=1` is also set. Each rank contributes `count/nranks` elements,
+receives the full `count`, and every receiver is validated.
+
+AllGatherV fusion requires RCCL 2.30.7 or newer; on older versions the grouped broadcasts simply
+run as individual broadcasts.
+
+```shell
+mpirun -np 8 -x RCCL_TESTS_ALLGATHERV_ENABLE=1 -x NCCL_ALLGATHERV_ENABLE=1 \
+  ./build/broadcast_perf -b 16K -e 1G -f 2
+```
+
 ### Arguments
 
 All tests support the same set of arguments :
@@ -143,10 +179,19 @@ All tests support the same set of arguments :
   * `-m,--agg_iters <aggregation count>` number of operations to aggregate together in each iteration. Default : 1.
   * `-N,--run_cycles <cycle count>` run & print each cycle. Default : 1; 0=infinite.
   * `-a,--average <0/1/2/3>` Report performance as an average across all ranks (MPI=1 only). <0=Rank0,1=Avg,2=Min,3=Max>. Default : 1.
+  * `-I,--per_iter_timing <0/1>` collect per-iteration HIP event timings and print summary columns.
+    `i_p99` uses nearest-rank percentile and may equal `i_max` with fewer than 100 samples.
+    Incompatible with HIP graph capture (`-G`). Default : 0.
+  * `-K,--per_iter_skip <count>` exclude leading samples from `-I` summary statistics.
+    Raw per-iteration JSON data remains complete. Default : 0.
 * Test operation
   * `-p,--parallel_init <0/1>` use threads to initialize NCCL in parallel. Default : 0.
   * `-c,--check <check iteration count>` perform count iterations, checking correctness of results on each iteration. This can be quite slow on large numbers of GPUs. Default : 1.
-  * `-z,--blocking <0/1/2>` Make RCCL collective blocking: 0=non-blocking, 1=wait for completion and barrier, 2=wait without barrier. Default : 0.
+  * `-z,--blocking <0/1/2/3>` collective blocking mode. Default: 0.
+    * `0` : non-blocking (default)
+    * `1` : wait and barrier after each inner iteration (`-m`)
+    * `2` : wait after each inner iteration, no barrier
+    * `3` : wait and barrier after each outer iteration (`-n`); reported time excludes barrier. Incompatible with HIP graph capture (`-G`).
   * `-y,--stream_null <0/1>` Use NULL stream instead of creating a new stream. Default : 0.
   * `-G,--cudagraph <num graph launches>` Capture iterations as a HIP graph and then replay specified number of times. Default : 0.
   * `-C,--report_cputime <0/1>` Report CPU time instead of latency. Default : 0.
@@ -154,7 +199,7 @@ All tests support the same set of arguments :
   * `-S,--report_timestamps <0/1>` Add timestamp (`"%Y-%m-%d %H:%M:%S"`) to each performance report line. Default : 0.
   * `-J,--output_file <file>` Write JSON output to filepath. Infer type from suffix (only `json` supported presently).
   * `-T,--timeout <time in seconds>` timeout each test after specified number of seconds. Default : disabled.
-  * `-M,--memory_report <0/1>` enable memory usage report. Default : 0.
+  * `-M,--memory <0/1>` enable memory usage report. Default : 0.
   * `-F,--cache_flush <number of iterations between instruction cache flush>` Enable cache flush after specified number of iterations. Default : 0 (No cache flush).
   * `-O,--out_of_place <0/1>` 0=in-place only, 1=out-of-place only. Default: both.
   * `-q,--delay_inout_place <delay in microseconds>` Delay between out-of-place and in-place runs (in microseconds). Default: 10.
@@ -171,7 +216,7 @@ All tests support the same set of arguments :
 
 ### Running multiple operations in parallel
 
-RCCL Tests allow to partition the set of GPUs into smaller sets, each executing the same operation in parallel. 
+RCCL Tests allow to partition the set of GPUs into smaller sets, each executing the same operation in parallel.
 To split the GPUs, RCCL will compute a "color" for each rank, based on the `NCCL_TESTS_SPLIT` environment variable, then all ranks
 with the same color will end up in the same group. The resulting group is printed next to each GPU at the beginning of the test.
 
@@ -188,6 +233,17 @@ Here are a few examples:
 - `NCCL_TESTS_SPLIT="AND 0x1"` or `NCCL_TESTS_SPLIT="MOD 2"`: Run two operations, each operation using every other rank.
 
 Note that the reported bandwidth is per group, hence to get the total bandwidth used by all groups, one must multiply by the number of groups.
+
+### Hierarchical alltoall over two GIN backends
+
+`alltoall_perf -R 2 -D 5` creates two DevComms on the same communicator: one on the Anvil SDMA GIN backend for intra-node (LSA) peers, and one on a network GIN backend for all other peers. CTA 0 drives the network DevComm and the remaining `-V` − 1 CTAs drive Anvil SDMA, so `-V` must be at least 2. `--gin_resource_sharing` applies to the network DevComm only; the SDMA DevComm stays GPU-locked, because every SDMA CTA flushes every peer. It needs a CMake build with `-DENABLE_DEVICE_API=ON -DENABLE_ROCSHMEM_GIN=ON`, and both backends active on the communicator: leave `NCCL_GIN_TYPE` unset. When either backend is not active on the communicator, the test prints `# SKIP` and exits successfully.
+
+- `RCCL_TESTS_A2A_HIER_NET_GIN_TYPE=<type>` selects the network backend (default: `2`, PROXY).
+- `RCCL_TESTS_A2A_HIER_GROUP_SIZE=<n>` splits each node's ranks into groups of `n` consecutive local ranks and sends to local peers in other groups over the network backend, so a single node moves data on both backends. Default: `0` (all local peers use Anvil SDMA).
+
+```shell
+mpirun -np 8 -x RCCL_TESTS_A2A_HIER_GROUP_SIZE=4 ./build/alltoall_perf -b 1M -e 1G -f 2 -g 1 -R 2 -D 5 -V 16 -c 1
+```
 
 ## Unit tests
 

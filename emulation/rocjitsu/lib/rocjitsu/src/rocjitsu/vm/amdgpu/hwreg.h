@@ -14,6 +14,27 @@ namespace amdgpu {
 
 class Wavefront;
 
+/// @brief Encode GFX12 STATE_PRIV using the selected STATUS and live workgroup flags.
+[[nodiscard]] uint32_t gfx12_state_priv_from_status(const Wavefront &wf, uint32_t status,
+                                                    bool scratch_enabled);
+
+/// @brief Apply the one-shot sleep credit and workgroup barrier completion fields.
+void set_gfx12_state_priv_workgroup_flags(Wavefront &wf, uint32_t state_priv);
+
+/// @brief Replace internal STATUS fields represented by GFX12 STATE_PRIV.
+[[nodiscard]] uint32_t update_status_from_gfx12_state_priv(uint32_t status, uint32_t state_priv);
+
+/// @brief Encode GFX12 EXCP_FLAG_PRIV from RocJITsu's common TRAPSTS state.
+[[nodiscard]] uint32_t gfx12_excp_flag_priv_from_trapsts(uint32_t trapsts);
+
+/// @brief Replace common TRAPSTS fields represented by GFX12 EXCP_FLAG_PRIV.
+[[nodiscard]] uint32_t update_trapsts_from_gfx12_excp_flag_priv(uint32_t trapsts,
+                                                                uint32_t excp_flag_priv);
+
+/// @brief Replace common TRAPSTS fields represented by GFX12 EXCP_FLAG_USER.
+[[nodiscard]] uint32_t update_trapsts_from_gfx12_excp_flag_user(uint32_t trapsts,
+                                                                uint32_t excp_flag_user);
+
 /// @brief Result of a shader HWREG read or write.
 ///
 /// @details Success means the addressed HWREG field is backed by wave state and
@@ -26,8 +47,18 @@ enum class HwregAccessResult : uint8_t {
   Privileged,
 };
 
+/// @brief Instruction form issuing an HWREG write.
+enum class HwregWriteKind : uint8_t {
+  Generic,
+  Setreg,
+  SetregImm32,
+};
+
 /// @brief Extract the register ID field from an encoded HWREG operand.
 [[nodiscard]] uint32_t hwreg_id(uint16_t hwreg);
+
+/// Whether this permitted HWREG access reads or replaces the SCC bit.
+[[nodiscard]] bool hwreg_accesses_scc(const Wavefront &wf, uint16_t hwreg, bool write);
 
 /// @brief Return the architecture-specific name for an encoded HWREG operand.
 [[nodiscard]] const char *hwreg_name(const Wavefront &wf, uint16_t hwreg);
@@ -46,7 +77,8 @@ enum class HwregAccessResult : uint8_t {
 /// @details Failed writes leave wave state unchanged. Unknown registers report
 /// Unsupported; known read-only or privileged registers report that policy
 /// before checking whether rocjitsu backs the register state.
-[[nodiscard]] HwregAccessResult write_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t src);
+[[nodiscard]] HwregAccessResult write_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t src,
+                                                  HwregWriteKind kind = HwregWriteKind::Generic);
 
 } // namespace amdgpu
 } // namespace rocjitsu

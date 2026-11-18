@@ -38,14 +38,14 @@ TEST(tracker_test, begin_returned_callback_advances_captured_renderer)
         void on_advance(std::uint64_t delta) noexcept { total_advanced += delta; }
     };
 
-    auto    renderer = std::make_shared<recording_renderer>();
-    tracker t{ [renderer](std::string, std::uint64_t) {
+    auto const renderer = std::make_shared<recording_renderer>();
+    tracker    t{ [renderer](std::string, std::uint64_t) {
         return progress_callback{ [renderer](std::uint64_t delta) {
             renderer->on_advance(delta);
         } };
     } };
 
-    auto cb = t.begin("rocpd", 1000);
+    auto const cb = t.begin("rocpd", 1000);
     cb(100);
     cb(250);
     cb(50);
@@ -57,7 +57,7 @@ TEST(tracker_test, begin_with_empty_factory_returns_empty_callback)
 {
     tracker t{ tracker::factory_t{} };
 
-    auto cb = t.begin("anything", 1234);
+    auto const cb = t.begin("anything", 1234);
 
     EXPECT_FALSE(static_cast<bool>(cb));
 }
@@ -70,7 +70,7 @@ TEST(tracker_test, callback_outlives_call_site_and_still_advances_renderer)
         void on_advance(std::uint64_t delta) noexcept { total_advanced += delta; }
     };
 
-    auto              renderer = std::make_shared<recording_renderer>();
+    auto const        renderer = std::make_shared<recording_renderer>();
     progress_callback escaped_cb;
 
     {

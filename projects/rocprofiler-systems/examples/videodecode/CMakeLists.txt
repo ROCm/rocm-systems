@@ -98,17 +98,21 @@ else()
 endif()
 
 # Copy video files to build directory
-if(EXISTS "${rocdecode_ROOT_DIR}/share/rocdecode/video")
+file(
+    GLOB_RECURSE video_files
+    "${rocdecode_ROOT_DIR}/share/rocdecode/video/*H26*.mp4"
+    "${rocdecode_ROOT_DIR}/share/rocdecode/video/*AV1*.mp4"
+)
+if(video_files)
     if(NOT EXISTS "${CMAKE_BINARY_DIR}/videos")
         file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/videos")
     endif()
-
-    file(GLOB_RECURSE video_files "${rocdecode_ROOT_DIR}/share/rocdecode/video/*H26*.mp4")
     file(COPY ${video_files} DESTINATION ${CMAKE_BINARY_DIR}/videos)
 else()
     videodecode_message(
         AUTHOR_WARNING
-        "Source directory ${rocdecode_ROOT_DIR}/share/rocdecode/video does not exist"
+        "${rocdecode_ROOT_DIR}/share/rocdecode/video contains no H264/H265/AV1 MP4 files; "
+        "videodecode tests will be skipped due to missing video data"
     )
 endif()
 
@@ -179,11 +183,16 @@ if(FFMPEG_FOUND AND rocdecode_FOUND)
             DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
             COMPONENT rocprofiler-systems-examples
         )
-        install(
-            DIRECTORY ${CMAKE_BINARY_DIR}/videos/
-            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples/videos
-            COMPONENT rocprofiler-systems-examples
-        )
+        # Sample videos ship only in ROCm test builds. install(DIRECTORY) fails
+        # the whole examples install when that directory was never created.
+        if(EXISTS "${CMAKE_BINARY_DIR}/videos")
+            install(
+                DIRECTORY ${CMAKE_BINARY_DIR}/videos/
+                DESTINATION
+                    ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples/videos
+                COMPONENT rocprofiler-systems-examples
+            )
+        endif()
     endif()
 else()
     message(

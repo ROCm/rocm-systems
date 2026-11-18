@@ -80,7 +80,7 @@ System requirements for managed memory
 
 Some AMD GPUs do not support page-faults, and thus do not support on-demand
 page-fault driven migration. On these architectures, if the programmer prefers
-all GPU memory accesses to be local, all pages have to migrated before the
+all GPU memory accesses to be local, all pages have to be migrated before the
 kernel is dispatched, as the driver cannot know beforehand which parts of a
 dataset are going to be accessed. This can lead to significant delays on the
 first run of a kernel, and, in the example of a sparsely accessed array, can
@@ -125,7 +125,7 @@ allocators (e.g., ``new``, ``malloc()``) can be used.
       - ✅ :sup:`1`
     * - CDNA2
       - ✅
-      - ✅ :sup:`1`
+      - ✅ :sup:`1` :sup:`2`
     * - CDNA1
       - ✅
       - ❌
@@ -142,6 +142,9 @@ allocators (e.g., ``new``, ``malloc()``) can be used.
 
 :sup:`1` Works only with ``HSA_XNACK=1`` and kernels with HMM support. First GPU
 access causes recoverable page-fault.
+
+:sup:`2` XNACK is not supported on CDNA2 (MI200 series) in SR-IOV configurations.
+System allocator support is therefore unavailable in that environment.
 
 .. _memory allocation approaches in unified memory:
 

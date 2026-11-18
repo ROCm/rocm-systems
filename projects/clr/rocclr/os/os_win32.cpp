@@ -507,6 +507,16 @@ bool Os::hasMovdir64b() {
   return supported;
 }
 
+bool Os::hasClflushopt() {
+  // CPUID leaf 7, sub-leaf 0: EBX bit 23 = CLFLUSHOPT.
+  static const bool supported = [] {
+    int regs[4];
+    __cpuidex(regs, 7, 0);
+    return static_cast<bool>((regs[1] >> 23) & 1);
+  }();
+  return supported;
+}
+
 uint64_t Os::offsetToEpochNanos() {
   static uint64_t offset = 0;
 
@@ -650,18 +660,22 @@ bool Os::MemoryMapFile(const char* fname, const void** mmap_ptr, size_t* mmap_si
   return true;
 }
 
-bool Os::MemoryMapFileTruncated(const char* fname, const void** mmap_ptr, size_t mmap_size) {
+bool Os::MemoryMapFileTruncated(const char* fname, const void** mmap_ptr, size_t mmap_size,
+                                ShmMode mode) {
   if (mmap_ptr == nullptr) {
     return false;
   }
 
-  HANDLE map_handle = OpenFileMapping(FILE_MAP_ALL_ACCESS, FALSE, fname);
-
+  HANDLE map_handle =
+      (mode == ShmMode::kOpenExisting)
+          ? OpenFileMapping(FILE_MAP_ALL_ACCESS, FALSE, fname)
+          : CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, mmap_size, fname);
   if (map_handle == nullptr) {
-    map_handle = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, mmap_size, fname);
-    if (map_handle == nullptr) {
-      return false;
-    }
+    return false;
+  }
+  if (mode == ShmMode::kCreateNew && GetLastError() == ERROR_ALREADY_EXISTS) {
+    CloseHandle(map_handle);
+    return false;
   }
 
   *mmap_ptr = MapViewOfFile(map_handle, FILE_MAP_ALL_ACCESS, 0, 0, mmap_size);
@@ -675,31 +689,7 @@ bool Os::MemoryMapFileTruncated(const char* fname, const void** mmap_ptr, size_t
   return true;
 }
 
-bool Os::FindFileNameFromAddress(const void* image, std::string* fname_ptr, size_t* foffset_ptr,
-                                 size_t* region_bound_ptr) {
-  // Fail closed: callers must never read a stale bound if we can't compute one.
-  if (region_bound_ptr != nullptr) {
-    *region_bound_ptr = 0;
-  }
-  // Readable bytes from image to the end of its committed region (anonymous or not).
-  if (region_bound_ptr != nullptr && image != nullptr) {
-    MEMORY_BASIC_INFORMATION mbi = {};
-    if (VirtualQuery(image, &mbi, sizeof(mbi)) == sizeof(mbi) && mbi.State == MEM_COMMIT &&
-        (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) == 0) {
-      const DWORD protection = mbi.Protect & 0xFF;
-      const bool readable = protection == PAGE_READONLY || protection == PAGE_READWRITE ||
-                            protection == PAGE_WRITECOPY || protection == PAGE_EXECUTE_READ ||
-                            protection == PAGE_EXECUTE_READWRITE ||
-                            protection == PAGE_EXECUTE_WRITECOPY;
-      const uintptr_t base = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
-      const uintptr_t address = reinterpret_cast<uintptr_t>(image);
-      const uintptr_t end = base + static_cast<uintptr_t>(mbi.RegionSize);
-      if (readable && address >= base && end >= base && end > address) {
-        *region_bound_ptr = static_cast<size_t>(end - address);
-      }
-    }
-  }
-
+bool Os::FindFileNameFromAddress(const void* image, std::string* fname_ptr, size_t* foffset_ptr) {
   HMODULE hm = NULL;
   if (!GetModuleHandleExA(
           GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,

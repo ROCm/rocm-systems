@@ -11,5 +11,6 @@ hipFile API reference
 * :doc:`./api-file-and-buffer`
 * :doc:`./api-async`
 * :doc:`./api-batch`
+* :doc:`./api-stats`
 * :doc:`./api-errors`
 * :doc:`./api-python`

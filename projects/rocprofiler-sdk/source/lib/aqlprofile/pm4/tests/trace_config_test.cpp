@@ -31,10 +31,22 @@ TEST_F(TraceConfigTest, DefaultValues)
     EXPECT_EQ(default_config.vmIdMask, 0);
     EXPECT_EQ(default_config.simd_sel, 0xF);
     EXPECT_EQ(default_config.sampleRate, 625);
+    EXPECT_EQ(default_config.spm_sample_interval_type, 0u);
     EXPECT_EQ(default_config.perfMASK, ~0u);
-    EXPECT_TRUE(default_config.spm_sq_32bit_mode);
     EXPECT_FALSE(default_config.spm_has_core1);
+    EXPECT_FALSE(default_config.spm_force_sample_before_stop);
     EXPECT_EQ(default_config.se_mask, 0x11);
+}
+
+TEST_F(TraceConfigTest, SpmForceSampleBeforeStop)
+{
+    EXPECT_FALSE(config.spm_force_sample_before_stop);
+
+    config.spm_force_sample_before_stop = true;
+    EXPECT_TRUE(config.spm_force_sample_before_stop);
+
+    config.spm_force_sample_before_stop = false;
+    EXPECT_FALSE(config.spm_force_sample_before_stop);
 }
 
 TEST_F(TraceConfigTest, SEConfiguration)
@@ -45,22 +57,11 @@ TEST_F(TraceConfigTest, SEConfiguration)
     config.target_cu_per_se[2] = 4;   // SE2: CU4
     config.target_cu_per_se[3] = 1;   // SE3: CU1
 
-    config.se_base_addresses[0] = 0x1000;
-    config.se_base_addresses[1] = 0x2000;
-    config.se_base_addresses[2] = 0x3000;
-    config.se_base_addresses[3] = 0x4000;
-
     // Test target CU retrieval
     EXPECT_EQ(config.GetTargetCU(0), 2);
     EXPECT_EQ(config.GetTargetCU(1), -1);
     EXPECT_EQ(config.GetTargetCU(2), 4);
     EXPECT_EQ(config.GetTargetCU(3), 1);
-
-    // Test SE base address retrieval
-    EXPECT_EQ(config.GetSEBaseAddr(0), 0x1000);
-    EXPECT_EQ(config.GetSEBaseAddr(1), 0x2000);
-    EXPECT_EQ(config.GetSEBaseAddr(2), 0x3000);
-    EXPECT_EQ(config.GetSEBaseAddr(3), 0x4000);
 
     // Test SE capacity calculations
     EXPECT_EQ(config.GetCapacity(0), config.capacity_per_se);           // Enabled SE
@@ -136,8 +137,8 @@ TEST_F(TraceConfigTest, ConcurrentConfiguration)
     // Setup multiple SEs with different target CUs
     for(uint32_t se = 0; se < config.se_number; se++)
     {
-        config.target_cu_per_se[se]  = se % 2 ? -1 : se;  // Alternate between enabled/disabled
-        config.se_base_addresses[se] = 0x1000 * (se + 1);
+        config.target_cu_per_se[se] = se % 2 ? -1 : se;  // Alternate between enabled/disabled
+        config.buffer_data[se]      = {reinterpret_cast<void*>(0x1000 * (se + 1))};
     }
 
     EXPECT_EQ(config.concurrent, 2);
@@ -155,7 +156,7 @@ TEST_F(TraceConfigTest, ConcurrentConfiguration)
             EXPECT_EQ(config.GetTargetCU(se), -1);
             EXPECT_EQ(config.GetCapacity(se), config.capacity_per_disabled_se);
         }
-        EXPECT_EQ(config.GetSEBaseAddr(se), 0x1000 * (se + 1));
+        EXPECT_EQ(reinterpret_cast<uint64_t>(config.GetSEBaseAddr(se)), 0x1000 * (se + 1));
     }
 }
 

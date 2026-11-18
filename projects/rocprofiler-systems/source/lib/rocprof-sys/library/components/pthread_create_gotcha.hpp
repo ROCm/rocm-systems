@@ -8,6 +8,7 @@
 #include "core/timemory.hpp"
 #include "library/thread_data.hpp"
 
+#include <atomic>
 #include <cstdint>
 #include <future>
 
@@ -32,7 +33,7 @@ struct pthread_create_gotcha : tim::component::base<pthread_create_gotcha, void>
         bool         enable_sampling = false;
         bool         offset          = false;
         std::int64_t parent_tid      = 0;
-        promise_t    promise         = {};
+        promise_t    promise;
     };
 
     struct wrapper
@@ -54,7 +55,6 @@ struct pthread_create_gotcha : tim::component::base<pthread_create_gotcha, void>
     // generate the gotcha wrappers
     static void configure();
     static void shutdown();
-    static void shutdown(std::int64_t);
 
     static void pause();
     static void resume();
@@ -70,8 +70,17 @@ private:
 
     static std::set<native_handle_t> get_native_handles();
 
-    wrappee_t         m_wrappee = &pthread_create;
-    static std::mutex s_mutex;
+    // Gates only the pthread_create call's own region (see
+    // operator()) - never the thread_info::init/sampler-setup path in
+    // wrapper::wrap(), which must run for every real thread regardless of
+    // control-session pause votes.
+    static bool is_paused() noexcept
+    {
+        return s_is_paused.load(std::memory_order_relaxed);
+    }
+
+    wrappee_t                m_wrappee = &pthread_create;
+    static std::atomic<bool> s_is_paused;
 };
 
 using pthread_create_gotcha_t =

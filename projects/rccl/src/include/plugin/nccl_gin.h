@@ -24,13 +24,18 @@
 #define NCCL_GIN_SIGNAL_OP_INC 0x1
 #define NCCL_GIN_SIGNAL_OP_ADD 0x2
 
+#if defined(NCCL_OS_WINDOWS)
+#include "gin/gin_host_win_stub.h"
+#else
 #include "gin/gin_v13.h"
-#include "gin/gin_v12.h"
-#include "gin/gin_v11.h"
+#include "gin/gin_v14.h"
+#include "gin/gin_v15.h"
 
-typedef ncclGin_v13_t ncclGin_t;
-typedef ncclGinConfig_v13_t ncclGinConfig_t;
+typedef ncclGin_v15_t ncclGin_t;
+typedef ncclGinConfig_v15_t ncclGinConfig_t;
+typedef ncclGinProperties_v15_t ncclGinProperties_t;
 
-#define NCCL_GIN_PLUGIN_SYMBOL ncclGinPlugin_v13
+#define NCCL_GIN_PLUGIN_SYMBOL ncclGinPlugin_v15
+#endif
 
 #endif // end include guard

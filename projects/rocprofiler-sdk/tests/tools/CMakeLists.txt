@@ -1,7 +1,7 @@
 #
 #
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(
     rocprofiler-sdk-tests-tools
@@ -20,6 +20,55 @@ target_link_libraries(
             rocprofiler-sdk::tests-perfetto)
 set_target_properties(
     rocprofiler-sdk-json-tool
+    PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/rocprofiler-sdk"
+               SOVERSION ${PROJECT_VERSION_MINOR}
+               VERSION
+               ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}
+               INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")
+
+# tool library supporting JSON and perfetto output with late/anytime initialization
+add_library(rocprofiler-sdk-json-tool-late SHARED)
+target_sources(rocprofiler-sdk-json-tool-late PRIVATE json-tool.cpp)
+# Rename this library's rocprofiler_configure so it does not collide with the early
+# (LD_PRELOAD'd) json-tool's exported symbol of the same name. Both libraries are built
+# from the same source, and when both are loaded in one process with RTLD_GLOBAL (an early
+# preloaded tool plus this late dlopen'd tool), the early definition would interpose the
+# late tool's internal call -- causing json_tool_force_configure() to register the EARLY
+# tool's configure (rejected as already-invoked) instead of its own. The late tool is
+# loaded by dlopen + json_tool_force_configure(), never symbol-scanned, so it does not
+# need to export rocprofiler_configure at all. Whole-token macro replacement leaves
+# rocprofiler_configure_* API calls untouched.
+target_compile_definitions(rocprofiler-sdk-json-tool-late
+                           PRIVATE rocprofiler_configure=rocprofiler_configure_late)
+target_link_libraries(
+    rocprofiler-sdk-json-tool-late
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::rocprofiler-sdk-cereal
+            rocprofiler-sdk::tests-build-flags rocprofiler-sdk::tests-common-library
+            rocprofiler-sdk::tests-perfetto)
+set_target_properties(
+    rocprofiler-sdk-json-tool-late
+    PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/rocprofiler-sdk"
+               SOVERSION ${PROJECT_VERSION_MINOR}
+               VERSION
+               ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}
+               INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")
+
+# A SECOND late-init json-tool library. Each json-tool .so holds all of its state in
+# namespace globals, so two simultaneously-active instances require two distinct .so
+# files. This is the companion to rocprofiler-sdk-json-tool-late used by variations that
+# register two tools late in the same process. Its rocprofiler_configure is renamed to a
+# third distinct symbol so neither the early tool nor the first late tool interposes it.
+add_library(rocprofiler-sdk-json-tool-late2 SHARED)
+target_sources(rocprofiler-sdk-json-tool-late2 PRIVATE json-tool.cpp)
+target_compile_definitions(rocprofiler-sdk-json-tool-late2
+                           PRIVATE rocprofiler_configure=rocprofiler_configure_late2)
+target_link_libraries(
+    rocprofiler-sdk-json-tool-late2
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::rocprofiler-sdk-cereal
+            rocprofiler-sdk::tests-build-flags rocprofiler-sdk::tests-common-library
+            rocprofiler-sdk::tests-perfetto)
+set_target_properties(
+    rocprofiler-sdk-json-tool-late2
     PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/rocprofiler-sdk"
                SOVERSION ${PROJECT_VERSION_MINOR}
                VERSION
@@ -53,6 +102,24 @@ add_custom_command(
     COMMAND ${CMAKE_STRIP} $<TARGET_FILE:rocprofiler-sdk-c-tool>
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Stripping rocprofiler-sdk-c-tool...")
+
+# same C tool, but rocprofiler_configure returns a configure result without enabling any
+# services, so the tool is configured (used by the attach tests)
+add_library(rocprofiler-sdk-c-tool-configured SHARED)
+target_sources(rocprofiler-sdk-c-tool-configured PRIVATE c-tool.c)
+target_compile_definitions(rocprofiler-sdk-c-tool-configured
+                           PRIVATE ROCPROFILER_C_TOOL_ACCEPT_CONFIGURE=1)
+target_link_libraries(
+    rocprofiler-sdk-c-tool-configured PRIVATE rocprofiler-sdk::rocprofiler-sdk
+                                              rocprofiler-sdk::tests-build-flags)
+target_compile_options(rocprofiler-sdk-c-tool-configured PRIVATE -Wno-cpp)
+set_target_properties(
+    rocprofiler-sdk-c-tool-configured
+    PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/rocprofiler-sdk"
+               SOVERSION ${PROJECT_VERSION_MINOR}
+               VERSION
+               ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}
+               INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")
 
 # thread-trace tool libraries
 set(THREAD_TRACE_TOOL_LINK_LIBRARIES
@@ -98,6 +165,17 @@ target_link_libraries(thread-trace-triple-buffer-tool
                       PRIVATE ${THREAD_TRACE_TOOL_LINK_LIBRARIES})
 set_target_properties(
     thread-trace-triple-buffer-tool
+    PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/rocprofiler-sdk"
+               INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")
+
+# multi-SE triple buffer correctness tool
+add_library(thread-trace-triple-buffer-multise-tool SHARED)
+target_sources(thread-trace-triple-buffer-multise-tool
+               PRIVATE thread-trace-triple-buffer-multise-tool.cpp)
+target_link_libraries(thread-trace-triple-buffer-multise-tool
+                      PRIVATE ${THREAD_TRACE_TOOL_LINK_LIBRARIES})
+set_target_properties(
+    thread-trace-triple-buffer-multise-tool
     PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/rocprofiler-sdk"
                INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")
 

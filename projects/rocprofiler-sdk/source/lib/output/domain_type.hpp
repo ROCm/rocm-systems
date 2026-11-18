@@ -47,6 +47,7 @@ enum class domain_type
     HIP_GRAPH,
     ROCSHMEM,
     HIPFILE,
+    HIP_EVENT,
     LAST,
 };
 

@@ -44,10 +44,12 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 #include "util/utils.h"
 #include "impl/wddm/types.h"
 #include "impl/wddm/thunks.h"
 #include "wkmi.h"
+#include "hsakmt/hsakmttypes.h"
 
 namespace wsl {
 namespace thunk {
@@ -130,6 +132,12 @@ struct GpuMemoryDesc {
     mem_flags = 0;
     engine_flag = 0;
     handle_ape_addr = 0;
+    swizzle_mode = 0;
+    tile_swizzle = 0;
+    swizzle_valid = false;
+    compression_mode = 0;
+    max_comp_blk = 0;
+    max_uncomp_blk = 0;
   }
 
   Wkmi::AllocDomain domain;
@@ -144,6 +152,12 @@ struct GpuMemoryDesc {
   GpuMemoryDescFlags flags;
   int mem_flags;
   int engine_flag;
+  uint32_t swizzle_mode;  // from VCAM_SURFACE_DESC.swizzleMode; 0 if not available
+  uint32_t tile_swizzle;  // from VCAM_SURFACE_DESC.ulTileSwizzle; 0 if not available
+  bool swizzle_valid;     // true if swizzle_mode/tile_swizzle are populated from driver data
+  uint32_t compression_mode;  // VCAM_SURFACE_DESC.ulCompressionMode (0 = uncompressed). gfx12+.
+  uint32_t max_comp_blk;      // VCAM_SURFACE_DESC.maxCompressedBlockSize. gfx12+.
+  uint32_t max_uncomp_blk;    // VCAM_SURFACE_DESC.maxUncompressedBlockSize. gfx12+.
 };
 
 struct SharedHandleInfo {
@@ -155,6 +169,12 @@ struct SharedHandleInfo {
   int mem_flags;
   int pid;
   gpusize gpu_addr;
+  uint32_t swizzle_mode;  // VCAM_SURFACE_DESC.swizzleMode (0 = LINEAR when valid=false)
+  uint32_t tile_swizzle;  // VCAM_SURFACE_DESC.ulTileSwizzle (pipe-bank XOR)
+  bool swizzle_valid;     // true if swizzle_mode/tile_swizzle were populated from driver data
+  uint32_t compression_mode;  // VCAM_SURFACE_DESC.ulCompressionMode (0 = uncompressed). gfx12+.
+  uint32_t max_comp_blk;      // VCAM_SURFACE_DESC.maxCompressedBlockSize. gfx12+.
+  uint32_t max_uncomp_blk;    // VCAM_SURFACE_DESC.maxUncompressedBlockSize. gfx12+.
 };
 
 using GpuMemoryHandle = void *;
@@ -186,6 +206,26 @@ public:
   inline bool IsVaAllocated() const { return desc_.flags.is_va_required; }
   inline bool IsBlitKernelObject() const { return desc_.flags.is_blit_kernel_object; }
   inline void forceSysMem() { desc_.domain = Wkmi::kSystem; }
+  inline bool HasSwizzleInfo() const { return desc_.swizzle_valid; }
+  inline uint32_t SwizzleMode() const { return desc_.swizzle_mode; }
+  inline uint32_t TileSwizzle() const { return desc_.tile_swizzle; }
+
+  // Returns a pointer to the stable surface metadata blob for this allocation. Valid as long as the
+  // GpuMemory object is alive. Always non-null: a swizzled (tiled) surface reports its real swizzle
+  // mode / pipe-bank-XOR / compression, while a LINEAR surface reports all-zeros (swizzle_mode 0,
+  // compression 0). The ROCr interop layer needs the blob even for linear surfaces so it can
+  // reconstruct a native linear SRD (the AMD Vulkan driver on Windows exposes no SRD to query).
+  const HsaWddmSurfaceMetadata* GetSurfaceMetadata() const {
+    return &surface_metadata_;
+  }
+  void BuildSurfaceMetadata() {
+    surface_metadata_.version = 0;  // unused; clr stamps the descriptor version.
+    surface_metadata_.swizzle_mode = desc_.swizzle_mode;
+    surface_metadata_.tile_swizzle = desc_.tile_swizzle;
+    surface_metadata_.compression_mode = desc_.compression_mode;
+    surface_metadata_.max_comp_blk = desc_.max_comp_blk;
+    surface_metadata_.max_uncomp_blk = desc_.max_uncomp_blk;
+  }
   inline void SetGpuAddress(uint64_t gpu_addr) { desc_.gpu_addr = gpu_addr; }
   inline void SetCpuAddress(void* cpu_addr) { desc_.cpu_addr = cpu_addr; }
 
@@ -220,6 +260,14 @@ public:
 
   ErrorCode MapGpuVirtualAddress(const gpusize map_addr, const gpusize size, gpusize offset = 0);
   ErrorCode UnmapGpuVirtualAddress(const gpusize map_addr, const gpusize size, gpusize offset = 0);
+
+  // This allocation's view on dev. System and user memory can create a peer view
+  // at the owner's VA; the owner keeps that reservation. *created is set when a
+  // new peer view was added.
+  GpuMemory* ViewOn(WDDMDevice* dev, bool create, bool* created);
+  void DropPeer(GpuMemory* peer);
+  void ReleasePeers();
+  GpuMemory* Owner() const { return owner_; }
   ErrorCode MapMemoryToVirtualAddress(bool create_phys_mem = true);
   ErrorCode MakeResident();
   ErrorCode Evict();
@@ -248,9 +296,10 @@ public:
  protected:
   explicit GpuMemory(WDDMDevice *device);
 private:
-  uint64_t AdjustSize(gpusize size) const;
-private:
   friend class WDDMDevice;
+
+  uint64_t AdjustSize(gpusize size) const;
+  ErrorCode MapFromPeer(GpuMemory* owner);
 
   WDDMDevice *const device_;
 
@@ -264,11 +313,15 @@ private:
 
   int mem_fd_; // IPC sigal's sys mem fd
 
+  GpuMemory* owner_ = nullptr;          // set when this object is a peer view
+  std::vector<GpuMemory*> peers_;       // peer views; only the owner has entries
+
   bool is_phymem_created = false; // status of physical memory allocation
   bool is_sysmem_locked_ = false; // kSystem allocation pinned via D3DKMTLock2
 
   // Number of outstanding GPU mappings of a user pointer.
   uint32_t mapping_count_ = 1;
+  HsaWddmSurfaceMetadata surface_metadata_{}; // stable storage for swizzle metadata blob
 
   DISALLOW_COPY_AND_ASSIGN(GpuMemory);
 };

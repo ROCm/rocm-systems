@@ -26,7 +26,7 @@
 #ifndef LIBHSAKMT_H_INCLUDED
 #define LIBHSAKMT_H_INCLUDED
 
-#include "hsakmt/linux/kfd_ioctl.h"
+#include "kfd_ioctl.h"
 #include "hsakmt/hsakmt.h"
 #include "kfdcontext.h"
 #include "hsakmt/hsakmtctx.h"
@@ -45,6 +45,7 @@ extern pthread_mutex_t hsakmt_mutex;
 extern bool hsakmt_is_dgpu;
 extern int hsakmt_zfb_support;
 extern int hsakmt_pm4_target_xcc;
+extern int hsakmt_force_mbind;
 
 extern HsaVersionInfo hsakmt_kfd_version_info;
 extern HsaKFDContext hsakmt_primary_kfd_ctx;
@@ -194,7 +195,8 @@ enum full_gfx_versions {
 	GFX_VERSION_GFX1151		= 0x0B0501,
 	GFX_VERSION_GFX1200		= 0x0C0000,
 	GFX_VERSION_GFX1201		= 0x0C0001,
-	GFX_VERSION_GFX1250		= 0x0C0500
+	GFX_VERSION_GFX1250		= 0x0C0500,
+	GFX_VERSION_GFX1251		= 0x0C0501,
 };
 
 struct hsa_gfxip_table {
@@ -254,6 +256,7 @@ void hsakmt_destroy_counter_props(HsaKFDContext *ctx);
 uint32_t *hsakmt_convert_queue_ids(HSAuint32 NumQueues, HSA_QUEUEID *Queues);
 
 extern int hsakmt_ioctl(int fd, unsigned long request, void *arg);
+extern int hsakmt_open(const char *path, int flags);
 
 /* Void pointer arithmetic (or remove -Wpointer-arith to allow void pointers arithmetic) */
 #define VOID_PTR_ADD32(ptr,n) (void*)((uint32_t*)(ptr) + n)/*ptr + offset*/

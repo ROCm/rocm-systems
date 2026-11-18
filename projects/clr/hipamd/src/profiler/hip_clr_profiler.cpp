@@ -60,8 +60,8 @@ bool demangleName(const std::string& mangledName, std::string& demangledName);
 } }
 
 
-extern "C" void hipRegisterTracerCallback(int (*function)(activity_domain_t domain,
-                                                          uint32_t operation_id, void* data));
+HIP_PUBLIC_API void hipRegisterTracerCallback(int (*function)(activity_domain_t domain,
+                                                              uint32_t operation_id, void* data));
 
 // ================================================================================================
 // Internal state
@@ -298,6 +298,8 @@ static HipCopyKindExt ToCopyKindExt(uint32_t cl_kind) {
     case CL_COMMAND_COPY_IMAGE_TO_BUFFER:   return HIP_COPY_KIND_IMAGE_TO_BUFFER_EXT;
     case CL_COMMAND_FILL_BUFFER:            return HIP_COPY_KIND_FILL_EXT;
     case ROCCLR_COMMAND_BATCH_COPY_BUFFER:  return HIP_COPY_KIND_BATCH_EXT;
+    case ROCCLR_COMMAND_BATCH_COPY_BUFFER_RECT:
+      return HIP_COPY_KIND_BATCH_EXT;
     case ROCCLR_COMMAND_BATCH_WRITE_BUFFER:
       return HIP_COPY_KIND_BATCH_EXT;
     case ROCCLR_COMMAND_BATCH_READ_BUFFER:
@@ -1138,7 +1140,6 @@ static constexpr uint32_t kLeg_flow_dir = 13;  // uint32 — FlowDirection: OUT=
 
 // DebugAnnotation (debug_annotation.proto)
 static constexpr uint32_t kAnn_name_iid = 1;   // uint64 interned name reference
-static constexpr uint32_t kAnn_uint     = 3;   // uint64 uint_value
 static constexpr uint32_t kAnn_str_val  = 6;   // string string_value
 
 // InternedData (interned_data.proto) in TracePacket — string intern table
@@ -1244,64 +1245,12 @@ static ProtoMsg MakeFlowEventPkt(uint64_t uuid, uint64_t ts_ns, uint64_t fid, bo
   return pkt;
 }
 
-static void EmitFlowEvent(std::string& out, uint64_t uuid, uint64_t ts_ns,
-                           uint64_t fid, bool is_start) {
-  // Emit a Chrome-format flow arrow event (ph='s' or ph='f') as a LegacyEvent instant.
-  // Mirrors the JSON writer's {"ph":"s"} / {"ph":"f"} events — known to work in Perfetto UI.
-  AppendPacket(out, MakeFlowEventPkt(uuid, ts_ns, fid, is_start));
-}
-
 static void EmitFlowEventSorted(SortedPktList& pkts, uint64_t uuid, uint64_t ts_ns,
                                  uint64_t fid, bool is_start) {
   AppendSorted(pkts, ts_ns, MakeFlowEventPkt(uuid, ts_ns, fid, is_start));
 }
 
 // ================================================================================================
-// name_iid / cat_iid / ann_key_iid: interned string IDs (0 = not interned, use direct string)
-static void EmitSlice(std::string& out, uint64_t uuid, uint32_t /*seq_id*/,
-                       uint64_t ts_ns, uint64_t dur_ns,
-                       const std::string& name, uint64_t name_iid,
-                       uint64_t cat_iid,
-                       const std::vector<std::pair<uint64_t,std::string>>& anns,
-                       const std::vector<uint64_t>& out_flows = {},
-                       const std::vector<uint64_t>& in_flows  = {}) {
-  // BEGIN
-  {
-    ProtoMsg evt;
-    evt.u32(kEvt_type, kEvt_TYPE_BEGIN);
-    evt.u64(kEvt_track_uuid, uuid);
-    if (name_iid) evt.u64(kEvt_name_iid, name_iid);
-    else          evt.str(23 /*name direct*/, name);
-    if (cat_iid)  evt.u64(kEvt_cat_iids, cat_iid);
-    for (const auto& a : anns) {
-      ProtoMsg ann;
-      ann.u64(kAnn_name_iid, a.first);   // always interned for annotation keys
-      ann.str(kAnn_str_val,  a.second);
-      evt.msg(kEvt_dbg_ann, ann);
-    }
-    ProtoMsg pkt;
-    pkt.u64(kPkt_timestamp, ts_ns);
-    pkt.msg(kPkt_track_event, evt);
-    pkt.u32(kPkt_seq_id, kGlobalSeq);
-    pkt.u32(kPkt_seq_flags, kSeqFlag_NeedsState);  // packet uses interned IIDs
-    AppendPacket(out, pkt);
-  }
-  // Flow events — separate packets, matching JSON writer's ph='s'/'f' approach
-  for (uint64_t fid : out_flows) EmitFlowEvent(out, uuid, ts_ns, fid, true);
-  for (uint64_t fid : in_flows)  EmitFlowEvent(out, uuid, ts_ns, fid, false);
-  // END
-  {
-    ProtoMsg evt;
-    evt.u32(kEvt_type, kEvt_TYPE_END);
-    evt.u64(kEvt_track_uuid, uuid);
-    ProtoMsg pkt;
-    pkt.u64(kPkt_timestamp, ts_ns + dur_ns);
-    pkt.msg(kPkt_track_event, evt);
-    pkt.u32(kPkt_seq_id, kGlobalSeq);
-    AppendPacket(out, pkt);
-  }
-}
-
 // Sorted variant: collects BEGIN, flow events, and END into pkts keyed by their timestamps.
 // Caller must call FlushSorted(out, pkts) after all events are accumulated.
 static void EmitSliceSorted(SortedPktList& pkts, uint64_t uuid,
@@ -2775,10 +2724,9 @@ uint64_t HipProfilerDisableExt() {
 // ============================================================
 // Public C extension API
 // ============================================================
-extern "C" {
 
 // ================================================================================================
-hipError_t hipProfilerEnableExt(uint64_t* start_record_id, uint64_t state) {
+HIP_PUBLIC_API hipError_t hipProfilerEnableExt(uint64_t* start_record_id, uint64_t state) {
   (void)state;  // reserved for future feature flags; ignored in this version
   uint64_t id = HipProfilerEnableExt();
   if (start_record_id) *start_record_id = id;
@@ -2786,14 +2734,14 @@ hipError_t hipProfilerEnableExt(uint64_t* start_record_id, uint64_t state) {
 }
 
 // ================================================================================================
-hipError_t hipProfilerDisableExt(uint64_t* end_record_id) {
+HIP_PUBLIC_API hipError_t hipProfilerDisableExt(uint64_t* end_record_id) {
   uint64_t id = HipProfilerDisableExt();
   if (end_record_id) *end_record_id = id;
   return hipSuccess;
 }
 
 // ================================================================================================
-hipError_t hipProfilerGetRecordsExt(const hipApiRecordExt* const** chunks,
+HIP_PUBLIC_API hipError_t hipProfilerGetRecordsExt(const hipApiRecordExt* const** chunks,
                                      size_t* chunk_count,
                                      size_t* chunk_size,
                                      size_t* total_count) {
@@ -2816,12 +2764,10 @@ hipError_t hipProfilerGetRecordsExt(const hipApiRecordExt* const** chunks,
 }
 
 // ================================================================================================
-hipError_t hipProfilerRegisterChunkCallbackExt(hipProfilerChunkCallback cb, void* user_data) {
+HIP_PUBLIC_API hipError_t hipProfilerRegisterChunkCallbackExt(hipProfilerChunkCallback cb, void* user_data) {
   if (!cb) return hipErrorInvalidValue;
-  bool first;
   {
     std::lock_guard<std::mutex> lk(g_chunk_clients_mtx);
-    first = g_chunk_clients.empty();
     g_chunk_clients.push_back({cb, user_data});
   }
   // Start the delivery thread only if not already running (pftrace env-var
@@ -2832,5 +2778,3 @@ hipError_t hipProfilerRegisterChunkCallbackExt(hipProfilerChunkCallback cb, void
   }
   return hipSuccess;
 }
-
-}  // extern "C"

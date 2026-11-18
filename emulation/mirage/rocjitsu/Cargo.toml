@@ -1,6 +1,6 @@
 [package]
 name = "mirage_rocjitsu"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 
 [lib]
@@ -8,6 +8,7 @@ path = "src/lib.rs"
 
 [dependencies]
 mirage_core = { workspace = true }
+mirage_builtin = { workspace = true }
 rocjitsu_sys = { workspace = true }
 inventory = { workspace = true }
 chrono = { workspace = true }
@@ -16,6 +17,11 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 
+[build-dependencies]
+serde_json = { workspace = true }
+
 [dev-dependencies]
-mirage_builtin = { workspace = true }
 tempfile = { workspace = true }
+
+[lints]
+workspace = true

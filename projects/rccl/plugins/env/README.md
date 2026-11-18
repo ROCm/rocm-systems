@@ -6,15 +6,15 @@ This page describes the NCCL Environment plugin API and how to implement an envi
 
 To allow NCCL to customize environment variable handling and provide enhanced configuration management, NCCL provides an environment plugin interface. Environment plugins allow users to implement custom environment variable resolution, validation, and transformation logic without modifying NCCL core code.
 
-Environment plugins come as a shared library called `libnccl-env.so`. That shared library contains one or more implementations of the NCCL ENV API, in the form of versioned structs, filled with pointers to all required functions.
+Environment plugins come as a shared library called `librccl-env.so`. That shared library contains one or more implementations of the NCCL ENV API, in the form of versioned structs, filled with pointers to all required functions.
 
 # Plugin architecture
 
 ## Plugin name and supporting multiple environment plugins
 
-When NCCL is initialized, it will look for a `libnccl-env.so` library and dynamically load it, then look for symbols inside the library.
+When NCCL is initialized, it will look for a `librccl-env.so` library and dynamically load it, then look for symbols inside the library.
 
-The `NCCL_ENV_PLUGIN` environment variable allows multiple plugins to coexist. If set, NCCL will look for a library with a name of `libnccl-env-${NCCL_ENV_PLUGIN}.so`. It is therefore advised to name the library following that pattern, with a symlink pointing `libnccl-env.so` to `libnccl-env-${NCCL_ENV_PLUGIN}.so`. That way, if there are multiple plugins in the path, setting `NCCL_ENV_PLUGIN` will allow users to select the right plugin.
+The `NCCL_ENV_PLUGIN` environment variable allows multiple plugins to coexist. If set, NCCL will look for a library with a name of `librccl-env-${NCCL_ENV_PLUGIN}.so`. It is therefore advised to name the library following that pattern, with a symlink pointing `librccl-env.so` to `librccl-env-${NCCL_ENV_PLUGIN}.so`. That way, if there are multiple plugins in the path, setting `NCCL_ENV_PLUGIN` will allow users to select the right plugin.
 
 ## Struct versioning
 
@@ -168,8 +168,8 @@ Set `NCCL_ENV_PLUGIN` to either the plugin name or the absolute path to the plug
 
 ```bash
 export NCCL_ENV_PLUGIN=myenv
-export NCCL_ENV_PLUGIN=libnccl-env-myenv.so
-export NCCL_ENV_PLUGIN=/path/to/your/plugin/libnccl-env-myenv.so
+export NCCL_ENV_PLUGIN=librccl-env-myenv.so
+export NCCL_ENV_PLUGIN=/path/to/your/plugin/librccl-env-myenv.so
 ```
 
 NCCL will automatically discover and load the plugin based on the exported symbol names.

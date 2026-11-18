@@ -48,7 +48,7 @@ ln -s libnccl.so.${nccl:Major}.${nccl:Minor}.${nccl:Patch} $RPM_BUILD_ROOT/%{_li
 install -m 755 -d $RPM_BUILD_ROOT/%{_bindir}
 install -m 755 -d $RPM_BUILD_ROOT/%{_includedir}
 cp -a include/* $RPM_BUILD_ROOT/%{_includedir}/
-install -m 755 bin/ncclras $RPM_BUILD_ROOT/%{_bindir}
+install -m 755 bin/rcclras $RPM_BUILD_ROOT/%{_bindir}
 ln -s libnccl.so.${nccl:Major} $RPM_BUILD_ROOT/%{_libdir}/libnccl.so
 
 # static
@@ -66,7 +66,7 @@ rm -rf $RPM_BUILD_ROOT
 %files devel
 %doc LICENSE.txt
 %defattr(-,root,root,-)
-%{_bindir}/ncclras
+%{_bindir}/rcclras
 %{_includedir}/*
 %{_libdir}/libnccl.so
 

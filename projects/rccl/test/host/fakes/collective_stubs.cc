@@ -1,0 +1,102 @@
+/*************************************************************************
+ * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
+//
+// Fail-loud (::abort()) link-satisfiers for the collective launch/registration
+// pipeline plus the transport connect entry points a group/enqueue TU
+// references but that a host-only control-flow test never executes. Reaching
+// one at run time is a real escape and the abort surfaces it immediately.
+//
+// Mostly self-contained: unlike the init binary's transport_stubs.cc (whose
+// NVLS/P2P-level stubs now route through test-driven seam globals defined in
+// the init test's own TUs), this floor has just the one seam global of its
+// own (g_ncclArgsGlobalCheck, for ncclArgsGlobalCheck below). It also reads
+// ncclParamEnqueueRearchEnable through g_loadParam, so the binary it links into
+// must also link that hook's definition (fakes/nccl_fakes.cc).
+
+#include "collective_stubs.h"
+#include "nccl_fakes.h"  // g_loadParam
+
+#include <cstdlib>
+
+#include "nccl.h"
+#include "comm.h"
+#include "mem_manager.h"
+#include "enqueue.h"
+#include "ce_coll.h"
+#include "rma/rma.h"
+#include "rma/rma_ce.h"
+#include "argcheck.h"
+#include "dev_runtime.h"
+#include "transport.h"
+#include "os.h"
+#include "fail_loud.h"
+#include "signature-drift.h"
+
+ASSERT_HOOK_MATCHES_PROD(g_ncclArgsGlobalCheck, ncclArgsGlobalCheck);
+#undef ASSERT_HOOK_MATCHES_PROD
+
+// enqueue.h
+ncclResult_t ncclPrepareTasks(struct ncclComm*, bool*, bool*, bool*, ncclSimInfo_t*) { ::abort(); }
+// group.cc validates every comm's launch-completion events on the happy path, so mirror
+// enqueue.cc rather than abort: at most one per communicator per group.
+ncclResult_t ncclValidateCollConfigLaunchCompletionEvents(struct ncclComm* comm) {
+  return comm->planner.nCollConfigLaunchCompletionEvents > 1 ? ncclInvalidUsage : ncclSuccess;
+}
+ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm*) { ::abort(); }
+ncclResult_t ncclLaunchPrepare(struct ncclComm*) { ::abort(); }
+ncclResult_t ncclLaunchKernelBefore_NoUncapturedCuda(struct ncclComm*, struct ncclKernelPlan*) { ::abort(); }
+ncclResult_t ncclLaunchKernel(struct ncclComm*, struct ncclKernelPlan*) { ::abort(); }
+ncclResult_t ncclLaunchKernelAfter_NoCuda(struct ncclComm*, struct ncclKernelPlan*) { ::abort(); }
+ncclResult_t ncclLaunchFinish(struct ncclComm*) { ::abort(); }
+// The 2.31 task-prep split: group.cc calls ncclTaskPrepare where it used to
+// call ncclPrepareTasks, and both it and dev_runtime.cc gate the rearch job
+// path on this param. Defaults to 0 so those call sites take the in-group task
+// branch; DevCommCreateFailureTest flips it through g_loadParam to reach the
+// job branch's failure arm.
+ncclResult_t ncclTaskPrepare(struct ncclComm*, ncclSimInfo_t*) { ::abort(); }
+int64_t ncclParamEnqueueRearchEnable() { return g_loadParam("ENQUEUE_REARCH_ENABLE", 0); }
+#ifndef RCCL_COLLECTIVE_STUBS_OMIT_P2P
+// transport/p2p.cc. group.cc sets up the CE P2P connectors only when it is true;
+// false matches the NCCL_P2P_USE_CUDA_MEMCPY default.
+bool ncclP2pUsesMemcpy() { return false; }
+#endif
+
+// ce_coll.h
+ncclResult_t ncclLaunchCeColl(struct ncclComm*, struct ncclKernelPlan*) { ::abort(); }
+
+// rma/rma.h, rma/rma_ce.h: omitted where the target compiles the real rma.cc and rma_ce.cc.
+#ifndef RCCL_COLLECTIVE_STUBS_OMIT_RMA
+ncclResult_t ncclLaunchRma(struct ncclComm*, struct ncclKernelPlan*) { ::abort(); }
+#endif
+#ifndef RCCL_COLLECTIVE_STUBS_OMIT_RMA_CE
+ncclResult_t ncclRmaCeInit(struct ncclComm*) { ::abort(); }
+#endif
+
+// dev_runtime.h: fakes/dev_runtime_fakes.cc, or the real dev_runtime.cc.
+
+// mem_manager.h
+ncclResult_t ncclCommMemSuspend(struct ncclComm*) { ::abort(); }
+ncclResult_t ncclCommMemResume(struct ncclComm*) { ::abort(); }
+
+// argcheck.h
+static ncclResult_t DefaultArgsGlobalCheck(struct ncclArgsInfo*) {
+  FailLoudUnfaked("collective_stubs", "ncclArgsGlobalCheck");
+}
+std::function<ncclResult_t(struct ncclArgsInfo*)> g_ncclArgsGlobalCheck = DefaultArgsGlobalCheck;
+ncclResult_t ncclArgsGlobalCheck(struct ncclArgsInfo* info) { return g_ncclArgsGlobalCheck(info); }
+
+void ResetCollectiveStubs() {
+  g_ncclArgsGlobalCheck = DefaultArgsGlobalCheck;
+}
+
+// transport.h -- only the connect/setup entry points group.cc references.
+ncclResult_t ncclTransportRingConnect(struct ncclComm*) { ::abort(); }
+ncclResult_t ncclTransportTreeConnect(struct ncclComm*) { ::abort(); }
+ncclResult_t ncclTransportPatConnect(struct ncclComm*) { ::abort(); }
+ncclResult_t ncclNvlsBufferSetup(struct ncclComm*) { ::abort(); }
+ncclResult_t ncclNvlsTreeConnect(struct ncclComm*) { ::abort(); }
+ncclResult_t ncclCollNetChainBufferSetup(ncclComm_t) { ::abort(); }
+ncclResult_t ncclCollNetDirectBufferSetup(ncclComm_t) { ::abort(); }

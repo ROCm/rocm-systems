@@ -14,8 +14,9 @@ if(ROCPROFILER_REGISTER_BUILD_TESTS)
 endif()
 
 target_include_directories(
-    rocprofiler-register PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/source
-                                 ${PROJECT_BINARY_DIR}/source)
+    rocprofiler-register
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}
+            ${PROJECT_SOURCE_DIR}/source ${PROJECT_BINARY_DIR}/source)
 
 target_link_libraries(
     rocprofiler-register

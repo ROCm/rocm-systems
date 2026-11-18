@@ -24,7 +24,7 @@
  */
 
 #include "libhsakmt.h"
-#include "hsakmt/linux/kfd_ioctl.h"
+#include "kfd_ioctl.h"
 #include "fmm.h"
 
 #ifndef MAX_RW_COUNT
@@ -70,6 +70,14 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAisReadWriteFile(void *MemoryAddress,
 	args.in.handle_offset = size_offset;
 
 	ret = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_AIS_OP, &args);
+
+	/* out is only written if the AIS handler ran, with status == -errno.
+	 * ENOTTY means no AIS ioctl.
+	 */
+	if (ret < 0 && (errno == ENOTTY || args.out.status != -errno)) {
+		args.out.status = -errno;
+		args.out.size_copied = 0;
+	}
 
 	if (SizeCopiedInBytes)
 		*SizeCopiedInBytes = args.out.size_copied;

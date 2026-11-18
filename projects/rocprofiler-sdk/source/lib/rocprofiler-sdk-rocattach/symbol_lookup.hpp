@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,14 +22,47 @@
 
 #pragma once
 
+#include <cstdint>
+#include <optional>
 #include <string>
+#include <vector>
 
 namespace rocprofiler
 {
 namespace rocattach
 {
+namespace detail
+{
+struct load_segment
+{
+    uint64_t file_offset     = 0;
+    uint64_t virtual_address = 0;
+    uint64_t file_size       = 0;
+};
+
+struct file_mapping
+{
+    uint64_t start_address = 0;
+    uint64_t end_address   = 0;
+    uint64_t file_offset   = 0;
+};
+
+std::optional<uint64_t>
+calculate_load_bias(uint64_t                         page_size,
+                    const std::vector<load_segment>& segments,
+                    const std::vector<file_mapping>& mappings);
+}  // namespace detail
+
+// pathname_only forces the /proc/<pid>/root path instead of
+// /proc/<pid>/map_files. No production caller sets it: the lookup already falls
+// back to the pathname when map_files is unavailable. It exists so tests can
+// exercise that fallback deterministically.
 bool
-find_symbol(int target_pid, void*& addr, const std::string& library, const std::string& symbol);
+find_symbol(int                target_pid,
+            void*&             addr,
+            const std::string& library,
+            const std::string& symbol,
+            bool               pathname_only = false);
 
 }  // namespace rocattach
 }  // namespace rocprofiler

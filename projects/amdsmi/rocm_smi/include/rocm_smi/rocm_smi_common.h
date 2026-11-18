@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #ifndef INCLUDE_ROCM_SMI_ROCM_SMI_COMMON_H_
 #define INCLUDE_ROCM_SMI_ROCM_SMI_COMMON_H_
@@ -39,28 +20,6 @@
 #define GET_DEV_FROM_INDX                                        \
   CHECK_DV_IND_RANGE                                             \
   std::shared_ptr<amd::smi::Device> dev = smi.devices()[dv_ind]; \
-  assert(dev != nullptr);
-
-#define CHECK_NIC_DV_IND_RANGE                               \
-  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance(); \
-  if (dv_ind >= smi.nic_devices().size()) {                  \
-    return RSMI_STATUS_INVALID_ARGS;                         \
-  }
-
-#define GET_NIC_DEV_FROM_INDX                                        \
-  CHECK_NIC_DV_IND_RANGE                                             \
-  std::shared_ptr<amd::smi::Device> dev = smi.nic_devices()[dv_ind]; \
-  assert(dev != nullptr);
-
-#define CHECK_SWITCH_DV_IND_RANGE                            \
-  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance(); \
-  if (dv_ind >= smi.switch_devices().size()) {               \
-    return RSMI_STATUS_INVALID_ARGS;                         \
-  }
-
-#define GET_SWITCH_DEV_FROM_INDX                                        \
-  CHECK_SWITCH_DV_IND_RANGE                                             \
-  std::shared_ptr<amd::smi::Device> dev = smi.switch_devices()[dv_ind]; \
   assert(dev != nullptr);
 
 #define GET_DEV_AND_KFDNODE_FROM_INDX                                           \

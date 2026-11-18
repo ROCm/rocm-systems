@@ -73,16 +73,16 @@ struct static_tl_object
     static constexpr bool is_trivial_standard_layout();
 
 private:
-    static thread_local Tp*                                             m_object;
-    static thread_local std::array<std::byte, static_buffer_size<Tp>()> m_buffer;
+    static thread_local Tp* m_object;
+    alignas(Tp) static thread_local std::array<std::byte, static_buffer_size<Tp>()> m_buffer;
 };
 
 template <typename Tp, typename ContextT>
 thread_local Tp* static_tl_object<Tp, ContextT>::m_object = nullptr;
 
 template <typename Tp, typename ContextT>
-thread_local std::array<std::byte, static_buffer_size<Tp>()>
-    static_tl_object<Tp, ContextT>::m_buffer = {};
+alignas(Tp) thread_local std::
+    array<std::byte, static_buffer_size<Tp>()> static_tl_object<Tp, ContextT>::m_buffer = {};
 
 template <typename Tp, typename ContextT>
 constexpr bool

@@ -5,9 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace cpu
+namespace rocprofsys::cpu
 {
 
 struct cpu_info
@@ -18,8 +16,8 @@ struct cpu_info
     long        physical_id = -1;
     long        core_id     = -1;
     long        apicid      = -1;
-    std::string vendor_id   = {};
-    std::string model_name  = {};
+    std::string vendor_id;
+    std::string model_name;
 };
 
 std::vector<cpu_info>
@@ -34,5 +32,4 @@ device_count();
 void
 query_cpu_agents();
 
-}  // namespace cpu
-}  // namespace rocprofsys
+}  // namespace rocprofsys::cpu

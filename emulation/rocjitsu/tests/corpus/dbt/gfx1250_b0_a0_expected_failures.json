@@ -1,6 +1,6 @@
 {
   "expected_failures": {
-    "2bff3e6611af6c6de83ff384fd5b659f9c42441c3553cf41c779047d4432b78b": {
+    "a3b66d0a9b5b3e0f35526296659792339c2e0a69adf2497f6b4f24f4275c4bc2": {
       "kind": "memory-limit",
       "reason": "RCCL code object exceeds the per-object DBT memory limit in indirect-branch discovery"
     }

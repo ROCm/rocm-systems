@@ -6,6 +6,8 @@
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <limits>
+#include <string>
 #include <unordered_map>
 
 using namespace rocprofsys::common;
@@ -20,14 +22,17 @@ struct fake_env
 
     static int setenv(const char* name, const char* value, int overwrite)
     {
-        if(!overwrite && store.count(name)) return 0;
+        if(!overwrite && store.contains(name))
+        {
+            return 0;
+        }
         store[name] = value;
         return 0;
     }
 
     static char* getenv(const char* name)
     {
-        auto it = store.find(name);
+        auto const it = store.find(name);
         return it != store.end() ? it->second.data() : nullptr;
     }
 
@@ -433,7 +438,7 @@ protected:
 
 TEST_F(FakeEnvGetEnvChoiceTest, ReturnsDefaultWhenUnset)
 {
-    auto result = fake_environment::get_env_choice<std::string>(
+    auto const result = fake_environment::get_env_choice<std::string>(
         "FOO", "trace", { "trace", "sampling", "causal" });
     EXPECT_EQ(result, "trace");
 }
@@ -441,7 +446,7 @@ TEST_F(FakeEnvGetEnvChoiceTest, ReturnsDefaultWhenUnset)
 TEST_F(FakeEnvGetEnvChoiceTest, ReturnsValueWhenValidChoiceSet)
 {
     fake_env::setenv("FOO", "sampling", 1);
-    auto result = fake_environment::get_env_choice<std::string>(
+    auto const result = fake_environment::get_env_choice<std::string>(
         "FOO", "trace", { "trace", "sampling", "causal" });
     EXPECT_EQ(result, "sampling");
 }
@@ -449,7 +454,7 @@ TEST_F(FakeEnvGetEnvChoiceTest, ReturnsValueWhenValidChoiceSet)
 TEST_F(FakeEnvGetEnvChoiceTest, ReturnsDefaultWhenInvalidChoiceSet)
 {
     fake_env::setenv("FOO", "bad_value", 1);
-    auto result = fake_environment::get_env_choice<std::string>(
+    auto const result = fake_environment::get_env_choice<std::string>(
         "FOO", "trace", { "trace", "sampling", "causal" });
     EXPECT_EQ(result, "trace");
 }
@@ -521,6 +526,17 @@ TEST_F(FakeEnvGetEnvTest, FloatTrailingGarbageReturnsDefault)
 {
     fake_env::setenv("FOO", "1.5abc", 1);
     EXPECT_NEAR(fake_environment::get_env("FOO", 9.9), 9.9, 1e-9);
+}
+
+TEST_F(FakeEnvGetEnvTest, FloatOutOfFloatRangeReturnsDefault)
+{
+    constexpr auto k_max_float = std::numeric_limits<float>::max();
+
+    fake_env::setenv("FOO", std::to_string(k_max_float).c_str(), 1);
+    EXPECT_EQ(fake_environment::get_env("FOO", 7.0f), k_max_float);
+
+    fake_env::setenv("FOO", "1e300", 1);
+    EXPECT_EQ(fake_environment::get_env("FOO", 7.0f), 7.0f);
 }
 
 // ── Integral branch gaps ──────────────────────────────────────────────────────
@@ -621,7 +637,7 @@ TEST(ToEnvStringTest, ConstCharPtrPassthrough)
 
 TEST(GetDefaultLibSearchPathsTest, ReturnsNonEmpty)
 {
-    auto paths = get_default_lib_search_paths();
+    auto const paths = get_default_lib_search_paths();
     EXPECT_FALSE(paths.empty());
 }
 
@@ -719,20 +735,23 @@ protected:
 
 TEST_F(FakeEnvIntChoiceTest, ReturnsDefaultWhenUnset)
 {
-    auto result = fake_environment::get_env_choice("FOO", 1, std::set<int>{ 1, 2, 3 });
+    auto const result =
+        fake_environment::get_env_choice("FOO", 1, std::set<int>{ 1, 2, 3 });
     EXPECT_EQ(result, 1);
 }
 
 TEST_F(FakeEnvIntChoiceTest, ReturnsValueWhenValidChoiceSet)
 {
     fake_env::setenv("FOO", "3", 1);
-    auto result = fake_environment::get_env_choice("FOO", 1, std::set<int>{ 1, 2, 3 });
+    auto const result =
+        fake_environment::get_env_choice("FOO", 1, std::set<int>{ 1, 2, 3 });
     EXPECT_EQ(result, 3);
 }
 
 TEST_F(FakeEnvIntChoiceTest, ReturnsDefaultWhenInvalidChoiceSet)
 {
     fake_env::setenv("FOO", "99", 1);
-    auto result = fake_environment::get_env_choice("FOO", 1, std::set<int>{ 1, 2, 3 });
+    auto const result =
+        fake_environment::get_env_choice("FOO", 1, std::set<int>{ 1, 2, 3 });
     EXPECT_EQ(result, 1);
 }

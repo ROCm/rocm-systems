@@ -40,6 +40,10 @@ class ExecuteContext:
     arch_name: str = ''
     enc_field_names: set[str] = field(default_factory=set)
     encoding_map: dict | None = None
+    supports_dpp: bool = False
+    supports_dpp8: bool = False
+    supports_sdwa: bool = False
+    result_writer: str | None = None
 
     @property
     def cls(self) -> str:
@@ -81,8 +85,15 @@ def _register_handlers() -> None:
         gen_vector_cmpx,
     )
     from amdisa.codegen.execute.vector_special import (
+        gen_vector_bcnt,
         gen_vector_mbcnt,
         gen_vector_movrel,
+        gen_vector_swaprel,
+        gen_vector_sat_pack,
+        gen_vector_mullit,
+        gen_vector_perm_pk16,
+        gen_vector_qsad,
+        gen_vector_trig_preop,
         gen_vector_mad_64_32,
         gen_vector_mad_32_16,
         gen_vector_div_fixup,
@@ -97,19 +108,18 @@ def _register_handlers() -> None:
         gen_vector_permlane_family,
         gen_vector_permlane_idx_gen,
         gen_vector_cvt_pk,
-        gen_vector_cvt_scale,
         gen_cvt_fp8,
-        gen_cvt_scalef32,
     )
     from amdisa.codegen.execute.packed import (
         gen_pk_binop,
         gen_pk_ternary,
         gen_pk_binop_f32,
         gen_pk_ternary_f32,
+        gen_pk_ternary_f64,
+        gen_pk_binop_u64,
+        gen_pk_binop_f64,
+        gen_pk_lshl_add_u64,
         gen_pk_mov_b32,
-        gen_mad_mix_f32,
-        gen_mad_mix_lo_hi,
-        gen_mad_mix_bf16,
         gen_dot2,
         gen_dot2_true16,
         gen_dot4,
@@ -138,22 +148,89 @@ def _register_handlers() -> None:
     # and always classifies in f32, so the dedicated per-type generator here
     # (correct f16/f32/f64 qnan masks, full 64-bit f64 read) owns it instead.
     DISPATCH['vector_cmpx'] = lambda c: gen_vector_cmpx(
-        c.src_ops, c.op, c.dtype, c.cmpx_writes_vcc, c.is_vop3, c.dst_ops, c.has_abs
+        c.src_ops,
+        c.op,
+        c.dtype,
+        c.cmpx_writes_vcc,
+        c.is_vop3,
+        c.dst_ops,
+        c.has_abs,
+        c.result_writer,
     )
     DISPATCH['vector_cmp_class'] = lambda c: gen_vector_cmp_class(
-        c.dst_ops, c.src_ops, c.dtype, False, False, c.is_vop3, c.has_abs
+        c.dst_ops,
+        c.src_ops,
+        c.dtype,
+        False,
+        False,
+        c.is_vop3,
+        c.has_abs,
+        c.result_writer,
     )
     DISPATCH['vector_cmpx_class'] = lambda c: gen_vector_cmp_class(
-        c.dst_ops, c.src_ops, c.dtype, True, c.cmpx_writes_vcc, c.is_vop3, c.has_abs
+        c.dst_ops,
+        c.src_ops,
+        c.dtype,
+        True,
+        c.cmpx_writes_vcc,
+        c.is_vop3,
+        c.has_abs,
+        c.result_writer,
     )
 
     # Vector special
+    DISPATCH['vector_bcnt'] = lambda c: gen_vector_bcnt(c.dst_ops, c.src_ops)
     DISPATCH['vector_mbcnt'] = lambda c: gen_vector_mbcnt(c.dst_ops, c.src_ops, c.op)
     DISPATCH['vector_movrel'] = lambda c: gen_vector_movrel(
+        c.dst_ops,
+        c.src_ops,
+        c.op,
+        c.profile.uses_vgpr_msb_indexing,
+        c.supports_dpp,
+        c.supports_dpp8,
+        c.supports_sdwa,
+        c.profile.dpp_bound_ctrl_applies_to_inactive_sources,
+        use_rj_arith=c.arch_name in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'),
+        is_vop3=c.is_vop3,
+        stage_after_destination=c.arch_name == 'rdna3_5',
+        # Preserve legacy CDNA bit-move modifiers; RDNA treats signs as FP32.
+        apply_dpp_source_modifiers=c.arch_name in ('rdna3', 'rdna4'),
+    )
+    DISPATCH['vector_swaprel'] = lambda c: gen_vector_swaprel(
+        c.dst_ops,
+        c.src_ops,
+        c.profile.uses_vgpr_msb_indexing,
+        use_rj_arith=c.arch_name in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'),
+    )
+    DISPATCH['vector_sat_pack'] = lambda c: gen_vector_sat_pack(
+        c.dst_ops,
+        c.src_ops,
+        c.op,
+        true16_dst=c.is_vop3 and c.profile.uses_true16_vop3_opsel,
+    )
+    DISPATCH['vector_mullit'] = lambda c: gen_vector_mullit(
+        c.dst_ops, c.src_ops, c.is_vop3, c.has_abs
+    )
+    DISPATCH['vector_perm_pk16'] = lambda c: gen_vector_perm_pk16(
         c.dst_ops, c.src_ops, c.op, c.profile.uses_vgpr_msb_indexing
     )
+    DISPATCH['vector_qsad'] = lambda c: gen_vector_qsad(
+        c.dst_ops,
+        c.src_ops,
+        c.op,
+        c.profile.uses_vgpr_msb_indexing,
+        c.is_vop3 and c.inst.name in c.profile.integer_clamp_dtypes,
+        c.arch_name == 'rdna3_5',
+    )
+    DISPATCH['vector_trig_preop'] = lambda c: gen_vector_trig_preop(
+        c.dst_ops, c.src_ops, c.is_vop3, c.has_abs
+    )
     DISPATCH['vector_mad_64_32'] = lambda c: gen_vector_mad_64_32(
-        c.dst_ops, c.src_ops, c.dtype
+        c.dst_ops,
+        c.src_ops,
+        c.dtype,
+        c.result_writer,
+        c.is_vop3 and c.inst.name in c.profile.integer_clamp_dtypes,
     )
     DISPATCH['vector_mad_32_16'] = lambda c: gen_vector_mad_32_16(
         c.dst_ops, c.src_ops, c.dtype, c.is_vop3
@@ -162,7 +239,12 @@ def _register_handlers() -> None:
         c.dst_ops, c.src_ops, c.dtype, c.is_vop3, c.has_abs
     )
     DISPATCH['vector_div_scale'] = lambda c: gen_vector_div_scale(
-        c.dst_ops, c.src_ops, c.dtype, c.is_vop3, c.has_abs
+        c.dst_ops,
+        c.src_ops,
+        c.dtype,
+        c.is_vop3,
+        c.has_abs,
+        c.result_writer,
     )
     DISPATCH['vector_div_fmas'] = lambda c: gen_vector_div_fmas(
         c.dst_ops, c.src_ops, c.dtype, c.is_vop3, c.has_abs
@@ -179,7 +261,7 @@ def _register_handlers() -> None:
         c.dtype,
         (
             c.opsel_exprs[0]
-            if c.arch_name == 'gfx1250' and c.is_vop3 and c.dtype == 'b16'
+            if c.arch_name == 'cdna5' and c.is_vop3 and c.dtype == 'b16'
             else None
         ),
     )
@@ -216,25 +298,27 @@ def _register_handlers() -> None:
         ),
         dtype=c.dtype,
         is_vop3=c.is_vop3,
+        has_abs=c.has_abs,
         fp8_format_select=(
             'inst_.clamp'
             if c.cls == 'vector_cvt_pk'
             and c.op in ('fp8_f32', 'fp8_f16')
             and c.is_vop3
-            and c.arch_name == 'gfx1250'
+            and c.arch_name == 'cdna5'
             else None
         ),
         arch_name=c.arch_name,
     )
-    DISPATCH['vector_cvt_scale'] = lambda c: gen_vector_cvt_scale(
-        c.dst_ops, c.src_ops, c.cls, c.op, c.arch_name
-    )
     DISPATCH['cvt_fp8'] = lambda c: gen_cvt_fp8(c)
-    DISPATCH['cvt_scalef32'] = lambda c: gen_cvt_scalef32(c)
 
     # Packed
     DISPATCH['pk_binop'] = lambda c: gen_pk_binop(
-        c.dst_ops, c.src_ops, c.op, c.dtype, opsel_exprs=c.opsel_exprs
+        c.dst_ops,
+        c.src_ops,
+        c.op,
+        c.dtype,
+        opsel_exprs=c.opsel_exprs,
+        multiply_clamp=c.profile.packed_mul_lo_u16_clamp,
     )
     DISPATCH['pk_ternary'] = lambda c: gen_pk_ternary(
         c.dst_ops,
@@ -243,13 +327,14 @@ def _register_handlers() -> None:
         c.dtype,
         op_sel_hi_2_expr=c.op_sel_hi_2_expr,
         opsel_exprs=c.opsel_exprs,
+        integer_clamp=c.inst.name in c.profile.integer_clamp_dtypes,
     )
     DISPATCH['pk_binop_f32'] = lambda c: gen_pk_binop_f32(
         c.dst_ops,
         c.src_ops,
         c.op,
         opsel_exprs=c.opsel_exprs,
-        use_gfx1250_helpers=c.arch_name == 'gfx1250',
+        use_cdna5_helpers=c.arch_name == 'cdna5',
     )
     DISPATCH['pk_ternary_f32'] = lambda c: gen_pk_ternary_f32(
         c.dst_ops,
@@ -257,74 +342,53 @@ def _register_handlers() -> None:
         c.op,
         op_sel_hi_2_expr=c.op_sel_hi_2_expr,
         opsel_exprs=c.opsel_exprs,
-        use_gfx1250_helpers=c.arch_name == 'gfx1250',
+        use_cdna5_helpers=c.arch_name == 'cdna5',
     )
+    DISPATCH['pk_binop_u64'] = lambda c: gen_pk_binop_u64(c.dst_ops, c.src_ops, c.op)
+    DISPATCH['pk_binop_f64'] = lambda c: gen_pk_binop_f64(c.dst_ops, c.src_ops, c.op)
+    DISPATCH['pk_ternary_f64'] = lambda c: gen_pk_ternary_f64(
+        c.dst_ops, c.src_ops, c.op
+    )
+    DISPATCH['pk_lshl_add_u64'] = lambda c: gen_pk_lshl_add_u64(c.dst_ops, c.src_ops)
     DISPATCH['pk_mov_b32'] = lambda c: gen_pk_mov_b32(
         c.dst_ops,
         c.src_ops,
         opsel_exprs=c.opsel_exprs,
     )
-    DISPATCH['mad_mix_f32'] = lambda c: gen_mad_mix_f32(
-        c.dst_ops,
-        c.src_ops,
-        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
-        opsel_exprs=c.opsel_exprs,
-        use_gfx1250_helpers=c.arch_name == 'gfx1250',
-    )
-    DISPATCH['mad_mixlo_f16'] = lambda c: gen_mad_mix_lo_hi(
-        c.dst_ops,
-        c.src_ops,
-        is_lo=True,
-        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
-        opsel_exprs=c.opsel_exprs,
-        use_gfx1250_helpers=c.arch_name == 'gfx1250',
-    )
-    DISPATCH['mad_mixhi_f16'] = lambda c: gen_mad_mix_lo_hi(
-        c.dst_ops,
-        c.src_ops,
-        is_lo=False,
-        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
-        opsel_exprs=c.opsel_exprs,
-        use_gfx1250_helpers=c.arch_name == 'gfx1250',
-    )
-    DISPATCH['mad_mix_f32_bf16'] = lambda c: gen_mad_mix_bf16(
-        c.dst_ops,
-        c.src_ops,
-        result='f32',
-        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
-        opsel_exprs=c.opsel_exprs,
-        use_gfx1250_helpers=c.arch_name == 'gfx1250',
-    )
-    DISPATCH['mad_mixlo_bf16'] = lambda c: gen_mad_mix_bf16(
-        c.dst_ops,
-        c.src_ops,
-        result='lo',
-        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
-        opsel_exprs=c.opsel_exprs,
-        use_gfx1250_helpers=c.arch_name == 'gfx1250',
-    )
-    DISPATCH['mad_mixhi_bf16'] = lambda c: gen_mad_mix_bf16(
-        c.dst_ops,
-        c.src_ops,
-        result='hi',
-        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
-        opsel_exprs=c.opsel_exprs,
-        use_gfx1250_helpers=c.arch_name == 'gfx1250',
-    )
-    DISPATCH['dot2'] = lambda c: gen_dot2(
-        c.dst_ops, c.src_ops, c.cls, opsel_exprs=c.opsel_exprs
-    )
-    DISPATCH['dot2_f16_f16'] = lambda c: gen_dot2_true16(c.dst_ops, c.src_ops, c.cls)
-    DISPATCH['dot2_bf16_bf16'] = lambda c: gen_dot2_true16(c.dst_ops, c.src_ops, c.cls)
-    DISPATCH['dot4'] = lambda c: gen_dot4(c.dst_ops, c.src_ops, c.cls)
-    DISPATCH['dot8'] = lambda c: gen_dot8(c.dst_ops, c.src_ops, c.cls)
+    # MIX arithmetic is emitted by rj_arith_float.gen_mixed_fma.
+    # DOT: every semantic class routes here, so the generator keeps no
+    # dot2_/dot4_/dot8_ fallback. test_dot_dispatch_covers_every_semantic_class
+    # fails if a new class arrives without an entry.
+    for _cls in ('dot2_f32_f16', 'dot2_f32_bf16', 'dot2_i32_i16', 'dot2_u32_u16'):
+        DISPATCH[_cls] = lambda c: gen_dot2(
+            c.dst_ops,
+            c.src_ops,
+            c.cls,
+            opsel_exprs=c.opsel_exprs,
+            dot_accumulation=c.profile.float_dot_accumulation,
+        )
+    for _cls in ('dot2_f16_f16', 'dot2_bf16_bf16'):
+        DISPATCH[_cls] = lambda c: gen_dot2_true16(
+            c.dst_ops, c.src_ops, c.cls, c.profile.float_dot_accumulation
+        )
+    for _cls in ('dot4_i32_i8', 'dot4_i32_iu8', 'dot4_u32_u8', 'dot4_f32_fp8'):
+        DISPATCH[_cls] = lambda c: gen_dot4(
+            c.dst_ops,
+            c.src_ops,
+            c.cls,
+            operation=c.sem.operation,
+            dot_accumulation=c.profile.float_dot_accumulation,
+            opsel_exprs=c.opsel_exprs,
+        )
+    for _cls in ('dot8_i32_i4', 'dot8_i32_iu4', 'dot8_u32_u4'):
+        DISPATCH[_cls] = lambda c: gen_dot8(
+            c.dst_ops, c.src_ops, c.cls, opsel_exprs=c.opsel_exprs
+        )
 
     # Matrix
     DISPATCH['accvgpr_read'] = lambda c: gen_accvgpr_read(c.dst_ops, c.src_ops)
     DISPATCH['accvgpr_write'] = lambda c: gen_accvgpr_write(c.dst_ops, c.src_ops)
-    DISPATCH['mfma'] = lambda c: gen_mfma(
-        c.inst, c.dst_ops, c.src_ops, arch_name=c.arch_name
-    )
+    DISPATCH['mfma'] = gen_mfma
 
 
 _register_handlers()

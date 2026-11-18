@@ -46,9 +46,9 @@
 extern "C" {
 #endif
 
-#define DOCA_GPUNETIO_VERSION_MAJOR 2
+#define DOCA_GPUNETIO_VERSION_MAJOR 5
 #define DOCA_GPUNETIO_VERSION_MINOR 0
-#define DOCA_GPUNETIO_VERSION_PATCH 2
+#define DOCA_GPUNETIO_VERSION_PATCH 0
 
 #define DOCA_GPUNETIO_VERSION_MAJOR_SHIFT 16
 #define DOCA_GPUNETIO_VERSION_MINOR_SHIFT 8
@@ -70,8 +70,8 @@ extern "C" {
      (DOCA_GPUNETIO_MIN_COMPAT_DEVICE_CODE_VERSION_MINOR << DOCA_GPUNETIO_VERSION_MINOR_SHIFT) | \
      (DOCA_GPUNETIO_MIN_COMPAT_DEVICE_CODE_VERSION_PATCH << DOCA_GPUNETIO_VERSION_PATCH_SHIFT))
 
-#define DOCA_GPUNETIO_MIN_COMPAT_HOST_CODE_VERSION_MAJOR 0
-#define DOCA_GPUNETIO_MIN_COMPAT_HOST_CODE_VERSION_MINOR 2
+#define DOCA_GPUNETIO_MIN_COMPAT_HOST_CODE_VERSION_MAJOR 5
+#define DOCA_GPUNETIO_MIN_COMPAT_HOST_CODE_VERSION_MINOR 0
 #define DOCA_GPUNETIO_MIN_COMPAT_HOST_CODE_VERSION_PATCH 0
 #define DOCA_GPUNETIO_MIN_COMPAT_HOST_CODE_VERSION                                             \
     ((DOCA_GPUNETIO_MIN_COMPAT_HOST_CODE_VERSION_MAJOR << DOCA_GPUNETIO_VERSION_MAJOR_SHIFT) | \
@@ -124,6 +124,14 @@ extern "C" {
 #define DOCA_GPUNETIO_VERBS_MKEY_SWAPPED 1
 
 /**
+ * On NVIDIA NICs, we can violate the memory model using a lighter
+ * fence acquire in poll_cq* functions. Set to 1 by default.
+ */
+#ifndef DOCA_GPUNETIO_VERBS_EXP_NIC_FENCE_ACQUIRE_CTA
+#define DOCA_GPUNETIO_VERBS_EXP_NIC_FENCE_ACQUIRE_CTA 1
+#endif
+
+/**
  * Enable debug prints in this headerfile.
  * Bad for performance, should be used only for debugging
  */
@@ -149,6 +157,32 @@ extern "C" {
  * CQE Opcode Shift Bytes
  */
 #define DOCA_GPUNETIO_VERBS_MLX5_CQE_OPCODE_SHIFT 4
+
+/**
+ * Signal packing in the RDMA immediate (host order after le32toh):
+ * bit 0:                                     signal op
+ * bits 1-(IMM_VAL_SHIFT - 1):                signal id
+ * bits IMM_VAL_SHIFT-31:                     signal value
+ *
+ * IMM_VAL_SHIFT must be defined by the build as 24 or 16
+ */
+#define DOCA_GPUNETIO_VERBS_SIGNAL_IMM_OP_SHIFT 0
+#define DOCA_GPUNETIO_VERBS_SIGNAL_IMM_OP_MASK 0x1u
+#define DOCA_GPUNETIO_VERBS_SIGNAL_IMM_ID_SHIFT 1
+#ifndef DOCA_GPUNETIO_VERBS_SIGNAL_IMM_VAL_SHIFT
+#define DOCA_GPUNETIO_VERBS_SIGNAL_IMM_VAL_SHIFT 16
+#endif
+
+#if DOCA_GPUNETIO_VERBS_SIGNAL_IMM_VAL_SHIFT != 16 && DOCA_GPUNETIO_VERBS_SIGNAL_IMM_VAL_SHIFT != 24
+#warning "DOCA_GPUNETIO_VERBS_SIGNAL_IMM_VAL_SHIFT must be 16 or 24"
+#endif
+
+#define DOCA_GPUNETIO_VERBS_SIGNAL_IMM_ID_MASK                    \
+    ((UINT32_C(1) << (DOCA_GPUNETIO_VERBS_SIGNAL_IMM_VAL_SHIFT -  \
+                      DOCA_GPUNETIO_VERBS_SIGNAL_IMM_ID_SHIFT)) - \
+     UINT32_C(1))
+#define DOCA_GPUNETIO_VERBS_SIGNAL_IMM_VAL_MASK \
+    (UINT32_MAX >> DOCA_GPUNETIO_VERBS_SIGNAL_IMM_VAL_SHIFT)
 
 #define DOCA_GPUNETIO_VERBS_CQE_SIZE 64
 
@@ -309,6 +343,7 @@ enum {
     DOCA_GPUNETIO_VERBS_NIC_HANDLER_FLAG_GPU_SM = 1 << 1,
     DOCA_GPUNETIO_VERBS_NIC_HANDLER_FLAG_BF = 1 << 2,
     DOCA_GPUNETIO_VERBS_NIC_HANDLER_FLAG_NO_DBR = 1 << 3,
+    DOCA_GPUNETIO_VERBS_NIC_HANDLER_FLAG_FREE_FLOW = 1 << 4,
 };
 
 /**
@@ -327,7 +362,9 @@ enum doca_gpu_dev_verbs_nic_handler {
     DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_NO_DBR =
         DOCA_GPUNETIO_VERBS_NIC_HANDLER_FLAG_GPU_SM |
         DOCA_GPUNETIO_VERBS_NIC_HANDLER_FLAG_NO_DBR,  ///< GPU SM, no need to update the DBREC
-    DOCA_GPUNETIO_VERBS_NIC_HANDLER_TYPE_MAX,         ///< Sentinel value
+    DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY_FREE_FLOW =
+        DOCA_GPUNETIO_VERBS_NIC_HANDLER_FLAG_CPU_PROXY |
+        DOCA_GPUNETIO_VERBS_NIC_HANDLER_FLAG_FREE_FLOW,  ///< CPU Proxy with free flow
 };
 
 /**
@@ -341,8 +378,33 @@ enum doca_gpu_dev_verbs_gpu_code_opt {
     DOCA_GPUNETIO_VERBS_GPU_CODE_OPT_SKIP_AVAILABILITY_CHECK =
         (1 << 1),                                                 ///< Skip availability check
     DOCA_GPUNETIO_VERBS_GPU_CODE_OPT_SKIP_DB_RINGING = (1 << 2),  ///< Skip DB ringing
-    DOCA_GPUNETIO_VERBS_GPU_CODE_OPT_CPU_PROXY_UPDATE_PI = (1 << 3),  ///< in case of CPU proxy, update producer index
-    DOCA_GPUNETIO_VERBS_GPU_CODE_OPT_MAX = INT_MAX                ///< Sentinel value
+    DOCA_GPUNETIO_VERBS_GPU_CODE_OPT_CPU_PROXY_UPDATE_PI =
+        (1 << 3),                                   ///< in case of CPU proxy, update producer index
+    DOCA_GPUNETIO_VERBS_GPU_CODE_OPT_MAX = INT_MAX  ///< Sentinel value
+};
+
+enum {
+    DOCA_GPUNETIO_VERBS_CQ_FLAG_COLLAPSED = 1 << 0,
+    DOCA_GPUNETIO_VERBS_CQ_FLAG_HOST = 1 << 1,
+    DOCA_GPUNETIO_VERBS_CQ_FLAG_UNKNOWN = 1 << 7,
+};
+
+/**
+ * @enum doca_gpu_dev_verbs_cq_type
+ * @brief Completion queue storage type.
+ *
+ * UNKNOWN is resolved by host-side QP creation only. Device code loads the resolved
+ * CQ type from the QP when a helper is instantiated with UNKNOWN.
+ */
+enum doca_gpu_dev_verbs_cq_type : uint8_t {
+    DOCA_GPUNETIO_VERBS_CQ_64B = 0,  ///< 64B CQEs in GPU memory
+    DOCA_GPUNETIO_VERBS_CQ_64B_COLLAPSED =
+        DOCA_GPUNETIO_VERBS_CQ_FLAG_COLLAPSED,  ///< Collapsed 64B CQEs in GPU memory
+    DOCA_GPUNETIO_VERBS_CQ_64B_COLLAPSED_HOST =
+        DOCA_GPUNETIO_VERBS_CQ_FLAG_COLLAPSED |
+        DOCA_GPUNETIO_VERBS_CQ_FLAG_HOST,  ///< Collapsed 64B CQEs in host memory
+    DOCA_GPUNETIO_VERBS_CQ_UNKNOWN =
+        DOCA_GPUNETIO_VERBS_CQ_FLAG_UNKNOWN,  ///< Resolve CQ type from QP attributes
 };
 
 enum doca_gpu_dev_verbs_signal_op {
@@ -500,9 +562,14 @@ struct doca_gpunetio_ib_mlx5_cqe64 {
     __be32 byte_cnt;
     __be64 timestamp;
     __be32 sop_drop_qpn;
-    __be16 wqe_counter;
-    uint8_t signature;
-    uint8_t op_own;
+    union {
+        struct {
+            __be16 wqe_counter;
+            uint8_t signature;
+            uint8_t op_own;
+        };
+        __be32 wqe_counter_sig_op_own_raw;
+    };
 };
 
 struct doca_gpunetio_ib_mlx5_err_cqe_ex {

@@ -1,7 +1,7 @@
 #
 #
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(
     rocprofiler-sdk-tests-thread-trace
@@ -33,6 +33,15 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 10
     LABELS "integration-tests"
     PRELOAD "$<TARGET_FILE:thread-trace-agent-tool>")
+
+# Same agent profiling test, but forcing the HSA queue/signal backend instead of KFD.
+rocprofiler_add_integration_execute_test(
+    thread-trace-api-agent-hsa-fallback-test
+    TARGET thread-trace-test-app
+    TIMEOUT 10
+    LABELS "integration-tests"
+    PRELOAD "$<TARGET_FILE:thread-trace-agent-tool>"
+    ENVIRONMENT "ROCPROFILER_SQTT_FORCE_HSA=1")
 
 # Start before hsa_init(): verifies the request is cached and replayed once HSA registers.
 rocprofiler_add_integration_execute_test(
@@ -86,7 +95,7 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_sdk_sqtt_triple_buffer_disabled(TRIPLE_BUFFER_DISABLED)
 set(TRIPLE_BUFFER_DISABLED ${TRIPLE_BUFFER_DISABLED} OR ${IS_DISABLED})
 
-# Checks for data integrity with ttracedata
+# Checks data integrity with ttracedata on a single shader engine.
 rocprofiler_add_integration_execute_test(
     thread-trace-api-triple-buffer-consistency-test
     TARGET thread-trace-test-app
@@ -94,6 +103,18 @@ rocprofiler_add_integration_execute_test(
     PRELOAD "$<TARGET_FILE:thread-trace-triple-buffer-tool>"
     ENVIRONMENT "TRIPLEBUFFER=1;ATT_NODETAIL=1;ATT_SLOW_CALLBACK=0"
     DISABLED ${TRIPLE_BUFFER_DISABLED})
+
+# Checks tagged data and repeated buffer swaps on every shader engine of at least one GPU.
+rocprofiler_add_integration_execute_test(
+    thread-trace-api-triple-buffer-multi-se-consistency-test
+    TARGET thread-trace-test-app
+    TIMEOUT 120
+    PRELOAD "$<TARGET_FILE:thread-trace-triple-buffer-multise-tool>"
+    ENVIRONMENT "TRIPLEBUFFER=1;ATT_LOOP_COUNT=2500"
+    PASS_REGULAR_EXPRESSION "Multi-SE triple-buffer validation passed"
+    DISABLED ${TRIPLE_BUFFER_DISABLED}
+    DISABLED_CODECOV
+    DISABLED_MEMCHECKS "Sanitizer")
 
 # Collects a lot of data, and check if parsing works successfully
 rocprofiler_add_integration_execute_test(
@@ -113,7 +134,6 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "TRIPLEBUFFER=1;ATT_NODETAIL=1;ATT_SLOW_CALLBACK=1"
     DISABLED ${TRIPLE_BUFFER_DISABLED})
 
-# Some runtime versions have a problem with this. Disabling until that is fully resolved.
 # Tests for thread trace not paused during application run (global destructor)
 rocprofiler_add_integration_execute_test(
     thread-trace-api-triple-buffer-no-pause-test
@@ -121,7 +141,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 120
     PRELOAD "$<TARGET_FILE:thread-trace-triple-buffer-tool>"
     ENVIRONMENT "TRIPLEBUFFER=1;EXECUTE_PAUSE=0"
-    DISABLED ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS} OR ${TRIPLE_BUFFER_DISABLED})
+    DISABLED ${TRIPLE_BUFFER_DISABLED})
 
 # Tests for thread trace starting and stopping multiple times during the application
 rocprofiler_add_integration_execute_test(

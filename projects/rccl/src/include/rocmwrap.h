@@ -10,6 +10,7 @@
 
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>  // hsa_amd_portable_export_dmabuf (DMA-BUF export)
+#include <unistd.h>
 #include "checks.h"
 
 #ifndef CU_STREAM_WRITE_VALUE_DEFAULT
@@ -39,9 +40,9 @@
 #define NCCL_CUMEM_VERSION_SUPPORTED(v) \
   (NCCL_VER_GE(v, ROCM_VER_7_12_60540) || NCCL_VER_IN(v, ROCM_VER_7_0_2_2, ROCM_VER_7_0_3_0))
 
-// cuMem HOST allocations: native only. NOT part of the 7.0.2.x backport (relies
-// on hipDeviceAttributeHostNumaId, which is absent there).
-#define NCCL_CUMEM_HOST_VERSION_SUPPORTED(v) NCCL_VER_GE(v, ROCM_VER_7_12_60540)
+// cuMem HOST allocations: native 7.12 OR the 7.0.2.x backport.
+#define NCCL_CUMEM_HOST_VERSION_SUPPORTED(v) \
+  (NCCL_VER_GE(v, ROCM_VER_7_12_60540) || NCCL_VER_IN(v, ROCM_VER_7_0_2_2, ROCM_VER_7_0_3_0))
 
 // Back-compat alias for the few call sites that compare against the native
 // minimum directly.
@@ -52,23 +53,48 @@
 #define NCCL_CE_BATCH_ASYNC_VERSION_SUPPORTED(v) \
   (NCCL_VER_GE(v, ROCM_VER_7_12_0) || NCCL_VER_IN(v, ROCM_VER_7_0_2_2, ROCM_VER_7_0_3_0))
 
-// === Capability gates: prefer the CMake symbol probe, fall back to version ==
-// Method 1 (preferred): CMake sets RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED when
-//   check_symbol_exists(hipMemGetHandleForAddressRange ...) succeeds.
-// Method 2 (fallback): the version predicate above, for builds where the probe
-//   did not run / was not wired in.
+// === Capability gate: both the symbol probe and the version must agree =====
+// CMake sets RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED when
+// check_symbol_exists(hipMemGetHandleForAddressRange ...) succeeds. The symbol
+// is declared in headers on backport builds outside the supported window too,
+// so it cannot gate the feature on its own: the version predicate has to agree.
 #if defined(RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)
-#define NCCL_CUMEM_DMABUF_EXPORT_GATE 1
+#define NCCL_CUMEM_DMABUF_EXPORT_PROBE 1
 #else
-#define NCCL_CUMEM_DMABUF_EXPORT_GATE NCCL_CUMEM_VERSION_SUPPORTED(HIP_VERSION)
+#define NCCL_CUMEM_DMABUF_EXPORT_PROBE 0
 #endif
+
+// Both gate inputs are parameters so every (probe, version) combination can be
+// asserted in unit tests; the gate itself is this build's instantiation.
+#define NCCL_CUMEM_DMABUF_EXPORT_GATE_FOR(probe, v) ((probe) && NCCL_CUMEM_VERSION_SUPPORTED(v))
+
+#define NCCL_CUMEM_DMABUF_EXPORT_GATE NCCL_CUMEM_DMABUF_EXPORT_GATE_FOR(NCCL_CUMEM_DMABUF_EXPORT_PROBE, HIP_VERSION)
+
+// CMake sets RCCL_HIP_MEM_LOCATION_HOST_SUPPORTED when hipMemLocationTypeHost
+// compiles. Stock ROCm 7.0.2 has the backport's HIP_VERSION but no host location
+// types, so compile-time host VMM code needs the probe as well as the version.
+#if defined(RCCL_HIP_MEM_LOCATION_HOST_SUPPORTED)
+#define NCCL_CUMEM_HOST_PROBE 1
+#else
+#define NCCL_CUMEM_HOST_PROBE 0
+#endif
+
+#define NCCL_CUMEM_HOST_GATE_FOR(probe, v) ((probe) && NCCL_CUMEM_HOST_VERSION_SUPPORTED(v))
+
+#define NCCL_CUMEM_HOST_GATE NCCL_CUMEM_HOST_GATE_FOR(NCCL_CUMEM_HOST_PROBE, HIP_VERSION)
+
+// Kernel version packing used by ncclGetKernelVersionCode(). cuMem works below 6.8; 6.8 is a performance recommendation.
+#define NCCL_KERNEL_VERSION_CODE(major, minor) (((major) << 16) | ((minor) << 8))
+#define NCCL_CUMEM_PERF_KERNEL_VERSION NCCL_KERNEL_VERSION_CODE(6, 8)
+#define NCCL_CUMEM_KERNEL_PERF_RECOMMENDED(kernelVersionCode) \
+  ((kernelVersionCode) >= NCCL_CUMEM_PERF_KERNEL_VERSION)
 
 // HIP: implemented in rma_proxy_launch.cc (hipStreamBatchMemOp + old-HIP fallback).
 // CUDA: implemented in cudawrap.cc (cuStreamBatchMemOp).
 ncclResult_t ncclCuStreamBatchMemOp(cudaStream_t stream, unsigned int numOps, CUstreamBatchMemOpParams* batchParams);
 
 // Re-declare the DMA-BUF export entry as a weak reference. hsa_init,
-// hsa_system_get_info and hsa_status_string are required and resolve as hard
+// hsa_shut_down, hsa_system_get_info and hsa_status_string are required and resolve as hard
 // dependencies, but hsa_amd_portable_export_dmabuf is optional: older ROCr
 // runtimes may not export it. A weak reference resolves to NULL at load time
 // when the symbol is absent (instead of failing librccl's load with an
@@ -78,7 +104,7 @@ ncclResult_t ncclCuStreamBatchMemOp(cudaStream_t stream, unsigned int numOps, CU
 extern "C" hsa_status_t hsa_amd_portable_export_dmabuf(const void* ptr, size_t size, int* dmabuf, uint64_t* offset)
   __attribute__((weak));
 
-// hsa_init, hsa_system_get_info and hsa_status_string are called directly via the
+// hsa_init, hsa_shut_down, hsa_system_get_info and hsa_status_string are called directly via the
 // hsa-runtime64 library that librccl links against. Only the DMA-BUF export entry
 // keeps a function-pointer indirection, because it doubles as the runtime feature
 // gate: pfn_hsa_amd_portable_export_dmabuf stays NULL when the platform does not
@@ -163,7 +189,42 @@ typedef hsa_status_t (*PFN_hsa_amd_portable_export_dmabuf)(const void* ptr, size
 
 DECLARE_ROCM_PFN_EXTERN(hsa_amd_portable_export_dmabuf); // DMA-BUF feature gate
 
+// Export `buffer` through the HSA portable DMA-BUF exporter and register the resulting fd
+// with a net plugin's regMrDmaBuf (identical signature for ncclNet_t and ncclCollNet_t).
+// The fd is closed on every path, so it can neither leak nor be clobbered by a later
+// export into a caller-owned variable. Returns false when either step fails, so the caller
+// can fall back to a plain regMr; callers must still gate on
+// pfn_hsa_amd_portable_export_dmabuf being non-NULL.
+static inline bool ncclHsaRegMrDmaBuf(ncclResult_t (*regMrDmaBuf)(void*, void*, size_t, int, uint64_t, int, void**),
+                                      void* comm, void* buffer, size_t size, int type, void** mhandle) {
+  int fd = -1;
+  uint64_t offset = 0;
+  hsa_status_t status = pfn_hsa_amd_portable_export_dmabuf(buffer, size, &fd, &offset);
+  if (status != HSA_STATUS_SUCCESS) {
+    const char* errStr;
+    hsa_status_string(status, &errStr);
+    WARN("hsa_amd_portable_export_dmabuf failed for %p (size %zu): '%s'", buffer, size, errStr);
+    return false;
+  }
+  ncclResult_t res = regMrDmaBuf(comm, buffer, size, type, offset, fd, mhandle);
+  (void)close(fd);
+  if (res != ncclSuccess) {
+    INFO(NCCL_NET, "DMA-BUF registration of %p (size %zu) failed with %d", buffer, size, res);
+    return false;
+  }
+  return true;
+}
+
 extern int ncclCuMemEnable();
+extern int ncclIsCuMemSupported();
+// Default visibility: rccl-tests (and other out-of-tree binaries) skip
+// symmetric/device-API paths when the runtime cuMem stack is unusable.
+// librccl is otherwise built with -fvisibility=hidden.
+#if defined(__GNUC__)
+extern int ncclCuMemRuntimeSupported() __attribute__((visibility("default")));
+#else
+extern int ncclCuMemRuntimeSupported();
+#endif
 extern int ncclCuMemHostEnable();
 extern int64_t rcclParamForceEnableDMABUF();
 extern int64_t ncclParamDmaBufEnable();

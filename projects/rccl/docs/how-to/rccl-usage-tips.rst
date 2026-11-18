@@ -32,16 +32,47 @@ set the HSA environment variable as follows:
 This feature requires GPUs that support peer-to-peer access along with
 proper large BAR addressing support.
 
+AMD EPYC inter-socket bandwidth
+===============================
+
+On a multi-socket AMD EPYC host, RCCL models the CPU-to-CPU link from the
+CPUID family:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Generation
+     - CPUID family
+     - Modeled bandwidth
+   * - Zen 1/2 (Naples, Rome)
+     - 23
+     - 16 GB/s
+   * - Zen 3/4 (Milan, Genoa, Bergamo)
+     - 25
+     - 24 GB/s
+   * - Zen 5 (Turin)
+     - 26
+     - 32 GB/s
+
+Graph search uses this weight when a path crosses sockets: PCIe GPUs on
+different sockets, or a GPU reaching a NIC on the other socket. The topology
+log shows the link itself (``SYS[16.0]``, ``SYS[24.0]``, or ``SYS[32.0]``).
+Search then picks the largest entry in its speed table that does not exceed
+the slowest hop, so a 32 GB/s Turin link can still produce a 24 GB/s graph
+speed. Intra-node GPU-to-GPU traffic that stays on xGMI does not cross
+that link, so its bandwidth is unchanged. ``NCCL_GRAPH_FILE``
+overrides the computed graph.
+
 Symmetric memory and ``NCCL_P2P_LEVEL``
 =======================================
 
 RCCL can accelerate some collectives (for example, allreduce, allgather, and
 reduce-scatter) through a *symmetric memory* path. This path uses
 :doc:`Virtual Memory Management <../api-reference/api-library>`-backed
-buffers that are registered as symmetric windows
-(``ncclCommWindowRegister`` with the ``NCCL_WIN_COLL_SYMMETRIC`` flag, or
-buffers allocated with ``ncclMemAlloc``) so that every participating rank can
-address the buffer directly.
+buffers that are registered as symmetric windows (``ncclCommWindowRegister``
+with the ``NCCL_WIN_COLL_SYMMETRIC`` flag) so that every participating rank can
+address the buffer directly. ``ncclMemAlloc`` allocates memory suitable for such
+a registration, but it does not create a symmetric window on its own.
 
 Whether a communicator can use symmetric memory is decided once at
 ``ncclCommInitRank`` time. The prerequisites are:
@@ -78,6 +109,204 @@ missing (for example, ``cuMemEnable`` or ``globalGinSupport``). If you expect
 the symmetric path but it is disabled, check those prerequisites rather than
 ``NCCL_P2P_LEVEL``.
 
+.. _symmetric-tdm-kernels:
+
+Tensor Data Mover symmetric kernels on gfx1250
+----------------------------------------------
+
+On gfx1250 (MI450), the symmetric allgather, allreduce, and reduce-scatter
+kernels have a variant that stages data through the Tensor Data Mover (TDM)
+rather than per-lane vector loads and stores. TDM is a DMA engine that moves
+tiles between global memory and the LDS (shared memory). As in NCCL 2.31.2,
+these kernels are enabled by default (``NCCL_SYM_TMA_ENABLE=1``).
+
+You don't need to change anything in your application to use them. A collective
+can use a TDM kernel when all of the following are true:
+
+- RCCL was built with ``gfx1250`` in ``GPU_TARGETS`` against a ROCm SDK that
+  ships the TDM descriptor header (``hip/amd_detail/amd_gfx1250_TDM.h``). The
+  TDM kernels are not generated otherwise.
+- The communicator can use symmetric memory (see the prerequisites above), and
+  the send and receive buffers are registered as symmetric windows, as for any
+  symmetric kernel.
+- The operation is an allgather of any datatype, or an allreduce with
+  ``ncclSum`` or a reduce-scatter with ``ncclSum`` or ``ncclAvg`` on a
+  floating-point type (``float``, ``half``, ``bfloat16``, ``fp8_e4m3``, or
+  ``fp8_e5m2``).
+- The send and receive buffers sit at the same offset, modulo 16 bytes, within
+  their windows. For an in-place allgather or reduce-scatter, the per-rank slice
+  must also be a multiple of 16 bytes.
+- The message is large enough for the TDM deep loop to engage.
+
+The symmetric cost model then chooses between the TDM kernel and the vector-load
+kernels. The TDM kernels cost more setup latency but reach a higher bandwidth
+ceiling, so the model picks them for large messages. When it does, the
+kernel launches at 512 threads (16 waves) per block and the widest block count
+allowed, because TDM throughput keeps scaling with resident blocks.
+
+To check which kernel ran, enable tuning logs and look for the ``[Symmetric]``
+line. TDM kernels have ``Tma`` in their name:
+
+.. code-block:: shell
+
+   NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=TUNING ./your_app
+   # ... ReduceScatter [Symmetric]: 67108864 Bytes -> Kernel ReduceScatter_TmaLD nchannels 64 nthreads 512 nWorks 1
+
+In rccl-tests, ``-A 1`` prints the selected algorithm for each size. With
+symmetric registration (``-R 2``), the ``algo`` column shows ``SymTDM`` for sizes
+that use a TDM kernel and ``SYM`` for sizes that use a vector-load symmetric
+kernel:
+
+.. code-block:: shell
+
+   ./reduce_scatter_perf -g 4 -b 64M -e 256M -f 4 -R 2 -A 1
+   #       size  ...   algo     proto   nchannels
+   #   67108864  ...    SYM    SIMPLE          62
+   #  268435456  ...  SymTDM    SIMPLE          64
+
+``NCCL_SYM_TMA_ENABLE`` controls these kernels:
+
+- ``0`` disables them.
+- ``1`` (the default) offers them to the cost model.
+- ``2`` forces them wherever the collective has one, ignoring the cost model and
+  the minimum size. Use ``2`` for A/B measurements only.
+
+Set ``NCCL_SYM_TMA_ENABLE`` to the same value on every rank. Each rank reads it
+on its own, and ranks that disagree can pick different kernels for the same
+collective and hang.
+
+.. _device-symmetric-memory:
+
+Device-side symmetric memory access (``ncclFindWindow``)
+========================================================
+
+In addition to the host-side collective API, RCCL exposes a *device-side* API
+that lets your own GPU kernels read and write peer ranks' symmetric buffers
+directly, without a host-driven collective. This is the mechanism that backs
+RCCL's fused symmetric kernels. It requires the same symmetric-memory
+prerequisites described above.
+
+Working with symmetric memory from a kernel involves three pieces:
+
+- A **device communicator** (``ncclDevComm``), created on the host with
+  ``ncclDevCommCreate`` and passed to the kernel by value. It carries the rank
+  layout, barriers, and the device-side window registry.
+- One or more **symmetric windows**, registered on the host with
+  ``ncclCommWindowRegister`` using the ``NCCL_WIN_COLL_SYMMETRIC`` flag.
+  ``ncclMemAlloc`` only allocates and maps symmetric-capable memory; it does not
+  populate the window registry, so the explicit registration call is required.
+- The **device API** (available through ``nccl_device.h``) that turns a window
+  plus an offset into a pointer to a specific peer's copy of the buffer.
+
+When a kernel already holds the ``ncclWindow_t`` handle (for example, because
+the host passed it as a launch argument), it can call ``ncclGetLsaPointer``
+directly. When a kernel only has a raw device pointer, it can resolve the
+backing window from the device-side registry with ``ncclFindWindow`` (introduced
+in NCCL 2.28.7), with no host round-trip:
+
+.. code-block:: cpp
+
+   template <typename Coop>
+   ncclWindow_t ncclFindWindow(Coop coop, ncclDevComm const& comm, void const* ptr);
+
+- ``coop`` is a cooperative-thread group (for example ``ncclCoopCta()``). The
+  lookup is warp-coalesced, so **every thread in the group must call it**; the
+  same window handle is returned to all participating threads.
+- ``comm`` is the device communicator passed to the kernel.
+- ``ptr`` is any address that falls within a registered symmetric window's
+  ``[base, base + size)`` range.
+
+``ncclFindWindow`` walks the communicator's window registry, which
+``ncclCommWindowRegister`` populates, and returns the matching ``ncclWindow_t``.
+``ncclDevCommCreate`` does not fill this registry; it only publishes a pointer
+to it into the device communicator. Passing a pointer that no registered
+window covers is undefined behavior rather than a recoverable error: the lookup
+returns only from its hit path, so a miss runs past the end of the registry and
+faults. Make sure the pointer is covered by a registration instead of testing
+the result against ``nullptr``. Once you have a window, resolve a specific
+peer's copy of the buffer with one of the pointer helpers:
+
+- ``ncclGetLsaPointer(window, offset, peer)`` returns a pointer to ``peer``'s
+  copy of the buffer at ``offset`` bytes into the window, for peers reachable
+  through Local Symmetric Access (LSA, that is, direct intra-node
+  peer-to-peer).
+- ``ncclGetPeerPointer(window, offset, team, peer)`` is the team-relative form.
+- ``ncclGetMultimemPointer`` / ``ncclGetLsaMultimemPointer`` return a multicast
+  pointer when multimem is available.
+
+The ``offset`` is measured from the window base, so a buffer registered at its
+base address is accessed at ``offset = 0``.
+
+The kernel below is handed only its local buffer pointer. It resolves the
+backing window on the device, then reads the value stored by its ring neighbor:
+
+.. code-block:: cpp
+
+   #include <nccl_device.h>
+
+   __global__ void readPeerValue(void* localPtr, int* out, ncclDevComm_t comm)
+   {
+       // Synchronize the local symmetric team before touching peer memory.
+       ncclLsaBarrierSession<ncclCoopCta> barrier(
+           ncclCoopCta(), comm, ncclTeamLsa(comm), comm.lsaBarrier, blockIdx.x);
+       barrier.sync(ncclCoopCta(), cuda::memory_order_relaxed);
+
+       // Device-side registry lookup (all threads participate).
+       ncclWindow_t window = ncclFindWindow(ncclCoopCta(), comm, localPtr);
+
+       if (threadIdx.x == 0) {
+           // ncclGetLsaPointer indexes the LSA team, so the peer must be an LSA
+           // rank. Use ncclGetPeerPointer(window, 0, team, peer) to address a
+           // rank of some other team by its rank in that team.
+           int  peer     = (comm.lsaRank + 1) % comm.lsaSize;
+           int* peerData = reinterpret_cast<int*>(ncclGetLsaPointer(window, 0, peer));
+           out[0] = peerData[0];
+       }
+
+       barrier.sync(ncclCoopCta(), cuda::memory_order_release);
+   }
+
+On the host, register the buffer as a symmetric window and build the device
+communicator before launching:
+
+.. code-block:: cpp
+
+   ncclCommWindowRegister(comm, buffer, bytes, &window, NCCL_WIN_COLL_SYMMETRIC);
+
+   ncclDevCommRequirements_t req = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+   req.lsaBarrierCount = 1;
+   ncclDevComm_t devComm;
+   ncclDevCommCreate(comm, &req, &devComm);
+
+   readPeerValue<<<1, 64, 0, stream>>>(buffer, out, devComm);
+
+The device communicator holds a pointer to the communicator's live window
+registry, so ``ncclFindWindow`` resolves any window registered with
+``NCCL_WIN_COLL_SYMMETRIC``, whether it was registered before or after
+``ncclDevCommCreate``. The only ordering requirement is that the registration
+completes before the kernel that calls ``ncclFindWindow`` runs, on a
+communicator for which symmetric memory is available. If ``ncclDevCommCreate``
+returns ``ncclInvalidUsage``, or a kernel
+faults inside the lookup, confirm the prerequisites above
+(``NCCL_CUMEM_ENABLE=1``, ``NCCL_WIN_ENABLE=1``, peer-to-peer capable ranks),
+that the buffer was registered with ``NCCL_WIN_COLL_SYMMETRIC``, and that the
+pointer passed to ``ncclFindWindow`` lies within that registration.
+
+``ncclDevCommCreate`` copies the ``ncclDevCommRequirements_t`` you pass,
+including its resource and team lists, so you can free or reuse that structure
+as soon as the call returns. The copy keeps the ``outBufferHandle``,
+``outGinSignalStart``, ``outGinCounterStart`` and ``outMultimemHandle``
+pointers as they are, and RCCL writes through them, and fills in the
+``ncclDevComm_t`` you pass, when the device communicator is actually created.
+Inside a ``ncclGroupStart``/``ncclGroupEnd`` block that happens at
+``ncclGroupEnd``, and on a nonblocking communicator only once the operation
+completes, so the ``ncclDevComm_t`` and the objects those pointers target, such
+as a handle filled in by ``ncclLsaBarrierCreateRequirement``, must stay valid
+until then. A request that ``ncclDevCommCreate`` itself rejects, for example with
+``ncclInvalidArgument`` for ``cftCaps`` that the communicator does not support,
+releases its copy before returning, so you can change the requirements and call
+it again without leaking memory.
+
 Ignoring CPU affinity with multi-node
 =====================================
 
@@ -108,12 +337,15 @@ small-message (under 16 MB) latency and can degrade it by roughly
 5-10x compared to earlier ROCm releases. Setting ``HSA_NO_SCRATCH_RECLAIM=1``
 removes the overhead and restores the expected small-message latency.
 
-Improving performance on the MI300X 
-===================================
+Improving performance on the MI300X and MI350X
+===============================================
 
-This section outlines ways to improve RCCL performance on MI300X systems,
-including guidelines for systems with fewer than eight GPUs and the most efficient
-GPU partition modes.
+This section outlines ways to improve RCCL performance on MI300X and MI350X
+systems, including guidelines for systems with fewer than eight GPUs, the most
+efficient GPU partition modes, and channel tuning for multi-node
+configurations. Where behavior applies to both architectures, both are called
+out together; where behavior differs, the difference is described in its own
+subsection.
 
 Configuration with fewer than eight GPUs
 ----------------------------------------
@@ -148,20 +380,23 @@ logical partitioning of XCDs into devices in the ROCm stack. The names are
 derived from the number of logical partitions that are created out of the eight
 XCDs. In the default mode, SPX (Single Partition X-celerator), all eight XCDs are
 viewed as a single logical compute element, meaning that the :doc:`amd-smi <amdsmi:index>`
-utility will show a single MI300X device. In CPX (Core Partitioned X-celerator)
+utility will show a single MI300X or MI350X device. In CPX (Core Partitioned X-celerator)
 mode, each XCD appears as a separate logical GPU, for example, as eight separate
-GPUs in :doc:`amd-smi <amdsmi:index>` per MI300X. CPX mode can be viewed as
+GPUs in :doc:`amd-smi <amdsmi:index>` per MI300X or MI350X device. CPX mode can be viewed as
 having explicit scheduling privileges for each individual compute element (XCD).
+Both the MI300X and MI350X support SPX and CPX compute partitioning modes.
 
 While compute partitioning modes change the space on which you can assign work
 to compute units, the memory partitioning modes (known as Non-Uniform Memory
 Access (NUMA) Per Socket (NPS)) change the number of NUMA domains that a device
 exposes. In other words, it changes the number of HBM stacks which are
 accessible to a compute unit, and therefore the size of its memory space. However,
-for the MI300X, the number of memory partitions must be less than or equal to
-the number of compute partitions. NPS4 (viewing pairs of HBM stacks as a
+for the MI300X and MI350X, the number of memory partitions must be less than or equal to
+the number of compute partitions. On the MI300X, NPS4 (viewing pairs of HBM stacks as a
 disparate element), for example, is only enabled when in CPX mode (viewing each
-XCD as a disparate element).
+XCD as a disparate element). The MI350X doesn't support NPS4; see
+`MI350X partition mode differences`_ for the memory partitioning modes it
+supports instead.
 
 - Compute partition modes 
 
@@ -181,7 +416,7 @@ XCD as a disparate element).
     directly visible to the logical devices in its quadrant. An XCD can still
     access all portions of memory through multi-GPU programming techniques.
 
-The MI300 CPX mode can be accessed using the following :doc:`amdsmi:index`
+The MI300X CPX mode can be accessed using the following :doc:`amdsmi:index`
 commands.
 
 .. code-block:: shell
@@ -189,10 +424,21 @@ commands.
    amd-smi set --gpu all --compute-partition CPX
    amd-smi set --gpu all --memory-partition NPS4
 
-RCCL performance with CPX and NPS4
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+MI350X/MI355X partition modes
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-To run RCCL allreduce on 64 GPUs with CPX+NPS4 mode on the MI300X, use this
+For MI350X/MI355X, RCCL supports the DPX compute partitioning mode and the NPS2 memory partitioning mode.
+
+.. code-block:: shell
+
+   amd-smi set --gpu all --compute-partition DPX
+   amd-smi set --gpu all --memory-partition NPS2
+
+RCCL performance with CPX and NPS4 on MI300X
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The following benchmark results were measured on MI300X systems. To run RCCL
+allreduce on 64 GPUs with CPX+NPS4 mode on the MI300X, use this
 example:
 
 .. code-block:: shell
@@ -233,10 +479,11 @@ A significant performance improvement is achievable with optimized CPX mode,
 which peaks at ~340 GB/s with a single OAM. The difference in bus bandwidth
 between the unoptimized and optimized modes increases as the buffer size grows.
 
-Using RCCL and CPX in PyTorch
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Using RCCL and CPX in PyTorch on MI300X
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The PyTorch all_reduce benchmark is used to reproduce the performance reported
+The following benchmark results were measured on MI300X systems. The PyTorch
+all_reduce benchmark is used to reproduce the performance reported
 by RCCL-Tests with the RCCL and CPX optimizations.
 
 .. note::
@@ -276,6 +523,39 @@ The default allreduce PyTorch benchmark peak bus bandwidth performance is
 ~170 GB/s on a single OAM with ROCm 6.2.4, while the optimized run for CPX on a
 single OAM peaks at ~315 GB/s.
 
+RCCL channel tuning for multi-node MI350X (ROCm 7.14 / RCCL 2.30.4)
+--------------------------------------------------------------------
+
+Starting with RCCL 2.30.4 (ROCm 7.14), the default number of communication
+channels for multi-node collectives on MI350X/MI355X in SPX mode has been reduced from 64 to 48,
+leaving additional Compute Units (CUs) free for compute kernels that run
+concurrently with communication. For computation-bound workloads that rely
+heavily on communication-computation overlap, staying with this default may
+be beneficial since it leaves more CUs available for compute, but this is a
+deliberate trade-off against raw communication bandwidth, so users measuring
+standalone rccl-tests bandwidth (with no concurrent compute contending for
+CUs) or running communication-bound workloads with negligible concurrent
+compute may see a regression compared to ROCm 7.2.1/RCCL 2.27.7. This expected
+behavior can be recovered by setting both ``NCCL_MAX_NCHANNELS=64`` and
+``NCCL_MIN_NCHANNELS=64`` (64 is the effective ceiling for multi-node jobs).
+In either case, the actual channel count in use should be confirmed via
+``NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=INIT,TUNING,COLL`` before drawing
+performance conclusions.
+
+As of ROCm 10.0, the default communication channel count will revert back to
+64 CUs.
+
+.. list-table:: Default max multi-node channel (CU) limits on MI350X by ROCm version
+   :header-rows: 1
+   :widths: 20 30
+
+   * - ROCm version
+     - Default max multi-node CUs
+   * - 7.14
+     - 48
+   * - 10.0
+     - 64
+
 Context tracking on GPUs
 ----------------------------------------
 Context tracking is disabled by default for optimal performance. However, enabling of context tracking can significantly improve performance
@@ -304,7 +584,8 @@ The relevant functions, declared in ``rccl.h``, are described in full in
 - ``ncclCommSuspend`` releases the resources selected by its ``flags``
   argument. Pass ``NCCL_SUSPEND_MEM`` to release dynamic GPU memory
   allocations. After this call, the communicator can't be used until it's
-  resumed.
+  resumed: a collective issued while it's suspended is rejected with
+  ``ncclInvalidUsage``.
 - ``ncclCommResume`` reacquires every resource that the matching
   ``ncclCommSuspend`` call released, after which the communicator can run
   collectives again.
@@ -324,8 +605,10 @@ support. VMM is available only when all of the following conditions are met:
   limited to gfx1250; on other architectures set ``1`` explicitly.
 - The HIP/ROCm runtime provides the cuMem VMM APIs: ROCm 7.12 or later, or a
   ROCm 7.0.x build that includes the cuMem backport.
-- The Linux kernel is version 6.8 or later.
-- The GPU and driver report VMM support.
+- The GPU and driver report VMM support, and the kernel can export cuMem
+  allocations as DMA-BUF.
+
+Linux kernel 6.8 or later is recommended for performance but is not required.
 
 Without VMM support, ``ncclCommSuspend`` and ``ncclCommResume`` still succeed,
 but they can't release the physical GPU memory, so the operation is
@@ -367,4 +650,17 @@ To suspend or resume several communicators together, wrap the calls in
    NCCLCHECK(ncclCommSuspend(commA, NCCL_SUSPEND_MEM));
    NCCLCHECK(ncclCommSuspend(commB, NCCL_SUSPEND_MEM));
    NCCLCHECK(ncclGroupEnd());
+
+   // ... later, the matching resume ...
+
+   NCCLCHECK(ncclGroupStart());
+   NCCLCHECK(ncclCommResume(commA));
+   NCCLCHECK(ncclCommResume(commB));
+   NCCLCHECK(ncclGroupEnd());
+
+.. note::
+
+   When a single process owns one communicator per device through
+   ``ncclCommInitAll``, ``ncclCommSuspend`` and ``ncclCommResume`` need to be
+   wrapped around a group API.
 

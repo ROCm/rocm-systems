@@ -101,7 +101,7 @@ reset-last
 : ${VERSIONS:=22.04}
 : ${ROCM_VERSIONS:=6.4 6.3}
 : ${MPI:=0}
-: ${PYTHON_VERSIONS:="8 9 10 11 12 13"}
+: ${PYTHON_VERSIONS:="8 9 10 11 12 13 14 15"}
 : ${RETRY:=3}
 
 n=0

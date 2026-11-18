@@ -1,17 +1,13 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocjitsu/vm/plugins/plugin_abi.h"
+#include "rocjitsu/vm/plugins/plugin_exports.h"
 
 #include <cstdio>
 #include <cstdlib>
 
 #ifndef PLUGIN_FIXTURE_NAME
 #error "PLUGIN_FIXTURE_NAME must be defined"
-#endif
-
-#ifndef PLUGIN_FIXTURE_ABI
-#define PLUGIN_FIXTURE_ABI ::rocjitsu::kPluginAbiVersion
 #endif
 
 namespace {
@@ -28,10 +24,29 @@ void trace(const char *event) {
 
 class BoundaryPlugin final : public rocjitsu::ExecutionPlugin {
 public:
-  BoundaryPlugin() : ExecutionPlugin("boundary") { trace("create"); }
-  ~BoundaryPlugin() override { trace("destroy"); }
+  BoundaryPlugin()
+      : ExecutionPlugin("boundary"),
+        long_shutdown_(std::getenv("ROCJITSU_PLUGIN_TEST_LONG_SHUTDOWN") != nullptr) {
+    trace("create");
+  }
+  ~BoundaryPlugin() override {
+    trace("destroy");
+    sink().write("boundary:destroy\n");
+  }
 
-  void onInit() override { sink().write("boundary:init\n"); }
+  void onShutdown() override {
+    trace("shutdown");
+    sink().write(long_shutdown_ ? "boundary:shutdown with a longer outgoing record\n"
+                                : "boundary:shutdown\n");
+  }
+
+  void onInit() override {
+    trace("init");
+    sink().write("boundary:init\n");
+  }
+
+private:
+  bool long_shutdown_;
 };
 
 __attribute__((destructor)) void on_unload() { trace("unload"); }
@@ -39,8 +54,8 @@ __attribute__((destructor)) void on_unload() { trace("unload"); }
 } // namespace
 
 extern "C" ROCJITSU_PLUGIN_EXPORT const rocjitsu::PluginMetadata *rocjitsu_plugin_metadata() {
-  static const rocjitsu::PluginMetadata metadata{PLUGIN_FIXTURE_ABI, PLUGIN_FIXTURE_NAME,
-                                                 "rocjitsu-tests", "1", "{}"};
+  trace("metadata");
+  static const rocjitsu::PluginMetadata metadata{PLUGIN_FIXTURE_NAME, "{}"};
   return &metadata;
 }
 

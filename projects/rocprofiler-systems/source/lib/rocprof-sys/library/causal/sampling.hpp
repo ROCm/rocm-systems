@@ -11,11 +11,7 @@
 #include <set>
 #include <type_traits>
 
-namespace rocprofsys
-{
-namespace causal
-{
-namespace sampling
+namespace rocprofsys::causal::sampling
 {
 std::set<int>
 get_signal_types(std::int64_t _tid);
@@ -56,6 +52,4 @@ shutdown();
 
 void
 post_process();
-}  // namespace sampling
-}  // namespace causal
-}  // namespace rocprofsys
+}  // namespace rocprofsys::causal::sampling

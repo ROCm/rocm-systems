@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include <pwd.h>
 #include <sys/stat.h>
@@ -41,7 +22,7 @@
       std::cout << "AMDSMI call returned " << RET << " at line " << __LINE__ << ": " << err_str \
                 << std::endl;                                                                   \
       if (RET != AMDSMI_STATUS_NOT_SUPPORTED && RET != AMDSMI_STATUS_INVAL) {                   \
-        return RET;                                                                             \
+        return static_cast<int>(RET);                                                           \
       }                                                                                         \
     }                                                                                           \
   }
@@ -124,6 +105,16 @@ int main() {
       printf("\tDeviceID: 0x%lx\n", asic_info.device_id);
       printf("\tVendorID: 0x%x\n", asic_info.vendor_id);
       printf("\tRevisionID: 0x%x\n", asic_info.rev_id);
+      if (asic_info.chip_rev_id != UINT32_MAX) {
+        printf("\tChip RevisionID: 0x%x\n", asic_info.chip_rev_id);
+      } else {
+        printf("\tChip RevisionID: N/A\n");
+      }
+      if (asic_info.external_rev_id != UINT32_MAX) {
+        printf("\tExternal RevisionID: 0x%x\n", asic_info.external_rev_id);
+      } else {
+        printf("\tExternal RevisionID: N/A\n");
+      }
       printf("\tSubSystemID: 0x%x\n", asic_info.subsystem_id);
       printf("\tAsic serial: 0x%s\n", asic_info.asic_serial);
       printf("\tOAM id: 0x%x\n", asic_info.oam_id);

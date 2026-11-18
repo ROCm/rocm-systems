@@ -3,10 +3,12 @@
 
 import argparse
 import shlex
+from typing import List
 
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils.logger import console_error, console_log, demarcate
+from utils.logger import demarcate
+from utils.utils_common import PROFILE_OUTPUT_FORMAT
 from utils.utils_profile import pc_sampling_unit
 
 
@@ -19,27 +21,19 @@ class rocprof_v3_profiler(RocProfCompute_Base):
     ) -> None:
         super().__init__(profiling_args, profiler_mode, soc)
 
-    def _live_attach_options(self) -> list[str]:
+    def _live_attach_options(self) -> List[str]:
         args = self.get_args()
-        options = ["--pid", args.attach_pid, "--attach-sync-output"]
+        options = ["--pid", str(args.attach_pid), "--attach-sync-output"]
         if args.attach_duration_msec:
             options += ["--attach-duration-msec", args.attach_duration_msec]
         return options
 
-    def _app_cmd_options(self) -> list[str]:
+    def _app_cmd_options(self) -> List[str]:
         return ["--", *shlex.split(self.get_args().remaining)]
 
-    def get_profiler_options(self) -> list[str]:
+    def get_profiler_options(self) -> List[str]:
         args = self.get_args()
-        if args.kokkos_trace:
-            trace_option = "--kokkos-trace"
-            # NOTE: --kokkos-trace feature is incomplete and is disabled for now.
-            console_error(
-                "The option '--kokkos-trace' is not supported in the current "
-                "version of rocprof-compute. This functionality is planned for a "
-                "future release. Please adjust your profiling options accordingly."
-            )
-        elif getattr(self, "_selected_frameworks", set()):
+        if args.trace_ml_api is not None:
             trace_option = "--marker-trace"
         else:
             trace_option = "--kernel-trace"
@@ -49,7 +43,7 @@ class rocprof_v3_profiler(RocProfCompute_Base):
             f"{self.get_args().output_directory}/out",
             trace_option,
             "--output-format",
-            args.format_rocprof_output,
+            PROFILE_OUTPUT_FORMAT,
         ]
 
         if args.attach_pid:
@@ -59,29 +53,29 @@ class rocprof_v3_profiler(RocProfCompute_Base):
         if args.kernel:
             profiling_options.extend(["--kernel-include-regex", "|".join(args.kernel)])
 
-        # Dispatch filtering
-        dispatch = []
-        # rocprofv3 dispatch indexing is inclusive and starts from 1
-        if args.dispatch:
-            for dispatch_id in args.dispatch:
-                if ":" in dispatch_id:
+        # Kernel iteration filtering
+        iterations = []
+        # rocprofv3 iteration indexing is inclusive and starts from 1
+        if args.kernel_iteration_range:
+            for iteration in args.kernel_iteration_range:
+                if ":" in iteration:
                     # 4:7 -> 4-7
-                    start, end = dispatch_id.split(":")
-                    dispatch.append(f"{start}-{end}")
+                    start, end = iteration.split(":")
+                    iterations.append(f"{start}-{end}")
                 else:
                     # 4 -> 4
-                    dispatch.append(f"{dispatch_id}")
-        if dispatch:
+                    iterations.append(f"{iteration}")
+        if iterations:
             profiling_options.extend([
                 "--kernel-iteration-range",
-                f"[{','.join(dispatch)}]",
+                f"[{','.join(iterations)}]",
             ])
 
         if not args.attach_pid:
             profiling_options += self._app_cmd_options()
         return profiling_options
 
-    def get_pc_sampling_profiler_options(self) -> list[str]:
+    def get_pc_sampling_profiler_options(self) -> List[str]:
         args = self.get_args()
         method = args.pc_sampling_method
 
@@ -99,7 +93,8 @@ class rocprof_v3_profiler(RocProfCompute_Base):
             "-d",
             args.output_directory,
             "-o",
-            "ps_file",  # TODO: sync up with the name from source in 2100_.yaml
+            # %pid% is expanded by rocprofiler-sdk, not by rocprof-compute.
+            "%pid%_ps_file",
         ]
 
         if args.attach_pid:
@@ -119,9 +114,6 @@ class rocprof_v3_profiler(RocProfCompute_Base):
     @demarcate
     def run_profiling(self, version: str, prog: str) -> None:
         """Run profiling."""
-        if self.get_args().roof_only:
-            console_log("roofline", "Profiling roofline counters only.")
-
         # Log profiling options and setup filtering
         super().run_profiling(version, prog)
 

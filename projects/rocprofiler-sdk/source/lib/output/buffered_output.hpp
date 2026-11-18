@@ -222,5 +222,7 @@ using pc_sampling_stochastic_buffered_output_t =
                     domain_type::PC_SAMPLING_STOCHASTIC>;
 using hip_graph_buffered_output_t =
     buffered_output<rocprofiler_buffer_tracing_hip_graph_record_t, domain_type::HIP_GRAPH>;
+using hip_event_buffered_output_ext_t =
+    buffered_output<tool_buffer_tracing_hip_event_ext_record_t, domain_type::HIP_EVENT>;
 }  // namespace tool
 }  // namespace rocprofiler

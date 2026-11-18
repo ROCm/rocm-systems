@@ -9,6 +9,17 @@
 #define _NCCL_DEVICE_COOP_H_
 #include "utility.h"
 
+// ROCM_VERSION is defined only when building RCCL itself; applications that
+// include these headers get the HIP version instead.
+#if defined(ROCM_VERSION)
+#define NCCL_COOP_HAS_WARP_SYNC (ROCM_VERSION >= 70000)
+#elif defined(__HIP_PLATFORM_AMD__)
+#include <hip/hip_version.h>
+#define NCCL_COOP_HAS_WARP_SYNC (HIP_VERSION_MAJOR >= 7)
+#else
+#define NCCL_COOP_HAS_WARP_SYNC 0
+#endif
+
 // ncclCoop[Foo]: NCCL's versions of CUDA's Cooperative Groups. They conform
 // to just this subset of the CUDA API:
 //   int Coop::thread_rank();
@@ -40,9 +51,16 @@ NCCL_DEVICE_INLINE int ncclCoopPopc(ncclCoopMask_t x) {
   return (int)__popc(x);
 }
 #endif
+// AMD uses a 64-bit mask for wave64 compatibility, but wave32 parts must
+// ignore bits that do not correspond to physical lanes.
+static constexpr ncclCoopMask_t ncclCoopLaneWindow =
+  ~ncclCoopMask_t(0) >> (8 * sizeof(ncclCoopMask_t) - WARP_SIZE);
 #endif
 
-#if NCCL_CHECK_CUDACC
+// Upstream moved ncclCoopAny into bindings/ir/src/coop.h (NVIDIA IR library).
+// RCCL's HIP bitcode is still built from bindings/ir/nccl_device_wrapper__impl.h,
+// which needs it here; keep it AMD-only so it cannot collide with the IR copy.
+#if NCCL_CHECK_CUDACC && defined(__HIP_PLATFORM_AMD__)
 struct ncclCoopAny {
   struct Storage {
     alignas(alignof(void*)) char space[16];
@@ -102,7 +120,7 @@ struct ncclCoopAny {
 };
 #endif
 
-#if NCCL_CHECK_CUDACC
+#ifdef __CUDACC__
 template <int nThreadsPow2>
 struct ncclCoopTile { // An aligned pow2 set of threads within the warp.
   static_assert(nccl::utility::isPow2(nThreadsPow2) && nThreadsPow2 <= WARP_SIZE, "Condition required");
@@ -118,10 +136,10 @@ struct ncclCoopTile { // An aligned pow2 set of threads within the warp.
   }
 
   NCCL_DEVICE_INLINE ncclCoopMask_t laneMask() const {
-    return (ncclCoopMask_t(-1) >> (WARP_SIZE - nThreadsPow2)) << (nccl::utility::lane() & -nThreadsPow2);
+    return (ncclCoopLaneWindow >> (WARP_SIZE - nThreadsPow2)) << (nccl::utility::lane() & -nThreadsPow2);
   }
   NCCL_DEVICE_INLINE void sync() {
-#if ROCM_VERSION >= 70000
+#if NCCL_COOP_HAS_WARP_SYNC
     if (nThreadsPow2 > 1) __syncwarp(laneMask());
 #else
     __syncthreads();
@@ -130,16 +148,17 @@ struct ncclCoopTile { // An aligned pow2 set of threads within the warp.
 };
 #endif
 
-#if NCCL_CHECK_CUDACC
+#ifdef __CUDACC__
 typedef ncclCoopTile<1> ncclCoopThread;
 typedef ncclCoopTile<WARP_SIZE> ncclCoopWarp;
 #endif
 
-#if NCCL_CHECK_CUDACC
+#ifdef __CUDACC__
 struct ncclCoopLanes { // Some lanes of this warp.
   ncclCoopMask_t lmask;
 
-  NCCL_DEVICE_INLINE constexpr ncclCoopLanes(ncclCoopMask_t lmask = ncclCoopFullMask) : lmask(lmask) {}
+  NCCL_DEVICE_INLINE constexpr ncclCoopLanes(ncclCoopMask_t lmask = ncclCoopFullMask)
+    : lmask(lmask & ncclCoopLaneWindow) {}
 
   NCCL_DEVICE_INLINE int thread_rank() const {
     return ncclCoopPopc(lmask & static_cast<ncclCoopMask_t>(nccl::utility::lanemask_lt()));
@@ -151,7 +170,7 @@ struct ncclCoopLanes { // Some lanes of this warp.
     return ncclCoopPopc(lmask);
   }
   NCCL_DEVICE_INLINE void sync() {
-#if ROCM_VERSION >= 70000
+#if NCCL_COOP_HAS_WARP_SYNC
     __syncwarp(lmask);
 #else
     __syncthreads();
@@ -202,6 +221,9 @@ NCCL_DEVICE_INLINE void ncclCoopNamedBarrierInit() {
 NCCL_DEVICE_INLINE void ncclCoopNamedBarrierInit() {}
 #endif
 
+// A set of consecutive warps that the user has also supplied with a unique
+// id from [0..15]. It is an error for two different warp spans with the same
+// id to be in a collective concurrently.
 struct ncclCoopWarpSpan {
   uint32_t warp0:8, nWarps:8, id:8;
 #if defined(__HIP_PLATFORM_AMD__)
@@ -254,8 +276,8 @@ struct ncclCoopWarpSpan {
     }
     cuda::atomic_thread_fence(cuda::memory_order_acquire, cuda::thread_scope_block);
 #else
-    asm volatile("barrier.sync %0, %1;" ::"r"(1 + id), "r"(32 * nWarps) : "memory");
-    __barrier_sync_count(1 + id, 32 * nWarps);
+    asm volatile("barrier.sync.aligned %0, %1;" ::"r"(1 + id), "r"(32 * nWarps) : "memory");
+    // __barrier_sync_count(1 + id, 32 * nWarps);
 #endif
   }
 };
@@ -266,7 +288,7 @@ static_assert(sizeof(ncclCoopWarpSpan) <= 16, "ncclCoopWarpSpan must fit ncclCoo
 #endif
 #endif
 
-#if NCCL_CHECK_CUDACC
+#ifdef __CUDACC__
 struct ncclCoopCta {
   NCCL_DEVICE_INLINE int thread_rank() const {
     return threadIdx.x;
@@ -302,7 +324,9 @@ NCCL_DEVICE_INLINE ncclCoopMask_t ncclCoopGetLaneMask(ncclCoopCta coop) {
 }
 #endif
 
-#if NCCL_CHECK_CUDACC
+#ifdef __CUDACC__
+// ncclCoopIsThread:
+// At compile time do we know the given coop is a single thread only.
 template <int nThreads>
 NCCL_DEVICE_INLINE constexpr bool ncclCoopIsThread(ncclCoopTile<nThreads>) {
   return nThreads == 1;
@@ -318,7 +342,7 @@ NCCL_DEVICE_INLINE constexpr bool ncclCoopIsThread(ncclCoopCta) {
 }
 #endif
 
-#if NCCL_CHECK_CUDACC
+#ifdef __CUDACC__
 template <int nThreads>
 NCCL_DEVICE_INLINE constexpr bool ncclCoopWithinWarp(ncclCoopTile<nThreads>) {
   return true;
@@ -334,10 +358,10 @@ NCCL_DEVICE_INLINE constexpr bool ncclCoopWithinWarp(ncclCoopCta) {
 }
 #endif
 
-#if NCCL_CHECK_CUDACC
+#ifdef __CUDACC__
 // Pick threads of our warp that are safe to use collectively.
 NCCL_DEVICE_INLINE ncclCoopLanes ncclCoopCoalesced() {
-#if ROCM_VERSION >= 70000
+#if NCCL_COOP_HAS_WARP_SYNC
   return ncclCoopLanes{static_cast<ncclCoopMask_t>(__activemask())};
 #else
   return ncclCoopLanes{static_cast<ncclCoopMask_t>(__ballot(1))};
@@ -345,7 +369,7 @@ NCCL_DEVICE_INLINE ncclCoopLanes ncclCoopCoalesced() {
 }
 #endif
 
-#if NCCL_CHECK_CUDACC
+#ifdef __CUDACC__
 // Pick threads of our warp that are safe to use collectively given that this
 // is a collective on the provided cooperative group.
 template <typename Coop>
@@ -361,7 +385,7 @@ NCCL_DEVICE_INLINE ncclCoopTile<nThreads> ncclCoopCoalesced(ncclCoopTile<nThread
 }
 #endif
 
-#if NCCL_CHECK_CUDACC
+#ifdef __CUDACC__
 template <int nThreads, typename T>
 NCCL_DEVICE_INLINE T ncclCoopBcast(ncclCoopTile<nThreads>, T value, int root, bool entrySync = true) {
   constexpr int n = (sizeof(T) + 4 - 1) / 4;
@@ -370,7 +394,7 @@ NCCL_DEVICE_INLINE T ncclCoopBcast(ncclCoopTile<nThreads>, T value, int root, bo
     T v;
   };
   v = value;
-#pragma unroll
+  NVCC_PRAGMA_UNROLL_AUTO
   for (int i = 0; i < n; i++) u[i] = __shfl_sync(-1u, u[i], root, nThreads);
   return v;
 }
@@ -384,13 +408,15 @@ NCCL_DEVICE_INLINE T ncclCoopBcast(ncclCoopLanes coop, T value, int root, bool e
     T v;
   };
   v = value;
-#pragma unroll
+  NVCC_PRAGMA_UNROLL_AUTO
   for (int i = 0; i < n; i++) u[i] = __shfl_sync(m, u[i], r);
   return v;
 }
 
+// 16 slots, not 15: ncclCoopWarpSpan::id runs 0..15, matching
+// ncclCoopNamedBarrierSlots. Indexing by id needs the full range.
 NCCL_DEVICE_INLINE ulong2* ncclCoopBcast_WarpSpan_stash() {
-  __shared__ ulong2 stash[15];
+  __shared__ ulong2 stash[16];
   return stash;
 }
 

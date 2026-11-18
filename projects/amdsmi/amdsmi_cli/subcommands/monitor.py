@@ -1,23 +1,6 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 import copy
 import json
@@ -52,10 +35,6 @@ class MonitorCommands:
         pcie=None,
         process=None,
         violation=None,
-        nic=None,
-        switch=None,
-        brcm_nic=None,
-        brcm_switch=None,
     ):
         """Populate a table with each GPU as an index to rows of targeted data
 
@@ -63,8 +42,6 @@ class MonitorCommands:
             args (Namespace): Namespace containing the parsed CLI args
             multiple_devices (bool, optional): True if checking for multiple devices. Defaults to False.
             gpu (device_handle, optional): device_handle for target device. Defaults to None.
-            nic (device_handle, optional): device_handle for target nic device. Defaults to None.
-            switch (device_handle, optional): device_handle for target switch device. Defaults to None.
             watch (bool, optional): Value override for args.watch. Defaults to None.
             watch_time (int, optional): Value override for args.watch_time. Defaults to None.
             iterations (int, optional): Value override for args.iterations. Defaults to None.
@@ -81,8 +58,6 @@ class MonitorCommands:
             pcie (bool, optional): Value override for args.pcie. Defaults to None.
             process (bool, optional): Value override for args.process. Defaults to None.
             violation (bool, optional): Value override for args.violation. Defaults to None.
-            brcm_nic (bool, optional): Value override for args.brcm_nic. Defaults to None.
-            brcm_switch (bool, optional): Value override for args.brcm_switch. Defaults to None.
 
         Raises:
             ValueError: Value error if no gpu value is provided
@@ -100,10 +75,6 @@ class MonitorCommands:
             args.watch_time = watch_time
         if iterations:
             args.iterations = iterations
-        if nic:
-            args.nic = nic
-        if switch:
-            args.switch = switch
 
         # monitor args
         if power_usage:
@@ -130,33 +101,6 @@ class MonitorCommands:
             args.pcie = pcie
         if process:
             args.process = process
-        if self.helpers.is_brcm_nic_initialized() and (
-            brcm_nic or getattr(args, "brcm_nic", False)
-        ):
-            self.metric_nic(
-                args,
-                multiple_devices,
-                watching_output,
-                watch,
-                watch_time,
-                iterations,
-                nic=args.nic,
-                nic_temperature=args.temperature,
-            )
-            return
-        if self.helpers.is_brcm_switch_initialized() and (
-            brcm_switch or getattr(args, "brcm_switch", False)
-        ):
-            self.metric_switch(
-                args,
-                multiple_devices,
-                watching_output,
-                watch,
-                watch_time,
-                iterations,
-                switch=args.switch,
-            )
-            return
         if not self.helpers.is_virtual_os():
             if violation:
                 args.violation = violation

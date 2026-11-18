@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #ifndef AMD_SMI_INCLUDE_AMD_SMI_COMMON_H_
 #define AMD_SMI_INCLUDE_AMD_SMI_COMMON_H_
@@ -36,9 +17,10 @@ extern "C" {
 }
 #endif
 
-extern "C" {
+// Included bare: the header opens its own extern "C", and wrapping it again
+// would extend C linkage over the C++-only declarations at its tail.
 #include "amd_smi/impl/nic/amdsmi_unified/interface/smi_nic_interface.h"
-}
+
 namespace amd::smi {
 
 // Define a map of rsmi status codes to amdsmi status codes
@@ -119,7 +101,7 @@ const std::map<smi_nic_status_t, amdsmi_status_t> ainic_status_map = {
     {SMI_NIC_STATUS_WRONG_PARAM, AMDSMI_STATUS_INVAL},
     {SMI_NIC_STATUS_NOT_FOUND, AMDSMI_STATUS_NOT_FOUND},
     {SMI_NIC_STATUS_NO_RESOURCE, AMDSMI_STATUS_OUT_OF_RESOURCES},
-    {SMI_NIC_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED},
+    {SMI_NIC_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_SUPPORTED},
     {SMI_NIC_STATUS_NOT_INIT, AMDSMI_STATUS_NOT_INIT},
     {SMI_NIC_STATUS_NO_DATA, AMDSMI_STATUS_NO_DATA},
     {SMI_NIC_STATUS_DRIVER_NOT_LOADED, AMDSMI_STATUS_DRIVER_NOT_LOADED}};

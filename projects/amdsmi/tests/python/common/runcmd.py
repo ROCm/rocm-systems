@@ -1,23 +1,7 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """Subprocess helper for driving the ``amd-smi`` CLI binary.
 
 Defines ``Util`` (RunCmdSync/RunCmdAsync/ConvertStr/Print/GetFuncName) --
@@ -26,7 +10,6 @@ the thin subprocess plumbing the CLI tests use to invoke the installed
 tests; it has no amdsmi or unittest dependencies.
 """
 
-import argparse
 import datetime
 import locale
 import os
@@ -46,10 +29,17 @@ class Util:
 
         # Build the subprocess environment once and cache it. Prepends the ROCm
         # bin directory so amd-smi is found even when invoked via sudo, which
-        # strips non-standard PATH entries. Honors ROCM_HOME/ROCM_PATH when not
-        # running under sudo; defaults to /opt/rocm otherwise (sudo strips those
-        # vars so the fallback is what actually takes effect in that case).
-        rocm_root = os.getenv("ROCM_HOME") or os.getenv("ROCM_PATH") or "/opt/rocm"
+        # strips non-standard PATH entries. AMDSMI_PATH (which names
+        # <root>/share/amd_smi) wins, then ROCM_HOME/ROCM_PATH, matching
+        # common.cli_search_order so the binary spawned here and the exit codes
+        # cli/base.py imports come from one install. Defaults to /opt/rocm
+        # otherwise (sudo strips those vars so the fallback is what actually
+        # takes effect in that case).
+        amdsmi_path = os.getenv("AMDSMI_PATH")
+        if amdsmi_path:
+            rocm_root = os.path.abspath(os.path.join(amdsmi_path, os.pardir, os.pardir))
+        else:
+            rocm_root = os.getenv("ROCM_HOME") or os.getenv("ROCM_PATH") or "/opt/rocm"
         rocm_bin = os.path.join(rocm_root, "bin")
         self._subprocess_env = os.environ.copy()
         existing_path = self._subprocess_env.get("PATH", "")
@@ -239,35 +229,3 @@ class Util:
 
         rc, std_out, std_err, proc = self._RunCmd(cmd, use_shell, msg_in, time_out=None, wait=False)
         return (rc, std_out, std_err, proc)
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Utility")
-    parser.add_argument(
-        "--version", action="version", version=version_number, help="Show version and exit"
-    )
-    parser.add_argument("--build", action="version", version=build_date, help="Show build and exit")
-    parser.add_argument(
-        "--verbose",
-        choices=verbose_choices,
-        type=str,
-        default="WARNING",
-        help="Level of information to output, default=%(default)s",
-    )
-    parser.add_argument("--cmd", type=str, default=None, help="Run cmd, default=%(default)s")
-    args = parser.parse_args()
-
-    util = Util(args.verbose)
-
-    if args.cmd:
-        cmd = args.cmd
-    else:
-        cmd = "amd-smi"
-
-    (rc, std_out, std_err) = util.RunCmdSync(cmd)
-    print(f"output:{cmd}")
-    print(f"\trc={rc}")
-    print(f"\tstd_out={std_out}")
-    print(f"\tstd_err={std_err}")
-
-    sys.exit(rc)

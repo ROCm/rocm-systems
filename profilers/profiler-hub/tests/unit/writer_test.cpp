@@ -1,10 +1,10 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "profiler-hub/reader.hpp"
-#include "profiler-hub/storage.hpp"
-#include "profiler-hub/writer.hpp"
-#include "profiler-hub/writer_types.hpp"
+#include "profiler-hub/cpp/reader.hpp"
+#include "profiler-hub/cpp/storage.hpp"
+#include "profiler-hub/cpp/writer.hpp"
+#include "profiler-hub/cpp/writer_types.hpp"
 
 #include <gtest/gtest.h>
 
@@ -186,6 +186,73 @@ TEST_F(writer_test, register_agent_info_with_invalid_agent_type_throws_invalid_a
     agent_info.process_id           = process_info.pid;
 
     EXPECT_THROW(writer->register_agent_info(agent_info), std::invalid_argument);
+}
+
+TEST_F(writer_test, register_agent_info_nic_is_readable_after_flush)
+{
+    auto writer = make_writer();
+    register_node_and_process(*writer);
+
+    writer_types::agent_info_t agent_info;
+    agent_info.unique_id.agent_type = "NIC";
+    agent_info.unique_id.type_index = 0;
+    agent_info.absolute_index       = 0;
+    agent_info.logical_index        = 0;
+    agent_info.uuid                 = 456;
+    agent_info.node_id              = 1;
+    agent_info.process_id           = 100;
+    writer->register_agent_info(agent_info);
+
+    writer->flush_in_memory_data_to_disk();
+    writer.reset();
+
+    auto reader =
+        std::make_unique<reader_t>(std::make_unique<storage_t>(m_db_path, m_uuid));
+    const auto agents = reader->get_all_agents();
+
+    ASSERT_EQ(agents.size(), 1);
+    EXPECT_EQ(agents[0]->agent_type, "NIC");
+    EXPECT_EQ(agents[0]->type_index, 0);
+}
+
+TEST_F(writer_test, register_pmc_info_with_nic_target_arch_is_readable_after_flush)
+{
+    auto writer = make_writer();
+    register_node_and_process(*writer);
+
+    writer_types::pmc_info_t pmc_info;
+    pmc_info.unique_id.name = "nic_counter";
+    pmc_info.symbol         = "nic_counter_symbol";
+    pmc_info.target_arch    = "NIC";
+    pmc_info.node_id        = 1;
+    pmc_info.process_id     = 100;
+    writer->register_pmc_info(pmc_info);
+
+    writer->flush_in_memory_data_to_disk();
+    writer.reset();
+
+    auto reader =
+        std::make_unique<reader_t>(std::make_unique<storage_t>(m_db_path, m_uuid));
+    const auto pmc_infos = reader->get_all_pmc_info();
+
+    ASSERT_EQ(pmc_infos.size(), 1);
+    EXPECT_EQ(pmc_infos[0]->name, "nic_counter");
+    EXPECT_EQ(pmc_infos[0]->target_arch, "NIC");
+}
+
+TEST_F(writer_test, register_pmc_info_with_invalid_target_arch_throws_invalid_argument)
+{
+    auto writer = make_writer();
+    register_node_and_process(*writer);
+
+    writer_types::pmc_info_t pmc_info;
+    pmc_info.unique_id.name = "bad_counter";
+    pmc_info.symbol         = "bad_symbol";
+    pmc_info.target_arch    = "TPU";
+    pmc_info.node_id        = 1;
+    pmc_info.process_id     = 100;
+
+    EXPECT_THROW(writer->register_pmc_info(pmc_info), std::invalid_argument);
 }
 
 TEST_F(writer_test, insert_region_data_is_readable_after_flush)

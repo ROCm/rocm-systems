@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 #ifndef ROCJITSU_CODE_AMDGPU_ELF_H_
@@ -6,7 +6,15 @@
 
 #include "rocjitsu/code/rj_code.h"
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <limits>
+#include <optional>
+#include <span>
+#include <type_traits>
+#include <vector>
 
 namespace rocjitsu {
 
@@ -29,6 +37,7 @@ inline constexpr int EI_MAGIC_SIZE = sizeof(EI_MAGIC);
 inline constexpr uint8_t ELFCLASSNONE = 0;
 inline constexpr uint8_t ELFCLASS32 = 1;
 inline constexpr uint8_t ELFCLASS64 = 2;
+inline constexpr uint8_t ELFDATA2LSB = 1;
 
 inline constexpr uint8_t ELFOSABI_NONE = 0;
 inline constexpr uint8_t ELFOSABI_AMDGPU_HSA = 64;
@@ -62,6 +71,7 @@ inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1100 = 0x41;
 inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1150 = 0x43;
 inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1200 = 0x48;
 inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1250 = 0x49;
+inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1251 = 0x5a;
 inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1201 = 0x4e;
 
 /*
@@ -89,7 +99,7 @@ inline constexpr uint32_t elf_mach_for_arch(rj_code_arch_t arch) {
     return EF_AMDGPU_MACH_AMDGCN_GFX1150;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return EF_AMDGPU_MACH_AMDGCN_GFX1200;
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return EF_AMDGPU_MACH_AMDGCN_GFX1250;
   default:
     return EF_AMDGPU_MACH_NONE;
@@ -125,7 +135,8 @@ inline constexpr rj_code_arch_t arch_for_elf_mach(uint32_t mach) {
   case EF_AMDGPU_MACH_AMDGCN_GFX1201:
     return ROCJITSU_CODE_ARCH_RDNA4;
   case EF_AMDGPU_MACH_AMDGCN_GFX1250:
-    return ROCJITSU_CODE_ARCH_GFX1250;
+  case EF_AMDGPU_MACH_AMDGCN_GFX1251:
+    return ROCJITSU_CODE_ARCH_CDNA5;
   default:
     return ROCJITSU_CODE_ARCH_INVALID;
   }
@@ -160,6 +171,8 @@ inline constexpr const char *elf_mach_name(uint32_t mach) {
     return "gfx1201";
   case EF_AMDGPU_MACH_AMDGCN_GFX1250:
     return "gfx1250";
+  case EF_AMDGPU_MACH_AMDGCN_GFX1251:
+    return "gfx1251";
   default:
     return "unknown";
   }
@@ -175,21 +188,45 @@ inline constexpr uint32_t SHT_NOBITS = 8; // ELF spec: section occupies no file 
 inline constexpr uint32_t SHT_REL = 9;
 inline constexpr uint32_t SHT_DYNSYM = 11;
 
-// AMDGPU ELF relocation types used by linked code-object function tables.
-// Keep the numeric values local to the ELF layer so DBT does not depend on
-// LLVM's ELF headers merely to inspect loader relocations.
+// AMDGPU ELF relocation types used by linked code objects. Keep the numeric
+// values local to the ELF layer so DBT does not depend on LLVM's ELF headers
+// merely to inspect loader relocations.
+inline constexpr uint32_t R_AMDGPU_NONE = 0;
+inline constexpr uint32_t R_AMDGPU_ABS32_LO = 1;
+inline constexpr uint32_t R_AMDGPU_ABS32_HI = 2;
 inline constexpr uint32_t R_AMDGPU_ABS64 = 3;
+inline constexpr uint32_t R_AMDGPU_ABS32 = 6;
 inline constexpr uint32_t R_AMDGPU_RELATIVE64 = 13;
 
 inline constexpr uint8_t kElfSymbolBindLocal = 0;
 inline constexpr uint8_t kElfSymbolBindGlobal = 1;
-inline constexpr uint8_t kElfSymbolTypeNone = 0;    // STT_NOTYPE
-inline constexpr uint8_t kElfSymbolTypeObject = 1;  // STT_OBJECT
-inline constexpr uint8_t kElfSymbolTypeFunc = 2;    // STT_FUNC
-inline constexpr uint8_t kElfSymbolTypeSection = 3; // STT_SECTION
+inline constexpr uint8_t kElfSymbolBindWeak = 2;
+inline constexpr uint8_t kElfSymbolVisibilityHidden = 2;     // STV_HIDDEN
+inline constexpr uint8_t kElfSymbolVisibilityInternal = 1;   // STV_INTERNAL
+inline constexpr uint8_t kElfSymbolTypeNone = 0;             // STT_NOTYPE
+inline constexpr uint8_t kElfSymbolTypeObject = 1;           // STT_OBJECT
+inline constexpr uint8_t kElfSymbolTypeFunc = 2;             // STT_FUNC
+inline constexpr uint8_t kElfSymbolTypeSection = 3;          // STT_SECTION
+inline constexpr uint8_t kElfSymbolTypeAmdGpuHsaKernel = 10; // STT_AMDGPU_HSA_KERNEL
 
 inline constexpr uint8_t elf_symbol_bind(uint8_t info) { return info >> 4; }
 inline constexpr uint8_t elf_symbol_type(uint8_t info) { return info & 0xf; }
+inline constexpr uint8_t elf_symbol_visibility(uint8_t other) { return other & 0x3; }
+
+/// @brief Whether a host could resolve this symbol by name and obtain its address.
+///
+/// @details Only external linkage reaches a loader: the HSA executable-symbol API and the dynamic
+/// linker expose `STB_GLOBAL`/`STB_WEAK` definitions that are not hidden or internal. A local
+/// symbol names a compilation-unit-private body -- an anonymous-namespace device function, say --
+/// and no interface hands its address out, so the only way its address can enter the machine is
+/// through this object's own code or relocations.
+inline constexpr bool elf_symbol_is_externally_resolvable(uint8_t info, uint8_t other) {
+  const uint8_t bind = elf_symbol_bind(info);
+  if (bind != kElfSymbolBindGlobal && bind != kElfSymbolBindWeak)
+    return false;
+  const uint8_t visibility = elf_symbol_visibility(other);
+  return visibility != kElfSymbolVisibilityHidden && visibility != kElfSymbolVisibilityInternal;
+}
 inline constexpr uint8_t elf_symbol_info(uint8_t bind, uint8_t type) {
   return static_cast<uint8_t>((bind << 4) | (type & 0xf));
 }
@@ -199,6 +236,11 @@ inline constexpr uint8_t elf_symbol_info(uint8_t bind, uint8_t type) {
 inline constexpr uint32_t elf_reloc_sym(uint64_t info) { return static_cast<uint32_t>(info >> 32); }
 inline constexpr uint32_t elf_reloc_type(uint64_t info) {
   return static_cast<uint32_t>(info & 0xffffffffu);
+}
+
+/// @brief Whether an AMDGPU ELF relocation record has no effect.
+inline constexpr bool elf_relocation_is_inert(uint64_t info) {
+  return elf_reloc_type(info) == R_AMDGPU_NONE;
 }
 
 // R_AMDGPU_RELATIVE64 uses symbol index 0 and forms its value from the load bias
@@ -214,6 +256,7 @@ inline constexpr uint32_t NT_AMDGPU_METADATA = 32;
 
 // Program header types.
 inline constexpr uint32_t PT_LOAD = 1;
+inline constexpr uint32_t PF_X = 1;
 inline constexpr uint32_t PT_DYNAMIC = 2;
 inline constexpr uint32_t PT_NOTE = 4;
 
@@ -270,6 +313,42 @@ struct Elf64_Phdr {
   uint64_t p_align;
 };
 
+/// @brief Whether one LOAD supplies the requested virtual range from the specified file bytes.
+[[nodiscard]] inline constexpr bool elf_load_maps_file_range(const Elf64_Phdr &segment,
+                                                             uint64_t file_offset, uint64_t vaddr,
+                                                             uint64_t size) {
+  if (segment.p_type != PT_LOAD || vaddr < segment.p_vaddr)
+    return false;
+  const uint64_t offset = vaddr - segment.p_vaddr;
+  return offset <= segment.p_filesz && size <= segment.p_filesz - offset &&
+         offset <= std::numeric_limits<uint64_t>::max() - segment.p_offset &&
+         segment.p_offset + offset == file_offset;
+}
+
+/// @brief Whether all LOAD file copies overlapping a virtual range use its expected file bytes.
+/// @details Does not require coverage or treat zero-fill tails as copies. Callers validate
+/// image bounds separately; modern ROCr zeroes its shared allocation before copying segments.
+[[nodiscard]] inline bool elf_load_file_mappings_match_range(std::span<const Elf64_Phdr> segments,
+                                                             uint64_t file_offset, uint64_t vaddr,
+                                                             uint64_t size) {
+  if (size > std::numeric_limits<uint64_t>::max() - vaddr ||
+      size > std::numeric_limits<uint64_t>::max() - file_offset)
+    return false;
+  for (const Elf64_Phdr &segment : segments) {
+    if (segment.p_type != PT_LOAD || segment.p_filesz == 0)
+      continue;
+    if (segment.p_filesz > std::numeric_limits<uint64_t>::max() - segment.p_vaddr ||
+        segment.p_filesz > std::numeric_limits<uint64_t>::max() - segment.p_offset)
+      return false;
+    const uint64_t begin = std::max(vaddr, segment.p_vaddr);
+    const uint64_t end = std::min(vaddr + size, segment.p_vaddr + segment.p_filesz);
+    if (begin < end &&
+        !elf_load_maps_file_range(segment, file_offset + (begin - vaddr), begin, end - begin))
+      return false;
+  }
+  return true;
+}
+
 /**
  * @brief ELF section header.
  */
@@ -320,6 +399,226 @@ struct Elf64_Rela {
   uint64_t r_info;
   int64_t r_addend;
 };
+
+/// @brief Resolve a signed ELF displacement without wrapping the address.
+[[nodiscard]] inline std::optional<uint64_t> add_signed_offset(uint64_t base, int64_t offset) {
+  if (offset >= 0) {
+    const uint64_t positive = static_cast<uint64_t>(offset);
+    if (positive > std::numeric_limits<uint64_t>::max() - base)
+      return std::nullopt;
+    return base + positive;
+  }
+  // Form the magnitude without negating INT64_MIN.
+  const uint64_t magnitude = static_cast<uint64_t>(-(offset + 1)) + 1;
+  if (magnitude > base)
+    return std::nullopt;
+  return base - magnitude;
+}
+
+/// @brief Copy a possibly strided ELF record table from an unaligned image.
+/// @details The declared stride may include trailing bytes, but it must hold a
+/// complete record. The entire table is bounds checked before any record is
+/// copied, including overflow in the count-times-stride calculation.
+template <typename Record>
+[[nodiscard]] std::optional<std::vector<Record>>
+read_elf_table(std::span<const uint8_t> image, uint64_t offset, uint64_t count, uint64_t stride) {
+  static_assert(std::is_trivially_copyable_v<Record>);
+  if (count == 0)
+    return std::vector<Record>{};
+  if (stride < sizeof(Record) || stride > std::numeric_limits<uint64_t>::max() / count) {
+    return std::nullopt;
+  }
+  const uint64_t table_size = count * stride;
+  if (offset > image.size() || table_size > image.size() - offset)
+    return std::nullopt;
+
+  std::vector<Record> records(static_cast<std::size_t>(count));
+  for (std::size_t record_index = 0; record_index < records.size(); ++record_index) {
+    const uint64_t record_offset = offset + record_index * stride;
+    std::memcpy(&records[record_index], image.data() + record_offset, sizeof(Record));
+  }
+  return records;
+}
+
+/// @brief Whether ROCr's dynamic loader forms this relocation from a symbol value.
+inline constexpr bool rocr_dynamic_relocation_uses_symbol_value(uint32_t relocation_type) {
+  switch (relocation_type) {
+  case R_AMDGPU_ABS32_LO:
+  case R_AMDGPU_ABS32_HI:
+  case R_AMDGPU_ABS64:
+  case R_AMDGPU_ABS32:
+    return true;
+  default:
+    return false;
+  }
+}
+
+/// @brief Write size of a relocation supported by ROCr's modern dynamic path.
+/// @details Callers classify the relocation section separately. An absent size
+/// means unsupported, including NONE; it never means an inert zero-byte write.
+/// Explicit-target/static records retain their separate dispatch and policy.
+[[nodiscard]] inline constexpr std::optional<uint64_t>
+rocr_dynamic_relocation_write_size(uint32_t relocation_type) {
+  switch (relocation_type) {
+  case R_AMDGPU_ABS32_LO:
+  case R_AMDGPU_ABS32_HI:
+  case R_AMDGPU_ABS32:
+    return sizeof(uint32_t);
+  case R_AMDGPU_ABS64:
+  case R_AMDGPU_RELATIVE64:
+    return sizeof(uint64_t);
+  default:
+    return std::nullopt;
+  }
+}
+
+/// @brief Whether ROCr derives this dynamic symbol's runtime address from st_value.
+inline constexpr bool rocr_dynamic_symbol_address_follows_st_value(uint8_t symbol_type) {
+  switch (symbol_type) {
+  case kElfSymbolTypeObject:
+  case kElfSymbolTypeFunc:
+  case kElfSymbolTypeAmdGpuHsaKernel:
+    return true;
+  default:
+    return false;
+  }
+}
+
+/// @brief Whether this symbol type can introduce a relocation-backed code entry.
+inline constexpr bool elf_symbol_is_executable_entry(uint8_t symbol_type) {
+  return symbol_type == kElfSymbolTypeFunc;
+}
+
+/// @brief How ROCr dispatches one relocation section in a modern code object.
+enum class RocrRelocationSectionMode : uint8_t {
+  NotApplicable,
+  Dynamic,
+  ExplicitTarget,
+  Malformed,
+};
+
+/// @brief Classify the relocation section using ROCr's targetSection() decision.
+///
+/// @details ROCr materializes SHT_RELA sections, resolves sh_info to a section pointer, and uses
+/// dynamic relocation processing when that pointer is null. Only section zero safely represents
+/// that null target: ROCr skips index zero during its later section passes, but dereferences every
+/// nonzero section entry before relocation dispatch. A valid non-null section selects the
+/// explicit/static path; a nonzero SHT_NULL entry or out-of-range index is malformed. Other ELF
+/// and relocation-section forms retain their existing non-ROCr handling.
+inline constexpr RocrRelocationSectionMode
+classify_rocr_relocation_section(const Elf64_Ehdr &ehdr, std::span<const Elf64_Shdr> shdrs,
+                                 const Elf64_Shdr &relocs) {
+  if (ehdr.e_type != ET_DYN || relocs.sh_type != SHT_RELA)
+    return RocrRelocationSectionMode::NotApplicable;
+  if (relocs.sh_info == SHN_UNDEF)
+    return RocrRelocationSectionMode::Dynamic;
+  if (relocs.sh_info >= shdrs.size() || shdrs[relocs.sh_info].sh_type == SHT_NULL)
+    return RocrRelocationSectionMode::Malformed;
+  return RocrRelocationSectionMode::ExplicitTarget;
+}
+
+/// @brief ROCr's handling of an R_AMDGPU_NONE record before place or symbol lookup.
+enum class RocrNoneRelocationAction : uint8_t {
+  NotNone,
+  Ignored,
+  Rejected,
+};
+
+/// @brief Classify R_AMDGPU_NONE from the shared ROCr relocation-section mode.
+inline constexpr RocrNoneRelocationAction
+classify_rocr_none_relocation(RocrRelocationSectionMode mode, uint64_t relocation_info) {
+  if (elf_reloc_type(relocation_info) != R_AMDGPU_NONE)
+    return RocrNoneRelocationAction::NotNone;
+  if (mode == RocrRelocationSectionMode::Dynamic || mode == RocrRelocationSectionMode::Malformed) {
+    return RocrNoneRelocationAction::Rejected;
+  }
+  return RocrNoneRelocationAction::Ignored;
+}
+
+/// @brief How a relocation reference to an ordinary symbol in rewritten .text must be handled.
+enum class TextSymbolRelocationAction : uint8_t {
+  Ignored,
+  RequiresSymbolMapping,
+  RequiresExecutableEntry,
+  Unsupported,
+};
+
+/// @brief Classify one relocation reference to a symbol defined in rewritten .text.
+///
+/// @details A required executable entry also requires the symbol's st_value to be remapped.
+/// ROCr rejects R_AMDGPU_NONE in target-less dynamic relocation sections, but skips
+/// explicit-target/static relocation sections for supported code objects. Other ROCr dynamic
+/// relocations follow the loader's supported symbol-valued forms, while explicit-target/static
+/// sections retain the broader pre-existing policy that any ordinary zero-addend RELA reference
+/// follows the symbol value.
+inline constexpr TextSymbolRelocationAction
+classify_text_symbol_relocation(RocrRelocationSectionMode mode, uint64_t relocation_info,
+                                bool has_explicit_addend, int64_t addend, const Elf64_Sym &symbol) {
+  const uint32_t relocation_type = elf_reloc_type(relocation_info);
+  if (mode == RocrRelocationSectionMode::Malformed)
+    return TextSymbolRelocationAction::Unsupported;
+  const bool rocr_dynamic = mode == RocrRelocationSectionMode::Dynamic;
+  if (relocation_type == R_AMDGPU_NONE) {
+    return rocr_dynamic ? TextSymbolRelocationAction::Unsupported
+                        : TextSymbolRelocationAction::Ignored;
+  }
+  if (!has_explicit_addend || addend != 0 || elf_reloc_sym(relocation_info) == 0)
+    return TextSymbolRelocationAction::Unsupported;
+
+  const uint8_t symbol_type = elf_symbol_type(symbol.st_info);
+  if (rocr_dynamic) {
+    if (relocation_type == R_AMDGPU_RELATIVE64) {
+      return symbol_type == kElfSymbolTypeSection
+                 ? TextSymbolRelocationAction::Unsupported
+                 : TextSymbolRelocationAction::RequiresSymbolMapping;
+    }
+    if (!rocr_dynamic_relocation_uses_symbol_value(relocation_type) ||
+        !rocr_dynamic_symbol_address_follows_st_value(symbol_type)) {
+      return TextSymbolRelocationAction::Unsupported;
+    }
+    return elf_symbol_is_executable_entry(symbol_type)
+               ? TextSymbolRelocationAction::RequiresExecutableEntry
+               : TextSymbolRelocationAction::RequiresSymbolMapping;
+  }
+
+  if (symbol_type == kElfSymbolTypeSection)
+    return TextSymbolRelocationAction::Unsupported;
+  if (elf_symbol_is_executable_entry(symbol_type) ||
+      (symbol_type == kElfSymbolTypeNone && relocation_type == R_AMDGPU_ABS64)) {
+    return TextSymbolRelocationAction::RequiresExecutableEntry;
+  }
+  return TextSymbolRelocationAction::RequiresSymbolMapping;
+}
+
+/// @brief Return whether a relocation record applies to storage loaded at runtime.
+///
+/// Relocation sections with an explicit sh_info target inherit that section's allocation
+/// state. Generic ET_DYN relocation sections use SHN_UNDEF and identify their target storage
+/// through each record's virtual r_offset instead. Keeping this ABI rule here prevents entry
+/// discovery and final ELF patching from disagreeing about debug-only relocation metadata.
+[[nodiscard]] inline bool elf_relocation_place_is_allocated(const Elf64_Ehdr &ehdr,
+                                                            std::span<const Elf64_Shdr> shdrs,
+                                                            const Elf64_Shdr &relocs,
+                                                            uint64_t relocation_offset) {
+  const RocrRelocationSectionMode mode = classify_rocr_relocation_section(ehdr, shdrs, relocs);
+  if (mode == RocrRelocationSectionMode::Malformed)
+    return false;
+  if (mode == RocrRelocationSectionMode::ExplicitTarget) {
+    return (shdrs[relocs.sh_info].sh_flags & SHF_ALLOC) != 0;
+  }
+  if (mode == RocrRelocationSectionMode::NotApplicable && relocs.sh_info != SHN_UNDEF) {
+    return relocs.sh_info < shdrs.size() && (shdrs[relocs.sh_info].sh_flags & SHF_ALLOC) != 0;
+  }
+  if (mode == RocrRelocationSectionMode::NotApplicable && ehdr.e_type != ET_DYN)
+    return false;
+  for (const Elf64_Shdr &section : shdrs) {
+    if ((section.sh_flags & SHF_ALLOC) != 0 && relocation_offset >= section.sh_addr &&
+        relocation_offset - section.sh_addr < section.sh_size) {
+      return true;
+    }
+  }
+  return false;
+}
 
 } // namespace rocjitsu
 

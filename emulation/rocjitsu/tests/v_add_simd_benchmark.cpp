@@ -9,14 +9,17 @@
 /// then unset (SIMD). Scalar-vs-SIMD bit-equivalence is verified separately by
 /// the *SimdCorrectness* suites (in-process double-run + EXPECT_EQ), not here.
 
+#include "compute_unit_test_util.h"
+#include "decode_test_util.h"
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "util/host_target.h"
 
 #include <gtest/gtest.h>
 
@@ -98,7 +101,9 @@ struct BenchFixture {
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_vadd_simd", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_vadd_simd", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
     decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -169,11 +174,11 @@ ModeStats time_mode(BenchFixture &fx, Instruction *inst, uint64_t seed, bool san
   fx.seed_inputs(seed, sanitize_finite);
   // Warmup.
   for (int i = 0; i < 100; ++i)
-    fx.cu->execute_instruction(inst, *fx.wf);
+    (void)fx.cu->execute_instruction(inst, *fx.wf);
   fx.seed_inputs(seed, sanitize_finite);
   auto t0 = Clock::now();
   for (int i = 0; i < ITERATIONS; ++i)
-    fx.cu->execute_instruction(inst, *fx.wf);
+    (void)fx.cu->execute_instruction(inst, *fx.wf);
   auto t1 = Clock::now();
   ModeStats s;
   s.total_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
@@ -184,12 +189,13 @@ ModeStats time_mode(BenchFixture &fx, Instruction *inst, uint64_t seed, bool san
 
 void run_words(const char *label, uint32_t w0, uint32_t w1, bool sanitize_finite) {
   BenchFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   ASSERT_NE(fx.cu, nullptr);
   ASSERT_NE(fx.decoder, nullptr);
   ASSERT_NE(fx.wf, nullptr);
 
   uint32_t words[4] = {w0, w1, 0u, 0u};
-  Instruction *inst = fx.decoder->decode(words);
+  Instruction *inst = decode_valid(*fx.decoder, words);
   ASSERT_NE(inst, nullptr) << label << ": decode failed";
 
   constexpr uint64_t SEED = 0xC0FFEE'1234'5678ULL;
@@ -813,7 +819,7 @@ TEST(VAddSimdBenchmark, Cdna4_VFrexpExpI32F32_Vop3) {
 
 // Diagnostic: report whether the SIMD fast path is compiled in.
 TEST(VAddSimdBenchmark, SimdCompileTimeReport) {
-#if __has_include(<experimental/simd>)
+#if RJ_HOST_HAS_STDX_SIMD
   using simd_u32 = std::experimental::native_simd<uint32_t>;
   std::printf("\n  util::has_stdx_simd=true, native_simd<uint32_t>::size() = %zu\n",
               simd_u32::size());

@@ -15,6 +15,7 @@
 #ifdef MPI_TESTS_ENABLED
 
 #include <chrono>
+#include <cstdlib>
 #include <thread>
 
 /**
@@ -156,8 +157,14 @@ void MPIEnvironment::initialize_devices()
         return;
     }
 
-    // Complete HIP context reset and isolation
-    HIP_TEST_CHECK_GTEST_FAIL(hipDeviceReset());
+    // Bind this rank to its device. Deliberately no hipDeviceReset() here: this
+    // runs after MPI_Init, and a hipDeviceReset() before hipSetDevice() below
+    // resets the *current* (default) device, not assigned_device, so it gave no
+    // per-rank isolation. What it did do is destroy the primary context of GPU 0
+    // for every local rank, including the HIP resources an MPI built with ROCm
+    // support (Open MPI's accelerator/rocm component) has already lazily created
+    // there. MPI_Finalize then segfaults destroying a dangling stream in
+    // mca_accelerator_rocm_stream_destruct().
     HIP_TEST_CHECK_GTEST_FAIL(hipSetDevice(assigned_device));
 
     // Force HIP context creation and synchronization
@@ -237,12 +244,22 @@ void MPIEnvironment::TearDown()
     if(barrier_result == MPI_SUCCESS)
     {
         // Wait for barrier with a timeout.
-        // 3 s: ncclCommDestroy is now explicitly called (and MPI-barrier'd) inside
-        // cleanupTestCommunicator before TearDown runs, so the only remaining rank
-        // skew here is log-file I/O (RCCL_MPI_LOG_ALL_RANKS) which is fast.
-        int        flag             = 0;
-        auto       timeout_start    = std::chrono::steady_clock::now();
-        const auto timeout_duration = std::chrono::seconds(3);
+        // ncclCommDestroy is now explicitly called (and MPI-barrier'd) inside
+        // cleanupTestCommunicator before TearDown runs, so the common remaining rank
+        // skew here is log-file I/O (RCCL_MPI_LOG_ALL_RANKS). However, heavy
+        // multi-phase tests (e.g. GrowMPITest, NetIbMPITest CtsDepthStress) can have
+        // ranks reach TearDown more than a few seconds apart even on success, so a
+        // 3 s timeout produced false "out of sync" aborts. Use a more tolerant default
+        // and allow override via RCCL_TEST_TEARDOWN_TIMEOUT_SEC.
+        int        flag          = 0;
+        auto       timeout_start = std::chrono::steady_clock::now();
+        int        timeout_sec   = 60;
+        if(const char* env = std::getenv("RCCL_TEST_TEARDOWN_TIMEOUT_SEC"))
+        {
+            int v = std::atoi(env);
+            if(v > 0) timeout_sec = v;
+        }
+        const auto timeout_duration = std::chrono::seconds(timeout_sec);
 
         while(!flag)
         {
@@ -254,18 +271,21 @@ void MPIEnvironment::TearDown()
                 auto elapsed = std::chrono::steady_clock::now() - timeout_start;
                 if(elapsed > timeout_duration)
                 {
-                    // Timeout - ranks are out of sync!
+                    // Timeout - ranks are genuinely out of sync (e.g. a rank died or
+                    // deadlocked in the test body). Force abort.
                     std::fprintf(
                         stderr,
-                        "Rank %d: TIMEOUT in TearDown barrier - ranks out of sync, forcing abort\n",
-                        world_rank);
+                        "Rank %d: TIMEOUT (%ds) in TearDown barrier - ranks out of sync, forcing abort\n",
+                        world_rank,
+                        timeout_sec);
                     std::fflush(stderr);
 
-                    // Cancel the barrier request
-                    MPI_Cancel(&barrier_req);
-                    MPI_Request_free(&barrier_req);
-
-                    // Force abort - can't safely continue
+                    // NOTE: Do NOT MPI_Cancel(&barrier_req) here. Cancelling a
+                    // nonblocking *collective* request (MPI_Ibarrier) is forbidden by
+                    // the MPI standard; OpenMPI returns MPI_ERR_REQUEST, and because
+                    // MPI_COMM_WORLD uses MPI_ERRORS_ARE_FATAL that call aborts the job
+                    // itself with a misleading error before we reach MPI_Abort. Since
+                    // MPI_Abort tears the whole job down anyway, just call it directly.
                     MPI_Abort(MPI_COMM_WORLD, 1);
                     return;
                 }

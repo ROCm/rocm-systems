@@ -7,13 +7,7 @@
 #ifndef IONIC_FW_H
 #define IONIC_FW_H
 
-#if !defined(__cplusplus)
-#include <util/util.h>
-#else
-#ifndef BIT
-#define BIT(n) (1u << (n))
-#endif
-#endif
+#define IONIC_BIT(n) (1u << (n))
 
 #define IONIC_EXP_DBELL_SZ 8
 
@@ -29,19 +23,19 @@ struct ionic_sge {
 /* admin queue mr type */
 enum ionic_mr_flags {
 	/* bits that determine mr access */
-	IONIC_MRF_LOCAL_WRITE		= BIT(0),
-	IONIC_MRF_REMOTE_WRITE		= BIT(1),
-	IONIC_MRF_REMOTE_READ		= BIT(2),
-	IONIC_MRF_REMOTE_ATOMIC		= BIT(3),
-	IONIC_MRF_MW_BIND		= BIT(4),
-	IONIC_MRF_ZERO_BASED		= BIT(5),
-	IONIC_MRF_ON_DEMAND		= BIT(6),
-	IONIC_MRF_PB			= BIT(7),
-	IONIC_MRF_ACCESS_MASK		= BIT(12) - 1,
+	IONIC_MRF_LOCAL_WRITE		= IONIC_BIT(0),
+	IONIC_MRF_REMOTE_WRITE		= IONIC_BIT(1),
+	IONIC_MRF_REMOTE_READ		= IONIC_BIT(2),
+	IONIC_MRF_REMOTE_ATOMIC		= IONIC_BIT(3),
+	IONIC_MRF_MW_BIND		= IONIC_BIT(4),
+	IONIC_MRF_ZERO_BASED		= IONIC_BIT(5),
+	IONIC_MRF_ON_DEMAND		= IONIC_BIT(6),
+	IONIC_MRF_PB			= IONIC_BIT(7),
+	IONIC_MRF_ACCESS_MASK		= IONIC_BIT(12) - 1,
 
 	/* bits that determine mr type */
-	IONIC_MRF_IS_MW			= BIT(14),
-	IONIC_MRF_INV_EN		= BIT(15),
+	IONIC_MRF_IS_MW			= IONIC_BIT(14),
+	IONIC_MRF_INV_EN		= IONIC_BIT(15),
 
 	/* base flags combinations for mr types */
 	IONIC_MRF_USER_MR		= 0,
@@ -180,8 +174,8 @@ enum ionic_v1_cqe_wqe_idx_timestamp_bits {
 /* bits for rcqe seq_op_flags */
 enum ionic_v1_cqe_rcqe_op_flag_bits {
 	IONIC_V1_CQE_RCQE_SEQ_MASK	= 0xffffff,
-	IONIC_V1_CQE_RCQE_FLAG_V	= BIT(24),
-	IONIC_V1_CQE_RCQE_FLAG_I	= BIT(25),
+	IONIC_V1_CQE_RCQE_FLAG_V	= IONIC_BIT(24),
+	IONIC_V1_CQE_RCQE_FLAG_I	= IONIC_BIT(25),
 	IONIC_V1_CQE_RCQE_OP_SHIFT	= 28,
 };
 
@@ -219,14 +213,14 @@ enum ionic_v1_cqe_src_qpn_bits {
 	IONIC_V1_CQE_RECV_OP_SEND_IMM	= 2,
 	IONIC_V1_CQE_RECV_OP_RDMA_IMM	= 3,
 
-	IONIC_V1_CQE_RECV_IS_IPV4	= BIT(7 + IONIC_V1_CQE_RECV_OP_SHIFT),
-	IONIC_V1_CQE_RECV_IS_VLAN	= BIT(6 + IONIC_V1_CQE_RECV_OP_SHIFT),
+	IONIC_V1_CQE_RECV_IS_IPV4	= IONIC_BIT(7 + IONIC_V1_CQE_RECV_OP_SHIFT),
+	IONIC_V1_CQE_RECV_IS_VLAN	= IONIC_BIT(6 + IONIC_V1_CQE_RECV_OP_SHIFT),
 };
 
 /* bits for cqe qid_type_flags */
 enum ionic_v1_cqe_qtf_bits {
-	IONIC_V1_CQE_COLOR		= BIT(0),
-	IONIC_V1_CQE_ERROR		= BIT(1),
+	IONIC_V1_CQE_COLOR		= IONIC_BIT(0),
+	IONIC_V1_CQE_ERROR		= IONIC_BIT(1),
 	IONIC_V1_CQE_TYPE_SHIFT		= 5,
 	IONIC_V1_CQE_TYPE_MASK		= 0x7,
 	IONIC_V1_CQE_QID_SHIFT		= 8,
@@ -379,11 +373,11 @@ enum ionic_v1_op {
 	IONIC_V1_OP_BIND_MW,
 
 	/* flags */
-	IONIC_V1_FLAG_FENCE		= BIT(0),
-	IONIC_V1_FLAG_SOL		= BIT(1),
-	IONIC_V1_FLAG_INL		= BIT(2),
-	IONIC_V1_FLAG_SIG		= BIT(3),
-	IONIC_V1_FLAG_COLOR		= BIT(4),
+	IONIC_V1_FLAG_FENCE		= IONIC_BIT(0),
+	IONIC_V1_FLAG_SOL		= IONIC_BIT(1),
+	IONIC_V1_FLAG_INL		= IONIC_BIT(2),
+	IONIC_V1_FLAG_SIG		= IONIC_BIT(3),
+	IONIC_V1_FLAG_COLOR		= IONIC_BIT(4),
 
 	/* flags last four bits for sgl spec format */
 	IONIC_V1_FLAG_SPEC32		= (1u << 12),
@@ -547,5 +541,7 @@ static inline void ionic_rcq_ack(struct ionic_rcq *rcq, uint32_t ack)
 }
 
 #endif // !defined(__cplusplus)
+
+#undef IONIC_BIT
 
 #endif /* IONIC_FW_H */

@@ -11,7 +11,7 @@ The first domains are:
 - `driver_memcpy`: driver-style directed 1D synchronous and stream-ordered copy contracts
 - `driver_memcpy_2d`: driver-style struct-based 2D synchronous and stream-ordered copy contracts
 - `runtime`: runtime initialization, device visibility, version, and error-state contracts
-- `device`: portable current-device property contracts
+- `device`: portable current-device property contracts, GPUDirect RDMA write-flush accepted-or-unsupported and invalid-enumerator contracts, and execution-affinity support-query boolean-shape, AMD-gated CU/WGP masking-granularity, and invalid-pointer/type/device rejection contracts
 - `device_identity`: device PCI identity, device selection, and single-device peer-query contracts
 - `device_texture_query`: image-gated device texture-width query contracts
 - `peer_query`: peer-to-peer attribute and AMD link-type query invalid-input contracts
@@ -27,6 +27,7 @@ The first domains are:
 - `async_transfer`: async copy visibility and invalid-kind consistency contracts
 - `mem_batch_copy`: batch async device-to-device copy round-trip, per-copy attribute, and invalid-input contracts
 - `mem_batch_copy_3d`: batch async 3D pointer copy host-device-host round-trip and invalid-input contracts
+- `mem_copy_with_attributes`: single async 1D and 3D copy-with-attributes host-device-host round-trip and invalid-input contracts
 - `mem_batch_discard`: batch async memory discard and discard-and-prefetch accepted-or-unsupported and invalid-input contracts
 - `memset`: byte, word, dword, and async memset contracts
 - `driver_memset_async`: driver-style directed async byte, word, and dword memset contracts
@@ -73,6 +74,7 @@ The first domains are:
 - `graph_node_params`: graph memcpy, memset, event, and lifecycle node parameter contracts
 - `graph_node_setters`: pre-instantiation graph node parameter setter and attribute-copy contracts
 - `graph_symbol_copy_nodes`: graph memcpy-to/from-symbol node add, set-params, and exec-set-params contracts
+- `graph_id`: IDs for graphs, executable graphs, and graph nodes
 - `host_memory`: host allocation, registration, device-pointer, and flag contracts
 - `host_alloc_aliases`: alternate host allocation/free entry point and extended allocation contracts
 - `pitched_memory`: pitched allocation and host/device 2D copy contracts
@@ -90,7 +92,7 @@ The first domains are:
 - `memory_pool`: default memory pool, release-threshold, and stream-ordered allocation contracts
 - `vmm`: virtual memory management granularity, reserve, map, access, and roundtrip contracts
 - `vmm_handle`: VMM allocation-handle retain, property query, and dma-buf address-range export contracts
-- `mem_map_array`: sparse array map/unmap (`hipMemMapArrayAsync`) invalid-input rejection contracts
+- `mem_map_array`: sparse array map/unmap (`hipMemMapArrayAsync`) and sparse layout query (`hipArrayGetSparseProperties`) invalid-input rejection contracts
 - `copy3d`: 3D pitched allocation and host-device 3D copy contracts
 - `async_copy3d`: stream-ordered 3D copy, 3D memset, and memcpy-with-stream contracts
 - `driver_copy3d`: driver-style 3D copy contracts
@@ -103,7 +105,7 @@ The first domains are:
 - `context_mutation`: driver-style context create, set-current, push/pop, synchronize, and API-version contracts
 - `context_config`: driver-style context cache/shared-memory config, flags, and peer-access contracts
 - `device_config`: device configuration query, limit, flag, and stream-priority contracts
-- `device_lifecycle`: device flag, shared-memory-config, valid-device selection, and primary-context flag/reset lifecycle contracts
+- `device_lifecycle`: device flag, device initialization (`hipInitDevice`), shared-memory-config, valid-device selection, and primary-context flag/reset lifecycle contracts
 - `device_reset`: `hipDeviceReset` state-discard and device-still-usable contract (a single isolated test case, since the reset is process-global)
 - `green_context`: device/stream SM resource query, SM split, and green execution context creation, stream, and event contracts
 - `memory_pool_lifecycle`: explicit memory pool lifecycle, release-threshold, trim, and pool-specific async allocation contracts
@@ -119,9 +121,9 @@ The first domains are:
 - `module`: HIPRTC-backed module load, function, global, launch, and function-attribute contracts
 - `module_load_ex`: HIPRTC-backed module load-data-with-options contracts
 - `module_load_file`: module load-from-file and fat-binary invalid-input contracts
-- `module_exec`: HIPRTC-backed module function-count, occupancy, and cooperative launch contracts
+- `module_exec`: HIPRTC-backed module function-count, enumeration, occupancy, and cooperative launch contracts
 - `jit_link`: AMD-gated JIT linker lifecycle and invalid-input contracts
-- `library`: AMD-gated HIPRTC-backed library load, kernel, global, and kernel-object contracts
+- `library`: AMD-gated HIPRTC-backed library load, kernel, global, module, and kernel-object contracts
 - `kernel_object_attributes`: AMD-gated HIPRTC-backed hipKernel_t attribute and parameter-info contracts
 - `library_file`: AMD-gated HIPRTC-backed library load-from-file and managed-symbol contracts
 
@@ -249,7 +251,7 @@ because the legacy texref API it exercises existed on NVIDIA only through CUDA 1
 In addition, several domains that do compile on NVIDIA gate only their AMD-only
 tests behind `#if HT_AMD` (for example `library`, `kernel_object_attributes`,
 `library_file`, `driver_graph_node`, `host_alloc_aliases`, `pointer_query`,
-`device_config`, `occupancy_ext`, `driver_texture_object`, `texture`), so their
+`device`, `device_config`, `occupancy_ext`, `driver_texture_object`, `texture`), so their
 portable subset still runs on NVIDIA.
 
 ### Tests skipped at execution on NVIDIA

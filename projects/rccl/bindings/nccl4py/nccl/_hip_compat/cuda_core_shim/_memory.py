@@ -26,7 +26,7 @@ import weakref
 from typing import Optional, Tuple
 
 from ._hip import check_hip, hip
-from .typing import DevicePointerT  # noqa: F401  (re-exported for fallback)
+from .typing import DevicePointerType  # noqa: F401  (re-exported for fallback)
 
 
 class Buffer:
@@ -54,7 +54,8 @@ class Buffer:
 
         def close(self, stream=None):
             if self.ptr and self.mr is not None:
-                self.mr.deallocate(self.ptr, self.size, stream)
+                # NcclMemoryResource.deallocate takes stream as keyword-only.
+                self.mr.deallocate(self.ptr, self.size, stream=stream)
                 self.ptr = 0
                 self.mr = None
 

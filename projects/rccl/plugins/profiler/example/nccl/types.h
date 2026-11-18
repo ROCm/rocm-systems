@@ -1,6 +1,11 @@
-/*
- * Copyright (c) 2017-2022, NVIDIA CORPORATION. All rights reserved.
- */
+/*************************************************************************
+ * SPDX-FileCopyrightText: Copyright (c) 2017-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef NCCL_TYPES_H_
 #define NCCL_TYPES_H_

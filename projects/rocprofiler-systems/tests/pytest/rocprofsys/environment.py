@@ -31,9 +31,10 @@ The following environment variables are excluded from the user layer overrides:
 """
 
 from __future__ import annotations
+
+import os
 from dataclasses import dataclass, field
 from enum import Enum
-import os
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -75,10 +76,15 @@ class TestEnvironment:
 
     def set_base_environment(
         self,
-        config: "RocprofsysConfig",
+        config: RocprofsysConfig,
         test_type: TestEnvKind = TestEnvKind.BASE,
+        python_version: str | None = None,
     ) -> None:
-        """Set the base layer to the preset for ``test_type`` (default: BASE)."""
+        """Set the base layer to the preset for ``test_type`` (default: BASE).
+
+        ``python_version`` is the interpreter the run targets, when it targets
+        one; only the PYTHON preset uses it.
+        """
         try:
             kind = TestEnvKind(test_type)
         except ValueError as exc:
@@ -94,7 +100,7 @@ class TestEnvironment:
         elif kind is TestEnvKind.BINARY:
             self.base = base_binary_environment()
         elif kind is TestEnvKind.PYTHON:
-            self.base = base_python_environment(config)
+            self.base = base_python_environment(config, python_version)
         elif kind is TestEnvKind.CAUSAL:
             self.base = base_causal_environment()
 
@@ -116,7 +122,7 @@ class TestEnvironment:
                 origin[key] = layer
         return merged, origin
 
-    def get_merged_environment(self, config: "RocprofsysConfig") -> dict[str, str]:
+    def get_merged_environment(self, config: RocprofsysConfig) -> dict[str, str]:
         """Return the effective merged environment (highest-precedence layer wins).
 
         ROCm-derived defaults (:func:`derived_defaults`) are applied at the
@@ -177,12 +183,13 @@ class TestEnvironment:
             "LD_LIBRARY_PATH",
             "LD_PRELOAD",
             "ROCPROFSYS_OUTPUT_PATH",
+            "ROCPROFSYS_TMPDIR",
             "ROCPROFSYS_CONFIG_FILE",
         )
         self.user.update({k: v for k, v in os.environ.items() if k not in owned})
 
 
-def derived_defaults(config: "RocprofsysConfig") -> dict[str, str]:
+def derived_defaults(config: RocprofsysConfig) -> dict[str, str]:
     """ROCm-derived defaults, applied at the lowest precedence by
     :meth:`TestEnvironment.get_merged_environment` (any layer overrides them).
     Each entry is only produced when its derived target exists on disk.
@@ -245,22 +252,35 @@ def base_binary_environment() -> dict[str, str]:
     }
 
 
-def base_python_environment(config: "RocprofsysConfig") -> dict[str, str]:
-    """Framework default environment for Python test execution."""
+def base_python_environment(
+    config: RocprofsysConfig, python_version: str | None = None
+) -> dict[str, str]:
+    """Framework default environment for Python test execution.
+
+    ``PYTHONPATH`` carries rocprofsys's own (ABI-agnostic) site-packages plus,
+    when ``python_version`` is given and ROCm ships them for it, the roctx
+    bindings - those live in a version-specific directory outside rocprofsys's
+    tree, so they cannot be picked up from the same entry.
+    """
+    python_paths: list[str] = []
+    if config.rocprofsys_site_packages:
+        python_paths.append(str(config.rocprofsys_site_packages))
+    if python_version:
+        roctx_site_packages = config.capabilities.roctx_site_packages(python_version)
+        if roctx_site_packages:
+            python_paths.append(str(roctx_site_packages))
+
     return {
         **COMMON_BASE_DEFAULT_VARS,
+        **OMP_DEFAULT_VARS,
         "ROCPROFSYS_TRACE": "ON",
         "ROCPROFSYS_PROFILE": "ON",
         "ROCPROFSYS_USE_SAMPLING": "OFF",
         "ROCPROFSYS_USE_PROCESS_SAMPLING": "ON",
         "ROCPROFSYS_TIME_OUTPUT": "OFF",
         "ROCPROFSYS_TREE_OUTPUT": "OFF",
-        "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,trip_count",
-        "PYTHONPATH": (
-            str(config.rocprofsys_site_packages)
-            if config.rocprofsys_site_packages
-            else ""
-        ),
+        "ROCPROFSYS_TIMEMORY_COMPONENTS": "trip_count",
+        "PYTHONPATH": os.pathsep.join(python_paths),
     }
 
 
@@ -268,6 +288,7 @@ def base_causal_environment() -> dict[str, str]:
     """Framework default environment for causal profiling test execution."""
     return {
         **COMMON_BASE_DEFAULT_VARS,
+        **OMP_DEFAULT_VARS,
         "ROCPROFSYS_THREAD_POOL_SIZE": "0",
         "ROCPROFSYS_VERBOSE": "1",
         "ROCPROFSYS_LOG_LEVEL": "info",
@@ -289,7 +310,7 @@ def flat_environment() -> dict[str, str]:
         "ROCPROFSYS_COLLAPSE_PROCESSES": "ON",
         "ROCPROFSYS_COLLAPSE_THREADS": "ON",
         "ROCPROFSYS_SAMPLING_FREQ": "50",
-        "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,trip_count",
+        "ROCPROFSYS_TIMEMORY_COMPONENTS": "trip_count",
     }
 
 
@@ -333,7 +354,7 @@ def timemory_environment() -> dict[str, str]:
         "ROCPROFSYS_USE_SAMPLING": "ON",
         "ROCPROFSYS_USE_PROCESS_SAMPLING": "ON",
         "ROCPROFSYS_TIME_OUTPUT": "OFF",
-        "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,trip_count,peak_rss",
+        "ROCPROFSYS_TIMEMORY_COMPONENTS": "trip_count,peak_rss",
     }
 
 

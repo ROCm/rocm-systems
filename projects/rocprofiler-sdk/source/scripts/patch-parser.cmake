@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 foreach(BINARY_OUTPUT ${BINARY_DIR}/parser.h ${BINARY_DIR}/parser.cpp
                       ${BINARY_DIR}/scanner.cpp)

@@ -1,0 +1,100 @@
+{
+    "required_tables": [
+        {
+            "min_rows": 1,
+            "name_prefix": "rocpd_info_pmc",
+            "required_columns": [
+                "agent_id",
+                "target_arch",
+                "name",
+                "symbol",
+                "description",
+                "units",
+                "value_type"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Check for hipFile PMC metric descriptions",
+                    "error_message": "No hipFile PMC info rows found in rocpd_info_pmc",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE name LIKE 'device_storage_%'"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Check for hipFile per-GPU byte counter descriptions",
+                    "error_message": "hipFile 'Read Bytes' / 'Write Bytes' PMC info not found",
+                    "expected_result": 2,
+                    "query": "SELECT COUNT(DISTINCT symbol) as count FROM {table_name} WHERE name LIKE 'device_storage_%' AND symbol IN ('Read Bytes', 'Write Bytes')"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Check for the hipFile fastpath/fallback split",
+                    "error_message": "hipFile fastpath/fallback PMC info not found",
+                    "expected_result": 4,
+                    "query": "SELECT COUNT(DISTINCT symbol) as count FROM {table_name} WHERE name LIKE 'device_storage_%' AND symbol IN ('Fastpath Reads', 'Fallback Reads', 'Fastpath Writes', 'Fallback Writes')"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Check hipFile byte counters carry the same units as the other byte metrics",
+                    "error_message": "hipFile byte counters are not registered with units 'bytes'",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE symbol IN ('Read Bytes', 'Write Bytes') AND units != 'bytes'"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Check hipFile bandwidth carries the same units as PCIe instantaneous bandwidth",
+                    "error_message": "hipFile bandwidth is not registered with units 'bytes/s'",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE symbol IN ('Read Bandwidth', 'Write Bandwidth') AND units != 'bytes/s'"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Check no process-scoped hipFile counters are registered",
+                    "error_message": "hipFile process-scoped registration counters are still being registered; they were removed because they are not GPU measurements",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE symbol IN ('File Registrations', 'Buffer Registrations')"
+                }
+            ]
+        },
+        {
+            "min_rows": 1,
+            "name_prefix": "rocpd_pmc_event",
+            "required_columns": [
+                "event_id",
+                "pmc_id",
+                "value"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Check for hipFile PMC counter events in trace",
+                    "error_message": "No hipFile PMC events found in rocpd_pmc_event",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name LIKE 'device_storage_%'"
+                },
+                {
+                    "comparison": "greater_than",
+                    "description": "Check that at least one hipFile byte counter is non-zero",
+                    "error_message": "Every hipFile byte counter was zero: rows exist but no I/O was actually measured",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.symbol IN ('Read Bytes', 'Write Bytes') AND event.value > 0"
+                },
+                {
+                    "comparison": "greater_than",
+                    "description": "Check that at least one hipFile operation counter is non-zero",
+                    "error_message": "Every hipFile operation counter was zero: no read or write operations were attributed to a GPU",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.symbol IN ('Read Ops', 'Write Ops') AND event.value > 0"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Check hipFile byte counters never decrease between non-zero samples",
+                    "error_message": "A hipFile byte counter decreased between samples; the counters are published cumulative, so a drop means per-interval deltas were emitted instead",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM (SELECT event.value AS value, LAG(event.value) OVER (PARTITION BY event.pmc_id ORDER BY event.event_id) AS previous FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.symbol IN ('Read Bytes', 'Write Bytes') AND event.value > 0) WHERE previous IS NOT NULL AND value < previous"
+                }
+            ]
+        }
+    ]
+}

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "common/string_utility.hpp"
 #include "core/demangler.hpp"
 #include "defines.hpp"
 #include <cstdint>
@@ -32,9 +33,7 @@
 
 //======================================================================================//
 
-namespace tim
-{
-namespace cereal
+namespace tim::cereal
 {
 class SettingsTextArchive
 : public OutputArchive<SettingsTextArchive>
@@ -66,7 +65,7 @@ public:
         setNextName(name);
         writeName();
 
-        auto base64string =
+        auto const base64string =
             base64::encode(reinterpret_cast<const unsigned char*>(data), size);
         saveValue(base64string);
     }
@@ -78,30 +77,31 @@ public:
     //! Sets the name for the next node created with startNode
     void setNextName(const char* name)
     {
-        if(exclude_stream.count(name) > 0) return;
-
-        if((current_entry != nullptr) && value_keys.count(name) > 0)
+        if(exclude_stream.contains(name))
         {
-            current_entry->insert({ name, "" });
-            current_value = &((*current_entry)[name]);
             return;
         }
 
-        if(value_keys.count(name) > 0)
+        if((current_entry != nullptr) && value_keys.contains(name))
+        {
+            current_entry->insert({ name, "" });
+            current_value = &(*current_entry)[name];
+            return;
+        }
+
+        if(value_keys.contains(name))
         {
             return;
         }
 
         current_value = nullptr;
         output_stream->push_back(entry_type{});
-        current_entry = &(output_stream->back());
+        current_entry = &output_stream->back();
 
         current_entry->insert({ "identifier", name });
         std::string       func   = name;
         const std::string prefix = TIMEMORY_SETTINGS_PREFIX;
-        func                     = func.erase(0, prefix.length());
-        std::transform(func.begin(), func.end(), func.begin(),
-                       [](char& c) { return tolower(c); });
+        func = rocprofsys::utility::string::to_lower(func.erase(0, prefix.length()));
         {
             std::stringstream ss;
             ss << "settings::" << func << "()";
@@ -123,7 +123,7 @@ public:
 
 public:
     template <typename Tp>
-    inline void saveValue(Tp _val)
+    void saveValue(Tp _val)
     {
         std::stringstream ssval;
         ssval << std::boolalpha << _val;
@@ -138,10 +138,10 @@ public:
     void makeArray() {}
 
 private:
-    value_type* current_value  = nullptr;
-    entry_type* current_entry  = nullptr;
-    array_type* output_stream  = nullptr;
-    unique_set  exclude_stream = {};
+    value_type* current_value = nullptr;
+    entry_type* current_entry = nullptr;
+    array_type* output_stream = nullptr;
+    unique_set  exclude_stream;
     int_stack   name_counter;
     unique_set  value_keys = { "name",    "value",     "description", "count",
                                "environ", "max_count", "cmdline",     "data_type",
@@ -282,7 +282,10 @@ template <typename T>
 inline void
 TIMEMORY_CEREAL_SAVE_FUNCTION_NAME(SettingsTextArchive& ar, const T& t)
 {
-    if(std::is_same<T, std::string>::value) ar.setNextType("string");
+    if(std::is_same<T, std::string>::value)
+    {
+        ar.setNextType("string");
+    }
     ar.saveValue(t);
 }
 
@@ -305,8 +308,7 @@ TIMEMORY_CEREAL_SAVE_FUNCTION_NAME(SettingsTextArchive&, const SizeTag<T>&)
     // nothing to do here, we don't explicitly save the size
 }
 
-}  // namespace cereal
-}  // namespace tim
+}  // namespace tim::cereal
 
 // register archives for polymorphic support
 TIMEMORY_CEREAL_REGISTER_ARCHIVE(SettingsTextArchive)

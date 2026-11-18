@@ -5,9 +5,11 @@
  */
 
 #include <hip/hip_fp6.h>
+#include <hip/hip_fp16.h>
 #include <hip_test_common.hh>
 
 #include <bitset>
+#include <cmath>
 #include <type_traits>
 #include <vector>
 
@@ -303,4 +305,36 @@ HIP_TEMPLATE_TEST_CASE(Unit_all_fp6_ocp_vector_cvt_interger_data_device, int, lo
 
   HIP_CHECK(hipFree(d_f_vals));
   HIP_CHECK(hipFree(d_res));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - FP6 signed zeros must decode to the matching fp16 signed zero. Encoding
+ * 0x20 sets the sign bit of a 6 bit value, so it is negative zero in both E3M2
+ * and E2M3 and must give fp16 0x8000, not a normal value.
+ * Test source
+ * ------------------------
+ *  - /unit/deviceLib/fp6_ocp.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.5
+ */
+HIP_TEST_CASE(Unit_ocp_fp6_to_halfraw_signed_zero_host) {
+  for (auto interp : {__HIP_E3M2, __HIP_E2M3}) {
+    const __half_raw pos =
+        __hip_cvt_fp6_to_halfraw(static_cast<__hip_fp6_storage_t>(0x00), interp);
+    const __half_raw neg =
+        __hip_cvt_fp6_to_halfraw(static_cast<__hip_fp6_storage_t>(0x20), interp);
+
+    INFO("interpretation " << static_cast<int>(interp) << ": 0x00 -> fp16 bits 0x" << std::hex
+                           << pos.x << ", 0x20 -> fp16 bits 0x" << neg.x);
+    REQUIRE(pos.x == 0x0000);
+    REQUIRE(__half2float(pos) == 0.0f);
+    REQUIRE(!std::signbit(__half2float(pos)));
+
+    REQUIRE(neg.x == 0x8000);
+    REQUIRE(__half2float(neg) == 0.0f);
+    REQUIRE(std::signbit(__half2float(neg)));
+  }
 }

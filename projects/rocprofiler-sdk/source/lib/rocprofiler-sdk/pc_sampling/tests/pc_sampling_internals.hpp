@@ -41,14 +41,6 @@ amd_intercept_marker_handler_callback(const struct amd_aql_intercept_marker_s* p
                                       uint64_t                                 packet_id);
 
 extern void
-kernel_completion_cb(const std::shared_ptr<rocprofiler::counters::counter_callback_info>& info,
-                     const rocprofiler_agent_t*                    rocp_agent,
-                     rocprofiler::hsa::ClientID                    client_id,
-                     const rocprofiler::hsa::rocprofiler_packet&   kernel_pkt,
-                     const rocprofiler::hsa::queue_info_session_t& session,
-                     std::unique_ptr<rocprofiler::hsa::AQLPacket>  pkt);
-
-extern void
 data_ready_callback(void*                                client_callback_data,
                     size_t                               data_size,
                     size_t                               lost_sample_count,

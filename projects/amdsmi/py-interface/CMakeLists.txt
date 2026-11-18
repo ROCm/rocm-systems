@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # Generate py-interface and package targets
 
 # CLANG installed must be 16.0 or above
@@ -56,8 +59,11 @@ if(NOT GOOD_CLANG_FOUND)
         AUTHOR_WARNING
         "A wrapper will not be re-generated! Using old wrapper instead.\nSet -DBUILD_WRAPPER=ON to re-build the wrapper"
     )
-    # Still need Python3 for building the wheel package
-    find_package(Python3 3.6 COMPONENTS Interpreter REQUIRED)
+    # Python3 is only consumed by the wheel build; the wrapper is copied with
+    # plain cmake here, so don't require an interpreter for a C-only build.
+    if(BUILD_PYTHON_WHEEL)
+        find_package(Python3 3.6 COMPONENTS Interpreter REQUIRED)
+    endif()
     add_custom_command(
         OUTPUT amdsmi_wrapper.py ${PY_PACKAGE_DIR}/amdsmi_wrapper.py
         DEPENDS ${AMD_SMI} ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_wrapper.py
@@ -113,8 +119,15 @@ add_custom_command(
         ${PY_PACKAGE_DIR}/amdsmi_interface_utils.py
         ${PY_PACKAGE_DIR}/README.md
         ${PY_PACKAGE_DIR}/LICENSE
+        ${PY_PACKAGE_DIR}/THIRD_PARTY_LICENSES/LGPL-2.1.txt
+        ${PY_PACKAGE_DIR}/THIRD_PARTY_LICENSES/NOTICE.md
         ${PY_BUILD_DIR}/setup.py
-    DEPENDS python_wrapper
+    DEPENDS
+        python_wrapper
+        # The other copied inputs are not listed here, so editing them does not
+        # restage the package; the notices at least should not go stale.
+        ${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_LICENSES/LGPL-2.1.txt
+        ${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_LICENSES/NOTICE.md
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/__init__.py ${PY_PACKAGE_DIR}/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/setup.py ${PY_BUILD_DIR}/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_exception.py ${PY_PACKAGE_DIR}/
@@ -123,6 +136,13 @@ add_custom_command(
         ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_interface_utils.py ${PY_PACKAGE_DIR}/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/README.md ${PY_PACKAGE_DIR}/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${PROJECT_SOURCE_DIR}/LICENSE ${PY_PACKAGE_DIR}/
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${PY_PACKAGE_DIR}/THIRD_PARTY_LICENSES
+    COMMAND
+        ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_LICENSES/LGPL-2.1.txt
+        ${PY_PACKAGE_DIR}/THIRD_PARTY_LICENSES/
+    COMMAND
+        ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_LICENSES/NOTICE.md
+        ${PY_PACKAGE_DIR}/THIRD_PARTY_LICENSES/
 )
 
 # copy libamd_smi.so to allow for a self-contained python package
@@ -144,6 +164,8 @@ add_custom_target(
         ${PY_PACKAGE_DIR}/amdsmi_interface_utils.py
         ${PY_PACKAGE_DIR}/README.md
         ${PY_PACKAGE_DIR}/LICENSE
+        ${PY_PACKAGE_DIR}/THIRD_PARTY_LICENSES/LGPL-2.1.txt
+        ${PY_PACKAGE_DIR}/THIRD_PARTY_LICENSES/NOTICE.md
         ${PY_BUILD_DIR}/setup.py
         ${PY_PACKAGE_DIR}/${AMDSMI_PYTHON_LIB_NAME}
 )
@@ -268,11 +290,24 @@ if(NOT AMDSMI_SYSTEM_PYTHON_SITELIB)
             RESULT_VARIABLE _amdsmi_sitelib_rc
         )
         if(NOT _amdsmi_sitelib_rc EQUAL 0 OR _amdsmi_detected_sitelib STREQUAL "")
-            message(
-                WARNING
-                "Could not query ${_amdsmi_detect_python} site-packages; falling back to Python3_SITELIB=${Python3_SITELIB}"
-            )
-            set(_amdsmi_detected_sitelib "${Python3_SITELIB}")
+            # Python3_SITELIB only exists when find_package(Python3) ran, and a
+            # C-only build no longer runs it (BUILD_PYTHON_WHEEL and
+            # BUILD_WRAPPER both default to OFF). Falling back to an unset
+            # variable would set the destination to "" and install the module to
+            # the prefix root -- the silent misplacement this detection exists to
+            # prevent -- so only fall back to a value we actually have.
+            if(Python3_SITELIB)
+                message(
+                    WARNING
+                    "Could not query ${_amdsmi_detect_python} site-packages; falling back to Python3_SITELIB=${Python3_SITELIB}"
+                )
+                set(_amdsmi_detected_sitelib "${Python3_SITELIB}")
+            else()
+                message(
+                    FATAL_ERROR
+                    "Could not query ${_amdsmi_detect_python} for the amdsmi module install path, and no Python3_SITELIB is available to fall back on. Set -DAMDSMI_SYSTEM_PYTHON_SITELIB=<dir> explicitly."
+                )
+            endif()
         endif()
     elseif(NOT BUILD_PYTHON_WHEEL)
         # System-package build with no default system python3: Python3_SITELIB

@@ -22,6 +22,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <optional>
 #include <span>
 #include <sstream>
 #include <string>
@@ -35,6 +36,21 @@
 namespace {
 
 std::filesystem::path g_translate_tool;
+std::filesystem::path g_decode_benchmark;
+#if defined(__linux__)
+std::filesystem::path g_pretranslate_tool;
+#endif
+
+rocjitsu::tools::ToolResult<rocjitsu::tools::TranslateOutput>
+capture_gfx1251_targets(const rocjitsu::tools::TranslateOptions &options) {
+  EXPECT_EQ(options.input_target, ROCJITSU_CODE_TARGET_GFX1251);
+  EXPECT_EQ(options.guest_arch, ROCJITSU_CODE_ARCH_CDNA5);
+  EXPECT_EQ(options.host_arch, ROCJITSU_CODE_ARCH_CDNA5);
+  EXPECT_EQ(options.target_mach, rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1251);
+  EXPECT_EQ(options.input_revision, rocjitsu::ProcessorRevision::Unspecified);
+  EXPECT_EQ(options.output_revision, rocjitsu::ProcessorRevision::Unspecified);
+  return {};
+}
 
 rocjitsu::tools::ToolResult<rocjitsu::tools::TranslateOutput>
 synthetic_idempotence_mismatch(const rocjitsu::tools::TranslateOptions &options) {
@@ -46,6 +62,24 @@ synthetic_idempotence_mismatch(const rocjitsu::tools::TranslateOptions &options)
       {.exit_code = 5,
        .message =
            "translation output is not byte-idempotent: section '.text' first differs at 0x4"});
+  return result;
+}
+
+rocjitsu::tools::ToolResult<rocjitsu::tools::TranslateOutput>
+synthetic_residual_rewrite(const rocjitsu::tools::TranslateOptions &options) {
+  EXPECT_TRUE(options.verify_rewrite_discharge);
+
+  rocjitsu::tools::ToolResult<rocjitsu::tools::TranslateOutput> result;
+  result.value.rewrite_discharge_checked = true;
+  result.value.diagnostics.push_back(
+      {.severity = rocjitsu::DiagnosticSeverity::Error,
+       .kind = rocjitsu::DiagnosticKind::ResidualRewrite,
+       .guest_offset = std::nullopt,
+       .output_offset = 4,
+       .mnemonic = "s_clause",
+       .message = "registered rewrite remains actionable in final output",
+       .required_work = {}});
+  result.errors.push_back({.exit_code = 3, .message = "translation failed"});
   return result;
 }
 
@@ -280,6 +314,28 @@ bool contains(std::string_view haystack, std::string_view needle) {
   return haystack.find(needle) != std::string_view::npos;
 }
 
+/// @brief Read one `name=<count>` field out of the summary line.
+///
+/// @details The counters are space-separated, so a substring search for
+/// "expand=1" also matches "expand=10". Anchoring on the leading space and
+/// reading to the next delimiter makes the comparison numeric, so a count that
+/// drifts fails instead of still matching a prefix.
+std::optional<long long> summary_counter(std::string_view text, std::string_view name) {
+  const std::string key = " " + std::string(name) + "=";
+  const size_t at = text.find(key);
+  if (at == std::string_view::npos)
+    return std::nullopt;
+  const size_t first = at + key.size();
+  const size_t last = text.find_first_not_of("0123456789", first);
+  if (last == first)
+    return std::nullopt;
+  long long value = 0;
+  const auto digits = text.substr(first, last - first);
+  for (const char digit : digits)
+    value = value * 10 + (digit - '0');
+  return value;
+}
+
 bool command_succeeded(int status) {
   return status != -1 && WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
@@ -414,8 +470,45 @@ TEST(RjDbtTranslateIdempotence, ReportsSyntheticMismatchThroughCli) {
   EXPECT_TRUE(contains(stderr_text, "section '.text' first differs at 0x4")) << stderr_text;
 }
 
+TEST(RjDbtTranslateRewriteDischarge, ReportsSyntheticResidualThroughCli) {
+  std::array arguments = {
+      std::string("rj_dbt_translate"),
+      std::string("synthetic.co"),
+      std::string("--input-target"),
+      std::string("gfx1250"),
+      std::string("--input-revision"),
+      std::string("b0"),
+      std::string("--output-target"),
+      std::string("gfx1250"),
+      std::string("--output-revision"),
+      std::string("a0"),
+      std::string("--verify-rewrite-discharge"),
+      std::string("--output-mode"),
+      std::string("diff"),
+  };
+  std::vector<char *> argv;
+  argv.reserve(arguments.size());
+  for (std::string &argument : arguments)
+    argv.push_back(argument.data());
+
+  testing::internal::CaptureStdout();
+  testing::internal::CaptureStderr();
+  const int status = rocjitsu::tools::detail::run_dbt_translate_cli(
+      static_cast<int>(argv.size()), argv.data(), synthetic_residual_rewrite);
+  const std::string stderr_text = testing::internal::GetCapturedStderr();
+  const std::string stdout_text = testing::internal::GetCapturedStdout();
+
+  EXPECT_EQ(status, 3);
+  EXPECT_TRUE(contains(stdout_text, "rewrite_discharge: not-verified")) << stdout_text;
+  EXPECT_TRUE(contains(stderr_text, "residual-rewrite output:.text+0x0004 s_clause"))
+      << stderr_text;
+  EXPECT_TRUE(contains(stderr_text, "registered rewrite remains actionable in final output"))
+      << stderr_text;
+}
+
 TEST(RjDbtTranslate, Smoke) {
-  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_smoke_");
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_dbt_translate_smoke_"));
   const std::filesystem::path temp_path(temp_dir.path());
 
   const auto input = temp_path / "smoke_gfx950.co";
@@ -456,7 +549,8 @@ TEST(RjDbtTranslate, Smoke) {
 }
 
 TEST(RjDbtTranslate, EmptyTextSameArchWarnsAndCopiesInput) {
-  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_empty_text_");
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_dbt_translate_empty_text_"));
   const std::filesystem::path temp_path(temp_dir.path());
 
   const auto input = temp_path / "data_only_gfx1250.co";
@@ -488,7 +582,8 @@ TEST(RjDbtTranslate, EmptyTextSameArchWarnsAndCopiesInput) {
 }
 
 TEST(RjDbtTranslate, DescriptorlessExecutableWarnsAndCopiesInput) {
-  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_descriptorless_");
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_dbt_translate_descriptorless_"));
   const std::filesystem::path temp_path(temp_dir.path());
 
   const auto input = temp_path / "descriptorless_gfx1250.co";
@@ -521,7 +616,8 @@ TEST(RjDbtTranslate, DescriptorlessExecutableWarnsAndCopiesInput) {
 }
 
 TEST(RjDbtTranslate, RequiresRevisionsOnlyForGfx1250) {
-  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_revision_");
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_dbt_translate_revision_"));
   const std::filesystem::path temp_path(temp_dir.path());
   const auto input = temp_path / "smoke.co";
   const auto output = temp_path / "stdout.txt";
@@ -580,8 +676,317 @@ TEST(RjDbtTranslate, RequiresRevisionsOnlyForGfx1250) {
   EXPECT_TRUE(contains(read_text_file(error), "gfx1250 A0-to-B0 translation is not supported"));
 }
 
+#if defined(__linux__)
+TEST(RjPretranslate, SharedParserWritesReusesAndForcesTranslationStore) {
+  const auto &tool = g_pretranslate_tool;
+  ASSERT_TRUE(std::filesystem::exists(tool));
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_pretranslate_cli_"));
+  const std::filesystem::path temp_path = std::filesystem::canonical(temp_dir.path());
+  const auto input = temp_path / "gfx1250.co";
+  const auto output = temp_path / "stdout.txt";
+  const auto error = temp_path / "stderr.txt";
+  const auto store = temp_path / "store";
+  {
+    const auto image = make_gfx1250_smoke_code_object();
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(image.data()),
+              static_cast<std::streamsize>(image.size()));
+  }
+  for (int pass = 0; pass < 3; ++pass) {
+    const std::string command =
+        shell_quote(tool.string()) +
+        " --store-root /unused/previous-value --store-root=" + shell_quote(store.string()) +
+        " --portable" + (pass == 2 ? " --force" : "") + " -- " + shell_quote(input.string()) +
+        " > " + shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+    ASSERT_TRUE(command_succeeded(std::system(command.c_str()))) << read_text_file(error);
+    EXPECT_TRUE(
+        contains(read_text_file(output), pass == 1 ? "written=0 held=1" : "written=1 held=0"))
+        << read_text_file(output);
+  }
+}
+#endif
+
+TEST(RjDbtTranslate, SharedParserPreservesHexBoundsOmissionAndLastValue) {
+  for (bool explicit_vgpr : {false, true}) {
+    std::vector<std::string> arguments{"rj_dbt_translate",        "--input-target=gfx1251",
+                                       "--output-target=gfx1251", "--output-mode=code-object",
+                                       "--output-mode=disasm",    "--code-object-index=0X2a"};
+    if (explicit_vgpr)
+      arguments.push_back("--debug-conservative-liveness=0xffff");
+    arguments.insert(arguments.end(), {"--", explicit_vgpr ? "explicit.co" : "omitted.co"});
+    std::vector<char *> argv;
+    for (auto &argument : arguments)
+      argv.push_back(argument.data());
+    auto check = [](const rocjitsu::tools::TranslateOptions &options)
+        -> rocjitsu::tools::ToolResult<rocjitsu::tools::TranslateOutput> {
+      EXPECT_EQ(options.code_object_index, 42u);
+      EXPECT_EQ(options.disassembly, rocjitsu::tools::DisassemblyMode::Translated);
+      if (options.input_path == "explicit.co")
+        EXPECT_EQ(options.debug_min_free_vgpr, UINT16_MAX);
+      else
+        EXPECT_FALSE(options.debug_min_free_vgpr);
+      return {};
+    };
+    EXPECT_EQ(rocjitsu::tools::detail::run_dbt_translate_cli(static_cast<int>(argv.size()),
+                                                             argv.data(), check),
+              0);
+  }
+}
+
+TEST(RjDbtTranslate, AcceptsGfx1251WithoutGfx1250Revisions) {
+  std::array arguments = {
+      std::string("rj_dbt_translate"), std::string("synthetic.co"),
+      std::string("--input-target"),   std::string("gfx1251"),
+      std::string("--output-target"),  std::string("gfx1251"),
+      std::string("--output-mode"),    std::string("diff"),
+  };
+  std::vector<char *> argv;
+  argv.reserve(arguments.size());
+  for (std::string &argument : arguments)
+    argv.push_back(argument.data());
+
+  testing::internal::CaptureStdout();
+  testing::internal::CaptureStderr();
+  const int status = rocjitsu::tools::detail::run_dbt_translate_cli(
+      static_cast<int>(argv.size()), argv.data(), capture_gfx1251_targets);
+  const std::string stderr_text = testing::internal::GetCapturedStderr();
+  const std::string stdout_text = testing::internal::GetCapturedStdout();
+
+  EXPECT_EQ(status, 0) << stderr_text;
+  EXPECT_TRUE(stderr_text.empty()) << stderr_text;
+  EXPECT_TRUE(contains(stdout_text, "input_target: gfx1251")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "output_target: gfx1251")) << stdout_text;
+}
+
+TEST(RjDbtTranslate, RejectsGfx1250RevisionOptionsForGfx1251) {
+  rocjitsu::tools::TranslateOptions options;
+  options.input_target = ROCJITSU_CODE_TARGET_GFX1251;
+  options.guest_arch = ROCJITSU_CODE_ARCH_CDNA5;
+  options.target_mach = rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1251;
+  options.host_arch = ROCJITSU_CODE_ARCH_CDNA5;
+  options.input_revision = rocjitsu::ProcessorRevision::Gfx1250B0;
+
+  auto error = rocjitsu::tools::translation_request_error(options);
+  ASSERT_TRUE(error.has_value());
+  EXPECT_EQ(*error, "--input-revision is only valid when --input-target is gfx1250");
+
+  options.input_revision = rocjitsu::ProcessorRevision::Unspecified;
+  options.output_revision = rocjitsu::ProcessorRevision::Gfx1250A0;
+  error = rocjitsu::tools::translation_request_error(options);
+  ASSERT_TRUE(error.has_value());
+  EXPECT_EQ(*error, "--output-revision is only valid when --output-target is gfx1250");
+}
+
+TEST(RjDbtTranslate, AppliesGfx1250RevisionContractToDefaultCdna5OutputMachine) {
+  rocjitsu::tools::TranslateOptions options;
+  options.input_target = ROCJITSU_CODE_TARGET_GFX1251;
+  options.guest_arch = ROCJITSU_CODE_ARCH_CDNA5;
+  options.host_arch = ROCJITSU_CODE_ARCH_CDNA5;
+  options.target_mach = 0;
+
+  const auto error = rocjitsu::tools::translation_request_error(options);
+  ASSERT_TRUE(error.has_value());
+  EXPECT_EQ(*error, "--output-revision is required when --output-target is gfx1250");
+}
+
+TEST(RjDecodeBenchmark, RejectsInputBeforeMeasurement) {
+  ASSERT_FALSE(g_decode_benchmark.empty());
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_decode_benchmark_rejection_"));
+  const std::filesystem::path temp_path(temp_dir.path());
+  const std::filesystem::path input = temp_path / "input.co";
+  const std::filesystem::path output = temp_path / "stdout.txt";
+  const std::filesystem::path error = temp_path / "stderr.txt";
+  const std::string command = shell_quote(g_decode_benchmark.string()) + " " +
+                              shell_quote(input.string()) + " > " + shell_quote(output.string()) +
+                              " 2> " + shell_quote(error.string());
+
+  EXPECT_TRUE(command_exited_with(std::system(command.c_str()), 2));
+  EXPECT_TRUE(contains(read_text_file(error), "Failed to parse input code object"));
+  EXPECT_TRUE(read_text_file(output).empty());
+
+  const std::array<uint32_t, 1> truncated_instruction = {0xBE8000FFu};
+  const std::vector<uint8_t> image =
+      make_smoke_code_object(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1251, truncated_instruction);
+  {
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(image.data()),
+              static_cast<std::streamsize>(image.size()));
+  }
+  EXPECT_TRUE(command_exited_with(std::system(command.c_str()), 2));
+  EXPECT_TRUE(contains(read_text_file(error), "crosses a text-section boundary"))
+      << read_text_file(error);
+  EXPECT_TRUE(read_text_file(output).empty());
+}
+
+TEST(RjDecodeBenchmark, PreservesConcreteGfx1251Identity) {
+  ASSERT_FALSE(g_decode_benchmark.empty());
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_decode_benchmark_gfx1251_"));
+  const std::filesystem::path temp_path(temp_dir.path());
+  const auto input = temp_path / "gfx1251.co";
+  const auto output = temp_path / "stdout.txt";
+  const auto error = temp_path / "stderr.txt";
+
+  constexpr std::array<uint32_t, 2> gfx1251_only_instruction = {
+      0xCC4B4004u,
+      0x1A021908u,
+  };
+  {
+    const std::vector<uint8_t> image =
+        make_smoke_code_object(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1251, gfx1251_only_instruction);
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(image.data()),
+              static_cast<std::streamsize>(image.size()));
+  }
+
+  const std::string automatic_command =
+      shell_quote(g_decode_benchmark.string()) + " " + shell_quote(input.string()) +
+      " --iterations 1 --invalid-limit 0 > " + shell_quote(output.string()) + " 2> " +
+      shell_quote(error.string());
+  int status = std::system(automatic_command.c_str());
+  EXPECT_TRUE(command_succeeded(status)) << read_text_file(error);
+  EXPECT_TRUE(contains(read_text_file(output), "1 valid instructions")) << read_text_file(output);
+
+  const std::string explicit_command =
+      shell_quote(g_decode_benchmark.string()) + " " + shell_quote(input.string()) +
+      " --target gfx1251 --iterations 1 --invalid-limit 0 > " + shell_quote(output.string()) +
+      " 2> " + shell_quote(error.string());
+  status = std::system(explicit_command.c_str());
+  EXPECT_TRUE(command_succeeded(status)) << read_text_file(error);
+
+  const std::string mismatch_command =
+      shell_quote(g_decode_benchmark.string()) + " " + shell_quote(input.string()) +
+      " --target gfx1250 --iterations 1 --invalid-limit 0 > " + shell_quote(output.string()) +
+      " 2> " + shell_quote(error.string());
+  status = std::system(mismatch_command.c_str());
+  EXPECT_TRUE(command_exited_with(status, 2));
+  EXPECT_TRUE(contains(read_text_file(error), "does not match code-object target"))
+      << read_text_file(error);
+}
+
+TEST(RjDecodeBenchmark, AcceptsGfx1100TargetAndChecksElfIdentity) {
+  ASSERT_FALSE(g_decode_benchmark.empty());
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_decode_benchmark_gfx1100_"));
+  const std::filesystem::path temp_path(temp_dir.path());
+  const std::filesystem::path input = temp_path / "gfx1100.co";
+  const std::filesystem::path output = temp_path / "stdout.txt";
+  const std::filesystem::path error = temp_path / "stderr.txt";
+
+  constexpr std::array<uint32_t, 1> kNop = {0xBF800000u};
+  {
+    const std::vector<uint8_t> image =
+        make_smoke_code_object(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1100, kNop);
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(image.data()),
+              static_cast<std::streamsize>(image.size()));
+  }
+
+  const std::string help_command = shell_quote(g_decode_benchmark.string()) + " --help > " +
+                                   shell_quote(output.string()) + " 2> " +
+                                   shell_quote(error.string());
+  int status = std::system(help_command.c_str());
+  EXPECT_TRUE(command_succeeded(status)) << read_text_file(error);
+  EXPECT_TRUE(contains(read_text_file(output),
+                       "Target: auto, gfx942, gfx950, gfx1100, gfx1200, gfx1201, gfx1250, gfx1251"))
+      << read_text_file(output);
+
+  const std::string explicit_command =
+      shell_quote(g_decode_benchmark.string()) + " " + shell_quote(input.string()) +
+      " --target gfx1100 --iterations 1 --invalid-limit 0 > " + shell_quote(output.string()) +
+      " 2> " + shell_quote(error.string());
+  status = std::system(explicit_command.c_str());
+  EXPECT_TRUE(command_succeeded(status)) << read_text_file(error);
+  EXPECT_TRUE(contains(read_text_file(output), "1 valid instructions")) << read_text_file(output);
+
+  const std::string mismatch_command =
+      shell_quote(g_decode_benchmark.string()) + " " + shell_quote(input.string()) +
+      " --target gfx1201 --iterations 1 --invalid-limit 0 > " + shell_quote(output.string()) +
+      " 2> " + shell_quote(error.string());
+  status = std::system(mismatch_command.c_str());
+  EXPECT_TRUE(command_exited_with(status, 2));
+  EXPECT_TRUE(contains(read_text_file(error), "does not match code-object target"))
+      << read_text_file(error);
+}
+
+TEST(RjDbtTranslate, RejectsStandaloneConcreteTargetMismatch) {
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_dbt_translate_target_mismatch_"));
+  const std::filesystem::path temp_path(temp_dir.path());
+  const auto input = temp_path / "input.co";
+  const auto output = temp_path / "stdout.txt";
+  const auto error = temp_path / "stderr.txt";
+
+  constexpr std::array<uint32_t, 2> text_words = {0xBF800000u, 0xBF800000u};
+  const auto run_mismatch = [&](uint32_t elf_mach, std::string_view arguments) {
+    const std::vector<uint8_t> image = make_smoke_code_object(elf_mach, text_words);
+    {
+      std::ofstream out(input, std::ios::binary);
+      out.write(reinterpret_cast<const char *>(image.data()),
+                static_cast<std::streamsize>(image.size()));
+    }
+    const std::string command = shell_quote(g_translate_tool.string()) + " " +
+                                shell_quote(input.string()) + " " + std::string(arguments) + " > " +
+                                shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+    const int status = std::system(command.c_str());
+    EXPECT_TRUE(command_exited_with(status, 2));
+    EXPECT_TRUE(contains(read_text_file(error),
+                         "input target does not match standalone code-object target metadata"))
+        << read_text_file(error);
+  };
+
+  run_mismatch(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1250,
+               "--input-target gfx1251 --output-target gfx1251 --output-mode diff");
+  run_mismatch(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1251,
+               "--input-target gfx1250 --input-revision b0 --output-target gfx1250 "
+               "--output-revision a0 --output-mode diff");
+}
+
+TEST(RjDbtTranslate, ReportsGfx1251OnlyInstructionWithConcreteDecoders) {
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_dbt_translate_gfx1251_report_"));
+  const std::filesystem::path temp_path(temp_dir.path());
+  const auto input = temp_path / "gfx1251.co";
+  const auto output = temp_path / "stdout.txt";
+  const auto error = temp_path / "stderr.txt";
+
+  constexpr std::array<uint32_t, 3> gfx1251_only_instruction = {
+      0xCC4B4004u,
+      0x1A021908u,
+      0xBFB00000u,
+  };
+  {
+    const std::vector<uint8_t> image =
+        make_smoke_code_object(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1251, gfx1251_only_instruction);
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(image.data()),
+              static_cast<std::streamsize>(image.size()));
+  }
+
+  const std::string command = shell_quote(g_translate_tool.string()) + " " +
+                              shell_quote(input.string()) +
+                              " --input-target gfx1251 --output-target gfx1251 --output-mode diff "
+                              "--show-all-translations > " +
+                              shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+  const int status = std::system(command.c_str());
+  const std::string stdout_text = read_text_file(output);
+  const std::string stderr_text = read_text_file(error);
+
+  ASSERT_TRUE(command_succeeded(status)) << "stderr:\n"
+                                         << stderr_text << "\nstdout:\n"
+                                         << stdout_text;
+  EXPECT_TRUE(stderr_text.empty()) << stderr_text;
+  EXPECT_TRUE(contains(stdout_text, "source: v_pk_add_f64")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "target: v_pk_add_f64")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "section .text bytes=12 instructions=2 decode_failures=0"))
+      << stdout_text;
+}
+
 TEST(RjDbtTranslate, VerifiesGfx1250B0ToA0Idempotence) {
-  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_idempotence_");
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_dbt_translate_idempotence_"));
   const std::filesystem::path temp_path(temp_dir.path());
   const std::filesystem::path input = temp_path / "smoke_gfx1250.co";
   const std::filesystem::path output = temp_path / "stdout.txt";
@@ -615,8 +1020,91 @@ TEST(RjDbtTranslate, VerifiesGfx1250B0ToA0Idempotence) {
   EXPECT_TRUE(contains(stdout_text, "target: s_nop 0")) << stdout_text;
 }
 
+TEST(RjDbtTranslate, VerifiesGfx1250IdempotenceAndRewriteDischarge) {
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_dbt_translate_rewrite_discharge_"));
+  const std::filesystem::path temp_path(temp_dir.path());
+  const std::filesystem::path input = temp_path / "smoke_gfx1250.co";
+  const std::filesystem::path output = temp_path / "stdout.txt";
+  const std::filesystem::path error = temp_path / "stderr.txt";
+
+  {
+    const std::vector<uint8_t> image = make_gfx1250_smoke_code_object();
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(image.data()),
+              static_cast<std::streamsize>(image.size()));
+  }
+
+  const std::string command =
+      shell_quote(g_translate_tool.string()) + " " + shell_quote(input.string()) +
+      " --input-target gfx1250 --input-revision b0 --output-target gfx1250 "
+      "--output-revision a0 --verify-idempotence --verify-rewrite-discharge "
+      "--output-mode diff > " +
+      shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+
+  const int status = std::system(command.c_str());
+  const std::string stdout_text = read_text_file(output);
+  const std::string stderr_text = read_text_file(error);
+
+  ASSERT_TRUE(command_succeeded(status)) << "stderr:\n"
+                                         << stderr_text << "\nstdout:\n"
+                                         << stdout_text;
+  EXPECT_TRUE(stderr_text.empty()) << stderr_text;
+  EXPECT_TRUE(contains(stdout_text, "idempotence: verified")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "idempotence_diagnostics: 0")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "rewrite_discharge: verified")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "changed=1")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "source: s_clause 4")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "target: s_nop 0")) << stdout_text;
+}
+
+TEST(RjDbtTranslate, RejectsInvalidRewriteDischargeOptionCombinations) {
+  rocjitsu::tools::TranslateOptions options;
+  options.verify_rewrite_discharge = true;
+  auto error = rocjitsu::tools::translation_request_error(options);
+  ASSERT_TRUE(error.has_value());
+  EXPECT_EQ(*error, "--verify-rewrite-discharge requires gfx1250 b0-to-a0 translation");
+
+  options.guest_arch = ROCJITSU_CODE_ARCH_CDNA5;
+  options.host_arch = ROCJITSU_CODE_ARCH_CDNA5;
+  options.input_target = ROCJITSU_CODE_TARGET_GFX1250;
+  options.target_mach = rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1250;
+  options.input_revision = rocjitsu::ProcessorRevision::Gfx1250B0;
+  options.output_revision = rocjitsu::ProcessorRevision::Gfx1250A0;
+  options.skip_failed_kernels = true;
+  error = rocjitsu::tools::translation_request_error(options);
+  ASSERT_TRUE(error.has_value());
+  EXPECT_EQ(*error, "--verify-rewrite-discharge cannot be combined with --skip-failed-kernels");
+}
+
+TEST(RjDbtTranslate, RejectsRewriteDischargeWithListCodeObjects) {
+  std::array arguments = {
+      std::string("rj_dbt_translate"),
+      std::string("unused.co"),
+      std::string("--list-code-objects"),
+      std::string("--verify-rewrite-discharge"),
+  };
+  std::vector<char *> argv;
+  argv.reserve(arguments.size());
+  for (std::string &argument : arguments)
+    argv.push_back(argument.data());
+
+  testing::internal::CaptureStdout();
+  testing::internal::CaptureStderr();
+  const int status = rocjitsu::tools::detail::run_dbt_translate_cli(
+      static_cast<int>(argv.size()), argv.data(), rocjitsu::tools::translate_code_object);
+  const std::string stderr_text = testing::internal::GetCapturedStderr();
+  const std::string stdout_text = testing::internal::GetCapturedStdout();
+
+  EXPECT_EQ(status, 1);
+  EXPECT_TRUE(stdout_text.empty()) << stdout_text;
+  EXPECT_TRUE(contains(stderr_text,
+                       "--verify-rewrite-discharge cannot be combined with --list-code-objects"));
+}
+
 TEST(RjDbtTranslate, VerifiesNonGfx1250SameArchitectureTranslation) {
-  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_non_gfx_idempotence_");
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_dbt_translate_non_gfx_idempotence_"));
   const std::filesystem::path temp_path(temp_dir.path());
   const std::filesystem::path input = temp_path / "smoke_gfx950.co";
   const std::filesystem::path output = temp_path / "stdout.txt";
@@ -646,7 +1134,8 @@ TEST(RjDbtTranslate, VerifiesNonGfx1250SameArchitectureTranslation) {
 }
 
 TEST(RjDbtTranslate, RejectsInvalidIdempotenceOptionCombinations) {
-  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_idempotence_options_");
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_dbt_translate_idempotence_options_"));
   const std::filesystem::path temp_path(temp_dir.path());
   const std::filesystem::path input = temp_path / "smoke_gfx950.co";
   const std::filesystem::path output = temp_path / "stdout.txt";
@@ -689,7 +1178,8 @@ TEST(RjDbtTranslate, RejectsInvalidIdempotenceOptionCombinations) {
 }
 
 TEST(RjDbtTranslate, VerifiesGfx1250ClusterLoadIdempotence) {
-  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_cluster_load_idempotence_");
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_dbt_translate_cluster_load_idempotence_"));
   const std::filesystem::path temp_path(temp_dir.path());
   const std::filesystem::path input = temp_path / "cluster_load_gfx1250.co";
   const std::filesystem::path output = temp_path / "stdout.txt";
@@ -724,13 +1214,67 @@ TEST(RjDbtTranslate, VerifiesGfx1250ClusterLoadIdempotence) {
   EXPECT_TRUE(contains(stdout_text, "idempotence_diagnostics: 0")) << stdout_text;
 }
 
+// A rule registered in the semantic table with no legalization entry reports through a label and a
+// counter branch that no other fixture reaches: the existing ones all translate through a
+// legalization-classified rule. The MODE separation rule is the only one shaped this way, so
+// without this the label and the partition can drift while the suite stays green.
+TEST(RjDbtTranslate, ReportsUnclassifiedSemanticExpansionInTheDiff) {
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_dbt_translate_unclassified_semantic_"));
+  const std::filesystem::path temp_path(temp_dir.path());
+  const std::filesystem::path input = temp_path / "mode_setreg_gfx1250.co";
+  const std::filesystem::path output = temp_path / "stdout.txt";
+  const std::filesystem::path error = temp_path / "stderr.txt";
+
+  // s_setreg_imm32_b32 hwreg(HW_REG_WAVE_MODE, 0, 32), 0 -- the one write the rule separates.
+  constexpr std::array<uint32_t, 3> text_words = {0xb980f801u, 0x00000001u, 0xbfb00000u};
+  {
+    const std::vector<uint8_t> image = make_gfx1250_smoke_code_object(text_words);
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(image.data()),
+              static_cast<std::streamsize>(image.size()));
+  }
+
+  const std::string command = shell_quote(g_translate_tool.string()) + " " +
+                              shell_quote(input.string()) +
+                              " --input-target gfx1250 --input-revision b0 --output-target gfx1250 "
+                              "--output-revision a0 --verify-idempotence --output-mode diff > " +
+                              shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+
+  const int status = std::system(command.c_str());
+  const std::string stdout_text = read_text_file(output);
+  const std::string stderr_text = read_text_file(error);
+
+  ASSERT_TRUE(command_succeeded(status)) << "stderr:\n"
+                                         << stderr_text << "\nstdout:\n"
+                                         << stdout_text;
+  EXPECT_TRUE(stderr_text.empty()) << stderr_text;
+
+  // The label must name the rule that rewrote the instruction rather than a re-encode.
+  EXPECT_TRUE(contains(stdout_text, "expand semantic")) << stdout_text;
+  // The counters must still partition the total: the expansion belongs to expand, not encode.
+  EXPECT_EQ(summary_counter(stdout_text, "expand"), 1) << stdout_text;
+  EXPECT_EQ(summary_counter(stdout_text, "encode"), 0) << stdout_text;
+  EXPECT_EQ(summary_counter(stdout_text, "semantic"), 1) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "idempotence: verified")) << stdout_text;
+}
+
 int main(int argc, char **argv) {
-  if (argc < 2) {
-    std::cerr << "usage: rj_dbt_translate_smoke_test <rj_dbt_translate>\n";
+  if (argc < 3) {
+    std::cerr << "usage: rj_dbt_translate_smoke_test <rj_dbt_translate> "
+                 "<rj_decode_benchmark>\n";
     return 2;
   }
 
   g_translate_tool = argv[1];
+  g_decode_benchmark = argv[2];
+#if defined(__linux__)
+  if (argc < 4) {
+    std::cerr << "Linux smoke tests also require the rj_pretranslate path\n";
+    return 2;
+  }
+  g_pretranslate_tool = argv[3];
+#endif
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }

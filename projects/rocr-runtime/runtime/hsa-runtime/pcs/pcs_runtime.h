@@ -151,6 +151,11 @@ class PcsRuntime {
   hsa_status_t PcSamplingFlush(hsa_ven_amd_pcs_t handle);
 
  private:
+
+  // Ensures all sessions are stopped before Runtime::Unload() tears down mutexes
+  // that otherwise may still be held by the sessions.
+  void StopActiveSessions();
+
   /// @brief Initialize singleton object, must be called once.
   static PcsRuntime* CreateSingleton();
 

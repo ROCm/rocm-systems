@@ -1,0 +1,32 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+[package]
+name = "rocaddr3"
+description = "GFX9–GFX12 surface layouts through AMD AddrLib2 and AddrLib3"
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+doctest = false
+crate-type = ["rlib"]
+
+[build-dependencies]
+cc = "1.2"
+
+[lints.rust]
+missing_docs = "deny"
+unsafe_code = "allow"
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+expect_used = "deny"
+panic = "deny"
+pedantic = { level = "warn", priority = -1 }
+unreachable = "deny"
+unwrap_used = "deny"

@@ -1,14 +1,15 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_VM_AMDGPU_IOD_H_
-#define ROCJITSU_VM_AMDGPU_IOD_H_
+#pragma once
 
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/hbm_controller.h"
 #include "rocjitsu/vm/amdgpu/memory_side_cache.h"
 
 #include "simdojo/sim/component.h"
+
+#include "util/diagnostic.h"
 
 #include <cstdint>
 #include <memory>
@@ -28,7 +29,21 @@ public:
     uint32_t num_hbm_stacks; ///< Number of HBM stacks on this IOD.
   };
 
-  Iod(std::string name, const Config &config, GpuMemory *memory);
+  Iod(std::string name, const Config &config, GpuMemory *memory,
+      std::shared_ptr<DeviceCacheCoherence> coherence = std::make_shared<DeviceCacheCoherence>());
+
+  /// @brief Rebind to a device-local coherence domain before use.
+  /// @details A null domain fails without changing registration.
+  /// @param emit_error Destination for failure diagnostics.
+  util::Result set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence,
+                                    util::DiagnosticEmitter emit_error = {});
+  void set_gpu_vm(GpuVm *gpu_vm) {
+    msc_->set_gpu_vm(gpu_vm);
+    hbm_->set_gpu_vm(gpu_vm);
+  }
+  void set_legacy_maintenance_memory(GpuMemory *memory) {
+    msc_->set_legacy_maintenance_memory(memory);
+  }
 
   void initialize() override;
 
@@ -52,6 +67,7 @@ public:
 
 private:
   MemorySideCache *msc_ = nullptr;
+  std::shared_ptr<DeviceCacheCoherence> coherence_;
   HbmController *hbm_ = nullptr;
   std::vector<simdojo::Port *> cpl_ports_;
   simdojo::Port *peer_req_ = nullptr;
@@ -62,5 +78,3 @@ private:
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_IOD_H_

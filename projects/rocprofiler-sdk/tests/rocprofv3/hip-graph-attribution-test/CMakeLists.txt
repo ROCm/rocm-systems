@@ -1,7 +1,7 @@
 #
 # rocprofv3 HIP graph attribution integration test
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(
     rocprofiler-sdk-tests-rocprofv3-hip-graph-attribution
@@ -17,9 +17,13 @@ if(DEFINED ENV{ROCM_PATH} AND EXISTS "$ENV{ROCM_PATH}/lib/rocm_sysdeps/lib")
 endif()
 # Pin determinism preconditions: segmented-scheduling + direct-dispatch keep the
 # per-launch node_id sequence stable across iterations.
+if(ROCPROFILER_SDK_TESTS_ROCPD_SCHEMA_PATH)
+    set(_hip_graph_schema "${ROCPROFILER_SDK_TESTS_ROCPD_SCHEMA_PATH}")
+else()
+    set(_hip_graph_schema "${CMAKE_BINARY_DIR}/share/rocprofiler-sdk-rocpd")
+endif()
 list(APPEND HIP_GRAPH_ATTRIBUTION_ENVIRONMENT "DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING=1"
-     "AMD_DIRECT_DISPATCH=1"
-     "ROCPD_SCHEMA_PATH=${CMAKE_BINARY_DIR}/share/rocprofiler-sdk-rocpd")
+     "AMD_DIRECT_DISPATCH=1" "ROCPD_SCHEMA_PATH=${_hip_graph_schema}")
 
 set(ITERATIONS 50)
 

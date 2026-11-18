@@ -101,20 +101,32 @@ ROSHMEM_ALLTOALL
 ----------------
 
 .. cpp:function:: __device__ void rocshmem_TYPENAME_alltoall_wg(rocshmem_team_t team, TYPE *dest, const TYPE *source, int nelems)
+.. cpp:function:: __device__ int rocshmem_TYPENAME_alltoall_wave(rocshmem_team_t team, TYPE *dest, const TYPE *source, int nelems)
+.. cpp:function:: __device__ void rocshmem_alltoallmem_wg(rocshmem_team_t team, void *dest, const void *source, int nelems)
+.. cpp:function:: __device__ int rocshmem_alltoallmem_wave(rocshmem_team_t team, void *dest, const void *source, int nelems)
 .. cpp:function:: __device__ void rocshmem_ctx_TYPENAME_alltoall_wg(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nelems)
+.. cpp:function:: __device__ int rocshmem_ctx_TYPENAME_alltoall_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nelems)
+.. cpp:function:: __device__ void rocshmem_ctx_alltoallmem_wg(rocshmem_ctx_t ctx, rocshmem_team_t team, void *dest, const void *source, int nelems)
+.. cpp:function:: __device__ int rocshmem_ctx_alltoallmem_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, void *dest, const void *source, int nelems)
 
+  :param ctx:    Context with which to perform this operation.
   :param team:   The team participating in the collective.
   :param dest:   Destination address. Must be an address on the
                  symmetric heap.
   :param source: Source address. Must be an address on the symmetric
                  heap.
-  :param nelems: Number of data blocks transferred per pair of PEs.
-  :returns:      None.
+  :param nelems: Number of elements transferred per pair of PEs (typed ``TYPENAME``
+                 variants); number of bytes transferred per pair of PEs
+                 (``alltoallmem_wg`` / ``alltoallmem_wave``).
+  :returns:      None (``_wg`` variants). Zero on successful local completion, nonzero otherwise (``_wave`` variants).
 
 **Description:**
 This routine exchanges a fixed amount of contiguous data blocks between all pairs
 of PEs participating in the collective routine.
-This function must be called as a work-group collective.
+The ``_wg`` variants must be called as a work-group collective; the ``_wave`` variants
+must be called as a wave-level collective. ``alltoallmem_wg`` and ``alltoallmem_wave``
+operate on untyped bytes rather than a typed element count. The undecorated (non-``ctx``)
+variants operate on the default context.
 
 Valid ``TYPENAME`` and ``TYPE`` values are listed in :ref:`RMA_TYPES`.
 
@@ -164,20 +176,33 @@ Valid TYPENAME and TYPE values are listed in :ref:`RMA_TYPES`.
 ROCSHMEM_BROADCAST
 ------------------
 
+.. cpp:function:: __device__ void rocshmem_TYPENAME_broadcast_wg(rocshmem_team_t team, TYPE *dest, const TYPE *source, int nelems, int pe_root)
+.. cpp:function:: __device__ int rocshmem_TYPENAME_broadcast_wave(rocshmem_team_t team, TYPE *dest, const TYPE *source, int nelems, int pe_root)
+.. cpp:function:: __device__ void rocshmem_broadcastmem_wg(rocshmem_team_t team, void *dest, const void *source, int nelems, int pe_root)
+.. cpp:function:: __device__ int rocshmem_broadcastmem_wave(rocshmem_team_t team, void *dest, const void *source, int nelems, int pe_root)
 .. cpp:function:: __device__ void rocshmem_ctx_TYPENAME_broadcast_wg(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nelems, int pe_root)
+.. cpp:function:: __device__ int rocshmem_ctx_TYPENAME_broadcast_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nelems, int pe_root)
+.. cpp:function:: __device__ void rocshmem_ctx_broadcastmem_wg(rocshmem_ctx_t ctx, rocshmem_team_t team, void *dest, const void *source, int nelems, int pe_root)
+.. cpp:function:: __device__ int rocshmem_ctx_broadcastmem_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, void *dest, const void *source, int nelems, int pe_root)
 
-  :param ctx:    Context with which to perform this collective.
-  :param team:   The team participating in the collective.
-  :param dest:   Destination address. Must be an address on the
-                 symmetric heap.
-  :param source: Source address. Must be an address on the symmetric
-                 heap.
-  :param nelems: Number of data blocks transferred per pair of PEs.
-  :returns:      None.
+  :param ctx:     Context with which to perform this collective.
+  :param team:    The team participating in the collective.
+  :param dest:    Destination address. Must be an address on the
+                  symmetric heap.
+  :param source:  Source address. Must be an address on the symmetric
+                  heap.
+  :param nelems:  Number of elements to broadcast (``_wg`` / ``_wave`` variants);
+                  number of bytes to broadcast (``broadcastmem_wg`` / ``broadcastmem_wave``).
+  :param pe_root: Root PE (relative to team) from which to broadcast.
+  :returns:       None (``_wg`` variants). Zero on successful local completion, nonzero otherwise (``_wave`` variants).
 
 **Description:**
 This routine performs a broadcast across PEs in the team.
 The caller is blocked until the broadcast completes.
+The ``_wg`` variants must be called as a work-group collective; the ``_wave`` variants
+must be called as a wave-level collective. ``broadcastmem_wg`` and ``broadcastmem_wave``
+operate on untyped bytes rather than a typed element count. The undecorated (non-``ctx``)
+variants operate on the default context.
 
 Valid ``TYPENAME`` and ``TYPE`` values are listed in :ref:`RMA_TYPES`.
 
@@ -207,6 +232,8 @@ ROCSHMEM_FCOLLECT
 -----------------
 
 .. cpp:function:: __device__ void rocshmem_ctx_TYPENAME_fcollect_wg(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nelems)
+.. cpp:function:: __device__ int rocshmem_ctx_TYPENAME_fcollect_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nelems)
+.. cpp:function:: __device__ int rocshmem_ctx_fcollectmem_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, void *dest, const void *source, int nelems)
 
   :param ctx:    Context with which to perform this collective.
   :param team:   The team participating in the collective.
@@ -214,16 +241,21 @@ ROCSHMEM_FCOLLECT
                  symmetric heap.
   :param source: Source address. Must be an address on the symmetric
                  heap.
-  :param nelems: Number of data blocks transferred per pair of PEs.
-  :returns:      None.
+  :param nelems: Number of data elements contributed by each PE (``_wg`` / ``_wave`` variants);
+                 number of bytes contributed by each PE (``fcollectmem_wave``).
+  :returns:      None (``_wg`` variant). Zero on successful local completion, nonzero otherwise (``_wave`` variants).
 
 **Description:**
 This routine concatenates blocks of data from multiple PEs to an array in every
 PE participating in the collective routine.
+The ``_wg`` variant must be called as a work-group collective; the ``_wave`` variants
+must be called as a wave-level collective. ``fcollectmem_wave`` operates on untyped
+bytes rather than a typed element count.
 
 ROCSHMEM_REDUCE_SCATTER
 -----------------------
 .. cpp:function:: __device__ int rocshmem_ctx_TYPENAME_OPNAME_reduce_scatter_wg(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nreduce)
+.. cpp:function:: __device__ int rocshmem_ctx_TYPENAME_OPNAME_reduce_scatter_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nreduce)
 .. cpp:function:: __host__ int rocshmem_ctx_TYPENAME_OPNAME_reduce_scatter(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nreduce)
 
   :param ctx:     Context with which to perform this collective.
@@ -242,13 +274,15 @@ reduction across all PEs, PE ``i`` receives the ``nreduce`` elements correspondi
 block ``i`` (i.e., ``source[i*nreduce .. (i+1)*nreduce - 1]`` reduced across all PEs)
 into its local ``dest`` buffer.
 
-This function must be called as a work-group collective (``_wg`` variant) or from host code.
+The ``_wg`` variant must be called as a work-group collective; the ``_wave`` variant
+must be called as a wave-level collective; the undecorated variant is a host-side call.
 
 Valid ``TYPENAME``, ``TYPE``, and ``OPNAME`` values are listed in :ref:`REDUCE_TYPES`.
 
 ROCSHMEM_REDUCTION
 ------------------
 .. cpp:function:: __device__ int rocshmem_ctx_TYPENAME_OPNAME_reduce_wg(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nreduce)
+.. cpp:function:: __device__ int rocshmem_ctx_TYPENAME_OPNAME_reduce_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nreduce)
 
   :param ctx:     Context with which to perform this collective.
   :param team:    The team participating in the collective.
@@ -256,12 +290,13 @@ ROCSHMEM_REDUCTION
                   symmetric heap.
   :param source:  Source address. Must be an address on the symmetric
                   heap.
-  :param nreduce: Number of data blocks transferred per pair of PEs.
+  :param nreduce: Number of elements to reduce.
   :returns:       Zero on successful local completion. Nonzero otherwise.
 
-
 **Description:**
-This routine  performs an allreduce operation across PEs in the team.
+This routine performs an allreduce operation across PEs in the team.
+The ``_wg`` variant must be called as a work-group collective; the ``_wave`` variant
+must be called as a wave-level collective.
 
 Valid ``TYPENAME``, ``TYPE``, and ``OPNAME`` values are listed in :ref:`REDUCE_TYPES`.
 

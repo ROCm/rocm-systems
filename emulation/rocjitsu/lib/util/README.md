@@ -33,14 +33,18 @@ INTERFACE library that contributes an include path and nothing to link.
 |------|-------------|
 | `arena_alloc.h` | Fixed-size block pool allocator with free-list. `ArenaAlloc<BlockSize, NumBlocks, BlockAlign>` provides O(1) alloc/dealloc with global-allocator fallback. |
 | `spinlock.h` | TTAS spinlock optimized for sub-microsecond critical sections. Uses C++20 `atomic::wait()` with ThreadSanitizer annotations. |
+| `conditional_wake_spinlock.h` | Parking lock for many independent, rarely contended critical sections where release cost dominates. A caller-supplied host policy provides timed waits and wakes, keeping native/interposed API selection outside util. Linux uses a store release; a missed wake waits up to the current timeout (capped at 2 ms) plus scheduling delay. Sustained contention may be slower than `Spinlock`. The lock must outlive every in-flight `unlock()` call; other hosts use `Spinlock`. |
 | `intrusive_list.h` | Bidirectional intrusive linked list with optional parent-pointer tracking. `IntrusiveList<T>` and `IListNode<T>` with O(1) insert/erase. |
 | `unique_handle.h` | Move-only RAII ownership for POSIX file descriptors, Win32 handles, and custom handle traits. |
+| `intrusive_shared_ptr.h` | Strong-only shared ownership with object-provided ownership hooks, plus atomic `RefCounted<T>` and counter-isolated `RefCountedCacheAligned<T>` storage helpers. `RefCountedNonAtomic<T>` supports non-atomic ownership when all ownership operations, destruction, and count inspection stay on one thread or are externally synchronized across all handles sharing the object. |
 
 ### Diagnostics
 
 | File | Description |
 |------|-------------|
 | `log.h` | Compile-time and runtime configurable logging with named groups (VM, CP). Thread-safe, supports lazy evaluation via lambda forms. Use `Logger::print<GroupId>()` for group-filtered output. |
+| `result.h` | No-throw `Result` and `FailureOr<T>` return types for expected failures. |
+| `diagnostic.h` | Non-owning diagnostic sinks and stream-style error construction for result-returning APIs. |
 | `except.h` | Exception hierarchy: `Exception` (base), `InvalidInst`, `UnimplementedInst`, `ConfigError`. All derive from `std::exception`. |
 
 ### Miscellaneous

@@ -4,8 +4,7 @@
 /// @file sparse_memory.h
 /// @brief Sparse page-table memory model with on-demand page allocation.
 
-#ifndef SIMDOJO_COMPONENTS_SPARSE_MEMORY_H_
-#define SIMDOJO_COMPONENTS_SPARSE_MEMORY_H_
+#pragma once
 
 #include "simdojo/sim/component.h"
 
@@ -13,6 +12,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <mutex>
 #include <shared_mutex>
 #include <span>
@@ -141,6 +141,45 @@ public:
     }
   }
 
+  /// @brief Allocate every sparse page a later write to this span may touch.
+  /// @details Missing pages are initialized to zero without changing any
+  /// existing byte. Pages are never removed, so a successful reservation lets
+  /// a later write to the same span avoid allocation. An allocation failure
+  /// may leave additional zero pages but cannot leave a partial byte write.
+  /// @returns False if the span exceeds the address space.
+  [[nodiscard]] bool reserve_write_pages(uint64_t addr, size_t size) {
+    if (size == 0)
+      return true;
+    if (size - 1 > std::numeric_limits<uint64_t>::max() - addr)
+      return false;
+    size_t visited = 0;
+    while (visited < size) {
+      const uint64_t ea = addr + visited;
+      auto &stripe = page_stripe(ea);
+      {
+        std::unique_lock<std::shared_mutex> lock(stripe.mutex);
+        (void)get_page_locked(stripe, ea);
+      }
+      visited += std::min(size - visited, PAGE_SIZE - (ea & PAGE_MASK));
+    }
+    return true;
+  }
+
+  /// @brief Apply one indivisible mutation within a single sparse page.
+  /// @details The callback runs while holding the same exclusive page-stripe
+  /// lock used by ordinary reads and writes, so all SparseMemory accessors
+  /// observe the mutation atomically. Missing pages are allocated as zeroes.
+  /// @returns false when the range is empty or crosses a page boundary.
+  template <typename Mutation> bool atomic_modify(uint64_t addr, size_t size, Mutation &&mutation) {
+    if (size == 0 || (addr & PAGE_MASK) + size > PAGE_SIZE)
+      return false;
+    auto &stripe = page_stripe(addr);
+    std::unique_lock<std::shared_mutex> lock(stripe.mutex);
+    Page &page = get_page_locked(stripe, addr);
+    mutation(page.data() + (addr & PAGE_MASK));
+    return true;
+  }
+
   /// @brief Instruction fetch - read a 32-bit word (little-endian).
   /// @param addr Memory address to fetch from.
   /// @returns The 32-bit instruction word at the given address.
@@ -187,10 +226,20 @@ public:
     return count;
   }
 
+  /// @brief Return whether the page containing @p addr has sparse backing.
+  /// @details Pages are keyed by their aligned byte address, the same key
+  /// get_page_locked() and read_sparse_chunk() use -- not by page number.
+  bool has_page(uint64_t addr) const {
+    const auto &stripe = page_stripes_[stripe_index(addr)];
+    std::shared_lock<std::shared_mutex> lock(stripe.mutex);
+    return stripe.pages.contains(addr & ~PAGE_MASK);
+  }
+
 private:
   static constexpr size_t NUM_PAGE_STRIPES = 1024;
 
-  struct PageStripe {
+  // Keep concurrent readers of neighboring stripes off the same host cache line.
+  struct alignas(64) PageStripe {
     mutable std::shared_mutex mutex;
     mutable std::unordered_map<uint64_t, Page> pages;
   };
@@ -238,5 +287,3 @@ private:
 };
 
 } // namespace simdojo
-
-#endif // SIMDOJO_COMPONENTS_SPARSE_MEMORY_H_

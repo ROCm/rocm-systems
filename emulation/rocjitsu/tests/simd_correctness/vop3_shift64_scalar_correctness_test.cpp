@@ -17,14 +17,16 @@
 ///     regression that widened the read AND dropped the mask is caught.)
 ///
 ///  2. v_lshl_add_u32 / v_lshl_add_u64 lowered the shift with no mask, so a
-///     count >= the element width was undefined behavior. HW masks the count
-///     to the low 6 bits (64-bit forms) or low 5 bits (32-bit forms); the
-///     cases below include counts of exactly the width and above it.
+///     count >= the element width was undefined behavior. The 32-bit
+///     instruction uses the low five bits. The 64-bit instruction decodes
+///     the low three bits and treats shifts above four as zero.
 ///
 /// The 64-bit value and destination operands carry nonzero high words so a
 /// low-word-only read or a high-word-dropping write is visible. No SIMD is
 /// involved; this exercises the plain decode+execute scalar path.
 
+#include "compute_unit_test_util.h"
+#include "decode_test_util.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -82,7 +84,9 @@ struct Fixture {
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_vop3_shift64", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_vop3_shift64", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
     decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
     if (wf == nullptr)
@@ -105,10 +109,10 @@ struct Fixture {
     }
     wf->set_exec(~0ULL);
     uint32_t words[4] = {w.w0, w.w1, 0u, 0u};
-    Instruction *inst = decoder->decode(words);
+    Instruction *inst = decode_valid(*decoder, words);
     ASSERT_NE(inst, nullptr) << "decode failed for " << expect_mnemonic;
     EXPECT_EQ(inst->mnemonic(), expect_mnemonic) << "decoded wrong op";
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     delete inst;
   }
 
@@ -200,11 +204,20 @@ TEST(Vop3Shift64Scalar, LshlAddU64) {
   Fixture fx;
   ASSERT_NE(fx.cu, nullptr);
   const uint64_t addend = 0x1111222233334444ull;
+  struct ShiftCase {
+    uint32_t count;
+    uint32_t shift;
+  };
+  constexpr ShiftCase kCases[] = {
+      {0, 0}, {1, 1}, {2, 2}, {3, 3},  {4, 4},  {5, 0},  {6, 0},
+      {7, 0}, {8, 0}, {9, 1}, {12, 4}, {13, 0}, {65, 1}, {UINT32_MAX, 0},
+  };
   for (uint64_t v : kVals64)
-    for (uint32_t c : kCounts64) {
-      uint64_t got = fx.run_lshl_add_u64(v, c, addend);
-      uint64_t want = (v << (c & 63u)) + addend;
-      EXPECT_EQ(got, want) << "v_lshl_add_u64 v=0x" << std::hex << v << " count=" << std::dec << c;
+    for (auto [count, shift] : kCases) {
+      uint64_t got = fx.run_lshl_add_u64(v, count, addend);
+      uint64_t want = (v << shift) + addend;
+      EXPECT_EQ(got, want) << "v_lshl_add_u64 v=0x" << std::hex << v << " count=" << std::dec
+                           << count;
     }
 }
 

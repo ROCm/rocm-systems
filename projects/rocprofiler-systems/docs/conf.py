@@ -1,6 +1,6 @@
 # MIT License
 
-# Copyright (c) 2023 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2023 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -28,32 +28,50 @@
 
 import re
 
-from rocm_docs import ROCmDocs
-
 with open("../VERSION", encoding="utf-8") as f:
     match = re.search(r"([0-9.]+)[^0-9.]+", f.read())
     if not match:
         raise ValueError("VERSION not found!")
     version_number = match[1]
 
+extensions = [
+    "rocm_docs",
+    "rocm_docs.doxygen",
+]
+
 external_projects_current_project = "rocprofiler-systems"
 
+# Project info
 project = "rocprofiler-systems"
 author = "Advanced Micro Devices, Inc."
-copyright = "Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved."
+copyright = "Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved."
 version = version_number
 release = version_number
-html_title = f"ROCm Systems Profiler {version} documentation"
+
+# Theme-related settings
+html_title = f"ROCm Systems Profiler (rocprofiler-systems) {version}"
+html_theme = "rocm_docs_theme"
+html_theme_options = {
+    "flavor": "rocm",
+    "repository_url": "https://github.com/ROCm/rocm-systems",
+    "path_to_docs": "projects/rocprofiler-systems/docs",
+    "use_repository_button": True,
+    "use_issues_button": True,
+    "use_download_button": True,
+}
 
 external_toc_path = "./sphinx/_toc.yml"
 
-docs_core = ROCmDocs(html_title)
-docs_core.setup()
-docs_core.run_doxygen(doxygen_root="doxygen", doxygen_path="doxygen/xml")
-docs_core.enable_api_reference()
+# Generate llms.txt
+rocm_docs_generate_llms = True
 
-for sphinx_var in ROCmDocs.SPHINX_VARS:
-    globals()[sphinx_var] = getattr(docs_core, sphinx_var)
+# Doxygen-related settings
+doxygen_root = "doxygen"
+doxygen_project = {
+    "name": "ROCm Systems Profiler (rocprofiler-systems) API reference",
+    "path": "doxygen/xml",
+}
+doxysphinx_enabled = True
 
-# Uncomment if facing rate limit exceed issue with local build
-external_projects_remote_repository = ""
+# Uncomment if you encounter rate limits when building
+# external_projects_remote_repository = ""

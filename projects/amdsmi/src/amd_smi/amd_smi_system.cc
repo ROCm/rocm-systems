@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "amd_smi/impl/amd_smi_system.h"
 
@@ -26,31 +7,37 @@
 
 #include <cassert>
 #include <cerrno>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
+#include <string>
 
 #include "amd_smi/impl/amd_smi_gpu_device.h"
-#ifdef BRCM_NIC
-#include "amd_smi/impl/nic/amd_smi_nic_device.h"
-#include "amd_smi/impl/nic/amd_smi_switch_device.h"
-#endif  // BRCM_NIC
+#ifdef ENABLE_WSL_BACKEND
+#include "amd_smi/impl/amd_smi_wsl_device.h"
+#endif
 #include <algorithm>
 #include <map>
 #include <regex>
 
 #include "amd_smi/impl/amd_smi_common.h"
+#include "amd_smi/impl/amd_smi_nic_testing.h"
 #include "amd_smi/impl/amd_smi_test_flags.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_logger.h"
+#include "smi_nic_log.h"
 
 namespace amd::smi {
 
 AMDSmiSystem& AMDSmiSystem::getInstance() {
-  static AMDSmiSystem instance;
+  // Never destroyed, so the sockets and processors it owns stay reachable and valid when a
+  // process exits without amdsmi_shut_down() or with a thread still inside the library.
+  static AMDSmiSystem& instance = *new AMDSmiSystem();
   return instance;
 }
 
@@ -66,14 +53,24 @@ const std::map<int, std::string> smi_nic_status_str = {
     {SMI_NIC_STATUS_DRIVER_NOT_LOADED, "Required driver not loaded"},
 };
 
-#define CHK_AMDNIC_RET(status)                                                                   \
-  if (status != SMI_NIC_STATUS_SUCCESS) {                                                        \
-    std::ostringstream ss;                                                                       \
-    ss << __PRETTY_FUNCTION__ << "[" << __FILE__ << ":" << __LINE__                              \
-       << "] smi_nic_status_t: " << status << ":" << smi_nic_status_str.at(status) << std::endl; \
-    LOG_INFO(ss);                                                                                \
-    return amd::smi::ainic_to_amdsmi_status(status);                                             \
-  }
+// .find() rather than .at(): a status added to smi_nic_interface.h but not to the
+// map above would otherwise throw out of amdsmi_init(), which has no handler on
+// either side of the extern "C" boundary.
+static const char* nic_status_str(smi_nic_status_t status) {
+  const auto it = smi_nic_status_str.find(status);
+  return it == smi_nic_status_str.end() ? "Unrecognized status" : it->second.c_str();
+}
+
+#define CHK_AMDNIC_RET(status)                                                                \
+  do {                                                                                        \
+    if ((status) != SMI_NIC_STATUS_SUCCESS) {                                                 \
+      std::ostringstream ss;                                                                  \
+      ss << __PRETTY_FUNCTION__ << "[" << __FILE__ << ":" << __LINE__                         \
+         << "] smi_nic_status_t: " << (status) << ":" << nic_status_str(status) << std::endl; \
+      LOG_INFO(ss);                                                                           \
+      return amd::smi::ainic_to_amdsmi_status(status);                                        \
+    }                                                                                         \
+  } while (0)
 
 #ifdef ENABLE_ESMI_LIB
 amdsmi_status_t AMDSmiSystem::get_cpu_family(uint32_t* cpu_family) {
@@ -148,7 +145,7 @@ amdsmi_status_t AMDSmiSystem::get_cpu_model_name(uint32_t socket_id, std::string
       if (info.find("model name") != std::string::npos) {
         *model_name = info.substr(info.find(':') + 2);
         if (current_socket_id != -1) {
-          socket_model_map[current_socket_id] = *model_name;
+          socket_model_map[static_cast<uint32_t>(current_socket_id)] = *model_name;
         }
       }
     }
@@ -266,31 +263,41 @@ std::vector<uint32_t> AMDSmiSystem::get_cpu_sockets_from_numa_node(int32_t numa_
   return sockets;
 }
 
+// flags == 0 skips all discovery below and returns SUCCESS -- GpuUnit tests
+// (ras_features_test.cc) rely on this fall-through to init with no hardware.
 amdsmi_status_t AMDSmiSystem::init(uint64_t flags) {
   init_flag_ = flags;
-  amdsmi_status_t amd_smi_status;
+  auto amd_smi_status = AMDSMI_STATUS_SUCCESS;
 
   // populate GPU sockets and processors
   if (flags & AMDSMI_INIT_AMD_GPUS) {
     amd_smi_status = populate_amd_gpu_devices();
-    if (amd_smi_status != AMDSMI_STATUS_SUCCESS) return amd_smi_status;
   }
 #ifdef ENABLE_ESMI_LIB
   // populate CPU sockets and processors
-  if (flags & AMDSMI_INIT_AMD_CPUS) {
+  if ((amd_smi_status == AMDSMI_STATUS_SUCCESS) && (flags & AMDSMI_INIT_AMD_CPUS)) {
     amd_smi_status = populate_amd_cpus();
-    if (amd_smi_status != AMDSMI_STATUS_SUCCESS) return amd_smi_status;
   }
 #endif
-  if (flags & AMDSMI_INIT_AMD_NICS) {
-    amd_smi_status = populate_brcm_nic_devices();
-    if (amd_smi_status != AMDSMI_STATUS_SUCCESS) return amd_smi_status;
-    amd_smi_status = populate_brcm_switch_devices();
-    if (amd_smi_status != AMDSMI_STATUS_SUCCESS) return amd_smi_status;
+  if ((amd_smi_status == AMDSMI_STATUS_SUCCESS) && (flags & AMDSMI_INIT_AMD_NICS)) {
     amd_smi_status = populate_amd_ainic_devices();
-    if (amd_smi_status != AMDSMI_STATUS_SUCCESS) return amd_smi_status;
+    // GPUs and CPUs stay usable without NICs; a NIC-only init has nothing else to offer.
+    const auto has_other_processors =
+        ((flags & (AMDSMI_INIT_AMD_GPUS | AMDSMI_INIT_AMD_CPUS)) != 0);
+    if ((amd_smi_status != AMDSMI_STATUS_SUCCESS) && has_other_processors) {
+      std::ostringstream ss;
+      ss << __func__ << ": NIC discovery failed with amdsmi_status=" << amd_smi_status
+         << "; continuing without NICs";
+      LOG_WARN(ss);
+      amd_smi_status = AMDSMI_STATUS_SUCCESS;
+    }
   }
-  return AMDSMI_STATUS_SUCCESS;
+  if (amd_smi_status != AMDSMI_STATUS_SUCCESS) {
+    // A failed init is never shut down, so release what the steps before the failure built. A
+    // retry then starts from nothing.
+    cleanup();
+  }
+  return amd_smi_status;
 }
 
 #ifdef ENABLE_ESMI_LIB
@@ -306,7 +313,8 @@ amdsmi_status_t AMDSmiSystem::populate_amd_cpus() {
     // prerequisite not satisfied, etc.). This must NOT be fatal to amdsmi_init()
     // - GPU and NIC functionality must remain usable. Skip CPU population and
     // continue, mirroring the non-fatal BRCM/AI NIC discovery paths.
-    std::cout << "\tESMI Not initialized, drivers not found " << std::endl;
+    std::cerr << "\tESMI not initialized; skipping CPU discovery "
+              << "(load amd_hsmp with HSMP enabled in BIOS for AMD CPU support)." << std::endl;
     return AMDSMI_STATUS_SUCCESS;
   }
 
@@ -354,8 +362,20 @@ amdsmi_status_t AMDSmiSystem::populate_amd_cpus() {
 #endif
 
 amdsmi_status_t AMDSmiSystem::populate_amd_gpu_devices() {
+#ifdef ENABLE_WSL_BACKEND
+  // WSL path: TryPopulate handles /dev/dxg detection, librocdxg loading, and
+  // device enumeration. Returns NOT_SUPPORTED when not on WSL.
+  amdsmi_status_t wsl_status = WSLGPUBackend::TryPopulate(sockets_, processors_);
+  if (wsl_status == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
+    std::ostringstream ss;
+    ss << __func__ << ": WSL detected (/dev/dxg) but librocdxg.so.1 failed to load";
+    LOG_INFO(ss);
+  }
+  if (wsl_status != AMDSMI_STATUS_NOT_SUPPORTED) return wsl_status;
+  // Fall through to native Linux path if not on WSL.
+#endif
+  // Native Linux path: use rsmi + libdrm.
   AMDSmiSystem::cleanup();
-  // init rsmi — forward the test flag so the mutex becomes non-blocking
   rsmi_driver_state_t state;
   uint64_t rsmi_flags = (init_flag_ & AMD_SMI_INIT_FLAG_RESRV_TEST1)
                             ? static_cast<uint64_t>(RSMI_INIT_FLAG_RESRV_TEST1)
@@ -380,14 +400,12 @@ amdsmi_status_t AMDSmiSystem::populate_amd_gpu_devices() {
   }
 
   for (uint32_t i = 0; i < device_count; i++) {
-    // GPU device uses the bdf as the socket id
     std::string socket_id;
     amd_smi_status = get_gpu_socket_id(i, socket_id);
     if (amd_smi_status != AMDSMI_STATUS_SUCCESS) {
       return amd_smi_status;
     }
 
-    // Multiple devices may share the same socket
     AMDSmiSocket* socket = nullptr;
     for (unsigned int j = 0; j < sockets_.size(); j++) {
       if (sockets_[j]->get_socket_id() == socket_id) {
@@ -407,37 +425,175 @@ amdsmi_status_t AMDSmiSystem::populate_amd_gpu_devices() {
   return AMDSMI_STATUS_SUCCESS;
 }
 
-static amdsmi_status_t populate_amd_ainic_device(const smi_nic_ctx_t& ctx, uint64_t bdf_int,
-                                                 AMDSmiAINICDevice::AINICInfo& ai_nic_info) {
+static const nic_info_getters_t kRealNicInfoGetters = {
+    smi_get_nic_bus_info,   smi_get_nic_driver_info, smi_get_nic_asic_info,
+    smi_get_nic_numa_info,  smi_get_nic_port_info,   smi_get_nic_rdma_dev_info_without_mtu,
+    smi_get_nic_kind,       smi_get_nic_capability,  smi_get_nic_rdma_mtu,
+    smi_nic_create_context,
+};
+
+// Rebound only by nic_set_info_getters_for_testing(); production never writes it.
+static const nic_info_getters_t* g_nic_info_getters = &kRealNicInfoGetters;
+
+// See amd_smi/impl/amd_smi_nic_testing.h for the contract.
+void nic_set_info_getters_for_testing(const nic_info_getters_t* getters) {
+  g_nic_info_getters = getters ? getters : &kRealNicInfoGetters;
+}
+
+const nic_info_getters_t& nic_production_info_getters_for_testing() { return kRealNicInfoGetters; }
+
+smi_nic_status_t fill_ainic_rdma_mtu(smi_nic_ctx_t ctx, uint64_t bdf_int,
+                                     amdsmi_nic_rdma_devices_info_t& rdma_dev) {
+  static_assert(sizeof(smi_nic_rdma_devices_info_t) == sizeof(rdma_dev));
+  return g_nic_info_getters->rdma_mtu(ctx, bdf_int,
+                                      reinterpret_cast<smi_nic_rdma_devices_info_t*>(&rdma_dev));
+}
+
+// RDMA device info is optional for an AI-NIC; a missing RDMA/ionic driver or an
+// empty result must not abort discovery of the rest of the NIC. Only meaningful
+// for a status the caller has already found to be non-SUCCESS.
+// The NIC getters write an smi_nic_* struct through a pointer to its amdsmi_nic_* mirror, so every
+// member keeps its offset and size in both. A reorder or a resized member fails the build here
+// instead of leaving a port that reports another member's bytes.
+#define AMDSMI_NIC_MIRRORED_MEMBER(smi_type, amdsmi_type, member)                \
+  static_assert((offsetof(smi_type, member) == offsetof(amdsmi_type, member)) && \
+                    (sizeof(smi_type::member) == sizeof(amdsmi_type::member)),   \
+                #smi_type "::" #member " does not mirror " #amdsmi_type "::" #member)
+
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_bus_info_t, amdsmi_nic_bus_info_t, bdf);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_bus_info_t, amdsmi_nic_bus_info_t, max_pcie_width);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_bus_info_t, amdsmi_nic_bus_info_t, max_pcie_speed);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_bus_info_t, amdsmi_nic_bus_info_t, pcie_interface_version);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_bus_info_t, amdsmi_nic_bus_info_t, slot_type);
+
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_driver_info_t, amdsmi_nic_driver_info_t, name);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_driver_info_t, amdsmi_nic_driver_info_t, version);
+
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_asic_info_t, amdsmi_nic_asic_info_t, vendor_id);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_asic_info_t, amdsmi_nic_asic_info_t, subvendor_id);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_asic_info_t, amdsmi_nic_asic_info_t, device_id);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_asic_info_t, amdsmi_nic_asic_info_t, subsystem_id);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_asic_info_t, amdsmi_nic_asic_info_t, revision);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_asic_info_t, amdsmi_nic_asic_info_t, permanent_address);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_asic_info_t, amdsmi_nic_asic_info_t, product_name);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_asic_info_t, amdsmi_nic_asic_info_t, part_number);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_asic_info_t, amdsmi_nic_asic_info_t, serial_number);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_asic_info_t, amdsmi_nic_asic_info_t, vendor_name);
+
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_numa_info_t, amdsmi_nic_numa_info_t, node);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_numa_info_t, amdsmi_nic_numa_info_t, affinity);
+
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_t, amdsmi_nic_port_t, bdf);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_t, amdsmi_nic_port_t, port_num);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_t, amdsmi_nic_port_t, type);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_t, amdsmi_nic_port_t, flavour);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_t, amdsmi_nic_port_t, netdev);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_t, amdsmi_nic_port_t, ifindex);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_t, amdsmi_nic_port_t, mac_address);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_t, amdsmi_nic_port_t, carrier);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_t, amdsmi_nic_port_t, mtu);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_t, amdsmi_nic_port_t, link_state);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_t, amdsmi_nic_port_t, link_speed);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_t, amdsmi_nic_port_t, active_fec);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_t, amdsmi_nic_port_t, autoneg);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_t, amdsmi_nic_port_t, pause_autoneg);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_t, amdsmi_nic_port_t, pause_rx);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_t, amdsmi_nic_port_t, pause_tx);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_info_t, amdsmi_nic_port_info_t, num_ports);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_info_t, amdsmi_nic_port_info_t, ports);
+
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_rdma_port_info_t, amdsmi_nic_rdma_port_info_t, netdev);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_rdma_port_info_t, amdsmi_nic_rdma_port_info_t, state);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_rdma_port_info_t, amdsmi_nic_rdma_port_info_t, rdma_port);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_rdma_port_info_t, amdsmi_nic_rdma_port_info_t, max_mtu);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_rdma_port_info_t, amdsmi_nic_rdma_port_info_t, active_mtu);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_rdma_dev_info_t, amdsmi_nic_rdma_dev_info_t, rdma_dev);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_rdma_dev_info_t, amdsmi_nic_rdma_dev_info_t, node_guid);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_rdma_dev_info_t, amdsmi_nic_rdma_dev_info_t, node_type);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_rdma_dev_info_t, amdsmi_nic_rdma_dev_info_t, sys_image_guid);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_rdma_dev_info_t, amdsmi_nic_rdma_dev_info_t, fw_ver);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_rdma_dev_info_t, amdsmi_nic_rdma_dev_info_t, num_rdma_ports);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_rdma_dev_info_t, amdsmi_nic_rdma_dev_info_t, rdma_port_info);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_rdma_devices_info_t, amdsmi_nic_rdma_devices_info_t,
+                           num_rdma_dev);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_rdma_devices_info_t, amdsmi_nic_rdma_devices_info_t,
+                           rdma_dev_info);
+
+#undef AMDSMI_NIC_MIRRORED_MEMBER
+
+static bool is_nic_rdma_failure_fatal(smi_nic_status_t status) {
+  return (status != SMI_NIC_STATUS_NO_DATA) && (status != SMI_NIC_STATUS_DRIVER_NOT_LOADED);
+}
+
+amdsmi_status_t populate_amd_ainic_device(const smi_nic_ctx_t& ctx, uint64_t bdf_int,
+                                          AMDSmiAINICDevice::AINICInfo& ai_nic_info) {
+  // Each getter writes an smi_nic_* struct through a pointer to its amdsmi_nic_* mirror; the
+  // member-by-member layout checks are above, and the sizes are checked here.
   static_assert(sizeof(smi_nic_bus_info_t) == sizeof(ai_nic_info.bus));
-  smi_nic_status_t status =
-      smi_get_nic_bus_info(ctx, bdf_int, reinterpret_cast<smi_nic_bus_info_t*>(&ai_nic_info.bus));
-  CHK_AMDNIC_RET(status)
-
-  static_assert(sizeof(smi_nic_driver_info_t) == sizeof(ai_nic_info.driver));
-  status = smi_get_nic_driver_info(ctx, bdf_int,
-                                   reinterpret_cast<smi_nic_driver_info_t*>(&ai_nic_info.driver));
-  CHK_AMDNIC_RET(status)
-
-  static_assert(sizeof(smi_nic_asic_info_t) == sizeof(ai_nic_info.asic));
-  status = smi_get_nic_asic_info(ctx, bdf_int,
-                                 reinterpret_cast<smi_nic_asic_info_t*>(&ai_nic_info.asic));
-  CHK_AMDNIC_RET(status)
-
-  static_assert(sizeof(smi_nic_numa_info_t) == sizeof(ai_nic_info.numa));
-  status = smi_get_nic_numa_info(ctx, bdf_int,
-                                 reinterpret_cast<smi_nic_numa_info_t*>(&ai_nic_info.numa));
-  CHK_AMDNIC_RET(status)
-
-  static_assert(sizeof(smi_nic_port_info_t) == sizeof(ai_nic_info.port));
-  status = smi_get_nic_port_info(ctx, bdf_int,
-                                 reinterpret_cast<smi_nic_port_info_t*>(&ai_nic_info.port));
+  smi_nic_status_t status = g_nic_info_getters->bus(
+      ctx, bdf_int, reinterpret_cast<smi_nic_bus_info_t*>(&ai_nic_info.bus));
   CHK_AMDNIC_RET(status);
 
+  static_assert(sizeof(smi_nic_driver_info_t) == sizeof(ai_nic_info.driver));
+  status = g_nic_info_getters->driver(
+      ctx, bdf_int, reinterpret_cast<smi_nic_driver_info_t*>(&ai_nic_info.driver));
+  // A fwctl-only NIC has no host netdev to query for driver name/version; that is
+  // not a failure. Keep the device with empty driver info.
+  if (status != SMI_NIC_STATUS_NO_DATA) {
+    CHK_AMDNIC_RET(status);
+  }
+
+  static_assert(sizeof(smi_nic_asic_info_t) == sizeof(ai_nic_info.asic));
+  status = g_nic_info_getters->asic(ctx, bdf_int,
+                                    reinterpret_cast<smi_nic_asic_info_t*>(&ai_nic_info.asic));
+  CHK_AMDNIC_RET(status);
+
+  // Type and capability are cosmetic next to the identity read above: a failure leaves them at
+  // UNKNOWN and no capability instead of dropping a NIC every other getter could read.
+  ai_nic_info.type = 0;
+  ai_nic_info.capability = 0;
+  const auto kind_status = g_nic_info_getters->kind(ctx, bdf_int, &ai_nic_info.type);
+  const auto capability_status =
+      g_nic_info_getters->capability(ctx, bdf_int, &ai_nic_info.capability);
+  if ((kind_status != SMI_NIC_STATUS_SUCCESS) || (capability_status != SMI_NIC_STATUS_SUCCESS)) {
+    std::ostringstream ss;
+    ss << __func__ << ": NIC kind/capability unavailable for BDF=0x" << std::hex << bdf_int
+       << std::dec << " kind status " << kind_status << " capability status " << capability_status;
+    LOG_DEBUG(ss);
+  }
+
+  static_assert(sizeof(smi_nic_numa_info_t) == sizeof(ai_nic_info.numa));
+  status = g_nic_info_getters->numa(ctx, bdf_int,
+                                    reinterpret_cast<smi_nic_numa_info_t*>(&ai_nic_info.numa));
+  CHK_AMDNIC_RET(status);
+
+  static_assert(sizeof(smi_nic_port_info_t) == sizeof(ai_nic_info.port));
+  status = g_nic_info_getters->port(ctx, bdf_int,
+                                    reinterpret_cast<smi_nic_port_info_t*>(&ai_nic_info.port));
+  // A fwctl-only NIC has no host netdev/port to report link state for; that is
+  // not a failure. Keep the device with empty port info.
+  if (status != SMI_NIC_STATUS_NO_DATA) {
+    CHK_AMDNIC_RET(status);
+  }
+
   static_assert(sizeof(smi_nic_rdma_devices_info_t) == sizeof(ai_nic_info.rdma_dev));
-  status = smi_get_nic_rdma_dev_info(
+  status = g_nic_info_getters->rdma(
       ctx, bdf_int, reinterpret_cast<smi_nic_rdma_devices_info_t*>(&ai_nic_info.rdma_dev));
-  CHK_AMDNIC_RET(status)
+  if (status != SMI_NIC_STATUS_SUCCESS) {
+    if (is_nic_rdma_failure_fatal(status)) {
+      CHK_AMDNIC_RET(status);
+    }
+    // The zeroed-struct contract published by amdsmi_get_nic_rdma_dev_info() is
+    // guaranteed here, not borrowed from the getter.
+    ai_nic_info.rdma_dev = {};
+    std::ostringstream ss;
+    ss << __func__ << ": RDMA info unavailable for BDF=0x" << std::hex << bdf_int << std::dec
+       << " smi_nic_status_t: " << status << ":" << nic_status_str(status)
+       << " - keeping the NIC with an empty rdma_dev";
+    // LOG_INFO, not LOG_DEBUG: the logger only reaches debug level once
+    // RocmSMI::Initialize() runs, which an NIC-only amdsmi_init never does.
+    LOG_INFO(ss);
+  }
 
   return AMDSMI_STATUS_SUCCESS;
 }
@@ -452,15 +608,41 @@ std::tuple<uint64_t, amdsmi_bdf_t> bdf_to_int(const std::string& bdf) {
     bdf_info.bus_number = std::stoul(matches[2], nullptr, 16) & 0xff;
     bdf_info.device_number = std::stoul(matches[3], nullptr, 16) & 0x1f;
     bdf_info.function_number = std::stoul(matches[4], nullptr, 16) & 0x7;
-    return {(bdf_info.domain_number << 16) | (bdf_info.bus_number << 8) |
-                (bdf_info.device_number << 3) | (bdf_info.function_number << 0),
+    return {(static_cast<uint64_t>(bdf_info.domain_number) << 16) |
+                (static_cast<uint64_t>(bdf_info.bus_number) << 8) |
+                (static_cast<uint64_t>(bdf_info.device_number) << 3) |
+                (static_cast<uint64_t>(bdf_info.function_number) << 0),
             bdf_info};
   }
   return {0, bdf_info};
 }
 
+/**
+ * Routes the NIC library's debug lines into the RSMI_LOGGING log. A NIC-only
+ * init never runs RocmSMI::Initialize(), which is what lifts the logger to debug
+ * level, so do that here when logging is on.
+ */
+static void install_nic_debug_log() {
+  auto* logger = ROCmLogging::Logger::getInstance();
+  if (!logger->isLoggerEnabled()) {
+    return;
+  }
+  logger->enableAllLogLevels();
+  amd::smi::nic::log::set_sink([](const std::string& msg) {
+    std::ostringstream ss;
+    ss << msg;
+    LOG_DEBUG(ss);
+  });
+}
+
 amdsmi_status_t AMDSmiSystem::populate_amd_ainic_devices() {
-  smi_nic_status_t status = smi_nic_create_context(&ainic_ctx_);
+  install_nic_debug_log();
+  smi_nic_status_t status = SMI_NIC_STATUS_SUCCESS;
+  {
+    // amdsmi_init must not fork per RDMA port; the MTU is probed when something first reads it.
+    const auto deferral = ScopedRdmaMtuDeferral_t{};
+    status = g_nic_info_getters->create_context(&ainic_ctx_);
+  }
   CHK_AMDNIC_RET(status);
 
   smi_nic_discovery_t discovery = {};
@@ -473,7 +655,7 @@ amdsmi_status_t AMDSmiSystem::populate_amd_ainic_devices() {
 
   for (uint32_t nic_idx = 0; nic_idx < discovery.count; ++nic_idx) {
     const char* bdf_str = discovery.devices[nic_idx].bdf;
-    auto [bdfid, bdf_info] = bdf_to_int(bdf_str);
+    [[maybe_unused]] auto [bdfid, bdf_info] = bdf_to_int(bdf_str);
     AMDSmiAINICDevice::AINICInfo ai_nic_info = {};
     amdsmi_status_t status = populate_amd_ainic_device(ainic_ctx_, bdfid, ai_nic_info);
     if (status != AMDSMI_STATUS_SUCCESS) {
@@ -485,7 +667,6 @@ amdsmi_status_t AMDSmiSystem::populate_amd_ainic_devices() {
       LOG_INFO(ss);
       continue;
     }
-    ai_nic_info_.emplace_back(ai_nic_info);
 
     auto [domain, bus, device_id, function] = parse_bdfid(bdfid);
 
@@ -509,146 +690,14 @@ amdsmi_status_t AMDSmiSystem::populate_amd_ainic_devices() {
       sockets_.push_back(socket);
     }
 
-    auto device = std::make_unique<AMDSmiAINICDevice>(nic_idx, bdf_info, ai_nic_info);
+    auto device = std::make_unique<AMDSmiAINICDevice>(ai_nic_info);
     socket->add_processor(device.get());
     ainic_processors_.insert(device.get());
     device.release();
   }
   return AMDSMI_STATUS_SUCCESS;
 }
-const auto& AMDSmiSystem::get_ai_nic_info() const { return ai_nic_info_; }
 
-amdsmi_status_t AMDSmiSystem::populate_brcm_nic_devices() {
-#ifdef BRCM_NIC
-  uint32_t device_count = 0;
-  amdsmi_status_t amd_smi_status = no_drm_nic_.init();
-  if (amd_smi_status != AMDSMI_STATUS_SUCCESS) {
-    // No NIC driver/support present (e.g. CI without NIC hardware) - not fatal
-    return AMDSMI_STATUS_SUCCESS;
-  }
-
-  rsmi_status_t ret = rsmi_num_nic_monitor_devices(&device_count);
-  if (ret != RSMI_STATUS_SUCCESS) {
-    // No NIC devices or driver not available - not fatal, continue with empty list
-    return AMDSMI_STATUS_SUCCESS;
-  }
-
-  for (uint32_t i = 0; i < device_count; i++) {
-    // NIC device uses the bdf as the socket id
-    std::string socket_id;
-    uint64_t bdfid = 0;
-    rsmi_status_t ret = rsmi_nic_dev_pci_id_get(i, &bdfid);
-    if (ret != RSMI_STATUS_SUCCESS) {
-      continue;
-    }
-
-    auto [domain, bus, device_id, function] = parse_bdfid(bdfid);
-
-    // The BD part of the BDF is used as the socket id as it
-    // represents a physical device.
-    std::stringstream ss;
-    ss << std::setfill('0') << std::uppercase << std::hex << std::setw(4) << domain << ":"
-       << std::setw(2) << bus << ":" << std::setw(2) << device_id;
-    socket_id = ss.str();
-
-    // Multiple devices may share the same socket
-    AMDSmiSocket* socket = nullptr;
-    for (unsigned int j = 0; j < sockets_.size(); j++) {
-      if (sockets_[j]->get_socket_id() == socket_id) {
-        socket = sockets_[j];
-        break;
-      }
-    }
-    if (socket == nullptr) {
-      socket = new AMDSmiSocket(socket_id);
-      sockets_.push_back(socket);
-    }
-
-    auto [domain_number, bus_number, device_number, function_number] = parse_bdfid(bdfid);
-    amdsmi_bdf_t bdf = {.function_number = function_number,
-                        .device_number = device_number,
-                        .bus_number = bus_number,
-                        .domain_number = domain_number};
-
-    auto device = std::make_unique<AMDSmiNICDevice>(i, bdf, no_drm_nic_);
-
-    std::string nicPath;
-    if ((no_drm_nic_.get_device_path_by_index(i, &nicPath)) != AMDSMI_STATUS_SUCCESS) continue;
-    std::string driverPath = nicPath + "/driver";
-    std::error_code ec;
-    auto target = std::filesystem::read_symlink(driverPath, ec);
-    if (ec) continue;
-    if (target.string().find("bnxt_en") == std::string::npos) continue;
-
-    socket->add_processor(device.get());
-    nic_processors_.insert(device.get());
-    device.release();
-  }
-#endif  // BRCM_NIC
-  return AMDSMI_STATUS_SUCCESS;
-}
-
-amdsmi_status_t AMDSmiSystem::populate_brcm_switch_devices() {
-#ifdef BRCM_NIC
-  uint32_t device_count = 0;
-  amdsmi_status_t amd_smi_status = no_drm_switch_.init();
-  if (amd_smi_status != AMDSMI_STATUS_SUCCESS) {
-    // No switch driver/support present (e.g. CI without NIC hardware) - not fatal
-    return AMDSMI_STATUS_SUCCESS;
-  }
-
-  rsmi_status_t ret = rsmi_num_switch_monitor_devices(&device_count);
-  if (ret != RSMI_STATUS_SUCCESS) {
-    // No switch devices or driver not available - not fatal, continue with empty list
-    return AMDSMI_STATUS_SUCCESS;
-  }
-
-  for (uint32_t i = 0; i < device_count; i++) {
-    // NIC device uses the bdf as the socket id
-    std::string socket_id;
-    uint64_t bdfid = 0;
-    rsmi_status_t ret = rsmi_switch_dev_pci_id_get(i, &bdfid);
-    if (ret != RSMI_STATUS_SUCCESS) {
-      // return amd::smi::rsmi_to_amdsmi_status(ret);
-      // device might be removed; continue with next device;
-      continue;
-    }
-
-    auto [domain, bus, device_id, function] = parse_bdfid(bdfid);
-
-    // The BD part of the BDF is used as the socket id as it
-    // represents a physical device.
-    std::stringstream ss;
-    ss << std::setfill('0') << std::uppercase << std::hex << std::setw(4) << domain << ":"
-       << std::setw(2) << bus << ":" << std::setw(2) << device_id;
-    socket_id = ss.str();
-
-    // Multiple devices may share the same socket
-    AMDSmiSocket* socket = nullptr;
-    for (unsigned int j = 0; j < sockets_.size(); j++) {
-      if (sockets_[j]->get_socket_id() == socket_id) {
-        socket = sockets_[j];
-        break;
-      }
-    }
-    if (socket == nullptr) {
-      socket = new AMDSmiSocket(socket_id);
-      sockets_.push_back(socket);
-    }
-
-    amdsmi_bdf_t bdf = {};
-    bdf.function_number = bdfid & 0x7;
-    bdf.device_number = (bdfid >> 3) & 0x1f;
-    bdf.bus_number = (bdfid >> 8) & 0xff;
-    bdf.domain_number = (bdfid >> 32) & 0xffffffff;
-
-    AMDSmiProcessor* device = new AMDSmiSWITCHDevice(i, bdf, no_drm_switch_);
-    socket->add_processor(device);
-    switch_processors_.insert(device);
-  }
-#endif
-  return AMDSMI_STATUS_SUCCESS;
-}
 amdsmi_status_t AMDSmiSystem::get_gpu_socket_id(uint32_t index, std::string& socket_id) {
   uint64_t bdfid = 0;
   rsmi_status_t ret = rsmi_dev_pci_id_get(index, &bdfid);
@@ -679,6 +728,9 @@ amdsmi_status_t AMDSmiSystem::get_gpu_socket_id(uint32_t index, std::string& soc
 }
 
 amdsmi_status_t AMDSmiSystem::cleanup() {
+  // A GPU shutdown failure is reported after the NIC branch has run, so it cannot leave the NIC
+  // context and the debug-log sink behind.
+  amdsmi_status_t status = AMDSMI_STATUS_SUCCESS;
 #ifdef ENABLE_ESMI_LIB
   if (init_flag_ & AMDSMI_INIT_AMD_CPUS) {
     for (uint32_t i = 0; i < sockets_.size(); i++) {
@@ -701,15 +753,35 @@ amdsmi_status_t AMDSmiSystem::cleanup() {
       sockets_.clear();
     }
     drm_.cleanup();
-    rsmi_status_t ret = rsmi_shut_down();
-    if (ret != RSMI_STATUS_SUCCESS) {
-      return amd::smi::rsmi_to_amdsmi_status(ret);
+#ifdef ENABLE_WSL_BACKEND
+    bool used_wsl = WSLGPUBackend::IsActive();
+    amdsmi_status_t wsl_ret = WSLGPUBackend::Shutdown();
+    if (wsl_ret != AMDSMI_STATUS_SUCCESS) {
+      status = wsl_ret;
     }
+    if (!used_wsl) {
+#endif
+      rsmi_status_t ret = rsmi_shut_down();
+      if ((ret != RSMI_STATUS_SUCCESS) && (status == AMDSMI_STATUS_SUCCESS)) {
+        status = amd::smi::rsmi_to_amdsmi_status(ret);
+      }
+#ifdef ENABLE_WSL_BACKEND
+    }
+#endif
   }
   if (init_flag_ & AMDSMI_INIT_AMD_NICS) {
     smi_nic_destroy_context(ainic_ctx_);
+    ainic_ctx_ = nullptr;
+    amd::smi::nic::log::set_sink(nullptr);
+    // The sockets own the devices. The GPU and CPU branches above already emptied sockets_, so
+    // this frees them only for a NIC-only init; either way the set's pointers are now dangling.
+    ainic_processors_.clear();
+    for (uint32_t i = 0; i < sockets_.size(); i++) {
+      delete sockets_[i];
+    }
+    sockets_.clear();
   }
-  return AMDSMI_STATUS_SUCCESS;
+  return status;
 }
 
 amdsmi_status_t AMDSmiSystem::handle_to_socket(amdsmi_socket_handle socket_handle,
@@ -737,19 +809,35 @@ amdsmi_status_t AMDSmiSystem::handle_to_processor(amdsmi_processor_handle proces
   if (std::find(processors_.begin(), processors_.end(), *processor) != processors_.end()) {
     return AMDSMI_STATUS_SUCCESS;
   }
-  if (std::find(nic_processors_.begin(), nic_processors_.end(), *processor) !=
-      nic_processors_.end()) {
-    return AMDSMI_STATUS_SUCCESS;
-  }
-  if (std::find(switch_processors_.begin(), switch_processors_.end(), *processor) !=
-      switch_processors_.end()) {
-    return AMDSMI_STATUS_SUCCESS;
-  }
   if (std::find(ainic_processors_.begin(), ainic_processors_.end(), *processor) !=
       ainic_processors_.end()) {
     return AMDSMI_STATUS_SUCCESS;
   }
   return AMDSMI_STATUS_NOT_FOUND;
+}
+
+// See amd_smi_system.h; only testing::ScopedProcessorRegistration may call
+// register/unregister_processor_for_testing.
+std::set<AMDSmiProcessor*>& AMDSmiSystem::set_for_type_for_testing(amdsmi_processor_type_t type) {
+  switch (type) {
+    case AMDSMI_PROCESSOR_TYPE_BRCM_NIC:
+    case AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH:
+    case AMDSMI_PROCESSOR_TYPE_AMD_NIC:
+      return ainic_processors_;
+    case AMDSMI_PROCESSOR_TYPE_AMD_GPU:
+    case AMDSMI_PROCESSOR_TYPE_AMD_CPU:
+    case AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE:
+    default:
+      return processors_;
+  }
+}
+
+void AMDSmiSystem::register_processor_for_testing(AMDSmiProcessor* processor) {
+  set_for_type_for_testing(processor->get_processor_type()).insert(processor);
+}
+
+void AMDSmiSystem::unregister_processor_for_testing(AMDSmiProcessor* processor) {
+  set_for_type_for_testing(processor->get_processor_type()).erase(processor);
 }
 
 amdsmi_status_t AMDSmiSystem::gpu_index_to_handle(uint32_t gpu_index,

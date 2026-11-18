@@ -4,12 +4,8 @@
  * SPDX-License-Identifier: MIT
  */
 
-#pragma once
-
-#include "amd_hip_mx_common.h"
-#include "amd_hip_fp8.h"
-
-#include "amd_hip_ocp_host.hpp"
+#ifndef _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_FP6_H_
+#define _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_FP6_H_
 
 #if defined(__HIPCC_RTC__)
 #define __FP6_HOST_DEVICE__ __device__
@@ -17,15 +13,19 @@
 #else
 #define __FP6_HOST_DEVICE__ __host__ __device__
 #define __FP6_HOST_DEVICE_STATIC__ __FP6_HOST_DEVICE__ static inline
+#include "amd_hip_mx_common.h"
+#include "amd_hip_fp8.h"
+
+#include "amd_hip_ocp_host.hpp"
 #endif  // __HIPCC_RTC__
 
 typedef __hip_fp8_storage_t __hip_fp6_storage_t;
 typedef __hip_fp8x2_storage_t __hip_fp6x2_storage_t;
 typedef __hip_fp8x4_storage_t __hip_fp6x4_storage_t;
 
-static_assert(sizeof(__hip_fp6_storage_t[4]) == sizeof(uint32_t), "");
-static_assert(sizeof(__hip_fp6x2_storage_t[2]) == sizeof(uint32_t), "");
-static_assert(sizeof(__hip_fp6x4_storage_t[2]) == sizeof(uint64_t), "");
+static_assert(sizeof(__hip_fp6_storage_t[4]) == sizeof(__hip_uint32_t), "");
+static_assert(sizeof(__hip_fp6x2_storage_t[2]) == sizeof(__hip_uint32_t), "");
+static_assert(sizeof(__hip_fp6x4_storage_t[2]) == sizeof(__hip_uint64_t), "");
 
 enum __hip_fp6_interpretation_t {
   __HIP_E3M2 = 0, /**< FP6 E3M2 Type*/
@@ -39,7 +39,7 @@ __FP6_HOST_DEVICE_STATIC__ __hip_fp6_storage_t __hip_cvt_bfloat16raw_to_fp6(
     const __hip_bfloat16_raw x, const __hip_fp6_interpretation_t fp6_interpretation,
     const enum hipRoundMode /* rounding */) {
   union {
-    uint32_t ui32;
+    __hip_uint32_t ui32;
     __hip_fp6_storage_t fp6[4];
   } u{0};
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
@@ -82,13 +82,14 @@ __FP6_HOST_DEVICE_STATIC__ __hip_fp6x2_storage_t __hip_cvt_bfloat16raw2_to_fp6x2
     const __hip_bfloat162_raw x, const __hip_fp6_interpretation_t fp6_interpretation,
     const enum hipRoundMode /* rounding */) {
   union {
-    uint32_t ui32;
+    __hip_uint32_t ui32;
     __hip_fp6x2_storage_t fp6x2[2];
   } u{0};
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
   __amd_bf16x32_storage_t in{};
-  in[0] = internal::hipbf16_to_bf16(x.x);
-  in[1] = internal::hipbf16_to_bf16(x.y);
+  const auto bf16x2 = internal::hipbf162_to_bf16x2(x);
+  in[0] = bf16x2[0];
+  in[1] = bf16x2[1];
   __amd_fp6x32_storage_t out{};
   if (fp6_interpretation == __HIP_E2M3) {
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_fp6_bf16))
@@ -97,12 +98,14 @@ __FP6_HOST_DEVICE_STATIC__ __hip_fp6x2_storage_t __hip_cvt_bfloat16raw2_to_fp6x2
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_bf6_bf16))
       out = __builtin_amdgcn_cvt_scalef32_pk32_bf6_bf16(in, 1.0f /* scale */);
   }
-  u.ui32 = out[0];
+  u.ui32 = out[0] & 0x3Fu;
+  u.ui32 |= ((out[0] & 0xFC0u) << 2);
   return u.fp6x2[0];
 #elif HIP_ENABLE_GFX1250_OCP_BUILTINS
   __amd_bf16x16_storage_t in{};
-  in[0] = internal::hipbf16_to_bf16(x.x);
-  in[1] = internal::hipbf16_to_bf16(x.y);
+  const auto bf16x2 = internal::hipbf162_to_bf16x2(x);
+  in[0] = bf16x2[0];
+  in[1] = bf16x2[1];
   __amd_fp6x16_storage_t out{};
   if (fp6_interpretation == __HIP_E2M3) {
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk16_fp6_bf16))
@@ -111,7 +114,8 @@ __FP6_HOST_DEVICE_STATIC__ __hip_fp6x2_storage_t __hip_cvt_bfloat16raw2_to_fp6x2
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk16_bf6_bf16))
       out = __builtin_amdgcn_cvt_scalef32_pk16_bf6_bf16(in, 1.0f /* scale */);
   }
-  u.ui32 = out[0];
+  u.ui32 = out[0] & 0x3Fu;
+  u.ui32 |= ((out[0] & 0xFC0u) << 2);
   return u.fp6x2[0];
 #else
   if (fp6_interpretation == __HIP_E2M3) {
@@ -132,7 +136,7 @@ __FP6_HOST_DEVICE_STATIC__ __hip_fp6_storage_t
 __hip_cvt_double_to_fp6(const double x, const __hip_fp6_interpretation_t fp6_interpretation_t,
                         const enum hipRoundMode /* rounding */) {
   union {
-    uint32_t ui32;
+    __hip_uint32_t ui32;
     __hip_fp6_storage_t fp6[4];
   } u{0};
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
@@ -176,7 +180,7 @@ __FP6_HOST_DEVICE_STATIC__ __hip_fp6x2_storage_t
 __hip_cvt_double2_to_fp6x2(const double2 x, const __hip_fp6_interpretation_t fp6_interpretation_t,
                            const enum hipRoundMode /* rounding */) {
   union {
-    uint32_t ui32;
+    __hip_uint32_t ui32;
     __hip_fp6x2_storage_t fp6x2[2];
   } u{0};
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
@@ -227,7 +231,7 @@ __FP6_HOST_DEVICE_STATIC__ __hip_fp6_storage_t
 __hip_cvt_float_to_fp6(const float x, const __hip_fp6_interpretation_t fp6_interpretation_t,
                        const enum hipRoundMode /* rounding */) {
   union {
-    uint32_t ui32;
+    __hip_uint32_t ui32;
     __hip_fp6_storage_t fp6[4];
   } u{0};
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
@@ -270,7 +274,7 @@ __FP6_HOST_DEVICE_STATIC__ __hip_fp6x2_storage_t
 __hip_cvt_float2_to_fp6x2(const float2 x, const __hip_fp6_interpretation_t fp6_interpretation_t,
                           const enum hipRoundMode /* rounding */) {
   union {
-    uint32_t ui32;
+    __hip_uint32_t ui32;
     __hip_fp6x2_storage_t fp6x2[2];
   } u{0};
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
@@ -323,7 +327,7 @@ __FP6_HOST_DEVICE_STATIC__ __half_raw __hip_cvt_fp6_to_halfraw(
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
   __amd_fp16x32_storage_t out{};
   __amd_fp6x32_storage_t in{};
-  in[0] = (uint32_t)x;
+  in[0] = (__hip_uint32_t)x;
   if (fp6_interpretation_t == __HIP_E2M3) {
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_f16_fp6))
       out = __builtin_amdgcn_cvt_scalef32_pk32_f16_fp6(in, 1.0f);
@@ -335,7 +339,7 @@ __FP6_HOST_DEVICE_STATIC__ __half_raw __hip_cvt_fp6_to_halfraw(
 #elif HIP_ENABLE_GFX1250_OCP_BUILTINS
   __amd_fp16x16_storage_t out{};
   __amd_fp6x16_storage_t in{};
-  in[0] = (uint32_t)x;
+  in[0] = (__hip_uint32_t)x;
   if (fp6_interpretation_t == __HIP_E2M3) {
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scale_pk16_f16_fp6))
       out = __builtin_amdgcn_cvt_scale_pk16_f16_fp6(in, 0x7F7Fu /* scale e8m0 = 1.0 */, 0);
@@ -347,9 +351,9 @@ __FP6_HOST_DEVICE_STATIC__ __half_raw __hip_cvt_fp6_to_halfraw(
 #else
   using namespace fcbx;
   if (fp6_interpretation_t == __HIP_E2M3) {
-    ret.data = __amd_fp16_storage_t{to_float<__amd_fp16_storage_t, Encoding::E2M3, true>(x, 0)};
+    ret = internal::f16_to_halfraw(to_float<__amd_fp16_storage_t, Encoding::E2M3, true>(x, 0));
   } else if (fp6_interpretation_t == __HIP_E3M2) {
-    ret.data = __amd_fp16_storage_t{to_float<__amd_fp16_storage_t, Encoding::E3M2, true>(x, 0)};
+    ret = internal::f16_to_halfraw(to_float<__amd_fp16_storage_t, Encoding::E3M2, true>(x, 0));
   }
 #endif
   return ret;
@@ -386,13 +390,13 @@ __FP6_HOST_DEVICE_STATIC__ __half2_raw __hip_cvt_fp6x2_to_halfraw2(
 #else
   using namespace fcbx;
   if (fp6_interpretation_t == __HIP_E2M3) {
-    ret.data =
+    ret = internal::f16x2_to_halfraw2(
         __amd_fp16x2_storage_t{to_float<__amd_fp16_storage_t, Encoding::E2M3, true>(x & 0xFFu, 0),
-                               to_float<__amd_fp16_storage_t, Encoding::E2M3, true>(x >> 8, 0)};
+                               to_float<__amd_fp16_storage_t, Encoding::E2M3, true>(x >> 8, 0)});
   } else if (fp6_interpretation_t == __HIP_E3M2) {
-    ret.data =
+    ret = internal::f16x2_to_halfraw2(
         __amd_fp16x2_storage_t{to_float<__amd_fp16_storage_t, Encoding::E3M2, true>(x & 0xFFu, 0),
-                               to_float<__amd_fp16_storage_t, Encoding::E3M2, true>(x >> 8, 0)};
+                               to_float<__amd_fp16_storage_t, Encoding::E3M2, true>(x >> 8, 0)});
   }
 #endif
   return ret;
@@ -401,7 +405,7 @@ __FP6_HOST_DEVICE_STATIC__ __hip_fp6_storage_t
 __hip_cvt_halfraw_to_fp6(const __half_raw x, const __hip_fp6_interpretation_t fp6_interpretation_t,
                          const enum hipRoundMode /* rounding */) {
   union {
-    uint32_t ui32;
+    __hip_uint32_t ui32;
     __hip_fp6_storage_t fp6[4];
   } u{0};
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
@@ -445,7 +449,7 @@ __FP6_HOST_DEVICE_STATIC__ __hip_fp6x2_storage_t __hip_cvt_halfraw2_to_fp6x2(
     const __half2_raw x, const __hip_fp6_interpretation_t fp6_interpretation_t,
     const enum hipRoundMode /* rounding */) {
   union {
-    uint32_t ui32;
+    __hip_uint32_t ui32;
     __hip_fp6x2_storage_t fp6x2[2];
   } u{0};
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
@@ -538,14 +542,14 @@ struct __hip_fp6_e2m3 {
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
     __amd_fp6x32_storage_t in{};
     __amd_bf16x32_storage_t out{};
-    in[0] = (uint32_t)__x;
+    in[0] = (__hip_uint32_t)__x;
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_bf16_fp6))
       out = __builtin_amdgcn_cvt_scalef32_pk32_bf16_fp6(in, 1.0f /* scale */);
     u.bf16 = out[0];
 #elif HIP_ENABLE_GFX1250_OCP_BUILTINS
     __amd_fp6x16_storage_t in{};
     __amd_bf16x16_storage_t out{};
-    in[0] = (uint32_t)__x;
+    in[0] = (__hip_uint32_t)__x;
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scale_pk16_bf16_fp6))
       out = __builtin_amdgcn_cvt_scale_pk16_bf16_fp6(in, 0x7F7Fu /* scale e8m0 = 1.0 */, 0);
     u.bf16 = out[0];
@@ -559,14 +563,14 @@ struct __hip_fp6_e2m3 {
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
     __amd_fp6x32_storage_t in{};
     __amd_floatx32_storage_t out{};
-    in[0] = (uint32_t)__x;
+    in[0] = (__hip_uint32_t)__x;
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_f32_fp6))
       out = __builtin_amdgcn_cvt_scalef32_pk32_f32_fp6(in, 1.0f /* scale */);
     auto ret = out[0];
 #elif HIP_ENABLE_GFX1250_OCP_BUILTINS
     __amd_fp6x16_storage_t in{};
     __amd_floatx16_storage_t out{};
-    in[0] = (uint32_t)__x;
+    in[0] = (__hip_uint32_t)__x;
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scale_pk16_f32_fp6))
       out = __builtin_amdgcn_cvt_scale_pk16_f32_fp6(in, 0x7F7Fu /* scale e8m0 = 1.0 */, 0);
     auto ret = out[0];
@@ -623,14 +627,14 @@ struct __hip_fp6_e3m2 {
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
     __amd_fp6x32_storage_t in{};
     __amd_bf16x32_storage_t out{};
-    in[0] = (uint32_t)__x;
+    in[0] = (__hip_uint32_t)__x;
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_bf16_bf6))
       out = __builtin_amdgcn_cvt_scalef32_pk32_bf16_bf6(in, 1.0f /* scale */);
     u.bf16 = out[0];
 #elif HIP_ENABLE_GFX1250_OCP_BUILTINS
     __amd_fp6x16_storage_t in{};
     __amd_bf16x16_storage_t out{};
-    in[0] = (uint32_t)__x;
+    in[0] = (__hip_uint32_t)__x;
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scale_pk16_bf16_bf6))
       out = __builtin_amdgcn_cvt_scale_pk16_bf16_bf6(in, 0x7F7Fu /* scale e8m0 = 1.0 */, 0);
     u.bf16 = out[0];
@@ -644,14 +648,14 @@ struct __hip_fp6_e3m2 {
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
     __amd_fp6x32_storage_t in{};
     __amd_floatx32_storage_t out{};
-    in[0] = (uint32_t)__x;
+    in[0] = (__hip_uint32_t)__x;
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_f32_bf6))
       out = __builtin_amdgcn_cvt_scalef32_pk32_f32_bf6(in, 1.0f /* scale */);
     auto ret = out[0];
 #elif HIP_ENABLE_GFX1250_OCP_BUILTINS
     __amd_fp6x16_storage_t in{};
     __amd_floatx16_storage_t out{};
-    in[0] = (uint32_t)__x;
+    in[0] = (__hip_uint32_t)__x;
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scale_pk16_f32_bf6))
       out = __builtin_amdgcn_cvt_scale_pk16_f32_bf6(in, 0x7F7Fu /* scale e8m0 = 1.0 */, 0);
     auto ret = out[0];
@@ -940,3 +944,5 @@ struct __hip_fp6x4_e3m2 {
   }
 #endif  // !defined(__HIP_NO_FP6_CONVERSION_OPERATORS__)
 };
+
+#endif  // _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_FP6_H_

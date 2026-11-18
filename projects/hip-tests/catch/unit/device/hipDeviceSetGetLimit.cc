@@ -407,26 +407,26 @@ HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_SetBeforeKernelLaunch) {
  * 5) Get the Current Scratch limit and validate it
  * 6) Set the Current Scratch limit to original value
  */
-void getMinMaxCurrentAndSetCurrent() {
+void getMinMaxCurrentAndSetCurrent(bool threadSafe = false) {
   size_t min = 0, max = 0, orgCurrent = 0;
 
-  HIP_CHECK(hipDeviceGetLimit(&min, hipExtLimitScratchMin));
-  REQUIRE(min == 0);
+  HIP_CHECK_OPT_THREAD(threadSafe, hipDeviceGetLimit(&min, hipExtLimitScratchMin));
+  REQUIRE_OPT_THREAD(threadSafe, min == 0);
 
-  HIP_CHECK(hipDeviceGetLimit(&max, hipExtLimitScratchMax));
-  REQUIRE(max > 0);
+  HIP_CHECK_OPT_THREAD(threadSafe, hipDeviceGetLimit(&max, hipExtLimitScratchMax));
+  REQUIRE_OPT_THREAD(threadSafe, max > 0);
 
-  HIP_CHECK(hipDeviceGetLimit(&orgCurrent, hipExtLimitScratchCurrent));
-  REQUIRE(orgCurrent >= 0);
+  HIP_CHECK_OPT_THREAD(threadSafe, hipDeviceGetLimit(&orgCurrent, hipExtLimitScratchCurrent));
+  REQUIRE_OPT_THREAD(threadSafe, orgCurrent >= 0);
 
   size_t setCurrent = 0.5 * max;
-  HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, setCurrent));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipDeviceSetLimit(hipExtLimitScratchCurrent, setCurrent));
 
   size_t getCurrent = 0;
-  HIP_CHECK(hipDeviceGetLimit(&getCurrent, hipExtLimitScratchCurrent));
-  REQUIRE(getCurrent == setCurrent);
+  HIP_CHECK_OPT_THREAD(threadSafe, hipDeviceGetLimit(&getCurrent, hipExtLimitScratchCurrent));
+  REQUIRE_OPT_THREAD(threadSafe, getCurrent == setCurrent);
 
-  HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, orgCurrent));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipDeviceSetLimit(hipExtLimitScratchCurrent, orgCurrent));
 }
 
 /**
@@ -484,8 +484,9 @@ HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_InThread) {
         " Only Mi300+ and Linux supports");
   }
 
-  std::thread threadObj(getMinMaxCurrentAndSetCurrent);
+  std::thread threadObj([]() { getMinMaxCurrentAndSetCurrent(true); });
   threadObj.join();
+  HIP_CHECK_THREAD_FINALIZE();
 }
 
 /**
@@ -517,7 +518,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_InChildProcess) {
  * Local function to set the given current scratch limit
  */
 void setScratchCurrent(size_t setValue) {
-  HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, setValue));
+  HIP_CHECK_THREAD(hipDeviceSetLimit(hipExtLimitScratchCurrent, setValue));
 }
 
 /*
@@ -526,8 +527,8 @@ void setScratchCurrent(size_t setValue) {
  */
 void getScratchCurrent(size_t checkValue) {
   size_t getCurrent = 0;
-  HIP_CHECK(hipDeviceGetLimit(&getCurrent, hipExtLimitScratchCurrent));
-  REQUIRE(getCurrent == checkValue);
+  HIP_CHECK_THREAD(hipDeviceGetLimit(&getCurrent, hipExtLimitScratchCurrent));
+  REQUIRE_THREAD(getCurrent == checkValue);
 }
 
 /**
@@ -573,6 +574,8 @@ HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_SetGetThreads) {
 
   std::thread getThread2(getScratchCurrent, orgCurrent);
   getThread2.join();
+
+  HIP_CHECK_THREAD_FINALIZE();
 }
 
 #endif

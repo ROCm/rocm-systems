@@ -3,24 +3,22 @@
 
 """SQLAlchemy ORM models and SQLite backend for the analysis database.
 
-The schema is documented visually in:
-    docs/data/analyze/analysis_data_dump_schema.png
-generated from its Mermaid source:
-    docs/data/analyze/analysis_data_dump_schema.mmd
-When changing the schema, update the .mmd file to match,
-then re-export the .png via draw.io.
+After changing a table, column, foreign key, or view, regenerate the diagrams
+under docs/data/analyze/ with tools/schema_visualizer.py and commit them.
 """
 
 import csv
 import json
 import math
 import sqlite3
+from collections.abc import Iterator
 from contextlib import closing
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, List, Optional, Tuple
 
 from sqlalchemy import (
     JSON,
+    CheckConstraint,
     Column,
     Float,
     ForeignKey,
@@ -28,7 +26,10 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    case,
+    cast,
     create_engine,
+    distinct,
     func,
     select,
     text,
@@ -38,11 +39,16 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, declarative_base, relationship, sessionmaker
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.sql import Select
+from sqlalchemy.sql.expression import ColumnElement, Subquery
 
+from pc_sampling.source_snapshot_analysis import (
+    SOURCE_FRAME_SEPARATOR,
+    UNKNOWN_SOURCE_LINE_TOKEN,
+)
 from utils.logger import console_debug, console_error, console_warning
 
 PREFIX = "compute_"
-SCHEMA_VERSION = "2.0.0"
+SCHEMA_VERSION = "2.5.0"
 
 
 Base = declarative_base()
@@ -50,6 +56,8 @@ Base = declarative_base()
 
 class Workload(Base):
     __tablename__ = f"{PREFIX}workload"
+    # The pair names the workload's source export folder, so it must be unique.
+    __table_args__ = (UniqueConstraint("name", "sub_name"),)
 
     workload_id = Column(Integer, primary_key=True)
     name = Column(String)
@@ -57,6 +65,8 @@ class Workload(Base):
     sys_info_extdata = Column(JSON)
     roofline_bench_extdata = Column(JSON)
     profiling_config_extdata = Column(JSON)
+    # Memory chart layout file with its format version; see src/memory_chart/README.md
+    memory_chart_layout_extdata = Column(JSON)
 
     # Workload can have multiple kernels
     kernels = relationship("Kernel", back_populates="workload")
@@ -66,12 +76,10 @@ class Workload(Base):
     workload_metric_values = relationship(
         "WorkloadMetricValue", back_populates="workload"
     )
-    # Workload can have multiple workload-level roofline data points
-    workload_roofline_data_points = relationship(
-        "WorkloadRooflineData", back_populates="workload"
-    )
     # Workload can have multiple code objects
     code_object_stores = relationship("CodeObjectStore", back_populates="workload")
+    # Workload can have multiple source files
+    source_files = relationship("SourceFile", back_populates="workload")
 
 
 class MetricDefinition(Base):
@@ -147,6 +155,9 @@ class Kernel(Base):
         Integer, ForeignKey(f"{PREFIX}workload.workload_id"), nullable=False
     )
     kernel_name = Column(String)
+    # The demangled identifier rocprofiler-sdk truncates the signature down to.
+    # Deliberately not unique: overloads and template instantiations share one.
+    short_name = Column(String, nullable=True)
 
     # Kernel can have one workload
     workload = relationship("Workload", back_populates="kernels")
@@ -156,13 +167,13 @@ class Kernel(Base):
     metric_values = relationship("KernelMetricValue", back_populates="kernel")
     # Kernel can have multiple roofline data points
     roofline_data_points = relationship("KernelRooflineData", back_populates="kernel")
-    # Kernel can have multiple sampled instruction lines
-    instruction_lines = relationship("InstructionLine", back_populates="kernel")
+    # Kernel is compiled into one symbol per code object that holds it
+    kernel_symbols = relationship("KernelSymbol", back_populates="kernel")
 
 
 class CodeObjectStore(Base):
     __tablename__ = f"{PREFIX}code_object_store"
-    # code_object_id is only unique per process, so pid disambiguates it.
+    # code_object_id is process-local within a workload.
     __table_args__ = (UniqueConstraint("workload_id", "pid", "code_object_id"),)
 
     code_object_uuid = Column(Integer, primary_key=True)
@@ -175,65 +186,224 @@ class CodeObjectStore(Base):
 
     # Code object belongs to one workload
     workload = relationship("Workload", back_populates="code_object_stores")
-    # One code object owns many instruction lines
-    instruction_lines = relationship(
-        "InstructionLine", back_populates="code_object_store"
-    )
+    # One code object owns many kernel symbols
+    kernel_symbols = relationship("KernelSymbol", back_populates="code_object_store")
 
 
-class InstructionLine(Base):
-    __tablename__ = f"{PREFIX}instruction_line"
-    # A shared code object samples one offset under several kernels.
+class KernelSymbol(Base):
+    __tablename__ = f"{PREFIX}kernel_symbol"
+    # One symbol per kernel per code object, and one kernel per offset: an
+    # offset picks a single instruction, which lies in a single symbol.
     __table_args__ = (
-        UniqueConstraint("code_object_uuid", "code_object_offset", "kernel_uuid"),
+        UniqueConstraint("code_object_uuid", "kernel_uuid"),
+        UniqueConstraint("code_object_uuid", "code_object_offset"),
     )
 
-    instruction_uuid = Column(Integer, primary_key=True)
+    kernel_symbol_uuid = Column(Integer, primary_key=True)
     code_object_uuid = Column(
         Integer,
         ForeignKey(f"{PREFIX}code_object_store.code_object_uuid"),
         nullable=False,
     )
-    # Attributed per-sample to its dispatch's kernel via dispatch correlation.
     kernel_uuid = Column(
         Integer, ForeignKey(f"{PREFIX}kernel.kernel_uuid"), nullable=False
     )
+    # Null for a code object whose ISA was skipped for want of a load_base.
+    code_object_offset = Column(Integer, nullable=True)
+
+    # Symbol belongs to one code object
+    code_object_store = relationship("CodeObjectStore", back_populates="kernel_symbols")
+    # Symbol is one compilation of one kernel
+    kernel = relationship("Kernel", back_populates="kernel_symbols")
+    # One symbol owns many instruction lines
+    instruction_lines = relationship("InstructionLine", back_populates="kernel_symbol")
+
+
+class InstructionTypeLookup(Base):
+    __tablename__ = f"{PREFIX}instruction_type_lookup"
+
+    instruction_type_lookup_uuid = Column(Integer, primary_key=True)
+    # Deduplicated: one row per distinct static instruction-type string.
+    text = Column(String, unique=True)
+
+    instruction_lines = relationship(
+        "InstructionLine", back_populates="instruction_type_lookup"
+    )
+
+
+class InstructionLine(Base):
+    __tablename__ = f"{PREFIX}instruction_line"
+    # One row per sampled or disassembled offset within a symbol.
+    __table_args__ = (UniqueConstraint("kernel_symbol_uuid", "code_object_offset"),)
+
+    instruction_uuid = Column(Integer, primary_key=True)
+    kernel_symbol_uuid = Column(
+        Integer,
+        ForeignKey(f"{PREFIX}kernel_symbol.kernel_symbol_uuid"),
+        nullable=False,
+    )
+    # The execution pipeline that runs the instruction at this offset (VALU /
+    # MATRIX / SCALAR / ...), one value per line. Distinct from
+    # InstructionSample, which counts the issue state seen at each sample.
+    instruction_type_uuid = Column(
+        Integer,
+        ForeignKey(f"{PREFIX}instruction_type_lookup.instruction_type_lookup_uuid"),
+        nullable=True,
+    )
     code_object_offset = Column(Integer)
-    comment = Column(Text)
     instruction = Column(Text)
 
-    # Instruction line belongs to one code object
-    code_object_store = relationship(
-        "CodeObjectStore", back_populates="instruction_lines"
+    # Instruction line belongs to one kernel symbol
+    kernel_symbol = relationship("KernelSymbol", back_populates="instruction_lines")
+    # Instruction line has at most one static instruction type
+    instruction_type_lookup = relationship(
+        "InstructionTypeLookup", back_populates="instruction_lines"
     )
-    # Instruction line is attributed to one kernel
-    kernel = relationship("Kernel", back_populates="instruction_lines")
     # An instruction line has at most one sampled state
     pc_sample_state = relationship(
         "PCSampleState", back_populates="instruction_line", uselist=False
     )
+    # An instruction line has an inline stack of source lines, innermost first
+    source_lines = relationship(
+        "InstructionSourceLine",
+        back_populates="instruction_line",
+        order_by="InstructionSourceLine.frame_index",
+    )
 
 
-class PCSampleState(Base):
-    __tablename__ = f"{PREFIX}pc_sample_state"
+class SourceFile(Base):
+    """One source file a workload's instructions came from.
 
-    pc_sample_state_uuid = Column(Integer, primary_key=True)
+    file_path is the absolute path on the capture host, which is also where the
+    file sits under the workload's source snapshot.
+    """
+
+    __tablename__ = f"{PREFIX}source_file"
+    # Two workloads can each hold a different a.cpp.
+    __table_args__ = (UniqueConstraint("workload_id", "file_path"),)
+
+    source_file_uuid = Column(Integer, primary_key=True)
+    workload_id = Column(
+        Integer, ForeignKey(f"{PREFIX}workload.workload_id"), nullable=False
+    )
+    file_path = Column(Text)
+    # Null when the file is absent from the workload's source snapshot.
+    md5_checksum = Column(String, nullable=True)
+
+    # Source file belongs to one workload
+    workload = relationship("Workload", back_populates="source_files")
+    # Source file owns many source lines
+    source_lines = relationship("SourceLine", back_populates="source_file")
+
+
+class SourceLine(Base):
+    """One line of a source file, whether or not an instruction points at it.
+
+    A null line_number is a line the compiler could not attribute. SQLite
+    treats nulls in a unique constraint as distinct, so analysis_db keeps that
+    row unique, not the database.
+    """
+
+    __tablename__ = f"{PREFIX}source_line"
+    __table_args__ = (UniqueConstraint("source_file_uuid", "line_number"),)
+
+    source_line_uuid = Column(Integer, primary_key=True)
+    source_file_uuid = Column(
+        Integer, ForeignKey(f"{PREFIX}source_file.source_file_uuid"), nullable=False
+    )
+    line_number = Column(Integer, nullable=True)
+    # Null when the line is unknown or past the end of the snapshot copy.
+    content = Column(Text, nullable=True)
+
+    # Line belongs to one source file
+    source_file = relationship("SourceFile", back_populates="source_lines")
+    # Line can be referenced by many instructions
+    instruction_source_lines = relationship(
+        "InstructionSourceLine", back_populates="source_line"
+    )
+    # Source line has at most one sample state
+    pc_sample_state = relationship(
+        "PCSampleState", back_populates="source_line", uselist=False
+    )
+
+
+class InstructionSourceLine(Base):
+    """One frame of an instruction's inline stack.
+
+    frame_index 0 is the line where the code was written; the highest index is
+    the line in the kernel the compiler charged it to. The ordinal belongs here
+    because one inlined line can have several call sites.
+    """
+
+    __tablename__ = f"{PREFIX}instruction_source_line"
+    __table_args__ = (UniqueConstraint("instruction_uuid", "frame_index"),)
+
+    instruction_source_line_uuid = Column(Integer, primary_key=True)
     instruction_uuid = Column(
         Integer,
         ForeignKey(f"{PREFIX}instruction_line.instruction_uuid"),
         nullable=False,
     )
+    source_line_uuid = Column(
+        Integer, ForeignKey(f"{PREFIX}source_line.source_line_uuid"), nullable=False
+    )
+    frame_index = Column(Integer)
+
+    # Frame belongs to one instruction line
+    instruction_line = relationship("InstructionLine", back_populates="source_lines")
+    # Frame points at one source line
+    source_line = relationship("SourceLine", back_populates="instruction_source_lines")
+
+
+class PCSampleState(Base):
+    """Holds the PC sampling counts of one instruction line or one source line.
+
+    The counts of a source line are the sums over all instructions whose inline
+    stack includes that source line.
+    """
+
+    __tablename__ = f"{PREFIX}pc_sample_state"
+    __table_args__ = (
+        CheckConstraint(
+            "(instruction_uuid IS NULL) != (source_line_uuid IS NULL)",
+            name="pc_sample_state_one_owner",
+        ),
+    )
+
+    pc_sample_state_uuid = Column(Integer, primary_key=True)
+    instruction_uuid = Column(
+        Integer,
+        ForeignKey(f"{PREFIX}instruction_line.instruction_uuid"),
+        nullable=True,
+    )
+    source_line_uuid = Column(
+        Integer,
+        ForeignKey(f"{PREFIX}source_line.source_line_uuid"),
+        nullable=True,
+    )
     total_count = Column(Integer)
     issue_count = Column(Integer, nullable=True)
     stall_count = Column(Integer, nullable=True)
+    active_thread_percent = Column(Float, nullable=True)
+    wave_occupancy_percent = Column(Float, nullable=True)
+    # TODO: populate from record.dispatch_id, resolved to its dispatch row.
+    # Blocked: this table aggregates samples grouped by
+    # (code_object_id, code_object_offset, kernel_id), a key that spans
+    # dispatches, so no single dispatch describes a row. Meaningful only once
+    # dispatch joins that group key, which multiplies row count by
+    # dispatches-per-kernel. Until then this stays null and never resolves.
+    dispatch_uuid = Column(
+        Integer, ForeignKey(f"{PREFIX}dispatch.dispatch_uuid"), nullable=True
+    )
 
-    # State belongs to one instruction line
+    # State belongs to one instruction line or one source line
     instruction_line = relationship("InstructionLine", back_populates="pc_sample_state")
+    source_line = relationship("SourceLine", back_populates="pc_sample_state")
     # State has many stall-reason counts
     stall_reasons = relationship(
         "PCSampleStallReason", back_populates="pc_sample_state"
     )
-    # State has many instruction-sample-type counts
+    # State has many issue-state counts
     instruction_samples = relationship(
         "InstructionSample", back_populates="pc_sample_state"
     )
@@ -279,7 +449,7 @@ class InstructionSampleLookup(Base):
     __tablename__ = f"{PREFIX}instruction_sample_lookup"
 
     instruction_sample_lookup_uuid = Column(Integer, primary_key=True)
-    # Deduplicated: one row per distinct instruction-type string.
+    # Deduplicated: one row per distinct issue-state string.
     text = Column(String, unique=True)
 
     instruction_samples = relationship(
@@ -288,6 +458,15 @@ class InstructionSampleLookup(Base):
 
 
 class InstructionSample(Base):
+    """Per-sample issue state, counted across the samples at one offset.
+
+    Holds the issue state seen each cycle a sample landed, so one offset
+    accumulates several rows: NO_INST, BRANCH_TAKEN vs BRANCH_NOT_TAKEN, and
+    DUAL_VALU vs VALU all vary sample to sample for one static instruction.
+    For that static instruction's own class see
+    InstructionLine.instruction_type_uuid.
+    """
+
     __tablename__ = f"{PREFIX}instruction_sample"
 
     instruction_sample_uuid = Column(Integer, primary_key=True)
@@ -352,28 +531,6 @@ class WorkloadMetricValue(Base):
     workload = relationship("Workload", back_populates="workload_metric_values")
 
 
-class WorkloadRooflineData(Base):
-    __tablename__ = f"{PREFIX}workload_roofline_data"
-
-    roofline_uuid = Column(Integer, primary_key=True)
-    # One roofline data point per workload.
-    workload_id = Column(
-        Integer,
-        ForeignKey(f"{PREFIX}workload.workload_id"),
-        nullable=False,
-        unique=True,
-    )
-    total_flops = Column(Float)
-    l0_cache_data = Column(Float)
-    l1_cache_data = Column(Float)
-    l2_cache_data = Column(Float)
-    hbm_cache_data = Column(Float)
-    lds_cache_data = Column(Float)
-
-    # Relationships
-    workload = relationship("Workload", back_populates="workload_roofline_data_points")
-
-
 class Metadata(Base):
     __tablename__ = f"{PREFIX}metadata"
 
@@ -381,6 +538,36 @@ class Metadata(Base):
     compute_version = Column(String)
     git_version = Column(String)
     schema_version = Column(String)
+
+
+def per_kernel_isa_file_key_columns() -> list[Any]:
+    """Return the columns naming the file a per-kernel ISA row is written to.
+
+    The exporter splits each row at the end of this list, so the select and the
+    split have to agree. Building the select from this one list is what keeps
+    them in step.
+    """
+    return [
+        Workload.name.label("workload_name"),
+        Workload.sub_name.label("workload_sub_name"),
+        Kernel.kernel_uuid.label("kernel_uuid"),
+        Kernel.short_name.label("kernel_short_name"),
+        CodeObjectStore.code_object_id.label("code_object_id"),
+        CodeObjectStore.pid.label("pid"),
+    ]
+
+
+def per_source_line_file_key_columns() -> List[Any]:
+    """Return the columns that name the file a per-source-line row is written to.
+
+    The per-source-line query selects these columns first, and the exporter
+    uses their count to split them off each row.
+    """
+    return [
+        Workload.name.label("workload_name"),
+        Workload.sub_name.label("workload_sub_name"),
+        SourceFile.file_path.label("file_path"),
+    ]
 
 
 class Database:
@@ -475,7 +662,7 @@ class Database:
             for view_name, sql in cls.get_view_sql().items():
                 cursor = raw_conn.execute(sql)
                 csv_path = csv_dir / f"{view_name}.csv"
-                with csv_path.open("w", newline="") as f:
+                with csv_path.open("w", newline="", encoding="utf-8") as f:
                     writer = csv.writer(f)
                     writer.writerow([column[0] for column in cursor.description])
                     writer.writerows(cursor)
@@ -483,6 +670,66 @@ class Database:
         finally:
             cls._session.close()
             cls._session = None
+
+    @classmethod
+    def get_stall_reasons_by_workload(cls) -> dict[int, list[str]]:
+        """Return the stall reasons each workload's samples actually carry.
+
+        A host_trap workload records none, so it maps to an empty list and its
+        exports carry no stall columns.
+        """
+        stall_reasons_by_workload: dict[int, list[str]] = {}
+        for workload_id, reason in cls._session.execute(
+            cls._stall_reasons_by_workload_statement()
+        ):
+            stall_reasons_by_workload.setdefault(workload_id, []).append(reason)
+        return {
+            workload_id: sorted(reasons)
+            for workload_id, reasons in stall_reasons_by_workload.items()
+        }
+
+    @classmethod
+    def stream_per_kernel_isa_rows(
+        cls,
+        workload_id: int,
+        stall_reasons: list[str],
+    ) -> Iterator[tuple[Any, ...]]:
+        """Yield one workload's instruction lines, grouped file by file.
+
+        Rows arrive in the order the exporter writes them, through the raw
+        sqlite3 cursor so the full result set is never held in memory.
+        """
+        yield from cls._stream_rows(
+            cls._per_kernel_isa_statement(workload_id, stall_reasons)
+        )
+
+    @classmethod
+    def stream_per_source_line_rows(
+        cls,
+        workload_id: int,
+        stall_reasons: List[str],
+    ) -> Iterator[Tuple[Any, ...]]:
+        """Yield every source line of one workload's captured source files.
+
+        The rows arrive in the order the exporter writes them, through the raw
+        sqlite3 cursor, so the full result set is never held in memory.
+        """
+        yield from cls._stream_rows(
+            cls._per_source_line_statement(workload_id, stall_reasons)
+        )
+
+    @classmethod
+    def _stream_rows(cls, statement: Select[Any]) -> Iterator[Tuple[Any, ...]]:
+        """Yield the rows of a statement through the raw sqlite3 cursor."""
+        raw_conn = cls._session.connection().connection
+        yield from raw_conn.execute(
+            str(
+                statement.compile(
+                    dialect=sqlite.dialect(),
+                    compile_kwargs={"literal_binds": True},
+                )
+            )
+        )
 
     @classmethod
     def create_views(cls) -> None:
@@ -509,6 +756,273 @@ class Database:
         if isinstance(value, float) and not math.isfinite(value):
             return None
         return value
+
+    @staticmethod
+    def _source_chain_subquery() -> Subquery:
+        """Join each instruction's frames back into one source string.
+
+        SQLite gained group_concat's ORDER BY in 3.44, so the frames are
+        joined by walking frame_index one step at a time instead.
+        """
+        frames = (
+            select(
+                InstructionSourceLine.instruction_uuid.label("instruction_uuid"),
+                InstructionSourceLine.frame_index.label("frame_index"),
+                (
+                    SourceFile.file_path
+                    + ":"
+                    + func.coalesce(
+                        cast(SourceLine.line_number, Text), UNKNOWN_SOURCE_LINE_TOKEN
+                    )
+                ).label("frame"),
+            )
+            .select_from(InstructionSourceLine)
+            .join(
+                SourceLine,
+                InstructionSourceLine.source_line_uuid == SourceLine.source_line_uuid,
+            )
+            .join(
+                SourceFile,
+                SourceLine.source_file_uuid == SourceFile.source_file_uuid,
+            )
+        ).subquery("source_frames")
+
+        chain = (
+            select(
+                frames.c.instruction_uuid,
+                frames.c.frame_index,
+                frames.c.frame.label("source"),
+            )
+            .where(frames.c.frame_index == 0)
+            .cte("source_chain", recursive=True)
+        )
+        chain = chain.union_all(
+            select(
+                frames.c.instruction_uuid,
+                frames.c.frame_index,
+                chain.c.source + SOURCE_FRAME_SEPARATOR + frames.c.frame,
+            ).where(
+                (frames.c.instruction_uuid == chain.c.instruction_uuid)
+                & (frames.c.frame_index == chain.c.frame_index + 1)
+            )
+        )
+
+        # Every step of the walk stays in the result, so keep the step that
+        # has no next frame.
+        return (
+            select(chain.c.instruction_uuid, chain.c.source).where(
+                ~select(InstructionSourceLine.instruction_source_line_uuid)
+                .where(
+                    (InstructionSourceLine.instruction_uuid == chain.c.instruction_uuid)
+                    & (InstructionSourceLine.frame_index == chain.c.frame_index + 1)
+                )
+                .exists()
+            )
+        ).subquery("source_chain")
+
+    @staticmethod
+    def _stall_reasons_by_workload_statement() -> Select[Any]:
+        """Select the distinct (workload, stall reason) pairs that were stored."""
+        return (
+            select(
+                CodeObjectStore.workload_id,
+                PCSampleStallReasonLookup.text,
+            )
+            .select_from(PCSampleStallReason)
+            .join(
+                PCSampleStallReasonLookup,
+                PCSampleStallReason.pc_sample_stall_reason_lookup_uuid
+                == PCSampleStallReasonLookup.pc_sample_stall_reason_lookup_uuid,
+            )
+            .join(
+                PCSampleState,
+                PCSampleStallReason.pc_sample_state_uuid
+                == PCSampleState.pc_sample_state_uuid,
+            )
+            .join(
+                InstructionLine,
+                PCSampleState.instruction_uuid == InstructionLine.instruction_uuid,
+            )
+            .join(
+                KernelSymbol,
+                InstructionLine.kernel_symbol_uuid == KernelSymbol.kernel_symbol_uuid,
+            )
+            .join(
+                CodeObjectStore,
+                KernelSymbol.code_object_uuid == CodeObjectStore.code_object_uuid,
+            )
+            .distinct()
+        )
+
+    @staticmethod
+    def _per_kernel_isa_statement(
+        workload_id: int,
+        stall_reasons: list[str],
+    ) -> Select[Any]:
+        """Select one workload's instruction lines with their sample counts.
+
+        The first columns name the file each row belongs in, and the instruction
+        uuid follows them. The rest are the row as it is written, in CSV column
+        order. Every disassembled line is returned, so an unsampled line arrives
+        with empty counts.
+        """
+        source_chain_subquery = Database._source_chain_subquery()
+
+        return (
+            select(
+                *per_kernel_isa_file_key_columns(),
+                InstructionLine.instruction_uuid.label("instruction_uuid"),
+                InstructionLine.code_object_offset.label("offset"),
+                InstructionLine.instruction,
+                InstructionTypeLookup.text.label("instruction_type"),
+                PCSampleState.total_count.label("count"),
+                PCSampleState.issue_count,
+                PCSampleState.stall_count,
+                PCSampleState.wave_occupancy_percent,
+                PCSampleState.active_thread_percent,
+                *Database._stall_reason_columns(stall_reasons),
+                source_chain_subquery.c.source.label("source"),
+                CodeObjectStore.code_object_id.label("code_object_id_cell"),
+                CodeObjectStore.pid.label("pid_cell"),
+            )
+            .select_from(InstructionLine)
+            .join(
+                KernelSymbol,
+                InstructionLine.kernel_symbol_uuid == KernelSymbol.kernel_symbol_uuid,
+            )
+            .join(
+                CodeObjectStore,
+                KernelSymbol.code_object_uuid == CodeObjectStore.code_object_uuid,
+            )
+            .join(Kernel, KernelSymbol.kernel_uuid == Kernel.kernel_uuid)
+            .join(Workload, CodeObjectStore.workload_id == Workload.workload_id)
+            # An instruction with no pipeline leaves the type empty.
+            .outerjoin(
+                InstructionTypeLookup,
+                InstructionLine.instruction_type_uuid
+                == InstructionTypeLookup.instruction_type_lookup_uuid,
+            )
+            # A line no sample landed on leaves the counts empty.
+            .outerjoin(
+                PCSampleState,
+                InstructionLine.instruction_uuid == PCSampleState.instruction_uuid,
+            )
+            .outerjoin(
+                PCSampleStallReason,
+                PCSampleState.pc_sample_state_uuid
+                == PCSampleStallReason.pc_sample_state_uuid,
+            )
+            .outerjoin(
+                PCSampleStallReasonLookup,
+                PCSampleStallReason.pc_sample_stall_reason_lookup_uuid
+                == PCSampleStallReasonLookup.pc_sample_stall_reason_lookup_uuid,
+            )
+            .outerjoin(
+                source_chain_subquery,
+                InstructionLine.instruction_uuid
+                == source_chain_subquery.c.instruction_uuid,
+            )
+            .where(CodeObjectStore.workload_id == workload_id)
+            # One row per line: the stall-reason join multiplies them otherwise.
+            .group_by(InstructionLine.instruction_uuid)
+            .order_by(
+                Kernel.kernel_uuid,
+                CodeObjectStore.code_object_id,
+                CodeObjectStore.pid,
+                InstructionLine.code_object_offset,
+            )
+        )
+
+    @staticmethod
+    def _per_source_line_statement(
+        workload_id: int,
+        stall_reasons: List[str],
+    ) -> Select[Any]:
+        """Select every source line of one workload's captured source files.
+
+        Each source line has its sample state and the uuids of the instructions
+        whose inline stack includes that source line. This includes the "?"
+        row of each file, which holds the instructions without a source line
+        number.
+        """
+        return (
+            select(
+                *per_source_line_file_key_columns(),
+                SourceLine.line_number,
+                SourceLine.content,
+                PCSampleState.total_count.label("count"),
+                PCSampleState.issue_count,
+                PCSampleState.stall_count,
+                PCSampleState.wave_occupancy_percent,
+                PCSampleState.active_thread_percent,
+                *Database._stall_reason_columns(stall_reasons),
+                # DISTINCT removes the repeats that the stall-reason join adds.
+                # A source line without instructions gets an empty string.
+                func.coalesce(
+                    func.group_concat(distinct(InstructionSourceLine.instruction_uuid)),
+                    "",
+                ).label("instruction_uuids"),
+            )
+            .select_from(SourceLine)
+            .join(
+                SourceFile,
+                SourceLine.source_file_uuid == SourceFile.source_file_uuid,
+            )
+            .join(Workload, SourceFile.workload_id == Workload.workload_id)
+            # A source line without samples has empty counts.
+            .outerjoin(
+                PCSampleState,
+                SourceLine.source_line_uuid == PCSampleState.source_line_uuid,
+            )
+            .outerjoin(
+                PCSampleStallReason,
+                PCSampleState.pc_sample_state_uuid
+                == PCSampleStallReason.pc_sample_state_uuid,
+            )
+            .outerjoin(
+                PCSampleStallReasonLookup,
+                PCSampleStallReason.pc_sample_stall_reason_lookup_uuid
+                == PCSampleStallReasonLookup.pc_sample_stall_reason_lookup_uuid,
+            )
+            .outerjoin(
+                InstructionSourceLine,
+                SourceLine.source_line_uuid == InstructionSourceLine.source_line_uuid,
+            )
+            .where(SourceFile.workload_id == workload_id)
+            # Only captured files are exported.
+            .where(SourceFile.md5_checksum.is_not(None))
+            # The stall-reason and instruction joins add rows, so group them
+            # back into one row per source line.
+            .group_by(SourceLine.source_line_uuid)
+            # SQLite sorts NULL first, so the "?" row of a file comes first.
+            .order_by(SourceFile.file_path, SourceLine.line_number)
+        )
+
+    @staticmethod
+    def _stall_reason_columns(stall_reasons: List[str]) -> List[Any]:
+        """Return one column per stall reason, holding its count."""
+        # Joining stall reasons gives one row per reason; MAX picks the count of
+        # the matching reason.
+        return [
+            func.max(
+                case((
+                    PCSampleStallReasonLookup.text == stall_reason,
+                    PCSampleStallReason.count,
+                ))
+            ).label(stall_reason)
+            for stall_reason in stall_reasons
+        ]
+
+    @staticmethod
+    def _sample_weighted_average(percent: ColumnElement[Any]) -> ColumnElement[Any]:
+        """Average a percentage over sample states, weighted by sample count.
+
+        A state without the percentage adds no weight. The average is null when
+        no state has it.
+        """
+        return func.sum(percent * PCSampleState.total_count) / func.sum(
+            case((percent.is_not(None), PCSampleState.total_count))
+        )
 
     @staticmethod
     def _compile_view_sql() -> dict[str, str]:
@@ -546,20 +1060,50 @@ class Database:
             .group_by(median_sort_subquery.c.kernel_uuid)
         ).subquery()
 
-        stall_reason_json_subquery = (
+        # Each kernel's count of each stall reason, summed over its instructions.
+        # The join through InstructionLine leaves out the source line states.
+        kernel_stall_reason_subquery = (
             select(
-                PCSampleStallReason.pc_sample_state_uuid,
-                func.json_group_object(
-                    PCSampleStallReasonLookup.text, PCSampleStallReason.count
-                ).label("stall_reason"),
+                KernelSymbol.kernel_uuid,
+                PCSampleStallReason.pc_sample_stall_reason_lookup_uuid,
+                func.sum(PCSampleStallReason.count).label("count"),
             )
             .select_from(PCSampleStallReason)
             .join(
+                PCSampleState,
+                PCSampleStallReason.pc_sample_state_uuid
+                == PCSampleState.pc_sample_state_uuid,
+            )
+            .join(
+                InstructionLine,
+                PCSampleState.instruction_uuid == InstructionLine.instruction_uuid,
+            )
+            .join(
+                KernelSymbol,
+                InstructionLine.kernel_symbol_uuid == KernelSymbol.kernel_symbol_uuid,
+            )
+            .group_by(
+                KernelSymbol.kernel_uuid,
+                PCSampleStallReason.pc_sample_stall_reason_lookup_uuid,
+            )
+        ).subquery()
+
+        # Each kernel's stall reason counts as one JSON object.
+        stall_reason_json_subquery = (
+            select(
+                kernel_stall_reason_subquery.c.kernel_uuid,
+                func.json_group_object(
+                    PCSampleStallReasonLookup.text,
+                    kernel_stall_reason_subquery.c.count,
+                ).label("stall_reason"),
+            )
+            .select_from(kernel_stall_reason_subquery)
+            .join(
                 PCSampleStallReasonLookup,
-                PCSampleStallReason.pc_sample_stall_reason_lookup_uuid
+                kernel_stall_reason_subquery.c.pc_sample_stall_reason_lookup_uuid
                 == PCSampleStallReasonLookup.pc_sample_stall_reason_lookup_uuid,
             )
-            .group_by(PCSampleStallReason.pc_sample_state_uuid)
+            .group_by(kernel_stall_reason_subquery.c.kernel_uuid)
         ).subquery()
 
         definitions: dict[str, Select[Any]] = {
@@ -568,6 +1112,7 @@ class Database:
                 Kernel.workload_id.label("workload_id"),
                 Workload.name.label("workload_name"),
                 Kernel.kernel_name,
+                Kernel.short_name,
                 func.count(Dispatch.dispatch_id).label("dispatch_count"),
                 func.sum(Dispatch.end_timestamp - Dispatch.start_timestamp).label(
                     "duration_ns_sum"
@@ -595,6 +1140,7 @@ class Database:
                 Kernel.workload_id,
                 Workload.name,
                 Kernel.kernel_name,
+                Kernel.short_name,
             ),
             "kernel_metric": select(
                 Workload.workload_id.label("workload_id"),
@@ -639,16 +1185,21 @@ class Database:
                 WorkloadMetricValue,
                 MetricDefinition.metric_uuid == WorkloadMetricValue.metric_uuid,
             ),
-            "pc_sampling": select(
-                CodeObjectStore.workload_id.label("workload_id"),
+            # One row per sampled kernel. A kernel is keyed by its name, so the
+            # instructions of all its processes and code objects merge into it.
+            "pc_sampling_summary": select(
+                Kernel.workload_id.label("workload_id"),
                 Kernel.kernel_uuid.label("kernel_uuid"),
                 Kernel.kernel_name,
-                InstructionLine.code_object_offset.label("offset"),
-                InstructionLine.instruction,
-                InstructionLine.comment.label("source"),
-                PCSampleState.total_count.label("count"),
-                PCSampleState.issue_count.label("count_issue"),
-                PCSampleState.stall_count.label("count_stall"),
+                func.sum(PCSampleState.total_count).label("count"),
+                func.sum(PCSampleState.issue_count).label("issue_count"),
+                func.sum(PCSampleState.stall_count).label("stall_count"),
+                Database._sample_weighted_average(
+                    PCSampleState.wave_occupancy_percent
+                ).label("wave_occupancy_percent"),
+                Database._sample_weighted_average(
+                    PCSampleState.active_thread_percent
+                ).label("active_thread_percent"),
                 stall_reason_json_subquery.c.stall_reason,
             )
             .select_from(PCSampleState)
@@ -657,15 +1208,27 @@ class Database:
                 PCSampleState.instruction_uuid == InstructionLine.instruction_uuid,
             )
             .join(
-                CodeObjectStore,
-                InstructionLine.code_object_uuid == CodeObjectStore.code_object_uuid,
+                KernelSymbol,
+                InstructionLine.kernel_symbol_uuid == KernelSymbol.kernel_symbol_uuid,
             )
-            .join(Kernel, InstructionLine.kernel_uuid == Kernel.kernel_uuid)
+            .join(Kernel, KernelSymbol.kernel_uuid == Kernel.kernel_uuid)
             # host_trap samples have no stall reasons, so the subquery is empty.
             .outerjoin(
                 stall_reason_json_subquery,
-                PCSampleState.pc_sample_state_uuid
-                == stall_reason_json_subquery.c.pc_sample_state_uuid,
+                Kernel.kernel_uuid == stall_reason_json_subquery.c.kernel_uuid,
+            )
+            .group_by(Kernel.kernel_uuid),
+            "source_lines": select(
+                SourceFile.workload_id.label("workload_id"),
+                SourceFile.file_path,
+                SourceFile.md5_checksum,
+                SourceLine.line_number,
+                SourceLine.content,
+            )
+            .select_from(SourceLine)
+            .join(
+                SourceFile,
+                SourceLine.source_file_uuid == SourceFile.source_file_uuid,
             ),
         }
 

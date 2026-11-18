@@ -80,6 +80,9 @@ create_queue_map(size_t count)
 
     auto agents = hsa::get_queue_controller()->get_supported_agents();
 
+    // prevent segfault
+    if(agents.empty()) return ret;
+
     for(size_t i = 0; i < count; i++)
     {
         auto& agent_cache = agents.begin()->second;
@@ -181,12 +184,23 @@ test_init()
     ASSERT_TRUE(hsa::get_queue_controller() != nullptr);
     hsa::get_queue_controller()->init(get_api_table(), get_ext_table());
 }
+
+// Every test below needs a real HSA queue on a GPU. rocprofiler publishes no GPU
+// agent when the platform topology is unavailable (e.g. WSL without a librocdxg
+// exporting the topology ABI), leaving nothing to create a queue on.
+bool
+has_supported_agents()
+{
+    const auto* controller = hsa::get_queue_controller();
+    return controller != nullptr && !controller->get_supported_agents().empty();
+}
 }  // namespace
 
 TEST(hsa_barrier, no_block_single)
 {
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     test_init();
+    if(!has_supported_agents()) GTEST_SKIP() << "requires a gpu agent";
 
     registration::init_logging();
     registration::set_init_status(-1);
@@ -224,6 +238,7 @@ TEST(hsa_barrier, no_block_multi)
 {
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     test_init();
+    if(!has_supported_agents()) GTEST_SKIP() << "requires a gpu agent";
 
     registration::init_logging();
     registration::set_init_status(-1);
@@ -263,6 +278,7 @@ TEST(hsa_barrier, block_single)
     std::vector<Queue*> pkt_waiting;
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     test_init();
+    if(!has_supported_agents()) GTEST_SKIP() << "requires a gpu agent";
 
     registration::init_logging();
     registration::set_init_status(-1);
@@ -323,6 +339,7 @@ TEST(hsa_barrier, block_multi)
     std::vector<Queue*> pkt_waiting;
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     test_init();
+    if(!has_supported_agents()) GTEST_SKIP() << "requires a gpu agent";
 
     registration::init_logging();
     registration::set_init_status(-1);
@@ -397,6 +414,7 @@ TEST(hsa_barrier, safe_to_destroy_gated_on_transition_drain)
 {
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     test_init();
+    if(!has_supported_agents()) GTEST_SKIP() << "requires a gpu agent";
 
     registration::init_logging();
     registration::set_init_status(-1);
@@ -443,6 +461,7 @@ TEST(hsa_barrier, safe_to_destroy_after_enqueued_queue_removed)
 {
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     test_init();
+    if(!has_supported_agents()) GTEST_SKIP() << "requires a gpu agent";
 
     registration::init_logging();
     registration::set_init_status(-1);

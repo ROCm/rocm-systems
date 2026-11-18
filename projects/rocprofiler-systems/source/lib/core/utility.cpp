@@ -4,13 +4,16 @@
 #include "utility.hpp"
 
 #include "common/delimit.hpp"
+#include "common/string_utility.hpp"
 #include "logger/debug.hpp"
 
-#include <cstdint>
+#include <fmt/format.h>
 
-namespace rocprofsys
-{
-namespace utility
+#include <cstdint>
+#include <stdexcept>
+#include <string>
+
+namespace rocprofsys::utility
 {
 namespace
 {
@@ -39,16 +42,18 @@ template <typename Tp, typename ContainerT, typename Up>
 ContainerT
 parse_numeric_range(std::string _input_string, const std::string& _label, Up _incr)
 {
-    auto _get_value = [](const std::string& _inp) {
-        std::stringstream iss{ _inp };
-        auto              var = Tp{};
-        iss >> var;
-        return var;
+    auto const _get_value = [&](const std::string& _inp) {
+        auto const _parsed = utility::string::safe_from_chars<Tp>(_inp);
+        if(_parsed.is_error())
+        {
+            throw std::invalid_argument(
+                fmt::format("Invalid {} value '{}': {}", _label, _inp, _parsed.error()));
+        }
+        return _parsed.value();
     };
 
-    for(auto& itr : _input_string)
-        itr = tolower(itr);
-    auto _result = ContainerT{};
+    _input_string = utility::string::to_lower(_input_string);
+    auto result   = ContainerT{};
     for(auto _v : rocprofsys::delimit(_input_string, ",; \t\n\r"))
     {
         if(_v.find_first_not_of("0123456789-:") != std::string::npos)
@@ -61,12 +66,23 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
             continue;
         }
 
-        auto _incr_v   = _incr;
-        auto _incr_pos = _v.find(':');
+        auto       _incr_v   = _incr;
+        auto const _incr_pos = _v.find(':');
         if(_incr_pos != std::string::npos)
         {
-            auto _incr_str = _v.substr(_incr_pos + 1);
-            if(!_incr_str.empty()) _incr_v = static_cast<Up>(std::stoull(_incr_str));
+            auto const _incr_str = _v.substr(_incr_pos + 1);
+            if(!_incr_str.empty())
+            {
+                auto const _parsed =
+                    utility::string::safe_from_chars<std::uint64_t>(_incr_str);
+                if(_parsed.is_error())
+                {
+                    throw std::invalid_argument(
+                        fmt::format("Invalid {} increment '{}': {}", _label, _incr_str,
+                                    _parsed.error()));
+                }
+                _incr_v = static_cast<Up>(_parsed.value());
+            }
             _v = _v.substr(0, _incr_pos);
         }
 
@@ -105,18 +121,25 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
                             _label, _v, _v);
                 continue;
             }
+            // A non-positive increment never reaches _vN and would loop forever.
+            if(_incr_v <= 0)
+            {
+                throw std::invalid_argument(fmt::format(
+                    "Invalid {} range specification: {}. Increment must be positive",
+                    _label, _v));
+            }
             do
             {
-                emplace(_result, _vn);
+                emplace(result, _vn);
                 _vn += _incr_v;
             } while(_vn <= _vN);
         }
         else
         {
-            emplace(_result, std::stoll(_v));
+            emplace(result, _get_value(_v));
         }
     }
-    return _result;
+    return result;
 }
 
 template std::set<std::int64_t>
@@ -130,19 +153,4 @@ parse_numeric_range<std::int64_t, std::unordered_set<std::int64_t>>(std::string,
                                                                     const std::string&,
                                                                     long);
 
-void
-trim_str(std::string& str)
-{
-    const auto start = str.find_first_not_of(" \n\r\t\f\v");
-    if(start == std::string::npos)
-    {
-        str.clear();
-        return;
-    }
-    str.erase(0, start);
-    const auto end = str.find_last_not_of(" \n\r\t\f\v");
-    str.erase(end + 1);
-}
-
-}  // namespace utility
-}  // namespace rocprofsys
+}  // namespace rocprofsys::utility

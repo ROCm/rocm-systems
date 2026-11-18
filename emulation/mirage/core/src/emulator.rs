@@ -1,40 +1,183 @@
+//! Emulator backends: the trait every GPU emulator integration
+//! implements, and the link-time registry they are discovered through.
+
 use serde::{Deserialize, Serialize};
 
 use crate::{
     common::{MaybeRef, SimpleMap},
     config::OptionDef,
+    discovery::RuntimeLocation,
     error::Result,
     exec::InjectionDef,
     plugin::PluginsDef,
     profile::ProfileDef,
-    session::{SessionHealth, SessionId},
+    session::{SessionContext, SessionHealth},
     topology::TopologyDef,
 };
 
+/// How faithfully the emulator models the device.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ExecMode {
+    /// Correct results, no timing model.
     #[default]
     Functional,
+    /// Model device timing as well as results.
     Clocked,
 }
 
+/// The canonical lowercase name of an emulator backend.
 pub type EmulatorKind = String;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// The emulator half of a profile: which backend, how it runs, and the
+/// system it emulates.
+///
+/// Additional fields are passed to the selected emulator's
+/// configuration, or refused by a backend that has none — see
+/// [`EmulatorDef::reject_extra`].
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct EmulatorDef {
-    /// which emulator backend to use, e.g. "rocjitsu"
+    /// Fields with no typed meaning to mirage, handed to the backend as
+    /// they were written. Deserialization never puts one of the field
+    /// names below in here; [`Serialize`] guarantees the same for a map
+    /// built in Rust, because a flattened map that shadows a typed
+    /// field would otherwise write a profile with duplicate JSON keys
+    /// that mirage could never read back.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+
+    /// Which emulator backend runs this profile, by its canonical
+    /// lowercase name.
     pub emulator: EmulatorKind,
 
-    /// plugins to use with the emulator, e.g. "rocjitsu" plugin for AMD GPU simulation
+    /// Which of the backend's plugins to enable, each with its argument
+    /// object. See [`PluginsDef`] for what an empty object means.
+    #[serde(default)]
     pub plugins: PluginsDef,
 
+    /// Functional or clocked emulation.
+    #[serde(default)]
     pub exec_mode: ExecMode,
 
-    /// extra options to configure the emulator, e.g. {"gpu_model": "cdna3"}
+    /// Backend-specific configuration overrides, e.g.
+    /// `{"gpu_model": "cdna3"}`.
+    #[serde(default)]
     pub options: SimpleMap,
 
-    /// system topology (rack/node/GPU layout + per-GPU agent).
+    /// System topology (rack/node/GPU layout plus the per-GPU agent).
     pub topology: MaybeRef<TopologyDef>,
+}
+
+impl EmulatorDef {
+    /// Refuse passthrough fields on behalf of a backend that does not
+    /// forward them.
+    ///
+    /// [`extra`](Self::extra) is a promise the *rocjitsu* backend keeps:
+    /// it merges these keys into the simulation config it synthesises,
+    /// so a profile can reach a rocjitsu setting mirage has no typed
+    /// field for. No other backend reads them. Since the map lives on
+    /// the shared `EmulatorDef`, dropping `deny_unknown_fields` to make
+    /// that promise possible also stopped every *other* backend
+    /// rejecting a key it will never act on — a misspelled or
+    /// unsupported field under a HotSwap or rocjitsu-dbt emulator would
+    /// parse, and the session would come up with the defaults it was
+    /// meant to change, silently.
+    ///
+    /// So a backend without a passthrough calls this from
+    /// [`EmulatorBackend::validate_profile`], which the CLI and the
+    /// daemon both run before a profile is written — the last point at
+    /// which the user is still looking at the document the key came
+    /// from.
+    ///
+    /// # Errors
+    ///
+    /// Names the offending keys and the backend that has no use for
+    /// them.
+    pub fn reject_extra(&self, backend: &str) -> std::result::Result<(), String> {
+        if self.extra.is_empty() {
+            return Ok(());
+        }
+        let keys = self
+            .extra
+            .keys()
+            .map(|key| format!("{key:?}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        Err(format!(
+            "emulator field(s) {keys} are not {backend} settings and {backend} has \
+             no configuration to pass them to; remove them, or correct the spelling \
+             of the mirage field that was meant"
+        ))
+    }
+
+    /// The agent every GPU in this system instantiates, when this
+    /// definition is resolved.
+    ///
+    /// `None` while either reference is still a name. Resolving one means
+    /// reading the on-disk stores, which is [`Self::resolve_refs`]'s job
+    /// and not something an accessor should do behind a caller's back —
+    /// an accessor that silently hit the filesystem would also silently
+    /// pick up an edit made after bring-up, which is the whole class of
+    /// bug a session snapshot exists to prevent.
+    #[must_use]
+    pub fn agent(&self) -> Option<&crate::agent::AgentDef> {
+        match &self.topology {
+            MaybeRef::Owned(topology) => match &topology.agent {
+                MaybeRef::Owned(agent) => Some(agent),
+                MaybeRef::Ref(_) => None,
+            },
+            MaybeRef::Ref(_) => None,
+        }
+    }
+
+    /// Follow every by-name reference in this definition, in place, so
+    /// that afterwards [`Self::agent`] answers.
+    ///
+    /// Done once, when a session is created, so the rest of that
+    /// session's life reads documents nothing can edit underneath it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a topology or agent reference names a
+    /// document that does not exist or does not parse.
+    pub fn resolve_refs(&mut self) -> Result<()> {
+        let mut topology = match &self.topology {
+            MaybeRef::Owned(topology) => topology.clone(),
+            MaybeRef::Ref(name) => crate::store::topology_get(name)?,
+        };
+        if let MaybeRef::Ref(name) = &topology.agent {
+            topology.agent = MaybeRef::Owned(crate::agent::store::get(name)?);
+        }
+        self.topology = MaybeRef::Owned(topology);
+        Ok(())
+    }
+}
+
+/// Written as `extra` with the typed fields laid over it.
+///
+/// Not derived: `#[serde(flatten)]` streams both halves, so an `extra`
+/// holding a typed field's name — `extra` is public, and the profile
+/// parser is the only thing that currently keeps one out — emits that
+/// key twice. `state::write_json` streams straight to the file, so the
+/// result is a profile on disk that fails to parse with `duplicate
+/// field`, and the user's only copy of it is unreadable. Building a
+/// `Value` first makes the typed field win instead.
+impl Serialize for EmulatorDef {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        let mut value = serde_json::Value::Object(self.extra.clone());
+        for (key, typed) in [
+            ("emulator", serde_json::to_value(&self.emulator)),
+            ("plugins", serde_json::to_value(&self.plugins)),
+            ("exec_mode", serde_json::to_value(&self.exec_mode)),
+            ("options", serde_json::to_value(&self.options)),
+            ("topology", serde_json::to_value(&self.topology)),
+        ] {
+            value[key] = typed.map_err(serde::ser::Error::custom)?;
+        }
+        value.serialize(serializer)
+    }
 }
 
 /// Whether the host's hardware/environment can actually run an
@@ -72,6 +215,50 @@ impl SupportStatus {
     }
 }
 
+/// The live state of a backend's runtime on this host: whether it is
+/// usable, and where it is — or, when it is not here, where mirage
+/// looked for it.
+///
+/// The two travel together because they come from one search. Locating a
+/// backend's library means stat'ing every candidate the discovery policy
+/// names, which for a backend that hunts for a build tree beside the
+/// binary is a hundred paths; asking "installed?" and "where?" as two
+/// questions would do that walk twice on the way to printing one line.
+///
+/// `installed` is not simply "the library exists": a backend may need
+/// more than one artifact co-located (HotSwap needs its intercept, a
+/// patched ROCR and COMGR in one directory), so it is reported
+/// separately rather than derived from `location`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeStatus {
+    /// `true` if this backend's runtime is present and usable here.
+    pub installed: bool,
+    /// Where the runtime library is, or where mirage looked.
+    pub location: RuntimeLocation,
+}
+
+impl RuntimeStatus {
+    /// A status for a backend whose install *is* just "the library was
+    /// located": installed exactly when the search found it.
+    #[must_use]
+    pub fn from_location(location: RuntimeLocation) -> Self {
+        Self {
+            installed: location.is_found(),
+            location,
+        }
+    }
+
+    /// A status for a backend that needs more than a located library to
+    /// count as installed, with `installed` decided by the backend.
+    #[must_use]
+    pub fn new(installed: bool, location: RuntimeLocation) -> Self {
+        Self {
+            installed,
+            location,
+        }
+    }
+}
+
 /// The static identity of an emulator backend: its name, version, a
 /// short human-readable blurb, and the schema of options it accepts.
 /// Live runtime status (installed / supported) is reported separately
@@ -87,7 +274,7 @@ pub struct EmulatorDescription {
 
 /// A backend integration mirage can drive to emulate a workload.
 ///
-/// Every emulator (the pass-through `noop`, `rocjitsu`, `hotswap`, …)
+/// Every emulator (`rocjitsu`, `rocjitsu-dbt`, `hotswap`, …)
 /// lives in its own crate and registers a single stateless
 /// implementation of this trait into the global registry via
 /// [`inventory`]. The core and control-plane crates never name a
@@ -97,28 +284,68 @@ pub struct EmulatorDescription {
 ///
 /// Implementations are stateless singletons (a unit struct is typical);
 /// any per-session state is resolved on demand from the on-disk session
-/// definition (see [`crate::session::resolve_profile`]).
-pub trait EmulatorBackend: Sync + Send {
+/// definition (see `mirage_supervisor::session::resolve_profile`).
+pub trait EmulatorBackend: Sync + Send + std::fmt::Debug {
     /// Returns a description of the emulator, including its name, version, and a brief description.
     fn description(&self) -> EmulatorDescription;
 
-    /// Bring the emulator up for the given profile. Returns a
-    /// human-readable reason on failure.
+    /// Bring the emulator up for the given profile.
+    ///
+    /// # Errors
+    ///
+    /// Returns a human-readable reason on failure.
     fn boot(&self, def: &ProfileDef) -> std::result::Result<(), String>;
 
     /// Schema for the options that this emulator supports. Empty when
     /// the emulator takes no options.
     fn options(&self) -> Vec<OptionDef>;
 
-    /// shuts down the emulator and releases any resources it holds.
-    fn shutdown(&self, session: &SessionId);
+    /// Shut the emulator down for a session and release any resources it
+    /// holds. Called exactly once, during session teardown, after every
+    /// workload process is gone.
+    fn shutdown(&self, ctx: &SessionContext);
 
     /// Validate that `def` can be used with this emulator before it is
-    /// persisted. Returns a human-readable reason on rejection.
+    /// persisted.
+    ///
+    /// # Errors
+    ///
+    /// Returns a human-readable reason on rejection.
     fn validate_profile(&self, def: &ProfileDef) -> std::result::Result<(), String>;
 
-    /// Returns true if the emulator is properly installed and can be used.
-    fn installed(&self) -> bool;
+    /// Whether this backend's runtime is installed *and* where it was
+    /// found, or the locations that were searched when it was not.
+    ///
+    /// This is what [`crate::registry::registry`] probes with, and the
+    /// two halves come from one search on purpose: locating a backend's
+    /// library means stat'ing every candidate its discovery policy names,
+    /// and asking "installed?" and "where?" separately would walk that
+    /// list twice to print one line.
+    ///
+    /// Required rather than defaulted, and [`Self::installed`] defaulted
+    /// from it rather than the other way round, because the location is
+    /// the half a user can act on. It was the other way round once: the
+    /// compiler asked a new backend author for the bare "no" and let them
+    /// skip the actionable answer, whose absence renders as nothing at
+    /// all in `mirage emulators -l`.
+    ///
+    /// A backend with no runtime library to locate has nothing to report
+    /// either way and should return
+    /// `RuntimeStatus::new(<installed>, RuntimeLocation::Unknown)`; one
+    /// that discovers a library should return the [`RuntimeLocation`] its
+    /// search produced (see [`crate::discovery::locate_emulator_lib`]).
+    fn runtime(&self) -> RuntimeStatus;
+
+    /// Returns true if the emulator is properly installed and can be
+    /// used.
+    ///
+    /// Defaults to [`Self::runtime`]'s verdict, which is where the
+    /// question is actually answered; a backend has no reason to
+    /// override this and every reason not to, since two implementations
+    /// of "is it installed?" can disagree.
+    fn installed(&self) -> bool {
+        self.runtime().installed
+    }
 
     /// check if the emulator is supported on this host, i.e. meets the hardware/environment requirements to run. This is a stronger condition than `installed`: an emulator can be installed but unsupported (e.g. HotSwap installed on a machine with no compatible physical GPU), or supported but not installed.
     fn supported(&self) -> SupportStatus;
@@ -126,8 +353,59 @@ pub trait EmulatorBackend: Sync + Send {
     /// Discovers available plugins for the emulator.
     fn discover_plugins(&self) -> Vec<PluginsDef>;
 
-    /// get health status of the emulator, e.g. check if the underlying runtime is responsive
-    fn health(&self, session: &SessionId) -> SessionHealth;
+    /// Health of the emulator for a session, e.g. whether the underlying
+    /// runtime is present and responsive.
+    fn health(&self, ctx: &SessionContext) -> SessionHealth;
+
+    /// Whether this backend stands up a synthetic GPU whose ISA the
+    /// workload's own ROCm runtime has to recognise.
+    ///
+    /// `false` — the default — for a backend that retargets code onto the
+    /// host's real GPU. Such a backend still has an agent, and that agent
+    /// still names a device, but ROCr is never asked to enumerate it, so
+    /// the ISA says nothing about whether the session will work. A new
+    /// backend therefore gets silence without having to know that the
+    /// preflight in [`crate::rocr`] exists.
+    fn presents_emulated_device(&self) -> bool {
+        false
+    }
+
+    /// Reconcile `profile` with configuration only this backend can read,
+    /// so that the profile describes the machine the session will really
+    /// stand up.
+    ///
+    /// Called once, on an already-resolved profile, before a session
+    /// freezes it. The case it exists for is a drop-in emulator config
+    /// file: the file describes a device of its own, and without this the
+    /// profile's agent would still name the device the profile was
+    /// written around — a device that is not the one about to exist.
+    /// Rather than reporting the real device separately and leaving two
+    /// answers in play, a backend corrects the agent here and everything
+    /// downstream keeps reading the one document.
+    ///
+    /// A backend that cannot tell what the file describes must clear the
+    /// agent's `gfx_target_version` rather than leave a stale value: no
+    /// answer is a verdict the preflight handles, and a confident wrong
+    /// one is not.
+    ///
+    /// `session_dir` is the session's scratch directory, already created.
+    /// A backend that reads a file here should snapshot it there and point
+    /// the profile at the snapshot, so the device it reports and the
+    /// configuration it later injects come from one reading of the file
+    /// rather than two.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error only when the profile is unusable — not when the
+    /// backend simply has nothing to correct, which is the default.
+    fn reconcile_profile(
+        &self,
+        profile: &mut ProfileDef,
+        session_dir: &std::path::Path,
+    ) -> Result<()> {
+        let _ = (profile, session_dir);
+        Ok(())
+    }
 
     /// Compute the env vars / `LD_PRELOAD` / files to inject into a
     /// workload run under this emulator. Returns an error when the
@@ -135,30 +413,67 @@ pub trait EmulatorBackend: Sync + Send {
     /// missing, so a misconfigured session fails loudly instead of
     /// silently running unemulated.
     ///
-    /// `session` is the id of the session the workload runs in, so
-    /// emulators can resolve the session's profile and materialise
-    /// per-session runtime assets under the session directory.
-    fn injection_def(&self, session: &SessionId) -> Result<InjectionDef>;
+    /// `ctx` carries the session's resolved profile and a scratch
+    /// directory the backend may materialise runtime assets in.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the backend is selected but cannot produce a
+    /// usable injection — a missing runtime library, an unresolvable
+    /// topology or agent reference, an unwritable scratch directory. This
+    /// must fail loudly: silently returning an empty injection would run
+    /// the workload unemulated on whatever hardware is actually present.
+    fn injection_def(&self, ctx: &SessionContext) -> Result<InjectionDef>;
 
     /// Start a host-side emulator *daemon* for `session`, if this
     /// backend hosts one.
     ///
-    /// The per-node host process calls this once, on startup, before it
-    /// runs any exec. A backend that emulates the GPU out-of-process
+    /// The supervisor calls this once during session bring-up, before
+    /// any exec runs. A backend that emulates the GPU out-of-process
     /// (e.g. rocjitsu's daemon, which owns the simulated device and
     /// serves the workload's KFD ioctls over a Unix socket) stands the
-    /// daemon up here and returns a handle the host keeps alive for the
-    /// whole session; the handle is stopped (dropped) when the host
-    /// shuts down. There is exactly one daemon per node host, matching
-    /// the "one emulated GPU per node" model.
+    /// daemon up here and returns a handle the supervisor keeps alive for
+    /// the whole session, stopping it during teardown after every
+    /// workload process has exited.
     ///
     /// Returns `Ok(None)` — the default — for backends that need no
-    /// daemon (`noop`, `hotswap`, or rocjitsu when its runtime library
-    /// is not installed and the exec will fail loudly anyway). Returns
-    /// `Err` only when a daemon was expected but could not be started.
-    fn start_daemon(&self, session: &SessionId) -> Result<Option<Box<dyn EmulatorDaemon>>> {
-        let _ = session;
+    /// daemon (`hotswap`, or rocjitsu when its runtime library
+    /// is not installed and the exec will fail loudly anyway).
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` only when a daemon was expected but could not be
+    /// started.
+    fn start_daemon(&self, ctx: &SessionContext) -> Result<Option<Box<dyn EmulatorDaemon>>> {
+        let _ = ctx;
         Ok(None)
+    }
+
+    /// Whether this backend could host a daemon here, asked without
+    /// creating anything.
+    ///
+    /// [`Self::start_daemon`] is the last step of bring-up, and for a
+    /// containerised session everything expensive has happened by the
+    /// time it runs: the image is pulled, the network is up, every node
+    /// container is created. A backend whose runtime simply cannot host a
+    /// daemon — an installed library that predates the daemon API, say —
+    /// fails all of that at the very end, on a fact that was knowable
+    /// before any of it started. The supervisor asks this first, so the
+    /// same session fails in a second with the same message.
+    ///
+    /// This must be cheap and side-effect-free enough to ask on every
+    /// bring-up and from [`Self::health`]: it decides nothing a backend
+    /// has to *do*, only what it would find if it tried. Backends that
+    /// host no daemon need not implement it — the default agrees with
+    /// [`Self::start_daemon`]'s, which is that there is nothing to host
+    /// and therefore nothing that can be missing.
+    ///
+    /// # Errors
+    ///
+    /// A human-readable reason the daemon could not be started here,
+    /// phrased for a user who has just been refused a run.
+    fn daemon_capability(&self) -> Result<()> {
+        Ok(())
     }
 }
 
@@ -171,9 +486,11 @@ pub trait EmulatorBackend: Sync + Send {
 /// dropping the handle.
 ///
 /// [`stop`]: EmulatorDaemon::stop
-pub trait EmulatorDaemon: Send {
-    /// Stop the daemon and release its resources. Blocking. The default
-    /// drops the handle, which must perform the teardown.
+pub trait EmulatorDaemon: Send + std::fmt::Debug {
+    /// Stop the daemon and release its resources. Blocking, so the
+    /// supervisor calls it from a blocking task rather than inline on the
+    /// runtime. The default drops the handle, which must perform the
+    /// teardown.
     fn stop(self: Box<Self>) {}
 }
 
@@ -182,6 +499,7 @@ pub trait EmulatorDaemon: Send {
 /// these via [`inventory::submit!`]; the backend is a `'static`
 /// reference to a stateless singleton (typically a unit struct), so the
 /// entry is const-constructible and needs no allocation.
+#[derive(Debug)]
 pub struct EmulatorBackendDef {
     /// Canonical lowercase name the backend registers under (the value
     /// stored in [`EmulatorDef::emulator`]).
@@ -195,9 +513,164 @@ inventory::collect!(EmulatorBackendDef);
 /// Look up the [`EmulatorBackend`] registered for `kind`, or `None` if
 /// no backend with that name was compiled into this binary (e.g. its
 /// crate's feature is disabled).
+#[must_use]
 pub fn get_emulator_backend(kind: &str) -> Option<&'static dyn EmulatorBackend> {
     inventory::iter::<EmulatorBackendDef>
         .into_iter()
         .find(|def| def.kind == kind)
         .map(|def| def.backend)
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+    use super::*;
+
+    /// A backend for this crate's own tests.
+    ///
+    /// No backend crate can be linked here — they all depend on
+    /// `mirage_core` — so anything that resolves an emulator, such as
+    /// [`ProfileDef::validate`] on the way into the store, would find an
+    /// empty registry. This is the one entry those tests write profiles
+    /// against, and it accepts everything: what they exercise is the
+    /// store's own rules, not a backend's.
+    #[derive(Debug)]
+    pub(super) struct Accepting;
+
+    /// The name a test profile puts in its `emulator` field.
+    pub(super) const TEST_EMULATOR: &str = "test";
+
+    impl EmulatorBackend for Accepting {
+        fn description(&self) -> EmulatorDescription {
+            EmulatorDescription {
+                name: TEST_EMULATOR.to_string(),
+                version: "0".to_string(),
+                description: "test-only backend that accepts every profile".to_string(),
+                options_schema: Vec::new(),
+            }
+        }
+
+        fn boot(&self, _def: &ProfileDef) -> std::result::Result<(), String> {
+            Ok(())
+        }
+
+        fn options(&self) -> Vec<OptionDef> {
+            Vec::new()
+        }
+
+        fn shutdown(&self, _ctx: &SessionContext) {}
+
+        fn validate_profile(&self, _def: &ProfileDef) -> std::result::Result<(), String> {
+            Ok(())
+        }
+
+        fn runtime(&self) -> RuntimeStatus {
+            // Nothing to locate: this backend is compiled in rather than
+            // installed, so there is no library and no search to report.
+            RuntimeStatus::new(true, RuntimeLocation::Unknown)
+        }
+
+        fn supported(&self) -> SupportStatus {
+            SupportStatus::supported("the test backend needs nothing")
+        }
+
+        fn discover_plugins(&self) -> Vec<PluginsDef> {
+            Vec::new()
+        }
+
+        fn health(&self, _ctx: &SessionContext) -> SessionHealth {
+            SessionHealth::phase(true, crate::session::state::READY, None)
+        }
+
+        fn injection_def(&self, _ctx: &SessionContext) -> Result<InjectionDef> {
+            Ok(InjectionDef::default())
+        }
+    }
+
+    inventory::submit! {
+        EmulatorBackendDef { kind: TEST_EMULATOR, backend: &Accepting }
+    }
+
+    /// A backend that answers only the question with an answer in it.
+    ///
+    /// It is [`Accepting`] with [`EmulatorBackend::installed`] left to
+    /// the trait, which is the shape the inverted pair is meant to
+    /// produce: the compiler demands the location, and the bare yes/no
+    /// falls out of it. It is not registered — nothing looks it up — so
+    /// it exists purely to hold that shape to the fire at compile time.
+    #[derive(Debug)]
+    struct LocationOnly;
+
+    /// A library name no machine has, so the search below always misses.
+    const NO_SUCH_LIB: &str = "libmirage-emulator-trait-test.so";
+
+    impl EmulatorBackend for LocationOnly {
+        fn description(&self) -> EmulatorDescription {
+            Accepting.description()
+        }
+
+        fn boot(&self, def: &ProfileDef) -> std::result::Result<(), String> {
+            Accepting.boot(def)
+        }
+
+        fn options(&self) -> Vec<OptionDef> {
+            Accepting.options()
+        }
+
+        fn shutdown(&self, ctx: &SessionContext) {
+            Accepting.shutdown(ctx);
+        }
+
+        fn validate_profile(&self, def: &ProfileDef) -> std::result::Result<(), String> {
+            Accepting.validate_profile(def)
+        }
+
+        fn runtime(&self) -> RuntimeStatus {
+            RuntimeStatus::from_location(RuntimeLocation::Missing {
+                lib_name: NO_SUCH_LIB.to_string(),
+                searched: vec![std::path::PathBuf::from("/nowhere").join(NO_SUCH_LIB)],
+                env: Vec::new(),
+            })
+        }
+
+        fn supported(&self) -> SupportStatus {
+            Accepting.supported()
+        }
+
+        fn discover_plugins(&self) -> Vec<PluginsDef> {
+            Accepting.discover_plugins()
+        }
+
+        fn health(&self, ctx: &SessionContext) -> SessionHealth {
+            Accepting.health(ctx)
+        }
+
+        fn injection_def(&self, ctx: &SessionContext) -> Result<InjectionDef> {
+            Accepting.injection_def(ctx)
+        }
+    }
+
+    /// The pair used to run the other way round: `installed` was
+    /// required and `runtime` defaulted to
+    /// `RuntimeStatus::new(self.installed(), RuntimeLocation::Unknown)`,
+    /// which renders as nothing — so a backend author was asked for the
+    /// bare "no" and allowed to skip the answer `mirage emulators -l`
+    /// exists to give. Now the location is what a backend must supply
+    /// and the flag is derived from it, so the two cannot disagree
+    /// either.
+    #[test]
+    fn installed_comes_from_the_runtime_search() {
+        let backend = LocationOnly;
+        assert!(!backend.installed());
+        assert_eq!(backend.installed(), backend.runtime().installed);
+        // And the answer a user can act on came with it.
+        assert_eq!(backend.runtime().location.searched().len(), 1);
+    }
+
+    #[test]
+    fn an_unregistered_backend_is_not_found() {
+        assert!(get_emulator_backend(TEST_EMULATOR).is_some());
+        assert!(get_emulator_backend("no-such-backend").is_none());
+    }
 }

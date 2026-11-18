@@ -125,7 +125,7 @@ def load_kernel_rows_via_rocpd(db_path):
     data = rocpd.connect([db_path])
 
     config = rocpd_output_config.output_config()
-    query = rocpd_csv.get_kernel_csv_query(config)
+    query = rocpd_csv.get_kernel_csv_query(data, config)
 
     cursor = rocpd.execute(data, query)
     columns = [desc[0] for desc in cursor.description]

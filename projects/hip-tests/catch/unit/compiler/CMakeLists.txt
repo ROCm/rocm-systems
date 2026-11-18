@@ -26,11 +26,22 @@ if(HIP_PLATFORM MATCHES "amd")
     --offload-arch=gfx9-generic
     --offload-arch=gfx9-4-generic:sramecc+:xnack-
     --offload-arch=gfx9-4-generic:sramecc-:xnack-
-    --offload-arch=gfx9-4-generic:xnack+
+    --offload-arch=gfx9-4-generic:sramecc+:xnack+
+    --offload-arch=gfx9-4-generic:sramecc-:xnack+
     --offload-arch=gfx10-1-generic
     --offload-arch=gfx10-3-generic
     --offload-arch=gfx11-generic
-    --offload-arch=gfx12-generic)
+    --offload-arch=gfx11-7-generic
+    --offload-arch=gfx12-generic
+    --offload-arch=gfx12-5-generic)
+
+  # ASAN is only supported on xnack+ offload archs; clang skips it on the other
+  # generic targets and emits an -Woption-ignored warning. Suppress it under device
+  # ASAN so -Werror does not fail the build.
+  set(ASAN_GENERIC_TARGET_FLAGS)
+  if(ENABLE_SANITIZER STREQUAL "ASAN")
+    set(ASAN_GENERIC_TARGET_FLAGS -Wno-option-ignored)
+  endif()
 
   set(DISABLE_GENERIC_TARGET_ONLY)
 
@@ -84,13 +95,13 @@ if(HIP_PLATFORM MATCHES "amd")
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
   set_target_properties(hipSquareGenericTargetDefault PROPERTIES COMPILE_FLAGS "-mcode-object-version=6 ${DISABLE_GENERIC_TARGET_ONLY}")
-  target_compile_options(hipSquareGenericTargetDefault PUBLIC ${OFFLOAD_ARCH_GENERIC_STR})
+  target_compile_options(hipSquareGenericTargetDefault PUBLIC ${ASAN_GENERIC_TARGET_FLAGS} ${OFFLOAD_ARCH_GENERIC_STR})
 
   hip_add_exe_to_target(NAME hipSquareGenericTargetCompressed
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
   set_target_properties(hipSquareGenericTargetCompressed PROPERTIES COMPILE_FLAGS " -DGENERIC_COMPRESSED ${DISABLE_GENERIC_TARGET_ONLY} -mcode-object-version=6 --offload-compress")
-  target_compile_options(hipSquareGenericTargetCompressed PUBLIC ${OFFLOAD_ARCH_GENERIC_STR})
+  target_compile_options(hipSquareGenericTargetCompressed PUBLIC ${ASAN_GENERIC_TARGET_FLAGS} ${OFFLOAD_ARCH_GENERIC_STR})
 
   add_dependencies(hipSquareGenericTargetDefault hipSquareGenericTargetCompressed)
   if(BUILD_SHARED_LIBS)
@@ -98,17 +109,26 @@ if(HIP_PLATFORM MATCHES "amd")
     add_dependencies(hipSquareGenericTargetDefault hipSquareGenericTargetOnlyCompressed)
   endif()
 
-  # SWDEV-548807 skip building hipSpirvTest
-  if(false)
-    add_custom_target(hipSpirvTest ALL
-                    COMMAND ${CMAKE_HIP_COMPILER} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/hipSpirvTest.cc
-                    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/hip_test_context.cc
-                    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/main.cc
-                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
-                    -I${Catch2_SOURCE_DIR}/src
-                    -I${Catch2_BINARY_DIR}/generated-includes
-                    --offload-arch=amdgcnspirv
-                    -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/compiler/hipSpirvTest)
-    add_dependencies(CompilerTest hipSpirvTest)
-  endif()
+  # Build hipSpirvTest for amdgcnspirv only
+  set(SPIRV_TEST_SRC
+    hipSpirvTest.cc
+    ../../hipTestMain/hip_test_context.cc
+    ../../hipTestMain/main.cc
+    ../../hipTestMain/hip_test_level.cc)
+  set_source_files_properties(${SPIRV_TEST_SRC} PROPERTIES LANGUAGE HIP)
+  add_executable(hipSpirvTest EXCLUDE_FROM_ALL ${SPIRV_TEST_SRC})
+  set_target_properties(hipSpirvTest PROPERTIES LINKER_LANGUAGE HIP)
+  target_compile_options(hipSpirvTest PRIVATE --no-offload-arch=all --offload-arch=amdgcnspirv)
+  target_link_options(hipSpirvTest PRIVATE --no-offload-arch=all --offload-arch=amdgcnspirv)
+  target_link_libraries(hipSpirvTest PRIVATE Catch2::Catch2 hip::host)
+  target_include_directories(hipSpirvTest PRIVATE ${CATCH_INCLUDE_BINARY_DIR})
+  add_dependencies(hipSpirvTest hip_tests_config)
+  add_dependencies(build_tests hipSpirvTest)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipSpirvTest)
+  catch_discover_tests(hipSpirvTest
+    DISCOVERY_MODE PRE_TEST
+    ADD_TAGS_AS_LABELS
+    PROPERTIES SKIP_RETURN_CODE 4)
+  file(GLOB SPIRV_TEST_CTEST_FILES "${CMAKE_CURRENT_BINARY_DIR}/hipSpirvTest-*_include.cmake")
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_CTEST_INCLUDE_FILES ${SPIRV_TEST_CTEST_FILES})
 endif()

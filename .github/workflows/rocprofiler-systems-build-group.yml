@@ -22,6 +22,9 @@ on:
         required: true
         type: string
 
+permissions:
+  contents: read
+
 env:
   ROCPROFSYS_CI: ON
   ROCPROFSYS_TMPDIR: "%env{PWD}%/testing-tmp"
@@ -67,13 +70,12 @@ jobs:
       # remainder lives in matrix.cmake_flags.
       CMAKE_COMMON_FLAGS: >-
         -DCMAKE_BUILD_TYPE=Release
+        -DPROFILER_HUB_FETCH_DEPENDENCIES=ON
         -DROCPROFSYS_BUILD_TESTING=ON
         -DROCPROFSYS_BUILD_EXAMPLES=ON
         -DROCPROFSYS_USE_PYTHON=ON
         -DROCPROFSYS_BUILD_DYNINST=ON
-        -DROCPROFSYS_BUILD_TBB=ON
         -DROCPROFSYS_BUILD_ELFUTILS=ON
-        -DROCPROFSYS_BUILD_LIBIBERTY=ON
         -DROCPROFSYS_MAX_THREADS=64
         -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
 
@@ -81,10 +83,11 @@ jobs:
       # Step anchors: steps shared identically with the system-deps job are
       # anchored here (_step-*) and aliased below to avoid duplication.
       - &_step-checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
             projects/rocprofiler-systems/
+            profilers/profiler-hub/
             .gitmodules
 
       - name: Configure ROCm environment (Ubuntu / Debian)
@@ -127,18 +130,17 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-systems/
         run: |
-          if [ "${{ matrix.os_major }}" = "8" ]; then
-            wget https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v47.0/linux-amd64/trace_processor_shell -P /opt/trace_processor/bin &&
-            chmod +x /opt/trace_processor/bin/trace_processor_shell
-            echo "ROCPROFSYS_TRACE_PROC_SHELL=/opt/trace_processor/bin/trace_processor_shell" >> $GITHUB_ENV
-          fi
+          # libiberty for Dyninst: prefer the system copy over downloading binutils
+          crb enable
+          dnf install -y binutils-devel
+
           if [ "${{ matrix.os_major }}" = "10" ]; then
             dnf install -y --enablerepo=crb mpich mpich-devel
             echo "/usr/lib64/mpich/bin" >> $GITHUB_PATH
           fi
 
       - name: Restore ccache
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache-${{ matrix.ccache_key_distro }}-${{ matrix.image }}-${{ github.job }}-${{ matrix.distro }}-${{ matrix.compiler }}-${{ github.sha }}
@@ -196,7 +198,7 @@ jobs:
           echo "CMake: $(cmake --version | head -n 1)"
           echo "Compiler: $(${{ matrix.compiler }} --version | head -n 1)"
           python3 ./scripts/run-ci.py --stage generate \
-            --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
+            --name "${{ github.repository_owner }}-${GITHUB_REF_NAME}-${{ matrix.cdash_suffix }}" \
             --build-jobs $(nproc) \
             --site GitHub \
             -B build \
@@ -215,7 +217,7 @@ jobs:
         working-directory: projects/rocprofiler-systems/
         run: |
           python3 ./scripts/run-ci.py --stage configure \
-            --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
+            --name "${{ github.repository_owner }}-${GITHUB_REF_NAME}-${{ matrix.cdash_suffix }}" \
             -B build
 
       - name: Build
@@ -224,7 +226,7 @@ jobs:
         working-directory: projects/rocprofiler-systems/
         run: |
           python3 ./scripts/run-ci.py --stage build \
-            --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
+            --name "${{ github.repository_owner }}-${GITHUB_REF_NAME}-${{ matrix.cdash_suffix }}" \
             -B build
 
       - &_step-cdash-link
@@ -234,7 +236,7 @@ jobs:
         working-directory: projects/rocprofiler-systems/
         run: |
           python3 ./scripts/run-ci.py --stage cdash-link \
-            --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}"
+            --name "${{ github.repository_owner }}-${GITHUB_REF_NAME}-${{ matrix.cdash_suffix }}"
 
       - name: Test
         timeout-minutes: 60
@@ -242,13 +244,13 @@ jobs:
         working-directory: projects/rocprofiler-systems/
         run: |
           python3 ./scripts/run-ci.py --stage test \
-            --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
+            --name "${{ github.repository_owner }}-${GITHUB_REF_NAME}-${{ matrix.cdash_suffix }}" \
             -B build
 
       - &_step-upload-junit-results
         name: Upload JUnit test results
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: junit-build-${{ inputs.group_key }}-${{ github.job }}-${{ strategy.job-index }}
           path: projects/rocprofiler-systems/build/test-results.xml
@@ -321,7 +323,7 @@ jobs:
           export PATH=/opt/conda/envs/py3.8/bin:${PATH}
           ./scripts/test-install.sh --test-rocprof-sys-{instrument,avail,sample,rewrite,runtime,python}=1
 
-      - name: Test User API
+      - name: Test find_package (Causal API)
         timeout-minutes: 10
         shell: bash
         working-directory: projects/rocprofiler-systems/
@@ -342,14 +344,16 @@ jobs:
         working-directory: projects/rocprofiler-systems/
         run: |
           set +e
-          RUNNING_PROCS=$(pgrep trace_processor_shell)
+          # -f is required: the process name is truncated to 15 characters, so
+          # pgrep refuses this pattern unless it matches the full command line
+          RUNNING_PROCS=$(pgrep -f trace_processor_shell)
           if [ -n "${RUNNING_PROCS}" ]; then kill -s 9 ${RUNNING_PROCS}; fi
 
       - &_step-ctest-artifacts
         name: CTest artifacts
         if: failure()
         continue-on-error: true
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ctest-${{ inputs.group_key }}-${{ github.job }}-${{ strategy.job-index }}-log
           path: |
@@ -359,7 +363,7 @@ jobs:
         name: Data artifacts
         if: failure()
         continue-on-error: true
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: data-${{ inputs.group_key }}-${{ github.job }}-${{ strategy.job-index }}-files
           path: |
@@ -369,7 +373,8 @@ jobs:
 
   # ──────────────────────────────────────────────────────────────────────────
   # System-dependency builds: validate that system-provided libs substitute
-  # for the bundled ones (BUILD_{TBB,ELFUTILS,LIBIBERTY}=OFF).
+  # for the bundled elfutils (BUILD_ELFUTILS=OFF). LIBIBERTY=ON deliberately
+  # exercises the download-and-build path that the primary builds skip.
   # Matrix entries are filtered to the selected distro group.
   # ──────────────────────────────────────────────────────────────────────────
   system-deps:
@@ -399,13 +404,13 @@ jobs:
       # g++ and amdclang++ entries share the same cmake_flags anchor.
       CMAKE_COMMON_FLAGS: >-
         -DCMAKE_BUILD_TYPE=Release
+        -DPROFILER_HUB_FETCH_DEPENDENCIES=ON
         -DROCPROFSYS_BUILD_TESTING=ON
         -DROCPROFSYS_BUILD_EXAMPLES=ON
         -DROCPROFSYS_USE_PYTHON=ON
         -DROCPROFSYS_BUILD_DYNINST=ON
-        -DROCPROFSYS_BUILD_TBB=OFF
         -DROCPROFSYS_BUILD_ELFUTILS=OFF
-        -DROCPROFSYS_BUILD_LIBIBERTY=OFF
+        -DROCPROFSYS_BUILD_LIBIBERTY=ON
         -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=ON
         -DROCPROFSYS_STRIP_LIBRARIES=OFF
         -DROCPROFSYS_MAX_THREADS=64
@@ -469,12 +474,12 @@ jobs:
           max_attempts: 5
           shell: bash
           command: |
-            dnf install -y --enablerepo=crb tbb-devel
+            dnf install -y --enablerepo=crb fmt-devel spdlog-devel
             dnf install -y binutils-devel
             dnf clean all
 
       - name: Restore ccache
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache-${{ matrix.ccache_key_distro }}-${{ matrix.image }}-${{ github.job }}-${{ matrix.compiler }}-${{ github.sha }}
@@ -496,9 +501,9 @@ jobs:
           git config --global --add safe.directory ${PWD}
           echo "CMake: $(cmake --version | head -n 1)"
           echo "Compiler: $(${{ matrix.compiler }} --version | head -n 1)"
-          echo "Testing build with SYSTEM dependencies (ROCPROFSYS_BUILD_{TBB,ELFUTILS,LIBIBERTY}=OFF)"
+          echo "Testing build with SYSTEM dependencies (ROCPROFSYS_BUILD_ELFUTILS=OFF) and a from-source libiberty (ROCPROFSYS_BUILD_LIBIBERTY=ON)"
           python3 ./scripts/run-ci.py --stage generate \
-            --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
+            --name "${{ github.repository_owner }}-${GITHUB_REF_NAME}-${{ matrix.cdash_suffix }}" \
             --build-jobs $(nproc) \
             --site GitHub \
             -B build \
@@ -518,7 +523,7 @@ jobs:
         working-directory: projects/rocprofiler-systems/
         run: |
           python3 ./scripts/run-ci.py --stage configure \
-            --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
+            --name "${{ github.repository_owner }}-${GITHUB_REF_NAME}-${{ matrix.cdash_suffix }}" \
             -B build
 
       - name: Build
@@ -527,7 +532,7 @@ jobs:
         working-directory: projects/rocprofiler-systems/
         run: |
           python3 ./scripts/run-ci.py --stage build \
-            --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
+            --name "${{ github.repository_owner }}-${GITHUB_REF_NAME}-${{ matrix.cdash_suffix }}" \
             -B build
 
       - *_step-cdash-link
@@ -538,7 +543,7 @@ jobs:
         working-directory: projects/rocprofiler-systems/
         run: |
           python3 ./scripts/run-ci.py --stage test \
-            --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
+            --name "${{ github.repository_owner }}-${GITHUB_REF_NAME}-${{ matrix.cdash_suffix }}" \
             -B build
 
       - *_step-upload-junit-results

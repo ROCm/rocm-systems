@@ -4,8 +4,8 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_CDNA3_ISA_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_CDNA3_ISA_H_
 
-#include "rocjitsu/isa/arch/amdgpu/cdna3/decoder.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna3/operand_types.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/decoder.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/cdna_isa_base.h"
 #include "rocjitsu/isa/isa_traits.h"
 
@@ -41,7 +41,6 @@ struct Isa : amdgpu::CdnaIsaBase {
   // operand.cpp; bodies forward to the anonymous-namespace helpers.
   static std::optional<uint32_t> resolved_vgpr_offset(OperandType opr_type, int ev);
   static bool simd_capable_value(OperandType opr_type, int ev);
-  static uint32_t simd_broadcast_value(const amdgpu::Wavefront &wf, OperandType opr_type, int ev);
 };
 
 } // namespace cdna3

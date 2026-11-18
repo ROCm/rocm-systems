@@ -13,34 +13,26 @@
 #include "nccl_tuner.h"
 #include "device.h"
 #include "compiler.h"
+#include "coll_sizes.h"
 
-#define NCCL_MAX_NET_SIZE (1024 * 1024 * 1024L) // Rather than send INT_MAX which is 2G-1, send a power of two.
+// Keep host proxy scheduling and device kernel dispatch on the same compile-time capability.
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+#define NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED 0
+#else
+#define NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED 1
+#endif
 
-// CHUNKSIZE must be a multiple of SLICESIZE
+static inline bool ncclUseOneRpnNetRegChannelCap(ncclFunc_t func) {
+  return func == ncclFuncBroadcast ||
+         (func == ncclFuncAllGather && NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED);
+}
+
 // RCCL: Benchmarking on single node for MI300X showed improved throughput for single node always using
 // a single slice, so we have separate configurations for single node and multi-node.  Single node configs
-// are suffixed with _SINGLE_NODE.
-#define ALLREDUCE_SLICESTEPS (NCCL_STEPS / 4)
+// are suffixed with _SINGLE_NODE. The multi-node *_SLICESTEPS/*_CHUNKSTEPS live in coll_sizes.h.
 #define ALLREDUCE_SLICESTEPS_SINGLE_NODE (NCCL_STEPS / 2)
-#define ALLREDUCE_CHUNKSTEPS (NCCL_STEPS / 2)
-#define ALLGATHER_SLICESTEPS (NCCL_STEPS / 4)
 #define ALLGATHER_SLICESTEPS_SINGLE_NODE (NCCL_STEPS / 2)
-#define ALLGATHER_CHUNKSTEPS (NCCL_STEPS / 2)
-#define ALLTOALL_SLICESTEPS 1
-#define ALLTOALL_CHUNKSTEPS 1
-#define REDUCESCATTER_SLICESTEPS (NCCL_STEPS / 4)
 #define REDUCESCATTER_SLICESTEPS_SINGLE_NODE (NCCL_STEPS / 2)
-#define REDUCESCATTER_CHUNKSTEPS (NCCL_STEPS / 2)
-#define BROADCAST_SLICESTEPS 1
-#define BROADCAST_CHUNKSTEPS 1
-#define GATHER_SLICESTEPS 1
-#define GATHER_CHUNKSTEPS 1
-#define SCATTER_SLICESTEPS 1
-#define SCATTER_CHUNKSTEPS 1
-#define REDUCE_SLICESTEPS 1
-#define REDUCE_CHUNKSTEPS 1
-#define NCCL_MAX_SLICE_PER_CHUNK 2  // max value for CHUNKSTEPS/SLICESTEPS, must accord with above
-#define NCCL_MAX_NET_SIZE (1024 * 1024 * 1024L) // Rather than send INT_MAX which is 2G-1, send a power of two.
 #define ALLTOALL_PIVOT_SLICESTEPS 2
 #define ALLTOALL_PIVOT_CHUNKSTEPS 4
 
@@ -57,29 +49,6 @@ const char* ncclDatatypeToString(ncclDataType_t type);
 const char* ncclAlgoToString(int algo);
 const char* ncclProtoToString(int proto);
 
-inline int ncclTypeSize(ncclDataType_t type) {
-  switch (type) {
-  case ncclInt8:
-  case ncclUint8:
-  case ncclFloat8e4m3:
-  case ncclFloat8e5m2:
-    return 1;
-  case ncclFloat16:
-  case ncclBfloat16:
-    return 2;
-  case ncclInt32:
-  case ncclUint32:
-  case ncclFloat32:
-    return 4;
-  case ncclInt64:
-  case ncclUint64:
-  case ncclFloat64:
-    return 8;
-  default:
-    return -1;
-  }
-}
-
 #include <sys/types.h>
 
 #define NCCL_MODE_NORMAL 0
@@ -87,7 +56,7 @@ inline int ncclTypeSize(ncclDataType_t type) {
 #define NCCL_MODE_PTR 2
 struct ncclConnFifo {
   int mode;
-  int offset;
+  ssize_t offset;
   ssize_t size;
   void* ptr;
 };
@@ -162,7 +131,7 @@ public:
     chunkId = (ringIndex + nRanks - 1 - chunkStage) % nRanks;
     chunkOffset = chunkId * curChunkSize;
     nelem = std::min(remSize - chunkOffset, curChunkSize);
-    curSliceSize = std::max(divUp(nelem / elemSize, 16 * slicePerChunk) * 16, sliceSize / elemSize / 32) * elemSize;
+    curSliceSize = ncclSimpleSliceSize(nelem / elemSize, slicePerChunk, sliceSize / elemSize) * elemSize;
     sliceOffset = sliceStage * curSliceSize;
 
     if (nelem <= sliceOffset) {
@@ -211,7 +180,7 @@ public:
 
     chunkOffset = chunkId * curChunkSize;
     nelem = std::min(remSize - chunkOffset, curChunkSize);
-    curSliceSize = std::max(divUp(nelem / elemSize, 16 * slicePerChunk) * 16, sliceSize / elemSize / 32) * elemSize;
+    curSliceSize = ncclSimpleSliceSize(nelem / elemSize, slicePerChunk, sliceSize / elemSize) * elemSize;
     sliceOffset = sliceStage * curSliceSize;
     if (nelem <= sliceOffset) {
       *recvbuffOut = recvbuff;
@@ -271,7 +240,7 @@ public:
     uint8_t* buff;
     void* mhandle;
 
-    curSliceSize = std::max(divUp(chunkSize / elemSize, 16 * slicePerChunk) * 16, sliceSize / elemSize / 32) * elemSize;
+    curSliceSize = ncclSimpleSliceSize(chunkSize / elemSize, slicePerChunk, sliceSize / elemSize) * elemSize;
     sliceOffset = sliceStage * curSliceSize;
     if (chunkStage == 0) {
       rankDest = ringRanks[0];
@@ -303,7 +272,7 @@ public:
     ssize_t size;
     int rankDest;
 
-    curSliceSize = std::max(divUp(chunkSize / elemSize, 16 * slicePerChunk) * 16, sliceSize / elemSize / 32) * elemSize;
+    curSliceSize = ncclSimpleSliceSize(chunkSize / elemSize, slicePerChunk, sliceSize / elemSize) * elemSize;
     sliceOffset = sliceStage * curSliceSize;
     if (chunkStage == 0) {
       rankDest = ringRanks[1];
@@ -425,11 +394,29 @@ public:
 
 // Need a power of two to ensure it divides by parallelFactor (which is also a power of two)
 #define NCCL_PAT_NWORKERS 128
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// [RCCL] Upstream uses 256 (of 640 threads). RCCL blocks are NCCL_MAX_NTHREADS=256 with 64-wide
+// warps, so 256 workers would leave no gather workers and overflow the barrier group index.
+#define NCCL_PAT_MULTI_RPN_NWORKERS NCCL_PAT_NWORKERS
+static_assert(NCCL_PAT_MULTI_RPN_NWORKERS + WARP_SIZE < NCCL_MAX_NTHREADS,
+              "multi-RPN PAT needs room for the gather workers");
+#else
+#define NCCL_PAT_MULTI_RPN_NWORKERS 256
+#endif
+
+// Threads per PAT worker group: whole warps, with nworkers split across parallelFactor groups.
+static __host__ __device__ constexpr int patWorkerGroupSize(int nworkers, int warpSize, int parallelFactor) {
+  return nworkers / (warpSize * parallelFactor) * warpSize;
+}
 
 static constexpr int PatUsed = 0x1, PatSkipped = 0x2;
 
 struct ncclPatStep {
   int recvDim, sendDim, recvOffset, sendOffset, stepOffset, postRecv, postSend, nelem, last, flags;
+  // PAT algo computation thread step number; -1 while the slot is free.
+  int step;
+  // This PAT group's offset within the shared NVLS slot.
+  int nvlsOffset;
   size_t inpIx, outIx;
 };
 
@@ -442,16 +429,24 @@ struct ncclPatPeer {
   uint64_t* tailPtr;
   uint64_t stepCache;
   long long int accSize;
-  int connStepSize;
+  uint32_t connStepSize;
 };
 
 #define NCCL_SHMEM_PAT_STEPS 32
+static constexpr int NCCL_PAT_NDIMS = 32;
 struct ncclPatShmem {
   struct ncclPatStep patSteps[NCCL_SHMEM_PAT_STEPS];
   int parallelFactor;
+  bool patGroupFenceNeeded;
   long long int localAccSize;
-  struct ncclPatPeer sendDims[32]; // Should cover 2^32 ranks
-  struct ncclPatPeer recvDims[32];
+  // First 32 entries cover PAT dimensions; entry 32 is reused for the local
+  // NVLS peer in multi-RPN PAT.
+  struct ncclPatPeer sendDims[NCCL_PAT_NDIMS + 1];
+  struct ncclPatPeer recvDims[NCCL_PAT_NDIMS + 1];
+  // Per-rail FIFO write pointers for patScatter (used in reduce_scatter)
+  void* patScatterDsts[NCCL_MAX_NVLS_ARITY];
+  // Per-rail FIFO read pointers for patGather (used in all_gather)
+  void* patGatherSrcs[NCCL_MAX_NVLS_ARITY];
 };
 
 template <typename T>
@@ -475,6 +470,7 @@ class PatRSAlgorithm {
   int aggDelta;
   int scale;
   int phase;
+  int psIdx;
 
   __device__ __host__ ssize_t min(ssize_t a, ssize_t b) {
     return (a < b) ? a : b;
@@ -540,6 +536,7 @@ public:
                                      size_t count, int chunkCount, int rank, int nranks)
     : offset(offset), end(end), count(count), chunkCount(chunkCount), rank(rank), nranks(nranks) {
     parallelFactor = maxParallelFactor;
+    psIdx = 0;
     aggDelta = nrPow2 = (1 << log2Up(nranks));
 
     aggFactor = 1;
@@ -569,6 +566,8 @@ public:
     ps->nelem = nelem;
     ps->outIx = offset;
     ps->stepOffset = stepOffset;
+    ps->nvlsOffset = (psIdx % parallelFactor) * nelem;
+    psIdx++;
     int skip = 0;
     if (a >= lastA) {
       skip = 1;
@@ -713,6 +712,15 @@ public:
   }
 };
 
+// PAT peers at dimension dim: ReduceScatter recvs from rank - 2^dim and sends to rank + 2^dim; mirrored swaps the two.
+static __host__ __device__ constexpr int patRecvPeer(int rank, int nranks, int dim, bool mirrored) {
+  return mirrored ? (rank + (1 << dim)) % nranks : (rank - (1 << dim) + nranks) % nranks;
+}
+static __host__ __device__ constexpr int patSendPeer(int rank, int nranks, int dim, bool mirrored) {
+  return patRecvPeer(rank, nranks, dim, !mirrored);
+}
+
+// When sharedConns is set, AllGather reuses PatRSAlgorithm's peer directions, so its data blocks are indexed rank-s; else it is mirrored.
 template <typename T>
 class PatAGAlgorithm {
   size_t offset;
@@ -722,6 +730,7 @@ class PatAGAlgorithm {
   int nelem;
   int rank;
   int nranks;
+  int sharedConns;
   int nrPow2;
   int postFreq;
   int lastA;
@@ -732,6 +741,7 @@ class PatAGAlgorithm {
   int aggDelta;
   int scale;
   int phase;
+  int psIdx;
 
   // AS computation
   int asDim;
@@ -806,9 +816,11 @@ class PatAGAlgorithm {
 
 public:
   __device__ __host__ PatAGAlgorithm(int stepSize, int stepDepth, int maxParallelFactor, size_t offset, size_t end,
-                                     size_t count, int chunkCount, int rank, int nranks)
-    : offset(offset), end(end), count(count), chunkCount(chunkCount), rank(rank), nranks(nranks) {
+                                     size_t count, int chunkCount, int rank, int nranks, int sharedConns)
+    : offset(offset), end(end), count(count), chunkCount(chunkCount), rank(rank), nranks(nranks),
+      sharedConns(sharedConns) {
     parallelFactor = maxParallelFactor;
+    psIdx = 0;
     aggDelta = nrPow2 = (1 << log2Up(nranks));
 
     aggFactor = 1;
@@ -838,13 +850,16 @@ public:
     ps->last = 0;
     ps->nelem = nelem;
     ps->inpIx = offset;
+    ps->nvlsOffset = (psIdx % parallelFactor) * nelem;
+    psIdx++;
     int skip = 0;
     if (a >= lastA) {
       skip = 1;
     } else if (phase == 0) {
       int s = a * aggDelta + as;
       if (s >= nranks) skip = 1;
-      int recvDataRank = (rank + s) % nranks;
+      // C++ % truncates toward zero, so (rank - s + nranks) % nranks is still negative when s > rank + nranks.
+      int recvDataRank = sharedConns ? ((rank - s) % nranks + nranks) % nranks : (rank + s) % nranks;
       ps->outIx = recvDataRank * count + offset;
       ps->sendDim = -1;
       ps->recvDim = 0;
@@ -859,7 +874,7 @@ public:
       if (s >= nranks) skip = 1;
       ps->sendDim = firstBitSet(s, nrPow2);
       s -= (1 << ps->sendDim);
-      int sendDataRank = (rank + nranks + s) % nranks;
+      int sendDataRank = sharedConns ? ((rank - s) % nranks + nranks) % nranks : (rank + nranks + s) % nranks;
       ps->outIx = sendDataRank * count + offset;
       ps->recvDim = s ? firstBitSet(s, nrPow2) : -1;
       ps->sendOffset = ps->recvOffset = (a % postFreq) * nelem;
@@ -895,7 +910,7 @@ public:
       s -= (1 << ps->sendDim);
       ps->sendOffset = (a % postFreq) * nelem;
       ps->stepOffset = a / postFreq;
-      int sendDataRank = (rank + nranks + s) % nranks;
+      int sendDataRank = sharedConns ? ((rank - s) % nranks + nranks) % nranks : (rank + nranks + s) % nranks;
       ps->outIx = sendDataRank * count + offset;
       ps->recvDim = s ? firstBitSet(s, nrPow2) : -1;
       if (ps->recvDim == -1) {

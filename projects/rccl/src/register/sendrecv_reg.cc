@@ -7,6 +7,7 @@
 
 #include "register.h"
 #include "transport.h"
+#include "checks.h"
 
 ncclResult_t ncclRegisterP2pNetBuffer(
   struct ncclComm* comm, void* userbuff, size_t size, struct ncclConnector* conn, int* regFlag, void** handle,
@@ -15,9 +16,17 @@ ncclResult_t ncclRegisterP2pNetBuffer(
 
   *regFlag = 0;
   if (comm->netDeviceType != NCCL_NET_DEVICE_UNPACK) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+    // HIP graph capture plus NCCL proxy-side NET registration deadlocks for
+    // pairwise sendrecv (AllToAll). Fall through to the unregistered capture path.
+    if (comm->planner.persistent && ncclParamGraphRegister()) {
+      INFO(NCCL_REG, "Skipping NET graph registration for buffer %p size %zi under HIP capture", userbuff, size);
+    }
+#else
     if (comm->planner.persistent && ncclParamGraphRegister()) {
       ncclNetGraphRegisterBuffer(comm, userbuff, size, &conn, 1, regFlag, handle, cleanupQueue, NULL);
     }
+#endif
     if (*regFlag == 0 && ncclParamLocalRegister()) {
       ncclNetLocalRegisterBuffer(comm, userbuff, size, &conn, 1, regFlag, handle);
     }
@@ -33,10 +42,16 @@ ncclResult_t ncclRegisterP2pIpcBuffer(
   uintptr_t* peerRmtAddrs = NULL;
 
   *regFlag = 0;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  if (comm->planner.persistent && ncclParamGraphRegister()) {
+    INFO(NCCL_REG, "Skipping IPC graph registration for buffer %p size %zi under HIP capture", userbuff, size);
+  }
+#else
   if (comm->planner.persistent && ncclParamGraphRegister()) {
     ncclIpcGraphRegisterBuffer(comm, userbuff, size, &peerRank, 1, NCCL_IPC_SENDRECV, regFlag, &offset, &peerRmtAddrs,
                                reinterpret_cast<void*>(cleanupQueue), NULL);
   }
+#endif
   if (*regFlag == 0 && ncclParamLocalRegister()) {
     ncclIpcLocalRegisterBuffer(comm, userbuff, size, &peerRank, 1, NCCL_IPC_SENDRECV, regFlag, &offset, &peerRmtAddrs);
   }

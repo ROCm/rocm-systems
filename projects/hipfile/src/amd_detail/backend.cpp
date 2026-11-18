@@ -3,16 +3,21 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include "async.h"
 #include "backend.h"
 #include "buffer.h"
+#include "context.h"
 #include "file.h"
 #include "io.h"
+#include "sys.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <exception>
 #include <memory>
 #include <stdexcept>
 #include <sys/types.h>
+#include <syslog.h>
 #include <system_error>
 #include <unistd.h>
 #include <utility>
@@ -52,6 +57,40 @@ BackendWithFallback::io(IoType type, std::shared_ptr<IFile> file, std::shared_pt
         return nbytes;
     }
     return nbytes;
+}
+
+void
+BackendWithFallback::async_io(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer,
+                              size_t *size_p, hoff_t *file_offset_p, hoff_t *buffer_offset_p,
+                              ssize_t *bytes_transferred_p, std::shared_ptr<IStream> stream)
+{
+    auto failover = std::make_shared<AsyncFailoverState>();
+
+    // Enqueue the primary backend's jobs. These populate `failover` at stream
+    // execution time to signal whether the fallback should engage. A throw here
+    // aborts the operation (nothing was queued that the caller must reap).
+    enqueueAsyncIo(type, file, buffer, size_p, file_offset_p, buffer_offset_p, bytes_transferred_p, stream,
+                   failover);
+
+    if (!fallback_backend) {
+        return;
+    }
+
+    size_t limited_size = std::min(*size_p, getMaxRwCount());
+    if (fallback_backend->score(file, buffer, limited_size, *file_offset_p, *buffer_offset_p) < 0) {
+        return;
+    }
+
+    // Best-effort: the primary jobs are already queued, so a failure to queue the
+    // fallback only costs us failover for this operation.
+    try {
+        fallback_backend->enqueueAsyncIo(type, std::move(file), std::move(buffer), size_p, file_offset_p,
+                                         buffer_offset_p, bytes_transferred_p, std::move(stream), failover);
+    }
+    catch (...) {
+        Context<Sys>::get()->syslog(
+            LOG_WARNING, "Unable to enqueue async fallback IO; failover is unavailable for this operation.");
+    }
 }
 
 void

@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 
 #include <algorithm>
+#include <numeric>
 #include "vp9_parser.h"
 
 Vp9VideoParser::Vp9VideoParser() {
@@ -28,6 +29,8 @@ Vp9VideoParser::Vp9VideoParser() {
     memset(&dpb_buffer_, 0, sizeof(DecodedPictureBuffer));
     memset(&uncompressed_header_, 0, sizeof(Vp9UncompressedHeader));
     uncomp_header_size_ = 0;
+    frame_data_size_in_bits_ = 0;
+    bitstream_overrun_ = false;
     memset(&tile_params_, 0, sizeof(RocdecVp9SliceParams));
     memset(y_dequant_, 0, sizeof(y_dequant_));
     memset(uv_dequant_, 0, sizeof(uv_dequant_));
@@ -94,7 +97,10 @@ ParserResult Vp9VideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
     FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_stream) + ", " + ROCDEC_TOSTR(pic_data_size));
     ParserResult ret = PARSER_OK;
 
-    CheckSuperframe(p_stream, pic_data_size);
+    if ((ret = CheckSuperframe(p_stream, pic_data_size)) != PARSER_OK) {
+        FunctionExitLog(g_rocdec_logger);
+        return ret;
+    }
 
     uint8_t *pic_data_ptr = const_cast<uint8_t*>(p_stream);
     for (int frame_index = 0; frame_index < num_frames_in_chunck_; frame_index++) {
@@ -169,7 +175,7 @@ ParserResult Vp9VideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
     FunctionExitLog(g_rocdec_logger);
     return PARSER_OK;
 }
-void Vp9VideoParser::CheckSuperframe(const uint8_t *p_stream, uint32_t chunk_data_size) {
+ParserResult Vp9VideoParser::CheckSuperframe(const uint8_t *p_stream, uint32_t chunk_data_size) {
     const uint32_t superframe_marker = 6; // 0b110
     bool is_superframe = false;
     int num_frames = 1;
@@ -190,20 +196,33 @@ void Vp9VideoParser::CheckSuperframe(const uint8_t *p_stream, uint32_t chunk_dat
         if (num_frames > frame_sizes_.size()) {
             frame_sizes_.resize(num_frames);
         }
-        int offset = chunk_data_size - size_index + 1;
+        // chunk_data_size is uint32_t, so keep the index in size_t: narrowing it to int would
+        // wrap to a negative value for a chunk larger than INT_MAX.
+        size_t offset = chunk_data_size - size_index + 1;
+        uint64_t total_frame_size = 0;
         for (int i = 0; i < num_frames; i++) {
-            int count = 0;
-            frame_sizes_[i] = 0;
-            do {
-                frame_sizes_[i] = (p_stream[offset++] << (8 * count)) + frame_sizes_[i];
-                count++;
-            } while (count < size_bytes);
+            uint32_t frame_size = 0;
+            for (int count = 0; count < size_bytes; count++) {
+                // Cast before the shift: the final byte is shifted by 24, which overflows the
+                // int that p_stream[offset] would otherwise promote to.
+                frame_size += static_cast<uint32_t>(p_stream[offset++]) << (8 * count);
+            }
+            frame_sizes_[i] = frame_size;
+            total_frame_size += frame_size;
+        }
+        // The coded frames occupy the chunk ahead of the index, so their sizes have to fit in
+        // it. Without this, the loop in ParsePictureData() advances pic_data_ptr past the end
+        // of the chunk by a distance taken from the bitstream.
+        if (total_frame_size > chunk_data_size - size_index) {
+            ErrorLog(g_rocdec_logger, "Superframe index frame sizes exceed the picture data chunk.");
+            return PARSER_OUT_OF_RANGE;
         }
         num_frames_in_chunck_ = num_frames;
     } else {
         num_frames_in_chunck_ = 1;
         frame_sizes_[0] = chunk_data_size;
     }
+    return PARSER_OK;
 }
 
 ParserResult Vp9VideoParser::NotifyNewSequence(Vp9UncompressedHeader *p_uncomp_header) {
@@ -239,7 +258,7 @@ ParserResult Vp9VideoParser::NotifyNewSequence(Vp9UncompressedHeader *p_uncomp_h
     // Display aspect ratio
     int disp_width = (video_format_params_.display_area.right - video_format_params_.display_area.left);
     int disp_height = (video_format_params_.display_area.bottom - video_format_params_.display_area.top);
-    int gcd = std::__gcd(disp_width, disp_height); // greatest common divisor
+    int gcd = std::gcd(disp_width, disp_height); // greatest common divisor
     if (gcd) {
         video_format_params_.display_aspect_ratio.x = disp_width / gcd;
         video_format_params_.display_aspect_ratio.y = disp_height / gcd;
@@ -457,34 +476,82 @@ void Vp9VideoParser::CheckAndUpdateDecStatus() {
 }
 
 ParserResult Vp9VideoParser::ParseUncompressedHeader(uint8_t *p_stream, size_t size) {
+    // The parse carries state forward between frames and mutates it before its later failure
+    // exits: SetupPastIndependence() resets part of the header, and the size change block assigns
+    // pic_width_ and pic_height_ before the check that rejects an unsupported size up on a non key
+    // frame. A failed frame therefore left the parser believing the new size had been taken, so a
+    // following frame of that size skipped the size change check and could be submitted against
+    // the older, smaller surfaces. Snapshot everything the body can touch and roll it back, so
+    // only a frame that parsed cleanly changes any of it.
+    // frame_data_size_in_bits_ and bitstream_overrun_ are excluded because the body sets both
+    // before its first read, and y_dequant_, uv_dequant_ and lvl_lookup_ because they are derived
+    // and recomputed by every successful frame before anything reads them.
+    Vp9UncompressedHeader saved_header = uncompressed_header_;
+    uint32_t saved_uncomp_header_size = uncomp_header_size_;
+    uint32_t saved_pic_width = pic_width_;
+    uint32_t saved_pic_height = pic_height_;
+    uint32_t saved_curr_surface_width = curr_surface_width_;
+    uint32_t saved_curr_surface_height = curr_surface_height_;
+    uint32_t saved_reconfig_option = reconfig_option_;
+    bool saved_new_seq_activated = new_seq_activated_;
+    uint8_t saved_last_frame_type = last_frame_type_;
+    uint8_t saved_frame_is_intra = frame_is_intra_;
+
+    ParserResult ret = ParseUncompressedHeaderBody(p_stream, size);
+    if (ret != PARSER_OK) {
+        uncompressed_header_ = saved_header;
+        uncomp_header_size_ = saved_uncomp_header_size;
+        pic_width_ = saved_pic_width;
+        pic_height_ = saved_pic_height;
+        curr_surface_width_ = saved_curr_surface_width;
+        curr_surface_height_ = saved_curr_surface_height;
+        reconfig_option_ = saved_reconfig_option;
+        new_seq_activated_ = saved_new_seq_activated;
+        last_frame_type_ = saved_last_frame_type;
+        frame_is_intra_ = saved_frame_is_intra;
+    }
+    return ret;
+}
+
+ParserResult Vp9VideoParser::ParseUncompressedHeaderBody(uint8_t *p_stream, size_t size) {
     ParserResult ret = PARSER_OK;
     size_t offset = 0;  // current bit offset
     Vp9UncompressedHeader *p_uncomp_header = &uncompressed_header_;
 
+    // Every read below goes through the size checked wrappers, which refuse to read past this
+    // limit. The frame is rejected once the syntax is done rather than at the first refused read,
+    // so the parsing below keeps its straight line shape.
+    frame_data_size_in_bits_ = size * 8;
+    bitstream_overrun_ = false;
+
     // memset(p_uncomp_header, 0, sizeof(Vp9UncompressedHeader));
-    p_uncomp_header->frame_marker = Parser::ReadBits(p_stream, offset, 2);
-    p_uncomp_header->profile_low_bit = Parser::GetBit(p_stream, offset);
-    p_uncomp_header->profile_high_bit = Parser::GetBit(p_stream, offset);
+    p_uncomp_header->frame_marker = ReadBitsChecked(p_stream, offset, 2);
+    p_uncomp_header->profile_low_bit = GetBitChecked(p_stream, offset);
+    p_uncomp_header->profile_high_bit = GetBitChecked(p_stream, offset);
     p_uncomp_header->profile = (p_uncomp_header->profile_high_bit << 1) + p_uncomp_header->profile_low_bit;
     if (p_uncomp_header->profile == 3) {
-        p_uncomp_header->reserved_zero = Parser::GetBit(p_stream, offset);
+        p_uncomp_header->reserved_zero = GetBitChecked(p_stream, offset);
         if (p_uncomp_header->reserved_zero) {
             ErrorLog(g_rocdec_logger, "Syntax error: reserved_zero in Uncompressed header is not 0 when Profile is 3");
             return PARSER_INVALID_ARG;
         }
     }
-    p_uncomp_header->show_existing_frame = Parser::GetBit(p_stream, offset);
+    p_uncomp_header->show_existing_frame = GetBitChecked(p_stream, offset);
     if (p_uncomp_header->show_existing_frame) {
-        p_uncomp_header->frame_to_show_map_idx = Parser::ReadBits(p_stream, offset, 3);
+        p_uncomp_header->frame_to_show_map_idx = ReadBitsChecked(p_stream, offset, 3);
         p_uncomp_header->header_size_in_bytes = 0;
         p_uncomp_header->refresh_frame_flags = 0;
         p_uncomp_header->loop_filter_params.loop_filter_level = 0;
+        if (bitstream_overrun_) {
+            ErrorLog(g_rocdec_logger, "Uncompressed header extends past the frame data size (" + ROCDEC_TOSTR(size) + ").");
+            return PARSER_OUT_OF_RANGE;
+        }
         return PARSER_OK;
     }
     last_frame_type_ = p_uncomp_header->frame_type;
-    p_uncomp_header->frame_type = Parser::GetBit(p_stream, offset);
-    p_uncomp_header->show_frame = Parser::GetBit(p_stream, offset);
-    p_uncomp_header->error_resilient_mode = Parser::GetBit(p_stream, offset);
+    p_uncomp_header->frame_type = GetBitChecked(p_stream, offset);
+    p_uncomp_header->show_frame = GetBitChecked(p_stream, offset);
+    p_uncomp_header->error_resilient_mode = GetBitChecked(p_stream, offset);
     if (p_uncomp_header->frame_type == kVp9KeyFrame) {
         if ((ret = FrameSyncCode(p_stream, offset, p_uncomp_header)) != PARSER_OK) {
             return ret;
@@ -498,13 +565,13 @@ ParserResult Vp9VideoParser::ParseUncompressedHeader(uint8_t *p_stream, size_t s
         frame_is_intra_ = 1;
     } else {
         if (p_uncomp_header->show_frame == 0) {
-            p_uncomp_header->intra_only = Parser::GetBit(p_stream, offset);
+            p_uncomp_header->intra_only = GetBitChecked(p_stream, offset);
         } else {
             p_uncomp_header->intra_only = 0;
         }
         frame_is_intra_ = p_uncomp_header->intra_only;
         if (p_uncomp_header->error_resilient_mode == 0) {
-            p_uncomp_header->reset_frame_context = Parser::ReadBits(p_stream, offset, 2);
+            p_uncomp_header->reset_frame_context = ReadBitsChecked(p_stream, offset, 2);
         } else {
             p_uncomp_header->reset_frame_context = 0;
         }
@@ -522,24 +589,24 @@ ParserResult Vp9VideoParser::ParseUncompressedHeader(uint8_t *p_stream, size_t s
                 p_uncomp_header->color_config.subsampling_y = 1;
                 p_uncomp_header->color_config.bit_depth = 8;
             }
-            p_uncomp_header->refresh_frame_flags = Parser::ReadBits(p_stream, offset, 8);
+            p_uncomp_header->refresh_frame_flags = ReadBitsChecked(p_stream, offset, 8);
             FrameSize(p_stream, offset, p_uncomp_header);
             RenderSize(p_stream, offset, p_uncomp_header);
         } else {
-            p_uncomp_header->refresh_frame_flags = Parser::ReadBits(p_stream, offset, 8);
+            p_uncomp_header->refresh_frame_flags = ReadBitsChecked(p_stream, offset, 8);
             for (int i = 0; i < VP9_REFS_PER_FRAME; i++) {
-                p_uncomp_header->ref_frame_idx[i] = Parser::ReadBits(p_stream, offset, 3);
-                p_uncomp_header->ref_frame_sign_bias[kVp9LastFrame + i] = Parser::GetBit(p_stream, offset);
+                p_uncomp_header->ref_frame_idx[i] = ReadBitsChecked(p_stream, offset, 3);
+                p_uncomp_header->ref_frame_sign_bias[kVp9LastFrame + i] = GetBitChecked(p_stream, offset);
             }
             FrameSizeWithRefs(p_stream, offset, p_uncomp_header);
-            p_uncomp_header->allow_high_precision_mv = Parser::GetBit(p_stream, offset);
+            p_uncomp_header->allow_high_precision_mv = GetBitChecked(p_stream, offset);
             // read_interpolation_filter()
             uint8_t literal_to_type[4] = {kVp9EightTapSmooth, kVp9EightTap, kVp9EightTapSharp, kVp9Bilinear};
-            p_uncomp_header->is_filter_switchable = Parser::GetBit(p_stream, offset);
+            p_uncomp_header->is_filter_switchable = GetBitChecked(p_stream, offset);
             if (p_uncomp_header->is_filter_switchable) {
                 p_uncomp_header->interpolation_filter = kVp9Switchable;
             } else {
-                p_uncomp_header->raw_interpolation_filter = Parser::ReadBits(p_stream, offset, 2);
+                p_uncomp_header->raw_interpolation_filter = ReadBitsChecked(p_stream, offset, 2);
                 p_uncomp_header->interpolation_filter = literal_to_type[p_uncomp_header->raw_interpolation_filter];
             }
         }
@@ -550,13 +617,13 @@ ParserResult Vp9VideoParser::ParseUncompressedHeader(uint8_t *p_stream, size_t s
     }
 
     if (p_uncomp_header->error_resilient_mode == 0) {
-        p_uncomp_header->refresh_frame_context = Parser::GetBit(p_stream, offset);
-        p_uncomp_header->frame_parallel_decoding_mode = Parser::GetBit(p_stream, offset);
+        p_uncomp_header->refresh_frame_context = GetBitChecked(p_stream, offset);
+        p_uncomp_header->frame_parallel_decoding_mode = GetBitChecked(p_stream, offset);
     } else {
         p_uncomp_header->refresh_frame_context = 0;
         p_uncomp_header->frame_parallel_decoding_mode = 1;
     }
-    p_uncomp_header->frame_context_idx = Parser::ReadBits(p_stream, offset, 2);
+    p_uncomp_header->frame_context_idx = ReadBitsChecked(p_stream, offset, 2);
     if (frame_is_intra_ || p_uncomp_header->error_resilient_mode) {
         SetupPastIndependence(p_uncomp_header);
         if (p_uncomp_header->frame_type == kVp9KeyFrame || p_uncomp_header->error_resilient_mode == 1 || p_uncomp_header->reset_frame_context == 3) {
@@ -573,13 +640,29 @@ ParserResult Vp9VideoParser::ParseUncompressedHeader(uint8_t *p_stream, size_t s
     if ((ret = SegmentationParams(p_stream, offset, p_uncomp_header)) != PARSER_OK) {
         return ret;
     }
+    // The color config is only coded in key and intra only frames and is carried over by
+    // every other frame, so it is still zeroed here if an inter frame arrives before any
+    // frame that codes one. SetupSegDequant() would then index the quantizer tables at
+    // (0 - 8) >> 1.
+    if (p_uncomp_header->color_config.bit_depth != 8 && p_uncomp_header->color_config.bit_depth != 10 &&
+        p_uncomp_header->color_config.bit_depth != 12) {
+        ErrorLog(g_rocdec_logger, "Invalid bit depth (" + ROCDEC_TOSTR(p_uncomp_header->color_config.bit_depth) + "). No key frame or intra only frame has been parsed yet.");
+        return PARSER_WRONG_STATE;
+    }
     SetupSegDequant(p_uncomp_header);
     LoopFilterFrameInit(p_uncomp_header);
     if ((ret = TileInfo(p_stream, offset, p_uncomp_header)) != PARSER_OK) {
         return ret;
     }
 
-    p_uncomp_header->header_size_in_bytes = Parser::ReadBits(p_stream, offset, 16);
+    p_uncomp_header->header_size_in_bytes = ReadBitsChecked(p_stream, offset, 16);
+
+    // All of the header syntax has been read by this point, so reject the frame before anything
+    // acts on values that a refused read left at 0.
+    if (bitstream_overrun_) {
+        ErrorLog(g_rocdec_logger, "Uncompressed header extends past the frame data size (" + ROCDEC_TOSTR(size) + ").");
+        return PARSER_OUT_OF_RANGE;
+    }
 
     // Arbitrary size change is only supported on key frames. For other frame types, particularly inter-coded frames, only size down is
     // supported where the existing surface can be reused.
@@ -613,17 +696,17 @@ ParserResult Vp9VideoParser::ParseUncompressedHeader(uint8_t *p_stream, size_t s
 }
 
 ParserResult Vp9VideoParser::FrameSyncCode(const uint8_t *p_stream, size_t &offset, Vp9UncompressedHeader *p_uncomp_header) {
-    p_uncomp_header->frame_sync_code.frame_sync_byte_0 = Parser::ReadBits(p_stream, offset, 8);
+    p_uncomp_header->frame_sync_code.frame_sync_byte_0 = ReadBitsChecked(p_stream, offset, 8);
     if (p_uncomp_header->frame_sync_code.frame_sync_byte_0 != 0x49) {
         ErrorLog(g_rocdec_logger, "Syntax error: frame_sync_byte_0 is " + ROCDEC_TOSTR(p_uncomp_header->frame_sync_code.frame_sync_byte_0) + " but shall be equal to 0x49.");
         return PARSER_INVALID_ARG;
     }
-    p_uncomp_header->frame_sync_code.frame_sync_byte_1 = Parser::ReadBits(p_stream, offset, 8);
+    p_uncomp_header->frame_sync_code.frame_sync_byte_1 = ReadBitsChecked(p_stream, offset, 8);
     if (p_uncomp_header->frame_sync_code.frame_sync_byte_1 != 0x83) {
         ErrorLog(g_rocdec_logger, "Syntax error: frame_sync_byte_1 is " + ROCDEC_TOSTR(p_uncomp_header->frame_sync_code.frame_sync_byte_1) + " but shall be equal to 0x83.");
         return PARSER_INVALID_ARG;
     }
-    p_uncomp_header->frame_sync_code.frame_sync_byte_2 = Parser::ReadBits(p_stream, offset, 8);
+    p_uncomp_header->frame_sync_code.frame_sync_byte_2 = ReadBitsChecked(p_stream, offset, 8);
     if (p_uncomp_header->frame_sync_code.frame_sync_byte_2 != 0x42) {
         ErrorLog(g_rocdec_logger, "Syntax error: frame_sync_byte_2 is " + ROCDEC_TOSTR(p_uncomp_header->frame_sync_code.frame_sync_byte_2) + " but shall be equal to 0x42.");
         return PARSER_INVALID_ARG;
@@ -633,22 +716,22 @@ ParserResult Vp9VideoParser::FrameSyncCode(const uint8_t *p_stream, size_t &offs
 
 ParserResult Vp9VideoParser::ColorConfig(const uint8_t *p_stream, size_t &offset, Vp9UncompressedHeader *p_uncomp_header) {
     if (p_uncomp_header->profile >= 2) {
-        p_uncomp_header->color_config.ten_or_twelve_bit = Parser::GetBit(p_stream, offset);
+        p_uncomp_header->color_config.ten_or_twelve_bit = GetBitChecked(p_stream, offset);
         p_uncomp_header->color_config.bit_depth = p_uncomp_header->color_config.ten_or_twelve_bit ? 12 : 10;
     } else {
         p_uncomp_header->color_config.bit_depth = 8;
     }
-    p_uncomp_header->color_config.color_space = Parser::ReadBits(p_stream, offset, 3);
+    p_uncomp_header->color_config.color_space = ReadBitsChecked(p_stream, offset, 3);
     if (p_uncomp_header->profile_low_bit == 0 && p_uncomp_header->color_config.color_space == CS_RGB) {
         ErrorLog(g_rocdec_logger, "It is a requirement of bitstream conformance that color_space is not equal to CS_RGB when profile_low_bit is equal to 0.");
         return PARSER_WRONG_STATE;
     }
     if (p_uncomp_header->color_config.color_space != CS_RGB) {
-        p_uncomp_header->color_config.color_range = Parser::GetBit(p_stream, offset);
+        p_uncomp_header->color_config.color_range = GetBitChecked(p_stream, offset);
         if (p_uncomp_header->profile == 1 || p_uncomp_header->profile == 3) {
-            p_uncomp_header->color_config.subsampling_x = Parser::GetBit(p_stream, offset);
-            p_uncomp_header->color_config.subsampling_y = Parser::GetBit(p_stream, offset);
-            p_uncomp_header->color_config.reserved_zero = Parser::GetBit(p_stream, offset);
+            p_uncomp_header->color_config.subsampling_x = GetBitChecked(p_stream, offset);
+            p_uncomp_header->color_config.subsampling_y = GetBitChecked(p_stream, offset);
+            p_uncomp_header->color_config.reserved_zero = GetBitChecked(p_stream, offset);
             if (p_uncomp_header->color_config.reserved_zero) {
                 ErrorLog(g_rocdec_logger, "Syntax error: reserved_zero in color config is not 0 when Profile is 1 or 3");
                 return PARSER_INVALID_ARG;
@@ -662,7 +745,7 @@ ParserResult Vp9VideoParser::ColorConfig(const uint8_t *p_stream, size_t &offset
         if (p_uncomp_header->profile == 1 || p_uncomp_header->profile == 3) {
             p_uncomp_header->color_config.subsampling_x = 0;
             p_uncomp_header->color_config.subsampling_y = 0;
-            p_uncomp_header->color_config.reserved_zero = Parser::GetBit(p_stream, offset);
+            p_uncomp_header->color_config.reserved_zero = GetBitChecked(p_stream, offset);
             if (p_uncomp_header->color_config.reserved_zero) {
                 ErrorLog(g_rocdec_logger, "Syntax error: reserved_zero in color config is not 0 when Profile is 1 or 3");
                 return PARSER_INVALID_ARG;
@@ -677,18 +760,18 @@ ParserResult Vp9VideoParser::ColorConfig(const uint8_t *p_stream, size_t &offset
 }
 
 void Vp9VideoParser::FrameSize(const uint8_t *p_stream, size_t &offset, Vp9UncompressedHeader *p_uncomp_header) {
-    p_uncomp_header->frame_size.frame_width_minus_1 = Parser::ReadBits(p_stream, offset, 16);
-    p_uncomp_header->frame_size.frame_height_minus_1 = Parser::ReadBits(p_stream, offset, 16);
+    p_uncomp_header->frame_size.frame_width_minus_1 = ReadBitsChecked(p_stream, offset, 16);
+    p_uncomp_header->frame_size.frame_height_minus_1 = ReadBitsChecked(p_stream, offset, 16);
     p_uncomp_header->frame_size.frame_width = p_uncomp_header->frame_size.frame_width_minus_1 + 1;
     p_uncomp_header->frame_size.frame_height = p_uncomp_header->frame_size.frame_height_minus_1 + 1;
     ComputeImageSize(p_uncomp_header);
 }
 
 void Vp9VideoParser::RenderSize(const uint8_t *p_stream, size_t &offset, Vp9UncompressedHeader *p_uncomp_header) {
-    p_uncomp_header->render_size.render_and_frame_size_different = Parser::GetBit(p_stream, offset);
+    p_uncomp_header->render_size.render_and_frame_size_different = GetBitChecked(p_stream, offset);
     if (p_uncomp_header->render_size.render_and_frame_size_different) {
-        p_uncomp_header->render_size.render_width_minus_1 = Parser::ReadBits(p_stream, offset, 16);
-        p_uncomp_header->render_size.render_height_minus_1 = Parser::ReadBits(p_stream, offset, 16);
+        p_uncomp_header->render_size.render_width_minus_1 = ReadBitsChecked(p_stream, offset, 16);
+        p_uncomp_header->render_size.render_height_minus_1 = ReadBitsChecked(p_stream, offset, 16);
         p_uncomp_header->render_size.render_width = p_uncomp_header->render_size.render_width_minus_1 + 1;
         p_uncomp_header->render_size.render_height = p_uncomp_header->render_size.render_height_minus_1 + 1;
     } else {
@@ -702,7 +785,7 @@ void Vp9VideoParser::RenderSize(const uint8_t *p_stream, size_t &offset, Vp9Unco
 void Vp9VideoParser::FrameSizeWithRefs(const uint8_t *p_stream, size_t &offset, Vp9UncompressedHeader *p_uncomp_header) {
     uint8_t found_ref;
     for (int i = 0; i < 3; i++) {
-        found_ref = Parser::GetBit(p_stream, offset);
+        found_ref = GetBitChecked(p_stream, offset);
         if (found_ref) {
             p_uncomp_header->frame_size.frame_width = dpb_buffer_.ref_frame_width[p_uncomp_header->ref_frame_idx[i]];
             p_uncomp_header->frame_size.frame_height = dpb_buffer_.ref_frame_height[p_uncomp_header->ref_frame_idx[i]];
@@ -747,20 +830,20 @@ void Vp9VideoParser::SetupPastIndependence(Vp9UncompressedHeader *p_uncomp_heade
 }
 
 void Vp9VideoParser::LoopFilterParams(const uint8_t *p_stream, size_t &offset, Vp9UncompressedHeader *p_uncomp_header) {
-    p_uncomp_header->loop_filter_params.loop_filter_level = Parser::ReadBits(p_stream, offset, 6);
-    p_uncomp_header->loop_filter_params.loop_filter_sharpness = Parser::ReadBits(p_stream, offset, 3);
-    p_uncomp_header->loop_filter_params.loop_filter_delta_enabled = Parser::GetBit(p_stream, offset);
+    p_uncomp_header->loop_filter_params.loop_filter_level = ReadBitsChecked(p_stream, offset, 6);
+    p_uncomp_header->loop_filter_params.loop_filter_sharpness = ReadBitsChecked(p_stream, offset, 3);
+    p_uncomp_header->loop_filter_params.loop_filter_delta_enabled = GetBitChecked(p_stream, offset);
     if (p_uncomp_header->loop_filter_params.loop_filter_delta_enabled) {
-        p_uncomp_header->loop_filter_params.loop_filter_delta_update = Parser::GetBit(p_stream, offset);
+        p_uncomp_header->loop_filter_params.loop_filter_delta_update = GetBitChecked(p_stream, offset);
         if (p_uncomp_header->loop_filter_params.loop_filter_delta_update) {
             for (int i = 0; i < 4; i++) {
-                p_uncomp_header->loop_filter_params.update_ref_delta[i] = Parser::GetBit(p_stream, offset);
+                p_uncomp_header->loop_filter_params.update_ref_delta[i] = GetBitChecked(p_stream, offset);
                 if (p_uncomp_header->loop_filter_params.update_ref_delta[i]) {
                     p_uncomp_header->loop_filter_params.loop_filter_ref_deltas[i] = ReadSigned(p_stream, offset, 6);
                 }
             }
             for (int i = 0; i < 2; i++) {
-                p_uncomp_header->loop_filter_params.update_mode_delta[i] = Parser::GetBit(p_stream, offset);
+                p_uncomp_header->loop_filter_params.update_mode_delta[i] = GetBitChecked(p_stream, offset);
                 if (p_uncomp_header->loop_filter_params.update_mode_delta[i]) {
                     p_uncomp_header->loop_filter_params.loop_filter_mode_deltas[i] = ReadSigned(p_stream, offset, 6);
                 }
@@ -770,7 +853,7 @@ void Vp9VideoParser::LoopFilterParams(const uint8_t *p_stream, size_t &offset, V
 }
 
 void Vp9VideoParser::QuantizationParams(const uint8_t *p_stream, size_t &offset, Vp9UncompressedHeader *p_uncomp_header) {
-    p_uncomp_header->quantization_params.base_q_idx = Parser::ReadBits(p_stream, offset, 8);
+    p_uncomp_header->quantization_params.base_q_idx = ReadBitsChecked(p_stream, offset, 8);
     p_uncomp_header->quantization_params.delta_q_y_dc = ReadDeltaQ(p_stream, offset);
     p_uncomp_header->quantization_params.delta_q_uv_dc = ReadDeltaQ(p_stream, offset);
     p_uncomp_header->quantization_params.delta_q_uv_ac = ReadDeltaQ(p_stream, offset);
@@ -780,7 +863,7 @@ void Vp9VideoParser::QuantizationParams(const uint8_t *p_stream, size_t &offset,
 int8_t Vp9VideoParser::ReadDeltaQ(const uint8_t *p_stream, size_t &offset) {
     uint8_t delta_coded;
     int8_t delta_q;
-    delta_coded = Parser::GetBit(p_stream, offset);
+    delta_coded = GetBitChecked(p_stream, offset);
     if (delta_coded) {
         delta_q = ReadSigned(p_stream, offset, 4);
     } else {
@@ -792,32 +875,32 @@ int8_t Vp9VideoParser::ReadDeltaQ(const uint8_t *p_stream, size_t &offset) {
 ParserResult Vp9VideoParser::SegmentationParams(const uint8_t *p_stream, size_t &offset, Vp9UncompressedHeader *p_uncomp_header) {
     const uint8_t segmentation_feature_bits[VP9_SEG_LVL_MAX] = {8, 6, 2, 0};
     const uint8_t segmentation_feature_signed[VP9_SEG_LVL_MAX] = {1, 1, 0, 0};
-    p_uncomp_header->segmentation_params.segmentation_enabled = Parser::GetBit(p_stream, offset);
+    p_uncomp_header->segmentation_params.segmentation_enabled = GetBitChecked(p_stream, offset);
     if (p_uncomp_header->segmentation_params.segmentation_enabled) {
-        p_uncomp_header->segmentation_params.segmentation_update_map = Parser::GetBit(p_stream, offset);
+        p_uncomp_header->segmentation_params.segmentation_update_map = GetBitChecked(p_stream, offset);
         if (p_uncomp_header->segmentation_params.segmentation_update_map) {
             for (int i = 0; i < 7; i++) {
                 p_uncomp_header->segmentation_params.segmentation_tree_probs[i] = ReadProb(p_stream, offset);
             }
-            p_uncomp_header->segmentation_params.segmentation_temporal_update = Parser::GetBit(p_stream, offset);
+            p_uncomp_header->segmentation_params.segmentation_temporal_update = GetBitChecked(p_stream, offset);
             for (int i = 0; i < 3; i++) {
                 p_uncomp_header->segmentation_params.segmentation_pred_prob[i] = p_uncomp_header->segmentation_params.segmentation_temporal_update ? ReadProb(p_stream, offset) : 255;
             }
         }
-        p_uncomp_header->segmentation_params.segmentation_update_data = Parser::GetBit(p_stream, offset);
+        p_uncomp_header->segmentation_params.segmentation_update_data = GetBitChecked(p_stream, offset);
         if (p_uncomp_header->segmentation_params.segmentation_update_data) {
-            p_uncomp_header->segmentation_params.segmentation_abs_or_delta_update = Parser::GetBit(p_stream, offset);
+            p_uncomp_header->segmentation_params.segmentation_abs_or_delta_update = GetBitChecked(p_stream, offset);
             for (int i = 0; i < VP9_MAX_SEGMENTS; i++) {
                 for (int j = 0; j < VP9_SEG_LVL_MAX; j++) {
                     int feature_value = 0;
-                    p_uncomp_header->segmentation_params.feature_enabled[i][j] = Parser::GetBit(p_stream, offset);
+                    p_uncomp_header->segmentation_params.feature_enabled[i][j] = GetBitChecked(p_stream, offset);
                     if (p_uncomp_header->segmentation_params.feature_enabled[i][j]) {
                         int bits_to_read = segmentation_feature_bits[j];
                         if (bits_to_read) {
-                            feature_value = Parser::ReadBits(p_stream, offset, bits_to_read);
+                            feature_value = ReadBitsChecked(p_stream, offset, bits_to_read);
                         }
                         if (segmentation_feature_signed[j] == 1) {
-                            uint8_t feature_sign = Parser::GetBit(p_stream, offset);
+                            uint8_t feature_sign = GetBitChecked(p_stream, offset);
                             if (feature_sign) {
                                 if (p_uncomp_header->segmentation_params.segmentation_abs_or_delta_update == 1) {
                                     ErrorLog(g_rocdec_logger, "It is a requirement of bitstream conformance that feature_sign is equal to 0 when segmentation_abs_or_delta_update is equal to 1.");
@@ -841,9 +924,9 @@ ParserResult Vp9VideoParser::SegmentationParams(const uint8_t *p_stream, size_t 
 uint8_t Vp9VideoParser::ReadProb(const uint8_t *p_stream, size_t &offset) {
     uint8_t prob_coded;
     uint8_t prob = 255;
-    prob_coded = Parser::GetBit(p_stream, offset);
+    prob_coded = GetBitChecked(p_stream, offset);
     if (prob_coded) {
-        prob = Parser::ReadBits(p_stream, offset, 8);
+        prob = ReadBitsChecked(p_stream, offset, 8);
     }
     return prob;
 }
@@ -863,16 +946,16 @@ ParserResult Vp9VideoParser::TileInfo(const uint8_t *p_stream, size_t &offset, V
     p_uncomp_header->tile_info.max_log2_tile_cols = max_log2 - 1;
     p_uncomp_header->tile_info.tile_cols_log2 = p_uncomp_header->tile_info.min_log2_tile_cols;
     while (p_uncomp_header->tile_info.tile_cols_log2 < p_uncomp_header->tile_info.max_log2_tile_cols) {
-        if (Parser::GetBit(p_stream, offset)) { // increment_tile_cols_log2
+        if (GetBitChecked(p_stream, offset)) { // increment_tile_cols_log2
             p_uncomp_header->tile_info.tile_cols_log2++;
         } else {
             break;
         }
     }
     CHECK_ALLOWED_MAX("tile_cols_log2", p_uncomp_header->tile_info.tile_cols_log2, 6);
-    p_uncomp_header->tile_info.tile_rows_log2 = Parser::GetBit(p_stream, offset);
+    p_uncomp_header->tile_info.tile_rows_log2 = GetBitChecked(p_stream, offset);
     if (p_uncomp_header->tile_info.tile_rows_log2) {
-        uint8_t increment_tile_rows_log2 = Parser::GetBit(p_stream, offset);
+        uint8_t increment_tile_rows_log2 = GetBitChecked(p_stream, offset);
         p_uncomp_header->tile_info.tile_rows_log2 += increment_tile_rows_log2;
     }
     return PARSER_OK;
@@ -1010,12 +1093,14 @@ static const int16_t ac_qlookup[3][256] = {
   28143, 28687, 29247,}
 };
 
+// The callers check bit_depth before reaching here; clamp the row as well since these
+// cannot report an error, and a bit_depth below 8 makes the row index negative.
 int Vp9VideoParser::DcQ(int bit_depth, int index) {
-    return dc_qlookup[(bit_depth - 8) >> 1][std::clamp(index, 0, 255)];
+    return dc_qlookup[std::clamp((bit_depth - 8) >> 1, 0, 2)][std::clamp(index, 0, 255)];
 }
 
 int Vp9VideoParser::AcQ(int bit_depth, int index) {
-    return ac_qlookup[(bit_depth - 8) >> 1][std::clamp(index, 0, 255)];
+    return ac_qlookup[std::clamp((bit_depth - 8) >> 1, 0, 2)][std::clamp(index, 0, 255)];
 }
 
 int Vp9VideoParser::GetQIndex(Vp9UncompressedHeader *p_uncomp_header, int seg_id) {
@@ -1055,26 +1140,32 @@ void Vp9VideoParser::SetupSegDequant(Vp9UncompressedHeader *p_uncomp_header) {
 void Vp9VideoParser::LoopFilterFrameInit(Vp9UncompressedHeader *p_uncomp_header) {
     int n_shift = p_uncomp_header->loop_filter_params.loop_filter_level >> 5;
     for (int seg_id = 0; seg_id < VP9_MAX_SEGMENTS; seg_id++) {
-        uint8_t lvl_seg = p_uncomp_header->loop_filter_params.loop_filter_level;
+        // 8.8.1 clips signed intermediates, so lvlSeg, intraLvl and interLvl are held in int
+        // here. feature_data and the loop filter deltas are signed, and accumulating into a
+        // uint8_t wrapped a negative result before the clamp could bring it back to 0.
+        int lvl_seg = p_uncomp_header->loop_filter_params.loop_filter_level;
         if (p_uncomp_header->segmentation_params.feature_enabled[seg_id][VP9_SEG_LVL_ALT_L]) {
             if (p_uncomp_header->segmentation_params.segmentation_abs_or_delta_update) {
                 lvl_seg = p_uncomp_header->segmentation_params.feature_data[seg_id][VP9_SEG_LVL_ALT_L];
             } else {
                 lvl_seg += p_uncomp_header->segmentation_params.feature_data[seg_id][VP9_SEG_LVL_ALT_L];
             }
-            lvl_seg = std::clamp(static_cast<int>(lvl_seg), 0, VP9_MAX_LOOP_FILTER);
+            lvl_seg = std::clamp(lvl_seg, 0, VP9_MAX_LOOP_FILTER);
         }
         if (p_uncomp_header->loop_filter_params.loop_filter_delta_update == 0) {
             memset(lvl_lookup_[seg_id], lvl_seg, VP9_MAX_REF_FRAMES * MAX_MODE_LF_DELTAS * sizeof(uint8_t));
         }
         if (p_uncomp_header->loop_filter_params.loop_filter_delta_enabled) {
-            uint8_t intra_lvl = lvl_seg + (p_uncomp_header->loop_filter_params.loop_filter_ref_deltas[kVp9IntraFrame] << n_shift);
-            lvl_lookup_[seg_id][kVp9IntraFrame][0] = std::clamp(static_cast<int>(intra_lvl), 0, VP9_MAX_LOOP_FILTER);
+            // The deltas are signed and the defaults alone include -1. Left shifting a
+            // negative value is undefined, so scale by the equivalent multiplier instead.
+            int lf_multiplier = 1 << n_shift;
+            int intra_lvl = lvl_seg + p_uncomp_header->loop_filter_params.loop_filter_ref_deltas[kVp9IntraFrame] * lf_multiplier;
+            lvl_lookup_[seg_id][kVp9IntraFrame][0] = std::clamp(intra_lvl, 0, VP9_MAX_LOOP_FILTER);
             for (int ref = kVp9LastFrame; ref < VP9_MAX_REF_FRAMES; ref++) {
                 for (int mode = 0; mode < MAX_MODE_LF_DELTAS; mode++) {
-                    uint8_t inter_lvl = lvl_seg + (p_uncomp_header->loop_filter_params.loop_filter_ref_deltas[ref] << n_shift)
-                    + (p_uncomp_header->loop_filter_params.loop_filter_mode_deltas[mode] << n_shift);
-                    lvl_lookup_[seg_id][ref][mode] = std::clamp(static_cast<int>(inter_lvl), 0, VP9_MAX_LOOP_FILTER);
+                    int inter_lvl = lvl_seg + p_uncomp_header->loop_filter_params.loop_filter_ref_deltas[ref] * lf_multiplier
+                    + p_uncomp_header->loop_filter_params.loop_filter_mode_deltas[mode] * lf_multiplier;
+                    lvl_lookup_[seg_id][ref][mode] = std::clamp(inter_lvl, 0, VP9_MAX_LOOP_FILTER);
                 }
             }
         }

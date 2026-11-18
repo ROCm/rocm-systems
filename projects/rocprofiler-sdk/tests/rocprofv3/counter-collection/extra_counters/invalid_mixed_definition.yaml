@@ -1,0 +1,10 @@
+rocprofiler-sdk:
+  counters:
+  - name: TEST
+    description: test
+    definitions:
+    - architectures:
+      - gfx942
+      expression: SQ_WAVES
+      block: SQ
+      event: 1

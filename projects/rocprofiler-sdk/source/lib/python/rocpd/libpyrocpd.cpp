@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,12 +30,15 @@
 #include "lib/python/rocpd/source/sql_generator.hpp"
 #include "lib/python/rocpd/source/types.hpp"
 
+#include "lib/rocprofiler-sdk-rocpd/details/operators.hpp"
+
 #include "lib/common/defines.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/simple_timer.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/output/agent_info.hpp"
 #include "lib/output/kernel_symbol_info.hpp"
+#include "lib/output/metadata.hpp"
 #include "lib/output/output_config.hpp"
 #include "lib/output/output_stream.hpp"
 #include "lib/output/sql/common.hpp"
@@ -43,6 +46,8 @@
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/pc_sampling.h>
+#include <rocprofiler-sdk/cxx/codeobj/code_printing.hpp>
 #include <rocprofiler-sdk/cxx/details/mpl.hpp>
 #include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 #include <rocprofiler-sdk/cxx/hash.hpp>
@@ -64,8 +69,10 @@
 
 #include <atomic>
 #include <future>
+#include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -144,8 +151,17 @@ struct RocpdImportData
     RocpdImportData& operator=(RocpdImportData&&) noexcept = default;
 
     RocpdImportData(const py::object& _obj, const std::vector<std::string>& _dbs)
+    : RocpdImportData{_obj, _dbs, {0, 0, 0}, {}}
+    {}
+
+    RocpdImportData(const py::object&               _obj,
+                    const std::vector<std::string>& _dbs,
+                    rocpd_version_triplet_t         _schema_version,
+                    std::vector<std::string>        _supported_features)
     : connection{_obj}
     , databases{_dbs}
+    , schema_version{_schema_version}
+    , supported_features{std::move(_supported_features)}
     {
         if(py::isinstance<RocpdImportData>(_obj))
         {
@@ -169,8 +185,10 @@ struct RocpdImportData
     size_t size() const { return (connection) ? databases.size() : 0; }
     bool   empty() const { return databases.empty() || !connection; }
 
-    py::object               connection = {};
-    std::vector<std::string> databases  = {};
+    py::object               connection         = {};
+    std::vector<std::string> databases          = {};
+    rocpd_version_triplet_t  schema_version     = {0, 0, 0};
+    std::vector<std::string> supported_features = {};
 };
 
 struct jinja_variables
@@ -225,6 +243,82 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
         .value("node", tool::agent_indexing::node)
         .value("logical_node", tool::agent_indexing::logical_node)
         .value("logical_node_type", tool::agent_indexing::logical_node_type);
+
+    namespace codeobj = ::rocprofiler::sdk::codeobj::disassembly;
+
+    py::class_<codeobj::CodeobjAddressTranslate>(pyrocpd, "isa_decoder")
+        .def(py::init<>())
+        .def("add_code_object_file",
+             [](codeobj::CodeobjAddressTranslate& self,
+                const std::string&                path,
+                uint64_t                          code_object_id,
+                uint64_t                          load_delta,
+                uint64_t                          load_size) {
+                 self.addDecoder(path.c_str(), code_object_id, load_delta, load_size);
+             })
+        .def("add_code_object_memory",
+             [](codeobj::CodeobjAddressTranslate& self,
+                const py::bytes&                  data,
+                uint64_t                          code_object_id,
+                uint64_t                          load_delta,
+                uint64_t                          load_size) {
+                 // The decoder copies the bytes; a view avoids a second copy.
+                 auto bytes = static_cast<std::string_view>(data);
+                 self.addDecoder(bytes.data(), bytes.size(), code_object_id, load_delta, load_size);
+             })
+        .def("decode",
+             [](codeobj::CodeobjAddressTranslate& self,
+                uint64_t                          code_object_id,
+                uint64_t                          code_object_offset) -> py::object {
+                 auto instruction = self.get(code_object_id, code_object_offset);
+                 if(!instruction) return py::none{};
+
+                 py::dict result{};
+                 result["instruction"] = instruction->inst;
+                 result["comment"]     = instruction->comment;
+                 result["size"]        = instruction->size;
+                 result["faddr"]       = instruction->faddr;
+                 result["vaddr"]       = instruction->vaddr;
+                 return result;
+             });
+
+    pyrocpd.def(
+        "code_object_content_hash",
+        [](const py::bytes& data) {
+            char*      buffer = nullptr;
+            Py_ssize_t length = 0;
+            if(PyBytes_AsStringAndSize(data.ptr(), &buffer, &length) != 0)
+                throw py::error_already_set{};
+            return tool::compute_code_object_content_hash(buffer, static_cast<size_t>(length));
+        },
+        "Return the content hash rocprofv3 records for a code object it decodes during PC "
+        "sampling (rocpd_info_code_object extdata 'content_hash').");
+
+    // Expose the SDK's canonical PC-sampling enum->name lookups so post-processing
+    // (rocpd importer) can resolve inst_type / stall_reason names without hardcoding
+    // the enum tables.  The SDK generates these from the enums at compile time, so new
+    // hardware values are picked up automatically -- nothing here needs updating.
+    pyrocpd.def(
+        "pc_sampling_instruction_type_name",
+        [](int value) -> py::object {
+            const auto* name = rocprofiler_get_pc_sampling_instruction_type_name(
+                static_cast<rocprofiler_pc_sampling_instruction_type_t>(value));
+            if(name == nullptr) return py::none{};
+            return py::str{name};
+        },
+        "Return the ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_* name for a PC sampling "
+        "inst_type enum value, or None if the value is not recognized by this SDK.");
+
+    pyrocpd.def(
+        "pc_sampling_instruction_not_issued_reason_name",
+        [](int value) -> py::object {
+            const auto* name = rocprofiler_get_pc_sampling_instruction_not_issued_reason_name(
+                static_cast<rocprofiler_pc_sampling_instruction_not_issued_reason_t>(value));
+            if(name == nullptr) return py::none{};
+            return py::str{name};
+        },
+        "Return the ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_* name for a "
+        "PC sampling stall_reason enum value, or None if unrecognized by this SDK.");
 
     // demo for creating python bindings to a class
     py::class_<rocpd::types::agent>(pyrocpd, "agent")
@@ -354,16 +448,32 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
              [](const rocpd_version_triplet_t& v) {
                  return fmt::format("{}.{}.{}", v.major, v.minor, v.patch);
              })
-        .def("__repr__", [](const rocpd_version_triplet_t& v) {
-            return fmt::format("schema_version({}, {}, {})", v.major, v.minor, v.patch);
-        });
+        .def("__repr__",
+             [](const rocpd_version_triplet_t& v) {
+                 return fmt::format("schema_version({}, {}, {})", v.major, v.minor, v.patch);
+             })
+        // NOLINTBEGIN(misc-redundant-expression)
+        .def(py::self == py::self)
+        .def(py::self != py::self)
+        .def(py::self < py::self)
+        .def(py::self > py::self)
+        .def(py::self <= py::self)
+        .def(py::self >= py::self)
+        // NOLINTEND(misc-redundant-expression)
+        ;
 
     py::class_<rocpd::RocpdImportData>(pyrocpd, "RocpdImportData", "RocPD database(s) instances")
         .def(py::init<>())
         .def(py::init<rocpd::RocpdImportData>())
         .def(py::init<py::object, std::vector<std::string>>())
+        .def(py::init<py::object,
+                      std::vector<std::string>,
+                      rocpd_version_triplet_t,
+                      std::vector<std::string>>())
         .def_readonly("connection", &rocpd::RocpdImportData::connection)
-        .def_readonly("databases", &rocpd::RocpdImportData::databases);
+        .def_readonly("databases", &rocpd::RocpdImportData::databases)
+        .def_readonly("schema_version", &rocpd::RocpdImportData::schema_version)
+        .def_readonly("supported_features", &rocpd::RocpdImportData::supported_features);
 
     pyrocpd.def("load_schema",
                 [](rocpd_sql_engine_t            engine,
@@ -492,7 +602,18 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
 
             auto* conn             = rocpd::interop::get_connection(std::move(data.connection));
             auto  perfetto_session = rocpd::output::PerfettoSession{output_cfg, conn};
-            auto  sqlgen_perf      = common::simple_timer{
+
+            // Identify schema specific limits & features here.
+            // Feature names are resolved in Python (features.py) and stored on
+            // RocpdImportData.supported_features so C++ never duplicates version constants.
+            auto schema_version = data.schema_version;
+            // auto has_feature    = [&data](std::string_view name) {
+            //     const auto& feats = data.supported_features;
+            //     return std::find(feats.begin(), feats.end(), name) != feats.end();
+            // };
+            // const auto graph_launch_supported = has_feature("graph_launch");
+
+            auto sqlgen_perf = common::simple_timer{
                 fmt::format("Perfetto generation from {} SQL database(s)", data.size())};
             for(auto obj : {data.connection})
             {
@@ -514,14 +635,28 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                                            pitr.guid,
                                            nitr.id,
                                            nitr.guid);
-                        auto select_guid_nid_pid = [&nitr, &pitr](std::string_view tbl) {
-                            return fmt::format("SELECT * FROM {} WHERE guid = '{}' AND nid "
-                                               "= {} AND pid = {}",
-                                               tbl,
-                                               pitr.guid,
-                                               nitr.id,
-                                               pitr.pid);
+                        auto select_guid_nid_pid = [&nitr, &pitr](std::string_view tbl,
+                                                                  std::string_view condition = {}) {
+                            return fmt::format(
+                                "SELECT * FROM {} WHERE guid = '{}' AND nid "
+                                "= {} AND pid = {}{}",
+                                tbl,
+                                pitr.guid,
+                                nitr.id,
+                                pitr.pid,
+                                condition.empty() ? std::string{} : fmt::format(" {}", condition));
                         };
+
+                        // Exclude SPM samples from the Perfetto trace. SPM samples reference
+                        // kernel dispatch events via event_id and use GPU hardware timestamps
+                        // that are in a different clock domain from CPU-monotonic timestamps,
+                        // causing the timeline to render incorrectly.
+                        // The subquery against rocpd_kernel_dispatch is small (one row per
+                        // dispatch, typically ~100s) and fast.
+                        auto samples_condition =
+                            fmt::format("AND event_id NOT IN (SELECT event_id FROM "
+                                        "rocpd_kernel_dispatch WHERE guid = '{}')",
+                                        pitr.guid);
 
                         auto _sqlgen_perft = common::simple_timer{fmt::format(
                             "Perfetto generation from SQL for process {} (total)", pitr.pid)};
@@ -536,8 +671,11 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                         auto memory_copies = rocpd::sql_generator<rocpd::types::memory_copies>{
                             conn, select_guid_nid_pid("memory_copies")};
 
-                        auto graph_launches = rocpd::sql_generator<rocpd::types::graph_launch>{
-                            conn, select_guid_nid_pid("graph_launches")};
+                        // Schemas < 3.0.2 lack the graph_launches table/view entirely, so allow
+                        // generator to be empty if the query for the view fails
+                        auto graph_launches =
+                            rocpd::sql_generator<rocpd::types::graph_launch, rocpd::optional_view>{
+                                conn, select_guid_nid_pid("graph_launches")};
 
                         auto scratch_memory = rocpd::sql_generator<rocpd::types::scratch_memory>{
                             conn, select_guid_nid_pid("scratch_memory")};
@@ -545,11 +683,19 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                         auto counters = rocpd::sql_generator<rocpd::types::counter>{
                             conn, select_guid_nid_pid("counters_collection")};
 
+                        // Schemas < 3.0.4 lack the hip_events table/view entirely, so allow
+                        // generator to be empty if the query for the view fails
+                        auto hip_events =
+                            rocpd::sql_generator<rocpd::types::hip_events, rocpd::optional_view>{
+                                conn, select_guid_nid_pid("hip_events")};
+
                         auto regions = rocpd::sql_generator<rocpd::types::region>{
                             conn, select_guid_nid_pid("regions"), region_order_by};
 
                         auto samples = rocpd::sql_generator<rocpd::types::sample>{
-                            conn, select_guid_nid_pid("samples"), sample_order_by};
+                            conn,
+                            select_guid_nid_pid("samples", samples_condition),
+                            sample_order_by};
 
                         auto threads = rocpd::sql_generator<rocpd::types::thread>{
                             conn, select_guid_nid_pid("threads")};
@@ -572,6 +718,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                         rocpd::output::write_perfetto(perfetto_session,
                                                       pitr,
                                                       agents_map,
+                                                      schema_version,
                                                       threads,
                                                       regions,
                                                       samples,
@@ -580,7 +727,8 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                                                       graph_launches,
                                                       scratch_memory,
                                                       memory_allocations,
-                                                      counters);
+                                                      counters,
+                                                      hip_events);
                     }
                 }
             }

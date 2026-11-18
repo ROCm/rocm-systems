@@ -1,30 +1,13 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 #include "err_cnt_read.h"
 
 #include <gtest/gtest.h>
 
 #include <cstdint>
 #include <iostream>
+#include <string>
 
 #include "amd_smi/amdsmi.h"
 #include "test_common.h"
@@ -60,6 +43,7 @@ void TestErrCntRead::Close() {
 void TestErrCntRead::Run(void) {
   amdsmi_status_t err;
   amdsmi_error_count_t ec;
+  amdsmi_error_count_t total_ec;
   uint64_t enabled_mask;
   amdsmi_ras_err_state_t err_state;
 
@@ -73,6 +57,28 @@ void TestErrCntRead::Run(void) {
   for (uint32_t x = 0; x < num_iterations(); ++x) {
     for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
       PrintDeviceHeader(processor_handles_[i]);
+
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_total_ecc_count", "gpu=" + std::to_string(i),
+                         VERB(STANDARD));
+      err = amdsmi_get_gpu_total_ecc_count(processor_handles_[i], &total_ec);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+      if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
+        IF_VERB(STANDARD) { std::cout << "\t**Total ECC counts: N/A" << std::endl; }
+      } else {
+        CHK_ERR_ASRT(err)
+        IF_VERB(STANDARD) {
+          std::cout << "\t**Total ECC counts: " << std::endl;
+          std::cout << "\t\tCorrectable errors: " << total_ec.correctable_count << std::endl;
+          std::cout << "\t\tUncorrectable errors: " << total_ec.uncorrectable_count << std::endl;
+          std::cout << "\t\tDeferred errors: " << total_ec.deferred_count << std::endl;
+        }
+      }
+      // Verify api support checking functionality is working
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_total_ecc_count(nullptr check)",
+                         "gpu=" + std::to_string(i), VERB(STANDARD));
+      err = amdsmi_get_gpu_total_ecc_count(processor_handles_[i], nullptr);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+      ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
       DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_enabled", "gpu=" + std::to_string(i), VERB(STANDARD));
       err = amdsmi_get_gpu_ecc_enabled(processor_handles_[i], &enabled_mask);
@@ -96,11 +102,27 @@ void TestErrCntRead::Run(void) {
         ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
         IF_VERB(STANDARD) {
-          std::cout << "Block Error Mask: 0x" << std::hex << enabled_mask << std::endl;
+          std::cout << "Block Error Mask: 0x" << std::hex << enabled_mask << std::dec << std::endl;
+          std::string enabled_names;
+          uint32_t enabled_count = 0;
+          for (uint64_t b = AMDSMI_GPU_BLOCK_FIRST; b <= AMDSMI_GPU_BLOCK_LAST; b = b * 2) {
+            if (enabled_mask & b) {
+              if (enabled_count++ > 0) {
+                enabled_names += ", ";
+              }
+              enabled_names += GetBlockNameStr(static_cast<amdsmi_gpu_block_t>(b));
+            }
+          }
+          std::cout << "Enabled blocks: (" << enabled_count << ")" << (enabled_count > 0 ? " " : "")
+                    << enabled_names << std::endl;
         }
       }
-      for (uint32_t b = AMDSMI_GPU_BLOCK_FIRST; b <= AMDSMI_GPU_BLOCK_LAST; b = b * 2) {
-        DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_status", "gpu=" + std::to_string(i), VERB(STANDARD));
+
+      for (uint64_t b = AMDSMI_GPU_BLOCK_FIRST; b <= AMDSMI_GPU_BLOCK_LAST; b = b * 2) {
+        DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_status",
+                           "gpu=" + std::to_string(i) +
+                               ", block=" + GetBlockNameStr(static_cast<amdsmi_gpu_block_t>(b)),
+                           VERB(STANDARD));
         err = amdsmi_get_gpu_ecc_status(processor_handles_[i], static_cast<amdsmi_gpu_block_t>(b),
                                         &err_state);
         DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
@@ -111,13 +133,19 @@ void TestErrCntRead::Run(void) {
                     << " block: " << GetErrStateNameStr(err_state) << std::endl;
         }
         // Verify api support checking functionality is working
-        DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_status", "gpu=" + std::to_string(i), VERB(STANDARD));
+        DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_status",
+                           "gpu=" + std::to_string(i) +
+                               ", block=" + GetBlockNameStr(static_cast<amdsmi_gpu_block_t>(b)),
+                           VERB(STANDARD));
         err = amdsmi_get_gpu_ecc_status(processor_handles_[i], static_cast<amdsmi_gpu_block_t>(b),
                                         nullptr);
         DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
         ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
-        DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_count", "gpu=" + std::to_string(i), VERB(STANDARD));
+        DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_count",
+                           "gpu=" + std::to_string(i) +
+                               ", block=" + GetBlockNameStr(static_cast<amdsmi_gpu_block_t>(b)),
+                           VERB(STANDARD));
         err = amdsmi_get_gpu_ecc_count(processor_handles_[i], static_cast<amdsmi_gpu_block_t>(b),
                                        &ec);
         DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
@@ -129,7 +157,9 @@ void TestErrCntRead::Run(void) {
                       << ": Not supported for this device or error accessing file" << std::endl;
           }
           // Verify api support checking functionality is working
-          DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_count", "gpu=" + std::to_string(i),
+          DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_count",
+                             "gpu=" + std::to_string(i) +
+                                 ", block=" + GetBlockNameStr(static_cast<amdsmi_gpu_block_t>(b)),
                              VERB(STANDARD));
           err = amdsmi_get_gpu_ecc_count(processor_handles_[i], static_cast<amdsmi_gpu_block_t>(b),
                                          nullptr);
@@ -146,7 +176,9 @@ void TestErrCntRead::Run(void) {
             std::cout << "\t\tUncorrectable errors: " << ec.uncorrectable_count << std::endl;
           }
           // Verify api support checking functionality is working
-          DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_count", "gpu=" + std::to_string(i),
+          DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_count",
+                             "gpu=" + std::to_string(i) +
+                                 ", block=" + GetBlockNameStr(static_cast<amdsmi_gpu_block_t>(b)),
                              VERB(STANDARD));
           err = amdsmi_get_gpu_ecc_count(processor_handles_[i], static_cast<amdsmi_gpu_block_t>(b),
                                          nullptr);

@@ -7,7 +7,7 @@
 #include "library/pmc/collectors/cpu/types.hpp"
 #include <cstdint>
 
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include <concepts>
 #include <map>
@@ -110,8 +110,14 @@ public:
     {
         metrics result = make_empty_metrics();
 
-        if(enabled.bits.load) collect_load_metrics(result);
-        if(enabled.bits.frequency) collect_frequency_metrics(result);
+        if(enabled.bits.load)
+        {
+            collect_load_metrics(result);
+        }
+        if(enabled.bits.frequency)
+        {
+            collect_frequency_metrics(result);
+        }
         collect_process_metrics(result, enabled);
 
         return result;
@@ -122,19 +128,19 @@ private:
     {
         m_supported_metrics.value = 0;
 
-        auto jiffies = m_backend->read_proc_stat();
+        auto const jiffies = m_backend->read_proc_stat();
         if(!jiffies.empty())
         {
             m_supported_metrics.bits.load = 1;
         }
 
-        auto freqs = m_backend->read_cpu_frequencies();
+        auto const freqs = m_backend->read_cpu_frequencies();
         if(!freqs.empty())
         {
             m_supported_metrics.bits.frequency = 1;
         }
 
-        auto rusage                           = m_backend->read_rusage();
+        auto const rusage                     = m_backend->read_rusage();
         m_supported_metrics.bits.page_rss     = 1;
         m_supported_metrics.bits.virt_mem     = 1;
         m_supported_metrics.bits.peak_rss     = (rusage.peak_rss > 0) ? 1u : 0u;
@@ -152,16 +158,22 @@ private:
      */
     void collect_load_metrics(metrics& result)
     {
-        if(!m_supported_metrics.bits.load) return;
+        if(!m_supported_metrics.bits.load)
+        {
+            return;
+        }
 
         auto current_jiffies = m_backend->read_proc_stat();
 
         for(const auto& cpu_id : m_monitored_cpus)
         {
-            auto curr_it = current_jiffies.find(cpu_id);
-            if(curr_it == current_jiffies.end()) continue;
+            auto const curr_it = current_jiffies.find(cpu_id);
+            if(curr_it == current_jiffies.end())
+            {
+                continue;
+            }
 
-            auto prev_it = m_prev_jiffies.find(cpu_id);
+            auto const prev_it = m_prev_jiffies.find(cpu_id);
             if(prev_it == m_prev_jiffies.end())
             {
                 m_prev_jiffies[cpu_id] = curr_it->second;
@@ -201,14 +213,20 @@ private:
 
     void collect_frequency_metrics(metrics& result)
     {
-        if(!m_supported_metrics.bits.frequency) return;
+        if(!m_supported_metrics.bits.frequency)
+        {
+            return;
+        }
 
         auto freqs = m_backend->read_cpu_frequencies();
 
         for(const auto& cpu_id : m_monitored_cpus)
         {
-            auto freq_it = freqs.find(cpu_id);
-            if(freq_it == freqs.end()) continue;
+            auto const freq_it = freqs.find(cpu_id);
+            if(freq_it == freqs.end())
+            {
+                continue;
+            }
 
             auto* entry      = find_or_create_cpu_entry(result, cpu_id);
             entry->frequency = freq_it->second;
@@ -221,24 +239,41 @@ private:
             enabled.bits.page_rss || enabled.bits.virt_mem || enabled.bits.peak_rss ||
             enabled.bits.ctx_switches || enabled.bits.page_faults ||
             enabled.bits.user_time || enabled.bits.kernel_time;
-        if(!any_process_metric) return;
+        if(!any_process_metric)
+        {
+            return;
+        }
 
-        auto snap = m_backend->read_rusage();
+        auto const snap = m_backend->read_rusage();
 
         if(m_supported_metrics.bits.page_rss && enabled.bits.page_rss)
+        {
             result.process_data.page_rss = snap.page_rss;
+        }
         if(m_supported_metrics.bits.virt_mem && enabled.bits.virt_mem)
+        {
             result.process_data.virt_mem = snap.virt_mem;
+        }
         if(m_supported_metrics.bits.peak_rss && enabled.bits.peak_rss)
+        {
             result.process_data.peak_rss = snap.peak_rss;
+        }
         if(m_supported_metrics.bits.ctx_switches && enabled.bits.ctx_switches)
+        {
             result.process_data.context_switches = snap.context_switches;
+        }
         if(m_supported_metrics.bits.page_faults && enabled.bits.page_faults)
+        {
             result.process_data.page_faults = snap.page_faults;
+        }
         if(m_supported_metrics.bits.user_time && enabled.bits.user_time)
+        {
             result.process_data.user_mode_time = snap.user_mode_time;
+        }
         if(m_supported_metrics.bits.kernel_time && enabled.bits.kernel_time)
+        {
             result.process_data.kernel_mode_time = snap.kernel_mode_time;
+        }
     }
 
     /**
@@ -251,9 +286,10 @@ private:
     {
         metrics result;
         result.cpu_data.reserve(m_monitored_cpus.size());
-        for(auto cpu_id : m_monitored_cpus)
+        for(auto const cpu_id : m_monitored_cpus)
         {
-            result.cpu_data.push_back({ cpu_id, 0.0f, 0.0 });
+            result.cpu_data.push_back(
+                { .cpu_id = cpu_id, .frequency = 0.0f, .load = 0.0 });
         }
         return result;
     }
@@ -262,9 +298,12 @@ private:
     {
         for(auto& entry : result.cpu_data)
         {
-            if(entry.cpu_id == cpu_id) return &entry;
+            if(entry.cpu_id == cpu_id)
+            {
+                return &entry;
+            }
         }
-        result.cpu_data.push_back({ cpu_id, 0.0f, 0.0 });
+        result.cpu_data.push_back({ .cpu_id = cpu_id, .frequency = 0.0f, .load = 0.0 });
         return &result.cpu_data.back();
     }
 

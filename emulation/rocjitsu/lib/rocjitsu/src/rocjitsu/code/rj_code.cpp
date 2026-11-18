@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/target_registry.h"
 
 #include <cstring>
+#include <string>
 #include <unordered_map>
 
 using namespace rocjitsu;
@@ -19,11 +20,10 @@ Decoder *create_decoder_for_target(rj_code_target_id_t target) {
   if (descriptor == nullptr)
     return nullptr;
 
-  static thread_local std::unordered_map<const IsaTargetDescriptor *, std::unique_ptr<Decoder>>
-      decoders;
-  std::unique_ptr<Decoder> &decoder = decoders[descriptor];
+  static thread_local std::unordered_map<rj_code_target_id_t, std::unique_ptr<Decoder>> decoders;
+  std::unique_ptr<Decoder> &decoder = decoders[target];
   if (!decoder)
-    decoder = descriptor->decoder_factory();
+    decoder = Decoder::create(registry, target);
   return decoder.get();
 }
 
@@ -34,19 +34,26 @@ rj_code_arch_t arch_for_target(rj_code_target_id_t target) {
   return descriptor->architecture_id;
 }
 
+bool code_object_accepts_target(const AmdGpuCodeObject &object, rj_code_target_id_t target) {
+  const rj_code_target_id_t object_target = object.target_id();
+  return object_target == ROCJITSU_CODE_TARGET_INVALID || object_target == target;
+}
+
 } // namespace
 
 rj_status_t rj_code_executable_create(const char *path, rj_code_executable_t **exec) {
   if (!path || !exec)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  auto executable = std::make_unique<Executable>(path);
-  if (!executable->is_valid())
-    return ROCJITSU_STATUS_INVALID_CODE_OBJECT;
+  return [&]() noexcept -> rj_status_t {
+    auto handle = std::make_unique<rj_code_executable_t>();
+    handle->exec = std::make_unique<Executable>(path);
+    if (!handle->exec->is_valid())
+      return ROCJITSU_STATUS_INVALID_CODE_OBJECT;
 
-  *exec = new rj_code_executable_t{};
-  (*exec)->exec = std::move(executable);
-  return ROCJITSU_STATUS_SUCCESS;
+    *exec = handle.release();
+    return ROCJITSU_STATUS_SUCCESS;
+  }();
 }
 
 void rj_code_executable_retain(rj_code_executable_t *exec) {
@@ -116,32 +123,42 @@ rj_status_t rj_code_inst_list_create(rj_code_object_t *obj, rj_code_target_id_t 
                                      rj_code_inst_list_t **inst_list) {
   if (!obj || !obj->co || !inst_list)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  *inst_list = nullptr;
 
-  auto *decoder = create_decoder_for_target(target_id);
-  if (!decoder)
-    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  return [&]() noexcept -> rj_status_t {
+    if (!code_object_accepts_target(*obj->co, target_id))
+      return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  auto owned = std::make_unique<rj_code_inst_list_t>();
+    auto *decoder = create_decoder_for_target(target_id);
+    if (!decoder)
+      return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  // DBT local caves are emitted into .text, so instruction-list callers only
-  // need the text sections to see translated code.
-  for (const auto *sec : obj->co->text_sections()) {
-    const auto *inst_data = reinterpret_cast<const uint32_t *>(sec->data());
-    std::size_t inst_data_size = sec->size() / sizeof(uint32_t);
-    // Each executable section owns a separate data buffer, so decoding starts
-    // at word zero for each section.
-    std::size_t word_index = 0;
-    while (word_index < inst_data_size) {
-      auto *raw_inst = decoder->decode(&inst_data[word_index]);
-      std::unique_ptr<Instruction> inst(raw_inst);
-      owned->list.push_back(*inst);
-      word_index += static_cast<std::size_t>(inst->size()) / sizeof(uint32_t);
-      owned->storage.push_back(std::move(inst));
+    Instruction::ScopedHeapAllocation heap_allocation;
+    auto owned = std::make_unique<rj_code_inst_list_t>();
+
+    // DBT local caves are emitted into .text, so instruction-list callers only
+    // need the text sections to see translated code.
+    for (const auto *sec : obj->co->text_sections()) {
+      const auto *inst_data = reinterpret_cast<const uint32_t *>(sec->data());
+      std::size_t inst_data_size = sec->size() / sizeof(uint32_t);
+      // Each executable section owns a separate data buffer, so decoding starts
+      // at word zero for each section.
+      std::size_t word_index = 0;
+      while (word_index < inst_data_size) {
+        DecodeResult decoded =
+            decoder->decode_window(std::span(inst_data + word_index, inst_data_size - word_index));
+        if (decoded.failed())
+          return ROCJITSU_STATUS_ERROR;
+        std::unique_ptr<Instruction> inst = std::move(decoded).value();
+        owned->list.push_back(*inst);
+        word_index += static_cast<std::size_t>(inst->size()) / sizeof(uint32_t);
+        owned->storage.push_back(std::move(inst));
+      }
     }
-  }
 
-  *inst_list = owned.release();
-  return ROCJITSU_STATUS_SUCCESS;
+    *inst_list = owned.release();
+    return ROCJITSU_STATUS_SUCCESS;
+  }();
 }
 
 void rj_code_inst_list_retain(rj_code_inst_list_t *inst_list) {
@@ -152,35 +169,49 @@ void rj_code_inst_list_retain(rj_code_inst_list_t *inst_list) {
 void rj_code_inst_list_release(rj_code_inst_list_t *inst_list) {
   if (!inst_list)
     return;
-  if (inst_list->release())
+  if (inst_list->release()) {
+    Instruction::ScopedHeapAllocation heap_allocation;
     delete inst_list;
+  }
 }
 
 void rj_code_inst_list_destroy(rj_code_inst_list_t *inst_list) {
   if (!inst_list)
     return;
-  if (inst_list->destroy())
+  if (inst_list->destroy()) {
+    Instruction::ScopedHeapAllocation heap_allocation;
     delete inst_list;
+  }
 }
 
 rj_status_t rj_code_basic_block_list_create(rj_code_object_t *obj, rj_code_target_id_t target_id,
                                             rj_code_basic_block_list_t **list) {
   if (!obj || !obj->co || !list)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  *list = nullptr;
 
-  auto *decoder = create_decoder_for_target(target_id);
-  if (!decoder)
-    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  return [&]() noexcept -> rj_status_t {
+    if (!code_object_accepts_target(*obj->co, target_id))
+      return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  const rj_code_arch_t arch = arch_for_target(target_id);
-  if (arch == ROCJITSU_CODE_ARCH_INVALID)
-    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+    auto *decoder = create_decoder_for_target(target_id);
+    if (!decoder)
+      return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  auto owned = std::make_unique<rj_code_basic_block_list_t>();
-  owned->blocks = BasicBlock::build(*obj->co, *decoder, arch);
+    const rj_code_arch_t arch = arch_for_target(target_id);
+    if (arch == ROCJITSU_CODE_ARCH_INVALID)
+      return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  *list = owned.release();
-  return ROCJITSU_STATUS_SUCCESS;
+    Instruction::ScopedHeapAllocation heap_allocation;
+    auto owned = std::make_unique<rj_code_basic_block_list_t>();
+    auto blocks = BasicBlock::build(*obj->co, *decoder, arch, {}, {},
+                                    ExternalEntryPolicy::InferPredecessorless, {}, target_id);
+    if (blocks.failed())
+      return ROCJITSU_STATUS_ERROR;
+    owned->blocks = std::move(blocks).value();
+    *list = owned.release();
+    return ROCJITSU_STATUS_SUCCESS;
+  }();
 }
 
 void rj_code_basic_block_list_retain(rj_code_basic_block_list_t *list) {
@@ -191,15 +222,19 @@ void rj_code_basic_block_list_retain(rj_code_basic_block_list_t *list) {
 void rj_code_basic_block_list_release(rj_code_basic_block_list_t *list) {
   if (!list)
     return;
-  if (list->release())
+  if (list->release()) {
+    Instruction::ScopedHeapAllocation heap_allocation;
     delete list;
+  }
 }
 
 void rj_code_basic_block_list_destroy(rj_code_basic_block_list_t *list) {
   if (!list)
     return;
-  if (list->destroy())
+  if (list->destroy()) {
+    Instruction::ScopedHeapAllocation heap_allocation;
     delete list;
+  }
 }
 
 uint32_t rj_code_basic_block_list_size(const rj_code_basic_block_list_t *list) {
@@ -229,15 +264,19 @@ void rj_code_basic_block_retain(rj_code_basic_block_t *block) {
 void rj_code_basic_block_release(rj_code_basic_block_t *block) {
   if (!block)
     return;
-  if (block->release())
+  if (block->release()) {
+    Instruction::ScopedHeapAllocation heap_allocation;
     delete block;
+  }
 }
 
 void rj_code_basic_block_destroy(rj_code_basic_block_t *block) {
   if (!block)
     return;
-  if (block->destroy())
+  if (block->destroy()) {
+    Instruction::ScopedHeapAllocation heap_allocation;
     delete block;
+  }
 }
 
 uint64_t rj_code_basic_block_start_offset(const rj_code_basic_block_t *block) {
@@ -288,7 +327,7 @@ rj_status_t rj_code_inst_disassemble(const rj_code_inst_t *inst, char *buf, uint
   if (!inst || !buf || buf_size == 0)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  const auto &dis = reinterpret_cast<const Instruction *>(inst)->disassemble();
+  const std::string dis = reinterpret_cast<const Instruction *>(inst)->disassemble();
   std::strncpy(buf, dis.c_str(), buf_size - 1);
   buf[buf_size - 1] = '\0';
   return ROCJITSU_STATUS_SUCCESS;

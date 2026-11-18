@@ -38,17 +38,40 @@ void ncclTopoFree(struct ncclTopoSystem* system);
 ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* comm);
 ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm);
 ncclResult_t ncclTopoComputeP2pChannelsPerPeer(struct ncclComm* comm);
+int64_t rcclParamP2pCeChannelsPerPeer();
+int rcclP2pCeChannelsPerPeerCap(int current, int pool, bool isGfx1250, bool useMemcpy, int64_t configuredCap);
+inline bool rcclP2pUseCeForConnection(bool useMemcpy, int connIndex) {
+  return useMemcpy && connIndex == NCCL_CONN_IDX_P2P_CE;
+}
+// Copy Engine steps must keep the int step and buffer sizes of the connectors and the proxy, and the
+// planner's 32-step part bound, from overflowing.
+constexpr int64_t kRcclP2pCeMaxStepSize = 32 << 20;
+inline size_t rcclP2pCeStepSizePolicy(int cudaArch, bool useMemcpy, int64_t configured, size_t fallback) {
+  if (cudaArch != 1250 || !useMemcpy) return fallback;
+  size_t step = configured > (int64_t)fallback ? (size_t)configured : fallback;
+  return step < (size_t)kRcclP2pCeMaxStepSize ? step : (size_t)kRcclP2pCeMaxStepSize;
+}
+inline bool rcclP2pCeSharesProxyStream(int cudaArch) {
+  return cudaArch == 1250;
+}
+inline int rcclP2pConnectorStepSize(int p2pChunkSize, bool useCe, int connStepSize) {
+  return useCe && connStepSize > 0 ? connStepSize : p2pChunkSize;
+}
+// Resolved NCCL_MAX_P2P_NCHANNELS (MAXCHANNELS when unset, else clamped user value).
+int ncclMaxP2pNchannels();
+// Upper bound for p2pnChannels: 64, MAXCHANNELS on single-node gfx1250, or the
+// user's NCCL_MAX_P2P_NCHANNELS above that. Always a power of two.
+int ncclP2pChannelsUpperBound(struct ncclComm* comm, bool* userOptedHigherOut);
 ncclResult_t ncclTopoGetNvbGpus(struct ncclTopoSystem* system, int rank, int* nranks, int** ranks);
 ncclResult_t ncclTopoPathAllNVLink(struct ncclTopoSystem* system, int* allNvLink);
 ncclResult_t ncclTopoPathAllDirectNVLink(struct ncclTopoSystem* system, bool* allNvlinkConnected);
-ncclResult_t ncclCheckMultiRank(struct ncclComm* comm);
 ncclResult_t ncclTopoComputeCommCPU(struct ncclComm* comm);
 
 // Query topology
 ncclResult_t ncclTopoGetNetDev(struct ncclComm* comm, int rank, struct ncclTopoGraph* graph, int channelId,
                                int peerRank, int64_t* id, int* dev, int* proxyRank);
 ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* system, int rank1, int rank2, int* p2p,
-                              int* read, int* intermediateRank, int* cudaP2p);
+                              int* read, int* intermediateRank, int* cudaP2p, int* isCrossClique = nullptr);
 ncclResult_t ncclTopoCheckMNNVL(struct ncclComm* comm, struct ncclPeerInfo* info1, struct ncclPeerInfo* info2,
                                 int* ret);
 enum ncclTopoGdrMode {
@@ -71,7 +94,6 @@ static inline uint32_t ncclGdcPinFlag(enum ncclTopoFlushType flush) {
 ncclResult_t ncclTopoNeedFlush(struct ncclComm* comm, int64_t netId, int netDev, int rank, bool netManaged,
                                enum ncclTopoFlushType* flush);
 ncclResult_t ncclTopoGetMinNetBw(struct ncclTopoSystem* system, int rank, float* bw);
-ncclResult_t ncclTopoIsGdrAvail(struct ncclTopoSystem* system, int rank, bool* avail);
 ncclResult_t ncclTopoCheckNet(struct ncclTopoSystem* system, int rank1, int rank2, int* net);
 int ncclPxnDisable(struct ncclComm* comm);
 ncclResult_t ncclTopoGetPxnRanks(struct ncclComm* comm, int** intermediateRanks, int* nranks);
@@ -82,12 +104,13 @@ ncclResult_t ncclGetUserP2pLevel(int* level);
 #define MAX_XGMI_INTER_GPUS 4
 ncclResult_t ncclTopoGetIntraNetDev(struct ncclTopoSystem* system, int rank, struct ncclTopoGraph* graph, int channelId,
                                     int type, int64_t* id, int* dev);
-ncclResult_t ncclTopoGetLinkType(struct ncclTopoSystem* system, int cudaDev1, int cudaDev2, bool* isXGMI,
+ncclResult_t ncclTopoGetLinkType(struct ncclTopoSystem* system, int dev1, int dev2, bool* isXGMI,
                                  int maxInter = MAX_XGMI_INTER_GPUS, int nInter = 0, int* inter = nullptr);
 
 // Find CPU affinity
 ncclResult_t ncclTopoGetCpuAffinity(struct ncclTopoSystem* system, int rank, ncclAffinity* affinity);
 
+#define NCCL_TOPO_CPU_ARCH_UNDEF 0
 #define NCCL_TOPO_CPU_ARCH_X86 1
 #define NCCL_TOPO_CPU_ARCH_POWER 2
 #define NCCL_TOPO_CPU_ARCH_ARM 3
@@ -100,17 +123,21 @@ ncclResult_t ncclTopoGetCpuAffinity(struct ncclTopoSystem* system, int rank, ncc
 #define NCCL_TOPO_CPU_MODEL_INTEL_SKL 2
 #define NCCL_TOPO_CPU_MODEL_INTEL_SRP 3
 #define NCCL_TOPO_CPU_MODEL_INTEL_ERP 4
-#define NCCL_TOPO_CPU_MODEL_AMD_ZEN 5
-#define NCCL_TOPO_CPU_MODEL_AMD_ROME 6
+#define NCCL_TOPO_CPU_MODEL_AMD_ZEN12 1
+#define NCCL_TOPO_CPU_MODEL_AMD_ZEN34 2
+#define NCCL_TOPO_CPU_MODEL_AMD_ZEN5 3
 #define NCCL_TOPO_CPU_MODEL_YONGFENG 1
 ncclResult_t ncclTopoCpuType(struct ncclTopoSystem* system, int* arch, int* vendor, int* model);
+// RCCL: true when the first CPU is an AMD Rome-class host, which enables the Rome presets and GDR relaxation.
+bool rcclTopoCpuIsRome(struct ncclTopoSystem* system);
 ncclResult_t ncclTopoGetGpuCount(struct ncclTopoSystem* system, int* count);
 ncclResult_t ncclTopoGetNetCount(struct ncclTopoSystem* system, int* count);
 ncclResult_t ncclTopoGetNvsCount(struct ncclTopoSystem* system, int* count);
 ncclResult_t ncclTopoGetLocalNet(struct ncclTopoSystem* system, int rank, int channelId, int64_t* id, int* dev);
 ncclResult_t ncclTopoGetLocalGinDevs(struct ncclComm* comm, int* localGinDevs, int* localGinCount);
+ncclResult_t ncclTopoGetLocalRmaDevs(struct ncclComm* comm, int* localRmaDevs, int* localRmaCount);
 ncclResult_t ncclTopoGetLocalGpu(struct ncclTopoSystem* system, int64_t netId, int* gpuIndex);
-ncclResult_t getLocalNetCountByBw(struct ncclTopoSystem* system, int gpu, int* count, float* bw);
+ncclResult_t ncclTopoGetLocalNetCountByBw(struct ncclTopoSystem* system, int gpu, int* count, float* bw);
 
 enum netDevsPolicy {
   NETDEVS_POLICY_AUTO = 0x0,
@@ -120,10 +147,14 @@ enum netDevsPolicy {
 };
 ncclResult_t ncclTopoGetNetDevsPolicy(enum netDevsPolicy* policy, int* policyNum);
 
-// Allows for up to 32 NICs per node on GB200-NVL72
-#define NCCL_TOPO_MAX_NODES 64
+// Allows for up to 144 GPUs in scale-up domain (72 GPUs in DPX mode).
+// [RCCL] Not raised to upstream's 640: ncclTopoGraph's RCCL-specific treeBase array is
+// O(NCCL_TOPO_MAX_NODES^2), so 640 would blow sizeof(ncclComm) up to ~17.6 MiB. TODO: decouple.
+#define NCCL_TOPO_MAX_NODES 144
 ncclResult_t ncclTopoGetLocal(struct ncclTopoSystem* system, int type, int index, int resultType,
                               int locals[NCCL_TOPO_MAX_NODES], int* localCount, int* pathType);
+ncclResult_t ncclTopoGetDevNodes(struct ncclTopoSystem* system, int64_t baseId, struct ncclTopoNode** nodes,
+                                 int* nNodes);
 
 // Local (myself)
 #define PATH_LOC 0
@@ -146,7 +177,8 @@ ncclResult_t ncclTopoGetLocal(struct ncclTopoSystem* system, int type, int index
 // Connection between a GPU and a NIC using the C2C connection to the CPU and the PCIe connection to the NIC
 #define PATH_P2C 6
 
-// Connection between a GPU and a NIC using an intermediate GPU. Used to enable rail-local, aggregated network send/recv operations.
+// Connection between a GPU and a NIC using an intermediate GPU. Used to enable rail-local, aggregated network
+// send/recv operations.
 #define PATH_PXN 7
 
 // Connection traversing PCIe as well as a PCIe Host Bridge (typically the CPU)
@@ -186,6 +218,7 @@ struct ncclTopoGraph {
   int maxChannels;
   // Output
   int nChannels;
+  int nCtasPerChannel;
   float bwIntra;
   float bwInter;
   float latencyInter;
@@ -206,6 +239,7 @@ ncclResult_t ncclTopoDumpGraphs(struct ncclTopoSystem* system, int ngraphs, stru
 
 struct ncclTopoRanks {
   int crossNicRing;
+  int nChannels;  // valid channels in the per-channel arrays below; set by Preset, raised by Postset's expansion
   int ringRecv[MAXCHANNELS];
   int ringSend[MAXCHANNELS];
   int ringPrev[MAXCHANNELS];
@@ -230,4 +264,5 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
 ncclResult_t ncclTopoGetAlgoTime(struct ncclComm* comm, int coll, int algorithm, int protocol, size_t nBytes,
                                  int numPipeOps, float* time);
 int rcclGetTuningIndexForArch(const char* gfxarch);
+#include "rccl_arch_thresholds.h"
 #endif

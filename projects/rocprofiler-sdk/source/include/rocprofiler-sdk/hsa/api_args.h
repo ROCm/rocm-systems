@@ -1584,6 +1584,57 @@ typedef union rocprofiler_hsa_api_args_t
         const void** metadata;
     } hsa_amd_interop_map_buffer_with_size;
 #    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x13
+    struct
+    {
+        void**              ptrs;
+        size_t*             sizes;
+        uint32_t            count;
+        const hsa_agent_t*  dst_agents;
+        uint32_t            num_dst_agents;
+        uint32_t            num_dep_signals;
+        const hsa_signal_t* dep_signals;
+        hsa_signal_t        completion_signal;
+    } hsa_amd_svm_discard_and_prefetch_batch_async;
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x14
+    struct
+    {
+        hsa_agent_t               agent;
+        hsa_amd_agent_attribute_t attribute;
+        void*                     value;
+    } hsa_amd_agent_set_attribute;
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x15
+    struct
+    {
+        hsa_amd_vmem_alloc_handle_t memory_handle;
+        hsa_amd_vmem_handle_info_t* info;
+    } hsa_amd_vmem_get_vmem_info;
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x16
+    struct
+    {
+        rocprofiler_hsa_api_no_args no_args;
+    } hsa_amd_enable_high_precision_timestamps;
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x17
+    struct
+    {
+        uint32_t                  count;
+        const hsa_signal_value_t* initial_values;
+        uint32_t                  num_consumers;
+        const hsa_agent_t*        consumers;
+        uint64_t                  attributes;
+        hsa_amd_memory_pool_t     pool;
+        hsa_amd_signal_batch_t*   batch;
+        hsa_signal_t*             signals;
+    } hsa_amd_signal_batch_create;
+    struct
+    {
+        hsa_amd_signal_batch_t batch;
+    } hsa_amd_signal_batch_destroy;
+#    endif
 #endif
 } rocprofiler_hsa_api_args_t;
 

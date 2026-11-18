@@ -81,68 +81,6 @@ bool PrintfDbg::init(VirtualGPU& gpu, bool printfEnabled, const amd::NDRange& si
   return true;
 }
 
-bool PrintfDbg::output(VirtualGPU& gpu, bool printfEnabled, const amd::NDRange& size,
-                       const std::vector<device::PrintfInfo>& printfInfo) {
-  // Are we expected to generate debug output?
-  if (printfEnabled && !printfInfo.empty()) {
-    uint32_t* workitemData;
-    size_t i, j, k, z;
-    bool realloc = false;
-
-    // Wait for kernel execution
-    gpu.waitAllEngines();
-
-    size_t zdim = 1;
-    size_t ydim = 1;
-    size_t xdim = 1;
-
-    switch (size.dimensions()) {
-      case 3:
-        zdim = size[2];
-      // Fall through ...
-      case 2:
-        ydim = size[1];
-      // Fall through ...
-      case 1:
-        xdim = size[0];
-      // Fall through ...
-      default:
-        break;
-    }
-
-    for (k = 0; k < zdim; ++k) {
-      for (j = 0; j < ydim; ++j) {
-        for (i = 0; i < xdim; ++i) {
-          size_t idx = (xdim * (ydim * k + j) + i);
-          workitemData = mapWorkitem(gpu, idx, &realloc);
-
-          if (nullptr != workitemData) {
-            uint32_t wp = workitemData[0];  // write pointer (i.e. first unwritten element)
-            // Walk through each PrintfDbg entry
-            for (z = 1; (z < (wiDbgSize() / sizeof(uint32_t))) && (z < wp);) {
-              if (printfInfo.size() < workitemData[z]) {
-                LogError("The format string wasn't reported");
-                return false;
-              }
-              // Get the PrintfDbg info
-              const device::PrintfInfo& info = printfInfo[workitemData[z++]];
-              // There's something in this buffer
-              outputDbgBuffer(info, workitemData, z);
-            }
-          }
-          unmapWorkitem(gpu, workitemData);
-        }
-      }
-    }
-
-    // Reallocate debug buffer if necessary
-    if (!allocate(realloc)) {
-      return false;
-    }
-  }
-  return true;
-}
-
 bool PrintfDbg::allocate(bool realloc) {
   if (nullptr == dbgBuffer_) {
     dbgBuffer_ = dev().createScratchBuffer(dev().info().printfBufferSize_);
@@ -261,13 +199,6 @@ size_t PrintfDbg::outputArgument(const std::string& fmt, bool printFloat, size_t
       if (size > 0 && size < ConstStr) {
         size_t len = 0;
         while (len < size && argumentStr[len] != 0) len++;
-        // When strlen is a multiple of 4, the compiler stores only the string
-        // bytes without a null terminator (ArgSize = strlen + 4 but the last
-        // 4 bytes are never written). If no null was found, the real string
-        // length is size - 4.
-        if (len == size && size >= 4) {
-          len = size - 4;
-        }
         std::string safeStr(reinterpret_cast<const char*>(argumentStr), len);
         amd::Os::printf(fmt.data(), safeStr.c_str());
         copiedBytes = size;

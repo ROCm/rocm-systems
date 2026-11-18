@@ -14,9 +14,9 @@ set(ROCPROFSYS_PROFILER_HUB_GIT_REPOSITORY
 )
 
 set(ROCPROFSYS_PROFILER_HUB_GIT_TAG
-    "0e57a383b016cfd75b02e83dfb2adcd55f395b42"
+    "develop"
     CACHE STRING
-    "Git commit for profiler-hub fallback sparse checkout (pinned to the #8610 merge commit that fixes profiler-hub's export-set and schema-API build failures)"
+    "Git ref (branch, tag or commit) for profiler-hub fallback sparse checkout; the default 'develop' is re-fetched on every configure"
 )
 
 set(ROCPROFSYS_PROFILER_HUB_GIT_SUBDIR
@@ -31,24 +31,49 @@ option(ROCPROFSYS_PROFILER_HUB_LINK_STATIC "Link profiler-hub statically" OFF)
 # ------------------------------------------------------------------------------
 # Resolution order:
 #   1. find_package(profiler-hub) - use installed package if present
-#   2. fallback: sparse checkout of ROCPROFSYS_PROFILER_HUB_GIT_SUBDIR from
+#   2. in-tree: ../../profilers/profiler-hub of this source checkout, if present
+#   3. fallback: sparse checkout of ROCPROFSYS_PROFILER_HUB_GIT_SUBDIR from
 #      ROCPROFSYS_PROFILER_HUB_GIT_REPOSITORY at ROCPROFSYS_PROFILER_HUB_GIT_TAG
 # ------------------------------------------------------------------------------
+set(ROCPROFSYS_PROFILER_HUB_MIN_VERSION
+    "0.3.0"
+    CACHE STRING
+    "Minimum profiler-hub package version; older installs fall back to in-tree or git sources"
+)
 
 set(_PROFILER_HUB_IS_EXTERNAL FALSE)
 set(_PROFILER_HUB_SOURCE_DIR "")
+get_filename_component(
+    _PROFILER_HUB_IN_TREE_DIR
+    "${PROJECT_SOURCE_DIR}/../../profilers/profiler-hub"
+    ABSOLUTE
+)
 
-find_package(profiler-hub QUIET CONFIG)
+# Pass the min version into find_package so an old install is skipped, not loaded.
+# Not REQUIRED: we fall back to git. NO_CMAKE_PACKAGE_REGISTRY: profiler-hub's build
+# trees register themselves in ~/.cmake/packages, and a stale one must not be accepted.
+find_package(
+    profiler-hub
+    ${ROCPROFSYS_PROFILER_HUB_MIN_VERSION}
+    QUIET
+    NO_CMAKE_PACKAGE_REGISTRY
+)
 
 if(profiler-hub_FOUND)
-    message(STATUS "[profiler-hub] Using installed package: ${profiler-hub_DIR}")
+    message(
+        STATUS
+        "[profiler-hub] Using installed package version ${profiler-hub_VERSION} from "
+        "${profiler-hub_DIR}"
+    )
     set(_PROFILER_HUB_IS_EXTERNAL TRUE)
+elseif(EXISTS "${_PROFILER_HUB_IN_TREE_DIR}/CMakeLists.txt")
+    message(STATUS "[profiler-hub] Using in-tree sources at ${_PROFILER_HUB_IN_TREE_DIR}")
+    set(_PROFILER_HUB_SOURCE_DIR "${_PROFILER_HUB_IN_TREE_DIR}")
 else()
     message(
         STATUS
-        "[profiler-hub] find_package failed; falling back to "
-        "sparse checkout of ${ROCPROFSYS_PROFILER_HUB_GIT_REPOSITORY} "
-        "(${ROCPROFSYS_PROFILER_HUB_GIT_TAG})"
+        "[profiler-hub] find_package failed for required version ${ROCPROFSYS_PROFILER_HUB_MIN_VERSION}; "
+        "therefore building from source"
     )
 
     find_package(Git REQUIRED)
@@ -60,13 +85,15 @@ else()
     )
     set(_PROFILER_HUB_STAMP "${_PROFILER_HUB_ROOT}/.checkout.stamp")
 
+    set(_PROFILER_HUB_TAG "${ROCPROFSYS_PROFILER_HUB_GIT_TAG}")
+
     set(_PROFILER_HUB_NEEDS_CHECKOUT TRUE)
-    if(EXISTS "${_PROFILER_HUB_STAMP}")
+    if(NOT _PROFILER_HUB_TAG STREQUAL "develop" AND EXISTS "${_PROFILER_HUB_STAMP}")
         file(READ "${_PROFILER_HUB_STAMP}" _stamp_contents)
         if(
             _stamp_contents
                 STREQUAL
-                "${ROCPROFSYS_PROFILER_HUB_GIT_REPOSITORY}@${ROCPROFSYS_PROFILER_HUB_GIT_TAG}:${ROCPROFSYS_PROFILER_HUB_GIT_SUBDIR}"
+                "${ROCPROFSYS_PROFILER_HUB_GIT_REPOSITORY}@${_PROFILER_HUB_TAG}:${ROCPROFSYS_PROFILER_HUB_GIT_SUBDIR}"
         )
             set(_PROFILER_HUB_NEEDS_CHECKOUT FALSE)
         endif()
@@ -75,7 +102,8 @@ else()
     if(_PROFILER_HUB_NEEDS_CHECKOUT)
         message(
             STATUS
-            "[profiler-hub] Sparse-checking out ${ROCPROFSYS_PROFILER_HUB_GIT_SUBDIR} into ${_PROFILER_HUB_CHECKOUT}"
+            "[profiler-hub] Fetching ${ROCPROFSYS_PROFILER_HUB_GIT_SUBDIR} "
+            "@ ${_PROFILER_HUB_TAG} into ${_PROFILER_HUB_CHECKOUT}"
         )
 
         if(EXISTS "${_PROFILER_HUB_CHECKOUT}")
@@ -110,7 +138,7 @@ else()
         execute_process(
             COMMAND
                 ${GIT_EXECUTABLE} fetch --filter=blob:none --depth 1 origin
-                ${ROCPROFSYS_PROFILER_HUB_GIT_TAG}
+                ${_PROFILER_HUB_TAG}
             WORKING_DIRECTORY ${_PROFILER_HUB_CHECKOUT}
             RESULT_VARIABLE _git_result
             OUTPUT_VARIABLE _git_output
@@ -171,12 +199,13 @@ else()
 
         file(
             WRITE "${_PROFILER_HUB_STAMP}"
-            "${ROCPROFSYS_PROFILER_HUB_GIT_REPOSITORY}@${ROCPROFSYS_PROFILER_HUB_GIT_TAG}:${ROCPROFSYS_PROFILER_HUB_GIT_SUBDIR}"
+            "${ROCPROFSYS_PROFILER_HUB_GIT_REPOSITORY}@${_PROFILER_HUB_TAG}:${ROCPROFSYS_PROFILER_HUB_GIT_SUBDIR}"
         )
     else()
         message(
             STATUS
-            "[profiler-hub] Reusing existing sparse checkout at ${_PROFILER_HUB_SOURCE_DIR}"
+            "[profiler-hub] Already have pin ${_PROFILER_HUB_TAG} at "
+            "${_PROFILER_HUB_SOURCE_DIR}"
         )
     endif()
 endif()
@@ -196,6 +225,30 @@ if(NOT _PROFILER_HUB_IS_EXTERNAL)
         ${PROJECT_BINARY_DIR}/external/profiler-hub/build
     )
 endif()
+
+# Version consumed by defines.h.in. An installed package exposes it through
+# find_package; a source build sets it as the VERSION property of the target
+# (the project() variables stay local to profiler-hub's directory scope).
+if(_PROFILER_HUB_IS_EXTERNAL)
+    set(ROCPROFSYS_PROFILER_HUB_VERSION "${profiler-hub_VERSION}")
+else()
+    get_target_property(ROCPROFSYS_PROFILER_HUB_VERSION profiler-hub VERSION)
+endif()
+
+if(NOT ROCPROFSYS_PROFILER_HUB_VERSION MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)")
+    message(
+        FATAL_ERROR
+        "[profiler-hub] Cannot determine MAJOR.MINOR.PATCH version "
+        "(found '${ROCPROFSYS_PROFILER_HUB_VERSION}')"
+    )
+endif()
+set(ROCPROFSYS_PROFILER_HUB_VERSION_MAJOR ${CMAKE_MATCH_1})
+set(ROCPROFSYS_PROFILER_HUB_VERSION_MINOR ${CMAKE_MATCH_2})
+set(ROCPROFSYS_PROFILER_HUB_VERSION_PATCH ${CMAKE_MATCH_3})
+message(
+    STATUS
+    "[profiler-hub] Building against version ${ROCPROFSYS_PROFILER_HUB_VERSION}"
+)
 
 if(ROCPROFSYS_PROFILER_HUB_LINK_STATIC)
     set(_PROFILER_HUB_SUFFIX "-static")

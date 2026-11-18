@@ -12,6 +12,9 @@ on:
       - 'shared/kpack/**'
       - '.github/workflows/kpack-ci.yml'
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -32,12 +35,15 @@ jobs:
             shared/kpack
             python/rocm-bootstrap
           lfs: true
+          persist-credentials: false
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install gdb (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get install -y gdb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gdb
       - name: Install
         run: |
           pip install python/rocm-bootstrap
@@ -57,6 +63,7 @@ jobs:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           sparse-checkout: shared/kpack
+          persist-credentials: false
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get install -y libmsgpack-cxx-dev libzstd-dev libgtest-dev

@@ -4,19 +4,19 @@
 /// @file semantic/cdna4_to_rdna4.cpp
 /// @brief CDNA4-to-RDNA4 handwritten semantic expansion rules.
 
-#include "rocjitsu/analysis/liveness.h"
+#include "rocjitsu/code/analysis/liveness.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/dbt/hazard_tracker.h"
 #include "rocjitsu/code/dbt/semantic/cdna4_to_rdna_common.h"
 #include "rocjitsu/code/dbt/semantic/rules.h"
 #include "rocjitsu/code/dbt/waitcnt_translator.h"
-#include "rocjitsu/code/patch/instruction_builder.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/instruction.h"
 
 #include "rocjitsu/code/dbt/generated/matrix_conversions.h"
@@ -105,8 +105,11 @@ ExpandResult lower_accvgpr_read(const Instruction &inst) {
                                 std::to_string(src_acc));
   const uint16_t src_unified = src_acc - 512;
 
-  if (dst_vgpr == src_unified)
-    return ExpandResult::success({build_s_nop()});
+  if (dst_vgpr == src_unified) {
+    constexpr util::FailureOr<uint32_t> nop = build_s_nop();
+    static_assert(nop.succeeded());
+    return ExpandResult::success({nop.value()});
+  }
 
   return ExpandResult::success(
       {build_v_mov_b32(static_cast<uint8_t>(dst_vgpr), static_cast<uint16_t>(256 + src_unified))});
@@ -149,8 +152,10 @@ ExpandResult lower_mfma_f32_16x16x16_f16(const Instruction &inst, const Liveness
                                     std::to_string(src0) + " src1=" + std::to_string(src1),
                                 {"Add an MFMA lowering path for scalar or inline-constant "
                                  "matrix operands."});
-
-  auto exec_save_opt = liveness.find_free_sgpr_pair(&inst);
+  auto maybe_exec_save_opt = liveness.find_free_sgpr_pair(&inst);
+  if (maybe_exec_save_opt.failed())
+    return ExpandResult::liveness_unavailable();
+  const auto exec_save_opt = maybe_exec_save_opt.value();
   if (!exec_save_opt)
     return ExpandResult::failed(
         std::string(inst.mnemonic()) +
@@ -158,8 +163,10 @@ ExpandResult lower_mfma_f32_16x16x16_f16(const Instruction &inst, const Liveness
         {"Reduce SGPR pressure, improve liveness, or add scalar spill support for semantic "
          "lowerings."});
   const uint8_t kExecSave = static_cast<uint8_t>(*exec_save_opt);
-
-  auto tmp_sgpr_opt = liveness.find_free_sgpr(&inst, kExecSave + 2);
+  auto maybe_tmp_sgpr_opt = liveness.find_free_sgpr(&inst, kExecSave + 2);
+  if (maybe_tmp_sgpr_opt.failed())
+    return ExpandResult::liveness_unavailable();
+  const auto tmp_sgpr_opt = maybe_tmp_sgpr_opt.value();
   if (!tmp_sgpr_opt)
     return ExpandResult::failed(
         std::string(inst.mnemonic()) +
@@ -167,8 +174,10 @@ ExpandResult lower_mfma_f32_16x16x16_f16(const Instruction &inst, const Liveness
         {"Reduce SGPR pressure, improve liveness, or add scalar spill support for semantic "
          "lowerings."});
   const uint8_t kTmpSgpr = static_cast<uint8_t>(*tmp_sgpr_opt);
-
-  auto free_reg = liveness.find_free_run(&inst, 1, vdst + 4);
+  auto maybe_free_reg = liveness.find_free_run(&inst, 1, vdst + 4);
+  if (maybe_free_reg.failed())
+    return ExpandResult::liveness_unavailable();
+  const auto free_reg = maybe_free_reg.value();
   if (!free_reg)
     return ExpandResult::failed(
         std::string(inst.mnemonic()) +
@@ -277,7 +286,11 @@ ExpandResult expand_accvgpr_write(const Instruction &, uint32_t, uint64_t, std::
                                   const LaneLayout *, const LaneLayout *) {
   // AccVGPR writes are already represented by the unified VGPR mapping that
   // descriptor translation reserves for RDNA targets.
-  return ExpandResult::success({build_s_nop()});
+  {
+    constexpr util::FailureOr<uint32_t> nop = build_s_nop();
+    static_assert(nop.succeeded());
+    return ExpandResult::success({nop.value()});
+  }
 }
 
 ExpandResult expand_mfma_f32_16x16x16_f16(const Instruction &inst, uint32_t, uint64_t,
@@ -289,7 +302,7 @@ ExpandResult expand_mfma_f32_16x16x16_f16(const Instruction &inst, uint32_t, uin
 }
 
 // Table MUST be sorted by (src_encoding_id, src_opcode) for binary search.
-const TranslationRule kExpandRules_cdna4_to_rdna4[] = {
+constexpr TranslationRule kExpandRules_cdna4_to_rdna4[] = {
     {cdna4::encoding::kSopp, cdna4::kSWaitcnt, RuleAction::Expand, 0, 0, nullptr, expand_waitcnt,
      nullptr, nullptr},
     {cdna4::encoding::kVop3OpHi4, cdna4::kVLshlAddU64, RuleAction::Expand, 0, 0, nullptr,
@@ -301,6 +314,9 @@ const TranslationRule kExpandRules_cdna4_to_rdna4[] = {
     {cdna4::encoding::kVop3pMfma, cdna4::kVAccvgprWrite, RuleAction::Expand, 0, 0, nullptr,
      expand_accvgpr_write, nullptr, nullptr},
 };
+
+static_assert(translation_rules_sorted(kExpandRules_cdna4_to_rdna4),
+              "the CDNA4-to-RDNA4 rule table must stay sorted by (encoding id, opcode)");
 
 static_assert(rocjitsu::kMatrixConversionCount >= 2,
               "Auto-generated matrix conversion table too small");

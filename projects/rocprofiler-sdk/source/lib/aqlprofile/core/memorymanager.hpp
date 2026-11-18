@@ -248,7 +248,7 @@ protected:
 class TraceMemoryManager : public MemoryManager
 {
 public:
-    TraceMemoryManager(hsa_agent_t                          agent,
+    TraceMemoryManager(aqlprofile_agent_handle_t            agent,
                        aqlprofile_memory_alloc_callback_t   alloc,
                        aqlprofile_memory_dealloc_callback_t dealloc,
                        aqlprofile_memory_copy_t             _copy_fn,
@@ -257,20 +257,22 @@ public:
     , copy_fn(_copy_fn)
     {}
 
-    TraceMemoryManager(aqlprofile_agent_handle_t            agent,
-                       aqlprofile_memory_alloc_callback_t   alloc,
-                       aqlprofile_memory_dealloc_callback_t dealloc,
-                       void*                                data)
-    : MemoryManager(agent, alloc, dealloc, data)
-    {}
-
-    void* AddExtraOutputBuf()
+    void* AddSqttOutputBuf(uint64_t size)
     {
         aqlprofile_buffer_desc_flags_t flags{};
         flags.device_access = true;
         flags.memory_hint   = AQLPROFILE_MEMORY_HINT_DEVICE_NONCOHERENT;
-        extra_output_buffers.emplace_back(AllocMemory(outputbuf_size, flags));
+        extra_output_buffers.emplace_back(AllocMemory(size, flags));
         return extra_output_buffers.back().get();
+    }
+
+    // Host-visible, GPU-mapped scratch used as the landing buffer for trace readback.
+    std::unique_ptr<void, MemoryDeleter> AllocHostBuffer(size_t size)
+    {
+        aqlprofile_buffer_desc_flags_t flags{};
+        flags.host_access = flags.device_access = true;
+        flags.memory_hint                       = AQLPROFILE_MEMORY_HINT_HOST;
+        return AllocMemory(size, flags);
     }
 
     void* AddExtraCmdBuf(size_t size)
@@ -323,9 +325,9 @@ public:
         return reinterpret_cast<Type*>(trace_control_buf.get());
     }
 
-    void CopyMemory(void* dst, const void* src, size_t size)
+    hsa_status_t CopyMemory(void* dst, const void* src, size_t size)
     {
-        this->copy_fn(dst, src, size, this->userdata);
+        return size == 0 ? HSA_STATUS_SUCCESS : this->copy_fn(dst, src, size, this->userdata);
     }
 
     int  GetSimdMask() const { return simd_mask; }
@@ -335,7 +337,9 @@ public:
     }
 
     pm4_builder::TraceConfig config{};
-    std::atomic<size_t>      buffer_swaps{0};
+    std::vector<size_t>      buffer_swaps{};
+    // Per SE: bytes to skip at the start of the buffer being written, from WPTR.READ_OFFSET (gfx9).
+    std::vector<uint64_t> read_offsets{};
 
 protected:
     int                                             target_cu = -1;
@@ -351,7 +355,7 @@ protected:
 class CodeobjMemoryManager : public MemoryManager
 {
 public:
-    CodeobjMemoryManager(hsa_agent_t                          agent,
+    CodeobjMemoryManager(aqlprofile_agent_handle_t            agent,
                          aqlprofile_memory_alloc_callback_t   alloc,
                          aqlprofile_memory_dealloc_callback_t dealloc,
                          size_t                               size,
@@ -375,7 +379,7 @@ public:
                      aqlprofile_memory_alloc_callback_t   alloc,
                      aqlprofile_memory_dealloc_callback_t dealloc,
                      void*                                data)
-    : MemoryManager(agent, alloc, dealloc, data)
+    : MemoryManager(hsa_agent, alloc, dealloc, data)
     {
         this->agent_handle = aql_agent;
     }
@@ -388,5 +392,23 @@ public:
         outputbuf_size    = size;
     }
 
+    // DEBUG_TRACE-only buffer for copying out RLC_SPM_SAMPLE_CNT.
+    // This is used during SPM integration-test debugging to compare the hardware
+    // sample-pulse count against the number of received segments. For a successful
+    // run, those two numbers should match.
+    void CreateSampleCountBuf()
+    {
+        aqlprofile_buffer_desc_flags_t flags{};
+        flags.host_access   = true;
+        flags.device_access = true;
+        flags.memory_hint   = AQLPROFILE_MEMORY_HINT_DEVICE_NONCOHERENT;
+        sample_count_buf_   = AllocMemory(sizeof(uint32_t), flags);
+    }
+
+    void* GetSampleCountBuf() const { return sample_count_buf_.get(); }
+
     pm4_builder::TraceConfig config{};
+
+private:
+    std::unique_ptr<void, MemoryDeleter> sample_count_buf_ = nullptr;
 };

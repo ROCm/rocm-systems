@@ -12,13 +12,15 @@
 /// mixed SGPR-pair/VGPR-pair case covers the legal scalar source encoding.
 /// In-process inactive lanes must keep the sentinel.
 
+#include "compute_unit_test_util.h"
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna2/vop3p.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna3/vop3p.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/vop3p.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/vop3p.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/vop3p.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/vop3p.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -101,8 +103,10 @@ struct Fixture {
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create(std::string("cu_vop3p_mov_b32_") + arch.name, cfg,
-                                         &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, std::string("cu_vop3p_mov_b32_") + arch.name, cfg,
+                                            &gpu_mem, &l2);
+    if (!cu)
+      return;
     decoder = Decoder::create(arch.arch);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -128,7 +132,7 @@ struct Fixture {
 
   std::array<uint64_t, WF_SIZE> run(Instruction *inst, uint32_t rot, uint64_t exec) {
     seed_inputs(rot, exec);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     return read_output();
   }
 
@@ -208,12 +212,14 @@ void check(uint64_t exec) {
                       uint32_t op_sel) -> std::array<uint64_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx(arch);
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[2] = {0u, 0u};
     // src0 = VGPR 256 (pair v0:v1), src1 = VGPR 258 (pair v2:v3).
     vop3p_encode(/*op=*/51, kDstVgpr, /*src0=*/256, /*src1=*/258, op_sel, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << "v_pk_mov_b32_vop3p decode failed";
     auto out =
         force_scalar ? fx.run(inst, rot, exec) : fx.run_simd_probe(inst, arch, rot, exec, op_sel);
@@ -287,7 +293,7 @@ TEST(Vop3pMovB32SimdCorrectness, ProductionSimdDispatchGolden) {
     ASSERT_NE(fx.wf, nullptr);
     uint32_t words[2] = {0u, 0u};
     vop3p_encode(/*op=*/51, kDstVgpr, /*src0=*/256, /*src1=*/258, kOpSel, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     ASSERT_NE(inst, nullptr) << arch.name << " v_pk_mov_b32_vop3p decode failed";
     const auto out = fx.run(inst, kRot, kExec);
     delete inst;
@@ -317,14 +323,17 @@ TEST(Vop3pMovB32SimdCorrectness, MixedSgprPairAndVgprPairGolden) {
        uint64_t{kMixedVgprLo} | (uint64_t{kMixedSgprHi} << 32)},
   }};
 
-  auto run_mode = [&](const ArchCase &arch, const MixedSourceCase &test_case, bool force_scalar) {
+  auto run_mode = [&](const ArchCase &arch, const MixedSourceCase &test_case,
+                      bool force_scalar) -> std::array<uint64_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx(arch);
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[2] = {0u, 0u};
     vop3p_encode(/*op=*/51, kDstVgpr, test_case.src0, test_case.src1, test_case.op_sel, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << arch.name << " " << test_case.name
                              << " v_pk_mov_b32_vop3p decode failed";
     auto out = force_scalar

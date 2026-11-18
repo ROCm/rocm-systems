@@ -17,6 +17,10 @@ typedef void* ncclGinWindow_t;
 #include "nccl_device/gin/gin_device_host_common.h"
 #endif
 
+// CFT Logical Endpoint ID
+#define NCCL_LE_ID_INVALID ((ncclCftLeId_t) - 1)
+#define NCCL_LSA_PEER_DELTA4G_INVALID INT_MIN
+
 struct ncclSegmentWindow {
   ncclGinWindow_t ginWins[NCCL_GIN_MAX_CONNECTIONS];
   size_t segmentSize;
@@ -26,28 +30,29 @@ struct ncclSegmentWindow {
 // nccl.h has: typedef ncclWindow_vidmem* ncclWindow_t;
 struct ncclWindow_vidmem {
   void* winHost;
-  char* lsaFlatBase; // pointer to first byte for rank 0 of lsa team
+  char* lsaFlatBase; // pointer to first byte for rank 0 of the regular LSA team
   int lsaRank;
   int worldRank;
   uint32_t stride4G;
   uint32_t mcOffset4K;
   uint32_t ginOffset4K;
-  ncclGinWindow_t ginWins[NCCL_GIN_MAX_CONNECTIONS];
+  uint32_t winFlags;
+  ncclGinWindow_t ginWinsDefaultBackend[NCCL_GIN_MAX_CONNECTIONS];
   struct ncclSegmentWindow* ginMultiSegmentWins; // multi-segment: pointer to accommodate variable num segments
   int numSegments;
+  int cftFlatRank;
+  ncclCftLeId_t ucLeIdBase;
+  int const* lsaPeerDelta4G; // indexed by world rank
 };
 
-// Inlined resource-window. This is a subset of ncclWindow_vidmem with only fields
-// used for resource-buffer addressing. Same size as ncclWindow_vidmem for backward
-// compatibility.
-struct ncclResourceWindow_vidmem {
-  char reserved1[8];
+// Inlined resource-window. A subset of ncclWindow_vidmem with only the fields used
+// for resource-buffer addressing. lsaFlatBase / stride4G / mcOffset4K stay at the same
+// offsets they have inside ncclWindow_vidmem for byte-level compatibility.
+typedef struct ncclResourceWindow_vidmem {
   char* lsaFlatBase;
-  char reserved2[8];
   uint32_t stride4G;
   uint32_t mcOffset4K;
-  char reserved3[40];
-};
+} ncclResourceWindow_vidmem_t;
 
 struct ncclMultimemHandle {
   void* mcBasePtr;

@@ -1,0 +1,43 @@
+{
+  "system_configurations": {
+    "name": "RCCL Host Tests",
+    "description": "CPU-only host-path tests; no GPU or RCCL build required (build_configuration.enabled=false)."
+  },
+  "paths": {
+    "workdir": "${WORKDIR:-$PWD}",
+    "rocm_path": "${ROCM_PATH:-/opt/rocm}",
+    "mpi_path": "${MPI_PATH:-/opt/ompi}"
+  },
+  "env_variables": {
+    "NCCL_DEBUG": "WARN"
+  },
+  "build_configuration": {
+    "enabled": false
+  },
+  "test_configurations": {
+    "kernel_count_guards": {
+      "is_pytest": true,
+      "setup_venv": true,
+      "test_dir": "test/kernel-count",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": "auto",
+      "timeout": 300,
+      "tests": [
+        {
+          "name": "KernelCount_Guards_All",
+          "description": "Assert the generated device-kernel set (main + symmetric generators) against committed baselines; fails with an actionable diff on any unreviewed kernel-count change.",
+          "test_filter": "ALL"
+        }
+      ]
+    }
+  },
+  "test_suites": [
+    {
+      "name": "Kernel-Count Guards",
+      "description": "CPU-only device-kernel leak guards via pytest; no GPU required.",
+      "config": "kernel_count_guards",
+      "enabled": true
+    }
+  ]
+}

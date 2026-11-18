@@ -27,7 +27,6 @@ import sys
 import json
 import pytest
 import glob
-import subprocess
 
 
 def get_gpu_node_count():
@@ -104,7 +103,7 @@ def load_json_file(filepath):
         # Try to load as a single JSON object first
         try:
             return json.loads(content)
-        except json.JSONDecodeError as e:
+        except json.JSONDecodeError:
             # If that fails, it might be multiple JSON objects concatenated
             # Try to extract the first valid JSON object
             decoder = json.JSONDecoder()
@@ -176,7 +175,6 @@ def test_mpi_ranks_feature(output_dir, test_mode):
 
     # Detect the number of GPU nodes in the system
     gpu_node_count = get_gpu_node_count()
-    is_single_node = gpu_node_count is not None and gpu_node_count <= 1
 
     # Find JSON output files
     # For MPI tests: Look only in rank.* subdirectories (to avoid stale files)

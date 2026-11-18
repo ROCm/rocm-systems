@@ -17,6 +17,9 @@ on:
       notify_webhook:
         type: string
         default: ''
+    secrets:
+      RCCL_CI_TEAMS_WEBHOOK:
+        required: false
   workflow_dispatch:
     inputs:
       amdgpu_families:
@@ -69,12 +72,12 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: "ROCm/TheRock"
-          ref: d8e27dff1d165462ffa5bd50057a075b943c97c5 # 2026-07-13
+          ref: c0d2f4d21e7daffe3896b9be9ce9d1b2e0793827 # 2026-11-11
 
       - name: Checkout rocm-systems scripts
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          sparse-checkout: .github/scripts
+          sparse-checkout: projects/rccl/ci/scripts
           path: rocm-systems
 
       - name: Run setup test environment workflow
@@ -96,18 +99,24 @@ jobs:
         #
         # xla_rocm_plugin.so has RUNPATH entries that resolve math libraries
         # (hipBLASLt, hipFFT, MIOpen, rocBLAS, etc.) from the _rocm_sdk_libraries
-        # site-package. The arch-specific v2 index provides the real binary
-        # wheels; the whl-multi-arch index only has stub metapackages.
+        # site-package, so the real binary SDK wheels must be installed first.
         # The test script overrides librccl.so with the CI-built version.
         run: |
-          AMDGPU_LOWER=$(echo "${{ inputs.amdgpu_families }}" | tr '[:upper:]' '[:lower:]')
           uv pip install --prerelease=allow \
-            rocm-sdk-core "rocm-sdk-libraries-${AMDGPU_LOWER}" \
-            --index-url "https://rocm.nightlies.amd.com/v2/${{ inputs.amdgpu_families }}/"
+            rocm-sdk-core rocm-sdk-device-gfx942 \
+            --index-url https://nightly.repo.amd.com/rocm/core/whl-next/
+          # PyPI is the base index and the nightly one is "extra" because uv
+          # ranks extra indexes ABOVE --index-url. Reversed, the plain-PyPI
+          # jax-rocm10-plugin outranks the nightly build and is silently
+          # installed in its place.
+          #
+          # jax/jaxlib are held to the plugin's 0.11 series: the plugin
+          # declares no jax dependency at all, so an unconstrained resolve
+          # pairs jax 0.12 with a 0.11 plugin.
           uv pip install --prerelease=allow \
-            jax-rocm7-plugin jax-rocm7-pjrt jax \
-            --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
-            --extra-index-url https://pypi.org/simple/
+            jax-rocm10-plugin jax-rocm10-pjrt "jax==0.11.*" "jaxlib==0.11.*" \
+            --index-url https://pypi.org/simple/ \
+            --extra-index-url https://nightly.repo.amd.com/rocm/jax/whl-next/
           uv pip install \
             pytest \
             pytest-timeout \
@@ -120,12 +129,15 @@ jobs:
         env:
           NCCL_DEBUG: INFO
           NOTIFY_EMAIL: ${{ inputs.notify_email }}
-          NOTIFY_WEBHOOK: ${{ inputs.notify_webhook }}
+          # Falls back to repo secret when no webhook input is provided.
+          # Empty on forked PRs (secrets unavailable) — only the notification
+          # is skipped; tests always run regardless.
+          NOTIFY_WEBHOOK: ${{ inputs.notify_webhook || secrets.RCCL_CI_TEAMS_WEBHOOK }}
         run: |
           NOTIFY_ARGS=()
           [ -n "$NOTIFY_EMAIL" ] && NOTIFY_ARGS+=(--notify-email "$NOTIFY_EMAIL")
           [ -n "$NOTIFY_WEBHOOK" ] && NOTIFY_ARGS+=(--notify-webhook "$NOTIFY_WEBHOOK")
-          python rocm-systems/.github/scripts/test_jax_collective.py \
+          python rocm-systems/projects/rccl/ci/scripts/test_jax_collective.py \
             --artifact-dir ${{ env.OUTPUT_ARTIFACTS_DIR }} \
             --jax-src ${{ env.JAX_SRC }} \
             --results-log ${{ env.JAX_SRC }}/jax_collective_results.log \

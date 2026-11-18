@@ -1,0 +1,3 @@
+# ROCr retains this process-lifetime worker after short-lived client programs
+# have completed. Keep the suppression limited to tests that exec such clients.
+thread:rocr::os::os_thread

@@ -1,5 +1,0 @@
-pmc: SQ_INSTS_SMEM  SQ_INST_LEVEL_SMEM SQ_ACCUM_PREV_HIRES
-
-gpu:
-range:
-kernel:

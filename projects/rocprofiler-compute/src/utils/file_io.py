@@ -1,25 +1,32 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import io
 import json
 import re
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, List, Optional, Sequence
 
 import pandas as pd
 import yaml
 
 import config
-from utils import schema, utils_analysis
-from utils.kernel_name_shortener import kernel_name_shortener
+from utils import csv_compression, utils_analysis
 from utils.logger import (
     console_debug,
+    console_error,
     console_log,
     console_warning,
     demarcate,
 )
-from utils.utils_common import canonical_config_arch, normalize_filter_to_str_list
+from utils.utils_common import normalize_filter_to_str_list
+
+KERNEL_SYMBOLS_CSV_GLOB = f"rocpd_kernel_symbols_*.csv{csv_compression.GZIP_SUFFIX}"
+
+_CSV_CHUNK_ROWS = 1_000_000
+# Aggregations that can run per chunk, mapped to how their chunk results combine.
+_CHUNK_COMBINERS = {"sum": "sum", "min": "min", "max": "max", "count": "sum"}
 
 # TODO: use pandas chunksize or dask to read really large csv file
 # from dask import dataframe as dd
@@ -64,6 +71,38 @@ def load_profiling_config(config_dir: str) -> dict[str, Any]:
     return {}
 
 
+def rank_kernels_by_total_duration(dispatch_frame: pd.DataFrame) -> list[str]:
+    """Return kernel names ordered by total dispatch duration, longest first.
+
+    A kernel's position in this list is the id that ``-k`` selects.
+    """
+    durations = dispatch_frame["End_Timestamp"] - dispatch_frame["Start_Timestamp"]
+    return (
+        durations
+        .groupby(dispatch_frame["Kernel_Name"])
+        .sum()
+        .sort_values(ascending=False)
+        .index.to_list()
+    )
+
+
+def validate_kernel_filter_ids(
+    filter_kernel_ids: list[int],
+    kernel_count: int,
+) -> None:
+    """Exit with a readable message when a ``-k`` id names no kernel."""
+    if kernel_count == 0:
+        console_error("analysis", "No kernels found in this workload.")
+
+    for kernel_id in filter_kernel_ids:
+        if not 0 <= kernel_id < kernel_count:
+            console_error(
+                "analysis",
+                f"{kernel_id} is an invalid kernel id. "
+                f"Please enter an id between 0-{kernel_count - 1}",
+            )
+
+
 @demarcate
 def create_df_kernel_top_stats(
     df_in: pd.DataFrame,
@@ -71,8 +110,6 @@ def create_df_kernel_top_stats(
     filter_gpu_ids: Optional[list[str]],
     filter_dispatch_ids: Optional[list[str]],
     time_unit: str,
-    kernel_verbose: int,
-    sortby: str = "sum",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Create top stats info by grouping kernels with user's filters.
@@ -106,57 +143,27 @@ def create_df_kernel_top_stats(
             df = df.loc[df["Dispatch_ID"].astype(str).isin(filter_strings)]
 
     # First, create a dispatches file used to populate global vars
-    dispatch_columns = ["Kernel_Name", "GPU_ID"]
-    if "Dispatch_ID" in df.columns:
-        dispatch_columns.insert(0, "Dispatch_ID")
+    dispatch_columns = ["Dispatch_ID", "Kernel_Name", "GPU_ID"]
+    if "PID" in df.columns:
+        dispatch_columns.insert(1, "PID")
 
     dispatch_info = df[dispatch_columns]
     dispatch_output_path = Path(raw_data_dir) / "pmc_dispatch_info.csv"
     dispatch_info.to_csv(dispatch_output_path, index=False)
 
-    if "Dispatch_ID" in df.columns:
-        # Calculate execution times
-        execution_times = df["End_Timestamp"] - df["Start_Timestamp"]
-        time_stats = pd.DataFrame({
-            "Kernel_Name": df["Kernel_Name"],
-            "ExeTime": execution_times,
-        })
+    # Calculate execution times
+    execution_times = df["End_Timestamp"] - df["Start_Timestamp"]
+    time_stats = pd.DataFrame({
+        "Kernel_Name": df["Kernel_Name"],
+        "ExeTime": execution_times,
+    })
 
-        grouped = time_stats.groupby("Kernel_Name")["ExeTime"].agg([
-            "count",
-            "sum",
-            "mean",
-            "median",
-        ])
-    else:
-        time_stats = pd.DataFrame({
-            "Kernel_Name": df["Kernel_Name"],
-            "count": df["Count"],
-            "sum": df["Mean_Time"] * df["Count"],
-            "mean": df["Mean_Time"],
-            "median": df["Median_Time"],
-        })
-
-        result_data: list[dict[str, Any]] = []
-        for _, group in time_stats.groupby("Kernel_Name"):
-            row: dict[str, Any] = {}
-
-            row["Kernel_Name"] = group["Kernel_Name"].iloc[0]
-            row["count"] = group["count"].sum()
-            row["sum"] = group["sum"].sum()
-            row["mean"] = row["sum"] / row["count"]
-
-            sorted_data_by_mean = group.sort_values("mean")
-            sorted_data_by_mean["count_cumsum"] = sorted_data_by_mean["count"].cumsum()
-            median_threshold = row["count"] / 2
-            median_value = sorted_data_by_mean.loc[
-                sorted_data_by_mean["count_cumsum"] >= median_threshold, "median"
-            ].iloc[0]
-            row["median"] = median_value
-
-            result_data.append(row)
-
-        grouped = pd.DataFrame(result_data)
+    grouped = time_stats.groupby("Kernel_Name")["ExeTime"].agg([
+        "count",
+        "sum",
+        "mean",
+        "median",
+    ])
 
     # Rename columns with time unit
     time_unit_suffix = f"({time_unit})"
@@ -177,20 +184,15 @@ def create_df_kernel_top_stats(
     ]:
         grouped[col] = grouped[col] / time_divisor
 
-    if "Dispatch_ID" in df.columns:
-        grouped = grouped.reset_index()
+    grouped = grouped.reset_index()
 
     # Calculate percent
     sum_column = f"Sum{time_unit_suffix}"
     grouped["Percent"] = grouped[sum_column] / grouped[sum_column].sum() * 100
 
-    #   Sort by total time as default.
-    if sortby == "sum":
-        grouped = grouped.sort_values(sum_column, ascending=False)
-        grouped.to_csv(str(Path(raw_data_dir) / "pmc_kernel_top.csv"), index=False)
-    elif sortby == "kernel":
-        grouped = grouped.sort_values("Kernel_Name")
-        grouped.to_csv(str(Path(raw_data_dir) / "pmc_kernel_top.csv"), index=False)
+    kernel_order = rank_kernels_by_total_duration(df)
+    grouped = grouped.set_index("Kernel_Name").loc[kernel_order].reset_index()
+    grouped.to_csv(str(Path(raw_data_dir) / "pmc_kernel_top.csv"), index=False)
 
     return grouped.reset_index(drop=True), dispatch_info.reset_index(drop=True)
 
@@ -202,8 +204,8 @@ def build_agent_to_gpu_map_from_json(
     Map agent ``id.handle`` values to 0-indexed GPU IDs.
 
     GPU agents are identified by the rocprofiler-sdk agent ``type`` enum
-    value 2 in the ``agents`` array of ``ps_file_results.json``.  They are
-    sorted by ``node_id`` so that the first GPU agent maps to GPU 0,
+    value 2 in the ``agents`` array of ``<pid>_ps_file_results.json``.  They
+    are sorted by ``node_id`` so that the first GPU agent maps to GPU 0,
     the second to GPU 1, etc.
     """
     rocprofiler_agent_type_gpu = 2
@@ -215,24 +217,97 @@ def build_agent_to_gpu_map_from_json(
 
 
 @demarcate
-def load_pc_sampling_results(workload_path: str) -> Optional[dict[str, Any]]:
-    """
-    Parse ``ps_file_results.json`` and return its ``rocprofiler-sdk-tool[0]``
-    record. Returns ``None`` if the file is absent or fails to parse (a
-    warning is logged in the latter case).
+def load_pc_sampling_results(workload_path: str) -> list[dict[str, Any]]:
+    """Load valid PC sampling tool records for a workload.
 
-    The json can be multiple GB: parse once here and pass the dict to every
-    PC sampling consumer instead of re-reading the file.
+    ``<pid>_ps_file_results.json`` records are returned in numeric PID order.
+    Malformed files are skipped with a warning.
+
+    Result files can be multiple GB, so parse each once here and share the records
+    with every PC sampling consumer instead of re-reading the files.
     """
-    json_path = Path(workload_path) / "ps_file_results.json"
-    if not json_path.exists():
-        return None
-    try:
-        with json_path.open(encoding="utf-8") as json_file:
-            return json.load(json_file)["rocprofiler-sdk-tool"][0]
-    except (json.JSONDecodeError, KeyError, IndexError) as error:
-        console_warning(f"PC sampling: failed to parse {json_path}: {error}")
-        return None
+    tool_records = []
+    for result_file in _find_pid_prefixed_pc_sampling_result_files(Path(workload_path)):
+        tool_record = _parse_pc_sampling_result_file(result_file)
+        if tool_record is None:
+            continue
+        tool_records.append(tool_record)
+    _validate_pc_sampling_process_ids(tool_records)
+    return tool_records
+
+
+def load_kernel_short_names(
+    workload_path: str,
+    tool_data_records: list[dict[str, Any]],
+) -> dict[str, str]:
+    """Map a workload's kernel names to the short names profiling captured."""
+    symbol_frames = _read_kernel_symbol_csvs(workload_path)
+
+    # A PC-sampling-only run has no rocpd database to write the CSV from, so
+    # read the same pair out of its results JSON instead.
+    if not symbol_frames:
+        return {
+            symbol["formatted_kernel_name"]: symbol["truncated_kernel_name"]
+            for tool_data in tool_data_records
+            for symbol in tool_data.get("kernel_symbols", [])
+        }
+
+    # A symbol is written once per process and once per run. The repeats all
+    # say the same thing, so keeping the last one is enough.
+    symbols = pd.concat(symbol_frames, ignore_index=True).dropna(
+        subset=["Kernel_Name", "Kernel_Short_Name"]
+    )
+    return dict(zip(symbols["Kernel_Name"], symbols["Kernel_Short_Name"]))
+
+
+def _read_kernel_symbol_csvs(workload_path: str) -> list[pd.DataFrame]:
+    """Return the workload's symbol CSVs that hold symbols to read.
+
+    Prefers the native tool's per-pid files; the rocpd conversion's file is
+    read only when there are none, as in attach mode. Columns are renamed to
+    one shape.
+
+    The conversion opens each file before it runs its query, so an extract that
+    failed leaves an empty file behind rather than no file.
+    """
+    symbol_frames = []
+    artifacts = utils_analysis.find_native_artifacts(Path(workload_path))
+    symbol_csv_paths = [artifact.kernel_symbols for artifact in artifacts] or sorted(
+        Path(workload_path).glob(KERNEL_SYMBOLS_CSV_GLOB)
+    )
+    for symbol_csv_path in symbol_csv_paths:
+        try:
+            symbols = pd.read_csv(symbol_csv_path)
+        except (pd.errors.EmptyDataError, pd.errors.ParserError):
+            continue
+        symbols = symbols.rename(
+            columns={
+                "kernel_name": "Kernel_Name",
+                "kernel_short_name": "Kernel_Short_Name",
+            }
+        )
+        if not symbols.empty and {"Kernel_Name", "Kernel_Short_Name"}.issubset(
+            symbols.columns
+        ):
+            symbol_frames.append(symbols)
+    return symbol_frames
+
+
+def process_pc_sampling_kernel_traces(
+    tool_data_records: list[dict[str, Any]],
+) -> pd.DataFrame:
+    """Build one dispatch trace containing every PC-sampling tool record."""
+    if not tool_data_records:
+        return process_pc_sampling_kernel_trace(None)
+
+    combined_trace = pd.concat(
+        [
+            process_pc_sampling_kernel_trace(tool_data)
+            for tool_data in tool_data_records
+        ],
+        ignore_index=True,
+    )
+    return _renumber_dispatch_ids_across_processes(combined_trace)
 
 
 def process_pc_sampling_kernel_trace(
@@ -250,6 +325,7 @@ def process_pc_sampling_kernel_trace(
     """
     columns = [
         "Dispatch_Id",
+        "PID",
         "Kernel_Name",
         "Start_Timestamp",
         "End_Timestamp",
@@ -259,6 +335,7 @@ def process_pc_sampling_kernel_trace(
         console_warning("PC sampling results not found. Cannot build dispatch data.")
         return pd.DataFrame(columns=columns)
 
+    process_id = int(tool_data["metadata"]["pid"])
     dispatches = tool_data["buffer_records"]["kernel_dispatch"]
     kernel_id_to_name = {
         symbol["kernel_id"]: symbol["formatted_kernel_name"]
@@ -269,6 +346,7 @@ def process_pc_sampling_kernel_trace(
     rows = [
         {
             "Dispatch_Id": dispatch["dispatch_info"]["dispatch_id"],
+            "PID": process_id,
             "Kernel_Name": kernel_id_to_name.get(
                 dispatch["dispatch_info"]["kernel_id"]
             ),
@@ -287,92 +365,285 @@ def process_pc_sampling_kernel_trace(
 @demarcate
 def create_df_pmc(
     raw_data_dir: str,
-    kernel_verbose: int,
     verbose: int,
-    config_dict: dict[str, Any],
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
     """
-    Load all raw pmc counters and join into one df.
+    Read all raw pmc counters. Return the merged table and one table per pass,
+    keyed by pass name.
+
+    Counter data comes from the native tool's per-pid artifacts when there are
+    any, and from the rocpd result artifacts otherwise. Bad profiling output
+    stops the run instead of producing a partial frame.
     """
-    pmc_perf_path = Path(raw_data_dir) / f"{schema.PMC_PERF_FILE_PREFIX}.csv"
-    if not pmc_perf_path.is_file():
-        return pd.DataFrame()
+    df, _slot_to_id, pass_tables = create_df_pmc_with_slot_ids(raw_data_dir, verbose)
+    return df, pass_tables
 
-    df = pd.read_csv(pmc_perf_path)
 
-    if config_dict.get("format_rocprof_output") == "rocpd":
-        df = utils_analysis.process_rocpd_csv(df)
+@demarcate
+def create_df_pmc_with_slot_ids(
+    raw_data_dir: str,
+    verbose: int,
+) -> tuple[pd.DataFrame, dict[tuple, int], dict[str, pd.DataFrame]]:
+    """Read pmc counters like create_df_pmc. Also return the map from
+    process_rocpd_csv group keys to the 1..N dispatch ids."""
+    counter_rows = _read_counter_rows(Path(raw_data_dir))
+    if counter_rows.empty:
+        return pd.DataFrame(), {}, {}
 
-    # Demangle original KernelNames
-    # Skip for Standalone Roofline with -1 to keep full kernel names
-    if kernel_verbose >= 0:
-        kernel_name_shortener(df, kernel_verbose)
+    df, slot_to_id = utils_analysis.process_rocpd_csv(counter_rows)
 
     utils_analysis.add_unit_counter(df)
+    pass_tables = utils_analysis.split_counters_by_pass(counter_rows, df)
 
     if verbose >= 2:
-        console_debug(f"pmc_raw_data final_single_df {df.info}")
+        frame_info = io.StringIO()
+        df.info(buf=frame_info)
+        console_debug(f"pmc_raw_data final_single_df\n{frame_info.getvalue()}")
+    return df, slot_to_id, pass_tables
+
+
+def _read_counter_rows(workload_dir: Path) -> pd.DataFrame:
+    """Read the long counter rows of a workload, one row per counter per dispatch.
+
+    Older workloads and attach mode have no native artifacts, so they fall back
+    to the rocpd result artifacts.
+    """
+    artifacts = utils_analysis.find_native_artifacts(workload_dir)
+    if artifacts:
+        return _read_native_counter_rows(workload_dir, artifacts)
+
+    result_suffix = f".csv{csv_compression.GZIP_SUFFIX}"
+    result_files = sorted(
+        workload_dir.glob(f"results_*{result_suffix}"),
+        key=lambda path: _natural_sort_key(path.name),
+    )
+    if not result_files:
+        return pd.DataFrame()
+    frames = [
+        _read_counter_results(result_file).assign(
+            Pass_Key=result_file.name[len("results_") : -len(result_suffix)]
+        )
+        for result_file in result_files
+    ]
+    counter_rows = pd.concat(frames, ignore_index=True)
+    # rocpd lists no agents, so number the GPUs that ran dispatches from 0.
+    counter_rows["GPU_ID"] = counter_rows["GPU_ID"].rank(method="dense").astype(int) - 1
+    return counter_rows
+
+
+def _read_native_counter_rows(
+    workload_dir: Path,
+    artifacts: List[utils_analysis.NativeArtifacts],
+) -> pd.DataFrame:
+    """Join each process's native CSVs, numbering ids per counter set and GPUs
+    from the agents CSVs."""
+    counter_sets = []
+    for fbase in sorted(
+        {artifact.fbase for artifact in artifacts}, key=_natural_sort_key
+    ):
+        processes = [
+            utils_analysis.join_native_counters(
+                _read_profiling_csv(
+                    artifact.counters,
+                    group_by=("dispatch_id", "counter_name"),
+                    agg={"counter_value": "sum"},
+                ),
+                _read_profiling_csv(artifact.dispatch),
+                _read_profiling_csv(artifact.kernel_symbols),
+                artifact.pid,
+            )
+            for artifact in artifacts
+            if artifact.fbase == fbase
+        ]
+        counter_sets.append(
+            utils_analysis.assign_native_ids(
+                pd.concat(processes, ignore_index=True)
+            ).assign(Pass_Key=fbase)
+        )
+
+    counter_rows = pd.concat(counter_sets, ignore_index=True)
+    gpu_ids = utils_analysis.number_gpus_by_node(
+        pd.concat(
+            [_read_profiling_csv(artifact.agents) for artifact in artifacts],
+            ignore_index=True,
+        )
+    )
+    counter_rows["GPU_ID"] = counter_rows["GPU_ID"].map(gpu_ids)
+    if counter_rows.empty:
+        console_error(
+            "profiling",
+            f"No counter data in the native profiling data under {workload_dir}.\n"
+            "Please re-run 'rocprof-compute profile'.",
+        )
+    return counter_rows
+
+
+def _read_counter_results(result_file: Path) -> pd.DataFrame:
+    """Read one rocpd result artifact and check it carries counter rows."""
+    df = _read_profiling_csv(result_file)
+
+    # The rocpd counter CSV is long: one row per counter per dispatch.
+    if not {"Counter_Name", "Counter_Value"}.issubset(df.columns):
+        console_error(
+            "analysis",
+            f"{result_file} is not in the supported rocpd format. "
+            "Please re-profile this workload with a current release.",
+        )
+
     return df
 
 
-def collect_wave_occu_per_cu(in_dir: str, out_dir: str, num_se: int) -> None:
+def _natural_sort_key(name: str) -> list[Any]:
+    """Sort key that puts pmc_perf_2 before pmc_perf_10."""
+    return [int(part) if part.isdigit() else part for part in re.split(r"(\d+)", name)]
+
+
+def _read_profiling_csv(
+    csv_path: Path,
+    group_by: Sequence[str] = (),
+    agg: Optional[dict[str, str]] = None,
+) -> pd.DataFrame:
+    """Read one profiling CSV, stopping the run if it is empty or corrupt.
+
+    With agg, reads only the group_by and agg columns, a chunk at a time, and
+    returns them aggregated per group_by.
     """
-    Collect wave occupancy info from in_dir csv files
-    and consolidate into out_dir/wave_occu_per_cu.csv.
-    It depends highly on wave_occu_se*.csv format.
-    """
-    in_path = Path(in_dir)
-    all_data = pd.DataFrame()
-
-    for i in range(num_se):
-        file_path = in_path / f"wave_occu_se{i}.csv"
-        if not file_path.exists():
-            continue
-
-        tmp_df = pd.read_csv(file_path)
-        if tmp_df.empty:
-            continue
-
-        se_idx = f"SE{tmp_df.loc[0, 'SE']}"
-        tmp_df.rename(
-            columns={
-                "Dispatch": "Dispatch",
-                "SE": "SE",
-                "CU": "CU",
-                "Occupancy": se_idx,
-            }
-        )
-
-        # TODO: join instead of concat!
-        if i == 0:
-            all_data = tmp_df[{"CU", se_idx}]
-            all_data.sort_index(axis=1, inplace=True)
+    try:
+        if agg is None:
+            df = pd.read_csv(csv_path)
         else:
-            all_data = pd.concat([all_data, tmp_df[se_idx]], axis=1, copy=False)
-
-    if not all_data.empty:
-        all_data.to_csv(Path(out_dir) / "wave_occu_per_cu.csv", index=False)
-
-
-def is_single_panel_config(
-    root_dir: str, supported_archs: dict[str, str]
-) -> Optional[bool]:
-    """
-    Check the root configs dir structure to decide using one config set for all
-    archs, or one for each arch.
-    """
-    # If not single config, verify all supported archs have defined configs
-    arch_names = {
-        canonical_config_arch(arch) or arch for arch in supported_archs.keys()
-    }
-    root_path = Path(root_dir)
-    arch_count = sum(1 for arch in arch_names if (root_path / arch).exists())
-
-    if arch_count == 0:
-        return True
-    elif arch_count == len(arch_names):
-        return False
-    else:
-        console_warning(
-            "Found multiple panel config sets but incomplete for all archs."
+            df = _aggregate_csv_in_chunks(csv_path, list(group_by), agg)
+    except pd.errors.EmptyDataError:
+        console_error(
+            "profiling",
+            f"No counter data in {csv_path}.\nPlease re-run 'rocprof-compute profile'.",
         )
+        return pd.DataFrame()
+    except csv_compression.CORRUPT_CSV_ERRORS as error:
+        console_error(
+            "profiling",
+            f"{csv_path} is truncated or corrupt: {error}\n"
+            "A profile run killed mid-write leaves this behind; "
+            "re-run 'rocprof-compute profile' to regenerate the "
+            "workload.",
+        )
+        return pd.DataFrame()
+
+    if df.empty:
+        console_error(
+            "profiling",
+            f"No counter data in {csv_path}.\nPlease re-run 'rocprof-compute profile'.",
+        )
+    return df
+
+
+def _aggregate_csv_in_chunks(
+    csv_path: Path, group_by: List[str], agg: dict[str, str]
+) -> pd.DataFrame:
+    """Aggregate each chunk, then aggregate the per-chunk results."""
+    unsupported = set(agg.values()) - _CHUNK_COMBINERS.keys()
+    if unsupported:
+        raise ValueError(f"Cannot aggregate in chunks with {sorted(unsupported)}")
+
+    chunks = pd.read_csv(csv_path, usecols=[*group_by, *agg], chunksize=_CSV_CHUNK_ROWS)
+    partials = [
+        chunk.groupby(group_by, sort=False, as_index=False).agg(agg) for chunk in chunks
+    ]
+    combine = {column: _CHUNK_COMBINERS[func] for column, func in agg.items()}
+    return (
+        pd
+        .concat(partials, ignore_index=True)
+        .groupby(group_by, sort=False, as_index=False)
+        .agg(combine)
+    )
+
+
+def _renumber_dispatch_ids_across_processes(
+    combined_trace: pd.DataFrame,
+) -> pd.DataFrame:
+    """Replace process-local dispatch ids with ids unique across processes.
+
+    ``dispatch_info.dispatch_id`` restarts in every process, so a multi-process
+    workload repeats the same id once per process. Counter profiling already
+    folds ``PID`` into ``Dispatch_ID`` via ``utils_profile``'s
+    ``GroupIdAssigner``, so both analyze paths agree on what a dispatch id means.
+    """
+    if combined_trace.empty:
+        return combined_trace
+
+    renumbered_trace = combined_trace.copy()
+    renumbered_trace["Dispatch_Id"] = range(1, len(renumbered_trace) + 1)
+    return renumbered_trace
+
+
+def _find_pid_prefixed_pc_sampling_result_files(
+    workload_path: Path,
+) -> tuple[Path, ...]:
+    """Return the workload's ``<pid>_ps_file_results.json`` in numeric PID order."""
+    if not workload_path.is_dir():
+        return ()
+
+    results_filename_suffix = "_ps_file_results.json"
+    pid_result_candidates: list[Path] = []
+
+    for candidate_path in workload_path.iterdir():
+        if not candidate_path.is_file():
+            continue
+        if not candidate_path.name.endswith(results_filename_suffix):
+            continue
+
+        process_identifier_prefix = candidate_path.name[: -len(results_filename_suffix)]
+        if re.fullmatch(r"[0-9]+", process_identifier_prefix) is None:
+            continue
+
+        pid_result_candidates.append(candidate_path)
+
+    # The PID prefix alone orders the files: it is unique among siblings.
+    return tuple(
+        sorted(
+            pid_result_candidates,
+            key=lambda candidate_path: int(
+                candidate_path.name[: -len(results_filename_suffix)]
+            ),
+        )
+    )
+
+
+def _validate_pc_sampling_process_ids(
+    tool_data_records: list[dict[str, Any]],
+) -> None:
+    """Require a concrete, unique process ID for every tool record.
+
+    This is the precondition that lets every downstream consumer index
+    ``tool_data["metadata"]["pid"]`` without a guard. ``console_error`` exits by
+    default, so a record that reaches those consumers is known to have a pid.
+    """
+    if not tool_data_records:
+        return
+
+    process_ids = [
+        tool_data.get("metadata", {}).get("pid") for tool_data in tool_data_records
+    ]
+    if any(process_id is None for process_id in process_ids):
+        console_error("PC sampling: every result record requires metadata.pid.")
+
+    if len(set(process_ids)) != len(process_ids):
+        console_error(
+            "PC sampling: multiple result records require unique metadata.pid values."
+        )
+
+
+def _parse_pc_sampling_result_file(json_path: Path) -> Optional[dict[str, Any]]:
+    """Extract the sole ``rocprofiler-sdk-tool`` record at index 0.
+
+    Each ``<pid>_ps_file_results.json`` output contains exactly one tool record,
+    so index 0 is the complete record for that process.
+
+    Log a warning and return ``None`` when the result file is malformed.
+    """
+    try:
+        with json_path.open(encoding="utf-8") as json_file:
+            return json.load(json_file)["rocprofiler-sdk-tool"][0]
+    except (json.JSONDecodeError, KeyError, IndexError) as error:
+        console_warning(f"PC sampling: failed to parse {json_path}: {error}")
+        return None

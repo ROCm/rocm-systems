@@ -4,8 +4,11 @@
 /// @file scalar_scc_test.cpp
 /// @brief Cross-architecture scalar SCC execution and preservation tests.
 
-#include "rocjitsu/analysis/def_use_chain.h"
+#include "compute_unit_test_util.h"
+#include "decode_test_util.h"
+#include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -14,19 +17,20 @@
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 
-#include "rocjitsu/isa/arch/amdgpu/cdna1/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna2/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna3/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna1/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna2/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3_5/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/test_encodings.h"
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstdint>
@@ -96,7 +100,7 @@ std::optional<EncodingWords> rdna4_encoding(std::string_view mnemonic) {
 }
 
 std::optional<EncodingWords> gfx1250_encoding(std::string_view mnemonic) {
-  return find_test_encoding(gfx1250::test_data::ENCODINGS, mnemonic);
+  return find_test_encoding(cdna5::test_data::ENCODINGS, mnemonic);
 }
 
 class ScalarSccProfile {
@@ -118,7 +122,7 @@ const std::array<ScalarSccProfile, 10> kScalarSccProfiles{{
     {ROCJITSU_CODE_ARCH_RDNA3, "rdna3", rdna3_encoding, WrexecDialect::AndNot, true},
     {ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", rdna3_5_encoding, WrexecDialect::AndNot, true},
     {ROCJITSU_CODE_ARCH_RDNA4, "rdna4", rdna4_encoding, WrexecDialect::AndNot, true},
-    {ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", gfx1250_encoding, WrexecDialect::AndNot, true},
+    {ROCJITSU_CODE_ARCH_CDNA5, "gfx1250", gfx1250_encoding, WrexecDialect::AndNot, true},
 }};
 
 EncodingWords require_encoding(const ScalarSccProfile &profile, std::string_view mnemonic) {
@@ -184,19 +188,22 @@ EncodingWords encode_sopk(const ScalarSccProfile &profile, std::string_view mnem
 
 class ScalarSccFixture {
 public:
-  ScalarSccFixture(const ScalarSccProfile &profile, std::string_view test_name)
+  ScalarSccFixture(const ScalarSccProfile &profile, std::string_view test_name,
+                   uint32_t wave_size = 0, uint32_t num_sgprs = 106)
       : profile(profile),
         gpu_mem(std::string(profile.name) + "_" + std::string(test_name) + "_mem"),
         l2(std::string(profile.name) + "_" + std::string(test_name) + "_l2") {
     config.arch = profile.arch;
     config.num_wf_slots = 1;
-    config.sgprs_per_wf = 106;
+    config.sgprs_per_wf = num_sgprs;
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create(std::string(profile.name), config, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, std::string(profile.name), config, &gpu_mem, &l2);
+    if (!cu)
+      return;
     decoder = Decoder::create(profile.arch);
     if (cu)
-      wf = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+      wf = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf, wave_size);
   }
 
   ~ScalarSccFixture() {
@@ -211,7 +218,7 @@ public:
 
   std::unique_ptr<Instruction> decode(const EncodingWords &words,
                                       std::string_view expected_mnemonic) {
-    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     if (inst) {
       EXPECT_EQ(std::string_view(inst->mnemonic()), expected_mnemonic) << profile.name;
     }
@@ -225,7 +232,7 @@ public:
     ASSERT_NE(cmov, nullptr) << profile.name;
     EXPECT_EQ(wf->read_scc(), expected_scc) << profile.name << " " << context;
     cu->write_sgpr(sgpr_base() + 8, kCmovSentinel);
-    cu->execute_instruction(cmov.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(cmov.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_sgpr(sgpr_base() + 8), expected_scc ? 0x1234u : kCmovSentinel)
         << profile.name << " " << context;
   }
@@ -240,6 +247,245 @@ public:
   std::unique_ptr<Decoder> decoder;
   amdgpu::Wavefront *wf = nullptr;
 };
+
+TEST(ScalarSccTest, Gfx10WaitRegisterValueIsDynamicAndWraps) {
+  using amdgpu::WaitCounterKind;
+  using amdgpu::WaitCounterPolicy;
+  for (const auto &profile : kScalarSccProfiles) {
+    if (profile.arch != ROCJITSU_CODE_ARCH_RDNA1 && profile.arch != ROCJITSU_CODE_ARCH_RDNA2)
+      continue;
+    ScalarSccFixture f(profile, "wait_register");
+    ASSERT_TRUE(f.ready());
+    const auto dynamic = f.decode(encode_sopk(profile, "s_waitcnt_vmcnt", /*sdst=*/0, /*simm16=*/1),
+                                  "s_waitcnt_vmcnt");
+    const auto immediate = f.decode(
+        encode_sopk(profile, "s_waitcnt_vmcnt", /*sdst=*/125, /*simm16=*/0x40), "s_waitcnt_vmcnt");
+    ASSERT_TRUE(dynamic && immediate);
+    const auto unknown = WaitCounterPolicy::explicit_wait_fields(*dynamic, profile.arch);
+    ASSERT_TRUE(unknown.succeeded());
+    // Without the executing wave's SGPR, a static checker cannot prove a threshold.
+    EXPECT_FALSE(unknown.value());
+    const auto zero = WaitCounterPolicy::explicit_wait_fields(*immediate, profile.arch);
+    ASSERT_TRUE(zero.succeeded() && zero.value());
+    const auto load = static_cast<size_t>(WaitCounterKind::Load);
+    EXPECT_EQ((*zero.value())[load], 0u);
+    // Adding SIMM16 to the SGPR wraps at the counter width: (63 + 1) & 0x3f == 0.
+    f.cu->write_sgpr(f.sgpr_base(), 63);
+    f.wf->wait_counters().vmcnt = 1;
+    ASSERT_TRUE(f.cu->execute_instruction(dynamic.get(), *f.wf).succeeded());
+    const auto resolved = WaitCounterPolicy::executed_wait_fields(
+        *dynamic, profile.arch, f.wf->wait_target().gfx10_wait_fields());
+    ASSERT_TRUE(resolved.succeeded() && resolved.value());
+    EXPECT_EQ((*resolved.value())[load], 0u);
+    EXPECT_EQ(f.wf->wait_target().vmcnt, 0u);
+    EXPECT_EQ(f.wf->state(), amdgpu::WfState::WAITCNT);
+    f.wf->wait_counters().vmcnt = 0;
+    f.wf->set_state(amdgpu::WfState::RUNNING);
+    f.wf->wait_for({.expcnt = 0});
+    f.wf->wait_counters().expcnt = 1;
+    EXPECT_TRUE(f.cu->execute_instruction(immediate.get(), *f.wf).succeeded());
+    EXPECT_EQ(f.wf->state(), amdgpu::WfState::RUNNING);
+    f.wf->wait_counters().expcnt = 0;
+  }
+}
+
+TEST(ScalarSccTest, Rdna2HwregsUseTheExecutingWavesState) {
+  const auto profile =
+      std::ranges::find(kScalarSccProfiles, ROCJITSU_CODE_ARCH_RDNA2, &ScalarSccProfile::arch);
+  ASSERT_NE(profile, kScalarSccProfiles.end());
+  ScalarSccFixture f(*profile, "hwreg");
+  ASSERT_TRUE(f.ready());
+  f.wf->set_lds_base(512);
+  f.wf->set_lds_size(4096);
+  f.wf->wait_counters().vmcnt = 45;
+  f.wf->wait_counters().vscnt = 12;
+  f.wf->wait_counters().expcnt = 2;
+  f.wf->wait_counters().lgkmcnt = 5;
+  f.wf->set_apertures(0x1234000000000000ull, 0x12340000ffffffffull, 0xabcd000000000000ull,
+                      0xabcd0000ffffffffull, /*override_launch=*/true);
+  f.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
+    return amdgpu::ComputeUnitCore::TrapHandlerConfig{.tba = 0x3456789abc00, .tma = 0x123456778800};
+  });
+  for (const auto &[id, expected] :
+       {std::pair{6u, 0x10002u}, std::pair{7u, 0x3080052du}, std::pair{15u, 0x1234abcdu},
+        std::pair{16u, 0x56789abcu}, std::pair{17u, 0x34u}, std::pair{18u, 0x34567788u},
+        std::pair{19u, 0x12u}, std::pair{25u, 0u}}) {
+    SCOPED_TRACE(id);
+    const auto read =
+        f.decode(encode_sopk(*profile, "s_getreg_b32", 2, id | (31u << 11)), "s_getreg_b32");
+    ASSERT_TRUE(read);
+    EXPECT_TRUE(f.cu->execute_instruction(read.get(), *f.wf).succeeded());
+    EXPECT_EQ(f.cu->read_sgpr(f.sgpr_base() + 2), expected);
+  }
+  for (unsigned i = 0; i < 2; ++i) {
+    const auto read = f.decode(encode_sopk(*profile, "s_getreg_b32", 2 + i, (18 + i) | (31u << 11)),
+                               "s_getreg_b32");
+    ASSERT_TRUE(read);
+    ASSERT_TRUE(f.cu->execute_instruction(read.get(), *f.wf).succeeded());
+  }
+  const auto encoded_tma = uint64_t{f.cu->read_sgpr(f.sgpr_base() + 2)} |
+                           (uint64_t{f.cu->read_sgpr(f.sgpr_base() + 3)} << 32);
+  EXPECT_EQ(encoded_tma << 8, 0x123456778800ull);
+  f.wf->wait_counters() = {};
+  for (const auto &[selector, address] : {std::pair{235u, f.wf->shared_aperture_base()},
+                                          std::pair{236u, f.wf->shared_aperture_limit()},
+                                          std::pair{237u, f.wf->private_aperture_base()},
+                                          std::pair{238u, f.wf->private_aperture_limit()}}) {
+    SCOPED_TRACE(selector);
+    for (std::string_view mnemonic : {"s_mov_b32", "s_mov_b64"}) {
+      const auto read = f.decode(encode_sop1(*profile, mnemonic, 2, selector), mnemonic);
+      ASSERT_TRUE(read);
+      EXPECT_TRUE(f.cu->execute_instruction(read.get(), *f.wf).succeeded());
+      EXPECT_EQ(f.cu->read_sgpr(f.sgpr_base() + 2), static_cast<uint32_t>(address));
+      if (mnemonic == "s_mov_b64") {
+        EXPECT_EQ(f.cu->read_sgpr(f.sgpr_base() + 3), address >> 32);
+      }
+    }
+  }
+}
+
+TEST(ScalarSccTest, Cdna1ReadsUnallocatedSourcesAndZeroPredicates) {
+  ScalarSccFixture f(kScalarSccProfiles.front(), "scalar_sources", /*wave_size=*/0,
+                     /*num_sgprs=*/32);
+  ASSERT_TRUE(f.ready());
+  f.cu->write_sgpr(f.sgpr_base(), 0x12345678);
+  f.cu->write_sgpr(f.sgpr_base() + 1, 0xabcdef01);
+  f.wf->write_exec(0);
+  f.wf->set_vcc_raw(0);
+  for (const auto &[selector, expected] : std::array<std::pair<unsigned, uint64_t>, 3>{
+           {{40, 0xabcdef0112345678ULL}, {251, 1}, {252, 1}}}) {
+    auto mov = f.decode({0xbe840100u | selector, 0}, "s_mov_b64");
+    ASSERT_TRUE(mov);
+    ASSERT_TRUE(f.cu->execute_instruction(mov.get(), *f.wf).succeeded());
+    EXPECT_EQ(f.cu->read_sgpr(f.sgpr_base() + 4), static_cast<uint32_t>(expected));
+    EXPECT_EQ(f.cu->read_sgpr(f.sgpr_base() + 5), expected >> 32);
+  }
+  auto mov = f.decode({0xbe840028, 0}, "s_mov_b32"); // s4, s40
+  ASSERT_TRUE(mov);
+  ASSERT_TRUE(f.cu->execute_instruction(mov.get(), *f.wf).succeeded());
+  EXPECT_EQ(f.cu->read_sgpr(f.sgpr_base() + 4), 0x12345678u);
+}
+
+TEST(ScalarSccTest, CdnaForkConsumesOneSharedLiteralWord) {
+  struct ForkCase {
+    uint32_t word, register_value, literal, target;
+  };
+  constexpr ForkCase cases[] = {
+      {0x948000ffu, 0x200, 0x100, 0x200}, // Literal mask, SGPR target.
+      {0x9480ff00u, 0x100, 0x200, 0x200}, // SGPR mask, literal target.
+      {0x9480ffffu, 0, 0x100, 0x100},     // One literal shared by both sources.
+  };
+  for (const auto &profile : kScalarSccProfiles) {
+    if (profile.arch > ROCJITSU_CODE_ARCH_CDNA4)
+      continue;
+    SCOPED_TRACE(profile.name);
+    ScalarSccFixture f(profile, "fork_literal");
+    ASSERT_TRUE(f.ready());
+    f.cu->write_sgpr(f.sgpr_base() + 1, 0);
+    for (const auto &c : cases) {
+      SCOPED_TRACE(c.word);
+      f.cu->write_sgpr(f.sgpr_base(), c.register_value);
+      auto fork = f.decode({c.word, c.literal}, "s_cbranch_g_fork");
+      ASSERT_TRUE(fork);
+      EXPECT_EQ(fork->size(), 8u);
+      f.wf->pc = 0x400;
+      f.wf->write_exec(0x100);
+      ASSERT_TRUE(f.cu->execute_instruction(fork.get(), *f.wf).succeeded());
+      EXPECT_EQ(f.wf->pc + fork->size(), c.target);
+      EXPECT_EQ(f.wf->cond_stack_ptr(), 0u);
+    }
+  }
+}
+
+TEST(ScalarSccTest, Cdna1RestrictsShaderWritesToTrapTemporaryPairs) {
+  ScalarSccFixture f(kScalarSccProfiles.front(), "trap_temporaries");
+  ASSERT_TRUE(f.ready());
+  auto mov = f.decode({0xbeec0181u, 0}, "s_mov_b64"); // ttmp[0:1], 1
+  ASSERT_TRUE(mov);
+  f.wf->set_ttmp(0, 12);
+  f.wf->set_ttmp(1, 34);
+  ASSERT_TRUE(f.cu->execute_instruction(mov.get(), *f.wf).succeeded());
+  EXPECT_EQ(f.wf->ttmp(0), 12u);
+  EXPECT_EQ(f.wf->ttmp(1), 34u);
+  f.wf->set_in_trap_handler(true);
+  ASSERT_TRUE(f.cu->execute_instruction(mov.get(), *f.wf).succeeded());
+  EXPECT_EQ(f.wf->ttmp(0), 1u);
+  EXPECT_EQ(f.wf->ttmp(1), 0u);
+  auto rfe = f.decode({0xbe801f00u, 0}, "s_rfe_b64"); // s[0:1]
+  ASSERT_TRUE(rfe);
+  f.cu->write_sgpr(f.sgpr_base(), 0x100);
+  f.cu->write_sgpr(f.sgpr_base() + 1, 0);
+  ASSERT_TRUE(f.cu->execute_instruction(rfe.get(), *f.wf).succeeded());
+  EXPECT_EQ(f.wf->pc + rfe->size(), 0x100u);
+  EXPECT_FALSE(f.wf->in_trap_handler());
+  EXPECT_EQ(f.wf->status_raw() & (1u << 5), 0u);
+}
+
+TEST(ScalarSccTest, Cdna1TrapDrainsCountersBeforeEnteringConfiguredHandler) {
+  ScalarSccFixture f(kScalarSccProfiles.front(), "trap_order");
+  ASSERT_TRUE(f.ready());
+  f.cu->set_functional_quantum(1);
+  constexpr uint64_t trap_pc = 0x1000, handler = 0x2000;
+  f.gpu_mem.write32(trap_pc, 0xbf920007u);     // s_trap 7
+  f.gpu_mem.write32(handler, 0xb8840142u);     // s_getreg_b32 s4, hwreg(STATUS,5,1)
+  f.gpu_mem.write32(handler + 4, 0xb885f810u); // s5 = TBA_LO
+  f.gpu_mem.write32(handler + 8, 0xb886f812u); // s6 = TMA_LO
+  f.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
+    return amdgpu::ComputeUnitCore::TrapHandlerConfig{handler, 0x3000, true};
+  });
+  f.wf->pc = trap_pc;
+  f.wf->wait_counters().vmcnt = 1;
+  f.cu->step();
+  EXPECT_FALSE(f.wf->in_trap_handler());
+  EXPECT_EQ(f.wf->pc, trap_pc);
+  f.wf->release_wait_counter(amdgpu::WaitCounterType::VMCNT);
+  for (unsigned i = 0; i < 3 && !f.wf->in_trap_handler(); ++i)
+    f.cu->step();
+  ASSERT_TRUE(f.wf->in_trap_handler());
+  ASSERT_EQ(f.wf->pc, handler);
+  f.cu->step();
+  f.cu->step();
+  f.cu->step();
+  EXPECT_EQ(f.cu->read_sgpr(f.sgpr_base() + 4), 1u);
+  EXPECT_EQ(f.cu->read_sgpr(f.sgpr_base() + 5), handler >> 8);
+  EXPECT_EQ(f.cu->read_sgpr(f.sgpr_base() + 6), 0x3000u >> 8);
+}
+
+TEST(ScalarSccTest, Cdna1TrapRetiresImplicitMemoryWaitOnlyOnHandlerEntry) {
+  constexpr uint64_t program = 0x1000, handler = 0x2000, data = 0x3000;
+  for (bool install_handler : {false, true}) {
+    SCOPED_TRACE(install_handler);
+    ScalarSccFixture f(kScalarSccProfiles.front(), "trap_wait_check");
+    ASSERT_TRUE(f.ready());
+    f.cu->set_functional_quantum(1);
+    f.l2.set_backing_memory(&f.gpu_mem);
+    f.gpu_mem.write32(data, 123);
+    f.gpu_mem.write32(program, 0xc0020200u); // s_load_dword s8, s[0:1], 0
+    f.gpu_mem.write32(program + 4, 0);
+    f.gpu_mem.write32(program + 8, 0xbf920007u);  // s_trap 7
+    f.gpu_mem.write32(program + 12, 0xbe890008u); // s_mov_b32 s9, s8
+    f.gpu_mem.write32(handler, 0xbe890008u);
+    if (install_handler) {
+      f.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
+        return amdgpu::ComputeUnitCore::TrapHandlerConfig{handler, 0, false};
+      });
+    }
+    f.cu->write_sgpr(f.sgpr_base(), data);
+    f.cu->write_sgpr(f.sgpr_base() + 1, 0);
+    f.wf->pc = program;
+    f.cu->step();
+    ASSERT_EQ(f.wf->pc, program + 8);
+    ASSERT_NE(f.wf->memory_wait_scoreboard(), nullptr);
+    ASSERT_FALSE(f.wf->memory_wait_scoreboard()->empty());
+    const uint64_t consumer = install_handler ? handler : program + 12;
+    for (unsigned i = 0; i < 8 && f.wf->pc != consumer; ++i)
+      f.cu->step();
+    ASSERT_EQ(f.wf->pc, consumer);
+    f.cu->step();
+    EXPECT_EQ(f.cu->read_sgpr(f.sgpr_base() + 9), 123u);
+    EXPECT_EQ(f.cu->memory_wait_diagnostic_count(), install_handler ? 0u : 1u);
+  }
+}
 
 class WrexecPair {
 public:
@@ -278,16 +524,16 @@ void expect_wrexec_def_use(const ScalarSccProfile &profile, const WrexecPair &pa
   const uint8_t width = pair.is_b64 ? 2 : 1;
   for (const auto mnemonic : {pair.first, pair.second}) {
     const auto words = encode_sop1(profile, mnemonic, kDestSgpr, kSourceSgpr);
-    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr) << profile.name << " " << mnemonic;
     ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic) << profile.name;
 
     const RegisterRef source{RegClass::SGPR, kSourceSgpr, width};
     const RegisterRef destination{RegClass::SGPR, kDestSgpr, width};
-    // The implicit EXEC read/write and SCC def are modeled as inert fieldless
-    // operands (to_register_ref() == nullopt): they add to the operand counts
-    // but contribute nothing to def/use at this time. The field-bearing SGPR
-    // source/dest stay at index 0.
+    // The implicit EXEC read/write and SCC def are fieldless special operands
+    // (to_register_ref() == nullopt): they become singleton special members of
+    // the def/use sets, but stay out of the ordinary projection asserted below.
+    // The field-bearing SGPR source/dest stay at index 0.
     ASSERT_EQ(inst->num_src_operands(), 2) << profile.name << " " << mnemonic;
     ASSERT_EQ(inst->num_dst_operands(), 3) << profile.name << " " << mnemonic;
     EXPECT_EQ(inst->src_operand(0)->to_register_ref(), source) << profile.name << " " << mnemonic;
@@ -302,13 +548,25 @@ void expect_wrexec_def_use(const ScalarSccProfile &profile, const WrexecPair &pa
       EXPECT_FALSE(inst->dst_operand(i)->to_register_ref()) << profile.name << " " << mnemonic;
     }
 
-    const InstDefUse def_use(*inst);
+    const InstDefUse def_use(*inst, 64);
     EXPECT_TRUE(def_use.uses.contains(source)) << profile.name << " " << mnemonic;
     EXPECT_FALSE(def_use.uses.contains(destination)) << profile.name << " " << mnemonic;
     EXPECT_TRUE(def_use.defs.contains(destination)) << profile.name << " " << mnemonic;
     EXPECT_FALSE(def_use.defs.contains(source)) << profile.name << " " << mnemonic;
-    EXPECT_EQ(def_use.uses.size(), static_cast<size_t>(width)) << profile.name << " " << mnemonic;
-    EXPECT_EQ(def_use.defs.size(), static_cast<size_t>(width)) << profile.name << " " << mnemonic;
+    EXPECT_EQ(def_use.uses.ordinary_size(), static_cast<size_t>(width))
+        << profile.name << " " << mnemonic;
+    EXPECT_EQ(def_use.defs.ordinary_size(), static_cast<size_t>(width))
+        << profile.name << " " << mnemonic;
+
+    // wrexec reads and writes EXEC and sets SCC: these fieldless special
+    // operands are singleton members of the def/use sets (outside the ordinary
+    // projection asserted above).
+    EXPECT_TRUE(def_use.uses.contains(RegisterRef{RegClass::EXEC, 0, 1}))
+        << profile.name << " " << mnemonic;
+    EXPECT_TRUE(def_use.defs.contains(RegisterRef{RegClass::EXEC, 0, 1}))
+        << profile.name << " " << mnemonic;
+    EXPECT_TRUE(def_use.defs.contains(RegisterRef{RegClass::SCC, 0, 1}))
+        << profile.name << " " << mnemonic;
   }
 }
 
@@ -355,7 +613,7 @@ void run_wrexec_scc_cases(const ScalarSccProfile &profile, const WrexecPair &pai
     fixture.wf->set_exec_raw(raw_exec);
     const bool expected_scc = test_case.expected != 0;
     fixture.wf->write_scc(!expected_scc);
-    fixture.cu->execute_instruction(inst.get(), *fixture.wf);
+    EXPECT_TRUE(fixture.cu->execute_instruction(inst.get(), *fixture.wf).succeeded());
 
     uint64_t actual = fixture.cu->read_sgpr(sb + kDestSgpr);
     if (pair.is_b64) {
@@ -375,6 +633,56 @@ void run_wrexec_scc_cases(const ScalarSccProfile &profile, const WrexecPair &pai
     EXPECT_EQ(fixture.wf->exec(), test_case.expected & lane_mask)
         << profile.name << " " << test_case.mnemonic;
     fixture.expect_scc_consumer(expected_scc, test_case.mnemonic);
+  }
+}
+
+TEST(ScalarSccTest, B32ExecInstructionsPreserveTheOtherHalfOfAWave) {
+  for (const auto &profile : kScalarSccProfiles) {
+    if (!profile.has_wrexec_b32)
+      continue;
+    SCOPED_TRACE(profile.name);
+    // The CDNA5 ISA exposes these B32 operations on wave32.
+    const uint32_t wave_size = profile.arch == ROCJITSU_CODE_ARCH_CDNA5 ? 32 : 64;
+    ScalarSccFixture fixture(profile, "b32_exec", wave_size);
+    ASSERT_TRUE(fixture.ready());
+    const char *wrexec = profile.wrexec_dialect == WrexecDialect::Andn ? "s_andn1_wrexec_b32"
+                                                                       : "s_and_not0_wrexec_b32";
+    for (const std::string_view mnemonic : {"s_and_saveexec_b32", wrexec}) {
+      SCOPED_TRACE(mnemonic);
+      auto inst = fixture.decode(encode_sop1(profile, mnemonic, 4, 0), mnemonic);
+      ASSERT_NE(inst, nullptr);
+      const uint64_t high = wave_size == 64 ? uint64_t{0xdeadbeef} << 32 : 0;
+      fixture.wf->set_exec_raw(high | 15);
+      fixture.cu->write_sgpr(fixture.sgpr_base(), mnemonic == "s_and_saveexec_b32" ? 0 : 15);
+      ASSERT_TRUE(fixture.cu->execute_instruction(inst.get(), *fixture.wf).succeeded());
+      EXPECT_EQ(fixture.wf->exec_raw(), high);
+      EXPECT_FALSE(fixture.wf->read_scc());
+      EXPECT_EQ(fixture.cu->read_sgpr(fixture.sgpr_base() + 4),
+                mnemonic == "s_and_saveexec_b32" ? 15u : 0u);
+    }
+  }
+}
+
+TEST(ScalarSccTest, Gfx10WaitUsesTheRegisterAndForgetsEarlierCounterLimits) {
+  for (const auto &profile : kScalarSccProfiles) {
+    if (profile.arch != ROCJITSU_CODE_ARCH_RDNA1 && profile.arch != ROCJITSU_CODE_ARCH_RDNA2)
+      continue;
+    ScalarSccFixture f(profile, "gfx10_wait");
+    ASSERT_TRUE(f.ready());
+    auto vm = f.decode(encode_sopk(profile, "s_waitcnt_vmcnt", /*sdst=*/4, /*simm16=*/2),
+                       "s_waitcnt_vmcnt");
+    auto ds = f.decode(encode_sopk(profile, "s_waitcnt_lgkmcnt", /*sdst=*/4, /*simm16=*/1),
+                       "s_waitcnt_lgkmcnt");
+    ASSERT_NE(vm, nullptr);
+    ASSERT_NE(ds, nullptr);
+    f.cu->write_sgpr(f.sgpr_base() + 4, 63);
+    ASSERT_TRUE(f.cu->execute_instruction(vm.get(), *f.wf).succeeded());
+    EXPECT_EQ(f.wf->wait_target().vmcnt, 1u);
+    f.wf->wait_counters().vmcnt = 2;
+    ASSERT_TRUE(f.cu->execute_instruction(ds.get(), *f.wf).succeeded());
+    EXPECT_EQ(f.wf->wait_target().lgkmcnt, 0u);
+    EXPECT_EQ(f.wf->state(), amdgpu::WfState::RUNNING);
+    f.wf->wait_counters().vmcnt = 0;
   }
 }
 
@@ -508,7 +816,7 @@ void run_saveexec_case(ScalarSccFixture &fixture, const ScalarSccProfile &profil
       is_b64 ? old_exec : (static_cast<uint64_t>(kHighSentinel) << 32) | old_exec;
   fixture.wf->set_exec_raw(initial_raw_exec);
   fixture.wf->write_scc(expected == 0);
-  fixture.cu->execute_instruction(inst.get(), *fixture.wf);
+  EXPECT_TRUE(fixture.cu->execute_instruction(inst.get(), *fixture.wf).succeeded());
 
   if (is_b64) {
     const uint64_t saved = fixture.cu->read_sgpr(sb + sdst) |
@@ -628,7 +936,7 @@ void run_addk_scc_cases(const ScalarSccProfile &profile) {
 
     fixture.cu->write_sgpr(sb + 4, test_case.initial);
     fixture.wf->write_scc(!test_case.expected_scc);
-    fixture.cu->execute_instruction(inst.get(), *fixture.wf);
+    EXPECT_TRUE(fixture.cu->execute_instruction(inst.get(), *fixture.wf).succeeded());
     EXPECT_EQ(fixture.cu->read_sgpr(sb + 4), test_case.expected) << profile.name;
     fixture.expect_scc_consumer(test_case.expected_scc, mnemonic);
   }
@@ -665,7 +973,7 @@ void run_mulk_cases(const ScalarSccProfile &profile) {
     for (const bool initial_scc : {false, true}) {
       fixture.cu->write_sgpr(sb + 4, test_case.initial);
       fixture.wf->write_scc(initial_scc);
-      fixture.cu->execute_instruction(inst.get(), *fixture.wf);
+      EXPECT_TRUE(fixture.cu->execute_instruction(inst.get(), *fixture.wf).succeeded());
       EXPECT_EQ(fixture.cu->read_sgpr(sb + 4), test_case.expected) << profile.name;
       fixture.expect_scc_consumer(initial_scc, "s_mulk_i32");
     }
@@ -684,12 +992,13 @@ TEST(ScalarSccTest, AddkAndMulkRegisterDestinationRead) {
     const std::array mnemonics{addk_mnemonic(profile), std::string_view{"s_mulk_i32"}};
     for (const auto mnemonic : mnemonics) {
       const auto words = encode_sopk(profile, mnemonic, /*sdst=*/4, /*simm16=*/1);
-      std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr) << profile.name << " " << mnemonic;
       ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic) << profile.name;
 
-      // s_addk_i32 sets SCC, modeled as an inert fieldless dst operand;
-      // s_mulk_i32 does not touch SCC. SCC carries no def/use either way.
+      // s_addk_i32 sets SCC through a fieldless dst operand (no RegisterRef);
+      // s_mulk_i32 does not. InstDefUse records that SCC write as a singleton
+      // special member of defs, kept out of the ordinary projection below.
       const bool sets_scc = mnemonic != std::string_view{"s_mulk_i32"};
       ASSERT_EQ(inst->num_src_operands(), 2) << profile.name << " " << mnemonic;
       ASSERT_EQ(inst->num_dst_operands(), sets_scc ? 2 : 1) << profile.name << " " << mnemonic;
@@ -707,13 +1016,17 @@ TEST(ScalarSccTest, AddkAndMulkRegisterDestinationRead) {
       EXPECT_EQ(inst->dst_operand(0)->to_register_ref(), (RegisterRef{RegClass::SGPR, 4, 1}))
           << profile.name << " " << mnemonic;
 
-      const InstDefUse def_use(*inst);
+      const InstDefUse def_use(*inst, 64);
       EXPECT_TRUE(def_use.uses.contains(RegisterRef{RegClass::SGPR, 4, 1}))
           << profile.name << " " << mnemonic;
       EXPECT_TRUE(def_use.defs.contains(RegisterRef{RegClass::SGPR, 4, 1}))
           << profile.name << " " << mnemonic;
-      EXPECT_EQ(def_use.uses.size(), 1u) << profile.name << " " << mnemonic;
-      EXPECT_EQ(def_use.defs.size(), 1u) << profile.name << " " << mnemonic;
+      // The implicit SCC def is a special member of defs; the ordinary
+      // projection is just the s4 read-modify-write.
+      EXPECT_EQ(def_use.defs.contains(RegisterRef{RegClass::SCC, 0, 1}), sets_scc)
+          << profile.name << " " << mnemonic;
+      EXPECT_EQ(def_use.uses.ordinary_size(), 1u) << profile.name << " " << mnemonic;
+      EXPECT_EQ(def_use.defs.ordinary_size(), 1u) << profile.name << " " << mnemonic;
     }
   }
 }
@@ -770,7 +1083,7 @@ void run_sop2_scc_cases(const ScalarSccProfile &profile) {
     fixture.cu->write_sgpr(sb, test_case.lhs);
     fixture.cu->write_sgpr(sb + 1, test_case.rhs);
     fixture.wf->write_scc(!test_case.expected_scc);
-    fixture.cu->execute_instruction(inst.get(), *fixture.wf);
+    EXPECT_TRUE(fixture.cu->execute_instruction(inst.get(), *fixture.wf).succeeded());
     EXPECT_EQ(fixture.cu->read_sgpr(sb + 2), test_case.expected_result)
         << profile.name << " " << test_case.mnemonic;
     fixture.expect_scc_consumer(test_case.expected_scc, test_case.mnemonic);
@@ -823,7 +1136,7 @@ void run_sop2_carry_input_cases(const ScalarSccProfile &profile) {
     fixture.cu->write_sgpr(sb, test_case.lhs);
     fixture.cu->write_sgpr(sb + 1, test_case.rhs);
     fixture.wf->write_scc(test_case.input_scc);
-    fixture.cu->execute_instruction(inst.get(), *fixture.wf);
+    EXPECT_TRUE(fixture.cu->execute_instruction(inst.get(), *fixture.wf).succeeded());
     EXPECT_EQ(fixture.cu->read_sgpr(sb + 2), test_case.expected_result)
         << profile.name << " " << test_case.mnemonic;
     fixture.expect_scc_consumer(test_case.expected_scc, test_case.mnemonic);
@@ -862,7 +1175,7 @@ void run_sopc_sopk_compare_scc_cases(const ScalarSccProfile &profile) {
     fixture.cu->write_sgpr(sb, test_case.lhs);
     fixture.cu->write_sgpr(sb + 1, test_case.rhs);
     fixture.wf->write_scc(!test_case.expected_scc);
-    fixture.cu->execute_instruction(inst.get(), *fixture.wf);
+    EXPECT_TRUE(fixture.cu->execute_instruction(inst.get(), *fixture.wf).succeeded());
     fixture.expect_scc_consumer(test_case.expected_scc, test_case.mnemonic);
   }
 
@@ -886,7 +1199,7 @@ void run_sopc_sopk_compare_scc_cases(const ScalarSccProfile &profile) {
 
     fixture.cu->write_sgpr(sb + 4, test_case.src);
     fixture.wf->write_scc(!test_case.expected_scc);
-    fixture.cu->execute_instruction(inst.get(), *fixture.wf);
+    EXPECT_TRUE(fixture.cu->execute_instruction(inst.get(), *fixture.wf).succeeded());
     fixture.expect_scc_consumer(test_case.expected_scc, "s_cmpk_eq_i32");
   }
 }
@@ -932,7 +1245,7 @@ void run_scalar_unary_preserves_scc(const ScalarSccProfile &profile,
       fixture.cu->write_sgpr(sb + 2, 0u);
       fixture.cu->write_sgpr(sb + 3, kHighDestinationSentinel);
       fixture.wf->write_scc(initial_scc);
-      fixture.cu->execute_instruction(inst.get(), *fixture.wf);
+      EXPECT_TRUE(fixture.cu->execute_instruction(inst.get(), *fixture.wf).succeeded());
 
       uint64_t actual = fixture.cu->read_sgpr(sb + 2);
       if (test_case.result_is_64_bit) {
@@ -1052,15 +1365,15 @@ void run_scalar_scan_carry_chain(const ScalarSccProfile &profile) {
   fixture.cu->write_sgpr(sb + 12, 1u);
   fixture.wf->write_scc(false);
 
-  fixture.cu->execute_instruction(add.get(), *fixture.wf);
+  EXPECT_TRUE(fixture.cu->execute_instruction(add.get(), *fixture.wf).succeeded());
   ASSERT_EQ(fixture.cu->read_sgpr(sb), 0u);
   ASSERT_TRUE(fixture.wf->read_scc());
 
-  fixture.cu->execute_instruction(scan.get(), *fixture.wf);
+  EXPECT_TRUE(fixture.cu->execute_instruction(scan.get(), *fixture.wf).succeeded());
   ASSERT_EQ(fixture.cu->read_sgpr(sb + 10), 0u);
   ASSERT_TRUE(fixture.wf->read_scc());
 
-  fixture.cu->execute_instruction(addc.get(), *fixture.wf);
+  EXPECT_TRUE(fixture.cu->execute_instruction(addc.get(), *fixture.wf).succeeded());
   EXPECT_EQ(fixture.cu->read_sgpr(sb + 1), 0x55u);
   EXPECT_FALSE(fixture.wf->read_scc());
 }

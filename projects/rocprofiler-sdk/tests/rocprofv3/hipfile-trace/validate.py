@@ -47,7 +47,7 @@ def test_hipfile(json_data):
 
     _, bf_op_names = get_operation(data, "HIPFILE_API_EXT")
 
-    assert len(bf_op_names) == 31
+    assert len(bf_op_names) == (34 if "hipFileGetStatsL3" in bf_op_names else 31)
 
     observed_operations = set()
     observed_args = False

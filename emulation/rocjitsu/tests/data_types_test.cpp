@@ -657,6 +657,25 @@ TEST(Fp16, RoundTrip) {
   EXPECT_TRUE(std::signbit(rt(-0.0f)));
 }
 
+TEST(Fp16, PreservesEveryEncodingThroughF32) {
+  for (uint32_t bits = 0; bits < 65536; ++bits) {
+    const float promoted = util::f16_to_f32(static_cast<uint16_t>(bits));
+    ASSERT_EQ(util::f32_to_f16(promoted), bits) << bits;
+    ASSERT_EQ(util::f32_to_f16_rtz(promoted), bits) << bits;
+  }
+}
+
+TEST(Fp16, NarrowNaNPayloadDoesNotBecomeInfinity) {
+  for (uint32_t sign : {0u, 0x80000000u})
+    for (uint32_t payload : {1u, 0x1fffu, 0x4000u, 0x400001u, 0x7fffffu}) {
+      const float value = std::bit_cast<float>(sign | 0x7f800000u | payload);
+      const uint16_t expected =
+          static_cast<uint16_t>((sign >> 16) | 0x7c00u | (payload < 0x2000u ? 1u : payload >> 13));
+      EXPECT_EQ(util::f32_to_f16(value), expected);
+      EXPECT_EQ(util::f32_to_f16_rtz(value), expected);
+    }
+}
+
 // ---- BF16 ----
 
 TEST(Bf16, RoundTrip) {

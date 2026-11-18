@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #ifndef INCLUDE_ROCM_SMI_ROCM_SMI_DEVICE_H_
 #define INCLUDE_ROCM_SMI_ROCM_SMI_DEVICE_H_
@@ -39,7 +20,6 @@
 #include "rocm_smi/rocm_smi_gpu_metrics.h"
 #include "rocm_smi/rocm_smi_monitor.h"
 #include "rocm_smi/rocm_smi_power_mon.h"
-#include "rocm_smi/rocm_smi_properties.h"
 #include "shared_mutex.h"  //NOLINT
 
 namespace amd::smi {
@@ -220,6 +200,9 @@ class Device {
   // GPU Overdrive (gpu_od) sysfs path helper methods
   std::string get_gpu_od_fan_min_pwm_path(void) const;
 
+  // AMPP (amdsmi power profile) sysfs root path helper method
+  std::string get_ampp_root_path(void) const;
+
   int readDevInfo(DevInfoTypes type, uint64_t* val);
   int readDevInfoLine(DevInfoTypes type, std::string* line);
   int readDevInfo(DevInfoTypes type, std::string* val);
@@ -256,8 +239,6 @@ class Device {
   rsmi_status_t storeDevicePartitions(uint32_t dv_ind);
   template <typename T>
   std::string readBootPartitionState(uint32_t dv_ind);
-  rsmi_status_t check_amdgpu_property_reinforcement_query(uint32_t dev_idx,
-                                                          AMDGpuVerbTypes_t verb_type);
 
   const AMDGpuMetricsHeader_v1_t& dev_get_metrics_header() { return m_gpu_metrics_header; }
   auto setup_gpu_metrics_reading(DevInfoTypes type = DevInfoTypes::kDevGpuMetrics) -> rsmi_status_t;
@@ -309,8 +290,6 @@ class Device {
   int readDevInfoMultiLineStr(DevInfoTypes type, std::vector<std::string>* retVec);
   int readDevInfoBinary(DevInfoTypes type, std::size_t b_size, void* p_binary_data);
   int writeDevInfoStr(DevInfoTypes type, std::string valStr, bool returnWriteErr = false);
-  rsmi_status_t run_amdgpu_property_reinforcement_query(
-      const AMDGpuPropertyQuery_t& amdgpu_property_query);
 
   uint64_t bdfid_;
   uint64_t kfd_gpu_id_;

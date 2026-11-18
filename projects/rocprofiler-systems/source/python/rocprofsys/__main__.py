@@ -1,11 +1,9 @@
-#!/usr/bin/env python@_VERSION@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-from __future__ import absolute_import
 
 __author__ = "AMD ROCm"
-__copyright__ = "Copyright 2024, Advanced Micro Devices, Inc."
+__copyright__ = "Copyright 2026, Advanced Micro Devices, Inc."
 __license__ = "MIT"
 __version__ = "@PROJECT_VERSION@"
 __maintainer__ = "AMD ROCm"
@@ -15,22 +13,37 @@ __status__ = "Development"
 Command line execution for profiler
 """
 
+import argparse
 import os
 import sys
-import argparse
 import traceback
 
-PY3 = sys.version_info[0] == 3
+PY3 = sys.version_info[0] >= 3
 _ROCPROFSYS_PYTHON_SCRIPT_FILE = None
+
+# Maps a parse_args() destination onto the profiler config attribute it sets.
+# '--label' is handled separately since it fans out into three attributes.
+_CONFIG_OPTION_MAP = {
+    "verbosity": "verbosity",
+    "full_filepath": "full_filepath",
+    "function_include": "include_functions",
+    "function_exclude": "exclude_functions",
+    "function_restrict": "restrict_functions",
+    "module_include": "include_modules",
+    "module_exclude": "exclude_modules",
+    "module_restrict": "restrict_modules",
+    "trace_c": "trace_c",
+    "annotate_trace": "annotate_trace",
+}
 
 # Python 3.x compatibility utils: execfile
 try:
-    execfile
+    execfile  # noqa: B018 probing for the Python 2 builtin
 except NameError:
     # Python 3.x doesn't have 'execfile' builtin
     import builtins
 
-    exec_ = getattr(builtins, "exec")
+    exec_ = builtins.exec
 
     def execfile(filename, globals=None, locals=None):
         with open(filename, "rb") as f:
@@ -52,17 +65,20 @@ def find_script(script_name):
         if os.path.isfile(fn):
             return fn
 
-    sys.stderr.write("Could not find script %s\n" % script_name)
+    sys.stderr.write(f"Could not find script {script_name}\n")
     raise SystemExit(1)
 
 
 def parse_args(args=None):
-    """Parse the arguments"""
+    """Parse the arguments.
+
+    Options that mirror a profiler config setting default to None, meaning
+    "not specified on the command line". Callers are responsible for merging
+    those against the profiler config's own defaults.
+    """
 
     if args is None:
         args = sys.argv[1:]
-
-    from .libpyrocprofsys.profiler import config as _profiler_config
 
     def str2bool(v):
         if isinstance(v, bool):
@@ -74,26 +90,17 @@ def parse_args(args=None):
         else:
             raise argparse.ArgumentTypeError("Boolean value expected.")
 
-    _default_label = []
-    if _profiler_config.include_args:
-        _default_label.append("args")
-    if _profiler_config.include_filename:
-        _default_label.append("file")
-    if _profiler_config.include_line:
-        _default_label.append("line")
-
     parser = argparse.ArgumentParser(
         "rocprofsys",
         add_help=True,
-        epilog="usage: {} -m rocprofsys <ROCPROFSYS_ARGS> -- <SCRIPT> <SCRIPT_ARGS>".format(
-            os.path.basename(sys.executable)
-        ),
+        allow_abbrev=False,
+        epilog=f"usage: {os.path.basename(sys.executable)} -m rocprofsys <ROCPROFSYS_ARGS> -- <SCRIPT> <SCRIPT_ARGS>",
     )
     parser.add_argument(
         "-v",
         "--verbosity",
         type=int,
-        default=_profiler_config.verbosity,
+        default=None,
         help="Logging verbosity",
     )
     parser.add_argument(
@@ -127,7 +134,7 @@ def parse_args(args=None):
         nargs="?",
         metavar="BOOL",
         const=True,
-        default=_profiler_config.full_filepath,
+        default=None,
         help="Encode the full function filename (instead of basename)",
     )
     parser.add_argument(
@@ -135,7 +142,7 @@ def parse_args(args=None):
         type=str,
         choices=("args", "file", "line"),
         nargs="*",
-        default=_default_label,
+        default=None,
         help="Encode the function arguments, filename, and/or line number into the profiling function label",
     )
     parser.add_argument(
@@ -144,7 +151,7 @@ def parse_args(args=None):
         type=str,
         nargs="+",
         metavar="FUNC",
-        default=_profiler_config.include_functions,
+        default=None,
         help="Include any entries with these function names",
     )
     parser.add_argument(
@@ -153,7 +160,7 @@ def parse_args(args=None):
         type=str,
         nargs="+",
         metavar="FUNC",
-        default=_profiler_config.exclude_functions,
+        default=None,
         help="Filter out any entries with these function names",
     )
     parser.add_argument(
@@ -162,7 +169,7 @@ def parse_args(args=None):
         type=str,
         nargs="+",
         metavar="FUNC",
-        default=_profiler_config.restrict_functions,
+        default=None,
         help="Select only entries with these function names",
     )
     parser.add_argument(
@@ -171,7 +178,7 @@ def parse_args(args=None):
         type=str,
         nargs="+",
         metavar="FILE",
-        default=_profiler_config.include_modules,
+        default=None,
         help="Include any entries from these files",
     )
     parser.add_argument(
@@ -180,7 +187,7 @@ def parse_args(args=None):
         type=str,
         nargs="+",
         metavar="FILE",
-        default=_profiler_config.exclude_modules,
+        default=None,
         help="Filter out any entries from these files",
     )
     parser.add_argument(
@@ -189,7 +196,7 @@ def parse_args(args=None):
         type=str,
         nargs="+",
         metavar="FILE",
-        default=_profiler_config.restrict_modules,
+        default=None,
         help="Select only entries from these files",
     )
     parser.add_argument(
@@ -198,7 +205,7 @@ def parse_args(args=None):
         nargs="?",
         metavar="BOOL",
         const=True,
-        default=_profiler_config.trace_c,
+        default=None,
         help="Enable profiling C functions",
     )
     parser.add_argument(
@@ -208,7 +215,7 @@ def parse_args(args=None):
         nargs="?",
         metavar="BOOL",
         const=True,
-        default=_profiler_config.annotate_trace,
+        default=None,
         help="Enable perfetto debug annotations",
     )
 
@@ -221,7 +228,7 @@ def get_value(env_var, default_value, dtype, arg=None):
     else:
         val = os.environ.get(env_var)
         if val is None:
-            os.environ[env_var] = "{}".format(default_value)
+            os.environ[env_var] = f"{default_value}"
             return dtype(default_value)
         else:
             return dtype(val)
@@ -239,7 +246,7 @@ def run(prof, cmd):
     import __main__
 
     dict = __main__.__dict__
-    print("code: {} {}".format(type(code).__name__, code))
+    print(f"code: {type(code).__name__} {code}")
     globs = {
         "__file__": progname,
         "__name__": "__main__",
@@ -249,6 +256,23 @@ def run(prof, cmd):
     }
 
     prof.runctx(code, globs, None)
+
+
+def apply_config_option(config_path):
+    """Merge a --config file path into ROCPROFSYS_CONFIG_FILE before loading profiler bindings."""
+    if config_path is None:
+        return
+
+    # If the environment already has a config file, keep it and append ours so
+    # both get read. The native config reader accepts ':' and ';' as
+    # separators; strip any trailing one to avoid an empty entry.
+    existing_config_file = os.environ.get("ROCPROFSYS_CONFIG_FILE", "").rstrip(":;")
+    if existing_config_file:
+        os.environ["ROCPROFSYS_CONFIG_FILE"] = (
+            existing_config_file + os.pathsep + config_path
+        )
+    else:
+        os.environ["ROCPROFSYS_CONFIG_FILE"] = config_path
 
 
 def main(main_args=sys.argv):
@@ -274,6 +298,16 @@ def main(main_args=sys.argv):
                     "python -m rocprofsys -- ./script.py".format(" ".join(argv))
                 )
 
+    # Must happen before any profiler bindings are imported below.
+    apply_config_option(opts.config)
+
+    if not argv:
+        raise RuntimeError(
+            "Could not determine input script. Use '--' before the script and its "
+            "arguments to ensure correct parsing. \nE.g. "
+            "python -m rocprofsys -- ./script.py"
+        )
+
     if len(argv) > 1:
         if argv[0] == "-m":
             argv = argv[1:]
@@ -288,11 +322,6 @@ def main(main_args=sys.argv):
     if argv:
         os.environ["ROCPROFSYS_COMMAND_LINE"] = " ".join(argv)
 
-    if opts.config is not None:
-        os.environ["ROCPROFSYS_CONFIG_FILE"] = ":".join(
-            [os.environ.get("ROCPROFSYS_CONFIG_FILE", ""), opts.config]
-        )
-
     from .libpyrocprofsys import initialize
 
     if os.path.isfile(argv[0]):
@@ -302,21 +331,18 @@ def main(main_args=sys.argv):
 
     from .libpyrocprofsys.profiler import config as _profiler_config
 
-    _profiler_config.trace_c = opts.trace_c
-    _profiler_config.include_args = "args" in opts.label
-    _profiler_config.include_line = "line" in opts.label
-    _profiler_config.include_filename = "file" in opts.label
-    _profiler_config.full_filepath = opts.full_filepath
-    _profiler_config.include_functions = opts.function_include
-    _profiler_config.include_modules = opts.module_include
-    _profiler_config.exclude_functions = opts.function_exclude
-    _profiler_config.exclude_modules = opts.module_exclude
-    _profiler_config.restrict_functions = opts.function_restrict
-    _profiler_config.restrict_modules = opts.module_restrict
-    _profiler_config.annotate_trace = opts.annotate_trace
-    _profiler_config.verbosity = opts.verbosity
+    # Unset options are None, and leave the config's own default in place.
+    for opt_name, config_name in _CONFIG_OPTION_MAP.items():
+        value = getattr(opts, opt_name)
+        if value is not None:
+            setattr(_profiler_config, config_name, value)
 
-    print("[rocprofsys]> profiling: {}".format(argv))
+    if opts.label is not None:
+        _profiler_config.include_args = "args" in opts.label
+        _profiler_config.include_line = "line" in opts.label
+        _profiler_config.include_filename = "file" in opts.label
+
+    print(f"[rocprofsys]> profiling: {argv}")
 
     main_args[:] = argv
     if opts.setup is not None:
@@ -330,7 +356,7 @@ def main(main_args=sys.argv):
         ns = locals()
         execfile(setup_file, ns, ns)
 
-    from . import Profiler, FakeProfiler
+    from . import FakeProfiler, Profiler
 
     script_file = find_script(main_args[0])
     __file__ = script_file
@@ -338,7 +364,6 @@ def main(main_args=sys.argv):
     # Make sure the script's directory is on sys.path
     sys.path.insert(0, os.path.dirname(script_file))
 
-    _ROCPROFSYS_PYTHON_SCRIPT_FILE = script_file
     os.environ["ROCPROFSYS_PYTHON_SCRIPT_FILE"] = script_file
 
     prof = Profiler()
@@ -363,7 +388,7 @@ def main(main_args=sys.argv):
             if opts.builtin:
                 execfile(script_file, ns, ns)
             else:
-                prof.runctx("execfile_(%r, globals())" % (script_file,), ns, ns)
+                prof.runctx(f"execfile_({script_file!r}, globals())", ns, ns)
         except (KeyboardInterrupt, SystemExit):
             pass
         finally:
@@ -374,7 +399,7 @@ def main(main_args=sys.argv):
     except Exception as e:
         exc_type, exc_value, exc_traceback = sys.exc_info()
         traceback.print_exception(exc_type, exc_value, exc_traceback, limit=10)
-        print("Exception - {}".format(e))
+        print(f"Exception - {e}")
 
 
 if __name__ == "__main__":

@@ -72,6 +72,9 @@ cat >$1 <<EOF
 #define __constant__ __attribute__((constant))
 #define __shared__ __attribute__((shared))
 
+#if __clang_major__ >= 25
+#define __launch_bounds__(...) __attribute__((launch_bounds(__VA_ARGS__)))
+#else
 #define launch_bounds_impl0(requiredMaxThreadsPerBlock)                                            \
     __attribute__((amdgpu_flat_work_group_size(1, requiredMaxThreadsPerBlock)))
 #define launch_bounds_impl1(requiredMaxThreadsPerBlock, minBlocksPerMultiprocessor)                \
@@ -80,6 +83,7 @@ cat >$1 <<EOF
 #define select_impl_(_1, _2, impl_, ...) impl_
 #define __launch_bounds__(...)                                                                     \
     select_impl_(__VA_ARGS__, launch_bounds_impl1, launch_bounds_impl0)(__VA_ARGS__)
+#endif
 
 EOF
 }
@@ -106,8 +110,7 @@ EOF
   fi
 
 cat << EOF >> $tmp/hip_pch.mcin
-  .section .hip_pch_wave32,"aMS",@progbits,1
-  .data
+  .section .hip_pch_wave32,"a",@progbits
   .globl __hip_pch_wave32
   .globl __hip_pch_wave32_size
   .p2align 3
@@ -116,8 +119,7 @@ __hip_pch_wave32:
 __hip_pch_wave32_size:
   .long __hip_pch_wave32_size - __hip_pch_wave32
   .type __hip_pch_wave64,@object
-  .section .hip_pch_wave64,"aMS",@progbits,1
-  .data
+  .section .hip_pch_wave64,"a",@progbits
   .globl __hip_pch_wave64
   .globl __hip_pch_wave64_size
   .p2align 3
@@ -142,7 +144,7 @@ EOF
 
   $LLVM_DIR/bin/clang -cc1 -O3 -emit-pch -triple amdgcn-amd-amdhsa -aux-triple "$host_triple" -fcuda-is-device -std=c++17 -fgnuc-version=4.2.1 -o $tmp/hip_wave64.pch -x hip-cpp-output - <$tmp/pch_wave64.cui &&
 
-  $LLVM_DIR/bin/llvm-mc -o hip_pch.o $tmp/hip_pch.mcin --filetype=obj &&
+  $LLVM_DIR/bin/clang -x assembler -o hip_pch.o -c $tmp/hip_pch.mcin &&
 
   rm -rf $tmp
 }
@@ -171,7 +173,7 @@ EOF
 
   echo "// Automatically generated script for HIP RTC." > $mcinFile
   if [[ $isWindows -eq 0 ]]; then
-    echo "  .section .note.GNU-stack,"",@progbits" >> $mcinFile
+    echo "  .section .note.GNU-stack,\"\",@progbits" >> $mcinFile
     echo "  .type __hipRTC_header,@object" >> $mcinFile
     echo "  .type __hipRTC_header_size,@object" >> $mcinFile
   fi
@@ -189,7 +191,7 @@ EOF
   set -x
   $LLVM_DIR/bin/clang -O3 --hip-path=$HIP_INC_DIR/.. -std=c++14 -nogpulib --hip-version=4.4 -isystem $HIP_INC_DIR -isystem $HIP_BUILD_INC_DIR -isystem $HIP_AMD_INC_DIR --cuda-device-only -D__HIPCC_RTC__ -x hip $tmp/hipRTC_header.h -E -P -o $tmp/hiprtc &&
   cat $macroFile >> $tmp/hiprtc &&
-  $LLVM_DIR/bin/llvm-mc -o $tmp/hiprtc_header.o $tmp/hipRTC_header.mcin --filetype=obj &&
+  $LLVM_DIR/bin/clang -x assembler -o $tmp/hiprtc_header.o -c $tmp/hipRTC_header.mcin &&
   $LLVM_DIR/bin/clang $tmp/hiprtc_header.o -o $rtc_shared_lib_out -shared &&
   $LLVM_DIR/bin/clang -O3 --hip-path=$HIP_INC_DIR/.. -std=c++14 -nogpulib -nogpuinc -emit-llvm -c -o $tmp/tmp.bc --cuda-device-only -D__HIPCC_RTC__ --offload-arch=gfx906 -x hip-cpp-output $tmp/hiprtc &&
   rm -rf $tmp

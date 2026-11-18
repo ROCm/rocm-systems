@@ -7,6 +7,26 @@
  ************************************************************************/
 
 #include "rccl_ptr.h"
+
+// Non-temporal 128-bit load for LL communication (FIFO) buffers. Comm buffers
+// are uncached; a single explicit vector load avoids relying on the backend to
+// fuse two independent 64-bit nontemporal loads into one 16-byte op.
+inline __device__ void loadLLLine(const union ncclLLFifoLine* src, union ncclLLFifoLine& dst) {
+  dst.v4u = __builtin_nontemporal_load((v4u_gptr)&src->v4u);
+}
+
+// Plain 128-bit vector store for LL FIFO lines. Comm buffers are uncached; a
+// single explicit vector store avoids relying on the backend to fuse two
+// independent 64-bit stores into one 16-byte op.
+inline __device__ void storeLLLine(union ncclLLFifoLine* dst, const union ncclLLFifoLine& src) {
+#if !RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && (defined(__gfx1200__) || defined(__gfx1201__))
+  __scoped_atomic_store_n((u64_gptr)dst->v, src.v[0], __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+  __scoped_atomic_store_n((u64_gptr)dst->v + 1, src.v[1], __ATOMIC_RELEASE, __MEMORY_SCOPE_SYSTEM);
+#else
+  *((v4u_gptr)&dst->v4u) = src.v4u;
+#endif
+}
+
 // UserRegMode is accepted only to match the Primitives primary template (which
 // carries it for LL128, see primitives.h/prims_ll128.h). The LL protocol path is
 // unchanged from the baseline and ignores it.
@@ -15,15 +35,8 @@ template <typename T, typename RedOp, typename Fan, int Direct, int P2p, bool is
 class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pipeline, useAcc, UserRegMode>
   : public PrimitivesWithoutDirect<
       Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pipeline, useAcc, UserRegMode>> {
-  // In the case of Fan::MaxRecv == 0, we need to force MaxRecv to 1 for this to compile
-  // This is because of a recv buffer which is allocated to MaxRecv length in send-only cases.
-  static constexpr int MaxRecv = Fan::MaxRecv > 1 ? Fan::MaxRecv : 1;
-#if defined(NCCL_OS_WINDOWS)
-  // MSVC rejects zero-length arrays; clamp to 1 on Windows only.
-  static constexpr int MaxSend = Fan::MaxSend > 1 ? Fan::MaxSend : 1;
-#else
+  static constexpr int MaxRecv = Fan::MaxRecv;
   static constexpr int MaxSend = Fan::MaxSend;
-#endif
   static constexpr int Input = 0, Output = 1, Acc = 2;
   RedOp redOp;
   const int tid;
@@ -44,10 +57,11 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
   uint64_t sendConnHead;
   uint64_t sendConnHeadCache; // Cache last seen value
 
-  uint64_t recvStep[MaxRecv];
-  uint64_t sendStep[MaxSend];
-  union ncclLLFifoLine* recvBuff[MaxRecv];
-  union ncclLLFifoLine* sendBuff[MaxSend];
+  // Avoid zero-length arrays while keeping the logical fan sizes unchanged.
+  uint64_t recvStep[MaxRecv ? MaxRecv : 1];
+  uint64_t sendStep[MaxSend ? MaxSend : 1];
+  union ncclLLFifoLine* recvBuff[MaxRecv ? MaxRecv : 1];
+  union ncclLLFifoLine* sendBuff[MaxSend ? MaxSend : 1];
 
   inline __device__ int recvOffset(int i) {
     return (recvStep[i] % NCCL_STEPS) * stepLines;
@@ -68,13 +82,31 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
     return NCCL_LL_FLAG(sendStep[i] + 1);
   }
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+#if RCCL_LL_FIFO_SYS_SCOPE
+  // System-scope FIFO line read. See RCCL_LL_FIFO_SYS_SCOPE in rccl_ptr.h.
+  __device__ __forceinline__ void loadLLLineB128(union ncclLLFifoLine* src, union ncclLLFifoLine& line) {
+    union {
+      v4u v;
+      uint32_t w[4];
+    } value;
+    value.v = __builtin_amdgcn_global_load_b128((v4u_gptr)src, RCCL_SYSTEM_SYNCSCOPE);
+    line.data1 = value.w[0];
+    line.flag1 = value.w[1];
+    line.data2 = value.w[2];
+    line.flag2 = value.w[3];
+  }
+#endif
+#endif
+
   uint64_t* barriers;
   uint64_t barrier_next = 0;
+  bool fifoSend = false;
 
   inline __device__ void barrier() {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
     if (nthreads != WARP_SIZE)
-#if defined(__gfx942__) || (defined(__gfx950__) && defined(HIP_HOST_UNCACHED_MEMORY)) || defined(__gfx1250__)
+#if defined(__gfx942__) || (defined(__gfx950__) && defined(HIP_HOST_UNCACHED_MEMORY)) || (defined(__gfx1250__) || defined(__gfx1250_strict__))
       barrier_generic(__threadfence_block(), nthreads, barrier_next, barriers);
 #else
       barrier_generic(__threadfence(), nthreads, barrier_next, barriers);
@@ -86,6 +118,11 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
       barrier_sync(15 - group, nthreads);
     }
 #endif
+  }
+
+  // LL lines carry per-step flags, so skip waiting on peer stores; connFifo sends keep the fence for the proxy.
+  inline __device__ void stepBarrier() {
+    if (!storeFreeStepBarrier(fifoSend, nthreads, threadsPerBlock, barrier_next, barriers)) barrier();
   }
 
   int abort = 0;
@@ -118,14 +155,14 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
       }
       sendConnHead += 1;
     }
-    barrier();
+    stepBarrier();
   }
 
   inline __device__ void incRecv(int i) {
     recvStep[i] += 1;
   }
   inline __device__ void postRecv() {
-    barrier();
+    stepBarrier();
     if (recvConnHeadPtr) STORE(recvConnHeadPtr, recvConnHead += 1);
   }
 
@@ -151,19 +188,16 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
     union ncclLLFifoLine i4;
     do {
-#ifdef __GFX11__
+#if RCCL_LL_FIFO_SYS_SCOPE
+      loadLLLineB128(src, i4);
+#elif defined(__GFX11__)
       asm volatile("global_load_b128 %0, %1, off glc slc dlc\n"
                    "s_waitcnt vmcnt(0)\n"
                    : "=v"(i4.i4)
                    : "v"(&src->i4));
-#elif RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-      // Comm FIFO buffers are uncached; use non-temporal loads so the flag poll
-      // never observes a stale cache line (no system-scope cache-bypass needed).
-      *((u64_gptr)i4.v) = __builtin_nontemporal_load((u64_gptr)src->v);
-      *((u64_gptr)i4.v + 1) = __builtin_nontemporal_load((u64_gptr)src->v + 1);
 #else
-      *((u64_gptr)i4.v) = __builtin_nontemporal_load((u64_gptr)src->v);
-      *((u64_gptr)i4.v + 1) = __builtin_nontemporal_load((u64_gptr)src->v + 1);
+      // Holds for the legacy IPC allocator only. See loadLLLineB128.
+      loadLLLine(src, i4);
 #endif
       if (checkAbort(abort, 1, spins)) break;
     } while ((i4.flag1 != flag) || (i4.flag2 != flag));
@@ -183,7 +217,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
   }
 
   template <int BeginIx>
-  __device__ void readLLBeginAll(int offset, ncclLLFifoLine (&line)[MaxRecv]) {
+  __device__ void readLLBeginAll(int offset, ncclLLFifoLine (&line)[MaxRecv ? MaxRecv : 1]) {
 #pragma unroll
     for (int i = BeginIx; i < MaxRecv; i++) {
       // Yes, for some template arguments this code will be unreachable.  That's fine.
@@ -191,18 +225,17 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
       if (i < fan.nrecv()) {
         union ncclLLFifoLine* src = recvPtr(i) + offset;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-#ifdef __GFX11__
+#if RCCL_LL_FIFO_SYS_SCOPE
+        loadLLLineB128(src, line[i]);
+#elif defined(__GFX11__)
         asm volatile("global_load_b128 %0, %1, off glc slc dlc\n"
                      "s_waitcnt vmcnt(0)\n"
                      : "=v"(line[i].i4)
                      : "v"(&src->i4));
-#elif RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-        // Comm FIFO buffers are uncached; use non-temporal loads (no bypass).
-        line[i].v[0] = __builtin_nontemporal_load((u64_gptr)src->v);
-        line[i].v[1] = __builtin_nontemporal_load((u64_gptr)src->v + 1);
 #else
-        line[i].v[0] = __builtin_nontemporal_load((u64_gptr)src->v);
-        line[i].v[1] = __builtin_nontemporal_load((u64_gptr)src->v + 1);
+        // Comm FIFO buffers are uncached; use non-temporal loads (no bypass).
+        // Holds for the legacy IPC allocator only. See loadLLLineB128.
+        loadLLLine(src, line[i]);
 #endif
 #else
         asm volatile("ld.volatile.global.v4.u32 {%0,%1,%2,%3}, [%4];"
@@ -213,25 +246,24 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
       }
     }
   }
-  __device__ uint64_t readLLFinish(int offset, ncclLLFifoLine (&line)[MaxRecv], int i) {
+  __device__ uint64_t readLLFinish(int offset, ncclLLFifoLine (&line)[MaxRecv ? MaxRecv : 1], int i) {
     union ncclLLFifoLine* src = recvPtr(i) + offset;
     uint32_t flag = recvFlag(i);
     int spins = 0;
 
     do {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-#ifdef __GFX11__
+#if RCCL_LL_FIFO_SYS_SCOPE
+      loadLLLineB128(src, line[i]);
+#elif defined(__GFX11__)
       asm volatile("global_load_b128 %0, %1, off glc slc dlc\n"
                    "s_waitcnt vmcnt(0)\n"
                    : "=v"(line[i].i4)
                    : "v"(&src->i4));
-#elif RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-      // Comm FIFO buffers are uncached; use non-temporal loads (no bypass).
-      line[i].v[0] = __builtin_nontemporal_load((u64_gptr)src->v);
-      line[i].v[1] = __builtin_nontemporal_load((u64_gptr)src->v + 1);
 #else
-      line[i].v[0] = __builtin_nontemporal_load((u64_gptr)src->v);
-      line[i].v[1] = __builtin_nontemporal_load((u64_gptr)src->v + 1);
+      // Comm FIFO buffers are uncached; use non-temporal loads (no bypass).
+      // Holds for the legacy IPC allocator only. See loadLLLineB128.
+      loadLLLine(src, line[i]);
 #endif
 #else
       asm volatile("ld.volatile.global.v4.u32 {%0,%1,%2,%3}, [%4];"
@@ -253,19 +285,15 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
     i4.flag1 = flag;
     i4.data2 = (val >> 32);
     i4.flag2 = flag;
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-    // Comm FIFO buffers are uncached; use plain stores (no system-scope cache
-    // bypass) for higher store throughput and lower register pressure.
-    *((u64_gptr)dst->v) = *((u64_gptr)i4.v);
-    *((u64_gptr)dst->v + 1) = *((u64_gptr)i4.v + 1);
+#if RCCL_LL_FIFO_SYS_SCOPE
+    // Sibling DPX partitions share a die, so a plain store can retire into the
+    // writer's cache and never reach the peer's poll. One b128 keeps data+flag
+    // in a single transaction. See RCCL_LL_FIFO_SYS_SCOPE in rccl_ptr.h.
+    __builtin_amdgcn_global_store_b128((v4u_gptr)dst, i4.v4u, RCCL_SYSTEM_SYNCSCOPE);
 #else
-#if defined(__gfx1200__) || defined(__gfx1201__)
-    __hip_atomic_store((u64_gptr)dst->v, i4.v[0], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
-    __hip_atomic_store((u64_gptr)dst->v + 1, i4.v[1], __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
-#else
-    *((u64_gptr)dst->v) = *((u64_gptr)i4.v);
-    *((u64_gptr)dst->v + 1) = *((u64_gptr)i4.v + 1);
-#endif
+    // Comm FIFO buffers are uncached. storeLLLine emits a plain 128-bit vector
+    // store, or a system-scope release pair on gfx1200/gfx1201.
+    storeLLLine(dst, i4);
 #endif
 #if defined(__gfx950__) && ROCM_VERSION < 70002
     __builtin_amdgcn_fence(
@@ -293,17 +321,17 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
     if (sizeof(U) == 1)
-      u1 =
-        __hip_atomic_load((__attribute__((address_space(1))) uint8_t*)src, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+      u1 = __scoped_atomic_load_n((__attribute__((address_space(1))) uint8_t*)src, __ATOMIC_RELAXED,
+                                  __MEMORY_SCOPE_SYSTEM);
     else if (sizeof(U) == 2)
-      u2 = __hip_atomic_load((__attribute__((address_space(1))) uint16_t*)src, __ATOMIC_RELAXED,
-                             __HIP_MEMORY_SCOPE_SYSTEM);
+      u2 = __scoped_atomic_load_n((__attribute__((address_space(1))) uint16_t*)src, __ATOMIC_RELAXED,
+                                  __MEMORY_SCOPE_SYSTEM);
     else if (sizeof(U) == 4)
-      u4 = __hip_atomic_load((__attribute__((address_space(1))) uint32_t*)src, __ATOMIC_RELAXED,
-                             __HIP_MEMORY_SCOPE_SYSTEM);
+      u4 = __scoped_atomic_load_n((__attribute__((address_space(1))) uint32_t*)src, __ATOMIC_RELAXED,
+                                  __MEMORY_SCOPE_SYSTEM);
     else
-      u8 = __hip_atomic_load((__attribute__((address_space(1))) uint64_t*)src, __ATOMIC_RELAXED,
-                             __HIP_MEMORY_SCOPE_SYSTEM);
+      u8 = __scoped_atomic_load_n((__attribute__((address_space(1))) uint64_t*)src, __ATOMIC_RELAXED,
+                                  __MEMORY_SCOPE_SYSTEM);
 #else
     if (sizeof(U) == 1)
 #ifdef __GFX11__
@@ -339,6 +367,8 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
     return elt;
   }
 
+  // User buffers only. Comm FIFO stores must go through storeLL, which keeps
+  // the gfx950 hipHostMallocUncached fence for ROCm < 7.0.2.
   template <typename U>
   __device__ static void store(U* dst, U val) {
     union {
@@ -352,27 +382,22 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
     if (sizeof(U) == 1)
-      __hip_atomic_store((__attribute__((address_space(1))) uint8_t*)dst, u1, __ATOMIC_RELAXED,
-                         __HIP_MEMORY_SCOPE_SYSTEM);
+      __scoped_atomic_store_n((__attribute__((address_space(1))) uint8_t*)dst, u1, __ATOMIC_RELAXED,
+                              __MEMORY_SCOPE_SYSTEM);
     else if (sizeof(U) == 2)
-      __hip_atomic_store((__attribute__((address_space(1))) uint16_t*)dst, u2, __ATOMIC_RELAXED,
-                         __HIP_MEMORY_SCOPE_SYSTEM);
+      __scoped_atomic_store_n((__attribute__((address_space(1))) uint16_t*)dst, u2, __ATOMIC_RELAXED,
+                              __MEMORY_SCOPE_SYSTEM);
     else if (sizeof(U) == 4)
-      __hip_atomic_store((__attribute__((address_space(1))) uint32_t*)dst, u4, __ATOMIC_RELAXED,
-                         __HIP_MEMORY_SCOPE_SYSTEM);
+      __scoped_atomic_store_n((__attribute__((address_space(1))) uint32_t*)dst, u4, __ATOMIC_RELAXED,
+                              __MEMORY_SCOPE_SYSTEM);
     else
-      __hip_atomic_store((__attribute__((address_space(1))) uint64_t*)dst, u8, __ATOMIC_RELAXED,
-                         __HIP_MEMORY_SCOPE_SYSTEM);
+      __scoped_atomic_store_n((__attribute__((address_space(1))) uint64_t*)dst, u8, __ATOMIC_RELAXED,
+                              __MEMORY_SCOPE_SYSTEM);
 #else
     if (sizeof(U) == 1) __builtin_nontemporal_store(u1, (uint8_t*)dst);
     else if (sizeof(U) == 2) __builtin_nontemporal_store(u2, (uint16_t*)dst);
     else if (sizeof(U) == 4) __builtin_nontemporal_store(u4, (uint32_t*)dst);
     else __builtin_nontemporal_store(u8, (uint64_t*)dst);
-#if defined(__gfx950__) && ROCM_VERSION < 70002
-    __builtin_amdgcn_fence(
-      __ATOMIC_RELEASE,
-      ""); // flush cache on gfx950 if ROCr fix for hipHostMallocUncached is not available (ROCm version < 7.0.2)
-#endif
 #endif
 #else
     if (sizeof(U) == 1) asm volatile("st.volatile.global.b8 [%0],%1;" ::"l"(dst), "r"(u4) : "memory");
@@ -451,6 +476,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
     nelem = nelem < 0 ? 0 : nelem;
     if (SEND) waitSend(divUp(nelem, EltPerLine) * sizeof(ncclLLFifoLine));
 
+    sqtt_marker_enter("PRIM_LL_DATA_PROCESS");
     nelem -= tid * EltPerLine;
     srcElts += tid * EltPerLine;
     dstElts += tid * EltPerLine;
@@ -461,7 +487,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
       int eltInLine = EltPerLine < nelem ? EltPerLine : nelem;
 
       DataLoader dl, accdl;
-      ncclLLFifoLine line[MaxRecv];
+      ncclLLFifoLine line[MaxRecv ? MaxRecv : 1];
       uint64_t data, peerData, accData;
       if (SRC) {
         dl.loadBegin(srcElts, eltInLine);
@@ -477,7 +503,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
       }
       if (RECV) {
         data = !SRC ? peerData : applyReduce(redOp, peerData, data);
-#pragma unroll MaxRecv
+        NVCC_PRAGMA_UNROLL(MaxRecv ? MaxRecv : 1)
         // Yes, for some template arguments this code will be unreachable.  That's fine.
         // coverity[dead_error_line]
         for (int i = 1; i < MaxRecv && i < fan.nrecv(); i++) {
@@ -510,6 +536,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
       offset += nthreads;
     }
 
+    sqtt_marker_exit("PRIM_LL_DATA_PROCESS");
     if (RECV) {
       for (int i = 0; i < MaxRecv; i++) incRecv(i);
       postRecv();
@@ -563,10 +590,9 @@ public:
     barriers = &ncclShmem.groups[group].barrier;
     // If we are going to support oneshot collNet + LL, then we would need to add connector index here
     int nrecv = 0, nsend = 0;
-    // We compare with Fan::MaxRecv here because this->MaxRecv is always at least 1
     // Yes, for some template arguments this code will be unreachable.  That's fine.
     // coverity[dead_error_line]
-    while (nrecv < Fan::MaxRecv && recvPeers[nrecv] >= 0) {
+    while (nrecv < MaxRecv && recvPeers[nrecv] >= 0) {
       loadRecvConn(&channel->peers[recvPeers[nrecv]]->recv[connIndexRecv], nrecv);
       nrecv++;
     }
@@ -582,6 +608,9 @@ public:
     loadRecvSync();
     // coverity[var_deref_model:FALSE]
     loadSendSync();
+#if RCCL_STORE_FREE_STEP_BARRIER
+    fifoSend = anySendConnFifo(channel, sendPeers, nsend, connIndexSend);
+#endif
     setDataPtrs(inputBuf, outputBuf, e != nullptr ? e->acc : nullptr);
   }
 

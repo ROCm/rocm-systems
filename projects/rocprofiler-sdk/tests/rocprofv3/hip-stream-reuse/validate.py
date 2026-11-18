@@ -99,7 +99,11 @@ def test_stream_ids_monotonically_increase(json_data, pointer_data):
     data = json_data["rocprofiler-sdk-tool"]
     buffer_records = data["buffer_records"]
 
-    kernel_dispatch_data = buffer_records["kernel_dispatch"]
+    # Sort by dispatch ID because callback delivery order can differ across HSA queues.
+    kernel_dispatch_data = sorted(
+        buffer_records["kernel_dispatch"],
+        key=lambda node: node.dispatch_info.dispatch_id,
+    )
     assert len(kernel_dispatch_data) > 0
 
     stream_ids = [node.stream_id.handle for node in kernel_dispatch_data]
@@ -114,7 +118,7 @@ def test_stream_ids_monotonically_increase(json_data, pointer_data):
     for i in range(1, len(stream_ids)):
         assert stream_ids[i] > stream_ids[i - 1], (
             f"Stream IDs should be monotonically increasing but "
-            f"stream_id[{i}]={stream_ids[i]} <= stream_id[{i-1}]={stream_ids[i-1]}"
+            f"stream_id[{i}]={stream_ids[i]} <= stream_id[{i - 1}]={stream_ids[i - 1]}"
         )
 
 

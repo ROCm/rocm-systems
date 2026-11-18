@@ -16,22 +16,21 @@
 /// @endcode
 ///
 /// Each key names a plugin; the loader opens `librocjitsu_plugin_<key>.so`
-/// via the standard dynamic-linker search path, validates its ABI, resolves
+/// via the standard dynamic-linker search path, validates its required exports, resolves
 /// the supplied configuration against the plugin's schema (filling in
 /// defaults), instantiates the plugin, and adds it to the supplied group.
 ///
-/// Output sinks and the profiling group are also configured from the same
-/// config file (see configure_plugin_group()):
+/// Output sinks are also configured from the same config file (see
+/// configure_plugin_group()):
 ///
 /// @code{.json}
-///   "profiled": true,
 ///   "sinks": { "types": ["stderr", "file"], "dir": "/tmp/out" }
 /// @endcode
 
 #pragma once
 
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
-#include "simdojo/sim/simulation.h"
+#include "util/diagnostic.h"
 
 #include <memory>
 #include <string>
@@ -53,27 +52,38 @@ public:
   /// before `execvp`).
   ///
   /// Loaded shared objects are kept open for the lifetime of the process.
-  /// Failures (missing library, ABI mismatch, bad config) are reported to the
-  /// plugin log and skip that plugin without aborting the others.
+  /// Failures (missing library, missing exports, bad config) are reported to the
+  /// plugin log and skip that plugin without aborting the others. This low-level
+  /// entry point is always best-effort; use configure_plugin_group() with
+  /// `"require_all_plugins": true` when every configured plugin is required.
   ///
   /// @returns The number of plugins successfully added to @p group.
   static int load_from_config(const std::string &config_json, ExecutionPluginGroup &group,
                               const std::string &plugin_dir = {});
 
-  /// Build a fully configured plugin group from @p config_json: selects the
-  /// plain or profiled group (`"profiled"` flag), wires output sinks
-  /// (`"sinks"` object), and loads the plugins (`"plugins"` object). Shared by
+  /// Build a fully configured plugin group from @p config_json: wires output
+  /// sinks (`"sinks"` object) and loads the plugins (`"plugins"` object). Shared by
   /// the local (interposer) and daemon launch paths so a given config behaves
   /// identically regardless of how the VM is brought up.
   ///
   /// @p plugin_dir has the same meaning as in load_from_config().
-  /// @p engine_config is the simulation engine configuration. Profiled groups
-  /// require single-threaded execution because their counters are not synchronized.
   ///
-  /// @returns A non-null group (empty if the config declares no plugins).
-  static std::shared_ptr<ExecutionPluginGroup>
+  /// The optional top-level `"require_all_plugins"` boolean defaults to false,
+  /// preserving best-effort loading. When true, this function returns failure if any
+  /// plugin listed in `"plugins"` cannot be added. A non-boolean value is
+  /// rejected. When all plugins are required, an explicitly present `"plugins"`
+  /// value must be an object; omitting `"plugins"` is valid and produces an empty
+  /// group.
+  ///
+  /// @returns A non-null group (empty if the config declares no plugins), or failure
+  /// for malformed JSON, a non-object root, invalid admission options, or when a required plugin
+  /// cannot be added. An empty input string intentionally produces an empty group.
+  /// The failure reason is sent to @p emit_error; omitting the emitter discards
+  /// the message because FailureOr itself carries no diagnostic text.
+  /// Plugin accessors, factories, callbacks and destructors must not throw.
+  static util::FailureOr<std::shared_ptr<ExecutionPluginGroup>>
   configure_plugin_group(const std::string &config_json, const std::string &plugin_dir = {},
-                         const simdojo::SimulationEngine::Config &engine_config = {});
+                         util::DiagnosticEmitter emit_error = {});
 };
 
 } // namespace rocjitsu

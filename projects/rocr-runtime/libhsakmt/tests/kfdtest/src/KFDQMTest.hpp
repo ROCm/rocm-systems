@@ -40,6 +40,20 @@ typedef struct {
     uint32_t numSAperSE;
     uint32_t numWGPperSA;
     uint32_t *pInactiveMask;
+    /*
+     * gfx12.1 multi-XCC support.
+     *
+     * On gfx12.1 the CU mask ABI is one bit per WGP and the driver interleaves
+     * the WGP bits across XCCs: the bit for unit u of XCC x lives at
+     * (x + u * numXcc). A PM4 dispatch only runs on the single XCC selected by
+     * pm4_target_xcc, so the ExtendedCuMasking test drives one XCC at a time
+     * with per-XCC topology (numSEs holds SEs-per-XCC in that case).
+     *
+     * numXcc <= 1 selects the legacy encoding (two contiguous bits per WGP),
+     * leaving all pre-gfx12.1 behaviour unchanged.
+     */
+    uint32_t numXcc;
+    uint32_t targetXcc;
 } mask_config_t;
 
 /*

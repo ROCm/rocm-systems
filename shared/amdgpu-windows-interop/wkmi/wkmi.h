@@ -25,6 +25,7 @@ enum MemFlag {
   kFineGrain    = (1ULL << 0),  ///< Fine-grained coherent memory access
   kKernarg      = (1ULL << 1),  ///< Kernel argument memory (uncached)
   kQueueObject  = (1ULL << 2),  ///< Queue object memory (AQL queue support)
+  kAqlCwsr      = (1ULL << 3),  ///< AQL queue CWSR allocation for HSA event signaling
 };
 
 /// @brief GPU engine type flags
@@ -44,6 +45,13 @@ enum SchedLevel {
   kHigh = 2,    ///< High priority scheduling
 };
 
+/// @brief Kind of hardware queue to create. AQL and SDMA are mutually exclusive.
+enum HwQueueKind {
+  kHwQueuePm4 = 0,  ///< PM4 / compute queue (AQL->PM4 translation); default
+  kHwQueueAql,      ///< Native AQL queue for compute
+  kHwQueueSdma,     ///< Native HSA SDMA user queue
+};
+
 /// @brief Hardware scheduling information
 /// Contains hardware scheduling (HWS) capabilities and engine support information
 struct HwsInfo {
@@ -54,12 +62,18 @@ struct HwsInfo {
       uint32_t dmaHwsEnabled     : 1;  ///< DMA engine HWS enabled
       uint32_t dma1HwsEnabled    : 1;  ///< DMA1 engine HWS enabled
       uint32_t aql_queue         : 1;  ///< Kernel mode driver supports native AQL queue
-      uint32_t reserved : 27;          ///< Reserved for future use
+      uint32_t sdma_queue        : 1;  ///< Kernel mode driver supports native HSA SDMA user queue
+      uint32_t reserved : 26;          ///< Reserved for future use
     } hwsMask;                         ///< Hardware scheduling mask bitfield
     uint32_t osHwsEnableFlags;         ///< OS HWS enable flags (raw value)
   };
   uint64_t engineOrdinalMask;          ///< Bitfield indicating which engines (by ordinal) support MES HWS
 };
+
+/// Extents of the WGP bitmask arrays in DeviceInfo, matching the KMD's
+/// MAX_NUM_SE and MAX_NUM_SA_PER_SE.
+constexpr uint32_t kMaxShaderEngines = 12;
+constexpr uint32_t kMaxShaderArraysPerSe = 2;
 
 /// @brief Comprehensive GPU device information structure
 /// Contains all device capabilities, hardware specifications, and driver information
@@ -77,12 +91,14 @@ struct DeviceInfo {
   
   // Compute capabilities
   uint32_t wavefront_size;                    ///< Wavefront size (32 or 64)
-  uint32_t compute_unit_count;                ///< Total number of compute units (CUs)
+  uint32_t compute_unit_count;                ///< Total number of compute units (CUs). Always 0
+                                              ///< when wgp_masks_valid is set: see the masks below
   uint32_t wave_per_cu;                       ///< Maximum waves per compute unit
   uint32_t simd_per_cu;                       ///< Number of SIMD units per CU (2 for RDNA, 4 for GCN)
   uint32_t max_scratch_slots_per_cu;          ///< Maximum scratch slots per CU
   uint32_t num_shader_engine;                 ///< Number of shader engines
   uint32_t shader_array_per_shader_engine;    ///< Number of shader arrays per shader engine
+  uint32_t max_phys_cu_per_engine;            ///< Max CUs per SE before harvest
   
   // Clock frequencies
   uint32_t max_engine_clock_mhz;              ///< Maximum engine clock frequency in MHz
@@ -128,7 +144,8 @@ struct DeviceInfo {
   uint32_t num_cp_queues;                     ///< Number of command processor queues
   HwsInfo hwsInfo;                            ///< Hardware scheduling information
   std::vector<int> sdma_schedid;              ///< SDMA scheduler IDs
-  uint32_t compute_schedid;                   ///< Compute scheduler ID
+  uint32_t compute_schedid;                   ///< Compute scheduler ID (AQL-preferred: COMPUTE1 if AQL-on-COMPUTE1 is supported, else COMPUTE0)
+  uint32_t pm4_compute_schedid;              ///< Compute scheduler ID for PM4 queues (always COMPUTE0 when present, else same as compute_schedid)
   
   // Advanced features
   bool state_shadowing_by_cpfw;               ///< True if CP firmware supports state shadowing
@@ -139,6 +156,14 @@ struct DeviceInfo {
   uint32_t kmd_version;                       ///< Kernel mode driver version (e.g., 2520 for 25.20)
   uint32_t gb_addr_config;                    ///< Graphics block address configuration
   uint32_t num_xcc;                           ///< Number of XCC (eXtended Compute Complex) units
+
+  // WGP bitmasks, one 8-bit mask per shader array, indexed [SE][SA].
+  // Only meaningful when wgp_masks_valid is set. On a part whose WGPs split into
+  // regular and tensor processors, wkmi reports none: compute_unit_count is 0
+  // and the client derives whichever count it needs from these masks.
+  bool wgp_masks_valid;                       ///< True when the two mask arrays below are populated
+  uint8_t active_wgp[kMaxShaderEngines][kMaxShaderArraysPerSe];  ///< Set bit = active WGP
+  uint8_t is_twgp[kMaxShaderEngines][kMaxShaderArraysPerSe];     ///< Set bit = tensor WGP, clear bit = regular WGP
 };
 
 struct KmdDbgVersion {
@@ -283,9 +308,9 @@ void SetAllocationInfo(void* data,                    ///< Pointer to allocation
                        uint64_t size,                 ///< Size of allocation in bytes
                        AllocDomain domain,            ///< Memory domain (kSystem, kLocal, kUserMemory, kUserQueue)
                        uint64_t addr,                 ///< Virtual address for user queue allocations
-                       uint32_t mem_flags,            ///< Memory flags (kFineGrain, kKernarg, kQueueObject)
+                       uint32_t mem_flags,            ///< Memory flags (kFineGrain, kKernarg, kQueueObject, kAqlCwsr)
                        uint32_t engine_flag,          ///< Engine flag for queue allocations
-                       const DeviceInfo& device_info);///< Device information structure (const reference)
+                       const DeviceInfo& device_info); ///< Device information structure (const reference)
 
 /// @brief Get the required sizes for allocation private data
 void GetAllocPrivDataSize(int* priv_drv_data_size,      ///< [out] Size of driver private data structure
@@ -318,13 +343,14 @@ int GetHwQueuePrivDataSize();
 void FillinHwQueuePrivData(void* priv_data,              ///< Pointer to HW queue private data structure
                            bool FwManagedGfxState,       ///< True to enable firmware-managed graphics state
                            SchedLevel level = kNormal,   ///< Queue scheduling priority level (default: kNormal)
-                           bool aql = false,             ///< True if creating an AQL queue (default: false)
-                           uint64_t queue_va = 0,        ///< Virtual address of AQL queue memory (for AQL queues)
-                           uint64_t queue_size = 0,      ///< Size of AQL queue memory in bytes (for AQL queues)
+                           HwQueueKind kind = kHwQueuePm4, ///< Queue kind: PM4 (default), AQL, or SDMA
+                           uint64_t queue_va = 0,        ///< Virtual address of queue memory (AQL queue memory, or the SDMA ring)
+                           uint64_t queue_size = 0,      ///< Size of queue memory in bytes (AQL queue memory, or the SDMA ring)
                            uint64_t wptr = 0,            ///< Initial write pointer value (for AQL queues)
                            uint64_t rptr = 0,            ///< Initial read pointer value (for AQL queues)
                            D3DKMT_HANDLE aql_queue_desc = 0, ///< Handle to AQL queue descriptor (for AQL queues)
-                           uint32_t** doorbell_ptr = nullptr); ///< [out] Pointer to receive doorbell offset address (for AQL queues)
+                           uint32_t** doorbell_ptr = nullptr, ///< [out] Pointer to receive doorbell offset address (for AQL queues)
+                           D3DKMT_HANDLE cwsr_mem_handle = 0); ///< Allocation handle of CWSR region (UMDKMDIF_CREATEHWQUEUE_PRIVATE_DATA::CwsrMemHandle)
 
 // ============================================================================
 // Context Management Functions
@@ -343,7 +369,8 @@ NTSTATUS ParseAdapterInfo(D3DKMT_HANDLE adapter,      ///< Handle to the D3DKMT 
 void FillinContextPrivData(void* priv_data,                ///< Pointer to context private data structure
                            bool FwManagedGfxState,         ///< True to enable firmware-managed graphics state
                            uint32_t schedId = 0,           ///< Scheduler ID for the context (default: 0)
-                           uint64_t debuggerData = 0);
+                           uint64_t debuggerData = 0,      ///< Debugger AQL packet list data (default: 0)
+                           bool rocr_client = false);      ///< True to tag the context with the ROCr client id (native SDMA queue support)
 
 // ============================================================================
 // AQL Queue Submit Interfaces (Windows only)
@@ -356,6 +383,14 @@ int GetAqlSubmitPrivDataSize();
 /// @brief Configure AQL packet submission with doorbell value
 void FillinAqlSubmitPrivData(void* priv_data,              ///< Pointer to AQL submission private data structure
                              uint64_t doorbell_value);     ///< Write pointer (doorbell) value for AQL submission
+
+/// @brief Get the size of native HSA SDMA submission private data structure
+/// @return Size in bytes of the SDMA submission private data structure
+int GetSdmaSubmitPrivDataSize();
+
+/// @brief Configure native HSA SDMA queue submission with the write pointer byte offset
+void FillinSdmaSubmitPrivData(void* priv_data,             ///< Pointer to SDMA submission private data structure
+                              uint64_t wptr_in_bytes);     ///< SDMA write pointer as a byte offset (WptrInBytes)
 
 // ============================================================================
 // Queue CU Mask Interface (Windows only)
@@ -394,7 +429,8 @@ int GetUnregisterEventPrivDataSize();
 
 /// @brief Unregister a previously registered user-mode event
 void FillinUnregisterEventPrivData(void* priv_data,  ///< Pointer to event unregistration private data structure
-                                   uint64_t handle); ///< Event handle to unregister
+                                   uint64_t handle,
+                                   uint32_t event_id = 0); ///< Event handle to unregister
 
 // ============================================================================
 // Interop Interfaces (Windows only)
@@ -406,9 +442,12 @@ uint64_t GetMemoryAllocationSize(const void* priv_data);  ///< Pointer to alloca
 
 /// @brief Surface swizzle information extracted from VCAM_SURFACE_DESC
 struct SurfaceSwizzleInfo {
-  uint32_t swizzle_mode;   ///< Generic swizzle mode (union of eSwizzleMode/gfx12SwizzleMode/eTilingMode)
-  uint32_t tile_swizzle;   ///< Pipe-bank XOR value (ulTileSwizzle) for plane 0
-  bool     valid;          ///< True if surfaceDesc was present and parsed successfully
+  uint32_t swizzle_mode;     ///< Generic swizzle mode (union of eSwizzleMode/gfx12SwizzleMode/eTilingMode)
+  uint32_t tile_swizzle;     ///< Pipe-bank XOR value (ulTileSwizzle) for plane 0
+  uint32_t compression_mode; ///< Distributed compression mode (ulCompressionMode); 0 == none. gfx12+.
+  uint32_t max_comp_blk;     ///< Max compressed block size for plane 0 (maxCompressedBlockSize). gfx12+.
+  uint32_t max_uncomp_blk;   ///< Max uncompressed block size for plane 0 (maxUncompressedBlockSize). gfx12+.
+  bool     valid;            ///< True if surfaceDesc was present and parsed successfully
 };
 
 /// @brief Extract swizzle mode and tile swizzle from allocation private data

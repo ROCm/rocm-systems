@@ -69,10 +69,16 @@ wave_t::~wave_t ()
     raise_event (AMD_DBGAPI_EVENT_KIND_WAVE_COMMAND_TERMINATED);
 }
 
+cluster_t &
+wave_t::cluster () const
+{
+  return workgroup ().cluster ();
+}
+
 const dispatch_t &
 wave_t::dispatch () const
 {
-  return m_workgroup.dispatch ();
+  return cluster ().dispatch ();
 }
 
 queue_t &
@@ -790,30 +796,7 @@ wave_t::write_register (amdgpu_regnum_t regnum, size_t offset,
 std::pair<agent_address_t /* address */, amd_dbgapi_size_t /* size */>
 wave_t::scratch_memory_region () const
 {
-  auto [address, size]
-    = queue ().scratch_memory_region (*m_cwsr_record.get ());
-
-  /* On architectures with an architected flat_scratch register, check that the
-     computed slot scratch address matches the content of the register.  */
-  if (architecture ().has_architected_flat_scratch ())
-    {
-      agent_address_t flat_scratch;
-      read_register (amdgpu_regnum_t::flat_scratch, &flat_scratch);
-
-      if (address != flat_scratch && size != 0)
-        {
-          warning ("flat_scratch may be corrupted, "
-                   "private memory access is disabled");
-
-          /* If the computed scratch address differs from the content of the
-             flat_scratch register, either the calculation is incorrect or the
-             register is corrupted.  Disable access to the scratch memory
-             region by returning a 0 size.  */
-          size = 0;
-        }
-    }
-
-  return { address, size };
+  return queue ().scratch_memory_region (*m_cwsr_record.get ());
 }
 
 size_t
@@ -993,10 +976,13 @@ wave_t::get_info (amd_dbgapi_wave_info_t query, size_t value_size,
       return;
 
     case AMD_DBGAPI_WAVE_INFO_WORKGROUP_COORD:
-      if (!workgroup ().group_ids ())
-        throw api_error_t (AMD_DBGAPI_STATUS_ERROR_NOT_AVAILABLE);
-      utils::get_info (value_size, value, *workgroup ().group_ids ());
-      return;
+      {
+        auto ids = workgroup ().group_ids ();
+        if (!ids.has_value ())
+          throw api_error_t (AMD_DBGAPI_STATUS_ERROR_NOT_AVAILABLE);
+        utils::get_info (value_size, value, *ids);
+        return;
+      }
 
     case AMD_DBGAPI_WAVE_INFO_WAVE_NUMBER_IN_WORKGROUP:
       if (!m_wave_in_group)
@@ -1035,6 +1021,28 @@ wave_t::get_info (amd_dbgapi_wave_info_t query, size_t value_size,
     case AMD_DBGAPI_WAVE_INFO_LANE_COUNT:
       utils::get_info (value_size, value, lane_count ());
       return;
+
+    case AMD_DBGAPI_WAVE_INFO_CLUSTER:
+      utils::get_info (value_size, value, cluster ().id ());
+      return;
+
+    case AMD_DBGAPI_WAVE_INFO_CLUSTER_COORD:
+      {
+        auto ids = cluster ().cluster_ids ();
+        if (!ids.has_value ())
+          throw api_error_t (AMD_DBGAPI_STATUS_ERROR_NOT_AVAILABLE);
+        utils::get_info (value_size, value, *ids);
+        return;
+      }
+
+    case AMD_DBGAPI_WAVE_INFO_WORKGROUP_COORD_IN_CLUSTER:
+      {
+        auto ids = workgroup ().group_ids_in_cluster ();
+        if (!ids.has_value ())
+          throw api_error_t (AMD_DBGAPI_STATUS_ERROR_NOT_AVAILABLE);
+        utils::get_info (value_size, value, *ids);
+        return;
+      }
     }
 
   throw api_error_t (AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT);

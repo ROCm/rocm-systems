@@ -1,0 +1,619 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
+"""
+Unit tests for counter allocation pipeline in soc_base.py.
+
+Tests the bin-packing helpers used by perfmon_coalesce. No GPU hardware
+required.
+"""
+
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, List, Optional
+from unittest.mock import MagicMock, patch
+
+import common
+import pytest
+
+import config
+from rocprof_compute_soc.soc_base import (
+    AnalysisConfigMetric,
+    OmniSoC_Base,
+)
+from utils.counters.allocator import reads_one_pass
+from utils.counters.counter_file import flat_counters_in_perfmon_file
+from utils.mi_gpu_spec import mi_gpu_specs
+from utils.utils_common import (
+    MEMBW_ANALYSIS_PANEL_ID,
+    canonical_config_arch,
+)
+from utils.utils_counter_defs import Collectables, extract_counters_and_variables
+
+# =============================================================================
+# Fixtures
+# =============================================================================
+
+PERFMON_CONFIG = {
+    "SQ": 8,
+    "TA": 2,
+    "TD": 2,
+    "TCP": 4,
+    "TCC": 4,
+    "CPC": 2,
+    "CPF": 2,
+    "SPI": 6,
+    "GRBM": 2,
+    "GDS": 4,
+}
+
+GFX1250_PERFMON_CONFIG = {
+    "GRBM": 2,
+    "SQ": 8,
+    "SPI": 6,
+}
+
+# CP Utilization (metric id 17.1.1): a GRBM ratio whose numerator and
+# denominator must land in the same perfmon pass.
+CP_UTIL_METRIC_EXPRESSIONS = [
+    "100 * SUM(GRBM_CP_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum)",
+    "100 * MIN(GRBM_CP_BUSY_sum / GRBM_GUI_ACTIVE_sum)",
+    "100 * MAX(GRBM_CP_BUSY_sum / GRBM_GUI_ACTIVE_sum)",
+]
+
+# One unique synthetic counter per metric table, so the counter set returned by
+# detect_counters() reveals exactly which tables were selected.
+BASELINE_COUNTER = "SQ_BASELINE_COUNTER"  # table 201, outside block 30
+TABLE_3012_COUNTER = "TCC_BOTTLENECK_COUNTER"  # block 30, table 3012
+TABLE_3013_COUNTER = "TCC_EA_COUNTER"  # block 30, table 3013
+FIXTURE_COUNTERS = {BASELINE_COUNTER, TABLE_3012_COUNTER, TABLE_3013_COUNTER}
+
+# Every counter name outside the expressions is unique, so any leak from a
+# comment, title, description or metric name shows up in the result.
+PROSE_ANALYSIS_CONFIG = """\
+# SQ_COMMENT_COUNTER in a comment
+Panel Config:
+  id: 200
+  title: Speed of Light
+  data source:
+  - metric_table:
+      id: 201
+      title: SQ_TITLE_COUNTER table
+      header:
+        metric: Metric
+        avg: Avg
+        unit: Unit
+      metric:
+        SQ_METRIC_NAME_COUNTER:
+          avg: SUM(SQ_LEVEL_WAVES_ACCUM) / SUM(SQ_BUSY_CYCLES)  # SQ_TRAILING_COUNTER
+          unit: Wavefronts
+  metrics_description:
+    SQ_METRIC_NAME_COUNTER: Uses SQ_DESCRIPTION_COUNTER.
+"""
+
+# One arch per analysis config directory (gfx115x parts share one).
+CONFIG_ARCHS = sorted(
+    {
+        canonical_config_arch(arch): arch for arch in mi_gpu_specs.get_gpu_series_dict()
+    }.values()
+)
+
+
+def offline_soc(
+    gpu_arch: str,
+    filter_blocks: List[str],
+    membw_analysis: bool,
+    set_selected: Optional[str] = None,
+) -> OmniSoC_Base:
+    """OmniSoC_Base that detects counters from the analysis configs without a GPU.
+    With one XCD and one L2 bank, each TCC channel template expands to channel 0
+    only."""
+    args = SimpleNamespace(
+        filter_blocks=filter_blocks,
+        membw_analysis=membw_analysis,
+        set_selected=set_selected,
+    )
+    machine_specs = SimpleNamespace(
+        gpu_arch=gpu_arch,
+        gpu_series=mi_gpu_specs.get_gpu_series(gpu_arch),
+        l2_banks=1,
+        num_xcd=1,
+        rocminfo_lines=None,
+    )
+    with patch("rocprof_compute_soc.soc_base.console_debug"):
+        soc = OmniSoC_Base(args, machine_specs)
+    soc.set_arch(gpu_arch)
+    return soc
+
+
+@pytest.fixture
+def perfmon_config():
+    return dict(PERFMON_CONFIG)
+
+
+@pytest.fixture
+def gfx1250_perfmon_config():
+    return dict(GFX1250_PERFMON_CONFIG)
+
+
+@pytest.fixture
+def membw_analysis_soc(tmp_path: Path, monkeypatch) -> OmniSoC_Base:
+    baseline_analysis_config = f"""\
+Panel Config:
+  id: 200
+  data source:
+  - metric_table:
+      id: 201
+      header:
+        metric: Metric
+        value: Value
+      metric:
+        Baseline:
+          value: SUM({BASELINE_COUNTER})
+"""
+    membw_analysis_config = f"""\
+Panel Config:
+  id: 3000
+  data source:
+  - metric_table:
+      id: 3012
+      header:
+        metric: Metric
+        value: Value
+      metric:
+        L2 Bottleneck Detection Indicators:
+          value: SUM({TABLE_3012_COUNTER})
+  - metric_table:
+      id: 3013
+      header:
+        metric: Metric
+        value: Value
+      metric:
+        EA Interface:
+          value: SUM({TABLE_3013_COUNTER})
+"""
+    config_root = tmp_path / "gfx950"
+    config_root.mkdir()
+    (config_root / "0200_baseline.yaml").write_text(
+        baseline_analysis_config,
+        encoding="utf-8",
+    )
+    (config_root / "3000_mem_bw.yaml").write_text(
+        membw_analysis_config,
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(config, "analysis_configs_dir", tmp_path)
+    return offline_soc("gfx950", [], membw_analysis=False)
+
+
+def _make_soc(perfmon_config, arch="gfx908", num_xcd=1, l2_banks=4):
+    """Build a minimal OmniSoC_Base without rocminfo or GPU access."""
+    mspec = MagicMock()
+    mspec.gpu_arch = arch
+    mspec.rocminfo_lines = None  # skip populate_mspec
+    mspec.num_xcd = num_xcd
+    mspec.l2_banks = l2_banks
+
+    args = MagicMock()
+
+    with patch("rocprof_compute_soc.soc_base.console_debug"):
+        soc = OmniSoC_Base(args, mspec)
+
+    soc.set_arch(arch)
+    soc.set_perfmon_config(perfmon_config)
+    return soc
+
+
+@pytest.fixture
+def gfx1250_soc(gfx1250_perfmon_config) -> OmniSoC_Base:
+    """Minimal gfx1250 OmniSoC for allocation tests."""
+    soc = _make_soc(gfx1250_perfmon_config, arch="gfx1250")
+    soc._mspec.gpu_series = "GFX1250_SERIES"
+    return soc
+
+
+def patch_cp_util_metric(soc: OmniSoC_Base) -> Any:
+    """Make CP Utilization the only metric in soc's analysis configs."""
+    return patch.object(
+        soc,
+        "_iter_arch_analysis_yaml_metrics",
+        return_value=iter([
+            AnalysisConfigMetric(
+                "1700",
+                1701,
+                1,
+                "CP Utilization",
+                CP_UTIL_METRIC_EXPRESSIONS,
+                table={},
+                metric={},
+            )
+        ]),
+    )
+
+
+# =============================================================================
+# _allocate_perfmon_counter_files
+# =============================================================================
+
+
+def test_allocate_accum_counters_cost_two_sq_slots(perfmon_config):
+    """Each *_ACCUM counter costs two SQ slots and shares a bucket with others."""
+    soc = _make_soc(perfmon_config)
+    counters = {
+        "SQ_LEVEL_WAVES_ACCUM",
+        "SQC_DCACHE_INFLIGHT_LEVEL_ACCUM",
+        "TA_ADDR",
+    }
+
+    files = soc._allocate_perfmon_counter_files(counters)
+
+    assert len(files) == 1
+    assert set(flat_counters_in_perfmon_file(files[0])) == counters
+    assert files[0].blocks["SQ"].avail == perfmon_config["SQ"] - 4
+
+
+def test_allocate_seven_sq_plus_one_accum_needs_second_bucket(perfmon_config):
+    """Seven SQ counters and one *_ACCUM need nine slots against SQ capacity 8."""
+    soc = _make_soc(perfmon_config)
+    counters = {
+        "SQ_ACTIVE_INST_ANY",
+        "SQ_INSTS",
+        "SQ_INSTS_MFMA",
+        "SQ_INSTS_SMEM",
+        "SQ_INSTS_VALU",
+        "SQ_VALU_MFMA_BUSY_CYCLES",
+        "SQ_WAVES",
+        "SQ_INST_LEVEL_SMEM_ACCUM",
+    }
+
+    files = soc._allocate_perfmon_counter_files(counters)
+
+    assert len(files) == 2
+    assert counters == {
+        counter for f in files for counter in flat_counters_in_perfmon_file(f)
+    }
+
+
+def test_allocate_first_fit_packing(perfmon_config):
+    soc = _make_soc(perfmon_config)
+    # 3 SQ counters all fit in one bucket (SQ capacity 8)
+    counters = {"SQ_WAVES", "SQ_BUSY", "SQ_INSTS"}
+
+    files = soc._allocate_perfmon_counter_files(counters)
+
+    assert len(files) == 1
+    flat = set(flat_counters_in_perfmon_file(files[0]))
+    assert flat == counters
+
+
+def test_allocate_tcc_channel_coalescing(perfmon_config):
+    soc = _make_soc(perfmon_config)
+    # TCC channels with same base should land in the same bucket
+    counters = {"TCC_HIT[0]", "TCC_HIT[1]", "TCC_HIT[2]", "SQ_WAVES"}
+
+    files = soc._allocate_perfmon_counter_files(counters)
+
+    # All TCC_HIT channels should be in the same file
+    tcc_file = None
+    for f in files:
+        flat = flat_counters_in_perfmon_file(f)
+        if any("TCC_HIT" in c for c in flat):
+            tcc_file = f
+            break
+    assert tcc_file is not None
+    tcc_ctrs = [c for c in flat_counters_in_perfmon_file(tcc_file) if "TCC_HIT" in c]
+    assert set(tcc_ctrs) == {"TCC_HIT[0]", "TCC_HIT[1]", "TCC_HIT[2]"}
+
+
+def test_allocate_ratio_partners_share_pass(gfx1250_soc):
+    """A metric's numerator and denominator land in one pass."""
+    counters = {"GRBM_CP_BUSY_sum", "GRBM_GUI_ACTIVE_sum", "SQ_WAVES"}
+
+    with patch_cp_util_metric(gfx1250_soc):
+        files = gfx1250_soc._allocate_perfmon_counter_files(counters)
+
+    def bucket_for(counter: str) -> str:
+        for f in files:
+            if counter in flat_counters_in_perfmon_file(f):
+                return f.name
+        msg = f"{counter!r} not allocated"
+        raise AssertionError(msg)
+
+    assert bucket_for("GRBM_CP_BUSY_sum") == bucket_for("GRBM_GUI_ACTIVE_sum")
+
+
+def test_allocate_allows_several_accum_counters_per_bucket(gfx1250_soc):
+    """Each *_ACCUM counter has its own accumulating register, so several may
+    share a pass when the SQ block has room."""
+    counters = {
+        "SQ_INST_LEVEL_LDS_ACCUM",
+        "SQ_IFETCH_LEVEL_ACCUM",
+        "GRBM_CP_BUSY_sum",
+        "GRBM_GUI_ACTIVE_sum",
+        "SQ_WAVES",
+    }
+
+    with patch_cp_util_metric(gfx1250_soc):
+        files = gfx1250_soc._allocate_perfmon_counter_files(counters)
+
+    assert len(files) == 1
+    assert set(flat_counters_in_perfmon_file(files[0])) == counters
+
+
+def test_allocate_keeps_sp_valu_and_sq_vmem_apart_on_gfx1250(gfx1250_soc):
+    """On gfx1250 an SP_VALU_* and an SQ_VMEM_* counter get separate passes,
+    even with SQ room for both."""
+    files = gfx1250_soc._allocate_perfmon_counter_files({"SP_VALU_A", "SQ_VMEM_B"})
+
+    assert sorted(flat_counters_in_perfmon_file(f) for f in files) == [
+        ["SP_VALU_A"],
+        ["SQ_VMEM_B"],
+    ]
+
+
+# =============================================================================
+# _expand_tcc_template_counters
+# =============================================================================
+
+
+def test_expand_tcc_templates(perfmon_config):
+    soc = _make_soc(perfmon_config, num_xcd=2, l2_banks=3)
+    result = soc._expand_tcc_template_counters({"TCC_HIT[", "SQ_WAVES"})
+
+    # Template replaced with 2*3=6 indexed counters
+    assert "TCC_HIT[" not in result
+    expected_tcc = {f"TCC_HIT[{i}]" for i in range(6)}
+    assert expected_tcc.issubset(result)
+    assert "SQ_WAVES" in result
+    assert len(result) == 7  # 6 TCC + 1 SQ
+
+
+def test_expand_tcc_no_templates(perfmon_config):
+    soc = _make_soc(perfmon_config, num_xcd=1, l2_banks=4)
+    inp = {"SQ_WAVES", "TA_ADDR", "TCC_HIT[0]"}
+    result = soc._expand_tcc_template_counters(inp)
+
+    # No templates: input unchanged
+    assert result == inp
+
+
+# =============================================================================
+# _append_expressions_for_filter_token alias handling
+# =============================================================================
+
+
+def _fake_soc_for_filter_token(arch: str = "gfx942") -> Any:
+    """Minimal stand-in exposing only the _mspec.gpu_arch the method reads."""
+    return SimpleNamespace(_mspec=SimpleNamespace(gpu_arch=arch))
+
+
+def test_filter_token_unknown_alias_exits_instead_of_keyerror(monkeypatch):
+    monkeypatch.setattr(
+        "rocprof_compute_soc.soc_base.get_arch_alias_to_panel_id",
+        lambda arch: {"lds": "10"},
+    )
+    with pytest.raises(SystemExit):
+        OmniSoC_Base._append_expressions_for_filter_token(
+            _fake_soc_for_filter_token(), "SQ", {}, "/cfg", []
+        )
+
+
+def test_filter_token_known_alias_resolves_without_crash(monkeypatch):
+    monkeypatch.setattr(
+        "rocprof_compute_soc.soc_base.get_arch_alias_to_panel_id",
+        lambda arch: {"lds": "10"},
+    )
+    expressions: list[str] = []
+    # Alias resolves to block id 10 -> file id "1000", absent from the
+    # empty config dict, so the token is skipped with a warning, not a crash.
+    OmniSoC_Base._append_expressions_for_filter_token(
+        _fake_soc_for_filter_token(), "lds", {}, "/cfg", expressions
+    )
+    assert expressions == []
+
+
+# =============================================================================
+# Memory Bandwidth Analysis counter selection
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    ("membw_analysis", "filter_blocks", "expected_counters"),
+    [
+        pytest.param(
+            False,
+            [],
+            {BASELINE_COUNTER},
+            id="flag_off_drops_the_whole_block_30_file",
+        ),
+        pytest.param(
+            True,
+            [],
+            {BASELINE_COUNTER, TABLE_3012_COUNTER, TABLE_3013_COUNTER},
+            id="flag_on_no_filter_keeps_every_table",
+        ),
+        pytest.param(
+            True,
+            ["30"],
+            {TABLE_3012_COUNTER, TABLE_3013_COUNTER},
+            id="block_30_keeps_both_block_30_tables_and_drops_baseline",
+        ),
+        pytest.param(
+            True,
+            ["30.12"],
+            {TABLE_3012_COUNTER},
+            id="block_30_12_keeps_only_table_3012",
+        ),
+        pytest.param(
+            True,
+            ["2", "30.13"],
+            {BASELINE_COUNTER, TABLE_3013_COUNTER},
+            id="ordinary_block_and_membw_table_are_combined",
+        ),
+    ],
+)
+def test_membw_analysis_counter_selection(
+    membw_analysis_soc: OmniSoC_Base,
+    membw_analysis: bool,
+    filter_blocks: list[str],
+    expected_counters: set[str],
+) -> None:
+    """--membw-analysis admits block 30; --block then narrows within it.
+
+    Each config table in the fixture owns one unique synthetic counter, so the
+    selected fixture counters identify exactly which tables survived. The 30.12
+    and mixed 30.13 cases prove selection is by table id; the mixed case also
+    proves a memory-bandwidth table composes with an ordinary report block.
+    """
+    args = membw_analysis_soc.get_args()
+    args.membw_analysis = membw_analysis
+    args.filter_blocks = filter_blocks
+
+    counters, effective_filter_blocks = membw_analysis_soc.detect_counters()
+
+    assert counters & FIXTURE_COUNTERS == expected_counters
+    assert effective_filter_blocks == filter_blocks
+
+
+# =============================================================================
+# Counters come only from metric expressions
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    "filter_blocks",
+    [
+        pytest.param([], id="no_filter"),
+        pytest.param(["2"], id="file"),
+        pytest.param(["2.1"], id="table"),
+        pytest.param(["2.1.0"], id="metric"),
+    ],
+)
+def test_detect_counters_reads_only_metric_expressions(
+    membw_analysis_soc: OmniSoC_Base, filter_blocks: list[str]
+) -> None:
+    """Comments, titles, descriptions and metric names add no counters,
+    whichever way the metric is selected."""
+    config_root = config.analysis_configs_dir / "gfx950"
+    (config_root / "0200_baseline.yaml").write_text(
+        PROSE_ANALYSIS_CONFIG, encoding="utf-8"
+    )
+    membw_analysis_soc.get_args().filter_blocks = filter_blocks
+
+    counters, _ = membw_analysis_soc.detect_counters()
+
+    formula_counters, _ = extract_counters_and_variables(
+        "", Collectables.of_arch(membw_analysis_soc._mspec.gpu_arch)
+    )
+    formula_counters |= {"SQ_LEVEL_WAVES_ACCUM", "SQ_BUSY_CYCLES"}
+    assert counters == formula_counters
+
+
+@pytest.mark.parametrize("gpu_arch", CONFIG_ARCHS)
+def test_panel_counters_add_up_to_full_profile(gpu_arch: str) -> None:
+    """On the shipped configs, the counters of each panel (-b <panel>) add up to
+    the default profile, and with panel 30 to --membw-analysis."""
+    config_dir = config.analysis_configs_dir
+    counters_by_file: dict[str, set[str]] = {}
+    for path in (config_dir / canonical_config_arch(gpu_arch)).glob("*.yaml"):
+        file_id = path.name.split("_")[0]
+        panel = str(int(file_id) // 100)
+        soc = offline_soc(gpu_arch, [panel], membw_analysis=True)
+        counters_by_file[file_id], _ = soc.detect_counters()
+    membw_file = str(MEMBW_ANALYSIS_PANEL_ID)
+
+    default, _ = offline_soc(gpu_arch, [], False).detect_counters()
+    membw, _ = offline_soc(gpu_arch, [], True).detect_counters()
+
+    assert default == set().union(
+        *(counters for file, counters in counters_by_file.items() if file != membw_file)
+    )
+    assert membw == set().union(*counters_by_file.values())
+
+
+@pytest.mark.parametrize("gpu_arch", CONFIG_ARCHS)
+def test_live_attach_set_fits_one_pass_on_each_architecture(gpu_arch: str) -> None:
+    """Live attachment cannot replay the workload for additional counter passes."""
+    soc = offline_soc(
+        gpu_arch,
+        [],
+        membw_analysis=False,
+        set_selected=common.SINGLE_PASS_SET,
+    )
+    soc.set_perfmon_config(mi_gpu_specs.get_perfmon_config(gpu_arch))
+    requested_counters, selected_blocks = soc.detect_counters()
+    assert selected_blocks
+    assert requested_counters
+
+    counter_files = soc._allocate_perfmon_counter_files(requested_counters)
+    assert len(counter_files) == 1, f"{gpu_arch}: live attachment needs one pass"
+    assert set(flat_counters_in_perfmon_file(counter_files[0])) == requested_counters
+    assert not any(counter.endswith("_ACCUM") for counter in requested_counters), (
+        f"{gpu_arch}: live attachment set uses accumulators"
+    )
+
+
+@pytest.mark.parametrize("gpu_arch", CONFIG_ARCHS)
+def test_every_metric_reads_one_pass(gpu_arch: str) -> None:
+    """Every metric of the default profile reads its counters from one pass."""
+    soc = offline_soc(gpu_arch, [], membw_analysis=False)
+    soc.set_perfmon_config(mi_gpu_specs.get_perfmon_config(gpu_arch))
+    counters, _ = soc.detect_counters()
+    passes = [
+        set(flat_counters_in_perfmon_file(counter_file))
+        for counter_file in soc._allocate_perfmon_counter_files(counters)
+    ]
+    collectables = Collectables.of_arch(gpu_arch)
+    spanning = [
+        f"{metric.table_id}.{metric.metric_idx} {metric.metric_name}"
+        for metric in soc._iter_arch_analysis_yaml_metrics()
+        if not reads_one_pass(metric.expressions, collectables, passes)
+    ]
+    assert spanning == [], (
+        f"{gpu_arch}: split these metrics into collectables "
+        "(see the metric library README and tools/counter_grouping_inspector.py)"
+    )
+
+
+# =============================================================================
+# post_profiling
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    ("filter_blocks", "expect_benchmark"),
+    [
+        pytest.param([], True, id="no_filter_runs_benchmark"),
+        pytest.param(["4"], True, id="block_4_runs_benchmark"),
+        pytest.param(["roof"], True, id="roof_alias_runs_benchmark"),
+        pytest.param(["11.2.3", "11.2.4"], False, id="set_metrics_skip_benchmark"),
+        pytest.param(["2"], False, id="unrelated_block_skips_benchmark"),
+    ],
+)
+def test_post_profiling_roofline_gating(
+    perfmon_config,
+    tmp_path: Path,
+    monkeypatch,
+    filter_blocks: list[str],
+    expect_benchmark: bool,
+) -> None:
+    """Roofline runs only when the effective filter blocks cover block 4."""
+    soc = _make_soc(perfmon_config, arch="gfx942")
+    args = soc.get_args()
+    args.device = 0
+    args.filter_blocks = filter_blocks
+    args.no_roof = False
+    args.output_directory = str(tmp_path)
+    mock_benchmark = MagicMock()
+    monkeypatch.setattr(
+        "rocprof_compute_soc.soc_base.run_roofline_benchmark", mock_benchmark
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_soc.soc_base.validate_roofline_csv",
+        lambda _workload_dir: (True, ""),
+    )
+
+    soc.post_profiling()
+
+    assert mock_benchmark.called is expect_benchmark

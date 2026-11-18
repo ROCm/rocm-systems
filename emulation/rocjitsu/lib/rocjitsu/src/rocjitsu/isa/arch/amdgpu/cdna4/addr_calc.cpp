@@ -5,10 +5,9 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_flat.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
-#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/log.h"
 
 #include <cassert>
 #include <cstdint>
@@ -17,35 +16,9 @@
 namespace rocjitsu {
 namespace cdna4 {
 
-namespace {
-bool is_scratch_op(uint32_t op) { return (op >= 5 && op <= 7) || (op >= 21 && op <= 23); }
-} // namespace
-
-uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf) {
-  if (!is_scratch_op(inst.op))
-    return amdgpu::addr_calc::smem_calculate_address(inst, wf);
-
-  // S_SCRATCH_LOAD / S_SCRATCH_STORE per CDNA4 ISA spec (section 8.2.1.1):
-  // ADDR = SGPR[base] + inst_offset + { M0 or SGPR[soffset] or zero } * 64
-  auto &cu = wf.cu();
-  uint32_t sbase = wf.sgpr_alloc().base + inst.sbase * 2;
-  uint64_t base = (static_cast<uint64_t>(amdgpu::RegisterAccess(cu).read_sgpr(sbase + 1)) << 32) |
-                  amdgpu::RegisterAccess(cu).read_sgpr(sbase);
-  int64_t inst_offset = 0;
-  if (inst.imm)
-    inst_offset = static_cast<int64_t>(static_cast<int32_t>(inst.offset << 11) >> 11);
-  uint64_t sgpr_off = 0;
-  if (inst.soffset_en)
-    sgpr_off = amdgpu::RegisterAccess(cu).read_sgpr(wf.sgpr_alloc().base + inst.soffset);
-  uint64_t addr = base + inst_offset + sgpr_off * 64;
-  util::Logger::cp([&](auto &os) {
-    static thread_local uint64_t scratch_smem_count = 0;
-    if (++scratch_smem_count <= 32)
-      os << std::format("S_SCRATCH_SMEM wf{} op={} sbase_idx={} base={:#x} inst_off={} "
-                        "sgpr_off={} addr={:#x} pc={:#x}",
-                        wf.wf_id(), inst.op, inst.sbase, base, inst_offset, sgpr_off, addr, wf.pc);
-  });
-  return addr;
+std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf,
+                                               amdgpu::ScalarMemState *state) {
+  return amdgpu::addr_calc::smem_calculate_address(inst, wf, state, /*check_negative_offset=*/true);
 }
 
 void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf,
@@ -66,6 +39,35 @@ void mtbuf_calculate_addresses(const MtbufMachineInst &inst, amdgpu::Wavefront &
 void ds_calculate_addresses(const DsMachineInst &inst, amdgpu::Wavefront &wf,
                             amdgpu::VectorMemState &d) {
   amdgpu::addr_calc::ds_calculate_addresses(inst, wf, d);
+  const auto transpose = static_cast<amdgpu::TransposeKind>(d.transpose);
+  const bool b64 = transpose == amdgpu::TransposeKind::CDNA4_TR_B4 ||
+                   transpose == amdgpu::TransposeKind::B64_TR_B8 ||
+                   transpose == amdgpu::TransposeKind::B64_TR_B16;
+  if ((!b64 && transpose != amdgpu::TransposeKind::CDNA4_TR_B6) || !d.exec_mask)
+    return;
+
+  // CDNA4 section 11.4 requires all lanes for these cross-lane loads. Empty
+  // EXEC issues no requests, as for the existing global-transpose diagnostic.
+  const uint64_t full_exec = ~uint64_t{0} >> (64 - wf.wf_size());
+  if (d.exec_mask != full_exec)
+    wf.report_undefined_behavior("LDS transpose load requires a full or empty EXEC mask");
+
+  // The B64 forms require eight-byte addresses, including the immediate offset.
+  // The manual does not specify a numerical alignment for the packed B96 form;
+  // do not infer twelve- or sixteen-byte alignment from its payload width.
+  if (!b64)
+    return;
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(d.exec_mask & (uint64_t{1} << lane)))
+      continue;
+    const uint64_t address = d.per_lane_addr[lane] - wf.lds_base();
+    if (address & 7) {
+      wf.report_undefined_behavior(std::format(
+          "LDS transpose load requires an 8-byte-aligned address (lane {} address={:#x})", lane,
+          address));
+      break;
+    }
+  }
 }
 
 } // namespace cdna4

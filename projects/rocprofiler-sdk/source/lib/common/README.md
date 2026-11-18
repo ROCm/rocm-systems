@@ -180,3 +180,7 @@ g++ test_old_abi.o test_new_abi.o -o cross_abi_test
 ```
 
 The current implementation achieves ABI independence by avoiding `std::regex` entirely, relying instead on minimal standard library components and custom string processing that remains stable across ABI versions.
+
+## SHA-256
+
+`sha256.hpp` is a shim over `shared/sha256`. This implementation is shared with other consumers (e.g. `projects/cuid`).

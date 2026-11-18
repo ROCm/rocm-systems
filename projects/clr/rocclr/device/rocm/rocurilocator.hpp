@@ -5,8 +5,7 @@
  */
 
 #pragma once
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
 #include "device/devurilocator.hpp"
 #include "rocrctx.hpp"
 #include <mutex>
@@ -33,5 +32,4 @@ class UriLocator : public device::UriLocator {
                                                           amd::Os::FileDesc* uri_fd) override;
 };
 }  // namespace amd::roc
-#endif
-#endif
+#endif  // DEVICE_ADDRESS_SANITIZER

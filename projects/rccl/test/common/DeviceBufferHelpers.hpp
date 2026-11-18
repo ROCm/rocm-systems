@@ -10,6 +10,7 @@
 #include "nccl.h"
 #include <cmath>
 #include <hip/hip_runtime.h>
+#include <hip/hip_fp16.h>
 
 // hip_bfloat16 type handling based on ROCm version
 // Note: Do NOT define _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_BFLOAT16_H_ or _HIP_BFLOAT16_H_ guards here
@@ -83,6 +84,7 @@ DEFINE_NCCL_TYPE_TRAIT(uint32_t, ncclUint32);
 DEFINE_NCCL_TYPE_TRAIT(int64_t,  ncclInt64);
 DEFINE_NCCL_TYPE_TRAIT(uint64_t, ncclUint64);
 DEFINE_NCCL_TYPE_TRAIT(hip_bfloat16, ncclBfloat16);
+DEFINE_NCCL_TYPE_TRAIT(__half,   ncclFloat16);
 
 // Undefine macro to avoid polluting namespace
 #undef DEFINE_NCCL_TYPE_TRAIT
@@ -107,6 +109,38 @@ template<typename T>
 constexpr const char* getTypeName()
 {
     return NcclTypeTraits<T>::name;
+}
+
+/**
+ * @brief VMM-aware device allocation for registrable buffers
+ *
+ * Routes through ncclMemAlloc so the buffer is cuMem/VMM memory when cuMem is
+ * enabled and hipMalloc otherwise. Use this instead of a raw hipMalloc for any
+ * buffer that will be ncclCommRegister'd, so tests exercise the same memory type
+ * production uses. Free with freeDeviceBuffer (or makeHipMemBufferAutoGuard),
+ * never hipFree.
+ *
+ * @param[out] ptr   Receives the allocated device buffer pointer
+ * @param      bytes Allocation size in bytes
+ * @return ncclSuccess on success, otherwise the failing ncclResult_t
+ */
+inline ncclResult_t allocateDeviceBuffer(void** ptr, size_t bytes)
+{
+    return ncclMemAlloc(ptr, bytes);
+}
+
+/**
+ * @brief Free a buffer allocated with allocateDeviceBuffer
+ *
+ * Unmaps and releases the VMM handle when cuMem is enabled, falls back to
+ * hipFree otherwise.
+ *
+ * @param ptr Device buffer previously returned by allocateDeviceBuffer
+ * @return ncclSuccess on success, otherwise the failing ncclResult_t
+ */
+inline ncclResult_t freeDeviceBuffer(void* ptr)
+{
+    return ncclMemFree(ptr);
 }
 
 // ============================================================================

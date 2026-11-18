@@ -1,0 +1,138 @@
+/*************************************************************************
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
+
+// Fail-loud stub floor for the bootstrap subsystem, satisfying link-time symbol closure for host-only microtests.
+
+#include <cstdint>
+#include <cstdlib>
+#include <functional>
+
+#include "nccl.h"
+#include "bootstrap.h"
+
+#include "fakes/bootstrap_stubs.h"
+#include "fakes/fail_loud.h"
+#include "fakes/signature-drift.h"
+
+bool g_bootstrapNetInitFail = false;
+ncclResult_t bootstrapNetInit() { return g_bootstrapNetInitFail ? ncclSystemError : ncclSuccess; }
+
+// A std::function seam, not a result code: commGetSplitInfo needs a test to write the (color, key) table into allData.
+// Defaults to failure so the bootstrapAllGather call sites no test reaches stay fail-fast.
+std::function<ncclResult_t(void* commState, void* allData, int size)> g_bootstrapAllGather =
+    [](void*, void*, int) { return ncclInternalError; };
+ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
+  return g_bootstrapAllGather(commState, allData, size);
+}
+ASSERT_HOOK_MATCHES_PROD(g_bootstrapAllGather, bootstrapAllGather);
+
+// Fail-loud by default: only a test that scripts the exchange may reach these.
+static ncclResult_t DefaultBootstrapBarrier(void*, int, int, int) {
+  FailLoudUnfaked("bootstrap_stubs", "bootstrapBarrier");
+}
+static ncclResult_t DefaultBootstrapSend(void*, int, int, void*, int) {
+  FailLoudUnfaked("bootstrap_stubs", "bootstrapSend");
+}
+static ncclResult_t DefaultBootstrapRecv(void*, int, int, void*, int) {
+  FailLoudUnfaked("bootstrap_stubs", "bootstrapRecv");
+}
+std::function<ncclResult_t(void*, int, int, int)> g_bootstrapBarrier = DefaultBootstrapBarrier;
+std::function<ncclResult_t(void*, int, int, void*, int)> g_bootstrapSend = DefaultBootstrapSend;
+std::function<ncclResult_t(void*, int, int, void*, int)> g_bootstrapRecv = DefaultBootstrapRecv;
+ASSERT_HOOK_MATCHES_PROD(g_bootstrapBarrier, bootstrapBarrier);
+ASSERT_HOOK_MATCHES_PROD(g_bootstrapSend, bootstrapSend);
+ASSERT_HOOK_MATCHES_PROD(g_bootstrapRecv, bootstrapRecv);
+ncclResult_t bootstrapBarrier(void* commState, int rank, int nRanks, int tag) {
+  return g_bootstrapBarrier(commState, rank, nRanks, tag);
+}
+ncclResult_t bootstrapSend(void* commState, int peer, int tag, void* data, int size) {
+  return g_bootstrapSend(commState, peer, tag, data, size);
+}
+ncclResult_t bootstrapRecv(void* commState, int peer, int tag, void* data, int size) {
+  return g_bootstrapRecv(commState, peer, tag, data, size);
+}
+// Only init.cc:2958 reaches this, to hand the rocSHMEM unique id to the other
+// ranks. Succeeds without touching bcastData; no test reaches it yet.
+ncclResult_t bootstrapBroadcast(void*, int, int, int, void*, int) { return ncclSuccess; }
+
+ncclResult_t bootstrapClose(void* commState) { ::abort(); }
+static ncclResult_t DefaultBootstrapCreateRoot(struct ncclBootstrapHandle*, bool) { ::abort(); }
+std::function<ncclResult_t(struct ncclBootstrapHandle*, bool)> g_bootstrapCreateRoot = DefaultBootstrapCreateRoot;
+ncclResult_t bootstrapCreateRoot(struct ncclBootstrapHandle* handle, bool idFromEnv) {
+  return g_bootstrapCreateRoot(handle, idFromEnv);
+}
+ncclResult_t g_bootstrapGetUniqueIdResult = ncclSuccess;
+ncclResult_t g_bcastGrowHandleResult      = ncclSuccess;
+uint64_t g_bootstrapHandleMagic           = 0xB007ULL;
+int g_bcastGrowHandleCalls                = 0;
+bool g_bcastGrowHandleIsRoot              = false;
+struct ncclBootstrapHandle g_bootstrapHandleTemplate{};
+int g_bootstrapGetUniqueIdCalls           = 0;
+void ResetBootstrapHandleTemplate() { g_bootstrapHandleTemplate = ncclBootstrapHandle{}; }
+
+// Writes the WHOLE handle, not just magic: a caller that memcpy's too few bytes is invisible if addr/nRanks stay 0.
+ncclResult_t bootstrapGetUniqueId(struct ncclBootstrapHandle* handle, struct ncclComm* comm) {
+  ++g_bootstrapGetUniqueIdCalls;
+  if (handle && g_bootstrapGetUniqueIdResult == ncclSuccess) {
+    *handle = g_bootstrapHandleTemplate;
+    handle->magic = g_bootstrapHandleMagic;
+  }
+  return g_bootstrapGetUniqueIdResult;
+}
+
+// A std::function on top of the result code: the grow path validates the magic the coordinator broadcast back.
+ncclResult_t DefaultBcastGrowHandle(struct ncclBootstrapHandle*, struct ncclComm*, bool) {
+  return g_bcastGrowHandleResult;
+}
+std::function<ncclResult_t(struct ncclBootstrapHandle*, struct ncclComm*, bool)> g_bcastGrowHandle =
+    DefaultBcastGrowHandle;
+
+ncclResult_t bcastGrowHandle(struct ncclBootstrapHandle* handle, struct ncclComm* parent, bool isRoot) {
+  ++g_bcastGrowHandleCalls;
+  g_bcastGrowHandleIsRoot = isRoot;
+  return g_bcastGrowHandle(handle, parent, isRoot);
+}
+static ncclResult_t DefaultBootstrapInit(int, void*, struct ncclComm*, struct ncclComm*) { ::abort(); }
+std::function<ncclResult_t(int, void*, struct ncclComm*, struct ncclComm*)> g_bootstrapInit = DefaultBootstrapInit;
+ncclResult_t bootstrapInit(int nHandles, void* handle, struct ncclComm* comm, struct ncclComm* parent) {
+  return g_bootstrapInit(nHandles, handle, comm, parent);
+}
+
+static ncclResult_t DefaultBootstrapIntraNodeBarrier(void*, int*, int, int, int) { return ncclSuccess; }
+std::function<ncclResult_t(void*, int*, int, int, int)> g_bootstrapIntraNodeBarrier =
+    DefaultBootstrapIntraNodeBarrier;
+ncclResult_t bootstrapIntraNodeBarrier(void* commState, int* ranks, int rank, int nranks, int tag) {
+  return g_bootstrapIntraNodeBarrier(commState, ranks, rank, nranks, tag);
+}
+ASSERT_HOOK_MATCHES_PROD(g_bootstrapIntraNodeBarrier, bootstrapIntraNodeBarrier);
+
+static ncclResult_t DefaultBootstrapSplit(uint64_t, struct ncclComm*, struct ncclComm*, int, int, int*) { ::abort(); }
+std::function<ncclResult_t(uint64_t, struct ncclComm*, struct ncclComm*, int, int, int*)> g_bootstrapSplit =
+    DefaultBootstrapSplit;
+ncclResult_t bootstrapSplit(unsigned long commHash, struct ncclComm* comm, struct ncclComm* parent, int color, int key,
+                            int* parentRanks) {
+  return g_bootstrapSplit(commHash, comm, parent, color, key, parentRanks);
+}
+
+void ResetBootstrapStubs() {
+  g_bootstrapInit = DefaultBootstrapInit;
+  g_bootstrapSplit = DefaultBootstrapSplit;
+  g_bootstrapCreateRoot = DefaultBootstrapCreateRoot;
+  g_bootstrapNetInitFail = false;
+  g_bootstrapAllGather = [](void*, void*, int) { return ncclInternalError; };
+  g_bootstrapBarrier = DefaultBootstrapBarrier;
+  g_bootstrapSend = DefaultBootstrapSend;
+  g_bootstrapRecv = DefaultBootstrapRecv;
+  g_bootstrapIntraNodeBarrier = DefaultBootstrapIntraNodeBarrier;
+  g_bootstrapGetUniqueIdResult = ncclSuccess;
+  g_bootstrapGetUniqueIdCalls = 0;
+  g_bcastGrowHandleResult = ncclSuccess;
+  g_bcastGrowHandle = DefaultBcastGrowHandle;
+  g_bcastGrowHandleCalls = 0;
+  g_bcastGrowHandleIsRoot = false;
+  g_bootstrapHandleMagic = 0xB007ULL;
+  ResetBootstrapHandleTemplate();
+}

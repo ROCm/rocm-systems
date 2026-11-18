@@ -501,6 +501,46 @@ void Resource::memTypeToHeap(Pal::GpuMemoryCreateInfo* createInfo) {
 }
 
 // ================================================================================================
+// Vulkan/D3D image interop: an image created on an imported external buffer whose parent retained a
+// shared handle is reopened as a shared image, so PAL reads the real tiling (swizzle) from the
+// surface descriptor instead of assuming Optimal (which lets addrlib pick a mismatching swizzle ->
+// garbage reads). Reopening creates image_ + memRef_ with the correct tiling bound to the shared
+// allocation, then builds the SRD. viewInfo arrives with viewType/possibleLayouts already set.
+bool Resource::CreateImageFromExternalBuffer(Pal::ChNumFormat format, Pal::ChannelMapping channels,
+                                             Pal::ImageViewInfo viewInfo,
+                                             const Pal::SubresRange& subresRange) {
+  Pal::ExternalImageOpenInfo imgOpenInfo = {};
+  imgOpenInfo.resourceInfo.hExternalResource = viewOwner_->sharedHandle();
+  imgOpenInfo.resourceInfo.flags.ntHandle = viewOwner_->sharedNtHandle();
+  imgOpenInfo.swizzledFormat.format = format;
+  imgOpenInfo.swizzledFormat.swizzle = channels;
+  imgOpenInfo.usage.shaderRead = true;
+  imgOpenInfo.usage.shaderWrite = true;
+
+  Pal::ImageCreateInfo sharedImgCreateInfo = {};
+  memRef_ = GpuMemoryReference::Create(dev(), imgOpenInfo, &sharedImgCreateInfo, &image_);
+  if (memRef_ == nullptr) {
+    return false;
+  }
+
+  hwSrd_ = dev().srds().allocSrdSlot(reinterpret_cast<address*>(&hwState_));
+  if (0 == hwSrd_) {
+    return false;
+  }
+  viewInfo.pImage = image_;
+  viewInfo.swizzledFormat.format = format;
+  viewInfo.swizzledFormat.swizzle = channels;
+  viewInfo.subresRange = subresRange;
+  dev().iDev()->CreateImageViewSrds(1, &viewInfo, hwState_);
+
+  hwState_[8] = GetHSAImageFormatType(desc().format_);
+  hwState_[9] = GetHSAImageOrderType(desc().format_);
+  hwState_[10] = static_cast<uint32_t>(desc().width_);
+  hwState_[11] = 0;  // one extra reserved field in the argument
+  return true;
+}
+
+// ================================================================================================
 bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
   Pal::Result result;
   Pal::SubresId ImgSubresId = {0, 0, 0};
@@ -611,6 +651,12 @@ bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
   }
   ImgSubresRange.numMips = desc().mipLevels_;
 
+  // Vulkan/D3D12 image interop imported via an external buffer: reopen as a shared image so PAL uses
+  // the driver's real tiling. See CreateImageFromExternalBuffer.
+  if (memoryType() == ImageExternalBuffer) {
+    return CreateImageFromExternalBuffer(format, channels, viewInfo, ImgSubresRange);
+  }
+
   if ((memoryType() != ImageView) ||
       //! @todo PAL doesn't allow an SRD view creation with different pixel size
       (elementSize() != viewOwner_->elementSize())) {
@@ -629,14 +675,6 @@ bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
 
     if (memoryType() == ImageBuffer) {
       tiling = Pal::ImageTiling::Linear;
-    } else if (memoryType() == ImageExternalBuffer) {
-      // We cannot get tiling info from vulkan/d3d driver now. So assume it to be optimal.
-      // When we get tiling info, we can easily update here
-      tiling = Pal::ImageTiling::Optimal;
-      // Pal will infer row pitch. If rowPitch != 0 and Pal inferred row picth isn't equal to
-      // rowPitch, assert(false) will be called
-      rowPitch = 0;
-      offset_ += params->owner_->getOrigin();
     } else if (memoryType() == ImageView) {
       tiling = viewOwner_->image_->GetImageCreateInfo().tiling;
       // Find the new pitch in pixels for the new format
@@ -822,6 +860,11 @@ bool Resource::CreateInterop(CreateParams* params) {
     mipLevel = d3dRes->mipLevel_;
   }
 #endif
+  // Retain the external handle so an image later created on this imported buffer (ImageExternalBuffer)
+  // can be reopened as a shared image, letting PAL apply the driver's real tiling (swizzle) from the
+  // surface descriptor instead of assuming Optimal (which lets addrlib pick a mismatching swizzle).
+  sharedHandle_ = openInfo.hExternalResource;
+  sharedNtHandle_ = openInfo.flags.ntHandle;
   //! @todo PAL query for image/buffer object doesn't work properly!
 #if 0
   bool    isImage = false;
@@ -850,6 +893,45 @@ bool Resource::CreateInterop(CreateParams* params) {
       if (Pal::Result::Success != dev().iDev()->GetExternalSharedImageSizes(
                                       imgOpenInfo, &imageSize, &gpuMemSize, &imgCreateInfo)) {
         return false;
+      }
+
+      // Per-plane layout as the driver actually laid the surface out. Opening the shared
+      // resource a second time with UndefinedSwizzledFormat makes PAL infer its native planar
+      // format (YV12/NV12/P010) instead of the single-plane view format above, so
+      // GetSubresourceLayout reports each plane's real offset and row pitch.
+      //
+      // This cannot be derived from the allocation size: a chroma plane padded up to the luma
+      // pitch and a canonical half-pitch plane inside a padded allocation give the same total.
+      // Both layouts exist in the wild, so guessing silently reads the wrong plane.
+      bool havePlaneLayout = false;
+      Pal::SubresLayout planeLayout[3] = {};
+      {
+        Pal::ExternalImageOpenInfo nativeOpenInfo = {};
+        nativeOpenInfo.resourceInfo = openInfo;
+        nativeOpenInfo.swizzledFormat = Pal::UndefinedSwizzledFormat;
+        nativeOpenInfo.usage.shaderRead = true;
+
+        Pal::ImageCreateInfo nativeCreateInfo = {};
+        Pal::IImage* nativeImage = nullptr;
+        GpuMemoryReference* nativeMemRef =
+            GpuMemoryReference::Create(dev(), nativeOpenInfo, &nativeCreateInfo, &nativeImage);
+        if ((nativeMemRef != nullptr) && (nativeImage != nullptr)) {
+          havePlaneLayout = true;
+          for (uint32_t plane = 0; plane < 3; ++plane) {
+            Pal::SubresId subres = {};
+            subres.plane = static_cast<Pal::uint8>(plane);
+            if (Pal::Result::Success !=
+                nativeImage->GetSubresourceLayout(subres, &planeLayout[plane])) {
+              // A 2-plane format (NV12/P010) legitimately has no plane 2; only treat a
+              // missing plane 1 as a failure of the whole query.
+              if (plane < 2) havePlaneLayout = false;
+              break;
+            }
+          }
+        }
+        if (nativeMemRef != nullptr) {
+          nativeMemRef->release();
+        }
       }
 
       Pal::gpusize viewOffset = 0;
@@ -894,17 +976,22 @@ bool Resource::CreateInterop(CreateParams* params) {
             case 0:
               break;
             case 1:
-              // Y - plane size to the offset
-              // YV12 format. U is 4 times smaller plane than Y
-              viewOffset = 2 * imgCreateInfo.rowPitch * desc().height_;
-              imgCreateInfo.rowPitch >>= 1;
+            case 2: {
+              if (havePlaneLayout) {
+                viewOffset = planeLayout[layer].offset;
+                imgCreateInfo.rowPitch = planeLayout[layer].rowPitch;
+              } else {
+                // Canonical YV12: chroma is half the luma pitch and half its height.
+                // desc().height_ is already the chroma height, so the luma plane is
+                // 2 * lumaPitch * height_ and each chroma plane is lumaPitch * height_ / 2.
+                const Pal::gpusize lumaPitch = imgCreateInfo.rowPitch;
+                const Pal::gpusize lumaSize = 2 * lumaPitch * desc().height_;
+                const Pal::gpusize chromaPlaneSize = lumaPitch * desc().height_ / 2;
+                viewOffset = lumaSize + ((layer == 2) ? chromaPlaneSize : 0);
+                imgCreateInfo.rowPitch = lumaPitch / 2;
+              }
               break;
-            case 2:
-              // Y + U plane sizes to the offest.
-              // U plane is 4 times smaller than Y and U == V
-              viewOffset = 5 * imgCreateInfo.rowPitch * desc().height_ / 2;
-              imgCreateInfo.rowPitch >>= 1;
-              break;
+            }
             default:
               LogError("Unknown Interop View Type");
               return false;

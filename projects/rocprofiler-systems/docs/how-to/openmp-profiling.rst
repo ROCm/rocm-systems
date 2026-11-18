@@ -94,14 +94,14 @@ Callback APIs, such as OMPT, can be traced using ``rocprof-sys-run`` with the ``
 
        rocprofsys-jacobi-fortran-targetdata-markers-output/<timestamp>/
 
-   By default, a ``.proto`` trace file containing all captured traces from the profiling session is written under this directory.
+   By default, a ``.pftrace`` trace file containing all captured traces from the profiling session is written under this directory.
 
 For more information about presets, see :doc:`Using preset profiles <using-preset-profiles>`.
 
 Understanding the proto file output
 -----------------------------------------------
 
-To view the generated ``.proto`` file in a browser, open the `Perfetto UI page <https://ui.perfetto.dev/>`_. Then, click on ``Open trace file`` and select the ``.proto`` file.
+To view the generated ``.pftrace`` file in a browser, open the `Perfetto UI page <https://ui.perfetto.dev/>`_. Then, click on ``Open trace file`` and select the ``.pftrace`` file.
 The output trace should resemble the following image:
 
 .. image:: ../data/openmp-profiling/perfetto-jacobi-initial-view.png
@@ -209,7 +209,7 @@ Instrumenting the application with rocprof-sys-instrument
 The application can be instrumented with ``rocprof-sys-instrument`` to also capture user-defined functions alongside the OMPT events. Expand for step-by-step instructions:
 
 .. dropdown:: Optional: Steps for instrumenting the application with rocprof-sys-instrument
-    
+
     1. Instrument the application to generate an instrumented binary, ``jacobi.inst``:
 
     .. code-block:: shell
@@ -228,7 +228,7 @@ The application can be instrumented with ``rocprof-sys-instrument`` to also capt
 
         rocprofsys-jacobi-inst-output/<timestamp>/
 
-    A ``.proto`` trace file is written under this directory, and can be viewed using the same method described in the previous section.
+    A ``.pftrace`` trace file is written under this directory, and can be viewed using the same method described in the previous section.
     Compared to the trace from the preset-only run, the instrumented trace additionally surfaces user-defined functions in the ``jacobi-fortran-targetdata-markers`` track,
     allowing application-level call paths to be correlated with OMPT and GPU activity.
 
@@ -237,7 +237,7 @@ The application can be instrumented with ``rocprof-sys-instrument`` to also capt
         With ``rocprof-sys-instrument``, data on user-defined functions can be gathered. However, default values on certain settings
         may prevent the expected function from being instrumented. For details, see :ref:`selective-instrumentation` section under the :doc:`Instrumenting and rewriting a binary application <instrumenting-rewriting-binary-application>` guide.
 
-For more details on ``rocprof-sys-instrument`` and the data it gathers, see :doc:`data collection modes <../conceptual/data-collection-modes>`. 
+For more details on ``rocprof-sys-instrument`` and the data it gathers, see :doc:`data collection modes <../conceptual/data-collection-modes>`.
 
 .. _openmp-env-var-config:
 
@@ -252,7 +252,7 @@ versions, use the equivalent environment variables. The environment variables pr
     .. code-block:: shell
 
         export ROCPROFSYS_USE_OMPT=true  # enable OMPT callback capture
-        export ROCPROFSYS_TRACE=true     # enable the Perfetto tracing backend (produces the .proto trace)
+        export ROCPROFSYS_TRACE=true     # enable the Perfetto tracing backend (produces the .pftrace trace)
         export ROCPROFSYS_PROFILE=false  # disable the timemory profiling backend (statistical text/JSON summaries)
         export ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,marker_api,memory_copy  # ROCm API domains to trace
 

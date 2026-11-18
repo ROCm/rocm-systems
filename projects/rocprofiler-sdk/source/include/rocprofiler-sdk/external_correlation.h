@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -75,6 +75,7 @@ typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_external_correlation_id_re
     ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MARKER_CORE_RANGE_API,  ///<
     ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_ROCSHMEM_API,           ///<
     ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HIPFILE_API,            ///<
+    ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HIP_EVENT,              ///<
     ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_LAST,
 } rocprofiler_external_correlation_id_request_kind_t;
 

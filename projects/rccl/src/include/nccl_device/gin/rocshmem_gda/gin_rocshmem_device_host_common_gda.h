@@ -9,11 +9,9 @@
 
 #include <stdint.h>
 
-#define NCCL_GIN_ROCSHMEM_VERSION 100
+#include "gda/queue_pair_provider.hpp"
 
-namespace rocshmem {
-class QueuePair;
-}
+#define NCCL_GIN_ROCSHMEM_VERSION 100
 
 struct ncclGinRocshmemGdaGPUContext {
   rocshmem::QueuePair** qps;        // Array of nRanks QP pointers (GPU-accessible)

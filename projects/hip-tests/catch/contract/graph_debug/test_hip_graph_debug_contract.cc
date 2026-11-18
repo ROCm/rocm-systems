@@ -12,18 +12,17 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <hip_test_temp_path.hh>
 #include <contract_cleanup.hh>
 
 namespace {
 constexpr size_t kByteCount = 64;
 
-// Builds a unique temporary file path for the exported dot graph so concurrent
-// test binaries do not collide on a shared filename.
-std::string UniqueDotPath() {
+// Temp dir: an installed test tree may be read-only.
+std::string DotPath() {
   int device = 0;
   HIP_CHECK(hipGetDevice(&device));
-  return std::string("hip_contract_graph_debug_") + std::to_string(device) + "_" +
-         std::to_string(static_cast<long long>(reinterpret_cast<intptr_t>(&device))) + ".dot";
+  return hip_test::TempPath("hip_contract_graph_debug_" + std::to_string(device), ".dot");
 }
 
 hipMemsetParams MakeByteMemsetParams(void* device_ptr, unsigned int value) {
@@ -61,8 +60,7 @@ HIP_TEST_CASE(Contract_GraphDebug_HipGraphDebugDotPrint_Default_WritesNonEmptyFi
   hipMemsetParams memset_params = MakeByteMemsetParams(device_ptr, 0x5A);
   HIP_CHECK(hipGraphAddMemsetNode(&node, graph, nullptr, 0, &memset_params));
 
-  const std::string path = UniqueDotPath();
-  std::remove(path.c_str());
+  const std::string path = DotPath();
 
   // Exporting a non-empty graph to a dot file must succeed (or report the
   // feature unsupported) and, on success, produce a non-empty file on disk.
@@ -87,8 +85,7 @@ HIP_TEST_CASE(Contract_GraphDebug_HipGraphDebugDotPrint_Default_VerboseFlagIsAcc
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
   HIP_CHECK(hipGraphAddEmptyNode(&node, graph, nullptr, 0));
 
-  const std::string path = UniqueDotPath();
-  std::remove(path.c_str());
+  const std::string path = DotPath();
 
   // The verbose flag augments the output but must not change the success
   // contract: a valid graph still exports to a non-empty file.

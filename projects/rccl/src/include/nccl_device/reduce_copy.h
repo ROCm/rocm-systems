@@ -13,7 +13,7 @@
 // Forward declarations for public API functions
 // Implementations are in impl/reduce_copy__funcs.h
 
-#if NCCL_CHECK_CUDACC
+#ifdef __CUDACC__
 // SERIES 1.x - Generic ReduceCopy with RedOp (LSA sources only)
 template <typename T, typename Coop, typename SrcLambda, typename DstLambda, typename RedOp, typename IntCount,
           int UNROLL = 4 * 16 / sizeof(T)>
@@ -96,6 +96,29 @@ NCCL_DEVICE_INLINE void ncclLsaCopy(Coop, T*, ncclWindow_t, size_t, IntCount, nc
 template <typename T, typename Coop, typename IntCount, int UNROLL = 4 * 16 / sizeof(T)>
 NCCL_DEVICE_INLINE void ncclLsaCopy(Coop, T*, ncclWindow_t, size_t, IntCount, ncclDevComm_t);
 
+// TMA Copy/Broadcast (1->N), sm100+ only
+// Each form takes the staging buffer pointer followed by its capacity in bytes.
+// Coop is Thread, Warp, or CTA.
+// 4.1T] LSA TMA Copy (lambda-based)
+template <typename T, typename Coop, typename DstLambda, typename IntCount>
+NCCL_DEVICE_INLINE void ncclLsaCopyTma(Coop, T*, DstLambda, int, IntCount, char*, int);
+
+// 4.2Ta] LSA TMA Copy (with ncclSymPtr + team)
+template <typename T, typename Coop, typename IntCount>
+NCCL_DEVICE_INLINE void ncclLsaCopyTma(Coop, T*, ncclSymPtr<T>, IntCount, ncclTeam, char*, int);
+
+// 4.2Tb] LSA TMA Copy (with ncclSymPtr + devComm)
+template <typename T, typename Coop, typename IntCount>
+NCCL_DEVICE_INLINE void ncclLsaCopyTma(Coop, T*, ncclSymPtr<T>, IntCount, ncclDevComm_t, char*, int);
+
+// 4.2Tc] LSA TMA Copy (with window + offset + team)
+template <typename T, typename Coop, typename IntCount>
+NCCL_DEVICE_INLINE void ncclLsaCopyTma(Coop, T*, ncclWindow_t, size_t, IntCount, ncclTeam, char*, int);
+
+// 4.2Td] LSA TMA Copy (with window + offset + devComm)
+template <typename T, typename Coop, typename IntCount>
+NCCL_DEVICE_INLINE void ncclLsaCopyTma(Coop, T*, ncclWindow_t, size_t, IntCount, ncclDevComm_t, char*, int);
+
 // 4.3a] Multimem Copy (with ncclSymPtr)
 template <typename T, typename Coop, typename IntCount, int UNROLL = 4 * 16 / sizeof(T)>
 NCCL_DEVICE_INLINE void ncclMultimemCopy(Coop, T*, ncclSymPtr<T>, IntCount, ncclMultimemHandle);
@@ -174,6 +197,6 @@ NCCL_DEVICE_INLINE void ncclMultimemReduceSumLsaCopy(Coop, T*, ncclSymPtr<T>, nc
 template <typename T, typename Coop, typename IntCount, int UNROLL = 4 * 16 / sizeof(T)>
 NCCL_DEVICE_INLINE void ncclLocalReduceSumCopy(Coop, int, T*, size_t, int, T*, size_t, IntCount);
 
-#endif // NCCL_CHECK_CUDACC
+#endif // __CUDACC__
 
 #endif // _NCCL_DEVICE_REDUCE_COPY_H_

@@ -1,4 +1,5 @@
-#pragma once
+#ifndef _NCCL_DEVICE_RCCL_PTR_H_
+#define _NCCL_DEVICE_RCCL_PTR_H_
 
 /*
 Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
@@ -36,7 +37,7 @@ using u16_gptr = __attribute__((address_space(1))) uint16_t*;
 using u8_gptr = __attribute__((address_space(1))) uint8_t*;
 
 #ifdef __HIP_DEVICE_COMPILE__
-#if (defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)) && \
+#if (defined(__gfx942__) || defined(__gfx950__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))) && \
   __has_builtin(__builtin_amdgcn_global_load_b128) && __has_builtin(__builtin_amdgcn_global_store_b128) && \
   !defined(DWORDX4_INTRINSICS_FORCE_OFF)
 #define RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS 1
@@ -49,9 +50,59 @@ using u8_gptr = __attribute__((address_space(1))) uint8_t*;
 #define RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS 0
 #endif
 
+// skip_fence for Simple post-send. Without the builtins, only an
+// unregistered collective (registeredOrP2p == false) may use the cheap fence.
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#define RCCL_USE_CHEAP_POST_SEND_FENCE(cheapOff, registeredOrP2p) (!(cheapOff))
+#else
+#define RCCL_USE_CHEAP_POST_SEND_FENCE(cheapOff, registeredOrP2p) (!(cheapOff) && !(registeredOrP2p))
+#endif
+
+// Point-to-point has no collective work. Registered IPC/NVLS (regUsed) and
+// network (netRegUsed) buffers are cacheable, so both keep the full fence
+// when the builtins are absent. prims_simple.h passes ncclDevWorkColl*.
+template <typename CollWork>
+__host__ __device__ inline bool rcclSimplePostSendRegisteredOrP2p(const CollWork* collWork) {
+  return collWork == nullptr || collWork->regUsed || collWork->netRegUsed;
+}
+
+#ifdef __HIP_DEVICE_COMPILE__
+#if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && \
+  __has_builtin(__builtin_amdgcn_cooperative_atomic_load_8x16B) && \
+  __has_builtin(__builtin_amdgcn_cooperative_atomic_store_8x16B) && \
+  !defined(COOPERATIVE_ATOMIC_INTRINSICS_FORCE_OFF)
+#define RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS 1
+// #pragma message "RCCL Cooperative Atomic Builtins Enabled on GFX1250"
+#else
+#define RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS 0
+// #pragma message "RCCL Cooperative Atomic Builtins Disabled"
+#endif
+#else
+#define RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS 0
+#endif
+
 typedef __attribute__((__vector_size__(4 * sizeof(unsigned int)))) unsigned int v4u;
 typedef __attribute__((address_space(1))) v4u* v4u_gptr;
+
+typedef __attribute__((__vector_size__(4 * sizeof(int)))) int v4i;
+typedef __attribute__((address_space(1))) v4i* v4i_gptr;
 
 // "" means system scope, "agent" means device.  Adding this here because I don't think it's obvious otherwise that
 // "" means system scope.
 #define RCCL_SYSTEM_SYNCSCOPE ""
+
+// Observed on gfx1250: sibling DPX P2P into a cacheable comm FIFO is not
+// coherent under plain/nontemporal load or store. Default hipMalloc and
+// cuMem/VMM hung; uncached (hipDeviceMallocUncached) did not. System-scope
+// b128 load *and* store both observe the peer. Restricted to gfx1250, the
+// only arch measured. Following up with HIP/compilers.
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && (defined(__gfx1250__) || defined(__gfx1250_strict__))
+#define RCCL_LL_FIFO_SYS_SCOPE 1
+#else
+#define RCCL_LL_FIFO_SYS_SCOPE 0
+#endif
+// Deprecated alias for RCCL_LL_FIFO_SYS_SCOPE; kept for source-level backward
+// compatibility with out-of-tree users of this installed header.
+#define RCCL_LL_FIFO_SYS_SCOPE_LOAD RCCL_LL_FIFO_SYS_SCOPE
+
+#endif // _NCCL_DEVICE_RCCL_PTR_H_

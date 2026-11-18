@@ -36,6 +36,7 @@
 #endif
 #include <stdint.h>
 #include <limits.h>
+#include <vector>
 #include "hsakmt/hsakmt.h"
 #if defined(__linux__)
 #include "hsakmt/hsakmt_drm.h"
@@ -70,8 +71,7 @@ struct hsakmtRuntime {
     system_heap_space_start_(0),
     system_heap_space_size_(0),
     handle_aperture_start_(0),
-    handle_aperture_size_(0),
-    default_node(1) {}
+    handle_aperture_size_(0) {}
 
   void HeapInit();
   void HeapFini();
@@ -113,7 +113,8 @@ struct hsakmtRuntime {
   unsigned long dxg_open_count;
 
   size_t max_single_alloc_size;
-  uint32_t default_node;
+  /* GPU HSA nodes used when the caller does not name a node. */
+  std::vector<uint32_t> default_node;
   D3DKMT_DRIVERVERSION wddm_version = static_cast<D3DKMT_DRIVERVERSION>(0);
 
   /* local heap means bo's backend is vram of all GPUs */
@@ -142,6 +143,7 @@ struct hsakmtRuntime {
       uint64_t enable_thunk_sub_allocator : 1;
       uint64_t is_svm_api_supported : 1;
       uint64_t disable_wait_timeout_ : 1;
+      uint64_t sdma_gpu_poll_ : 1;
     };
     uint64_t settings_bits_ = 0;
   };
@@ -255,6 +257,10 @@ uint32_t get_direct_link_cpu(uint32_t gpu_node);
 HSAKMT_STATUS topology_sysfs_get_system_props(HsaSystemProperties& props);
 HSAKMT_STATUS topology_get_node_props(HSAuint32 NodeId,
 				      HsaNodeProperties *NodeProperties);
+void topology_clear_snapshot_refs(void);
+void topology_abandon_after_fork(void);
+bool topology_snapshot_is_live(void);
+void topology_drop_snapshot_at_last_close(void);
 HSAKMT_STATUS topology_get_iolink_props(HSAuint32 NodeId,
 					HSAuint32 NumIoLinks,
 					HsaIoLinkProperties *IoLinkProperties);
@@ -300,7 +306,8 @@ uint32_t get_vgpr_size_per_cu(HSA_ENGINE_ID id);
 
 bool is_ipc_sysmemfd(uint64_t fd);
 
-HSAKMT_STATUS import_dmabuf_fd(uint64_t DMABufFd, uint32_t NodeId, bool alloc_va, bool is_ipc_memfd,
+HSAKMT_STATUS import_dmabuf_fd(uint64_t DMABufFd, HSAuint64 NumberOfNodes, HSAuint32* NodeArray,
+                               bool alloc_va, bool is_ipc_memfd,
                                wsl::thunk::GpuMemoryHandle* GpuMemHandle, bool is_kmt_handle,
                                uint64_t size_hint = 0);
 

@@ -20,9 +20,7 @@ Panel Config:
         L1I-L2 Bandwidth Utilization:
           value: 100000 * SUM(SQC_TC_INST_REQ) / (2 * SUM($max_sclk * $sqc_per_gpu * (End_Timestamp - Start_Timestamp)))
           unit: Percent
-      comparable: false
       cli_style: simple_bar
-      tui_style: simple_bar
   - metric_table:
       id: 1302
       title: L1I cache accesses

@@ -14,16 +14,14 @@
 
 #include "logger/debug.hpp"
 
-#include <spdlog/fmt/ranges.h>
+#include <fmt/ranges.h>
 
 #include <cstddef>
 #include <cstdlib>
 #include <tuple>
 #include <unistd.h>
 
-namespace rocprofsys
-{
-namespace component
+namespace rocprofsys::component
 {
 void
 exit_gotcha::configure()
@@ -72,7 +70,9 @@ invoke_exit_gotcha(const exit_gotcha::gotcha_data& _data, FuncT _func, Args... _
 void
 exit_gotcha::operator()(const gotcha_data& _data, exit_func_t _func, int _ec) const
 {
-    _exit_info = { true, _data.tool_id.find("quick") != std::string::npos, _ec };
+    _exit_info = { .is_known  = true,
+                   .is_quick  = _data.tool_id.find("quick") != std::string::npos,
+                   .exit_code = _ec };
     invoke_exit_gotcha(_data, _func, _ec);
 }
 
@@ -80,7 +80,7 @@ exit_gotcha::operator()(const gotcha_data& _data, exit_func_t _func, int _ec) co
 void
 exit_gotcha::operator()(const gotcha_data& _data, abort_func_t _func) const
 {
-    _exit_info = { true, false, SIGABRT };
+    _exit_info = { .is_known = true, .is_quick = false, .exit_code = SIGABRT };
     invoke_exit_gotcha(_data, _func);
 }
 
@@ -89,5 +89,4 @@ exit_gotcha::get_exit_info()
 {
     return _exit_info;
 }
-}  // namespace component
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component

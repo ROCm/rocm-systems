@@ -1,25 +1,14 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """System initialization and shutdown functional tests."""
 
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
 import unittest
 
 import common.common as common
@@ -51,3 +40,41 @@ class TestAmdSmiInit(unittest.TestCase):
             self.common.print(msg, e)
             raise e
         return
+
+    def test_init_with_another_library_copy_loaded_global(self):
+        # rocm_sdk preloads libamd_smi RTLD_GLOBAL for PyTorch; a second copy
+        # must not take over this library's internal calls (#7643).
+        self.common.print("## test_init_with_another_library_copy_loaded_global()")
+        probe = (
+            "import ctypes, os, sys\n"
+            "if len(sys.argv) > 1:\n"
+            "    ctypes.CDLL(sys.argv[1], mode=ctypes.RTLD_GLOBAL)\n"
+            "import amdsmi\n"
+            "amdsmi.amdsmi_init()\n"
+            "print(len(amdsmi.amdsmi_get_processor_handles()))\n"
+            "libs = [l.split()[-1] for l in open('/proc/self/maps') if '.so' in l]\n"
+            "print([p for p in libs if '/libamd_smi' in p][0])\n"
+            "print(':'.join(sorted({os.path.dirname(p) for p in libs if p.startswith('/')})))\n"
+            "amdsmi.amdsmi_shut_down()\n"
+        )
+        env = dict(os.environ, PYTHONPATH=os.pathsep.join(p for p in sys.path if p))
+
+        def run(*args):
+            out = subprocess.run(
+                [sys.executable, "-c", probe, *args], env=env, capture_output=True, text=True
+            )
+            self.assertEqual(out.returncode, 0, out.stderr)
+            return out.stdout.split()[:3]
+
+        expected, lib, lib_dirs = run()
+        if int(expected) == 0:
+            self.skipTest("no GPUs enumerated")
+        # The copy loses the original's $ORIGIN RPATH, so point the loader at
+        # the directories its dependencies were found in.
+        env["LD_LIBRARY_PATH"] = os.pathsep.join(
+            d for d in (lib_dirs, os.environ.get("LD_LIBRARY_PATH")) if d
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            other = os.path.join(tmp, os.path.basename(lib))
+            shutil.copy(lib, other)
+            self.assertEqual(run(other)[0], expected)

@@ -23,6 +23,10 @@
 
 #include "util/perf_timer.h"
 
+#if defined(__powerpc__)
+#include <sys/platform/ppc.h>
+#endif
+
 PerfTimer::PerfTimer() { freq_in_100mhz_ = MeasureTSCFreqHz(); }
 
 PerfTimer::~PerfTimer() {
@@ -158,6 +162,7 @@ uint64_t PerfTimer::CoarseTimestampUs() {
 }
 
 uint64_t PerfTimer::MeasureTSCFreqHz() {
+#if defined(__x86_64__) || defined(_M_X64)
   // Make a coarse interval measurement of TSC ticks for 1 gigacycles.
   unsigned int unused;
   uint64_t tscTicksEnd;
@@ -174,4 +179,17 @@ uint64_t PerfTimer::MeasureTSCFreqHz() {
   uint64_t coarseIntervalNs = (coarseEndUs - coarseBeginUs) * 1000;
   uint64_t tscIntervalTicks = tscTicksEnd - tscTicksBegin;
   return (tscIntervalTicks * 10 + (coarseIntervalNs / 2)) / coarseIntervalNs;
+#elif defined(__powerpc__)
+  return (__ppc_get_timebase_freq() + 50000000) / 100000000;
+#else
+  // RISC-V and other Linux targets do not expose an x86-style TSC. The
+  // generic timer path uses wall-clock units, so return the corresponding
+  // 100 MHz scaling factor without probing an architecture-specific counter.
+  std::cerr
+      << "Warning: PerfTimer::MeasureTSCFreqHz(): "
+         "architecture-specific timer calibration is unavailable; "
+         "the generic wall-clock path does not require it."
+      << std::endl;
+  return 10;
+#endif
 }

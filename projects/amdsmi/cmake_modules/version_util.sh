@@ -1,4 +1,6 @@
 #!/bin/bash
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 # Handle commandline args
 while [ "$1" != "" ]; do

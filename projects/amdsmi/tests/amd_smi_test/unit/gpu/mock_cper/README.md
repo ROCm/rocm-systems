@@ -29,7 +29,10 @@ Scrubbed:
   a second record when the fixtures are concatenated.
 
 The read path under test only counts records and filters by severity, so the
-zeroed body does not affect the tests. The `serial_number` was already `N/A` and
+zeroed body does not affect the tests. The AFID decode test uses
+`cper_fatal.cper` for its real 0xB0-byte fatal crashdump section and writes a
+known register set back into the zeroed body before decoding. The
+`serial_number` was already `N/A` and
 the FRU id already a generic `OAM0` in the captures.
 
 ## Files

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -49,6 +49,7 @@
 
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -190,13 +191,14 @@ struct metadata
     // Loads only selected counters into metadata to reduce JSON size. Used by the 'rocprofv3' tool.
     void init(inprocess_with_counters&&);
 
-    const agent_info*                   get_agent(rocprofiler_agent_id_t _val) const;
-    const code_object_info*             get_code_object(uint64_t code_obj_id) const;
-    const kernel_symbol_info*           get_kernel_symbol(uint64_t kernel_id) const;
-    const host_function_info*           get_host_function(uint64_t host_function_id) const;
-    const tool_counter_info*            get_counter_info(uint64_t instance_id) const;
-    const tool_counter_info*            get_counter_info(rocprofiler_counter_id_t id) const;
-    const counter_dimension_info_vec_t* get_counter_dimension_info(uint64_t instance_id) const;
+    const agent_info*                     get_agent(rocprofiler_agent_id_t _val) const;
+    const code_object_info*               get_code_object(uint64_t code_obj_id) const;
+    std::optional<rocprofiler_agent_id_t> get_code_object_agent(uint64_t code_obj_id) const;
+    const kernel_symbol_info*             get_kernel_symbol(uint64_t kernel_id) const;
+    const host_function_info*             get_host_function(uint64_t host_function_id) const;
+    const tool_counter_info*              get_counter_info(uint64_t instance_id) const;
+    const tool_counter_info*              get_counter_info(rocprofiler_counter_id_t id) const;
+    const counter_dimension_info_vec_t*   get_counter_dimension_info(uint64_t instance_id) const;
 
     std::vector<std::string> get_att_filenames() const;
     code_object_data_vec_t   get_code_objects() const;
@@ -212,8 +214,9 @@ struct metadata
     std::string_view get_instruction(int64_t index) const { return instruction_decoder.at(index); }
     std::string_view get_comment(int64_t index) const { return instruction_comment.at(index); }
     int64_t          get_instruction_index(rocprofiler_pc_t record);
-    void             add_decoder(rocprofiler_code_object_info_t* obj_data_v);
+    void add_decoder(rocprofiler_code_object_info_t* obj_data_v, bool capture_content_hash);
     code_object_load_info_vec_t get_code_object_load_info() const;
+    std::optional<std::string>  get_code_object_content_hash(uint64_t code_obj_id) const;
 
     string_index_map_t get_string_entries() const;
 
@@ -255,6 +258,8 @@ private:
     std::vector<std::string> instruction_decoder = {};
     std::vector<std::string> instruction_comment = {};
     std::map<inst_t, size_t> indexes             = {};
+
+    synced_map<std::unordered_map<uint64_t, std::string>> code_object_content_hashes = {};
 };
 
 template <typename Tp>
@@ -276,5 +281,10 @@ create_agent_index(const agent_indexing   index,
                    uint32_t               agent_log_index,
                    uint32_t               agent_type_index,
                    const std::string_view agent_type);
+
+// Identity of a code object's bytes ("fnv1a64:<hex>"). Recorded when ROCpd PC sampling decodes a
+// code object and compared by rocpd before it decodes the same object again from disk.
+std::string
+compute_code_object_content_hash(const char* data, size_t size);
 }  // namespace tool
 }  // namespace rocprofiler

@@ -61,5 +61,8 @@ hipFileError_t hipFileGetParameterString(hipFileStringConfigParameter_t param, c
 hipFileError_t hipFileSetParameterSizeT(hipFileSizeTConfigParameter_t param, size_t value);
 hipFileError_t hipFileSetParameterBool(hipFileBoolConfigParameter_t param, bool value);
 hipFileError_t hipFileSetParameterString(hipFileStringConfigParameter_t param, const char *desc_str);
+hipFileError_t hipFileGetStatsL1(hipFileStatsLevel1_t *stats);
+hipFileError_t hipFileGetStatsL2(hipFileStatsLevel2_t *stats);
+hipFileError_t hipFileGetStatsL3(hipFileStatsLevel3_t *stats);
 
 } // namespace hipFile

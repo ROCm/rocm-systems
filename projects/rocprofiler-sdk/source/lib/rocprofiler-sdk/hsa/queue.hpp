@@ -135,11 +135,16 @@ public:
           hsa_queue_t**      queue);
 
     // Used when creating a Queue from a previously created intercept queue.
+    //
+    // A non-participant is a Queue the profiling machinery does not manage. It submits no
+    // profiler-enable packet into the ring, is never registered with the serializer, and
+    // owns its ready_signal. Not counter-capable.
     Queue(const AgentCache&       agent,
           CoreApiTable            core_api,
           AmdExtTable             ext_api,
           hsa_queue_t*            queue,
-          set_write_interceptor_t set_write_interceptor);
+          set_write_interceptor_t set_write_interceptor,
+          bool                    profiling_participant = true);
     virtual ~Queue();
 
     const hsa_queue_t*        intercept_queue() const { return _intercept_queue; };
@@ -171,7 +176,12 @@ public:
         return _core_api.hsa_signal_load_scacquire_fn(_active_kernels);
     }
 
-    void sync() const;
+    // Block up to one ~5s slice for in-flight async completion handlers to finish. Returns true if
+    // the queue drained (zero active kernels), false if the slice elapsed first. HSA's signal wait
+    // does not wake spuriously, so false is a real per-slice timeout rather than an early return.
+    // Teardown callers treat false as warn-and-proceed. Callers needing a guaranteed drain loop
+    // until true (e.g., see @replay_drain_or_fatal).
+    bool sync() const;
 
     void register_callback(ClientID id, queue_callbacks_t callbacks);
     void remove_callback(ClientID id);
@@ -201,6 +211,7 @@ private:
     queue_state                          _state           = queue_state::normal;
     std::mutex                           _lock_queue      = {};
     hsa_signal_t                         _active_kernels  = {.handle = 0};
+    bool                                 _tracked_queue   = true;
 };
 
 inline rocprofiler_queue_id_t

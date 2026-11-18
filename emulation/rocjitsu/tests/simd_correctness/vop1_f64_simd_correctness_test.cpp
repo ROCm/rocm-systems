@@ -19,10 +19,12 @@
 /// inputs, so both runs skip the same lanes. v_mov_b64 is a pure bit copy and is
 /// compared exactly (no NaN carve-out).
 
+#include "compute_unit_test_util.h"
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -81,7 +83,8 @@ const std::array<F64UnaryCase, 10> kCases = {{
     {"v_floor_f64", 26, true},
     {"v_trunc_f64", 23, true},
     {"v_rndne_f64", 25, true},
-    {"v_fract_f64", 50, true},
+    // fract: raw-bit result, NaNs included, so exact compare (is_float=false).
+    {"v_fract_f64", 50, false},
     {"v_rcp_f64", 37, true},
     {"v_rsq_f64", 38, true},
     {"v_sqrt_f64", 40, true},
@@ -110,7 +113,9 @@ struct Fixture {
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_vop1_f64_simd", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_vop1_f64_simd", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
     decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -137,7 +142,7 @@ struct Fixture {
 
   std::array<uint64_t, WF_SIZE> run(Instruction *inst, uint64_t exec) {
     seed_inputs(exec);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint64_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
@@ -160,12 +165,14 @@ void check_case(const F64UnaryCase &c, uint64_t exec) {
   auto run_mode = [&](bool force_scalar) -> std::array<uint64_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     // src0 = v0:v1 (enc 256), vdst = v2:v3.
     uint32_t enc = vop1_encode(c.opcode, /*vdst=*/2, /*src0=*/256);
     uint32_t words[4] = {enc, 0u, 0u, 0u};
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
     auto out = fx.run(inst, exec);
     delete inst;

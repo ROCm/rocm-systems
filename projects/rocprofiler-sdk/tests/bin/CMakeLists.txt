@@ -1,7 +1,7 @@
 #
 # Integration test applications
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(rocprofiler-sdk-tests-bin LANGUAGES C CXX)
 
@@ -33,7 +33,9 @@ endif()
 add_subdirectory(reproducible-runtime)
 add_subdirectory(reproducible-dispatch-count)
 add_subdirectory(transpose)
+add_subdirectory(hip-memcpy)
 add_subdirectory(openmp)
+add_subdirectory(signal-handler)
 
 set(CMAKE_BUILD_RPATH "\$ORIGIN:\$ORIGIN/../lib")
 
@@ -44,11 +46,15 @@ add_subdirectory(vector-operations)
 add_subdirectory(hip-in-libraries)
 add_subdirectory(scratch-memory)
 add_subdirectory(hsa-queue-dependency)
+add_subdirectory(sdma-copy)
 add_subdirectory(hip-graph)
+add_subdirectory(hip-graph-forkjoin)
 add_subdirectory(hip-graph-attribution)
 add_subdirectory(roctx-pause-resume)
+add_subdirectory(roctx-attach-pause-resume)
 add_subdirectory(att-marker-trace)
 add_subdirectory(hsa-memory-allocation)
+add_subdirectory(hsa-async-copy-time)
 add_subdirectory(pc-sampling)
 if(rocdecode_FOUND AND rocdecode_VERSION VERSION_GREATER 0.8.0)
     add_subdirectory(rocdecode)
@@ -58,9 +64,7 @@ if(rocjpeg_FOUND AND rocjpeg_VERSION VERSION_GREATER 0.6.0)
 endif()
 if(rocshmem_FOUND AND rocshmem_VERSION VERSION_GREATER_EQUAL 3.3.0)
     # rocshmem >= 3.3.0 introduced the full host-stream API set that rocshmem-demo
-    # exercises (quiet/sync_all/alltoallmem/broadcastmem/getmem/putmem/putmem_signal/
-    # signal_wait_until on_stream). Skip the subdir on older installs so the build does
-    # not break.
+    # exercises. Skip the subdir on older installs so the build does not break.
     add_subdirectory(rocshmem)
 endif()
 add_subdirectory(hipfile)
@@ -68,10 +72,13 @@ add_subdirectory(hsa-code-object)
 add_subdirectory(hip-streams)
 add_subdirectory(hip-stream-reuse)
 add_subdirectory(hip-streams-per-thread)
+add_subdirectory(peer-memcpy)
 add_subdirectory(attachment-test)
 add_subdirectory(hip-host)
 add_subdirectory(module-loading-test)
 add_subdirectory(late-start-tracing)
 add_subdirectory(thread-trace)
+add_subdirectory(hip-events)
 add_subdirectory(hip-graph-bubbles)
 add_subdirectory(rocpd-api-test)
+add_subdirectory(kernel-replay)

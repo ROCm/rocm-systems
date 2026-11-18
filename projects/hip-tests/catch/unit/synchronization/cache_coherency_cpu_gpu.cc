@@ -18,10 +18,9 @@ __device__ int gpu_spin_loop_or_abort_on_negative_one(unsigned int* address, uns
   bool check = false;
   do {
     compare = value;
-    check =
-        __hip_atomic_compare_exchange_strong(address, /*expected=*/&compare,
-                                             /*desired=*/value, __ATOMIC_ACQUIRE, __ATOMIC_ACQUIRE,
-                                             /*scope=*/__HIP_MEMORY_SCOPE_SYSTEM);
+    check = __scoped_atomic_compare_exchange_n(address, /*expected=*/&compare, /*desired=*/value,
+                                               /*weak=*/0, __ATOMIC_ACQUIRE, __ATOMIC_ACQUIRE,
+                                               /*scope=*/__MEMORY_SCOPE_SYSTEM);
     if (compare == -1) return -1;
   } while (!check);
   return 0;
@@ -35,7 +34,7 @@ __global__ void gpu_kernel(int* A, int* B, int* X, int* Y, size_t N, unsigned in
     // Store data into A, system fence, and atomically mark flag.
     // This guarantees this global write is visible by device 1.
     A[i] = X[i];
-    __hip_atomic_fetch_add(AA1, 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+    __scoped_atomic_fetch_add(AA1, 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_SYSTEM);
     // Wait on device 1's global write to B.
     if (gpu_spin_loop_or_abort_on_negative_one(BA1, i + 1) == -1) {
       *dresult = -1;
@@ -47,11 +46,11 @@ __global__ void gpu_kernel(int* A, int* B, int* X, int* Y, size_t N, unsigned in
     if (!stored_data_matches) {
       // If the data does not match, alert other thread and abort.
       printf("FAIL: at i=%zu, B[i]=%d, which does not match Y[i]=%d.\n", i, B[i], Y[i]);
-      __hip_atomic_exchange(AA2, -1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+      __scoped_atomic_exchange_n(AA2, -1, __ATOMIC_RELEASE, __MEMORY_SCOPE_SYSTEM);
       *dresult = -1;
     }
     // Otherwise tell the other thread to continue.
-    __hip_atomic_fetch_add(AA2, 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+    __scoped_atomic_fetch_add(AA2, 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_SYSTEM);
     // Wait on kernel gpu_cache1 to finish checking X is stored in A.
     if (gpu_spin_loop_or_abort_on_negative_one(BA2, i + 1) == -1) {
       *dresult = -1;

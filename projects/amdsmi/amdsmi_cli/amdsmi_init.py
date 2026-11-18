@@ -1,23 +1,6 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 ### Handle safe initialization for amdsmi
 
@@ -29,6 +12,8 @@ import sys
 import threading
 from pathlib import Path
 
+from amdsmi_cli_exceptions import AmdSmiExitCode
+
 # CLI module resolution order (distinct from `import amdsmi` in a user script):
 #   1. this installation's share/amd_smi copy -- the modules the CLI shipped
 #      with, always preferred so `amd-smi` uses its own version even on a host
@@ -39,17 +24,11 @@ from pathlib import Path
 #   3. the system site-packages -- last resort.
 # A pip install is meant for Python scripting, not for changing CLI behavior,
 # so it must not override the shipped modules; the fallbacks are safety nets.
-_share_candidates = []
-_rocm = os.environ.get("ROCM_PATH") or os.environ.get("ROCM_HOME")
-if _rocm:
-    _share_candidates.append(os.path.join(_rocm, "share", "amd_smi"))
-# CLI runs from ROCM_PATH/libexec/amdsmi_cli/, so ../../share/amd_smi is the
-# installed copy relative to this file.
-_share_candidates.append(str(Path(__file__).resolve().parent.parent.parent / "share" / "amd_smi"))
-for _cand in _share_candidates:
-    if os.path.isdir(os.path.join(_cand, "amdsmi")):
-        sys.path.insert(0, _cand)
-        break
+# CLI runs from <root>/libexec/amdsmi_cli/, so ../../share/amd_smi is the
+# installed copy. Not $ROCM_PATH: it can name a different ROCm install.
+_share_dir = Path(__file__).resolve().parent.parent.parent / "share" / "amd_smi"
+if (_share_dir / "amdsmi").is_dir():
+    sys.path.insert(0, str(_share_dir))
 
 try:
     from amdsmi import amdsmi_exception, amdsmi_interface
@@ -58,7 +37,7 @@ except ImportError as e:
     print(
         "Failed to import the amdsmi Python library. Install amd-smi-lib (rpm/deb) or pip install the amdsmi wheel."
     )
-    sys.exit(1)
+    sys.exit(int(AmdSmiExitCode.IMPORT_ERROR))
 
 # Using basic python logging for user errors and development
 logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.ERROR)  # User level logging
@@ -71,8 +50,33 @@ AMDSMI_INIT_FLAG = amdsmi_interface.AmdSmiInitFlags.INIT_ALL_PROCESSORS
 AMD_VENDOR_ID = 4098
 
 
+def check_wsl_dxg():
+    """Returns true if running under WSL2 (not Hyper-V) with /dev/dxg present.
+
+    /dev/dxg is created by dxgkrnl for any WDDM GPU, so we additionally require
+    the WSL2 kernel signature in /proc/version to avoid false-positives on
+    Hyper-V Linux guests or native hosts where dxgkrnl may be loaded.
+    Vendor confirmation (AMD 0x1002) is deferred to amdsmi_init(), which calls
+    into librocdxg and rejects non-AMD adapters.
+    """
+    if not Path("/dev/dxg").exists():
+        return False
+    try:
+        osrelease = Path("/proc/sys/kernel/osrelease").read_text(encoding="ascii").lower()
+        return "microsoft" in osrelease and "wsl" in osrelease
+    except OSError:
+        return False
+
+
 def check_amdgpu_driver():
     """Returns true if amdgpu is found in the list of initialized modules"""
+    # WSL2: no native amdgpu module; use /dev/dxg via dxgkrnl instead.
+    # check_wsl_dxg() requires the WSL2 kernel string, so this is safe for
+    # Hyper-V guests (which lack "wsl" in osrelease) and bare-metal hosts.
+    # Vendor confirmation (AMD 0x1002) is done inside librocdxg during amdsmi_init().
+    if check_wsl_dxg():
+        return True
+
     amd_gpu_status_file = Path("/sys/module/amdgpu/initstate")
     if amd_gpu_status_file.exists():
         try:
@@ -101,23 +105,16 @@ def check_amd_hsmp_driver():
     return False
 
 
-def check_amd_ionic_driver():
-    """Returns true if ionic is found in the list of initialized modules"""
-    status_file = Path("/sys/module/ionic/initstate")
-    if status_file.exists():
-        if status_file.read_text(encoding="ascii").strip() == "live":
-            return True
-    return False
-
-
-def check_brcm_nic_driver():
-    """Returns true if bnxt_en is found in the list of initialized modules"""
-    status_file = Path("/sys/module/bnxt_en/initstate")
+def _any_nic_present():
+    """Returns true if NIC discovery enumerated at least one NIC after init."""
     try:
-        if status_file.exists():
-            if status_file.read_text(encoding="ascii").strip() == "live":
+        for socket in amdsmi_interface.amdsmi_get_socket_handles():
+            result = amdsmi_interface.amdsmi_get_processor_handles_by_type(
+                socket, amdsmi_interface.AmdSmiProcessorType.AMD_AINIC
+            )
+            if result["processor_handles"]:
                 return True
-    except OSError:
+    except amdsmi_exception.AmdSmiException:
         return False
     return False
 
@@ -125,8 +122,10 @@ def check_brcm_nic_driver():
 def amdsmi_cli_init():
     """Initializes AMDSMI Library for the CLI
 
-    Probes for the presence of the amdgpu, amd_hsmp/hsmp_acpi, ionic, and bnxt_en
-    drivers and initializes the AMD SMI library based on the live drivers found.
+    Probes for the presence of the amdgpu and amd_hsmp/hsmp_acpi drivers and
+    initializes the AMD SMI library based on the live drivers found. NIC init is
+    always requested; the library's discovery layer decides whether any NIC is
+    present, so no per-vendor NIC driver probe is done here.
 
     Return:
         init_flag: the flag used to initialize the AMD SMI library without error
@@ -146,18 +145,19 @@ def amdsmi_cli_init():
         logging.debug("amdgpu driver's initstate is live")
     if cpu_init_disabled:
         logging.debug("CPU/ESMI init disabled via AMDSMI_DISABLE_CPU_INIT")
-    # amdsmi_get_cpu_handles has shipped in every supported libamd_smi.so
-    # (ROCm 5.6+), so the previous hasattr() guard here was always true; it
-    # was removed because the regenerated wrapper binds the symbol directly.
     elif check_amd_hsmp_driver():
-        init_flag |= amdsmi_interface.AmdSmiInitFlags.INIT_AMD_CPUS
-        logging.debug("hsmp driver's initstate is live")
-    if check_amd_ionic_driver():
-        logging.debug("ionic driver's initstate is live")
-        init_flag |= amdsmi_interface.AmdSmiInitFlags.INIT_AMD_NICS
-    if check_brcm_nic_driver():
-        logging.debug("bnxt_en driver's initstate is live")
-        init_flag |= amdsmi_interface.AmdSmiInitFlags.INIT_AMD_NICS
+        if hasattr(amdsmi_interface.amdsmi_wrapper, "amdsmi_get_cpu_handles"):
+            init_flag |= amdsmi_interface.AmdSmiInitFlags.INIT_AMD_CPUS
+            logging.debug("hsmp driver's initstate is live")
+        else:
+            logging.debug("hsmp driver is live, but libamd_smi was built without ESMI")
+    # NIC presence is decided by the library's discovery layer, not a per-vendor
+    # driver probe here: always request NIC init and let discovery enumerate
+    # whatever vendors are present. A GPU/CPU-less host is still valid if it has
+    # a NIC, so the "no manageable device" decision is deferred until after init,
+    # when NIC discovery results are available (see below).
+    mandatory_drivers_present = init_flag != 0
+    init_flag |= amdsmi_interface.AmdSmiInitFlags.INIT_AMD_NICS
 
     _INIT_TIMEOUT_SEC = 60
     init_result = {"exception": None}
@@ -173,34 +173,38 @@ def amdsmi_cli_init():
     init_thread.join(timeout=_INIT_TIMEOUT_SEC)
 
     if init_thread.is_alive():
+        # The library hung with no status, so exit with a CLI code (not a borrowed
+        # library status) -- the exit code unambiguously means the CLI watchdog gave up.
         logging.error(
             "amdsmi_init() timed out after %ds. The GPU driver may be unresponsive.",
             _INIT_TIMEOUT_SEC,
         )
-        sys.exit(2)
+        sys.exit(int(AmdSmiExitCode.INIT_TIMEOUT))
 
     if isinstance(
         init_result["exception"],
         (amdsmi_interface.AmdSmiLibraryException, amdsmi_interface.AmdSmiParameterException),
     ):
         e = init_result["exception"]
-        # parameter exception thrown if init_flag is 0, but err_code will be set to 0 in that case, so must check if init_flag is 0 too
-        if (
-            e.err_code
-            in (
-                amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
-                amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED,
-            )
-            or init_flag == 0
+        # Normalize the library's NOT_INIT/DRIVER_NOT_LOADED to one CLI code. We don't want to
+        # clash with library error codes, so we use a CLI code (AmdSmiExitCode.DRIVERS_NOT_LOADED).
+        if e.err_code in (
+            amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
+            amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED,
         ):
-            logging.error(
-                "Drivers not loaded (amdgpu, amd_hsmp, ionic, bnxt_en drivers not found in modules)"
-            )
-            sys.exit(-1)
+            logging.error("Drivers not loaded (amdgpu, amd_hsmp drivers not found in modules)")
+            sys.exit(int(AmdSmiExitCode.DRIVERS_NOT_LOADED))
         else:
             raise e
     elif init_result["exception"] is not None:
         raise init_result["exception"]
+
+    # A host with neither GPU/CPU drivers nor any discovered NIC has nothing to
+    # manage. The always-on INIT_AMD_NICS request can let amdsmi_init() succeed
+    # on such a host, so NIC presence is confirmed here rather than assumed.
+    if not mandatory_drivers_present and not _any_nic_present():
+        logging.error("Drivers not loaded (amdgpu, amd_hsmp drivers not found in modules)")
+        sys.exit(int(AmdSmiExitCode.DRIVERS_NOT_LOADED))
 
     logging.debug(
         f"AMDSMI initialized with at least one driver successfully | init flag: {init_flag}"

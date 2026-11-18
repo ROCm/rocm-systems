@@ -4,12 +4,22 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 #include "net.h"
+#include "socket.h"
+#include "os.h"
 #include "common/ErrCode.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
+#include "common/ScopedEnv.hpp"
 #include "gtest/gtest.h"
 #include <atomic>
+#include <cctype>
+#include <cstdlib>
 #include <cstring>
+#include <dirent.h>
+#include <string>
+#include <sys/stat.h>
 #include <thread>
+#include <ftw.h>
+#include <unistd.h>
 
 extern ncclNet_t ncclNetSocket;
 
@@ -1599,6 +1609,192 @@ TEST_F(NetSocketTests, TestIflushAlwaysFails) {
       << "iflush should always return ncclInternalError";
 
   TEST_INFO("TestIflushAlwaysFails completed");
+}
+
+// AICOMRCCL-1894: the libvirt bridge interface must be considered LAST in the
+// bootstrap TCP interface auto-selection. libvirt names its default network
+// bridge virbr0 (virbr1, ...); such bridges serve host-to-VM (virtual machine)
+// traffic and cannot reach a remote node, so ncclFindInterfaces() must (a)
+// exclude virbr* from the general candidate set and (b) never auto-pick a
+// virbr* interface while any other interface exists (see the "^docker,lo,virbr"
+// primary pick and the "virbr" final fallback in src/misc/socket.cc).
+// Deterministic and GPU-free: it only enumerates the host's interfaces via the
+// socket layer's own matcher.
+TEST(NetBootstrapInterfaceTest, VirbrConsideredLast) {
+  constexpr int kMaxIfs = 16;
+  constexpr int kNameSz = MAX_IF_NAME_SIZE;
+
+  // Save/restore the process-global env this test touches so we neither pin the
+  // auto-selection path to a user-forced interface/family nor leak state into
+  // other tests in the same binary.
+  ScopedEnv guardIfname("NCCL_SOCKET_IFNAME", nullptr);
+  ScopedEnv guardCommId("NCCL_COMM_ID", nullptr);
+  ScopedEnv guardFamily("NCCL_SOCKET_FAMILY", nullptr);
+
+  // Resolve the socket family only after NCCL_SOCKET_FAMILY has been cleared, so
+  // the probes are not forced to IPv6 -- which can legitimately return zero
+  // interfaces on an IPv4-only host and make this test flaky.
+  const int family = ncclEnvSocketFamily();
+
+  auto nameAt = [](const char* names, int i) {
+    return std::string(names + static_cast<size_t>(i) * kNameSz);
+  };
+  auto isVirbr = [](const std::string& n) { return n.rfind("virbr", 0) == 0; };
+
+  // (1) General candidate bucket — the auto-pick's primary query: everything
+  //     EXCEPT docker*, lo and virbr*. No virbr* interface may appear here.
+  char generalNames[kMaxIfs * kNameSz] = {};
+  union ncclSocketAddress generalAddrs[kMaxIfs] = {};
+  int nGeneral = 0;
+  ASSERT_EQ(ncclOsFindInterfaces("^docker,lo,virbr", generalNames, generalAddrs,
+                                 family, kNameSz, kMaxIfs, &nGeneral),
+            ncclSuccess);
+  for (int i = 0; i < nGeneral; ++i)
+    EXPECT_FALSE(isVirbr(nameAt(generalNames, i)))
+        << "virbr* interface '" << nameAt(generalNames, i)
+        << "' leaked into the general (non-bridge) candidate set";
+
+  // (2) The virbr* last-resort bucket, queried on its own: any match must in
+  //     fact be a virbr* interface.
+  char virbrNames[kMaxIfs * kNameSz] = {};
+  union ncclSocketAddress virbrAddrs[kMaxIfs] = {};
+  int nVirbr = 0;
+  ASSERT_EQ(ncclOsFindInterfaces("virbr", virbrNames, virbrAddrs, family,
+                                 kNameSz, kMaxIfs, &nVirbr),
+            ncclSuccess);
+  for (int i = 0; i < nVirbr; ++i)
+    EXPECT_TRUE(isVirbr(nameAt(virbrNames, i)));
+
+  // (3) Full priority order: ncclFindInterfaces() must not auto-select a virbr*
+  //     interface. Some non-virbr interface always exists (lo at minimum), and
+  //     lo is tried before virbr, so the bridge is never chosen.
+  char pick[kNameSz] = {};
+  union ncclSocketAddress pickAddr = {};
+  int nPick = 0;
+  ASSERT_EQ(ncclFindInterfaces(pick, &pickAddr, kNameSz, 1, &nPick),
+            ncclSuccess);
+  ASSERT_GT(nPick, 0) << "no bootstrap interface found at all";
+  EXPECT_FALSE(isVirbr(std::string(pick)))
+      << "ncclFindInterfaces auto-selected libvirt bridge '" << pick
+      << "'; virbr* must be the last-resort interface";
+
+  if (nVirbr == 0)
+    GTEST_SKIP() << "no virbr* interface present; the libvirt bridge fallback "
+                    "ordering was not exercised on this host";
+  TEST_INFO("virbr present (%d bridge iface(s)) but auto-pick chose '%s'",
+            nVirbr, pick);
+}
+
+// A failing ASSERT_* returns from the test body, so cleanup written at the end
+// is skipped and temp trees accumulate.  Tie removal to scope instead.
+namespace {
+class TempDir {
+ public:
+  explicit TempDir(std::string path) : path_(std::move(path)) {}
+  ~TempDir() { nftw(path_.c_str(), rmEntry_, 16, FTW_DEPTH | FTW_PHYS); }
+  TempDir(const TempDir&) = delete;
+  TempDir& operator=(const TempDir&) = delete;
+  const std::string& str() const { return path_; }
+
+ private:
+  static int rmEntry_(const char* p, const struct stat*, int, struct FTW*) {
+    return remove(p);
+  }
+  std::string path_;
+};
+}  // namespace
+
+// Test: BcmLinksEnvFallback
+//
+// GPU-free unit test for the RCCL_BCM_LINKS_PATH env-var fallback in
+// ncclOsGetBcmLinks().  Creates a tmpdir whose layout mirrors the sysfs
+// structure that the BCM switch_discovery kernel module would populate,
+// using two real PCI bus IDs read from /sys/bus/pci/devices/ (required
+// because ncclOsGetPciPath validates each peer via realpath).
+// ---------------------------------------------------------------------------
+TEST(BcmLinksTest, EnvFallback) {
+  // Skip when the kernel module's default sysfs directory exists —
+  // the env-var fallback is never reached in that case.
+  struct stat st;
+  if (stat("/sys/kernel/pci_switch_link/virtual_switch_links", &st) == 0 &&
+      S_ISDIR(st.st_mode)) {
+    GTEST_SKIP() << "BCM switch_discovery sysfs path exists; "
+                    "env-var fallback not exercised";
+  }
+
+  // Pick two real PCI bus IDs so ncclOsGetPciPath's realpath() succeeds.
+  DIR* pciDir = opendir("/sys/bus/pci/devices");
+  if (pciDir == nullptr) {
+    GTEST_SKIP() << "/sys/bus/pci/devices not available";
+  }
+
+  std::string bdfA, bdfB;
+  struct dirent* entry;
+  while ((entry = readdir(pciDir)) != nullptr) {
+    if (entry->d_name[0] == '.') continue;
+    if (strlen(entry->d_name) != 12) continue;  // "0000:00:00.0"
+    if (bdfA.empty()) {
+      bdfA = entry->d_name;
+    } else if (bdfB.empty()) {
+      bdfB = entry->d_name;
+      break;
+    }
+  }
+  closedir(pciDir);
+
+  if (bdfA.empty()) {
+    GTEST_SKIP() << "no PCI devices in /sys/bus/pci/devices";
+  }
+  if (bdfB.empty()) {
+    GTEST_SKIP() << "fewer than 2 PCI devices found";
+  }
+
+  // Build mock directory: <tmpdir>/<bdfA>/<bdfB>
+  // TempDir is RAII — nftw-removes the tree on scope exit even if an
+  // ASSERT_ fires early, preventing /tmp/rccl_bcm_test_* accumulation.
+  char tmpl[] = "/tmp/rccl_bcm_test_XXXXXX";
+  ASSERT_NE(mkdtemp(tmpl), nullptr) << "mkdtemp failed";
+  TempDir tmpdir(tmpl);
+
+  std::string linkDir   = tmpdir.str() + "/" + bdfA;
+  std::string linkEntry = linkDir + "/" + bdfB;
+  ASSERT_EQ(mkdir(linkDir.c_str(), 0755), 0)
+      << "mkdir failed: " << linkDir;
+  { FILE* f = fopen(linkEntry.c_str(), "w");
+    ASSERT_NE(f, nullptr) << "cannot create " << linkEntry;
+    fclose(f); }
+
+  // Redirect the fallback path to our tmpdir.
+  ScopedEnv guard("RCCL_BCM_LINKS_PATH", tmpdir.str().c_str());
+
+  // Query bdfA — should discover bdfB as its sole peer.
+  int   nlinks = -1;
+  char* peers  = nullptr;
+  ASSERT_EQ(ncclOsGetBcmLinks(bdfA.c_str(), &nlinks, &peers), ncclSuccess);
+  EXPECT_EQ(nlinks, 1) << "expected 1 peer for " << bdfA;
+  if (nlinks == 1 && peers != nullptr) {
+    // Peers are stored as 13-byte (12-char + NUL) entries.
+    std::string got(peers, 12);
+    // Case-insensitive compare (readdir preserves on-disk case).
+    auto toLower = [](std::string s) {
+      for (auto& c : s) c = static_cast<char>(tolower(c));
+      return s;
+    };
+    EXPECT_EQ(toLower(got), toLower(bdfB))
+        << "peer mismatch: expected " << bdfB << ", got " << got;
+  }
+  free(peers);
+
+  // Query bdfB — no subdirectory exists for it, expect 0 peers.
+  int   nlinks2 = -1;
+  char* peers2  = nullptr;
+  ASSERT_EQ(ncclOsGetBcmLinks(bdfB.c_str(), &nlinks2, &peers2), ncclSuccess);
+  EXPECT_EQ(nlinks2, 0) << "expected 0 peers for " << bdfB;
+  free(peers2);
+
+  // tmpdir cleaned up by TempDir destructor on scope exit.
+  TEST_INFO("BcmLinksEnvFallback: bdfA=%s bdfB=%s nlinks=%d",
+            bdfA.c_str(), bdfB.c_str(), nlinks);
 }
 
 } // namespace RcclUnitTesting

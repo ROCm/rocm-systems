@@ -1,6 +1,10 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# See LICENSE.txt for more license information
+
 import os
-import re
-import subprocess
+import sys
 from pathlib import Path
 
 from Cython.Build import cythonize
@@ -104,5 +108,4 @@ setup(
         compiler_directives=compiler_directives,
     ),
     zip_safe=False,
-    options={"build_ext": {"inplace": False}},
 )

@@ -1,5 +1,8 @@
 # rocDecode Test Scripts
 
+> For the full local validation sweep (CTest + conformance) and the `/validate` Claude Code
+> skill that wrap these runners, see [`../README.md`](../README.md).
+
 ## Pre-requisites to run python script
 * Install [rocDecode](https://rocm.docs.amd.com/projects/rocDecode/en/latest/install/rocDecode-build-and-install.html)
 

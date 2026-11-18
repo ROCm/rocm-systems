@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <gtest/gtest.h>
 #include <poll.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -27,6 +28,7 @@
 #include <thread>
 
 #include "ErrCode.hpp"
+#include "GpuCountProbe.hpp"
 
 #if defined(RCCL_TEST_CODE_COVERAGE)
 #include <dlfcn.h>
@@ -199,14 +201,40 @@ static std::vector<int> gpuPoolFromKfd()
     return pool;
 }
 
+std::vector<int> clampPoolToDeviceCount(std::vector<int> pool, int hipDeviceCount)
+{
+    if(hipDeviceCount > 0 && static_cast<size_t>(hipDeviceCount) < pool.size())
+    {
+        TEST_INFO(
+            "GPU pool reported %zu device(s) but HIP can open only %d; "
+            "clamping pool to %d",
+            pool.size(), hipDeviceCount, hipDeviceCount
+        );
+        pool.resize(static_cast<size_t>(hipDeviceCount));
+    }
+    return pool;
+}
+
 // Detects available GPU indices: first from HIP_VISIBLE_DEVICES, then from
-// KFD sysfs. Returns empty if neither source yields a pool.
+// KFD sysfs, then clamped to the devices HIP can actually open. Returns empty
+// if neither source yields a pool.
 static std::vector<int> detectGpuPool()
 {
     auto pool = gpuPoolFromEnv();
     if(pool.empty())
         pool = gpuPoolFromKfd();
-    return pool;
+
+    const int hipDeviceCount = gpuCountViaFreshImage();
+    if(hipDeviceCount == kGpuCountProbeFailed && !pool.empty())
+    {
+        TEST_INFO(
+            "WARNING: could not determine how many devices HIP can open; "
+            "leaving the detected pool of %zu device(s) unclamped",
+            pool.size()
+        );
+    }
+
+    return clampPoolToDeviceCount(std::move(pool), hipDeviceCount);
 }
 
 // Tracks which physical GPU device indices from a fixed pool are in use.
@@ -587,6 +615,19 @@ void ProcessIsolatedTestRunner::displayCapturedOutput(
     flush(std::cerr, output.stderrContent);
 }
 
+void ProcessIsolatedTestRunner::exitChild(int code)
+{
+    fflush(NULL);
+#if defined(RCCL_TEST_CODE_COVERAGE)
+    __llvm_profile_write_file();
+    using WriteFn = int (*)(void);
+    auto libWrite = reinterpret_cast<WriteFn>(
+        dlsym(RTLD_DEFAULT, "rcclCoverageWriteFile"));
+    if(libWrite) libWrite();
+#endif
+    _exit(code);
+}
+
 // Re-exec child entrypoint: if kReexecMarkerEnvVar is set, runs the named test
 // and _exit()s with the result. Returns normally only in the original parent.
 void ProcessIsolatedTestRunner::handleReexecEntrypoint(
@@ -603,16 +644,7 @@ void ProcessIsolatedTestRunner::handleReexecEntrypoint(
     {
         if(testConfig.name == target)
         {
-            int result = runTestInProcess(testConfig);
-            fflush(NULL);
-#if defined(RCCL_TEST_CODE_COVERAGE)
-            __llvm_profile_write_file();
-            using WriteFn = int (*)(void);
-            auto libWrite = reinterpret_cast<WriteFn>(
-                dlsym(RTLD_DEFAULT, "rcclCoverageWriteFile"));
-            if(libWrite) libWrite();
-#endif
-            _exit(result);
+            exitChild(runTestInProcess(testConfig));
         }
     }
 
@@ -824,6 +856,12 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
 #endif
 
             setenv(kReexecMarkerEnvVar, cfg.name.c_str(), 1);
+
+            // The one-test filter maps to shard 0 only; inherited shard vars make the child run 0 tests and exit 0.
+            // GTEST_OUTPUT is kept: the child leaves via _exit(), which skips gtest's report writer.
+            unsetenv("GTEST_TOTAL_SHARDS");
+            unsetenv("GTEST_SHARD_INDEX");
+            unsetenv("GTEST_SHARD_STATUS_FILE");
 
             // gtestInfo was validated non-null in the parent before any
             // fork; no need to re-check here.

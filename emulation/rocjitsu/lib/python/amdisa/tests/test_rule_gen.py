@@ -251,7 +251,7 @@ class TestMatrixExpandRules:
         )
         assert len(rules) == 0
 
-    def test_emit_header_compiles(self):
+    def test_emit_header_contents(self):
         from amdisa.codegen.dbt.rule_gen import (
             generate_matrix_expand_rules,
             emit_matrix_conversions_header,
@@ -263,5 +263,6 @@ class TestMatrixExpandRules:
         )
         header = emit_matrix_conversions_header(rules)
         assert '#pragma once' in header
+        assert '#include <cstddef>' in header
         assert 'kMatrixConversions' in header
         assert '192u' in header

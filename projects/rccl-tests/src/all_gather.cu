@@ -1,15 +1,25 @@
+
 /*************************************************************************
  * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
- * Modifications Copyright (c) 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright (c) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
 
+#include <cstdlib>
 #include "cuda_runtime.h"
 #include "common.h"
+#include "gin_sdma_allgather_policy.h"
+#include "gin_sdma_allgather_reqs.h"
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+#include "nccl_device.h"
+#include "rccl_vector_types.h"
+#include "gin_sdma_devtime.h" // shared device-side (wall_clock64) timing scaffold
+#include "gin_resource_sharing.h"  // --gin_resource_sharing mode selection
+#endif
 
 void AllGatherGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, size_t eltSize, int nranks) {
-  size_t base = (count/nranks) & -(16/eltSize);
+  size_t base = gin_sdma_allgather::chunkBaseCount(count, eltSize, nranks);
   *sendcount = base;
   *recvcount = base*nranks;
   *sendInplaceOffset = base;
@@ -44,17 +54,154 @@ testResult_t  AllGatherGetAlgoProtoChannels(ncclComm_t comm, size_t count, ncclD
 
 testResult_t  AllGatherGetSymkInfo(ncclComm_t comm, size_t count, ncclDataType_t type, ncclRedOp_t op, int* algo, int* proto, int* nchannels) {
   if(rcclTestsGetSymkInfo == NULL) return testInternalError;
-  NCCLCHECK(rcclTestsGetSymkInfo(comm, ncclFuncAllGather , count, type , op, algo, proto, nchannels));
+  NCCLCHECK(rcclTestsGetSymkInfo(comm, ncclFunc_t::ncclFuncAllGather , count, type , op, algo, proto, nchannels));
   return testSuccess;
 }
 
-void AllGatherGetBw(size_t count, int typesize, double sec, double* algBw, double* busBw, int nranks) {
-  double baseBw = (double)(count * typesize * nranks) / 1.0E9 / sec;
-
-  *algBw = baseBw;
-  double factor = ((double)(nranks - 1))/((double)nranks);
-  *busBw = baseBw * factor;
+testResult_t  AllGatherGetCollImplInfo(ncclComm_t comm, size_t count, ncclDataType_t type, ncclRedOp_t op,
+    const void* sendbuff, void* recvbuff, int graphCapturing, int* algo, int* proto, int* nchannels) {
+  if(rcclTestsGetCollImplInfo == NULL) return testInternalError;
+  NCCLCHECK(rcclTestsGetCollImplInfo(comm, ncclFuncAllGather, count, type, op, sendbuff, recvbuff, graphCapturing, algo, proto, nchannels));
+  return testSuccess;
 }
+
+void AllGatherGetBw(size_t count, size_t typesize, double sec, double* algBw, double* busBw, int nranks) {
+  gin_sdma_allgather::bandwidthGBps(count, typesize, sec, nranks, algBw, busBw);
+}
+
+// -D 3 is GinHybridAllGatherKernel: LSA direct (small) + direct GIN puts (large).
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
+testResult_t AllGatherGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs, ncclComm_t comm) {
+  return ginSdmaAllGatherDevCommRequirements(deviceImpl, reqs, comm, "GinHybridAllGatherKernel");
+}
+#elif defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+bool AllGatherGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs) {
+  return ginSdmaAllGatherDevCommRequirements(deviceImpl, reqs);
+}
+#endif
+
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
+// -D 3 launch settings for ginSdmaResolve*() (gin_sdma_allgather_reqs.h).
+struct AllGatherSdmaColl {
+  static constexpr const char* kThresholdEnv = gin_sdma_allgather::kAllGatherSdmaThresholdEnv;
+  static constexpr size_t kDefaultThreshold = gin_sdma_allgather::kAllGatherSdmaThresholdDefault;
+  static size_t hostThresholdDefault() { return kDefaultThreshold; }
+  static constexpr const char* kCtasEnv = gin_sdma_allgather::kAllGatherCtasEnv;
+  static constexpr const char* kCtasAlias = gin_sdma_allgather::kAllGatherCtasEnvAlias;
+  static constexpr int kSdmaCtas = gin_sdma_allgather::kAllGatherCtasSdma;
+  static int lsaCtas(size_t) { return gin_sdma_allgather::kAllGatherCtasLsa; }
+};
+
+static inline size_t AllGatherResolveSdmaThreshold() {
+  return ginSdmaResolveSdmaThreshold<AllGatherSdmaColl>();
+}
+
+template <typename T>
+__device__ void AllGatherLsaDirect(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int rank, int lsaRanks, int tid, int nthreads) {
+  T* src = (T*)ncclGetLocalPointer(sendwin, sendoffset);
+  const size_t dstOff = gin_sdma_allgather::allGatherRecvSliceOffset(rank, count);
+  for (size_t i = tid; i < count; i += nthreads) {
+    T value = src[i];
+    for (int lp = 0; lp < lsaRanks; lp++) {
+      T* dst = (T*)ncclGetLsaPointer(recvwin, recvoffset, lp) + dstOff;
+      dst[i] = value;
+    }
+  }
+}
+
+// Single-node hybrid AllGather body (-D 3), factored out so both the production
+// kernel and the device-timing kernel share one implementation:
+//   chunkBytes <= sdmaThreshold: direct LSA (all CTAs).
+//   chunkBytes >  sdmaThreshold: one GIN put per peer, issued by a single thread
+//     (peer p is sent by CTA p % gridDim.x, thread p / gridDim.x); only the
+//     receiving CTA waits on its signal (AllToAll pattern).
+// Each invocation re-derives its entry barrier (LSA barrier for the small tier,
+// GIN world barrier + signal read for the large tier), so back-to-back calls are
+// self-synchronizing -- the timed kernel loops this body with no extra bookkeeping.
+template <typename T>
+__device__ void ginAllGatherBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, size_t sdmaThreshold, const struct ncclDevComm& devComm) {
+  const size_t chunkBytes = count * sizeof(T);
+
+  if (gin_sdma_allgather::chunkUsesLsaTier(chunkBytes, sdmaThreshold)) {
+    ncclTeam lsa = ncclTeamLsa(devComm);
+    const int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    const int nthreads = blockDim.x * gridDim.x;
+
+    ncclLsaBarrierSession<ncclCoopCta> lsaBar { ncclCoopCta(), devComm, lsa, devComm.lsaBarrier, blockIdx.x };
+    lsaBar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
+    AllGatherLsaDirect<T>(sendwin, sendoffset, recvwin, recvoffset, count, devComm.rank, lsa.nRanks, tid, nthreads);
+    lsaBar.sync(ncclCoopCta(), cuda::memory_order_release);
+    return;
+  }
+
+  const int ginContext = 0;
+  const unsigned int signalIndex = blockIdx.x;
+  // GPU-locked, NOT --gin_resource_sharing: unlike alltoall/broadcast, the puts
+  // here are spread across CTAs (peer r on CTA r%gridDim.x) and every CTA posts
+  // the world barrier, so qps[peer] is multi-poster -- THREAD's lock elision would
+  // race. Keep the SQ lock regardless of the CLI selection.
+  ncclGin gin { devComm, ginContext, NCCL_GIN_RESOURCE_SHARING_GPU };
+  const uint64_t signalValue = gin.readSignal(signalIndex);
+
+  ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x };
+  bar.sync(ncclCoopCta(), cuda::memory_order_acquire, ncclGinFenceLevel::Relaxed);
+
+  // One put per (sender rank, peer), issued by exactly ONE thread. gin.put()
+  // defaults to Coop = ncclCoopThread, i.e. it is a per-thread call: every thread
+  // that reaches it submits its own SDMA descriptor and its own SignalInc. Peer r
+  // is therefore owned by CTA (r % gridDim.x) -- so inbound completion for this
+  // rank lands on signal (rank % gridDim.x) and only that CTA calls waitSignal
+  // (the receivingCta idea from GinAlltoAllKernel) -- and, within that CTA, by
+  // thread (r / gridDim.x). Dropping the threadIdx.x term would submit blockDim.x
+  // duplicate puts per peer onto that peer's single SDMA queue and inflate its
+  // signal by blockDim.x, making waitSignal return before the data landed.
+  const int peerStride = gridDim.x;
+  for (int r = blockIdx.x + (int)threadIdx.x * peerStride; r < devComm.nRanks;
+       r += peerStride * (int)blockDim.x) {
+    gin.put(ncclTeamWorld(devComm), r,
+        recvwin, recvoffset + (size_t)devComm.rank * chunkBytes,
+        sendwin, sendoffset,
+        chunkBytes, TEST_GIN_WEAK_SIGNAL_INC(signalIndex));
+  }
+  // The puts above are per-thread; the flush below is CTA-collective and must not
+  // run until every issuing thread in this CTA has submitted.
+  __syncthreads();
+
+  if (blockIdx.x == (devComm.rank % peerStride))
+    gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + devComm.nRanks);
+  gin.flush(ncclCoopCta());
+
+  bar.sync(ncclCoopCta(), cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
+}
+
+// Single-node hybrid AllGather (-D 3): one AllGather via the shared body.
+template <typename T>
+__global__ void GinHybridAllGatherKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, size_t sdmaThreshold, struct ncclDevComm devComm) {
+  (void)root;
+  ginAllGatherBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, sdmaThreshold, devComm);
+}
+
+// Device-timing kernel (shared gin_devtime methodology): run skip+loop back-to-back
+// AllGather bodies under ONE persistent launch, bracketing only the timed region
+// with wall_clock64() per CTA. Every body re-derives its entry barrier (a full
+// inter-iteration sync), so looping is correct with no extra bookkeeping.
+template <typename T>
+__global__ void GinHybridAllGatherTimedKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, size_t sdmaThreshold, struct ncclDevComm devComm, int loop, int skip, long long* start_time, long long* end_time) {
+  (void)root;
+  for (int i = 0; i < skip + loop; i++) {
+    if (i == skip) {
+      __syncthreads();
+      if (threadIdx.x == 0) start_time[blockIdx.x] = wall_clock64();
+    }
+    ginAllGatherBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, sdmaThreshold, devComm);
+  }
+  __syncthreads();
+  if (threadIdx.x == 0) end_time[blockIdx.x] = wall_clock64();
+}
+
+#endif
+#endif
 
 testResult_t AllGatherRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl, void* bias = nullptr) {
   if (deviceImpl == 0) {
@@ -62,10 +209,116 @@ testResult_t AllGatherRunColl(void* sendbuff, size_t sendoffset, void* recvbuff,
     char* rptr = (char*)recvbuff + recvoffset;
     NCCLCHECK(ncclAllGather(sptr, rptr, count, type, comm, stream));
   } else {
-    return testNotImplemented;
+    switch(deviceImpl) {
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
+      case 3: {
+        // Size-adaptive CTA count (decoupled from -V), keyed off the same LSA<->SDMA
+        // tier predicate the kernel evaluates: ~16 CTAs for the direct-store LSA
+        // tier, few (4) for the GIN-put/SDMA tier where only nRanks threads issue
+        // the puts and extra CTAs are pure barrier overhead. NCCL_GIN_ANVIL_SDMA_ALLGATHER_CTAS
+        // pins a fixed count (diagnostic).
+        const size_t agSdmaThreshold = AllGatherResolveSdmaThreshold();
+        const size_t agChunkBytes = gin_sdma_allgather::chunkBytes(count, (size_t)wordSize(type));
+        const int agGridCtas = ginSdmaResolveLaunchCtas<AllGatherSdmaColl>(agChunkBytes, agSdmaThreshold);
+        TESTCHECK(ginSdmaLaunchDeviceKernel(SPECIALIZE_KERNEL(GinHybridAllGatherKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, root, comm, stream, agSdmaThreshold, agGridCtas));
+        return testSuccess;
+      }
+#endif
+      default:
+        return testNotImplemented;
+    }
   }
   return testSuccess;
 }
+
+// Device-side (in-kernel wall_clock64) timing for the GIN-SDMA AllGather (-D 3),
+// via the shared gin_devtime scaffold. Opt-in via --device_timing: 1=augment
+// (print an extra #[ag-devtime] line next to the graph numbers), 2=device-time-only
+// (report the in-kernel latency as the out-of-place metric; in-place keeps normal
+// timing). loop/skip come from --devtime_loop/--devtime_skip (default 10/10); size-
+// tier overrides via --devtime_loop_mid/_large and --devtime_skip_mid/_large. Self-
+// selects the same size-adaptive CTA count as the perf path (decoupled from -V),
+// threading the host-resolved per-collective sdmaThreshold so the timed tier matches
+// the launched cfg.
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
+testResult_t AllGatherDeviceTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place, double* outDeltaSec) {
+  if (!deviceTimingMode) return testSuccess;
+
+  // Only the GIN hybrid impl (-D 3) provisions the GIN signals/barriers the timed
+  // body relies on. Other device impls would fault or hang on missing GIN state.
+  if (deviceImpl != 3) return testSuccess;
+
+  const size_t count = args->nbytes / wordSize(type);   // per-rank input-chunk count
+  if (count == 0 || devtimeLoop < 1) return testSuccess;
+
+  const size_t chunkBytes = gin_sdma_allgather::chunkBytes(count, (size_t)wordSize(type));
+  int loop = 0;
+  int skip = 0;
+  gin_devtime::resolveLoopSkip(chunkBytes, loop, skip);
+
+  auto kernel = SPECIALIZE_KERNEL(GinHybridAllGatherTimedKernel, type, op);
+  if (kernel == nullptr) return testSuccess;
+
+  const size_t sdmaThreshold = AllGatherResolveSdmaThreshold();
+  const int gridCtas = ginSdmaResolveLaunchCtas<AllGatherSdmaColl>(chunkBytes, sdmaThreshold);
+  double devUs = 0.0;
+  TESTCHECK(gin_devtime::measure(args, gridCtas, loop,
+      [&](int i, long long* d_start, long long* d_end) {
+        ncclDevComm* devComm = testDevComms(args, i);
+        ncclWindow_t sendwin = (ncclWindow_t)(in_place ? args->recvRegHandles[i] : args->sendRegHandles[i]);
+        ncclWindow_t recvwin = (ncclWindow_t)args->recvRegHandles[i];
+        size_t sendoff = in_place ? args->sendInplaceOffset * (size_t)devComm->rank : 0;
+        size_t recvoff = in_place ? args->recvInplaceOffset * (size_t)devComm->rank : 0;
+        kernel<<<gridCtas, 512, 0, args->streams[i]>>>(sendwin, sendoff, recvwin, recvoff, count, root, sdmaThreshold, *devComm,
+                 loop, skip, d_start, d_end);
+      },
+      &devUs));
+
+  if (outDeltaSec != nullptr) {
+    *outDeltaSec = (devUs > 0.0) ? devUs * 1.0e-6 : -1.0;
+    return testSuccess;
+  }
+
+  if (args->proc == 0 && args->thread == 0 && devUs > 0.0) {
+    int nRanksGlobal = args->nProcs * args->nThreads * args->nGpus;
+    const size_t totalBytes = chunkBytes * (size_t)nRanksGlobal;
+    double sec = devUs * 1.0e-6;
+    double algBw = 0.0, busBw = 0.0;
+    gin_sdma_allgather::bandwidthGBps(count, (size_t)wordSize(type), sec, nRanksGlobal, &algBw, &busBw);
+    const char* tierName = gin_sdma_allgather::chunkUsesLsaTier(chunkBytes, sdmaThreshold) ? "LSA" : "SDMA";
+    snprintf(args->devtimeAugmentLine, sizeof(args->devtimeAugmentLine),
+             "#[ag-devtime] size %12zu B  tier %-4s  ctas %2d  loop %2d skip %2d  devtime %10.2f us  algbw %8.2f GB/s  busbw %8.2f GB/s\n",
+             totalBytes, tierName, gridCtas, loop, skip, devUs, algBw, busBw);
+  }
+  return testSuccess;
+}
+#else
+testResult_t AllGatherDeviceTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place, double* outDeltaSec) {
+  return testSuccess;  // device API path not available in this build
+}
+#endif
+
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
+// Tier report for -D 3. An all-peers DIRECT allgather whose transport the hybrid
+// kernel picks per-rank, keyed on the same chunkBytes-vs-threshold crossover the
+// device evaluates (chunkUsesLsaTier): <= threshold -> direct-LSA all-peers store;
+// > threshold -> GIN-put (Anvil-SDMA). `count` here is the per-rank input-chunk
+// element count (args->nbytes/eltSize), matching gin_sdma_allgather::chunkBytes.
+testResult_t AllGatherGetDeviceImplInfo(int /*deviceImpl*/, size_t count, ncclDataType_t type,
+    int /*nRanks*/, int /*lsaSize*/, char* algoOut, char* protoOut) {
+  snprintf(algoOut, 16, "%s", "T-DIRECT");
+  const size_t sdmaThreshold = AllGatherResolveSdmaThreshold();
+  const size_t chunkBytes = gin_sdma_allgather::chunkBytes(count, (size_t)wordSize(type));
+  snprintf(protoOut, 16, "%s", gin_sdma_allgather::chunkUsesLsaTier(chunkBytes, sdmaThreshold) ? "LSA" : "GIN");
+  return testSuccess;
+}
+#else
+testResult_t AllGatherGetDeviceImplInfo(int, size_t, ncclDataType_t, int, int, char* algoOut, char* protoOut) {
+  snprintf(algoOut, 16, "%s", "T-DIRECT");
+  snprintf(protoOut, 16, "%s", "GIN");
+  return testSuccess;
+}
+#endif
 
 struct testColl allGatherTest = {
   "AllGather",
@@ -74,7 +327,10 @@ struct testColl allGatherTest = {
   AllGatherGetBw,
   AllGatherRunColl,
   AllGatherGetAlgoProtoChannels,
-  AllGatherGetSymkInfo
+  AllGatherGetSymkInfo,
+  AllGatherGetCollImplInfo,
+  AllGatherDeviceTime,
+  AllGatherGetDeviceImplInfo
 };
 
 void AllGatherGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {
@@ -84,6 +340,12 @@ void AllGatherGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, in
 
 testResult_t AllGatherRunTest(struct threadArgs* args, int root, ncclDataType_t type, const char* typeName, ncclRedOp_t op, const char* opName) {
   args->collTest = &allGatherTest;
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+  for (int i = 0; i < args->nGpus; i++) {
+    CUDACHECK(cudaSetDevice(args->gpus[i]));
+    TESTCHECK(uploadGinResourceSharingMode());
+  }
+#endif
   ncclDataType_t *run_types;
   const char **run_typenames;
   int type_count;
@@ -104,7 +366,13 @@ testResult_t AllGatherRunTest(struct threadArgs* args, int root, ncclDataType_t 
   return testSuccess;
 }
 
-struct testEngine ncclTestEngine = {
-  .getBuffSize = AllGatherGetBuffSize,
-  .runTest = AllGatherRunTest
+NCCL_WEAK struct testEngine ncclTestEngine = {
+  /* .getBuffSize = */ AllGatherGetBuffSize,
+  /* .runTest = */ AllGatherRunTest,
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,14,0)
+  /* .initCommConfig = */ nullptr,
+#endif
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0) || (defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0))
+  /* .getDevCommRequirements = */ AllGatherGetDevCommRequirements,
+#endif
 };

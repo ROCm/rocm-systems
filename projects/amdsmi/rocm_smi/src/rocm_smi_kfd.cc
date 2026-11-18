@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "rocm_smi/rocm_smi_kfd.h"
 
@@ -58,7 +39,6 @@ namespace amd::smi {
 
 static bool is_number(const std::string& s);
 static const char* kKFDProcPathRoot = "/sys/class/kfd/kfd/proc";
-static const char* kKFDNodesPathRoot = "/sys/class/kfd/kfd/topology/nodes";
 static const char* kKFDVramPrefix = "vram_";
 
 // Tri-state result of inspecting a PID's open file descriptors for /dev/kfd.
@@ -315,7 +295,7 @@ static std::vector<std::string> GetSecondaryContextPaths(const std::string& proc
 }
 
 static std::string KFDDevicePath(uint32_t dev_id) {
-  std::string node_path = kKFDNodesPathRoot;
+  std::string node_path = KFDNodesPathRoot();
   node_path += '/';
   node_path += std::to_string(dev_id);
   return node_path;
@@ -991,7 +971,7 @@ int DiscoverKFDNodes(std::map<uint64_t, std::shared_ptr<KFDNode>>* nodes) {
   std::shared_ptr<KFDNode> node;
   uint32_t node_indx;
 
-  auto kfd_node_dir = opendir(kKFDNodesPathRoot);
+  auto kfd_node_dir = opendir(KFDNodesPathRoot());
   if (kfd_node_dir == nullptr) {
     return errno;
   }
@@ -1015,9 +995,16 @@ int DiscoverKFDNodes(std::map<uint64_t, std::shared_ptr<KFDNode>>* nodes) {
       continue;
     }
 
+    int ret;
+
     node = std::make_shared<KFDNode>(node_indx);
 
-    node->Initialize();
+    ret = node->Initialize();
+    if (ret != 0) {
+      std::cerr << "Failed to initialize kfd node " << node->node_index() << "." << std::endl;
+      closedir(kfd_node_dir);
+      return ret;
+    }
 
     if (node->gpu_id() == 0) {
       // Don't add; this is a cpu node.
@@ -1027,7 +1014,6 @@ int DiscoverKFDNodes(std::map<uint64_t, std::shared_ptr<KFDNode>>* nodes) {
 
     uint64_t kfd_gpu_node_bus_fn;
     uint64_t kfd_gpu_node_domain;
-    int ret;
     ret = node->get_property_value(kKFDNodePropLOCATION_IDStr, &kfd_gpu_node_bus_fn);
     if (ret != 0) {
       std::cerr << "Failed to open properties file for kfd node " << node->node_index() << "."
@@ -1052,7 +1038,7 @@ int DiscoverKFDNodes(std::map<uint64_t, std::shared_ptr<KFDNode>>* nodes) {
 
   if (closedir(kfd_node_dir)) {
     std::string err_str = "Failed to close KFD node directory ";
-    err_str += kKFDNodesPathRoot;
+    err_str += KFDNodesPathRoot();
     err_str += ".";
     perror(err_str.c_str());
     return 1;
@@ -1135,6 +1121,12 @@ int KFDNode::Initialize(void) {
   uint64_t node_to_gpu_id;
   std::shared_ptr<IOLink> link;
   bool numa_node_found = false;
+  // Reset in case Initialize() is ever invoked again on this node (construction
+  // already sets the sentinel for the first call).
+  numa_node_number_ = kInvalidNumaNode;
+  numa_node_weight_ = kInvalidNumaNodeWeight;
+  numa_node_type_ = IOLINK_TYPE_UNDEFINED;
+
   for (it = io_link_map_tmp.begin(); it != io_link_map_tmp.end(); it++) {
     io_link_map_[it->first] = it->second;
     node_to = it->first;
@@ -1253,7 +1245,7 @@ int KFDNode::get_total_memory(uint64_t* total) {
   }
   *total = 0;
 
-  std::string f_path = kKFDNodesPathRoot;
+  std::string f_path = KFDNodesPathRoot();
   f_path += "/";
   f_path += std::to_string(node_indx_);
   f_path += "/mem_banks";
@@ -1293,8 +1285,10 @@ int KFDNode::get_total_memory(uint64_t* total) {
     while (std::getline(fs, line)) {
       if (line.substr(0, size_in_bytes_property.length()) == size_in_bytes_property) {
         auto bytes = line.substr(size_in_bytes_property.length());
+        // stoull() wraps a negative string to a huge value instead of throwing.
+        if (bytes.find('-') != std::string::npos) break;
         try {
-          *total += std::stol(bytes);
+          *total += std::stoull(bytes);
           break;
         } catch (...) {
           dentry = readdir(kfd_node_dir);
@@ -1430,7 +1424,7 @@ int KFDNode::get_cache_info(rsmi_gpu_cache_info_t* info) {
   if (ret != 0) return ret;
 
   // /sys/class/kfd/kfd/topology/nodes/1/caches/0/properties
-  std::string f_path = kKFDNodesPathRoot;
+  std::string f_path = KFDNodesPathRoot();
   f_path += "/";
   f_path += std::to_string(node_indx_);
   f_path += "/";
@@ -1471,11 +1465,11 @@ int KFDNode::get_cache_info(rsmi_gpu_cache_info_t* info) {
 
       if (info->num_cache_types >= RSMI_MAX_CACHE_TYPES) return 1;
 
-      info->cache[info->num_cache_types].cache_level = cache_level;
-      info->cache[info->num_cache_types].cache_size_kb = cache_size;
-      info->cache[info->num_cache_types].max_num_cu_shared = num_cu_shared;
+      info->cache[info->num_cache_types].cache_level = static_cast<uint32_t>(cache_level);
+      info->cache[info->num_cache_types].cache_size_kb = static_cast<uint32_t>(cache_size);
+      info->cache[info->num_cache_types].max_num_cu_shared = static_cast<uint32_t>(num_cu_shared);
       info->cache[info->num_cache_types].num_cache_instance = 1;
-      info->cache[info->num_cache_types].flags = cache_type;
+      info->cache[info->num_cache_types].flags = static_cast<uint32_t>(cache_type);
       info->num_cache_types++;
     } catch (...) {
       continue;
@@ -1488,7 +1482,7 @@ int KFDNode::get_cache_info(rsmi_gpu_cache_info_t* info) {
 int read_node_properties(uint32_t node, std::string property_name, uint64_t* val) {
   std::ostringstream ss;
   std::string propertiesFullPath =
-      "/sys/class/kfd/kfd/topology/nodes/" + std::to_string(node) + "/properties";
+      std::string(KFDNodesPathRoot()) + "/" + std::to_string(node) + "/properties";
   int retVal = EINVAL;
   if (property_name.empty() || val == nullptr) {
     ss << __PRETTY_FUNCTION__ << " | File: " << propertiesFullPath
@@ -1522,7 +1516,7 @@ int read_node_properties(uint32_t node, std::string property_name, uint64_t* val
 int get_gpu_id(uint32_t node, uint64_t* gpu_id) {
   std::ostringstream ss;
   std::string gpu_id_FullPath =
-      "/sys/class/kfd/kfd/topology/nodes/" + std::to_string(node) + "/gpu_id";
+      std::string(KFDNodesPathRoot()) + "/" + std::to_string(node) + "/gpu_id";
   int retVal = EINVAL;
   if (gpu_id == nullptr) {
     ss << __PRETTY_FUNCTION__ << " | File: " << gpu_id_FullPath << " | Issue: Could not read node #"
@@ -1554,7 +1548,7 @@ int get_gpu_id(uint32_t node, uint64_t* gpu_id) {
 int KFDNode::get_gfx_target_version(uint64_t* gfx_target_version) {
   std::ostringstream ss;
   std::string properties_path =
-      "/sys/class/kfd/kfd/topology/nodes/" + std::to_string(this->node_indx_) + "/properties";
+      std::string(KFDNodesPathRoot()) + "/" + std::to_string(this->node_indx_) + "/properties";
   uint64_t gfx_version = 0;
   int ret = read_node_properties(this->node_indx_, "gfx_target_version", &gfx_version);
   *gfx_target_version = gfx_version;
@@ -1567,7 +1561,7 @@ int KFDNode::get_gfx_target_version(uint64_t* gfx_target_version) {
 }
 
 int32_t KFDNode::get_simd_per_cu(uint64_t* simd_per_cu) const {
-  const std::string properties_path("/sys/class/kfd/kfd/topology/nodes/" +
+  const std::string properties_path(std::string(KFDNodesPathRoot()) + "/" +
                                     std::to_string(this->node_indx_) + "/properties");
 
   auto tmp_simd_per_cu = uint64_t(0);
@@ -1577,7 +1571,7 @@ int32_t KFDNode::get_simd_per_cu(uint64_t* simd_per_cu) const {
 }
 
 int32_t KFDNode::get_simd_count(uint64_t* simd_count) const {
-  const std::string properties_path("/sys/class/kfd/kfd/topology/nodes/" +
+  const std::string properties_path(std::string(KFDNodesPathRoot()) + "/" +
                                     std::to_string(this->node_indx_) + "/properties");
 
   auto tmp_simd_count = uint64_t(0);
@@ -1591,7 +1585,7 @@ int32_t KFDNode::get_simd_count(uint64_t* simd_count) const {
 int KFDNode::get_gpu_id(uint64_t* gpu_id) {
   std::ostringstream ss;
   std::string gpuid_path =
-      "/sys/class/kfd/kfd/topology/nodes/" + std::to_string(this->node_indx_) + "/gpu_id";
+      std::string(KFDNodesPathRoot()) + "/" + std::to_string(this->node_indx_) + "/gpu_id";
   const uint64_t undefined_gpu_id = std::numeric_limits<uint64_t>::max();
   std::string gpu_id_string = "";
   *gpu_id = undefined_gpu_id;
@@ -1622,7 +1616,8 @@ int KFDNode::get_gpu_id(uint64_t* gpu_id) {
 int KFDNode::get_node_id(uint32_t* node_id) {
   std::ostringstream ss;
   int ret = 0;
-  std::string nodeid_path = "/sys/class/kfd/kfd/topology/nodes/" + std::to_string(this->node_indx_);
+  std::string nodeid_path =
+      std::string(KFDNodesPathRoot()) + "/" + std::to_string(this->node_indx_);
   *node_id = this->node_indx_;
   ss << __PRETTY_FUNCTION__ << " | File: " << nodeid_path
      << " | Read node #: " << std::to_string(this->node_indx_)

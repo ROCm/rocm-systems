@@ -2,7 +2,7 @@
 ###############################################################################
 # MIT License
 #
-# Copyright (c) 2025 Advanced Micro Devices, Inc.
+# Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -25,8 +25,9 @@
 
 import os
 import re
+import sqlite3
 
-from .importer import RocpdImportData
+from .importer import RocpdImportData, add_decode_args, get_decode_args
 from .query import export_sqlite_query
 from . import output_config
 from . import libpyrocpd
@@ -38,8 +39,12 @@ def write_sql_query_to_csv(
     query,
     filename="",
     postfix="trace",
+    integer_columns=(),
 ) -> None:
-    """Write the contents of a SQL query to a CSV file in the specified output path."""
+    """Write the contents of a SQL query to a CSV file in the specified output path.
+
+    ``integer_columns`` names columns whose integer text is written as unquoted numbers.
+    """
 
     query_not_empty = f"""
         SELECT EXISTS (
@@ -58,7 +63,7 @@ def write_sql_query_to_csv(
         config.output_path, f"{file_prefix}{filename}{file_postfix}.csv"
     )
 
-    kwargs = {"title_columns": True}
+    kwargs = {"title_columns": True, "integer_columns": integer_columns}
     export_sqlite_query(
         connection, query, export_format="csv", export_path=export_path, **kwargs
     )
@@ -213,7 +218,7 @@ def build_agent_id_string(agent_index_value, prefix=""):
         return ""
 
 
-def get_kernel_csv_query(config) -> str:
+def get_kernel_csv_query(importData, config) -> str:
     agent_id = build_agent_id_string(config.agent_index_value)
 
     if config.kernel_rename:
@@ -221,14 +226,18 @@ def get_kernel_csv_query(config) -> str:
     else:
         kernel_name = "name"
 
+    # check if graph_launch is supported and add new fields:
+    hip_graph_fields = ()
+    if "graph_launch" in importData.supported_features:
+        hip_graph_fields = ("graph_exec_id", "graph_node_id")
+
     select_columns = [
         "guid",
         "'KERNEL_DISPATCH' AS Kind",
         f"{agent_id} AS Agent_Id",
         "queue_id",
         "stream_id",
-        "graph_exec_id AS Graph_Exec_Id",
-        "graph_node_id AS Graph_Node_Id",
+        *hip_graph_fields,
         "tid AS Thread_Id",
         "dispatch_id",
         "kernel_Id",
@@ -262,7 +271,7 @@ def get_kernel_csv_query(config) -> str:
 
 
 def write_kernel_csv(importData, config) -> None:
-    query = get_kernel_csv_query(config)
+    query = get_kernel_csv_query(importData, config)
     write_sql_query_to_csv(importData, config, query, "kernel")
 
 
@@ -271,14 +280,21 @@ def write_memory_copy_csv(importData, config) -> None:
     src_agent_id = build_agent_id_string(config.agent_index_value, "src")
     dst_agent_id = build_agent_id_string(config.agent_index_value, "dst")
 
+    # check if graph_launch is supported and add new fields:
+    hip_graph_fields = ()
+    if "graph_launch" in importData.supported_features:
+        hip_graph_fields = (
+            "graph_exec_id",
+            "graph_node_id",
+        )
+
     query = f"""
         SELECT
             guid,
             'MEMORY_COPY' AS Kind,
             name AS Direction,
             stream_id,
-            graph_exec_id AS Graph_Exec_Id,
-            graph_node_id AS Graph_Node_Id,
+            {(','.join(hip_graph_fields) + ',') if hip_graph_fields else ''}
             {src_agent_id} AS Source_Agent_Id,
             {dst_agent_id} AS Destination_Agent_Id,
             stack_id AS Correlation_Id,
@@ -313,6 +329,32 @@ def write_graph_launch_csv(importData, config) -> None:
             guid ASC, start ASC, end DESC
     """
     write_sql_query_to_csv(importData, config, query, "graph_launch")
+
+
+def write_hip_event_csv(importData, config) -> None:
+
+    agent_id = build_agent_id_string(config.agent_index_value)
+
+    query = f"""
+        SELECT
+            guid,
+            'HIP_EVENT' AS Kind,
+            name AS Operation,
+            {agent_id} AS Agent_Id,
+            queue_id,
+            stream_id,
+            tid AS Thread_Id,
+            hip_event_handle AS Event_Handle,
+            source_queue_id AS Source_Queue_Id,
+            stack_id AS Correlation_Id,
+            start AS Start_Timestamp,
+            end AS End_Timestamp,
+            duration AS Duration
+        FROM "hip_events"
+        ORDER BY
+            guid ASC, start ASC, end DESC
+    """
+    write_sql_query_to_csv(importData, config, query, "hip_event")
 
 
 def write_memory_allocation_csv(importData, config) -> None:
@@ -418,7 +460,15 @@ def write_spm_counters_csv(importData, config) -> None:
         "vgpr_count",
         "accum_vgpr_count",
         "sgpr_count",
-        "counter_name || '[XCC: ' || xcc || ', SE: ' || shader_engine || ', Instance: ' || instance || ']' AS counter_name",
+        (
+            "counter_name || '[XCC: ' || COALESCE(xcc, '') || "
+            "', Instance: ' || COALESCE(instance, '') || "
+            "', SE: ' || COALESCE(shader_engine, '') || "
+            "', SA: ' || COALESCE(shader_array, '') || "
+            "', WGP: ' || COALESCE(wgp, '') || ']' AS counter_name"
+            if "spm_counter_location" in importData.supported_features
+            else "counter_name || '[XCC: ' || xcc || ', SE: ' || shader_engine || ', Instance: ' || instance || ']' AS counter_name"
+        ),
         "value AS Counter_Value",
         "timestamp AS Timestamp",
     ]
@@ -480,17 +530,101 @@ def write_region_csv(importData, config) -> None:
     write_sql_query_to_csv(importData, config, query, "regions")
 
 
+def _pc_sampling_query_runs(importData, query: str) -> bool:
+    """Return False when *query* needs a decoded view or column that is missing."""
+    try:
+        importData.execute(f"SELECT * FROM ({query}) LIMIT 0")
+        return True
+    except sqlite3.OperationalError as error:
+        message = str(error).lower()
+        if any(
+            text in message
+            for text in ("no such table", "no such view", "no such column")
+        ):
+            return False
+        raise
+
+
+def write_pc_sampling_host_trap_csv(importData, config) -> None:
+    query = """
+        SELECT
+            sample.guid,
+            sample.timestamp AS Sample_Timestamp,
+            sample.exec_mask AS Exec_Mask,
+            sample.dispatch_id AS Dispatch_Id,
+            sample.instruction AS Instruction,
+            sample.instruction_comment AS Instruction_Comment,
+            event.stack_id AS Correlation_Id
+        FROM "rocpd_gpu_pc_sample_decoded" sample
+        JOIN rocpd_event event ON event.guid = sample.guid AND event.id = sample.event_id
+        WHERE sample.wave_issued IS NULL
+        ORDER BY sample.guid ASC, sample.id ASC
+    """
+    if not _pc_sampling_query_runs(importData, query):
+        return
+    # exec_mask is stored as decimal text to keep all 64 bits; export it unquoted.
+    write_sql_query_to_csv(
+        importData,
+        config,
+        query,
+        "pc_sampling_host_trap",
+        integer_columns=("Exec_Mask",),
+    )
+
+
+def write_pc_sampling_stochastic_csv(importData, config) -> None:
+    query = """
+        SELECT
+            sample.guid,
+            sample.timestamp AS Sample_Timestamp,
+            sample.exec_mask AS Exec_Mask,
+            sample.dispatch_id AS Dispatch_Id,
+            sample.instruction AS Instruction,
+            sample.instruction_comment AS Instruction_Comment,
+            event.stack_id AS Correlation_Id,
+            sample.wave_issued AS Wave_Issued_Instruction,
+            sample.inst_type_name AS Instruction_Type,
+            sample.stall_reason_name AS Stall_Reason,
+            sample.wave_count AS Wave_Count
+        FROM "rocpd_gpu_pc_sample_decoded" sample
+        JOIN rocpd_event event ON event.guid = sample.guid AND event.id = sample.event_id
+        WHERE sample.wave_issued IS NOT NULL
+        ORDER BY sample.guid ASC, sample.id ASC
+    """
+    if not _pc_sampling_query_runs(importData, query):
+        return
+    write_sql_query_to_csv(
+        importData,
+        config,
+        query,
+        "pc_sampling_stochastic",
+        integer_columns=("Exec_Mask",),
+    )
+
+
 def write_csv(importData, config):
 
     write_agent_info_csv(importData, config)
     write_counters_csv(importData, config)
-    write_graph_launch_csv(importData, config)
-    write_spm_counters_csv(importData, config)
     write_kernel_csv(importData, config)
     write_memory_allocation_csv(importData, config)
     write_memory_copy_csv(importData, config)
     write_region_csv(importData, config)
     write_scratch_memory_csv(importData, config)
+
+    if "pc_sampling" in importData.supported_features:
+        write_pc_sampling_host_trap_csv(importData, config)
+        write_pc_sampling_stochastic_csv(importData, config)
+
+    # graph launch was not introduced until schema version 3.0.2
+    if "graph_launch" in importData.supported_features:
+        write_graph_launch_csv(importData, config)
+
+    if "spm_counters" in importData.supported_features:
+        write_spm_counters_csv(importData, config)
+
+    if "hip_event" in importData.supported_features:
+        write_hip_event_csv(importData, config)
 
 
 def execute(input, config=None, **kwargs):
@@ -540,17 +674,20 @@ def main(argv=None):
     process_generic_args = output_config.add_generic_args(parser)
     process_time_window_args = time_window.add_args(parser)
     process_csv_args = add_args(parser)
+    add_decode_args(parser)
 
     args = parser.parse_args(argv)
 
     input = RocpdImportData(
-        args.input, automerge_limit=getattr(args, "automerge_limit", None)
+        args.input,
+        automerge_limit=getattr(args, "automerge_limit", None),
+        **get_decode_args(args),
     )
 
     out_cfg_args = process_out_config_args(input, args)
     generic_out_cfg_args = process_generic_args(input, args)
     csv_args = process_csv_args(input, args)
-    process_time_window_args(input, args)
+    time_window.process_args_or_exit(process_time_window_args, input, args)
 
     all_args = {
         **out_cfg_args,

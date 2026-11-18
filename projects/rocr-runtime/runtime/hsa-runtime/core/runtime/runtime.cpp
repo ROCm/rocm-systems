@@ -44,7 +44,10 @@
 #include <cassert>
 #include <chrono>
 #include <thread>
+#include <condition_variable>
+#include <mutex>
 #include <cstring>
+#include <optional>
 #include <regex>
 #include <string>
 #if defined(__linux__)
@@ -82,7 +85,6 @@ extern "C" void __sanitizer_purge_allocator(void);
 #include "core/inc/amd_topology.h"
 #include "core/inc/exceptions.h"
 #include "core/inc/host_queue.h"
-#include "core/inc/hotswap.hpp"
 #include "core/inc/hsa_api_trace_int.h"
 #include "core/inc/hsa_ext_amd_impl.h"
 #include "core/inc/hsa_ext_interface.h"
@@ -90,6 +92,7 @@ extern "C" void __sanitizer_purge_allocator(void);
 #include "core/inc/signal.h"
 #include "core/util/memory.h"
 #include "core/util/os.h"
+#include "core/util/poll_backoff.h"
 #include "inc/hsa_ven_amd_aqlprofile.h"
 
 #ifndef HSA_VERSION_MAJOR
@@ -122,6 +125,8 @@ extern void _loader_debug_state();
 namespace core {
 bool g_use_interrupt_wait;
 bool g_use_mwaitx;
+bool g_use_yielding_poll;
+bool g_use_clflushopt;
 Runtime* Runtime::runtime_singleton_ = NULL;
 
 hsa_status_t Runtime::Acquire() {
@@ -224,13 +229,19 @@ void Runtime::RegisterAgent(Agent* agent, bool Enabled) {
       // Default system pool must support kernarg
       for (auto pool : system_regions_fine_) {
         if (pool->kernarg()) {
-          system_allocator_ = [pool](size_t size, size_t alignment,
-                                     MemoryRegion::AllocateFlags alloc_flags,
-                                     int agent_node_id) -> void* {
+          // Capture a raw pointer (not the shared_ptr) so the closure state is
+          // trivially destructible and stored inline in std::function.  The
+          // region outlives the closure via system_regions_fine_ and the owning
+          // CPU agent, and this avoids a heap-buffer-overflow when the closure
+          // copy held by BaseShared is torn down during Unload().
+          const core::MemoryRegion* pool_ptr = pool.get();
+          system_allocator_ = [pool_ptr](size_t size, size_t alignment,
+                                         MemoryRegion::AllocateFlags alloc_flags,
+                                         int agent_node_id) -> void* {
             assert(alignment <= 4096);
             void* ptr = NULL;
             return (HSA_STATUS_SUCCESS ==
-                    core::Runtime::runtime_singleton_->AllocateMemory(pool.get(), size, alloc_flags,
+                    core::Runtime::runtime_singleton_->AllocateMemory(pool_ptr, size, alloc_flags,
                                                                       &ptr, agent_node_id))
                 ? ptr
                 : NULL;
@@ -888,10 +899,7 @@ hsa_status_t Runtime::GetSystemInfo(hsa_system_info_t attribute, void* value) {
       break;
     }
     case HSA_AMD_SYSTEM_INFO_SVM_ACCESSIBLE_BY_DEFAULT: {
-      bool ret = true;
-      for (auto agent : gpu_agents_)
-        ret &= (agent->supported_isas()[0]->GetXnack() == IsaFeature::Enabled);
-      *(bool*)value = ret;
+      *(bool*)value = core::Runtime::runtime_singleton_->XnackEnabled();
       break;
     }
     case HSA_AMD_SYSTEM_INFO_MWAITX_ENABLED: {
@@ -942,8 +950,10 @@ hsa_status_t Runtime::GetSystemInfo(hsa_system_info_t attribute, void* value) {
       // Host memory DMA-BUF allocation via vmem APIs requires:
       //  - Virtual Memory APIs supported by the driver
       //  - At least one GPU agent (needed for DRM operations)
+      //  - Requires vmem support, a GPU agent, and a non-DXG backend (WDDM/DXG has no host-memory VMM).
       auto* runtime = core::Runtime::runtime_singleton_;
-      *((bool*)value) = runtime->VirtualMemApiSupported() && !runtime->gpu_agents().empty();
+      *((bool*)value) = runtime->VirtualMemApiSupported() && !runtime->gpu_agents().empty() &&
+                        !runtime->thunkLoader()->IsDXG();
       break;
     }
     default:
@@ -979,9 +989,16 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal, hsa_signal_cond
 
   asyncInfo->new_events.PushBack(signal, cond, value, handler, arg);
 
-  hsa_signal_handle(asyncInfo->control.wake)->StoreRelease(1);
+  hsa_signal_handle(asyncInfo->control.wake)->StoreReleaseAndNotify(1);
 
   return HSA_STATUS_SUCCESS;
+}
+
+void Runtime::WakeAsyncSignalMonitor() {
+  // Notify unconditionally, as SetAsyncSignalHandler() does, so a monitor about to park can't
+  // miss it. Like SetAsyncSignalHandler(), this assumes waiters are gone before teardown.
+  if (!asyncSignals_.empty())
+    hsa_signal_handle((*asyncSignals_)->control.wake)->StoreReleaseAndNotify(1);
 }
 
 hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents, hsa_handle_t handle,
@@ -1077,6 +1094,25 @@ hsa_status_t Runtime::InteropUnmap(void* ptr) {
   return HSA_STATUS_SUCCESS;
 }
 
+void Runtime::MarkReservedAddressSvm(const void* ptr, size_t size) {
+  if (ptr == nullptr || size == 0) return;
+
+  const uint8_t* start = reinterpret_cast<const uint8_t*>(ptr);
+  const uint8_t* end = start + size;
+
+  std::lock_guard<std::shared_mutex> lock(memory_lock_);
+  auto it = reserved_address_map_.upper_bound(ptr);
+  if (it != reserved_address_map_.begin()) --it;
+
+  for (; it != reserved_address_map_.end(); ++it) {
+    const uint8_t* range_start = reinterpret_cast<const uint8_t*>(it->first);
+    const uint8_t* range_end = range_start + it->second.size;
+    if (range_end <= start) continue;
+    if (range_start >= end) break;
+    it->second.svm_attrib = true;
+  }
+}
+
 /* This should be called memory_lock_ held */
 Runtime::AddressHandle* Runtime::VMemoryFindReservedAddressHandle(const void* va) {
   auto reservedAddressIt = reserved_address_map_.upper_bound(va);
@@ -1105,42 +1141,56 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
         ptr) {
       /* Allocation found */
       info->type = HSA_EXT_POINTER_TYPE_HSA_VMEM;
-      info->agentBaseAddress = const_cast<void*>(ptr);
-      info->hostBaseAddress = const_cast<void*>(ptr);
+      // Report the mapping the pointer lies in, as for other allocations: callers pair the base
+      // with sizeInBytes, so an interior pointer must not be reported as the base.
+      info->agentBaseAddress = const_cast<void*>(mappedHandleIt->first);
+      info->hostBaseAddress = const_cast<void*>(mappedHandleIt->first);
       info->sizeInBytes = mappedHandleIt->second.size;
       info->registered = true;
-      info->agentOwner = mappedHandleIt->second.mem_handle->agentOwner()->public_handle();
 
-      // Populate global_flags from the backing region's mem_flags.
+      // Handles imported from another process (dmabuf or fabric) carry no local region: the
+      // owning agent and the allocation's memory flags belong to the exporter. Report those as
+      // unset instead of resolving them through MemoryHandle::region, which is NULL here.
       const AMD::MemoryRegion* memRegion =
-          static_cast<const AMD::MemoryRegion*>(mappedHandleIt->second.mem_handle->region);
-      assert(memRegion && "MappedHandle has a MemoryHandle with NULL region");
-      const HsaMemFlags& regionFlags = memRegion->mem_flags();
-      info->global_flags = regionFlags.ui32.CoarseGrain
-          ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED
-          : HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED;
-      info->global_flags |=
-          regionFlags.ui32.Uncached ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT : 0;
-      info->global_flags |= regionFlags.ui32.ExtendedCoherent
-          ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED
-          : 0;
-
-      // Populate alloc_flags from AllocateFlags stored in MemoryHandle and region flags.
-      MemoryRegion::AllocateFlags af = mappedHandleIt->second.mem_handle->alloc_flag;
+          mappedHandleIt->second.mem_handle->imported
+              ? nullptr
+              : static_cast<const AMD::MemoryRegion*>(mappedHandleIt->second.mem_handle->region);
+      info->agentOwner = {};
+      info->global_flags = 0;
       info->alloc_flags = 0;
+
+      if (memRegion != nullptr) {
+        info->agentOwner = mappedHandleIt->second.mem_handle->agentOwner()->public_handle();
+
+        // Populate global_flags from the backing region's mem_flags.
+        const HsaMemFlags& regionFlags = memRegion->mem_flags();
+        info->global_flags = regionFlags.ui32.CoarseGrain
+            ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED
+            : HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED;
+        info->global_flags |=
+            regionFlags.ui32.Uncached ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT : 0;
+        info->global_flags |= regionFlags.ui32.ExtendedCoherent
+            ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED
+            : 0;
+
+        if (regionFlags.ui32.ReadOnly)
+          info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_READONLY;
+        if (regionFlags.ui32.HostAccess)
+          info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_HOST_ACCESS;
+        if (regionFlags.ui32.AtomicAccessFull)
+          info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_ATOMIC_FULL;
+        if (regionFlags.ui32.AtomicAccessPartial)
+          info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_ATOMIC_PARTIAL;
+      }
+
+      // Populate alloc_flags from AllocateFlags stored in MemoryHandle.
+      MemoryRegion::AllocateFlags af = mappedHandleIt->second.mem_handle->alloc_flag;
       if (af & core::MemoryRegion::AllocateExecutable)
         info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_EXECUTABLE;
       if (af & core::MemoryRegion::AllocateContiguous)
         info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_CONTIGUOUS;
       if (af & core::MemoryRegion::AllocateNonPaged)
         info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_NONPAGED;
-      if (regionFlags.ui32.ReadOnly) info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_READONLY;
-      if (regionFlags.ui32.HostAccess)
-        info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_HOST_ACCESS;
-      if (regionFlags.ui32.AtomicAccessFull)
-        info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_ATOMIC_FULL;
-      if (regionFlags.ui32.AtomicAccessPartial)
-        info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_ATOMIC_PARTIAL;
 
       if (alloc && num_agents_accessible && accessible) {
         std::vector<hsa_agent_t> allowed_agents;
@@ -1172,9 +1222,17 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
   /* This is not a mapped address. Check if it is a reserved address range */
   auto addressHandle = VMemoryFindReservedAddressHandle(ptr);
   if (addressHandle) {
-    info->type = HSA_EXT_POINTER_TYPE_RESERVED_ADDR;
-    info->agentBaseAddress = NULL;
+    /*
+     * Reservations that have had hsa_amd_svm_attributes_set applied are backed
+     * by SVM system memory. Bare reservations have no backing.
+     */
+    info->type = addressHandle->svm_attrib ? HSA_EXT_POINTER_TYPE_SVM
+                                           : HSA_EXT_POINTER_TYPE_RESERVED_ADDR;
     info->hostBaseAddress = addressHandle->os_addr;
+    // The driver query supplies an agent address when it recognizes the
+    // reservation. Until then the agent base stays null. Fill and copy treat a
+    // non-null agent base as a mapped allocation and require an owner.
+    info->agentBaseAddress = nullptr;
     info->sizeInBytes = addressHandle->size;
     info->registered = addressHandle->registered;
     info->agentOwner = {};
@@ -1210,7 +1268,7 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
                 "Thunk pointer info mismatch");
 
   HsaPointerInfo thunkInfo;
-  uint32_t* mappedNodes;
+  uint32_t* mappedNodes = nullptr;
 
   hsa_amd_pointer_info_t retInfo = {0};
 
@@ -1224,6 +1282,20 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
 
   bool allocation_map_entry_found = false;
 
+  // Driver that described ptr. Node ids are unique only within a driver, so a node id is matched
+  // only against agents of that driver's type.
+  const Driver* ptr_driver = nullptr;
+  auto same_driver = [&](const Agent* agent) {
+    return agent->driver().kernel_driver_type_ == ptr_driver->kernel_driver_type_;
+  };
+  auto first_agent = [&](uint32_t node, bool enabled_only) -> Agent* {
+    auto it = agents_by_node_.find(node);
+    if (it == agents_by_node_.end()) return nullptr;
+    for (auto agent : it->second)
+      if (same_driver(agent) && (!enabled_only || agent->Enabled())) return agent;
+    return nullptr;
+  };
+
   {  // memory_lock protects access to the NMappedNodes array and fragment user data since these may
      // change with calls to memory APIs.
     std::lock_guard<std::shared_mutex> lock(memory_lock_);
@@ -1231,26 +1303,54 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
     if (VMemoryPtrInfo(ptr, &retInfo, alloc, num_agents_accessible, accessible) ==
         HSA_STATUS_SUCCESS) {
       /*
-       * For SVM allocations, the VA is reserved using hsa_amd_vmem_address_reserve with
-       * HSA_AMD_VMEM_ADDRESS_NO_REGISTER flag. So for SVM allocations, we do not return
-       * yet as we can check whether this address was registered via hsa_amd_svm_attributes_set
-       * and provide additional information from hsaKmtQueryPointerInfo.
+       * An unregistered reservation falls through to the driver query, including
+       * after hsa_amd_svm_attributes_set has changed its type to SVM. That is the
+       * query these NO_REGISTER addresses went through before. A registered
+       * reservation, bare or SVM, is fully described here.
        */
-      if (!(retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR && !retInfo.registered)) {
+      const bool query_driver = !retInfo.registered &&
+          (retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR ||
+           retInfo.type == HSA_EXT_POINTER_TYPE_SVM);
+      if (!query_driver) {
         memcpy(info, &retInfo, retInfo.size);
         return HSA_STATUS_SUCCESS;
       }
     }
 
-    // We don't care if this returns an error code.
-    // The type will be HSA_EXT_POINTER_TYPE_UNKNOWN if so.
-    auto err = HSAKMT_CALL(hsaKmtQueryPointerInfo(ptr, &thunkInfo));
-    if (err != HSAKMT_STATUS_SUCCESS || thunkInfo.Type == HSA_POINTER_UNKNOWN) {
-      if (retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR) {
-        /* This is an address that was reserved using hsa_amd_vmem_address_reserve with
-         * the HSA_AMD_VMEM_ADDRESS_NO_REGISTER flag, but the address was not registered
-         * with hsa_amd_svm_attributes_set. So we return the contents of retInfo that
-         * were previously filled with VMemoryPtrInfo.
+    // Ask the driver of the agent that owns the allocation. Memory the runtime has no record of
+    // is KFD's.
+    const AllocationRegion* record = nullptr;
+    auto entry = allocation_map_.upper_bound(ptr);
+    if (entry != allocation_map_.begin()) {
+      --entry;
+      if (ptr < reinterpret_cast<const uint8_t*>(entry->first) + entry->second.size)
+        record = &entry->second;
+    }
+    const Driver* driver = nullptr;
+    if (record != nullptr && record->region != nullptr) {
+      driver = &record->region->owner()->driver();
+    } else {
+      for (const auto& d : agent_drivers_) {
+        if (d->kernel_driver_type_ == DriverType::KFD) {
+          driver = d.get();
+          break;
+        }
+      }
+    }
+    if (driver != nullptr) {
+      const bool described =
+          driver->QueryPointerInfo(ptr, record ? record->region : nullptr,
+                                   record ? record->alloc_flags : MemoryRegion::AllocateNoFlags,
+                                   (record && record->region) ? &record->driver_handle : nullptr,
+                                   &thunkInfo) == HSA_STATUS_SUCCESS;
+      if (described) ptr_driver = driver;
+    }
+    if (ptr_driver == nullptr) {
+      if (retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR ||
+          retInfo.type == HSA_EXT_POINTER_TYPE_SVM) {
+        /* NO_REGISTER reservation. The driver has no object for it, whether or
+         * not hsa_amd_svm_attributes_set has run. Keep the reservation record:
+         * RESERVED_ADDR until attributes are set, SVM afterwards.
          */
         memcpy(info, &retInfo, retInfo.size);
         return HSA_STATUS_SUCCESS;
@@ -1316,9 +1416,8 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
       block_info->length = retInfo.sizeInBytes;
 
       // Report the owning agent, even if such an agent is not usable in the process.
-      auto nodeAgents = agents_by_node_.find(thunkInfo.Node);
-      assert(nodeAgents != agents_by_node_.end() && "Node id not found!");
-      block_info->agentOwner = nodeAgents->second[0];
+      block_info->agentOwner = first_agent(thunkInfo.Node, false);
+      assert(block_info->agentOwner != nullptr && "Node id not found!");
     }
     auto fragment = allocation_map_.upper_bound(ptr);
     if (fragment != allocation_map_.begin()) {
@@ -1326,11 +1425,14 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
       if ((fragment->first <= ptr) &&
           (ptr <
            reinterpret_cast<const uint8_t*>(fragment->first) + fragment->second.size_requested)) {
-        // agent and host address must match here. Only lock memory is allowed to have differing
-        // addresses but lock memory has type HSA_EXT_POINTER_TYPE_LOCKED and cannot be
-        // suballocated.
-        retInfo.agentBaseAddress = const_cast<void*>(fragment->first);
-        retInfo.hostBaseAddress = retInfo.agentBaseAddress;
+        // The agent address of a block can differ from its host address, so offset it by the
+        // fragment's position in the block. It need not point to host memory, hence uintptr_t.
+        const uintptr_t block_base = reinterpret_cast<uintptr_t>(
+            retInfo.hostBaseAddress ? retInfo.hostBaseAddress : retInfo.agentBaseAddress);
+        const uintptr_t offset = reinterpret_cast<uintptr_t>(fragment->first) - block_base;
+        retInfo.agentBaseAddress =
+            reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(retInfo.agentBaseAddress) + offset);
+        retInfo.hostBaseAddress = const_cast<void*>(fragment->first);
         retInfo.sizeInBytes = fragment->second.size_requested;
         retInfo.userData = fragment->second.user_ptr;
         allocation_map_entry_found = true;
@@ -1347,20 +1449,14 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
   // IPC and Graphics memory may come from a node that does not have an agent in this process.
   // Ex. ROCR_VISIBLE_DEVICES or peer GPU is not supported by ROCm.
   retInfo.agentOwner.handle = 0;
-  auto nodeAgents = agents_by_node_.find(thunkInfo.Node);
-  assert(nodeAgents != agents_by_node_.end() && "Node id not found!");
-  for (auto agent : nodeAgents->second) {
-    if (agent->Enabled()) {
-      retInfo.agentOwner = agent->public_handle();
-      break;
-    }
-  }
+  Agent* node_agent = first_agent(thunkInfo.Node, false);
+  assert(node_agent != nullptr && "Node id not found!");
+  if (Agent* owner = first_agent(thunkInfo.Node, true)) retInfo.agentOwner = owner->public_handle();
 
   // Correct agentOwner for locked memory.  Thunk reports the GPU that owns the
   // alias but users are expecting to see a CPU when the memory is system.
   if (retInfo.type == HSA_EXT_POINTER_TYPE_LOCKED) {
-    if ((nodeAgents == agents_by_node_.end()) ||
-        (nodeAgents->second[0]->device_type() != core::Agent::kAmdCpuDevice)) {
+    if ((node_agent == nullptr) || (node_agent->device_type() != core::Agent::kAmdCpuDevice)) {
       retInfo.agentOwner = cpu_agents_[0]->public_handle();
     }
   }
@@ -1372,7 +1468,8 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
     for (HSAuint32 i = 0; i < thunkInfo.NMappedNodes; i++) {
       assert(mappedNodes[i] <= max_node_id() &&
              "PointerInfo: Invalid node ID returned from thunk.");
-      count += agents_by_node_[mappedNodes[i]].size();
+      for (auto agent : agents_by_node_[mappedNodes[i]])
+        if (same_driver(agent)) count++;
     }
 
     *num_agents_accessible = count;
@@ -1386,8 +1483,8 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
 
       uint32_t index = 0;
       for (HSAuint32 i = 0; i < thunkInfo.NMappedNodes; i++) {
-        auto& list = agents_by_node_[mappedNodes[i]];
-        for (auto agent : list) {
+        for (auto agent : agents_by_node_[mappedNodes[i]]) {
+          if (!same_driver(agent)) continue;
           (*accessible)[index] = agent->public_handle();
           index++;
         }
@@ -1632,6 +1729,18 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   return HSA_STATUS_SUCCESS;
 }
 
+void Runtime::ReleaseImportHandles(HsaMemoryObjectHandle owner,
+                                   const std::vector<AllocationRegion::PeerImport>& peers) {
+  // hsaKmtMemHandleFreePreserveMetadata is chosen over hsaKmtMemHandleFree because the latter
+  // clears the exporter's IPC token, which an importer does not own.
+  for (const auto& peer : peers) {
+    if (HSAKMT_CALL(hsaKmtMemHandleFreePreserveMetadata(peer.thunk_bo)) != HSAKMT_STATUS_SUCCESS)
+      debug_warning(false && "Peer dma-buf handle release failed");
+  }
+  if (HSAKMT_CALL(hsaKmtMemHandleFreePreserveMetadata(owner)) != HSAKMT_STATUS_SUCCESS)
+    debug_warning(false && "Owner dma-buf handle release failed");
+}
+
 int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle, unsigned int numNodes,
                              HSAuint32* nodes, void** importAddress, HSAuint64* importSize,
                              bool isDmabufSysmem, uint32_t shared_handle) {
@@ -1660,7 +1769,7 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle, un
   if (dmabuf_fd == -1) return -1;
   MAKE_SCOPE_GUARD([&]() { os::DmaBufClose(&dmabuf_fd); });
 
-  HsaGraphicsResourceInfo info;
+  HsaGraphicsResourceInfo info{};
   HSA_REGISTER_MEM_FLAGS regFlags{0};
   regFlags.ui32.requiresVAddr = !isDmabufSysmem;
   int err = HSAKMT_CALL(hsaKmtRegisterGraphicsHandleToNodesExt(static_cast<HSAuint64>(dmabuf_fd),
@@ -1697,14 +1806,61 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle, un
     // hsaKmtRegisterGraphicsHandleToNodesExt and is cleaned up via
     // hsaKmtDeregisterMemory in IPCDetach.
     if (isDmabufSysmem) {
+      // The importing process can touch this buffer from any GPU, and
+      // hsaKmtMemoryVaMap only maps a buffer object into the device that owns
+      // it, so every DRM device needs an import of its own. An import on
+      // another device is a fresh buffer object with no IPC metadata to check.
+      HsaHandleImportFlags peerFlags = hflags;
+      peerFlags.ui32.IPCHandle = 0;
+
+      std::vector<AllocationRegion::PeerImport> peerImports;
+      std::vector<HsaAMDGPUDeviceHandle> importedDevices;
+
+      HSAuint32 ownerNode = AllocationRegion::kNodeUnmapped;
+
+      if (thunkLoader()->IsDXG()) {
+        // Peer imports are unsupported by the current DXG thunk, which assigns the mapping
+        // address itself in ReserveIPCSysMem. ownerNode is still set so IPCDetach runs the
+        // unmap.
+        ownerNode = agent->node_id();
+      } else {
+        for (core::Agent* peer : gpu_agents_) {
+          HsaHandleImportDesc peerDesc = desc;
+          peerDesc.device_handle = reinterpret_cast<AMD::GpuAgent*>(peer)->libThunkDev();
+          if (peerDesc.device_handle == desc.device_handle) {
+            // The import above covers every node of the exporting device.
+            if (ownerNode == AllocationRegion::kNodeUnmapped) ownerNode = peer->node_id();
+            continue;
+          }
+          // A GPU in a multi-partition mode such as CPX exposes several agents on one device,
+          // and a second map of the same address in its VM would fail.
+          if (std::find(importedDevices.begin(), importedDevices.end(), peerDesc.device_handle) !=
+              importedDevices.end())
+            continue;
+
+          // An attach naming no agents grants every agent access, so a device
+          // that cannot import the buffer fails the attach.
+          HsaHandleImportResult peerRes = {};
+          if (HSAKMT_CALL(hsaKmtHandleImport(&peerDesc, &peerRes, &peerFlags)) !=
+              HSAKMT_STATUS_SUCCESS) {
+            fprintf(stderr, "IPC Client Import: dma-buf import failed on node %u\n",
+                    peer->node_id());
+            ReleaseImportHandles(res.buf_handle, peerImports);
+            return -1;
+          }
+          importedDevices.push_back(peerDesc.device_handle);
+          peerImports.push_back({peer->node_id(), peerRes.buf_handle});
+        }
+      }
+
       std::lock_guard<std::shared_mutex> lock(memory_lock_);
       auto [it, inserted] = allocation_map_.try_emplace(
           *importAddress, nullptr, *importSize, *importSize, core::MemoryRegion::AllocateNoFlags);
-      if (!inserted && it->second.thunk_bo) {
-        HSAKMT_CALL(hsaKmtMemHandleFreePreserveMetadata(it->second.thunk_bo));
-      }
+      if (!inserted && it->second.thunk_bo)
+        ReleaseImportHandles(it->second.thunk_bo, it->second.thunk_peer_imports);
       it->second.thunk_bo = res.buf_handle;
-      it->second.thunk_node_id = agent->node_id();
+      it->second.thunk_node_id = ownerNode;
+      it->second.thunk_peer_imports = std::move(peerImports);
     } else {
       HSAKMT_CALL(hsaKmtMemHandleFreePreserveMetadata(res.buf_handle));
     }
@@ -1727,22 +1883,30 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
   bool isFragment = false;
   uint32_t fragOffset = 0;
 
-  auto fixFragment = [&](HsaMemoryObjectHandle new_thunk_bo, HSAuint32 node_id = -1) {
+  // Records the imported allocation in allocation_map_. For a fragment export, the address and
+  // length are narrowed to the shared sub-range first.
+  auto registerImport = [&](HsaMemoryObjectHandle new_thunk_bo,
+                            HSAuint32 node_id = AllocationRegion::kNodeUnmapped,
+                            std::vector<AllocationRegion::PeerImport> peer_imports = {},
+                            std::optional<void*> intermediateAddr = std::nullopt) {
     if (isFragment) {
       importAddress = reinterpret_cast<uint8_t*>(importAddress) + fragOffset;
       len = Min(len, importSize - fragOffset);
     }
     std::lock_guard<std::shared_mutex> lock(memory_lock_);
+    // IPCClientImport recorded the handles under a temporary address, since the caller-visible
+    // one was not known yet. Removing that entry here stops the registration below from finding
+    // those handles and releasing what it will store.
+    if (intermediateAddr) allocation_map_.erase(*intermediateAddr);
     auto [it, inserted] = allocation_map_.try_emplace(importAddress, nullptr, len, len,
                                                       core::MemoryRegion::AllocateNoFlags);
-    // If a new thunk_bo is provided, store it. If an entry already exists with
-    // a different thunk_bo, free the old one first to avoid leaking it.
+    // A prior attach of the same handle may already be registered here. Release it before overwriting.
     if (new_thunk_bo) {
-      if (it->second.thunk_bo && it->second.thunk_bo != new_thunk_bo) {
-        HSAKMT_CALL(hsaKmtMemHandleFreePreserveMetadata(it->second.thunk_bo));
-      }
+      if (it->second.thunk_bo)
+        ReleaseImportHandles(it->second.thunk_bo, it->second.thunk_peer_imports);
       it->second.thunk_bo = new_thunk_bo;
       it->second.thunk_node_id = node_id;
+      it->second.thunk_peer_imports = std::move(peer_imports);
     }
   };
 
@@ -1773,24 +1937,24 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
       mem_flags.Value = 0;
       mem_flags.ui32.CoarseGrain = 1;
       mem_flags.ui32.PageSize = HSA_PAGE_SIZE_64KB;
-      if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, mem_flags, numNodes,
-                                    nodes)) != HSAKMT_STATUS_SUCCESS) {
+      if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, mem_flags,
+                                                numNodes, nodes)) != HSAKMT_STATUS_SUCCESS) {
         mem_flags.ui32.PageSize = HSA_PAGE_SIZE_4KB;
-        if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, mem_flags, numNodes,
-                                      nodes)) != HSAKMT_STATUS_SUCCESS) {
+        if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, mem_flags,
+                                                  numNodes, nodes)) != HSAKMT_STATUS_SUCCESS) {
           HSAKMT_CALL(hsaKmtDeregisterMemory(importAddress));
           return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
         }
       }
     }
-    fixFragment(NULL);
+    registerImport(NULL);
     *mapped_ptr = importAddress;
     return HSA_STATUS_SUCCESS;
   };
 
   if ((importHandle.handle[6] & 0x80000000) != 0) {
     isFragment = true;
-    fragOffset = (importHandle.handle[6] & 0x1FF) * 4096;
+    fragOffset = (importHandle.handle[6] & 0x1FF) * os::PageSize();
     importHandle.handle[6] &= ~(0x80000000 | 0x1FF);
   }
 
@@ -1808,35 +1972,62 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
     if (!isDmabufSysMem) return mapMemoryToNodes(0, NULL);
 
     // System memory DMA Buf import
-    auto errCleanup = [&](HsaMemoryObjectHandle bo) {
-      HSAKMT_CALL(hsaKmtMemHandleFree(bo));
+    void* cpuPtr = nullptr;
+    void* intermediateAddr = importAddress;
+    HsaMemoryObjectHandle bo = nullptr;
+    HSAuint32 gpu_node_id = AllocationRegion::kNodeUnmapped;
+    std::vector<AllocationRegion::PeerImport> peerImports;
+    {
+      std::lock_guard<std::shared_mutex> lock(memory_lock_);
+      auto allocation = allocation_map_.find(importAddress);
+      if (allocation == allocation_map_.end() || !allocation->second.thunk_bo)
+        return HSA_STATUS_ERROR;
+      bo = allocation->second.thunk_bo;
+      gpu_node_id = allocation->second.thunk_node_id;
+      peerImports = std::move(allocation->second.thunk_peer_imports);
+    }
+
+    // Releasing a buffer object unmaps its CPU mapping and closes its GEM handle, which
+    // drops the VA maps taken from it, so the maps that succeeded above need no explicit
+    // unmap here.
+    auto errCleanup = [&]() {
+      ReleaseImportHandles(bo, peerImports);
+      std::lock_guard<std::shared_mutex> lock(memory_lock_);
+      allocation_map_.erase(intermediateAddr);
       return HSA_STATUS_ERROR;
     };
 
     // Create a shared cpu access pointer for user
-    void* cpuPtr;
-    void* intermediateAddr = importAddress;
-    HsaMemoryObjectHandle bo = allocation_map_[importAddress].thunk_bo;
     HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryCpuMap(bo, &cpuPtr));
     if (status != HSAKMT_STATUS_SUCCESS) {
-      return errCleanup(bo);
+      return errCleanup();
     }
-    HSAuint32 gpu_node_id = allocation_map_[importAddress].thunk_node_id;
-    status = HSAKMT_CALL(hsaKmtMemoryVaMap(bo, 0, static_cast<HSAuint64>(importSize),
-                                           reinterpret_cast<HSAuint64>(cpuPtr),
-                                           HSA_MEMORY_ACCESS_RW, gpu_node_id));
-    if (status != HSAKMT_STATUS_SUCCESS) {
-      return errCleanup(bo);
+    if (gpu_node_id != AllocationRegion::kNodeUnmapped) {
+      status = HSAKMT_CALL(hsaKmtMemoryVaMap(bo, 0, static_cast<HSAuint64>(importSize),
+                                             reinterpret_cast<HSAuint64>(cpuPtr),
+                                             HSA_MEMORY_ACCESS_RW, gpu_node_id));
+      if (status != HSAKMT_STATUS_SUCCESS) {
+        return errCleanup();
+      }
     }
-    importAddress = cpuPtr;
-    fixFragment(bo, gpu_node_id);
 
-    // Remove the stale intermediate entry created by IPCClientImport.
-    // The canonical entry now lives at cpuPtr (set by fixFragment above).
-    if (intermediateAddr != importAddress) {
-      std::lock_guard<std::shared_mutex> lock(memory_lock_);
-      allocation_map_.erase(intermediateAddr);
+    // Every GPU needs the mapping at the same address: work submitted by the
+    // importing process is not restricted to the exporting node, and for an IPC
+    // signal the command processor writes the completion value to this page.
+    for (const auto& peer : peerImports) {
+      status = HSAKMT_CALL(hsaKmtMemoryVaMap(peer.thunk_bo, 0,
+                                             static_cast<HSAuint64>(importSize),
+                                             reinterpret_cast<HSAuint64>(cpuPtr),
+                                             HSA_MEMORY_ACCESS_RW, peer.node_id));
+      if (status != HSAKMT_STATUS_SUCCESS) {
+        fprintf(stderr, "IPC Attach: dma-buf mapping failed on node %u\n", peer.node_id);
+        return errCleanup();
+      }
     }
+
+    // Update importAddress to the caller-visible address.
+    importAddress = cpuPtr;
+    registerImport(bo, gpu_node_id, std::move(peerImports), intermediateAddr);
 
     *mapped_ptr = importAddress;
     return HSA_STATUS_SUCCESS;
@@ -1871,16 +2062,20 @@ hsa_status_t Runtime::IPCDetach(void* ptr) {
       if (it->second.region != nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       if (it->second.thunk_bo) {
         HSAuint32 gpu_node_id = it->second.thunk_node_id;
-        HSAKMT_STATUS status = HSAKMT_CALL(
-            hsaKmtMemoryVaUnmap(it->second.thunk_bo, 0, static_cast<HSAuint64>(it->second.size),
-                                reinterpret_cast<HSAuint64>(ptr), gpu_node_id));
-        if (status != HSAKMT_STATUS_SUCCESS) {
-          return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+        for (const auto& peer : it->second.thunk_peer_imports) {
+          if (HSAKMT_CALL(hsaKmtMemoryVaUnmap(peer.thunk_bo, 0,
+                                              static_cast<HSAuint64>(it->second.size),
+                                              reinterpret_cast<HSAuint64>(ptr), peer.node_id)) !=
+              HSAKMT_STATUS_SUCCESS)
+            debug_warning(false && "Peer dma-buf unmap failed");
         }
-        status = HSAKMT_CALL(hsaKmtMemHandleFree(it->second.thunk_bo));
-        if (status != HSAKMT_STATUS_SUCCESS) {
-          return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-        }
+        if (gpu_node_id != AllocationRegion::kNodeUnmapped &&
+            HSAKMT_CALL(hsaKmtMemoryVaUnmap(
+                it->second.thunk_bo, 0, static_cast<HSAuint64>(it->second.size),
+                reinterpret_cast<HSAuint64>(ptr), gpu_node_id)) != HSAKMT_STATUS_SUCCESS)
+          debug_warning(false && "Owner dma-buf unmap failed");
+
+        ReleaseImportHandles(it->second.thunk_bo, it->second.thunk_peer_imports);
         ldrmImportCleaned = true;
       }
       allocation_map_.erase(it);
@@ -1904,6 +2099,111 @@ hsa_status_t Runtime::IPCDetach(void* ptr) {
   return HSA_STATUS_SUCCESS;
 }
 
+namespace {
+// Nap ceiling (microseconds) for polling while interrupts are available: used by
+// the poll sentinel, and by AsyncEventsLoop when the sentinel thread cannot start.
+constexpr int kInterruptPollNapCeilingUs = 200;
+
+// Watches async signals that have no KFD event (IPC signals, DefaultSignals,
+// or interrupt signals created after the KFD events ran out) while the
+// async-events thread sleeps in the KFD wait on the interrupt-backed signals.
+// When one of them meets its condition it notifies the wake signal, the same
+// way SetAsyncSignalHandler() does, and the async-events thread then rescans
+// and runs the handler as usual. The entries are only read while armed; the
+// async-events thread disarms under the lock before it touches the list again.
+class PollSentinel {
+ public:
+  struct Entry {
+    hsa_signal_t signal;
+    hsa_signal_condition_t cond;
+    hsa_signal_value_t value;
+  };
+
+  explicit PollSentinel(hsa_signal_t wake) : wake_(wake) {}
+
+  ~PollSentinel() {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      exit_ = true;
+    }
+    cv_.notify_one();
+    if (thread_.joinable()) thread_.join();
+  }
+
+  // False if the sentinel thread could not be started; the caller then polls.
+  bool Usable() const { return !failed_; }
+
+  bool Arm(std::vector<Entry>& entries) {
+    if (entries.empty()) return true;
+    if (!thread_.joinable()) {
+      try {
+        thread_ = std::thread([this] { Loop(); });
+      } catch (...) {
+        failed_ = true;
+        return false;
+      }
+    }
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      entries_.swap(entries);
+      armed_ = true;
+      ++generation_;
+    }
+    cv_.notify_one();
+    return true;
+  }
+
+  void Disarm() {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      armed_ = false;
+    }
+    cv_.notify_one();
+  }
+
+ private:
+  void Loop() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    while (!exit_) {
+      cv_.wait(lock, [this] { return exit_ || armed_; });
+      // Each arming starts the nap at the floor again; the nap waits on the
+      // condition variable so Arm/Disarm cut it short.
+      uint64_t gen = generation_;
+      int nap_us = kPollNapFloorUs;
+      while (armed_ && !exit_) {
+        if (generation_ != gen) {
+          gen = generation_;
+          nap_us = kPollNapFloorUs;
+        }
+        // Held across the scan on purpose: after Disarm() returns, AsyncEventsLoop may
+        // Release() these signals, and Arm() swaps entries_ under the same lock.
+        for (const auto& e : entries_) {
+          if (CheckSignalCondition(hsa_signal_handle(e.signal)->LoadRelaxed(), e.cond, e.value)) {
+            armed_ = false;
+            hsa_signal_handle(wake_)->StoreReleaseAndNotify(1);
+            break;
+          }
+        }
+        if (!armed_) break;
+        cv_.wait_for(lock, std::chrono::microseconds(nap_us),
+                     [this, gen] { return exit_ || !armed_ || generation_ != gen; });
+        nap_us = NextPollNapUs(nap_us, kInterruptPollNapCeilingUs);
+      }
+    }
+  }
+
+  hsa_signal_t wake_;
+  std::mutex mutex_;
+  std::condition_variable cv_;
+  std::vector<Entry> entries_;
+  uint64_t generation_ = 0;
+  bool armed_ = false;
+  bool exit_ = false;
+  bool failed_ = false;
+  std::thread thread_;
+};
+}  // namespace
+
 void Runtime::AsyncEventsLoop(void* _eventsInfo) {
   AsyncEventsInfo* eventsInfo = reinterpret_cast<AsyncEventsInfo*>(_eventsInfo);
 
@@ -1915,6 +2215,10 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
   auto& event_age_map = eventsInfo->events.age_by_event_;
   uint32_t unique_evts = 0;
   auto hsa_signals = reinterpret_cast<hsa_signal_handle*>(&async_events_.signal_[0]);
+  // Signals of the current batch that have no KFD event.
+  std::vector<size_t> poll_only;
+  std::vector<PollSentinel::Entry> sentinel_entries;
+  PollSentinel sentinel(async_events_control_.wake);
 
   auto processEvent = [&](size_t index, hsa_signal_value_t value, bool wait_any) {
     // No error or timeout occured, process the handlers
@@ -1936,9 +2240,9 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
   // Prepares a list of events for a wait inside KFD
   auto PrepareInterrupt = [&](size_t idx) {
     HsaEvent* hsa_event = hsa_signals[idx]->EopEvent();
-    // If any signal doesn't have an interrupt, then switch to polling
+    // A signal without a KFD event stays out of the KFD wait list; the caller
+    // collects it in poll_only.
     if (hsa_event == nullptr) {
-      unique_evts = 0;
       return false;
     } else {
       if (hsa_events.size() <= unique_evts) {
@@ -1998,7 +2302,8 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       if (core::Runtime::runtime_singleton_->flag().wait_any()) {
         index = Signal::WaitMultiple(uint32_t(async_events_.Size()), &async_events_.signal_[0],
                                      &async_events_.cond_[0], &async_events_.value_[0],
-                                     uint64_t(-1), HSA_WAIT_STATE_BLOCKED, value, false);
+                                     uint64_t(-1), HSA_WAIT_STATE_BLOCKED, value, false,
+                                     /*wake_async_monitor=*/false);
       } else {
         // Skip wake-up signal logic
         index = 1;
@@ -2018,6 +2323,12 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       // Process all signals on the CPU first
       bool finish = false;
       bool polling = false;
+      // Nap duration for the no-interrupt polling mode below (see
+      // core/util/poll_backoff.h). poll_nap_us is re-initialized here, i.e.
+      // once per outer-loop iteration (one per new wait batch), so the backoff
+      // only compounds within a single idle wait and every new wait starts
+      // again at the floor -- the escalated value cannot carry across waits.
+      int poll_nap_us = kPollNapFloorUs;
 
       while (!finish) {
         // If exception or WaitAny(), then finish with just one iterration
@@ -2026,6 +2337,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
         }
         bool interrupt_wait = false;
         unique_evts = 0;
+        poll_only.clear();
 
         // Check remaining signals before sleeping.
         for (size_t i = index; i < async_events_.Size(); i++) {
@@ -2047,15 +2359,20 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
           // If the current signal isn't complete and polling is disabled, then prepare KFD wait for
           // an interrupt
           if (!finish && !polling) {
-            interrupt_wait = PrepareInterrupt(i);
-            // If the interrupt was disabled, then force polling
-            if (!interrupt_wait) {
-              polling = true;
-              finish = false;
-            }
+            if (!PrepareInterrupt(i)) poll_only.push_back(i);
           } else if (unique_evts > 0) {
             unique_evts = 0;
-            interrupt_wait = false;
+          }
+        }
+        // Wait in KFD on the interrupt-backed signals while the poll sentinel
+        // watches the others. If the sentinel thread could not be started, poll
+        // all of them instead.
+        if (!finish && !polling) {
+          if (unique_evts > 0 && (poll_only.empty() || sentinel.Usable())) {
+            interrupt_wait = true;
+          } else if (unique_evts > 0 || !poll_only.empty()) {
+            polling = true;
+            unique_evts = 0;
           }
         }
         // If nothing was complete and an interrupt wait was requested, then call KFD
@@ -2098,7 +2415,16 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
             }
 
             if (!finish) {
-              WaitForInterrupt();
+              sentinel_entries.clear();
+              for (size_t p : poll_only)
+                sentinel_entries.push_back(
+                    {async_events_.signal_[p], async_events_.cond_[p], async_events_.value_[p]});
+              // If the sentinel cannot start, skip the KFD wait; the next pass
+              // sees Usable() == false and polls.
+              if (sentinel.Arm(sentinel_entries)) {
+                WaitForInterrupt();
+                sentinel.Disarm();
+              }
             }
 
             for (size_t e = 0; e < async_events_.Size(); e++) {
@@ -2107,6 +2433,26 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
             }
             break;
           }
+        } else if (polling && !finish) {
+          // No interrupt-backed event is available for the pending signals --
+          // on the WSL/dxg thunk that is every signal, since it implements no
+          // KFD events at all.
+          // Without a sleep this loop monopolizes a CPU core re-scanning the
+          // signal values for the whole lifetime of the async-events thread,
+          // idle or not; the two async-events threads cost ~2 cores in every
+          // process that has merely touched the GPU
+          // (https://github.com/ROCm/librocdxg/issues/60). Nap between scans,
+          // doubling from 20us up to poll_nap_ceiling_us (2ms when the whole
+          // runtime is polling-only, so a wait that completes quickly keeps low
+          // observation latency while a long-lived idle wait costs almost no
+          // CPU. The nap is re-initialized at the outer-loop boundary (see
+          // poll_nap_us above), so the escalation only compounds within a
+          // single idle wait batch. With interrupts available this branch is only
+          // reached when the poll sentinel thread could not be started, and the
+          // nap is capped at kInterruptPollNapCeilingUs instead of spinning.
+          os::uSleep(poll_nap_us);
+          poll_nap_us = NextPollNapUs(
+              poll_nap_us, g_use_interrupt_wait ? kInterruptPollNapCeilingUs : kPollNapCeilingUs);
         }
       }
     }
@@ -2146,6 +2492,31 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
 }
 
 void Runtime::AsyncEventsPool::clear() {
+  // The same lock alloc() and free() take. Without it this walks and releases
+  // block_list_, and empties free_list_, while another thread is still handing
+  // items out of them: ConcurrentAsyncEvents::Clear() runs on the async-event
+  // monitor thread, and application threads can be inside
+  // hsa_amd_signal_async_handler() -> PushBack() -> alloc() at the same moment.
+  // Not recursive, so this cannot self-deadlock: neither caller (the destructor,
+  // and ConcurrentAsyncEvents::Clear()) holds the lock.
+  //
+  // What this lock does not cover is an item alloc() already returned. That
+  // caller releases the lock before it runs item->init() and enqueues, so a
+  // clear() landing in between frees the block out from under that write. No
+  // lock here can close that window: the item outlives the critical section it
+  // came from. What closes it is the API contract. Both callers run only from
+  // teardown, reached from Runtime::Unload() under bootstrap_lock(), and the
+  // HSA specification leaves it undefined to call into the runtime concurrently
+  // with the hsa_shut_down() releasing the last reference, so in a conforming
+  // program no PushBack() is in flight by the time either runs. The runtime
+  // does not enforce that, though: IS_OPEN() reads ref_count_ once and holds
+  // nothing for the rest of the call, so a thread can pass it and then be
+  // descheduled while another tears the runtime down. Holding the lock here is
+  // what keeps that program from corrupting the pool's vectors outright, a far
+  // likelier and less debuggable failure than the item-lifetime window it
+  // leaves; it is not a substitute for callers quiescing before shutdown.
+  std::lock_guard<HybridMutex> lock(lock_);
+
   ifdebug {
     size_t capacity = 0;
     for (auto& block : block_list_) capacity += block.second;
@@ -2544,7 +2915,7 @@ Runtime::AsyncEventsControl::AsyncEventsControl(AsyncEventsInfo* asyncInfo)
     : exit(false), info_(asyncInfo) {
   auto err = HSA::hsa_signal_create(0, 0, NULL, &wake);
   if (err != HSA_STATUS_SUCCESS)
-    throw AMD::hsa_exception(HSA_STATUS_ERROR, "Failed to allocate async handler signal");
+    throw AMD::hsa_exception(err, "Failed to allocate async handler signal");
 }
 
 void Runtime::AsyncEventsControl::Start() {
@@ -2579,6 +2950,8 @@ Runtime::Runtime()
   xnack_enabled_ = false;
   g_use_interrupt_wait = true;
   g_use_mwaitx = true;
+  g_use_yielding_poll = false;
+  g_use_clflushopt = false;
   ::_amdgpu_r_debug = {11, nullptr, reinterpret_cast<uintptr_t>(&_loader_debug_state),
                        r_debug::RT_CONSISTENT, 0};
   log_file = stderr;
@@ -2597,7 +2970,6 @@ hsa_status_t Runtime::Load() {
   }
 
   flag_.Refresh();
-  hotswap::ConfigureHotswapBackend();
 
   thunkLoader_ = new ThunkLoader();
   thunkLoader_->LoadThunkApiTable();
@@ -2614,6 +2986,8 @@ hsa_status_t Runtime::Load() {
 
   g_use_interrupt_wait = flag_.enable_interrupt();
   g_use_mwaitx = flag_.check_mwaitx(cpuinfo.mwaitx);
+  g_use_yielding_poll = flag_.enable_yielding_poll();
+  g_use_clflushopt = cpuinfo.clflushopt;
 
   if (!AMD::Load()) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -2632,8 +3006,16 @@ hsa_status_t Runtime::Load() {
 
   loader_.reset(amd::hsa::loader::Loader::Create(&loader_context_));
 
-  // Probe aqlprofile availability once and cache the result
-  aqlprofile_lib_ = os::LoadLib(kAqlProfileLib);
+  // Probe aqlprofile availability once and cache the result. Prefer the
+  // version-suffixed file name (libhsa-amd-aqlprofile64.so.<major>) that matches
+  // the aqlprofile ABI this runtime is built against; the unversioned dev
+  // symlink may point at an incompatible major version. Fall back to the
+  // unversioned name only if the expected versioned file is absent.
+  aqlprofile_lib_ = os::LoadLib(std::string(kAqlProfileLib) + "." +
+                                std::to_string(hsa_ven_amd_aqlprofile_VERSION_MAJOR));
+  if (aqlprofile_lib_ == nullptr) {
+    aqlprofile_lib_ = os::LoadLib(kAqlProfileLib);
+  }
 
   // Load extensions
   LoadExtensions();
@@ -2732,6 +3114,13 @@ void Runtime::Unload() {
   // contain allocations from memory regions owned by agents.
   SharedSignalPool.clear();
   EventPool.clear();
+
+  // Release static allocators while agents and the thunk are still valid so
+  // system memory regions kept alive by the allocator closures can run
+  // fragment heap teardown safely.
+  system_allocator_ = {};
+  system_deallocator_ = {};
+  BaseShared::SetAllocateAndFree({}, {});
 
   // Clear system regions before destroying agents to prevent use-after-free
   // when agent destructors access region memory.
@@ -2898,6 +3287,11 @@ void Runtime::LoadTools() {
   typedef Agent* (*tool_wrap_t)(Agent*);
   typedef void (*tool_add_t)(Runtime*);
 
+  // Set when a v3 tool owns the API table. Tools named in HSA_TOOLS_LIB are an
+  // explicit request and still load; tools that are merely loaded in the
+  // process are not picked up, since they would wrap the table a second time.
+  bool skip_loaded_tools = false;
+
 #if defined(HSA_ROCPROFILER_REGISTER) && HSA_ROCPROFILER_REGISTER > 0
   if (!flag().disable_tool_register()) {
     auto* profiler_api_table_ = static_cast<void*>(&hsa_api_table());
@@ -2928,9 +3322,7 @@ void Runtime::LoadTools() {
       }
     }
 
-    // if rocprofiler library supports registration and v1 support not explicitly requested,
-    // do not use old method
-    if (rocp_reg_status == ROCP_REG_SUCCESS && !allow_v1_registration) return;
+    skip_loaded_tools = (rocp_reg_status == ROCP_REG_SUCCESS && !allow_v1_registration);
   }
 #endif
 
@@ -2975,7 +3367,8 @@ void Runtime::LoadTools() {
   }
 
   // Discover loaded tools.
-  std::vector<os::LibHandle> loaded_hds = os::GetLoadedToolsLib();
+  std::vector<os::LibHandle> loaded_hds;
+  if (!skip_loaded_tools) loaded_hds = os::GetLoadedToolsLib();
   for (auto& handle : loaded_hds) {
     const uint32_t* order = (const uint32_t*)os::GetExportAddress(handle, "HSA_AMD_TOOL_PRIORITY");
     if (order) {
@@ -3062,18 +3455,20 @@ void Runtime::LoadTools() {
   }
 }
 
-// Load the rocjitsu backend through the existing HSA tool lifecycle. Keeping
-// its handle in tool_libs_ gives it the normal reverse-order OnUnload and
-// CloseTools handling without dedicated runtime state.
+// When enabled, load the rocjitsu hotswap hook through the existing HSA tool lifecycle.
+// Keeping its handle in tool_libs_ gives it the normal reverse-order OnUnload
+// and CloseTools handling without dedicated runtime state.
 hsa_status_t Runtime::LoadHotswapTool() {
-  if (!hotswap::IsRocjitsuHotswapEnabled()) return HSA_STATUS_SUCCESS;
+  if (!flag().hotswap_enable()) return HSA_STATUS_SUCCESS;
 
   bool has_gfx1250_a0_agent = false;
   for (const Agent* agent : gpu_agents_) {
     char name[64] = {};
     hsa_status_t status = agent->GetInfo(HSA_AGENT_INFO_NAME, name);
     if (status != HSA_STATUS_SUCCESS) return status;
-    if (std::strcmp(name, "gfx1250") != 0) continue;
+    // A0 agents report the strict target name, so match both spellings; the ASIC
+    // revision below is the actual A0 discriminator.
+    if (std::strcmp(name, "gfx1250") != 0 && std::strcmp(name, "gfx1250-strict") != 0) continue;
 
     uint32_t asic_revision = 0;
     status = agent->GetInfo(static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_ASIC_REVISION),
@@ -3178,7 +3573,7 @@ void Runtime::CloseTools() {
 
 void Runtime::AsyncEventsControl::Shutdown() {
   exit.store(true, std::memory_order_release);
-  hsa_signal_handle(wake)->StoreRelaxed(1);
+  hsa_signal_handle(wake)->StoreReleaseAndNotify(1);
   os::WaitForThread(thread_);
   os::CloseThread(thread_);
   thread_ = NULL;
@@ -3420,6 +3815,8 @@ hsa_status_t Runtime::SetSvmAttrib(void* ptr, size_t size,
   HSAKMT_STATUS error = HSAKMT_CALL(hsaKmtSVMSetAttr(base, len, attribs.size(), &attribs[0]));
   if (error != HSAKMT_STATUS_SUCCESS)
     throw AMD::hsa_exception(HSA_STATUS_ERROR, "hsaKmtSVMSetAttr failed.");
+
+  MarkReservedAddressSvm(base, len);
 
   return HSA_STATUS_SUCCESS;
 }
@@ -3802,9 +4199,12 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
       return status;
     }
 
-    // Only SVM allocations that were reserved using hsa_amd_vmem_address_reserve are valid for
-    // discard
-    if (ptr_info.type != HSA_EXT_POINTER_TYPE_RESERVED_ADDR || ptr_info.registered) {
+    // Managed SVM is reserved with HSA_AMD_VMEM_ADDRESS_NO_REGISTER (registered == false).
+    // After hsa_amd_svm_attributes_set the same reservation is reported as
+    // HSA_EXT_POINTER_TYPE_SVM. Registered VMM reservations stay ineligible.
+    if (ptr_info.registered ||
+        (ptr_info.type != HSA_EXT_POINTER_TYPE_RESERVED_ADDR &&
+         ptr_info.type != HSA_EXT_POINTER_TYPE_SVM)) {
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
   }
@@ -3902,7 +4302,7 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
   };
 
   /* Each pending dep signal calls this handler when it reaches 0.
-  The last one to decrement remaining_deps to 0 will triggers the discard. */
+  The last one to decrement remaining_deps to 0 will trigger the discard. */
   static hsa_amd_signal_handler signal_handler = [](hsa_signal_value_t value, void* arg) {
     DiscardOp* op = reinterpret_cast<DiscardOp*>(arg);
 
@@ -3922,6 +4322,131 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
     }
   } else {
     // Set signal handlers for all pending dependencies
+    op->remaining_deps.store(static_cast<uint32_t>(pending_deps.size()), std::memory_order_release);
+    for (size_t i = 0; i < pending_deps.size(); i++) {
+      /* SetAsyncSignalHandler currently always returns HSA_STATUS_SUCCESS. If it is modified to
+      return errors in the future, we need to handle the possibility of use-after-free and double
+      deletion of op if this call fails midway and leaves some handlers set but not others. */
+      SetAsyncSignalHandler(pending_deps[i], HSA_SIGNAL_CONDITION_EQ, 0, signal_handler, op);
+    }
+  }
+
+  OpGuard.Dismiss();
+  return HSA_STATUS_SUCCESS;
+#endif
+}
+
+hsa_status_t Runtime::SvmDiscardAndPrefetchBatch(void** ptrs, size_t* sizes, uint32_t count,
+                                                 const hsa_agent_t* dst_agents,
+                                                 uint32_t num_dst_agents,
+                                                 uint32_t num_dep_signals,
+                                                 const hsa_signal_t* dep_signals,
+                                                 hsa_signal_t completion_signal) {
+#if !defined(__linux__)
+  return HSA_STATUS_ERROR;
+#else
+  const size_t kPageSize = os::PageSize();
+
+  // Resolve and validate all unique destination agents up front
+  std::vector<uint32_t> gpu_nodes(num_dst_agents);
+  for (uint32_t i = 0; i < num_dst_agents; i++) {
+    core::Agent* agent = Agent::Convert(dst_agents[i]);
+    if (agent == nullptr || agent->device_type() != core::Agent::kAmdGpuDevice)
+      return HSA_STATUS_ERROR_INVALID_AGENT;
+    gpu_nodes[i] = agent->node_id();
+  }
+
+  // Validate the pointers; only vmem-reserved addresses supported
+  for (uint32_t i = 0; i < count; i++) {
+    hsa_amd_pointer_info_t ptr_info = {};
+    ptr_info.size = sizeof(ptr_info);
+    hsa_status_t status = PtrInfo(ptrs[i], &ptr_info, nullptr, nullptr, nullptr);
+    if (status != HSA_STATUS_SUCCESS) {
+      debug_warning(false && "Retrieving SVM pointer information failed");
+      return status;
+    }
+    // Same eligibility as SvmBatchDiscard: unregistered reservations, including those
+    // reported as HSA_EXT_POINTER_TYPE_SVM after hsa_amd_svm_attributes_set.
+    if (ptr_info.registered ||
+        (ptr_info.type != HSA_EXT_POINTER_TYPE_RESERVED_ADDR &&
+         ptr_info.type != HSA_EXT_POINTER_TYPE_SVM))
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // Operation context
+  struct DiscardAndPrefetchOp {
+    std::vector<uint32_t> target_gpus;    // per-region dest gpu node for prefetch
+    std::vector<std::pair<void*, size_t>> regions;
+    std::atomic<uint32_t> remaining_deps;
+    hsa_signal_t completion;
+  };
+
+  DiscardAndPrefetchOp* op = new DiscardAndPrefetchOp();
+  MAKE_NAMED_SCOPE_GUARD(OpGuard, [&]() { delete op; });
+
+  op->completion = completion_signal;
+  op->regions.reserve(count);
+  op->target_gpus.reserve(count);
+
+  // Build page-aligned region list, resolve gpus for every region
+  for (uint32_t i = 0; i < count; i++) {
+    uint8_t* base = AlignDown((uint8_t*)ptrs[i], kPageSize);
+    uint8_t* end = AlignUp((uint8_t*)ptrs[i] + sizes[i], kPageSize);
+    size_t len = end - base;
+
+    op->regions.emplace_back(std::make_pair(reinterpret_cast<void*>(base), len));
+    op->target_gpus.push_back(gpu_nodes[i]);
+  }
+
+  // Filter out dependency signals already at 0
+  std::vector<hsa_signal_t> pending_deps;
+  pending_deps.reserve(num_dep_signals);
+  for (uint32_t i = 0; i < num_dep_signals; i++) {
+    if (Signal::Convert(dep_signals[i])->LoadRelaxed() != 0)
+      pending_deps.push_back(dep_signals[i]);
+  }
+
+  static auto discard_and_prefetch_all = [](DiscardAndPrefetchOp* op) {
+    for (size_t i = 0; i < op->regions.size(); i++) {
+      void* base = op->regions[i].first;
+      size_t size = op->regions[i].second;
+      uint32_t target_gpu = op->target_gpus[i];
+
+      int res = madvise(base, size, MADV_DONTNEED);
+      if (res != 0)
+        debug_warning(false && "madvise MADV_DONTNEED failed in SvmDiscardAndPrefetchBatch");
+
+      // prefetch to dest gpu
+      HSA_SVM_ATTRIBUTE gpu_attr;
+      gpu_attr.type = HSA_SVM_ATTR_PREFETCH_LOC;
+      gpu_attr.value = target_gpu;
+      HSAKMT_STATUS err = HSAKMT_CALL(hsaKmtSVMSetAttr(base, size, 1, &gpu_attr));
+      if (err != HSAKMT_STATUS_SUCCESS)
+        debug_warning(false && "hsaKmtSVMSetAttr gpu prefetch failed in SvmDiscardAndPrefetchBatch");
+    }
+
+    if (op->completion.handle != 0)
+      Signal::Convert(op->completion)->SubRelaxed(1);
+    delete op;
+  };
+
+  /* Every dep signal calls this handler when it reaches 0. The last one to decrement 
+  remaining_deps to 0 triggers the discard-and-prefetch op on all memory ranges */
+  static hsa_amd_signal_handler signal_handler = [](hsa_signal_value_t value, void* arg) {
+    DiscardAndPrefetchOp* op = reinterpret_cast<DiscardAndPrefetchOp*>(arg);
+    if (op->remaining_deps.fetch_sub(1, std::memory_order_acq_rel) == 1)
+      discard_and_prefetch_all(op);
+    return false;
+  };
+
+  // Dispatch directly if there are no pending deps, otherwise register signal handlers
+  if (pending_deps.empty()) {
+    op->remaining_deps.store(1, std::memory_order_release);
+    auto no_dependencies = [](void* arg) { signal_handler(0, arg); };
+    hsa_status_t err = AMD::hsa_amd_async_function(no_dependencies, op);
+    if (err != HSA_STATUS_SUCCESS)
+      throw AMD::hsa_exception(err, "Failed to schedule async discard-and-prefetch operation");
+  } else {
     op->remaining_deps.store(static_cast<uint32_t>(pending_deps.size()), std::memory_order_release);
     for (size_t i = 0; i < pending_deps.size(); i++) {
       /* SetAsyncSignalHandler currently always returns HSA_STATUS_SUCCESS. If it is modified to
@@ -4083,27 +4608,26 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
 
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   core::DriverMemoryHandle driver_handle = {};
+  auto agentOwner = region->owner();
 
-  hsa_status_t status = region->Allocate(size, alloc_flags, 0, &driver_handle);
+  /* Host memory has no DRM device of its own, so the GTT allocation and the DRM import 
+  that follows must be done using the same GPU. Rocr chooses the first enabled GPU here
+  and passes it down instead of letting thunk fall back to the default gpu node 0 */
+  core::Agent* agent_for_drm = agentOwner;
+  core::Agent* drm_owner = nullptr;
+  uint32_t alloc_node_id = 0;
+  if (agentOwner->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
+    if (gpu_agents().empty()) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    agent_for_drm = gpu_agents()[0];
+    drm_owner = agent_for_drm;
+    alloc_node_id = agent_for_drm->node_id();
+    alloc_flags |= MemoryRegion::AllocateGTTAccess;
+  }
+
+  hsa_status_t status = region->Allocate(size, alloc_flags, alloc_node_id, &driver_handle);
   if (status == HSA_STATUS_SUCCESS) {
     // TODO: Combine the Allocate and CreateShareableHandle into a single function.
     uint64_t offset;
-    auto agentOwner = region->owner();
-
-    /* For CPU-owned memory, DRM operations require a GPU agent. Select
-    the first available GPU agent before calling CreateShareableHandle.
-    For device memory, use owner agent. */
-    core::Agent* agent_for_drm = agentOwner;
-    core::Agent* drm_owner = nullptr;
-    if (agentOwner->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
-      const auto& gpus = core::Runtime::runtime_singleton_->gpu_agents();
-      if (gpus.empty()) {
-        region->Free(driver_handle);
-        return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-      }
-      agent_for_drm = gpus.front();
-      drm_owner = agent_for_drm;
-    }
 
     // alloc_handle goes in as the allocation handle and is transformed in place into the shareable
     // memory handle. This lets the driver recover the allocation from its native id (no virtual
@@ -4262,9 +4786,7 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(MappedHandle* _mappe
 
   /* Avoid creating multiple amdgpu bos in the same gpu agent that was used
   for drm import of host memory during the creation of a shareable_handle */
-  if (!memHandle->imported && memHandle->region &&
-      memHandle->agentOwner()->device_type() == core::Agent::DeviceType::kAmdCpuDevice &&
-      memHandle->drm_owner && memHandle->drm_owner == targetAgent) {
+  if (memHandle->drm_owner == targetAgent) {
     driver_handle = memHandle->driver_handle;
     owns_driver_handle = false;
     return;
@@ -4283,7 +4805,7 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(MappedHandle* _mappe
 
 Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
-    if (core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg()) assert(!"Unimplemented");
+    if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) assert(!"Unimplemented");
 
     /* Remap the CPU mapping back to anonymous, freeing the DRM FD while retaining VA reservation */
     bool result = rocr::os::UncommitMemory(va, size);
@@ -4300,28 +4822,36 @@ Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
 
 hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permission_t perms) {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
-    if (core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg()) return HSA_STATUS_ERROR;
+    if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) return HSA_STATUS_ERROR;
 
-    core::Agent* agent = nullptr;
-    int mmap_fd = -1;
+    MemoryHandle* memHandle = mappedHandle->mem_handle;
 
-    /* For imported handles, we don't have a region/owner, but we can use any GPU agent for mmap.
-     * The driver_handle created during import should have the correct mmap_offset. */
-    if (mappedHandle->mem_handle->imported) {
+    // For imported handles, we don't have a region/drm_owner 
+    // we can import into first enabled gpu agent for getting an mmap_offset
+    if (!memHandle->drm_owner && memHandle->imported) {
       const auto& gpus = core::Runtime::runtime_singleton_->gpu_agents();
-      if (!gpus.empty()) {
-        agent = gpus.front();
-        agent->driver().GetDeviceFd(agent->node_id(), &mmap_fd);
-      }
-    } else if (mappedHandle->mem_handle->region) {
-      agent = mappedHandle->mem_handle->drmAgent();
-      /* Do not check the return value of GetDeviceFd. We do not need mmap_fd in some cases, so it
-       * is valid for mmap_fd to be -1*/
-      agent->driver().GetDeviceFd(agent->node_id(), &mmap_fd);
+      if (gpus.empty()) return HSA_STATUS_ERROR;
+      core::Agent* defaultDrm = gpus[0];
+
+      core::DriverMemoryHandle imported = {};
+      hsa_status_t status = defaultDrm->driver().ImportMemoryHandle(
+          *defaultDrm, &imported,
+          memHandle->is_fabric_handle ? ShareType::FABRIC_HANDLE : ShareType::DMABUF_FD,
+          &memHandle->driver_handle);
+      if (status != HSA_STATUS_SUCCESS) return status;
+
+      memHandle->driver_handle.handle = imported.handle;
+      memHandle->driver_handle.size = imported.size;
+      memHandle->driver_handle.mmap_offset = imported.mmap_offset;
+      memHandle->drm_owner = defaultDrm;
     }
 
+    core::Agent* agent = memHandle->drmAgent();
+    int mmap_fd = -1;
+    agent->driver().GetDeviceFd(agent->node_id(), &mmap_fd);
+
     if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mmap_fd,
-                             mappedHandle->mem_handle->driver_handle.mmap_offset)) {
+                             memHandle->driver_handle.mmap_offset)) {
       return HSA_STATUS_ERROR;
     }
   } else {
@@ -4336,7 +4866,7 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
 hsa_status_t Runtime::MappedHandleAllowedAgent::RemoveAccess() {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
     if (permissions != HSA_ACCESS_PERMISSION_NONE) {
-      if (core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg()) return HSA_STATUS_ERROR;
+      if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) return HSA_STATUS_ERROR;
 
       hsa_access_permission_t perms = HSA_ACCESS_PERMISSION_NONE;
       if (!rocr::os::ProtectMemory(va, size, PermissionsToMemProt(perms))) {
@@ -4356,7 +4886,7 @@ Runtime::MappedHandle::MappedHandle(MemoryHandle* mem_handle, AddressHandle* add
                                     hsa_access_permission_t perm)
     : mem_handle(mem_handle), address_handle(address_handle), offset(offset), size(size) {
   /* Create a CPU mapping with PROT_NONE */
-  if (core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg()) return;
+  if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) return;
 
   if (!mem_handle->imported) {
     /*
@@ -4399,7 +4929,23 @@ Runtime::MemoryHandle::MemoryHandle(int dmabuf_fd)
       imported(true),
       is_fabric_handle(false),
       alloc_flag(MemoryRegion::AllocateNoFlags),
-      drm_owner(nullptr) {}
+      drm_owner(nullptr) {
+  /* Caller holds memory_lock_. Ask each agent driver in turn and take the first
+   * that recognizes the fd. AgentDriver(KFD) is not used because it throws when
+   * no KFD driver is present. alloc_flag stays AllocateNoFlags: the dmabuf carries
+   * no memory-type metadata. */
+  if (driver_handle.dmabuf_fd < 0) return;
+
+  core::Runtime* runtime = core::Runtime::runtime_singleton_;
+  core::DmaBufInfo info = {};
+  for (auto& driver : runtime->AgentDrivers()) {
+    if (driver->QueryDmaBufInfo(driver_handle.dmabuf_fd, &info) == HSA_STATUS_SUCCESS) {
+      region = runtime->ResolveImportedRegion(info);
+      driver_handle.size = info.size;
+      return;
+    }
+  }
+}
 
 Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
     : region(nullptr),
@@ -4412,13 +4958,12 @@ Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
       drm_owner(nullptr) {}
 
 Runtime::MemoryHandle::~MemoryHandle() {
-  if (driver_handle.handle != 0 && region != nullptr) {
+  if (driver_handle.handle != 0) {
     /* For host memory, CreateShareableHandle imports the BO into a GPU DRM context
     (drm_owner) to produce a driver_handle. The resulting driver_handle
     is owned by that GPU agent, not the CPU region, so destruction must be
     dispatched through drm_owner */
-    core::Agent* destroy_agent = drmAgent();
-    destroy_agent->driver().DestroyMemoryHandle(&driver_handle);
+    drmAgent()->driver().DestroyMemoryHandle(&driver_handle);
   } else {
     /* FIXME: the Driver class should close the dmabuf_fd, but in case of imported handles,
      * we do not have a region so we do not have an agentOwner() to call the driver.*/
@@ -4624,7 +5169,6 @@ hsa_status_t Runtime::VMemoryGetAccess(const void* va, hsa_access_permission_t* 
 hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
                                                    hsa_amd_vmem_alloc_handle_t handle,
                                                    uint64_t flags) {
-  (void)flags;
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   *dmabuf_fd = -1;
   MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(handle));
@@ -4640,8 +5184,39 @@ hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
    * Use drm_owner (the GPU agent used during CreateShareableHandle) instead. */
   auto agentOwner = memoryHandle->drmAgent();
 
+  if (flags & HSA_AMD_DMABUF_MAPPING_TYPE_PCIE) {
+    if (agentOwner->device_type() != core::Agent::DeviceType::kAmdGpuDevice) {
+      return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+    }
+    auto* gpuAgentOwner = static_cast<AMD::GpuAgent*>(agentOwner);
+    if (!gpuAgentOwner->is_xgmi_cpu_gpu() && !gpuAgentOwner->LargeBarEnabled()) {
+      return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+    }
+  }
+
   return agentOwner->driver().ExportMemoryHandle(*agentOwner, memoryHandle->driver_handle,
                                                  ShareType::DMABUF_FD, dmabuf_fd);
+}
+
+/* Map a driver-reported placement onto a region ROCr can name. Returns nullptr
+ * when no suitable region exists, leaving the handle's properties unresolved. */
+const core::MemoryRegion* Runtime::ResolveImportedRegion(const core::DmaBufInfo& info) {
+  if (info.is_device_memory) {
+    core::Agent* owner = agent_by_gpuid(info.node_id);
+    if (owner == nullptr) return nullptr;
+
+    /* Device VMM allocations come from the coarse-grained local pool. */
+    for (const auto& region : owner->regions()) {
+      const auto* amd_region = static_cast<const AMD::MemoryRegion*>(region.get());
+      if (amd_region->IsLocalMemory() && !region->fine_grain()) return region.get();
+    }
+    return nullptr;
+  }
+
+  /* Host memory. The driver query reports no NUMA node, so the default
+   * fine-grained system region is used. */
+  if (system_regions_fine_.empty()) return nullptr;
+  return system_regions_fine_[0].get();
 }
 
 hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
@@ -4653,6 +5228,8 @@ hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
   int owned_fd = os::DmaBufDup(dmabuf_fd);
   if (owned_fd < 0) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
+  /* memory_lock_ is held across construction. The dmabuf constructor queries the
+   * fd for its owning region, which requires that lock. */
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   auto memoryHandle = std::make_unique<MemoryHandle>(owned_fd);
   *memoryOnlyHandle = MemoryHandle::Convert(memoryHandle.get());
@@ -4701,8 +5278,14 @@ hsa_status_t Runtime::VMemoryImportFabricHandle(hsa_fabric_handle_t fabric_handl
 hsa_status_t Runtime::VMemoryRetainAllocHandle(hsa_amd_vmem_alloc_handle_t* mapped_handle,
                                                void* va) {
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
-  auto mappedHandleIt = mapped_handle_map_.find(va);
-  if (mappedHandleIt == mapped_handle_map_.end()) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  // Look-up any mapped handle that contains this address.
+  auto mappedHandleIt = mapped_handle_map_.upper_bound(va);
+  if (mappedHandleIt == mapped_handle_map_.begin()) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  mappedHandleIt--;
+  if (reinterpret_cast<const uint8_t*>(va) >=
+      reinterpret_cast<const uint8_t*>(mappedHandleIt->first) + mappedHandleIt->second.size) {
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  }
 
   MemoryHandle* memoryHandle = mappedHandleIt->second.mem_handle;
   memoryHandle->ref_count++;
@@ -4717,14 +5300,49 @@ hsa_status_t Runtime::VMemoryGetAllocPropertiesFromHandle(hsa_amd_vmem_alloc_han
   MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(allocHandle));
   if (memoryHandle == nullptr) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
-  if (!memoryHandle->imported) {
-    *mem_region = memoryHandle->region;
-    *type = (memoryHandle->alloc_flag & core::MemoryRegion::AllocatePinned) ? MEMORY_TYPE_PINNED
-                                                                            : MEMORY_TYPE_NONE;
-  } else {
-    *mem_region = nullptr;
-    *type = MEMORY_TYPE_NONE;
-  }
+  const MemoryRegion* region = memoryHandle->region;
+  *mem_region = region;
+  *type = (region != nullptr && (memoryHandle->alloc_flag & core::MemoryRegion::AllocatePinned))
+              ? MEMORY_TYPE_PINNED
+              : MEMORY_TYPE_NONE;
+  return HSA_STATUS_SUCCESS;
+}
+
+/* fits() below compares the caller's byte count against member end offsets, which
+ * only holds while every member starts where the previous one ended. */
+static_assert(offsetof(hsa_amd_vmem_handle_info_t, alloc_size) ==
+                  offsetof(hsa_amd_vmem_handle_info_t, size) +
+                      sizeof(hsa_amd_vmem_handle_info_t::size),
+              "padding before hsa_amd_vmem_handle_info_t::alloc_size");
+static_assert(offsetof(hsa_amd_vmem_handle_info_t, agent) ==
+                  offsetof(hsa_amd_vmem_handle_info_t, alloc_size) +
+                      sizeof(hsa_amd_vmem_handle_info_t::alloc_size),
+              "padding before hsa_amd_vmem_handle_info_t::agent");
+static_assert(sizeof(hsa_amd_vmem_handle_info_t) ==
+                  offsetof(hsa_amd_vmem_handle_info_t, agent) +
+                      sizeof(hsa_amd_vmem_handle_info_t::agent),
+              "trailing padding in hsa_amd_vmem_handle_info_t");
+
+hsa_status_t Runtime::VMemoryGetHandleInfo(hsa_amd_vmem_alloc_handle_t allocHandle,
+                                           hsa_amd_vmem_handle_info_t* info) {
+  std::lock_guard<std::shared_mutex> lock(memory_lock_);
+  MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(allocHandle));
+  if (memoryHandle == nullptr) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+
+  const MemoryRegion* region = memoryHandle->region;
+
+  /* An unresolved import has no agent to report, and succeeding would hand back a
+   * null one the caller cannot tell apart from a real agent. */
+  if (memoryHandle->imported && region == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  
+  // Fill in the handle info structure with the allocation size and agent.
+  const size_t caller_size = info->size;
+  info->size = Min(caller_size, sizeof(hsa_amd_vmem_handle_info_t));
+  info->alloc_size = memoryHandle->driver_handle.size;
+  info->agent = (region != nullptr && region->owner() != nullptr)
+      ? core::Agent::Convert(region->owner())
+      : hsa_agent_t{0};
   return HSA_STATUS_SUCCESS;
 }
 

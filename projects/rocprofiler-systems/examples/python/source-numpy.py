@@ -4,10 +4,10 @@
 # SPDX-License-Identifier: MIT
 
 import os
-import sys
-import time
+
 import rocprofsys
-from rocprofsys.user import region as omni_user_region
+import roctx
+from roctx.context_decorators import RoctxRange
 
 _prefix = ""
 
@@ -36,7 +36,7 @@ except ImportError as e:
     import random
 
     def _sum(arr):
-        print(f"----  in _sum")
+        print("----  in _sum")
         return sum(arr)
 
     def inefficient(n):
@@ -79,8 +79,8 @@ if __name__ == "__main__":
     _prefix = os.path.basename(__file__)
     print(f"[{_prefix}] Executing {args.num_iterations} iterations...\n")
     for i in range(args.num_iterations):
-        with omni_user_region(f"main_loop"):
+        with RoctxRange("main_loop"):
             if args.stop_profile > 0 and i == args.stop_profile:
-                rocprofsys.user.stop_trace()
+                roctx.profilerPause()
             ans = run(args.value)
             print(f"[{_prefix}] [{i}] result of run({args.value}) = {ans}\n")

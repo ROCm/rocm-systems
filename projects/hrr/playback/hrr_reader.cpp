@@ -1,0 +1,908 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include "hrr_reader.h"
+
+#include "hrr/hrr_regions.h"
+
+#include <algorithm>
+#include <atomic>
+#include <new>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <filesystem>
+#include <vector>
+
+namespace fs = std::filesystem;
+
+namespace hrr {
+
+// ---------------------------------------------------------------------------
+// Event move semantics
+// ---------------------------------------------------------------------------
+
+Event::Event(Event&& o) noexcept
+    : raw_payload(std::move(o.raw_payload)),
+      stream_handle(o.stream_handle),
+      handle64(o.handle64),
+      malloc_ev(o.malloc_ev),
+      memcpy_ev(o.memcpy_ev),
+      module_load_ev(o.module_load_ev),
+      malloc_async_ev(o.malloc_async_ev),
+      free_async_ev(o.free_async_ev),
+      stream_create_ev(o.stream_create_ev),
+      event_record_ev(o.event_record_ev),
+      stream_wait_ev(o.stream_wait_ev),
+      kernel_launch(o.kernel_launch) {
+  o.kernel_launch = nullptr;
+}
+
+Event& Event::operator=(Event&& o) noexcept {
+  if (this != &o) {
+    delete kernel_launch;
+    raw_payload      = std::move(o.raw_payload);
+    stream_handle    = o.stream_handle;
+    handle64         = o.handle64;
+    malloc_ev        = o.malloc_ev;
+    memcpy_ev        = o.memcpy_ev;
+    module_load_ev   = o.module_load_ev;
+    malloc_async_ev  = o.malloc_async_ev;
+    free_async_ev    = o.free_async_ev;
+    stream_create_ev = o.stream_create_ev;
+    event_record_ev  = o.event_record_ev;
+    stream_wait_ev   = o.stream_wait_ev;
+    kernel_launch    = o.kernel_launch;
+    o.kernel_launch  = nullptr;
+  }
+  return *this;
+}
+
+// ---------------------------------------------------------------------------
+// Utilities
+// ---------------------------------------------------------------------------
+
+std::string hash_hex(uint64_t lo, uint64_t hi) {
+  char buf[33];
+  snprintf(buf, sizeof(buf), "%016llx%016llx",
+           static_cast<unsigned long long>(lo),
+           static_cast<unsigned long long>(hi));
+  return std::string(buf);
+}
+
+const char* event_type_name(uint16_t type) {
+  if (type < HRR_API_COUNT) return hrr_api_names[type];
+  return "UNKNOWN";
+}
+
+uint64_t pid_from_archive_dir_name(const std::string& name) {
+  if (name.size() <= 4 || name.compare(0, 4, "pid-") != 0 ||
+      name.find_first_not_of("0123456789", 4) != std::string::npos)
+    return 0;
+  return std::strtoull(name.c_str() + 4, nullptr, 10);
+}
+
+static std::vector<fs::path> find_pid_subarchives(const fs::path& root) {
+  std::vector<fs::path> dirs;
+  if (!fs::exists(root) || !fs::is_directory(root)) return dirs;
+  for (const auto& ent : fs::directory_iterator(root)) {
+    if (!ent.is_directory()) continue;
+    const std::string name = ent.path().filename().string();
+    if (pid_from_archive_dir_name(name) != 0 && fs::exists(ent.path() / "events.bin"))
+      dirs.push_back(ent.path());
+  }
+  std::sort(dirs.begin(), dirs.end());
+  return dirs;
+}
+
+// ---------------------------------------------------------------------------
+// Shared record framing
+//
+// Crash resilience: a record stream is an append-only log of self-delimiting
+// records, so a partial write can only ever be the LAST record. A torn header
+// or payload at the tail is therefore a recovery point — every complete record
+// already parsed is kept — rather than a reason to reject the whole file.
+// ---------------------------------------------------------------------------
+
+RecordStatus read_raw_record(FILE* f, std::vector<uint8_t>& out,
+                             ByteBudget* budget) {
+  const uint16_t hdr_size = static_cast<uint16_t>(sizeof(hrr_event_header));
+  out.resize(hdr_size);
+
+  size_t got = fread(out.data(), 1, hdr_size, f);
+  if (got == 0) return RecordStatus::EndOfStream;
+  if (got < hdr_size) {
+    fprintf(stderr, "[HRR] Truncated event header (%zu/%u bytes) at tail\n",
+            got, hdr_size);
+    return RecordStatus::Torn;
+  }
+
+  const uint32_t total =
+      reinterpret_cast<const hrr_event_header*>(out.data())->payload_length;
+  if (total < hdr_size) {
+    fprintf(stderr, "[HRR] Torn trailing record (payload_length %u < %u)\n",
+            total, hdr_size);
+    return RecordStatus::Torn;
+  }
+  if (total > kMaxRecordBytes) {
+    fprintf(stderr,
+            "[HRR] Implausible payload_length %u (max %u) — treating as torn\n",
+            total, kMaxRecordBytes);
+    return RecordStatus::Torn;
+  }
+  // The record is held whole until it is stored, so charge it before it is
+  // allocated. `out` is only the header so far.
+  if (budget && !budget->try_charge(total)) return RecordStatus::OverBudget;
+  if (total > hdr_size) {
+    out.resize(total);
+    const uint32_t pl_size = total - hdr_size;
+    if (fread(out.data() + hdr_size, 1, pl_size, f) != pl_size) {
+      fprintf(stderr, "[HRR] Truncated event payload (expected %u bytes) at tail\n",
+              pl_size);
+      if (budget) budget->release(total);
+      return RecordStatus::Torn;
+    }
+  }
+  return RecordStatus::Ok;
+}
+
+FILE* open_record_stream(const std::string& file_path, uint32_t expected_magic,
+                         uint16_t expected_version, uint16_t* version,
+                         uint16_t* flags) {
+  FILE* f = fopen(file_path.c_str(), "rb");
+  if (!f) {
+    fprintf(stderr, "[HRR] Cannot open %s\n", file_path.c_str());
+    return nullptr;
+  }
+  hrr_file_header fh{};
+  if (fread(&fh, sizeof(fh), 1, f) != 1) {
+    fprintf(stderr, "[HRR] %s too short (missing file header)\n", file_path.c_str());
+    fclose(f);
+    return nullptr;
+  }
+  if (fh.magic != expected_magic) {
+    fprintf(stderr, "[HRR] Bad magic 0x%08x in %s (expected 0x%08x)\n", fh.magic,
+            file_path.c_str(), expected_magic);
+    fclose(f);
+    return nullptr;
+  }
+  if (fh.version != expected_version) {
+    fprintf(stderr, "[HRR] Version mismatch in %s: file=%u reader=%u\n",
+            file_path.c_str(), fh.version, expected_version);
+    fclose(f);
+    return nullptr;
+  }
+  if (version) *version = fh.version;
+  if (flags) *flags = fh.reserved;
+  return f;
+}
+
+std::vector<std::string> find_region_streams(const std::string& archive_dir) {
+  std::vector<std::string> out;
+  const fs::path dir = fs::path(archive_dir) / "regions";
+  std::error_code ec;
+  if (!fs::is_directory(dir, ec)) return out;
+  for (const auto& ent : fs::directory_iterator(dir, ec)) {
+    if (ec) break;
+    if (ent.is_regular_file() && ent.path().extension() == ".hrrr")
+      out.push_back(ent.path().string());
+  }
+  // Deterministic merge order; the records themselves are ordered by mono_ns.
+  std::sort(out.begin(), out.end());
+  return out;
+}
+
+static bool resolve_archive_path(const std::string& input, std::string& resolved) {
+  fs::path path(input);
+  if (fs::exists(path / "events.bin")) {
+    resolved = path.string();
+    return true;
+  }
+
+  std::vector<fs::path> pid_dirs = find_pid_subarchives(path);
+  if (pid_dirs.empty()) {
+    fprintf(stderr, "[HRR] Cannot open %s\n", (path / "events.bin").string().c_str());
+    return false;
+  }
+  if (pid_dirs.size() == 1) {
+    resolved = pid_dirs.front().string();
+    return true;
+  }
+
+  fprintf(stderr,
+          "[HRR] Archive root %s contains multiple process captures; "
+          "point hrr-playback at a specific pid directory:\n",
+          input.c_str());
+  for (const auto& dir : pid_dirs)
+    fprintf(stderr, "[HRR]   %s\n", dir.string().c_str());
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// Payload read helpers (bytes after the 32-byte EventHeader already consumed)
+// ---------------------------------------------------------------------------
+// Kernel launch payload parser
+//
+// Binary layout (bytes in raw_payload, after 32-byte EventHeader):
+//   [0..7]   stream_handle (uint64_t, raw hipStream_t pointer)
+//   [8..9]   name_len (uint16_t)
+//   [10..]   kernel_name (name_len bytes, no NUL)
+//   [+0..7]  co_hash_lo (uint64_t)
+//   [+8..15] co_hash_hi (uint64_t)
+//   [+0..11] grid[3] (uint32_t[3])
+//   [+12..23] block[3] (uint32_t[3])
+//   [+24..27] shared_mem (uint32_t)
+//   [+28..29] num_args (uint16_t)
+//   [+30..31] num_snapshots (uint16_t)
+//   per arg: u8 value_kind, u16 size, <size> bytes data
+//   per snapshot (v10, 41 bytes): see BufferSnapshot; the attribute tail follows
+// ---------------------------------------------------------------------------
+
+// What an unordered_map node costs beyond its pair: the next pointer, the cached
+// hash and the bucket slot, rounded up.
+constexpr uint64_t kMapNodeOverhead = 32;
+
+// The least a malloc takes: glibc's smallest chunk is 32 bytes on a 64-bit target.
+constexpr uint64_t kMinAllocation = 32;
+
+// Charges what a parse keeps against the load budget before it allocates it.
+// A record's bytes expand when parsed (a 3-byte argument header becomes a
+// KernelArg, a 41-byte snapshot a BufferSnapshot), so the raw-record charge
+// alone does not cover it. `total` is what was charged, so a parse that fails
+// can give it back.
+struct ParseCharge {
+  ByteBudget& budget;
+  uint64_t total = 0;
+  bool refused = false;
+  bool charge(uint64_t n) {
+    if (!budget.try_charge(n)) { refused = true; return false; }
+    total += n;
+    return true;
+  }
+  // A non-empty vector's buffer is its own malloc, which takes at least
+  // kMinAllocation whatever it holds, so a record full of one-byte arguments
+  // is not charged its byte count alone.
+  bool charge_buffer(uint64_t n) {
+    return charge(n ? std::max<uint64_t>(n, kMinAllocation) : 0);
+  }
+};
+
+static bool parse_kernel_launch(const uint8_t* data, size_t len,
+                                uint64_t& out_stream_handle,
+                                KernelLaunchEvent& kl, ParseCharge& pc) {
+  const uint8_t* p   = data;
+  const uint8_t* end = data + len;
+
+  // stream_handle
+  if (p + 8 > end) return false;
+  memcpy(&out_stream_handle, p, 8); p += 8;
+
+  // kernel name
+  if (p + 2 > end) return false;
+  uint16_t name_len;
+  memcpy(&name_len, p, 2); p += 2;
+  if (p + name_len > end) return false;
+  if (!pc.charge(name_len)) return false;
+  kl.kernel_name.assign(reinterpret_cast<const char*>(p), name_len);
+  p += name_len;
+
+  // co_hash
+  kl.co_hash_lo = 0; kl.co_hash_hi = 0;
+  if (p + 16 <= end) {
+    memcpy(&kl.co_hash_lo, p, 8); p += 8;
+    memcpy(&kl.co_hash_hi, p, 8); p += 8;
+  }
+
+  // grid / block / shared / counts
+  if (p + 12 + 12 + 4 + 2 + 2 > end) return false;
+  memcpy(kl.grid,        p, 12); p += 12;
+  memcpy(kl.block,       p, 12); p += 12;
+  memcpy(&kl.shared_mem, p,  4); p +=  4;
+
+  uint16_t num_args, num_snapshots;
+  memcpy(&num_args,      p, 2); p += 2;
+  memcpy(&num_snapshots, p, 2); p += 2;
+
+  // args
+  if (!pc.charge(uint64_t(num_args) * sizeof(KernelArg))) return false;
+  kl.args.reserve(num_args);
+  for (uint16_t i = 0; i < num_args; i++) {
+    if (p + 3 > end) return false;
+    KernelArg arg;
+    arg.value_kind = *p++;
+    memcpy(&arg.size, p, 2); p += 2;
+    if (p + arg.size > end) return false;
+    if (!pc.charge_buffer(arg.size)) return false;
+    arg.data.assign(p, p + arg.size);
+    p += arg.size;
+    if (arg.value_kind == 3) {  // trailing embedded-pointer offset list
+      if (p + 2 > end) return false;
+      uint16_t n_ptrs; memcpy(&n_ptrs, p, 2); p += 2;
+      if (!pc.charge_buffer(uint64_t(n_ptrs) * sizeof(uint16_t))) return false;
+      arg.ptr_offsets.reserve(n_ptrs);
+      for (uint16_t k = 0; k < n_ptrs; k++) {
+        if (p + 2 > end) return false;
+        uint16_t off; memcpy(&off, p, 2); p += 2;
+        arg.ptr_offsets.push_back(off);
+      }
+    }
+    kl.args.push_back(std::move(arg));
+  }
+
+  // pinned host snapshots
+  if (!pc.charge(uint64_t(num_snapshots) * sizeof(BufferSnapshot))) return false;
+  kl.snapshots.reserve(num_snapshots);
+  for (uint16_t i = 0; i < num_snapshots; i++) {
+    if (p + 41 > end) return false;
+    BufferSnapshot snap;
+    memcpy(&snap.ptr_handle, p, 8); p += 8;
+    memcpy(&snap.offset,     p, 8); p += 8;
+    memcpy(&snap.length,     p, 8); p += 8;
+    memcpy(&snap.hash_lo,    p, 8); p += 8;
+    memcpy(&snap.hash_hi,    p, 8); p += 8;
+    snap.direction = *p++;
+    kl.snapshots.push_back(snap);
+  }
+
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Archive loader
+// ---------------------------------------------------------------------------
+
+bool load_archive(const std::string& path, Archive& archive,
+                  ByteBudget* bytes) {
+  std::string archive_dir;
+  if (!resolve_archive_path(path, archive_dir))
+    return false;
+  archive.path = archive_dir;
+
+  std::string events_path = archive_dir + "/events.bin";
+  uint16_t file_version = 0, file_flags = 0;
+  FILE* f = open_record_stream(events_path, HRR_MAGIC, HRR_VERSION, &file_version,
+                               &file_flags);
+  if (!f) return false;
+  archive.version = file_version;
+  archive.flags = file_flags;
+
+  // The budget is the caller's when given: the archive keeps its bytes charged
+  // on success, and a failed load gives back what it charged since `start`
+  // (the load is single-threaded and nothing else charges the budget meanwhile).
+  ByteBudget own_budget;
+  ByteBudget& budget = bytes ? *bytes : own_budget;
+  const uint64_t start = budget.used();
+  auto fail = [&](const char* what) {
+    fprintf(stderr,
+            "[HRR] Refusing %s: %s; stopped reading after %zu events\n",
+            events_path.c_str(), what, archive.events.size());
+    budget.release(budget.used() - start);
+    if (f) fclose(f);
+    return false;
+  };
+  auto over_budget = [&] {
+    std::string why = "loading needs more than " + std::to_string(budget.cap()) +
+                      " bytes of host memory (--max-host-bytes)";
+    return fail(why.c_str());
+  };
+  // Event slots: the vector's capacity is what is held, and a growth holds the
+  // old and the new buffer at once, so the new one is charged before the old is
+  // given back.
+  uint64_t slots_charged = 0;
+  auto grow_events = [&] {
+    const size_t cap = std::max<size_t>(archive.events.capacity() * 2, 64);
+    if (!budget.try_charge(uint64_t(cap) * sizeof(Event))) return false;
+    archive.events.reserve(cap);
+    budget.release(slots_charged);
+    slots_charged = uint64_t(cap) * sizeof(Event);
+    return true;
+  };
+
+  // Read events sequentially. read_raw_record handles the framing and the
+  // torn-tail recovery; a torn record means the capture was interrupted, and
+  // everything parsed before it is kept. The clean-shutdown trailer
+  // (hrr_eof_record) explicitly marks a whole archive, and it ends the event
+  // stream.
+  bool truncated = false;
+  bool complete  = false;
+  bool trailer   = false;
+  uint64_t trailer_count = 0;
+  const uint16_t hdr_size = static_cast<uint16_t>(sizeof(hrr_event_header));
+  while (true) {
+    Event ev;
+    const RecordStatus st = read_raw_record(f, ev.raw_payload, &budget);
+    if (st == RecordStatus::OverBudget) return over_budget();
+    if (st == RecordStatus::EndOfStream) break;
+    if (st == RecordStatus::Torn) {
+      fprintf(stderr, "[HRR] Recovered %zu events before the torn record\n",
+              archive.events.size());
+      truncated = true;
+      break;
+    }
+
+    const uint16_t etype = ev.header().event_type;
+    const uint32_t total = ev.header().payload_length;
+
+    // Clean-shutdown trailer: full hrr_eof_record with valid magic only.
+    // event_type 0xFFFF alone is not enough — Unit_HRR_Format_UnknownEventType
+    // uses 0xFFFF with header-sized payload as an opaque unknown record.
+    if (etype == HRR_EOF_MARKER &&
+        total == static_cast<uint32_t>(sizeof(hrr_eof_record))) {
+      const auto* er = reinterpret_cast<const hrr_eof_record*>(ev.raw_payload.data());
+      if (er->eof_magic == HRR_EOF_MAGIC) {
+        trailer = true;
+        trailer_count = er->total_events;
+        // Not stored, so not held: give back what it was charged.
+        budget.release(ev.raw_payload.size());
+        break;  // the trailer is not a replay event, and nothing after it is
+      }
+    }
+
+    // Convenience cast macro — raw_payload.data() is the full hrr_args_* struct.
+    // SIZE_OK(T): verify payload is large enough for the typed struct before casting.
+    // A malformed archive could supply a valid event_type with payload_length == 32
+    // (header only), which would cause an OOB read in the typed cast.
+    #define AS(T) reinterpret_cast<const T*>(ev.raw_payload.data())
+    #define SIZE_OK(T) (total >= static_cast<uint32_t>(sizeof(T)))
+
+    switch (ev.header().event_type) {
+
+      // --- Memory allocation ---
+
+      case HRR_API_HIPMALLOC: {
+        if (!SIZE_OK(hrr_args_hipMalloc)) break;
+        const auto* a = AS(hrr_args_hipMalloc);
+        ev.malloc_ev.ptr_handle = a->ptr;
+        ev.malloc_ev.size       = a->size;
+        break;
+      }
+      case HRR_API_HIPFREE:
+        if (SIZE_OK(hrr_args_hipFree))
+          ev.malloc_ev.ptr_handle = AS(hrr_args_hipFree)->ptr;
+        break;
+
+      case HRR_API_HIPMALLOCASYNC: {
+        if (!SIZE_OK(hrr_args_hipMallocAsync)) break;
+        const auto* a = AS(hrr_args_hipMallocAsync);
+        ev.malloc_async_ev.ptr_handle    = a->dev_ptr;
+        ev.malloc_async_ev.size          = a->size;
+        ev.malloc_async_ev.stream_handle = a->stream;
+        break;
+      }
+      case HRR_API_HIPFREEASYNC: {
+        if (!SIZE_OK(hrr_args_hipFreeAsync)) break;
+        const auto* a = AS(hrr_args_hipFreeAsync);
+        ev.free_async_ev.ptr_handle    = a->dev_ptr;
+        ev.free_async_ev.stream_handle = a->stream;
+        break;
+      }
+
+      // --- Data transfer ---
+
+      case HRR_API_HIPMEMCPY: {
+        if (!SIZE_OK(hrr_args_hipMemcpy)) break;
+        const auto* a = AS(hrr_args_hipMemcpy);
+        ev.memcpy_ev.dst_addr = a->dst;
+        ev.memcpy_ev.src_addr = a->src;
+        ev.memcpy_ev.size     = a->sizeBytes;
+        ev.memcpy_ev.kind     = a->kind;
+        ev.memcpy_ev.hash_lo  = a->blob_hash_lo;
+        ev.memcpy_ev.hash_hi  = a->blob_hash_hi;
+        break;
+      }
+      case HRR_API_HIPMEMCPYASYNC: {
+        if (!SIZE_OK(hrr_args_hipMemcpyAsync)) break;
+        const auto* a = AS(hrr_args_hipMemcpyAsync);
+        ev.memcpy_ev.dst_addr = a->dst;
+        ev.memcpy_ev.src_addr = a->src;
+        ev.memcpy_ev.size     = a->sizeBytes;
+        ev.memcpy_ev.kind     = a->kind;
+        ev.stream_handle      = a->stream;
+        ev.memcpy_ev.hash_lo  = a->blob_hash_lo;
+        ev.memcpy_ev.hash_hi  = a->blob_hash_hi;
+        break;
+      }
+      case HRR_API_HIPMEMCPYHTOD: {
+        if (!SIZE_OK(hrr_args_hipMemcpyHtoD)) break;
+        const auto* a = AS(hrr_args_hipMemcpyHtoD);
+        ev.memcpy_ev.dst_addr = a->dst;
+        ev.memcpy_ev.src_addr = a->src;
+        ev.memcpy_ev.size     = a->sizeBytes;
+        ev.memcpy_ev.kind     = 1;  // hipMemcpyHostToDevice
+        ev.memcpy_ev.hash_lo  = a->blob_hash_lo;
+        ev.memcpy_ev.hash_hi  = a->blob_hash_hi;
+        break;
+      }
+      case HRR_API_HIPMEMCPYHTODASYNC: {
+        if (!SIZE_OK(hrr_args_hipMemcpyHtoDAsync)) break;
+        const auto* a = AS(hrr_args_hipMemcpyHtoDAsync);
+        ev.memcpy_ev.dst_addr = a->dst;
+        ev.memcpy_ev.src_addr = a->src;
+        ev.memcpy_ev.size     = a->sizeBytes;
+        ev.memcpy_ev.kind     = 1;  // hipMemcpyHostToDevice
+        ev.stream_handle      = a->stream;
+        ev.memcpy_ev.hash_lo  = a->blob_hash_lo;
+        ev.memcpy_ev.hash_hi  = a->blob_hash_hi;
+        break;
+      }
+
+      case HRR_API_HIPMEMCPY2D: {
+        if (!SIZE_OK(hrr_args_hipMemcpy2D)) break;
+        const auto* a = AS(hrr_args_hipMemcpy2D);
+        ev.memcpy_ev.dst_addr = a->dst;
+        ev.memcpy_ev.src_addr = a->src;
+        ev.memcpy_ev.size     = a->width * a->height;  // logical bytes (best-effort)
+        ev.memcpy_ev.kind     = a->kind;
+        // H2D blob if present, else D2H expected-output blob.
+        ev.memcpy_ev.hash_lo  = a->blob_hash_lo ? a->blob_hash_lo : a->d2h_hash_lo;
+        ev.memcpy_ev.hash_hi  = a->blob_hash_lo ? a->blob_hash_hi : a->d2h_hash_hi;
+        break;
+      }
+      case HRR_API_HIPMEMCPY2DASYNC: {
+        if (!SIZE_OK(hrr_args_hipMemcpy2DAsync)) break;
+        const auto* a = AS(hrr_args_hipMemcpy2DAsync);
+        ev.memcpy_ev.dst_addr = a->dst;
+        ev.memcpy_ev.src_addr = a->src;
+        ev.memcpy_ev.size     = a->width * a->height;  // logical bytes (best-effort)
+        ev.memcpy_ev.kind     = a->kind;
+        ev.stream_handle      = a->stream;
+        ev.memcpy_ev.hash_lo  = a->blob_hash_lo ? a->blob_hash_lo : a->d2h_hash_lo;
+        ev.memcpy_ev.hash_hi  = a->blob_hash_lo ? a->blob_hash_hi : a->d2h_hash_hi;
+        break;
+      }
+
+      case HRR_API_HIPMEMSET:
+      case HRR_API_HIPMEMSETASYNC:
+        break;  // raw_payload retained for replay
+
+      // --- Modules ---
+
+      case HRR_API_HIPMODULELOADDATA:
+      case HRR_API_HIPMODULELOADDATAEX: {
+        if (!SIZE_OK(hrr_args_hipModuleLoadData)) break;
+        const auto* a = AS(hrr_args_hipModuleLoadData);
+        ev.module_load_ev.module_handle = a->module;
+        ev.module_load_ev.hash_lo       = a->co_hash_lo;
+        ev.module_load_ev.hash_hi       = a->co_hash_hi;
+        break;
+      }
+      case HRR_API_HIPMODULELOAD: {
+        if (!SIZE_OK(hrr_args_hipModuleLoad)) break;
+        const auto* a = AS(hrr_args_hipModuleLoad);
+        ev.module_load_ev.module_handle = a->module;
+        ev.module_load_ev.hash_lo       = a->co_hash_lo;
+        ev.module_load_ev.hash_hi       = a->co_hash_hi;
+        break;
+      }
+      case HRR_API_HIPMODULEUNLOAD:
+        if (SIZE_OK(hrr_args_hipModuleUnload))
+          ev.handle64 = AS(hrr_args_hipModuleUnload)->module;
+        break;
+
+      // --- Kernel launch ---
+
+      case HRR_API_HIPMODULELAUNCHKERNEL:
+      case HRR_API_HIPEXTMODULELAUNCHKERNEL:
+      case HRR_API_HIPLAUNCHKERNEL:
+      case HRR_API_HIPLAUNCHBYPTR: {
+        auto* kl = new KernelLaunchEvent();
+        ParseCharge pc{budget};
+        pc.charge(sizeof(KernelLaunchEvent));
+        uint64_t sh = 0;
+        const uint8_t* kl_data = ev.raw_payload.data() + hdr_size;
+        size_t         kl_len  = static_cast<size_t>(total) - hdr_size;
+        if (parse_kernel_launch(kl_data, kl_len, sh, *kl, pc)) {
+          ev.stream_handle  = sh;
+          ev.kernel_launch  = kl;
+          archive.kernel_count++;
+        } else {
+          delete kl;
+          budget.release(pc.total);
+          if (pc.refused) return over_budget();
+        }
+        break;
+      }
+
+      // --- Streams ---
+
+      case HRR_API_HIPSTREAMCREATE: {
+        if (!SIZE_OK(hrr_args_hipStreamCreate)) break;
+        const auto* a = AS(hrr_args_hipStreamCreate);
+        ev.stream_create_ev.stream_handle = a->stream;
+        ev.stream_create_ev.flags         = 0;
+        ev.stream_create_ev.priority      = 0;
+        break;
+      }
+      case HRR_API_HIPSTREAMCREATEWITHFLAGS: {
+        if (!SIZE_OK(hrr_args_hipStreamCreateWithFlags)) break;
+        const auto* a = AS(hrr_args_hipStreamCreateWithFlags);
+        ev.stream_create_ev.stream_handle = a->stream;
+        ev.stream_create_ev.flags         = a->flags;
+        ev.stream_create_ev.priority      = 0;
+        break;
+      }
+      case HRR_API_HIPSTREAMCREATEWITHPRIORITY: {
+        if (!SIZE_OK(hrr_args_hipStreamCreateWithPriority)) break;
+        const auto* a = AS(hrr_args_hipStreamCreateWithPriority);
+        ev.stream_create_ev.stream_handle = a->stream;
+        ev.stream_create_ev.flags         = a->flags;
+        ev.stream_create_ev.priority      = a->priority;
+        break;
+      }
+      case HRR_API_HIPSTREAMDESTROY:
+        if (SIZE_OK(hrr_args_hipStreamDestroy))
+          ev.handle64 = AS(hrr_args_hipStreamDestroy)->stream;
+        break;
+      case HRR_API_HIPSTREAMSYNCHRONIZE:
+        if (SIZE_OK(hrr_args_hipStreamSynchronize))
+          ev.handle64 = AS(hrr_args_hipStreamSynchronize)->stream;
+        break;
+
+      case HRR_API_HIPSTREAMWAITEVENT: {
+        if (!SIZE_OK(hrr_args_hipStreamWaitEvent)) break;
+        const auto* a = AS(hrr_args_hipStreamWaitEvent);
+        ev.stream_wait_ev.stream_handle = a->stream;
+        ev.stream_wait_ev.event_handle  = a->event;
+        ev.stream_wait_ev.flags         = a->flags;
+        break;
+      }
+
+      // --- Events ---
+
+      case HRR_API_HIPEVENTCREATE:
+        if (SIZE_OK(hrr_args_hipEventCreate))
+          ev.handle64 = AS(hrr_args_hipEventCreate)->event;
+        break;
+      case HRR_API_HIPEVENTCREATEWITHFLAGS:
+        if (SIZE_OK(hrr_args_hipEventCreateWithFlags))
+          ev.handle64 = AS(hrr_args_hipEventCreateWithFlags)->event;
+        break;
+      case HRR_API_HIPEVENTRECORD: {
+        if (!SIZE_OK(hrr_args_hipEventRecord)) break;
+        const auto* a = AS(hrr_args_hipEventRecord);
+        ev.event_record_ev.event_handle  = a->event;
+        ev.event_record_ev.stream_handle = a->stream;
+        break;
+      }
+      case HRR_API_HIPEVENTSYNCHRONIZE:
+        if (SIZE_OK(hrr_args_hipEventSynchronize))
+          ev.handle64 = AS(hrr_args_hipEventSynchronize)->event;
+        break;
+      case HRR_API_HIPEVENTDESTROY:
+        if (SIZE_OK(hrr_args_hipEventDestroy))
+          ev.handle64 = AS(hrr_args_hipEventDestroy)->event;
+        break;
+
+      // --- Device sync ---
+
+      case HRR_API_HIPDEVICESYNCHRONIZE:
+      default:
+        break;
+    }
+
+    #undef AS
+    #undef SIZE_OK
+
+    if (archive.events.size() >= max_events()) {
+      const std::string why = "more than " + std::to_string(max_events()) +
+                              " events (--max-events)";
+      return fail(why.c_str());
+    }
+    if (archive.events.size() == archive.events.capacity() && !grow_events())
+      return over_budget();
+    archive.events.push_back(std::move(ev));
+  }
+
+  // A runtime older than the writer fix for it could append a few records
+  // after the trailer, from calls still in flight at shutdown. They are not in
+  // the trailer's count, so they are counted and left out of the replay.
+  if (trailer) {
+    std::vector<uint8_t> rest;
+    while (read_raw_record(f, rest) == RecordStatus::Ok)
+      ++archive.skipped_after_trailer;
+    if (archive.skipped_after_trailer)
+      fprintf(stderr,
+              "[HRR] Ignored %zu records after the clean-shutdown trailer\n",
+              archive.skipped_after_trailer);
+  }
+
+  fclose(f);
+  f = nullptr;
+
+  if (trailer) {
+    complete = trailer_count == archive.events.size();
+    if (!complete)
+      fprintf(stderr,
+              "[HRR] Clean-shutdown trailer counts %llu events but %zu precede it; "
+              "the archive is not treated as complete\n",
+              static_cast<unsigned long long>(trailer_count), archive.events.size());
+  }
+
+  archive.complete       = complete;
+  archive.truncated      = truncated;
+  archive.trailer        = trailer;
+  archive.trailer_events = trailer_count;
+  if (!trailer) {
+    fprintf(stderr,
+            "[HRR] Archive has no clean-shutdown trailer (capture likely crashed); "
+            "recovered %zu events%s\n",
+            archive.events.size(), truncated ? ", trailing torn record discarded" : "");
+  }
+
+  // Sort events by sequence_id to restore causal ordering across threads.
+  // Multi-threaded captures write events from different threads in file-arrival
+  // order, which may differ from the logical call order. sequence_id is assigned
+  // atomically by the writer, so sorting by it restores the true call sequence.
+  // stable_sort takes a scratch buffer of up to half the events, so it is
+  // charged while the sort runs.
+  const uint64_t sort_scratch = uint64_t(archive.events.size() / 2 + 1) * sizeof(Event);
+  if (!budget.try_charge(sort_scratch)) return over_budget();
+  std::stable_sort(archive.events.begin(), archive.events.end(),
+    [](const Event& a, const Event& b) {
+      return a.header().sequence_id < b.header().sequence_id;
+    });
+  budget.release(sort_scratch);
+
+  archive.event_count = archive.events.size();
+
+  // Collect distinct thread IDs in first-seen order (after sort = sequence order).
+  // One linear pass; avoids a separate scan by the replayer.
+  {
+    std::unordered_map<uint64_t, bool> seen;
+    for (const auto& ev : archive.events) {
+      if (seen.emplace(ev.header().thread_id, true).second)
+        archive.threads.push_back(ev.header().thread_id);
+    }
+  }
+
+  // One map node per file: the key (the stem), the value (the path) and the
+  // node itself. A file count alone can then set the memory, so it is charged.
+  auto charge_map_node = [&](const fs::path& p) {
+    return budget.try_charge(sizeof(std::pair<const std::string, std::string>) +
+                             kMapNodeOverhead + p.stem().string().size() +
+                             p.string().size());
+  };
+
+  // Enumerate blobs
+  std::string blobs_dir = archive_dir + "/blobs";
+  if (fs::exists(blobs_dir)) {
+    for (auto& entry : fs::recursive_directory_iterator(blobs_dir)) {
+      if (entry.is_regular_file() && entry.path().extension() == ".blob") {
+        if (!charge_map_node(entry.path())) return over_budget();
+        archive.blobs[entry.path().stem().string()] = entry.path().string();
+        archive.blob_count++;
+      }
+    }
+  }
+
+  // Enumerate code objects
+  std::string co_dir = archive_dir + "/code_objects";
+  if (fs::exists(co_dir)) {
+    for (auto& entry : fs::directory_iterator(co_dir)) {
+      if (entry.is_regular_file() && entry.path().extension() == ".hsaco") {
+        if (!charge_map_node(entry.path())) return over_budget();
+        archive.code_objects[entry.path().stem().string()] = entry.path().string();
+        archive.code_object_count++;
+      }
+    }
+  }
+
+  return true;
+}
+
+// fseek takes a long, 32 bits on Windows, and an msvcrt fseek fails once the
+// file position passes 2 GiB even for a small relative offset. events.bin can
+// be larger than that, so the walk seeks with the 64-bit call.
+static int seek64(FILE* f, int64_t offset, int origin) {
+#ifdef _WIN32
+  return _fseeki64(f, offset, origin);
+#else
+  return fseeko(f, static_cast<off_t>(offset), origin);
+#endif
+}
+
+// The framing checks are read_raw_record's, so a record the loader takes as
+// torn ends the walk here too, and like the loader the walk stops at the first
+// trailer. A payload that runs past the end of the file needs no check of its
+// own: the seek succeeds and the next header read fails.
+bool has_clean_trailer(const std::string& archive_dir) {
+  FILE* f = fopen((fs::path(archive_dir) / "events.bin").string().c_str(), "rb");
+  if (!f) return false;
+  const uint32_t hdr_size = static_cast<uint32_t>(sizeof(hrr_event_header));
+  hrr_file_header fh{};
+  bool ok = fread(&fh, sizeof(fh), 1, f) == 1 && fh.magic == HRR_MAGIC &&
+            fh.version == HRR_VERSION;
+  uint64_t records = 0;
+  bool clean = false;
+  hrr_eof_record rec{};
+  while (ok && fread(&rec.hdr, hdr_size, 1, f) == 1) {
+    const uint32_t total = rec.hdr.payload_length;
+    if (total < hdr_size || total > kMaxRecordBytes) break;
+    if (rec.hdr.event_type == HRR_EOF_MARKER && total == sizeof(rec)) {
+      ok = fread(reinterpret_cast<char*>(&rec) + hdr_size, sizeof(rec) - hdr_size, 1, f) == 1;
+      if (ok && rec.eof_magic == HRR_EOF_MAGIC) {
+        clean = rec.total_events == records;
+        break;
+      }
+    } else {
+      ok = seek64(f, static_cast<int64_t>(total - hdr_size), SEEK_CUR) == 0;
+    }
+    ++records;
+  }
+  fclose(f);
+  return clean;
+}
+
+// ---------------------------------------------------------------------------
+// Blob / code object readers
+// ---------------------------------------------------------------------------
+
+static std::atomic<uint64_t> g_max_file_bytes{kDefaultMaxFileBytes};
+static std::atomic<uint64_t> g_max_events{kDefaultMaxEvents};
+
+uint64_t max_events() { return g_max_events.load(std::memory_order_relaxed); }
+void set_max_events(uint64_t events) { g_max_events.store(events, std::memory_order_relaxed); }
+
+uint64_t max_file_bytes() { return g_max_file_bytes.load(std::memory_order_relaxed); }
+void set_max_file_bytes(uint64_t bytes) {
+  g_max_file_bytes.store(bytes, std::memory_order_relaxed);
+}
+
+bool read_file_capped(const std::string& file_path, std::vector<uint8_t>& data,
+                      std::string* error, bool* refused) {
+  if (refused) *refused = false;
+  auto fail = [&](const std::string& why) {
+    if (error) *error = why;
+    return false;
+  };
+  auto refuse = [&](const std::string& why) {
+    if (refused) *refused = true;
+    return fail(why);
+  };
+  std::error_code ec;
+  const uintmax_t size = std::filesystem::file_size(file_path, ec);
+  if (ec)
+    return fail("cannot stat " + file_path + ": " + ec.message());
+  const uint64_t cap = max_file_bytes();
+  if (size > cap)
+    return refuse("refusing to read " + file_path + ": " + std::to_string(size) +
+                " bytes exceeds the " + std::to_string(cap) +
+                "-byte file cap (--max-file-bytes)");
+  FILE* f = fopen(file_path.c_str(), "rb");
+  if (!f) return fail("cannot open " + file_path);
+  try {
+    data.resize(static_cast<size_t>(size));
+  } catch (const std::bad_alloc&) {
+    fclose(f);
+    return refuse("out of memory reading " + file_path + " (" + std::to_string(size) + " bytes)");
+  }
+  // Read at most `size` bytes: a file that grew since the stat is not followed.
+  bool ok = fread(data.data(), 1, data.size(), f) == data.size();
+  fclose(f);
+  if (!ok) return fail("short read of " + file_path);
+  return true;
+}
+
+static bool read_file(const std::string& file_path, std::vector<uint8_t>& data) {
+  std::string err;
+  if (read_file_capped(file_path, data, &err)) return true;
+  fprintf(stderr, "[HRR] %s\n", err.c_str());
+  return false;
+}
+
+bool read_blob(const Archive& archive, uint64_t hash_lo, uint64_t hash_hi,
+               std::vector<uint8_t>& data) {
+  auto it = archive.blobs.find(hash_hex(hash_lo, hash_hi));
+  return it != archive.blobs.end() && read_file(it->second, data);
+}
+
+bool read_code_object(const Archive& archive, uint64_t hash_lo, uint64_t hash_hi,
+                      std::vector<uint8_t>& data) {
+  auto it = archive.code_objects.find(hash_hex(hash_lo, hash_hi));
+  return it != archive.code_objects.end() && read_file(it->second, data);
+}
+
+}  // namespace hrr

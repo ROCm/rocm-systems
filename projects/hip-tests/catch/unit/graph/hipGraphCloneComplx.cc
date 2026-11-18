@@ -1574,7 +1574,7 @@ static void hipGraphClone_address_change_in_thread(hipGraph_t* graph, hipGraphNo
                                                    hipGraphNode_t* memcpyH2D_B,
                                                    hipGraphNode_t* memcpyD2H_C,
                                                    hipGraphNode_t* kVecAdd, int dev) {
-  HIP_CHECK(hipSetDevice(dev));
+  HIP_CHECK_THREAD(hipSetDevice(dev));
 
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -1590,16 +1590,16 @@ static void hipGraphClone_address_change_in_thread(hipGraph_t* graph, hipGraphNo
   HipTest::initArrays(&D_d, &E_d, &F_d, &D_h, &E_h, &F_h, N, false);
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
 
-  HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipGraphClone(&graph_C, *graph));
-  HIP_CHECK(hipGraphNodeFindInClone(&memcpyH2D_AC, *memcpyH2D_A, graph_C));
-  HIP_CHECK(hipGraphNodeFindInClone(&memcpyH2D_BC, *memcpyH2D_B, graph_C));
-  HIP_CHECK(hipGraphNodeFindInClone(&memcpyD2H_CC, *memcpyD2H_C, graph_C));
-  HIP_CHECK(hipGraphNodeFindInClone(&kVecAddC, *kVecAdd, graph_C));
+  HIP_CHECK_THREAD(hipStreamCreate(&stream));
+  HIP_CHECK_THREAD(hipGraphClone(&graph_C, *graph));
+  HIP_CHECK_THREAD(hipGraphNodeFindInClone(&memcpyH2D_AC, *memcpyH2D_A, graph_C));
+  HIP_CHECK_THREAD(hipGraphNodeFindInClone(&memcpyH2D_BC, *memcpyH2D_B, graph_C));
+  HIP_CHECK_THREAD(hipGraphNodeFindInClone(&memcpyD2H_CC, *memcpyD2H_C, graph_C));
+  HIP_CHECK_THREAD(hipGraphNodeFindInClone(&kVecAddC, *kVecAdd, graph_C));
 
-  HIP_CHECK(hipGraphMemcpyNodeSetParams1D(memcpyH2D_AC, D_d, D_h, Nbytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipGraphMemcpyNodeSetParams1D(memcpyH2D_BC, E_d, E_h, Nbytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipGraphMemcpyNodeSetParams1D(memcpyD2H_CC, F_h, F_d, Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK_THREAD(hipGraphMemcpyNodeSetParams1D(memcpyH2D_AC, D_d, D_h, Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK_THREAD(hipGraphMemcpyNodeSetParams1D(memcpyH2D_BC, E_d, E_h, Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK_THREAD(hipGraphMemcpyNodeSetParams1D(memcpyD2H_CC, F_h, F_d, Nbytes, hipMemcpyDeviceToHost));
 
   void* kernelArgs1[] = {&D_d, &E_d, &F_d, reinterpret_cast<void*>(&NElem)};
   kNodeParams1.func = reinterpret_cast<void*>(HipTest::vectorSUB<int>);
@@ -1608,20 +1608,20 @@ static void hipGraphClone_address_change_in_thread(hipGraph_t* graph, hipGraphNo
   kNodeParams1.sharedMemBytes = 0;
   kNodeParams1.kernelParams = reinterpret_cast<void**>(kernelArgs1);
   kNodeParams1.extra = nullptr;
-  HIP_CHECK(hipGraphKernelNodeSetParams(kVecAddC, &kNodeParams1));
+  HIP_CHECK_THREAD(hipGraphKernelNodeSetParams(kVecAddC, &kNodeParams1));
 
   // Instantiate and launch the graph
-  HIP_CHECK(hipGraphInstantiate(&graphExecC, graph_C, NULL, NULL, 0));
-  HIP_CHECK(hipGraphLaunch(graphExecC, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK_THREAD(hipGraphInstantiate(&graphExecC, graph_C, NULL, NULL, 0));
+  HIP_CHECK_THREAD(hipGraphLaunch(graphExecC, stream));
+  HIP_CHECK_THREAD(hipStreamSynchronize(stream));
 
   // Verify graph execution result
   HipTest::checkVectorSUB<int>(D_h, E_h, F_h, N);
 
   HipTest::freeArrays(D_d, E_d, F_d, D_h, E_h, F_h, false);
-  HIP_CHECK(hipGraphExecDestroy(graphExecC));
-  HIP_CHECK(hipGraphDestroy(graph_C));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK_THREAD(hipGraphExecDestroy(graphExecC));
+  HIP_CHECK_THREAD(hipGraphDestroy(graph_C));
+  HIP_CHECK_THREAD(hipStreamDestroy(stream));
 }
 
 /* Scenarios - 22
@@ -1691,6 +1691,8 @@ HIP_TEST_CASE(Unit_hipGraphClone_address_change_in_thread) {
   for (auto& t : threads) {
     t.join();
   }
+
+  HIP_CHECK_THREAD_FINALIZE();
 
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
   HIP_CHECK(hipGraphExecDestroy(graphExec));

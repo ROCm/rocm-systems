@@ -123,6 +123,14 @@ if(rocdecode_FOUND)
         target_link_libraries(rocdecode::rocdecode INTERFACE ${rocdecode_LIBRARY})
         target_include_directories(rocdecode::rocdecode
                                    INTERFACE ${rocdecode_INCLUDE_DIR})
+    else()
+        # rocdecode config doesn't set this...
+        get_target_property(_rocdecode_include_dirs rocdecode::rocdecode
+                            INTERFACE_INCLUDE_DIRECTORIES)
+        if(NOT _rocdecode_include_dirs)
+            target_include_directories(rocdecode::rocdecode
+                                       INTERFACE ${rocdecode_INCLUDE_DIR})
+        endif()
     endif()
 endif()
 

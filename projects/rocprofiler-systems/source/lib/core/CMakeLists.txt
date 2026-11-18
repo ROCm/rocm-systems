@@ -7,21 +7,20 @@ set(core_sources
     ${CMAKE_CURRENT_LIST_DIR}/argparse.cpp
     ${CMAKE_CURRENT_LIST_DIR}/categories.cpp
     ${CMAKE_CURRENT_LIST_DIR}/config.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/constraint.cpp
     ${CMAKE_CURRENT_LIST_DIR}/cpu.cpp
     ${CMAKE_CURRENT_LIST_DIR}/dynamic_library.cpp
     ${CMAKE_CURRENT_LIST_DIR}/exception.cpp
     ${CMAKE_CURRENT_LIST_DIR}/gpu.cpp
     ${CMAKE_CURRENT_LIST_DIR}/gpu_metrics.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/library_checker.cpp
     ${CMAKE_CURRENT_LIST_DIR}/mproc.cpp
     ${CMAKE_CURRENT_LIST_DIR}/node_info.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/output_file_registry.cpp
     ${CMAKE_CURRENT_LIST_DIR}/perf.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/perfetto.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/process_environment_info.cpp
     ${CMAKE_CURRENT_LIST_DIR}/timemory.cpp
     ${CMAKE_CURRENT_LIST_DIR}/track_registry.cpp
     ${CMAKE_CURRENT_LIST_DIR}/utility.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/wall_clock_report.cpp
 )
 
 set(core_headers
@@ -35,25 +34,24 @@ set(core_headers
     ${CMAKE_CURRENT_LIST_DIR}/common_types.hpp
     ${CMAKE_CURRENT_LIST_DIR}/concepts.hpp
     ${CMAKE_CURRENT_LIST_DIR}/config.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/constraint.hpp
     ${CMAKE_CURRENT_LIST_DIR}/cpu.hpp
     ${CMAKE_CURRENT_LIST_DIR}/demangler.hpp
     ${CMAKE_CURRENT_LIST_DIR}/dynamic_library.hpp
     ${CMAKE_CURRENT_LIST_DIR}/exception.hpp
     ${CMAKE_CURRENT_LIST_DIR}/gpu.hpp
     ${CMAKE_CURRENT_LIST_DIR}/gpu_metrics.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/library_checker.hpp
     ${CMAKE_CURRENT_LIST_DIR}/locking.hpp
     ${CMAKE_CURRENT_LIST_DIR}/mpi.hpp
     ${CMAKE_CURRENT_LIST_DIR}/mproc.hpp
     ${CMAKE_CURRENT_LIST_DIR}/node_info.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/output_file_registry.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perf.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/perfetto.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/process_environment_info.hpp
     ${CMAKE_CURRENT_LIST_DIR}/state.hpp
     ${CMAKE_CURRENT_LIST_DIR}/timemory.hpp
     ${CMAKE_CURRENT_LIST_DIR}/track_registry.hpp
     ${CMAKE_CURRENT_LIST_DIR}/utility.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/wall_clock_report.hpp
 )
 
 add_library(rocprofiler-systems-core-library STATIC)
@@ -65,9 +63,13 @@ add_library(
 target_sources(rocprofiler-systems-core-library PRIVATE ${core_sources} ${core_headers})
 add_subdirectory(binary)
 add_subdirectory(components)
+add_subdirectory(config)
 add_subdirectory(containers)
+add_subdirectory(control)
+add_subdirectory(output)
 add_subdirectory(perfetto)
 add_subdirectory(progress)
+add_subdirectory(sdk)
 add_subdirectory(trace_cache)
 
 target_include_directories(
@@ -84,6 +86,10 @@ target_include_directories(
 target_link_libraries(
     rocprofiler-systems-core-library
     PRIVATE rocprofiler-systems::rocprofiler-systems-interface-library
+)
+target_link_libraries(
+    rocprofiler-systems-core-library
+    PUBLIC rocprofiler-systems::rocprofiler-systems-containers
 )
 target_link_libraries(
     rocprofiler-systems-core-library

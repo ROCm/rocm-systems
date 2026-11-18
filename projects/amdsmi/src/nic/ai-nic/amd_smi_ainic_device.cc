@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "amd_smi/impl/nic/amd_smi_ainic_device.h"
 
@@ -28,12 +9,46 @@
 
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <vector>
 
+#include "amd_smi/impl/amd_smi_nic_testing.h"
+#include "amd_smi/impl/amd_smi_system.h"
+#include "rocm_smi/rocm_smi_logger.h"
+
 namespace amd::smi {
 amdsmi_status_t AMDSmiAINICDevice::amd_query_nic_info(AINICInfo& info) const {
+  const auto lock = std::lock_guard<std::mutex>{m_rdma_mtu_mutex};
+  fill_rdma_mtu_once_locked();
   info = ai_nic_info_;
   return AMDSMI_STATUS_SUCCESS;
+}
+
+void AMDSmiAINICDevice::get_rdma_dev(amdsmi_nic_rdma_devices_info_t& rdma_dev) const {
+  const auto lock = std::lock_guard<std::mutex>{m_rdma_mtu_mutex};
+  fill_rdma_mtu_once_locked();
+  rdma_dev = ai_nic_info_.rdma_dev;
+}
+
+// Holds only this device's mutex across the probe, never the NIC context lock. A context-level
+// failure is retried by the next read; a port the probe could not read stays unknown.
+void AMDSmiAINICDevice::fill_rdma_mtu_once_locked() const {
+  if (m_was_rdma_mtu_filled) {
+    return;
+  }
+  if (ai_nic_info_.rdma_dev.num_rdma_dev == 0) {
+    m_was_rdma_mtu_filled = true;
+    return;
+  }
+  const auto status = fill_ainic_rdma_mtu(AMDSmiSystem::getInstance().get_ainic_ctx(), bdf(),
+                                          ai_nic_info_.rdma_dev);
+  m_was_rdma_mtu_filled = (status == SMI_NIC_STATUS_SUCCESS);
+  if (!m_was_rdma_mtu_filled) {
+    std::ostringstream ss;
+    ss << __func__ << ": RDMA MTU unavailable for BDF=0x" << std::hex << bdf() << std::dec
+       << " smi_nic_status_t: " << status << " - reporting it as unknown";
+    LOG_INFO(ss);
+  }
 }
 }  // namespace amd::smi

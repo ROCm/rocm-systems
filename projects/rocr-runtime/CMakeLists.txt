@@ -41,7 +41,16 @@
 ################################################################################
 
 
-cmake_minimum_required(VERSION 3.7)
+cmake_minimum_required(VERSION 3.25)
+
+# The binary-only wkmi.lib is compiled with /MT so ROCR must follow suit.
+# Otherwise, the default is /MD and the library cannot be linked.
+# If the linkage of wkmi.lib is ever changed to /MD, this must be updated
+# or deleted.
+# Must come before project and after cmake_minimum_required
+if(WIN32)
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
 
 # Set the project name
 project("rocr")
@@ -90,7 +99,7 @@ include(utils)
 
 
 ## Get version strings
-get_version("1.21.0")
+get_version("1.22.0")
 if (${ROCM_PATCH_VERSION})
   set(VERSION_PATCH ${ROCM_PATCH_VERSION})
 endif()

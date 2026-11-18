@@ -1,0 +1,227 @@
+/* Copyright (c) Advanced Micro Devices, Inc. */
+/* SPDX-License-Identifier:  MIT */
+
+:root {
+  --roofline-warning: #8a4b00;
+  --roofline-warning-bg: #fff3cd;
+  --roofline-warning-border: #d69e2e;
+
+  /* Chart colors. */
+  --roofline-plot-area: #ffffff;
+  --roofline-plot-grid: rgba(0, 0, 0, 0.08);
+  --roofline-marker-outline: #000000;
+}
+
+:root.report-theme-dark {
+  --roofline-warning: #ffd580;
+  --roofline-warning-bg: #402d08;
+  --roofline-warning-border: #d69e2e;
+  --roofline-plot-area: #000000;
+  --roofline-plot-grid: rgba(255, 255, 255, 0.14);
+  --roofline-marker-outline: rgba(255, 255, 255, 0.7);
+}
+
+.roofline-precision-btn:focus-visible,
+.roofline-kernel-offplot:focus-visible {
+  outline: 2px solid var(--report-accent);
+  outline-offset: 2px;
+}
+
+.roofline-plot-col {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.roofline-plot-col > div {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.roofline-plot-col .plotly-graph-div,
+.roofline-plot-col .js-plotly-plot,
+.roofline-plot-col .plot-container,
+.roofline-plot-col .svg-container {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.roofline-plot-col .plotly-graph-div,
+.roofline-plot-col .js-plotly-plot {
+  width: 100%;
+  height: 100%;
+}
+
+/* Kernels card grows and owns its own scroll area. */
+.roofline-panel--kernels {
+  flex: 1 1 auto;
+}
+
+/* Bandwidth rooflines card is sized to its content, with a maximum height.*/
+.roofline-panel--roofs {
+  flex: 0 0 auto;
+  max-height: 45%;
+}
+
+.roofline-runtime-filter {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--report-muted);
+  border-bottom: 1px solid var(--report-border);
+}
+
+.roofline-runtime-filter label {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.roofline-runtime-value {
+  color: var(--report-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.roofline-runtime-filter input[type="range"] {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--report-accent);
+}
+
+.roofline-kernel-name {
+  font-family: var(--report-kernel-font, monospace);
+}
+
+.roofline-kernel-pct {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-left: 8px;
+  color: var(--report-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.roofline-kernel-offplot {
+  flex: 0 0 auto;
+  margin: 5px 8px 0 0;
+  padding: 1px 5px;
+  border: 1px solid var(--roofline-warning-border);
+  border-radius: 999px;
+  color: var(--roofline-warning);
+  background: var(--roofline-warning-bg);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.3;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.roofline-kernel-offplot:hover {
+  box-shadow: 0 0 0 1px var(--roofline-warning-border);
+}
+
+.roofline-kernel-offplot[hidden],
+.roofline-offplot-count[hidden] {
+  display: none;
+}
+
+.roofline-offplot-count {
+  margin-left: 4px;
+  color: var(--roofline-warning);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.roofline-roof-swatch {
+  border-radius: 2px;
+  height: 4px;
+  margin-top: 6px;
+}
+
+.roofline-roof-list .report-panel-name {
+  flex: 0 1 auto;
+}
+
+.roofline-roof-aiaxis {
+  flex: 0 0 auto;
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--report-muted);
+  white-space: nowrap;
+}
+
+.roofline-precision-dropdown {
+  position: relative;
+  display: inline-block;
+}
+
+.roofline-precision-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--report-text);
+  padding: 4px 8px;
+  border: 1px solid var(--report-border);
+  border-radius: 6px;
+  background: var(--report-surface);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.roofline-precision-btn:hover {
+  border-color: var(--report-accent);
+  color: var(--report-accent);
+}
+
+.roofline-precision-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 200;
+  min-width: 120px;
+  background: var(--report-surface);
+  border: 1px solid var(--report-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 4px 0;
+}
+
+.roofline-precision-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 10px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--report-text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.roofline-precision-item:hover {
+  background: var(--report-bg-soft);
+}
+
+.roofline-precision-item input[type="checkbox"] {
+  accent-color: var(--report-accent);
+  cursor: pointer;
+}
+
+@media (max-width: 900px) {
+  .roofline-plot-col {
+    width: 100%;
+  }
+}
