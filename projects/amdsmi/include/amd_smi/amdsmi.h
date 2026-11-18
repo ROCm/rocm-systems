@@ -6737,15 +6737,10 @@ amdsmi_status_t amdsmi_get_fabric_cper_entries(amdsmi_processor_handle processor
  *
  *  @platform{nic}
  *
- *  @details Reads CPER records written by the NIC firmware into the pds_core kernel
- *  driver's debugfs ring at:
- *    /sys/kernel/debug/pds_core/<pds_core_bdf>/cper_events
- *
- *  The pds_core BDF is the management function's PCIe BDF, which is a downstream
- *  endpoint under the same NIC bridge as the ionic port functions. It is resolved
- *  automatically from the processor_handle at call time by traversing sysfs.
- *
- *  Records are in the same UEFI CPER binary format as GPU CPER entries.
+ *  @details Returns CPER-formatted error records for the AI-NIC device. Records
+ *  are read from the pds_core debugfs ring at
+ *  /sys/kernel/debug/pds_core/<pds_core_bdf>/cper_events and are in the same
+ *  UEFI CPER binary format as GPU CPER entries.
  *
  *  @param[in] processor_handle AI-NIC processor handle (AMDSMI_PROCESSOR_TYPE_AMD_NIC).
  *  @param[in] severity_mask Bitmask of severity levels to retrieve.

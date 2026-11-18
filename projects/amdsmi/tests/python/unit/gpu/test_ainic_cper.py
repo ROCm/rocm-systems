@@ -2,7 +2,7 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Unit tests for amdsmi_interface.amdsmi_get_ainic_cper_entries()
+"""Unit tests for amdsmi_interface.amdsmi_get_nic_cper_entries()
 
 Tests the Python wrapper for AI-NIC CPER retrieval without real hardware.
 Mocks the ctypes layer to verify parameter handling, exception raising, and
@@ -70,21 +70,21 @@ def _set_out(ref, value):
 @unittest.skipIf(amdsmi_interface is None, "amdsmi_interface not available")
 @unittest.skipIf(_nic_symbol_missing, "installed amdsmi build predates the NIC CPER API")
 class TestAinicCperInterface(unittest.TestCase):
-    """Test amdsmi_interface.amdsmi_get_ainic_cper_entries()"""
+    """Test amdsmi_interface.amdsmi_get_nic_cper_entries()"""
 
     def setUp(self):
         self.processor_handle = amdsmi_wrapper.amdsmi_processor_handle(0xABCD)
 
     def test_invalid_handle_type(self):
         with self.assertRaises(amdsmi_exception.AmdSmiParameterException):
-            amdsmi_interface.amdsmi_get_ainic_cper_entries("not_a_handle", 0xFFFF)
+            amdsmi_interface.amdsmi_get_nic_cper_entries("not_a_handle", 0xFFFF)
 
     @_patch_nic_symbol()
     def test_not_supported_error(self, mock_nic_cper):
         mock_nic_cper.return_value = amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
 
         with self.assertRaises(amdsmi_exception.AmdSmiLibraryException) as ctx:
-            amdsmi_interface.amdsmi_get_ainic_cper_entries(self.processor_handle, 0xFFFF)
+            amdsmi_interface.amdsmi_get_nic_cper_entries(self.processor_handle, 0xFFFF)
 
         self.assertEqual(ctx.exception.get_error_code(), amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED)
 
@@ -94,7 +94,7 @@ class TestAinicCperInterface(unittest.TestCase):
         mock_nic_cper.return_value = amdsmi_wrapper.AMDSMI_STATUS_FILE_NOT_FOUND
 
         with self.assertRaises(amdsmi_exception.AmdSmiLibraryException) as ctx:
-            amdsmi_interface.amdsmi_get_ainic_cper_entries(self.processor_handle, 0xFFFF)
+            amdsmi_interface.amdsmi_get_nic_cper_entries(self.processor_handle, 0xFFFF)
 
         self.assertEqual(
             ctx.exception.get_error_code(), amdsmi_wrapper.AMDSMI_STATUS_FILE_NOT_FOUND
@@ -105,7 +105,7 @@ class TestAinicCperInterface(unittest.TestCase):
         mock_nic_cper.return_value = amdsmi_wrapper.AMDSMI_STATUS_NO_PERM
 
         with self.assertRaises(amdsmi_exception.AmdSmiLibraryException) as ctx:
-            amdsmi_interface.amdsmi_get_ainic_cper_entries(self.processor_handle, 0xFFFF)
+            amdsmi_interface.amdsmi_get_nic_cper_entries(self.processor_handle, 0xFFFF)
 
         self.assertEqual(ctx.exception.get_error_code(), amdsmi_wrapper.AMDSMI_STATUS_NO_PERM)
 
@@ -119,7 +119,7 @@ class TestAinicCperInterface(unittest.TestCase):
 
         mock_nic_cper.side_effect = mock_impl
 
-        entries, new_cursor, cper_data, status = amdsmi_interface.amdsmi_get_ainic_cper_entries(
+        entries, new_cursor, cper_data, status = amdsmi_interface.amdsmi_get_nic_cper_entries(
             self.processor_handle, severity_mask=0xFFFF
         )
 
@@ -158,7 +158,7 @@ class TestAinicCperInterface(unittest.TestCase):
 
         mock_nic_cper.side_effect = mock_impl
 
-        entries, new_cursor, cper_data, status = amdsmi_interface.amdsmi_get_ainic_cper_entries(
+        entries, new_cursor, cper_data, status = amdsmi_interface.amdsmi_get_nic_cper_entries(
             self.processor_handle, severity_mask=0xFFFF
         )
 
@@ -188,7 +188,7 @@ class TestAinicCperInterface(unittest.TestCase):
 
         mock_nic_cper.side_effect = mock_impl
 
-        entries, _, _, _ = amdsmi_interface.amdsmi_get_ainic_cper_entries(
+        entries, _, _, _ = amdsmi_interface.amdsmi_get_nic_cper_entries(
             self.processor_handle, severity_mask=0xFFFF
         )
         self.assertEqual(entries[0]["source"], "ainic")
@@ -203,7 +203,7 @@ class TestAinicCperInterface(unittest.TestCase):
 
         mock_nic_cper.side_effect = mock_impl
 
-        entries, new_cursor, _, status = amdsmi_interface.amdsmi_get_ainic_cper_entries(
+        entries, new_cursor, _, status = amdsmi_interface.amdsmi_get_nic_cper_entries(
             self.processor_handle, severity_mask=0xFFFF, cursor=0
         )
 
@@ -225,7 +225,7 @@ class TestAinicCperInterface(unittest.TestCase):
         mock_nic_cper.side_effect = mock_impl
 
         custom = 2 * 1048576
-        amdsmi_interface.amdsmi_get_ainic_cper_entries(
+        amdsmi_interface.amdsmi_get_nic_cper_entries(
             self.processor_handle, severity_mask=0xFFFF, buffer_size=custom
         )
 

@@ -4176,7 +4176,7 @@ def amdsmi_get_fabric_cper_entries(
     return entries, cur.value, cper_data, ret
 
 
-def amdsmi_get_ainic_cper_entries(
+def amdsmi_get_nic_cper_entries(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
     severity_mask: int,
     buffer_size: int = 4 * 1048576,

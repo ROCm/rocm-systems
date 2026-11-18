@@ -3081,7 +3081,7 @@ class AMDSMIHelpers:
         while True:
             try:
                 entries, new_cursor, cper_data, _status = (
-                    amdsmi_interface.amdsmi_get_ainic_cper_entries(
+                    amdsmi_interface.amdsmi_get_nic_cper_entries(
                         ainic_handle, severity_mask, buffer_size, ainic_cursors[ainic_idx]
                     )
                 )
