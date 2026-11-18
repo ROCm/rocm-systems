@@ -7389,7 +7389,7 @@ Field | Description
 `version` | Fabric info structure version
 `accelerator_id` | Accelerator identifier (range 0 to 1023)
 `fabric_type` | Fabric type: `UALOE`, `UALLINK`, or `UNKNOWN`
-`bandwidth` | Station bandwidth share in Mb/s
+`bandwidth` | Estimated total bandwidth between pairs of accelerators, in MB/s (10^6 bytes per second)
 `latency` | Latency in nanoseconds
 `ppod_id` | Physical PoD identifier as a list of 16 bytes
 `ppod_size` | Physical PoD size

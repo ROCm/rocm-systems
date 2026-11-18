@@ -132,7 +132,7 @@ void TestFabricRead::Run(void) {
         std::cout << "\t\tversion:        " << fabric_info.fabric_version << "\n"
                   << "\t\taccelerator_id: " << v1.accelerator_id << "\n"
                   << "\t\tfabric_type:    " << v1.fabric_type << "\n"
-                  << "\t\tbandwidth:      " << v1.bandwidth << " Mb/s" << "\n"
+                  << "\t\tbandwidth:      " << v1.bandwidth << " MB/s" << "\n"
                   << "\t\tlatency:        " << v1.latency << " ns" << "\n"
                   << "\t\tvpod_id:        " << v1.vpod_id << "\n"
                   << "\t\tvpod_size:      " << v1.vpod_size << "\n"

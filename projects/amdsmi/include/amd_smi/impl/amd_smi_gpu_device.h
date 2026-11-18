@@ -28,7 +28,7 @@ namespace amd::smi {
  * -----------------------------------------------------------------------------------------------
  *  - link_type: ualink or ualoe
  *  - accel_id: size is architecture dependent, 0-255 on MI4xx
- *  - bandwidth: station bandwidth share, units TBD
+ *  - bandwidth: estimated total bandwidth between pairs of accelerators, MB/s
  *  - latency: latency depends on switch presence/type, unit TBD
  *  - ppod_id: physical pod id: 64-bit hexadecimal 0x...
  *  - ppod_size: physical pod size
