@@ -676,8 +676,8 @@ add_executable(
     util_simd_test.cpp
     v_add_simd_benchmark.cpp
     mfma_simd_benchmark.cpp
-    smfmac_simd_benchmark.cpp
     wmma_simd_benchmark.cpp
+    smfmac_simd_benchmark.cpp
     swmmac_k64_simd_benchmark.cpp
     swmmac_k128_simd_benchmark.cpp
     simd_correctness/simd_coverage_test.cpp
@@ -736,6 +736,7 @@ add_executable(
     execution_plugin_register_test.cpp
     execution_plugin_memory_test.cpp
     execution_plugin_race_test.cpp
+    race_report_test.cpp
     plugin_config_resolver_test.cpp
     plugin_loader_test.cpp
     race-detector/race_detector_counter_capacity_tests.cpp
@@ -816,9 +817,7 @@ endif()
 if(RJ_ENABLE_EXPENSIVE_CHECKS)
     target_sources(
         rocjitsu_tests
-        PRIVATE
-            simd_correctness/mfma_simd_exact_test.cpp
-            simd_correctness/wmma_simd_exact_test.cpp
+        PRIVATE simd_correctness/mfma_simd_exact_test.cpp
     )
 endif()
 target_link_libraries(

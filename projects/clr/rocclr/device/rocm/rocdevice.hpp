@@ -71,9 +71,10 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   uint32_t dispatch_slot_ = kNoDispatchSlot;
   std::recursive_mutex lock_;  //!< Signal lock for update
 
-  //! Reuse bookkeeping, touched only by the owning RetiringSignalTracker. Kept out of flags_
-  //! because timestamp processing updates flags_ from other threads.
-  uint64_t use_seq_ = 0;         //!< Queue sequence of the last use, 0 if unused
+  //! Reuse bookkeeping, touched only by the owning tracker: use_seq_ and use_fence_ by every
+  //! tracker, the rest by RetiringSignalTracker. Kept out of flags_ because timestamp processing
+  //! updates flags_ from other threads.
+  uint64_t use_seq_ = 0;         //!< Queue sequence of the last use, 0 if none or rolled back
   uint64_t use_aql_slot_ = kInvalidAqlSlot;  //!< AQL packet completing the use, if it retires
                                              //!< in queue order
   uint64_t use_queue_gen_ = 0;   //!< HW queue generation the packet was submitted to
@@ -581,6 +582,16 @@ class Device : public NullDevice {
 
   virtual cl_int virtualMap(void* va, size_t size, amd::Memory* phys) override;
   virtual cl_int virtualUnmap(void* va, size_t size) override;
+
+  //! Maps phys at va. With track_mapping, creates the VA sub-object, wires MemObjMap, resolves
+  //! the owning agent on its existing device views, and rolls the sub-object back if the map
+  //! fails. phys must not be nullptr.
+  [[nodiscard]] cl_int MapPhysicalToVirtual(void* va, size_t size, amd::Memory* phys,
+                                            bool track_mapping) const;
+
+  //! Unmaps va. With track_mapping, also tears down the VA sub-object bookkeeping, and va must
+  //! name a range this runtime previously mapped and bookkept.
+  [[nodiscard]] cl_int UnmapVirtual(void* va, size_t size, bool track_mapping) const;
 
   virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
                             VmmLocationType = VmmLocationType::kDevice,
