@@ -476,13 +476,13 @@ sqlite_relation_present(data_storage::sqlite_backend& backend, const std::string
     {
         size_t one{};
     };
-    const auto rows =
-        backend
-            .create_read_statement_executor<present_row>(
-                "SELECT 1 FROM sqlite_master WHERE type IN ('table', 'view') AND name = '" +
-                    name + "'",
-                &present_row::one)()
-            .to_vector();
+    const auto rows = backend
+                          .create_read_statement_executor<present_row>(
+                              "SELECT 1 FROM sqlite_master WHERE type IN ('table', "
+                              "'view') AND name = '" +
+                                  name + "'",
+                              &present_row::one)()
+                          .to_vector();
     return !rows.empty();
 }
 
@@ -503,7 +503,8 @@ std::string
 choose_sample_table(data_storage::sqlite_backend& backend)
 {
     const std::string chosen = physical_join_table(backend, "rocpd_sample");
-    if(chosen != "rocpd_sample" || sqlite_relation_present(backend, chosen)) return chosen;
+    if(chosen != "rocpd_sample" || sqlite_relation_present(backend, chosen))
+        return chosen;
     return {};
 }
 
@@ -1183,10 +1184,10 @@ rocpd_v3_reader::summarize_name_durations(const resolved_event_query& query,
     const std::string sql =
         "SELECT " + name_expr + ", COUNT(*), MIN(" + duration + "), MAX(" + duration +
         "), SUM(" + duration + ") FROM " + source->table + "_" + m_backend->get_uuid() +
-        " " + source->alias + " INNER JOIN " + event_table + " E ON E.id = " +
-        source->alias + ".event_id LEFT JOIN " + sample_table + " S ON S.event_id = " +
-        source->alias + ".event_id WHERE " + (where.empty() ? std::string("1") : where) +
-        " GROUP BY 1";
+        " " + source->alias + " INNER JOIN " + event_table +
+        " E ON E.id = " + source->alias + ".event_id LEFT JOIN " + sample_table +
+        " S ON S.event_id = " + source->alias + ".event_id WHERE " +
+        (where.empty() ? std::string("1") : where) + " GROUP BY 1";
 
     std::unordered_map<std::string, name_duration_summary_t> groups;
     auto collect = [&](const duration_summary_row& row) {

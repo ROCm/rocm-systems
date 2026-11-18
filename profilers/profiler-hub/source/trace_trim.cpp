@@ -316,7 +316,8 @@ trim_trace_files(const std::vector<trim_source_t>& inputs,
     if(error) return PH_RESULT_INVALID_FILE;
 
     // sqlite3_open_v2 creates a missing file, but not a missing parent directory.
-    const std::filesystem::path parent = std::filesystem::path{ output_path }.parent_path();
+    const std::filesystem::path parent =
+        std::filesystem::path{ output_path }.parent_path();
     if(!parent.empty())
     {
         std::filesystem::create_directories(parent, error);
