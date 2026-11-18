@@ -5,10 +5,10 @@
 // Reuses decoded factors across eight-column FMA accumulation, applying operand
 // modifiers and stage-specific narrowing for packed results before final stores.
 
-#include "common/float_formats.h"
+#include "common/float_encoding.h"
 #include "common/simd.h"
 #include "common/x86_64/half_x86_64_v3.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 #include "wmma/layout.h"
 
 #include <immintrin.h>

@@ -13,6 +13,7 @@
 #include "rocjitsu/code/builders/spill_builders.h"
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
+#include "rocjitsu/code/kernel_scope.h"
 #include "rocjitsu/code/patch/checked_text_edits.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/entry_prologue.h"
@@ -24,21 +25,28 @@
 #include "rocjitsu/code/patch/probe_live_in.h"
 #include "rocjitsu/code/patch/probe_symbol.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
+#include "rocjitsu/code/scoped_cfg_edges.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/sgpr_layout.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
+#include "rocjitsu/isa/operand.h"
 #include "rocjitsu/isa/target_registry.h"
 #include "util/diagnostic.h"
 #include "util/result.h"
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cassert>
 #include <cstring>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -46,6 +54,261 @@
 namespace rocjitsu {
 
 namespace {
+
+rj_code_target_id_t effective_target(const AmdGpuCodeObject &object, rj_code_arch_t arch) {
+  if (object.target_id() != ROCJITSU_CODE_TARGET_INVALID)
+    return object.target_id();
+  const IsaTargetRegistry &registry = default_isa_target_registry();
+  const IsaTargetDescriptor *descriptor = registry.find(arch);
+  if (descriptor == nullptr)
+    return ROCJITSU_CODE_TARGET_INVALID;
+  const IsaGpuTargetDescription *target = registry.find_default_gpu_target(*descriptor);
+  return target == nullptr ? ROCJITSU_CODE_TARGET_INVALID : target->public_id;
+}
+
+bool requires_cdna5_valu_follower(const Instruction &inst) {
+  // These gfx1250/1251 permutes need an immediately issuing safe VALU.
+  // https://github.com/llvm/llvm-project/commit/0c8e5777423c2e657d7e5c61b2cc812253f9b3ec
+  const std::string_view mnemonic = inst.mnemonic();
+  return mnemonic == "v_perm_pk16_b4_u4" || mnemonic == "v_perm_pk16_b6_u4" ||
+         mnemonic == "v_perm_pk16_b8_u4";
+}
+
+// These ISA message tables assign MSG_DEALLOC_VGPRS to message 3. Older
+// architectures give that encoding different semantics.
+bool deallocates_vgprs(const Instruction &instruction, rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_CDNA5 && arch != ROCJITSU_CODE_ARCH_RDNA3 &&
+      arch != ROCJITSU_CODE_ARCH_RDNA3_5 && arch != ROCJITSU_CODE_ARCH_RDNA4)
+    return false;
+  if (instruction.mnemonic() != "s_sendmsg" && instruction.mnemonic() != "s_sendmsghalt")
+    return false;
+  const Operand *message = instruction.src_operand(0);
+  constexpr uint32_t kDeallocVgprsMessage = 3;
+  // In-tree OPR_SENDMSG.MSG is 9/4/7/7 bits for RDNA3/3.5/4/CDNA5.
+  // LLVM SendMsg::ID_MASK_GFX11Plus_ (SIDefines.h) uses the low byte. Until these descriptions
+  // agree, reject deallocation under either interpretation (including 0x103).
+  const uint32_t message_mask = arch == ROCJITSU_CODE_ARCH_RDNA3     ? 0x1ffu
+                                : arch == ROCJITSU_CODE_ARCH_RDNA3_5 ? 0xfu
+                                                                     : 0x7fu;
+  return message == nullptr || (message->encoding_value() & message_mask) == kDeallocVgprsMessage ||
+         (message->encoding_value() & 0xffu) == kDeallocVgprsMessage;
+}
+
+enum class CallableState { GprIndexing, Vskip, UnavailableStorage };
+
+enum class StateWrite { Unchanged, Safe, Unsafe };
+
+bool has_callable_state(rj_code_arch_t arch, CallableState state) {
+  switch (state) {
+  case CallableState::GprIndexing:
+    return isa_properties(arch).mode_has_gpr_idx_en;
+  case CallableState::Vskip:
+    return arch_is_cdna_4_or_lower(arch);
+  case CallableState::UnavailableStorage:
+    return arch == ROCJITSU_CODE_ARCH_CDNA5 || arch == ROCJITSU_CODE_ARCH_RDNA3 ||
+           arch == ROCJITSU_CODE_ARCH_RDNA3_5 || arch == ROCJITSU_CODE_ARCH_RDNA4;
+  }
+  return false;
+}
+
+StateWrite
+callable_state_write(const Instruction &inst, std::span<const uint8_t> text, rj_code_arch_t arch,
+                     CallableState state,
+                     const std::unordered_set<const Instruction *> *preserving_calls = nullptr) {
+  if (!has_callable_state(arch, state))
+    return StateWrite::Unchanged;
+  if (inst.flags() & INDIRECT_CALL)
+    return preserving_calls != nullptr && preserving_calls->contains(&inst) ? StateWrite::Unchanged
+                                                                            : StateWrite::Unsafe;
+  // Descriptor counts prove only dispatch-time storage. No later allocation
+  // currently proves that the callback envelope has sufficient VGPRs/scratch.
+  if (state == CallableState::UnavailableStorage)
+    return inst.mnemonic() == "s_alloc_vgpr" || deallocates_vgprs(inst, arch)
+               ? StateWrite::Unsafe
+               : StateWrite::Unchanged;
+  const bool enables = state == CallableState::GprIndexing
+                           ? may_enable_gpr_indexing(inst, text, arch)
+                           : may_enable_vskip(inst, text, arch);
+  if (enables)
+    return StateWrite::Unsafe;
+  if ((state == CallableState::GprIndexing && inst.mnemonic() == "s_set_gpr_idx_off") ||
+      (state == CallableState::Vskip && inst.mnemonic() == "s_setvskip"))
+    return StateWrite::Safe;
+  if (inst.mnemonic() == "s_setreg_b32" || inst.mnemonic() == "s_setreg_imm32_b32") {
+    const Operand *hwreg = inst.dst_operand(0);
+    if (hwreg != nullptr &&
+        amdgpu::hwreg_slice_overlaps_mode_bit(static_cast<uint16_t>(hwreg->encoding_value()),
+                                              state == CallableState::GprIndexing ? 27 : 28))
+      return StateWrite::Safe;
+  }
+  return StateWrite::Unchanged;
+}
+
+// A resolved straight-line helper can preserve the required state without an
+// ABI assumption. More complex or unresolved callees remain unknown here.
+bool callee_preserves_state(const BasicBlock::CallEdge &edge, std::span<const uint8_t> text,
+                            rj_code_arch_t arch, CallableState state) {
+  if (edge.callee == nullptr || !edge.callee->successors().empty() ||
+      !edge.callee->predecessors().empty())
+    return false;
+  const Instruction *ret = edge.callee->terminator();
+  if (ret == nullptr || (ret->mnemonic() != "s_setpc_b64" && ret->mnemonic() != "s_set_pc_i64"))
+    return false;
+  const Operand *link = ret->src_operand(0);
+  if (link == nullptr || link->encoding_value() != edge.return_sreg)
+    return false;
+  for (const Instruction &inst : edge.callee->instructions()) {
+    if (&inst == ret)
+      break;
+    if (inst.mnemonic().starts_with("s_movrel") ||
+        callable_state_write(inst, text, arch, state) != StateWrite::Unchanged)
+      return false;
+    const InstDefUse effects(inst, 64);
+    if (effects.defs.contains({RegClass::SGPR, edge.return_sreg, 1}) ||
+        effects.defs.contains({RegClass::SGPR, static_cast<uint16_t>(edge.return_sreg + 1), 1}))
+      return false;
+  }
+  return true;
+}
+
+// Recognize a contiguous negative 64-bit PC adjustment with its carry intact.
+// Restrict hidden edges to dispatch roots so they cannot enter another helper
+// with a return-link context supplied only by that helper's own callers.
+std::optional<uint64_t> adjusted_pc_entry_target(const std::array<const Instruction *, 3> &tail,
+                                                 uint64_t base, uint16_t link,
+                                                 std::span<const KernelDescriptorInfo> kernels) {
+  if (tail[0] == nullptr || tail[0]->src_loc() + tail[0]->size() != tail[1]->src_loc() ||
+      tail[1]->src_loc() + tail[1]->size() != tail[2]->src_loc())
+    return std::nullopt;
+  const std::string_view low_name = tail[0]->mnemonic();
+  const std::string_view high_name = tail[1]->mnemonic();
+  const std::string_view ret_name = tail[2]->mnemonic();
+  if ((low_name != "s_add_u32" && low_name != "s_add_co_u32") ||
+      (high_name != "s_addc_u32" && high_name != "s_add_co_ci_u32") ||
+      (ret_name != "s_setpc_b64" && ret_name != "s_set_pc_i64"))
+    return std::nullopt;
+  const auto is_link = [](const Operand *operand, uint16_t index, uint8_t width = 1) {
+    return operand != nullptr &&
+           operand->to_register_ref() == RegisterRef{RegClass::SGPR, index, width};
+  };
+  const uint16_t high = link + 1;
+  if (!is_link(tail[0]->dst_operand(0), link) || !is_link(tail[0]->src_operand(0), link) ||
+      !is_link(tail[1]->dst_operand(0), high) || !is_link(tail[1]->src_operand(0), high) ||
+      !is_link(tail[2]->src_operand(0), link, 2))
+    return std::nullopt;
+  const Operand *low_value = tail[0]->src_operand(1);
+  const Operand *high_value = tail[1]->src_operand(1);
+  if (low_value == nullptr || high_value == nullptr)
+    return std::nullopt;
+  const std::optional<uint64_t> low_constant = low_value->const_value();
+  const std::optional<uint64_t> high_constant = high_value->const_value();
+  if (!low_constant || !high_constant || static_cast<uint32_t>(*high_constant) != 0xffffffffu)
+    return std::nullopt;
+  const int64_t delta = static_cast<int32_t>(static_cast<uint32_t>(*low_constant));
+  if (delta >= 0 || base < static_cast<uint64_t>(-delta))
+    return std::nullopt;
+  const uint64_t target = base - static_cast<uint64_t>(-delta);
+  if (!std::ranges::any_of(kernels, [&](const KernelDescriptorInfo &kernel) {
+        return kernel.entry_text_offset == target;
+      }))
+    return std::nullopt;
+  return target;
+}
+
+std::optional<uint64_t> callee_reentry_target(const BasicBlock::CallEdge &edge,
+                                              std::span<const KernelDescriptorInfo> kernels) {
+  if (edge.callee == nullptr || edge.continuation == nullptr ||
+      !edge.callee->successors().empty() || !edge.callee->predecessors().empty())
+    return std::nullopt;
+  std::array<const Instruction *, 3> tail = {};
+  for (const Instruction &inst : edge.callee->instructions())
+    tail = {tail[1], tail[2], &inst};
+  const std::optional<uint64_t> target =
+      adjusted_pc_entry_target(tail, edge.continuation->start_offset(), edge.return_sreg, kernels);
+  if (!target)
+    return std::nullopt;
+  const uint16_t high = edge.return_sreg + 1;
+  for (const Instruction &inst : edge.callee->instructions()) {
+    if (&inst == tail[0])
+      break;
+    const InstDefUse effects(inst, 64);
+    if (inst.mnemonic().starts_with("s_movrel") ||
+        effects.defs.contains({RegClass::SGPR, edge.return_sreg, 1}) ||
+        effects.defs.contains({RegClass::SGPR, high, 1}))
+      return std::nullopt;
+  }
+  return target;
+}
+
+std::optional<uint64_t> static_pc_reentry_target(const BasicBlock &block,
+                                                 std::span<const KernelDescriptorInfo> kernels) {
+  std::array<const Instruction *, 4> tail = {};
+  for (const Instruction &inst : block.instructions())
+    tail = {tail[1], tail[2], tail[3], &inst};
+  if (tail[0] == nullptr ||
+      (tail[0]->mnemonic() != "s_getpc_b64" && tail[0]->mnemonic() != "s_get_pc_i64") ||
+      tail[0]->src_loc() + tail[0]->size() != tail[1]->src_loc())
+    return std::nullopt;
+  const Operand *destination = tail[0]->dst_operand(0);
+  if (destination == nullptr)
+    return std::nullopt;
+  const std::optional<RegisterRef> pair = destination->to_register_ref();
+  if (!pair || pair->cls != RegClass::SGPR || pair->width != 2)
+    return std::nullopt;
+  return adjusted_pc_entry_target({tail[1], tail[2], tail[3]}, tail[0]->src_loc() + tail[0]->size(),
+                                  pair->index, kernels);
+}
+
+// Hidden but bounded return edges preserve initial state if no instruction in
+// the closed text changes it. Unknown/external transfers still fail.
+bool callable_state_is_preserved_in_closed_text(std::span<const std::unique_ptr<BasicBlock>> blocks,
+                                                std::span<const KernelDescriptorInfo> kernels,
+                                                std::span<const uint8_t> text, rj_code_arch_t arch,
+                                                CallableState state) {
+  std::unordered_set<const Instruction *> known_returns;
+  for (const std::unique_ptr<BasicBlock> &block : blocks) {
+    for (const Instruction &inst : block->instructions()) {
+      if (inst.mnemonic().starts_with("s_rfe"))
+        return false;
+      if (inst.flags() & INDIRECT_CALL) {
+        if (&inst != block->terminator() || block->call_edges().empty())
+          return false;
+      } else if (callable_state_write(inst, text, arch, state) != StateWrite::Unchanged) {
+        return false;
+      }
+    }
+    for (const BasicBlock::CallEdge &edge : block->call_edges()) {
+      if (edge.callee == nullptr ||
+          std::ranges::any_of(kernels,
+                              [&](const KernelDescriptorInfo &kernel) {
+                                return kernel.entry_text_offset == edge.callee->start_offset();
+                              }) ||
+          (!callee_preserves_state(edge, text, arch, state) &&
+           !callee_reentry_target(edge, kernels)))
+        return false;
+      known_returns.insert(edge.callee->terminator());
+    }
+  }
+  for (const std::unique_ptr<BasicBlock> &block : blocks) {
+    const BasicBlock::SuccessorIssue issue = block->successor_issue();
+    if (issue == BasicBlock::SuccessorIssue::None)
+      continue;
+    if (issue != BasicBlock::SuccessorIssue::IndirectControlFlow)
+      return false;
+    if (known_returns.contains(block->terminator()) || static_pc_reentry_target(*block, kernels))
+      continue;
+    const std::vector<IndirectCallFixup> &fixups = block->static_indirect_call_fixups();
+    if (fixups.empty() || !std::ranges::all_of(fixups, [&](const IndirectCallFixup &fixup) {
+          return !fixup.source_incomplete && block->terminator() != nullptr &&
+                 fixup.source_call_offset == block->terminator()->src_loc() &&
+                 std::ranges::any_of(blocks, [&](const std::unique_ptr<BasicBlock> &target) {
+                   return target->start_offset() == fixup.source_target_offset;
+                 });
+        }))
+      return false;
+  }
+  return true;
+}
 
 // PC-reading / PC-relative instructions to reject as anchors: relocating any of
 // them into a trampoline changes the PC value they read (s_getpc) or the target
@@ -241,8 +504,14 @@ std::optional<uint8_t> common_wavefront_size(rj_code_arch_t arch,
 // FLAT_SCRATCH stays rejected: the spill store/load depend on it, so a probe
 // that clobbers it entangles with the spill mechanism. Fail closed there rather
 // than let it silently corrupt the host kernel's state.
-bool check_probe_special_state(const ProbeClobberSummary &summary, std::string *error_out) {
-  if (summary.touches_flat_scratch) {
+bool check_probe_special_state(const ProbeClobberSummary &summary, rj_code_arch_t arch,
+                               std::span<const uint32_t> allocations, std::string *error_out) {
+  const bool writes_backing =
+      arch == ROCJITSU_CODE_ARCH_CDNA3 && std::ranges::any_of(allocations, [&](uint32_t count) {
+        const auto base = cdna3::flat_scratch_base(cdna3::sgpr_alias_end(count));
+        return summary.ordinary_clobbers.intersects(RegisterRef{RegClass::SGPR, base, 2});
+      });
+  if (summary.touches_flat_scratch || writes_backing) {
     report(error_out, "probe body writes FLAT_SCRATCH, which the spill store/load depend on; "
                       "not preservable across a probe call");
     return false;
@@ -328,7 +597,7 @@ bool is_relocatable_anchor(const Instruction &anchor, uint64_t anchor_offset,
 std::optional<ResolvedInstrumentationSite>
 validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
                 std::span<const uint8_t> text_bytes, const InstrumentationPoint &pt,
-                rj_code_arch_t arch, std::string *error_out) {
+                rj_code_arch_t arch, std::string *error_out, bool setreg_vgpr_msb_fixup) {
   auto fail = [&](const char *msg) {
     report(error_out, (msg + (", anchor_offset = " + std::to_string(anchor_offset))).c_str());
   };
@@ -337,10 +606,10 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
     fail("InstrumentationPoint::filter_flags must be 0 temporarily");
     return std::nullopt;
   }
-  // TODO: support AfterInst / BlockEntry / BlockExit.
-  if (pt.kind != InstrumentationKind::BeforeInst && pt.kind != InstrumentationKind::KernelEntry &&
-      pt.kind != InstrumentationKind::KernelExit) {
-    fail("InstrumentationPoint::kind must be BeforeInst, KernelEntry, or KernelExit");
+  // TODO: support BlockEntry / BlockExit.
+  if (pt.kind != InstrumentationKind::BeforeInst && pt.kind != InstrumentationKind::AfterInst &&
+      pt.kind != InstrumentationKind::KernelEntry && pt.kind != InstrumentationKind::KernelExit) {
+    fail("InstrumentationPoint::kind must be BeforeInst, AfterInst, KernelEntry, or KernelExit");
     return std::nullopt;
   }
   // A probe call needs both halves of the request: the object to resolve the
@@ -362,7 +631,47 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
     return std::nullopt;
   }
 
-  if (pt.kind == InstrumentationKind::BeforeInst) {
+  // The bank analysis proves the state before the anchor. On CDNA5, a bank-changing
+  // anchor can make the envelope's encoded v0 name v256 instead, invalidating
+  // that addressing proof before an AfterInst callback runs.
+  if (pt.kind == InstrumentationKind::AfterInst &&
+      (pt.probe_obj == nullptr || may_change_vgpr_msb(anchor, arch, setreg_vgpr_msb_fixup))) {
+    fail("AfterInst requires a callable probe and an anchor preserving VGPR bank selection");
+    return std::nullopt;
+  }
+  if (pt.kind == InstrumentationKind::AfterInst &&
+      may_enable_gpr_indexing(anchor, text_bytes, arch, anchor_offset)) {
+    fail("AfterInst anchor may enable GPR indexing");
+    return std::nullopt;
+  }
+  if (pt.kind == InstrumentationKind::AfterInst &&
+      may_enable_vskip(anchor, text_bytes, arch, anchor_offset)) {
+    fail("AfterInst anchor may enable VSKIP");
+    return std::nullopt;
+  }
+  // No allocation analysis proves that the post-anchor register file can hold
+  // the envelope and callback, including SGPR-supplied shrinking allocations.
+  if (pt.kind == InstrumentationKind::AfterInst && anchor.mnemonic() == "s_alloc_vgpr") {
+    fail("AfterInst cannot prove the VGPR allocation after s_alloc_vgpr");
+    return std::nullopt;
+  }
+  if (pt.kind == InstrumentationKind::AfterInst && deallocates_vgprs(anchor, arch)) {
+    fail("AfterInst anchor deallocates VGPRs and scratch");
+    return std::nullopt;
+  }
+  if (pt.kind == InstrumentationKind::AfterInst && anchor.is_mfma()) {
+    fail("AfterInst cannot satisfy MFMA software-managed register hazards");
+    return std::nullopt;
+  }
+  // CDNA5 ISA 5.7.2 / 7.12.1 require independent VALUs for co-execution hazards;
+  // scalar waits do not provide that spacing before argument copies or spills.
+  // Reject whole families conservatively, without inferring a latency class.
+  if (pt.kind == InstrumentationKind::AfterInst && arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+      may_require_cdna5_valu_spacing(anchor)) {
+    fail("AfterInst requires proven VALU spacing for CDNA5 matrix or transcendental anchors");
+    return std::nullopt;
+  }
+  if (pt.kind == InstrumentationKind::BeforeInst || pt.kind == InstrumentationKind::AfterInst) {
     if (!is_relocatable_anchor(anchor, anchor_offset, text_bytes, arch, error_out))
       return std::nullopt;
   } else {
@@ -743,6 +1052,120 @@ namespace {
   });
 }
 
+// A direct call initializes its even SGPR pair to one of this kernel's decoded
+// continuations. A SETPC is bounded only if every path still carries such a link.
+bool cdna3_kernel_has_unknown_target(BasicBlock &entry, const KernelScopeSpec &spec,
+                                     const BlockOffsetIndex &offsets,
+                                     const std::unordered_set<BasicBlock *> &reachable,
+                                     uint32_t sgpr_count) {
+  if (std::ranges::none_of(reachable, [](const BasicBlock *block) {
+        return block->successor_issue() != BasicBlock::SuccessorIssue::None;
+      }))
+    return false;
+
+  std::unordered_map<BasicBlock *, uint64_t> incoming;
+  std::vector<BasicBlock *> worklist;
+  auto merge = [&](BasicBlock *block, uint64_t links) {
+    if (!reachable.contains(block))
+      return;
+    auto [it, inserted] = incoming.emplace(block, links);
+    if (!inserted) {
+      links &= it->second;
+      if (it->second == links)
+        return;
+      it->second = links;
+    }
+    worklist.push_back(block);
+  };
+  merge(&entry, 0);
+  for (uint64_t offset : spec.own_entries)
+    merge(block_for_offset(offsets, offset), 0);
+  const auto pair_bit = [sgpr_count](unsigned reg) -> uint64_t {
+    // Firmware's aliased scalar tail can also be written by implicit operands.
+    if ((reg & 1u) || reg >= 128 ||
+        reg + 1 >= cdna3::flat_scratch_base(cdna3::sgpr_alias_end(sgpr_count)))
+      return 0;
+    return uint64_t{1} << (reg / 2);
+  };
+  while (!worklist.empty()) {
+    BasicBlock *block = worklist.back();
+    worklist.pop_back();
+    uint64_t links = incoming.at(block);
+    for (const Instruction &inst : block->instructions()) {
+      if (!links)
+        break;
+      if (inst.mnemonic().starts_with("s_movrel")) {
+        links = 0;
+        break;
+      }
+      const InstDefUse effects(inst, 64);
+      for (uint64_t pairs = links; pairs; pairs &= pairs - 1) {
+        const uint16_t first = 2 * std::countr_zero(pairs);
+        if (effects.defs.intersects(RegisterRef{RegClass::SGPR, first, 2}))
+          links &= ~pair_bit(first);
+      }
+    }
+    if (block->successor_issue() != BasicBlock::SuccessorIssue::None) {
+      const Instruction *term = block->terminator();
+      if (block->successor_issue() != BasicBlock::SuccessorIssue::IndirectControlFlow || !term ||
+          term->mnemonic() != "s_setpc_b64" || !term->num_src_operands())
+        return true;
+      const auto src = term->src_operand(0)->to_register_ref();
+      if (!src || src->cls != RegClass::SGPR || src->width != 2 || !(links & pair_bit(src->index)))
+        return true;
+    }
+
+    const auto &calls = block->call_edges();
+    for (BasicBlock *next : block->successors())
+      merge(next, calls.empty() ? links : 0);
+    for (const BasicBlock::CallEdge &call : calls) {
+      // The callee may clobber any older saved link before it returns.
+      merge(call.continuation, 0);
+      const bool local = call.kind == BasicBlock::CallEdgeKind::DirectCall &&
+                         reachable.contains(call.continuation);
+      merge(call.callee, links | (local ? pair_bit(call.return_sreg) : 0));
+    }
+  }
+  return false;
+}
+
+// Shared code must satisfy every kernel that can execute a probe. Keep an
+// unresolved caller among the possible owners of every site.
+std::unordered_map<uint64_t, std::vector<uint32_t>>
+cdna3_probe_sgpr_counts(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+                        std::span<const KernelDescriptorInfo> kernels,
+                        std::span<const ResolvedInstrumentationSite> sites) {
+  std::unordered_map<uint64_t, std::vector<uint32_t>> owners;
+  const auto offsets = build_block_offset_index(blocks);
+  const auto positions = build_block_position_index(blocks);
+  std::vector<uint32_t> all_counts;
+  for (const auto &kernel : kernels) {
+    const uint32_t count =
+        *AmdGpuCodeObject::min_kernel_sgpr_count(ROCJITSU_CODE_ARCH_CDNA3, std::span(&kernel, 1));
+    all_counts.push_back(count);
+    auto *entry = block_for_offset(offsets, kernel.entry_text_offset);
+    KernelScopeSpec spec;
+    // On gfx942 firmware can start 256 bytes beyond a kernarg-preload entry.
+    if (kernarg_preload_length(kernel.descriptor))
+      spec.own_entries.insert(kernel.entry_text_offset + 256);
+    std::vector<BasicBlock *> reached;
+    if (entry)
+      reached = reachable_kernel_blocks(blocks, offsets, positions, *entry, spec);
+    const std::unordered_set<BasicBlock *> reachable(reached.begin(), reached.end());
+    const bool incomplete =
+        !entry || cdna3_kernel_has_unknown_target(*entry, spec, offsets, reachable, count);
+    for (const auto &site : sites) {
+      if (site.is_probe_call() &&
+          (incomplete || reachable.contains(block_for_offset(offsets, site.anchor_offset))))
+        owners[site.anchor_offset].push_back(count);
+    }
+  }
+  for (const auto &site : sites)
+    if (site.is_probe_call() && !owners.contains(site.anchor_offset))
+      owners.emplace(site.anchor_offset, all_counts);
+  return owners;
+}
+
 // The probes whose arguments made a prologue necessary, named so a rejection
 // does not read as an unprompted failure on an otherwise ordinary kernel.
 [[nodiscard]] std::string entry_storage_reader_list(const std::vector<ProbeCallable> &probes) {
@@ -775,7 +1198,9 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
                           .c_str());
     return std::nullopt;
   }
-  if (!kernel_sgpr_count) {
+  const std::optional<uint32_t> original_sgpr_count =
+      AmdGpuCodeObject::min_kernel_sgpr_count(arch_, kernels);
+  if (!kernel_sgpr_count || !original_sgpr_count) {
     report(error_out, "a probe reads the framework's entry storage, but no kernel SGPR "
                       "allocation was discovered to reserve it from");
     return std::nullopt;
@@ -797,6 +1222,27 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
   if (options_.register_growth)
     for (uint16_t reg = 0; reg < options_.register_growth->sgprs; ++reg)
       reserved.expand(RegisterRef{RegClass::SGPR, reg, 1});
+
+  // Reserve scalar sources before the wrapper prologue chooses its scratch:
+  // a requested entry input can otherwise be dead to the original guest CFG.
+  // CP inputs remain valid even when metadata counts only used registers.
+  // The planning allocation may already be enlarged, but entry sources must
+  // remain within the original descriptor's ordinary register ranges.
+  const uint32_t original_scalar_bound = ordinary_sgpr_bound(arch_, *original_sgpr_count);
+  const uint32_t scalar_bound =
+      options_.register_growth
+          ? std::max(std::min(options_.register_growth->sgprs, original_scalar_bound),
+                     kernel_descriptor_initial_sgpr_count(arch_, kernel.descriptor))
+          : original_scalar_bound;
+  for (const InstrumentationPoint &point : points_)
+    for (const ProbeArgValue &arg : point.probe_args)
+      if (arg.source == ProbeArgSource::EntrySgpr) {
+        if (arg.register_index >= scalar_bound) {
+          report(error_out, "entry SGPR capture exceeds the original guest allocation");
+          return std::nullopt;
+        }
+        reserved.expand(RegisterRef{RegClass::SGPR, arg.register_index, 1});
+      }
 
   std::optional<DbiEntryProloguePlan> planned;
   if (probes_read_entry_storage(probes))
@@ -824,34 +1270,70 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
   if (planned) {
     patch.storage_base = planned->storage.persistent_base;
     patch.words = planned->prologue.words;
-    const uint32_t bound = kernel_vgpr_bounds(arch_, kernel.descriptor).ordinary_bound;
-    std::vector<uint16_t> sources;
+    // The prologue has restored the guest kernarg pointer. Capture EntrySgpr
+    // sources afterward so a kernarg-pointer word cannot expose the wrapper.
+    // The prologue's temporary pair is now available for persistent snapshots.
+    const uint32_t original_vector_bound =
+        kernel_vgpr_bounds(arch_, kernel.descriptor).ordinary_bound;
+    const uint32_t vector_bound =
+        options_.register_growth ? std::min(options_.register_growth->vgprs, original_vector_bound)
+                                 : original_vector_bound;
+    std::vector<std::pair<RegClass, uint16_t>> sources;
     for (const InstrumentationPoint &point : points_)
-      for (const ProbeArgValue &arg : point.probe_args)
-        if (arg.source == ProbeArgSource::EntryVgprLane0 &&
-            std::ranges::find(sources, arg.register_index) == sources.end())
-          sources.push_back(arg.register_index);
+      for (const ProbeArgValue &arg : point.probe_args) {
+        const std::optional<RegClass> source_class = entry_register_class(arg.source);
+        if (!source_class)
+          continue;
+        if (arg.source == ProbeArgSource::EntryTtmp &&
+            arg.register_index >= REGISTER_SET_MAX_TTMPS) {
+          report(error_out, "entry TTMP capture exceeds the trap-temporary register file");
+          return std::nullopt;
+        }
+        if (*source_class == RegClass::TTMP && !supports_entry_ttmp_capture(arch_)) {
+          report(error_out, "entry TTMP capture requires unprivileged TTMP reads, which this "
+                            "target does not support");
+          return std::nullopt;
+        }
+        const std::pair<RegClass, uint16_t> source = {*source_class, arg.register_index};
+        if (std::ranges::find(sources, source) == sources.end())
+          sources.push_back(source);
+      }
     if (sources.size() > 2) {
-      report(error_out, "the entry snapshot has room for at most two lane-zero VGPR values");
+      report(error_out, "the entry snapshot has room for at most two register values");
       return std::nullopt;
     }
     for (size_t index = 0; index < sources.size(); ++index) {
-      if (sources[index] >= std::min(bound, 256u)) {
+      const auto [source_class, source_index] = sources[index];
+      if (source_class == RegClass::VGPR && source_index >= std::min(vector_bound, 256u)) {
         report(error_out, "entry VGPR capture exceeds the kernel's ordinary VGPR allocation");
         return std::nullopt;
       }
       const uint16_t destination = planned->storage.entry_temp_base + index;
-      util::StringDiagnostic lane_error;
-      const util::DiagnosticEmitter emit_lane_error = lane_error.emitter();
-      const util::FailureOr<std::array<uint32_t, 2>> maybe_words =
-          build_v_readlane_b32(destination, sources[index], 0, arch_, &emit_lane_error);
-      if (maybe_words.failed()) {
-        report(error_out, lane_error.message().c_str());
-        return std::nullopt;
+      if (source_class == RegClass::SGPR || source_class == RegClass::TTMP) {
+        OptionalStringDiagnosticSink record_error(error_out);
+        const util::DiagnosticEmitter error(record_error);
+        const util::FailureOr<uint32_t> word = build_s_mov_b32(
+            destination,
+            source_class == RegClass::TTMP ? amdgpu::kTtmpSelectorFirst + source_index
+                                           : source_index,
+            arch_, &error);
+        if (word.failed())
+          return std::nullopt;
+        patch.words.push_back(word.value());
+      } else {
+        util::StringDiagnostic lane_error;
+        const util::DiagnosticEmitter emit_lane_error = lane_error.emitter();
+        const util::FailureOr<std::array<uint32_t, 2>> maybe_words =
+            build_v_readlane_b32(destination, source_index, 0, arch_, &emit_lane_error);
+        if (maybe_words.failed()) {
+          report(error_out, lane_error.message().c_str());
+          return std::nullopt;
+        }
+        const std::array<uint32_t, 2> &words = maybe_words.value();
+        patch.words.insert(patch.words.end(), words.begin(), words.end());
       }
-      const std::array<uint32_t, 2> &words = maybe_words.value();
-      patch.words.insert(patch.words.end(), words.begin(), words.end());
-      patch.captured_vgprs.push_back({sources[index], destination});
+      patch.captured_registers.push_back(
+          {.source_index = source_index, .sgpr = destination, .source_class = source_class});
     }
   }
   const uint64_t branch_pc = patch.stub_offset + patch.words.size() * sizeof(uint32_t);
@@ -871,6 +1353,181 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
   patch.words.push_back(branch.value());
   return patch;
 }
+
+// The object and decoded blocks stay unchanged while points are queued. Compute
+// their observation states once, independently of the requested instrumentation.
+class Instrumentor::CallableStateAnalysis {
+public:
+  CallableStateAnalysis(std::span<const std::unique_ptr<BasicBlock>> blocks,
+                        std::span<const KernelDescriptorInfo> kernels,
+                        std::span<const uint8_t> text, rj_code_arch_t arch) {
+    std::unordered_set<uint64_t> entries;
+    for (const KernelDescriptorInfo &kernel : kernels)
+      entries.insert(kernel.entry_text_offset);
+    std::unordered_set<const BasicBlock *> reachable;
+    std::vector<const BasicBlock *> work;
+    for (const std::unique_ptr<BasicBlock> &block : blocks) {
+      if (entries.contains(block->start_offset()))
+        work.push_back(block.get());
+      for (const Instruction &inst : block->instructions()) {
+        states_.try_emplace(&inst);
+        has_mfma_producer_ |= inst.is_mfma();
+        has_cdna5_producer_ |=
+            arch == ROCJITSU_CODE_ARCH_CDNA5 && may_require_cdna5_valu_spacing(inst);
+        has_cdna5_packed_permute_ |=
+            arch == ROCJITSU_CODE_ARCH_CDNA5 && requires_cdna5_valu_follower(inst);
+      }
+    }
+    while (!work.empty()) {
+      const BasicBlock *block = work.back();
+      work.pop_back();
+      if (!reachable.insert(block).second)
+        continue;
+      work.insert(work.end(), block->successors().begin(), block->successors().end());
+      for (const BasicBlock::CallEdge &edge : block->call_edges())
+        if (edge.callee != nullptr)
+          work.push_back(edge.callee);
+    }
+    for (const CallableState state :
+         {CallableState::GprIndexing, CallableState::Vskip, CallableState::UnavailableStorage}) {
+      if (has_callable_state(arch, state))
+        analyze_state(blocks, kernels, text, arch, state, entries, reachable);
+    }
+  }
+
+  [[nodiscard]] bool has_mfma_producer() const { return has_mfma_producer_; }
+  [[nodiscard]] bool has_cdna5_producer() const { return has_cdna5_producer_; }
+  [[nodiscard]] bool has_cdna5_packed_permute() const { return has_cdna5_packed_permute_; }
+
+  [[nodiscard]] bool may_be_unsafe(const Instruction &anchor, bool after,
+                                   CallableState state) const {
+    const std::unordered_map<const Instruction *, PointState>::const_iterator found =
+        states_.find(&anchor);
+    return found == states_.end() ||
+           ((after ? found->second.after : found->second.before) & state_bit(state)) != 0;
+  }
+
+private:
+  struct PointState {
+    uint8_t before = 0;
+    uint8_t after = 0;
+  };
+  struct BlockState {
+    StateWrite last_write = StateWrite::Unchanged;
+    uint8_t incoming = 0;
+    uint8_t outgoing = 0;
+  };
+  std::unordered_map<const Instruction *, PointState> states_;
+  bool has_mfma_producer_ = false;
+  bool has_cdna5_producer_ = false;
+  bool has_cdna5_packed_permute_ = false;
+
+  static uint8_t state_bit(CallableState state) { return 1u << static_cast<unsigned>(state); }
+
+  void analyze_state(std::span<const std::unique_ptr<BasicBlock>> blocks,
+                     std::span<const KernelDescriptorInfo> kernels, std::span<const uint8_t> text,
+                     rj_code_arch_t arch, CallableState state,
+                     const std::unordered_set<uint64_t> &entries,
+                     const std::unordered_set<const BasicBlock *> &reachable) {
+    std::unordered_set<const Instruction *> preserving_calls;
+    std::unordered_set<const Instruction *> known_returns;
+    for (const std::unique_ptr<BasicBlock> &block : blocks) {
+      if (block->successor_issue() != BasicBlock::SuccessorIssue::None ||
+          block->call_edges().empty())
+        continue;
+      if (std::ranges::all_of(block->call_edges(), [&](const BasicBlock::CallEdge &edge) {
+            return callee_preserves_state(edge, text, arch, state);
+          })) {
+        preserving_calls.insert(block->terminator());
+        if (reachable.contains(block.get()))
+          for (const BasicBlock::CallEdge &edge : block->call_edges())
+            known_returns.insert(edge.callee->terminator());
+      }
+    }
+    // Unknown transfers can introduce incoming MODE/storage state at every
+    // ordinary observation. Bounded closed text can preserve its initial state.
+    const bool storage = state == CallableState::UnavailableStorage;
+    bool incomplete = false;
+    bool missing_fallthrough = false;
+    for (const BasicBlock *block : reachable) {
+      const BasicBlock::SuccessorIssue issue = block->successor_issue();
+      if (issue == BasicBlock::SuccessorIssue::MissingFallthrough) {
+        missing_fallthrough = true;
+        continue;
+      }
+      incomplete |=
+          issue != BasicBlock::SuccessorIssue::None && !known_returns.contains(block->terminator());
+    }
+    const bool closed_state = incomplete && callable_state_is_preserved_in_closed_text(
+                                                blocks, kernels, text, arch, state);
+
+    // Each bit denotes a possible incoming state; zero has no proven source.
+    // Constant writes seed the worklist even inside cycles. Ordinary edges join
+    // possibilities, including backedges into descriptor entries.
+    constexpr uint8_t kSafe = 1;
+    constexpr uint8_t kUnsafe = 2;
+    const auto transfer = [](uint8_t incoming, StateWrite write) -> uint8_t {
+      if (write == StateWrite::Safe)
+        return kSafe;
+      if (write == StateWrite::Unsafe)
+        return kUnsafe;
+      return incoming;
+    };
+    std::unordered_map<const BasicBlock *, BlockState> summaries;
+    std::vector<const BasicBlock *> work(reachable.begin(), reachable.end());
+    std::unordered_set<const BasicBlock *> queued = reachable;
+    for (const BasicBlock *block : reachable) {
+      BlockState &summary = summaries[block];
+      for (const Instruction &inst : block->instructions()) {
+        const StateWrite write = callable_state_write(inst, text, arch, state, &preserving_calls);
+        if (write != StateWrite::Unchanged)
+          summary.last_write = write;
+      }
+    }
+    while (!work.empty()) {
+      const BasicBlock *block = work.back();
+      work.pop_back();
+      queued.erase(block);
+      BlockState &summary = summaries.at(block);
+      summary.incoming = entries.contains(block->start_offset())
+                             ? kSafe
+                             : (block->predecessors().empty() ? kUnsafe : 0);
+      for (const BasicBlock *predecessor : block->predecessors())
+        if (reachable.contains(predecessor))
+          summary.incoming |= summaries.at(predecessor).outgoing;
+      const uint8_t outgoing = transfer(summary.incoming, summary.last_write);
+      if (outgoing == summary.outgoing)
+        continue;
+      summary.outgoing = outgoing;
+      for (const BasicBlock *successor : block->successors())
+        if (reachable.contains(successor) && queued.insert(successor).second)
+          work.push_back(successor);
+    }
+    const uint8_t bit = state_bit(state);
+    for (const std::unique_ptr<BasicBlock> &block : blocks) {
+      const bool is_reachable = reachable.contains(block.get());
+      uint8_t current = is_reachable ? summaries.at(block.get()).incoming : 0;
+      const auto unsafe = [&](uint8_t value, bool after) {
+        if (!is_reachable)
+          return true;
+        // Falling off the original text cannot enter an earlier observation.
+        // Retain the existing stricter AfterInst MODE completeness boundary.
+        if (incomplete || (!storage && after && missing_fallthrough))
+          return !closed_state || (!storage && after);
+        return value == 0 || (value & kUnsafe) != 0;
+      };
+      for (const Instruction &inst : block->instructions()) {
+        PointState &point = states_.at(&inst);
+        if (unsafe(current, false))
+          point.before |= bit;
+        current =
+            transfer(current, callable_state_write(inst, text, arch, state, &preserving_calls));
+        if (unsafe(current, true))
+          point.after |= bit;
+      }
+    }
+  }
+};
 
 Instrumentor::Instrumentor(const AmdGpuCodeObject &obj, rj_code_arch_t arch,
                            InstrumentationOptions options)
@@ -923,7 +1580,17 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
   }
   decoder_ = std::move(decoder);
   util::StringDiagnostic decode_error;
-  auto blocks = BasicBlock::build(obj_, *decoder_, arch_, decode_error.emitter());
+  std::vector<uint64_t> kernel_entries;
+  if (obj_.text_sections().size() == 1) {
+    const Section *text = obj_.text_sections().front();
+    const std::span<const uint8_t> image(reinterpret_cast<const uint8_t *>(obj_.image_data()),
+                                         obj_.image_size());
+    const std::vector<KernelDescriptorInfo> kernels =
+        scan_kernel_descriptors(image, text->sectionOffset(), text->size());
+    for (const KernelDescriptorInfo &kernel : kernels)
+      kernel_entries.push_back(kernel.entry_text_offset);
+  }
+  auto blocks = BasicBlock::build(obj_, *decoder_, arch_, decode_error.emitter(), kernel_entries);
   if (blocks.failed()) {
     report(error_out, decode_error.message().c_str());
     return false;
@@ -956,17 +1623,40 @@ bool Instrumentor::ensure_liveness_built(uint8_t wave_size,
   const Section *text = obj_.text_sections().front();
   std::vector<BasicBlock *> scope;
   LivenessAnalysisOptions options;
-  if (arch_ == ROCJITSU_CODE_ARCH_CDNA5) {
-    options.arch = arch_;
-    options.text = {reinterpret_cast<const uint8_t *>(text->data()), text->size()};
-  }
+  options.arch = arch_;
+  options.target = effective_target(obj_, arch_);
+  options.text = {reinterpret_cast<const uint8_t *>(text->data()), text->size()};
   for (const std::unique_ptr<BasicBlock> &block : blocks_) {
     scope.push_back(block.get());
     if (kernels.size() == 1 && block->start_offset() == kernels.front().entry_text_offset)
       options.entry_block = block.get();
   }
-  liveness_ =
-      std::make_unique<LivenessAnalysis>(KernelBlockScope(scope), wave_size, nullptr, options);
+  // Ordinary successors omit callees; their live-ins must reach the caller.
+  std::vector<ScopedCfgEdge> edges =
+      scoped_call_liveness_edges(KernelBlockScope(scope), options.text);
+  // State admission also recognizes computed re-entry. Preserve its actual
+  // destination; the call's continuation alone omits values read on re-entry.
+  const auto add_entry_edge = [&](BasicBlock *from, std::optional<uint64_t> target) {
+    if (!target)
+      return true;
+    const std::vector<BasicBlock *>::const_iterator entry =
+        std::ranges::find(scope, *target, &BasicBlock::start_offset);
+    if (entry == scope.end()) {
+      report(error_out, "computed kernel re-entry has no decoded entry block");
+      return false;
+    }
+    edges.push_back({.from = from, .to = *entry});
+    return true;
+  };
+  for (BasicBlock *block : scope) {
+    if (!add_entry_edge(block, static_pc_reentry_target(*block, kernels)))
+      return false;
+    for (const BasicBlock::CallEdge &call : block->call_edges())
+      if (!add_entry_edge(call.callee, callee_reentry_target(call, kernels)))
+        return false;
+  }
+  liveness_ = std::make_unique<LivenessAnalysis>(KernelBlockScope(scope), wave_size, nullptr,
+                                                 options, edges);
   return true;
 }
 
@@ -1027,16 +1717,10 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   out.wave_size = common_wavefront_size(arch_, out.kernels);
 
   const auto &registry = default_isa_target_registry();
-  const IsaTargetDescriptor *arch_descriptor = registry.find(arch_);
-  auto effective_target = [&](const AmdGpuCodeObject &object) {
-    if (object.target_id() != ROCJITSU_CODE_TARGET_INVALID)
-      return object.target_id();
-    if (arch_descriptor == nullptr)
-      return ROCJITSU_CODE_TARGET_INVALID;
-    const IsaGpuTargetDescription *gpu_target = registry.find_default_gpu_target(*arch_descriptor);
-    return gpu_target == nullptr ? ROCJITSU_CODE_TARGET_INVALID : gpu_target->public_id;
-  };
-  const rj_code_target_id_t destination_target = effective_target(obj_);
+  const rj_code_target_id_t destination_target = effective_target(obj_, arch_);
+  const IsaGpuTargetDescription *gpu_target = registry.find_gpu_target(destination_target);
+  const bool setreg_vgpr_msb_fixup =
+      gpu_target == nullptr || gpu_target->capabilities.setreg_vgpr_msb_fixup;
   ProbeEntryState probe_entry_state = ProbeEntryState::Unknown;
   if (arch_ == ROCJITSU_CODE_ARCH_CDNA5 && out.wave_size) {
     if (!ensure_liveness_built(*out.wave_size, out.kernels, &err)) {
@@ -1141,7 +1825,7 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
              " arguments; the limit is " + std::to_string(kMaxProbeArgVgprs);
       return std::nullopt;
     }
-    const rj_code_target_id_t probe_target = effective_target(*pt.probe_obj);
+    const rj_code_target_id_t probe_target = effective_target(*pt.probe_obj, arch_);
     if (destination_target != ROCJITSU_CODE_TARGET_INVALID &&
         probe_target != ROCJITSU_CODE_TARGET_INVALID && destination_target != probe_target) {
       perr = "probe concrete target does not match the destination code-object target";
@@ -1198,7 +1882,8 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     }
 
     std::string perr;
-    auto site = validate_anchor(*anchor, pt.anchor_offset, text_bytes, pt, arch_, &perr);
+    std::optional<ResolvedInstrumentationSite> site = validate_anchor(
+        *anchor, pt.anchor_offset, text_bytes, pt, arch_, &perr, setreg_vgpr_msb_fixup);
     if (!site) {
       out.errors.push_back(std::move(perr));
       continue;
@@ -1230,6 +1915,54 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
                              "per code object");
         continue;
       }
+      bool unsafe_state = false;
+      // Dispatch enters a separate stub once. Guest backedges to the original
+      // entry do not revisit this callback and cannot change its initial state.
+      if (pt.kind != InstrumentationKind::KernelEntry) {
+        if (!callable_state_analysis_)
+          callable_state_analysis_ =
+              std::make_unique<CallableStateAnalysis>(blocks_, out.kernels, text_bytes, arch_);
+        // A scalar anchor does not discharge dependencies left by earlier VALUs.
+        // Until spacing is proven, exclude the entire decoded object, including
+        // unreachable producers and helper bodies rather than guessing ownership.
+        if (pt.kind == InstrumentationKind::AfterInst &&
+            callable_state_analysis_->has_mfma_producer()) {
+          out.errors.emplace_back("AfterInst requires proven MFMA register spacing in a code "
+                                  "object containing MFMA or SMFMAC producers");
+          continue;
+        }
+        if (pt.kind == InstrumentationKind::AfterInst &&
+            callable_state_analysis_->has_cdna5_producer()) {
+          out.errors.emplace_back("AfterInst requires proven VALU spacing in a CDNA5 code object "
+                                  "containing matrix or transcendental producers");
+          continue;
+        }
+        // Replacing the required follower with a branch is unsafe too. Until
+        // adjacency is proven, exclude the family throughout the decoded object.
+        if (pt.kind == InstrumentationKind::AfterInst &&
+            callable_state_analysis_->has_cdna5_packed_permute()) {
+          out.errors.emplace_back("AfterInst cannot preserve the required VALU adjacency in a "
+                                  "CDNA5 code object containing packed permutes");
+          continue;
+        }
+        for (const CallableState state : {CallableState::GprIndexing, CallableState::Vskip,
+                                          CallableState::UnavailableStorage}) {
+          if (callable_state_analysis_->may_be_unsafe(
+                  *anchor, pt.kind == InstrumentationKind::AfterInst, state)) {
+            const std::string reason =
+                state == CallableState::UnavailableStorage
+                    ? "cannot prove the VGPR allocation and scratch storage"
+                    : std::string("may inherit enabled ") +
+                          (state == CallableState::GprIndexing ? "GPR indexing" : "VSKIP");
+            out.errors.emplace_back("probe observation " + reason +
+                                    ", anchor_offset = " + std::to_string(pt.anchor_offset));
+            unsafe_state = true;
+            break;
+          }
+        }
+      }
+      if (unsafe_state)
+        continue;
       auto index = resolve_probe_index(pt, perr);
       if (!index) {
         out.errors.push_back(std::move(perr));
@@ -1345,6 +2078,18 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       return result;
     }
   }
+  // MODE safety at the callback does not enumerate later indexed guest reads.
+  // Require that independent proof before AfterInst relies on physical liveness.
+  if (std::ranges::any_of(resolved.sites, [](const ResolvedInstrumentationSite &site) {
+        return site.kind == InstrumentationKind::AfterInst;
+      })) {
+    const util::FailureOr<bool> complete = liveness_->global_vgpr_usage_is_complete();
+    if (complete.failed() || !complete.value()) {
+      result.errors.emplace_back("AfterInst requires complete physical VGPR usage; relative or "
+                                 "GPR-indexed accesses are unsupported");
+      return result;
+    }
+  }
 
   // Lay out the appended region as [probe bodies][s_nop padding][entry stub]
   // [trampolines], the padding and stub only when the kernel has an entry
@@ -1407,6 +2152,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
         result.resources.vgprs = std::max(result.resources.vgprs, end);
     });
   };
+  RegisterSet guest_registers;
   if (options_.register_growth) {
     const util::FailureOr<bool> complete = liveness_->global_vgpr_usage_is_complete();
     if (complete.failed()) {
@@ -1419,7 +2165,6 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     }
     result.resources = {.sgprs = options_.register_growth->sgprs,
                         .vgprs = options_.register_growth->vgprs};
-    RegisterSet guest_registers;
     for (const std::unique_ptr<BasicBlock> &block : blocks_)
       for (const Instruction &instruction : block->instructions()) {
         const InstDefUse effects(instruction, *resolved.wave_size, liveness_->gfx1250_vgpr_msb(),
@@ -1491,7 +2236,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
                                         uint32_t{*entry_storage_base} + kDbiEntryStorageRegisters);
       // Aligning entry storage can advance its snapshots past the initial
       // backup base when the original SGPR count is odd.
-      for (const EntryVgprCapture &capture : entry_patch->captured_vgprs)
+      for (const EntryRegisterCapture &capture : entry_patch->captured_registers)
         sgpr_save_base = std::max(sgpr_save_base, uint32_t{capture.sgpr} + 1);
     }
     cave_cursor = entry_patch->stub_offset + entry_patch->words.size() * sizeof(uint32_t);
@@ -1502,6 +2247,10 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   // created lazily on the first spilling site and shared by the rest; its final
   // size is written back to the descriptor after all sites succeed.
   std::optional<SpillManager> spills;
+
+  std::unordered_map<uint64_t, std::vector<uint32_t>> cdna3_owners;
+  if (arch_ == ROCJITSU_CODE_ARCH_CDNA3 && kernels.size() > 1 && !resolved.probes.empty())
+    cdna3_owners = cdna3_probe_sgpr_counts(blocks_, kernels, sites);
 
   std::vector<AppliedSite> applied;
   applied.reserve(sites.size());
@@ -1519,16 +2268,34 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     if (site.is_probe_call()) {
       const ProbeCallable &probe = resolved.probes[*site.probe_index];
 
-      // The kernel must own the fixed return-link pair.
-      if (const uint16_t link_base = probe.abi.link_pair_base;
-          is_valid_probe_abi(probe.abi) &&
-          !probe_link_pair_fits_in_kernel(*kernel_sgpr_count, link_base)) {
-        result.errors.push_back(
-            "probe call needs the return-link pair s[" + std::to_string(link_base) + ":" +
-            std::to_string(link_base + 1) + "] but the kernel allocates only " +
-            std::to_string(*kernel_sgpr_count) + " SGPRs; rebuild the kernel with at least " +
-            std::to_string(link_base + 2) + " SGPRs");
-        continue;
+      const uint32_t default_count = kernel_sgpr_count.value_or(0);
+      std::span<const uint32_t> allocations(&default_count, 1);
+      if (!cdna3_owners.empty())
+        allocations = cdna3_owners.at(site.anchor_offset);
+      const uint32_t site_sgpr_count = std::ranges::min(allocations);
+      // The kernel must own an ordinary pair throughout the call. On gfx942 an
+      // in-bounds pair can still be the physical backing of VCC or FLAT_SCRATCH.
+      if (is_valid_probe_abi(probe.abi)) {
+        const uint16_t link_base = probe.abi.link_pair_base;
+        if (!probe_link_pair_fits_in_kernel(site_sgpr_count, link_base)) {
+          result.errors.push_back(
+              "probe call needs the return-link pair s[" + std::to_string(link_base) + ":" +
+              std::to_string(link_base + 1) + "] but the kernel allocates only " +
+              std::to_string(site_sgpr_count) + " SGPRs; rebuild the kernel with at least " +
+              std::to_string(link_base + 2) + " SGPRs");
+          continue;
+        }
+        const auto alias = std::ranges::find_if(allocations, [&](uint32_t count) {
+          return arch_ == ROCJITSU_CODE_ARCH_CDNA3 &&
+                 cdna3::sgpr_pair_overlaps_vcc_or_flat_scratch(count, link_base);
+        });
+        if (alias != allocations.end()) {
+          result.errors.push_back("probe return-link pair s[" + std::to_string(link_base) + ":" +
+                                  std::to_string(link_base + 1) +
+                                  "] overlaps VCC or FLAT_SCRATCH in the kernel's " +
+                                  std::to_string(*alias) + "-SGPR allocation");
+          continue;
+        }
       }
 
       // The kernel must likewise own the argument VGPRs. Only asked of a call
@@ -1580,7 +2347,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       const ProbeClobberSummary *summary = &probe_summaries[*site.probe_index];
 
       // Check for special machine state that has no save/restore path yet
-      if (!check_probe_special_state(*summary, &err)) {
+      if (!check_probe_special_state(*summary, arch_, allocations, &err)) {
         result.errors.push_back(std::move(err));
         continue;
       }
@@ -1603,6 +2370,12 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
         continue;
       }
       RegisterSet live = *maybe_live.value() | probe_argument_registers(site.probe_args);
+      // Including original definitions conservatively covers live-after state:
+      // the callback must observe and preserve the relocated instruction's result.
+      if (site.kind == InstrumentationKind::AfterInst)
+        live |= InstDefUse(*anchor, *resolved.wave_size, liveness_->gfx1250_vgpr_msb(),
+                           UnknownVgprDefPolicy::ExpandAll)
+                    .defs;
       if (options_.register_growth &&
           options_.preservation == GuestStatePreservation::DeclaredRegisters) {
         for (uint16_t reg = 0; reg < options_.register_growth->sgprs; ++reg)
@@ -1614,6 +2387,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       // Set the probe's offset
       TrampolinePlan plan = make_base_plan(site, arch_, trampoline_offset);
       plan.probe_target_offset = probe.output_text_offset;
+      plan.probe_after_original = site.kind == InstrumentationKind::AfterInst;
       if (site.kind == InstrumentationKind::KernelEntry) {
         plan.emit_original = false;
         plan.patch_anchor = false;
@@ -1630,7 +2404,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       plan.preserve_m0 = summary->touches_m0;
       // Cap envelope/temp SGPR selection at the kernel's own allocation so a temp
       // never lands past its .sgpr_count
-      plan.kernel_sgpr_count = *kernel_sgpr_count;
+      plan.kernel_sgpr_count = site_sgpr_count;
       plan.kernel_vgpr_count = vgpr_bounds.ordinary_bound;
       plan.probe_args = site.probe_args;
       plan.force_full_exec = probe.force_full_exec;
@@ -1639,7 +2413,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       // has to stay off it everywhere.
       plan.entry_storage_base = entry_storage_base;
       if (entry_patch)
-        plan.entry_vgpr_captures = entry_patch->captured_vgprs;
+        plan.entry_register_captures = entry_patch->captured_registers;
       if (options_.register_growth) {
         const RegisterSet overwritten =
             (summary->ordinary_clobbers | arg_registers(probe.abi)) & live;
@@ -1928,6 +2702,21 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       if (result.resources.sgprs > REGISTER_SET_ALLOCATABLE_SGPRS || result.resources.vgprs > 256) {
         result.errors.emplace_back("instrumentation exceeds the bounded register allocation");
         return result;
+      }
+      if (arch_ == ROCJITSU_CODE_ARCH_CDNA3) {
+        const uint32_t old_end =
+            cdna3::sgpr_alias_end(*AmdGpuCodeObject::min_kernel_sgpr_count(arch_, kernels));
+        const uint32_t new_end =
+            cdna3::sgpr_alias_end(result.resources.sgprs + kCdnaSpecialSgprTailReserve);
+        const auto uses_numeric_alias = [&](uint32_t end) {
+          return guest_registers.intersects({RegClass::SGPR, cdna3::flat_scratch_base(end), 2}) ||
+                 guest_registers.intersects({RegClass::SGPR, cdna3::vcc_base(end), 2});
+        };
+        if (old_end != new_end && (uses_numeric_alias(old_end) || uses_numeric_alias(new_end))) {
+          result.errors.emplace_back(
+              "register growth would change a guest numeric SGPR alias for VCC or FLAT_SCRATCH");
+          return result;
+        }
       }
       RJ_AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
                          amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,

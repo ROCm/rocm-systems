@@ -23,4 +23,5 @@ fn main() {
     println!("cargo:rustc-cdylib-link-arg=-Wl,-z,nodelete");
     println!("cargo:rustc-cdylib-link-arg=-Wl,--undefined=amdf_query_api");
     println!("cargo:rustc-cdylib-link-arg=-Wl,--undefined=hsa_init");
+    println!("cargo:rustc-cdylib-link-arg=-Wl,--undefined=rocddi_hsa_queue_intercept_create_v1");
 }

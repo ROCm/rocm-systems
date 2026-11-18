@@ -4,12 +4,12 @@
 // AVX2 FP16 interpolation with packed source selection and staged rounding.
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
-#include "common/internal.h"
+#include "common/validation.h"
 #include "common/x86_64/half_x86_64_v3.h"
 #include "fp/x86_64/mixed_half_x86_64_v3.h"
 #include "graphics/interp.h"
 #include "graphics/interp16_scalar.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_graphics.h"
 
 #include <immintrin.h>
 #include <stdint.h>
@@ -48,12 +48,12 @@ uint32_t interp16_x86_64_v3(bool saturate, uint32_t exec_mask, uint32_t mode, ui
     }
     __m256i result;
     if constexpr (P2) {
-      auto lo =
-          mixed_half_value4<Rtz>(_mm256_castps256_ps128(x), _mm256_castps256_ps128(y),
-                                 _mm256_castps256_ps128(z), saturate, mode & RJ_ARITH_ALU_CLAMP);
-      auto hi =
-          mixed_half_value4<Rtz>(_mm256_extractf128_ps(x, 1), _mm256_extractf128_ps(y, 1),
-                                 _mm256_extractf128_ps(z, 1), saturate, mode & RJ_ARITH_ALU_CLAMP);
+      auto lo = mixed_half_value4(_mm256_castps256_ps128(x), _mm256_castps256_ps128(y),
+                                  _mm256_castps256_ps128(z), saturate, mode & RJ_ARITH_ALU_CLAMP,
+                                  false, false, Rtz ? 3 : 0);
+      auto hi = mixed_half_value4(_mm256_extractf128_ps(x, 1), _mm256_extractf128_ps(y, 1),
+                                  _mm256_extractf128_ps(z, 1), saturate, mode & RJ_ARITH_ALU_CLAMP,
+                                  false, false, Rtz ? 3 : 0);
       result = _mm256_inserti128_si256(_mm256_castsi128_si256(lo), hi, 1);
       unsigned sd = mode & RJ_ARITH_ALU_HIGH_D ? 16 : 0;
       auto old = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(d + lane));

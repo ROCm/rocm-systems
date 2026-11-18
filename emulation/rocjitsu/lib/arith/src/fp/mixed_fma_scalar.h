@@ -7,12 +7,12 @@
 #pragma once
 
 #include "common/bits.h"
-#include "common/float_formats.h"
-#include "common/internal.h"
+#include "common/float_encoding.h"
+#include "common/validation.h"
 #include "fp/fma_integer.h"
 #include "fp/half_fma_scalar.h"
 #include "fp/mixed_fma_control.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <stdint.h>
 

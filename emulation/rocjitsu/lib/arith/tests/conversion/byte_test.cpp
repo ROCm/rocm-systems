@@ -5,8 +5,9 @@
 
 #include "conversion/byte_conversion_reference.h"
 #include "conversion/helpers.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_conversion.h"
 
+#include <bit>
 #include <gtest/gtest.h>
 #include <stdint.h>
 
@@ -32,7 +33,7 @@ template <int Lanes, int Byte, bool Gfx12, typename Call> void check_byte(Call c
 }
 
 // Check selected-byte packing and preservation of untouched bytes for the supplied entry point.
-template <int Lanes, typename Call> void check_byte_pack(Call call) {
+template <int Lanes, bool Accumulate = false, typename Call> void check_byte_pack(Call call) {
   auto input = conversion_inputs<Lanes>(32);
   // Ties, saturation around 255, and all four insertion positions.
   const uint32_t edges[] = {0x3f000000, 0x3fc00000, 0x40200000, 0x437e8000, 0x437f0000, 0x437f8000};
@@ -42,12 +43,22 @@ template <int Lanes, typename Call> void check_byte_pack(Call call) {
   for (int lane = 0; lane < Lanes; ++lane) {
     input.v[2][lane] = uint32_t(lane);
   }
-  check_conversion<Lanes, 3, 1, 1, true>(
+  check_conversion<Lanes, 3, 1, 1, !Accumulate>(
       call, input,
       [](uint64_t a, uint32_t b, uint32_t c, uint32_t, uint64_t, uint32_t mode) {
-        return byte_pack_reference(uint32_t(a), b, c, mode);
+        if constexpr (Accumulate) {
+          const float value = std::bit_cast<float>(uint32_t(a));
+          const uint32_t byte = !(value > 0) ? 0 : value >= 255 ? 255 : uint32_t(value);
+          const int shift = (b & 3) * 8;
+          return (c & ~(0xffU << shift)) | (byte << shift);
+        } else {
+          return byte_pack_reference(uint32_t(a), b, c, mode);
+        }
       },
-      conversion_bits, RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_CLAMP, false,
+      conversion_bits,
+      RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_CLAMP |
+          (Accumulate ? RJ_ARITH_ALU_OMOD_MASK : 0),
+      false,
       RJ_ARITH_FP_IEEE_MODE | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
           RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
 }
@@ -172,4 +183,11 @@ TEST(ConversionCvtPkU8F32W64Gfx11, Arithmetic) {
 // Check selected-byte packing and preservation of untouched bytes.
 TEST(ConversionCvtPkU8F32W64Gfx12, Arithmetic) {
   check_byte_pack<64>(rj_arith_v_cvt_pk_u8_f32_w64_gfx12);
+}
+
+TEST(ConversionCvtPkaccumU8F32W32, Arithmetic) {
+  check_byte_pack<32, true>(rj_arith_v_cvt_pkaccum_u8_f32_w32);
+}
+TEST(ConversionCvtPkaccumU8F32W64, Arithmetic) {
+  check_byte_pack<64, true>(rj_arith_v_cvt_pkaccum_u8_f32_w64);
 }

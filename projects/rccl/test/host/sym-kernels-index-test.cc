@@ -15,15 +15,7 @@
 
 #include "sym_kernels.h"
 
-// Neuter __global__: a real definition needs hipLaunchKernel/__hipRegisterFunction, unavailable under -no-hip-rt.
-#undef __global__
-#define __global__
-
-#include "fakes/sym_kernels_test_stubs.h"
-
-#include SYM_KERNELS_HOST_CC_PATH
-
-#undef __global__
+#include "fakes/sym_kernels_host_include.h"
 
 namespace {
 

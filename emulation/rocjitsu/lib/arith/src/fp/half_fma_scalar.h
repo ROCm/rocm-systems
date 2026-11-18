@@ -8,10 +8,10 @@
 
 #include "common/bits.h"
 
-#include "common/float_formats.h"
-#include "common/internal.h"
+#include "common/float_encoding.h"
+#include "common/validation.h"
 #include "fp/fma_integer.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <stdint.h>
 
@@ -29,7 +29,7 @@ inline bool half_fma_reporting_unsupported(uint64_t flags, bool rdna3) {
 // Directed rounding follows rocjitsu pseudo_scalar.h::round_f64_to_f16;
 // integer discarded-bit tests avoid depending on host conversions.
 inline uint16_t half_fma_narrow(uint64_t bits, bool saturate, unsigned rounding = 0) {
-  // Adapted from rocjitsu mixed_fma_simd.h: round_finite_f16_simd.
+  // Follow the inherited FP64 significand/exponent rounding model.
   int exponent = (bits >> 52) & 2047;
   uint16_t sign = uint16_t((bits >> 48) & 0x8000);
   const bool away = rounding == (sign ? 2u : 1u);

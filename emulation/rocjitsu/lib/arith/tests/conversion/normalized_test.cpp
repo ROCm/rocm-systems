@@ -6,7 +6,7 @@
 #include "common/floating_point.h"
 #include "conversion/helpers.h"
 #include "conversion/normalized_reference.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_conversion.h"
 
 #include <bit>
 #include <gtest/gtest.h>
@@ -27,7 +27,7 @@ enum class Normalized {
 };
 
 // Check normalized conversion results and destination preservation for the supplied entry point.
-template <int Lanes, int Operands, typename Call>
+template <int Lanes, int Operands, bool Cdna = false, typename Call>
 void check_normalized(Call call, Normalized operation) {
   int op = int(operation);
   auto input = conversion_inputs<Lanes>(op < 2 ? 32 : 16);
@@ -72,7 +72,13 @@ void check_normalized(Call call, Normalized operation) {
           a = flush(uint32_t(a));
           b = flush(b);
         }
-        return normalized_reference(op, uint32_t(a), b, d, mode);
+        uint32_t result = normalized_reference(op, uint32_t(a), b, d, mode);
+        if constexpr (Cdna) {
+          if (!(mode & RJ_ARITH_ALU_HIGH_D)) {
+            result &= 0xffffU;
+          }
+        }
+        return result;
       },
       conversion_bits, modifiers, false,
       RJ_ARITH_FP_IEEE_MODE | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
@@ -159,4 +165,20 @@ TEST(ConversionCvtNormI16F16W64, Arithmetic) {
 // Check normalized conversion results and destination preservation.
 TEST(ConversionCvtNormU16F16W64, Arithmetic) {
   check_normalized<64, 1>(rj_arith_v_cvt_norm_u16_f16_w64, Normalized::UnsignedHalf);
+}
+
+TEST(ConversionCvtNormI16F16W32Gfx942, Arithmetic) {
+  check_normalized<32, 1, true>(rj_arith_v_cvt_norm_i16_f16_w32_gfx942, Normalized::SignedHalf);
+}
+
+TEST(ConversionCvtNormI16F16W64Gfx942, Arithmetic) {
+  check_normalized<64, 1, true>(rj_arith_v_cvt_norm_i16_f16_w64_gfx942, Normalized::SignedHalf);
+}
+
+TEST(ConversionCvtNormU16F16W32Gfx942, Arithmetic) {
+  check_normalized<32, 1, true>(rj_arith_v_cvt_norm_u16_f16_w32_gfx942, Normalized::UnsignedHalf);
+}
+
+TEST(ConversionCvtNormU16F16W64Gfx942, Arithmetic) {
+  check_normalized<64, 1, true>(rj_arith_v_cvt_norm_u16_f16_w64_gfx942, Normalized::UnsignedHalf);
 }

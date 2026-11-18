@@ -32,18 +32,10 @@ class Wavefront;
 /// The store mutex is a leaf lock under the owning CU's wave lock. Signals update
 /// shared credits/generations; only the owning CU polls and mutates its waves.
 /// No peer CU is dereferenced, and failure callbacks run after releasing the store.
-/// Per-ISA qualifications where the manuals describe different behavior:
-///  * Barrier release ordering: CDNA1-3 and RDNA1/2 test the counter before
-///    decrementing; RDNA3/3.5 (Table 63) decrement first, and their
-///    "participants - 1" wording would make @c init(1) followed by the first
-///    @c barrier(1) release immediately. The model implements the CDNA/LLVM
-///    test-then-decrement reading uniformly; the RDNA3/3.5 decrement-first
-///    variant is not modeled.
-///  * @c release_all credit accounting: CDNA1-3 and RDNA1/2 assign the queued-
-///    wave count to the counter (so with no queued waiter it clears to zero),
-///    whereas RDNA3/3.5 (Table 63) add the queued-wave count (leaving prior
-///    banked credits intact). The model implements the assignment reading
-///    (credits cleared); the RDNA3/3.5 additive variant is not modeled.
+/// RDNA3/3.5 Table 63 describes both an initial count of participants minus one
+/// and a decrement before testing. Barrier arrivals use the participants-minus-one
+/// convention. Semaphore release-all advances the generation to wake queued
+/// waiters. RDNA3/3.5 preserve banked credits. Other modeled targets clear them.
 class GwsDevice {
 public:
   static constexpr uint32_t kResourceCount = 64;
@@ -78,6 +70,7 @@ private:
   uint32_t poll_local_waiters(ComputeUnitCore &cu);
 
   std::mutex mutex_;
+
   std::unordered_map<uint32_t, std::array<Resource, kResourceCount>> resources_;
   std::unordered_map<uint32_t, uint32_t> parked_;
   std::unordered_map<uint32_t, uint64_t> instruction_progress_;

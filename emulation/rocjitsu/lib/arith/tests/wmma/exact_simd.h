@@ -8,7 +8,8 @@
 #include "common/cpu.h"
 #include "common/floating_point.h"
 #include "common/registers.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 #include <bit>
 
 #include <gtest/gtest.h>

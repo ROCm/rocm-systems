@@ -6,9 +6,12 @@
 //! These layouts follow the vendored `ROCm` Systems KFD UAPI in
 //! `runtimes/api-headers/include/uapi/linux/kfd_ioctl.h`. Rust unit tests pin
 //! selected record sizes and offsets. The queue path requires UAPI 1.17's
-//! extended create record. Keep pointer-bearing records here as integers: only
-//! `sys` constructs their pointers and keeps referenced storage alive for the
-//! complete synchronous ioctl.
+//! extended create record. Address fields remain integers to match the UAPI.
+//!
+//! The `connection` ioctl boundary owns or borrows temporary argument buffers
+//! through each synchronous syscall. Resource owners supply queue ring,
+//! context-save, and other resource addresses and retain their backing until
+//! kernel and GPU access has ended, including after the ioctl returns.
 
 use std::mem::{offset_of, size_of};
 
@@ -122,15 +125,6 @@ pub(super) const SVM_FLAG_GPU_READ_ONLY: u32 = 0x08;
 pub(super) const SVM_FLAG_GPU_EXECUTE: u32 = 0x10;
 pub(super) const SVM_FLAG_GPU_READ_MOSTLY: u32 = 0x20;
 pub(super) const SVM_FLAG_GPU_ALWAYS_MAPPED: u32 = 0x40;
-pub(super) const SVM_FLAG_EXT_COHERENT: u32 = 0x80;
-pub(super) const SVM_FLAGS: u32 = SVM_FLAG_HOST_ACCESS
-    | SVM_FLAG_COHERENT
-    | SVM_FLAG_HIVE_LOCAL
-    | SVM_FLAG_GPU_READ_ONLY
-    | SVM_FLAG_GPU_EXECUTE
-    | SVM_FLAG_GPU_READ_MOSTLY
-    | SVM_FLAG_GPU_ALWAYS_MAPPED
-    | SVM_FLAG_EXT_COHERENT;
 
 /// KFD UAPI version returned by `GET_VERSION`.
 #[repr(C)]
@@ -527,7 +521,7 @@ pub(super) struct ResetEvent {
 }
 
 /// The kernel's event union occupies 32 bytes and has eight-byte alignment.
-/// `sys` decodes the hardware- and memory-exception layouts only after a
+/// `connection` decodes the hardware- and memory-exception layouts only after a
 /// successful wait on an event created with the matching type.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
