@@ -286,8 +286,12 @@ Limitations
 * **Only single-packet, single-dispatch submissions** are replayed. Multi-packet batches warn once
   and run once.
 * **Writer lock serializes the agent** for the whole replay window. Different GPUs use different
-  locks (multi-GPU concurrent at the SDK), but there is no in-tree multi-GPU test and no MPI
-  coordination.
+  locks, so they replay concurrently (``test-kernel-replay-multi-agent`` replays on two at once),
+  but there is no MPI coordination.
+* **Tool callbacks must not allocate or free device memory during a replay.** The PASS callbacks,
+  and the callbacks of services such as dispatch counting for the replayed passes, run while the
+  SDK holds the allocation inventory's read lock, so such a call waits on that lock, and the replay
+  hangs or aborts when its drain times out.
 * **Async copies are not fenced.** ``hsa_amd_memory_async_copy`` (or HIP async memcpy) on another
   thread can mutate device memory during the replay window.
 * **Stuck drains and internal blit kernels abort the process** rather than hanging (roughly 60 s

@@ -115,6 +115,12 @@ typedef struct rocprofiler_kernel_replay_options_t
  *   in effect for this pass, and the tool may overwrite it there to change the continue decision
  *   for this pass only (the next pass reverts to the CONFIG default).
  *
+ * Tool callbacks that run while a dispatch is replayed (the PASS callbacks, and the callbacks of
+ * services such as dispatch counting for the replayed passes) must not allocate or free device
+ * memory. The SDK holds the allocation inventory's read lock from each restore until its pass
+ * completes, so such a call waits on that lock, and the replay hangs or aborts when its drain
+ * times out.
+ *
  * The SDK maintains a single @c rocprofiler_user_data_t for the entire replay sequence
  * (CONFIG + all PASS operations). A tool can write per-dispatch state into
  * @c user_data during CONFIG PHASE_ENTER; the same value is delivered to every
