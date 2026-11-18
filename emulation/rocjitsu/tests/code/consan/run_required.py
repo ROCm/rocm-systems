@@ -6,6 +6,7 @@
 import argparse
 import json
 from pathlib import Path
+import re
 import subprocess
 import xml.etree.ElementTree as ET
 
@@ -194,6 +195,26 @@ def validate_selected(tests):
         raise ValueError(
             'Required ConSan registrations missing:\n' + '\n'.join(sorted(missing))
         )
+    for test in tests:
+        validate_workgroup_count(test)
+
+
+def validate_workgroup_count(test):
+    suffix = re.search(r'\.groups([0-9]+)$', test['name'])
+    if suffix is None:
+        return
+    expected = int(suffix.group(1))
+    parser = argparse.ArgumentParser(add_help=False, exit_on_error=False)
+    parser.add_argument('--workgroups', type=int, default=1)
+    try:
+        args, _ = parser.parse_known_args(test.get('command', []))
+    except argparse.ArgumentError as error:
+        raise ValueError(f"{test['name']}: invalid --workgroups: {error}") from error
+    if args.workgroups != expected:
+        raise ValueError(
+            f"{test['name']}: effective --workgroups {args.workgroups} "
+            f'does not match .groups{expected}'
+        )
 
 
 def physical_names():
@@ -281,6 +302,8 @@ def validate_physical_registrations(tests):
             raise ValueError(
                 f'{name}: command differs from required simulator twin {twin_name}'
             )
+        validate_workgroup_count(test)
+        validate_workgroup_count(twin)
 
 
 def validate_results(root):
