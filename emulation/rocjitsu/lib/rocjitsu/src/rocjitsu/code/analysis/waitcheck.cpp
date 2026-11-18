@@ -5640,6 +5640,13 @@ private:
            starts_with(mnemonic, "v_cos_");
   }
 
+  [[nodiscard]] static bool is_short_cdna5_trans_event(const PendingEvent &event,
+                                                       rj_code_arch_t arch) {
+    return arch == ROCJITSU_CODE_ARCH_CDNA5 && event.counter == WaitCounterKind::VaVdst &&
+           event.kind == WaitEventKind::ValuTrans &&
+           event.instruction.find("_f64") == std::string::npos;
+  }
+
   [[nodiscard]] static bool is_gfx1250_smem(std::string_view mnemonic) {
     return is_scalar_memory_op(mnemonic);
   }
@@ -6416,6 +6423,9 @@ private:
     bool expert_enabled = false;
     bool source_implies_nonempty_exec = false;
     bool crossed_exec_expansion = false;
+    bool trans_slot_ready = false;
+    bool trans_exec_covered = false;
+    std::bitset<128> trans_saved_exec_covered;
     uint8_t younger_source_primaries = 0;
     uint8_t gfx10_younger_ds = 0;
     bool gfx10_ds_source_active = false;
@@ -7123,6 +7133,81 @@ private:
     }
   }
 
+  // A full VALU overwrite covers only the lanes active at that instruction.
+  // Keep the relation between current EXEC and saved EXEC values through
+  // simple subset-preserving scalar operations. Any unmodeled transfer loses
+  // the proof while the original VA event remains pending.
+  static void update_trans_overwrite_mask(PathProgress &progress,
+                                          const CfgInstructionView &view,
+                                          const PathMasks &masks,
+                                          std::span<const uint16_t> scalar_defs,
+                                          uint32_t allocated_sgprs) {
+    const Instruction &inst = *view.instruction;
+    const auto name = inst.mnemonic();
+    if (masks.scalar_pending_exec || masks.scalar_pending_unknown ||
+        view.scalar_result_dest_exec || view.scalar_result_dest_unknown ||
+        name.starts_with("s_setreg") || name.starts_with("s_setmode") ||
+        name.starts_with("s_set_vgpr_msb")) {
+      progress.trans_exec_covered = false;
+      progress.trans_saved_exec_covered.reset();
+      return;
+    }
+    const bool old_covered = progress.trans_exec_covered;
+    const auto saved_destination = [&]() -> std::optional<uint16_t> {
+      const auto *dst = inst.dst_operand(0);
+      const auto reg = dst ? dst->to_register_ref() : std::nullopt;
+      if (!reg || reg->cls != RegClass::SGPR || reg->width != 1 ||
+          reg->index >= allocated_sgprs ||
+          reg->index >= progress.trans_saved_exec_covered.size() ||
+          path_operand_has_pending_scalar_result(dst, masks))
+        return std::nullopt;
+      return reg->index;
+    };
+    const auto source_covered = [&](const Operand *source) {
+      if (!source || path_operand_has_pending_scalar_result(source, masks))
+        return false;
+      if (low_selector(source, amdgpu::kExecSelectorFirst))
+        return old_covered;
+      if (const auto literal = source->const_value(); literal && *literal == 0)
+        return true;
+      const auto reg = source->to_register_ref();
+      return reg && reg->cls == RegClass::SGPR && reg->width == 1 &&
+             reg->index < progress.trans_saved_exec_covered.size() &&
+             progress.trans_saved_exec_covered.test(reg->index);
+    };
+    std::optional<uint16_t> saved;
+    if (old_covered &&
+        (name == "s_and_saveexec_b32" ||
+         (name == "s_mov_b32" &&
+          low_selector(inst.src_operand(0), amdgpu::kExecSelectorFirst))))
+      saved = saved_destination();
+    if (view.invalidates_exec) {
+      const bool dst_exec = low_selector(inst.dst_operand(0), amdgpu::kExecSelectorFirst);
+      if (name == "s_and_saveexec_b32" ||
+          name.starts_with("v_cmpx")) {
+        progress.trans_exec_covered = old_covered;
+      } else if (dst_exec && name == "s_mov_b32" && inst.num_src_operands() == 1) {
+        progress.trans_exec_covered = source_covered(inst.src_operand(0));
+      } else if (dst_exec && name == "s_or_b32" && inst.num_src_operands() == 2) {
+        progress.trans_exec_covered = source_covered(inst.src_operand(0)) &&
+                                      source_covered(inst.src_operand(1));
+      } else if (dst_exec && name == "s_and_b32" && inst.num_src_operands() == 2) {
+        progress.trans_exec_covered = source_covered(inst.src_operand(0)) ||
+                                      source_covered(inst.src_operand(1));
+      } else {
+        progress.trans_exec_covered = false;
+      }
+    }
+    for (uint16_t reg : scalar_defs)
+      if (reg < progress.trans_saved_exec_covered.size())
+        progress.trans_saved_exec_covered.reset(reg);
+    for (uint16_t reg : view.scalar_result_dest_sgprs)
+      if (reg < progress.trans_saved_exec_covered.size())
+        progress.trans_saved_exec_covered.reset(reg);
+    if (saved)
+      progress.trans_saved_exec_covered.set(*saved);
+  }
+
   struct LaneOperand {
     uint16_t index;
     WaitcheckAccessKind access;
@@ -7320,7 +7405,8 @@ private:
       bool before_target = false, bool requires_active_lane = false, uint32_t minimum_younger = 0,
       std::optional<WaitRange> weakened = {}, std::optional<LaneOperand> lane_operand = {},
       bool scalar_full_drains_only = false, bool track_younger_predicates = false,
-      std::optional<MaskedSccPredicate> masked_guard = {}, std::optional<LoopParity> parity = {}) {
+      std::optional<MaskedSccPredicate> masked_guard = {}, std::optional<LoopParity> parity = {},
+      std::optional<WaitcheckAccessKind> query_access = {}) {
     requires_active_lane |= lane_operand.has_value();
     if (cfg_views_.empty())
       return std::nullopt;
@@ -7335,6 +7421,14 @@ private:
                         (event.counter == WaitCounterKind::VaVdst ||
                          (event.counter == WaitCounterKind::VmVsrc &&
                           event.kind != WaitEventKind::Gfx10ScalarSource));
+    const bool cdna5_short_trans =
+        is_short_cdna5_trans_event(event, arch) && !cfg_has_unknown_successor_;
+    std::optional<RegisterRef> trans_output;
+    if (cdna5_short_trans && event.check_uses && event.regs.size() == 1)
+      event.regs.for_each([&](RegisterRef reg) {
+        if (reg.cls == RegClass::VGPR)
+          trans_output = reg;
+      });
     const bool scratch_guard = !scalar_full_drains_only && has_guarded_scratch_result(event);
     const bool resolve_scratch_relative = scratch_guard && cfg_can_resolve_scratch_relative_;
     const auto ds_wait = std::ranges::upper_bound(cfg_ds_wait_offsets_, event.section_offset);
@@ -7371,7 +7465,10 @@ private:
                                       parity,
                                       expert ? event.kind : WaitEventKind::Unknown,
                                       expert && !event.regs.none(),
-                                      expert ? event.wmma_wait_states : uint8_t{0}};
+                                      expert ? event.wmma_wait_states : uint8_t{0},
+                                      cdna5_short_trans && event.check_uses,
+                                      trans_output ? trans_output->index : UINT16_MAX,
+                                      query_access == WaitcheckAccessKind::Use};
     if (auto cached = feasible_path_cache_.find(cache_key); cached != feasible_path_cache_.end())
       return cached->second;
 
@@ -7379,7 +7476,8 @@ private:
     // that an earlier event in the same straight-line block is still pending.
     // Avoid launching the path-sensitive CFG search for the overwhelmingly
     // common compiler pattern of a wait shortly after its producer.
-    if (!requires_active_lane && !track_async_issue && !weakened && !scratch_guard &&
+    if (!cdna5_short_trans && !requires_active_lane && !track_async_issue && !weakened &&
+        !scratch_guard &&
         !native_ds_wait_between && current_cfg_view_index_ &&
         *current_cfg_view_index_ < cfg_views_.size()) {
       const BasicBlock *current_block = cfg_views_[*current_cfg_view_index_].block;
@@ -7393,7 +7491,8 @@ private:
 
     const std::vector<size_t> producer_block_indices =
         cfg_block_indices_containing(event.section_offset);
-    if (before_target && minimum_younger == 0 && !track_async_issue && current_cfg_view_index_ &&
+    if (before_target && minimum_younger == 0 && !track_async_issue && !cdna5_short_trans &&
+        current_cfg_view_index_ &&
         *current_cfg_view_index_ < cfg_views_.size() &&
         std::ranges::any_of(
             producer_block_indices,
@@ -7407,6 +7506,78 @@ private:
         cfg_block_indices_containing(consumer_offset);
     if (producer_block_indices.empty() || consumer_block_indices.empty())
       return std::nullopt;
+
+    // The one-slot rule closes the TRANS source-read coexecution window. Its
+    // output can then be forwarded to ordinary VALU, but a non-VALU consumer
+    // still needs VA completion before reading the register file.
+    const bool trans_valu_consumer =
+        cdna5_short_trans && !before_target &&
+        std::ranges::all_of(consumer_block_indices, [&](size_t block_index) {
+          const auto &instructions = cfg_views_[block_index].instructions;
+          const auto found = std::ranges::lower_bound(instructions, consumer_offset, {},
+                                                       &CfgInstructionView::section_offset);
+          return found != instructions.end() && found->section_offset == consumer_offset &&
+                 (found->instruction->flags() & VALU) && is_vector_alu(*found->instruction) &&
+                 !found->instruction->is_transcendental();
+        });
+    const bool track_trans_overwrite =
+        trans_output && !trans_valu_consumer && !before_target && requires_active_lane &&
+        query_access == WaitcheckAccessKind::Use && current_kernel_ && wavefront_size_ == 32;
+
+    // One issued VALU slot closes the TRANS source-read window and permits
+    // ordinary VALU forwarding. Decode every producer context so a banked
+    // operand cannot be missed at a join.
+    RegisterSet trans_uses;
+    RegisterSet trans_defs;
+    bool trans_registers_known = cdna5_short_trans;
+    if (cdna5_short_trans) {
+      for (size_t block_index : producer_block_indices) {
+        const auto &instructions = cfg_views_[block_index].instructions;
+        const auto found = std::ranges::lower_bound(instructions, event.section_offset, {},
+                                                     &CfgInstructionView::section_offset);
+        if (found == instructions.end() || found->section_offset != event.section_offset) {
+          trans_registers_known = false;
+          break;
+        }
+        const auto du = inst_def_use_for_waitcheck(*found->instruction, found->vgpr_msb, arch,
+                                                   wavefront_size_);
+        trans_uses |= vector_registers(du.uses);
+        trans_defs |= vector_registers(du.defs);
+      }
+      trans_registers_known &= !trans_defs.none();
+    }
+    auto full_trans_output_overwrite = [&](const CfgInstructionView &view,
+                                           const InstDefUse &du) {
+      const Instruction &inst = *view.instruction;
+      if (!track_trans_overwrite || !trans_output || !(inst.flags() & VALU) ||
+          !(inst.flags() & DIRECT_REGISTER_ACCESSES) ||
+          (inst.flags() & (MATRIX_REGISTER_ACCESSES | IGNORES_EXEC | PREDICATED_DEF)) ||
+          inst.is_transcendental() || view.vector_skip != false || !view.vgpr_msb.known ||
+          du.uses.contains(*trans_output) || !du.defs.contains(*trans_output))
+        return false;
+      amdgpu::RegisterModifiers modifiers;
+      inst.amdgpu_register_modifiers(modifiers);
+      if (modifiers.dpp || modifiers.dpp8 || modifiers.sdwa || modifiers.exec_whole_quads ||
+          modifiers.ds_permutation != amdgpu::DsPermutation::None ||
+          modifiers.valu_permutation != amdgpu::ValuPermutation::None)
+        return false;
+      for (int i = 0; i < inst.num_dst_operands(); ++i) {
+        const Operand *dst = inst.dst_operand(i);
+        if (!dst || dst->register_byte_mask() != 0xf ||
+            dst->preserve_unwritten_bytes())
+          continue;
+        auto ref = register_operand(*dst, arch);
+        if (!ref || ref->cls != RegClass::VGPR)
+          continue;
+        if (dst->vgpr_msb_role() != amdgpu::VgprMsbRole::None)
+          ref->index = static_cast<uint16_t>(
+              ref->index + view.vgpr_msb.for_role(dst->vgpr_msb_role()) * 256u);
+        if (ref->index <= trans_output->index &&
+            trans_output->index - ref->index < ref->width)
+          return true;
+      }
+      return false;
+    };
 
     const SharedReachability consumer_reaching = reachable_blocks(consumer_block_indices, false);
     const auto &can_reach_consumer = *consumer_reaching;
@@ -7592,6 +7763,9 @@ private:
               static_cast<size_t>(key.progress.expert_enabled),
               static_cast<size_t>(key.progress.source_implies_nonempty_exec),
               static_cast<size_t>(key.progress.crossed_exec_expansion),
+              static_cast<size_t>(key.progress.trans_slot_ready),
+              static_cast<size_t>(key.progress.trans_exec_covered),
+              std::hash<std::bitset<128>>{}(key.progress.trans_saved_exec_covered),
               static_cast<size_t>(key.progress.younger_source_primaries),
               static_cast<size_t>(key.progress.gfx10_younger_ds),
               static_cast<size_t>(key.progress.gfx10_ds_source_active),
@@ -7740,6 +7914,14 @@ private:
       }
       const Instruction &inst = *inst_view.instruction;
       const auto path_name = inst.mnemonic();
+      if (cdna5_short_trans && state.pending &&
+          (path_name.starts_with("s_call") || path_name.starts_with("s_swappc") ||
+           path_name.starts_with("s_setpc") || path_name.starts_with("s_set_pc") ||
+           path_name.starts_with("s_rfe") || path_name.starts_with("s_movrel"))) {
+        // A transfer can change EXEC or the physical register mapping before
+        // the next visible instruction. Preserve the TRANS warning if so.
+        return feasible_path_cache_[cache_key] = std::nullopt;
+      }
       const bool rdna1_unknown_path_transfer =
           track_gfx10_ds_completion && rdna1_saved_exec_enabled_ &&
           (path_name.starts_with("s_call") || path_name.starts_with("s_swappc") ||
@@ -7811,6 +7993,9 @@ private:
         state.progress.core = 0;
         state.progress.source_implies_nonempty_exec = false;
         state.progress.crossed_exec_expansion = false;
+        state.progress.trans_slot_ready = false;
+        state.progress.trans_exec_covered = false;
+        state.progress.trans_saved_exec_covered.reset();
         state.progress.saved_source_exec.reset();
         state.progress.younger_source_primaries = 0;
         state.progress.gfx10_younger_ds = 0;
@@ -7819,7 +8004,8 @@ private:
 
       if (!before_target && inst_view.section_offset == consumer_offset && state.pending &&
           (!minimum_younger || state.progress.age < minimum_younger) &&
-          (!weakened || state.crossed_wait)) {
+          (!weakened || state.crossed_wait) &&
+          !(track_trans_overwrite && state.progress.trans_exec_covered)) {
         const std::optional<bool> reaches =
             lane_operand
                 ? physical_lane_witness(inst, *lane_operand, state.masks, state.constraints, arch)
@@ -7873,13 +8059,17 @@ private:
           state.progress.gfx10_younger_ds = 0;
           state.progress.gfx10_ds_source_active =
               native_ds_issues != 0 && (!older_gfx10_source_pending || older_gfx10_source_active);
-          // The live physical source implies its original mask had a lane.
-          // This evidence applies only to the pending event, never to a CFG edge.
+          // A live physical VGPR result proves its issue had an active lane.
+          // Keep that fact only for this pending event until EXEC changes.
           state.progress.source_implies_nonempty_exec =
               expert && !event.regs.none() &&
               (event.counter == WaitCounterKind::VmVsrc ||
-               (cfg_has_repeated_exec_filter_ && event.kind == WaitEventKind::ValuCore &&
-                !inst_view.valu_issues_with_empty_exec));
+               (!inst_view.valu_issues_with_empty_exec &&
+                (cdna5_short_trans ||
+                 (cfg_has_repeated_exec_filter_ && event.kind == WaitEventKind::ValuCore))));
+          state.progress.trans_slot_ready = false;
+          state.progress.trans_exec_covered = false;
+          state.progress.trans_saved_exec_covered.reset();
           state.pending = true;
           state.progress.age = 0;
           state.progress.store_age = 0;
@@ -7961,6 +8151,37 @@ private:
                     !is_async_lds_store(inst.mnemonic()))) {
           state.progress.age = std::min<uint32_t>(state.progress.age + 1, kMaxTrackedAge);
         }
+      }
+      const bool trans_slot_ready_before_inst = state.progress.trans_slot_ready;
+      if (state.pending && trans_registers_known && !same_producer &&
+          (inst.flags() & VALU) && is_vector_alu(inst) && inst_view.vector_skip == false &&
+          (inst_view.valu_issues_with_empty_exec || state.masks.exec == true ||
+           state.progress.source_implies_nonempty_exec)) {
+        const auto du = inst_def_use_for_waitcheck(inst, inst_view.vgpr_msb, arch,
+                                                   wavefront_size_);
+        const RegisterSet reads = vector_registers(du.uses);
+        const RegisterSet writes = vector_registers(du.defs);
+        // Another TRANS does not coexecute with this one. Ordinary VALU needs
+        // a disjoint RAW/WAR/WAW slot; read/read sharing is independent.
+        if (inst.is_transcendental() ||
+            (!reads.intersects(trans_defs) && !writes.intersects(trans_uses) &&
+             !writes.intersects(trans_defs))) {
+          if (track_trans_overwrite)
+            state.progress.trans_slot_ready = true;
+          if (!event.check_uses || trans_valu_consumer)
+            state.pending = false;
+        }
+      }
+      if (track_trans_overwrite && state.pending) {
+        update_trans_overwrite_mask(
+            state.progress, inst_view, state.masks, path_scalar_defs_.at(&inst),
+            current_kernel_->min_sgprs ? current_kernel_->min_sgprs
+                                       : amdgpu::kVccSelectorFirst);
+        if (trans_slot_ready_before_inst && !same_producer &&
+            full_trans_output_overwrite(
+                inst_view, inst_def_use_for_waitcheck(inst, inst_view.vgpr_msb, arch,
+                                                      wavefront_size_)))
+          state.progress.trans_exec_covered = true;
       }
       if (track_gfx10_ds_completion && state.pending && !same_producer &&
           state.progress.gfx10_ds_source_active && native_ds_issues)
@@ -8909,7 +9130,11 @@ private:
                                                 WaitcheckAccessKind access,
                                                 uint64_t consumer_offset, rj_code_arch_t arch) {
     const auto lane_operand = guarded_lane_operand(event, consumer, reg, access, arch);
-    const bool active = access_requires_active_lane(consumer, reg);
+    const bool trans_overwrite_candidate =
+        is_short_cdna5_trans_event(event, arch) && event.check_uses &&
+        access == WaitcheckAccessKind::Use && current_kernel_ && wavefront_size_ == 32 &&
+        is_exec_masked_lane_access(consumer, reg);
+    const bool active = access_requires_active_lane(consumer, reg) || trans_overwrite_candidate;
     const auto *memory_issue = consumer.amdgpu_memory_issue_info();
     if (reg.cls == RegClass::VGPR && event.counter == WaitCounterKind::Load &&
         wave64_guarded_loads_.contains(event.section_offset) &&
@@ -8921,7 +9146,8 @@ private:
     // An SGPR relative-wait selector is consumed before this instruction's drain.
     const bool before_wait = relative_wait_operand(consumer, arch) != nullptr;
     const auto reaches = has_cfg_path_with_event_pending(event, consumer_offset, arch, before_wait,
-                                                         active, 0, {}, lane_operand);
+                                                         active, 0, {}, lane_operand, false, false,
+                                                         {}, {}, access);
     if (reaches != false && active && !before_wait &&
         cdna5_guarded_va_drain(event, consumer, reg, arch))
       return false;
@@ -9335,9 +9561,13 @@ private:
       const auto &events = state.pending[counter_idx];
       for (size_t i = 0; i < events.size(); ++i) {
         const PendingEvent &event = events[i];
-        // VALU-to-VALU hazards are interlocked in expert scheduling mode.
+        // Ordinary VALU-to-VALU and TRANS-to-TRANS hazards are interlocked.
+        // A CDNA5 TRANS needs one independent slot before an ordinary VALU may
+        // use its result or overwrite its source.
         if ((event.counter == WaitCounterKind::VaVdst &&
-             ((inst.flags() & VALU) || dsdir_wait_va_vdst(inst))) ||
+             (((inst.flags() & VALU) &&
+               (!is_short_cdna5_trans_event(event, arch) || inst.is_transcendental())) ||
+              dsdir_wait_va_vdst(inst))) ||
             !checks_scalar_source(event.kind, inst))
           continue;
         std::optional<RegisterRef> reg;
@@ -11280,7 +11510,7 @@ private:
   std::map<std::tuple<uint64_t, uint64_t, WaitCounterKind, bool, bool, uint32_t,
                       std::optional<WaitRange>, std::optional<LaneOperand>, bool, bool,
                       std::optional<MaskedSccPredicate>, std::optional<LoopParity>, WaitEventKind,
-                      bool, uint8_t>,
+                      bool, uint8_t, bool, uint16_t, bool>,
            std::optional<bool>>
       feasible_path_cache_;
   std::map<std::vector<size_t>, SharedReachability> reverse_reachability_cache_;

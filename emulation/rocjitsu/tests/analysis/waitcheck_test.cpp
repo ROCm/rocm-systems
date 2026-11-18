@@ -429,6 +429,24 @@ TEST(WaitcheckTest, ReachableGfx1250DecodePreservesFourWordInstruction) {
   return inst;
 }
 
+[[nodiscard]] rdna4::Vop1MachineInst v_exp_f32(uint32_t vdst, uint32_t src_vgpr) {
+  rdna4::Vop1MachineInst inst{};
+  inst.encoding = 0x3F;
+  inst.op = 37;
+  inst.vdst = vdst;
+  inst.src0 = 256 + src_vgpr;
+  return inst;
+}
+
+[[nodiscard]] rdna4::Vop1MachineInst v_sqrt_f64(uint32_t vdst, uint32_t src_vgpr) {
+  rdna4::Vop1MachineInst inst{};
+  inst.encoding = 0x3F;
+  inst.op = 52;
+  inst.vdst = vdst;
+  inst.src0 = 256 + src_vgpr;
+  return inst;
+}
+
 [[nodiscard]] rdna4::Vop2MachineInst v_add_f32_e32(uint32_t vdst, uint32_t src0, uint32_t vsrc1) {
   auto inst = std::bit_cast<rdna4::Vop2MachineInst>(0x06000000U);
   inst.vdst = vdst;
@@ -9956,7 +9974,7 @@ TEST(WaitcheckTest, ExpertValuRegisterHazardsRequireOrderedIssueCredits) {
   }
 }
 
-TEST(WaitcheckTest, OptionalExpertDelayDoesNotCompleteVaForMemory) {
+TEST(WaitcheckTest, OptionalExpertDelayDoesNotCompleteCdna5TransVaForMemory) {
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     for (bool trans : {false, true}) {
       for (unsigned dep : {0u, 1u, 2u, 5u, 6u}) {
@@ -9973,12 +9991,11 @@ TEST(WaitcheckTest, OptionalExpertDelayDoesNotCompleteVaForMemory) {
         append_inst(code, s_endpgm());
         const auto report = analyze_waitcnts(TestCodeObject(code), arch);
         ASSERT_TRUE(report.supported) << report.analysis_error;
-        EXPECT_EQ(std::ranges::any_of(report.diagnostics,
-                                      [](const auto &d) {
-                                        return d.counter == WaitCounterKind::VaVdst &&
-                                               d.reg.index == 8;
-                                      }),
-                  true)
+        EXPECT_TRUE(std::ranges::any_of(report.diagnostics,
+                                        [](const auto &d) {
+                                          return d.counter == WaitCounterKind::VaVdst &&
+                                                 d.reg.index == 8;
+                                        }))
             << diagnostic_summary(report);
       }
     }
@@ -10012,6 +10029,455 @@ TEST(WaitcheckTest, ExpertValuForwardingDoesNotCompleteVaForMemory) {
         EXPECT_FALSE(missing_at(alu)) << diagnostic_summary(report);
         EXPECT_EQ(missing_at(memory), !wait_va) << diagnostic_summary(report);
       }
+}
+
+TEST(WaitcheckTest, Gfx1250TransNeedsAnIndependentIssuedValuBeforeItsRegistersAreReused) {
+  enum class Gap {
+    None,
+    Independent,
+    SharedRead,
+    DependentRead,
+    DependentWrite,
+    DestinationOverwrite,
+    Nop,
+    Matrix,
+    EmptyExec,
+    UnknownExec
+  };
+  for (const auto gap : {Gap::None, Gap::Independent, Gap::SharedRead, Gap::DependentRead,
+                         Gap::DependentWrite, Gap::DestinationOverwrite, Gap::Nop, Gap::Matrix,
+                         Gap::EmptyExec, Gap::UnknownExec}) {
+    for (const bool memory_def : {false, true}) {
+      SCOPED_TRACE(testing::Message() << static_cast<int>(gap) << '/' << memory_def);
+      std::vector<uint32_t> code;
+      append_inst(code, s_setreg_imm32_b32(hwreg(26, 0, 2), 2));
+      const auto producer = code.size() * sizeof(uint32_t);
+      append_inst(code, v_exp_f32(6, gap == Gap::DependentWrite ||
+                                             gap == Gap::DestinationOverwrite ||
+                                             gap == Gap::SharedRead ? 3 : 6));
+      const auto gap_pc = code.size() * sizeof(uint32_t);
+      switch (gap) {
+      case Gap::None:
+        append_inst(code, sopp(0));
+        break;
+      case Gap::Independent:
+        append_inst(code, v_mov_b32(12, 11));
+        break;
+      case Gap::SharedRead:
+        append_inst(code, v_mov_b32(12, 3));
+        break;
+      case Gap::DependentRead:
+        append_inst(code, v_mov_b32(12, 6));
+        break;
+      case Gap::DependentWrite:
+        append_inst(code, v_mov_b32(3, 11));
+        break;
+      case Gap::DestinationOverwrite:
+        append_inst(code, v_mov_b32(6, 11));
+        break;
+      case Gap::Nop:
+        code.push_back(0x7e000000u);
+        break;
+      case Gap::Matrix:
+        code.insert(code.end(), {0xcc600010u, 0x1c42e528u}); // Disjoint WMMA slot.
+        break;
+      case Gap::EmptyExec:
+        append_inst(code, s_mov_b32(126, 128));
+        append_inst(code, v_mov_b32(12, 11));
+        append_inst(code, s_mov_b32(126, 129));
+        break;
+      case Gap::UnknownExec:
+        append_inst(code, s_mov_b32(126, 0));
+        append_inst(code, v_mov_b32(12, 11));
+        append_inst(code, s_mov_b32(126, 129));
+        break;
+      }
+      const auto consumer = code.size() * sizeof(uint32_t);
+      append_inst(code, global_load_b32(memory_def ? 6 : 4, memory_def ? 8 : 6));
+      append_inst(code, s_endpgm());
+      const auto report = analyze_gfx12_with_vgpr_allocation(
+          code, EF_AMDGPU_MACH_AMDGCN_GFX1250, ROCJITSU_CODE_ARCH_CDNA5, true, 128);
+      ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+      const auto missing_at = [&](uint64_t pc, WaitcheckAccessKind access) {
+        return std::ranges::any_of(report.diagnostics, [&](const auto &d) {
+          return d.counter == WaitCounterKind::VaVdst && d.producer_section_offset == producer &&
+                 d.section_offset == pc && d.reg.index == (gap == Gap::DependentWrite &&
+                                                            pc == gap_pc ? 3 : 6) &&
+                 d.access == access;
+        });
+      };
+      const bool dependent = gap == Gap::DependentRead || gap == Gap::DependentWrite ||
+                             gap == Gap::DestinationOverwrite;
+      if (dependent)
+        EXPECT_TRUE(missing_at(gap_pc, gap == Gap::DependentRead ? WaitcheckAccessKind::Use
+                                                                 : WaitcheckAccessKind::Def))
+            << diagnostic_summary(report);
+      EXPECT_TRUE(missing_at(consumer, memory_def ? WaitcheckAccessKind::Def
+                                                   : WaitcheckAccessKind::Use))
+          << diagnostic_summary(report);
+    }
+  }
+}
+
+TEST(WaitcheckTest, Gfx1250TransGapMustExecuteOnEveryPathToTheConsumer) {
+  std::vector<uint32_t> code;
+  append_inst(code, s_setreg_imm32_b32(hwreg(26, 0, 2), 2));
+  const auto producer = code.size() * sizeof(uint32_t);
+  append_inst(code, v_exp_f32(6, 6));
+  append_inst(code, sopp(33, 1)); // One arm skips the independent VALU.
+  append_inst(code, v_mov_b32(12, 11));
+  const auto consumer = code.size() * sizeof(uint32_t);
+  append_inst(code, v_mov_b32(13, 6));
+  append_inst(code, s_endpgm());
+  const auto report = analyze_gfx12_with_vgpr_allocation(
+      code, EF_AMDGPU_MACH_AMDGCN_GFX1250, ROCJITSU_CODE_ARCH_CDNA5, true, 128);
+  ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+  EXPECT_TRUE(std::ranges::any_of(report.diagnostics, [&](const auto &d) {
+    return d.counter == WaitCounterKind::VaVdst && d.producer_section_offset == producer &&
+           d.section_offset == consumer && d.reg.index == 6;
+  })) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1250TransGapOnlyClosesTheSourceAndValuCoexecutionWindow) {
+  enum class MemoryAccess {
+    ReadOutput,
+    WriteOutput,
+    WriteSource,
+    ReadInPlaceOutput,
+    WriteInPlaceOutput
+  };
+  for (const auto access : {MemoryAccess::ReadOutput, MemoryAccess::WriteOutput,
+                            MemoryAccess::WriteSource, MemoryAccess::ReadInPlaceOutput,
+                            MemoryAccess::WriteInPlaceOutput})
+    for (const bool wait_va : {false, true}) {
+      SCOPED_TRACE(testing::Message() << static_cast<int>(access) << '/' << wait_va);
+      std::vector<uint32_t> code;
+      append_inst(code, s_setreg_imm32_b32(hwreg(26, 0, 2), 2));
+      const auto producer = code.size() * sizeof(uint32_t);
+      append_inst(code, v_exp_f32(6, access == MemoryAccess::ReadInPlaceOutput ||
+                                           access == MemoryAccess::WriteInPlaceOutput ? 6 : 3));
+      append_inst(code, v_mov_b32(12, 11)); // Independent issued VALU slot.
+      if (wait_va)
+        append_inst(code, sopp(8, 0x0f9f));
+      const auto consumer = code.size() * sizeof(uint32_t);
+      switch (access) {
+      case MemoryAccess::ReadOutput:
+      case MemoryAccess::ReadInPlaceOutput:
+        append_inst(code, global_load_b32(4, 6));
+        break;
+      case MemoryAccess::WriteOutput:
+      case MemoryAccess::WriteInPlaceOutput:
+        append_inst(code, global_load_b32(6, 8));
+        break;
+      case MemoryAccess::WriteSource:
+        append_inst(code, global_load_b32(3, 8));
+        break;
+      }
+      append_inst(code, s_endpgm());
+      const auto report = analyze_gfx12_with_vgpr_allocation(
+          code, EF_AMDGPU_MACH_AMDGCN_GFX1250, ROCJITSU_CODE_ARCH_CDNA5, true, 128);
+      ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+      EXPECT_EQ(std::ranges::any_of(report.diagnostics, [&](const auto &d) {
+                  return d.counter == WaitCounterKind::VaVdst &&
+                         d.producer_section_offset == producer && d.section_offset == consumer &&
+                         d.reg.index == (access == MemoryAccess::WriteSource ? 3 : 6);
+                }),
+                !wait_va && access != MemoryAccess::WriteSource)
+          << diagnostic_summary(report);
+    }
+}
+
+TEST(WaitcheckTest, Gfx1250FullValuOverwriteCoversOnlyProvenExecLanes) {
+  enum class Path {
+    SameExec,
+    SaveAndRestoreCoveredExec,
+    RestoreUncoveredExec,
+    SkipOverwrite,
+    UnknownExecWrite,
+    UnknownExecBeforeOverwrite,
+    ComplementExecAfterOverwrite,
+    NoPriorSlot,
+    MemoryDef,
+    InPlaceTrans,
+    PartialOverwrite,
+    WideOverwrite
+  };
+  for (const Path path : {Path::SameExec, Path::SaveAndRestoreCoveredExec,
+                          Path::RestoreUncoveredExec, Path::SkipOverwrite,
+                          Path::UnknownExecWrite, Path::UnknownExecBeforeOverwrite,
+                          Path::ComplementExecAfterOverwrite, Path::NoPriorSlot,
+                          Path::MemoryDef, Path::InPlaceTrans, Path::PartialOverwrite,
+                          Path::WideOverwrite}) {
+    SCOPED_TRACE(static_cast<int>(path));
+    std::vector<uint32_t> code;
+    append_inst(code, s_setreg_imm32_b32(hwreg(26, 0, 2), 2));
+    const auto producer = code.size() * sizeof(uint32_t);
+    append_inst(code, v_exp_f32(6, path == Path::InPlaceTrans ? 6 : 3));
+    if (path != Path::NoPriorSlot)
+      append_inst(code, v_mov_b32(12, 11)); // The independent coexecution slot.
+    if (path == Path::RestoreUncoveredExec)
+      code.push_back(0xbe842006u); // s_and_saveexec_b32 s4,s6 before the overwrite.
+    if (path == Path::SkipOverwrite)
+      append_inst(code, sopp(33, 1)); // One edge bypasses the overwrite.
+    if (path == Path::UnknownExecBeforeOverwrite)
+      append_inst(code, s_mov_b32(126, 0)); // Unknown but stable EXEC at both uses.
+    if (path == Path::PartialOverwrite)
+      code.push_back(0x7f0c3880u); // v_mov_b16_e32 v6.h,0 preserves the other half.
+    else if (path == Path::WideOverwrite)
+      code.insert(code.end(), {0xd6520006u, 0x05a90226u}); // v_lshl_add_u64 v[6:7].
+    else
+      append_inst(code, v_mov_b32(6, 10)); // A full physical VGPR write.
+    if (path == Path::SaveAndRestoreCoveredExec)
+      code.push_back(0xbe842006u); // Save the already covered EXEC into s4.
+    if (path == Path::SaveAndRestoreCoveredExec || path == Path::RestoreUncoveredExec)
+      code.push_back(0x8c7e047eu); // s_or_b32 exec_lo,exec_lo,s4.
+    if (path == Path::UnknownExecWrite)
+      append_inst(code, s_mov_b32(126, 0)); // May enable uncovered lanes.
+    if (path == Path::ComplementExecAfterOverwrite)
+      code.push_back(0xbe843006u); // EXEC = s6 & ~EXEC may enable uncovered lanes.
+    const auto consumer = code.size() * sizeof(uint32_t);
+    append_inst(code, global_load_b32(path == Path::MemoryDef ? 6 : 4,
+                                      path == Path::MemoryDef ? 8 : 6));
+    append_inst(code, s_endpgm());
+    const auto report = analyze_gfx12_with_vgpr_allocation(
+        code, EF_AMDGPU_MACH_AMDGCN_GFX1250, ROCJITSU_CODE_ARCH_CDNA5, true, 128);
+    ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+    const bool warning = std::ranges::any_of(report.diagnostics, [&](const auto &d) {
+      return d.counter == WaitCounterKind::VaVdst &&
+             d.producer_section_offset == producer && d.section_offset == consumer &&
+             d.reg.index == 6;
+    });
+    EXPECT_EQ(warning, path == Path::RestoreUncoveredExec || path == Path::SkipOverwrite ||
+                           path == Path::UnknownExecWrite ||
+                           path == Path::ComplementExecAfterOverwrite || path == Path::NoPriorSlot ||
+                           path == Path::MemoryDef || path == Path::PartialOverwrite)
+        << diagnostic_summary(report);
+  }
+}
+
+TEST(WaitcheckTest, Gfx1250TransOverwriteMustCoverEveryLoopBackedge) {
+  for (const bool skip_overwrite : {false, true}) {
+    std::vector<uint32_t> code;
+    append_inst(code, s_setreg_imm32_b32(hwreg(26, 0, 2), 2));
+    const size_t loop_header = code.size();
+    append_inst(code, sopp(33, 0)); // Exit path; the other edge repeats the loop.
+    const auto consumer = code.size() * sizeof(uint32_t);
+    append_inst(code, global_load_b32(4, 6));
+    const auto producer = code.size() * sizeof(uint32_t);
+    append_inst(code, v_exp_f32(6, 3));
+    append_inst(code, v_mov_b32(12, 11)); // Independent slot.
+    if (skip_overwrite) {
+      append_inst(code, s_cmp_eq_u32(0, 1));
+      append_inst(code, sopp(33, 1)); // One loop edge omits the full write.
+    }
+    append_inst(code, v_mov_b32(6, 10));
+    append_inst(code, s_cmp_eq_u32(2, 3)); // Independent predicate for the next loop header.
+    const size_t backedge = code.size();
+    append_inst(code, sopp(32, static_cast<int>(loop_header) - static_cast<int>(backedge) - 1));
+    code[loop_header] = std::bit_cast<uint32_t>(sopp(33, code.size() - loop_header - 1));
+    append_inst(code, s_endpgm());
+    const auto report = analyze_gfx12_with_vgpr_allocation(
+        code, EF_AMDGPU_MACH_AMDGCN_GFX1250, ROCJITSU_CODE_ARCH_CDNA5, true, 128);
+    ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+    EXPECT_EQ(std::ranges::any_of(report.diagnostics, [&](const auto &d) {
+                return d.counter == WaitCounterKind::VaVdst &&
+                       d.producer_section_offset == producer && d.section_offset == consumer &&
+                       d.reg.index == 6;
+              }),
+              skip_overwrite)
+        << diagnostic_summary(report);
+  }
+}
+
+TEST(WaitcheckTest, Gfx1250TransGapMayIssueWithEmptyExec) {
+  enum class Gap { OrdinaryValu, Nop, ReadFirstLane, Matrix, VccCompare };
+  for (const Gap gap : {Gap::OrdinaryValu, Gap::Nop, Gap::ReadFirstLane, Gap::Matrix,
+                        Gap::VccCompare}) {
+    SCOPED_TRACE(static_cast<int>(gap));
+    std::vector<uint32_t> code;
+    append_inst(code, s_setreg_imm32_b32(hwreg(26, 0, 2), 2));
+    const auto producer = code.size() * sizeof(uint32_t);
+    append_inst(code, v_exp_f32(6, 3));
+    append_inst(code, s_mov_b32(126, 128)); // EXEC_LO = 0.
+    switch (gap) {
+    case Gap::OrdinaryValu:
+      append_inst(code, v_mov_b32(12, 11));
+      break;
+    case Gap::Nop:
+      code.push_back(0x7e000000u); // V_NOP_e32 is issued with empty EXEC.
+      break;
+    case Gap::ReadFirstLane:
+      code.push_back(0x7e100500u); // v_readfirstlane_b32 s8, v0.
+      break;
+    case Gap::Matrix:
+      code.insert(code.end(), {0xcc600010u, 0x1c42e528u});
+      break;
+    case Gap::VccCompare:
+      append_inst(code, v_cmp_gt_u32_e32(5, 12));
+      break;
+    }
+    append_inst(code, s_mov_b32(126, 129)); // Restore one active lane.
+    const auto consumer = code.size() * sizeof(uint32_t);
+    append_inst(code, v_mov_b32(13, 6));
+    append_inst(code, s_endpgm());
+    const auto report = analyze_gfx12_with_vgpr_allocation(
+        code, EF_AMDGPU_MACH_AMDGCN_GFX1250, ROCJITSU_CODE_ARCH_CDNA5, true, 128);
+    ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+    EXPECT_EQ(std::ranges::any_of(report.diagnostics, [&](const auto &d) {
+                return d.counter == WaitCounterKind::VaVdst &&
+                       d.producer_section_offset == producer && d.section_offset == consumer &&
+                       d.reg.index == 6;
+              }),
+              gap == Gap::OrdinaryValu)
+        << diagnostic_summary(report);
+  }
+}
+
+TEST(WaitcheckTest, Gfx1250TransLoopBackedgeDoesNotCompleteMemoryVa) {
+  for (const bool independent_gap : {false, true}) {
+    std::vector<uint32_t> code;
+    append_inst(code, s_setreg_imm32_b32(hwreg(26, 0, 2), 2));
+    const size_t loop_header = code.size();
+    append_inst(code, sopp(33, 0)); // One path exits; another repeats the loop.
+    const auto consumer = code.size() * sizeof(uint32_t);
+    append_inst(code, global_load_b32(4, 6));
+    const auto producer = code.size() * sizeof(uint32_t);
+    append_inst(code, v_exp_f32(6, 6));
+    if (independent_gap)
+      append_inst(code, v_mov_b32(12, 11));
+    else
+      append_inst(code, sopp(0));
+    const size_t backedge = code.size();
+    append_inst(code, sopp(32, static_cast<int>(loop_header) - static_cast<int>(backedge) - 1));
+    code[loop_header] = std::bit_cast<uint32_t>(sopp(33, code.size() - loop_header - 1));
+    append_inst(code, s_endpgm());
+    const auto report = analyze_gfx12_with_vgpr_allocation(
+        code, EF_AMDGPU_MACH_AMDGCN_GFX1250, ROCJITSU_CODE_ARCH_CDNA5, true, 128);
+    ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+    EXPECT_EQ(std::ranges::any_of(report.diagnostics, [&](const auto &d) {
+                return d.counter == WaitCounterKind::VaVdst &&
+                       d.producer_section_offset == producer && d.section_offset == consumer &&
+                       d.reg.index == 6;
+              }),
+              true)
+        << diagnostic_summary(report);
+  }
+}
+
+TEST(WaitcheckTest, Gfx1250PendingTransImpliesNonemptyExecUntilTheGap) {
+  std::vector<uint32_t> code;
+  append_inst(code, s_setreg_imm32_b32(hwreg(26, 0, 2), 2));
+  append_inst(code, s_mov_b32(126, 0)); // EXEC is unknown at the TRANS issue.
+  const auto producer = code.size() * sizeof(uint32_t);
+  append_inst(code, v_exp_f32(6, 6));
+  append_inst(code, v_mov_b32(12, 11)); // An outstanding result proves EXEC was nonempty.
+  const auto consumer = code.size() * sizeof(uint32_t);
+  append_inst(code, v_mov_b32(13, 6));
+  append_inst(code, s_endpgm());
+  const auto report = analyze_gfx12_with_vgpr_allocation(
+      code, EF_AMDGPU_MACH_AMDGCN_GFX1250, ROCJITSU_CODE_ARCH_CDNA5, true, 128);
+  ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+  EXPECT_FALSE(std::ranges::any_of(report.diagnostics, [&](const auto &d) {
+    return d.counter == WaitCounterKind::VaVdst && d.producer_section_offset == producer &&
+           d.section_offset == consumer && d.reg.index == 6;
+  })) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1250IssuedTransCoversThePreviousTransEvenWithRawOrWar) {
+  for (const auto [next_dst, next_src] : {
+           std::pair{7u, 4u}, // Independent.
+           std::pair{7u, 6u}, // RAW from the prior TRANS output.
+           std::pair{3u, 4u}, // WAR on the prior TRANS source.
+       }) {
+    SCOPED_TRACE(testing::Message() << next_dst << '/' << next_src);
+    std::vector<uint32_t> code;
+    append_inst(code, s_setreg_imm32_b32(hwreg(26, 0, 2), 2));
+    const auto producer = code.size() * sizeof(uint32_t);
+    append_inst(code, v_exp_f32(6, 3));
+    const auto gap = code.size() * sizeof(uint32_t);
+    append_inst(code, v_exp_f32(next_dst, next_src));
+    const auto consumer = code.size() * sizeof(uint32_t);
+    append_inst(code, v_mov_b32(13, 6));
+    append_inst(code, s_endpgm());
+    const auto report = analyze_gfx12_with_vgpr_allocation(
+        code, EF_AMDGPU_MACH_AMDGCN_GFX1250, ROCJITSU_CODE_ARCH_CDNA5, true, 128);
+    ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+    EXPECT_FALSE(std::ranges::any_of(report.diagnostics, [&](const auto &d) {
+      return d.counter == WaitCounterKind::VaVdst && d.producer_section_offset == producer &&
+             (d.section_offset == gap || d.section_offset == consumer);
+    })) << diagnostic_summary(report);
+  }
+}
+
+TEST(WaitcheckTest, Gfx1250TransSkippedWithEmptyExecCannotCoverAnOlderTrans) {
+  std::vector<uint32_t> code;
+  append_inst(code, s_setreg_imm32_b32(hwreg(26, 0, 2), 2));
+  const auto producer = code.size() * sizeof(uint32_t);
+  append_inst(code, v_exp_f32(6, 3));
+  append_inst(code, s_mov_b32(126, 128)); // EXEC=0 skips this VALU.
+  append_inst(code, v_exp_f32(7, 4));
+  append_inst(code, s_mov_b32(126, 129)); // Restore one active lane.
+  const auto consumer = code.size() * sizeof(uint32_t);
+  append_inst(code, v_mov_b32(13, 6));
+  append_inst(code, s_endpgm());
+  const auto report = analyze_gfx12_with_vgpr_allocation(
+      code, EF_AMDGPU_MACH_AMDGCN_GFX1250, ROCJITSU_CODE_ARCH_CDNA5, true, 128);
+  ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+  EXPECT_TRUE(std::ranges::any_of(report.diagnostics, [&](const auto &d) {
+    return d.counter == WaitCounterKind::VaVdst && d.producer_section_offset == producer &&
+           d.section_offset == consumer && d.reg.index == 6;
+  })) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1250TransGapAfterExecChangingCallDoesNotCredit) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA5;
+  std::vector<uint32_t> code;
+  append_inst(code, s_setreg_imm32_b32(hwreg(26, 0, 2), 2));
+  const auto producer = code.size() * sizeof(uint32_t);
+  append_inst(code, v_exp_f32(6, 3));
+  const size_t call_word = code.size();
+  code.push_back(0);
+  append_inst(code, v_mov_b32(12, 11)); // Helper makes this masked off.
+  append_inst(code, s_mov_b32(126, 129));
+  const auto consumer = code.size() * sizeof(uint32_t);
+  append_inst(code, v_mov_b32(13, 6));
+  append_inst(code, s_endpgm());
+  const size_t helper_word = code.size();
+  append_inst(code, s_mov_b32(126, 128));
+  code.push_back(build_s_setpc_b64(30, arch).value());
+  code[call_word] = build_s_call_b64(30, helper_word - call_word - 1, arch).value();
+  const auto report = analyze_gfx12_with_vgpr_allocation(
+      code, EF_AMDGPU_MACH_AMDGCN_GFX1250, arch, true, 128);
+  ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+  EXPECT_TRUE(std::ranges::any_of(report.diagnostics, [&](const auto &d) {
+    return d.counter == WaitCounterKind::VaVdst && d.producer_section_offset == producer &&
+           d.section_offset == consumer && d.reg.index == 6;
+  })) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1250F64TransKeepsOrdinaryValuInterlockAndVaLifetime) {
+  for (const bool dependent_gap : {false, true}) {
+    std::vector<uint32_t> code;
+    append_inst(code, s_setreg_imm32_b32(hwreg(26, 0, 2), 2));
+    const auto producer = code.size() * sizeof(uint32_t);
+    append_inst(code, v_sqrt_f64(6, 8));
+    const auto gap = code.size() * sizeof(uint32_t);
+    append_inst(code, v_mov_b32(12, dependent_gap ? 6 : 11));
+    const auto consumer = code.size() * sizeof(uint32_t);
+    append_inst(code, global_load_b32(6, 20));
+    append_inst(code, s_endpgm());
+    const auto report = analyze_gfx12_with_vgpr_allocation(
+        code, EF_AMDGPU_MACH_AMDGCN_GFX1250, ROCJITSU_CODE_ARCH_CDNA5, true, 128);
+    ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+    const auto missing_at = [&](uint64_t pc) {
+      return std::ranges::any_of(report.diagnostics, [&](const auto &d) {
+        return d.counter == WaitCounterKind::VaVdst && d.producer_section_offset == producer &&
+               d.section_offset == pc && d.reg.index == 6;
+      });
+    };
+    EXPECT_FALSE(missing_at(gap)) << diagnostic_summary(report);
+    EXPECT_TRUE(missing_at(consumer)) << diagnostic_summary(report);
+  }
 }
 
 TEST(WaitcheckTest, OptionalExpertDelayDoesNotMakeVaWaitExcessive) {

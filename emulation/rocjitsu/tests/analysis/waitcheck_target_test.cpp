@@ -61,6 +61,23 @@ TEST(WaitcheckTarget, ExpertWideComparisonsUseTheDoublePrecisionPipe) {
     }
 }
 
+TEST(WaitcheckTarget, Cdna5ExpertVaTracksF64TranscendentalsAsTrans) {
+  // The expert VA hardware event classification includes f64 forms even
+  // though S_DELAY_ALU classifies their delay as ordinary VALU.
+  for (const auto [word, expected] : {
+           std::pair{0x7e10690au, WaitEventKind::ValuTrans}, // v_sqrt_f64 v[8:9], v[10:11]
+           std::pair{0x7e105f0au, WaitEventKind::ValuTrans}, // v_rcp_f64 v[8:9], v[10:11]
+           std::pair{0x7e10670au, WaitEventKind::ValuTrans}, // v_sqrt_f32 v8, v10
+           std::pair{0x7e104b0au, WaitEventKind::ValuTrans}, // v_exp_f32 v8, v10
+       }) {
+    const std::array words{word};
+    auto inst = decode(words, ROCJITSU_CODE_ARCH_CDNA5);
+    ASSERT_NE(inst, nullptr);
+    EXPECT_TRUE(inst->is_transcendental());
+    EXPECT_EQ(Target::expert_valu_kind(*inst, ROCJITSU_CODE_ARCH_CDNA5), expected);
+  }
+}
+
 TEST(WaitcheckTarget, Rdna1VmemReadsAreProtectedFromScalarWritesInOrdinaryMode) {
   const std::array<uint32_t, 2> load{0xdc308000, 0x02180000}; // global_load_dword v2, v0, s[24:25]
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
