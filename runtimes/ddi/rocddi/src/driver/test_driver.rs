@@ -165,6 +165,7 @@ impl ConfigurableDriver for TestDriver {
 
 /// Test driver instance with common routing and a numeric-only GPU queue.
 pub(crate) struct TestDriver {
+    pub(super) admission: crate::session::SessionAdmission,
     instance: super::DriverInstanceId,
     id: [u8; 16],
     kind: EndpointKind,
@@ -339,10 +340,14 @@ impl CachedInfo for TestAllocation {
 impl TestDriver {
     #[allow(
         clippy::large_types_passed_by_value,
-        reason = "test driver takes ownership of its endpoint snapshot"
+        clippy::expect_used,
+        reason = "test driver owns its snapshot and requires a process witness"
     )]
     pub(crate) fn new(id: [u8; 16], kind: EndpointKind, lifetime: DriverContextLifetime) -> Self {
         Self {
+            admission: crate::session::SessionAdmission::new(
+                crate::os::ProcessIdentity::capture().expect("test process identity"),
+            ),
             instance: super::new_driver_instance(),
             id,
             kind,
@@ -510,6 +515,10 @@ impl AddressSpaceInfo for TestDevice {
 
 impl Driver for TestDriver {
     type DeviceState = TestDevice;
+
+    fn admission(&self) -> &crate::session::SessionAdmission {
+        &self.admission
+    }
 
     fn driver_instance(&self) -> super::DriverInstanceId {
         self.instance

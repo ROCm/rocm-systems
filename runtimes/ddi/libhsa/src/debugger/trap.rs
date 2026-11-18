@@ -49,13 +49,16 @@ pub(crate) struct TrapRestore {
 }
 
 impl TrapRestore {
-    /// Resolves the saved trap in the exact GPU VM whose binding will be restored.
-    pub(crate) fn address(&self, device: &Device) -> Result<u64, Status> {
+    /// Restores the retained normal trap after sampling has stopped.
+    #[allow(unsafe_code)]
+    pub(crate) fn restore(&self, device: &Device) -> Result<(), Status> {
         #[cfg(target_os = "linux")]
-        return self
-            .trap
-            .address(&device.gpu().map_err(map_error)?)
-            .map_err(map_error);
+        {
+            // SAFETY: HSA serializes its normal/sampling binding changes. The
+            // token retains normal code; sampling retains its displaced code
+            // and TMA through checked destruction and deferred asset release.
+            unsafe { self.trap.restore(&device.gpu().map_err(map_error)?) }.map_err(map_error)
+        }
         #[cfg(not(target_os = "linux"))]
         {
             let _ = device;
