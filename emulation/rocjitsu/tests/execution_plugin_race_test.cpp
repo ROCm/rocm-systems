@@ -2844,6 +2844,31 @@ TEST_F(LdsBarrierCellRaceTest, FlatLoadOfTheCellAcquires) {
   EXPECT_FALSE(ds_read(1, kTile));
 }
 
+// A race report describes a barrier arrive as an arrival, not as a plain
+// transfer: a plain store over a cell another wave arrived at conflicts with
+// the arrive's read of the cell.
+TEST_F(LdsBarrierCellRaceTest, ReportDescribesTheConflictingArrive) {
+  uint32_t cell = kCell;
+  for (const Source source : {Source::DsAtomic, Source::AsyncDsAtomic}) {
+    SCOPED_TRACE(source == Source::DsAtomic ? "rtn" : "async");
+    waves[0]->pc = 0x3000 + cell;
+    const uint64_t arrive_pc = waves[0]->pc + 16;
+    EXPECT_FALSE(arrive(0, source, cell));
+    const size_t previous = sink->str().size();
+    EXPECT_TRUE(ds_write(1, cell));
+    const std::string report = sink->str().substr(previous);
+    EXPECT_EQ(occurrences(report, "write-after-read (WAR)"), 1) << report;
+    EXPECT_EQ(occurrences(
+                  report,
+                  std::format(
+                      "  Conflict: arrival at an LDS barrier cell{} at PC 0x{:x}, wave 0.\n",
+                      source == Source::DsAtomic ? " returning the cell to VGPRs" : "", arrive_pc)),
+              1)
+        << report;
+    cell += 16;
+  }
+}
+
 // With EXEC zero no lane arrives, so the simulator reports no arrival (see
 // LdsBarrierArriveTest.ExecZeroArriveReportsNothing) and nothing is released:
 // the instruction is issued here without one.
