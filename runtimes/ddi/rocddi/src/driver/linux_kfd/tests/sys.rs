@@ -28,12 +28,12 @@ fn debugger_registration_is_stable_until_confirmed_runtime_disable() {
             .push((args.mode_mask, args.r_debug));
         Ok(())
     }));
-    let first = Some(RuntimeDebuggerRegistration {
+    let first = Some(DebuggerRegistration {
         address: 0x1000,
         setup_ttmp: true,
         mode: DebuggerRegistrationMode::Require,
     });
-    let second = Some(RuntimeDebuggerRegistration {
+    let second = Some(DebuggerRegistration {
         address: 0x2000,
         setup_ttmp: false,
         mode: DebuggerRegistrationMode::Require,
@@ -72,7 +72,7 @@ fn advisory_debugger_registration_preserves_an_active_unregistered_context() {
         panic!("advisory request changed an active native context")
     }));
     kfd.mark_runtime_enabled_for_test();
-    let request = RuntimeDebuggerRegistration {
+    let request = DebuggerRegistration {
         address: 0x1000,
         setup_ttmp: true,
         mode: DebuggerRegistrationMode::Prefer,
@@ -88,7 +88,7 @@ fn advisory_debugger_registration_preserves_an_active_unregistered_context() {
         assert_eq!(
             kfd.configure_debugger_locked(
                 &mut runtime,
-                Some(RuntimeDebuggerRegistration {
+                Some(DebuggerRegistration {
                     mode: DebuggerRegistrationMode::Require,
                     ..request
                 })
@@ -124,7 +124,7 @@ fn debugger_registration_survives_uncertain_enable_and_disable() {
             _ => panic!("unexpected lifecycle replay"),
         }
     }));
-    let registration = Some(RuntimeDebuggerRegistration {
+    let registration = Some(DebuggerRegistration {
         address: 0x1000,
         setup_ttmp: true,
         mode: DebuggerRegistrationMode::Require,

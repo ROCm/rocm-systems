@@ -10,7 +10,7 @@
 //! Device, memory, and queue owners live in their respective modules.
 
 use crate::device::{Device, DeviceResources};
-use crate::driver::{self, DriverInstance};
+use crate::driver::{self, ConfigurableDriver, DriverConfiguration, DriverInstance};
 use crate::memory::Allocation;
 use crate::memory::storage::Shared;
 use crate::memory::storage::TryPush;
@@ -38,25 +38,6 @@ pub enum DriverContextLifetime {
     /// within the session's lifetime. A driver must reject an operation before
     /// acquisition when it cannot satisfy this bound.
     Session,
-}
-
-/// Native recoverable-page-fault mode requested before GPU activation.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum XnackModeRequest {
-    /// Activation must confirm this mode or report a native configuration error.
-    Require(bool),
-    /// Attempt this mode; a confirmed existing mode is an acceptable fallback.
-    /// A failed live-mode query still prevents activation.
-    Prefer(bool),
-}
-
-/// Whether activation requires ownership of the native debugger rendezvous.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DebuggerRegistrationMode {
-    /// Reject an active context registered to another adapter.
-    Require,
-    /// Preserve an active context and report unavailable debugger ownership.
-    Prefer,
 }
 
 /// Caller-owned scope for discovery, activation, and driver shutdown.
@@ -245,6 +226,56 @@ impl Session {
         Ok(&self.registry.drivers)
     }
 
+    /// Replaces one installed driver's complete pending configuration.
+    ///
+    /// The configuration type selects its backend. This records options without
+    /// opening native resources; activation applies the requested settings.
+    /// Configure before sharing the session or activating that driver. The
+    /// backend defines its options and how the complete replacement affects
+    /// pending requests.
+    ///
+    /// # Errors
+    /// Reports `Busy` while the session or selected driver is shared, or when
+    /// the driver has begun activation. Reports `Unsupported` when no matching
+    /// driver is installed, `InvalidArgument` for multiple matches, and errors
+    /// for an inherited/closing session or invalid backend configuration.
+    /// Failure leaves the previous configuration unchanged.
+    pub fn configure<C: DriverConfiguration>(&mut self, configuration: C) -> Result<(), Error> {
+        configuration.apply(self)
+    }
+
+    /// Selects and exclusively borrows a driver for typed configuration.
+    /// All configuration routes must enter here before accessing driver state.
+    /// The selector must only project a matching driver, preserving registry
+    /// entries, driver identities, and context lifetimes.
+    pub(crate) fn configure_driver<D: ConfigurableDriver>(
+        &mut self,
+        configuration: D::Configuration,
+        select: fn(&mut DriverInstance) -> Option<&mut Shared<D>>,
+    ) -> Result<(), Error> {
+        self.ensure_open()?;
+        let registry = Shared::get_mut(&mut self.registry).ok_or(Error::Operation {
+            kind: ErrorKind::Busy,
+            detail: "native configuration requires an unshared session",
+        })?;
+        let mut matching = registry.drivers.iter_mut().filter_map(select);
+        let driver = matching.next().ok_or(Error::Operation {
+            kind: ErrorKind::Unsupported,
+            detail: "this session has no matching configuration provider",
+        })?;
+        if matching.next().is_some() {
+            return Err(Error::Operation {
+                kind: ErrorKind::InvalidArgument,
+                detail: "configuration matches multiple installed drivers",
+            });
+        }
+        let driver = Shared::get_mut(driver).ok_or(Error::Operation {
+            kind: ErrorKind::Busy,
+            detail: "native configuration requires an unshared driver",
+        })?;
+        driver.configure(configuration)
+    }
+
     /// Creates one instance of every compiled driver backend without opening,
     /// enumerating, or activating an endpoint.
     ///
@@ -265,78 +296,6 @@ impl Session {
             drivers.push(construct(lifetime, process.clone())?);
         }
         Self::from_drivers_with_process(drivers, lifetime, process)
-    }
-
-    /// Requests the Linux KFD recoverable-page-fault mode for GPU activation.
-    ///
-    /// This records native configuration without opening KFD. Activation applies
-    /// and verifies the mode before acquiring or enabling a VM. A required mode
-    /// must match an already enabled shared context; a preferred mode can fall
-    /// back to its confirmed current mode. Call before the first GPU
-    /// activation and before sharing this session.
-    ///
-    /// # Errors
-    /// Reports `Busy` after sharing or activation, `Unsupported` without a KFD
-    /// provider, or an inherited/closed session error. Native configuration
-    /// errors are reported by the later activation call.
-    #[cfg(target_os = "linux")]
-    pub fn request_xnack_mode(&mut self, request: XnackModeRequest) -> Result<(), Error> {
-        self.unshared_kfd_driver()?.request_xnack_mode(request)
-    }
-
-    /// Registers a native runtime-debugger rendezvous for the first activation.
-    /// This records the address without opening KFD or changing an active VM.
-    ///
-    /// # Safety
-    /// `r_debug` must address a correctly initialized native `r_debug` record,
-    /// with its breakpoint and every reachable link-map record kept valid while
-    /// published. The record itself must remain valid for the process lifetime;
-    /// process-scoped contexts can outlive this session and share registration.
-    /// `setup_ttmp` must match the adapter's debugger/trap-handler ABI.
-    ///
-    /// # Errors
-    /// Rejects null/misaligned records, shared sessions, prior activation, or a
-    /// missing KFD provider. Activation rejects conflicting active registrations.
-    #[cfg(target_os = "linux")]
-    #[allow(unsafe_code)]
-    pub unsafe fn request_debugger_registration(
-        &mut self,
-        r_debug: usize,
-        setup_ttmp: bool,
-        mode: DebuggerRegistrationMode,
-    ) -> Result<(), Error> {
-        self.unshared_kfd_driver()?
-            .request_debugger_registration(r_debug, setup_ttmp, mode)
-    }
-
-    /// Borrows the unshared native configuration owner before activation.
-    #[cfg(target_os = "linux")]
-    #[allow(
-        clippy::unnecessary_find_map,
-        reason = "test and future native providers need not offer KFD configuration"
-    )]
-    fn unshared_kfd_driver(&mut self) -> Result<&mut crate::driver::KfdDriver, Error> {
-        self.ensure_open()?;
-        let registry = Shared::get_mut(&mut self.registry).ok_or(Error::Operation {
-            kind: ErrorKind::Busy,
-            detail: "native configuration requires an unshared session",
-        })?;
-        let driver = registry
-            .drivers
-            .iter_mut()
-            .find_map(|driver| match driver {
-                DriverInstance::LinuxKfd(driver) => Some(driver),
-                #[cfg(test)]
-                DriverInstance::Test(_) => None,
-            })
-            .ok_or(Error::Operation {
-                kind: ErrorKind::Unsupported,
-                detail: "this session has no KFD configuration provider",
-            })?;
-        Shared::get_mut(driver).ok_or(Error::Operation {
-            kind: ErrorKind::Busy,
-            detail: "native configuration must precede GPU activation",
-        })
     }
 
     /// Takes already constructed driver instances as one session registry.
@@ -677,8 +636,8 @@ impl Session {
 mod tests {
     use super::*;
     use crate::device::gpu::queue::{QueueParameters, QueuePriority, QueueRequest};
-    use crate::driver::VirtualMemoryOperations;
-    use crate::driver::test_driver::TestDriver;
+    use crate::driver::test_driver::{TestConfiguration, TestDriver};
+    use crate::driver::{Driver, VirtualMemoryOperations};
     use crate::memory::device::VirtualAddress;
     use crate::memory::host::HostAllocation;
     use crate::memory::{
@@ -712,6 +671,102 @@ mod tests {
         drop(shared);
         first.destroy().unwrap();
         second.destroy().unwrap();
+    }
+
+    #[test]
+    fn typed_configuration_selects_only_its_matching_driver() {
+        let id = [0x25; 16];
+        let kfd = Shared::new(driver::KfdDriver::new()).unwrap();
+        let test = TestDriver::new(id, EndpointKind::Npu, DriverContextLifetime::Session);
+        let mut session = Session::from_drivers(
+            vec![
+                DriverInstance::LinuxKfd(kfd.clone()),
+                DriverInstance::Test(Shared::new(test).unwrap()),
+            ],
+            DriverContextLifetime::Session,
+        )
+        .unwrap();
+        let supports_registration = |session: &Session| {
+            let test = session
+                .registry
+                .drivers
+                .iter()
+                .find_map(|driver| match driver {
+                    DriverInstance::Test(driver) => Some(driver),
+                    DriverInstance::LinuxKfd(_) => None,
+                })
+                .unwrap();
+            let endpoint = test.open_endpoint(id).unwrap();
+            session.supports_host_registration(&endpoint)
+        };
+        assert!(!supports_registration(&session));
+        // Sharing the unselected KFD driver must not block configuration.
+        session
+            .configure(TestConfiguration {
+                host_registration: true,
+            })
+            .unwrap();
+        assert!(supports_registration(&session));
+        let retained_test = session
+            .registry
+            .drivers
+            .iter()
+            .find_map(|driver| match driver {
+                DriverInstance::Test(driver) => Some(driver.clone()),
+                DriverInstance::LinuxKfd(_) => None,
+            })
+            .unwrap();
+        assert_eq!(
+            session
+                .configure(TestConfiguration {
+                    host_registration: false,
+                })
+                .unwrap_err()
+                .kind(),
+            ErrorKind::Busy
+        );
+        assert!(supports_registration(&session));
+        drop(retained_test);
+        session
+            .configure(TestConfiguration {
+                host_registration: false,
+            })
+            .unwrap();
+        assert!(!supports_registration(&session));
+        drop(kfd);
+        session.destroy().unwrap();
+
+        let mut session = Session::new(DriverContextLifetime::Session).unwrap();
+        assert_eq!(
+            session
+                .configure(TestConfiguration {
+                    host_registration: true,
+                })
+                .unwrap_err()
+                .kind(),
+            ErrorKind::Unsupported
+        );
+        session.destroy().unwrap();
+    }
+
+    #[test]
+    fn ambiguous_configuration_leaves_all_drivers_unchanged() {
+        let ids = [[0x26; 16], [0x27; 16]];
+        let (mut session, _) = test_session(&ids);
+        assert_eq!(
+            session
+                .configure(TestConfiguration {
+                    host_registration: true,
+                })
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidArgument
+        );
+        for id in ids {
+            let endpoint = session.open_endpoint(id).unwrap();
+            assert!(!session.supports_host_registration(&endpoint));
+        }
+        session.destroy().unwrap();
     }
 
     #[test]
@@ -1076,6 +1131,15 @@ mod tests {
         assert!(session.can_access_local_memory(&endpoint, &endpoint));
         session.process = ProcessIdentity::with_pid_for_test(std::process::id().wrapping_add(1));
         assert!(!session.can_access_local_memory(&endpoint, &endpoint));
+        assert_eq!(
+            session
+                .configure(TestConfiguration {
+                    host_registration: true,
+                })
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidArgument
+        );
         session.process = ProcessIdentity::capture().unwrap();
         session.destroy().unwrap();
     }

@@ -29,6 +29,8 @@ use rocddi::device::event::{
     GpuMemoryFaultCause, GpuResetCause, subscribe,
 };
 use rocddi::device::gpu::profiling::{PcSamplingConfiguration, PcSamplingConfigurationSet};
+#[cfg(target_os = "linux")]
+use rocddi::driver::linux_kfd::{KfdConfiguration, XnackModeRequest};
 use rocddi::memory::device::Allocation;
 use rocddi::session::{DriverContextLifetime, Session, SessionRetirement};
 use rocddi::topology::host::{CpuCacheKind, CpuInfo};
@@ -438,20 +440,7 @@ impl HsaState {
         // Clean HSA generations rejoin the exact retained native process VM.
         // Native process ownership validates identity, loss and prior disable;
         // the HSA lifecycle gate prevents rejoining an uncertain generation.
-        let mut session = Session::new(DriverContextLifetime::Process).map_err(map_error)?;
-        #[cfg(target_os = "linux")]
-        if let Ok(value) = std::env::var("HSA_XNACK") {
-            let requested = match value.as_str() {
-                "0" => Some(false),
-                "1" => Some(true),
-                _ => None,
-            };
-            if let Some(enabled) = requested {
-                session
-                    .request_xnack_mode(rocddi::session::XnackModeRequest::Prefer(enabled))
-                    .map_err(map_error)?;
-            }
-        }
+        let session = Session::new(DriverContextLifetime::Process).map_err(map_error)?;
         let mut pending = PendingInit {
             debugger: None,
             session: Some(session),
@@ -513,9 +502,27 @@ impl HsaState {
         host: &CpuInfo,
         topology: TopologyGraphSnapshot,
     ) -> Result<Self, Status> {
-        pending.debugger = Some(PendingDebugger::new(
-            pending.session.as_mut().ok_or(ERROR)?,
-        )?);
+        #[cfg(target_os = "linux")]
+        {
+            let xnack = std::env::var("HSA_XNACK")
+                .ok()
+                .and_then(|value| match value.as_str() {
+                    "0" => Some(XnackModeRequest::Prefer(false)),
+                    "1" => Some(XnackModeRequest::Prefer(true)),
+                    _ => None,
+                });
+            let configuration = KfdConfiguration {
+                xnack,
+                debugger: Some(PendingDebugger::registration()?),
+            };
+            pending
+                .session
+                .as_mut()
+                .ok_or(ERROR)?
+                .configure(configuration)
+                .map_err(map_error)?;
+        }
+        pending.debugger = Some(PendingDebugger::default());
         let session = pending.session.as_ref().ok_or(ERROR)?;
         let discovered = topology
             .endpoints

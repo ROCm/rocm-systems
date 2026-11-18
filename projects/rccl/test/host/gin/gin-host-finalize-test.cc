@@ -1,0 +1,517 @@
+/*************************************************************************
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
+
+// Host-only microtests for src/gin/gin_host.cc's ncclGinHostFinalize, the
+// register / deregister / DevCommSetup walks that must not call through NULLed
+// ginComms[] after host finalize, and ncclGinConnectOnce's failure and
+// finalized paths (AICOMRCCL-2739).
+//
+// fakes/dev_runtime_micro_fakes.cc fakes the GIN host entry points for
+// dev-runtime-test.cc, so this binary must not link it beside the real
+// gin_host.cc. GinFinalizeTest in gin-plugin-init-test.cc covers ncclGinFinalize against a hand-built ginState;
+// this suite covers the host half that preserves those records and marks
+// backends closed.
+
+#include <gtest/gtest.h>
+
+#include <cstdarg>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <memory>
+#include <thread>
+#include <vector>
+
+#include "nccl.h"
+#include "comm.h"
+#include "nccl_gin.h"
+#include "gin/gin_host.h"
+#include "debug.h"
+
+// Lean seams for this binary only -- do not pull fakes/nccl_fakes.cc (its
+// std::function seams keep large unrelated graphs live against --gc-sections).
+uint32_t ncclDebugLevelMask = 0;
+uint64_t ncclDebugMask = 0;
+FILE* ncclDebugFile = nullptr;
+thread_local int ncclDebugNoWarn = 0;
+char ncclLastError[1024] = {};
+
+void ncclDebugLog(ncclDebugLogLevel, unsigned long, const char*, int, const char* fmt, ...) {
+  if (!fmt) return;
+  std::va_list ap;
+  va_start(ap, fmt);
+  std::vfprintf(stderr, fmt, ap);
+  va_end(ap);
+  std::fputc('\n', stderr);
+}
+
+static int64_t g_loadParam(const char*, int64_t deftVal) { return deftVal; }
+
+#include "fakes/param_redirect.h"
+
+#include GIN_HOST_CC_PATH
+
+// Link seams for ncclGinConnectOnce / ncclGinDevCommSetup. A single-rank comm
+// makes every AllGather a no-op.
+static int g_localGinDevCount = 2;
+
+int64_t ncclParamGinType() { return NCCL_GIN_TYPE_NONE; }
+
+ncclResult_t ncclTopoGetLocalGinDevs(struct ncclComm*, int* localGinDevs, int* localGinCount) {
+  for (int i = 0; i < g_localGinDevCount; i++) localGinDevs[i] = i;
+  *localGinCount = g_localGinDevCount;
+  return ncclSuccess;
+}
+
+// Slots for the next int allgather only; any other allgather leaves the buffer
+// as the caller filled it.
+static std::vector<int> g_nextIntAllGather;
+ncclResult_t bootstrapAllGather(void*, void* data, int size) {
+  if (size == static_cast<int>(sizeof(int)) && !g_nextIntAllGather.empty()) {
+    std::memcpy(data, g_nextIntAllGather.data(), g_nextIntAllGather.size() * sizeof(int));
+    g_nextIntAllGather.clear();
+  }
+  return ncclSuccess;
+}
+
+ncclTeam_t ncclTeamWorld(ncclComm_t comm) { return {comm->nRanks, comm->rank, 1}; }
+ncclTeam_t ncclTeamRail(ncclComm_t comm) { return {comm->nRanks, comm->rank, 1}; }
+int ncclTeamRankToWorld(ncclComm_t, ncclTeam_t team, int rank) { return rank * team.stride; }
+
+void ncclSetThreadName(std::thread&, const char*, ...) {}
+
+// ncclGinDevCommSetup sizes NCCL's barrier requirements through src/dev_runtime.cc. These tests pass no
+// barrier requirements (nBarrierReqs == 0), so reaching this seam is a bug.
+ncclResult_t ncclGinBarrierSizeRequirement(struct ncclComm*, struct ncclGinBackendState const*,
+                                           struct ncclDevCommCompat const*, struct ncclGinBarrierReq const*) {
+  ADD_FAILURE() << "ncclGinBarrierSizeRequirement reached with no barrier requirements";
+  return ncclInternalError;
+}
+
+static bool g_anvilFabricMemCapable = false;
+static bool g_anvilFabricMemOptIn = false;
+bool ginAnvilFabricMemCapable(struct ncclComm*) { return g_anvilFabricMemCapable; }
+bool ginAnvilUseFabricMem(struct ncclComm*) { return g_anvilFabricMemCapable && g_anvilFabricMemOptIn; }
+
+#include "fakes/gin_vtable_fake.h"
+
+namespace {
+
+class GinHostFinalizeTest : public ::testing::Test {
+ protected:
+  FakeGinVtable fake_;
+  ncclGin_t gin_{};
+  std::unique_ptr<ncclSharedResources> sharedRes_ = std::make_unique<ncclSharedResources>();
+  ncclComm comm_{};
+  void* ginInstance_ = reinterpret_cast<void*>(0x1111);
+  void* ginComm0_ = reinterpret_cast<void*>(0x2222);
+  void* ginComm1_ = reinterpret_cast<void*>(0x2223);
+  void* hostWins_[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS] = {};
+  ncclGinWindow_t devWins_[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS] = {};
+  uint32_t winGens_[NCCL_GIN_MAX_ACTIVE_BACKENDS] = {};
+
+  void SetUp() override {
+    FakeGinVtable::setCurrent(&fake_);
+    gin_ = fake_.vtable();
+    g_localGinDevCount = 2;
+    g_anvilFabricMemCapable = false;
+    g_anvilFabricMemOptIn = false;
+    g_nextIntAllGather.clear();
+    // Both are already value-initialized (make_unique, and `ncclComm comm_{}`);
+    // do not memset either. ginState embeds std::thread / mutex / atomic, and
+    // ncclComm embeds ncclRmaState, which holds a thread, mutex and condvar.
+    sharedRes_->owner = &comm_;
+    sharedRes_->tpNRanks = 1;
+    comm_.sharedRes = sharedRes_.get();
+    comm_.rank = 0;
+    comm_.nRanks = 1;
+    comm_.contiguousRanksPerHost = 1;
+    comm_.symmetricSupport = true;
+    comm_.globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+
+    struct ncclGinState* ginState = &comm_.ginState;
+    ginState->connected = true;
+    ginState->supported = true;
+    ginState->numActiveBackends = 1;
+    struct ncclGinBackendState* backend = &ginState->backends[0];
+    backend->ncclGin = &gin_;
+    backend->ginInstance = ginInstance_;
+    backend->ginType = NCCL_GIN_TYPE_PROXY;
+    backend->pluginIndex = 0;
+    backend->ginCommCount = 2;
+    backend->ginComms[0] = ginComm0_;
+    backend->ginComms[1] = ginComm1_;
+    backend->closed = false;
+    backend->connectGeneration = 1;
+    // ConnectOnce calls devices() and rejects ndev <= 0. The plugin-init
+    // cases leave ndev at 0, so this fixture sets it.
+    fake_.ndev = 1;
+    fake_.closedFlag = &backend->closed;
+  }
+
+  void TearDown() override { FakeGinVtable::setCurrent(nullptr); }
+
+  struct ncclGinState* ginState() { return &comm_.ginState; }
+  struct ncclGinBackendState* backend() { return &ginState()->backends[0]; }
+
+  ncclResult_t registerWindow() {
+    std::memset(hostWins_, 0, sizeof(hostWins_));
+    return ncclGinRegister(&comm_, reinterpret_cast<void*>(0x1), 8, hostWins_, devWins_, winGens_, 0);
+  }
+};
+
+TEST_F(GinHostFinalizeTest, PreservesBackendRecordsAndMarksClosed) {
+  EXPECT_EQ(ncclGinHostFinalize(&comm_), ncclSuccess);
+
+  EXPECT_EQ(fake_.closedColls, (std::vector<void*>{ginComm0_, ginComm1_}));
+  EXPECT_EQ(backend()->ginComms[0], nullptr);
+  EXPECT_EQ(backend()->ginComms[1], nullptr);
+  EXPECT_TRUE(backend()->closed);
+  EXPECT_TRUE(ginState()->finalized);
+
+  // ncclGinFinalize reads these; clearing them here was the leak.
+  EXPECT_EQ(ginState()->numActiveBackends, 1);
+  EXPECT_EQ(backend()->ginInstance, ginInstance_);
+  EXPECT_EQ(backend()->ginCommCount, 2);
+  EXPECT_FALSE(ginState()->connected);
+  EXPECT_FALSE(ginState()->supported);
+}
+
+// A failure part-way must never leave NULL ginComms[] with closed still false,
+// or register / deregister would call through them.
+TEST_F(GinHostFinalizeTest, MarksClosedBeforeClosingAnyHandle) {
+  EXPECT_EQ(ncclGinHostFinalize(&comm_), ncclSuccess);
+  EXPECT_EQ(fake_.closedFlagAtClose, (std::vector<bool>{true, true}));
+}
+
+TEST_F(GinHostFinalizeTest, ResetsHostStateButKeepsBackendRecords) {
+  struct ncclGinState* gs = ginState();
+  auto* devCommsSentinel = reinterpret_cast<struct ncclGinStateDevComm*>(0x4444);
+  gs->proxyNthreads = 3;
+  gs->proxyThreadsCreated = true;  // no joinable threads: the join loop skips them
+  gs->devComms = devCommsSentinel;
+  gs->asyncResult = ncclSystemError;
+  gs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  gs->writePending.store(true);
+
+  EXPECT_EQ(ncclGinHostFinalize(&comm_), ncclSuccess);
+
+  EXPECT_EQ(gs->proxyNthreads, 0);
+  EXPECT_FALSE(gs->proxyThreadsCreated);
+  EXPECT_FALSE(gs->proxyThreadStopSignal.load());
+  EXPECT_FALSE(gs->writePending.load());
+  EXPECT_EQ(gs->devComms, nullptr);
+  EXPECT_EQ(gs->asyncResult, ncclSuccess);
+  EXPECT_EQ(gs->ginConnectionType, NCCL_GIN_CONNECTION_NONE);
+  EXPECT_TRUE(gs->finalized);
+}
+
+// commFree records this result and returns it after ncclGinFinalize and the
+// frees, so one failing handle must not leak the others or skip the reset.
+TEST_F(GinHostFinalizeTest, CloseCollFailure_ClosesEveryHandleResetsAndReturnsError) {
+  fake_.closeCollFailOn = ginComm0_;
+  ginState()->proxyNthreads = 2;
+
+  EXPECT_EQ(ncclGinHostFinalize(&comm_), ncclSystemError);
+
+  EXPECT_EQ(fake_.closedColls, (std::vector<void*>{ginComm0_, ginComm1_}));
+  EXPECT_EQ(backend()->ginComms[0], nullptr);
+  EXPECT_EQ(backend()->ginComms[1], nullptr);
+  EXPECT_TRUE(backend()->closed);
+  EXPECT_TRUE(ginState()->finalized);
+  EXPECT_FALSE(ginState()->connected);
+  EXPECT_FALSE(ginState()->supported);
+  EXPECT_EQ(ginState()->proxyNthreads, 0);
+  EXPECT_EQ(ginState()->numActiveBackends, 1);
+  EXPECT_EQ(backend()->ginInstance, ginInstance_);
+}
+
+TEST_F(GinHostFinalizeTest, RegisterAndDeregisterSkipClosedBackend) {
+  ASSERT_EQ(ncclGinHostFinalize(&comm_), ncclSuccess);
+
+  hostWins_[0] = reinterpret_cast<void*>(0x3333);
+  EXPECT_EQ(ncclGinRegister(&comm_, reinterpret_cast<void*>(0x1), 8, hostWins_, devWins_, winGens_, 0),
+            ncclSuccess);
+  EXPECT_EQ(ncclGinDeregister(&comm_, hostWins_, winGens_), ncclSuccess);
+
+  // Register / deregister after host finalize must not call through the NULLed ginComms[].
+  EXPECT_EQ(fake_.regMrSymCalls, 0);
+  EXPECT_EQ(fake_.deregMrSymCalls, 0);
+}
+
+TEST_F(GinHostFinalizeTest, DevCommSetupSkipsClosedBackend) {
+  ASSERT_EQ(ncclGinHostFinalize(&comm_), ncclSuccess);
+
+  ncclDevCommRequirements reqs{};
+  ncclDevComm devComm{};
+  EXPECT_EQ(ncclGinDevCommSetup(&comm_, &reqs, /*resReqs=*/nullptr, /*barrierReqs=*/nullptr, 0, &devComm,
+                                NCCL_VERSION_CODE, /*devCompat=*/nullptr), ncclInternalError);
+  EXPECT_EQ(fake_.createContextCalls, 0);
+}
+
+// Even if supported were re-armed, a finalized comm must not reconnect:
+// ginInstance still points at the comm that ran ncclGinInit, which may be freed.
+TEST_F(GinHostFinalizeTest, ConnectOnceAfterFinalizeIsRejectedWithoutListening) {
+  ASSERT_EQ(ncclGinHostFinalize(&comm_), ncclSuccess);
+  ginState()->supported = true;
+
+  EXPECT_EQ(ncclGinConnectOnce(&comm_), ncclInvalidUsage);
+  EXPECT_EQ(fake_.listenCalls, 0);
+  EXPECT_FALSE(ginState()->connected);
+  EXPECT_TRUE(backend()->closed);
+}
+
+// The end-to-end shape of the original bug: a window registered before a
+// sibling's teardown is never deregistered against a handle it was not
+// registered on, and the survivor cannot reconnect underneath it.
+TEST_F(GinHostFinalizeTest, WindowFromBeforeFinalize_IsNeverDeregisteredAgainstAnotherHandle) {
+  ASSERT_EQ(registerWindow(), ncclSuccess);
+  ASSERT_EQ(fake_.regMrSymCalls, 2);
+  EXPECT_EQ(winGens_[0], 1u);
+
+  ASSERT_EQ(ncclGinHostFinalize(&comm_), ncclSuccess);
+  ginState()->supported = true;
+  EXPECT_EQ(ncclGinConnectOnce(&comm_), ncclInvalidUsage);
+
+  EXPECT_EQ(ncclGinDeregister(&comm_, hostWins_, winGens_), ncclSuccess);
+  EXPECT_EQ(fake_.deregMrSymCalls, 0);
+}
+
+// A connect failure part-way closes what was opened, marks the backend closed so
+// windows skip it, and a retry repopulates under a new generation.
+TEST_F(GinHostFinalizeTest, ConnectOnceFailureThenRetry_ReopensUnderNewGeneration) {
+  ginState()->connected = false;
+  backend()->ginComms[0] = nullptr;
+  backend()->ginComms[1] = nullptr;
+  fake_.connectFailOnCall = 2;
+
+  EXPECT_EQ(ncclGinConnectOnce(&comm_), ncclSystemError);
+  void* const firstAttemptComm = reinterpret_cast<void*>(0x5000);
+  EXPECT_EQ(fake_.closedColls, (std::vector<void*>{firstAttemptComm}));
+  EXPECT_EQ(fake_.closeListenCalls, 2);  // the successful pass, then the fail path
+  EXPECT_EQ(backend()->ginComms[0], nullptr);
+  EXPECT_EQ(backend()->ginComms[1], nullptr);
+  EXPECT_TRUE(backend()->closed);
+  EXPECT_FALSE(ginState()->connected);
+  EXPECT_FALSE(ginState()->finalized);
+  EXPECT_EQ(backend()->connectGeneration, 1u);
+
+  EXPECT_EQ(registerWindow(), ncclSuccess);
+  EXPECT_EQ(fake_.regMrSymCalls, 0);
+
+  fake_.connectFailOnCall = 0;
+  uint32_t abortFlag = 0;
+  comm_.abortFlag = &abortFlag;
+  ASSERT_EQ(ncclGinConnectOnce(&comm_), ncclSuccess);
+  // connect() gets the comm's abort flag so a blocked handshake can be interrupted.
+  EXPECT_EQ(fake_.connectAbortFlag, &abortFlag);
+  comm_.abortFlag = nullptr;
+  EXPECT_TRUE(ginState()->connected);
+  EXPECT_FALSE(backend()->closed);
+  EXPECT_EQ(backend()->connectGeneration, 2u);
+  void* const retryComm0 = backend()->ginComms[0];
+  void* const retryComm1 = backend()->ginComms[1];
+  EXPECT_NE(retryComm0, nullptr);
+  EXPECT_NE(retryComm1, nullptr);
+
+  ASSERT_EQ(registerWindow(), ncclSuccess);
+  EXPECT_EQ(winGens_[0], 2u);
+  EXPECT_EQ(ncclGinDeregister(&comm_, hostWins_, winGens_), ncclSuccess);
+  EXPECT_EQ(fake_.deregColls, (std::vector<void*>{retryComm0, retryComm1}));
+}
+
+TEST_F(GinHostFinalizeTest, DeregisterSkipsWindowStampedByAnotherGeneration) {
+  ASSERT_EQ(registerWindow(), ncclSuccess);
+  backend()->connectGeneration++;
+
+  EXPECT_EQ(ncclGinDeregister(&comm_, hostWins_, winGens_), ncclSuccess);
+  EXPECT_EQ(fake_.deregMrSymCalls, 0);
+}
+
+// A splitShare child copies the owner's GIN backends, ginInstance included, with
+// no connections (ncclGinInitFromParent), then connects its own team through the
+// owner's plugin context. Anvil SDMA fabric registration allgathers on the
+// owner's bootstrap, so there a child that does not span the owner's ranks in
+// order would wait alone. That includes a 1-rank child, which is not
+// fabric-capable itself once the owner has voted fabric memory on. Other
+// backends, and Anvil SDMA without the opt-in or that vote, keep the develop
+// behavior.
+class GinHostSplitShareTest : public GinHostFinalizeTest {
+ protected:
+  std::unique_ptr<ncclComm> child_ = std::make_unique<ncclComm>();
+  std::vector<int> childTopParentRanks_;
+
+  void useAnvilFabric() {
+    backend()->ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+    g_anvilFabricMemCapable = true;
+    g_anvilFabricMemOptIn = true;
+  }
+
+  void makeChild(int ownerNRanks, std::vector<int> topParentRanks) {
+    sharedRes_->tpNRanks = ownerNRanks;
+    childTopParentRanks_ = std::move(topParentRanks);
+    child_->sharedRes = sharedRes_.get();
+    child_->rank = 0;
+    child_->nRanks = static_cast<int>(childTopParentRanks_.size());
+    child_->topParentRanks = childTopParentRanks_.data();
+    child_->contiguousRanksPerHost = 1;
+    child_->symmetricSupport = true;
+    child_->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+
+    struct ncclGinState* gs = childGinState();
+    gs->supported = ginState()->supported;
+    gs->numActiveBackends = ginState()->numActiveBackends;
+    for (int i = 0; i < gs->numActiveBackends; i++) {
+      gs->backends[i] = ginState()->backends[i];
+      gs->backends[i].ginCommCount = 0;
+      std::memset(gs->backends[i].ginComms, 0, sizeof(gs->backends[i].ginComms));
+    }
+  }
+
+  struct ncclGinState* childGinState() { return &child_->ginState; }
+
+  void expectRejectedWithoutConnecting() {
+    EXPECT_EQ(ncclGinConnectOnce(child_.get()), ncclInvalidUsage);
+    EXPECT_EQ(fake_.listenCalls, 0);
+    EXPECT_FALSE(childGinState()->connected);
+  }
+
+  // bootstrapAllGather is a no-op here, so a multi-rank child reads 0 for its
+  // peers' ginCommCount and opens no connection. Only a 1-rank child gets far
+  // enough to listen.
+  void expectConnectsThroughOwnerContext() {
+    EXPECT_EQ(ncclGinConnectOnce(child_.get()), ncclSuccess);
+    EXPECT_TRUE(childGinState()->connected);
+    EXPECT_EQ(childGinState()->backends[0].ginInstance, ginInstance_);
+    if (child_->nRanks == 1) {
+      EXPECT_GT(fake_.listenCalls, 0);
+      EXPECT_NE(childGinState()->backends[0].ginComms[0], nullptr);
+    }
+  }
+
+  void expectOwnerConnectionsUntouched() {
+    EXPECT_TRUE(ginState()->connected);
+    EXPECT_EQ(backend()->ginComms[0], ginComm0_);
+    EXPECT_EQ(backend()->ginComms[1], ginComm1_);
+  }
+};
+
+TEST_F(GinHostSplitShareTest, AnvilFabric_SubsetChildIsRejectedWithoutConnecting) {
+  useAnvilFabric();
+  makeChild(/*ownerNRanks=*/2, {1});
+
+  expectRejectedWithoutConnecting();
+  expectOwnerConnectionsUntouched();
+}
+
+TEST_F(GinHostSplitShareTest, AnvilFabric_SubsetChildIsRejectedBeforeOwnerConnects) {
+  useAnvilFabric();
+  ginState()->connected = false;
+  backend()->ginComms[0] = nullptr;
+  backend()->ginComms[1] = nullptr;
+  makeChild(/*ownerNRanks=*/2, {0});
+
+  expectRejectedWithoutConnecting();
+  EXPECT_FALSE(ginState()->connected);
+}
+
+TEST_F(GinHostSplitShareTest, AnvilFabric_ReorderedChildIsRejected) {
+  useAnvilFabric();
+  makeChild(/*ownerNRanks=*/2, {1, 0});
+
+  expectRejectedWithoutConnecting();
+}
+
+TEST_F(GinHostSplitShareTest, AnvilFabric_FullRankSetChildConnects) {
+  useAnvilFabric();
+  makeChild(/*ownerNRanks=*/2, {0, 1});
+
+  expectConnectsThroughOwnerContext();
+  expectOwnerConnectionsUntouched();
+}
+
+// ncclSymkInitOnce reaches ncclGinConnectOnce from ncclCommSplit for a
+// multi-node child, so rejecting here would fail the split itself.
+TEST_F(GinHostSplitShareTest, OtherBackend_SubsetChildConnects) {
+  g_anvilFabricMemCapable = true;
+  g_anvilFabricMemOptIn = true;
+  makeChild(/*ownerNRanks=*/2, {1});
+
+  expectConnectsThroughOwnerContext();
+  expectOwnerConnectionsUntouched();
+}
+
+TEST_F(GinHostSplitShareTest, AnvilWithoutFabricMem_SubsetChildConnects) {
+  backend()->ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+  makeChild(/*ownerNRanks=*/2, {1, 0});
+
+  expectConnectsThroughOwnerContext();
+}
+
+// MI450 with MNNVL, one clique and cuMem is capable on default runs. Without
+// RCCL_GIN_ANVIL_FABRIC_MEM nothing registers through fabric memory, so a
+// subset child keeps the develop behavior.
+TEST_F(GinHostSplitShareTest, AnvilCapableWithoutOptIn_SubsetChildConnects) {
+  backend()->ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+  g_anvilFabricMemCapable = true;
+  makeChild(/*ownerNRanks=*/2, {1});
+
+  expectConnectsThroughOwnerContext();
+  expectOwnerConnectionsUntouched();
+}
+
+TEST_F(GinHostSplitShareTest, AnvilCapableWithoutOptIn_ReorderedChildConnects) {
+  backend()->ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+  g_anvilFabricMemCapable = true;
+  makeChild(/*ownerNRanks=*/2, {1, 0});
+
+  expectConnectsThroughOwnerContext();
+}
+
+// The opt-in is per rank. A peer that opted in would reject the child, so this
+// rank, which did not, must reject it too rather than wait for that peer.
+TEST_F(GinHostSplitShareTest, AnvilFabric_PeerOptInRejectsTheWholeChild) {
+  backend()->ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+  g_anvilFabricMemCapable = true;
+  makeChild(/*ownerNRanks=*/2, {1, 0});
+  g_nextIntAllGather = {0, 1};
+
+  expectRejectedWithoutConnecting();
+}
+
+// A 1-rank child never sets MNNVL, so ginAnvilUseFabricMem is false. After
+// the owner has voted fabric registration on, the child still registers
+// through that context and would allgather alone.
+TEST_F(GinHostSplitShareTest, AnvilFabric_OneRankChildIsRejectedAfterOwnerVote) {
+  backend()->ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+  g_anvilFabricMemCapable = false;
+  sharedRes_->ginAnvilFabricMem = true;
+  makeChild(/*ownerNRanks=*/2, {0});
+
+  expectRejectedWithoutConnecting();
+  expectOwnerConnectionsUntouched();
+}
+
+TEST_F(GinHostSplitShareTest, AnvilWithoutFabricVote_OneRankChildConnects) {
+  backend()->ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+  g_anvilFabricMemCapable = false;
+  makeChild(/*ownerNRanks=*/2, {0});
+
+  expectConnectsThroughOwnerContext();
+  expectOwnerConnectionsUntouched();
+}
+
+TEST_F(GinHostFinalizeTest, AlreadyDisconnectedIsNoOp) {
+  ginState()->connected = false;
+
+  EXPECT_EQ(ncclGinHostFinalize(&comm_), ncclSuccess);
+  EXPECT_EQ(fake_.closeCollCalls, 0);
+  EXPECT_FALSE(backend()->closed);
+  EXPECT_FALSE(ginState()->finalized);
+  EXPECT_EQ(backend()->ginComms[0], ginComm0_);
+}
+
+}  // namespace
