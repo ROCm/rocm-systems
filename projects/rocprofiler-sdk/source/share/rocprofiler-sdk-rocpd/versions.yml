@@ -44,6 +44,13 @@ rocprofiler-sdk-rocpd:
       rocpd_data_views: versions/3.0.5/data_views.sql
       rocpd_summary_views: versions/3.0.5/summary_views.sql
     - version: "3.0.6"
+      rocpd_metadata: versions/3.0.6/rocpd_metadata.sql
+      rocpd_tables: versions/3.0.6/rocpd_tables.sql
+      rocpd_views: versions/3.0.6/rocpd_views.sql
+      rocpd_indexes: versions/3.0.6/rocpd_indexes.sql
+      rocpd_data_views: versions/3.0.6/data_views.sql
+      rocpd_summary_views: versions/3.0.6/summary_views.sql
+    - version: "3.1.0"
       rocpd_metadata: rocpd_metadata.sql
       rocpd_tables: rocpd_tables.sql
       rocpd_views: rocpd_views.sql
@@ -86,3 +93,14 @@ rocprofiler-sdk-rocpd:
 # - Kernel-replay passes after the first tag their rocpd_pmc_event rows with replay_pass in extdata
 # - counters_collection averages a counter over the passes that collected it instead of summing them
 # - pmc_events reports the kernel-replay pass in a replay_pass column
+
+# Version 3.1.0
+# - Added rocpd_info_blob_schema table (self-describing binary blob layout)
+# - Added rocpd_info_blob_field table (per-field descriptor for blob schemas)
+# - Added rocpd_blob_event table (schema-tagged binary blob instances)
+# - Added rocpd_gpu_pc_sample table (GPU PC sampling data)
+# - Added rocpd_disassembly_data table (optional persisted instruction text)
+# - Added rocpd_event.parent_id for parent/child event relationships
+# - Populated rocpd_info_code_object.storage_type (column present since 3.0.1)
+# - rocpd_info_code_object.extdata records content_hash for code objects decoded
+#   during PC sampling

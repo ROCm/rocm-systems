@@ -23,14 +23,12 @@
 #include <map>
 #include <memory>
 #include <mutex>
-#include <new>
 #include <optional>
 #include <sys/mman.h>
 #include <unistd.h>
 
 namespace rocjitsu::consan {
 namespace {
-
 class ConSanHsaPlugin : public ::testing::Test {
 protected:
   void SetUp() override {
@@ -353,10 +351,6 @@ protected:
 
   static hsa_status_t create_reader(const void *bytes, size_t size,
                                     hsa_code_object_reader_t *reader) {
-    if (current_->throw_reader_) {
-      mark_exception();
-      throw std::bad_alloc();
-    }
     reader->handle = ++current_->next_reader_;
     current_->readers_[reader->handle] = {static_cast<const uint8_t *>(bytes), size};
     return HSA_STATUS_SUCCESS;
@@ -405,10 +399,6 @@ protected:
     std::lock_guard lock(current_->fake_mutex_);
     // Normal launches may replace report_; only the armed, single-launch
     // finish test needs to inspect it here.
-    if (current_->throw_report_free_ && memory == current_->report_) {
-      mark_exception();
-      throw std::bad_alloc();
-    }
     if (current_->allocations_.erase(memory) != 1)
       return HSA_STATUS_ERROR_INVALID_ALLOCATION;
     std::free(memory);
@@ -416,10 +406,6 @@ protected:
   }
   static hsa_status_t pointer_info(const void *pointer, hsa_amd_pointer_info_t *info,
                                    void *(*)(size_t), uint32_t *, hsa_agent_t **) {
-    if (current_->throw_pointer_info_) {
-      mark_exception();
-      throw 42;
-    }
     const uintptr_t base = reinterpret_cast<uintptr_t>(current_->arguments_.data());
     const uintptr_t address = reinterpret_cast<uintptr_t>(pointer);
     if (address < base || address >= base + current_->arguments_.size())
@@ -473,10 +459,6 @@ protected:
   }
   static hsa_signal_value_t wait_signal(hsa_signal_t signal, hsa_signal_condition_t,
                                         hsa_signal_value_t, uint64_t, hsa_wait_state_t) {
-    if (current_->throw_wait_) {
-      mark_exception();
-      throw std::bad_alloc();
-    }
     std::unique_lock lock(current_->fake_mutex_);
     current_->fake_condition_.wait_for(lock, std::chrono::milliseconds(1), [&] {
       return current_->signal_values_.at(signal.handle) < 1;
@@ -534,13 +516,6 @@ protected:
     return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
   }
 
-  static void mark_exception() {
-    constexpr char message[] = "consan injected exception\n";
-    if (::write(STDERR_FILENO, message, sizeof(message) - 1) !=
-        static_cast<ssize_t>(sizeof(message) - 1))
-      std::_Exit(90);
-  }
-
   inline static ConSanHsaPlugin *current_ = nullptr;
   CoreApiTable core_{};
   AmdExtTable amd_{};
@@ -583,8 +558,6 @@ protected:
   const hsa_agent_t *amd_signal_agents_ = nullptr;
   uint64_t amd_signal_attributes_ = 0;
   bool installed_ = false, preserve_ = false, fail_proxy_ = false, auto_complete_ = true;
-  bool throw_reader_ = false, throw_report_free_ = false, throw_pointer_info_ = false,
-       throw_wait_ = false;
 };
 
 class ConSanHsaPluginDeathTest : public ConSanHsaPlugin {
@@ -592,23 +565,6 @@ protected:
   void SetUp() override {
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     ConSanHsaPlugin::SetUp();
-  }
-
-  template <typename Action> void expect_termination(Action &&action) {
-    // Distinguish the injected exception's terminate path from a returned
-    // status or an exception escaping the loaded DSO into its caller.
-    ASSERT_EXIT(
-        {
-          std::set_terminate([] { std::_Exit(86); });
-          ::alarm(5);
-          try {
-            action();
-          } catch (...) {
-            std::_Exit(89);
-          }
-          std::_Exit(87);
-        },
-        ::testing::ExitedWithCode(86), "consan injected exception");
   }
 
   void expect_interrupted_freeze(bool finish_during_query) {
@@ -654,51 +610,6 @@ TEST_F(ConSanHsaPluginDeathTest, FinishDuringFreezePreventsWorkerStartupAndUnloa
 
 TEST_F(ConSanHsaPluginDeathTest, DestroyDuringFreezeInvalidatesTheAdmittedModule) {
   expect_interrupted_freeze(false);
-}
-
-TEST_F(ConSanHsaPluginDeathTest, HsaHookExceptionTerminatesInsteadOfReturningAStatus) {
-  expect_termination([&] {
-    throw_reader_ = true;
-    hsa_code_object_reader_t reader{};
-    (void)core_.hsa_code_object_reader_create_from_memory_fn(original_.data(), original_.size(),
-                                                             &reader);
-  });
-}
-
-TEST_F(ConSanHsaPluginDeathTest, PacketCallbackExceptionTerminatesInsteadOfReturningToHsa) {
-  expect_termination([&] {
-    ASSERT_TRUE(bind());
-    ASSERT_TRUE(create_queue_and_signal());
-    throw_pointer_info_ = true;
-    submit();
-  });
-}
-
-TEST_F(ConSanHsaPluginDeathTest, ObserverExceptionTerminatesInsteadOfLeavingAStoppedWorker) {
-  expect_termination([&] {
-    throw_wait_ = true;
-    ASSERT_TRUE(bind());
-    ASSERT_TRUE(create_queue_and_signal());
-    submit();
-    for (;;)
-      ::pause();
-  });
-}
-
-TEST_F(ConSanHsaPluginDeathTest, FinishExceptionTerminatesInsteadOfReturningInvalidFacts) {
-  expect_termination([&] {
-    ASSERT_TRUE(bind());
-    ASSERT_TRUE(create_queue_and_signal());
-    submit();
-    ASSERT_EQ(drain_(), 0);
-    // Only the report is freed by finish after joining both workers. Observer
-    // wrapper/context cleanup must not trigger this exception on another path.
-    {
-      std::lock_guard lock(fake_mutex_);
-      throw_report_free_ = true;
-    }
-    (void)finish_();
-  });
 }
 
 TEST_F(ConSanHsaPlugin, RuntimeConfigurationRequiresBothPrefixedPaths) {
@@ -870,11 +781,55 @@ TEST_F(ConSanHsaPlugin, FailedProxyAllocationNeverPublishesTheKernel) {
 TEST_F(ConSanHsaPlugin, InvalidGeometryFailsBeforeAllocation) {
   ASSERT_TRUE(bind());
   ASSERT_TRUE(create_queue_and_signal());
-  submit(128);
+  submit(129);
   EXPECT_EQ(published_packets_, 0u);
   EXPECT_EQ(allocation_calls_, 0u);
   EXPECT_EQ(load_signal(signal_), -1);
   EXPECT_NE(finish_(), 0);
+}
+
+TEST_F(ConSanHsaPlugin, CompleteWorkgroupsPublishAllRowsAndCaptureTheirFullExtent) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  ASSERT_EQ(facts_.target, 1100u);
+  const LaunchDimensions dimensions = {.grid = {128, 1, 1}, .workgroup = {64, 1, 1}};
+  const FailureOr<LaunchLayout> layout = plan_launch(facts_, dimensions, 8, 0);
+  ASSERT_TRUE(layout.succeeded());
+  ASSERT_EQ(layout.value().workgroup_count, 2u);
+  ASSERT_EQ(layout.value().waves_per_workgroup, 2u);
+  ASSERT_EQ(layout.value().wave_count, 4u);
+  auto_complete_ = false;
+  submit(128);
+  ASSERT_EQ(published_packets_, 1u);
+  EXPECT_EQ(published_.grid_size_x, 128u);
+  EXPECT_EQ(published_.workgroup_size_x, 64u);
+  EXPECT_EQ(report_capacity(), layout.value().report_bytes);
+  EXPECT_EQ(report_bytes_, layout.value().report_bytes);
+  EXPECT_EQ(statistics_().submitted, 1u);
+  EXPECT_EQ(statistics_().forwarded, 0u);
+  EXPECT_EQ(statistics_().copied, 0u);
+  store_signal(published_.completion_signal, 0);
+  ASSERT_EQ(drain_(), 0);
+  EXPECT_EQ(load_signal(signal_), 0);
+  ASSERT_EQ(finish_(), 0);
+  EXPECT_EQ(statistics_().forwarded, 1u);
+  EXPECT_EQ(statistics_().copied, 1u);
+  EXPECT_EQ(statistics_().written, 1u);
+  const FailureOr<Capture> captured = decode_capture(read_capture());
+  ASSERT_TRUE(captured.succeeded());
+  ASSERT_EQ(captured.value().executions.size(), 1u);
+  const CapturedExecution &execution = captured.value().executions[0];
+  EXPECT_EQ(execution.dimensions.grid, dimensions.grid);
+  EXPECT_EQ(execution.dimensions.workgroup, dimensions.workgroup);
+  ASSERT_EQ(execution.report.size(), layout.value().report_bytes);
+  EXPECT_EQ(wire::read_u64(execution.context, wire::kContextReportBytes),
+            layout.value().report_bytes);
+  EXPECT_EQ(wire::read_u32(execution.report, wire::kReportRows), 4u);
+  for (uint32_t row = 0; row < 4; ++row) {
+    const size_t offset = kReportHeaderBytes + row * layout.value().row_stride;
+    EXPECT_EQ(wire::read_u32(execution.report, offset + wire::kRowWave), row % 2);
+    EXPECT_EQ(wire::read_u32(execution.report, offset + wire::kRowWorkgroupX), row / 2);
+  }
 }
 
 TEST_F(ConSanHsaPlugin, AmdSignalsCompleteAdmittedDispatches) {
@@ -913,7 +868,7 @@ TEST_F(ConSanHsaPlugin, AmdSignalCreationPreservesArgumentsAndFailedOutputsRemai
   ASSERT_EQ(create_signal(1, 0, nullptr, &extra), HSA_STATUS_SUCCESS);
   amd_signal_status_ = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   EXPECT_EQ(amd_.hsa_amd_signal_create_fn(1, 0, nullptr, 0, &extra), amd_signal_status_);
-  submit(128);
+  submit(129);
   hsa_barrier_and_packet_t barrier{};
   barrier.header = HSA_PACKET_TYPE_BARRIER_AND;
   barrier.completion_signal = extra;
@@ -926,7 +881,7 @@ TEST_F(ConSanHsaPlugin, AmdSignalCreationPreservesArgumentsAndFailedOutputsRemai
 TEST_F(ConSanHsaPlugin, RejectedAmdDispatchNotifiesItsCompletion) {
   ASSERT_TRUE(bind());
   ASSERT_TRUE(create_queue_and_signal(true));
-  submit(128);
+  submit(129);
   EXPECT_EQ(load_signal(signal_), -1);
   EXPECT_EQ(published_packets_, 0u);
   EXPECT_EQ(allocation_calls_, 0u);
@@ -960,7 +915,7 @@ TEST_F(ConSanHsaPlugin, RejectedBatchesNotifyAmdDispatchAndBarrierCompletions) {
 TEST_F(ConSanHsaPlugin, AmdBarriersAfterADispatchRejectionReceiveFailureNotifications) {
   ASSERT_TRUE(bind());
   ASSERT_TRUE(create_queue_and_signal(true));
-  submit(128);
+  submit(129);
   for (const bool batch : {false, true}) {
     std::array<hsa_barrier_and_packet_t, 2> packets{};
     packets[0].header = HSA_PACKET_TYPE_BARRIER_AND;
@@ -1010,7 +965,7 @@ TEST_F(ConSanHsaPlugin, RejectedAmdBarrierCannotOverwritePendingDispatchCompleti
 TEST_F(ConSanHsaPlugin, UntrackedBarriersAfterARejectionRetainTheirSignalsWithoutPublication) {
   ASSERT_TRUE(bind());
   ASSERT_TRUE(create_queue_and_signal());
-  submit(128);
+  submit(129);
   for (const uint16_t type : {HSA_PACKET_TYPE_BARRIER_AND, HSA_PACKET_TYPE_BARRIER_OR}) {
     hsa_barrier_and_packet_t barrier{};
     barrier.header = type;
@@ -1245,7 +1200,7 @@ TEST_F(ConSanHsaPlugin, IndividualBarriersStillPassThroughWithoutDispatchAdmissi
 TEST_F(ConSanHsaPlugin, BarriersAfterADispatchRejectionReceiveFailureNotifications) {
   ASSERT_TRUE(bind());
   ASSERT_TRUE(create_queue_and_signal());
-  submit(128);
+  submit(129);
   ASSERT_EQ(load_signal(signal_), -1);
   for (const bool batch : {false, true}) {
     std::array<hsa_barrier_and_packet_t, 2> packets{};

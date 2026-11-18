@@ -4,8 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// HIP runtime fakes for rccl-UnitTestsMicro. The binary does not link the real
-// HIP runtime, so this file provides (1) controllable std::function seams
+// HIP runtime fakes for the rccl-UnitTestsMicro* binaries, which do not link the
+// real HIP runtime, so this file provides (1) controllable std::function seams
 // (g_hip*) the tests drive via the macro shims in p2p-test.cc, and (2) plain
 // stubs for every other HIP symbol the object code references (returning
 // hipErrorInvalidValue so unexercised paths fail loudly instead of binding the

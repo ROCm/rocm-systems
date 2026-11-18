@@ -280,7 +280,7 @@ public:
   /// signal_queue_exception(..., false). This operation is safe to serialize
   /// under a driver status-publication mutex because it cannot flush CU
   /// notifications back into the driver. With wait_for_ack=false, success
-  /// means the status and interrupt were published, not consumed by ROCr.
+  /// means the status and software event were published, not consumed by ROCr.
   bool publish_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status,
                                bool wait_for_ack = true);
 

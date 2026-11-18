@@ -299,6 +299,10 @@ class VirtualGPU : public device::VirtualDevice {
     //! The HW queue changed, so AQL slots of earlier uses no longer prove anything
     virtual void NoteQueueChange() {}
 
+    //! True if the next use should keep its barrier bit, so that its completion can retire pins
+    //! that no other proof reaches
+    virtual bool NeedsFence() const { return false; }
+
     //! The HW queue is idle and about to be released: every AQL packet on it has launched
     virtual void NoteQueueDrained() {}
 
@@ -377,10 +381,31 @@ class VirtualGPU : public device::VirtualDevice {
     virtual bool IsKnownRetired(const ProfilingSignal* signal) const { return false; }
 
     //! The operations consuming the waits of the previous WaitingSignal call have been submitted
-    virtual void NoteWaitsSubmitted() {}
+    virtual void NoteWaitsSubmitted() = 0;
 
-    //! A GPU waiter will read the busy signal
-    virtual void NoteGpuWait(ProfilingSignal* /*signal*/) {}
+    //! A GPU waiter will read the busy signal. Every operation submitted until the next
+    //! WaitingSignal call may poll it, not just the one owning the following slot, so the signal
+    //! is pinned with a reference until the tracker proves those consumers passed it. aql_waiter
+    //! means the consumers are packets on this VirtualGPU's AQL queue, which may own no use.
+    virtual void NoteGpuWait(ProfilingSignal* signal, bool aql_waiter);
+
+    //! A GPU wait captured by one WaitingSignal call. Holding a reference keeps the owner from
+    //! rearming the signal while a waiter may still read the old use.
+    struct PinnedWait {
+      ProfilingSignal* signal;
+      uint64_t close_seq = 0;         //!< Uses below this sequence consume the wait, 0 while open
+      uint64_t close_aql = 0;         //!< AQL packets below this slot consume the wait
+      uint64_t queue_gen = 0;         //!< HW queue generation of those packets
+      bool consumers_passed = false;  //!< The queue drained, so every AQL consumer launched
+      bool aql_waiter = false;        //!< The consumers are AQL packets on this queue
+    };
+
+    //! Closes the pins captured by the last WaitingSignal call at the next use sequence
+    void CloseOpenPins(uint64_t close_aql, uint64_t queue_gen);
+
+    //! Drops every pin, open, closed or awaiting a fence. The consumers must be complete or
+    //! abandoned.
+    void ReleaseAllPins();
 
     HwQueueEngine engine_ = HwQueueEngine::Unknown;  //!< Engine used in the current operations
     std::stack<ProfilingSignal*> signal_pool_irq_;   //!< The pool of free signals with interrupts
@@ -391,6 +416,19 @@ class VirtualGPU : public device::VirtualDevice {
     std::vector<ProfilingSignal*> external_signals_;  //!< External signals for a wait in this queue
     std::vector<hsa_signal_t> dynamic_queue_waits_;   //!< Extra raw signals for a wait in this queue
     std::vector<hsa_signal_t> waiting_signals_;       //!< Current waiting signals in this queue
+    uint64_t next_use_seq_ = 1;                       //!< Sequence number of the next use
+    //! Pinned GPU waits, oldest first. Closed pins precede the num_open_pins_ open ones, and
+    //! their close_seq never decreases along the deque. An open pin of AQL waiters may already
+    //! hold the close_seq of a fence use that followed it.
+    std::deque<PinnedWait> pins_;
+    size_t num_open_pins_ = 0;                        //!< Pins from the last WaitingSignal call
+    //! Closed pins of AQL waiters that no fence use followed yet, for LegacySignalTracker. The
+    //! next fence use moves them into pins_, after the closed pins and ahead of the open ones.
+    std::vector<ProfilingSignal*> unfenced_pins_;
+    //! Pins of AQL waiters that no fence use followed when the HW queue changed. Their consumers
+    //! may still be queued on the earlier queue, which a fence use on the new one doesn't order,
+    //! so they are held until the tracker is destroyed, as RetiringSignalTracker does.
+    std::vector<ProfilingSignal*> stale_pins_;
   };
 
   //! Reads and resets each signal when it is handed out
@@ -400,16 +438,52 @@ class VirtualGPU : public device::VirtualDevice {
 
     void ResetCurrentSignal() override;
 
+    //! Pins of AQL waiters wait for a fence use. The AQL barrier optimization may clear the
+    //! barrier bit of every use when other streams on the HW queue publish barrier packets after
+    //! them, which would keep the pins forever, so past kMaxUnfencedPins the next use keeps it.
+    //! Until a use with a signal follows, the stream's packets then wait for all earlier packets
+    //! on the HW queue, as they would without the optimization.
+    bool NeedsFence() const override { return unfenced_pins_.size() >= kMaxUnfencedPins; }
+
+    //! Pins awaiting a fence on the earlier HW queue are not retired by one on the new queue
+    void NoteQueueChange() override;
+
+    //! Every packet on the idle queue launched, past the waits that the pins awaiting a fence guard
+    void NoteQueueDrained() override;
+
    private:
+    static constexpr size_t kMaxUnfencedPins = 64;
+
     void AcquireSlot() override;
     void ArmForUse(ProfilingSignal* signal, hsa_signal_value_t init_val, uint64_t aql_slot,
                    bool barrier_bit, bool blocking_callback) override;
     hsa_status_t SetAsyncHandler(ProfilingSignal* signal, Timestamp* ts,
                                  hsa_signal_value_t init_value) override;
     bool IsBusy(const ProfilingSignal* signal) const override;
+    //! Closes the open pins. A pin of AQL waiters closes at the first fence use after it, since
+    //! its consumers may own no use; until then it waits in unfenced_pins_.
+    void NoteWaitsSubmitted() override;
+
+    //! A fence use, whose packet was published on the AQL queue with the barrier bit, starts at
+    //! fence_seq. Its completion proves that every earlier packet on the queue completed, so it
+    //! closes the pins of AQL waiters that no fence followed yet at fence_seq + 1.
+    void NoteFenceUse(uint64_t fence_seq);
 
     //! Wait for the next active signal
     void WaitNext();
+
+    //! Records that the use of a slot signal completed. AcquireSlot reuses the slots in use
+    //! order and waits each use before its reuse, so every earlier use completed too.
+    void NoteCompleted(const ProfilingSignal* signal);
+
+    //! Reads, without waiting, the uses following the next slot until one is busy or every
+    //! closed pin's consumers are proven complete
+    void ProbeCompleted();
+
+    //! Drops the closed pins whose consumers all completed
+    void ReleaseCompletedPins();
+
+    uint64_t completed_below_seq_ = 1;  //!< Every use below this sequence completed
   };
 
   //! Proves reuse from host memory instead of reading every signal, and rearms signals ahead of
@@ -441,17 +515,7 @@ class VirtualGPU : public device::VirtualDevice {
     bool IsBusy(const ProfilingSignal* signal) const override;
     bool IsKnownRetired(const ProfilingSignal* signal) const override;
     void NoteWaitsSubmitted() override;
-    void NoteGpuWait(ProfilingSignal* signal) override;
-
-    //! Signals a set of GPU waits captured in one WaitingSignal call. Holding a reference keeps
-    //! the owner from rearming them while a waiter may still read the old use.
-    struct PinnedWaits {
-      std::vector<ProfilingSignal*> signals;
-      uint64_t close_seq = 0;   //!< Uses below this sequence consume the waits
-      uint64_t close_aql = 0;   //!< AQL packets below this slot consume the waits
-      uint64_t queue_gen = 0;   //!< HW queue generation of those packets
-      bool consumers_passed = false;  //!< The queue drained, so every AQL consumer launched
-    };
+    void NoteGpuWait(ProfilingSignal* signal, bool aql_waiter) override;
 
     //! True if the last use of the signal is known to be complete without reading its value
     bool IsRetired(const ProfilingSignal* signal) const;
@@ -524,7 +588,6 @@ class VirtualGPU : public device::VirtualDevice {
     static constexpr uint32_t kSpareBatch = 64;   //!< Signals per spare pool allocation
     static constexpr size_t kMaxFences = 256;     //!< Fence uses tracked per queue
 
-    uint64_t next_use_seq_ = 1;       //!< Sequence number of the next use
     uint64_t oldest_unretired_seq_ = 1;  //!< Every use below this sequence completed
     uint64_t queue_gen_ = 1;          //!< Generation of the current HW queue
     uint64_t retired_below_ = 0;      //!< Every packet below this slot on queue_gen_ completed
@@ -537,8 +600,6 @@ class VirtualGPU : public device::VirtualDevice {
     //! Retired signals swapped out while shared, oldest first. Reusing them avoids destroying and
     //! recreating device-memory signals.
     std::deque<ProfilingSignal*> parked_signals_;
-    PinnedWaits open_pins_;                        //!< Pins from the last WaitingSignal call
-    std::deque<PinnedWaits> closed_pins_;          //!< Pins waiting for their consumers
     ProfilingSignal* unflushed_store_ = nullptr;  //!< Last direct store not yet flushed
     hsa_signal_value_t unflushed_value_ = 0;      //!< Value of unflushed_store_
   };
@@ -554,31 +615,43 @@ class VirtualGPU : public device::VirtualDevice {
         pending_descriptor_ = nullptr;
         pending_preload_length_ = 0;
         pending_preload_offset_ = 0;
+        pending_kernargs_ = nullptr;
+        pending_kernarg_bytes_ = 0;
       }
 
-      //! Stage the kernel descriptor and preload info for the next dispatch.
-      //! Call before dispatchAqlPacket.
+      //! Stage the kernel descriptor, preload info and host copy of the kernel arguments for
+      //! the next dispatch. Call before dispatchAqlPacket.
       void PrepareDispatch(const hsa_amd_metadata_kernel_descriptor_t* descriptor,
-                           uint16_t preload_length, uint16_t preload_offset) {
+                           uint16_t preload_length, uint16_t preload_offset,
+                           const uint8_t* kernargs, size_t kernarg_bytes) {
         pending_descriptor_ = descriptor;
         pending_preload_length_ = preload_length;
         pending_preload_offset_ = preload_offset;
+        pending_kernargs_ = kernargs;
+        pending_kernarg_bytes_ = kernarg_bytes;
       }
+
+      //! The next packet's completion signal has this event_id, so the metadata needn't read it
+      //! from the signal and bring a device-memory signal's line into the CPU cache
+      void SetCompletionEventId(uint32_t event_id) { completion_event_id_ = event_id; }
 
       //! Write the metadata prefetch packet for the AQL slot at |index|.
       //! |use_movdir64b|: use atomic 64B writes (no sfence between body/header).
-      //! |device_mem_ring_buf|: ring buffer is WC over PCIe — when MOVDIR64B is
-      //!   unavailable, stages locally then NT-copies to avoid scattered WC stores.
+      //! |device_mem_ring_buf|: ring buffer is in device memory (WC on a PCIe host, WB on
+      //!   A+A) — stages locally then copies with MOVDIR64B or NT stores, so no scattered
+      //!   stores cross the bus or stay in the CPU cache.
       template <class AqlPacket>
       inline void SetMetadata(AqlPacket* packet, uint16_t header,
                               uint64_t index, bool use_movdir64b,
                               bool device_mem_ring_buf, uint32_t rest = 0,
                               AqlPacket* aql_loc = nullptr) {
         if (!HasMetadataQueue()) {
+          completion_event_id_ = -1;
           return;
         }
         auto* dst = static_cast<uint8_t*>(queue_base_) + index * kMetadataPacketSize;
         FillMetadata(packet, header, dst, use_movdir64b, device_mem_ring_buf);
+        completion_event_id_ = -1;
 
         // For Format 4 (DISPATCH_LD), set the launch_descriptor pointer in the AQL packet
         // to point to the launch_descriptor structure in the metadata packet
@@ -604,9 +677,11 @@ class VirtualGPU : public device::VirtualDevice {
       template <class AqlPacket>
       inline void CaptureMetadata(AqlPacket* packet, uint16_t header, uint8_t* dst) {
         if (!HasMetadataQueue() || dst == nullptr) {
+          completion_event_id_ = -1;
           return;
         }
         FillMetadata(packet, header, dst, false, false);
+        completion_event_id_ = -1;
       }
 
       //! Set the launch descriptor version (called once from VirtualGPU::create)
@@ -715,9 +790,10 @@ class VirtualGPU : public device::VirtualDevice {
                      bool use_movdir64b, bool device_mem_ring_buf) const {
         const uint32_t metadata_header = GetType(header) | metadata_version_header_;
         uint32_t event_id = 0;
-        if (aql->completion_signal.handle) {
-          auto* signal = reinterpret_cast<amd_signal_t*>(aql->completion_signal.handle);
-          event_id = signal->event_id;
+        if (aql->completion_signal.handle != 0) {
+          event_id = completion_event_id_ >= 0
+                         ? static_cast<uint32_t>(completion_event_id_)
+                         : amd_signal_from_handle(aql->completion_signal.handle)->event_id;
         }
         if (use_movdir64b) {
           alignas(64) uint8_t seg0[64] = {};
@@ -735,7 +811,11 @@ class VirtualGPU : public device::VirtualDevice {
 
       void* queue_base_ = nullptr;        //!< The buffer base of prefetching queue
       uint32_t metadata_version_header_ = 0; //!< Pre-shifted version bits for metadata headers
+      //! event_id of the next packet's completion signal if known, else -1 to read it
+      int64_t completion_event_id_ = -1;
       const hsa_amd_metadata_kernel_descriptor_t* pending_descriptor_ = nullptr;
+      const uint8_t* pending_kernargs_ = nullptr;  //!< Host copy of the kernel arguments
+      size_t pending_kernarg_bytes_ = 0;           //!< Bytes valid at pending_kernargs_
       uint16_t pending_preload_length_ = 0;
       uint16_t pending_preload_offset_ = 0;
 
@@ -823,9 +903,6 @@ class VirtualGPU : public device::VirtualDevice {
    * @return bool true if Wait returned successfully, false otherwise
    */
   bool releaseGpuMemoryFence(bool skip_copy_wait = false);
-  //! An armed gate signal for a graph end marker (DEBUG_CLR_GRAPH_FAST_LAUNCH) from the device's
-  //! pool, nullptr if none
-  ProfilingSignal* AcquireGateSignal();
   //! Issues the pending fork wait (DEBUG_CLR_GRAPH_FAST_LAUNCH) as a barrier without signal
   void FlushPendingForkWait();
   //! Drops the pending fork wait and its reference
@@ -989,13 +1066,24 @@ class VirtualGPU : public device::VirtualDevice {
   bool dispatchCounterAqlPacket(hsa_ext_amd_aql_pm4_packet_t* packet, const uint32_t gfxVersion,
                                 bool blocking, const hsa_ven_amd_aqlprofile_1_00_pfn_t* extApi);
   void dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal = false,
-                             hsa_signal_t signal = hsa_signal_t{0}, bool depSignalsSet = false);
+                             hsa_signal_t signal = hsa_signal_t{0}, bool depSignalsSet = false,
+                             bool skipTs = false);
   void dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveDepSignal = false,
                                   hsa_signal_t signal = hsa_signal_t{0},
                                   hsa_signal_value_t value = 0, hsa_signal_value_t mask = 0,
                                   hsa_signal_condition32_t cond = HSA_SIGNAL_CONDITION_EQ,
                                   bool skipTs = false,
                                   hsa_signal_t completionSignal = hsa_signal_t{0});
+  //! Places the pending waits on the packet that resolves them: two to five in a barrier-AND's
+  //! dep_signal (DEBUG_CLR_GRAPH_FAST_LAUNCH), any other number in a barrier-value packet, with nop
+  //! barriers ahead of it for the waits past the first. Returns true for the barrier-AND.
+  bool PlaceBarrierWaits(hsa_amd_barrier_value_packet_t& value_packet,
+                         hsa_barrier_and_packet_t& and_packet);
+  //! Submits a split graph end marker, the packet resolving the waits and the nop barrier with
+  //! the interrupt signal, in one slot reservation with one doorbell: a second reservation's
+  //! locked compare-and-swap would wait for the first packet's ring and doorbell stores to land.
+  //! Returns the first packet's signal.
+  ProfilingSignal* dispatchSplitEndMarker();
   //! True if a barrier of the current command needs timestamps: a timed event record, or a
   //! command created under queue or activity profiling
   bool BarrierTimestamps() const;
@@ -1069,13 +1157,17 @@ class VirtualGPU : public device::VirtualDevice {
   //! Record the last write index and whether the last packet is idle-trackable. Only tracker-owned
   //! signals (from Barriers().ActiveSignal()) qualify; set skip_signal for externally-provided or
   //! absent completion signals. IsQueueIdle() reads the tracker-owned signal at check time.
+  inline void TrackQueueProgress(hsa_signal_t completion_signal, uint64_t index,
+                                 bool skip_signal = false) {
+    last_write_index_ = index;
+    if (!skip_signal && completion_signal.handle != 0) {
+      last_packet_with_signal_index_ = index;
+    }
+  }
   template <typename AqlPacket>
   inline void TrackQueueProgress(const AqlPacket& packet, uint64_t index,
                                  bool skip_signal = false) {
-    last_write_index_ = index;
-    if (!skip_signal && packet.completion_signal.handle != 0) {
-      last_packet_with_signal_index_ = index;
-    }
+    TrackQueueProgress(packet.completion_signal, index, skip_signal);
   }
 
   //! Returns true if the queue is considered as idle, i.e. all submitted packets are complete.

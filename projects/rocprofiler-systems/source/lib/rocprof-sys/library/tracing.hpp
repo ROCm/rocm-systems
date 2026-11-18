@@ -65,10 +65,6 @@ record_thread_start_time();
 void
 thread_init();
 
-template <typename CategoryT>
-auto&
-get_category_stack();
-
 ROCPROFSYS_INLINE auto
 now()
 {
@@ -95,25 +91,12 @@ pop_count()
     return _v;
 }
 
-struct category_stack
-{
-    std::int32_t profile = 0;  // use signed so compiler doesn't have to
-                               // account for underflow/overflow
-};
-
 template <typename CategoryT>
-auto&
-get_category_stack()
+bool&
+thread_has_pushed()
 {
-    static thread_local auto _v = category_stack{};
+    static thread_local bool _v = false;
     return _v;
-}
-
-template <typename CategoryT>
-auto&
-get_profile_stack()
-{
-    return get_category_stack<CategoryT>().profile;
 }
 
 template <typename CategoryT>
@@ -134,24 +117,42 @@ template <typename CategoryT>
 auto
 category_pop_disabled()
 {
-    return !trait::runtime_enabled<CategoryT>::get() &&
-           get_profile_stack<CategoryT>() <= 0;
+    return !trait::runtime_enabled<CategoryT>::get() && !thread_has_pushed<CategoryT>();
 }
 
 template <typename CategoryT>
 auto
 profile_pop_disabled()
 {
-    return !trait::runtime_enabled<CategoryT>::get() &&
-           get_profile_stack<CategoryT>() <= 0;
+    return !trait::runtime_enabled<CategoryT>::get() && !thread_has_pushed<CategoryT>();
+}
+
+inline std::atomic<bool> timemory_components_enabled{ false };
+
+inline bool
+has_timemory_components()
+{
+    return timemory_components_enabled.load(std::memory_order_acquire);
+}
+
+inline void
+enable_timemory_components()
+{
+    timemory_components_enabled.store(true, std::memory_order_release);
 }
 
 template <typename CategoryT, typename... Args>
 inline void
 push_timemory(CategoryT, std::string_view name, Args&&... args)
 {
-    // skip if category is disabled
+    // skip if the category is disabled
     if(category_push_disabled<CategoryT>())
+    {
+        return;
+    }
+
+    thread_has_pushed<CategoryT>() = true;
+    if(!has_timemory_components())
     {
         return;
     }
@@ -162,8 +163,6 @@ push_timemory(CategoryT, std::string_view name, Args&&... args)
         // this generates a hash for the raw string array
         auto const _hash = tim::add_hash_id(name);
         _data->construct(_hash)->start(std::forward<Args>(args)...);
-        // increment the profile stack
-        ++get_profile_stack<CategoryT>();
     }
 }
 
@@ -243,8 +242,9 @@ template <typename CategoryT, typename... Args>
 inline void
 pop_timemory(CategoryT, std::string_view name, Args&&... args)
 {
-    // skip if category is disabled and not pushed on this thread
-    if(profile_pop_disabled<CategoryT>())
+    // skip if no component records regions, or the category is disabled and not
+    // pushed on this thread
+    if(!has_timemory_components() || profile_pop_disabled<CategoryT>())
     {
         return;
     }

@@ -3,6 +3,8 @@
 
 """Unit tests for utils/specs.py."""
 
+import argparse
+import sys
 from subprocess import CompletedProcess
 from unittest.mock import patch
 
@@ -12,7 +14,8 @@ import utils.specs as specs
 from utils.specs import (
     MachineSpecs,
     MachineSpecsCDNA,
-    MachineSpecsRDNA35,
+    MachineSpecsRDNA,
+    _detect_arch,
     generate_machine_specs,
     spec_family_for_arch,
 )
@@ -159,11 +162,12 @@ def test_kw_only_rejects_positional_arguments():
 @pytest.mark.parametrize(
     "series, expected_cls",
     [
-        ("RDNA3.5", MachineSpecsRDNA35),
+        ("RDNA3.5", MachineSpecsRDNA),
+        ("RDNA4", MachineSpecsRDNA),
         ("mi300", MachineSpecsCDNA),
         (None, MachineSpecsCDNA),
     ],
-    ids=["rdna35", "cdna", "unknown"],
+    ids=["rdna35", "rdna4", "cdna", "unknown"],
 )
 def test_spec_family_for_arch_dispatch(series, expected_cls):
     with patch.object(specs.mi_gpu_specs, "get_gpu_series", return_value=series):
@@ -186,7 +190,7 @@ def test_rdna35_finalize_soc_fields(
     """RDNA 3.5 derives num_gl1c from SE*SA and num_memory_channels from the
     VRAM bus width, falling back to total_l2_chan when width is unavailable.
     """
-    spec = MachineSpecsRDNA35(
+    spec = MachineSpecsRDNA(
         gpu_arch="gfx1151",
         gpu_model="rdna35_halo",
         se_per_gpu=se_per_gpu,
@@ -256,7 +260,7 @@ def test_reconstruct_specs_from_sysinfo_round_trip():
     ), patch.object(specs.mi_gpu_specs, "get_gpu_series", return_value="RDNA3.5"):
         spec = generate_machine_specs(None, sysinfo)
 
-    assert isinstance(spec, MachineSpecsRDNA35)
+    assert isinstance(spec, MachineSpecsRDNA)
     assert spec.num_gl1c == "8"
     assert spec.num_memory_channels == "8"
 
@@ -266,6 +270,45 @@ def test_reconstruct_specs_from_sysinfo_missing_version_raises():
     """A sysinfo dict without a version key aborts via console_error/KeyError."""
     with pytest.raises((KeyError, SystemExit)):
         generate_machine_specs(None, {"gpu_arch": "gfx1151"})
+
+
+@pytest.mark.misc
+def test_reconstruct_specs_from_sysinfo_unsupported_arch_exits(monkeypatch):
+    """A workload from an arch without a spec entry stops with an error naming
+    the arch, not a traceback."""
+    monkeypatch.setattr(specs, "console_error", sys.exit)
+    monkeypatch.setattr(specs, "get_version", lambda _home: {"version": "3.0.0"})
+    with pytest.raises(SystemExit, match="profiled on gfx1030, which is not supported"):
+        generate_machine_specs(None, {"version": "3", "gpu_arch": "gfx1030"})
+
+
+@pytest.mark.misc
+@pytest.mark.parametrize(
+    "gpu_arch", sorted(specs.mi_gpu_specs.get_experimental_archs())
+)
+def test_experimental_arch_without_flag_exits(monkeypatch, gpu_arch):
+    """A workload from an experimental arch stops unless --experimental is given."""
+    monkeypatch.setattr(specs, "console_error", sys.exit)
+    with pytest.raises(SystemExit, match=f"{gpu_arch} is an experimental GPU"):
+        generate_machine_specs(
+            argparse.Namespace(experimental=False),
+            {"version": "3", "gpu_arch": gpu_arch},
+        )
+
+
+@pytest.mark.misc
+def test_detect_arch_dash_variant_maps_to_base():
+    """A Name line with a dash-suffixed variant (e.g. gfx1250-strict) should
+    resolve to the base arch (gfx1250) because the regex stops at `-`."""
+    rocminfo_lines = ["  Name:  gfx1250-strict"]
+    with patch.object(
+        specs.mi_gpu_specs,
+        "get_gpu_series_dict",
+        return_value={"gfx1250": "gfx1250_series"},
+    ):
+        result = _detect_arch(rocminfo_lines)
+    assert result is not None
+    assert result[0] == "gfx1250"
 
 
 @pytest.mark.misc

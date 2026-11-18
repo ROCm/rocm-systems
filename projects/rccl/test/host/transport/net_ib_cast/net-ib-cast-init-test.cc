@@ -753,11 +753,12 @@ TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_ClosingAnUnusedHcaFails_Fails)
   EXPECT_EQ(World().freeDeviceList.calls, 1);
 }
 
-TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_FreeingTheListFails_Fails) {
+// wrap_ibv_free_device_list passes a void ibv_free_device_list() through, so its result carries nothing.
+TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_FreeingTheListReportsAnError_IsIgnoredAndFreesOnce) {
   World().AddHca("ionic_0");
   ScopedHook freeList(g_ibvFreeDeviceList, [](struct ibv_device**) { return ncclSystemError; });
-  EXPECT_EQ(Init(), ncclInternalError);
-  EXPECT_EQ(freeList.calls, 2);  // the failure path tries once more
+  EXPECT_EQ(Init(), ncclSuccess);
+  EXPECT_EQ(freeList.calls, 1);
 }
 
 TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_PortSpeedQuery_WinsOverThePortAttributes) {
@@ -809,9 +810,9 @@ TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_IbHcaRailAndPlane_AreRecordedA
   EXPECT_NE(IbCastDevs[1].planeIdx, IbCastDevs[2].planeIdx);
 }
 
-// The list is freed after enumeration but the pointer is kept, so a plane-index failure frees it
-// again on the fail: path. Pins AICOMRCCL-3143; a fix flips this pin.
-TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_KnownBug_TooManyPlanesFreesTheDeviceListTwice) {
+// The list is freed after enumeration, so a later plane-index failure must not free it again on the fail: path
+// (AICOMRCCL-3143).
+TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_TooManyPlanes_FreesTheDeviceListOnce) {
   std::string hca;
   for (int i = 0; i < NCCL_IB_PLANE_MAX_INDEX; i++) {
     const std::string name = "ionic_" + std::string(1, (char)('a' + i));
@@ -825,8 +826,7 @@ TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_KnownBug_TooManyPlanesFreesThe
     return ncclSuccess;
   });
   EXPECT_EQ(Init(), ncclInvalidUsage);
-  ASSERT_EQ(freed.size(), 2u);
-  EXPECT_EQ(freed[0], freed[1]);
+  EXPECT_EQ(freed.size(), 1u);
 }
 
 TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_SortsByPciPathUnlessDisabled) {
@@ -840,6 +840,27 @@ TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_SortsByPciPathUnlessDisabled) 
   params_.Set("IB_DEVICE_PCI_ORDER", 0);
   ASSERT_EQ(Init(), ncclSuccess);
   EXPECT_STREQ(IbCastDevs[0].devName, "ionic_0");
+}
+
+// Each async-event thread keeps its IbCastDevs slot for life, so the slot must already hold its post-sort device
+// when the thread starts. The thread name carries the slot index.
+TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_AsyncThreadsStartOnTheSortedDevices) {
+  World().AddHca("ionic_0");
+  World().AddHca("ionic_1");
+  PciPaths({{"ionic_0", "/sys/devices/pci0000:80/0000:81:00.0"}, {"ionic_1", "/sys/devices/pci0000:00/0000:01:00.0"}});
+  std::vector<std::string> atStart;
+  auto worldHook = g_ncclSetThreadName;
+  ScopedHook named(g_ncclSetThreadName, [&](pthread_t thread, const char* name) {
+    int slot = -1;
+    if (sscanf(name, "NCCL IbAsync %d", &slot) == 1 && slot >= 0 && slot < MAX_IB_DEVS) {
+      atStart.push_back(IbCastDevs[slot].devName);
+    }
+    worldHook(thread, name);
+  });
+  ASSERT_EQ(Init(), ncclSuccess);
+  ASSERT_EQ(IbCastNDevs, 2);
+  EXPECT_STREQ(IbCastDevs[0].devName, "ionic_1");
+  EXPECT_EQ(atStart, (std::vector<std::string>{IbCastDevs[0].devName, IbCastDevs[1].devName}));
 }
 
 TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_TwoPortsOfOneNic_GetDistinctRealPorts) {
