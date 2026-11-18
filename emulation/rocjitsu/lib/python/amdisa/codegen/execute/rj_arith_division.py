@@ -18,11 +18,16 @@ DIVISION_NAMES = {
 CDNA_FIXUP_NAMES = {'V_DIV_FIXUP_F16', 'V_DIV_FIXUP_F32', 'V_DIV_FIXUP_F64'}
 CDNA_FMAS_NAMES = {'V_DIV_FMAS_F32', 'V_DIV_FMAS_F64'}
 
+# All five profiles inherit the preexisting division model, not new hardware qualification.
+OLDER_DIVISION_ARCHS = ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5')
+
 
 def supports_division(arch: str, mnemonic: str) -> bool:
     if mnemonic == 'V_DIV_FIXUP_LEGACY_F16':
-        return arch in ('cdna3', 'cdna4')
-    return (arch in ('rdna3', 'rdna4') and mnemonic in DIVISION_NAMES) or (
+        return arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4')
+    return (
+        arch in ('rdna3', 'rdna4') + OLDER_DIVISION_ARCHS and mnemonic in DIVISION_NAMES
+    ) or (
         arch in ('cdna3', 'cdna4', 'cdna5')
         and mnemonic
         in (CDNA_FMAS_NAMES | CDNA_FIXUP_NAMES | {"V_DIV_SCALE_F32", "V_DIV_SCALE_F64"})
@@ -33,7 +38,8 @@ def gen_division(ctx: ExecuteContext) -> str | None:
     arch, mnemonic = ctx.arch_name, ctx.inst.name
     dst, src = ctx.dst_ops, ctx.src_ops
     is_vop3, result_writer = ctx.is_vop3, ctx.result_writer
-    cdna_scale = arch in ('cdna3', 'cdna4', 'cdna5') and mnemonic in {
+    older = arch in OLDER_DIVISION_ARCHS
+    inherited_scale = (older or arch in ('cdna3', 'cdna4', 'cdna5')) and mnemonic in {
         'V_DIV_SCALE_F32',
         'V_DIV_SCALE_F64',
     }
@@ -48,6 +54,7 @@ def gen_division(ctx: ExecuteContext) -> str | None:
     if mnemonic.endswith('F16'):
         suffix = {
             'rdna4': '_gfx12',
+            **dict.fromkeys(OLDER_DIVISION_ARCHS, '_gfx942'),
             'cdna3': '_gfx942',
             'cdna4': '_gfx942',
             'cdna5': '_gfx1250',
@@ -76,18 +83,19 @@ def gen_division(ctx: ExecuteContext) -> str | None:
                 '  const uint64_t modifiers = ' + ' | '.join(terms) + ';',
                 f'  amdgpu::arith::execute_float_ternary16(wf, {wave_api(api, 32)}, {wave_api(wide_api, 64)},',
                 '      wf.cu().arithmetic_flags(), modifiers,',
-                f'      {dst[0]}, {", ".join(src)}, /*rdna3=*/{str(arch in ("rdna3", "cdna3", "cdna4")).lower()},'
+                f'      {dst[0]}, {", ".join(src)}, /*rdna3=*/{str(older or arch in ("rdna3", "cdna3", "cdna4")).lower()},'
                 f'      /*low_dst_zeroes_high=*/{str(mnemonic == "V_DIV_FIXUP_LEGACY_F16").lower()});',
             ]
         )
     width = 64 if mnemonic.endswith('F64') else 32
     suffix = {
         'rdna4': '_gfx12',
+        **dict.fromkeys(OLDER_DIVISION_ARCHS, '_gfx942'),
         'cdna3': '_gfx942',
         'cdna4': '_gfx942',
         'cdna5': '_gfx1250',
     }.get(arch, '')
-    if cdna_scale:
+    if inherited_scale:
         suffix = '_gfx942'
     api = 'rj_arith_' + mnemonic.lower() + suffix
     # gfx1250 is Wave32-only; the generic adapter still needs a typed Wave64 callback.
@@ -110,7 +118,7 @@ def gen_division(ctx: ExecuteContext) -> str | None:
         if result_writer is None:
             result_writer = f'[&](uint64_t result) {{ amdgpu::write_wave_mask_scalar({dst[1]}, wf, result); }}'
         writer = ', ' + result_writer
-        if cdna_scale:
+        if inherited_scale:
             writer += ', /*preserve_inactive_condition=*/true'
     return '\n'.join(
         [
@@ -119,7 +127,7 @@ def gen_division(ctx: ExecuteContext) -> str | None:
             f'      wf, {wave_api(api, 32)}, {wave_api(wide_api, 64)},',
             f'      wf.cu().arithmetic_flags(), modifiers,',
             f'      {dst[0]}, {", ".join(src)},',
-            f'      /*rdna3=*/{str(arch in ("rdna3", "cdna3", "cdna4")).lower()}'
+            f'      /*rdna3=*/{str(older or arch in ("rdna3", "cdna3", "cdna4")).lower()}'
             + writer
             + ');',
         ]

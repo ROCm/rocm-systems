@@ -152,3 +152,27 @@ Loose uses FP32-intermediate MAD. Guest rounding, forced intermediate flushing,
 IEEE NaN quieting, FP16_OVFL and final output modifiers are retained. This is
 software-model reuse, not new empirical qualification; strict modes reject and
 FP status is unchanged. The native half FMA migration is independent.
+
+## Older native math
+
+Gfx908/gfx90a/gfx1010/gfx1030/gfx1150 FP32 RCP, RCP_IFLAG, RSQ and SQRT use
+rj-arith's inherited scalar and SIMD models. Compatibility preserves their
+existing numeric and FP-status policy; explicit empirical semantics remain
+unqualified. The VM retains operand access, destination placement and trap delivery.
+
+The gfx942/gfx950 FP32 and FP16 native math APIs also own SDWA output controls
+in scalar, AVX2 and AVX-512 paths. FP32 SIN/RCP_IFLAG retain guest-mode output;
+other FP32 math uses nearest-output scaling. FP16 finalizes an already-scaled
+half without a second multiplication. These controls do not change ordinary
+encodings, and gfx1250 does not accept the SDWA selector. See
+[the API contract](include/rj_arith/detail/rj_arith_math.h) for details.
+
+The gfx942 integral/decomposition APIs (TRUNC/CEIL/FLOOR/RNDNE, FREXP_MANT
+and FRACT, FP16/FP32) also own inherited SDWA rounded-output scaling and clamp.
+They share the native-unary scalar/AVX2/v4 output passes. Ordinary arithmetic
+and its existing strict-mode/FP-status support are unchanged.
+
+Older FP64 native-math migration also routes TRIG_PREOP on gfx908/gfx90a,
+gfx1010/gfx1030 and gfx1150 through the inherited 1201-bit table and existing
+scalar/AVX2/AVX-512 implementations. Compatibility/Loose remain the supported
+semantics; strict empirical requests are not newly qualified.

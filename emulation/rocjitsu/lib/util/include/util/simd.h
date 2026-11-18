@@ -4,11 +4,6 @@
 #ifndef UTIL_SIMD_H_
 #define UTIL_SIMD_H_
 
-#include "util/amdgpu_exp.h"
-#include "util/amdgpu_log.h"
-#include "util/amdgpu_rcp.h"
-#include "util/amdgpu_rsq.h"
-#include "util/amdgpu_sqrt.h"
 #include "util/bit.h"
 #include "util/host_target.h"
 #include "util/simd_control.h"
@@ -506,23 +501,6 @@ inline native<double> cvt_u32_f64_saturate_input_simd(native<double> s) {
   return result;
 }
 
-inline native<double> sqrt_f64_simd(native<double> a) {
-  native<double> r = stdx::sqrt(a);
-  constexpr std::size_t W = native<double>::size();
-  alignas(64) double in[W];
-  alignas(64) double out[W];
-  a.copy_to(in, stdx::element_aligned);
-  r.copy_to(out, stdx::element_aligned);
-  for (std::size_t i = 0; i < W; ++i) {
-    if (std::isnan(in[i]))
-      out[i] = in[i];
-    else if (in[i] < 0.0)
-      out[i] = std::numeric_limits<double>::quiet_NaN();
-  }
-  r.copy_from(out, stdx::element_aligned);
-  return r;
-}
-
 /// Vectorized, bit-exact port of `f16_to_f32` (util/data_types.h). Each lane's
 /// low 16 bits hold the f16; high bits are ignored. All branch selection is
 /// done with `where`-masks in the uint32 domain. Bit-identical to the scalar
@@ -841,35 +819,7 @@ inline double ceil_scalar(double a) { return quiet_snan_scalar(a, std::ceil(a));
 inline float trunc_scalar(float a) { return quiet_snan_scalar(a, std::trunc(a)); }
 inline double trunc_scalar(double a) { return quiet_snan_scalar(a, std::trunc(a)); }
 
-/// Native-width adapters for the shared integer transcendental mappings.
-inline native<float> rcp_f32_simd(native<float> a, bool quiet_snan = true) {
-  return map_native_convert_scalar<float, float>(
-      a, [quiet_snan](float value) { return amdgpu_rcp_f32(value, quiet_snan); });
-}
-
-inline native<float> rsq_f32_simd(native<float> a, bool quiet_snan = true) {
-  return map_native_convert_scalar<float, float>(
-      a, [quiet_snan](float value) { return amdgpu_rsq_f32(value, quiet_snan); });
-}
-
-inline native<float> sqrt_f32_simd(native<float> a, bool quiet_snan = true) {
-  return map_native_convert_scalar<float, float>(
-      a, [quiet_snan](float value) { return amdgpu_sqrt_f32(value, quiet_snan); });
-}
-
-inline native<float> log_f32_simd(native<float> a, bool quiet_snan = true) {
-  return map_native_convert_scalar<float, float>(
-      a, [quiet_snan](float value) { return amdgpu_log_f32(value, quiet_snan); });
-}
-
-inline native<float> exp_f32_simd(native<float> a, bool quiet_snan = true) {
-  return map_native_convert_scalar<float, float>(
-      a, [quiet_snan](float value) { return amdgpu_exp_f32(value, quiet_snan); });
-}
-
-/// Branchless SWAR population count over a uint32 vector. Each lane holds
-/// std::popcount(lane) in [0, 32], bit-identical to the scalar std::popcount.
-/// Used by the bit-scan VOP1/VOP3 SIMD fast paths (bcnt / ffbh / ffbl / cls).
+/// Native-width adapters for the remaining integer transcendental mappings.
 inline native<uint32_t> popcount_u32_simd(native<uint32_t> x) {
   using U = native<uint32_t>;
   x = x - ((x >> 1) & U(0x55555555u));

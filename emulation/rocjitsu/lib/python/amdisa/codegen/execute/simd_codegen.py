@@ -620,43 +620,8 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
     # exactly via util::*_f32_simd (FTZ input/output flush + canonical-qNaN and
     # NaN-input-preservation blends), so the SIMD result is bit-identical to the
     # forced-scalar body on every input incl NaN/Inf/denormal. ---
-    'v_rcp_f32_vop1': (
-        'float32_t',
-        'float32_t',
-        '[&wf](auto a) { return util::rcp_f32_simd(a, '
-        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())); }',
-    ),
-    'v_rcp_iflag_f32_vop1': (
-        'float32_t',
-        'float32_t',
-        '[](auto a) { return util::rcp_f32_simd(a); }',
-    ),
-    'v_rsq_f32_vop1': (
-        'float32_t',
-        'float32_t',
-        '[&wf](auto a) { return util::rsq_f32_simd(a, '
-        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())); }',
-    ),
-    'v_sqrt_f32_vop1': (
-        'float32_t',
-        'float32_t',
-        '[&wf](auto a) { return util::sqrt_f32_simd(a, '
-        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())); }',
-    ),
     # LOG and EXP share their integer scalar mappings. Their complete
     # instruction bodies save the host environment for output scaling.
-    'v_exp_f32_vop1': (
-        'float32_t',
-        'float32_t',
-        '[&wf](auto a) { return util::exp_f32_simd(a, '
-        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())); }',
-    ),
-    'v_log_f32_vop1': (
-        'float32_t',
-        'float32_t',
-        '[&wf](auto a) { return util::log_f32_simd(a, '
-        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())); }',
-    ),
     # --- float -> int conversions with NaN->0 and saturating clamp. The float
     # comparison masks are re-typed to the int lane via simd_mask_as<> before
     # the where-blend. Masks are mutually exclusive so application order is
@@ -971,15 +936,6 @@ SIMD_VOP1_UNARY_F64: dict[str, tuple[str, str]] = {
     'v_trunc_f64_vop1': ('double', '[](auto a) { return util::trunc_simd(a); }'),
     'v_rndne_f64_vop1': ('double', '[](auto a) { return util::rndne_simd(a); }'),
     'v_fract_f64_vop1': ('uint64_t', float_fract.simd_functor('f64')),
-    'v_rcp_f64_vop1': (
-        'double',
-        '[](auto a) { return util::native<double>(1.0) / a; }',
-    ),
-    'v_rsq_f64_vop1': (
-        'double',
-        '[](auto a) { return util::native<double>(1.0) / util::stdx::sqrt(a); }',
-    ),
-    'v_sqrt_f64_vop1': ('double', '[](auto a) { return util::sqrt_f64_simd(a); }'),
     'v_mov_b64_vop1': ('uint64_t', '[](auto a) { return a; }'),
     # frexp mantissa: significand in [0.5,1) via bitfield rebias + denormal
     # renorm (see util::frexp_mant_f64_simd). VOP3 twin in SIMD_VOP3_UNARY_FP64.
@@ -1063,14 +1019,6 @@ SIMD_VOP3_CNDMASK: set[str] = {
     'v_cndmask_b32_vop3',
 }
 
-# VOP3 div_fmas: fused FMA and VCC-controlled scaling, rounded once using
-# the guest mode. Fixed-op / functorless.
-SIMD_VOP3_DIV_FMAS_FP32: set[str] = {
-    'v_div_fmas_f32_vop3',
-}
-SIMD_VOP3_DIV_FMAS_FP64: set[str] = {
-    'v_div_fmas_f64_vop3',
-}
 
 # VOP3P packed-16 integer binary family. The glue applies half selectors
 # before the functor and retains scalar execution for integer CLAMP.
@@ -1906,21 +1854,12 @@ SIMD_VOP3_UNARY_FP64: dict[str, str] = {
     ),
     'v_trunc_f64_vop3': '[](auto a) { return util::trunc_simd(a); }',
     'v_rndne_f64_vop3': '[](auto a) { return util::rndne_simd(a); }',
-    # sqrt_f64 is correctly-rounded IEEE (scalar uses transcendental::sqrt_f64
-    # which is `std::sqrt` after NaN/negative guards); stdx::sqrt matches.
-    'v_sqrt_f64_vop3': ('[](auto a) { return util::sqrt_f64_simd(a); }'),
     # frexp mantissa: same functor as the VOP1 form, after MODE input flushing;
     # the f64 unary FP glue applies abs/neg on the source and omod/clamp on the
     # mantissa, matching the scalar.
     'v_frexp_mant_f64_vop3': _flush_input_then(
         'F64', '[](auto a) { return util::frexp_mant_f64_simd(a); }'
     ),
-    # v_rcp_f64 / v_rsq_f64: scalar uses transcendental::*_f64 with explicit
-    # NaN passthrough, ±0 -> copysign(Inf, x), ±Inf -> copysign(0, x); negative
-    # rsq inputs -> qNaN. Plain 1.0 / x and 1.0 / sqrt match the IEEE result
-    # for all non-NaN inputs; NaN-result lanes are skipped by the A/B test.
-    'v_rcp_f64_vop3': '[](auto a) { return util::native<double>(1.0) / a; }',
-    'v_rsq_f64_vop3': '[](auto a) { return util::native<double>(1.0) / util::stdx::sqrt(a); }',
     # NOTE: v_mov_b64 is deliberately NOT here. It is an integer 64-bit bit-move;
     # OMOD/CLAMP are float-only, so its generated VOP3 scalar body is a raw copy
     # that ignores them. Routing it through the f64 modifier glue made the SIMD
@@ -2005,41 +1944,18 @@ SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
         )
         for op in CUBE_OPERATIONS
     },
-    # Share the bit-level fixup and guest MODE policy with the scalar executor.
-    # FIXUP rounds OMOD explicitly; operand glue still applies CLAMP.
-    'v_div_fixup_f32_vop3': (
-        '[&inst, &wf](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_simd(p, b, c, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), ::rocjitsu::amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(), wf.ieee_mode(), inst.inst_.omod)); }, false'
-    ),
 }
 
 # Non-fused F16 ternaries: widen -> ABS/NEG -> evaluate -> round F16 -> OMOD/CLAMP.
 # MAD retains its existing MODE policy; selection uses the shared raw-bit stage.
-# DIV_FIXUP explicitly retains modifiers before narrowing. Native fused FMA
-# is implemented by rj-arith on every profile.
-SIMD_VOP3_TERNARY_FP16: dict[str, str] = {
-    'v_div_fixup_f16_vop3': (
-        '[&wf](auto p, auto b, auto c) { return '
-        '::rocjitsu::amdgpu::div_fixup_f16_promoted_simd('
-        'p, b, c, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()); '
-        '}, amdgpu::F16TernaryOutputOrder::MODIFY_THEN_ROUND, true'
-    ),
-    'v_div_fixup_legacy_f16_vop3': (
-        '[&wf](auto p, auto b, auto c) { return '
-        '::rocjitsu::amdgpu::div_fixup_f16_promoted_simd('
-        'p, b, c, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()); '
-        '}, amdgpu::F16TernaryOutputOrder::MODIFY_THEN_ROUND, true'
-    ),
-}
+# Fused FMA uses the
+# MODE-aware native<double> route selected by SIMD_VOP3_FMA_MODE_FP16 below.
+SIMD_VOP3_TERNARY_FP16: dict[str, str] = {}
 
 SIMD_VOP3_FMA_MODE_FP64 = {'v_fma_f64_vop3'}
 
 # f64 ternary FMA.
-SIMD_VOP3_TERNARY_FP64: dict[str, str] = {
-    # v_div_fixup_f64 shares the bit-level helper and explicit guest MODE policy.
-    'v_div_fixup_f64_vop3': (
-        '[&inst, &wf](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_simd(p, b, c, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), ::rocjitsu::amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst.inst_.omod)); }, false'
-    ),
-}
+SIMD_VOP3_TERNARY_FP64: dict[str, str] = {}
 
 # --- VOP3 dst-accumulate FMA / MAC (vdst is the accumulator) ----------------
 #
@@ -2785,10 +2701,6 @@ def _simd_probe_line(
     spec3tf64 = SIMD_VOP3_TERNARY_FP64.get(template_name)
     if spec3tf64 is not None:
         return f'  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP64({spec3tf64});'
-    if template_name in SIMD_VOP3_DIV_FMAS_FP32:
-        return '  ROCJITSU_TRY_SIMD_DIV_FMAS_VOP3_FP32();'
-    if template_name in SIMD_VOP3_DIV_FMAS_FP64:
-        return '  ROCJITSU_TRY_SIMD_DIV_FMAS_VOP3_FP64();'
     # VOP3P packed-16 integer binary family (pk_add/sub/mul_lo/min/max for
     # i16/u16 + pk_lshlrev/lshrrev/ashrrev for b16/i16). The glue applies
     # source half selectors and retains scalar execution for CLAMP.
@@ -3289,13 +3201,6 @@ def _local_coverage_probe(
             + mask
             + '; }',
         )
-    if template_name in ('v_div_scale_f32_vop3', 'v_div_scale_f64_vop3'):
-        t = 'double' if 'f64' in template_name else 'float'
-        commit = (
-            result_writer
-            or '[&](uint64_t v) { amdgpu::write_wave_mask_scalar(inst.sdst, wf, v); }'
-        )
-        return f'  if (amdgpu::try_execute_div_scale_simd<{t}>(inst, wf, {commit})) return;'
     if true16_vop3:
         binary = {
             'v_and_b16_vop3': 'a & b',

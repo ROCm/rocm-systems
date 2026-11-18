@@ -208,8 +208,14 @@ void add_fp(std::vector<Benchmark> &cases) {
   add(cases, "fp", "v_rcp_f64_w32_gfx942", [](Operands &r, uint64_t flags) {
     return rj_arith_v_rcp_f64_w32_gfx942(flags, UINT32_MAX, 0, r.d, r.a, &r.status);
   });
+  add(cases, "fp", "v_rcp_f64_w32_gfx908", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_rcp_f64_w32_gfx908(flags, UINT32_MAX, 0, r.d, r.a, &r.status);
+  });
   add(cases, "fp", "v_rcp_f64_w64_gfx942", [](Operands &r, uint64_t flags) {
     return rj_arith_v_rcp_f64_w64_gfx942(flags, UINT64_MAX, 0, r.d, r.a, &r.status);
+  });
+  add(cases, "fp", "v_rcp_f64_w64_gfx908", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_rcp_f64_w64_gfx908(flags, UINT64_MAX, 0, r.d, r.a, &r.status);
   });
   add(cases, "fp", "v_rcp_f64_w32_gfx1250", [](Operands &r, uint64_t flags) {
     return rj_arith_v_rcp_f64_w32_gfx1250(flags, UINT32_MAX, 0, r.d, r.a, &r.status);
@@ -217,8 +223,14 @@ void add_fp(std::vector<Benchmark> &cases) {
   add(cases, "fp", "v_rsq_f64_w32_gfx942", [](Operands &r, uint64_t flags) {
     return rj_arith_v_rsq_f64_w32_gfx942(flags, UINT32_MAX, 0, r.d, r.a, &r.status);
   });
+  add(cases, "fp", "v_rsq_f64_w32_gfx908", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_rsq_f64_w32_gfx908(flags, UINT32_MAX, 0, r.d, r.a, &r.status);
+  });
   add(cases, "fp", "v_rsq_f64_w64_gfx942", [](Operands &r, uint64_t flags) {
     return rj_arith_v_rsq_f64_w64_gfx942(flags, UINT64_MAX, 0, r.d, r.a, &r.status);
+  });
+  add(cases, "fp", "v_rsq_f64_w64_gfx908", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_rsq_f64_w64_gfx908(flags, UINT64_MAX, 0, r.d, r.a, &r.status);
   });
   add(cases, "fp", "v_rsq_f64_w32_gfx1250", [](Operands &r, uint64_t flags) {
     return rj_arith_v_rsq_f64_w32_gfx1250(flags, UINT32_MAX, 0, r.d, r.a, &r.status);
@@ -226,8 +238,14 @@ void add_fp(std::vector<Benchmark> &cases) {
   add(cases, "fp", "v_sqrt_f64_w32_gfx942", [](Operands &r, uint64_t flags) {
     return rj_arith_v_sqrt_f64_w32_gfx942(flags, UINT32_MAX, 0, r.d, r.a, &r.status);
   });
+  add(cases, "fp", "v_sqrt_f64_w32_gfx908", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_sqrt_f64_w32_gfx908(flags, UINT32_MAX, 0, r.d, r.a, &r.status);
+  });
   add(cases, "fp", "v_sqrt_f64_w64_gfx942", [](Operands &r, uint64_t flags) {
     return rj_arith_v_sqrt_f64_w64_gfx942(flags, UINT64_MAX, 0, r.d, r.a, &r.status);
+  });
+  add(cases, "fp", "v_sqrt_f64_w64_gfx908", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_sqrt_f64_w64_gfx908(flags, UINT64_MAX, 0, r.d, r.a, &r.status);
   });
   add(cases, "fp", "v_sqrt_f64_w32_gfx1250", [](Operands &r, uint64_t flags) {
     return rj_arith_v_sqrt_f64_w32_gfx1250(flags, UINT32_MAX, 0, r.d, r.a, &r.status);

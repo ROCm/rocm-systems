@@ -24,7 +24,6 @@ from amdisa.codegen.execute.vector_special import (
     _TRIG_PREOP_VALID_BITS,
     gen_vector_bitop3,
     gen_vector_cvt_pk,
-    gen_vector_div_fixup,
     gen_vector_mad_32_16,
     gen_vector_movrel,
     gen_vector_mullit,
@@ -340,14 +339,6 @@ def test_vop3_f16_simd_probes_split_true16_from_generic():
     assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16' in rcp_generic
     assert 'if (!wf.fp16_ovfl())' not in rcp_true16
     assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16' in rcp_true16
-    div_fixup = simd_probe_line('v_div_fixup_f16_vop3')
-    assert 'if (!wf.fp16_ovfl())' not in div_fixup
-    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16' in div_fixup
-    div_fixup_true16 = simd_probe_line('v_div_fixup_f16_vop3', true16_vop3=True)
-    assert 'if (!wf.fp16_ovfl())' not in div_fixup_true16
-    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16' in div_fixup_true16
-    assert 'F16TernaryOutputOrder::MODIFY_THEN_ROUND' in div_fixup
-    assert 'F16TernaryOutputOrder::MODIFY_THEN_ROUND' in div_fixup_true16
 
 
 @pytest.mark.parametrize('true16', [False, True])
@@ -668,26 +659,6 @@ def test_vop3_mad_32_16_uses_true16_sources_for_src0_src1_only():
     assert 'uint32_t s2 = amdgpu::RegisterAccess(wf).read_lane(src2, lane);' in body
 
 
-def test_vop3_div_fixup_f16_uses_true16_sources_and_destination():
-    body = gen_vector_div_fixup(['vdst'], ['src0', 'src1', 'src2'], 'f16', is_vop3=True)
-
-    assert 'uint32_t opsel = amdgpu::vop3_opsel(inst_);' in body
-    assert 'util::f16_to_f32(static_cast<uint16_t>(' in body
-    assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in body
-    assert 'read_vop3_true16_src(src1, wf, lane, opsel, 1)' in body
-    assert 'read_vop3_true16_src(src2, wf, lane, opsel, 2)' in body
-    assert (
-        'uint32_t result_bits = amdgpu::narrow_div_fixup_f16(result, wf.fp16_ovfl());'
-        in body
-    )
-    assert (
-        'result_bits = amdgpu::fp_mode::finalize_omod_f16(result_bits, effective_omod);'
-        in body
-    )
-    assert 'write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true)' in body
-    assert 'std::bit_cast<float>(src0.read_lane' not in body
-
-
 def test_vop3_pack_and_pknorm_f16_use_true16_source_halves():
     pack = gen_vector_cvt_pk(
         ['vdst'],
@@ -750,9 +721,6 @@ def test_true16_special_vop3_simd_routes_use_true16_glue():
     assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC' in simd_probe_line(
         'v_cvt_pk_norm_i16_f16_vop3'
     )
-    div_fixup = simd_probe_line('v_div_fixup_f16_vop3')
-    assert 'if (!wf.fp16_ovfl())' not in div_fixup
-    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16' in div_fixup
 
 
 @pytest.mark.parametrize(

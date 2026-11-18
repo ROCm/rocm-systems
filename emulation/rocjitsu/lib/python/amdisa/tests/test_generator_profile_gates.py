@@ -29,7 +29,6 @@ from amdisa.codegen.execute.floating_policy import (
 from amdisa.codegen.execute.vector_special import (
     gen_cvt_fp8,
     gen_vector_mad_64_32,
-    gen_vector_div_scale,
     gen_vector_movrel,
     gen_vector_cvt_pk,
 )
@@ -788,6 +787,22 @@ def test_generated_flush_nearest_f32_keeps_modifiers_in_nearest_environment(
     shared = execute_shared_path.read_text()
     for instruction in sorted(FLUSH_NEAREST_F32_OPS):
         for encoding in ('vop1', 'vop3'):
+            if instruction in {
+                'V_COS_F32',
+                'V_EXP_F32',
+                'V_EXP_LEGACY_F32',
+                'V_LOG_F32',
+                'V_LOG_LEGACY_F32',
+                'V_RCP_F32',
+                'V_RSQ_F32',
+                'V_SQRT_F32',
+            }:
+                # These operations dispatch through the library on every target.
+                assert (
+                    f'inline void execute_{instruction.lower()}_{encoding}'
+                    not in shared
+                )
+                continue
             body = _generated_function_body(
                 shared,
                 f'inline void execute_{instruction.lower()}_{encoding}',
@@ -795,10 +810,7 @@ def test_generated_flush_nearest_f32_keeps_modifiers_in_nearest_environment(
             assert body.count('fp_mode::ScopedEnvironment environment(0);') == 1
 
     for encoding in ('vop1', 'vop3'):
-        sin_body = _generated_function_body(
-            shared, f'inline void execute_v_sin_f32_{encoding}'
-        )
-        assert 'fp_mode::ScopedEnvironment environment(0);' not in sin_body
+        assert f'inline void execute_v_sin_f32_{encoding}' not in shared
 
 
 def test_gfx1250_model_include_graph_does_not_reach_vm(
@@ -1974,25 +1986,6 @@ def test_movrel_uses_wavefront_resolver_with_vgpr_msb_indexing():
     body = gen_vector_movrel(['vdst'], ['src0'], 'src', uses_vgpr_msb_indexing=True)
     assert 'Isa::resolved_vgpr_offset(wf, src0.opr_type_' in body
     assert 'src0.vgpr_msb_role()' in body
-
-
-def test_div_scale_writes_explicit_sdst_mask():
-    body = gen_vector_div_scale(
-        ['vdst', 'sdst'], ['src0', 'src1', 'src2'], 'f32', is_vop3=True
-    )
-
-    assert 'amdgpu::write_wave_mask_scalar(sdst, wf, vcc);' in body
-    assert 'wf.set_vcc' not in body
-
-    callback_body = gen_vector_div_scale(
-        ['vdst', 'sdst'],
-        ['src0', 'src1', 'src2'],
-        'f32',
-        is_vop3=True,
-        result_writer='commit_result',
-    )
-    assert 'commit_result(vcc);' in callback_body
-    assert 'write_wave_mask_scalar' not in callback_body
 
 
 def test_vector_cmp_writes_explicit_sdst_mask():
@@ -3383,22 +3376,6 @@ def test_gfx1251_f64_wmma_uses_wave32_mode_independent_executor():
     assert 'amdgpu::exec_f64' not in body
 
 
-@pytest.mark.parametrize('dtype, mode', [('f32', 'f32'), ('f64', 'f16_f64')])
-def test_div_scale_delegates_classification_and_preserves_explicit_mask(dtype, mode):
-    body = gen_vector_div_scale(
-        ['vdst', 'sdst'], ['src0', 'src1', 'src2'], dtype, is_vop3=True
-    )
-
-    nan_policy = (
-        ', wf.cu().arch() != ROCJITSU_CODE_ARCH_RDNA3' if dtype == 'f64' else ''
-    )
-    assert (
-        f'div_scale(s0, s1, s2, wf.fp_round_mode_{mode}(), '
-        f'wf.fp_denorm_mode_{mode}(){nan_policy})' in body
-    )
-    assert 'amdgpu::write_wave_mask_scalar(sdst, wf, vcc)' in body
-
-
 def test_gfx1250_profile_enables_generator_backed_quirks():
     profile = Cdna5Profile()
 
@@ -3823,12 +3800,11 @@ def test_generated_special_vop3_true16_paths_use_selected_halves(
     div_fixup = _generated_function_body(
         rdna2_vop3, 'void VDivFixupF16Vop3::execute_impl'
     )
-    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16' in div_fixup
-    assert 'F16TernaryOutputOrder::MODIFY_THEN_ROUND' in div_fixup
-    assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in div_fixup
-    assert 'read_vop3_true16_src(src1, wf, lane, opsel, 1)' in div_fixup
-    assert 'read_vop3_true16_src(src2, wf, lane, opsel, 2)' in div_fixup
-    assert 'write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits,' in div_fixup
+    assert 'execute_float_ternary16' in div_fixup
+    assert 'rj_arith_v_div_fixup_f16_w32_gfx942' in div_fixup
+    for operand in 'ABCD':
+        assert f'RJ_ARITH_ALU_HIGH_{operand}' in div_fixup
+    assert 'low_dst_zeroes_high=*/false' in div_fixup
 
     pack = _shared_execute_body(
         execute_shared, 'v_pack_b32_f16_vop3', 'v_perm_b32_vop3'
@@ -4343,11 +4319,13 @@ def test_generated_pseudo_scalar_vop3_paths_ignore_exec_and_f16_opsel(
         assert 'amdgpu::vop3_opsel(inst_)' in generic_true16_constructor
         assert 'may not use VCC as a destination' not in generic_true16_constructor
 
-    ordinary_exp = _shared_execute_body(
-        execute_shared, 'v_exp_f32_vop1', 'v_exp_f32_vop3'
+    ordinary_exp = _generated_function_body(
+        (rdna4_generated_root / 'vop1_exec.cpp').read_text(),
+        'void VExpF32Vop1::execute_impl(',
     )
-    assert 'amdgpu::transcendental::exp_f32(' in ordinary_exp
-    assert 'amdgpu::pseudo_scalar::' not in ordinary_exp
+    assert 'rj_arith_v_exp_f32_w32_gfx12' in ordinary_exp
+    assert 'amdgpu::arith::execute_float_unary32(' in ordinary_exp
+    assert 'execute_pseudo_scalar' not in ordinary_exp
 
 
 def test_generated_scalar_f16_arithmetic_delegates_overflow_policy(

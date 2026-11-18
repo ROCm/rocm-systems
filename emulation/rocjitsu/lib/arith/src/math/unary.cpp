@@ -7,6 +7,7 @@
 // and is checked against gfx1201 hardware captures.
 
 #include "common/alu.h"
+#include "common/sdwa_dispatch.h"
 #include "common/validation.h"
 #include "fp/fma_scalar.h"
 #include "math/unary_exact.h"
@@ -139,7 +140,7 @@ template <rocjitsu::arith::Unary Op, bool QuietNan = false>
   uint32_t result[32];
   for (int lane = 0; lane < 32; ++lane) {
     if constexpr (Op == rocjitsu::arith::Unary::Sqrt) {
-      // Borrow rocjitsu's classify_sqrt_f32_vop3: test the modified input
+      // The inherited SQRT classifier tests the modified input
       // before flushing or CLAMP. Negative zero and NaNs do not contribute.
       if (rocjitsu::arith::reports_fp_status(flags) && ((exec_mask >> lane) & 1)) {
         uint32_t input = a[0][lane];
@@ -1097,8 +1098,12 @@ int rj_arith_v_trunc_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return unary<rocjitsu::arith::Unary::Trunc, true, true>(flags, exec_mask, instruction_flags, d, a,
-                                                          trapsts);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return unary<rocjitsu::arith::Unary::Trunc, true, true>(
+            rocjitsu::arith::sdwa_fixed_round_flags(flags, instruction_flags), exec_mask, core_mode,
+            d, a, trapsts);
+      });
 }
 
 // Evaluate trunc with the inherited CDNA NaN and guest-mode policy.
@@ -1113,8 +1118,12 @@ int rj_arith_v_trunc_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return unary_wave64<rocjitsu::arith::Unary::Trunc, true, true>(flags, exec_mask,
-                                                                 instruction_flags, d, a, trapsts);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return unary_wave64<rocjitsu::arith::Unary::Trunc, true, true>(
+            rocjitsu::arith::sdwa_fixed_round_flags(flags, instruction_flags), exec_mask, core_mode,
+            d, a, trapsts);
+      });
 }
 
 // Evaluate ceil with the inherited CDNA NaN and guest-mode policy.
@@ -1129,8 +1138,12 @@ int rj_arith_v_ceil_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t 
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return unary<rocjitsu::arith::Unary::Ceil, true, true>(flags, exec_mask, instruction_flags, d, a,
-                                                         trapsts);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return unary<rocjitsu::arith::Unary::Ceil, true, true>(
+            rocjitsu::arith::sdwa_fixed_round_flags(flags, instruction_flags), exec_mask, core_mode,
+            d, a, trapsts);
+      });
 }
 
 // Evaluate ceil with the inherited CDNA NaN and guest-mode policy.
@@ -1145,8 +1158,12 @@ int rj_arith_v_ceil_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t 
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return unary_wave64<rocjitsu::arith::Unary::Ceil, true, true>(flags, exec_mask, instruction_flags,
-                                                                d, a, trapsts);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return unary_wave64<rocjitsu::arith::Unary::Ceil, true, true>(
+            rocjitsu::arith::sdwa_fixed_round_flags(flags, instruction_flags), exec_mask, core_mode,
+            d, a, trapsts);
+      });
 }
 
 // Evaluate floor with the inherited CDNA NaN and guest-mode policy.
@@ -1161,8 +1178,12 @@ int rj_arith_v_floor_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return unary<rocjitsu::arith::Unary::Floor, true, true>(flags, exec_mask, instruction_flags, d, a,
-                                                          trapsts);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return unary<rocjitsu::arith::Unary::Floor, true, true>(
+            rocjitsu::arith::sdwa_fixed_round_flags(flags, instruction_flags), exec_mask, core_mode,
+            d, a, trapsts);
+      });
 }
 
 // Evaluate floor with the inherited CDNA NaN and guest-mode policy.
@@ -1177,8 +1198,12 @@ int rj_arith_v_floor_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return unary_wave64<rocjitsu::arith::Unary::Floor, true, true>(flags, exec_mask,
-                                                                 instruction_flags, d, a, trapsts);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return unary_wave64<rocjitsu::arith::Unary::Floor, true, true>(
+            rocjitsu::arith::sdwa_fixed_round_flags(flags, instruction_flags), exec_mask, core_mode,
+            d, a, trapsts);
+      });
 }
 
 // Evaluate rndne with the inherited CDNA NaN and guest-mode policy.
@@ -1193,8 +1218,12 @@ int rj_arith_v_rndne_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return unary<rocjitsu::arith::Unary::Rndne, true, true>(flags, exec_mask, instruction_flags, d, a,
-                                                          trapsts);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return unary<rocjitsu::arith::Unary::Rndne, true, true>(
+            rocjitsu::arith::sdwa_fixed_round_flags(flags, instruction_flags), exec_mask, core_mode,
+            d, a, trapsts);
+      });
 }
 
 // Evaluate rndne with the inherited CDNA NaN and guest-mode policy.
@@ -1209,8 +1238,12 @@ int rj_arith_v_rndne_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return unary_wave64<rocjitsu::arith::Unary::Rndne, true, true>(flags, exec_mask,
-                                                                 instruction_flags, d, a, trapsts);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return unary_wave64<rocjitsu::arith::Unary::Rndne, true, true>(
+            rocjitsu::arith::sdwa_fixed_round_flags(flags, instruction_flags), exec_mask, core_mode,
+            d, a, trapsts);
+      });
 }
 
 // Evaluate frexp_mant with the inherited CDNA NaN and guest-mode policy.
@@ -1225,8 +1258,12 @@ int rj_arith_v_frexp_mant_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return unary<rocjitsu::arith::Unary::FrexpMant, true, true>(flags, exec_mask, instruction_flags,
-                                                              d, a, trapsts);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return unary<rocjitsu::arith::Unary::FrexpMant, true, true>(
+            rocjitsu::arith::sdwa_fixed_round_flags(flags, instruction_flags), exec_mask, core_mode,
+            d, a, trapsts);
+      });
 }
 
 // Evaluate frexp_mant with the inherited CDNA NaN and guest-mode policy.
@@ -1241,8 +1278,12 @@ int rj_arith_v_frexp_mant_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return unary_wave64<rocjitsu::arith::Unary::FrexpMant, true, true>(
-      flags, exec_mask, instruction_flags, d, a, trapsts);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return unary_wave64<rocjitsu::arith::Unary::FrexpMant, true, true>(
+            rocjitsu::arith::sdwa_fixed_round_flags(flags, instruction_flags), exec_mask, core_mode,
+            d, a, trapsts);
+      });
 }
 
 // Fractional part with inherited CDNA guest rounding and NaN policy.
@@ -1253,8 +1294,11 @@ int rj_arith_v_fract_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return unary<rocjitsu::arith::Unary::Fract, true, true>(flags, exec_mask, instruction_flags, d, a,
-                                                          trapsts);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return unary<rocjitsu::arith::Unary::Fract, true, true>(flags, exec_mask, core_mode, d, a,
+                                                                trapsts);
+      });
 }
 
 // Fractional part with inherited CDNA guest rounding and NaN policy.
@@ -1265,6 +1309,9 @@ int rj_arith_v_fract_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return unary_wave64<rocjitsu::arith::Unary::Fract, true, true>(flags, exec_mask,
-                                                                 instruction_flags, d, a, trapsts);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return unary_wave64<rocjitsu::arith::Unary::Fract, true, true>(flags, exec_mask, core_mode,
+                                                                       d, a, trapsts);
+      });
 }

@@ -1,7 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// CDNA integral unary arithmetic with staged SDWA output and true16 publication.
+// CDNA and older Radeon unary arithmetic with staged SDWA output.
+// CDNA half results additionally retain their true16 publication policy.
 // The library owns arithmetic; operand observations and destination placement stay here.
 
 #pragma once
@@ -14,8 +15,8 @@
 
 namespace rocjitsu::amdgpu::arith {
 
-// Evaluate the whole wave before aliased stores. Retain legacy SDWA scaling and
-// placement; old CDNA low-half results zero-extend, while high halves preserve low bits.
+// Evaluate the whole wave before aliased stores. The library owns SDWA output controls;
+// old CDNA low-half results zero-extend, while high halves preserve low bits.
 template <bool Half, bool OldCdna, typename Inst>
 inline void execute_cdna_integral_unary(Inst &inst, Wavefront &wave, FloatUnary32Function wave32,
                                         FloatUnary64Function wave64, uint64_t flags,
@@ -42,6 +43,8 @@ inline void execute_cdna_integral_unary(Inst &inst, Wavefront &wave, FloatUnary3
                   inst.inst_.src0;
                 }) {
     if (inst.inst_.src0 == SRC_SDWA) {
+      modifiers |= RJ_ARITH_ALU_SDWA | uint64_t(inst.sdwa_omod_) * RJ_ARITH_ALU_OMOD_2 |
+                   (inst.sdwa_clamp_ ? RJ_ARITH_ALU_CLAMP : 0U);
       uint32_t result[64]{};
       uint32_t *d = result;
       if (invoke(&d, exec_mask) != RJ_ARITH_SUCCESS) {
@@ -50,10 +53,7 @@ inline void execute_cdna_integral_unary(Inst &inst, Wavefront &wave, FloatUnary3
       }
       for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
         if ((exec_mask >> lane) & 1) {
-          // Half producers return an unscaled result; apply OMOD before placement.
-          sdwa::write_lane<Half ? sdwa::ResultFormat::F16 : sdwa::ResultFormat::F32,
-                           Half ? sdwa::OutputPolicy::ROUNDED : sdwa::OutputPolicy::MODE>(
-              inst, wave, destination, lane, result[lane]);
+          sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
         }
       }
       return;
@@ -68,9 +68,9 @@ inline void execute_cdna_integral_unary(Inst &inst, Wavefront &wave, FloatUnary3
                                                           : 0x3);
 }
 
-// Retain SDWA modifiers and byte placement for FP32 math and exponent extraction.
-// Integer exponents ignore floating output controls, as in the ISA.
-template <sdwa::ResultFormat Format, sdwa::OutputPolicy Policy, typename Inst>
+// Stage native FP32 math or integer exponents before SDWA byte placement.
+// Only floating results forward output controls to the arithmetic library.
+template <bool Floating = true, typename Inst>
 inline void execute_cdna_float_unary(Inst &inst, Wavefront &wave, FloatUnary32Function wave32,
                                      FloatUnary64Function wave64, uint64_t flags,
                                      uint64_t modifiers, const Operand &destination,
@@ -81,23 +81,26 @@ inline void execute_cdna_float_unary(Inst &inst, Wavefront &wave, FloatUnary32Fu
                           guest_rounding, compatibility_all_exec);
     return;
   }
-  execute_float_unary32_with_writer(
-      wave, wave32, wave64, flags, modifiers, source, rdna3, guest_rounding, compatibility_all_exec,
-      [&](uint64_t exec_mask, auto invoke) {
-        uint32_t result[64]{};
-        uint32_t *d = result;
-        if (invoke(&d, exec_mask) != RJ_ARITH_SUCCESS) {
-          wave.report_instruction_execution_error(
-              InstructionExecutionError::UnsupportedOperandValue);
-          return false;
-        }
-        for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
-          if (((exec_mask & wave.vgpr_write_mask()) >> lane) & 1) {
-            sdwa::write_lane<Format, Policy>(inst, wave, destination, lane, result[lane]);
-          }
-        }
-        return !wave.instruction_execution_failed();
-      });
+  if constexpr (Floating) {
+    modifiers |= RJ_ARITH_ALU_SDWA | sdwa_float_modifiers(inst);
+  }
+  const auto write = [&](uint64_t exec_mask, auto invoke) {
+    uint32_t result[64]{};
+    uint32_t *d = result;
+    if (invoke(&d, exec_mask) != RJ_ARITH_SUCCESS) {
+      wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+      return false;
+    }
+    for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+      if (((exec_mask & wave.vgpr_write_mask()) >> lane) & 1) {
+        sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+      }
+    }
+    return !wave.instruction_execution_failed();
+  };
+  // Preserve guest output rounding; native SDWA entry points clear core rounding themselves.
+  execute_float_unary32_with_writer(wave, wave32, wave64, flags, modifiers, source, rdna3,
+                                    Floating || guest_rounding, compatibility_all_exec, write);
 }
 
 } // namespace rocjitsu::amdgpu::arith

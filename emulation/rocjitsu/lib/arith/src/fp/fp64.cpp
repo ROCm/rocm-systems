@@ -72,7 +72,8 @@ template <rocjitsu::arith::Fp64 Op>
 
 // Evaluate FP64 arithmetic or selection for the selected lanes. Reject invalid controls before
 // changing outputs.
-template <rocjitsu::arith::Fp64 Op, bool Rdna3 = false, bool NativeMath = false, bool Cdna = false>
+template <rocjitsu::arith::Fp64 Op, bool Rdna3 = false, bool NativeMath = false, bool Cdna = false,
+          bool LegacyNative = false>
 int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_t *const *d,
          const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
   // The RDNA empirical model does not describe CDNA's inherited host-double core.
@@ -109,7 +110,12 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
     instruction_flags = uint32_t(rocjitsu::arith::rdna3_output_modifiers(flags, instruction_flags));
   }
   // gfx11 preserves signaling NaNs when IEEE mode is clear.
-  const bool quiet_snan = Cdna || !Rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE);
+  const bool quiet_snan = !LegacyNative && (Cdna || !Rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE));
+  if constexpr (LegacyNative) {
+    // Older host-double math did not flush inputs or unscaled results. Keep the
+    // guest OMOD decision above, then evaluate that inherited raw-input model.
+    flags &= ~(RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
+  }
   // CDNA native math obeys guest input flushing. Reciprocal also obeys output
   // flushing; the root cores retain their inherited output policy.
   if constexpr (NativeMath) {
@@ -349,12 +355,13 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
 
 // Evaluate FP64 arithmetic or selection for Wave64. Reject invalid controls before changing
 // outputs.
-template <rocjitsu::arith::Fp64 Op, bool Rdna3 = false, bool NativeMath = false, bool Cdna = false>
+template <rocjitsu::arith::Fp64 Op, bool Rdna3 = false, bool NativeMath = false, bool Cdna = false,
+          bool LegacyNative = false>
 int fp64_wave64(uint64_t flags, uint64_t exec_mask, uint32_t instruction_flags, uint32_t *const *d,
                 const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
   // Validate before either Wave64 half can modify outputs, even when EXEC is empty.
-  if (int error = fp64<Op, Rdna3, NativeMath, Cdna>(flags, 0, instruction_flags, nullptr, nullptr,
-                                                    nullptr, nullptr)) {
+  if (int error = fp64<Op, Rdna3, NativeMath, Cdna, LegacyNative>(
+          flags, 0, instruction_flags, nullptr, nullptr, nullptr, nullptr)) {
     return error;
   }
   if (!exec_mask) {
@@ -374,8 +381,8 @@ int fp64_wave64(uint64_t flags, uint64_t exec_mask, uint32_t instruction_flags, 
         z[word] = c[word] + half * 32;
       }
     }
-    if (int error = fp64<Op, Rdna3, NativeMath, Cdna>(flags, uint32_t(exec_mask >> (half * 32)),
-                                                      instruction_flags, dest, x, y, z)) {
+    if (int error = fp64<Op, Rdna3, NativeMath, Cdna, LegacyNative>(
+            flags, uint32_t(exec_mask >> (half * 32)), instruction_flags, dest, x, y, z)) {
       return error;
     }
   }
@@ -1972,4 +1979,94 @@ int rj_arith_v_frexp_mant_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                          const uint32_t *const *a,
                                          [[maybe_unused]] uint32_t *trapsts) {
   return cdna_unary<rocjitsu::arith::Fp64::FrexpMant>(flags, exec_mask, instruction_flags, d, a);
+}
+
+// Inherit older host-double RCP, including raw denormals and source NaN payloads.
+int rj_arith_v_rcp_f64_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64<rocjitsu::arith::Fp64::Rcp, true, true, false, true>(
+      flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
+}
+
+// Inherit older host-double RSQ, including raw denormals and source NaN payloads.
+int rj_arith_v_rsq_f64_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64<rocjitsu::arith::Fp64::Rsq, true, true, false, true>(
+      flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
+}
+
+// Inherit older host-double SQRT, including raw denormals and source NaN payloads.
+int rj_arith_v_sqrt_f64_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64<rocjitsu::arith::Fp64::Sqrt, true, true, false, true>(
+      flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
+}
+
+// Inherit older host-double RCP, including raw denormals and source NaN payloads.
+int rj_arith_v_rcp_f64_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64_wave64<rocjitsu::arith::Fp64::Rcp, true, true, false, true>(
+      flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
+}
+
+// Inherit older host-double RSQ, including raw denormals and source NaN payloads.
+int rj_arith_v_rsq_f64_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64_wave64<rocjitsu::arith::Fp64::Rsq, true, true, false, true>(
+      flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
+}
+
+// Inherit older host-double SQRT, including raw denormals and source NaN payloads.
+int rj_arith_v_sqrt_f64_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64_wave64<rocjitsu::arith::Fp64::Sqrt, true, true, false, true>(
+      flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
 }
