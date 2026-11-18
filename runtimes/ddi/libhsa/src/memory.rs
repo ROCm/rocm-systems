@@ -22,9 +22,8 @@ pub(crate) mod compute_copy;
 pub(crate) mod copy_svm;
 pub(crate) mod interop;
 pub(crate) mod svm;
-pub(crate) use crate::api::memory::copy_svm::hsa_memory_copy;
 use copy_svm::*;
-pub(crate) use copy_svm::{image_copy_borrow, image_device_address};
+pub(crate) use copy_svm::{copy, image_copy_borrow, image_device_address};
 pub(crate) mod virtual_memory;
 
 use std::collections::{BTreeMap, HashMap};
