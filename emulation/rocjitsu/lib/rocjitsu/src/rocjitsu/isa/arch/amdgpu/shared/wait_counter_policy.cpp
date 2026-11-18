@@ -41,6 +41,22 @@ std::string_view wait_counter_name(WaitCounterKind counter) {
   return "unknown";
 }
 
+std::string_view wait_counter_name(WaitCounterKind counter, WaitcntModel model) {
+  if (uses_legacy_waitcnt(model)) {
+    switch (counter) {
+    case WaitCounterKind::Load:
+      return "vmcnt";
+    case WaitCounterKind::Store:
+      return "vscnt";
+    case WaitCounterKind::Ds:
+      return "lgkmcnt";
+    default:
+      break;
+    }
+  }
+  return wait_counter_name(counter);
+}
+
 [[nodiscard]] size_t WaitCounterPolicy::counter_index(WaitCounterKind counter) {
   return static_cast<size_t>(counter);
 }
