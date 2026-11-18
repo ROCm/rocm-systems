@@ -2263,6 +2263,27 @@ typedef struct hipArrayMemoryRequirements {
 } hipArrayMemoryRequirements;
 
 /**
+ * Indicates that the layered sparse HIP array or HIP mipmapped array has a single mip tail region
+ * for all layers.
+ */
+#define hipArraySparsePropertiesSingleMipTail 0x1
+
+/**
+ * Sparse HIP array and HIP mipmapped array properties.
+ */
+typedef struct hipArraySparseProperties {
+  struct {
+    unsigned int width;   ///< Width of sparse tile in elements
+    unsigned int height;  ///< Height of sparse tile in elements
+    unsigned int depth;   ///< Depth of sparse tile in elements
+  } tileExtent;
+  unsigned int miptailFirstLevel;  ///< First mip level at which the mip tail begins
+  unsigned long long miptailSize;  ///< Total size of the mip tail
+  unsigned int flags;  ///< Zero or ::hipArraySparsePropertiesSingleMipTail
+  unsigned int reserved[4];  ///< Reserved for future use, must be zero now
+} hipArraySparseProperties;
+
+/**
  * Requested handle type for address range.
  */
 typedef enum hipMemRangeHandleType {
@@ -6572,6 +6593,20 @@ hipError_t hipMemcpy3DPeerAsync(hipMemcpy3DPeerParms* p, hipStream_t stream __dp
  */
 hipError_t hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* memoryRequirements,
                                                   hipMipmappedArray_t mipmap, hipDevice_t device);
+
+/**
+ * @brief Returns the layout properties of a sparse HIP array.
+ *
+ * @param [out] sparseProperties - Pointer to hipArraySparseProperties
+ * @param [in] array - HIP array to get the sparse properties of
+ *
+ * @returns #hipErrorInvalidValue, #hipErrorInvalidHandle, #hipErrorNotSupported
+ *
+ * @note Sparse HIP arrays are not currently supported on AMD devices;
+ * This function always reports #hipErrorNotSupported for well-formed arguments.
+ */
+hipError_t hipArrayGetSparseProperties(hipArraySparseProperties* sparseProperties,
+                                       hipArray_t array);
 // doxygen end Memory
 /**
  * @}
@@ -9010,6 +9045,9 @@ int hipGetStreamDeviceId(hipStream_t stream);
  *  @defgroup Graph Graph Management
  *  @{
  *  This section describes the graph management types & functions of HIP runtime API.
+ *
+ *  @note hipGraph_t objects are not thread-safe. It is the user's responsibility to ensure that
+ *  multiple threads do not concurrently access the same hipGraph_t.
  */
 
 /**
@@ -9271,6 +9309,54 @@ hipError_t hipGraphNodeGetDependentNodes(hipGraphNode_t node, hipGraphNode_t* pD
  *
  */
 hipError_t hipGraphNodeGetType(hipGraphNode_t node, hipGraphNodeType* pType);
+
+/**
+ * @brief Returns the local node ID of a graph node.
+ *
+ * @param [in] node - Node to query.
+ * @param [out] nodeId - Returns the node ID.
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * Returns the node ID of @p node in @p nodeId. The value matches the node ID reported by
+ * #hipGraphDebugDotPrint. The local node ID and graph ID together uniquely identify the node.
+ *
+ */
+hipError_t hipGraphNodeGetLocalId(hipGraphNode_t node, unsigned int* nodeId);
+
+/**
+ * @brief Returns an ID used by tools to identify a graph node.
+ *
+ * @param [in] node - Node to query.
+ * @param [out] toolsId - Returns the ID used by tools.
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ */
+hipError_t hipGraphNodeGetToolsId(hipGraphNode_t node, unsigned long long* toolsId);
+
+/**
+ * @brief Returns the ID of a graph.
+ *
+ * @param [in] graph - Graph to query.
+ * @param [out] graphId - Returns the graph ID.
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * Returns the ID of @p graph in @p graphId. The value matches the graph ID reported by
+ * #hipGraphDebugDotPrint.
+ *
+ */
+hipError_t hipGraphGetId(hipGraph_t graph, unsigned int* graphId);
+
+/**
+ * @brief Returns the ID of an executable graph.
+ *
+ * @param [in] graphExec - Executable graph to query.
+ * @param [out] graphId - Returns the executable graph ID.
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * Returns the ID of @p graphExec in @p graphId.
+ *
+ */
+hipError_t hipGraphExecGetId(hipGraphExec_t graphExec, unsigned int* graphId);
 
 /**
  * @brief Remove a node from the graph.

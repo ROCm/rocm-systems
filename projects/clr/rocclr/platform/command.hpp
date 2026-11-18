@@ -104,6 +104,11 @@ class Event : public RuntimeObject {
                                             //!< 2 - system scope, 1 - device scope,
                                             //!< 0 - ignore, -1 - invalid
   std::vector<void*> dep_hw_events_;  //!< Dependent HW events associated with SW event
+  //! HW events that GPU waits of this command read, held until the command completes
+  std::vector<void*> pinned_hw_events_;
+
+  //! Releases pinned_hw_events_
+  void releasePinnedHwEvents();
  protected:
   static const EventWaitList nullWaitList;
   const Device* device_;  //!< Device, this event associated with
@@ -236,6 +241,11 @@ class Event : public RuntimeObject {
 
   //! Returns HW event, associated with the current command
   void* HwEvent() const { return hw_event_; }
+
+  //! Holds a HW event that a GPU wait of this command reads until the command completes, which
+  //! follows the wait. Takes over one reference. Called while the command is submitted, before it
+  //! can complete
+  void PinHwEvent(void* hw_event) { pinned_hw_events_.push_back(hw_event); }
 
   //! Returns notify even associated with the current command
   Event* NotifyEvent() const { return notify_event_; }
