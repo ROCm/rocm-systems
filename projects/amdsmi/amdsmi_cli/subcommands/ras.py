@@ -302,7 +302,7 @@ class RasCommands:
                 )
                 all_json_rows.extend(rows)
             nic_filter = getattr(args, "nic", None)
-            for idx, ainic_handle in enumerate(self.device_handles_ainics):
+            for idx, ainic_handle in enumerate(getattr(self, "device_handles_ainics", [])):
                 if nic_filter is not None and not any(
                     ainic_handle.value == h.value for h in nic_filter
                 ):
