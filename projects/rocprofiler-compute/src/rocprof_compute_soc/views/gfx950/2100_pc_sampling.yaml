@@ -1,0 +1,5 @@
+view: PC Sampling
+alias: pc_sampling
+tables:
+- render: pc_sampling_table
+  title: PC Sampling

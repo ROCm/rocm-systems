@@ -1,0 +1,21 @@
+view: UTCL1 (Translation Cache L1)
+alias: utcl1
+tables:
+- title: UTCL1 Metrics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: utcl1.total_req_from_utcl0
+    label: Total Requests from UTCL0
+  - metric: utcl1.total_returns_to_utcl0
+    label: Total Returns to UTCL0
+  - metric: utcl1.lookup_hit_rate
+  - metric: utcl1.utcl2_req
+  - metric: utcl1.utcl2_returns
+  - metric: utcl1.utcl2_req_lat
+  - metric: utcl1.utcl2_req_stall_rate
+  - metric: utcl1.miss_handler_fifo_full_rate

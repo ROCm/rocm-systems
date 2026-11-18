@@ -1,0 +1,60 @@
+view: Command Processor Compute (CPC)
+alias: cpc
+tables:
+- title: CPC Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: cp.cpc_busy
+  - metric: cp.cpc_idle
+  - metric: cp.cpc_stalled
+- title: CPC Interface Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: cp.tciu_busy
+  - metric: cp.utcl2_busy
+  - metric: cp.gcriu_busy
+- title: MEC Stall Cycles
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: cp.me1_stall_on_rciu_ready
+  - metric: cp.me1_stall_on_memory_rd
+  - metric: cp.me1_stall_on_memory_wr
+  - metric: cp.me1_stall_on_roq_data
+- title: CPC Memory Requests
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: cp.tciu_rd_req
+  - metric: cp.tciu_wr_req
+  - metric: cp.gus_rd_req
+  - metric: cp.gus_wr_req
+- title: MEC Instruction Cache
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: cp.inst_cache_hits
+  - metric: cp.inst_cache_misses
+  - metric: cp.inst_cache_hit_rate

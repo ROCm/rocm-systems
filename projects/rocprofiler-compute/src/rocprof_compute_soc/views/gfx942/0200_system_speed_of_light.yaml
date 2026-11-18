@@ -1,0 +1,55 @@
+view: System Speed-of-Light
+alias: sol
+tables:
+- title: System Speed-of-Light
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+    peak: Peak
+    pct_of_peak: Percent of Peak
+  metrics:
+  - metric: compute.valu_flops
+  - metric: compute.mfma_flops_f8
+  - metric: compute.mfma_flops_bf16
+  - metric: compute.mfma_flops_f16
+  - metric: compute.mfma_flops_f32
+  - metric: compute.mfma_flops_f64
+  - metric: compute.mfma_iops_int8
+  - metric: compute.salu_util
+    pct_of_peak: false
+  - metric: compute.valu_util
+    pct_of_peak: false
+  - metric: compute.mfma_util
+    pct_of_peak: false
+  - metric: compute.vmem_util
+    pct_of_peak: false
+  - metric: compute.branch_util
+    pct_of_peak: false
+  - metric: compute.valu_active_threads
+  - metric: compute.ipc
+  - metric: wave.occupancy
+  - metric: lds.theoretical_bw
+  - metric: lds.bank_conflicts_access
+  - metric: vl1d.hit_rate
+    pct_of_peak: false
+  - metric: vl1d.cache_bw
+  - metric: l2.hit_rate
+    pct_of_peak: false
+  - metric: l2.bw
+  - metric: fabric.rd_bw
+  - metric: fabric.wr_atomic_bw
+  - metric: fabric.rd_lat
+    pct_of_peak: false
+  - metric: fabric.wr_lat
+    pct_of_peak: false
+  - metric: sl1d.hit_rate_excl_dup
+    pct_of_peak: false
+  - metric: sl1d.bw
+  - metric: l1i.hit_rate_excl_dup
+    pct_of_peak: false
+  - metric: l1i.bw
+  - metric: l1i.fetch_lat
+    pct_of_peak: false
+  - metric: compute.cu_util
+    pct_of_peak: false

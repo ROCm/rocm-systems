@@ -1,0 +1,107 @@
+view: Memory Chart
+alias: memchart
+tables:
+- title: Instruction Cache
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: l1i.req
+  - metric: l1i.hit_rate_excl_dup
+  - metric: l1i.gl1_rd_bw
+- title: Scalar Data Cache
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: sl1d.req
+  - metric: sl1d.hit_rate_excl_dup
+  - metric: sl1d.gl1_rd_bw
+- title: TCP Cache (GL0 Vector Cache)
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: gl0.rd_req
+  - metric: gl0.wr_req
+  - metric: gl0.hit_rate
+  - metric: gl0.bw
+- title: LDS (Local Data Share)
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: compute.insts_lds
+    label: LDS Instructions
+  - metric: lds.util
+  - metric: lds.bank_conflict_rate
+  - metric: lds.theoretical_bw
+- title: TCP-GL1 Interface
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: gl0.gl1_rd_bw
+  - metric: gl0.gl1_wr_bw
+- title: GL1 Cache (L1)
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: gl1.util
+  - metric: gl1.hit_rate
+  - metric: gl1.stall_gl2_backpressure
+- title: GL1-GL2 Interface
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: gl1.gl2_rd_bw
+  - metric: gl1.gl2_wr_bw
+- title: GL2 Cache (L2)
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: gl2.util
+  - metric: gl2.hit_rate
+  - metric: gl2.fabric_rd_bw
+  - metric: gl2.fabric_wr_bw
+- title: Graphics Core Efficiency Arbiter (GCEA) to System Memory
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: gcea.sysarb_util
+  - metric: gcea.sysarb_stall_rate
+  - metric: gcea.dram_rd_bw
+  - metric: gcea.dram_wr_bw
+- title: Workgroup Processors (WGPs)
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: wave.occupancy_pct
+    label: Wavefront Occupancy
+    round: 1
+  - metric: dispatch.vgprs
+    round: 0
+  - metric: dispatch.sgprs
+    round: 0
+  - metric: dispatch.lds_allocation
+    round: 0
+  - metric: dispatch.scratch_allocation_per_wave
+    round: 3
+  - metric: dispatch.workgroups_per_wgp
+    label: Workgroups
+    round: 1

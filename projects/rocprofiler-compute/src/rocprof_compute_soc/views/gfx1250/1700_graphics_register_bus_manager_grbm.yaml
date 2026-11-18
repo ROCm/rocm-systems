@@ -1,0 +1,21 @@
+view: GRBM (Graphics Register Bus Manager)
+alias: grbm
+tables:
+- title: GRBM Metrics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: grbm.gpu_active_cycles
+  - metric: grbm.cp_util
+  - metric: spi.workgroup_manager_util
+    label: SPI Utilization
+  - metric: grbm.utcl1_util
+  - metric: grbm.utcl2_util
+  - metric: grbm.gl1_util
+  - metric: grbm.glarb_util
+  - metric: grbm.sdma_util
+  - metric: grbm.ch_util

@@ -1,0 +1,94 @@
+view: GL1 Cache
+alias: gl1
+tables:
+- title: GL1A Processing
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl1.gl1a_util
+  - metric: gl1.gl1a_req_bus_util
+  - metric: gl1.gl1a_return_bus_util
+  - metric: gl1.gl1a_req
+  - metric: gl1.gl1a_req_lat
+- title: GL1C Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl1.util
+    label: GL1C Utilization
+  - metric: gl1.gl1c_return_arbitration_lat
+  - metric: gl1.gl1c_buffer_full_stall
+- title: GL1C Request
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl1.total_req
+    label: GL1C Requests
+  - metric: gl1.rd_req
+  - metric: gl1.wr_req
+  - metric: gl1.gl1c_req_atomic_with_return
+  - metric: gl1.gl1c_req_atomic_without_return
+- title: GL1C Request Bandwidth
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl1.gl1c_req_bw_rd
+  - metric: gl1.gl1c_req_bw_wr
+- title: GL1C Multicast
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl1.gl1c_multicast_tracker_depletion_stall
+  - metric: gl1.gl1c_multicast_req_128b
+  - metric: gl1.gl1c_multicast_req_256b
+  - metric: gl1.gl1c_req_bw_multicast
+  - metric: gl1.gl1c_multicast_tracker_0_timeout_rate
+  - metric: gl1.gl1c_multicast_tracker_1_timeout_rate
+  - metric: gl1.gl1c_multicast_tracker_2_timeout_rate
+  - metric: gl1.gl1c_multicast_tracker_3_timeout_rate
+  - metric: gl1.gl1c_multicast_to_unicast_downgrade_rate
+- title: GL1C-GLARB Interface
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl1.gl2_rd_req
+    label: GL1C-GLARB Read Requests
+  - metric: gl1.gl1c_glarb_rd_req_32b
+  - metric: gl1.gl1c_glarb_rd_req_64b
+  - metric: gl1.gl2_rd_128b_req
+  - metric: gl1.gl1c_glarb_rd_req_256b
+  - metric: gl1.gl2_wr_req
+    label: GL1C-GLARB Write Requests
+  - metric: gl1.gl1c_glarb_wr_req_32b
+  - metric: gl1.gl1c_glarb_wr_req_64b
+  - metric: gl1.gl1c_glarb_wr_req_128b
+  - metric: gl1.gl1c_glarb_wr_req_256b
+  - metric: gl1.gl1c_glarb_rd_lat
+  - metric: gl1.gl1c_glarb_wr_lat
+  - metric: gl1.gl1c_glarb_rd_bw
+  - metric: gl1.gl1c_glarb_wr_bw
+  - metric: gl1.gl1c_glarb_wr_acks

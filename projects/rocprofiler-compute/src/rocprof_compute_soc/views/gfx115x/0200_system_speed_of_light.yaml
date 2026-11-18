@@ -1,0 +1,38 @@
+view: System Speed-of-Light
+alias: sol
+tables:
+- title: System Speed-of-Light
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+    peak: Peak
+    pct_of_peak: Percent of Peak
+  metrics:
+  - metric: compute.valu_flops
+  - metric: compute.valu_flops_f64
+  - metric: compute.ipc
+  - metric: wave.occupancy
+  - metric: gl2.hit_rate
+    pct_of_peak: false
+  - metric: gl2.fabric_rd_bw
+  - metric: gl2.fabric_wr_bw
+  - metric: lds.bank_conflicts
+    pct_of_peak: false
+  - metric: wave.wait_for_any
+    pct_of_peak: false
+  - metric: wave.issue_wait
+    pct_of_peak: false
+  - metric: gl0.hit_rate
+    pct_of_peak: false
+  - metric: gl0.bw
+  - metric: gl1.hit_rate
+    pct_of_peak: false
+  - metric: gl1.gl2_rd_bw
+  - metric: l2.bw
+  - metric: sl1d.hit_rate_excl_dup
+    pct_of_peak: false
+  - metric: sl1d.gl1_rd_bw
+  - metric: l1i.hit_rate_excl_dup
+    pct_of_peak: false
+  - metric: l1i.gl1_rd_bw

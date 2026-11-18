@@ -1,0 +1,40 @@
+view: Instruction Cache
+alias: ins_cache
+tables:
+- title: L1I Speed-of-Light
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: l1i.bw_util
+    label: Bandwidth Utilization
+  - metric: l1i.hit_rate_incl_dup
+  - metric: l1i.l2_bw_util
+- title: L1I cache accesses
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: l1i.req
+    label: Req
+  - metric: l1i.hits
+    label: Hits
+  - metric: l1i.misses_non_duplicated
+    label: Misses - Non Duplicated
+  - metric: l1i.misses_duplicated
+    label: Misses - Duplicated
+  - metric: l1i.hit_rate_incl_dup
+  - metric: l1i.fetch_lat
+- title: L1I <-> L2 interface
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: l1i.l2_bw

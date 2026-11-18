@@ -1,0 +1,40 @@
+view: Wavefront
+alias: wavefront
+tables:
+- title: Wavefront Launch Stats
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: dispatch.grid_size
+  - metric: dispatch.workgroup_size
+  - metric: spi.dispatched_wavefronts
+  - metric: wave.saved
+  - metric: wave.restored
+  - metric: dispatch.vgprs
+  - metric: dispatch.agprs
+  - metric: dispatch.sgprs
+  - metric: dispatch.lds_allocation
+  - metric: dispatch.scratch_allocation
+- title: Wavefront Runtime Stats
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: dispatch.kernel_time
+  - metric: grbm.gui_active_cycles
+  - metric: compute.insts_per_wave
+  - metric: wave.cycles
+  - metric: wave.dep_wait_cycles
+    label: Dependency Wait Cycles
+  - metric: wave.issue_wait_cycles
+    label: Issue Wait Cycles
+  - metric: wave.active_cycles
+    label: Active Cycles
+  - metric: wave.occupancy

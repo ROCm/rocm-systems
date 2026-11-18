@@ -1,0 +1,86 @@
+view: Central Hub (CH)
+alias: ch
+tables:
+- title: CHA Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: ch.cha_util
+    label: Utilization
+- title: CHA Arbitration
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: ch.req_lat
+    label: Request Latency
+  - metric: ch.cha_chc0_req_stall_rate
+  - metric: ch.cha_chc1_req_stall_rate
+  - metric: ch.cha_req_path_util
+  - metric: ch.cha_return_path_util
+- title: CHC Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: ch.chc_util
+    label: Utilization
+  - metric: ch.buffer_stall_rate
+    label: Buffer Stall Rate
+- title: CHC Requests
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: ch.total_req
+    label: Total Requests
+  - metric: ch.total_req_rd
+    label: Total Requests - Read
+  - metric: ch.total_req_32b_rd
+    label: Total Requests - 32B Read
+  - metric: ch.total_req_64b_rd
+    label: Total Requests - 64B Read
+  - metric: ch.total_req_128b_rd
+    label: Total Requests - 128B Read
+  - metric: ch.total_req_256b_rd
+    label: Total Requests - 256B Read
+  - metric: ch.total_req_wr
+    label: Total Requests - Write
+  - metric: ch.total_req_32b_wr
+    label: Total Requests - 32B Write
+  - metric: ch.total_req_64b_wr
+    label: Total Requests - 64B Write
+  - metric: ch.total_req_128b_wr
+    label: Total Requests - 128B Write
+  - metric: ch.total_req_256b_wr
+    label: Total Requests - 256B Write
+  - metric: ch.total_req_atomic_with_return
+    label: Total Requests - Atomic with Return
+  - metric: ch.total_req_atomic_without_return
+    label: Total Requests - Atomic without Return
+- title: CHC Bandwidth and Latency
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: ch.chc_bw_rd
+  - metric: ch.chc_bw_wr
+  - metric: ch.chc_gl2_lat_rd
+  - metric: ch.chc_gl2_lat_wr
+  - metric: ch.chc_return_arbitration_lat

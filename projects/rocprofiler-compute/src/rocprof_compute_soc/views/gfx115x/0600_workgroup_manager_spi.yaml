@@ -1,0 +1,22 @@
+view: Workgroup Manager (SPI)
+alias: spi
+tables:
+- title: SPI Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: spi.workgroup_manager_util
+- title: Wave Dispatch Statistics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: spi.compute_wave_dispatches
+  - metric: spi.wave_dispatch_rate

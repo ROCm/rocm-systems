@@ -1,0 +1,75 @@
+view: Address Processing Unit and Data Return Path (TA/TD)
+alias: tatd
+tables:
+- title: Busy and stall metrics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: ta.busy
+  - metric: ta.address_stall
+    label: Address Stall
+  - metric: ta.data_stall
+    label: Data Stall
+  - metric: ta.data_processor_address_stall
+- title: Instruction counts
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: ta.total_insts
+    label: Total Instructions
+  - metric: ta.global_insts
+    label: Global/Generic Instructions
+  - metric: ta.global_rd_insts
+    label: Global/Generic Read Instructions
+  - metric: ta.global_wr_insts
+    label: Global/Generic Write Instructions
+  - metric: ta.global_atomic_insts
+    label: Global/Generic Atomic Instructions
+  - metric: ta.buffer_insts
+    label: Buffer Instructions
+  - metric: ta.buffer_rd_insts
+    label: Buffer Read Instructions
+  - metric: ta.buffer_wr_insts
+    label: Buffer Write Instructions
+  - metric: ta.buffer_atomic_insts
+    label: Buffer Atomic Instructions
+- title: Spill and stack metrics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: ta.buffer_total_cycles
+    label: Buffer Total Cycles
+  - metric: ta.buffer_coalesced_rd
+    label: Buffer Coalesced Read
+  - metric: ta.buffer_coalesced_wr
+    label: Buffer Coalesced Write
+- title: Vector L1 data-return path or Texture Data (TD)
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: td.busy
+  - metric: td.tc_stall
+  - metric: td.coalescable_insts
+    label: Coalescable Instructions
+  - metric: td.rd_insts
+    label: Read Instructions
+  - metric: td.wr_insts
+    label: Write Instructions
+  - metric: td.atomic_insts
+    label: Atomic Instructions

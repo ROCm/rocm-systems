@@ -1,0 +1,19 @@
+view: GL0 Texture Data (TXD)
+alias: txd
+tables:
+- title: TXD Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: txd.util
+    label: Utilization
+  - metric: txd.stalled_by_gl0_cache_lds
+  - metric: txd.output_stalled_by_shader
+  - metric: txd.output_stalled_by_spi_wr_to_shader
+  - metric: txd.shader_bus_util_lds_return
+  - metric: txd.shader_bus_util_gl0_return
+  - metric: txd.cache_return_stalled_by_txd

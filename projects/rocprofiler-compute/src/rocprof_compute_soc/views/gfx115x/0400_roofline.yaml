@@ -1,0 +1,39 @@
+view: Roofline
+alias: roof
+tables:
+- title: Roofline Performance Rates
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+    peak: Peak (Empirical)
+  metrics:
+  - metric: compute.valu_flops
+    peak: empirical
+  - metric: compute.valu_flops_f64
+    peak: empirical
+  - metric: gl1.gl2_bw
+    label: GL2 Cache Bandwidth
+    peak: empirical
+  - metric: gl0.gl1_cache_bw
+    label: GL1 Cache Bandwidth
+    peak: empirical
+  - metric: gl0.bw
+    peak: empirical
+  - metric: lds.theoretical_bw
+    peak: empirical
+- title: Roofline Plot Points
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: l2.ai
+    label: AI L2
+  - metric: vl1d.ai
+    label: AI L1
+  - metric: gl0.ai
+    label: AI L0
+  - metric: lds.ai
+    label: AI LDS
+  - metric: compute.total_flops
