@@ -192,7 +192,15 @@ TEST(hsa, dispatch_time_signal_lifecycle)
 
     hsa::retain_dispatch_time(signal);
     hsa::release_dispatch_time(signal);
-    ASSERT_EQ(hsa::query_dispatch_time(agent, signal, &time, query), HSA_STATUS_SUCCESS);
+    const auto unexpected_runtime_query =
+        [](hsa_agent_t, hsa_signal_t, hsa_amd_profiling_dispatch_time_t*) {
+            ADD_FAILURE() << "A cached query must not read the replacement signal";
+            return HSA_STATUS_ERROR;
+        };
+    time = {};
+    ASSERT_EQ(hsa::query_dispatch_time(agent, signal, &time, unexpected_runtime_query),
+              HSA_STATUS_SUCCESS);
+    EXPECT_EQ(time.start, 128);
     EXPECT_EQ(time.end, 138);
     hsa::forget_dispatch_time(signal);
     hsa::store_dispatch_time(signal, pending, query);

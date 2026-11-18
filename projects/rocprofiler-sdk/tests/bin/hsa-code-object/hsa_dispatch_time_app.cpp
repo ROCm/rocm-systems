@@ -74,8 +74,8 @@ signal_hints_supported(hsa_agent_t agent)
 constexpr uint32_t num_elements    = 1u << 26;
 constexpr uint64_t min_duration_ns = 10000;
 constexpr int      iterations      = 8;
-// Bounded drain: the monitor and queue phase share 30 s and the copy wait allows up to 30 s more.
-constexpr auto max_shutdown_duration = std::chrono::seconds{65};
+// Allow scheduling and runtime teardown overhead in addition to the shared drain budget.
+constexpr auto max_shutdown_duration = std::chrono::seconds{45};
 }  // namespace
 
 int
@@ -96,6 +96,16 @@ main(int argc, char** argv)
         fprintf(stderr, "No GPU agent found; cannot run test.\n");
         return EXIT_FAILURE;
     }
+
+    constexpr auto ns_per_second = uint64_t{1'000'000'000};
+    auto           timestamp_hz  = uint64_t{0};
+    status = hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &timestamp_hz);
+    RET_IF_HSA_ERR(status)
+    if(timestamp_hz == 0 || timestamp_hz > ns_per_second) return EXIT_FAILURE;
+    // The trace fixture scales timestamps by the integer nanoseconds per tick.
+    const auto ns_per_tick = ns_per_second / timestamp_hz;
+    const auto min_duration_ticks =
+        (min_duration_ns * timestamp_hz + ns_per_second - 1) / ns_per_second;
 
     auto agent = obj.gpu[0].agent;
     char agent_name[64];
@@ -192,7 +202,7 @@ main(int argc, char** argv)
 
         auto kernel_time = hsa_amd_profiling_dispatch_time_t{};
         status           = wait_and_get_time(signal, kernel_time);
-        if(status != HSA_STATUS_SUCCESS || kernel_time.end < kernel_time.start + min_duration_ns)
+        if(status != HSA_STATUS_SUCCESS || kernel_time.end < kernel_time.start + min_duration_ticks)
         {
             fprintf(stderr,
                     "dispatch %d: hsa_amd_profiling_get_dispatch_time returned %d (start=%lu "
@@ -205,7 +215,8 @@ main(int argc, char** argv)
         }
 
         if(application_times.is_open())
-            application_times << kernel_time.start << ',' << kernel_time.end << '\n';
+            application_times << kernel_time.start * ns_per_tick << ','
+                              << kernel_time.end * ns_per_tick << '\n';
 
         auto invalid_agent_time = hsa_amd_profiling_dispatch_time_t{};
         status = hsa_amd_profiling_get_dispatch_time(obj.cpu[0].agent, signal, &invalid_agent_time);
@@ -249,7 +260,8 @@ main(int argc, char** argv)
 
         auto shared_time = hsa_amd_profiling_dispatch_time_t{};
         status           = wait_and_get_time(signal, shared_time);
-        if(status != HSA_STATUS_SUCCESS || shared_time.end >= shared_time.start + min_duration_ns)
+        if(status != HSA_STATUS_SUCCESS ||
+           shared_time.end >= shared_time.start + min_duration_ticks)
         {
             fprintf(stderr,
                     "kernel and barrier %d: hsa_amd_profiling_get_dispatch_time returned %d "
@@ -310,6 +322,21 @@ main(int argc, char** argv)
                                            1,
                                            &dependency,
                                            blocked_copy);
+        RET_IF_HSA_ERR(status)
+    }
+
+    else
+    {
+        auto copy_done = hsa_signal_t{};
+        status         = hsa_signal_create(1, 0, nullptr, &copy_done);
+        RET_IF_HSA_ERR(status)
+        status =
+            hsa_amd_memory_async_copy(args->a, agent, args->b, agent, 4096, 0, nullptr, copy_done);
+        RET_IF_HSA_ERR(status)
+        while(hsa_signal_wait_scacquire(
+                  copy_done, HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_BLOCKED) >= 1)
+        {}
+        status = hsa_signal_destroy(copy_done);
         RET_IF_HSA_ERR(status)
     }
 

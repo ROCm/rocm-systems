@@ -44,7 +44,8 @@ def node_exists(name, data, min_len=1):
 
 def test_app_dispatch_time(dispatch_times):
     """Compare application queries with the corresponding profiled kernels."""
-    application, trace = dispatch_times
+    application, trace, copies = dispatch_times
+    assert any(row["Direction"] == "MEMORY_COPY_DEVICE_TO_DEVICE" for row in copies)
     kernels = sorted(
         (row for row in trace if row["Kernel_Name"] == "copyA"),
         key=lambda row: int(row["Dispatch_Id"]),

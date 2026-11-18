@@ -347,13 +347,12 @@ start_completion_monitor();
  * pooled signals and correlation-id references are released. Must run before the signal pool is
  * torn down, so those releases target a live pool. A batch whose completion signal never dropped
  * produces no dispatch record and keeps its pooled signal, since its timestamps were never
- * written and the GPU may still write to that signal. Every caller returns with the monitor
- * thread dead and every record delivered, waiting on the record emitter to do so. Producers still
- * inside the doorbell path are not waited on; they see the monitor stopped and dispose of their
- * own batch.
+ * written and the GPU may still write to that signal. With wait_for_records disabled, only
+ * the HSA monitor is joined; the caller must retain state used by any pending record deliveries.
+ * Producers still inside the doorbell path see the stopped monitor and dispose of their own batch.
  */
 void
-stop_completion_monitor();
+stop_completion_monitor(bool wait_for_records = true);
 }  // namespace queue_interposition
 }  // namespace hsa
 }  // namespace rocprofiler

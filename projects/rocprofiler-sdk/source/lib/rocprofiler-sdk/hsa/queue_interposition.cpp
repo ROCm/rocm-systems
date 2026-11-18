@@ -2339,7 +2339,8 @@ interposition_sync()
 bool
 interposition_sync_until(std::chrono::steady_clock::time_point deadline)
 {
-    return drain_completion_monitor(deadline);
+    if(registration::get_fini_status() > 0 || internal_threading::fork_stale()) return true;
+    return wait_for_inflight_drain(get_completion_monitor(), deadline);
 }
 
 // Create the wake signal and launch the monitor thread. A second call while it is already
@@ -2382,9 +2383,9 @@ start_completion_monitor()
         if(!admitted) return;
 
         // Stand the record emitter up before the monitor, so the first batch the monitor retires
-        // already has somewhere to send its records. Created once and kept across cycles: a stop
-        // joins it, so it holds no work from a previous one. create_task_group brackets its own
-        // thread creation with the internal-thread notifications.
+        // already has somewhere to send its records. It is kept across HSA runtime cycles and
+        // joined before SDK finalization destroys callback state. create_task_group brackets its
+        // own thread creation with the internal-thread notifications.
         if(!mon.record_emitter) mon.record_emitter = internal_threading::create_task_group(1);
 
         // Bracket creation with the internal-thread notifications so tools honoring the
@@ -2396,11 +2397,10 @@ start_completion_monitor()
     });
 }
 
-// Stop the monitor, wake it so it observes the state change, and join. Every caller returns with
-// the monitor thread dead, every registered batch retired, and every record delivered -- a second
-// caller blocks on the handle lock until the first has finished rather than returning early.
+// Stop all monitor HSA access before the runtime closes. Record delivery can be joined separately
+// when the SDK is about to free state used by tool callbacks.
 void
-stop_completion_monitor()
+stop_completion_monitor(bool wait_for_records)
 {
     // Finalization has completed: destroy_static_objects has nulled the monitor's static_object, so
     // a second hsa_shut_down from another DSO's teardown must not construct or dereference it.
@@ -2431,18 +2431,8 @@ stop_completion_monitor()
         mon.wake_signal = {};
     });
 
-    // Outside the lock, and every caller does it, not just the one that won the exchange. Outside,
-    // because a tool callback running on the emitter can re-enter this function and would otherwise
-    // wait for a lock held by the thread waiting for that callback. Every caller, because the loser
-    // of the exchange goes straight on to signal-pool teardown and correlation-id finalization, and
-    // records still in the emitter name both.
-    //
-    // This wait is unbounded: it ends when the tool callbacks queued on the emitter return. It is
-    // the only drain that runs on this path -- drain_completion_monitor, which
-    // queue_controller_fini reaches through queue_controller_sync just before this call, returns
-    // immediately once finalization has begun, leaving force_retire_all above and this join to
-    // dispose of everything.
-    if(mon.record_emitter) mon.record_emitter->join();
+    // Only SDK finalization waits for tool callbacks here, outside the monitor lock.
+    if(wait_for_records && mon.record_emitter) mon.record_emitter->join();
 }
 
 void

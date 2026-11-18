@@ -104,7 +104,8 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 95
     WSL_TIMEOUT_SCALE
     LABELS "integration-tests"
-    ENVIRONMENT "ROCPROFILER_QUEUE_INTERPOSITION=0" "${ROCPROFV3_PRELOAD_ENV}"
+    ENVIRONMENT "ROCPROFILER_QUEUE_INTERPOSITION=0"
+                "ROCPROFILER_CI_FREQ_SCALE_TIMESTAMPS=1" "${ROCPROFV3_PRELOAD_ENV}"
     FIXTURES_SETUP kernel-tracing-app-dispatch-time)
 
 rocprofiler_add_integration_validate_test(
@@ -119,10 +120,13 @@ rocprofiler_add_integration_validate_test(
     ARGS --application-times
          ${CMAKE_CURRENT_BINARY_DIR}/app-dispatch-time-application-times.csv
          --kernel-trace
-         ${CMAKE_CURRENT_BINARY_DIR}/app-dispatch-time-trace/out_kernel_trace.csv)
+         ${CMAKE_CURRENT_BINARY_DIR}/app-dispatch-time-trace/out_kernel_trace.csv
+         --memory-copy-trace
+         ${CMAKE_CURRENT_BINARY_DIR}/app-dispatch-time-trace/out_memory_copy_trace.csv)
 
-# Same fixture, but the queue is left holding a kernel and an intercepted copy behind a dependency
-# that is never satisfied. Final shutdown must abandon that work instead of waiting for it.
+# Same fixture, but the queue is left holding a kernel and an intercepted copy behind a
+# dependency that is never satisfied. Final shutdown must abandon that work instead of
+# waiting for it.
 rocprofiler_add_integration_execute_test(
     kernel-tracing-app-dispatch-time-blocked
     COMMAND

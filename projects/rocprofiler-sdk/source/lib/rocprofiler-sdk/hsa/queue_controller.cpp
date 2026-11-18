@@ -1190,54 +1190,60 @@ queue_controller_sync()
     return _drained;
 }
 
-void
-queue_controller_shutdown()
+bool
+queue_controller_drain_until(std::chrono::steady_clock::time_point deadline)
 {
-    if(auto* controller = common::static_object<QueueController>::get())
+    auto* controller = common::static_object<QueueController>::get();
+    if(!controller || internal_threading::fork_stale()) return true;
+
+    const bool monitor_drained = queue_interposition::interposition_sync_until(deadline);
+    bool       queues_drained  = false;
+    do
     {
-        if(internal_threading::fork_stale()) return;
+        queues_drained = true;
+        controller->iterate_queues([&queues_drained](const Queue* queue) {
+            queues_drained = queues_drained && (queue->active_async_packets() == 0);
+        });
+        const auto now = std::chrono::steady_clock::now();
+        if(queues_drained || now >= deadline) break;
+        std::this_thread::sleep_until(std::min(deadline, now + std::chrono::milliseconds{2}));
+    } while(true);
 
-        // Wait for in-flight work before the runtime is invalidated, but do not wait forever: a
-        // submission whose dependency the application never satisfies does not complete, and
-        // hsa_shut_down must still return. On timeout the handler state those submissions own is
-        // left to the runtime's own reclamation rather than being freed here, because the
-        // runtime may still deliver their completions.
-        const auto deadline        = std::chrono::steady_clock::now() + std::chrono::seconds{30};
-        const bool monitor_drained = queue_interposition::interposition_sync_until(deadline);
-        // The monitor counter and the per-queue counters track different work, so they are polled
-        // separately: a busy queue must not be able to mask a monitor timeout, and a monitor
-        // timeout must not be able to fail an otherwise finished queue. Each poll re-derives its
-        // own result, so a queue that finishes mid-wait still lets shutdown proceed.
-        bool queues_drained = false;
-        do
-        {
-            queues_drained = true;
-            controller->iterate_queues([&queues_drained](const Queue* queue) {
-                queues_drained = queues_drained && (queue->active_async_packets() == 0);
-            });
-            if(queues_drained) break;
-            std::this_thread::sleep_for(std::chrono::milliseconds{2});
-        } while(std::chrono::steady_clock::now() < deadline);
+    const bool copies_drained = async_copy_sync(deadline);
+    return monitor_drained && queues_drained && copies_drained;
+}
 
-        const bool copies_drained = async_copy_sync();
-        const bool drained        = monitor_drained && queues_drained && copies_drained;
-        queue_interposition::stop_completion_monitor();
-        if(drained)
-        {
-            controller->reset();
-            async_copy_retire();
-            queue_fini();
-            queue_interposition::get_queue_registry().wlock([](auto& map) { map.clear(); });
-        }
-        else
-        {
-            // Keep completion state alive when the runtime may still deliver completions for it.
-            // The runtime invalidates its own resources at shutdown; the SDK-owned state behind
-            // these handlers is not reclaimed by it and is released with the process.
-            ROCP_WARNING << "HSA completion drain timed out; retaining completion state for the "
-                            "life of the process";
-        }
+void
+queue_controller_shutdown(bool drained)
+{
+    auto* controller = common::static_object<QueueController>::get();
+    if(!controller || internal_threading::fork_stale()) return;
+
+    // A ROCr retry can enter the interceptor after the first drain. Close admission before
+    // retiring the callback data and check for completions registered since that drain.
+    drained = close_queue_write_interceptors() && drained;
+    if(drained)
+    {
+        controller->iterate_queues([&drained](const Queue* queue) {
+            drained = drained && (queue->active_async_packets() == 0);
+        });
+        drained = drained &&
+                  queue_interposition::interposition_sync_until(std::chrono::steady_clock::now());
     }
+
+    // Stop HSA access by the monitor, but leave host record delivery to SDK finalization.
+    queue_interposition::stop_completion_monitor(false);
+    if(!drained)
+    {
+        ROCP_WARNING << "HSA completion drain timed out; retaining completion state for the "
+                        "life of the process";
+        return;
+    }
+
+    controller->reset();
+    async_copy_retire();
+    queue_fini();
+    queue_interposition::get_queue_registry().wlock([](auto& map) { map.clear(); });
 }
 
 void

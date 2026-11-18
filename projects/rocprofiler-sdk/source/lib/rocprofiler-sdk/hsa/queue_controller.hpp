@@ -32,6 +32,7 @@
 #include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -207,9 +208,13 @@ queue_controller_init(HsaApiTable* table);
 void
 queue_controller_fini();
 
-// Drain and retire HSA-backed queue state before the final runtime shutdown.
+// Wait for queue and copy completions without closing admission or retiring resources.
+bool
+queue_controller_drain_until(std::chrono::steady_clock::time_point deadline);
+
+// Stop the HSA monitor and retire resources only if completions are drained.
 void
-queue_controller_shutdown();
+queue_controller_shutdown(bool drained);
 
 // Best-effort drain of every intercepted queue. Returns false if any queue's drain timed out with
 // kernels still active, so callers that tear state down behind the drain can say so; callers that

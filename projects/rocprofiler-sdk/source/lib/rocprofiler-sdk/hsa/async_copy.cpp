@@ -48,10 +48,11 @@
 
 #include <hsa/hsa.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
-#include <limits>
 #include <mutex>
+#include <thread>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
@@ -326,9 +327,9 @@ struct active_signals
     active_signals& operator=(const active_signals&) = delete;
     active_signals& operator=(active_signals&&) noexcept = delete;
 
-    void create();          // create hsa signal
-    void destroy();         // destroy hsa signal
-    bool sync();            // wait for outstanding signal completion callbacks
+    void create();   // create hsa signal
+    void destroy();  // destroy hsa signal
+    bool sync(std::chrono::steady_clock::time_point deadline);
     void fetch_add(int v);  // increment hsa signal value
     void fetch_sub(int v);  // decrement hsa signal value
 
@@ -375,45 +376,36 @@ active_signals::destroy()
 }
 
 bool
-active_signals::sync()
+active_signals::sync(std::chrono::steady_clock::time_point deadline)
 {
-    // The runtime invalidated this signal at final shutdown; waiting on it would call into a
-    // closed runtime.
-    if(m_signal.handle == 0 || is_runtime_shutdown()) return m_count.load() == 0;
+    auto outstanding = m_count.load();
+    if(outstanding == 0) return true;
+    if(m_signal.handle == 0 || is_runtime_shutdown()) return false;
 
 #if defined(ROCPROFILER_CI_STRICT_TIMESTAMPS) && ROCPROFILER_CI_STRICT_TIMESTAMPS > 0
-    constexpr auto timeout_sec = std::chrono::seconds{5};
+    constexpr auto timeout = std::chrono::seconds{5};
 #else
-    // wait a maximum of thirty seconds
-    constexpr auto timeout_sec = std::chrono::seconds{30};
+    constexpr auto timeout = std::chrono::seconds{30};
 #endif
 
-    // hsa_signal_wait_*_fn takes its timeout in system-timestamp ticks, not nanoseconds. This
-    // returns nanoseconds per tick, so divide rather than multiply.
-    const auto ns_per_tick = get_hsa_timestamp_period();
-    const auto timeout_ticks =
-        (ns_per_tick == 0)
-            ? std::numeric_limits<uint64_t>::max()
-            : std::chrono::duration_cast<std::chrono::nanoseconds>(timeout_sec).count() /
-                  ns_per_tick;
+    using clock_type             = std::chrono::steady_clock;
+    deadline                     = std::min(deadline, clock_type::now() + timeout);
+    constexpr auto poll_interval = std::chrono::microseconds{100};
+    const auto     initial       = outstanding;
 
-    if(m_count.load() > 0)
+    // Only the host counter reaches zero after handlers have finished releasing their signals.
+    while(outstanding != 0)
     {
-        auto _cnt_beg      = m_count.load();
-        auto _signal_value = get_core_table()->hsa_signal_wait_scacquire_fn(
-            m_signal, HSA_SIGNAL_CONDITION_LT, 1, timeout_ticks, HSA_WAIT_STATE_ACTIVE);
-        auto _cnt_end = m_count.load();
-        if(_signal_value != 0)
-        {
-            ROCP_CI_LOG_IF(WARNING, _cnt_end > 0)
-                << "rocprofiler-sdk timed out after " << timeout_sec.count()
-                << " seconds waiting for " << _cnt_beg
-                << " completion callbacks from HSA for async memory copy tracing. " << _cnt_end
-                << " completion callbacks were not delivered";
-        }
+        const auto now = clock_type::now();
+        if(now >= deadline) break;
+        std::this_thread::sleep_until(std::min(deadline, now + poll_interval));
+        outstanding = m_count.load();
     }
 
-    return m_count.load() == 0;
+    ROCP_CI_LOG_IF(WARNING, outstanding > 0)
+        << "rocprofiler-sdk timed out waiting for " << initial
+        << " HSA async memory copy completion callbacks; " << outstanding << " still outstanding";
+    return outstanding == 0;
 }
 
 void
@@ -1684,11 +1676,11 @@ async_copy_init(hsa_api_table_t* _orig, uint64_t _tbl_instance)
 }
 
 bool
-async_copy_sync()
+async_copy_sync(std::chrono::steady_clock::time_point deadline)
 {
     if(!async_copy::get_active_signals()) return true;
 
-    return async_copy::get_active_signals()->sync();
+    return async_copy::get_active_signals()->sync(deadline);
 }
 
 void

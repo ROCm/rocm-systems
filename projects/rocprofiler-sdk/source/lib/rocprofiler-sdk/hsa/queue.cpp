@@ -311,6 +311,10 @@ dispatch_time_cache::clear()
 
 constexpr auto null_hsa_signal = hsa_signal_t{.handle = 0};
 
+// The high bit closes admission; the other bits count interceptors that may use Queue state.
+constexpr auto write_interceptors_closed = uint64_t{1} << 63;
+auto           write_interceptors        = std::atomic<uint64_t>{0};
+
 dispatch_time_cache*
 get_dispatch_time_cache()
 {
@@ -747,20 +751,38 @@ WriteInterceptor(const void* packets,
                  void*                                 data,
                  hsa_amd_queue_intercept_packet_writer writer)
 {
-    // every packet, traced or not, starts a new use of its completion signal
-    for(size_t i = 0; i < pkt_count; ++i)
+    auto admitted = write_interceptors.load();
+    do
     {
-        const auto& _packet = static_cast<const rocprofiler_packet*>(packets)[i];
-        auto        _type   = bit_extract(_packet.kernel_dispatch.header,
-                                 HSA_PACKET_HEADER_TYPE,
-                                 HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
-        if(_type != HSA_PACKET_TYPE_INVALID)
-            forget_dispatch_time(_packet.kernel_dispatch.completion_signal);
-    }
+        // ROCr can invoke a retry after shutdown has started retiring the Queue objects.
+        if(admitted & write_interceptors_closed)
+        {
+            writer(packets, pkt_count);
+            return;
+        }
+    } while(!write_interceptors.compare_exchange_weak(admitted, admitted + 1));
+    auto leave = common::scope_destructor{[]() { write_interceptors.fetch_sub(1); }};
+
+    const auto forget_packet = [](const auto& packet, auto type) {
+        if(type != HSA_PACKET_TYPE_INVALID && packet.completion_signal != null_hsa_signal)
+            forget_dispatch_time(packet.completion_signal);
+    };
+    const auto forward_packets = [&]() {
+        for(size_t i = 0; i < pkt_count; ++i)
+        {
+            const auto& packet = static_cast<const rocprofiler_packet*>(packets)[i].kernel_dispatch;
+            const auto  type =
+                bit_extract(packet.header,
+                            HSA_PACKET_HEADER_TYPE,
+                            HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
+            forget_packet(packet, type);
+        }
+        writer(packets, pkt_count);
+    };
 
     if(registration::get_fini_status() > 0)
     {
-        writer(packets, pkt_count);
+        forward_packets();
         return;
     }
 
@@ -826,7 +848,7 @@ WriteInterceptor(const void* packets,
     if(pkt_count == 0 || (no_real_consumers && !graph_launch_active && !has_kernel_replay &&
                           !hip::event::is_active()))
     {
-        writer(packets, pkt_count);
+        forward_packets();
         return;
     }
 
@@ -860,7 +882,7 @@ WriteInterceptor(const void* packets,
 
     if(num_dispatch_packets == 0 && !hip::event::is_active())
     {
-        writer(packets, pkt_count);
+        forward_packets();
         return;
     }
 
@@ -897,7 +919,7 @@ WriteInterceptor(const void* packets,
     if(graph_launch_active && no_real_consumers && !has_kernel_replay && !hip::event::is_active())
     {
         gls->dispatch_count += num_dispatch_packets;
-        writer(packets, pkt_count);
+        forward_packets();
         return;
     }
 
@@ -943,7 +965,7 @@ WriteInterceptor(const void* packets,
     // just write packet through without tracing
     if(!corr_id)
     {
-        writer(packets, pkt_count);
+        forward_packets();
         return;
     }
 
@@ -961,6 +983,7 @@ WriteInterceptor(const void* packets,
 
     auto process_packet_batch = [&queue,
                                  &corr_id,
+                                 &forget_packet,
                                  tracing_data_v,
                                  hip_event_tracing_data_v,
                                  has_kernel_replay](
@@ -992,8 +1015,7 @@ WriteInterceptor(const void* packets,
                             HSA_PACKET_HEADER_TYPE,
                             HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
             // in packet order, so a later packet sharing the signal drops an earlier kernel's time
-            if(packet_type != HSA_PACKET_TYPE_INVALID)
-                forget_dispatch_time(original_packet.completion_signal);
+            forget_packet(original_packet, packet_type);
             bool is_kernel_dispatch     = (packet_type == HSA_PACKET_TYPE_KERNEL_DISPATCH);
             bool is_ext_kernel_dispatch = false;
 
@@ -1975,13 +1997,11 @@ Queue::release_signal(pooled_signal_t* signal)
 {
     if(signal && signal->in_use())
     {
-        // signal->get().data = nullptr;
+        const auto handle = signal->get().value.handle;
+        const auto index  = signal->index();
         ROCP_WARNING_IF(!signal->release())
-            << fmt::format("Failed to release a pooled signal: hsa_signal_t{{.handle={}}}",
-                           signal->get().value.handle);
-        ROCP_TRACE << fmt::format("released signal {}: hsa_signal_t{{.handle={}}}",
-                                  signal->index(),
-                                  signal->get().value.handle);
+            << fmt::format("Failed to release a pooled signal: hsa_signal_t{{.handle={}}}", handle);
+        ROCP_TRACE << fmt::format("released signal {}: hsa_signal_t{{.handle={}}}", index, handle);
     }
 }
 
@@ -2048,6 +2068,19 @@ void
 queue_init()
 {
     // placeholder for future global init if required
+}
+
+bool
+close_queue_write_interceptors()
+{
+    const auto active = write_interceptors.fetch_or(write_interceptors_closed);
+    return (active & ~write_interceptors_closed) == 0;
+}
+
+void
+open_queue_write_interceptors()
+{
+    write_interceptors.fetch_and(~write_interceptors_closed);
 }
 
 void

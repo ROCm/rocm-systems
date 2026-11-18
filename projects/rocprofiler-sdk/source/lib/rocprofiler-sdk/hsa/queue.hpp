@@ -285,6 +285,13 @@ dispatch_time_init(HsaApiTable* table, uint64_t tbl_instance);
 void
 dispatch_time_reset();
 
+// Close admission and report whether all admitted write interceptors have returned.
+bool
+close_queue_write_interceptors();
+
+void
+open_queue_write_interceptors();
+
 void
 queue_fini();
 }  // namespace hsa

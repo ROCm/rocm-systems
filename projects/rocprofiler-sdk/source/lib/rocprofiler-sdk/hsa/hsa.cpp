@@ -35,6 +35,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
 #include "lib/rocprofiler-sdk/hsa/utils.hpp"
+#include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
@@ -48,8 +49,10 @@
 
 #include <dlfcn.h>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 #include <type_traits>
 #include <utility>
 
@@ -552,59 +555,86 @@ should_wrap_functor(const context::context_array_t&     _contexts,
     return false;
 }
 
-auto hsa_reference_count_value = std::atomic<int>{0};
-auto runtime_shutdown_value    = std::atomic<bool>{false};
+auto       hsa_reference_count_value = std::atomic<int>{0};
+auto       runtime_shutdown_value    = std::atomic<bool>{false};
+std::mutex hsa_lifecycle_mutex       = {};
+uint64_t   hsa_init_epoch            = 0;
 
 hsa_status_t
 hsa_init_refcnt_impl()
 {
-    // Count the reference before the runtime call, not after it: a shutdown on another thread must
-    // not be able to observe a count that excludes this reference and retire state the caller is
-    // about to own. On failure the count is put back.
-    ++hsa_reference_count_value;
-    auto _status = get_core_table()->hsa_init_fn();
+    if(internal_threading::fork_stale()) return get_core_table()->hsa_init_fn();
 
-    if(_status != HSA_STATUS_SUCCESS)
     {
-        --hsa_reference_count_value;
-        return _status;
+        auto lock = std::lock_guard{hsa_lifecycle_mutex};
+        // A runtime table installed during native init must see this reference already counted.
+        ++hsa_reference_count_value;
+        auto status = get_core_table()->hsa_init_fn();
+        if(status != HSA_STATUS_SUCCESS)
+        {
+            --hsa_reference_count_value;
+            return status;
+        }
+        ++hsa_init_epoch;
+        if(runtime_shutdown_value.exchange(false)) open_queue_write_interceptors();
     }
 
-    // Start the monitor after hsa_init_fn and only when it succeeded: creating the wake signal
-    // needs an open runtime. Starting again is harmless, since start_completion_monitor returns
-    // early when the monitor is already running. Without this, interception stays off for the
-    // rest of the process once a full shutdown has stopped the monitor.
-    runtime_shutdown_value.store(false);
-    ::rocprofiler::hsa::queue_interposition::start_completion_monitor();
+    // Thread-creation notifications can call into tools, so start outside the lifecycle lock.
+    queue_interposition::start_completion_monitor();
+    return HSA_STATUS_SUCCESS;
+}
 
-    return _status;
+// The native transition and its SDK bookkeeping must be ordered together.
+hsa_status_t
+hsa_release_reference()
+{
+    auto status = get_core_table()->hsa_shut_down_fn();
+    if(status == HSA_STATUS_SUCCESS && --hsa_reference_count_value == 0)
+        runtime_shutdown_value.store(true);
+    return status;
 }
 
 hsa_status_t
 hsa_shut_down_refcnt_impl()
 {
-    if(hsa_reference_count_value > 0)
-    {
-        // Elect exactly one final shutdown. Decrement-and-test in two steps lets two callers both
-        // observe zero and both run the retirement below.
-        if(hsa_reference_count_value.fetch_sub(1) == 1)
-        {
-            // F24 terminal fail-closed fence: after real hsa_shut_down the runtime
-            // frees SDMA/signal state, so no callback-capable signal-less completion
-            // may survive. On timeout abandon+disable process-wide. No-op with the
-            // feature off.
-            ::rocprofiler::kfd::signal_less_fence_completions();
-            queue_controller_shutdown();
-            dispatch_time_reset();
-            async_copy_reset();
+    if(internal_threading::fork_stale()) return get_core_table()->hsa_shut_down_fn();
 
-            auto _status = get_core_table()->hsa_shut_down_fn();
-            if(_status == HSA_STATUS_SUCCESS) runtime_shutdown_value.store(true);
-            return _status;
+    auto lock = std::unique_lock{hsa_lifecycle_mutex};
+    if(hsa_reference_count_value == 0) return HSA_STATUS_SUCCESS;
+    if(hsa_reference_count_value > 1) return hsa_release_reference();
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{30};
+    bool       drained  = false;
+    bool       fenced   = false;
+    do
+    {
+        const auto epoch = hsa_init_epoch;
+        // The caller still owns a native reference. Admit init while waiting for callbacks,
+        // including callbacks that acquire and release their own runtime reference.
+        lock.unlock();
+        drained = queue_controller_drain_until(deadline);
+        lock.lock();
+        if(hsa_reference_count_value > 1) return hsa_release_reference();
+
+        if(!fenced)
+        {
+            // Signal-less completion owns a separate terminal fence that can run tool code.
+            lock.unlock();
+            kfd::signal_less_fence_completions();
+            lock.lock();
+            fenced = true;
+            if(hsa_reference_count_value > 1) return hsa_release_reference();
         }
-        return get_core_table()->hsa_shut_down_fn();
-    }
-    return HSA_STATUS_SUCCESS;
+
+        if(epoch == hsa_init_epoch) break;
+        // Another reference may have come and gone during the drain, submitting more work.
+        drained = false;
+    } while(std::chrono::steady_clock::now() < deadline);
+
+    queue_controller_shutdown(drained);
+    dispatch_time_reset();
+    async_copy_reset();
+    return hsa_release_reference();
 }
 
 template <size_t TableIdx, typename LookupT = internal_table, typename Tp, size_t OpIdx>
