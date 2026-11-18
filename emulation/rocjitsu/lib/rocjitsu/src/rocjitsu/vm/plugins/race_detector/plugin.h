@@ -91,6 +91,7 @@ util::FailureOr<std::string> formatTrace(
 /// @brief Describe a violation: the hazard direction, the current access at
 /// `access_pc`, the conflicting event, and that event's completion and
 /// synchronization observed by the detector, with counter names for `arch`.
+/// Wave-local GDS source locks supply their producing instruction directly.
 /// @throws std::out_of_range if `events` no longer holds the conflicting event.
 /// @throws std::invalid_argument for an architecture without a wait-counter model.
 /// @throws std::logic_error if the event is already retired.
@@ -110,9 +111,26 @@ struct RaceWavefrontState : WavefrontState {
   };
   std::optional<LdsOperandRead> lds_operand_read;
 
-  // Inline image queries write every selected DWORD on the same
+  struct MixedLdsAccess {
+    struct Lane {
+      int address;
+      int lane;
+      int bytes;
+      uint8_t atomic_bytes;
+    };
+    EventId event;
+    MemoryOrderClass order;
+    bool reads;
+    bool writes;
+    std::vector<Lane> lanes;
+    IntervalSet intervals;
+  };
+  std::optional<MixedLdsAccess> mixed_lds;
+
+  // The GFX10 and GFX11 inline image queries write every selected DWORD on the same
   // active lanes. Gather the actual register writes until execution succeeds.
   struct ImageQuery {
+    amdgpu::VmemWriteback type;
     amdgpu::WaitCounterType counter;
     uint64_t lanes = 0;
     std::vector<uint32_t> registers;
@@ -123,7 +141,9 @@ struct RaceWavefrontState : WavefrontState {
 class RaceDetectorPlugin : public ExecutionPlugin,
                            public AmdgpuTrapEntryObserver,
                            public AmdgpuImplicitMemoryWaitObserver,
-                           public AmdgpuImageFeedbackObserver {
+                           public AmdgpuImageFeedbackObserver,
+                           public AmdgpuMixedFlatLdsObserver,
+                           public AmdgpuMemoryCancellationObserver {
 public:
   /// @param config_json Plugin JSON with an optional integer trace_context in
   ///        [2, kTraceHistorySize]. Null or empty uses the default context.
@@ -152,6 +172,8 @@ public:
   void onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wf) override;
 
   void onAmdgpuImageFeedbackQualified(const Instruction &inst, amdgpu::Wavefront &wf) override;
+  void onAmdgpuMixedFlatLdsAccess(const Instruction &inst, amdgpu::Wavefront &wf) override;
+  void onAmdgpuMemoryAccessCancelled(const Instruction &inst, amdgpu::Wavefront &wf) override;
   void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
                                   const Instruction &inst, amdgpu::Wavefront &wf) override;
 
