@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import argparse
 import difflib
 import json
 import os
@@ -27,7 +28,15 @@ FIELD = re.compile(rf"field ({IDENT})\.({IDENT}) \d+ \d+ \d+")
 CONSTANT = re.compile(rf"constant ({IDENT}) \d+")
 STRING = re.compile(rf"string ({IDENT}) .*")
 RUST_KEYWORDS = {
-    "type", "self", "Self", "super", "crate", "async", "await", "move", "ref"
+    "type",
+    "self",
+    "Self",
+    "super",
+    "crate",
+    "async",
+    "await",
+    "move",
+    "ref",
 }
 EXPECTED_RECORDS = 973  # Pinned C snapshot; update only with the headers.
 
@@ -83,12 +92,20 @@ def rust_probe(c_lines: list[str]) -> str:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--c-probe", type=Path, help="Use an already-built C ABI record probe"
+    )
+    args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="rocddi-amdf-layout-") as temporary:
         output = Path(temporary)
         c_binary = output / ("c_layout.exe" if os.name == "nt" else "c_layout")
         rust_binary = output / ("rust_layout.exe" if os.name == "nt" else "rust_layout")
         rust_source = output / "rust_layout.rs"
-        compile_c(HERE / "amdf_layout.c", c_binary, HEADERS)
+        if args.c_probe is None:
+            compile_c(HERE / "amdf_layout.c", c_binary, HEADERS)
+        else:
+            c_binary = args.c_probe.resolve()
         c_lines = run([str(c_binary)]).splitlines()
         if len(c_lines) != EXPECTED_RECORDS:
             raise ValueError(
@@ -107,8 +124,11 @@ def main() -> int:
         rust_lines = run([str(rust_binary)]).splitlines()
     if c_lines != rust_lines:
         differences = difflib.unified_diff(
-            c_lines, rust_lines, fromfile="C headers",
-            tofile="Rust bindings", lineterm=""
+            c_lines,
+            rust_lines,
+            fromfile="C headers",
+            tofile="Rust bindings",
+            lineterm="",
         )
         print("\n".join(list(differences)[:80]), file=sys.stderr)
         return 1

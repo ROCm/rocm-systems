@@ -45,11 +45,11 @@ struct RocAddr3Output {
 
 namespace {
 
-void* Allocate(const rocr::ADDR_ALLOCSYSMEM_INPUT* input) {
+void* ADDR_API Allocate(const rocr::ADDR_ALLOCSYSMEM_INPUT* input) {
   return std::malloc(input->sizeInBytes);
 }
 
-ADDR_E_RETURNCODE Free(const rocr::ADDR_FREESYSMEM_INPUT* input) {
+ADDR_E_RETURNCODE ADDR_API Free(const rocr::ADDR_FREESYSMEM_INPUT* input) {
   std::free(input->pVirtAddr);
   return ADDR_OK;
 }

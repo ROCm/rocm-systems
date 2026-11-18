@@ -237,7 +237,7 @@ function(runtime_rust_library target)
         if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
             target_link_options(${target} INTERFACE "LINKER:@${_response}")
         else()
-            target_link_libraries(${target} INTERFACE "-Wl,@${_response}")
+            target_link_libraries(${target} INTERFACE "-Xlinker \"@${_response}\"")
         endif()
         set_property(
             TARGET ${target}

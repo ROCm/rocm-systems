@@ -94,6 +94,12 @@ common = [
     "*/.markdownlint-ci2.yaml",
     "tools/systems_pr_bot/*",
 
+    # Formatting infrastructure and lightweight tests have their own CI.
+    ".github/workflows/*-formatting.yml",
+    ".github/workflows/unit-tests.yml",
+    ".github/actions/changed-files/*",
+    ".github/workflows/tests/*",
+
     # Documentation files
     "docs/*",
     "*.md",
@@ -104,6 +110,9 @@ common = [
     "*/.wordlist.txt",
     "projects/*/docs/*",
     "shared/*/docs/*",
+
+    # Standalone runtime host workflow edits do not affect TheRock builds.
+    ".github/workflows/runtimes-ci.yml",
 
     # Vendored API headers are not yet integrated into TheRock builds.
     "runtimes/api-headers/*",
