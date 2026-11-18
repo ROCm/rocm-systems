@@ -34,7 +34,7 @@ Running Subtest: ctest –R “...” (Regex to match the subtest name)
 ## New Features
 - Better CI integration via xunit compatible output
 - hip-tests can be built in SPIRV, where all kernels are compiled in SPIRV, enable with cmake flag `-DENABLE_SPIRV=ON`. By default it's `OFF`.
-- hip-tests can be built with `-Wall -Werror` so that compiler warnings are treated as errors, controlled by the cmake flag `-DHIP_TESTS_ENABLE_WERROR`. It defaults to `OFF` in all cases.
+- hip-tests can be built with `-Wall -Werror` so that compiler warnings are treated as errors, controlled by the cmake flag `-DHIP_TESTS_ENABLE_WERROR`. It defaults to `OFF` in all cases. 
 
 ## Testing Context
 HIP testing framework gives you a context for each test. This context will have useful information about the environment your test is running.
@@ -67,11 +67,11 @@ TEST_CASE("hipExtAPIs") {
 
 All configuration for the test cases is done through the `hip_tests_config.yaml` file.
 Every test case has its own entry. Currently supported options are:
-- level : Specify to which level the case belongs to (e.g. Level_2 is a standard test)
-- tags : List all Catch2 tags that the case is associated with
-- disabled : Temporarily skip the case on the listed targets (a regression or tracked bug that is expected to be re-enabled)
-- unsupported : Permanently skip the case on the listed targets, where the platform, architecture, or backend cannot support it
-- requires : List of device features the case needs (see [Device feature requirements](#device-feature-requirements))
+- `level` : Specify to which level the case belongs to (e.g. Level_2 is a standard test)
+- `tags` : List all Catch2 tags that the case is associated with
+- `disabled` : Temporarily skip the case on the listed targets (a regression or tracked bug that is expected to be re-enabled)
+- `unsupported` : Permanently skip the case on the listed targets, where the platform, architecture, or backend cannot support it
+- `requires` : List of device features the case needs (see [Device feature requirements](#device-feature-requirements))
 `disabled` and `unsupported` share the same syntax and produce the same skip; they differ only in intent (temporary regression versus permanent capability gap).
 Each takes the mapping form `{targets: [...], reason: "..."}`. A section with a
 non-empty `targets` list **must** carry a non-empty `reason`, and that reason **must**
@@ -82,6 +82,10 @@ project keys are an allowlist; add a new one by editing the `JIRA_PROJECTS` tupl
 non-empty skip. An empty section (`targets: []`) is a no-op and needs no reason. If a
 skip has not yet been triaged, lead the reason with the tracking ticket, e.g.
 `AIRUNTIME-2744 - needs to be re-triaged`.
+
+`requires` shares the intent with `unsupported` (permanent capability gap), but
+it doesn't require a reason.
+
 The group name is automatically added as a tag for every case.
 Changing the configuration file will retrigger the build, so we have an up to date configuration every time.
 
