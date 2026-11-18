@@ -121,30 +121,13 @@ private:
             return fallback;
         }
 
-#if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L
-        // Locale-independent, non-throwing parse mirroring the integral path: a
-        // trailing-garbage or unparsable value falls back to the default.
-        Tp          value{};
-        const auto* end      = token.data() + token.size();
-        const auto [ptr, ec] = std::from_chars(token.data(), end, value);
-        if(ec == std::errc{} && ptr == end)
+        const auto parsed = utility::string::safe_from_chars<Tp>(token);
+        if(parsed.is_ok())
         {
-            return value;
+            return parsed.value();
         }
-#else
-        // Fallback for standard libraries without floating-point from_chars
-        // (libstdc++ < 11). std::stod is locale-sensitive (assumes C/POSIX locale).
-        try
-        {
-            std::size_t       pos = 0;
-            const std::string str{ token };
-            const double      parsed = std::stod(str, &pos);
-            if(pos == str.size()) return static_cast<Tp>(parsed);
-        } catch(const std::exception&)
-        {}
-#endif
-        LOG_ERROR("[get_env] Failed to convert getenv(\"{}\") = \"{}\" to float", env_id,
-                  raw);
+        LOG_ERROR("[get_env] Failed to convert getenv(\"{}\") = \"{}\" to float: {}",
+                  env_id, raw, parsed.error());
         return fallback;
     }
 
@@ -166,20 +149,16 @@ private:
             return fallback;
         }
 
-        // std::from_chars parses against the exact target type: it rejects a
-        // leading '-' for unsigned Tp and reports result_out_of_range, so
-        // negative or overflowing input falls back to the default instead of
-        // silently wrapping or truncating. Signed Tp still accepts '-'.
-        Tp          value{};
-        const auto* end      = token.data() + token.size();
-        const auto [ptr, ec] = std::from_chars(token.data(), end, value);
-        if(ec == std::errc{} && ptr == end)
+        // Parses against the exact target type: negative input for unsigned Tp and
+        // overflow are errors, so they fall back to the default instead of wrapping.
+        const auto parsed = utility::string::safe_from_chars<Tp>(token);
+        if(parsed.is_ok())
         {
-            return value;
+            return parsed.value();
         }
 
-        LOG_ERROR("[get_env] Failed to convert getenv(\"{}\") = \"{}\" to integer",
-                  env_id, raw);
+        LOG_ERROR("[get_env] Failed to convert getenv(\"{}\") = \"{}\" to integer: {}",
+                  env_id, raw, parsed.error());
         return fallback;
     }
 

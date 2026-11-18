@@ -82,7 +82,7 @@ void SignalHintCost::SetUp(void) {
                          static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_TIMESTAMP_FREQUENCY),
                          &gpu_timestamp_frequency_),
       HSA_STATUS_SUCCESS);
-  device_signal_pool_ = rocrtst::FindExtendedFineGrainedPool(*gpu_device1());
+  device_signal_pool_ = rocrtst::FindSignalCapablePool(*gpu_device1());
   // A profiling queue, like the ones HIP creates, so TS_OFF has timestamps to remove
   ASSERT_EQ(rocrtst::CreateQueue(*gpu_device1(), &queue_, kQueueSize), HSA_STATUS_SUCCESS);
   ASSERT_EQ(hsa_amd_profiling_set_profiler_enabled(queue_, 1), HSA_STATUS_SUCCESS);

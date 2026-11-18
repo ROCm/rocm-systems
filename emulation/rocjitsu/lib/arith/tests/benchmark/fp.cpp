@@ -10,6 +10,38 @@ namespace rocjitsu::arith::test {
 
 // Append FP workloads and their supported CPU/semantics variants.
 void add_fp(std::vector<Benchmark> &cases) {
+  add(cases, "fp", "v_min_num_f32_w32_gfx1250", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_min_num_f32_w32_gfx1250(flags, UINT32_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+
+  add(cases, "fp", "v_min_num_f32_w64_gfx1250", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_min_num_f32_w64_gfx1250(flags, UINT64_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+
+  add(cases, "fp", "v_max_num_f32_w32_gfx1250", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_max_num_f32_w32_gfx1250(flags, UINT32_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+
+  add(cases, "fp", "v_max_num_f32_w64_gfx1250", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_max_num_f32_w64_gfx1250(flags, UINT64_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+
+  add(cases, "fp", "v_minimum_f32_w32_gfx1250", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_minimum_f32_w32_gfx1250(flags, UINT32_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+
+  add(cases, "fp", "v_minimum_f32_w64_gfx1250", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_minimum_f32_w64_gfx1250(flags, UINT64_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+
+  add(cases, "fp", "v_maximum_f32_w32_gfx1250", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_maximum_f32_w32_gfx1250(flags, UINT32_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+
+  add(cases, "fp", "v_maximum_f32_w64_gfx1250", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_maximum_f32_w64_gfx1250(flags, UINT64_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+
   add(cases, "fp", "v_fma_mix_f32_bf16_w32", [](Operands &r, uint64_t flags) {
     return rj_arith_v_fma_mix_f32_bf16_w32(flags, UINT32_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
   });
