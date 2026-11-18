@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! Passive endpoint descriptions and explicit native device activation.
+//! AMDF session ownership, passive endpoints, and native device activation.
 //!
 //! Handles borrow their parent exactly as the AMDF contract requires. A cold
 //! instance-local list recognizes registration of a provider-owned host view;
@@ -19,7 +19,8 @@ use rocddi::device::gpu::event::{SignalEventService, signal_event_available};
 use rocddi::host::cache::{CacheMaintenance, CachePolicy};
 use rocddi::memory::storage::TryPush;
 use rocddi::memory::storage::{Allocator, Owned, OwnerVec, Shared, UninitOwned};
-use rocddi::{device as native_device, memory as native_memory, session, topology};
+use rocddi::session::{DriverContextLifetime, Session as NativeSession};
+use rocddi::{device as native_device, memory as native_memory, topology};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread::{self, JoinHandle};
@@ -27,13 +28,13 @@ use std::time::Duration;
 
 const INITIAL_RESET_EPOCH: u64 = 1;
 
-/// Root AMDF owner containing native session state and embedded host scope.
+/// AMDF instance owner extending a native session with public API state.
 ///
 /// `children` prevents destruction while endpoint handles remain public.
 /// Cached host facts stay valid until destruction succeeds.
-pub(crate) struct Instance {
+pub(crate) struct AmdfSession {
     /// Native session that discovers and activates devices.
-    pub native: session::Session,
+    native_session: NativeSession,
     /// Callback policy for public frontend owner records.
     pub host_allocator: Allocator,
     /// Number of public children that still borrow this instance.
@@ -56,11 +57,16 @@ pub(crate) struct Instance {
     pub scope: Scope,
 }
 
-impl Instance {
+impl AmdfSession {
+    /// Borrows native services while the public instance retains ownership.
+    pub(crate) fn native_session(&self) -> &NativeSession {
+        &self.native_session
+    }
+
     /// Rejects an inherited handle before entering frontend mutexes or
     /// releasing native owners that belong to its creating process.
     pub(crate) fn require_current_process(&self) -> Result<(), u64> {
-        if self.native.is_current_process() {
+        if self.native_session.is_current_process() {
             Ok(())
         } else {
             Err(PRECONDITION)
@@ -69,7 +75,7 @@ impl Instance {
 
     /// Reports the immutable native lifetime selected for this instance.
     pub(crate) fn process_lifetime(&self) -> bool {
-        self.native.driver_context_lifetime() == session::DriverContextLifetime::Process
+        self.native_session.driver_context_lifetime() == DriverContextLifetime::Process
     }
 
     /// Reserves frontend owner storage under this instance's callback policy.
@@ -90,7 +96,7 @@ impl Instance {
 /// Passive endpoint handle borrowing its instance and owning no device state.
 pub(crate) struct Endpoint {
     /// Parent instance borrowed by this public endpoint handle.
-    pub instance: *mut Instance,
+    pub instance: *mut AmdfSession,
     /// Passive topology record used for activation and metadata queries.
     pub native: topology::Endpoint,
     /// Host NUMA locality captured during passive open.
@@ -141,7 +147,7 @@ struct EventHubRecord {
     worker: Option<JoinHandle<()>>,
 }
 
-/// Instance hub distributing one subscription to its endpoint observers.
+/// Session hub distributing one subscription to its endpoint observers.
 struct EventHub {
     state: Mutex<EventHubState>,
     stop: AtomicBool,
@@ -481,7 +487,7 @@ fn device_event_worker_with(
 /// Registers a public handle with its endpoint observer. One subscription
 /// and worker serve every endpoint on the same installed driver source.
 fn register_event_observer(
-    instance: &Instance,
+    instance: &AmdfSession,
     native: &native_device::Device,
     endpoint_id: [u8; 16],
     epoch: Shared<AtomicU64>,
@@ -866,7 +872,7 @@ pub(crate) fn features(endpoint: &topology::Endpoint, host_registration: bool) -
     features
 }
 
-pub(crate) unsafe fn device_instance(device: &Device) -> &Instance {
+pub(crate) unsafe fn device_instance(device: &Device) -> &AmdfSession {
     unsafe { &*(*device.endpoint).instance }
 }
 
@@ -898,22 +904,22 @@ pub(crate) unsafe extern "C" fn create(
         )
         .map_err(|_| INVALID)?;
         let slot = host_allocator
-            .with_scope(|| Owned::<Instance>::try_new_uninit().map_err(|_| EXHAUSTED))?;
+            .with_scope(|| Owned::<AmdfSession>::try_new_uninit().map_err(|_| EXHAUSTED))?;
         // The C ABI calls this native_lifetime; rocddi names the policy after
         // the driver context and its retained bindings.
         let lifetime = if info.native_lifetime == AMDF_NATIVE_LIFETIME_PROCESS {
-            session::DriverContextLifetime::Process
+            DriverContextLifetime::Process
         } else {
-            session::DriverContextLifetime::Session
+            DriverContextLifetime::Session
         };
-        let native = session::Session::new(lifetime).map_err(|e| crate::support::native(&e))?;
+        let native = NativeSession::new(lifetime).map_err(|e| crate::support::native(&e))?;
         let event_service =
             SignalEventService::new(&native).map_err(|error| crate::support::native(&error))?;
         let host_page_size =
             native_memory::host::host_page_size().map_err(|e| crate::support::native(&e))?;
         let host_write_back_cache = CacheMaintenance::qualify(CachePolicy::WriteBack).ok();
-        let owner = slot.write(Instance {
-            native,
+        let owner = slot.write(AmdfSession {
+            native_session: native,
             host_allocator,
             host_page_size,
             host_write_back_cache,
@@ -940,7 +946,7 @@ pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_instance_t) -> u64 {
         unsafe {
             // Destruction is externally serialized. Keep this owner alive
             // until native shutdown releases every resource it retains.
-            let instance = object(pointer.cast::<Instance>())?;
+            let instance = object(pointer.cast::<AmdfSession>())?;
             instance.require_current_process()?;
             if instance.children.load(Ordering::Acquire) != 0 {
                 return Err(BUSY);
@@ -950,12 +956,12 @@ pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_instance_t) -> u64 {
             }
             // No child can now retain a shared borrow, and the caller
             // serializes direct use of the instance during destruction.
-            let instance = exclusive(pointer.cast::<Instance>())?;
+            let instance = exclusive(pointer.cast::<AmdfSession>())?;
             instance
                 .event_service
                 .lock()
                 .map_err(|_| INTERNAL)?
-                .preflight_session_destroy(&mut instance.native)
+                .preflight_session_destroy(&mut instance.native_session)
                 .map_err(|error| native(&error))?;
             // Native cleanup can make partial progress. Retain this handle on
             // failure for destruction only; no new child may borrow it then.
@@ -966,8 +972,8 @@ pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_instance_t) -> u64 {
                 .map_err(|_| INTERNAL)?
                 .release()
                 .map_err(|error| native(&error))?;
-            instance.native.destroy().map_err(|e| native(&e))?;
-            drop(Owned::from_raw(pointer.cast::<Instance>()));
+            instance.native_session.destroy().map_err(|e| native(&e))?;
+            drop(Owned::from_raw(pointer.cast::<AmdfSession>()));
             Ok(())
         }
     })
@@ -980,7 +986,7 @@ pub(crate) unsafe extern "C" fn enumerate(
     count: *mut u32,
 ) -> u64 {
     crate::support::boundary(|| unsafe {
-        let instance = object(pointer.cast::<Instance>())?;
+        let instance = object(pointer.cast::<AmdfSession>())?;
         instance.require_current_process()?;
         if instance.closing {
             return Err(PRECONDITION);
@@ -993,7 +999,7 @@ pub(crate) unsafe extern "C" fn enumerate(
             .map_err(|_| EXHAUSTED)?;
         let mut total = 0u32;
         instance
-            .native
+            .native_session
             .enumerate(&mut |endpoint| {
                 if staged.len() < capacity as usize {
                     staged.try_push(summary(&endpoint))?;
@@ -1023,7 +1029,7 @@ pub(crate) unsafe extern "C" fn open(
 ) -> u64 {
     crate::support::boundary(|| {
         unsafe {
-            let instance = object(pointer.cast::<Instance>())?;
+            let instance = object(pointer.cast::<AmdfSession>())?;
             instance.require_current_process()?;
             if instance.closing {
                 return Err(PRECONDITION);
@@ -1032,7 +1038,7 @@ pub(crate) unsafe extern "C" fn open(
             let id = *object(id)?;
             let slot = instance.owner_slot::<Endpoint>()?;
             let native = instance
-                .native
+                .native_session
                 .open_endpoint(native_id(id))
                 .map_err(|error| {
                     // Opening a passive identity cannot lose an activated device. A
@@ -1193,7 +1199,7 @@ pub(crate) unsafe extern "C" fn device_create(
         let reset_epoch = instance.shared(AtomicU64::new(INITIAL_RESET_EPOCH))?;
         let id = next_id(&instance.ids)?;
         register(&endpoint.children)?;
-        let result = instance.native.activate(&endpoint.native);
+        let result = instance.native_session.activate(&endpoint.native);
         let native = match result {
             Ok(device) => device,
             Err(error) => {
@@ -1253,7 +1259,7 @@ pub(crate) unsafe extern "C" fn device_info(
             features: features(
                 device.native.endpoint(),
                 device_instance(device)
-                    .native
+                    .native_session
                     .supports_host_registration(device.native.endpoint()),
             ) | if device.native_events_available {
                 AMDF_GPU_DEVICE_FEATURE_NATIVE_EVENTS

@@ -4,7 +4,8 @@
 //! C entry points for the HSA generation lifecycle.
 
 use crate::ffi::Status;
-use crate::runtime::{initialize, plain_boundary, shutdown};
+use crate::lifecycle::{initialize, shutdown};
+use crate::status::plain_boundary;
 
 #[cfg_attr(
     all(hsa_tool_dispatch, not(test)),

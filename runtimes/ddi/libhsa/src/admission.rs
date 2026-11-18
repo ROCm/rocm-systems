@@ -3,7 +3,10 @@
 
 //! Process admission and object-local rundown protection.
 
-use super::*;
+use std::cell::Cell;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::Duration;
 
 /// One bit closes admission; lower bits count work in this gate.
 const ADMISSION_CLOSED: usize = 1 << (usize::BITS - 1);
@@ -177,7 +180,7 @@ impl InFlightTracker {
     /// Grants one internal teardown lease only after a matching process
     /// generation is closed and idle. The lifecycle owner retains its state.
     #[cfg(any(test, hsa_tool_dispatch))]
-    pub(super) fn enter_cleanup(self: &Arc<Self>, generation: u64) -> Option<InFlightToken> {
+    pub(crate) fn enter_cleanup(self: &Arc<Self>, generation: u64) -> Option<InFlightToken> {
         if !crate::platform::process_is_current()
             || !self.process
             || generation == 0
@@ -203,7 +206,7 @@ impl InFlightTracker {
     /// Opens a cleanup window after ordinary admission has drained. The
     /// anchor remains live until the owner closes delegation on every exit.
     #[cfg(any(test, hsa_tool_dispatch))]
-    pub(super) fn begin_cleanup(self: &Arc<Self>, generation: u64) -> Option<ToolCleanupScope> {
+    pub(crate) fn begin_cleanup(self: &Arc<Self>, generation: u64) -> Option<ToolCleanupScope> {
         let mut active = self.cleanup_generation.lock().ok()?;
         if *active != 0 {
             return None;
@@ -218,7 +221,7 @@ impl InFlightTracker {
 
     /// Delegates one bounded cleanup operation to a known worker. The mutex
     /// makes closing the cleanup window atomic with acquiring its last lease.
-    pub(super) fn enter_delegated_cleanup(
+    pub(crate) fn enter_delegated_cleanup(
         self: &Arc<Self>,
         generation: u64,
     ) -> Option<InFlightToken> {
@@ -244,7 +247,7 @@ impl InFlightTracker {
     /// Unlike ordinary work, its bounded native stop/drain sequence is not
     /// canceled by closing public admission.
     #[cfg(all(hsa_tool_dispatch, not(test)))]
-    pub(super) fn enter_tool_work(self: &Arc<Self>, generation: u64) -> Option<InFlightToken> {
+    pub(crate) fn enter_tool_work(self: &Arc<Self>, generation: u64) -> Option<InFlightToken> {
         if generation == 0 || self.generation.load(Ordering::Acquire) != generation {
             return None;
         }
@@ -621,3 +624,7 @@ mod cleanup_tests {
         assert!(tracker.is_closed_and_idle());
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests;

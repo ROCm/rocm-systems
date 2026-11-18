@@ -77,11 +77,11 @@ fn worker_with(
     let mut retry_delay = Duration::from_millis(1);
     let mut driver_failures = 0u8;
     while !stop.load(Ordering::Acquire) && alive.load(Ordering::Acquire) {
-        let Some(token) = crate::runtime::enter_runtime_service() else {
+        let Some(token) = crate::admission::enter_runtime_service() else {
             pause(Duration::from_millis(1));
             continue;
         };
-        if crate::runtime::ApiLeaseScope::run(token, || {
+        if crate::admission::ApiLeaseScope::run(token, || {
             let status = match wait(Duration::from_millis(1)) {
                 Ok(event) => {
                     retry_delay = Duration::from_millis(1);

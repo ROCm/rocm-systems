@@ -25,8 +25,8 @@ pub(crate) unsafe fn with_queue_index<R>(
     index: QueueIndex,
     operation: impl for<'a> FnOnce(&'a AtomicU64) -> R,
 ) -> Option<R> {
-    let admission = crate::runtime::enter_public_raw_handle()?;
-    crate::runtime::ApiLeaseScope::run(admission, || {
+    let admission = crate::admission::enter_public_raw_handle()?;
+    crate::admission::ApiLeaseScope::run(admission, || {
         if queue.is_null() {
             return None;
         }

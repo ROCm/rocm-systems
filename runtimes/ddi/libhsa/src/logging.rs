@@ -3,7 +3,14 @@
 
 //! HSA logging configuration and retained writes.
 
-use super::*;
+use crate::admission::{ApiLeaseScope, InFlightToken, InFlightTracker};
+use crate::ffi::*;
+use std::cell::Cell;
+use std::ffi::c_void;
+use std::fmt::Arguments;
+use std::io::Write;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 thread_local! {
     /// Whether this thread is inside a borrowed C stream write.
@@ -58,7 +65,7 @@ pub(crate) struct LogOutput {
 
 impl LogOutput {
     /// Initializes logging state with no custom output stream.
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             enabled: AtomicU64::new(0),
             config: Mutex::new(LogConfig {
@@ -126,7 +133,7 @@ impl LogOutput {
     }
 
     /// Formats a log record while the runtime state is borrowed.
-    pub(super) fn prepare(
+    pub(crate) fn prepare(
         self: &Arc<Self>,
         tracker: &Arc<InFlightTracker>,
         flag: u32,
@@ -170,7 +177,7 @@ impl LogWork {
 }
 
 /// Checks whether a logging category is enabled in the flag array.
-pub(super) fn logging_flag_enabled(flags: [u8; 8], flag: u32) -> bool {
+pub(crate) fn logging_flag_enabled(flags: [u8; 8], flag: u32) -> bool {
     usize::try_from(flag / 8)
         .ok()
         .and_then(|index| flags.get(index))
@@ -181,6 +188,8 @@ pub(super) fn logging_flag_enabled(flags: [u8; 8], flag: u32) -> bool {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use crate::lifecycle::{HsaLifecycle, begin_init_waiting};
+    use std::sync::Condvar;
 
     #[test]
     fn log_write_init_does_not_wait_for_preparing_shutdown() {
@@ -202,6 +211,15 @@ mod tests {
             begin_init_waiting(lifecycle.lock().unwrap(), &Condvar::new()).err(),
             Some(INVALID_RUNTIME_STATE)
         );
+    }
+    #[test]
+    /// Verifies that logging flags use the public 64 bit mask layout.
+    fn logging_flags_use_the_public_64_bit_mask_layout() {
+        let flags = [0b0000_0101, 0, 0, 0, 0, 0, 0, 0];
+        assert!(logging_flag_enabled(flags, 0));
+        assert!(!logging_flag_enabled(flags, 1));
+        assert!(logging_flag_enabled(flags, AMD_LOG_FLAG_INFO));
+        assert!(!logging_flag_enabled([u8::MAX; 8], 64));
     }
 }
 

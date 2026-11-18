@@ -14,8 +14,11 @@ use std::sync::atomic::{Ordering, fence};
 use rocaddr3::{ResourceType, SurfaceLayout, SurfaceRequest};
 use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
 
+use crate::admission::InFlightToken;
 use crate::ffi::*;
-use crate::runtime::{HsaState, InFlightToken, initialized_mut, lock, map_error};
+use crate::lifecycle::{initialized_mut, lock};
+use crate::session::HsaSession;
+use crate::status::map_error;
 use descriptor::{Format, Generation, Layout};
 
 mod color;

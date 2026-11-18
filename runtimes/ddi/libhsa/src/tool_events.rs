@@ -5,9 +5,9 @@
 
 use std::ffi::c_void;
 
-use crate::ffi::HsaQueue;
 #[cfg(all(hsa_tool_dispatch, not(test)))]
-use crate::runtime::CallbackScope;
+use crate::events::CallbackScope;
+use crate::ffi::HsaQueue;
 
 /// Tool table slot for scratch-allocation start events.
 const ALLOC_START: usize = 0;
