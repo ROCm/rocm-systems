@@ -42,7 +42,6 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include "ExecutableScratch.h"
 #include "ScopedDir.h"
 
 namespace {
@@ -72,11 +71,11 @@ struct DispatchRun {
 
 // The dispatcher, its fixture binaries and its manifest, in a directory of the test's own.
 //
-// Under a base that allows execution, not simply TMPDIR: see ExecutableScratch.h. valid() is
-// false when there is no such base, which the tests report as a skip.
+// Under the build directory, not TMPDIR: TMPDIR may be mounted noexec, and the fixture binaries
+// these tests copy in already live in the build tree.
 class FixtureTree {
 public:
-    FixtureTree() : dir_("rccl-host-dispatch-e2e", rccl_host_test::executableScratchDirectory())
+    FixtureTree() : dir_("rccl-host-dispatch-e2e", RCCL_HOST_TEST_BUILD_DIR)
     {
     }
 
@@ -233,12 +232,9 @@ std::vector<EnvVar> baseEnvironment(const FixtureTree &tree)
     };
 }
 
-// The whole tree, one fixture binary per name, or a skip when this machine will not run it.
+// The whole tree, one fixture binary per name.
 #define RCCL_REQUIRE_TREE(tree, ...)                                                      \
     do {                                                                                  \
-        if (rccl_host_test::executableScratchDirectory().empty()) {                       \
-            GTEST_SKIP() << "no directory here allows executing a file written to it";    \
-        }                                                                                 \
         ASSERT_TRUE((tree).build({__VA_ARGS__})) << "could not build the fixture tree";   \
     } while (false)
 

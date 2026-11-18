@@ -3464,8 +3464,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroHostDispatch
     # binary, this one included, and naming it here would close that into a cycle. The build that
     # produces this binary produces that one too.
     HOST_DISPATCH_FRONT_DOOR_PATH="$<TARGET_FILE:rccl-UnitTestsHostAll>"
-    # Somewhere these tests can write a file and then execute it, for the machines where TMPDIR
-    # is mounted noexec. See ExecutableScratch.h.
+    # Where these tests write files they then execute: TMPDIR may be mounted noexec.
     RCCL_HOST_TEST_BUILD_DIR="${CMAKE_CURRENT_BINARY_DIR}")
 add_dependencies(rccl-UnitTestsMicroHostDispatch rccl-host-dispatch-fixture)
 

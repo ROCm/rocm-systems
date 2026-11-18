@@ -1684,13 +1684,11 @@ This is what notices the failures no unit test can see, all of which are silent
 dropping the `GTEST_*` strip or the per-child `LLVM_PROFILE_FILE` each leave the
 file-level tests green while quietly costing coverage or mis-reporting cases.
 
-The fixture tree is written under `ExecutableScratch.h`'s
-`executableScratchDirectory()`, not under `TMPDIR`: `TMPDIR` is mounted `noexec`
-on some developer machines and in many containers, and a test that execs a
-fixture it wrote there fails for a reason that has nothing to do with the code
-under test. It tries `RCCL_HOST_TEST_SCRATCH_DIR`, then the build directory,
-then `TMPDIR`, and these tests skip only if none of the three allows execution.
-`ScopedDir` takes that directory as its optional second argument.
+The fixture tree is written under the build directory
+(`RCCL_HOST_TEST_BUILD_DIR`), not under `TMPDIR`: `TMPDIR` is mounted `noexec`
+on some developer machines and in many containers. If the build directory does
+not allow execution either, these tests fail rather than skip. `ScopedDir`
+takes that directory as its optional second argument.
 
 ## Standalone host-only build (no full librccl build)
 
