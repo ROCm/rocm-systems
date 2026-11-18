@@ -86,6 +86,7 @@ set(rj_arith_x86_64_v3_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/fp64_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/frexp_exp_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/half_mad_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/common/x86_64/sdwa_output_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/half_binary_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/half_exponent_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/half_fma_x86_64_v3.cpp
@@ -206,6 +207,7 @@ set(rj_arith_x86_64_v4_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/fma_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/fma_exact_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/half_mad_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/common/x86_64/sdwa_output_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/half_fma_exact_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/half_ldexp_exact_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/half_binary_x86_64_v4.cpp

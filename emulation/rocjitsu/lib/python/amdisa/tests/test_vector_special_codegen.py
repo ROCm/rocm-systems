@@ -6,7 +6,6 @@
 from pathlib import Path
 from types import SimpleNamespace
 
-import hashlib
 import re
 
 import pytest
@@ -18,17 +17,12 @@ from amdisa.codegen.execute.simd_codegen import (
     simd_probe_line,
 )
 from amdisa.codegen.execute.vector_special import (
-    _TRIG_PREOP_CHUNK_BITS,
-    _TRIG_PREOP_TWO_OVER_PI_CHUNKS,
-    _TRIG_PREOP_VALID_BITS,
     gen_vector_bitop3,
     gen_vector_cvt_pk,
-    gen_vector_div_fixup,
     gen_vector_movrel,
     gen_vector_perm_pk16,
     gen_vector_sat_pack,
     gen_vector_swaprel,
-    gen_vector_trig_preop,
 )
 from amdisa.codegen.config import CodegenConfig
 from amdisa.codegen._generator import CodeGenerator
@@ -109,37 +103,6 @@ def test_perm_codegen_covers_multiword_results():
 def test_unsupported_vector_special_operations_fail_during_generation(generator, args):
     with pytest.raises(ValueError):
         generator(*args)
-
-
-def test_trig_preop_preserves_special_fp_rules():
-    trig = gen_vector_trig_preop(['vdst'], ['src0', 'src1'], is_vop3=True, has_abs=True)
-    assert '0xA2F983u' in trig
-    assert 'kTwoOverPiChunks' in trig
-    assert 'kChunkBits = 24u' in trig
-    assert 'kValidBits = 1201u' in trig
-    assert 'selector * 53u' in trig
-    assert 'if (bit >= kValidBits) return 0' in trig
-    assert 'exponent > 1077u' in trig
-    assert 'exponent >= 1968u' in trig
-    assert 'scale_u53_f64_rtz(segment, scale)' in trig
-    assert 'amdgpu::fp_mode::effective_omod' in trig
-    assert 'amdgpu::fp_mode::finish_f64' in trig
-    assert re.search(r'finish_f64\([^;]*effective_omod', trig, flags=re.DOTALL)
-    assert not re.search(r'finish_f64\([^;]*inst_\.omod', trig, flags=re.DOTALL)
-
-
-def test_trig_preop_two_over_pi_table_integrity():
-    table_bytes = b''.join(
-        chunk.to_bytes(3, byteorder='big') for chunk in _TRIG_PREOP_TWO_OVER_PI_CHUNKS
-    )
-
-    assert _TRIG_PREOP_CHUNK_BITS == 24
-    assert _TRIG_PREOP_VALID_BITS == 1201
-    assert len(_TRIG_PREOP_TWO_OVER_PI_CHUNKS) == 51
-    assert (
-        hashlib.sha256(table_bytes).hexdigest()
-        == '6945fb5ae75f6a3e8dec95553821e5886324e9e96181eb7944d828f508eee5b9'
-    )
 
 
 def test_permlane_is_not_shared_across_profiles():
@@ -231,14 +194,6 @@ def test_vop3_f16_simd_probes_split_true16_from_generic():
     assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16' in rcp_generic
     assert 'if (!wf.fp16_ovfl())' not in rcp_true16
     assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16' in rcp_true16
-    div_fixup = simd_probe_line('v_div_fixup_f16_vop3')
-    assert 'if (!wf.fp16_ovfl())' not in div_fixup
-    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16' in div_fixup
-    div_fixup_true16 = simd_probe_line('v_div_fixup_f16_vop3', true16_vop3=True)
-    assert 'if (!wf.fp16_ovfl())' not in div_fixup_true16
-    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16' in div_fixup_true16
-    assert 'F16TernaryOutputOrder::MODIFY_THEN_ROUND' in div_fixup
-    assert 'F16TernaryOutputOrder::MODIFY_THEN_ROUND' in div_fixup_true16
 
 
 @pytest.mark.parametrize('true16', [False, True])
@@ -547,26 +502,6 @@ def test_gfx1250_bitop3_b16_uses_true16_helpers():
     assert 'write_vop3_true16_dst(vdst, wf, lane, inst_.opsel, result, true)' in body
 
 
-def test_vop3_div_fixup_f16_uses_true16_sources_and_destination():
-    body = gen_vector_div_fixup(['vdst'], ['src0', 'src1', 'src2'], 'f16', is_vop3=True)
-
-    assert 'uint32_t opsel = amdgpu::vop3_opsel(inst_);' in body
-    assert 'util::f16_to_f32(static_cast<uint16_t>(' in body
-    assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in body
-    assert 'read_vop3_true16_src(src1, wf, lane, opsel, 1)' in body
-    assert 'read_vop3_true16_src(src2, wf, lane, opsel, 2)' in body
-    assert (
-        'uint32_t result_bits = amdgpu::narrow_div_fixup_f16(result, wf.fp16_ovfl());'
-        in body
-    )
-    assert (
-        'result_bits = amdgpu::fp_mode::finalize_omod_f16(result_bits, effective_omod);'
-        in body
-    )
-    assert 'write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true)' in body
-    assert 'std::bit_cast<float>(src0.read_lane' not in body
-
-
 @pytest.mark.parametrize('op', ['i16', 'u16'])
 def test_pknorm_f16_spelling_matches_pk_norm(op):
     # GFX9 and RDNA1/2 spell V_CVT_PK_NORM_*_F16 as V_CVT_PKNORM_*_F16.
@@ -588,11 +523,13 @@ def test_pknorm_f16_spelling_matches_pk_norm(op):
 
 
 def test_migrated_true16_packing_skips_legacy_simd_glue():
-    assert simd_probe_line('v_pack_b32_f16_vop3') is None
-    assert simd_probe_line('v_cvt_pk_norm_i16_f16_vop3') is None
-    div_fixup = simd_probe_line('v_div_fixup_f16_vop3')
-    assert 'if (!wf.fp16_ovfl())' not in div_fixup
-    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16' in div_fixup
+    for name in (
+        'v_pack_b32_f16_vop3',
+        'v_cvt_pk_norm_i16_f16_vop3',
+        'v_cvt_pk_norm_u16_f16_vop3',
+        'v_div_fixup_f16_vop3',
+    ):
+        assert simd_probe_line(name) is None
 
 
 def test_packed_rtz_rejects_retired_fallbacks():
@@ -668,4 +605,11 @@ def test_half_selection_has_no_legacy_simd_probe(mnemonic, true16):
     for encoding in ('vop2', 'vop3'):
         assert (
             simd_probe_line(f'v_{mnemonic}_f16_{encoding}', true16_vop3=true16) is None
+        )
+
+
+def test_remaining_true16_integer_routes_use_simd_glue():
+    for name in ('v_mad_u32_u16_vop3', 'v_mad_i32_i16_vop3'):
+        assert simd_probe_line(name).startswith(
+            '  ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_SRC01'
         )

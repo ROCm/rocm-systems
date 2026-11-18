@@ -12,7 +12,9 @@
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_fp.h"
 #include <algorithm>
+#include <bit>
 #include <cmath>
+#include <limits>
 
 #include <gtest/gtest.h>
 #include <stddef.h>
@@ -418,4 +420,126 @@ TEST(FpNativeF64Cdna, OutputDenormalsAndSignalingNan) {
       }
     }
   }
+}
+
+namespace {
+
+// Match the inherited host-double core, retaining source NaNs and positive invalid root NaNs.
+double legacy_native_reference(double x, int operation) {
+  if (std::isnan(x)) {
+    return x;
+  }
+  if (operation && x < 0) {
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+  return operation == 0 ? 1.0 / x : operation == 1 ? 1.0 / std::sqrt(x) : std::sqrt(x);
+}
+
+// Exercise raw denormals, payloads, guest output policy and overlap on every CPU level.
+template <int Lanes, typename Call> void check_legacy_native_f64(Call call, int operation) {
+  using namespace rocjitsu::arith::test;
+  check_loose_unary_f64<Lanes>(
+      call, [&](double x) { return legacy_native_reference(x, operation); }, false,
+      /*check_omod=*/true, /*accepts_exact=*/false);
+  constexpr uint64_t bits[] = {0,
+                               0x8000000000000000ULL,
+                               1,
+                               0x8000000000000001ULL,
+                               0x000fffffffffffffULL,
+                               0x0010000000000000ULL,
+                               0x7fefffffffffffffULL,
+                               0x7ff0000000000000ULL,
+                               0xfff0000000000000ULL,
+                               0x7ff0123456789abcULL,
+                               0xfff8abcdef012345ULL,
+                               0x3ff8000000000000ULL,
+                               0xc010000000000000ULL,
+                               0xbff8000000000000ULL,
+                               0x4000000000000000ULL,
+                               0x4010000000000000ULL};
+  Registers<6, Lanes> input;
+  for (int lane = 0; lane < Lanes; ++lane) {
+    write_fp(input.v, lane, 64, bits[lane % int(std::size(bits))]);
+  }
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t semantics : {RJ_ARITH_SEMANTICS_COMPATIBILITY, RJ_ARITH_SEMANTICS_LOOSE}) {
+      for (int scenario = 0; scenario < 16; ++scenario) {
+        const uint64_t flags =
+            cpu | semantics | (scenario & 1 ? RJ_ARITH_FP_FLUSH_INPUT_DENORMALS : 0) |
+            (scenario & 2 ? RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS : 0) |
+            (scenario & 4 ? RJ_ARITH_FP_IEEE_MODE : 0) |
+            (scenario & 8 ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0) | (uint64_t(scenario % 4) << 24);
+        const uint32_t mode = uint32_t(scenario % 4) << 6 |
+                              (scenario & 8 ? RJ_ARITH_ALU_CLAMP : 0) |
+                              (scenario & 4 ? RJ_ARITH_ALU_NEG_A : 0);
+        const uint64_t exec_mask = Lanes == 64 ? 0x800000038000ffffULL : 0x8000ffffULL;
+        for (int aliasing_offset : {0, 1, 3}) {
+          SCOPED_TRACE(::testing::Message()
+                       << operation << ':' << Lanes << ':' << cpu << ':' << semantics << ':'
+                       << scenario << ':' << aliasing_offset);
+          auto actual = input;
+          uint32_t status = 0x100;
+          ASSERT_EQ(call(flags, exec_mask, mode, actual.v + aliasing_offset, actual.v, &status),
+                    RJ_ARITH_SUCCESS);
+          EXPECT_EQ(status, 0x100U);
+          actual.expect_preserved(input, aliasing_offset, 2);
+          for (int lane = 0; lane < Lanes; ++lane) {
+            uint64_t expected = read_fp(input.v + aliasing_offset, lane, 64);
+            if (exec_mask >> lane & 1) {
+              const uint64_t source = read_fp(input.v, lane, 64) ^
+                                      (mode & RJ_ARITH_ALU_NEG_A ? 0x8000000000000000ULL : 0);
+              double value = legacy_native_reference(std::bit_cast<double>(source), operation);
+              if ((flags & RJ_ARITH_FP_IEEE_MODE) &&
+                  (source & 0x7fffffffffffffffULL) > 0x7ff0000000000000ULL) {
+                value = std::bit_cast<double>(source | 0x0008000000000000ULL);
+              }
+              const unsigned omod =
+                  (flags & RJ_ARITH_FP_IEEE_MODE) || !(flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)
+                      ? 0
+                      : unsigned((mode >> 6) & 3);
+              if (omod) {
+                value *= omod == 3 ? 0.5 : double(1U << omod);
+                if (!(std::bit_cast<uint64_t>(value) & 0x7ff0000000000000ULL)) {
+                  value = 0;
+                }
+              }
+              if ((mode & RJ_ARITH_ALU_CLAMP) &&
+                  (!(flags & RJ_ARITH_FP_DX10_CLAMP_OFF) || !std::isnan(value))) {
+                value = !(value > 0) ? 0 : std::min(value, 1.0);
+              }
+              expected = std::bit_cast<uint64_t>(value);
+            }
+            EXPECT_EQ(read_fp(actual.v + aliasing_offset, lane, 64), expected) << lane;
+          }
+        }
+      }
+    }
+  }
+}
+
+} // namespace
+
+// Check older host-double reciprocal and its uniform API contract.
+TEST(FpRcpF64W32Gfx908, Arithmetic) {
+  check_legacy_native_f64<32>(rj_arith_v_rcp_f64_w32_gfx908, 0);
+}
+// Check the same reciprocal contract across both Wave64 halves.
+TEST(FpRcpF64W64Gfx908, Arithmetic) {
+  check_legacy_native_f64<64>(rj_arith_v_rcp_f64_w64_gfx908, 0);
+}
+// Check inherited reciprocal square root, special values and raw denormals.
+TEST(FpRsqF64W32Gfx908, Arithmetic) {
+  check_legacy_native_f64<32>(rj_arith_v_rsq_f64_w32_gfx908, 1);
+}
+// Check Wave64 reciprocal square root and cross-word register overlap.
+TEST(FpRsqF64W64Gfx908, Arithmetic) {
+  check_legacy_native_f64<64>(rj_arith_v_rsq_f64_w64_gfx908, 1);
+}
+// Check inherited square root, special values and raw denormals.
+TEST(FpSqrtF64W32Gfx908, Arithmetic) {
+  check_legacy_native_f64<32>(rj_arith_v_sqrt_f64_w32_gfx908, 2);
+}
+// Check Wave64 square root and the same API/alias scenarios.
+TEST(FpSqrtF64W64Gfx908, Arithmetic) {
+  check_legacy_native_f64<64>(rj_arith_v_sqrt_f64_w64_gfx908, 2);
 }
