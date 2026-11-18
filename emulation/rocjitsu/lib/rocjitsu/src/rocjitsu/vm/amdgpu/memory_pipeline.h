@@ -7,6 +7,7 @@
 #pragma once
 
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/stats/compute_statistics.h"
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -22,6 +23,7 @@
 #include <queue>
 #include <span>
 #include <utility>
+#include <vector>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -49,14 +51,9 @@ using MemoryAccessDeferredCompletion = std::function<void()>;
 
 /// @brief Base class for a memory pipeline stage (scalar, global, or local).
 ///
-/// @details Models the memory access pipeline as two FIFO queues:
-/// - issued_: instructions that need initiate_access() called
-/// - returned_: instructions whose memory response has arrived, awaiting
-///   register writeback via complete_access().
-///
-/// In functional mode, L1/L2/HBM accesses are synchronous and produce an
-/// immediate response, so instructions move from issued_ to returned_
-/// in a single tick() and then complete on the next tick().
+/// @details Functional accesses normally complete synchronously. Unavailable
+/// instructions can be retained in issued_ for later retry, while a deferred
+/// writeback backend owns its completion callback until the response is ready.
 class MemoryPipeline {
 public:
   using FaultHandler = std::function<void(Wavefront &, VmAccessOutcome, uint64_t issue_pc)>;
@@ -118,6 +115,11 @@ public:
 
   WaitCounterType counter_type() const { return counter_type_; }
   void set_fault_handler(FaultHandler handler) { fault_handler_ = std::move(handler); }
+  /// @brief Bind optional observations while the pipeline has no owned instructions.
+  void set_statistics(const std::shared_ptr<stats::Scope> &scope, std::string_view pipeline);
+  /// @brief Settle outstanding statistics after producer quiescence, before export.
+  /// @details Idempotent; does not cancel architectural work or retire callbacks.
+  void finish_statistics();
   /// @brief Install local-effect admission for this pipeline.
   /// @details With no handler, local access is admitted without a permit.
   /// The handler receives the issuing process ID, its VM snapshot, and the
@@ -143,6 +145,8 @@ protected:
   /// Return Complete and do not call complete, or return Deferred and call it
   /// exactly once after the memory response is ready for architectural writeback.
   /// Failed must not invoke complete. Earlier lane writes may remain.
+  /// The owner must serialize deferred callbacks with issue, retry and cancel,
+  /// normally under the CU wave-state lock. The pipeline adds no independent lock.
   virtual MemoryAccessCompletion complete_access(Instruction &inst, Wavefront &wf,
                                                  MemoryAccessDeferredCompletion complete) = 0;
 
@@ -154,13 +158,17 @@ protected:
   void release_wait_counters(Wavefront &wf, const WaitCounterTokens &counters);
   bool cancel_wait_check_issue(const PipelineEntry &entry);
   VmAccessOutcome complete_entry(PipelineEntry entry);
+  void begin_statistics(Instruction *inst, const Wavefront &wf);
+  void finish_statistics(Instruction *inst, MemoryPipelineStatistics::Terminal terminal);
 
   void finish_completed_access(Instruction *inst, Wavefront &wf, const WaitCounterTokens &counters,
                                uint64_t wave_generation) {
     if (wf.dispatch_generation() != wave_generation) {
+      finish_statistics(inst, MemoryPipelineStatistics::Terminal::Cancelled);
       delete inst;
       return;
     }
+    finish_statistics(inst, MemoryPipelineStatistics::Terminal::Completed);
     const auto *state = inst->data();
     if (state && (state->tag() == GLOBAL_MEM || state->tag() == LOCAL_MEM) &&
         inst->data_as<VectorMemState>()->address_range_violation_lanes)
@@ -188,6 +196,17 @@ protected:
   FaultHandler fault_handler_;
   IngressHandler ingress_handler_;
   PeerCacheReadHandler peer_cache_read_handler_;
+
+private:
+  struct StatisticsOperation {
+    Instruction *inst;
+    const Wavefront *wf;
+    uint64_t wave_generation;
+  };
+  MemoryPipelineStatistics statistics_;
+  // Reuse slots so normal synchronous issue does not allocate. Growth is bounded
+  // by the observed maximum number of owned instructions, only when enabled.
+  std::vector<StatisticsOperation> statistics_operations_;
 };
 
 /// Remove sparse texel misses from the request using the instruction's VM snapshot.
