@@ -120,6 +120,7 @@ __global__ void mailboxMessagePassing(DeviceMailbox* dataMb, DeviceMailbox* ackM
 template <bool kAcquireOnly>
 __global__ void flatSync(IpcGpuBarrier bar, uint32_t* const* bufs, int self, int iters, int slice,
                          unsigned long long* bad) {
+  bool barAborted = false;
   const int b = blockIdx.x;
   unsigned long long mismatches = 0;
   for (int it = 0; it < iters; ++it) {
@@ -137,9 +138,9 @@ __global__ void flatSync(IpcGpuBarrier bar, uint32_t* const* bufs, int self, int
       // Release-only stand-in for the prior kernel end; with no acquire here, only the barrier orders the reads.
       __syncthreads();
       __builtin_amdgcn_fence(__ATOMIC_RELEASE, "");
-      bar.syncOnSameBlockIdx<false, true>();
+      bar.syncOnSameBlockIdx<false, true>(barAborted);
     } else {
-      bar.syncOnSameBlockIdx<true, true>();
+      bar.syncOnSameBlockIdx<true, true>(barAborted);
     }
     for (int p = 0; p < kRanks; ++p) {
       if (p == self) {
@@ -152,7 +153,7 @@ __global__ void flatSync(IpcGpuBarrier bar, uint32_t* const* bufs, int self, int
         }
       }
     }
-    bar.syncOnSameBlockIdx<true, false>();
+    bar.syncOnSameBlockIdx<true, false>(barAborted);
     // Stands in for the kernel end that follows <true, false> in production.
     __syncthreads();
   }
@@ -164,12 +165,13 @@ __global__ void flatSync(IpcGpuBarrier bar, uint32_t* const* bufs, int self, int
 // One rank with its abort flag raised and no live peers: barrier 1 gives up, then late peers drain its flags.
 // Barrier 2 must signal nothing, or a late peer would pair with it and read a shard this rank never produced.
 __global__ void abortedBarrierStaysSilent(IpcGpuBarrier bar, uint32_t* const* flags, int self) {
-  bar.syncOnSameBlockIdx<true, true>();
+  bool barAborted = false;
+  bar.syncOnSameBlockIdx<true, true>(barAborted);
   if (threadIdx.x < kRanks) {
     __atomic_store_n(flags[threadIdx.x] + blockIdx.x * kRanks + self, 0u, __ATOMIC_RELAXED);
   }
   __syncthreads();
-  bar.syncOnSameBlockIdx<true, false>();
+  bar.syncOnSameBlockIdx<true, false>(barAborted);
 }
 
 // Uncached is the production scratch; Coarse (cached) is the only allocation where a relaxed release is observable.
