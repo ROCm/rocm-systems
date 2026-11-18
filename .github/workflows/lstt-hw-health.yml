@@ -5,9 +5,11 @@
 # module is loaded and that ROCm sees the expected GPU. The BIOS version is
 # reported. For hosts marked bmc: true it also checks that the BMC responds.
 # Nothing is stored or compared. Each row's runner labels pick its host, and no
-# host name or secret is used in this file. Ids are opaque and sequential
-# (host-01, host-02, ...), never taken from the hardware; rows that run on one
-# machine share its number, and a machine added later takes the next number.
+# host name or secret is used in this file. Each row has a unique id: its GPU
+# architecture and a number (gfx1151-01, gfx90a-01), never a host name. A second
+# machine with the same GPU takes the next number (gfx1151-02). The mapping from
+# an id to a machine is kept internally, and hardware that is not public yet is
+# not added to this file.
 #
 # Why this is not part of TheRock CI: these hosts are not in TheRock's runner
 # pool, so TheRock CI does not cover them. This is a per-host check, not a build
@@ -51,18 +53,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - id: host-01
+          - id: gfx1151-01
             label: lstt-gfx1151
             gfx: gfx1151
           # One row per runner entry, so the two arches check in parallel. The
-          # MI210 label is shared by several hosts, so that row also needs the
-          # generic host label host-02 on its runner.
-          - id: host-02
+          # MI210 label is shared by several hosts, so that row also needs a host
+          # label on its runner: its own id, gfx90a-01.
+          - id: gfx90a-01
             label: lstt-gfx90a
-            host_label: host-02
+            host_label: gfx90a-01
             gfx: gfx90a
             bmc: true
-          - id: host-02
+          - id: gfx1100-01
             label: lstt-gfx1100
             gfx: gfx1100
     runs-on:
