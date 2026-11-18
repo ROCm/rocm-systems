@@ -43,6 +43,7 @@ jobs:
         with:
           sparse-checkout: |
             projects/rocprofiler-systems/
+            profilers/profiler-hub/
             .gitmodules
           set-safe-directory: true
           submodules: true
@@ -164,6 +165,7 @@ jobs:
             -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g') \
             -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DPROFILER_HUB_FETCH_DEPENDENCIES=ON \
             -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \
             -DROCPROFSYS_BUILD_EXAMPLES=ON \
             -DROCPROFSYS_BUILD_TESTING=ON \

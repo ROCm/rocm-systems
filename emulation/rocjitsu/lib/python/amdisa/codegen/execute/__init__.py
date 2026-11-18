@@ -113,8 +113,6 @@ def _register_handlers() -> None:
     from amdisa.codegen.execute.packed import (
         gen_pk_binop,
         gen_pk_ternary,
-        gen_pk_fmac_vop2,
-        gen_pk_fmac_vop3,
         gen_pk_binop_f32,
         gen_pk_ternary_f32,
         gen_pk_ternary_f64,
@@ -122,9 +120,6 @@ def _register_handlers() -> None:
         gen_pk_binop_f64,
         gen_pk_lshl_add_u64,
         gen_pk_mov_b32,
-        gen_mad_mix_f32,
-        gen_mad_mix_lo_hi,
-        gen_mad_mix_bf16,
         gen_dot2,
         gen_dot2_true16,
         gen_dot4,
@@ -334,11 +329,6 @@ def _register_handlers() -> None:
         opsel_exprs=c.opsel_exprs,
         integer_clamp=c.inst.name in c.profile.integer_clamp_dtypes,
     )
-    DISPATCH['pk_fmac_vop2'] = lambda c: (
-        gen_pk_fmac_vop3(c.dst_ops, c.src_ops)
-        if c.enc_name.upper() == 'ENC_VOP3'
-        else gen_pk_fmac_vop2(c.dst_ops, c.src_ops)
-    )
     DISPATCH['pk_binop_f32'] = lambda c: gen_pk_binop_f32(
         c.dst_ops,
         c.src_ops,
@@ -365,59 +355,7 @@ def _register_handlers() -> None:
         c.src_ops,
         opsel_exprs=c.opsel_exprs,
     )
-    DISPATCH['mad_mix_f32'] = lambda c: gen_mad_mix_f32(
-        c.dst_ops,
-        c.src_ops,
-        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
-        opsel_exprs=c.opsel_exprs,
-        use_cdna5_helpers=c.arch_name == 'cdna5',
-        fused_result=c.arch_name.startswith('rdna')
-        or c.arch_name in ('cdna1', 'cdna5'),
-    )
-    DISPATCH['mad_mixlo_f16'] = lambda c: gen_mad_mix_lo_hi(
-        c.dst_ops,
-        c.src_ops,
-        is_lo=True,
-        fused_f32_intermediate=c.arch_name == 'cdna1',
-        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
-        opsel_exprs=c.opsel_exprs,
-        use_cdna5_helpers=c.arch_name == 'cdna5',
-        fused_result=c.arch_name.startswith('rdna') or c.arch_name == 'cdna5',
-    )
-    DISPATCH['mad_mixhi_f16'] = lambda c: gen_mad_mix_lo_hi(
-        c.dst_ops,
-        c.src_ops,
-        is_lo=False,
-        fused_f32_intermediate=c.arch_name == 'cdna1',
-        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
-        opsel_exprs=c.opsel_exprs,
-        use_cdna5_helpers=c.arch_name == 'cdna5',
-        fused_result=c.arch_name.startswith('rdna') or c.arch_name == 'cdna5',
-    )
-    DISPATCH['mad_mix_f32_bf16'] = lambda c: gen_mad_mix_bf16(
-        c.dst_ops,
-        c.src_ops,
-        result='f32',
-        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
-        opsel_exprs=c.opsel_exprs,
-        use_cdna5_helpers=c.arch_name == 'cdna5',
-    )
-    DISPATCH['mad_mixlo_bf16'] = lambda c: gen_mad_mix_bf16(
-        c.dst_ops,
-        c.src_ops,
-        result='lo',
-        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
-        opsel_exprs=c.opsel_exprs,
-        use_cdna5_helpers=c.arch_name == 'cdna5',
-    )
-    DISPATCH['mad_mixhi_bf16'] = lambda c: gen_mad_mix_bf16(
-        c.dst_ops,
-        c.src_ops,
-        result='hi',
-        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
-        opsel_exprs=c.opsel_exprs,
-        use_cdna5_helpers=c.arch_name == 'cdna5',
-    )
+    # MIX arithmetic is emitted by rj_arith_float.gen_mixed_fma.
     # DOT: every semantic class routes here, so the generator keeps no
     # dot2_/dot4_/dot8_ fallback. test_dot_dispatch_covers_every_semantic_class
     # fails if a new class arrives without an entry.

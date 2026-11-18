@@ -205,6 +205,10 @@ _VARIABLE_KERNEL_LAUNCH_MIN_PAYLOAD_EXPR = (
 # (hipModuleGetFunction: function handles identified by name at launch time)
 PASSTHROUGH_ONLY: Set[str] = {
     "hipModuleGetFunction",
+    # Generated capture would store these process-local struct pointers without
+    # their pointees, so replay could not reconstruct either operation.
+    "hipMemcpyWithAttributesAsync",
+    "hipMemcpy3DWithAttributesAsync",
 }
 
 # ---------------------------------------------------------------------------
@@ -876,6 +880,10 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipGraphDestroy",
     "hipGraphUpload",
     "hipGraphDebugDotPrint",
+    "hipGraphGetId",
+    "hipGraphExecGetId",
+    "hipGraphNodeGetLocalId",
+    "hipGraphNodeGetToolsId",
     "hipGraphNodeGetType",
     "hipGraphNodeGetEnabled",
     "hipGraphKernelNodeGetParams",
@@ -1583,6 +1591,7 @@ _ENUM_TYPES = {
     "hipGraphMemAttributeType", "hipJitInputType",
     "hipMemAllocationHandleType", "hipMemRangeHandleType",
     "hipPointer_attribute", "hipStreamAttrID", "hipGLDeviceList",
+    "hipExecAffinityType",
 }
 
 # Scalar type map: normalised type string -> C field type
@@ -2100,8 +2109,14 @@ _HEADER_PREAMBLE = """\
  * v14: hipMemcpyWithAttributesAsync, hipMemcpy3DWithAttributesAsync and
  * hipArrayGetSparseProperties were appended to HipDispatchTable, shifting
  * the compiler API IDs up by three. A v13 reader would decode those events
- * as the wrong API. */
-#define HRR_VERSION ((uint16_t)14u)
+ * as the wrong API.
+ * v15: four graph ID queries were appended to HipDispatchTable, shifting the
+ * compiler API IDs up by four. A v14 reader would decode those events as the
+ * wrong API.
+ * v16: hipDeviceGetExecAffinitySupport was appended to HipDispatchTable,
+ * shifting the compiler API IDs up by one. A v15 reader would decode
+ * those events as the wrong API. */
+#define HRR_VERSION ((uint16_t)16u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)

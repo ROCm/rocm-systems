@@ -22,6 +22,7 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, AtomicUsize};
 
 enum Reply {
+    Xnack(i32, Option<i32>),
     SetScratch(Option<i32>),
     Allocate(u64, Option<i32>),
     DmaBufInfo(u64, u32, u32, &'static [u8], Option<i32>),
@@ -343,6 +344,11 @@ impl Fixture {
                         args.success = after;
                         errno
                     }
+                    (sys::Call::XnackMode(args), Reply::Xnack(enabled, errno)) => {
+                        assert_eq!(args.xnack_enabled, -1);
+                        args.xnack_enabled = enabled;
+                        errno
+                    }
                     (sys::Call::Free(args), Reply::Free(errno)) => {
                         assert_eq!(args.handle, 17);
                         errno
@@ -537,6 +543,66 @@ impl Fixture {
             "native cleanup stopped early"
         );
     }
+}
+
+#[test]
+fn xnack_query_reads_live_mode_and_rejects_lost_devices() {
+    use crate::device::{Device, DeviceResources};
+    use crate::driver::test_driver::TestDriver;
+    use crate::driver::{DeviceDriverState, Driver, EndpointSelector};
+    use crate::session::DriverContextLifetime;
+    use crate::topology::{EndpointKind, GpuInfo};
+
+    let fixture = Fixture::new([
+        Reply::Xnack(1, None),
+        Reply::Xnack(0, None),
+        Reply::Xnack(0, Some(errno::EIO)),
+    ]);
+    let driver = shared(super::super::LinuxKfdDriver::new());
+    let mut endpoint = TestDriver::new(
+        node().identity,
+        EndpointKind::Gpu {
+            info: GpuInfo::default(),
+        },
+        DriverContextLifetime::Session,
+    )
+    .open_endpoint(node().identity)
+    .unwrap();
+    endpoint.driver_instance = driver.driver_instance();
+    endpoint.selector = EndpointSelector::LinuxKfd {
+        native: node(),
+        access_targets: None,
+    };
+    let driver_state = DeviceDriverState::LinuxKfd {
+        driver,
+        state: super::super::DeviceState {
+            vm: fixture.vm.clone(),
+            native: node(),
+            asic_family_id: 0,
+            gpu_counter_frequency_hz: 0,
+        },
+    };
+    let device = Device {
+        resources: DeviceResources::for_activated(&endpoint, &driver_state).unwrap(),
+        driver_state,
+        endpoint,
+    };
+    let gpu = device.gpu().unwrap();
+    assert!(gpu.xnack_enabled().unwrap());
+    assert!(!gpu.xnack_enabled().unwrap());
+    assert_eq!(
+        gpu.xnack_enabled()
+            .unwrap_err()
+            .native_status()
+            .and_then(crate::NativeStatus::errno_code),
+        Some(errno::EIO)
+    );
+    fixture.hardware.store(2, Ordering::Release);
+    assert_eq!(
+        gpu.xnack_enabled().unwrap_err().kind(),
+        ErrorKind::DeviceLost
+    );
+    fixture.exhausted();
 }
 
 #[test]
