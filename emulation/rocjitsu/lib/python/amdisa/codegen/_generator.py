@@ -11885,25 +11885,6 @@ class CodeGenerator:
             vop3p_local_simd_probe_line,
         )
 
-        if self.isa_spec.arch_name == 'cdna1':
-            result = {
-                'v_mad_mix_f32': 'F32',
-                'v_mad_mixlo_f16': 'F16_LO',
-                'v_mad_mixhi_f16': 'F16_HI',
-            }.get(inst.mnemonic)
-            if result:
-                return (
-                    f'  if (amdgpu::try_execute_vop3p_fma_mix_simd<amdgpu::FmaMixDst::{result}, '
-                    'true, true>(inst, wf)) return;'
-                )
-        if self.isa_spec.profile.generated_dir_name == 'cdna5':
-            mixed = {
-                'v_fma_mix_f32': 'F32',
-                'v_fma_mixlo_f16': 'F16_LO',
-                'v_fma_mixhi_f16': 'F16_HI',
-            }.get(inst.mnemonic)
-            if mixed:
-                return f'  ROCJITSU_TRY_SIMD_FUSED_MIX({mixed});'
         return vop3p_local_simd_probe_line(
             f'{inst.mnemonic}_{enc_key}',
             self.isa_spec.profile.vop3p_opsel_fields,
@@ -17534,6 +17515,24 @@ class CodeGenerator:
                     'cdna4',
                     'cdna5',
                 ) and any(i.name in float_names for i in all_insts):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
+                    )
+                if self.isa_spec.arch_name in (
+                    'cdna1',
+                    'cdna2',
+                    'rdna1',
+                    'rdna3_5',
+                ) and any(
+                    i.name in {'V_PK_FMA_F16', 'V_PK_FMAC_F16'} for i in all_insts
+                ):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
+                    )
+                if self.isa_spec.arch_name in ('cdna1', 'cdna2') and any(
+                    i.name in {'V_MAD_MIX_F32', 'V_MAD_MIXLO_F16', 'V_MAD_MIXHI_F16'}
+                    for i in all_insts
+                ):
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
                     )
