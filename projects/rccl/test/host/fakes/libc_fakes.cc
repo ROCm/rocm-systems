@@ -313,6 +313,11 @@ static ssize_t DefaultReadlink(const char*, char*, size_t) {
   return -1;
 }
 
+static ssize_t DefaultReadlinkat(int, const char*, char*, size_t) {
+  errno = ENOENT;
+  return -1;
+}
+
 static int DefaultIoctl(int, unsigned long, void*) {
   errno = ENOTTY;
   return -1;
@@ -367,6 +372,8 @@ std::function<DIR*(const char*)> g_opendir = DefaultOpendir;
 std::function<struct dirent*(DIR*)> g_readdir = DefaultReaddir;
 std::function<int(DIR*)> g_closedir = DefaultClosedir;
 std::function<ssize_t(const char*, char*, size_t)> g_readlink = DefaultReadlink;
+std::function<ssize_t(int, const char*, char*, size_t)> g_readlinkat = DefaultReadlinkat;
+ASSERT_HOOK_MATCHES_PROD(g_readlinkat, ::readlinkat);
 std::function<int(int, unsigned long, void*)> g_ioctl = DefaultIoctl;
 std::function<int(void (*)(void))> g_atexit = DefaultAtexit;
 std::function<int(clockid_t, struct timespec*)> g_clockGettime = DefaultClockGettime;
@@ -475,6 +482,7 @@ void ResetLibcFakes() {
   g_readdir = DefaultReaddir;
   g_closedir = DefaultClosedir;
   g_readlink = DefaultReadlink;
+  g_readlinkat = DefaultReadlinkat;
   g_ioctl = DefaultIoctl;
   g_atexit = DefaultAtexit;
   g_clockGettime = DefaultClockGettime;
@@ -573,6 +581,7 @@ void UseRealLibc() {
   g_fopen = ::fopen;
   g_opendir = ::opendir;
   g_readlink = ::readlink;
+  g_readlinkat = ::readlinkat;
 }
 
 // ---------------------------------------------------------------------------
@@ -639,6 +648,9 @@ DIR* micro_opendir(const char* path) { return g_opendir(path); }
 struct dirent* micro_readdir(DIR* dir) { return g_readdir(dir); }
 int micro_closedir(DIR* dir) { return g_closedir(dir); }
 ssize_t micro_readlink(const char* path, char* buf, size_t len) { return g_readlink(path, buf, len); }
+ssize_t micro_readlinkat(int fd, const char* path, char* buf, size_t len) {
+  return g_readlinkat(fd, path, buf, len);
+}
 int micro_ioctl(int fd, unsigned long request, ...) {
   va_list args;
   va_start(args, request);

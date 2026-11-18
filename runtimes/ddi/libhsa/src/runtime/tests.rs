@@ -270,10 +270,13 @@ fn first_and_later_gpu_activation_failures_retire_the_session_join() {
     struct Activated {
         /// Number of mock GPU owners still live.
         live: Arc<AtomicUsize>,
+        /// Admission must close before a resource owner is released.
+        retiring: Arc<AtomicBool>,
     }
     impl Drop for Activated {
         /// Records destruction of the test owner.
         fn drop(&mut self) {
+            assert!(self.retiring.load(AtomicOrdering::Relaxed));
             self.live.fetch_sub(1, AtomicOrdering::Relaxed);
         }
     }
@@ -283,10 +286,21 @@ fn first_and_later_gpu_activation_failures_retire_the_session_join() {
         live: Arc<AtomicUsize>,
         /// Number of mock session joins still outstanding.
         joins: Arc<AtomicUsize>,
+        /// Expected live owners when rollback closes admission.
+        live_at_begin: usize,
+        /// Shared retirement state observed by resource destructors.
+        retiring: Arc<AtomicBool>,
     }
     impl RetireSession for Joined {
+        fn begin_retirement(&self) -> bool {
+            assert_eq!(self.live.load(AtomicOrdering::Relaxed), self.live_at_begin);
+            self.retiring.store(true, AtomicOrdering::Relaxed);
+            true
+        }
+
         /// Checks native owners are gone before retiring the mock session.
         fn retire(&mut self) -> bool {
+            assert!(self.retiring.load(AtomicOrdering::Relaxed));
             assert_eq!(self.live.load(AtomicOrdering::Relaxed), 0);
             self.joins.fetch_sub(1, AtomicOrdering::Relaxed);
             true
@@ -296,14 +310,20 @@ fn first_and_later_gpu_activation_failures_retire_the_session_join() {
     for completed_activations in [0, 1] {
         let live = Arc::new(AtomicUsize::new(completed_activations));
         let joins = Arc::new(AtomicUsize::new(1));
+        let retiring = Arc::new(AtomicBool::new(false));
         let mut pending = PendingInit {
             debugger: None,
             session: Some(Joined {
                 live: live.clone(),
                 joins: joins.clone(),
+                live_at_begin: completed_activations,
+                retiring: retiring.clone(),
             }),
             gpus: (0..completed_activations)
-                .map(|_| Activated { live: live.clone() })
+                .map(|_| Activated {
+                    live: live.clone(),
+                    retiring: retiring.clone(),
+                })
                 .collect(),
         };
         assert!(pending.cleanup());
@@ -313,18 +333,29 @@ fn first_and_later_gpu_activation_failures_retire_the_session_join() {
 }
 
 #[test]
-fn failed_or_unwound_initialization_retains_the_native_session() {
+fn failed_or_unwound_initialization_retains_required_owners() {
     /// Records whether failed native rollback releases its owner.
     struct SessionProbe {
         /// Drop count that must remain zero after an uncertain rollback.
         drops: Arc<AtomicUsize>,
-        /// Injects an unwind instead of a returned native error.
-        panic_on_retire: bool,
+        /// Fails admission closure before releasing any resource owner.
+        fail_before_release: bool,
+        /// Injects an unwind instead of a returned error.
+        panic_on_failure: bool,
     }
 
     impl RetireSession for SessionProbe {
+        fn begin_retirement(&self) -> bool {
+            if self.fail_before_release {
+                assert!(!self.panic_on_failure, "injected admission closure unwind");
+                return false;
+            }
+            true
+        }
+
         fn retire(&mut self) -> bool {
-            assert!(!self.panic_on_retire, "injected native rollback unwind");
+            assert!(!self.fail_before_release);
+            assert!(!self.panic_on_failure, "injected native rollback unwind");
             false
         }
     }
@@ -335,24 +366,41 @@ fn failed_or_unwound_initialization_retains_the_native_session() {
         }
     }
 
-    for panic_on_retire in [false, true] {
-        let drops = Arc::new(AtomicUsize::new(0));
-        let mut pending = PendingInit {
-            debugger: None,
-            session: Some(SessionProbe {
-                drops: drops.clone(),
-                panic_on_retire,
-            }),
-            gpus: Vec::<()>::new(),
-        };
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| pending.cleanup()));
-        if panic_on_retire {
-            assert!(result.is_err());
-        } else {
-            assert!(!result.unwrap());
+    struct GpuProbe(Arc<AtomicUsize>);
+
+    impl Drop for GpuProbe {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, AtomicOrdering::Relaxed);
         }
-        drop(pending);
-        assert_eq!(drops.load(AtomicOrdering::Relaxed), 0);
+    }
+
+    for fail_before_release in [false, true] {
+        for panic_on_failure in [false, true] {
+            let drops = Arc::new(AtomicUsize::new(0));
+            let gpu_drops = Arc::new(AtomicUsize::new(0));
+            let mut pending = PendingInit {
+                debugger: None,
+                session: Some(SessionProbe {
+                    drops: drops.clone(),
+                    fail_before_release,
+                    panic_on_failure,
+                }),
+                gpus: vec![GpuProbe(gpu_drops.clone())],
+            };
+            let result =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| pending.cleanup()));
+            if panic_on_failure {
+                assert!(result.is_err());
+            } else {
+                assert!(!result.unwrap());
+            }
+            drop(pending);
+            assert_eq!(drops.load(AtomicOrdering::Relaxed), 0);
+            assert_eq!(
+                gpu_drops.load(AtomicOrdering::Relaxed),
+                usize::from(!fail_before_release)
+            );
+        }
     }
 }
 
