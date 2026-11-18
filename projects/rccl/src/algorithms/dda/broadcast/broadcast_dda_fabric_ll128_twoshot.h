@@ -81,9 +81,6 @@ __global__ void ddaBroadcastFabricLL128TwoShot(
   const int col = (int)blockIdx.x;
   const int peer = col < selfRank ? col : col + 1;
 
-  auto chunkOff = [&](int r) -> size_t {
-    return (size_t)r * chunkSlices * (size_t)kDdaLL128DataBytesPerSlice;
-  };
 
   // Fan-out: 0 or >= nPeers means full fan-out
   const int kFanOut = (fanOut <= 0 || fanOut >= nPeers) ? nPeers : fanOut;
@@ -96,7 +93,7 @@ __global__ void ddaBroadcastFabricLL128TwoShot(
     uint64_t* scatterDst = reinterpret_cast<uint64_t*>(peerScratch[peer]) + bankWords;
     for (size_t s = gwarp; s < chunkSlices; s += wstride) {
       const size_t wireOff = s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane;
-      const size_t dOff = chunkOff(col) + s * (size_t)kDdaLL128DataBytesPerSlice;
+      const size_t dOff = (size_t)col * chunkSlices * (size_t)kDdaLL128DataBytesPerSlice + s * (size_t)kDdaLL128DataBytesPerSlice;
       const size_t rem = totalBytes > dOff ? totalBytes - dOff : 0;
       const int elt = rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
       uint64_t regs[kDdaLL128WordsPerThread];
@@ -168,7 +165,7 @@ __global__ void ddaBroadcastFabricLL128TwoShot(
                             vr, flag, flagLane);
         }
         if (nFanRounds > 1 ? (fRound == 0) : (col == (int)(s % (size_t)nPeers))) {
-          const size_t dOff = chunkOff(selfCol) + s * (size_t)kDdaLL128DataBytesPerSlice;
+          const size_t dOff = (size_t)selfCol * chunkSlices * (size_t)kDdaLL128DataBytesPerSlice + s * (size_t)kDdaLL128DataBytesPerSlice;
           const size_t rem = totalBytes > dOff ? totalBytes - dOff : 0;
           const int elt = rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
           if (elt > 0)
@@ -184,7 +181,7 @@ __global__ void ddaBroadcastFabricLL128TwoShot(
       gatherOff + (uint64_t)peer * slotWireWords;
     for (size_t s = gwarp; s < chunkSlices; s += wstride) {
       const int peerCol = peer < root ? peer : peer - 1;
-      const size_t dOff = chunkOff(peerCol) + s * (size_t)kDdaLL128DataBytesPerSlice;
+      const size_t dOff = (size_t)peerCol * chunkSlices * (size_t)kDdaLL128DataBytesPerSlice + s * (size_t)kDdaLL128DataBytesPerSlice;
       const size_t rem = totalBytes > dOff ? totalBytes - dOff : 0;
       const int elt = rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
       uint64_t vr[kDdaLL128WordsPerThread];
