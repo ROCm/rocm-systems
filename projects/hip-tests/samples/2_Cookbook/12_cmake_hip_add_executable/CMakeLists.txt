@@ -16,6 +16,14 @@ if(UNIX)
   list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 endif()
 
+if(WIN32)
+  if(NOT DEFINED HIP_PATH)
+    if(DEFINED ENV{HIP_PATH})
+      set(HIP_PATH "$ENV{HIP_PATH}" CACHE STRING "HIP Path")
+    endif()
+  endif()
+endif()
+
 set(CMAKE_HIP_ARCHITECTURES native)
 
 project(12_cmake_hip_add_executable LANGUAGES CXX HIP)
