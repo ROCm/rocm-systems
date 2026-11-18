@@ -230,7 +230,7 @@ class FetchTest(unittest.TestCase):
                 "tarball_url": "T"}
         files = {"T": tarball({"./lib/librccl.so.1.0": b"lib",
                                "./.kpack/rccl_lib_gfx950.kpack": b"kernels"},
-                              symlinks={"./lib/librccl.so.1": "librccl.so.1.0"})}
+                              symlinks={"./lib/librccl.so.1.0": "librccl.so.1"})}
         with Remote(files=files), mock.patch.object(fb, "resolve", return_value=plan):
             fb.fetch("release:7.13.0", "gfx950-dcgpu", self.out)
         self.assert_laid_out(b"lib", b"kernels")
@@ -252,6 +252,28 @@ class FetchTest(unittest.TestCase):
 
 
 class HttpRangeFileTest(unittest.TestCase):
+    def test_a_wheel_is_read_by_range(self):
+        data = wheel({"other.txt": b"x" * 5000, fb.WHEEL_LIB: b"lib"})
+        ranges = []
+
+        class Response(io.BytesIO):
+            def __init__(self, body: bytes, status: int):
+                super().__init__(body)
+                self.status, self.headers = status, {"Content-Length": str(len(data))}
+
+        def urlopen(request, timeout):
+            if request.get_method() == "HEAD":
+                return Response(b"", 200)
+            start, end = map(int, request.get_header("Range")[len("bytes="):].split("-"))
+            ranges.append((start, end))
+            return Response(data[start:end + 1], 206)
+
+        with mock.patch.object(fb.urllib.request, "urlopen", side_effect=urlopen), \
+             fb._open_zip("https://repo.amd.com/x.whl") as z:
+            self.assertEqual(z.read(fb.WHEEL_LIB), b"lib")
+        self.assertTrue(ranges)
+        self.assertTrue(all(0 <= start <= end < len(data) for start, end in ranges))
+
     def test_a_server_ignoring_ranges_fails(self):
         class Response(io.BytesIO):
             status = 200
