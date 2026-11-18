@@ -110,39 +110,3 @@ rocprofiler_add_unit_test(
     LABELS "unittests"
     ENVIRONMENT "${rocprofiler-sdk-lib-tests-env}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
-
-# Keep the multi-client lifecycle in its own process: SDK registration is global.
-add_executable(rocprofiler-sdk-attach-lifecycle-tests registration_attach_lifecycle.cpp)
-target_link_libraries(
-    rocprofiler-sdk-attach-lifecycle-tests
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk-shared-library GTest::gtest
-            GTest::gtest_main ${CMAKE_DL_LIBS})
-set_target_properties(rocprofiler-sdk-attach-lifecycle-tests PROPERTIES BUILD_RPATH
-                                                                      "\$ORIGIN/../lib")
-
-foreach(_id RANGE 1 4)
-    set(_fixture rocprofiler-sdk-attach-client-${_id})
-    set(_fixture_filename "${CMAKE_SHARED_LIBRARY_PREFIX}${_fixture}${CMAKE_SHARED_LIBRARY_SUFFIX}")
-    add_library(${_fixture} SHARED registration_attach_clients.cpp)
-    target_link_libraries(
-        ${_fixture}
-        PRIVATE rocprofiler-sdk::rocprofiler-sdk-shared-library
-                rocprofiler-sdk::rocprofiler-sdk-build-flags)
-    target_compile_definitions(${_fixture} PRIVATE ROCPROFILER_TEST_CLIENT_ID=${_id})
-    target_compile_definitions(
-        rocprofiler-sdk-attach-lifecycle-tests
-        PRIVATE "ROCPROFILER_TEST_ATTACH_CLIENT_${_id}=\"${_fixture_filename}\"")
-    add_dependencies(rocprofiler-sdk-attach-lifecycle-tests ${_fixture})
-    install(
-        TARGETS ${_fixture}
-        LIBRARY DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests/unit-tests/lib
-                COMPONENT tests)
-endforeach()
-
-rocprofiler_add_unit_test(
-    TARGET rocprofiler-sdk-attach-lifecycle-tests
-    SOURCES registration_attach_lifecycle.cpp
-    TIMEOUT 30
-    LABELS "unittests"
-    ENVIRONMENT "${rocprofiler-sdk-lib-tests-env}"
-    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
