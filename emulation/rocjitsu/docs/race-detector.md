@@ -480,7 +480,7 @@ clock as barriers:
 
   | Arrival | Pending operations it hands off |
   | --- | --- |
-  | `ds_atomic_barrier_arrive_rtn_b64` | The wave's earlier DS operations: the arrive "is ordered with other LDS operations" (11.2.2). |
+  | `ds_atomic_barrier_arrive_rtn_b64` | The wave's earlier DS operations and the LDS lanes of its FLAT operations: the arrive "is ordered with other LDS operations" (11.2.2), and FLAT and LDS instructions "stay in order as they move through LDS" (5.7.1.3). |
   | `ds_atomic_async_barrier_arrive_b64` | The wave's earlier async loads to LDS: the arrive executes "only when all previously issued asynchronous loads have completed" (15.15). |
   | A tensor transfer's completion arrival (10.11.3) | That transfer and the wave's earlier tensor transfers, which complete in issue order (10.11.1). |
 
