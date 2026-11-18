@@ -309,14 +309,18 @@ public:
 
   /// Called for each arrival at an LDS barrier cell (CDNA5 ISA 11.2.2), after
   /// the cell has been updated. The DS arrive instructions report one arrival
-  /// per active lane, in the simulator's lane order, within the issuing wave's
-  /// instruction step and after onAmdgpuMemoryAccessRouted(). A tensor DMA
-  /// instruction whose descriptor requests an arrival reports one, after
-  /// onAmdgpuTensorDmaIssued() and after the transfer has written LDS; `wf` is
-  /// the wave that issued the transfer. A transfer deferred until its memory
-  /// is available arrives when it resumes, outside any instruction step of
-  /// its wave and before the wave issues another instruction. An instruction
-  /// issued with EXEC zero, and a NULL tensor descriptor, report nothing.
+  /// per active lane whose address is in range, in the simulator's lane order,
+  /// within the issuing wave's instruction step and after
+  /// onAmdgpuMemoryAccessRouted(); issued with EXEC zero they report nothing.
+  /// ds_atomic_barrier_arrive_rtn_b64 with an update value of zero reads the
+  /// cell without arriving, and is reported with `old_state == new_state`. A
+  /// tensor DMA instruction whose descriptor requests an arrival reports one,
+  /// after onAmdgpuTensorDmaIssued() and after the transfer has written LDS;
+  /// `wf` is the wave that issued the transfer. A tensor instruction ignores
+  /// EXEC (CDNA5 ISA 10.11.1) and reports nothing only for a NULL descriptor.
+  /// A transfer deferred until its memory is available arrives when it
+  /// resumes, outside any instruction step of its wave and before the wave
+  /// issues another instruction.
   /// May run concurrently across simulation partitions unless
   /// requires_serial_hot_hooks() returns true.
   virtual void onAmdgpuLdsBarrierArrived(const amdgpu::LdsBarrierArrivalObservation & /*arrival*/,

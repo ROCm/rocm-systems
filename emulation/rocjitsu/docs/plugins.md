@@ -621,12 +621,15 @@ barrier cell, a 64-bit LDS word holding a pending count and a phase (CDNA5 ISA
 the arrival, the cell's LDS address, its contents before and after, and whether
 the arrival rolled the pending count under, which changes the phase.
 `ds_atomic_barrier_arrive_rtn_b64` and `ds_atomic_async_barrier_arrive_b64`
-report one arrival per active lane, each at that lane's address, in the
-simulator's lane order, within the issuing wavefront's instruction step and
-after `onAmdgpuMemoryAccessRouted`; with EXEC zero they report nothing. A
-tensor DMA instruction whose descriptor requests an arrival reports one, after
-`onAmdgpuTensorDmaIssued` and after the transfer has written LDS, with `wf` the
-wavefront that issued it; a NULL descriptor reports nothing. A transfer that
+report one arrival per active lane whose address is in range, each at that
+lane's address, in the simulator's lane order, within the issuing wavefront's
+instruction step and after `onAmdgpuMemoryAccessRouted`; with EXEC zero they
+report nothing. `ds_atomic_barrier_arrive_rtn_b64` with an update value of zero
+reads the cell without arriving, and is reported with `old_state` equal to
+`new_state`. A tensor DMA instruction whose descriptor requests an arrival
+reports one, after `onAmdgpuTensorDmaIssued` and after the transfer has written
+LDS, with `wf` the wavefront that issued it; it ignores EXEC (CDNA5 ISA
+10.11.1), and reports nothing only for a NULL descriptor. A transfer that
 waits for memory arrives when it resumes, outside any instruction step of its
 wavefront and before that wavefront issues another instruction. Consumers must
 opt in through `observes_lds_barrier_arrival()`.
