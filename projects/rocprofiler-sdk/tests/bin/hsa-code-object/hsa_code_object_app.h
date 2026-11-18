@@ -80,7 +80,13 @@ class MQDependencyTest
 {
 public:
     MQDependencyTest() { hsa_init(); }
-    ~MQDependencyTest() { hsa_shut_down(); }
+    ~MQDependencyTest()
+    {
+        if(!shutdown_done) hsa_shut_down();
+    }
+
+    // Lets a fixture shut the runtime down itself and inspect the returned status.
+    bool shutdown_done = false;
 
     std::vector<Device>      cpu;
     std::vector<Device>      gpu;

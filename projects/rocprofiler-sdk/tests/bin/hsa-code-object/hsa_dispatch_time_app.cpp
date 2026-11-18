@@ -35,10 +35,46 @@
 
 namespace
 {
+// AMD interface 1.39 replaced the per-agent boolean HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED
+// (added in 1.36, never released) with the HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS bit of
+// HSA_AMD_AGENT_INFO_AQL_EXTENSIONS. These are enumerators and inline functions, not macros, so
+// the interface version decides which query a header set provides; older headers provide neither
+// and the test then runs without hinted handles.
+#if !defined(HSA_AMD_INTERFACE_VERSION_MINOR)
+#    define AMD_SIGNAL_HINTS_QUERY_AVAILABLE 0
+#elif HSA_AMD_INTERFACE_VERSION_MINOR >= 39
+#    define AMD_SIGNAL_HINTS_QUERY_AVAILABLE 1
+bool
+signal_hints_supported(hsa_agent_t agent)
+{
+    uint8_t extensions[8] = {};
+    return hsa_agent_get_info(agent,
+                              static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_AQL_EXTENSIONS),
+                              extensions) == HSA_STATUS_SUCCESS &&
+           hsa_flag_isset64(extensions, HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS);
+}
+#elif HSA_AMD_INTERFACE_VERSION_MINOR >= 36
+#    define AMD_SIGNAL_HINTS_QUERY_AVAILABLE 1
+bool
+signal_hints_supported(hsa_agent_t agent)
+{
+    auto supported = false;
+    return hsa_agent_get_info(
+               agent,
+               static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED),
+               &supported) == HSA_STATUS_SUCCESS &&
+           supported;
+}
+#else
+#    define AMD_SIGNAL_HINTS_QUERY_AVAILABLE 0
+#endif
+
 // large enough that the kernel runs far longer than the minimum duration below
 constexpr uint32_t num_elements    = 1u << 26;
 constexpr uint64_t min_duration_ns = 10000;
 constexpr int      iterations      = 8;
+// Bounded drain: the monitor and queue phase share 30 s and the copy wait allows up to 30 s more.
+constexpr auto max_shutdown_duration = std::chrono::seconds{65};
 }  // namespace
 
 int
@@ -114,13 +150,14 @@ main()
     };
 
     int failures = 0;
+    // The packet layout is identical for every iteration, including the one left blocked at exit.
+    auto packet = MQDependencyTest::Aql{};
     for(int i = 0; i < iterations; ++i)
     {
         auto signal = hsa_signal_t{};
         status      = hsa_signal_create(1, 0, nullptr, &signal);
         RET_IF_HSA_ERR(status)
 
-        MQDependencyTest::Aql packet{};
         packet.header.type                   = HSA_PACKET_TYPE_KERNEL_DISPATCH;
         packet.header.barrier                = 1;
         packet.header.acquire                = HSA_FENCE_SCOPE_SYSTEM;
@@ -137,13 +174,8 @@ main()
         packet.dispatch.kernel_object        = kernel.handle;
         packet.dispatch.kernarg_address      = args;
         packet.dispatch.completion_signal    = signal;
-#if defined(AMD_SIGNAL_HINT_MASK)
-        auto hints_supported = false;
-        if(hsa_agent_get_info(
-               agent,
-               static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED),
-               &hints_supported) == HSA_STATUS_SUCCESS &&
-           hints_supported)
+#if AMD_SIGNAL_HINTS_QUERY_AVAILABLE
+        if(signal_hints_supported(agent))
             packet.dispatch.completion_signal =
                 hsa_amd_signal_set_hints(signal, AMD_SIGNAL_HINT_TS_ON);
 #endif
@@ -221,15 +253,79 @@ main()
         RET_IF_HSA_ERR(status)
     }
 
-    // Final HSA shutdown retires the live queue after its completion handlers drain.
+    // Final HSA shutdown retires the live queue after its completion handlers drain. With
+    // ROCPROFILER_DISPATCH_TIME_BLOCKED set, the queue is instead left holding a kernel and an
+    // intercepted copy behind a dependency that is never satisfied, so shutdown must abandon them
+    // rather than wait for work the application never releases. The buffers those submissions name
+    // stay allocated: the copy is never executed, and freeing them would not make it completable.
+    if(std::getenv("ROCPROFILER_DISPATCH_TIME_BLOCKED") != nullptr)
+    {
+        auto dependency     = hsa_signal_t{};
+        auto blocked_kernel = hsa_signal_t{};
+        auto blocked_copy   = hsa_signal_t{};
+        status              = hsa_signal_create(1, 0, nullptr, &dependency);
+        RET_IF_HSA_ERR(status)
+        status = hsa_signal_create(2, 0, nullptr, &blocked_kernel);
+        RET_IF_HSA_ERR(status)
+        status = hsa_signal_create(1, 0, nullptr, &blocked_copy);
+        RET_IF_HSA_ERR(status)
+
+        auto blocked_args = static_cast<args_t*>(obj.hsa_malloc(sizeof(args_t), obj.kernarg));
+        *blocked_args     = {};
+        blocked_args->a   = static_cast<uint32_t*>(
+            obj.hsa_malloc(num_elements * sizeof(uint32_t), obj.gpu[0], false));
+        blocked_args->b = static_cast<uint32_t*>(
+            obj.hsa_malloc(num_elements * sizeof(uint32_t), obj.gpu[0], false));
+
+        auto gate                      = MQDependencyTest::Aql{};
+        gate.header.type               = HSA_PACKET_TYPE_BARRIER_AND;
+        gate.header.barrier            = 1;
+        gate.header.acquire            = HSA_FENCE_SCOPE_SYSTEM;
+        gate.header.release            = HSA_FENCE_SCOPE_SYSTEM;
+        gate.barrier_and.dep_signal[0] = dependency;
+
+        auto blocked_packet                       = packet;
+        blocked_packet.dispatch.kernarg_address   = blocked_args;
+        blocked_packet.dispatch.completion_signal = blocked_kernel;
+        submit_together(gate, blocked_packet);
+
+        // Intercepted only when memory-copy tracing is active for this process.
+        status = hsa_amd_memory_async_copy(blocked_args->a,
+                                           agent,
+                                           blocked_args->b,
+                                           agent,
+                                           num_elements * sizeof(uint32_t),
+                                           1,
+                                           &dependency,
+                                           blocked_copy);
+        RET_IF_HSA_ERR(status)
+    }
+
     status = hsa_amd_memory_pool_free(args->a);
     RET_IF_HSA_ERR(status)
     status = hsa_amd_memory_pool_free(args->b);
     RET_IF_HSA_ERR(status)
     status = hsa_amd_memory_pool_free(args);
     RET_IF_HSA_ERR(status)
-    status = hsa_executable_destroy(code_object.executable);
-    RET_IF_HSA_ERR(status)
+    // A blocked submission still names this executable's kernel, so the executable is not destroyed
+    // here: its lifetime ends with the runtime shutdown below.
+
+    // Final shutdown must return even though the submissions above can never complete. The
+    // destructor does not report the status, so shut the runtime down here and check it, then
+    // keep the object from repeating the call.
+    const auto shutdown_begin = std::chrono::steady_clock::now();
+    status                    = hsa_shut_down();
+    obj.shutdown_done         = true;
+    if(status != HSA_STATUS_SUCCESS)
+    {
+        fprintf(stderr, "final hsa_shut_down returned %d\n", static_cast<int>(status));
+        ++failures;
+    }
+    else if(std::chrono::steady_clock::now() - shutdown_begin > max_shutdown_duration)
+    {
+        fprintf(stderr, "final hsa_shut_down exceeded its drain budget\n");
+        ++failures;
+    }
 
     return (failures == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
 }

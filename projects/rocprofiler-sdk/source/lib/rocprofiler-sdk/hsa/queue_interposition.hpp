@@ -29,6 +29,7 @@
 #include <hsa/hsa_api_trace.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <functional>
 #include <memory>
@@ -318,6 +319,15 @@ interposition_fini();
  */
 void
 interposition_sync();
+
+/**
+ * @brief Wait, bounded, for in-flight completions to retire
+ *
+ * Returns false if batches were still in flight at @p deadline. A caller that must not free the
+ * state those batches name should retain it and let the runtime reclaim it instead.
+ */
+bool
+interposition_sync_until(std::chrono::steady_clock::time_point deadline);
 
 /**
  * @brief Create the wake signal and launch the completion-monitor thread

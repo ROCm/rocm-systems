@@ -56,6 +56,11 @@ construct_hsa_signal(signal_t&          signal,
                      const hsa_agent_t* consumers,
                      uint64_t           attributes)
 {
+    // A handle from a previous runtime generation is not a reusable signal: once the runtime closed
+    // it, the handle is invalid, and reusing it would substitute a dead signal for a fresh one.
+    // Drop it so the create path below allocates for the current generation.
+    if(signal.value != hsa_signal_t{} && is_runtime_shutdown()) signal.value = hsa_signal_t{};
+
     if(signal.value != hsa_signal_t{})
     {
         ROCP_WARNING_IF(num_consumers != 0 || consumers != nullptr || attributes != 0)
@@ -113,8 +118,14 @@ signal_pool_fini()
         static auto _once = std::once_flag{};
         std::call_once(_once, [&]() { ROCP_INFO << pool->get_usage_report(); });
 
-        // always try to clear
-        pool->clear([](auto& signal) { Queue::destroy_signal(&signal); });
+        // A checked-out entry keeps a pointer to this pool, and release() writes through it, so
+        // tearing the storage down while one is borrowed leaves that release with a dangling pool.
+        // clear_if_idle() performs the check and the teardown under one lock; if an entry is still
+        // borrowed the pool is kept intact and the owning handler's runtime reclaims its signal.
+        if(!pool->clear_if_idle([](auto& signal) { Queue::destroy_signal(&signal); }))
+        {
+            ROCP_WARNING << "signal pool still has entries in use; deferring pool teardown";
+        }
     }
 }
 

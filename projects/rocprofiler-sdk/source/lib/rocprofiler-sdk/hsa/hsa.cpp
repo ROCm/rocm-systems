@@ -553,24 +553,29 @@ should_wrap_functor(const context::context_array_t&     _contexts,
 }
 
 auto hsa_reference_count_value = std::atomic<int>{0};
+auto runtime_shutdown_value    = std::atomic<bool>{false};
 
 hsa_status_t
 hsa_init_refcnt_impl()
 {
-    struct scoped_dtor
-    {
-        scoped_dtor() = default;
-        ~scoped_dtor() { ++hsa_reference_count_value; }
-    };
-    auto _dtor   = scoped_dtor{};
+    // Count the reference before the runtime call, not after it: a shutdown on another thread must
+    // not be able to observe a count that excludes this reference and retire state the caller is
+    // about to own. On failure the count is put back.
+    ++hsa_reference_count_value;
     auto _status = get_core_table()->hsa_init_fn();
+
+    if(_status != HSA_STATUS_SUCCESS)
+    {
+        --hsa_reference_count_value;
+        return _status;
+    }
 
     // Start the monitor after hsa_init_fn and only when it succeeded: creating the wake signal
     // needs an open runtime. Starting again is harmless, since start_completion_monitor returns
     // early when the monitor is already running. Without this, interception stays off for the
     // rest of the process once a full shutdown has stopped the monitor.
-    if(_status == HSA_STATUS_SUCCESS)
-        ::rocprofiler::hsa::queue_interposition::start_completion_monitor();
+    runtime_shutdown_value.store(false);
+    ::rocprofiler::hsa::queue_interposition::start_completion_monitor();
 
     return _status;
 }
@@ -580,8 +585,9 @@ hsa_shut_down_refcnt_impl()
 {
     if(hsa_reference_count_value > 0)
     {
-        --hsa_reference_count_value;
-        if(hsa_reference_count_value == 0)
+        // Elect exactly one final shutdown. Decrement-and-test in two steps lets two callers both
+        // observe zero and both run the retirement below.
+        if(hsa_reference_count_value.fetch_sub(1) == 1)
         {
             // F24 terminal fail-closed fence: after real hsa_shut_down the runtime
             // frees SDMA/signal state, so no callback-capable signal-less completion
@@ -591,6 +597,10 @@ hsa_shut_down_refcnt_impl()
             queue_controller_shutdown();
             dispatch_time_reset();
             async_copy_reset();
+
+            auto _status = get_core_table()->hsa_shut_down_fn();
+            if(_status == HSA_STATUS_SUCCESS) runtime_shutdown_value.store(true);
+            return _status;
         }
         return get_core_table()->hsa_shut_down_fn();
     }
@@ -1063,6 +1073,12 @@ copy_table<hsa_pc_sampling_ext_table_t>(hsa_pc_sampling_ext_table_t* _tbl, uint6
 
 #endif
 #undef INSTANTIATE_HSA_TABLE_FUNC
+
+bool
+is_runtime_shutdown()
+{
+    return runtime_shutdown_value.load();
+}
 
 int
 get_hsa_ref_count()

@@ -1907,6 +1907,9 @@ Queue::invoke_write_interceptor(const void*                           packets,
 
 Queue::~Queue()
 {
+    // A queue abandoned by a shutdown drain has already lost its runtime state.
+    if(is_runtime_shutdown()) return;
+
     sync();
 
     if(_active_kernels.handle != 0 && _core_api.hsa_signal_destroy_fn != nullptr)
@@ -1989,7 +1992,7 @@ Queue::destroy_signal(pooled_signal_t* signal)
 
     if(signal && get_core_table() && get_core_table()->hsa_signal_destroy_fn)
     {
-        get_core_table()->hsa_signal_destroy_fn(signal->get().value);
+        if(!is_runtime_shutdown()) get_core_table()->hsa_signal_destroy_fn(signal->get().value);
         signal->get().value = null_hsa_signal;
     }
 }
@@ -1997,7 +2000,7 @@ Queue::destroy_signal(pooled_signal_t* signal)
 bool
 Queue::sync() const
 {
-    if(_active_kernels == null_hsa_signal) return true;
+    if(is_runtime_shutdown() || _active_kernels == null_hsa_signal) return true;
 
     const auto _value =
         _core_api.hsa_signal_wait_relaxed_fn(_active_kernels,

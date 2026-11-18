@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/hsa/hsa_barrier.hpp"
+#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
@@ -40,7 +41,7 @@ hsa_barrier::hsa_barrier(std::function<void()>&& finished, CoreApiTable core_api
 
 hsa_barrier::~hsa_barrier()
 {
-    if(registration::get_fini_status() > 0)
+    if(registration::get_fini_status() > 0 || is_runtime_shutdown())
     {
         return;
     }

@@ -74,6 +74,13 @@ struct pool
     template <typename FuncT = void (*)(pool_object<Tp>&)>
     void clear(FuncT&& func = [](pool_object<Tp>&) {});
 
+    // Clears only when no object is marked in use, checking and tearing down under the pool lock so
+    // a caller cannot observe a half-destroyed pool. An acquire that has already reserved an index
+    // is not excluded; that admission contract belongs to the caller. Returns false and leaves the
+    // pool untouched when an object is still borrowed.
+    template <typename FuncT = void (*)(pool_object<Tp>&)>
+    bool clear_if_idle(FuncT&& func = [](pool_object<Tp>&) {});
+
     std::string get_usage_report() const;
 
 private:
@@ -181,6 +188,48 @@ pool<Tp>::acquire(FuncT&& ctor, Args&&... args)
     auto& _ref = acquire();
     ctor(_ref.get(), std::forward<Args>(args)...);
     return _ref;
+}
+
+template <typename Tp>
+template <typename FuncT>
+bool
+pool<Tp>::clear_if_idle(FuncT&& func)
+{
+    auto _write_pool_lk = std::unique_lock<std::mutex>{m_pool_mtx};
+
+    for(const auto& itr : m_pool)
+    {
+        if(itr.in_use()) return false;
+    }
+
+    for(auto& itr : m_pool)
+    {
+        itr.release();
+        if constexpr(std::is_invocable_v<FuncT, pool_object<Tp>&>)
+        {
+            func(itr);
+        }
+        else if constexpr(std::is_invocable_v<FuncT, Tp&>)
+        {
+            func(itr.get());
+        }
+        else
+        {
+            static_assert(mpl::assert_false<FuncT>::value,
+                          "Invalid function type for pool<Tp>::clear_if_idle");
+        }
+    }
+
+    auto _write_avail_lk = std::unique_lock<std::mutex>{m_available_mtx};
+
+    while(!m_available.empty())
+        m_available.pop();
+    m_pool = pool_array_type{};
+    m_released.store(0);
+    m_reused.store(0);
+    m_new_batch.store(0);
+
+    return true;
 }
 
 template <typename Tp>

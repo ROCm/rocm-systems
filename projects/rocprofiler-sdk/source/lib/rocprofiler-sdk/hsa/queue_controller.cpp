@@ -26,8 +26,10 @@
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
+#include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_correlation.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
 #include "lib/rocprofiler-sdk/kfd/signal_less.hpp"
@@ -42,10 +44,12 @@
 #include <unistd.h>
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace rocprofiler
@@ -641,10 +645,17 @@ QueueController::reset()
 
     for(auto* id : queues)
     {
-        const auto* queue = get_queue(*id);
-        if(!queue) continue;
-        if(queue->ready_signal.handle != 0)
-            get_core_table().hsa_signal_destroy_fn(queue->ready_signal);
+        // An adopted queue is not registered with the serializer, so its ready_signal is not
+        // retired by queue_ready(). Zero the handle once it is destroyed here to keep the
+        // Queue destructor from destroying the same handle again.
+        _queues.wlock([&](auto& map) {
+            auto itr = map.find(id);
+            if(itr == map.end()) return;
+            auto& signal = itr->second->ready_signal;
+            if(signal.handle != 0 &&
+               get_core_table().hsa_signal_destroy_fn(signal) == HSA_STATUS_SUCCESS)
+                signal.handle = 0;
+        });
         destroy_queue(id);
     }
 }
@@ -1184,12 +1195,48 @@ queue_controller_shutdown()
 {
     if(auto* controller = common::static_object<QueueController>::get())
     {
-        while(!queue_controller_sync())
-        {}
+        if(internal_threading::fork_stale()) return;
+
+        // Wait for in-flight work before the runtime is invalidated, but do not wait forever: a
+        // submission whose dependency the application never satisfies does not complete, and
+        // hsa_shut_down must still return. On timeout the handler state those submissions own is
+        // left to the runtime's own reclamation rather than being freed here, because the
+        // runtime may still deliver their completions.
+        const auto deadline        = std::chrono::steady_clock::now() + std::chrono::seconds{30};
+        const bool monitor_drained = queue_interposition::interposition_sync_until(deadline);
+        // The monitor counter and the per-queue counters track different work, so they are polled
+        // separately: a busy queue must not be able to mask a monitor timeout, and a monitor
+        // timeout must not be able to fail an otherwise finished queue. Each poll re-derives its
+        // own result, so a queue that finishes mid-wait still lets shutdown proceed.
+        bool queues_drained = false;
+        do
+        {
+            queues_drained = true;
+            controller->iterate_queues([&queues_drained](const Queue* queue) {
+                queues_drained = queues_drained && (queue->active_async_packets() == 0);
+            });
+            if(queues_drained) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds{2});
+        } while(std::chrono::steady_clock::now() < deadline);
+
+        const bool copies_drained = async_copy_sync();
+        const bool drained        = monitor_drained && queues_drained && copies_drained;
         queue_interposition::stop_completion_monitor();
-        controller->reset();
-        queue_fini();
-        queue_interposition::get_queue_registry().wlock([](auto& map) { map.clear(); });
+        if(drained)
+        {
+            controller->reset();
+            async_copy_retire();
+            queue_fini();
+            queue_interposition::get_queue_registry().wlock([](auto& map) { map.clear(); });
+        }
+        else
+        {
+            // Keep completion state alive when the runtime may still deliver completions for it.
+            // The runtime invalidates its own resources at shutdown; the SDK-owned state behind
+            // these handlers is not reclaimed by it and is released with the process.
+            ROCP_WARNING << "HSA completion drain timed out; retaining completion state for the "
+                            "life of the process";
+        }
     }
 }
 
@@ -1204,8 +1251,9 @@ queue_controller_fini()
     // (queue_fini below tears the pool down).
     queue_interposition::stop_completion_monitor();
 
-    // finalize queue data (e.g. clean up signal pool)
-    if(enable_queue_intercept()) queue_fini();
+    // finalize queue data (e.g. clean up signal pool). Once the runtime has shut down its
+    // signals are invalid, so the pool is left to process teardown instead.
+    if(enable_queue_intercept() && !is_runtime_shutdown()) queue_fini();
 
     queue_interposition::interposition_fini();
 }

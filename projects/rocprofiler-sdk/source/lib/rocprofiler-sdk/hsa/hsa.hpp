@@ -211,6 +211,17 @@ dlsym_table<hsa_amd_ext_table_t>(hsa_amd_ext_table_t* _orig);
 
 int
 get_hsa_ref_count();
+
+/**
+ * @brief Whether the final hsa_shut_down has succeeded
+ *
+ * After it returns, the runtime has invalidated the signals, queues, and allocations the SDK holds.
+ * State that could not be retired before the call is abandoned to process teardown, so teardown
+ * paths consult this to avoid calling into a closed runtime. Cleared by the next successful
+ * hsa_init.
+ */
+bool
+is_runtime_shutdown();
 }  // namespace hsa
 }  // namespace rocprofiler
 

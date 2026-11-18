@@ -71,8 +71,13 @@ get_ids();
 void
 async_copy_init(hsa_api_table_t* _orig, uint64_t _tbl_instance);
 
-void
+// Returns false if completion callbacks were still outstanding when the wait timed out.
+bool
 async_copy_sync();
+
+// Retire the counting signal. Only valid once no copy completion is outstanding.
+void
+async_copy_retire();
 
 void
 async_copy_fini();
