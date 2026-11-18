@@ -528,10 +528,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - With `ionic_rdma` blacklisted or not loaded, the whole NIC was dropped. It is now listed with no RDMA devices.
   - `amdsmi_get_nic_rdma_dev_info()` returns `AMDSMI_STATUS_SUCCESS` with `num_rdma_dev` set to `0`, and `amd-smi static` shows `RDMA_DEVICES: N/A`.
 
-- **Fixed `amdsmi_get_gpu_asic_info()` reporting `rev_id` as a real revision when it is not available**.  
-  - On the WSL backend `rev_id` read as `0x0`, and where the not-supported value was reported, Python showed the raw `0xffffffff`. Python and the CLI now show `N/A`.
-  - Other fields a backend cannot supply now keep their not-supported value instead of reading as zero.
-
 ### Upcoming Changes
 
 - **UUIDs will be replaced by CUIDs (Component Unified IDs) in an upcoming release**.  
