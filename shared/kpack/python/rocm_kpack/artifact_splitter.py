@@ -418,9 +418,9 @@ class ArtifactSplitter:
 
                         # Build source_binary_relpath with index suffix
                         # TOC always uses indexed format: "lib/foo.so#0", "lib/foo.so#1"
-                        # The index is the source bundle index, which matches the
-                        # co_index in wrapper's reserved1 field even when earlier
-                        # bundles have no code object for this arch.
+                        # The index is the source bundle index (see
+                        # UnbundledContents.bundle_indices), so bundles without
+                        # code for this arch do not shift it.
                         base_relpath = binary_path.relative_to(prefix_path).as_posix()
                         indexed_relpath = f"{base_relpath}#{index}"
 

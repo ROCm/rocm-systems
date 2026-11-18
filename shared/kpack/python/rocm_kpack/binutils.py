@@ -195,9 +195,11 @@ class UnbundledContents:
         self.dest_dir = dest_dir
         self.delete_on_close = delete_on_close
         self.target_list = target_list
-        # bundle_indices[i] is the index of the offload bundle (one per
-        # translation unit and fat binary wrapper) that target_list[i] came
-        # from. The kpack transform writes the same index into each wrapper.
+        # bundle_indices[i] is the index of the offload bundle that
+        # target_list[i] came from. The kpack transforms write each wrapper's
+        # position into reserved1, so this matches the runtime's lookup only
+        # while wrapper i references bundle i (one wrapper per bundle, same
+        # order). The splitters currently assume that.
         self.bundle_indices = bundle_indices
 
     def __enter__(self) -> "UnbundledContents":
