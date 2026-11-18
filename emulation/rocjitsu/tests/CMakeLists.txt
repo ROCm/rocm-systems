@@ -211,6 +211,23 @@ add_test(
         ${Python3_EXECUTABLE} -B
         ${PROJECT_SOURCE_DIR}/tests/stats/test_stats_converter.py -v
 )
+add_executable(
+    rocjitsu_export_statistics_fixture
+    stats/export_statistics_fixture.cpp
+)
+target_link_libraries(
+    rocjitsu_export_statistics_fixture
+    PRIVATE rocjitsu_statistics
+)
+rj_configure_target(rocjitsu_export_statistics_fixture PRIVATE_INCLUDES WARNINGS)
+add_test(
+    NAME NativeStatisticsConverterTest
+    COMMAND
+        ${Python3_EXECUTABLE} -B
+        ${CMAKE_CURRENT_SOURCE_DIR}/stats/test_native_stats_converter.py
+        --fixture $<TARGET_FILE:rocjitsu_export_statistics_fixture> --converter
+        ${PROJECT_SOURCE_DIR}/scripts/rocjitsu-stats.py -v
+)
 add_test(
     NAME CodeObjectFuzzCliTest
     COMMAND
@@ -693,6 +710,7 @@ add_executable(
     cache_statistics_test.cpp
     pipeline_statistics_test.cpp
     execution_statistics_test.cpp
+    statistics_reset_test.cpp
     util_bit_test.cpp
     util_unique_handle_test.cpp
     util_intrusive_shared_ptr_test.cpp

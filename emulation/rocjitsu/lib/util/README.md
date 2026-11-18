@@ -98,8 +98,8 @@ call `finish(complete)` only after producers are quiescent. Registration conflic
 make the exported snapshot incomplete even when the caller passes `true`.
 
 Rocjitsu's adapter in `rocjitsu/stats/statistics.h` supplies GPU identities,
-component/dispatch selection, the dispatch scope limit, build provenance,
-and VM completion policy. Those concepts are not part of the generic
+component/dispatch selection, the dispatch scope limit, build provenance, reset
+metadata, and VM completion policy. Those concepts are not part of the generic
 utility API.
 
 The default `util.statistics.v1` JSONL output is accepted by

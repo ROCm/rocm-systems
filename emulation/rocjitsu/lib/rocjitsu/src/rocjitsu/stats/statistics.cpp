@@ -10,6 +10,69 @@
 
 namespace rocjitsu {
 
+StatisticsReset::StatisticsReset(std::shared_ptr<State> state, Kind kind)
+    : state_(std::move(state)), kind_(kind) {
+  std::lock_guard lock(state_->mutex);
+  state_->kinds[static_cast<size_t>(kind_)].attempts.increment();
+  ++state_->active;
+}
+
+StatisticsReset::~StatisticsReset() {
+  if (!state_)
+    return;
+  std::lock_guard lock(state_->mutex);
+  auto &counts = state_->kinds[static_cast<size_t>(kind_)];
+  if (completed_)
+    counts.completed.increment();
+  else
+    counts.failed.increment();
+  --state_->active;
+}
+
+void StatisticsSession::register_gpu(uint32_t gpu_id) {
+  std::lock_guard lock(mutex_);
+  if (!finished_ && !gpu_resets_.contains(gpu_id))
+    gpu_resets_.emplace(gpu_id, std::make_shared<StatisticsReset::State>());
+}
+
+StatisticsReset StatisticsSession::observe_reset(uint32_t gpu_id, StatisticsReset::Kind kind) {
+  std::lock_guard lock(mutex_);
+  if (finished_)
+    return {};
+  const auto state = gpu_resets_.find(gpu_id);
+  if (state == gpu_resets_.end() || static_cast<size_t>(kind) >= 3) {
+    incomplete_.store(true, std::memory_order_relaxed);
+    return {};
+  }
+  return StatisticsReset(state->second, kind);
+}
+
+void StatisticsSession::write_gpu_metadata(std::ostream &output) const {
+  output << ",\"accumulation_scope\":\"session\",\"devices\":[";
+  bool first = true;
+  constexpr std::array names{"function_level", "bus", "lost_connection"};
+  for (const auto &[gpu_id, state] : gpu_resets_) {
+    std::lock_guard lock(state->mutex);
+    if (!first)
+      output << ',';
+    first = false;
+    output << std::format("{{\"gpu_id\":{},\"resets\":{{", gpu_id);
+    for (size_t index = 0; index < names.size(); ++index) {
+      if (index != 0)
+        output << ',';
+      const auto &counts = state->kinds[index];
+      output << std::format("\"{}\":{{\"attempts\":\"{}\",\"completed\":\"{}\",\"failed\":\"{}\","
+                            "\"overflow\":{}}}",
+                            names[index], counts.attempts.value(), counts.completed.value(),
+                            counts.failed.value(),
+                            counts.attempts.overflowed() || counts.completed.overflowed() ||
+                                counts.failed.overflowed());
+    }
+    output << std::format("}},\"resets_in_progress\":\"{}\"}}", state->active);
+  }
+  output << ']';
+}
+
 StatisticsSession::StatisticsSession(const StatisticsConfig &config, std::string node,
                                      std::string execution_model,
                                      std::shared_ptr<stats::Session> collection)
@@ -65,6 +128,21 @@ void StatisticsSession::write_run_metadata(std::ostream &output) const {
   output << std::format(",\"node\":{},\"execution_model\":{},\"build\":{}",
                         stats::json_string(node_), stats::json_string(execution_model_),
                         stats::json_string(rj_get_version_string()));
+  write_gpu_metadata(output);
+  output << ",\"selection\":{\"include\":[";
+  for (size_t index = 0; index < config_.include.size(); ++index) {
+    if (index)
+      output << ',';
+    output << stats::json_string(config_.include[index]);
+  }
+  output << "],\"scopes\":[";
+  for (size_t index = 0; index < config_.scopes.size(); ++index) {
+    if (index)
+      output << ',';
+    output << stats::json_string(config_.scopes[index]);
+  }
+  output << std::format("],\"max_dispatch_scopes\":{}}},\"dropped_dispatch_scopes\":\"{}\"",
+                        config_.max_dispatch_scopes, dropped_dispatch_scopes_.value());
 }
 
 void StatisticsSession::finish() {
@@ -72,6 +150,11 @@ void StatisticsSession::finish() {
   if (finished_)
     return;
   finished_ = true;
+  for (const auto &[gpu_id, state] : gpu_resets_) {
+    std::lock_guard reset_lock(state->mutex);
+    if (state->active != 0)
+      incomplete_.store(true, std::memory_order_relaxed);
+  }
   const bool complete =
       ran_.load(std::memory_order_relaxed) && !incomplete_.load(std::memory_order_relaxed);
   collection_->finish(

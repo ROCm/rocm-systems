@@ -74,6 +74,8 @@ TEST(StatisticsVmTest, PassiveConfigDoesNotOpenOutputAndAllGpusShareSession) {
   EXPECT_NE(output.find("\"gpu_id\":0"), std::string::npos);
   EXPECT_NE(output.find("\"gpu_id\":1"), std::string::npos);
   EXPECT_NE(output.find("cache.backing_read_attempts"), std::string::npos);
+  EXPECT_NE(output.find("\"devices\":[{\"gpu_id\":0,\"resets\":"), std::string::npos);
+  EXPECT_NE(output.find("{\"gpu_id\":1,\"resets\":"), std::string::npos);
   EXPECT_NE(output.find("\"record\":\"session_end\",\"complete\":true"), std::string::npos);
 }
 

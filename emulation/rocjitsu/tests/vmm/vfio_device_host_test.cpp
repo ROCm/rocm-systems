@@ -21,6 +21,7 @@
 #include "rocjitsu/vm/amdgpu/xcd.h"
 #include "rocjitsu/vm/canonical_backing_id.h"
 #include "rocjitsu/vm/fabric_endpoint.h"
+#include "rocjitsu/vm/plugins/plugin_config_resolver.h"
 #include "rocjitsu/vm/soc.h"
 #include "rocjitsu/vm/topology_assembly.h"
 #include "rocjitsu/vm/virtual_machine.h"
@@ -74,6 +75,7 @@ extern "C" {
 #include <cstring>
 #include <filesystem>
 #include <format>
+#include <fstream>
 #include <future>
 #include <limits>
 #include <memory>
@@ -2658,6 +2660,87 @@ TEST(VfioServer, ServesFourIndependentFunctionsUntilCleanShutdown) {
 
 TEST(VfioServer, WaitsForLauncherAfterTwoFunctionsDisconnect) {
   run_multi_function_server_scenario(2, MultiClientDeparture::DisconnectAll);
+}
+
+TEST(VfioServer, StatisticsRemainCompleteAfterAllFunctionsDisconnect) {
+  rocjitsu::test::ScopedTempDirectory statistics;
+  ASSERT_TRUE(statistics.initialize("rj-vfu-statistics-"));
+  std::string config;
+  ASSERT_TRUE(compact_manifest_vfio_server_config(config));
+  config.insert(1, std::format(R"("statistics":{{"enabled":true,"output":{{"directory":"{}"}}}},)",
+                               statistics.path()));
+  ASSERT_NO_FATAL_FAILURE(
+      run_multi_function_server_scenario(2, MultiClientDeparture::DisconnectAll, config));
+
+  std::vector<std::filesystem::path> outputs;
+  for (const auto &entry : std::filesystem::directory_iterator(statistics.path())) {
+    ASSERT_TRUE(entry.is_regular_file());
+    ASSERT_EQ(entry.path().extension(), ".jsonl");
+    outputs.push_back(entry.path());
+  }
+  ASSERT_EQ(outputs.size(), 1u) << "every local GPU must share one session output";
+  std::ifstream input(outputs.front());
+  ASSERT_TRUE(input.is_open());
+  std::array<bool, 2> l2_scopes{};
+  uint32_t runs = 0;
+  uint32_t snapshots = 0;
+  uint32_t snapshot_ends = 0;
+  bool session_ended = false;
+  for (std::string line; std::getline(input, line);) {
+    ASSERT_FALSE(session_ended) << "session_end must be the final JSONL record";
+    flexbuffers::Builder parsed;
+    ASSERT_TRUE(rocjitsu::plugin_detail::flexbuffer_from_json(line, parsed)) << line;
+    const auto root = flexbuffers::GetRoot(parsed.GetBuffer());
+    ASSERT_TRUE(root.IsMap());
+    const auto record = root.AsMap();
+    const std::string kind = record["record"].AsString().str();
+    if (kind == "run") {
+      ++runs;
+      EXPECT_EQ(record["schema"].AsString().str(), "rocjitsu.statistics.v1");
+      EXPECT_EQ(record["node"].AsString().str(), "selected");
+      EXPECT_EQ(record["execution_model"].AsString().str(), "functional");
+      EXPECT_EQ(record["accumulation_scope"].AsString().str(), "session");
+      const auto devices = record["devices"].AsVector();
+      ASSERT_EQ(devices.size(), 2u);
+      for (uint32_t gpu = 0; gpu < devices.size(); ++gpu) {
+        const auto device = devices[gpu].AsMap();
+        EXPECT_EQ(device["gpu_id"].AsUInt64(), gpu);
+        EXPECT_EQ(device["resets_in_progress"].AsString().str(), "0");
+        const auto disconnect = device["resets"].AsMap()["lost_connection"].AsMap();
+        EXPECT_EQ(disconnect["attempts"].AsString().str(), "1");
+        EXPECT_EQ(disconnect["completed"].AsString().str(), "1");
+        EXPECT_EQ(disconnect["failed"].AsString().str(), "0");
+        EXPECT_FALSE(disconnect["overflow"].AsBool());
+      }
+    } else if (kind == "scope") {
+      const uint64_t gpu = record["gpu_id"].AsUInt64();
+      ASSERT_LT(gpu, l2_scopes.size());
+      if (record["name"].AsString().str() == std::format("vm.gpu{}.xcd0.l2", gpu)) {
+        EXPECT_FALSE(l2_scopes[gpu]);
+        l2_scopes[gpu] = true;
+      }
+    } else if (kind == "snapshot_begin") {
+      ++snapshots;
+      EXPECT_EQ(record["epoch"].AsString().str(), "0");
+      ASSERT_TRUE(record["complete"].IsBool());
+      EXPECT_TRUE(record["complete"].AsBool());
+    } else if (kind == "snapshot_end") {
+      ++snapshot_ends;
+      EXPECT_EQ(record["epoch"].AsString().str(), "0");
+    } else if (kind == "session_end") {
+      session_ended = true;
+      ASSERT_TRUE(record["complete"].IsBool());
+      EXPECT_TRUE(record["complete"].AsBool())
+          << "healthy disconnects followed by launcher shutdown must count as an orderly stop";
+    }
+  }
+  EXPECT_TRUE(input.eof());
+  EXPECT_EQ(runs, 1u);
+  EXPECT_EQ(snapshots, 1u);
+  EXPECT_EQ(snapshot_ends, 1u);
+  EXPECT_TRUE(l2_scopes[0]);
+  EXPECT_TRUE(l2_scopes[1]);
+  EXPECT_TRUE(session_ended);
 }
 
 TEST(VfioServer, WaitsForLauncherAfterFourFunctionsDisconnect) {

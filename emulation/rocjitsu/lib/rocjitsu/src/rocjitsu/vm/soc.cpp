@@ -58,6 +58,8 @@ void SoC::set_statistics(std::shared_ptr<StatisticsSession> session, uint32_t gp
   }
   statistics_ = std::move(session);
   statistics_gpu_index_ = gpu_index;
+  if (statistics_)
+    statistics_->register_gpu(gpu_index);
   const auto scope = [&](std::string path) {
     return statistics_ ? statistics_->scope(std::move(path), gpu_index) : nullptr;
   };
