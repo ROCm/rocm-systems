@@ -3,11 +3,11 @@
 
 /// @file trampoline_builder.h
 /// @brief Lowers a TrampolinePlan into patched-anchor bytes and trampoline
-///        words for the DBI relocation-only path.
+///        words for DBI observation and instruction replacement.
 ///
 /// This is the byte emitter; it owns SOPP branch math and basic plan
-/// well-formedness checks (original_size 4 or 8 when splicing or relocating,
-/// original_words count matches, requested branch ranges fit). It does not
+/// well-formedness checks (original_size 4/8/12 when splicing, 4/8 when replaying
+/// the original, original_words count matches, requested branch ranges fit). It does not
 /// touch the ELF, own layout assignment, or enforce milestone-scoped restrictions
 /// (e.g. "only emit s_nop placeholder bodies" — that lives in the orchestrator
 /// as `validate_inline_nop_plan` in instrumentor.h).
@@ -26,7 +26,7 @@
 
 namespace rocjitsu {
 
-/// @brief Concrete instruction words placed before or after the relocated
+/// @brief Concrete instruction words placed before or after the optional
 ///        original in the trampoline. Declared clobbers are intentionally
 ///        deferred to a later milestone.
 struct InlineAsmItem {
@@ -86,13 +86,16 @@ struct TrampolinePlan {
   rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
 
   uint64_t anchor_offset = 0;
-  uint32_t original_size = 0; // 4 or 8 for the inline-nop smoke build.
+  uint32_t original_size = 0; // 4/8/12 for a splice; replaying the original requires 4/8.
   uint64_t trampoline_offset = 0;
   uint64_t return_target = 0; // Typically anchor_offset + original_size.
 
   std::vector<uint32_t> original_words; // Exact bytes pulled from .text.
 
   std::vector<InlineAsmItem> before_items;
+  /// Explicit trailing items for inline plans. Callable plans retain these as
+  /// the replacement body only with emit_original=false, after the restored
+  /// envelope; replay plans generate their item lists from probe placement.
   std::vector<InlineAsmItem> after_items;
   bool emit_original = true;
   /// Execute the relocated anchor before the callable envelope.
@@ -101,8 +104,8 @@ struct TrampolinePlan {
   /// reads results or overwrites registers with pending source reads. Live-after
   /// preservation alone is insufficient; the builder neither checks these
   /// obligations nor inserts anchor-specific hazard spacing.
-  /// With emit_original=false, both placements emit only the envelope and keep
-  /// the same original_byte_offset and call-envelope range.
+  /// With emit_original=false, both placements emit the envelope followed by
+  /// after_items and keep the same original_byte_offset and call-envelope range.
   bool probe_after_original = false;
   /// A dispatch-only callback returns to an untouched original entry; it has
   /// no anchor splice and imposes no relocation-size constraint on that entry.
@@ -212,11 +215,11 @@ struct TrampolineBytes {
   std::vector<uint32_t> trampoline_words;
   /// Original's byte offset from trampoline start, or its insertion boundary
   /// between before_items and after_items when emit_original=false. Callable
-  /// plans without an original place this after the envelope, at the return
-  /// branch if present, otherwise at the end of the trampoline.
+  /// plans without an original place this after the envelope, at the replacement
+  /// body, return branch or end of the trampoline as applicable.
   uint32_t original_byte_offset = 0;
-  /// Call envelope relative to trampoline start, excluding the relocated guest
-  /// instruction and resume branch. Both fields are zero for inline plans.
+  /// Call envelope relative to trampoline start, excluding the effective guest
+  /// sequence and resume branch. Both fields are zero for inline plans.
   uint32_t call_envelope_byte_offset = 0;
   uint32_t call_envelope_byte_size = 0;
 };
@@ -229,7 +232,8 @@ public:
   /// @p error_out (if non-null) on:
   ///   - arch left at ROCJITSU_CODE_ARCH_INVALID (caller forgot to set it)
   ///   - original_size zero or not dword aligned
-  ///   - original_size other than 4 or 8 when splicing or relocating the original
+  ///   - original_size other than 4/8/12 when splicing the anchor
+  ///   - original_size other than 4/8 when relocating the original
   ///   - original_words size mismatch with original_size
   ///   - A requested forward or return branch outside s_branch simm16 range
   ///
@@ -285,12 +289,14 @@ public:
                                             const RegisterSet &probe_body_clobbers,
                                             std::string *error_out = nullptr);
 
-  /// @brief Emit a planned probe call before or after the relocated original,
-  ///        followed by a return branch when requested.
+  /// @brief Emit a planned probe envelope before or after original replay, or
+  ///        before an explicit replacement body, with an optional return branch.
   ///
   /// Requires @p plan.is_probe_call (i.e. plan_probe_call() succeeded). Builds
   /// the call envelope from the planned resources and @p plan.probe_target_offset
-  /// then delegates to build() for layout and branch math.
+  /// according to probe_after_original when replaying the original. Without
+  /// original replay, replaces before_items with the envelope and retains
+  /// after_items for the replacement. Delegates layout and branch math to build().
   ///
   /// On GFX9 (CDNA1-4), which does not interlock them, a restored SGPR or M0 is
   /// spaced from guest resumption by the wait states its readers need: one

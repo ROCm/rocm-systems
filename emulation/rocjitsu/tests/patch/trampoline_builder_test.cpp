@@ -35,6 +35,20 @@ uint64_t resolve_sopp_target(uint64_t branch_pc, uint32_t branch_word) {
   return branch_pc + 4 + static_cast<int64_t>(decode_sopp_simm16(branch_word)) * 4;
 }
 
+TrampolinePlan make_omitted_original_plan(rj_code_arch_t arch,
+                                          const std::vector<uint32_t> &original,
+                                          uint64_t anchor = 0x100, uint64_t trampoline = 0x200) {
+  TrampolinePlan plan;
+  plan.arch = arch;
+  plan.anchor_offset = anchor;
+  plan.original_size = static_cast<uint32_t>(original.size() * sizeof(uint32_t));
+  plan.trampoline_offset = trampoline;
+  plan.return_target = anchor + plan.original_size;
+  plan.original_words = original;
+  plan.emit_original = false;
+  return plan;
+}
+
 //==============================================================================
 // Permanent contract: byte layout, branch math, arch honoring
 //
@@ -122,6 +136,150 @@ TEST(TrampolineBuilder, Emits8ByteRelocationAnchorPatchWithNopTail) {
   util::FailureOr<uint32_t> return_branch = build_s_branch(-66, kArch);
   ASSERT_TRUE(return_branch.succeeded());
   EXPECT_EQ(bytes->trampoline_words[3], return_branch.value());
+}
+
+TEST(TrampolineBuilder, OmittedOriginalEmptyBodySplicesCompleteInstructionExtents) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr uint64_t kAnchor = 0x100;
+  constexpr uint64_t kTrampoline = 0x200;
+  const util::FailureOr<uint32_t> forward_branch = build_s_branch(63, kArch);
+  ASSERT_TRUE(forward_branch.succeeded());
+  const util::FailureOr<uint32_t> branch_opcode = build_s_branch(0, kArch);
+  ASSERT_TRUE(branch_opcode.succeeded());
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
+  ASSERT_TRUE(nop.succeeded());
+  // Complete RDNA4 instructions: scalar move, literal move, and global store.
+  const std::vector<std::vector<uint32_t>> originals = {
+      {0xbe800080u}, {0xbe8000ffu, 0x12345678u}, {0xee068002u, 0x00800000u, 0}};
+  for (const std::vector<uint32_t> &original : originals) {
+    const uint32_t original_size = static_cast<uint32_t>(original.size() * sizeof(uint32_t));
+    SCOPED_TRACE(original_size);
+    const TrampolinePlan plan = make_omitted_original_plan(kArch, original, kAnchor, kTrampoline);
+    std::string error;
+    const std::optional<TrampolineBytes> bytes = TrampolineBuilder::build(plan, &error);
+    ASSERT_TRUE(bytes) << error;
+    ASSERT_EQ(bytes->patched_anchor_bytes.size(), original_size);
+    EXPECT_EQ(word_at(bytes->patched_anchor_bytes, 0), forward_branch.value());
+    EXPECT_EQ(resolve_sopp_target(kAnchor, word_at(bytes->patched_anchor_bytes, 0)), kTrampoline);
+    for (uint32_t offset = sizeof(uint32_t); offset < original_size; offset += sizeof(uint32_t))
+      EXPECT_EQ(word_at(bytes->patched_anchor_bytes, offset), nop.value());
+    // An empty replacement contains only the branch past the complete original.
+    ASSERT_EQ(bytes->trampoline_words.size(), 1u);
+    EXPECT_EQ(bytes->trampoline_words.front() & 0xffff0000u, branch_opcode.value());
+    EXPECT_EQ(resolve_sopp_target(kTrampoline, bytes->trampoline_words.front()),
+              plan.return_target);
+    EXPECT_EQ(bytes->original_byte_offset, 0u);
+  }
+}
+
+TEST(TrampolineBuilder, OmittedOriginalReplacementBodyContainsNoReplayedGuestWords) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr uint64_t kAnchor = 0x100;
+  constexpr uint64_t kTrampoline = 0x200;
+  const util::FailureOr<uint32_t> padding = build_s_nop(0, kArch);
+  ASSERT_TRUE(padding.succeeded());
+  const util::FailureOr<uint32_t> branch_opcode = build_s_branch(0, kArch);
+  ASSERT_TRUE(branch_opcode.succeeded());
+  const std::vector<std::vector<uint32_t>> originals = {
+      {0xbe800080u}, {0xbe8000ffu, 0x12345678u}, {0xee068002u, 0x00800000u, 0}};
+  for (const std::vector<uint32_t> &original : originals) {
+    for (const uint32_t replacement_words : {1u, 2u, 3u, 4u}) {
+      SCOPED_TRACE(original.size());
+      SCOPED_TRACE(replacement_words);
+      std::vector<uint32_t> replacement;
+      for (uint32_t index = 0; index < replacement_words; ++index) {
+        const util::FailureOr<uint32_t> nop = build_s_nop(index + 1, kArch);
+        ASSERT_TRUE(nop.succeeded());
+        replacement.push_back(nop.value());
+      }
+      const uint32_t original_size = static_cast<uint32_t>(original.size() * sizeof(uint32_t));
+      TrampolinePlan plan = make_omitted_original_plan(kArch, original, kAnchor, kTrampoline);
+      plan.after_items = {InlineAsmItem{.words = replacement}};
+      std::string error;
+      const std::optional<TrampolineBytes> bytes = TrampolineBuilder::build(plan, &error);
+      ASSERT_TRUE(bytes) << error;
+      ASSERT_EQ(bytes->patched_anchor_bytes.size(), original_size);
+      EXPECT_EQ(resolve_sopp_target(kAnchor, word_at(bytes->patched_anchor_bytes, 0)), kTrampoline);
+      for (uint32_t offset = sizeof(uint32_t); offset < original_size; offset += sizeof(uint32_t))
+        EXPECT_EQ(word_at(bytes->patched_anchor_bytes, offset), padding.value());
+      ASSERT_EQ(bytes->trampoline_words.size(), replacement.size() + 1);
+      EXPECT_TRUE(
+          std::equal(replacement.begin(), replacement.end(), bytes->trampoline_words.begin()));
+      EXPECT_EQ(bytes->original_byte_offset, 0u);
+      const uint64_t return_pc = kTrampoline + replacement.size() * sizeof(uint32_t);
+      EXPECT_EQ(bytes->trampoline_words.back() & 0xffff0000u, branch_opcode.value());
+      EXPECT_EQ(resolve_sopp_target(return_pc, bytes->trampoline_words.back()), plan.return_target);
+      for (const uint32_t original_word : original)
+        EXPECT_EQ(std::ranges::find(bytes->trampoline_words, original_word),
+                  bytes->trampoline_words.end());
+    }
+  }
+}
+
+TEST(TrampolineBuilder, OmittedOriginalRejectsMalformedAnchorExtentsAndWords) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  for (const uint32_t original_size : {0u, 2u, 6u, 16u}) {
+    SCOPED_TRACE(original_size);
+    TrampolinePlan plan =
+        make_omitted_original_plan(kArch, std::vector<uint32_t>(original_size / 4));
+    plan.original_size = original_size;
+    plan.return_target = plan.anchor_offset + original_size;
+    std::string error;
+    EXPECT_FALSE(TrampolineBuilder::build(plan, &error));
+    EXPECT_NE(error.find("original_size"), std::string::npos) << error;
+  }
+  TrampolinePlan mismatch = make_omitted_original_plan(kArch, {0xee068002u, 0x00800000u});
+  mismatch.original_size = 12;
+  mismatch.return_target = mismatch.anchor_offset + mismatch.original_size;
+  std::string error;
+  EXPECT_FALSE(TrampolineBuilder::build(mismatch, &error));
+  EXPECT_NE(error.find("original_words"), std::string::npos) << error;
+}
+
+TEST(TrampolineBuilder, OmittedOriginalChecksBothBranchRangesForTwelveByteAnchors) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
+  ASSERT_TRUE(nop.succeeded());
+  for (const bool forward_overflow : {false, true}) {
+    SCOPED_TRACE(forward_overflow);
+    TrampolinePlan plan = make_omitted_original_plan(
+        kArch, {0xee068002u, 0x00800000u, 0}, 0, 4 + (32767ull + (forward_overflow ? 1 : 0)) * 4);
+    plan.after_items = {InlineAsmItem{.words = std::vector<uint32_t>(4, nop.value())}};
+    std::string error;
+    EXPECT_FALSE(TrampolineBuilder::build(plan, &error));
+    EXPECT_NE(error.find(forward_overflow ? "forward" : "return"), std::string::npos) << error;
+  }
+}
+
+TEST(TrampolineBuilder, OmittedOriginalDoesNotRelaxTheRelocatedOriginalSizeLimit) {
+  for (const bool patch_anchor : {false, true}) {
+    SCOPED_TRACE(patch_anchor);
+    TrampolinePlan plan =
+        make_omitted_original_plan(ROCJITSU_CODE_ARCH_RDNA4, {0xee068002u, 0x00800000u, 0});
+    plan.emit_original = true;
+    plan.patch_anchor = patch_anchor;
+    std::string error;
+    EXPECT_FALSE(TrampolineBuilder::build(plan, &error));
+    EXPECT_NE(error.find("original_size"), std::string::npos) << error;
+  }
+}
+
+TEST(TrampolineBuilder, OmittedOriginalEntryWithoutAnchorSpliceKeepsTwelveByteSupport) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  const util::FailureOr<uint32_t> maybe_nop = build_s_nop(1, kArch);
+  ASSERT_TRUE(maybe_nop.succeeded());
+  const uint32_t nop = maybe_nop.value();
+  TrampolinePlan plan = make_omitted_original_plan(kArch, {0xee068002u, 0x00800000u, 0});
+  plan.return_target = plan.anchor_offset;
+  plan.before_items = {InlineAsmItem{.words = {nop}}};
+  plan.patch_anchor = false;
+  std::string error;
+  const std::optional<TrampolineBytes> bytes = TrampolineBuilder::build(plan, &error);
+  ASSERT_TRUE(bytes) << error;
+  EXPECT_TRUE(bytes->patched_anchor_bytes.empty());
+  ASSERT_EQ(bytes->trampoline_words.size(), 2u);
+  EXPECT_EQ(bytes->trampoline_words.front(), nop);
+  EXPECT_EQ(resolve_sopp_target(0x204, bytes->trampoline_words.back()), plan.return_target);
 }
 
 // build_s_branch uses opcode 32 on RDNA3/3.5/4 and opcode 2 on CDNA1-4. If the
@@ -1003,6 +1161,76 @@ TrampolinePlan make_probe_plan(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA2,
                                                  /*probe_body_clobbers=*/{}, &err))
       << err;
   return plan;
+}
+
+TEST(TrampolineBuilderEmit, OmittedOriginalProbePreservesReplacementAfterRestoredEnvelope) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  const util::FailureOr<uint32_t> move = build_s_mov_b32(8, 128, kArch);
+  ASSERT_TRUE(move.succeeded());
+  const util::FailureOr<uint32_t> end = build_s_endpgm(kArch);
+  ASSERT_TRUE(end.succeeded());
+  const util::FailureOr<uint32_t> nop = build_s_nop(3, kArch);
+  ASSERT_TRUE(nop.succeeded());
+  const util::FailureOr<uint32_t> branch_opcode = build_s_branch(0, kArch);
+  ASSERT_TRUE(branch_opcode.succeeded());
+  const std::vector<std::vector<uint32_t>> originals = {
+      {0xbe800080u}, {0xbe8000ffu, 0x12345678u}, {0xee068002u, 0x00800000u, 0}};
+  for (const std::vector<uint32_t> &original : originals) {
+    for (const bool terminal : {false, true}) {
+      for (const bool after_original : {false, true}) {
+        SCOPED_TRACE(original.size());
+        SCOPED_TRACE(terminal);
+        SCOPED_TRACE(after_original);
+        TrampolinePlan plan = make_probe_plan(kArch);
+        plan.original_size = static_cast<uint32_t>(original.size() * sizeof(uint32_t));
+        plan.original_words = original;
+        plan.return_target = plan.anchor_offset + plan.original_size;
+        plan.emit_original = false;
+        plan.probe_after_original = after_original;
+        plan.returns_to_kernel = !terminal;
+        const std::vector<uint32_t> replacement = {move.value(),
+                                                   terminal ? end.value() : nop.value()};
+        plan.after_items = {InlineAsmItem{.words = replacement}};
+        TrampolinePlan envelope = plan;
+        envelope.after_items.clear();
+        envelope.returns_to_kernel = false;
+        std::string error;
+        const std::optional<TrampolineBytes> envelope_bytes =
+            TrampolineBuilder::emit_probe_call(envelope, &error);
+        ASSERT_TRUE(envelope_bytes) << error;
+        const std::optional<TrampolineBytes> bytes =
+            TrampolineBuilder::emit_probe_call(plan, &error);
+        ASSERT_TRUE(bytes) << error;
+        const std::vector<uint32_t> &envelope_words = envelope_bytes->trampoline_words;
+        const std::vector<uint32_t> &words = bytes->trampoline_words;
+        ASSERT_EQ(words.size(), envelope_words.size() + replacement.size() + (terminal ? 0 : 1));
+        EXPECT_TRUE(std::equal(envelope_words.begin(), envelope_words.end(), words.begin()));
+        const util::FailureOr<uint32_t> call =
+            build_s_swappc_b64(plan.link_pair_base, plan.target_pair_base, kArch);
+        ASSERT_TRUE(call.succeeded());
+        EXPECT_NE(std::ranges::find(envelope_words, call.value()), envelope_words.end());
+        EXPECT_TRUE(std::equal(replacement.begin(), replacement.end(),
+                               words.begin() + envelope_words.size()));
+        const uint32_t envelope_size =
+            static_cast<uint32_t>(envelope_words.size() * sizeof(uint32_t));
+        EXPECT_EQ(bytes->original_byte_offset, envelope_size);
+        EXPECT_EQ(bytes->call_envelope_byte_offset, 0u);
+        EXPECT_EQ(bytes->call_envelope_byte_size, envelope_size);
+        EXPECT_EQ(envelope_bytes->call_envelope_byte_offset, 0u);
+        EXPECT_EQ(envelope_bytes->call_envelope_byte_size, envelope_size);
+        EXPECT_EQ(bytes->patched_anchor_bytes.size(), plan.original_size);
+        EXPECT_EQ(std::search(words.begin(), words.end(), original.begin(), original.end()),
+                  words.end());
+        if (terminal) {
+          EXPECT_EQ(words.back(), end.value());
+        } else {
+          const uint64_t return_pc = plan.trampoline_offset + (words.size() - 1) * sizeof(uint32_t);
+          EXPECT_EQ(words.back() & 0xffff0000u, branch_opcode.value());
+          EXPECT_EQ(resolve_sopp_target(return_pc, words.back()), plan.return_target);
+        }
+      }
+    }
+  }
 }
 
 // Emission screens the sources too rather than trusting that planning did: the
