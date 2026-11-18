@@ -8,7 +8,7 @@
 //! interrupted destroy has an unknowable native outcome, so the owner records
 //! that uncertainty and refuses to replay the event ID.
 
-use super::{errno, error, native_error, sys, uapi};
+use super::{connection, errno, error, native_error, uapi};
 use crate::driver::kfd_notifications::SignalEventInfo;
 use crate::memory::storage::{Owned, Shared};
 use crate::session::SessionLease;
@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 /// One KFD event and the shared native endpoint required to destroy it.
 pub(crate) struct KfdSignalEvent {
     /// Native connection that created this event.
-    kfd: Shared<sys::Kfd>,
+    kfd: Shared<connection::Kfd>,
     /// Counts every native event until all identifiers are conclusively retired.
     lease: Option<SessionLease>,
     /// Event ID until native destruction succeeds.
@@ -43,7 +43,7 @@ struct SignalWaitState {
 
 impl SignalWaitState {
     fn prepare_event(
-        kfd: &sys::Kfd,
+        kfd: &connection::Kfd,
         event_type: u32,
         id: &mut Option<u32>,
         uncertain: &mut bool,
@@ -85,7 +85,7 @@ impl SignalWaitState {
         Ok(())
     }
 
-    fn prepare(&mut self, kfd: &sys::Kfd) -> Result<(u32, u32), Error> {
+    fn prepare(&mut self, kfd: &connection::Kfd) -> Result<(u32, u32), Error> {
         Self::prepare_event(
             kfd,
             uapi::MEMORY_EXCEPTION,
@@ -109,7 +109,7 @@ impl SignalWaitState {
 
 impl KfdSignalEvent {
     pub(super) fn create(
-        kfd: Shared<sys::Kfd>,
+        kfd: Shared<connection::Kfd>,
         lease: SessionLease,
         event_page_handle: Option<u64>,
         page_offered: &mut bool,
@@ -270,7 +270,11 @@ impl KfdSignalEvent {
         Ok(())
     }
 
-    fn destroy_id(kfd: &sys::Kfd, id: &mut Option<u32>, uncertain: &mut bool) -> Result<(), Error> {
+    fn destroy_id(
+        kfd: &connection::Kfd,
+        id: &mut Option<u32>,
+        uncertain: &mut bool,
+    ) -> Result<(), Error> {
         if *uncertain {
             return Err(error(
                 ErrorKind::DriverContract,
@@ -331,7 +335,7 @@ fn signal_event_error(operation: &'static str, source: std::io::Error) -> Error 
 #[allow(unsafe_code, clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
-    use crate::driver::linux_kfd::sys::{Call, IoctlHook, Kfd};
+    use crate::driver::linux_kfd::connection::{Call, IoctlHook, Kfd};
     use crate::session::{DriverContextLifetime, RetirementOutcome, Session};
     use std::ffi::c_void;
     use std::fs::File;
