@@ -844,8 +844,8 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
     INFO(NCCL_COLL, "AllReduce: taking DDA fabric LL128 path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
          comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
     return rcclAddonLaunch(info, [&] {
-      return ncclAllReduceDdaFabricLL128(sendbuff, recvbuff, count, datatype, op, comm, stream,
-                                         info.decision.ddaCap);
+      return ncclAllReduceDdaFabricLL128(sendbuff, recvbuff, count, datatype, op, comm, stream, info.decision.ddaCap,
+                                         info.decision.ddaLL128Split);
     });
   case RCCL_DDA_FABRIC_VMM:
     INFO(NCCL_COLL, "AllReduce: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",

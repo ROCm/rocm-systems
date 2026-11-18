@@ -53,6 +53,8 @@ struct rcclCollDecision {
   bool symkTdmOnly;  // symk admitted only through the TDM window, so only a TDM kernel may run
   // Set when DDA replaces another backend for this call; the DDA launchers stay within it.
   rcclDdaLaunchCap ddaCap;
+  // The LL128 two-shot runs the peer-split; ddaCap is then the grid of the launch it replaces.
+  bool ddaLL128Split;
 };
 
 

@@ -24,10 +24,15 @@ extern std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t,
     g_allReduceDdaFabricLLEligible;
 extern std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t)>
     g_allReduceDdaFabricLL128Eligible;
+extern std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, rcclDdaLaunchCap, bool,
+                          rcclDdaLaunchCap*)>
+    g_allReduceDdaFabricLL128SplitEligible;
 extern std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_allReduceDdaIpcBlocks;
-// The fabric AllReduce reporters and launchers also receive the call's rcclDdaLaunchCap.
+// The fabric AllReduce reporters and launchers also receive the call's rcclDdaLaunchCap; LL128's also the split flag.
 using DdaCappedBlocksHook = std::function<uint32_t(ncclComm*, size_t, ncclDataType_t, rcclDdaLaunchCap)>;
-extern DdaCappedBlocksHook g_allReduceDdaFabricBlocks, g_allReduceDdaFabricLLBlocks, g_allReduceDdaFabricLL128Blocks;
+using DdaLL128BlocksHook = std::function<uint32_t(ncclComm*, size_t, ncclDataType_t, rcclDdaLaunchCap, bool)>;
+extern DdaCappedBlocksHook g_allReduceDdaFabricBlocks, g_allReduceDdaFabricLLBlocks;
+extern DdaLL128BlocksHook g_allReduceDdaFabricLL128Blocks;
 
 extern std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t)> g_allGatherDdaIpcEligible;
 extern std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t)> g_allGatherDdaFabricEligible;
@@ -74,8 +79,11 @@ extern DdaLaunchHook g_allGatherDdaIpc, g_allGatherDdaFabric, g_allGatherDdaFabr
 extern DdaLaunchHook g_allToAllDdaIpc, g_allToAllDdaFabric, g_allToAllDdaFabricLL, g_allToAllDdaFabricLL128;
 using DdaCappedReduceLaunchHook = std::function<ncclResult_t(const void*, void*, size_t, ncclDataType_t, ncclRedOp_t,
                                                              ncclComm*, hipStream_t, rcclDdaLaunchCap)>;
+using DdaLL128ReduceLaunchHook = std::function<ncclResult_t(const void*, void*, size_t, ncclDataType_t, ncclRedOp_t,
+                                                            ncclComm*, hipStream_t, rcclDdaLaunchCap, bool)>;
 extern DdaReduceLaunchHook g_allReduceDdaIpc;
-extern DdaCappedReduceLaunchHook g_allReduceDdaFabric, g_allReduceDdaFabricLL, g_allReduceDdaFabricLL128;
+extern DdaCappedReduceLaunchHook g_allReduceDdaFabric, g_allReduceDdaFabricLL;
+extern DdaLL128ReduceLaunchHook g_allReduceDdaFabricLL128;
 extern DdaReduceLaunchHook g_reduceScatterDdaIpc, g_reduceScatterDdaFabric, g_reduceScatterDdaFabricLL,
     g_reduceScatterDdaFabricLL128;
 using DdaRootLaunchHook =
