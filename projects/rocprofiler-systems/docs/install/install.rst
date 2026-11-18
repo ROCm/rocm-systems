@@ -162,15 +162,21 @@ issues locating the installed libraries:
 Troubleshooting
 ===============
 
-This section explains how to resolve certain issues that might happen when you first use ROCm Systems Profiler.
+This section explains how to resolve certain issues that might happen when you first use
+ROCm Systems Profiler.
 
-Issues with RHEL and SELinux
-----------------------------
+.. _selinux-troubleshooting:
 
-RHEL (Red Hat Enterprise Linux) and related distributions of Linux automatically enable a security feature
-named SELinux (Security-Enhanced Linux) that prevents ROCm Systems Profiler from running.
-This issue applies to any Linux distribution with SELinux installed, including RHEL and Rocky Linux.
-The problem can happen with any GPU, or even without a GPU.
+Issues with SELinux
+-------------------
+
+SELinux (Security-Enhanced Linux) is a security feature that prevents ROCm Systems
+Profiler from running when it is in enforcing mode. This issue is not specific to any one
+Linux distribution. It can occur on any distribution where SELinux is installed and
+enforcing. It is most often seen on Red Hat Enterprise Linux (RHEL) and related
+distributions, such as Rocky Linux, because they enable SELinux by default.
+Recent versions of SUSE Linux Enterprise Server (SLES), such as 16.1, also enable
+SELinux by default. The problem can happen with any GPU, or even without a GPU.
 
 The problem occurs after you instrument a program and try to
 run ``rocprof-sys-run`` with the instrumented program.
@@ -182,7 +188,13 @@ run ``rocprof-sys-run`` with the instrumented program.
    rocprof-sys-run -- ./hello.instr
 
 Instead of successfully running the binary with call-stack sampling,
-ROCm Systems Profiler crashes with a segmentation fault.
+ROCm Systems Profiler might crash with a segmentation fault or, in newer versions,
+abort with a message similar to the following:
+
+.. code-block:: text
+
+   [library.cpp:588 rocprofsys_init_library_hidden][critical] SELinux enforcing mode detected.
+   Consider disabling SELinux or configure permissive mode with 'sudo setenforce 0'. Aborting.
 
 .. note::
 
