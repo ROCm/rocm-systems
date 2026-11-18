@@ -243,7 +243,7 @@ int main() {
         std::cout << "\t\t\t\t** PPOD Size: " << fabric_info.fabric_info.v1.ppod_size << "\n";
         std::cout << "\t\t\t\t** VPOD ID: " << fabric_info.fabric_info.v1.vpod_id << "\n";
         std::cout << "\t\t\t\t** VPOD Size: " << fabric_info.fabric_info.v1.vpod_size << "\n";
-        print_array_grid(std::cout, "\t\t\t\t", "VPOD Active Accelerators",
+        print_array_grid(std::cout, "\t\t\t\t", "VPOD Active Accelerators (bitmap words)",
                          fabric_info.fabric_info.v1.vpod_active_accelerators,
                          AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE, MAX_COLUMNS_PER_GRID);
         print_array_grid(std::cout, "\t\t\t\t", "Local Accelerators",

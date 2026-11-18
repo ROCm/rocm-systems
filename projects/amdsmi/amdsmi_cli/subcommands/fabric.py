@@ -24,13 +24,12 @@ def _fabric_ppod_id_to_uuid_string(ppod_id):
     return f"{h[0:8]}-{h[8:12]}-{h[12:16]}-{h[16:20]}-{h[20:32]}"
 
 
-# Unset slots in local_accelerators[] and vpod_active_accelerators[] use UINT32_MAX
-# (see amd_smi_gpu_device.cc).
+# Unset slots in local_accelerators[] use UINT32_MAX (see amd_smi_gpu_device.cc).
 _FABRIC_LOCAL_ACCEL_UNSET = (1 << 32) - 1
 
 
 def _fabric_local_accelerators_to_line(local_accelerators):
-    """Format accelerator id list (local or vPoD-active) as one comma-separated line; skip unset."""
+    """Format local accelerator ids as one comma-separated line; skip unset."""
     if not isinstance(local_accelerators, (list, tuple)):
         return "N/A"
     try:
@@ -41,30 +40,31 @@ def _fabric_local_accelerators_to_line(local_accelerators):
     return ", ".join(active) if active else "N/A"
 
 
-_FABRIC_VPOD_ACTIVE_SLOTS = 32
+_FABRIC_VPOD_ACTIVE_WORD_BITS = 32
 _FABRIC_VPOD_ACTIVE_ROW_LEN = 8
 
 
 def _fabric_local_active_accelerators_rows(vpod_active_accelerators):
-    """32 vPoD-active slots as 4×8 grid; each row is comma-separated ('-' if unset). Returns None if invalid."""
-    unset = _FABRIC_LOCAL_ACCEL_UNSET
+    """Decode the vPoD-active bitmap (bit N % 32 of word N / 32 = accelerator id N) into rows of
+    up to 8 comma-separated ids. Returns None if invalid or no accelerator is active."""
     if not isinstance(vpod_active_accelerators, (list, tuple)):
         return None
     try:
-        vals = [int(x) for x in vpod_active_accelerators]
+        words = [int(x) for x in vpod_active_accelerators]
     except (TypeError, ValueError):
         return None
-    if len(vals) != _FABRIC_VPOD_ACTIVE_SLOTS:
-        if len(vals) > _FABRIC_VPOD_ACTIVE_SLOTS:
-            vals = vals[:_FABRIC_VPOD_ACTIVE_SLOTS]
-        else:
-            vals = vals + [unset] * (_FABRIC_VPOD_ACTIVE_SLOTS - len(vals))
-    rows = []
-    for r in range(_FABRIC_VPOD_ACTIVE_SLOTS // _FABRIC_VPOD_ACTIVE_ROW_LEN):
-        start = r * _FABRIC_VPOD_ACTIVE_ROW_LEN
-        chunk = vals[start : start + _FABRIC_VPOD_ACTIVE_ROW_LEN]
-        rows.append(", ".join(str(v) if v != unset else "-" for v in chunk))
-    return rows
+    ids = [
+        word_idx * _FABRIC_VPOD_ACTIVE_WORD_BITS + bit
+        for word_idx, word in enumerate(words)
+        for bit in range(_FABRIC_VPOD_ACTIVE_WORD_BITS)
+        if (word >> bit) & 1
+    ]
+    if not ids:
+        return None
+    return [
+        ", ".join(str(i) for i in ids[start : start + _FABRIC_VPOD_ACTIVE_ROW_LEN])
+        for start in range(0, len(ids), _FABRIC_VPOD_ACTIVE_ROW_LEN)
+    ]
 
 
 class FabricCommands:
