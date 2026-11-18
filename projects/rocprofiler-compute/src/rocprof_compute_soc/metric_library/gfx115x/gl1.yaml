@@ -17,7 +17,7 @@ gl1.gl2_bw:
     the GL1 level.
   peak_empirical: $L2Bw_empirical_peak
 gl1.gl2_rd_128b_req:
-  name: GL2 Read 128B Requests
+  name: GL1-GL2 Read Requests (128B)
   formula: SUM(GL1C_GL2_REQ_READ_128B_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
