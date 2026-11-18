@@ -3509,7 +3509,7 @@ RaceTestBuilder cellBuilder(int numWaves = 2) {
 
 // ----- Handoff -----
 
-TEST(RaceDetector, BarrierCell_CompletedWriteHandedOff) {
+TEST(RaceDetector, BarrierCell_CompletedWriteReleased) {
   RaceTestBuilder b = cellBuilder();
   dsWrite(b, 0);
   b.waitDscnt(0, 0);
@@ -3667,13 +3667,13 @@ TEST(RaceDetector, BarrierCell_OnlyAReadOfTheStateDwordAcquires) {
   }
 }
 
-// ----- What an arrival releases -----
+// ----- What an arrival hands off -----
 
 // ds_atomic_barrier_arrive_rtn_b64 "is ordered with other LDS operations"
 // (CDNA5 ISA 11.2.2), and "LDS instructions are kept in order" (CDNA5 ISA
 // 5.7.1.4), so the wave's earlier DS write has executed when the arrival does,
 // without a wait.
-TEST(RaceDetector, BarrierCell_RtnArriveReleasesPendingDsWrite) {
+TEST(RaceDetector, BarrierCell_RtnArriveHandsOffPendingDsWrite) {
   RaceTestBuilder b = cellBuilder();
   dsWrite(b, 0);
   b.cellArrive(0, kCell, Arrival::Ds, /*completes=*/true);
@@ -3685,7 +3685,7 @@ TEST(RaceDetector, BarrierCell_RtnArriveReleasesPendingDsWrite) {
 // Tensor instructions "are unordered with respect to other types of memory
 // instructions" (CDNA5 ISA 10.11.1), so a DS arrival does not follow a pending
 // tensor load.
-TEST(RaceDetector, BarrierCell_RtnArriveDoesNotReleasePendingTensorLoad) {
+TEST(RaceDetector, BarrierCell_RtnArriveDoesNotHandOffPendingTensorLoad) {
   RaceTestBuilder b = cellBuilder();
   tensorLoad(b, 0);
   b.cellArrive(0, kCell, Arrival::Ds, /*completes=*/true);
@@ -3697,7 +3697,7 @@ TEST(RaceDetector, BarrierCell_RtnArriveDoesNotReleasePendingTensorLoad) {
 // ds_atomic_async_barrier_arrive_b64 executes "only when all previously issued
 // asynchronous loads have completed" (CDNA5 ISA 15.15), so it releases the
 // wave's pending async load with no ASYNCcnt wait.
-TEST(RaceDetector, BarrierCell_AsyncArriveReleasesPendingAsyncLoad) {
+TEST(RaceDetector, BarrierCell_AsyncArriveHandsOffPendingAsyncLoad) {
   RaceTestBuilder b = cellBuilder();
   asyncLoad(b, 0);
   b.cellArrive(0, kCell, Arrival::Async, /*completes=*/true);
@@ -3706,7 +3706,7 @@ TEST(RaceDetector, BarrierCell_AsyncArriveReleasesPendingAsyncLoad) {
   EXPECT_EQ(b.raceCount(), 0);
 }
 
-TEST(RaceDetector, BarrierCell_AsyncArriveDoesNotReleaseLaterAsyncLoad) {
+TEST(RaceDetector, BarrierCell_AsyncArriveDoesNotHandOffLaterAsyncLoad) {
   RaceTestBuilder b = cellBuilder();
   b.cellArrive(0, kCell, Arrival::Async, /*completes=*/true);
   asyncLoad(b, 0);
@@ -3718,7 +3718,7 @@ TEST(RaceDetector, BarrierCell_AsyncArriveDoesNotReleaseLaterAsyncLoad) {
 // Async loads and stores return done out of order with each other (CDNA5 ISA
 // 10.8), and the arrive stays in order with async loads only, so a pending
 // async store's LDS source is not released.
-TEST(RaceDetector, BarrierCell_AsyncArriveDoesNotReleasePendingAsyncStore) {
+TEST(RaceDetector, BarrierCell_AsyncArriveDoesNotHandOffPendingAsyncStore) {
   RaceTestBuilder b = cellBuilder();
   asyncStore(b, 0);
   b.cellArrive(0, kCell, Arrival::Async, /*completes=*/true);
@@ -3728,7 +3728,7 @@ TEST(RaceDetector, BarrierCell_AsyncArriveDoesNotReleasePendingAsyncStore) {
 }
 
 // The async arrive is not ordered with DS instructions.
-TEST(RaceDetector, BarrierCell_AsyncArriveDoesNotReleasePendingDsWrite) {
+TEST(RaceDetector, BarrierCell_AsyncArriveDoesNotHandOffPendingDsWrite) {
   RaceTestBuilder b = cellBuilder();
   dsWrite(b, 0);
   b.cellArrive(0, kCell, Arrival::Async, /*completes=*/true);
@@ -3740,7 +3740,7 @@ TEST(RaceDetector, BarrierCell_AsyncArriveDoesNotReleasePendingDsWrite) {
 // A transfer's arrival follows it, and tensor instructions "complete in-order
 // with other Tensor instructions from the same wave" (CDNA5 ISA 10.11.1), so
 // it also follows the wave's earlier transfers.
-TEST(RaceDetector, BarrierCell_TensorArriveReleasesItsTransferAndEarlierOnes) {
+TEST(RaceDetector, BarrierCell_TensorArriveHandsOffItsTransferAndEarlierOnes) {
   RaceTestBuilder b = cellBuilder();
   tensorLoad(b, 0, kX);
   tensorLoad(b, 0, kY);
@@ -3751,7 +3751,7 @@ TEST(RaceDetector, BarrierCell_TensorArriveReleasesItsTransferAndEarlierOnes) {
   EXPECT_EQ(b.raceCount(), 0);
 }
 
-TEST(RaceDetector, BarrierCell_TensorArriveDoesNotReleasePendingAsyncLoad) {
+TEST(RaceDetector, BarrierCell_TensorArriveDoesNotHandOffPendingAsyncLoad) {
   RaceTestBuilder b = cellBuilder();
   asyncLoad(b, 0, kX);
   tensorLoad(b, 0, kY);
@@ -3761,9 +3761,9 @@ TEST(RaceDetector, BarrierCell_TensorArriveDoesNotReleasePendingAsyncLoad) {
   expectOneLdsRace(b, /*wave=*/1, kX, /*isWrite=*/false);
 }
 
-// Releasing a pending operation orders it for other waves. Its own wave still
-// has to wait for it.
-TEST(RaceDetector, BarrierCell_ReleasedPendingOperationStillNeedsItsOwnWait) {
+// Handing a pending operation off orders it for other waves. Its own wave
+// still has to wait for it.
+TEST(RaceDetector, BarrierCell_HandedOffOperationStillNeedsItsOwnWait) {
   RaceTestBuilder b = cellBuilder();
   asyncLoad(b, 0);
   b.cellArrive(0, kCell, Arrival::Async, /*completes=*/true);
@@ -3771,9 +3771,10 @@ TEST(RaceDetector, BarrierCell_ReleasedPendingOperationStillNeedsItsOwnWait) {
   expectOneLdsRace(b, /*wave=*/0, kX, /*isWrite=*/false);
 }
 
-// A released operation that its wave later waits for stays released in the
-// epoch of the arrival, not of the wait.
-TEST(RaceDetector, BarrierCell_ReleaseSurvivesLaterCompletion) {
+// An operation that its wave waits for after the arrival stays handed off: the
+// waves that acquired the handoff still skip it once it is in its wave's
+// history.
+TEST(RaceDetector, BarrierCell_HandoffSurvivesLaterCompletion) {
   RaceTestBuilder b = cellBuilder();
   asyncLoad(b, 0);
   b.cellArrive(0, kCell, Arrival::Async, /*completes=*/true);
@@ -3783,11 +3784,11 @@ TEST(RaceDetector, BarrierCell_ReleaseSurvivesLaterCompletion) {
   EXPECT_EQ(b.raceCount(), 0);
 }
 
-// A pending operation that an arrival releases is handed off only through
-// arrivals that are ordered after it. A barrier signal waits for no memory
+// A pending operation that an arrival hands off is carried only by arrivals
+// that are ordered after it. A barrier signal waits for no memory
 // counter (CDNA5 ISA 15.3, S_BARRIER_SIGNAL), so a barrier after the arrival
 // does not order the pending operation for a wave that never read the cell.
-TEST(RaceDetector, BarrierCell_PendingReleaseIsNotCarriedByALaterBarrier) {
+TEST(RaceDetector, BarrierCell_HandoffIsNotCarriedByALaterBarrier) {
   RaceTestBuilder b = cellBuilder();
   asyncLoad(b, 0);
   b.cellArrive(0, kCell, Arrival::Async, /*completes=*/true);
@@ -3798,7 +3799,7 @@ TEST(RaceDetector, BarrierCell_PendingReleaseIsNotCarriedByALaterBarrier) {
 
 // The same for a tensor load whose descriptor requests the arrival: the wave
 // reaches the barrier while the transfer may still be moving data.
-TEST(RaceDetector, BarrierCell_PendingTensorReleaseIsNotCarriedByALaterBarrier) {
+TEST(RaceDetector, BarrierCell_TensorHandoffIsNotCarriedByALaterBarrier) {
   RaceTestBuilder b = cellBuilder();
   tensorLoad(b, 0);
   b.cellArrive(0, kCell, Arrival::Tensor, /*completes=*/true);
@@ -3808,8 +3809,8 @@ TEST(RaceDetector, BarrierCell_PendingTensorReleaseIsNotCarriedByALaterBarrier) 
 }
 
 // A DS arrive is not ordered after the wave's async loads, so it does not
-// carry a pending async load that an earlier async arrive released.
-TEST(RaceDetector, BarrierCell_PendingAsyncReleaseIsNotCarriedByALaterDsArrive) {
+// carry a pending async load that an earlier async arrive handed off.
+TEST(RaceDetector, BarrierCell_AsyncHandoffIsNotCarriedByALaterDsArrive) {
   RaceTestBuilder b = cellBuilder();
   asyncLoad(b, 0);
   b.cellArrive(0, kCell, Arrival::Async, /*completes=*/true);
@@ -3820,8 +3821,8 @@ TEST(RaceDetector, BarrierCell_PendingAsyncReleaseIsNotCarriedByALaterDsArrive) 
 }
 
 // Nor does an async arrive carry a pending DS write that an earlier DS arrive
-// released.
-TEST(RaceDetector, BarrierCell_PendingDsReleaseIsNotCarriedByALaterAsyncArrive) {
+// handed off.
+TEST(RaceDetector, BarrierCell_DsHandoffIsNotCarriedByALaterAsyncArrive) {
   RaceTestBuilder b = cellBuilder();
   dsWrite(b, 0);
   b.cellArrive(0, kCell, Arrival::Ds, /*completes=*/true);
@@ -3833,7 +3834,7 @@ TEST(RaceDetector, BarrierCell_PendingDsReleaseIsNotCarriedByALaterAsyncArrive) 
 
 // A later arrival of the same kind is ordered after the pending operation
 // too, so a wave that reads only the later cell still acquires it.
-TEST(RaceDetector, BarrierCell_PendingReleaseIsCarriedByALaterArrivalOfItsKind) {
+TEST(RaceDetector, BarrierCell_HandoffIsCarriedByALaterArrivalOfItsKind) {
   RaceTestBuilder b = cellBuilder();
   asyncLoad(b, 0);
   b.cellArrive(0, kCell, Arrival::Async, /*completes=*/true);
@@ -3843,9 +3844,9 @@ TEST(RaceDetector, BarrierCell_PendingReleaseIsCarriedByALaterArrivalOfItsKind) 
   EXPECT_EQ(b.raceCount(), 0);
 }
 
-// Once its wave waits for it, a released operation is completed like any
+// Once its wave waits for it, a handed-off operation is completed like any
 // other, and the wave's next barrier signal orders it.
-TEST(RaceDetector, BarrierCell_PendingReleaseCompletedBeforeABarrierIsOrderedByIt) {
+TEST(RaceDetector, BarrierCell_HandoffCompletedBeforeABarrierIsOrderedByIt) {
   RaceTestBuilder b = cellBuilder();
   asyncLoad(b, 0);
   b.cellArrive(0, kCell, Arrival::Async, /*completes=*/true);
@@ -3858,7 +3859,7 @@ TEST(RaceDetector, BarrierCell_PendingReleaseCompletedBeforeABarrierIsOrderedByI
 // A wave that acquired a pending operation through the cell carries it on: it
 // read the cell after the arrival, so its own later signal follows the
 // operation.
-TEST(RaceDetector, BarrierCell_AcquiredPendingReleaseIsCarriedByTheAcquirersBarrier) {
+TEST(RaceDetector, BarrierCell_AcquiredHandoffIsCarriedByTheAcquirersBarrier) {
   RaceTestBuilder b = cellBuilder(/*numWaves=*/3);
   const BarrierRoundId round = RaceTestBuilder::namedRound(1, 0);
   asyncLoad(b, 0);
@@ -4197,14 +4198,14 @@ TEST(RaceDetector, BarrierCell_LoopDoesNotAccumulate) {
   EXPECT_EQ(b.barrierPendingEventCount(0), 3u);
   EXPECT_EQ(b.barrierPendingEventCount(1), 1u);
   // Every retired event has left the registry: what remains is the four
-  // events above, which nothing has released yet.
+  // events above, whose completion nothing has released yet.
   EXPECT_EQ(b.events().totalAllocated(), kIterations * kEventsPerIteration);
   EXPECT_EQ(b.events().trimmedCount(), kIterations * kEventsPerIteration - 4);
   EXPECT_EQ(b.events().size(), 4);
 }
 
 // With no other wave, nothing holds an event back: it retires when it
-// completes, as before.
+// completes.
 TEST(RaceDetector, BarrierCell_SingleWaveWorkgroup) {
   RaceTestBuilder b = cellBuilder(/*numWaves=*/1);
   dsWrite(b, 0);
