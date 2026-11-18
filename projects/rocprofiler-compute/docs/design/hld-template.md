@@ -1,5 +1,4 @@
 # General guidelines:
-- Use AI tools as an instrument but avoid producing HLD via AI tools, especially for complex problems.
 ```
 "Writing is thinking. To write well is to think clearly. That's why it's so hard."
                                                         - David McCullough
