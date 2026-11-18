@@ -73,7 +73,7 @@ jobs:
       AFL_NO_UI: "1"
       AFL_SKIP_CPUFREQ: "1"
       AFL_SYNC_TIME: "1"
-    runs-on: aws-linux-scale-rocm-medium
+    runs-on: az-linux-scale-rocm-medium-prod
     timeout-minutes: 60
     outputs:
       artifact-url: ${{ steps.upload.outputs.artifact-url }}
