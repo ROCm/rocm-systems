@@ -35,6 +35,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <shared_mutex>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -101,6 +102,13 @@ public:
     const Queue* get_queue(const hsa_queue_t&) const;
 
     void iterate_queues(const queue_iterator_cb_t&) const;
+    // Queues destroy_queue has erased from the queue map but is still syncing, so their completion
+    // handlers may still be running. Read the map first and this set second: destroy_queue adds a
+    // queue here before erasing it, so that order sees a queue being destroyed at least once. The
+    // callback runs under this set's read lock and must not block or touch the queue map.
+    void iterate_retiring_queues(const queue_iterator_cb_t&) const;
+    // Keeps SDK and runtime queues alive through callbacks without holding the queue-map lock.
+    void iterate_queues_with_lifetime(const queue_iterator_cb_t&) const;
     void set_queue_state(queue_state state, hsa_queue_t* hsa_queue);
 
     void add_dispatch_ready(const Queue* queue);
@@ -142,6 +150,7 @@ public:
 #endif
 
 private:
+    mutable std::shared_mutex _queue_lifetime_mutex;
     using client_id_map_t  = std::unordered_map<ClientID, agent_callback_tuple_t>;
     using resource_alloc_t = void(const AgentCache&, const CoreApiTable&, const AmdExtTable&);
 
@@ -184,6 +193,10 @@ private:
     };
 
     common::Synchronized<serialization_refcount> _serialization_refcount;
+
+    // See iterate_retiring_queues. A queue here is dereferenced only under this set's read lock,
+    // and destroy_queue removes it under the write lock before the Queue is freed.
+    common::Synchronized<std::unordered_set<const Queue*>> _retiring_queues = {};
 
     // Applies a +1/-1 to the refcount of each agent in `agents` (empty == all GPU agents) and
     // toggles only the serializers whose effective count crossed zero.

@@ -319,8 +319,11 @@ snap(hsa_agent_t agent)
     return out;
 }
 
+namespace
+{
 bool
-restore(const device_snapshot_t& snapshot)
+restore_impl(const device_snapshot_t&             snapshot,
+             const memory_tracker::tracked_map_t* locked_inventory)
 {
     size_t restored = 0;
     for(const auto& blk : snapshot.blocks)
@@ -333,9 +336,18 @@ restore(const device_snapshot_t& snapshot)
             // check and the write (see with_inventory_check). A nullopt result means the region is
             // no longer a live allocation of at least its size. It was freed or reallocated after
             // snap, so skip it (benign -- not a restore failure).
-            const auto st = with_inventory_check(blk.gpu_addr, blk.host_copy.size(), [&] {
+            const auto copy = [&] {
                 return dma_copy(blk.gpu_addr, blk.host_copy.data(), blk.host_copy.size());
-            });
+            };
+            auto st = std::optional<hsa_status_t>{};
+            if(locked_inventory != nullptr)
+            {
+                const auto itr = locked_inventory->find(blk.gpu_addr);
+                if(itr != locked_inventory->end() && itr->second.size >= blk.host_copy.size())
+                    st = copy();
+            }
+            else
+                st = with_inventory_check(blk.gpu_addr, blk.host_copy.size(), copy);
 
             if(!st)
             {
@@ -373,6 +385,19 @@ restore(const device_snapshot_t& snapshot)
     ROCP_INFO << fmt::format(
         "kernel-replay restore: restored {}/{} regions", restored, snapshot.blocks.size());
     return true;
+}
+}  // namespace
+
+bool
+restore(const device_snapshot_t& snapshot)
+{
+    return restore_impl(snapshot, nullptr);
+}
+
+bool
+restore(const device_snapshot_t& snapshot, const memory_tracker::tracked_map_t& locked_inventory)
+{
+    return restore_impl(snapshot, &locked_inventory);
 }
 }  // namespace memory_snapshot
 }  // namespace kernel_replay
