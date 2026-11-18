@@ -103,21 +103,23 @@ protected:
 TEST_F(DdaAlltoAllLLBankMPI, AlltoAllLLAfterAllReduceLL128KeepsData)
 {
     const size_t nRanks = static_cast<size_t>(nRanks_);
-    void *arSend = nullptr, *arRecv = nullptr, *a2aSend = nullptr, *a2aRecv = nullptr;
+    void *arSend = nullptr, *arRecv = nullptr, *a2aSend = nullptr, *a2aRecv0 = nullptr, *a2aRecv1 = nullptr;
     ASSERT_MPI_EQ(hipSuccess, hipMalloc(&arSend, kMaxArBytes));
     DeviceBufferAutoGuard arSendGuard(arSend);
     ASSERT_MPI_EQ(hipSuccess, hipMalloc(&arRecv, kMaxArBytes));
     DeviceBufferAutoGuard arRecvGuard(arRecv);
     ASSERT_MPI_EQ(hipSuccess, hipMalloc(&a2aSend, kMaxA2aBytes * nRanks));
     DeviceBufferAutoGuard a2aSendGuard(a2aSend);
-    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&a2aRecv, kMaxA2aBytes * nRanks));
-    DeviceBufferAutoGuard a2aRecvGuard(a2aRecv);
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&a2aRecv0, kMaxA2aBytes * nRanks));
+    DeviceBufferAutoGuard a2aRecv0Guard(a2aRecv0);
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&a2aRecv1, kMaxA2aBytes * nRanks));
+    DeviceBufferAutoGuard a2aRecv1Guard(a2aRecv1);
 
     // The largest AllReduce LL128 call fills its slots furthest into bank 0, so step down by 1 MiB.
     const size_t arBytes =
         largestSelected(ncclFuncAllReduce, RCCL_DDA_FABRIC_LL128, kMaxArBytes, kMiB, kMiB, arSend, arRecv);
     const size_t a2aBytes =
-        largestSelected(ncclFuncAlltoAll, RCCL_DDA_FABRIC_LL, kMaxA2aBytes, kMinA2aBytes, 0, a2aSend, a2aRecv);
+        largestSelected(ncclFuncAlltoAll, RCCL_DDA_FABRIC_LL, kMaxA2aBytes, kMinA2aBytes, 0, a2aSend, a2aRecv0);
     const std::string skip = mpiCoordinatedSkipReason(arBytes == 0 || a2aBytes == 0,
                                                       "AllReduce LL128 or AlltoAll LL is not selected at any size");
     if(!skip.empty())
@@ -141,9 +143,11 @@ TEST_F(DdaAlltoAllLLBankMPI, AlltoAllLLAfterAllReduceLL128KeepsData)
                           return chunkPattern(rank_, static_cast<int>(i / a2aBytes), iter, i % a2aBytes);
                       }));
         ASSERT_MPI_EQ(hipSuccess, hipMemsetAsync(arRecv, 0, arBytes, stream));
+        ASSERT_MPI_EQ(hipSuccess, hipMemsetAsync(a2aRecv0, 0, a2aTotal, stream));
+        ASSERT_MPI_EQ(hipSuccess, hipMemsetAsync(a2aRecv1, 0, a2aTotal, stream));
         ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(arSend, arRecv, arCount, ncclFloat32, ncclSum, comm, stream));
-        ASSERT_MPI_EQ(ncclSuccess, ncclAlltoAll(a2aSend, a2aRecv, a2aCount, ncclFloat32, comm, stream));
-        ASSERT_MPI_EQ(ncclSuccess, ncclAlltoAll(a2aSend, a2aRecv, a2aCount, ncclFloat32, comm, stream));
+        ASSERT_MPI_EQ(ncclSuccess, ncclAlltoAll(a2aSend, a2aRecv0, a2aCount, ncclFloat32, comm, stream));
+        ASSERT_MPI_EQ(ncclSuccess, ncclAlltoAll(a2aSend, a2aRecv1, a2aCount, ncclFloat32, comm, stream));
         ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
         EXPECT_TRUE(verifyBufferData<float>(arRecv, arCount, [nr](size_t i) {
@@ -152,9 +156,10 @@ TEST_F(DdaAlltoAllLLBankMPI, AlltoAllLLAfterAllReduceLL128KeepsData)
                 sum += arInput(r, i);
             return sum;
         })) << "Rank " << rank_ << ": AllReduce data mismatch";
-        EXPECT_TRUE(verifyBufferData<uint8_t>(a2aRecv, a2aTotal, [this, iter, a2aBytes](size_t i) {
-            return chunkPattern(static_cast<int>(i / a2aBytes), rank_, iter, i % a2aBytes);
-        })) << "Rank " << rank_ << ": AlltoAll data mismatch";
+        for(void* a2aRecv : {a2aRecv0, a2aRecv1})
+            EXPECT_TRUE(verifyBufferData<uint8_t>(a2aRecv, a2aTotal, [this, iter, a2aBytes](size_t i) {
+                return chunkPattern(static_cast<int>(i / a2aBytes), rank_, iter, i % a2aBytes);
+            })) << "Rank " << rank_ << ": AlltoAll data mismatch";
     }
 }
 
