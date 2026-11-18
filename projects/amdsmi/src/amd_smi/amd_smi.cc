@@ -8447,9 +8447,10 @@ amdsmi_status_t amdsmi_get_cpu_model_name(amdsmi_processor_handle processor_hand
 
   sock_ind = (uint8_t)std::stoi(proc_id, NULL, 0);
 
+  // get_cpu_model_name() reads /proc/cpuinfo and already returns AMD SMI statuses, so they must
+  // not go through the ESMI status map (that would turn e.g. NO_DATA into MAP_ERROR).
   status = amd::smi::AMDSmiSystem::getInstance().get_cpu_model_name(sock_ind, &model_name);
-  if (status != AMDSMI_STATUS_SUCCESS)
-    return amd::smi::esmi_to_amdsmi_status(static_cast<esmi_status_t>(status));
+  if (status != AMDSMI_STATUS_SUCCESS) return status;
 
   snprintf(cpu_info->model_name, AMDSMI_MAX_STRING_LENGTH, "%s", model_name.c_str());
 
