@@ -14,7 +14,6 @@
 
 #ifdef MPI_TESTS_ENABLED
 
-#include "DdaMPITestHelpers.hpp"
 #include "MPIHelpers.hpp"
 #include "MPITestBase.hpp"
 #include "TestChecks.hpp"
@@ -48,7 +47,12 @@ inline bool fabricInitRequired()
 
 inline bool isGfx1250Device()
 {
-    return DdaMPITestHelpers::isGfx1250Device();
+    hipDeviceProp_t props{};
+    if(hipGetDeviceProperties(&props, 0) != hipSuccess)
+    {
+        return false;
+    }
+    return std::string(props.gcnArchName).find("gfx1250") != std::string::npos;
 }
 
 inline size_t countOccurrences(const std::string& haystack, const char* needle)

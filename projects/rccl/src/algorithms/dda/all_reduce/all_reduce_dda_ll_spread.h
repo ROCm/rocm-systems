@@ -82,11 +82,11 @@ __device__ __forceinline__ void ddaLLSpreadLdsBarrier() {
 #endif
 }
 
-// Polls the lines of up to kDdaLLSpreadBatch units this thread owns (mask bit i = unit i valid); false if aborted.
-__device__ __forceinline__ bool ddaLLSpreadPoll(const uint32_t* const (&line)[kDdaLLSpreadBatch], uint32_t mask,
-                                                uint32_t flag, DdaKernelParams params,
-                                                uint32_t (&d0)[kDdaLLSpreadBatch], uint32_t (&d1)[kDdaLLSpreadBatch]) {
-  return ddaLLWaitLineFlagsBatched<kDdaLLSpreadBatch>(line, mask, flag, params, d0, d1);
+// Polls the lines of up to kDdaLLSpreadBatch units this thread owns (mask bit i = unit i valid).
+__device__ __forceinline__ void ddaLLSpreadPoll(const uint32_t* const (&line)[kDdaLLSpreadBatch], uint32_t mask,
+                                                uint32_t flag, uint32_t (&d0)[kDdaLLSpreadBatch],
+                                                uint32_t (&d1)[kDdaLLSpreadBatch]) {
+  ddaLLWaitLineFlagsBatched<kDdaLLSpreadBatch>(line, mask, flag, d0, d1);
 }
 
 // LL spread two-shot all-reduce kernel; launched on the one-shot tier's grid (kDdaLLSpreadThreads per block).
@@ -101,13 +101,10 @@ __launch_bounds__(kDdaLLSpreadThreads)
                                               int selfRank, int nRanksRt,
                                               uint32_t* __restrict__ epochDev,    // per-block LL epoch cells
                                               int epochLen,                       // number of cells in epochDev
-                                              size_t bankSize,                    // scratch bank size (from host)
-                                              DdaKernelParams params) {
+                                              size_t bankSize) {                  // scratch bank size (from host)
   __shared__ uint2 ldsIn[kDdaLLSpreadLdsPkts];
   __shared__ uint2 ldsAcc[kDdaLLSpreadMaxPassPkts];
   __shared__ LLPacket16* ldsPeer[kDdaLLSpreadMaxRanks];
-  // Set by any thread whose wait aborted: the fold reads LDS rows other threads polled, so an abort is block-wide.
-  __shared__ int ldsAborted;
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const size_t nPk = (count * sizeof(T)) >> 3;
@@ -153,9 +150,6 @@ __launch_bounds__(kDdaLLSpreadThreads)
   for (int r = (int)tid; r < nRanks; r += (int)nthr) {
     ldsPeer[r] = reinterpret_cast<LLPacket16*>(peerScratch[r]);
   }
-  if (tid == 0) {
-    ldsAborted = 0;
-  }
   uint32_t sendD0[kDdaLLSpreadBatch], sendD1[kDdaLLSpreadBatch];
   int sendPeer[kDdaLLSpreadBatch];
   size_t sendPk[kDdaLLSpreadBatch];
@@ -195,8 +189,7 @@ __launch_bounds__(kDdaLLSpreadThreads)
     }
   }
 
-  // Phase 2 per LDS pass: stage each rank's copy, fold in rank order, publish; an abort leaves at the staging barrier.
-  bool aborted = false;
+  // Phase 2 per LDS pass: stage each rank's copy, fold in rank order, publish.
   for (size_t q0 = p0; q0 < p1Mine; q0 += passPkts) {
     const size_t plen = p1Mine - q0 < passPkts ? p1Mine - q0 : passPkts;
     const size_t pollUnits = (size_t)(nRanks - 1) * plen;
@@ -220,9 +213,7 @@ __launch_bounds__(kDdaLLSpreadThreads)
         }
       }
       uint32_t d0[kDdaLLSpreadBatch], d1[kDdaLLSpreadBatch];
-      if (!aborted) {
-        aborted = !ddaLLSpreadPoll(line, mask, flag, params, d0, d1);
-      }
+      ddaLLSpreadPoll(line, mask, flag, d0, d1);
 #pragma unroll
       for (int i = 0; i < kDdaLLSpreadBatch; ++i) {
         if (((mask >> i) & 1u) != 0) {
@@ -238,15 +229,7 @@ __launch_bounds__(kDdaLLSpreadThreads)
         ldsIn[(size_t)selfRank * plen + k] = make_uint2(in[w], in[w + 1]);
       }
     }
-    if (aborted) {
-      ldsAborted = 1;
-    }
     ddaLLSpreadLdsBarrier();
-    aborted = aborted || ldsAborted != 0;
-    // Partial sums: skip the fold, my recvbuff shard and the publish. aborted is uniform here, so no barrier is split.
-    if (aborted) {
-      break;
-    }
 
     for (size_t k = tid; k < plen; k += nthr) {
       uint32_t acc0 = ldsIn[k].x;
@@ -302,13 +285,10 @@ __launch_bounds__(kDdaLLSpreadThreads)
       }
     }
     uint32_t d0[kDdaLLSpreadBatch], d1[kDdaLLSpreadBatch];
-    if (aborted) {
-      continue;
-    }
-    aborted = !ddaLLSpreadPoll(line, mask, flag, params, d0, d1);
+    ddaLLSpreadPoll(line, mask, flag, d0, d1);
 #pragma unroll
     for (int i = 0; i < kDdaLLSpreadBatch; ++i) {
-      if (((mask >> i) & 1u) != 0 && !aborted) {
+      if (((mask >> i) & 1u) != 0) {
         out[w[i]] = d0[i];
         out[w[i] + 1] = d1[i];
       }

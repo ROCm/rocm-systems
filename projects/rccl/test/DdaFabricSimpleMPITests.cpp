@@ -27,7 +27,6 @@
 
 #ifdef MPI_TESTS_ENABLED
 
-#include "DdaMPITestHelpers.hpp"
 #include "DeviceBufferHelpers.hpp"
 #include "MPIHelpers.hpp"
 #include "MPITestBase.hpp"
@@ -87,6 +86,13 @@ constexpr char kAllToAllPeerTdmPushNeedle[] =
     "DDA fabric AllToAll: launching peer-major TDM push kernel";
 constexpr char kAllToAllLLNeedle[] =
     "DDA fabric AllToAll LL:";
+
+bool isGfx1250Device()
+{
+    hipDeviceProp_t props{};
+    return hipGetDeviceProperties(&props, 0) == hipSuccess
+        && std::string(props.gcnArchName).find("gfx1250") != std::string::npos;
+}
 } // namespace
 
 class DdaFabricSimpleMPITest : public MPITestBase
@@ -120,7 +126,7 @@ protected:
 
         if(!validateTestPrerequisites(kMinProcessesForMPI))
             GTEST_SKIP() << "Need at least 2 MPI ranks";
-        if(!DdaMPITestHelpers::isGfx1250Device())
+        if(!isGfx1250Device())
             GTEST_SKIP() << "DDA fabric SIMPLE requires gfx1250";
         if(rcclParamDdaLL128() != 0)
             GTEST_SKIP() << "RCCL_DDA_LL128 was cached as enabled before this fixture; "

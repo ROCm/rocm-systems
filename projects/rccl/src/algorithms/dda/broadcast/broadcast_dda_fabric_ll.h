@@ -74,8 +74,7 @@ __launch_bounds__(512)
                                        char* __restrict__ recvbuff, const char* __restrict__ sendbuff,
                                        size_t bytes, // multiple of 16
                                        int selfRank, int nRanks, int root,
-                                       uint32_t* __restrict__ epochDev, int epochLen, size_t bankSize,
-                                       DdaKernelParams params) {
+                                       uint32_t* __restrict__ epochDev, int epochLen, size_t bankSize) {
   const int tid = threadIdx.x;
   const int nthreads = blockDim.x;
   const int flatBlockId = blockIdx.x * gridDim.y + blockIdx.y;
@@ -111,7 +110,7 @@ __launch_bounds__(512)
 
     if (blockIdx.y == 0 && tid == 0) {
       uint32_t d0, f0, d1, f1;
-      (void)ddaLLWaitLineFlags(&self[peer], flag, params, d0, f0, d1, f1);
+      ddaLLWaitLineFlags(&self[peer], flag, d0, f0, d1, f1);
     }
   } else {
     if (flatBlockId == 0) {
@@ -125,7 +124,7 @@ __launch_bounds__(512)
     const LLPacket16* src = self + nRanks;
     for (size_t pk = pkBegin + tid; pk < pkEnd; pk += nthreads) {
       uint32_t d0, f0, d1, f1;
-      if (!ddaLLWaitLineFlags(&src[pk], flag, params, d0, f0, d1, f1)) break;
+      ddaLLWaitLineFlags(&src[pk], flag, d0, f0, d1, f1);
       ddaBcStore8<kAligned>(recvbuff + 8 * pk, d0, d1);
     }
 
@@ -133,7 +132,7 @@ __launch_bounds__(512)
       for (int p = tid; p < nRanks; p += nthreads) {
         if (p == selfRank || p == root) continue;
         uint32_t d0, f0, d1, f1;
-        if (!ddaLLWaitLineFlags(&self[p], flag, params, d0, f0, d1, f1)) break;
+        ddaLLWaitLineFlags(&self[p], flag, d0, f0, d1, f1);
       }
     }
   }

@@ -183,8 +183,7 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
     // Past the barrier's pointer exchange, failures set !ready so every rank still reaches the allgather.
     bool ready = true;
     auto barrierPair =
-      dda::common::FabricGpuBarrier::mallocAndInit(nRanks, nBlocksMax, comm->rank, comm->bootstrap, comm->memManager,
-                                                   dda::common::DdaKernelParams{comm->abortFlagDev});
+      dda::common::FabricGpuBarrier::mallocAndInit(nRanks, nBlocksMax, comm->rank, comm->bootstrap, comm->memManager);
     if (!barrierPair.first) {
       WARN("ncclDdaFabricCommInit: FabricGpuBarrier malloc/init failed");
       ready = false;

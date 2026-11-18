@@ -2802,8 +2802,8 @@ TEST(Rcclwrap, SymEligible_YieldsToSymmetricKernel)
 
 // ---------------------------------------------------------------------------
 // rcclCollectiveMustUseEnqueuePath: DDA/CE/GIN early-returns skip ncclEnqueueCheck.
-// NCCL_CHECK_MODE, a suspended communicator and a revoked one must divert to
-// enqueue so pointer checks, the suspend guard and the revoked rejection still run. Named Rcclwrap so fixtures-debug CI
+// NCCL_CHECK_MODE and a suspended communicator must divert to enqueue so pointer
+// checks and the suspend guard still run. Named Rcclwrap so fixtures-debug CI
 // selects them (Rcclwrap.* is the listed prefix for this file).
 // ---------------------------------------------------------------------------
 
@@ -2835,14 +2835,6 @@ TEST(Rcclwrap, EnqueueGuards_SuspendedForcesEnqueue)
     ncclMemManager mgr{};
     comm.memManager = &mgr;
     __atomic_store_n(&mgr.released, 1, __ATOMIC_RELAXED);
-    EXPECT_TRUE(rcclCollectiveMustUseEnqueuePath(&comm));
-}
-
-TEST(Rcclwrap, EnqueueGuards_RevokedForcesEnqueue)
-{
-    ncclComm comm{};
-    comm.checkMode = ncclCheckModeDefault;
-    __atomic_store_n(&comm.revokedFlag, 1u, __ATOMIC_RELAXED);
     EXPECT_TRUE(rcclCollectiveMustUseEnqueuePath(&comm));
 }
 
@@ -3107,21 +3099,19 @@ TEST(RcclDdaTierThresholds, Gfx1250_RankScaledCaps)
             // 4 ranks: totals.
             EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllReduce), 32 * MiB);
             EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllGather), 64 * KiB);
-            EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncReduceScatter), 4 * MiB);
+            EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncReduceScatter), 16 * MiB);
             EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllGather), 128 * MiB);
-            EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncReduceScatter), 224 * MiB);
+            EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncReduceScatter), 2 * MiB);
             EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncReduceScatter), 0ul);
             for (int nRanks : {8, 16, 32, 64}) {
                 comm->nRanks = nRanks;
                 const size_t n = static_cast<size_t>(nRanks);
                 EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllReduce), n * MiB) << nRanks;
                 EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllGather), n * 16 * KiB) << nRanks;
-                EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncReduceScatter), n * MiB) << nRanks;
+                EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncReduceScatter), n * 256 * KiB) << nRanks;
                 EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllGather), std::min(n * 16 * MiB, 256 * MiB))
                     << nRanks;
-                EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncReduceScatter),
-                          std::min(n * 15 * MiB / 2, 256 * MiB))
-                    << nRanks;
+                EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncReduceScatter), n * 512 * KiB) << nRanks;
                 EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncReduceScatter), n * 2 * MiB) << nRanks;
                 // Unscaled tiers keep their totals.
                 EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllReduce), 256 * MiB) << nRanks;

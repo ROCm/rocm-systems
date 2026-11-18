@@ -45,8 +45,6 @@ using dda_fabric_test::ParamName;
 using dda_fabric_test::PeerRanks;
 
 constexpr int kNBlocks = 3;
-const uint32_t* const kAbortFlag = reinterpret_cast<const uint32_t*>(0xAB047);
-
 // Toggle flags, epoch flags (nRanks * nBlocks each), then one epoch cell per block.
 size_t FlagBytes(int nRanks, int nBlocks) {
   return (2 * static_cast<size_t>(nRanks) * nBlocks + static_cast<size_t>(nBlocks)) * sizeof(FlagType);
@@ -71,8 +69,7 @@ class FabricGpuBarrierMicrotest : public FabricLedgerTest {
                    struct ncclMemManager* manager = nullptr) {
     nRanks_ = nRanks;
     selfRank_ = selfRank;
-    result_ = FabricGpuBarrier::mallocAndInit(nRanks, nBlocks, selfRank, kBootstrap, manager,
-                                              dda::common::DdaKernelParams{kAbortFlag});
+    result_ = FabricGpuBarrier::mallocAndInit(nRanks, nBlocks, selfRank, kBootstrap, manager);
     return result_;
   }
 
@@ -236,7 +233,6 @@ TEST_F(FabricGpuBarrierMicrotest, MallocAndInit_AllSucceed_BarrierCarriesGeometr
   EXPECT_EQ(state.selfRank, kRank);
   EXPECT_EQ(state.nRanks, kNRanks);
   EXPECT_EQ(state.peerFlags, r.first->peerFlagsDev->get());
-  EXPECT_EQ(state.params.flag, kAbortFlag);
 }
 
 TEST_F(FabricGpuBarrierMicrotest, MallocAndInit_WithManager_TracksAndUntracksEveryAllocationInIt) {

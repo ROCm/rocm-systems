@@ -116,8 +116,6 @@ test_categories:
       - "GinPluginInitFail.*"
       - "TunerPluginConstants.*"
       - "CpuAffinity.*"
-      - "DdaReduceScatterFabricLL.*"
-      - "DdaAllReduceFabricLL.*"
       - "RasDiagnostics.*"
       - "ProfilerApiEventRank.*"
       - "Diagnostics.*"

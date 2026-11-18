@@ -31,7 +31,8 @@ namespace dda::common {
 // slices, so a slot always begins on a slice boundary and the 16B wire accesses
 // stay aligned however nRanks divides the bank
 constexpr size_t ddaLL128ArSlotWords(size_t bankSize, int nRanks) {
-  return ddaLL128SlotWords(bankSize, nRanks, 1);
+  return ddaLLSlotPkts(bankSize, sizeof(uint64_t) * (size_t)nRanks,
+                       (size_t)kDdaLL128WireWordsPerSlice);
 }
 
 // LL128 flat all-reduce kernel. One warp owns one slice at a time; the grid is
@@ -56,8 +57,7 @@ __launch_bounds__(512)
                                         uint32_t* __restrict__ epochDev, // per-block LL epoch cells
                                         int epochLen, // number of cells in epochDev
                                         size_t slicesTotal, // slices this call actually uses
-                                        size_t bankSize, // scratch bank size (from host)
-                                        DdaKernelParams params) {
+                                        size_t bankSize) { // scratch bank size (from host)
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
 
@@ -121,11 +121,7 @@ __launch_bounds__(512)
         ddaLL128LoadRegs<int8_t>(vr, srcBytes + dataByte, eltInSlice, lane, flagLane);
       } else {
         const uint64_t* gatherSlot = gatherBase + (uint64_t)peer * (uint64_t)slotWords;
-        if (!ddaLL128PollWire(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, vr, flag, lane,
-                              params)) {
-          ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag32);
-          return;
-        }
+        ddaLL128PollWire(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, vr, flag, lane);
       }
       // On a flag lane the odd words hold flags rather than payload, so the sums
       // landing there are meaningless -- ddaLL128StoreRegs re-derives those slots

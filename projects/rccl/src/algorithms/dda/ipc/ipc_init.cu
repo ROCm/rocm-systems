@@ -173,8 +173,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   }
 
   const int nBlocksMax = ddaMaxNBlocksForScratch();
-  auto barrierPair = dda::common::IpcGpuBarrier::mallocAndInit(kDdaNranks, nBlocksMax, comm->rank, comm->bootstrap,
-                                                               dda::common::DdaKernelParams{comm->abortFlagDev});
+  auto barrierPair = dda::common::IpcGpuBarrier::mallocAndInit(kDdaNranks, nBlocksMax, comm->rank, comm->bootstrap);
   // From here on every rank reaches the ready allgather below, so a local failure cannot leave peers on DDA.
   DdaIpcBarrierState* barrierState = nullptr;
   if (!barrierPair.first) {

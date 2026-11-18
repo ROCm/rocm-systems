@@ -33,7 +33,6 @@ using bf16 = __nv_bfloat16;
 using bf162 = __nv_bfloat162;
 #endif
 
-#include "algorithms/dda/device/dda_kernel_params.h"
 #include "nccl_device/rccl_ptr.h"
 
 namespace dda::common {
@@ -228,31 +227,6 @@ inline bool ddaAlltoAllSingleBlockGrid(size_t count, int typeSize) {
   return count < elementsPerThread * kThreadsPerBlock;
 }
 
-// copyFromSrcToDest loads user buffers as uint4, so both pointers have to be
-// 16-byte aligned. Shared by the IPC eligibility checks.
-inline bool ddaUserBuffers16ByteAligned(const void* sendbuff, const void* recvbuff) {
-  return (reinterpret_cast<uintptr_t>(sendbuff) % 16) == 0 &&
-         (reinterpret_cast<uintptr_t>(recvbuff) % 16) == 0;
-}
-
-// Reduce-scatter IPC copies each shard inside the kernel at or below this size.
-// Above it the host pre-copies the whole input into scratch. The cutoff is per
-// shard, so a multi-rank total cannot stage twice, and it lives only here: the
-// kernel takes a single copy-in-kernel flag and does not re-derive the size.
-constexpr size_t kDdaRsIpcKernelCopyMaxBytes = 1ULL * 1024 * 1024;
-
-enum class DdaRsIpcStaging {
-  InKernel,    // kernel copies each shard from sendbuff
-  HostPreCopy, // host cudaMemcpyAsync before launch
-};
-
-inline DdaRsIpcStaging ddaReduceScatterIpcStaging(size_t recvcount, int typeSize) {
-  if (recvcount * static_cast<size_t>(typeSize) <= kDdaRsIpcKernelCopyMaxBytes) {
-    return DdaRsIpcStaging::InKernel;
-  }
-  return DdaRsIpcStaging::HostPreCopy;
-}
-
 constexpr uint32_t calcBlockCount(size_t numThreads, size_t threadsPerBlock, size_t maxBlocks) {
   const auto uNumThreads = static_cast<uint64_t>(numThreads);
   const auto uThreadsPerBlock = static_cast<uint64_t>(threadsPerBlock);
@@ -438,18 +412,13 @@ __device__ __forceinline__ void ddaLLLoadLineB128(const uint32_t* src, uint32_t&
 #endif
 }
 
-// Poll one 16B LL line until both flags match, or the comm abort flag is set.
-// Returns false if the wait was aborted so the kernel can exit.
-__device__ __forceinline__ bool ddaLLWaitLineFlags(const volatile LLPacket16* src, uint32_t flag,
-                                                   DdaKernelParams params, uint32_t& d0, uint32_t& f0, uint32_t& d1,
-                                                   uint32_t& f1) {
+// Poll one 16B LL line until both flags match.
+__device__ __forceinline__ void ddaLLWaitLineFlags(const volatile LLPacket16* src, uint32_t flag, uint32_t& d0,
+                                                   uint32_t& f0, uint32_t& d1, uint32_t& f1) {
   const uint32_t* line = reinterpret_cast<const uint32_t*>(const_cast<const LLPacket16*>(src));
-  int spins = 0;
   do {
     ddaLLLoadLineB128(line, d0, f0, d1, f1);
-    if (f0 == flag && f1 == flag) return true;
-  } while (!params.abortSpinTick(spins));
-  return false;
+  } while (f0 != flag || f1 != flag);
 }
 
 // Lines one sweep of ddaLLWaitLineFlagsBatched polls at most: a 4- or 8-rank comm's peers fit one sweep.
@@ -499,10 +468,9 @@ __device__ __forceinline__ void ddaLLPrefetchSend(const void* sendbuff, size_t f
 }
 
 // Spins on the first stale line alone until both its flags land, so a waiting lane keeps one load in flight, not kN.
-// Returns false if aborted.
 template <int kN>
-__device__ __forceinline__ bool ddaLLSpinOneStale(const uint32_t* const (&line)[kN], const bool (&stale)[kN],
-                                                  uint32_t flag, DdaKernelParams params, int& spins) {
+__device__ __forceinline__ void ddaLLSpinOneStale(const uint32_t* const (&line)[kN], const bool (&stale)[kN],
+                                                  uint32_t flag) {
   const uint32_t* wait = line[0];
   bool found = false;
 #pragma unroll
@@ -511,33 +479,26 @@ __device__ __forceinline__ bool ddaLLSpinOneStale(const uint32_t* const (&line)[
     found |= stale[i];
   }
   if (!found) {
-    return true;
+    return;
   }
-  while (true) {
-    uint32_t d0, f0, d1, f1;
+  uint32_t d0, f0, d1, f1;
+  do {
     ddaLLLoadLineB128(wait, d0, f0, d1, f1);
-    if (f0 == flag && f1 == flag) {
-      return true;
-    }
-    if (params.abortSpinTick(spins)) {
-      return false;
-    }
-  }
+  } while (f0 != flag || f1 != flag);
 }
 
 // Waits until both flags of every line selected by mask (per lane) match. Each sweep issues kN loads before testing
 // any flag, so they share one wait (a load under a per-line branch would wait on its own); a slot outside mask reloads
-// the first selected line, so only selected lines are read. Sweeps repeat until every selected line is fresh, one abort
-// spin tick per sweep; with kDdaLLSpinOneMinLines or more selected lines a waiting lane spins on one stale line between
-// sweeps. A single selected line is polled alone: there is no other load to share its wait, and a sweep would issue kN
-// loads of it. d0/d1 of slots outside mask are overwritten. Returns false if aborted.
+// the first selected line, so only selected lines are read. Sweeps repeat until every selected line is fresh; with
+// kDdaLLSpinOneMinLines or more selected lines a waiting lane spins on one stale line between sweeps. A single selected
+// line is polled alone: there is no other load to share its wait, and a sweep would issue kN loads of it. d0/d1 of
+// slots outside mask are overwritten.
 template <int kN>
-__device__ __forceinline__ bool ddaLLWaitLineFlagsBatched(const uint32_t* const (&line)[kN], uint32_t mask,
-                                                          uint32_t flag, DdaKernelParams params, uint32_t (&d0)[kN],
-                                                          uint32_t (&d1)[kN]) {
+__device__ __forceinline__ void ddaLLWaitLineFlagsBatched(const uint32_t* const (&line)[kN], uint32_t mask,
+                                                          uint32_t flag, uint32_t (&d0)[kN], uint32_t (&d1)[kN]) {
   static_assert(kN > 0 && kN <= 32, "one mask bit per line");
   if (mask == 0) {
-    return true;
+    return;
   }
   const uint32_t* first = line[0];
 #pragma unroll
@@ -547,13 +508,13 @@ __device__ __forceinline__ bool ddaLLWaitLineFlagsBatched(const uint32_t* const 
   if (__builtin_popcount(mask) == 1) {
     uint32_t w0, f0, w1, f1;
     const auto* only = reinterpret_cast<const volatile LLPacket16*>(first);
-    const bool ok = ddaLLWaitLineFlags(only, flag, params, w0, f0, w1, f1);
+    ddaLLWaitLineFlags(only, flag, w0, f0, w1, f1);
 #pragma unroll
     for (int i = 0; i < kN; ++i) {
       d0[i] = w0;
       d1[i] = w1;
     }
-    return ok;
+    return;
   }
   const uint32_t* src[kN];
 #pragma unroll
@@ -561,7 +522,6 @@ __device__ __forceinline__ bool ddaLLWaitLineFlagsBatched(const uint32_t* const 
     src[i] = ((mask >> i) & 1u) != 0 ? line[i] : first;
   }
   const bool spinOne = __builtin_popcount(mask) >= kDdaLLSpinOneMinLines;
-  int spins = 0;
   while (true) {
     uint32_t f0[kN], f1[kN];
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
@@ -596,13 +556,10 @@ __device__ __forceinline__ bool ddaLLWaitLineFlagsBatched(const uint32_t* const 
       stale |= staleLine[i];
     }
     if (!stale) {
-      return true;
+      return;
     }
-    if (params.abortSpinTick(spins)) {
-      return false;
-    }
-    if (spinOne && !ddaLLSpinOneStale(src, staleLine, flag, params, spins)) {
-      return false;
+    if (spinOne) {
+      ddaLLSpinOneStale(src, staleLine, flag);
     }
   }
 }

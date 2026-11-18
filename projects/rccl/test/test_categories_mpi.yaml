@@ -563,7 +563,6 @@ test_categories:
     description: "DDA fabric Broadcast one-shot data checks (LL)."
     test_patterns:
       - "DdaMPI_BroadcastLL.*"
-      - "AbortDdaMPITest.IncompleteCollective_DdaBroadcastLl"
     exclude_windows: *mpi_exclude_windows
     labels: *mpi_standard_labels
     env_variables:

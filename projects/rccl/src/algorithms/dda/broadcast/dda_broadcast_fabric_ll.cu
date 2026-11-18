@@ -108,7 +108,6 @@ ncclResult_t ncclBroadcastDdaFabricLL(const void* sendbuff, void* recvbuff, size
 
   char* const* peers = reinterpret_cast<char* const*>(comm->ddaPeerPtrsDev);
   const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
-  const dda::common::DdaKernelParams params{comm->abortFlagDev};
 
   INFO(NCCL_COLL, "DDA Broadcast LL: nRanks=%d root=%d bytes=%zu grid=%ux%u block=%u aligned=%d", comm->nRanks, root,
        bytes, grid.x, grid.y, threads, (int)aligned);
@@ -118,12 +117,12 @@ ncclResult_t ncclBroadcastDdaFabricLL(const void* sendbuff, void* recvbuff, size
     hipExtLaunchKernelGGL((dda::common::ddaBroadcastFabricLL<true>), grid, dim3(threads), 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<char*>(recvbuff),
                           static_cast<const char*>(sendbuff), bytes, comm->rank, comm->nRanks, root,
-                          comm->ddaLLEpochDev, comm->ddaLLEpochLen, bankSize, params);
+                          comm->ddaLLEpochDev, comm->ddaLLEpochLen, bankSize);
   } else {
     hipExtLaunchKernelGGL((dda::common::ddaBroadcastFabricLL<false>), grid, dim3(threads), 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<char*>(recvbuff),
                           static_cast<const char*>(sendbuff), bytes, comm->rank, comm->nRanks, root,
-                          comm->ddaLLEpochDev, comm->ddaLLEpochLen, bankSize, params);
+                          comm->ddaLLEpochDev, comm->ddaLLEpochLen, bankSize);
   }
   CUDACHECK(cudaGetLastError());
   return ncclSuccess;
