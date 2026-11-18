@@ -260,9 +260,10 @@ install(
 )
 
 # rdc_metric_fetcher_tests: builds and destroys metric fetchers from several
-# threads at once. Compiles the metric fetcher into the test, so it runs on
-# GPU-less CI. amd_smi provides the calls the fetcher's other functions make,
-# librdc_bootstrap the logger.
+# threads at once, and checks RDC_FI_GPU_MEMORY_CUR_BANDWIDTH against fake
+# gpu_metrics replies. Compiles the metric fetcher into the test, which defines
+# the amdsmi calls the tests reach, so it runs on GPU-less CI. amd_smi provides
+# the calls the tests never make, librdc_bootstrap the logger.
 add_executable(
     rdc_metric_fetcher_tests
     ${SRC_DIR}/test_metric_fetcher.cc
