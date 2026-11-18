@@ -49,11 +49,11 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 PROJECT_NAME = "rocdecode"
 
 DEFAULT_BUCKET = "knagesh-media-test"
-# The corpus is published as more than one object. rocDecodeConformance.zip is a
-# container: it holds one zip per codec (AVC, AV1 and VP9) rather than the stream
-# folders themselves. HEVC is published beside it as its own zip instead of being
-# folded in, so it has to be fetched separately.
-DEFAULT_KEYS = ["rocDecodeConformance.zip", "HevcConformance.zip"]
+# The corpus is published as a single object. rocDecodeConformance.zip is a
+# container: it holds one zip per codec rather than the stream folders
+# themselves. HEVC used to ship beside it as its own object and is now folded in
+# with the rest, so there is nothing to fetch separately.
+DEFAULT_KEYS = ["rocDecodeConformance.zip"]
 DEFAULT_REGION = "us-east-1"
 
 # Codec -> the literal prefix of the folder it ships under. Matched as a prefix
