@@ -2556,14 +2556,16 @@ a quiescent boundary unless they explicitly tolerate both cases.</p>
 <code>onAmdgpuRouteMemoryInstruction</code> fires before routing decides anything: the
 instruction still carries the address space it decoded as and the addresses it
 computed. <code>onAmdgpuMemoryAccessRouted</code> fires once routing has settled and
-reports a <code>MemoryAccessObservation</code> describing the access the memory system is
-actually about to be asked for — the pipeline it was issued to, its routing-selected
-counter, and its effective addresses. The scalar <code>wait_counter</code> field does not
-describe the complete wait requirement: mixed FLAT retains its VMEM counter here,
-while <code>VectorMemState::routed_issue_info</code> carries both VMEM and LDS obligations.
-Consult that routed issue's <code>counter_obligations()</code> for the full set.</p>
-<p>When all requesting FLAT lanes use the shared aperture, routing selects the
-LDS pipeline and sets <code>normalized_to_local</code> to <code>true</code>. This flag describes the
+reports the selected pipeline and effective addresses in a <code>MemoryAccessObservation</code>.
+The observation's scalar <code>wait_counter</code> field identifies the counter for that route. Mixed FLAT
+requests retain their VMEM counter in this field. For the full set of issued
+counters, use <code>onAmdgpuMemoryAccessRouted(access, inst, wf)</code>. For generic FLAT,
+<code>inst.data_as&lt;VectorMemState&gt;()-&gt;routed_issue_info-&gt;counter_obligations()</code> includes
+both VMEM and LDS on RDNA1–4 and CDNA5, even for uniform or empty requests.
+On CDNA1–4 each domain takes a position only when a lane requests it.</p>
+<p>When at least one FLAT lane requests memory and all requests use the shared
+aperture, routing selects the LDS pipeline and sets
+<code>normalized_to_local</code> to <code>true</code>. This flag describes the
 uniform local route, not whether addresses were normalized.</p>
 <p>Mixed FLAT requests retain <code>MemoryRoute::GLOBAL</code>. The global pipeline separates the lanes by backing store, completing
 retryable global/scratch work before accessing LDS. These
@@ -2577,18 +2579,22 @@ LDS allocation address. Requesting DDS lanes emit a warning naming the instructi
 and PC, then fault before any memory effects because DDS backing is unimplemented.
 On other architectures the shared aperture remains LDS; out-of-backing accesses
 read zero and discard writes.</p>
-<p>For RDNA4 FLAT LDS requests, the offset wraps to 17 bits before adding the
-workgroup base. <code>flat_local_allocation_end</code> captures the exclusive modeled
-<code>lds_base + lds_size</code> limit and remains fixed across retries. This includes the
-current 256-byte scheduler rounding; PM4 sizes may already be 512-byte multiples
-before that rounding. Target allocation and encoding granules remain unmodeled.
-A lane whose first memory element does not fit is rejected in full and appears
-in <code>flat_local_oob_lane_mask</code>. Other lanes retain only complete elements below
-the allocation end (DWORDs for multiword transfers); atomics require their whole
-element. Rejected reads return zero and rejected writes are discarded. These
-bounds leave <code>valid_lane_mask</code>, <code>request_lane_mask</code> and nominal counter
-participation unchanged, so those masks describe requests rather than bytes
-actually accessed.</p>
+<p>For ordinary FLAT LDS requests, routing captures the exclusive workgroup limit
+<code>lds_base + lds_size</code> at issue and reuses it on retry. The observation reports
+this limit clamped to the backing size in <code>flat_local_allocation_end</code>.
+RDNA4 wraps the LDS offset to 17 bits before adding the workgroup base.
+RDNA1 through RDNA3.5 reject the entire lane transfer if any element crosses
+the workgroup limit. Other targets retain complete elements that fit, including
+individual DWORDs of a multiword transfer. An atomic requires its whole element.
+<code>flat_local_oob_lane_mask</code> identifies fully rejected requests. Rejected reads
+return zero and rejected writes are dropped. <code>request_lane_mask</code> includes
+requests that reach the bounds check, even when they transfer zero bytes.</p>
+<p>For CDNA2 DS and ordinary FLAT LDS, <code>lds_allocation</code> reports the workgroup
+range intersected with the backing. For FLAT, start with
+<code>flat_local_lane_mask &amp; ~flat_local_oob_lane_mask</code>. For CDNA2 DS, start with
+<code>request_lane_mask</code>. Apply <code>lds_allocation-&gt;retained_bytes()</code> to each selected
+lane and address set to recover the transferred byte intervals. Equal-offset
+CDNA2 DS pairs report a single access.</p>
 <p>Observers must inspect <code>flat_local_lane_mask</code> and <code>flat_dds_lane_mask</code> to account
 for LDS and DDS lanes; choosing a backing store
 from <code>route</code> alone misses the shared-aperture portion of a mixed request.</p>
@@ -2615,6 +2621,18 @@ RocJITsu calls the most specific form; its defaults forward through the
 wavefront-aware form to the observation-only form. The borrowed instruction and
 wavefront already reflect the selected route and are valid only during the
 callback.</p>
+<p>A plugin can also implement <code>AmdgpuMemoryCancellationObserver</code> to roll back an
+individual routed issue. The group calls <code>onAmdgpuMemoryAccessCancelled(inst, wf)</code>
+only when the plugin enables <code>observes_memory_routing()</code> and subscribes to hot
+hooks for that wavefront. The instruction and wavefront are borrowed for the
+callback, which runs before the pipeline deletes the instruction. When an entire
+wave is cancelled, release its outstanding issues in <code>onAmdgpuWavefrontCancelled</code>
+instead of expecting individual issue callbacks.</p>
+<p>Mixed FLAT requests can reach the global pipeline and fault before touching
+LDS. Plugins that track actual LDS accesses can implement
+<code>AmdgpuMixedFlatLdsObserver</code>. With routing and wave hot hooks enabled,
+<code>onAmdgpuMixedFlatLdsAccess(inst, wf)</code> runs after the global lanes succeed
+and immediately before the shared lanes access LDS.</p>
 <p>The observation's spans borrow execution-owned storage and are valid only for
 the duration of the callback. A plugin that keeps one must copy them.</p>
 <p>Tensor DMA transfers execute directly rather than through the ordinary memory
