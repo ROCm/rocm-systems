@@ -3172,6 +3172,21 @@ struct_amdsmi_sock_info_t._fields_ = [
 ]
 
 amdsmi_sock_info_t = struct_amdsmi_sock_info_t
+class struct_amdsmi_cpu_identity_t(Structure):
+    pass
+
+struct_amdsmi_cpu_identity_t._pack_ = 1 # source:False
+struct_amdsmi_cpu_identity_t._layout_ = 'ms'
+struct_amdsmi_cpu_identity_t._fields_ = [
+    ('model_name', ctypes.c_char * 256),
+    ('bios_model_name', ctypes.c_char * 256),
+    ('cores_per_socket', ctypes.c_uint32),
+    ('family', ctypes.c_uint32),
+    ('model', ctypes.c_uint32),
+    ('stepping', ctypes.c_uint32),
+]
+
+amdsmi_cpu_identity_t = struct_amdsmi_cpu_identity_t
 class struct_amdsmi_nic_stat_t(Structure):
     pass
 
@@ -5294,6 +5309,12 @@ try:
 except AttributeError:
     pass
 try:
+    amdsmi_get_cpu_identity_info = _libraries['libamd_smi.so'].amdsmi_get_cpu_identity_info
+    amdsmi_get_cpu_identity_info.restype = amdsmi_status_t
+    amdsmi_get_cpu_identity_info.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_cpu_identity_t)]
+except AttributeError:
+    pass
+try:
     amdsmi_get_cpu_enabled_commands = _libraries['libamd_smi.so'].amdsmi_get_cpu_enabled_commands
     amdsmi_get_cpu_enabled_commands.restype = amdsmi_status_t
     amdsmi_get_cpu_enabled_commands.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_bool), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
@@ -5937,7 +5958,7 @@ __all__ = \
     'amdsmi_cper_notify_type_t', 'amdsmi_cper_sev_t',
     'amdsmi_cper_timestamp_t', 'amdsmi_cper_valid_bits_t',
     'amdsmi_cpu_apb_disable', 'amdsmi_cpu_apb_enable',
-    'amdsmi_cpu_info_t', 'amdsmi_cpu_util_t',
+    'amdsmi_cpu_identity_t', 'amdsmi_cpu_info_t', 'amdsmi_cpu_util_t',
     'amdsmi_cpusocket_handle', 'amdsmi_cuid_component_t',
     'amdsmi_cuid_component_type_t', 'amdsmi_cuid_info_t',
     'amdsmi_cuid_source_t', 'amdsmi_ddr_bw_metrics_t',
@@ -5982,7 +6003,7 @@ __all__ = \
     'amdsmi_get_cpu_dimm_temp_range_and_refresh_rate',
     'amdsmi_get_cpu_dimm_thermal_sensor',
     'amdsmi_get_cpu_eff_floor_freq_limit',
-    'amdsmi_get_cpu_enabled_commands', 'amdsmi_get_cpu_family',
+    'amdsmi_get_cpu_enabled_commands', 'amdsmi_get_cpu_identity_info', 'amdsmi_get_cpu_family',
     'amdsmi_get_cpu_fclk_mclk', 'amdsmi_get_cpu_floor_freq_limit',
     'amdsmi_get_cpu_freq_range', 'amdsmi_get_cpu_handles',
     'amdsmi_get_cpu_hsmp_driver_version',
@@ -6192,7 +6213,7 @@ __all__ = \
     'struct_amdsmi_bdf_t_1', 'struct_amdsmi_board_info_t',
     'struct_amdsmi_clk_info_t', 'struct_amdsmi_counter_value_t',
     'struct_amdsmi_cper_guid_t', 'struct_amdsmi_cper_hdr_t',
-    'struct_amdsmi_cper_timestamp_t', 'struct_amdsmi_cpu_info_t',
+    'struct_amdsmi_cper_timestamp_t', 'struct_amdsmi_cpu_identity_t', 'struct_amdsmi_cpu_info_t',
     'struct_amdsmi_cpu_util_t', 'struct_amdsmi_cuid_component_t',
     'struct_amdsmi_cuid_info_t', 'struct_amdsmi_ddr_bw_metrics_t',
     'struct_amdsmi_dimm_power_t', 'struct_amdsmi_dimm_thermal_t',

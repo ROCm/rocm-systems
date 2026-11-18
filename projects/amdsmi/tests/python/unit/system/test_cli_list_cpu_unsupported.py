@@ -23,9 +23,7 @@ when no CLI is present.
 import argparse
 import os
 import sys
-import tempfile
 import unittest
-import unittest.mock
 from typing import Any
 
 from common.common import (
@@ -124,10 +122,9 @@ class _FakeLogger:
 
 
 class _FakeHelpers:
-    def __init__(self, family=26, model=17, bios_model_name="N/A"):
+    def __init__(self, family=26, model=17):
         self._family = family
         self._model = model
-        self._bios_model_name = bios_model_name
 
     def check_required_groups(self):
         pass
@@ -143,9 +140,6 @@ class _FakeHelpers:
     def get_output_format(self):
         return "human"
 
-    def get_cpu_bios_model_name(self, cpu_id):
-        return self._bios_model_name
-
 
 class TestCliListCpuIdentification(unittest.TestCase):
     CommandNotSupported: Any = (
@@ -159,24 +153,24 @@ class TestCliListCpuIdentification(unittest.TestCase):
         self,
         family=26,
         model=17,
+        stepping=1,
         model_name=_MODEL_NAME,
         cores=16,
         bios_model_name=_BIOS_MODEL_NAME,
     ):
         module = load_cli_module("list_devices_under_test", _LIST_DEVICES_PATH, _SUBCOMMANDS_DIR)
-        # family/model come from the amd-smi interface; stub them on the module's
-        # bound interface so the test is hardware-independent.
-        module.amdsmi_interface.amdsmi_get_cpu_family = lambda: family
-        module.amdsmi_interface.amdsmi_get_cpu_model = lambda: model
-        module.amdsmi_interface.amdsmi_get_cpu_model_name = lambda handle: model_name
-        module.amdsmi_interface.amdsmi_get_cpu_cores_per_socket = lambda count: {
-            "socket_id": 0,
+        # All identity fields come from amdsmi_get_cpu_identity_info; stub it so the
+        # test is hardware-independent.
+        module.amdsmi_interface.amdsmi_get_cpu_identity_info = lambda handle: {
+            "model_name": model_name,
+            "bios_model_name": bios_model_name,
             "cores_per_socket": cores,
+            "family": family,
+            "model": model,
+            "stepping": stepping,
         }
         commands = module.ListDevicesCommands()
-        commands.helpers = _FakeHelpers(
-            family=family, model=model, bios_model_name=bios_model_name
-        )
+        commands.helpers = _FakeHelpers(family=family, model=model)
         commands.logger = _FakeLogger()
         commands.group_check_printed = False
         commands.cpu_handles = [_FakeHandle(1)]
@@ -191,7 +185,18 @@ class TestCliListCpuIdentification(unittest.TestCase):
         self.assertEqual(commands.logger.stored["cores_per_socket"], 16)
         self.assertEqual(commands.logger.stored["family"], "0x1A")
         self.assertEqual(commands.logger.stored["model"], "0x11")
-        self.assertNotIn("stepping", commands.logger.stored)
+        self.assertEqual(commands.logger.stored["stepping"], 1)
+
+    def test_cpu_all_raises_command_not_supported(self):
+        commands = self._make_commands()
+        args = argparse.Namespace(
+            gpu=None, cpu=[_FakeHandle(1)], core=None, cpu_all_requested=True, enumeration=False
+        )
+        with self.assertRaises(self.CommandNotSupported) as ctx:
+            commands.list_devices(args)
+        self.assertEqual(ctx.exception.value, self.expected_exit_code)
+        self.assertIn("--cpu all", str(ctx.exception))
+        self.assertEqual(commands.logger.stored, {})
 
     def test_core_flag_raises_command_not_supported(self):
         commands = self._make_commands()
@@ -202,19 +207,18 @@ class TestCliListCpuIdentification(unittest.TestCase):
         self.assertIn("--core is not supported", str(ctx.exception))
         self.assertNotIn("family", commands.logger.stored)
 
-    def test_family_model_fallback_to_na(self):
+    def test_identity_failure_falls_back_to_na(self):
         commands = self._make_commands()
         module = load_cli_module("list_devices_under_test", _LIST_DEVICES_PATH, _SUBCOMMANDS_DIR)
 
-        def _raise():
+        def _raise(*_args):
             raise module.amdsmi_exception.AmdSmiLibraryException(12)
 
-        module.amdsmi_interface.amdsmi_get_cpu_family = _raise
-        module.amdsmi_interface.amdsmi_get_cpu_model = _raise
+        module.amdsmi_interface.amdsmi_get_cpu_identity_info = _raise
         args = argparse.Namespace(gpu=None, cpu=[_FakeHandle(1)], core=None, enumeration=True)
         commands.list_devices(args)
-        self.assertEqual(commands.logger.stored["family"], "N/A")
-        self.assertEqual(commands.logger.stored["model"], "N/A")
+        for key in ("model_name", "bios_model_name", "cores_per_socket", "family", "model", "stepping"):
+            self.assertEqual(commands.logger.stored[key], "N/A")
 
     def test_cpu_flag_reports_model_name_bios_model_name_and_cores(self):
         commands = self._make_commands()
@@ -226,20 +230,6 @@ class TestCliListCpuIdentification(unittest.TestCase):
         self.assertNotIn("family", commands.logger.stored)
         self.assertNotIn("model", commands.logger.stored)
         self.assertNotIn("stepping", commands.logger.stored)
-
-    def test_model_name_and_cores_fallback_to_na(self):
-        commands = self._make_commands()
-        module = load_cli_module("list_devices_under_test", _LIST_DEVICES_PATH, _SUBCOMMANDS_DIR)
-
-        def _raise(*_args):
-            raise module.amdsmi_exception.AmdSmiLibraryException(12)
-
-        module.amdsmi_interface.amdsmi_get_cpu_model_name = _raise
-        module.amdsmi_interface.amdsmi_get_cpu_cores_per_socket = _raise
-        args = argparse.Namespace(gpu=None, cpu=[_FakeHandle(1)], core=None)
-        commands.list_devices(args)
-        self.assertEqual(commands.logger.stored["model_name"], "N/A")
-        self.assertEqual(commands.logger.stored["cores_per_socket"], "N/A")
 
     def test_no_cpu_or_core_does_not_list_cpu(self):
         # Namespace without cpu/core attrs at all (as e.g. a hypervisor-only
@@ -257,69 +247,3 @@ class TestCliListCpuIdentification(unittest.TestCase):
             # fire, which is all this test verifies.
             pass
         self.assertNotIn("family", commands.logger.stored)
-
-
-def _smbios_structure(stype, length, strings=(), version_index=0):
-    """Build one SMBIOS structure: formatted area, then NUL-terminated strings."""
-    body = bytearray(length)
-    body[0] = stype
-    body[1] = length
-    if stype == 4 and length > 0x10:
-        body[0x10] = version_index  # Processor Version string index (SMBIOS type 4)
-    tail = b"".join(s.encode() + b"\0" for s in strings) + b"\0" if strings else b"\0\0"
-    return bytes(body) + tail
-
-
-class TestCpuBiosModelName(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        # setUp reloads amdsmi_helpers, which star-imports amdsmi_init. Another module's
-        # tearDownModule can remove that name, so own a stub for this class: the real
-        # driver-init module is never imported, and nothing is left in sys.modules.
-        stub_modules(cls, {"amdsmi_init": _amdsmi_init_stub()})
-
-    def setUp(self):
-        if _HELPERS_PATH is None:
-            raise unittest.SkipTest("amd-smi CLI dir not found")
-        self.helpers_mod = load_cli_module("amdsmi_helpers_under_test", _HELPERS_PATH, _CLI_DIR)
-        self.helpers = self.helpers_mod.AMDSMIHelpers()
-
-    def _read_with_table(self, table, cpu_id=0):
-        with tempfile.NamedTemporaryFile(delete=False) as tmp:
-            tmp.write(table)
-        self.addCleanup(os.remove, tmp.name)
-        with unittest.mock.patch.object(self.helpers_mod, "SMBIOS_TABLE_PATH", tmp.name):
-            return self.helpers.get_cpu_bios_model_name(cpu_id)
-
-    def test_parse_returns_processor_versions_in_order(self):
-        table = (
-            _smbios_structure(1, 0x1B, ["System"], version_index=1)
-            + _smbios_structure(4, 0x18, ["AMD Eng Sample: 100-000001645-04  "], 1)
-            + _smbios_structure(4, 0x18, ["Second socket"], 1)
-            + _smbios_structure(127, 4)
-        )
-        self.assertEqual(
-            self.helpers_mod.parse_smbios_processor_versions(table),
-            ["AMD Eng Sample: 100-000001645-04", "Second socket"],
-        )
-
-    def test_parse_ignores_data_after_end_of_table(self):
-        table = _smbios_structure(127, 4) + _smbios_structure(4, 0x18, ["Late"], 1)
-        self.assertEqual(self.helpers_mod.parse_smbios_processor_versions(table), [])
-
-    def test_bios_model_name_is_trimmed_processor_version(self):
-        table = _smbios_structure(4, 0x18, ["AMD Eng Sample: 100-000001645-04  "], 1)
-        self.assertEqual(self._read_with_table(table), "AMD Eng Sample: 100-000001645-04")
-
-    def test_bios_model_name_is_na_when_cpu_has_no_entry(self):
-        table = _smbios_structure(4, 0x18, ["only socket"], 1)
-        self.assertEqual(self._read_with_table(table, cpu_id=3), "N/A")
-        self.assertEqual(self._read_with_table(table, cpu_id=0), "only socket")
-
-    def test_bios_model_name_is_na_when_version_is_empty(self):
-        table = _smbios_structure(4, 0x18, [""], 0)
-        self.assertEqual(self._read_with_table(table), "N/A")
-
-    def test_bios_model_name_is_na_when_table_unreadable(self):
-        with unittest.mock.patch.object(self.helpers_mod, "SMBIOS_TABLE_PATH", "/nonexistent/DMI"):
-            self.assertEqual(self.helpers.get_cpu_bios_model_name(0), "N/A")

@@ -8291,6 +8291,111 @@ amdsmi_status_t amdsmi_get_cpu_cores_per_socket(uint32_t sock_count,
   return AMDSMI_STATUS_SUCCESS;
 }
 
+namespace {
+// Read the "stepping" of logical processor cpu_index from /proc/cpuinfo.
+bool read_cpu_stepping(uint32_t cpu_index, uint32_t* stepping) {
+  std::ifstream f("/proc/cpuinfo");
+  if (!f.is_open()) return false;
+  std::string line;
+  bool in_target = false;
+  while (std::getline(f, line)) {
+    auto colon = line.find(':');
+    if (colon == std::string::npos) continue;
+    if (line.compare(0, 9, "processor") == 0) {
+      in_target = (std::strtoul(line.c_str() + colon + 1, nullptr, 10) == cpu_index);
+    } else if (in_target && line.compare(0, 8, "stepping") == 0) {
+      *stepping = static_cast<uint32_t>(std::strtoul(line.c_str() + colon + 1, nullptr, 10));
+      return true;
+    }
+  }
+  return false;
+}
+
+// Return the SMBIOS Processor Version string of the Nth type 4 entry (empty if unavailable;
+// the SMBIOS table is typically root-readable only).
+std::string read_smbios_processor_version(uint32_t cpu_index) {
+  constexpr uint8_t kTypeProcessor = 4, kTypeEnd = 127;
+  constexpr size_t kVersionOffset = 0x10;
+  std::ifstream f("/sys/firmware/dmi/tables/DMI", std::ios::binary);
+  if (!f.is_open()) return "";
+  std::vector<uint8_t> d((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+  size_t off = 0;
+  uint32_t idx = 0;
+  while (off + 4 <= d.size()) {
+    uint8_t type = d[off], len = d[off + 1];
+    if (type == kTypeEnd || len < 4) break;
+    size_t sstart = off + len, send = sstart;
+    while (send + 1 < d.size() && !(d[send] == 0 && d[send + 1] == 0)) ++send;
+    if (send + 1 >= d.size()) break;
+    if (type == kTypeProcessor) {
+      if (idx == cpu_index && len > kVersionOffset) {
+        uint8_t sidx = d[off + kVersionOffset];
+        size_t p = sstart;
+        for (uint8_t i = 1; sidx != 0 && p <= send; ++i) {
+          size_t e = p;
+          while (e < send && d[e] != 0) ++e;
+          if (i == sidx) {
+            std::string s(d.begin() + p, d.begin() + e);
+            auto b = s.find_first_not_of(" \t");
+            auto t = s.find_last_not_of(" \t");
+            return b == std::string::npos ? "" : s.substr(b, t - b + 1);
+          }
+          p = e + 1;
+        }
+        return "";
+      }
+      ++idx;
+    }
+    off = send + 2;
+  }
+  return "";
+}
+}  // namespace
+
+amdsmi_status_t amdsmi_get_cpu_identity_info(amdsmi_processor_handle processor_handle,
+                                             amdsmi_cpu_identity_t* identity) {
+  AMDSMI_CHECK_INIT();
+  if (processor_handle == nullptr || identity == nullptr) return AMDSMI_STATUS_INVAL;
+
+  *identity = {};
+
+  amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
+  if (r != AMDSMI_STATUS_SUCCESS) return r;
+  uint32_t cpu_index = static_cast<uint32_t>(std::stoul(proc_id, nullptr, 0));
+
+  amd::smi::AMDSmiSystem& sys = amd::smi::AMDSmiSystem::getInstance();
+  bool any = false;
+
+  std::string model_name;
+  if (sys.get_cpu_model_name(cpu_index, &model_name) == AMDSMI_STATUS_SUCCESS) {
+    snprintf(identity->model_name, AMDSMI_MAX_STRING_LENGTH, "%s", model_name.c_str());
+    any = true;
+  }
+
+  std::string bios = read_smbios_processor_version(cpu_index);
+  snprintf(identity->bios_model_name, AMDSMI_MAX_STRING_LENGTH, "%s", bios.c_str());
+
+  uint32_t v = 0;
+  if (sys.get_sys_cpu_cores_per_socket(&v) == AMDSMI_STATUS_SUCCESS) {
+    identity->cores_per_socket = v;
+    any = true;
+  }
+  if (sys.get_cpu_family(&v) == AMDSMI_STATUS_SUCCESS) {
+    identity->family = v;
+    any = true;
+  }
+  if (sys.get_cpu_model(&v) == AMDSMI_STATUS_SUCCESS) {
+    identity->model = v;
+    any = true;
+  }
+  if (read_cpu_stepping(cpu_index, &v)) {
+    identity->stepping = v;
+    any = true;
+  }
+
+  return any ? AMDSMI_STATUS_SUCCESS : AMDSMI_STATUS_NOT_SUPPORTED;
+}
+
 amdsmi_status_t amdsmi_get_cpu_socket_count(uint32_t* sock_count) {
   amdsmi_status_t status;
   uint32_t sock_num;

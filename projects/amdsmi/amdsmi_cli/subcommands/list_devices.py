@@ -283,7 +283,7 @@ class ListDevicesCommands:
         """List CPU identification for target cpu.
 
         Always reports the model name, BIOS (SMBIOS processor) model name and
-        cores per socket. With -e (args.enumeration) also reports family and model.
+        cores per socket. With -e (args.enumeration) also reports family, model and stepping.
         Family, model, model name and cores come from the amd-smi APIs; the BIOS
         model name is read from the SMBIOS table via the helpers.
 
@@ -321,46 +321,23 @@ class ListDevicesCommands:
             return f"0x{value:X}" if isinstance(value, int) else value
 
         try:
-            model_name = amdsmi_interface.amdsmi_get_cpu_model_name(args.cpu)
+            identity = amdsmi_interface.amdsmi_get_cpu_identity_info(args.cpu)
         except amdsmi_exception.AmdSmiLibraryException as e:
-            model_name = "N/A"
-            logging.debug(
-                "Failed to get cpu model name for cpu %s | %s", cpu_id, e.get_error_info()
-            )
+            identity = {}
+            logging.debug("Failed to get cpu identity for cpu %s | %s", cpu_id, e.get_error_info())
 
-        bios_model_name = self.helpers.get_cpu_bios_model_name(cpu_id)
+        def _field(key):
+            value = identity.get(key)
+            return "N/A" if value in (None, "") else value
 
-        try:
-            cores_per_socket = amdsmi_interface.amdsmi_get_cpu_cores_per_socket(cpu_id)[
-                "cores_per_socket"
-            ]
-        except amdsmi_exception.AmdSmiLibraryException as e:
-            cores_per_socket = "N/A"
-            logging.debug(
-                "Failed to get cores per socket for cpu %s | %s", cpu_id, e.get_error_info()
-            )
-
-        self.logger.store_cpu_output(args.cpu, "model_name", model_name)
-        self.logger.store_cpu_output(args.cpu, "bios_model_name", bios_model_name)
-        self.logger.store_cpu_output(args.cpu, "cores_per_socket", cores_per_socket)
+        self.logger.store_cpu_output(args.cpu, "model_name", _field("model_name"))
+        self.logger.store_cpu_output(args.cpu, "bios_model_name", _field("bios_model_name"))
+        self.logger.store_cpu_output(args.cpu, "cores_per_socket", _field("cores_per_socket"))
 
         if getattr(args, "enumeration", False):
-            try:
-                family = amdsmi_interface.amdsmi_get_cpu_family()
-            except amdsmi_exception.AmdSmiLibraryException as e:
-                family = "N/A"
-                logging.debug(
-                    "Failed to get cpu family for cpu %s | %s", cpu_id, e.get_error_info()
-                )
-
-            try:
-                model = amdsmi_interface.amdsmi_get_cpu_model()
-            except amdsmi_exception.AmdSmiLibraryException as e:
-                model = "N/A"
-                logging.debug("Failed to get cpu model for cpu %s | %s", cpu_id, e.get_error_info())
-
-            self.logger.store_cpu_output(args.cpu, "family", _as_hex(family))
-            self.logger.store_cpu_output(args.cpu, "model", _as_hex(model))
+            self.logger.store_cpu_output(args.cpu, "family", _as_hex(_field("family")))
+            self.logger.store_cpu_output(args.cpu, "model", _as_hex(_field("model")))
+            self.logger.store_cpu_output(args.cpu, "stepping", _field("stepping"))
 
         if multiple_devices:
             self.logger.store_multiple_device_output()
@@ -378,6 +355,12 @@ class ListDevicesCommands:
                 "list",
                 self.helpers.get_output_format(),
                 message="list reports GPU information. --core is not supported for this command.",
+            )
+        if getattr(args, "cpu_all_requested", False):
+            raise AmdSmiCommandNotSupportedException(
+                "list",
+                self.helpers.get_output_format(),
+                message="list does not support --cpu all. Select a specific CPU ID with --cpu <id>.",
             )
         if getattr(args, "cpu", None):
             self.list_cpu(args)

@@ -989,6 +989,13 @@ class AMDSMIParser(argparse.ArgumentParser):
             def __call__(self, parser, args, values, option_string=None):
                 if "all" in cpu_choices:
                     del cpu_choices["all"]
+                # Remember an explicit "--cpu all" (not bare --cpu) so commands such
+                # as `list` can reject it.
+                setattr(
+                    args,
+                    "cpu_all_requested",
+                    any(str(v).lower() == "all" for v in (values or [])),
+                )
                 # Bare --cpu (nargs="*") selects every CPU
                 if not values:
                     values = ["all"]

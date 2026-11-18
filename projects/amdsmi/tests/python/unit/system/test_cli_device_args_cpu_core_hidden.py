@@ -117,7 +117,9 @@ class TestCliDeviceArgsCpuCoreHidden(unittest.TestCase):
                 subparsers = parser.add_subparsers()
                 fake = types.SimpleNamespace(
                     helpers=types.SimpleNamespace(
-                        is_amdgpu_initialized=lambda: gpu, is_amd_hsmp_initialized=lambda: cpu
+                        is_amdgpu_initialized=lambda: gpu,
+                        is_amd_hsmp_initialized=lambda: cpu,
+                        is_ainic_initialized=lambda: False,
                     ),
                     description="AMD SMI",
                     _add_device_arguments=lambda *args, **kwargs: None,
@@ -227,12 +229,15 @@ class TestCliDeviceArgsCpuCoreHidden(unittest.TestCase):
 class TestCpuOptionalValueForList(unittest.TestCase):
     """``list --cpu`` takes zero values (all CPUs); other subcommands still need one."""
 
-    _HANDLES = {"0": {"Device Handle": "h0"}, "1": {"Device Handle": "h1"}}
+    # Parser de-duplicates selected handles by ``.value``, like real ctypes handles.
+    _H0 = types.SimpleNamespace(value=0)
+    _H1 = types.SimpleNamespace(value=1)
+    _HANDLES = {"0": {"Device Handle": _H0}, "1": {"Device Handle": _H1}}
 
     def _build_parser(self, cpu_nargs):
         def select_handles(cpu_selections, cpu_choices):
             if "all" in cpu_selections:
-                return True, True, ["h0", "h1"]
+                return True, True, [self._H0, self._H1]
             return True, False, [cpu_choices[sel]["Device Handle"] for sel in cpu_selections]
 
         fake = types.SimpleNamespace()
@@ -271,18 +276,18 @@ class TestCpuOptionalValueForList(unittest.TestCase):
 
     def test_bare_cpu_selects_all_cpus(self):
         parser = self._build_parser(cpu_nargs="*")
-        self.assertEqual(parser.parse_args(["--cpu"]).cpu, ["h0", "h1"])
+        self.assertEqual(parser.parse_args(["--cpu"]).cpu, [self._H0, self._H1])
 
     def test_bare_cpu_with_enumeration_selects_all_cpus(self):
         parser = self._build_parser(cpu_nargs="*")
         args = parser.parse_args(["--cpu", "-e"])
-        self.assertEqual(args.cpu, ["h0", "h1"])
+        self.assertEqual(args.cpu, [self._H0, self._H1])
         self.assertTrue(args.enumeration)
 
     def test_explicit_cpu_ids_still_select_those_cpus(self):
         parser = self._build_parser(cpu_nargs="*")
-        self.assertEqual(parser.parse_args(["--cpu", "1"]).cpu, ["h1"])
-        self.assertEqual(parser.parse_args(["--cpu", "all", "-e"]).cpu, ["h0", "h1"])
+        self.assertEqual(parser.parse_args(["--cpu", "1"]).cpu, [self._H1])
+        self.assertEqual(parser.parse_args(["--cpu", "all", "-e"]).cpu, [self._H0, self._H1])
 
     def test_default_cpu_still_requires_a_value(self):
         parser = self._build_parser(cpu_nargs="+")
