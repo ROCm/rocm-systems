@@ -2868,6 +2868,16 @@ TEST_F(LdsBarrierCellRaceTest, ReportDescribesTheConflictingArrive) {
   }
 }
 
+// A FLAT load routed to LDS that the wave has not waited for is handed off by
+// a returning arrive, which stays in order with it (CDNA5 ISA 5.7.1.3), so
+// the wave that reads the cell may overwrite the bytes the load read.
+TEST_F(LdsBarrierCellRaceTest, RtnArriveHandsOffAPendingFlatLdsLoad) {
+  flat_load(0, /*vgpr=*/8, FlatRoute::Lds);
+  EXPECT_FALSE(arrive(0, Source::DsAtomic, kCell + 16));
+  EXPECT_FALSE(poll(1, kCell + 16));
+  EXPECT_FALSE(ds_write(1, kFlatLdsAddress));
+}
+
 // With EXEC zero no lane arrives, so the simulator reports no arrival (see
 // LdsBarrierArriveTest.ExecZeroArriveReportsNothing) and nothing is released:
 // the instruction is issued here without one.

@@ -3883,6 +3883,43 @@ TEST(RaceDetector, BarrierCell_OperandReadAfterArrivalIsRecordedAgain) {
   expectOneLdsRace(b, /*wave=*/0, kX, /*isWrite=*/true);
 }
 
+// The LDS lanes of a FLAT operation stay in order with DS instructions: "FLAT
+// and LDS instructions issued from a single wave stay in order as they move
+// through LDS" (CDNA5 ISA 5.7.1.3). A returning arrive therefore hands off a
+// pending FLAT read of LDS; an async arrive, which is not ordered with LDS
+// operations, does not.
+TEST(RaceDetector, BarrierCell_RtnArriveHandsOffPendingFlatLdsRead) {
+  RaceTestBuilder b = cellBuilder();
+  b.flatLdsRead(/*wave=*/1, /*lane=*/0, kX, /*bytes=*/4, /*vgprDst=*/1);
+  b.cellArrive(1, kCell, Arrival::Ds, /*completes=*/true);
+  pollCell(b, 0);
+  b.checkLdsWrite(/*wave=*/0, /*lane=*/0, kX, /*bytes=*/4);
+  EXPECT_EQ(b.raceCount(), 0);
+}
+
+TEST(RaceDetector, BarrierCell_AsyncArriveDoesNotHandOffPendingFlatLdsRead) {
+  RaceTestBuilder b = cellBuilder();
+  b.flatLdsRead(/*wave=*/1, /*lane=*/0, kX, /*bytes=*/4, /*vgprDst=*/1);
+  b.cellArrive(1, kCell, Arrival::Async, /*completes=*/true);
+  pollCell(b, 0);
+  b.checkLdsWrite(/*wave=*/0, /*lane=*/0, kX, /*bytes=*/4);
+  expectOneLdsRace(b, /*wave=*/0, kX, /*isWrite=*/true);
+}
+
+// A FLAT read whose LDS access has completed, while its register result is
+// still pending, is released on the wave's epoch like any completed access,
+// not handed off.
+TEST(RaceDetector, BarrierCell_FlatLdsReadWithACompletedLdsAccessIsReleased) {
+  RaceTestBuilder b = cellBuilder();
+  b.flatLdsRead(/*wave=*/1, /*lane=*/0, kX, /*bytes=*/4, /*vgprDst=*/1);
+  b.waitcnt(1, /*vmcnt=*/-1, /*lgkmcnt=*/0);
+  // An async arrive hands off no LDS operation, so only the release orders it.
+  b.cellArrive(1, kCell, Arrival::Async, /*completes=*/true);
+  pollCell(b, 0);
+  b.checkLdsWrite(/*wave=*/0, /*lane=*/0, kX, /*bytes=*/4);
+  EXPECT_EQ(b.raceCount(), 0);
+}
+
 // ----- The cell's own bytes -----
 
 constexpr std::array kDsArrivals{Arrival::Ds, Arrival::Async};
