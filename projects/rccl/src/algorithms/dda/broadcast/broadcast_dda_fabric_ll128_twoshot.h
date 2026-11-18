@@ -118,7 +118,11 @@ __global__ void ddaBroadcastFabricLL128TwoShot(
     const uint64_t* myGather = myScratch + gatherOff + (uint64_t)peer * slotWireWords;
     if (gwarp == 0) {
       uint64_t vr[kDdaLL128WordsPerThread];
+#if RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
       if (ddaLL128PollWireBatched(myGather + 2 * lane, vr, flag, lane, params))
+#else
+      if (ddaLL128PollWire(myGather + 2 * lane, vr, flag, lane, params))
+#endif
         ddaLL128ClearWire(const_cast<uint64_t*>(myGather) + 2 * lane, lane);
     }
   } else {
@@ -148,8 +152,13 @@ __global__ void ddaBroadcastFabricLL128TwoShot(
         (uint64_t)selfRank * slotWireWords;
       for (size_t s = gwarp_r; s < chunkSlices; s += wstride_r) {
         uint64_t vr[kDdaLL128WordsPerThread];
+#if RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
         if (!ddaLL128PollWireBatched(myScatter + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane,
                               vr, flag, lane, params)) {
+#else
+        if (!ddaLL128PollWire(myScatter + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane,
+                              vr, flag, lane, params)) {
+#endif
           aborted = true;
           break;
         }
@@ -179,8 +188,13 @@ __global__ void ddaBroadcastFabricLL128TwoShot(
       const size_t rem = totalBytes > dOff ? totalBytes - dOff : 0;
       const int elt = rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
       uint64_t vr[kDdaLL128WordsPerThread];
+#if RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
       if (!ddaLL128PollWireBatched(myGather + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane,
                             vr, flag, lane, params))
+#else
+      if (!ddaLL128PollWire(myGather + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane,
+                            vr, flag, lane, params))
+#endif
         break;
       if (elt > 0)
         ddaLL128StoreRegs<int8_t>(recvbuff + dOff, vr, elt, lane, flagLane);
