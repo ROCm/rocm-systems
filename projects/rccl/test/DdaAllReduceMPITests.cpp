@@ -404,6 +404,8 @@ TEST_F(DdaMPI_AllReduce, LLOneShotMultiRank)
 
 TEST_F(DdaMPI_AllReduce, LLTwoShotMultiRank)
 {
+    // The gfx1250 AllReduce LL tier stops at 1M; restore 32 MiB so this message stays on the LL two-shot.
+    MPIHelpers::MpiEnvGuard llTierGuard("RCCL_DDA_LL_THRESHOLD", "33554432");
     if(!validateTestPrerequisites(kMinProcessesForMPI))
         GTEST_SKIP() << "Need at least 2 MPI ranks";
 
