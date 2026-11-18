@@ -13,7 +13,13 @@ import tempfile
 
 def check(label, command, expected, env, cwd):
     result = subprocess.run(
-        command, env=env, cwd=cwd, text=True, capture_output=True, timeout=45
+        [str(part) for part in command],
+        env=env,
+        cwd=str(cwd),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        universal_newlines=True,
+        timeout=45,
     )
     print(f"{label}: {result.stdout.strip()}", flush=True)
     assert result.returncode == 0, result.stderr
