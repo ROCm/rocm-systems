@@ -3884,6 +3884,47 @@ TEST(RaceDetector, BarrierCell_OperandReadAfterArrivalIsRecordedAgain) {
   expectOneLdsRace(b, /*wave=*/0, kX, /*isWrite=*/true);
 }
 
+// Two arrivals of different kinds into one phase of one cell: the second does
+// not drop the handoff the first released into the phase.
+TEST(RaceDetector, BarrierCell_HandoffSurvivesAnArrivalOfAnotherKindInTheSamePhase) {
+  RaceTestBuilder b = cellBuilder();
+  asyncLoad(b, 0);
+  b.cellArrive(0, kCell, Arrival::Async, /*completes=*/false);
+  b.cellArrive(0, kCell, Arrival::Ds, /*completes=*/true);
+  pollCell(b, 1);
+  b.checkLdsRead(/*wave=*/1, /*lane=*/0, kX, /*bytes=*/4);
+  EXPECT_EQ(b.raceCount(), 0);
+}
+
+// A handoff into a phase that has not completed is acquired once the phase
+// does: the reader races before the last arrival and is ordered after it.
+TEST(RaceDetector, BarrierCell_HandoffIsAcquiredOnceItsPhaseCompletes) {
+  RaceTestBuilder b = cellBuilder(/*numWaves=*/3);
+  asyncLoad(b, 0);
+  b.cellArrive(0, kCell, Arrival::Async, /*completes=*/false);
+  pollCell(b, 2);
+  b.checkLdsRead(/*wave=*/2, /*lane=*/0, kX, /*bytes=*/4);
+  expectOneLdsRace(b, /*wave=*/2, kX, /*isWrite=*/false);
+
+  b.clearViolations();
+  b.cellArrive(1, kCell, Arrival::Async, /*completes=*/true);
+  pollCell(b, 2);
+  b.checkLdsRead(/*wave=*/2, /*lane=*/0, kX, /*bytes=*/4);
+  EXPECT_EQ(b.raceCount(), 0);
+}
+
+// A pending DS read is handed off like a pending DS write: the returning
+// arrive stays in order with it, so the wave that reads the cell may overwrite
+// what it read.
+TEST(RaceDetector, BarrierCell_RtnArriveHandsOffPendingDsRead) {
+  RaceTestBuilder b = cellBuilder();
+  dsRead(b, 1, /*vgprDst=*/0);
+  b.cellArrive(1, kCell, Arrival::Ds, /*completes=*/true);
+  pollCell(b, 0);
+  b.checkLdsWrite(/*wave=*/0, /*lane=*/0, kX, /*bytes=*/4);
+  EXPECT_EQ(b.raceCount(), 0);
+}
+
 // The LDS lanes of a FLAT operation stay in order with DS instructions: "FLAT
 // and LDS instructions issued from a single wave stay in order as they move
 // through LDS" (CDNA5 ISA 5.7.1.3). A returning arrive therefore hands off a
