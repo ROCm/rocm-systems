@@ -38,6 +38,9 @@
   that compiled function, and of an eager JAX op to the op that dispatched
   them, with no changes to the workload source.
 - Reuse the existing ML API trace `marker -> counter -> call-tree` pipeline.
+- Attribute multi-device launches as well as single-device ones. A kernel
+  launched from a worker thread must still land under the call that opened
+  the marker.
 
 ## Considered and not chosen
 
@@ -49,36 +52,44 @@
     nesting into a many-to-many join.
 - **Native `Execute` hook.** Hooking `Execute` would open a range around the
   compiled module that launches the kernels. We do not use it:
-  - `Execute` does not know the Python function or caller `file:line`. It
-    cannot link kernels to `jax.jit.<fn>` without another channel from the
-    Python call.
+  - The HLO module name does encode the function (`jit_train_step`). What
+    `Execute` does not have is the caller's Python `file:line`.
   - When the Python wrapper already has a range open, kernels inherit that
     marker's `Correlation_ID`. A nested native range becomes current, so
     kernels inherit `Execute`'s id instead. The join then attaches to the
     module, not `jax.jit.<fn>`.
+  - It stays a later-phase option if the Python wrap misses a launch path.
 
 ## Design
 
 - JAX is added as a backend to the existing `--trace-ml-api` pipeline, through
-  `inject_roctx`.
+  `inject_roctx`. The marker uses the v1 wire contract with a trailing `jax`
+  backend token, and `jax` is added to `KNOWN_ML_API_BACKENDS`.
 - `jax.jit` / `jax.pmap` / `jax.shard_map` open a range around each compiled
   call.
-- Eager ops (no outer `jit`) open a range at primitive dispatch, named
-  `jax.{primitive}` (for example `jax.dot_general`). There is no `jax.eager`.
-  The primitive carries its own name at dispatch; we prefix `jax.`. We do not
-  ship a list of primitive names.
+- Eager ops (no outer `jit`) open a range at the call that actually runs.
+  On JAX 0.11.0 that call is usually a jitted helper, so the marker is
+  `jax.jit.<helper>` rather than `jax.{primitive}` (see below). There is no
+  `jax.eager`.
 - A nested or inner call does not open a second range; its kernels stay under
   the outer marker.
   - JAX compiles nested `jit` into the outer module, so the outer call is one
     `Execute`.
   - rocprofiler-compute emits one marker for that `Execute`. If an inner
     wrapper still runs while that range is open, it does not open another.
-- `Execute` runs inside the range, so kernels join to that marker.
+  - The "range already open" flag is thread-local and cleared in `finally`,
+    so a thrown exception still pops the range.
+- `Execute` runs inside the range, so kernels join to that marker when the
+  launch happens on the thread that opened it. Multi-device launches need
+  the fallback under "Where the range is marked".
 
 ### At a glance
 
 - The marker trace and the kernel trace are joined on `Correlation_ID` and
   `GUID` in the existing pipeline.
+- Kernels that do not inherit that id are joined by the
+  `hipModuleLaunchKernel` timestamp falling inside the marker (same process
+  and `GUID`).
 
 
 ```
@@ -88,6 +99,9 @@
                                                     │ join on
  XLA executable ────kernel launches►  kernel trace ┘ Correlation_ID + GUID
                                                     │
+                                                    │ unmatched kernels:
+                                                    │ hipModuleLaunchKernel
+                                                    │ timestamp inside marker
                                                     ▼
                                             call tree
 ```
@@ -103,9 +117,12 @@
     `jaxlib._jax.PjitFunction`.
   - Calling it always goes through `PjitFunction.__call__`, so replacing
     that one method wraps every jitted function. The object JAX returns
-    is still a `PjitFunction`.
-  - The deprecated `pjit` alias returns the same type, so those calls
-    show as `jax.jit.<fn>`.
+    is still a `PjitFunction`. Confirm the assignment on each supported
+    Python/JAX pair; if it does not intercept calls, warn and skip the
+    JAX backend (same pattern as the Torch minor gate).
+  - `jax.experimental.pjit.pjit` (deprecated since JAX 0.8.0 in favor of
+    `jax.jit`) returns the same type, so those calls show as
+    `jax.jit.<fn>`.
   - Each outer call opens `jax.jit.<fn>`, runs the executable, and closes
     the range when the callable returns.
   - A direct call to an inner jitted function is its own outer call, so it
@@ -115,23 +132,50 @@
   - `pmap` maps `fn` over devices. `shard_map` runs `fn` on a mesh.
   - Each outer call opens `jax.pmap.<fn>` or `jax.shard_map.<fn>`, runs the
     executable, and closes the range when the callable returns.
+  - Without that factory wrap, the call still enters an internal
+    `PjitFunction` (`_fun` for `pmap`) and the marker name is not
+    `jax.pmap.<fn>`.
 - Primitive wrap: `inject_roctx` wraps `jax.extend.core.Primitive`, not
   `jax.numpy`.
   - If a JAX range is already open, do not open another; run the original
     dispatch.
   - Otherwise read the primitive's name from that call, push `jax.{name}` with
     the caller `file:line`, run the original dispatch (the one-op `Execute`),
-    then pop. `x @ x` therefore marks `jax.dot_general`; `jax.numpy.sum`
-    marks `jax.reduce_sum`.
+    then pop.
+  - On JAX 0.11.0 the eager helpers are themselves jitted, so the
+    `PjitFunction.__call__` range opens first and the primitive wrap is
+    skipped. Verified names: `jnp.sum` marks `jax.jit._reduce_sum`; `x @ x`
+    marks `jax.jit.matmul`. They do not mark `jax.reduce_sum` or
+    `jax.dot_general`.
 - JAX dispatch is asynchronous: the callable returns before the GPU finishes
   ([Asynchronous dispatch](https://docs.jax.dev/en/latest/async_dispatch.html)).
   - The range encloses the host-side launch enqueue, not GPU completion.
-  - Those enqueues inherit the marker's correlation id.
+  - An enqueue on the thread that opened the range inherits the marker's
+    correlation id. Verified for single-device `jax.jit`, including when the
+    range closes before `block_until_ready`.
+  - An enqueue on another thread does not inherit that id. Verified on
+    2× MI300X: `pmap` and `shard_map` launch each GPU's compute kernels from
+    a per-device worker thread. The marker's `Correlation_Id` matches the
+    host copies only; the compute kernels keep their own ids.
+  - Those unmatched kernels are attributed by following
+    `hipModuleLaunchKernel` (same `Correlation_Id` as the kernel) and
+    assigning the kernel to the JAX marker whose time window contains that
+    launch, in the same process and `GUID`. Verified on the same 2× MI300X
+    run: every compute launch fell inside its `pmap` or `shard_map` window,
+    and setup launches before any marker stayed unmatched.
   - `GUID` is the rocprofiler-sdk database/import identifier
     ([rocpd schema](https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-sdk/source/lib/python/rocpd/README.md)).
     All marker and kernel rows from that instance share it.
-  - The join is `Correlation_ID` + `GUID` so a colliding `Correlation_ID`
-    from another instance does not match.
+  - The join is `Correlation_ID` + `GUID`, then the launch-time fallback for
+    what that join leaves unmatched, so a colliding `Correlation_ID` from
+    another instance does not match.
+  - The first call with a new signature compiles inside the range, and XLA
+    GPU autotuning launches many candidate kernels on helper threads. Those
+    candidates do not share the marker id. Two fresh processes can disagree
+    on the full kernel list, which aborts analyze. Multi-pass profiles pin
+    autotuning (`XLA_FLAGS=--xla_gpu_autotune_level=0`) or share a
+    compilation cache. With that pin, two processes on one GPU produced the
+    same kernel list.
 
 ```
 time →
@@ -140,17 +184,19 @@ time →
   │
   └─ compiled callable                            (cached XLA executable)
        └─ PjRtLoadedExecutable::Execute
-            ├─ launch  gemm_fusion_dot_general_0   ┐
-            ├─ launch  input_reduce_fusion         │ launched within the range
-            └─ launch  input_reduce_fusion_1       ┘ → inherit Correlation_Id = C
+            ├─ launch  gemm_fusion_dot_general_0   ┐  calling thread
+            ├─ launch  input_reduce_fusion         │  → Correlation_Id = C
+            └─ launch  input_reduce_fusion_1       ┘
+            └─ (multi-device) launch on worker tid → Correlation_Id = K
+                 hipModuleLaunchKernel timestamp inside this range
   │
   ROCTX range close
 
 rocprofv3 marker trace :  "jax.jit.train_step"        Correlation_Id = C
 rocprofv3 kernel trace :  gemm_fusion_dot_general_0   Correlation_Id = C
-                          input_reduce_fusion         Correlation_Id = C
-                          input_reduce_fusion_1       Correlation_Id = C
-        join on Correlation_ID + GUID  ⇒  kernels attributed to jax.jit.train_step
+                          input_reduce_fusion         Correlation_Id = K
+        join on Correlation_ID + GUID, then launch timestamp inside C
+        ⇒  kernels attributed to jax.jit.train_step
 ```
 
 ### Difference from the Torch/Triton backends
@@ -161,6 +207,9 @@ rocprofv3 kernel trace :  gemm_fusion_dot_general_0   Correlation_Id = C
   executable with no per-op Python call, so one marker names the function and
   several kernels sit directly under it. Eager JAX is one primitive per
   `Execute`, closer to Triton's one-launch marker.
+- Torch attaches autograd worker ranges by publishing the launcher thread id.
+  JAX multi-device workers are not under that collector, so this design uses
+  the launch-timestamp fallback instead of a launcher-thread field.
 
 ### Analyze display
 
@@ -186,15 +235,16 @@ x = jnp.ones((512, 512))
 train_step(w, x)                 # line 13
 ```
 
-- `--list-operators jax` prints the call tree the ML API trace already prints
-  for Torch and Triton:
+- `--list-jax-operators` prints the call tree the ML API trace already prints
+  for Torch and Triton (`--list-*-operators` / `--*-operator`):
   - One node per compiled function or eager primitive.
   - Caller `file:line` on that node.
   - Kernels underneath sorted by total GPU time.
   - A per-operator summary table follows the tree.
 - A direct call to `matmul_relu` is its own root, `jax.jit.matmul_relu`.
-- An eager op in the same run is its own root, for example `jax.dot_general`,
-  with that op's kernels underneath.
+- An eager op in the same run is its own root, for example
+  `jax.jit._reduce_sum` or `jax.jit.matmul`, with that op's kernels
+  underneath.
 
 ```
 ================================================================================
@@ -209,8 +259,8 @@ jax.jit.train_step jax_workload.py:13 (calls: N, dispatches: M, total: T)
 └─ input_reduce_fusion_1 (dispatches: M, total: T)
 ```
 
-- `--operator jax:<PATTERN>` filters that tree by function name, for example
-  `--operator 'jax:*train_step*'`, and prints the matched nodes in the same
+- `--jax-operator <PATTERN>` filters that tree by function name, for example
+  `--jax-operator 'jax:*train_step*'`, and prints the matched nodes in the same
   form.
 
 ## Validation, security and debuggability
@@ -220,26 +270,39 @@ jax.jit.train_step jax_workload.py:13 (calls: N, dispatches: M, total: T)
 - Those tests assert the following on a profiled workload:
   - An outer `jax.jit` / `jax.pmap` / `jax.shard_map` call emits one range
     `jax.jit.<fn>`, `jax.pmap.<fn>`, or `jax.shard_map.<fn>`. An outer eager
-    op emits `jax.{primitive}`. Nested or inner calls do not emit a second
-    range.
+    op emits the name of the call that ran (`jax.jit._reduce_sum`,
+    `jax.jit.matmul`, or `jax.{primitive}` when no jitted helper ran).
+    Nested or inner calls do not emit a second range.
   - Kernels launched by that call appear under that marker, with the caller
-    `file:line` and the call's dispatch count and GPU time.
+    `file:line` and the call's dispatch count and GPU time. Single-device
+    kernels match on `Correlation_ID`. Multi-device compute kernels match
+    through the launch-timestamp fallback.
+  - With autotuning pinned, kernel lists agree across analyze passes.
 - Unit tests cover marker naming and the "range already open" skip, without a
   GPU workload.
 - **Security.** Same in-process `inject_roctx` injector as the other backends.
   Analysis reads the trace files the workload produced.
 - **Debug.** The injector logs which entry points it wrapped during profile
   (`ml api trace` on the profile stdout). A wrap miss is an absent `jax.*`
-  node in the `--list-operators jax` tree (analyze stdout).
+  node in the `--list-jax-operators` tree (analyze stdout).
 
 Limitations:
 
 - This wrap list is planned coverage, not a closed inventory of every GPU
   launch. Other JAX or XLA paths may still enqueue kernels without a
   `jax.*` marker; those cases need to be confirmed on real traces.
+- AOT `jit(f).lower(...).compile()` objects do not go through
+  `PjitFunction.__call__` with a stable function name.
+- Host callbacks, HIP-graph (command buffer) launches, and multi-process
+  `jax.distributed` (one `GUID` per process) are out of scope.
+- Newer JAX may rebuild `pmap` on top of `jit` / `shard_map`; re-check the
+  factory wrap on each supported version.
 
 Design trade-offs:
 
 - A `jit` / `pmap` / `shard_map` marker is the compiled function. Every
   kernel that call launches is a direct child of that node.
 - One function name covers every input signature.
+- Prefer the `Correlation_ID` join. Use the launch-timestamp fallback only
+  for kernels that join leaves unmatched, so single-device behavior stays
+  the same.
