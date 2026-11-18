@@ -265,8 +265,11 @@ static int ddaArLL128Wire(const ncclComm* comm, size_t bytes) {
                                                                                   : dda::common::kDdaLL128WireCoop;
 }
 
-// Dynamic LDS of an LL128 launch: the staged writer's two windows per warp.
-static size_t ddaArLL128SharedBytes(int wire, unsigned threads) {
+// Dynamic LDS of an LL128 launch: the peer-parallel fold's slice per warp, or the staged writer's two windows per warp.
+static size_t ddaArLL128SharedBytes(int wire, bool peerPar, unsigned threads) {
+  if (peerPar) {
+    return dda::common::ddaLL128ArPeerLdsBytes(threads);
+  }
   return wire == dda::common::kDdaLL128WireCoop ? 0 : dda::common::ddaLL128StageBytes(threads);
 }
 
@@ -348,11 +351,12 @@ static ncclResult_t ncclAllReduceDdaFabricLL128OneShotTyped(const void* sendbuff
        "(bankSize=%zu)",
        nRanks, bytes, slices, grid.x, block.x, (int)peerPar, bankSize);
 
+  const size_t lds = ddaArLL128SharedBytes(dda::common::kDdaLL128WireCoop, peerPar, block.x);
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   const DdaArLL128Kernel<T> kernel =
     peerPar ? ddaArLL128OneShotPeerParKernel<T>(nRanks) : ddaArLL128OneShotKernel<T>(nRanks);
-  hipExtLaunchKernelGGL(kernel, grid, block, 0, stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers,
+  hipExtLaunchKernelGGL(kernel, grid, block, lds, stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers,
                         static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), bytes, comm->rank, nRanks,
                         epochDev, epochLen, slices, bankSize, params);
 
@@ -383,7 +387,7 @@ static ncclResult_t ncclAllReduceDdaFabricLL128TwoShotTyped(const void* sendbuff
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
 
-  const size_t lds = ddaArLL128SharedBytes(wire, block.x);
+  const size_t lds = ddaArLL128SharedBytes(wire, peerPar, block.x);
 
   INFO(NCCL_COLL,
        "DDA fabric AllReduce LL128 two-shot: nRanks=%d bytes=%zu shardBytes=%zu slices=%zu grid=%u block=%u wire=%d "

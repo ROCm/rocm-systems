@@ -41,7 +41,7 @@
 
 namespace dda::common {
 
-// Widest block the peer-parallel kernels take: it sizes their static LDS.
+// Widest block the peer-parallel kernels take; it bounds the fold's unrolled round.
 constexpr int kDdaLL128ArPeerMaxThreads = 512;
 constexpr int kDdaLL128ArPeerMaxWarps = kDdaLL128ArPeerMaxThreads / kDdaLL128Warp;
 // One 16B wire pair (lo, hi); 16B-aligned so LDS accesses are 16B wide.
@@ -54,6 +54,17 @@ constexpr int kDdaLL128PairsPerSlice = kDdaLL128WireWordsPerSlice / 2;
 // Pairs of a slice one thread folds. Blocks come in 64-thread granules and nRanks >= 2, so a group is at least two
 // warps.
 constexpr int kDdaLL128ArPeerFoldPairs = kDdaLL128PairsPerSlice / (2 * kDdaLL128Warp);
+
+// Dynamic LDS of a peer-parallel block of `threads`: one wire slice per warp, for the copy it parks each round.
+__host__ __device__ constexpr size_t ddaLL128ArPeerLdsBytes(unsigned threads) {
+  return (size_t)(threads / kDdaLL128Warp) * kDdaLL128PairsPerSlice * sizeof(DdaLL128Pair);
+}
+
+// The block's dynamic LDS as one wire slice per warp; the launcher passes ddaLL128ArPeerLdsBytes(blockDim.x).
+__device__ __forceinline__ DdaLL128Pair (*ddaLL128ArPeerLds())[kDdaLL128PairsPerSlice] {
+  extern __shared__ DdaLL128Pair ddaLL128ArPeerLdsSlices[];
+  return reinterpret_cast<DdaLL128Pair (*)[kDdaLL128PairsPerSlice]>(ddaLL128ArPeerLdsSlices);
+}
 
 // Warps per slice group: one per rank, up to the whole block.
 __host__ __device__ constexpr int ddaLL128ArPeerWarps(int nRanks, int nwarps) {
@@ -190,7 +201,7 @@ __launch_bounds__(kDdaLL128ArPeerMaxThreads)
                                                size_t bankSize, // scratch bank size (from host)
                                                DdaKernelParams params) {
   // One wire slice per warp: the copy it parked this round.
-  __shared__ DdaLL128Pair lds[kDdaLL128ArPeerMaxWarps][kDdaLL128PairsPerSlice];
+  DdaLL128Pair (*lds)[kDdaLL128PairsPerSlice] = ddaLL128ArPeerLds();
   __shared__ int aborted;
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
@@ -309,7 +320,7 @@ __launch_bounds__(kDdaLL128ArPeerMaxThreads)
                                                   size_t bankSize, // scratch bank size (from host)
                                                   DdaKernelParams params) {
   // One wire slice per warp: the copy it parked this round.
-  __shared__ DdaLL128Pair lds[kDdaLL128ArPeerMaxWarps][kDdaLL128PairsPerSlice];
+  DdaLL128Pair (*lds)[kDdaLL128PairsPerSlice] = ddaLL128ArPeerLds();
   __shared__ int aborted;
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;

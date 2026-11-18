@@ -1029,6 +1029,7 @@ TEST_F(DdaAllReduceFabricLL128PeerParMicrotest, RunLL128_BlockIsOneWarpGroup) {
     const DdaLaunch& one = RunOneLL128(16);
     EXPECT_EQ(one.block.x, c.threads) << "nRanks " << c.nRanks;
     EXPECT_EQ(one.grid.x, 1u) << "nRanks " << c.nRanks;
+    EXPECT_EQ(one.sharedMemBytes, c.threads / 32 * kSliceWire) << "a wire slice of LDS per warp, nRanks " << c.nRanks;
     EXPECT_EQ(RunOneLL128(SliceFloats(17)).grid.x, 17u) << "a block per slice, nRanks " << c.nRanks;
   }
 }
@@ -1090,7 +1091,7 @@ TEST_F(DdaAllReduceFabricLL128PeerParMicrotest, RunLL128_TwoShotPeerParallelOnly
   EXPECT_EQ(ncclAllReduceDdaFabricLL128Blocks(mock_.get(), big, ncclFloat32), staged.grid.x);
   const DdaLaunch& below = RunOneLL128(big - 8 * 4);  // one 16 B chunk short of a 2 MiB shard
   EXPECT_EQ(below.kernel, (LL128TwoShotPP<float, 8>()));
-  EXPECT_EQ(below.sharedMemBytes, 0u);
+  EXPECT_EQ(below.sharedMemBytes, below.block.x / 32 * kSliceWire) << "the fold's slice per warp";
   comm().WarpSize = 64;
   EXPECT_EQ(RunOneLL128(big).kernel, (LL128TwoShotPP<float, 8>())) << "no staged writer on wave64";
   EXPECT_EQ(RunOneLL128(64).kernel, (LL128OneShotPP<float, 8>())) << "the one-shot never stages";
