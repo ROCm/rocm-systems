@@ -21,11 +21,13 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <sys/types.h>
 #include <system_error>
 #include <thread>
 #include <vector>
 
 #include <rocprofiler-sdk-rocattach/rocattach.h>
+#include <rocprofiler-sdk-rocattach/types.h>
 
 namespace
 {
@@ -435,8 +437,12 @@ void
 print_sessions(const active_sessions& sessions)
 {
     std::cout << "\nActive sessions:\n";
+
     for(const auto& entry : sessions.active())
+    {
         std::cout << fmt::format("  [{}] pid {}\n", entry.id, entry.pid);
+    }
+
     std::cout << "Enter a session id to detach, or 'a' to detach all: " << std::flush;
 }
 
@@ -474,7 +480,11 @@ run_detach_prompt(active_sessions& sessions)
     while(!sessions.active().empty())
     {
         print_sessions(sessions);
-        if(!std::getline(std::cin, line)) return detach_all(sessions) && all_detached;
+
+        if(!std::getline(std::cin, line))
+        {
+            return detach_all(sessions) && all_detached;
+        }
 
         all_detached = handle_prompt_input(line, sessions) && all_detached;
     }
