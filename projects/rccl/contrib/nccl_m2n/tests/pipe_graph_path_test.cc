@@ -482,4 +482,77 @@ TEST_F(PipeGraphPathTest, ThreeDestinationDomainsCoverGeneratorRingIngressForwar
   ASSERT_NCCL(ncclCommDestroy(comm));
 }
 
+TEST_F(PipeGraphPathTest, StridedSplitInjectionKeepsRingOnItsChain) {
+  if (world_ != 8) {
+    GTEST_SKIP() << "requires 8 MPI ranks (got " << world_ << ")";
+  }
+
+  ncclComm_t comm = nullptr;
+  initComm(&comm);
+  ASSERT_NE(nullptr, comm);
+
+  const ReshardCopyAlgorithm savedCopyAlgorithm = gReshardCopyAlgorithm;
+  const ReshardLoadBalanceMode savedLbMode = gReshardLbMode;
+  gReshardCopyAlgorithm = RESHARD_COPY_ALGO_PIPE;
+  gReshardLbMode = RESHARD_LB_NODE_AWARE;
+
+  // Two source replicas (ranks 0-1) and three destination replicas of two shards, one domain each
+  // (ranks 2-3, 4-5, 6-7). Strided injection with K=2 gives chains {rep0, rep2} and {rep1}.
+  int srcMeshDims[2] = {2, 1};
+  int dstMeshDims[2] = {3, 2};
+  int srcPlacements[2] = {NCCL_RESHARD_REPLICATE, NCCL_RESHARD_SHARD(0)};
+  int dstPlacements[2] = {NCCL_RESHARD_REPLICATE, NCCL_RESHARD_SHARD(1)};
+  size_t srcLocalShape[2] = {2, 4};
+  size_t dstLocalShape[2] = {2, 2};
+
+  ncclMesh_t srcMesh = NCCL_M2N_MESH_INITIALIZER;
+  srcMesh.ndims = 2;
+  srcMesh.dims = srcMeshDims;
+  srcMesh.startRank = 0;
+  ncclMesh_t dstMesh = NCCL_M2N_MESH_INITIALIZER;
+  dstMesh.ndims = 2;
+  dstMesh.dims = dstMeshDims;
+  dstMesh.startRank = 2;
+
+  ncclDistTensor_t src = NCCL_M2N_DIST_TENSOR_INITIALIZER;
+  src.dataPtr = rank_ < 2 ? reinterpret_cast<void*>(0x6000) : nullptr;
+  src.localShape = srcLocalShape;
+  src.ndims = 2;
+  src.dtype = ncclUint8;
+  src.mesh = &srcMesh;
+  src.placements = srcPlacements;
+  ncclDistTensor_t dst = NCCL_M2N_DIST_TENSOR_INITIALIZER;
+  dst.dataPtr = rank_ >= 2 ? reinterpret_cast<void*>(0x7000) : nullptr;
+  dst.localShape = dstLocalShape;
+  dst.ndims = 2;
+  dst.dtype = ncclUint8;
+  dst.mesh = &dstMesh;
+  dst.placements = dstPlacements;
+
+  StagingTransferDescriptor desc = {};
+  ASSERT_EQ(ncclSuccess, buildStagingTransferDescriptor(comm, src.dataPtr, src.localShape, 2, &src, dst.dataPtr,
+                                                        dst.localShape, &dst, 2, 2, 0, &desc,
+                                                        /*splitStrided=*/true, /*splitNumInjectionDomains=*/2,
+                                                        /*splitDomainsPerRep=*/1, /*nodeAnchorAtMeshStart=*/true));
+
+  if (rank_ >= 2) {
+    const int rep = (rank_ - 2) / 2;
+    const int shard = (rank_ - 2) % 2;
+    ASSERT_EQ(1, desc.numSources);
+    EXPECT_TRUE(desc.sources[0].isRdma);
+    // rep0 and rep1 are fed by source replicas 0 and 1; rep2 by rep0 over the ring.
+    const int expectedPrev = rep == 0 ? 0 : (rep == 1 ? 1 : 2 + shard);
+    EXPECT_EQ(expectedPrev, desc.sources[0].peerWorldRank) << "rep " << rep;
+    EXPECT_EQ(rep == 0 ? 1 : 0, desc.numRingTargets) << "rep " << rep;
+    if (rep == 0 && desc.numRingTargets == 1) {
+      EXPECT_EQ(6 + shard, desc.targets[desc.numTargets - 1].peerWorldRank);
+    }
+  }
+
+  gReshardCopyAlgorithm = savedCopyAlgorithm;
+  gReshardLbMode = savedLbMode;
+  ASSERT_EQ(MPI_SUCCESS, MPI_Barrier(MPI_COMM_WORLD));
+  ASSERT_NCCL(ncclCommDestroy(comm));
+}
+
 } // namespace
