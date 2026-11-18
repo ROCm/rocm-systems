@@ -203,3 +203,47 @@ hipfile_add_test_executable(
 )
 
 target_link_libraries(hipfilewrite-visibility PRIVATE Threads::Threads)
+
+# One test per backend for each producer whose data hipFileWrite writes today:
+# a kernel the host synchronizes with, after an earlier hipFileWrite read the
+# buffer; a kernel still running during hipFileWrite; hipMemcpy from host
+# memory; and hipFileRead, after an earlier hipFileWrite read the buffer. The
+# top of hipfilewrite-visibility.cpp describes the other producers and options,
+# some of which fail with fastpath, and a soak test.
+set(_hipfilewrite_visibility_args --directory ${HIPFILE_CAPABLE_DIR} --iterations 100)
+set(_hipfilewrite_visibility_kernel_after_args --producer kernel --kernel after --prime write)
+set(_hipfilewrite_visibility_kernel_during_args --producer kernel --kernel during)
+set(_hipfilewrite_visibility_memcpy_args --producer memcpy)
+set(_hipfilewrite_visibility_read_args --producer read --prime write)
+foreach(_producer IN ITEMS kernel_after kernel_during memcpy read)
+    # gdb follows hipfile-fastpath-gate's exec, so a crash in
+    # hipfilewrite-visibility still gets a backtrace
+    add_test(
+        NAME hipfilewrite_visibility_${_producer}_fastpath_test
+        COMMAND gdb --batch --quiet -ex run -ex "thread apply all bt full" --return-child-result
+                --args $<TARGET_FILE:hipfile-fastpath-gate> ${_hipfile_fastpath_gate_args} ${HIPFILE_CAPABLE_DIR}
+                -- $<TARGET_FILE:hipfilewrite-visibility> ${_hipfilewrite_visibility_args}
+                ${_hipfilewrite_visibility_${_producer}_args}
+    )
+    add_test(
+        NAME hipfilewrite_visibility_${_producer}_fallback_test
+        COMMAND gdb --batch --quiet -ex run -ex "thread apply all bt full" --return-child-result
+                --args $<TARGET_FILE:hipfilewrite-visibility> ${_hipfilewrite_visibility_args}
+                ${_hipfilewrite_visibility_${_producer}_args}
+    )
+    set_tests_properties(
+        hipfilewrite_visibility_${_producer}_fastpath_test hipfilewrite_visibility_${_producer}_fallback_test
+        PROPERTIES LABELS "stress;internal"
+    )
+    # Report the fastpath run as skipped rather than failed when, only with
+    # --allow-skip-fastpath, hipfile-fastpath-gate reports that fastpath is
+    # unavailable. Keep the marker synchronized with the message in
+    # hipfile-fastpath-gate.cpp.
+    set_tests_properties(hipfilewrite_visibility_${_producer}_fastpath_test PROPERTIES
+        ENVIRONMENT "HIPFILE_ALLOW_COMPAT_MODE=false"
+        SKIP_REGULAR_EXPRESSION "Fast path is not available"
+    )
+    set_tests_properties(hipfilewrite_visibility_${_producer}_fallback_test PROPERTIES
+        ENVIRONMENT "HIPFILE_FORCE_COMPAT_MODE=true"
+    )
+endforeach()
