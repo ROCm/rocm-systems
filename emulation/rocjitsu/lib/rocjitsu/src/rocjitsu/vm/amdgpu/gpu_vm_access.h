@@ -739,7 +739,7 @@ public:
 
 private:
   friend class GpuVmAccess;
-  static constexpr std::size_t kSnapshotCount = 256;
+  static constexpr std::size_t kSnapshotCount = 512;
   using Snapshots = std::array<VmMtypeSnapshot, kSnapshotCount>;
   // Interleaved lanes revisit short page runs in widely separated rows.
   // Offset each 128-page block by eight slots to separate those runs without
