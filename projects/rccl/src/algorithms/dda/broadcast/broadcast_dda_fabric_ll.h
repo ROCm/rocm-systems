@@ -92,6 +92,9 @@ __launch_bounds__(512)
 
   LLPacket16* self = reinterpret_cast<LLPacket16*>(peerScratch[selfRank]) + bankLines;
 
+  // A wait saw the abort flag: skip the remaining waits, still publish the epoch.
+  bool aborted = false;
+
   if (isRoot) {
     const int peer = (root + 1 + (int)blockIdx.x) % nRanks;
     LLPacket16* dst = reinterpret_cast<LLPacket16*>(peerScratch[peer]) + bankLines + nRanks;
@@ -111,7 +114,7 @@ __launch_bounds__(512)
 
     if (blockIdx.y == 0 && tid == 0) {
       uint32_t d0, f0, d1, f1;
-      (void)ddaLLWaitLineFlags(&self[peer], flag, params, d0, f0, d1, f1);
+      aborted = !ddaLLWaitLineFlags(&self[peer], flag, params, d0, f0, d1, f1);
     }
   } else {
     if (flatBlockId == 0) {
@@ -125,15 +128,21 @@ __launch_bounds__(512)
     const LLPacket16* src = self + nRanks;
     for (size_t pk = pkBegin + tid; pk < pkEnd; pk += nthreads) {
       uint32_t d0, f0, d1, f1;
-      if (!ddaLLWaitLineFlags(&src[pk], flag, params, d0, f0, d1, f1)) break;
+      if (!ddaLLWaitLineFlags(&src[pk], flag, params, d0, f0, d1, f1)) {
+        aborted = true;
+        break;
+      }
       ddaBcStore8<kAligned>(recvbuff + 8 * pk, d0, d1);
     }
 
-    if (flatBlockId == 0) {
+    if (!aborted && flatBlockId == 0) {
       for (int p = tid; p < nRanks; p += nthreads) {
         if (p == selfRank || p == root) continue;
         uint32_t d0, f0, d1, f1;
-        if (!ddaLLWaitLineFlags(&self[p], flag, params, d0, f0, d1, f1)) break;
+        if (!ddaLLWaitLineFlags(&self[p], flag, params, d0, f0, d1, f1)) {
+          aborted = true;
+          break;
+        }
       }
     }
   }
