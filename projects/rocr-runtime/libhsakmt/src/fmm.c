@@ -215,7 +215,7 @@ typedef struct {
 	uint32_t device_id;
 	uint32_t node_id;
 	uint64_t local_mem_size;
-	HSA_ENGINE_ID EngineId;
+	HSA_GFXIP_VERSION EngineId;
 	aperture_t lds_aperture;
 	aperture_t scratch_aperture;
 	aperture_t mmio_aperture;

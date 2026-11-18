@@ -702,8 +702,8 @@ static HSAKMT_STATUS hsaKmtGetCoreDeviceInfoCtx(HsaKFDContext *ctx,
 	                                        + props.EngineId.ui32.Minor * 100
 	                                        + props.EngineId.ui32.Stepping);
 
-	/* fw_version from EngineId */
-	device_info->fw_version = props.EngineId.ui32.uCode;
+	/* fw_version from the compute uCode */
+	device_info->fw_version = props.uCodeEngineVersions.uCodeCompute;
 
 	/* SIMD/compute topology */
 	device_info->simd_count = props.NumFComputeCores;

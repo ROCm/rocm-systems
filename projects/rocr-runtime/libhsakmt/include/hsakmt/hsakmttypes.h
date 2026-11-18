@@ -167,12 +167,11 @@ typedef union
     HSAuint32 Value;
     struct
     {
-        unsigned int uCode    : 10;  // ucode packet processor version
         unsigned int Major    :  6;  // GFXIP Major engine version
         unsigned int Minor    :  8;  // GFXIP Minor engine version
         unsigned int Stepping :  8;  // GFXIP Stepping info
     }ui32;
-} HSA_ENGINE_ID;
+} HSA_GFXIP_VERSION;
 
 typedef union
 {
@@ -180,8 +179,8 @@ typedef union
     struct
     {
         unsigned int uCodeSDMA: 10; // ucode version SDMA engine
-        unsigned int uCodeRes : 10; // ucode version (reserved)
-        unsigned int Reserved : 12; // Reserved, must be 0
+        unsigned int uCodeCompute : 12; // ucode version Compute engine
+        unsigned int Reserved : 10; // Reserved, must be 0
     };
 } HSA_ENGINE_VERSION;
 
@@ -316,8 +315,8 @@ typedef struct _HsaNodeProperties
     HSAuint32       MaxSlotsScratchCU; // Number of temp. memory ("scratch") wave slots available to access,
                                        // may be 0 if HW has no restrictions
 
-    HSA_ENGINE_ID   EngineId;          // Identifier (rev) of the GPU uEngine or Firmware, may be 0
-    HSA_ENGINE_ID   OverrideEngineId;  // Identifier (rev) of the Overrided GPU uEngine or Firmware, may be 0
+    HSA_GFXIP_VERSION EngineId;        // GFXIP version of this node, may be 0
+    HSA_GFXIP_VERSION OverrideEngineId; // GFXIP version override, may be 0
 
     HSAuint16       VendorId;          // GPU vendor id; 0 on latency (= CPU)-only nodes
     HSAuint16       DeviceId;          // GPU device id; 0 on latency (= CPU)-only nodes
