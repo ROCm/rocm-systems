@@ -96,6 +96,13 @@ Command-line options
    * ``rocpd`` - Generates a RocPD SQLite database file (``.db``) for
      programmatic analysis.
 
+``-d, --detach-after SECONDS``
+   Detaches from all attached processes after ``SECONDS`` seconds, without waiting
+   for input (non-interactive). ``SECONDS`` must be a non-negative integer. The
+   timer starts once the attach to every process has been attempted. When this option
+   is omitted, ``rocprof-sys-attach`` waits for input at the session prompt (see
+   `Attaching to multiple processes`_).
+
 Basic usage
 ========================================
 
@@ -113,7 +120,8 @@ Basic usage
       $ rocprof-sys-attach -p 12345
 
 3. Wait for the desired profiling period you want to capture, then press ENTER to
-   detach and finalize the profiling data.
+   detach and finalize the profiling data. When attached to more than one process,
+   enter a session id or ``a`` instead (see `Attaching to multiple processes`_).
 
 Examples
 ========================================
@@ -184,12 +192,16 @@ Here is a complete workflow for attaching to a running GPU application:
    [rocprof-sys-attach] Output path: ./results
    [rocprof-sys-attach] Output format: perfetto rocpd
    [rocprof-sys-attach] Trying to attach to process 98765
-   [rocprof-sys-attach] Attached to process 98765. Press ENTER to detach.
+   [rocprof-sys-attach] Attached to process 98765 (session 1)
+
+   Active sessions:
+     [1] pid 98765
+   Enter a session id to detach, or 'a' to detach all:
 
    # Let the application run for the profiling period...
    # Press ENTER when ready to stop profiling
 
-   [rocprof-sys-attach] Detached from process 98765
+   [rocprof-sys-attach] Detached from process 98765 (session 1)
    [rocprof-sys-attach] Output written to: ./results
    [rocprof-sys-attach]   - Perfetto trace: perfetto-trace-98765.pftrace
    [rocprof-sys-attach]   - RocPD database: rocpd-98765.db
@@ -243,15 +255,23 @@ timestamp directory.
 
    # First profiling session
    $ rocprof-sys-attach -p 98765 -o ./results -F perfetto
-   [rocprof-sys-attach] Attached to process 98765. Press ENTER to detach.
+   [rocprof-sys-attach] Attached to process 98765 (session 1)
+
+   Active sessions:
+     [1] pid 98765
+   Enter a session id to detach, or 'a' to detach all:
    # Press ENTER to detach
-   [rocprof-sys-attach] Detached from process 98765
+   [rocprof-sys-attach] Detached from process 98765 (session 1)
 
    # Second profiling session (same PID)
    $ rocprof-sys-attach -p 98765 -o ./results -F perfetto
-   [rocprof-sys-attach] Attached to process 98765. Press ENTER to detach.
+   [rocprof-sys-attach] Attached to process 98765 (session 1)
+
+   Active sessions:
+     [1] pid 98765
+   Enter a session id to detach, or 'a' to detach all:
    # Press ENTER to detach
-   [rocprof-sys-attach] Detached from process 98765
+   [rocprof-sys-attach] Detached from process 98765 (session 1)
 
 .. note::
 
