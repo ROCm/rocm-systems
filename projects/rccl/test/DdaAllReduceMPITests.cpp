@@ -416,6 +416,13 @@ TEST_F(DdaMPI_AllReduce, LLTwoShotMultiRank)
     runAllReduce(count, kTwoShotLogNeedle, "DdaMPI_AllReduce/LLTwoShotMultiRank");
 }
 
+// 1 MiB of f32 is the largest LL one-shot message, which from 5 ranks runs as the spread two-shot on its grid.
+TEST_F(DdaMPI_AllReduce, LLSpreadTwoShotMultiRank)
+{
+    const char* needle = MPIEnvironment::world_size < 5 ? kOneShotLogNeedle : "DDA fabric AllReduce LL spread two-shot";
+    runAllReduce(kDefaultLLOneShotThresholdBytes / sizeof(float), needle, "DdaMPI_AllReduce/LLSpreadTwoShotMultiRank");
+}
+
 // The LL128 tiers sit behind the LL ones in ncclAllReduceDdaFabricLL, each gated
 // on its own threshold. Under the defaults the LL tiers claim everything up to
 // 16 MiB while an LL128 slot tops out near the same size, which leaves LL128 a

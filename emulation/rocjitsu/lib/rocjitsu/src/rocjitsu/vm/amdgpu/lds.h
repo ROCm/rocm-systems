@@ -4,7 +4,10 @@
 #ifndef ROCJITSU_VM_AMDGPU_LDS_H_
 #define ROCJITSU_VM_AMDGPU_LDS_H_
 
+#include "rocjitsu/base/api.h"
+#include "rocjitsu/base/rj_compiler.h"
 #include "simdojo/components/memory_interface.h"
+#include "util/bit.h"
 
 #include <algorithm>
 #include <cassert>
@@ -15,6 +18,46 @@
 
 namespace rocjitsu {
 namespace amdgpu {
+
+/// \NPI Review allocation and addressable granules for each new ISA.
+/// Physical workgroup allocations are rounded separately from the kernel descriptor encoding.
+constexpr uint32_t lds_allocation_granule(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return 512;
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return 1024;
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return 1280;
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    return 2048;
+  default:
+    // Legacy fallback for architectures without an AMDGPU ISA profile.
+    return 256;
+  }
+}
+
+constexpr uint64_t lds_allocation_bytes(rj_code_arch_t arch, uint32_t requested) {
+  const uint64_t granule = lds_allocation_granule(arch);
+  return (uint64_t{requested} + granule - 1) / granule * granule;
+}
+
+/// Size visible to DS and FLAT-LDS instructions, in bytes.
+constexpr uint64_t lds_workgroup_window_bytes(rj_code_arch_t arch, uint32_t requested) {
+  // GFX11 and GFX12 place workgroups on 1 KiB boundaries but program LDS_SIZE in 512-byte units.
+  if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+      arch == ROCJITSU_CODE_ARCH_RDNA4)
+    return util::align_up(uint64_t{requested}, uint64_t{512});
+  // RDNA2 ISA §3.6.6 restricts accesses to the allocated 256-DWORD blocks.
+  // LDS_SIZE encoding and HWREG reporting units do not reduce this window.
+  return lds_allocation_bytes(arch, requested);
+}
 
 /// Reserved value used when an instruction lane has no valid LDS address.
 constexpr uint32_t kInvalidLdsAddress = UINT32_MAX;
@@ -219,34 +262,48 @@ private:
     return static_cast<uint64_t>(addr) + size <= capacity_bytes_;
   }
 
+  static void copy_bytes(uint8_t *dst, const uint8_t *src, size_t size) {
+    switch (size) {
+    case 2:
+      std::memcpy(dst, src, 2);
+      break;
+    case 4:
+      std::memcpy(dst, src, 4);
+      break;
+    case 8:
+      std::memcpy(dst, src, 8);
+      break;
+    case 16:
+      std::memcpy(dst, src, 16);
+      break;
+    default:
+      std::memcpy(dst, src, size);
+    }
+  }
+
   void read_backing(uint32_t addr, uint8_t *dst, uint32_t size) const {
     const size_t begin = addr;
-    const size_t backed = begin < data_.size() ? std::min<size_t>(size, data_.size() - begin) : 0;
-    // Expose common load widths so the compiler can replace memcpy with fixed-size loads.
-    if (backed == 4)
-      std::memcpy(dst, &data_[begin], 4);
-    else if (backed == 8)
-      std::memcpy(dst, &data_[begin], 8);
-    else if (backed == 2)
-      std::memcpy(dst, &data_[begin], 2);
-    else if (backed != 0)
-      std::memcpy(dst, &data_[begin], backed);
-    if (backed != size)
-      std::memset(dst + backed, 0, size - backed);
+    if (begin < data_.size() && size <= data_.size() - begin) {
+      copy_bytes(dst, data_.data() + begin, size);
+      return;
+    }
+    for (uint32_t i = 0; i < size; ++i)
+      dst[i] = begin + i < data_.size() ? data_[begin + i] : 0;
   }
 
   void write_backing(size_t offset, const uint8_t *src, size_t size) {
     assert(offset <= capacity_bytes_ && size <= capacity_bytes_ - offset);
     ensure_materialized(offset + size);
-    // Keep the checked loop explicit: GCC 15 can retain the vector's old object
-    // size across resize and report a false stringop-overflow for memcpy here.
-    for (size_t i = 0; i < size; ++i)
-      data_[offset + i] = src[i];
+    copy_bytes(data_.data() + offset, src, size);
   }
 
   void ensure_materialized(size_t required) {
-    if (required <= data_.size())
-      return;
+    if (required > data_.size())
+      grow_backing(required);
+  }
+
+  // Keep the resize out of line so GCC does not carry an old allocation's size into later stores.
+  RJ_NOINLINE void grow_backing(size_t required) {
     assert(required <= capacity_bytes_);
 
     // Grow in fixed 4 KiB backing granules so storage tracks the allocated LDS

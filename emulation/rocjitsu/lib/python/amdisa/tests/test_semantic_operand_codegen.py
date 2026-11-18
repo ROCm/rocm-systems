@@ -3,6 +3,8 @@
 
 """Codegen regressions for semantic register operands."""
 
+import pytest
+
 from amdisa.codegen._generator import CodeGenerator, _OperandCtx
 from amdisa.semantics import InstructionSemantics, derive_semantics
 
@@ -160,16 +162,19 @@ def test_mfma_acc_cd_selects_accvgpr_c_and_d_banks():
     )
 
 
-def test_mfma_acc_bits_select_accvgpr_multiplicand_banks():
+@pytest.mark.parametrize(
+    ('encoding', 'has_acc_cd'), [('ENC_VOP3P_MFMA', False), ('ENC_VOP3P', True)]
+)
+def test_mfma_acc_bits_select_accvgpr_multiplicand_banks(encoding, has_acc_cd):
     for operand_name, acc_mask in (('src0', '0x1u'), ('src1', '0x2u')):
         expr = CodeGenerator._operand_encoding_value_expr(
             _OperandCtx(
                 operand_name,
-                'ENC_VOP3P',
+                encoding,
                 packed_16bit=False,
                 operand_type='OPR_SRC_VGPR_OR_ACCVGPR',
                 has_acc_field=True,
-                has_acc_cd_field=True,
+                has_acc_cd_field=has_acc_cd,
             )
         )
         assert expr == (
@@ -178,21 +183,6 @@ def test_mfma_acc_bits_select_accvgpr_multiplicand_banks():
             '(OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_ACC_MIN - '
             'OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_VGPR_MIN) : 0))'
         )
-
-
-def test_mfma_acc_without_acc_cd_does_not_fold_multiplicand_banks():
-    for operand_name in ('src0', 'src1'):
-        expr = CodeGenerator._operand_encoding_value_expr(
-            _OperandCtx(
-                operand_name,
-                'ENC_VOP3P',
-                packed_16bit=False,
-                operand_type='OPR_SRC_VGPR_OR_ACCVGPR',
-                has_acc_field=True,
-                has_acc_cd_field=False,
-            )
-        )
-        assert expr == f'reinterpret_cast<const OpEncoding*>(inst)->{operand_name}'
 
 
 def test_accvgpr_dst_is_canonicalized_into_acc_range():

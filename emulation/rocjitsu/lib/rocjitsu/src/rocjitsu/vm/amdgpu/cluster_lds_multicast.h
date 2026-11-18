@@ -5,6 +5,7 @@
 #define ROCJITSU_VM_AMDGPU_CLUSTER_LDS_MULTICAST_H_
 
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
+#include "util/result.h"
 
 #include <array>
 #include <cstdint>
@@ -57,13 +58,16 @@ struct ClusterLdsMulticastTransaction {
 enum class [[nodiscard]] ClusterLdsMulticastResult {
   Complete,
   Deferred,
+  InvalidPayload,
+  InvalidTarget,
 };
 
 using ClusterLdsMulticastCompletion = std::function<void()>;
 
 /// @brief Remap a source WG LDS address into an equivalent target WG LDS window.
-uint64_t remap_cluster_lds_addr(uint32_t source_lds_base, uint32_t target_lds_base,
-                                uint64_t source_lds_addr);
+/// @details Fails if the address precedes its source base.
+util::FailureOr<uint64_t> remap_cluster_lds_addr(uint32_t source_lds_base, uint32_t target_lds_base,
+                                                 uint64_t source_lds_addr);
 
 /// @brief Return the lane LDS address remapped into one target LDS window.
 ///
@@ -90,7 +94,7 @@ public:
   /// @details Backends returning Complete must perform all writes before return
   /// and must not invoke complete. Backends returning Deferred take ownership of
   /// txn and must invoke complete exactly once after all participant writes are
-  /// visible.
+  /// visible. Rejected transactions must not invoke complete. Earlier lane writes may remain.
   virtual ClusterLdsMulticastResult submit(ClusterLdsMulticastTransaction txn,
                                            ClusterLdsMulticastCompletion complete) = 0;
 };
