@@ -3696,7 +3696,7 @@ struct LdsBarrierArriveTest : testing::Test {
   /// Execute ds_atomic_async_barrier_arrive_b64 for the lanes in `exec`.
   void arrive_async(uint64_t exec) {
     wf->set_exec(exec);
-    const std::array<uint32_t, 2> words = {0xd9580000u, 0x00000000u};
+    const auto words = cdna5::build_vds(cdna5::kDsAtomicAsyncBarrierArriveB64Vds, {.addr = 0});
     auto inst = std::make_unique<cdna5::DsAtomicAsyncBarrierArriveB64Vds>(words.data());
     ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     amdgpu::LocalMemPipeline pipeline;
@@ -3874,6 +3874,10 @@ TEST_F(LdsBarrierArriveTest, TensorTransferArrivesAfterItIssuesAndMovesItsData) 
     write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 18));
     write_wave_sgpr(*cu, *wf, 13, (1u << 16) | (kCell >> 3));
     write_wave_sgpr(*cu, *wf, 15, 1u << 16);
+    // tensor_load_to_lds and tensor_store_from_lds with descriptor group 0 in
+    // SGPRs 0-3 and group 1 in SGPRs 12-19; the last word's bytes are VADDR0 to
+    // VADDR3. Groups 2 and 3 are NULL: "These fields recognize NULL as 0x7C"
+    // (CDNA5 ISA 10.11.1).
     const std::array<uint32_t, 3> words = {store ? 0xd0714001u : 0xd0710001u, 0x7c000000u,
                                            0x7c7c0c00u};
     auto inst = decode_gfx1250(words, store ? "tensor_store_from_lds" : "tensor_load_to_lds");
