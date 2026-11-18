@@ -28,7 +28,7 @@
 static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   // ddaLLMax: DDA LL tier ceiling per collective (fabric gfx1250 only).
   .ddaLLMax = {
-    0,                   // [0] Broadcast      -- not used
+    16ULL*1024,          // [0] Broadcast       -- LL beats Ring 1.5-4.5x to 16K at 4-24 ranks
     0,                   // [1] Reduce          -- not used
     64ULL*1024,          // [2] AllGather         // [2] AllGather
     4ULL*1024*1024,      // [3] ReduceScatter   -- LL beats LL128 to 4M at 4 ranks; nRanks x 1M below 4 ranks
@@ -41,7 +41,9 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   // ddaLL128Max: DDA LL128 tier ceiling per collective.
   // RCCL_PARAM(DdaLL128, ...) defaults to 1 (enabled); set RCCL_DDA_LL128=0 to disable.
   .ddaLL128Max = {
-    0,                   // [0] Broadcast      -- not used
+    128ULL*1024,         // [0] Broadcast       -- LL128 beats Ring to 1M/512K/512K/256K at 4/8/12/16 ranks and
+                         //                        ties it at 64K-128K at 24; the crossover halves as ranks
+                         //                        double, so this is the 24-rank total
     0,                   // [1] Reduce          -- not used
     128ULL*1024*1024,    // [2] AllGather       -- beats Ring at 128M on 8-64 ranks (AICOMRCCL-2876)
     224ULL*1024*1024,    // [3] ReduceScatter   -- LL128 through 224M total below 8 ranks
@@ -273,7 +275,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
 static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   // ddaLLMax: DDA LL tier ceiling per collective (fabric gfx1250 only).
   .ddaLLMax = {
-    0,                   // [0] Broadcast      -- not used
+    16ULL*1024,          // [0] Broadcast       -- LL beats Ring 1.9x to 16K at 16 ranks (128K at 8)
     0,                   // [1] Reduce          -- not used
     512ULL*1024,         // [2] AllGather       -- LL beats LL128 1.4-1.6x to 512K at 8 ranks; the
                          //                        crossover falls with rank count (512K at 16, ~128K
@@ -289,7 +291,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   // ddaLL128Max: DDA LL128 tier ceiling per collective.
   // RCCL_PARAM(DdaLL128, ...) defaults to 1 (enabled); set RCCL_DDA_LL128=0 to disable.
   .ddaLL128Max = {
-    0,                   // [0] Broadcast      -- not used
+    128ULL*1024,         // [0] Broadcast       -- LL128 beats Ring 1.5x to 128K at 16 ranks (256K at 8)
     0,                   // [1] Reduce          -- not used
     64ULL*1024*1024,     // [2] AllGather       -- Ring beats it 1.1-1.4x at 128M-256M on 8/16/32 (DPX)
     4ULL*1024*1024,      // [3] ReduceScatter   -- below 8 ranks: LL128 through 1 MiB/rank at 4 GPUs.
