@@ -10,6 +10,16 @@
 // The TDM reduction path of reduceCopy for the SIMPLE generic kernels. common_kernel.h includes it after BytePack, the
 // reduction functors and kRcclTdmPolicy are defined, and before reduceCopy, which calls it.
 
+// Copies with two or more destinations go to reduceCopyTdm, which reads the source once; tryTdmCopy keeps the rest.
+__device__ __forceinline__ bool tdmReduceTakesCopy(int nDsts) {
+  return 2 <= nDsts;
+}
+
+#ifdef RCCL_TDM_REDUCE_TEST_HOOKS
+// Copies reduceCopyTdm has taken, so the device tests can see which path reduceCopy chose.
+__device__ unsigned int rcclTdmReduceTestCopies;
+#endif
+
 #if TDM_SUPPORTED && ENABLE_TDM_SIMPLE
 // The warp's staging window holds two tiles: tile 0 accumulates, tile 1 receives each further source in turn.
 constexpr int kRcclTdmReduceTileBytes = RCCL_TDM_STAGE_BYTES_PER_WARP / 2;
@@ -72,11 +82,9 @@ __device__ __forceinline__ bool tdmReduceIsCopy(int nSrcs, bool postOp) {
   return nSrcs == 1 && PreOpIsIdentity && (PostOpIsIdentity || !postOp);
 }
 
-// Tiles of a slice through the TDM mover: load, reduce in LDS, store to every destination. A copy-shaped slice skips
-// the reduce and goes through whole: its tiles are sized so every warp gets the same number, at most one reduce tile
-// each, and only the last is shorter. Copies alternate the warp's two tiles, so the stores of one overlap the load of
-// the next. Updates the cursors and rotates `thread` the same way reduceCopyPacks does, so the remainder of a
-// reduction can be handed to it.
+// Tiles of a slice through the TDM mover: load, reduce in LDS, store to every destination. A copy skips the reduce and
+// takes the whole slice in equal tiles per warp, alternating the two tiles so stores overlap the next load.
+// Updates the cursors and rotates `thread` the same way reduceCopyPacks does, so a reduction's remainder can follow.
 template <typename RedFn, typename T, int MaxSrcs, int MaxDsts, int PreOpSrcs, typename IntBytes, typename SrcPtrFn,
           typename DstPtrFn>
 __device__ __forceinline__ void reduceCopyTdm(int nThreads, int& thread, uint64_t redArg, bool postOp, int nSrcs,
@@ -86,6 +94,9 @@ __device__ __forceinline__ void reduceCopyTdm(int nThreads, int& thread, uint64_
   const int warp = thread / WARP_SIZE;
   const int lane = laneId();
   const bool copy = tdmReduceIsCopy<RedFn, PreOpSrcs>(nSrcs, postOp);
+#ifdef RCCL_TDM_REDUCE_TEST_HOOKS
+  if (copy && thread == 0) atomicAdd(&rcclTdmReduceTestCopies, 1u);
+#endif
 
   IntBytes tileBytes = kRcclTdmReduceTileBytes;
   IntBytes nTiles = nBytesAhead / tileBytes;
@@ -147,10 +158,9 @@ __device__ __forceinline__ bool canUseTdmReduce(int thread, int nThreads, bool p
                                                 SrcPtrFn const& srcPtrFn, int nDsts, DstPtrFn const& dstPtrFn,
                                                 IntBytes nBytes) {
   if (nSrcs < 1) return false;
-  // Single-destination copies belong to tryTdmCopy. Multi-destination copies come here so each tile is read once.
-  // reduceCopyTdm takes a copy of any size; a reduction needs at least one whole tile.
+  // A copy of any size qualifies; a reduction needs at least one whole tile.
   if (tdmReduceIsCopy<RedFn, PreOpSrcs>(nSrcs, postOp)) {
-    if (!ncclShmem.comm.tdmSimpleEnable || nDsts < 2 || nBytes <= 0) return false;
+    if (!ncclShmem.comm.tdmSimpleEnable || !tdmReduceTakesCopy(nDsts) || nBytes <= 0) return false;
   } else if (!ncclShmem.comm.tdmSimpleReduceEnable || nBytes < kRcclTdmReduceTileBytes) {
     return false;
   }

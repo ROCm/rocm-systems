@@ -26,6 +26,8 @@
 #ifndef RCCL_DEVICE_LINKER
 #define RCCL_DEVICE_LINKER
 #endif
+// Counts the copies reduceCopyTdm takes (rcclTdmReduceTestCopies), so a case can tell it from tryTdmCopy.
+#define RCCL_TDM_REDUCE_TEST_HOOKS
 #include "common_kernel.h"
 
 namespace RcclUnitTesting
@@ -87,8 +89,8 @@ __global__ void __launch_bounds__(kBlockThreads)
 #endif
 }
 
-// Runs reduceCopyTdm on a copy alone, without the vector passes reduceCopy adds after it, so every output byte comes
-// from the mover. Writes the bytes it left for the vector path, or -1 when the device code has no TDM path.
+// Runs reduceCopyTdm on a copy without reduceCopy's vector passes, so only the mover writes the output. Writes the
+// bytes left for the vector path, or -1 when the device code has no TDM path.
 template<typename T, int NDsts>
 __global__ void __launch_bounds__(kBlockThreads)
   kCopyTdmOnly(T* src, T* const* dsts, ssize_t nElts, ssize_t* left) {
@@ -128,10 +130,23 @@ protected:
   template<typename T>
   static T value(size_t i, int s);
 
-  // Runs one reduceCopy shape with a TDM switch on and off and checks both against `ref`, and checks that the TDM gate
-  // admits the shape only with the switch on, and only when `expectTdm`. The switch is RCCL_TDM_SIMPLE_REDUCE_ENABLE,
-  // or RCCL_TDM_SIMPLE_ENABLE with `copySwitch`. `offElts` shifts every pointer off the 256-byte alignment the TDM
-  // gate requires.
+  // Checks that `out` holds `expected` from `start` on and the sentinel everywhere else.
+  template<typename T>
+  static void checkDst(const std::vector<T>& out, size_t start, const std::vector<T>& expected, const T& sentinel,
+                       const std::string& where) {
+    for (size_t i = 0; i < expected.size(); i++) {
+      ASSERT_EQ(0, std::memcmp(&out[start + i], &expected[i], sizeof(T)))
+        << where << ": mismatch at element " << i << " of " << expected.size();
+    }
+    for (size_t i = 0; i < out.size(); i++) {
+      if (i >= start && i < start + expected.size()) continue;
+      ASSERT_EQ(0, std::memcmp(&out[i], &sentinel, sizeof(T))) << where << ": guard overwritten at index " << i;
+    }
+  }
+
+  // Runs one reduceCopy shape with a TDM switch on and off against `ref`, and checks the TDM gate and, for copies, that
+  // reduceCopyTdm took the slice exactly when `expectTdm`. The switch is RCCL_TDM_SIMPLE_REDUCE_ENABLE, or
+  // RCCL_TDM_SIMPLE_ENABLE with `copySwitch`. `offElts` offsets every pointer by that many elements.
   template<typename RedOp, typename T, int NSrcs, int NDsts, int PreOpSrcs>
   void run(size_t nElts, size_t offElts, uint64_t redArg, bool postOp, bool expectTdm,
            const std::function<T(const std::vector<std::vector<T>>&, size_t)>& ref, const std::string& tag,
@@ -178,9 +193,13 @@ protected:
       dSrcPtrs.copyFrom(srcPtrs);
       dDstPtrs.copyFrom(dstPtrs);
 
+      const unsigned int zero = 0;
+      HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(rcclTdmReduceTestCopies), &zero, sizeof(zero)));
       kReduceCopyTdm<RedOp, T, NSrcs, NDsts, PreOpSrcs><<<1, kBlockThreads>>>(
         dSrcPtrs.ptr, dDstPtrs.ptr, static_cast<ssize_t>(nElts), redArg, postOp, tdmCopy, tdmReduce);
       syncAndCheck();
+      unsigned int copies = 0;
+      HIP_CHECK(hipMemcpyFromSymbol(&copies, HIP_SYMBOL(rcclTdmReduceTestCopies), sizeof(copies)));
 
       DeviceBuffer<int> dGate(1);
       kTdmReduceGate<RedOp, T, NSrcs, NDsts, PreOpSrcs><<<1, kBlockThreads>>>(
@@ -189,18 +208,12 @@ protected:
       const int gate = dGate.copyTo()[0];
       if (gate < 0) GTEST_SKIP() << "Device code was built without the TDM reduce path";
       ASSERT_EQ(tdm && expectTdm ? 1 : 0, gate) << tag << " tdm=" << tdm << ": TDM gate";
+      ASSERT_EQ(copySwitch && tdm && expectTdm ? 1u : 0u, copies)
+        << tag << " tdm=" << tdm << ": copies reduceCopyTdm took";
 
       for (int d = 0; d < NDsts; d++) {
-        std::vector<T> out = dDst[d].copyTo();
-        for (size_t i = 0; i < nElts; i++) {
-          ASSERT_EQ(0, std::memcmp(&out[dstStart + i], &expected[i], sizeof(T)))
-            << tag << " tdm=" << tdm << " dst=" << d << ": mismatch at element " << i << " of " << nElts;
-        }
-        for (size_t i = 0; i < dstTotal; i++) {
-          if (i >= dstStart && i < dstStart + nElts) continue;
-          ASSERT_EQ(0, std::memcmp(&out[i], &sentinel, sizeof(T)))
-            << tag << " tdm=" << tdm << " dst=" << d << ": guard overwritten at index " << i;
-        }
+        ASSERT_NO_FATAL_FAILURE(checkDst(dDst[d].copyTo(), dstStart, expected, sentinel,
+                                         tag + " tdm=" + std::to_string(tdm) + " dst=" + std::to_string(d)));
       }
     }
   }
@@ -242,16 +255,7 @@ protected:
     ASSERT_EQ(0, left) << tag << ": reduceCopyTdm left bytes for the vector path";
 
     for (int d = 0; d < NDsts; d++) {
-      std::vector<T> out = dDst[d].copyTo();
-      for (size_t i = 0; i < nElts; i++) {
-        ASSERT_EQ(0, std::memcmp(&out[guard + i], &hSrc[i], sizeof(T)))
-          << tag << " dst=" << d << ": mismatch at element " << i << " of " << nElts;
-      }
-      for (size_t i = 0; i < dstTotal; i++) {
-        if (i >= guard && i < guard + nElts) continue;
-        ASSERT_EQ(0, std::memcmp(&out[i], &sentinel, sizeof(T)))
-          << tag << " dst=" << d << ": guard overwritten at index " << i;
-      }
+      ASSERT_NO_FATAL_FAILURE(checkDst(dDst[d].copyTo(), guard, hSrc, sentinel, tag + " dst=" + std::to_string(d)));
     }
   }
 };
@@ -364,8 +368,7 @@ static float copyRef(const std::vector<std::vector<float>>& src, size_t i) {
   return src[0][i];
 }
 
-// recvCopySend with unregistered buffers: one FIFO source to the output and the next peer, read once per tile. Four
-// rounds of 6400-byte tiles run both halves of the ping-pong; the last tile is shorter and warp 7 runs one fewer.
+// recvCopySend: one FIFO source to the output and the next peer, in four rounds of 6400-byte tiles, the last shorter.
 TEST_F(TdmReduceCopyTest, CopyF32OneSrcTwoDsts) {
   run<FuncSum<float>, float, 1, 2, 0>(tileElts<float>(3) + 333, 0, 0, false, true, copyRef, "copy1x2",
                                       /*copySwitch=*/true);
@@ -380,6 +383,11 @@ TEST_F(TdmReduceCopyTest, CopyF32UnevenTilesThreeDsts) {
 // A copy shorter than one tile still goes to the mover, in 512-byte tiles.
 TEST_F(TdmReduceCopyTest, CopyF32BelowOneTileTwoDsts) {
   run<FuncSum<float>, float, 1, 2, 0>(1000, 0, 0, false, true, copyRef, "copySmall1x2", /*copySwitch=*/true);
+}
+
+// An aborted genericOp passes an empty slice; the pointers stay aligned, so only the size refuses it.
+TEST_F(TdmReduceCopyTest, CopyF32EmptySliceFallsBack) {
+  run<FuncSum<float>, float, 1, 2, 0>(0, 64, 0, false, false, copyRef, "copyEmpty1x2", /*copySwitch=*/true);
 }
 
 // Pointers off the 256-byte alignment still fail the gate for copies.
