@@ -15,7 +15,7 @@
 
 ### Fixed
 
-* The exported `hip::hipfile` CMake target no longer requires C++20 of the targets that link it. Previously, it carried hipFile's own C++ standard as a usage requirement, so CMake compiled every C++ target that linked it as C++20 (or the standard set by `HIPFILE_CXX_STANDARD`), whatever standard that target asked for. Consumers that relied on getting C++20 this way must now request it themselves, for example with `target_compile_features(<target> PRIVATE cxx_std_20)`.
+* The exported `hip::hipfile` CMake target no longer requires C++20 of the targets that link it. Previously, it carried hipFile's own C++ standard as a usage requirement, so CMake compiled every C++ target that linked it as at least C++20 (or the standard set by `HIPFILE_CXX_STANDARD`), even if that target asked for an older one. Consumers that relied on getting C++20 this way must now request it themselves, for example with `target_compile_features(<target> PRIVATE cxx_std_20)`.
 * `hipfile.h` no longer triggers `-Wundef` when compiled as C++11 or C++14. Previously, it tested `__STDC_VERSION__`, which C++ doesn't define, so those builds failed with `-Wundef -Werror`.
 * `ais-check` no longer reports an LVM parity RAID logical volume (`raid4`, `raid5`, `raid6`) as fastpath capable.
 * Per-GPU I/O statistics are now attributed to the GPU that owns the I/O buffer instead of the caller's active HIP device. Previously, `hipFileGetStatsL3()` and `ais-stats` could report counters against the wrong GPU when the active device differed from the buffer's device.
