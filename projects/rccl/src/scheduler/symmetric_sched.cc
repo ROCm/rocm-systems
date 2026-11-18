@@ -102,6 +102,12 @@ static bool symBatchesAlone(const struct ncclTaskColl* t) {
   return t->aggIsolate || t->symkExtract == RCCL_SYMK_EXTRACT_ALLOW_TDM_ONLY;
 }
 
+// [RCCL] Upper bound on a symmetric launch's tuned channel count: the Symk tuning models cap at
+// ncclSymkAgHierMaxBlocks and the Genk model at min(nChannels, maxCTAs).
+static int symkMaxLaunchChannels(struct ncclComm* comm) {
+  return std::max(ncclSymkAgHierMaxBlocks, std::min(comm->nChannels, comm->config.maxCTAs));
+}
+
 // [RCCL] Symk/Genk kernels take a 4 KB argument even when workArgsBytes is 5 KB, so a batch must fit 4 KB.
 static_assert(sizeof(ncclGenkDevWorkArgs4K) == sizeof(ncclSymkDevWorkArgs4K), "symkMaxArgsBytes assumes one size");
 static size_t symkMaxArgsBytes(struct ncclComm* comm) {
@@ -184,7 +190,7 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
   if (!foundSymm) return ret;
 
   // make sure kernel args space can hold at least a single work
-  size_t const minArgsSize = symkMaxDevWorkArgsSize(MAXCHANNELS, 1, ncclProfilerPluginLoaded());
+  size_t const minArgsSize = symkMaxDevWorkArgsSize(symkMaxLaunchChannels(comm), 1, ncclProfilerPluginLoaded());
   if (symkMaxArgsBytes(comm) < minArgsSize) {
     WARN("Symmetric kernel args size %zu is smaller than minimum size %zu", symkMaxArgsBytes(comm), minArgsSize);
     return ncclInternalError;
@@ -214,7 +220,8 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
         // (it is the head), or if the next task is one (so it starts its own batch).
         bool configBoundary = symBatchesAlone(task) || (task->next != nullptr && symBatchesAlone(task->next));
         if (headTask->func == ncclFuncAlltoAll ||
-            symkMaxDevWorkArgsSize(MAXCHANNELS, nWorks + 1, ncclProfilerPluginLoaded()) > symkMaxArgsBytes(comm) ||
+            symkMaxDevWorkArgsSize(symkMaxLaunchChannels(comm), nWorks + 1, ncclProfilerPluginLoaded()) >
+              symkMaxArgsBytes(comm) ||
             task->next == nullptr || configBoundary) {
           task->isSymLast = 1;
           break;

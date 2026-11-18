@@ -145,7 +145,7 @@ class MakeSymmetricTaskList_Scene {
 ncclTaskColl MakeSymmetricTaskList_MakeTask(MakeSymmetricTaskList_Scene& scene, ncclFunc_t func = ncclFuncBroadcast,
                                             ncclDataType_t datatype = ncclInt8) {
   g_symRegType = ncclSymSendRegRecvReg;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(MAXCHANNELS, 5, false));
+  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(symkMaxLaunchChannels(scene.comm.get()), 5, false));
   ncclTaskColl task{};
   task.func = func;
   task.datatype = datatype;
@@ -1370,7 +1370,7 @@ std::vector<std::pair<char, uint64_t>> ScheduleWindowAndPlain(bool windowFirst, 
   MakeSymmetricTaskList_Scene scene;
   scene.comm->planner.nTasksColl = 5;
   g_symRegType = ncclSymSendRegRecvReg;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(MAXCHANNELS, 5, false));
+  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(symkMaxLaunchChannels(scene.comm.get()), 5, false));
   ScopedHook tmaMask(g_symkTmaKernelMask, [] { return 1 << (int)ncclSymkKernelId_AllGather_TmaST; });
   std::vector<std::pair<char, uint64_t>> batches;
   ScopedHook tuningHook(g_tuningCompute, [&](struct ncclTuningInput_t* in, struct ncclTuningResult_t*) {
@@ -1583,7 +1583,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_ArgsSizeGuard_TooSmall_ReturnsI
   ncclTaskColl task{};
   task.func = ncclFuncBroadcast;
   task.datatype = ncclInt8;
-  scene.comm->workArgsBytes = 0;  // deliberately below calcArgsSize(MAXCHANNELS, 1, false)'s minimum
+  scene.comm->workArgsBytes = 0;  // deliberately below the single-work minimum
   struct ncclTaskColl* remainTasksHead = nullptr;
 
   RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_WARN, NCCL_ALL);
@@ -1602,7 +1602,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_ArgsSizeGuard_SufficientlyLarge
   ncclTaskColl task{};
   task.func = ncclFuncBroadcast;
   task.datatype = ncclInt8;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(MAXCHANNELS, 1, false));
+  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(symkMaxLaunchChannels(scene.comm.get()), 1, false));
   struct ncclTaskColl* remainTasksHead = nullptr;
 
   // Explicit success: the fallback-to-remainder needs this to succeed, but the canonical default now fails loudly.
@@ -1618,7 +1618,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_OuterCursorLoop_VisitsEveryDist
   MakeSymmetricTaskList_Scene scene;
   scene.comm->planner.nTasksColl = 5;
   g_symRegType = ncclSymSendRegRecvReg;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(MAXCHANNELS, 1, false));
+  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(symkMaxLaunchChannels(scene.comm.get()), 1, false));
 
   ncclTaskColl task2{};
   task2.func = ncclFuncAllGather;  // distinct bucket from task1 (different func)
@@ -1644,7 +1644,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_BatchBoundary_ConfigBoundary_Fo
   MakeSymmetricTaskList_Scene scene;
   scene.comm->planner.nTasksColl = 5;
   g_symRegType = ncclSymSendRegRecvReg;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(MAXCHANNELS, 5, false));
+  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(symkMaxLaunchChannels(scene.comm.get()), 5, false));
 
   ncclTaskColl task1{};  // classified first -> becomes the bucket's tail (processed 2nd by the cursor loop)
   task1.func = ncclFuncBroadcast;
@@ -1671,7 +1671,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_BatchBoundary_ConfigBoundary_Ne
   MakeSymmetricTaskList_Scene scene;
   scene.comm->planner.nTasksColl = 5;
   g_symRegType = ncclSymSendRegRecvReg;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(MAXCHANNELS, 5, false));
+  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(symkMaxLaunchChannels(scene.comm.get()), 5, false));
 
   ncclTaskColl task1{};  // classified first -> tail (processed second): its OWN aggIsolate isolates it too
   task1.func = ncclFuncBroadcast;
@@ -1699,7 +1699,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_BatchBoundary_ArgsSizeBudgetExh
   scene.comm->planner.nTasksColl = 5;
   g_symRegType = ncclSymSendRegRecvReg;
   // Room for exactly 2 works per batch, not 3: forces a break after the 2nd task of a 3-task bucket.
-  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(MAXCHANNELS, 2, false));
+  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(symkMaxLaunchChannels(scene.comm.get()), 2, false));
 
   // Bucket is LIFO (last classified = head = first processed), so classify taskThird, taskSecond, taskFirst.
   ncclTaskColl taskFirst{};
@@ -1732,17 +1732,18 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_BatchBoundary_ArgsSizeBudgetExh
 // The default workArgsBytes is 5 KB, but the symmetric kernels take a 4 KB argument: batches must still fit 4 KB.
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_BatchBoundary_WorkArgsAbove4K_CapsBatchesAt4KKernelArg) {
   constexpr size_t kSymkArgBytes = sizeof(ncclSymkDevWorkArgs4K);
+  MakeSymmetricTaskList_Scene scene;
+  const int nCh = symkMaxLaunchChannels(scene.comm.get());
   int maxWorksIn4K = 0;
-  while (symkMaxDevWorkArgsSize(MAXCHANNELS, maxWorksIn4K + 1, false) <= kSymkArgBytes) maxWorksIn4K++;
+  while (symkMaxDevWorkArgsSize(nCh, maxWorksIn4K + 1, false) <= kSymkArgBytes) maxWorksIn4K++;
   ASSERT_GT(maxWorksIn4K, 0);
   const int nTasks = maxWorksIn4K + 13;
 
-  MakeSymmetricTaskList_Scene scene;
   scene.comm->planner.nTasksColl = nTasks;
   g_symRegType = ncclSymSendRegRecvReg;
   scene.comm->workArgsBytes = sizeof(ncclDevKernelArgs5K);
   // Without the 4 KB cap the first batch would take more works than the kernel argument holds.
-  ASSERT_LE(symkMaxDevWorkArgsSize(MAXCHANNELS, maxWorksIn4K + 1, false), scene.comm->workArgsBytes);
+  ASSERT_LE(symkMaxDevWorkArgsSize(nCh, maxWorksIn4K + 1, false), scene.comm->workArgsBytes);
 
   std::vector<ncclTaskColl> tasks(nTasks);
   for (int i = 0; i < nTasks; ++i) {
@@ -1772,7 +1773,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_BatchBoundary_WorkArgsAbove4K_C
   ASSERT_EQ(batchSizes.size(), 2u);
   EXPECT_EQ(batchSizes[0], maxWorksIn4K);
   EXPECT_EQ(batchSizes[1], nTasks - maxWorksIn4K);
-  for (int n : batchSizes) EXPECT_LE(symkMaxDevWorkArgsSize(MAXCHANNELS, n, false), kSymkArgBytes);
+  for (int n : batchSizes) EXPECT_LE(symkMaxDevWorkArgsSize(nCh, n, false), kSymkArgBytes);
 }
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_BasicScalarFieldsWiring) {
@@ -1816,7 +1817,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_AggregatesAcrossBat
   MakeSymmetricTaskList_Scene scene;
   scene.comm->planner.nTasksColl = 5;
   g_symRegType = ncclSymSendRegRecvReg;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(MAXCHANNELS, 5, false));
+  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(symkMaxLaunchChannels(scene.comm.get()), 5, false));
 
   // Bucket is LIFO (last classified = head = first processed), so classify secondTask before headTask.
   ncclTaskColl headTask{};
@@ -1891,7 +1892,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_NvlsSupport_ViaNccl
   task.func = ncclFuncBroadcast;  // not AllGather: the bypass operand must not be what makes this true
   task.datatype = ncclInt32;
   task.opDev.op = ncclDevSum;  // ncclNvlsSupported(ncclDevSum, ncclInt32) == true
-  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(MAXCHANNELS, 5, false));
+  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(symkMaxLaunchChannels(scene.comm.get()), 5, false));
 
   int capturedNvlsSupport = -1;
   ScopedHook tuningHook(g_tuningCompute, [&](struct ncclTuningInput_t* input, struct ncclTuningResult_t*) {
@@ -1911,7 +1912,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_NvlsSupport_ViaAllG
   ncclTaskColl task{};
   task.func = ncclFuncAllGather;  // bypasses ncclNvlsSupported entirely
   task.datatype = ncclInt8;       // ncclNvlsSupported(_, ncclInt8) == false: proves the bypass, not this
-  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(MAXCHANNELS, 5, false));
+  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(symkMaxLaunchChannels(scene.comm.get()), 5, false));
 
   int capturedNvlsSupport = -1;
   ScopedHook tuningHook(g_tuningCompute, [&](struct ncclTuningInput_t* input, struct ncclTuningResult_t*) {
@@ -1932,7 +1933,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_NvlsSupport_FalseWh
   task.func = ncclFuncAllGather;
   task.datatype = ncclInt32;
   task.opDev.op = ncclDevSum;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(MAXCHANNELS, 5, false));
+  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(symkMaxLaunchChannels(scene.comm.get()), 5, false));
 
   int capturedNvlsSupport = -1;
   ScopedHook tuningHook(g_tuningCompute, [&](struct ncclTuningInput_t* input, struct ncclTuningResult_t*) {
@@ -2224,7 +2225,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_FinalAssignmentLoop_ConvertSymT
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_FinalAssignmentLoop_MultiTaskBatch_EnqueuesAllInOrder) {
   MakeSymmetricTaskList_Scene scene;
   g_symRegType = ncclSymSendRegRecvReg;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(MAXCHANNELS, 5, false));
+  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(symkMaxLaunchChannels(scene.comm.get()), 5, false));
 
   // Bucket is LIFO (last classified = head = first processed), so classify secondTask before headTask.
   ncclTaskColl headTask{};
@@ -2257,7 +2258,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_FinalAssignmentLoop_MultiTaskBa
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_OuterCursorLoop_MultipleBucketsAllKernelFound_EnqueuesBoth) {
   MakeSymmetricTaskList_Scene scene;
   g_symRegType = ncclSymSendRegRecvReg;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(MAXCHANNELS, 1, false));
+  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(symkMaxLaunchChannels(scene.comm.get()), 1, false));
 
   ncclTaskColl task2{};
   task2.func = ncclFuncAllGather;  // distinct bucket from task1 (different func)
@@ -2284,7 +2285,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_MixedBuckets_OneKernelFoundOneN
   MakeSymmetricTaskList_Scene scene;
   scene.comm->planner.nTasksColl = 5;
   g_symRegType = ncclSymSendRegRecvReg;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(MAXCHANNELS, 1, false));
+  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(symkMaxLaunchChannels(scene.comm.get()), 1, false));
 
   ncclTaskColl foundTask{};
   foundTask.func = ncclFuncBroadcast;
@@ -2370,7 +2371,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_FinalAssignmentLoop_StopsAtIsSy
   MakeSymmetricTaskList_Scene scene;
   g_symRegType = ncclSymSendRegRecvReg;
   // Room for exactly 2 works per batch, not 3: same split as ...ArgsSizeBudgetExhausted_SplitsIntoTwoBatches.
-  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(MAXCHANNELS, 2, false));
+  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(symkMaxLaunchChannels(scene.comm.get()), 2, false));
 
   // Bucket is LIFO (last classified = head = first processed): classify taskThird, taskSecond, taskFirst.
   ncclTaskColl taskFirst{};
@@ -2418,7 +2419,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_KnownBug_FallbackTailNextNotNul
   MakeSymmetricTaskList_Scene scene;
   g_symRegType = ncclSymSendRegRecvReg;
   // Room for exactly 2 works per batch, not 3: same split as ...ArgsSizeBudgetExhausted_SplitsIntoTwoBatches.
-  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(MAXCHANNELS, 2, false));
+  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(symkMaxLaunchChannels(scene.comm.get()), 2, false));
 
   // Bucket is LIFO (last classified = head = first processed): classify taskThird, taskSecond, taskFirst.
   ncclTaskColl taskFirst{};
