@@ -12,9 +12,10 @@ use super::system::{
 use std::ffi::c_void;
 
 use crate::ffi::*;
+use crate::image::descriptor as image_descriptor;
 use crate::isa::isa_handle;
 use crate::runtime::{boundary, lock, map_error};
-use crate::{image_gfx12, platform, runtime};
+use crate::{platform, runtime};
 
 /// Maximum dimensions of a kernel cluster.
 pub(crate) const KERNEL_CLUSTER_MAX_DIM: HsaAmdDim3 = HsaAmdDim3 {
@@ -304,7 +305,7 @@ pub unsafe extern "C" fn hsa_agent_get_info(
         };
         let gpu = endpoint.as_ref().and_then(|endpoint| endpoint.gpu());
         let gpu_only = gpu.is_some();
-        let image_gpu = gpu.is_some_and(image_gfx12::supported_gpu);
+        let image_gpu = gpu.is_some_and(image_descriptor::supported_gpu);
         // SAFETY: The caller supplies the storage selected by the attribute.
         if let Some(status) = unsafe { write_image_2d_limit(attribute, image_gpu, value) } {
             return status;
@@ -602,7 +603,7 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                 EXT_AGENT_INFO_IMAGE_1DB_MAX_ELEMENTS => write_value(
                     value,
                     if image_gpu {
-                        image_gfx12::BUFFER_MAX_ELEMENTS
+                        image_descriptor::BUFFER_MAX_ELEMENTS
                     } else {
                         0
                     },
@@ -630,7 +631,7 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                 EXT_AGENT_INFO_IMAGE_LINEAR_ROW_PITCH_ALIGNMENT => write_value(
                     value,
                     if image_gpu {
-                        image_gfx12::ROW_ALIGNMENT
+                        image_descriptor::ROW_ALIGNMENT
                     } else {
                         0
                     },
@@ -801,7 +802,7 @@ pub unsafe extern "C" fn hsa_agent_extension_supported(
         }
         let gpu_index = runtime.gpu_index(agent);
         let supported_gpu = gpu_index.is_some_and(|index| match extension {
-            EXTENSION_IMAGES => image_gfx12::supported_gpu(&runtime.gpus[index].info()),
+            EXTENSION_IMAGES => image_descriptor::supported_gpu(&runtime.gpus[index].info()),
             EXTENSION_AMD_PC_SAMPLING => runtime.gpus[index].pc_sampling_supported,
             _ => true,
         });
@@ -850,7 +851,7 @@ pub unsafe extern "C" fn hsa_agent_major_extension_supported(
         }
         let gpu_index = runtime.gpu_index(agent);
         let supported_gpu = gpu_index.is_some_and(|index| match extension {
-            EXTENSION_IMAGES => image_gfx12::supported_gpu(&runtime.gpus[index].info()),
+            EXTENSION_IMAGES => image_descriptor::supported_gpu(&runtime.gpus[index].info()),
             EXTENSION_AMD_PC_SAMPLING => runtime.gpus[index].pc_sampling_supported,
             _ => true,
         });
@@ -901,8 +902,11 @@ mod tests {
                         channel_order: 18,
                         channel_type,
                     };
-                    assert_eq!(image_gfx12::access_capabilities(geometry, image_format), 3);
-                    let format = image_gfx12::format(image_format).unwrap();
+                    assert_eq!(
+                        image_descriptor::access_capabilities(geometry, image_format),
+                        3
+                    );
+                    let format = image_descriptor::format(image_format).unwrap();
                     let descriptor = HsaExtImageDescriptor {
                         geometry,
                         width: storage[1],
@@ -911,7 +915,7 @@ mod tests {
                         array_size: usize::from(geometry == 7),
                         format: image_format,
                     };
-                    assert!(image_gfx12::layout(descriptor, format, 0, 0).is_ok());
+                    assert!(image_descriptor::layout(descriptor, format, 0, 0).is_ok());
                     for oversized in [
                         HsaExtImageDescriptor {
                             width: descriptor.width + 1,
@@ -923,7 +927,7 @@ mod tests {
                         },
                     ] {
                         assert!(matches!(
-                            image_gfx12::layout(oversized, format, 0, 0),
+                            image_descriptor::layout(oversized, format, 0, 0),
                             Err(IMAGE_SIZE_UNSUPPORTED)
                         ));
                     }
