@@ -63,7 +63,7 @@ class SdmaImpl {
   sdma_anvil::SdmaQueueDeviceHandle** deviceHandles_d{nullptr};
   int shm_size{0};     // IPC pod size: the slot count per channel and the agreement group
   int my_pe{0};
-  int pod_rank{0};     // this rank's position in the pod
+  int pod_rank{0};     // index in the IPC pod (0..shm_size-1); not the world rank, my_pe
   int local_size{0};   // pod ranks on this host
   int local_rank{0};   // this rank's position among them
   // Host-side key of the queues this init connected (sdma_policy.cpp); 0 = none.
@@ -73,9 +73,7 @@ class SdmaImpl {
   // already written its own entry at buf + pod_rank * bytes_per_rank.
   using PodAllGather = std::function<void(void* buf, int bytes_per_rank)>;
 
-  // Host initialization (called from IpcSdmaImpl::ipcHostInit). Collective over the IPC pod: ranks
-  // exchange device and host ids, then agree on the connect result, so a failure on any rank drops
-  // SDMA on all of them (ranks that disagree on sdmaEnabled run incompatible alltoalls and hang).
+  // Collective over the IPC pod; a failed connect on any rank drops SDMA on all of them.
   __host__ void sdmaHostInit(int pe, int pod_size, int pod_rank, const PodAllGather& allGather);
   __host__ void sdmaHostStop();
   // Copy this rank's queue handles to deviceHandles_d, or nulls when SDMA was dropped.

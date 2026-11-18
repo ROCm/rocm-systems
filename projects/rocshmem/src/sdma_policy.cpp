@@ -198,8 +198,9 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int pod_sz, int prank,
       return;
     case SdmaDecision::kFallbackConnectFailed:
       LOG_ERROR("SDMA: connect failed on pod rank(s) %s of %d; all of them fall back to IPC "
-                "memcpy. Lower ROCSHMEM_SDMA_NUM_CHANNELS or use fewer ranks per node to keep "
-                "SDMA", agreed.ranks.c_str(), shm_size);
+                "memcpy. Each rank needs pod size x ROCSHMEM_SDMA_NUM_CHANNELS = %d SDMA queues; "
+                "lower ROCSHMEM_SDMA_NUM_CHANNELS or the pod size to keep SDMA",
+                agreed.ranks.c_str(), shm_size, shm_size * numChannels);
       break;
     case SdmaDecision::kFallbackEnvMismatch:
       LOG_ERROR("SDMA: ROCSHMEM_SDMA_ENABLED=0 on pod rank(s) %s of %d only; all of them fall "
