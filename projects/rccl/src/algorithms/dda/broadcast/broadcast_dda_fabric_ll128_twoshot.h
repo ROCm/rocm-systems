@@ -22,6 +22,7 @@
 
 #include "algorithms/dda/device/CollCommon.h"
 #include "algorithms/dda/device/CollCommon_ll128.h"
+#include "device/uniform.h"
 
 namespace dda::common {
 
@@ -71,9 +72,9 @@ __global__ void ddaBroadcastFabricLL128TwoShot(
   const uint32_t flag32 = ddaGetLLEpochInc(epochDev, flatBlockId, 1);
   const uint64_t flag = ((uint64_t)flag32 << 32) | (uint64_t)flag32;
 
-  const uint64_t bankWords = (uint64_t)(flag32 & 1u) * (uint64_t)(bankSize / sizeof(uint64_t));
-  const size_t slotWireWords = chunkSlices * (size_t)kDdaLL128WireWordsPerSlice;
-  const uint64_t gatherOff = bankWords + slotWireWords;
+  const uint64_t bankWords = wave::uniform((uint64_t)(flag32 & 1u) * (uint64_t)(bankSize / sizeof(uint64_t)));
+  const size_t slotWireWords = wave::uniform(chunkSlices * (size_t)kDdaLL128WireWordsPerSlice);
+  const uint64_t gatherOff = wave::uniform(bankWords + slotWireWords);
 
   const size_t gwarp = (size_t)blockIdx.y * (size_t)nwarps + (size_t)warp;
   const size_t wstride = (size_t)gridDim.y * (size_t)nwarps;
