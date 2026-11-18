@@ -569,10 +569,10 @@ resolve_gfx_name(const HsaNodeProperties& props)
                      << "'; expected gfx<NNN> with >=3 digits, the last of which may be hex";
     }
 
-    // EngineId and OverrideEngineId are unions over the same bit-field layout,
+    // GfxIpVersion and OverrideGfxIpVersion are unions over the same bit-field layout,
     // so the version digits come out of the .ui32 view of whichever one speaks.
-    const auto& reported   = props.EngineId.ui32;
-    const auto& overriding = props.OverrideEngineId.ui32;
+    const auto& reported   = props.GfxIpVersion.ui32;
+    const auto& overriding = props.OverrideGfxIpVersion.ui32;
     const bool  overridden = (overriding.Major != 0);
 
     const uint32_t major    = overridden ? overriding.Major : reported.Major;
@@ -649,8 +649,16 @@ apply_node_topology(const DxgNode& node, rocprofiler_agent_t& info)
     info.capability.Value          = props.Capability.Value;
     info.hive_id                   = props.HiveID;
     info.gpu_id                    = props.KFDGpuID;
-    info.fw_version.ui32.uCode     = props.EngineId.ui32.uCode;
-    info.sdma_fw_version.uCodeSDMA = props.uCodeEngineVersions.uCodeSDMA;
+    // fw_version is the GFXIP version, resolved the same way resolve_gfx_name() does,
+    // so an HSA_OVERRIDE_GFX_VERSION override wins over the reported version.
+    const auto& gfxip = (props.OverrideGfxIpVersion.ui32.Major != 0)
+                            ? props.OverrideGfxIpVersion.ui32
+                            : props.GfxIpVersion.ui32;
+    info.fw_version.ui32.Major         = gfxip.Major;
+    info.fw_version.ui32.Minor         = gfxip.Minor;
+    info.fw_version.ui32.Stepping      = gfxip.Stepping;
+    info.sdma_fw_version.uCodeCompute  = props.uCodeEngineVersions.uCodeCompute;
+    info.sdma_fw_version.uCodeSDMA     = props.uCodeEngineVersions.uCodeSDMA;
 
     auto _uuid       = ::rocprofiler::agent::uuid_view_t{};
     _uuid.value64[0] = props.UniqueID;

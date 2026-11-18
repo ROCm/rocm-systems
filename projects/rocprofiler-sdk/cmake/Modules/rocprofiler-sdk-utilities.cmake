@@ -181,7 +181,7 @@ int main()
     sizes.StructureSizes          = sizeof(HsaStructureSizes);
     sizes.SizeOfHsaNodeProperties = sizeof(HsaNodeProperties);
     return (int) (props.LuidLowPart + props.LuidHighPart +
-                  props.OverrideEngineId.ui32.Major + sizes.SizeOfHsaNodeProperties);
+                  props.OverrideGfxIpVersion.ui32.Major + sizes.SizeOfHsaNodeProperties);
 }
 "
             ROCPROFILER_SDK_DXG_TOPOLOGY_SUPPORTED)

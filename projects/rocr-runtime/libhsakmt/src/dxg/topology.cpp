@@ -976,17 +976,17 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
       pr_err("HSA_OVERRIDE_GFX_VERSION %s is invalid\n", envvar);
       return HSAKMT_STATUS_ERROR;
     }
-    props.OverrideEngineId.ui32.Major = major & 0x3f;
-    props.OverrideEngineId.ui32.Minor = minor & 0xff;
-    props.OverrideEngineId.ui32.Stepping = step & 0xff;
+    props.OverrideGfxIpVersion.ui32.Major = major & 0x3f;
+    props.OverrideGfxIpVersion.ui32.Minor = minor & 0xff;
+    props.OverrideGfxIpVersion.ui32.Stepping = step & 0xff;
   } else {
-    props.EngineId.ui32.Major = device->Major();
-    props.EngineId.ui32.Minor = device->Minor();
-    props.EngineId.ui32.Stepping = device->Stepping();
+    props.GfxIpVersion.ui32.Major = device->Major();
+    props.GfxIpVersion.ui32.Minor = device->Minor();
+    props.GfxIpVersion.ui32.Stepping = device->Stepping();
   }
 
   snprintf(reinterpret_cast<char*>(props.AMDName), sizeof(props.AMDName) - 1, "GFX%06x",
-           HSA_GET_GFX_VERSION_FULL(props.EngineId.ui32));
+           HSA_GET_GFX_VERSION_FULL(props.GfxIpVersion.ui32));
 
   if (!dxg_runtime->is_svm_api_supported) {
     props.Capability.ui32.SVMAPISupported = 0;
@@ -995,10 +995,10 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
 
   // Get VGPR/SGPR size in byte per CU
   props.SGPRSizePerCU = SGPR_SIZE_PER_CU;
-  props.VGPRSizePerCU = get_vgpr_size_per_cu(props.EngineId);
+  props.VGPRSizePerCU = get_vgpr_size_per_cu(props.GfxIpVersion);
 
   if (props.NumFComputeCores) {
-    assert(props.EngineId.ui32.Major && "HSA_OVERRIDE_GFX_VERSION may be needed");
+    assert(props.GfxIpVersion.ui32.Major && "HSA_OVERRIDE_GFX_VERSION may be needed");
   }
 
   props.WallClockKHz = device->GPUCounterFrequency() / 1000ull;

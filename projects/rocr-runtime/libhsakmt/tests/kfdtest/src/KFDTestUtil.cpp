@@ -194,10 +194,10 @@ bool hasPciAtomicsSupport(int node) {
 unsigned int FamilyIdFromNode(const HsaNodeProperties *props) {
     unsigned int familyId = FAMILY_UNKNOWN;
 
-    switch (props->EngineId.ui32.Major) {
+    switch (props->GfxIpVersion.ui32.Major) {
     case 7:
-        if (props->EngineId.ui32.Minor == 0) {
-            if (props->EngineId.ui32.Stepping == 0)
+        if (props->GfxIpVersion.ui32.Minor == 0) {
+            if (props->GfxIpVersion.ui32.Stepping == 0)
                 familyId = FAMILY_KV;
             else
                 familyId = FAMILY_CI;
@@ -205,18 +205,18 @@ unsigned int FamilyIdFromNode(const HsaNodeProperties *props) {
         break;
     case 8:
         familyId = FAMILY_VI;
-        if (props->EngineId.ui32.Stepping == 1)
+        if (props->GfxIpVersion.ui32.Stepping == 1)
             familyId = FAMILY_CZ;
         break;
     case 9:
         familyId = FAMILY_AI;
-        if (props->EngineId.ui32.Minor >= 4)
+        if (props->GfxIpVersion.ui32.Minor >= 4)
             familyId = FAMILY_AV;
-        else if (props->EngineId.ui32.Stepping == 2)
+        else if (props->GfxIpVersion.ui32.Stepping == 2)
             familyId = FAMILY_RV;
-        else if (props->EngineId.ui32.Stepping == 8)
+        else if (props->GfxIpVersion.ui32.Stepping == 8)
             familyId = FAMILY_AR;
-        else if (props->EngineId.ui32.Stepping == 10)
+        else if (props->GfxIpVersion.ui32.Stepping == 10)
             familyId = FAMILY_AL;
         break;
     case 10:
@@ -226,7 +226,7 @@ unsigned int FamilyIdFromNode(const HsaNodeProperties *props) {
         familyId = FAMILY_GFX11;
         break;
     case 12:
-        if (props->EngineId.ui32.Minor == 5)
+        if (props->GfxIpVersion.ui32.Minor == 5)
             familyId = FAMILY_GFX125X;
         else
             familyId = FAMILY_GFX12;
@@ -264,7 +264,7 @@ void GetHwQueueInfo(const HsaNodeProperties *props,
 
 bool isTonga(const HsaNodeProperties *props) {
     /* Tonga has some workarounds in the thunk that cause certain failures */
-    if (props->EngineId.ui32.Major == 8 && props->EngineId.ui32.Stepping == 2) {
+    if (props->GfxIpVersion.ui32.Major == 8 && props->GfxIpVersion.ui32.Stepping == 2) {
         return true;
     }
 
@@ -272,9 +272,9 @@ bool isTonga(const HsaNodeProperties *props) {
 }
 
 const uint32_t GetGfxVersion(const HsaNodeProperties *props) {
-    return ((props->EngineId.ui32.Major << 16) |
-            (props->EngineId.ui32.Minor <<  8) |
-            (props->EngineId.ui32.Stepping));
+    return ((props->GfxIpVersion.ui32.Major << 16) |
+            (props->GfxIpVersion.ui32.Minor <<  8) |
+            (props->GfxIpVersion.ui32.Stepping));
 }
 
 HSAuint64 GetSystemTickCountInMicroSec() {

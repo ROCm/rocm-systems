@@ -315,8 +315,8 @@ typedef struct _HsaNodeProperties
     HSAuint32       MaxSlotsScratchCU; // Number of temp. memory ("scratch") wave slots available to access,
                                        // may be 0 if HW has no restrictions
 
-    HSA_GFXIP_VERSION EngineId;        // GFXIP version of this node, may be 0
-    HSA_GFXIP_VERSION OverrideEngineId; // GFXIP version override, may be 0
+    HSA_GFXIP_VERSION GfxIpVersion;         // GFXIP version of this node, may be 0
+    HSA_GFXIP_VERSION OverrideGfxIpVersion; // GFXIP version override, may be 0
 
     HSAuint16       VendorId;          // GPU vendor id; 0 on latency (= CPU)-only nodes
     HSAuint16       DeviceId;          // GPU device id; 0 on latency (= CPU)-only nodes

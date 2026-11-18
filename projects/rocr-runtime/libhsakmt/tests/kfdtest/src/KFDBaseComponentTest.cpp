@@ -313,13 +313,13 @@ bool KFDBaseComponentTest::NeedCwsrWA(unsigned int nodeId)
     bool needCwsrWA = false;
     const HsaNodeProperties *props = m_NodeInfo.GetNodeProperties(nodeId);
 
-    needCwsrWA = props->EngineId.ui32.Major == 11 &&
-                  props->EngineId.ui32.Minor == 0 &&
-                  (props->EngineId.ui32.Stepping == 0 ||
-                   props->EngineId.ui32.Stepping == 1 ||
-                   props->EngineId.ui32.Stepping == 2 ||
-                   props->EngineId.ui32.Stepping == 5 ||
-                   (props->EngineId.ui32.Stepping == 3 && props->NumArrays > 1));
+    needCwsrWA = props->GfxIpVersion.ui32.Major == 11 &&
+                  props->GfxIpVersion.ui32.Minor == 0 &&
+                  (props->GfxIpVersion.ui32.Stepping == 0 ||
+                   props->GfxIpVersion.ui32.Stepping == 1 ||
+                   props->GfxIpVersion.ui32.Stepping == 2 ||
+                   props->GfxIpVersion.ui32.Stepping == 5 ||
+                   (props->GfxIpVersion.ui32.Stepping == 3 && props->NumArrays > 1));
 
     return needCwsrWA;
 }

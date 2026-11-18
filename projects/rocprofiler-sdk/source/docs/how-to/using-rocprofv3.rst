@@ -1662,7 +1662,7 @@ Here are the properties of the JSON output schema:
             - **sdma_fw_version** `(object)`: SDMA and compute firmware versions.
                - **uCodeSDMA** `(integer, required)`: SDMA microcode version.
                - **uCodeCompute** `(integer, required)`: Compute microcode version.
-            - **fw_version** `(object)`: GFXIP version.
+            - **gfxip_version** `(object)`: GFXIP version.
                - **Major** `(integer, required)`: GFXIP major version.
                - **Minor** `(integer, required)`: GFXIP minor version.
                - **Stepping** `(integer, required)`: GFXIP stepping.

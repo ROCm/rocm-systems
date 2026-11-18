@@ -63,10 +63,10 @@ make_gfx1150_node()
     props.WaveFrontSize                 = 32;
     props.MaxWavesPerSIMD               = 16;
     props.NumXcc                        = 1;
-    props.EngineId.ui32.Major           = 11;
-    props.EngineId.ui32.Minor           = 5;
-    props.EngineId.ui32.Stepping        = 0;
-    props.EngineId.ui32.uCode           = 42;
+    props.GfxIpVersion.ui32.Major       = 11;
+    props.GfxIpVersion.ui32.Minor       = 5;
+    props.GfxIpVersion.ui32.Stepping    = 0;
+    props.uCodeEngineVersions.uCodeCompute = 42;
     props.uCodeEngineVersions.uCodeSDMA = 17;
     props.VendorId                      = 0x1002;
     props.DeviceId                      = 0x150e;
@@ -148,7 +148,10 @@ TEST(wsl_dxg_topology, identity_fields_are_copied)
     EXPECT_EQ(info.location_id, 0x0300u);
     EXPECT_EQ(info.family_id, 145u);
     // Read back out of the same union bit-fields the thunk fills in.
-    EXPECT_EQ(info.fw_version.ui32.uCode, 42u);
+    EXPECT_EQ(info.fw_version.ui32.Major, 11u);
+    EXPECT_EQ(info.fw_version.ui32.Minor, 5u);
+    EXPECT_EQ(info.fw_version.ui32.Stepping, 0u);
+    EXPECT_EQ(info.sdma_fw_version.uCodeCompute, 42u);
     EXPECT_EQ(info.sdma_fw_version.uCodeSDMA, 17u);
     EXPECT_EQ(info.max_engine_clk_fcompute, 2900u);
 
@@ -197,17 +200,17 @@ TEST(wsl_dxg_topology, gfx_name_precedence)
         EXPECT_EQ(rocprofiler::platform::wsl::resolve_gfx_name(node.props), "gfx1150");
     }
 
-    // HSA_OVERRIDE_GFX_VERSION reaches us as OverrideEngineId with EngineId's
+    // HSA_OVERRIDE_GFX_VERSION reaches us as OverrideGfxIpVersion with GfxIpVersion's
     // version fields left zero, exactly as the HSA runtime sees it.
     {
         const auto _env                                 = ForceGfxEnv{nullptr};
         auto       overridden                           = node;
-        overridden.props.EngineId.ui32.Major            = 0;
-        overridden.props.EngineId.ui32.Minor            = 0;
-        overridden.props.EngineId.ui32.Stepping         = 0;
-        overridden.props.OverrideEngineId.ui32.Major    = 11;
-        overridden.props.OverrideEngineId.ui32.Minor    = 0;
-        overridden.props.OverrideEngineId.ui32.Stepping = 0;
+        overridden.props.GfxIpVersion.ui32.Major            = 0;
+        overridden.props.GfxIpVersion.ui32.Minor            = 0;
+        overridden.props.GfxIpVersion.ui32.Stepping         = 0;
+        overridden.props.OverrideGfxIpVersion.ui32.Major    = 11;
+        overridden.props.OverrideGfxIpVersion.ui32.Minor    = 0;
+        overridden.props.OverrideGfxIpVersion.ui32.Stepping = 0;
         EXPECT_EQ(rocprofiler::platform::wsl::resolve_gfx_name(overridden.props), "gfx1100");
     }
 
@@ -227,7 +230,7 @@ TEST(wsl_dxg_topology, gfx_name_precedence)
     {
         const auto _env                   = ForceGfxEnv{nullptr};
         auto       unknown                = node;
-        unknown.props.EngineId.ui32.Major = 0;
+        unknown.props.GfxIpVersion.ui32.Major = 0;
         EXPECT_TRUE(rocprofiler::platform::wsl::resolve_gfx_name(unknown.props).empty());
     }
 }
