@@ -3,11 +3,13 @@
 
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -29,11 +31,16 @@ RaceDetector::RaceDetector(int nWaves, int vgprCount, int sgprCount, Dim3d workg
   for (int i = 0; i < nWaves; ++i) {
     waveRaceStates.emplace_back(vgprCount, sgprCount, WaveId{i}, this, counterCapacities);
   }
-  acquired_.assign(static_cast<size_t>(nWaves) * nWaves, 0);
-  // Each wave starts in epoch 1, so 0 means nothing acquired.
-  for (int i = 0; i < nWaves; ++i)
-    acquired(WaveId{i}, WaveId{i}) = 1;
-  exitClock_.assign(nWaves, 0);
+  acquired_.assign(static_cast<size_t>(nWaves) * clockSize(), 0);
+  // Each wave starts in epoch 1, and in handoff epoch 1 of each kind, so 0
+  // means nothing acquired.
+  for (int i = 0; i < nWaves; ++i) {
+    const WaveId wave{i};
+    acquired(wave, wave) = 1;
+    for (int kind = 0; kind < kArrivalKinds; ++kind)
+      acquiredRow(wave)[handoffIndex(static_cast<BarrierCellArrival>(kind), wave)] = 1;
+  }
+  exitClock_.assign(clockSize(), 0);
   ended_.assign(nWaves, false);
   // With no other wave, nothing holds back retirement.
   covered_.assign(nWaves, nWaves == 1 ? std::numeric_limits<uint32_t>::max() : 0);
@@ -121,6 +128,18 @@ void joinClock(std::span<uint32_t> into, std::span<const uint32_t> from) {
 
 } // namespace
 
+void RaceDetector::joinReleased(std::span<uint32_t> clock, WaveId wave,
+                                std::optional<BarrierCellArrival> arrival) const {
+  // Hold back the wave's own handoff epochs, except that of `arrival`.
+  std::array<uint32_t, kArrivalKinds> held;
+  for (int kind = 0; kind < kArrivalKinds; ++kind)
+    held[kind] = clock[handoffIndex(static_cast<BarrierCellArrival>(kind), wave)];
+  joinClock(clock, acquiredRow(wave));
+  for (int kind = 0; kind < kArrivalKinds; ++kind)
+    if (static_cast<BarrierCellArrival>(kind) != arrival)
+      clock[handoffIndex(static_cast<BarrierCellArrival>(kind), wave)] = held[kind];
+}
+
 RaceDetector::BarrierRoundState *RaceDetector::findRound(BarrierRoundId round) {
   for (BarrierRoundState &state : rounds_)
     if (state.open && state.id == round)
@@ -140,7 +159,7 @@ RaceDetector::BarrierRoundState &RaceDetector::roundState(BarrierRoundId round) 
   slot->completed = false;
   slot->awaiting = 0;
   slot->signalled = 0;
-  slot->clock.assign(waveCount(), 0);
+  slot->clock.assign(clockSize(), 0);
   ++openRounds_;
   // A named barrier's counted signals can be discarded by S_BARRIER_INIT, and
   // its round can complete while no live wave has joined it; neither is
@@ -162,9 +181,7 @@ void RaceDetector::closeRound(BarrierRoundState &state) {
 
 void RaceDetector::barrierSignaled(WaveId wave, BarrierRoundId round) {
   BarrierRoundState &state = roundState(round);
-  const auto row =
-      std::span(acquired_).subspan(static_cast<size_t>(wave.value) * waveCount(), waveCount());
-  joinClock(state.clock, row);
+  joinReleased(state.clock, wave);
   state.signalled |= uint64_t{1} << wave.value;
   // Events the wave completes from now on wait for its next signal, and so do
   // the LDS operands it reads from now on.
@@ -187,8 +204,7 @@ void RaceDetector::barrierRoundCompleted(BarrierRoundId round, std::span<const W
         const uint64_t bit = uint64_t{1} << wave;
         if ((endedWaves_ & bit) == 0 || (state.signalled & bit) != 0)
           continue;
-        joinClock(state.clock, std::span(acquired_).subspan(static_cast<size_t>(wave) * waveCount(),
-                                                            waveCount()));
+        joinReleased(state.clock, WaveId{wave});
       }
     }
   }
@@ -231,9 +247,7 @@ void RaceDetector::waveEnded(WaveId wave) {
   assert(!ended_[wave.value]);
   ended_[wave.value] = true;
   endedWaves_ |= uint64_t{1} << wave.value;
-  const auto row =
-      std::span(acquired_).subspan(static_cast<size_t>(wave.value) * waveCount(), waveCount());
-  joinClock(exitClock_, row);
+  joinReleased(exitClock_, wave);
   stopAwaiting(wave, std::nullopt);
   --liveWaves_;
   // The ended wave no longer holds back any other wave's retirement. Where it
@@ -284,6 +298,10 @@ void RaceDetector::acquire(WaveId accessor, std::span<const uint32_t> clock) {
     if (wasAtCoverage)
       leaveCoverageMinimum(WaveId{owner});
   }
+  // Handoff epochs order events but retire none, so they have no coverage.
+  const auto row = acquiredRow(accessor);
+  for (int index = waveCount(); index < clockSize(); ++index)
+    row[index] = std::max(row[index], clock[index]);
 }
 
 void RaceDetector::leaveCoverageMinimum(WaveId owner) {
@@ -315,6 +333,59 @@ bool RaceDetector::ordered(WaveId accessor, EventId eventId) const {
   // An event has a release epoch once its LDS access has completed.
   const uint32_t releaseEpoch = events_.releaseEpoch(eventId);
   return releaseEpoch != 0 && acquired(accessor, events_.waveId(eventId)) >= releaseEpoch;
+}
+
+bool RaceDetector::handedOffTo(WaveId accessor, EventId eventId) const {
+  const WaveId owner = events_.waveId(eventId);
+  const std::optional<BarrierCellArrival> kind = events_.handoffKind(eventId);
+  return kind && owner != accessor &&
+         acquiredRow(accessor)[handoffIndex(*kind, owner)] >= events_.handoffEpoch(eventId);
+}
+
+RaceDetector::BarrierCell &RaceDetector::barrierCell(uint32_t address) {
+  const auto cell = std::ranges::find(cells_, address, &BarrierCell::address);
+  if (cell != cells_.end())
+    return *cell;
+  return cells_.emplace_back(BarrierCell{.address = address,
+                                         .open = std::vector<uint32_t>(clockSize(), 0),
+                                         .done = std::vector<uint32_t>(clockSize(), 0)});
+}
+
+void RaceDetector::barrierCellArrived(WaveId wave, uint32_t address, BarrierCellArrival kind,
+                                      bool completed) {
+  // With no other wave there is nothing to order, and events retire when
+  // they complete.
+  if (waveCount() == 1)
+    return;
+  uint32_t &handoffEpoch = acquiredRow(wave)[handoffIndex(kind, wave)];
+  waveRaceStates[wave.value].handOffPending(kind, handoffEpoch);
+  BarrierCell &cell = barrierCell(address);
+  joinReleased(cell.open, wave, kind);
+  // Events the wave completes from now on wait for its next release, and so
+  // do the LDS operands it reads from now on. Accesses it issues from now on
+  // wait for its next arrival of this kind.
+  ++acquired(wave, wave);
+  ++handoffEpoch;
+  waveRaceStates[wave.value].forgetLdsOperandReads();
+  if (completed) {
+    joinClock(cell.done, cell.open);
+    std::ranges::fill(cell.open, 0);
+  }
+  if (kind == BarrierCellArrival::Ds) {
+    refreshStaleCoverage();
+    acquire(wave, cell.done);
+  }
+}
+
+void RaceDetector::acquireBarrierCells(WaveId wave, const IntervalSet &accessed) {
+  // Indexed: acquiring retires events, which never adds a cell.
+  for (size_t index = 0; index < cells_.size(); ++index) {
+    const int address = static_cast<int>(cells_[index].address);
+    if (!accessed.overlapsRange(address, address + kBarrierCellStateBytes))
+      continue;
+    refreshStaleCoverage();
+    acquire(wave, cells_[index].done);
+  }
 }
 
 bool RaceDetector::satisfyEventWaitCounter(EventId eventId, amdgpu::WaitCounterType waitCounter) {
@@ -377,7 +448,8 @@ void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes,
   }
 
   const auto check = [&](EventId eventId) {
-    if (!events_.writesLds(eventId) || events_.atomicLdsElementMatches(eventId, atomicBytes))
+    if (!events_.writesLds(eventId) || events_.atomicLdsElementMatches(eventId, atomicBytes) ||
+        handedOffTo(wave, eventId))
       return;
     // Report a byte both accesses touch, not the start of this access.
     if (const auto byte = events_.ldsIntervals(eventId).firstOverlap(addr, addr + nBytes)) {
@@ -421,7 +493,8 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
     }
   }
   const auto check = [&](EventId eventId) {
-    if (!events_.readsLds(eventId) || events_.atomicLdsElementMatches(eventId, atomicBytes))
+    if (!events_.readsLds(eventId) || events_.atomicLdsElementMatches(eventId, atomicBytes) ||
+        handedOffTo(wave, eventId))
       return;
     // Report a byte both accesses touch, not the start of this access.
     if (const auto byte = events_.ldsIntervals(eventId).firstOverlap(addr, addr + nBytes)) {

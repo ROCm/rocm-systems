@@ -1580,10 +1580,14 @@ VmAccessOutcome execute_atomic_rmw(
 }
 
 /// @brief Perform a per-lane atomic RMW on LDS memory.
+/// @details `arrival_observer`, when set, is the issuing wave of a barrier
+/// arrive whose arrivals a plugin observes; each lane's arrival is reported to
+/// it once the cell is updated.
 void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
                             const std::array<uint64_t, 64> &per_lane_addr,
                             const std::vector<uint8_t> &store_data,
-                            std::vector<uint8_t> &response_data, uint64_t lane_mask) {
+                            std::vector<uint8_t> &response_data, uint64_t lane_mask,
+                            Wavefront *arrival_observer) {
   const uint32_t esz = d.elem_size;
   response_data.resize(d.wf_size * esz);
   const bool uses_two_sources = atomic_uses_two_sources(d.atomic_op);
@@ -1669,6 +1673,7 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
     } else if (esz == 8) {
       uint64_t old_val = lds->read64(addr);
       uint64_t new_val;
+      bool completes_phase = false;
       if (d.atomic_op == AtomicOp::BARRIER_ARRIVE) {
         // The returning DS instruction supplies UPDATE_VAL.b32 in the low DWORD
         // of DATA0. An asynchronous arrival has a fixed update of one.
@@ -1676,6 +1681,7 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
         if (store_data.size() >= lane * src_stride + sizeof(update))
           std::memcpy(&update, &store_data[lane * src_stride], sizeof(update));
         new_val = lds_barrier_cell_update_arrive(old_val, update);
+        completes_phase = lds_barrier_cell_arrive_completes_phase(old_val, update);
       } else if (fp_operation) {
         uint64_t source_bits = 0, compare_bits = 0;
         std::memcpy(&source_bits, &store_data[lane * src_stride], 8);
@@ -1693,6 +1699,18 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
       }
       lds->write64(addr, new_val);
       std::memcpy(&response_data[lane * 8], &old_val, 8);
+      // Each arrival is reported with the cell already updated. Of the two
+      // barrier arrives, the one on ASYNCcnt is the async form.
+      if (arrival_observer) {
+        using Source = LdsBarrierArrivalObservation::Source;
+        arrival_observer->cu().report_lds_barrier_arrival(
+            {.source = d.wait_counter_type == WaitCounterType::ASYNCCNT ? Source::AsyncDsAtomic
+                                                                        : Source::DsAtomic,
+             .cell_address = static_cast<uint32_t>(addr),
+             .old_state = old_val,
+             .new_state = new_val,
+             .phase_completed = completes_phase});
+      }
     }
   }
 }
@@ -1769,7 +1787,11 @@ void execute_lds_access(VectorMemState &d, Wavefront &wf, Lds &lds,
   lane_mask &= ~rejected;
   d.address_range_violation_lanes |= rejected & reporting_lanes;
   if (d.atomic_op != AtomicOp::NONE)
-    execute_lds_atomic_rmw(d, &lds, addresses, store_data, response_data, lane_mask);
+    execute_lds_atomic_rmw(d, &lds, addresses, store_data, response_data, lane_mask,
+                           d.atomic_op == AtomicOp::BARRIER_ARRIVE &&
+                                   wf.cu().observes_lds_barrier_arrival()
+                               ? &wf
+                               : nullptr);
   else if (!ordinary) {
     if (d.is_load)
       lds.vector_load(addresses.data(), lane_mask, d.elem_size, d.num_elems, response_data.data());

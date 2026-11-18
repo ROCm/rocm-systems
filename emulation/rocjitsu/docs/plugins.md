@@ -450,8 +450,8 @@ Plugins can opt out of individual high-frequency hooks by overriding
 `observes_memory_instruction_routing()`, `observes_vgpr_reads()`,
 `observes_vgpr_writes()`, `observes_sgpr_reads()`,
 `observes_scalar_register_writes()`, `observes_memory_routing()`,
-`observes_tensor_dma_memory_access()`, or `observes_tensor_dma_issue()`. The
-group samples these stable flags when the plugin is added and avoids both
+`observes_tensor_dma_memory_access()`, `observes_tensor_dma_issue()`, or
+`observes_lds_barrier_arrival()`. The group samples these stable flags when the plugin is added and avoids both
 fanout and upstream observation work when no contained plugin consumes a hook.
 
 For finer-grained selection, `observes_hot_hooks_for_wavefront(wf)` controls
@@ -615,6 +615,22 @@ in-bounds tensor elements from global memory and can fault there, and a store
 still writes zeros to its global destination. Consumers must opt in through
 `observes_tensor_dma_issue()`.
 
+`onAmdgpuLdsBarrierArrived(arrival, wf)` fires for each arrival at an LDS
+barrier cell, a 64-bit LDS word holding a pending count and a phase (CDNA5 ISA
+11.2.2), after the cell has been updated. The observation gives the source of
+the arrival, the cell's LDS address, its contents before and after, and whether
+the arrival rolled the pending count under, which changes the phase.
+`ds_atomic_barrier_arrive_rtn_b64` and `ds_atomic_async_barrier_arrive_b64`
+report one arrival per active lane, each at that lane's address, in the
+simulator's lane order, within the issuing wavefront's instruction step and
+after `onAmdgpuMemoryAccessRouted`; with EXEC zero they report nothing. A
+tensor DMA instruction whose descriptor requests an arrival reports one, after
+`onAmdgpuTensorDmaIssued` and after the transfer has written LDS, with `wf` the
+wavefront that issued it; a NULL descriptor reports nothing. A transfer that
+waits for memory arrives when it resumes, outside any instruction step of its
+wavefront and before that wavefront issues another instruction. Consumers must
+opt in through `observes_lds_barrier_arrival()`.
+
 SGPR owner resolution is skipped when no contained plugin observes scalar
 register reads. Plugins that consume neither `onAmdgpuReadScalarRegister` nor
 `onAmdgpuReadSgpr` should override
@@ -733,9 +749,10 @@ from this hook.
    plugin consumes. Use `observes_hot_hooks_for_wavefront()` when subscription
    also depends on the dispatched wavefront; keep that predicate lock-free,
    thread-safe, and stable after dispatch. A consumer of
-   `onAmdgpuMemoryAccessRouted`, `onAmdgpuTensorDmaMemoryAccess`, or
-   `onAmdgpuTensorDmaIssued` must explicitly return `true` from the corresponding
-   interest method because those conservative defaults are `false`.
+   `onAmdgpuMemoryAccessRouted`, `onAmdgpuTensorDmaMemoryAccess`,
+   `onAmdgpuTensorDmaIssued`, or `onAmdgpuLdsBarrierArrived` must explicitly
+   return `true` from the corresponding interest method because those
+   conservative defaults are `false`.
 7. Enable it by adding `"myname": { ... }` to the `plugins` section of
    the config file.
 8. Return `true` from `supports_async_instructions()` only when the plugin accepts

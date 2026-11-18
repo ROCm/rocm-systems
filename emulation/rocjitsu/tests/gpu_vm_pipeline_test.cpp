@@ -3937,6 +3937,60 @@ TEST(GpuVmPipeline, TranslatedTensorLoadRetriesBeforeCommittingLdsOrBarrier) {
   EXPECT_EQ(context.external->read_history[2].address, kGlobalAddress + sizeof(uint32_t));
 }
 
+// A tensor load deferred for memory arrives at its barrier cell when it
+// resumes, not when it issues. Its wave is still stalled in VM_RETRY at that
+// point, so the wave issues nothing between the transfer and its arrival.
+TEST(GpuVmPipeline, DeferredTensorLoadReportsItsArrivalBeforeItsWaveResumes) {
+  TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
+  ASSERT_TRUE(context.address_space);
+  ASSERT_NE(context.wf, nullptr);
+  context.wf->set_lds_base(context.cu->allocate_lds(256));
+  auto &recorder = install_lds_barrier_arrival_recorder(context.sim);
+
+  constexpr uint64_t kGlobalAddress = 0x500;
+  constexpr uint32_t kBarrierAddress = 64;
+  const uint64_t kUnarrived = amdgpu::lds_barrier_cell_init_state(2);
+  for (uint32_t index = 0; index < 2; ++index)
+    context.external->store(kGlobalAddress + index * sizeof(uint32_t), 0x11223344u + index);
+  context.wf->lds().write64(context.wf->lds_base() + kBarrierAddress, kUnarrived);
+  context.external->unavailable_read_call = 2;
+
+  amdgpu::tensor_dma_detail::TensorDmaDescriptor descriptor;
+  descriptor.elem_size = sizeof(uint32_t);
+  descriptor.atomic_barrier = true;
+  descriptor.atomic_barrier_addr = kBarrierAddress;
+  auto state = std::make_unique<amdgpu::tensor_dma_detail::TensorDmaState>(descriptor, false);
+  state->access = context.wf->snapshot_vm_access();
+  ASSERT_TRUE(state->access);
+  state->payload.resize(2 * sizeof(uint32_t));
+  for (uint32_t index = 0; index < 2; ++index) {
+    state->elements.push_back(
+        {.global_address = kGlobalAddress + index * sizeof(uint32_t),
+         .lds_address = context.wf->lds_base() + index * static_cast<uint32_t>(sizeof(uint32_t)),
+         .in_bounds = true});
+  }
+
+  amdgpu::TensorDmaPipeline pipeline;
+  EXPECT_EQ(pipeline.issue_deferred(new TestMemoryInstruction(std::move(state)), *context.wf),
+            amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(context.wf->state(), amdgpu::WfState::VM_RETRY);
+  EXPECT_TRUE(recorder.arrivals.empty());
+
+  pipeline.tick();
+
+  EXPECT_EQ(context.wf->state(), amdgpu::WfState::RUNNING);
+  EXPECT_EQ(recorder.arrivals,
+            (std::vector<LdsBarrierArrivalRecorder::Arrival>{
+                {.observation = {.source = amdgpu::LdsBarrierArrivalObservation::Source::TensorDma,
+                                 .cell_address = context.wf->lds_base() + kBarrierAddress,
+                                 .old_state = kUnarrived,
+                                 .new_state = amdgpu::lds_barrier_cell_update_arrive(kUnarrived),
+                                 .phase_completed = false},
+                 .wave = context.wf,
+                 .wave_state = amdgpu::WfState::VM_RETRY}}));
+}
+
 TEST(GpuVmPipeline, DeferredTensorLoadCommitsLdsAfterPeerReadEffects) {
   rocjitsu::test::AsyncVmHarness owner_sim;
   Gfx1250Sim sim;

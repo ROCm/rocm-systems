@@ -520,6 +520,33 @@ void WaveRaceState::recordLdsOperandRead(InstructionSnapshot instruction, uint32
   covered = bytes;
 }
 
+void WaveRaceState::handOffPending(BarrierCellArrival kind, uint32_t epoch) {
+  const EventRegistry &events = detector->events();
+  for (const EventId eventId : waveMemoryEvents) {
+    // An access that has completed is released on the wave's epoch instead.
+    if (events.handoffKind(eventId) || !events.hasLiveLdsIntervals(eventId) ||
+        events.ldsAccessComplete(eventId))
+      continue;
+    const MemoryOrderClass order = events.ldsOrder(eventId);
+    bool ordered = false;
+    switch (kind) {
+    case BarrierCellArrival::Ds:
+      ordered = order == MemoryOrderClass::LDS;
+      break;
+    case BarrierCellArrival::Async:
+      ordered =
+          order == MemoryOrderClass::ASYNC_LOAD &&
+          (events.type(eventId) == MemoryEventType::GLOBAL_TO_LDS || events.barrierArrive(eventId));
+      break;
+    case BarrierCellArrival::Tensor:
+      ordered = order == MemoryOrderClass::TENSOR;
+      break;
+    }
+    if (ordered)
+      detector->markEventHandedOff(eventId, kind, epoch);
+  }
+}
+
 void WaveRaceState::queueForBarrier(EventId eventId) {
   detector->stampReleaseEpoch(eventId);
   if (barrierPendingEvents.empty())
