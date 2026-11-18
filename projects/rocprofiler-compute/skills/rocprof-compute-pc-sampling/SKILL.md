@@ -16,7 +16,8 @@ option names can change between releases, so run
 ## Before you start
 
 If `command -v rocprof-compute` finds the tool and
-`rocprof-compute analyze --verify-deps` passes, skip this section.
+`rocprof-compute analyze --debug-verify-deps` passes, skip this section.
+On ROCm 10.2, use `--verify-deps` instead of `--debug-verify-deps`.
 
 Otherwise, check that ROCm and a GPU are present:
 
@@ -41,9 +42,9 @@ Then follow "Install the analyze mode dependencies" in the
 rocprof-compute in a virtual environment of its own. Use the nightly index so the
 version matches these skills. Activate that environment with
 `source <venv>/bin/activate` before you run rocprof-compute, and confirm with
-`rocprof-compute analyze --verify-deps`. If the application is a Python script,
-note the full path of its Python before you activate, and run the script with
-that path.
+`rocprof-compute analyze --debug-verify-deps`. If the application is a Python
+script, note the full path of its Python before you activate, and run the
+script with that path.
 
 ## 1. Check what the hardware supports
 
