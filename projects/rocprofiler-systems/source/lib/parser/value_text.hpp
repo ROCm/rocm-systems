@@ -49,9 +49,9 @@ using config_value_t =
 using typed_values_t = std::map<std::string, config_value_t, std::less<>>;
 
 /// True when @p value has the type of @p param and satisfies its rules: numbers are
-/// within min/max, an enumeration names a choice (or custom values are allowed, or the
-/// row names a backend, which checks the name), and a path is non-empty. The value is
-/// not parsed again.
+/// within min/max, an enumeration names a choice (or the row names a backend, which
+/// checks the name), a list element is not empty and holds no separator, and a path is
+/// non-empty. The value is not parsed again.
 [[nodiscard]] bool
 accepts_value(const schema_param& param, const config_value_t& value);
 

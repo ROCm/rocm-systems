@@ -203,10 +203,6 @@ TEST(parser_schema_validator, enumeration_values)
     EXPECT_FALSE(is_valid_value(param, "gamma"));
     EXPECT_FALSE(is_valid_value(param, "Alpha"));
     EXPECT_FALSE(is_valid_value(param, ""));
-
-    param.allow_custom = true;
-    EXPECT_TRUE(is_valid_value(param, "gamma"));
-    EXPECT_FALSE(is_valid_value(param, ""));
 }
 
 TEST(parser_schema_validator, enumeration_list_values)
@@ -226,9 +222,6 @@ TEST(parser_schema_validator, enumeration_list_values)
 
     param.env = "ROCPROFSYS_LIST";
     EXPECT_TRUE(is_valid_value(param, "alpha,beta"));
-
-    param.allow_custom = true;
-    EXPECT_TRUE(is_valid_value(param, "alpha,custom"));
 }
 
 TEST(parser_schema_validator,

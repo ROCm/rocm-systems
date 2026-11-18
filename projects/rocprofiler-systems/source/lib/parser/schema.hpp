@@ -52,20 +52,16 @@ struct schema_param
     std::optional<double> max;
     /// Allowed values of an enumeration or enumeration_list.
     std::vector<std::string> choices;
-    /// Accept a value that is not one of choices. For example, the common
-    /// ROCPROFSYS_GPU_PERF_COUNTERS counters could be listed, but any counter the
-    /// device supports must still be accepted.
-    bool allow_custom = false;
-    /// A command-line switch that takes no value, such as "--trace". Present means
-    /// true, and "--trace=false" sets false.
-    bool flag = false;
-    /// Environment variable that sets the parameter.
+    /// Environment variable that sets the parameter. Without one, the environment does
+    /// not set it.
     std::optional<std::string> env;
     /// Command-line spelling, such as "--output-format". Help and errors use it.
+    /// Without one, the command line does not set the parameter. A boolean option is a
+    /// switch: "--trace" sets true, and "--trace=false" sets false.
     std::optional<std::string> arg;
     /// Other command-line spellings of arg, such as "-f".
     std::vector<std::string> arg_aliases;
-    /// How many tokens follow the option. Unset means one, or none for a flag.
+    /// How many tokens follow the option. Unset means one, or none for a boolean.
     std::optional<std::size_t> arg_min_count;
     std::optional<std::size_t> arg_max_count;
     /// Name of the backend that lists the allowed values at run time, for an
@@ -82,8 +78,7 @@ struct schema_param
 };
 
 /// Separator between elements of an enumeration_list value.
-[[nodiscard]] std::string_view
-list_separator(const schema_param& param) noexcept;
+inline constexpr std::string_view k_list_separator = ",";
 
 /// Split a list on @p separator, trimming each element.
 /// One separator at either end is ignored when the value names something, so "a," and

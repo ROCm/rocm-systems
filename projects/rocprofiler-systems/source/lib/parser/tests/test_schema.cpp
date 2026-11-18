@@ -142,6 +142,25 @@ TEST(parser_schema, rejects_a_repeated_empty_or_orphan_alias)
     EXPECT_FALSE(accepts_second_row("", { "-s" }));
 }
 
+TEST(parser_schema, rejects_an_empty_arg_spelling)
+{
+    // make_param() reads an empty name as "no arg", so set the empty arg directly.
+    const auto empty_arg_accepted = [](std::vector<std::string> aliases) {
+        schema value{};
+        auto   param      = make_param("empty_arg");
+        param.arg         = std::string{};
+        param.arg_aliases = std::move(aliases);
+        return value.add_param(std::move(param));
+    };
+
+    EXPECT_FALSE(empty_arg_accepted({}));
+    EXPECT_FALSE(empty_arg_accepted({ "-e" }));
+
+    // No arg at all is still a valid row: it is set by environment or file only.
+    schema value{};
+    EXPECT_TRUE(value.add_param(make_param("no_arg")));
+}
+
 TEST(parser_schema, indexes_stay_valid_after_growth)
 {
     schema value{};
@@ -275,10 +294,4 @@ TEST(parser_schema, join_list_skips_blank_items_and_does_not_double_a_separator)
     EXPECT_EQ(join_list(items{ "," }, ","), ",");
     EXPECT_EQ(join_list(items{ "" }, ","), "");
     EXPECT_EQ(join_list(items{}, ","), "");
-}
-
-TEST(parser_schema, list_separator_is_a_comma)
-{
-    const auto param = make_param("list", "ROCPROFSYS_LIST");
-    EXPECT_EQ(list_separator(param), ",");
 }

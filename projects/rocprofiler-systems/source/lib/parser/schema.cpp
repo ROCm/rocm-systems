@@ -38,8 +38,12 @@ std::optional<std::vector<std::string_view>>
 arg_spellings(const schema_param& param)
 {
     std::vector<std::string_view> spellings;
-    if(param.arg && !param.arg->empty())
+    if(param.arg)
     {
+        if(param.arg->empty())
+        {
+            return std::nullopt;
+        }
         spellings.emplace_back(*param.arg);
     }
     else if(!param.arg_aliases.empty())
@@ -74,12 +78,6 @@ inner_list_text(std::string_view value, std::string_view separator)
     return text;
 }
 }  // namespace
-
-std::string_view
-list_separator(const schema_param&) noexcept
-{
-    return ",";
-}
 
 std::optional<std::vector<std::string>>
 split_list(std::string_view value, std::string_view separator)

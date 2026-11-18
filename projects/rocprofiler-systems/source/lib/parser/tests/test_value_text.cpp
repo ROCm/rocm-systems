@@ -157,6 +157,16 @@ TEST(parser_value_text, accepts_value_checks_the_type_and_the_rules)
     EXPECT_FALSE(accepts_value(make_list(), std::vector<std::string>{ "alpha", "" }));
 }
 
+// Text never yields such an element, since every source splits on the separator first,
+// but a list built in code can, and it would read back as one more element.
+TEST(parser_value_text, accepts_value_refuses_a_list_element_that_holds_the_separator)
+{
+    auto metrics    = make_param(param_type::enumeration_list);
+    metrics.backend = "amd-smi";
+    EXPECT_TRUE(accepts_value(metrics, std::vector<std::string>{ "alpha", "b" }));
+    EXPECT_FALSE(accepts_value(metrics, std::vector<std::string>{ "alpha", "b,c" }));
+}
+
 TEST(parser_value_text, format_value_writes_canonical_text)
 {
     EXPECT_EQ(format_value(true), "true");

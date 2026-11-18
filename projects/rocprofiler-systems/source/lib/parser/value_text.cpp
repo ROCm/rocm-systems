@@ -6,6 +6,8 @@
 
 #include "common/string_utility.hpp"
 
+#include <fmt/format.h>
+
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -14,6 +16,7 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -146,13 +149,12 @@ choice_listed(const schema_param& param, std::string_view value)
     return std::ranges::find(param.choices, value) != param.choices.end();
 }
 
-/// A name that is not listed is accepted when custom values are allowed, or when the
-/// row names a backend, which lists the names and checks it later.
+/// A name that is not listed is accepted when the row names a backend, which lists the
+/// names and checks it later.
 [[nodiscard]] bool
 choice_accepted(const schema_param& param, std::string_view value)
 {
-    return choice_listed(param, value) ||
-           ((param.allow_custom || param.backend.has_value()) && !value.empty());
+    return choice_listed(param, value) || (param.backend.has_value() && !value.empty());
 }
 
 [[nodiscard]] std::string
@@ -175,21 +177,6 @@ format_number(double value)
         return {};
     }
     return std::string{ buffer.data(), result.ptr };
-}
-
-[[nodiscard]] std::string
-format_list(const std::vector<std::string>& parts)
-{
-    std::string joined;
-    for(std::size_t index = 0; index < parts.size(); ++index)
-    {
-        if(index != 0)
-        {
-            joined.push_back(',');
-        }
-        joined.append(parts[index]);
-    }
-    return joined;
 }
 
 // One overload per config_value_t alternative: each accepts the parameter types
@@ -224,8 +211,10 @@ accepts_held(const schema_param& param, const std::string& value)
         case param_type::integer:
         case param_type::number:
         case param_type::enumeration_list: return false;
+        default:
+            throw std::logic_error(
+                fmt::format("param_type {} not handled", static_cast<int>(param.type)));
     }
-    return false;
 }
 
 [[nodiscard]] bool
@@ -233,7 +222,9 @@ accepts_held(const schema_param& param, const std::vector<std::string>& parts)
 {
     return param.type == param_type::enumeration_list &&
            std::ranges::all_of(parts, [&](const std::string& element) {
-               return !element.empty() && choice_accepted(param, element);
+               return !element.empty() &&
+                      element.find(k_list_separator) == std::string::npos &&
+                      choice_accepted(param, element);
            });
 }
 }  // namespace
@@ -294,11 +285,14 @@ parse_value(const schema_param& param, std::string_view text)
             candidate = config_value_t{ std::string{ trimmed } };
             break;
         case param_type::enumeration_list:
-            if(auto parts = split_list(trimmed, list_separator(param)))
+            if(auto parts = split_list(trimmed, k_list_separator))
             {
                 candidate = config_value_t{ std::move(*parts) };
             }
             break;
+        default:
+            throw std::logic_error(
+                fmt::format("param_type {} not handled", static_cast<int>(param.type)));
     }
     if(!candidate || !accepts_value(param, *candidate))
     {
@@ -326,7 +320,7 @@ format_value(const config_value_t& value)
     {
         return *text;
     }
-    return format_list(std::get<std::vector<std::string>>(value));
+    return join_list(std::get<std::vector<std::string>>(value), k_list_separator);
 }
 
 bool
