@@ -2844,6 +2844,24 @@ TEST_F(LdsBarrierCellRaceTest, FlatLoadOfTheCellAcquires) {
   EXPECT_FALSE(ds_read(1, kTile));
 }
 
+// ds_atomic_barrier_arrive_rtn_b64 with an update value of zero reads the cell
+// without arriving: the simulator reports it with the cell unchanged. No phase
+// waits for it, so it releases and hands off nothing, and the pending write is
+// not ordered for the wave whose arrival completes the phase.
+TEST_F(LdsBarrierCellRaceTest, RtnArriveWithUpdateZeroReleasesNothing) {
+  EXPECT_FALSE(ds_write(0, kTile));
+  EXPECT_FALSE(issue_arrive(0, Source::DsAtomic, kCell));
+  const uint64_t unchanged = lds_barrier_cell_init_state(1);
+  fixture.plugin_group_->onAmdgpuLdsBarrierArrived({.source = Source::DsAtomic,
+                                                    .cell_address = kCell,
+                                                    .old_state = unchanged,
+                                                    .new_state = unchanged,
+                                                    .phase_completed = false},
+                                                   *waves[0]);
+  EXPECT_FALSE(arrive(1, Source::DsAtomic));
+  EXPECT_TRUE(ds_read(1, kTile));
+}
+
 // A race report describes a barrier arrive as an arrival, not as a plain
 // transfer: a plain store over a cell another wave arrived at conflicts with
 // the arrive's read of the cell.

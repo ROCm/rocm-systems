@@ -1511,6 +1511,12 @@ void RaceDetectorPlugin::onAmdgpuLdsBarrierArrived(
       arrival.cell_address >
           static_cast<uint32_t>(std::numeric_limits<int>::max()) - kBarrierCellBytes)
     return;
+  // ds_atomic_barrier_arrive_rtn_b64 with an update of zero leaves the cell
+  // unchanged: it reads the cell without arriving, so it releases nothing. No
+  // phase waits for it, and it can execute after the phase it is reported in
+  // completes. Its read of the cell acquired when the instruction issued.
+  if (arrival.old_state == arrival.new_state)
+    return;
   const auto kind = [&] {
     switch (arrival.source) {
     case Source::DsAtomic:
