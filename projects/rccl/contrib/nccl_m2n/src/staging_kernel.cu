@@ -458,6 +458,12 @@ __global__ __launch_bounds__(DIRECT_TOTAL_WARPS * STAGING_WARP_SIZE, 1) void Sta
 
           chunks_done += (size_t)batch;
         }
+        if (lane_id == 0 && my_num_chunks > 0) {
+          const uint64_t puts_done = local_put_counter_base[t] + (uint64_t)my_num_chunks;
+          while (gin.readCounter(local_fc.localPutCounter) < puts_done) {
+          }
+        }
+        __syncwarp();
       }
     }
 
