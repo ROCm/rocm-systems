@@ -386,51 +386,6 @@ def gen_vector_sat_pack(
     return '\n'.join(L)
 
 
-def gen_vector_mullit(
-    dst: list[str], src: list[str], is_vop3: bool, has_abs: bool
-) -> str:
-    """Generate V_MULLIT_F32 (the legacy lighting multiply).
-
-    Stages: ABS/NEG, fp_mode::mullit_f32 (input flush and special cases; a zero
-    factor gives +0 by the legacy rule, other factors use the architectural F32
-    multiply with MODE rounding, tininess and output flush), then OMOD and CLAMP.
-    """
-    L = []
-    if is_vop3:
-        L.append(output_policy_decl('f32'))
-    L.extend(
-        [
-            '  uint64_t exec = wf.exec();',
-            '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
-            '    if (!(exec & (1ULL << lane))) continue;',
-        ]
-    )
-    abs_field = 'inst_.abs' if has_abs else '0u'
-    for i in range(3):
-        read = f'amdgpu::RegisterAccess(wf).read_lane({src[i]}, lane)'
-        if is_vop3:
-            read = (
-                f'amdgpu::source_modifier::apply<amdgpu::fp_format::F32>('
-                f'{read}, {i}, {abs_field}, inst_.neg)'
-            )
-        L.append(f'    const uint32_t s{i} = {read};')
-    # An effective OMOD flushes a tiny product before scaling, as for V_MUL_F32.
-    force_output_flush = 'output_policy.omod != 0' if is_vop3 else 'false'
-    result = (
-        'amdgpu::fp_mode::mullit_f32(s0, s1, s2, wf.fp_round_mode_f32(), '
-        f'wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode(), {force_output_flush})'
-    )
-    if is_vop3:
-        result = apply_output('f32', result)
-    L.extend(
-        [
-            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, {result});',
-            '  }',
-        ]
-    )
-    return '\n'.join(L)
-
-
 def gen_vector_perm_pk16(
     dst: list[str], src: list[str], op: str | None, uses_vgpr_msb_indexing: bool
 ) -> str:
