@@ -1013,6 +1013,9 @@ memory:
   Unit_hipExtMemcpyBatchAsync_WaitSignal_Peer:
     <<: *level_2
     tags: [multigpu, P1]
+  Unit_hipExtMemcpyBatchAsync_Wait_PageableProducer:
+    <<: *level_2
+    tags: [P1]
   Unit_hipExtMemcpyBatchAsync_StreamCapture_Negative:
     <<: *level_2
     tags: [P1]

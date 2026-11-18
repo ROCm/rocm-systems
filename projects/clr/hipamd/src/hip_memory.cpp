@@ -2971,7 +2971,8 @@ template <typename Command, typename Operation>
 static hipError_t EnqueueBatchCommands(std::vector<std::vector<Operation>>& operations_by_device,
                                        cl_command_type command_type, hip::Stream& stream,
                                        bool is_async, amd::Command* stream_wait_cmd,
-                                       amd::Command::EventWaitList& marker_wait_list) {
+                                       amd::Command::EventWaitList& marker_wait_list,
+                                       const amd::Command::EventWaitList* earlier_cmds = nullptr) {
   for (size_t device_id = 0; device_id < operations_by_device.size(); ++device_id) {
     std::vector<Operation>& operations = operations_by_device[device_id];
     if (operations.empty()) {
@@ -2984,6 +2985,9 @@ static hipError_t EnqueueBatchCommands(std::vector<std::vector<Operation>>& oper
     amd::Command::EventWaitList wait_list;
     if (queue_stream != &stream && stream_wait_cmd != nullptr) {
       wait_list.push_back(stream_wait_cmd);
+    }
+    if (earlier_cmds != nullptr) {
+      wait_list.insert(wait_list.end(), earlier_cmds->begin(), earlier_cmds->end());
     }
 
     Command* batch_cmd = nullptr;
@@ -3260,6 +3264,34 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
   std::vector<std::vector<amd::BatchReadMemoryOp>> read_ops_by_device(g_devices.size());
   std::vector<size_t> hostToHostIndices;
 
+  // A wait may depend on any lower-index entry, so a batch with waits is submitted as contiguous
+  // runs of one kind, in input order.
+  enum class RunKind { kNone, kCopy, kWrite, kRead };
+  struct Run {
+    std::vector<std::vector<amd::BatchCopyOp>> copy_ops;
+    std::vector<std::vector<amd::BatchWriteMemoryOp>> write_ops;
+    std::vector<std::vector<amd::BatchReadMemoryOp>> read_ops;
+  };
+  std::vector<Run> runs;
+  RunKind run_kind = RunKind::kNone;
+  bool ordered = false;
+  for (size_t i = 0; waits != nullptr && !ordered && i < count; ++i) {
+    ordered = waits[i].compareOp != hipExtMemcpyWaitNone;
+  }
+  auto closeRun = [&]() {
+    runs.push_back({std::move(copy_ops_by_device), std::move(write_ops_by_device),
+                    std::move(read_ops_by_device)});
+    copy_ops_by_device.assign(g_devices.size(), {});
+    write_ops_by_device.assign(g_devices.size(), {});
+    read_ops_by_device.assign(g_devices.size(), {});
+  };
+  auto startRun = [&](RunKind kind) {
+    if (ordered && run_kind != RunKind::kNone && run_kind != kind) {
+      closeRun();
+    }
+    run_kind = kind;
+  };
+
   // Swap and indirect operations require the SDMA batch path. Allow device-to-device
   // and pinned host/device transfers; reject host-only and pageable-host copies.
   const unsigned int kExtOpFlagMask =
@@ -3395,6 +3427,7 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
           if (status == hipSuccess) status = resolve(signal.addr, true);
           if (status != hipSuccess) return fail(i, status);
         }
+        startRun(RunKind::kCopy);
         auto& ops = copy_ops_by_device[device_id];
         if (sizeB > 0 && sizeB != sizes[i]
             && !stream.device().settings().sdma_asymmetric_swap_supported_) {
@@ -3423,12 +3456,14 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
         break;
       case hipWriteBuffer: {
         const int device_id = dstMemories[i]->getUserData().deviceId;
+        startRun(RunKind::kWrite);
         write_ops_by_device[device_id].emplace_back(srcs[i], dstMemories[i], dstOffsets[i],
                                                     sizes[i], metadata);
         break;
       }
       case hipReadBuffer: {
         const int device_id = srcMemories[i]->getUserData().deviceId;
+        startRun(RunKind::kRead);
         read_ops_by_device[device_id].emplace_back(srcMemories[i], dsts[i], srcOffsets[i], sizes[i],
                                                    metadata);
         break;
@@ -3449,18 +3484,34 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
   amd::Command::EventWaitList marker_wait_list;
   amd::Command* stream_wait_cmd = stream.getLastQueuedCommand(true);
 
-  status = EnqueueBatchCommands<amd::BatchCopyMemoryCommand>(
-      copy_ops_by_device, ROCCLR_COMMAND_BATCH_COPY_BUFFER, stream, isAsync, stream_wait_cmd,
-      marker_wait_list);
-  if (status == hipSuccess) {
-    status = EnqueueBatchCommands<amd::BatchWriteMemoryCommand>(
-        write_ops_by_device, ROCCLR_COMMAND_BATCH_WRITE_BUFFER, stream, isAsync, stream_wait_cmd,
-        marker_wait_list);
-  }
-  if (status == hipSuccess) {
-    status = EnqueueBatchCommands<amd::BatchReadMemoryCommand>(
-        read_ops_by_device, ROCCLR_COMMAND_BATCH_READ_BUFFER, stream, isAsync, stream_wait_cmd,
-        marker_wait_list);
+  closeRun();
+  size_t prev_run_begin = 0;
+  for (Run& run : runs) {
+    // A run also follows what the previous run queued on other devices' streams. That run
+    // followed its own predecessor, so the earlier ones are covered.
+    const amd::Command::EventWaitList earlier_cmds(marker_wait_list.begin() + prev_run_begin,
+                                                   marker_wait_list.end());
+    prev_run_begin = marker_wait_list.size();
+    const amd::Command::EventWaitList* earlier = ordered ? &earlier_cmds : nullptr;
+    amd::Command* run_wait_cmd = ordered ? stream.getLastQueuedCommand(true) : stream_wait_cmd;
+    if (status == hipSuccess) {
+      status = EnqueueBatchCommands<amd::BatchCopyMemoryCommand>(
+          run.copy_ops, ROCCLR_COMMAND_BATCH_COPY_BUFFER, stream, isAsync, run_wait_cmd,
+          marker_wait_list, earlier);
+    }
+    if (status == hipSuccess) {
+      status = EnqueueBatchCommands<amd::BatchWriteMemoryCommand>(
+          run.write_ops, ROCCLR_COMMAND_BATCH_WRITE_BUFFER, stream, isAsync, run_wait_cmd,
+          marker_wait_list, earlier);
+    }
+    if (status == hipSuccess) {
+      status = EnqueueBatchCommands<amd::BatchReadMemoryCommand>(
+          run.read_ops, ROCCLR_COMMAND_BATCH_READ_BUFFER, stream, isAsync, run_wait_cmd,
+          marker_wait_list, earlier);
+    }
+    if (ordered && run_wait_cmd != nullptr) {
+      run_wait_cmd->release();
+    }
   }
 
   if (stream_wait_cmd != nullptr) {
