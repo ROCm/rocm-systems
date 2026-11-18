@@ -44,6 +44,11 @@ void swap_rows_x86_64_v4(int lanes, int stride, uint64_t exec_mask, uint32_t *d,
 // Exchange rows using the named CPU features and independently masked stores.
 void swap_rows_x86_64_v3(int lanes, int stride, uint64_t exec_mask, uint32_t *d, uint32_t *a);
 #endif
+// Exact packed INT4/INT8/INT16 dot with final wrapping or saturation.
+// Requires x86-64-v4 and validated controls; half selection is resolved by the caller.
+void integer_dot_x86_64_v4(int bits, bool unsigned_acc, uint32_t exec_mask,
+                           uint32_t instruction_flags, uint32_t *d, const uint32_t *a,
+                           const uint32_t *b, const uint32_t *c);
 
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
 // CDNA FP32 pair-sum then C; preserve inactive lanes and aliases. Requires validated controls.
@@ -150,7 +155,7 @@ void fp8_dot_x86_64_v3(bool bf8_a, bool bf8_b, uint32_t exec_mask, uint32_t inst
 void dot2_x86_64_v3(bool bf16, uint32_t exec_mask, uint32_t instruction_flags, uint32_t *d,
                     const uint32_t *a, const uint32_t *b, const uint32_t *c);
 
-// Exact packed INT4/INT8 dot with wrapping or saturating INT32 accumulation.
+// Exact packed INT4/INT8/INT16 dot with wrapping or saturating INT32 accumulation.
 // Half selection is resolved by the caller; preserve inactive lanes and aliases.
 // Requires the named CPU features and validated instruction controls.
 void integer_dot_x86_64_v3(int bits, bool unsigned_acc, uint32_t exec_mask,

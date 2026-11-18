@@ -4,6 +4,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm_transfer_batch.h"
 #include "rocjitsu/vm/amdgpu/vm_local_grants.h"
 
 #include "util/log.h"
@@ -354,37 +355,20 @@ void VmTransferEffectGate::revoke() {
 
 VmTransferToken::VmTransferToken(std::unique_ptr<VmDeferredTransfer> operation, std::size_t bytes,
                                  VmDeferredWriteMaintenance write_maintenance, bool peer_origin)
-    : operation_(std::move(operation)), peer_origin_(peer_origin), read_result_(bytes),
-      bytes_(bytes), write_maintenance_(write_maintenance) {}
-
-VmTransferToken::~VmTransferToken() { cancel(); }
-
-VmTransferToken::VmTransferToken(VmTransferToken &&other) noexcept
-    : operation_(std::move(other.operation_)), peer_origin_(other.peer_origin_),
-      completed_read_(std::move(other.completed_read_)),
-      read_result_(std::move(other.read_result_)), bytes_(other.bytes_),
-      total_bytes_(other.total_bytes_), offset_(other.offset_), address_(other.address_),
-      kind_(other.kind_), state_(std::move(other.state_)),
-      write_maintenance_(
-          std::exchange(other.write_maintenance_, VmDeferredWriteMaintenance::Caller)),
-      submitted_(other.submitted_) {}
+    : operation_(std::move(operation)) {
+  if (operation_) {
+    operation_->read_result_.resize(bytes);
+    operation_->write_maintenance_ = write_maintenance;
+    operation_->peer_origin_ = peer_origin;
+  }
+}
 
 VmTransferToken &VmTransferToken::operator=(VmTransferToken &&other) noexcept {
-  if (this == &other)
-    return *this;
-  cancel();
-  operation_ = std::move(other.operation_);
-  peer_origin_ = other.peer_origin_;
-  completed_read_ = std::move(other.completed_read_);
-  read_result_ = std::move(other.read_result_);
-  bytes_ = other.bytes_;
-  total_bytes_ = other.total_bytes_;
-  offset_ = other.offset_;
-  address_ = other.address_;
-  kind_ = other.kind_;
-  state_ = std::move(other.state_);
-  write_maintenance_ = std::exchange(other.write_maintenance_, VmDeferredWriteMaintenance::Caller);
-  submitted_ = other.submitted_;
+  if (this != &other) {
+    cancel();
+    operation_ = std::move(other.operation_);
+    completed_read_ = std::move(other.completed_read_);
+  }
   return *this;
 }
 
@@ -392,16 +376,7 @@ void VmTransferToken::cancel() noexcept {
   if (operation_)
     operation_->cancel();
   operation_.reset();
-  peer_origin_ = false;
   completed_read_.reset();
-  read_result_.clear();
-  bytes_ = 0;
-  total_bytes_ = 0;
-  offset_ = 0;
-  address_ = 0;
-  state_ = nullptr;
-  write_maintenance_ = VmDeferredWriteMaintenance::Caller;
-  submitted_ = false;
 }
 
 VmTransferStep AddressSpaceTranslator::read_step(PhysicalMemoryAccess &memory, uint64_t address,
@@ -877,10 +852,8 @@ std::optional<Mtype> GpuVmAccess::query_mtype(uint64_t address, VmMtypeCache &ca
     return std::nullopt;
   // A hit uses copied policy only. Retirement invalidates the snapshot's state
   // before releasing any frontend storage; misses remain under its lease.
-  // Compare generation ownership without acquiring another strong reference.
-  const bool same_generation = cache.snapshots_ &&
-                               !cache.access_state_.owner_before(access_state_) &&
-                               !access_state_.owner_before(cache.access_state_);
+  const bool same_generation =
+      cache.snapshots_ && cache.cache_identity_ == access_state_->cache_identity;
   const std::size_t index = VmMtypeCache::snapshot_index(address);
   if (same_generation && access_state_->valid.load(std::memory_order_acquire)) {
     const auto &snapshot = (*cache.snapshots_)[index];
@@ -900,7 +873,7 @@ std::optional<Mtype> GpuVmAccess::query_mtype(uint64_t address, VmMtypeCache &ca
       cache.snapshots_ = std::make_unique<VmMtypeCache::Snapshots>();
     else
       *cache.snapshots_ = {};
-    cache.access_state_ = access_state_;
+    cache.cache_identity_ = access_state_->cache_identity;
   }
   auto &snapshot = (*cache.snapshots_)[index];
   snapshot = access_state_->translator->snapshot_mtype(address);
@@ -910,8 +883,7 @@ std::optional<Mtype> GpuVmAccess::query_mtype(uint64_t address, VmMtypeCache &ca
 bool GpuVmAccess::cached_private_uc_hint(uint64_t address, const VmMtypeCache &cache) const {
   if (!access_state_ || !cache.snapshots_)
     return false;
-  const bool same_generation = !cache.access_state_.owner_before(access_state_) &&
-                               !access_state_.owner_before(cache.access_state_);
+  const bool same_generation = cache.cache_identity_ == access_state_->cache_identity;
   const auto &snapshot = (*cache.snapshots_)[VmMtypeCache::snapshot_index(address)];
   return same_generation && access_state_->valid.load(std::memory_order_acquire) &&
          snapshot.may_batch_private_uc && snapshot.unchanged(address);
@@ -921,8 +893,7 @@ std::optional<Mtype> GpuVmAccess::cached_private_ram_mtype(uint64_t address,
                                                            const VmMtypeCache &cache) const {
   if (!access_state_ || !cache.snapshots_)
     return std::nullopt;
-  const bool same_generation = !cache.access_state_.owner_before(access_state_) &&
-                               !access_state_.owner_before(cache.access_state_);
+  const bool same_generation = cache.cache_identity_ == access_state_->cache_identity;
   const auto &snapshot = (*cache.snapshots_)[VmMtypeCache::snapshot_index(address)];
   if (same_generation && access_state_->valid.load(std::memory_order_acquire) &&
       snapshot.may_batch_private_ram && snapshot.unchanged(address))
@@ -1066,12 +1037,21 @@ template <typename Span>
 VmAccessOutcome GpuVmAccess::transfer_tokenized(
     uint64_t address, Span bytes, std::size_t &completed_bytes, VmTransferToken &token,
     VmAccessKind access, bool allow_deferred, const VmTransferMaintenance &maintenance,
-    const VmTransferIngress &ingress, const VmPrivateUcGttCopySource &copy_source) const {
+    const VmTransferIngress &ingress, const VmPrivateUcGttCopySource &copy_source,
+    GpuVmTransferBatch *batch) const {
+  const auto release_batch = [&] {
+    if (batch)
+      batch->release();
+  };
+  // A carried token may poll, reconcile revocation or cancel on any exit.
+  if (token.pending())
+    release_batch();
   if (access == VmAccessKind::Execute || completed_bytes > bytes.size()) {
     token.cancel();
     return VmAccessOutcome::Malformed;
   }
   if (bytes.size() != 0 && bytes.size() - 1 > std::numeric_limits<uint64_t>::max() - address) {
+    release_batch();
     report_terminal_fault(address, access, VmAccessOutcome::Malformed);
     token.cancel();
     return VmAccessOutcome::Malformed;
@@ -1087,14 +1067,15 @@ VmAccessOutcome GpuVmAccess::transfer_tokenized(
 
   while (completed_bytes < bytes.size()) {
     if (token.pending()) {
+      auto &operation = *token.operation_;
       if (!allow_deferred) {
         token.cancel();
         return VmAccessOutcome::Malformed;
       }
-      if (token.state_ != access_state_ || token.address_ != address ||
-          token.total_bytes_ != bytes.size() || token.offset_ != completed_bytes ||
-          token.kind_ != access || token.bytes_ == 0 ||
-          token.bytes_ > bytes.size() - completed_bytes) {
+      if (operation.state_ != access_state_ || operation.address_ != address ||
+          operation.total_bytes_ != bytes.size() || operation.offset_ != completed_bytes ||
+          operation.kind_ != access || operation.read_result_.empty() ||
+          operation.read_result_.size() > bytes.size() - completed_bytes) {
         token.cancel();
         return VmAccessOutcome::Malformed;
       }
@@ -1105,13 +1086,13 @@ VmAccessOutcome GpuVmAccess::transfer_tokenized(
       }
       // Only the owner event may execute the request. Neither submission nor
       // polling holds the VM revocation lease or caller-owned data pointers.
-      if (valid && !token.submitted_) {
-        token.submitted_ = true;
-        token.operation_->submit();
+      if (valid && !operation.submitted_) {
+        operation.submitted_ = true;
+        operation.submit();
       }
-      const VmAccessOutcome outcome =
-          valid ? token.operation_->poll(token.read_result_)
-                : token.operation_->reconcile_revocation(token.read_result_);
+      const VmAccessOutcome outcome = valid
+                                          ? operation.poll(operation.read_result_)
+                                          : operation.reconcile_revocation(operation.read_result_);
       if (outcome == VmAccessOutcome::Unavailable)
         return outcome;
       if (outcome != VmAccessOutcome::Complete) {
@@ -1120,22 +1101,17 @@ VmAccessOutcome GpuVmAccess::transfer_tokenized(
         return outcome;
       }
       if constexpr (!std::is_const_v<typename Span::element_type>)
-        std::ranges::copy(token.read_result_, bytes.begin() + completed_bytes);
+        std::ranges::copy(operation.read_result_, bytes.begin() + completed_bytes);
       if constexpr (!std::is_const_v<typename Span::element_type>) {
         if (std::optional<CanonicalLineFreshness::ReadStamp> stamp =
-                token.operation_->completed_read_stamp())
+                operation.completed_read_stamp())
           token.completed_read_ =
-              VmCompletedRead{.stamp = std::move(*stamp), .peer_origin = token.peer_origin_};
+              VmCompletedRead{.stamp = std::move(*stamp), .peer_origin = operation.peer_origin_};
         else
           token.completed_read_.reset();
       }
-      completed_bytes += token.bytes_;
+      completed_bytes += operation.read_result_.size();
       token.operation_.reset();
-      token.peer_origin_ = false;
-      token.write_maintenance_ = VmDeferredWriteMaintenance::Caller;
-      token.read_result_.clear();
-      token.bytes_ = 0;
-      token.state_ = nullptr;
       if (!valid)
         return completed_bytes == bytes.size() ? VmAccessOutcome::Complete
                                                : VmAccessOutcome::Revoked;
@@ -1143,10 +1119,17 @@ VmAccessOutcome GpuVmAccess::transfer_tokenized(
                                              : VmAccessOutcome::Unavailable;
     }
 
-    MemoryIngressAdmission pt_admitted = admit_pt_rewalk();
-    if (pt_admitted.outcome != VmAccessOutcome::Complete)
-      return pt_admitted.outcome;
-    const MemoryPtEpoch admitted_epoch = pt_admitted.permit.pt_epoch();
+    MemoryIngressAdmission pt_admitted;
+    if (batch) {
+      if (const auto outcome = batch->acquire(); outcome != VmAccessOutcome::Complete)
+        return outcome;
+    } else {
+      pt_admitted = admit_pt_rewalk();
+      if (pt_admitted.outcome != VmAccessOutcome::Complete)
+        return pt_admitted.outcome;
+    }
+    const MemoryPtEpoch admitted_epoch =
+        batch ? batch->pt_permit_.pt_epoch() : pt_admitted.permit.pt_epoch();
     const std::optional<MemoryPtEpoch> token_epoch =
         admitted_epoch ? std::optional<MemoryPtEpoch>{admitted_epoch} : std::nullopt;
     std::optional<VmTransferToken> prepared;
@@ -1204,7 +1187,8 @@ VmAccessOutcome GpuVmAccess::transfer_tokenized(
         const bool source_owns_read_maintenance = static_cast<bool>(source_admitted.permit);
         const bool endpoint_owns_write_maintenance =
             access == VmAccessKind::Write && prepared && prepared->pending() &&
-            prepared->write_maintenance_ == VmDeferredWriteMaintenance::ControlledLocalEndpoint;
+            prepared->operation_->write_maintenance_ ==
+                VmDeferredWriteMaintenance::ControlledLocalEndpoint;
         [[maybe_unused]] std::optional<DeviceCacheMaintenanceLease> cache_lease;
         if (maintenance && !endpoint_owns_write_maintenance && !source_owns_read_maintenance) {
           auto acquired = maintenance();
@@ -1242,20 +1226,24 @@ VmAccessOutcome GpuVmAccess::transfer_tokenized(
     // acquires its own permit before its entered effect and validation rewalk.
     pt_admitted.permit.reset();
     if (prepared) {
+      // Prepared operations can cancel in their destructor, including malformed requests.
+      release_batch();
       if (!allow_deferred)
         return VmAccessOutcome::Malformed;
-      if (!prepared->pending() || prepared->bytes_ == 0 ||
-          prepared->bytes_ > bytes.size() - completed_bytes)
+      if (!prepared->pending() || prepared->operation_->read_result_.empty() ||
+          prepared->operation_->read_result_.size() > bytes.size() - completed_bytes)
         return VmAccessOutcome::Malformed;
+      auto &operation = *prepared->operation_;
+      operation.state_ = access_state_;
+      operation.address_ = address;
+      operation.total_bytes_ = bytes.size();
+      operation.offset_ = completed_bytes;
+      operation.kind_ = access;
       token = std::move(*prepared);
-      token.state_ = access_state_;
-      token.address_ = address;
-      token.total_bytes_ = bytes.size();
-      token.offset_ = completed_bytes;
-      token.kind_ = access;
       continue;
     }
     if (step.outcome != VmAccessOutcome::Complete) {
+      release_batch();
       if (step.report_translation_fault && step.outcome != VmAccessOutcome::Unavailable &&
           step.outcome != VmAccessOutcome::Revoked)
         report_terminal_fault(address + completed_bytes, access, step.outcome);
@@ -1266,6 +1254,39 @@ VmAccessOutcome GpuVmAccess::transfer_tokenized(
     completed_bytes += step.completed_bytes;
   }
   return VmAccessOutcome::Complete;
+}
+
+VmAccessOutcome GpuVmTransferBatch::acquire() {
+  if (!boundary_) {
+    auto admitted = access_.admit_pt_rewalk();
+    if (admitted.outcome != VmAccessOutcome::Complete)
+      return admitted.outcome;
+    pt_permit_ = std::move(admitted.permit);
+    boundary_.emplace(coherence_.acquire_atomic_boundary());
+  }
+  return boundary_->outcome();
+}
+
+void GpuVmTransferBatch::release() {
+  boundary_.reset();
+  pt_permit_.reset();
+}
+
+template <typename Byte>
+VmAccessOutcome GpuVmTransferBatch::transfer(uint64_t address, std::span<Byte> bytes) {
+  constexpr auto kind = std::is_const_v<Byte> ? VmAccessKind::Write : VmAccessKind::Read;
+  const auto outcome = access_.transfer_tokenized(address, bytes, completed_bytes_, token_, kind,
+                                                  true, {}, {}, {}, this);
+  if (outcome == VmAccessOutcome::Complete)
+    completed_bytes_ = 0;
+  return outcome;
+}
+
+VmAccessOutcome GpuVmTransferBatch::read(uint64_t address, std::span<std::byte> bytes) {
+  return transfer(address, bytes);
+}
+VmAccessOutcome GpuVmTransferBatch::write(uint64_t address, std::span<const std::byte> bytes) {
+  return transfer(address, bytes);
 }
 
 VmAccessOutcome GpuVmAccess::read(uint64_t address, std::span<std::byte> bytes,

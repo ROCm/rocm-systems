@@ -9,10 +9,10 @@ use crate::runtime::{boundary, initialized_mut, lock};
 use crate::signal::{signal_uses_interrupt, valid_consumers};
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_signal_create")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Creates an HSA signal with validated consumers.
 pub unsafe extern "C" fn hsa_signal_create(
     initial_value: SignalValue,
@@ -50,10 +50,10 @@ pub unsafe extern "C" fn hsa_signal_create(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_signal_create")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Creates an AMD signal with attributes and consumer selection.
 pub unsafe extern "C" fn hsa_amd_signal_create(
     initial_value: SignalValue,
@@ -103,10 +103,10 @@ pub unsafe extern "C" fn hsa_amd_signal_create(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_signal_batch_create")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Creates a batch of signals with shared native backing.
 pub unsafe extern "C" fn hsa_amd_signal_batch_create(
     count: u32,
@@ -168,10 +168,10 @@ pub unsafe extern "C" fn hsa_amd_signal_batch_create(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_signal_batch_destroy")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Releases a signal batch after all members retire.
 pub extern "C" fn hsa_amd_signal_batch_destroy(batch: HsaAmdSignalBatch) -> Status {
     boundary(|| {
@@ -188,10 +188,10 @@ pub extern "C" fn hsa_amd_signal_batch_destroy(batch: HsaAmdSignalBatch) -> Stat
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_signal_destroy")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Invalidates a signal and retires its backing safely.
 pub unsafe extern "C" fn hsa_signal_destroy(signal: HsaSignal) -> Status {
     boundary(|| {
@@ -208,10 +208,10 @@ pub unsafe extern "C" fn hsa_signal_destroy(signal: HsaSignal) -> Status {
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_ipc_signal_create")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Creates an IPC-capable signal in shared native storage.
 pub unsafe extern "C" fn hsa_amd_ipc_signal_create(
     signal: HsaSignal,
@@ -239,10 +239,10 @@ pub unsafe extern "C" fn hsa_amd_ipc_signal_create(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_ipc_signal_attach")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Attaches an exported IPC signal and returns its local HSA handle.
 pub unsafe extern "C" fn hsa_amd_ipc_signal_attach(
     handle: *const HsaAmdIpcSignal,

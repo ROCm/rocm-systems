@@ -13,6 +13,19 @@
   (`AnvilLib::connectRemotePeer`, `getRemotePeerQueue`, `disconnectRemotePeer`). They are keyed
   by a caller-supplied peer key, so they never share a queue with a peer on the same host, and
   each goes on the usable engine carrying the fewest of this process's queues.
+* Merged the TDM (Tensor Data Mover) LDS-staged IPC copy path with a new, non-TDM async
+  LDS-staged copy backend (sized `global_load_async_to_lds_b32`/
+  `global_store_async_from_lds_b32`-class instructions) into a single mechanism. Both
+  backends are gfx1250-only; every other architecture is unaffected.
+  * New primary build option `USE_LDS_STAGE` (selects the async backend on gfx1250).
+    `USE_TDM` selects the TDM backend specifically and is independent of
+    `USE_LDS_STAGE`: setting `USE_TDM=ON` alone is enough to build and use the
+    TDM path.
+  * Public API renamed: `rocshmem_set_tdm_lds()` -> `rocshmem_set_lds_stage()`,
+    `rocshmem_query_tdm_lds_bytes()` -> `rocshmem_query_lds_stage_bytes()`.
+  * Env vars renamed: `ROCSHMEM_TDM_TILE_BYTES`/`ROCSHMEM_TDM_PUT_THRESHOLD`/
+    `ROCSHMEM_TDM_GET_THRESHOLD` -> `ROCSHMEM_LDS_STAGE_TILE_BYTES`/
+    `ROCSHMEM_LDS_STAGE_PUT_THRESHOLD`/`ROCSHMEM_LDS_STAGE_GET_THRESHOLD`.
 
 ### Resolved issues
 * Fixed `rocshmem_fence` on the RO backend taking a host proxy round trip from every calling thread.
@@ -25,6 +38,10 @@
   which the host may already have handed to another thread.
   The `amo_add`, `amo_fadd`, `amo_inc`, `amo_finc` and
   `putmem_signal_on_stream` functional tests now run on RO.
+
+### Deprecated
+* Deprecated `rocshmem_set_tdm_lds()` and `rocshmem_query_tdm_lds_bytes()`.
+  Use `rocshmem_set_lds_stage()` and `rocshmem_query_lds_stage_bytes()` instead.
 
 ### Changed
 * SDMA transport is now built by default when IPC is enabled (`USE_SDMA` defaults to `ON`

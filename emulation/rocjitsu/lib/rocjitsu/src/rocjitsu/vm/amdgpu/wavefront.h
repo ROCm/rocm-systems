@@ -763,7 +763,8 @@ public:
                     .kmcnt = 0,
                     .tensorcnt = 0,
                     .asynccnt = 0,
-                    .samplecnt = 0};
+                    .samplecnt = 0,
+                    .bvhcnt = 0};
     if (!wait_satisfied())
       set_state(WfState::WAITCNT);
   }
@@ -870,7 +871,7 @@ public:
       if (!wait_satisfied())
         set_state(WfState::WAITCNT);
     } else if (name == "wait_bvhcnt") {
-      wait_target_.vmcnt = t; // map to vmcnt
+      wait_target_.bvhcnt = static_cast<uint8_t>(t & WaitCounters::BVHCNT_MAX);
       if (!wait_satisfied())
         set_state(WfState::WAITCNT);
     } else if (name == "wait_loadcnt_dscnt") {
@@ -1618,6 +1619,9 @@ private:
   friend class ComputeUnitCore; // CU sets allocation fields during dispatch.
   friend class GwsDevice;       // Device-global GWS store parks/wakes this wave.
   friend class ::rocjitsu::ExecutionPluginGroup;
+  // Reads VCC and FLAT_SCRATCH storage inline for self-contained plugins (see
+  // RegisterAccess::read_scalar_unobserved()).
+  friend class RegisterAccess;
 
   // Memory pipelines complete deferred VM loads into physical SGPR/VGPR
   // storage. They intentionally bypass instruction read-observation because

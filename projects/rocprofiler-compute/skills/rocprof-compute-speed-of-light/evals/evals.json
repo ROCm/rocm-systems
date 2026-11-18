@@ -13,7 +13,7 @@
       "unexpected_behavior": [
         "calculates a theoretical peak instead of using the one in the report"
       ],
-      "logs_contain": ["-b sol"]
+      "logs_contain": ["--speed-of-light"]
     },
     {
       "id": "sol-overall-efficiency",
@@ -27,7 +27,7 @@
       "unexpected_behavior": [
         "reports a Speed-of-Light table averaged across unrelated kernels"
       ],
-      "logs_contain": ["-b sol"]
+      "logs_contain": ["--speed-of-light"]
     },
     {
       "id": "sol-mfma-zero",

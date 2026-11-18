@@ -16,6 +16,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 class MockInputParameters : public rocprofiler_compute_tool::InputParameters
@@ -23,21 +24,21 @@ class MockInputParameters : public rocprofiler_compute_tool::InputParameters
 public:
     std::string_view get_output_path() override;
     std::string_view get_requested_counters() override;
-    std::string_view get_iteration_multiplexing_mode() override;
+    std::string_view get_iteration_multiplexing() override;
     std::string_view get_kernel_filter_include_regex() override;
     std::string_view get_kernel_filter_range() override;
     std::string_view get_pc_sampling_method() override;
 
     void set_output_path(const std::string& output_path);
     void set_requested_counters(const std::string& counters);
-    void set_iteration_multiplexing_mode(const std::string& mode);
+    void set_iteration_multiplexing(const std::string& value);
     void set_kernel_filter_include_regex(const std::string& regex);
     void set_kernel_filter_range(const std::string& range);
     void set_pc_sampling_method(const std::string& method);
 
     void unset_output_path();
     void unset_requested_counters();
-    void unset_iteration_multiplexing_mode();
+    void unset_iteration_multiplexing();
     void unset_kernel_filter_include_regex();
     void unset_kernel_filter_range();
 
@@ -45,14 +46,14 @@ private:
     const char* m_non_empty_str               = "non empty string";
     std::string m_output_path                 = m_non_empty_str;
     std::string m_requested_counters          = m_non_empty_str;
-    std::string m_iteration_multiplexing_mode = m_non_empty_str;
+    std::string m_iteration_multiplexing      = m_non_empty_str;
     std::string m_kernel_filter_include_regex = m_non_empty_str;
     std::string m_kernel_filter_range         = m_non_empty_str;
     std::string m_pc_sampling_method;
 
     bool m_output_path_set                 = true;
     bool m_requested_counters_set          = true;
-    bool m_iteration_multiplexing_mode_set = true;
+    bool m_iteration_multiplexing_set      = true;
     bool m_kernel_filter_include_regex_set = true;
     bool m_kernel_filter_range_set         = true;
 };
@@ -194,14 +195,16 @@ class MockPcSamplingCollector : public rocprofiler_compute_tool::pc_sampling_col
 {
 public:
     void on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info) override;
-    void finalize(rocprofiler_compute_tool::code_object_writer_t& writer) override;
+    void finalize(rocprofiler_compute_tool::code_object_writer_t&   writer,
+                  const std::set<std::pair<uint64_t, std::string>>& dispatched_symbols) override;
     const std::set<std::filesystem::path>& get_source_paths() const override;
 
     void set_has_code_objects(bool has_code_objects);
     void set_source_paths(const std::set<std::filesystem::path>& source_paths);
 
-    int load_count     = 0;
-    int finalize_count = 0;
+    std::set<std::pair<uint64_t, std::string>> last_dispatched_symbols;
+    int                                        load_count     = 0;
+    int                                        finalize_count = 0;
 
 private:
     bool                            m_has_code_objects = false;
