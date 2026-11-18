@@ -58,13 +58,14 @@ void rj_consan_entry(u32 low, u32 high, u32 first_workitem, u32 stride) {
     output[wire::kRowSerial / 4 + 1] = dispatch[wire::kContextSerial / 4 + 1];
     output[wire::kRowEntry / 4] = 0;
     output[wire::kRowWave / 4] = wave;
+    output[wire::kRowFinalPhase / 4] = 0;
     publish(output + wire::kRowStatus / 4, wire::kRowEntered);
   }
 }
 
 extern "C" __device__ __attribute__((noinline, used, visibility("default")))
 void rj_consan_access(u32 low, u32 high, u32 first_workitem, u32 stride, u32 site,
-                      u32 address, u32 immediate, u32 mask_low, u32 mask_high) {
+                      u32 address, u32 immediate, u32 mask_low, u32 mask_high, u32 width) {
   GlobalWords dispatch = context(low, high);
   GlobalWords output = row(dispatch, uniform(first_workitem) / CONSAN_PROBE_WAVE_SIZE, stride);
   u64 remaining = u64{uniform(mask_low)} | (u64{uniform(mask_high)} << 32);
@@ -90,8 +91,9 @@ void rj_consan_access(u32 low, u32 high, u32 first_workitem, u32 stride, u32 sit
       record[wire::kRecordSite / 4] = uniform(site);
       record[wire::kRecordRange / 4] = 0;
       record[wire::kRecordSequence / 4] = sequence;
+      record[wire::kRecordPhase / 4] = output[wire::kRowFinalPhase / 4];
       record[wire::kRecordLdsOffset / 4] = u32(offset);
-      record[wire::kRecordWidth / 4] = 4;
+      record[wire::kRecordWidth / 4] = uniform(width);
       record[wire::kRecordGuestMask / 4] = u32(matching);
       record[wire::kRecordGuestMask / 4 + 1] = u32(matching >> 32);
       record[wire::kRecordFlags / 4] = wire::kExactGuestMask | (offset >> 32 ? 2u : 0u);
@@ -100,6 +102,26 @@ void rj_consan_access(u32 low, u32 high, u32 first_workitem, u32 stride, u32 sit
   }
   if (remaining)
     wave_state(output).record_loss(lane_id());
+}
+
+extern "C" __device__ __attribute__((noinline, used, visibility("default")))
+void rj_consan_barrier(u32 low, u32 high, u32 first_workitem, u32 stride, u32 group,
+                       u32 journal_offset) {
+  GlobalWords dispatch = context(low, high);
+  GlobalWords output = row(dispatch, uniform(first_workitem) / CONSAN_PROBE_WAVE_SIZE, stride);
+  if (lane_id() == 0) {
+    const u32 phase = output[wire::kRowFinalPhase / 4] + 1;
+    output[wire::kRowFinalPhase / 4] = phase;
+    GlobalWords record = output + (uniform(journal_offset) +
+        uniform(group) * rocjitsu::consan::kSyncRecordBytes) / 4;
+    record[wire::kSyncGroup / 4] = uniform(group);
+    record[wire::kSyncOccurrence / 4] = 1;
+    record[wire::kSyncParticipants / 4] =
+        (dispatch[wire::kContextWorkgroup / 4] + CONSAN_PROBE_WAVE_SIZE - 1) / CONSAN_PROBE_WAVE_SIZE;
+    record[wire::kSyncSequence / 4] = output[wire::kRowFinalSequence / 4];
+    record[wire::kSyncPhase / 4] = phase;
+    publish(record + wire::kSyncCommit / 4, wire::kBarrierCompleted);
+  }
 }
 
 extern "C" __device__ __attribute__((noinline, used, visibility("default")))
@@ -116,3 +138,5 @@ void rj_consan_exit(u32 low, u32 high, u32 first_workitem, u32 stride) {
 __device__ auto rj_consan_entry_keepalive = &rj_consan_entry;
 __device__ auto rj_consan_access_keepalive = &rj_consan_access;
 __device__ auto rj_consan_exit_keepalive = &rj_consan_exit;
+
+__device__ auto rj_consan_barrier_keepalive = &rj_consan_barrier;

@@ -207,8 +207,8 @@ inline ncclResult_t RecordCudaFree(T* ptr, struct ncclMemManager* mgr,
 
 // Pull in the hipified copy of p2p.cc (cudaXxx -> hipXxx rewrites already
 // applied by the hipify pass that runs as part of the main RCCL build).
-// P2P_CC_PATH is defined by this target's CMakeLists.txt as a string
-// literal pointing at ${PROJECT_BINARY_DIR}/hipify/src/transport/p2p.cc.
+// P2P_CC_PATH is defined by transport/host_tests.cmake as a string
+// literal pointing at the hipified src/transport/p2p_tmp.cc.
 #include P2P_CC_PATH
 
 // ===========================================================================

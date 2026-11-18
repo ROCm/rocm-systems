@@ -311,6 +311,11 @@
           "name": "GdrFlush_RepeatedFlushBurst",
           "description": "50-iteration GPU recv+flush burst over the dma-buf scratchpad; an intermittent QP async-fatal would surface as a non-success flush. The whole burst must stay clean.",
           "test_filter": "GdrFlushTest.RepeatedFlush_NoFaultBurst"
+        },
+        {
+          "name": "GdrFlush_ScratchpadWriteRoundTrip",
+          "description": "The chained flush must write the host sentinel into the RO=0 scratchpad and read it back. Dropping the write leaves the scratchpad zero.",
+          "test_filter": "GdrFlushTest.ScratchpadWrite_RoundTripsSentinel"
         }
       ]
     },
@@ -368,7 +373,13 @@
         }
       ]
     },
-    "gdr_flush_cumem_multinode": {
+    "net_ib_gdr_flush_cast": {
+      "extends": "net_ib_gdr_flush",
+      "env_variables": {
+        "NCCL_NET": "ib-cast",
+        "NCCL_GDR_FLUSH_DISABLE": "0"
+      }
+    },    "gdr_flush_cumem_multinode": {
       "extends": "default",
       "is_gtest": true,
       "binary": "rccl-UnitTestsMPI",
@@ -3486,6 +3497,57 @@
         }
       ]
     },
+    "net_ll128_post_send_fence": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 300,
+      "description": "LL128 Ring AllReduce with every ring hop on NET. On gfx1250 this is the connFifo path, the one LL128 send that keeps the full fence at step barriers. NCCL_P2P_DISABLE and NCCL_SHM_DISABLE are cached per process, so they are set before launch.",
+      "env_variables": {
+        "NCCL_P2P_DISABLE": "1",
+        "NCCL_SHM_DISABLE": "1"
+      },
+      "tests": [
+        {
+          "name": "NetLl128_RingAllReduceEveryHopOnNet",
+          "description": "Regression test for the LL128 connFifo fences: without the full fence the NIC could send stale 128-byte lines and the receiver hung",
+          "test_filter": "NetLl128MPITest.RingAllReduceCompletesWithEveryHopOnNet"
+        }
+      ]
+    },
+    "p2p_ll_step_barrier": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 600,
+      "description": "Ring LL and LL128 collectives over P2P with per-rank, per-iteration input. On gfx1250 these sends use the store-free step barrier. The DDA, direct, symmetric and TDM switches are cached per process, so they are set before launch.",
+      "env_variables": {
+        "RCCL_LL128_FORCE_ENABLE": "1",
+        "RCCL_DDA_ENABLE": "0",
+        "RCCL_DIRECT_ALLGATHER_DISABLE": "1",
+        "RCCL_DIRECT_REDUCE_SCATTER_DISABLE": "1",
+        "RCCL_SYM_K_MAX_BYTES": "0",
+        "RCCL_TDM_LL128_ENABLE": "0"
+      },
+      "tests": [
+        {
+          "name": "LlStepBarrier_RingLl128OverP2p",
+          "description": "Ring/LL128 AllReduce, ReduceScatter and AllGather over P2P; a line read before its data landed shows up as a wrong element",
+          "test_filter": "LlStepBarrierMPITest.RingLl128OverP2pMatchesPerIterationInput"
+        },
+        {
+          "name": "LlStepBarrier_RingLlOverP2p",
+          "description": "Ring/LL AllReduce, ReduceScatter and AllGather over P2P; a line read before its data landed shows up as a wrong element",
+          "test_filter": "LlStepBarrierMPITest.RingLlOverP2pMatchesPerIterationInput"
+        }
+      ]
+    },
     "ubr_multi_node": {
       "extends": "default",
       "is_gtest": true,
@@ -6087,6 +6149,12 @@
       "enabled": false
     },
     {
+      "name": "GDR Flush - Whitebox ncclIbIflush (Single-Node, 2-Rank) (IB-CAST)",
+      "description": "Whitebox coverage of the NET/IB GDR flush fix: dma-buf and peermem RO=0 scratchpad reads, feature-disabled fallback, repeated-flush burst, and the fault-injection regression guard. Disabled: Broadcom Thor Ultra has no matching OFED/verbs userspace.",
+      "config": "net_ib_gdr_flush_cast",
+      "enabled": false
+    },
+    {
       "name": "GDR Flush - cuMem AllGather (Multi-Node)",
       "description": "Cross-node AllGather over cuMem/DMA-BUF GDR exercising the base recv+flush path with the RO=0 scratchpad write+read fence",
       "config": "gdr_flush_cumem_multinode",
@@ -6567,6 +6635,18 @@
       "name": "DDA AlltoAll In-Place - 8-Rank (gfx1250 buffer offsets)",
       "description": "gfx1250 AlltoAll at any buffer offset, in place and out of place, stays on DDA LL or LL128 with exact data, also with several peers per LL128 column, single node",
       "config": "dda_alltoall_inplace_mpi_8rank",
+      "enabled": true
+    },
+    {
+      "name": "NET LL128 connFifo Fence - 8-Rank",
+      "description": "Ring/LL128 AllReduce with P2P and SHM disabled so every hop goes through the network proxy, single node",
+      "config": "net_ll128_post_send_fence",
+      "enabled": true
+    },
+    {
+      "name": "P2P LL/LL128 Step Barrier - 8-Rank",
+      "description": "Ring LL and LL128 collectives over P2P with data checks, single node",
+      "config": "p2p_ll_step_barrier",
       "enabled": true
     },
     {

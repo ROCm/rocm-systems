@@ -59,7 +59,14 @@ constexpr std::string_view kTopology = R"({
       {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10},
       {"src":"xcd0.se0.cu1.req","dst":"xcd0.l2.cpl_1","latency":1,"weight":10}]}})";
 
-enum class Bootstrap { None, Enabled, OmitPointerRestore, OmitPayloadLoad, Instrumented };
+enum class Bootstrap {
+  None,
+  Enabled,
+  OmitPointerRestore,
+  OmitPayloadLoad,
+  Instrumented,
+  InstrumentedWithoutPublicationWait
+};
 
 struct RunResult {
   std::array<uint32_t, 2> output{};
@@ -81,7 +88,7 @@ protected:
 
   void run(std::string_view fixture, Bootstrap mode, RunResult &result,
            test::TargetMode target_mode = {"gfx1100", 32}, uint32_t threads = 64,
-           bool target_fixture = false) {
+           bool target_fixture = false, uint32_t output_words_per_wave = 1) {
 #ifdef CONSAN_FIXTURE_DIR
     const std::vector<uint8_t> original =
         test::read_fixture(target_fixture ? test::target_fixture_path(target_mode, fixture)
@@ -100,12 +107,30 @@ protected:
     result.original_sgprs = input.original_sgprs;
     result.original_vgprs = input.original_vgprs;
     std::vector<uint8_t> image = original;
-    if (mode == Bootstrap::Instrumented) {
+    const bool instrumented =
+        mode == Bootstrap::Instrumented || mode == Bootstrap::InstrumentedWithoutPublicationWait;
+    if (instrumented) {
       const FailureOr<PreparedArtifact> artifact =
           prepare(original, *target_profile(target_mode.target), "lds_producer_consumer", error);
       ASSERT_TRUE(artifact.succeeded()) << error.message;
       image = artifact.value().image;
       result.manifest = artifact.value().manifest;
+      if (mode == Bootstrap::InstrumentedWithoutPublicationWait) {
+        ASSERT_EQ(result.manifest.barriers.size(), 2u);
+        AmdGpuCodeObject prepared(image.data(), image.size());
+        ASSERT_TRUE(prepared.is_valid());
+        ASSERT_EQ(prepared.text_sections().size(), 1u);
+        const uint64_t wait = prepared.text_sections().front()->sectionOffset() +
+                              result.manifest.barriers.back().prepared_wait;
+        const FailureOr<uint32_t> nop = build_s_nop(0, arch);
+        ASSERT_TRUE(nop.succeeded());
+        ASSERT_TRUE(wire::read_u32(image, wait).has_value());
+        ASSERT_NE(*wire::read_u32(image, wait), nop.value());
+        // Fault injection changes only the relocated publication wait. Keep
+        // the completion callback and all other instrumentation intact.
+        wire::write_u32(image, wait, nop.value());
+        result.manifest.prepared.sha256 = digest(image);
+      }
     } else if (mode != Bootstrap::None) {
       const std::optional<DbiEntryProloguePlan> plan = test::bootstrap_plan(input);
       ASSERT_TRUE(plan);
@@ -187,7 +212,7 @@ protected:
     std::memcpy(arguments.data(), &input_value, sizeof(input_value));
     std::memcpy(arguments.data() + 8, &kOutput, sizeof(kOutput));
     memory->load_image(arguments.data(), arguments.size(), kOriginalArguments);
-    if (mode == Bootstrap::Instrumented) {
+    if (instrumented) {
       const FailureOr<TransportImage> transport =
           initialize_transport(result.manifest,
                                {{threads, 1, 1},
@@ -219,7 +244,7 @@ protected:
                                                   kOriginalArguments, writes));
       // A safe binding control makes restoration observable: the original
       // pointer still names input=7 while the copied prefix now says input=13.
-      if (mode != Bootstrap::Instrumented) {
+      if (!instrumented) {
         const uint32_t poison = 13;
         std::memcpy(wrapper.data(), &poison, sizeof(poison));
       }
@@ -238,13 +263,15 @@ protected:
     result.waves = snapshots->snapshots();
     std::ranges::sort(result.waves, {}, &::rocjitsu::test::WavefrontSnapshot::wf_id);
     soc->flush_all();
-    if (mode == Bootstrap::Instrumented)
+    if (instrumented)
       memory->read_block(kReport, result.report);
-    std::vector<uint8_t> output(std::max(wave_count, 2u) * sizeof(uint32_t));
+    std::vector<uint8_t> output(std::max(wave_count * output_words_per_wave, 2u) *
+                                sizeof(uint32_t));
     memory->read_block(kOutput, output);
     std::memcpy(result.output.data(), output.data(), sizeof(result.output));
-    result.full_output.resize(wave_count);
-    std::memcpy(result.full_output.data(), output.data(), wave_count * sizeof(uint32_t));
+    result.full_output.resize(wave_count * output_words_per_wave);
+    std::memcpy(result.full_output.data(), output.data(),
+                result.full_output.size() * sizeof(uint32_t));
 #else
     (void)fixture;
     (void)mode;
@@ -252,6 +279,7 @@ protected:
     (void)target_mode;
     (void)threads;
     (void)target_fixture;
+    (void)output_words_per_wave;
 #endif
   }
 };
@@ -446,6 +474,30 @@ TEST_F(ConSanBootstrapSim,
   }
 }
 
+TEST_F(ConSanBootstrapSim, Gfx1250PublicationBarrierBlocksAnEarlyConsumer) {
+  // Both kernels initialize LDS to zero and synchronize. Only the producer
+  // then delays. Without the second barrier the consumer must see the old
+  // value; original and instrumented barriers must both expose input=7.
+  RunResult without_publication_barrier;
+  ASSERT_NO_FATAL_FAILURE(
+      run("native-26", Bootstrap::None, without_publication_barrier, {"gfx1250", 32}, 65, true));
+  EXPECT_EQ(without_publication_barrier.output, (std::array<uint32_t, 2>{0, 0}));
+
+  for (const Bootstrap mode : {Bootstrap::None, Bootstrap::Instrumented}) {
+    SCOPED_TRACE(mode == Bootstrap::None ? "original" : "instrumented");
+    RunResult synchronized;
+    ASSERT_NO_FATAL_FAILURE(run("native-25", mode, synchronized, {"gfx1250", 32}, 65, true));
+    EXPECT_EQ(synchronized.output, (std::array<uint32_t, 2>{7, 0}));
+  }
+
+  // Callback execution must not substitute for the wait. If callback growth
+  // hides this missing wait, increase the producer delay to restore the oracle.
+  RunResult without_wait;
+  ASSERT_NO_FATAL_FAILURE(run("native-25", Bootstrap::InstrumentedWithoutPublicationWait,
+                              without_wait, {"gfx1250", 32}, 65, true));
+  EXPECT_EQ(without_wait.output, (std::array<uint32_t, 2>{0, 0}));
+}
+
 class ConSanTargetSim : public ConSanBootstrapSim,
                         public ::testing::WithParamInterface<test::TargetMode> {};
 
@@ -477,8 +529,8 @@ struct ObservedAccess {
 
 std::vector<ObservedAccess> published_accesses(const RunResult &result, bool exhausted = false) {
   std::vector<ObservedAccess> accesses;
-  const uint32_t stride =
-      kRowHeaderBytes + result.manifest.sites.size() * kAddressGroupsPerSite * kAccessRecordBytes;
+  const uint32_t stride = static_cast<uint32_t>(
+      report_row_bytes(result.manifest.sites.size(), !result.manifest.barriers.empty()));
   for (uint32_t wave = 0; wave < result.waves.size(); ++wave) {
     const size_t row = kReportHeaderBytes + wave * stride;
     EXPECT_EQ(wire::read_u64(result.report, row + wire::kRowSerial), 41u);
@@ -497,6 +549,7 @@ std::vector<ObservedAccess> published_accesses(const RunResult &result, bool exh
         EXPECT_EQ(wire::read_u32(result.report, record + wire::kRecordCommit),
                   wire::kAccessCommitted);
         EXPECT_EQ(wire::read_u32(result.report, record + wire::kRecordSite), site.id);
+        EXPECT_EQ(wire::read_u32(result.report, record + wire::kRecordWidth), site.width);
         EXPECT_EQ(wire::read_u32(result.report, record + wire::kRecordFlags),
                   wire::kExactGuestMask);
         accesses.push_back({wave, site.id,
@@ -628,6 +681,105 @@ TEST_P(ConSanHipSim, CompiledHipRaceDisjointAndReadReadExecuteTheirNativeSites) 
       EXPECT_EQ(after.full_output, (std::vector<uint32_t>{7, 8}));
     }
   }
+}
+
+TEST_F(ConSanBootstrapSim, Gfx1250BarrierPreservesOutputAndGuestStateAtEmptyExecAndHighLanes) {
+  for (const char *fixture :
+       {"native-15", "native-16", "native-20", "native-21", "native-24", "native-27"}) {
+    for (const uint32_t threads : {64u, 65u}) {
+      SCOPED_TRACE(fixture);
+      SCOPED_TRACE(threads);
+      RunResult before, after;
+      run(fixture, Bootstrap::None, before, {"gfx1250", 32}, threads, true);
+      ASSERT_FALSE(HasFatalFailure());
+      run(fixture, Bootstrap::Instrumented, after, {"gfx1250", 32}, threads, true);
+      ASSERT_FALSE(HasFatalFailure());
+      EXPECT_EQ(before.output[0], 7u);
+      EXPECT_EQ(after.output[0], 7u);
+      expect_guest_state(before, after);
+      const std::vector<ObservedAccess> records = published_accesses(after);
+      const bool reuses_word =
+          std::string_view(fixture) == "native-24" || std::string_view(fixture) == "native-27";
+      ASSERT_EQ(records.size(), reuses_word ? 3u : 2u);
+      EXPECT_EQ(records.front().wave, 0u);
+      EXPECT_EQ(records.back().wave, 1u);
+      if (reuses_word) {
+        EXPECT_EQ(records[1].wave, 0u);
+        EXPECT_EQ(records[1].site, 2u);
+        EXPECT_EQ(after.manifest.sites[records[1].site].access, AccessKind::Write);
+      }
+      const uint64_t mask = std::string_view(fixture) == "native-20" ? uint64_t{1} << 31 : 1;
+      for (const ObservedAccess &record : records)
+        EXPECT_EQ(record.mask, mask);
+    }
+  }
+}
+
+TEST_P(ConSanTargetSim, NativeWidthsPreserveEveryWordAndAllGuestState) {
+  const test::TargetMode target = GetParam();
+  const uint32_t wave_size = target.wave_size;
+  for (const char *name : {"u16", "i16", "b64", "b128", "u16-high", "i16-high", "b64-high",
+                           "b128-high", "b128-alias"}) {
+    const std::string_view kind(name);
+    if (std::string_view(target.target) != "gfx1250" && kind != "i16" && kind != "b64-high" &&
+        kind != "b128-alias")
+      continue;
+    for (const uint32_t threads : {2 * wave_size, 2 * wave_size + 1}) {
+      SCOPED_TRACE(name);
+      SCOPED_TRACE(threads);
+      const std::string fixture = "width-" + std::string(name);
+      RunResult before, after;
+      run(fixture, Bootstrap::None, before, target, threads, true, 4);
+      ASSERT_FALSE(HasFatalFailure());
+      run(fixture, Bootstrap::Instrumented, after, target, threads, true, 4);
+      ASSERT_FALSE(HasFatalFailure());
+      expect_guest_state(before, after);
+      std::vector<uint32_t> expected;
+      const uint32_t waves = (threads + wave_size - 1) / wave_size;
+      for (uint32_t wave = 0; wave < waves; ++wave) {
+        const bool inactive =
+            kind.ends_with("-high") && wave * wave_size + wave_size - 1 >= threads;
+        std::array<uint32_t, 4> words{7u + wave, 0x01234567u, 0x76543210u, 0xa5a5a5a5u};
+        if (kind.starts_with("i16"))
+          words[0] += 0xffff8000u;
+        else if (kind.starts_with("u16"))
+          words[0] += 0x8000u;
+        else
+          words[1] = 0x89abcdefu;
+        if (kind.starts_with("b128")) {
+          words[2] = 0x13579bdfu;
+          words[3] = 0xfedcba98u;
+        }
+        if (inactive)
+          words.fill(0);
+        expected.insert(expected.end(), words.begin(), words.end());
+      }
+      EXPECT_EQ(before.full_output, expected);
+      EXPECT_EQ(after.full_output, expected);
+      const std::vector<ObservedAccess> records = published_accesses(after);
+      const bool high = kind.ends_with("-high");
+      EXPECT_EQ(records.size(), 2u * (high ? threads / wave_size : waves));
+      for (const ObservedAccess &record : records)
+        EXPECT_EQ(record.mask, high ? uint64_t{1} << (wave_size - 1) : 1);
+    }
+  }
+}
+
+TEST_F(ConSanBootstrapSim, MixedWidthBarrierPreservesTheIndependentCrossWaveValueAndState) {
+  RunResult before, after;
+  run("mixed-5", Bootstrap::None, before, {"gfx1250", 32}, 65, true);
+  ASSERT_FALSE(HasFatalFailure());
+  run("mixed-5", Bootstrap::Instrumented, after, {"gfx1250", 32}, 65, true);
+  ASSERT_FALSE(HasFatalFailure());
+  expect_guest_state(before, after);
+  EXPECT_EQ(before.output[0], 8u);
+  EXPECT_EQ(after.output[0], 8u);
+  const std::vector<ObservedAccess> records = published_accesses(after);
+  ASSERT_EQ(records.size(), 2u);
+  EXPECT_EQ(records[0].offset, 0u);
+  EXPECT_EQ(records[1].offset, 4u);
+  EXPECT_EQ(after.manifest.sites[0].width, 8u);
+  EXPECT_EQ(after.manifest.sites[1].width, 4u);
 }
 
 const auto target_name = [](const auto &info) {
