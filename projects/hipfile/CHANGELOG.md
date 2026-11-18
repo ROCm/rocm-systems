@@ -18,6 +18,7 @@
 * `ais-check` no longer reports an LVM parity RAID logical volume (`raid4`, `raid5`, `raid6`) as fastpath capable.
 * Per-GPU I/O statistics are now attributed to the GPU that owns the I/O buffer instead of the caller's active HIP device. Previously, `hipFileGetStatsL3()` and `ais-stats` could report counters against the wrong GPU when the active device differed from the buffer's device.
 * `hipfile.h` now includes `<time.h>`, which declares the `struct timespec` used by `hipFileBatchIOGetStatus()`. Previously, C code that included `<time.h>` after `hipfile.h` got an incompatible pointer type error or warning when passing a `struct timespec *` to `hipFileBatchIOGetStatus()`.
+* Configuring hipFile with `HIPFILE_CXX_STANDARD=26` and a CMake older than 3.30, which C++26 requires, now fails with an error that names `HIPFILE_CXX_STANDARD` and the CMake version needed. Previously, the error only said that CMake didn't know the `cxx_std_26` compiler feature.
 * Building hipFile with GCC 15 or later no longer warns about every line indented with spaces. The build now uses `-Wleading-whitespace=spaces`, which warns about tabs in indentation, instead of `-Wleading-whitespace=tabs`.
 
 ### Removed
