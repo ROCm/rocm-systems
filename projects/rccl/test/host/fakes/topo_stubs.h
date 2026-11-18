@@ -96,4 +96,8 @@ extern int g_ncclTopoPostsetNc;
 
 void ResetTopoStubs();
 
+struct ncclTopoNetPropertiesSnapshot;
+extern std::function<ncclResult_t(struct ncclComm*, bool, struct ncclTopoNetPropertiesSnapshot**, int*)>
+    g_ncclTopoGetNetPropertiesSnapshot;
+
 #endif  // RCCL_TEST_HOST_TOPO_STUBS_H_

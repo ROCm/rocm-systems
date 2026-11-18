@@ -131,7 +131,7 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES SQ_INSTS_VALU GRBM_COUNT
         --pmc SQ_WAVES SQ_INSTS_VALU GRBM_GUI_ACTIVE --replay-mode kernel
         --kernel-replay-beta-enabled --kernel-include-regex saxpy --kernel-iteration-range
-        "2-3" --output-format json -d
+        "2-3" --kernel-trace --output-format json -d
         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-iteration-range -o out --
         $<TARGET_FILE:kernel-replay> 65536 4
     DEPENDS kernel-replay
@@ -141,7 +141,8 @@ rocprofiler_add_integration_execute_test(
     FIXTURES_SETUP rocprofv3-test-kernel-replay-iteration-range-data)
 
 # Validate the exact ticket invariant: two selected logical dispatches, each carrying two
-# distinct counter-group passes. Numeric dispatch IDs are deliberately not pinned.
+# distinct counter-group passes, which are the second and third saxpy launches. Numeric
+# dispatch IDs are deliberately not pinned.
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-kernel-replay-iteration-range-validate BUNDLE_TESTS
     TEST_PATHS validate.py
@@ -155,13 +156,63 @@ rocprofiler_add_integration_validate_test(
          --common-counters
          SQ_WAVES
          SQ_INSTS_VALU
+         --selected-kernel
+         saxpy
+         --selected-launches
+         2
+         3
          -k
-         "dispatch_id_constant_across_replay_passes or expected_logical_dispatch_count or each_pass_collects_distinct_batch"
+         "dispatch_id_constant_across_replay_passes or expected_logical_dispatch_count or each_pass_collects_distinct_batch or unselected_dispatches_run_once or iteration_range_selects_launches"
     TIMEOUT 120
     LABELS "kernel-replay"
     PYTHON_PATH
         "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
     FIXTURES_REQUIRED rocprofv3-test-kernel-replay-iteration-range-data)
+
+# Under --selected-regions only the launches inside a region are profiled, so only they
+# count toward --kernel-iteration-range, with replay as without it. The application
+# launches saxpy 3 times before the region, 5 times inside it and twice after it, so range
+# 2-3 must replay the second and third launches inside the region.
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-kernel-replay-selected-regions-generate
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --selected-regions --pmc SQ_WAVES
+        SQ_INSTS_VALU GRBM_COUNT --pmc SQ_WAVES SQ_INSTS_VALU GRBM_GUI_ACTIVE
+        --replay-mode kernel --kernel-replay-beta-enabled --kernel-include-regex saxpy
+        --kernel-iteration-range "2-3" --kernel-trace --output-format json -d
+        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-selected-regions -o out --
+        $<TARGET_FILE:kernel-replay-regions> 65536 3 5 2
+    DEPENDS kernel-replay-regions
+    TIMEOUT 120
+    LABELS "kernel-replay;selected-regions"
+    ENVIRONMENT "${rocprofv3-generate-env}"
+    FIXTURES_SETUP rocprofv3-test-kernel-replay-selected-regions-data)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-kernel-replay-selected-regions-validate BUNDLE_TESTS
+    TEST_PATHS validate.py
+    COPY conftest.py
+    ARGS --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-selected-regions/out_results.json
+         --passes
+         2
+         --expected-dispatch-count
+         2
+         --common-counters
+         SQ_WAVES
+         SQ_INSTS_VALU
+         --selected-kernel
+         saxpy
+         --selected-launches
+         2
+         3
+         -k
+         "dispatch_id_constant_across_replay_passes or expected_logical_dispatch_count or each_pass_collects_distinct_batch or unselected_dispatches_run_once or iteration_range_selects_launches"
+    TIMEOUT 120
+    LABELS "kernel-replay;selected-regions"
+    PYTHON_PATH
+        "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
+    FIXTURES_REQUIRED rocprofv3-test-kernel-replay-selected-regions-data)
 
 # One-pass baseline for performance scaling checks (same workload, single --pmc group).
 rocprofiler_add_integration_execute_test(
