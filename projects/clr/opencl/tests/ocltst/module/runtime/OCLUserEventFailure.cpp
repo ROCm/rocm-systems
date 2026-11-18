@@ -6,6 +6,9 @@
 
 #include "OCLUserEventFailure.h"
 
+#include <stdio.h>
+#include <string.h>
+
 #include "CL/cl.h"
 
 static const unsigned int NumTasks = 4;
@@ -96,6 +99,17 @@ void OCLUserEventFailure::failSingleEvent() {
 }
 
 void OCLUserEventFailure::failOneOfTwoEvents() {
+  // Without direct dispatch the queue thread waits on every user event before it fails a
+  // command, so the wait below can't return until the second event is resolved
+  char driverVersion[256] = {};
+  error_ = _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DRIVER_VERSION,
+                                     sizeof(driverVersion) - 1, driverVersion, NULL);
+  CHECK_RESULT((error_ != CL_SUCCESS), "clGetDeviceInfo() failed");
+  if (strstr(driverVersion, "PAL") != NULL) {
+    printf("PAL backend doesn't use direct dispatch, skipping...\n");
+    return;
+  }
+
   cl_command_queue queue = cmdQueues_[_deviceId];
   cl_event userEvents[2];
   for (unsigned int i = 0; i < 2; ++i) {
