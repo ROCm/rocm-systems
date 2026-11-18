@@ -147,3 +147,12 @@ Loose uses FP32-intermediate MAD. Guest rounding, forced intermediate flushing,
 IEEE NaN quieting, FP16_OVFL and final output modifiers are retained. This is
 software-model reuse, not new empirical qualification; strict modes reject and
 FP status is unchanged. The native half FMA migration is independent.
+
+## gfx1150 scalar floating point
+
+All 58 scalar FP forms used by Rocjitsu support Loose and Compatibility.
+Compatibility preserves the inherited software model, including guest rounding,
+IEEE-dependent NaNs and FP status. The 30 gfx1150-specific arithmetic, selection,
+rounding and conversion entry points do not advertise new empirical qualification;
+comparisons share the existing raw-bit predicates. Scalar operations have one
+SGPR value per operand, so there is no lane-vector SIMD backend to select.
