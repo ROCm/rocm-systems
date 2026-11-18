@@ -5,17 +5,14 @@
 """Hardware-free regression tests for
 ``amdsmi_set_power_stabilization_param()``'s int64 value validation.
 
-``int(value)`` silently truncates a non-whole float (``int(3.9) == 3``) and
-raises a raw ``ValueError``/``OverflowError`` -- not the documented
-``AmdSmiParameterException`` -- for NaN/inf. These tests pin the fix: a float
-value for any param_id must be a whole, finite number, and non-whole
-floats (including NaN/inf) raise ``AmdSmiParameterException`` instead of
-truncating or leaking a raw Python exception.
+The C API takes a signed 64-bit integer only, so the Python API accepts
+``int`` and rejects everything else -- including ``bool`` (an ``int``
+subclass) and ``float`` -- with ``AmdSmiParameterException``, and rejects
+out-of-range ``int`` values the same way.
 """
 
 import ctypes
 import importlib.util
-import math
 import os
 import sys
 import types
@@ -117,30 +114,21 @@ class TestPowerStabilizationParamIntValidation(unittest.TestCase):
     def tearDown(self):
         del ai.amdsmi_wrapper.amdsmi_set_power_stabilization_param
 
-    def test_whole_number_float_is_accepted_and_truncates_safely(self):
-        ai.amdsmi_set_power_stabilization_param(self.handle, self.int_param, 70.0)
-        self.assertEqual(self.calls[-1][2], 70)
-
     def test_int_value_is_accepted(self):
         ai.amdsmi_set_power_stabilization_param(self.handle, self.int_param, 70)
         self.assertEqual(self.calls[-1][2], 70)
 
-    def test_non_whole_float_raises_instead_of_silently_truncating(self):
+    def test_bool_raises_parameter_exception(self):
         with self.assertRaises(ai.AmdSmiParameterException):
-            ai.amdsmi_set_power_stabilization_param(self.handle, self.int_param, 3.9)
+            ai.amdsmi_set_power_stabilization_param(self.handle, self.int_param, True)
         self.assertEqual(self.calls, [], "must not reach the wrapper call")
 
-    def test_nan_raises_parameter_exception_not_raw_value_error(self):
+    def test_whole_number_float_raises_parameter_exception(self):
         with self.assertRaises(ai.AmdSmiParameterException):
-            ai.amdsmi_set_power_stabilization_param(self.handle, self.int_param, math.nan)
+            ai.amdsmi_set_power_stabilization_param(self.handle, self.int_param, 70.0)
         self.assertEqual(self.calls, [])
 
-    def test_positive_inf_raises_parameter_exception_not_raw_overflow_error(self):
+    def test_out_of_range_int_raises_parameter_exception(self):
         with self.assertRaises(ai.AmdSmiParameterException):
-            ai.amdsmi_set_power_stabilization_param(self.handle, self.int_param, math.inf)
-        self.assertEqual(self.calls, [])
-
-    def test_negative_inf_raises_parameter_exception(self):
-        with self.assertRaises(ai.AmdSmiParameterException):
-            ai.amdsmi_set_power_stabilization_param(self.handle, self.int_param, -math.inf)
+            ai.amdsmi_set_power_stabilization_param(self.handle, self.int_param, 2**63)
         self.assertEqual(self.calls, [])

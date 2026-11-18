@@ -222,7 +222,7 @@ For every component on the node, not only GPUs, use
 ~$ amd-smi static --help
 usage: amd-smi static [-h] [-a] [-b] [-I] [-d] [-v] [-c] [-B] [-R] [-r] [-C [CLOCK ...]]
                       [-Y] [-y] [-p] [-m] [-A] [-l] [-P] [-x] [-o] [-u]
-                      [--power-stabilization] [-s] [-i] [-g GPU [GPU ...]
+                      [-S] [-s] [-i] [-g GPU [GPU ...]
                       | -U CPU [CPU ...]] [--json | --csv] [--file FILE] [--overwrite]
                       [--append] [--loglevel LEVEL]
 
@@ -266,7 +266,8 @@ Static Arguments:
   -x, --xgmi-plpd          The available XGMI per-link power down policy
   -o, --profile            Display current and available power profiles
   -u, --numa               All numa node information
-  --power-stabilization    Power Stabilization status (HAWK dummy-compute insertion and Ramp Management)
+  -S, --power-stabilization
+                                Power Stabilization status (HAWK dummy-compute insertion and Ramp Management)
 
 CPU Arguments:
   -s, --smu                All SMU FW information
@@ -817,8 +818,8 @@ Set Arguments:
   -n, --node-power-limit WATTS                Set the node-level (NPM) power limit in watts.
                                                 This is a node-wide setting, not per-GPU.
                                                 Max node power limit: 6000 W
-  --power-stabilization-configure KEY=VALUE [KEY=VALUE ...] | @PATH
-                                               Configure Power Stabilization (HAWK dummy-compute insertion and Ramp Management).
+  -s, --power-stabilization-configure KEY=VALUE [KEY=VALUE ...] | @PATH
+                                                Configure Power Stabilization (HAWK dummy-compute insertion and Ramp Management).
                                                 Accepts one or more space/comma-separated KEY=VALUE pairs (enable, power_floor,
                                                 delay, insertion_priority, ramp_enable, ramp_max_ramp_up_rate,
                                                 ramp_max_ramp_down_rate, ramp_min_time_at_power_floor, ramp_stop_delay), or a

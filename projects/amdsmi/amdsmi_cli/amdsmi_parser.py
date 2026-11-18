@@ -1948,6 +1948,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                     "Power Stabilization status (HAWK dummy-compute insertion and Ramp Management)"
                 )
                 static_parser.add_argument(
+                    "-S",
                     "--power-stabilization",
                     action="store_true",
                     required=False,
@@ -3125,6 +3126,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                     "\n\tEach key is applied in order; processing stops at the first failure."
                 )
                 set_value_exclusive_group.add_argument(
+                    "-s",
                     "--power-stabilization-configure",
                     action=self._validate_power_stabilization_configure(),
                     nargs="+",

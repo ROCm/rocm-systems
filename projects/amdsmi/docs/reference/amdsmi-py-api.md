@@ -6875,7 +6875,7 @@ Input parameters:
 
 * `processor_handle` the device handle
 * `param_id` parameter to set (`AmdSmiPowerStabilizationParamId`)
-* `value` new value, written as a signed 64-bit integer: every `param_id`, including `RAMP_MAX_RAMP_UP_RATE` and `RAMP_MAX_RAMP_DOWN_RATE` despite being a %PL/sec rate, accepts an `int` or whole-number `bool`/`float` (this parameter's sysfs node cannot accept floating-point values)
+* `value` new value, written as a signed 64-bit integer: every `param_id`, including `RAMP_MAX_RAMP_UP_RATE` and `RAMP_MAX_RAMP_DOWN_RATE` despite being a %PL/sec rate, accepts an `int` only (`bool` is rejected since it is an `int` subclass; this parameter's sysfs node cannot accept floating-point values)
 
 Output: None
 

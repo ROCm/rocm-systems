@@ -8124,9 +8124,7 @@ def amdsmi_get_power_stabilization_info(processor_handle: processor_handle_t) ->
 
 
 def amdsmi_set_power_stabilization_param(
-    processor_handle: processor_handle_t,
-    param_id: AmdSmiPowerStabilizationParamId,
-    value: Union[int, float],
+    processor_handle: processor_handle_t, param_id: AmdSmiPowerStabilizationParamId, value: int
 ) -> None:
     """
     Set a single Power Stabilization parameter.
@@ -8137,13 +8135,11 @@ def amdsmi_set_power_stabilization_param(
         value: New value, written as a signed 64-bit integer -- every
         param_id, including the two ramp rates despite being a %PL/sec
         rate, is an int64_t (this parameter's sysfs node cannot accept
-        floating-point values). A float value must be a whole number
-        (e.g. 3.0, not 3.9, NaN, or inf).
+        floating-point values).
 
     Raises:
         AmdSmiParameterException: If processor_handle, param_id, or value is
-        invalid, including an int64 value out of signed 64-bit range or a
-        non-whole-number float
+        invalid, including an int64 value out of signed 64-bit range
         AmdSmiException: If the function fails (AMDSMI_STATUS_NOT_SUPPORTED,
         AMDSMI_STATUS_NO_PERM, AMDSMI_STATUS_INVAL, or AMDSMI_STATUS_FILE_ERROR)
     """
@@ -8153,23 +8149,17 @@ def amdsmi_set_power_stabilization_param(
     if not isinstance(param_id, AmdSmiPowerStabilizationParamId):
         raise AmdSmiParameterException(param_id, AmdSmiPowerStabilizationParamId)
 
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if isinstance(value, bool) or not isinstance(value, int):
         # bool is a subclass of int; reject it explicitly rather than
         # silently writing 0/1 (same idiom as amdsmi_configure_ampp_profile's
         # field_value check).
-        raise AmdSmiParameterException(value, Union[int, float])
+        raise AmdSmiParameterException(value, int)
 
-    if isinstance(value, float) and not value.is_integer():
-        # Also catches NaN/inf (is_integer() is False for both), which
-        # int() would otherwise raise a raw ValueError/OverflowError on
-        # instead of the documented AmdSmiParameterException.
-        raise AmdSmiParameterException(value, int, msg=f"value {value!r} is not a whole number")
-    int_value = int(value)
-    if not -(2**63) <= int_value < 2**63:
+    if not -(2**63) <= value < 2**63:
         raise AmdSmiParameterException(
             value, ctypes.c_int64, msg=f"value {value!r} does not fit in a signed 64-bit integer"
         )
 
     _check_res(
-        amdsmi_wrapper.amdsmi_set_power_stabilization_param(processor_handle, param_id, int_value)
+        amdsmi_wrapper.amdsmi_set_power_stabilization_param(processor_handle, param_id, value)
     )
