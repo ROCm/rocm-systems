@@ -451,7 +451,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ### Changed
 
 - **`amdsmi_get_clock_info()` now returns `AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS` for clock values above `INT_MAX`**.  
-  - Such values were previously returned as negative numbers.
+  - Such values were previously returned as if valid.
   - A clock reported as unavailable (`UINT_MAX`) still reads as unavailable instead of failing the call.
 
 - **Expanded `amdsmi_gpu_block_t` enum with 20 new RAS IP blocks**.  
@@ -498,7 +498,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - `--energy`, `--ecc-blocks`, `--overdrive`, `--xgmi-err`, `--pcie`, `--voltage-curve`, `--voltage` and `--fan` now show `N/A` when named. The default `amd-smi metric` output is unchanged.
 
 - **Fixed `amdsmi_get_clock_info()` reporting an unavailable clock as `65535` instead of `N/A`**.  
-  - All clock domains now report an unavailable clock as `UINT32_MAX`, which Python and the CLI show as `N/A`.
+  - All clock domains now report an unavailable clock as `UINT32_MAX`, which Python shows as `N/A`.
 
 - **Fixed `amd-smi metric --usage` showing APU IPU read/write bandwidth without a unit**.  
   - `APU_AVERAGE_IPU_READS` and `APU_AVERAGE_IPU_WRITES` now show `MB/s`, like the DRAM bandwidth counters.
@@ -514,7 +514,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - A process started from a path of 256 or more characters no longer reports a corrupted name.
 
 - **Fixed out-of-bounds reads and writes when parsing malformed CPER records**.  
-  - Records shorter than a CPER header, with an oversized register dump, or with an out-of-range severity are now dropped or rejected instead of being read or written past their end. One such record previously wrote past the end of the buffer passed to `amdsmi_get_gpu_cper_entries()`.
+  - Records shorter than a CPER header or with an oversized register dump are now dropped or rejected instead of being read past their end. One such record previously wrote past the end of the buffer passed to `amdsmi_get_gpu_cper_entries()`.
+  - Records with an out-of-range severity are now rejected.
   - `amdsmi_get_afids_from_cper()` returns `AMDSMI_STATUS_UNEXPECTED_SIZE` when `buf_size` is smaller than a CPER header.
   - AFIDs that came from reading past a boot-context register dump no longer appear.
 
@@ -530,7 +531,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - `amdsmi_get_nic_rdma_dev_info()` returns `AMDSMI_STATUS_SUCCESS` with `num_rdma_dev` set to `0`, and `amd-smi static` shows `RDMA_DEVICES: N/A`.
 
 - **Fixed `amdsmi_get_gpu_asic_info()` reporting `rev_id` as a real revision when it is not available**.  
-  - On the WSL backend `rev_id` read as `0x0`, and elsewhere an unavailable `rev_id` showed as `0xffffffff` in Python. Python and the CLI now show `N/A`.
+  - On the WSL backend `rev_id` read as `0x0`, and where the not-supported value was reported, Python showed the raw `0xffffffff`. Python and the CLI now show `N/A`.
   - Other fields a backend cannot supply now keep their not-supported value instead of reading as zero.
 
 ### Upcoming Changes
