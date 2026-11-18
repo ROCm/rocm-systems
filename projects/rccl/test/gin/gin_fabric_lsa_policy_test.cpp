@@ -84,13 +84,15 @@ TEST(GinFabricLsaPolicy, FlagBlocksCapAt64) {
 TEST(GinFabricLsaPolicy, ThresholdIsZeroUnlessOptedIn) {
   EXPECT_EQ(ginFabricLsaA2AThreshold(false, -1, 4), 0u);
   EXPECT_EQ(ginFabricLsaA2AThreshold(false, 65536, 4), 0u);
-  // A total size of nRanks^2 MiB below 16 ranks, and no cap from 16.
+  // A total size of nRanks^2 MiB, except no cap at 16 ranks, the largest count measured.
   EXPECT_EQ(ginFabricLsaA2AThreshold(true, -1, 2), 4u * 1024 * 1024);
   EXPECT_EQ(ginFabricLsaA2AThreshold(true, -1, 4), 16u * 1024 * 1024);
   EXPECT_EQ(ginFabricLsaA2AThreshold(true, -1, 8), 64u * 1024 * 1024);
   EXPECT_EQ(ginFabricLsaA2AThreshold(true, -1, 15), 225u * 1024 * 1024);
   EXPECT_EQ(ginFabricLsaA2AThreshold(true, -1, 16), ~(size_t)0);
-  EXPECT_EQ(ginFabricLsaA2AThreshold(true, -1, 64), ~(size_t)0);
+  EXPECT_EQ(ginFabricLsaA2AThreshold(true, -1, 17), 289u * 1024 * 1024);
+  EXPECT_EQ(ginFabricLsaA2AThreshold(true, -1, 32), (size_t)1024 * 1024 * 1024);
+  EXPECT_EQ(ginFabricLsaA2AThreshold(true, -1, 64), (size_t)4096 * 1024 * 1024);
   EXPECT_EQ(ginFabricLsaA2AThreshold(true, (int64_t)256 * 1024 * 1024, 16), 256u * 1024 * 1024);
   EXPECT_EQ(ginFabricLsaA2AThreshold(true, -1, 1), 0u);
   EXPECT_EQ(ginFabricLsaA2AThreshold(true, 65536, 4), 65536u);

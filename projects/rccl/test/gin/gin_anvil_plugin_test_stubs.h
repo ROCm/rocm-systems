@@ -23,6 +23,8 @@ void SetBootstrapNranks(int nranks);
 void SetBootstrapPeerThreshold(size_t threshold);
 // Rank 1 reports a failed context setup in the LSA agreement vote.
 void SetBootstrapPeerLsaSetupFail(bool fail);
+// Rank 1 votes the LSA lane off (enabled = 0) in the LSA agreement vote.
+void SetBootstrapPeerLsaDisabled(bool disabled);
 // Queue one allgather payload. Each sizeof(int) allgather consumes the front
 // entry, so a second call can inject a peer-reported missing vector.
 void SetBootstrapIntResult(const int* values, int count);

@@ -42,6 +42,7 @@ struct State {
   bool bootstrapPeerThresholdSet = false;
   size_t bootstrapPeerThreshold = 0;
   bool bootstrapPeerLsaSetupFail = false;
+  bool bootstrapPeerLsaDisabled = false;
   std::vector<std::vector<int>> bootstrapIntResults;
   IntraNodeBootstrapCall lastIntraNodeAllGather;
   IntraNodeBootstrapCall lastIntraNodeBarrier;
@@ -100,6 +101,7 @@ void SetBootstrapPeerThreshold(size_t threshold) {
   g.bootstrapPeerThreshold = threshold;
 }
 void SetBootstrapPeerLsaSetupFail(bool fail) { g.bootstrapPeerLsaSetupFail = fail; }
+void SetBootstrapPeerLsaDisabled(bool disabled) { g.bootstrapPeerLsaDisabled = disabled; }
 void SetBootstrapIntResult(const int* values, int count) {
   g.bootstrapIntResults.emplace_back(values, values + count);
 }
@@ -285,6 +287,11 @@ static ncclResult_t stubWideAllGather(void* allData, int nranks, int size) {
   if (GinAnvilPluginStubs::g.bootstrapPeerLsaSetupFail && nranks > 1 && slot >= sizeof(size_t) + 2 * sizeof(int)) {
     const int failed = 0;
     memcpy(bytes + slot + sizeof(size_t) + sizeof(int), &failed, sizeof(int));
+  }
+  // Its enabled int follows threshold.
+  if (GinAnvilPluginStubs::g.bootstrapPeerLsaDisabled && nranks > 1 && slot >= sizeof(size_t) + sizeof(int)) {
+    const int disabled = 0;
+    memcpy(bytes + slot + sizeof(size_t), &disabled, sizeof(int));
   }
   return ncclSuccess;
 }

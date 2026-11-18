@@ -103,14 +103,16 @@ GIN_FABRIC_LSA_HD inline bool ginFabricLsaA2ACapablePredicate(bool fabricMemPath
 // Default total-size threshold of the lane. On MI450 the lane's crossover with gin.put grows with
 // the rank count: between 4 and 8 MiB total at 2 ranks, 16 MiB at 4 (1P4G) and 64 MiB at 8 (2P8G),
 // which nRanks^2 MiB follows. At 16 ranks (4P16G) the lane beats gin.put at every measured size,
-// 2.4x at 512 MiB, so from kGinFabricLsaA2AUncappedRanks the default has no cap. Visible on the
+// 2.4x at 512 MiB, so at kGinFabricLsaA2AUncappedRanks the default has no cap. Above it each peer
+// gets fewer of the lane's 64 CTAs (64 / nRanks), and no larger clique has been measured, so those
+// keep nRanks^2 MiB. Visible on the
 // device pass: createContext calls this from a .cc that HIP still parses for device when
 // ENABLE_DEVICE_LINKER=OFF.
 constexpr size_t kGinFabricLsaA2ADefaultThresholdUnit = (size_t)1024 * 1024;
 constexpr int kGinFabricLsaA2AUncappedRanks = 16;
 
 GIN_FABRIC_LSA_HD inline size_t ginFabricLsaA2ADefaultThreshold(int nRanks) {
-  if (nRanks >= kGinFabricLsaA2AUncappedRanks) return ~(size_t)0;
+  if (nRanks == kGinFabricLsaA2AUncappedRanks) return ~(size_t)0;
   return (size_t)nRanks * (size_t)nRanks * kGinFabricLsaA2ADefaultThresholdUnit;
 }
 

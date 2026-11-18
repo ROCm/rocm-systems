@@ -440,6 +440,37 @@ TEST_F(GinAnvilPluginTest, CreateContext_LsaThresholdMismatchDisablesLane) {
   plugin_.finalize(ictx);
 }
 
+// A peer that did not opt in, or is not capable, votes the lane off, which keeps
+// every rank off LSA even where this rank is capable and opted in.
+TEST_F(GinAnvilPluginTest, CreateContext_PeerWithoutLsaDisablesLane) {
+  GinAnvilPluginStubs::SetFabricLsaOptIn(true);
+  GinAnvilPluginStubs::SetUseFabricMem(true);
+  GinAnvilPluginStubs::SetFabricLsaCapable(true);
+  mockComm_.comm.MNNVL = 1;
+  mockComm_.comm.devrState.lsaTeamSize = 4;
+  setupFabricComm(4);
+
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 4);
+  GinAnvilPluginStubs::SetBootstrapPeerLsaDisabled(true);
+
+  ncclGinConfig_t cfg{};
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  ncclGinAnvilSdmaGPUContext hostCtx{};
+  ASSERT_EQ(hipMemcpy(&hostCtx, devHandle->handle, sizeof(hostCtx), hipMemcpyDeviceToHost), hipSuccess);
+  EXPECT_EQ(hostCtx.fabricA2ALsaEnabled, 0u);
+  EXPECT_EQ(hostCtx.fabricA2ALsaThreshold, 0u);
+
+  plugin_.destroyContext(ginCtx);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
 // The lane needs peer windows mapped LSA-flat through fabric handles; an opt-in
 // alone does not arm it.
 TEST_F(GinAnvilPluginTest, CreateContext_LsaOptInWithoutCapabilityKeepsLaneOff) {
