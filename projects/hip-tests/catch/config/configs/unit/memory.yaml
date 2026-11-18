@@ -423,7 +423,7 @@ memory:
     tags: [alloc, P1]
   Unit_hipHostUnregister_MultiGpuOverlappingDeviceVA:
     <<: *level_default
-    tags: [alloc, multigpu]
+    tags: [alloc, multigpu, P1]
   Unit_hipHostUnregister_NotRegisteredPointer:
     <<: *level_default
     tags: [alloc, P1]

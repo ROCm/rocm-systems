@@ -56,7 +56,7 @@ HIP_TEST_CASE(Unit_hipHostUnregister_NullPtr) {
 
 HIP_TEST_CASE(Unit_hipHostUnregister_Ptr_Different_Than_Specified_To_Register) {
   std::vector<int> alloc(2);
-  HIP_CHECK(hipHostRegister(alloc.data(), alloc.size(), 0));
+  HIP_CHECK(hipHostRegister(alloc.data(), alloc.size() * sizeof(int), 0));
   HIP_CHECK_ERROR(hipHostUnregister(&alloc.data()[1]), hipErrorHostMemoryNotRegistered);
   HIP_CHECK(hipHostUnregister(alloc.data()));
 }
@@ -82,9 +82,11 @@ HIP_TEST_CASE(Unit_hipHostUnregister_InteriorPtr) {
   HIP_CHECK(hipHostUnregister(host));
 }
 
-#if HT_AMD && HT_WIN
-// On Windows each device maps registered memory at its own VA, kept out of the global pointer
-// map. Passing that VA to hipHostUnregister or hipFree must fail, not abort the process.
+#if HT_AMD
+// Each device can map registered memory at a VA other than the host address (on Windows always,
+// from its own VA space). Passing that VA to hipHostUnregister or hipFree must fail without
+// touching the registration (it aborted the process on Windows, and released the registration on
+// Linux, leaving the host address pointing at a freed object).
 HIP_TEST_CASE(Unit_hipHostUnregister_DevicePtr) {
   constexpr size_t kSize = 64 * 1024;
   std::vector<char> buffer(kSize);
@@ -148,9 +150,39 @@ HIP_TEST_CASE(Unit_hipHostUnregister_MultiGpuOverlappingDeviceVA) {
     }
     HIP_CHECK(hipDeviceSynchronize());
   }
+  // Count how often one buffer's VA on a device falls inside another buffer's VA range on another
+  // device: the layout that broke a shared pointer map. Hardware with a different VA layout may
+  // produce none, and then this test cannot catch the bug.
+  const size_t count = buffers.size();
+  std::vector<std::vector<uintptr_t>> vas(num_devices, std::vector<uintptr_t>(count));
+  for (int dev = 0; dev < num_devices; ++dev) {
+    HIP_CHECK(hipSetDevice(dev));
+    for (size_t i = 0; i < count; ++i) {
+      void* device_memory = nullptr;
+      HIP_CHECK(hipHostGetDevicePointer(&device_memory, buffers[i].data(), 0));
+      vas[dev][i] = reinterpret_cast<uintptr_t>(device_memory);
+    }
+  }
+  int overlaps = 0;
+  for (int a = 0; a < num_devices; ++a) {
+    for (int b = 0; b < num_devices; ++b) {
+      for (size_t i = 0; i < count && a != b; ++i) {
+        for (size_t j = 0; j < count; ++j) {
+          if (i != j && vas[a][i] >= vas[b][j] && vas[a][i] < vas[b][j] + sizes[j]) {
+            ++overlaps;
+          }
+        }
+      }
+    }
+  }
+  if (overlaps == 0) {
+    WARN("no cross-device VA overlap produced; this run does not exercise ROCm/TheRock#6224");
+  } else {
+    INFO("cross-device VA overlaps: " << overlaps);
+  }
+
   HIP_CHECK(hipSetDevice(0));
   // Newest first for every other buffer, then the rest oldest first.
-  const size_t count = buffers.size();
   for (size_t i = count; i-- > 0;) {
     if ((count - 1 - i) % 2 == 0) {
       HIP_CHECK(hipHostUnregister(buffers[i].data()));
