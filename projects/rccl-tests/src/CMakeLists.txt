@@ -72,6 +72,8 @@ set(COMMON_FILES
   collector.h
   collector.cu
   alltoall_hier_policy.h
+  alltoall_lsa_lane.h
+  alltoall_lsa_lane_policy.h
   common.h
   common.cu
   gin_sdma_allgather_policy.h

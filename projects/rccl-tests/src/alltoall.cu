@@ -13,22 +13,19 @@
 #include "rccl_vector_types.h"
 #include "gin_resource_sharing.h"  // --gin_resource_sharing mode selection
 #include <atomic>
-// The fabric LSA AllToAll lane needs the Anvil SDMA backend, librccl's lane
-// headers and device resource requirements (2.29) for its LL flags; an install
-// without any of them keeps -D 3 on gin.put.
-#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0) && defined(NCCL_OS_LINUX) && \
-    NCCL_GIN_ANVIL_SDMA_ENABLE && __has_include("nccl_device/gin/anvil_sdma/gin_fabric_lsa_policy.h")
-#define ALLTOALL_GIN_FABRIC_LSA 1
+// The LSA AllToAll lane needs device resource requirements (2.29) for its LL
+// flags; an older install keeps -D 3 on gin.put.
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0) && defined(NCCL_OS_LINUX)
+#define ALLTOALL_LSA_LANE 1
 #include <map>
 #include <mutex>
 #include <utility>
-#include "nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h"
-#include "nccl_device/gin/anvil_sdma/gin_fabric_lsa_a2a_device.h"
-#include "nccl_device/gin/anvil_sdma/gin_fabric_lsa_policy.h"
+#include "nccl_device/rccl_ptr.h"
+#include "alltoall_lsa_lane.h"
 #endif
 #endif
-#ifndef ALLTOALL_GIN_FABRIC_LSA
-#define ALLTOALL_GIN_FABRIC_LSA 0
+#ifndef ALLTOALL_LSA_LANE
+#define ALLTOALL_LSA_LANE 0
 #endif
 
 #if defined(NCCL_OS_LINUX)
@@ -102,9 +99,30 @@ void AlltoAllGetBw(size_t count, size_t typesize, double sec, double* algBw, dou
   *busBw = baseBw * factor;
 }
 
-#if ALLTOALL_GIN_FABRIC_LSA
-// The fabric LSA lane's ready/done flags. thread_local for -t N, like Broadcast's
-// LL requirement: each host thread links its own node into its requirements list.
+#if ALLTOALL_LSA_LANE
+// RCCL_TESTS_A2A_LSA_LANE=1 lets -D 3 copy through the LSA team instead of
+// gin.put, up to the lane's threshold, where that team covers every rank.
+static bool lsaLaneOptIn() {
+  static const bool value = [] {
+    const char* s = getenv("RCCL_TESTS_A2A_LSA_LANE");
+    return s != nullptr && strtol(s, nullptr, 0) != 0;
+  }();
+  return value;
+}
+
+// RCCL_TESTS_A2A_LSA_THRESHOLD: largest total size (nRanks * bytes per peer)
+// the lane takes. Unset or negative: alltoall_lsa::defaultThreshold.
+static long long lsaLaneThresholdEnv() {
+  static const long long value = [] {
+    const char* s = getenv("RCCL_TESTS_A2A_LSA_THRESHOLD");
+    const long long v = s ? strtoll(s, nullptr, 0) : -1;
+    return v < 0 ? -1LL : v;
+  }();
+  return value;
+}
+
+// The lane's ready/done flags. thread_local for -t N, like Broadcast's LL
+// requirement: each host thread links its own node into its requirements list.
 // Without -p 1 only thread 0's is filled; AlltoAllRunTest copies it to the rest.
 thread_local ncclLLA2AHandle g_alltoallLaneFlags = {};
 thread_local ncclDevResourceRequirements g_alltoallLaneFlagReq = {};
@@ -142,12 +160,14 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
 #endif
       reqs->barrierCount = 1;
       reqs->ginSignalCount = 1;
-#if ALLTOALL_GIN_FABRIC_LSA
-      // The lane state is only known once the devComm exists, so every -D 3
-      // communicator the lane could run on gets its flags.
+#if ALLTOALL_LSA_LANE
+      // AlltoAllRunTest turns the lane off on every rank unless every rank has
+      // these flags. ncclDevCommCreate is collective, so every rank must ask for
+      // the same requirements: they depend only on the communicator, never on
+      // the per-process opt-in.
       g_alltoallLaneFlags = {};
-      if (commProperties.nRanks >= 2 && commProperties.nRanks <= ::gin::fabric::kGinFabricLsaA2AMaxCtas) {
-        NCCLCHECK(ncclLLA2ACreateRequirement(::gin::fabric::ginFabricLsaA2AFlagBlocks(commProperties.nRanks),
+      if (alltoall_lsa::capable(commProperties.nRanks, ncclTeamLsa(comm).nRanks)) {
+        NCCLCHECK(ncclLLA2ACreateRequirement(alltoall_lsa::flagBlocks(commProperties.nRanks),
                                              commProperties.nRanks, &g_alltoallLaneFlags, &g_alltoallLaneFlagReq));
         g_alltoallLaneFlagReq.next = reqs->resourceRequirementsList;
         reqs->resourceRequirementsList = &g_alltoallLaneFlagReq;
@@ -419,7 +439,7 @@ __global__ void NvlAlltoAllKernelOptimized(ncclWindow_t sendwin, size_t sendoffs
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
 // Records the -D 3 lane RunColl took for this thread's proto column. With
 // RCCL_TESTS_A2A_LANE_LOG it also names the lane, once per lane, so a test can
-// tell the fabric LSA lane from the gin.put fallback it silently takes.
+// tell the LSA lane from the gin.put fallback it silently takes.
 enum class AlltoAllGinLane { GinPut, Lsa };
 thread_local AlltoAllGinLane g_alltoallLastLane = AlltoAllGinLane::GinPut;
 
@@ -439,83 +459,54 @@ static void alltoallReportLane(AlltoAllGinLane lane) {
 }
 #endif
 
-#if ALLTOALL_GIN_FABRIC_LSA
-using ::gin::fabric::ginFabricLsaA2ALaunchConfig;
-using ::gin::fabric::ginFabricA2ASelectAlgo;
-using ::gin::fabric::GinFabricA2AAlgo;
-
-struct AlltoAllGinLaneState {
-  bool ctxOk;
-  uint32_t lsaEnabled;
-  size_t lsaThreshold;
-};
-
-// Copies the agreed lane state out of the Anvil SDMA context. layoutMagic is
-// the first field and is fetched and checked on its own before the rest:
-// librccl sizes that device allocation, so an alltoall_perf built on a newer
-// header against an older librccl would over-read it if the full struct were
-// copied before the version check.
-static AlltoAllGinLaneState AlltoAllGinReadLaneState(const ncclDevComm* devComm) {
-  AlltoAllGinLaneState state{false, 0, 0};
-  const void* handle = devComm->ginHandles[0];
-  if (handle == nullptr) return state;
-  uint32_t layoutMagic = 0;
-  if (cudaMemcpy(&layoutMagic, handle, sizeof(layoutMagic), cudaMemcpyDeviceToHost) != cudaSuccess) {
-    (void)cudaGetLastError();
-    return state;
-  }
-  if (layoutMagic != NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC) return state;
-  ncclGinAnvilSdmaGPUContext ctx{};
-  if (cudaMemcpy(&ctx, handle, sizeof(ctx), cudaMemcpyDeviceToHost) != cudaSuccess) {
-    (void)cudaGetLastError();
-    return state;
-  }
-  return {true, ctx.fabricA2ALsaEnabled, ctx.fabricA2ALsaThreshold};
-}
-
-// The lane state is fixed for the life of a devComm, and RunColl runs inside the
-// timed loop and under -G graph capture, where a synchronous copy cannot. So
-// AlltoAllRunTest reads it once per devComm, agrees ctxOk across ranks, and
-// caches it; RunColl never copies. The LSA lane and gin.put do not wait on each
+#if ALLTOALL_LSA_LANE
+// The lane state is fixed for the life of a devComm, and RunColl runs inside
+// the timed loop and under -G graph capture. So AlltoAllRunTest agrees it once
+// per devComm and caches it. The LSA lane and gin.put do not wait on each
 // other, so every rank must pick the same one.
-struct AlltoAllGinLaneCache {
-  std::mutex mutex;
-  std::map<std::pair<const ncclDevComm*, const void*>, AlltoAllGinLaneState> map;
+struct AlltoAllLsaLaneState {
+  bool on;
+  size_t threshold;
 };
 
-static AlltoAllGinLaneCache& alltoAllGinLaneCache() {
-  static AlltoAllGinLaneCache cache;
+struct AlltoAllLsaLaneCache {
+  std::mutex mutex;
+  std::map<std::pair<const ncclDevComm*, const void*>, AlltoAllLsaLaneState> map;
+};
+
+static AlltoAllLsaLaneCache& alltoAllLsaLaneCache() {
+  static AlltoAllLsaLaneCache cache;
   return cache;
 }
 
-static std::pair<const ncclDevComm*, const void*> alltoAllGinLaneKey(const ncclDevComm* devComm) {
+static std::pair<const ncclDevComm*, const void*> alltoAllLsaLaneKey(const ncclDevComm* devComm) {
   return std::make_pair(devComm, (const void*)devComm->ginHandles[0]);
 }
 
-static void AlltoAllGinStoreLaneState(const ncclDevComm* devComm, AlltoAllGinLaneState state) {
-  auto& cache = alltoAllGinLaneCache();
+static void AlltoAllStoreLsaLaneState(const ncclDevComm* devComm, AlltoAllLsaLaneState state) {
+  auto& cache = alltoAllLsaLaneCache();
   std::lock_guard<std::mutex> lock(cache.mutex);
-  cache.map[alltoAllGinLaneKey(devComm)] = state;
+  cache.map[alltoAllLsaLaneKey(devComm)] = state;
 }
 
-// A devComm AlltoAllRunTest did not cache gets gin.put, never a copy.
-static AlltoAllGinLaneState AlltoAllGinLaneStateFor(const ncclDevComm* devComm) {
-  auto& cache = alltoAllGinLaneCache();
+// A devComm AlltoAllRunTest did not cache gets gin.put.
+static AlltoAllLsaLaneState AlltoAllLsaLaneStateFor(const ncclDevComm* devComm) {
+  auto& cache = alltoAllLsaLaneCache();
   std::lock_guard<std::mutex> lock(cache.mutex);
-  auto it = cache.map.find(alltoAllGinLaneKey(devComm));
-  if (it == cache.map.end()) return AlltoAllGinLaneState{false, 0, 0};
+  auto it = cache.map.find(alltoAllLsaLaneKey(devComm));
+  if (it == cache.map.end()) return AlltoAllLsaLaneState{false, 0};
   return it->second;
 }
 
-static GinFabricA2AAlgo AlltoAllGinFabricAlgoHost(const ncclDevComm* devComm, size_t bytesPerPeer) {
-  const AlltoAllGinLaneState state = AlltoAllGinLaneStateFor(devComm);
-  return ginFabricA2ASelectAlgo(state.ctxOk, state.lsaEnabled, devComm->nRanks, bytesPerPeer, state.lsaThreshold);
+static alltoall_lsa::Algo AlltoAllLsaLaneAlgo(const ncclDevComm* devComm, size_t bytesPerPeer) {
+  const AlltoAllLsaLaneState state = AlltoAllLsaLaneStateFor(devComm);
+  return alltoall_lsa::select(state.on, devComm->nRanks, bytesPerPeer, state.threshold);
 }
 
 // blockIdx.x is the peer and blockIdx.y the chunk.
 __global__ void GinAlltoAllLsaKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset,
                                      size_t bytesPerPeer, struct ncclDevComm devComm, ncclLLA2AHandle flags) {
-  ::gin::fabric::ginFabricLsaAlltoAllBody(sendwin, sendoffset, recvwin, recvoffset, bytesPerPeer, devComm, flags);
+  alltoall_lsa::alltoallBody(sendwin, sendoffset, recvwin, recvoffset, bytesPerPeer, devComm, flags);
 }
 
 static testResult_t AlltoAllLaunchGinLsa(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset,
@@ -523,7 +514,7 @@ static testResult_t AlltoAllLaunchGinLsa(void* sendbuff, size_t sendoffset, void
   int chunks = 0;
   int threads = 0;
   size_t chunkBytes = 0;
-  ginFabricLsaA2ALaunchConfig(devComm->nRanks, bytesPerPeer, &chunks, &threads, &chunkBytes);
+  alltoall_lsa::launchConfig(devComm->nRanks, bytesPerPeer, &chunks, &threads, &chunkBytes);
   dim3 grid((unsigned)devComm->nRanks, (unsigned)chunks);
   GinAlltoAllLsaKernel<<<grid, dim3((unsigned)threads), 0, stream>>>((ncclWindow_t)sendbuff, sendoffset,
                                                                      (ncclWindow_t)recvbuff, recvoffset,
@@ -833,8 +824,8 @@ testResult_t AlltoAllRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, 
 #endif
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
       case 3:
-#if ALLTOALL_GIN_FABRIC_LSA
-        if (AlltoAllGinFabricAlgoHost((ncclDevComm*)comm, count * wordSize(type)) == GinFabricA2AAlgo::Lsa) {
+#if ALLTOALL_LSA_LANE
+        if (AlltoAllLsaLaneAlgo((ncclDevComm*)comm, count * wordSize(type)) == alltoall_lsa::Algo::Lsa) {
           TESTCHECK(AlltoAllLaunchGinLsa(sendbuff, sendoffset, recvbuff, recvoffset, count * wordSize(type),
                                          (ncclDevComm*)comm, stream));
           alltoallReportLane(AlltoAllGinLane::Lsa);
@@ -876,7 +867,7 @@ testResult_t AlltoAllRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, 
 // --devtime_skip_mid/_large. The timed kernel launches with the same
 // <<<deviceCtaCount, 512>>> grid the production path uses, and selects the
 // GIN (deviceImpl 3) or Hybrid (deviceImpl 4) body to match RunColl. It has no
-// fabric LSA body, so it is skipped when RunColl would take that lane.
+// LSA lane body, so it is skipped when RunColl would take that lane.
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
 testResult_t AlltoAllDeviceTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place, double* outDeltaSec) {
   if (!deviceTimingMode) return testSuccess;
@@ -890,12 +881,12 @@ testResult_t AlltoAllDeviceTime(struct threadArgs* args, ncclDataType_t type, nc
   const size_t count = args->nbytes / wordSize(type);
   if (count == 0 || devtimeLoop < 1) return testSuccess;
 
-#if ALLTOALL_GIN_FABRIC_LSA
+#if ALLTOALL_LSA_LANE
   // gin_devtime::measure launches the timed kernel on every local GPU, so with
   // -g > 1 each devComm's lane state is checked, not just the first.
   if (deviceImpl == 3) {
     for (int i = 0; i < args->nGpus; i++) {
-      if (AlltoAllGinFabricAlgoHost(testDevComms(args, i), count * wordSize(type)) == GinFabricA2AAlgo::Lsa) {
+      if (AlltoAllLsaLaneAlgo(testDevComms(args, i), count * wordSize(type)) == alltoall_lsa::Algo::Lsa) {
         return testSuccess;
       }
     }
@@ -992,8 +983,8 @@ testResult_t AlltoAllGetCollImplInfo(ncclComm_t comm, size_t count, ncclDataType
 // transport depends on deviceImpl (AlltoAllRunColl):
 //   -D 1/2 -> NvlAlltoAllKernel[Optimized]: intra-node LSA stores, no GIN.
 //   -D 3   -> GinAlltoAllKernel:            every peer via gin.put (GIN), or
-//             GinAlltoAllLsaKernel (LSA) for sizes RunColl sent to the fabric
-//             LSA lane. The row reports the lane this size's RunColl took.
+//             GinAlltoAllLsaKernel (LSA) for sizes RunColl sent to the LSA
+//             lane. The row reports the lane this size's RunColl took.
 //   -D 4   -> HybridAlltoAllKernel:         CTA 0 GIN, CTAs 1..N LSA.
 testResult_t AlltoAllGetDeviceImplInfo(int deviceImpl, size_t /*count*/, ncclDataType_t /*type*/,
     int /*nRanks*/, int /*lsaSize*/, char* algoOut, char* protoOut) {
@@ -1038,14 +1029,15 @@ testResult_t AlltoAllRunTest(struct threadArgs* args, int root, ncclDataType_t t
     CUDACHECK(cudaSetDevice(args->gpus[i]));
     TESTCHECK(uploadGinResourceSharingMode());
   }
-#if ALLTOALL_GIN_FABRIC_LSA
+#if ALLTOALL_LSA_LANE
   // GPU i's devComm is testDevComms(args, i), which strides by testMaxDevComms.
   // Without -p 1 only host thread 0 created the devComms, so only it holds the
   // lane flags. Their buffer handle is an offset ncclDevCommCreate derives from
   // the requirements list alone, so it is the same for every devComm created
   // from that list, and the other threads take thread 0's copy.
-  // The context copy can still fail on one rank; MIN across threads and MPI
-  // ranks then makes every rank fall back to gin.put together.
+  // The opt-in and threshold are per-process environment, so MIN and MAX
+  // across threads and MPI ranks agree them: unless every rank opted in with
+  // the same threshold, every rank stays on gin.put.
   if (deviceImpl == 3) {
     static std::mutex laneFlagsMutex;
     static ncclLLA2AHandle sharedLaneFlags = {};
@@ -1058,18 +1050,26 @@ testResult_t AlltoAllRunTest(struct threadArgs* args, int root, ncclDataType_t t
       std::lock_guard<std::mutex> lock(laneFlagsMutex);
       g_alltoallLaneFlags = sharedLaneFlags;
     }
-    std::vector<AlltoAllGinLaneState> states(args->nGpus);
-    long long laneOk = 1;
+    long long laneOk = lsaLaneOptIn() && g_alltoallLaneFlags.nSlots != 0 ? 1 : 0;
     for (int i = 0; i < args->nGpus; i++) {
-      CUDACHECK(cudaSetDevice(args->gpus[i]));
-      states[i] = AlltoAllGinReadLaneState(testDevComms(args, i));
-      states[i].ctxOk = states[i].ctxOk && g_alltoallLaneFlags.nSlots != 0;
-      if (!states[i].ctxOk) laneOk = 0;
+      const ncclDevComm* devComm = testDevComms(args, i);
+      if (!alltoall_lsa::capable(devComm->nRanks, devComm->lsaSize)) laneOk = 0;
     }
+    long long thresholdMin = lsaLaneThresholdEnv();
+    long long thresholdMax = thresholdMin;
     Allreduce(args, &laneOk, /*min*/2);
+    Allreduce(args, &thresholdMin, /*min*/2);
+    Allreduce(args, &thresholdMax, /*max*/3);
+    if (laneOk != 0 && thresholdMin != thresholdMax) {
+      if (is_main_proc && args->thread == 0) {
+        printf("# RCCL_TESTS_A2A_LSA_THRESHOLD differs between ranks; -D 3 stays on gin.put\n");
+      }
+      laneOk = 0;
+    }
     for (int i = 0; i < args->nGpus; i++) {
-      if (laneOk == 0) states[i].ctxOk = false;
-      AlltoAllGinStoreLaneState(testDevComms(args, i), states[i]);
+      const ncclDevComm* devComm = testDevComms(args, i);
+      const size_t threshold = alltoall_lsa::threshold(laneOk != 0, thresholdMin, devComm->nRanks);
+      AlltoAllStoreLsaLaneState(devComm, AlltoAllLsaLaneState{laneOk != 0, threshold});
     }
   }
 #endif

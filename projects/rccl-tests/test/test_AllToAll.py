@@ -50,8 +50,9 @@
 #   RCCL_TESTS_A2A_CTAS      device CTA count (-V) (default: 16)
 #   RCCL_TESTS_A2A_TIMEOUT_S per-run hang timeout in seconds (default: 900)
 #   RCCL_TESTS_A2A_CONN_RETRIES  connectivity-gate retries (default: 5)
-#   RCCL_TESTS_A2A_EXPECT_LSA_LANE  set to 1 where the fabric LSA lane must arm
-#                            (MI450 fabric); otherwise lsa-on accepts either lane
+#   RCCL_TESTS_A2A_EXPECT_LSA_LANE  set to 1 where the LSA lane must arm (every
+#                            rank in one LSA team, e.g. one MI450 node or an
+#                            MNNVL clique); otherwise lsa-on accepts either lane
 #
 # Verified on 8x MI355X (ROCm 7.13, NCCL_GIN_TYPE=7, force1ch): 256 MiB/peer and
 # 2 GiB/peer int32 and the 2 GiB-total guard all pass with #wrong=0, no hang
@@ -165,17 +166,17 @@ def test_AllToAllGinSdma2GiBTotalHangGuard(request):
     assert rc == 0, "AllToAll 2 GiB-total data check failed (nonzero exit)"
 
 
-# The fabric LSA lane arms only where every rank has fabric-registered windows
-# (MI450 MNNVL; pass NCCL_MNNVL_ENABLE=1 through RCCL_TESTS_A2A_XENV there).
-# Elsewhere the opt-ins leave -D 3 on gin.put. 64 KiB per peer keeps the total
-# under the nRanks^2 MiB default threshold at any rank count.
-_FABRIC_LSA_ENV = ("RCCL_GIN_ANVIL_FABRIC_MEM=1", "RCCL_GIN_ANVIL_FABRIC_LSA_A2A=1")
+# The LSA lane arms only where one LSA team covers every rank (one node, or an
+# MI450 MNNVL clique; pass NCCL_MNNVL_ENABLE=1 through RCCL_TESTS_A2A_XENV
+# there). Elsewhere the opt-in leaves -D 3 on gin.put. 64 KiB per peer keeps the
+# total under the nRanks^2 MiB default threshold at any rank count.
+_LSA_LANE_ENV = ("RCCL_TESTS_A2A_LSA_LANE=1",)
 
 
 @pytest.mark.parametrize("lane", [False, True], ids=["lsa-off", "lsa-on"])
 @pytest.mark.parametrize("dtype", ["float", "int32"])
-def test_AllToAllGinFabricLsaLane(request, lane, dtype):
-    env = ("RCCL_TESTS_A2A_LANE_LOG=1",) + (_FABRIC_LSA_ENV if lane else ())
+def test_AllToAllLsaLane(request, lane, dtype):
+    env = ("RCCL_TESTS_A2A_LANE_LOG=1",) + (_LSA_LANE_ENV if lane else ())
     rc, out = _run_a2a(request, 64 * 1024 * NP, dtype, env)
     assert rc == 0, "AllToAll data check failed (nonzero exit), lane={}, dtype={}".format(lane, dtype)
     lanes = set(A2A_LANE_RE.findall(out or ""))
@@ -198,15 +199,25 @@ def test_AllToAllGinFabricLsaLane(request, lane, dtype):
 # still take the lane. Only the lane sizes run here: -D 3 gin.put with more than
 # one rank per process faults on the MI450 ROCm 10.3 images, lane or not.
 @pytest.mark.parametrize("layout", [["-g", "2"], ["-t", "2"]], ids=["g2", "t2"])
-def test_AllToAllGinFabricLsaLaneTwoRanksPerProcess(request, layout):
+def test_AllToAllLsaLaneTwoRanksPerProcess(request, layout):
     if not EXPECT_LSA_LANE:
-        pytest.skip("needs RCCL_TESTS_A2A_EXPECT_LSA_LANE=1 (MI450 fabric)")
+        pytest.skip("needs RCCL_TESTS_A2A_EXPECT_LSA_LANE=1")
     if NP % 2:
         pytest.skip("needs an even number of ranks/GPUs")
-    env = ("RCCL_TESTS_A2A_LANE_LOG=1",) + _FABRIC_LSA_ENV
+    env = ("RCCL_TESTS_A2A_LANE_LOG=1",) + _LSA_LANE_ENV
     rc, out = _run_a2a(request, 64 * 1024 * NP, "float", env, nprocs=NP // 2, perf_extra=layout)
     assert rc == 0, "AllToAll data check failed (nonzero exit), layout={}".format(layout)
     lanes = set(A2A_LANE_RE.findall(out or ""))
     assert lanes == {"lsa"}, "AllToAll took lane(s) {}, expected ['lsa'] (layout={})".format(
         sorted(lanes), layout
     )
+
+
+# RCCL_TESTS_A2A_LSA_THRESHOLD overrides the default total-size threshold; 0
+# keeps every size on gin.put even with the lane opted in.
+def test_AllToAllLsaLaneThresholdZero(request):
+    env = ("RCCL_TESTS_A2A_LANE_LOG=1", "RCCL_TESTS_A2A_LSA_THRESHOLD=0") + _LSA_LANE_ENV
+    rc, out = _run_a2a(request, 64 * 1024 * NP, "float", env)
+    assert rc == 0, "AllToAll data check failed (nonzero exit)"
+    lanes = set(A2A_LANE_RE.findall(out or ""))
+    assert lanes == {"gin-put"}, "AllToAll took lane(s) {}, expected ['gin-put']".format(sorted(lanes))
