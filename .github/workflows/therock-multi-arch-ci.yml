@@ -248,7 +248,9 @@ jobs:
       rocm_rpm_package_version: ${{ needs.setup.outputs.rocm_rpm_package_version }}
       test_type: ${{ needs.configure.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
-      # Empty string when run_all_tests=true triggers full test run in downstream workflow
+      # The changed projects, or '' when run_all_tests is 'true'. An empty value
+      # makes the downstream workflow run every test. `cond && '' || x` would
+      # always yield x, because '' is falsy, so the condition is negated.
       changed_projects: ${{ needs.configure.outputs.run_all_tests != 'true' && needs.configure.outputs.changed_projects || '' }}
       repository: ROCm/TheRock
       ref: c0d2f4d21e7daffe3896b9be9ce9d1b2e0793827 # 2026-11-11
@@ -272,7 +274,9 @@ jobs:
       rocm_msi_package_version: ${{ needs.setup.outputs.rocm_msi_package_version }}
       test_type: ${{ needs.configure.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
-      # Empty string when run_all_tests=true triggers full test run in downstream workflow
+      # The changed projects, or '' when run_all_tests is 'true'. An empty value
+      # makes the downstream workflow run every test. `cond && '' || x` would
+      # always yield x, because '' is falsy, so the condition is negated.
       changed_projects: ${{ needs.configure.outputs.run_all_tests != 'true' && needs.configure.outputs.changed_projects || '' }}
       repository: ROCm/TheRock
       ref: c0d2f4d21e7daffe3896b9be9ce9d1b2e0793827 # 2026-11-11
