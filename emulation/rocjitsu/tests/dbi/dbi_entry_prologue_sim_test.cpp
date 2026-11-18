@@ -120,12 +120,18 @@
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
+#include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "rocjitsu/vm/plugins/execution_plugin.h"
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <memory>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -901,6 +907,226 @@ TEST(DbiEntrySnapshotSim, WrongVectorCaptureSourceLosesTheNonzeroEntryValue) {
   for (const PrologueSimArch arch : {kCdna3, kCdna4, kRdna4})
     ASSERT_NO_FATAL_FAILURE(
         expect_scalar_and_vector_entry_snapshots(arch, /*capture_wrong_vgpr=*/true));
+}
+
+// The dispatch stub captures TTMP9 before branching to the original entry.
+// Mutating there models a later hardware update without an illegal guest write.
+class EntryTtmpMutationPlugin final : public ExecutionPlugin {
+public:
+  explicit EntryTtmpMutationPlugin(uint64_t original_entry_pc)
+      : ExecutionPlugin("entry_ttmp_mutation"), original_entry_pc_(original_entry_pc) {}
+
+  void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &,
+                                        amdgpu::Wavefront &wave) override {
+    if (pc != original_entry_pc_ || wave.wg_id() != 1)
+      return;
+    ++mutations_;
+    launch_value_ = wave.ttmp(9);
+    wave.set_ttmp(9, 99);
+  }
+
+  uint32_t mutations() const { return mutations_; }
+  uint32_t launch_value() const { return launch_value_; }
+
+private:
+  uint64_t original_entry_pc_;
+  uint32_t mutations_ = 0;
+  uint32_t launch_value_ = 0;
+};
+
+void expect_scalar_and_vector_entry_snapshots(const PrologueSimArch &arch, ProbeArgSource source,
+                                              bool read_live_ttmp = false) {
+  SCOPED_TRACE(arch.sim_arch);
+  const bool trap_temporary = source == ProbeArgSource::EntryTtmp;
+  const uint16_t scalar_index = trap_temporary ? 9 : 0;
+  const uint16_t scalar_operand =
+      trap_temporary ? amdgpu::kTtmpSelectorFirst + scalar_index : scalar_index;
+  const util::FailureOr<uint32_t> guest_write = build_v_mov_b32_src(0, 135, arch.arch);
+  const util::FailureOr<uint32_t> guest_read = build_v_mov_b32_src(4, 256, arch.arch);
+  const util::FailureOr<uint32_t> scalar_read = build_s_mov_b32(0, scalar_operand, arch.arch);
+  const util::FailureOr<uint32_t> scalar_guest_output = build_v_mov_b32_src(0, 0, arch.arch);
+  const util::FailureOr<uint32_t> scalar_output = build_v_mov_b32_src(2, 256, arch.arch);
+  const util::FailureOr<uint32_t> vector_output = build_v_mov_b32_src(3, 257, arch.arch);
+  // User shaders can read TTMPs but cannot overwrite them. The simulator plugin
+  // changes TTMP9 after capture; the SGPR case destroys its source in guest code.
+  const util::FailureOr<uint32_t> scalar_write =
+      trap_temporary ? build_s_nop(0, arch.arch) : build_s_mov_b32(scalar_operand, 128, arch.arch);
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, arch.arch);
+  const util::FailureOr<uint32_t> end = build_s_endpgm(arch.arch);
+  const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, arch.arch);
+  ASSERT_TRUE(guest_write.succeeded());
+  ASSERT_TRUE(guest_read.succeeded());
+  ASSERT_TRUE(scalar_read.succeeded() && scalar_guest_output.succeeded());
+  ASSERT_TRUE(scalar_output.succeeded());
+  ASSERT_TRUE(vector_output.succeeded());
+  ASSERT_TRUE(scalar_write.succeeded() && nop.succeeded() && end.succeeded() && ret.succeeded());
+  const std::vector<uint8_t> target = test::with_descriptor_metadata(
+      test::make_kernarg_kernel_elf({scalar_write.value(), guest_write.value(), guest_read.value(),
+                                     nop.value(), scalar_read.value(), scalar_guest_output.value(),
+                                     end.value()},
+                                    64, arch.e_flags, kGuestKernargSize, arch.wave32,
+                                    test::kCallableProbeGranulatedSgprCount, 0, 1, 1),
+      arch.arch);
+  const std::vector<uint8_t> body = test::make_amdgpu_probe_elf(
+      "entry_inputs", {scalar_output.value(), vector_output.value(), ret.value()}, arch.e_flags);
+  const AmdGpuCodeObject object(target.data(), target.size());
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  InstrumentationOptions options;
+  options.kernarg_binding = DbiKernargBinding::CallerSuppliedWrapper;
+  Instrumentor instrumentor(object, arch.arch, options);
+  InstrumentationPoint point;
+  point.anchor_offset = 12;
+  point.probe_obj = &probe;
+  point.probe_symbol = "entry_inputs";
+  point.probe_args = {{.source = source, .register_index = scalar_index},
+                      {.source = ProbeArgSource::EntryVgprLane0, .register_index = 0}};
+  instrumentor.add_point(point);
+  const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+  const AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  const std::optional<uint64_t> entry = test::patched_entry_text_offset(patched);
+  ASSERT_TRUE(entry);
+  std::vector<uint32_t> text = test::section_words(patched, ".text");
+  if (read_live_ttmp) {
+    ASSERT_TRUE(trap_temporary);
+    ASSERT_EQ(result.patches.size(), 1u);
+    const uint64_t probe_offset = result.patches.front().probe_target_offset;
+    ASSERT_EQ(probe_offset % sizeof(uint32_t), 0u);
+    const size_t probe_word = probe_offset / sizeof(uint32_t);
+    ASSERT_LT(probe_word, text.size());
+    ASSERT_EQ(text[probe_word], scalar_output.value());
+    const util::FailureOr<uint32_t> live_output = build_v_mov_b32_src(2, scalar_operand, arch.arch);
+    ASSERT_TRUE(live_output.succeeded());
+    // Redirect only the callback's publication read to live TTMP9. Its output
+    // must change from the captured launch value to the plugin's later value.
+    text[probe_word] = live_output.value();
+  }
+  test::DbiSim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize(arch.sim_arch, arch.wave_size));
+  if (arch.wave32)
+    sim.set_wave32_dispatch();
+  // Workgroup one receives TTMP9 = 1, distinct from TTMP8's queue packet ID
+  // and the zero-valued trap temporaries of a dispatch at the origin.
+  EntryTtmpMutationPlugin *mutation_plugin = nullptr;
+  if (trap_temporary) {
+    sim.set_workgroup_count_x(2);
+    auto plugin = std::make_unique<EntryTtmpMutationPlugin>(test::DbiSim::KERNEL_ADDR +
+                                                            sizeof(amdhsa::kernel_descriptor_t));
+    mutation_plugin = plugin.get();
+    ASSERT_TRUE(sim.add_plugin(std::move(plugin)));
+  }
+  sim.set_kernarg(make_wrapper_image());
+  sim.set_entry_offset(*entry);
+  const std::vector<std::vector<uint32_t>> values = sim.run_and_read_vgprs(
+      text, test::patched_private_segment_size(patched), {2, 3, 4, 0}, trap_temporary ? 1u : 0u);
+  if (trap_temporary) {
+    ASSERT_EQ(mutation_plugin->mutations(), 1u);
+    EXPECT_EQ(mutation_plugin->launch_value(), 1u);
+  }
+  ASSERT_EQ(values.size(), 4u);
+  for (const std::vector<uint32_t> &value : values)
+    ASSERT_EQ(value.size(), arch.wave_size);
+  for (uint32_t lane = 0; lane < arch.wave_size; ++lane) {
+    EXPECT_EQ(values[0][lane], trap_temporary ? (read_live_ttmp ? 99u : 1u)
+                                              : static_cast<uint32_t>(kGuestKernargSentinel));
+    EXPECT_EQ(values[1][lane], 0u);
+    EXPECT_EQ(values[2][lane], 7u);
+    EXPECT_EQ(values[3][lane], trap_temporary ? 99u : 0u);
+  }
+}
+
+TEST(DbiEntrySnapshotSim, TrapTemporaryLaunchValueAndVectorSnapshotReachProbe) {
+  const PrologueSimArch cdna5{"cdna5", ROCJITSU_CODE_ARCH_CDNA5, EF_AMDGPU_MACH_AMDGCN_GFX1250, 32,
+                              true};
+  ASSERT_NO_FATAL_FAILURE(
+      expect_scalar_and_vector_entry_snapshots(cdna5, ProbeArgSource::EntryTtmp));
+}
+
+TEST(DbiEntrySnapshotSim, ReadingLiveTrapTemporaryInsteadOfSnapshotReturnsTheChangedValue) {
+  const PrologueSimArch cdna5{"cdna5", ROCJITSU_CODE_ARCH_CDNA5, EF_AMDGPU_MACH_AMDGCN_GFX1250, 32,
+                              true};
+  ASSERT_NO_FATAL_FAILURE(expect_scalar_and_vector_entry_snapshots(cdna5, ProbeArgSource::EntryTtmp,
+                                                                   /*read_live_ttmp=*/true));
+}
+
+class DistinctEntryScalarInputsPlugin final : public ExecutionPlugin {
+public:
+  DistinctEntryScalarInputsPlugin() : ExecutionPlugin("distinct_entry_scalar_inputs") {}
+
+  void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wave) override {
+    if (wave.wg_id() != 1)
+      return;
+    EXPECT_EQ(wave.ttmp(9), 1u);
+    const amdgpu::RegisterAccess registers(wave);
+    ASSERT_TRUE(registers.write_sgpr(wave.sgpr_alloc().base + 9, 23).succeeded());
+    ++seeded_waves_;
+  }
+
+  uint32_t seeded_waves() const { return seeded_waves_; }
+
+private:
+  uint32_t seeded_waves_ = 0;
+};
+
+TEST(DbiEntrySnapshotSim, SameIndexScalarAndTrapTemporarySnapshotsRemainDistinct) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  const util::FailureOr<uint32_t> overwrite = build_s_mov_b32(9, 128, kArch);
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
+  const util::FailureOr<uint32_t> live_output = build_v_mov_b32_src(4, 9, kArch);
+  const util::FailureOr<uint32_t> end = build_s_endpgm(kArch);
+  const util::FailureOr<uint32_t> ttmp_output = build_v_mov_b32_src(2, 256, kArch);
+  const util::FailureOr<uint32_t> sgpr_output = build_v_mov_b32_src(3, 257, kArch);
+  const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, kArch);
+  ASSERT_TRUE(overwrite.succeeded() && nop.succeeded() && live_output.succeeded() &&
+              end.succeeded() && ttmp_output.succeeded() && sgpr_output.succeeded() &&
+              ret.succeeded());
+  const std::vector<uint8_t> target = test::with_descriptor_metadata(
+      test::make_kernarg_kernel_elf(
+          {overwrite.value(), nop.value(), live_output.value(), end.value()}, 64,
+          EF_AMDGPU_MACH_AMDGCN_GFX1250, kGuestKernargSize, true, 3, 0, 1, 1),
+      kArch);
+  const std::vector<uint8_t> body = test::make_amdgpu_probe_elf(
+      "distinct_entry_inputs", {ttmp_output.value(), sgpr_output.value(), ret.value()},
+      EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  const AmdGpuCodeObject object(target.data(), target.size());
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  Instrumentor instrumentor(object, kArch,
+                            {.kernarg_binding = DbiKernargBinding::CallerSuppliedWrapper,
+                             .register_growth = std::nullopt});
+  InstrumentationPoint point;
+  point.anchor_offset = 4;
+  point.probe_obj = &probe;
+  point.probe_symbol = "distinct_entry_inputs";
+  point.probe_args = {{.source = ProbeArgSource::EntryTtmp, .register_index = 9},
+                      {.source = ProbeArgSource::EntrySgpr, .register_index = 9}};
+  instrumentor.add_point(point);
+  const InstrumentedCodeObject result = instrumentor.patch();
+  ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+  const AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  const std::optional<uint64_t> entry = test::patched_entry_text_offset(patched);
+  ASSERT_TRUE(entry);
+
+  test::DbiSim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize("cdna5", 32));
+  sim.set_wave32_dispatch();
+  sim.set_workgroup_count_x(2);
+  auto plugin = std::make_unique<DistinctEntryScalarInputsPlugin>();
+  const DistinctEntryScalarInputsPlugin *inputs = plugin.get();
+  ASSERT_TRUE(sim.add_plugin(std::move(plugin)));
+  sim.set_kernarg(make_wrapper_image());
+  sim.set_entry_offset(*entry);
+  const std::vector<std::vector<uint32_t>> values =
+      sim.run_and_read_vgprs(test::section_words(patched, ".text"),
+                             test::patched_private_segment_size(patched), {2, 3, 4}, 1);
+  ASSERT_EQ(inputs->seeded_waves(), 1u);
+  ASSERT_EQ(values.size(), 3u);
+  for (const std::vector<uint32_t> &value : values)
+    ASSERT_EQ(value.size(), 32u);
+  for (uint32_t lane = 0; lane < 32; ++lane) {
+    EXPECT_EQ(values[0][lane], 1u);
+    EXPECT_EQ(values[1][lane], 23u);
+    EXPECT_EQ(values[2][lane], 0u);
+  }
 }
 
 } // namespace

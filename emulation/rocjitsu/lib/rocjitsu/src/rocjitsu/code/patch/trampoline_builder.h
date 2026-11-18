@@ -65,7 +65,7 @@ struct ProbeArgumentMove {
   constexpr bool operator==(const ProbeArgumentMove &) const = default;
 };
 
-/// @brief Framework-owned snapshot of an SGPR or VGPR's lane zero at guest entry.
+/// @brief Framework-owned snapshot of an SGPR, TTMP or VGPR's lane zero at guest entry.
 struct EntryRegisterCapture {
   uint16_t source_index = 0;
   uint16_t sgpr = 0;
