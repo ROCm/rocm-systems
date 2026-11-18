@@ -353,7 +353,6 @@ class Roofline:
         self,
         level_ai: dict[str, float],
         ceiling_data: dict[str, Any],
-        performance: float,
         compute_peaks: list[tuple[str, float]],
     ) -> tuple[str, str, Optional[float]]:
         candidates: list[tuple[float, str, str]] = []
@@ -361,11 +360,10 @@ class Roofline:
             bandwidth = self._peak_value(ceiling_data, level_name.lower())
             if bandwidth and ai_value > 0:
                 roof = bandwidth * ai_value
-                if roof >= performance:
-                    candidates.append((roof, level_name, "Memory"))
+                candidates.append((roof, level_name, "Memory"))
 
         for label, peak in compute_peaks:
-            if peak >= performance:
+            if peak > 0:
                 candidates.append((peak, label, "Compute"))
 
         if not candidates:
@@ -409,7 +407,7 @@ class Roofline:
                 for values in (kernel_colors, counts, kernel_time, kernel_pct_runtime)
             )
             limiter, limiter_category, roof_value = self._determine_kernel_limiter(
-                level_ai, ceiling_data, points[0]["perf"], compute_peaks
+                level_ai, ceiling_data, compute_peaks
             )
             limiting_peak = self._resolve_limiting_peak(
                 limiter, limiter_category, points
