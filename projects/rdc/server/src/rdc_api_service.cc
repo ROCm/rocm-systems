@@ -1000,7 +1000,9 @@ int RdcAPIServiceImpl::PolicyCallback(rdc_policy_callback_response_t* userData) 
           }
           bool send = ctx->pending && ctx->start;
           ctx->pending = false;
-          rdc_policy_callback_response_t response = ctx->response;
+          // ctx->response is unset until PolicyCallback() runs.
+          rdc_policy_callback_response_t response = {};
+          if (send) response = ctx->response;
           pthread_mutex_unlock(&ctx->mutex);
 
           // Write without the lock: a slow client must not block RDC's policy thread.

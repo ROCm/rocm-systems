@@ -1677,8 +1677,10 @@ rdc_status_t rdc_policy_register(rdc_handle_t p_rdc_handle, rdc_gpu_group_t grou
 /**
  *  @brief un-register a policy callback function for a conditioin.
  *
- *  @details Un-register the policy callback for a condition. A check that is
- *  already running may still call the callback once after this returns.
+ *  @details Un-register the policy callback for a condition. On a handle from
+ *  rdc_start_embedded(), a check that is already running may still call the
+ *  callback after this returns, once for each policy and GPU of the group that
+ *  meets the policy's condition.
  *
  *  @param[in] p_rdc_handle The RDC handler.
  *
