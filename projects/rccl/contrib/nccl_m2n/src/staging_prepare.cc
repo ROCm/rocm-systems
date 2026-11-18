@@ -153,6 +153,14 @@ static int countOverlappingSrcShards(const size_t srcDims[], const size_t srcStr
   return count;
 }
 
+static int stagingRingNodeStep(const ncclReshardRepLoadBalancer* lb) {
+  return (lb->strided && lb->numInjectionDomains > 0) ? lb->numInjectionDomains : 1;
+}
+
+static bool stagingNodeInRing(const ncclReshardRepLoadBalancer* lb, int node, int myNode) {
+  return (node - myNode) % stagingRingNodeStep(lb) == 0;
+}
+
 static ncclResult_t validateRankStagingCounts(
   int worldRank, int rank, const ncclDistTensor_t* srcTensor, const ncclReshardMeshGroupInfo* fullSrcInfo,
   const ncclDistTensor_t* dstTensor, const ncclReshardMeshGroupInfo* fullDstInfo, const size_t srcDims[],
@@ -249,7 +257,7 @@ static ncclResult_t validateRankStagingCounts(
 
       int sourceRepSlots = firstNodeLocalReps > 0 ? firstNodeLocalReps : numLocalReps;
       int activeSourceSlots = sourceRepSlots;
-      for (int node = firstRepNodeDest; node >= 0 && node <= myNode; node++) {
+      for (int node = firstRepNodeDest; node >= 0 && node <= myNode; node += stagingRingNodeStep(lb)) {
         int nodeLocalReps = 0;
         for (int rep = targetRepStart; rep < targetRepEnd; rep++) {
           int repRank = getMeshRank(dstTensor, fullDstInfo, dstInfo.shardIdx, rep);
@@ -283,7 +291,8 @@ static ncclResult_t validateRankStagingCounts(
       bool hasRingNext = false;
       for (int rep = targetRepStart; rep < targetRepEnd; rep++) {
         int repRank = getMeshRank(dstTensor, fullDstInfo, dstInfo.shardIdx, rep);
-        if ((repRank - dstNodeAnchor) / gpusPerDomain > myNode) {
+        const int repNode = (repRank - dstNodeAnchor) / gpusPerDomain;
+        if (repNode > myNode && stagingNodeInRing(lb, repNode, myNode)) {
           hasRingNext = true;
           break;
         }
@@ -666,7 +675,7 @@ ncclResult_t buildStagingTransferDescriptor(
     int mySourceStart = 0, mySourceEnd = 0;
     int sourceRepSlots = firstNodeLocalReps > 0 ? firstNodeLocalReps : numLocalReps;
     int activeSourceSlots = sourceRepSlots;
-    for (int node = firstRepNodeDest; node >= 0 && node <= myNode; node++) {
+    for (int node = firstRepNodeDest; node >= 0 && node <= myNode; node += stagingRingNodeStep(&lb)) {
       int nodeLocalReps = 0;
       for (int rep = targetRepStart; rep < targetRepEnd; rep++) {
         int rr = getMeshRank(dstTensor, &fullDstInfo, dstInfo.shardIdx, rep);
@@ -746,7 +755,7 @@ ncclResult_t buildStagingTransferDescriptor(
     for (int rep = targetRepStart; rep < targetRepEnd; rep++) {
       int rr = getMeshRank(dstTensor, &fullDstInfo, dstInfo.shardIdx, rep);
       int rrNode = rankNode(rr);
-      if (rrNode < myNode && (ringPrevNode == -1 || rrNode > ringPrevNode)) {
+      if (rrNode < myNode && stagingNodeInRing(&lb, rrNode, myNode) && (ringPrevNode == -1 || rrNode > ringPrevNode)) {
         ringPrevNode = rrNode;
       }
     }
@@ -768,7 +777,7 @@ ncclResult_t buildStagingTransferDescriptor(
     for (int rep = targetRepStart; rep < targetRepEnd; rep++) {
       int rr = getMeshRank(dstTensor, &fullDstInfo, dstInfo.shardIdx, rep);
       int rrNode = rankNode(rr);
-      if (rrNode > myNode && (ringNextNode == -1 || rrNode < ringNextNode)) {
+      if (rrNode > myNode && stagingNodeInRing(&lb, rrNode, myNode) && (ringNextNode == -1 || rrNode < ringNextNode)) {
         ringNextNode = rrNode;
       }
     }
