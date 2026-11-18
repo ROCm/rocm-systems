@@ -125,6 +125,9 @@ class TestResetGpuresetHiveGrouping(unittest.TestCase):
                 f"amd-smi CLI reset.py not found (looked in {_CLI_DIR or amdsmi_path})"
             )
         modules = _build_fake_amdsmi()
+        helpers_module = types.ModuleType("amdsmi_helpers")
+        helpers_module.AMDSMIHelpers = object
+        modules["amdsmi_helpers"] = helpers_module
         stub_modules(cls, modules)
         cls.interface = modules["amdsmi.amdsmi_interface"]
         cls.module = load_cli_module(
@@ -146,6 +149,7 @@ class TestResetGpuresetHiveGrouping(unittest.TestCase):
         cmd = self.module.ResetCommands()
         cmd.logger = _NullLogger()
         cmd.helpers = _StubHelpers()
+        cmd.helpers.device_has_ualink = lambda h: fabric_types.get(h) in {"UALINK", "UALOE"}
         cmd.group_check_printed = True
         cmd.device_handles = list(self.GPUS)
         cmd.reset(_Args(gpureset=True))
@@ -173,7 +177,3 @@ class TestResetGpuresetHiveGrouping(unittest.TestCase):
     def test_gpus_without_hive_are_each_reset(self):
         hive_ids = {"gpu0": 7, "gpu1": 7, "gpu2": 0, "gpu3": 0}
         self.assertEqual(self._reset_all(hive_ids, {}), ["gpu0", "gpu2", "gpu3"])
-
-
-if __name__ == "__main__":
-    unittest.main()
