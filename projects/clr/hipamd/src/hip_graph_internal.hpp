@@ -1053,6 +1053,7 @@ class Graph {
   //!< Non-null when this Graph object is the storage of a child graph node. Lets a node
   //!< be mapped back to its owning ChildGraphNode without RTTI.
   ChildGraphNode* owningNode_ = nullptr;
+  bool movedIntoNode_ = false;
 
  public:
   ChildGraphNode* GetOwningNode() const { return owningNode_; }
@@ -1066,6 +1067,11 @@ class Graph {
   }
   void ReleaseSharedNodes() { vertices_.clear(); }
   void SetOwningNode(ChildGraphNode* node) { owningNode_ = node; }
+  //! Set only when this graph was handed to its node by ownership MOVE. Clone-owned graphs
+  //! are also owned by a node, but the caller never gave up their own object, so the
+  //! destroy/instantiate/re-parent restrictions must not apply to them.
+  void MarkMovedIntoNode() { movedIntoNode_ = true; }
+  bool IsMovedIntoNode() const { return movedIntoNode_; }
   //! Maps a node of the graph this was cloned from to its copy here. Virtual so a child
   //! graph node can answer from the graph it holds rather than from its own base.
   virtual Node GetClonedNode(Node node) {
@@ -1544,6 +1550,7 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
   void CommitMove(Graph* g) {
     childGraph_ = g;
     childGraph_->SetOwningNode(this);
+    childGraph_->MarkMovedIntoNode();
     ShareNodesFrom(childGraph_);
   }
 
