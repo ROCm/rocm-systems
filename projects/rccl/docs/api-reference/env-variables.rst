@@ -393,7 +393,8 @@ in the following table.
     * - | ``RCCL_LOG_ROCTX``
         | Emits ROCTX ranges around RCCL operations so profilers such as
           ``rocprof`` can show them. The library must be built with
-          ``ROCTX_ENABLE``.
+          ``ROCTX_ENABLE``; otherwise RCCL prints a warning and emits no
+          ranges.
       - | ``0``: Disabled (default).
         | Non-zero: Enabled.
 
@@ -905,9 +906,15 @@ in the following table.
         | ``N``: Split only when message size >= N bytes.
 
     * - | ``RCCL_AINIC_ROCE``
-        | Controls which NICs are counted during AINIC detection. AINIC mode is
-          used when the primary NIC type (by majority) is AINIC.
-          ``NCCL_NET=ROCM-IB`` bypasses this variable entirely.
+        | Controls which NICs are counted during AINIC detection. The primary
+          NIC type is chosen by majority; AINIC mode (automatic IB-CAST and
+          AINIC RoCEv2 optimizations) is used when the primary type is AINIC.
+          Setting ``1`` counts only AINIC devices and treats Mellanox and
+          Broadcom as generic NICs, but it does not force AINIC mode; ``0``
+          ignores AINIC devices, so detection never selects AINIC mode.
+          ``NCCL_NET=ROCM-IB`` bypasses this variable entirely. IB-CAST is
+          selected automatically only if ``NCCL_NET`` is unset and no external
+          net plugin was requested. Detection honours ``NCCL_IB_HCA`` filters.
       - | ``-1``: Auto-detect (default).
         | ``0``: Ignore AINIC devices.
         | ``1``: Count only AINIC devices.
@@ -1195,8 +1202,14 @@ in the following table.
           ``example`` loads ``librccl-rma-example.so``.
 
     * - | ``RCCL_MODEL_MATCHING_DISABLE``
-        | Skips all preset topology matching so RCCL uses its generic graph
-          search instead of hand-tuned ring or tree topologies.
+        | Skips all preset topology matching (chordal ring 8P6L, 8-GPU
+          all-to-all, Rome 4P2H, 1H16P, 4H4P, and GIO models), so RCCL uses
+          its generic graph search instead of a hand-tuned ring or tree. Only
+          consulted when no explicit topology was supplied; ``NCCL_RINGS``,
+          ``RCCL_TREES``, and ``NCCL_GRAPH_FILE`` take priority. Also
+          suppresses the Rome model dump and any options-string effects such
+          as ``tuning=``, ``ll128Enabled=``, ``pivotA2AEnabled=``, and
+          ``treeDefined=``.
       - | ``0``: Match presets (default).
         | Non-zero: Skip matching.
 
@@ -1272,15 +1285,24 @@ in the following table.
         | Debug only. When set to ``1``, RCCL assumes the GPU-NIC RDMA module
           is loaded and skips the ``peermem`` module scan, the Hyper-V
           blocklist, and the test memory-registration probe. The DMA-buf check
-          still runs.
+          still runs. Whether GDR is actually used still depends on topology
+          and ``NCCL_NET_GDR_LEVEL``; the NIC driver must support GDR,
+          otherwise memory registration fails. Applies to both the IB and
+          IB-CAST transports, which declare this name independently.
       - | ``-1``: Auto-detect (default).
-        | ``1``: Force on.
+        | ``1``: Force on. Only ``1`` has an effect.
 
     * - | ``RCCL_FORCE_ENABLE_DMABUF``
         | Forces RCCL to select the DMA-buf GPU Direct RDMA path instead of
-          ``peermem``. When set, RCCL registers GPU buffers through
-          ``regMrDmaBuf`` even if ``peermem`` is available. If DMA-buf is not
-          actually available, GPU Direct RDMA is disabled for that device.
+          ``peermem``. When set, RCCL skips the OS and kernel DMA-BUF and
+          P2PDMA configuration checks and registers GPU buffers through
+          ``regMrDmaBuf`` even if ``peermem`` is available. ROCr must still
+          report DMA-buf support and export
+          ``hsa_amd_portable_export_dmabuf``. With ``0``, ``peermem`` is
+          preferred and DMA-buf is used only as a fallback when ``peermem`` is
+          missing. If DMA-buf is not actually available (ROCr, plugin
+          ``regMrDmaBuf``, or ``NCCL_DMABUF_ENABLE=0``), GPU Direct RDMA is
+          disabled for that device.
       - | ``0``: Normal GDR selection (``peermem`` preferred, default).
         | ``1``: Force DMA-buf; skip ``peermem``.
 
@@ -1419,10 +1441,15 @@ collected in the following table.
         | ``1``: Enable.
 
     * - | ``RCCL_ENABLE_INTRANET``
-        | Testing and tuning option for single-node communicators. Keeps
-          network devices in the topology of a single-node communicator.
-          Required for intra-node ring channels over the NIC on fully
-          XGMI-connected systems, together with ``RCCL_P2P_NET_DISABLE=0``.
+        | Testing and tuning option for single-node communicators; not needed
+          for multi-node jobs, where it has no effect. Keeps the network (NIC)
+          devices in the topology of a single-node communicator. Without it
+          they are removed, unless GDR is available on all GPUs and the GPUs
+          are not all XGMI-connected. Required for intra-node ring channels
+          over the NIC on fully XGMI-connected systems, together with
+          ``RCCL_P2P_NET_DISABLE=0`` (see ``RCCL_INTRANET_THRESHOLD``). Also
+          used for single-node GIN runs. Setting it disables same-node
+          send/recv over the network (``RCCL_P2P_NET_THRESHOLD``).
       - | ``1``: Enable.
         | Any other value: Disabled (default).
 
@@ -1430,13 +1457,16 @@ collected in the following table.
         | Controls same-node traffic over the NIC. With ``0``, on Rome 4P2H
           topologies where GDR is available and GPUs are not fully
           XGMI-connected, same-node send/recv larger than
-          ``RCCL_P2P_NET_THRESHOLD`` go through the network.
+          ``RCCL_P2P_NET_THRESHOLD`` go through the network. Also required,
+          together with ``RCCL_ENABLE_INTRANET``, for intra-node ring channels
+          over the NIC on fully XGMI-connected systems.
       - | ``0``: Allow same-node NIC traffic.
         | Non-zero: Disable same-node NIC traffic (default: ``1``).
 
     * - | ``RCCL_P2P_NET_THRESHOLD``
         | Size cutoff for same-node send/recv over the network.
-          See ``RCCL_P2P_NET_DISABLE``.
+          See ``RCCL_P2P_NET_DISABLE``, and ``RCCL_INTRANET_THRESHOLD`` for
+          the intra-node NET channel cutoff.
       - | Integer, bytes. Default: ``131072`` (128 KiB).
 
     * - | ``NCCL_WIN_ENABLE``
@@ -1534,13 +1564,23 @@ the following table.
     * - | ``RCCL_HIERARCHICAL_ALLGATHER``
         | Enables hierarchical AllGather, which splits the operation across
           intra-node and inter-node sub-communicators. Requires 8 or more
-          nodes and compact rank ordering.
+          nodes, compact rank ordering, and successful creation of the
+          sub-communicators at init. The maximum message size depends on the
+          node count: 32 MiB at 8 to 15 nodes, 64 MiB at 16 to 31 nodes, and
+          128 MiB at 32 or more nodes. A per-rank floor
+          (``RCCL_HIERARCHICAL_ALLGATHER_MIN_BYTES_PER_RANK``) keeps small
+          startup AllGathers off the hierarchical path.
       - | ``1``: Enabled when prerequisites are met (default).
         | ``0`` or any other value: Disabled.
 
     * - | ``RCCL_DISABLE_REDUCE_COPY_PIPELINING``
-        | Forces non-pipelined device functions. In practice only changes
-          behavior on ``gfx942``.
+        | Forces ``info->pipeline = 0``, which selects non-pipelined device
+          functions. In practice this only changes behavior on ``gfx942``:
+          ``gfx950`` returns early with pipelining already off, and no other
+          architecture matches the enabling branch. On ``gfx942`` pipelining
+          otherwise applies to ``AllReduce`` (single-node, or multi-node
+          within 512 MB x 2^(log2(nNodes)-1)), ``ReduceScatter``, and
+          ``Reduce``.
       - | ``0``: Allow pipelining (default).
         | Non-zero: Disable.
 
@@ -1579,7 +1619,12 @@ the following table.
 
     * - | ``RCCL_CTS_OFFLOAD_ENABLED``
         | Enables AINIC CTS offload and the inline-data path it depends on.
-          Only read inside the IbCastAinicRoce branch of device init. CTS is
+          Read once inside the ``IbCastAinicRoce`` branch of device init, so it
+          has no effect on non-AINIC RoCE hardware. Only the value ``0`` is
+          distinguished: ``-1`` and ``1`` behave identically. Setting ``1``
+          does not force CTS onto P2P connections;
+          ``RCCL_IB_P2P_DISABLE_CTS`` (default ``1``) still excludes them. If
+          inline data is off it is turned back on automatically, and CTS is
           disabled entirely when CAST QP scheduling or IB port
           failover/recovery is active.
       - | ``-1``: Auto-enable on AINIC (default).
