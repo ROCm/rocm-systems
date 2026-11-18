@@ -438,20 +438,23 @@ TEST(RjWaitcheck, KernelEntryChecksOnlySelectedDescriptor) {
   EXPECT_TRUE(contains(stdout_text, "instructions=3 memory-events=1 diagnostics=0")) << stdout_text;
 }
 
-TEST(RjWaitcheck, FunctionEntryAcceptsExplicitFallbackWaveSize) {
+TEST(RjWaitcheck, FunctionEntryWaveSizeDoesNotInventRegisterAllocation) {
   const TempDir temp_dir(
       std::filesystem::temp_directory_path() /
       ("rj_waitcheck_smoke_" + std::to_string(static_cast<long long>(getpid()))));
   const auto input = temp_dir.path / "function-only-gfx1200.co";
   const auto output = temp_dir.path / "stdout.txt";
+  const auto error = temp_dir.path / "stderr.txt";
   ASSERT_TRUE(write_binary_file(
       input, rocjitsu::waitcheck_test::make_gfx1200_function_only_padded_code_object()));
 
-  const std::string command =
-      shell_quote(g_waitcheck_tool.string()) + " " + shell_quote(input.string()) +
-      " --target gfx1200 --kernel-entry 0x10 --wave-size 32 > " + shell_quote(output.string());
-  EXPECT_TRUE(command_exited_with(std::system(command.c_str()), 4)) << read_text_file(output);
-  EXPECT_TRUE(contains(read_text_file(output), "diagnostics=1")) << read_text_file(output);
+  const std::string command = shell_quote(g_waitcheck_tool.string()) + " " +
+                              shell_quote(input.string()) +
+                              " --target gfx1200 --kernel-entry 0x10 --wave-size 32 > " +
+                              shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+  EXPECT_TRUE(command_exited_with(std::system(command.c_str()), 2)) << read_text_file(error);
+  EXPECT_TRUE(contains(read_text_file(error), "descriptorless code has no VGPR allocation"))
+      << read_text_file(error);
 }
 
 TEST(RjWaitcheck, PrintedDiagnosticIdentifiesHazardousKernel) {
@@ -685,6 +688,20 @@ TEST(RjWaitcheck, CompletedKernelHazardSurvivesIncompleteObjectSkip) {
   EXPECT_TRUE(command_succeeded(std::system(parity_only.c_str()))) << read_text_file(output);
   EXPECT_TRUE(contains(read_text_file(output), "skipped=1 code-objects=0 diagnostics=0"))
       << read_text_file(output);
+
+  for (bool check_parity : {false, true}) {
+    const std::string exhaustive =
+        shell_quote(g_waitcheck_tool.string()) + " " + shell_quote(input.string()) +
+        " --exhaustive --target gfx1201 --summary-only --no-fail --diagnostics-jsonl " +
+        shell_quote(diagnostics.string()) + (check_parity ? " --check-counter-parity" : "") +
+        " > " + shell_quote(output.string());
+    EXPECT_TRUE(command_exited_with(std::system(exhaustive.c_str()), 2)) << read_text_file(output);
+    EXPECT_TRUE(contains(read_text_file(output), "code-objects=0/1 kernels=1/2"))
+        << read_text_file(output);
+    const std::string rows = read_text_file(diagnostics);
+    EXPECT_EQ(std::count(rows.begin(), rows.end(), '\n'), 1) << rows;
+    EXPECT_TRUE(contains(rows, "\"kernel_name\":\"hazard\"")) << rows;
+  }
 }
 
 TEST(RjWaitcheck, ExhaustiveWritesLosslessGfx950CounterParityJsonl) {
@@ -1353,6 +1370,64 @@ TEST(RjWaitcheck, RecursiveDirectorySweepScansNestedCorpusFiles) {
         << "missing expected output fragment: " << needle << "\noutput:\n"
         << stdout_text;
   }
+}
+
+TEST(RjWaitcheck, RecursiveSweepReusesItsReportWithoutReplacingCodeObject) {
+  const TempDir temp_dir(
+      std::filesystem::temp_directory_path() /
+      ("rj_waitcheck_smoke_" + std::to_string(static_cast<long long>(getpid()))));
+  const auto corpus = temp_dir.path / "corpus";
+  const auto input = corpus / "missing_wait_gfx942.co";
+  const auto report = corpus / "hazards.jsonl";
+  const auto output = temp_dir.path / "stdout.txt";
+  const auto error = temp_dir.path / "stderr.txt";
+  std::filesystem::create_directories(corpus);
+  const auto image = rocjitsu::waitcheck_test::make_gfx942_missing_wait_code_object();
+  ASSERT_TRUE(write_binary_file(input, image));
+
+  const std::string common = shell_quote(g_waitcheck_tool.string()) + " " +
+                             shell_quote(corpus.string()) +
+                             " --exhaustive --target gfx942 --summary-only --no-fail "
+                             "--diagnostics-jsonl ";
+  const std::string command = common + shell_quote(report.string()) + " > " +
+                              shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+  for (int run = 0; run < 2; ++run) {
+    EXPECT_TRUE(command_succeeded(std::system(command.c_str()))) << read_text_file(error);
+    EXPECT_TRUE(contains(read_text_file(output), "files=1 ignored=0 code-objects=1/1 kernels=1/1"))
+        << read_text_file(output);
+    const std::string rows = read_text_file(report);
+    EXPECT_EQ(std::count(rows.begin(), rows.end(), '\n'), 1) << rows;
+  }
+
+  const std::string alias = common + shell_quote(input.string()) + " > " +
+                            shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+  EXPECT_TRUE(command_exited_with(std::system(alias.c_str()), 2));
+  EXPECT_TRUE(contains(read_text_file(error), "aliases an input")) << read_text_file(error);
+  EXPECT_EQ(read_binary_file(input), image);
+}
+
+TEST(RjWaitcheck, DanglingReportSymlinkCannotAliasSecondWriter) {
+  const TempDir temp_dir(
+      std::filesystem::temp_directory_path() /
+      ("rj_waitcheck_smoke_" + std::to_string(static_cast<long long>(getpid()))));
+  const auto input = temp_dir.path / "missing_wait_gfx950.co";
+  const auto diagnostics = temp_dir.path / "hazards.jsonl";
+  const auto parity = temp_dir.path / "parity.jsonl";
+  const auto output = temp_dir.path / "stdout.txt";
+  const auto error = temp_dir.path / "stderr.txt";
+  ASSERT_TRUE(write_binary_file(
+      input, rocjitsu::waitcheck_test::make_gfx_code_object(
+                 {0xE0501000u, 0x80000008u, 0x7E020300u}, rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX950)));
+  std::filesystem::create_symlink(parity, diagnostics);
+  const std::string command =
+      shell_quote(g_waitcheck_tool.string()) + " " + shell_quote(input.string()) +
+      " --exhaustive --target gfx950 --no-fail --check-counter-parity --diagnostics-jsonl " +
+      shell_quote(diagnostics.string()) + " --counter-parity-jsonl " +
+      shell_quote(parity.string()) + " > " + shell_quote(output.string()) + " 2> " +
+      shell_quote(error.string());
+  EXPECT_TRUE(command_exited_with(std::system(command.c_str()), 2));
+  EXPECT_TRUE(contains(read_text_file(error), "aliases an input or another report"))
+      << read_text_file(error);
 }
 
 TEST(RjWaitcheck, SummaryOnlyRecursiveSweepReportsLowerBoundTotals) {

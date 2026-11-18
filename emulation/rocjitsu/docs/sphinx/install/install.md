@@ -101,7 +101,7 @@ This installs:
 -   Public headers to `<prefix>/include/rocjitsu/`
 -   Shared libraries (`librocjitsu.so`, `librocjitsu_hooks.so`,
     `librocjitsu_kmd.so` on Linux) to `<prefix>/lib/`
--   The `rocjitsu` CLI binary to `<prefix>/bin/` (Linux only)
+-   The `rocjitsu` and `rj_waitcheck` CLI binaries to `<prefix>/bin/` (Linux only)
 -   GPU topology JSON configuration files to
     `<prefix>/share/rocjitsu/configs/`
 -   FlatBuffers schema files to `<prefix>/share/rocjitsu/schemas/`

@@ -1046,8 +1046,29 @@ private:
                                : std::filesystem::directory_options::skip_permission_denied;
     std::filesystem::recursive_directory_iterator it(path, traversal, ec), end;
     while (!ec && it != end) {
-      if (it->is_regular_file(ec))
+      if (it->is_regular_file(ec)) {
+        bool previous_report = false;
+        for (const auto &report :
+             {options.diagnostics_jsonl_path, options.counter_parity_jsonl_path}) {
+          std::error_code alias_error;
+          if (report && std::filesystem::equivalent(it->path(), *report, alias_error)) {
+            previous_report = true;
+            break;
+          }
+        }
+        // A repeated recursive sweep can write into its own corpus directory.
+        // Skip an existing non-GPU report, but retain a code object at that
+        // path so the later output-alias check rejects its replacement.
+        if (previous_report) {
+          Executable candidate(it->path().string());
+          if (!candidate.is_valid() && !candidate.gpu_payload_recognized() &&
+              !candidate.read_failed()) {
+            it.increment(ec);
+            continue;
+          }
+        }
         directory_files.push_back(it->path().string());
+      }
       if (ec && options.exhaustive) {
         error = it->path().string() + ": failed to inspect directory entry: " + ec.message();
         return false;
@@ -1454,13 +1475,15 @@ run_kernel_batch_analysis(const CliOptions &options, const std::string &input_pa
   const WaitcheckReport &report = result.report;
   ++totals.code_objects_discovered;
   totals.kernels_discovered += report.kernels_discovered;
+  // A completed entry remains covered even if another entry makes the whole
+  // code object incomplete. Keep the numerator aligned with published rows.
+  totals.kernels_analyzed += report.kernels_analyzed;
   if (!report.supported || !report.complete) {
     error = result.error;
     return false;
   }
 
   ++totals.code_objects;
-  totals.kernels_analyzed += report.kernels_analyzed;
   totals.instructions_analyzed += report.instructions_analyzed;
   totals.memory_events_tracked += report.memory_events_tracked;
   totals.diagnostics += report.diagnostics_observed;
@@ -2131,6 +2154,17 @@ int main(int argc, char **argv) {
     }
     diagnostic_writer = std::make_unique<DiagnosticJsonlWriter>(
         diagnostic_output, std::string(argv[0]), options.wave_size);
+  }
+  if (options.diagnostics_jsonl_path && options.counter_parity_jsonl_path) {
+    // Opening the first report can materialize a dangling symlink target.
+    // Recheck before the second writer can truncate that same file.
+    std::error_code alias_error;
+    if (std::filesystem::equivalent(*options.diagnostics_jsonl_path,
+                                    *options.counter_parity_jsonl_path, alias_error)) {
+      std::cerr << "JSONL output path aliases an input or another report: "
+                << *options.counter_parity_jsonl_path << "\n";
+      return kInputError;
+    }
   }
   std::ofstream counter_parity_output;
   std::unique_ptr<CounterParityJsonlWriter> counter_parity_writer;

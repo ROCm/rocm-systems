@@ -84,7 +84,7 @@ rj_waitcheck /path/to/site-packages/torch \
 | `--target TARGET` | Select a target from the supported architectures listed below. |
 | `--code-object-index N` | Select the Nth code object for the selected target. |
 | `--kernel-entry OFFSET` | Analyze each merged entry/wave group at this `.text` byte offset. Same-wave descriptors are conservatively grouped, including register allocation. Use `--wave-size` to select one wave mode. This flag cannot select an individual descriptor for a dispatch-specific check. When replaying `--list-kernels` output through the CLI, run once per unique `(kernel_entry, wavefront_size)` or `analysis_group_name`; exact descriptor rows can share one group. Offline callers iterating `waitcheck_kernels()` should pass each `WaitcheckKernelInfo` to the core overload. |
-| `--wave-size 32\|64` | Select a descriptor wave size at `--kernel-entry`, or supply the wave size for a descriptorless entry. Requires `--kernel-entry`; a descriptorless entry remains incomplete without VGPR allocation. Descriptors keep their encoded wave size. |
+| `--wave-size 32\|64` | Select a descriptor wave size at `--kernel-entry`, or supply the wave size for a descriptorless entry. Requires `--kernel-entry`. Descriptorless entries remain incomplete because these options cannot establish their register allocation. Descriptors keep their encoded wave size. |
 | `--all-code-objects` | Analyze all supported code objects in each input. |
 | `--recursive` | Expand directory inputs into recursive file sweeps. |
 | `--exhaustive` | Strict target-specific recursive sweep with code-object and kernel completeness totals. Requires `--target`. Implies `--recursive --all-code-objects`. |
@@ -171,5 +171,6 @@ When `--summary-only` is used, only final batch totals are printed. For `--exhau
 -   waitcheck validates final encoded programs. It does not rewrite code.
 -   The analyzer is only as complete as the ISA metadata available to rocJITsu. Missing implicit operands, instruction-class flags, wait-counter effects, or target predicates can cause false negatives or false positives.
 -   Hazards whose architectural fix is instruction spacing, `s_nop`, or `s_delay_alu` are separate from wait-counter validation unless they also expose a wait-like dependency.
--   Relocatable ELF objects (`.o` files) are rejected because they are compiler intermediates rather than final loadable code objects.
+-   AMDGPU relocatable device ELF objects (`ET_REL`) are rejected because they are not final loadable code objects. Host `.o` files containing final HIP code objects in `.hip_fatbin` are accepted.
+-   Descriptorless entries cannot be checked completely without their register allocation, including when `--kernel-entry` and `--wave-size` are supplied.
 -   Targets outside the supported set listed above are out of scope.

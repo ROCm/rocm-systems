@@ -12,12 +12,10 @@
 #   name         - base name of the .hip source (without extension)
 #   offload_arch - GPU target (e.g. gfx942, gfx950)
 #   OUTPUT_NAME  - optional; basename of the output .o (default: ${name}).
-#                  Use when the same source is compiled for multiple targets
-#                  so each build lands in a distinct .o file. (Multi-target
-#                  fat binaries via repeated --offload-arch flags would be
-#                  more elegant but the Executable fat-binary loader has a
-#                  pre-existing single-bundle assumption — see
-#                  executable.cpp::load_hip_fatbin.)
+#                  Use when the same source is compiled separately for multiple
+#                  targets so each invocation lands in a distinct .o file.
+#                  The loader also accepts multi-target HIP bundles; this
+#                  helper builds one target per invocation for test fixtures.
 function(rj_add_device_kernel name offload_arch)
     set(oneValueArgs OUTPUT_NAME)
     cmake_parse_arguments(RJ_KERNEL "" "${oneValueArgs}" "" ${ARGN})
