@@ -240,10 +240,10 @@ TEST(parser_schema_validator,
 
 TEST(parser_schema_validator, catalog_check_reports_an_assigns_value_its_target_refuses)
 {
-    const auto errors_for = [](const char* text) {
+    const auto errors_for = [](const char* target, const char* text) {
         auto gpu     = make_param(param_type::boolean);
         gpu.id       = "gpu";
-        gpu.assigns  = { { "use_amd_smi", text } };
+        gpu.assigns  = { { target, text } };
         auto amd_smi = make_param(param_type::boolean);
         amd_smi.id   = "use_amd_smi";
         schema value{};
@@ -252,12 +252,17 @@ TEST(parser_schema_validator, catalog_check_reports_an_assigns_value_its_target_
         return validate_schema(value);
     };
 
-    const auto typo = errors_for("ture");
+    const auto typo = errors_for("use_amd_smi", "ture");
     ASSERT_EQ(typo.size(), 1U);
     EXPECT_EQ(typo.front().message,
               "parameter 'gpu' assigns invalid value 'ture' to 'use_amd_smi'");
-    EXPECT_TRUE(errors_for("true").empty());
-    EXPECT_TRUE(errors_for(" true ").empty());
+    EXPECT_TRUE(errors_for("use_amd_smi", "true").empty());
+    EXPECT_TRUE(errors_for("use_amd_smi", " true ").empty());
+
+    const auto unknown = errors_for("use_amdsmi", "true");
+    ASSERT_EQ(unknown.size(), 1U);
+    EXPECT_NE(unknown.front().message.find("refers to unknown parameter 'use_amdsmi'"),
+              std::string::npos);
 }
 
 TEST(parser_schema_validator, ignores_whitespace_around_a_value_and_a_default)
