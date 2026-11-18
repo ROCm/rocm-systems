@@ -15,7 +15,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{Ordering, fence};
 
 use super::memory::{BufferKind, DeviceVm, KfdAllocation};
-use super::{errno, error, native_error, os_memory, sys, sysfs, uapi};
+use super::{connection, errno, error, native_error, os_memory, sysfs, uapi};
 use crate::device::gpu::queue::{
     AqlControlLayout, AqlControlRegion, AqlQueueHeader, MAX_PRIVATE_SEGMENT_BYTES,
     QueueAccessWidth, QueueErrorEvent, QueueParameters, QueuePriority, QueueProducerMode,
@@ -243,7 +243,7 @@ impl DoorbellMapping {
             .ok_or_else(|| error(ErrorKind::Internal, "doorbell mapping has no storage"))
     }
 
-    fn transfer(&mut self, kfd: &sys::Kfd, map: bool) -> Result<(), Error> {
+    fn transfer(&mut self, kfd: &connection::Kfd, map: bool) -> Result<(), Error> {
         let handle = self
             .handle
             .ok_or_else(|| error(ErrorKind::Internal, "doorbell mapping has no handle"))?;
@@ -274,7 +274,7 @@ impl DoorbellMapping {
         })
     }
 
-    fn rollback_device(&mut self, kfd: &sys::Kfd) -> Result<(), Error> {
+    fn rollback_device(&mut self, kfd: &connection::Kfd) -> Result<(), Error> {
         if self.uncertain {
             return Err(error(
                 ErrorKind::DriverContract,
@@ -427,7 +427,7 @@ impl DoorbellMapping {
         Ok(address)
     }
 
-    fn close(&mut self, kfd: &sys::Kfd) -> Result<(), Error> {
+    fn close(&mut self, kfd: &connection::Kfd) -> Result<(), Error> {
         if let Some(handle) = self.handle {
             for peer in self.peers.iter_mut().rev() {
                 peer.close(handle)?;
@@ -464,7 +464,7 @@ impl Drop for DoorbellMapping {
 }
 
 impl Doorbells {
-    pub(super) fn close(&mut self, kfd: &sys::Kfd) -> Result<(), Error> {
+    pub(super) fn close(&mut self, kfd: &connection::Kfd) -> Result<(), Error> {
         let mapping = self
             .mapping
             .get_mut()
