@@ -71,22 +71,6 @@ jobs:
           }
         }
 
-  log_therock_ref:
-    name: Locked TheRock ref
-    needs: [setup]
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Surface locked TheRock ref
-        run: |
-          RESOLVED_REF="${{ needs.setup.outputs.ref }}"
-          COMMIT_URL="https://github.com/ROCm/TheRock/commit/${RESOLVED_REF}"
-          echo "Locked TheRock ref for this run: ${RESOLVED_REF} (${COMMIT_URL})"
-          {
-            echo "### Locked TheRock ref"
-            echo ""
-            echo "Every build/test job in this run is locked to ROCm/TheRock commit [\`${RESOLVED_REF}\`](${COMMIT_URL})."
-          } >> "$GITHUB_STEP_SUMMARY"
-
   linux_build_and_test:
     name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
     needs: [setup]
@@ -152,6 +136,7 @@ jobs:
           ref: c0d2f4d21e7daffe3896b9be9ce9d1b2e0793827 # 2026-11-11
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
+          persist-credentials: false
 
       - name: Evaluate workflow results
         env:

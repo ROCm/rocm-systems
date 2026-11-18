@@ -120,6 +120,7 @@ jobs:
             .github/repos-config.json
             .github/scripts/compute_build_stages.py
           sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: Checkout TheRock for configure script
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -137,6 +138,7 @@ jobs:
             build_tools/project_mappings.json
             build_tools/artifact_subprojects.json
           sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: Configure CI for pull request or push
         id: configure-pr
@@ -166,10 +168,13 @@ jobs:
       # project is disabled on Windows in the topology.
       - name: Compute build-stage allowlist
         id: build_stages
+        env:
+          CHANGED_PROJECTS: ${{ steps.configure-pr.outputs.changed_projects || steps.configure-manual.outputs.changed_projects }}
+          RUN_ALL_TESTS: ${{ steps.configure-pr.outputs.run_all_tests || steps.configure-manual.outputs.run_all_tests }}
         run: |
           python3 .github/scripts/compute_build_stages.py \
-            --changed-projects "${{ steps.configure-pr.outputs.changed_projects || steps.configure-manual.outputs.changed_projects }}" \
-            --run-all-tests "${{ steps.configure-pr.outputs.run_all_tests || steps.configure-manual.outputs.run_all_tests }}" \
+            --changed-projects "${CHANGED_PROJECTS}" \
+            --run-all-tests "${RUN_ALL_TESTS}" \
             --therock-path "_therock"
 
   setup:
@@ -243,8 +248,10 @@ jobs:
       rocm_rpm_package_version: ${{ needs.setup.outputs.rocm_rpm_package_version }}
       test_type: ${{ needs.configure.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
-      # Empty string when run_all_tests=true triggers full test run in downstream workflow
-      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
+      # The changed projects, or '' when run_all_tests is 'true'. An empty value
+      # makes the downstream workflow run every test. `cond && '' || x` would
+      # always yield x, because '' is falsy, so the condition is negated.
+      changed_projects: ${{ needs.configure.outputs.run_all_tests != 'true' && needs.configure.outputs.changed_projects || '' }}
       repository: ROCm/TheRock
       ref: c0d2f4d21e7daffe3896b9be9ce9d1b2e0793827 # 2026-11-11
     permissions:
@@ -267,8 +274,10 @@ jobs:
       rocm_msi_package_version: ${{ needs.setup.outputs.rocm_msi_package_version }}
       test_type: ${{ needs.configure.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
-      # Empty string when run_all_tests=true triggers full test run in downstream workflow
-      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
+      # The changed projects, or '' when run_all_tests is 'true'. An empty value
+      # makes the downstream workflow run every test. `cond && '' || x` would
+      # always yield x, because '' is falsy, so the condition is negated.
+      changed_projects: ${{ needs.configure.outputs.run_all_tests != 'true' && needs.configure.outputs.changed_projects || '' }}
       repository: ROCm/TheRock
       ref: c0d2f4d21e7daffe3896b9be9ce9d1b2e0793827 # 2026-11-11
     permissions:
@@ -292,6 +301,7 @@ jobs:
           ref: c0d2f4d21e7daffe3896b9be9ce9d1b2e0793827 # 2026-11-11
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
+          persist-credentials: false
 
       - name: Evaluate workflow results
         env:
