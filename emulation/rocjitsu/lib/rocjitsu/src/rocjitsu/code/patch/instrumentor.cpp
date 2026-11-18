@@ -819,10 +819,12 @@ namespace {
 
 // A direct call initializes its even SGPR pair to one of this kernel's decoded
 // continuations. A SETPC is bounded only if every path still carries such a link.
-bool cdna3_kernel_has_unknown_target(BasicBlock &entry, const KernelScopeSpec &spec,
-                                     const BlockOffsetIndex &offsets,
-                                     const std::unordered_set<BasicBlock *> &reachable,
-                                     uint32_t sgpr_count) {
+bool kernel_has_unknown_target(BasicBlock &entry, const KernelScopeSpec &spec,
+                               const BlockOffsetIndex &offsets,
+                               const std::unordered_set<BasicBlock *> &reachable,
+                               uint32_t ordinary_sgpr_count,
+                               const std::unordered_set<const BasicBlock *> &proven_reentries = {},
+                               bool allow_implicit_exit = false) {
   if (std::ranges::none_of(reachable, [](const BasicBlock *block) {
         return block->successor_issue() != BasicBlock::SuccessorIssue::None;
       }))
@@ -845,10 +847,9 @@ bool cdna3_kernel_has_unknown_target(BasicBlock &entry, const KernelScopeSpec &s
   merge(&entry, 0);
   for (uint64_t offset : spec.own_entries)
     merge(block_for_offset(offsets, offset), 0);
-  const auto pair_bit = [sgpr_count](unsigned reg) -> uint64_t {
+  const auto pair_bit = [ordinary_sgpr_count](unsigned reg) -> uint64_t {
     // Firmware's aliased scalar tail can also be written by implicit operands.
-    if ((reg & 1u) || reg >= 128 ||
-        reg + 1 >= cdna3::flat_scratch_base(cdna3::sgpr_alias_end(sgpr_count)))
+    if ((reg & 1u) || reg >= 128 || reg + 1 >= ordinary_sgpr_count)
       return 0;
     return uint64_t{1} << (reg / 2);
   };
@@ -870,7 +871,11 @@ bool cdna3_kernel_has_unknown_target(BasicBlock &entry, const KernelScopeSpec &s
           links &= ~pair_bit(first);
       }
     }
-    if (block->successor_issue() != BasicBlock::SuccessorIssue::None) {
+    const BasicBlock::SuccessorIssue issue = block->successor_issue();
+    const bool implicit_exit =
+        allow_implicit_exit && issue == BasicBlock::SuccessorIssue::MissingFallthrough;
+    if (issue != BasicBlock::SuccessorIssue::None && !implicit_exit &&
+        !proven_reentries.contains(block)) {
       const Instruction *term = block->terminator();
       if (block->successor_issue() != BasicBlock::SuccessorIssue::IndirectControlFlow || !term ||
           term->mnemonic() != "s_setpc_b64" || !term->num_src_operands())
@@ -892,6 +897,140 @@ bool cdna3_kernel_has_unknown_target(BasicBlock &entry, const KernelScopeSpec &s
     }
   }
   return false;
+}
+
+// Recognize a contiguous negative 64-bit PC adjustment with its carry intact.
+// Restrict hidden edges to dispatch roots so they cannot enter another helper
+// with a return-link context supplied only by that helper's own callers.
+std::optional<uint64_t> adjusted_pc_entry_target(const std::array<const Instruction *, 3> &tail,
+                                                 uint64_t base, uint16_t link,
+                                                 std::span<const KernelDescriptorInfo> kernels) {
+  if (tail[0] == nullptr || tail[0]->src_loc() + tail[0]->size() != tail[1]->src_loc() ||
+      tail[1]->src_loc() + tail[1]->size() != tail[2]->src_loc())
+    return std::nullopt;
+  const std::string_view low_name = tail[0]->mnemonic();
+  const std::string_view high_name = tail[1]->mnemonic();
+  const std::string_view ret_name = tail[2]->mnemonic();
+  if ((low_name != "s_add_u32" && low_name != "s_add_co_u32") ||
+      (high_name != "s_addc_u32" && high_name != "s_add_co_ci_u32") ||
+      (ret_name != "s_setpc_b64" && ret_name != "s_set_pc_i64"))
+    return std::nullopt;
+  const auto is_link = [](const Operand *operand, uint16_t index, uint8_t width = 1) {
+    return operand != nullptr &&
+           operand->to_register_ref() == RegisterRef{RegClass::SGPR, index, width};
+  };
+  const uint16_t high = link + 1;
+  if (!is_link(tail[0]->dst_operand(0), link) || !is_link(tail[0]->src_operand(0), link) ||
+      !is_link(tail[1]->dst_operand(0), high) || !is_link(tail[1]->src_operand(0), high) ||
+      !is_link(tail[2]->src_operand(0), link, 2))
+    return std::nullopt;
+  const Operand *low_value = tail[0]->src_operand(1);
+  const Operand *high_value = tail[1]->src_operand(1);
+  if (low_value == nullptr || high_value == nullptr)
+    return std::nullopt;
+  const std::optional<uint64_t> low_constant = low_value->const_value();
+  const std::optional<uint64_t> high_constant = high_value->const_value();
+  if (!low_constant || !high_constant || static_cast<uint32_t>(*high_constant) != 0xffffffffu)
+    return std::nullopt;
+  const int64_t delta = static_cast<int32_t>(static_cast<uint32_t>(*low_constant));
+  if (delta >= 0 || base < static_cast<uint64_t>(-delta))
+    return std::nullopt;
+  const uint64_t target = base - static_cast<uint64_t>(-delta);
+  if (!std::ranges::any_of(kernels, [&](const KernelDescriptorInfo &kernel) {
+        return kernel.entry_text_offset == target;
+      }))
+    return std::nullopt;
+  return target;
+}
+
+std::optional<uint64_t> callee_reentry_target(const BasicBlock::CallEdge &edge,
+                                              std::span<const KernelDescriptorInfo> kernels) {
+  if (edge.callee == nullptr || edge.continuation == nullptr ||
+      !edge.callee->successors().empty() || !edge.callee->predecessors().empty())
+    return std::nullopt;
+  std::array<const Instruction *, 3> tail = {};
+  for (const Instruction &inst : edge.callee->instructions())
+    tail = {tail[1], tail[2], &inst};
+  const std::optional<uint64_t> target =
+      adjusted_pc_entry_target(tail, edge.continuation->start_offset(), edge.return_sreg, kernels);
+  if (!target)
+    return std::nullopt;
+  const uint16_t high = edge.return_sreg + 1;
+  for (const Instruction &inst : edge.callee->instructions()) {
+    if (&inst == tail[0])
+      break;
+    const InstDefUse effects(inst, 64);
+    if (inst.mnemonic().starts_with("s_movrel") ||
+        effects.defs.contains({RegClass::SGPR, edge.return_sreg, 1}) ||
+        effects.defs.contains({RegClass::SGPR, high, 1}))
+      return std::nullopt;
+  }
+  return target;
+}
+
+std::optional<uint64_t> static_pc_reentry_target(const BasicBlock &block,
+                                                 std::span<const KernelDescriptorInfo> kernels) {
+  std::array<const Instruction *, 4> tail = {};
+  for (const Instruction &inst : block.instructions())
+    tail = {tail[1], tail[2], tail[3], &inst};
+  if (tail[0] == nullptr ||
+      (tail[0]->mnemonic() != "s_getpc_b64" && tail[0]->mnemonic() != "s_get_pc_i64") ||
+      tail[0]->src_loc() + tail[0]->size() != tail[1]->src_loc())
+    return std::nullopt;
+  const Operand *destination = tail[0]->dst_operand(0);
+  if (destination == nullptr)
+    return std::nullopt;
+  const std::optional<RegisterRef> pair = destination->to_register_ref();
+  if (!pair || pair->cls != RegClass::SGPR || pair->width != 2)
+    return std::nullopt;
+  return adjusted_pc_entry_target({tail[1], tail[2], tail[3]}, tail[0]->src_loc() + tail[0]->size(),
+                                  pair->index, kernels);
+}
+
+// Omitted but bounded call/return edges cannot introduce set VSKIP when
+// every instruction in the inspected text leaves it clear. This establishes
+// only the MODE precondition, never EXEC or interprocedural register liveness.
+bool vskip_is_preserved_in_closed_text(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+                                       std::span<const KernelDescriptorInfo> kernels,
+                                       std::span<const uint8_t> text, rj_code_arch_t arch) {
+  std::unordered_set<const BasicBlock *> proven_reentries;
+  for (const std::unique_ptr<BasicBlock> &block : blocks) {
+    for (const Instruction &inst : block->instructions()) {
+      if (may_enable_vskip(inst, text, arch) || inst.mnemonic().starts_with("s_rfe"))
+        return false;
+      if ((inst.flags() & INDIRECT_CALL) &&
+          (&inst != block->terminator() || block->call_edges().empty()))
+        return false;
+    }
+    if (static_pc_reentry_target(*block, kernels))
+      proven_reentries.insert(block.get());
+    for (const BasicBlock::CallEdge &edge : block->call_edges()) {
+      if (callee_reentry_target(edge, kernels))
+        proven_reentries.insert(edge.callee);
+    }
+  }
+  const BlockOffsetIndex offsets = build_block_offset_index(blocks);
+  const BlockPositionIndex positions = build_block_position_index(blocks);
+  for (const KernelDescriptorInfo &kernel : kernels) {
+    BasicBlock *entry = block_for_offset(offsets, kernel.entry_text_offset);
+    const std::optional<uint32_t> count =
+        AmdGpuCodeObject::min_kernel_sgpr_count(arch, std::span(&kernel, 1));
+    if (entry == nullptr || !count)
+      return false;
+    KernelScopeSpec spec;
+    if (kernarg_preload_length(kernel.descriptor))
+      spec.own_entries.insert(kernel.entry_text_offset + 256);
+    const std::vector<BasicBlock *> reached =
+        reachable_kernel_blocks(blocks, offsets, positions, *entry, spec);
+    const std::unordered_set<BasicBlock *> reachable(reached.begin(), reached.end());
+    const uint32_t ordinary = arch == ROCJITSU_CODE_ARCH_CDNA3
+                                  ? cdna3::flat_scratch_base(cdna3::sgpr_alias_end(*count))
+                                  : ordinary_sgpr_bound(arch, *count);
+    if (kernel_has_unknown_target(*entry, spec, offsets, reachable, ordinary, proven_reentries,
+                                  true))
+      return false;
+  }
+  return !kernels.empty();
 }
 
 // Shared code must satisfy every kernel that can execute a probe. Keep an
@@ -918,7 +1057,8 @@ cdna3_probe_sgpr_counts(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
       reached = reachable_kernel_blocks(blocks, offsets, positions, *entry, spec);
     const std::unordered_set<BasicBlock *> reachable(reached.begin(), reached.end());
     const bool incomplete =
-        !entry || cdna3_kernel_has_unknown_target(*entry, spec, offsets, reachable, count);
+        !entry || kernel_has_unknown_target(*entry, spec, offsets, reachable,
+                                            cdna3::flat_scratch_base(cdna3::sgpr_alias_end(count)));
     for (const auto &site : sites) {
       if (site.is_probe_call() &&
           (incomplete || reachable.contains(block_for_offset(offsets, site.anchor_offset))))
@@ -1362,18 +1502,36 @@ bool Instrumentor::ensure_liveness_built(uint8_t wave_size,
     else
       entries.push_back(*entry);
   }
+  vskip_cfg_is_closed_ = true;
+  bool may_enable_guest_vskip = false;
   for (const BasicBlock *block : scope) {
     if (!block->call_edges().empty() || block->has_implicit_terminator() ||
         block->successor_issue() != BasicBlock::SuccessorIssue::None)
       can_analyze_exec = false;
+    // An implicit exit or missing fallthrough cannot bring a new MODE value
+    // into a BeforeInst callback. Unknown taken targets still invalidate proof.
+    if (!block->call_edges().empty() ||
+        (block->successor_issue() != BasicBlock::SuccessorIssue::None &&
+         block->successor_issue() != BasicBlock::SuccessorIssue::MissingFallthrough))
+      vskip_cfg_is_closed_ = false;
     for (const Instruction &inst : block->instructions()) {
+      may_enable_guest_vskip |= may_enable_vskip(inst, options.text, arch_);
       if (is_control_flow_transfer(inst) && !is_program_path_terminator(inst) &&
           !inst.branch_offset_bytes())
-        can_analyze_exec = false;
+        vskip_cfg_is_closed_ = false;
     }
   }
+  // With no enables or unmodeled flow, every dispatch path stays clear even
+  // when a descriptor enters inside a decoded block. This does not grant EXEC
+  // precision or assume that the block's earlier instructions ran.
+  vskip_is_always_clear_ = !may_enable_guest_vskip &&
+                           (vskip_cfg_is_closed_ || vskip_is_preserved_in_closed_text(
+                                                        blocks_, kernels, options.text, arch_));
+  // VSKIP is clear on dispatch. Keep this entry proof separate from EXEC,
+  // whose dispatch mask can be partial, and merge it with guest backedges.
+  options.vskip_clear_entry_blocks = entries;
   std::unique_ptr<ExecMaskAnalysis> exec;
-  if (can_analyze_exec)
+  if (can_analyze_exec && vskip_cfg_is_closed_)
     exec = std::make_unique<ExecMaskAnalysis>(KernelBlockScope(scope), wave_size,
                                               std::span<const ScopedCfgEdge>{}, entries);
   liveness_ = std::make_unique<LivenessAnalysis>(KernelBlockScope(scope), wave_size,
@@ -2449,6 +2607,20 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       if (anchor == nullptr) {
         result.errors.emplace_back("internal: anchor instruction vanished after validation");
         continue;
+      }
+      // Execution-state and allocation checks share patch preflight. Keeping
+      // the established ABI/resource diagnostics first does not emit anything:
+      // every site's plan must succeed before any ELF or site is published.
+      if (arch_is_cdna_4_or_lower(arch_) && site.kind != InstrumentationKind::KernelEntry) {
+        bool clear = vskip_is_always_clear_;
+        if (!clear && vskip_cfg_is_closed_) {
+          const FailureOr<bool> proof = liveness_->vskip_clear_before(*anchor);
+          clear = proof.succeeded() && proof.value();
+        }
+        if (!clear) {
+          result.errors.emplace_back("probe call requires VSKIP to be proven clear at its anchor");
+          continue;
+        }
       }
       const util::FailureOr<const RegisterSet *> maybe_live = liveness_->live_before(*anchor);
       if (maybe_live.failed()) {

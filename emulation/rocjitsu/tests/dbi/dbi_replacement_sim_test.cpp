@@ -225,10 +225,11 @@ protected:
   }
 
   void expect_memory(const std::vector<uint32_t> &words, uint32_t private_bytes, uint32_t expected,
-                     uint32_t output_dwords = 0) const {
+                     uint32_t output_dwords = 0, uint64_t entry_offset = 0) const {
     const ReplacementSimTarget &target = GetParam();
     test::DbiSim simulator;
     ASSERT_NO_FATAL_FAILURE(simulator.initialize(target.sim_arch, target.wave_size));
+    simulator.set_entry_offset(entry_offset);
     if (target.wave_size == 32)
       simulator.set_wave32_dispatch();
     const uint32_t output_count = output_dwords == 0 ? target.wave_size : output_dwords;
@@ -578,6 +579,272 @@ TEST_P(DbiReplacementSim, AddingALaterObserverInvalidatesCachedLiveness) {
   ASSERT_NO_FATAL_FAILURE(expect_memory(missing_restore, scratch, kProbeClobber, 1));
 }
 
+class DbiVskipReplacementSim : public DbiReplacementSim {};
+
+TEST_P(DbiVskipReplacementSim, SuppressedGuestDefinitionsPreserveTheEarlierProbeInput) {
+  const rj_code_arch_t arch = GetParam().arch;
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
+  const util::FailureOr<uint32_t> end = build_s_endpgm(arch);
+  const util::FailureOr<uint32_t> set_exec = build_s_mov_b64(126, 193, arch);
+  const util::FailureOr<uint32_t> set_s4 =
+      build_s_mov_b32(4, scalar_positive_inline_u32(kReplacementInput), arch);
+  const util::FailureOr<uint32_t> copy_s4 = build_v_mov_b32_src(1, 4, arch);
+  const util::FailureOr<uint32_t> clobber_s4 = build_s_mov_b32(4, 255, arch);
+  const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, arch);
+  ASSERT_TRUE(nop.succeeded());
+  ASSERT_TRUE(end.succeeded());
+  ASSERT_TRUE(set_exec.succeeded());
+  ASSERT_TRUE(set_s4.succeeded());
+  ASSERT_TRUE(copy_s4.succeeded());
+  ASSERT_TRUE(clobber_s4.succeeded());
+  ASSERT_TRUE(ret.succeeded());
+  enum class VskipWrite { Set, Clear, ImmediateMode, RegisterMode };
+  struct Case {
+    VskipWrite write;
+    bool earlier_probe;
+    bool scalar_destination;
+  };
+  constexpr std::array<Case, 6> cases = {
+      Case{.write = VskipWrite::Set, .earlier_probe = true, .scalar_destination = false},
+      Case{.write = VskipWrite::Clear, .earlier_probe = true, .scalar_destination = false},
+      Case{.write = VskipWrite::Set, .earlier_probe = false, .scalar_destination = false},
+      Case{.write = VskipWrite::ImmediateMode, .earlier_probe = true, .scalar_destination = false},
+      Case{.write = VskipWrite::RegisterMode, .earlier_probe = true, .scalar_destination = false},
+      Case{.write = VskipWrite::Set, .earlier_probe = true, .scalar_destination = true}};
+  for (const Case &test_case : cases) {
+    SCOPED_TRACE(static_cast<int>(test_case.write));
+    SCOPED_TRACE(test_case.earlier_probe);
+    SCOPED_TRACE(test_case.scalar_destination);
+    std::vector<uint8_t> logger_image;
+    std::vector<uint8_t> clobber_image;
+    ASSERT_NO_FATAL_FAILURE(make_probe_images(LoggerOutput::Shared, logger_image, clobber_image));
+    if (test_case.scalar_destination) {
+      clobber_image = test::make_amdgpu_probe_elf("replacement_probe",
+                                                  {clobber_s4.value(), kProbeClobber, ret.value()},
+                                                  GetParam().machine);
+    }
+    const AmdGpuCodeObject logger(logger_image.data(), logger_image.size());
+    const AmdGpuCodeObject clobber(clobber_image.data(), clobber_image.size());
+    ASSERT_TRUE(logger.is_valid());
+    ASSERT_TRUE(clobber.is_valid());
+    std::vector<uint32_t> words = setup_;
+    if (test_case.scalar_destination)
+      words.push_back(set_s4.value());
+    const uint64_t early_offset = words.size() * sizeof(uint32_t);
+    words.push_back(nop.value());
+    words.push_back(set_exec.value());
+    switch (test_case.write) {
+    case VskipWrite::Set:
+      words.push_back(0xbf108081u); // s_setvskip 1, 0
+      break;
+    case VskipWrite::Clear:
+      words.push_back(0xbf108080u); // s_setvskip 0, 0
+      break;
+    case VskipWrite::ImmediateMode:
+      words.insert(words.end(), {0xba000701u, 1u}); // s_setreg_imm32_b32 MODE[28], 1
+      words.push_back(0xbf800001u);                 // s_nop 1: MODE write wait states
+      break;
+    case VskipWrite::RegisterMode: {
+      const util::FailureOr<uint32_t> set_s7 =
+          build_s_mov_b32(7, scalar_positive_inline_u32(1), arch);
+      ASSERT_TRUE(set_s7.succeeded());
+      words.insert(words.end(), {set_s7.value(), 0xb9070701u, 0xbf800001u});
+      // s_setreg_b32 MODE[28], s7; s_nop 1
+      break;
+    }
+    }
+    // VSKIP suppresses vector encodings with either a VGPR or an SGPR result.
+    words.push_back(test_case.scalar_destination ? 0x7e080502u // v_readfirstlane_b32 s4, v2
+                                                 : test::make_mov_vgpr_inline(1, kOriginalInput));
+    words.push_back(0xbf108080u); // Both callbacks execute with VSKIP clear.
+    if (test_case.scalar_destination)
+      words.push_back(copy_s4.value());
+    const uint64_t observer_offset = words.size() * sizeof(uint32_t);
+    words.push_back(nop.value());
+    words.push_back(end.value());
+    std::vector<uint8_t> image;
+    ASSERT_NO_FATAL_FAILURE(make_image(words, image));
+    const std::vector<uint8_t> pristine = image;
+    const AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+    Instrumentor instrumentor(source, arch);
+    if (test_case.earlier_probe)
+      instrumentor.add_point(probe_at(early_offset, clobber));
+    InstrumentationPoint observer = replacement(observer_offset, nop.value(), {});
+    observer.probe_obj = &logger;
+    observer.probe_symbol = "replacement_probe";
+    observer.probe_args = {probe_arg_vgpr(1)};
+    instrumentor.add_point(std::move(observer));
+    const Instrumentor::ValidationResult validated = instrumentor.validate_points();
+    ASSERT_TRUE(validated.errors.empty()) << validated.errors.front();
+    const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+    ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+    EXPECT_EQ(result.sites.size(), test_case.earlier_probe ? 2u : 1u);
+    ASSERT_EQ(source.image_size(), pristine.size());
+    EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+    const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(candidate.is_valid());
+    const uint32_t expected =
+        test_case.write == VskipWrite::Clear ? kOriginalInput : kReplacementInput;
+    ASSERT_NO_FATAL_FAILURE(expect_memory(test::section_words(candidate, ".text"),
+                                          test::patched_private_segment_size(candidate), expected,
+                                          1));
+  }
+}
+
+TEST_P(DbiVskipReplacementSim, CallableSiteRequiresVskipClearAtItsActualBoundary) {
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, GetParam().arch);
+  const util::FailureOr<uint32_t> end = build_s_endpgm(GetParam().arch);
+  ASSERT_TRUE(nop.succeeded());
+  ASSERT_TRUE(end.succeeded());
+  std::vector<uint8_t> logger_image;
+  std::vector<uint8_t> clobber_image;
+  ASSERT_NO_FATAL_FAILURE(make_probe_images(LoggerOutput::Shared, logger_image, clobber_image));
+  const AmdGpuCodeObject logger(logger_image.data(), logger_image.size());
+  ASSERT_TRUE(logger.is_valid());
+  struct Case {
+    std::vector<uint32_t> prefix;
+    bool accepted;
+  };
+  const std::array<Case, 4> cases = {
+      Case{.prefix = {0xbf108081u}, .accepted = false},              // s_setvskip 1, 0
+      Case{.prefix = {0xb9070701u, 0xbf800001u}, .accepted = false}, // Unknown MODE[28].
+      Case{.prefix = {0xbf108081u, 0xbf108080u}, .accepted = true},
+      // A generic immediate MODE write proves VSKIP clear before the callback.
+      Case{.prefix = {0xbf108081u, 0xba000701u, 0u, 0xbf800001u}, .accepted = true}};
+  for (const Case &test_case : cases) {
+    for (bool replacement_site : {false, true}) {
+      SCOPED_TRACE(test_case.accepted);
+      SCOPED_TRACE(test_case.prefix.size());
+      SCOPED_TRACE(replacement_site);
+      std::vector<uint32_t> words = setup_;
+      words.insert(words.end(), test_case.prefix.begin(), test_case.prefix.end());
+      const uint64_t anchor = words.size() * sizeof(uint32_t);
+      words.insert(words.end(), {nop.value(), 0xbf108080u, end.value()});
+      std::vector<uint8_t> image;
+      ASSERT_NO_FATAL_FAILURE(make_image(words, image));
+      const std::vector<uint8_t> pristine = image;
+      const AmdGpuCodeObject source(image.data(), image.size());
+      ASSERT_TRUE(source.is_valid());
+      Instrumentor instrumentor(source, GetParam().arch);
+      InstrumentationPoint point =
+          replacement_site ? replacement(anchor, nop.value(), {}) : probe_at(anchor, logger);
+      point.probe_obj = &logger;
+      point.probe_symbol = "replacement_probe";
+      point.probe_args = {probe_arg_vgpr(1)};
+      instrumentor.add_point(std::move(point));
+      const Instrumentor::ValidationResult validated = instrumentor.validate_points();
+      ASSERT_TRUE(validated.errors.empty()) << validated.errors.front();
+      ASSERT_EQ(validated.sites.size(), 1u);
+      const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+      ASSERT_EQ(source.image_size(), pristine.size());
+      EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+      if (!test_case.accepted) {
+        EXPECT_TRUE(result.elf_bytes.empty());
+        EXPECT_TRUE(result.sites.empty());
+        EXPECT_TRUE(result.patches.empty());
+        ASSERT_FALSE(result.errors.empty());
+        EXPECT_NE(result.errors.front().find("VSKIP"), std::string::npos);
+        continue;
+      }
+      ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+      ASSERT_EQ(result.sites.size(), 1u);
+      const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
+      ASSERT_TRUE(candidate.is_valid());
+      ASSERT_NO_FATAL_FAILURE(expect_memory(test::section_words(candidate, ".text"),
+                                            test::patched_private_segment_size(candidate),
+                                            kReplacementInput, 1));
+    }
+  }
+}
+
+TEST_P(DbiVskipReplacementSim, LocalClearDoesNotProveCallableStateAcrossAnOpaqueTransfer) {
+  const rj_code_arch_t arch = GetParam().arch;
+  const util::FailureOr<uint32_t> transfer = build_s_setpc_b64(8, arch);
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
+  const util::FailureOr<uint32_t> end = build_s_endpgm(arch);
+  ASSERT_TRUE(transfer.succeeded());
+  ASSERT_TRUE(nop.succeeded());
+  ASSERT_TRUE(end.succeeded());
+  std::vector<uint8_t> logger_image;
+  std::vector<uint8_t> clobber_image;
+  ASSERT_NO_FATAL_FAILURE(make_probe_images(LoggerOutput::Shared, logger_image, clobber_image));
+  const AmdGpuCodeObject logger(logger_image.data(), logger_image.size());
+  ASSERT_TRUE(logger.is_valid());
+  for (bool enable_vskip : {false, true}) {
+    SCOPED_TRACE(enable_vskip);
+    std::vector<uint32_t> words = setup_;
+    if (enable_vskip)
+      words.push_back(0xbf108081u);
+    words.insert(words.end(), {transfer.value(), 0xbf108080u});
+    // The unresolved transfer can enter at this callback, bypassing the local
+    // clear. Its decoded block alone therefore cannot prove the incoming state.
+    const uint64_t anchor = words.size() * sizeof(uint32_t);
+    words.insert(words.end(), {nop.value(), end.value()});
+    std::vector<uint8_t> image;
+    ASSERT_NO_FATAL_FAILURE(make_image(words, image));
+    const std::vector<uint8_t> pristine = image;
+    const AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+    Instrumentor instrumentor(source, arch);
+    InstrumentationPoint point = probe_at(anchor, logger);
+    point.probe_args = {probe_arg_vgpr(1)};
+    instrumentor.add_point(std::move(point));
+    const Instrumentor::ValidationResult validated = instrumentor.validate_points();
+    ASSERT_TRUE(validated.errors.empty()) << validated.errors.front();
+    ASSERT_EQ(validated.sites.size(), 1u);
+    const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+    EXPECT_TRUE(result.elf_bytes.empty());
+    EXPECT_TRUE(result.sites.empty());
+    EXPECT_TRUE(result.patches.empty());
+    ASSERT_FALSE(result.errors.empty());
+    EXPECT_NE(result.errors.front().find("VSKIP"), std::string::npos);
+    ASSERT_EQ(source.image_size(), pristine.size());
+    EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+  }
+}
+
+TEST_P(DbiVskipReplacementSim, KernelEntryUsesDispatchStateDespiteAVskipEnabledBackedge) {
+  std::vector<uint32_t> words = setup_;
+  words.push_back(0xbf108081u); // s_setvskip 1, 0
+  const int16_t backedge = -static_cast<int16_t>(words.size() + 1);
+  // s_cbranch_execz entry: present in the CFG but not taken by this full wave.
+  words.push_back(0xbf880000u | static_cast<uint16_t>(backedge));
+  words.push_back(0xbf108080u);
+  const util::FailureOr<uint32_t> end = build_s_endpgm(GetParam().arch);
+  ASSERT_TRUE(end.succeeded());
+  words.push_back(end.value());
+  std::vector<uint8_t> image;
+  ASSERT_NO_FATAL_FAILURE(make_image(words, image));
+  const std::vector<uint8_t> pristine = image;
+  const AmdGpuCodeObject source(image.data(), image.size());
+  std::vector<uint8_t> logger_image;
+  std::vector<uint8_t> clobber_image;
+  ASSERT_NO_FATAL_FAILURE(make_probe_images(LoggerOutput::Shared, logger_image, clobber_image));
+  const AmdGpuCodeObject probe(logger_image.data(), logger_image.size());
+  ASSERT_TRUE(source.is_valid());
+  ASSERT_TRUE(probe.is_valid());
+  Instrumentor instrumentor(source, GetParam().arch);
+  InstrumentationPoint point = probe_at(0, probe);
+  point.kind = InstrumentationKind::KernelEntry;
+  point.probe_args = {probe_arg_imm(kProbeClobber)};
+  instrumentor.add_point(std::move(point));
+  const Instrumentor::ValidationResult validated = instrumentor.validate_points();
+  ASSERT_TRUE(validated.errors.empty()) << validated.errors.front();
+  const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+  ASSERT_EQ(result.sites.size(), 1u);
+  ASSERT_EQ(source.image_size(), pristine.size());
+  EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+  const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(candidate.is_valid());
+  const std::optional<uint64_t> entry = test::patched_entry_text_offset(candidate);
+  ASSERT_TRUE(entry.has_value());
+  ASSERT_NO_FATAL_FAILURE(expect_memory(test::section_words(candidate, ".text"),
+                                        test::patched_private_segment_size(candidate),
+                                        kProbeClobber, 1, *entry));
+}
+
 TEST_P(DbiReplacementSim, InteriorDescriptorEntryKeepsObservationExecAnalysisConservative) {
   ObservationProgram program;
   ASSERT_NO_FATAL_FAILURE(make_observation_program(ObservationDefinition::Full, 0, program, true));
@@ -750,6 +1017,11 @@ TEST_P(DbiVectorRelativeSim, CallableProbeRejectsReplacementIntroducingHiddenVgp
 }
 
 INSTANTIATE_TEST_SUITE_P(Gfx1200, DbiVectorRelativeSim, ::testing::Values(kRdna4));
+
+INSTANTIATE_TEST_SUITE_P(Cdna, DbiVskipReplacementSim, ::testing::Values(kCdna3, kCdna4),
+                         [](const ::testing::TestParamInfo<ReplacementSimTarget> &info) {
+                           return std::string(info.param.sim_arch);
+                         });
 
 INSTANTIATE_TEST_SUITE_P(Targets, DbiReplacementSim, ::testing::Values(kCdna3, kCdna4, kRdna4),
                          [](const ::testing::TestParamInfo<ReplacementSimTarget> &info) {

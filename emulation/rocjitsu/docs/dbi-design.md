@@ -609,6 +609,15 @@ CFG liveness rather than a linear scan of the body words: a def under a forward 
 
 The analysis sets `LivenessAnalysisOptions::exec_masked_defs_kill`, so a masked vector write counts as writing the whole register. Without it no masked def is ever a kill and every VGPR the probe reads — including ones it defines itself — is reported as an input. The probe owns its own EXEC; the option's doc states what that obliges.
 
+Callable probes enter with VSKIP proven clear. Dispatch establishes that state
+for KernelEntry probes; other sites require a proof on the effective guest CFG.
+Probe bodies that may enable VSKIP are rejected because the call envelope also
+requires vector instructions to execute. Probe live-in analysis seeds its entry
+with this callable precondition, independently of its EXEC policy.
+The execution-state check runs with the allocation checks during patch preflight;
+`validate_points()` resolves structural and probe-body contracts without promising
+that those preflight requirements can be met.
+
 Fail-closed, each with a distinct message: an unrecognized convention; gfx1250/CDNA5 without a proof that all `MODE.VGPR_MSB` roles are zero at each call site (the instrumentor derives this from the sole kernel entry and rejects guests with calls); relative (`v_movrel*`) or GPR-indexed (`MODE.GPR_IDX_EN`) VGPR access, which displaces an encoded index at runtime and so loses live-ins rather than inventing them; relative SGPR access (the `s_movrel*` family, which displaces its index through M0 the same way), rejected by a mnemonic scan rather than by liveness, which models no scalar equivalent; a probe object without exactly one `.text`, or a body outside it, since `BasicBlock::build()` decodes nothing else and restarts its offsets per section; a body ahead of its section; no decoder for the arch; an undecodable `.text`; and an entry offset that starts no decoded block.
 
 ### SpillManager
@@ -884,8 +893,12 @@ argument writes. The builder orders overlapping copies and breaks cycles with a
 dead VGPR. Observed sources participate in resource exclusion even if the guest
 itself no longer uses them. Each observation is a read before its anchor in the
 effective CFG, including when a replacement deletes the last guest read. Liveness
-propagates that read backward to earlier probes until a proven full-lane definition
-ends the old value's live range. Partial or unknown EXEC remains conservative;
+propagates that read backward to earlier probes until a definition is proven to
+execute and overwrite every lane. A VSKIP-affected instruction can end that range
+only where VSKIP is proven clear, including when its result is an SGPR or an
+AccVGPR. The forward proof uses the same scoped edges as liveness, merges clear
+dispatch entries with backedges, and treats unknown entries, possible enables,
+and calls conservatively. Explicit clears can restore the proof. Partial or unknown EXEC remains conservative;
 EXEC precision is disabled for unmodeled calls, transfers, or descriptor entries.
 Dispatch-only KernelEntry reads are local to their entry probe, rather than reads
 on guest backedges. Adding a queued point invalidates the cached liveness.

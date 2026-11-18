@@ -10,6 +10,7 @@
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/isa/target_registry.h"
 
@@ -65,13 +66,13 @@ void dfs_reverse_post_order(const BasicBlock &start,
 }
 
 // Ordinary registers that du overwrites on every path and in every lane.
-[[nodiscard]] RegisterSet kill_defs(const InstDefUse &du, ExecState exec_before) {
+[[nodiscard]] RegisterSet kill_defs(const InstDefUse &du, ExecState exec_before, bool may_skip) {
   // Ordinary registers only: special singletons (EXEC/VCC/...) live in du.defs
   // but are not part of scratch-allocation liveness and must not become kills.
   RegisterSet kills = du.defs.ordinary_only();
-  // Predicated defs preserve old values on at least one control-flow path, so
-  // they can never be unconditional kills.
-  if (du.has_predicated_def)
+  // Suppressed instructions preserve every result, including SGPR destinations
+  // of vector encodings. Predicated defs likewise cannot be unconditional kills.
+  if (may_skip || du.has_predicated_def)
     return {};
   if (du.conditional_vgpr_def)
     kills.erase(*du.conditional_vgpr_def);
@@ -87,7 +88,7 @@ void dfs_reverse_post_order(const BasicBlock &start,
 
 // The 32-bit word at offset in text, or nullopt if it runs past the end.
 [[nodiscard]] std::optional<uint32_t> text_word_at(std::span<const uint8_t> text, uint64_t offset) {
-  if (text.empty() || offset + sizeof(uint32_t) > text.size())
+  if (offset > text.size() || text.size() - offset < sizeof(uint32_t))
     return std::nullopt;
   uint32_t word = 0;
   std::memcpy(&word, text.data() + offset, sizeof(word));
@@ -96,6 +97,47 @@ void dfs_reverse_post_order(const BasicBlock &start,
 
 [[nodiscard]] bool is_sgpr_movrel(const Instruction &inst) {
   return inst.mnemonic().starts_with("s_movrel");
+}
+
+// nullopt leaves the bit unchanged; true includes writes not provably clear.
+std::optional<bool> mode_bit_write(const Instruction &inst, std::span<const uint8_t> text,
+                                   uint16_t bit, uint64_t offset) {
+  const std::string_view mnemonic = inst.mnemonic();
+  if (mnemonic != "s_setreg_b32" && mnemonic != "s_setreg_imm32_b32")
+    return std::nullopt;
+  const Operand *hwreg_operand = inst.dst_operand(0);
+  if (hwreg_operand == nullptr)
+    return true;
+  const uint16_t hwreg = static_cast<uint16_t>(hwreg_operand->encoding_value());
+  if (!amdgpu::hwreg_slice_overlaps_mode_bit(hwreg, bit))
+    return std::nullopt;
+  if (mnemonic == "s_setreg_b32" || inst.size() < 8 || offset > text.size() ||
+      text.size() - offset < 8)
+    return true;
+  const std::optional<uint32_t> literal = text_word_at(text, offset + sizeof(uint32_t));
+  if (!literal)
+    return true;
+  const amdgpu::HwregSlice slice = amdgpu::decode_vgpr_msb_hwreg(hwreg);
+  return ((*literal >> (bit - slice.begin)) & 1u) != 0;
+}
+
+std::optional<bool> vskip_write(const Instruction &inst, std::span<const uint8_t> text,
+                                uint64_t offset) {
+  if (inst.mnemonic() != "s_setvskip")
+    return mode_bit_write(inst, text, 28, offset);
+  const Operand *source = inst.src_operand(0);
+  const Operand *selector = inst.src_operand(1);
+  if (source == nullptr || selector == nullptr)
+    return true;
+  const std::optional<uint64_t> value = source->const_value();
+  if (!value)
+    return true;
+  if (*value == 0)
+    return false;
+  const std::optional<uint64_t> bit = selector->const_value();
+  if (!bit)
+    return true;
+  return ((*value >> (*bit & 31u)) & 1u) != 0;
 }
 
 // True if inst may reach VGPRs through M0-relative or GPR-index addressing,
@@ -113,38 +155,16 @@ void dfs_reverse_post_order(const BasicBlock &start,
   if (mnemonic == "s_set_gpr_idx_on")
     return true;
 
-  // GPR indexing can also be enabled by writing MODE.GPR_IDX_EN through a
-  // generic S_SETREG form. Dynamic writes covering bit 27 fail closed; immediate
-  // writes can stay eligible when their decoded literal proves the bit is clear.
-  const bool is_dynamic_setreg = mnemonic == "s_setreg_b32";
-  const bool is_immediate_setreg = mnemonic == "s_setreg_imm32_b32";
-  if (!is_dynamic_setreg && !is_immediate_setreg) {
-    return false;
-  }
-  const Operand *hwreg_operand = inst.dst_operand(0);
-  if (hwreg_operand == nullptr)
-    return true;
-  const uint16_t hwreg = static_cast<uint16_t>(hwreg_operand->encoding_value());
-  const uint16_t id = hwreg & 0x3fu;
-  const uint16_t begin = (hwreg >> 6) & 0x1fu;
-  const uint16_t width = static_cast<uint16_t>(((hwreg >> 11) & 0x1fu) + 1u);
-  constexpr uint16_t kModeHwreg = 1;
-  constexpr uint16_t kGprIdxEnableBit = 27;
-  if (id != kModeHwreg || begin > kGprIdxEnableBit ||
-      static_cast<uint32_t>(begin) + width <= kGprIdxEnableBit) {
-    return false;
-  }
-
-  if (is_dynamic_setreg)
-    return true;
-
-  const auto literal = text_word_at(text, inst.src_loc() + sizeof(uint32_t));
-  if (!literal || inst.size() < 2 * static_cast<int>(sizeof(uint32_t)))
-    return true;
-  return ((*literal >> (kGprIdxEnableBit - begin)) & 1u) != 0;
+  return mode_bit_write(inst, text, 27, inst.src_loc()).value_or(false);
 }
 
 } // namespace
+
+bool may_enable_vskip(const Instruction &inst, std::span<const uint8_t> text, rj_code_arch_t arch,
+                      std::optional<uint64_t> instruction_offset) {
+  return arch_is_cdna_4_or_lower(arch) &&
+         vskip_write(inst, text, instruction_offset.value_or(inst.src_loc())).value_or(false);
+}
 
 LivenessAnalysis::LivenessAnalysis(UnavailableTag) : available_(false) {}
 
@@ -231,6 +251,8 @@ LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks, uint8_t wave_size,
   assert(!(exec && options.exec_masked_defs_kill) &&
          "exec_masked_defs_kill has no effect alongside an ExecMaskAnalysis");
   exec_masked_defs_kill_ = options.exec_masked_defs_kill;
+  tracks_vskip_ =
+      options.arch == ROCJITSU_CODE_ARCH_INVALID || arch_is_cdna_4_or_lower(options.arch);
   wave_size_ = wave_size;
   // Own the EXEC-state analysis; the backward dataflow is deferred to the first
   // query (ensure_analyzed), which consults it for kills. May be null: kills then
@@ -244,6 +266,13 @@ LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks, uint8_t wave_size,
       scoped_blocks_.insert(block);
   }
   deferred_extra_edges_.assign(extra_edges.begin(), extra_edges.end());
+  vskip_clear_entry_blocks_.insert(options.vskip_clear_entry_blocks.begin(),
+                                   options.vskip_clear_entry_blocks.end());
+  vskip_entry_blocks_ = vskip_clear_entry_blocks_;
+  if (options.entry_block != nullptr)
+    vskip_entry_blocks_.insert(options.entry_block);
+  vskip_entry_blocks_.insert(options.additional_entry_blocks.begin(),
+                             options.additional_entry_blocks.end());
   deferred_live_before_instructions_.assign(options.live_before_instructions.begin(),
                                             options.live_before_instructions.end());
   deferred_restrict_live_before_to_instructions_ = options.restrict_live_before_to_instructions;
@@ -301,6 +330,12 @@ void LivenessAnalysis::collect_global_register_usage(
     if (block == nullptr)
       continue;
     for (const Instruction &inst : block->instructions()) {
+      tracks_vskip_ |= inst.is_vskip_affected();
+      const std::optional<bool> write = (inst.flags() & INDIRECT_CALL)
+                                            ? std::optional<bool>(true)
+                                            : vskip_write(inst, text, inst.src_loc());
+      if (write)
+        vskip_writes_.emplace(&inst, *write);
       if (is_sgpr_movrel(inst))
         global_sgpr_usage_is_complete_ = false;
       if (may_access_vgprs_indirectly(inst, text, arch))
@@ -376,6 +411,99 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks, bool restrict_live_befor
   for (const ScopedCfgEdge &edge : extra_edges)
     add_edge(edge.from, edge.to);
 
+  if (tracks_vskip_) {
+    // This forward may-be-set proof uses exactly the graph of the backward
+    // analysis. Arbitrary/external entries are unknown; dispatch-clear seeds
+    // contribute a clear incoming path without overriding loop backedges.
+    std::vector<bool> unknown_entry(blocks.size(), false);
+    std::vector<bool> reached(blocks.size(), false);
+    std::vector<std::optional<bool>> effects(blocks.size());
+    std::deque<size_t> pending;
+    for (const ScopedCfgEdge &edge : extra_edges) {
+      const std::unordered_map<const BasicBlock *, size_t>::const_iterator target =
+          block_index_.find(edge.to);
+      if (target != block_index_.end() && !block_index_.contains(edge.from))
+        unknown_entry[target->second] = true;
+    }
+    for (size_t i = 0; i < blocks.size(); ++i) {
+      const BasicBlock *block = blocks[i];
+      if (block == nullptr)
+        continue;
+      // The scope projects away original predecessors, such as padding before
+      // a copied probe body. Only explicitly supplied outside edges introduce
+      // unknown incoming state in addition to this scope's entry contract.
+      bool outside_predecessor = unknown_entry[i];
+      const bool entry = predecessors[i].empty() || vskip_entry_blocks_.contains(block);
+      unknown_entry[i] =
+          outside_predecessor || (entry && !vskip_clear_entry_blocks_.contains(block));
+      if (entry || outside_predecessor) {
+        reached[i] = true;
+        pending.push_back(i);
+      }
+      for (const Instruction &inst : block->instructions()) {
+        const std::unordered_map<const Instruction *, bool>::const_iterator write =
+            vskip_writes_.find(&inst);
+        if (write != vskip_writes_.end())
+          effects[i] = write->second;
+      }
+    }
+    while (!pending.empty()) {
+      const size_t i = pending.front();
+      pending.pop_front();
+      for (size_t succ : successors[i]) {
+        if (!reached[succ]) {
+          reached[succ] = true;
+          pending.push_back(succ);
+        }
+      }
+    }
+    // Disconnected cycles have no proven entry state. Do not invent a clear
+    // state merely because their fixed point has no incoming edge.
+    std::vector<bool> before(blocks.size(), false);
+    std::vector<bool> after(blocks.size(), false);
+    std::vector<bool> queued(blocks.size(), true);
+    for (size_t i = 0; i < blocks.size(); ++i) {
+      unknown_entry[i] = unknown_entry[i] || !reached[i];
+      pending.push_back(i);
+    }
+    while (!pending.empty()) {
+      const size_t i = pending.front();
+      pending.pop_front();
+      queued[i] = false;
+      bool may_skip = unknown_entry[i];
+      for (size_t pred : predecessors[i])
+        may_skip = may_skip || after[pred];
+      before[i] = may_skip;
+      const bool out = effects[i].value_or(may_skip);
+      if (out == after[i])
+        continue;
+      after[i] = out;
+      for (size_t succ : successors[i]) {
+        if (!queued[succ]) {
+          queued[succ] = true;
+          pending.push_back(succ);
+        }
+      }
+    }
+    for (size_t i = 0; i < blocks.size(); ++i) {
+      if (blocks[i] == nullptr)
+        continue;
+      bool may_skip = before[i];
+      for (const Instruction &inst : blocks[i]->instructions()) {
+        if (!may_skip)
+          vskip_clear_before_.insert(&inst);
+        const std::unordered_map<const Instruction *, bool>::const_iterator write =
+            vskip_writes_.find(&inst);
+        if (write != vskip_writes_.end())
+          may_skip = write->second;
+      }
+    }
+  }
+
+  const auto may_skip = [this](const Instruction &inst) {
+    return inst.is_vskip_affected() && !vskip_clear_before_.contains(&inst);
+  };
+
   // Compute each block's local transfer function before iterating across CFG
   // edges. `gen` keeps only uses that occur before a local definition, because
   // later uses are satisfied inside the block. `kill` is every local def.
@@ -390,7 +518,7 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks, bool restrict_live_befor
       if (filter_live_before && requested_live_before.contains(&inst))
         ++requested_live_before_by_block[i];
       InstDefUse du(inst, wave_size_, gfx1250_vgpr_msb_.get());
-      RegisterSet kills = kill_defs(du, exec_before(inst));
+      RegisterSet kills = kill_defs(du, exec_before(inst), may_skip(inst));
       RegisterSet upward_uses = du.uses.ordinary_only();
       const std::unordered_map<const Instruction *, RegisterSet>::const_iterator additional =
           additional_uses_.find(&inst);
@@ -463,7 +591,7 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks, bool restrict_live_befor
       --it;
       const Instruction *inst = &*it;
       InstDefUse du(*inst, wave_size_, gfx1250_vgpr_msb_.get());
-      RegisterSet kills = kill_defs(du, exec_before(*inst));
+      RegisterSet kills = kill_defs(du, exec_before(*inst), may_skip(*inst));
       live -= kills;
       live |= du.uses.ordinary_only();
       const std::unordered_map<const Instruction *, RegisterSet>::const_iterator additional =
@@ -527,6 +655,13 @@ FailureOr<bool> LivenessAnalysis::global_sgpr_usage_is_complete() const {
   if (require_available().failed())
     return Result::failure();
   return global_sgpr_usage_is_complete_;
+}
+
+FailureOr<bool> LivenessAnalysis::vskip_clear_before(const Instruction &inst) const {
+  if (ensure_analyzed().failed())
+    return Result::failure();
+  return scoped_blocks_.contains(inst.parent()) &&
+         (!tracks_vskip_ || vskip_clear_before_.contains(&inst));
 }
 
 FailureOr<std::optional<uint16_t>>

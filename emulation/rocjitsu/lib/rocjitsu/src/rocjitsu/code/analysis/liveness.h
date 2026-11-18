@@ -37,6 +37,13 @@ class Instruction;
 /// @brief The basic blocks reachable from one kernel entry.
 using KernelBlockScope = std::span<BasicBlock *const>;
 
+/// @brief Whether an instruction may enable VSKIP, including generic MODE writes.
+/// @details Unknown sources are possible enables. The optional byte offset is
+/// relative to @p text, for callers analyzing a copied instruction body.
+[[nodiscard]] bool may_enable_vskip(const Instruction &inst, std::span<const uint8_t> text,
+                                    rj_code_arch_t arch,
+                                    std::optional<uint64_t> instruction_offset = std::nullopt);
+
 /// @brief Extra edge in a kernel-scoped analysis graph.
 ///
 /// @details BasicBlock::successors() stores context-free local CFG edges only.
@@ -97,6 +104,13 @@ struct LivenessAnalysisOptions {
   /// with is the ABI's, which is the same one entry_block gets.
   std::span<BasicBlock *const> additional_entry_blocks;
 
+  /// @brief Entries whose incoming VSKIP is proven clear, such as dispatch roots.
+  /// @details Other entries have unknown VSKIP. These seeds are merged with
+  /// backedges; they do not override state from an earlier loop iteration.
+  /// Construction copies the span. This proof is independent of EXEC fullness
+  /// and of entry_block's VGPR-bank contract.
+  std::span<const BasicBlock *const> vskip_clear_entry_blocks = {};
+
   /// @brief Lowest VGPR index that a VGPR scratch query may return.
   ///
   /// @details This is a debug-oriented allocation floor, not a dataflow fact.
@@ -128,7 +142,8 @@ struct LivenessAnalysisOptions {
   ///
   /// An ExecMaskAnalysis, if supplied, takes precedence — where it reports
   /// `Unknown` the result is the conservative one, so do not supply one
-  /// alongside this flag.
+  /// alongside this flag. This option does not override VSKIP suppression;
+  /// affected definitions still require VSKIP to be proven clear.
   bool exec_masked_defs_kill = false;
 
   /// @brief Restrict instruction-level live-before materialization to selected instructions.
@@ -152,10 +167,9 @@ struct LivenessAnalysisOptions {
 
   /// @brief Raw .text image for the analyzed kernel scope.
   ///
-  /// @details Forwarded to the gfx1250 VGPR_MSB analysis so it can read
-  /// S_SETREG_IMM32_B32 literals safely from the instruction stream (at
-  /// src_loc()+4) instead of indexing past a decoded instruction's encoding word.
-  /// Empty is tolerated: such writes then mark the affected banks ambiguous.
+  /// @details Used for VGPR_MSB and VSKIP effects of S_SETREG_IMM32_B32.
+  /// Literal-dependent effects are captured at construction, so deferred
+  /// liveness does not borrow this span. Missing literals leave state unknown.
   std::span<const uint8_t> text = {};
 
   /// @brief Additional ordinary-register reads before the specified instructions.
@@ -316,6 +330,11 @@ public:
   /// conclusion requires a scope that includes all reachable callees.
   FailureOr<bool> global_sgpr_usage_is_complete() const;
 
+  /// @brief Whether VSKIP is proven clear immediately before an instruction.
+  /// @details Unknown state or an instruction outside the scope answers false;
+  /// unavailable analysis returns failure. Calls invalidate the proof.
+  FailureOr<bool> vskip_clear_before(const Instruction &inst) const;
+
   /// @brief Find an even ordinary SGPR pair unused throughout the decoded scope.
   /// @details The scope must include reachable callees. The search spans
   /// REGISTER_SET_ALLOCATABLE_SGPRS. Callers using a pair beyond the current
@@ -401,6 +420,7 @@ private:
   bool available_ = true;
   mutable bool analyzed_ = false;
   bool exec_masked_defs_kill_ = false;
+  bool tracks_vskip_ = false;
   bool global_vgpr_usage_is_complete_ = true;
   bool global_sgpr_usage_is_complete_ = true;
   uint16_t min_free_vgpr_ = 0;
@@ -413,6 +433,12 @@ private:
   std::unique_ptr<ExecMaskAnalysis> exec_;
   RegisterSet globally_used_registers_;
   std::unordered_map<const Instruction *, RegisterSet> additional_uses_;
+  // Only state-changing instructions are stored: true means possibly set,
+  // false means proven clear. Capture literal-dependent effects before deferral.
+  std::unordered_map<const Instruction *, bool> vskip_writes_;
+  std::unordered_set<const BasicBlock *> vskip_clear_entry_blocks_;
+  std::unordered_set<const BasicBlock *> vskip_entry_blocks_;
+  mutable std::unordered_set<const Instruction *> vskip_clear_before_;
   std::vector<BasicBlock *> deferred_blocks_;
   std::unordered_set<const BasicBlock *> scoped_blocks_;
   bool deferred_restrict_live_before_to_instructions_ = false;

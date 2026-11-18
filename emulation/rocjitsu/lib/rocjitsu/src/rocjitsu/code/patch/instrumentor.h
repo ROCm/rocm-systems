@@ -587,6 +587,8 @@ private:
   std::unique_ptr<AmdGpuCodeObject> analysis_object_;
   std::vector<std::unique_ptr<BasicBlock>> blocks_;
   std::unique_ptr<LivenessAnalysis> liveness_;
+  bool vskip_cfg_is_closed_ = false;
+  bool vskip_is_always_clear_ = false;
   // .text-relative byte offset -> decoded Instruction. Populated alongside
   // blocks_ so find_instruction_at_offset is O(1). Pointers are stable for
   // the lifetime of blocks_ (BasicBlock owns the Instructions via unique_ptr).
