@@ -88,11 +88,11 @@ _TARGET_RE = re.compile(r"^\s*(add_executable|add_library|add_test_executable)\(
 
 
 def _cmake_code_lines(text):
-    """(1-based line number, line) for every line that is not a pure comment."""
+    """(1-based line number, line) for every line that is not blank or a pure comment."""
     return [
         (n, line)
         for n, line in enumerate(text.splitlines(), 1)
-        if not line.lstrip().startswith("#")
+        if line.strip() and not line.lstrip().startswith("#")
     ]
 
 
@@ -273,6 +273,18 @@ class TestBuildWiringTest(unittest.TestCase):
         errors = _poison_wiring_errors(
             body, "test/host/CMakeLists.txt rccl_standalone_setup()"
         )
+        self.assertFalse(errors, "\n".join(errors))
+
+    def test_blank_and_comment_lines_do_not_separate_include_from_if(self):
+        text = (
+            "if(RCCL_POISON_HIP_ATOMICS)\n"
+            "\n"
+            "  # comment\n"
+            "  add_compile_options(--include=${X}/poison_hip_atomics.h)\n"
+            "endif()\n"
+            "add_executable(t t.cpp)\n"
+        )
+        errors = _poison_wiring_errors(_cmake_code_lines(text), "inline")
         self.assertFalse(errors, "\n".join(errors))
 
 
