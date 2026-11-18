@@ -96,6 +96,16 @@ find_slot(const std::vector<config_slot>& slots, std::string_view param_id)
     const auto found = std::ranges::find(slots, param_id, &config_slot::id);
     return found == slots.end() ? nullptr : &*found;
 }
+
+void
+write_slot(config_store& store, int index)
+{
+    const auto param_id = "slot_" + std::to_string(index);
+    for(int write = 0; write < k_writes_per_thread; ++write)
+    {
+        store.set(param_id, std::to_string(write), config_source::environment);
+    }
+}
 }  // namespace
 
 TEST(parser_config_store, stores_and_reads_values)
@@ -284,16 +294,6 @@ TEST(parser_config_store, callback_can_store_another_parameter)
     store.clear();
     EXPECT_FALSE(store.contains("trace"));
     EXPECT_FALSE(store.contains("profile"));
-}
-
-void
-write_slot(config_store& store, int index)
-{
-    const auto param_id = "slot_" + std::to_string(index);
-    for(int write = 0; write < k_writes_per_thread; ++write)
-    {
-        store.set(param_id, std::to_string(write), config_source::environment);
-    }
 }
 
 TEST(parser_config_store, concurrent_updates_keep_each_value)
