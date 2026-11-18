@@ -4,6 +4,8 @@
 #include "rocjitsu/vm/amdgpu/image_addressing.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
+#include "rocjitsu/vm/amdgpu/gfx10_msaa_patterns.h"
+#include "rocjitsu/vm/graphics/image_address.h"
 #include "util/bit.h"
 
 #include <algorithm>
@@ -352,8 +354,26 @@ uint32_t gfx9_tile_offset(uint32_t swizzle_mode, uint32_t element, uint32_t bloc
 
 std::optional<uint32_t> tile_offset(const ImageAddressConfig &config, const ImageLayout &layout,
                                     uint32_t block_bits, uint32_t element, uint32_t x, uint32_t y,
-                                    uint32_t z) {
+                                    uint32_t z, uint32_t sample = 0) {
   const uint32_t swizzle_mode = layout.swizzle_mode;
+  if (layout.samples > 1) {
+    const bool rb_plus = config.arch == ROCJITSU_CODE_ARCH_RDNA2;
+    const uint32_t device = 2 * uint32_t{rb_plus} + (config.gb_addr_config != 0);
+    const uint32_t kind = (swizzle_mode >= 28 ? 2u : 0u) + ((swizzle_mode & 3u) == 3u);
+    const auto &parts =
+        kGfx10MsaaPatterns[device][kind][std::countr_zero(layout.samples) - 1][element];
+    const uint64_t coordinates =
+        x | (uint64_t{y} << 16) | (uint64_t{z} << 32) | (uint64_t{sample} << 48);
+    uint32_t offset = 0;
+    for (uint32_t bit = 0; bit < block_bits; ++bit) {
+      const uint64_t mask = bit < 8    ? kGfx10MsaaBits0[parts[0]][bit]
+                            : bit < 12 ? kGfx10MsaaBits8[parts[1]][bit - 8]
+                            : bit < 16 ? kGfx10MsaaBits12[parts[2]][bit - 12]
+                                       : kGfx10MsaaBits16[parts[3]][bit - 16];
+      offset |= (std::popcount(coordinates & mask) & 1u) << bit;
+    }
+    return offset;
+  }
   if (arch_is_cdna_4_or_lower(config.arch)) {
     // The shipped CDNA image targets expose this topology; other register
     // configurations require independent layout qualification.
@@ -363,6 +383,14 @@ std::optional<uint32_t> tile_offset(const ImageAddressConfig &config, const Imag
   }
   if (config.arch == ROCJITSU_CODE_ARCH_RDNA4)
     return permutation(kGfx12Tiles[element], block_bits, x, y);
+  if (swizzle_mode == 30) {
+    // The GFX11 256 KiB display equation was qualified for this topology.
+    if (config.gb_addr_config != 0x545 ||
+        (config.arch != ROCJITSU_CODE_ARCH_RDNA3 && config.arch != ROCJITSU_CODE_ARCH_RDNA3_5))
+      return std::nullopt;
+    return gfx11_large_tile_offset(x, y, layout.element_bytes, block_bits, false) ^
+           gfx11_image_slice_xor(z, layout.element_bytes, swizzle_mode);
+  }
   const bool rdna1 = config.arch == ROCJITSU_CODE_ARCH_RDNA1;
   const bool rdna2 = config.arch == ROCJITSU_CODE_ARCH_RDNA2;
   // RB+ keeps the GFX10 display ordering except for the 32-bit microtile.
@@ -542,11 +570,17 @@ MipAddress linear_mip_address(const ImageAddressConfig &config, const ImageLayou
                               uint32_t mip) {
   const bool gfx9 = arch_is_cdna_4_or_lower(config.arch);
   const bool gfx12 = config.arch == ROCJITSU_CODE_ARCH_RDNA4;
+  const bool gfx11 =
+      config.arch == ROCJITSU_CODE_ARCH_RDNA3 || config.arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+  // The extended mip-zero pitch is the storage width from which smaller linear mips shrink.
+  const uint32_t storage_width = (gfx11 || gfx12) && layout.dimensions == 2 && layout.depth == 1
+                                     ? std::max(layout.width, layout.pitch)
+                                     : layout.width;
   const uint32_t element_bytes = layout.element_bytes;
   uint64_t offset = 0, slice = 0;
   uint32_t row_pitch = 0;
   for (uint32_t mip_level = 0; mip_level < layout.mip_levels; ++mip_level) {
-    const uint32_t width = gfx9 ? layout.width : mip_extent(layout.width, mip_level);
+    const uint32_t width = gfx9 ? layout.width : mip_extent(storage_width, mip_level);
     const uint32_t height = mip_extent(layout.height, mip_level);
     const bool trim = gfx12 && mip_level == 0 && layout.dimensions != 3 && layout.depth == 1;
     const uint32_t allocated_pitch =
@@ -568,6 +602,13 @@ ImageAddressConfig default_image_address_config(rj_code_arch_t arch) {
   return {arch, kmd::gb_addr_config_for_arch(arch)};
 }
 
+bool supports_linear_image_pitch(rj_code_arch_t arch, uint32_t width, uint32_t pitch,
+                                 uint32_t element_bytes) {
+  return !pitch ||
+         (pitch >= width && (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4 ||
+                             (uint64_t{pitch} * element_bytes) % 256 == 0));
+}
+
 std::optional<ImageAddressing> ImageAddressing::prepare(const ImageAddressConfig &config,
                                                         const ImageLayout &layout, uint32_t mip) {
   if (!arch_has_image_memory_instructions(config.arch) || layout.dimensions < 1 ||
@@ -579,6 +620,19 @@ std::optional<ImageAddressing> ImageAddressing::prepare(const ImageAddressConfig
               {layout.width, layout.height, layout.dimensions == 3 ? layout.depth : 1u}))) ||
       !std::has_single_bit(layout.element_bytes) || layout.element_bytes > 16)
     return std::nullopt;
+  if (!std::has_single_bit(layout.samples) || layout.samples > 8)
+    return std::nullopt;
+  if (layout.samples != 1) {
+    const bool gfx10 =
+        config.arch == ROCJITSU_CODE_ARCH_RDNA1 || config.arch == ROCJITSU_CODE_ARCH_RDNA2;
+    const bool variable = config.arch == ROCJITSU_CODE_ARCH_RDNA2 &&
+                          (layout.swizzle_mode == 28 || layout.swizzle_mode == 31);
+    if (!gfx10 || (layout.swizzle_mode != 24 && layout.swizzle_mode != 27 && !variable) ||
+        layout.dimensions != 2 || layout.mip_levels != 1 ||
+        (config.gb_addr_config &&
+         config.gb_addr_config != (config.arch == ROCJITSU_CODE_ARCH_RDNA1 ? 0x44u : 0x444u)))
+      return std::nullopt;
+  }
   ImageAddressing result;
   result.config_ = config;
   result.layout_ = layout;
@@ -588,20 +642,18 @@ std::optional<ImageAddressing> ImageAddressing::prepare(const ImageAddressConfig
   const uint32_t element_bytes = layout.element_bytes, swizzle_mode = layout.swizzle_mode;
   MipAddress allocation;
   if (swizzle_mode == 0) {
+    const bool extended_2d =
+        layout.dimensions == 2 && layout.depth == 1 &&
+        (config.arch == ROCJITSU_CODE_ARCH_RDNA3 || config.arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+         config.arch == ROCJITSU_CODE_ARCH_RDNA4);
+    if ((layout.mip_levels == 1 || extended_2d) &&
+        !supports_linear_image_pitch(config.arch, layout.width, layout.pitch, element_bytes))
+      return std::nullopt;
     if (layout.mip_levels > 1 || !layout.pitch) {
       allocation = linear_mip_address(config, layout, mip);
     } else {
-      if (layout.pitch && layout.pitch < layout.width)
-        return std::nullopt;
-      // Patched descriptors on gfx1100 and gfx1201 establish rounding to the
-      // row quantum. Misaligned pitches on other generations, including
-      // RDNA3.5 (gfx1151), still need hardware qualification.
       const uint32_t row_alignment =
           config.arch == ROCJITSU_CODE_ARCH_RDNA4 ? 128 / element_bytes : 256 / element_bytes;
-      const bool rounds_pitch =
-          config.arch == ROCJITSU_CODE_ARCH_RDNA3 || config.arch == ROCJITSU_CODE_ARCH_RDNA4;
-      if (!rounds_pitch && layout.pitch % row_alignment != 0)
-        return std::nullopt;
       allocation.pitch = util::align_up<uint64_t>(layout.pitch, row_alignment);
       allocation.slice = uint64_t{layout.height} * allocation.pitch * element_bytes;
     }
@@ -609,13 +661,14 @@ std::optional<ImageAddressing> ImageAddressing::prepare(const ImageAddressConfig
     const bool gfx12 = config.arch == ROCJITSU_CODE_ARCH_RDNA4;
     const bool gfx9 = arch_is_cdna_4_or_lower(config.arch);
     const bool supported =
-        gfx12  ? swizzle_mode <= 4
-        : gfx9 ? swizzle_mode == 1 || swizzle_mode == 2 || swizzle_mode == 5 || swizzle_mode == 6 ||
-                     swizzle_mode == 9 || swizzle_mode == 10 || swizzle_mode == 21 ||
-                     swizzle_mode == 22 || swizzle_mode == 25 || swizzle_mode == 26
-               : swizzle_mode == 2 || swizzle_mode == 6 || swizzle_mode == 10 ||
-                     swizzle_mode == 22 || swizzle_mode == 24 || swizzle_mode == 26 ||
-                     swizzle_mode == 27 || swizzle_mode == 28 || swizzle_mode == 31;
+        gfx12 ? swizzle_mode <= 4
+        : gfx9
+            ? swizzle_mode == 1 || swizzle_mode == 2 || swizzle_mode == 5 || swizzle_mode == 6 ||
+                  swizzle_mode == 9 || swizzle_mode == 10 || swizzle_mode == 21 ||
+                  swizzle_mode == 22 || swizzle_mode == 25 || swizzle_mode == 26
+            : swizzle_mode == 2 || swizzle_mode == 6 || swizzle_mode == 10 || swizzle_mode == 22 ||
+                  swizzle_mode == 24 || swizzle_mode == 26 || swizzle_mode == 27 ||
+                  swizzle_mode == 28 || swizzle_mode == 30 || swizzle_mode == 31;
     if (!supported || (layout.dimensions == 1 && !gfx12) ||
         (!gfx12 && layout.dimensions == 3 &&
          ((swizzle_mode & 3) == 1 || (!gfx9 && (swizzle_mode & 3) == 2))) ||
@@ -628,8 +681,14 @@ std::optional<ImageAddressing> ImageAddressing::prepare(const ImageAddressConfig
         : swizzle_mode >= 28                                                                   ? 18
                                                                                                : 16;
     const uint32_t element = std::countr_zero(element_bytes);
-    result.block_width_ = 1u << ((result.block_bits_ - element + 1) / 2);
-    result.block_height_ = 1u << ((result.block_bits_ - element) / 2);
+    if (layout.samples > 1 && swizzle_mode >= 28)
+      result.block_bits_ = 14 + (config.gb_addr_config & 7u);
+    const uint32_t sample_bits = std::countr_zero(layout.samples);
+    const uint32_t texel_bits = result.block_bits_ - element - sample_bits;
+    const bool wide = !(sample_bits & 1u) || (result.block_bits_ & 1u);
+    const uint32_t x_bits = (texel_bits + wide) / 2;
+    result.block_width_ = 1u << x_bits;
+    result.block_height_ = 1u << (texel_bits - x_bits);
     if (layout.mip_levels > 1) {
       if (gfx9 && result.block_bits_ == 8)
         return std::nullopt;
@@ -641,7 +700,7 @@ std::optional<ImageAddressing> ImageAddressing::prepare(const ImageAddressConfig
                              : util::align_up<uint64_t>(layout.width, result.block_width_);
       allocation.slice = uint64_t{allocation.pitch} *
                          util::align_up<uint64_t>(layout.height, result.block_height_) *
-                         element_bytes;
+                         element_bytes * layout.samples;
     }
     if (allocation.pitch < (layout.mip_levels == 1 ? layout.width : 1) ||
         allocation.pitch % result.block_width_ != 0 ||
@@ -661,15 +720,15 @@ bool ImageAddressing::contains(uint32_t x, uint32_t y, uint32_t z) const {
   return x < width_ && y < height_ && z < depth_;
 }
 
-uint64_t ImageAddressing::byte_offset(uint32_t x, uint32_t y, uint32_t z) const {
-  assert(contains(x, y, z));
+uint64_t ImageAddressing::byte_offset(uint32_t x, uint32_t y, uint32_t z, uint32_t sample) const {
+  assert(contains(x, y, z) && sample < layout_.samples);
   const uint32_t element_bytes = layout_.element_bytes;
   if (layout_.swizzle_mode == 0)
     return uint64_t{z} * slice_ + offset_ + (uint64_t{y} * pitch_ + x) * element_bytes;
   const bool gfx9 = arch_is_cdna_4_or_lower(config_.arch);
   const uint32_t element = std::countr_zero(element_bytes);
-  const uint32_t within =
-      *tile_offset(config_, layout_, block_bits_, element, x + tail_x_, y + tail_y_, gfx9 ? 0 : z);
+  const uint32_t within = *tile_offset(config_, layout_, block_bits_, element, x + tail_x_,
+                                       y + tail_y_, gfx9 ? 0 : z, sample);
   const uint64_t block = uint64_t{y / block_height_} * (pitch_ / block_width_) + x / block_width_;
   const uint32_t pixel_offset = within | tail_bits_;
   return uint64_t{z} * slice_ + offset_ + (block << block_bits_) + pixel_offset;

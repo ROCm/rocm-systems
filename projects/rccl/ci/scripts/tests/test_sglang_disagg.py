@@ -48,8 +48,7 @@ class TempWork(unittest.TestCase):
         path = tm.generate_manifest(
             WORKLOAD, CONFIG, RUBY, f"image-{phase}", CONFIG["required_nodes"],
             self.work, run_dir=run_dir,
-            dockerfile_name=(tm.SGLANG_BASELINE_DOCKERFILE if phase == tm.BASELINE
-                             else tm.OVERLAY_DOCKERFILE),
+            dockerfile_name=tm.OVERLAY_DOCKERFILES[phase],
         )
         return json.loads(path.read_text())
 
@@ -103,7 +102,7 @@ class GenerateManifestTest(TempWork):
         config = tm.WORKLOAD_CONFIGS["llama-3.1-70b-training"]
         (self.work / "scripts" / "primus_megatron-lm").mkdir()
         path = tm.generate_manifest("llama-3.1-70b-training", config, RUBY, "img", 2,
-                                    self.work, pull_only=True)
+                                    self.work)
         opts = json.loads(path.read_text())["built_models"]["overlay"][
             "additional_docker_run_options"]
         self.assertIn("libibverbs", opts)
