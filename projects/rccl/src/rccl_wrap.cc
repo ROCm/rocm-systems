@@ -1254,13 +1254,20 @@ inline size_t ddaTierCapFromTable(const rcclArchThresholds* table, const size_t*
   return funcThresholdFromTable(totals, func);
 }
 
-// The table's LL tier cap. ReduceScatter on comms of at least ddaRsLLLargeCommMinRanks ranks runs to
-// ddaRsLLLargeCommMaxBytes when that is higher. A 0 cap leaves the tier off.
-inline size_t ddaLLTierCapFromTable(const rcclArchThresholds* table, ncclFunc_t func, int nRanks) {
-  const size_t cap = ddaTierCapFromTable(table, table->ddaLLMax, table->ddaLLMaxPerRank, func, nRanks);
-  const bool largeComm = table->ddaRsLLLargeCommMinRanks > 0 && nRanks >= table->ddaRsLLLargeCommMinRanks;
+// ddaTierCapFromTable, which ReduceScatter on comms of at least largeCommMinRanks ranks runs to largeCommMaxBytes
+// when that is higher. A 0 cap leaves the tier off.
+inline size_t ddaTierCapWithRsLargeComm(const rcclArchThresholds* table, const size_t* totals, const size_t* perRank,
+                                        ncclFunc_t func, int nRanks, int largeCommMinRanks, size_t largeCommMaxBytes) {
+  const size_t cap = ddaTierCapFromTable(table, totals, perRank, func, nRanks);
+  const bool largeComm = largeCommMinRanks > 0 && nRanks >= largeCommMinRanks;
   if (func != ncclFuncReduceScatter || !largeComm || cap == 0) return cap;
-  return std::max(cap, table->ddaRsLLLargeCommMaxBytes);
+  return std::max(cap, largeCommMaxBytes);
+}
+
+// The table's LL tier cap, with the ReduceScatter large-comm window (ddaRsLLLargeComm*).
+inline size_t ddaLLTierCapFromTable(const rcclArchThresholds* table, ncclFunc_t func, int nRanks) {
+  return ddaTierCapWithRsLargeComm(table, table->ddaLLMax, table->ddaLLMaxPerRank, func, nRanks,
+                                   table->ddaRsLLLargeCommMinRanks, table->ddaRsLLLargeCommMaxBytes);
 }
 
 inline size_t rcclDdaLLThresholdTab(const rcclArchThresholds* table, ncclFunc_t func, int nRanks) {
@@ -1322,13 +1329,10 @@ static size_t rcclCeArRegChunkElems(const ncclComm* comm, size_t count, ncclData
   return ncclCeAllReduceChunkBytes(shardBytes, slotChunkBytes) / eltSize;
 }
 
-// The table's LL128 tier cap. ReduceScatter on comms of at least ddaRsLL128LargeCommMinRanks ranks runs to
-// ddaRsLL128LargeCommMaxBytes when that is higher. A 0 cap leaves the tier off.
+// The table's LL128 tier cap, with the ReduceScatter large-comm window (ddaRsLL128LargeComm*).
 inline size_t ddaLL128TierCapFromTable(const rcclArchThresholds* table, ncclFunc_t func, int nRanks) {
-  const size_t cap = ddaTierCapFromTable(table, table->ddaLL128Max, table->ddaLL128MaxPerRank, func, nRanks);
-  const bool largeComm = table->ddaRsLL128LargeCommMinRanks > 0 && nRanks >= table->ddaRsLL128LargeCommMinRanks;
-  if (func != ncclFuncReduceScatter || !largeComm || cap == 0) return cap;
-  return std::max(cap, table->ddaRsLL128LargeCommMaxBytes);
+  return ddaTierCapWithRsLargeComm(table, table->ddaLL128Max, table->ddaLL128MaxPerRank, func, nRanks,
+                                   table->ddaRsLL128LargeCommMinRanks, table->ddaRsLL128LargeCommMaxBytes);
 }
 
 // Returns the LL128 size cap for this collective, or 0 if the tier is disabled.

@@ -661,10 +661,10 @@ TEST_F(DdaReduceScatterFabricSpreadLL, TornLineWaitsForBothHalves) {
   }
 }
 
-// An abort with one peer published still sends, then leaves recvbuff untouched and advances the epoch.
+// An abort with only row 1 published, which the fold threads poll, so only the abort broadcast keeps them off recvbuff.
 TEST_F(DdaReduceScatterFabricSpreadLL, AbortLeavesRecvbuffAndAdvancesEpoch) {
   ASSERT_NO_FATAL_FAILURE(reference<float>(kSelf, 4));
-  publishPeer((kSelf + 2) % kRanks);
+  publishPeer((kSelf + 1) % kRanks);
   *peers_.AbortFlag() = 1;
   ASSERT_NO_FATAL_FAILURE(launchSpread(kLaunchGrid, dRecv_));
   ASSERT_TRUE(finishes()) << "kernel ignored the abort flag";
@@ -694,6 +694,19 @@ TEST_F(DdaReduceScatterFabricSpreadLL, InPlaceMatchesOutOfPlace) {
   ASSERT_NO_FATAL_FAILURE(launchSpread(kThreeBlocks, mine));
   ASSERT_TRUE(finishes()) << "spread kernel did not finish in place";
   ASSERT_NO_FATAL_FAILURE(expectRecv(mine, kPackets));
+  ASSERT_NO_FATAL_FAILURE(expectSent());
+  expectEpochAdvanced();
+}
+
+// Epoch cells at 0xffffffff wrap to the 0 sentinel, which ddaNextLLEpoch skips to kFlag, so the run is unchanged.
+TEST_F(DdaReduceScatterFabricSpreadLL, EpochWrapSkipsTheZeroSentinel) {
+  ASSERT_NO_FATAL_FAILURE(reference<float>(kSelf, 7));
+  const std::vector<uint32_t> epoch(kEpochCells, 0xffffffffu);
+  ASSERT_EQ(hipMemcpy(dEpoch_, epoch.data(), kEpochCells * sizeof(uint32_t), hipMemcpyHostToDevice), hipSuccess);
+  publishAll();
+  ASSERT_NO_FATAL_FAILURE(launchSpread(kLaunchGrid, dRecv_));
+  ASSERT_TRUE(finishes()) << "spread kernel did not finish across the epoch wrap";
+  ASSERT_NO_FATAL_FAILURE(expectRecv(dRecv_, kPackets));
   ASSERT_NO_FATAL_FAILURE(expectSent());
   expectEpochAdvanced();
 }

@@ -49,8 +49,8 @@ __host__ __device__ constexpr size_t ddaLLRsSpreadSlicePkts(size_t nPk, unsigned
   return (pkts + kDdaLLRsSpreadLinePkts - 1) / kDdaLLRsSpreadLinePkts * kDdaLLRsSpreadLinePkts;
 }
 
-// LL reduce-scatter on a grid over the whole message. Each block owns the same slice of every shard on all ranks and
-// its threads share (peer, packet) units, so a thread carries about one unit instead of all nRanks - 1 peers.
+// LL reduce-scatter over the whole message. Each block's threads split the (peer, packet) units of its slice of
+// every shard.
 template <typename T, int NRANKS_CT>
 __launch_bounds__(kDdaLLRsSpreadThreads)
   __global__ void ddaReduceScatterFabricSpreadLL(T* const* __restrict__ peerScratch, // ddaPeerPtrsDev: scratch bases
@@ -88,8 +88,8 @@ __launch_bounds__(kDdaLLRsSpreadThreads)
   // Rank offset of unit u in runs of run32 packets per rank, counted from selfRank + 1.
   auto unitOff = [&](size_t u, uint32_t run32) { return 1 + (int)((uint32_t)u / run32); };
 
-  // Unit u of phase 1: its destination without the bank offset and its payload from the peer's chunk of sendbuff.
-  // A unit past peerUnits takes unit 0's place, so every slot loads with no per-lane branch and repeats unit 0's store.
+  // Phase-1 unit u: destination before the bank offset, and payload. A unit past peerUnits repeats unit 0, so
+  // lanes load and store without a branch.
   auto sendUnit = [&](size_t u, bool& valid, LLPacket16*& dst, uint32_t& d0, uint32_t& d1) {
     valid = u < peerUnits;
     const uint32_t v = valid ? (uint32_t)u : 0u;
@@ -137,8 +137,8 @@ __launch_bounds__(kDdaLLRsSpreadThreads)
       }
     }
   }
-  // Orders every thread's epoch read before thread 0's ddaSetLLEpoch, and thread 0's ldsAborted reset before any
-  // phase-2 abort. The LDS-only barrier does not wait on global loads, so the epoch read gets an explicit wait.
+  // Orders epoch reads before ddaSetLLEpoch and the ldsAborted reset before phase 2. The LDS-only barrier ignores
+  // global loads, hence the wait.
 #if defined(__gfx1250__) || defined(__gfx1250_strict__)
   asm volatile("s_wait_loadcnt 0x0\n\ts_wait_kmcnt 0x0" ::: "memory");
 #endif

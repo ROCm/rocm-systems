@@ -33,12 +33,11 @@ struct DdaLLRsGeom {
   bool spread;
 };
 
-// The launch grid, which ncclReduceScatterDdaFabricLLBlocks reports: a thread on each packet of one shard for the shard
-// kernel, of the whole message for the spread kernel.
+// The grid ncclReduceScatterDdaFabricLLBlocks reports: a thread per packet of a shard, or of the message when spread.
 static inline DdaLLRsGeom ddaReduceScatterFabricLLGeom(const ncclComm* comm, size_t shardBytes) {
   const bool spread = comm->nRanks >= dda::common::kDdaLLRsSpreadMinRanks;
   const size_t nPk = shardBytes >> 3; // 8 payload bytes per packet
-  const unsigned threads = spread ? (unsigned)dda::common::kDdaLLRsSpreadThreads : 256u;
+  const unsigned threads = (unsigned)dda::common::kDdaLLRsSpreadThreads;
   int nBlocksMax = comm->ddaFabricMaxBlocks;
   if (nBlocksMax < 1) {
     nBlocksMax = 1;
