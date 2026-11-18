@@ -329,8 +329,8 @@ constexpr rocprofiler_agent_t default_agent =
                         .num_cp_queues              = 0,
                         .max_engine_clk_ccompute    = 0,
                         .max_engine_clk_fcompute    = 0,
+                        .sdma_fw_version            = {},
                         .fw_version                 = {},
-                        .gfxip_version              = {},
                         .capability                 = {},
                         .cu_per_engine              = 0,
                         .max_waves_per_cu           = 0,
@@ -353,7 +353,8 @@ constexpr rocprofiler_agent_t default_agent =
                         .logical_node_id            = 0,
                         .logical_node_type_id       = 0,
                         .runtime_visibility         = {0, 0, 0, 0, 0},
-                        .uuid = static_cast<rocprofiler_uuid_t>(agent::uuid_view_t{})};
+                        .uuid = static_cast<rocprofiler_uuid_t>(agent::uuid_view_t{}),
+                        .gfxip_version              = {}};
 
 RocAttachDispatchTable**
 get_attach_table()
