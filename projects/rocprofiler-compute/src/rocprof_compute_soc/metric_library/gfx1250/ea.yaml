@@ -1,11 +1,11 @@
 ea.dram_rd_bw:
-  name: DRAM Bandwidth - Read
+  name: DRAM Read Bandwidth
   formula: 32 * SUM(GC_EA_SE_SARB_DRAM_RD_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: The number of bytes per second read from HBM (DRAM) through the EA.
   peak: $hbmBandwidth
 ea.dram_wr_bw:
-  name: DRAM Bandwidth - Write
+  name: DRAM Write Bandwidth
   formula: 32 * SUM(GC_EA_SE_SARB_DRAM_WR_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: The number of bytes per second written to HBM (DRAM) through the EA.
@@ -21,42 +21,42 @@ ea.gl2_to_dram_wr_lat:
   unit: Cycles
   description: Average latency to write data from GL2 to HBM.
 ea.gmi_bw_rd:
-  name: GMI Bandwidth - Read
+  name: GMI Read Bandwidth
   formula: 32 * SUM(GC_EA_SE_SARB_GMI_RD_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
     The number of bytes per second read from peer GPU HBM over Infinity Fabric through
     the EA.
 ea.gmi_bw_wr:
-  name: GMI Bandwidth - Write
+  name: GMI Write Bandwidth
   formula: 32 * SUM(GC_EA_SE_SARB_GMI_WR_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
     The number of bytes per second written to peer GPU HBM over Infinity Fabric through
     the EA.
 ea.hdm_bw_rd:
-  name: HDM Bandwidth - Read
+  name: HDM Read Bandwidth
   formula: 32 * SUM(GC_EA_SE_SARB_HDM_RD_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
     The number of bytes per second read from Host Data Memory (unified memory pages)
     through the EA.
 ea.hdm_bw_wr:
-  name: HDM Bandwidth - Write
+  name: HDM Write Bandwidth
   formula: 32 * SUM(GC_EA_SE_SARB_HDM_WR_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
     The number of bytes per second written to Host Data Memory (unified memory pages)
     through the EA.
 ea.io_bw_rd:
-  name: IO Bandwidth - Read
+  name: IO Read Bandwidth
   formula: 32 * SUM(GC_EA_SE_SARB_IO_RD_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
     The number of bytes per second read from host CPU memory (pinned or mapped) through
     the EA.
 ea.io_bw_wr:
-  name: IO Bandwidth - Write
+  name: IO Write Bandwidth
   formula: 32 * SUM(GC_EA_SE_SARB_IO_WR_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
