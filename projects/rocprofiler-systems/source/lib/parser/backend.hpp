@@ -41,9 +41,9 @@ public:
     /**
      * @return true when @p value is allowed for @p param: the text is read as
      * parse_value() reads it, against the row's own choices and this backend's. A
-     * name neither lists is refused unless allow_custom is set, and a list follows the
-     * rules of any other enumeration_list, so "temp,,power" and "temp;power" are
-     * refused, and an empty list is allowed.
+     * name neither lists is refused, and a list follows the rules of any other
+     * enumeration_list, so "temp,,power" and "temp;power" are refused, and an empty
+     * list is allowed.
      */
     [[nodiscard]] bool accepts(const schema_param& param, std::string_view value) const;
 

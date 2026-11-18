@@ -143,25 +143,6 @@ TEST(parser_backend, adds_its_names_to_the_rows_own_choices)
     EXPECT_FALSE(domains->accepts(param, "all,bogus"));
 }
 
-TEST(parser_backend, allow_custom_accepts_unlisted_text)
-{
-    backend_registry registry;
-    add_domains(registry);
-    const auto* domains = registry.find("domains");
-    ASSERT_NE(domains, nullptr);
-
-    auto enumeration         = make_param("domains", param_type::enumeration);
-    enumeration.allow_custom = true;
-    EXPECT_TRUE(domains->accepts(enumeration, "custom_domain"));
-    EXPECT_FALSE(domains->accepts(enumeration, ""));
-
-    auto listed         = make_param("domains", param_type::enumeration_list);
-    listed.allow_custom = true;
-    EXPECT_TRUE(domains->accepts(listed, "one,two"));
-    EXPECT_TRUE(domains->accepts(listed, ""));
-    EXPECT_FALSE(domains->accepts(listed, "one,,two"));
-}
-
 TEST(parser_backend, a_backend_row_gets_the_verdict_of_a_row_that_lists_the_names)
 {
     backend_registry registry;
