@@ -108,6 +108,9 @@ include(rocprofiler_formatting) # formatting
 include(rocprofiler_linting) # clang-tidy
 include(rocprofiler_config_interfaces) # configure interface libraries
 
+# Defined in every build, not only with tests, so code outside the tests can use the list.
+include("${PROJECT_SOURCE_DIR}/tests/cmake/rocprofiler_default_gpu_targets.cmake")
+
 if(ROCPROFILER_BUILD_TESTS)
     # Source-level unit tests are configured before tests/common sets test GPU targets.
     include("${PROJECT_SOURCE_DIR}/tests/cmake/rocprofiler_test_gpu_targets.cmake")
