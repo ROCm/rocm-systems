@@ -1,0 +1,7 @@
+remove:
+  - hbm_read_bandwidth
+  - hbm_write_bandwidth
+hbm_read_bytes:
+  formula: TCC_EA_RDREQ_32B_sum * 32 + (TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) * 64
+hbm_write_bytes:
+  formula: TCC_EA_WRREQ_64B_sum * 64 + (TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) * 32

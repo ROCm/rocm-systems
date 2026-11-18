@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -86,6 +87,65 @@ struct WaveDebugFixture {
     return wf;
   }
 };
+
+// Scalar FP ignores EXEC and delivers a fresh trap even for an already sticky cause.
+TEST(WaveDebugTest, Gfx12ScalarCompatibilityDeliversInvalidAfterCommit) {
+  WaveDebugFixture f(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
+  const auto words = rdna4::build_sop2(rdna4::kSMulF32Sop2, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 2});
+  f.gpu_mem.write32(kKernelAddr, words[0]);
+  f.gpu_mem.write32(kKernelAddr + 4, words[0]);
+  auto *wave = f.dispatch(kKernelAddr);
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(0);
+  wave->set_mode_raw(0xf0);
+  const auto base = wave->sgpr_alloc().base;
+  f.cu->write_sgpr(base, 0x7f800000U);
+  f.cu->write_sgpr(base + 1, 0);
+  int traps = 0;
+  f.cu->set_alu_exception_handler([&](amdgpu::Wavefront &) {
+    ++traps;
+    const auto result = f.cu->read_sgpr(base + 2);
+    EXPECT_EQ(result & 0x7f800000U, 0x7f800000U);
+    EXPECT_NE(result & 0x7fffffU, 0U);
+    return false;
+  });
+  wave->set_gfx12_trap_ctrl_raw(0);
+  f.cu->step();
+  EXPECT_EQ(wave->trapsts(), 1U);
+  EXPECT_EQ(traps, 0);
+  f.cu->write_sgpr(base + 2, 0); // Require the trapping multiply to publish a fresh NaN.
+  wave->set_gfx12_trap_ctrl_raw(1);
+  f.cu->step();
+  EXPECT_EQ(wave->trapsts(), 1U);
+  EXPECT_EQ(traps, 1);
+}
+
+TEST(WaveDebugTest, TrapDrainsBeforeEnteringPrivilegedHandler) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
+                    ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA1,
+                    ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
+                    ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(arch);
+    WaveDebugFixture f(arch);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
+    const bool opcode16 = arch == ROCJITSU_CODE_ARCH_CDNA5 || arch == ROCJITSU_CODE_ARCH_RDNA3 ||
+                          arch == ROCJITSU_CODE_ARCH_RDNA3_5 || arch == ROCJITSU_CODE_ARCH_RDNA4;
+    f.gpu_mem.write32(kKernelAddr, opcode16 ? kGfx12STrap : kSTrapSeven);
+    f.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
+      return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerAddr, 0x3000, true};
+    });
+    auto *wave = f.dispatch(kKernelAddr);
+    ASSERT_NE(wave, nullptr);
+    wave->wait_counters().increment(amdgpu::WaitCounterType::VMCNT);
+    f.cu->step();
+    EXPECT_EQ(wave->pc, kKernelAddr);
+    EXPECT_FALSE(wave->in_trap_handler());
+    wave->release_wait_counter(amdgpu::WaitCounterType::VMCNT);
+    f.cu->step();
+    ASSERT_EQ(wave->pc, kTrapHandlerAddr);
+  }
+}
 
 TEST(WaveDebugTest, Gfx10TrapDrainsBeforeEnteringPrivilegedHandler) {
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
@@ -286,6 +346,28 @@ TEST(WaveDebugTest, Gfx1151PrivilegedDestinations) {
   EXPECT_EQ(fx.cu->read_sgpr(wf->sgpr_alloc().base + 2), 0u);
   EXPECT_EQ(wf->ttmp(0), 0x12345678u);
   EXPECT_FALSE(wf->read_scc());
+}
+
+TEST(WaveDebugTest, Gfx1151SopkWaitMasksImmediateAndReplacesEarlierTarget) {
+  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA3_5, 1, 1);
+  ASSERT_TRUE(fx.cu);
+  fx.gpu_mem.write32(kKernelAddr, 0xbcfc0040);      // s_waitcnt_vmcnt null, 0x40
+  fx.gpu_mem.write32(kKernelAddr + 4, 0xbf800000);  // s_nop 0
+  fx.gpu_mem.write32(kKernelAddr + 8, 0xbd7c0000);  // s_waitcnt_expcnt null, 0
+  fx.gpu_mem.write32(kKernelAddr + 12, 0xbf800000); // s_nop 0
+  auto *wf = fx.dispatch(kKernelAddr);
+  ASSERT_NE(wf, nullptr);
+  wf->wait_counters().vmcnt = 1;
+  fx.cu->step();
+  EXPECT_EQ(wf->state(), amdgpu::WfState::WAITCNT);
+  EXPECT_EQ(wf->wait_target().vmcnt, 0u);
+  wf->wait_counters().vmcnt = 0;
+  fx.cu->step();
+  wf->wait_counters().vmcnt = 1;
+  fx.cu->step();
+  ASSERT_EQ(wf->state(), amdgpu::WfState::RUNNING);
+  fx.cu->step();
+  EXPECT_EQ(wf->pc, kKernelAddr + 16);
 }
 
 TEST(WaveDebugTest, Gfx1151IllegalPaddingEntersPrivilegedHandler) {

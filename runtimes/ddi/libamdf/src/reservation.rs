@@ -50,20 +50,24 @@ impl Reservation {
     }
 }
 
-fn capabilities(page: u64) -> amdf_memory_reservation_capabilities_t {
-    amdf_memory_reservation_capabilities_t {
+fn capabilities() -> Result<amdf_memory_reservation_capabilities_t, u64> {
+    let caps = host::capabilities()
+        .map_err(|error| native(&error))?
+        .reservation
+        .ok_or(UNSUPPORTED)?;
+    Ok(amdf_memory_reservation_capabilities_t {
         supported_access: AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
         required_access: AMDF_MEMORY_ACCESS_READ,
         address_domain_ordinal: AMDF_ADDRESS_DOMAIN_ORDINAL_NONE,
-        maximum_byte_length: (isize::MAX as u64) & !(page - 1),
-        reservation_granularity: page,
-        maximum_alignment: 1_u64 << (usize::BITS - 2),
-        mapping_granularity: page,
-        minimum_address: page,
-        maximum_address: usize::MAX as u64,
+        maximum_byte_length: caps.maximum_size,
+        reservation_granularity: caps.reservation_granularity,
+        maximum_alignment: caps.maximum_alignment,
+        mapping_granularity: caps.mapping_granularity,
+        minimum_address: caps.minimum_address,
+        maximum_address: caps.maximum_address,
         required_source_flags: AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE,
         ..Default::default()
-    }
+    })
 }
 
 pub(crate) unsafe extern "C" fn host_capabilities(
@@ -76,8 +80,7 @@ pub(crate) unsafe extern "C" fn host_capabilities(
         if instance.closing || !instance.native.is_current_process() {
             return Err(PRECONDITION);
         }
-        let page = host::host_page_size().map_err(|error| native(&error))?;
-        out.publish(capabilities(page));
+        out.publish(capabilities()?);
         Ok(())
     })
 }
@@ -115,7 +118,7 @@ pub(crate) unsafe extern "C" fn create(
         }
         let access = accesses[0];
         let page = host::host_page_size().map_err(|error| native(&error))?;
-        let caps = capabilities(page);
+        let caps = capabilities()?;
         if access.address_domain_ordinal != AMDF_ADDRESS_DOMAIN_ORDINAL_NONE
             || access.access & AMDF_MEMORY_ACCESS_READ == 0
             || access.access & !caps.supported_access != 0
@@ -127,18 +130,14 @@ pub(crate) unsafe extern "C" fn create(
         {
             return Err(INVALID);
         }
-        let granularity = if access.mapping_granularity == 0 {
-            page
-        } else {
-            access.mapping_granularity
-        };
-        if !granularity.is_power_of_two() || granularity < page {
-            return Err(INVALID);
-        }
         let slot = instance.owner_slot::<Reservation>()?;
-        let native_owner =
-            host::HostReservation::reserve(info.byte_length, info.minimum_alignment.max(page))
-                .map_err(|error| native(&error))?;
+        let native_owner = host::HostReservation::reserve(
+            info.byte_length,
+            info.minimum_alignment.max(page),
+            access.mapping_granularity,
+        )
+        .map_err(|error| native(&error))?;
+        let granularity = native_owner.info().mapping_granularity;
         let address = u64::try_from(native_owner.info().address).map_err(|_| RANGE)?;
         register(&instance.children)?;
         let owner = slot.write(Reservation {
@@ -204,12 +203,14 @@ fn validate_update(
     update: amdf_memory_mapping_update_t,
 ) -> Result<(), u64> {
     let granularity = reservation.info.mapping_granularity;
-    if update.byte_length == 0
-        || update.target_byte_offset % granularity != 0
-        || update.target_byte_offset > reservation.info.byte_length
-        || update.byte_length > reservation.info.byte_length - update.target_byte_offset
-        || (update.byte_length % granularity != 0
-            && update.byte_length != reservation.info.byte_length - update.target_byte_offset)
+    if rocddi::memory::constraints::CheckedRange::new(
+        reservation.info.byte_length,
+        update.target_byte_offset,
+        update.byte_length,
+        granularity,
+        rocddi::memory::constraints::RangeTail::EndOfReservation,
+    )
+    .is_none()
     {
         return Err(INVALID);
     }

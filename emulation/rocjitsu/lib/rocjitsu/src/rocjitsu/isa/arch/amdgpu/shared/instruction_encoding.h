@@ -217,6 +217,52 @@ public:
   bool channel_enabled(unsigned channel) const { return components & (1u << channel); }
 };
 
+/// E8M0 scale location for a CDNA5 V_CVT_SCALE_PK widening conversion.
+struct CvtScaleSelection {
+  uint8_t lane_base;
+  uint8_t first_byte;
+  uint8_t byte_step;
+
+  // CDNA5 ISA 7.6.3, Table 36. Bit 0 selects the scale half-wave. Bit 2 selects
+  // Block16, where bit 1 chooses bytes 0/2 or 1/3 for the two data half-waves.
+  // In Block32, bit 1 chooses bytes 0/1 or 2/3. Bit 3 is ignored.
+  static constexpr CvtScaleSelection f4_f6(unsigned opsel) {
+    const auto base = static_cast<uint8_t>((opsel & 1) * 16);
+    const auto pair = static_cast<uint8_t>(opsel & 2);
+    if (opsel & 4)
+      return {base, static_cast<uint8_t>(pair / 2), 2};
+    return {base, pair, 1};
+  }
+
+  // Table 37. Bit 3 selects Block16. In Block32, bit 0 selects the scale half-wave
+  // and bits 1 and 2 contribute 2 and 1 to the byte index shared by both data halves.
+  // In Block16, bit 1 selects both the scale half-wave and byte pair. Bit 0 is
+  // ignored. Selectors 12..15 are reserved.
+  static constexpr CvtScaleSelection f8(unsigned opsel) {
+    if (opsel & 8) {
+      const unsigned half = (opsel >> 1) & 1;
+      return {static_cast<uint8_t>(half * 16), static_cast<uint8_t>(half * 2), 1};
+    }
+    return {static_cast<uint8_t>((opsel & 1) * 16),
+            static_cast<uint8_t>((opsel & 2) | ((opsel >> 2) & 1)), 0};
+  }
+
+  constexpr unsigned lane(unsigned data_lane) const { return (data_lane & ~16u) | lane_base; }
+  constexpr unsigned byte(unsigned data_lane) const {
+    return first_byte + ((data_lane & 16) ? byte_step : 0);
+  }
+};
+
+constexpr bool has_gfx11_plus_image_operands(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA4;
+}
+
+/// VMEM and EXP substitute v0 independently for each missing source DWORD.
+constexpr uint16_t gfx115_source_vgpr(uint32_t selector, uint32_t allocation) {
+  return selector < allocation ? static_cast<uint16_t>(selector) : 0;
+}
+
 /// @brief Decoded register-access modifiers.
 /// @details This view contains no wave state or values.
 struct RegisterModifiers {
@@ -227,11 +273,11 @@ struct RegisterModifiers {
   uint8_t memory_result_last_bytes = 0xf; // Last data word, excluding optional image status.
   /// A nonzero count bounds the payload masks. An appended status word owns all four bytes.
   uint8_t memory_result_payload_words = 0;
-  bool memory_result_has_status = false;
-  void set_packed_image_result(unsigned components, unsigned result_words) {
+  std::optional<CvtScaleSelection> cvt_scale; // Widening conversion scale in SRC1.
+  void set_packed_image_result(unsigned components) {
     if (components & 1u) {
       memory_result_last_bytes = 0x3;
-      memory_result_has_status = result_words > (components + 1) / 2;
+      memory_result_payload_words = (components + 1) / 2;
     }
   }
   const Operand *packed_store_data = nullptr; // Only the low half of the final word is stored.
@@ -241,16 +287,23 @@ struct RegisterModifiers {
   /// VADDR operand enabling coordinate tracking.
   const Operand *image_address = nullptr;
   std::optional<ShaderExportOperands> shader_export;
+  const Operand *image_resource = nullptr;
+  bool image_resource_info = false;
+  std::optional<uint8_t> image_transfer_dim;
+  bool image_reads_address = true;
+  /// Sampling controls select active lanes and implicit derivative inputs from the 2x2 quad.
+  std::optional<ImageSampleSources> image_sample_sources;
+  const Operand *image_store_data = nullptr;
   /// Coordinate VGPR selectors, including NSA selectors.
   ImageAddressRegisters image_coordinates{};
   /// Number of tracked coordinate components.
   uint8_t image_coordinate_count = 0;
   /// Coordinates occupy packed 16-bit halves.
   bool image_a16 = false;
-  /// VGPR words occupied by derivative inputs.
+  /// VGPR words before coordinates, including offset, bias, compare, and explicit gradients.
   uint8_t image_prefix_words = 0;
-  /// Prefix words whose upper half is unused by packed odd-dimensional derivatives.
-  uint16_t image_low_half_prefix = 0;
+  /// Prefix words in which only the low half carries an input.
+  uint16_t image_prefix_low16_words = 0;
   /// GFX9 derives its actual tuple from the descriptor. The sentinel
   /// leaves RDNA's instruction-derived coordinate metadata in effect.
   struct Gfx9ImageTuple {
@@ -491,12 +544,13 @@ inline void append_bit_array(std::string &out, std::string_view name, uint32_t b
 /// @brief Add packed VOP3 source-selection and arithmetic attributes.
 inline void append_vop3p_disassembly(std::string &out, uint32_t op_sel, uint32_t op_sel_hi,
                                      uint32_t neg_lo, uint32_t neg_hi, uint32_t clamp,
-                                     uint32_t source_count, bool packed_defaults) {
+                                     uint32_t source_count, bool packed_defaults,
+                                     bool display_op_sel_hi = true) {
   const uint32_t mask = (uint32_t{1} << source_count) - 1;
   if ((op_sel & mask) != 0)
     append_bit_array(out, "op_sel", op_sel, source_count);
   const uint32_t default_op_sel_hi = packed_defaults ? mask : 0;
-  if ((op_sel_hi & mask) != default_op_sel_hi)
+  if (display_op_sel_hi && (op_sel_hi & mask) != default_op_sel_hi)
     append_bit_array(out, "op_sel_hi", op_sel_hi, source_count);
   if ((neg_lo & mask) != 0)
     append_bit_array(out, "neg_lo", neg_lo, source_count);

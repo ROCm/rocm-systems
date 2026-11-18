@@ -16,9 +16,24 @@ template <bool Ldexp>
 void half_exponent_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
                              uint32_t *d, const uint32_t *a, const uint32_t *b);
 
+// Extract integer half exponents with guest input flushing and selected-half writes.
+// Requires x86-64-v4 and validated controls; preserve inactive lanes and the other half.
+void half_frexp_exp_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
+                              uint32_t *d, const uint32_t *a);
+
 // Scale FP16 by powers of two with guest input/output flushing; preserve inactive lanes.
 // Requires the named CPU features and validated instruction controls.
 void half_ldexp_guest_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
                                 uint32_t *d, const uint32_t *a, const uint32_t *b);
+
+// Scale FP16 with guest rounding and modifiers; preserve inactive and unselected halves.
+// Requires the named ISA level and validated controls.
+void half_ldexp_exact_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
+                                uint32_t *d, const uint32_t *a, const uint32_t *b, bool quiet_snan);
+
+// Scale FP16 with guest rounding and modifiers; preserve inactive and unselected halves.
+// Requires the named ISA level and validated controls.
+void half_ldexp_exact_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
+                                uint32_t *d, const uint32_t *a, const uint32_t *b, bool quiet_snan);
 
 } // namespace rocjitsu::arith

@@ -114,6 +114,8 @@ class Os : AllStatic {
   //! CPU supports MOVDIR64B (atomic 64-byte store with WC buffer close).
   //! Result is cached on first call.
   static bool hasMovdir64b();
+  //! CPU supports CLFLUSHOPT. Result is cached on first call.
+  static bool hasClflushopt();
 #endif  // ATI_ARCH_X86
 
   // Stack helper routines:

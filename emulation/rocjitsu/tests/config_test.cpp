@@ -24,6 +24,8 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/rpc.h"
@@ -1006,6 +1008,107 @@ TEST(SystemGraphTest, ExpandsLegacyFourGpuIdentity) {
   EXPECT_EQ(graph.links.size(), 6u);
 }
 
+TEST(SystemGraphTest, ProjectsFourGpuScaleUpSchematic) {
+  const std::string path = CONFIG_DIR_PATH + "/gfx1250_mi455x_4gpu_scaleup.json";
+  config::SystemGraph graph;
+  ASSERT_TRUE(load_system_graph_valid(graph, path, rocjitsu::kEmbeddedSchema));
+  ASSERT_TRUE(graph.explicit_manifest);
+  ASSERT_EQ(graph.nodes.size(), 1u);
+  EXPECT_EQ(graph.nodes[0].id, "node0");
+  ASSERT_EQ(graph.endpoints.size(), 5u);
+  ASSERT_EQ(graph.links.size(), 4u);
+  ASSERT_EQ(graph.coherence_domains.size(), 1u);
+  EXPECT_EQ(graph.coherence_domains[0].id, "node0_candidate");
+  EXPECT_EQ(graph.coherence_domains[0].gpus, (std::vector<std::string>{"g0", "g1", "g2", "g3"}));
+
+  util::StringDiagnostic graph_diagnostic;
+  const auto gpus_result = graph.local_gpus(graph_diagnostic.emitter());
+  ASSERT_TRUE(gpus_result.succeeded()) << graph_diagnostic.message();
+  const auto gpus = gpus_result.value();
+  ASSERT_EQ(gpus.size(), 4u);
+  for (size_t i = 0; i < gpus.size(); ++i) {
+    SCOPED_TRACE(i);
+    const auto index = std::to_string(i);
+    EXPECT_EQ(gpus[i].id, "g" + index);
+    EXPECT_EQ(gpus[i].profile, "vm");
+    EXPECT_EQ(gpus[i].device.gpu_id, 1250u + i);
+    EXPECT_EQ(gpus[i].device.unique_id, 1250u + i);
+    EXPECT_EQ(gpus[i].device.location_id, 0x0300u + (i << 8));
+    EXPECT_EQ(gpus[i].device.drm_render_minor, 128u + i);
+    EXPECT_EQ(graph.endpoints[i].id, "e" + index);
+    EXPECT_EQ(graph.endpoints[i].kind, config::SystemEndpointKind::Gpu);
+    EXPECT_EQ(graph.endpoints[i].gpu, gpus[i].id);
+    EXPECT_EQ(graph.links[i].src, graph.endpoints[i].id);
+    EXPECT_EQ(graph.links[i].dst, "switch");
+    EXPECT_EQ(graph.links[i].link_class, config::SystemLinkClass::ScaleUp);
+  }
+  EXPECT_EQ(graph.endpoints[4].id, "switch");
+  EXPECT_EQ(graph.endpoints[4].kind, config::SystemEndpointKind::Switch);
+
+  const auto projection_result = graph.local_peer_routes(graph_diagnostic.emitter());
+  ASSERT_TRUE(projection_result.succeeded()) << graph_diagnostic.message();
+  const auto &projection = projection_result.value();
+  EXPECT_EQ(projection.node_id(), "node0");
+  ASSERT_EQ(projection.routes().size(), 6u);
+  size_t directed_checks = 0;
+  for (size_t source = 0; source < gpus.size(); ++source) {
+    for (size_t target = 0; target < gpus.size(); ++target) {
+      if (source == target)
+        continue;
+      SCOPED_TRACE(std::to_string(source) + " -> " + std::to_string(target));
+      const auto &source_name = gpus[source].id;
+      const auto &target_name = gpus[target].id;
+      const auto route = std::find_if(
+          projection.routes().begin(), projection.routes().end(),
+          [&](const config::SystemPeerRoute &candidate) {
+            return (candidate.source_gpu == source_name && candidate.target_gpu == target_name) ||
+                   (candidate.source_gpu == target_name && candidate.target_gpu == source_name);
+          });
+      ASSERT_NE(route, projection.routes().end());
+      const bool route_starts_at_source = route->source_gpu == source_name;
+      EXPECT_EQ(route->source_gpu_id, gpus[route_starts_at_source ? source : target].device.gpu_id);
+      EXPECT_EQ(route->target_gpu_id, gpus[route_starts_at_source ? target : source].device.gpu_id);
+      auto directed_path = route->endpoints;
+      if (!route_starts_at_source)
+        std::reverse(directed_path.begin(), directed_path.end());
+      EXPECT_EQ(directed_path, (std::vector<std::string>{"e" + std::to_string(source), "switch",
+                                                         "e" + std::to_string(target)}));
+      for (size_t hop = 1; hop < directed_path.size(); ++hop) {
+        EXPECT_TRUE(std::any_of(
+            graph.links.begin(), graph.links.end(), [&](const config::SystemLink &link) {
+              return link.link_class == config::SystemLinkClass::ScaleUp &&
+                     ((link.src == directed_path[hop - 1] && link.dst == directed_path[hop]) ||
+                      (link.dst == directed_path[hop - 1] && link.src == directed_path[hop]));
+            }));
+      }
+      ++directed_checks;
+    }
+  }
+  EXPECT_EQ(directed_checks, 12u);
+
+  util::StringDiagnostic load_diagnostic;
+  auto loaded_result =
+      config::load_config(path, rocjitsu::kEmbeddedSchema, load_diagnostic.emitter());
+  ASSERT_TRUE(loaded_result.succeeded()) << load_diagnostic.message();
+  const auto &loaded = loaded_result.value();
+  EXPECT_EQ(loaded.local_node_id, "node0");
+  EXPECT_EQ(loaded.num_gpus, 4u);
+  constexpr uint64_t kGuestVramApertureBytes = 1ULL << 30;
+  EXPECT_EQ(loaded.pci.vram_aperture_bytes, kGuestVramApertureBytes);
+  ASSERT_EQ(loaded.devices.size(), 4u);
+  for (size_t i = 0; i < loaded.devices.size(); ++i) {
+    EXPECT_EQ(loaded.devices[i].gpu_id, gpus[i].device.gpu_id);
+    EXPECT_EQ(loaded.devices[i].unique_id, gpus[i].device.unique_id);
+    EXPECT_EQ(loaded.devices[i].drm_render_minor, gpus[i].device.drm_render_minor);
+    EXPECT_EQ(loaded.global_to_local_ordinals.at(gpus[i].id), i);
+    const auto pci_spec = rocjitsu::gpu_pci_spec_from_config(loaded.devices[i], loaded.pci);
+    EXPECT_EQ(pci_spec.vram_aperture_bytes, kGuestVramApertureBytes);
+  }
+  std::string source;
+  ASSERT_TRUE(read_config_file_valid(source, path));
+  EXPECT_THAT(source, testing::Not(testing::HasSubstr("\"num_gpus\"")));
+}
+
 TEST(SystemGraphTest, LegacyAndNetFixturesDoNotProjectLocalPeerRoutes) {
   util::StringDiagnostic diagnostic;
   config::SystemGraph legacy;
@@ -1030,6 +1133,38 @@ TEST(SystemGraphTest, LegacyAndNetFixturesDoNotProjectLocalPeerRoutes) {
   auto maybe_projection3 = two_node.local_peer_routes(diagnostic.emitter(), "node1");
   ASSERT_TRUE(maybe_projection3.succeeded()) << diagnostic.message();
   EXPECT_TRUE(maybe_projection3.value().routes().empty());
+}
+
+TEST(SystemGraphTest, ScaleUpSchematicDoesNotAdvertisePeerDiscovery) {
+  const std::string path = CONFIG_DIR_PATH + "/gfx1250_mi455x_4gpu_scaleup.json";
+  test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(runtime.initialize("rocjitsu-scaleup-sysfs-"));
+  test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", runtime.path());
+  rj_vm_t *raw = nullptr;
+  ASSERT_EQ(rj_vm_create(path.c_str(), RJ_VM_MODE_LOCAL, &raw), ROCJITSU_STATUS_SUCCESS);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw, &rj_vm_destroy);
+  ASSERT_NE(vm->vm->driver(), nullptr);
+  ASSERT_EQ(vm->vm->driver()->num_gpus(), 4u);
+  const std::filesystem::path nodes =
+      std::filesystem::path(vm->vm->driver()->topology_path()) / "nodes";
+  for (uint32_t ordinal = 0; ordinal < 4; ++ordinal) {
+    SCOPED_TRACE(ordinal);
+    const auto *info = vm->vm->driver()->gpu_info_at(ordinal);
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(info->gpu_id, 1250u + ordinal);
+    EXPECT_EQ(info->hive_id, 0u);
+    EXPECT_EQ(info->num_sdma_xgmi_engines, 0u);
+    const auto node_path = nodes / std::to_string(ordinal + 1);
+    std::string gpu_id;
+    ASSERT_TRUE(read_config_file_valid(gpu_id, (node_path / "gpu_id").string()));
+    EXPECT_EQ(gpu_id, std::to_string(1250u + ordinal) + "\n");
+    std::string properties;
+    ASSERT_TRUE(read_config_file_valid(properties, (node_path / "properties").string()));
+    EXPECT_THAT(properties, testing::HasSubstr("p2p_links_count 0\n"));
+    EXPECT_THAT(properties, testing::HasSubstr("hive_id 0\n"));
+    EXPECT_THAT(properties, testing::HasSubstr("num_sdma_xgmi_engines 0\n"));
+    EXPECT_FALSE(std::filesystem::exists(node_path / "p2p_links"));
+  }
 }
 
 TEST(SystemGraphTest, ProjectsGfx1250TwoNodeNetFixture) {
@@ -2625,7 +2760,8 @@ TEST(ConfigLoaderTest, ShippedDevicesDeclareSdmaQueues) {
       EXPECT_NE(dbt.guest_device.num_sdma_queues_per_engine, 0u);
     } else {
       config::LoadedConfig loaded;
-      if (name == "gfx1250_mi455x_kmd_2node_net.json") {
+      if (name == "gfx1250_mi455x_kmd_2node_net.json" ||
+          name == "gfx1250_mi455x_kmd_4node_2gpu_if.json") {
         ASSERT_TRUE(test::load_valid_config_for_node(entry.path().string(), loaded, "node0"));
       } else {
         ASSERT_TRUE(test::load_valid_config(entry.path().string(), loaded));
@@ -5362,6 +5498,64 @@ TEST(CheckpointTest, PreservesRequestedVgprsAcrossWaveArchitectures) {
       EXPECT_EQ(other->num_vgprs(), requested);
       wave->halt();
     }
+  }
+}
+
+TEST(CheckpointTest, PreservesRdna4ImageStoreVgprZeroSubstitution) {
+  auto json = functional_quantum_checkpoint_config(1, 1);
+  ASSERT_TRUE(replace_exactly_once(json, "cdna3", "rdna4"));
+  rj_vm_t *raw = nullptr;
+  ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
+            ROCJITSU_STATUS_SUCCESS);
+  using Vm = std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)>;
+  Vm original(raw, &rj_vm_destroy);
+  auto cu = [](const Vm &vm) { return vm->soc->xcd(0)->shader_engine(0)->compute_unit(0); };
+  constexpr uint64_t kernel = 0x1000, texel = 0x10000;
+  const auto store = rdna4::build_vimage(
+      rdna4::kImageStoreVimage, {.dim = 1, .dmask = 7, .vdata = 31, .vaddr0 = 4, .vaddr1 = 5});
+  auto *memory = original->soc->memory();
+  memory->load_image(reinterpret_cast<const uint8_t *>(store.data()), sizeof(store), kernel);
+  const std::array<uint32_t, 2> finish{0xbfc10000, 0xbfb00000}; // s_wait_storecnt 0; s_endpgm
+  memory->load_image(reinterpret_cast<const uint8_t *>(finish.data()), sizeof(finish),
+                     kernel + sizeof(store));
+  auto *wave = cu(original)->dispatch_wf(0, kernel, 16, 32, 32);
+  ASSERT_NE(wave, nullptr);
+  const std::array<uint32_t, 8> descriptor{uint32_t(texel >> 8),
+                                           (61u << 17) | (2u << 30),
+                                           1u << 14,
+                                           (9u << 28) | (4 | (5 << 3) | (6 << 6) | (7 << 9)),
+                                           63,
+                                           0,
+                                           0,
+                                           0};
+  for (unsigned i = 0; i < descriptor.size(); ++i)
+    cu(original)->write_sgpr(wave->sgpr_alloc().base + i, descriptor[i]);
+  wave->set_exec(1);
+  const auto base = wave->vgpr_alloc().base;
+  cu(original)->write_vgpr(base + 4, 0, 0);
+  cu(original)->write_vgpr(base + 5, 0, 0);
+  cu(original)->write_vgpr(base + 31, 0, 0x11112222);
+  cu(original)->write_vgpr(base, 0, 0x33334444);
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rocjitsu-rdna4-image-store-vgprs-"));
+  ASSERT_EQ(rj_vm_save_checkpoint(original.get(), file.path().c_str(), 0), ROCJITSU_STATUS_SUCCESS);
+  rj_vm_t *loaded = nullptr;
+  ASSERT_EQ(rj_vm_restore_checkpoint(file.path().c_str(), &loaded), ROCJITSU_STATUS_SUCCESS);
+  Vm restored(loaded, &rj_vm_destroy);
+  for (const auto *machine : {&original, &restored}) {
+    auto *unit = cu(*machine);
+    auto *resident = unit->wf(0);
+    ASSERT_NE(resident, nullptr);
+    EXPECT_EQ(resident->num_vgprs(), 32u);
+    for (unsigned i = 0; i < 64 && !resident->is_halted(); ++i)
+      ASSERT_EQ(rj_vm_step(machine->get(), nullptr), ROCJITSU_STATUS_SUCCESS);
+    ASSERT_TRUE(resident->is_halted());
+    unit->l1_vector().flush_all();
+    unit->l2()->flush_all();
+    const auto *output = (*machine)->soc->memory();
+    EXPECT_EQ(output->read32(texel), 0x11112222u);
+    EXPECT_EQ(output->read32(texel + 4), 0x33334444u);
+    EXPECT_EQ(output->read32(texel + 8), 0x33334444u);
   }
 }
 

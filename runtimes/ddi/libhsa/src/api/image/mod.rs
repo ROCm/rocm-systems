@@ -8,11 +8,11 @@ mod query;
 mod sampler;
 mod transfer;
 
-#[cfg(any(test, not(target_arch = "x86_64")))]
+#[cfg(any(test, not(hsa_tool_dispatch)))]
 pub(crate) use create::*;
-#[cfg(any(test, not(target_arch = "x86_64")))]
+#[cfg(any(test, not(hsa_tool_dispatch)))]
 pub(crate) use query::*;
-#[cfg(any(test, not(target_arch = "x86_64")))]
+#[cfg(any(test, not(hsa_tool_dispatch)))]
 pub(crate) use sampler::*;
-#[cfg(any(test, not(target_arch = "x86_64")))]
+#[cfg(any(test, not(hsa_tool_dispatch)))]
 pub(crate) use transfer::*;

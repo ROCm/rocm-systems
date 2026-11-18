@@ -20,8 +20,11 @@
 #include "rocjitsu/vm/amdgpu/gpu_vm_access.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/lds_allocation.h"
+#include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
+#include "rocjitsu/vm/graphics/image_access.h"
+#include "rocjitsu/vm/graphics/image_bc.h"
 
 #include <algorithm>
 #include <array>
@@ -61,6 +64,8 @@ struct TranslatedMemoryRequest {
   uint32_t data_offset = 0;
   uint32_t size = 0;
   uint64_t reordered_lane_mask = 0;
+  // Set during legacy KFD preflight; retained across deferred peer retries.
+  VmDataRoute route = VmDataRoute::Local;
 };
 
 /// @brief Retry state retained by a prepared translated memory instruction.
@@ -77,10 +82,27 @@ public:
   std::vector<uint8_t> reordered_data;
   std::size_t request_index = 0;
   std::size_t completed_bytes = 0;
+  VmTransferToken transfer_token;
   uint32_t atomic_lane = 0;
   uint64_t atomic_loaded_value = 0;
   bool initialized = false;
   bool atomic_loaded = false;
+  // A legacy binding may contain deferred peer requests. Retain the choice
+  // with its VM snapshot and request cursor across retries.
+  bool peer_data_route = false;
+  bool mixed_local_peer_route = false;
+};
+
+/// Per-lane texture status. A resident fetch leaves the status VGPR unchanged.
+class TexelStatus {
+public:
+  bool report_failure = false;
+  std::array<uint8_t, 64> lod{};
+  uint64_t failures = 0;
+  uint64_t lod_warnings = 0;
+  uint64_t written_lanes() const {
+    return (lod_warnings & ~failures) | (report_failure ? failures : 0);
+  }
 };
 
 /// @brief Texel footprint captured at issue time for one filtered image instruction.
@@ -89,12 +111,31 @@ struct ImageSampleAccess {
     std::array<uint64_t, 64> addresses{};
     std::array<float, 64> weights{};
     uint64_t lane_mask = 0;
+    uint64_t border_mask = 0;
     std::vector<uint8_t> response;
     TranslatedMemoryProgress translated;
   };
   std::vector<Tap> taps;
   uint32_t next_tap = 0;
+  // A group load/store uses the same independently addressed texel requests
+  // as filtering. Its four VDATA slots concatenate the participating texels.
+  struct Transfer {
+    uint32_t dmask;
+    uint32_t slots_per_texel;
+    bool raw;
+    bool sign_extend;
+  };
+  std::optional<Transfer> transfer;
   bool gather = false;
+  bool horizontal = false;
+  bool packed_row = false;
+  uint8_t fp32_filter_taps = 0;
+  uint32_t border_color = 0;
+  struct DepthCompare {
+    uint8_t function;
+    std::array<float, 64> reference{};
+  };
+  std::unique_ptr<DepthCompare> depth_compare;
   /// GFX12 quads with an active fractional-mip lane blend every active lane.
   uint64_t mip_blend_mask = 0;
 };
@@ -266,11 +307,37 @@ public:
   uint32_t buffer_components = 0;
   bool buffer_d16 = false;
   bool check_texel_residency = false;
+  std::unique_ptr<TexelStatus> texel_status;
   // Image DMASK packs only enabled shader components into the data tuple.
   // A nonzero mask asks store capture to scatter that tuple back into its
   // original X/Y/Z/W slots before applying image selector/padding semantics.
   uint32_t image_store_component_mask = 0;
+  struct BlockCompressedImage {
+    ImageBlockFormat format{};
+    std::vector<std::array<uint8_t, 64>> texels; // Per-tap in-block texel per lane.
+  };
+  std::unique_ptr<BlockCompressedImage> image_bc;
   bool image_srgb = false;
+  std::optional<ImageBlockFormat> image_bc_format;
+  std::array<uint8_t, 64> image_bc_texels{};
+  bool image_sampling = false;
+  std::unique_ptr<ImageFeedback> image_status;
+  // Completion supplies the status write mask before the wave can resume.
+  std::unique_ptr<MemoryWaitScoreboard::DeferredWrite> feedback_wait;
+  [[nodiscard]] bool has_feedback_result() const {
+    return texel_status || (image_status && image_status->returns_status()) ||
+           reports_buffer_residency();
+  }
+  [[nodiscard]] uint64_t feedback_write_lanes() const {
+    if (texel_status)
+      return texel_status->written_lanes();
+    if (image_status)
+      return image_status->written_misses() | image_status->written_warnings();
+    return buffer_missing_lanes;
+  }
+
+  std::unique_ptr<ImageMetadataAccess> image_metadata;
+  std::unique_ptr<GraphicsSampleAccess> graphics_sample;
   std::unique_ptr<ImageSampleAccess> image_sample;
   // Some accesses use an interleaved ("swizzled") layout: consecutive units
   // of a lane are separated rather than contiguous. Units are 4 bytes for
@@ -310,10 +377,13 @@ public:
   /// Separate LDS and L2 modes cover FLAT requests routed to either pipeline.
   uint32_t atomic_denorm_mode = 3;
   uint32_t atomic_lds_denorm_mode = 3;
-  /// Older MIN/MAX compare flushed inputs but return the original selected bits.
-  /// They also propagate signaling NaNs instead of treating them as missing numbers.
+  /// Current emulator policy for older MIN/MAX: compare flushed inputs, return the original
+  /// selected bits and propagate signaling NaNs instead of treating them as missing numbers.
   bool atomic_legacy_minmax = true;
-  /// L2 ADD on qualified RDNA4 targets selects the incoming NaN first.
+  /// MI300A/MI350X MIN/MAX select flushed inputs but still return a quieted
+  /// signaling NaN, the data operand's first.
+  bool atomic_minmax_snan_wins = false;
+  /// L2 ADD on qualified RDNA4 and CDNA3/4 targets selects the incoming NaN first.
   /// Indexed LDS has an independent source-first policy.
   bool atomic_source_nan_first = false;
   bool lds_dword_extend = false; ///< Narrow LDS transfers extend to a full DWORD per lane.
@@ -324,8 +394,18 @@ public:
   /// allocation base; per-lane destination offsets are carried in
   /// per_lane_lds_addr.
   uint32_t lds_base = 0;
-  bool lds_per_lane_addr = false; ///< Per-lane LDS endpoints of a load or store.
+  /// Read the store payload from LDS rather than VGPRs, as gfx1250 async stores
+  /// do. per_lane_lds_addr then holds each lane's LDS source address, or
+  /// kInvalidLdsAddress for a lane that reads no LDS bytes.
+  bool lds_src = false;
+  /// Per-lane LDS endpoints of a load or store: per_lane_lds_addr holds the LDS
+  /// destination (lds_dst) or source (lds_src) addresses.
+  bool lds_per_lane_addr = false;
   std::array<uint32_t, 64> per_lane_lds_addr = {};
+  /// For lds_src, the leading LDS bytes each lane reads from per_lane_lds_addr:
+  /// the bytes of its source inside the allocation. Bytes past them read zero.
+  /// Zero for lanes that read no LDS.
+  std::array<uint8_t, 64> per_lane_lds_src_bytes = {};
   bool cluster_multicast = false;  ///< Cluster async-to-LDS load: multicast LDS writes by M0 mask.
   uint32_t cluster_mcast_mask = 0; ///< Cluster workgroup destination mask captured at issue time.
   uint64_t issue_pc = 0;           ///< PC at which the instruction was issued (debug).

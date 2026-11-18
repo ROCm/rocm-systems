@@ -308,6 +308,48 @@ public:
     });
   }
 
+  void onAmdgpuMemoryAccessCancelled(const Instruction &inst, amdgpu::Wavefront &wf) {
+    if (!observes_memory_routing_)
+      return;
+    dispatch_wave_hot_hook(&wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_memory_routing && plugin_observes_hot_hooks(index, &wf, cached)) {
+          if (auto *observer = dynamic_cast<AmdgpuMemoryCancellationObserver *>(entry.plugin.get()))
+            observer->onAmdgpuMemoryAccessCancelled(inst, wf);
+        }
+      }
+    });
+  }
+
+  void onAmdgpuMixedFlatLdsAccess(const Instruction &inst, amdgpu::Wavefront &wf) {
+    if (!observes_memory_routing_)
+      return;
+    dispatch_wave_hot_hook(&wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_memory_routing && plugin_observes_hot_hooks(index, &wf, cached)) {
+          if (auto *observer = dynamic_cast<AmdgpuMixedFlatLdsObserver *>(entry.plugin.get()))
+            observer->onAmdgpuMixedFlatLdsAccess(inst, wf);
+        }
+      }
+    });
+  }
+
+  void onAmdgpuImageFeedbackQualified(const Instruction &inst, amdgpu::Wavefront &wf) {
+    if (!observes_memory_routing_)
+      return;
+    dispatch_wave_hot_hook(&wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_memory_routing && plugin_observes_hot_hooks(index, &wf, cached)) {
+          if (auto *observer = dynamic_cast<AmdgpuImageFeedbackObserver *>(entry.plugin.get()))
+            observer->onAmdgpuImageFeedbackQualified(inst, wf);
+        }
+      }
+    });
+  }
+
   void onAmdgpuLdsDirectRead(const amdgpu::Wavefront &wf, uint32_t address, uint32_t bytes,
                              uint32_t lane) {
     if (!observes_lds_direct_reads_ || wf.observing_lds_direct_read_)
@@ -592,31 +634,13 @@ private:
       std::forward<Callback>(callback)();
   }
 
-  // Complete issue accounting for every observer even if one throws. Preserve
-  // the first exception for the issuer, which joins all accepted jobs.
   template <typename Callback>
   void dispatch_async_hook(const amdgpu::Wavefront *wf, Callback &&callback) {
     dispatch_wave_hot_hook(wf, [&](bool cached) {
-      size_t index = 0;
-      try {
-        for (; index != plugins_.size(); ++index) {
-          const auto &entry = plugins_[index];
-          if (entry.observes_async_instruction_issued &&
-              plugin_observes_hot_hooks(index, wf, cached))
-            callback(*plugins_[index].plugin);
-        }
-      } catch (...) {
-        for (++index; index != plugins_.size(); ++index) {
-          const auto &entry = plugins_[index];
-          if (!entry.observes_async_instruction_issued ||
-              !plugin_observes_hot_hooks(index, wf, cached))
-            continue;
-          try {
-            callback(*plugins_[index].plugin);
-          } catch (...) {
-          }
-        }
-        throw;
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        const auto &entry = plugins_[index];
+        if (entry.observes_async_instruction_issued && plugin_observes_hot_hooks(index, wf, cached))
+          callback(*entry.plugin);
       }
     });
   }
