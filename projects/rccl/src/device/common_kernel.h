@@ -839,8 +839,9 @@ template <int Unroll, int useAcc, typename RedFn, typename T, int MultimemSrcs, 
 __device__ __forceinline__ void reduceCopy(int thread, int nThreads, uint64_t redArg, bool postOp, int nSrcs,
                                            void** srcPtrs, int nDsts, void** dstPtrs, IntBytes nElts,
                                            void* accPtr = nullptr) {
-  if (tryTdmCopy<useAcc, RedFn, T, MultimemSrcs, MultimemDsts, PreOpSrcs, Pipeline>(
-        thread, nThreads, postOp, nSrcs, srcPtrs, nDsts, dstPtrs, nElts))
+  // With EnableTdmReduce, reduceCopyTdm copies to several destinations reading the source once.
+  if ((!EnableTdmReduce || nDsts < 2) && tryTdmCopy<useAcc, RedFn, T, MultimemSrcs, MultimemDsts, PreOpSrcs, Pipeline>(
+                                           thread, nThreads, postOp, nSrcs, srcPtrs, nDsts, dstPtrs, nElts))
     return;
   reduceCopy<Unroll, useAcc, RedFn, T, MultimemSrcs, MinSrcs, MaxSrcs, MultimemDsts, MinDsts, MaxDsts, PreOpSrcs,
              IntBytes, Pipeline, EnableTdmReduce>(
