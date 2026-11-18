@@ -8,6 +8,16 @@
 
 #include <hip_test_common.hh>
 
+// Cluster range checks assume the gfx1250 family layout.
+inline bool IsOccupancyClusterRangeArch(const char* gcnArchName) {
+  if (gcnArchName == nullptr) {
+    return false;
+  }
+  return std::strcmp(gcnArchName, "gfx1250") == 0 ||
+         std::strcmp(gcnArchName, "gfx1250-strict") == 0 ||
+         std::strcmp(gcnArchName, "gfx1251") == 0;
+}
+
 template <typename F> void MaxPotentialBlockSize(F func, int maxThreadsPerBlock) {
   int gridSize = 0;
   int blockSize = 0;
