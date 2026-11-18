@@ -152,6 +152,20 @@ like a `disabled`/`unsupported` match: they get the `[disabled]` tag, plus a
 `[missing_<feature>]` tag for every missing feature. The resulting binaries are
 therefore specific to the build machine. This mode needs a working GPU at build time.
 
+Features can also be listed as `disabled`/`unsupported` targets, for test cases that
+cannot run when a feature *is* available:
+```yaml
+memory:
+  Unit_hipStreamAttachMemAsync_Positive_AttachHost:
+    <<: *level_default
+    unsupported:
+      targets: [concurrent_managed_access]
+      reason: "..."
+```
+In a tailored build such a target matches when the feature is available, just like a
+platform or architecture target matches the build. Otherwise feature targets never
+match, so the test must still skip itself at runtime.
+
 The probe must report exactly the features declared in `definitions.yaml`; any
 difference fails the build. To add a feature, declare it in `definitions.yaml` and
 detect it in `hip_tests_sysinfo.cc`. The probe runs once per build tree; delete

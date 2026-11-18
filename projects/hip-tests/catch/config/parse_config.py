@@ -178,9 +178,13 @@ def create_test_definition(
     #   {arch}                  any platform and OS
     #   {os_name}_{arch}        linux_<arch>, windows_<arch>
     #   asan                    ASAN builds only
+    #   <feature>               a device feature from definitions.yaml that is
+    #                           available on the machine the build is tailored to
     disable_keys = {f"{platform}_{os_name}", arch, f"{os_name}_{arch}"}
     if asan:
         disable_keys.add("asan")
+    if available_features is not None:
+        disable_keys.update(f for f, available in available_features.items() if available)
 
     tags_str = ""
 
