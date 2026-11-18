@@ -875,28 +875,11 @@ SIMD_VOP2_CARRY.update(
 # so the generator can assert it per ISA.
 # The f16 entries here are the legacy MAD literal forms. They widen each operand
 # to f32 and narrow once after the arithmetic, matching their scalar bodies.
-# Architectural f16 FMA forms use SIMD_VOP2_FMA_F16 below instead: that path
-# performs the fused operation in native<double> chunks and applies the current
-# FP16 MODE controls without an intervening f32 rounding. v_fmac_f64 likewise
-# has a dedicated split-VGPR, MODE-aware path in SIMD_VOP2_FMA_F64.
+# Architectural F16 FMA forms use rj-arith, which owns guest rounding and CPU
+# dispatch. v_fmac_f64 retains the split-VGPR, MODE-aware SIMD_VOP2_FMA_F64 path.
 _FMA_ACC_F32 = '[&wf](auto a, auto b, auto d, auto) { return amdgpu::fma_f32_simd_unscoped(a, b, d, wf); }'
 _FMA_ADDK_F32 = '[&wf](auto a, auto b, auto, auto k) { return amdgpu::fma_f32_simd_unscoped(a, b, k, wf); }'
 _FMA_MULK_F32 = '[&wf](auto a, auto b, auto, auto k) { return amdgpu::fma_f32_simd_unscoped(a, k, b, wf); }'
-_FMA_ACC_F16 = (
-    '[](auto a, auto b, auto d, auto) {'
-    ' return util::f32_to_f16_simd(util::stdx::fma('
-    'util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), util::f16_to_f32_simd(d))); }'
-)
-_FMA_ADDK_F16 = (
-    '[](auto a, auto b, auto, auto k) {'
-    ' return util::f32_to_f16_simd(util::stdx::fma('
-    'util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), util::f16_to_f32_simd(k))); }'
-)
-_FMA_MULK_F16 = (
-    '[](auto a, auto b, auto, auto k) {'
-    ' return util::f32_to_f16_simd(util::stdx::fma('
-    'util::f16_to_f32_simd(a), util::f16_to_f32_simd(k), util::f16_to_f32_simd(b))); }'
-)
 # Inline-literal K read, routed through the RegisterAccess facade (see comment
 # above). Hard-coded operand name `simm32`; simd_ternary_literal_operand_name()
 # parses it back out for the generator's per-ISA assertion.
@@ -917,9 +900,6 @@ SIMD_VOP2_TERNARY: dict[str, tuple[str, str, str]] = {
     'v_madak_f32_vop2': ('float32_t', _FMA_K_READ, _FMA_ADDK_F32),
     'v_fmamk_f32_vop2': ('float32_t', _FMA_K_READ, _FMA_MULK_F32),
     'v_madmk_f32_vop2': ('float32_t', _FMA_K_READ, _FMA_MULK_F32),
-    # --- f16 inline literal ---
-    'v_madak_f16_vop2': ('uint32_t', _FMA_K_READ, _FMA_ADDK_F16),
-    'v_madmk_f16_vop2': ('uint32_t', _FMA_K_READ, _FMA_MULK_F16),
 }
 
 
@@ -949,13 +929,6 @@ SIMD_VOP2_TERNARY_ACCUMULATE = {
     'v_fmac_f32_vop2',
     'v_fmac_dx9_zero_f32_vop2',
     'v_mac_f32_vop2',
-}
-
-
-SIMD_VOP2_FMA_F16: dict[str, str] = {
-    'v_fmaak_f16_vop2': 'ROCJITSU_TRY_SIMD_VOP2_FMA_F16_ADD_LITERAL',
-    'v_fmamk_f16_vop2': 'ROCJITSU_TRY_SIMD_VOP2_FMA_F16_MULTIPLY_LITERAL',
-    'v_fmac_f16_vop2': 'ROCJITSU_TRY_SIMD_VOP2_FMAC_F16',
 }
 
 
@@ -1097,25 +1070,6 @@ SIMD_VOP3_DIV_FMAS_FP32: set[str] = {
 }
 SIMD_VOP3_DIV_FMAS_FP64: set[str] = {
     'v_div_fmas_f64_vop3',
-}
-
-# VOP3P fma_mix / mad_mix family. FMA uses the fused, mode-aware path:
-#  - F32     -> v_fma_mix_f32_vop3p (RDNA), v_mad_mix_f32_vop3p (CDNA1-4)
-#  - F16_LO  -> v_fma_mixlo_f16_vop3p, v_mad_mixlo_f16_vop3p
-#  - F16_HI  -> v_fma_mixhi_f16_vop3p, v_mad_mixhi_f16_vop3p
-# Per-source op_sel_hi gates the f16<->f32 widening shape; op_sel picks the f16
-# half. neg flips the sign bit and neg_hi applies ABS. No OMOD.
-SIMD_VOP3P_FMA_MIX_F32: set[str] = {
-    'v_fma_mix_f32_vop3p',
-    'v_mad_mix_f32_vop3p',
-}
-SIMD_VOP3P_FMA_MIX_F16_LO: set[str] = {
-    'v_fma_mixlo_f16_vop3p',
-    'v_mad_mixlo_f16_vop3p',
-}
-SIMD_VOP3P_FMA_MIX_F16_HI: set[str] = {
-    'v_fma_mixhi_f16_vop3p',
-    'v_mad_mixhi_f16_vop3p',
 }
 
 # VOP3P packed-16 integer binary family. The glue applies half selectors
@@ -1685,7 +1639,7 @@ SIMD_VOPC_VOP3_FLOAT: dict[str, tuple[str, str]] = _build_simd_vopc_vop3_float()
 # (src0, src1, src2) with no modifiers and no widening: routed through
 # try_execute_ternary_vop3_simd<T>. Functor sig: `(native<T> a, native<T> b,
 # native<T> c) -> native<T>`. Excluded from this table: the float ternary
-# family (fma/mad/mad_mix — needs modifier glue), med3/min3/max3 (NaN /
+# family (fma/mad — needs modifier glue), med3/min3/max3 (NaN /
 # signed-integer-vs-fmin semantics — see project_pr6470_review_findings), the
 # bfe ops (branchy mask), the byte-permute ops (perm/alignbyte/lerp/sad/msad —
 # byte-wise / table-driven), and 64-bit-lane ternary (would need a 64-bit
@@ -2060,11 +2014,9 @@ SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
 
 # Non-fused F16 ternaries: widen -> ABS/NEG -> evaluate -> round F16 -> OMOD/CLAMP.
 # MAD retains its existing MODE policy; selection uses the shared raw-bit stage.
-# DIV_FIXUP explicitly retains modifiers before narrowing. Fused FMA uses the
-# MODE-aware native<double> route selected by SIMD_VOP3_FMA_MODE_FP16 below.
+# DIV_FIXUP explicitly retains modifiers before narrowing. Native fused FMA
+# is implemented by rj-arith on every profile.
 SIMD_VOP3_TERNARY_FP16: dict[str, str] = {
-    'v_mad_f16_vop3': '[](auto a, auto b, auto c) { return a * b + c; }',
-    'v_mad_legacy_f16_vop3': '[](auto a, auto b, auto c) { return a * b + c; }',
     'v_div_fixup_f16_vop3': (
         '[&wf](auto p, auto b, auto c) { return '
         '::rocjitsu::amdgpu::div_fixup_f16_promoted_simd('
@@ -2079,7 +2031,6 @@ SIMD_VOP3_TERNARY_FP16: dict[str, str] = {
     ),
 }
 
-SIMD_VOP3_FMA_MODE_FP16 = {'v_fma_f16_vop3'}
 SIMD_VOP3_FMA_MODE_FP64 = {'v_fma_f64_vop3'}
 
 # f64 ternary FMA.
@@ -2101,7 +2052,6 @@ SIMD_VOP3_FMAC_FP32: dict[str, str] = {
     'v_mac_f32_vop3': '[&inst, &wf](auto a, auto b, auto c) { return amdgpu::fma_f32_simd_unscoped(a, b, c, wf, amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod)); }',
     'v_fmac_dx9_zero_f32_vop3': SIMD_VOP3_TERNARY_FP32['v_fma_dx9_zero_f32_vop3'],
 }
-SIMD_VOP3_FMAC_FP16 = {'v_fmac_f16_vop3'}
 SIMD_VOP3_FMAC_FP64 = {'v_fmac_f64_vop3'}
 
 SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
@@ -2534,6 +2484,8 @@ for _fmt in ('f16', 'bf16'):
         'minimum': 'MINIMUM',
         'maximum': 'MAXIMUM',
     }.items():
+        if _fmt == 'f16' and _op == 'FMA':
+            continue
         SIMD_PACKED_FLOAT[f'v_pk_{_mnemonic}_{_fmt}_vop3p'] = (_op, _fmt == 'bf16')
 
 
@@ -2555,9 +2507,6 @@ def _guard_mode_arithmetic_probe(template_name: str, probe: str | None) -> str |
         # The helper requires guest RNE and handles denormal MODE explicitly.
         # Its instruction wrapper installs host RNE once and restores the
         # caller's FP state; the F16 evaluator inside it is unscoped.
-        return probe
-    if template_name == 'v_fma_mix_f32_vop3p':
-        # The fused MIX helper establishes MODE and applies denormal controls.
         return probe
     arithmetic_ops = (
         'add',
@@ -2667,11 +2616,6 @@ def _simd_probe_line(
             template_name.replace('_vop2', '') in _VOP3_CARRY_CIN_NAMES
         ).lower()
         return f'  ROCJITSU_TRY_SIMD_VOP2_CARRY{suffix}({writer_arg}{reads_carry}, {specc});'
-    fma_f16_macro = SIMD_VOP2_FMA_F16.get(template_name)
-    if fma_f16_macro is not None:
-        if template_name == 'v_fmac_f16_vop2':
-            return f'  {fma_f16_macro}();'
-        return f'  {fma_f16_macro}({_FMA_K_READ});'
     spect = SIMD_VOP2_TERNARY.get(template_name)
     if spect is not None:
         cpp_t, k_expr, cpp_op = spect
@@ -2836,13 +2780,6 @@ def _simd_probe_line(
             else 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16'
         )
         return f'  {macro}({spec3tf16});'
-    if template_name in SIMD_VOP3_FMA_MODE_FP16:
-        macro = (
-            'ROCJITSU_TRY_SIMD_FMA_VOP3_TRUE16_FP16'
-            if true16_vop3
-            else 'ROCJITSU_TRY_SIMD_FMA_VOP3_FP16'
-        )
-        return f'  {macro}();'
     if template_name in SIMD_VOP3_FMA_MODE_FP64:
         return '  ROCJITSU_TRY_SIMD_FMA_VOP3_FP64();'
     spec3tf64 = SIMD_VOP3_TERNARY_FP64.get(template_name)
@@ -2888,19 +2825,6 @@ def _simd_probe_line(
     specdotcf16 = SIMD_DOTC_F16.get(template_name)
     if specdotcf16 is not None:
         return f'  ROCJITSU_TRY_SIMD_DOTC_F16({specdotcf16});'
-    # VOP3P fma_mix / mad_mix: select fused arithmetic and destination shape.
-    if template_name == 'v_fma_mix_f32_vop3p':
-        return '  ROCJITSU_TRY_SIMD_FUSED_MIX(F32);'
-    if template_name in SIMD_VOP3P_FMA_MIX_F32:
-        return '  ROCJITSU_TRY_SIMD_VOP3P_FMA_MIX_F32();'
-    if template_name == 'v_fma_mixlo_f16_vop3p':
-        return '  ROCJITSU_TRY_SIMD_FUSED_MIX(F16_LO);'
-    if template_name == 'v_fma_mixhi_f16_vop3p':
-        return '  ROCJITSU_TRY_SIMD_FUSED_MIX(F16_HI);'
-    if template_name in SIMD_VOP3P_FMA_MIX_F16_LO:
-        return '  ROCJITSU_TRY_SIMD_VOP3P_FMA_MIX_F16_LO();'
-    if template_name in SIMD_VOP3P_FMA_MIX_F16_HI:
-        return '  ROCJITSU_TRY_SIMD_VOP3P_FMA_MIX_F16_HI();'
     # VOP3 dst-accumulate FMA/MAC (vdst is the third operand). Per-isa class
     # has no src2; the accumulate glue reads vdst instead.
     specfmacf32 = SIMD_VOP3_FMAC_FP32.get(template_name)
@@ -2916,13 +2840,6 @@ def _simd_probe_line(
             else 'ROCJITSU_TRY_SIMD_FMAC_VOP3_FP32'
         )
         return f'  {fmac_macro}({specfmacf32}{policy});'
-    if template_name in SIMD_VOP3_FMAC_FP16:
-        macro = (
-            'ROCJITSU_TRY_SIMD_FMAC_VOP3_MODE_TRUE16_FP16'
-            if true16_vop3
-            else 'ROCJITSU_TRY_SIMD_FMAC_VOP3_MODE_FP16'
-        )
-        return f'  {macro}();'
     if template_name in SIMD_VOP3_FMAC_FP64:
         return '  ROCJITSU_TRY_SIMD_FMAC_VOP3_MODE_FP64();'
     # VOP3 unary integer ops with no VOP1 twin (e.g. v_not_b16). Reuse the
@@ -3254,10 +3171,6 @@ def _local_coverage_probe(
                 f'inst, wf, {functor}, {recipe.round_mode})) return;'
             )
         return f'  if (amdgpu::try_execute_words_simd<{args}>(inst, wf, {functor})) return;'
-
-    if template_name in ('v_pk_fmac_f16_vop2', 'v_pk_fmac_f16_vop3'):
-        v3 = str(template_name.endswith('_vop3')).lower()
-        return f'  if (amdgpu::try_execute_packed_fmac_simd<{v3}>(inst, wf)) return;'
 
     if template_name.startswith('v_cmpx_'):
         ordinary = template_name.replace('v_cmpx_', 'v_cmp_', 1)

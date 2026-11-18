@@ -4,7 +4,6 @@
 //! Retained signal callbacks and their serialized dispatcher.
 
 use super::*;
-use crate::api::signal::atomic::hsa_signal_load_scacquire;
 
 /// Work accepted by the single asynchronous callback dispatcher.
 #[derive(Clone, Copy)]
@@ -193,7 +192,12 @@ pub(super) fn run_async_dispatcher(
             let registration = &handlers[index];
             // SAFETY: The runtime retains each registered signal until this
             // worker releases its last handler reference.
-            let observed = unsafe { hsa_signal_load_scacquire(registration.signal) };
+            let observed = unsafe {
+                with_public_signal(registration.signal, |slot| {
+                    slot.value.load(Ordering::Acquire)
+                })
+            }
+            .unwrap_or(0);
             if stop.load(Ordering::Acquire) {
                 return;
             }
