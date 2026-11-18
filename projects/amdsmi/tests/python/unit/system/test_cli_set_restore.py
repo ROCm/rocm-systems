@@ -11,6 +11,14 @@ from unittest import mock
 from cli import test_set
 from common.common import amdsmi
 
+UNSUPPORTED = int(amdsmi.AmdSmiStatus.NOT_SUPPORTED)
+DGPU_FAN = {"max": 255, "speed": 80}
+POWER_CAP = {
+    "min_power_limit": {"value": 261, "unit": "W"},
+    "max_power_limit": {"value": 350, "unit": "W"},
+    "socket_power_limit": {"value": 291, "unit": "W"},
+}
+
 
 class TestCliSetRestore(unittest.TestCase):
     def setUp(self) -> None:
@@ -44,6 +52,7 @@ class TestCliSetRestore(unittest.TestCase):
 
     def _remaining_commands(self, index: int = 0) -> list:
         return [
+            f"amd-smi reset --fans --gpu {index}",
             f"amd-smi set --profile COMPUTE --gpu {index}",
             f"amd-smi reset --power-cap --gpu {index}",
             f"amd-smi reset --clocks --gpu {index}",
@@ -51,10 +60,17 @@ class TestCliSetRestore(unittest.TestCase):
             f"amd-smi set --process-isolation 0 --gpu {index}",
         ]
 
-    def _mock_commands(self, expected: list, failures: dict = None) -> None:
-        codes = {command: 0 for command in expected}
-        if failures:
-            codes.update(failures)
+    def _mock_commands(self, expected: list, overrides: dict = None) -> None:
+        # The default baseline has no fan max and no power cap, so both resets
+        # answer NOT_SUPPORTED, as they do on that hardware.
+        codes = {
+            command: UNSUPPORTED
+            if command.startswith(("amd-smi reset --fans", "amd-smi reset --power-cap"))
+            else 0
+            for command in expected
+        }
+        if overrides:
+            codes.update(overrides)
 
         def run(command: str, *, msg_in: str = None) -> tuple:
             return codes[command], "", ""
@@ -67,13 +83,26 @@ class TestCliSetRestore(unittest.TestCase):
             [mock.call(command, msg_in=None) for command in expected],
         )
 
-    def _restore(self, expected: list) -> None:
-        self._mock_commands(expected)
+    def _restore(self, expected: list, overrides: dict = None) -> None:
+        self._mock_commands(expected, overrides)
         self._run_restore()
         self._assert_commands(expected)
 
     def _run_restore(self) -> None:
         self.sweep.RunCmds(self.sweep._restore_commands())
+
+    def _assert_reset_codes(self, command: str, accepted: tuple, rejected: tuple) -> None:
+        """Run the restore with *command* answering each code; only *accepted* pass."""
+        expected = self._remaining_commands()
+        for code in accepted:
+            with self.subTest(command=command, code=code):
+                self._restore(expected, {command: code})
+        for code in rejected:
+            with self.subTest(command=command, code=code):
+                self._mock_commands(expected, {command: code})
+                with self.assertRaises(AssertionError):
+                    self._run_restore()
+                self._assert_commands(expected)
 
     def test_restore_with_omitted_fan_runs_remaining_cleanup(self) -> None:
         self.sweep.clk_freq[0]["is_apu"] = True
@@ -119,35 +148,23 @@ class TestCliSetRestore(unittest.TestCase):
         self.assertEqual([entry.get("is_apu") for entry in baseline], [True, False, False])
         functions["amdsmi_shut_down"].assert_called_once_with()
 
-    def test_supported_power_cap_rejects_not_supported_reset(self) -> None:
+    def test_reported_power_cap_requires_reset_success(self) -> None:
         limits = self.sweep.static_data["gpu_data"][0]["limit"]
+        # A current cap of 0 does not matter: reset writes the default cap.
         for power_type, current in (("ppt0", 291), ("ppt1", 291), ("ppt0", 0)):
-            with self.subTest(power_type=power_type, current=current):
-                limits.update(ppt0="N/A", ppt1="N/A")
-                limits[power_type] = {
-                    "min_power_limit": {"value": 261, "unit": "W"},
-                    "max_power_limit": {"value": 350, "unit": "W"},
-                    "socket_power_limit": {"value": current, "unit": "W"},
-                }
-                self.sweep.static_data["gpu_data"][0]["limit"] = limits
-                self._restore(self._remaining_commands())
-                self._mock_commands(
-                    self._remaining_commands(),
-                    {"amd-smi reset --power-cap --gpu 0": int(amdsmi.AmdSmiStatus.NOT_SUPPORTED)},
-                )
-                with self.assertRaisesRegex(AssertionError, "NOT_SUPPORTED"):
-                    self._run_restore()
+            limits.update(ppt0="N/A", ppt1="N/A")
+            limits[power_type] = deepcopy(POWER_CAP)
+            limits[power_type]["socket_power_limit"]["value"] = current
+            self._assert_reset_codes(
+                "amd-smi reset --power-cap --gpu 0", accepted=(0,), rejected=(UNSUPPORTED,)
+            )
 
-    def test_unsettable_power_cap_allows_not_supported_reset(self) -> None:
+    def test_missing_power_cap_requires_reset_not_supported(self) -> None:
         for sensor in ("N/A", {"min_power_limit": "N/A", "max_power_limit": "N/A"}):
-            with self.subTest(sensor=sensor):
-                self.sweep.static_data["gpu_data"][0]["limit"]["ppt0"] = sensor
-                self._mock_commands(
-                    self._remaining_commands(),
-                    {"amd-smi reset --power-cap --gpu 0": int(amdsmi.AmdSmiStatus.NOT_SUPPORTED)},
-                )
-                self._run_restore()
-                self._assert_commands(self._remaining_commands())
+            self.sweep.static_data["gpu_data"][0]["limit"]["ppt0"] = sensor
+            self._assert_reset_codes(
+                "amd-smi reset --power-cap --gpu 0", accepted=(UNSUPPORTED,), rejected=(0,)
+            )
 
     def test_restore_with_na_fan_runs_remaining_cleanup(self) -> None:
         self.sweep.clk_freq[0]["is_apu"] = True
@@ -191,7 +208,7 @@ class TestCliSetRestore(unittest.TestCase):
                 expected = [cmd for cmd in self._remaining_commands() if "--perf-level" not in cmd]
                 self._restore(expected)
 
-    def test_restore_with_apu_or_unavailable_fan_has_no_dgpu_fan_reset(self) -> None:
+    def test_apu_fan_reset_requires_not_supported(self) -> None:
         self.sweep.clk_freq[0]["is_apu"] = True
         for fan in (
             {},
@@ -199,25 +216,37 @@ class TestCliSetRestore(unittest.TestCase):
             {"apu_fan_pwm": "N/A"},
             {"apu_fan_pwm": {"value": 38, "unit": "%"}},
         ):
-            with self.subTest(fan=fan):
-                self.sweep.metric_data["gpu_data"][0]["fan"] = fan
-                self._restore(self._remaining_commands())
+            self.sweep.metric_data["gpu_data"][0]["fan"] = fan
+            self._assert_reset_codes(
+                "amd-smi reset --fans --gpu 0", accepted=(UNSUPPORTED,), rejected=(0,)
+            )
 
-    def test_restore_dgpu_fan_fields_are_independently_readable(self) -> None:
-        for maximum, speed in (("N/A", 80), (255, "N/A"), (255, 80), (255, 0)):
-            with self.subTest(maximum=maximum, speed=speed):
-                self.sweep.metric_data["gpu_data"][0]["fan"] = {"max": maximum, "speed": speed}
-                expected = self._remaining_commands()
-                if speed != "N/A":
-                    expected.insert(0, "amd-smi reset --fans --gpu 0")
-                self._restore(expected)
+    def test_dgpu_fan_reset_is_graded_by_max_not_speed(self) -> None:
+        # A runtime-suspended dGPU reports speed as N/A; max decides whether a fan exists.
+        for speed in ("N/A", 80):
+            self.sweep.metric_data["gpu_data"][0]["fan"] = {"max": "N/A", "speed": speed}
+            self._assert_reset_codes(
+                "amd-smi reset --fans --gpu 0", accepted=(UNSUPPORTED,), rejected=(0,)
+            )
+        for speed in ("N/A", 80, 0):
+            self.sweep.metric_data["gpu_data"][0]["fan"] = {"max": 255, "speed": speed}
+            self._assert_reset_codes(
+                "amd-smi reset --fans --gpu 0",
+                accepted=(0, UNSUPPORTED),
+                rejected=(int(amdsmi.AmdSmiStatus.UNEXPECTED_DATA),),
+            )
+
+    def test_dgpu_fan_max_out_of_range_fails_before_sweep(self) -> None:
+        for maximum in (0, 256):
+            with self.subTest(maximum=maximum):
+                self.sweep.metric_data["gpu_data"][0]["fan"] = {"max": maximum, "speed": 80}
+                self._mock_commands([])
+                with self.assertRaises(AssertionError):
+                    self._run_restore()
+                self.sweep.util.RunCmdSync.assert_not_called()
 
     def test_restore_mixed_apu_dgpu_preserves_cleanup_order(self) -> None:
-        dgpu = {
-            "fan": {"max": 255, "speed": 80},
-            "clock": {},
-            "perf_level": "AMDSMI_DEV_PERF_LEVEL_HIGH",
-        }
+        dgpu = {"fan": dict(DGPU_FAN), "clock": {}, "perf_level": "AMDSMI_DEV_PERF_LEVEL_HIGH"}
         static = deepcopy(self.sweep.static_data["gpu_data"][0])
         self.sweep.common.processors.append(object())
         self.sweep.partition_data["current_partition"] *= 2
@@ -233,7 +262,7 @@ class TestCliSetRestore(unittest.TestCase):
                 for index in range(2):
                     commands = self._remaining_commands(index)
                     if index == dgpu_index:
-                        commands = [f"amd-smi reset --fans --gpu {index}"] + [
+                        commands = [
                             cmd.replace("--perf-level AUTO", "--perf-level HIGH")
                             for cmd in commands
                         ]
@@ -244,8 +273,8 @@ class TestCliSetRestore(unittest.TestCase):
                 self.assertEqual(metrics[1 - dgpu_index], {})
 
     def test_restore_unexpected_command_failure_still_runs_remaining_cleanup(self) -> None:
-        self.sweep.metric_data["gpu_data"][0]["fan"] = {"max": 255, "speed": 80}
-        expected = ["amd-smi reset --fans --gpu 0"] + self._remaining_commands()
+        self.sweep.metric_data["gpu_data"][0]["fan"] = dict(DGPU_FAN)
+        expected = self._remaining_commands()
         for failed_command in expected:
             with self.subTest(command=failed_command):
                 self._mock_commands(

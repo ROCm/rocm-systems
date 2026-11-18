@@ -65,22 +65,20 @@ class TestSet(TestCliBase):
         self.static_data = static_data
         cmds = []
         for index, gpu in enumerate(self.common.processors):
-            # max fan speed is the hwmon pwm1_max ceiling on every interface
+            # reset --fans (works for both legacy hwmon and gpu_od interfaces)
+            # The driver hides pwm1_max only along with every other fan attribute,
+            # pwm1_enable included, so a GPU without max cannot reset its fan. Speed is
+            # not used: a runtime-suspended dGPU reports it as "N/A".
             fan_max = self.metric_data["gpu_data"][index]["fan"]["max"]
-            if fan_max != "N/A":
+            if self.clk_freq[index]["is_apu"] or fan_max == "N/A":
+                fan_reset = [amdsmi.AmdSmiStatus.NOT_SUPPORTED]
+            else:
+                # max fan speed is the hwmon pwm1_max ceiling on every interface
                 self.assertGreater(fan_max, 0, f"GPU {index}: max fan speed must be > 0")
                 self.assertLessEqual(fan_max, 255, f"GPU {index}: max fan speed must be <= 255")
-
-            # reset --fans (works for both legacy hwmon and gpu_od interfaces)
-            # A readable fan speed does not imply the fan can be controlled.
-            fan_speed = self.metric_data["gpu_data"][index]["fan"]["speed"]
-            if fan_speed != "N/A":
-                cmds.append(
-                    (
-                        f"amd-smi reset --fans --gpu {index}",
-                        [self.PASS, amdsmi.AmdSmiStatus.NOT_SUPPORTED],
-                    )
-                )
+                # A present fan is not necessarily controllable.
+                fan_reset = [self.PASS, amdsmi.AmdSmiStatus.NOT_SUPPORTED]
+            cmds.append((f"amd-smi reset --fans --gpu {index}", fan_reset))
 
             # set --profile defaults
             # Read from the static baseline: the library is shut down once setup
@@ -140,20 +138,17 @@ class TestSet(TestCliBase):
             # reset --power-cap
             # Writes each supported sensor's default_power_cap. Replaying the recorded
             # value did not restore it: min and max were written after it, so the cap
-            # was left at max.
+            # was left at max. The current cap is not read, so a cap of 0 still resets.
             power_limits = self.static_data["gpu_data"][index]["limit"]
-            has_power_cap = False
-            for power_type in self.power_types:
-                sensor = power_limits[power_type]
-                if sensor == "N/A":
-                    continue
-                if sensor["min_power_limit"] == "N/A" or sensor["max_power_limit"] == "N/A":
-                    continue
-                has_power_cap = True
+            reports_cap = any(
+                isinstance(power_limits[power_type], dict)
+                and power_limits[power_type]["max_power_limit"] != "N/A"
+                for power_type in self.power_types
+            )
             cmds.append(
                 (
                     f"amd-smi reset --power-cap --gpu {index}",
-                    self.PASS if has_power_cap else [self.PASS, amdsmi.AmdSmiStatus.NOT_SUPPORTED],
+                    self.PASS if reports_cap else [amdsmi.AmdSmiStatus.NOT_SUPPORTED],
                 )
             )
 
