@@ -1226,13 +1226,17 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
       pending.reads = d.is_load || ldsAccess.read_modify_write;
       pending.writes = !d.is_load || ldsAccess.read_modify_write;
     }
+    // When every lane is an aligned atomic of one width, the instruction-wide
+    // check exempts matching atomics as each lane's check does.
     const bool checkReads = !defer_lds && (d.is_load || ldsAccess.read_modify_write) &&
-                            detector->mayConflict(intervals, waveId, /*isWrite=*/false, ldsOrder);
+                            detector->mayConflict(intervals, waveId, /*isWrite=*/false, ldsOrder,
+                                                  ldsAccess.aligned_atomic_bytes);
     // A barrier arrive updates its cell atomically, so it races with no read
     // of the cell and is checked only as a read, against writes of it.
     const bool checkWrites = !defer_lds && (!d.is_load || ldsAccess.read_modify_write) &&
                              !ldsAccess.barrier_arrive &&
-                             detector->mayConflict(intervals, waveId, /*isWrite=*/true, ldsOrder);
+                             detector->mayConflict(intervals, waveId, /*isWrite=*/true, ldsOrder,
+                                                   ldsAccess.aligned_atomic_bytes);
     if (defer_lds || checkReads || checkWrites) {
       for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
         for (size_t set = 0; set < numAddressSets; ++set) {

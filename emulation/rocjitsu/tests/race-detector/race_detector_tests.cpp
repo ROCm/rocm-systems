@@ -995,6 +995,32 @@ TEST(RaceDetector, LdsMayConflictChecksOnlyTheAccessedChunks) {
   }
 }
 
+// Bytes of the accessed chunk are live, but no event overlaps the access.
+TEST(RaceDetector, LdsMayConflictScansTheEventsOfALiveChunk) {
+  for (bool writes : {false, true}) {
+    SCOPED_TRACE(writes ? "RAW" : "WAR");
+    RaceTestBuilder builder(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8);
+    if (writes)
+      builder.ldsWrite(/*wave=*/1, /*lane=*/0, /*addr=*/1024, /*bytes=*/4);
+    else
+      builder.ldsRead(/*wave=*/1, /*lane=*/0, /*addr=*/1024, /*bytes=*/4, /*vgprDst=*/2);
+    auto range = [](int start, int end) {
+      IntervalSet set;
+      set.append(start, end);
+      set.finalize();
+      return set;
+    };
+    const RaceDetector &detector = builder.detector();
+    const bool checkWrite = !writes;
+    const MemoryOrderClass order = MemoryOrderClass::LDS;
+    // [1028, 1032) shares the event's 16-byte chunk and none of its bytes.
+    EXPECT_FALSE(detector.mayConflict(range(1028, 1032), WaveId{0}, checkWrite, order));
+    EXPECT_FALSE(detector.mayConflict(range(1020, 1024), WaveId{0}, checkWrite, order));
+    EXPECT_TRUE(detector.mayConflict(range(1027, 1032), WaveId{0}, checkWrite, order));
+    EXPECT_TRUE(detector.mayConflict(range(1020, 1025), WaveId{0}, checkWrite, order));
+  }
+}
+
 TEST(RaceDetector, LdsSameWave_MixedOrderingSurvivesPartialRetirement) {
   for (bool writes : {false, true}) {
     SCOPED_TRACE(writes ? "RAW" : "WAR");
@@ -3507,6 +3533,72 @@ RaceTestBuilder cellBuilder(int numWaves = 2) {
 }
 
 } // namespace
+
+// ----- Instruction-wide check -----
+
+namespace {
+
+IntervalSet dataBytes() {
+  IntervalSet set;
+  set.append(kX, kX + 4);
+  set.finalize();
+  return set;
+}
+
+bool readMayConflict(RaceTestBuilder &b, int wave) {
+  return b.detector().mayConflict(dataBytes(), WaveId{wave}, /*isWrite=*/false,
+                                  MemoryOrderClass::LDS);
+}
+
+} // namespace
+
+// Wave 2 has not read the cell, so the write is still live. The instruction-wide
+// check skips it for wave 1, which acquired it, and not for wave 2.
+TEST(RaceDetector, BarrierCell_MayConflictSkipsAnAcquiredWrite) {
+  RaceTestBuilder b = cellBuilder(/*numWaves=*/3);
+  dsWrite(b, 0);
+  b.waitDscnt(0, 0);
+  b.cellArrive(0, kCell, Arrival::Ds, /*completes=*/true);
+  EXPECT_TRUE(readMayConflict(b, 1));
+  pollCell(b, 1);
+  EXPECT_FALSE(readMayConflict(b, 1));
+  EXPECT_TRUE(readMayConflict(b, 2));
+  b.checkLdsRead(/*wave=*/1, /*lane=*/0, kX, /*bytes=*/4);
+  EXPECT_EQ(b.raceCount(), 0);
+  b.checkLdsRead(/*wave=*/2, /*lane=*/0, kX, /*bytes=*/4);
+  expectOneLdsRace(b, /*wave=*/2, kX, /*isWrite=*/false);
+}
+
+// The write is in flight when wave 0 arrives, so it is handed off, not released.
+TEST(RaceDetector, BarrierCell_MayConflictSkipsAHandedOffWrite) {
+  RaceTestBuilder b = cellBuilder(/*numWaves=*/3);
+  dsWrite(b, 0);
+  b.cellArrive(0, kCell, Arrival::Ds, /*completes=*/true);
+  EXPECT_TRUE(readMayConflict(b, 1));
+  pollCell(b, 1);
+  EXPECT_FALSE(readMayConflict(b, 1));
+  EXPECT_TRUE(readMayConflict(b, 2));
+  b.checkLdsRead(/*wave=*/1, /*lane=*/0, kX, /*bytes=*/4);
+  EXPECT_EQ(b.raceCount(), 0);
+  b.checkLdsRead(/*wave=*/2, /*lane=*/0, kX, /*bytes=*/4);
+  expectOneLdsRace(b, /*wave=*/2, kX, /*isWrite=*/false);
+}
+
+// A pending arrive is an aligned 64-bit atomic on the cell. An access whose
+// lanes are all atomics of that width does not conflict with it; any other
+// write of the cell does.
+TEST(RaceDetector, BarrierCell_MayConflictExemptsAnAtomicOfTheSameWidth) {
+  RaceTestBuilder b = cellBuilder(/*numWaves=*/3);
+  b.cellArrive(0, kCell, Arrival::Ds, /*completes=*/false);
+  IntervalSet cell;
+  cell.append(kCell, kCell + kBarrierCellBytes);
+  cell.finalize();
+  const RaceDetector &detector = b.detector();
+  const MemoryOrderClass order = MemoryOrderClass::LDS;
+  EXPECT_FALSE(detector.mayConflict(cell, WaveId{1}, /*isWrite=*/true, order, kBarrierCellBytes));
+  EXPECT_TRUE(detector.mayConflict(cell, WaveId{1}, /*isWrite=*/true, order, /*atomicBytes=*/4));
+  EXPECT_TRUE(detector.mayConflict(cell, WaveId{1}, /*isWrite=*/true, order));
+}
 
 // ----- Handoff -----
 

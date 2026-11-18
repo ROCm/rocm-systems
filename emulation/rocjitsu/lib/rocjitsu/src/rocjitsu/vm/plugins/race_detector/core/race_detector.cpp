@@ -428,9 +428,23 @@ void RaceDetector::retireEvent(EventId eventId) {
   events_.markRetired(eventId);
 }
 
-template <typename Visit>
-void RaceDetector::forEachUnacquiredLdsEvent(WaveId accessor, int start, int end,
-                                             Visit visit) const {
+template <typename Matches>
+bool RaceDetector::anyCheckedLdsEvent(WaveId accessor, bool isWrite,
+                                      MemoryOrderClass currentMemoryOrder, int start, int end,
+                                      Matches matches) const {
+  for (EventId eventId : isWrite ? ldsReadEvents : ldsWriteEvents) {
+    // The LDS bytes are safe only when the two operations share a proven FIFO
+    // completion class: operations in the same non-UNORDERED class complete in
+    // issue order. An explicit wait that completed the older access also makes
+    // them safe. A read's destination VGPR remains independently protected by
+    // its wait-counter obligations. LDS write/write ordering is not checked.
+    if (accessor == events_.waveId(eventId) &&
+        (events_.ldsAccessComplete(eventId) || (currentMemoryOrder != MemoryOrderClass::UNORDERED &&
+                                                events_.ldsOrder(eventId) == currentMemoryOrder)))
+      continue;
+    if (matches(eventId))
+      return true;
+  }
   for (const WaveRaceState &owner : waveRaceStates) {
     if (owner.getWaveId() == accessor || !owner.barrierPendingMayOverlap(start, end))
       continue;
@@ -438,8 +452,28 @@ void RaceDetector::forEachUnacquiredLdsEvent(WaveId accessor, int start, int end
     const std::vector<EventId> &history = owner.getBarrierPendingEvents();
     for (auto event = history.rbegin();
          event != history.rend() && events_.releaseEpoch(*event) > acquiredEpoch; ++event)
-      visit(*event);
+      if (matches(*event))
+        return true;
   }
+  return false;
+}
+
+template <typename Matches>
+bool RaceDetector::anyCheckedSrc2Read(WaveId accessor, MemoryOrderClass currentMemoryOrder,
+                                      Matches matches) const {
+  for (const Src2Event &source : src2Events) {
+    const EventId id = source.id;
+    if (events_.waveId(id) == accessor) {
+      if (events_.ldsAccessComplete(id) || (currentMemoryOrder != MemoryOrderClass::UNORDERED &&
+                                            events_.ldsOrder(id) == currentMemoryOrder))
+        continue;
+    } else if (ordered(accessor, id)) {
+      continue;
+    }
+    if (matches(source))
+      return true;
+  }
+  return false;
 }
 
 void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes,
@@ -450,25 +484,19 @@ void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes,
     return;
   }
 
-  const auto check = [&](EventId eventId) {
+  anyCheckedLdsEvent(wave, /*isWrite=*/false, currentMemoryOrder, addr, addr + nBytes,
+                     [&](EventId eventId) {
     if (!events_.writesLds(eventId) || events_.atomicLdsElementMatches(eventId, atomicBytes))
-      return;
+      return false;
     // Report a byte both accesses touch, not the start of this access.
     if (const auto byte = events_.ldsIntervals(eventId).firstOverlap(addr, addr + nBytes);
         byte && !handedOffTo(wave, eventId)) {
       raceHandler(
           {RaceViolation::Space::LDS, *byte, wave.value, lane, false, workgroupId, eventId});
     }
-  };
-  for (EventId eventId : ldsWriteEvents) {
-    // Operations in the same non-UNORDERED class complete in issue order.
-    if (wave == events_.waveId(eventId) &&
-        (events_.ldsAccessComplete(eventId) || (currentMemoryOrder != MemoryOrderClass::UNORDERED &&
-                                                events_.ldsOrder(eventId) == currentMemoryOrder)))
-      continue;
-    check(eventId);
-  }
-  forEachUnacquiredLdsEvent(wave, addr, addr + nBytes, check);
+    // Report every conflicting event.
+    return false;
+  });
 }
 
 void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
@@ -479,52 +507,61 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
     return;
   }
 
-  for (const auto &source : src2Events) {
-    const auto id = source.id;
-    if (events_.waveId(id) == wave) {
-      if (events_.ldsAccessComplete(id) || (currentMemoryOrder != MemoryOrderClass::UNORDERED &&
-                                            events_.ldsOrder(id) == currentMemoryOrder))
-        continue;
-    } else if (ordered(wave, id)) {
-      continue;
-    }
+  anyCheckedSrc2Read(wave, currentMemoryOrder, [&](const Src2Event &source) {
     if (const auto byte = source.sourceReads.firstOverlap(addr, addr + nBytes)) {
       RaceViolation violation{
-          RaceViolation::Space::LDS, *byte, wave.value, lane, true, workgroupId, id};
+          RaceViolation::Space::LDS, *byte, wave.value, lane, true, workgroupId, source.id};
       violation.conflictsWithSrc2Read = true;
       raceHandler(violation);
     }
-  }
-  const auto check = [&](EventId eventId) {
+    // Report every conflicting event.
+    return false;
+  });
+  anyCheckedLdsEvent(wave, /*isWrite=*/true, currentMemoryOrder, addr, addr + nBytes,
+                     [&](EventId eventId) {
     if (!events_.readsLds(eventId) || events_.atomicLdsElementMatches(eventId, atomicBytes))
-      return;
+      return false;
     // Report a byte both accesses touch, not the start of this access.
     if (const auto byte = events_.ldsIntervals(eventId).firstOverlap(addr, addr + nBytes);
         byte && !handedOffTo(wave, eventId)) {
       raceHandler({RaceViolation::Space::LDS, *byte, wave.value, lane, true, workgroupId, eventId});
     }
-  };
-  for (EventId eventId : ldsReadEvents) {
-    // The LDS bytes are safe only when the two operations share a proven
-    // FIFO completion class, or an explicit wait completed the older event.
-    // The read's destination VGPR remains independently protected by its
-    // wait-counter obligations. This WAR check does not cover LDS
-    // write/write ordering, which is not currently checked.
-    if (wave == events_.waveId(eventId) &&
-        (events_.ldsAccessComplete(eventId) || (currentMemoryOrder != MemoryOrderClass::UNORDERED &&
-                                                events_.ldsOrder(eventId) == currentMemoryOrder)))
-      continue;
-    check(eventId);
-  }
-  forEachUnacquiredLdsEvent(wave, addr, addr + nBytes, check);
+    // Report every conflicting event.
+    return false;
+  });
 }
 
 bool RaceDetector::mayConflict(const IntervalSet &accessed, WaveId wave, bool isWrite,
-                               MemoryOrderClass currentMemoryOrder) const {
+                               MemoryOrderClass currentMemoryOrder, uint8_t atomicBytes) const {
+  // Fast path: no live event has bytes in any 16-byte chunk the access touches.
   const std::vector<LdsChunkCounts> &counts = isWrite ? byteReadCounts : byteWriteCounts;
-  return std::ranges::any_of(accessed, [&](const Interval &interval) {
-    return hasPotentialLdsConflict(interval.start, interval.end - interval.start, counts, wave,
-                                   currentMemoryOrder);
+  if (!std::ranges::any_of(accessed, [&](const Interval &interval) {
+        return hasPotentialLdsConflict(interval.start, interval.end - interval.start, counts, wave,
+                                       currentMemoryOrder);
+      }))
+    return false;
+  // Scan the events once for the whole instruction, by the rules the per-lane
+  // checks apply, so a clean access does not repeat the scan for each lane.
+  if (isWrite &&
+      anyCheckedSrc2Read(wave, currentMemoryOrder, [&](const Src2Event &source) {
+        return std::ranges::any_of(accessed, [&](const Interval &interval) {
+          return source.sourceReads.overlapsRange(interval.start, interval.end);
+        });
+      }))
+    return true;
+  // The fast path found a chunk with live bytes, so `accessed` is not empty.
+  const int start = accessed.begin()->start;
+  const int end = (accessed.end() - 1)->end;
+  return anyCheckedLdsEvent(wave, isWrite, currentMemoryOrder, start, end, [&](EventId eventId) {
+    if (!(isWrite ? events_.readsLds(eventId) : events_.writesLds(eventId)) ||
+        events_.atomicLdsElementMatches(eventId, atomicBytes))
+      return false;
+    const IntervalSet &bytes = events_.ldsIntervals(eventId);
+    return std::ranges::any_of(accessed,
+                               [&](const Interval &interval) {
+                                 return bytes.overlapsRange(interval.start, interval.end);
+                               }) &&
+           !handedOffTo(wave, eventId);
   });
 }
 

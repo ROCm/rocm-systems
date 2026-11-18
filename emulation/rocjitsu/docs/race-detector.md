@@ -737,9 +737,11 @@ mixed chunk uses the scan until its count drains. The history remains available
 for checks by other waves until a barrier orders it for all of them. Direct-to-LDS and unordered
 memory operations still require their own completion checks.
 For a DS or FLAT instruction, the plugin first merges the active lanes' byte
-ranges into intervals and checks the chunk counts under them. When no chunk can
-hold a conflict, it skips the per-lane checks. The same intervals become the
-instruction's event.
+ranges into intervals and checks the chunk counts under them. When a chunk can
+hold a conflict, it scans the events once for the instruction, against all of
+its intervals. The per-lane checks, which report each conflicting lane, run
+only when that scan finds an event that conflicts. The same intervals become
+the instruction's event.
 
 For indexed RDNA1/2 LDS instructions, the byte checks use the same workgroup
 allocation bounds as execution. The two addresses of a dual operation are
