@@ -3,9 +3,11 @@
 ## System Context
 
 - rocprofiler-compute provides an ML API trace pipeline under `--trace-ml-api`:
-  - It wraps each framework call in a ROCTX range, so the kernels launched
-    share `Correlation_ID` and `GUID` with the marker.
-  - This is used to group the kernels under the operation that launched them.
+  - It wraps each framework call in a ROCTX range used to group kernels under
+    the operation that launched them.
+  - Analysis joins markers to kernels on `Correlation_ID` and `GUID`, then
+    applies a launch-time fallback for kernels that do not inherit the
+    marker's `Correlation_ID`.
 - JAX compiles each `jax.jit` / `jax.pmap` / `jax.shard_map` function, and
   each eager primitive, into an XLA module:
   - The function or primitive is lowered to HLO (High Level Optimizer IR),
@@ -78,10 +80,10 @@
   - The "range already open" flag is thread-local. Push and pop of the range,
     and clearing that flag, happen in `try` / `finally` so an exception still
     balances the marker.
-- Kernels join to the marker on `Correlation_ID` when the launch is on the
-  thread that opened the range. Multi-device `pmap` / `shard_map` launch
-  compute kernels from worker threads, so they need the fallback under
-  "Where the range is marked".
+- Kernels join to the marker on `Correlation_ID` + `GUID` when the launch is
+  on the thread that opened the range. Multi-device `pmap` / `shard_map`
+  launch compute kernels from worker threads, so they need the fallback
+  under "Where the range is marked".
 
 ### At a glance
 
@@ -155,16 +157,17 @@
     `block_until_ready`.
   - An enqueue on another thread does not inherit that id. Multi-device
     `pmap` and `shard_map` launch each GPU's compute kernels from a
-    per-device worker thread: the marker's `Correlation_Id` matches the
+    per-device worker thread: the marker's `Correlation_ID` matches the
     host copies only; the compute kernels keep their own ids.
   - Those unmatched kernels are attributed by following
-    `hipModuleLaunchKernel` (same `Correlation_Id` as the kernel) and
+    `hipModuleLaunchKernel` (same `Correlation_ID` as the kernel) and
     assigning the kernel to the JAX marker whose time window contains that
     launch, in the same process and `GUID`. Setup launches outside any
     marker stay unmatched.
   - `GUID` is the rocprofiler-sdk database/import identifier
     ([rocpd schema](https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-sdk/source/lib/python/rocpd/README.md)).
-    All marker and kernel rows from that instance share it.
+    All marker and kernel rows from that instance share it. Analyze renames
+    on-disk `Correlation_Id` to `Correlation_ID` before the join.
   - The join is `Correlation_ID` + `GUID`, then the launch-time fallback for
     what that join leaves unmatched, so a colliding `Correlation_ID` from
     another instance does not match.
@@ -272,9 +275,9 @@ jax.jit.train_step jax_workload.py:13 (calls: N, dispatches: M, total: T)
     `jax.jit.matmul`, or `jax.{primitive}` when no jitted helper ran).
     Nested or inner calls do not emit a second range.
   - Kernels launched by that call appear under that marker, with the caller
-    `file:line` and the call's dispatch count and GPU time. Single-device
-    kernels match on `Correlation_ID`. Multi-device compute kernels match
-    through the launch-timestamp fallback.
+    `file:line` and the call's dispatch count and GPU time. Same-thread
+    launches match on `Correlation_ID` + `GUID`. Worker-thread compute
+    launches match through the launch-timestamp fallback (same `GUID`).
   - With autotuning pinned, kernel lists agree across analyze passes.
 - Unit tests cover marker naming and the "range already open" skip, without a
   GPU workload.
@@ -301,6 +304,6 @@ Design trade-offs:
 - A `jit` / `pmap` / `shard_map` marker is the compiled function. Every
   kernel that call launches is a direct child of that node.
 - One function name covers every input signature.
-- Prefer the `Correlation_ID` join. Use the launch-timestamp fallback only
-  for kernels that join leaves unmatched, so single-device behavior stays
-  the same.
+- Prefer the `Correlation_ID` + `GUID` join. Use the launch-timestamp
+  fallback only for kernels that join leaves unmatched, so same-thread
+  launches stay on the exact id match.
