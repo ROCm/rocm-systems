@@ -129,7 +129,49 @@ class BlitKernel : public core::Blit {
   /// BlitKernel rather than a core::Blit.
   using core::Blit::SubmitSwapCopyCommand;
 
+  /// @brief Submit a broadcast copy. Destinations past what one dispatch can
+  /// drive are split across further dispatches, all sharing @p out_signal.
+  virtual hsa_status_t SubmitBroadcastCopyCommand(
+      const void* src, void* const* dst_list, uint32_t num_destinations,
+      size_t size, std::vector<core::Signal*>& dep_signals,
+      core::Signal& out_signal) override;
+
   const uint16_t kInvalidPacketHeader = HSA_PACKET_TYPE_INVALID;
+
+  /// Largest broadcast destination count this path accepts, and the value
+  /// GpuAgent::MaxBroadcastDestinations reports. This is the API's own limit -
+  /// hsa_amd_memory_copy_op_t::num_entries is a uint16_t - not any one
+  /// engine's packet limit, because both routings split a request larger than
+  /// their packets or dispatches can describe rather than failing it. The
+  /// accepted range is therefore a property of the agent, not of whichever
+  /// engine happens to service the copy.
+  static constexpr uint32_t kMaxBroadcastDestinations = UINT16_MAX;
+
+  /// Destinations one broadcast dispatch drives, and so the capacity of one
+  /// slot of the destination-list ring. The shader keys its destination off
+  /// workgroup_id_x, so this also bounds the grid of a single dispatch.
+  static constexpr uint32_t kMaxBroadcastDstPerDispatch = 1024;
+
+  /// Bytes one broadcast dispatch writes to each destination.
+  /// KernelArgs::broadcast::copy_size is a uint32_t, and the bound is rounded
+  /// down to a multiple of the shader's 16-byte chunk for the same reason as
+  /// kMaxSwapBytesPerDispatch: the shader splits its grid into a 16-byte phase
+  /// and a trailing-byte phase, so a boundary that was not a multiple of 16
+  /// would give the tail of one slice and the head of the next inconsistent
+  /// phase assignments.
+  ///
+  /// A larger transfer is split across dispatches rather than refused. The
+  /// SDMA routing chunks a linear copy internally and so has no size ceiling,
+  /// and an application must not see a broadcast succeed or fail depending on
+  /// which engine served it - the same argument that makes the accepted
+  /// destination count engine-independent.
+  static constexpr size_t kMaxBroadcastBytesPerDispatch = size_t(UINT32_MAX) & ~size_t(15);
+
+  /// Threads per workgroup for a broadcast dispatch. Must match the
+  /// workgroup_size_x PopulateQueue writes into the packet, because the shader
+  /// strides its copy loops by this many lanes; a grid built from a different
+  /// figure would leave bytes uncopied or copy them twice.
+  static constexpr uint32_t kBroadcastWorkgroupSize = 64;
 
   /// Bytes one swap dispatch exchanges. KernelArgs::swap::swap_size is a
   /// uint32_t, and the bound is rounded down to a multiple of the shader's
@@ -143,6 +185,16 @@ class BlitKernel : public core::Blit {
   /// Divides the ring size to give the largest reservation a splittable
   /// submission may take. See MaxReservationPackets.
   static constexpr uint32_t kReservationRingDivisor = 2;
+
+  /// Capacity of one slot of the kernarg payload ring. Every operation that
+  /// puts a block there must fit within it, so raising a consumer's own bound
+  /// means raising this too. Sized by the largest consumer: a broadcast
+  /// destination list of kMaxBroadcastDstPerDispatch addresses. A multiple of
+  /// 16 so each slot inherits the ring allocation's 16-byte alignment.
+  static constexpr size_t kKernargPayloadBytesPerSlot =
+      size_t(kMaxBroadcastDstPerDispatch) * sizeof(uint64_t);
+  static_assert(kKernargPayloadBytesPerSlot % 16 == 0,
+                "a payload slot must preserve the ring's 16-byte alignment");
 
   union KernelArgs {
     struct __ALIGNED__(16) {
@@ -176,6 +228,13 @@ class BlitKernel : public core::Blit {
       uint32_t fill_value;
       uint32_t num_workitems;
     } fill;
+
+    struct __ALIGNED__(16) {
+      uint64_t src_addr;          // Source buffer address
+      uint64_t dst_list_addr;     // GPU-accessible array of destination addresses
+      uint32_t num_destinations;  // Destinations this dispatch drives
+      uint32_t copy_size;         // Bytes written to each destination
+    } broadcast;
 
     struct __ALIGNED__(16) {
       uint64_t addr_a;     // First buffer address
@@ -226,6 +285,30 @@ class BlitKernel : public core::Blit {
   /// At most half the ring, and never zero.
   uint32_t MaxReservationPackets() const;
 
+  /// Lazily allocate the kernarg payload ring and return it in @p ring.
+  ///
+  /// A dispatch whose kernarg has to point at a variable-length block - the
+  /// broadcast destination list today - puts that block here rather than in
+  /// an allocation of its own. There is one payload slot per kernarg ring
+  /// entry and it is claimed with the same index, so the lifetime argument is
+  /// exactly the kernarg ring's and no stronger: a slot is reused only once
+  /// the queue's read index has passed the dispatch that owned it. That is a
+  /// launch bound rather than a retirement bound, and it is the same bound
+  /// kernarg reuse has always relied on - the payload is read at kernel entry
+  /// alongside the kernarg itself, so the two share one exposure window.
+  /// NULL until the first operation that needs a payload.
+  ///
+  /// Use KernargPayload to address a slot; the ring base is returned here only
+  /// so a caller can hoist the one allocation check out of its dispatch loop.
+  hsa_status_t EnsureKernargPayloadRing(void*& ring);
+
+  /// Payload block belonging to kernarg slot @p index, at least
+  /// kKernargPayloadBytesPerSlot bytes and 16-byte aligned. @p ring must come
+  /// from a successful EnsureKernargPayloadRing.
+  static void* KernargPayload(void* ring, uint32_t index) {
+    return static_cast<uint8_t*>(ring) + size_t(index) * kKernargPayloadBytesPerSlot;
+  }
+
   /// Dispatch packets that still fit in one reservation once
   /// @p num_barrier_packet barrier packets have taken their place in it.
   /// A request needing more than this is split across reservations.
@@ -261,6 +344,10 @@ class BlitKernel : public core::Blit {
 
   KernelArgs* ObtainAsyncKernelCopyArg();
 
+  /// As above, also reporting the ring slot the arguments were taken from, so
+  /// callers can place per-dispatch data in a matching slot of their own ring.
+  KernelArgs* ObtainAsyncKernelCopyArg(uint32_t& index);
+
   void RecordBlitHistory(uint64_t size, uint64_t index);
 
   /// AQL code object and size for each kernel.
@@ -269,6 +356,7 @@ class BlitKernel : public core::Blit {
     CopyMisaligned,
     Fill,
     SwapCopy,
+    BroadcastCopy,
   };
 
   struct KernelCode {
@@ -288,6 +376,12 @@ class BlitKernel : public core::Blit {
   KernelArgs* kernarg_async_;
   uint32_t kernarg_async_mask_;
   volatile uint32_t kernarg_async_counter_;
+
+  /// Variable-length payload ring, indexed in lockstep with the kernarg ring
+  /// so a slot is recycled on the same bound kernarg slots are.
+  /// NULL until the first operation that needs a payload.
+  std::atomic<void*> kernarg_payload_;
+  std::mutex kernarg_payload_lock_;
 
   /// Completion signal for every kernel dispatched.
   hsa_signal_t completion_signal_;
