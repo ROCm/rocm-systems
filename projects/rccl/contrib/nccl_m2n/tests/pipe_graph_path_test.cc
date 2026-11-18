@@ -154,6 +154,65 @@ TEST(PipeGraphPathPlannerTest, KeepsPackSourceFifoLayout) {
   gReshardCopyAlgorithm = savedCopyAlgorithm;
 }
 
+bool anyChannelHasEdge(const StagingPeerInfo (&edges)[STAGING_MAX_CHANNELS][MAX_TARGETS], int edge, int channels) {
+  for (int ch = 0; ch < channels; ++ch) {
+    if (edges[ch][edge].active) return true;
+  }
+  return false;
+}
+
+bool anyChannelHasEdge(const StagingPeerInfo (&edges)[STAGING_MAX_CHANNELS][MAX_SOURCES], int edge, int channels) {
+  for (int ch = 0; ch < channels; ++ch) {
+    if (edges[ch][edge].active) return true;
+  }
+  return false;
+}
+
+/* With a {Shard(0), Shard(1)} source, a destination shard is fed by
+ * non-adjacent source shards, which PIPE channel grouping cannot place. Every
+ * rank has to reject it in validation, before any rank reaches the kernel. */
+TEST(PipeGraphPathPlannerTest, RejectsNonContiguousSourceShardsOnEveryRank) {
+  int srcMeshDims[2] = {2, 2};
+  int dstMeshDims[2] = {1, 4};
+  int srcPlacements[2] = {NCCL_RESHARD_SHARD(0), NCCL_RESHARD_SHARD(1)};
+  int dstPlacements[2] = {NCCL_RESHARD_REPLICATE, NCCL_RESHARD_SHARD(1)};
+  size_t srcLocalShape[2] = {2, 4};
+  size_t dstLocalShape[2] = {4, 2};
+
+  ncclMesh_t srcMesh = NCCL_M2N_MESH_INITIALIZER;
+  srcMesh.ndims = 2;
+  srcMesh.dims = srcMeshDims;
+  srcMesh.startRank = 0;
+  ncclMesh_t dstMesh = NCCL_M2N_MESH_INITIALIZER;
+  dstMesh.ndims = 2;
+  dstMesh.dims = dstMeshDims;
+  dstMesh.startRank = 4;
+
+  ncclDistTensor_t src = NCCL_M2N_DIST_TENSOR_INITIALIZER;
+  src.localShape = srcLocalShape;
+  src.ndims = 2;
+  src.dtype = ncclUint8;
+  src.mesh = &srcMesh;
+  src.placements = srcPlacements;
+  ncclDistTensor_t dst = NCCL_M2N_DIST_TENSOR_INITIALIZER;
+  dst.localShape = dstLocalShape;
+  dst.ndims = 2;
+  dst.dtype = ncclUint8;
+  dst.mesh = &dstMesh;
+  dst.placements = dstPlacements;
+
+  for (int rank = 0; rank < 8; ++rank) {
+    src.dataPtr = rank < 4 ? reinterpret_cast<void*>(0x2000) : nullptr;
+    dst.dataPtr = rank >= 4 ? reinterpret_cast<void*>(0x3000) : nullptr;
+    EXPECT_EQ(ncclInvalidArgument, validateStagingPlanLimits(rank, &src, srcLocalShape, &dst, dstLocalShape,
+                                                             RESHARD_COPY_ALGO_PIPE, 1))
+      << "rank " << rank;
+    EXPECT_EQ(ncclSuccess, validateStagingPlanLimits(rank, &src, srcLocalShape, &dst, dstLocalShape,
+                                                     RESHARD_COPY_ALGO_DIRECT, 1))
+      << "rank " << rank;
+  }
+}
+
 class PipeGraphPathTest : public ::testing::Test {
 protected:
   void SetUp() override {
@@ -476,6 +535,183 @@ TEST_F(PipeGraphPathTest, ThreeDestinationDomainsCoverGeneratorRingIngressForwar
     EXPECT_EQ(receivesFromGenerator ? 1 : 0, countRdmaSourcesFromPeerRange(desc, 2, 8));
     EXPECT_EQ(receivesFromGenerator ? 0 : 1, countRdmaSourcesFromPeerRange(desc, 0, 2));
   }
+
+  gReshardCopyAlgorithm = savedCopyAlgorithm;
+  ASSERT_EQ(MPI_SUCCESS, MPI_Barrier(MPI_COMM_WORLD));
+  ASSERT_NCCL(ncclCommDestroy(comm));
+}
+
+/* Five source shards into three destination shards: the boundaries do not
+ * line up, so source shards 1 and 3 each feed two destination shards. Every
+ * rank has to place its PIPE edges on distinct channel groups: the kernel
+ * serves at most one RDMA target and one RDMA source per channel. */
+TEST_F(PipeGraphPathTest, MisalignedShardBoundariesPlanOnEveryRank) {
+  if (world_ != 8) {
+    GTEST_SKIP() << "requires 8 MPI ranks (got " << world_ << ")";
+  }
+
+  ncclComm_t comm = nullptr;
+  initComm(&comm);
+  ASSERT_NE(nullptr, comm);
+
+  const ReshardCopyAlgorithm savedCopyAlgorithm = gReshardCopyAlgorithm;
+  gReshardCopyAlgorithm = RESHARD_COPY_ALGO_PIPE;
+
+  int srcMeshDims[2] = {5, 1};
+  int dstMeshDims[2] = {3, 1};
+  int srcPlacements[2] = {NCCL_RESHARD_SHARD(0), NCCL_RESHARD_REPLICATE};
+  int dstPlacements[2] = {NCCL_RESHARD_SHARD(0), NCCL_RESHARD_REPLICATE};
+  size_t srcLocalShape[2] = {3, 4};
+  size_t dstLocalShape[2] = {5, 4};
+
+  ncclMesh_t srcMesh = NCCL_M2N_MESH_INITIALIZER;
+  srcMesh.ndims = 2;
+  srcMesh.dims = srcMeshDims;
+  srcMesh.startRank = 0;
+  ncclMesh_t dstMesh = NCCL_M2N_MESH_INITIALIZER;
+  dstMesh.ndims = 2;
+  dstMesh.dims = dstMeshDims;
+  dstMesh.startRank = 5;
+
+  ncclDistTensor_t src = NCCL_M2N_DIST_TENSOR_INITIALIZER;
+  src.dataPtr = rank_ < 5 ? reinterpret_cast<void*>(0x8000) : nullptr;
+  src.localShape = srcLocalShape;
+  src.ndims = 2;
+  src.dtype = ncclUint8;
+  src.mesh = &srcMesh;
+  src.placements = srcPlacements;
+  ncclDistTensor_t dst = NCCL_M2N_DIST_TENSOR_INITIALIZER;
+  dst.dataPtr = rank_ >= 5 ? reinterpret_cast<void*>(0x9000) : nullptr;
+  dst.localShape = dstLocalShape;
+  dst.ndims = 2;
+  dst.dtype = ncclUint8;
+  dst.mesh = &dstMesh;
+  dst.placements = dstPlacements;
+
+  /* Only rank 0 prints, so each rank folds its checks into one flag and every
+   * rank asserts on the reduced value. A rank whose planning failed still
+   * joins the reduction instead of leaving the others waiting. */
+  int localBad = validateStagingPlanLimits(rank_, &src, srcLocalShape, &dst, dstLocalShape, RESHARD_COPY_ALGO_PIPE, 1) !=
+                 ncclSuccess;
+  StagingTransferDescriptor desc = {};
+  StagingKernelParams params = {};
+  preparePipeParams(comm, &src, &dst, 1, 1, &desc, &params);
+  localBad |= HasFatalFailure() ? 1 : 0;
+
+  const int expectedTargets[5] = {1, 2, 1, 2, 1};
+  const int expectedSources[3] = {2, 3, 2};
+  if (!localBad && rank_ < 5) {
+    localBad |= !desc.isSource || desc.numTargets != expectedTargets[rank_] ||
+                params.numRdmaTargets != expectedTargets[rank_];
+    for (int t = 0; t < params.numRdmaTargets; ++t) {
+      localBad |= !anyChannelHasEdge(params.rdmaTargets, t, params.numChannels);
+    }
+    for (int ch = 0; ch < params.numChannels; ++ch) {
+      int active = 0;
+      for (int t = 0; t < params.numRdmaTargets; ++t) active += params.rdmaTargets[ch][t].active;
+      localBad |= active > 1;
+    }
+  } else if (!localBad) {
+    localBad |= !desc.isDest || desc.numSources != expectedSources[rank_ - 5] ||
+                params.numRdmaSources != expectedSources[rank_ - 5];
+    for (int s = 0; s < params.numRdmaSources; ++s) {
+      localBad |= !anyChannelHasEdge(params.rdmaSources, s, params.numChannels);
+    }
+    for (int ch = 0; ch < params.numChannels; ++ch) {
+      int active = 0;
+      for (int s = 0; s < params.numRdmaSources; ++s) active += params.rdmaSources[ch][s].active;
+      localBad |= active > 1;
+    }
+  }
+  int badRanks = 0;
+  ASSERT_EQ(MPI_SUCCESS, MPI_Allreduce(&localBad, &badRanks, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD));
+  EXPECT_EQ(0, badRanks) << "ranks with a planning failure, an unplaced edge, or two RDMA peers on one channel";
+
+  gReshardCopyAlgorithm = savedCopyAlgorithm;
+  ASSERT_EQ(MPI_SUCCESS, MPI_Barrier(MPI_COMM_WORLD));
+  ASSERT_NCCL(ncclCommDestroy(comm));
+}
+
+/* A {Replicate, Shard(1)} source into a 2x2 {Shard(0), Shard(1)} dest: each
+ * source shard feeds two dest shards two indices apart. An edge's channel
+ * group must not depend on how far apart a shard's peers are, so every rank
+ * still keeps at most one RDMA target and one RDMA source per channel. */
+TEST_F(PipeGraphPathTest, StridedTargetShardsPlanOnEveryRank) {
+  if (world_ != 8) {
+    GTEST_SKIP() << "requires 8 MPI ranks (got " << world_ << ")";
+  }
+
+  ncclComm_t comm = nullptr;
+  initComm(&comm);
+  ASSERT_NE(nullptr, comm);
+
+  const ReshardCopyAlgorithm savedCopyAlgorithm = gReshardCopyAlgorithm;
+  gReshardCopyAlgorithm = RESHARD_COPY_ALGO_PIPE;
+
+  int srcMeshDims[2] = {1, 4};
+  int dstMeshDims[2] = {2, 2};
+  int srcPlacements[2] = {NCCL_RESHARD_REPLICATE, NCCL_RESHARD_SHARD(1)};
+  int dstPlacements[2] = {NCCL_RESHARD_SHARD(0), NCCL_RESHARD_SHARD(1)};
+  size_t srcLocalShape[2] = {4, 2};
+  size_t dstLocalShape[2] = {2, 4};
+
+  ncclMesh_t srcMesh = NCCL_M2N_MESH_INITIALIZER;
+  srcMesh.ndims = 2;
+  srcMesh.dims = srcMeshDims;
+  srcMesh.startRank = 0;
+  ncclMesh_t dstMesh = NCCL_M2N_MESH_INITIALIZER;
+  dstMesh.ndims = 2;
+  dstMesh.dims = dstMeshDims;
+  dstMesh.startRank = 4;
+
+  ncclDistTensor_t src = NCCL_M2N_DIST_TENSOR_INITIALIZER;
+  src.dataPtr = rank_ < 4 ? reinterpret_cast<void*>(0xa000) : nullptr;
+  src.localShape = srcLocalShape;
+  src.ndims = 2;
+  src.dtype = ncclUint8;
+  src.mesh = &srcMesh;
+  src.placements = srcPlacements;
+  ncclDistTensor_t dst = NCCL_M2N_DIST_TENSOR_INITIALIZER;
+  dst.dataPtr = rank_ >= 4 ? reinterpret_cast<void*>(0xb000) : nullptr;
+  dst.localShape = dstLocalShape;
+  dst.ndims = 2;
+  dst.dtype = ncclUint8;
+  dst.mesh = &dstMesh;
+  dst.placements = dstPlacements;
+
+  /* Only rank 0 prints, so each rank folds its checks into one flag and every
+   * rank asserts on the reduced value. */
+  int localBad = validateStagingPlanLimits(rank_, &src, srcLocalShape, &dst, dstLocalShape, RESHARD_COPY_ALGO_PIPE, 1) !=
+                 ncclSuccess;
+  StagingTransferDescriptor desc = {};
+  StagingKernelParams params = {};
+  preparePipeParams(comm, &src, &dst, 1, 1, &desc, &params);
+  localBad |= HasFatalFailure() ? 1 : 0;
+
+  if (!localBad && rank_ < 4) {
+    localBad |= !desc.isSource || desc.numTargets != 2 || params.numRdmaTargets != 2;
+    for (int t = 0; t < params.numRdmaTargets; ++t) {
+      localBad |= !anyChannelHasEdge(params.rdmaTargets, t, params.numChannels);
+    }
+    for (int ch = 0; ch < params.numChannels; ++ch) {
+      int active = 0;
+      for (int t = 0; t < params.numRdmaTargets; ++t) active += params.rdmaTargets[ch][t].active;
+      localBad |= active > 1;
+    }
+  } else if (!localBad) {
+    localBad |= !desc.isDest || desc.numSources != 2 || params.numRdmaSources != 2;
+    for (int s = 0; s < params.numRdmaSources; ++s) {
+      localBad |= !anyChannelHasEdge(params.rdmaSources, s, params.numChannels);
+    }
+    for (int ch = 0; ch < params.numChannels; ++ch) {
+      int active = 0;
+      for (int s = 0; s < params.numRdmaSources; ++s) active += params.rdmaSources[ch][s].active;
+      localBad |= active > 1;
+    }
+  }
+  int badRanks = 0;
+  ASSERT_EQ(MPI_SUCCESS, MPI_Allreduce(&localBad, &badRanks, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD));
+  EXPECT_EQ(0, badRanks) << "ranks with a planning failure, an unplaced edge, or two RDMA peers on one channel";
 
   gReshardCopyAlgorithm = savedCopyAlgorithm;
   ASSERT_EQ(MPI_SUCCESS, MPI_Barrier(MPI_COMM_WORLD));
