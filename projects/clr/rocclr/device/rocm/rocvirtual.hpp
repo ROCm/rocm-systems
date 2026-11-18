@@ -515,6 +515,8 @@ class VirtualGPU : public device::VirtualDevice {
     void NoteQueueDrained() override;
     bool WaitCurrent() override;
     void ResetCurrentSignal() override;
+    //! The ring starts with this many slots and never shrinks, so a chunk can't wrap onto its own
+    //! unsubmitted signals
     size_t MaxUnsubmittedSignals() const override { return ROC_SIGNAL_POOL_SIZE; }
     void HoldSignal(ProfilingSignal* signal) override;
     size_t HeldSignalCount() const override { return held_signals_.size(); }
