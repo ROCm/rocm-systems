@@ -29,6 +29,7 @@ RCCL_PARAM(DdaLL128AGThreads, "DDA_LL128_AG_THREADS", 0);
 namespace {
 
 using dda::common::ddaBankSize;
+using dda::common::ddaLL128AgActiveSlotWords;
 using dda::common::ddaLL128AgSlotWords;
 using dda::common::ddaLL128Slices;
 using dda::common::kDdaLL128DataBytesPerSlice;
@@ -101,8 +102,9 @@ static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
 
   INFO(NCCL_COLL,
        "DDA fabric AllGather LL128: nRanks=%d perRankBytes=%zu slices=%zu grid=%ux%u block=%u "
-       "(warp-per-slice, bpp=%u, slotWords=%zu)",
+       "(warp-per-slice, bpp=%u, slotWords=%zu, capacitySlotWords=%zu)",
        nRanks, perRankBytes, slices, grid.x, grid.y, block.x, blocksPerPeer,
+       ddaLL128AgActiveSlotWords(bankSize, nRanks, slices),
        ddaLL128AgSlotWords(bankSize, nRanks));
 
   const dda::common::DdaKernelParams params{comm->abortFlagDev};

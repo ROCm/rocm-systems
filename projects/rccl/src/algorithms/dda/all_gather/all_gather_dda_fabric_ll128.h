@@ -32,6 +32,17 @@ constexpr size_t ddaLL128AgSlotWords(size_t bankSize, int nRanks) {
   return ddaLL128SlotWords(bankSize, nRanks, 1);
 }
 
+// Use message-sized peer slots instead of spreading transfers across the bank.
+// Whole-MiB rounding is tuned for gfx1250; keep full slots if it exceeds capacity.
+constexpr size_t ddaLL128AgActiveSlotWords(size_t bankSize, int nRanks, size_t slices) {
+  const size_t capacityWords = ddaLL128AgSlotWords(bankSize, nRanks);
+  const size_t capacitySlices = capacityWords / (size_t)kDdaLL128WireWordsPerSlice;
+  constexpr size_t slicesPerMiB = (size_t{1} << 20) / (size_t)kDdaLL128WireBytesPerSlice;
+  const size_t units = slices / slicesPerMiB + (slices % slicesPerMiB != 0);
+  if (units > capacitySlices / slicesPerMiB) return capacityWords;
+  return units * slicesPerMiB * (size_t)kDdaLL128WireWordsPerSlice;
+}
+
 // LL128 all-gather. 2D grid: grid.x == nRanks - 1 places one column per remote
 // peer; grid.y splits that peer's slices across blocks, one
 // warp per slice. Each column packs this rank's payload into its peer's slot,
@@ -67,7 +78,7 @@ __launch_bounds__(1024)
   const int total = (int)(gridDim.x * gridDim.y);
   const uint32_t flag32 = ddaGetLLEpochInc(epochDev, flatBlockId, 1);
   const uint64_t flag = ((uint64_t)flag32 << 32) | (uint64_t)flag32;
-  const size_t slotWords = ddaLL128AgSlotWords(bankSize, nRanks);
+  const size_t slotWords = ddaLL128AgActiveSlotWords(bankSize, nRanks, slicesTotal);
   // Bank 1 sits at bankSize rather than right after the slots, so every DDA LL
   // tier sharing this scratch and epoch counter banks at the same byte offsets.
   const uint64_t bankWords = (uint64_t)(flag32 & 1u) * (uint64_t)(bankSize / sizeof(uint64_t));
