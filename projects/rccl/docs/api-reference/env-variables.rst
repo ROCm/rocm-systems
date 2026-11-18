@@ -416,8 +416,10 @@ in the following table.
     * - | ``RCCL_ENABLE_PROXY_TRACE``
         | Loads the proxy-trace profiler plugin
           ``librccl-profiler-proxytrace.so`` from the directory containing
-          ``librccl.so``, when ``NCCL_PROFILER_PLUGIN`` is not set. If that
-          library is missing the setting has no effect and RCCL falls back to
+          ``librccl.so``, when no other profiler plugin was loaded -- whether
+          because ``NCCL_PROFILER_PLUGIN`` is unset or because the plugin it
+          names failed to load. If that library is missing the setting has no
+          effect and RCCL falls back to
           the normal profiler plugin lookup. The plugin records the state of
           every network proxy send and receive operation: channel, peer, step
           counters (posted, transmitted, received, done) and timestamps. When a
@@ -426,8 +428,7 @@ in the following table.
           level, which shows which connection and step a hung collective is
           stuck on. An explicit
           ``NCCL_PROFILER_PLUGIN=/path/to/librccl-profiler-proxytrace.so``
-          loads the same plugin and takes precedence over this variable. Only
-          one profiler plugin can be active at a time.
+          loads the same plugin and takes precedence over this variable.
       - | ``0``: Do not load the proxy-trace plugin (default).
         | ``1``: Load the proxy-trace plugin.
 
@@ -923,7 +924,8 @@ in the following table.
           Setting ``1`` counts only AINIC devices and treats Mellanox and
           Broadcom as generic NICs, but it does not force AINIC mode; ``0``
           ignores AINIC devices, so detection never selects AINIC mode.
-          ``NCCL_NET=ROCM-IB`` bypasses this variable entirely. IB-CAST is
+          ``NCCL_NET=ROCM-IB`` bypasses this variable entirely and forces AINIC
+          mode regardless of the detected hardware. IB-CAST is
           selected automatically only if ``NCCL_NET`` is unset and no external
           net plugin was requested. Detection honours ``NCCL_IB_HCA`` filters.
       - | ``-1``: Auto-detect (default).
@@ -1321,7 +1323,8 @@ in the following table.
         | Selects the buffer used by the GPUDirect RDMA flush. Applies only to
           the IB/RoCE transports (``net_ib`` and ``net_ib_cast``) when the GDR
           flush is on, that is, ``peermem`` or DMA-buf is available and
-          ``NCCL_GDR_FLUSH_DISABLE=0``. After data arrives in GPU memory the
+          ``NCCL_GDR_FLUSH_DISABLE=0``; on ``net_ib_cast`` the flush also
+          requires CTS offload to be off. After data arrives in GPU memory the
           receiver posts an RDMA read, the flush, which completes only once the
           NIC's earlier writes to the GPU are visible, so the GPU kernel never
           sees partial data.
@@ -1371,13 +1374,15 @@ in the following table.
           ``__threadfence_system()`` with a wait on outstanding stores, which
           avoids an expensive L2 writeback on the generations that support it.
           Applies to the Simple protocol; LL128 honours it only on
-          ``gfx1250`` and otherwise always uses the full fence.
+          ``gfx1250`` and otherwise always uses the full fence. The cheap
+          fence requires cache-bypassing load/store builtins
+          (``HIP_UNCACHED_MEMORY``) at build time; without them it is always
+          forced off, whatever this variable is set to.
       - | ``0``: Architecture-tuned auto mode (default) -- cheap fence on for
           ``gfx942``/MI300 and ``gfx1250``/MI450, off for ``gfx950``/MI350 and
           everything else.
         | ``1``: Force ``__threadfence_system()``.
-        | ``2``: Force the cheap fence on, including on ``gfx950``, but only
-          when cache-bypassing load/store builtins are available.
+        | ``2``: Force the cheap fence on, including on ``gfx950``.
         | Renamed from ``RCCL_GFX9_CHEAP_FENCE_OFF``, which is no longer read.
 
     * - | ``HSA_FORCE_FINE_GRAIN_PCIE``
@@ -1582,7 +1587,9 @@ the following table.
         | Enables hierarchical AllGather, which splits the operation across
           intra-node and inter-node sub-communicators. Requires 8 or more
           nodes, compact rank ordering, and successful creation of the
-          sub-communicators at init. The maximum message size depends on the
+          sub-communicators, which happens at init unless
+          ``RCCL_HIERARCHICAL_LAZY_INIT=1`` defers it to the first eligible
+          AllGather. The maximum message size depends on the
           node count: 32 MiB at 8 to 15 nodes, 64 MiB at 16 to 31 nodes, and
           128 MiB at 32 or more nodes. A per-rank floor
           (``RCCL_HIERARCHICAL_ALLGATHER_MIN_BYTES_PER_RANK``) keeps small
@@ -1596,8 +1603,9 @@ the following table.
           ``gfx950`` returns early with pipelining already off, and no other
           architecture matches the enabling branch. On ``gfx942`` pipelining
           otherwise applies to ``AllReduce`` (single-node, or multi-node
-          within 512 MB x 2^(log2(nNodes)-1)), ``ReduceScatter``, and
-          ``Reduce``.
+          within 512 MiB x 2^(log2(nNodes)-1)), ``ReduceScatter``, and
+          ``Reduce``, and only for ``bfloat16`` unless
+          ``RCCL_PIPELINE_ALL_DATA_TYPES`` is set.
       - | ``0``: Allow pipelining (default).
         | Non-zero: Disable.
 
@@ -1642,7 +1650,8 @@ the following table.
           does not force CTS onto P2P connections;
           ``RCCL_IB_P2P_DISABLE_CTS`` (default ``1``) still excludes them. If
           inline data is off it is turned back on automatically, and CTS is
-          disabled entirely when CAST QP scheduling or IB port
+          disabled entirely when NIC fusion (``NCCL_IB_MERGE_NICS``), CAST QP
+          scheduling, QP sharing (``RCCL_IB_QP_SHARING_ENABLE``), or IB port
           failover/recovery is active.
       - | ``-1``: Auto-enable on AINIC (default).
         | ``0``: Force off.
