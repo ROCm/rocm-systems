@@ -449,4 +449,49 @@ TEST_F(DdaMPI_BroadcastLL128, BackToBackNoSync) {
   backToBackRounds(sizes, RCCL_DDA_FABRIC_LL128);
 }
 
+// ---- DDA fabric Broadcast LL128 two-shot, default fan-out ----
+//
+// Environment set by standard_env_dda_bc_ll128_default_fanout in test_categories_mpi.yaml:
+//   RCCL_DDA_BC=1                      -- opt-in to DDA Broadcast
+//   RCCL_DDA_LL_THRESHOLD=0            -- suppress LL tier so LL128 is chosen
+//   RCCL_DDA_LL128_THRESHOLD=<cap>     -- cap LL128 tier (kLL128Cap bytes)
+//   (no RCCL_DDA_LL128_BC_FANOUT)      -- exercises the default flat scatter path
+//
+// With fanOut=0 each non-root column writes recvbuff only when col == s % nPeers.
+// At >2 ranks this differs from the fanOut=1 path; this suite provides GPU data
+// checks for that branch.
+
+class DdaMPI_BroadcastLL128DefaultFanOut : public DdaMPI_BroadcastLL128 {
+ protected:
+  std::vector<std::pair<const char*, std::string>> ddaEnv() const override {
+    return {
+      {"RCCL_DDA_BC", "1"},
+      {"RCCL_DDA_LL_THRESHOLD", "0"},
+      {"RCCL_DDA_LL128_THRESHOLD", std::to_string(kLL128Cap)},
+    };
+  }
+};
+
+TEST_F(DdaMPI_BroadcastLL128DefaultFanOut, AllRootsOutOfPlace) {
+  allRoots({16, kLL128MultiChunk, 1024 * 1024, kLL128Cap}, false, RCCL_DDA_FABRIC_LL128);
+}
+
+TEST_F(DdaMPI_BroadcastLL128DefaultFanOut, AllRootsInPlace) {
+  allRoots({16, kLL128MultiChunk, 1024 * 1024, kLL128Cap}, true, RCCL_DDA_FABRIC_LL128);
+}
+
+TEST_F(DdaMPI_BroadcastLL128DefaultFanOut, PartialLastChunk) {
+  for (int root = 0; root < nRanks_; ++root) {
+    broadcastAndCheck({kLL128MultiChunk, root, false, 0, 0}, RCCL_DDA_FABRIC_LL128);
+    if (HasFatalFailure() || IsSkipped()) return;
+    broadcastAndCheck({kLL128MultiChunk, root, true, 0, 0}, RCCL_DDA_FABRIC_LL128);
+    if (HasFatalFailure() || IsSkipped()) return;
+  }
+}
+
+TEST_F(DdaMPI_BroadcastLL128DefaultFanOut, BackToBackNoSync) {
+  const size_t sizes[7] = {16, kLL128MultiChunk, 1024 * 1024, kLL128Cap, kLL128MultiChunk, 16, 1024 * 1024};
+  backToBackRounds(sizes, RCCL_DDA_FABRIC_LL128);
+}
+
 #endif  // MPI_TESTS_ENABLED
