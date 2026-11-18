@@ -23,6 +23,7 @@
 #include "amd_smi/impl/nic/amd_smi_nic_interface.h"
 #include "smi_devlink_netlink.h"
 #include "smi_ethtool_ioctl.h"
+#include "smi_nic_cper.h"
 #include "smi_nic_system.h"
 #include "smi_nic_telemetry.h"
 #include "smi_nic_testing.h"
@@ -158,6 +159,27 @@ smi_nic_status_t smi_get_nic_capability(smi_nic_ctx_t ctx, uint64_t device, uint
     return SMI_NIC_STATUS_WRONG_PARAM;
   }
   return read_nic_value(ctx, device, [&](const SmiNic& nic) { *capability = nic.capabilities(); });
+}
+
+smi_nic_status_t smi_get_nic_cper_entries(smi_nic_ctx_t ctx, uint64_t device,
+                                          uint32_t severity_mask, char* cper_data,
+                                          uint64_t* buf_size, amdsmi_cper_hdr_t** cper_hdrs,
+                                          uint64_t* entry_count, uint64_t* cursor) {
+  if (!cper_data || !buf_size || !cper_hdrs || !entry_count || !cursor || !*buf_size ||
+      !*entry_count) {
+    return SMI_NIC_STATUS_WRONG_PARAM;
+  }
+  if (!ctx) return SMI_NIC_STATUS_WRONG_PARAM;
+
+  auto* nic_system = get_nic_system_from_context(ctx);
+  if (!nic_system) return SMI_NIC_STATUS_NOT_INIT;
+
+  const auto lock = std::lock_guard<std::mutex>{ctx->ctx_mutex};
+  const auto* nic = nic_system->get_nic_by_bdf(device);
+  if (!nic) return SMI_NIC_STATUS_NOT_FOUND;
+
+  return smi_nic_read_cper_entries(*nic, severity_mask, cper_data, buf_size, cper_hdrs, entry_count,
+                                   cursor);
 }
 
 static_assert(static_cast<int>(amd::smi::nic::pci::LinkType_t::Unknown) ==
