@@ -48,10 +48,7 @@ ROCSHMEM_HIPMODULE_INIT
   :returns:      ``0`` on success, non-zero on failure.
 
 **Description:**
-Initializes the rocSHMEM device context for a specific HIP module. This routine
-queries the ``ROCSHMEM_CTX_DEFAULT`` symbol from ``module`` and initializes it
-with the host-side context using stream-ordered memory operations, which is
-what makes it safe to use during HIP graph capture.
+Initializes the rocSHMEM device-side global state for a specific HIP module.
 
 .. note::
 
@@ -277,7 +274,7 @@ ROCSHMEM_QUERY_BACKEND_TYPE
                ``BackendType::GDA_BACKEND``.
 
 **Description:**
-Returns the conduit that the runtime chose at initialization. Because a single
+Returns the backend that the runtime chose at initialization. Because a single
 build can contain several backends, and because selection depends on the job
 layout and on environment variables such as ``ROCSHMEM_BACKEND``, this routine
 is the authoritative way for an application to discover what it is actually

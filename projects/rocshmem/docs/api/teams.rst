@@ -159,10 +159,10 @@ ROCSHMEM_TEAM_SYNC
   :returns:    None.
 
 **Description:**
-Synchronizes all PEs in ``team``. In contrast with a barrier, this routine only
-ensures completion and visibility of previously issued memory stores; it does
-not ensure completion of remote memory updates issued through rocSHMEM
-routines. Use ``rocshmem_quiet`` first if you need that guarantee.
+Synchronizes all PEs in ``team`` via a cross-PE barrier. Unlike
+``rocshmem_barrier``, this routine does not complete outstanding
+remote memory accesses issued through rocSHMEM routines before synchronizing;
+use ``rocshmem_quiet`` first if you need that guarantee.
 
 ROCSHMEM_TEAM_SYNC_ON_STREAM
 ----------------------------
