@@ -181,6 +181,30 @@ TEST_F(DdaAllGatherFabricLL128Microtest, Eligible_PerRankBytesMustFitTheSlotSlic
   EXPECT_FALSE(Eligible(4));
 }
 
+TEST(DdaLL128AgActiveSlotWords, RoundsOneSliceUpToOneMiB) {
+  constexpr size_t kBankSize = 4 * 4 * kMiB;
+  const size_t slotWords = dda::common::ddaLL128AgActiveSlotWords(kBankSize, 4, 1);
+  EXPECT_EQ(slotWords * sizeof(uint64_t), kMiB);
+}
+
+TEST(DdaLL128AgActiveSlotWords, RoundsPast512SlicesUpToTwoMiB) {
+  constexpr size_t kBankSize = 4 * 4 * kMiB;
+  const size_t slotWords = dda::common::ddaLL128AgActiveSlotWords(kBankSize, 4, 513);
+  EXPECT_EQ(slotWords * sizeof(uint64_t), 2 * kMiB);
+}
+
+TEST(DdaLL128AgActiveSlotWords, FallsBackWhenRoundingWouldExceedCapacity) {
+  constexpr size_t kCapacitySlices = 768;
+  constexpr size_t kRequestedSlices = 700;
+  constexpr size_t kBankSize = 4 * kCapacitySlices * kSliceWire;
+  const size_t slotWords = dda::common::ddaLL128AgActiveSlotWords(kBankSize, 4, kRequestedSlices);
+  const size_t slotBytes = slotWords * sizeof(uint64_t);
+  // Rounding 700 slices up to a whole MiB would require 1024 slices, beyond this slot.
+  EXPECT_EQ(slotBytes, kCapacitySlices * kSliceWire);
+  EXPECT_GE(slotBytes, kRequestedSlices * kSliceWire);
+  EXPECT_LE(4 * slotBytes, kBankSize);
+}
+
 TEST_F(DdaAllGatherFabricLL128Microtest, Launch_UnsupportedDatatypeReturnsInvalidArgument) {
   for (ncclDataType_t datatype : {ncclInt8, ncclInt32, ncclUint64, ncclFloat64}) {
     EXPECT_EQ(Run(16, datatype), ncclInvalidArgument) << "datatype " << datatype;
