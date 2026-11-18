@@ -279,10 +279,12 @@ jax.jit.train_step jax_workload.py:13 (calls: N, dispatches: M, total: T)
   - Kernels launched by that call appear under that marker, with the caller
     `file:line` and the call's dispatch count and GPU time. Same-thread
     launches match on `Correlation_ID` + `GUID`. Worker-thread compute
-    launches match through the launch-timestamp fallback (same `GUID`).
-  - With autotuning pinned, kernel lists agree across analyze passes.
-- Unit tests cover marker naming and the "range already open" skip, without a
-  GPU workload.
+    launches match through the `hipModuleLaunchKernel` timestamp fallback
+    (same `GUID`). Launches outside any marker stay unmatched.
+  - With autotuning pinned or a shared compilation cache, kernel lists agree
+    across analyze passes.
+- Unit tests cover marker naming, the thread-local "range already open" skip,
+  and balanced push/pop on exceptions, without a GPU workload.
 - **Security.** Same in-process `inject_roctx` injector as the other backends.
   Analysis reads the trace files the workload produced.
 - **Debug.** The injector logs which entry points it wrapped during profile
@@ -294,12 +296,13 @@ Limitations:
 - This wrap list is planned coverage, not a closed inventory of every GPU
   launch. Other JAX or XLA paths may still enqueue kernels without a
   `jax.*` marker; those cases need to be confirmed on real traces.
-- AOT `jit(f).lower(...).compile()` objects do not go through
-  `PjitFunction.__call__` with a stable function name.
+- AOT `jit(f).lower(...).compile()` still hits `PjitFunction.__call__`, but
+  `__name__` is unset, so the marker is not the original function name.
 - Host callbacks, HIP-graph (command buffer) launches, and multi-process
   `jax.distributed` (one `GUID` per process) are out of scope.
-- Newer JAX may rebuild `pmap` on top of `jit` / `shard_map`; re-check the
-  factory wrap on each supported version.
+- On JAX 0.11.0, `pmap` is already built on `jit` / `shard_map`; without the
+  factory wrap the marker is `jax.jit._fun`. Re-check that wrap on each
+  supported version.
 
 Design trade-offs:
 
