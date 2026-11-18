@@ -43,7 +43,7 @@ class TestMetric(TestCliBase):
         gpu_ids = [int(row["gpu"]) for row in csv_rows]
         self.assertEqual(len(gpu_ids), len(set(gpu_ids)), f"GPU rows repeated: {gpu_ids}")
         self.assert_gpu_ids(gpu_ids, "amd-smi metric --csv")
-        
+
     def test_repeated_gpu_selection(self):
         self.common.print_func_name("")
         if len(self.list_data) < 2:
