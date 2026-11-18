@@ -49,9 +49,12 @@
 #endif
 #endif
 
-// GIN rocshmem device templates (GDA, SDMA) gate on ENABLE_ROCSHMEM_GIN.
+// NCCL_GIN_*_AVAILABLE comes from the build (see rccl_gin_config.h); the C++17
+// clause additionally keeps the backend off for a C++14 consumer.
+#include "nccl_device/gin/rccl_gin_config.h"
+
 #ifndef NCCL_GIN_ROCSHMEM_GDA_ENABLE
-#if defined(__HIP_PLATFORM_AMD__) && defined(ENABLE_ROCSHMEM_GIN)
+#if defined(__HIP_PLATFORM_AMD__) && __cplusplus >= 201703L && NCCL_GIN_ROCSHMEM_GDA_AVAILABLE
 #define NCCL_GIN_ROCSHMEM_GDA_ENABLE 1
 #else
 #define NCCL_GIN_ROCSHMEM_GDA_ENABLE 0
@@ -59,7 +62,7 @@
 #endif
 
 #ifndef NCCL_GIN_ANVIL_SDMA_ENABLE
-#if defined(__HIP_PLATFORM_AMD__) && defined(ENABLE_ROCSHMEM_GIN)
+#if defined(__HIP_PLATFORM_AMD__) && __cplusplus >= 201703L && NCCL_GIN_ANVIL_SDMA_AVAILABLE
 #define NCCL_GIN_ANVIL_SDMA_ENABLE 1
 #else
 #define NCCL_GIN_ANVIL_SDMA_ENABLE 0
@@ -89,7 +92,7 @@ enum ncclGinOptFlags {
    ((NCCL_GIN_ANVIL_SDMA_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
 
 #ifdef __CUDACC__
-// Resource sharing mode for a given ncclGin/ncclGin_C *instance*.
+// Resource sharing mode for a given ncclGin instance.
 // This mode is selected at construction time and is carried by the ncclGin
 // object, then copied into ncclGinCtx for each call. It is not stored as
 // persistent per-context state in the communicator (i.e., different ncclGin
@@ -232,6 +235,11 @@ struct ncclGinApi_SupportsStrongSignal {
 template <ncclNetDeviceType backend>
 struct ncclGinApi_FlushesAllPutsOnAnySignal {
   NCCL_DEVICE_INLINE static bool call(ncclGinCtx);
+};
+
+template <ncclNetDeviceType backend>
+struct ncclGinApi_BarrierOptions {
+  NCCL_DEVICE_INLINE static ncclGinBarrierOptions_t call(ncclGinCtx);
 };
 #endif
 

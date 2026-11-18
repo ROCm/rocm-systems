@@ -213,7 +213,7 @@ jobs:
             -w "/mnt/ais-fs/${AIS_CONTAINER_NAME}" \
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
-              HIPFILE_FORCE_COMPAT_MODE=true
+              HIPFILE_FORCE_COMPAT_MODE=true \
                 /ais/rocm-systems/projects/hipfile/util/ci-aiscp-test.sh \
                 /ais/build/hipfile/examples/aiscp/aiscp
             '
@@ -224,7 +224,7 @@ jobs:
             -w "/mnt/ais-fs/${AIS_CONTAINER_NAME}" \
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
-              HIPFILE_ALLOW_COMPAT_MODE=false
+              HIPFILE_ALLOW_COMPAT_MODE=false \
                 /ais/rocm-systems/projects/hipfile/util/ci-aiscp-test.sh \
                 /ais/build/hipfile/examples/aiscp/aiscp
             '

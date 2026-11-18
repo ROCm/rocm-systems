@@ -75,6 +75,7 @@ struct thread_trace_parameter_pack
     uint64_t buffer_size        = DEFAULT_BUFFER_SIZE;
     uint64_t perf_exclude_mask  = 0;
     bool     no_detail_simd     = false;
+    bool     exec_mask_trace    = false;
     /// Number of CPU staging buffers in the producer/consumer pipeline.
     /// 1 = single buffer (synchronous, no async copy).
     /// Values >= 3 enable the async copy pipeline. 2 is rejected at the API layer.
@@ -136,6 +137,7 @@ private:
     /// Acquire a copy of the control packet, with optional increment to active_traces
     std::unique_ptr<hsa::TraceControlAQLPacket> get_control(bool bStart = false);
 
+    uint32_t        num_shader_engines = 0;
     att_queue_ptr_t queue{};
 
     std::atomic<int> active_traces{0};

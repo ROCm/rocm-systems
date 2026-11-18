@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "common/string_utility.hpp"
+
 #include <cctype>
 #include <string_view>
 
@@ -161,11 +163,7 @@ inline constexpr const char* FILE_OUTPUT         = "ROCPROFSYS_FILE_OUTPUT";
 inline constexpr const char* TEXT_OUTPUT         = "ROCPROFSYS_TEXT_OUTPUT";
 inline constexpr const char* JSON_OUTPUT         = "ROCPROFSYS_JSON_OUTPUT";
 inline constexpr const char* COUT_OUTPUT         = "ROCPROFSYS_COUT_OUTPUT";
-inline constexpr const char* DIFF_OUTPUT         = "ROCPROFSYS_DIFF_OUTPUT";
 inline constexpr const char* TREE_OUTPUT         = "ROCPROFSYS_TREE_OUTPUT";
-inline constexpr const char* INPUT_PATH          = "ROCPROFSYS_INPUT_PATH";
-inline constexpr const char* INPUT_PREFIX        = "ROCPROFSYS_INPUT_PREFIX";
-inline constexpr const char* INPUT_EXTENSIONS    = "ROCPROFSYS_INPUT_EXTENSIONS";
 inline constexpr const char* USE_ROCPD           = "ROCPROFSYS_USE_ROCPD";
 inline constexpr const char* USE_TEMPORARY_FILES = "ROCPROFSYS_USE_TEMPORARY_FILES";
 inline constexpr const char* USE_UNIFIED_MEMORY_PROFILING =
@@ -358,30 +356,16 @@ inline constexpr const char* USE_SHMEM =
 [[nodiscard]] inline int
 log_level_to_verbose(std::string_view level) noexcept
 {
-    auto const iequal = [](std::string_view lhs, std::string_view rhs) noexcept {
-        if(lhs.size() != rhs.size())
-        {
-            return false;
-        }
-        for(std::size_t idx = 0; idx < lhs.size(); ++idx)
-        {
-            if(std::tolower(static_cast<unsigned char>(lhs[idx])) !=
-               std::tolower(static_cast<unsigned char>(rhs[idx])))
-            {
-                return false;
-            }
-        }
-        return true;
-    };
-    if(iequal(level, "trace"))
+    using utility::string::equals_ignore_case;
+    if(equals_ignore_case(level, "trace"))
     {
         return 2;
     }
-    if(iequal(level, "debug"))
+    if(equals_ignore_case(level, "debug"))
     {
         return 1;
     }
-    if(iequal(level, "info"))
+    if(equals_ignore_case(level, "info"))
     {
         return 0;
     }

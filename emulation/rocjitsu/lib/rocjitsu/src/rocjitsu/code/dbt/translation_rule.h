@@ -288,6 +288,7 @@ struct ExpandResult {
   std::vector<uint32_t> words;
   std::string message;
   std::vector<std::string> required_work;
+  bool internal_error = false; ///< Fail translation even when failed kernels may be skipped.
 
   [[nodiscard]] static ExpandResult not_handled() { return {}; }
 
@@ -304,6 +305,17 @@ struct ExpandResult {
     result.status = ExpandStatus::Failed;
     result.message = std::move(failure_message);
     result.required_work = std::move(work);
+    return result;
+  }
+
+  /// @brief Reject a lowering that queried analysis declared unavailable by its rule.
+  [[nodiscard]] static ExpandResult liveness_unavailable() {
+    return internal_failure("liveness query from a rule marked liveness-free");
+  }
+
+  [[nodiscard]] static ExpandResult internal_failure(std::string message) {
+    auto result = failed(std::move(message));
+    result.internal_error = true;
     return result;
   }
 };

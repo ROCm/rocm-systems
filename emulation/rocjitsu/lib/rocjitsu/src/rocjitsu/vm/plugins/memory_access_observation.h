@@ -7,10 +7,13 @@
 #pragma once
 
 #include "rocjitsu/vm/amdgpu/atomic_op.h"
+#include "rocjitsu/vm/amdgpu/lds_allocation.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 
+#include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -63,6 +66,7 @@ constexpr const char *decoded_memory_space_name(DecodedMemorySpace space) {
     return "global";
   case DecodedMemorySpace::LOCAL:
     return "local";
+
   case DecodedMemorySpace::SCRATCH:
     return "scratch";
   case DecodedMemorySpace::FLAT:
@@ -72,6 +76,12 @@ constexpr const char *decoded_memory_space_name(DecodedMemorySpace space) {
   }
   return "unknown";
 }
+
+/// @brief One tap or fragment address set in an image instruction.
+struct ImageSampleFootprint {
+  std::span<const uint64_t> addresses;
+  uint64_t lane_mask = 0;
+};
 
 /// @brief One memory instruction as the memory system will see it.
 ///
@@ -162,24 +172,22 @@ struct MemoryAccessObservation {
   /// @details Normally a snapshot of EXEC, but an ISA exception may replace it:
   /// a CDNA5 DS transpose load issues with every lane regardless of EXEC.
   uint64_t active_lane_mask = 0;
-  /// @brief The architectural EXEC mask before an instruction-specific
-  ///        all-lane execution rule was applied.
+  /// @brief The architectural EXEC mask before instruction-specific lane rules.
   ///
   /// @details This normally equals @ref active_lane_mask. It differs for ISA
   /// operations such as CDNA5 transpose loads that execute with more lanes
-  /// than the incoming EXEC mask selects. It is always limited to
+  /// than the incoming EXEC mask selects, or GFX10 accesses suppressed by an
+  /// unallocated destination. It is always limited to
   /// @ref wavefront_size lanes.
   uint64_t architectural_exec_lane_mask = 0;
-  /// @brief Lanes whose address resolved to something the memory system can
-  ///        use. A lane that is active but not valid went out of bounds or
-  ///        through an unmapped aperture.
+  /// @brief Lanes whose address resolved for routing. Address-generation bounds
+  ///        can remove lanes here; later backing checks can reject bytes from
+  ///        a routed request without changing this mask.
   uint64_t valid_lane_mask = 0;
-  /// @brief Lanes that actually produce a memory request.
+  /// @brief Lanes producing a nominal pipeline request, before backing checks.
   ///
-  /// @details Differs from @ref valid_lane_mask only for the wave64 transpose
-  /// loads that issue through the low half -- a `WMMA_TR_B8`, or a global
-  /// `TR16_B128` -- where one lane fetches on behalf of several. Every other
-  /// access, transpose or not, requests from every valid lane.
+  /// @details Wave64 transpose loads can fetch on behalf of more than one lane.
+  /// GWS can hold a contributing VGPR lane while issuing a zero-byte request.
   uint64_t request_lane_mask = 0;
   /// @brief Lanes whose addresses are swizzled scratch; see
   ///        @ref scratch_element_stride_bytes. A FLAT wave can mix these with
@@ -204,6 +212,19 @@ struct MemoryAccessObservation {
   /// @ref scratch_lane_mask and @ref flat_local_lane_mask, and always zero for
   /// non-FLAT instructions.
   uint64_t flat_dds_lane_mask = 0;
+  /// @brief Ordinary FLAT LDS requests rejected in full by allocation bounds.
+  /// @details A subset of @ref flat_local_lane_mask. Addresses and nominal
+  /// counter participation remain intact. RDNA1 through RDNA3.5 reject a lane
+  /// when its whole transfer does not fit. On other targets the mask identifies
+  /// lanes with no complete element in the allocation.
+  uint64_t flat_local_oob_lane_mask = 0;
+  /// @brief Exclusive allocation end for an ordinary FLAT LDS request.
+  /// @details The captured workgroup limit includes the LDS base and scheduler
+  /// rounding and stays fixed across retries. The observation clamps this limit
+  /// to the backing size. Exclude @ref flat_local_oob_lane_mask before counting
+  /// complete elements below this bound. Atomics require their whole element.
+  /// Unset when no lane requests ordinary LDS through FLAT.
+  std::optional<uint64_t> flat_local_allocation_end;
   /// @brief Byte stride between consecutive elements of a scratch lane. Zero
   ///        when the access is contiguous, which every non-scratch access is.
   ///
@@ -252,16 +273,41 @@ struct MemoryAccessObservation {
   ///        @ref valid_lane_mask; otherwise there are @ref elements_per_lane masks.
   std::span<const uint64_t> element_lane_masks;
   /// @brief Addresses of the second access of a DS dual-access instruction.
-  ///        Empty unless the instruction has one.
+  ///        Empty when the target issues only the first address set.
   ///
-  /// @details The second access moves the same bytes per lane through the same
+  /// @details Equal-offset GFX10 paired DS instructions issue a single access.
+  /// The second access, when present, moves the same bytes per lane through the same
   /// lanes as the first, so an instruction with a non-empty set here moves
   /// twice @ref bytes_per_lane().
   std::span<const uint64_t> secondary_addresses;
+  /// @brief Per-texel footprints of sample, gather and multisample-load instructions.
+  /// @details IMAGE_SAMPLE*, IMAGE_GATHER4* and IMAGE_MSAA_LOAD replace addresses with these
+  /// footprints, including point samples. Each has wavefront_size addresses and a lane mask
+  /// contained in request_lane_mask. Border/zero-weight taps have cleared masks.
+  /// bytes_per_lane() is bytes per texel; all footprints share one instruction
+  /// issue and one completion-counter event. A null resource or unbacked sampler
+  /// uses the ordinary per-lane addresses span, empty footprints, and a zero
+  /// request_lane_mask while retaining the instruction's completion counter.
+  std::span<const ImageSampleFootprint> image_sample_footprints;
 
-  /// @brief Bytes each participating lane moves through one address set,
-  ///        ignoring scratch swizzling. Double it when @ref
+  /// Workgroup range intersected with the LDS backing for CDNA2 DS,
+  /// LDS-to-buffer sources and ordinary FLAT LDS requests. For FLAT, exclude
+  /// @ref flat_local_oob_lane_mask from @ref flat_local_lane_mask before
+  /// applying retained_bytes() to each LDS address set. Global lanes of a
+  /// mixed FLAT instruction use their own backing.
+  std::optional<LdsAllocationRange> lds_allocation;
+
+  /// CDNA4 native DS lanes with no access to the first or second LDS address.
+  /// Allocation bounds and coincident offsets suppress byte effects while
+  /// nominal requests and register/counter dependencies remain observable.
+  uint64_t ds_suppressed_lanes = 0;
+  uint64_t ds2_suppressed_lanes = 0;
+
+  /// @brief Nominal bytes each participating lane requests through one address
+  ///        set, before backing rejection. Double it when @ref
   ///        secondary_addresses is non-empty.
+  /// @details For image sampling this is bytes per texel footprint, not the
+  /// instruction total. Count each image_sample_footprints lane mask separately.
   uint64_t bytes_per_lane() const {
     return static_cast<uint64_t>(element_size_bytes) * elements_per_lane;
   }

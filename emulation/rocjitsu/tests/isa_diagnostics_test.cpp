@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "cdna5_sim_test_common.h"
+#include "compute_unit_test_util.h"
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
@@ -40,21 +41,22 @@ using namespace rocjitsu::amdgpu;
 
 class IsaDiagnosticsTest : public ::testing::TestWithParam<rj_code_arch_t> {
 protected:
-  void SetUp() override { create(); }
+  void SetUp() override { ASSERT_NO_FATAL_FAILURE(create()); }
 
-  void create(uint32_t wave_size = 0, unsigned helpers = 0) {
+  void create(uint32_t wave_size = 0, unsigned helpers = 0, unsigned vgprs = 256) {
     ComputeUnitCore::Config config{};
     config.arch = GetParam();
     config.num_wf_slots = 1;
     config.sgprs_per_wf = 128;
-    config.vgprs_per_wf = 256;
+    config.vgprs_per_wf = vgprs;
     config.lds_size_kb = 64;
     config.async_resources = std::make_shared<matrix_coexecution::ExecutionResources>(helpers);
-    cu = ComputeUnitCore::create("isa_test_cu", config, &memory, &l2);
+    wf = nullptr;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "isa_test_cu", config, &memory, &l2));
     decoder = Decoder::create(GetParam());
-    ASSERT_NE(cu, nullptr);
     ASSERT_NE(decoder, nullptr);
-    wf = cu->dispatch_wf(7, 0x100000, 106, 256, wave_size);
+    wf = cu->dispatch_wf(7, 0x100000, 106, vgprs, wave_size);
     ASSERT_NE(wf, nullptr);
     wf->set_exec(~uint64_t{0});
     wf->debug_write_sgpr(0, 0x4000);
@@ -138,6 +140,33 @@ protected:
   std::unique_ptr<Decoder> decoder;
   Wavefront *wf = nullptr;
 };
+
+TEST_P(IsaDiagnosticsTest, PackedWideningScaleSelectorAndRegisterOverlap) {
+  if (GetParam() != ROCJITSU_CODE_ARCH_CDNA5)
+    GTEST_SKIP();
+  ASSERT_NO_FATAL_FAILURE(create(32, 0, 512));
+  for (uint16_t op : {cdna5::kVCvtScalePk8F32Fp8Vop3, cdna5::kVCvtScalePk8F32Bf8Vop3,
+                      cdna5::kVCvtScalePk8F32Fp4Vop3, cdna5::kVCvtScalePk16F32Fp6Vop3}) {
+    const bool fp8 = op == cdna5::kVCvtScalePk8F32Fp8Vop3 || op == cdna5::kVCvtScalePk8F32Bf8Vop3;
+    for (uint8_t sel = 0; sel < 16; ++sel)
+      execute(cdna5::build_vop3(op, {.vdst = 8, .opsel = sel, .src0 = 256, .src1 = 260}),
+              fp8 && sel >= 12, "v_cvt_scale_");
+  }
+  auto check = [&](uint8_t dst, uint16_t src, uint16_t scale, unsigned warnings) {
+    execute(cdna5::build_vop3(cdna5::kVCvtScalePk16F32Fp6Vop3,
+                              {.vdst = dst, .src0 = src, .src1 = scale}),
+            warnings, "v_cvt_scale_");
+  };
+  check(8, 256 + 6, 0, 1);        // End of the data tuple overlaps v8.
+  check(8, 256, 256 + 23, 1);     // Scale aliases the last destination.
+  check(8, 256 + 5, 256 + 24, 0); // Both sources are adjacent.
+  check(8, 256, 8, 0);            // s8 and v8 are distinct.
+  wf->set_vgpr_msb_mode(1u << 2); // SRC1 in bank 1.
+  check(8, 256, 256 + 8, 0);      // Same encoded index, different banks.
+  check(252, 256 + 16, 256, 1);   // v[252:267] overlaps v256.
+  wf->set_exec(0);
+  check(252, 256 + 16, 256, 0);
+}
 
 TEST_P(IsaDiagnosticsTest, ScalarLoadOffsetBoundaryAndCdna5Exception) {
   wf->debug_write_sgpr(4, 0);
@@ -262,12 +291,12 @@ TEST_P(IsaDiagnosticsTest, MfmaFormatSelectorsAreNotBroadcastGroups) {
 TEST_P(IsaDiagnosticsTest, TransposeLoadsRequireFullOrEmptyEffectiveExec) {
   if (!gfx12())
     GTEST_SKIP();
-  for (uint32_t wave : {32u, 64u}) {
-    if (wave == 64 && GetParam() == ROCJITSU_CODE_ARCH_CDNA5)
+  for (uint32_t wave_size : {32u, 64u}) {
+    if (wave_size == 64 && GetParam() == ROCJITSU_CODE_ARCH_CDNA5)
       continue;
-    create(wave);
+    ASSERT_NO_FATAL_FAILURE(create(wave_size));
     ASSERT_NE(wf, nullptr);
-    const uint64_t full = ~uint64_t{0} >> (64 - wave);
+    const uint64_t full = ~uint64_t{0} >> (64 - wave_size);
     std::vector<uint16_t> ops;
     if (GetParam() == ROCJITSU_CODE_ARCH_CDNA5)
       ops = {cdna5::kGlobalLoadTr16B128Vglobal, cdna5::kGlobalLoadTr8B64Vglobal,
@@ -399,12 +428,12 @@ TEST_P(IsaDiagnosticsTest, Cdna5LdsTransposeDoesNotInheritCdna4Restrictions) {
   }
 }
 
-TEST_P(IsaDiagnosticsTest, AsyncMfmaReportsItsIssuingPc) {
+TEST_P(IsaDiagnosticsTest, MigratedMfmaReportsItsIssuingPc) {
   if (GetParam() != ROCJITSU_CODE_ARCH_CDNA4)
     GTEST_SKIP();
-  create(64, 2);
+  ASSERT_NO_FATAL_FAILURE(create(64, 2));
   const uint64_t pc = wf->pc;
-  // Independent, helper-eligible MFMAs followed by a branch that drains work.
+  // Migrated MFMAs stay on the issuer, preserving each diagnostic PC.
   for (unsigned i = 0; i < 2; ++i) {
     const auto words = cdna4::build_vop3p_mfma(cdna4::kVMfmaF3216x16x32F16Vop3pMfma,
                                                {.vdst = static_cast<uint8_t>(64 + i * 16),
@@ -422,7 +451,7 @@ TEST_P(IsaDiagnosticsTest, AsyncMfmaReportsItsIssuingPc) {
     cu->step();
   cu->step(); // Drain at the branch before inspecting the result.
   const std::string output = testing::internal::GetCapturedStderr();
-  EXPECT_GT(async_execution::stats.mma, submitted);
+  EXPECT_EQ(async_execution::stats.mma, submitted);
   EXPECT_EQ(cu->isa_diagnostic_count(), 2u);
   EXPECT_NE(output.find("pc=0x100000:"), std::string::npos) << output;
   EXPECT_NE(output.find("pc=0x100008:"), std::string::npos) << output;
@@ -432,7 +461,7 @@ TEST_P(IsaDiagnosticsTest, AsyncMfmaReportsItsIssuingPc) {
 TEST_P(IsaDiagnosticsTest, IuModifiersPreserveSignednessAndFloatModifiers) {
   if (!vopd())
     GTEST_SKIP();
-  create(32);
+  ASSERT_NO_FATAL_FAILURE(create(32));
   const bool cdna5_target = GetParam() == ROCJITSU_CODE_ARCH_CDNA5;
   const uint16_t wmma =
       cdna5_target ? cdna5::kVWmmaI3216x16x64Iu8Vop3p : rdna4::kVWmmaI3216x16x16Iu8Vop3p;
@@ -504,9 +533,17 @@ TEST_P(IsaDiagnosticsTest, ScalarLoadTupleAndBufferDescriptorAlignment) {
 TEST_P(IsaDiagnosticsTest, PermlaneGroupWidthUsesScalarValueOnce) {
   if (GetParam() != ROCJITSU_CODE_ARCH_CDNA5)
     GTEST_SKIP();
-  for (uint16_t op : {cdna5::kVPermlaneBcastB32Vop3, cdna5::kVPermlaneUpB32Vop3,
-                      cdna5::kVPermlaneDownB32Vop3, cdna5::kVPermlaneXorB32Vop3}) {
-    const auto words = cdna5::build_vop3(op, {.vdst = 16, .src0 = 256, .src1 = 128, .src2 = 4});
+  const auto idx_gen = [](uint16_t width_src) {
+    return cdna5::build_vop3(cdna5::kVPermlaneIdxGenB32Vop3,
+                             {.vdst = 16, .src0 = 256, .src1 = width_src});
+  };
+  for (uint16_t op :
+       {cdna5::kVPermlaneBcastB32Vop3, cdna5::kVPermlaneUpB32Vop3, cdna5::kVPermlaneDownB32Vop3,
+        cdna5::kVPermlaneXorB32Vop3, cdna5::kVPermlaneIdxGenB32Vop3}) {
+    const auto words =
+        op == cdna5::kVPermlaneIdxGenB32Vop3
+            ? idx_gen(4)
+            : cdna5::build_vop3(op, {.vdst = 16, .src0 = 256, .src1 = 128, .src2 = 4});
     for (uint32_t width : {1u, 2u, 16u, 32u, 64u, 0x80000000u}) {
       wf->debug_write_sgpr(4, width);
       execute(words, 0, "v_permlane_");
@@ -519,6 +556,11 @@ TEST_P(IsaDiagnosticsTest, PermlaneGroupWidthUsesScalarValueOnce) {
     execute(words, 0, "v_permlane_");
     wf->set_exec(~uint64_t{0});
   }
+  execute(idx_gen(128 + 24), 1, "v_permlane_idx_gen"); // Inline width.
+  const auto literal = idx_gen(255);
+  execute(std::array{literal[0], literal[1], 128u}, 0, "v_permlane_idx_gen");
+  const auto vgpr_width = idx_gen(256);
+  EXPECT_TRUE(decoder->decode(vgpr_width.data()).failed()); // SRC1 requires a scalar source.
 }
 
 std::array<uint32_t, 3> vopd_pair(uint8_t x, uint8_t y, uint16_t x0, uint8_t x1, uint16_t y0,
@@ -531,7 +573,7 @@ std::array<uint32_t, 3> vopd_pair(uint8_t x, uint8_t y, uint16_t x0, uint8_t x1,
 TEST_P(IsaDiagnosticsTest, VopdBanksHonorSharedSourcesAndIgnoredPorts) {
   if (!vopd())
     GTEST_SKIP();
-  create(32);
+  ASSERT_NO_FATAL_FAILURE(create(32));
   constexpr uint8_t mul = 3, mov = 8;
   execute(vopd_pair(mul, mul, 256, 1, 258, 2), 0, "v_dual_");
   execute(vopd_pair(mul, mul, 0, 1, 4, 2), 0, "v_dual_");
@@ -551,7 +593,7 @@ TEST_P(IsaDiagnosticsTest, VopdBanksHonorSharedSourcesAndIgnoredPorts) {
 TEST_P(IsaDiagnosticsTest, VopdSrc2ParityAndScalarBudget) {
   if (!vopd())
     GTEST_SKIP();
-  create(32);
+  ASSERT_NO_FATAL_FAILURE(create(32));
   constexpr uint8_t fmac = 0, fmaak = 1, fmamk = 2, mul = 3, mov = 8;
   // FMAMK's second VGPR uses SRC2, not SRC1.
   execute(vopd_pair(fmamk, mul, 256, 1, 258, 5), 0, "v_dual_");
@@ -570,7 +612,7 @@ TEST_P(IsaDiagnosticsTest, VopdSrc2ParityAndScalarBudget) {
 TEST_P(IsaDiagnosticsTest, VopdScalarBudgetQualifiesSpecialAndImplicitReads) {
   if (!vopd())
     GTEST_SKIP();
-  create(32);
+  ASSERT_NO_FATAL_FAILURE(create(32));
   constexpr uint8_t fmaak = 1, mov = 8, cndmask = 9;
   for (uint16_t selector : {126, 127, 253})
     execute(vopd_pair(fmaak, mov, 0, 1, selector, 2), gfx12(), "v_dual_");
@@ -584,7 +626,7 @@ TEST_P(IsaDiagnosticsTest, VopdScalarBudgetQualifiesSpecialAndImplicitReads) {
 TEST_P(IsaDiagnosticsTest, VopdDependenciesRemainUnqualified) {
   if (!vopd())
     GTEST_SKIP();
-  create(32);
+  ASSERT_NO_FATAL_FAILURE(create(32));
   // RDNA4's broad restriction conflicts with LLVM's single-cycle pairing rule.
   execute(vopd_pair(3, 3, 258, 1, 320, 2), 0, "v_dual_");
   // The reverse dependency reads the old value on every qualified target.
@@ -594,7 +636,7 @@ TEST_P(IsaDiagnosticsTest, VopdDependenciesRemainUnqualified) {
 TEST_P(IsaDiagnosticsTest, VopdRdna4CompilerAntidependencyRemainsSilent) {
   if (GetParam() != ROCJITSU_CODE_ARCH_RDNA4)
     GTEST_SKIP();
-  create(32);
+  ASSERT_NO_FATAL_FAILURE(create(32));
   // The FP16 smoke emits MOV v10,v25 :: ADD v95,0,v10.
   const std::array<uint32_t, 2> words{0xca200119, 0x0a5e1480};
   execute(words, 0, "v_dual_mov_b32");

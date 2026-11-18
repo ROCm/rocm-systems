@@ -56,6 +56,8 @@ ncclResult_t buildIbvSymbols(struct ncclIbvSymbols* ibvSymbols) {
   ASSIGN_SYM(ibvSymbols, ibv_set_ece, ibv_internal_set_ece);
   ASSIGN_SYM(ibvSymbols, ibv_query_port_speed, ibv_internal_query_port_speed);
 
+  ASSIGN_SYM(ibvSymbols, _ibv_query_gid_table, ibv_internal_query_gid_table);
+
   ibvSymbols->ibv_internal_reg_mr = &ibv_internal_reg_mr;
   ibvSymbols->ibv_internal_query_port = &ibv_internal_query_port;
 
@@ -139,6 +141,11 @@ ncclResult_t buildIbvSymbols(struct ncclIbvSymbols* ibvSymbols) {
   LOAD_SYM_VERSION(ibvhandle, "ibv_set_ece", ibvSymbols->ibv_internal_set_ece, "IBVERBS_1.10");
   LOAD_SYM_VERSION(ibvhandle, "ibv_query_port_speed", ibvSymbols->ibv_internal_query_port_speed, "IBVERBS_1.16");
 
+  // query_gid_table is exported as "_ibv_query_gid_table" (leading underscore,
+  // trailing entry-size arg). create_cq_ex/alloc_parent_domain are absent here —
+  // they are verbs.h inlines, not symbols (see ibvwrap.cc).
+  LOAD_SYM_VERSION(ibvhandle, "_ibv_query_gid_table", ibvSymbols->ibv_internal_query_gid_table, "IBVERBS_1.11");
+
   return ncclSuccess;
 
 teardown:
@@ -170,6 +177,7 @@ teardown:
   ibvSymbols->ibv_internal_query_ece = NULL;
   ibvSymbols->ibv_internal_set_ece = NULL;
   ibvSymbols->ibv_internal_query_port_speed = NULL;
+  ibvSymbols->ibv_internal_query_gid_table = NULL;
 
   if (ibvhandle != NULL) dlclose(ibvhandle);
   return ncclSystemError;

@@ -8,6 +8,7 @@
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
 #include "common/path.hpp"
+#include "common/string_utility.hpp"
 #include "core/demangler.hpp"
 #include "dl/dl.hpp"
 #include "dynamic_dependency_listing.hpp"
@@ -37,8 +38,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <filesystem>
 #include <iomanip>
+#include <iostream>
 #include <iterator>
 #include <map>
 #include <regex>
@@ -293,6 +296,7 @@ auto _activate =
 //
 int
 main(int argc, char** argv)
+try
 {
     argv0 = argv[0];
 
@@ -2204,17 +2208,18 @@ main(int argc, char** argv)
 
     for(auto const& itr : env_vars)
     {
-        auto const _pos = itr.find('=');
-        if(_pos == std::string::npos)
+        auto const parsed = rocprofsys::utility::string::split_key_value(itr);
+        if(!parsed)
         {
             errprintf(0, "environment variable %s not in form VARIABLE=VALUE\n",
                       itr.c_str());
+            continue;
         }
-        auto const _var = itr.substr(0, _pos);
-        auto const _val = itr.substr(_pos + 1);
-        rocprofsys::set_env(_var.c_str(), _val, 0);
-        auto _expr = rocprofsys_call_expr(_var, _val);
-        env_variables.emplace_back(_expr.get(env_func));
+        auto const key   = std::string{ parsed->key };
+        auto const value = std::string{ parsed->value };
+        rocprofsys::set_env(key.c_str(), value, 0);
+        auto expression = rocprofsys_call_expr(key, value);
+        env_variables.emplace_back(expression.get(env_func));
     }
 
     //----------------------------------------------------------------------------------//
@@ -2886,6 +2891,10 @@ main(int argc, char** argv)
         log_ofs->close();
     }
     return code;
+} catch(const std::exception& err)
+{
+    std::cerr << "[rocprof-sys] error: " << err.what() << '\n';
+    return EXIT_FAILURE;
 }
 
 //======================================================================================//

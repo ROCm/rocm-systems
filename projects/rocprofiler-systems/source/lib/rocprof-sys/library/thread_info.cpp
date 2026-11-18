@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/thread_info.hpp"
+#include "common/clocks.hpp"
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
-#include "core/control/clocks/timeline.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
 #include "library/causal/delay.hpp"
@@ -202,7 +202,7 @@ thread_info::init(bool _offset)
         _info                 = thread_info{};
         _info->is_offset      = threading::offset_this_id();
         _info->index_data     = init_index_data(_tid, _info->is_offset);
-        _info->lifetime.first = control::clocks::timeline_ns();
+        _info->lifetime.first = clocks::timeline::now_ns();
 
         const auto _sequent_tid = _info->index_data->sequent_value;
         _info->causal_count     = (!_info->is_offset && _sequent_tid < peak_num_threads)
