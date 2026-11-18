@@ -313,6 +313,22 @@ static inline void mlx5_query_rmac(const mlx5dv_funcs_t& mlx5dv,
   CHECK_ZERO(err, "ibv_destroy_ah");
 }
 
+static const char* mlx5dv_devx_alloc_uar_error_cause(int errnum) {
+  switch (errnum) {
+  case ENOMEM:
+    /* Tried to allocate too many UARs, usually caused by ROCSHMEM_MAX_NUM_CONTEXTS >= 1024. */
+    return "Maximum UAR allocation limit reached, cannot allocate additional UARs. "
+           "Try reducing ROCSHMEM_MAX_NUM_CONTEXTS < 1024.";
+  case EOPNOTSUPP:
+    /* It is recommended that the user upgrade their network stack.
+     * However, this is a fall-back mechanism to notify the user of this issue. */
+    return "MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED is not supported by the installed rdma-core/OFED. "
+           "Please upgrade network stack to rdma-core v45 or later.";
+  default:
+    return "Unknown cause.";
+  }
+}
+
 int mlx5dv_funcs_t::create_qp(mlx5_devx_qp& qp, struct ibv_context *ctx,
                               struct ibv_pd* pd, uint16_t sq_depth) {
   const mlx5dv_funcs_t& mlx5dv = *this;
@@ -346,15 +362,10 @@ int mlx5dv_funcs_t::create_qp(mlx5_devx_qp& qp, struct ibv_context *ctx,
   errno = 0;
   qp.uar = mlx5dv.devx_alloc_uar(qp.ctx, MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED);
 
-  /* It is recommended that the user upgrade their network stack.
-   * However, this is a fall-back mechanism to notify the user of this issue.  */
-  if (!qp.uar && EOPNOTSUPP == errno) {
-    fprintf(stderr,
-            "[Warning] Cannot provide dedicated DBs to each QP, "
-            "rocSHMEM correctness is not guaranteed "
-            "MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED is not supported by the installed rdma-core/OFED."
-            "Please upgrade network stack to rdma-core v45 or later.\n");
-
+  if (!qp.uar) {
+    LOG_WARN("Cannot provide dedicated doorbells to each queue pair, "
+             "rocSHMEM correctness is not guaranteed: %s (errno %d: %s)\n",
+             mlx5dv_devx_alloc_uar_error_cause(errno), errno, strerror(errno));
     qp.uar = mlx5dv.devx_alloc_uar(qp.ctx, MLX5DV_UAR_ALLOC_TYPE_BF);
   }
   CHECK_NNULL(qp.uar, "mlx5dv_devx_alloc_uar");
