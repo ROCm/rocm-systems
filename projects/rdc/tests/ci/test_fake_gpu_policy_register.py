@@ -20,7 +20,7 @@ NOTIFICATION = "A Temperature Limit exceeds the threshold 1 with the value"
 
 
 @pytest.fixture
-def rdcd(tools, tmp_path):
+def rdcd(tools, tmp_path):  # noqa: F811 (the fixture)
     d = Rdcd(tools, tmp_path).start()
     yield d
     d.stop()
