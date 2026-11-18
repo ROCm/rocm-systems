@@ -21,6 +21,11 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
       * `hipArrayGetSparseProperties` returns the layout properties of a sparse HIP array in a
         `hipArraySparseProperties` structure. Added for source compatibility: AMD devices do not
         support sparse arrays, so it zeroes the structure and returns `hipErrorNotSupported`.
+    - Execution affinity: support for API parity with corresponding CUDA API.
+      * `hipDeviceGetExecAffinitySupport` reports whether a device supports a given execution-affinity
+        type and the device's CU-masking granularity. `hipExecAffinityTypeCUCount` is always reported
+        as supported. Two HIP-specific extension types, `hipExtExecAffinityTypeGranularityCU` and
+        `hipExtExecAffinityTypeGranularityWGP`, report the granularity the applies to the CU mask.
 * `hipExtMemcpyBatchAsync` (beta) supports per-entry waits and signals: copy `i` can wait for a masked comparison on a 64-bit value before it starts and write, add or subtract a value after it completes. Entries the device can't run return `hipErrorNotSupported`.
 
 ### Resolved issues
