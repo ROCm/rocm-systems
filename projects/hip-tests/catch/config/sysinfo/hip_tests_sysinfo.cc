@@ -126,10 +126,6 @@ const std::vector<std::pair<std::string, DeviceFeatureCheck>> kDeviceFeatures = 
     {"memory_pools", DEVICE_ATTRIBUTE(hipDeviceAttributeMemoryPoolsSupported)},
     {"large_bar", DEVICE_ATTRIBUTE(hipDeviceAttributeIsLargeBar)},
     {"stream_wait_value", DEVICE_ATTRIBUTE(hipDeviceAttributeCanUseStreamWaitValue)},
-    {"xnack",
-     [](int, const DeviceInfo& info) { return HasTargetFeature(info.arch_name, "xnack+"); }},
-    {"sramecc",
-     [](int, const DeviceInfo& info) { return HasTargetFeature(info.arch_name, "sramecc+"); }},
 };
 
 #undef DEVICE_ATTRIBUTE

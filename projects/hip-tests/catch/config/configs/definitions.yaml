@@ -44,8 +44,6 @@ features:
   memory_pools: Stream ordered memory allocator (hipDeviceAttributeMemoryPoolsSupported)
   large_bar: Large BAR, host-visible device memory (hipDeviceAttributeIsLargeBar)
   stream_wait_value: hipStreamWaitValue32/64 (hipDeviceAttributeCanUseStreamWaitValue)
-  xnack: XNACK enabled, the target ID contains xnack+
-  sramecc: SRAM ECC enabled, the target ID contains sramecc+
   multi_gpu: At least two visible devices
   p2p: At least two visible devices and every device can access every other device as a peer
 
