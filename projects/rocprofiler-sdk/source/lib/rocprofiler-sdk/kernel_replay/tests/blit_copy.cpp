@@ -29,6 +29,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <sstream>
+#include <string>
 #include <vector>
 
 namespace
@@ -126,5 +128,16 @@ TEST(kernel_replay_blit_copy, short_lists_split_into_pieces_down_to_4_kib)
     for(std::uint32_t tiles = 1; tiles < 8 * waves; tiles += 97)
         EXPECT_GE(abi::tile_bytes >> abi::split_for(tiles, waves),
                   std::uint64_t{1} << abi::min_piece_shift);
+}
+
+// The test links the SDK statically, so the lookup starts from the test's own bin directory, which
+// sits beside lib in the build tree.
+TEST(kernel_replay_blit_copy, code_objects_are_found_beside_the_library)
+{
+    auto gpu_names = std::istringstream{KERNEL_REPLAY_BLIT_GPU_NAMES};
+    for(auto gpu_name = std::string{}; std::getline(gpu_names, gpu_name, ',');)
+        EXPECT_FALSE(rocprofiler::kernel_replay::blit::find_code_object(gpu_name).empty())
+            << gpu_name;
+    EXPECT_TRUE(rocprofiler::kernel_replay::blit::find_code_object("gfx9999").empty());
 }
 }  // namespace
