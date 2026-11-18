@@ -63,31 +63,31 @@
 ## Design
 
 - JAX is added as a backend to the existing `--trace-ml-api` pipeline, through
-  `inject_roctx`. The marker uses the v1 wire contract with a trailing `jax`
-  backend token, and `jax` is added to `KNOWN_ML_API_BACKENDS`.
+  `inject_roctx`.
 - `jax.jit` / `jax.pmap` / `jax.shard_map` open a range around each compiled
   call.
 - Eager ops (no outer `jit`) open a range at the call that actually runs.
-  On JAX 0.11.0 that call is usually a jitted helper, so the marker is
-  `jax.jit.<helper>` rather than `jax.{primitive}` (see below). There is no
-  `jax.eager`.
+  When that call is a jitted helper, the marker is `jax.jit.<helper>` rather
+  than `jax.{primitive}` (see below). There is no `jax.eager`.
 - A nested or inner call does not open a second range; its kernels stay under
   the outer marker.
   - JAX compiles nested `jit` into the outer module, so the outer call is one
     `Execute`.
   - rocprofiler-compute emits one marker for that `Execute`. If an inner
     wrapper still runs while that range is open, it does not open another.
-  - The "range already open" flag is thread-local and cleared in `finally`,
-    so a thrown exception still pops the range.
-- `Execute` runs inside the range, so kernels join to that marker when the
-  launch happens on the thread that opened it. Multi-device launches need
-  the fallback under "Where the range is marked".
+  - The "range already open" flag is thread-local. Push and pop of the range,
+    and clearing that flag, happen in `try` / `finally` so an exception still
+    balances the marker.
+- Kernels join to the marker on `Correlation_ID` when the launch is on the
+  thread that opened the range (verified for single-device `jax.jit`).
+  Multi-device `pmap` / `shard_map` launch compute kernels from worker
+  threads, so they need the fallback under "Where the range is marked".
 
 ### At a glance
 
 - The marker trace and the kernel trace are joined on `Correlation_ID` and
   `GUID` in the existing pipeline.
-- Kernels that do not inherit that id are joined by the
+- Kernels that do not inherit the marker's `Correlation_ID` are joined by the
   `hipModuleLaunchKernel` timestamp falling inside the marker (same process
   and `GUID`).
 
@@ -142,9 +142,9 @@
   - Otherwise read the primitive's name from that call, push `jax.{name}` with
     the caller `file:line`, run the original dispatch (the one-op `Execute`),
     then pop.
-  - On JAX 0.11.0 the eager helpers are themselves jitted, so the
+  - On JAX 0.11.0 many `jax.numpy` helpers are themselves jitted, so the
     `PjitFunction.__call__` range opens first and the primitive wrap is
-    skipped. Verified names: `jnp.sum` marks `jax.jit._reduce_sum`; `x @ x`
+    skipped. Verified: `jnp.sum` marks `jax.jit._reduce_sum`; `x @ x`
     marks `jax.jit.matmul`. They do not mark `jax.reduce_sum` or
     `jax.dot_general`.
 - JAX dispatch is asynchronous: the callable returns before the GPU finishes
