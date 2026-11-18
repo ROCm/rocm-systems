@@ -1726,7 +1726,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_BatchBoundary_WorkArgsAbove4K_C
   MakeSymmetricTaskList_Scene scene;
   scene.comm->planner.nTasksColl = nTasks;
   g_symRegType = ncclSymSendRegRecvReg;
-  scene.comm->workArgsBytes = 5 << 10;
+  scene.comm->workArgsBytes = sizeof(ncclDevKernelArgs5K);
   // Without the 4 KB cap the first batch would take more works than the kernel argument holds.
   ASSERT_LE(symkMaxDevWorkArgsSize(MAXCHANNELS, maxWorksIn4K + 1, false), scene.comm->workArgsBytes);
 
@@ -2780,11 +2780,7 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_WorkCountingLoop_SingleTask_Pr
   ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
   ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
   int makeDevWorkCalls = 0;
-  ScopedHook makeDevWorkHook(g_symkMakeDevWork,
-                             [&](struct ncclComm*, struct ncclTaskColl*, struct ncclSymkDevWork*) {
-                               ++makeDevWorkCalls;
-                               return ncclSuccess;
-                             });
+  ScopedHook makeDevWorkHook(g_symkMakeDevWork, SymmetricTaskScheduler_CountMakeDevWork(&makeDevWorkCalls));
   EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
   EXPECT_EQ(makeDevWorkCalls, 1);
 }
@@ -2794,11 +2790,7 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_WorkCountingLoop_ManySameDevFu
   auto tasks = SymmetricTaskScheduler_EnqueueBatch(&scene.symTaskQueue, kSymSchedBigBatchTasks,
                                                     ncclSymkKernelId_AllGather_LL, /*lastIsSymLast=*/1);
   int makeDevWorkCalls = 0;
-  ScopedHook makeDevWorkHook(g_symkMakeDevWork,
-                             [&](struct ncclComm*, struct ncclTaskColl*, struct ncclSymkDevWork*) {
-                               ++makeDevWorkCalls;
-                               return ncclSuccess;
-                             });
+  ScopedHook makeDevWorkHook(g_symkMakeDevWork, SymmetricTaskScheduler_CountMakeDevWork(&makeDevWorkCalls));
   EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
   // workCount-specific: one ncclSymkMakeDevWork call per task, so all kSymSchedBigBatchTasks were counted as one batch.
   EXPECT_EQ(makeDevWorkCalls, kSymSchedBigBatchTasks);
@@ -2882,7 +2874,7 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_WorkCountingLoop_CgaClusterSiz
 
 // ncclSymmetricTaskScheduler args-buffer allocation (symmetric_sched.cc:354-364); packing's own fields unasserted.
 
-// calcArgsSize(2,1,false) is well below the 4096-byte floor, so max() must pick the floor here.
+// calcArgsSize(2,1,false) is well below 4 KB; the scheduler always sizes the args buffer at 4 KB.
 TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsSize_FloorWins_BelowCalcArgsSize) {
   SymmetricTaskScheduler_Scene scene;
   ncclTaskColl task = SymmetricTaskScheduler_MakeTask();

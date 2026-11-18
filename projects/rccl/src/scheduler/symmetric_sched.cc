@@ -102,8 +102,7 @@ static bool symBatchesAlone(const struct ncclTaskColl* t) {
   return t->aggIsolate || t->symkExtract == RCCL_SYMK_EXTRACT_ALLOW_TDM_ONLY;
 }
 
-// [RCCL] workArgsBytes can exceed 4 KB (ncclDevKernelArgs5K), but the symmetric and general kernels take a
-// 4 KB ncclSymkDevWorkArgs4K / ncclGenkDevWorkArgs4K argument, so a symmetric batch must still fit in 4 KB.
+// [RCCL] Symk/Genk kernels take a 4 KB argument even when workArgsBytes is 5 KB, so a batch must fit 4 KB.
 static_assert(sizeof(ncclGenkDevWorkArgs4K) == sizeof(ncclSymkDevWorkArgs4K), "symkMaxArgsBytes assumes one size");
 static size_t symkMaxArgsBytes(struct ncclComm* comm) {
   return std::min<size_t>(comm->workArgsBytes, sizeof(ncclSymkDevWorkArgs4K));
