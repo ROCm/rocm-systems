@@ -4854,8 +4854,14 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(
       // Note: # of XCDs is max # of partitions CPX supports
       uint16_t tmp_xcd_count = 0;
       amdsmi_status_t xcd_status = amdsmi_get_gpu_xcd_counter(processor_handle, &tmp_xcd_count);
+      uint32_t count = 0;
       if (xcd_status == AMDSMI_STATUS_SUCCESS) {
         profile->num_partitions = tmp_xcd_count;
+      } else if (rsmi_wrapper(rsmi_dev_compute_partition_count_get, processor_handle, 0, &count) ==
+                     AMDSMI_STATUS_SUCCESS &&
+                 count > 1) {
+        // A secondary partition has no gpu_metrics; the count comes from its GPU.
+        profile->num_partitions = count;
       }
     }
   }
