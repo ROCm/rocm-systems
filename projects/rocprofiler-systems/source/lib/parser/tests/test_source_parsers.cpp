@@ -25,7 +25,6 @@ using namespace rocprofsys::parser;
 namespace
 {
 constexpr double       k_frequency_limit = 3.0;
-constexpr int          k_argc            = 2;
 constexpr std::int64_t k_negative_number = -5;
 
 schema_param
@@ -89,7 +88,6 @@ add_trace(schema& value)
     param.default_value = "true";
     param.env           = "ROCPROFSYS_TRACE";
     param.arg           = "--trace";
-    param.flag          = true;
     add_param(value, std::move(param));
 }
 
@@ -98,10 +96,8 @@ add_short_flags(schema& value)
 {
     auto quiet   = make_param("quiet", param_type::boolean);
     quiet.arg    = "-q";
-    quiet.flag   = true;
     auto verbose = make_param("verbose", param_type::boolean);
     verbose.arg  = "-v";
-    verbose.flag = true;
     add_param(value, std::move(quiet));
     add_param(value, std::move(verbose));
 }
@@ -323,6 +319,8 @@ TEST(parser_cli, last_repeated_option_wins)
     expect_stored(parsed.values, "freq", std::int64_t{ 2 });
 }
 
+namespace
+{
 schema
 make_event_schema()
 {
@@ -360,10 +358,10 @@ make_traces_schema()
 }
 
 parse_result
-parse_traces(std::vector<std::string> args)
+parse_traces(std::vector<std::string> args,
+             unknown_option           unknown = unknown_option::report)
 {
-    return cli_parser{ std::move(args), unknown_option::report }.parse(
-        make_traces_schema());
+    return cli_parser{ std::move(args), unknown }.parse(make_traces_schema());
 }
 
 /// What each source stores for one row from the same text; nullopt where it refuses.
@@ -415,6 +413,7 @@ expect_one_verdict(const schema_param& row, std::initializer_list<const char*> t
         EXPECT_EQ(found.command_line, found.default_value);
     }
 }
+}  // namespace
 
 TEST(parser_cli, joins_tokens_until_the_next_option)
 {
@@ -519,7 +518,6 @@ TEST(parser_cli, accepts_a_short_flag_bundle)
     add_short_flags(value);
     auto json = make_param("json", param_type::boolean);
     json.arg  = "-j";
-    json.flag = true;
     add_param(value, std::move(json));
 
     const auto parsed = cli_parser{ { "-qj" }, unknown_option::report }.parse(value);
@@ -610,6 +608,97 @@ TEST(parser_cli, list_refuses_a_value_with_no_name_or_an_empty_element)
     expect_refused({ "--traces", "hip,,mpi" }, "hip,,mpi");
 }
 
+TEST(parser_cli, equals_form_takes_one_token_and_the_next_is_unexpected)
+{
+    const auto parsed = parse_traces({ "--traces=hip", "mpi" });
+    expect_stored(parsed.values, "traces", std::vector<std::string>{ "hip" });
+    ASSERT_EQ(parsed.errors.size(), 1U);
+    EXPECT_EQ(parsed.errors.front(),
+              "unexpected argument 'mpi'; did you mean '--traces=hip,mpi'?");
+}
+
+TEST(parser_cli, equals_form_refuses_the_next_word_when_forwarding)
+{
+    const auto parsed =
+        parse_traces({ "--traces=hip", "mpi", "--", "./app" }, unknown_option::forward);
+    expect_stored(parsed.values, "traces", std::vector<std::string>{ "hip" });
+    ASSERT_EQ(parsed.errors.size(), 1U);
+    EXPECT_EQ(parsed.errors.front(),
+              "unexpected argument 'mpi'; did you mean '--traces=hip,mpi'?");
+    EXPECT_TRUE(parsed.unparsed.empty());
+    EXPECT_EQ(parsed.command, std::vector<std::string>{ "./app" });
+}
+
+TEST(parser_cli, equals_form_does_not_apply_arg_min_count)
+{
+    schema catalog{};
+    auto   pair        = make_param("pair", param_type::string);
+    pair.arg           = "--pair";
+    pair.arg_min_count = 2;
+    pair.arg_max_count = 2;
+    add_param(catalog, std::move(pair));
+    const auto spaced =
+        cli_parser{ { "--pair", "a" }, unknown_option::report }.parse(catalog);
+    const auto equals =
+        cli_parser{ { "--pair=a" }, unknown_option::report }.parse(catalog);
+    EXPECT_EQ(spaced.errors.size(), 1U);
+    EXPECT_TRUE(equals.errors.empty());
+    expect_stored(equals.values, "pair", std::string{ "a" });
+}
+
+TEST(parser_cli, equals_form_suggests_every_following_word_in_one_error)
+{
+    const auto parsed = parse_traces({ "--traces=hip", "mpi", "rccl", "--trace" },
+                                     unknown_option::forward);
+    ASSERT_EQ(parsed.errors.size(), 1U);
+    EXPECT_EQ(parsed.errors.front(),
+              "unexpected arguments 'mpi' 'rccl'; did you mean '--traces=hip,mpi,rccl'?");
+    expect_stored(parsed.values, "trace", true);
+    EXPECT_TRUE(parsed.unparsed.empty());
+}
+
+TEST(parser_cli, equals_form_suggestion_skips_a_blank_value_and_a_boundary_separator)
+{
+    const auto blank = parse_traces({ "--traces=", "mpi" });
+    ASSERT_EQ(blank.errors.size(), 1U);
+    EXPECT_EQ(blank.errors.front(),
+              "unexpected argument 'mpi'; did you mean '--traces=mpi'?");
+
+    const auto boundary = parse_traces({ "--traces=hip,", "mpi" });
+    ASSERT_EQ(boundary.errors.size(), 1U);
+    EXPECT_EQ(boundary.errors.front(),
+              "unexpected argument 'mpi'; did you mean '--traces=hip,mpi'?");
+}
+
+TEST(parser_cli, a_word_right_after_an_option_is_unexpected_when_forwarding)
+{
+    for(const auto& args : { std::vector<std::string>{ "--output", "out", "word" },
+                             std::vector<std::string>{ "--output=out", "word" },
+                             std::vector<std::string>{ "--trace", "word" },
+                             std::vector<std::string>{ "-qv", "word" },
+                             std::vector<std::string>{ "--freq", "2", "word" } })
+    {
+        SCOPED_TRACE(args.front());
+        const auto parsed = parse_cli(args, unknown_option::forward);
+        ASSERT_EQ(parsed.errors.size(), 1U);
+        EXPECT_EQ(parsed.errors.front(), "unexpected argument 'word'");
+        EXPECT_TRUE(parsed.unparsed.empty());
+    }
+}
+
+TEST(parser_cli, a_word_first_or_after_a_forwarded_option_is_forwarded)
+{
+    const auto parsed = parse_cli({ "word", "--trace", "--tool", "value", "more",
+                                    "--output", "out", "--", "./app" },
+                                  unknown_option::forward);
+    EXPECT_TRUE(parsed.errors.empty());
+    EXPECT_EQ(parsed.unparsed,
+              (std::vector<std::string>{ "word", "--tool", "value", "more" }));
+    expect_stored(parsed.values, "trace", true);
+    expect_stored(parsed.values, "output", std::string{ "out" });
+    EXPECT_EQ(parsed.command, std::vector<std::string>{ "./app" });
+}
+
 TEST(parser_cli, optional_value_does_not_override_the_default)
 {
     schema value{};
@@ -637,18 +726,6 @@ TEST(parser_cli, required_value_stops_at_the_separator)
     EXPECT_NE(parsed.errors.front().find("requires a value"), std::string::npos);
     EXPECT_EQ(parsed.values.find("output"), parsed.values.end());
     EXPECT_EQ(parsed.command, (std::vector<std::string>{ "./app" }));
-}
-
-TEST(parser_cli, arguments_from_skips_the_program_name)
-{
-    // arguments_from() takes the same char** argv a program receives.
-    char  program[] = "tool";                      // NOLINT(modernize-avoid-c-arrays)
-    char  flag[]    = "--trace";                   // NOLINT(modernize-avoid-c-arrays)
-    char* argv[]    = { program, flag, nullptr };  // NOLINT(modernize-avoid-c-arrays)
-
-    const auto args = cli_parser::arguments_from(k_argc, argv);
-    EXPECT_EQ(args, std::vector<std::string>{ "--trace" });
-    EXPECT_TRUE(cli_parser::arguments_from(0, nullptr).empty());
 }
 
 TEST(parser_cli, reads_an_arg_alias)

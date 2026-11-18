@@ -8,6 +8,7 @@
 #include "parser/value_text.hpp"
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -34,17 +35,12 @@ struct token_limit
     std::size_t maximum = 0;
 };
 
-std::string_view
-option_name(const schema_param& param)
-{
-    return param.arg ? std::string_view{ *param.arg } : std::string_view{ param.id };
-}
-
 token_limit
 limits_for(const schema_param& param)
 {
-    const auto fallback = param.flag ? std::size_t{ 0 } : k_single_value;
-    const auto minimum  = param.arg_min_count.value_or(fallback);
+    const auto fallback =
+        param.type == param_type::boolean ? std::size_t{ 0 } : k_single_value;
+    const auto minimum = param.arg_min_count.value_or(fallback);
     if(param.type == param_type::enumeration_list && param.arg && !param.arg_max_count)
     {
         return { .minimum = minimum, .maximum = std::numeric_limits<std::size_t>::max() };
@@ -84,7 +80,7 @@ blocks_value(const schema_param& param, std::string_view token)
 std::string
 refused_part(const schema_param& param, const std::string& text)
 {
-    const auto parts = split_list(text, list_separator(param));
+    const auto parts = split_list(text, k_list_separator);
     if(parts)
     {
         const auto found =
@@ -207,35 +203,71 @@ private:
         const auto* param     = m_schema.find_param_by_arg(name);
         if(param == nullptr)
         {
+            // Not an option name. The one other valid form is a bundle of single-letter
+            // booleans such as "-qv"; store_bundle() returns false if it is not one.
             return store_bundle(token);
         }
         if(equals_at != std::string_view::npos)
         {
+            // "--name=value" supplies exactly one token. It ignores arg_min_count and
+            // arg_max_count, which apply only to the space form.
             store_tokens(*param, { std::string{ token.substr(equals_at + 1) } });
+            refuse_plain_words(*param, token);
             return true;
         }
-        return consume_counted(*param);
+        // "--name" alone takes the following tokens that arg_min_count and
+        // arg_max_count allow. A missing value is recorded as an error, and the option
+        // still counts as handled.
+        consume_counted(*param);
+        refuse_plain_words(*param);
+        return true;
     }
 
-    [[nodiscard]] bool consume_counted(const schema_param& param)
+    void consume_counted(const schema_param& param)
     {
         const auto limit  = limits_for(param);
         const auto tokens = take_tokens(param, limit.maximum);
         if(tokens.size() < limit.minimum)
         {
             report_missing(param);
-            return true;
         }
-        if(tokens.empty())
+        else if(!tokens.empty())
         {
-            if(!store_bare_flag(param) && limit.minimum > 0)
-            {
-                report_missing(param);
-            }
-            return true;
+            store_tokens(param, tokens);
         }
-        store_tokens(param, tokens);
-        return true;
+        else if(param.type == param_type::boolean)
+        {
+            m_result.store_if_valid(param, "true");
+        }
+    }
+
+    /// No tool option comes before the plain words right after an option and its
+    /// values, so they are refused, not forwarded. After @p equals_token, the
+    /// "--name=value" token of a list, the message suggests the value with those
+    /// words added.
+    void refuse_plain_words(const schema_param& param, std::string_view equals_token = {})
+    {
+        const auto first =
+            std::next(m_args.begin(), static_cast<std::ptrdiff_t>(m_index + 1));
+        auto words = std::vector<std::string>(
+            first, std::ranges::find_if(first, m_args.end(), starts_option));
+        if(words.empty())
+        {
+            return;
+        }
+        m_index += words.size();
+        auto message = fmt::format("unexpected argument{} '{}'",
+                                   words.size() > 1 ? "s" : "", fmt::join(words, "' '"));
+        if(!equals_token.empty() && param.type == param_type::enumeration_list)
+        {
+            const auto equals_at = equals_token.find('=');
+            words.insert(words.begin(),
+                         std::string{ equals_token.substr(equals_at + 1) });
+            message +=
+                fmt::format("; did you mean '{}={}'?", equals_token.substr(0, equals_at),
+                            join_list(words, k_list_separator));
+        }
+        m_result.errors.push_back(std::move(message));
     }
 
     /// A list reads its tokens as one value and adds its elements to the ones given
@@ -243,14 +275,13 @@ private:
     /// stores its tokens joined, and a repeat replaces the earlier value.
     void store_tokens(const schema_param& param, const std::vector<std::string>& tokens)
     {
-        const auto separator = list_separator(param);
         if(param.type != param_type::enumeration_list)
         {
-            m_result.store_if_valid(param,
-                                    join_tokens(tokens, 0, tokens.size(), separator));
+            m_result.store_if_valid(
+                param, join_tokens(tokens, 0, tokens.size(), k_list_separator));
             return;
         }
-        const auto text   = join_list(tokens, separator);
+        const auto text   = join_list(tokens, k_list_separator);
         const auto parsed = parse_value(param, text);
         if(!parsed)
         {
@@ -276,16 +307,6 @@ private:
         return list == nullptr ? std::vector<std::string>{} : *list;
     }
 
-    [[nodiscard]] bool store_bare_flag(const schema_param& param)
-    {
-        if(!param.flag)
-        {
-            return false;
-        }
-        m_result.store_if_valid(param, "true");
-        return true;
-    }
-
     [[nodiscard]] std::vector<std::string> take_tokens(const schema_param& param,
                                                        std::size_t         maximum)
     {
@@ -306,7 +327,7 @@ private:
     void report_missing(const schema_param& param)
     {
         m_result.errors.push_back(
-            fmt::format("option '{}' requires a value", option_name(param)));
+            fmt::format("option '{}' requires a value", param.arg.value_or(param.id)));
     }
 
     [[nodiscard]] bool store_bundle(std::string_view token)
@@ -321,7 +342,7 @@ private:
         {
             const auto  name  = std::string{ '-' } + token[index];
             const auto* param = m_schema.find_param_by_arg(name);
-            if(param == nullptr || !param->flag)
+            if(param == nullptr || param->type != param_type::boolean)
             {
                 return false;
             }
@@ -331,6 +352,7 @@ private:
         {
             m_result.store_if_valid(*param, "true");
         }
+        refuse_plain_words(*flags.back());
         return true;
     }
 
@@ -346,25 +368,6 @@ cli_parser::cli_parser(std::vector<std::string> args, unknown_option unknown)
 : m_args(std::move(args))
 , m_unknown(unknown)
 {}
-
-std::vector<std::string>
-cli_parser::arguments_from(int argc, char** argv)
-{
-    std::vector<std::string> args;
-    if(argv == nullptr || argc < 2)
-    {
-        return args;
-    }
-    args.reserve(static_cast<std::size_t>(argc - 1));
-    for(int index = 1; index < argc; ++index)
-    {
-        if(argv[index] != nullptr)
-        {
-            args.emplace_back(argv[index]);
-        }
-    }
-    return args;
-}
 
 parse_result
 cli_parser::parse(const schema& config_schema) const
