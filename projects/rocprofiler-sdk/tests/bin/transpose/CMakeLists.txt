@@ -57,7 +57,6 @@ find_package(Threads REQUIRED)
 find_package(rocprofiler-sdk-roctx REQUIRED)
 
 transpose_build_target(transpose "" rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
-target_compile_options(transpose PRIVATE -gline-tables-only)
 
 #
 # using old roctracer roctx

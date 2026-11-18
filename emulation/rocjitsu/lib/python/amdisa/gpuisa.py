@@ -278,6 +278,13 @@ class InstEncoding(InstBase):
         self.insts: list[Instruction] = []
         self.implied_literal_ops: dict[str, int] = {}
 
+    def opcode_expression(self, inst: str) -> str:
+        """Reconstruct the logical opcode from its XML bit ranges."""
+        expr = f'{inst}.op'
+        if self.opm_field_bit_cnt:
+            expr += f' | ({inst}.opm << {self.op_field_bit_cnt})'
+        return expr
+
     @cached_property
     def has_implied_literal_ops(self) -> bool:
         """True if this encoding has any implied literal opcodes."""
@@ -457,6 +464,7 @@ class IsaSpec:
         self.cpp_namespace = cpp_namespace or arch_name
         self.version = version
         self.encoding_map: dict[str, InstEncoding] = {}
+        self.flat_segments_by_opcode: dict[int, int] = {}
         self.inst_encodings: list[InstEncoding] = []
         self.operand_types: list[str] = []
         self.opnd_selectors: list[OperandSelector] = []

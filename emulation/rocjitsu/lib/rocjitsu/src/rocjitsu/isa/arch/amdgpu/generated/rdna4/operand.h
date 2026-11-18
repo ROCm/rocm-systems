@@ -20,7 +20,8 @@ class Operand final : public IsaOperand<Isa> {
 public:
   enum class Literal32Widening : uint8_t { ZeroExtend, SignExtend, Replicate32, F64HighBits };
   static constexpr bool kStaticRegisterAccess = true;
-  Operand(int size_bits, OperandType opr_type, int encoding_value, bool packed_16bit_source = false,
+  Operand(int size_bits, OperandType opr_type, int encoding_value);
+  Operand(int size_bits, OperandType opr_type, int encoding_value, bool packed_16bit_source,
           bool packed_16bit_dst = false);
   Operand(int size_bits, OperandType opr_type, unsigned short encoding_value,
           bool packed_16bit_source, bool packed_16bit_dst = false);

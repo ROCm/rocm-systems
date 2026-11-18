@@ -5,7 +5,7 @@
 
 #include "conversion/conversion32_reference.h"
 #include "conversion/helpers.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_conversion.h"
 
 #include <gtest/gtest.h>
 #include <stdint.h>
@@ -32,6 +32,14 @@ void check_float32(Call call, Conversion32 operation) {
     const uint32_t edges[] = {0, 1, 3, 16777217, 16777219, 0xffffffffU, 0x80000000U, 0x7fffffffU};
     for (int lane = 0; lane < 8; ++lane) {
       input.v[0][lane] = edges[lane];
+    }
+  }
+  if (op == 2 || op == 3) {
+    // Adjacent FP32 encodings around signed/unsigned saturation and upper-half conversion.
+    const uint32_t edges[] = {0x4effffffU, 0x4f000001U, 0x4f7fffffU, 0x4f800000U,
+                              0x4f800001U, 0xceffffffU, 0xcf000001U, 0xff800001U};
+    for (int lane = 0; lane < 8; ++lane) {
+      input.v[0][16 + lane] = edges[lane];
     }
   }
   if (op < 2) {

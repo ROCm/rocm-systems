@@ -66,7 +66,8 @@ uint32_t Vopd::bitop2(uint32_t src0, uint32_t src1, uint32_t truth_table) {
   return amdgpu::bitop3_words(src0, src1, uint32_t{0}, static_cast<uint8_t>(truth_table));
 }
 
-uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t lane) {
+uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t lane,
+                            uint32_t &causes) {
   uint32_t src0 = amdgpu::RegisterAccess(wf).read_lane(*slot.src0, lane);
   if (uses_src_neg_modifier(slot.op))
     src0 = apply_neg(src0, slot.neg, 0);
@@ -81,58 +82,23 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
     src2 = apply_neg(src2, slot.neg, 2);
   }
 
+  if (slot.op <= kVopdSubrevF32) {
+    if (slot.op == kVopdFmacF32)
+      src2 = amdgpu::RegisterAccess(wf).read_lane(*slot.dst, lane);
+    const auto in = rdna3_5::dual_fma_inputs(slot.op, src0, src1, src2);
+    const uint32_t result = rdna3_5::evaluate_fma(in, wf);
+    if (!wf.dx10_clamp())
+      causes |= rdna3_5::fma_flags(in, result, wf);
+    return result;
+  }
+
   switch (slot.op) {
-  case kVopdFmacF32: {
-    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(
-        std::bit_cast<float>(src0), std::bit_cast<float>(src1),
-        std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(*slot.dst, lane)),
-        wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
-    return std::bit_cast<uint32_t>(result);
-  }
-  case kVopdFmaakF32: {
-    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(
-        std::bit_cast<float>(src0), std::bit_cast<float>(src1), std::bit_cast<float>(src2),
-        wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
-    return std::bit_cast<uint32_t>(result);
-  }
-  case kVopdFmamkF32: {
-    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(
-        std::bit_cast<float>(src0), std::bit_cast<float>(src2), std::bit_cast<float>(src1),
-        wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
-    return std::bit_cast<uint32_t>(result);
-  }
-  case kVopdMulF32: {
-    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::MUL>(
-        std::bit_cast<float>(src0), std::bit_cast<float>(src1), 0.0f, wf.fp_round_mode_f32(),
-        wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
-    return std::bit_cast<uint32_t>(result);
-  }
   case kVopdMulDx9ZeroF32: {
     float lhs = std::bit_cast<float>(src0);
     float rhs = std::bit_cast<float>(src1);
     return std::bit_cast<uint32_t>(
         amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::MUL_LEGACY>(
             lhs, rhs, 0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32()));
-  }
-  case kVopdAddF32: {
-    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::ADD>(
-        std::bit_cast<float>(src0), std::bit_cast<float>(src1), 0.0f, wf.fp_round_mode_f32(),
-        wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
-    return std::bit_cast<uint32_t>(result);
-  }
-  case kVopdSubF32: {
-    // The ISA defines VOPD by the VOP2 instructions (16.11): add the
-    // negated subtrahend, keeping the sources in operand order.
-    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::ADD>(
-        std::bit_cast<float>(src0), std::bit_cast<float>(src1 ^ 0x80000000u), 0.0f,
-        wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
-    return std::bit_cast<uint32_t>(result);
-  }
-  case kVopdSubrevF32: {
-    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::ADD>(
-        std::bit_cast<float>(src0 ^ 0x80000000u), std::bit_cast<float>(src1), 0.0f,
-        wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
-    return std::bit_cast<uint32_t>(result);
   }
   case kVopdMovB32:
     return src0;
@@ -193,21 +159,23 @@ void Vopd::execute_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::try_execute_vopd_integer_pair_simd<kVopdMovB32, kVopdAddNcU32, kVopdLshlrevB32>(
           wf, x_, y_))
     return;
-  if (amdgpu::try_execute_vopd_simd<false>(x_, y_, wf))
+  if (amdgpu::try_execute_vopd_simd<false, true>(x_, y_, wf))
     return;
+  uint32_t causes = 0;
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t x_result = execute_slot(x_, wf, lane);
+    uint32_t x_result = execute_slot(x_, wf, lane, causes);
     if (wf.instruction_execution_failed())
       return;
-    uint32_t y_result = execute_slot(y_, wf, lane);
+    uint32_t y_result = execute_slot(y_, wf, lane, causes);
     if (wf.instruction_execution_failed())
       return;
     amdgpu::RegisterAccess(wf).write_lane(*x_.dst, lane, x_result);
     amdgpu::RegisterAccess(wf).write_lane(*y_.dst, lane, y_result);
   }
+  rdna3_5::record_alu_causes(wf, causes);
 }
 
 } // namespace rdna3_5

@@ -26,7 +26,8 @@ template <typename BufferMachineInst> uint32_t buffer_vaddr_bits(const BufferMac
 TbufferLoadFormatXMtbuf::TbufferLoadFormatXMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_x", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::TbufferLoadFormatXMtbuf)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(32 + 32u * reinterpret_cast<const OpEncoding *>(inst)->tfe, OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
@@ -41,7 +42,10 @@ TbufferLoadFormatXMtbuf::TbufferLoadFormatXMtbuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe)
+    flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -61,7 +65,8 @@ DecodeResult decodeTbufferLoadFormatXMtbuf(const MachineInst *opcode,
 TbufferLoadFormatXyMtbuf::TbufferLoadFormatXyMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_xy", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::TbufferLoadFormatXyMtbuf)),
-      vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(64 + 32u * reinterpret_cast<const OpEncoding *>(inst)->tfe, OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
@@ -76,7 +81,10 @@ TbufferLoadFormatXyMtbuf::TbufferLoadFormatXyMtbuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe)
+    flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -96,7 +104,8 @@ DecodeResult decodeTbufferLoadFormatXyMtbuf(const MachineInst *opcode,
 TbufferLoadFormatXyzMtbuf::TbufferLoadFormatXyzMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::TbufferLoadFormatXyzMtbuf)),
-      vdata(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(96 + 32u * reinterpret_cast<const OpEncoding *>(inst)->tfe, OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
@@ -111,7 +120,10 @@ TbufferLoadFormatXyzMtbuf::TbufferLoadFormatXyzMtbuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe)
+    flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -131,7 +143,8 @@ DecodeResult decodeTbufferLoadFormatXyzMtbuf(const MachineInst *opcode,
 TbufferLoadFormatXyzwMtbuf::TbufferLoadFormatXyzwMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::TbufferLoadFormatXyzwMtbuf)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(128 + 32u * reinterpret_cast<const OpEncoding *>(inst)->tfe, OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
@@ -146,7 +159,10 @@ TbufferLoadFormatXyzwMtbuf::TbufferLoadFormatXyzwMtbuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe)
+    flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -182,6 +198,7 @@ TbufferStoreFormatXMtbuf::TbufferStoreFormatXMtbuf(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -217,6 +234,7 @@ TbufferStoreFormatXyMtbuf::TbufferStoreFormatXyMtbuf(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -252,6 +270,7 @@ TbufferStoreFormatXyzMtbuf::TbufferStoreFormatXyzMtbuf(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -287,6 +306,7 @@ TbufferStoreFormatXyzwMtbuf::TbufferStoreFormatXyzwMtbuf(const MachineInst *inst
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -306,7 +326,8 @@ DecodeResult decodeTbufferStoreFormatXyzwMtbuf(const MachineInst *opcode,
 TbufferLoadD16FormatXMtbuf::TbufferLoadD16FormatXMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_d16_format_x", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::TbufferLoadD16FormatXMtbuf)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(32 + 32u * reinterpret_cast<const OpEncoding *>(inst)->tfe, OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
@@ -321,7 +342,10 @@ TbufferLoadD16FormatXMtbuf::TbufferLoadD16FormatXMtbuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe)
+    flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -347,7 +371,8 @@ void TbufferLoadD16FormatXMtbuf::implicit_uses(RegisterSet &uses) const {
 TbufferLoadD16FormatXyMtbuf::TbufferLoadD16FormatXyMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_d16_format_xy", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::TbufferLoadD16FormatXyMtbuf)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(32 + 32u * reinterpret_cast<const OpEncoding *>(inst)->tfe, OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
@@ -362,7 +387,10 @@ TbufferLoadD16FormatXyMtbuf::TbufferLoadD16FormatXyMtbuf(const MachineInst *inst
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe)
+    flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -383,7 +411,8 @@ DecodeResult decodeTbufferLoadD16FormatXyMtbuf(const MachineInst *opcode,
 TbufferLoadD16FormatXyzMtbuf::TbufferLoadD16FormatXyzMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_d16_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::TbufferLoadD16FormatXyzMtbuf)),
-      vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(64 + 32u * reinterpret_cast<const OpEncoding *>(inst)->tfe, OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
@@ -398,7 +427,10 @@ TbufferLoadD16FormatXyzMtbuf::TbufferLoadD16FormatXyzMtbuf(const MachineInst *in
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe)
+    flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -425,7 +457,8 @@ void TbufferLoadD16FormatXyzMtbuf::implicit_uses(RegisterSet &uses) const {
 TbufferLoadD16FormatXyzwMtbuf::TbufferLoadD16FormatXyzwMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_d16_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::TbufferLoadD16FormatXyzwMtbuf)),
-      vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(64 + 32u * reinterpret_cast<const OpEncoding *>(inst)->tfe, OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
@@ -440,7 +473,10 @@ TbufferLoadD16FormatXyzwMtbuf::TbufferLoadD16FormatXyzwMtbuf(const MachineInst *
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  if (inst_.tfe)
+    flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -476,6 +512,8 @@ TbufferStoreD16FormatXMtbuf::TbufferStoreD16FormatXMtbuf(const MachineInst *inst
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= CONDITIONAL_MEMORY_LANES;
+  vdata.set_register_byte_mask(0x3);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -511,6 +549,7 @@ TbufferStoreD16FormatXyMtbuf::TbufferStoreD16FormatXyMtbuf(const MachineInst *in
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -546,6 +585,7 @@ TbufferStoreD16FormatXyzMtbuf::TbufferStoreD16FormatXyzMtbuf(const MachineInst *
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -581,6 +621,7 @@ TbufferStoreD16FormatXyzwMtbuf::TbufferStoreD16FormatXyzwMtbuf(const MachineInst
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  flags_ |= CONDITIONAL_MEMORY_LANES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
