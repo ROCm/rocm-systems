@@ -379,6 +379,43 @@ DEFINE_ld_st__size(1, uint8_t, b8, r) DEFINE_ld_st__size(2, uint16_t, b16, h) DE
 #endif
 }
 
+// gfx1250 marks every atomic store "single access": the compiler puts s_wait_xcnt 0 ahead of each one so an XNACK
+// replay never repeats it, which leaves one 16-byte store per address translation in flight. A Simple hunk's stores are
+// plain data behind the step post, so a repeat is harmless: issue them as buffer stores, which keep scope:SCOPE_SYS
+// and the cheap post-send fence, from one wave-uniform base. Configure with -DENABLE_SIMPLE_BUFFER_STORE=OFF to keep
+// the atomic stores.
+#if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && \
+  !defined(RCCL_DISABLE_SIMPLE_BUFFER_STORE) && __has_builtin(__builtin_amdgcn_raw_buffer_store_b128) && \
+  __has_builtin(__builtin_amdgcn_make_buffer_rsrc)
+#define RCCL_SIMPLE_BUFFER_STORE 1
+// cpol of the buffer stores: SCOPE_SYS (scope field at bit 3), the scope the DWORDX4 store builtin gives.
+#define RCCL_BUFFER_CPOL_SCOPE_SYS (3 << 3)
+
+struct WaveStore16 {
+  __amdgpu_buffer_rsrc_t rsrc;
+  uint32_t voff;
+};
+
+// Base = the first active lane's address, OOB checking off. True when every active lane sits less than one warp of
+// packs above it (the lane layout of a Simple hunk); otherwise the caller keeps the global stores.
+__device__ __forceinline__ bool waveStore16Begin(uintptr_t addr, WaveStore16& w) {
+  uint32_t lo = __builtin_amdgcn_readfirstlane((uint32_t)addr);
+  uint32_t hi = __builtin_amdgcn_readfirstlane((uint32_t)(addr >> 32));
+  uintptr_t off = addr - (((uintptr_t)hi << 32) | lo);
+  w.rsrc = __builtin_amdgcn_make_buffer_rsrc((void*)(((uintptr_t)hi << 32) | lo), 0, -1LL, 0);
+  // The mask changes nothing once the check below passed; it lets the compiler fold ioff into the instruction offset.
+  w.voff = (uint32_t)off & (WARP_SIZE * 16 - 1);
+  return !__any(off >= WARP_SIZE * 16);
+}
+
+// Only after waveStore16Begin() returned true.
+__device__ __forceinline__ void waveStore16(WaveStore16 const& w, uint32_t ioff, BytePack<16> value) {
+  __builtin_amdgcn_raw_buffer_store_b128(value.v4u, w.rsrc, w.voff + ioff, 0, RCCL_BUFFER_CPOL_SCOPE_SYS);
+}
+#else
+#define RCCL_SIMPLE_BUFFER_STORE 0
+#endif
+
 __device__ __forceinline__ BytePack<16> load16global(uintptr_t addr) {
   BytePack<16> ans;
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS

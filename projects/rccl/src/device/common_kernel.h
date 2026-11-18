@@ -38,6 +38,29 @@ inline __device__ ssize_t loadSsize(ssize_t* ptr) {
   return v;
 }
 
+#if RCCL_SIMPLE_BUFFER_STORE
+// Stores one warp's hunk (Unroll packs per lane, a warp of packs apart) from dst. 16-byte packs go out as buffer
+// stores (op128.h waveStore16) where the lanes allow, so the stores do not wait on each other's address translation.
+template <int Unroll, int BytePerPack>
+__device__ __forceinline__ void stGlobalHunk(uintptr_t dst, BytePack<BytePerPack> const (&vals)[Unroll]) {
+  if constexpr (BytePerPack == 16) {
+    WaveStore16 w;
+    if (waveStore16Begin(dst, w)) {
+#pragma unroll Unroll
+      for (int u = 0; u < Unroll; u++) {
+        waveStore16(w, u * WARP_SIZE * BytePerPack, vals[u]);
+      }
+      return;
+    }
+  }
+#pragma unroll Unroll
+  for (int u = 0; u < Unroll; u++) {
+    st_global<BytePerPack>(dst, vals[u]);
+    dst += WARP_SIZE * BytePerPack;
+  }
+}
+#endif
+
 template <typename RedFn, typename T, int Unroll, int BytePerPack, int MultimemSrcs, int MinSrcs, int MaxSrcs,
           int MultimemDsts, int MinDsts, int MaxDsts, int PreOpSrcs, typename IntBytes, typename SrcPtrFn,
           typename DstPtrFn>
@@ -156,6 +179,24 @@ __device__ __forceinline__ static void reduceCopyPacks(int nThreads, int& thread
       for (int u = 0; u < Unroll; u++) acc[u] = applyPostOp(redFn, acc[u]);
     }
 
+#if RCCL_SIMPLE_BUFFER_STORE
+#pragma unroll Unroll
+    for (int d = 0; d < MinDsts; d++) {
+      if (d < MultimemDsts) {
+#pragma unroll Unroll
+        for (int u = 0; u < Unroll; u++) {
+          multimem_st_global(minDsts[d], acc[u]);
+          minDsts[d] += WARP_SIZE * BytePerPack;
+        }
+      } else {
+        stGlobalHunk<Unroll, BytePerPack>(minDsts[d], acc);
+        minDsts[d] += Unroll * WARP_SIZE * BytePerPack;
+      }
+    }
+    for (int d = MinDsts; (MinDsts < MaxDsts) && (d < MaxDsts) && (d < nDsts); d++) {
+      stGlobalHunk<Unroll, BytePerPack>(cvta_to_global(dstPtrFn(d)) + threadBytesBehind, acc);
+    }
+#else
 #pragma unroll Unroll
     for (int d = 0; d < MinDsts; d++) {
 #pragma unroll Unroll
@@ -180,6 +221,7 @@ __device__ __forceinline__ static void reduceCopyPacks(int nThreads, int& thread
         dst += WARP_SIZE * BytePerPack;
       }
     }
+#endif
 
     nWarps = nThreads / WARP_SIZE;
 #pragma unroll
@@ -261,6 +303,24 @@ __device__ __forceinline__ void reduceAndStore(RedFn redFn, BytePack<BytePerPack
     for (int u = 0; u < Unroll; u++) buff[0][u] = applyPostOp(redFn, buff[0][u]);
   }
 
+#if RCCL_SIMPLE_BUFFER_STORE
+#pragma unroll Unroll
+  for (int d = 0; d < MinDsts; d++) {
+    if (d < MultimemDsts) {
+#pragma unroll Unroll
+      for (int u = 0; u < Unroll; u++) {
+        multimem_st_global(minDsts[d], buff[0][u]);
+        minDsts[d] += WARP_SIZE * BytePerPack;
+      }
+    } else {
+      stGlobalHunk<Unroll, BytePerPack>(minDsts[d], buff[0]);
+      minDsts[d] += Unroll * WARP_SIZE * BytePerPack;
+    }
+  }
+  for (int d = MinDsts; (MinDsts < MaxDsts) && (d < MaxDsts) && (d < nDsts); d++) {
+    stGlobalHunk<Unroll, BytePerPack>(cvta_to_global(dstPtrFn(d)) + tailThreadBytesBehind, buff[0]);
+  }
+#else
 #pragma unroll Unroll
   for (int d = 0; d < MinDsts; d++) {
 #pragma unroll Unroll
@@ -282,6 +342,7 @@ __device__ __forceinline__ void reduceAndStore(RedFn redFn, BytePack<BytePerPack
       dst += WARP_SIZE * BytePerPack;
     }
   }
+#endif
 }
 
 template <typename RedFn, typename T, int Unroll, int BytePerPack, int MultimemSrcs, int MinSrcs, int MaxSrcs,
