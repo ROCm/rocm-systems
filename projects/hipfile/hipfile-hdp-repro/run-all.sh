@@ -1,6 +1,6 @@
 #!/bin/bash
 # Runs every hipFile data-visibility test and probe from the HDP / L2 investigation on one node:
-# Kurt's hipfileread-cpu-visibility, John's hipfileread-gpu-visibility, their ctest entries, the
+# Kurt's hipfileread-cpu-visibility, John's hipfileread-gpu-visibility and hipfilewrite-visibility, their ctest entries, the
 # HIP-only BAR repro, and the subagents' probes (a1 barprobe + instrumented Kurt test, a2
 # stale-probe, c f1probe/f2probe). See README.md for what each section does and what touches
 # the BAR or the HDP register.
@@ -12,7 +12,7 @@
 #   --dir DIR           directory on an AIS-capable (ext4 data=ordered / xfs) NVMe mount for test files
 #   --build-dir DIR     hipFile build directory (default: <hipfile-src>/build-visibility)
 #   --build             configure and build hipFile even if the build directory exists
-#   --sections LIST     comma-separated; default: health,ctest,kurt,gpu,aqllog,hipbar,a1,a2,c
+#   --sections LIST     comma-separated; default: health,ctest,kurt,gpu,write,aqllog,hipbar,a1,a2,c
 #                       (hdpprobe is added by --allow-hdp-flush)
 #   --allow-hdp-flush   also run configs that write the HDP flush register (write only, never read
 #                       back) and the hdpprobe section. Off by default.
@@ -51,7 +51,7 @@ done
     die "--hipfile-src must point at projects/hipfile of a checkout with hipfileread-gpu-visibility"
 [ -n "$DIR" ] && [ -d "$DIR" ] && [ -w "$DIR" ] || die "--dir must be an existing writable directory"
 BUILD=${BUILD:-$SRC/build-visibility}
-SECTIONS=${SECTIONS:-health,ctest,kurt,gpu,aqllog,hipbar,a1,a2,c}
+SECTIONS=${SECTIONS:-health,ctest,kurt,gpu,write,aqllog,hipbar,a1,a2,c}
 [ "$ALLOW_HDP" = 1 ] && [[ ,$SECTIONS, != *,hdpprobe,* ]] && SECTIONS+=,hdpprobe
 [ -n "$GPU" ] && export ROCR_VISIBLE_DEVICES=$GPU
 OUT=${OUT:-$PWD/results-$(hostname -s)-$(date +%Y%m%d-%H%M%S)}
@@ -61,6 +61,7 @@ exec > >(tee -a "$OUT/run.log") 2>&1
 
 if [ "$QUICK" = 1 ]; then REPS=1 KURT_ITERS=200 GPU_ITERS=50 BIG_ITERS=5 QUICK_ITERS=ITERS=100
 else REPS=3 KURT_ITERS=2000 GPU_ITERS=200 BIG_ITERS=50 QUICK_ITERS=; fi
+if [ "$QUICK" = 1 ]; then WRITE_ITERS=100 SLEEP_ITERS=20; else WRITE_ITERS=1000 SLEEP_ITERS=100; fi
 
 note() { echo "$*" | tee -a "$SUMMARY"; }
 section() { note ""; note "######## $1 ########"; }
@@ -92,14 +93,16 @@ note "hipfile-src=$SRC ($(git -C "$SRC" rev-parse --abbrev-ref HEAD 2>/dev/null)
 note "dir=$DIR build=$BUILD sections=$SECTIONS allow-hdp-flush=$ALLOW_HDP quick=$QUICK gpu=${GPU:-all} out=$OUT"
 
 # ---- build hipFile -------------------------------------------------------------------------
-if [ "$DO_BUILD" = 1 ] || [ ! -x "$BUILD/test/amd_detail/hipfileread-gpu-visibility" ]; then
+if [ "$DO_BUILD" = 1 ] || [ ! -x "$BUILD/test/amd_detail/hipfileread-gpu-visibility" ] ||
+    [ ! -x "$BUILD/test/amd_detail/hipfilewrite-visibility" ]; then
     section "build hipFile"
     cmake_flags=(-DCMAKE_CXX_COMPILER="$HIPCXX" -DCMAKE_BUILD_TYPE=Debug -DHIPFILE_CAPABLE_DIR="$DIR")
     [ -n "$EXTRA_FLAGS" ] && cmake_flags+=(-DCMAKE_CXX_FLAGS="$EXTRA_FLAGS" -DCMAKE_HIP_FLAGS="$EXTRA_FLAGS")
     run build cmake -S "$SRC" -B "$BUILD" "${cmake_flags[@]}" >/dev/null ||
         die "cmake configure failed; see $OUT/logs/build.log"
     LD_LIBRARY_PATH=$BUILD/src/amd_detail:$ROCM/lib run build cmake --build "$BUILD" --parallel \
-        --target hipfile hipfileread-cpu-visibility hipfileread-gpu-visibility hipfile-fastpath-gate >/dev/null ||
+        --target hipfile hipfileread-cpu-visibility hipfileread-gpu-visibility hipfilewrite-visibility \
+        hipfile-fastpath-gate >/dev/null ||
         die "hipFile build failed; see $OUT/logs/build.log"
 fi
 # /opt/rocm/lib may hold an older libhipfile, and LD_LIBRARY_PATH beats RUNPATH: build dir first
@@ -107,6 +110,7 @@ export LD_LIBRARY_PATH=$BUILD/src/amd_detail:$ROCM/lib${LD_LIBRARY_PATH:+:$LD_LI
 T=$BUILD/test/amd_detail
 KURT=$T/hipfileread-cpu-visibility
 GVIS=$T/hipfileread-gpu-visibility
+WVIS=$T/hipfilewrite-visibility
 ldd "$GVIS" | grep -q "$BUILD/src/amd_detail/libhipfile" || die "$GVIS does not load $BUILD's libhipfile"
 CAPDIR=$(grep -oP '^HIPFILE_CAPABLE_DIR:\w+=\K.*' "$BUILD/CMakeCache.txt")
 [ "$CAPDIR" = "$DIR" ] || note "NOTE: ctest uses HIPFILE_CAPABLE_DIR=$CAPDIR from the existing build, not --dir; pass --build to reconfigure"
@@ -152,9 +156,9 @@ health before
 
 # ---- ctest: Kurt's and John's registered tests --------------------------------------------
 if has_section ctest; then
-    section "ctest (hipfileread_cpu_visibility_* and hipfileread_gpu_visibility_*)"
+    section "ctest (hipfileread_cpu_visibility_*, hipfileread_gpu_visibility_* and hipfilewrite_visibility_*)"
     gpu_busy_check ctest
-    run ctest ctest --test-dir "$BUILD" -R 'hipfileread_(cpu|gpu)_visibility' --output-on-failure |
+    run ctest ctest --test-dir "$BUILD" -R 'hipfileread_(cpu|gpu)_visibility|hipfilewrite_visibility' --output-on-failure |
         grep -E 'Test +#|tests passed' | tee -a "$SUMMARY"
 fi
 
@@ -222,6 +226,113 @@ if has_section gpu; then
             out=$(run gpu env "$(backend_env "$be")" "$GVIS" --directory "$DIR" --iterations "$BIG_ITERS" --buffer-size 256M $cfg)
             note "$(printf '%-8s %-56s 256M rep 1: %s' "$be" "$cfg" "$(gvis_verdict "$out")")"
         done
+    done
+fi
+
+# ---- write: hipfilewrite-visibility matrix (the drive reads VRAM through the HDP) ------------
+wvis_verdict() {
+    if grep -q 'passed in' <<<"$1"; then echo "PASS"
+    elif grep -q 'the file differed' <<<"$1"; then
+        echo "FAIL at $(grep -m1 -oE 'iteration [0-9]+' <<<"$1"):" \
+             "$(grep -m1 -oE '[0-9]+ of [0-9]+ 64-bit words' <<<"$1") wrong," \
+             "second write $(grep -q 'wrote the generation' <<<"$1" && echo right || echo 'still wrong')," \
+             "buffer $(grep -q 'held the generation' <<<"$1" && echo right || echo wrong)"
+    else echo "ERROR: $(grep -m1 -v '^$' <<<"$1" | cut -c1-120)"; fi
+}
+# The buffer is 1M unless a configuration says otherwise
+WVIS_CONFIGS=(
+    # A kernel that finished before hipFileWrite, and each way the host can learn that it did
+    "--producer kernel --wait sync"
+    "--producer kernel --wait sync --prime write"
+    "--producer kernel --wait query"
+    "--producer kernel --wait event"
+    "--producer kernel --wait callback"
+    "--producer kernel --write async"
+    "--producer kernel --wait flag"
+    "--producer kernel --wait sleep"
+    "--producer kernel --wait sleep --memory uncached"
+    # A kernel still running during hipFileWrite
+    "--producer kernel --kernel during"
+    "--producer kernel --kernel during --memory uncached"
+    "--producer kernel --kernel during --memory coarse"
+    "--producer kernel --kernel during --buffer-size 4K --background-writers 4"
+    "--producer kernel --kernel during --memory uncached --buffer-size 4K --background-writers 4"
+    # hipMemcpy from host memory: a kernel copies up to 16K, the SDMA engine copies more
+    "--producer memcpy --buffer-size 4K"
+    "--producer memcpy --buffer-size 16K"
+    "--producer memcpy --buffer-size 64K"
+    "--producer memcpy"
+    "--producer memcpy --buffer-size 4K --prime write"
+    "--producer memcpy --buffer-size 4K --background-writers 1"
+    "--producer memcpy --buffer-size 4K --background-writers 4"
+    "--producer memcpy --buffer-size 4K --background-writers 4 --memory uncached"
+    "--producer memcpy --buffer-size 16K --background-writers 4"
+    "--producer memcpy --buffer-size 64K --background-writers 8"
+    "--producer memcpy --buffer-size 4K --threads 16"
+    # Synchronous HIP calls that fill the buffer with a kernel
+    "--producer memset --buffer-size 4K"
+    "--producer memset"
+    "--producer memset --memory uncached"
+    "--producer memset --memory fine"
+    "--producer copy --buffer-size 4K"
+    "--producer copy"
+    # hipFileRead, then hipFileWrite
+    "--producer read --buffer-size 4K"
+    "--producer read"
+    "--producer read --prime write"
+    "--producer read --buffer-size 4K --background-writers 4"
+    "--producer read --buffer-size 4K --threads 16"
+    "--producer read --prime store --wait sync --threads 4 --buffer-size 4M"
+    "--producer read --prime store --wait sleep --threads 4 --buffer-size 4M"
+    # A kernel the host synchronizes with, with the HDP's read path busy
+    "--producer kernel --wait sync --buffer-size 4K --background-writers 4"
+    "--producer kernel --wait sync --threads 4"
+)
+WVIS_BIG_CONFIGS=(
+    "--producer memset --buffer-size 64M"
+    "--producer copy --buffer-size 64M"
+    "--producer read --buffer-size 16M"
+)
+# The AQL packets HIP submits show why a configuration fails: the fills that
+# fail are dispatches with agent-scope fences and no barrier before the write
+WVIS_AQL_CONFIGS=(
+    "--producer kernel --wait sync"
+    "--producer kernel --wait query"
+    "--producer kernel --wait sleep"
+    "--producer memset"
+    "--producer memset --memory fine"
+    "--producer copy --buffer-size 4K"
+    "--producer copy"
+    "--producer memcpy --buffer-size 4K"
+)
+if has_section write; then
+    section "write: hipfilewrite-visibility, $WRITE_ITERS iterations ($SLEEP_ITERS with --wait sleep, $BIG_ITERS for 16M and 64M)"
+    gpu_busy_check write
+    for be in "${BACKENDS[@]}"; do
+        for cfg in "${WVIS_CONFIGS[@]}"; do
+            iters=$WRITE_ITERS
+            [[ $cfg == *"--wait sleep"* ]] && iters=$SLEEP_ITERS
+            read -ra cfg_args <<<"$cfg"
+            out=$(run write env "$(backend_env "$be")" "$WVIS" --directory "$DIR" --iterations "$iters" \
+                  "${cfg_args[@]}")
+            note "$(printf '%-8s %-90s %s' "$be" "$cfg" "$(wvis_verdict "$out")")"
+        done
+        for cfg in "${WVIS_BIG_CONFIGS[@]}"; do
+            read -ra cfg_args <<<"$cfg"
+            out=$(run write env "$(backend_env "$be")" "$WVIS" --directory "$DIR" --iterations "$BIG_ITERS" \
+                  "${cfg_args[@]}")
+            note "$(printf '%-8s %-90s %s' "$be" "$cfg" "$(wvis_verdict "$out")")"
+        done
+    done
+    note "AQL packet headers for 3 iterations (acquire and release fences: 0xb02 agent, 0x1502 and 0x1503 system):"
+    be=${BACKENDS[0]}
+    for cfg in "${WVIS_AQL_CONFIGS[@]}"; do
+        read -ra cfg_args <<<"$cfg"
+        out=$(run write-aql env AMD_LOG_LEVEL=5 AMD_LOG_MASK=8 "$(backend_env "$be")" "$WVIS" --directory "$DIR" \
+              --iterations 3 "${cfg_args[@]}" 2>&1)
+        seq=$(grep -oE '(Dispatch|Barrier-?AND|Barrier-?OR|Marker)[^,]*Header = 0x[0-9a-f]+' <<<"$out" |
+              sed -E 's/ Header = /=/' | tr '\n' ' ')
+        note "$be $cfg: $seq-> $(wvis_verdict "$out")"
     done
 fi
 

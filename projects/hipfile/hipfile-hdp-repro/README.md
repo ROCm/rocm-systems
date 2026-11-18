@@ -43,9 +43,10 @@ Results go to `./results-<host>-<timestamp>/`: `summary.txt` (read this first), 
 | Section | What runs | Touches |
 |---|---|---|
 | `health` | `health.sh` before and after: AER counters for each AMD GPU and its bridges, D-state processes, KFD processes, kernel-log trouble markers | read-only |
-| `ctest` | `ctest -R 'hipfileread_(cpu\|gpu)_visibility'`: Kurt's 2 entries and John's 4 | CPU BAR reads (Kurt's) |
+| `ctest` | `ctest -R 'hipfileread_(cpu\|gpu)_visibility\|hipfilewrite_visibility'`: Kurt's 2 entries and John's 12 | CPU BAR reads (Kurt's) |
 | `kurt` | `hipfileread-cpu-visibility`, fastpath and fallback × `--cpus` 2/8/24/all × `--buffer-size` 64K/1M/4M × 3 reps, 2000 iterations | CPU BAR reads |
 | `gpu` | `hipfileread-gpu-visibility`, fastpath and fallback × `--kernel after` (no prime; `--prime --prime-wait sync/flag/sleep`; each also with `--read async`) and `--kernel during` (±`--prime`), 1 MiB × 2 reps; plus 256 MiB for three configs | GPU reads only |
+| `write` | `hipfilewrite-visibility`, fastpath and fallback × producers `kernel` (each `--wait`; `--kernel during` in fine, uncached and coarse memory), `memcpy` (4K to 1M), `memset`, `copy`, `read`, with `--prime write`/`store`, `--background-writers` and `--threads`; then the AQL packet headers HIP submits for eight configs | GPU and drive reads only |
 | `aqllog` | the `--prime-wait flag` case with `--read sync` and `async` under `AMD_LOG_LEVEL=5 AMD_LOG_MASK=8`, printing the AQL packet headers HIP submits | GPU reads only |
 | `hipbar` | HIP-only Failure-1 repro (`hip-bar-read-stale`, no hipFile): `READERS` 1/2/7/20 × `MEM` coarse/fine/uncached × `KICK` off/on (unrelated memset + sync) | CPU BAR reads |
 | `a1` | a1-cpu-side's `barprobe` with its 9 config files (sync/event/AQL-barrier/memset interventions, writers, sizes, reader layouts) × 3 reps; per-reader timing idle vs background GPU load; Kurt's test instrumented to count stale watcher events under interventions | CPU BAR reads, CPU BAR writes for some configs |
@@ -67,7 +68,7 @@ like their write-only variants here.
 
 `kurt`, `hipbar`, `a1` and `c` read VRAM from the CPU through the large BAR (that is what
 Failure 1 is about); `a2`, `c` and some `a1` configs also write it. To avoid all of that, run
-`--sections health,ctest,gpu,aqllog` (and note that the `ctest` section includes Kurt's CPU test).
+`--sections health,ctest,gpu,write,aqllog` (and note that the `ctest` section includes Kurt's CPU test).
 
 ## What rowlet (RX 6800 XT, gfx1030, ROCm 7.15, amdgpu-dkms 7.1.3) showed
 
@@ -82,6 +83,31 @@ Failure 1 is about); `a2`, `c` and some `a1` configs also write it. To avoid all
 | ctest, all 6 | pass | pass |
 | `hipbar` READERS ≥ 2 | n/a | 30–95% of iterations stale; `KICK=1` → 0 |
 | GPU test `--prime-wait sleep` + write-only HDP flush (`hdpprobe`) | **still fails** | pass |
+
+`hipfilewrite-visibility` on the same machine, 1 MiB unless a size is given. Everything
+passes with fallback. With fastpath:
+
+| Configuration | Result | Cause |
+|---|---|---|
+| `--producer kernel --wait sync` / `query` / `event` / `callback`, `--write async` | pass | HIP enqueues a system-scope barrier |
+| `--producer kernel --wait sleep` / `flag` | **fail at iteration 0, every word stale**; passes with `--memory uncached` or `fine` | GPU L2 |
+| `--producer memset` (4K to 64M) | **fail at iteration 0 or 1**; with `--memory uncached` only the start of the buffer is stale and a second write is right | GPU L2, and `hipMemsetD32` returns before its kernel finishes |
+| `--producer copy --buffer-size 4K` | **fail at iteration 0, every word stale** | GPU L2 |
+| `--producer copy` | **fail at iteration 59 of 1000, 20 KiB stale**, and a second write is right | `hipMemcpy` between GPU buffers returns before its kernel finishes |
+| `--producer memcpy` 4K to 16K with `--background-writers` 1 to 8 | **fail within 6 iterations** in coarse, fine and uncached memory; passes from 32K | HDP read cache |
+| `--producer kernel --kernel during --buffer-size 4K --background-writers 4`, fine or uncached | **fail within 9 iterations** | HDP read cache |
+| `--producer read --prime store --wait sleep --threads 4 --buffer-size 4M` | **fail at iteration 82: the file and the buffer hold the priming kernel's data** | GPU L2 written back over `hipFileRead`'s data |
+| `--producer kernel --kernel during`, `memcpy` 4K to 16M, `read` 4K to 16M, with `--prime write`, `--threads` up to 16 | pass | |
+
+On an MI300X node (ctr-smc-mi300x-cx67-25, gfx942, ROCm 7.14, amdgpu-dkms 6.19.14) the `gpu`
+and `write` sections ran on three GPUs with the test files on one NVMe drive: the GPU behind
+the same PCIe switch as the drive, one on another root complex of the same socket, and one on
+the other socket. The three gave the same results. Every `gpu` configuration passes, and so
+does every `write` configuration with fallback. With fastpath, none of the GPU L2 or HDP read
+cache failures above occur, including in 150 s soaks of thirteen configurations on the three
+GPUs at once. The two that fail are the synchronous calls that return before their kernel
+finishes: `--producer memset --buffer-size 4K` at iteration 128 to 404 of 1000 on each GPU, and
+`--producer copy` at iteration 2 on one GPU. In both, a second write is right.
 
 Failure 1 (CPU reads, fallback) is the HDP read cache: only an HDP flush issued after the copy,
 or an AQL packet with an acquire fence, clears it. Failure 2 (GPU reads, fastpath) is the GPU L2:
