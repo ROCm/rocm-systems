@@ -128,6 +128,53 @@ class ImportData:
 time_window = load_time_window_module()
 
 
+def load_summary_module():
+    """Import rocpd.summary without the compiled libpyrocpd dependency.
+
+    summary.py imports .importer (needs libpyrocpd) and .query. Both are replaced
+    with stubs that cover only what summary.py reads at import time.
+    """
+
+    package_name = "_rocpd_summary_test"
+    package = types.ModuleType(package_name)
+    package.__path__ = []
+
+    importer = types.ModuleType(f"{package_name}.importer")
+
+    class RocpdImportData:
+        pass
+
+    def execute_statement(connection, statement, is_script=False):
+        assert isinstance(connection, sqlite3.Connection)
+        return connection.execute(statement)
+
+    importer.RocpdImportData = RocpdImportData
+    importer.execute_statement = execute_statement
+
+    query = types.ModuleType(f"{package_name}.query")
+    query.export_sqlite_query = lambda *args, **kwargs: None
+
+    sys.modules[package_name] = package
+    sys.modules[importer.__name__] = importer
+    sys.modules[query.__name__] = query
+
+    test_dir = Path(__file__).resolve().parent
+    source_path = test_dir.parents[1] / "source/lib/python/rocpd/summary.py"
+    if not source_path.is_file():
+        source_path = SOURCE_TEST_DIR.parent.parent / "source/lib/python/rocpd/summary.py"
+    assert source_path.is_file(), f"cannot locate {source_path}"
+
+    spec = importlib.util.spec_from_file_location(f"{package_name}.summary", source_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+summary = load_summary_module()
+
+
 @pytest.fixture
 def import_data():
     data = ImportData()
@@ -581,3 +628,71 @@ def test_standalone_main_reports_invalid_window_without_traceback(intervals, mon
         time_window.main(["--input", "trace.db", "--start", "invalid"])
 
     assert str(excinfo.value).startswith("ERROR: Invalid --start value")
+
+
+def _rank_name_for_env(env):
+    """Return the rank variable chosen from a one-row rocpd_info_process table."""
+    import json
+
+    # get_rank_env_variable_name caches its answer on the function. Clear it so
+    # every case starts from the database it is handed.
+    if hasattr(summary.get_rank_env_variable_name, "_rank_env_name_cached"):
+        del summary.get_rank_env_variable_name._rank_env_name_cached
+
+    connection = sqlite3.connect(":memory:")
+    try:
+        connection.execute("CREATE TABLE rocpd_info_process (environment TEXT)")
+        connection.execute(
+            "INSERT INTO rocpd_info_process (environment) VALUES (?)",
+            (json.dumps(env),),
+        )
+        return summary.get_rank_env_variable_name(connection)
+    finally:
+        connection.close()
+        if hasattr(summary.get_rank_env_variable_name, "_rank_env_name_cached"):
+            del summary.get_rank_env_variable_name._rank_env_name_cached
+
+
+def test_rank_env_var_rejects_malicious_name():
+    """ROCPROF_MPI_RANK_VAR must be a plain identifier that exists in the environment.
+
+    A name with a quote would otherwise be interpolated into json_extract().
+    """
+    malicious = "X') OR 1=1 --"
+
+    # Even when the malicious string is a real environment key, it is not used.
+    assert (
+        _rank_name_for_env(
+            {
+                "ROCPROF_MPI_RANK_VAR": malicious,
+                malicious: "0",
+                "OMPI_COMM_WORLD_RANK": "0",
+            }
+        )
+        == "OMPI_COMM_WORLD_RANK"
+    )
+
+    # With nothing else to fall back on, no rank column is produced at all.
+    assert _rank_name_for_env({"ROCPROF_MPI_RANK_VAR": malicious, malicious: "0"}) is None
+
+    # A well-formed name that was not actually set is ignored.
+    assert (
+        _rank_name_for_env(
+            {"ROCPROF_MPI_RANK_VAR": "NOT_A_REAL_VAR", "OMPI_COMM_WORLD_RANK": "1"}
+        )
+        == "OMPI_COMM_WORLD_RANK"
+    )
+
+    # A custom variable wins when it is a plain name and a real environment key.
+    chosen = _rank_name_for_env(
+        {
+            "ROCPROF_MPI_RANK_VAR": "MY_RANK",
+            "MY_RANK": "3",
+            "OMPI_COMM_WORLD_RANK": "0",
+        }
+    )
+    assert chosen == "MY_RANK"
+    _, sql = summary.generate_summary_query(
+        "kernels", by_rank=True, by_rank_env_var=chosen
+    )
+    assert "$.MY_RANK" in sql

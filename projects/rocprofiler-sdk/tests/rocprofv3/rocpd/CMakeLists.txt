@@ -414,7 +414,6 @@ rocprofiler_add_integration_validate_test(
     ARGS validate.py::test_summary_markers_default
          validate.py::test_summary_by_rank_files
          validate.py::test_summary_by_rank_no_mpi_rank
-         validate.py::test_rank_env_var_rejects_malicious_name
          --summary-markers-csv
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-default/out_marker_summary.csv
          --summary-files-csv
@@ -427,10 +426,6 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary/out_marker_summary_by_rank.csv
     TIMEOUT 60
     LABELS "integration-tests;rocpd"
-    PYTHON_PATH
-        "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
-        LIBRARY_PATH
-        "${rocprofiler-sdk_LIB_DIR}"
     FIXTURES_REQUIRED rocprofv3-test-rocpd-generation)
 
 # Validate --summary-by-rank files output for multiple processes
@@ -441,7 +436,7 @@ rocprofiler_add_integration_validate_test(
     CONFIG pytest.ini
     BUNDLE_TESTS
     ARGS validate.py::test_summary_by_rank_files
-         validate.py::test_summary_by_rank_files_rank_order
+         validate.py::test_summary_by_rank_files_rank_and_pid_match_kernels
          validate.py::test_summary_by_rank_kernel_rank
          validate.py::test_summary_by_rank_marker_rank
          --summary-files-csv

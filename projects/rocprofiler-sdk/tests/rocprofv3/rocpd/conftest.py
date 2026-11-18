@@ -309,7 +309,7 @@ def csv_kernels_full(request):
 def _read_required_csv(request, option):
     filename = request.config.getoption(option)
     if not filename:
-        pytest.skip(f"{option} not provided")
+        pytest.fail(f"{option} not provided")
     if not os.path.exists(filename):
         pytest.fail(f"{filename} does not exist")
     return pd.read_csv(filename)

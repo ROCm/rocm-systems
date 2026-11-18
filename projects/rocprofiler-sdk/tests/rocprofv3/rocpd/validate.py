@@ -562,73 +562,6 @@ def test_summary_by_rank_no_mpi_rank(
             assert column in df.columns, f"{label} missing {column}: {list(df.columns)}"
 
 
-def _reset_rank_env_cache():
-    from rocpd.summary import get_rank_env_variable_name
-
-    if hasattr(get_rank_env_variable_name, "_rank_env_name_cached"):
-        delattr(get_rank_env_variable_name, "_rank_env_name_cached")
-
-
-def _rank_name_for_env(env):
-    """Return the rank variable chosen from a one-row rocpd_info_process table."""
-    import json
-    import sqlite3
-
-    from rocpd.summary import generate_summary_query, get_rank_env_variable_name
-
-    _reset_rank_env_cache()
-    connection = sqlite3.connect(":memory:")
-    connection.execute("CREATE TABLE rocpd_info_process (environment TEXT)")
-    connection.execute(
-        "INSERT INTO rocpd_info_process (environment) VALUES (?)",
-        (json.dumps(env),),
-    )
-    try:
-        return get_rank_env_variable_name(connection), generate_summary_query
-    finally:
-        _reset_rank_env_cache()
-
-
-def test_rank_env_var_rejects_malicious_name():
-    """ROCPROF_MPI_RANK_VAR must be a plain identifier that exists in the environment.
-
-    A name with a quote would otherwise be interpolated into json_extract().
-    """
-    malicious = "X') OR 1=1 --"
-    chosen, generate_summary_query = _rank_name_for_env(
-        {
-            "ROCPROF_MPI_RANK_VAR": malicious,
-            malicious: "0",
-            "OMPI_COMM_WORLD_RANK": "0",
-        }
-    )
-    assert chosen == "OMPI_COMM_WORLD_RANK"
-    _, sql = generate_summary_query("kernels", by_rank=True, by_rank_env_var=chosen)
-    assert malicious not in sql
-    assert "OMPI_COMM_WORLD_RANK" in sql
-
-    # A well-formed name that was not actually set is ignored.
-    chosen, _ = _rank_name_for_env(
-        {
-            "ROCPROF_MPI_RANK_VAR": "NOT_A_REAL_VAR",
-            "OMPI_COMM_WORLD_RANK": "1",
-        }
-    )
-    assert chosen == "OMPI_COMM_WORLD_RANK"
-
-    # A custom variable wins when it is a plain name and a real environment key.
-    chosen, generate_summary_query = _rank_name_for_env(
-        {
-            "ROCPROF_MPI_RANK_VAR": "MY_RANK",
-            "MY_RANK": "3",
-            "OMPI_COMM_WORLD_RANK": "0",
-        }
-    )
-    assert chosen == "MY_RANK"
-    _, sql = generate_summary_query("kernels", by_rank=True, by_rank_env_var=chosen)
-    assert "$.MY_RANK" in sql
-
-
 def test_summary_by_rank_files(summary_files_csv, summary_files_expected):
     """Test that --summary-by-rank outputs the files table with original DB filenames."""
     df = summary_files_csv
@@ -641,13 +574,41 @@ def test_summary_by_rank_files(summary_files_csv, summary_files_expected):
     assert df["Hostname"].notna().all(), f"Missing hostname:\n{df}"
 
 
-def test_summary_by_rank_files_rank_order(summary_files_csv):
-    """Test that multi-process --summary-by-rank lists Rank first, sorted 0, 1, 2, ..."""
+def test_summary_by_rank_files_rank_and_pid_match_kernels(
+    summary_files_csv, summary_kernels_by_rank_csv
+):
+    """Multi-process --summary-by-rank lists Rank first, sorted 0, 1, 2, ..., and each
+    (Rank, Process_Id) pair in the files legend matches the kernels summary."""
     df = summary_files_csv
     assert df.columns[0] == "Rank", f"First column is not 'Rank': {list(df.columns)}"
 
     ranks = df["Rank"].astype(int).tolist()
     assert ranks == list(range(len(df))), f"Ranks not sorted as 0..N-1: {ranks}"
+
+    kernels = summary_kernels_by_rank_csv
+    for column in ("Rank", "Process_Id"):
+        assert (
+            column in kernels.columns
+        ), f"kernels missing {column}: {list(kernels.columns)}"
+
+    def rank_pid_pairs(frame):
+        return set(
+            zip(
+                frame["Rank"].astype(int).tolist(),
+                frame["Process_Id"].astype(int).tolist(),
+            )
+        )
+
+    files_pairs = rank_pid_pairs(df)
+    kernel_pairs = rank_pid_pairs(kernels)
+    assert files_pairs == kernel_pairs, (
+        f"(Rank, Process_Id) differs between files legend {sorted(files_pairs)} "
+        f"and kernels summary {sorted(kernel_pairs)}"
+    )
+
+    # One pid per rank in the legend, so the pairing is unambiguous.
+    assert df["Process_Id"].is_unique, f"Duplicate Process_Id in files legend:\n{df}"
+    assert len(files_pairs) == len(df)
 
 
 if __name__ == "__main__":
