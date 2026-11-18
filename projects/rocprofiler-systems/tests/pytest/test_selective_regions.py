@@ -31,7 +31,7 @@ pytestmark = [
 def selective_region_env() -> dict[str, str]:
     """Environment variables for selective region tests."""
     return {
-        "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,marker_api,kernel_dispatch,marker_core_range_api",
+        "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,marker_api,kernel_dispatch,roctx",
     }
 
 

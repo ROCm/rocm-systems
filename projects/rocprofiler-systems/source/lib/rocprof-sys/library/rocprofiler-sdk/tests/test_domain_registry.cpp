@@ -1,13 +1,20 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "common/string_utility.hpp"
+#include "core/sdk/tracing-config-deps.hpp"
+#include "core/sdk/tracing-config.hpp"
 #include "library/rocprofiler-sdk/domain_registry.hpp"
 #include "library/rocprofiler-sdk/tests/mock_domain_service.hpp"
 #include "library/rocprofiler-sdk/types.hpp"
 
+#include <fmt/format.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <array>
 #include <cstddef>
+#include <cstdint>
 #include <stdexcept>
 #include <string_view>
 
@@ -136,6 +143,131 @@ TEST(domain_registry_test, get_callback_returns_ompt_definition_at_sdk_0_6_0)
 
     EXPECT_EQ(definition.meta.name, "ompt");
     EXPECT_EQ(definition.meta.mode, collection_mode::callback);
+}
+
+// Every tracing kind name rocprofiler-sdk 1.5 reports (rocprofiler-sdk/fwd.h), except
+// the pre-1.0 PAGE_MIGRATION that tracing_config accepts without a registry entry.
+constexpr auto k_sdk_tracing_kind_names = std::to_array<std::string_view>({
+    "HSA_CORE_API",
+    "HSA_AMD_EXT_API",
+    "HSA_IMAGE_EXT_API",
+    "HSA_FINALIZE_EXT_API",
+    "HIP_RUNTIME_API",
+    "HIP_COMPILER_API",
+    "HIP_RUNTIME_API_EXT",
+    "HIP_COMPILER_API_EXT",
+    "MARKER_CORE_API",
+    "MARKER_CONTROL_API",
+    "MARKER_NAME_API",
+    "MARKER_CORE_RANGE_API",
+    "CODE_OBJECT",
+    "SCRATCH_MEMORY",
+    "KERNEL_DISPATCH",
+    "KERNEL_REPLAY",
+    "MEMORY_COPY",
+    "MEMORY_ALLOCATION",
+    "CORRELATION_ID_RETIREMENT",
+    "RCCL_API",
+    "OMPT",
+    "RUNTIME_INITIALIZATION",
+    "ROCDECODE_API",
+    "ROCDECODE_API_EXT",
+    "ROCJPEG_API",
+    "HIP_STREAM",
+    "HIP_GRAPH",
+    "HIP_EVENT",
+    "ROCSHMEM_API",
+    "ROCSHMEM_API_EXT",
+    "HIPFILE_API",
+    "HIPFILE_API_EXT",
+    "KFD_EVENT_PAGE_MIGRATE",
+    "KFD_EVENT_PAGE_FAULT",
+    "KFD_EVENT_QUEUE",
+    "KFD_EVENT_UNMAP_FROM_GPU",
+    "KFD_EVENT_DROPPED_EVENTS",
+    "KFD_PAGE_MIGRATE",
+    "KFD_PAGE_FAULT",
+    "KFD_QUEUE",
+});
+
+// Also satisfies policies::tracing_config::backend, and reports every SDK tracing kind,
+// so only the compile-time version gates decide which domains tracing_config accepts.
+template <std::size_t FormattedVersion>
+struct mock_sdk_with_all_kinds : mock_sdk_at_version<FormattedVersion>
+{
+    // NOLINTBEGIN(readability-identifier-naming)
+    static constexpr std::size_t BUFFER_TRACING_HSA_CORE_API         = 40;
+    static constexpr std::size_t BUFFER_TRACING_HSA_AMD_EXT_API      = 41;
+    static constexpr std::size_t BUFFER_TRACING_HSA_IMAGE_EXT_API    = 42;
+    static constexpr std::size_t BUFFER_TRACING_HSA_FINALIZE_EXT_API = 43;
+    static constexpr std::size_t BUFFER_TRACING_HIP_RUNTIME_API      = 44;
+    static constexpr std::size_t BUFFER_TRACING_HIP_COMPILER_API     = 45;
+    static constexpr std::size_t BUFFER_TRACING_MARKER_CORE_API      = 46;
+    // NOLINTEND(readability-identifier-naming)
+
+    // Declared only: get_domain_choices() never calls it.
+    static void get_version(std::uint32_t* major, std::uint32_t* minor,
+                            std::uint32_t* patch);
+
+    static test_support::tracing_names_t get_buffer_tracing_names() { return {}; }
+    static test_support::tracing_names_t get_callback_tracing_names()
+    {
+        auto table = test_support::tracing_names_t{};
+        for(const auto name : k_sdk_tracing_kind_names)
+        {
+            table.entries.push_back({ .name = name, .operations = {} });
+        }
+        return table;
+    }
+};
+
+// Temporary: tracing_config keeps its own list of supported domains because core/
+// cannot include the registry; a domain it accepts but the registry lacks aborts
+// tool_init. Delete this check (and mock_sdk_with_all_kinds, k_sdk_tracing_kind_names)
+// once domain choices are probed from domain_service's available domains instead of
+// tracing_config::k_supported_domains.
+template <std::size_t FormattedVersion>
+void
+expect_choices_match_registry_at()
+{
+    using sdk_t = mock_sdk_with_all_kinds<FormattedVersion>;
+    // get_domain_choices() reads no externals, so the production ones are never called.
+    using tracing_config_t =
+        rocprofiler_sdk::tracing_config<sdk_t, rocprofiler_sdk::default_externals>;
+
+    SCOPED_TRACE(fmt::format("compile_time_version {}", FormattedVersion));
+
+    const auto choices = tracing_config_t::get_domain_choices();
+    for(const auto sdk_name : k_sdk_tracing_kind_names)
+    {
+        const auto name      = utility::string::to_lower(sdk_name);
+        const bool is_choice = std::ranges::find(choices, name) != choices.end();
+        const bool is_registered =
+            registry<sdk_t, externals>::find_descriptor(name) != nullptr;
+        EXPECT_EQ(is_choice, is_registered) << name;
+    }
+}
+
+template <std::size_t... FormattedVersions>
+void
+expect_choices_match_registry()
+{
+    (expect_choices_match_registry_at<FormattedVersions>(), ...);
+}
+
+constexpr std::size_t k_version_0_6_9 = 609;
+constexpr std::size_t k_version_0_7_0 = 700;
+constexpr std::size_t k_version_1_2_1 = 10201;
+constexpr std::size_t k_version_1_2_2 = 10202;
+constexpr std::size_t k_version_1_3_3 = 10303;
+constexpr std::size_t k_version_1_3_4 = 10304;
+constexpr std::size_t k_version_1_3_5 = 10305;
+
+TEST(domain_registry_test, rocm_domain_choices_match_registry_on_both_sides_of_each_gate)
+{
+    expect_choices_match_registry<k_version_0_5_9, k_version_0_6_0, k_version_0_6_9,
+                                  k_version_0_7_0, k_version_1_2_1, k_version_1_2_2,
+                                  k_version_1_3_3, k_version_1_3_4, k_version_1_3_5>();
 }
 
 }  // namespace
