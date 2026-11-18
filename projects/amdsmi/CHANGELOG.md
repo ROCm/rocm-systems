@@ -230,7 +230,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Added `amdsmi_get_fabric_cper_entries()` for IFoE fabric RAS events**.  
   - Returns fabric link-down, link-up and fatal-error events as CPER records, paged with a cursor like `amdsmi_get_gpu_cper_entries()`. It returns `AMDSMI_STATUS_NOT_SUPPORTED` when UALoE is not available.
-  - `amd-smi ras --cper` now lists these events (`fabric-linkdown`, `fabric-linkup`, `fabric-fatal`) alongside GPU errors.
+  - `amd-smi ras --cper` now lists these events (`FABRIC-LINKDOWN`, `FABRIC-LINKUP`, `FABRIC-FATAL`) alongside GPU errors.
 
 - **Added AMPP (amdsmi power profile) API and CLI support**.  
   - New `amdsmi_get_ampp_profiles()`, `amdsmi_get_ampp_fields()`, `amdsmi_activate_ampp_profile()` and `amdsmi_configure_ampp_profile()` list, activate and configure the driver's predefined power/performance profiles. Profiles and fields are read from the driver and can differ between GPU generations.
@@ -288,7 +288,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   | Failures with different codes | (new) | `204` |
   | `amdsmi_init()` watchdog timeout | `2` | `205` |
   | Drivers not loaded | `255` | `206` |
-  | Interactive confirmation declined | `1` | `207` |
+  | Interactive confirmation declined (answering no, or closing stdin) | `1` | `207` |
   | Library failure | `1000 + status`, wrapped to a byte | `AMDSMI_STATUS_*` value (`0`-`56`) |
   | Unknown library error | `231` | `255` |
 
@@ -305,24 +305,24 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - `--json` and `--csv` errors gain an `error_type` field. `--csv` errors now have three columns (`error,code,error_type`), so a reader that expects two needs updating.
 
 - **`amd-smi ras` now exits non-zero when a CPER file fails to decode.**  
-  - Affects `--cper`, `--afid --cper-file` and `--afid --folder`, which previously exited `0` and could print a Python traceback.
+  - Affects `--cper` and `--afid --folder`, which previously exited `0`, and `--afid --cper-file`, which previously exited `1` with a Python traceback.
   - The exit code is the `AMDSMI_STATUS_*` value, for example `43`, or `204` when files fail with different codes.
   - A failing file shows `[AMDSMI_STATUS_<name>] <message>` in place of its AFIDs. A record with no AFIDs, such as a corrected error, shows `N/A`.
   - `--json` and `--csv` gain `status`, `message` and `code` fields, and `--afid --csv` now emits CSV instead of a table.
 
 - **`amd-smi set --compute-partition` / `-C` now attempts each GPU individually.**  
   - A GPU that does not support the request reports `NOT_SUPPORTED` without stopping the others.
-  - `-C` also accepts a profile index `0`-`4`, mapped in `SPX, DPX, TPX, QPX, CPX` order, and the help lists both forms instead of `N/A`.
+  - When partition profiles cannot be read (for example, without root), `-C` is validated against the type names and the indexes `0`-`4`, mapped in an assumed `SPX, DPX, TPX, QPX, CPX` order, and the help lists both instead of `N/A`.
 
 - **`amdsmi_get_npm_info()` and `amdsmi_set_npm_limit()` now reject node handles not obtained from `amdsmi_get_node_handle()`**.  
   - They return `AMDSMI_STATUS_INVAL` instead of using the handle.
 
-- **`amdsmi_get_npm_info()` now reports negative or malformed NPM sysfs values as unavailable**.  
-  - A negative value was previously read as a very large number.
+- **`amdsmi_get_npm_info()` now reports negative or malformed NPM power values as unavailable**.  
+  - A negative power limit was previously read as a very large number.
 
 - **`amd-smi metric` no longer prints fields the GPU's `gpu_metrics` table version cannot report**.  
   - These fields previously printed as `N/A`. A field the version supports still prints, even when its value is `N/A`.
-  - On MI300X, MI325X and MI355X, `THROTTLE_STATUS` and the `MM_ACTIVITY`, `VCN_ACTIVITY` and `JPEG_ACTIVITY` rows no longer appear.
+  - On MI300X, MI325X and MI355X, `THROTTLE_STATUS` and the `MM_ACTIVITY`, `VCN_ACTIVITY` and `JPEG_ACTIVITY` rows no longer appear, even with `--power` or `--usage`.
   - A section with no supported fields is dropped unless named on the command line, for example `--throttle`.
   - Only human-readable output changes: `--json` and `--csv` still emit every field. Pass `--show-unsupported` to restore the previous output.
 
@@ -361,7 +361,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - `amdsmi_topo_get_numa_node_number()`, `amdsmi_topo_get_link_weight()` and `amdsmi_topo_get_link_type()` could return an unrelated value with `AMDSMI_STATUS_SUCCESS`. They now return `AMDSMI_STATUS_NOT_SUPPORTED`.
 
 - **Fixed `amdsmi_get_gpu_fabric_info()` failing when some UALink fabric values are empty**.  
-  - One empty sysfs file, such as `vpod_active_accels`, made the call return `AMDSMI_STATUS_UNEXPECTED_DATA`, so `amd-smi fabric` printed nothing. It now returns the available values, and `AMDSMI_STATUS_NO_DATA` only when none are available.
+  - One empty sysfs file, such as `vpod_active_accels`, made the call return `AMDSMI_STATUS_UNEXPECTED_DATA`, so `amd-smi fabric` showed the fabric info as `N/A`. It now returns the available values, and `AMDSMI_STATUS_NO_DATA` only when none are available.
 
 - **Restored `amd-smi` bash autocompletion**.  
   - Pressing Tab completes `amd-smi` subcommands and their options again, whether completion is registered explicitly or through the global `argcomplete` hook.
@@ -394,7 +394,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - The name is now truncated inside the buffer, and the call still reports the buffer as too small.
 
 - **Fixed `amd-smi set --memory-partition` advising a driver reload when the partition is already current**.  
-  - It now reports that nothing changed, and notes when an earlier, different request still applies at the next reload.
+  - It now reports that nothing changed and notes that, if a different partition was set since the driver loaded, the next reload still applies it.
 
 - **Fixed `amdsmi_get_gpu_driver_info()` reporting `0` as the driver date**.  
   - Kernels that no longer use the DRM driver date report it as `0`. `driver_date` is now empty in the C API and `N/A` in Python.
