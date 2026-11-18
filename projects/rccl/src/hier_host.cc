@@ -238,7 +238,7 @@ bool rcclHostHierAllReduceAutoWindow(int nHosts, int ranksPerHost, size_t bytes)
   if (ranksPerHost == 8) {
     switch (nHosts) {
     case 2:
-      return bytes >= 2 * MiB && bytes <= 512 * MiB;
+      return bytes >= 2 * MiB && bytes <= 128 * MiB;
     case 4:
       return bytes >= 2 * MiB && bytes <= 1024 * MiB;
     case 8:

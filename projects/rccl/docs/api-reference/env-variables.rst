@@ -528,7 +528,7 @@ collected in the following table.
           communicator, so all ranks must use the same value.
       - | ``-1``: Auto (default). On gfx1250 with MNNVL, used for ``ncclSum``
           on buffers outside registered windows, with these layouts and
-          message sizes. With eight ranks per host: 2 to 512 MiB on two hosts
+          message sizes. With eight ranks per host: 2 to 128 MiB on two hosts
           for ``ncclFloat32``, ``ncclFloat16`` and ``ncclBfloat16``, and for
           ``ncclFloat32`` only, 2 MiB to 1 GiB on four hosts and 2 MiB to
           2 GiB on eight hosts. With four ranks per host, for ``ncclFloat32``

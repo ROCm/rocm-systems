@@ -197,14 +197,17 @@ TEST(HostHierAllReduce, AutoWindowEdges)
     EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, 8, 2 * kMiB - 1));
     EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(2, 8, 2 * kMiB));
     EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(2, 8, 64 * kMiB));
-    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(2, 8, 512 * kMiB));
-    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, 8, 512 * kMiB + 1));
+    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(2, 8, 128 * kMiB));
+    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, 8, 128 * kMiB + 1));
+    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, 8, 512 * kMiB));
 
+    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(4, 8, kMiB));
     EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(4, 8, 2 * kMiB - 1));
     EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(4, 8, 2 * kMiB));
     EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(4, 8, 1024 * kMiB));
     EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(4, 8, 1024 * kMiB + 1));
 
+    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(8, 8, kMiB));
     EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(8, 8, 2 * kMiB - 1));
     EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(8, 8, 2 * kMiB));
     EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(8, 8, 2048 * kMiB));
@@ -257,7 +260,8 @@ TEST(HostHierAllReduce, EligibilityPerMode_Isolated)
             };
             EXPECT_TRUE(eligible(blockHosts(2, 8), floats(2 * kMiB)));
             EXPECT_FALSE(eligible(blockHosts(2, 8), floats(2 * kMiB) - 8)) << "below the window";
-            EXPECT_TRUE(eligible(blockHosts(2, 8), floats(512 * kMiB)));
+            EXPECT_TRUE(eligible(blockHosts(2, 8), floats(128 * kMiB)));
+            EXPECT_FALSE(eligible(blockHosts(2, 8), floats(256 * kMiB))) << "two hosts, above the window";
             EXPECT_FALSE(eligible(blockHosts(2, 8), floats(1024 * kMiB))) << "above the window";
             EXPECT_FALSE(eligible(blockHosts(4, 8), floats(kMiB))) << "four hosts, below the window";
             EXPECT_TRUE(eligible(blockHosts(4, 8), floats(2 * kMiB)));
@@ -272,7 +276,7 @@ TEST(HostHierAllReduce, EligibilityPerMode_Isolated)
             EXPECT_FALSE(eligible(blockHosts(8, 4), floats(kMiB))) << "eight hosts of four ranks, below";
             EXPECT_FALSE(eligible(blockHosts(4, 4), 8 * kMiB, ncclBfloat16)) << "bf16, four hosts of four ranks";
             EXPECT_TRUE(eligible(blockHosts(2, 8), kMiB, ncclBfloat16)) << "bf16, 2 MiB";
-            EXPECT_TRUE(eligible(blockHosts(2, 8), 256 * kMiB, ncclFloat16)) << "fp16, 512 MiB";
+            EXPECT_TRUE(eligible(blockHosts(2, 8), 64 * kMiB, ncclFloat16)) << "fp16, 128 MiB";
             EXPECT_FALSE(eligible(blockHosts(2, 8), kMiB - 8, ncclBfloat16)) << "bf16 below the window";
             EXPECT_FALSE(eligible(blockHosts(4, 8), 8 * kMiB, ncclBfloat16)) << "bf16 on four hosts";
             EXPECT_FALSE(eligible(blockHosts(2, 8), kMiB, ncclFloat64)) << "fp64";
