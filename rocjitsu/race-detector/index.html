@@ -202,8 +202,8 @@
     <div class="md-source__repository md-source__repository--active">
       ROCm/rocm-systems
       <ul class="md-source__facts">
-        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 566 · build snapshot" aria-label="Stars: 566">566</li>
-        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 506 · build snapshot" aria-label="Forks: 506">506</li>
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 567 · build snapshot" aria-label="Stars: 567">567</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 507 · build snapshot" aria-label="Forks: 507">507</li>
       </ul>
     </div>
   </a>
@@ -255,8 +255,8 @@
     <div class="md-source__repository md-source__repository--active">
       ROCm/rocm-systems
       <ul class="md-source__facts">
-        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 566 · build snapshot" aria-label="Stars: 566">566</li>
-        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 506 · build snapshot" aria-label="Forks: 506">506</li>
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 567 · build snapshot" aria-label="Stars: 567">567</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 507 · build snapshot" aria-label="Forks: 507">507</li>
       </ul>
     </div>
   </a>
@@ -656,6 +656,17 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reading-a-report" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading a report
+      
+    </span>
+  </a>
   
 </li>
       
@@ -1786,6 +1797,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#reading-a-report" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading a report
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-is-a-race" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1930,6 +1952,7 @@ a barrier. The reads race with the writes.</p>
 <div class="highlight"><pre><span></span><code><span class="c1">// race_example.hip</span>
 <span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;hip/hip_runtime.h&gt;</span>
 <span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;cstdio&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;cstdlib&gt;</span>
 
 <span class="n">__global__</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">transpose_lds</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="o">*</span><span class="n">in</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="o">*</span><span class="n">out</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
 <span class="w">  </span><span class="n">__shared__</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">tile</span><span class="p">[</span><span class="mi">128</span><span class="p">];</span>
@@ -1940,15 +1963,23 @@ a barrier. The reads race with the writes.</p>
 <span class="w">  </span><span class="n">out</span><span class="p">[</span><span class="n">tid</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">tile</span><span class="p">[</span><span class="mi">127</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">tid</span><span class="p">];</span>
 <span class="p">}</span>
 
+<span class="kt">void</span><span class="w"> </span><span class="n">check_hip</span><span class="p">(</span><span class="n">hipError_t</span><span class="w"> </span><span class="n">status</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">status</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">hipSuccess</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">fprintf</span><span class="p">(</span><span class="n">stderr</span><span class="p">,</span><span class="w"> </span><span class="s">"HIP error: %s</span><span class="se">\n</span><span class="s">"</span><span class="p">,</span><span class="w"> </span><span class="n">hipGetErrorString</span><span class="p">(</span><span class="n">status</span><span class="p">));</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">exit</span><span class="p">(</span><span class="n">EXIT_FAILURE</span><span class="p">);</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+
 <span class="kt">int</span><span class="w"> </span><span class="n">main</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
 <span class="w">  </span><span class="kt">int</span><span class="w"> </span><span class="o">*</span><span class="n">d_in</span><span class="p">,</span><span class="w"> </span><span class="o">*</span><span class="n">d_out</span><span class="p">;</span>
-<span class="w">  </span><span class="n">hipMalloc</span><span class="p">(</span><span class="o">&amp;</span><span class="n">d_in</span><span class="p">,</span><span class="w"> </span><span class="mi">128</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="kt">int</span><span class="p">));</span>
-<span class="w">  </span><span class="n">hipMalloc</span><span class="p">(</span><span class="o">&amp;</span><span class="n">d_out</span><span class="p">,</span><span class="w"> </span><span class="mi">128</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="kt">int</span><span class="p">));</span>
+<span class="w">  </span><span class="n">check_hip</span><span class="p">(</span><span class="n">hipMalloc</span><span class="p">(</span><span class="o">&amp;</span><span class="n">d_in</span><span class="p">,</span><span class="w"> </span><span class="mi">128</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="kt">int</span><span class="p">)));</span>
+<span class="w">  </span><span class="n">check_hip</span><span class="p">(</span><span class="n">hipMalloc</span><span class="p">(</span><span class="o">&amp;</span><span class="n">d_out</span><span class="p">,</span><span class="w"> </span><span class="mi">128</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="kt">int</span><span class="p">)));</span>
 <span class="w">  </span><span class="n">transpose_lds</span><span class="o">&lt;&lt;&lt;</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">128</span><span class="o">&gt;&gt;&gt;</span><span class="p">(</span><span class="n">d_in</span><span class="p">,</span><span class="w"> </span><span class="n">d_out</span><span class="p">);</span>
-<span class="w">  </span><span class="n">hipDeviceSynchronize</span><span class="p">();</span>
-<span class="w">  </span><span class="n">hipFree</span><span class="p">(</span><span class="n">d_in</span><span class="p">);</span>
-<span class="w">  </span><span class="n">hipFree</span><span class="p">(</span><span class="n">d_out</span><span class="p">);</span>
-<span class="w">  </span><span class="n">printf</span><span class="p">(</span><span class="s">"done</span><span class="se">\n</span><span class="s">"</span><span class="p">);</span>
+<span class="w">  </span><span class="n">check_hip</span><span class="p">(</span><span class="n">hipGetLastError</span><span class="p">());</span>
+<span class="w">  </span><span class="n">check_hip</span><span class="p">(</span><span class="n">hipDeviceSynchronize</span><span class="p">());</span>
+<span class="w">  </span><span class="n">check_hip</span><span class="p">(</span><span class="n">hipFree</span><span class="p">(</span><span class="n">d_in</span><span class="p">));</span>
+<span class="w">  </span><span class="n">check_hip</span><span class="p">(</span><span class="n">hipFree</span><span class="p">(</span><span class="n">d_out</span><span class="p">));</span>
+<span class="w">  </span><span class="n">std</span><span class="o">::</span><span class="n">puts</span><span class="p">(</span><span class="s">"done"</span><span class="p">);</span>
 <span class="p">}</span>
 </code></pre></div>
 <p>Compile it with <code>hipcc</code> or <code>amdclang++</code>. The <code>--offload-arch</code> must match the
@@ -1959,51 +1990,45 @@ objects. <code>hipcc</code> defaults to <code>-O3</code> so this isn't an issue 
 <div class="highlight"><pre><span></span><code>hipcc<span class="w"> </span>-o<span class="w"> </span>/tmp/race_example<span class="w"> </span>race_example.hip<span class="w"> </span>--offload-arch<span class="o">=</span>gfx950
 <span class="c1"># or: amdclang++ -O2 -o /tmp/race_example race_example.hip --offload-arch=gfx950</span>
 </code></pre></div>
-<p>Enable the race detector by adding it to the <code>plugins</code> section of your
-rocjitsu config file (<code>my_config.json</code>):</p>
-<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="w"> </span><span class="nt">"plugins"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"race"</span><span class="p">:</span><span class="w"> </span><span class="p">{}</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span>
+<p>Copy <code>configs/gfx950_mi350x.json</code> to <code>my_config.json</code> and enable the race
+detector by adding these top-level settings to that configuration:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="w"> </span><span class="nt">"require_all_plugins"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span><span class="w"> </span><span class="nt">"plugins"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"race"</span><span class="p">:</span><span class="w"> </span><span class="p">{}</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span>
 </code></pre></div>
+<p><code>require_all_plugins</code> makes a missing or invalid plugin fail initialization.
+The example checks HIP errors and exits with a failure status in that case,
+so a skipped detector cannot look like a successful race check.</p>
 <p>Run it under the emulator:</p>
 <div class="highlight"><pre><span></span><code><span class="nv">$BUILD_DIR</span>/tools/rocjitsu/rocjitsu<span class="w"> </span>--config<span class="w"> </span>my_config.json<span class="w"> </span>--<span class="w"> </span>/tmp/race_example
 </code></pre></div>
-<p>You should see output:</p>
-<div class="highlight"><pre><span></span><code>RACE kernel=transpose_lds symbol=_Z13transpose_ldsPKiPi dispatch=1 type=LDS access=read reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
-Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]
-  ==&gt;  0x7f6a1e801010  ds_write_b32 v0, v1  ; &lt;-- wave 1
-       0x7f6a1e801018  v_sub_u32_e32 v1, 0, v0
-  ==&gt;  0x7f6a1e80101c  ds_read_b32 v1, v1  ; &lt;-- wave 0 lane 0
+<p>A report identifies the conflicting instructions and their owning waves. This
+report was captured from the gfx950 example above; PCs, register assignments,
+and dispatch IDs can vary between builds and runs:</p>
+<div class="highlight"><pre><span></span><code>RACE kernel=transpose_lds symbol=_Z13transpose_ldsPKiPi dispatch=2 type=LDS access=read reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
+Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]: read-after-write (RAW).
+  Current access: read at PC 0x73aee4951728.
+  Conflict: transfer from VGPRs into LDS at PC 0x73aee495171c, wave 1.
+  Completion for wave 1 is not guaranteed; pending counters: lgkmcnt.
+  The detector observed no synchronization between waves 1 and 0 for this access.
+       PC              Instruction
+  ==&gt;  0x73aee495171c  ds_write_b32 v0, v1  ; &lt;-- wave 1
+       Execution trace below is for wave 0.
+       0x73aee495171c  ds_write_b32 v0, v1
+       0x73aee4951724  v_sub_u32_e32 v1, 0, v0
+  ==&gt;  0x73aee4951728  ds_read_b32 v1, v1 offset:508  ; &lt;-- wave 0 lane 0
 END_RACE
 </code></pre></div>
-<p>This tells you that dispatch 1 of <code>transpose_lds</code> reported a race: wave 1 wrote
+<p>This tells you that dispatch 2 of <code>transpose_lds</code> reported a race: wave 1 wrote
 to LDS (<code>ds_write_b32</code>) and wave 0 read from the same address (<code>ds_read_b32</code>)
 without a barrier in between. The <code>kernel</code> field is a compact display name, and
 <code>symbol</code> is the exact ELF symbol when rocjitsu can resolve it. If a name cannot
 be resolved, rocjitsu reports <code>?</code> for the unresolved field. The fix is to add
 <code>__syncthreads()</code> between the write and the read.</p>
-<p>Each trace line shows an instruction's GPU virtual address, which varies
-between runs, and its disassembly. The trace lists instructions that the
-reporting wave (here wave 0) executed, oldest first. <code>==&gt;</code> marks entries matching
-the PC and captured encoding of either instruction involved in the race, and
-the <code>&lt;--</code> annotation names the wave and lane that performed that access. When the
-conflicting instruction ran in another wave, as with wave 1's <code>ds_write_b32</code>
-above, the marker is placed where the reporting wave executed the same bytes
-at the same address, if such an entry is present. Repeated executions of identical
-bytes at the same address are not distinguished; the displayed span ends at the
-first matching racing access after its first marker.</p>
-<p>The race detector retains the last 256 instructions of each wave. If the
-reporting wave has no entry matching the conflicting PC and encoding, the report
-prints the retained producer instruction first with a <code>(before trace window)</code>
-note. This can mean the instruction has left the trace, but it can also mean that
-another wave executed an instruction the reporting wave never executed. The note
-does not establish that the conflict is more than 256 instructions old.</p>
-<p>For example, if another wave's producer is at <code>0x1000</code> and the reporting wave's
-trace contains only its racing access at <code>0x3000</code>, the producer appears with
-<code>(before trace window)</code> and <code>0 instructions not recorded</code>. That count is the
-number of retained reporting-wave entries skipped before the first displayed
-marker, not the number of instructions since the producer ran.</p>
-<p>Traces longer than 32 instructions show only their first and last 16. Each trace
-row is disassembled from its own captured bytes, so it remains accurate if the
-kernel's code is later overwritten or unmapped.</p>
+<p>The completion line refers to the conflicting memory operation. Here, wave 1
+has not satisfied its <code>lgkmcnt</code> wait requirement. Even if that requirement
+were satisfied by an <code>s_waitcnt</code>, wave 0's read would still need to be ordered
+after wave 1's write. The synchronization line describes that separate
+requirement. The unmarked <code>ds_write_b32</code> is wave 0's own execution of the
+store; the marked write above it belongs to wave 1.</p>
 <h3 id="running-your-own-application">Running your own application<a class="headerlink" href="#running-your-own-application" title="Permanent link">&para;</a></h3>
 <p>Replace the binary path with your application. This works with any ROCm workload
 — compiled HIP/HSA binaries, Python scripts using PyTorch or JAX, multi-process
@@ -2012,8 +2037,10 @@ launchers like <code>torchrun</code>, etc.</p>
 <span class="nv">$BUILD_DIR</span>/tools/rocjitsu/rocjitsu<span class="w"> </span>--config<span class="w"> </span>my_config.json<span class="w"> </span>--<span class="w"> </span>python<span class="w"> </span>my_script.py
 </code></pre></div>
 <p>To capture reports to a file instead of stderr (useful for CI or
-scripted workflows), add a <code>sinks</code> section to your config:</p>
+scripted workflows), create the output directory with <code>mkdir -p /tmp/output</code>
+and add a <code>sinks</code> section to your config:</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"require_all_plugins"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"plugins"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"race"</span><span class="p">:</span><span class="w"> </span><span class="p">{}</span><span class="w"> </span><span class="p">},</span>
 <span class="w">  </span><span class="nt">"sinks"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"types"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"file"</span><span class="p">],</span><span class="w"> </span><span class="nt">"dir"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/tmp/output"</span><span class="w"> </span><span class="p">}</span>
 <span class="p">}</span>
@@ -2021,6 +2048,70 @@ scripted workflows), add a <code>sinks</code> section to your config:</p>
 <div class="highlight"><pre><span></span><code><span class="nv">$BUILD_DIR</span>/tools/rocjitsu/rocjitsu<span class="w"> </span>--config<span class="w"> </span>my_config.json<span class="w"> </span>--<span class="w"> </span>./my_app
 <span class="c1"># Reports are written to /tmp/output/race.log</span>
 </code></pre></div>
+<h2 id="reading-a-report">Reading a report<a class="headerlink" href="#reading-a-report" title="Permanent link">&para;</a></h2>
+<p>The human-readable heading names the affected register or LDS byte and identifies
+read-after-write (RAW), write-after-read (WAR), or write-after-write (WAW). The
+next lines identify the current access and the conflicting memory event by
+where its data moves, such as from VGPRs into LDS. Register-load conflicts name
+the destination (VGPRs, SGPRs, or TTMPs) without guessing the source memory space.
+Direct-to-LDS loads likewise say “load into LDS” because they can read global
+memory or scratch. A FLAT instruction can load from different spaces in
+different lanes, and scalar memory loads can read scratch. These events do
+not retain that source. For LDS conflicts, atomic operations are described as
+updates of LDS, with returned VGPR values mentioned when applicable.</p>
+<p>For a pending event, the report lists the completion counters that remain unsatisfied, using
+the architectural wait names for the target. Internal GFX11 subsets are
+displayed as their covering <code>vmcnt</code>, <code>vscnt</code>, or <code>lgkmcnt</code> domains. When the
+event belongs to another wave, the report also states that the detector observed
+no synchronization between the waves for this access. This can be a false
+positive when the kernel uses a synchronization mechanism the detector does not
+observe, such as an LDS barrier phase wait; see <a href="#limitations">Limitations</a>.
+Completion and inter-wave synchronization are separate conditions; one wait
+instruction is not a universal fix for every reported hazard.</p>
+<p>Each trace row is disassembled from its own captured bytes, so code rewrites or
+unmapping do not change the reported instructions. Within the reporting wave,
+the displayed span starts at the first matching producer PC and encoding and
+ends at the last matching current access. Repeated producer executions with
+identical PCs and encodings are not distinguished.</p>
+<p>When the conflict belongs to another wave, the reporting wave's trace starts at
+its own latest execution of the same instruction. Waves usually run the same
+code, so this shows the path from that instruction to the reported access,
+including any intervening waits or barriers. If the reporting wave never ran
+that instruction, the report shows up to its last 16 instructions, limited by
+<code>trace_context</code>.</p>
+<p>The instruction table follows the reporting wave's execution order. An event
+from another wave, or one older than the trace window, is shown separately.</p>
+<p>Each wave retains 256 instruction records. The <code>trace_context</code> plugin option
+controls how much of an excerpt is selected before eliding its middle. It
+defaults to 128 records, split equally between the start and end. It accepts
+integers from 2 to 256; an odd value gives the extra record to the end. Setting
+it to 256 disables middle elision. For example:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="w"> </span><span class="nt">"require_all_plugins"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span><span class="w"> </span><span class="nt">"plugins"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"race"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"trace_context"</span><span class="p">:</span><span class="w"> </span><span class="mi">256</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div>
+<p>Keep <code>require_all_plugins</code> enabled when changing this option. An invalid value,
+such as 257, otherwise warns and skips the detector instead of failing the run.</p>
+<p>Synchronization and control-flow instructions remain visible in the middle,
+even when they exceed the configured context. A gap of one instruction is
+shown in full. The number of elided instructions is shown at each larger gap.
+The fallback for a conflict never executed by the reporting wave remains the
+last 16 instructions, or <code>trace_context</code> if smaller. Older unrecorded history
+is identified separately; this option does not increase history storage.</p>
+<p>Consecutive identical <code>s_nop</code> instructions in the selected context share a row
+showing their execution count and final PC. Runs stop at a changed encoding,
+nonsequential PC, elision gap, or marked instruction. This is display compaction:
+context and gap counts still count individual executed instructions. Waits,
+barriers (including split-barrier signals and LDS barrier arrivals), GWS
+operations, and control-flow instructions are always shown individually.</p>
+<p>The plugin writes a summary when it is destroyed during VM teardown. It counts
+emitted reports and observations suppressed by the existing PC-based
+deduplication, not affected lanes or independent bugs. A successful application
+exit can occur without that teardown, so complete race reports can appear
+without a summary. Its absence does not mean zero races or zero suppressed
+observations. The structured <code>RACE</code> header and <code>END_RACE</code> delimiter remain
+available for tools that consume individual reports.</p>
+<p>The separate memory-wait warning states the threshold required immediately
+before its reported access. That threshold need not be sufficient at an earlier
+wait instruction, because more operations may have been issued in between.</p>
 <h2 id="what-is-a-race">What is a race?<a class="headerlink" href="#what-is-a-race" title="Permanent link">&para;</a></h2>
 <p>A race occurs when the value read from a register or LDS memory is 'ambiguous'
 due to unsynchronized access. By 'ambiguous' we mean that it is theoretically
