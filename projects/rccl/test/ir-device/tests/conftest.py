@@ -9,7 +9,7 @@ This mirrors test/ext-plugins: the test artifact (here, the GoogleTest
 binary built from bindings/ir/test/IR_test.cpp against librccl_device.bc) is
 built on demand from a session-scoped fixture and the whole suite is skipped
 with a clear reason when its prerequisites are missing — instead of failing
-the CI job on machines that did not build with -DEMIT_LLVM_IR=ON.
+the CI job on machines that did not build with -DNCCL_EMIT_LLVM_IR=ON.
 
 Prerequisites (set as environment variables, with sensible defaults):
 
@@ -21,7 +21,7 @@ Prerequisites (set as environment variables, with sensible defaults):
   IR_OUTDIR    dir for the compiled exe(default: <workdir>/ir_test_build)
 
 The build requires that RCCL was configured/built with:
-  cmake -DEMIT_LLVM_IR=ON -DBITCODE_LIB_ARCH=<arch> -DBUILD_TESTS=ON ...
+  cmake -DNCCL_EMIT_LLVM_IR=ON -DBITCODE_LIB_ARCH=<arch> -DBUILD_TESTS=ON ...
 so that librccl_device.bc, the hipify-staged headers, generated nccl.h/rccl.h
 and GoogleTest are all present.
 """
@@ -128,7 +128,7 @@ def _missing_prerequisite():
 def _build_bitcode():
     """Emit librccl_device.bc via the standalone bindings/ir Makefile.
 
-    Equivalent to building RCCL with -DEMIT_LLVM_IR=ON, but without a full
+    Equivalent to building RCCL with -DNCCL_EMIT_LLVM_IR=ON, but without a full
     rebuild: the Makefile reuses the hipify-staged headers an earlier RCCL
     build already produced. Returns the build log path; raises on failure.
     """
@@ -136,7 +136,7 @@ def _build_bitcode():
     env.update({"ROCM_PATH": ROCM_PATH})
     args = [
         "make", "-C", IR_DIR,
-        "EMIT_LLVM_IR=1",
+        "NCCL_EMIT_LLVM_IR=1",
         f"BITCODE_LIB_ARCH={ARCH}",
         f"BUILDDIR={RCCL_BUILD}",
         f"ROCM_PATH={ROCM_PATH}",
@@ -178,7 +178,7 @@ def _build_test_binary():
         "-x", "hip",
         f"--offload-arch={ARCH}", "-O0",
         "-D__HIP_PLATFORM_AMD__=1",
-        # Source wrapper first: cmake -DEMIT_LLVM_IR=OFF does not restage
+        # Source wrapper first: cmake -DNCCL_EMIT_LLVM_IR=OFF does not restage
         # build/include/nccl_device_wrapper.h, so a generated copy can be stale.
         # ROCm system headers come after project-specific includes so freshly
         # hipified headers in HIPIFY_INC take precedence over installed copies.
@@ -240,7 +240,7 @@ def _missing_mpi_prerequisite():
     if _find_rccl_libdir() is None:
         return (
             f"host librccl.so not found under {RCCL_BUILD} "
-            "(build RCCL's host library, not just -DEMIT_LLVM_IR=ON)"
+            "(build RCCL's host library, not just -DNCCL_EMIT_LLVM_IR=ON)"
         )
     return None
 
@@ -374,7 +374,7 @@ def ir_test_binary():
     # Always invoke make so dependency timestamps decide whether the artifact
     # is current. Merely checking that BITCODE exists can reuse an artifact
     # from before a wrapper/implementation edit when RCCL itself was rebuilt
-    # with EMIT_LLVM_IR=OFF.
+    # with NCCL_EMIT_LLVM_IR=OFF.
     logger.info("Updating librccl_device.bc at %s (arch=%s)...", BITCODE, ARCH)
     bc_log = _build_bitcode()
     logger.info("librccl_device.bc READY at %s (log: %s)", BITCODE, bc_log)

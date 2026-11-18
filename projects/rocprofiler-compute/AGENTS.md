@@ -38,6 +38,12 @@ Scripts under `tools/` generate committed artifacts that must never be
 hand-edited. **[`CONTRIBUTING.md`](CONTRIBUTING.md)** says which change
 requires which script.
 
+Put tests for `tools/` scripts in `tools/test_*.py`. Register each module in
+`CMakeLists.txt` with its own `add_test` inside `if(NOT TEST_FROM_INSTALL)`,
+because the install tree has no `tools/`. Add its test name to each category
+in `tests/test_categories.yaml` and to every `*_exclude` list there, so CI skips
+it.
+
 ## Git Workflows
 
 Prefer the **`gh` CLI** for all GitHub interactions (pull requests, issues,

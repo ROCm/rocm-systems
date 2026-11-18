@@ -119,39 +119,62 @@ void WaveRaceState::registerEventWithIntervals(
   waveMemoryEvents.push_back(eventId);
 }
 
+amdgpu::WaitCounterType WaveRaceState::capacityCounterFor(amdgpu::WaitCounterType type) const {
+  // A split counter with its own capacity (gfx1250) counts against that
+  // capacity alone. On the pre-GFX12 capacity models, the split names in
+  // decoded metadata alias the combined architectural counters.
+  if (counterCapacities.split(type) > 0)
+    return type;
+  if (amdgpu::wait_counter_covers(amdgpu::WaitCounterType::VMCNT, type))
+    return amdgpu::WaitCounterType::VMCNT;
+  if (amdgpu::wait_counter_covers(amdgpu::WaitCounterType::LGKMCNT, type))
+    return amdgpu::WaitCounterType::LGKMCNT;
+  return type;
+}
+
 util::Result WaveRaceState::prepareForCounterIncrement(amdgpu::WaitCounterType type,
                                                        uint8_t increment) {
-  // The runtime plugin calls this only for pre-GFX12 capacity models, where
-  // these internal split names alias the combined architectural counters.
-  if (amdgpu::wait_counter_covers(amdgpu::WaitCounterType::VMCNT, type))
-    type = amdgpu::WaitCounterType::VMCNT;
-  else if (amdgpu::wait_counter_covers(amdgpu::WaitCounterType::LGKMCNT, type))
-    type = amdgpu::WaitCounterType::LGKMCNT;
+  type = capacityCounterFor(type);
 
-  int capacity;
-  switch (type) {
-  case amdgpu::WaitCounterType::VMCNT:
-    capacity = counterCapacities.vmcnt;
-    break;
-  case amdgpu::WaitCounterType::LGKMCNT:
-    capacity = counterCapacities.lgkmcnt;
-    break;
-  case amdgpu::WaitCounterType::EXPCNT:
-  case amdgpu::WaitCounterType::VSCNT:
-  case amdgpu::WaitCounterType::LOADCNT:
-  case amdgpu::WaitCounterType::STORECNT:
-  case amdgpu::WaitCounterType::DSCNT:
-  case amdgpu::WaitCounterType::KMCNT:
-  case amdgpu::WaitCounterType::TENSORCNT:
-  case amdgpu::WaitCounterType::SAMPLECNT:
-  case amdgpu::WaitCounterType::ASYNCCNT:
-    return util::Result::success();
-  default:
-    assert(false && "invalid wait counter type");
-    return util::Result::success();
+  int capacity = counterCapacities.split(type);
+  if (capacity == 0) {
+    switch (type) {
+    case amdgpu::WaitCounterType::VMCNT:
+      capacity = counterCapacities.vmcnt;
+      break;
+    case amdgpu::WaitCounterType::LGKMCNT:
+      capacity = counterCapacities.lgkmcnt;
+      break;
+    case amdgpu::WaitCounterType::EXPCNT:
+    case amdgpu::WaitCounterType::VSCNT:
+    case amdgpu::WaitCounterType::LOADCNT:
+    case amdgpu::WaitCounterType::STORECNT:
+    case amdgpu::WaitCounterType::DSCNT:
+    case amdgpu::WaitCounterType::KMCNT:
+    case amdgpu::WaitCounterType::TENSORCNT:
+    case amdgpu::WaitCounterType::SAMPLECNT:
+    case amdgpu::WaitCounterType::ASYNCCNT:
+      // No capacity is modeled for this counter on this target.
+      return util::Result::success();
+    default:
+      assert(false && "invalid wait counter type");
+      return util::Result::success();
+    }
   }
+  // Decoded metadata names only the counters its target has: the combined
+  // VMCNT and LGKMCNT before GFX12, and the split counters on gfx1250. A
+  // combined counter without a capacity therefore means the metadata does not
+  // match the target, which is reported rather than silently left unmodeled.
   if (capacity <= 0 || increment == 0 || increment > capacity)
     return util::Result::failure();
+
+  // Each pending event holds at most MAX_COUNTER_INCREMENT tokens on a counter.
+  // When even that many leave room for this issue, the counter cannot be full,
+  // so the common case skips counting the wave's pending events.
+  if (waveMemoryEvents.size() * amdgpu::MemoryCounterObligation::MAX_COUNTER_INCREMENT +
+          increment <=
+      static_cast<size_t>(capacity))
+    return util::Result::success();
 
   int pending_tokens = 0;
   for (const EventId event_id : waveMemoryEvents)
@@ -167,13 +190,12 @@ util::Result WaveRaceState::prepareForCounterIncrement(amdgpu::WaitCounterType t
 }
 
 util::Result WaveRaceState::prepareForMemoryIssue(const amdgpu::MemoryIssueInfo &info) {
-  for (const auto obligation : info.counter_obligations()) {
-    const auto counter = obligation.wait_counter_type();
-    if (amdgpu::wait_counter_covers(amdgpu::WaitCounterType::VMCNT, counter) ||
-        amdgpu::wait_counter_covers(amdgpu::WaitCounterType::LGKMCNT, counter))
-      if (prepareForCounterIncrement(counter, obligation.counter_increment()).failed())
-        return util::Result::failure();
-  }
+  // Counters without a modeled capacity, such as STORECNT before GFX12, apply
+  // no backpressure; prepareForCounterIncrement() returns early for them.
+  for (const auto obligation : info.counter_obligations())
+    if (prepareForCounterIncrement(obligation.wait_counter_type(), obligation.counter_increment())
+            .failed())
+      return util::Result::failure();
   return util::Result::success();
 }
 

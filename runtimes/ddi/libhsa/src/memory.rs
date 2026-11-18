@@ -18,11 +18,13 @@
 //! copy/SVM operations. This root retains shared state and shutdown order.
 
 pub(crate) mod advice;
+pub(crate) mod compute_copy;
 pub(crate) mod copy_svm;
 pub(crate) mod interop;
+pub(crate) mod svm;
 pub(crate) use crate::api::memory::copy_svm::hsa_memory_copy;
-pub(crate) use copy_svm::image_device_address;
 use copy_svm::*;
+pub(crate) use copy_svm::{image_copy_borrow, image_device_address};
 pub(crate) mod virtual_memory;
 
 use std::collections::{BTreeMap, HashMap};
@@ -486,6 +488,8 @@ pub(crate) struct VmemReservation {
     pub(crate) deallocation_callbacks: Vec<RegisteredDeallocationCallback>,
     /// Mappings that still occupy this reserved range.
     pub(crate) mappings: usize,
+    /// Anonymous ranges given host backing through SVM registration.
+    pub(crate) svm_ranges: Vec<(usize, usize)>,
 }
 
 impl VmemReservation {
@@ -508,6 +512,7 @@ impl VmemReservation {
             },
             deallocation_callbacks: Vec::new(),
             mappings: 0,
+            svm_ranges: Vec::new(),
         }
     }
 
