@@ -12,10 +12,10 @@ use crate::image_abi::{
 use crate::runtime::{boundary, lock};
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_ext_image_get_capability")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 #[allow(unsafe_code)]
 /// Reports image capabilities for a format and geometry.
 pub unsafe extern "C" fn hsa_ext_image_get_capability(
@@ -47,10 +47,10 @@ pub unsafe extern "C" fn hsa_ext_image_get_capability(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_ext_image_get_capability_with_layout")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 #[allow(unsafe_code)]
 /// Reports image capabilities for a specified layout.
 pub unsafe extern "C" fn hsa_ext_image_get_capability_with_layout(
@@ -69,10 +69,10 @@ pub unsafe extern "C" fn hsa_ext_image_get_capability_with_layout(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_ext_image_data_get_info")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 #[allow(unsafe_code)]
 /// Reports allocation size and alignment for an image.
 pub unsafe extern "C" fn hsa_ext_image_data_get_info(
@@ -101,10 +101,10 @@ pub unsafe extern "C" fn hsa_ext_image_data_get_info(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_ext_image_data_get_info_with_layout")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 #[allow(unsafe_code)]
 /// Reports allocation requirements for a chosen image layout.
 pub unsafe extern "C" fn hsa_ext_image_data_get_info_with_layout(
@@ -136,10 +136,10 @@ pub unsafe extern "C" fn hsa_ext_image_data_get_info_with_layout(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_ext_image_data_get_info_v2")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 #[allow(unsafe_code)]
 /// Reports allocation requirements for a mipmapped image.
 pub unsafe extern "C" fn hsa_ext_image_data_get_info_v2(
@@ -181,10 +181,10 @@ pub unsafe extern "C" fn hsa_ext_image_data_get_info_v2(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_image_get_info_max_dim")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 #[allow(unsafe_code)]
 /// Reports maximum dimensions supported for an image geometry.
 pub unsafe extern "C" fn hsa_amd_image_get_info_max_dim(

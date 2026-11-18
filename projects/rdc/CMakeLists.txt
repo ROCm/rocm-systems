@@ -122,6 +122,11 @@ option(BUILD_TESTS "Build test suite" OFF)
 # When cmake -DBUILD_EXAMPLES=off, it will not build RDC examples
 option(BUILD_EXAMPLES "Build examples" OFF)
 
+# ThreadSanitizer race tests (tests/race); need BUILD_TESTS and a compiler with
+# -fsanitize=thread. CI builds them with AMD clang. On kernels with 32 bits of
+# mmap entropy, GCC's ThreadSanitizer needs `setarch -R` to run them.
+option(RDC_BUILD_RACE_TESTS "Build the ThreadSanitizer race tests" OFF)
+
 # Enable shared libraries for gtest
 option(BUILD_SHARED_LIBS "Build shared library (.so) or not." ON)
 
@@ -395,6 +400,17 @@ if(BUILD_TESTS)
     enable_testing()
     add_subdirectory("tests/unit")
     add_subdirectory("tests/fake_amdsmi")
+    if(RDC_BUILD_RACE_TESTS)
+        if(ADDRESS_SANITIZER OR CMAKE_CXX_FLAGS MATCHES "fsanitize=[a-z,]*(address|memory)")
+            message(
+                FATAL_ERROR
+                "RDC_BUILD_RACE_TESTS cannot be combined with AddressSanitizer or MemorySanitizer"
+            )
+        endif()
+        add_subdirectory("tests/race")
+    endif()
+elseif(RDC_BUILD_RACE_TESTS)
+    message(FATAL_ERROR "RDC_BUILD_RACE_TESTS needs BUILD_TESTS=ON")
 endif()
 
 if(BUILD_EXAMPLES)

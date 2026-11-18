@@ -6,6 +6,9 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     aql/aql_packet_processor.cpp
     compute_queue_binding_factory.cpp
     circular_ring_reader.cpp
+    ../graphics/image_completion.cpp
+    ../graphics/image_memory.cpp
+    ../graphics/image_msaa.cpp
     buffer_format.cpp
     cluster_lds_multicast.cpp
     command_processor.cpp
@@ -17,6 +20,7 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     gpu_memory_access.cpp
     gpu_queue_registry.cpp
     gpu_vm.cpp
+    legacy_address_space.cpp
     gws_device.cpp
     hwreg.cpp
     image_addressing.cpp

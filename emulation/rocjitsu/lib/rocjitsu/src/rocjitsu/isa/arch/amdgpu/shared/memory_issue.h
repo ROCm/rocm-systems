@@ -4,6 +4,7 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_MEMORY_ISSUE_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_MEMORY_ISSUE_H_
 
+#include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter.h"
 
 #include <array>
@@ -68,7 +69,7 @@ private:
                                 static_cast<uint8_t>(wait_counter_type));
   }
 
-  static_assert(static_cast<uint8_t>(WaitCounterType::SAMPLECNT) < 16);
+  static_assert(static_cast<uint8_t>(WaitCounterType::BVHCNT) < 16);
   static_assert(static_cast<uint8_t>(MemoryCompletionClass::UNORDERED) < 8);
   uint8_t encoded_ = 0;
 };
@@ -80,7 +81,8 @@ private:
 /// Each obligation carries its own completion-order class because operations
 /// sharing one counter need not form one FIFO, and one instruction's different
 /// counter domains can have different ordering guarantees. Decoded FLAT metadata
-/// lists possible domains; address routing selects the domains actually used.
+/// lists both domains. Address routing selects the obligations for each request.
+/// The gfx1250 race detector also records a counter slot for each unused domain.
 /// The dynamic race detector requires every attached obligation for whole-event
 /// completion, including destination-register and memory dependencies. This API
 /// does not represent a separate source-register lifetime. The same obligations

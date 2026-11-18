@@ -8,8 +8,8 @@
 // against GFX1201, including clipped BFE widths.
 
 #include "common/bits.h"
-#include "common/internal.h"
-#include "rj_arith/rj_arith.h"
+#include "common/validation.h"
+#include "rj_arith/detail/rj_arith_scalar.h"
 
 #include <stdint.h>
 

@@ -58,6 +58,7 @@ struct InputProgram {
   uint32_t original_vgprs = 0;
   std::vector<uint64_t> exit_offsets;
   std::vector<NativeLdsAccess> accesses;
+  std::vector<BarrierFacts> barriers;
 };
 
 /// @brief Build an owning, qualified input program for the native LDS b32 MVP.

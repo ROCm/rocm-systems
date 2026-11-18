@@ -3,6 +3,7 @@
 
 // Tests for scalar integer comparisons and bit tests.
 
+#include "rj_arith/detail/rj_arith_scalar.h"
 #include "scalar/compare_helpers.h"
 
 // Check scalar predicates, SCC aliases, and FP-status expectations.

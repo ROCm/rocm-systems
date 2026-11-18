@@ -902,6 +902,12 @@ memory:
   Unit_hipMemcpyBatchAsync_P2P_IndirectCopy:
     <<: *level_default
     tags: [transfer, multigpu]
+  Unit_hipMemcpyBatchAsync_P2P_Allgather_BackToBack:
+    <<: *level_default
+    tags: [transfer, multigpu, stream]
+  Unit_hipMemcpyBatchAsync_P2P_Allgather_BackToBack_AllDevices:
+    <<: *level_3
+    tags: [transfer, multigpu, stream]
   Unit_hipMemcpyBatchAsync_Negative:
     <<: *level_default
     tags: [transfer]
@@ -926,6 +932,15 @@ memory:
   Unit_hipMemcpyBatchAsync_Mixed_Functional:
     <<: *level_default
     tags: [transfer]
+  Unit_hipMemcpyBatchAsync_MixedDirections_BackToBack:
+    <<: *level_default
+    tags: [transfer, stream]
+  Unit_hipMemcpyBatchAsync_Mixed_QueuedShaderWait_BackToBack:
+    <<: *level_default
+    tags: [transfer, stream]
+  Unit_hipMemcpyBatchAsync_Mixed_QueuedShaderWait_OtherStreamBarriers:
+    <<: *level_default
+    tags: [transfer, stream]
   Unit_hipMemcpyBatchAsync_Stream:
     <<: *level_default
     tags: [transfer, stream]
@@ -1079,6 +1094,9 @@ memory:
   Unit_hipMemPoolExportPointer_Negative:
     <<: *level_default
     tags: [alloc, P1]
+  Unit_hipMemPoolExportPointer_Capture:
+    <<: *level_2
+    tags: [alloc, capture]
   Unit_hipMemPoolExportToShareableHandle_SameProc:
     <<: *level_default
     disabled:
@@ -1103,6 +1121,21 @@ memory:
   Unit_hipMemPoolImportPointer_Negative:
     <<: *level_default
     tags: [alloc, P1]
+  Unit_hipMemPoolExportToShareableHandle_Capture:
+    <<: *level_2
+    tags: [alloc, capture]
+  Unit_hipMemPoolImportFromShareableHandle_Negative:
+    <<: *level_2
+    tags: [alloc]
+  Unit_hipMemPoolImportFromShareableHandle_Capture:
+    <<: *level_2
+    tags: [alloc, capture]
+  Unit_hipMemPoolImportPointer_Negative:
+    <<: *level_2
+    tags: [alloc]
+  Unit_hipMemPoolImportPointer_Capture:
+    <<: *level_2
+    tags: [alloc, capture]
   Unit_hipMemPtrGetInfo_Basic:
     <<: *level_default
     tags: [query, P0]
@@ -1384,6 +1417,9 @@ memory:
   Unit_hipMemPoolSetAccess_NegTst:
     <<: *level_default
     tags: [alloc, P1]
+  Unit_hipMemPoolSetAccess_Capture:
+    <<: *level_2
+    tags: [alloc, capture]
   Unit_hipMemPoolGetAccess_Negative_Parameters:
     <<: *level_default
     disabled:
@@ -1396,6 +1432,9 @@ memory:
   Unit_hipMemPoolGetAccess_GetDefMempoolOfEachDevice:
     <<: *level_default
     tags: [alloc, P1]
+  Unit_hipMemPoolGetAccess_Capture:
+    <<: *level_2
+    tags: [alloc, capture]
   Unit_hipMemPoolSetGetAttribute_Positive_Default:
     <<: *level_default
     tags: [alloc, P1]
@@ -1420,6 +1459,9 @@ memory:
   Unit_hipMemPoolSetAttribute_ResetMemHighAttr:
     <<: *level_default
     tags: [alloc, P1]
+  Unit_hipMemPoolSetAttribute_Capture:
+    <<: *level_2
+    tags: [alloc, capture]
   Unit_hipMemPoolGetAttribute_Negative_Parameters:
     <<: *level_default
     disabled:
@@ -1444,6 +1486,9 @@ memory:
   Unit_hipMemPoolGetAttribute_CheckDefaultValues:
     <<: *level_default
     tags: [alloc, P1]
+  Unit_hipMemPoolGetAttribute_Capture:
+    <<: *level_2
+    tags: [alloc, capture]
   Unit_hipMemPoolCreate_Negative_Parameter:
     <<: *level_default
     tags: [alloc, P1]
@@ -1459,6 +1504,15 @@ memory:
   Unit_hipMemPoolDestroy_Negative_Parameter:
     <<: *level_default
     tags: [alloc, P1]
+  Unit_hipMemPoolCreate_Capture:
+    <<: *level_2
+    tags: [alloc, capture]
+  Unit_hipMemPoolDestroy_Negative_Parameter:
+    <<: *level_2
+    tags: [alloc]
+  Unit_hipMemPoolDestroy_Capture:
+    <<: *level_2
+    tags: [alloc, capture]
   Unit_hipMemPoolMaxAlloc:
     <<: *level_default
     tags: [alloc]
@@ -1480,6 +1534,9 @@ memory:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [alloc, P1]
+  Unit_hipMemPoolTrimTo_Capture:
+    <<: *level_2
+    tags: [alloc, capture]
   Unit_hipMallocFromPoolAsync_Basic_OneAlloc:
     <<: *level_default
     tags: [alloc, P0]
@@ -2033,6 +2090,12 @@ memory:
   Unit_hipArray3DCreate_Negative_Non2DTextureGather:
     <<: *level_default
     tags: [image, P1]
+  Unit_hipMalloc3DArray_MaxExtent_RoundTrip:
+    <<: *level_default
+    tags: [transfer, image, P1]
+  Unit_hipMalloc3DArray_Layered_MaxExtent_RoundTrip:
+    <<: *level_default
+    tags: [transfer, image, P1]
   Unit_hipDrvMemcpy3D_Positive_Basic:
     <<: *level_default
     tags: [transfer, P1]
@@ -2791,6 +2854,9 @@ memory:
   Unit_hipDrvMemcpy2DUnaligned_Positive_Parameters:
     <<: *level_default
     tags: [transfer, P1]
+  Unit_hipArrayGetSparseProperties_Negative_Parameters:
+    <<: *level_default
+    tags: [query, image, P1]
   Unit_hipArrayGetInfo_Positive_Basic:
     <<: *level_default
     tags: [query, image, P1]

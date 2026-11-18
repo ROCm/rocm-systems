@@ -3,13 +3,16 @@
 
 #pragma once
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/instruction_snapshot.h"
 #include "rocjitsu/vm/plugins/race_detector/core/types.h"
+#include "util/result.h"
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <unordered_map>
 #include <vector>
 
 namespace rocjitsu::plugins::race_detector {
@@ -17,20 +20,74 @@ namespace rocjitsu::plugins::race_detector {
 class IntervalSet;
 class RaceDetector;
 
+/// The number of tokens each wait counter holds before issuing another
+/// instruction on it stalls. Zero means the counter is absent or its capacity
+/// is not modeled.
 struct CounterCapacities {
-  int vmcnt;
-  int lgkmcnt;
+  /// Combined counters of the pre-GFX12 targets.
+  int vmcnt = 0;
+  int lgkmcnt = 0;
+  /// Split counters of gfx1250. On the pre-GFX12 capacity targets, the split
+  /// counter names in decoded metadata alias the combined counters instead.
+  /// RDNA4 has split counters, but its capacity is not modeled.
+  int loadcnt = 0;
+  int storecnt = 0;
+  int dscnt = 0;
+  int kmcnt = 0;
+  int asynccnt = 0;
+  int tensorcnt = 0;
+
+  /// Capacity of a split counter, or zero for a combined or unmodeled one.
+  [[nodiscard]] constexpr int split(amdgpu::WaitCounterType type) const {
+    switch (type) {
+    case amdgpu::WaitCounterType::LOADCNT:
+      return loadcnt;
+    case amdgpu::WaitCounterType::STORECNT:
+      return storecnt;
+    case amdgpu::WaitCounterType::DSCNT:
+      return dscnt;
+    case amdgpu::WaitCounterType::KMCNT:
+      return kmcnt;
+    case amdgpu::WaitCounterType::ASYNCCNT:
+      return asynccnt;
+    case amdgpu::WaitCounterType::TENSORCNT:
+      return tensorcnt;
+    default:
+      return 0;
+    }
+  }
 };
 
 /// Adapt the generated architecture properties to the race core's compact
 /// counter model. A zero capacity means that the architecture has no combined
 /// counter of that type.
+///
+/// gfx1250 (CDNA5) also gets split-counter capacities. The counter table in
+/// CDNA5 ISA 5.7.1 sizes LOADcnt, STOREcnt, DScnt, ASYNCcnt and TENSORcnt at 6
+/// bits and KMcnt at 5 bits, and hardware stalls issue rather than overflow a
+/// counter, so each holds 2^n - 1 tokens: 63, or 31 for KMcnt.
+/// The wait policy shared with the core memory-wait checker caps a wait at one
+/// below that all-ones value, so its maximum plus one is the same capacity.
 [[nodiscard]] inline constexpr CounterCapacities counterCapacitiesForArch(rj_code_arch_t arch) {
   const auto properties = isa_properties(arch);
-  return {
+  CounterCapacities capacities{
       .vmcnt = properties.vmcnt_capacity,
       .lgkmcnt = properties.lgkmcnt_capacity,
   };
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+    const auto capacity = [](amdgpu::WaitCounterKind kind) {
+      return static_cast<int>(amdgpu::WaitCounterPolicy::maximum_dependency_wait(
+                 amdgpu::WaitcntModel::SplitGfx12, kind)) +
+             1;
+    };
+    capacities.loadcnt = capacity(amdgpu::WaitCounterKind::Load);
+    capacities.storecnt = capacity(amdgpu::WaitCounterKind::Store);
+    capacities.dscnt = capacity(amdgpu::WaitCounterKind::Ds);
+    capacities.kmcnt = capacity(amdgpu::WaitCounterKind::Km);
+    capacities.asynccnt = capacity(amdgpu::WaitCounterKind::Async);
+    capacities.tensorcnt = capacity(amdgpu::WaitCounterKind::Tensor);
+  }
+  return capacities;
 }
 
 /// Per-wave race detection state. Owns VGPR event lists, wave-level event
@@ -38,21 +95,23 @@ struct CounterCapacities {
 /// race checking. Holds a pointer to the workgroup level RaceDetector for
 /// event allocation and lifecycle transitions.
 ///
-/// Every event registration method (registerEvent, registerScalarLoad,
-/// registerLdsEvent and registerLdsRangeEvent) takes the producing instruction
-/// as an InstructionSnapshot; the event's PC comes from the snapshot. The
-/// encoding is decoded only if a plugin report needs its disassembly.
+/// Every event registration method takes the producing instruction as an
+/// InstructionSnapshot; the event's PC comes from the snapshot. The encoding
+/// is decoded only if a plugin report needs its disassembly.
 class WaveRaceState {
 public:
   WaveRaceState(int vgprCount, int sgprCount, WaveId, RaceDetector *, CounterCapacities);
 
+  [[nodiscard]] bool hasPendingCounter(amdgpu::WaitCounterType counter) const;
+
   /// Apply the issue backpressure required before an instruction adds one
   /// token to a finite hardware counter. Call before operand checks when the
   /// counter is known statically, or after routing for address-dependent FLAT.
-  void prepareForCounterIncrement(amdgpu::WaitCounterType, uint8_t increment = 1);
+  /// Returns failure if the counter capacity or increment is invalid.
+  util::Result prepareForCounterIncrement(amdgpu::WaitCounterType, uint8_t increment = 1);
 
   /// Apply backpressure to every counter incremented by a resolved issue.
-  void prepareForMemoryIssue(const amdgpu::MemoryIssueInfo &);
+  util::Result prepareForMemoryIssue(const amdgpu::MemoryIssueInfo &);
 
   /// Register an in-flight memory event that does not involve LDS.
   /// \param instruction Complete captured encoding and PC of the producing instruction.
@@ -69,7 +128,8 @@ public:
   void registerEvent(InstructionSnapshot instruction, MemoryEventType type,
                      std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
                      std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                     MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0);
+                     VgprWriteOrder writeOrder, uint8_t lastRegisterByteMask = 0,
+                     ConditionalVgprWrite feedback = {});
 
   /// Register an in-flight scalar load using its architectural destination.
   void registerScalarLoad(InstructionSnapshot instruction, RegisterRef destination,
@@ -90,15 +150,13 @@ public:
   /// Bits outside execMask are ignored; zero records no LDS intervals.
   /// elementBytes selects the execution granularity at the backing boundary;
   /// zero treats the whole per-lane access as one element.
-  /// allocationEnd additionally clips complete elements to a captured workgroup
-  /// allocation without reducing register or counter participation.
   void registerLdsEvent(InstructionSnapshot instruction, MemoryEventType type,
                         std::vector<uint32_t> registers, uint64_t execMask, int waveSize,
                         std::span<const uint32_t> laneBaseAddresses, int bytesPerLane,
                         uint8_t byteMask,
                         std::span<const amdgpu::MemoryCounterObligation> counterObligations,
                         MemoryOrderClass memoryOrder, uint64_t ldsLaneMask = ~uint64_t{0},
-                        int elementBytes = 0, std::optional<uint64_t> allocationEnd = std::nullopt);
+                        int elementBytes = 0, LdsAccess ldsAccess = {});
   /// Register two LDS address sets per lane. elementBytes selects the granularity
   /// of complete elements retained at the backing boundary; zero treats the
   /// whole per-lane access in each address set as one element.
@@ -108,7 +166,8 @@ public:
                         std::span<const uint32_t> secondLaneBaseAddresses, int bytesPerLane,
                         uint8_t byteMask,
                         std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                        MemoryOrderClass memoryOrder, int elementBytes = 0);
+                        MemoryOrderClass memoryOrder, int elementBytes = 0,
+                        LdsAccess ldsAccess = {});
 
   /// Register an LDS event described by byte ranges rather than lanes, such as
   /// a tensor DMA transfer. The event has no registers. Each range is retained
@@ -136,8 +195,25 @@ public:
                              std::span<const amdgpu::MemoryCounterObligation> counterObligations,
                              MemoryOrderClass memoryOrder);
 
+  /// @brief Register an event using the caller's finalized LDS intervals.
+  /// @details Intervals must contain only accessed bytes within the LDS backing
+  /// and, for FLAT, the workgroup allocation, with endpoints that fit in int.
+  /// This does not clip ranges or validate conflicts; validate before registering.
+  /// Empty intervals retain the event's register and counter dependencies.
+  void registerEventWithIntervals(InstructionSnapshot instruction, MemoryEventType,
+                                  std::vector<uint32_t> registers, uint64_t execMask,
+                                  uint8_t byteMask, IntervalSet ldsIntervals,
+                                  std::span<const amdgpu::MemoryCounterObligation>,
+                                  VgprWriteOrder writeOrder, uint8_t lastRegisterByteMask = 0,
+                                  LdsAccess ldsAccess = {}, ConditionalVgprWrite feedback = {});
+
   /// Dispatch the counter thresholds changed by one wait instruction.
   void dispatch(const PendingWaitCount &);
+
+  /// Check a synchronous VALU source against older writers and remember the
+  /// completed read until a barrier publishes it to peer waves.
+  void recordLdsOperandRead(InstructionSnapshot instruction, uint32_t address, uint32_t bytes,
+                            uint32_t lane);
 
   /// Retire non-trimmable events whose owning wave completed them before a workgroup barrier.
   void flushBarrierPendingEvents();
@@ -152,7 +228,7 @@ public:
   /// Check an asynchronous memory destination write. On supported targets,
   /// operations in the same non-UNORDERED class cannot overtake one another.
   void checkVgprWrite(int reg, uint64_t execMask, uint8_t byteMask,
-                      MemoryOrderClass currentMemoryOrder) const;
+                      VgprWriteOrder currentMemoryOrder) const;
 
   /// Check a scalar register read for races. Calls the RaceHandler on
   /// violation (outstanding scalar load targeting the same register).
@@ -174,13 +250,12 @@ public:
   WaveId getWaveId() const { return waveId; }
 
 private:
-  void registerEventWithIntervals(InstructionSnapshot instruction, MemoryEventType,
-                                  std::vector<uint32_t> registers, uint64_t execMask,
-                                  uint8_t byteMask, IntervalSet ldsIntervals,
-                                  std::span<const amdgpu::MemoryCounterObligation>,
-                                  MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0);
   void retireEventRegisters(EventId);
   void checkScalarAccess(RegisterRef reg, bool isWrite) const;
+
+  /// The counter whose capacity a token of `type` counts against: the split counter
+  /// itself when it has a capacity, else the combined counter it aliases.
+  amdgpu::WaitCounterType capacityCounterFor(amdgpu::WaitCounterType type) const;
 
   template <typename Pred>
   void satisfyOldestCounterObligations(int count, amdgpu::WaitCounterType, Pred matches);
@@ -194,6 +269,7 @@ private:
   std::vector<std::vector<EventId>> ttmpMemoryEvents;
 
   std::vector<EventId> waveMemoryEvents;
+  std::unordered_map<uint32_t, uint8_t> directLdsReadWidths;
   std::vector<EventId> barrierPendingEvents;
 
   CounterCapacities counterCapacities;

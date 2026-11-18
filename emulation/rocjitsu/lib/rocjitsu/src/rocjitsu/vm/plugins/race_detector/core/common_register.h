@@ -3,6 +3,7 @@
 
 #pragma once
 #include "rocjitsu/isa/arch/amdgpu/shared/memory_issue.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 
 #include <array>
 #include <cassert>
@@ -12,6 +13,11 @@
 
 namespace rocjitsu::plugins::race_detector {
 
+struct ConditionalVgprWrite {
+  uint32_t reg = 0;
+  uint64_t lanes = 0;
+};
+
 /// Categorizes in-flight memory operations for race detection.
 enum class MemoryEventType {
   GLOBAL_TO_VGPR = 0, ///< Load from global memory to VGPR.
@@ -19,10 +25,10 @@ enum class MemoryEventType {
   LDS_TO_VGPR,        ///< Load from LDS to VGPR.
   VGPR_TO_LDS,        ///< Store from VGPR to LDS.
 
-  /// Direct-to-LDS (DTL): `buffer_load ... lds` bypasses VGPRs and writes
-  /// global memory data directly to LDS. Unlike VGPR_TO_LDS (which has VGPR
-  /// registers), GLOBAL_TO_LDS events have no VGPR registers -- only LDS
-  /// intervals.
+  /// Direct-to-LDS (DTL) loads, including `buffer_load ... lds` and
+  /// `scratch_load_lds_dword`, bypass VGPRs and write directly to LDS.
+  /// The source memory space is not recorded. Unlike VGPR_TO_LDS (which has
+  /// VGPR registers), GLOBAL_TO_LDS events have only LDS intervals.
   ///
   /// The event records the target-specific VMEM/async counter family separately.
   /// The corresponding zero wait must complete before the owning wave can read
@@ -34,18 +40,38 @@ enum class MemoryEventType {
   GLOBAL_TO_TTMP,   ///< Scalar load to a TTMP; the event stores its counter family separately.
   SCALAR_TO_GLOBAL, ///< Scalar store; retained to preserve partial-wait ordering.
 
-  /// LDS-to-global transfer, such as a tensor DMA store: reads LDS and writes
-  /// global memory, with no VGPR registers -- only LDS intervals. The reverse
-  /// direction is GLOBAL_TO_LDS.
+  /// LDS-to-global transfer, such as a tensor DMA store or a gfx1250 async
+  /// store: reads LDS and writes global memory, with no VGPR registers -- only
+  /// LDS intervals. The reverse direction is GLOBAL_TO_LDS.
   ///
-  /// The event records its counter family and completion order separately.
-  /// defaultWaitCounterType and defaultMemoryOrder return those of a tensor DMA
-  /// store (TENSORCNT, TENSOR).
+  /// The event records its counter family and completion order separately: an
+  /// async store carries ASYNCCNT and ASYNC_STORE. defaultWaitCounterType and
+  /// defaultMemoryOrder return those of a tensor DMA store (TENSORCNT, TENSOR).
   LDS_TO_GLOBAL,
+
+  /// A synchronous VALU operand read visible to peers until a barrier.
+  LDS_OPERAND_READ,
+
 };
 
 /// Race-detector name for the decoded hardware completion-order classification.
 using MemoryOrderClass = amdgpu::MemoryCompletionClass;
+
+/// VMEM result writes can use distinct hardware FIFOs while sharing a counter.
+class VgprWriteOrder {
+public:
+  constexpr VgprWriteOrder(MemoryOrderClass completion,
+                           amdgpu::VmemWriteback type = amdgpu::VmemWriteback::Ordinary)
+      : completion(completion), type(type) {}
+  bool operator==(const VgprWriteOrder &) const = default;
+  MemoryOrderClass completion;
+  amdgpu::VmemWriteback type;
+};
+
+struct LdsAccess {
+  bool read_modify_write = false;
+  uint8_t aligned_atomic_bytes = 0;
+};
 
 /// Derive the ordering usable for whole-event hazards such as destination WAW.
 /// Per-counter ordering remains useful for partial waits, but an event spanning
@@ -77,7 +103,8 @@ inline bool isToSgpr(MemoryEventType t) { return t == MemoryEventType::GLOBAL_TO
 inline bool isToTtmp(MemoryEventType t) { return t == MemoryEventType::GLOBAL_TO_TTMP; }
 
 inline bool isFromLds(MemoryEventType t) {
-  return t == MemoryEventType::LDS_TO_VGPR || t == MemoryEventType::LDS_TO_GLOBAL;
+  return t == MemoryEventType::LDS_TO_VGPR || t == MemoryEventType::LDS_TO_GLOBAL ||
+         t == MemoryEventType::LDS_OPERAND_READ;
 }
 
 /// True if the event touches LDS (read or write).
@@ -102,6 +129,8 @@ inline amdgpu::WaitCounterType defaultWaitCounterType(MemoryEventType t) {
     return amdgpu::WaitCounterType::LGKMCNT;
   case MemoryEventType::LDS_TO_GLOBAL:
     return amdgpu::WaitCounterType::TENSORCNT;
+  case MemoryEventType::LDS_OPERAND_READ:
+    break;
   }
   assert(false && "invalid memory event type");
   return amdgpu::WaitCounterType::VMCNT;
@@ -124,6 +153,8 @@ inline MemoryOrderClass defaultMemoryOrder(MemoryEventType t) {
     return MemoryOrderClass::UNORDERED;
   case MemoryEventType::LDS_TO_GLOBAL:
     return MemoryOrderClass::TENSOR;
+  case MemoryEventType::LDS_OPERAND_READ:
+    break;
   }
   assert(false && "invalid memory event type");
   return MemoryOrderClass::UNORDERED;

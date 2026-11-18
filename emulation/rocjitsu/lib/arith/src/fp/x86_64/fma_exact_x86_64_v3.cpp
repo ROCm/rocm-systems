@@ -5,10 +5,11 @@
 // repair.
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
+#include "common/compiler.h"
 #include "common/simd.h"
 #include "common/x86_64/alu_x86_64_v3.h"
 #include "fp/scalar_repair.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <immintrin.h>
 #include <stdint.h>
@@ -27,6 +28,7 @@ void fma_exact_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instructio
     const uint32_t *inputs[] = {a, b, c};
     __m256 values[3];
     auto bad = _mm256_setzero_si256();
+    RJ_ARITH_UNROLL(3)
     for (int operand = 0; operand < 3; ++operand) {
       auto x = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(inputs[operand] + lane));
       if (instruction_flags & (RJ_ARITH_ALU_ABS_A << operand)) {

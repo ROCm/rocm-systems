@@ -9,8 +9,8 @@
 // wraps before ABS. Both architectures have the same result and SCC rules.
 
 #include "common/bits.h"
-#include "common/internal.h"
-#include "rj_arith/rj_arith.h"
+#include "common/validation.h"
+#include "rj_arith/detail/rj_arith_scalar.h"
 
 #include <stdint.h>
 

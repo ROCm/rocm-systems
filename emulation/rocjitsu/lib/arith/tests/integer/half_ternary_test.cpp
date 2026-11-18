@@ -4,7 +4,7 @@
 // Tests for single-halfword integer multiply-add and three-input selection.
 
 #include "integer/half_ternary_test.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_integer.h"
 
 #include <gtest/gtest.h>
 

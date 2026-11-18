@@ -6,9 +6,8 @@
 // loose accumulation or evaluates the bit-exact two-stage DOT8 model.
 
 #include "common/float_formats.h"
-#include "common/internal.h"
 #include "dot/dot.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 #include "wmma/sparse_layout.h"
 #include "wmma/swmmac_float_impl.h"
 
