@@ -16,8 +16,6 @@ build:
    os: ubuntu-26.04
    tools:
       python: "3.10"
-   apt_packages:
-      - jq
    jobs:
       post_system_dependencies:
          - mkdir -p $HOME/.local/bin /tmp/doxygen
