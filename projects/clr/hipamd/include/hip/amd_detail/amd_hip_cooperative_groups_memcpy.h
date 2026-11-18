@@ -52,9 +52,8 @@ __CG_STATIC_QUALIFIER__ bool dispatch_tdm_memcpy(const TyGroup& group, TyElem* _
       __builtin_amdgcn_is_private(dst)) {
     return false;
   }
-  if (count > UINT32_MAX ||
-      ((reinterpret_cast<uintptr_t>(src) | reinterpret_cast<uintptr_t>(dst)) &
-       (alignment_bytes - 1))) {
+  if (count > UINT32_MAX || ((reinterpret_cast<uintptr_t>(src) | reinterpret_cast<uintptr_t>(dst)) &
+                             (alignment_bytes - 1))) {
     return false;
   }
   const unsigned int total_bytes = __builtin_amdgcn_readfirstlane(static_cast<unsigned int>(count));
@@ -73,14 +72,13 @@ __CG_STATIC_QUALIFIER__ bool dispatch_tdm_memcpy(const TyGroup& group, TyElem* _
 
   const TyElem* global_ptr = src_is_shared ? dst : src;
   const TyElem* local_ptr = src_is_shared ? src : dst;
-    const uintptr_t global_address =
+  const uintptr_t global_address =
       tdm_uniform_address(reinterpret_cast<uintptr_t>(
           (const __attribute__((address_space(1))) TyElem*)global_ptr)) +
       offset;
-    const uintptr_t local_address =
-      tdm_uniform_address(reinterpret_cast<uintptr_t>(
-          (const __attribute__((address_space(3))) TyElem*)local_ptr)) +
-      offset;
+  const uintptr_t local_address = tdm_uniform_address(reinterpret_cast<uintptr_t>(
+                                      (const __attribute__((address_space(3))) TyElem*)local_ptr)) +
+                                  offset;
   gfx1250_TDM_GROUP0 group0;
   group0.ldsAddr(static_cast<uint32_t>(local_address));
   group0.globalAddr(global_address);
@@ -93,10 +91,10 @@ __CG_STATIC_QUALIFIER__ bool dispatch_tdm_memcpy(const TyGroup& group, TyElem* _
   group1.tensorDim0Stride(bytes);
   if (src_is_shared) {
     __builtin_amdgcn_tensor_store_from_lds(group0.m_bitfield, group1.m_bitfield, __hip_uint32x4{},
-                                         __hip_uint32x4{}, __hip_uint32x8{}, 0);
+                                           __hip_uint32x4{}, __hip_uint32x8{}, 0);
   } else {
     __builtin_amdgcn_tensor_load_to_lds(group0.m_bitfield, group1.m_bitfield, __hip_uint32x4{},
-                                      __hip_uint32x4{}, __hip_uint32x8{}, 0);
+                                        __hip_uint32x4{}, __hip_uint32x8{}, 0);
   }
   return true;
 }
