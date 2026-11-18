@@ -499,13 +499,13 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - All clock domains now report an unavailable clock as `UINT32_MAX`, which Python shows as `N/A`.
 
 - **Fixed `amd-smi metric --usage` showing APU IPU read/write bandwidth without a unit**.  
-  - `APU_AVERAGE_IPU_READS` and `APU_AVERAGE_IPU_WRITES` now show `MB/s`, like the DRAM bandwidth counters.
+  - `APU_AVERAGE_IPU_READS` and `APU_AVERAGE_IPU_WRITES` now show `MB/s`, like the DRAM bandwidth counters. In `--json` output they are now objects with `value` and `unit` instead of bare numbers.
 
 - **Fixed `amd-smi static --vram` reporting `GDDR7` for LPDDR5 memory on APUs (for example gfx117x)**.  
   - It now reports `LPDDR5`.
 
 - **Fixed `container_name` in process info being wrong, missing, or crashing `amd-smi`**.  
-  - `amd-smi process --sort-by-pid` could abort with a `std::out_of_range` exception when a GPU process ran in a cgroup whose path ended in `docker` or `lxc`.
+  - Listing GPU processes could abort with a `std::out_of_range` exception when one of them ran in a cgroup whose path ended in `docker` or `lxc`. This affected `amd-smi`, `amd-smi process`, `amd-smi monitor --process` and programs calling `amdsmi_get_gpu_process_list()`.
   - Processes in containerd, CRI-O and Podman containers, including Kubernetes pods, are now identified.
   - Processes outside a container, such as those under `docker.service`, are no longer reported as containerized.
   - LXC 3+ and LXD containers under systemd are now identified.
