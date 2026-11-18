@@ -89,8 +89,9 @@ all supported ML frameworks as well.
 
 On ROCm 10.2 and earlier, use `--torch-trace`, `--triton-trace` and
 `--ml-api-trace` instead of `--trace-ml-api torch`, `--trace-ml-api triton` and
-a bare `--trace-ml-api`, and use `--list-torch-operators` and `--torch-operator`
-instead of `--list-operators torch` and `--operator`.
+a bare `--trace-ml-api`, and use `--list-torch-operators`,
+`--list-triton-operators`, `--torch-operator` and `--triton-operator` instead of
+`--list-operators torch`, `--list-operators triton` and `--operator`.
 
 Tracing adds overhead on top of the usual counter replay. Profile a few
 iterations of a steady-state model rather than a full training run, and skip
