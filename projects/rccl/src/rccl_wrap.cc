@@ -230,6 +230,67 @@ static const rcclArchThresholds* rcclBroadcastTotalByteTable(const struct ncclCo
   return t;
 }
 
+// Fabric bandwidth (amd-smi Mb/s field) every rank of the comm sees: the minimum over the exchanged peer infos, so all
+// ranks price the wire alike and pick the same protocol. 0 when any rank reports none.
+static uint64_t rcclCommFabricBandwidth(const struct ncclComm* comm) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  if (comm->peerInfo == nullptr || comm->nRanks <= 0) {
+    return 0;
+  }
+  uint64_t bw = UINT64_MAX;
+  for (int r = 0; r < comm->nRanks; r++) {
+    const struct amdsmiFabricDeviceInfo& f = comm->peerInfo[r].fabricInfo;
+    bw = std::min<uint64_t>(bw, f.fabricSupported ? f.bandwidth : 0);
+  }
+  return bw;
+#else
+  return 0;
+#endif
+}
+
+// Ring AllReduce LL128 vs Simple per ring step, priced on the chunk C one rank sends per channel per step
+// (nBytes / nChannels / nRanks, 16-byte aligned as the device splits it), so no rank count enters the rule.
+// Each protocol costs its fixed part plus the larger of its unit work and its wire time:
+// - LL128 units: each warp moves WarpSize x ll128ShmemElemsPerThread 8-byte words per pass, 15/16 of them data
+//   (7680 B on gfx1250), so a step takes ceil(C / (nWarps x that)) passes. A power-of-two C spills 1/15 into a
+//   nearly empty last pass. Past one LL128 loop (C over its chunk) or arRingLL128MaxPasses passes LL128 is never
+//   picked.
+// - Simple units: one per Unroll x WarpSize x 16 B hunk (16 KiB on gfx1250).
+// - Wire: nChannels x the bytes sent (LL128 C x 16/15, Simple C) over the fabric bandwidth. Where the fabric is slow
+//   for the channel count, both are wire-bound and LL128's line overhead loses to Simple.
+// LL128 is picked only when it is arRingLL128MarginPct cheaper, so a near tie stays on Simple.
+static bool rcclArRingLL128BeatsSimple(const struct ncclComm* comm, uint64_t nBytes, const rcclArchThresholds* t) {
+  if (t->arRingLL128PassNs == 0 || comm->nChannels <= 0 || comm->nRanks <= 0 || comm->WarpSize <= 0 ||
+      comm->ll128LineElems <= 0 || comm->ll128DataElems <= 0 || comm->unroll < NCCL_UNROLL_1 ||
+      comm->unroll > NCCL_UNROLL_32) {
+    return false;
+  }
+  const uint64_t ll128Warps = comm->maxThreads[NCCL_ALGO_RING][NCCL_PROTO_LL128] / comm->WarpSize;
+  const uint64_t passBytes = ll128Warps * comm->WarpSize * comm->ll128ShmemElemsPerThread * sizeof(uint64_t) /
+                             comm->ll128LineElems * comm->ll128DataElems;
+  const uint64_t ll128Chunk =
+    (uint64_t)(comm->buffSizes[NCCL_PROTO_LL128] / NCCL_STEPS) / comm->ll128LineElems * comm->ll128DataElems;
+  const uint64_t hunkBytes = (1ULL << comm->unroll) * comm->WarpSize * 16;
+  const uint64_t nChannels = (uint64_t)comm->nChannels;
+  const uint64_t chunk = ROUNDUP(DIVUP(DIVUP(nBytes, nChannels), (uint64_t)comm->nRanks), 16);
+  const uint64_t passes = passBytes == 0 ? 0 : DIVUP(chunk, passBytes);
+  if (passBytes == 0 || chunk > ll128Chunk || (t->arRingLL128MaxPasses != 0 && passes > t->arRingLL128MaxPasses)) {
+    return false;
+  }
+  uint64_t ll128WireNs = 0;
+  uint64_t simpleWireNs = 0;
+  const uint64_t fabricBw = t->arRingWireNsScale != 0 ? rcclCommFabricBandwidth(comm) : 0;
+  if (fabricBw != 0) {
+    const uint64_t ll128WireBytes = DIVUP(chunk * comm->ll128LineElems, (uint64_t)comm->ll128DataElems);
+    ll128WireNs = DIVUP(nChannels * ll128WireBytes * t->arRingWireNsScale, fabricBw);
+    simpleWireNs = DIVUP(nChannels * chunk * t->arRingWireNsScale, fabricBw);
+  }
+  const uint64_t ll128Ns = t->arRingLL128StepNs + std::max(passes * t->arRingLL128PassNs, ll128WireNs);
+  const uint64_t simpleNs =
+    t->arRingSimpleStepNs + std::max(DIVUP(chunk, hunkBytes) * t->arRingSimpleHunkNs, simpleWireNs);
+  return ll128Ns * 100 < simpleNs * (100 - std::min<uint64_t>(t->arRingLL128MarginPct, 100));
+}
+
 // Arch-table replacements for the tuning model's LL / LL128 ranges (rank-scaled entries).
 static void rcclArchProtoRanges(const struct ncclComm* comm, const struct ncclTaskColl* info, uint64_t& llMax,
                                 uint64_t& ll128Min, uint64_t& ll128Max) {
@@ -360,6 +421,9 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
               ll128Max = UINT64_MAX;
             } else if (info->algorithm != NCCL_ALGO_TREE && t->arRingLL128MaxPerRank != 0) {
               ll128Max = std::max<uint64_t>(ll128Max, (uint64_t)comm->nRanks * t->arRingLL128MaxPerRank);
+              if (sizePerRank > ll128Max && rcclArRingLL128BeatsSimple(comm, sizePerRank, t)) {
+                ll128Max = sizePerRank;
+              }
             }
           }
         }

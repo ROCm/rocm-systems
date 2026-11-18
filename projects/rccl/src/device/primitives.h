@@ -87,10 +87,43 @@ inline __device__ bool storeFreeStepBarrier(bool fifoSend, int nthreads, int thr
 #endif
 }
 
-#if RCCL_STORE_FREE_STEP_BARRIER
+// gfx1250 Simple runs its end-of-step barrier and the cheap post-send fence as one barrier (stepEndBarrier() in
+// prims_simple.h). Not with the TDM Simple mover, whose stores a store-count wait does not cover.
+// Configure with -DENABLE_SIMPLE_FUSED_STEP_END=OFF to keep the two barriers.
+#if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && !defined(RCCL_DISABLE_SIMPLE_FUSED_STEP_END) && \
+  !(defined(ENABLE_TDM_SIMPLE) && ENABLE_TDM_SIMPLE)
+#define RCCL_SIMPLE_FUSED_STEP_END 1
+#else
+#define RCCL_SIMPLE_FUSED_STEP_END 0
+#endif
+
+// gfx1250 Simple's start-of-step barrier orders LDS only (stepStartBarrier() in prims_simple.h): it no longer waits for
+// the tail and head the post threads stored at the end of the last step. Not with the TDM Simple mover.
+// Configure with -DENABLE_SIMPLE_STORE_FREE_STEP_START=OFF to keep the full-fence barrier.
+#if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && !defined(RCCL_DISABLE_SIMPLE_STORE_FREE_STEP_START) && \
+  !(defined(ENABLE_TDM_SIMPLE) && ENABLE_TDM_SIMPLE)
+#define RCCL_SIMPLE_STORE_FREE_STEP_START 1
+#else
+#define RCCL_SIMPLE_STORE_FREE_STEP_START 0
+#endif
+
+// LL/LL128 (storeFreeStepBarrier()) and Simple (stepStartBarrier()) both skip the store-free barrier on connFifo sends.
+#if RCCL_STORE_FREE_STEP_BARRIER || RCCL_SIMPLE_STORE_FREE_STEP_START
 inline __device__ bool anySendConnFifo(struct ncclDevChannel* channel, int const* sendPeers, int nsend, int connIndex) {
   bool fifo = false;
-  for (int i = 0; i < nsend; i++) fifo |= channel->peers[sendPeers[i]]->send[connIndex].connFifo != nullptr;
+  for (int i = 0; i < nsend; i++) {
+    fifo |= channel->peers[sendPeers[i]]->send[connIndex].connFifo != nullptr;
+  }
+  return fifo;
+}
+#endif
+
+#if RCCL_SIMPLE_STORE_FREE_STEP_START
+inline __device__ bool anyRecvConnFifo(struct ncclDevChannel* channel, int const* recvPeers, int nrecv, int connIndex) {
+  bool fifo = false;
+  for (int i = 0; i < nrecv; i++) {
+    fifo |= channel->peers[recvPeers[i]]->recv[connIndex].connFifo != nullptr;
+  }
   return fifo;
 }
 #endif

@@ -61,6 +61,9 @@ class Primitives<T, RedOp, Fan, Direct,
   uint64_t barrier_next_pat = 0;
   int repeat;
   bool skip_fence = false;
+#if RCCL_SIMPLE_STORE_FREE_STEP_START
+  bool stepStoreFree = false;  // stepStartBarrier() may order LDS only: no connFifo on any send or receive peer
+#endif
 
   // Don't use barrier 0 as it's used by the final sync
   inline __device__ void barrier() {
@@ -78,6 +81,48 @@ class Primitives<T, RedOp, Fan, Direct,
   inline __device__ void subBarrier() {
     if (nworkers == WARP_SIZE) __syncwarp();
     else barrier();
+  }
+
+  // Start of a step: the wait threads' LDS pointers must reach the workers, and no worker may touch the step's slot
+  // before the wait has seen it. Both are LDS order and execution order: the slot accesses that follow issue after the
+  // barrier, behind the wait thread's system-scope acquire. No global store has to be visible to the block here: the
+  // last step's data and loads drained at its end barrier, and the tail or head the post threads stored after it only
+  // has to reach the peer. On gfx1250 a workgroup fence waits for that store's fabric round trip (s_wait_storecnt);
+  // these fences order LDS only. Comms with a connFifo on either side (net proxy) keep subBarrier().
+  inline __device__ void stepStartBarrier() {
+#if RCCL_SIMPLE_STORE_FREE_STEP_START
+    if (stepStoreFree && nworkers != WARP_SIZE) {
+      __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
+      barrier_generic_ordered(__atomic_signal_fence(__ATOMIC_SEQ_CST), nworkers, barrier_next, barriers,
+                              __ATOMIC_RELAXED, __ATOMIC_RELAXED);
+      __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
+      return;
+    }
+#endif
+    subBarrier();
+  }
+
+  // End of a step, ahead of postPeer(). Returns true where it already ran the cheap post-send fence, so postPeer()
+  // skips its second barrier. Store and load counters are per wave, so every wave drains its own before it arrives:
+  // the post thread's step then releases the whole block's data, and the head store hands back a slot no load still
+  // reads. The barrier itself only has to order LDS (srcs/dsts are rewritten for the next slice). A one-warp group
+  // has no other wave to wait for, as in barrier() and the cheap fence.
+  inline __device__ bool stepEndBarrier() {
+#if RCCL_SIMPLE_FUSED_STEP_END
+    if (skip_fence) {
+      __atomic_signal_fence(__ATOMIC_SEQ_CST);
+      asm volatile("s_wait_loadcnt 0x0\n\ts_wait_storecnt 0x0" ::: "memory");
+      __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
+      if (nworkers != WARP_SIZE) {
+        barrier_generic_ordered(__atomic_signal_fence(__ATOMIC_SEQ_CST), nworkers, barrier_next, barriers,
+                                __ATOMIC_RELAXED, __ATOMIC_RELAXED);
+      }
+      __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
+      return true;
+    }
+#endif
+    barrier();
+    return false;
   }
 
   // Multi-RPN (hierarchical) PAT runs NCCL_PAT_MULTI_RPN_NWORKERS workers.
@@ -231,8 +276,10 @@ class Primitives<T, RedOp, Fan, Direct,
   }
 
   template <int Recv, int Send>
-  inline __device__ void postPeer(bool dataStored) {
-    if (skip_fence) {
+  inline __device__ void postPeer(bool dataStored, bool drained = false) {
+    if (drained) {
+      // stepEndBarrier() already ran the cheap post-send fence.
+    } else if (skip_fence) {
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
 #if (defined(__gfx1250__) || defined(__gfx1250_strict__))
       // To be revisited for correctness and performance on gfx1250
@@ -301,7 +348,7 @@ class Primitives<T, RedOp, Fan, Direct,
           ncclShmem.groups[group].acc = (Dst && userAcc != nullptr) ? userAcc + dstIx + offset : nullptr;
         }
         waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(srcIx, dstIx, offset, sliceSize);
-        subBarrier();
+        stepStartBarrier();
         /* if user abort the kernel, we don't need to actually perform copy/reduce; just set size
          * to 0 to avoid unnecessary workload. */
         int workSize = ncclShmem.aborted ? 0 : sliceSize;
@@ -355,8 +402,8 @@ class Primitives<T, RedOp, Fan, Direct,
           // skip data flush.
           workSize = 0;
         }
-        barrier(); // This barrier has a counterpart in following loop
-        postPeer<Recv, Send>(0 < workSize);
+        bool drained = stepEndBarrier(); // This barrier has a counterpart in following loop
+        postPeer<Recv, Send>(0 < workSize, drained);
         offset += sliceSize;
         slice += 1;
         // Yes, for some template arguments this code will be unreachable.  That's fine.
@@ -375,9 +422,9 @@ class Primitives<T, RedOp, Fan, Direct,
         // since we've exited the loop above.
         waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(0, 0, 0, sliceSize);
       }
-      barrier(); // Has couterpart in preceding worker-only loop.
+      bool drained = stepEndBarrier(); // Has couterpart in preceding worker-only loop.
       int workSize = ncclShmem.aborted ? 0 : sliceSize;
-      postPeer<Recv, Send>(0 < workSize);
+      postPeer<Recv, Send>(0 < workSize, drained);
       offset += sliceSize;
       slice += 1;
     }
@@ -812,6 +859,11 @@ public:
     // coverity[overrun-call] => Coverity think prims.index can be greater than 1
     if (flags & (RoleWaitSend | RolePostSend))
       loadSendConn(channel->peers[peer], connIndexSend, collWork ? collWork->direct : 0, sendIpcReg, sendNetReg);
+#if RCCL_SIMPLE_STORE_FREE_STEP_START
+    // Every thread scans the same peers, so the whole block takes the same barrier.
+    stepStoreFree = !anySendConnFifo(channel, sendPeers, nsend, connIndexSend) &&
+                    !anyRecvConnFifo(channel, recvPeers, nrecv, connIndexRecv);
+#endif
 
     // if (barrierAny(flags & NetDeviceUnpack)) {
     //   flags |= AnyNetDeviceUnpack;

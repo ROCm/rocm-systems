@@ -1780,7 +1780,14 @@ rcclArchThresholds MakeRankScaledTable() {
   t.ddaVmmBlockBudget = 2048;
   t.ddaVmmMinBlocks = 32;
   t.ddaVmmMaxBlocks = 128;
-  t.arRingLL128MaxPerRank = 32 * kMiB;
+  t.arRingLL128MaxPerRank = 4 * kMiB;
+  t.arRingLL128StepNs = 5460;
+  t.arRingLL128PassNs = 7900;
+  t.arRingSimpleStepNs = 6460;
+  t.arRingSimpleHunkNs = 2770;
+  t.arRingWireNsScale = 1040;
+  t.arRingLL128MarginPct = 4;
+  t.arRingLL128MaxPasses = 2;
   t.arTreeLL128Unlimited = true;
   t.arTreeMaxPerRank = 1 * kMiB;
   t.arTreeLLMaxPerRank = 32 * kKiB;
@@ -1899,22 +1906,28 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250TreeAllReduceKeepsLL
       });
 }
 
-// AICOMRCCL-2875: Ring AllReduce keeps LL128 up to nRanks x 32 MiB (inclusive), past the
-// model's 16 MiB ceiling, and returns to Simple one byte later.
+// Ring AllReduce keeps LL128 up to the larger of nRanks x 4 MiB (inclusive) and the model's 16 MiB ceiling, and
+// returns to Simple one byte later: Simple from 256M at 8-32 ranks, LL128 at 32 ranks 128M.
 TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250RingAllReduceLL128ScalesWithRanks) {
   RUN_ISOLATED_TEST(
       "Wrap_UpdateCollectiveProtocol_Gfx1250RingAllReduceLL128ScalesWithRanks",
       []() {
         SetMicroEnvAbsent("NCCL_PROTO");
         // Not a rank-scaled entry: it applies below rankScaledMinRanks too.
-        for (int nRanks : {4, 8, 16, 64}) {
+        for (int nRanks : {4, 8, 16, 32, 64}) {
           ncclComm* comm = MakeGfx1250ProtocolComm(nRanks);
-          const size_t cap = size_t(nRanks) * 32 * kMiB;
+          const size_t cap = std::max<size_t>(size_t(nRanks) * 4 * kMiB, kGfx1250ArLL128Max);
           EXPECT_EQ(NCCL_PROTO_LL128, ArProtocol(comm, NCCL_ALGO_RING, cap)) << nRanks;
           EXPECT_EQ(NCCL_PROTO_SIMPLE, ArProtocol(comm, NCCL_ALGO_RING, cap + 1)) << nRanks;
+          if (nRanks >= 8 && nRanks <= 32) {
+            EXPECT_EQ(NCCL_PROTO_SIMPLE, ArProtocol(comm, NCCL_ALGO_RING, 256 * kMiB)) << nRanks;
+          }
           DeleteCommWithArch(comm);
         }
-        // Two ranks with a 128 MiB model ceiling: nRanks x 32 MiB (64 MiB) sits below it,
+        ncclComm* comm32 = MakeGfx1250ProtocolComm(32);
+        EXPECT_EQ(NCCL_PROTO_LL128, ArProtocol(comm32, NCCL_ALGO_RING, 128 * kMiB));
+        DeleteCommWithArch(comm32);
+        // Two ranks with a 128 MiB model ceiling: nRanks x 4 MiB (8 MiB) sits below it,
         // so the model ceiling is the one that applies.
         constexpr uint64_t kModelCeiling = 128ULL << 20;
         ncclComm* comm = MakeGfx1250ProtocolComm(2);
@@ -1922,6 +1935,172 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250RingAllReduceLL128Sc
         EXPECT_EQ(NCCL_PROTO_LL128, ArProtocol(comm, NCCL_ALGO_RING, kModelCeiling));
         EXPECT_EQ(NCCL_PROTO_SIMPLE, ArProtocol(comm, NCCL_ALGO_RING, kModelCeiling + 1));
         DeleteCommWithArch(comm);
+      });
+}
+
+namespace {
+
+// The gfx1250 SPX launch geometry the Ring LL128 cost model reads: 256 channels, 256-thread LL128 blocks of
+// wave32 warps, 128-byte LL128 lines (15 data words of 16) with 32 words per thread per pass, the default LL128
+// buffer (one-loop chunk 230400 B) and Simple's Unroll 32 (16 KiB hunks).
+void SetGfx1250RingGeometry(ncclComm* comm, int nChannels = 256) {
+  comm->nChannels = nChannels;
+  comm->WarpSize = 32;
+  comm->maxThreads[NCCL_ALGO_RING][NCCL_PROTO_LL128] = 256;
+  comm->ll128LineElems = 16;
+  comm->ll128DataElems = 15;
+  comm->ll128ShmemElemsPerThread = 32;
+  comm->buffSizes[NCCL_PROTO_LL128] = 120 * 256 * NCCL_STEPS * 8;
+  comm->unroll = NCCL_UNROLL_32;
+}
+
+// Every rank's peer info reports `bandwidth` as its fabric bandwidth (amd-smi field; 0 = no fabric). Caller frees
+// comm->peerInfo with free().
+void SetFabricBandwidth(ncclComm* comm, uint32_t bandwidth) {
+  comm->peerInfo = static_cast<ncclPeerInfo*>(calloc(comm->nRanks, sizeof(ncclPeerInfo)));
+  for (int r = 0; r < comm->nRanks; r++) {
+    comm->peerInfo[r].fabricInfo.fabricSupported = bandwidth != 0;
+    comm->peerInfo[r].fabricInfo.bandwidth = bandwidth;
+  }
+}
+
+void DeleteFabricComm(ncclComm* comm) {
+  free(comm->peerInfo);
+  comm->peerInfo = nullptr;
+  DeleteCommWithArch(comm);
+}
+
+}  // namespace
+
+// Past nRanks x 4 MiB, Ring AllReduce keeps LL128 only where its per-step cost on the per-rank chunk C (bytes per
+// channel per rank) is 4% under Simple's, each the fixed part plus the larger of unit work and wire time.
+// 256 channels on a 1800000 fabric (units decide): 12, 24 and 28 ranks at 256M (C 87392 / 43696 / 37456 B), 24 ranks
+// at 512M; never at a power-of-two C (8/16/32 ranks), whose last LL128 warp pass is nearly empty, nor past 2 LL128
+// passes (C over 122880 B: 12 ranks 512M, 24 ranks 1G, 28 ranks 1G), nor past one LL128 loop.
+// 192 channels on a 900000 fabric (wire decides): Simple wherever the floor ends, as LL128 sends 16/15 of C.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250RingAllReduceLL128ByChunkCost) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_Gfx1250RingAllReduceLL128ByChunkCost",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        constexpr int L = NCCL_PROTO_LL128;
+        constexpr int S = NCCL_PROTO_SIMPLE;
+        struct Row {
+          int nRanks;
+          int proto[5];  // 256M, 512M, 1G, 2G, 4G
+        };
+        struct Fabric {
+          int nChannels;
+          uint32_t bandwidth;
+          Row rows[7];
+        };
+        const Fabric fabrics[] = {
+            {256, 1800000, {{4, {S, S, S, S, S}}, {8, {S, S, S, S, S}}, {12, {L, S, S, S, S}},
+                            {16, {S, S, S, S, S}}, {24, {L, L, S, S, S}}, {28, {L, S, S, S, S}},
+                            {32, {S, S, S, S, S}}}},
+            {192, 900000, {{4, {S, S, S, S, S}}, {8, {S, S, S, S, S}}, {12, {S, S, S, S, S}},
+                           {16, {S, S, S, S, S}}, {24, {S, S, S, S, S}}, {28, {S, S, S, S, S}},
+                           {32, {S, S, S, S, S}}}},
+        };
+        for (const Fabric& f : fabrics) {
+          for (const Row& row : f.rows) {
+            ncclComm* comm = MakeGfx1250ProtocolComm(row.nRanks);
+            SetGfx1250RingGeometry(comm, f.nChannels);
+            SetFabricBandwidth(comm, f.bandwidth);
+            for (int i = 0; i < 5; i++) {
+              const size_t bytes = (256 * kMiB) << i;
+              EXPECT_EQ(row.proto[i], ArProtocol(comm, NCCL_ALGO_RING, bytes))
+                  << f.nChannels << " channels, " << row.nRanks << " ranks, " << bytes;
+            }
+            // The nRanks x 4 MiB floor still holds below the cost model.
+            const size_t floor = std::max<size_t>(size_t(row.nRanks) * 4 * kMiB, kGfx1250ArLL128Max);
+            EXPECT_EQ(L, ArProtocol(comm, NCCL_ALGO_RING, floor)) << f.nChannels << " channels, " << row.nRanks;
+            DeleteFabricComm(comm);
+          }
+        }
+
+        // 12 ranks: C = 21856 B at 64M is one LL128 pass against two Simple hunks, Simple; 43696 B at 128M, LL128.
+        ncclComm* comm = MakeGfx1250ProtocolComm(12);
+        SetGfx1250RingGeometry(comm);
+        SetFabricBandwidth(comm, 1800000);
+        EXPECT_EQ(S, ArProtocol(comm, NCCL_ALGO_RING, 64 * kMiB));
+        EXPECT_EQ(L, ArProtocol(comm, NCCL_ALGO_RING, 128 * kMiB));
+        // Two LL128 passes hold C <= 122880 B: 12 x 122880 B per channel is the last LL128 size at 12 ranks.
+        EXPECT_EQ(L, ArProtocol(comm, NCCL_ALGO_RING, 12ULL * 122880 * 256));
+        EXPECT_EQ(S, ArProtocol(comm, NCCL_ALGO_RING, 12ULL * 122880 * 256 + 12 * 256 * 16));
+        // With no pass limit one LL128 loop holds C <= 230400 B: 12 x 230400 B per channel is the last LL128 size.
+        rcclArchThresholds noPassLimit = *Gfx1250Table();
+        noPassLimit.arRingLL128MaxPasses = 0;
+        comm->archThresholds = &noPassLimit;
+        EXPECT_EQ(L, ArProtocol(comm, NCCL_ALGO_RING, 512 * kMiB)) << "no pass limit";
+        EXPECT_EQ(L, ArProtocol(comm, NCCL_ALGO_RING, 12ULL * 230400 * 256)) << "no pass limit";
+        EXPECT_EQ(S, ArProtocol(comm, NCCL_ALGO_RING, 12ULL * 230400 * 256 + 12 * 256 * 16)) << "no pass limit";
+        comm->archThresholds = Gfx1250Table();
+        DeleteFabricComm(comm);
+        // 28 ranks at 1G (C = 149808 B, 3 LL128 passes) costs LL128 under Simple, but the pass limit keeps Simple.
+        comm = MakeGfx1250ProtocolComm(28);
+        SetGfx1250RingGeometry(comm);
+        SetFabricBandwidth(comm, 1800000);
+        EXPECT_EQ(S, ArProtocol(comm, NCCL_ALGO_RING, 1024 * kMiB));
+        comm->archThresholds = &noPassLimit;
+        EXPECT_EQ(L, ArProtocol(comm, NCCL_ALGO_RING, 1024 * kMiB)) << "no pass limit";
+        comm->archThresholds = Gfx1250Table();
+        DeleteFabricComm(comm);
+        // The chunk is per channel: on 128 channels 24 ranks at 256M has C = 87392 B, LL128, and 512M is 3 passes.
+        comm = MakeGfx1250ProtocolComm(24);
+        SetGfx1250RingGeometry(comm, 128);
+        SetFabricBandwidth(comm, 1800000);
+        EXPECT_EQ(L, ArProtocol(comm, NCCL_ALGO_RING, 256 * kMiB));
+        EXPECT_EQ(S, ArProtocol(comm, NCCL_ALGO_RING, 512 * kMiB));
+        DeleteFabricComm(comm);
+
+        // The wire term is what makes the slow fabric Simple: 8 ranks at 256M on 192 channels (C = 174768 B, 3 LL128
+        // passes vs 11 Simple hunks) is LL128 by the units alone with no pass limit, Simple on a 900000 fabric.
+        comm = MakeGfx1250ProtocolComm(8);
+        SetGfx1250RingGeometry(comm, 192);
+        comm->archThresholds = &noPassLimit;
+        EXPECT_EQ(L, ArProtocol(comm, NCCL_ALGO_RING, 256 * kMiB)) << "no peer info";
+        SetFabricBandwidth(comm, 900000);
+        EXPECT_EQ(S, ArProtocol(comm, NCCL_ALGO_RING, 256 * kMiB)) << "900000 fabric";
+        // One rank without fabric bandwidth turns the wire term off on every rank (the minimum over all peers).
+        comm->peerInfo[5].fabricInfo.fabricSupported = false;
+        EXPECT_EQ(L, ArProtocol(comm, NCCL_ALGO_RING, 256 * kMiB)) << "one rank without fabric";
+        comm->peerInfo[5].fabricInfo.fabricSupported = true;
+        comm->peerInfo[5].fabricInfo.bandwidth = 1800000;
+        EXPECT_EQ(S, ArProtocol(comm, NCCL_ALGO_RING, 256 * kMiB)) << "slowest rank prices the wire";
+        // A zero wire scale turns the wire term off too.
+        rcclArchThresholds noWire = noPassLimit;
+        noWire.arRingWireNsScale = 0;
+        comm->archThresholds = &noWire;
+        EXPECT_EQ(L, ArProtocol(comm, NCCL_ALGO_RING, 256 * kMiB)) << "wire scale 0";
+        comm->archThresholds = Gfx1250Table();
+        DeleteFabricComm(comm);
+
+        // 24 ranks at 256M on 192 channels (C = 58256 B): LL128 is under 1% cheaper on the 900000 fabric, inside the
+        // 4% margin, so Simple; with no margin LL128.
+        comm = MakeGfx1250ProtocolComm(24);
+        SetGfx1250RingGeometry(comm, 192);
+        SetFabricBandwidth(comm, 900000);
+        EXPECT_EQ(S, ArProtocol(comm, NCCL_ALGO_RING, 256 * kMiB)) << "inside the margin";
+        rcclArchThresholds noMargin = *Gfx1250Table();
+        noMargin.arRingLL128MarginPct = 0;
+        comm->archThresholds = &noMargin;
+        EXPECT_EQ(L, ArProtocol(comm, NCCL_ALGO_RING, 256 * kMiB)) << "margin 0";
+        comm->archThresholds = Gfx1250Table();
+        DeleteFabricComm(comm);
+
+        // A zeroed cost entry (every other arch and table) and an unknown geometry keep the floor.
+        rcclArchThresholds noCost = *Gfx1250Table();
+        noCost.arRingLL128PassNs = 0;
+        comm = MakeGfx1250ProtocolComm(24);
+        SetGfx1250RingGeometry(comm);
+        SetFabricBandwidth(comm, 1800000);
+        comm->archThresholds = &noCost;
+        EXPECT_EQ(S, ArProtocol(comm, NCCL_ALGO_RING, 256 * kMiB)) << "cost entry off";
+        comm->archThresholds = Gfx1250Table();
+        comm->nChannels = 0;
+        EXPECT_EQ(S, ArProtocol(comm, NCCL_ALGO_RING, 256 * kMiB)) << "no channels";
+        DeleteFabricComm(comm);
       });
 }
 

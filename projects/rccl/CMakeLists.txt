@@ -128,6 +128,9 @@ option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernel
 option(ENABLE_TDM_SIMPLE                       "Build the experimental gfx1250 TDM SIMPLE copy and reduce paths" OFF)
 option(ENABLE_TDM_PRIM_LL128                   "Build the experimental gfx1250 TDM LL128 user-buffer path" OFF)
 option(ENABLE_STORE_FREE_STEP_BARRIER          "gfx1250 LL and LL128 step barriers skip waiting for remote stores" ON)
+option(ENABLE_SIMPLE_FUSED_STEP_END            "gfx1250 Simple drains a step's loads and stores once before posting it" ON)
+option(ENABLE_SIMPLE_STORE_FREE_STEP_START     "gfx1250 Simple's start-of-step barrier orders LDS only" ON)
+option(ENABLE_GFX1250_AR_RING_LL128_BY_CHUNK   "gfx1250 SPX Ring AllReduce picks LL128 or Simple by per-rank chunk cost" ON)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
 option(ROCTX                                   "Enable ROCTX"                                  ${RCCL_DEFAULT_ROCTX})
@@ -149,6 +152,18 @@ endif()
 
 if(NOT ENABLE_STORE_FREE_STEP_BARRIER)
   add_compile_definitions(RCCL_DISABLE_STORE_FREE_STEP_BARRIER=1)
+endif()
+
+if(NOT ENABLE_SIMPLE_FUSED_STEP_END)
+  add_compile_definitions(RCCL_DISABLE_SIMPLE_FUSED_STEP_END=1)
+endif()
+
+if(NOT ENABLE_SIMPLE_STORE_FREE_STEP_START)
+  add_compile_definitions(RCCL_DISABLE_SIMPLE_STORE_FREE_STEP_START=1)
+endif()
+
+if(NOT ENABLE_GFX1250_AR_RING_LL128_BY_CHUNK)
+  add_compile_definitions(RCCL_DISABLE_GFX1250_AR_RING_LL128_BY_CHUNK=1)
 endif()
 # rocSHMEM integration (mutually exclusive — enabling both causes duplicate
 # rocshmem state between librccl.so and the executable at runtime):
