@@ -7115,6 +7115,11 @@ TEST(WrapMicrotestIsolated, SelectAllGather_HierWindowOnlyWhereHierRuns) {
 
         ScopedHook hier(g_symkAgHierGroups, [](struct ncclComm*) { return 8; });
         EXPECT_TRUE(picksSymk(64 * kMiB)) << "hierarchical kernel: the hierarchical window";
+
+        g_loadParam = ForceParam("RCCL_SYM_K_MAX_BYTES", 32 * kMiB);
+        EXPECT_FALSE(picksSymk(64 * kMiB)) << "RCCL_SYM_K_MAX_BYTES wins over the hierarchical window";
+        g_loadParam = ForceParam("RCCL_SYM_K_MIN_BYTES", 128 * kMiB);
+        EXPECT_FALSE(picksSymk(64 * kMiB)) << "RCCL_SYM_K_MIN_BYTES wins over the hierarchical window";
       });
 }
 

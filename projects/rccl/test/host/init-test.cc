@@ -11551,9 +11551,21 @@ TEST_F(InitMicrotest, InitTransportsRank_HierAllGatherSizingMismatch_FailsOnlyOn
   auto reachesPostset = [](bool partitioned, const Patch& patch) {
     TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
     Tr_ReachAllGather3(c, "gfx900");
+    c.get()->config.minCTAs = 3;
+    c.get()->config.maxCTAs = 5;
+    ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) {
+      return std::string(env) == "SYM_CTAS" ? 7 : deft;
+    });
     std::vector<PeerSpec> specs(4);
     for (auto& s : specs) s.mloPart = partitioned ? 1 : -1;
     const auto gathers = Tr_InstallGathers(c, specs, [&](int r, Tr_AllGatherInfo& row) {
+      if (r == 0) {
+        EXPECT_EQ(row.minCTAs, 3);
+        EXPECT_EQ(row.maxCTAs, 5);
+        EXPECT_EQ(row.symCtas, 7);
+        EXPECT_EQ(row.symAgHierMaxBlocks, ncclSymkAgHierMaxBlocks);
+        EXPECT_EQ(row.symAgHierMaxChunkBytes, int64_t(ncclSymkAgHierMaxChunkBytes));
+      }
       if (r == 2 && patch) patch(row);
     });
     const int before = g_ncclTopoPostsetCalls;
