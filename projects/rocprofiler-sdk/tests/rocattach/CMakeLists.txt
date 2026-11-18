@@ -157,6 +157,33 @@ else()
         )
 endif()
 
+# Attach, detach and attach again to one process with a tool that finalizes itself from
+# tool_detach, as rocprofiler-systems does. The client must survive the detach.
+add_library(rocattach-reattach-tool SHARED)
+target_sources(rocattach-reattach-tool PRIVATE reattach_tool.cpp)
+target_link_libraries(rocattach-reattach-tool PRIVATE rocprofiler-sdk::rocprofiler-sdk
+                                                      rocprofiler-sdk::tests-build-flags)
+
+add_executable(rocattach-reattach-test)
+target_sources(rocattach-reattach-test PRIVATE reattach_self_finalizing_tool.cpp)
+target_link_libraries(
+    rocattach-reattach-test
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
+            rocprofiler-sdk::rocprofiler-sdk-rocattach-shared-library)
+
+rocprofiler_add_integration_execute_test(
+    rocattach-reattach-self-finalizing-tool-test-execute
+    COMMAND $<TARGET_FILE:rocattach-reattach-test> $<TARGET_FILE:attachment-test>
+            $<TARGET_FILE:rocattach-reattach-tool>
+    DEPENDS rocattach-reattach-test rocattach-reattach-tool
+    TIMEOUT 60
+    LABELS "attachment"
+    ENVIRONMENT "${rocattach-test-env}"
+    DISABLED ${IS_DISABLED}
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    PASS_REGULAR_EXPRESSION "Test PASSED: reattached 3 times with a self-finalizing tool"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
 # Utilize rocattach to use a generic C tool in a basic app
 rocprofiler_add_integration_execute_test(
     rocattach-parallel-attach-test-execute

@@ -25,7 +25,8 @@
 #
 # Each subdirectory is a self-contained execute + validate test pair that exercises
 # registering a rocprofiler-sdk tool at a controlled point during a running process via
-# rocprofiler_force_configure (the "anytime" initialization path).
+# rocprofiler_force_configure (the "anytime" initialization path). The top-level tests
+# below cover client finalization: concurrent finalization and reattaching after a detach.
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
@@ -54,6 +55,32 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests;anytime-tool-config"
     ENVIRONMENT "ROCPROFILER_LIBRARY_CTOR=0"
     PASS_REGULAR_EXPRESSION "Process exit waited for the active client"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+# Attach, detach and attach again with a tool that finalizes itself from tool_detach. The
+# tool is a separate library loaded through ROCP_TOOL_LIBRARIES, like a real attach tool.
+add_library(reattach-after-detach-tool SHARED)
+target_sources(reattach-after-detach-tool PRIVATE reattach-after-detach-tool.cpp)
+target_link_libraries(
+    reattach-after-detach-tool PRIVATE rocprofiler-sdk::rocprofiler-sdk
+                                       rocprofiler-sdk::tests-build-flags)
+
+add_executable(reattach-after-detach)
+target_sources(reattach-after-detach PRIVATE reattach-after-detach.cpp)
+target_link_libraries(
+    reattach-after-detach PRIVATE rocprofiler-sdk::rocprofiler-sdk
+                                  rocprofiler-sdk::tests-build-flags ${CMAKE_DL_LIBS})
+add_dependencies(reattach-after-detach reattach-after-detach-tool)
+
+rocprofiler_add_integration_execute_test(
+    reattach-after-detach
+    TARGET reattach-after-detach
+    ARGS $<TARGET_FILE:reattach-after-detach-tool>
+    TIMEOUT 15
+    LABELS "integration-tests;anytime-tool-config;attachment"
+    ENVIRONMENT "ROCPROFILER_LIBRARY_CTOR=1"
+                "ROCP_TOOL_LIBRARIES=$<TARGET_FILE:reattach-after-detach-tool>"
+    PASS_REGULAR_EXPRESSION "Reattach after detach succeeded"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 add_subdirectory(early-hip-late-dispatch)

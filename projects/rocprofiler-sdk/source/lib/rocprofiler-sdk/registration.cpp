@@ -735,6 +735,41 @@ get_registration_mutex()
     return _v;
 }
 
+// Number of tool_detach callbacks currently running. A detach only ends an attach session: the
+// client stays registered so the process can be attached again. Tools commonly tear themselves
+// down in tool_detach by calling the client finalize function they received in initialize; that
+// request (and the finalize() it leads to for a single client) must be ignored while a detach is
+// in progress, otherwise the client is unregistered and the next attach finds no clients.
+std::atomic<int>&
+get_active_detaches()
+{
+    static auto _v = std::atomic<int>{0};
+    return _v;
+}
+
+bool
+is_detaching()
+{
+    return get_active_detaches().load(std::memory_order_acquire) > 0;
+}
+
+// Marks finalization as in progress (-1) while a client's finalize or detach callback runs, unless
+// finalization has already started. Afterwards only a -1 is undone, so a finalization that
+// completed during the callback (status 1) is not reset to 0. This is best-effort against a
+// finalize() running concurrently on another thread, which also uses -1 while in progress.
+common::scope_destructor
+mark_fini_in_progress()
+{
+    auto       _not_finalizing = 0;
+    const bool _marked         = get_status() && get_status()->second.compare_exchange_strong(
+                                             _not_finalizing, -1, std::memory_order_acq_rel);
+    return common::scope_destructor{[_marked]() {
+        if(!_marked) return;
+        auto _in_progress = -1;
+        get_status()->second.compare_exchange_strong(_in_progress, 0, std::memory_order_acq_rel);
+    }};
+}
+
 bool
 invoke_client_configure(std::optional<client_library>& itr)
 {
@@ -837,6 +872,13 @@ invoke_client_initializer(std::optional<client_library>& itr)
     if(itr && itr->configure_result && itr->configure_result->initialize)
     {
         rocprofiler_client_finalize_t client_fini_func = [](rocprofiler_client_id_t _id) -> void {
+            if(is_detaching())
+            {
+                ROCP_INFO << "ignoring client finalization request during tool_detach (client_id="
+                          << _id.handle << ")";
+                return;
+            }
+
             // if there is only one client, just fully finalize
             if(get_clients()->size() == 1)
                 finalize();
@@ -984,10 +1026,13 @@ invoke_client_detaches()
             kfd::signal_less_fence_completions();
             pc_sampling::service_sync(itr->internal_client_id);
 
-            auto _fini_status = get_fini_status();
-            if(_fini_status == 0) set_fini_status(-1);
-            itr->configure_attach_result->tool_detach(itr->configure_attach_result->tool_data);
-            if(_fini_status == 0) set_fini_status(_fini_status);
+            {
+                auto _detaching = common::scope_destructor{
+                    []() { get_active_detaches().fetch_sub(1, std::memory_order_acq_rel); },
+                    []() { get_active_detaches().fetch_add(1, std::memory_order_acq_rel); }};
+                auto _fini_marker = mark_fini_in_progress();
+                itr->configure_attach_result->tool_detach(itr->configure_attach_result->tool_data);
+            }
             context::deactivate_client_contexts(itr->internal_client_id);
 
             ret = ROCPROFILER_STATUS_SUCCESS;
@@ -1044,10 +1089,10 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
                 kfd::signal_less_fence_completions();
                 pc_sampling::service_sync(itr->internal_client_id);
 
-                auto _fini_status = get_fini_status();
-                if(_fini_status == 0) set_fini_status(-1);
-                _finalize_func(itr->configure_result->tool_data);
-                if(_fini_status == 0) set_fini_status(_fini_status);
+                {
+                    auto _fini_marker = mark_fini_in_progress();
+                    _finalize_func(itr->configure_result->tool_data);
+                }
             }
             context::deactivate_client_contexts(itr->internal_client_id);
             itr.reset();
@@ -1211,6 +1256,16 @@ finalize()
     if(get_fini_status() > 0)
     {
         ROCP_INFO << "ignoring finalization request (value=" << get_fini_status() << ")";
+        return;
+    }
+
+    // A detach ends an attach session, not the SDK: keep the clients registered for reattach.
+    // As before the concurrent-finalization change, any request that arrives while a tool_detach
+    // is running is ignored, including one from process exit on another thread.
+    if(is_detaching())
+    {
+        ROCP_INFO << "ignoring finalization request during tool_detach (value=" << get_fini_status()
+                  << ")";
         return;
     }
 
