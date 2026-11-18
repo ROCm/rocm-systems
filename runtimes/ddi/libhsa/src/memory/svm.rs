@@ -326,36 +326,37 @@ pub(crate) unsafe fn submit_discard(
         let worker = match thread::Builder::new()
             .name("rocddi-svm-discard".into())
             .spawn(move || {
-                let _lease = cleanup.map(crate::runtime::ApiLeaseScope::enter);
-                let _devices = devices;
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-                    || -> Result<(), Status> {
-                        if !wait_async_dependencies(&worker_handles[..dependency_len], &stop) {
-                            return Err(ERROR);
-                        }
-                        for (index, &range) in ranges.iter().enumerate() {
-                            if stop.load(Ordering::Acquire) {
+                crate::runtime::ApiLeaseScope::run_optional(cleanup, || {
+                    let _devices = devices;
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                        || -> Result<(), Status> {
+                            if !wait_async_dependencies(&worker_handles[..dependency_len], &stop) {
                                 return Err(ERROR);
                             }
-                            {
-                                let mut guard = lock()?;
-                                let runtime = initialized_mut(&mut guard)?;
-                                commit_managed(runtime, &service, range)?;
+                            for (index, &range) in ranges.iter().enumerate() {
+                                if stop.load(Ordering::Acquire) {
+                                    return Err(ERROR);
+                                }
+                                {
+                                    let mut guard = lock()?;
+                                    let runtime = initialized_mut(&mut guard)?;
+                                    commit_managed(runtime, &service, range)?;
+                                }
+                                discard_range(&service, range, locations.get(index).copied())?;
                             }
-                            discard_range(&service, range, locations.get(index).copied())?;
-                        }
-                        Ok(())
-                    },
-                ));
-                let retain = result.is_err();
-                if retain {
-                    health.quarantine();
-                }
-                for range in &ranges {
-                    release_async_resources(&[], &[Some(range.reservation)], retain);
-                }
-                finish_async_signal(completion, matches!(result, Ok(Ok(()))));
-                release_async_resources(&worker_handles, &[], false);
+                            Ok(())
+                        },
+                    ));
+                    let retain = result.is_err();
+                    if retain {
+                        health.quarantine();
+                    }
+                    for range in &ranges {
+                        release_async_resources(&[], &[Some(range.reservation)], retain);
+                    }
+                    finish_async_signal(completion, matches!(result, Ok(Ok(()))));
+                    release_async_resources(&worker_handles, &[], false);
+                })
             }) {
             Ok(worker) => worker,
             Err(_) => return OUT_OF_RESOURCES,

@@ -6,7 +6,6 @@
 use std::ptr::NonNull;
 
 use super::*;
-use crate::runtime::InFlightGeneration;
 
 /// Producer policy of an ordinary HSA AQL queue.
 #[derive(Clone, Copy)]
@@ -149,7 +148,6 @@ pub(crate) fn destroy(queue: NonNull<HsaQueue>) -> Result<(), Status> {
     }
     let (mut record, cooperative_agent, in_flight) = {
         let mut guard = lock()?;
-        let generation = guard.active_generation().ok_or(NOT_INITIALIZED)?;
         let runtime = initialized_mut(&mut guard)?;
         let cooperative_agent = if let Some(record) = runtime.queue_state.queues.get_mut(&key) {
             if record.public_handle != key || record.counted_pool_key.is_some() {
@@ -163,7 +161,8 @@ pub(crate) fn destroy(queue: NonNull<HsaQueue>) -> Result<(), Status> {
         } else {
             None
         };
-        let in_flight = InFlightGeneration::enter(generation, &runtime.inflight, &runtime.health)?;
+        let in_flight = guard.retain_generation()?;
+        let runtime = initialized_mut(&mut guard)?;
         if let Some(agent) = cooperative_agent {
             runtime
                 .queue_state

@@ -352,20 +352,21 @@ pub unsafe extern "C" fn hsa_amd_svm_prefetch_async(
         let worker = match thread::Builder::new()
             .name("rocddi-svm-prefetch".into())
             .spawn(move || {
-                let _lease = cleanup.map(crate::runtime::ApiLeaseScope::enter);
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    svm_prefetch_worker(
-                        service,
-                        stop,
-                        &worker_handles[..dependency_len],
-                        address,
-                        size,
-                        location,
-                    )
-                }));
-                release_async_resources(&[], &reservations, false);
-                finish_async_signal(completion, matches!(result, Ok(true)));
-                release_async_resources(&worker_handles, &[], false);
+                crate::runtime::ApiLeaseScope::run_optional(cleanup, || {
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        svm_prefetch_worker(
+                            service,
+                            stop,
+                            &worker_handles[..dependency_len],
+                            address,
+                            size,
+                            location,
+                        )
+                    }));
+                    release_async_resources(&[], &reservations, false);
+                    finish_async_signal(completion, matches!(result, Ok(true)));
+                    release_async_resources(&worker_handles, &[], false);
+                })
             }) {
             Ok(worker) => worker,
             Err(_) => return OUT_OF_RESOURCES,

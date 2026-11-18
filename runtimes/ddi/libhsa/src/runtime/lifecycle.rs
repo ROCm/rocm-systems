@@ -31,6 +31,7 @@ impl GenerationHealth {
 }
 
 thread_local! {
+    /// Rejects recursive initialization or shutdown on the transition thread.
     static LIFECYCLE_ENTRY: Cell<bool> = const { Cell::new(false) };
 }
 
@@ -98,7 +99,7 @@ pub(crate) struct InFlightGeneration {
 
 impl InFlightGeneration {
     /// Enters the active generation and retains its in-flight token.
-    pub(crate) fn enter(
+    fn enter(
         generation: u64,
         tracker: &Arc<InFlightTracker>,
         health: &Arc<GenerationHealth>,
@@ -156,392 +157,546 @@ impl<T> std::ops::DerefMut for RetainOnDrop<T> {
     }
 }
 
-/// Owner retained when an HSA generation cannot be safely recreated.
+/// Published frontend ownership, retained until explicit retirement succeeds.
+struct PublishedGeneration {
+    /// Identity shared by public admission and detached generation leases.
+    number: u64,
+    /// Object graph released only after checked retirement succeeds.
+    state: RetainOnDrop<HsaState>,
+}
+
+/// Checkpoints whose only incomplete work is a counted operation drain.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ShutdownStage {
+    /// Ordinary callers must finish before tools prepare shutdown.
+    Calls,
+    /// Tools prepared successfully; their admitted descendants must finish.
+    Cleanup,
+}
+
+/// Phase and its ownership are changed together under the lifecycle mutex.
 #[allow(
     clippy::large_enum_variant,
-    reason = "boxing HSA state would allocate on an uncertain cleanup path"
+    reason = "retirement moves existing owners without allocating"
 )]
-enum Quarantine {
-    /// HSA objects retired; only the native session still needs cleanup.
-    NativeRetry(SessionRetirement),
-    /// An uncertain frontend cleanup retains the entire HSA generation.
-    RetainedGeneration {
-        /// Owner intentionally held without an automatic destructor.
-        _state: RetainOnDrop<HsaState>,
+enum LifecycleState {
+    /// No HSA objects or pending native retirement remain.
+    Inactive,
+    /// One executor constructs the numbered generation outside the registry.
+    Starting(u64),
+    /// Objects are published for tool loading before the first reference commits.
+    LoadingTools(PublishedGeneration),
+    /// Public initialization references keep this generation available.
+    Active {
+        /// Objects reachable through admitted HSA calls.
+        generation: PublishedGeneration,
+        /// Successful initializations not yet matched by shutdown calls.
+        references: std::num::NonZeroU32,
     },
-    /// Rollback or unwind retained an owner outside the published registry.
+    /// One executor drains callers and prepares tools for final retirement.
+    Preparing {
+        /// Objects retained for admitted calls and tool cleanup.
+        generation: PublishedGeneration,
+        /// Earliest preparation work that the executor still needs to complete.
+        stage: ShutdownStage,
+    },
+    /// No executor is active; a later shutdown resumes this exact checkpoint.
+    PendingShutdown {
+        /// Objects still reachable by known outstanding work.
+        generation: PublishedGeneration,
+        /// Incomplete drain to resume without replaying successful preparation.
+        stage: ShutdownStage,
+    },
+    /// One executor owns detached frontend or native retirement for this identity.
+    Stopping(u64),
+    /// Startup frontend rollback completed; only native retirement remains.
+    InitRetirement {
+        /// Failed startup identity whose native ownership is still pending.
+        number: u64,
+        /// Exact native retirement owner retried by the next initialization.
+        session: SessionRetirement,
+    },
+    /// Final frontend retirement completed; only native retirement remains.
+    NativeRetirement {
+        /// Retired HSA identity whose native ownership is still pending.
+        number: u64,
+        /// Exact native retirement owner retried by the next shutdown.
+        session: SessionRetirement,
+    },
+    /// Native reachability is uncertain; the full generation remains owned.
+    Retained {
+        /// Dependencies kept alive because their last native user is uncertain.
+        _generation: PublishedGeneration,
+    },
+    /// An abnormal exit retained dependencies outside the registry.
     Unrecoverable,
 }
 
-/// Process registry phase and generation during initialization or teardown.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum LifecyclePhase {
-    /// No HSA runtime is published.
-    Inactive,
-    /// A new generation is acquiring native resources.
-    Starting(u64),
-    /// The generation is invoking tool initialization callbacks.
-    LoadingTools(u64),
-    /// The generation is available to HSA callers.
-    Active(u64),
-    /// Final shutdown is waiting for registrar setters with state still live.
-    Preparing(u64),
-    /// Final shutdown is retiring the generation.
-    Stopping(u64),
-    /// Failed native cleanup prevents a safe new generation.
-    Quarantined,
-}
-
-/// Work detached from the registry for one shutdown call.
-#[allow(
-    clippy::large_enum_variant,
-    reason = "boxing HSA state would allocate while shutting down a runtime"
-)]
-pub(crate) enum ShutdownWork {
-    /// An initialization reference was released; the generation remains live.
+/// Work owned by one initialization call after releasing the registry lock.
+pub(crate) enum InitWork {
+    /// A reference was acquired from the active generation; no startup is needed.
     Reference,
-    /// The final reference must first quiesce registered tools.
-    Prepare(u64),
-    /// An earlier native shutdown failed after HSA state was retired.
+    /// Construct and publish the newly reserved generation identity.
+    Create(u64),
+    /// Retry failed startup retirement before attempting a replacement generation.
     NativeRetry(SessionRetirement, u64),
 }
 
-/// Process-wide gate for HSA generation transitions.
+#[cfg(test)]
+impl InitWork {
+    /// Extracts the new generation expected by a startup transition test.
+    pub(super) fn created(self) -> Option<u64> {
+        match self {
+            Self::Create(number) => Some(number),
+            _ => None,
+        }
+    }
+}
+
+/// Work owned by one shutdown call after releasing the registry lock.
+pub(crate) enum ShutdownWork {
+    /// A reference was released while another initialization still owns the generation.
+    Reference,
+    /// Prepare the identified generation, resuming any recorded drain checkpoint.
+    Prepare(u64),
+    /// Retry native retirement after all HSA objects have already been released.
+    NativeRetry(SessionRetirement, u64),
+}
+
+/// Process-wide HSA generation coordinator, independent of native sessions.
 pub(crate) struct HsaLifecycle {
-    /// Published HSA adapter state for the active generation.
-    state: Option<HsaState>,
-    /// Successful `hsa_init` calls awaiting shutdown for the active generation.
-    references: u32,
-    /// Last generation number assigned by initialization.
-    generation: u64,
-    /// Current transition phase under the registry mutex.
-    phase: LifecyclePhase,
-    /// Distinguishes native retry from terminal retained ownership.
-    quarantine: Option<Quarantine>,
+    /// Monotonic identity source, including generations that failed startup.
+    last_generation: u64,
+    /// Transition phase together with the owner required to complete or retry it.
+    state: LifecycleState,
 }
 
 impl HsaLifecycle {
-    /// Initializes the unstarted process-global HSA lifecycle.
-    pub(super) const fn new() -> Self {
-        Self {
-            state: None,
-            references: 0,
-            generation: 0,
-            phase: LifecyclePhase::Inactive,
-            quarantine: None,
-        }
-    }
-
-    /// Returns this value as ref.
-    pub(crate) fn as_ref(&self) -> Option<&HsaState> {
-        match self.phase {
-            LifecyclePhase::LoadingTools(_)
-            | LifecyclePhase::Active(_)
-            | LifecyclePhase::Preparing(_) => self.state.as_ref(),
-            _ => None,
-        }
-    }
-
-    /// Returns this value as mut.
-    pub(crate) fn as_mut(&mut self) -> Option<&mut HsaState> {
-        match self.phase {
-            LifecyclePhase::LoadingTools(_)
-            | LifecyclePhase::Active(_)
-            | LifecyclePhase::Preparing(_) => self.state.as_mut(),
-            _ => None,
-        }
-    }
-
-    /// Returns the generation of the currently published runtime.
-    pub(crate) fn active_generation(&self) -> Option<u64> {
-        match (self.phase, self.state.as_ref()) {
-            (
-                LifecyclePhase::LoadingTools(generation)
-                | LifecyclePhase::Active(generation)
-                | LifecyclePhase::Preparing(generation),
-                Some(_),
-            ) => Some(generation),
-            _ => None,
-        }
-    }
-
-    /// Returns None after adding a reference to an already active runtime.
-    pub(crate) fn begin_init(&mut self) -> Result<Option<u64>, Status> {
-        match self.phase {
-            LifecyclePhase::Active(_) => {
-                if self.state.is_none() {
-                    return Err(ERROR);
-                }
-                if self.references == i32::MAX as u32 {
-                    return Err(REFCOUNT_OVERFLOW);
-                }
-                self.references += 1;
-                Ok(None)
-            }
-            LifecyclePhase::Inactive => {
-                self.generation = self.generation.checked_add(1).ok_or(ERROR)?;
-                self.phase = LifecyclePhase::Starting(self.generation);
-                Ok(Some(self.generation))
-            }
-            LifecyclePhase::Starting(_)
-            | LifecyclePhase::LoadingTools(_)
-            | LifecyclePhase::Preparing(_)
-            | LifecyclePhase::Stopping(_)
-            | LifecyclePhase::Quarantined => Err(INVALID_RUNTIME_STATE),
-        }
-    }
-
-    /// Reports a transition that another `hsa_init` caller must await.
-    fn init_transition_in_progress(&self) -> bool {
-        matches!(
-            self.phase,
-            LifecyclePhase::Starting(_)
-                | LifecyclePhase::LoadingTools(_)
-                | LifecyclePhase::Preparing(_)
-                | LifecyclePhase::Stopping(_)
+    /// Retains the identity and lifetime controls from one published owner.
+    pub(crate) fn retain_generation(&self) -> Result<InFlightGeneration, Status> {
+        let generation = self.published().ok_or(NOT_INITIALIZED)?;
+        InFlightGeneration::enter(
+            generation.number,
+            &generation.state.inflight,
+            &generation.state.health,
         )
     }
 
-    /// Publishes fully initialized HSA state for the active generation.
-    pub(crate) fn publish_init(
-        &mut self,
-        generation: u64,
-        runtime: HsaState,
-    ) -> Result<(), Status> {
-        if self.phase != LifecyclePhase::Starting(generation) {
+    /// Starts with no published generation, references, or pending retirement.
+    pub(super) const fn new() -> Self {
+        Self {
+            last_generation: 0,
+            state: LifecycleState::Inactive,
+        }
+    }
+
+    /// Finds objects that remain available to admitted callers and tool cleanup.
+    fn published(&self) -> Option<&PublishedGeneration> {
+        match &self.state {
+            LifecycleState::LoadingTools(generation)
+            | LifecycleState::Active { generation, .. }
+            | LifecycleState::Preparing { generation, .. }
+            | LifecycleState::PendingShutdown { generation, .. } => Some(generation),
+            _ => None,
+        }
+    }
+
+    /// Borrows the generation while admitted calls or tool cleanup may use it.
+    pub(crate) fn as_ref(&self) -> Option<&HsaState> {
+        self.published().map(|generation| &*generation.state)
+    }
+
+    /// Mutates published objects while the caller holds the registry lock.
+    pub(crate) fn as_mut(&mut self) -> Option<&mut HsaState> {
+        match &mut self.state {
+            LifecycleState::LoadingTools(generation)
+            | LifecycleState::Active { generation, .. }
+            | LifecycleState::Preparing { generation, .. }
+            | LifecycleState::PendingShutdown { generation, .. } => Some(&mut generation.state),
+            _ => None,
+        }
+    }
+
+    /// Identifies the generation retained by admitted operations.
+    pub(crate) fn active_generation(&self) -> Option<u64> {
+        self.published().map(|generation| generation.number)
+    }
+
+    /// Acquires an initialization reference or one exclusive startup action.
+    pub(crate) fn begin_init(&mut self) -> Result<InitWork, Status> {
+        match &mut self.state {
+            LifecycleState::Active { references, .. } => {
+                let count = references.get();
+                if count == i32::MAX as u32 {
+                    return Err(REFCOUNT_OVERFLOW);
+                }
+                *references = std::num::NonZeroU32::new(count + 1).ok_or(ERROR)?;
+                Ok(InitWork::Reference)
+            }
+            LifecycleState::Inactive => {
+                self.last_generation = self.last_generation.checked_add(1).ok_or(ERROR)?;
+                self.state = LifecycleState::Starting(self.last_generation);
+                Ok(InitWork::Create(self.last_generation))
+            }
+            LifecycleState::InitRetirement { number, .. } => {
+                let number = *number;
+                let old = std::mem::replace(&mut self.state, LifecycleState::Stopping(number));
+                let LifecycleState::InitRetirement { session, .. } = old else {
+                    return Err(ERROR);
+                };
+                Ok(InitWork::NativeRetry(session, number))
+            }
+            _ => Err(INVALID_RUNTIME_STATE),
+        }
+    }
+
+    /// Distinguishes an active executor from a checkpoint awaiting an explicit retry.
+    fn init_transition_in_progress(&self) -> bool {
+        matches!(
+            self.state,
+            LifecycleState::Starting(_)
+                | LifecycleState::LoadingTools(_)
+                | LifecycleState::Preparing { .. }
+                | LifecycleState::Stopping(_)
+        )
+    }
+
+    /// Publishes owned state before tool callbacks may access HSA services.
+    pub(crate) fn publish_init(&mut self, number: u64, state: HsaState) -> Result<(), Status> {
+        let generation = PublishedGeneration {
+            number,
+            state: RetainOnDrop::new(state),
+        };
+        if !matches!(self.state, LifecycleState::Starting(current) if current == number) {
             return Err(ERROR);
         }
-        self.state = Some(runtime);
-        self.references = 1;
-        process_admission().open(generation);
-        // HSA queries may run from a tool's OnLoad, but recursive init and
-        // shutdown must remain rejected until the tool table is published.
-        self.phase = LifecyclePhase::LoadingTools(generation);
+        self.state = LifecycleState::LoadingTools(generation);
+        process_admission().open(number);
         Ok(())
     }
 
-    /// Completes init after its pending work has retired.
-    pub(crate) fn finish_init(&mut self, generation: u64) -> Result<(), Status> {
-        if self.phase != LifecyclePhase::LoadingTools(generation) || self.state.is_none() {
+    /// Commits the first reference only after tool loading has completed.
+    pub(crate) fn finish_init(&mut self, number: u64) -> Result<(), Status> {
+        if !matches!(&self.state, LifecycleState::LoadingTools(generation) if generation.number == number)
+        {
             return Err(ERROR);
         }
-        self.phase = LifecyclePhase::Active(generation);
+        let old = std::mem::replace(&mut self.state, LifecycleState::Unrecoverable);
+        let LifecycleState::LoadingTools(generation) = old else {
+            return Err(ERROR);
+        };
+        self.state = LifecycleState::Active {
+            generation,
+            references: std::num::NonZeroU32::MIN,
+        };
         LIFECYCLE_CONDVAR.notify_all();
         Ok(())
     }
 
-    /// Cancels an incomplete initialization and advances the lifecycle.
+    /// Records startup rollback and wakes callers waiting on the process transition.
     pub(crate) fn cancel_init(
         &mut self,
-        generation: u64,
-        cleanup_failed: bool,
+        number: u64,
+        rollback: InitRollback,
     ) -> Result<(), Status> {
-        self.cancel_init_with_notification(generation, cleanup_failed, &LIFECYCLE_CONDVAR)
+        self.cancel_init_with_notification(number, rollback, &LIFECYCLE_CONDVAR)
     }
 
-    /// Cancels initialization and wakes callers waiting on this lifecycle.
+    /// Transfers failed startup ownership into its retry or terminal state.
     pub(super) fn cancel_init_with_notification(
         &mut self,
-        generation: u64,
-        cleanup_failed: bool,
+        number: u64,
+        rollback: InitRollback,
         changed: &Condvar,
     ) -> Result<(), Status> {
-        if self.phase != LifecyclePhase::Starting(generation) {
+        if !matches!(self.state, LifecycleState::Starting(current) if current == number) {
             return Err(ERROR);
         }
-        self.phase = if cleanup_failed {
-            self.quarantine = Some(Quarantine::Unrecoverable);
-            LifecyclePhase::Quarantined
-        } else {
-            LifecyclePhase::Inactive
+        self.state = match rollback {
+            InitRollback::Complete => LifecycleState::Inactive,
+            InitRollback::NativeRetry(session) => {
+                LifecycleState::InitRetirement { number, session }
+            }
+            InitRollback::Uncertain => LifecycleState::Unrecoverable,
         };
         process_admission().close();
-        self.references = 0;
         changed.notify_all();
         Ok(())
     }
 
-    #[cfg(test)]
-    pub(super) fn prepare_without_runtime_for_test(&mut self, generation: u64) {
-        assert_eq!(self.phase, LifecyclePhase::Starting(generation));
-        self.phase = LifecyclePhase::Preparing(generation);
-    }
-
-    /// Reports whether final shutdown must prepare this active generation.
-    pub(crate) fn shutdown_will_prepare(&self) -> Result<bool, Status> {
-        match self.phase {
-            LifecyclePhase::Active(_) if self.state.is_some() => Ok(self.references == 1),
-            LifecyclePhase::Active(_) => Err(ERROR),
-            _ => Ok(false),
-        }
-    }
-
-    /// Detaches final teardown work, or releases one of several references.
-    pub(crate) fn begin_shutdown(&mut self) -> Result<ShutdownWork, Status> {
-        match self.phase {
-            LifecyclePhase::Active(generation) => {
-                if self.state.is_none() {
-                    return Err(ERROR);
-                }
-                if self.references > 1 {
-                    self.references -= 1;
-                    return Ok(ShutdownWork::Reference);
-                }
-                // This is the single public admission boundary for final
-                // shutdown. Existing leases finish before state is detached.
-                let runtime = self.state.as_ref().ok_or(ERROR)?;
-                runtime.request_shutdown();
-                self.references = 0;
-                self.phase = LifecyclePhase::Preparing(generation);
-                Ok(ShutdownWork::Prepare(generation))
-            }
-            LifecyclePhase::Quarantined => match self.quarantine.take() {
-                Some(Quarantine::NativeRetry(session)) => {
-                    self.phase = LifecyclePhase::Stopping(self.generation);
-                    Ok(ShutdownWork::NativeRetry(session, self.generation))
-                }
-                other => {
-                    self.quarantine = other;
-                    Err(INVALID_RUNTIME_STATE)
-                }
-            },
-            LifecyclePhase::Inactive => Err(NOT_INITIALIZED),
-            LifecyclePhase::Starting(_)
-            | LifecyclePhase::LoadingTools(_)
-            | LifecyclePhase::Preparing(_)
-            | LifecyclePhase::Stopping(_) => Err(INVALID_RUNTIME_STATE),
-        }
-    }
-
-    /// Detaches a prepared generation after all tool setters have quiesced.
-    pub(crate) fn finish_prepare_shutdown(&mut self, generation: u64) -> Result<HsaState, Status> {
-        if self.phase != LifecyclePhase::Preparing(generation) {
-            return Err(ERROR);
-        }
-        // The caller closed and drained process admission before detaching
-        // the generation. Keep that wait outside the lifecycle mutex.
-        let runtime = self.state.as_ref().ok_or(ERROR)?;
-        debug_assert!(runtime.inflight.is_closed_and_idle());
-        // Tools may create cleanup work throughout Preparing. Close the core
-        // only after their cleanup window ends, while retaining failed owners.
-        runtime.begin_session_retirement()?;
-        let runtime = self.state.take().ok_or(ERROR)?;
-        self.phase = LifecyclePhase::Stopping(generation);
-        Ok(runtime)
-    }
-
-    /// Completes shutdown after its pending work has retired.
-    pub(crate) fn finish_shutdown(
+    /// Completes one retry without reconstructing already retired frontend state.
+    fn finish_init_retirement(
         &mut self,
-        generation: u64,
+        number: u64,
         outcome: ShutdownOutcome,
     ) -> Result<(), Status> {
-        if self.phase != LifecyclePhase::Stopping(generation) {
+        if !matches!(self.state, LifecycleState::Stopping(current) if current == number) {
             return Err(ERROR);
         }
-        // A failed stop can leave native resources alive. Do not create a new
-        // runtime generation over their process-wide KFD state.
-        self.quarantine = match outcome {
-            ShutdownOutcome::Complete => None,
-            ShutdownOutcome::NativeRetry { session, .. } => Some(Quarantine::NativeRetry(session)),
-            ShutdownOutcome::RetainedGeneration { state, .. } => {
-                Some(Quarantine::RetainedGeneration { _state: state })
+        self.state = match outcome {
+            ShutdownOutcome::Complete => LifecycleState::Inactive,
+            ShutdownOutcome::NativeRetry { session, .. } => {
+                LifecycleState::InitRetirement { number, session }
             }
-        };
-        self.phase = if self.quarantine.is_some() {
-            LifecyclePhase::Quarantined
-        } else {
-            LifecyclePhase::Inactive
+            ShutdownOutcome::RetainedGeneration { state, .. } => LifecycleState::Retained {
+                _generation: PublishedGeneration { number, state },
+            },
         };
         LIFECYCLE_CONDVAR.notify_all();
         Ok(())
     }
+
+    #[cfg(test)]
+    /// Models an active retirement executor without constructing HSA objects.
+    pub(super) fn stop_without_runtime_for_test(&mut self, number: u64) {
+        assert!(matches!(self.state, LifecycleState::Starting(current) if current == number));
+        self.state = LifecycleState::Stopping(number);
+    }
+
+    /// Reports whether shutdown needs a preparation executor, possibly a helper.
+    fn shutdown_will_prepare(&self) -> bool {
+        match &self.state {
+            LifecycleState::Active { references, .. } => references.get() == 1,
+            LifecycleState::PendingShutdown { .. } => true,
+            _ => false,
+        }
+    }
+
+    /// Releases a reference or grants one executor exclusive shutdown progress.
+    pub(crate) fn begin_shutdown(&mut self) -> Result<ShutdownWork, Status> {
+        if let LifecycleState::Active { references, .. } = &mut self.state {
+            if references.get() > 1 {
+                *references = std::num::NonZeroU32::new(references.get() - 1).ok_or(ERROR)?;
+                return Ok(ShutdownWork::Reference);
+            }
+        }
+        let old = std::mem::replace(&mut self.state, LifecycleState::Unrecoverable);
+        match old {
+            LifecycleState::Active { generation, .. } => {
+                generation.state.request_shutdown();
+                let number = generation.number;
+                self.state = LifecycleState::Preparing {
+                    generation,
+                    stage: ShutdownStage::Calls,
+                };
+                Ok(ShutdownWork::Prepare(number))
+            }
+            LifecycleState::PendingShutdown { generation, stage } => {
+                let number = generation.number;
+                self.state = LifecycleState::Preparing { generation, stage };
+                Ok(ShutdownWork::Prepare(number))
+            }
+            LifecycleState::NativeRetirement { number, session } => {
+                self.state = LifecycleState::Stopping(number);
+                Ok(ShutdownWork::NativeRetry(session, number))
+            }
+            other => {
+                let status = if matches!(other, LifecycleState::Inactive) {
+                    NOT_INITIALIZED
+                } else {
+                    INVALID_RUNTIME_STATE
+                };
+                self.state = other;
+                Err(status)
+            }
+        }
+    }
+
+    /// Checks executor identity before exposing its current preparation checkpoint.
+    fn preparation_stage(&self, number: u64) -> Result<ShutdownStage, Status> {
+        match &self.state {
+            LifecycleState::Preparing { generation, stage } if generation.number == number => {
+                Ok(*stage)
+            }
+            _ => Err(INVALID_RUNTIME_STATE),
+        }
+    }
+
+    /// Records completion of tool preparation before waiting for descendants.
+    fn finish_tool_preparation(&mut self, number: u64) -> Result<(), Status> {
+        match &mut self.state {
+            LifecycleState::Preparing { generation, stage }
+                if generation.number == number && *stage == ShutdownStage::Calls =>
+            {
+                *stage = ShutdownStage::Cleanup;
+                Ok(())
+            }
+            _ => Err(INVALID_RUNTIME_STATE),
+        }
+    }
+
+    /// Retains known outstanding work without turning a timeout into uncertainty.
+    fn pause_shutdown(&mut self, number: u64) -> Result<(), Status> {
+        self.preparation_stage(number)?;
+        let old = std::mem::replace(&mut self.state, LifecycleState::Unrecoverable);
+        let LifecycleState::Preparing { generation, stage } = old else {
+            return Err(ERROR);
+        };
+        self.state = LifecycleState::PendingShutdown { generation, stage };
+        LIFECYCLE_CONDVAR.notify_all();
+        Ok(())
+    }
+
+    /// Detaches only a fully prepared generation into an explicit retirement owner.
+    fn finish_prepare_shutdown(&mut self, number: u64) -> Result<PreparedGeneration, Status> {
+        if self.preparation_stage(number)? != ShutdownStage::Cleanup {
+            return Err(INVALID_RUNTIME_STATE);
+        }
+        let generation = self.published().ok_or(ERROR)?;
+        if !generation.state.inflight.is_closed_and_idle() {
+            return Err(RESOURCE_BUSY);
+        }
+        generation.state.begin_session_retirement()?;
+        let old = std::mem::replace(&mut self.state, LifecycleState::Stopping(number));
+        let LifecycleState::Preparing { generation, .. } = old else {
+            return Err(ERROR);
+        };
+        Ok(PreparedGeneration(generation.state))
+    }
+
+    /// Publishes retirement completion or retains the owner needed after failure.
+    pub(crate) fn finish_shutdown(
+        &mut self,
+        number: u64,
+        outcome: ShutdownOutcome,
+    ) -> Result<(), Status> {
+        if !matches!(self.state, LifecycleState::Stopping(current) if current == number) {
+            return Err(ERROR);
+        }
+        self.state = match outcome {
+            ShutdownOutcome::Complete => LifecycleState::Inactive,
+            ShutdownOutcome::NativeRetry { session, .. } => {
+                LifecycleState::NativeRetirement { number, session }
+            }
+            ShutdownOutcome::RetainedGeneration { state, .. } => LifecycleState::Retained {
+                _generation: PublishedGeneration { number, state },
+            },
+        };
+        LIFECYCLE_CONDVAR.notify_all();
+        Ok(())
+    }
+
+    /// Prevents replacement when a matching executor exits without committing progress.
+    fn retain_failed_transition(&mut self, phase: TransitionPhase, number: u64) {
+        let matches = match &self.state {
+            LifecycleState::Starting(current) => {
+                phase == TransitionPhase::Starting && *current == number
+            }
+            LifecycleState::LoadingTools(generation) => {
+                phase == TransitionPhase::Starting && generation.number == number
+            }
+            LifecycleState::Preparing { generation, .. } => {
+                phase == TransitionPhase::Preparing && generation.number == number
+            }
+            LifecycleState::Stopping(current) => {
+                phase == TransitionPhase::Stopping && *current == number
+            }
+            _ => false,
+        };
+        if !matches {
+            return;
+        }
+        process_admission().close();
+        let old = std::mem::replace(&mut self.state, LifecycleState::Unrecoverable);
+        if let LifecycleState::LoadingTools(generation)
+        | LifecycleState::Preparing { generation, .. } = old
+        {
+            generation.state.request_stop();
+            self.state = LifecycleState::Retained {
+                _generation: generation,
+            };
+        }
+        LIFECYCLE_CONDVAR.notify_all();
+    }
 }
 
-/// Quarantines a generation if initialization or shutdown unwinds.
+/// Proof that producers, callbacks and tools have completed their cleanup window.
+struct PreparedGeneration(RetainOnDrop<HsaState>);
+
+impl PreparedGeneration {
+    /// Transfers the prepared owner into ordered frontend and native retirement.
+    fn retire(self) -> ShutdownOutcome {
+        self.0.into_inner().retire_prepared()
+    }
+}
+
+/// Executor phase whose abnormal exit a transition guard must retain.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum TransitionPhase {
+    /// Construction or tool loading before the first reference commits.
+    Starting,
+    /// Caller drain and tool cleanup while generation objects remain published.
+    Preparing,
+    /// Detached frontend retirement or a retry of remaining native retirement.
+    Stopping,
+}
+
+/// Retains incomplete ownership on every abnormal transition exit.
 pub(crate) struct LifecycleTransition {
-    /// Generation phase that will be quarantined if this guard unwinds.
-    phase: LifecyclePhase,
-    /// Cleared once the transition finishes successfully.
+    /// Phase still owned by this executor.
+    phase: TransitionPhase,
+    /// Identity used to avoid changing an unrelated lifecycle transition.
+    number: u64,
+    /// Whether scope exit must retain the incomplete transition.
     armed: bool,
 }
 
 impl LifecycleTransition {
-    /// Constructs a transition guard for initialization.
-    pub(crate) fn starting(generation: u64) -> Self {
+    /// Protects construction and tool loading until initialization commits.
+    fn starting(number: u64) -> Self {
         Self {
-            phase: LifecyclePhase::Starting(generation),
+            phase: TransitionPhase::Starting,
+            number,
             armed: true,
         }
     }
 
-    /// Constructs a transition guard for shutdown.
-    pub(crate) fn stopping(generation: u64) -> Self {
+    /// Protects published owners during call drains and tool cleanup.
+    fn preparing(number: u64) -> Self {
         Self {
-            phase: LifecyclePhase::Stopping(generation),
+            phase: TransitionPhase::Preparing,
+            number,
             armed: true,
         }
     }
 
-    /// Guards the preparation phase before native state is detached.
-    pub(crate) fn preparing(generation: u64) -> Self {
+    /// Protects a retirement executor after its owner leaves the registry.
+    fn stopping(number: u64) -> Self {
         Self {
-            phase: LifecyclePhase::Preparing(generation),
+            phase: TransitionPhase::Stopping,
+            number,
             armed: true,
         }
     }
 
-    /// Advances an armed shutdown guard after the state is detached.
-    pub(crate) fn advance_to_stopping(&mut self, generation: u64) {
-        self.phase = LifecyclePhase::Stopping(generation);
+    /// Follows the ownership transfer from published preparation to retirement.
+    fn advance_to_stopping(&mut self) {
+        self.phase = TransitionPhase::Stopping;
     }
 
-    /// Prevents a completed transition guard from rolling back state.
-    pub(crate) fn disarm(&mut self) {
+    /// Marks progress committed to a complete or explicitly retryable state.
+    fn disarm(&mut self) {
         self.armed = false;
     }
 }
 
 impl Drop for LifecycleTransition {
-    /// Rolls back an incomplete generation transition.
     fn drop(&mut self) {
-        if !self.armed || !crate::platform::process_is_current() {
-            return;
-        }
-        let mut registry = LIFECYCLE
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if registry.phase == self.phase
-            || matches!(
-                (self.phase, registry.phase),
-                (LifecyclePhase::Starting(expected), LifecyclePhase::LoadingTools(current))
-                    if expected == current
-            )
-        {
-            // Some handle APIs intentionally bypass the registry mutex. Fence
-            // those entry points when a failed transition retains live state.
-            process_admission().close();
-            if let Some(state) = &registry.state {
-                state.request_stop();
-            }
-            registry.quarantine = Some(match registry.state.take() {
-                Some(state) => Quarantine::RetainedGeneration {
-                    _state: RetainOnDrop::new(state),
-                },
-                None => Quarantine::Unrecoverable,
-            });
-            registry.phase = LifecyclePhase::Quarantined;
-            LIFECYCLE_CONDVAR.notify_all();
+        if self.armed && crate::platform::process_is_current() {
+            LIFECYCLE
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .retain_failed_transition(self.phase, self.number);
         }
     }
 }
 
-/// Process-global gate owning the active HSA generation.
+/// Serializes HSA publication, registry access, and lifecycle ownership changes.
 pub(crate) static LIFECYCLE: Mutex<HsaLifecycle> = Mutex::new(HsaLifecycle::new());
-/// Wakes concurrent init callers after an initialization or final shutdown.
+/// Wakes initialization callers when another transition executor relinquishes ownership.
 pub(crate) static LIFECYCLE_CONDVAR: Condvar = Condvar::new();
 
-/// Locks the process-global lifecycle state, handling poisoned locks.
+/// Locks the process registry after rejecting inherited post-fork state.
 pub(crate) fn lock() -> Result<MutexGuard<'static, HsaLifecycle>, Status> {
     if !crate::platform::process_is_current() {
         return Err(NOT_INITIALIZED);
@@ -549,16 +704,12 @@ pub(crate) fn lock() -> Result<MutexGuard<'static, HsaLifecycle>, Status> {
     LIFECYCLE.lock().map_err(|_| ERROR)
 }
 
-/// Waits for another thread's lifecycle transition before adding an init
-/// reference or starting a new generation.
+/// Waits only while another thread actually owns a transition executor.
 pub(crate) fn begin_init_waiting(
     mut guard: MutexGuard<'_, HsaLifecycle>,
     changed: &Condvar,
-) -> Result<Option<u64>, Status> {
+) -> Result<InitWork, Status> {
     while guard.init_transition_in_progress() {
-        // A deferred final shutdown must join callbacks and workers before
-        // it can leave Preparing. A borrowed logging write may also hold the
-        // config mutex that shutdown needs, so none of these callers can wait.
         if ApiLeaseScope::current()
             || CallbackScope::active()
             || LogWriteScope::active()
@@ -571,271 +722,71 @@ pub(crate) fn begin_init_waiting(
     guard.begin_init()
 }
 
-/// Returns mutable initialized state or an HSA lifecycle error.
+/// Borrows still-published objects after the caller has established admission.
 pub(crate) fn initialized_mut(runtime: &mut HsaLifecycle) -> Result<&mut HsaState, Status> {
     runtime.as_mut().ok_or(NOT_INITIALIZED)
 }
 
-/// Admits synchronous v2 tool resource destruction after ordinary admission
-/// and callback producers have drained. The scope must end before legacy
-/// unload callbacks or generation detachment.
 #[cfg(all(hsa_tool_dispatch, not(test)))]
-pub(crate) fn enter_tool_cleanup() -> Result<ApiLeaseScope, Status> {
+/// Acquires the coordinator's lease for synchronous tool retirement.
+pub(crate) fn enter_tool_cleanup() -> Result<InFlightToken, Status> {
     let registry = lock()?;
-    let LifecyclePhase::Preparing(generation) = registry.phase else {
+    let LifecycleState::Preparing { generation, .. } = &registry.state else {
         return Err(INVALID_RUNTIME_STATE);
     };
-    if registry.state.is_none() {
-        return Err(INVALID_RUNTIME_STATE);
-    }
-    let token = process_admission()
-        .enter_cleanup(generation)
-        .ok_or(INVALID_RUNTIME_STATE)?;
-    Ok(ApiLeaseScope::enter(token))
-}
-
-/// Opens explicit cleanup delegation while native and callback services live.
-#[cfg(all(hsa_tool_dispatch, not(test)))]
-pub(crate) fn begin_tool_preparation() -> Result<admission::ToolCleanupScope, Status> {
-    let registry = lock()?;
-    let LifecyclePhase::Preparing(generation) = registry.phase else {
-        return Err(INVALID_RUNTIME_STATE);
-    };
-    if registry
-        .state
-        .as_ref()
-        .is_none_or(|state| state.health.is_quarantined())
-    {
-        return Err(INVALID_RUNTIME_STATE);
-    }
     process_admission()
-        .begin_cleanup(generation)
+        .enter_cleanup(generation.number)
         .ok_or(INVALID_RUNTIME_STATE)
 }
 
-/// Grants a worker access only to the currently preparing generation.
 #[cfg(all(hsa_tool_dispatch, not(test)))]
-pub(crate) fn enter_delegated_tool_cleanup(generation: u64) -> Result<ApiLeaseScope, Status> {
+/// Opens scoped cleanup delegation while the ordinary-call checkpoint is owned.
+pub(crate) fn begin_tool_preparation() -> Result<admission::ToolCleanupScope, Status> {
     let registry = lock()?;
-    if registry
-        .state
-        .as_ref()
-        .is_none_or(|state| state.health.is_quarantined())
-    {
+    let LifecycleState::Preparing {
+        generation,
+        stage: ShutdownStage::Calls,
+    } = &registry.state
+    else {
+        return Err(INVALID_RUNTIME_STATE);
+    };
+    if generation.state.health.is_quarantined() {
         return Err(INVALID_RUNTIME_STATE);
     }
-    let token = match registry.phase {
-        LifecyclePhase::Active(current) | LifecyclePhase::LoadingTools(current)
-            if current == generation =>
-        {
-            process_admission().enter_tool_work(generation)
+    process_admission()
+        .begin_cleanup(generation.number)
+        .ok_or(INVALID_RUNTIME_STATE)
+}
+
+#[cfg(all(hsa_tool_dispatch, not(test)))]
+/// Admits tool work through the active generation or its live cleanup authority.
+pub(crate) fn enter_delegated_tool_cleanup(number: u64) -> Result<InFlightToken, Status> {
+    let registry = lock()?;
+    let generation = registry.published().ok_or(INVALID_RUNTIME_STATE)?;
+    if generation.number != number || generation.state.health.is_quarantined() {
+        return Err(INVALID_RUNTIME_STATE);
+    }
+    match &registry.state {
+        LifecycleState::Active { .. } | LifecycleState::LoadingTools(_) => {
+            process_admission().enter_tool_work(number)
         }
-        LifecyclePhase::Preparing(current) if current == generation => {
-            if ApiLeaseScope::cleanup() {
-                // Final synchronous destruction may use the same executor.
-                // Its parent lease already retains this generation; this does
-                // not reopen delegation to another worker after preparation.
-                process_admission().enter_tool_work(generation)
-            } else {
-                process_admission().enter_delegated_cleanup(generation)
-            }
+        LifecycleState::Preparing { .. } if ApiLeaseScope::cleanup() => {
+            process_admission().enter_tool_work(number)
+        }
+        LifecycleState::Preparing { .. } => process_admission().enter_delegated_cleanup(number),
+        // A timed-out cleanup descendant may continue nested work under its
+        // existing lease, but never opens delegation to another worker.
+        LifecycleState::PendingShutdown { .. } if ApiLeaseScope::cleanup() => {
+            process_admission().enter_tool_work(number)
         }
         _ => None,
     }
-    .ok_or(INVALID_RUNTIME_STATE)?;
-    Ok(ApiLeaseScope::enter(token))
+    .ok_or(INVALID_RUNTIME_STATE)
 }
+
+mod operations;
+pub(crate) use operations::{initialize, shutdown};
 
 #[cfg(test)]
 #[allow(clippy::panic, clippy::unwrap_used)]
-mod tests {
-    use super::*;
-    use rocddi::session::SessionState;
-    use rocddi::topology::host::{HostCaches, HostTopologyGraphSnapshot};
-
-    /// Builds a generation without discovery or native device acquisition.
-    fn state_without_devices(session: Session) -> HsaState {
-        let health = Arc::new(GenerationHealth::new());
-        let inflight = Arc::new(InFlightTracker::new_process());
-        inflight.open(1);
-        HsaState {
-            debugger: None,
-            sdma_enabled: false,
-            peer_sdma_enabled: false,
-            logging: Arc::new(LogOutput::new()),
-            next_handle: 0x4853_4101_0000_0000,
-            queue_state: QueueState::new(),
-            loader: LoaderState::new(),
-            image_state: ImageState::new(),
-            memory_state: MemoryState::new(health.clone()),
-            signal_state: SignalState::new(&session).unwrap(),
-            pc_sampling_state: PcSamplingState::new(health.clone()),
-            host_page_size: 4096,
-            system_alloc_max_bytes: 0,
-            cpus: Vec::new(),
-            full_profile: true,
-            disable_fragment_allocator: false,
-            vm_fault_details: None,
-            system_event_handlers: Vec::new(),
-            system_event_worker: None,
-            system_event_failed: Arc::new(AtomicBool::new(false)),
-            stop_workers: Arc::new(AtomicBool::new(false)),
-            cancel_work: Arc::new(AtomicBool::new(false)),
-            inflight,
-            health,
-            caches: Vec::new(),
-            topology: TopologyGraphSnapshot {
-                host: HostTopologyGraphSnapshot {
-                    memory_bytes: None,
-                    cpu: None,
-                    cpu_apic_ids: Vec::new(),
-                    online_cpus: None,
-                    caches: HostCaches {
-                        records: Vec::new(),
-                        complete: true,
-                    },
-                    domains: Vec::new(),
-                    domains_complete: true,
-                },
-                endpoints: Vec::new(),
-                sources: Vec::new(),
-                nodes: Vec::new(),
-                attachments: Vec::new(),
-                routes: Vec::new(),
-                caches: Vec::new(),
-                memory_locations: Vec::new(),
-                memory_banks: Vec::new(),
-            },
-            gpus: Vec::new(),
-            session: Some(session),
-        }
-    }
-
-    #[test]
-    fn prepared_shutdown_closes_core_after_cleanup_services_finish() {
-        let session = Session::new(DriverContextLifetime::Session).unwrap();
-        let observer = session.clone();
-        let mut lifecycle = HsaLifecycle::new();
-        lifecycle.state = Some(state_without_devices(session));
-        lifecycle.references = 1;
-        lifecycle.generation = 1;
-        lifecycle.phase = LifecyclePhase::Active(1);
-
-        assert!(matches!(
-            lifecycle.begin_shutdown().unwrap(),
-            ShutdownWork::Prepare(1)
-        ));
-        assert!(lifecycle.as_ref().unwrap().inflight.is_closed_and_idle());
-        assert_eq!(observer.state().unwrap(), SessionState::Open);
-        // Tool preparation can still acquire a core service after public HSA
-        // admission closes. Its owner must be released before final teardown.
-        drop(SignalState::new(&observer).unwrap());
-
-        let state = lifecycle.finish_prepare_shutdown(1).unwrap();
-        assert_eq!(observer.state().unwrap(), SessionState::Retiring);
-        assert!(SignalState::new(&observer).is_err());
-        assert_eq!(lifecycle.phase, LifecyclePhase::Stopping(1));
-        drop(observer);
-        let outcome = state.stop();
-        assert!(matches!(outcome, ShutdownOutcome::Complete));
-        lifecycle.finish_shutdown(1, outcome).unwrap();
-        assert_eq!(lifecycle.phase, LifecyclePhase::Inactive);
-    }
-
-    #[test]
-    fn uncertain_frontend_shutdown_retains_the_whole_generation() {
-        let session = Session::new(DriverContextLifetime::Session).unwrap();
-        let observer = session.clone();
-        let state = state_without_devices(session);
-        state.health.quarantine();
-        let outcome = state.stop();
-        assert!(matches!(
-            outcome,
-            ShutdownOutcome::RetainedGeneration { .. }
-        ));
-        assert_eq!(observer.state().unwrap(), SessionState::Retiring);
-
-        let mut lifecycle = HsaLifecycle::new();
-        lifecycle.generation = 1;
-        lifecycle.phase = LifecyclePhase::Stopping(1);
-        lifecycle.finish_shutdown(1, outcome).unwrap();
-        assert_eq!(lifecycle.phase, LifecyclePhase::Quarantined);
-        assert_eq!(lifecycle.begin_init().unwrap_err(), INVALID_RUNTIME_STATE);
-        assert!(matches!(
-            lifecycle.begin_shutdown(),
-            Err(INVALID_RUNTIME_STATE)
-        ));
-    }
-
-    #[test]
-    fn detached_retirement_keeps_owners_on_unwind() {
-        struct Owner(Arc<AtomicUsize>);
-
-        impl Drop for Owner {
-            fn drop(&mut self) {
-                self.0.fetch_add(1, Ordering::Relaxed);
-            }
-        }
-
-        let drops = Arc::new(AtomicUsize::new(0));
-        let owner = Owner(drops.clone());
-        let result = std::panic::catch_unwind(move || {
-            let retained = RetainOnDrop::new(owner);
-            assert_eq!(retained.0.load(Ordering::Relaxed), 0);
-            panic!("injected retirement unwind");
-        });
-        assert!(result.is_err());
-        assert_eq!(drops.load(Ordering::Relaxed), 0);
-
-        let clean = RetainOnDrop::new(Owner(drops.clone()));
-        drop(clean.into_inner());
-        assert_eq!(drops.load(Ordering::Relaxed), 1);
-    }
-
-    #[test]
-    fn failed_native_shutdown_retains_session_until_retry_succeeds() {
-        let session = Session::new(DriverContextLifetime::Session).unwrap();
-        let clone = session.clone();
-        // Direct teardown closes core admission even without the prepared
-        // shutdown path, then reports the surviving session borrow as Busy.
-        let outcome = state_without_devices(session).stop();
-        assert_eq!(outcome.status(), RESOURCE_BUSY);
-        assert_eq!(clone.state().unwrap(), SessionState::Retiring);
-        assert!(SignalState::new(&clone).is_err());
-        let mut lifecycle = HsaLifecycle::new();
-        lifecycle.generation = 1;
-        lifecycle.phase = LifecyclePhase::Stopping(1);
-        lifecycle.finish_shutdown(1, outcome).unwrap();
-        assert_eq!(lifecycle.phase, LifecyclePhase::Quarantined);
-        assert!(matches!(
-            lifecycle.quarantine.as_ref(),
-            Some(Quarantine::NativeRetry(_))
-        ));
-
-        let ShutdownWork::NativeRetry(retirement, generation) = lifecycle.begin_shutdown().unwrap()
-        else {
-            panic!("failed session was not offered for retry");
-        };
-        assert_eq!(generation, 1);
-        let outcome = ShutdownOutcome::retry(retirement);
-        assert_eq!(outcome.status(), RESOURCE_BUSY);
-        lifecycle.finish_shutdown(generation, outcome).unwrap();
-        assert_eq!(lifecycle.phase, LifecyclePhase::Quarantined);
-        assert!(matches!(
-            lifecycle.quarantine.as_ref(),
-            Some(Quarantine::NativeRetry(_))
-        ));
-
-        let ShutdownWork::NativeRetry(retirement, generation) = lifecycle.begin_shutdown().unwrap()
-        else {
-            panic!("failed session was not kept for another retry");
-        };
-        drop(clone);
-        let outcome = ShutdownOutcome::retry(retirement);
-        assert_eq!(outcome.status(), SUCCESS);
-        lifecycle.finish_shutdown(generation, outcome).unwrap();
-        assert_eq!(lifecycle.phase, LifecyclePhase::Inactive);
-        assert!(lifecycle.quarantine.is_none());
-        assert_eq!(lifecycle.begin_init().unwrap(), Some(2));
-    }
-}
+mod tests;

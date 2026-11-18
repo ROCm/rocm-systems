@@ -33,8 +33,7 @@ pub(crate) fn boundary(operation: impl FnOnce() -> Status) -> Status {
         let Some(token) = process_admission().enter() else {
             return NOT_INITIALIZED;
         };
-        let _scope = ApiLeaseScope::enter(token);
-        plain_boundary(operation)
+        ApiLeaseScope::run(token, || plain_boundary(operation))
     }
     #[cfg(test)]
     plain_boundary(operation)

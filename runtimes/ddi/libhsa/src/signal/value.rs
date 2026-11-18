@@ -61,12 +61,12 @@ mod tests {
         let handle = HsaSignal {
             handle: std::ptr::from_ref(&slot) as u64,
         };
-        let admitted = crate::runtime::ApiLeaseScope::enter(gate.enter().unwrap());
-        gate.close();
-        // SAFETY: The stack slot remains live for both stores. The inherited
-        // generation lease permits descendants to finish after final closure.
-        assert_eq!(unsafe { store(handle, 9, Ordering::Release) }, Some(()));
-        drop(admitted);
+        crate::runtime::ApiLeaseScope::run(gate.enter().unwrap(), || {
+            gate.close();
+            // SAFETY: The stack slot remains live for both stores. The inherited
+            // generation lease permits descendants to finish after final closure.
+            assert_eq!(unsafe { store(handle, 9, Ordering::Release) }, Some(()));
+        });
         assert_eq!(unsafe { store(handle, 11, Ordering::Relaxed) }, None);
         assert_eq!(slot.value.load(Ordering::Acquire), 9);
         assert!(gate.wait_idle_for(Duration::from_secs(1)));
