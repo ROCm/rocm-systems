@@ -122,7 +122,6 @@ uint8_t vector_memory_byte_mask(const amdgpu::VectorMemState &state, const amdgp
 /// On CDNA1 through CDNA4, a buffer, global or scratch instruction issued with EXEC
 /// zero counts on VMCNT, in order with the wave's other non-FLAT VMEM
 /// instructions (all four ISA manuals, sections 3.3, 4.4 and 10.4–10.5).
-/// docs/race-detector.md lists the instructions measured on MI300X and MI355X.
 bool exec_zero_memory_issue_counts(rj_code_arch_t arch) {
   return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
          arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||

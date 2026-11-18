@@ -480,31 +480,13 @@ SAMPLECNT, ASYNCCNT and TENSORCNT hold up to 63 positions where implemented,
 KMCNT holds up to 31, and BVHCNT and EXPCNT hold up to 7. Generic FLAT
 uses the target-specific admission rules above.
 
-On CDNA1 through CDNA4, a buffer, global or scratch instruction issued with
-wave EXEC zero occupies a VMCNT slot in issue order with the wave's other
-non-FLAT VMEM instructions, even though it moves no data. The detector applies
-VMCNT backpressure and records an event with no register or LDS dependencies.
-For example, after an active load followed by an EXEC-zero
-`scratch_load_dword`, `s_waitcnt vmcnt(1)` completes the older load.
+On CDNA1 through CDNA4, the detector retains ordered VMCNT slots for buffer,
+global and scratch instructions issued with EXEC zero. These slots count
+toward backpressure and partial waits but have no register or LDS accesses.
+For example, after an active buffer load and an EXEC-zero buffer load,
+`s_waitcnt vmcnt(1)` completes the older load.
 
-The
-[CDNA1 ISA, 14 December 2020](https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/instinct-mi100-cdna1-shader-instruction-set-architecture.pdf),
-[CDNA2 ISA, 4 February 2022](https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/instinct-mi200-cdna2-instruction-set-architecture.pdf),
-[CDNA3 ISA, 5 August 2025](https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-mi300-cdna3-instruction-set-architecture.pdf),
-and [CDNA4 ISA, 5 August 2025](https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna4-instruction-set-architecture.pdf)
-describe this basis in sections 3.3 (EXEC-zero issue), 4.4 (VM_CNT counting and
-ordering) and 10.4–10.5 (global and scratch).
-
-MI355X (gfx950) measurements cover buffer and global loads to VGPRs,
-buffer and global stores, and buffer loads to LDS (#15938). On MI300X (gfx942),
-the same forms and scratch loads and stores were measured with paired
-`vmcnt(1)` and `vmcnt(2)` waits after an older buffer load: the former completed
-the older load, while the latter left it pending. CDNA1/2 coverage is based on
-the ISA and native regressions, without hardware measurements.
-
-The detector does not retain slots for EXEC-zero DS or generic FLAT
-instructions on CDNA1 through CDNA4. Those paths require separate validation
-of their counter, routing and completion rules.
+EXEC-zero DS and generic FLAT instructions remain outside this accounting.
 
 On gfx1250 it is modeled for each split counter: LOADcnt, STOREcnt, DScnt,
 ASYNCcnt and TENSORcnt are 6-bit counters and KMcnt is a 5-bit counter (the
