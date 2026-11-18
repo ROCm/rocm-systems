@@ -1,7 +1,7 @@
 # Performance benchmark recipes
 
-The [corpus suite TOML](https://github.com/ROCm/rocjitsu-test-corpus/tree/35296609b3a2c23fde57e46fc307ba8efa123cd5/benchmarks/suites)
-at revision `35296609b3a2c23fde57e46fc307ba8efa123cd5` is the source of truth, pinned by the
+The [corpus suite TOML](https://github.com/ROCm/rocjitsu-test-corpus/tree/970fb7cb6d94f818a6dd65f9a928eeee26edce7a/benchmarks/suites)
+at revision `970fb7cb6d94f818a6dd65f9a928eeee26edce7a` is the source of truth, pinned by the
 [benchmark workflow](../../../../../.github/workflows/rocjitsu-benchmarks.yml).
 Update this reference when changing that pin or either recipe.
 
@@ -17,7 +17,7 @@ No execution or elapsed timings are shown.
 
 ## performance-v1
 
-[performance-v1.toml](https://github.com/ROCm/rocjitsu-test-corpus/blob/35296609b3a2c23fde57e46fc307ba8efa123cd5/benchmarks/suites/performance-v1.toml) — **20 workloads; 38 enabled target/policy combinations.**
+[performance-v1.toml](https://github.com/ROCm/rocjitsu-test-corpus/blob/970fb7cb6d94f818a6dd65f9a928eeee26edce7a/benchmarks/suites/performance-v1.toml) — **20 workloads; 38 enabled target/policy combinations.**
 
 | Benchmark suite | Workload | Coverage | gfx950 | gfx1250 |
 | --- | --- | --- | --- | --- |
@@ -44,7 +44,7 @@ No execution or elapsed timings are shown.
 
 ## performance-v2 — v1 + RDNA3/RDNA4 additions
 
-[performance-v2.toml](https://github.com/ROCm/rocjitsu-test-corpus/blob/35296609b3a2c23fde57e46fc307ba8efa123cd5/benchmarks/suites/performance-v2.toml)
+[performance-v2.toml](https://github.com/ROCm/rocjitsu-test-corpus/blob/970fb7cb6d94f818a6dd65f9a928eeee26edce7a/benchmarks/suites/performance-v2.toml)
 preserves all **38 v1 target/policy combinations** and appends **28 combinations**
 for **RDNA3 (`gfx1100`) and RDNA4 (`gfx1201`)**. The complete recipe has
 **31 workload definitions and 66 enabled combinations**.
