@@ -499,15 +499,6 @@ detector does not retain slots for EXEC-zero DS or generic FLAT instructions on
 CDNA1 through CDNA4; those paths require separate validation of their counter,
 routing and completion rules.
 
-RDNA EXEC-zero buffer, global and scratch slots are not retained. GFX11/GFX12
-images have separate slot accounting when their counters have pending work.
-A general extension must preserve the separate load and store counters and
-the independent completion groups sharing a counter. In particular,
-RDNA3/RDNA3.5 ISA section 5.6 separates texture samples
-from other loads under VMcnt, but the current instruction metadata assigns
-them one completion class. That must be corrected before general RDNA
-EXEC-zero accounting is safe.
-
 On gfx1250 it is modeled for each split counter: LOADcnt, STOREcnt, DScnt,
 ASYNCcnt and TENSORcnt are 6-bit counters and KMcnt is a 5-bit counter (the
 counter table in CDNA5 ISA 5.7.1), so each holds 63 tokens, or 31 for KMcnt.
