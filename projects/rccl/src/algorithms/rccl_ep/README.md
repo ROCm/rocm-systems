@@ -1,8 +1,8 @@
 # rccl_ep
 
-Intranode expert-parallel dispatch and combine for RCCL on AMD GPUs: the
-scale-up leg of an MoE all-to-all, where every peer is reachable by load and
-store.
+Expert-parallel dispatch and combine for RCCL on AMD GPUs: the all-to-all of an
+MoE layer. Within a node every peer is reached by load and store; across nodes
+peers are reached by RCCL send/recv (see Internode below).
 
 Dispatch is a push model: each rank writes tokens straight into its
 peers' symmetric memory, so a receiver reconstructs the required receive
@@ -15,8 +15,38 @@ Beyond plain dispatch and combine the module offers an output layout already
 grouped by expert, so an expert GEMM needs no permute; FP8; and cached replay,
 which reuses a routing plan with reproducible row assignment.
 
-Scale-up only. No scale-out path, no low-latency path. The path needs only
-load/store access to peer memory -- no GIN backend and no rocSHMEM.
+No low-latency path. The scale-up path needs only load/store access to peer
+memory -- no GIN backend and no rocSHMEM.
+
+### Internode
+
+A buffer whose group spans more than one node takes the internode path
+automatically; a single-node group stays on the scale-up path. Nodes are grouped
+as RCCL groups them (`NCCL_HOSTID`, else the host name); nodes must be equal in
+size and each node's ranks contiguous. Ranks on the same node keep the
+load/store path through a window registered on a per-node split of the
+communicator; a rank on another node is reached by RCCL `ncclSend` / `ncclRecv`,
+so any RCCL network transport works and no GPU-initiated RDMA is needed. Up to
+64 ranks, 16 per node and 16 nodes.
+
+The EP domain is flat, `get_logical_domain_size() == (1, num_ranks)`, with no
+per-node pre-reduction. Rows for a remote peer are staged in a local outbox laid
+out like the window and sent on the global communicator, so both paths share the
+dispatch and combine kernels. The outbox and inbox each take one window's worth
+of memory. Every uncached internode dispatch exchanges its counts on the host
+before the payload moves (one more host synchronization), since each receive is
+posted at its exact size.
+
+In the C ABI, `ep_create_nodes(..., node_size)` creates a handle for
+`num_ranks / node_size` nodes, node n holding ranks
+`[n * node_size, (n + 1) * node_size)`, and `ep_create` is the same with
+`node_size = num_ranks`. After `ep_plan`, `ep_inter_counts` all-gathers the
+plan's send counts and returns this rank's send and receive counts, and
+`ep_inter_bind` binds them, with the plan's `send_list`, for the dispatch or
+combine that follows; an internode dispatch or combine with nothing bound fails.
+A binding stays until it is replaced or until `ep_configure` changes the shape,
+which drops it, so the Python layer keeps the counts on the handle and rebinds
+them before a cached dispatch and before each combine.
 
 ## Layout
 
@@ -103,5 +133,9 @@ together; the process must end up with exactly one HIP runtime loaded.
 - A top-k id of -1 or outside `[0, num_experts)` is ignored; an int64 id is clamped to
   `[-1, num_experts]` before it is narrowed to int32, so none truncates onto a valid expert. An expert repeated within
   one token's top-k is delivered in each of its slots by the plain and expanded layouts.
+- An internode transfer that fails part-way leaves the handle broken: it refuses every
+  call but `destroy()`, which then leaks the handle's device memory, window and
+  communicators, since a kernel may still be using them. The peers of that rank
+  can still block in their own `destroy()`.
 - The kernels are wave64: the CMake build compiles gfx9 targets only, and `ep_create`
   fails on every rank of a group in which any rank's device is not wave64.
