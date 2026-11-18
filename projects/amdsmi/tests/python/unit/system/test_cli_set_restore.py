@@ -4,12 +4,26 @@
 
 """Hardware-free replay of the set sweep's recorded starting values."""
 
+import sys
 import unittest
 from copy import deepcopy
 from unittest import mock
 
-from cli import test_set
 from common.common import amdsmi
+
+# cli.base puts the CLI dir on sys.path and imports amdsmi_cli_exceptions from it.
+# Undo both so later test modules import the CLI as they would without this one.
+_sys_path = list(sys.path)
+_CLI_EXCEPTIONS = "amdsmi_cli_exceptions"
+_cli_exceptions = sys.modules.get(_CLI_EXCEPTIONS)
+try:
+    from cli import test_set
+finally:
+    sys.path[:] = _sys_path
+    if _cli_exceptions is None:
+        sys.modules.pop(_CLI_EXCEPTIONS, None)
+    else:
+        sys.modules[_CLI_EXCEPTIONS] = _cli_exceptions
 
 UNSUPPORTED = int(amdsmi.AmdSmiStatus.NOT_SUPPORTED)
 DGPU_FAN = {"max": 255, "speed": 80}
@@ -49,6 +63,10 @@ class TestCliSetRestore(unittest.TestCase):
         self.sweep.partition_data = {
             "current_partition": [{"memory": "N/A", "accelerator_type": "N/A"}]
         }
+
+    def _make_apu(self) -> None:
+        self.sweep.clk_freq[0]["is_apu"] = True
+        del self.sweep.metric_data["gpu_data"][0]["fan"]
 
     def _remaining_commands(self, index: int = 0) -> list:
         return [
@@ -105,9 +123,15 @@ class TestCliSetRestore(unittest.TestCase):
                 self._assert_commands(expected)
 
     def test_restore_with_omitted_fan_runs_remaining_cleanup(self) -> None:
-        self.sweep.clk_freq[0]["is_apu"] = True
-        del self.sweep.metric_data["gpu_data"][0]["fan"]
+        self._make_apu()
         self._restore(self._remaining_commands())
+
+    def test_restore_commands_leave_baseline_unchanged(self) -> None:
+        self._make_apu()
+        baseline = deepcopy((self.sweep.metric_data, self.sweep.static_data))
+        first = self.sweep._restore_commands()
+        self.assertEqual(self.sweep._restore_commands(), first)
+        self.assertEqual((self.sweep.metric_data, self.sweep.static_data), baseline)
 
     def test_missing_dgpu_sections_are_rejected(self) -> None:
         for field in ("fan", "clock", "perf_level"):
@@ -166,13 +190,8 @@ class TestCliSetRestore(unittest.TestCase):
                 "amd-smi reset --power-cap --gpu 0", accepted=(UNSUPPORTED,), rejected=(0,)
             )
 
-    def test_restore_with_na_fan_runs_remaining_cleanup(self) -> None:
-        self.sweep.clk_freq[0]["is_apu"] = True
-        self.sweep.metric_data["gpu_data"][0]["fan"] = "N/A"
-        self._restore(self._remaining_commands())
-
     def test_restore_without_static_clock_levels_runs_remaining_cleanup(self) -> None:
-        self.sweep.clk_freq[0]["is_apu"] = True
+        self._make_apu()
         for fields in (
             {},
             {"clock": "N/A"},
@@ -186,7 +205,7 @@ class TestCliSetRestore(unittest.TestCase):
                 self._restore(self._remaining_commands())
 
     def test_restore_without_metric_clock_runs_remaining_cleanup(self) -> None:
-        self.sweep.clk_freq[0]["is_apu"] = True
+        self._make_apu()
         for fields in (
             {},
             {"clock": "N/A"},
@@ -200,7 +219,7 @@ class TestCliSetRestore(unittest.TestCase):
                 self._restore(self._remaining_commands())
 
     def test_restore_without_perf_level_runs_remaining_cleanup(self) -> None:
-        self.sweep.clk_freq[0]["is_apu"] = True
+        self._make_apu()
         for fields in ({}, {"perf_level": "N/A"}, {"perf_level": "AMDSMI_DEV_PERF_LEVEL_UNKNOWN"}):
             with self.subTest(fields=fields):
                 self.sweep.metric_data["gpu_data"][0].pop("perf_level", None)
@@ -209,17 +228,27 @@ class TestCliSetRestore(unittest.TestCase):
                 self._restore(expected)
 
     def test_apu_fan_reset_requires_not_supported(self) -> None:
-        self.sweep.clk_freq[0]["is_apu"] = True
+        self._make_apu()
+        self._assert_reset_codes(
+            "amd-smi reset --fans --gpu 0", accepted=(UNSUPPORTED,), rejected=(0,)
+        )
+
+    def test_apu_with_fan_section_fails_before_sweep(self) -> None:
+        # The APU default metric dump drops the fan section, N/A included.
+        self._make_apu()
         for fan in (
+            "N/A",
             {},
             {"max": "N/A", "speed": "N/A"},
             {"apu_fan_pwm": "N/A"},
             {"apu_fan_pwm": {"value": 38, "unit": "%"}},
         ):
-            self.sweep.metric_data["gpu_data"][0]["fan"] = fan
-            self._assert_reset_codes(
-                "amd-smi reset --fans --gpu 0", accepted=(UNSUPPORTED,), rejected=(0,)
-            )
+            with self.subTest(fan=fan):
+                self.sweep.metric_data["gpu_data"][0]["fan"] = fan
+                self._mock_commands([])
+                with self.assertRaisesRegex(AssertionError, "fan section"):
+                    self._run_restore()
+                self.sweep.util.RunCmdSync.assert_not_called()
 
     def test_dgpu_fan_reset_is_graded_by_max_not_speed(self) -> None:
         # A runtime-suspended dGPU reports speed as N/A; max decides whether a fan exists.
