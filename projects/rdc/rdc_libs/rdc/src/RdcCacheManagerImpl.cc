@@ -337,6 +337,7 @@ rdc_status_t RdcCacheManagerImpl::rdc_job_get_stats(const char jobId[64],
   bool is_job_stopped = (job_stats->second.end_time != 0);
   RDC_LOG(RDC_DEBUG, "rdc_job_get_stats for job " << jobId);
   auto& summary_info = p_job_info->summary;
+  summary_info.gpu_id = GPU_ID_INVALID;
   summary_info.start_time = job_stats->second.start_time;
   if (job_stats->second.end_time == 0) {
     summary_info.end_time = time(nullptr);

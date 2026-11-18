@@ -4,20 +4,45 @@ Runs like test_fake_gpu.py (same environment variables and helpers).
 """
 
 import json
+import os
 import re
+import subprocess
+import sys
 import time
 
 import pytest
 
 # The helpers and the `tools` fixture come from test_fake_gpu.py, not conftest.py:
 # tests/ci/conftest.py is not installed with the suite (share/rdc/rdctst_tests/fake_gpu).
-from test_fake_gpu import FACTOR, Rdcd, _created_id, golden, tools  # noqa: F401 (fixture)
+from test_fake_gpu import FACTOR, PREFIX, Rdcd, _created_id, golden, tools  # noqa: F401 (fixture)
+from test_fake_gpu import _missing as _not_installed
 
 RDC_ST_NOT_FOUND = 6  # rdc_status_t in include/rdc/rdc.h; rdci exits with it
 RDC_ST_MAX_LIMIT = 10
 RDC_FI_GPU_MEMORY_USAGE = 501
 RDC_FI_GPU_MEMORY_TOTAL = 502
 PARTITION_G0_1 = (1 << 27) | (1 << 11)  # partition 1 of GPU 0, see RdcEntityCodec.h
+GPU_ID_INVALID = 0xFFFFFFFF  # include/rdc/rdc.h's (-1) in a uint32_t gpu_id
+
+# rdc_job_get_stats() through the installed Python binding, in a child process with
+# rdci's environment: prints num_gpus and the summary's gpu_id, which rdci does not show.
+# rdc_bootstrap.py's rdc_job_info_t is shorter than the C structure, so RDC writes into a
+# larger buffer; the two fields read come first in both.
+_JOB_INFO = """
+import ctypes, sys
+sys.path.insert(0, sys.argv[1])
+from rdc_bootstrap import rdc, rdc_handle_t, rdc_job_info_t, rdc_status_t
+ok = rdc_status_t.RDC_ST_OK
+handle = rdc_handle_t()
+assert rdc.rdc_init(0) == ok
+assert rdc.rdc_connect(sys.argv[2].encode(), ctypes.byref(handle), None, None, None) == ok
+buffer = ctypes.create_string_buffer(1 << 16)
+info = ctypes.cast(buffer, ctypes.POINTER(rdc_job_info_t))
+job = ctypes.create_string_buffer(sys.argv[3].encode(), 64)
+assert rdc.rdc_job_get_stats(handle, job, info) == ok
+print(info.contents.num_gpus, info.contents.summary.gpu_id)
+assert rdc.rdc_disconnect(handle) == ok
+"""
 
 
 def _memory_utilization(gpu):
@@ -99,6 +124,22 @@ def _run_job(d, entities, rows, job="job_all_gpus"):
     return running, stopped, data
 
 
+def _job_info(d, job):
+    """(num_gpus, summary gpu_id) of rdc_job_get_stats() for `job`."""
+    binding = os.path.join(PREFIX, "libexec", "rdc", "python_binding")
+    if not os.path.isfile(os.path.join(binding, "rdc_bootstrap.py")):
+        _not_installed("python_binding/rdc_bootstrap.py")
+    r = subprocess.run(
+        [sys.executable, "-c", _JOB_INFO, binding, f"127.0.0.1:{d.port}", job],
+        env=d.rdci_env,
+        capture_output=True,
+        text=True,
+        timeout=30 * FACTOR,
+    )
+    assert r.returncode == 0, f"rdc_job_get_stats -> {r.returncode}\n{r.stdout}{r.stderr}"
+    return tuple(int(v) for v in r.stdout.split())
+
+
 def _rows(gpus):
     return [(f"GPU {g}", label) for g in gpus for label in STATS]
 
@@ -125,7 +166,7 @@ def _check(out, gpus):
 
 
 @pytest.fixture
-def make_rdcd(tools, tmp_path):
+def make_rdcd(tools, tmp_path):  # noqa: F811 (the fixture)
     started = []
 
     def make(**fake_env):
@@ -148,6 +189,16 @@ def test_job_stats_cover_every_gpu_of_the_group(make_rdcd):
     for g in (1, 3):
         power = STATS["Power Usage (Watts)"](g)
         assert data[f"gpu_{g}"]["power_usage_max"] == power, data
+
+
+def test_job_stats_summary_is_not_a_gpu(make_rdcd):
+    # With GPU 0 in the job, a summary gpu_id of 0 would name it.
+    d = make_rdcd()
+    gid = _created_id(d.ok("group", "-c", "job_summary"))
+    d.ok("group", "-g", gid, "-a", "0,1")
+    d.ok("stats", "-s", "job_summary", "-g", gid)
+    assert _job_info(d, "job_summary") == (2, GPU_ID_INVALID)
+    d.ok("stats", "-r", "job_summary")
 
 
 def test_job_stats_for_sixteen_gpus_past_the_per_job_array(make_rdcd):
