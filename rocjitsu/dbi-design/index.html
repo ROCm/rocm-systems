@@ -2864,7 +2864,7 @@ current limits.</p>
 <li>Probe calls require the probe body to read no register its ABI does not supply (<code>analyze_probe_live_ins</code>, see <a href="#probe-live-ins">Probe live-ins</a>). Under <code>AmdGpuFuncReturnS30S31</code> that is the link pair plus the declared argument VGPRs; any other input is fatal.</li>
 <li>Callable probes reject code objects containing decoded guest <code>s_movrel*</code> instructions because liveness does not model M0-displaced SGPR accesses. This check includes unreachable blocks and other kernels. Inline-nop instrumentation without register growth remains supported.</li>
 <li>Callable <code>AfterInst</code> and register growth require complete decoded VGPR usage, rejecting relative accesses and possible runtime GPR indexing throughout the decoded scope. Other placements without register growth retain the pre-existing vector-relative liveness limitation: on gfx1200 with <code>M0 = 2</code>, <code>v_movrels_b32 v3, v0</code> reads a hidden live <code>v2</code> that a callback can clobber.</li>
-<li>Probe calls may pass 32-bit arguments via <code>InstrumentationPoint::probe_args</code>, delivered in VGPRs from <code>v0</code>. Each names a <code>ProbeArgSource</code>: a build-time constant, an anchor VGPR, a dword of the anchor <code>EXEC</code> mask, a dword of the framework's entry storage, or an SGPR or lane-zero VGPR snapshot captured once at guest entry after wrapper restoration. The two snapshot slots share a bounded reservation; source class and index identify each value. Original allocation and enabled hardware-input bounds apply even when instrumentation grows the register file. The count and the sources are declared by the caller and verified against the body; see <a href="#probe-arguments">Probe arguments</a>.</li>
+<li>Probe calls may pass 32-bit arguments via <code>InstrumentationPoint::probe_args</code>, delivered in VGPRs from <code>v0</code>. Each names a <code>ProbeArgSource</code>: a build-time constant, an anchor VGPR, a dword of the anchor <code>EXEC</code> mask, a dword of the framework's entry storage, or an SGPR, TTMP, or lane-zero VGPR snapshot captured once at guest entry after wrapper restoration. The two snapshot slots share a bounded reservation; source class and index identify each value. Original allocation and enabled hardware-input bounds apply even when instrumentation grows the register file. The count and the sources are declared by the caller and verified against the body; see <a href="#probe-arguments">Probe arguments</a>.</li>
 <li>Probe calls require the probe's link pair (<code>s[30:31]</code> for <code>rj_nop_probe</code>) to be within the kernel's SGPR allocation (<code>kernel_sgpr_count</code>) and any chosen scratch/special-state temps to be below <code>ordinary_sgpr_bound</code> of it; allocation growth requires explicit original metadata counts and a supported resource note (see <a href="#instrumentation-flow-probe-call">Probe-call register requirement</a>).</li>
 <li>Register spilling is enabled for <code>spill_set = live_at_anchor ∩ (probe_clobbers ∪ builder_clobbers)</code>. The orchestrator scans the kernel descriptor (<code>scan_kernel_descriptors</code>), builds one <code>SpillManager</code> from its <code>private_segment_fixed_size</code>, splits the spill set by class, and calls <code>plan_vgpr_spills</code> / <code>plan_sgpr_spills</code> / <code>plan_acc_spills</code>. Spilling is gated per-arch by <code>max_scratch_offset_bytes()</code> (returns 0 ⇒ arch has no scratch emitter ⇒ unsupported) and by those fail-closed helpers; there is no <code>SpillPolicy</code> enum. A kernel with zero scratch, more than one kernel, an over-offset-cap slot, a probe that clobbers FLAT_SCRATCH, or (for SGPR spills) no dead bridge VGPR within the kernel's VGPR allocation fails closed.</li>
 </ul>
@@ -3423,9 +3423,9 @@ Without a binding, both patch entry points refuse entry-storage arguments. Tests
 that skip the gate without declaring a binding retain the original size and may
 hand the CP a wrapper directly. Skipping the gate does not allocate or initialize
 that wrapper.
-<code>EntrySgpr</code> and <code>EntryVgprLane0</code> share up to two snapshot slots in the prologue's
-temporary SGPR pair after kernarg restoration. Each slot holds an original SGPR
-or lane-zero VGPR value. These slots then become persistent and are excluded
+<code>EntrySgpr</code>, <code>EntryTtmp</code>, and <code>EntryVgprLane0</code> share up to two snapshot slots in the prologue's
+temporary SGPR pair after kernarg restoration. Each slot holds an original SGPR,
+TTMP, or lane-zero VGPR value. These slots then become persistent and are excluded
 from every call envelope, just like the pointer. The source must fit the original
 guest allocation or the descriptor's enabled scalar entry-input range, even when
 instrumentation grows the register file. This includes hardware input padding
@@ -3433,7 +3433,13 @@ that the metadata's used-register count need not cover.
 With register growth, metadata counts are capped at the original descriptor's
 ordinary bounds before admitting snapshot sources: the SGPR total can include
 the special-register tail, and the VGPR total can include an accumulator window.
-Enabled scalar hardware inputs remain admissible beyond the metadata count.</p>
+Enabled scalar hardware inputs remain admissible beyond the metadata count.
+TTMP sources use their separate 0..15 index range and do not reserve ordinary
+SGPR allocation.
+<code>EntryTtmp</code> is supported only on RDNA4 and CDNA5, whose user shaders can read
+TTMP0-15 without trap-handler privilege. Other targets are rejected during
+planning; in particular, a CDNA4 unprivileged TTMP read would silently return
+zero instead of the requested launch value.</p>
 <p><code>AnchorVgpr</code> sources are parallel copies made before constants or scalar-sourced
 argument writes. The builder orders overlapping copies and breaks cycles with a
 dead VGPR. Observed sources participate in resource exclusion even if the guest
