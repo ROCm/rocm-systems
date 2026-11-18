@@ -288,12 +288,14 @@ CONSAN_KERNEL:
   .amdhsa_private_segment_fixed_size 0
   .amdhsa_kernarg_size 16
   .amdhsa_user_sgpr_kernarg_segment_ptr 1
-  // gfx1100 wave32 requires at least 16 user+system SGPR inputs. The
-  // kernarg pointer stays at s[0:1]; padding moves workgroup X to s15.
-  .amdhsa_user_sgpr_count 15
+  // gfx1100 wave32 requires at least 16 user+system SGPR inputs. Without
+  // workgroup X, user padding alone must retain that 16-register input range.
 #if defined(CONSAN_NO_WORKGROUP_ID) && CONSAN_NO_WORKGROUP_ID
+  .amdhsa_user_sgpr_count 16
   .amdhsa_system_sgpr_workgroup_id_x 0
 #else
+  // The kernarg pointer stays at s[0:1]; padding moves workgroup X to s15.
+  .amdhsa_user_sgpr_count 15
   .amdhsa_system_sgpr_workgroup_id_x 1
 #endif
   .amdhsa_system_vgpr_workitem_id 0
