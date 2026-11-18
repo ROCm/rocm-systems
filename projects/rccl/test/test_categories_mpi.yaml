@@ -264,6 +264,19 @@ test_categories:
     env_variables:
       - "NCCL_P2P_DISABLE=1"
       - "NCCL_SHM_DISABLE=1"
+  quick_env_p2p_ll_step_barrier:
+    description: "Ring LL and LL128 AllReduce, ReduceScatter and AllGather over P2P with per-rank, per-iteration input, checked element by element. On gfx1250 this runs the store-free step barrier. DDA, CE, direct and symmetric kernels win ahead of Ring and their switches are cached for the process lifetime, so they are set before launch. The test skips where a case does not select Ring with the requested protocol or a ring hop is not on P2P."
+    test_patterns:
+      - "LlStepBarrierMPITest.*"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "RCCL_LL128_FORCE_ENABLE=1"
+      - "RCCL_DDA_ENABLE=0"
+      - "RCCL_DIRECT_ALLGATHER_DISABLE=1"
+      - "RCCL_DIRECT_REDUCE_SCATTER_DISABLE=1"
+      - "RCCL_SYM_K_MAX_BYTES=0"
+      - "RCCL_TDM_LL128_ENABLE=0"
   quick_env_profiler_kernelch_sym:
     description: "KernelPhase events from the symmetric kernels, which are the only ones that stamp phase boundaries. A communicator only gets symmetric support with cuMem on, and NCCL_CUMEM_ENABLE is cached for the process lifetime, so it is set before launch. DDA is disabled as in quick_env_profiler_kernelch."
     test_patterns:

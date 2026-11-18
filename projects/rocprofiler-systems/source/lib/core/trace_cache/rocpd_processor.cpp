@@ -24,9 +24,9 @@
 
 #include <algorithm>
 #include <array>
-#include <profiler-hub/storage.hpp>
-#include <profiler-hub/writer.hpp>
-#include <profiler-hub/writer_types.hpp>
+#include <profiler-hub/cpp/storage.hpp>
+#include <profiler-hub/cpp/writer.hpp>
+#include <profiler-hub/cpp/writer_types.hpp>
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/context.h>
 #include <rocprofiler-sdk/fwd.h>

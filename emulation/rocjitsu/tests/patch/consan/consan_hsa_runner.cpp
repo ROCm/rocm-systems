@@ -95,10 +95,13 @@ hsa_amd_memory_pool_t fine_pool(hsa_agent_t cpu) {
 
 int run(int argc, char **argv) {
   if (argc < 5) {
-    std::cerr << "Usage: consan_hsa_runner ORIGINAL ENTRY LAUNCHES defined|observe [--baseline] "
-                 "[--bad-geometry] [--profiling] [--reuse-signal] [--target GPU] [--wave-size N] "
-                 "[--threads N] [--test-statistics] [--batch-barrier-and|--batch-barrier-or] "
-                 "[--separate-barrier] [--amd-signals]\n";
+    std::cerr
+        << "Usage: consan_hsa_runner ORIGINAL ENTRY LAUNCHES MODE "
+           "[--baseline] "
+           "[--bad-geometry] [--profiling] [--reuse-signal] [--target GPU] [--wave-size N] "
+           "[--threads N] [--test-statistics] [--batch-barrier-and|--batch-barrier-or] "
+           "[--separate-barrier] [--high-lane] [--amd-signals]\n"
+           "MODE: defined, synchronized, mixed, wide_u16, wide_i16, wide_b64, wide_b128, observe\n";
     return 3;
   }
   uint32_t launches = 0;
@@ -106,17 +109,26 @@ int run(int argc, char **argv) {
       std::from_chars(argv[3], argv[3] + std::strlen(argv[3]), launches);
   if (parsed.ec != std::errc{} || *parsed.ptr != '\0' || launches == 0 || launches > 16)
     return 3;
-  const bool defined = std::string_view(argv[4]) == "defined";
-  if (!defined && std::string_view(argv[4]) != "observe")
+  const std::string_view mode(argv[4]);
+  const bool defined = mode == "defined";
+  const bool mixed = mode == "mixed";
+  const bool synchronized = mode == "synchronized" || mixed;
+  const uint32_t wide_width = mode == "wide_u16" || mode == "wide_i16" ? 2
+                              : mode == "wide_b64"                     ? 8
+                              : mode == "wide_b128"                    ? 16
+                                                                       : 0;
+  if (!defined && !synchronized && wide_width == 0 && mode != "observe")
     return 3;
   std::string_view target = "gfx1100";
   uint32_t threads = 64, wave_size = 32;
   bool baseline = false, bad_geometry = false, profiling = false, reuse_signal = false;
-  bool test_statistics = false, separate_barrier = false, amd_signals = false;
+  bool test_statistics = false, separate_barrier = false, high_lane = false, amd_signals = false;
   uint16_t barrier_type = 0;
   for (int index = 5; index < argc; ++index) {
     const std::string_view option(argv[index]);
-    if (option == "--baseline")
+    if (option == "--high-lane")
+      high_lane = true;
+    else if (option == "--baseline")
       baseline = true;
     else if (option == "--bad-geometry")
       bad_geometry = true;
@@ -150,7 +162,8 @@ int run(int argc, char **argv) {
       threads > 1024)
     return 3;
   const uint32_t wave_count = (threads + wave_size - 1) / wave_size;
-  const size_t output_bytes = std::max(wave_count, 2u) * sizeof(uint32_t);
+  const uint32_t output_words = std::max(wide_width ? 4 * wave_count : wave_count, 2u);
+  const size_t output_bytes = output_words * sizeof(uint32_t);
   if (baseline && (bad_geometry || profiling || reuse_signal || test_statistics || barrier_type))
     return 3;
   if (separate_barrier && (!barrier_type || !bad_geometry))
@@ -200,8 +213,9 @@ int run(int argc, char **argv) {
   void *arguments = nullptr, *output = nullptr;
   int result = 0;
   uint32_t completed = 0;
+  int64_t dispatch_wall_ns = 0, drain_wall_ns = 0;
   int profiling_status = 0;
-  std::vector<uint32_t> last_output(std::max(wave_count, 2u));
+  std::vector<uint32_t> last_output(output_words);
   const auto require = [&](hsa_status_t status, const char *operation) {
     if (status == HSA_STATUS_SUCCESS)
       return true;
@@ -316,6 +330,9 @@ int run(int argc, char **argv) {
               : barrier_type | (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
                     (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
     }
+    // Host wall time includes simulator/driver work and completion forwarding;
+    // it is not a profiling timestamp from the GPU.
+    const auto dispatch_started = std::chrono::steady_clock::now();
     // Keep the second header invalid for the separate-callback control.
     __atomic_store_n(reinterpret_cast<uint16_t *>(packet), header, __ATOMIC_RELEASE);
     hsa_signal_store_screlease(queue->doorbell_signal,
@@ -358,6 +375,9 @@ int run(int argc, char **argv) {
       result = 21;
       break;
     }
+    dispatch_wall_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now() - dispatch_started)
+                            .count();
     ++completed;
     std::memcpy(last_output.data(), output, output_bytes);
     std::cout << "launch=" << index + 1 << " input=" << input << " output=" << last_output[0] << ','
@@ -367,8 +387,42 @@ int run(int argc, char **argv) {
         if (last_output[wave] != input + wave)
           result = 23;
     }
-    if (drain && drain() != 0)
-      result = 22;
+    if (synchronized) {
+      // This checks output preservation, not that a wait actually blocked: an
+      // eager producer can also yield input without a barrier. The simulator's
+      // Gfx1250PublicationBarrierBlocksAnEarlyConsumer test supplies that control.
+      for (size_t word = 0; word < last_output.size(); ++word)
+        if (last_output[word] != (word == 0 ? input + uint32_t{mixed} : 0))
+          result = 23;
+    }
+    if (wide_width) {
+      for (uint32_t wave = 0; wave < wave_count; ++wave) {
+        std::array<uint32_t, 4> expected{input + wave, 0x01234567u, 0x76543210u, 0xa5a5a5a5u};
+        if (mode == "wide_i16")
+          expected[0] += 0xffff8000u;
+        else if (wide_width == 2)
+          expected[0] += 0x8000u;
+        else
+          expected[1] = 0x89abcdefu;
+        if (wide_width == 16) {
+          expected[2] = 0x13579bdfu;
+          expected[3] = 0xfedcba98u;
+        }
+        if (high_lane && wave * wave_size + wave_size - 1 >= threads)
+          expected.fill(0);
+        for (uint32_t word = 0; word < 4; ++word)
+          if (last_output[4 * wave + word] != expected[word])
+            result = 23;
+      }
+    }
+    if (drain) {
+      const auto drain_started = std::chrono::steady_clock::now();
+      if (drain() != 0)
+        result = 22;
+      drain_wall_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                           std::chrono::steady_clock::now() - drain_started)
+                           .count();
+    }
     if (!reuse_signal) {
       if (!require(hsa_signal_destroy(signal), "completed signal destroy") && result == 0)
         result = 22;
@@ -377,7 +431,11 @@ int run(int argc, char **argv) {
   }
   // This explicit finish is before signal/queue/executable teardown and HSA
   // shutdown, so GPU and capture last users are still inside HSA's lifetime.
+  const auto finish_started = std::chrono::steady_clock::now();
   const int finish_status = finish ? finish() : 0;
+  const int64_t finish_wall_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                     std::chrono::steady_clock::now() - finish_started)
+                                     .count();
   if (finish_status != 0 && result == 0)
     result = 22;
   const rj_consan_statistics stats = statistics ? statistics() : rj_consan_statistics{};
@@ -403,7 +461,8 @@ int run(int argc, char **argv) {
   if (plugin)
     ::dlclose(plugin);
   std::cout << "{\"app_status\":" << result << ",\"finish_status\":" << finish_status
-            << ",\"completed\":" << completed;
+            << ",\"completed\":" << completed << ",\"dispatch_wall_ns\":" << dispatch_wall_ns
+            << ",\"drain_wall_ns\":" << drain_wall_ns << ",\"finish_wall_ns\":" << finish_wall_ns;
   if (barrier_type)
     std::cout << ",\"barrier_completion\":" << barrier_completion;
   if (statistics)
