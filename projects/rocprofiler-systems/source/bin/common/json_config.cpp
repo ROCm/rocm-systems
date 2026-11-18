@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <concepts>
 #include <fstream>
 #include <iostream>
 #include <set>
@@ -694,30 +695,15 @@ expand_gpu_metrics(const std::string& metrics_str)
     return result;
 }
 
-void
-set_json_int(nlohmann::json& target, const std::string& value)
-{
-    if(auto number = utility::string::safe_stoi(value))
-    {
-        target = *number;
-    }
-    else
-    {
-        target = value;
-    }
-}
+template <typename Number>
+concept json_number = std::integral<Number> || std::floating_point<Number>;
 
+template <json_number Number>
 void
-set_json_double(nlohmann::json& target, const std::string& value)
+set_json_number(nlohmann::json& target, const std::string& value)
 {
-    if(auto number = utility::string::safe_stod(value))
-    {
-        target = *number;
-    }
-    else
-    {
-        target = value;
-    }
+    const auto number = utility::string::safe_from_chars<Number>(value);
+    target = number.is_ok() ? nlohmann::json(number.value()) : nlohmann::json(value);
 }
 
 bool
@@ -781,7 +767,8 @@ export_int_value(nlohmann::json&                           config,
     auto const it = env_map.find(std::string{ env_var });
     if(it != env_map.end())
     {
-        set_json_int(config[json_path_section][json_path_key]["value"], it->second);
+        set_json_number<int>(config[json_path_section][json_path_key]["value"],
+                             it->second);
     }
 }
 
@@ -794,7 +781,8 @@ export_double_value(nlohmann::json&                           config,
     auto const it = env_map.find(std::string{ env_var });
     if(it != env_map.end())
     {
-        set_json_double(config[json_path_section][json_path_key]["value"], it->second);
+        set_json_number<double>(config[json_path_section][json_path_key]["value"],
+                                it->second);
     }
 }
 
@@ -880,15 +868,15 @@ export_domain_gpu(nlohmann::json&                           config,
     }
     if(auto freq = lookup(env_map, env_vars::AMD_SMI_FREQ))
     {
-        set_json_int(gpu["sampling_rate_hz"]["value"], *freq);
+        set_json_number<int>(gpu["sampling_rate_hz"]["value"], *freq);
     }
     if(auto freq = lookup(env_map, env_vars::PROCESS_SAMPLING_FREQ))
     {
-        set_json_double(gpu["process_sampling_freq"]["value"], *freq);
+        set_json_number<double>(gpu["process_sampling_freq"]["value"], *freq);
     }
     if(auto dur = lookup(env_map, env_vars::PROCESS_SAMPLING_DURATION))
     {
-        set_json_double(gpu["process_sampling_duration"]["value"], *dur);
+        set_json_number<double>(gpu["process_sampling_duration"]["value"], *dur);
     }
     if(auto v = lookup(env_map, env_vars::USE_AINIC))
     {

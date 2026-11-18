@@ -265,24 +265,39 @@ constexpr uint32_t calcBlockCount(size_t numThreads, size_t threadsPerBlock, siz
   return y;
 }
 
+// DDA block widths come in 64-thread units: one wave64 or two wave32 waves, so no block ends in a partial wave.
+constexpr uint32_t kDdaThreadGranule = 64;
+
+// Blocks under a grid cap: `capBlocks` when set and lower, else `blocks`.
+inline size_t ddaCapBlocks(size_t blocks, uint32_t capBlocks) {
+  return (capBlocks > 0 && capBlocks < blocks) ? capBlocks : blocks;
+}
+
+// Block width under a grid cap: `capThreads` rounded down to whole granules, floored at one; kernels stride the grid.
+inline uint32_t ddaCapThreads(uint32_t threads, uint32_t capThreads) {
+  if (capThreads == 0 || threads <= capThreads) {
+    return threads;
+  }
+  return std::max(capThreads / kDdaThreadGranule * kDdaThreadGranule, kDdaThreadGranule);
+}
+
 inline std::pair<dim3, dim3> getGridAndBlockDims(size_t count, int typeSize, size_t maxBlocks) {
-  constexpr uint32_t kThreadsPerWarp = 64;
   constexpr uint32_t kThreadsPerBlock = 512;
 
   const uint32_t elementsPerThread = 16 / typeSize; // we do 16 Byte load in kernel
 
-  const uint32_t elementsPerWarp = elementsPerThread * kThreadsPerWarp;
+  const uint32_t elementsPerWarp = elementsPerThread * kDdaThreadGranule;
 
   dim3 threads(0, 1, 1);
   dim3 blocks(0, 1, 1);
   if (ddaAlltoAllSingleBlockGrid(count, typeSize)) {
-    threads.x = divRoundUp(count, elementsPerWarp) * kThreadsPerWarp;
+    threads.x = divRoundUp(count, elementsPerWarp) * kDdaThreadGranule;
     blocks.x = 1;
   } else {
     auto warpsRequired = divRoundUp(count, elementsPerWarp);
     blocks.x = calcBlockCount(divRoundUp(count, elementsPerThread), kThreadsPerBlock, maxBlocks);
     auto warpsPerBlock = divRoundUp(warpsRequired, blocks.x);
-    auto threadsPerBlock = std::min<uint32_t>(kThreadsPerBlock, warpsPerBlock * kThreadsPerWarp);
+    auto threadsPerBlock = std::min<uint32_t>(kThreadsPerBlock, warpsPerBlock * kDdaThreadGranule);
     threads.x = threadsPerBlock;
   }
 
@@ -318,6 +333,40 @@ constexpr size_t ddaLLSlotPkts(size_t bankSize, size_t div, size_t align) {
   const size_t slotUnits = bankSize / div;
   return (slotUnits / align) * align;
 }
+
+// Grid of peer columns that stays within totalBlockCap: past the cap a column serves
+// several peers (DdaPeerColumns). Each column gets blocksWanted blocks, at most its
+// share of the cap and at least one.
+struct DdaPeerGrid {
+  unsigned cols;
+  unsigned blocksPerCol;
+};
+constexpr DdaPeerGrid ddaPeerGrid(int nPeers, size_t blocksWanted, size_t totalBlockCap) {
+  const size_t cap = totalBlockCap < 1 ? 1 : totalBlockCap;
+  const size_t peers = nPeers < 1 ? 1 : (size_t)nPeers;
+  const size_t cols = peers < cap ? peers : cap;
+  const size_t share = cap / cols;
+  const size_t perCol = blocksWanted < share ? blocksWanted : share;
+  return {(unsigned)cols, perCol < 1 ? 1u : (unsigned)perCol};
+}
+
+// Peers this block's column serves: blockIdx.x, blockIdx.x + gridDim.x, ... below nPeers.
+// Issue every send before the first poll, or two columns can each wait on the other's send.
+struct DdaPeerColumns {
+  struct Iter {
+    int x;
+    int step;
+    __device__ int operator*() const { return x; }
+    __device__ Iter& operator++() {
+      x += step;
+      return *this;
+    }
+    __device__ bool operator!=(const Iter& end) const { return x < end.x; }
+  };
+  int nPeers;
+  __device__ Iter begin() const { return {(int)blockIdx.x, (int)gridDim.x}; }
+  __device__ Iter end() const { return {nPeers, 0}; }
+};
 
 // Peers staged in one pass. A runtime-sized array, or a runtime index into
 // one, is placed in scratch. 8 covers rank counts 4 and 8 in a single pass.
@@ -476,7 +525,7 @@ __device__ __forceinline__ bool ddaLLSpinOneStale(const uint32_t* const (&line)[
   }
 }
 
-// Waits until both flags of every line selected by mask (wave uniform) match. Each sweep issues kN loads before testing
+// Waits until both flags of every line selected by mask (per lane) match. Each sweep issues kN loads before testing
 // any flag, so they share one wait (a load under a per-line branch would wait on its own); a slot outside mask reloads
 // the first selected line, so only selected lines are read. Sweeps repeat until every selected line is fresh, one abort
 // spin tick per sweep; with kDdaLLSpinOneMinLines or more selected lines a waiting lane spins on one stale line between
@@ -576,6 +625,15 @@ __device__ __forceinline__ void ddaSetLLEpoch(uint32_t* __restrict__ epochDev, i
        e += total * (int)blockDim.x) {
     epochDev[e] = flag;
   }
+}
+
+// Copies `bytes` (a multiple of 16) from src to dst in 16-byte vectors, thread `gtid` of
+// `gstride` threads taking every gstride-th vector, so the whole grid shares the copy.
+__device__ __forceinline__ void ddaGridCopy16B(const void* src, void* dst, size_t bytes, size_t gtid, size_t gstride) {
+  v4u_gptr s4 = (v4u_gptr)src;
+  v4u_gptr d4 = (v4u_gptr)dst;
+  const size_t nVec = bytes >> 4;
+  for (size_t i = gtid; i < nVec; i += gstride) d4[i] = s4[i];
 }
 
 } // namespace dda::common

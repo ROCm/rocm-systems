@@ -17,20 +17,23 @@ namespace rdna4 {
 
 namespace {
 template <typename MimgMachineInst>
+bool mimg_has_status(const MimgMachineInst *inst, bool sampler) {
+  // A dropped fetch with DMASK=0 cannot produce TFE status. LWE
+  // can still return status for samplers. Both share one DWORD.
+  bool status = false;
+  if constexpr (requires { inst->tfe; })
+    status = inst->tfe && inst->dmask;
+  if constexpr (requires { inst->lwe; })
+    status = status || (sampler && inst->lwe);
+  return status;
+}
+template <typename MimgMachineInst>
 uint32_t mimg_vdata_bits(const MimgMachineInst *inst, bool gather4, bool d16_allowed,
                          bool status_allowed, bool sampler) {
   uint32_t words = gather4 ? 4u : std::max(1, std::popcount(uint32_t{inst->dmask}));
   if (d16_allowed && inst->d16)
     words = (words + 1) / 2;
-  // A dropped fetch with DMASK=0 cannot produce TFE status. LWE
-  // can still return status for sampler operations. Both flags
-  // share one status word; stores do not consume that word.
-  bool status = false;
-  if constexpr (requires { inst->tfe; })
-    status = status_allowed && inst->tfe && inst->dmask;
-  if constexpr (requires { inst->lwe; })
-    status = status || (status_allowed && sampler && inst->lwe);
-  if (status)
+  if (status_allowed && mimg_has_status(inst, sampler))
     ++words;
   return words * 32;
 }
@@ -49,6 +52,8 @@ ImageLoadVimage::ImageLoadVimage(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  if (mimg_has_status(&inst_, false))
+    flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -88,7 +93,7 @@ void ImageLoadVimage::implicit_uses(RegisterSet &uses) const {
 }
 
 bool ImageLoadVimage::implicit_preservation_uses(RegisterSet &preservation_uses) const {
-  const uint32_t components = std::popcount(uint32_t{inst_.dmask});
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
   if (inst_.d16 && (components & 1u))
     if (auto r = vdata.to_register_ref()) {
       const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
@@ -130,7 +135,67 @@ ImageLoadMipVimage::ImageLoadMipVimage(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  if (mimg_has_status(&inst_, false))
+    flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+bool ImageLoadMipVimage::should_print_src_operand(uint8_t operand_index) const {
+  return src_operands_[operand_index] == &vaddr || Vimage::should_print_src_operand(operand_index);
+}
+
+void ImageLoadMipVimage::append_src_operand(std::string &out, uint8_t operand_index) const {
+  if (src_operands_[operand_index] != &vaddr) {
+    Vimage::append_src_operand(out, operand_index);
+    return;
+  }
+  const auto registers = amdgpu::gfx12_image_address_registers(inst_);
+  const uint32_t count = (0u + (inst_.a16 ? (amdgpu::image_coordinate_count(inst_.dim) + 1u + 1) / 2
+                                          : amdgpu::image_coordinate_count(inst_.dim) + 1u));
+  if (count == 1) {
+    out += "v" + std::to_string(registers[0]);
+    return;
+  }
+  out += "[";
+  for (uint32_t index = 0; index < count; ++index) {
+    if (index != 0)
+      out += ", ";
+    out += "v" + std::to_string(registers[index]);
+  }
+  out += "]";
+}
+
+void ImageLoadMipVimage::implicit_uses(RegisterSet &uses) const {
+  Vimage::implicit_uses(uses);
+  const auto registers = amdgpu::gfx12_image_address_registers(inst_);
+  const uint32_t count = (0u + (inst_.a16 ? (amdgpu::image_coordinate_count(inst_.dim) + 1u + 1) / 2
+                                          : amdgpu::image_coordinate_count(inst_.dim) + 1u));
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageLoadMipVimage::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers = amdgpu::gfx12_image_address_registers(inst_);
+      const uint32_t count =
+          (0u + (inst_.a16 ? (amdgpu::image_coordinate_count(inst_.dim) + 1u + 1) / 2
+                           : amdgpu::image_coordinate_count(inst_.dim) + 1u));
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageLoadMipVimage::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -330,7 +395,47 @@ ImageStoreMipVimage::ImageStoreMipVimage(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   vaddr.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+bool ImageStoreMipVimage::should_print_src_operand(uint8_t operand_index) const {
+  return src_operands_[operand_index] == &vaddr || Vimage::should_print_src_operand(operand_index);
+}
+
+void ImageStoreMipVimage::append_src_operand(std::string &out, uint8_t operand_index) const {
+  if (src_operands_[operand_index] != &vaddr) {
+    Vimage::append_src_operand(out, operand_index);
+    return;
+  }
+  const auto registers = amdgpu::gfx12_image_address_registers(inst_);
+  const uint32_t count = (0u + (inst_.a16 ? (amdgpu::image_coordinate_count(inst_.dim) + 1u + 1) / 2
+                                          : amdgpu::image_coordinate_count(inst_.dim) + 1u));
+  if (count == 1) {
+    out += "v" + std::to_string(registers[0]);
+    return;
+  }
+  out += "[";
+  for (uint32_t index = 0; index < count; ++index) {
+    if (index != 0)
+      out += ", ";
+    out += "v" + std::to_string(registers[index]);
+  }
+  out += "]";
+}
+
+void ImageStoreMipVimage::implicit_uses(RegisterSet &uses) const {
+  Vimage::implicit_uses(uses);
+  const auto registers = amdgpu::gfx12_image_address_registers(inst_);
+  const uint32_t count = (0u + (inst_.a16 ? (amdgpu::image_coordinate_count(inst_.dim) + 1u + 1) / 2
+                                          : amdgpu::image_coordinate_count(inst_.dim) + 1u));
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageStoreMipVimage::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -893,12 +998,13 @@ DecodeResult decodeImageAtomicDecUintVimage(const MachineInst *opcode,
 } // namespace detail
 
 ImageGetResinfoVimage::ImageGetResinfoVimage(const MachineInst *inst)
-    : Vimage("image_get_resinfo", reinterpret_cast<const OpEncoding *>(inst),
-             selected_exec_fn(InstructionExecutionId::ImageGetResinfoVimage)),
+    : ImageAddressInstruction("image_get_resinfo", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageGetResinfoVimage)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, false, false),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(32, OperandType::OPR_VGPR, 0),
-      rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
+      rsrc((reinterpret_cast<const OpEncoding *>(inst)->r128 ? 128u : 256u), OperandType::OPR_SREG,
+           reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
@@ -920,8 +1026,8 @@ DecodeResult decodeImageGetResinfoVimage(const MachineInst *opcode,
 } // namespace detail
 
 ImageBvhIntersectRayVimage::ImageBvhIntersectRayVimage(const MachineInst *inst)
-    : Vimage("image_bvh_intersect_ray", reinterpret_cast<const OpEncoding *>(inst),
-             selected_exec_fn(InstructionExecutionId::ImageBvhIntersectRayVimage)),
+    : ImageAddressInstruction("image_bvh_intersect_ray", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageBvhIntersectRayVimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(352, OperandType::OPR_VGPR, 0),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
@@ -946,8 +1052,9 @@ DecodeResult decodeImageBvhIntersectRayVimage(const MachineInst *opcode,
 } // namespace detail
 
 ImageBvh64IntersectRayVimage::ImageBvh64IntersectRayVimage(const MachineInst *inst)
-    : Vimage("image_bvh64_intersect_ray", reinterpret_cast<const OpEncoding *>(inst),
-             selected_exec_fn(InstructionExecutionId::ImageBvh64IntersectRayVimage)),
+    : ImageAddressInstruction(
+          "image_bvh64_intersect_ray", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::ImageBvh64IntersectRayVimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(384, OperandType::OPR_VGPR, 0),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {

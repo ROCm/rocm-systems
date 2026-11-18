@@ -7,6 +7,9 @@ CPU-specific SIMD arithmetic.
 
 ## Scope and contract
 
+GETREG/SETREG hardware-register access stays in Rocjitsu’s VM. Its register mapping,
+privilege checks, topology, and execution side effects are outside this arithmetic library.
+
 The library is a collection of C entry points mapping one-to-one to GPU instructions.
 Each aims to reproduce the instruction's arithmetic, synchronously on the calling
 CPU thread. Operation is stateless: operands and controls arrive as arguments,
@@ -148,18 +151,34 @@ Mode 7 is a temporary, instruction-specific policy outside the ordered modes.
 Each entry point selects the arithmetic and FP status policy matching Rocjitsu's
 previous behavior. This can retain instruction-specific details beyond the
 other modes, such as rounding FP16 results before applying OMOD.
-FP32 MUL selects numeric-only exact semantics in every configuration. Its
-integration retains Rocjitsu's existing exception classifier for Compatibility;
-explicit mode 3 uses the library's qualified reporting domain instead.
+FP32 MUL retains Rocjitsu's inherited numerical and exception-classification
+models inside the library for Compatibility; explicit mode 3 uses its separately
+qualified reporting domain. Gfx12 binary arithmetic and selection likewise own
+their inherited Compatibility causes in the library. Their status storage must
+be valid when these policies report. Gfx1250 selection has a separate entry-point
+suffix because its inherited Compatibility policy does not report causes.
+
+Gfx12 scalar FP Compatibility computes the inherited numerical result and FP
+status inside the library; the VM commits the destination and raises guest traps.
+For arithmetic and conversion, this inherited reporting does not qualify explicit
+mode 3, which continues to reject unsupported status. Compatibility requires
+valid status storage for these operations, as specified by their declarations.
 Compatibility may retain demonstrated hardware-fidelity improvements over the
 previous interpreter; instruction contracts document such exceptions.
+On RDNA4 the library also records invalid inputs to FP32 binary arithmetic
+and min/max, overflow of FP32 add/subtract before OMOD, and signaling
+floating-point compares on NaN. The comparison library owns the inherited
+Compatibility reporting gate: a nonfinite selected operand enables signaling
+causes across the wave, including denormal pairs in the other Wave64 half.
+The simulator only commits the comparison mask and causes.
+Dual FP32 arithmetic slots share the wave’s
+
+exception flags. Explicit numeric-only modes suppress these additional flags.
 Rocjitsu's [`arithmetic.semantics`](configuration.md#cpu-arithmetic-policy)
 setting maps directly to these modes and defaults to compatibility. Its string
 values are the lowercase constant names without `RJ_ARITH_SEMANTICS_`.
-The migrated families are RDNA3/RDNA4 dense WMMA, RDNA4 sparse WMMA, and RDNA3/RDNA4 fused floating-point
-arithmetic, basic floating-point arithmetic and selection, division and dot products.
-VOPD remains unmigrated. RDNA3.5, CDNA, and other handlers retain their existing
-implementations.
+[Instruction coverage](../lib/arith/COVERAGE.md) describes the migrated families.
+Other handlers retain their existing implementations.
 
 ### Guest FP controls
 
@@ -260,7 +279,7 @@ sanitizers provide broader validation; ordinary tests need no GPU.
 Each `*_test.cpp` builds as a separate executable, with individual GTest cases
 exposed to CTest. Public headers are compiled independently as C23 and C++17.
 
-## Benchmarking (planned)
+## Benchmarking
 
 No benchmark executable is built at this stage. The following describes its intended interface.
 

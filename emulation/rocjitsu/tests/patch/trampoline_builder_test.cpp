@@ -1075,7 +1075,8 @@ TEST(TrampolineBuilderEmit, ProbeCallRejectsUnsupportedBoundaryDrainWithoutOutpu
 // A separately constructed plan can name the literal source code instead of
 // an SGPR. The failed vector builder must stop emission without returning bytes.
 TEST(TrampolineBuilderEmit, LiteralArgumentSourceFailurePropagates) {
-  for (const auto source : {ProbeArgSource::LogBufferPtrLo, ProbeArgSource::LogBufferPtrHi}) {
+  for (const ProbeArgSource source :
+       {ProbeArgSource::LogBufferPtrLo, ProbeArgSource::LogBufferPtrHi}) {
     SCOPED_TRACE(static_cast<int>(source));
     TrampolinePlan plan = make_probe_plan();
     plan.entry_storage_base = 20;
@@ -1091,6 +1092,84 @@ TEST(TrampolineBuilderEmit, LiteralArgumentSourceFailurePropagates) {
     EXPECT_EQ(err, "probe-call emission: argument 0 (" + source_name +
                        "): v_mov_b32 from a literal needs build_v_mov_b32_imm");
     EXPECT_FALSE(TrampolineBuilder::emit_probe_call(plan).has_value());
+  }
+}
+
+TEST(TrampolineBuilderEmit, EntrySnapshotArgumentSourceFailurePropagates) {
+  for (const ProbeArgSource source :
+       {ProbeArgSource::EntrySgpr, ProbeArgSource::EntryVgprLane0, ProbeArgSource::EntryTtmp}) {
+    SCOPED_TRACE(static_cast<int>(source));
+    TrampolinePlan plan = make_probe_plan(
+        source == ProbeArgSource::EntryTtmp ? ROCJITSU_CODE_ARCH_CDNA5 : ROCJITSU_CODE_ARCH_CDNA2);
+    plan.entry_storage_base = 20;
+    plan.entry_register_captures = {
+        {.source_index = 0,
+         .sgpr = 22,
+         .source_class = source == ProbeArgSource::EntrySgpr   ? RegClass::SGPR
+                         : source == ProbeArgSource::EntryTtmp ? RegClass::TTMP
+                                                               : RegClass::VGPR}};
+    plan.probe_args = {{source, 0}};
+    std::string error;
+    ASSERT_TRUE(
+        TrampolineBuilder::plan_probe_call(plan, arg_abi(1), make_sgpr_set({4}), {}, &error))
+        << error;
+    plan.entry_register_captures.front().sgpr = kVectorSrcLiteral;
+    EXPECT_FALSE(TrampolineBuilder::emit_probe_call(plan, &error).has_value());
+    const std::string source_name = source == ProbeArgSource::EntrySgpr   ? "EntrySgpr"
+                                    : source == ProbeArgSource::EntryTtmp ? "EntryTtmp"
+                                                                          : "EntryVgprLane0";
+    EXPECT_EQ(error, "probe-call emission: argument 0 (" + source_name +
+                         "): v_mov_b32 from a literal needs build_v_mov_b32_imm");
+    EXPECT_FALSE(TrampolineBuilder::emit_probe_call(plan).has_value());
+  }
+}
+
+TEST(TrampolineBuilderPlan, RejectsInvalidAndDuplicateEntryTtmpCaptures) {
+  for (const std::vector<EntryRegisterCapture> &captures :
+       {std::vector<EntryRegisterCapture>{{16, 22, RegClass::TTMP}},
+        std::vector<EntryRegisterCapture>{{9, 22, RegClass::TTMP}, {9, 23, RegClass::TTMP}}}) {
+    TrampolinePlan plan = make_probe_plan(ROCJITSU_CODE_ARCH_CDNA5);
+    plan.entry_storage_base = 20;
+    plan.entry_register_captures = captures;
+    plan.probe_args = {{.source = ProbeArgSource::EntryTtmp, .register_index = 9}};
+    std::string error;
+    EXPECT_FALSE(
+        TrampolineBuilder::plan_probe_call(plan, arg_abi(1), make_sgpr_set({4}), {}, &error));
+    EXPECT_EQ(error, "entry register capture is outside the framework-owned register run");
+  }
+}
+
+TEST(TrampolineBuilderPlan, RejectsEntryTtmpCapturesWithoutUnprivilegedReads) {
+  for (const rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
+        ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2,
+        ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+    SCOPED_TRACE(static_cast<int>(arch));
+    TrampolinePlan plan = make_probe_plan(arch);
+    plan.entry_storage_base = 20;
+    plan.entry_register_captures = {
+        {.source_index = 9, .sgpr = 22, .source_class = RegClass::TTMP}};
+    plan.probe_args = {{.source = ProbeArgSource::EntryTtmp, .register_index = 9}};
+    std::string error;
+    EXPECT_FALSE(
+        TrampolineBuilder::plan_probe_call(plan, arg_abi(1), make_sgpr_set({4}), {}, &error));
+    EXPECT_NE(error.find("unprivileged TTMP reads"), std::string::npos) << error;
+  }
+}
+
+TEST(TrampolineBuilderPlan, EntryTtmpCapturesSupportUserReadableTargets) {
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(static_cast<int>(arch));
+    TrampolinePlan plan = make_probe_plan(arch);
+    plan.entry_storage_base = 20;
+    plan.entry_register_captures = {
+        {.source_index = 15, .sgpr = 22, .source_class = RegClass::TTMP}};
+    plan.probe_args = {{.source = ProbeArgSource::EntryTtmp, .register_index = 15}};
+    std::string error;
+    ASSERT_TRUE(
+        TrampolineBuilder::plan_probe_call(plan, arg_abi(1), make_sgpr_set({4}), {}, &error))
+        << error;
+    EXPECT_TRUE(TrampolineBuilder::emit_probe_call(plan, &error).has_value()) << error;
   }
 }
 
@@ -1434,6 +1513,55 @@ TEST(TrampolineBuilderEmit, Cdna2M0RestoreIsPaddedBeforeTheOriginal) {
   util::FailureOr<uint16_t> maybe_scalar_operand_m0 = scalar_operand_m0(plan.arch);
   ASSERT_TRUE(maybe_scalar_operand_m0.succeeded());
   EXPECT_EQ(decode_sop1_sdst(w[index - 2]), maybe_scalar_operand_m0.value());
+}
+
+// The caller knows M0=0, so s2 is the MOVRELS source in its supplied live set.
+// Keep this concrete reader hazard covered without claiming that the generic
+// Instrumentor can prove an unknown M0-displaced register alias.
+TEST(TrampolineBuilderEmit, MovrelsM0RestorePadsToOneWaitState) {
+  constexpr uint32_t kMovrelsS1S2 = 0xbe812a02u;
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(arch);
+    TrampolinePlan plan = {.arch = arch,
+                           .anchor_offset = 0x1000,
+                           .original_size = 4,
+                           .trampoline_offset = 0x2000,
+                           .return_target = 0x1004,
+                           .original_words = {kMovrelsS1S2},
+                           .before_items = {},
+                           .after_items = {},
+                           .probe_args = {},
+                           .argument_moves = {},
+                           .argument_copy_temp = std::nullopt,
+                           .entry_storage_base = std::nullopt,
+                           .entry_register_captures = {},
+                           .register_saves = {},
+                           .preserve_m0 = true,
+                           .special_state_saves = {},
+                           .builder_clobbers = {},
+                           .probe_target_offset = 0x3000,
+                           .vgpr_spills = {},
+                           .sgpr_spills = {},
+                           .acc_spills = {}};
+    std::string error;
+    ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, kProbeAbi, make_sgpr_set({2}),
+                                                   /*probe_body_clobbers=*/{}, &error))
+        << error;
+    const std::optional<TrampolineBytes> bytes = TrampolineBuilder::emit_probe_call(plan, &error);
+    ASSERT_TRUE(bytes) << error;
+    const std::vector<uint32_t> &words = bytes->trampoline_words;
+    const size_t original = bytes->original_byte_offset / sizeof(uint32_t);
+    ASSERT_GE(original, 2u);
+    ASSERT_LT(original, words.size());
+    EXPECT_EQ(words[original], kMovrelsS1S2);
+    const util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
+    const util::FailureOr<uint32_t> mov = sop1_op_mov_b32(arch);
+    const util::FailureOr<uint16_t> m0 = scalar_operand_m0(arch);
+    ASSERT_TRUE(nop.succeeded() && mov.succeeded() && m0.succeeded());
+    EXPECT_EQ(words[original - 1], nop.value());
+    EXPECT_EQ(decode_sop1_op(words[original - 2]), mov.value());
+    EXPECT_EQ(decode_sop1_sdst(words[original - 2]), m0.value());
+  }
 }
 
 // The return branch (trailing word) targets anchor + original_size.
@@ -1835,6 +1963,52 @@ TEST(TrampolineBuilderEmit, Rdna4GuardsScalarSavesBeforeArgumentReads) {
                                                    make_sgpr_set({8}), &error))
         << error;
     EXPECT_EQ(plan.planned_envelope_word_count, cdna.planned_envelope_word_count + 3);
+  }
+}
+
+TEST(TrampolineBuilderEmit, Rdna3WaitsForValuDestinationsAtBothCallBoundaries) {
+  // Immediate 0x0fff waits for VA_VDST=0 and disables the other counters.
+  constexpr uint32_t kWaitVaVdst = 0xbf880fffu;
+  for (const bool saves_vgpr : {false, true}) {
+    SCOPED_TRACE(saves_vgpr);
+    TrampolinePlan plan = make_probe_plan(ROCJITSU_CODE_ARCH_RDNA3);
+    RegisterSet live;
+    if (saves_vgpr) {
+      live.expand({RegClass::VGPR, 8, 1});
+      plan.register_saves = {{.cls = RegClass::VGPR, .source = 8, .destination = 16}};
+    }
+    std::string error;
+    ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, kProbeAbi, live, live, &error)) << error;
+    const std::optional<TrampolineBytes> bytes = TrampolineBuilder::emit_probe_call(plan, &error);
+    ASSERT_TRUE(bytes) << error;
+    const std::vector<uint32_t> &words = bytes->trampoline_words;
+    ASSERT_GE(words.size(), 2u);
+    EXPECT_EQ(words[1], kWaitVaVdst);
+    EXPECT_EQ(std::ranges::count(words, kWaitVaVdst), 2);
+
+    const util::FailureOr<uint32_t> call_word =
+        build_s_swappc_b64(30, plan.target_pair_base, plan.arch);
+    ASSERT_TRUE(call_word.succeeded());
+    const std::vector<uint32_t>::const_iterator call = std::ranges::find(words, call_word.value());
+    ASSERT_NE(call, words.end());
+    ASSERT_GT(words.end() - call, 2);
+    EXPECT_EQ(*(call + 2), kWaitVaVdst);
+
+    if (saves_vgpr) {
+      const util::FailureOr<uint32_t> save_word = build_v_mov_b32_src(16, 256 + 8, plan.arch);
+      const util::FailureOr<uint32_t> restore_word = build_v_mov_b32_src(8, 256 + 16, plan.arch);
+      ASSERT_TRUE(save_word.succeeded());
+      ASSERT_TRUE(restore_word.succeeded());
+      const std::vector<uint32_t>::const_iterator save =
+          std::ranges::find(words, save_word.value());
+      const std::vector<uint32_t>::const_iterator restore =
+          std::ranges::find(words, restore_word.value());
+      ASSERT_NE(save, words.end());
+      ASSERT_NE(restore, words.end());
+      EXPECT_LT(words.begin() + 1, save);
+      EXPECT_LT(save, call);
+      EXPECT_LT(call + 2, restore);
+    }
   }
 }
 

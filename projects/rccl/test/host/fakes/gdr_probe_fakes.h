@@ -5,7 +5,7 @@
  ************************************************************************/
 
 // Seam for ncclIbProbeGdrSupport (src/misc/gdr_probe.cc), for binaries that do not
-// compile gdr_probe.cc (rccl-UnitTestsMicro does, so it cannot link this). Fails
+// compile gdr_probe.cc (rccl-UnitTestsMicroMiscGdrProbe does, so it cannot link this). Fails
 // loud by default.
 
 #ifndef RCCL_TEST_HOST_GDR_PROBE_FAKES_H_

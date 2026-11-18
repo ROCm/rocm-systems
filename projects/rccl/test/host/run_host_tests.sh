@@ -166,7 +166,7 @@ do_host_tests() {
       binaries+=("$bin:$XML_FILE")
       continue
     fi
-    # rccl-UnitTestsMicroDdaColl -> host_tests_micro_dda_coll.xml
+    # rccl-UnitTestsMicroDdaAllGatherFabricLl -> host_tests_micro_dda_all_gather_fabric_ll.xml
     xml_stem="$(printf '%s' "${bin#rccl-UnitTests}" | sed 's/\([a-z0-9]\)\([A-Z]\)/\1_\2/g; s/-/_/g' \
       | tr '[:upper:]' '[:lower:]')"
     binaries+=("$bin:$SCRIPT_DIR/host_tests_${xml_stem}.xml")
@@ -395,6 +395,12 @@ do_coverage() {
       --ignore-filename-regex='(/test/|nvtx)' \
       -format=lcov > "$dir/coverage.lcov" \
       || { echo "    error: llvm-cov export failed for $name" >&2; rc=1; continue; }
+
+    # A binary that only tests test/ code exports no records, and lcov rejects an empty tracefile.
+    if ! grep -q '^SF:' "$dir/coverage.lcov"; then
+      echo "    $name: no src/ lines covered, left out of the overall report"
+      continue
+    fi
 
     echo "    $name text report: $dir/coverage.txt"
     echo "    $name html report: $dir/html/index.html"

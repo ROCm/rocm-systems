@@ -496,6 +496,7 @@ BufferStoreFormatD16XMubuf::BufferStoreFormatD16XMubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  vdata.set_register_byte_mask(0x3);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1543,6 +1544,7 @@ BufferStoreFormatD16HiXMubuf::BufferStoreFormatD16HiXMubuf(const MachineInst *in
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  vdata.set_register_byte_mask(0xc);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -2147,10 +2149,13 @@ BufferAtomicAddF32Mubuf::BufferAtomicAddF32Mubuf(const MachineInst *inst)
 namespace detail {
 DecodeResult decodeBufferAtomicAddF32Mubuf(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
   Result validation = Mubuf::validate_encoding(
       "buffer_atomic_add_f32", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (reinterpret_cast<const Mubuf::OpEncoding *>(inst)->glc) [[unlikely]]
+    return emit_error.emit() << "BUFFER_ATOMIC_ADD_F32 cannot return its result on CDNA1";
   return std::make_unique<BufferAtomicAddF32Mubuf>(opcode);
 }
 } // namespace detail
@@ -2185,10 +2190,13 @@ BufferAtomicPkAddF16Mubuf::BufferAtomicPkAddF16Mubuf(const MachineInst *inst)
 namespace detail {
 DecodeResult decodeBufferAtomicPkAddF16Mubuf(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
   Result validation = Mubuf::validate_encoding(
       "buffer_atomic_pk_add_f16", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (reinterpret_cast<const Mubuf::OpEncoding *>(inst)->glc) [[unlikely]]
+    return emit_error.emit() << "BUFFER_ATOMIC_PK_ADD_F16 cannot return its result on CDNA1";
   return std::make_unique<BufferAtomicPkAddF16Mubuf>(opcode);
 }
 } // namespace detail
