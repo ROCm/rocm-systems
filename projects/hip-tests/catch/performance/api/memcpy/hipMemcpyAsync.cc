@@ -131,6 +131,7 @@ HIP_TEST_CASE(Performance_hipMemcpyAsync_HostToHost) {
  *      - Small: 4 KB
  *      - Medium: 4 MB
  *      - Large: 16 MB
+ *      - Larger than the last-level cache: 512 MB
  *    -# Allocation type
  *      - Source: device malloc
  *      - Destination: device malloc
@@ -142,7 +143,12 @@ HIP_TEST_CASE(Performance_hipMemcpyAsync_HostToHost) {
  *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpyAsync_DeviceToDevice_DisablePeerAccess) {
-  const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);
+  const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB, 512_MB);
+  size_t free_memory = 0, total_memory = 0;
+  HIP_CHECK(hipMemGetInfo(&free_memory, &total_memory));
+  if (free_memory < 2 * allocation_size + 1_MB) {
+    HIP_SKIP_TEST("Not enough free device memory");
+  }
   const auto src_allocation_type = LinearAllocs::hipMalloc;
   const auto dst_allocation_type = LinearAllocs::hipMalloc;
   RunBenchmark(dst_allocation_type, src_allocation_type, allocation_size, hipMemcpyDeviceToDevice);
