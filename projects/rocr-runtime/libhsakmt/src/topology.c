@@ -873,7 +873,7 @@ void hsakmt_topology_setup_is_dgpu_param(HsaNodeProperties *props)
 		hsakmt_is_dgpu = true;
 }
 
-bool hsakmt_topology_is_svm_needed(HSA_ENGINE_ID EngineId)
+bool hsakmt_topology_is_svm_needed(HSA_GFXIP_VERSION EngineId)
 {
 	if (hsakmt_is_dgpu)
 		return true;
@@ -1222,7 +1222,7 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(HsaKFDContext *ctx,
 		else if (strcmp(prop_name, "max_slots_scratch_cu") == 0)
 			props->MaxSlotsScratchCU = (uint32_t)prop_val;
 		else if (strcmp(prop_name, "fw_version") == 0)
-			props->EngineId.Value = (uint32_t)prop_val & 0x3ff;
+			props->uCodeEngineVersions.uCodeCompute = (uint32_t)prop_val & 0xfff;
 		else if (strcmp(prop_name, "vendor_id") == 0)
 			props->VendorId = (uint32_t)prop_val;
 		else if (strcmp(prop_name, "device_id") == 0)
@@ -1240,7 +1240,7 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(HsaKFDContext *ctx,
 		else if (strcmp(prop_name, "drm_render_minor") == 0)
 			props->DrmRenderMinor = (int32_t)prop_val;
 		else if (strcmp(prop_name, "sdma_fw_version") == 0)
-			props->uCodeEngineVersions.Value = (uint32_t)prop_val & 0x3ff;
+			props->uCodeEngineVersions.uCodeSDMA = (uint32_t)prop_val & 0x3ff;
 		else if (strcmp(prop_name, "hive_id") == 0)
 			props->HiveID = prop_val;
 		else if (strcmp(prop_name, "unique_id") == 0)

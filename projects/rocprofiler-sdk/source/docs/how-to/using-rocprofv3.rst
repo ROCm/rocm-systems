@@ -1659,14 +1659,13 @@ Here are the properties of the JSON output schema:
             - **num_cp_queues** `(integer)`: Number of CP queues.
             - **max_engine_clk_ccompute** `(integer)`: Maximum engine clock for compute.
             - **max_engine_clk_fcompute** `(integer)`: Maximum engine clock for F compute.
-            - **sdma_fw_version** `(object)`: SDMA firmware version.
+            - **sdma_fw_version** `(object)`: SDMA and compute firmware versions.
                - **uCodeSDMA** `(integer, required)`: SDMA microcode version.
-               - **uCodeRes** `(integer, required)`: Reserved microcode version.
-            - **fw_version** `(object)`: Firmware version.
-               - **uCode** `(integer, required)`: Microcode version.
-               - **Major** `(integer, required)`: Major version.
-               - **Minor** `(integer, required)`: Minor version.
-               - **Stepping** `(integer, required)`: Stepping version.
+               - **uCodeCompute** `(integer, required)`: Compute microcode version.
+            - **fw_version** `(object)`: GFXIP version.
+               - **Major** `(integer, required)`: GFXIP major version.
+               - **Minor** `(integer, required)`: GFXIP minor version.
+               - **Stepping** `(integer, required)`: GFXIP stepping.
             - **capability** `(object, required)`: Agent capability flags.
                - **HotPluggable** `(integer, required)`: Hot pluggable capability.
                - **HSAMMUPresent** `(integer, required)`: HSAMMU present capability.

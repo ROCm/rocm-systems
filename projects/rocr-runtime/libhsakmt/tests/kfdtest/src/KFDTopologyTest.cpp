@@ -55,7 +55,7 @@ TEST_F(KFDTopologyTest , BasicTest) {
                 EXPECT_GT(pNodeProperties->NumFComputeCores, HSAuint32(0)) << "Node index: " << node
                                                                            << "No GPUs core are connected.";
                 // EngineId only applies to GPU, not CPU-only nodes
-                EXPECT_GT(pNodeProperties->EngineId.ui32.uCode, 0) << "uCode version is 0";
+                EXPECT_GT(pNodeProperties->uCodeEngineVersions.uCodeCompute, 0) << "uCode version is 0";
                 EXPECT_GE(pNodeProperties->EngineId.ui32.Major, 7) << "Major Version is less than 7";
                 EXPECT_LT(pNodeProperties->EngineId.ui32.Minor, 10) << "Minor Version is greater than 9";
                 EXPECT_GT(pNodeProperties->uCodeEngineVersions.uCodeSDMA, 0) << "sDMA firmware version is 0";

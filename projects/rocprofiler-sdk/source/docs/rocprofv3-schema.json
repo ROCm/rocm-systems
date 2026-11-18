@@ -197,39 +197,34 @@
                                             "type": "integer",
                                             "description": "SDMA microcode version"
                                         },
-                                        "uCodeRes": {
+                                        "uCodeCompute": {
                                             "type": "integer",
-                                            "description": "Reserved microcode version"
+                                            "description": "Compute microcode version"
                                         }
                                     },
                                     "required": [
                                         "uCodeSDMA",
-                                        "uCodeRes"
+                                        "uCodeCompute"
                                     ]
                                 },
                                 "fw_version": {
                                     "type": "object",
-                                    "description": "Firmware version",
+                                    "description": "GFXIP version",
                                     "properties": {
-                                        "uCode": {
-                                            "type": "integer",
-                                            "description": "Microcode version"
-                                        },
                                         "Major": {
                                             "type": "integer",
-                                            "description": "Major version"
+                                            "description": "GFXIP major version"
                                         },
                                         "Minor": {
                                             "type": "integer",
-                                            "description": "Minor version"
+                                            "description": "GFXIP minor version"
                                         },
                                         "Stepping": {
                                             "type": "integer",
-                                            "description": "Stepping version"
+                                            "description": "GFXIP stepping"
                                         }
                                     },
                                     "required": [
-                                        "uCode",
                                         "Major",
                                         "Minor",
                                         "Stepping"

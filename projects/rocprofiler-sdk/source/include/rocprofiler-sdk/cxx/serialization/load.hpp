@@ -189,14 +189,13 @@ void
 load(ArchiveT& ar, HSA_ENGINE_VERSION& data)
 {
     ROCP_SDK_LOAD_DATA_BITFIELD("uCodeSDMA", uCodeSDMA);
-    ROCP_SDK_LOAD_DATA_BITFIELD("uCodeRes", uCodeRes);
+    ROCP_SDK_LOAD_DATA_BITFIELD("uCodeCompute", uCodeCompute);
 }
 
 template <typename ArchiveT>
 void
-load(ArchiveT& ar, HSA_ENGINE_ID& data)
+load(ArchiveT& ar, HSA_GFXIP_VERSION& data)
 {
-    ROCP_SDK_LOAD_DATA_BITFIELD("uCode", ui32.uCode);
     ROCP_SDK_LOAD_DATA_BITFIELD("Major", ui32.Major);
     ROCP_SDK_LOAD_DATA_BITFIELD("Minor", ui32.Minor);
     ROCP_SDK_LOAD_DATA_BITFIELD("Stepping", ui32.Stepping);

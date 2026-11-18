@@ -157,7 +157,7 @@ extern int hsakmt_debug_level;
 #define HSA_GET_GFX_VERSION_HEX_MINOR(gfxv)   (((gfxv) >> 8) & 0xff)
 #define HSA_GET_GFX_VERSION_HEX_STEP(gfxv)    ((gfxv) & 0xff)
 
-/* Expects HSA_ENGINE_ID.ui32, returns gfxv (full) in hex */
+/* Expects HSA_GFXIP_VERSION.ui32, returns gfxv (full) in hex */
 #define HSA_GET_GFX_VERSION_FULL(ui32) \
 	(((ui32.Major) << 16) | ((ui32.Minor) << 8) | (ui32.Stepping))
 
@@ -233,7 +233,7 @@ HSAKMT_STATUS hsakmt_topology_get_iolink_props(HsaKFDContext *ctx,
 				      HSAuint32 NumIoLinks,
 				      HsaIoLinkProperties *IoLinkProperties);
 void hsakmt_topology_setup_is_dgpu_param(HsaNodeProperties *props);
-bool hsakmt_topology_is_svm_needed(HSA_ENGINE_ID EngineId);
+bool hsakmt_topology_is_svm_needed(HSA_GFXIP_VERSION EngineId);
 
 HSAuint32 hsakmt_PageSizeFromFlags(unsigned int pageSizeFlags);
 HSAuint64 MapDrmPerm(HsaMemoryMapFlags flags);
