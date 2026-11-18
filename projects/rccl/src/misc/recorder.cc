@@ -13,6 +13,7 @@ using namespace std::chrono;
 
 namespace rccl {
 __thread int Recorder::rcclReplayThreadIdx = -1;
+thread_local bool Recorder::skipped = false;
 int Recorder::depth = 0;
 
 static char buffer[4096];
