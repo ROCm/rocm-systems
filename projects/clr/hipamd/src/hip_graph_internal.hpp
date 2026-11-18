@@ -254,7 +254,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   GraphNode(hipGraphNodeType type, const char* style = "", const char* shape = "",
             const char* label = "")
       : hipGraphNodeDOTAttribute(style, shape, label),
-        id_(nextID.fetch_add(1, std::memory_order_relaxed)),
+        id_(0),
         type_(type),
         visited_(false),
         parentGraph_(nullptr),
@@ -389,7 +389,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     stream_ = stream;
     return hipSuccess;
   }
-  /// Return node unique ID
+  /// Return the node ID local to its containing graph
   int GetID() const { return id_; }
   /// Returns command for graph node
   virtual std::vector<amd::Command*>& GetCommands() { return commands_; }
@@ -573,7 +573,6 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   int hw_queue_id_ = -1; //! Hardware queue ID on which this node will be executed
   int32_t segment_id_ = -1;  //! Segment ID on which this node will be executed
   int32_t launch_id_ = -1;  //! Launch ID of this node in the entire graph execution sequence
-  static std::atomic<int> nextID;
   Graph* parentGraph_;
   static std::unordered_set<GraphNode*> nodeSet_;
   static amd::Monitor nodeSetLock_;
@@ -1058,6 +1057,7 @@ class Graph {
   std::unordered_map<UserObject*, int> graphUserObj_;
   unsigned int id_;
   static std::atomic<int> nextID;
+  unsigned int nextNodeID_ = 0;
   uint32_t memalloc_nodes_ = 0;  //!< Count of unreleased Memalloc nodes
   std::vector<Node> roots_;      //!< Root nodes, used in parallel launches
   std::vector<Node> leafs_;      //!< The list of leaf nodes on every parallel stream
@@ -1386,7 +1386,21 @@ class GraphExecSegmented : public GraphExecBase {
     // it has no remaining dependency, or its first kernel carries the one dependency in its
     // ext-dispatch dep_signal. Later packets keep the barrier bit.
     bool firstPacketUnordered = false;
+    // A patch_list entry whose packet is in dispatchPackets or is fallbackDepBarrier, and the
+    // last known index of that packet in dispatchPackets (kNoSlot when it has none). The patch
+    // functions below only touch these entries.
+    struct OwnedPatch {
+      size_t patch;
+      size_t slot;
+    };
+    static constexpr size_t kNoSlot = ~size_t{0};
+    std::vector<OwnedPatch> ownedPatches;
     PacketBatch() {}
+    // Index in dispatchPackets of |owned|'s packet. Uses the cached slot when it still holds
+    // the packet; otherwise searches the batch and re-caches. Callers handle fallbackDepBarrier,
+    // which has no slot. A packet that is not in the batch is a broken patch, and the search
+    // asserts.
+    size_t findAndCachePacketSlot(OwnedPatch& owned, const uint8_t* packet);
     // O(1) enable/disable operations - just update state
     void setEnabled(GraphNode* node, bool enabled);
     // Rebuild cached filtered lists if cache is stale.

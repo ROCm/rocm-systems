@@ -300,6 +300,7 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "videodecode"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4
+            -md5_check ${ROCM_PATH}/share/rocdecode/md5/AMD_driving_virtual_20-H265_yuv420.md5
   )
   set_test_env(video_decode-HEVC)
   set_codec_skip(video_decode-HEVC)
@@ -315,6 +316,7 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "videodecode"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H264.mp4
+            -md5_check ${ROCM_PATH}/share/rocdecode/md5/AMD_driving_virtual_20-H264_yuv420.md5
   )
   set_test_env(video_decode-AVC)
   set_codec_skip(video_decode-AVC)
@@ -330,6 +332,7 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "videodecode"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-AV1.mp4
+            -md5_check ${ROCM_PATH}/share/rocdecode/md5/AMD_driving_virtual_20-AV1_yuv420.md5
   )
   set_test_env(video_decode-AV1)
   set_codec_skip(video_decode-AV1)
@@ -345,6 +348,7 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "videodecode"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-VP9.ivf
+            -md5_check ${ROCM_PATH}/share/rocdecode/md5/AMD_driving_virtual_20-VP9_yuv420.md5
   )
   set_test_env(video_decode-VP9)
   set_codec_skip(video_decode-VP9)
@@ -403,6 +407,7 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "videodecodemem"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4
+            -md5_check ${ROCM_PATH}/share/rocdecode/md5/AMD_driving_virtual_20-H265_yuv420.md5
   )
   set_test_env(video_decodeMem-HEVC)
 

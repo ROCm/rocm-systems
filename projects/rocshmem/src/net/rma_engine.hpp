@@ -74,8 +74,10 @@ class RmaEngine {
   uint32_t lkey_for(const void *addr) const;
 
   // --- posting (return the wr_id used; 0 on post failure) -----------------
+  // Inline is chosen automatically when @p len fits the driver-granted
+  // max_inline_data (see post_write); callers do not pass an inline hint.
   uint64_t post_write(int lane, uintptr_t laddr, uint32_t lkey, uintptr_t raddr,
-                      uint32_t rk, uint32_t len, bool inl, uint64_t wr_id);
+                      uint32_t rk, uint32_t len, uint64_t wr_id);
   uint64_t post_read(int lane, uintptr_t laddr, uint32_t lkey, uintptr_t raddr,
                      uint32_t rk, uint32_t len, uint64_t wr_id);
   uint64_t post_fadd(int lane, uintptr_t result, uint32_t lkey, uintptr_t raddr,

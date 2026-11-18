@@ -57,7 +57,7 @@ public:
                           std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
                           IntervalSet ldsIntervals,
                           std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                          MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0,
+                          VgprWriteOrder writeOrder, uint8_t lastRegisterByteMask = 0,
                           LdsAccess ldsAccess = {});
 
   /// Transition an event from ACTIVE to WAVE_COMPLETE.
@@ -110,6 +110,9 @@ public:
     return std::min(bytes, ldsSizeBytes_ - address) / elementBytes * elementBytes;
   }
 
+  void setConditionalVgprWrite(EventId id, ConditionalVgprWrite feedback) {
+    events_.setConditionalVgprWrite(id, feedback);
+  }
   const EventRegistry &events() const { return events_; }
 
   const std::vector<EventId> &getLdsWriteEvents() const { return ldsWriteEvents; }

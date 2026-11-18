@@ -6,6 +6,7 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "mma_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/addr_calc.h"
@@ -71,6 +72,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/vop3p.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/vopc.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
@@ -878,9 +880,13 @@ TEST(MfmaExecTest, SwmmacI32K64U4VaryingSelectorsMatchSparseReference) {
     for (uint32_t col = 0; col < 16; ++col)
       write_nibble(b_base, amdgpu::swmmac_b_input_loc<16, 64>(32, col, k, 4), (k % 15u) + 1u);
 
-  amdgpu::exec_rdna_swmmac_i32<4, 64>(*cu, 32, d_base, a_base, b_base, index_base, /*index_key=*/0,
-                                      /*a_signed=*/false,
-                                      /*b_signed=*/false, /*clamp=*/false);
+  ASSERT_NO_FATAL_FAILURE(
+      mma_test::execute(*cu, *wf,
+                        rdna4::build_vop3p(rdna4::kVSwmmacI3216x16x64Iu4Vop3p,
+                                           {.vdst = uint8_t(d_base - vb),
+                                            .src0 = uint16_t(256 + a_base - vb),
+                                            .src1 = uint16_t(256 + b_base - vb),
+                                            .src2 = uint16_t(256 + index_base - vb)})));
   for (uint32_t row = 0; row < 16; ++row)
     for (uint32_t col = 0; col < 16; ++col) {
       uint32_t expected = 0;
@@ -916,7 +922,7 @@ TEST(MfmaExecTest, SwmmacF32K32Fp8MatchesSparseReference) {
   const uint32_t vb = wf->vgpr_alloc().base;
   const uint32_t a_base = vb + 0;
   const uint32_t b_base = vb + 4;
-  const uint32_t c_base = vb + 12;
+  const uint32_t c_base = vb + 20; // SWMMAC ties C to D.
   const uint32_t d_base = vb + 20;
   const uint32_t index_base = vb + 32;
 
@@ -970,8 +976,13 @@ TEST(MfmaExecTest, SwmmacF32K32Fp8MatchesSparseReference) {
     }
   }
 
-  amdgpu::exec_swmmac_f32<M, N, K>(*cu, 8, d_base, a_base, b_base, c_base, index_base, 16,
-                                   /*index_key=*/0, amdgpu::extract_fp8, amdgpu::extract_fp8);
+  ASSERT_NO_FATAL_FAILURE(
+      mma_test::execute(*cu, *wf,
+                        rdna4::build_vop3p(rdna4::kVSwmmacF3216x16x32Fp8Fp8Vop3p,
+                                           {.vdst = uint8_t(d_base - vb),
+                                            .src0 = uint16_t(256 + a_base - vb),
+                                            .src1 = uint16_t(256 + b_base - vb),
+                                            .src2 = uint16_t(256 + index_base - vb)})));
 
   for (uint32_t row = 0; row < M; ++row) {
     for (uint32_t col = 0; col < N; ++col) {

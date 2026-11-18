@@ -1,13 +1,13 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""GFX11.5 and GFX12 scalar floating-point operations on SGPRs, independent of EXEC."""
+"""Legacy GFX11.5 scalar FP operations; GFX12 uses rj-arith in every semantics."""
 
 from . import ExecuteContext
 
 
 def gen_scalar_fp(ctx: ExecuteContext) -> str | None:
-    if ctx.arch_name not in ('rdna3_5', 'rdna4'):
+    if ctx.arch_name != 'rdna3_5':
         return None
     parts = ctx.inst.name.split('_')
     if parts[0] != 'S' or parts[-1] not in ('F16', 'F32', 'I32', 'U32'):

@@ -205,6 +205,10 @@ _VARIABLE_KERNEL_LAUNCH_MIN_PAYLOAD_EXPR = (
 # (hipModuleGetFunction: function handles identified by name at launch time)
 PASSTHROUGH_ONLY: Set[str] = {
     "hipModuleGetFunction",
+    # Generated capture would store these process-local struct pointers without
+    # their pointees, so replay could not reconstruct either operation.
+    "hipMemcpyWithAttributesAsync",
+    "hipMemcpy3DWithAttributesAsync",
 }
 
 # ---------------------------------------------------------------------------
@@ -853,6 +857,7 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipArrayGetDescriptor",
     "hipArray3DGetDescriptor",
     "hipArrayGetInfo",
+    "hipArrayGetSparseProperties",
     "hipArrayDestroy",
     "hipGetChannelDesc",
     "hipCreateTextureObject",
@@ -875,6 +880,10 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipGraphDestroy",
     "hipGraphUpload",
     "hipGraphDebugDotPrint",
+    "hipGraphGetId",
+    "hipGraphExecGetId",
+    "hipGraphNodeGetLocalId",
+    "hipGraphNodeGetToolsId",
     "hipGraphNodeGetType",
     "hipGraphNodeGetEnabled",
     "hipGraphKernelNodeGetParams",
@@ -2095,8 +2104,15 @@ _HEADER_PREAMBLE = """\
  * those events as the wrong API.
  * v13: a hipGraphLaunch or hipGraphLaunch_spt event carries pinned host
  * snapshot records after its fixed fields. A v12 reader would launch the
- * graph without restoring them. */
-#define HRR_VERSION ((uint16_t)13u)
+ * graph without restoring them.
+ * v14: hipMemcpyWithAttributesAsync, hipMemcpy3DWithAttributesAsync and
+ * hipArrayGetSparseProperties were appended to HipDispatchTable, shifting
+ * the compiler API IDs up by three. A v13 reader would decode those events
+ * as the wrong API.
+ * v15: four graph ID queries were appended to HipDispatchTable, shifting the
+ * compiler API IDs up by four. A v14 reader would decode those events as the
+ * wrong API. */
+#define HRR_VERSION ((uint16_t)15u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
@@ -3441,8 +3457,10 @@ def _playback_arg(entry: ApiEntry, p: Param, name: str,
     if base in _PLAYBACK_HANDLE_TRANSLATE:
         fn = _PLAYBACK_HANDLE_TRANSLATE[base]
         return f"({t}){fn}(a->{name})"
-    # hipArray_const_t and hipMipmappedArray_const_t
-    if 'hipArray' in base:
+    # hipArray_const_t and hipMipmappedArray_const_t. Match the handle types
+    # exactly: a substring test also catches struct types such as
+    # hipArraySparseProperties, which are output parameters, not handles.
+    if base in ('hipArray_t', 'hipArray_const_t'):
         return f"(hipArray_t)ctx.translate_array(a->{name})"
     if 'hipMipmappedArray' in base:
         return f"(hipMipmappedArray_t)ctx.translate_mipmapped(a->{name})"

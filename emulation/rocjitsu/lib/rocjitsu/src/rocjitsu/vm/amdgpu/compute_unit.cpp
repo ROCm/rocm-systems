@@ -29,6 +29,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/register_modifiers.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/tensor_dma.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/target_registry.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
@@ -49,6 +50,7 @@
 #include <memory>
 #include <span>
 #include <stdexcept>
+#include <string_view>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -1421,9 +1423,7 @@ bool ComputeUnitCore::nullify_unallocated_memory_result(Instruction &inst, const
     return false;
   d.exec_mask = d.lane_mask = 0;
   d.element_lane_masks.clear();
-  if (d.image_sample)
-    for (auto &tap : d.image_sample->taps)
-      tap.lane_mask = 0;
+  visit_image_sample_taps(d, [](auto &tap) { tap.lane_mask = 0; });
   return true;
 }
 
@@ -1674,16 +1674,10 @@ void ComputeUnitCore::report_memory_wait(void *context,
   const auto count = replay ? ++cu.xcnt_diagnostic_count_ : ++cu.memory_wait_diagnostic_count_;
   if (count > kMaxMemoryWaitDiagnostics)
     return;
-  auto counter_name = wait_counter_name(hazard.producer.counter);
   const auto model = waitcnt_model(cu.arch());
-  if (model.succeeded() && uses_legacy_waitcnt(model.value())) {
-    if (hazard.producer.counter == WaitCounterKind::Load)
-      counter_name = "vmcnt";
-    else if (hazard.producer.counter == WaitCounterKind::Store)
-      counter_name = "vscnt";
-    else if (hazard.producer.counter == WaitCounterKind::Ds)
-      counter_name = "lgkmcnt";
-  }
+  const std::string_view counter_name =
+      model.succeeded() ? wait_counter_name(hazard.producer.counter, model.value())
+                        : wait_counter_name(hazard.producer.counter);
   const auto max_wait =
       WaitCounterPolicy::maximum_dependency_wait(cu.arch(), hazard.producer.counter);
   const auto required = max_wait.succeeded() ? std::min(hazard.required_wait, max_wait.value())
@@ -1724,7 +1718,8 @@ void ComputeUnitCore::report_memory_wait(void *context,
   } else {
     util::Logger::warn(std::format(
         "memory-wait: {} wg={} wave={} pc={:#x}: {} of {} before memory result from pc={:#x} is "
-        "known ready ({}). A wait threshold <= {} is required; set top-level wait_checking "
+        "known ready ({}). A wait threshold <= {} is required immediately before this access; set "
+        "top-level wait_checking "
         "to \"off\" (rocjitsu --wait-checking=off) to disable wait checking.",
         cu.full_path(), wf.wg_id(), wf.wf_id(), hazard.consumer_pc,
         hazard.write ? "overwrite" : "read", register_name, hazard.producer.pc, counter_name,
@@ -1857,6 +1852,13 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
                               scoreboard.issue_units(inst, event, config_.arch));
   }
 
+  auto *texel =
+      inst.data() && inst.data()->tag() == GLOBAL_MEM ? inst.data_as<VectorMemState>() : nullptr;
+  const std::optional<uint16_t> feedback_reg =
+      texel && texel->is_load && (inst.flags() & CONDITIONAL_LAST_VGPR_DEF)
+          ? std::optional{static_cast<uint16_t>(texel->dst_reg_base - wf.vgpr_alloc().base +
+                                                texel->destination_vgpr_count())}
+          : std::nullopt;
   struct Destination {
     RegisterRef reg;
     uint64_t lanes;
@@ -1922,9 +1924,17 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
       for (unsigned i = 0; i < count; ++i) {
         const auto reg = registers[i];
         const auto lanes = reg.cls == RegClass::VGPR ? vector_lanes : ~uint64_t{0};
-        for_each_memory_result_range(
-            reg, modifiers, sram_ecc(),
-            [&](RegisterRef range, uint8_t bytes) { append(range, lanes, bytes); });
+        for_each_memory_result_range(reg, modifiers, sram_ecc(),
+                                     [&](RegisterRef range, uint8_t bytes) {
+                                       if (feedback_reg && range.cls == RegClass::VGPR &&
+                                           range.index + range.width - 1 == *feedback_reg) {
+                                         if (--range.width)
+                                           append(range, lanes, bytes);
+                                         append({RegClass::VGPR, *feedback_reg, 1}, lanes, 0xf);
+                                       } else {
+                                         append(range, lanes, bytes);
+                                       }
+                                     });
       }
     }
   }
@@ -1962,6 +1972,10 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
       flat && flat_requests != 0 && (flat_requests & ~flat_shared_lanes) == 0;
   const auto xcnt_completion_counter =
       flat_local_route ? WaitCounterKind::Ds : classified.front().counter;
+  std::unique_ptr<MemoryWaitScoreboard::DeferredWrite> feedback_wait;
+  if (feedback_reg && texel->has_feedback_result() &&
+      config_.memory_wait_diagnostics != MemoryWaitDiagnostics::Off)
+    feedback_wait = scoreboard.defer_write({RegClass::VGPR, *feedback_reg, 1});
   std::optional<WaitCounterKind> xcnt_completion;
   for (const auto &event : classified) {
     const auto counter = event.counter;
@@ -2048,7 +2062,17 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
         // to registers in order with native LDS results.
         if (event.kind == WaitEventKind::FlatLoad && counter == WaitCounterKind::Ds)
           result.ordered_overwrite = has_ordered_flat_lds_writeback(config_.arch);
-        scoreboard.add(result);
+        if (feedback_reg && d.reg.cls == RegClass::VGPR && d.reg.index == *feedback_reg) {
+          const auto order = scoreboard.ordered_write_order(event, config_.arch);
+          result.order = order.fifo;
+          result.writeback = order.writeback;
+          if (feedback_wait) {
+            feedback_wait->result = result;
+            texel->feedback_wait = std::move(feedback_wait);
+          }
+        } else {
+          scoreboard.add(result);
+        }
       }
   }
 }
@@ -2181,11 +2205,11 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &w
     access.non_temporal = state.non_temporal;
     access.force_l1_bypass = state.request_force_l1_bypass;
     access.lds_destination = state.lds_dst;
-    if (state.image_sample) {
-      for (const auto &tap : state.image_sample->taps)
-        image_footprints.push_back({std::span(tap.addresses).first(wf_size), tap.lane_mask});
+    if (visit_image_sample_taps(state, [&](const auto &tap) {
+          image_footprints.push_back({std::span(tap.addresses).first(wf_size), tap.lane_mask});
+        }))
       access.image_sample_footprints = image_footprints;
-    } else
+    else
       access.addresses = std::span<const uint64_t>(state.per_lane_addr.data(), wf_size);
     if (!rejected)
       access.element_lane_masks = state.element_lane_masks.view();
@@ -2692,9 +2716,12 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
       wait_state->before(*inst, config_.arch);
     wait_state->bind(active->pc, active, &ComputeUnitCore::report_memory_wait);
   }
-  const bool wait_for_buffer_lanes =
-      wait_state && !wait_state->empty() && inst->is_memory_wait_producer() &&
-      MemoryWaitScoreboard::needs_buffer_payload_lanes(*inst, config_.arch);
+  const bool deferred_texel_feedback =
+      config_.memory_wait_checks_enabled() && (inst->flags() & CONDITIONAL_LAST_VGPR_DEF);
+  const bool check_prepared_memory =
+      deferred_texel_feedback ||
+      (wait_state && !wait_state->empty() && inst->is_memory_wait_producer() &&
+       MemoryWaitScoreboard::needs_buffer_payload_lanes(*inst, config_.arch));
   bool wait_checked = false;
 
   if constexpr (EnableAsync) {
@@ -2722,7 +2749,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
       window = &storage->window.emplace(*this, *active, storage->has_accvgprs);
     if (window) {
       window->before(*inst);
-      if (wait_state && !wait_for_buffer_lanes) {
+      if (wait_state && !check_prepared_memory) {
         wait_state->check_instruction(*inst, *active);
         wait_checked = true;
       }
@@ -2747,7 +2774,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     }
   }
 
-  if (wait_state && !wait_checked && !wait_for_buffer_lanes)
+  if (wait_state && !wait_checked && !check_prepared_memory)
     wait_state->check_instruction(*inst, *active);
 
   struct ProbeWaitIssue {
@@ -2760,7 +2787,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     if (debugger_active)
       probe_wait_issue = ProbeWaitIssue{active->ensure_memory_wait_scoreboard().issue_snapshot(),
                                         active->pc, active->dispatch_generation()};
-    if (!wait_for_buffer_lanes)
+    if (!check_prepared_memory)
       track_memory_wait(*inst, *active);
   }
 
@@ -2891,10 +2918,11 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
   const uint32_t executing_process = active->process_id();
   const util::Result execution_result =
       execute_instruction(inst, *active, &execution_failure_detail_);
-  if (wait_for_buffer_lanes) {
+  if (check_prepared_memory && wait_state)
     wait_state->check_instruction(*inst, *active);
+
+  if (check_prepared_memory)
     track_memory_wait(*inst, *active);
-  }
 
   if (execution_result.failed()) [[unlikely]] {
     fail_current_instruction();
@@ -3015,22 +3043,30 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
       const bool check_buffer = d.reports_buffer_residency() && active->address_space() &&
                                 vm_access && vm_access->info().ready;
       const auto ranges = check_residency ? vm_access->nonresident_prt_ranges() : nullptr;
-      if (check_residency || check_buffer) {
+      const bool check_feedback =
+          d.image_status && active->address_space() && vm_access && vm_access->info().ready;
+      if (check_residency || check_feedback || check_buffer) {
         d.translated.access = *vm_access;
         d.translated.initialized = true;
       }
+      // Check sparse textures before offering a fault or watchpoint. The pipeline
+      // reuses both the snapshot and the per-tap decisions made for the debugger.
+      const bool feedback_ready =
+          !check_feedback || qualify_image_feedback(d, *vm_access) == VmAccessOutcome::Complete;
       if (check_buffer)
         qualify_buffer_residency(d, *vm_access);
       const auto &element_lanes = d.element_lane_masks;
       debug_ranges.reserve(d.wf_size);
       const bool flat = inst->mnemonic().starts_with("flat_");
       auto record = [&](uint64_t lanes, std::span<const uint64_t> addresses,
-                        TranslatedMemoryProgress &progress) {
-        if (d.rejects_private_atomic(lanes))
+                        TranslatedMemoryProgress *progress) {
+        if (!feedback_ready || d.rejects_private_atomic(lanes))
           return;
         if (check_residency) {
-          progress.nonresident_lanes = nonresident_texel_lanes(d, addresses, lanes, ranges.get());
-          lanes &= ~*progress.nonresident_lanes;
+          const auto missing = nonresident_texel_lanes(d, addresses, lanes, ranges.get());
+          if (progress)
+            progress->nonresident_lanes = missing;
+          lanes &= ~missing;
         }
         while (lanes) {
           const auto lane = std::countr_zero(lanes);
@@ -3064,12 +3100,15 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
       };
       const uint64_t lanes =
           transpose_request_lane_mask(d, active->wf_size()) & active->lane_mask();
-      if (d.image_sample) {
-        for (auto &tap : d.image_sample->taps)
-          record(tap.lane_mask & lanes, tap.addresses, tap.translated);
-      } else {
-        record(lanes, d.per_lane_addr, d.translated);
-      }
+      if (!visit_image_sample_taps(d, [&](auto &tap) {
+            const uint64_t resident = tap.lane_mask & lanes & ~image_tap_misses(tap);
+            if constexpr (requires { tap.translated; })
+              record(resident, tap.addresses, &tap.translated);
+            else
+              record(resident, tap.addresses, nullptr);
+          }))
+        record(d.image_status ? lanes & ~d.image_status->misses : lanes, d.per_lane_addr,
+               &d.translated);
     }
   }
   // One predicate for the whole access, used both to decide that this
@@ -3158,6 +3197,9 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     } else {
       if (inst->data()->tag() == GLOBAL_MEM) {
         auto *d = inst->data_as<VectorMemState>();
+        if (wait_state && has_gfx11_plus_image_operands(config_.arch) &&
+            d->image_store_component_mask && d->atomic_op == AtomicOp::NONE && d->lane_mask)
+          wait_state->check_image_store_payload(*inst, *active);
         d->issue_pc = active->pc;
       }
       const VmAccessOutcome memory_outcome = route_memory_inst(std::move(decoded.value()), *active);
