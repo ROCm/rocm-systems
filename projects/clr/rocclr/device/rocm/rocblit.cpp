@@ -3434,6 +3434,7 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
     }
   }
 
+  bool intraOk = true;
   // Dispatch intra-device copies for overlap with SDMA.
   // Set engine to Compute so WaitingSignal(Compute) inside copyBuffer does not
   // see an engine switch and does not add the batch's current_id_ as a dependency.
@@ -3455,7 +3456,8 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
       if (!ShaderCopyBufferBatch(copy_ops_by_size)) {
         LogError("KernelBlitManager::ShaderCopyBufferBatch: Intra-device batch "
                  "copy failed!");
-        return false;
+        intraOk = false;
+        break;
       }
     }
 
@@ -3463,7 +3465,7 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
     // synchronizes the compute stream with them.
     // Compute signals are implicitly ordered on the same AQL queue.
     ProfilingSignal* sig = gpu().Barriers().GetLastSignal();
-    if (sig != nullptr && sig->engine_ != HwQueueEngine::Compute) {
+    if (intraOk && sig != nullptr && sig->engine_ != HwQueueEngine::Compute) {
       gpu().Barriers().AddExternalSignal(sig);
     }
   }
@@ -3476,11 +3478,13 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
   // The last batch signal was at current_id_ after the batch. If intra copies
   // advanced current_id_ past it, add it as external so the barrier picks it up.
   // Check against GetLastSignal to avoid adding a duplicate of current_id_.
-  if (lastBatchSignal != nullptr && lastBatchSignal != gpu().Barriers().GetLastSignal()) {
+  // After a failed intra copy the engine is Compute, which hides it at current_id_ too.
+  if (lastBatchSignal != nullptr &&
+      (!intraOk || lastBatchSignal != gpu().Barriers().GetLastSignal())) {
     gpu().Barriers().AddExternalSignal(lastBatchSignal);
   }
 
-  return true;
+  return intraOk;
 }
 
 // ================================================================================================
