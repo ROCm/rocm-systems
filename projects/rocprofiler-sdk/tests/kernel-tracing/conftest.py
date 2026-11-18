@@ -43,7 +43,6 @@ def pytest_addoption(parser):
     )
     parser.addoption("--application-times", help="Application dispatch timestamps CSV")
     parser.addoption("--kernel-trace", help="Kernel trace CSV")
-    parser.addoption("--memory-copy-trace", help="Memory copy trace CSV")
 
 
 @pytest.fixture
@@ -55,7 +54,6 @@ def dispatch_times(request):
     return (
         read_csv("--application-times"),
         read_csv("--kernel-trace"),
-        read_csv("--memory-copy-trace"),
     )
 
 

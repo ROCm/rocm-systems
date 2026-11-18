@@ -80,13 +80,7 @@ class MQDependencyTest
 {
 public:
     MQDependencyTest() { hsa_init(); }
-    ~MQDependencyTest()
-    {
-        if(!shutdown_done) hsa_shut_down();
-    }
-
-    // Lets a fixture shut the runtime down itself and inspect the returned status.
-    bool shutdown_done = false;
+    ~MQDependencyTest() { hsa_shut_down(); }
 
     std::vector<Device>      cpu;
     std::vector<Device>      gpu;
@@ -248,6 +242,9 @@ public:
         err = hsa_executable_symbol_get_info(
             symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &kern.handle);
         RET_IF_HSA_ERR(err);
+        err = hsa_executable_symbol_get_info(
+            symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE, &kern.kernarg_size);
+        if(err != HSA_STATUS_SUCCESS) return false;
 
         return true;
     }

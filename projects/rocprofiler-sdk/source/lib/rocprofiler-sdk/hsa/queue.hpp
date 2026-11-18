@@ -276,7 +276,7 @@ queue_init();
 
 /**
  * @brief Wraps dispatch-time queries and signal lifetime APIs so that a caller's completion
- * signal reports the kernel's dispatch time. Installed when queue interception is enabled,
+ * signal reports the kernel's dispatch time. Installed for non-inline queue interception,
  * before the HSA API tracing wrappers.
  */
 void

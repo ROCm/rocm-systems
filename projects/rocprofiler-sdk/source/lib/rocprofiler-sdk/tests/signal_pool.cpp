@@ -98,13 +98,18 @@ TEST(hsa, pooled_signal_reuses_handle_and_resets_value)
     EXPECT_EQ(signal_resets, iterations);
 
     auto retire_signal = [](auto& signal) { hsa::Queue::destroy_signal(&signal); };
-    pool.clear(retire_signal);
+    EXPECT_TRUE(pool.clear_if_idle(retire_signal));
     EXPECT_EQ(signal_destructions, 1);
     auto& slot = pool.acquire(hsa::construct_hsa_signal, 9, 0, nullptr, 0);
     EXPECT_EQ(signal_allocations, 2);
     EXPECT_NE(slot.get().value, last);
     EXPECT_EQ(signal_value, 9);
+    const auto borrowed_signal = slot.get().value;
+    EXPECT_FALSE(pool.clear_if_idle(retire_signal));
+    EXPECT_EQ(signal_destructions, 1);
+    EXPECT_TRUE(slot.in_use());
+    EXPECT_EQ(slot.get().value, borrowed_signal);
     EXPECT_TRUE(slot.release());
-    pool.clear(retire_signal);
+    EXPECT_TRUE(pool.clear_if_idle(retire_signal));
     EXPECT_EQ(signal_destructions, 2);
 }

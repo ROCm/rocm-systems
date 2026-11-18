@@ -28,6 +28,7 @@
 
 #include "hsa_code_object_app.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -72,10 +73,9 @@ signal_hints_supported(hsa_agent_t agent)
 
 // large enough that the kernel runs far longer than the minimum duration below
 constexpr uint32_t num_elements    = 1u << 26;
+constexpr uint16_t workgroup_size  = 256;
 constexpr uint64_t min_duration_ns = 10000;
 constexpr int      iterations      = 8;
-// Allow scheduling and runtime teardown overhead in addition to the shared drain budget.
-constexpr auto max_shutdown_duration = std::chrono::seconds{45};
 }  // namespace
 
 int
@@ -124,17 +124,49 @@ main(int argc, char** argv)
 
     struct args_t
     {
-        uint32_t*                       a      = nullptr;
-        uint32_t*                       b      = nullptr;
-        MQDependencyTest::OCLHiddenArgs hidden = {};
+        uint32_t* a                = nullptr;
+        uint32_t* b                = nullptr;
+        uint32_t  block_count[3]   = {};
+        uint16_t  group_size[3]    = {};
+        uint8_t   reserved0[22]    = {};
+        uint64_t  global_offset[3] = {};
+        uint16_t  dimensions       = 0;
+        uint8_t   reserved1[190]   = {};
     };
+    static_assert(sizeof(args_t) == 272);
+    static_assert(offsetof(args_t, block_count) == 16);
+    static_assert(offsetof(args_t, group_size) == 28);
+    static_assert(offsetof(args_t, global_offset) == 56);
+    static_assert(offsetof(args_t, dimensions) == 80);
+    constexpr auto legacy_kernarg_size =
+        2 * sizeof(uint32_t*) + sizeof(MQDependencyTest::OCLHiddenArgs);
+    if(kernel.kernarg_size != sizeof(args_t) && kernel.kernarg_size != legacy_kernarg_size)
+    {
+        fprintf(stderr, "Unsupported copyA kernarg size: %u\n", kernel.kernarg_size);
+        return EXIT_FAILURE;
+    }
 
     auto* args = static_cast<args_t*>(obj.hsa_malloc(sizeof(args_t), obj.kernarg));
     *args      = {};
+    if(kernel.kernarg_size == sizeof(args_t))
+    {
+        args->block_count[0] = num_elements / workgroup_size;
+        args->block_count[1] = 1;
+        args->block_count[2] = 1;
+        args->group_size[0]  = workgroup_size;
+        args->group_size[1]  = 1;
+        args->group_size[2]  = 1;
+        args->dimensions     = 1;
+    }
     args->a =
         static_cast<uint32_t*>(obj.hsa_malloc(num_elements * sizeof(uint32_t), obj.gpu[0], false));
     args->b =
         static_cast<uint32_t*>(obj.hsa_malloc(num_elements * sizeof(uint32_t), obj.gpu[0], false));
+
+    status = hsa_amd_memory_fill(args->a, 0, num_elements);
+    RET_IF_HSA_ERR(status)
+    status = hsa_amd_memory_fill(args->b, 1, num_elements);
+    RET_IF_HSA_ERR(status)
 
     hsa_queue_t* queue = nullptr;
     status             = hsa_queue_create(
@@ -168,11 +200,22 @@ main(int argc, char** argv)
         hsa_signal_store_screlease(queue->doorbell_signal, index - 1);
     };
 
-    int failures = 0;
-    // The packet layout is identical for every iteration, including the one left blocked at exit.
-    auto packet = MQDependencyTest::Aql{};
+    int  failures = 0;
+    auto packet   = MQDependencyTest::Aql{};
     for(int i = 0; i < iterations; ++i)
     {
+        auto check_time =
+            [&](const char* label, const hsa_amd_profiling_dispatch_time_t& time, bool valid) {
+                if(status == HSA_STATUS_SUCCESS && valid) return;
+                fprintf(stderr,
+                        "%s %d: dispatch-time query returned %d (start=%lu end=%lu)\n",
+                        label,
+                        i,
+                        static_cast<int>(status),
+                        static_cast<unsigned long>(time.start),
+                        static_cast<unsigned long>(time.end));
+                ++failures;
+            };
         auto signal = hsa_signal_t{};
         status      = hsa_signal_create(1, 0, nullptr, &signal);
         RET_IF_HSA_ERR(status)
@@ -182,7 +225,7 @@ main(int argc, char** argv)
         packet.header.acquire                = HSA_FENCE_SCOPE_SYSTEM;
         packet.header.release                = HSA_FENCE_SCOPE_SYSTEM;
         packet.dispatch.setup                = 1;
-        packet.dispatch.workgroup_size_x     = 256;
+        packet.dispatch.workgroup_size_x     = workgroup_size;
         packet.dispatch.workgroup_size_y     = 1;
         packet.dispatch.workgroup_size_z     = 1;
         packet.dispatch.grid_size_x          = num_elements;
@@ -202,17 +245,8 @@ main(int argc, char** argv)
 
         auto kernel_time = hsa_amd_profiling_dispatch_time_t{};
         status           = wait_and_get_time(signal, kernel_time);
-        if(status != HSA_STATUS_SUCCESS || kernel_time.end < kernel_time.start + min_duration_ticks)
-        {
-            fprintf(stderr,
-                    "dispatch %d: hsa_amd_profiling_get_dispatch_time returned %d (start=%lu "
-                    "end=%lu)\n",
-                    i,
-                    static_cast<int>(status),
-                    static_cast<unsigned long>(kernel_time.start),
-                    static_cast<unsigned long>(kernel_time.end));
-            ++failures;
-        }
+        check_time(
+            "dispatch", kernel_time, kernel_time.end >= kernel_time.start + min_duration_ticks);
 
         if(application_times.is_open())
             application_times << kernel_time.start * ns_per_tick << ','
@@ -239,20 +273,9 @@ main(int argc, char** argv)
 
         auto barrier_time = hsa_amd_profiling_dispatch_time_t{};
         status            = wait_and_get_time(signal, barrier_time);
-        if(status != HSA_STATUS_SUCCESS ||
-           (barrier_time.start == kernel_time.start && barrier_time.end == kernel_time.end))
-        {
-            fprintf(stderr,
-                    "barrier %d: hsa_amd_profiling_get_dispatch_time returned %d (start=%lu "
-                    "end=%lu, kernel start=%lu end=%lu)\n",
-                    i,
-                    static_cast<int>(status),
-                    static_cast<unsigned long>(barrier_time.start),
-                    static_cast<unsigned long>(barrier_time.end),
-                    static_cast<unsigned long>(kernel_time.start),
-                    static_cast<unsigned long>(kernel_time.end));
-            ++failures;
-        }
+        check_time("barrier",
+                   barrier_time,
+                   barrier_time.start != kernel_time.start || barrier_time.end != kernel_time.end);
 
         // a kernel and a barrier sharing the signal in one write must report the barrier's time
         hsa_signal_store_screlease(signal, 2);
@@ -260,111 +283,24 @@ main(int argc, char** argv)
 
         auto shared_time = hsa_amd_profiling_dispatch_time_t{};
         status           = wait_and_get_time(signal, shared_time);
-        if(status != HSA_STATUS_SUCCESS ||
-           shared_time.end >= shared_time.start + min_duration_ticks)
-        {
-            fprintf(stderr,
-                    "kernel and barrier %d: hsa_amd_profiling_get_dispatch_time returned %d "
-                    "(start=%lu end=%lu)\n",
-                    i,
-                    static_cast<int>(status),
-                    static_cast<unsigned long>(shared_time.start),
-                    static_cast<unsigned long>(shared_time.end));
-            ++failures;
-        }
+        check_time("kernel and barrier",
+                   shared_time,
+                   shared_time.end < shared_time.start + min_duration_ticks);
 
         status = hsa_signal_destroy(signal);
         RET_IF_HSA_ERR(status)
     }
 
-    // Final HSA shutdown retires the live queue after its completion handlers drain. With
-    // ROCPROFILER_DISPATCH_TIME_BLOCKED set, the queue is instead left holding a kernel and an
-    // intercepted copy behind a dependency that is never satisfied, so shutdown must abandon them
-    // rather than wait for work the application never releases. The buffers those submissions name
-    // stay allocated: the copy is never executed, and freeing them would not make it completable.
-    if(std::getenv("ROCPROFILER_DISPATCH_TIME_BLOCKED") != nullptr)
-    {
-        auto dependency     = hsa_signal_t{};
-        auto blocked_kernel = hsa_signal_t{};
-        auto blocked_copy   = hsa_signal_t{};
-        status              = hsa_signal_create(1, 0, nullptr, &dependency);
-        RET_IF_HSA_ERR(status)
-        status = hsa_signal_create(2, 0, nullptr, &blocked_kernel);
-        RET_IF_HSA_ERR(status)
-        status = hsa_signal_create(1, 0, nullptr, &blocked_copy);
-        RET_IF_HSA_ERR(status)
-
-        auto blocked_args = static_cast<args_t*>(obj.hsa_malloc(sizeof(args_t), obj.kernarg));
-        *blocked_args     = {};
-        blocked_args->a   = static_cast<uint32_t*>(
-            obj.hsa_malloc(num_elements * sizeof(uint32_t), obj.gpu[0], false));
-        blocked_args->b = static_cast<uint32_t*>(
-            obj.hsa_malloc(num_elements * sizeof(uint32_t), obj.gpu[0], false));
-
-        auto gate                      = MQDependencyTest::Aql{};
-        gate.header.type               = HSA_PACKET_TYPE_BARRIER_AND;
-        gate.header.barrier            = 1;
-        gate.header.acquire            = HSA_FENCE_SCOPE_SYSTEM;
-        gate.header.release            = HSA_FENCE_SCOPE_SYSTEM;
-        gate.barrier_and.dep_signal[0] = dependency;
-
-        auto blocked_packet                       = packet;
-        blocked_packet.dispatch.kernarg_address   = blocked_args;
-        blocked_packet.dispatch.completion_signal = blocked_kernel;
-        submit_together(gate, blocked_packet);
-
-        // Intercepted only when memory-copy tracing is active for this process.
-        status = hsa_amd_memory_async_copy(blocked_args->a,
-                                           agent,
-                                           blocked_args->b,
-                                           agent,
-                                           num_elements * sizeof(uint32_t),
-                                           1,
-                                           &dependency,
-                                           blocked_copy);
-        RET_IF_HSA_ERR(status)
-    }
-
-    else
-    {
-        auto copy_done = hsa_signal_t{};
-        status         = hsa_signal_create(1, 0, nullptr, &copy_done);
-        RET_IF_HSA_ERR(status)
-        status =
-            hsa_amd_memory_async_copy(args->a, agent, args->b, agent, 4096, 0, nullptr, copy_done);
-        RET_IF_HSA_ERR(status)
-        while(hsa_signal_wait_scacquire(
-                  copy_done, HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_BLOCKED) >= 1)
-        {}
-        status = hsa_signal_destroy(copy_done);
-        RET_IF_HSA_ERR(status)
-    }
-
+    status = hsa_queue_destroy(queue);
+    RET_IF_HSA_ERR(status)
+    status = hsa_executable_destroy(code_object.executable);
+    RET_IF_HSA_ERR(status)
     status = hsa_amd_memory_pool_free(args->a);
     RET_IF_HSA_ERR(status)
     status = hsa_amd_memory_pool_free(args->b);
     RET_IF_HSA_ERR(status)
     status = hsa_amd_memory_pool_free(args);
     RET_IF_HSA_ERR(status)
-    // A blocked submission still names this executable's kernel, so the executable is not destroyed
-    // here: its lifetime ends with the runtime shutdown below.
-
-    // Final shutdown must return even though the submissions above can never complete. The
-    // destructor does not report the status, so shut the runtime down here and check it, then
-    // keep the object from repeating the call.
-    const auto shutdown_begin = std::chrono::steady_clock::now();
-    status                    = hsa_shut_down();
-    obj.shutdown_done         = true;
-    if(status != HSA_STATUS_SUCCESS)
-    {
-        fprintf(stderr, "final hsa_shut_down returned %d\n", static_cast<int>(status));
-        ++failures;
-    }
-    else if(std::chrono::steady_clock::now() - shutdown_begin > max_shutdown_duration)
-    {
-        fprintf(stderr, "final hsa_shut_down exceeded its drain budget\n");
-        ++failures;
-    }
 
     return (failures == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
 }

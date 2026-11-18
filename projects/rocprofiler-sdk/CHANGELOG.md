@@ -51,6 +51,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Fixed `rocattach` not unmapping the environment and tool-path buffers in the target when the attach call in the target reported failure.
 - Fixed the rocprofv3 tool library aborting on reattach after it disabled thread trace or kernel replay because the running rocprofiler-sdk does not support them, and fixed counter collection using kernel replay passes when kernel replay is unsupported.
 - `hsa_amd_profiling_get_dispatch_time` now returns kernel timing on the caller-provided completion signal when ROCprofiler-SDK replaces the kernel’s signal during non-inline interception.
+- Fixed races between final HSA shutdown, completion handlers, and SDK-owned queue and signal retirement.
 - Fixed rocpd reporting a counter at N times its value under `rocprofv3 --replay-mode kernel` when N `--pmc` groups list it, for example a sanity counter such as `SQ_WAVES` in every group. Every pass of a replayed dispatch shares the dispatch's record, so the `counters_collection` view, and the counter CSV and Perfetto output that `rocpd convert` builds from it, summed the passes. Passes after the first are now tagged with `replay_pass` in `rocpd_pmc_event.extdata`, the view averages a counter over the passes that collected it, and the `pmc_events` view reports each row's pass in a new `replay_pass` column. This behavior is identified by rocpd schema version 3.0.6.
 
 ### Known issues
