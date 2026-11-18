@@ -324,6 +324,7 @@ def generate_device_metadata(
     bundle_key: str,
     device_package_prefix: str,
     device_requires_dist: list[str],
+    split_bundle_keys: set[str] | None = None,
 ) -> str:
     """Generate METADATA content for a device wheel.
 
@@ -332,6 +333,11 @@ def generate_device_metadata(
         bundle_key: Bundle key, e.g. "gfx942", "gfx11", "gfx12_0".
         device_package_prefix: Package name prefix, e.g. "amd-torch-device".
         device_requires_dist: Additional Requires-Dist entries (may contain @GFXARCH@).
+        split_bundle_keys: All bundle keys that get a device wheel from the
+            same split. A target wheel requires the sub-family and family
+            wheels of its packaging chain that are in this set, because they
+            hold the rest of that target's device files (e.g. the AOTriton
+            images in amd-torch-device-gfx12-0 for gfx1201).
 
     Returns:
         METADATA file content.
@@ -345,6 +351,14 @@ def generate_device_metadata(
         f"Summary: AMD device kernels ({bundle.display_name}) for {host_identity.name}",
         f"Requires-Dist: {host_identity.name} == {host_identity.version}",
     ]
+    if bundle.level == rocm_bootstrap.PackagingLevel.TARGET and split_bundle_keys:
+        for chain_bundle in rocm_bootstrap.packaging_chain(bundle_key):
+            if chain_bundle.key == bundle_key or chain_bundle.key not in split_bundle_keys:
+                continue
+            chain_name = rocm_bootstrap.device_dist_name(
+                device_package_prefix, chain_bundle
+            )
+            lines.append(f"Requires-Dist: {chain_name} == {host_identity.version}")
     for dep in device_requires_dist:
         if "@GFXARCH@" in dep and bundle.level != rocm_bootstrap.PackagingLevel.TARGET:
             # `@GFXARCH@` deps name per-target packages (e.g.
@@ -886,6 +900,7 @@ class WheelSplitter:
                 db_refs_by_bundle.get(bundle_key, []),
                 output_dir,
                 output_format,
+                split_bundle_keys=set(bundle_keys),
             )
             device_paths[bundle_key] = device_path
 
@@ -1580,6 +1595,7 @@ class WheelSplitter:
         db_refs: list[DatabaseFileRef],
         output_dir: Path,
         output_format: str,
+        split_bundle_keys: set[str] | None = None,
     ) -> Path:
         """Create a device wheel for a specific bundle key.
 
@@ -1588,6 +1604,8 @@ class WheelSplitter:
             kpack_entries: List of (arch, kpack_path) tuples. Multiple entries
                 occur when xnack variants collapse into the same bundle key.
             db_refs: Database files to include for this bundle.
+            split_bundle_keys: All bundle keys of this split; see
+                generate_device_metadata().
 
         Returns:
             Path to the generated device wheel (file or directory).
@@ -1658,6 +1676,7 @@ class WheelSplitter:
             bundle_key,
             self.device_package_prefix,
             self.device_requires_dist,
+            split_bundle_keys,
         )
         (dist_info_dir / "METADATA").write_text(metadata_content, encoding="utf-8")
 

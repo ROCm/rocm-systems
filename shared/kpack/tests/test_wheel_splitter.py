@@ -21,6 +21,7 @@ from rocm_bootstrap.tests.conftest import FakePlatform
 from rocm_bootstrap.variant_provider import AMDVariantPlugin
 
 from rocm_kpack.binutils import Toolchain
+from rocm_kpack.database_handlers import WHEEL_TYPE_PRESETS, get_database_handlers
 from rocm_kpack.wheel_splitter import (
     DatabaseFileRef,
     FatBinaryInfo,
@@ -330,6 +331,92 @@ class TestGenerateDeviceMetadata:
             ["rocm-sdk-device-@GFXARCH@ == 7.13"],
         )
         assert "rocm-sdk-device" not in sub_family_metadata
+
+    def test_target_requires_sub_family_from_same_split(self):
+        # The AOTriton images for gfx1201 ship in the gfx12_0 sub-family
+        # wheel. Installing amd-torch-device-gfx1201 alone must pull it in,
+        # or SDPA fails with hipErrorInvalidImage (ROCm/TheRock#10054).
+        identity = WheelIdentity(
+            name="torch",
+            version="2.14.0+rocm10.2.0",
+            python_tag="cp312",
+            abi_tag="cp312",
+            platform_tag="linux_x86_64",
+            dist_info_name="torch-2.14.0+rocm10.2.0.dist-info",
+        )
+        metadata = generate_device_metadata(
+            identity,
+            "gfx1201",
+            "amd-torch-device",
+            ["rocm-sdk-device-@GFXARCH@ == 10.2.0"],
+            split_bundle_keys={"gfx1200", "gfx1201", "gfx12_0"},
+        )
+        assert "Requires-Dist: amd-torch-device-gfx12-0 == 2.14.0+rocm10.2.0" in (
+            metadata
+        )
+        assert "Requires-Dist: rocm-sdk-device-gfx1201 == 10.2.0" in metadata
+        assert "amd-torch-device-gfx1200" not in metadata
+
+    def test_target_requires_full_chain_from_same_split(self):
+        identity = WheelIdentity(
+            name="torch",
+            version="2.10.0+rocm7.1",
+            python_tag="cp313",
+            abi_tag="cp313",
+            platform_tag="manylinux_2_28_x86_64",
+            dist_info_name="torch-2.10.0+rocm7.1.dist-info",
+        )
+        metadata = generate_device_metadata(
+            identity,
+            "gfx1100",
+            "amd-torch-device",
+            [],
+            split_bundle_keys={"gfx1100", "gfx110x", "gfx11"},
+        )
+        assert "Requires-Dist: amd-torch-device-gfx110x == 2.10.0+rocm7.1" in metadata
+        assert "Requires-Dist: amd-torch-device-gfx11 == 2.10.0+rocm7.1" in metadata
+        assert "Requires-Dist: amd-torch-device-gfx1100 " not in metadata
+
+    def test_target_skips_chain_wheels_not_in_split(self):
+        identity = WheelIdentity(
+            name="torch",
+            version="2.10.0+rocm7.1",
+            python_tag="cp313",
+            abi_tag="cp313",
+            platform_tag="manylinux_2_28_x86_64",
+            dist_info_name="torch-2.10.0+rocm7.1.dist-info",
+        )
+        metadata = generate_device_metadata(
+            identity,
+            "gfx1201",
+            "amd-torch-device",
+            [],
+            split_bundle_keys={"gfx1201", "gfx942"},
+        )
+        requires = [l for l in metadata.splitlines() if l.startswith("Requires-Dist")]
+        assert requires == ["Requires-Dist: torch == 2.10.0+rocm7.1"]
+
+    def test_family_does_not_require_targets(self):
+        identity = WheelIdentity(
+            name="torch",
+            version="2.10.0+rocm7.1",
+            python_tag="cp313",
+            abi_tag="cp313",
+            platform_tag="manylinux_2_28_x86_64",
+            dist_info_name="torch-2.10.0+rocm7.1.dist-info",
+        )
+        for key in ("gfx12_0", "gfx11", "gfx110x"):
+            metadata = generate_device_metadata(
+                identity,
+                key,
+                "amd-torch-device",
+                [],
+                split_bundle_keys={"gfx1100", "gfx110x", "gfx11", "gfx1201", "gfx12_0"},
+            )
+            requires = [
+                l for l in metadata.splitlines() if l.startswith("Requires-Dist")
+            ]
+            assert requires == ["Requires-Dist: torch == 2.10.0+rocm7.1"]
 
 
 class TestArchToBundleKey:
@@ -1158,6 +1245,51 @@ class TestWheelSplitterIntegration:
             dist_info_name = f"{device_name.replace('-', '_')}-2.10.0+rocm7.1.dist-info"
             metadata = (device_path / dist_info_name / "METADATA").read_text()
             assert f"Requires-Dist: rocm-sdk-device-{bundle_key} == 7.1" in metadata
+
+    def test_target_wheel_requires_family_wheel_with_aotriton_images(
+        self, fat_binary_wheel: Path, toolchain, tmp_path: Path
+    ):
+        """A target wheel pulls in the family wheel that holds its AOTriton images.
+
+        Regression test for ROCm/TheRock#10054: with only the target wheel
+        installed, AOTriton finds no images and SDPA fails with
+        hipErrorInvalidImage.
+        """
+        image = (
+            fat_binary_wheel
+            / "torch/lib/aotriton.images/amd-gfx11xx/flash/attn_fwd.zip"
+        )
+        image.parent.mkdir(parents=True)
+        image.write_bytes(b"aotriton image")
+
+        splitter = WheelSplitter(
+            device_package_prefix="amd-torch-device",
+            overlay_root="torch/",
+            toolchain=toolchain,
+            database_handlers=get_database_handlers(WHEEL_TYPE_PRESETS["torch-fat"]),
+        )
+        result = splitter.split(
+            fat_binary_wheel, tmp_path / "output", output_format="directory"
+        )
+
+        assert set(result.device_wheel_paths) == {"gfx1100", "gfx11"}
+        family_wheel = result.device_wheel_paths["gfx11"]
+        assert (
+            family_wheel / "torch/lib/aotriton.images/amd-gfx11xx/flash/attn_fwd.zip"
+        ).is_file()
+
+        target_metadata = (
+            result.device_wheel_paths["gfx1100"]
+            / "amd_torch_device_gfx1100-2.10.0+rocm7.1.dist-info"
+            / "METADATA"
+        ).read_text()
+        assert "Requires-Dist: amd-torch-device-gfx11 == 2.10.0+rocm7.1" in (
+            target_metadata
+        )
+        family_metadata = (
+            family_wheel / "amd_torch_device_gfx11-2.10.0+rocm7.1.dist-info" / "METADATA"
+        ).read_text()
+        assert "amd-torch-device-gfx1100" not in family_metadata
 
     def test_split_parallel(self, fat_binary_wheel: Path, toolchain, tmp_path: Path):
         """Test that parallel splitting (jobs=2) produces correct results."""
