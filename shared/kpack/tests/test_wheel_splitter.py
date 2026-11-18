@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from rocm_bootstrap import device_dist_name, lookup_bundle
 from rocm_bootstrap.targets import lookup_target
 from rocm_bootstrap.tests.conftest import FakePlatform
 from rocm_bootstrap.variant_provider import AMDVariantPlugin
@@ -373,9 +374,27 @@ class TestGenerateDeviceMetadata:
             [],
             split_bundle_keys={"gfx1100", "gfx110x", "gfx11"},
         )
-        assert "Requires-Dist: amd-torch-device-gfx110x == 2.10.0+rocm7.1" in metadata
-        assert "Requires-Dist: amd-torch-device-gfx11 == 2.10.0+rocm7.1" in metadata
-        assert "Requires-Dist: amd-torch-device-gfx1100 " not in metadata
+        requires = [l for l in metadata.splitlines() if l.startswith("Requires-Dist")]
+        assert requires == [
+            "Requires-Dist: torch == 2.10.0+rocm7.1",
+            "Requires-Dist: amd-torch-device-gfx110x == 2.10.0+rocm7.1",
+            "Requires-Dist: amd-torch-device-gfx11 == 2.10.0+rocm7.1",
+        ]
+
+    def test_target_without_split_keys_adds_no_chain(self):
+        identity = WheelIdentity(
+            name="torch",
+            version="2.10.0+rocm7.1",
+            python_tag="cp313",
+            abi_tag="cp313",
+            platform_tag="manylinux_2_28_x86_64",
+            dist_info_name="torch-2.10.0+rocm7.1.dist-info",
+        )
+        metadata = generate_device_metadata(
+            identity, "gfx1100", "amd-torch-device", [], split_bundle_keys=None
+        )
+        requires = [l for l in metadata.splitlines() if l.startswith("Requires-Dist")]
+        assert requires == ["Requires-Dist: torch == 2.10.0+rocm7.1"]
 
     def test_target_skips_chain_wheels_not_in_split(self):
         identity = WheelIdentity(
@@ -1287,9 +1306,25 @@ class TestWheelSplitterIntegration:
             target_metadata
         )
         family_metadata = (
-            family_wheel / "amd_torch_device_gfx11-2.10.0+rocm7.1.dist-info" / "METADATA"
+            family_wheel
+            / "amd_torch_device_gfx11-2.10.0+rocm7.1.dist-info"
+            / "METADATA"
         ).read_text()
         assert "amd-torch-device-gfx1100" not in family_metadata
+
+        # Every device wheel requirement names a wheel of this split, at the
+        # host version, so the set always installs.
+        produced = {
+            device_dist_name("amd-torch-device", lookup_bundle(key))
+            for key in result.device_wheel_paths
+        }
+        for key, path in result.device_wheel_paths.items():
+            dist_info = next(path.glob("*.dist-info"))
+            for line in (dist_info / "METADATA").read_text().splitlines():
+                if line.startswith("Requires-Dist: amd-torch-device-"):
+                    name, _, version = line[len("Requires-Dist: ") :].partition(" == ")
+                    assert name in produced, (key, line)
+                    assert version == "2.10.0+rocm7.1", (key, line)
 
     def test_split_parallel(self, fat_binary_wheel: Path, toolchain, tmp_path: Path):
         """Test that parallel splitting (jobs=2) produces correct results."""

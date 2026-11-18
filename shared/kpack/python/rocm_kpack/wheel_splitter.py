@@ -353,7 +353,10 @@ def generate_device_metadata(
     ]
     if bundle.level == rocm_bootstrap.PackagingLevel.TARGET and split_bundle_keys:
         for chain_bundle in rocm_bootstrap.packaging_chain(bundle_key):
-            if chain_bundle.key == bundle_key or chain_bundle.key not in split_bundle_keys:
+            if (
+                chain_bundle.key == bundle_key
+                or chain_bundle.key not in split_bundle_keys
+            ):
                 continue
             chain_name = rocm_bootstrap.device_dist_name(
                 device_package_prefix, chain_bundle
@@ -891,6 +894,7 @@ class WheelSplitter:
 
         # Phase 6: Create device wheels (one per bundle key)
         device_paths: dict[str, Path] = {}
+        split_bundle_keys = set(bundle_keys)
         for bundle_key in bundle_keys:
             device_path = self._create_device_wheel(
                 bundle_key,
@@ -900,7 +904,7 @@ class WheelSplitter:
                 db_refs_by_bundle.get(bundle_key, []),
                 output_dir,
                 output_format,
-                split_bundle_keys=set(bundle_keys),
+                split_bundle_keys=split_bundle_keys,
             )
             device_paths[bundle_key] = device_path
 
