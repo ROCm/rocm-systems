@@ -24,13 +24,13 @@
 
 #include "sdma_policy.hpp"
 
-#include <unistd.h>
 
 #include <cstdint>
 #include <unordered_map>
 #include <vector>
 
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
+#include "bootstrap/utils.hpp"
 #include "envvar.hpp"
 #include "log.hpp"
 #include "sdma_agreement.hpp"
@@ -54,15 +54,11 @@ struct SdmaPeerInfo {
 };
 static_assert(sizeof(SdmaPeerInfo) == 16, "exchanged as raw bytes");
 
-// FNV-1a of the hostname. Never 0, so 0 can mean "unknown".
+// Names this host in the pod exchange. getHostHash() hashes the hostname together with the kernel
+// boot id (or ROCSHMEM_HOSTID when set), so containers on different hosts that share a hostname
+// still read as different hosts. Never 0, so 0 can mean "unknown".
 uint64_t sdmaHostId() {
-  char name[256] = {};
-  gethostname(name, sizeof(name) - 1);
-  uint64_t h = 1469598103934665603ull;
-  for (const char* c = name; *c != '\0'; ++c) {
-    h ^= static_cast<unsigned char>(*c);
-    h *= 1099511628211ull;
-  }
+  const uint64_t h = getHostHash();
   return h != 0 ? h : 1;
 }
 
