@@ -263,6 +263,32 @@ TEST_F(kfd_resource_test, invalid_arguments_and_closed_queue)
     EXPECT_FALSE(queue->submit(packet, {}));
 }
 
+TEST_F(kfd_resource_test, signal_slots_are_reused)
+{
+    const auto& agent  = hsa::get_queue_controller()->get_supported_agents().begin()->second;
+    auto        memory = kfd::kfd_memory_pool_t::create(*agent.get_rocp_agent());
+    ASSERT_NE(memory, nullptr);
+
+    auto first = kfd::kfd_signal_t::create(memory);
+    ASSERT_NE(first, nullptr);
+    auto* slot             = first->abi();
+    first->abi()->start_ts = 0x1234;
+    const auto page_of = [](const void* ptr) { return reinterpret_cast<uintptr_t>(ptr) / 4096; };
+    first.reset();
+
+    auto second = kfd::kfd_signal_t::create(memory);
+    ASSERT_NE(second, nullptr);
+    EXPECT_EQ(second->abi(), slot);
+    EXPECT_EQ(second->abi()->start_ts, 0);
+    EXPECT_EQ(second->abi()->value, 0);
+    EXPECT_EQ(second->abi()->kind, AMD_SIGNAL_KIND_USER);
+
+    auto third = kfd::kfd_signal_t::create(memory);
+    ASSERT_NE(third, nullptr);
+    EXPECT_NE(third->abi(), slot);
+    EXPECT_EQ(page_of(third->abi()), page_of(slot));
+}
+
 TEST(kfd_resource, unrelated_render_descriptor)
 {
     std::vector<int> descriptors;

@@ -497,6 +497,7 @@ struct kfd_memory_pool_t::impl
     uint32_t                                                      max_wave_id{0};
     int                                                           render_fd{-1};
     common::Synchronized<std::unordered_map<void*, allocation_t>> allocations{};
+    common::Synchronized<std::vector<amd_signal_t*>>              free_signals{};
 };
 
 kfd_memory_pool_t::kfd_memory_pool_t(std::unique_ptr<impl> state)
@@ -550,7 +551,8 @@ kfd_memory_pool_t::allocate(size_t size, kfd_memory_kind_t kind, size_t alignmen
     args.flags   = KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE | KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE;
     args.flags |= (kind == kfd_memory_kind_t::device)
                       ? (KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE)
-                      : (KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_COHERENT);
+                      : (KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_COHERENT |
+                         KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED);
 
     if(kfd_ioctl(_impl->runtime->kfd_fd(), AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &args) != 0)
     {
@@ -623,6 +625,53 @@ kfd_memory_pool_t::deallocate(void* ptr)
         return;
     }
     _impl->release(ptr, allocation.mapped());
+}
+
+amd_signal_t*
+kfd_memory_pool_t::allocate_signal()
+{
+    constexpr size_t signals_per_page = KFD_PAGE_SIZE / sizeof(amd_signal_t);
+    static_assert(KFD_PAGE_SIZE % sizeof(amd_signal_t) == 0);
+
+    auto* signal = _impl->free_signals.wlock([](auto& slots) -> amd_signal_t* {
+        if(slots.empty()) return nullptr;
+        auto* slot = slots.back();
+        slots.pop_back();
+        return slot;
+    });
+
+    if(signal == nullptr)
+    {
+        auto* page = static_cast<amd_signal_t*>(allocate(KFD_PAGE_SIZE, kfd_memory_kind_t::host));
+        if(page == nullptr) return nullptr;
+        try
+        {
+            _impl->free_signals.wlock([&](auto& slots) {
+                for(size_t i = 1; i < signals_per_page; ++i)
+                    slots.emplace_back(page + i);
+            });
+        } catch(const std::bad_alloc&)
+        {
+            ROCP_CI_LOG(WARNING) << "Could not track spare KFD signal slots";
+        }
+        signal = page;
+    }
+
+    std::memset(signal, 0, sizeof(amd_signal_t));
+    return signal;
+}
+
+void
+kfd_memory_pool_t::deallocate_signal(amd_signal_t* signal)
+{
+    if(signal == nullptr) return;
+    try
+    {
+        _impl->free_signals.wlock([&](auto& slots) { slots.emplace_back(signal); });
+    } catch(const std::bad_alloc&)
+    {
+        ROCP_CI_LOG(WARNING) << "Could not recycle KFD signal slot";
+    }
 }
 
 bool
@@ -705,13 +754,12 @@ std::unique_ptr<kfd_signal_t>
 kfd_signal_t::create(const std::shared_ptr<kfd_memory_pool_t>& memory)
 {
     if(!memory) return nullptr;
-    auto* signal =
-        static_cast<amd_signal_t*>(memory->allocate(sizeof(amd_signal_t), kfd_memory_kind_t::host));
+    auto* signal = memory->allocate_signal();
     if(!signal) return nullptr;
     auto result = std::unique_ptr<kfd_signal_t>{new(std::nothrow) kfd_signal_t{memory, signal}};
     if(!result)
     {
-        memory->deallocate(signal);
+        memory->deallocate_signal(signal);
         ROCP_CI_LOG(ERROR) << "Could not allocate KFD signal";
     }
     return result;
@@ -720,7 +768,7 @@ kfd_signal_t::create(const std::shared_ptr<kfd_memory_pool_t>& memory)
 kfd_signal_t::~kfd_signal_t()
 {
     wait();
-    _memory->deallocate(_signal);
+    _memory->deallocate_signal(_signal);
 }
 
 hsa_signal_t
