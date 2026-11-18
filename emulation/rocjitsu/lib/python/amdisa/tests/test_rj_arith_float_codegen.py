@@ -1483,7 +1483,7 @@ def test_fp8_to_f16_vop1_true16_selection():
             assert 'rj_arith_' + name.lower() + '_w32' in generated
 
 
-@pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
+@pytest.mark.parametrize('arch', ['cdna2', 'cdna3', 'cdna4'])
 @pytest.mark.parametrize(
     'name', ['V_MAD_MIX_F32', 'V_MAD_MIXLO_F16', 'V_MAD_MIXHI_F16']
 )
@@ -2403,3 +2403,120 @@ def test_gfx1250_selection_owns_its_numeric_only_compatibility_policy(name):
     for wave in (32, 64):
         assert f'rj_arith_{name.lower()}_w{wave}_gfx1250,' in body
     assert 'BinaryFpOperation' not in body
+
+
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'])
+@pytest.mark.parametrize('accumulate', [False, True])
+def test_older_packed_fma_uses_inherited_policy(arch, accumulate):
+    from amdisa.codegen.execute.rj_arith_float import gen_packed_fma16
+
+    cdna = arch.startswith('cdna')
+    name = 'V_PK_FMAC_F16' if accumulate else 'V_PK_FMA_F16'
+    encodings = (
+        ['ENC_VOP2', 'ENC_VOP3']
+        if accumulate and cdna
+        else ['ENC_VOP2'] if accumulate else ['ENC_VOP3P']
+    )
+    for enc in encodings:
+        body = gen_packed_fma16(
+            context(
+                arch,
+                name,
+                ['d'],
+                ['a', 'b'] if accumulate else ['a', 'b', 'c'],
+                enc_name=enc,
+                opsel_exprs=('lo', 'hi'),
+                op_sel_hi_2_expr='hi_c',
+            )
+        )
+        suffix = '_gfx942' if accumulate and cdna else ''
+        for lanes in (32, 64):
+            assert f'rj_arith_{name.lower()}_w{lanes}{suffix}' in body
+        assert body.index('if (!wf.exec())') < body.index('UnsupportedOperandValue')
+        assert 'pk16_src_needs_narrowing' in body
+        assert ('execute_packed_fmac_sdwa' in body) == (
+            accumulate and cdna and enc == 'ENC_VOP2'
+        )
+        assert ('RJ_ARITH_ALU_OMOD_2' in body) == (accumulate and cdna)
+
+
+@pytest.mark.parametrize('arch', ['rdna1', 'rdna2', 'rdna3_5'])
+@pytest.mark.parametrize(
+    'name', ['V_FMA_MIX_F32', 'V_FMA_MIXLO_F16', 'V_FMA_MIXHI_F16']
+)
+def test_older_radeon_mixed_uses_preserved_half_policy(arch, name):
+    from amdisa.codegen.execute.rj_arith_float import gen_mixed_fma
+
+    body = gen_mixed_fma(
+        context(
+            arch,
+            name,
+            ['d'],
+            ['a', 'b', 'c'],
+            enc_name='ENC_VOP3P',
+            opsel_exprs=('lo', 'hi'),
+            op_sel_hi_2_expr='hi_c',
+        )
+    )
+    for lanes in (32, 64):
+        assert f'rj_arith_{name.lower()}_w{lanes}' in body
+    assert body.index('if (!wf.exec())') < body.index('UnsupportedOperandValue')
+    assert 'true, true);' in body
+    assert 'RJ_ARITH_MIX_F16_C' in body
+    assert 'is_inline_float_src(inst_.src2)' in body
+
+
+@pytest.mark.parametrize(
+    'name', ['V_MAD_MIX_F32', 'V_MAD_MIXLO_F16', 'V_MAD_MIXHI_F16']
+)
+def test_gfx908_mixed_fma_routes_independent_rounding_model(name):
+    from amdisa.codegen.execute.rj_arith_float import gen_mixed_fma
+
+    body = gen_mixed_fma(
+        context(
+            'cdna1',
+            name,
+            ['d'],
+            ['a', 'b', 'c'],
+            enc_name='ENC_VOP3P',
+            opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
+            op_sel_hi_2_expr='inst_.op_sel_hi_2',
+        )
+    )
+    assert f'rj_arith_{name.lower()}_w32_gfx908' in body
+    assert f'rj_arith_{name.lower()}_w64_gfx908' in body
+    assert 'true, false, true);' in body
+
+
+def test_mixed_fma_has_no_legacy_dispatch_for_any_registered_profile():
+    from amdisa.__main__ import _PROFILES
+    from amdisa.codegen.execute import DISPATCH
+    from amdisa.codegen.execute.rj_arith_float import (
+        MIXED_FMA_NAMES,
+        MIXED_BF16_NAMES,
+        gen_mixed_fma,
+    )
+
+    assert not any(name.startswith('mad_mix') for name in DISPATCH)
+    for profile in _PROFILES:
+        if profile == 'cdna':
+            continue
+        arch = profile.replace('.', '_')
+        names = MIXED_FMA_NAMES
+        if arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4'):
+            names = {name.replace('FMA', 'MAD') for name in names}
+        elif arch == 'cdna5':
+            names = names | MIXED_BF16_NAMES
+        for name in names:
+            body = gen_mixed_fma(
+                context(
+                    arch,
+                    name,
+                    ['d'],
+                    ['a', 'b', 'c'],
+                    enc_name='ENC_VOP3P',
+                    opsel_exprs=('lo', 'hi'),
+                    op_sel_hi_2_expr='hi_c',
+                )
+            )
+            assert body and 'arith::execute_mixed_' in body, (arch, name)
