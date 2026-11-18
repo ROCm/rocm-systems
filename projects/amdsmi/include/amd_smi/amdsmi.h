@@ -1319,8 +1319,8 @@ typedef struct {
 } amdsmi_link_metrics_t;
 
 /**
- * @brief One GPU<->CPU link, of any link type (e.g. MI450's XGMI-typed
- * GPU-to-CPU-socket connection, or another ASIC's PCIe-typed one).
+ * @brief One GPU<->CPU link, of any link type (e.g. an XGMI-typed
+ * GPU-to-CPU-socket connection, or a PCIe-typed one).
  *
  * @cond @tag{gpu_bm_linux} @endcond
  */

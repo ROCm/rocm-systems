@@ -5135,8 +5135,8 @@ rsmi_status_t rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst, 
  *  @brief Retrieve a device's directly-connected CPU link(s), of any type
  *
  *  @details Given a source device index @p dv_ind, this discovers every
- *  CPU-destined io_link neighbor of that GPU (e.g. MI450's XGMI-typed
- *  GPU-to-CPU-socket connection, or another ASIC's PCIe-typed one) and
+ *  CPU-destined io_link neighbor of that GPU (e.g. an XGMI-typed
+ *  GPU-to-CPU-socket connection, or a PCIe-typed one) and
  *  writes up to @p *num_links of them to @p links. On return, @p *num_links
  *  holds the number of links found (which may be more than fit in the
  *  caller's buffer if @p links is too small). A GPU is physically wired to
