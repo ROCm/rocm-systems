@@ -470,27 +470,40 @@ sqlite_table_present(data_storage::sqlite_backend& backend, const std::string& n
 }
 
 bool
-sqlite_table_has_row(data_storage::sqlite_backend& backend, const std::string& name)
+sqlite_relation_present(data_storage::sqlite_backend& backend, const std::string& name)
 {
-    if(!sqlite_table_present(backend, name)) return false;
     struct present_row
     {
         size_t one{};
     };
-    const auto rows = backend
-                          .create_read_statement_executor<present_row>(
-                              "SELECT 1 FROM " + name + " LIMIT 1", &present_row::one)()
-                          .to_vector();
+    const auto rows =
+        backend
+            .create_read_statement_executor<present_row>(
+                "SELECT 1 FROM sqlite_master WHERE type IN ('table', 'view') AND name = '" +
+                    name + "'",
+                &present_row::one)()
+            .to_vector();
     return !rows.empty();
 }
 
+// Per-guid tables are physical. The unsuffixed name is a view, and a trace
+// that was not opened through the view layer does not have it. Prefer the
+// physical table so prepare() does not fail with "no such table".
+std::string
+physical_join_table(data_storage::sqlite_backend& backend, const char* base)
+{
+    const std::string suffixed = std::string(base) + "_" + backend.get_uuid();
+    if(sqlite_table_present(backend, suffixed)) return suffixed;
+    return base;
+}
+
+// Same choice as physical_join_table. An absent sample table stays empty so
+// callers can skip the query instead of preparing a name that does not exist.
 std::string
 choose_sample_table(data_storage::sqlite_backend& backend)
 {
-    const std::string suffixed = "rocpd_sample_" + backend.get_uuid();
-    if(sqlite_table_has_row(backend, suffixed)) return suffixed;
-    if(sqlite_table_present(backend, "rocpd_sample")) return "rocpd_sample";
-    if(sqlite_table_present(backend, suffixed)) return suffixed;
+    const std::string chosen = physical_join_table(backend, "rocpd_sample");
+    if(chosen != "rocpd_sample" || sqlite_relation_present(backend, chosen)) return chosen;
     return {};
 }
 
@@ -558,15 +571,15 @@ sample_table_sql(data_storage::sqlite_backend& backend,
     const std::string tracks = sample_track_clause(kind, catalog, query);
     if(!query.tracks.empty() && tracks.empty()) return {};
 
-    const std::string uuid = backend.get_uuid();
+    const std::string uuid      = backend.get_uuid();
+    const std::string pmc_table = physical_join_table(backend, "rocpd_info_pmc");
     std::string       from;
     std::string       time;
     if(kind == sample_table_kind::counter)
     {
         from = "rocpd_pmc_event_" + uuid + " PE INNER JOIN rocpd_kernel_dispatch_" +
-               uuid +
-               " K ON K.event_id = PE.event_id INNER JOIN rocpd_info_pmc PI ON PI.id = "
-               "PE.pmc_id";
+               uuid + " K ON K.event_id = PE.event_id INNER JOIN " + pmc_table +
+               " PI ON PI.id = PE.pmc_id";
         if(query.time.has_value())
         {
             time = "K.start <= " + std::to_string(query.time->end) +
@@ -577,9 +590,9 @@ sample_table_sql(data_storage::sqlite_backend& backend,
     {
         const std::string sample_table = choose_sample_table(backend);
         if(sample_table.empty()) return {};
-        from = "rocpd_pmc_event_" + uuid +
-               " PE INNER JOIN rocpd_info_pmc PI ON PI.id = PE.pmc_id INNER JOIN " +
-               sample_table + " S ON S.event_id = PE.event_id";
+        from = "rocpd_pmc_event_" + uuid + " PE INNER JOIN " + pmc_table +
+               " PI ON PI.id = PE.pmc_id INNER JOIN " + sample_table +
+               " S ON S.event_id = PE.event_id";
         if(query.time.has_value())
         {
             time = "S.timestamp >= " + std::to_string(query.time->start) +
@@ -897,14 +910,16 @@ rocpd_v3_reader::read_table_events(const resolved_event_query& query,
     add_and(where, text_filter);
     add_and(where, tracks);
 
+    const std::string event_table  = physical_join_table(*m_backend, "rocpd_event");
+    const std::string sample_table = physical_join_table(*m_backend, "rocpd_sample");
     const std::string sql =
         "SELECT " + select_list(*source) + " FROM " + source->table + "_" +
-        m_backend->get_uuid() + " " + source->alias +
-        " INNER JOIN rocpd_event E ON E.id = " + source->alias +
-        ".event_id LEFT JOIN rocpd_sample S ON S.event_id = " + source->alias +
-        ".event_id WHERE " + (where.empty() ? std::string() : where + " AND ") +
-        source->alias + ".id > ? AND " + source->alias + ".id <= ? ORDER BY " +
-        source->alias + ".id LIMIT ?";
+        m_backend->get_uuid() + " " + source->alias + " INNER JOIN " + event_table +
+        " E ON E.id = " + source->alias + ".event_id LEFT JOIN " + sample_table +
+        " S ON S.event_id = " + source->alias + ".event_id WHERE " +
+        (where.empty() ? std::string() : where + " AND ") + source->alias +
+        ".id > ? AND " + source->alias + ".id <= ? ORDER BY " + source->alias +
+        ".id LIMIT ?";
 
     // SQLite binds signed 64-bit integers, so an unbounded range stops at INT64_MAX.
     const uint64_t upper_id =
@@ -1163,12 +1178,15 @@ rocpd_v3_reader::summarize_name_durations(const resolved_event_query& query,
                                       : "IFNULL(" + std::string(source->name_id) + ", 0)";
     const std::string duration =
         std::string(source->alias) + ".end - " + source->alias + ".start";
+    const std::string event_table  = physical_join_table(*m_backend, "rocpd_event");
+    const std::string sample_table = physical_join_table(*m_backend, "rocpd_sample");
     const std::string sql =
         "SELECT " + name_expr + ", COUNT(*), MIN(" + duration + "), MAX(" + duration +
         "), SUM(" + duration + ") FROM " + source->table + "_" + m_backend->get_uuid() +
-        " " + source->alias + " INNER JOIN rocpd_event E ON E.id = " + source->alias +
-        ".event_id LEFT JOIN rocpd_sample S ON S.event_id = " + source->alias +
-        ".event_id WHERE " + (where.empty() ? std::string("1") : where) + " GROUP BY 1";
+        " " + source->alias + " INNER JOIN " + event_table + " E ON E.id = " +
+        source->alias + ".event_id LEFT JOIN " + sample_table + " S ON S.event_id = " +
+        source->alias + ".event_id WHERE " + (where.empty() ? std::string("1") : where) +
+        " GROUP BY 1";
 
     std::unordered_map<std::string, name_duration_summary_t> groups;
     auto collect = [&](const duration_summary_row& row) {
