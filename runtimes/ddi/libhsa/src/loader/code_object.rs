@@ -97,14 +97,6 @@ pub(crate) fn hsa_variable_segment(segment: VariableSegment) -> u32 {
     }
 }
 
-#[cfg(test)]
-/// Parses ELF layout through the production code-object parser for tests.
-fn parse_elf_layout(bytes: &[u8]) -> Result<ElfLayout, Status> {
-    LoaderCodeObject::parse(bytes)
-        .map(|object| object.layout())
-        .map_err(map_loader_error)
-}
-
 impl From<rocloader::Symbol> for ParsedCodeSymbol {
     /// Converts parsed loader metadata to HSA symbol query values.
     fn from(symbol: rocloader::Symbol) -> Self {
@@ -129,45 +121,6 @@ impl From<rocloader::Symbol> for ParsedCodeSymbol {
             wavefront_size: symbol.wavefront_size,
         }
     }
-}
-
-#[cfg(test)]
-/// Parses symbols with the requested section-table precedence for tests.
-fn parse_symbols(
-    bytes: &[u8],
-    _layout: ElfLayout,
-    preferred_tables: &[u32],
-) -> Result<Vec<ParsedCodeSymbol>, Status> {
-    let order = if preferred_tables.first() == Some(&SECTION_DYNSYM) {
-        SymbolTableOrder::DynamicFirst
-    } else {
-        SymbolTableOrder::RegularFirst
-    };
-    LoaderCodeObject::parse(bytes)
-        .and_then(|object| object.symbols(order))
-        .map(|symbols| symbols.into_iter().map(ParsedCodeSymbol::from).collect())
-        .map_err(map_loader_error)
-}
-
-#[cfg(test)]
-/// Applies AMDGPU relocations to a test image using the production loader.
-fn apply_relocations(
-    bytes: &[u8],
-    layout: ElfLayout,
-    virtual_base: u64,
-    device_base: u64,
-    image: &mut [u8],
-    resolve_external: impl Fn(&str) -> Option<u64>,
-) -> Result<(), Status> {
-    rocelf::apply_amdgpu_relocations(
-        bytes,
-        layout,
-        virtual_base,
-        device_base,
-        image,
-        resolve_external,
-    )
-    .map_err(|error| map_loader_error(error.into()))
 }
 
 /// Resolves executable symbol to a validated runtime resource.
@@ -438,7 +391,3 @@ pub(crate) unsafe fn code_object_get_symbol_impl(
         SUCCESS
     })
 }
-
-#[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod tests;

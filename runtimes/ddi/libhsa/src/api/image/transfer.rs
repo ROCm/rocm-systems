@@ -6,7 +6,7 @@
 use std::ffi::c_void;
 
 use crate::ffi::*;
-use crate::image_abi::{hsa_ext_image_clear_impl, hsa_ext_image_copy_impl, transfer_image};
+use crate::image::{clear_image, copy_images, transfer_image};
 use crate::runtime::boundary;
 
 #[cfg_attr(
@@ -26,7 +26,7 @@ pub unsafe extern "C" fn hsa_ext_image_copy(
 ) -> Status {
     // SAFETY: The image owner validates caller pointers and retains image
     // state through this synchronous operation.
-    unsafe { hsa_ext_image_copy_impl(agent, src_image, src_offset, dst_image, dst_offset, range) }
+    boundary(|| unsafe { copy_images(agent, src_image, src_offset, dst_image, dst_offset, range) })
 }
 
 #[cfg_attr(
@@ -100,5 +100,5 @@ pub unsafe extern "C" fn hsa_ext_image_clear(
 ) -> Status {
     // SAFETY: The image owner validates caller pointers and retains image
     // state through this synchronous operation.
-    unsafe { hsa_ext_image_clear_impl(agent, image, data, image_region) }
+    boundary(|| unsafe { clear_image(agent, image, data, image_region) })
 }

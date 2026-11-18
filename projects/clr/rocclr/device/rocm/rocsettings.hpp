@@ -37,10 +37,9 @@ class Settings : public device::Settings {
       uint dynamic_queues_ : 2;        //!< Dynamic queues: 0=off, 1=Depth, 2=1+dedicated null
       uint blocking_blit_ : 1;         //!< Blit ops can be blocking on CPU
       uint queue_pipe_dist_ : 1;       //!< Queue pipe distribution
-      uint ext_dispatch_packet_ : 1;   //!< Uses new ext dispatch packet for all launches
       uint aql_barrier_opt_ : 1;       //!< Per-stream barrier-bit optimization
       uint split_end_marker_ : 1;      //!< Graph end markers resolve waits on a packet of their own
-      uint reserved_ : 16;
+      uint reserved_ : 17;
     };
     uint value_;
   };
@@ -66,15 +65,16 @@ class Settings : public device::Settings {
   uint32_t limit_blit_wg_;  //!< The number of workgroups for blit execution
   uint32_t max_hw_queues_;  //!< Effective maximum HW queues (accounts for null stream reservation)
 
+  //! Uses new ext dispatch packet for all launches. Not a bitfield: Device::ResolveCpFirmwareCaps()
+  //! writes it after init, while other threads may read the bitfields.
+  bool ext_dispatch_packet_;
+
   //! Default constructor
   Settings();
 
   //! Creates settings
-  //! aqlExtDispatch: whether ROCr reports HSA_AMD_AQL_PROPERTY_EXT_DISPATCH for the agent
-  //! (HSA_AMD_AGENT_INFO_AQL_EXTENSIONS); -1 if unknown (an offline device, or a runtime without
-  //! the query), when the ISA decides
   bool create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, bool coop_groups = false,
-              bool pcieStoresNeedFlush = true, bool isAPU = false, int aqlExtDispatch = -1);
+              bool pcieStoresNeedFlush = true, bool isAPU = false);
 
  private:
   //! Disable copy constructor
