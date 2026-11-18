@@ -18,6 +18,20 @@ if(RJ_ENABLE_UBSAN)
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(host_access_guard_test host_access_guard_test.cpp)
+    target_link_libraries(
+        host_access_guard_test
+        PRIVATE GTest::gtest_main Threads::Threads
+    )
+    rj_configure_target(host_access_guard_test PRIVATE_INCLUDES WARNINGS)
+    rj_add_gtest_tests(host_access_guard_test)
+    if(RJ_INSTALL_TESTS)
+        file(
+            APPEND "${RJ_INSTALL_CTEST_FILE}"
+            "include(\"host_access_guard_test.cmake\")\n"
+        )
+    endif()
+
     # A separate executable lets --wrap hide modern stat symbols without
     # affecting any other test or the interposer's own symbol resolution.
     add_executable(
@@ -493,7 +507,6 @@ add_executable(
     sanitizer_diagnostic_test.cpp
     rvsim_test.cpp
     amdgpu_vm_test.cpp
-    host_access_guard_test.cpp
     gpu_queue_registry_test.cpp
     gpu_vm_pipeline_test.cpp
     coalesced_lane_runs_test.cpp

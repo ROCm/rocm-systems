@@ -67,7 +67,11 @@ and the current process's memory-keeper owner lease the library's lifetime.
 The two options are independent. Disabling fault recovery makes emulated host
 memory accesses execute directly; invalid accesses follow the host's signal
 disposition. The caller keeps registered backing accessible for the duration of
-execution. Availability queries inspect mapping metadata without faulting.
+execution. In `RJ_VM_MODE_LOCAL`, address passthrough can also resolve an
+unregistered guest address to the same address in the host process. A bad
+guest pointer can therefore deliver `SIGSEGV` or `SIGBUS` to the host even
+when all registered backing is accessible. Availability queries inspect
+mapping metadata without faulting.
 Host-fault recovery installs process-wide handlers; a host using it must keep
 the library loaded while those handlers are installed. Unloadable embedding
 selects both options OFF. Builds without the interposer reject application
