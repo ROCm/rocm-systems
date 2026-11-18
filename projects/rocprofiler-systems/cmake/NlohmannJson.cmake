@@ -3,14 +3,7 @@
 
 include_guard(GLOBAL)
 
-# Same minimum profiler-hub requires. Build the submodule only when that
-# version is not already installed.
-find_package(nlohmann_json 3.11.3 QUIET)
-
-if(nlohmann_json_FOUND)
-    message(STATUS "Using system nlohmann/json library")
-    target_link_libraries(rocprofiler-systems-json INTERFACE nlohmann_json::nlohmann_json)
-elseif(ROCPROFSYS_BUILD_NLOHMANN_JSON)
+if(ROCPROFSYS_BUILD_NLOHMANN_JSON)
     message(STATUS "Building nlohmann/json from source")
     include(FetchContent)
 

@@ -3,11 +3,7 @@
 
 include_guard(GLOBAL)
 
-# Same minimum profiler-hub requires. Build the submodule only when that
-# version is not already installed.
-find_package(fmt 11.1.3 QUIET)
-
-if(NOT fmt_FOUND AND ROCPROFSYS_BUILD_FMT)
+if(ROCPROFSYS_BUILD_FMT)
     message(STATUS "Building fmt from source!")
 
     include(FetchContent)
@@ -47,30 +43,26 @@ if(NOT fmt_FOUND AND ROCPROFSYS_BUILD_FMT)
     endif()
 
     target_link_libraries(rocprofiler-systems-fmt INTERFACE fmt::fmt)
-    return()
-endif()
-
-if(NOT fmt_FOUND)
-    find_package(fmt REQUIRED)
-endif()
-
-message(STATUS "Using system fmt library")
-
-# fmt::fmt may be an ALIAS to the real imported target (e.g. Debian's
-# fmtConfig.cmake), and set_target_properties() rejects ALIAS targets.
-get_target_property(_fmt_aliased_target fmt::fmt ALIASED_TARGET)
-if(_fmt_aliased_target)
-    set(_fmt_target ${_fmt_aliased_target})
 else()
-    set(_fmt_target fmt::fmt)
-endif()
+    message(STATUS "Using system fmt library")
+    find_package(fmt REQUIRED)
 
-get_target_property(_fmt_include_dirs ${_fmt_target} INTERFACE_INCLUDE_DIRECTORIES)
-if(_fmt_include_dirs)
-    set_target_properties(
-        ${_fmt_target}
-        PROPERTIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_fmt_include_dirs}"
-    )
-endif()
+    # fmt::fmt may be an ALIAS to the real imported target (e.g. Debian's
+    # fmtConfig.cmake), and set_target_properties() rejects ALIAS targets.
+    get_target_property(_fmt_aliased_target fmt::fmt ALIASED_TARGET)
+    if(_fmt_aliased_target)
+        set(_fmt_target ${_fmt_aliased_target})
+    else()
+        set(_fmt_target fmt::fmt)
+    endif()
 
-target_link_libraries(rocprofiler-systems-fmt INTERFACE fmt::fmt)
+    get_target_property(_fmt_include_dirs ${_fmt_target} INTERFACE_INCLUDE_DIRECTORIES)
+    if(_fmt_include_dirs)
+        set_target_properties(
+            ${_fmt_target}
+            PROPERTIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_fmt_include_dirs}"
+        )
+    endif()
+
+    target_link_libraries(rocprofiler-systems-fmt INTERFACE fmt::fmt)
+endif()
