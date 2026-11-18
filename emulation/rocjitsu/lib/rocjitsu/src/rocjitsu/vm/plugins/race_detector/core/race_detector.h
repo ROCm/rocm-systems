@@ -270,7 +270,7 @@ private:
     uint64_t awaiting = 0;
     /// Bit per wave whose signal was counted toward the round.
     uint64_t signalled = 0;
-    /// Per wave, the highest epoch released into the round.
+    /// The clock released into the round.
     std::vector<uint32_t> clock;
   };
 
@@ -343,6 +343,8 @@ private:
   // A clock has one section of waveCount() entries for the waves' epochs,
   // then one for their handoff epochs of each kind of LDS barrier arrival.
   static constexpr int kArrivalKinds = 3;
+  static_assert(static_cast<int>(BarrierCellArrival::Tensor) == kArrivalKinds - 1,
+                "a clock has one handoff section per BarrierCellArrival");
   int clockSize() const { return (1 + kArrivalKinds) * waveCount(); }
   /// Index in a clock of `owner`'s handoff epoch of `kind`.
   int handoffIndex(BarrierCellArrival kind, WaveId owner) const {

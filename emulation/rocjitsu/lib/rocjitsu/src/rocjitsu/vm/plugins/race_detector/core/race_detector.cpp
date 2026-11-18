@@ -122,6 +122,7 @@ namespace {
 
 /// Join `from` into `into`, element-wise maximum.
 void joinClock(std::span<uint32_t> into, std::span<const uint32_t> from) {
+  assert(into.size() == from.size());
   for (size_t index = 0; index < into.size(); ++index)
     into[index] = std::max(into[index], from[index]);
 }
@@ -252,7 +253,7 @@ void RaceDetector::waveEnded(WaveId wave) {
   --liveWaves_;
   // The ended wave no longer holds back any other wave's retirement. Where it
   // was the last wave at an owner's coverage, the coverage is recomputed at
-  // the next barrier wait (see staleCoverage_).
+  // the next barrier wait or read of an LDS barrier cell (see staleCoverage_).
   for (int owner = 0; owner < waveCount(); ++owner) {
     if (owner == wave.value || staleCoverage_[owner] ||
         acquired(wave, WaveId{owner}) != covered_[owner])
@@ -377,6 +378,8 @@ void RaceDetector::barrierCellArrived(WaveId wave, uint32_t address, BarrierCell
   }
 }
 
+// A cell's address fits an int: the plugin reports only cells inside the LDS
+// backing, whose byte addresses the interval sets index as int.
 void RaceDetector::acquireBarrierCells(WaveId wave, const IntervalSet &accessed) {
   // Indexed: acquiring retires events, which never adds a cell.
   for (size_t index = 0; index < cells_.size(); ++index) {

@@ -1255,10 +1255,10 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     // A load, or an atomic that returns the old value, of an LDS barrier cell
     // observes its phase, and acquires what its completed phases released. A
     // mixed FLAT load does so when its LDS lanes are accessed.
-    if (d.is_load && !defer_lds)
-      detector->acquireBarrierCells(waveId, intervals);
     if (defer_lds)
       s->mixed_lds->acquires_barrier_cells = d.is_load;
+    else if (d.is_load)
+      detector->acquireBarrierCells(waveId, intervals);
     uint8_t byte_mask = vector_memory_byte_mask(d, wf);
     if (d.is_load) {
       for (uint32_t reg : registers)
@@ -1522,7 +1522,7 @@ void RaceDetectorPlugin::onAmdgpuLdsBarrierArrived(
     case Source::AsyncDsAtomic:
       return BarrierCellArrival::Async;
     case Source::TensorDma:
-      break;
+      return BarrierCellArrival::Tensor;
     }
     return BarrierCellArrival::Tensor;
   }();
