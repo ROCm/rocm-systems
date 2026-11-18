@@ -787,8 +787,10 @@ TEST_F(RevokeDdaMPITest, IncompleteCollective_DdaLl128OneShot)
         "count is sized against the default RCCL_DDA_LL128_ONESHOT_THRESHOLD");
     if(!skipReason.empty())
         GTEST_SKIP() << skipReason;
-    runIncompleteDdaRevokeShrink(
-        *this, {ncclFuncAllReduce, kOneShotCount, kDdaLL128, NCCL_PROTO_LL128, kDisableAllReduceLL});
+    // kOneShotCount of f32, cut to the LL128 one-shot cap at this rank count, so the one-shot still takes it.
+    const size_t count = ll128OneShotBytes(kOneShotCount * sizeof(float), MPIEnvironment::world_size) / sizeof(float);
+    runIncompleteDdaRevokeShrink(*this,
+                                 {ncclFuncAllReduce, count, kDdaLL128, NCCL_PROTO_LL128, kDisableAllReduceLL});
 }
 
 TEST_F(RevokeDdaMPITest, IncompleteCollective_DdaLl128TwoShot)
