@@ -202,6 +202,8 @@ HSA_TOOLS_LIB="build/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_waitcheck_hooks
 
 In dispatch mode, descriptors are indexed at code-object load, mapped to runtime `kernel_object` values after executable freeze, and not decoded or analyzed until the kernel is actually submitted. This avoids whole-library analysis costs for large code objects. Use `ROCJITSU_WAITCHECK_MODE=eager` for load-only validation or when the application does not create an interceptable HSA queue.
 
+When an earlier HSA tool owns a queue, dispatch mode checks every loaded code object eagerly for that queue's agent. ROCr invokes newer packet interceptors before older ones, so a later waitcheck callback could see a kernel before the earlier tool rewrites its packet. Hazardous loads are rejected before that queue can dispatch them when fail-closed mode is enabled.
+
 The HSA tool discovers ordinary AMDHSA kernel descriptors. It does not
 automatically discover metadata-only variants or descriptorless entrypoints.
 For a known descriptorless entrypoint, use the offline command with

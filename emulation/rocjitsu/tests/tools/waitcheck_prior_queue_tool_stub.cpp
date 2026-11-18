@@ -11,16 +11,18 @@ namespace {
 decltype(hsa_queue_create) *g_create = nullptr;
 decltype(hsa_queue_destroy) *g_destroy = nullptr;
 decltype(AmdExtTable::hsa_amd_queue_create_fn) g_amd_create = nullptr;
+decltype(AmdExtTable::hsa_amd_queue_intercept_create_fn) g_intercept_create = nullptr;
 std::unordered_set<hsa_queue_t *> g_owned;
 } // namespace
 
-extern "C" RJ_TEST_EXPORT void
-rj_waitcheck_test_prior_queue_configure(decltype(hsa_queue_create) *create,
-                                        decltype(hsa_queue_destroy) *destroy,
-                                        decltype(AmdExtTable::hsa_amd_queue_create_fn) amd_create) {
+extern "C" RJ_TEST_EXPORT void rj_waitcheck_test_prior_queue_configure(
+    decltype(hsa_queue_create) *create, decltype(hsa_queue_destroy) *destroy,
+    decltype(AmdExtTable::hsa_amd_queue_create_fn) amd_create,
+    decltype(AmdExtTable::hsa_amd_queue_intercept_create_fn) intercept_create) {
   g_create = create;
   g_destroy = destroy;
   g_amd_create = amd_create;
+  g_intercept_create = intercept_create;
   g_owned.clear();
 }
 
@@ -47,6 +49,19 @@ extern "C" RJ_TEST_EXPORT hsa_status_t HSA_API rj_waitcheck_test_prior_amd_queue
   for (uint32_t index = 0; descs != nullptr && index < num_descs; ++index)
     if (descs[index].queue != nullptr)
       g_owned.insert(descs[index].queue);
+  return status;
+}
+
+extern "C" RJ_TEST_EXPORT hsa_status_t HSA_API rj_waitcheck_test_prior_intercept_create(
+    hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
+    void (*callback)(hsa_status_t, hsa_queue_t *, void *), void *data,
+    uint32_t private_segment_size, uint32_t group_segment_size, hsa_queue_t **queue) {
+  if (g_intercept_create == nullptr)
+    return HSA_STATUS_ERROR_NOT_INITIALIZED;
+  const hsa_status_t status = g_intercept_create(agent, size, type, callback, data,
+                                                 private_segment_size, group_segment_size, queue);
+  if (status == HSA_STATUS_SUCCESS && queue != nullptr && *queue != nullptr)
+    g_owned.insert(*queue);
   return status;
 }
 

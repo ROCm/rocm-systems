@@ -4927,6 +4927,23 @@ if(RJ_ENABLE_HIP_TESTS)
             )
             add_custom_target(hip_waitcheck_clean_fixture_target
                 DEPENDS ${_waitcheck_clean_fixture})
+            if(RJ_HIP_TEST_ARCH STREQUAL "gfx950" AND TARGET probe_rj_nop_probe_gfx950)
+                set(_waitcheck_descriptorless_fixture
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_waitcheck_descriptorless_fixture.hsaco)
+                add_custom_command(
+                    OUTPUT ${_waitcheck_descriptorless_fixture}
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        ${KERNEL_OUTPUT_DIR}/rj_nop_probe_gfx950.hsaco
+                        ${_waitcheck_descriptorless_fixture}
+                    DEPENDS probe_rj_nop_probe_gfx950
+                        ${KERNEL_OUTPUT_DIR}/rj_nop_probe_gfx950.hsaco
+                    VERBATIM
+                )
+                add_custom_target(hip_waitcheck_descriptorless_fixture_target
+                    DEPENDS ${_waitcheck_descriptorless_fixture})
+                add_dependencies(hip_waitcheck_hazard_test_target
+                    hip_waitcheck_descriptorless_fixture_target)
+            endif()
             add_dependencies(
                 hip_waitcheck_hazard_test_target
                 rocjitsu_waitcheck_hooks hip_waitcheck_hazard_fixture_target
@@ -4935,6 +4952,10 @@ if(RJ_ENABLE_HIP_TESTS)
             if(RJ_INSTALL_TESTS)
                 install(FILES ${_waitcheck_hazard_fixture} ${_waitcheck_clean_fixture}
                     DESTINATION ${RJ_INSTALL_TEST_BIN_DIR})
+                if(RJ_HIP_TEST_ARCH STREQUAL "gfx950" AND TARGET probe_rj_nop_probe_gfx950)
+                    install(FILES ${_waitcheck_descriptorless_fixture}
+                        DESTINATION ${RJ_INSTALL_TEST_BIN_DIR})
+                endif()
             endif()
             rj_add_hip_test_case(
                 hip_waitcheck_hazard_test "HipWaitcheckHazardTest.FailClosedRejectsKernelCodeObject"
@@ -4974,6 +4995,15 @@ if(RJ_ENABLE_HIP_TESTS)
                 )
                 rj_add_hip_test_case(
                     hip_waitcheck_hazard_test
+                    "HipWaitcheckHazardTest.CleanEmbeddedFileRangeLoadsWithWaitChecking"
+                    NAME "WaitcheckHsaToolsHipTest.CleanEmbeddedFileRange.${_waitcheck_mode}"
+                    CONFIG ${RJ_HIP_TEST_CONFIG}
+                    ENVIRONMENT ${_waitcheck_env}
+                        "ROCJITSU_WAITCHECK_MODE=${_waitcheck_mode}"
+                    REQUIRED_OUTPUT "summary loads=[1-9][0-9]*.*unavailable=0"
+                )
+                rj_add_hip_test_case(
+                    hip_waitcheck_hazard_test
                     "HipWaitcheckHazardTest.CleanPathModuleLoadsWithWaitChecking"
                     NAME "WaitcheckHsaToolsHipTest.CleanPathModule.${_waitcheck_mode}"
                     CONFIG ${RJ_HIP_TEST_CONFIG}
@@ -5001,6 +5031,15 @@ if(RJ_ENABLE_HIP_TESTS)
                 CONFIG ${RJ_HIP_TEST_CONFIG}
                 ENVIRONMENT ${_waitcheck_dispatch_env}
             )
+            if(RJ_HIP_TEST_ARCH STREQUAL "gfx950" AND TARGET probe_rj_nop_probe_gfx950)
+                rj_add_hip_test_case(
+                    hip_waitcheck_hazard_test
+                    "HipWaitcheckHazardTest.DescriptorlessReaderSubstitutionAborts"
+                    NAME WaitcheckHsaToolsHipTest.DescriptorlessReaderSubstitution
+                    CONFIG ${RJ_HIP_TEST_CONFIG}
+                    ENVIRONMENT ${_waitcheck_dispatch_env}
+                )
+            endif()
             rj_add_hip_test(
                 hip_instruction_failure_test
                 ARCH ${RJ_HIP_TEST_ARCH}

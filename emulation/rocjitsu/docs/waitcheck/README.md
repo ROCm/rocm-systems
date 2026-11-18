@@ -538,15 +538,16 @@ active cooperative queue can conservatively reject a hazardous caller reader
 before a later loader layer substitutes it; that diagnostic describes the
 caller reader, not the selected image.
 
-If a preceding HSA tool owns a plain queue, the hook preserves that tool's
-create/destroy chain. It checks already loaded kernels when the queue is
-created and checks future loads for the same agent eagerly. Descriptor queues
-requesting device-memory placement keep their original queue and use the same
-eager fallback. With `ROCJITSU_WAITCHECK_FAIL=1`, device-memory queue creation
-is rejected, and any fallback queue with a known hazard is rejected before it
-is returned to the application. An explicit AMD intercept-queue request still
-requires an intercept queue; it fails if a preceding tool only provides a plain
-queue.
+If a preceding HSA tool owns a queue, the hook preserves that tool's
+create/destroy chain and packet interceptors. It checks already loaded kernels
+when the queue is created and checks future loads for the same agent eagerly.
+This also applies when the preceding tool wraps only the AMD intercept-queue
+creator. An explicit AMD intercept-queue request calls that saved creator and
+retains its returned intercept queue. Descriptor queues requesting device-memory
+placement keep their original queue and use the same eager fallback. With
+`ROCJITSU_WAITCHECK_FAIL=1`, device-memory queue creation is rejected, and any
+fallback queue with a known hazard is rejected before it is returned to the
+application.
 
 ## How It Works
 

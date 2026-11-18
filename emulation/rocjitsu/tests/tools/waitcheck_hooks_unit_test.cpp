@@ -28,10 +28,10 @@
 extern "C" bool OnLoad(HsaApiTable *table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char *const *failed_tool_names);
 extern "C" void OnUnload();
-extern "C" void
-rj_waitcheck_test_prior_queue_configure(decltype(hsa_queue_create) *create,
-                                        decltype(hsa_queue_destroy) *destroy,
-                                        decltype(AmdExtTable::hsa_amd_queue_create_fn) amd_create);
+extern "C" void rj_waitcheck_test_prior_queue_configure(
+    decltype(hsa_queue_create) *create, decltype(hsa_queue_destroy) *destroy,
+    decltype(AmdExtTable::hsa_amd_queue_create_fn) amd_create,
+    decltype(AmdExtTable::hsa_amd_queue_intercept_create_fn) intercept_create);
 extern "C" size_t rj_waitcheck_test_prior_queue_count();
 extern "C" hsa_status_t HSA_API rj_waitcheck_test_prior_queue_create(
     hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
@@ -39,6 +39,10 @@ extern "C" hsa_status_t HSA_API rj_waitcheck_test_prior_queue_create(
     uint32_t private_segment_size, uint32_t group_segment_size, hsa_queue_t **queue);
 extern "C" hsa_status_t HSA_API rj_waitcheck_test_prior_amd_queue_create(
     hsa_agent_t agent, hsa_amd_queue_create_desc_t *descs, uint32_t num_descs);
+extern "C" hsa_status_t HSA_API rj_waitcheck_test_prior_intercept_create(
+    hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
+    void (*callback)(hsa_status_t, hsa_queue_t *, void *), void *data,
+    uint32_t private_segment_size, uint32_t group_segment_size, hsa_queue_t **queue);
 extern "C" hsa_status_t HSA_API rj_waitcheck_test_prior_queue_destroy(hsa_queue_t *queue);
 
 namespace {
@@ -71,6 +75,10 @@ int g_first_tool_memory_calls = 0;
 int g_first_tool_load_calls = 0;
 int g_writer_calls = 0;
 int g_preceding_packet_calls = 0;
+int g_intercept_create_calls = 0;
+uint64_t g_preceding_replacement_kernel = 0;
+uint64_t g_written_kernel_object = 0;
+size_t g_interceptor_chain_index = 0;
 int64_t g_load_delta = 0x100000;
 hsa_amd_queue_intercept_handler g_intercept_handler = nullptr;
 void *g_intercept_data = nullptr;
@@ -251,9 +259,15 @@ hsa_status_t HSA_API fake_queue_destroy(hsa_queue_t *queue) {
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t HSA_API fake_prior_intercept_queue_destroy(hsa_queue_t *queue) {
+  return queue == &g_intercept_queue ? rj_waitcheck_test_prior_queue_destroy(queue)
+                                     : fake_queue_destroy(queue);
+}
+
 hsa_status_t HSA_API fake_queue_intercept_create(hsa_agent_t, uint32_t, hsa_queue_type32_t,
                                                  void (*)(hsa_status_t, hsa_queue_t *, void *),
                                                  void *, uint32_t, uint32_t, hsa_queue_t **queue) {
+  ++g_intercept_create_calls;
   if (queue == nullptr)
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   if (g_queue_capacity >= 0 && g_live_queues >= g_queue_capacity)
@@ -318,13 +332,33 @@ hsa_status_t HSA_API fake_queue_cu_set_mask(const hsa_queue_t *queue, uint32_t c
   return HSA_STATUS_SUCCESS;
 }
 
-void fake_packet_writer(const void *, uint64_t packet_count) {
+void fake_packet_writer(const void *packets, uint64_t packet_count) {
   g_writer_calls += static_cast<int>(packet_count);
+  if (packets != nullptr && packet_count != 0)
+    g_written_kernel_object =
+        static_cast<const hsa_kernel_dispatch_packet_t *>(packets)->kernel_object;
+}
+
+void chain_packet_writer(const void *packets, uint64_t packet_count) {
+  if (g_interceptor_chain_index == 0) {
+    fake_packet_writer(packets, packet_count);
+    return;
+  }
+  --g_interceptor_chain_index;
+  const auto callback = g_registered_interceptors[g_interceptor_chain_index];
+  callback(packets, packet_count, 0, nullptr, chain_packet_writer);
+  ++g_interceptor_chain_index;
 }
 
 void preceding_queue_intercept(const void *packets, uint64_t packet_count, uint64_t, void *,
                                hsa_amd_queue_intercept_packet_writer writer) {
   g_preceding_packet_calls += static_cast<int>(packet_count);
+  if (g_preceding_replacement_kernel != 0 && packet_count == 1) {
+    auto replacement = *static_cast<const hsa_kernel_dispatch_packet_t *>(packets);
+    replacement.kernel_object = g_preceding_replacement_kernel;
+    writer(&replacement, 1);
+    return;
+  }
   writer(packets, packet_count);
 }
 
@@ -512,6 +546,10 @@ protected:
     g_first_tool_load_calls = 0;
     g_writer_calls = 0;
     g_preceding_packet_calls = 0;
+    g_intercept_create_calls = 0;
+    g_preceding_replacement_kernel = 0;
+    g_written_kernel_object = 0;
+    g_interceptor_chain_index = 0;
     g_intercept_handler = nullptr;
     g_intercept_data = nullptr;
     g_queue_capacity = -1;
@@ -904,6 +942,52 @@ TEST_F(WaitcheckHooksTest, DispatchModeDoesNotMapDownstreamReplacement) {
   });
   EXPECT_FALSE(contains(dispatch.stderr_text, "waitcnt hazard")) << dispatch.stderr_text;
   EXPECT_EQ(g_writer_calls, 1);
+}
+
+TEST_F(WaitcheckHooksTest, DispatchModeVerifiesDescriptorlessSelectedImage) {
+  OnUnload();
+  loaded_ = false;
+  setenv("ROCJITSU_WAITCHECK_MODE", "dispatch", 1);
+  const auto descriptorless =
+      rocjitsu::waitcheck_test::make_gfx1200_function_only_padded_code_object();
+
+  core_ = make_core_table();
+  amd_ext_ = make_amd_ext_table();
+  table_ = make_api_table(&core_, &amd_ext_);
+  ASSERT_TRUE(OnLoad(&table_, 1, 0, nullptr));
+  loaded_ = true;
+  const CapturedCall unchanged = load_memory(descriptorless);
+  EXPECT_EQ(unchanged.status, HSA_STATUS_SUCCESS);
+  EXPECT_FALSE(contains(unchanged.stderr_text, "loaded code object image"))
+      << unchanged.stderr_text;
+  EXPECT_EQ(g_load_calls, 1);
+
+  OnUnload();
+  loaded_ = false;
+  g_inner_create = fake_reader_create_from_memory;
+  g_inner_destroy = fake_reader_destroy;
+  g_inner_load = fake_load;
+  core_ = make_core_table();
+  core_.hsa_executable_load_agent_code_object_fn = outer_load;
+  amd_ext_ = make_amd_ext_table();
+  table_ = make_api_table(&core_, &amd_ext_);
+  ASSERT_TRUE(OnLoad(&table_, 1, 0, nullptr));
+  loaded_ = true;
+  g_replacement_bytes = rocjitsu::waitcheck_test::make_gfx1200_missing_wait_code_object();
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(core_.hsa_code_object_reader_create_from_memory_fn(descriptorless.data(),
+                                                               descriptorless.size(), &reader),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EXIT(
+      {
+        hsa_loaded_code_object_t loaded{};
+        (void)core_.hsa_executable_load_agent_code_object_fn({}, {}, reader, nullptr, &loaded);
+        (void)core_.hsa_executable_freeze_fn({}, nullptr);
+        std::_Exit(77);
+      },
+      ::testing::KilledBySignal(SIGABRT), "loaded code object image differs from reader; aborting");
+  EXPECT_EQ(core_.hsa_code_object_reader_destroy_fn(reader), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(g_load_calls, 1);
 }
 
 TEST_F(WaitcheckHooksTest, DispatchModeChecksOnlySelectedKernelAndCachesIt) {
@@ -1440,12 +1524,13 @@ TEST_F(WaitcheckHooksTest, PreservesPriorQueueOwnershipWithEagerFallback) {
   loaded_ = false;
   setenv("ROCJITSU_WAITCHECK_MODE", "dispatch", 1);
   rj_waitcheck_test_prior_queue_configure(fake_plain_queue_create, fake_queue_destroy,
-                                          fake_amd_queue_create);
+                                          fake_amd_queue_create, fake_queue_intercept_create);
   core_ = make_core_table();
   core_.hsa_queue_create_fn = rj_waitcheck_test_prior_queue_create;
   core_.hsa_queue_destroy_fn = rj_waitcheck_test_prior_queue_destroy;
   amd_ext_ = make_amd_ext_table();
   amd_ext_.hsa_amd_queue_create_fn = rj_waitcheck_test_prior_amd_queue_create;
+  amd_ext_.hsa_amd_queue_intercept_create_fn = rj_waitcheck_test_prior_intercept_create;
   table_ = make_api_table(&core_, &amd_ext_);
   ASSERT_TRUE(OnLoad(&table_, 1, 0, nullptr));
   loaded_ = true;
@@ -1467,11 +1552,19 @@ TEST_F(WaitcheckHooksTest, PreservesPriorQueueOwnershipWithEagerFallback) {
   EXPECT_EQ(g_live_queues, 0);
   EXPECT_EQ(rj_waitcheck_test_prior_queue_count(), 0u);
 
+  ASSERT_EQ(fake_queue_intercept_register(&g_intercept_queue, preceding_queue_intercept, nullptr),
+            HSA_STATUS_SUCCESS);
   hsa_queue_t *explicit_intercept = nullptr;
   EXPECT_EQ(amd_ext_.hsa_amd_queue_intercept_create_fn({}, 64, HSA_QUEUE_TYPE_MULTI, nullptr,
                                                        nullptr, 0, 0, &explicit_intercept),
-            HSA_STATUS_ERROR_INVALID_QUEUE_CREATION);
-  EXPECT_EQ(explicit_intercept, nullptr);
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(explicit_intercept, &g_intercept_queue);
+  EXPECT_EQ(g_intercept_create_calls, 1);
+  ASSERT_EQ(g_registered_interceptors.size(), 1u);
+  EXPECT_EQ(g_registered_interceptors.front(), preceding_queue_intercept);
+  EXPECT_EQ(g_live_queues, 1);
+  EXPECT_EQ(rj_waitcheck_test_prior_queue_count(), 1u);
+  EXPECT_EQ(core_.hsa_queue_destroy_fn(explicit_intercept), HSA_STATUS_SUCCESS);
   EXPECT_EQ(g_live_queues, 0);
   EXPECT_EQ(rj_waitcheck_test_prior_queue_count(), 0u);
 
@@ -1506,8 +1599,12 @@ TEST_F(WaitcheckHooksTest, DescriptorQueuePreservesPrecedingPacketInterceptor) {
   OnUnload();
   loaded_ = false;
   setenv("ROCJITSU_WAITCHECK_MODE", "dispatch", 1);
+  rj_waitcheck_test_prior_queue_configure(fake_queue_intercept_create, fake_queue_destroy,
+                                          fake_amd_queue_create, fake_queue_intercept_create);
   core_ = make_core_table();
+  core_.hsa_queue_destroy_fn = rj_waitcheck_test_prior_queue_destroy;
   amd_ext_ = make_amd_ext_table();
+  amd_ext_.hsa_amd_queue_create_fn = rj_waitcheck_test_prior_amd_queue_create;
   table_ = make_api_table(&core_, &amd_ext_);
   ASSERT_TRUE(OnLoad(&table_, 1, 0, nullptr));
   loaded_ = true;
@@ -1524,15 +1621,96 @@ TEST_F(WaitcheckHooksTest, DescriptorQueuePreservesPrecedingPacketInterceptor) {
   EXPECT_EQ(desc.queue, &g_intercept_queue);
   EXPECT_EQ(g_last_destroyed_queue, nullptr);
   EXPECT_EQ(g_live_queues, 1);
-  ASSERT_EQ(g_registered_interceptors.size(), 2u);
+  ASSERT_EQ(g_registered_interceptors.size(), 1u);
   EXPECT_EQ(g_registered_interceptors.front(), preceding_queue_intercept);
+  EXPECT_EQ(rj_waitcheck_test_prior_queue_count(), 1u);
   hsa_kernel_dispatch_packet_t packet{};
-  for (const auto interceptor : g_registered_interceptors)
-    interceptor(&packet, 1, 0, nullptr, fake_packet_writer);
+  packet.kernel_object = 0x111u;
+  g_preceding_replacement_kernel = 0x222u;
+  g_interceptor_chain_index = g_registered_interceptors.size();
+  chain_packet_writer(&packet, 1);
   EXPECT_EQ(g_preceding_packet_calls, 1);
-  EXPECT_EQ(g_writer_calls, 2);
+  EXPECT_EQ(g_writer_calls, 1);
+  EXPECT_EQ(g_written_kernel_object, 0x222u);
+
+  const CapturedCall hazard =
+      load_memory(rocjitsu::waitcheck_test::make_gfx1200_missing_wait_code_object());
+  EXPECT_EQ(hazard.status, HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  EXPECT_EQ(g_load_calls, 0);
+  EXPECT_TRUE(contains(hazard.stderr_text, "waitcnt hazard")) << hazard.stderr_text;
+
   EXPECT_EQ(core_.hsa_queue_destroy_fn(desc.queue), HSA_STATUS_SUCCESS);
   EXPECT_EQ(g_live_queues, 0);
+  EXPECT_EQ(rj_waitcheck_test_prior_queue_count(), 0u);
+}
+
+TEST_F(WaitcheckHooksTest, PriorInterceptQueueChecksLoadedObjectsEagerly) {
+  OnUnload();
+  loaded_ = false;
+  setenv("ROCJITSU_WAITCHECK_MODE", "dispatch", 1);
+  rj_waitcheck_test_prior_queue_configure(fake_queue_intercept_create, fake_queue_destroy,
+                                          fake_amd_queue_create, fake_queue_intercept_create);
+  core_ = make_core_table();
+  core_.hsa_queue_create_fn = rj_waitcheck_test_prior_queue_create;
+  core_.hsa_queue_destroy_fn = rj_waitcheck_test_prior_queue_destroy;
+  amd_ext_ = make_amd_ext_table();
+  table_ = make_api_table(&core_, &amd_ext_);
+  ASSERT_TRUE(OnLoad(&table_, 1, 0, nullptr));
+  loaded_ = true;
+
+  ASSERT_EQ(fake_queue_intercept_register(&g_intercept_queue, preceding_queue_intercept, nullptr),
+            HSA_STATUS_SUCCESS);
+  hsa_queue_t *queue = nullptr;
+  ASSERT_EQ(core_.hsa_queue_create_fn({}, 64, HSA_QUEUE_TYPE_MULTI, nullptr, nullptr, 0, 0, &queue),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(queue, &g_intercept_queue);
+  ASSERT_EQ(g_registered_interceptors.size(), 1u);
+  EXPECT_EQ(g_registered_interceptors.front(), preceding_queue_intercept);
+
+  const CapturedCall hazard =
+      load_memory(rocjitsu::waitcheck_test::make_gfx1200_missing_wait_code_object());
+  EXPECT_EQ(hazard.status, HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  EXPECT_EQ(g_load_calls, 0);
+  EXPECT_TRUE(contains(hazard.stderr_text, "waitcnt hazard")) << hazard.stderr_text;
+  EXPECT_EQ(core_.hsa_queue_destroy_fn(queue), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(rj_waitcheck_test_prior_queue_count(), 0u);
+}
+
+TEST_F(WaitcheckHooksTest, PriorAmdReplacementQueueChecksLoadedObjectsEagerly) {
+  OnUnload();
+  loaded_ = false;
+  setenv("ROCJITSU_WAITCHECK_MODE", "dispatch", 1);
+  rj_waitcheck_test_prior_queue_configure(fake_plain_queue_create, fake_queue_destroy,
+                                          fake_amd_queue_create, fake_queue_intercept_create);
+  core_ = make_core_table();
+  core_.hsa_queue_create_fn = fake_plain_queue_create;
+  core_.hsa_queue_destroy_fn = fake_prior_intercept_queue_destroy;
+  amd_ext_ = make_amd_ext_table();
+  amd_ext_.hsa_amd_queue_intercept_create_fn = rj_waitcheck_test_prior_intercept_create;
+  table_ = make_api_table(&core_, &amd_ext_);
+  ASSERT_TRUE(OnLoad(&table_, 1, 0, nullptr));
+  loaded_ = true;
+
+  ASSERT_EQ(fake_queue_intercept_register(&g_intercept_queue, preceding_queue_intercept, nullptr),
+            HSA_STATUS_SUCCESS);
+  hsa_queue_t *queue = nullptr;
+  ASSERT_EQ(core_.hsa_queue_create_fn({}, 64, HSA_QUEUE_TYPE_MULTI, nullptr, nullptr, 0, 0, &queue),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(queue, &g_intercept_queue);
+  EXPECT_EQ(g_last_destroyed_queue, &g_descriptor_queue);
+  EXPECT_EQ(g_intercept_create_calls, 1);
+  ASSERT_EQ(g_registered_interceptors.size(), 1u);
+  EXPECT_EQ(g_registered_interceptors.front(), preceding_queue_intercept);
+  EXPECT_EQ(rj_waitcheck_test_prior_queue_count(), 1u);
+
+  const CapturedCall hazard =
+      load_memory(rocjitsu::waitcheck_test::make_gfx1200_missing_wait_code_object());
+  EXPECT_EQ(hazard.status, HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  EXPECT_EQ(g_load_calls, 0);
+  EXPECT_TRUE(contains(hazard.stderr_text, "waitcnt hazard")) << hazard.stderr_text;
+  EXPECT_EQ(core_.hsa_queue_destroy_fn(queue), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(g_live_queues, 0);
+  EXPECT_EQ(rj_waitcheck_test_prior_queue_count(), 0u);
 }
 
 TEST_F(WaitcheckHooksTest, DisabledCheckingAllowsDeviceMemoryDescriptorQueues) {

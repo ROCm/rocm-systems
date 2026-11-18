@@ -250,8 +250,9 @@ typedef struct rj_waitcheck_options_s {
   /// @brief Optional receiver for counter-parity findings.
   rj_waitcheck_counter_parity_callback_t counter_parity_callback;
   /// @brief Wave size for entries without descriptors. Zero selects the target default
-  /// for provisional analysis; a complete descriptorless selected-entry analysis
-  /// requires an explicit 32 or 64. Descriptor-backed entries use their own wave size.
+  /// for provisional analysis. An explicit 32 or 64 permits decoding a selected
+  /// descriptorless entry, but its result remains incomplete without VGPR allocation.
+  /// Descriptor-backed entries use their own wave size.
   uint32_t fallback_wavefront_size;
 } rj_waitcheck_options_t;
 
@@ -380,7 +381,8 @@ RJ_API_EXPORT rj_status_t rj_waitcheck_analyze(const void *code_object, size_t c
 /// Descriptors sharing that entry and wave mode are merged conservatively;
 /// their allocation bounds can differ at dispatch.
 /// A descriptorless entry requires an explicit fallback_wavefront_size of 32 or
-/// 64 in @p options for a complete result.
+/// 64 in @p options to decode the selected entry. Without VGPR allocation, the
+/// result remains incomplete and returns ROCJITSU_STATUS_INVALID_CODE_OBJECT.
 ///
 /// @param[in] code_object AMDGPU HSA ELF image in memory.
 /// @param[in] code_object_size Size of @p code_object in bytes.

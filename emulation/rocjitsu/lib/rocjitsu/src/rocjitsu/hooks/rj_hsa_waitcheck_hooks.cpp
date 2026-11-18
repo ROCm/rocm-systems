@@ -421,6 +421,7 @@ public:
   struct PreparedLoad {
     std::shared_ptr<LoadedCodeObjectEntry> entry;
     bool passed = true;
+    std::shared_ptr<rocjitsu::AmdGpuCodeObject> image;
   };
 
   PreparedLoad prepare(hsa_executable_t executable, hsa_agent_t agent, const uint8_t *bytes,
@@ -431,7 +432,7 @@ public:
       auto code_object = std::make_shared<rocjitsu::AmdGpuCodeObject>(bytes, size);
       if (!code_object->is_valid() || rocjitsu::waitcheck_arch_for_target(
                                           code_object->target_id()) == ROCJITSU_CODE_ARCH_INVALID) {
-        return {};
+        return {.entry = {}, .passed = true, .image = std::move(code_object)};
       }
 
       auto entry = std::make_shared<LoadedCodeObjectEntry>();
@@ -447,7 +448,7 @@ public:
       for (auto &info : rocjitsu::waitcheck_kernels_exact(*code_object))
         add_kernel(std::move(info));
       if (entry->kernels.empty())
-        return {};
+        return {.entry = {}, .passed = true, .image = std::move(code_object)};
 
       bool cooperative_active = false;
       {
@@ -461,7 +462,9 @@ public:
                                return queue.second.agent_handle == agent.handle;
                              });
       }
-      return {entry, !cooperative_active || check_all(entry->kernels)};
+      return {.entry = entry,
+              .passed = !cooperative_active || check_all(entry->kernels),
+              .image = std::move(code_object)};
     } catch (const std::exception &error) {
       std::fprintf(stderr, "rocjitsu-waitcheck: failed to index loaded code object: %s\n",
                    error.what());
@@ -470,7 +473,7 @@ public:
       std::fprintf(stderr, "rocjitsu-waitcheck: failed to index loaded code object\n");
       g_stats.analysis_errors.fetch_add(1, std::memory_order_relaxed);
     }
-    return {.entry = nullptr, .passed = false};
+    return {.entry = nullptr, .passed = false, .image = nullptr};
   }
 
   void complete(const PreparedLoad &prepared, hsa_loaded_code_object_t loaded, bool success) {
@@ -981,6 +984,11 @@ template <typename FunctionPointer>
   const void *reference = runtime == nullptr
                               ? reinterpret_cast<const void *>(layer().intercept_register())
                               : dlsym(runtime, symbol);
+  // AMD extension callbacks can live only in the API table and have no
+  // exported symbol. The core queue-create export identifies the same ROCR
+  // module without treating an earlier tool's wrapper as a runtime callback.
+  if (runtime != nullptr && reference == nullptr)
+    reference = dlsym(runtime, "hsa_queue_create");
   Dl_info reference_info{};
   const bool same_owner = reference != nullptr && dladdr(reference, &reference_info) != 0 &&
                           creator_info.dli_fbase == reference_info.dli_fbase;
@@ -1348,17 +1356,22 @@ hsa_status_t HSA_API waitcheck_executable_load_agent_code_object(
       registry.complete(prepared, {}, false);
       return status;
     }
-    if (!prepared.entry) {
-      g_stats.unavailable.fetch_add(1, std::memory_order_relaxed);
-      return status;
-    }
-    const auto &checked_image = *prepared.entry->kernels.front()->code_object;
-    const auto identity = loaded_image_identity(
-        *runtime_output, *entry, reinterpret_cast<const uint8_t *>(checked_image.image_data()),
-        checked_image.image_size());
+    // A descriptorless reader can still be replaced with a dispatchable
+    // image by the loader. Verify the selected bytes before deciding whether
+    // there are any kernels to index for later dispatch.
+    const auto identity =
+        prepared.image == nullptr
+            ? LoadedImageIdentity::Unavailable
+            : loaded_image_identity(*runtime_output, *entry,
+                                    reinterpret_cast<const uint8_t *>(prepared.image->image_data()),
+                                    prepared.image->image_size());
     if (identity != LoadedImageIdentity::Same) {
       registry.complete(prepared, {}, false);
       return unchecked_loaded_image_status(identity);
+    }
+    if (!prepared.entry) {
+      g_stats.unavailable.fetch_add(1, std::memory_order_relaxed);
+      return status;
     }
     registry.complete(prepared, *runtime_output, true);
     return status;
@@ -1500,10 +1513,7 @@ hsa_status_t HSA_API waitcheck_queue_get_info(hsa_queue_t *queue,
   }
   registry.finish_cooperative_create(agent, queue);
   g_stats.unavailable.fetch_add(1, std::memory_order_relaxed);
-  std::fprintf(stderr,
-               "rocjitsu-waitcheck: %s cannot be intercepted; "
-               "using eager checks for this agent\n",
-               reason);
+  std::fprintf(stderr, "rocjitsu-waitcheck: %s: using eager checks for this agent\n", reason);
   return HSA_STATUS_SUCCESS;
 }
 
@@ -1511,15 +1521,14 @@ hsa_status_t create_checked_queue(hsa_agent_t agent, uint32_t size, hsa_queue_ty
                                   void (*callback)(hsa_status_t, hsa_queue_t *, void *), void *data,
                                   uint32_t private_segment_size, uint32_t group_segment_size,
                                   hsa_queue_t **queue, bool require_intercept_queue) {
+  auto create = require_intercept_queue ? layer().intercept_create() : layer().queue_create();
   if (!env_enabled("ROCJITSU_WAITCHECK", true)) {
-    auto *create = layer().queue_create();
     return create == nullptr ? HSA_STATUS_ERROR_NOT_INITIALIZED
                              : create(agent, size, type, callback, data, private_segment_size,
                                       group_segment_size, queue);
   }
   if (type == HSA_QUEUE_TYPE_COOPERATIVE) {
     auto &registry = DispatchRegistry::instance();
-    auto create = layer().queue_create();
     if (!create)
       return HSA_STATUS_ERROR_NOT_INITIALIZED;
     const bool checking = env_enabled("ROCJITSU_WAITCHECK", true);
@@ -1534,7 +1543,6 @@ hsa_status_t create_checked_queue(hsa_agent_t agent, uint32_t size, hsa_queue_ty
                                        status == HSA_STATUS_SUCCESS && queue ? *queue : nullptr);
     return status;
   }
-  auto create = layer().queue_create();
   auto register_intercept = layer().intercept_register();
   if (create == nullptr || register_intercept == nullptr)
     return HSA_STATUS_ERROR_NOT_INITIALIZED;
@@ -1544,6 +1552,24 @@ hsa_status_t create_checked_queue(hsa_agent_t agent, uint32_t size, hsa_queue_ty
   if (status != HSA_STATUS_SUCCESS || queue == nullptr || *queue == nullptr)
     return status;
 
+  // ROCr invokes interceptors in reverse registration order. A preceding
+  // queue creator can already have registered a packet rewriter, which would
+  // run after a newly appended waitcheck callback. Preserve that queue and
+  // check every loaded object before it can be used instead.
+  if (!is_rocr_queue_creator(create, require_intercept_queue ? "hsa_amd_queue_intercept_create"
+                                                             : "hsa_queue_create") ||
+      !is_rocr_queue_creator(layer().queue_destroy(), "hsa_queue_destroy")) {
+    auto *destroy = layer().queue_destroy();
+    const hsa_status_t fallback_status =
+        keep_queue_with_eager_checks(agent, *queue, "preceding tool's queue");
+    if (fallback_status != HSA_STATUS_SUCCESS) {
+      if (destroy != nullptr)
+        (void)destroy(*queue);
+      *queue = nullptr;
+    }
+    return fallback_status;
+  }
+
   const hsa_status_t register_status =
       register_intercept(*queue, waitcheck_queue_intercept, nullptr);
   if (register_status == HSA_STATUS_SUCCESS) {
@@ -1552,25 +1578,6 @@ hsa_status_t create_checked_queue(hsa_agent_t agent, uint32_t size, hsa_queue_ty
   }
 
   auto *destroy = layer().queue_destroy();
-  if (register_status == HSA_STATUS_ERROR_INVALID_QUEUE &&
-      (!is_rocr_queue_creator(create, "hsa_queue_create") ||
-       !is_rocr_queue_creator(destroy, "hsa_queue_destroy"))) {
-    if (require_intercept_queue) {
-      if (destroy != nullptr)
-        (void)destroy(*queue);
-      *queue = nullptr;
-      return HSA_STATUS_ERROR_INVALID_QUEUE_CREATION;
-    }
-    const hsa_status_t fallback_status =
-        keep_queue_with_eager_checks(agent, *queue, "preceding tool's queue");
-    if (fallback_status == HSA_STATUS_SUCCESS)
-      return HSA_STATUS_SUCCESS;
-    if (destroy != nullptr)
-      (void)destroy(*queue);
-    *queue = nullptr;
-    return fallback_status;
-  }
-
   if (destroy == nullptr)
     return HSA_STATUS_ERROR_NOT_INITIALIZED;
   const hsa_status_t destroy_status = destroy(*queue);
@@ -1579,6 +1586,8 @@ hsa_status_t create_checked_queue(hsa_agent_t agent, uint32_t size, hsa_queue_ty
     return destroy_status;
   if (register_status != HSA_STATUS_ERROR_INVALID_QUEUE)
     return register_status;
+  if (require_intercept_queue)
+    return HSA_STATUS_ERROR_INVALID_QUEUE_CREATION;
 
   create = layer().intercept_create();
   if (create == nullptr)
@@ -1587,6 +1596,15 @@ hsa_status_t create_checked_queue(hsa_agent_t agent, uint32_t size, hsa_queue_ty
       create(agent, size, type, callback, data, private_segment_size, group_segment_size, queue);
   if (replacement_status != HSA_STATUS_SUCCESS || queue == nullptr || *queue == nullptr)
     return replacement_status;
+  if (!is_rocr_queue_creator(create, "hsa_amd_queue_intercept_create")) {
+    const hsa_status_t fallback_status =
+        keep_queue_with_eager_checks(agent, *queue, "preceding tool's queue");
+    if (fallback_status != HSA_STATUS_SUCCESS) {
+      (void)destroy(*queue);
+      *queue = nullptr;
+    }
+    return fallback_status;
+  }
   const hsa_status_t replacement_register_status =
       register_intercept(*queue, waitcheck_queue_intercept, nullptr);
   if (replacement_register_status == HSA_STATUS_SUCCESS) {
@@ -1714,21 +1732,11 @@ hsa_status_t HSA_API waitcheck_amd_queue_create(hsa_agent_t agent,
       continue;
     }
 
-    // A preceding HSA tool may already have replaced this descriptor queue
-    // with an intercept queue. Register on that queue so its packet callbacks
-    // and queue identity remain intact.
-    auto *register_intercept = layer().intercept_register();
-    const hsa_status_t reuse_status =
-        register_intercept == nullptr
-            ? HSA_STATUS_ERROR_NOT_INITIALIZED
-            : register_intercept(plain_queue, waitcheck_queue_intercept, nullptr);
-    if (reuse_status == HSA_STATUS_SUCCESS) {
-      layer().track_queue(plain_queue);
-      continue;
-    }
-    if (reuse_status == HSA_STATUS_ERROR_INVALID_QUEUE &&
-        (!is_rocr_queue_creator(original_create, "hsa_amd_queue_create") ||
-         !is_rocr_queue_creator(layer().queue_destroy(), "hsa_queue_destroy"))) {
+    // A preceding HSA tool can own this queue and register a packet rewriter.
+    // ROCr would run a newly appended waitcheck callback before that writer,
+    // so preserve the queue and use eager checks for its agent.
+    if (!is_rocr_queue_creator(original_create, "hsa_amd_queue_create") ||
+        !is_rocr_queue_creator(layer().queue_destroy(), "hsa_queue_destroy")) {
       const hsa_status_t fallback_status =
           keep_queue_with_eager_checks(agent, plain_queue, "preceding tool's queue");
       if (fallback_status != HSA_STATUS_SUCCESS) {
@@ -1736,6 +1744,16 @@ hsa_status_t HSA_API waitcheck_amd_queue_create(hsa_agent_t agent,
         desc.queue = nullptr;
         note_replacement_error(fallback_status);
       }
+      continue;
+    }
+
+    auto *register_intercept = layer().intercept_register();
+    const hsa_status_t reuse_status =
+        register_intercept == nullptr
+            ? HSA_STATUS_ERROR_NOT_INITIALIZED
+            : register_intercept(plain_queue, waitcheck_queue_intercept, nullptr);
+    if (reuse_status == HSA_STATUS_SUCCESS) {
+      layer().track_queue(plain_queue);
       continue;
     }
     if (reuse_status != HSA_STATUS_ERROR_INVALID_QUEUE) {

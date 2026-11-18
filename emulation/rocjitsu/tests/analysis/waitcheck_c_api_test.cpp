@@ -534,11 +534,13 @@ TEST(WaitcheckCApiTest, FunctionEntryRequiresExplicitWaveSizeWithoutDescriptor) 
   options.fallback_wavefront_size = 32;
   result = initialized_result();
   ASSERT_EQ(rj_waitcheck_analyze_kernel(image.data(), image.size(), 0x10, &options, &result),
-            ROCJITSU_STATUS_SUCCESS);
+            ROCJITSU_STATUS_INVALID_CODE_OBJECT);
   EXPECT_EQ(result.passed, 0u);
   EXPECT_EQ(result.diagnostics_observed, 1u);
   ASSERT_EQ(state.diagnostics.size(), 1u);
   EXPECT_FALSE(state.diagnostics.front().has_kernel);
+  ASSERT_EQ(state.errors.size(), 1u);
+  EXPECT_NE(state.errors.front().find("no VGPR allocation"), std::string::npos);
 }
 
 TEST(WaitcheckCApiTest, SharedEntryChecksBothWaveModes) {
