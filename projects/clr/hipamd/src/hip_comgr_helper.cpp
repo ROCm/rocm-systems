@@ -435,12 +435,16 @@ std::string comgrDataName(const std::string& name) {
   // Comgr writes a data object to a file named after it in its temporary
   // directory, and rejects names that contain ':', such as a Windows path with
   // a drive letter ("C:\src\k.cu"). For such a name keep only the file name
-  // (the part after the last '/' or '\') and replace any ':' left in it.
+  // (the part after the last '/' or '\') and replace any ':' left in it. An
+  // empty result, also for "." or "..", tells the caller to generate a name.
   if (name.find(':') == std::string::npos) {
     return name;
   }
   const size_t sep = name.find_last_of("/\\");
   std::string fileName = (sep == std::string::npos) ? name : name.substr(sep + 1);
+  if (fileName == "." || fileName == "..") {
+    return std::string();
+  }
   std::replace(fileName.begin(), fileName.end(), ':', '_');
   return fileName;
 }

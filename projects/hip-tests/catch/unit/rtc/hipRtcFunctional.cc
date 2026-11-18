@@ -75,7 +75,9 @@ HIP_TEST_CASE(Unit_hiprtc_functional) {
 // a cache file, which on Windows starts with a drive letter (ROCm/TheRock#9848).
 HIP_TEST_CASE(Unit_hiprtc_name_with_drive_letter) {
   using namespace std;
-  const char* name = GENERATE("C:\\src\\testinline.cu", "C:/src/testinline.cu", "C:testinline.cu");
+  // "C:\src\" and "C:\src\.." leave no file name; hiprtc then generates one.
+  const char* name = GENERATE("C:\\src\\testinline.cu", "C:/src/testinline.cu", "C:testinline.cu",
+                              "/tmp/a:b/testinline.cu", "C:\\src\\", "C:\\src\\..");
   INFO("program name: " << name);
   hiprtcProgram prog;
   HIPRTC_CHECK(hiprtcCreateProgram(&prog, code, name, 0, nullptr, nullptr));
