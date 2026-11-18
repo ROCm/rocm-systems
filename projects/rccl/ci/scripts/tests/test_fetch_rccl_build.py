@@ -185,6 +185,15 @@ class ResolveTest(unittest.TestCase):
             plan = fb.resolve(f"url:{lib}", "gfx950-dcgpu")
         self.assertEqual((plan["version"], plan["kpack_url"]), ("10.0.0", dev))
 
+    def test_a_tarball_url_must_exist(self):
+        url = f"{TARBALLS}therock-dist-linux-gfx950-dcgpu-7.13.0.tar.gz"
+        with Remote(files={url: b""}):
+            plan = fb.resolve(f"url:{url}", "gfx950-dcgpu")
+        self.assertEqual(plan, {"source": f"url:{url}", "version": "7.13.0",
+                                "archive": "tarball", "tarball_url": url})
+        with Remote(), self.assertRaisesRegex(RuntimeError, "not found"):
+            fb.resolve(f"url:{url}", "gfx950-dcgpu")
+
     def test_a_tarball_url_must_be_for_the_family(self):
         url = f"{TARBALLS}therock-dist-linux-gfx942-dcgpu-7.13.0.tar.gz"
         with Remote(), self.assertRaisesRegex(ValueError, "not a gfx950-dcgpu dist tarball"):

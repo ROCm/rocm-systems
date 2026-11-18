@@ -194,6 +194,8 @@ def resolve(spec: str, family: str) -> dict:
             prefix = f"therock-dist-linux-{family}-"
             if not name.startswith(prefix):
                 raise ValueError(f"{spec!r}: not a {family} dist tarball")
+            if not _exists(value):
+                raise RuntimeError(f"{spec}: not found")
             return _tarball_plan(spec, name[len(prefix):-len(".tar.gz")], value)
         lib_url, version = value, name.split("-")[1]
         if not VERSION_RE.fullmatch(version):
