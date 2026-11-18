@@ -156,11 +156,11 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
     enableCoopMultiDeviceGroups_ = GPU_ENABLE_COOP_GROUPS & coop_groups;
   }
 
-  // gfx12+ includes Navi4x (gfx120x) as well as gfx125x
+  // gfx120x CP firmware rejects barrier-value packets as malformed
   if ((gfxipMajor == 9 && gfxipMinor == 0 && gfxStepping == 10) ||
       ((gfxipMajor == 9 && gfxipMinor >= 4 &&
         (gfxStepping == 0 || gfxStepping == 1 || gfxStepping == 2))) ||
-      (gfxipMajor >= 12)) {
+      (gfxipMajor == 12 && gfxipMinor >= 5)) {
     barrier_value_packet_ = true;
     queue_pipe_dist_ = dynamic_queues_ >= 1;
   }
