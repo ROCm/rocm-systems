@@ -15,10 +15,10 @@ request, regardless of its target branch or changed paths:
 
 The PR policy requires all four formatting checks. RocJITsu retains its
 `pre-commit` name. The workflow title identifies the PR number, target branch,
-and target commit. A change of target branch triggers fresh validation even
-when the head commit is unchanged. Title and description edits skip validation
-under a separate, nonrequired check name and use isolated concurrency groups,
-so they cannot cancel validation or replace its results. Each matrix row
+and target commit. Every PR edit, including title and description changes,
+evaluates that event's exact head and base comparison. An old success against
+a different base commit cannot satisfy an edit after retargeting or a base
+advance. Each matrix row
 reports its own result; a failure does not cancel the other rows.
 
 Formatting steps live directly in the workflow. Each row calls the shared
@@ -63,7 +63,8 @@ Include every directory the tests read in the sparse checkout. The runner
 provides Python 3.11 and reports each suite separately as `unit-tests / <suite>`.
 
 The workflow validates source changes and retargets on every PR, plus `develop`
-pushes. Metadata-only edits use the same isolation as formatting. Each row
+pushes. Metadata-only edits skip unit tests under a separate check name and
+concurrency group, while formatting re-evaluates the exact PR comparison. Each row
 uses the complete Git-diff selector before provisioning test inputs or
 installing dependencies.
 Changes to the selector or test workflow activate every suite. Formatting

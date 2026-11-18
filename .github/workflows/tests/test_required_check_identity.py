@@ -23,17 +23,60 @@ POLICY = policy_check.load_policy(POLICY_PATH)
 
 class RequiredCheckIdentityTests(unittest.TestCase):
     def checks(self, duplicate, reverse=False):
-        scoped = {"name": "pre-commit", "status": "completed", "conclusion": "success"}
+        duplicate = duplicate | {"check_suite": {"id": 200}}
+        scoped = {
+            "name": "pre-commit",
+            "status": "completed",
+            "conclusion": "success",
+            "check_suite": {"id": 100},
+        }
         checks = [duplicate, scoped] if not reverse else [scoped, duplicate]
         return checks + [
-            {"name": name, "status": "completed", "conclusion": "success"}
-            for name in POLICY.required_checks
+            {
+                "name": name,
+                "status": "completed",
+                "conclusion": "success",
+                "check_suite": {"id": 100},
+            }
+            for name in (check.name for check in POLICY.required_checks)
             if name != "pre-commit"
         ]
 
     def invoke(self, batches, timeout=5):
         output = io.StringIO()
         reads = Mock(side_effect=batches)
+        active = []
+
+        def get(url, token):
+            nonlocal active
+            if "/actions/workflows/" in url:
+                active = reads()
+                return {
+                    "total_count": 1,
+                    "workflow_runs": [
+                        {
+                            "id": 10,
+                            "run_number": 10,
+                            "check_suite_id": 100,
+                            "event": "pull_request",
+                            "head_sha": "fixture-head",
+                            "display_title": "PR #1: develop@fixture-base",
+                            "status": "completed",
+                            "conclusion": "success",
+                        }
+                    ],
+                }
+            if "/check-suites/100/" in url:
+                # The first same-name record is the legacy producer; the
+                # other record and distinct names belong to the scoped suite.
+                scoped = [
+                    run for run in active if run.get("check_suite", {}).get("id") == 100
+                ]
+                return {"total_count": len(scoped), "check_runs": scoped}
+            if "/commits/fixture-head/" in url:
+                return {"total_count": len(active), "check_runs": active}
+            raise AssertionError(url)
+
         with contextlib.ExitStack() as stack:
             stack.enter_context(
                 patch.dict(
@@ -44,6 +87,9 @@ class RequiredCheckIdentityTests(unittest.TestCase):
                         "REPO": "rocm-systems",
                         "PR_NUMBER": "1",
                         "SHA": "fixture-head",
+                        "BASE_REF": "develop",
+                        "BASE_SHA": "fixture-base",
+                        "ACTIONS_TOKEN": "actions-token",
                     },
                 )
             )
@@ -54,6 +100,9 @@ class RequiredCheckIdentityTests(unittest.TestCase):
                     return_value={
                         "body": "ISSUE ID: #1\nCheck independently emitted formatting results.",
                         "user": {"login": "human"},
+                        "head": {"sha": "fixture-head"},
+                        "base": {"ref": "develop", "sha": "fixture-base"},
+                        "changed_files": 1,
                     },
                 )
             )
@@ -71,7 +120,7 @@ class RequiredCheckIdentityTests(unittest.TestCase):
                     ),
                 )
             )
-            stack.enter_context(patch.object(policy_check, "get_check_runs", reads))
+            stack.enter_context(patch.object(policy_check, "gh_get", side_effect=get))
             for operation in (
                 "upsert_comment",
                 "remove_label",
@@ -160,8 +209,13 @@ class RequiredCheckIdentityTests(unittest.TestCase):
 
     def test_missing_required_name_cannot_pass(self):
         checks = [
-            {"name": name, "status": "completed", "conclusion": "success"}
-            for name in POLICY.required_checks
+            {
+                "name": name,
+                "status": "completed",
+                "conclusion": "success",
+                "check_suite": {"id": 100},
+            }
+            for name in (check.name for check in POLICY.required_checks)
             if name != "pre-commit / cuid"
         ]
         result, _, output = self.invoke([checks], timeout=0)
