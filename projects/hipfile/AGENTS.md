@@ -123,7 +123,8 @@ Notes:
 
 - The default build type is `RelWithDebInfo`, and `BUILD_TESTING` is on by
   default.
-- `HIPFILE_CXX_STANDARD` selects C++20 (the default), 23, or 26.
+- `HIPFILE_CXX_STANDARD` selects C++20 (the default), 23, or 26. C++26
+  needs CMake 3.30 or later; configuring fails with older versions.
 - CI's build workflow
   ([hipfile-build.yml](../../.github/workflows/hipfile-build.yml), started
   by [hipfile-ci-toplevel.yml](../../.github/workflows/hipfile-ci-toplevel.yml))
