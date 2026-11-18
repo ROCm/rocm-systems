@@ -8592,13 +8592,14 @@ TEST(Gfx1250CvtScaleTest, UnpackSelectsE8M0ScaleLaneAndByte) {
             ASSERT_TRUE(cu->execute_instruction(constant.get(), *wf).succeeded());
             for (unsigned i = 0; i < 8; ++i)
               for (unsigned lane = 0; lane < 32; ++lane) {
-                SCOPED_TRACE(testing::Message() << "output " << i << ", lane " << lane);
                 const uint32_t literal_result = cu->read_vgpr(vb + destination + i, lane);
                 const uint32_t register_result = cu->read_vgpr(vb + 16 + i, lane);
-                ASSERT_EQ(literal_result, register_result);
+                ASSERT_EQ(literal_result, register_result) << "output " << i << ", lane " << lane;
                 if (!(mask & (uint64_t{1} << lane))) {
-                  ASSERT_EQ(literal_result, initial_value(block, lane, i));
-                  ASSERT_EQ(register_result, initial_value(block, lane, i));
+                  ASSERT_EQ(literal_result, initial_value(block, lane, i))
+                      << "output " << i << ", lane " << lane;
+                  ASSERT_EQ(register_result, initial_value(block, lane, i))
+                      << "output " << i << ", lane " << lane;
                 }
               }
           }
@@ -8659,14 +8660,13 @@ TEST(Gfx1250CvtScaleTest, UnitScalePackMatchesRegisterScaleWithOverlappingTuples
       ASSERT_TRUE(cu->execute_instruction(fast.get(), *wf).succeeded());
       for (unsigned lane = 0; lane < 32; ++lane)
         for (unsigned word = 0; word < 2; ++word) {
-          SCOPED_TRACE(testing::Message() << "lane " << lane << ", word " << word);
           const uint32_t fast_result = cu->read_vgpr(base + 4 + word, lane);
           const uint32_t control_result = cu->read_vgpr(base + 20 + word, lane);
-          EXPECT_EQ(fast_result, control_result);
+          EXPECT_EQ(fast_result, control_result) << "lane " << lane << ", word " << word;
           if (!(mask & (uint64_t{1} << lane))) {
             const uint32_t initial = inputs[(lane + word + 2) % inputs.size()];
-            EXPECT_EQ(fast_result, initial);
-            EXPECT_EQ(control_result, initial);
+            EXPECT_EQ(fast_result, initial) << "lane " << lane << ", word " << word;
+            EXPECT_EQ(control_result, initial) << "lane " << lane << ", word " << word;
           }
         }
     }
