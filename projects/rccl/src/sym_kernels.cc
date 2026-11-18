@@ -490,13 +490,14 @@ int ncclSymkAgHierGroups(struct ncclComm* comm) {
   int scaleIn = comm->symkState.kcomm.hierScaleInSize;
   if (!ncclSymkAgHierAvailable(comm) || scaleIn <= 0) return 0;
   int lsaRanks = ncclTeamLsa(comm).nRanks;
-  if (lsaRanks % scaleIn != 0 || lsaRanks / scaleIn < 2) return 0;
+  if (lsaRanks < comm->nRanks || lsaRanks % scaleIn != 0 || lsaRanks / scaleIn < 2) return 0;
   return lsaRanks / scaleIn;
 }
 
 int ncclSymkAgHierLaunchBlocks(struct ncclComm* comm, int nBlocks) {
   int nGroups = ncclSymkAgHierGroups(comm);
   if (nGroups == 0) return nBlocks;
+  nBlocks = std::min(nBlocks, comm->symkState.agHierMaxBlocks);
   int nUsed = ncclSymkAgHierG0Blocks(nBlocks, nGroups) + (nGroups - 1) * ncclSymkAgHierGroupBlocks(nBlocks, nGroups);
   return std::min(nBlocks, nUsed);
 }
@@ -516,6 +517,7 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
     symk->kcomm.hierScaleInSize = computeHierScaleInSize(comm);
     symk->kcomm.hierMaxChunkBytes = static_cast<uint32_t>(ncclSymkAgHierMaxChunkBytesLimit());
     int agHierBlocks = std::max(ncclSymkAgHierMaxBlocksLimit(), ncclSymkAgHierTmaMaxBlocks);
+    symk->agHierMaxBlocks = agHierBlocks;
     int agHierGroups = ncclSymkAgHierGroups(comm);
     if (ncclSymkAgHierAvailable(comm) && symk->kcomm.hierScaleInSize == 0) {
       INFO(NCCL_INIT,

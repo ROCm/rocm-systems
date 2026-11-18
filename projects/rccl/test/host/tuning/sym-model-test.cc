@@ -363,6 +363,7 @@ class SymModelTdmHierTest : public SymModelTdmReachableTest {
     SymModelTdmReachableTest::SetUp();
     comm_->hasMloPart = true;
     comm_->symkState.kcomm.hierScaleInSize = 2;
+    comm_->symkState.agHierMaxBlocks = ncclSymkAgHierMaxBlocks;
   }
 
   // What NCCL_SYM_KERNEL=AllGather_HierLsaTmaST leaves to the model.
@@ -439,6 +440,15 @@ TEST_F(SymModelTdmHierTest, VectorKernel_HonorsMinCtas) {
   ncclTuningResult_t r = Evaluate(in, ncclSymkKernelId_AllGather_HierLsaST);
   ASSERT_TRUE(r.valid);
   EXPECT_EQ(r.nChannels, ncclSymkAgHierLaunchBlocks(comm_.get(), ncclSymkAgHierMaxBlocks));
+}
+
+// hierPushFlags is sized at init, so NCCL_SYM_AG_HIER_CTAS raised after init cannot launch past its rows.
+TEST_F(SymModelTdmHierTest, VectorKernel_HierCtasAboveTheInitRows_LaunchesTheRows) {
+  ScopedHook loadParam(g_loadParam, ParamOverride({{"SYM_AG_HIER_CTAS", 96}}));
+  comm_->tuningContext.forced[ncclFuncAllGather] = 1;
+  ncclTuningResult_t r = Evaluate(Input(ncclFuncAllGather, size_t(64) << 20), ncclSymkKernelId_AllGather_HierLsaST);
+  ASSERT_TRUE(r.valid);
+  EXPECT_EQ(r.nChannels, ncclSymkAgHierLaunchBlocks(comm_.get(), comm_->symkState.agHierMaxBlocks));
 }
 
 // The vector kernels hold every size range, so neither TDM kernel runs unless asked for.

@@ -10838,6 +10838,11 @@ struct Tr_AllGatherInfo {
   int localCollNetCount;
   int isAllNvlink;
   bool nicFused;
+  int minCTAs;
+  int maxCTAs;
+  int symAgHierMaxBlocks;
+  int64_t symAgHierMaxChunkBytes;
+  int64_t symCtas;
 };
 
 // One GPU node per rank, so ncclTopoRankToIndex (:1869) resolves and every rank carries an arch string.
@@ -11538,6 +11543,35 @@ TEST_F(InitMicrotest, InitTransportsRank_RomeConsensusFails_PropagatesThatCode) 
   const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(ncclInvalidArgument, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(0, g_ncclTopoPostsetCalls);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_HierAllGatherSizingMismatch_FailsOnlyOnPartitionedComms) {
+  using Patch = std::function<void(Tr_AllGatherInfo&)>;
+  // The mismatch and kTrPostsetReached share a code, so the Postset call count tells them apart.
+  auto reachesPostset = [](bool partitioned, const Patch& patch) {
+    TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+    Tr_ReachAllGather3(c, "gfx900");
+    std::vector<PeerSpec> specs(4);
+    for (auto& s : specs) s.mloPart = partitioned ? 1 : -1;
+    const auto gathers = Tr_InstallGathers(c, specs, [&](int r, Tr_AllGatherInfo& row) {
+      if (r == 2 && patch) patch(row);
+    });
+    const int before = g_ncclTopoPostsetCalls;
+    EXPECT_EQ(ncclInvalidUsage, initTransportsRank(c.get(), nullptr, c.timers()));
+    return g_ncclTopoPostsetCalls > before;
+  };
+  const Patch patches[] = {
+      [](Tr_AllGatherInfo& row) { row.minCTAs += 1; },
+      [](Tr_AllGatherInfo& row) { row.maxCTAs -= 1; },
+      [](Tr_AllGatherInfo& row) { row.symAgHierMaxBlocks += 1; },
+      [](Tr_AllGatherInfo& row) { row.symAgHierMaxChunkBytes *= 2; },
+      [](Tr_AllGatherInfo& row) { row.symCtas += 1; },
+  };
+  EXPECT_TRUE(reachesPostset(/*partitioned=*/true, nullptr)) << "matching values";
+  EXPECT_TRUE(reachesPostset(/*partitioned=*/false, patches[0])) << "not partitioned";
+  for (size_t i = 0; i < std::size(patches); i++) {
+    EXPECT_FALSE(reachesPostset(/*partitioned=*/true, patches[i])) << "field " << i;
+  }
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_TopoPresetFails_PropagatesBeforeTheSecondAllGather) {

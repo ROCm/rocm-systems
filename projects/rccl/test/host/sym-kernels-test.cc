@@ -492,7 +492,6 @@ TEST_F(SymKernelMaskTest, AllGather_AGKernelSurvives) {
 
 // ---- Hierarchical AllGather: packages found in peerInfo, and the mask gate ----
 
-// A package is a run of consecutive ranks on one physical device, and every package must be the same size.
 TEST_F(SymKernelMicrotest, AgHierLimits_UnsetEnvKeepsTheDefaults) {
   EXPECT_EQ(ncclSymkAgHierMaxBlocksLimit(), ncclSymkAgHierMaxBlocks);
   EXPECT_EQ(ncclSymkAgHierMaxChunkBytesLimit(), ncclSymkAgHierMaxChunkBytes);
@@ -512,6 +511,7 @@ TEST_F(SymKernelMicrotest, AgHierLimits_EnvOverridesAndClamps) {
   EXPECT_EQ(ncclSymkAgHierMaxChunkBytesLimit(), ncclSymkAgHierMaxChunkBytes);
 }
 
+// A package is a run of consecutive ranks on one physical device, and every package must be the same size.
 TEST_F(SymKernelMicrotest, HierScaleInSize_EqualRunsOfConsecutiveRanksPerDevice) {
   struct {
     const char* layout;
@@ -563,6 +563,21 @@ TEST_F(SymKernelMaskTest, HierLsaST_OnlyOnGfx1250PartitionModeWithTwoOrMorePacka
         << c.name;
     EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllGather_ST)) << c.name;
   }
+}
+
+// The mask drops the hierarchical kernels across LSA teams, so the groups that open their window must be 0 too.
+TEST_F(SymKernelMaskTest, AgHierGroups_LsaTeamSmallerThanTheComm_NoGroups) {
+  SetTdmCapableArch(comm_.get());
+  comm_->hasMloPart = true;
+  comm_->symkState.kcomm.hierScaleInSize = 2;
+  ScopedHook teamLsa(g_ncclTeamLsa, [](ncclComm_t) {
+    ncclTeam_t t{};
+    t.nRanks = 4;
+    return t;
+  });
+  EXPECT_EQ(ncclSymkAgHierGroups(comm_.get()), 2);
+  comm_->nRanks = 8;
+  EXPECT_EQ(ncclSymkAgHierGroups(comm_.get()), 0);
 }
 
 TEST_F(SymKernelMaskTest, UnsupportedCollective_EntireMaskZeroed) {

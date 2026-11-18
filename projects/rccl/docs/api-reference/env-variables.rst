@@ -1876,7 +1876,8 @@ threshold table introduced for gfx1250.
           higher. A positive value uses that count for every size, clamped to
           ``MAXCHANNELS``. ``NCCL_SYM_CTAS``, when set, is used instead, capped
           at this limit. The launch can still drop blocks that do not fill a
-          package group. Set the same value on every rank.
+          package group. Set the same value on every rank; on a partitioned
+          communicator, initialization fails when ranks differ.
       - | ``0``: Size schedule, 64 or 72 blocks (default).
         | ``N``: Use ``N`` blocks for every size.
 
@@ -1886,6 +1887,7 @@ threshold table introduced for gfx1250.
           next chunk can overlap it. ``0`` uses 256 KiB. A positive value
           replaces that, clamped to 1 GiB. Read once when the communicator is
           created, so it applies to every later collective on that communicator.
-          Set the same value on every rank.
+          Set the same value on every rank; on a partitioned communicator,
+          initialization fails when ranks differ.
       - | ``0``: 256 KiB (default).
         | ``N`` (bytes): Cap each pushed chunk at ``N`` bytes.

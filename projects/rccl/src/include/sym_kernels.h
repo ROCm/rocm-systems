@@ -461,6 +461,8 @@ struct ncclSymkState {
   bool ginBackendUnsupported;
   int maxGinInboxBlocks;
   int alltoAllLLMaxResidentCtas;
+  // Rows of hierPushFlags, so the most blocks a hierarchical AllGather launch may use.
+  int agHierMaxBlocks;
 #if !defined(NCCL_OS_WINDOWS)
   struct {
     ncclDevResourceHandle bufHandle;

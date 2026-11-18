@@ -63,6 +63,9 @@ static int DefaultSymkAgHierGroups(struct ncclComm*) { return 0; }
 std::function<int(struct ncclComm*)> g_symkAgHierGroups = DefaultSymkAgHierGroups;
 int ncclSymkAgHierGroups(struct ncclComm* comm) { return g_symkAgHierGroups(comm); }
 
+int ncclSymkAgHierMaxBlocksLimit() { return ncclSymkAgHierMaxBlocks; }
+size_t ncclSymkAgHierMaxChunkBytesLimit() { return ncclSymkAgHierMaxChunkBytes; }
+
 // NCCL 2.32.6: whether the tuner forced the AlltoAll LL symmetric kernel. Default false, as for a comm whose
 // tuning context forces nothing.
 static bool DefaultSymkAlltoAllLLForced(struct ncclComm*) { return false; }
