@@ -3,32 +3,19 @@
 
 //! Process lifecycle and in-flight native call admission.
 
-use super::*;
-
-/// Sticky uncertainty shared by native work in one HSA generation.
-pub(crate) struct GenerationHealth {
-    /// Any cleanup result that could leave native users of frontend owners.
-    uncertain: AtomicBool,
-}
-
-impl GenerationHealth {
-    /// Starts a generation without uncertain native owners.
-    pub(crate) fn new() -> Self {
-        Self {
-            uncertain: AtomicBool::new(false),
-        }
-    }
-
-    /// Retains the generation when native retirement cannot be proved.
-    pub(crate) fn quarantine(&self) {
-        self.uncertain.store(true, Ordering::Release);
-    }
-
-    /// Reports whether any participant retained an uncertain owner.
-    pub(crate) fn is_quarantined(&self) -> bool {
-        self.uncertain.load(Ordering::Acquire)
-    }
-}
+#[cfg(all(hsa_tool_dispatch, not(test)))]
+use crate::admission;
+use crate::admission::{ApiLeaseScope, InFlightToken, InFlightTracker, process_admission};
+use crate::events::CallbackScope;
+use crate::ffi::*;
+use crate::logging::LogWriteScope;
+use crate::session::{HsaSession, InitRollback, SessionHealth, ShutdownOutcome, defer_cleanup};
+use crate::status::plain_boundary;
+use rocddi::memory::storage::RetainOnDrop;
+use rocddi::session::SessionRetirement;
+use std::cell::Cell;
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::time::Duration;
 
 thread_local! {
     /// Rejects recursive initialization or shutdown on the transition thread.
@@ -37,7 +24,7 @@ thread_local! {
 
 /// Rejects recursive public lifecycle calls from tool callbacks while a
 /// transition runs on this thread.
-pub(crate) struct LifecycleCallScope {
+struct LifecycleCallScope {
     /// Whether this scope set and must clear the thread-local entry flag.
     owns_flag: bool,
     /// The thread-local entry flag must be cleared on its entering thread.
@@ -86,23 +73,23 @@ impl Drop for LifecycleCallScope {
     }
 }
 
-/// Keeps an unlocked native operation in one HSA generation until its owner
-/// is either published back into that generation or safely retired.
-pub(crate) struct InFlightGeneration {
+/// Keeps an unlocked native operation in its HSA session until its owner
+/// is either published back into that session or safely retired.
+pub(crate) struct InFlightSession {
     /// Lifecycle generation in which this token was acquired.
     generation: u64,
-    /// In-flight reference preventing that generation from retiring.
+    /// In-flight reference preventing that session from retiring.
     _token: InFlightToken,
-    /// Generation owner retained if native cleanup becomes uncertain.
-    health: Arc<GenerationHealth>,
+    /// Session health retained if native cleanup becomes uncertain.
+    health: Arc<SessionHealth>,
 }
 
-impl InFlightGeneration {
-    /// Enters the active generation and retains its in-flight token.
+impl InFlightSession {
+    /// Retains the active session under its generation identity.
     fn enter(
         generation: u64,
         tracker: &Arc<InFlightTracker>,
-        health: &Arc<GenerationHealth>,
+        health: &Arc<SessionHealth>,
     ) -> Result<Self, Status> {
         let token = tracker.enter().ok_or(OUT_OF_RESOURCES)?;
         Ok(Self {
@@ -118,51 +105,17 @@ impl InFlightGeneration {
     }
 
     /// Prevents shutdown from dropping dependencies when an unpublished owner
-    /// cannot be returned to its original generation.
+    /// cannot be returned to its original session.
     pub(crate) fn quarantine(&self) {
         self.health.quarantine();
     }
 }
-/// Retains an owner unless native cleanup has proved it safe to drop.
-pub(crate) struct RetainOnDrop<T> {
-    /// Deliberately retained on error or unwind.
-    value: std::mem::ManuallyDrop<T>,
-}
-
-impl<T> RetainOnDrop<T> {
-    /// Takes responsibility for retaining an owner through uncertain cleanup.
-    pub(crate) fn new(value: T) -> Self {
-        Self {
-            value: std::mem::ManuallyDrop::new(value),
-        }
-    }
-
-    /// Releases the guard only after cleanup proves the owner may be dropped.
-    pub(crate) fn into_inner(self) -> T {
-        std::mem::ManuallyDrop::into_inner(self.value)
-    }
-}
-
-impl<T> std::ops::Deref for RetainOnDrop<T> {
-    type Target = T;
-
-    fn deref(&self) -> &T {
-        &self.value
-    }
-}
-
-impl<T> std::ops::DerefMut for RetainOnDrop<T> {
-    fn deref_mut(&mut self) -> &mut T {
-        &mut self.value
-    }
-}
-
 /// Published frontend ownership, retained until explicit retirement succeeds.
-struct PublishedGeneration {
+struct PublishedSession {
     /// Identity shared by public admission and detached generation leases.
     number: u64,
     /// Object graph released only after checked retirement succeeds.
-    state: RetainOnDrop<HsaState>,
+    state: RetainOnDrop<HsaSession>,
 }
 
 /// Checkpoints whose only incomplete work is a counted operation drain.
@@ -182,28 +135,28 @@ enum ShutdownStage {
 enum LifecycleState {
     /// No HSA objects or pending native retirement remain.
     Inactive,
-    /// One executor constructs the numbered generation outside the registry.
+    /// One executor constructs the identified HSA session outside the registry.
     Starting(u64),
     /// Objects are published for tool loading before the first reference commits.
-    LoadingTools(PublishedGeneration),
-    /// Public initialization references keep this generation available.
+    LoadingTools(PublishedSession),
+    /// Public initialization references keep this session available.
     Active {
         /// Objects reachable through admitted HSA calls.
-        generation: PublishedGeneration,
+        session: PublishedSession,
         /// Successful initializations not yet matched by shutdown calls.
         references: std::num::NonZeroU32,
     },
     /// One executor drains callers and prepares tools for final retirement.
     Preparing {
         /// Objects retained for admitted calls and tool cleanup.
-        generation: PublishedGeneration,
+        session: PublishedSession,
         /// Earliest preparation work that the executor still needs to complete.
         stage: ShutdownStage,
     },
     /// No executor is active; a later shutdown resumes this exact checkpoint.
     PendingShutdown {
         /// Objects still reachable by known outstanding work.
-        generation: PublishedGeneration,
+        session: PublishedSession,
         /// Incomplete drain to resume without replaying successful preparation.
         stage: ShutdownStage,
     },
@@ -223,10 +176,10 @@ enum LifecycleState {
         /// Exact native retirement owner retried by the next shutdown.
         session: SessionRetirement,
     },
-    /// Native reachability is uncertain; the full generation remains owned.
+    /// Native reachability is uncertain; the full HSA session remains owned.
     Retained {
         /// Dependencies kept alive because their last native user is uncertain.
-        _generation: PublishedGeneration,
+        _session: PublishedSession,
     },
     /// An abnormal exit retained dependencies outside the registry.
     Unrecoverable,
@@ -234,7 +187,7 @@ enum LifecycleState {
 
 /// Work owned by one initialization call after releasing the registry lock.
 pub(crate) enum InitWork {
-    /// A reference was acquired from the active generation; no startup is needed.
+    /// A reference was acquired from the active session; no startup is needed.
     Reference,
     /// Construct and publish the newly reserved generation identity.
     Create(u64),
@@ -245,7 +198,7 @@ pub(crate) enum InitWork {
 #[cfg(test)]
 impl InitWork {
     /// Extracts the new generation expected by a startup transition test.
-    pub(super) fn created(self) -> Option<u64> {
+    pub(crate) fn created(self) -> Option<u64> {
         match self {
             Self::Create(number) => Some(number),
             _ => None,
@@ -255,15 +208,15 @@ impl InitWork {
 
 /// Work owned by one shutdown call after releasing the registry lock.
 pub(crate) enum ShutdownWork {
-    /// A reference was released while another initialization still owns the generation.
+    /// A reference was released while another initialization still owns the session.
     Reference,
-    /// Prepare the identified generation, resuming any recorded drain checkpoint.
+    /// Prepare the identified session, resuming any recorded drain checkpoint.
     Prepare(u64),
     /// Retry native retirement after all HSA objects have already been released.
     NativeRetry(SessionRetirement, u64),
 }
 
-/// Process-wide HSA generation coordinator, independent of native sessions.
+/// Process-wide HSA session coordinator, independent of native session policy.
 pub(crate) struct HsaLifecycle {
     /// Monotonic identity source, including generations that failed startup.
     last_generation: u64,
@@ -273,17 +226,17 @@ pub(crate) struct HsaLifecycle {
 
 impl HsaLifecycle {
     /// Retains the identity and lifetime controls from one published owner.
-    pub(crate) fn retain_generation(&self) -> Result<InFlightGeneration, Status> {
-        let generation = self.published().ok_or(NOT_INITIALIZED)?;
-        InFlightGeneration::enter(
-            generation.number,
-            &generation.state.inflight,
-            &generation.state.health,
+    pub(crate) fn retain_session(&self) -> Result<InFlightSession, Status> {
+        let session = self.published().ok_or(NOT_INITIALIZED)?;
+        InFlightSession::enter(
+            session.number,
+            &session.state.control.inflight,
+            &session.state.control.health,
         )
     }
 
-    /// Starts with no published generation, references, or pending retirement.
-    pub(super) const fn new() -> Self {
+    /// Starts with no published session, references, or pending retirement.
+    pub(crate) const fn new() -> Self {
         Self {
             last_generation: 0,
             state: LifecycleState::Inactive,
@@ -291,35 +244,35 @@ impl HsaLifecycle {
     }
 
     /// Finds objects that remain available to admitted callers and tool cleanup.
-    fn published(&self) -> Option<&PublishedGeneration> {
+    fn published(&self) -> Option<&PublishedSession> {
         match &self.state {
-            LifecycleState::LoadingTools(generation)
-            | LifecycleState::Active { generation, .. }
-            | LifecycleState::Preparing { generation, .. }
-            | LifecycleState::PendingShutdown { generation, .. } => Some(generation),
+            LifecycleState::LoadingTools(session)
+            | LifecycleState::Active { session, .. }
+            | LifecycleState::Preparing { session, .. }
+            | LifecycleState::PendingShutdown { session, .. } => Some(session),
             _ => None,
         }
     }
 
-    /// Borrows the generation while admitted calls or tool cleanup may use it.
-    pub(crate) fn as_ref(&self) -> Option<&HsaState> {
-        self.published().map(|generation| &*generation.state)
+    /// Borrows the session while admitted calls or tool cleanup may use it.
+    pub(crate) fn as_ref(&self) -> Option<&HsaSession> {
+        self.published().map(|session| &*session.state)
     }
 
     /// Mutates published objects while the caller holds the registry lock.
-    pub(crate) fn as_mut(&mut self) -> Option<&mut HsaState> {
+    pub(crate) fn as_mut(&mut self) -> Option<&mut HsaSession> {
         match &mut self.state {
-            LifecycleState::LoadingTools(generation)
-            | LifecycleState::Active { generation, .. }
-            | LifecycleState::Preparing { generation, .. }
-            | LifecycleState::PendingShutdown { generation, .. } => Some(&mut generation.state),
+            LifecycleState::LoadingTools(session)
+            | LifecycleState::Active { session, .. }
+            | LifecycleState::Preparing { session, .. }
+            | LifecycleState::PendingShutdown { session, .. } => Some(&mut session.state),
             _ => None,
         }
     }
 
     /// Identifies the generation retained by admitted operations.
     pub(crate) fn active_generation(&self) -> Option<u64> {
-        self.published().map(|generation| generation.number)
+        self.published().map(|session| session.number)
     }
 
     /// Acquires an initialization reference or one exclusive startup action.
@@ -362,31 +315,31 @@ impl HsaLifecycle {
     }
 
     /// Publishes owned state before tool callbacks may access HSA services.
-    pub(crate) fn publish_init(&mut self, number: u64, state: HsaState) -> Result<(), Status> {
-        let generation = PublishedGeneration {
+    pub(crate) fn publish_init(&mut self, number: u64, state: HsaSession) -> Result<(), Status> {
+        let session = PublishedSession {
             number,
             state: RetainOnDrop::new(state),
         };
         if !matches!(self.state, LifecycleState::Starting(current) if current == number) {
             return Err(ERROR);
         }
-        self.state = LifecycleState::LoadingTools(generation);
+        self.state = LifecycleState::LoadingTools(session);
         process_admission().open(number);
         Ok(())
     }
 
     /// Commits the first reference only after tool loading has completed.
     pub(crate) fn finish_init(&mut self, number: u64) -> Result<(), Status> {
-        if !matches!(&self.state, LifecycleState::LoadingTools(generation) if generation.number == number)
+        if !matches!(&self.state, LifecycleState::LoadingTools(session) if session.number == number)
         {
             return Err(ERROR);
         }
         let old = std::mem::replace(&mut self.state, LifecycleState::Unrecoverable);
-        let LifecycleState::LoadingTools(generation) = old else {
+        let LifecycleState::LoadingTools(session) = old else {
             return Err(ERROR);
         };
         self.state = LifecycleState::Active {
-            generation,
+            session,
             references: std::num::NonZeroU32::MIN,
         };
         LIFECYCLE_CONDVAR.notify_all();
@@ -403,7 +356,7 @@ impl HsaLifecycle {
     }
 
     /// Transfers failed startup ownership into its retry or terminal state.
-    pub(super) fn cancel_init_with_notification(
+    pub(crate) fn cancel_init_with_notification(
         &mut self,
         number: u64,
         rollback: InitRollback,
@@ -438,8 +391,8 @@ impl HsaLifecycle {
             ShutdownOutcome::NativeRetry { session, .. } => {
                 LifecycleState::InitRetirement { number, session }
             }
-            ShutdownOutcome::RetainedGeneration { state, .. } => LifecycleState::Retained {
-                _generation: PublishedGeneration { number, state },
+            ShutdownOutcome::RetainedSession { state, .. } => LifecycleState::Retained {
+                _session: PublishedSession { number, state },
             },
         };
         LIFECYCLE_CONDVAR.notify_all();
@@ -448,7 +401,7 @@ impl HsaLifecycle {
 
     #[cfg(test)]
     /// Models an active retirement executor without constructing HSA objects.
-    pub(super) fn stop_without_runtime_for_test(&mut self, number: u64) {
+    pub(crate) fn stop_without_runtime_for_test(&mut self, number: u64) {
         assert!(matches!(self.state, LifecycleState::Starting(current) if current == number));
         self.state = LifecycleState::Stopping(number);
     }
@@ -472,18 +425,18 @@ impl HsaLifecycle {
         }
         let old = std::mem::replace(&mut self.state, LifecycleState::Unrecoverable);
         match old {
-            LifecycleState::Active { generation, .. } => {
-                generation.state.request_shutdown();
-                let number = generation.number;
+            LifecycleState::Active { session, .. } => {
+                session.state.control.request_shutdown();
+                let number = session.number;
                 self.state = LifecycleState::Preparing {
-                    generation,
+                    session,
                     stage: ShutdownStage::Calls,
                 };
                 Ok(ShutdownWork::Prepare(number))
             }
-            LifecycleState::PendingShutdown { generation, stage } => {
-                let number = generation.number;
-                self.state = LifecycleState::Preparing { generation, stage };
+            LifecycleState::PendingShutdown { session, stage } => {
+                let number = session.number;
+                self.state = LifecycleState::Preparing { session, stage };
                 Ok(ShutdownWork::Prepare(number))
             }
             LifecycleState::NativeRetirement { number, session } => {
@@ -505,9 +458,7 @@ impl HsaLifecycle {
     /// Checks executor identity before exposing its current preparation checkpoint.
     fn preparation_stage(&self, number: u64) -> Result<ShutdownStage, Status> {
         match &self.state {
-            LifecycleState::Preparing { generation, stage } if generation.number == number => {
-                Ok(*stage)
-            }
+            LifecycleState::Preparing { session, stage } if session.number == number => Ok(*stage),
             _ => Err(INVALID_RUNTIME_STATE),
         }
     }
@@ -515,8 +466,8 @@ impl HsaLifecycle {
     /// Records completion of tool preparation before waiting for descendants.
     fn finish_tool_preparation(&mut self, number: u64) -> Result<(), Status> {
         match &mut self.state {
-            LifecycleState::Preparing { generation, stage }
-                if generation.number == number && *stage == ShutdownStage::Calls =>
+            LifecycleState::Preparing { session, stage }
+                if session.number == number && *stage == ShutdownStage::Calls =>
             {
                 *stage = ShutdownStage::Cleanup;
                 Ok(())
@@ -529,29 +480,29 @@ impl HsaLifecycle {
     fn pause_shutdown(&mut self, number: u64) -> Result<(), Status> {
         self.preparation_stage(number)?;
         let old = std::mem::replace(&mut self.state, LifecycleState::Unrecoverable);
-        let LifecycleState::Preparing { generation, stage } = old else {
+        let LifecycleState::Preparing { session, stage } = old else {
             return Err(ERROR);
         };
-        self.state = LifecycleState::PendingShutdown { generation, stage };
+        self.state = LifecycleState::PendingShutdown { session, stage };
         LIFECYCLE_CONDVAR.notify_all();
         Ok(())
     }
 
-    /// Detaches only a fully prepared generation into an explicit retirement owner.
-    fn finish_prepare_shutdown(&mut self, number: u64) -> Result<PreparedGeneration, Status> {
+    /// Detaches only a fully prepared HSA session into an explicit retirement owner.
+    fn finish_prepare_shutdown(&mut self, number: u64) -> Result<PreparedSession, Status> {
         if self.preparation_stage(number)? != ShutdownStage::Cleanup {
             return Err(INVALID_RUNTIME_STATE);
         }
-        let generation = self.published().ok_or(ERROR)?;
-        if !generation.state.inflight.is_closed_and_idle() {
+        let session = self.published().ok_or(ERROR)?;
+        if !session.state.control.inflight.is_closed_and_idle() {
             return Err(RESOURCE_BUSY);
         }
-        generation.state.begin_session_retirement()?;
+        session.state.begin_native_retirement()?;
         let old = std::mem::replace(&mut self.state, LifecycleState::Stopping(number));
-        let LifecycleState::Preparing { generation, .. } = old else {
+        let LifecycleState::Preparing { session, .. } = old else {
             return Err(ERROR);
         };
-        Ok(PreparedGeneration(generation.state))
+        Ok(PreparedSession(session.state))
     }
 
     /// Publishes retirement completion or retains the owner needed after failure.
@@ -568,8 +519,8 @@ impl HsaLifecycle {
             ShutdownOutcome::NativeRetry { session, .. } => {
                 LifecycleState::NativeRetirement { number, session }
             }
-            ShutdownOutcome::RetainedGeneration { state, .. } => LifecycleState::Retained {
-                _generation: PublishedGeneration { number, state },
+            ShutdownOutcome::RetainedSession { state, .. } => LifecycleState::Retained {
+                _session: PublishedSession { number, state },
             },
         };
         LIFECYCLE_CONDVAR.notify_all();
@@ -582,11 +533,11 @@ impl HsaLifecycle {
             LifecycleState::Starting(current) => {
                 phase == TransitionPhase::Starting && *current == number
             }
-            LifecycleState::LoadingTools(generation) => {
-                phase == TransitionPhase::Starting && generation.number == number
+            LifecycleState::LoadingTools(session) => {
+                phase == TransitionPhase::Starting && session.number == number
             }
-            LifecycleState::Preparing { generation, .. } => {
-                phase == TransitionPhase::Preparing && generation.number == number
+            LifecycleState::Preparing { session, .. } => {
+                phase == TransitionPhase::Preparing && session.number == number
             }
             LifecycleState::Stopping(current) => {
                 phase == TransitionPhase::Stopping && *current == number
@@ -598,22 +549,20 @@ impl HsaLifecycle {
         }
         process_admission().close();
         let old = std::mem::replace(&mut self.state, LifecycleState::Unrecoverable);
-        if let LifecycleState::LoadingTools(generation)
-        | LifecycleState::Preparing { generation, .. } = old
+        if let LifecycleState::LoadingTools(session) | LifecycleState::Preparing { session, .. } =
+            old
         {
-            generation.state.request_stop();
-            self.state = LifecycleState::Retained {
-                _generation: generation,
-            };
+            session.state.control.request_stop();
+            self.state = LifecycleState::Retained { _session: session };
         }
         LIFECYCLE_CONDVAR.notify_all();
     }
 }
 
 /// Proof that producers, callbacks and tools have completed their cleanup window.
-struct PreparedGeneration(RetainOnDrop<HsaState>);
+struct PreparedSession(RetainOnDrop<HsaSession>);
 
-impl PreparedGeneration {
+impl PreparedSession {
     /// Transfers the prepared owner into ordered frontend and native retirement.
     fn retire(self) -> ShutdownOutcome {
         self.0.into_inner().retire_prepared()
@@ -625,14 +574,14 @@ impl PreparedGeneration {
 enum TransitionPhase {
     /// Construction or tool loading before the first reference commits.
     Starting,
-    /// Caller drain and tool cleanup while generation objects remain published.
+    /// Caller drain and tool cleanup while HSA objects remain published.
     Preparing,
     /// Detached frontend retirement or a retry of remaining native retirement.
     Stopping,
 }
 
 /// Retains incomplete ownership on every abnormal transition exit.
-pub(crate) struct LifecycleTransition {
+struct LifecycleTransition {
     /// Phase still owned by this executor.
     phase: TransitionPhase,
     /// Identity used to avoid changing an unrelated lifecycle transition.
@@ -713,7 +662,7 @@ pub(crate) fn begin_init_waiting(
         if ApiLeaseScope::current()
             || CallbackScope::active()
             || LogWriteScope::active()
-            || guard.as_ref().is_some_and(HsaState::running_on_worker)
+            || guard.as_ref().is_some_and(HsaSession::running_on_worker)
         {
             return Err(INVALID_RUNTIME_STATE);
         }
@@ -723,7 +672,7 @@ pub(crate) fn begin_init_waiting(
 }
 
 /// Borrows still-published objects after the caller has established admission.
-pub(crate) fn initialized_mut(runtime: &mut HsaLifecycle) -> Result<&mut HsaState, Status> {
+pub(crate) fn initialized_mut(runtime: &mut HsaLifecycle) -> Result<&mut HsaSession, Status> {
     runtime.as_mut().ok_or(NOT_INITIALIZED)
 }
 
@@ -731,11 +680,11 @@ pub(crate) fn initialized_mut(runtime: &mut HsaLifecycle) -> Result<&mut HsaStat
 /// Acquires the coordinator's lease for synchronous tool retirement.
 pub(crate) fn enter_tool_cleanup() -> Result<InFlightToken, Status> {
     let registry = lock()?;
-    let LifecycleState::Preparing { generation, .. } = &registry.state else {
+    let LifecycleState::Preparing { session, .. } = &registry.state else {
         return Err(INVALID_RUNTIME_STATE);
     };
     process_admission()
-        .enter_cleanup(generation.number)
+        .enter_cleanup(session.number)
         .ok_or(INVALID_RUNTIME_STATE)
 }
 
@@ -744,26 +693,26 @@ pub(crate) fn enter_tool_cleanup() -> Result<InFlightToken, Status> {
 pub(crate) fn begin_tool_preparation() -> Result<admission::ToolCleanupScope, Status> {
     let registry = lock()?;
     let LifecycleState::Preparing {
-        generation,
+        session,
         stage: ShutdownStage::Calls,
     } = &registry.state
     else {
         return Err(INVALID_RUNTIME_STATE);
     };
-    if generation.state.health.is_quarantined() {
+    if session.state.control.health.is_quarantined() {
         return Err(INVALID_RUNTIME_STATE);
     }
     process_admission()
-        .begin_cleanup(generation.number)
+        .begin_cleanup(session.number)
         .ok_or(INVALID_RUNTIME_STATE)
 }
 
 #[cfg(all(hsa_tool_dispatch, not(test)))]
-/// Admits tool work through the active generation or its live cleanup authority.
+/// Admits tool work through the active session or its live cleanup authority.
 pub(crate) fn enter_delegated_tool_cleanup(number: u64) -> Result<InFlightToken, Status> {
     let registry = lock()?;
-    let generation = registry.published().ok_or(INVALID_RUNTIME_STATE)?;
-    if generation.number != number || generation.state.health.is_quarantined() {
+    let session = registry.published().ok_or(INVALID_RUNTIME_STATE)?;
+    if session.number != number || session.state.control.health.is_quarantined() {
         return Err(INVALID_RUNTIME_STATE);
     }
     match &registry.state {

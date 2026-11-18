@@ -125,7 +125,7 @@ impl From<rocloader::Symbol> for ParsedCodeSymbol {
 
 /// Resolves executable symbol to a validated runtime resource.
 fn resolve_executable_symbol(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     executable: HsaExecutable,
     agent: HsaAgent,
     name: &str,
@@ -140,7 +140,7 @@ fn resolve_executable_symbol(
 
 /// Parses a code object and loads its segments for the selected agent.
 pub(super) unsafe fn parse_and_load(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     executable: HsaExecutable,
     agent: HsaAgent,
     code_object: Arc<[u8]>,
@@ -171,13 +171,14 @@ pub(super) unsafe fn parse_and_load(
         .map_err(map_loader_error)?;
     let (gpu_index, memory_kind, object_kind) = if program {
         let gpu_index = runtime
+            .agents
             .gpus
             .iter()
             .position(|gpu| object.validate_target(Target::from(&gpu.info())).is_ok())
             .ok_or(INCOMPATIBLE_ARGUMENTS)?;
         (gpu_index, MemoryKind::System, LOADER_OBJECT_KIND_PROGRAM)
     } else {
-        let Some(gpu_index) = runtime.gpu_index(agent) else {
+        let Some(gpu_index) = runtime.agents.gpu_index(agent) else {
             return Err(INVALID_AGENT);
         };
         (
@@ -192,7 +193,7 @@ pub(super) unsafe fn parse_and_load(
             LOADER_OBJECT_KIND_AGENT,
         )
     };
-    let gpu = &runtime.gpus[gpu_index];
+    let gpu = &runtime.agents.gpus[gpu_index];
     let uri = match storage {
         ReaderStorage::Memory => format!(
             "memory://{}#offset=0x{:x}&size={}",
@@ -213,7 +214,7 @@ pub(super) unsafe fn parse_and_load(
                 code_object,
                 address,
                 size,
-                runtime.host_page_size as u64,
+                runtime.agents.host_page_size as u64,
                 resolve,
             )
         }
@@ -222,6 +223,7 @@ pub(super) unsafe fn parse_and_load(
         // executable, including agents whose code objects are loaded later.
         let peers = if program {
             runtime
+                .agents
                 .gpus
                 .iter()
                 .enumerate()
@@ -235,7 +237,7 @@ pub(super) unsafe fn parse_and_load(
             &peers,
             code_object,
             memory_kind,
-            runtime.host_page_size as u64,
+            runtime.agents.host_page_size as u64,
             resolve,
         )
     }
@@ -256,11 +258,11 @@ pub(super) unsafe fn parse_and_load(
 
 /// Returns the ISA handle required by a parsed code object.
 pub(crate) fn code_object_isa(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     object: &LoaderCodeObject<'_>,
 ) -> Result<HsaIsa, Status> {
     let (target, variant) = object.target().map_err(map_loader_error)?;
-    for (index, gpu) in runtime.gpus.iter().enumerate() {
+    for (index, gpu) in runtime.agents.gpus.iter().enumerate() {
         let Some(name) = isa_name(&gpu.info(), gpu.xnack_enabled, variant) else {
             continue;
         };
@@ -280,7 +282,7 @@ pub(crate) fn code_object_isa(
 
 /// Ensures code object symbols exists before use.
 pub(crate) fn ensure_code_object_symbols(
-    runtime: &mut HsaState,
+    runtime: &mut HsaSession,
     handle: u64,
 ) -> Result<(), Status> {
     let Some(code_object) = runtime.loader.code_objects.get(&handle) else {

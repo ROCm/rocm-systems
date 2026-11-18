@@ -10,12 +10,14 @@ use rocddi::device::gpu::profiling::{
     PcSamplingConfigurationSet, PcSamplingIntervalUnit, PcSamplingMethod,
 };
 
+use crate::events::CallbackScope;
 use crate::ffi::*;
+use crate::lifecycle::lock;
 use crate::pc_sampling::session::SessionHandle;
 use crate::pc_sampling::{
     CreateArgs, create_session, destroy_session, sampling_error, with_session,
 };
-use crate::runtime::{CallbackScope, boundary, lock};
+use crate::status::boundary;
 
 #[cfg_attr(
     all(hsa_tool_dispatch, not(test)),
@@ -40,19 +42,19 @@ pub extern "C" fn hsa_ven_amd_pcs_iterate_configuration(
             let Some(runtime) = guard.as_ref() else {
                 return NOT_INITIALIZED;
             };
-            let Some(index) = runtime.gpu_index(agent) else {
+            let Some(index) = runtime.agents.gpu_index(agent) else {
                 return INVALID_AGENT;
             };
-            if !runtime.gpus[index].pc_sampling_supported {
+            if !runtime.agents.gpus[index].pc_sampling_supported {
                 return NOT_SUPPORTED;
             }
             if runtime.pc_sampling_state.agent_busy(agent) {
                 return SUCCESS;
             }
-            let Some(token) = runtime.inflight.enter() else {
+            let Some(token) = runtime.control.inflight.enter() else {
                 return OUT_OF_RESOURCES;
             };
-            (runtime.gpus[index].device.clone(), token)
+            (runtime.agents.gpus[index].device.clone(), token)
         };
         let configurations = match device
             .gpu()

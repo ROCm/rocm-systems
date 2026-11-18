@@ -57,7 +57,7 @@ pub(super) fn queue_error_status(error: u64) -> Status {
 
 /// Prepares a callback for a queue event without holding the registry lock.
 fn pending_callback(
-    runtime: &crate::runtime::HsaState,
+    runtime: &crate::session::HsaSession,
     key: usize,
     status: Status,
 ) -> Option<PendingCallback> {
@@ -72,16 +72,15 @@ fn pending_callback(
 
 /// Prepares the user error callback after a queue fault.
 fn pending_error_callback(
-    runtime: &mut crate::runtime::HsaState,
+    runtime: &mut crate::session::HsaSession,
     key: usize,
     status: Status,
 ) -> Option<PendingCallback> {
     if status == MEMORY_FAULT {
         // Publish the affected queue so a running system event worker can
         // attach the process fault's address and reason.
-        let details = runtime.vm_fault_details;
-        let defer_to_system = runtime.system_event_worker.is_some()
-            && !runtime.system_event_failed.load(Ordering::Acquire);
+        let details = runtime.events.fault_details();
+        let defer_to_system = runtime.events.observing();
         let queue = runtime.queue_state.queues.get_mut(&key)?;
         queue.vm_faulted = true;
         if let Some((_, address, reason)) = details.filter(|(agent, _, _)| *agent == queue.agent) {
@@ -167,7 +166,7 @@ fn handle_queue_event(key: usize, observed: SignalValue) -> Option<QueueEventOut
         cooperative,
     ) = {
         let queue = runtime.queue_state.queues.get(&key)?;
-        let index = runtime.gpu_index(queue.agent)?;
+        let index = runtime.agents.gpu_index(queue.agent)?;
         let Some((private_segment_size, dispatch_id, lanes_per_group)) =
             dispatch_private_segment(queue)
         else {
@@ -177,8 +176,8 @@ fn handle_queue_event(key: usize, observed: SignalValue) -> Option<QueueEventOut
             });
         };
         (
-            runtime.gpus[index].device.clone(),
-            runtime.gpus[index].info(),
+            runtime.agents.gpus[index].device.clone(),
+            runtime.agents.gpus[index].info(),
             queue.public_handle,
             private_segment_size,
             dispatch_id,
@@ -421,11 +420,11 @@ pub(super) fn queue_event_worker(
     let mut reclaim_check = std::time::Instant::now();
     let mut reclaim_enabled = true;
     while !stop.load(Ordering::Acquire) && alive.load(Ordering::Acquire) {
-        let Some(token) = crate::runtime::enter_runtime_service() else {
+        let Some(token) = crate::admission::enter_runtime_service() else {
             thread::sleep(Duration::from_millis(1));
             continue;
         };
-        if crate::runtime::ApiLeaseScope::run(token, || {
+        if crate::admission::ApiLeaseScope::run(token, || {
             let error = signal.load_error();
             let callback = if !observer_failure_checked && observer_failed.load(Ordering::Acquire) {
                 observer_failure_checked = true;

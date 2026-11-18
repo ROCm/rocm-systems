@@ -34,7 +34,7 @@ fn elements(input: &str, maximum: u32) -> Option<Vec<u32>> {
 }
 
 /// Parses `ROCr`'s GPU-list:CU-list sets, retaining the valid prefix on error.
-pub(in crate::runtime) fn parse(input: &str, compute_units: &[u32]) -> Vec<Option<Vec<u32>>> {
+pub(crate) fn parse(input: &str, compute_units: &[u32]) -> Vec<Option<Vec<u32>>> {
     let mut masks = vec![None; compute_units.len()];
     let Some(maximum_gpu) = u32::try_from(compute_units.len())
         .ok()

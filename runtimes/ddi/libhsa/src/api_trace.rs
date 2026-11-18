@@ -328,12 +328,12 @@ unsafe extern "C" fn profiler_cleanup(
     work: unsafe extern "C" fn(*mut c_void) -> i32,
     data: *mut c_void,
 ) -> u32 {
-    let Ok(token) = crate::runtime::enter_delegated_tool_cleanup(generation) else {
+    let Ok(token) = crate::lifecycle::enter_delegated_tool_cleanup(generation) else {
         return 9; // ROCP_REG_ATTACHMENT_NOT_AVAILABLE
     };
     // SAFETY: The v2 callback is synchronous and must not unwind or retain the
     // supplied native-call lease beyond this call.
-    crate::runtime::ApiLeaseScope::run(token, || if unsafe { work(data) } == 0 { 0 } else { 6 })
+    crate::admission::ApiLeaseScope::run(token, || if unsafe { work(data) } == 0 { 0 } else { 6 })
 }
 
 /// Executes a versioned foreign update without exposing its mutable table to
@@ -349,11 +349,11 @@ unsafe extern "C" fn profiler_update(
     if PROFILER_QUIESCING.load(Ordering::Acquire) {
         return INACTIVE;
     }
-    let Some(token) = crate::runtime::process_admission().enter() else {
+    let Some(token) = crate::admission::process_admission().enter() else {
         return INACTIVE;
     };
     let generation = token.generation();
-    crate::runtime::ApiLeaseScope::run(token, || {
+    crate::admission::ApiLeaseScope::run(token, || {
         // Registrar serializes its calls and rejects recursive updates. The
         // independent mutex also protects the retained seed across generations.
         let Ok(mut profiler) = PROFILER.lock() else {

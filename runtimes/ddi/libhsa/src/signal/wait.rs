@@ -51,10 +51,10 @@ pub(crate) unsafe fn signal_wait(
     // Keep the generation alive for the complete wait. The blocking path
     // observes stop_workers and releases its retained slot before this drops.
     // Publish the lease so nested slot reads still enter after final closure.
-    let Some(call) = crate::runtime::enter_public_raw_handle() else {
+    let Some(call) = crate::admission::enter_public_raw_handle() else {
         return 0;
     };
-    crate::runtime::ApiLeaseScope::run(call, || {
+    crate::admission::ApiLeaseScope::run(call, || {
         #[cfg(test)]
         AFTER_WAIT_ADMISSION.with(|slot| {
             let hook = slot.borrow_mut().take();
@@ -265,7 +265,7 @@ impl WaitInputs {
     ///
     /// # Safety
     /// The caller holds the process HSA registry lock until preparation returns.
-    pub(crate) unsafe fn prepare(self, runtime: &mut HsaState) -> Option<PreparedWait> {
+    pub(crate) unsafe fn prepare(self, runtime: &mut HsaSession) -> Option<PreparedWait> {
         if self.signals.len() != self.conditions.len() || self.signals.len() != self.values.len() {
             return None;
         }
@@ -403,7 +403,7 @@ impl Drop for WaitRegistration {
 }
 
 /// Releases the retained wait entries reference.
-fn release_wait_entries(runtime: &mut HsaState, entries: &mut [WaitEntry]) {
+fn release_wait_entries(runtime: &mut HsaSession, entries: &mut [WaitEntry]) {
     for entry in entries {
         if entry.retained {
             entry.signal = None;
@@ -418,10 +418,10 @@ fn release_wait_entries(runtime: &mut HsaState, entries: &mut [WaitEntry]) {
 /// The caller must hold the runtime registry lock until every accepted signal
 /// is retained, and must keep the returned registration alive through the wait.
 pub(crate) unsafe fn prepare_multi_wait(
-    runtime: &mut HsaState,
+    runtime: &mut HsaSession,
     handles: &[HsaSignal],
 ) -> Option<WaitRegistration> {
-    let token = runtime.inflight.enter()?;
+    let token = runtime.control.inflight.enter()?;
     // SAFETY: The runtime lock protects every accepted handle while its
     // storage reference is acquired, and the references are retained below.
     let mut entries =
@@ -449,7 +449,7 @@ pub(crate) unsafe fn prepare_multi_wait(
     Some(WaitRegistration {
         entries,
         _token: token,
-        stop: runtime.operation_stop(),
+        stop: runtime.control.operation_stop(),
     })
 }
 

@@ -6,11 +6,12 @@
 use std::sync::atomic::{Ordering, fence};
 
 use crate::ffi::*;
-use crate::runtime::{boundary, initialized_mut, lock};
+use crate::lifecycle::{initialized_mut, lock};
 use crate::signal::wait::{
     prepare_multi_wait, signal_group_wait_any, signal_wait, signal_wait_all_open,
     signal_wait_inputs,
 };
+use crate::status::boundary;
 
 #[cfg_attr(
     all(hsa_tool_dispatch, not(test)),
@@ -131,7 +132,10 @@ pub unsafe extern "C" fn hsa_signal_group_create(
             // SAFETY: The caller supplies consumer_count readable handles.
             let consumers =
                 unsafe { std::slice::from_raw_parts(consumers, consumer_count as usize) };
-            if consumers.iter().any(|agent| !runtime.is_agent(*agent)) {
+            if consumers
+                .iter()
+                .any(|agent| !runtime.agents.is_agent(*agent))
+            {
                 return INVALID_AGENT;
             }
         }
@@ -252,7 +256,7 @@ pub unsafe extern "C" fn hsa_amd_signal_wait_any(
     wait_state_hint: u32,
     satisfying_value: *mut SignalValue,
 ) -> u32 {
-    let Some(_call) = crate::runtime::enter_public_raw_handle() else {
+    let Some(_call) = crate::admission::enter_public_raw_handle() else {
         return u32::MAX;
     };
     let mut guard = match lock() {
@@ -297,7 +301,7 @@ pub unsafe extern "C" fn hsa_amd_signal_wait_all(
     wait_state_hint: u32,
     satisfying_values: *mut SignalValue,
 ) -> u32 {
-    let Some(_call) = crate::runtime::enter_public_raw_handle() else {
+    let Some(_call) = crate::admission::enter_public_raw_handle() else {
         return u32::MAX;
     };
     let mut guard = match lock() {

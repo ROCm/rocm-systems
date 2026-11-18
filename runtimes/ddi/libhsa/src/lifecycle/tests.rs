@@ -4,74 +4,18 @@
 //! Lifecycle ownership and resumable retirement regressions.
 
 use super::*;
+use crate::session::testing::session_without_devices;
+use crate::signal::SignalState;
 use rocddi::session::SessionState;
-use rocddi::topology::host::{HostCaches, HostTopologyGraphSnapshot};
+use rocddi::session::{DriverContextLifetime, Session as NativeSession};
 
-/// Builds a generation without discovery or native device acquisition.
-fn state_without_devices(session: Session) -> HsaState {
-    let health = Arc::new(GenerationHealth::new());
-    let inflight = Arc::new(InFlightTracker::new_process());
-    inflight.open(1);
-    HsaState {
-        debugger: None,
-        sdma_enabled: false,
-        peer_sdma_enabled: false,
-        logging: Arc::new(LogOutput::new()),
-        next_handle: 0x4853_4101_0000_0000,
-        queue_state: QueueState::new(),
-        loader: LoaderState::new(),
-        image_state: ImageState::new(),
-        memory_state: MemoryState::new(health.clone()),
-        signal_state: SignalState::new(&session).unwrap(),
-        pc_sampling_state: PcSamplingState::new(health.clone()),
-        host_page_size: 4096,
-        system_alloc_max_bytes: 0,
-        cpus: Vec::new(),
-        full_profile: true,
-        disable_fragment_allocator: false,
-        vm_fault_details: None,
-        system_event_handlers: Vec::new(),
-        system_event_worker: None,
-        system_event_failed: Arc::new(AtomicBool::new(false)),
-        stop_workers: Arc::new(AtomicBool::new(false)),
-        cancel_work: Arc::new(AtomicBool::new(false)),
-        inflight,
-        health,
-        caches: Vec::new(),
-        topology: TopologyGraphSnapshot {
-            host: HostTopologyGraphSnapshot {
-                memory_bytes: None,
-                cpu: None,
-                cpu_apic_ids: Vec::new(),
-                online_cpus: None,
-                caches: HostCaches {
-                    records: Vec::new(),
-                    complete: true,
-                },
-                domains: Vec::new(),
-                domains_complete: true,
-            },
-            endpoints: Vec::new(),
-            sources: Vec::new(),
-            nodes: Vec::new(),
-            attachments: Vec::new(),
-            routes: Vec::new(),
-            caches: Vec::new(),
-            memory_locations: Vec::new(),
-            memory_banks: Vec::new(),
-        },
-        gpus: Vec::new(),
-        session: Some(session),
-    }
-}
-
-fn active(session: Session) -> HsaLifecycle {
+fn active(session: NativeSession) -> HsaLifecycle {
     HsaLifecycle {
         last_generation: 1,
         state: LifecycleState::Active {
-            generation: PublishedGeneration {
+            session: PublishedSession {
                 number: 1,
-                state: RetainOnDrop::new(state_without_devices(session)),
+                state: RetainOnDrop::new(session_without_devices(session)),
             },
             references: std::num::NonZeroU32::MIN,
         },
@@ -80,7 +24,7 @@ fn active(session: Session) -> HsaLifecycle {
 
 #[test]
 fn prepared_shutdown_closes_core_after_cleanup_services_finish() {
-    let session = Session::new(DriverContextLifetime::Session).unwrap();
+    let session = NativeSession::new(DriverContextLifetime::Session).unwrap();
     let observer = session.clone();
     let mut lifecycle = active(session);
     assert!(matches!(
@@ -103,8 +47,8 @@ fn prepared_shutdown_closes_core_after_cleanup_services_finish() {
 
 #[test]
 fn timed_out_calls_keep_the_generation_and_resume_the_first_checkpoint() {
-    let mut lifecycle = active(Session::new(DriverContextLifetime::Session).unwrap());
-    let gate = lifecycle.as_ref().unwrap().inflight.clone();
+    let mut lifecycle = active(NativeSession::new(DriverContextLifetime::Session).unwrap());
+    let gate = lifecycle.as_ref().unwrap().control.inflight.clone();
     let caller = gate.enter().unwrap();
     assert!(matches!(
         lifecycle.begin_shutdown().unwrap(),
@@ -141,17 +85,17 @@ fn timed_out_calls_keep_the_generation_and_resume_the_first_checkpoint() {
 
 #[test]
 fn timed_out_cleanup_resumes_without_repeating_tool_preparation() {
-    let session = Session::new(DriverContextLifetime::Session).unwrap();
+    let session = NativeSession::new(DriverContextLifetime::Session).unwrap();
     let observer = session.clone();
     let mut lifecycle = active(session);
-    let gate = lifecycle.as_ref().unwrap().inflight.clone();
-    let ordinary_stop = lifecycle.as_ref().unwrap().operation_stop();
+    let gate = lifecycle.as_ref().unwrap().control.inflight.clone();
+    let ordinary_stop = lifecycle.as_ref().unwrap().control.operation_stop();
     lifecycle.begin_shutdown().unwrap();
     assert!(ordinary_stop.load(std::sync::atomic::Ordering::Acquire));
     let (cleanup, cleanup_stop) = gate.begin_cleanup(1).unwrap().run(|| {
         (
             gate.enter_delegated_cleanup(1).unwrap(),
-            lifecycle.as_ref().unwrap().operation_stop(),
+            lifecycle.as_ref().unwrap().control.operation_stop(),
         )
     });
     lifecycle.finish_tool_preparation(1).unwrap();
@@ -188,7 +132,7 @@ fn timed_out_cleanup_resumes_without_repeating_tool_preparation() {
 
 #[test]
 fn initialization_retries_only_pending_native_rollback() {
-    let session = Session::new(DriverContextLifetime::Session).unwrap();
+    let session = NativeSession::new(DriverContextLifetime::Session).unwrap();
     let observer = session.clone();
     session.begin_retirement().unwrap();
     let mut lifecycle = HsaLifecycle::new();
@@ -222,7 +166,7 @@ fn initialization_retries_only_pending_native_rollback() {
 
 #[test]
 fn abnormal_preparation_retains_ownership_but_timeout_remains_resumable() {
-    let mut lifecycle = active(Session::new(DriverContextLifetime::Session).unwrap());
+    let mut lifecycle = active(NativeSession::new(DriverContextLifetime::Session).unwrap());
     lifecycle.begin_shutdown().unwrap();
     lifecycle.pause_shutdown(1).unwrap();
     // An old executor's guard cannot consume a paused, safely owned checkpoint.
@@ -234,7 +178,7 @@ fn abnormal_preparation_retains_ownership_but_timeout_remains_resumable() {
     lifecycle.begin_shutdown().unwrap();
     lifecycle.retain_failed_transition(TransitionPhase::Preparing, 1);
     assert!(
-        matches!(&lifecycle.state, LifecycleState::Retained { _generation: generation } if generation.number == 1)
+        matches!(&lifecycle.state, LifecycleState::Retained { _session: session } if session.number == 1)
     );
     assert!(lifecycle.as_ref().is_none());
     assert_eq!(lifecycle.begin_init().err(), Some(INVALID_RUNTIME_STATE));
@@ -246,15 +190,12 @@ fn abnormal_preparation_retains_ownership_but_timeout_remains_resumable() {
 
 #[test]
 fn uncertain_frontend_shutdown_retains_the_whole_generation() {
-    let session = Session::new(DriverContextLifetime::Session).unwrap();
+    let session = NativeSession::new(DriverContextLifetime::Session).unwrap();
     let observer = session.clone();
-    let state = state_without_devices(session);
-    state.health.quarantine();
+    let state = session_without_devices(session);
+    state.control.health.quarantine();
     let outcome = state.stop();
-    assert!(matches!(
-        outcome,
-        ShutdownOutcome::RetainedGeneration { .. }
-    ));
+    assert!(matches!(outcome, ShutdownOutcome::RetainedSession { .. }));
     assert_eq!(observer.state().unwrap(), SessionState::Retiring);
     let mut lifecycle = HsaLifecycle {
         last_generation: 1,
@@ -270,31 +211,10 @@ fn uncertain_frontend_shutdown_retains_the_whole_generation() {
 }
 
 #[test]
-fn detached_retirement_keeps_owners_on_unwind() {
-    struct Owner(Arc<AtomicUsize>);
-    impl Drop for Owner {
-        fn drop(&mut self) {
-            self.0.fetch_add(1, Ordering::Relaxed);
-        }
-    }
-    let drops = Arc::new(AtomicUsize::new(0));
-    let owner = Owner(drops.clone());
-    let result = std::panic::catch_unwind(move || {
-        let retained = RetainOnDrop::new(owner);
-        assert_eq!(retained.0.load(Ordering::Relaxed), 0);
-        panic!("injected retirement unwind");
-    });
-    assert!(result.is_err());
-    assert_eq!(drops.load(Ordering::Relaxed), 0);
-    drop(RetainOnDrop::new(Owner(drops.clone())).into_inner());
-    assert_eq!(drops.load(Ordering::Relaxed), 1);
-}
-
-#[test]
 fn failed_native_shutdown_retains_session_until_retry_succeeds() {
-    let session = Session::new(DriverContextLifetime::Session).unwrap();
+    let session = NativeSession::new(DriverContextLifetime::Session).unwrap();
     let observer = session.clone();
-    let outcome = state_without_devices(session).stop();
+    let outcome = session_without_devices(session).stop();
     assert_eq!(outcome.status(), RESOURCE_BUSY);
     assert_eq!(observer.state().unwrap(), SessionState::Retiring);
     let mut lifecycle = HsaLifecycle {
@@ -321,4 +241,140 @@ fn failed_native_shutdown_retains_session_until_retry_succeeds() {
         InitWork::Create(2)
     ));
     lifecycle.cancel_init(2, InitRollback::Complete).unwrap();
+}
+
+#[test]
+/// Verifies that initialization gate rejects overlapping generations.
+fn initialization_gate_rejects_overlapping_generations() {
+    let mut registry = HsaLifecycle::new();
+    let first = registry.begin_init().unwrap().created().unwrap();
+    assert_eq!(registry.begin_init().err().unwrap(), INVALID_RUNTIME_STATE);
+    assert_eq!(registry.begin_shutdown().err(), Some(INVALID_RUNTIME_STATE));
+    registry.cancel_init(first, InitRollback::Complete).unwrap();
+    let second = registry.begin_init().unwrap().created().unwrap();
+    assert_ne!(second, first);
+    registry
+        .cancel_init(second, InitRollback::Complete)
+        .unwrap();
+}
+
+#[test]
+fn concurrent_init_waits_for_the_first_generation_to_finish() {
+    let lifecycle = Arc::new(Mutex::new(HsaLifecycle::new()));
+    let changed = Arc::new(Condvar::new());
+    let generation = lifecycle
+        .lock()
+        .unwrap()
+        .begin_init()
+        .unwrap()
+        .created()
+        .unwrap();
+    let ready = Arc::new(std::sync::Barrier::new(2));
+    let worker_lifecycle = lifecycle.clone();
+    let worker_changed = changed.clone();
+    let worker_ready = ready.clone();
+    let worker = std::thread::spawn(move || {
+        let guard = worker_lifecycle.lock().unwrap();
+        worker_ready.wait();
+        begin_init_waiting(guard, &worker_changed)
+    });
+    ready.wait();
+    lifecycle
+        .lock()
+        .unwrap()
+        .cancel_init_with_notification(generation, InitRollback::Complete, &changed)
+        .unwrap();
+    let next = worker.join().unwrap().unwrap().created().unwrap();
+    assert_ne!(next, generation);
+    lifecycle
+        .lock()
+        .unwrap()
+        .cancel_init(next, InitRollback::Complete)
+        .unwrap();
+}
+
+#[test]
+fn callback_init_does_not_wait_for_preparing_shutdown() {
+    let lifecycle = Mutex::new(HsaLifecycle::new());
+    let generation = lifecycle
+        .lock()
+        .unwrap()
+        .begin_init()
+        .unwrap()
+        .created()
+        .unwrap();
+    lifecycle
+        .lock()
+        .unwrap()
+        .stop_without_runtime_for_test(generation);
+    CallbackScope::run(|| {
+        assert_eq!(
+            begin_init_waiting(lifecycle.lock().unwrap(), &Condvar::new()).err(),
+            Some(INVALID_RUNTIME_STATE)
+        );
+    });
+}
+
+#[test]
+fn admitted_call_init_does_not_wait_for_preparing_shutdown() {
+    let lifecycle = Mutex::new(HsaLifecycle::new());
+    let generation = lifecycle
+        .lock()
+        .unwrap()
+        .begin_init()
+        .unwrap()
+        .created()
+        .unwrap();
+    lifecycle
+        .lock()
+        .unwrap()
+        .stop_without_runtime_for_test(generation);
+    let gate = Arc::new(InFlightTracker::new());
+    gate.close();
+    gate.open(generation);
+    ApiLeaseScope::run(gate.enter().unwrap(), || {
+        assert_eq!(
+            begin_init_waiting(lifecycle.lock().unwrap(), &Condvar::new()).err(),
+            Some(INVALID_RUNTIME_STATE)
+        );
+    });
+}
+
+#[test]
+fn same_thread_lifecycle_reentry_is_rejected() {
+    let entry = LifecycleCallScope::enter().unwrap();
+    assert_eq!(
+        LifecycleCallScope::enter().err(),
+        Some(INVALID_RUNTIME_STATE)
+    );
+    let helper = LifecycleCallScope::enter_helper();
+    drop(helper);
+    assert_eq!(
+        LifecycleCallScope::enter().err(),
+        Some(INVALID_RUNTIME_STATE)
+    );
+    drop(entry);
+    assert!(LifecycleCallScope::enter().is_ok());
+}
+
+#[test]
+/// Verifies that failed initialization cleanup quarantines the next generation.
+fn failed_initialization_cleanup_quarantines_the_next_generation() {
+    let mut registry = HsaLifecycle::new();
+    let generation = registry.begin_init().unwrap().created().unwrap();
+    registry
+        .cancel_init(generation, InitRollback::Uncertain)
+        .unwrap();
+    assert_eq!(registry.begin_init().err().unwrap(), INVALID_RUNTIME_STATE);
+    assert_eq!(registry.begin_shutdown().err(), Some(INVALID_RUNTIME_STATE));
+}
+
+#[test]
+#[ignore = "requires a qualified GPU and KFD runtime"]
+/// Verifies that HSA runtime reinitializes after shutdown.
+fn hsa_runtime_reinitializes_after_shutdown() {
+    for _ in 0..3 {
+        assert_eq!(crate::hsa_init(), SUCCESS);
+        assert_eq!(crate::hsa_shut_down(), SUCCESS);
+    }
 }

@@ -4,7 +4,7 @@
 //! HSA status translation and the C ABI panic boundary.
 
 #[cfg(not(test))]
-use super::{ApiLeaseScope, process_admission};
+use crate::admission::{ApiLeaseScope, process_admission};
 #[cfg(not(test))]
 use crate::ffi::NOT_INITIALIZED;
 use crate::ffi::{ERROR, INVALID_ARGUMENT, NOT_SUPPORTED, OUT_OF_RESOURCES, RESOURCE_BUSY, Status};
@@ -43,3 +43,7 @@ pub(crate) fn boundary(operation: impl FnOnce() -> Status) -> Status {
 pub(crate) fn plain_boundary(operation: impl FnOnce() -> Status) -> Status {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(operation)).unwrap_or(ERROR)
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests;

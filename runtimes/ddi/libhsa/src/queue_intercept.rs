@@ -22,10 +22,13 @@ use rocddi::device::Device;
 use rocddi::device::gpu::queue::{AqlControlRegion, QueueRingMemory, complete_host_stores};
 use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
 
+use crate::admission::InFlightTracker;
 use crate::callback_arg::CallbackArg;
+use crate::events::CallbackScope;
 use crate::ffi::*;
-use crate::runtime::{CallbackScope, InFlightTracker, initialized_mut, lock, map_error};
+use crate::lifecycle::{initialized_mut, lock};
 use crate::signal::AmdSignal;
+use crate::status::map_error;
 
 /// Packet size in bytes.
 const PACKET_BYTES: usize = 64;
@@ -431,10 +434,10 @@ impl InterceptQueue {
         // Forwarding may ring the lower queue through an HSA signal store.
         // Keep that nested work in the admitted generation even if final
         // shutdown commits while this drain is running.
-        let Some(token) = crate::runtime::enter_runtime_service() else {
+        let Some(token) = crate::admission::enter_runtime_service() else {
             return;
         };
-        crate::runtime::ApiLeaseScope::run(token, || {
+        crate::admission::ApiLeaseScope::run(token, || {
             if !self.active.load(Ordering::Acquire) {
                 return;
             }

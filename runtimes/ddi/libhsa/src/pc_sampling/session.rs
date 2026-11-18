@@ -23,9 +23,10 @@ use rocddi::topology::GpuInfo;
 use super::sampling_error;
 use crate::callback_arg::CallbackArg;
 use crate::debugger::TrapRestore;
+use crate::events::CallbackScope;
 use crate::ffi::*;
-use crate::runtime::{CallbackScope, map_error};
 use crate::signal::AmdSignal;
+use crate::status::map_error;
 
 /// Sample size in bytes.
 const SAMPLE_BYTES: usize = 64;
@@ -797,7 +798,7 @@ impl SessionHandle {
     pub(super) fn create(
         resources: Resources,
         agent: HsaAgent,
-        quarantine: &crate::runtime::GenerationHealth,
+        quarantine: &crate::session::SessionHealth,
     ) -> Result<Arc<Self>, Status> {
         let session = Arc::new(Self {
             agent,
@@ -817,10 +818,10 @@ impl SessionHandle {
                     if session.stop_worker.load(Ordering::Acquire) {
                         break;
                     }
-                    let Some(token) = crate::runtime::enter_runtime_service() else {
+                    let Some(token) = crate::admission::enter_runtime_service() else {
                         continue;
                     };
-                    if crate::runtime::ApiLeaseScope::run(token, || {
+                    if crate::admission::ApiLeaseScope::run(token, || {
                         let Ok(mut resources) = session.resources.lock() else {
                             return std::ops::ControlFlow::Break(());
                         };

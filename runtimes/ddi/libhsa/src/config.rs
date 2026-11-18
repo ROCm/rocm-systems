@@ -70,6 +70,16 @@ pub(super) fn supports_execution(gpu: &rocddi::topology::GpuInfo) -> bool {
         && gpu.queues.copy.is_some()
 }
 
+/// Immutable frontend policy for one initialized HSA generation.
+pub(crate) struct HsaConfig {
+    /// Generation-wide copy-engine configuration.
+    pub(crate) sdma_enabled: bool,
+    /// Generation-wide peer-copy engine configuration.
+    pub(crate) peer_sdma_enabled: bool,
+    /// Whether ROCr-compatible fragment allocation is disabled by the caller.
+    pub(crate) disable_fragment_allocator: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::visible_gpu_indices;

@@ -22,25 +22,29 @@ fn pause_shutdown(number: u64, transition: &mut LifecycleTransition) -> Status {
     }
 }
 
-/// Retires one generation, resuming only its last incomplete drain checkpoint.
+/// Retires one HSA session, resuming only its last incomplete drain checkpoint.
 fn finish_prepared_shutdown(number: u64) -> Status {
     let _entry = LifecycleCallScope::enter_helper();
     let mut transition = LifecycleTransition::preparing(number);
-    let (checkpoint, inflight, logging) = {
+    let (stage, inflight, logging) = {
         let registry = match lock() {
             Ok(registry) => registry,
             Err(status) => return status,
         };
-        let checkpoint = match registry.preparation_stage(number) {
+        let stage = match registry.preparation_stage(number) {
             Ok(stage) => stage,
             Err(status) => return status,
         };
-        let Some(state) = registry.as_ref() else {
+        let Some(session) = registry.as_ref() else {
             return ERROR;
         };
-        (checkpoint, state.inflight.clone(), state.logging.clone())
+        (
+            stage,
+            session.control.inflight.clone(),
+            session.logging.clone(),
+        )
     };
-    if checkpoint == ShutdownStage::Calls {
+    if stage == ShutdownStage::Calls {
         // A borrowed FILE may reenter HSA; its drain stays outside the registry.
         logging.stop();
         if !inflight.wait_idle_for(Duration::from_secs(5)) {
@@ -77,10 +81,10 @@ fn finish_prepared_shutdown(number: u64) -> Status {
             Ok(registry) => registry,
             Err(status) => return status,
         };
-        let Some(state) = registry.as_mut() else {
+        let Some(session) = registry.as_mut() else {
             return ERROR;
         };
-        state.begin_tool_shutdown()
+        session.begin_tool_shutdown()
     };
     let status = callbacks.quiesce();
     if status != SUCCESS {
@@ -91,15 +95,15 @@ fn finish_prepared_shutdown(number: u64) -> Status {
             Ok(registry) => registry,
             Err(status) => return status,
         };
-        let Some(state) = registry.as_mut() else {
+        let Some(session) = registry.as_mut() else {
             return ERROR;
         };
-        if state.health.is_quarantined() {
+        if session.control.health.is_quarantined() {
             return INVALID_RUNTIME_STATE;
         }
         // Producers and callbacks have stopped. Native queues must stop before
         // a tool can release operands; public descriptors remain valid for it.
-        if let Err(status) = state.queue_state.stop_native_for_tool_cleanup() {
+        if let Err(status) = session.queue_state.stop_native_for_tool_cleanup() {
             return status;
         }
     }
@@ -186,7 +190,7 @@ pub(crate) fn initialize() -> Status {
         }
     };
     let mut transition = LifecycleTransition::starting(number);
-    let result = HsaState::create().map(RetainOnDrop::new);
+    let result = HsaSession::create().map(RetainOnDrop::new);
     let mut registry = match lock() {
         Ok(registry) => registry,
         Err(status) => return status,
@@ -223,7 +227,7 @@ pub(crate) fn initialize() -> Status {
     }
 }
 
-/// Releases one reference, or exclusively resumes the generation's retirement.
+/// Releases one reference, or exclusively resumes the HSA session's retirement.
 pub(crate) fn shutdown() -> Status {
     if !crate::platform::process_is_current() {
         return NOT_INITIALIZED;

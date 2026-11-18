@@ -137,7 +137,7 @@ pub(crate) fn destroy(queue: NonNull<HsaQueue>) -> Result<(), Status> {
             .intercept_queues
             .get(&key)
             .cloned()
-            .map(|owner| runtime.inflight.enter().map(|token| (owner, token)))
+            .map(|owner| runtime.control.inflight.enter().map(|token| (owner, token)))
     };
     if let Some(intercept) = intercept {
         let (intercept, _in_flight) = intercept.ok_or(INVALID_RUNTIME_STATE)?;
@@ -161,7 +161,7 @@ pub(crate) fn destroy(queue: NonNull<HsaQueue>) -> Result<(), Status> {
         } else {
             None
         };
-        let in_flight = guard.retain_generation()?;
+        let in_flight = guard.retain_session()?;
         let runtime = initialized_mut(&mut guard)?;
         if let Some(agent) = cooperative_agent {
             runtime

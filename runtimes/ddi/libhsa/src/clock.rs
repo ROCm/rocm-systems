@@ -3,7 +3,11 @@
 
 //! GPU and system clock correlation for HSA profiling.
 
-use super::*;
+use crate::ffi::*;
+use crate::status::map_error;
+use rocddi::device::Device;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 /// Whether profiling requests high precision GPU clock samples.
 static PRECISE_TIMESTAMPS: AtomicBool = AtomicBool::new(false);
@@ -26,7 +30,7 @@ pub(crate) fn clock_counters(
 }
 
 /// Chooses the native clock sample with the smallest host read interval.
-pub(super) fn best_clock_sample<T, E>(
+pub(crate) fn best_clock_sample<T, E>(
     count: usize,
     mut sample: impl FnMut() -> Result<(T, Duration), E>,
 ) -> Result<T, E> {
@@ -76,3 +80,7 @@ pub(crate) fn translate_gpu_tick(
     }
     counters.to_host(tick).map_err(map_error)
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests;

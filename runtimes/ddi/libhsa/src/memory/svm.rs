@@ -19,7 +19,7 @@ struct ManagedRange {
 }
 
 /// Finds a complete managed reservation without manufacturing backing.
-fn managed_range(runtime: &HsaState, address: u64, size: u64) -> Result<ManagedRange, Status> {
+fn managed_range(runtime: &HsaSession, address: u64, size: u64) -> Result<ManagedRange, Status> {
     let address_host = usize::try_from(address).map_err(|_| INVALID_ARGUMENT)?;
     let size_host = usize::try_from(size).map_err(|_| INVALID_ARGUMENT)?;
     let (&base, reservation) = runtime
@@ -71,7 +71,7 @@ pub(crate) fn committed_range(ranges: &[(usize, usize)], address: usize) -> Opti
 
 /// Commits only runtime-owned anonymous memory, preserving its reservation.
 fn commit_managed(
-    runtime: &mut HsaState,
+    runtime: &mut HsaSession,
     service: &MemoryAdvice,
     range: ManagedRange,
 ) -> Result<(), Status> {
@@ -99,7 +99,7 @@ fn commit_managed(
 /// Makes a managed reservation host-backed before KFD consumes its SVM policy.
 /// External memory and registered VMEM remain owned by their existing paths.
 pub(crate) fn commit_registration(
-    runtime: &mut HsaState,
+    runtime: &mut HsaSession,
     service: &MemoryAdvice,
     address: u64,
     size: u64,
@@ -204,7 +204,12 @@ pub(crate) unsafe fn submit_discard(
         {
             return INVALID_ARGUMENT;
         }
-        if !runtime.gpus.first().is_some_and(|gpu| gpu.xnack_enabled) {
+        if !runtime
+            .agents
+            .gpus
+            .first()
+            .is_some_and(|gpu| gpu.xnack_enabled)
+        {
             return XNACK_DISABLED;
         }
         if (dependency_count == 0) != dependencies.is_null()
@@ -287,7 +292,7 @@ pub(crate) unsafe fn submit_discard(
             ranges.push(range);
         }
         for &agent in agents {
-            let Some(index) = runtime.gpu_index(agent) else {
+            let Some(index) = runtime.agents.gpu_index(agent) else {
                 return INVALID_AGENT;
             };
             let location = match svm_location_from_agent(runtime, &service, agent, false) {
@@ -295,19 +300,19 @@ pub(crate) unsafe fn submit_discard(
                 Err(status) => return status,
             };
             locations.push(location);
-            devices.push(runtime.gpus[index].device.clone());
+            devices.push(runtime.agents.gpus[index].device.clone());
         }
         handles.extend_from_slice(dependencies);
         if completion.handle != 0 {
             handles.push(completion);
         }
         runtime.memory_state.reap_finished_workers();
-        let stop = runtime.operation_stop();
-        let cleanup = match runtime.inherit_cleanup() {
+        let stop = runtime.control.operation_stop();
+        let cleanup = match runtime.control.inherit_cleanup() {
             Ok(cleanup) => cleanup,
             Err(status) => return status,
         };
-        let health = runtime.health.clone();
+        let health = runtime.control.health.clone();
         let mut pending = match PendingAsyncRetention::new(
             &mut runtime.signal_state,
             &mut runtime.memory_state,
@@ -326,7 +331,7 @@ pub(crate) unsafe fn submit_discard(
         let worker = match thread::Builder::new()
             .name("rocddi-svm-discard".into())
             .spawn(move || {
-                crate::runtime::ApiLeaseScope::run_optional(cleanup, || {
+                crate::admission::ApiLeaseScope::run_optional(cleanup, || {
                     let _devices = devices;
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
                         || -> Result<(), Status> {

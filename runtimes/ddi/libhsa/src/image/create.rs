@@ -150,7 +150,7 @@ struct PreparedImage {
 #[allow(unsafe_code)]
 /// Publishes a created native image under a new HSA handle.
 unsafe fn publish_image(
-    runtime: &mut HsaState,
+    runtime: &mut HsaSession,
     agent: HsaAgent,
     prepared: PreparedImage,
     output: *mut HsaExtImage,
@@ -168,12 +168,12 @@ unsafe fn publish_image(
     if runtime.image_state.images.try_reserve(1).is_err() {
         return OUT_OF_RESOURCES;
     }
-    let index = match runtime.gpu_index(agent) {
+    let index = match runtime.agents.gpu_index(agent) {
         Some(index) => index,
         None => return INVALID_AGENT,
     };
-    let device = runtime.gpus[index].device.clone();
-    let page = match u64::try_from(runtime.host_page_size) {
+    let device = runtime.agents.gpus[index].device.clone();
+    let page = match u64::try_from(runtime.agents.host_page_size) {
         Ok(page) if page >= 64 => page,
         _ => return ERROR,
     };
@@ -202,7 +202,7 @@ unsafe fn publish_image(
     runtime.image_state.images.insert(
         (agent.handle, handle),
         Arc::new(ImageRecord {
-            architecture: Generation::from_gpu(&runtime.gpus[index].info())
+            architecture: Generation::from_gpu(&runtime.agents.gpus[index].info())
                 .unwrap_or(Generation::Gfx12),
             allocation,
             descriptor,
@@ -266,7 +266,7 @@ pub(crate) unsafe fn create_image(agent: HsaAgent, request: ImageRequest) -> Sta
         Err(status) => return status,
     };
     let words = match descriptor::descriptor(
-        Generation::from_gpu(&runtime.gpus[index].info()).unwrap_or(Generation::Gfx12),
+        Generation::from_gpu(&runtime.agents.gpus[index].info()).unwrap_or(Generation::Gfx12),
         descriptor,
         format,
         surface,
@@ -344,7 +344,7 @@ pub(crate) unsafe fn create_imported_image(
     // SAFETY: The caller supplies a readable AMD descriptor. Version 1 means
     // its flexible data member contains eight readable SRD words.
     let native = unsafe { &*native_layout };
-    let Some(pci) = runtime.gpus[index].endpoint.pci else {
+    let Some(pci) = runtime.agents.gpus[index].endpoint.pci else {
         return NOT_SUPPORTED;
     };
     if native.version != 1
@@ -364,7 +364,7 @@ pub(crate) unsafe fn create_imported_image(
     let mut srd = [0_u32; 8];
     srd.copy_from_slice(source);
     let words = match descriptor::imported_descriptor(
-        Generation::from_gpu(&runtime.gpus[index].info()).unwrap_or(Generation::Gfx12),
+        Generation::from_gpu(&runtime.agents.gpus[index].info()).unwrap_or(Generation::Gfx12),
         descriptor,
         format,
         surface,
@@ -376,7 +376,7 @@ pub(crate) unsafe fn create_imported_image(
     };
     let words = if mip_levels > 1 {
         match descriptor::imported_mip_chain(
-            Generation::from_gpu(&runtime.gpus[index].info()).unwrap_or(Generation::Gfx12),
+            Generation::from_gpu(&runtime.agents.gpus[index].info()).unwrap_or(Generation::Gfx12),
             words,
             descriptor,
             srd,
@@ -419,7 +419,7 @@ pub(crate) fn destroy_image(agent: HsaAgent, image: HsaExtImage) -> Status {
         Ok(runtime) => runtime,
         Err(status) => return status,
     };
-    if runtime.gpu_index(agent).is_none() {
+    if runtime.agents.gpu_index(agent).is_none() {
         return INVALID_AGENT;
     }
     let key = (agent.handle, image.handle);
