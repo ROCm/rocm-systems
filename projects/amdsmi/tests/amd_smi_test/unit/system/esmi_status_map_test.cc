@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "amd_smi/impl/amd_smi_common.h"
+#include "amd_smi/impl/amd_smi_system.h"
 
 namespace {
 
@@ -130,6 +131,17 @@ TEST(SystemUnit, EsmiStatusMapErrMsgUnmappedStatusReturnsMapError) {
   EXPECT_EQ(amdsmi_get_esmi_err_msg(static_cast<amdsmi_status_t>(0x7FFF), &msg),
             AMDSMI_STATUS_MAP_ERROR);
   EXPECT_EQ(msg, nullptr);
+}
+
+TEST(SystemUnit, CpuModelNameReturnsAmdSmiStatusNotEsmiStatus) {
+  // get_cpu_model_name() reads /proc/cpuinfo and reports AMD SMI statuses directly. A socket
+  // that does not exist must yield NO_DATA (or FILE_ERROR without /proc), never MAP_ERROR,
+  // which is what routing the status through esmi_to_amdsmi_status() produced.
+  std::string name;
+  const auto status = amd::smi::AMDSmiSystem::getInstance().get_cpu_model_name(0xFFFFFFFFu, &name);
+  EXPECT_TRUE(status == AMDSMI_STATUS_NO_DATA || status == AMDSMI_STATUS_FILE_ERROR)
+      << "status=" << status;
+  EXPECT_NE(status, AMDSMI_STATUS_MAP_ERROR);
 }
 
 #endif  // ENABLE_ESMI_LIB
