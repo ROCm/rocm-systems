@@ -6,6 +6,11 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ### Added
 * New HIP APIs
+    - Graph Management: added graph and graph-node identifier queries.
+      * `hipGraphNodeGetLocalId` returns a node's graph-local ID.
+      * `hipGraphNodeGetToolsId` returns the node ID used by profiling tools.
+      * `hipGraphGetId` returns a graph ID.
+      * `hipGraphExecGetId` returns an executable graph ID.
     - Memory Management: support for API parity with corresponding CUDA API.
       * `hipMemcpyWithAttributesAsync` performs a single asynchronous 1D copy with the attributes
         described by a `hipMemcpyAttributes` structure, without requiring the caller to build the
@@ -16,6 +21,11 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
       * `hipArrayGetSparseProperties` returns the layout properties of a sparse HIP array in a
         `hipArraySparseProperties` structure. Added for source compatibility: AMD devices do not
         support sparse arrays, so it zeroes the structure and returns `hipErrorNotSupported`.
+    - Execution affinity: support for API parity with corresponding CUDA API.
+      * `hipDeviceGetExecAffinitySupport` reports whether a device supports a given execution-affinity
+        type and the device's CU-masking granularity. `hipExecAffinityTypeCUCount` is always reported
+        as supported. Two HIP-specific extension types, `hipExtExecAffinityTypeGranularityCU` and
+        `hipExtExecAffinityTypeGranularityWGP`, report the granularity the applies to the CU mask.
 
 ### Resolved issues
 
@@ -62,6 +72,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * Resolved a segmentation fault in `hipStreamEndCapture` during multi-stream capture caused by a bookkeeping cycle among capture participants. The fix tracks capture participants in a single origin-stream-owned set, eliminating recursive traversal of forked streams during capture finalization and improving stream capture stability.
 * Resolved a potential deadlock between `hipMallocAsync` and `hipEventSynchronize` during concurrent multi-threaded execution.
 * Fixed incorrect calculations when using the type `bool` for `cooperative_groups::exclusive_scan`. The implementation now correctly handles the identity value for the first active lane and prevents unintended type conversions from `bool` to `int`.
+* Resolved an issue where legacy-stream sync operations (`hipMemset`, `hipMemcpy`) incorrectly invalidated `ThreadLocal` and `Relaxed` graph captures on `hipStreamNonBlocking` streams. These captures now remain active, matching CUDA semantics. `Global`-mode captures and captures involving blocking participants are still invalidated as expected.
 
 ### Optimized
 
@@ -72,8 +83,6 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 ### Changed
 
 * Stream priority is now disabled to avoid known queue-priority-related issues. Priority streams are currently not supported.
-* HRR capture feature is now disabled.
-* `hipMemAdvise` now aliases `hipMemAdvise_v2`, which uses a `hipMemLocation` parameter instead of a device ID. Applications using the legacy `hipMemAdvise` signature may require source updates to pass a `hipMemLocation` structure. To maintain compatibility with the previous API signature, define `HIP_TARGET_API_VERSION` to a nonzero value less than 800 (for example, 700 for HIP 7.0 or 717 for HIP 7.17) at compile time. By default, `hipMemAdvise` alias to the `hipMemAdvise_v2` interface.
 * The `HIPRTC_USE_RUNTIME_UNBUNDLER` environment variable and its associated functionality have been removed from the HIP runtime. The runtime unbundler path is now always used; setting this variable no longer has any effect.
 
 ### Known issues

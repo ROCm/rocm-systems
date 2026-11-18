@@ -1,8 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+// Deprecated path; include <profiler-hub/cpp/shared_types.hpp> instead.
 #pragma once
 
-// The public C++ headers moved to profiler-hub/cpp. This path remains so
-// existing includes, including rocprofiler-systems, keep compiling.
 #include <profiler-hub/cpp/shared_types.hpp>

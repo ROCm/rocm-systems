@@ -144,21 +144,27 @@ add_subdirectory(source)
 
 add_subdirectory(include/cpp)
 
+# Old-path forwarding headers; remove in a future release.
 list(
     APPEND profiler-hub_public_headers
-    ${CMAKE_CURRENT_LIST_DIR}/include/reader.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/reader_types.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/shared_types.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/storage.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/trimmer.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/version.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/writer.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/writer_types.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/c/profiler_hub.h
-    ${CMAKE_CURRENT_LIST_DIR}/include/c/profiler_hub_trim.h
-    ${CMAKE_CURRENT_LIST_DIR}/include/c/profiler_hub_types.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/writer.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/reader.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/storage.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/trimmer.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/version.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/writer_types.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/reader_types.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/shared_types.hpp
 )
 
+list(
+    APPEND profiler-hub_public_headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/c/profiler_hub.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/c/profiler_hub_trim.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/c/profiler_hub_types.h
+)
+
+file(REMOVE_RECURSE ${CMAKE_BINARY_DIR}/include/profiler-hub)
 foreach(HEADER_FILE ${profiler-hub_public_headers})
     file(
         RELATIVE_PATH
@@ -507,8 +513,11 @@ file(
     DESTINATION ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-set(CMAKE_EXPORT_PACKAGE_REGISTRY ON)
-export(PACKAGE ${PACKAGE_NAME})
+# Registry entries are for standalone builds; a parent project's build must not write one.
+if(PROJECT_IS_TOP_LEVEL)
+    set(CMAKE_EXPORT_PACKAGE_REGISTRY ON)
+    export(PACKAGE ${PACKAGE_NAME})
+endif()
 
 # ------------------------------------------------------------ #
 # Clang-Tidy Custom Target

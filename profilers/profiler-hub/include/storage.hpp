@@ -1,8 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+// Deprecated path; include <profiler-hub/cpp/storage.hpp> instead.
 #pragma once
 
-// The public C++ headers moved to profiler-hub/cpp. This path remains so
-// existing includes, including TheRock's install test, keep compiling.
 #include <profiler-hub/cpp/storage.hpp>

@@ -9,9 +9,11 @@
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/legacy_address_space.h"
 #include "util/diagnostic.h"
+#include "util/distributed_shared_mutex.h"
 
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <unordered_map>
 
 namespace rocjitsu::amdgpu {
@@ -69,6 +71,8 @@ public:
   address_space_snapshot(uint32_t vmid) const;
 
 private:
+  friend class LegacyGpuVmAdapterTestAccess;
+
   class Binding;
 
   class Entry {
@@ -78,13 +82,14 @@ private:
   };
 
   static void revoke_binding(const std::shared_ptr<Binding> &binding);
+  [[nodiscard]] bool has_stale_locked() const;
   void remove_stale_locked();
   [[nodiscard]] Entry *find_locked(AddressSpaceHandle handle);
   [[nodiscard]] const Entry *find_locked(AddressSpaceHandle handle) const;
 
   GpuVm *gpu_vm_ = nullptr;
   std::shared_ptr<GpuMemory> memory_;
-  mutable std::mutex mutex_;
+  mutable util::DistributedSharedMutex mutex_;
   std::unordered_map<uint32_t, Entry> bindings_;
 };
 
