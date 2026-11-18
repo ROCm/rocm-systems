@@ -13,7 +13,8 @@
 #   --build-dir DIR     hipFile build directory (default: <hipfile-src>/build-visibility)
 #   --build             configure and build hipFile even if the build directory exists
 #   --sections LIST     comma-separated; default: health,ctest,kurt,gpu,write,aqllog,hipbar,a1,a2,c
-#                       (hdpprobe is added by --allow-hdp-flush)
+#                       (hdpprobe is added by --allow-hdp-flush; failing runs only the
+#                       configurations that have failed on some machine)
 #   --allow-hdp-flush   also run configs that write the HDP flush register (write only, never read
 #                       back) and the hdpprobe section. Off by default.
 #   --gpu N             run on GPU N only (sets ROCR_VISIBLE_DEVICES)
@@ -61,7 +62,8 @@ exec > >(tee -a "$OUT/run.log") 2>&1
 
 if [ "$QUICK" = 1 ]; then REPS=1 KURT_ITERS=200 GPU_ITERS=50 BIG_ITERS=5 QUICK_ITERS=ITERS=100
 else REPS=3 KURT_ITERS=2000 GPU_ITERS=200 BIG_ITERS=50 QUICK_ITERS=; fi
-if [ "$QUICK" = 1 ]; then WRITE_ITERS=100 SLEEP_ITERS=20; else WRITE_ITERS=1000 SLEEP_ITERS=100; fi
+if [ "$QUICK" = 1 ]; then WRITE_ITERS=100 SLEEP_ITERS=20 FAILING_ITERS=500
+else WRITE_ITERS=1000 SLEEP_ITERS=100 FAILING_ITERS=2000; fi
 
 note() { echo "$*" | tee -a "$SUMMARY"; }
 section() { note ""; note "######## $1 ########"; }
@@ -333,6 +335,57 @@ if has_section write; then
         seq=$(grep -oE '(Dispatch|Barrier-?AND|Barrier-?OR|Marker)[^,]*Header = 0x[0-9a-f]+' <<<"$out" |
               sed -E 's/ Header = /=/' | tr '\n' ' ')
         note "$be $cfg: $seq-> $(wvis_verdict "$out")"
+    done
+fi
+
+# ---- failing: only the configurations that have failed on some machine ----------------------
+# Each line is the backend a configuration failed with, the program (kurt, gvis or wvis), and
+# its arguments. Not in the default sections, as the kurt, gpu and write sections run them too.
+FAILING_CONFIGS=(
+    # hipfileread-cpu-visibility, on rowlet (gfx1030)
+    "fallback kurt --cpus 8 --buffer-size 64K"
+    # hipfileread-gpu-visibility, on rowlet (gfx1030)
+    "fastpath gvis --kernel after --prime --prime-wait flag"
+    "fastpath gvis --kernel after --prime --prime-wait sleep"
+    # hipfilewrite-visibility, on rowlet (gfx1030) and on MI300X (gfx942)
+    "fastpath wvis --producer memset --buffer-size 4K"
+    "fastpath wvis --producer copy"
+    # hipfilewrite-visibility, on rowlet (gfx1030) only
+    "fastpath wvis --producer memset"
+    "fastpath wvis --producer memset --memory uncached"
+    "fastpath wvis --producer memset --buffer-size 64M"
+    "fastpath wvis --producer copy --buffer-size 4K"
+    "fastpath wvis --producer kernel --wait flag"
+    "fastpath wvis --producer kernel --wait sleep"
+    "fastpath wvis --producer kernel --kernel during --memory coarse"
+    "fastpath wvis --producer kernel --kernel during --buffer-size 4K --background-writers 4"
+    "fastpath wvis --producer kernel --kernel during --memory uncached --buffer-size 4K --background-writers 4"
+    "fastpath wvis --producer memcpy --buffer-size 4K --background-writers 1"
+    "fastpath wvis --producer memcpy --buffer-size 4K --background-writers 4"
+    "fastpath wvis --producer memcpy --buffer-size 4K --background-writers 4 --memory uncached"
+    "fastpath wvis --producer memcpy --buffer-size 16K --background-writers 4"
+    "fastpath wvis --producer read --prime store --wait sleep --threads 4 --buffer-size 4M"
+)
+if has_section failing; then
+    section "failing: configurations that have failed on some machine, $FAILING_ITERS iterations ($SLEEP_ITERS with a sleep, $BIG_ITERS for 64M)"
+    gpu_busy_check failing
+    for cfg in "${FAILING_CONFIGS[@]}"; do
+        read -r be prog cfg_text <<<"$cfg"
+        read -ra cfg_args <<<"$cfg_text"
+        if [ "$be" = fastpath ] && [ "$FASTPATH" = 0 ]; then
+            note "$(printf '%-8s %-5s %-90s %s' "$be" "$prog" "$cfg_text" "SKIP (fastpath is not available)")"
+            continue
+        fi
+        iters=$FAILING_ITERS
+        [[ $cfg_text == *sleep* ]] && iters=$SLEEP_ITERS
+        [[ $cfg_text == *64M* ]] && iters=$BIG_ITERS
+        case $prog in
+            kurt) bin=$KURT verdict=kurt_verdict ;;
+            gvis) bin=$GVIS verdict=gvis_verdict ;;
+            *) bin=$WVIS verdict=wvis_verdict ;;
+        esac
+        out=$(run failing env "$(backend_env "$be")" "$bin" --directory "$DIR" --iterations "$iters" "${cfg_args[@]}")
+        note "$(printf '%-8s %-5s %-90s %s' "$be" "$prog" "$cfg_text" "$($verdict "$out")")"
     done
 fi
 
