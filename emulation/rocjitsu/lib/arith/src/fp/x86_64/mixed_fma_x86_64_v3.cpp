@@ -167,9 +167,10 @@ void mixed_half(bool high, uint64_t flags, uint32_t exec_mask, uint32_t mode, ui
       z = flush(z, mode >> 2);
     }
     auto result =
-        mixed_half_value4<false>(x, y, z, flags & RJ_ARITH_FP16_OVFL, mode & RJ_ARITH_ALU_CLAMP,
-                                 GuestPolicy && (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS),
-                                 GuestPolicy && (flags & RJ_ARITH_FP_DX10_CLAMP_OFF));
+        mixed_half_value4(x, y, z, flags & RJ_ARITH_FP16_OVFL, mode & RJ_ARITH_ALU_CLAMP,
+                          GuestPolicy && (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS),
+                          GuestPolicy && (flags & RJ_ARITH_FP_DX10_CLAMP_OFF),
+                          GuestPolicy ? unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24) : 0);
     unsigned shift = high ? 16 : 0;
     auto original = _mm_loadu_si128(reinterpret_cast<const __m128i *>(d + lane));
     auto output_mask = _mm_set1_epi32(int(uint32_t(65535) << shift));

@@ -160,18 +160,21 @@ original code-object files nor live HSA state.
 ## Available analysis
 
 `LdsRaceDetection` is the only implemented analysis. It checks ordinary native
-32-bit LDS reads/writes at naturally aligned addresses, using the same
-observations for two checks:
+LDS reads/writes at naturally aligned addresses, using the same observations
+for two checks. All supported targets admit ordinary single-range b16, b32,
+b64, and b128: gfx942/gfx950 wave64, gfx1100/gfx1201 wave32 or wave64, and
+gfx1250 wave32.
 
 | Check | What it reports |
 | --- | --- |
-| Cross-wave conflict | Address-group records from different waves access the same LDS word, with at least one write. Read/read pairs do not conflict. |
-| Same-instruction ordinary-store collision | Multiple lanes of one store observation write the same LDS word. |
+| Cross-wave conflict | Address-group records from different waves access overlapping half-open byte ranges, with at least one write. Read/read pairs do not conflict. |
+| Same-instruction ordinary-store collision | Multiple lanes of one store observation write the same LDS range. |
 
 ### Analysis and admission
 
-Preparation accepts a limited instruction/access subset without relevant guest
-synchronization; unsupported forms, barriers, and atomics are rejected. Exact
+Preparation accepts a limited instruction/access subset with no synchronization,
+or multiple qualified full-workgroup barriers on **gfx1250 wave32**. Other barrier
+forms and atomics are rejected. Exact
 conditions are defined by [compiler qualification](../lib/rocjitsu/src/rocjitsu/code/patch/consan/lds_race.cpp)
 and [runtime admission](../lib/rocjitsu/src/rocjitsu/hooks/consan/hsa_plugin.cpp).
 
@@ -179,8 +182,110 @@ The input code object must contain exactly one kernel, matching the requested
 entry. Selecting an entry does not exclude sibling kernels from this requirement;
 provide a code object containing only the selected kernel.
 
+The forms are `ds_store_b16`, `ds_load_u16`, `ds_load_i16`, and
+`ds_store_b32/b64/b128` or `ds_load_b32/b64/b128` on gfx1100/gfx1201/gfx1250.
+gfx942/gfx950 use the corresponding `ds_write_*` and `ds_read_*` names.
+The b16 loads write a whole 32-bit result with unsigned or signed extension. Access probes
+capture addresses before an aliased load can overwrite them, record actual byte
+widths and byte immediates, and preserve every guest result word. b8/b96,
+partial-register subword loads, dual-range, transpose, FLAT, and atomic forms
+remain unsupported. The existing minimum fixed LDS extent remains four bytes.
+
+Access widths are measured in bytes. `NativeLdsAccess::width` and
+`SiteFacts::width` default to zero, meaning unspecified and invalid. Producers
+must explicitly supply 2, 4, 8, or 16; zero never implies b32 or a zero-length
+access. Manifest admission rejects zero, and a committed observation must match
+its site's width. An all-zero uncommitted report slot still represents vacant
+storage, not an access.
+
+Range admission checks bounds by subtraction before calculating ends. Diagnosis
+sweeps checked ranges, retaining grouped counts for identical ranges, excluding
+Read/Read and same-wave pairs, and treating adjacent ranges as disjoint. Natural
+alignment and the admitted widths bound active range shapes. Widths share the
+same four-address-group quota, loss rules, exact collision masks, and qualified
+barrier certificates. The compatibility token/options reject older b32-only
+producer interpretations and target-specific width restrictions.
+
+gfx1250 wave32 accepts one through sixteen complete 1D workgroups; other
+target/wave profiles remain limited to one. Grid/workgroup Y and Z must equal
+one, and grid X must be nonzero and divisible by workgroup X. Each group retains
+all of its waves, including a partial final wave. Multi-group launches require
+the original descriptor's workgroup-X input; kernels without it remain
+supported for one group.
+
+Each workgroup has independent LDS and barrier participants. Equal numeric
+LDS addresses in different workgroups cannot form conflict candidates, and
+missing evidence in one group does not invalidate another group's complete
+barrier witness.
+
+The barrier profile requires at least two waves in each complete 1D workgroup
+and a closed forward CFG. Preparation and facts admission reject a declared maximum
+workgroup size no larger than one wave, since no valid dispatch could use it.
+The original `s_wait_dscnt 0` must immediately precede
+`s_barrier_signal -1`; the matching `s_barrier_wait -1` must be in the same
+basic block. Admitted arithmetic may separate signal and wait; memory operations
+or barriers may not. Each group block must dominate every exit. Repeated occurrences,
+dynamic IDs, partial/cluster barriers, loops, and paths bypassing the group are unsupported.
+These rules are established from original instructions; probe waits provide no
+guest synchronization evidence.
+
+Each unchanged guest completing wait advances a persistent per-wave phase. Access
+records retain the current phase separately from their dynamic access sequence.
+A bounded explicit journal records each completed group, occurrence, required
+wave count, phase and access-relative sequence. Scalar completion is recorded
+even at guest EXEC=0. Every required wave, including waves without retained
+accesses, must supply matching completion evidence. Numeric phase differences
+alone never establish ordering. A complete witness must bracket both endpoints.
+Every retained access is checked against its wave's completion boundaries before
+conflict enumeration, including disjoint and Read/Read observations. Contradictory
+phase/sequence evidence records an integrity issue and incomplete coverage even
+when no conflicting pair exists. An endpoint that contradicts any retained valid
+boundary cannot supply ordering facts from another boundary: its cross-wave
+candidates remain Unresolved. The reader cannot tell which of the endpoint's
+phase, sequence, or boundary is corrupt, so it does not select a consistent subset
+to certify that endpoint. Other consistent endpoints, including those in the same
+wave, may still use independently complete witnesses. An exact-mask store
+collision uses the independently validated range and mask without relying on the
+endpoint's barrier position. Missing evidence differs from this contradiction:
+unrelated loss does not revoke a valid endpoint's complete witness. Only rows with
+consistent retained evidence contribute to the completed-barrier-wave count.
+
+The no-synchronization profile statically rules out synchronization. Two valid
+conflicting endpoints in the same workgroup therefore remain confirmed even if
+an unrelated wave's row is missing, malformed, or has an invalid final phase.
+That row still causes an integrity issue and incomplete coverage. Rows with
+invalid identity, status, or sequence are rejected; contradictory endpoint
+phases remain Unresolved.
+This independence does not apply to barrier profiles: every required participant
+must supply the witnesses needed to classify the pair, even without LDS accesses.
+
+The analyzer reports `ordered_pairs` both per execution and as a total across
+executions. It keeps ordered pairs, confirmed `cross_wave_pairs`, and
+`ordering_unresolved_pairs` separate, with separate example arrays. Missing or
+contradictory required evidence retains an unresolved candidate and incomplete
+coverage. It contributes neither to confirmed totals nor the default findings
+exit status. An independent exact-mask store collision remains a finding.
+Incomplete coverage alone does not change the default CLI exit status: callers
+that require complete evidence must also check `coverage_complete` in the JSON.
+Zero confirmed findings with gaps does not mean complete-clean. An independently
+complete journal witness can order a pair despite unrelated lost evidence.
+
+Barrier facts are saved with original/prepared signal/wait positions and the
+after-wait probe mapping. Prepared guest instructions and all per-site callback
+envelopes must have disjoint ranges, including access and barrier callbacks.
+The producer compatibility token and options identity
+cover these meanings, and incompatible artifacts/captures reject explicitly.
+The journal reserves sixteen 32-byte records per wave separately from access
+reservations. Each slot belongs to its static group, with occurrence always one
+and phase equal to slot plus one. Admission caps groups at sixteen, so sync loss
+remains zero; repeated occurrences and dynamic overflow are unsupported.
+Extending this profile requires coordinated producer, reader, and compatibility
+changes. Compiled HIP probes store sequence and phase in each report row.
+The shared callable DBI planner owns register preservation and allocation; sizing
+and descriptor checks apply before preparation.
+
 Recording is bounded and does not provide a full execution history. Broader
-access forms, synchronization analysis, and application integration require
+access forms, synchronization forms, and application integration require
 extensions.
 
 ## How to use
@@ -304,6 +409,7 @@ conflict was found; exit 0 means no findings were observed. The result includes:
   "target": 1250,
   "wave_size": 32,
   "cross_wave_pairs": 1,
+  "ordered_pairs": 0,
   "collision_groups": 0,
   "coverage_complete": true
 }
@@ -407,3 +513,22 @@ matching physical hardware. Required simulator cases must execute without skips;
 physical cases skip when the requested HSA agent is unavailable. Runtime-stage
 scenarios remain available without building the analyzer. Keep simulator and
 physical-target evidence distinct.
+
+The `barrier_multiple` capture uses wave-0 store, B0, wave-1 load, B1, wave-0
+store. B0 orders publication and B1 orders reuse, producing two ordered pairs.
+The sibling `barrier_missing_second` omits only B1 and retains barrier scope:
+its saved analysis must report one ordered pair and one confirmed unordered pair.
+
+The synchronized runner checks output preservation; that alone does not prove
+that a wait blocked an early consumer. The
+`ConSanBootstrapSim.Gfx1250PublicationBarrierBlocksAnEarlyConsumer` simulator
+control uses assembly cases 25/26: both initialize LDS to zero and synchronize,
+then only the producer delays before publishing input=7. Without the publication
+barrier the consumer reads zero; both the original and instrumented synchronized
+kernels must read seven. A second negative control replaces only the relocated
+publication wait with `s_nop 0` in the prepared image, leaving the completion
+callback intact. It must also read zero, proving that callback execution does
+not hide the missing wait. The 512-NOP forward-only producer delay keeps this
+control in the acyclic profile; increase it if callback growth causes the
+mutation control to read seven. These scheduling-dependent controls are simulator evidence,
+not a requirement that physical hardware reproduce the same unsynchronized read.

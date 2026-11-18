@@ -15,6 +15,7 @@ use crate::memory::Allocation;
 use crate::topology::{CacheAssociations, CacheInfo, CacheKind, GpuInfo};
 use crate::{Error, ErrorKind};
 
+mod code_cache;
 mod copy;
 pub mod event;
 pub mod image;
@@ -74,6 +75,8 @@ pub struct GpuDevice<'a> {
 pub struct GpuSurfaceConfig {
     /// Provider-resolved ASIC family for the same activated GPU.
     pub asic_family_id: u32,
+    /// External ASIC revision in the address-library family namespace.
+    pub chip_revision: u32,
     /// Hardware `GB_ADDR_CONFIG` register value.
     pub gb_addr_config: u32,
 }
@@ -86,7 +89,9 @@ impl GpuDevice<'_> {
         self.driver.asic_family_id()
     }
 
-    /// Queries the active KFD process's recoverable page-fault mode.
+    /// Queries the effective XNACK mode of this GPU's native execution context.
+    ///
+    /// GPUs sharing a native KFD context share this recoverable-page-fault mode.
     ///
     /// # Errors
     /// Returns a native or device-lifetime failure when the mode is unavailable.
