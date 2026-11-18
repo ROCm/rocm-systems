@@ -151,10 +151,13 @@ NCCL library is not supported.
 - `NCCL_INSPECTOR_REQUIRE_KERNEL_TIMING=<0|1>` (default: `1`)
   When enabled (default), only events with GPU-based kernel timing (`kernel_gpu`) are recorded. Events that fall back to CPU-measured timing (`kernel_cpu` or `collective_cpu`) are silently discarded. Set to `0` to restore the previous fallback behaviour and retain all events regardless of timing source.
 
-#### Collectives using RCCL DDA are not traced
+#### Collectives using RCCL DDA are partially traced
 
 The direct device access (DDA) path launches its own kernels and bypasses the proxy and plan
-machinery the profiler interface is built on, so the Inspector never sees a collective that DDA
+machinery, but does manually emit some profiler host events. Under graph capture, these events are
+emitted once when the graph is captured, but not on subsequent graph replay.
+Device events are not emitted: the Inspector plugin records a collective only
+when all its KernelCh device events complete, so the Inspector never sees a collective that DDA
 services. Set `RCCL_DDA_ENABLE=0` to route the
 collectives through the instrumented path while collecting Inspector data.
 
