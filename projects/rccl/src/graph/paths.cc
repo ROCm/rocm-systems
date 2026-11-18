@@ -1500,14 +1500,12 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     // at 8 channels per peer, 15.0 at 4 and 29.6 at 1; over the 8 partitions of one device it
     // runs 74.3 at 64 and 144.8 at 16.
     //
-    // Strictly greater, where the branch above is >=, so a plan that exactly fills the pool is
-    // left alone instead of halved once more. Exactly full is one round, which is all either loop
-    // is after; the >= above goes a step past its own comment, and that step is not free here
-    // because it is the case that keeps coming up -- 8 partitions land on 16 channels per peer
-    // over 4 rounds and 16 partitions on 8 over 8, both exactly 64. Halving either would cost
-    // about a quarter of the bandwidth: 8 partitions run 1 GiB sendrecv at 120.9 GB/s with 16
-    // channels per peer and 88.5 with 8. The >= is left as it is because the net-bound branch has
-    // its own history and is not what this change is about.
+    // >=, as the branch above, so a plan that exactly fills the pool is halved once more. Exactly
+    // full still contends: 16 partitions (a DPX node) land on 8 channels per peer over 8 rounds,
+    // exactly 64, and 1 GiB alltoall runs 201 GB/s with 4 channels per peer and 113 with 8. A
+    // collective with one peer at a time pays for halving instead (8 partitions run 1 GiB
+    // sendrecv at 120.9 GB/s with 16 channels per peer and 88.5 with 8), so gather and send/recv
+    // keep the unhalved count as their part count; see rcclP2pPartitionedGather.
     //
     // Gated on MLOPart because that is the configuration the contention was measured in: a
     // whole-device (SPX) comm has its own per-peer counts and channel pool and is left as it was.
@@ -1527,8 +1525,16 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     // declines to run, and ncclTopoGetNchannels() hands it straight back as the count for every
     // remote peer, so halving it here would undo it. Multi-node is the network's bottleneck to
     // size against, not the on-package fabric's.
+    // Gather and send/recv keep this unhalved count as their part count (rcclP2pPartCount). The
+    // halving below sets the channel stride the device inverts with, which alltoall, alltoallv
+    // and scatter keep.
+    comm->p2pnChannelsPerPeerBase = comm->p2pnChannelsPerPeer;
     if (comm->nNodes == 1 && comm->hasMloPart) {
-      while (comm->p2pnChannelsPerPeer * divUp(maxP2pPeers, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) >
+      // >= : a plan that exactly fills the pool is halved too. Left alone, the 16 partitions of
+      // a DPX node ran alltoall at 8 channels per peer (113 GB/s at 1 GiB) where 4 gives 201,
+      // and scatter 227 against 318. The collectives that lose from fewer channels per peer
+      // (gather, send/recv) do not use the halved count; see rcclP2pPartitionedGather.
+      while (comm->p2pnChannelsPerPeer * divUp(maxP2pPeers, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) >=
                comm->p2pnChannels &&
              comm->p2pnChannelsPerPeer > 1)
         comm->p2pnChannelsPerPeer /= 2;
@@ -1551,8 +1557,9 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, comm->p2pnChannels);
   }
 
-  INFO(NCCL_INIT | NCCL_TUNING, "P2P channels: p2pnChannels=%d p2pnChannelsPerPeer=%d maxP2pPeers=%d",
-       comm->p2pnChannels, comm->p2pnChannelsPerPeer, maxP2pPeers);
+  INFO(NCCL_INIT | NCCL_TUNING,
+       "P2P channels: p2pnChannels=%d p2pnChannelsPerPeer=%d p2pnChannelsPerPeerBase=%d maxP2pPeers=%d",
+       comm->p2pnChannels, comm->p2pnChannelsPerPeer, comm->p2pnChannelsPerPeerBase, maxP2pPeers);
 
   // Init channels that weren't used so far
   for (int c = comm->nChannels; c < std::max(comm->nChannels, comm->p2pnChannels); c++) NCCLCHECK(initChannel(comm, c));

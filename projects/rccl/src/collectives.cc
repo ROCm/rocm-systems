@@ -747,6 +747,14 @@ ncclResult_t ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[],
 
     return ncclEnqueueCheck(&info);
   } else {
+    // Cleared on every exit, including a failed Send. GroupEnd plans the tasks, so the flag has to
+    // stay set until that returns: AlltoAllv here is one send and one recv per rank, which is the
+    // many-peers case the halving loop sizes, not a one-peer send/recv.
+    struct AlltoAllvP2pFlag {
+      ncclComm_t comm;
+      ~AlltoAllvP2pFlag() { comm->p2pFromAlltoAllv = false; }
+    } flag{comm};
+    comm->p2pFromAlltoAllv = true;
     Recorder::instance().skip(true);
     NCCLCHECK(ncclGroupStart());
     for (int r = 0; r < nRanks; r++) {
