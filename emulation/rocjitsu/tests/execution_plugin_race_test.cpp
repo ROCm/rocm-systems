@@ -2878,6 +2878,49 @@ TEST_F(LdsBarrierCellRaceTest, RtnArriveHandsOffAPendingFlatLdsLoad) {
   EXPECT_FALSE(ds_write(1, kFlatLdsAddress));
 }
 
+// A FLAT load whose lanes split between global memory and LDS has its LDS
+// lanes checked when they are accessed, after its global lanes translate. Its
+// read of a cell acquires then, not when the instruction issues.
+TEST_F(LdsBarrierCellRaceTest, MixedFlatLoadOfTheCellAcquiresWhenItsLdsLanesAreAccessed) {
+  constexpr uint32_t kOtherTile = kTile + 32;
+  EXPECT_FALSE(async_load(0, kTile));
+  EXPECT_FALSE(async_load(0, kOtherTile));
+  EXPECT_FALSE(arrive(0, Source::AsyncDsAtomic));
+
+  // Lane 0 resolves to global memory and lane 1 to the cell.
+  waves[1]->pc += 16;
+  constexpr uint64_t kExec = 0x3;
+  auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+  state->elem_size = sizeof(uint32_t);
+  state->num_elems = 1;
+  state->is_load = true;
+  state->wf_size = waves[1]->wf_size();
+  state->exec_mask = kExec;
+  state->lane_mask = kExec;
+  state->dst_reg_base = waves[1]->vgpr_alloc().base + 8;
+  state->per_lane_addr[0] = kCell;
+  state->per_lane_addr[1] = kCell;
+  TestMemoryInstruction load(std::move(state),
+                             {{WaitCounterType::LOADCNT, MemoryCompletionClass::VMEM},
+                              {WaitCounterType::DSCNT, MemoryCompletionClass::LDS}},
+                             /*exec_masked=*/true, "flat_load_b32");
+  // Execution records the issue it routed, which defers the LDS lanes.
+  load.data_as<VectorMemState>()->routed_issue_info = *load.amdgpu_memory_issue_info();
+  MemoryAccessObservation access{};
+  access.route = MemoryRoute::GLOBAL;
+  access.decoded_space = DecodedMemorySpace::FLAT;
+  access.request_lane_mask = kExec;
+  access.flat_local_lane_mask = 0x2;
+  const size_t previous = sink->str().size();
+  issue(1, load, access, kExec);
+  EXPECT_EQ(sink->str().find("RACE ", previous), std::string::npos);
+
+  // The cell has not been read yet, so nothing is acquired.
+  EXPECT_TRUE(ds_read(1, kTile));
+  fixture.plugin_group_->onAmdgpuMixedFlatLdsAccess(load, *waves[1]);
+  EXPECT_FALSE(ds_read(1, kOtherTile));
+}
+
 // With EXEC zero no lane arrives, so the simulator reports no arrival (see
 // LdsBarrierArriveTest.ExecZeroArriveReportsNothing) and nothing is released:
 // the instruction is issued here without one.
