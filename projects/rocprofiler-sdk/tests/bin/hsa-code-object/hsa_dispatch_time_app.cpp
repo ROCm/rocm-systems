@@ -31,6 +31,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
 #include <string>
 
 namespace
@@ -78,8 +79,16 @@ constexpr auto max_shutdown_duration = std::chrono::seconds{65};
 }  // namespace
 
 int
-main()
+main(int argc, char** argv)
 {
+    auto application_times = std::ofstream{};
+    if(argc > 1)
+    {
+        application_times.open(argv[1]);
+        if(!application_times) return EXIT_FAILURE;
+        application_times << "Start,End\n";
+    }
+
     hsa_status_t     status = HSA_STATUS_SUCCESS;
     MQDependencyTest obj;
     if(!obj.device_discovery() || obj.gpu.empty())
@@ -194,6 +203,9 @@ main()
                     static_cast<unsigned long>(kernel_time.end));
             ++failures;
         }
+
+        if(application_times.is_open())
+            application_times << kernel_time.start << ',' << kernel_time.end << '\n';
 
         auto invalid_agent_time = hsa_amd_profiling_dispatch_time_t{};
         status = hsa_amd_profiling_get_dispatch_time(obj.cpu[0].agent, signal, &invalid_agent_time);

@@ -1582,7 +1582,6 @@ clear_copy_time_cache()
 {
     if(auto* cache = common::static_object<copy_time_cache>::get())
     {
-        async_copy_sync();
         auto lock = cache->lock_lifetime();
         cache->clear();
     }
