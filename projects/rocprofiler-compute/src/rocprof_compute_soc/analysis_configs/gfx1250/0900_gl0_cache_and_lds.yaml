@@ -23,8 +23,8 @@ Panel Config:
         max: Max
         unit: Unit
       metric:
-        # TX_VMW_VMW_BUSY_sum is summed across WGPs. GRBM_GUI_ACTIVE_sum already sums XCDs,
-        # so divide by active WGPs per XCD.
+        # TX_VMW_VMW_BUSY_sum is summed across WGPs.
+        # Denominator: GRBM_GUI_ACTIVE_sum * cu_per_gpu / num_xcd.
         Utilization:
           avg: 100 * SUM(TX_VMW_VMW_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum * $cu_per_gpu / $num_xcd)
           min: 100 * MIN(TX_VMW_VMW_BUSY_sum / (GRBM_GUI_ACTIVE_sum * $cu_per_gpu / $num_xcd))

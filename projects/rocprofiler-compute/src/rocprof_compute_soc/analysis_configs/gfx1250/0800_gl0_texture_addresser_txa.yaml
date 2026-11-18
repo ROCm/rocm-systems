@@ -22,8 +22,8 @@ Panel Config:
         max: Max
         unit: Unit
       metric:
-        # TX_VCA_VCA_BUSY_sum is about two cycles per busy WGP. GRBM_GUI_ACTIVE_sum
-        # already sums XCDs, so divide by 2 * active WGPs per XCD.
+        # TX_VCA_VCA_BUSY_sum counts about two cycles per busy WGP.
+        # Denominator: GRBM_GUI_ACTIVE_sum * 2 * cu_per_gpu / num_xcd.
         Utilization:
           avg: 100 * SUM(TX_VCA_VCA_BUSY_sum) / SUM(2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu / $num_xcd)
           min: 100 * MIN(TX_VCA_VCA_BUSY_sum / (2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu / $num_xcd))
