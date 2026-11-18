@@ -1343,16 +1343,6 @@ static size_t rcclCeArRegChunkElems(const ncclComm* comm, size_t count, ncclData
   return ncclCeAllReduceChunkBytes(shardBytes, slotChunkBytes) / eltSize;
 }
 
-// LL128 table cap; ReduceScatter takes the small-comm per-rank entry where it applies.
-inline size_t ddaLL128TierCapFromTable(const rcclArchThresholds* table, ncclFunc_t func, int nRanks) {
-  if (func == ncclFuncReduceScatter && rcclRsSmallComm(table, nRanks) && nRanks <= table->rsSmallCommDdaLL128MaxRanks &&
-      table->rsSmallCommDdaLL128MaxPerRank != 0) {
-    return std::min((size_t)nRanks * table->rsSmallCommDdaLL128MaxPerRank, table->rankScaledMaxBytes);
-  }
-  return ddaTierCapFromTable(table, table->ddaLL128Max, table->ddaLL128MaxPerRank, func, nRanks,
-                             table->ddaLargeCommLL128MaxPerRank);
-}
-
 // Returns the LL128 size cap for this collective, or 0 if the tier is disabled.
 // RCCL_DDA_LL128 three-way logic:
 //   kDdaThresholdUnset (-1, default): auto — enabled iff arch table has non-zero
@@ -1367,11 +1357,13 @@ inline size_t rcclDdaLL128ThresholdTab(const rcclArchThresholds* table, ncclFunc
   if (param == 0) return 0;
   if (param == kDdaThresholdUnset) {
     if (table == nullptr) return 0;
-    return ddaLL128TierCapFromTable(table, func, nRanks);
+    return ddaTierCapFromTable(table, table->ddaLL128Max, table->ddaLL128MaxPerRank, func, nRanks,
+                               table->ddaLargeCommLL128MaxPerRank);
   }
   // param > 0: user forced on
   if (table == nullptr) return kDdaLL128BaseDefault;
-  return ddaLL128TierCapFromTable(table, func, nRanks);
+  return ddaTierCapFromTable(table, table->ddaLL128Max, table->ddaLL128MaxPerRank, func, nRanks,
+                             table->ddaLargeCommLL128MaxPerRank);
 }
 size_t rcclDdaLL128Threshold(const ncclComm* comm, ncclFunc_t func) {
   return rcclDdaLL128ThresholdTab(extAlgoArchTable(comm), func, comm != nullptr ? comm->nRanks : 0);

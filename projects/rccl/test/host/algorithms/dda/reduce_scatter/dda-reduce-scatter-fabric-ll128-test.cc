@@ -53,8 +53,6 @@ class DdaReduceScatterFabricLL128Microtest : public ::testing::Test {
     };
     // The LL128 tier is off without an arch table; give it a cap well above anything tested.
     g_rcclDdaLL128Threshold = [](const ncclComm*, ncclFunc_t) { return size_t{1} << 30; };
-    // The narrow width the gfx1250 SPX table sets for 16 ranks or fewer.
-    g_rcclDdaFabricNarrowThreads = [](const ncclComm*) { return 256; };
     comm().rank = 7;
     comm().addonStopEvent = kStopEvent;
   }
@@ -233,7 +231,7 @@ TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_EachDatatypeLaunchesItsOwnKe
 
 TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_TakesTheStopEventOnTheStream) {
   const DdaLaunch& launch = RunOne(4);
-  EXPECT_EQ(launch.block.x, 256u);
+  EXPECT_EQ(launch.block.x, 512u);
   EXPECT_EQ(launch.stream, kStream);
   EXPECT_EQ(launch.startEvent, nullptr);
   EXPECT_EQ(launch.stopEvent, kStopEvent);
@@ -256,23 +254,14 @@ TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_FourAndEightRanksUnrolledOth
   }
 }
 
-// One warp per slice. While one pass of 256-thread blocks (8 warps) covers the shard, a block per 8 slices; past
-// that, 512 threads (16 warps), a block per 16 slices.
+// 512 threads are 16 warps, one slice each: a block per 16 slices of the shard.
 TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_GridFollowsShardSlicesWithinCaps) {
-  comm().ddaFabricMaxBlocks = 256;
   EXPECT_EQ(RunOne(8, ncclFloat16).grid.x, 1u);
-  EXPECT_EQ(RunOne(8 * kSliceFloats).block.x, 256u);
-  EXPECT_EQ(RunOne(8 * kSliceFloats).grid.x, 1u);
-  EXPECT_EQ(RunOne(8 * kSliceFloats + 4).grid.x, 2u);
-  EXPECT_EQ(RunOne(16 * kSliceFloats, ncclBfloat16).grid.x, 1u);
-  const DdaLaunch onePass = RunOne(8 * 256 * kSliceFloats);  // 2048 slices: one pass of 256 blocks
-  EXPECT_EQ(onePass.block.x, 256u);
-  EXPECT_EQ(onePass.grid.x, 256u);
-  const DdaLaunch wide = RunOne(8 * 256 * kSliceFloats + 4);  // 2049 slices
-  EXPECT_EQ(wide.block.x, 512u);
-  EXPECT_EQ(wide.grid.x, 129u);
+  EXPECT_EQ(RunOne(16 * kSliceFloats).grid.x, 1u);
+  EXPECT_EQ(RunOne(16 * kSliceFloats + 4).grid.x, 2u);
+  EXPECT_EQ(RunOne(32 * kSliceFloats, ncclBfloat16).grid.x, 1u);
+  EXPECT_EQ(RunOne(16 * 100 * kSliceFloats).grid.x, 100u);
   comm().ddaFabricMaxBlocks = 6;
-  EXPECT_EQ(RunOne(16 * 100 * kSliceFloats).block.x, 512u);
   EXPECT_EQ(RunOne(16 * 100 * kSliceFloats).grid.x, 6u);
   comm().ddaFabricMaxBlocks = 0;
   EXPECT_EQ(RunOne(16 * 100 * kSliceFloats).grid.x, 1u);
@@ -281,15 +270,6 @@ TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_GridFollowsShardSlicesWithin
   EXPECT_EQ(RunOne(16 * 100 * kSliceFloats).grid.x, 9u);
   comm().ddaLLEpochLen = 0;
   EXPECT_EQ(RunOne(16 * 100 * kSliceFloats).grid.x, 1u);
-}
-
-// With no ddaNarrowThreads (DPX, larger SPX comms, no table) the grid keeps 512-thread blocks, a block per 16 slices.
-TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_WithoutNarrowThreadsKeeps512) {
-  g_rcclDdaFabricNarrowThreads = [](const ncclComm*) { return 0; };
-  comm().ddaFabricMaxBlocks = 256;
-  EXPECT_EQ(RunOne(8 * kSliceFloats).block.x, 512u);
-  EXPECT_EQ(RunOne(16 * kSliceFloats).grid.x, 1u);
-  EXPECT_EQ(RunOne(16 * kSliceFloats + 4).grid.x, 2u);
 }
 
 TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_LaunchErrorIsReported) {

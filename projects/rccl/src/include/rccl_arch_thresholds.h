@@ -130,8 +130,8 @@ struct rcclArchThresholds {
   size_t ddaArLLTwoShotMaxPerRank;
 
   // On comms of at most ddaNarrowMaxRanks ranks: the DDA LL AllReduce one-shot and two-shot (to 8 MiB) launch
-  // ddaNarrowThreads-wide blocks instead of 512 and 1024, and the warp-per-slice DDA LL128 AllReduce two-shot and
-  // ReduceScatter grids do instead of 512 while one pass of them covers the shard. 0 threads = off.
+  // ddaNarrowThreads-wide blocks instead of 512 and 1024, and the warp-per-slice DDA LL128 AllReduce two-shot grid
+  // does instead of 512 while one pass of them covers the shard. 0 threads = off.
   int ddaNarrowThreads;
   int ddaNarrowMaxRanks;
 
@@ -186,13 +186,9 @@ struct rcclArchThresholds {
   size_t rsRingSimpleCappedMaxPerRank;  // Ring Simple ReduceScatter above the LL128 band,
   int rsRingSimpleCappedChannels;       // up to this per rank, runs on at most this many channels
 
-  // ReduceScatter on rank-scaled comms of at most rsSmallCommMaxRanks ranks. A non-zero entry
-  // replaces ddaLL128MaxPerRank[ReduceScatter] (still clipped to rankScaledMaxBytes) or
-  // rsRingLL128MaxPerRank (2- and 4-byte types). 0 ranks = off. The DDA LL128 entry further
-  // stops at rsSmallCommDdaLL128MaxRanks.
+  // ReduceScatter on rank-scaled comms of at most rsSmallCommMaxRanks ranks: a non-zero entry replaces
+  // rsRingLL128MaxPerRank (2- and 4-byte types). 0 ranks = off.
   int rsSmallCommMaxRanks;
-  int rsSmallCommDdaLL128MaxRanks;
-  size_t rsSmallCommDdaLL128MaxPerRank;
   size_t rsSmallCommRingLL128MaxPerRank;
 
   // Force CE-Scratch for unregistered AllGather / AlltoAll / Gather / Scatter

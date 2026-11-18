@@ -1794,8 +1794,6 @@ rcclArchThresholds MakeRankScaledTable() {
   t.rsRingSimpleCappedMaxPerRank = 32 * kMiB;
   t.rsRingSimpleCappedChannels = 128;
   t.rsSmallCommMaxRanks = 16;
-  t.rsSmallCommDdaLL128MaxRanks = 8;
-  t.rsSmallCommDdaLL128MaxPerRank = 16 * kMiB;
   t.rsSmallCommRingLL128MaxPerRank = 32 * kMiB;
   t.symTdmMinR2[ncclFuncAllGather] = 64 * kMiB;
   t.symTdmMaxR2[ncclFuncAllGather] = 128 * kMiB;
@@ -7983,13 +7981,13 @@ TEST(WrapMicrotestIsolated, DdaTierCaps_RankScaledFromMinRanks) {
         EXPECT_EQ(128 * kKiB, rcclDdaLLThreshold(comm, ncclFuncAllGather));
         EXPECT_EQ(8 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
         EXPECT_EQ(128 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllGather));
-        EXPECT_EQ(128 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter)) << "small-comm entry";
+        EXPECT_EQ(60 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter));
         EXPECT_EQ(16 * kMiB, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter));
         EXPECT_EQ(256 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllReduce)) << "no per-rank entry";
         EXPECT_EQ(16 * kMiB, rcclDdaVmmThreshold(comm, ncclFuncAllReduce)) << "no per-rank entry";
         comm->nRanks = 16;
         EXPECT_EQ(16 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
-        EXPECT_EQ(120 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter)) << "DDA entry stops at 8 ranks";
+        EXPECT_EQ(120 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter));
         comm->nRanks = 32;
         EXPECT_EQ(256 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllGather)) << "clipped";
         EXPECT_EQ(64 * kMiB, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter));
@@ -8958,8 +8956,7 @@ TEST(WrapMicrotestIsolated, DdaFabricNarrowThreads_FromSpxTableUpTo32Ranks) {
       });
 }
 
-// The SPX table's small-comm ReduceScatter entries: DDA LL128 to 16M per rank on 8 ranks only (16 and 32 keep 7.5M),
-// and Ring LL128 to 32M per rank on 8-32 ranks; 64 ranks keep 8M.
+// The SPX table's small-comm ReduceScatter entry: Ring LL128 to 32M per rank on 8-32 ranks; 64 ranks keep 8M.
 TEST(WrapMicrotestIsolated, ReduceScatterSmallComm_FromSpxTable) {
   RUN_ISOLATED_TEST(
       "Wrap_ReduceScatterSmallComm_FromSpxTable",
@@ -8968,11 +8965,6 @@ TEST(WrapMicrotestIsolated, ReduceScatterSmallComm_FromSpxTable) {
         ncclComm* comm = MakeGfx1250ProtocolComm(8);
         comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
         ASSERT_NE(nullptr, comm->archThresholds);
-        const std::pair<int, size_t> dda[] = {{8, 128 * kMiB}, {16, 120 * kMiB}, {32, 240 * kMiB}};
-        for (const auto& c : dda) {
-          comm->nRanks = c.first;
-          EXPECT_EQ(c.second, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter)) << c.first << " ranks";
-        }
         for (const std::pair<int, size_t> c :
              {std::make_pair(8, 32 * kMiB), {16, 32 * kMiB}, {32, 32 * kMiB}, {64, 8 * kMiB}}) {
           comm->nRanks = c.first;
@@ -8983,8 +8975,8 @@ TEST(WrapMicrotestIsolated, ReduceScatterSmallComm_FromSpxTable) {
       });
 }
 
-// The SPX table's 32-rank DDA caps: AllReduce LL to 8M with one-shot to 4M, LL128 to 128M, and ReduceScatter LL
-// to 16M. 16 and 64 ranks keep the rank-scaled caps and the 1M one-shot default; DPX sets none.
+// The SPX table's 32-rank DDA caps: AllReduce LL to 16M with one-shot to 4M and LL128 to 128M; ReduceScatter keeps
+// nRanks x 1M. 16 and 64 ranks keep the rank-scaled caps and the 1M one-shot default; DPX sets none.
 TEST(WrapMicrotestIsolated, DdaLargeComm_FromSpxTable) {
   RUN_ISOLATED_TEST(
       "Wrap_DdaLargeComm_FromSpxTable",
@@ -9001,7 +8993,7 @@ TEST(WrapMicrotestIsolated, DdaLargeComm_FromSpxTable) {
           size_t arLL, arOneShot, arLL128, rsLL;
         };
         const Case cases[] = {{16, 16 * kMiB, kMiB, 256 * kMiB, 16 * kMiB},
-                              {32, 16 * kMiB, 4 * kMiB, 128 * kMiB, 16 * kMiB},
+                              {32, 16 * kMiB, 4 * kMiB, 128 * kMiB, 32 * kMiB},
                               {64, 64 * kMiB, kMiB, 256 * kMiB, 64 * kMiB}};
         for (const Case& c : cases) {
           comm->nRanks = c.nRanks;
@@ -9138,8 +9130,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250NeverPicksSymmetric) {
       });
 }
 
-// gfx1250 SPX ReduceScatter: DDA LL to its cap, LL128 to 224M below 8 ranks, nRanks x 16M at 8 ranks,
-// nRanks x 7.5M to 256M above, then Ring.
+// gfx1250 SPX ReduceScatter: DDA LL to its cap, LL128 to 224M below 8 ranks, nRanks x 7.5M to 256M, then Ring.
 TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250SpxLL128Caps) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_Gfx1250SpxLL128Caps",
@@ -9172,7 +9163,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250SpxLL128Caps) {
           EXPECT_EQ(ll128, algo(c.second + (size_t)c.first * sizeof(float))) << c.first;
         }
         const std::pair<int, size_t> cases[] = {
-            {4, 224 * kMiB}, {8, 128 * kMiB}, {16, 120 * kMiB}, {32, 240 * kMiB}, {64, 256 * kMiB}};
+            {4, 224 * kMiB}, {8, 60 * kMiB}, {16, 120 * kMiB}, {32, 240 * kMiB}, {64, 256 * kMiB}};
         for (const auto& c : cases) {
           comm->nRanks = c.first;
           EXPECT_EQ(ll128, algo(c.second)) << c.first;
