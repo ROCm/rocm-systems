@@ -1422,51 +1422,51 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
       break;
     case TilePut3DStridedTestType:
       test_name = "Tile Put 3D Strided";
-      testers.push_back(new TileNDRMATester(args));
+      PUSH_TESTER(TileNDRMATester(args));
       break;
     case TileGet3DStridedTestType:
       test_name = "Tile Get 3D Strided";
-      testers.push_back(new TileNDRMATester(args));
+      PUSH_TESTER(TileNDRMATester(args));
       break;
     case TilePutWG3DStridedTestType:
       test_name = "Tile Put WG 3D Strided";
-      testers.push_back(new TileNDRMATester(args));
+      PUSH_TESTER(TileNDRMATester(args));
       break;
     case TileGetWG3DStridedTestType:
       test_name = "Tile Get WG 3D Strided";
-      testers.push_back(new TileNDRMATester(args));
+      PUSH_TESTER(TileNDRMATester(args));
       break;
     case TilePutWave3DStridedTestType:
       test_name = "Tile Put Wave 3D Strided";
-      testers.push_back(new TileNDRMATester(args));
+      PUSH_TESTER(TileNDRMATester(args));
       break;
     case TileGetWave3DStridedTestType:
       test_name = "Tile Get Wave 3D Strided";
-      testers.push_back(new TileNDRMATester(args));
+      PUSH_TESTER(TileNDRMATester(args));
       break;
     case TilePut4DStridedTestType:
       test_name = "Tile Put 4D Strided";
-      testers.push_back(new TileNDRMATester(args));
+      PUSH_TESTER(TileNDRMATester(args));
       break;
     case TileGet4DStridedTestType:
       test_name = "Tile Get 4D Strided";
-      testers.push_back(new TileNDRMATester(args));
+      PUSH_TESTER(TileNDRMATester(args));
       break;
     case TilePutWG4DStridedTestType:
       test_name = "Tile Put WG 4D Strided";
-      testers.push_back(new TileNDRMATester(args));
+      PUSH_TESTER(TileNDRMATester(args));
       break;
     case TileGetWG4DStridedTestType:
       test_name = "Tile Get WG 4D Strided";
-      testers.push_back(new TileNDRMATester(args));
+      PUSH_TESTER(TileNDRMATester(args));
       break;
     case TilePutWave4DStridedTestType:
       test_name = "Tile Put Wave 4D Strided";
-      testers.push_back(new TileNDRMATester(args));
+      PUSH_TESTER(TileNDRMATester(args));
       break;
     case TileGetWave4DStridedTestType:
       test_name = "Tile Get Wave 4D Strided";
-      testers.push_back(new TileNDRMATester(args));
+      PUSH_TESTER(TileNDRMATester(args));
       break;
     case HostTeamSyncBarrierTestType:
       test_name = "Host Team Sync/Barrier";
