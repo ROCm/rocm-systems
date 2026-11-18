@@ -42,7 +42,7 @@ use rocddi::topology::{
 use crate::callback_arg::CallbackArg;
 use crate::debugger::PendingDebugger;
 use crate::ffi::*;
-use crate::image_abi::ImageState;
+use crate::image::ImageState;
 use crate::isa::isa_name;
 use crate::loader::LoaderState;
 use crate::memory::{CpuPoolKind, GpuPoolKind, MemoryState, POOL_HANDLE_STRIDE};

@@ -9,7 +9,7 @@ use crate::ffi::*;
 use crate::runtime::{boundary, initialized_mut, lock};
 use crate::signal::wait::{
     prepare_multi_wait, signal_group_wait_any, signal_wait, signal_wait_all_open,
-    signal_wait_any_open, signal_wait_inputs,
+    signal_wait_inputs,
 };
 
 #[cfg_attr(
@@ -267,25 +267,19 @@ pub unsafe extern "C" fn hsa_amd_signal_wait_any(
     else {
         return u32::MAX;
     };
-    // SAFETY: The registry lock protects validation and retention; the returned
-    // registration stays alive until this wait returns.
-    let registration = match unsafe { prepare_multi_wait(runtime, &inputs.signals) } {
-        Some(registration) => registration,
-        None => return u32::MAX,
+    // SAFETY: The registry lock covers validation and signal retention.
+    let Some(prepared) = (unsafe { inputs.prepare(runtime) }) else {
+        return u32::MAX;
     };
     drop(guard);
-    // SAFETY: The caller supplied optional writable output storage.
-    unsafe {
-        signal_wait_any_open(
-            &registration.entries,
-            &inputs.conditions,
-            &inputs.values,
-            timeout_hint,
-            wait_state_hint,
-            satisfying_value,
-            &registration.stop,
-        )
+    let Some(satisfied) = prepared.wait_any(timeout_hint, wait_state_hint) else {
+        return u32::MAX;
+    };
+    if !satisfying_value.is_null() {
+        // SAFETY: The caller supplies optional writable output storage.
+        unsafe { satisfying_value.write(satisfied.value) };
     }
+    satisfied.index
 }
 
 #[cfg_attr(

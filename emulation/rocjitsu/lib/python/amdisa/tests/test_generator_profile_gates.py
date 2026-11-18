@@ -3919,10 +3919,11 @@ def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
 
     rdna2_vop3 = (amdgpu_generated_root / 'rdna2' / 'vop3_exec.cpp').read_text()
     ternary = _generated_function_body(rdna2_vop3, 'void VFmaF16Vop3::execute_impl')
-    assert 'ROCJITSU_TRY_SIMD_FMA_VOP3_TRUE16_FP16' in ternary
-    assert 'fp_mode::fma_f16' in ternary
-    assert 'read_vop3_true16_src' in ternary
-    assert 'write_vop3_true16_dst' in ternary
+    assert 'arith::execute_float_ternary16' in ternary
+    assert 'rj_arith_v_fma_f16_w32' in ternary
+    assert 'fp_mode::fma_f16' not in ternary
+    assert 'read_vop3_true16_src' not in ternary
+    assert 'write_vop3_true16_dst' not in ternary
 
     true16_unary = _generated_method_body(
         gfx1250_vop3_alu, 'VCeilF16Vop3', 'VTruncF16Vop3'

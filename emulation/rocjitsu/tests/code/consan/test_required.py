@@ -299,7 +299,7 @@ class RequiredCoverage(unittest.TestCase):
         ):
             tests = paired_registrations()
             fixture = 'grouped_disjoint' if groups == 1 else 'grouped_race'
-            suffix = f'.assembly.{fixture}.groups{groups}'
+            suffix = f'.gfx1250.wave32.assembly.{fixture}.groups{groups}'
             twins = [test for test in tests if test['name'].endswith(suffix)]
             self.assertEqual(len(twins), 2)
             for test in twins:
