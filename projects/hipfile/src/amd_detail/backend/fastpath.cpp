@@ -302,6 +302,13 @@ Fastpath::is_fallback_eligible(std::exception_ptr e_ptr, ssize_t nbytes) const
     catch (const std::system_error &sys_err) {
         return fastpathFallbackEligibleErrno(sys_err.code().value());
     }
+    catch (const BackendDisabled &) {
+        // Configuration::fastpath() can change while an IO is in flight, e.g.
+        // another thread hit ENOTTY after score() accepted this IO. Any check
+        // of it after score() that finds it off must end in a fallback
+        // eligible exception.
+        return true;
+    }
     catch (...) {
         // Thrown exception not eligible for fallback.
         return false;
