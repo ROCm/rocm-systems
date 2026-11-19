@@ -7,7 +7,11 @@ from subprocess import CalledProcessError
 from types import SimpleNamespace
 from unittest import mock
 
+from lib.test_config import TestConfigProcessor
 from lib.test_executor import TestExecutor
+
+
+_CONFIG_DIR = Path(__file__).resolve().parents[1] / "configs"
 
 
 def _args(**overrides):
@@ -309,20 +313,18 @@ class CoverageReportingTest(unittest.TestCase):
     def test_report_only_falls_back_to_the_binaries_the_configs_name(self):
         # --coverage-report --skip-tests reports on an earlier run's workspace, so
         # this process launched nothing. The configs name the same binaries that
-        # run would have used, which is the only record of them left.
+        # run would have used, which is the only record of them left. A real config
+        # file, so the test reads the same keys the runner does.
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             executor, build_dir = self._coverage_executor(root)
             micro = build_dir / "test" / "host" / "micro"
             micro.mkdir(parents=True)
-            binary = micro / "rccl-UnitTestsMicro"
+            binary = micro / "rccl-UnitTestsMicroPluginGinPluginInit"
             binary.write_bytes(b"object")
             executor.executed_binaries = set()
-            executor.config_processor = SimpleNamespace(config={
-                "configs": {
-                    "gin_micro_finalize": {"binary": "host/micro/rccl-UnitTestsMicro"},
-                }
-            })
+            executor.config_processor = TestConfigProcessor(
+                str(_CONFIG_DIR / "gin_rocshmem_backends_mellanox.json"))
 
             recorded, runner = self._recording_runner()
             self.assertTrue(self._run_report(executor, runner))

@@ -3250,7 +3250,7 @@ class TestExecutor:
             # --coverage-report --skip-tests reports on an earlier run's
             # workspace, so nothing was launched in this process. The configs name
             # the same binaries that run would have used.
-            configs = self.config_processor.config.get("configs", {}) or {}
+            configs = self.config_processor.config.get("test_configurations", {}) or {}
             launched = set()
             for config in configs.values():
                 binary = config.get("binary")
