@@ -5,17 +5,15 @@
 """Pre-commit hook: validate membw tree spec metric names.
 
 Checks:
-  1. Every metric referenced in the tree spec exists in the analysis config.
+  1. Every metric referenced in the tree spec exists in the membw tables of the views.
   2. No tree-referenced metric formula contains $denom.
 """
 
 import sys
 from pathlib import Path
-
-import yaml
+from typing import Dict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-ANALYSIS_DIR = PROJECT_ROOT / "src" / "rocprof_compute_soc" / "analysis_configs"
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from membw_analysis.guidance import _METRIC_THRESHOLD_RE
@@ -25,35 +23,18 @@ from membw_analysis.tree_spec import (
     load_tree_spec,
     membw_analysis_dir,
 )
-from utils.utils_common import canonical_config_arch
+from utils.analysis_views import arch_panel_configs
+from utils.utils_common import metric_tables_by_id
 
 
-def load_analysis_metrics(arch: str) -> dict[str, str]:
-    """Return {metric_name: formula} from membw-relevant tables."""
-    config_arch = canonical_config_arch(arch) or arch
-    arch_dir = ANALYSIS_DIR / config_arch
-    if not arch_dir.is_dir():
-        return {}
-
-    result: dict[str, str] = {}
-    for config_path in sorted(arch_dir.glob("*.yaml")):
-        with open(config_path, encoding="utf-8") as fh:
-            data = yaml.safe_load(fh)
-        panel = (data or {}).get("Panel Config", {})
-        for source in panel.get("data source", []):
-            metric_table = source.get("metric_table", {})
-            table_id = metric_table.get("id")
-            if table_id not in MEMBW_TABLE_IDS:
-                continue
-            metrics = metric_table.get("metric", {})
-            if not metrics:
-                continue
-            for name, definition in metrics.items():
-                if isinstance(definition, dict):
-                    result[name] = str(definition.get("value", ""))
-                else:
-                    result[name] = str(definition)
-    return result
+def load_view_metrics(arch: str) -> Dict[str, str]:
+    """Return {metric_name: formula} from the membw tables of arch's views."""
+    tables = metric_tables_by_id(arch_panel_configs(arch))
+    return {
+        name: str(row.get("value", ""))
+        for table_id in MEMBW_TABLE_IDS
+        for name, row in (tables.get(table_id, {}).get("metric") or {}).items()
+    }
 
 
 def validate() -> list[str]:
@@ -74,25 +55,23 @@ def validate() -> list[str]:
         )
 
         tree_keys = collect_metric_keys(tree_spec)
-        analysis_metrics = load_analysis_metrics(arch)
+        view_metrics = load_view_metrics(arch)
 
-        if not analysis_metrics:
+        if not view_metrics:
             errors.append(
-                f"[{arch}] no analysis config metrics found "
-                f"for tables {MEMBW_TABLE_IDS}"
+                f"[{arch}] no view metrics found for tables {MEMBW_TABLE_IDS}"
             )
             continue
 
-        tree_only = sorted(tree_keys - frozenset(analysis_metrics))
+        tree_only = sorted(tree_keys - frozenset(view_metrics))
         for metric in tree_only:
             errors.append(
-                f"[{arch}] tree spec references metric "
-                f"not in analysis config: {metric!r}"
+                f"[{arch}] tree spec references metric not in the views: {metric!r}"
             )
 
         # Tree metrics must use hardware cycle denominators, not $denom
-        for metric in sorted(tree_keys & frozenset(analysis_metrics)):
-            formula = analysis_metrics[metric]
+        for metric in sorted(tree_keys & frozenset(view_metrics)):
+            formula = view_metrics[metric]
             if "$denom" in formula:
                 errors.append(
                     f"[{arch}] tree metric {metric!r} uses $denom "
@@ -102,10 +81,9 @@ def validate() -> list[str]:
         for gid, template in tree_spec.guidance_templates.items():
             for match in _METRIC_THRESHOLD_RE.finditer(template):
                 kind, key = match.group(1), match.group(2)
-                if kind == "metric" and key not in analysis_metrics:
+                if kind == "metric" and key not in view_metrics:
                     errors.append(
-                        f"[{arch}] guidance {gid!r}: "
-                        f"{{metric:{key}}} not in analysis config"
+                        f"[{arch}] guidance {gid!r}: {{metric:{key}}} not in the views"
                     )
                 if kind == "threshold" and key not in tree_spec.thresholds:
                     errors.append(
@@ -113,11 +91,11 @@ def validate() -> list[str]:
                         f"{{threshold:{key}}} not in thresholds"
                     )
 
-        config_only = sorted(frozenset(analysis_metrics) - tree_keys)
-        if config_only:
+        view_only = sorted(frozenset(view_metrics) - tree_keys)
+        if view_only:
             print(
-                f"[{arch}] info: {len(config_only)} analysis config "
-                f"metrics not used by tree spec (OK)",
+                f"[{arch}] info: {len(view_only)} view metrics not used by tree "
+                "spec (OK)",
                 file=sys.stderr,
             )
 
