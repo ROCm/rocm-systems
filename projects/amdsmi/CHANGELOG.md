@@ -60,7 +60,13 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - `uuid`/`gpu_uuid` in `amd-smi list` keep reporting the legacy UUID instead of switching to the CUID as 10.1 announced, because a temporary CUID changes with the host's machine ID.
   - The `BUILD_CUID` CMake option now takes `AUTO` (default), `ON` or `OFF`. It was off by default.
 
+- **Added `amdsmi_get_gpu_driver_info_v2()` to report the amdgpu driver build and package**.  
+  - Returns the fields of `amdsmi_get_gpu_driver_info()` and the kernel and amdgpu parts of the driver version. When the installed `amdgpu-dkms` or `amdgpu-kmod` package matches the loaded driver, it also returns that package, its build, and the full version such as `6.19.14.31400000-2370381`. Includes Python and Rust bindings.
+
 ### Changed
+
+- **`amd-smi` now shows the driver package build in the amdgpu version**.  
+  - `amd-smi`, `amd-smi version`, and `amd-smi static --driver` report the version as `6.19.14.31400000-2370381` and add the driver package when the installed `amdgpu-dkms` or `amdgpu-kmod` package matches the loaded driver. Scripts that parse the amdgpu version now get the `-<build>` suffix, and `amd-smi static --csv` has two new columns after `os_kernel_version`.
 
 - **The `amdsmi` Python module no longer loads an AMD SMI library newer than itself**.  
   - A newer library's structures can be larger than the module allocates, so it is now skipped, and an older library loads with a warning. To load a specific library anyway, set `AMDSMI_LIB_OVERRIDE` to its absolute path.
@@ -231,6 +237,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed `amdsmi_get_gpu_total_ecc_count()` in the Rust API returning wrong totals**.  
   - The counts were added to uninitialized memory, so the totals could be wrong. The Rust activity, power, clock and per-block ECC queries now also zero their output before the call.
+
+### Upcoming Changes
+
+- **`amdsmi_get_gpu_driver_info()` and `amdsmi_driver_info_t` will be removed in a future major release**.  
+  - Use `amdsmi_get_gpu_driver_info_v2()` and `amdsmi_driver_info_v2_t` instead; they report the same driver name, version, and date. The Python function emits a `DeprecationWarning`.
 
 ## amd_smi_lib for ROCm 10.2.0
 

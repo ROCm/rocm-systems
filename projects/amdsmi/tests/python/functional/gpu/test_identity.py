@@ -4,10 +4,33 @@
 
 """GPU device identity: ASIC info, board info, IDs, BDF, UUID, firmware, VBIOS, enumeration."""
 
+import os
+import re
 import unittest
+import warnings
 
 import common.common as common
 from common.common import amdsmi
+
+
+def _dkms_version_of_running_kernel():
+    """The amdgpu-dkms version DKMS recorded for the running kernel, or None.
+
+    Read here and not through the library: the test must not share the lookup it checks.
+    """
+    uname = os.uname()
+    root = "/var/lib/dkms/amdgpu"
+    try:
+        target = os.readlink(os.path.join(root, f"kernel-{uname.release}-{uname.machine}"))
+        # DKMS writes <version>/<release>/<machine>, relative to the root.
+        version = target.split("/")[0]
+        with open(os.path.join(root, version, "source", "dkms.conf"), encoding="utf-8") as conf:
+            lines = conf.read().splitlines()
+    except OSError:
+        return None
+    if version and 'PACKAGE_NAME="amdgpu"' in lines and f'PACKAGE_VERSION="{version}"' in lines:
+        return version
+    return None
 
 
 class TestGpuIdentity(unittest.TestCase):
@@ -92,6 +115,60 @@ class TestGpuIdentity(unittest.TestCase):
     def test_get_gpu_driver_info(self):
         self.common.print_func_name("")
         self.common.Test_API_Per_GPU(amdsmi_get_gpu_driver_info=amdsmi.amdsmi_get_gpu_driver_info)
+        return
+
+    def test_get_gpu_driver_info_v2(self):
+        self.common.print_func_name("")
+        self.common.Test_API_Per_GPU(
+            amdsmi_get_gpu_driver_info_v2=amdsmi.amdsmi_get_gpu_driver_info_v2
+        )
+
+        # A.B.C[.D] for the module, A.B.C[.D]-<build>[.<distro>] for the package.
+        dkms = re.fullmatch(
+            r"((\d+\.\d+\.\d+)(?:\.\d+)*-(\d+))(?:\..*)?", _dkms_version_of_running_kernel() or ""
+        )
+        answered = 0
+        for gpu in self.common.processors:
+            try:
+                info = amdsmi.amdsmi_get_gpu_driver_info_v2(gpu)
+            except amdsmi.AmdSmiLibraryException:
+                continue
+            answered += 1
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", DeprecationWarning)
+                base = amdsmi.amdsmi_get_gpu_driver_info(gpu)
+            self.assertEqual({key: info[key] for key in base}, base)
+            self.assertEqual(
+                set(info) - set(base),
+                {
+                    "driver_kernel_version",
+                    "amdgpu_driver_version",
+                    "driver_build_version",
+                    "driver_full_version",
+                    "driver_package",
+                    "driver_package_version",
+                },
+            )
+
+            version = base["driver_version"]
+            module = re.fullmatch(r"(\d+\.\d+\.\d+)(?:\.(\d+))?", version)
+            self.assertEqual(info["driver_kernel_version"], module.group(1) if module else "N/A")
+            self.assertEqual(
+                info["amdgpu_driver_version"], (module.group(2) or "N/A") if module else "N/A"
+            )
+            if module and dkms and dkms.group(2) == module.group(1):
+                # DKMS recorded a package with the kernel version of the loaded module.
+                self.assertEqual(info["driver_package"], "amdgpu-dkms")
+                self.assertEqual(info["driver_package_version"], dkms.group(1))
+                self.assertEqual(info["driver_build_version"], dkms.group(3))
+                self.assertEqual(info["driver_full_version"], f"{version}-{dkms.group(3)}")
+            else:
+                # A package is reported only together with its build.
+                self.assertEqual(
+                    info["driver_package"] == "N/A", info["driver_build_version"] == "N/A"
+                )
+        if not answered:
+            self.skipTest("no device reported driver info")
         return
 
     def test_get_gpu_enumeration_info(self):
