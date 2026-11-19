@@ -21,6 +21,7 @@ reachability is reported: the BMC firmware version is never read into the output
 
 import argparse
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -117,41 +118,40 @@ def check_gpu(report, gfx, image):
         report.fail(f"- GPU: {msg}", msg)
 
     if not os.path.exists("/dev/kfd"):
-        return fail(
-            "/dev/kfd is missing on the host, so no container can reach the GPU"
-        )
+        return fail("/dev/kfd is missing, so the GPU is not reachable")
     if not os.path.isdir("/dev/dri"):
-        return fail("/dev/dri is missing on the host")
+        return fail("/dev/dri is missing")
+    # In CI the job already runs in the ROCm container, so rocminfo is on PATH.
+    # By hand on a host without it, run it in the same image through docker.
+    if shutil.which("rocminfo"):
+        cmd = ["rocminfo"]
+    else:
+        cmd = [
+            "docker",
+            "run",
+            "--rm",
+            "--device=/dev/kfd",
+            "--device=/dev/dri",
+            "--group-add",
+            "video",
+            image,
+            "rocminfo",
+        ]
     try:
         proc = subprocess.run(
-            [
-                "docker",
-                "run",
-                "--rm",
-                "--device=/dev/kfd",
-                "--device=/dev/dri",
-                "--group-add",
-                "video",
-                image,
-                "rocminfo",
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
         )
     except FileNotFoundError:
-        return fail("docker is not installed on the host")
+        return fail("neither rocminfo nor docker is installed")
     rc = proc.returncode
     if rc == 125:
         return fail(
             "docker could not start the container (daemon down, or the image could not be pulled)"
         )
     if rc in (126, 127):
-        return fail(f"the container started but could not run rocminfo (exit {rc})")
+        return fail(f"rocminfo could not run (exit {rc})")
     if rc != 0:
-        return fail(
-            f"rocminfo failed inside the container (exit {rc}): a broken ROCm stack or driver"
-        )
+        return fail(f"rocminfo failed (exit {rc}): a broken ROCm stack or driver")
     if gfx not in proc.stdout:
         return fail(
             f"rocminfo ran but did not report {gfx}: a different ASIC, or the GPU is not visible"
@@ -171,6 +171,11 @@ def main():
     p.add_argument(
         "--bmc", action="store_true", help="also check that the BMC answers over IPMI"
     )
+    p.add_argument(
+        "--bmc-only",
+        action="store_true",
+        help="check only the BMC (it needs the host, not the ROCm container)",
+    )
     args = p.parse_args()
 
     report = Report()
@@ -178,7 +183,9 @@ def main():
     host_ok = check_host(report)
     # A run reports every layer, but not on the wrong host: its values would
     # be attributed to another machine.
-    if host_ok:
+    if host_ok and args.bmc_only:
+        check_bmc(report)
+    elif host_ok:
         check_bios(report)
         check_driver(report)
         if args.bmc:
