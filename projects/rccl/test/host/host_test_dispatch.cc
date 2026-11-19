@@ -1824,6 +1824,11 @@ std::vector<SuiteFragment> runSelections(const std::vector<Selection> &selection
                                        [finished](const RunningChild &child) {
                                            return child.pid == finished;
                                        });
+        if (slot == running.end() && finished > 0) {
+            fmt::print(stderr, "host-test-dispatch: ignoring exit of unknown child {}\n",
+                       finished);
+            continue;
+        }
         if (slot == running.end()) {
             for (const RunningChild &child : running) {
                 perSelection[child.selection].push_back(

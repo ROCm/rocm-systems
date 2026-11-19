@@ -2119,6 +2119,10 @@ public:
         return [this](ChildExit &exit, std::optional<std::chrono::milliseconds> within) {
             exit = ChildExit{};
             boundedReaps_ += within.has_value() ? 1 : 0;
+            if (strayReaps_ > 0) {
+                --strayReaps_;
+                return kStrayPid;
+            }
             const auto reapable = std::find_if(live_.rbegin(), live_.rend(), [this](pid_t pid) {
                 if (hanging_.count(pid) == 0 || killed_.count(pid) != 0) {
                     return true;
@@ -2179,6 +2183,11 @@ public:
     // The run is asked to stop once *spawns* children have been started, standing in for the
     // SIGTERM an outer watchdog sends partway through.
     void stopAfter(size_t spawns) { stopAfter_ = spawns; }
+
+    // The next *count* reaps return kStrayPid, a child this process has that the scheduler
+    // never started.
+    void reapStrays(size_t count) { strayReaps_ = count; }
+    static constexpr pid_t kStrayPid = 99;
 
     TerminatedFn terminated()
     {
@@ -2248,6 +2257,7 @@ private:
     size_t boundedReaps_ = 0;
     size_t inFlightHighWater_ = 0;
     std::optional<size_t> stopAfter_;
+    size_t strayReaps_ = 0;
     pid_t nextPid_ = 100;
 };
 
@@ -2300,6 +2310,29 @@ TEST(HostDispatchSchedulerMicrotest, EveryPartOfASplitBinaryIsRun)
     }
     EXPECT_EQ(fragments.size(), filters[0].size());
     EXPECT_EQ(failures, 0);
+}
+
+TEST(HostDispatchSchedulerMicrotest, AStrayChildDoesNotAbandonTheRunningOnes)
+{
+    // waitpid(-1) can return a child this process started some other way. Treating that as
+    // fatal used to fail every running binary and stop waiting for it, leaving it orphaned.
+    const ScopedDir dir("rccl-host-dispatch-scheduler");
+    FakeScheduler fake(dir.path());
+    fake.reapStrays(1);
+    const std::vector<Selection> selections = {schedulerSelection("Alpha", 1),
+                                               schedulerSelection("Beta", 1)};
+    const std::vector<std::vector<std::string>> filters = {childFilters(selections[0]),
+                                                           childFilters(selections[1])};
+
+    int failures = 0;
+    const std::vector<SuiteFragment> fragments =
+        runSelections(selections, filters, ScheduleOptions{2, ReportFormat::Xml, {}, ""},
+                      fake.ops(), failures);
+
+    EXPECT_EQ(fake.started().size(), 2u);
+    EXPECT_EQ(fragments.size(), 2u);
+    EXPECT_EQ(failures, 0);
+    EXPECT_TRUE(fake.signals().empty());
 }
 
 TEST(HostDispatchSchedulerMicrotest, PartsOfOneBinaryNeverRunAtTheSameTime)
