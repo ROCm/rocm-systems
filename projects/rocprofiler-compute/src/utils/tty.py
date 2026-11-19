@@ -44,8 +44,6 @@ from utils.utils_common import (
     MEMORY_CHART_PANEL_ID,
     ROOFLINE_PANEL_ID,
     format_table_id,
-    is_gfx115x,
-    panel_id_of,
     selects_roofline,
     strip_ansi,
 )
@@ -806,16 +804,6 @@ def format_table_output(
     return content
 
 
-def _scales_bandwidth(gpu_arch: Optional[str], table_id: int) -> bool:
-    """Return whether a table's GB/s rows are shown in readable units: every table
-    on gfx115x and gfx1201, and the memory chart tables on every arch."""
-    return (
-        is_gfx115x(gpu_arch)
-        or gpu_arch == "gfx1201"
-        or panel_id_of(table_id) == MEMORY_CHART_PANEL_ID
-    )
-
-
 def _max_line_width(rendered: str) -> int:
     """Return the longest line width after stripping ANSI codes."""
     stripped = strip_ansi(rendered)
@@ -1033,9 +1021,7 @@ def show_all(
                     table_config,
                     table_type,
                     comparable_columns,
-                    scale_bandwidth=len(runs) == 1
-                    and not is_mem_chart
-                    and _scales_bandwidth(gpu_arch, table_config["id"]),
+                    scale_bandwidth=len(runs) == 1 and not is_mem_chart,
                 )
 
                 if processed_df.empty:
