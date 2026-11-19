@@ -19,6 +19,7 @@
 #include "MPITestBase.hpp"
 #include "TestChecks.hpp"
 #include "comm.h" // internal: struct ncclComm::ddaFabricBarrierState
+#include "rccl_common.h" // internal: rcclGetCollImplInfo
 
 #include <hip/hip_runtime.h>
 #include <mpi.h>
@@ -178,6 +179,18 @@ protected:
         if(comm == nullptr)
             comm = getActiveCommunicator();
         return mpiCoordinatedSkipReason(comm->ddaFabricBarrierState == nullptr, "DDA fabric path did not initialize");
+    }
+
+    // Algorithm the host selection picks for this call on the active comm; blocks, when given, gets its block count.
+    int selectedAlgo(ncclFunc_t func, size_t count, ncclDataType_t datatype, const void* send, void* recv,
+                     int* blocks = nullptr)
+    {
+        int algo = -1, protocol = -1, maxChannels = -1;
+        EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(getActiveCommunicator(), func, count, datatype, ncclSum, send, recv,
+                                                   /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
+        if(blocks != nullptr)
+            *blocks = maxChannels;
+        return algo;
     }
 
     size_t countLogNeedle(const char* needle) const

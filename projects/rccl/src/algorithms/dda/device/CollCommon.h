@@ -384,6 +384,25 @@ union LLPacket16 {
 };
 static_assert(sizeof(LLPacket16) == 16, "LLPacket16 must be exactly 16 bytes");
 
+// Per-peer slot in 16-byte packets for an LL tier that keeps one staging area per rank in a bank,
+// so bank 1 sits at the offset every DDA LL/LL128 tier uses. Kernel and eligibility both call this.
+constexpr size_t ddaLLPeerSlotPkts(size_t bankSize, int nRanks) {
+  return ddaLLSlotPkts(bankSize, sizeof(LLPacket16) * (size_t)nRanks, 16);
+}
+
+// Blocks per peer of a block-per-peer LL grid (grid.x = peer, grid.y = blocks per peer): one block
+// per kDdaLLPeerPktsPerBlock packets, at most maxPerPeer, and at most the block budget's share per
+// peer. The floor is one block per peer, so the grid fits totalBlockCap only when nRanks <= totalBlockCap.
+constexpr size_t kDdaLLPeerPktsPerBlock = 256;
+constexpr unsigned ddaLLBlocksPerPeer(size_t perPeerBytes, int nRanks, size_t maxPerPeer, size_t totalBlockCap) {
+  const size_t nPk = perPeerBytes >> 3; // 8 payload bytes per packet
+  const size_t wanted = (nPk + kDdaLLPeerPktsPerBlock - 1) / kDdaLLPeerPktsPerBlock;
+  const size_t share = totalBlockCap / (nRanks < 1 ? 1 : (size_t)nRanks);
+  const size_t capped = wanted < maxPerPeer ? wanted : maxPerPeer;
+  const size_t bpp = capped < share ? capped : share;
+  return bpp < 1 ? 1u : (unsigned)bpp;
+}
+
 // Folds one packet's 8B payload (d0, d1) into the accumulator (acc0, acc1).
 template <typename T>
 __device__ __forceinline__ void ddaLLAddPayload(uint32_t& acc0, uint32_t& acc1, uint32_t d0, uint32_t d1) {

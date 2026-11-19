@@ -80,21 +80,13 @@ protected:
         DDA_FABRIC_SKIP_OR_FAIL(fabricInitSkipReason());
     }
 
-    int selectedAlgo(ncclFunc_t func, size_t count, const void* send, void* recv)
-    {
-        int algo = -1, protocol = -1, maxChannels = -1;
-        EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(getActiveCommunicator(), func, count, ncclFloat32, ncclSum, send,
-                                                   recv, /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
-        return algo;
-    }
-
     // Largest float size from maxBytes down to minBytes that selects algo, stepping down by step,
     // or halving when step is 0; 0 if none does. minBytes must be at least step.
     size_t largestSelected(ncclFunc_t func, int algo, size_t maxBytes, size_t minBytes, size_t step,
                            const void* send, void* recv)
     {
         for(size_t bytes = maxBytes; bytes >= minBytes; bytes = step ? bytes - step : bytes / 2)
-            if(selectedAlgo(func, bytes / sizeof(float), send, recv) == algo)
+            if(selectedAlgo(func, bytes / sizeof(float), ncclFloat32, send, recv) == algo)
                 return bytes;
         return 0;
     }

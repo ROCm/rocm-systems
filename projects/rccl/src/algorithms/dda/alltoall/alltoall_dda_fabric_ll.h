@@ -30,12 +30,6 @@
 
 namespace dda::common {
 
-// Per-peer slot in 16-byte packets, carved from the scratch bank as AllGather LL does so bank 1
-// sits at the offset every DDA LL/LL128 tier uses. Kernel and eligibility both call this.
-constexpr size_t ddaLLA2ASlotPkts(size_t bankSize, int nRanks) {
-  return ddaLLSlotPkts(bankSize, sizeof(LLPacket16) * (size_t)nRanks, 16);
-}
-
 // LL all-to-all kernel. 2D grid: grid.x == nRanks selects the peer (column b
 // owns peer b); grid.y == blocksPerPeer splits that peer's packets into gridDim.y
 // contiguous chunks (chunk == blockIdx.y). grid.y == 1 is one block per peer.
@@ -65,7 +59,7 @@ __launch_bounds__(512)
   const int tid = threadIdx.x;
   const int nthreads = blockDim.x;
   const size_t nPk = perChunkBytes >> 3;   // 8 payload bytes per packet
-  const size_t slot = ddaLLA2ASlotPkts(bankSize, nRanks);
+  const size_t slot = ddaLLPeerSlotPkts(bankSize, nRanks);
 
   // On-device, graph-safe flag/bank derivation. bank = flag & 1, and bank 1 starts at bankSize.
   const int flatBlockId = blockIdx.x * gridDim.y + blockIdx.y;

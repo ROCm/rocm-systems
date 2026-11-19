@@ -115,17 +115,6 @@ protected:
         ll128On_ = rcclDdaLL128Threshold(comm, ncclFuncAlltoAll) > 0;
     }
 
-    int selectedAlgo(const void* send, void* recv, size_t count, ncclDataType_t datatype, int* blocks = nullptr)
-    {
-        int algo = -1, protocol = -1, maxChannels = -1;
-        EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(getActiveCommunicator(), ncclFuncAlltoAll, count, datatype,
-                                                   ncclSum, send, recv, /*graphCapturing=*/0, &algo, &protocol,
-                                                   &maxChannels));
-        if(blocks != nullptr)
-            *blocks = maxChannels;
-        return algo;
-    }
-
     void runCase(uint8_t* sendBase, uint8_t* recvBase, size_t perPeerBytes, const OffsetCase& c)
     {
         const size_t totalBytes = perPeerBytes * static_cast<size_t>(nRanks_);
@@ -134,20 +123,21 @@ protected:
         void* const  recv       = c.inPlace ? send : recvBase + c.recvOffset;
         if(c.inPlace)
         {
-            EXPECT_EQ(selectedAlgo(send, recv, count, c.datatype), RCCL_DIRECT_ALLTOALL) << "Rank " << rank_;
+            EXPECT_EQ(selectedAlgo(ncclFuncAlltoAll, count, c.datatype, send, recv), RCCL_DIRECT_ALLTOALL)
+                << "Rank " << rank_;
             return;
         }
 
         int       blocks      = -1;
-        const int alignedAlgo = selectedAlgo(sendBase, recvBase, count, c.datatype, &blocks);
+        const int alignedAlgo = selectedAlgo(ncclFuncAlltoAll, count, c.datatype, sendBase, recvBase, &blocks);
         if(!isDdaFabric(alignedAlgo))
             return;
         ++ddaCases_;
         ll128Cases_ += alignedAlgo == RCCL_DDA_FABRIC_LL128;
-        EXPECT_EQ(selectedAlgo(send, recv, count, c.datatype), alignedAlgo) << "Rank " << rank_;
+        EXPECT_EQ(selectedAlgo(ncclFuncAlltoAll, count, c.datatype, send, recv), alignedAlgo) << "Rank " << rank_;
         // The buffer-less query (rcclSymKGetInfo) passes null for both buffers; it must report the
         // out-of-place tier, not the in-place fallback.
-        EXPECT_EQ(selectedAlgo(nullptr, nullptr, count, c.datatype), alignedAlgo)
+        EXPECT_EQ(selectedAlgo(ncclFuncAlltoAll, count, c.datatype, nullptr, nullptr), alignedAlgo)
             << "Rank " << rank_ << ": buffer-less query";
         if(alignedAlgo == RCCL_DDA_FABRIC_LL128)
             EXPECT_LE(blocks, getActiveCommunicator()->ddaFabricMaxBlocks)

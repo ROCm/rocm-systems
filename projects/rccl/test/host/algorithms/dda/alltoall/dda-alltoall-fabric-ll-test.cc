@@ -205,6 +205,7 @@ TEST_F(DdaAlltoallFabricLLMicrotest, Launch_BlocksPerPeerFollowPacketCountCapped
 }
 
 // The whole grid must be co-resident, so blocks per peer are also capped at the comm block budget / nRanks.
+// A peer keeps one block even when nRanks exceeds the budget ({3, 1}: 4 blocks on a budget of 3).
 TEST_F(DdaAlltoallFabricLLMicrotest, Launch_BlocksPerPeerCappedByTheCuBudget) {
   comm().nRanks = 4;
   const std::pair<int, unsigned> cases[] = {{256, 8}, {20, 5}, {4, 1}, {3, 1}};
