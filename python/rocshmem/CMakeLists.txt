@@ -308,6 +308,11 @@ if(ROCSHMEM4PY_INSTALL_RPATH)
   if(NOT ROCSHMEM4PY_PATCHELF)
     message(FATAL_ERROR "rocshmem4py: ROCSHMEM4PY_INSTALL_RPATH needs patchelf")
   endif()
+  # Link with the requested RPATH so `cmake --install` keeps it as is.
+  string(REPLACE ":" ";" _ROCSHMEM4PY_RPATH "${ROCSHMEM4PY_INSTALL_RPATH}")
+  set_target_properties(_rocshmem4py PROPERTIES
+    BUILD_WITH_INSTALL_RPATH ON
+    INSTALL_RPATH "${_ROCSHMEM4PY_RPATH}")
   add_custom_command(TARGET _rocshmem4py POST_BUILD
     COMMAND "${ROCSHMEM4PY_PATCHELF}" --set-rpath "${ROCSHMEM4PY_INSTALL_RPATH}"
             --force-rpath "$<TARGET_FILE:_rocshmem4py>"

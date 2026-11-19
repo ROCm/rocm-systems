@@ -18,6 +18,11 @@ from pathlib import Path
 
 import pytest
 
+try:
+    from packaging.requirements import Requirement
+except ImportError:  # setuptools < 71
+    from setuptools.extern.packaging.requirements import Requirement
+
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 INPUTS = (
     "ROCSHMEM4PY_VERSION_SUFFIX",
@@ -56,6 +61,11 @@ def _headers(metadata, name):
         for line in header.splitlines()
         if line.startswith(name + ":")
     ]
+
+
+def _requires(metadata):
+    # Older wheel versions write "name (>=1)"; compare the normalized form.
+    return [str(Requirement(r)) for r in _headers(metadata, "Requires-Dist")]
 
 
 def _metadata(tmp_path, **inputs):
@@ -101,7 +111,7 @@ def test_extra_install_requirements(tmp_path):
         tmp_path, ROCSHMEM4PY_EXTRA_INSTALL_REQUIREMENTS=f"{REQUIREMENT}|packaging>=20"
     )
     assert proc.returncode == 0, proc.stderr
-    requires = _headers(metadata, "Requires-Dist")
+    requires = _requires(metadata)
     assert REQUIREMENT in requires and "packaging>=20" in requires
     assert any("extra ==" in req for req in requires)
 
@@ -211,12 +221,12 @@ def test_wheel_inputs_then_rebuild_without_them(tmp_path):
         ROCSHMEM4PY_INSTALL_RPATH=RPATH,
     )
     assert name.startswith(f"rocshmem4py-{BASE_VERSION}+rocm7.10.0-")
-    assert REQUIREMENT in _headers(metadata, "Requires-Dist")
+    assert REQUIREMENT in _requires(metadata)
     # Exactly the requested entries: no build-host ROCm path in a packaged wheel.
     assert paths == {"RPATH": RPATH}
 
     # Same build tree, as repeated `pip wheel .` runs reuse: no input may stick.
     name, metadata, paths = _build_wheel(src, tmp_path / "without")
     assert name.startswith(f"rocshmem4py-{BASE_VERSION}+rocshmem")
-    assert all("extra ==" in req for req in _headers(metadata, "Requires-Dist"))
+    assert all("extra ==" in req for req in _requires(metadata))
     assert list(paths) == ["RUNPATH"] and "$ORIGIN" not in paths["RUNPATH"]
