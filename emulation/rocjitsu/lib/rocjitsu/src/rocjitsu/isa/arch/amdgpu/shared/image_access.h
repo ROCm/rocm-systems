@@ -170,7 +170,9 @@ prepare_image_resource(Wavefront &wf, VectorMemState &state, uint32_t resource_r
                                  : arch == ROCJITSU_CODE_ARCH_RDNA2 ? BufferFormatEncoding::Rdna2
                                                                     : BufferFormatEncoding::Gfx11;
   const bool gfx10 = arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
-  if (!gfx10 && (fields.r128 || fields.tfe || fields.lwe))
+  const bool atomic_tfe =
+      arch == ROCJITSU_CODE_ARCH_RDNA4 && fields.tfe && state.atomic_op != AtomicOp::NONE;
+  if (!gfx10 && (fields.r128 || (fields.tfe && !atomic_tfe) || fields.lwe))
     return fail(InstructionExecutionError::UnimplementedInstruction);
   if (state.buffer_components == 0 ||
       ((!state.is_load || state.atomic_op != AtomicOp::NONE) && !fields.unorm) ||
@@ -206,10 +208,12 @@ prepare_image_resource(Wavefront &wf, VectorMemState &state, uint32_t resource_r
   for (uint32_t i = 0; i < descriptor_words; ++i)
     words[i] = read_scalar_selector(wf, resource_reg + i);
   const ImageResource resource = decode_image_resource(words, arch, fields.r128);
-  if (!gfx9 && !gfx10 && state.is_load && state.exec_mask && !state.image_status &&
-      (resource.min_lod_warn || image_may_have_sparse_pages(wf))) {
+  if (!gfx9 && !gfx10 && (state.is_load || state.atomic_op != AtomicOp::NONE) && state.exec_mask &&
+      !state.image_status &&
+      (resource.min_lod_warn || image_may_have_sparse_pages(wf) || atomic_tfe)) {
     state.image_status = std::make_unique<ImageFeedback>();
     state.image_status->warning_threshold = resource.min_lod_warn;
+    state.image_status->tfe = atomic_tfe && state.is_load;
   }
   const bool msaa = resource.type == kImage2dMsaa || resource.type == kImage2dMsaaArray;
 
@@ -457,6 +461,8 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
     const uint32_t level = level64;
     if (state.texel_status)
       state.texel_status->lod[lane] = level;
+    if (state.image_status)
+      state.image_status->levels[lane] = level;
     if (x >= std::max(1u, resource.width >> level) || y >= std::max(1u, resource.height >> level) ||
         slice >= (resource.type == kImage3d ? std::max(1u, depth >> level) : depth))
       continue;
@@ -508,6 +514,140 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
   }
   if (gfx10 && fields.raw)
     state.elem_size = std::min(4u, state.elem_size);
+  return util::Result::success();
+}
+
+enum class ImageAtomicRegisters {
+  Allocated,    ///< The entire source tuple must fit the wave allocation.
+  SubstituteV0, ///< Each source DWORD outside the allocation reads v0.
+  Backed        ///< Read the physical backing without an allocation check.
+};
+
+/// The atomic opcode and DMASK encode the texel width independently of the descriptor.
+constexpr unsigned image_atomic_texel_bytes(AtomicOp op, uint32_t dmask, bool require_32) {
+  const bool compare = atomic_uses_two_sources(op);
+  if (dmask == (compare ? 0x3u : 0x1u))
+    return 4;
+  return !require_32 && dmask == (compare ? 0xfu : 0x3u) ? 8 : 0;
+}
+
+/// Capture lane-major raw operands for an image atomic. DMASK covers both
+/// halves of a compare-swap tuple. Only an unbound descriptor omits its format.
+inline util::Result capture_image_atomic_words(Wavefront &wave, VectorMemState &state,
+                                               uint32_t data_base, uint32_t dmask, bool require_32,
+                                               ImageAtomicRegisters policy) {
+  const auto fail = [&] {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    return util::Result::failure();
+  };
+  const unsigned words = std::popcount(dmask);
+  const unsigned bytes = image_atomic_texel_bytes(state.atomic_op, dmask, require_32);
+  if (!bytes || (state.buffer_format && state.elem_size != bytes))
+    return fail();
+  state.elem_size = bytes;
+  state.buffer_components = 0;
+  if (!state.lane_mask)
+    return util::Result::success();
+  state.store_data.resize(wave.wf_size() * words * sizeof(uint32_t));
+  RegisterAccess registers(wave);
+  if (policy != ImageAtomicRegisters::SubstituteV0) {
+    if (policy == ImageAtomicRegisters::Allocated && !wave.vgpr_alloc().contains(data_base, words))
+      return fail();
+    const auto source = registers.read_vgpr_region(data_base, words, state.lane_mask);
+    if (!source.valid())
+      return fail();
+    return source.copy_dwords_lane_major(state.store_data, state.lane_mask);
+  }
+  const unsigned first = data_base - wave.vgpr_alloc().base;
+  for (uint64_t lanes = state.lane_mask; lanes; lanes &= lanes - 1) {
+    const unsigned lane = std::countr_zero(lanes);
+    for (unsigned word = 0; word < words; ++word) {
+      const auto reg = gfx115_source_vgpr(first + word, wave.num_vgprs());
+      const auto value = registers.read_vgpr(wave.vgpr_alloc().base + reg, lane);
+      std::memcpy(state.store_data.data() + (lane * words + word) * sizeof(value), &value,
+                  sizeof(value));
+    }
+  }
+  return util::Result::success();
+}
+
+/// GFX10 raw atomics require unnormalized coordinates and preserve FP32 denorm mode.
+inline util::Result capture_image_atomic(Wavefront &wave, VectorMemState &state, uint32_t vdata,
+                                         uint32_t dmask, bool unorm, bool d16) {
+  if (!unorm || d16) {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    return util::Result::failure();
+  }
+  const bool floating = atomic_is_floating_point(state.atomic_op);
+  if (floating)
+    state.atomic_denorm_mode = wave.fp_denorm_mode_f32();
+  return capture_image_atomic_words(wave, state, wave.vgpr_alloc().base + vdata, dmask, floating,
+                                    ImageAtomicRegisters::Allocated);
+}
+
+/// Snapshot raw shader DWORDs without applying the normal typed-store saturation or swizzle.
+inline void capture_packed_image_store(Wavefront &wf, VectorMemState &d, uint32_t base) {
+  const unsigned texel_words = (d.elem_size + 3) / 4;
+  d.buffer_components = std::popcount(d.image_store_component_mask & ((1u << texel_words) - 1));
+  d.buffer_selectors = 0xfac; // Identity XYZW selectors for raw DWORDs.
+  capture_buffer_format_store(wf, d, base, /*raw=*/true);
+}
+
+/// Image atomics share typed image coordinates but exchange raw words with VDATA.
+/// RDNA4 ISA §10.4.2 requires a nonzero DMASK to supply the atomic payload.
+inline util::Result prepare_gfx12_image_atomic(Wavefront &wf, VectorMemState &d, uint32_t resource,
+                                               const ImageAddressRegisters &coords,
+                                               ImageFields fields) {
+  if (fields.d16 || fields.r128) {
+    wf.report_instruction_execution_error(InstructionExecutionError::UnimplementedInstruction);
+    return util::Result::failure();
+  }
+  const bool compare = atomic_uses_two_sources(d.atomic_op);
+  const unsigned result_words = std::popcount(fields.dmask) / (compare ? 2u : 1u);
+  const bool result_in_range =
+      !d.is_load || wf.vgpr_alloc().contains(d.dst_reg_base, result_words + fields.tfe);
+  if (prepare_image_access(wf, d, resource, coords, fields, result_in_range).failed())
+    return util::Result::failure();
+  const bool fp = atomic_is_floating_point(d.atomic_op);
+  d.num_elems = 1;
+  return capture_image_atomic_words(wf, d, d.dst_reg_base, fields.dmask, fp,
+                                    ImageAtomicRegisters::SubstituteV0);
+}
+
+/// Prepare CDNA2's raw integer atomics and single-texel packed transfers
+/// after address calculation has used the complete texel stride.
+inline util::Result prepare_raw_image_payload(Wavefront &wave, VectorMemState &state,
+                                              uint32_t data_base, uint32_t dmask,
+                                              bool sign_extend) {
+  if (state.atomic_op != AtomicOp::NONE)
+    return capture_image_atomic_words(wave, state, data_base, dmask, false,
+                                      ImageAtomicRegisters::Backed);
+
+  const unsigned texel_bytes = state.elem_size;
+  const unsigned raw_words = (texel_bytes + 3) / 4;
+  const unsigned word_bytes = std::min(texel_bytes, 4u);
+  state.decoded_buffer_format = {};
+  state.decoded_buffer_format.number =
+      sign_extend ? BufferNumberFormat::Sint : BufferNumberFormat::Uint;
+  std::fill_n(state.decoded_buffer_format.widths.begin(), raw_words, 8 * word_bytes);
+  if (state.is_load) {
+    state.buffer_selectors = 0;
+    unsigned packed = 0;
+    for (unsigned word = 0; word < 4; ++word) {
+      if (dmask & (1u << word)) {
+        if (word < raw_words)
+          state.buffer_selectors |= (4u + word) << (3 * packed);
+        ++packed;
+      }
+    }
+    return util::Result::success();
+  }
+
+  // MI200 image writes replace the complete texel. Consecutive source
+  // registers supply the selected words; other texel components receive zero.
+  state.buffer_selectors = 4u | (5u << 3) | (6u << 6) | (7u << 9);
+  state.image_store_component_mask = dmask;
+  capture_buffer_format_store(wave, state, data_base);
   return util::Result::success();
 }
 

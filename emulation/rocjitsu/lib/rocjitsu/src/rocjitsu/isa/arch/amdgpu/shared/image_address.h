@@ -12,6 +12,8 @@
 #include <array>
 #include <bit>
 #include <cstdint>
+#include <numeric>
+#include <optional>
 
 namespace rocjitsu::amdgpu {
 
@@ -201,6 +203,81 @@ inline ImageAddressRegisters mimg_image_address_registers(uint32_t extension_wor
 inline ImageAddressRegisters mimg_nsa_image_address_registers(bool nsa, uint32_t first,
                                                               const uint32_t *raw_encoding) {
   return mimg_image_address_registers(nsa, true, first, raw_encoding);
+}
+
+enum class Gfx11BvhNodeType : uint8_t {
+  Triangle0,
+  Triangle1,
+  Triangle2,
+  Triangle3,
+  Box16,
+  Box32,
+  Instance,
+  Procedural
+};
+
+constexpr Gfx11BvhNodeType gfx11_bvh_node_type(uint64_t pointer) {
+  return static_cast<Gfx11BvhNodeType>(pointer & 7);
+}
+
+constexpr uint64_t gfx11_bvh_node_index(uint64_t pointer) {
+  return (pointer >> 3) & ((uint64_t{1} << 42) - 1);
+}
+
+/// BVH instructions interpret TYPE 8 as a four-DWORD node array resource.
+/// Words 2 and 3 encode the inclusive last 64-byte node index in bits 41:0.
+inline constexpr uint32_t kGfx11BvhResourceType = 8;
+
+/// Return the inclusive last node index for a GFX11 BVH resource.
+constexpr std::optional<uint64_t> gfx11_bvh_last_node(uint32_t word2, uint32_t word3) {
+  if ((word3 >> 28) != kGfx11BvhResourceType)
+    return std::nullopt;
+  return word2 | (uint64_t{word3 & 0x3ff} << 32);
+}
+
+/// Return whether the descriptor enables the ten flag bits in a 64-bit node pointer.
+constexpr bool gfx11_bvh_pointer_flags_enabled(uint32_t word3) { return word3 & (1u << 23); }
+
+/// @brief Test whether the tagged pointer can fetch the complete node.
+/// @details When the descriptor disables pointer_flags, nonzero bits 63:54 reject the pointer.
+/// Instance and procedural nodes do not fetch. A Box32 needs two slots.
+constexpr bool bvh_node_can_load(uint64_t pointer, uint64_t last_node, bool pointer_flags) {
+  if (!pointer_flags && pointer >> 54)
+    return false;
+  const auto type = gfx11_bvh_node_type(pointer);
+  const uint64_t index = gfx11_bvh_node_index(pointer);
+  return type <= Gfx11BvhNodeType::Box32 &&
+         (index < last_node || (index == last_node && type != Gfx11BvhNodeType::Box32));
+}
+
+// GFX11 NSA names the start of each contiguous group. GFX10.3 shares only the total width.
+constexpr std::array<unsigned, 5> gfx11_bvh_group_widths(bool wide, bool a16) {
+  return {1u + wide, 1, 3, 3, a16 ? 0u : 3u};
+}
+
+// GFX10.3 and GFX11 consume 11/12 words for a 32/64-bit pointer, or 8/9 with A16.
+constexpr uint32_t bvh_address_words(bool wide, bool a16) {
+  const auto widths = gfx11_bvh_group_widths(wide, a16);
+  return std::accumulate(widths.begin(), widths.end(), 0u);
+}
+
+/// @brief Decode the grouped GFX11 BVH NSA selectors.
+/// @details Groups name the node pointer, extent, XYZ origin, direction and inverse
+/// direction. A16 packs both directions into three registers. When present, NSA
+/// points to the third encoding word.
+inline ImageAddressRegisters gfx11_bvh_registers(bool wide, bool a16, uint32_t first,
+                                                 const uint32_t *nsa) {
+  if (!nsa)
+    return contiguous_image_address_registers(first);
+  ImageAddressRegisters registers{};
+  const auto widths = gfx11_bvh_group_widths(wide, a16);
+  unsigned word = 0;
+  for (unsigned group = 0; group < widths.size(); ++group) {
+    const unsigned start = group ? (*nsa >> ((group - 1) * 8)) & 255 : first;
+    for (unsigned i = 0; i < widths[group]; ++i)
+      registers[word++] = start + i;
+  }
+  return registers;
 }
 
 /// @brief Decode GFX12 explicit selectors and its trailing consecutive group.

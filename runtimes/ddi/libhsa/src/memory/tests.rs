@@ -27,7 +27,7 @@ fn execute_access_permission_matches_the_native_bitmask() {
 /// Verifies that completed memory workers are reaped without joining active
 /// work.
 fn completed_memory_workers_are_reaped_without_joining_active_work() {
-    let mut state = MemoryState::new(Arc::new(crate::runtime::GenerationHealth::new()));
+    let mut state = MemoryState::new(Arc::new(crate::session::SessionHealth::new()));
     let stop = Arc::new(AtomicBool::new(false));
     let worker_stop = stop.clone();
     let active = thread::spawn(move || {
@@ -829,7 +829,7 @@ fn cpu_pool_allocations_preserve_their_cache_policy() {
 /// Verifies the GPU pool handle classes used by enumeration.
 fn gpu_pool_handle_classes_are_stable() {
     let index = 2;
-    let handle = |kind| HsaState::gpu_pool(index, kind).handle;
+    let handle = |kind| crate::agent::Agents::gpu_pool(index, kind).handle;
     let pools = gpu_agent_pools(index, false, false)
         .into_iter()
         .map(|pool| pool.handle)

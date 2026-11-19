@@ -4,6 +4,7 @@
 #include "target_fixture.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/consan/encoding.h"
 #include "rocjitsu/code/consan/image/artifact.h"
@@ -289,6 +290,56 @@ TEST(ConSanBarrierStatic, DiagnoseInterveningBarrierWithoutMemoryOperations) {
       << error.message;
 }
 
+TEST(ConSanBarrierStatic, PreserveRealLoopBackedgesAndRejectMultipleBlockCycles) {
+  for (const char *name : {"native-25", "native-26", "native-27", "native-30", "native-31"}) {
+    SCOPED_TRACE(name);
+    std::vector<uint8_t> original =
+        test::read_fixture(test::target_fixture_path({"gfx1250", 32}, name));
+    InputError error;
+    const FailureOr<InputProgram> input =
+        build_input_program(original, *target_profile("gfx1250"), "lds_producer_consumer", error);
+    ASSERT_TRUE(input.succeeded()) << error.message;
+    ASSERT_TRUE(input.value().repeated);
+    const AmdGpuCodeObject object(original.data(), original.size());
+    const std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    ASSERT_TRUE(decoder);
+    const std::array entries{input.value().kernel.entry_text_offset};
+    const FailureOr<std::vector<std::unique_ptr<BasicBlock>>> blocks =
+        BasicBlock::build_reachable(object, *decoder, ROCJITSU_CODE_ARCH_CDNA5, entries);
+    ASSERT_TRUE(blocks.succeeded());
+    const Instruction *backedge = nullptr;
+    for (const std::unique_ptr<BasicBlock> &block : blocks.value())
+      for (const Instruction &instruction : block->instructions()) {
+        const std::optional<int64_t> branch = instruction.branch_offset_bytes();
+        if (branch && *branch <= -static_cast<int64_t>(instruction.size())) {
+          ASSERT_EQ(backedge, nullptr);
+          backedge = &instruction;
+        }
+      }
+    ASSERT_NE(backedge, nullptr);
+    const FailureOr<PreparedArtifact> artifact =
+        prepare(original, *target_profile("gfx1250"), "lds_producer_consumer", error);
+    ASSERT_TRUE(artifact.succeeded()) << error.message;
+    EXPECT_EQ(artifact.value().manifest.scope, ScopeKind::NativeLdsWorkgroupBarrierLoop);
+    EXPECT_TRUE(validate_prepared(original, artifact.value(), error).succeeded()) << error.message;
+    const AmdGpuCodeObject prepared(artifact.value().image.data(), artifact.value().image.size());
+    const Section &prepared_text = *prepared.text_sections().front();
+    EXPECT_EQ(
+        wire::read_u32(artifact.value().image, prepared_text.sectionOffset() + backedge->src_loc()),
+        backedge->raw_encoding()[0]);
+    // Redirect the real conditional backedge to the preheader. The resulting
+    // multi-block cycle is outside the currently admitted single-block shape.
+    const int64_t delta = (static_cast<int64_t>(input.value().kernel.entry_text_offset) -
+                           static_cast<int64_t>(backedge->src_loc()) - 4) /
+                          4;
+    wire::write_u32(original, input.value().text_file_offset + backedge->src_loc(),
+                    (backedge->raw_encoding()[0] & 0xffff0000u) | static_cast<uint16_t>(delta));
+    EXPECT_TRUE(
+        prepare(original, *target_profile("gfx1250"), "lds_producer_consumer", error).failed());
+    EXPECT_EQ(error.code, InputErrorCode::UnsupportedFlow) << error.message;
+  }
+}
+
 TEST_P(ConSanTargetStatic, EquivalentMetadataEnvironmentsPreserveTargetAndAbiValidation) {
   const test::TargetMode mode = GetParam();
   const TargetProfile &target = *target_profile(mode.target);
@@ -528,6 +579,70 @@ TEST_P(ConSanTargetStatic, HipWorkloadsMustContainQualifiedNativeLdsSites) {
         prepare(original, *target_profile(mode.target), "lds_producer_consumer", error);
     ASSERT_TRUE(prepared.succeeded()) << error.message;
     EXPECT_TRUE(validate_prepared(original, prepared.value(), error).succeeded()) << error.message;
+  }
+}
+
+TEST(ConSanBoundedStatic, BindOriginalWorkgroupInputAndRejectForgedIdentityFacts) {
+  for (const test::TargetMode mode : test::kTargetModes)
+    for (const char *fixture : {"native-2", "native-no-workgroup-id"}) {
+      SCOPED_TRACE(mode.target);
+      SCOPED_TRACE(mode.wave_size);
+      SCOPED_TRACE(fixture);
+      const TargetProfile &target = *target_profile(mode.target);
+      const std::vector<uint8_t> original =
+          test::read_fixture(test::target_fixture_path(mode, fixture));
+      ASSERT_FALSE(original.empty());
+      InputError error;
+      const FailureOr<PreparedArtifact> artifact =
+          prepare(original, target, "lds_producer_consumer", error);
+      ASSERT_TRUE(artifact.succeeded()) << error.message;
+      const bool identity = std::string_view(fixture) == "native-2";
+      const bool ttmp =
+          target.arch == ROCJITSU_CODE_ARCH_RDNA4 || target.arch == ROCJITSU_CODE_ARCH_CDNA5;
+      const uint32_t selector = ttmp ? 117u : 15u;
+      EXPECT_EQ(artifact.value().manifest.entry.workgroup_id_scalar,
+                identity ? selector : UINT32_MAX);
+      ContractError contract_error;
+      const uint32_t threads = 2 * mode.wave_size + 1;
+      EXPECT_EQ(plan_launch(artifact.value().manifest, {{4 * threads, 1, 1}, {threads, 1, 1}}, 8, 0)
+                    .succeeded(),
+                identity);
+      EXPECT_TRUE(plan_launch(artifact.value().manifest, {{threads, 1, 1}, {threads, 1, 1}}, 8, 0)
+                      .succeeded());
+      Manifest forged = artifact.value().manifest;
+      forged.entry.workgroup_id_scalar = identity ? UINT32_MAX : selector;
+      ASSERT_TRUE(match_images(forged, original, artifact.value().image).succeeded());
+      EXPECT_TRUE(verify_artifact_images(forged, original, artifact.value().image, &contract_error)
+                      .failed());
+      EXPECT_EQ(contract_error.code, ContractErrorCode::IdentityMismatch);
+    }
+}
+
+TEST_P(ConSanTargetStatic, BoundedWorkgroupFixturesRetainQualifiedLdsSites) {
+  const test::TargetMode mode = GetParam();
+  const TargetProfile &target = *target_profile(mode.target);
+  for (const char *fixture : {"group-1", "group-3", "group-4", "group-6"}) {
+    SCOPED_TRACE(fixture);
+    const std::vector<uint8_t> original =
+        test::read_fixture(test::target_fixture_path(mode, fixture));
+    ASSERT_FALSE(original.empty());
+    InputError error;
+    const FailureOr<PreparedArtifact> artifact =
+        prepare(original, target, "lds_producer_consumer", error);
+    ASSERT_TRUE(artifact.succeeded()) << error.message;
+    ASSERT_EQ(artifact.value().manifest.sites.size(), 2u);
+    EXPECT_TRUE(artifact.value().manifest.barriers.empty());
+    EXPECT_EQ(artifact.value().manifest.sites[0].access,
+              std::string_view(fixture) == "group-4" ? AccessKind::Read : AccessKind::Write);
+    EXPECT_EQ(artifact.value().manifest.sites[1].access, AccessKind::Read);
+    const uint32_t threads = 2 * mode.wave_size + 1;
+    const FailureOr<LaunchLayout> layout =
+        plan_launch(artifact.value().manifest, {{16 * threads, 1, 1}, {threads, 1, 1}}, 128, 0);
+    ASSERT_TRUE(layout.succeeded());
+    EXPECT_EQ(layout.value().waves_per_workgroup, 3u);
+    EXPECT_EQ(layout.value().wave_count, 48u);
+    EXPECT_TRUE(verify_artifact_images(artifact.value().manifest, original, artifact.value().image)
+                    .succeeded());
   }
 }
 
