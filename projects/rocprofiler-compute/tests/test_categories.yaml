@@ -20,6 +20,7 @@ test_categories:
       - test_memory_chart_preview
       - test_schema_visualizer
       - test_validate_metric_library
+      - test_validate_views
       - test_analysis_views
       - test_parser
       - test_argparser
@@ -104,6 +105,7 @@ test_categories:
       - test_metric_library_sync
       - test_schema_visualizer
       - test_validate_metric_library
+      - test_validate_views
     rocprofiler_compute_ci_exclude:
       - test_profile_live_attach_detach
       - test_counter_grouping_inspector
@@ -115,6 +117,7 @@ test_categories:
       - test_metric_library_sync
       - test_schema_visualizer
       - test_validate_metric_library
+      - test_validate_views
     labels:
       - "quick"
       - "pre-commit"
@@ -147,6 +150,7 @@ test_categories:
       - test_memory_chart_preview
       - test_schema_visualizer
       - test_validate_metric_library
+      - test_validate_views
       - test_analysis_views
       - test_parser
       - test_argparser
@@ -247,6 +251,7 @@ test_categories:
       - test_metric_library_sync
       - test_schema_visualizer
       - test_validate_metric_library
+      - test_validate_views
     rocprofiler_compute_ci_exclude:
       - test_profile_live_attach_detach
       - test_counter_grouping_inspector
@@ -258,6 +263,7 @@ test_categories:
       - test_metric_library_sync
       - test_schema_visualizer
       - test_validate_metric_library
+      - test_validate_views
     labels:
       - "standard"
       - "pr"
@@ -298,6 +304,7 @@ test_categories:
       - test_memory_chart_preview
       - test_schema_visualizer
       - test_validate_metric_library
+      - test_validate_views
       - test_analysis_views
       - test_parser
       - test_argparser
@@ -398,6 +405,7 @@ test_categories:
       - test_metric_library_sync
       - test_schema_visualizer
       - test_validate_metric_library
+      - test_validate_views
     rocprofiler_compute_ci_exclude:
       - test_profile_live_attach_detach
       - test_counter_grouping_inspector
@@ -409,6 +417,7 @@ test_categories:
       - test_metric_library_sync
       - test_schema_visualizer
       - test_validate_metric_library
+      - test_validate_views
     labels:
       - "comprehensive"
       - "nightly"
@@ -449,6 +458,7 @@ test_categories:
       - test_memory_chart_preview
       - test_schema_visualizer
       - test_validate_metric_library
+      - test_validate_views
       - test_analysis_views
       - test_parser
       - test_argparser
@@ -549,6 +559,7 @@ test_categories:
       - test_metric_library_sync
       - test_schema_visualizer
       - test_validate_metric_library
+      - test_validate_views
     rocprofiler_compute_ci_exclude:
       - test_profile_live_attach_detach
       - test_counter_grouping_inspector
@@ -560,6 +571,7 @@ test_categories:
       - test_metric_library_sync
       - test_schema_visualizer
       - test_validate_metric_library
+      - test_validate_views
     labels:
       - "full"
       - "weekly"
