@@ -31,7 +31,7 @@
 #include <csetjmp>
 #include <cstdio>
 #include <cstdlib>
-#include <string>
+#include <cstring>
 
 #define HIP_CHECK(call)                                                                            \
     do                                                                                             \
@@ -76,9 +76,9 @@ main()
     }
 
     const auto* mode_env     = getenv("RR_APP_MODE");
-    const auto  mode         = std::string{mode_env != nullptr ? mode_env : "plain"};
-    const bool  second_queue = (mode == "multi-queue");
-    const bool  host_replay  = (mode == "host");
+    const auto* mode         = mode_env != nullptr ? mode_env : "plain";
+    const bool  second_queue = std::strcmp(mode, "multi-queue") == 0;
+    const bool  host_replay  = std::strcmp(mode, "host") == 0;
 
     using jmpbuf_fn_t = void* (*) ();
     auto* jmp_fn      = host_replay ? reinterpret_cast<jmpbuf_fn_t>(
@@ -166,7 +166,7 @@ main()
     HIP_CHECK(hipFree(acc));
     HIP_CHECK(hipFree(scratch));
 
-    printf("[app] mode=%s acc=%d\n", mode.c_str(), acc_h);
+    printf("[app] mode=%s acc=%d\n", mode, acc_h);
 
     // The application must see exactly the value its own execution of the range produced, whether
     // the range was replayed or declined: the replay window has to be transparent to the

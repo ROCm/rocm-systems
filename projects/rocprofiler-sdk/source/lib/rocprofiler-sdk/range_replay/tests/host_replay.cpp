@@ -452,7 +452,8 @@ TEST(range_replay_host, a_jump_re_executes_the_range_over_restored_host_state)
     jump_sums   = {};
     jump_passes = 0;
 
-    auto regions = std::vector<range_replay::host_region_t>{};
+    static auto regions = std::vector<range_replay::host_region_t>{};
+    regions.clear();
     regions.emplace_back(range_replay::host::capture_region(jump_state.data(), sizeof(jump_state)));
 
     if(sigsetjmp(*static_cast<sigjmp_buf*>(range_replay::host_jmp_target()), 1) != 0)
@@ -474,6 +475,7 @@ TEST(range_replay_host, a_jump_re_executes_the_range_over_restored_host_state)
 
     EXPECT_EQ(jump_passes, 3);
     EXPECT_EQ(jump_sums, (std::array<int, 3>{20, 20, 20}));
+    regions.clear();
 }
 
 TEST(range_replay_host, pending_region_capture_failures_decline_without_throwing)

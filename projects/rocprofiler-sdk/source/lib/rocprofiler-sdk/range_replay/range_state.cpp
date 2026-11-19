@@ -428,9 +428,22 @@ note_submission(const hsa::Queue&              queue,
         const auto* rocp_agent = queue.get_agent().get_rocp_agent();
         if(ctx->agent_id.handle == 0 && rocp_agent != nullptr) ctx->agent_id = rocp_agent->id;
 
+        // Count launch-descriptor dispatches here. Packet recording below stays on
+        // is_dispatch_packet, which does not treat those packets as dispatches.
         auto dispatches = size_t{0};
         for(size_t i = 0; i < packet_count; ++i)
-            if(is_dispatch_packet(packets[i])) ++dispatches;
+        {
+            const auto& packet   = packets[i];
+            auto        dispatch = is_dispatch_packet(packet);
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x18
+            const auto type = (packet.kernel_dispatch.header >> HSA_PACKET_HEADER_TYPE) &
+                              ((1U << HSA_PACKET_HEADER_WIDTH_TYPE) - 1U);
+            dispatch = dispatch || (type == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
+                                    packet.ext_kernel_dispatch.amd_format ==
+                                        HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD);
+#endif
+            if(dispatch) ++dispatches;
+        }
         ctx->record.count_dispatches(dispatches);
         return;
     }

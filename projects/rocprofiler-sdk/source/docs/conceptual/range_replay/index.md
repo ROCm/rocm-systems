@@ -137,7 +137,8 @@ lifts the rows marked *(packet only)*; see [Host range replay](range_replay_host
 | Host state *(packet only)* | never rewound; a range whose kernels consume values the host recomputed inside it is not a replay candidate |
 | HIP graph launches inside a range *(packet only)* | declined (`GRAPH_LAUNCH`) |
 | Async copies into device memory inside a range *(packet only)* | declined (`MEMORY_COPY_IN_RANGE`) |
-| Code objects loaded or unloaded inside a range (lazy module loading, JIT, `hipModuleUnload`) | declined (`CODE_OBJECT_CHANGED_IN_RANGE`); run a range once before measuring it |
+| Code objects loaded inside a range (lazy module loading, JIT) *(packet only)* | declined (`CODE_OBJECT_CHANGED_IN_RANGE`); host replay instead warns on a first-pass load and does not rewind that code object's module variables; launch each kernel once before the range |
+| Code objects unloaded inside a range (`hipModuleUnload`) | declined (`CODE_OBJECT_CHANGED_IN_RANGE`) in both packet and host modes |
 | Kernels that call `printf` | replayed output is printed again (hostcall `printf`, HIP's default) or lost (`-mprintf-kind=buffered`); see [Soundness and declining](range_replay_soundness.md) |
 | Concurrency within a pass | passes are serialized dispatch-by-dispatch, so concurrency-sensitive measurements differ from pass 0 |
 
