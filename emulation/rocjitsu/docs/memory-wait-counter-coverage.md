@@ -55,7 +55,9 @@ Counter admission and occupancy both account for EXEC and resource descriptors.
 An ignored gfx1250 buffer descriptor (TYPE other than 0) neither forces progress
 nor contributes a younger counter position in the checker. The ISA specifies
 ignored data effects; omitting its counter slot conservatively keeps older
-results pending even if hardware counts the ignored instruction.
+results pending even if hardware counts the ignored instruction. This can report
+a missing wait when hardware would already guarantee completion; the counter
+behavior of mismatched descriptors has not been validated on hardware.
 With EXEC zero, gfx1250 VMEM retains
 its LOAD/STORE/ASYNC/TENSOR obligations, LDS retains DSCNT, and FLAT retains both
 domains, following the skip conditions in CDNA5 ISA section 3.2.2.1. An LDS
@@ -64,9 +66,6 @@ its counter positions. On CDNA1–4, ordinary VMEM and LDS instructions with EXE
 zero retain positions behind pending operations, so partial waits and counter
 capacity still prove completion of older results. Generic FLAT retains the
 address-dependent accounting described above.
-On gfx1250, `global_inv` occupies an ordered LOADcnt position alongside ordinary
-loads, even with EXEC zero. A load followed by `global_inv` and `s_wait_loadcnt 1`
-therefore has a ready result.
 
 GFX12 block transfers use their issue-time M0 DWORD mask for register dependencies.
 Disabled load destinations and store-data words do not require completion or replay
