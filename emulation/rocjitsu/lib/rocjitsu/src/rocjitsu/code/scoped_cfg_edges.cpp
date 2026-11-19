@@ -31,8 +31,9 @@ namespace {
 /// call edge's saved return SGPR. Checks the raw SOP1 source field rather than
 /// broader semantics so only the exact scoped call-return form matches.
 [[nodiscard]] bool s_setpc_from_sreg(const Instruction &inst, uint32_t word, uint16_t ssrc0) {
-  const std::string_view mnemonic = inst.mnemonic();
-  if (inst.size() != sizeof(uint32_t) || (mnemonic != "s_setpc_b64" && mnemonic != "s_set_pc_i64"))
+  const amdgpu::Operation operation = inst.amdgpu_operation();
+  if (inst.size() != sizeof(uint32_t) ||
+      (operation != amdgpu::Operation::S_SETPC_B64 && operation != amdgpu::Operation::S_SET_PC_I64))
     return false;
   return static_cast<uint16_t>(word & 0xffu) == ssrc0;
 }

@@ -99,6 +99,9 @@ public:
 
     void Begin(CmdBuffer* cmd_buffer, const SpmConfig* config, const counters_vector& counters_vec)
     {
+        // Each command stream can run after other packets change GRBM_GFX_INDEX.
+        grbm_index_value_last_ = ~uint32_t{0};
+
         // SPM parameters
         const uint32_t sampling_rate        = config->sampleRate;
         const uint64_t buffer_ptr           = reinterpret_cast<uint64_t>(config->data_buffer_ptr);

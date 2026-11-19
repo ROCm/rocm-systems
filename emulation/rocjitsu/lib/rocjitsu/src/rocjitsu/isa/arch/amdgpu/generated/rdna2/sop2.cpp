@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/sop2.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/decode_factories.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/execution_backend.h"
 #include <memory>
 
@@ -33,6 +34,7 @@ SAddU32Sop2::SAddU32Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_ADD_U32);
 }
 
 namespace detail {
@@ -67,6 +69,7 @@ SSubU32Sop2::SSubU32Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_SUB_U32);
 }
 
 namespace detail {
@@ -101,6 +104,7 @@ SAddI32Sop2::SAddI32Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_ADD_I32);
 }
 
 namespace detail {
@@ -135,6 +139,7 @@ SSubI32Sop2::SSubI32Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_SUB_I32);
 }
 
 namespace detail {
@@ -172,6 +177,7 @@ SAddcU32Sop2::SAddcU32Sop2(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
   scc_in.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_ADDC_U32);
 }
 
 namespace detail {
@@ -209,6 +215,7 @@ SSubbU32Sop2::SSubbU32Sop2(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
   scc_in.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_SUBB_U32);
 }
 
 namespace detail {
@@ -243,6 +250,7 @@ SMinI32Sop2::SMinI32Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_MIN_I32);
 }
 
 namespace detail {
@@ -277,6 +285,7 @@ SMinU32Sop2::SMinU32Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_MIN_U32);
 }
 
 namespace detail {
@@ -311,6 +320,7 @@ SMaxI32Sop2::SMaxI32Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_MAX_I32);
 }
 
 namespace detail {
@@ -345,6 +355,7 @@ SMaxU32Sop2::SMaxU32Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_MAX_U32);
 }
 
 namespace detail {
@@ -379,6 +390,7 @@ SCselectB32Sop2::SCselectB32Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CSELECT_B32);
 }
 
 namespace detail {
@@ -416,6 +428,7 @@ SCselectB64Sop2::SCselectB64Sop2(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CSELECT_B64);
 }
 
 namespace detail {
@@ -451,6 +464,7 @@ SAndB32Sop2::SAndB32Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_AND_B32);
 }
 
 namespace detail {
@@ -487,6 +501,7 @@ SAndB64Sop2::SAndB64Sop2(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_AND_B64);
 }
 
 namespace detail {
@@ -522,6 +537,7 @@ SOrB32Sop2::SOrB32Sop2(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
   flags_ |= RESULT_OR;
+  set_amdgpu_operation(amdgpu::Operation::S_OR_B32);
 }
 
 namespace detail {
@@ -559,6 +575,7 @@ SOrB64Sop2::SOrB64Sop2(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   scc.apply_fieldless_caps(false, false, false);
   flags_ |= RESULT_OR;
+  set_amdgpu_operation(amdgpu::Operation::S_OR_B64);
 }
 
 namespace detail {
@@ -593,6 +610,7 @@ SXorB32Sop2::SXorB32Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_XOR_B32);
 }
 
 namespace detail {
@@ -629,6 +647,7 @@ SXorB64Sop2::SXorB64Sop2(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_XOR_B64);
 }
 
 namespace detail {
@@ -663,6 +682,7 @@ SAndn2B32Sop2::SAndn2B32Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_ANDN2_B32);
 }
 
 namespace detail {
@@ -699,6 +719,7 @@ SAndn2B64Sop2::SAndn2B64Sop2(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_ANDN2_B64);
 }
 
 namespace detail {
@@ -733,6 +754,7 @@ SOrn2B32Sop2::SOrn2B32Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_ORN2_B32);
 }
 
 namespace detail {
@@ -769,6 +791,7 @@ SOrn2B64Sop2::SOrn2B64Sop2(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_ORN2_B64);
 }
 
 namespace detail {
@@ -803,6 +826,7 @@ SNandB32Sop2::SNandB32Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_NAND_B32);
 }
 
 namespace detail {
@@ -839,6 +863,7 @@ SNandB64Sop2::SNandB64Sop2(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_NAND_B64);
 }
 
 namespace detail {
@@ -873,6 +898,7 @@ SNorB32Sop2::SNorB32Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_NOR_B32);
 }
 
 namespace detail {
@@ -909,6 +935,7 @@ SNorB64Sop2::SNorB64Sop2(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_NOR_B64);
 }
 
 namespace detail {
@@ -943,6 +970,7 @@ SXnorB32Sop2::SXnorB32Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_XNOR_B32);
 }
 
 namespace detail {
@@ -979,6 +1007,7 @@ SXnorB64Sop2::SXnorB64Sop2(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_XNOR_B64);
 }
 
 namespace detail {
@@ -1013,6 +1042,7 @@ SLshlB32Sop2::SLshlB32Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_LSHL_B32);
 }
 
 namespace detail {
@@ -1048,6 +1078,7 @@ SLshlB64Sop2::SLshlB64Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_LSHL_B64);
 }
 
 namespace detail {
@@ -1082,6 +1113,7 @@ SLshrB32Sop2::SLshrB32Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_LSHR_B32);
 }
 
 namespace detail {
@@ -1117,6 +1149,7 @@ SLshrB64Sop2::SLshrB64Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_LSHR_B64);
 }
 
 namespace detail {
@@ -1151,6 +1184,7 @@ SAshrI32Sop2::SAshrI32Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_ASHR_I32);
 }
 
 namespace detail {
@@ -1186,6 +1220,7 @@ SAshrI64Sop2::SAshrI64Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_ASHR_I64);
 }
 
 namespace detail {
@@ -1217,6 +1252,7 @@ SBfmB32Sop2::SBfmB32Sop2(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  set_amdgpu_operation(amdgpu::Operation::S_BFM_B32);
 }
 
 namespace detail {
@@ -1248,6 +1284,7 @@ SBfmB64Sop2::SBfmB64Sop2(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  set_amdgpu_operation(amdgpu::Operation::S_BFM_B64);
 }
 
 namespace detail {
@@ -1279,6 +1316,7 @@ SMulI32Sop2::SMulI32Sop2(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  set_amdgpu_operation(amdgpu::Operation::S_MUL_I32);
 }
 
 namespace detail {
@@ -1313,6 +1351,7 @@ SBfeU32Sop2::SBfeU32Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_BFE_U32);
 }
 
 namespace detail {
@@ -1347,6 +1386,7 @@ SBfeI32Sop2::SBfeI32Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_BFE_I32);
 }
 
 namespace detail {
@@ -1382,6 +1422,7 @@ SBfeU64Sop2::SBfeU64Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_BFE_U64);
 }
 
 namespace detail {
@@ -1417,6 +1458,7 @@ SBfeI64Sop2::SBfeI64Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_BFE_I64);
 }
 
 namespace detail {
@@ -1451,6 +1493,7 @@ SAbsdiffI32Sop2::SAbsdiffI32Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_ABSDIFF_I32);
 }
 
 namespace detail {
@@ -1486,6 +1529,7 @@ SLshl1AddU32Sop2::SLshl1AddU32Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_LSHL1_ADD_U32);
 }
 
 namespace detail {
@@ -1521,6 +1565,7 @@ SLshl2AddU32Sop2::SLshl2AddU32Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_LSHL2_ADD_U32);
 }
 
 namespace detail {
@@ -1556,6 +1601,7 @@ SLshl3AddU32Sop2::SLshl3AddU32Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_LSHL3_ADD_U32);
 }
 
 namespace detail {
@@ -1591,6 +1637,7 @@ SLshl4AddU32Sop2::SLshl4AddU32Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_LSHL4_ADD_U32);
 }
 
 namespace detail {
@@ -1625,6 +1672,7 @@ SPackLlB32B16Sop2::SPackLlB32B16Sop2(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  set_amdgpu_operation(amdgpu::Operation::S_PACK_LL_B32_B16);
 }
 
 namespace detail {
@@ -1658,6 +1706,7 @@ SPackLhB32B16Sop2::SPackLhB32B16Sop2(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  set_amdgpu_operation(amdgpu::Operation::S_PACK_LH_B32_B16);
 }
 
 namespace detail {
@@ -1690,6 +1739,7 @@ SPackHhB32B16Sop2::SPackHhB32B16Sop2(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  set_amdgpu_operation(amdgpu::Operation::S_PACK_HH_B32_B16);
 }
 
 namespace detail {
@@ -1722,6 +1772,7 @@ SMulHiU32Sop2::SMulHiU32Sop2(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  set_amdgpu_operation(amdgpu::Operation::S_MUL_HI_U32);
 }
 
 namespace detail {
@@ -1753,6 +1804,7 @@ SMulHiI32Sop2::SMulHiI32Sop2(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  set_amdgpu_operation(amdgpu::Operation::S_MUL_HI_I32);
 }
 
 namespace detail {

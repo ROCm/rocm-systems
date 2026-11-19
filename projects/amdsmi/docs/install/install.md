@@ -218,6 +218,12 @@ Nightly builds of the ROCm Core SDK (including AMD SMI) are published by
    Set this after activating the target virtual environment; a `PYTHONPATH`
    pointing at another ROCm installation would override its Python package.
 
+   This wrapper never loads a system `libamd_smi.so`. It finds
+   `lib/libamd_smi.so.<MAJOR>` in the `_rocm_sdk_core` package through
+   `sys.path`, so a copy of the `amdsmi` directory placed elsewhere in the
+   environment also loads it. It refuses a library newer than itself; see
+   [Packaging and install paths](../packaging.md).
+
 ## Optional and advanced installation
 
 Use these optional procedures for CLI autocompletion and advanced setups, such

@@ -23,6 +23,8 @@ THE SOFTWARE.
 #ifndef INCLUDE_RDC_LIB_RDC_COMMON_H_
 #define INCLUDE_RDC_LIB_RDC_COMMON_H_
 #include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <iostream>
 #include <map>
 #include <string>
@@ -54,6 +56,20 @@ typedef std::map<RdcFieldKey, uint64_t> rdc_gpu_gauges_t;
  *  @retval Return a pointer to the destination string.
  */
 char* strncpy_with_null(char* dest, const char* src, size_t n);
+
+/**
+ *  @brief The number in a field ID that a caller passed to RDC.
+ *
+ *  @details A caller can pass any 32-bit value as an ::rdc_field_t, and loading a value that
+ *  ::rdc_field_t does not define as that enum is undefined behavior. This copies the bytes
+ *  instead, so that the number can be checked before the ID is used as an ::rdc_field_t.
+ */
+inline uint32_t rdc_field_id_number(const rdc_field_t& field_id) {
+  static_assert(sizeof(uint32_t) == sizeof(rdc_field_t), "rdc_field_t is 32 bits");
+  uint32_t id;
+  std::memcpy(&id, &field_id, sizeof(id));
+  return id;
+}
 
 /**
  *  @brief The length of the well-formed UTF-8 character (RFC 3629) at s[0..size), or 0 when

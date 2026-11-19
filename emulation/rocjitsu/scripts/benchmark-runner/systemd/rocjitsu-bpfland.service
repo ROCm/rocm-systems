@@ -1,0 +1,17 @@
+[Unit]
+Description=Pinned Bpfland scheduler for benchmark runners
+
+[Service]
+Type=exec
+ExecStartPre=/usr/bin/python3 -E -s /usr/local/libexec/rocjitsu-benchmark-runner/host_setup.py
+ExecStart=/usr/local/libexec/rocjitsu-benchmark-runner/scx_bpfland
+ExecStartPost=/usr/bin/python3 -E -s /usr/local/libexec/rocjitsu-benchmark-runner/host_setup.py --wait-ready
+WorkingDirectory=/
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=40
+KillMode=control-group
+UMask=0022
+
+[Install]
+WantedBy=multi-user.target

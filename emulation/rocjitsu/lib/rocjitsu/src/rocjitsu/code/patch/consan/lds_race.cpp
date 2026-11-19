@@ -1,0 +1,362 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#include "rocjitsu/code/patch/consan/lds_race.h"
+#include "rocjitsu/code/patch/consan/prepare.h"
+
+#include "rocjitsu/code/basic_block.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/isa/instruction.h"
+
+#include <algorithm>
+#include <cstring>
+#include <set>
+
+namespace rocjitsu::consan {
+namespace {
+Result reject_instruction(InputError &error, InputErrorCode code, std::string message,
+                          std::optional<uint64_t> offset = std::nullopt) {
+  error = {.code = code, .text_offset = offset, .message = std::move(message)};
+  return Result::failure();
+}
+
+bool admitted_instruction(const Instruction &instruction) {
+  switch (instruction.amdgpu_operation()) {
+  case amdgpu::Operation::S_MUL_I32:
+  case amdgpu::Operation::S_LOAD_DWORD:
+  case amdgpu::Operation::S_LOAD_DWORDX2:
+  case amdgpu::Operation::S_MOV_B64:
+  case amdgpu::Operation::S_AND_SAVEEXEC_B64:
+  case amdgpu::Operation::S_AND_B64:
+  case amdgpu::Operation::S_OR_B64:
+  case amdgpu::Operation::S_DELAY_ALU:
+  case amdgpu::Operation::GLOBAL_STORE_DWORD:
+  case amdgpu::Operation::DS_READ_B32:
+  case amdgpu::Operation::DS_WRITE_B32:
+  case amdgpu::Operation::S_WAIT_KMCNT:
+  case amdgpu::Operation::S_WAIT_STORECNT:
+  case amdgpu::Operation::S_WAIT_DSCNT:
+  case amdgpu::Operation::S_WAIT_LOADCNT_DSCNT:
+  case amdgpu::Operation::S_WAIT_LOADCNT:
+  case amdgpu::Operation::S_WAIT_XCNT:
+  case amdgpu::Operation::S_LOAD_B32:
+  case amdgpu::Operation::S_LOAD_B64:
+  case amdgpu::Operation::S_WAITCNT:
+  case amdgpu::Operation::S_WAITCNT_VSCNT:
+  case amdgpu::Operation::S_MOV_B32:
+  case amdgpu::Operation::S_AND_SAVEEXEC_B32:
+  case amdgpu::Operation::S_AND_B32:
+  case amdgpu::Operation::S_OR_B32:
+  case amdgpu::Operation::S_CMP_EQ_U32:
+  case amdgpu::Operation::S_ADD_U32:
+  case amdgpu::Operation::S_SUB_U32:
+  case amdgpu::Operation::S_ADD_CO_U32:
+  case amdgpu::Operation::S_SUB_CO_U32:
+  case amdgpu::Operation::S_BRANCH:
+  case amdgpu::Operation::S_CBRANCH_SCC0:
+  case amdgpu::Operation::S_CBRANCH_SCC1:
+  case amdgpu::Operation::S_CBRANCH_VCCZ:
+  case amdgpu::Operation::S_CBRANCH_VCCNZ:
+  case amdgpu::Operation::S_CBRANCH_EXECZ:
+  case amdgpu::Operation::S_CBRANCH_EXECNZ:
+  case amdgpu::Operation::S_NOP:
+  case amdgpu::Operation::S_ENDPGM:
+  case amdgpu::Operation::GLOBAL_STORE_B32:
+  case amdgpu::Operation::DS_STORE_B32:
+  case amdgpu::Operation::DS_LOAD_B32:
+    return true;
+  case amdgpu::Operation::V_CMPX_EQ_U32:
+  case amdgpu::Operation::V_ADD_U32:
+  case amdgpu::Operation::V_NOP:
+  case amdgpu::Operation::V_MOV_B32:
+  case amdgpu::Operation::V_LSHRREV_B32:
+  case amdgpu::Operation::V_LSHLREV_B32:
+  case amdgpu::Operation::V_ADD_NC_U32:
+  case amdgpu::Operation::V_AND_B32:
+  case amdgpu::Operation::V_CMP_EQ_U32:
+  case amdgpu::Operation::V_CMP_GT_U32:
+    break;
+  default:
+    return false;
+  }
+
+  // The qualified vector forms use VOP1/VOP2/VOPC rather than VOP3. Their
+  // first word has bit 31 clear; literals and DPP extensions do not change it.
+  // SDWA has the same base format but was never part of this admission set.
+  if (instruction.raw_encoding() == nullptr || instruction.size() < 4 ||
+      (instruction.raw_encoding()[0] & (uint32_t{1} << 31)) != 0)
+    return false;
+  amdgpu::RegisterModifiers modifiers;
+  instruction.amdgpu_register_modifiers(modifiers);
+  return !modifiers.sdwa;
+}
+
+Result reject(InputError &error, std::string message) {
+  error = {.code = InputErrorCode::ResourceLimit, .text_offset = {}, .message = std::move(message)};
+  return Result::failure();
+}
+
+uint32_t native_lds_width(const Instruction &instruction) {
+  switch (instruction.amdgpu_operation()) {
+  case amdgpu::Operation::DS_LOAD_B32:
+  case amdgpu::Operation::DS_STORE_B32:
+  case amdgpu::Operation::DS_READ_B32:
+  case amdgpu::Operation::DS_WRITE_B32:
+    return 4;
+  case amdgpu::Operation::DS_LOAD_U16:
+  case amdgpu::Operation::DS_LOAD_I16:
+  case amdgpu::Operation::DS_STORE_B16:
+  case amdgpu::Operation::DS_READ_U16:
+  case amdgpu::Operation::DS_READ_I16:
+  case amdgpu::Operation::DS_WRITE_B16:
+    return 2;
+  case amdgpu::Operation::DS_LOAD_B64:
+  case amdgpu::Operation::DS_STORE_B64:
+  case amdgpu::Operation::DS_READ_B64:
+  case amdgpu::Operation::DS_WRITE_B64:
+    return 8;
+  case amdgpu::Operation::DS_LOAD_B128:
+  case amdgpu::Operation::DS_STORE_B128:
+  case amdgpu::Operation::DS_READ_B128:
+  case amdgpu::Operation::DS_WRITE_B128:
+    return 16;
+  default:
+    return 0;
+  }
+}
+
+} // namespace
+
+Result qualify_lds_race_entry(const InputProgram &program, InputError &error) {
+  const uint32_t group_bytes = program.kernel.descriptor.group_segment_fixed_size;
+  if (group_bytes < 4 || group_bytes > 65536)
+    return reject_instruction(error, InputErrorCode::UnsupportedEntry,
+                              "native LDS requires an LDS extent in [4, 65536] bytes");
+  return Result::success();
+}
+
+Result qualify_lds_race_block(const BasicBlock &block, InputError &error) {
+  // Defer the conditional self-loop to whole-program barrier qualification.
+  for (const BasicBlock *successor : block.successors())
+    if ((successor != &block && successor->start_offset() <= block.start_offset()) ||
+        (successor == &block && block.successors().size() != 2))
+      return reject_instruction(
+          error, InputErrorCode::UnsupportedFlow,
+          "only a conditional single-block backedge can enter barrier qualification",
+          block.start_offset());
+  return Result::success();
+}
+
+Result classify_lds_race_instruction(const Instruction &instruction, rj_code_arch_t arch,
+                                     uint32_t allocated_vgprs,
+                                     std::vector<NativeLdsAccess> &accesses, InputError &error) {
+  const std::string_view name = instruction.mnemonic();
+  const amdgpu::Operation operation = instruction.amdgpu_operation();
+  const amdgpu::MemoryAddressing addressing = instruction.amdgpu_memory_addressing();
+  const uint64_t offset = instruction.src_loc();
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5 && (operation == amdgpu::Operation::S_BARRIER_SIGNAL ||
+                                           operation == amdgpu::Operation::S_BARRIER_WAIT))
+    return Result::success(); // The complete original group/CFG is qualified below.
+  if ((instruction.flags() & BARRIER) != 0 ||
+      instruction.amdgpu_memory_kind() == amdgpu::MemoryKind::Atomic ||
+      name.starts_with("s_barrier") || name.starts_with("s_sendmsg"))
+    return reject_instruction(error, InputErrorCode::UnsupportedSynchronization,
+                              "unmodeled synchronization: " + std::string(name), offset);
+  const uint32_t width = native_lds_width(instruction);
+  if ((addressing == amdgpu::MemoryAddressing::Lds || addressing == amdgpu::MemoryAddressing::Gds ||
+       addressing == amdgpu::MemoryAddressing::DirectLds) &&
+      width == 0)
+    return reject_instruction(error, InputErrorCode::UnsupportedAccess,
+                              "unsupported LDS form: " + std::string(name), offset);
+  if (width == 0 && !admitted_instruction(instruction))
+    return reject_instruction(error, InputErrorCode::UnsupportedInstruction,
+                              "instruction outside MVP: " + std::string(name), offset);
+  if (width != 0) {
+    // CDNA3/4 place GDS at bit 16; RDNA and CDNA5 use bit 17.
+    const uint32_t gds_bit =
+        (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) ? 16 : 17;
+    if (instruction.size() != 8 || (instruction.raw_encoding()[0] & (1u << gds_bit)) != 0)
+      return reject_instruction(error, InputErrorCode::UnsupportedAccess, "non-native LDS form",
+                                offset);
+    const bool read = instruction.amdgpu_memory_kind() == amdgpu::MemoryKind::Load;
+    const Operand *address = instruction.src_operand(0);
+    const Operand *value = read ? instruction.dst_operand(0) : instruction.src_operand(1);
+    const std::optional<RegisterRef> address_reg = address->decoded_vgpr();
+    const std::optional<RegisterRef> value_reg = value->decoded_vgpr();
+    // b16 loads extend into one full VGPR; b64/b128 use a contiguous 2/4-word
+    // tuple. Validate the whole value tuple, including store sources.
+    const uint32_t value_words = std::max(width / 4, 1u);
+    if (!address_reg || !value_reg || address_reg->width != 1 || value_reg->width != value_words ||
+        address_reg->index >= allocated_vgprs ||
+        uint32_t{value_reg->index} + value_words > allocated_vgprs)
+      return reject_instruction(error, InputErrorCode::UnsupportedAccess,
+                                "LDS operands exceed allocation", offset);
+    accesses.push_back(
+        {.site = static_cast<uint32_t>(accesses.size()),
+         .original_offset = offset,
+         .kind = read ? AccessKind::Read : AccessKind::Write,
+         .address_vgpr = address_reg->index,
+         .immediate_bytes = static_cast<uint16_t>(instruction.raw_encoding()[0] & 0xffff),
+         .width = width});
+  }
+  return Result::success();
+}
+
+Result qualify_lds_race_barrier(InputProgram &program, std::span<BasicBlock *const> blocks,
+                                InputError &error) {
+  std::vector<const BasicBlock *> barrier_blocks;
+  uint32_t members = 0;
+  for (BasicBlock *block : blocks) {
+    std::vector<const Instruction *> instructions;
+    for (const Instruction &instruction : block->instructions()) {
+      instructions.push_back(&instruction);
+      if (instruction.amdgpu_operation() == amdgpu::Operation::S_BARRIER_SIGNAL ||
+          instruction.amdgpu_operation() == amdgpu::Operation::S_BARRIER_WAIT)
+        ++members;
+    }
+    for (size_t index = 0; index < instructions.size(); ++index) {
+      if (instructions[index]->amdgpu_operation() != amdgpu::Operation::S_BARRIER_SIGNAL)
+        continue;
+      const uint32_t signal =
+          cdna5::build_sop1(cdna5::kSBarrierSignalSop1, {.ssrc0 = cdna5::OPR_SSRC_NEG_INT_MIN})[0];
+      const uint32_t wait =
+          build_sopp_encoding(ROCJITSU_CODE_ARCH_CDNA5, cdna5::kSBarrierWaitSopp, 0xffff).value();
+      const uint32_t drain =
+          build_sopp_encoding(ROCJITSU_CODE_ARCH_CDNA5, cdna5::kSWaitDscntSopp, 0).value();
+      size_t wait_index = index + 1;
+      bool intervening_memory_or_barrier = false;
+      while (wait_index < instructions.size() &&
+             instructions[wait_index]->amdgpu_operation() != amdgpu::Operation::S_BARRIER_WAIT) {
+        const Instruction &instruction = *instructions[wait_index];
+        if (instruction.is_memory_op() || instruction.is_barrier())
+          intervening_memory_or_barrier = true;
+        ++wait_index;
+      }
+      // Require the original guest drain: DBI envelopes add their own waits,
+      // which must not make a store/signal/wait group without s_wait_dscnt 0
+      // qualify as guest synchronization.
+      if (program.target->id != 1250 || program.wave_size != 32 || index == 0 ||
+          wait_index == instructions.size() || intervening_memory_or_barrier ||
+          instructions[index - 1]->size() != 4 || instructions[index]->size() != 4 ||
+          instructions[wait_index]->size() != 4 ||
+          instructions[index - 1]->raw_encoding()[0] != drain ||
+          instructions[index]->raw_encoding()[0] != signal ||
+          instructions[wait_index]->raw_encoding()[0] != wait)
+        return reject_instruction(
+            error, InputErrorCode::UnsupportedSynchronization,
+            "requires original LDS drain/signal -1/wait -1 groups without intervening memory "
+            "operations or barriers",
+            instructions[index]->src_loc());
+      barrier_blocks.push_back(block);
+      program.barriers.push_back(
+          BarrierFacts{.original_drain = instructions[index - 1]->src_loc(),
+                       .original_signal = instructions[index]->src_loc(),
+                       .original_wait = instructions[wait_index]->src_loc()});
+    }
+  }
+  // One block containing every group gives each completed loop cycle the same
+  // group order, allowing a retained phase ordinal to identify its occurrence.
+  const BasicBlock *loop = nullptr;
+  for (const BasicBlock *block : blocks)
+    for (const BasicBlock *successor : block->successors())
+      if (successor == block) {
+        if (loop || block->successors().size() != 2 || program.target->id != 1250 ||
+            program.wave_size != 32 || members == 0)
+          return reject_instruction(error, InputErrorCode::UnsupportedFlow,
+                                    "requires one conditional single-block barrier loop");
+        loop = block;
+      }
+  if (loop) {
+    if (std::ranges::any_of(barrier_blocks, [&](const BasicBlock *block) { return block != loop; }))
+      return reject_instruction(error, InputErrorCode::UnsupportedFlow,
+                                "all repeated barrier groups must belong to the single loop block");
+    program.repeated = true;
+  }
+  if (members == 0)
+    return Result::success();
+  if (program.maximum_workgroup_size <= program.wave_size)
+    return reject_instruction(
+        error, InputErrorCode::UnsupportedEntry,
+        "barrier profile requires a maximum workgroup size permitting two waves");
+  if (members != 2 * program.barriers.size() || program.barriers.empty() ||
+      program.barriers.size() > kSyncCapacity)
+    return reject_instruction(error, InputErrorCode::UnsupportedSynchronization,
+                              "incomplete or repeated workgroup barrier group");
+  // For the acyclic profile, deleting the group block must leave no path
+  // from the hardware entry to an exit. This also rejects divergent bypasses;
+  // scalar barriers themselves execute independently of the current EXEC.
+  const auto entry =
+      std::ranges::find(blocks, program.kernel.entry_text_offset, &BasicBlock::start_offset);
+  if (entry == blocks.end())
+    return reject_instruction(error, InputErrorCode::UnsupportedSynchronization,
+                              "missing barrier entry");
+  // A preheader may bypass the loop for zero iterations. Do not require loop
+  // groups to dominate exits or infer uniform trip counts; classification needs
+  // actual matching completion witnesses from every required wave.
+  if (!program.repeated)
+    for (const BasicBlock *barrier_block : barrier_blocks) {
+      std::vector<const BasicBlock *> pending{*entry};
+      std::set<const BasicBlock *> visited;
+      while (!pending.empty()) {
+        const BasicBlock *block = pending.back();
+        pending.pop_back();
+        if (block == barrier_block || !visited.insert(block).second)
+          continue;
+        if (block->successors().empty())
+          return reject_instruction(error, InputErrorCode::UnsupportedSynchronization,
+                                    "workgroup barrier does not converge on every exit",
+                                    block->start_offset());
+        for (const BasicBlock *successor : block->successors())
+          pending.push_back(successor);
+      }
+    }
+  std::ranges::sort(program.barriers, {}, &BarrierFacts::original_signal);
+  return Result::success();
+}
+
+FailureOr<uint32_t> lds_race_row_stride(size_t sites, InputError &error, bool has_barriers) {
+  if (sites > ContractLimits{}.sites)
+    return reject(error, "no bounded LDS report-row layout");
+  const uint64_t stride = report_row_bytes(sites, has_barriers);
+  if (stride > ContractLimits{}.report_bytes - kReportHeaderBytes)
+    return reject(error, "no bounded LDS report-row layout");
+  return static_cast<uint32_t>(stride);
+}
+
+Result validate_lds_race_accesses(const InputProgram &program, const PreparedArtifact &artifact,
+                                  std::span<BasicBlock *const> blocks,
+                                  std::span<const uint8_t> prepared_text, InputError &error) {
+  std::set<uint64_t> barrier_offsets;
+  std::set<uint64_t> access_offsets;
+  for (BasicBlock *block : blocks)
+    for (const Instruction &instruction : block->instructions()) {
+      const amdgpu::Operation operation = instruction.amdgpu_operation();
+      if (operation == amdgpu::Operation::S_BARRIER_SIGNAL ||
+          operation == amdgpu::Operation::S_BARRIER_WAIT)
+        barrier_offsets.insert(instruction.src_loc());
+      if (native_lds_width(instruction) != 0)
+        access_offsets.insert(instruction.src_loc());
+    }
+  std::set<uint64_t> expected_barriers;
+  for (const BarrierFacts &barrier : artifact.manifest.barriers) {
+    expected_barriers.insert(barrier.prepared_signal);
+    expected_barriers.insert(barrier.prepared_wait);
+    if (std::memcmp(program.image.data() + program.text_file_offset + barrier.original_signal,
+                    prepared_text.data() + barrier.prepared_signal, 4) != 0 ||
+        std::memcmp(program.image.data() + program.text_file_offset + barrier.original_wait,
+                    prepared_text.data() + barrier.prepared_wait, 4) != 0)
+      return reject(error, "final reachable barrier operations differ from original group");
+  }
+  if (barrier_offsets != expected_barriers)
+    return reject(error, "final reachable barrier multiplicity differs from original");
+  if (access_offsets.size() != artifact.manifest.sites.size())
+    return reject(error, "final reachable guest access multiplicity differs from original");
+  for (const SiteFacts &site : artifact.manifest.sites)
+    if (!access_offsets.contains(site.prepared_guest_offset) ||
+        std::memcmp(program.image.data() + program.text_file_offset + site.original_offset,
+                    prepared_text.data() + site.prepared_guest_offset, 8) != 0)
+      return reject(error, "final guest LDS operation/map differs from original bytes");
+  return Result::success();
+}
+
+} // namespace rocjitsu::consan
