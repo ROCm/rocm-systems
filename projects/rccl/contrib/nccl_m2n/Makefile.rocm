@@ -171,6 +171,9 @@ endif
 LIB_LDFLAGS        := $(RCCL_LIBDIR)/librccl.so -Wl,-rpath,$(RCCL_LIBDIR)
 M2N_LIB_LDFLAGS    := $(LIB_LDFLAGS) -Wl,-rpath,'$$ORIGIN'
 M2N_CLIENT_LDFLAGS := -L$(LIBDIR) -lnccl_m2n -Wl,-rpath,'$$ORIGIN/../lib'
+# Only the NCCL_M2N_API entry points are exported, as in the CMake build. The .so is
+# loaded with RTLD_GLOBAL, so internal symbols would otherwise interpose on other libraries.
+LIB_VISIBILITY     := -fvisibility=hidden -fvisibility-inlines-hidden
 BENCH_LDFLAGS      := $(LIB_LDFLAGS) $(MPI_LDFLAGS)
 
 # -- googletest (optional; source tree with include/ + src/) -----------------
@@ -268,7 +271,7 @@ $(M2N_LIBTARGET): $(HIPIFY_STAMP) $(ARCH_STAMP)
 	@printf "Building $(M2N_LIBNAME) (hipcc, arch=$(OFFLOAD_ARCH), ROCM_VERSION=$(ROCM_VERSION)) ...\n"
 	@mkdir -p $(LIBDIR)
 	@rm -f $(LIBDIR)/gpu_archs.txt
-	$(HIPCC) -shared -o $@ $(HIPFLAGS) $(LIB_SRCS) -x none $(M2N_LIB_LDFLAGS)
+	$(HIPCC) -shared -o $@ $(HIPFLAGS) $(LIB_VISIBILITY) $(LIB_SRCS) -x none $(M2N_LIB_LDFLAGS)
 	@echo '$(GPU_ARCH_LIST)' > $(LIBDIR)/gpu_archs.txt
 	@printf "Done! Library at: $@\n"
 
@@ -294,7 +297,9 @@ endif
 # Tests (gtest). Mirrors tests/Makefile:
 #   * basic_api_test_local links the library SOURCES directly (it exercises
 #     NCCL_M2N_TESTING-only internal symbols), no MPI.
-#   * basic_api_test_mpi links libnccl_m2n.so + MPI.
+#   * basic_api_test_mpi also links the library SOURCES (it uses internal symbols
+#     that the -fvisibility=hidden .so does not export, as CMake links it to
+#     m2n_static), plus MPI.
 # ============================================================================
 ifeq ($(GTEST_AVAILABLE),1)
 tests: basic_api_test_mpi basic_api_test_local
@@ -302,12 +307,12 @@ tests: basic_api_test_mpi basic_api_test_local
 basic_api_test_mpi:   $(BINDIR)/basic_api_test_mpi   ; @:
 basic_api_test_local: $(BINDIR)/basic_api_test_local ; @:
 
-$(BINDIR)/basic_api_test_mpi: $(M2N_LIBTARGET) $(GTEST_A)
+$(BINDIR)/basic_api_test_mpi: $(HIPIFY_STAMP) $(ARCH_STAMP) $(GTEST_A)
 	@printf "Building basic_api_test_mpi (hipcc, gtest, MPI) ...\n"
 	@mkdir -p $(BINDIR)
 	$(HIPCC) -o $@ $(HIPFLAGS) $(MPI_CFLAGS) -DCUDART_CB= -DOMPI_SKIP_MPICXX=1 \
 	    -I$(HTESTS) -isystem $(GTEST_INC) \
-	    $(TEST_MPI_SRCS) -x none $(GTEST_A) $(M2N_CLIENT_LDFLAGS) $(BENCH_LDFLAGS) -lpthread
+	    $(TEST_MPI_SRCS) $(LIB_SRCS) -x none $(GTEST_A) $(BENCH_LDFLAGS) -lpthread -ldl
 	@printf "Done! Test binary at: $@\n"
 
 $(BINDIR)/basic_api_test_local: $(HIPIFY_STAMP) $(ARCH_STAMP) $(GTEST_A)

@@ -20,7 +20,9 @@ CXXSTD := -std=c++17
 NVCC_GENCODE ?= -gencode=arch=compute_80,code=sm_80 \
                   -gencode=arch=compute_90,code=sm_90 \
                   -gencode=arch=compute_100,code=sm_100
-include $(NCCL_RESHARD_ROOT)/../makefiles/common.mk
+# nccl-extensions keeps common.mk next to nccl_m2n; in RCCL it is projects/rccl/makefiles.
+include $(firstword $(wildcard $(NCCL_RESHARD_ROOT)/../makefiles/common.mk) \
+                    $(NCCL_RESHARD_ROOT)/../../makefiles/common.mk)
 
 # If the caller hasn't set NCCL_HOME, default to the vendored NCCL
 # submodule's build output. Callers pointing at their own from-source NCCL
