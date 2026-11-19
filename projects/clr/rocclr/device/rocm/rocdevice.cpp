@@ -2468,7 +2468,7 @@ void* Device::hostLock(void* hostMem, size_t size, const MemorySegment memSegmen
   }
 
   // gpu_agents_ is every GPU visible to the process, already filtered by
-  // HIP_VISIBLE_DEVICES/GPU_DEVICE_ORDINAL, matchin the HIP context
+  // HIP_VISIBLE_DEVICES/GPU_DEVICE_ORDINAL, matching the HIP context
   hsa_agent_t* agents = const_cast<hsa_agent_t*>(&bkendDevice_);
   int numAgents = 1;
   if (mapAllAgents && !gpu_agents_.empty()) {

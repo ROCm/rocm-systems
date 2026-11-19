@@ -132,6 +132,15 @@ class Memory : public device::Memory {
   //! Returns the reconstructed-SRD interop image descriptor (may be null).
   hsa_amd_image_descriptor_t* getAmdImageDesc() const { return amdImageDesc_; }
 
+  //! Checks if this object lock covers every GPU agent, so siblings may reuse its address.
+  //! False when it fell back to locking just its own agent.
+  //! Public, not protected, because siblings read it through a roc::Memory base pointer.
+  bool HostLockAllAgents() const { return hostLockAllAgents_; }
+
+  //! Checks if this object is the one that called hsa_amd_memory_lock and therefore the
+  //! only one that may unlock the range.
+  bool HostLockOwner() const { return hostLockOwner_; }
+
  protected:
   bool allocateMapMemory(size_t allocationSize);
 
@@ -143,6 +152,13 @@ class Memory : public device::Memory {
   void setOwningAgent(hsa_agent_t agent) {
     owningAgentHandle_.store(agent.handle, std::memory_order_release);
     owningAgentIndex_.store(Device::agentGlobalIndex(agent), std::memory_order_release);
+  }
+
+  //! Record the outcome of this object's host-lock attempt: whether it owns the lock (and
+  //! so must unlock the range) and whether that lock covered every GPU agent.
+  void setHostLockState(bool lockOwner, bool allAgents) {
+    hostLockOwner_ = lockOwner;
+    hostLockAllAgents_ = allAgents;
   }
 
   // Free / deregister device memory.
@@ -167,18 +183,6 @@ class Memory : public device::Memory {
 
   void destroyInteropBuffer();
 
-  // True if the device memory is the object that calls hsa_amd_memory_lock
-  bool hostLockOwner_ = false;
-
-  // True when this object's lock covered every GPU agent, so siblings may reuse its
-  // address. False when it fell back to locking just its own agent
-  bool hostLockAllAgents_ = false;
-
- public:
-  // Checks if this object lock covers every GPU agent.
-  bool HostLockAllAgents() const { return hostLockAllAgents_; }
-
- protected:
   // Pointer to the device associated with this memory object.
   const roc::Device& dev_;
 
@@ -211,6 +215,9 @@ class Memory : public device::Memory {
 
   // Disable operator=
   Memory& operator=(const Memory&);
+
+  bool hostLockOwner_ = false;       //!< This object called hsa_amd_memory_lock
+  bool hostLockAllAgents_ = false;   //!< This object's lock covered every GPU agent
 
   amd::Memory* pinnedMemory_;        //!< Memory used as pinned system memory
   std::atomic<uint64_t> owningAgentHandle_;  //!< HSA agent handle (atomic for thread-safety)

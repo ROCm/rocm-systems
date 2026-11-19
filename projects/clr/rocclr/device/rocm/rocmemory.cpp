@@ -850,7 +850,7 @@ void Buffer::destroy() {
       }
     }
 
-    if (needUnlockHostMem && hostLockOwner_) {
+    if (needUnlockHostMem && HostLockOwner()) {
       if (memFlags & (CL_MEM_USE_HOST_PTR | CL_MEM_ALLOC_HOST_PTR)) {
         // To prevent double frees and use after free. Only one device has hostLockOwner_
         // = true and Memory::~Memory() destroys in insertion order.
@@ -1204,20 +1204,24 @@ bool Buffer::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
           shareLock ? static_cast<roc::Memory*>(owner()->getOriginalDeviceMemory()) : nullptr;
 
       if (first != nullptr && first != this && first->HostLockAllAgents()) {
+        // Reusing slot 0's mapping, so slot 0 stays the sole unlock owner and this object
+        // must not become one.
+        assert(first->HostLockOwner() && "An all-agent lock must have an unlock owner!");
         deviceMemory_ = reinterpret_cast<void*>(first->virtualAddress());
+        assert(!HostLockOwner() && "Only the locking device may unlock the range!");
       } else {
         // Skip the group lock if the first device already tried it and fell back.
         const bool tryAllAgents = shareLock && (first == nullptr || first == this);
         deviceMemory_ = dev().hostLock(owner()->getHostMem(), owner()->getSize(),
                                        getHostMemorySegment(memFlags), tryAllAgents);
-        hostLockAllAgents_ = tryAllAgents && deviceMemory_ != nullptr;
+        const bool lockedAllAgents = tryAllAgents && deviceMemory_ != nullptr;
         if (deviceMemory_ == nullptr && tryAllAgents) {
           // One agent could not be mapped (pool access, resource limits).
           // Fallback to locking just this device
           deviceMemory_ = dev().hostLock(owner()->getHostMem(), owner()->getSize(),
                                          getHostMemorySegment(memFlags));
         }
-        hostLockOwner_ = deviceMemory_ != nullptr;
+        setHostLockState(deviceMemory_ != nullptr, lockedAllAgents);
       }
     } else {
       deviceMemory_ = owner()->getHostMem();
