@@ -55,6 +55,7 @@ stage a distinct kernarg slot for each of them.
 |---|---|
 | `plain` (default) | Three dispatches on one stream |
 | `multi-queue` | The same, plus a dispatch on a second stream |
+| `host` | The same as `plain`, opened with `sigsetjmp` so a tool can `siglongjmp` back to the top of the range |
 
 `multi-queue` also needs `GPU_MAX_HW_QUEUES` to be at least 2 (the CTest target pins it to 4).
 HIP pools hardware queues and round-robins streams onto them, so with a pool of one the two
@@ -65,6 +66,7 @@ streams would share a queue and the range would be replayed rather than declined
 | Sample | Asks for | CLOSE status | Shows |
 |---|---|---|---|
 | `range-replay-basic` | 4 passes | `REPLAYED` | The whole loop: one CONFIG, three PASS callbacks (passes 1-3), one CLOSE, and a zero divergence count. |
+| `range-replay-host` | 4 passes, `host_replay` | `REPLAYED` | The same checks, but passes 1-3 re-enter `main` through `siglongjmp` instead of re-submitting recorded packets. |
 | `range-replay-opt-out` | nothing | `NO_PASS_COUNT` | Leaving `pass_count_cb` NULL is the per-range opt-out: the range is still opened, tracked and closed, but no pass runs. |
 | `range-replay-decline` | 4 passes | `MULTI_QUEUE` | A range the SDK refuses. CLOSE names the reason, and the application's result is untouched. |
 

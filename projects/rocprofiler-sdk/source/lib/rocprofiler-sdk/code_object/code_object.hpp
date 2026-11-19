@@ -31,6 +31,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <shared_mutex>
 #include <vector>
 
 namespace rocprofiler
@@ -57,6 +58,12 @@ get_kernel_id(uint64_t kernel_object);
 
 void
 iterate_loaded_code_objects(code_object_iterator_t&& func);
+
+// Hold shared while capturing or restoring executable globals. Unload retires executable metadata
+// and publishes range declines under exclusive ownership, before the runtime frees those globals.
+// Acquire before code-object metadata locks, after queue drains; never hold across tool callbacks.
+std::shared_mutex&
+executable_lifetime_mutex();
 
 void
 initialize(HsaApiTable* table);

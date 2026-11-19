@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/common/container/small_vector.hpp"
+#include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -44,6 +45,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 
@@ -436,6 +438,9 @@ QueueController::add_queue(hsa_queue_t*           id,
                            bool                   is_attach)
 {
     CHECK(queue);
+    const auto lifetime_lock = std::unique_lock<std::shared_mutex>{_queue_lifetime_mutex};
+    queue->_engine_type =
+        is_compute ? Queue::engine_type::compute : Queue::engine_type::non_compute;
     const auto agent_id = queue->get_agent().get_rocp_agent()->id;
 
     _callback_cache.wlock([&](auto& callbacks) {
@@ -550,7 +555,8 @@ QueueController::destroy_queue(hsa_queue_t* id)
 {
     if(!id) return;
 
-    const auto* queue = get_queue(*id);
+    auto        lifetime_lock = std::unique_lock<std::shared_mutex>{_queue_lifetime_mutex};
+    const auto* queue         = get_queue(*id);
 
     // return if queue does not exist
     if(!queue) return;
@@ -618,9 +624,37 @@ QueueController::destroy_queue(hsa_queue_t* id)
     }
 
     queue_interposition::destroy_queue_state(id);
-    queue->sync();
-    if(queue->block_signal.handle != 0) get_core_table().hsa_signal_destroy_fn(queue->block_signal);
-    _queues.wlock([&](auto& map) { map.erase(id); });
+
+    // Drop the wrapper out of the map before waiting. sync waits for completion handlers, and
+    // those handlers can create or destroy another queue, which needs this same lock. Holding it
+    // across the wait deadlocks that callback. The unique_ptr keeps this queue alive for the wait.
+    // The queue enters the retiring set before it leaves the map and stays there until the wait
+    // ends, so the replay agent drain still counts the handlers it is waiting for.
+    std::unique_ptr<Queue> owned;
+    _retiring_queues.wlock([queue](auto& retiring) { retiring.emplace(queue); });
+    // Declared after `owned` so that it runs before the Queue is freed.
+    const auto _unretire = common::scope_destructor{[this, queue]() {
+        _retiring_queues.wlock([queue](auto& retiring) { retiring.erase(queue); });
+    }};
+    _queues.wlock([&](auto& map) {
+        for(auto itr = map.begin(); itr != map.end(); ++itr)
+        {
+            if(itr->second.get() == queue)
+            {
+                owned = std::move(itr->second);
+                map.erase(itr);
+                break;
+            }
+        }
+    });
+    lifetime_lock.unlock();
+
+    if(!owned) return;
+    // One bounded wait. A timeout is reported and destruction still finishes: the runtime queue
+    // is going away, so the wrapper cannot stay behind.
+    ROCP_WARNING_IF(!owned->sync()) << "queue destroy proceeding after sync timed out; a "
+                                       "completion callback may still be in flight";
+    if(owned->block_signal.handle != 0) get_core_table().hsa_signal_destroy_fn(owned->block_signal);
 }
 
 ClientID
@@ -924,6 +958,25 @@ QueueController::iterate_queues(const queue_iterator_cb_t& cb) const
             if(itr.second) cb(itr.second.get());
         }
     });
+}
+
+void
+QueueController::iterate_retiring_queues(const queue_iterator_cb_t& cb) const
+{
+    _retiring_queues.rlock([&cb](const auto& retiring) {
+        for(const auto* queue : retiring)
+            cb(queue);
+    });
+}
+
+void
+QueueController::iterate_queues_with_lifetime(const queue_iterator_cb_t& cb) const
+{
+    const auto lifetime_lock = std::shared_lock<std::shared_mutex>{_queue_lifetime_mutex};
+    auto       queues        = std::vector<const Queue*>{};
+    iterate_queues([&](const Queue* queue) { queues.emplace_back(queue); });
+    for(const auto* queue : queues)
+        cb(queue);
 }
 
 void

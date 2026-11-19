@@ -1155,10 +1155,16 @@ executable_destroy_internal(hsa_executable_t executable)
         return;
     }
 
-    // Before any bookkeeping: an open range may hold packets pointing at the code being unloaded.
+    // Notify early, but do not hold the lifetime lock over unload callbacks: they may open ranges.
     ::rocprofiler::range_replay::note_code_object_unload();
 
     auto _unloaded = shutdown(executable);
+
+    // Wait for captures/restores before retiring this executable. Republish after callbacks, which
+    // may have opened new ranges. Once metadata is removed, new snapshots cannot discover its
+    // globals, so the lifetime lock need not span the underlying runtime destroy or its callbacks.
+    auto lifetime_lock = std::unique_lock{executable_lifetime_mutex()};
+    ::rocprofiler::range_replay::note_code_object_unload();
 
     if(get_kernel_object_map())
     {
@@ -1500,6 +1506,8 @@ finalize()
             shutdown(itr);
     });
 
+    auto lifetime_lock = std::unique_lock{executable_lifetime_mutex()};
+    ::rocprofiler::range_replay::note_code_object_unload();
     CHECK_NOTNULL(get_code_objects())->wlock([](code_object_array_t& data) { data.clear(); });
 
     is_shutdown.store(true, std::memory_order_release);
@@ -1519,6 +1527,13 @@ iterate_loaded_code_objects(code_object_iterator_t&& func)
                 }
             },
             std::move(func));
+}
+
+std::shared_mutex&
+executable_lifetime_mutex()
+{
+    static auto mutex = std::shared_mutex{};
+    return mutex;
 }
 
 void

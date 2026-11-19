@@ -22,7 +22,6 @@
 
 #include "lib/rocprofiler-sdk/range_replay/queue_hooks.hpp"
 #include "lib/common/logging.hpp"
-#include "lib/rocprofiler-sdk/range_replay/executor.hpp"
 #include "lib/rocprofiler-sdk/range_replay/range_state.hpp"
 
 namespace rocprofiler
@@ -36,19 +35,20 @@ submission_hook(const hsa::Queue*                     queue,
                 bool                                  graph_launch_active,
                 hsa_amd_queue_intercept_packet_writer writer)
 {
+    // The writer was how packet replay injected an entry-snapshot barrier. This line does not
+    // re-submit packets, so a non-host range is not snapshotted on the submit path.
+    (void) writer;
     if(!any_range_open() || this_thread_replaying()) return;
 
     const auto& _queue = *CHECK_NOTNULL(queue);
 
-    if(auto* open_range = current_range(); open_range != nullptr)
-    {
-        note_submission(_queue, packets, pkt_count, graph_launch_active);
-        ensure_entry_snapshot(*open_range, _queue, writer);
-    }
-    else if(const auto* rocp_agent = _queue.get_agent().get_rocp_agent(); rocp_agent != nullptr)
+    if(const auto* rocp_agent = _queue.get_agent().get_rocp_agent(); rocp_agent != nullptr)
     {
         note_foreign_dispatch(rocp_agent->id.handle);
     }
+
+    if(auto* open_range = current_range(); open_range != nullptr)
+        note_submission(_queue, packets, pkt_count, graph_launch_active);
 }
 }  // namespace range_replay
 }  // namespace rocprofiler

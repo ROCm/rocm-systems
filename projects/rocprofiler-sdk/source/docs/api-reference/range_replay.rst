@@ -60,6 +60,31 @@ Mark a range
 Ranges are thread-scoped and do not nest; only the marking thread's dispatches are recorded.
 ``rocprofiler_range_replay_end()`` blocks until the extra passes have run.
 
+Mark a range that re-runs host code
+-----------------------------------
+
+When the range contains copies, several streams, graph launches, or host computation the kernels
+depend on, packet replay declines it. Host replay re-runs the application's own code instead: the
+tool sets ``host_replay`` during ``CONFIG`` and the application opens the range with the macro, which
+takes a ``sigsetjmp`` in the caller's frame. ``rocprofiler_range_replay_end()`` restores device
+memory and registered host memory, then ``siglongjmp``\ s back for each extra pass.
+
+.. code-block:: cpp
+
+    rocprofiler_status_t status;
+    rocprofiler_range_replay_host_track_memory(&host_state, sizeof(host_state));
+    hipDeviceSynchronize();  // every device that will participate; copies included
+    ROCPROFILER_RANGE_REPLAY_HOST_BEGIN(iteration_index, status);  // CONFIG on first entry only
+
+    // ... time steps: kernels, copies, memsets, graphs, host computation ...
+
+    hipDeviceSynchronize();          // again on every pass, before end
+    rocprofiler_range_replay_end();  // jumps back for passes 1..N-1, then CLOSE and return
+
+``rocprofiler_range_replay_get_host_pass()`` tells host code which pass it is on, so once-only side
+effects stay on pass 0. See :ref:`range-replay-host` for the contract (no C++ objects with
+destructors live across the jump, ``volatile`` for modified locals, balanced allocations).
+
 Operations and payload
 ----------------------
 
@@ -148,4 +173,5 @@ See also
 * :ref:`range-replay-conceptual` — the model and its carve-outs
 * :ref:`range-replay-callback-api` — API contract
 * :ref:`range-replay-soundness` — what makes a range replayable
+* :ref:`range-replay-host` — host replay with ``sigsetjmp`` / ``siglongjmp``
 * :ref:`kernel-replay-sdk-api` — the single-dispatch counterpart

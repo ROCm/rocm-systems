@@ -132,6 +132,7 @@ execute_config_callback(uint64_t                range_id,
 
     plan.pass_count_cb            = plan.config_data.pass_count_cb;
     plan.replay_continue_cb       = plan.config_data.replay_continue_cb;
+    plan.host_replay              = (plan.config_data.host_replay != 0);
     plan.config_contexts          = std::move(config_contexts);
     plan.external_correlation_ids = std::move(extern_corr_ids);
     plan.user_data                = plan.config_contexts.front().user_data;
