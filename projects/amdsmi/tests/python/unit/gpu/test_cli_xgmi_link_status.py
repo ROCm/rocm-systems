@@ -73,13 +73,21 @@ class TestCliXgmiLinkStatus(unittest.TestCase):
         self.statuses = ["D", "U"] + ["X"] * (AMDSMI_MAX_NUM_XGMI_LINKS - 2)
         self.interface.amdsmi_get_gpu_device_bdf = lambda handle: self.bdfs[handle]
         self.interface.amdsmi_get_processor_handle_from_bdf = self.bdfs.index
-        self.interface.amdsmi_get_link_metrics = mock.Mock(return_value=self.metrics)
+        self.interface.amdsmi_get_link_metrics = mock.Mock(side_effect=self._packed_metrics)
+        self.interface.amdsmi_get_gpu_cpu_links = mock.Mock(return_value=[])
         self.interface.amdsmi_get_gpu_xgmi_link_status = mock.Mock(
             return_value={"status": self.statuses}
         )
         self.interface.amdsmi_topo_get_link_type = mock.Mock(
             return_value={"type": amdsmi_wrapper.AMDSMI_LINK_TYPE_XGMI}
         )
+
+    def _packed_metrics(self, _handle):
+        # The Python wrapper returns only the first num_links native entries.
+        if "num_links" not in self.metrics:
+            return {"links": []}
+        count = self.metrics["num_links"]
+        return {"num_links": count, "links": self.metrics["links"][:count]}
 
     def _run_xgmi(
         self,
