@@ -813,6 +813,10 @@ ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
   return ncclSuccess;
 }
 
+static ncclResult_t rcclRingFallback(struct ncclComm* comm, const void* sendbuff, void* recvbuff, ncclFunc_t func,
+                                     size_t count, ncclDataType_t datatype, bool query,
+                                     struct rcclCollDecision* decision, uint32_t* threadsPerBlock);
+
 // Decisions that still run when a collective is diverted to ncclEnqueueCheck: the
 // planner's own kernels, the symmetric kernel and CE (enqueue.cc honors info->decision),
 // and the setups collectives.cc runs before enqueue (rcclEnqueueSetupNeedsSwitch).
@@ -863,15 +867,23 @@ ncclResult_t rcclGetCollImplInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_
                                    /*query=*/true, /*graphCapturingHint=*/capturing, &decision));
     }
     // Check-mode, suspended and revoked comms divert to ncclEnqueueCheck (collectives.cc), which runs
-    // the planner's kernel for every backend it does not honor; report that kernel instead.
-    if (!rcclCollectiveMustUseEnqueuePath(comm) || rcclEnqueueRunsDecision(decision.algo)) {
-      *algo = decision.algo;
-      *protocol = decision.protocol;
-      *maxChannels = decision.nMaxChannels;
-      return ncclSuccess;
+    // the planner's plain kernel for every backend it does not honor; report that kernel instead.
+    // Not rcclGetAlgoInfo: it would pick hierarchical or Direct AllGather again, which the divert skips.
+    if (rcclCollectiveMustUseEnqueuePath(comm) && !rcclEnqueueRunsDecision(decision.algo)) {
+      if (coll == ncclFuncAlltoAll) {
+        // taskAppend() splits AlltoAll into per-peer Send/Recv over the p2p channels.
+        decision.algo = rcclAddonAlgos_t::RCCL_DIRECT_ALLTOALL;
+        decision.protocol = NCCL_PROTO_SIMPLE;
+        decision.nMaxChannels = comm->p2pnChannels;
+      } else {
+        NCCLCHECK(rcclRingFallback(comm, sendbuff, recvbuff, coll, (size_t)count, dataType, /*query=*/true,
+                                   &decision, /*threadsPerBlock=*/nullptr));
+      }
     }
-    return rcclGetAlgoInfo(comm, coll, count, dataType, /*collNetSupport=*/0, /*nvlsSupport=*/0,
-                           /*numPipeOps=*/1, algo, protocol, maxChannels);
+    *algo = decision.algo;
+    *protocol = decision.protocol;
+    *maxChannels = decision.nMaxChannels;
+    return ncclSuccess;
   }
 
   // Broadcast: report DDA when picked, else the generic query below. Check-mode, suspended and

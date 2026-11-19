@@ -11536,6 +11536,82 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_AllGatherMustEnqueue_KeepsCeRegister
       });
 }
 
+// The divert skips the hierarchical launch, so the planner's plain kernel runs. rcclGetAlgoInfo would
+// re-pick hierarchical, so the report must come from the plain-kernel query, packed channels included.
+TEST(WrapMicrotestIsolated, GetCollImplInfo_HierarchicalAllGatherMustEnqueue_ReportsPlannerKernel) {
+  RUN_ISOLATED_TEST(
+      "Wrap_GetCollImplInfo_HierarchicalAllGatherMustEnqueue_ReportsPlannerKernel",
+      []() {
+        ScopedHook getAlgo(g_getAlgoInfo, [](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
+                                              ncclSimInfo_t*) {
+          task->algorithm = NCCL_ALGO_TREE;
+          task->protocol = NCCL_PROTO_LL;
+          task->nMaxChannels = 6;
+          return ncclSuccess;
+        });
+        ScopedHook packed(g_kernelPackedChannels,
+                          [](struct ncclComm*, ncclFunc_t, size_t, ncclDataType_t, int, int) { return 3; });
+        ncclComm* interComm = MakeCommWithArch("gfx942");
+        interComm->nRanks = 8;
+        interComm->nNodes = 8;
+        ncclComm* intraComm = MakeCommWithArch("gfx942");
+        intraComm->nRanks = 1;
+        intraComm->nNodes = 1;
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nNodes = 8;
+        comm->nRanks = 8;
+        comm->hierarchicalCommsInitialized = true;
+        comm->hierarchicalInterComm = interComm;
+        comm->hierarchicalIntraComm = intraComm;
+        int algo = -7, protocol = -7, maxChannels = -7;
+        ASSERT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllGather, 8, ncclFloat32, ncclSum, nullptr,
+                                                    nullptr, /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
+        ASSERT_EQ((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER, algo) << "setup must pick hierarchical";
+        ScopedHook enqueue(g_collectiveMustUseEnqueuePath, [](ncclComm*) { return true; });
+        EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllGather, 8, ncclFloat32, ncclSum, nullptr,
+                                                    nullptr, /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
+        EXPECT_EQ(NCCL_ALGO_TREE, algo);
+        EXPECT_EQ(NCCL_PROTO_LL, protocol);
+        EXPECT_EQ(3, maxChannels) << "the plain kernel's packed channel count";
+        comm->hierarchicalInterComm = nullptr;
+        comm->hierarchicalIntraComm = nullptr;
+        DeleteCommWithArch(comm);
+        DeleteHierarchicalSubComms(interComm, intraComm);
+      });
+}
+
+// gfx950 single-node AllGather is Direct-eligible, but a diverted DDA decision never sets useDirect, so
+// the ring/tree kernel runs. Reporting Direct AllGather would name a path that does not run.
+TEST(WrapMicrotestIsolated, GetCollImplInfo_AllGatherMustEnqueue_DdaNotRelabeledDirect) {
+  RUN_ISOLATED_TEST(
+      "Wrap_GetCollImplInfo_AllGatherMustEnqueue_DdaNotRelabeledDirect",
+      []() {
+        SetMicroEnvAbsent("RCCL_DIRECT_ALLGATHER_THRESHOLD");
+        ScopedHook ipcEligible(g_allGatherDdaIpcEligible,
+                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return true; });
+        ScopedHook getAlgo(g_getAlgoInfo, [](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
+                                              ncclSimInfo_t*) {
+          task->algorithm = NCCL_ALGO_TREE;
+          task->protocol = NCCL_PROTO_LL;
+          task->nMaxChannels = 6;
+          return ncclSuccess;
+        });
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 1;  // auto Direct threshold -> 8MiB
+        comm->nRanks = 8;
+        int algo = -7, protocol = -7, maxChannels = -7;
+        ASSERT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllGather, 8, ncclFloat32, ncclSum, nullptr,
+                                                    nullptr, /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
+        ASSERT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_IPC, algo) << "setup must pick DDA outside check mode";
+        ScopedHook enqueue(g_collectiveMustUseEnqueuePath, [](ncclComm*) { return true; });
+        EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllGather, 8, ncclFloat32, ncclSum, nullptr,
+                                                    nullptr, /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_DIRECT_ALLGATHER, algo);
+        EXPECT_EQ(NCCL_ALGO_TREE, algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
 TEST(WrapMicrotestIsolated, GetCollImplInfo_ReduceScatterDelegatesToSelectReduceScatter) {
   RUN_ISOLATED_TEST(
       "Wrap_GetCollImplInfo_ReduceScatterDelegatesToSelectReduceScatter",
