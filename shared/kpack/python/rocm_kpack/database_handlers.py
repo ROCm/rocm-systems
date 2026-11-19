@@ -115,6 +115,16 @@ class DatabaseHandler(ABC):
         # By default, if we can detect it, we should move it
         return True
 
+    def is_shared_sidecar(self, path: Path, prefix_root: Path) -> bool:
+        """
+        Return True for a file that every architecture artifact of the prefix needs.
+
+        Such a file is copied into each per-architecture artifact the prefix
+        produces and removed from the generic artifact. If the prefix produces
+        no per-architecture artifacts, the file stays in the generic artifact.
+        """
+        return False
+
 
 # Regex matching a library/<arch>/ path component (for per-arch subdirectory layout).
 _LIBRARY_ARCH_DIR_PATTERN = re.compile(
@@ -442,6 +452,51 @@ class HotswapCacheHandler(DatabaseHandler):
         return self._DOMAIN_TO_BUNDLE.get(domain)
 
 
+# Matches the device build name hiprtcc gives a test, e.g. "x.gfx1250-strict.gpu".
+# The "-strict" variant is stored in the same per-arch archive as its base arch.
+_HIPRTC_GPU_PATTERN = re.compile(r"\.(gfx[0-9a-z]+)(?:-strict)?\.gpu$")
+
+
+class LibhipcxxHiprtcHandler(DatabaseHandler):
+    """Handler for prebuilt libhipcxx hiprtc test device code.
+
+    hiprtcc writes one device build per target next to each prebuilt test:
+        bin/libhipcxx/lit-hiprtc/.../<test>.<arch>.gpu
+    together with <test>.build.yml, which lists those builds and the run
+    configuration. Every architecture archive needs that yml, so it is shared.
+    """
+
+    _TEST_DIR = "libhipcxx/lit-hiprtc/"
+
+    def name(self) -> str:
+        return "libhipcxx"
+
+    def _in_test_dir(self, path: Path, prefix_root: Path) -> bool:
+        try:
+            rel_path = path.relative_to(prefix_root).as_posix()
+        except ValueError:
+            return False
+        return self._TEST_DIR in rel_path
+
+    def detect(self, path: Path, prefix_root: Path) -> Optional[str]:
+        """
+        Detect hiprtc device builds.
+
+        Pattern: bin/libhipcxx/lit-hiprtc/**/*.gfx*.gpu
+
+        Returns:
+            Base architecture (e.g., 'gfx1250') or None.
+        """
+        if path.suffix != ".gpu" or not self._in_test_dir(path, prefix_root):
+            return None
+        match = _HIPRTC_GPU_PATTERN.search(path.name)
+        return match.group(1) if match else None
+
+    def is_shared_sidecar(self, path: Path, prefix_root: Path) -> bool:
+        """Detect the run description that lists the device builds of a test."""
+        return path.name.endswith(".build.yml") and self._in_test_dir(path, prefix_root)
+
+
 # Registry of available handlers
 AVAILABLE_HANDLERS = {
     "rocblas": RocBLASHandler,
@@ -452,6 +507,7 @@ AVAILABLE_HANDLERS = {
     "composablekernel": ComposableKernelHandler,
     "hipkernelprovider": HipKernelProviderArchContentHandler,
     "hotswap_cache": HotswapCacheHandler,
+    "libhipcxx": LibhipcxxHiprtcHandler,
 }
 
 

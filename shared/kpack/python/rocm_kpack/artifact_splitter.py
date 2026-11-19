@@ -107,6 +107,10 @@ class FileClassificationVisitor:
             defaultdict(list)
         )
         self.exclude_from_generic: Set[Path] = set()
+        # Files every per-arch artifact of this prefix needs (see
+        # DatabaseHandler.is_shared_sidecar). Not excluded from generic here:
+        # that depends on whether the prefix produces any per-arch artifacts.
+        self.shared_sidecars: List[Path] = []
 
     def visit_file(self, file_path: Path, prefix_path: Path) -> None:
         """
@@ -123,6 +127,9 @@ class FileClassificationVisitor:
         # .so files) are also fat binaries, but compiled per-arch. Matching
         # them here prevents them from entering the kpack processing path.
         for handler in self.database_handlers:
+            if handler.is_shared_sidecar(file_path, prefix_path):
+                self.shared_sidecars.append(file_path)
+                return
             arch = handler.detect(file_path, prefix_path)
             if arch:
                 # detect() returns the Tensile hyphen form ('gfx90a-xnack-');
@@ -723,6 +730,41 @@ class ArtifactSplitter:
                 existing_prefixes.append(prefix)
                 write_artifact_manifest(arch_artifact_dir, existing_prefixes)
 
+    def process_shared_sidecars(
+        self,
+        classifier: "FileClassificationVisitor",
+        prefix: str,
+        prefix_path: Path,
+        output_dir: Path,
+    ):
+        """
+        Copy shared sidecar files into every architecture artifact of a prefix.
+
+        Shared sidecars are excluded from the generic artifact only when the
+        prefix produces at least one architecture artifact. Otherwise they stay
+        in the generic artifact, so no file is lost.
+
+        Args:
+            classifier: Classification results for this prefix
+            prefix: The prefix string (from artifact_manifest.txt)
+            prefix_path: The actual prefix directory path
+            output_dir: Output directory for artifacts
+        """
+        arches = sorted(classifier.database_files_by_arch)
+        if not arches or not classifier.shared_sidecars:
+            return
+
+        for file_path in classifier.shared_sidecars:
+            rel_path = file_path.relative_to(prefix_path)
+            for arch in arches:
+                arch_artifact_name = f"{self.artifact_prefix}_{arch}"
+                dest_path = output_dir / arch_artifact_name / prefix / rel_path
+                dest_path.parent.mkdir(parents=True, exist_ok=True)
+                if self.verbose:
+                    print(f"    Copying shared {rel_path} to {arch_artifact_name}")
+                shutil.copy2(file_path, dest_path)
+            classifier.exclude_from_generic.add(file_path)
+
     def split(self, input_dir: Path, output_dir: Path):
         """
         Split an artifact directory into generic and architecture-specific components.
@@ -816,6 +858,9 @@ class ArtifactSplitter:
             if self.database_handlers and classifier.database_files_by_arch:
                 self.process_database_files(
                     classifier.database_files_by_arch, prefix, prefix_path, output_dir
+                )
+                self.process_shared_sidecars(
+                    classifier, prefix, prefix_path, output_dir
                 )
 
             # Phase 3: Create generic artifact (excluding database files)
