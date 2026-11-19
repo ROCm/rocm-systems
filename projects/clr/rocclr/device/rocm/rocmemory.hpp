@@ -167,25 +167,16 @@ class Memory : public device::Memory {
 
   void destroyInteropBuffer();
 
-  // True only for the device memory object that called hsa_amd_memory_lock.
-  // Sibling devices reuse that mapping and must not unlock it.
+  // True if the device memory is the object that calls hsa_amd_memory_lock
   bool hostLockOwner_ = false;
 
-  // True only when hostLockOwner_'s lock call included every device in the owning
-  // context (i.e. it used the multi-agent hostLock path and that call succeeded).
-  // Sibling devices may only reuse hostLockOwner_'s mapping when this is true;
-  // otherwise each device must lock its own agent individually (see Buffer::create).
-  bool hostLockCoversAllDevices_ = false;
-
-  // True once a device in this context tried the multi-agent group lock and it failed,
-  // falling back to an individual lock. Siblings check this to skip retrying (see
-  // Buffer::create).
-  bool hostLockGroupAttemptFailed_ = false;
+  // True when this object's lock covered every GPU agent, so siblings may reuse its
+  // address. False when it fell back to locking just its own agent
+  bool hostLockAllAgents_ = false;
 
  public:
-  // Accessors so Buffer::create() can inspect a sibling's lock state via roc::Memory*.
-  bool HostLockCoversAllDevices() const { return hostLockCoversAllDevices_; }
-  bool HostLockGroupAttemptFailed() const { return hostLockGroupAttemptFailed_; }
+  // Checks if this object lock covers every GPU agent.
+  bool HostLockAllAgents() const { return hostLockAllAgents_; }
 
  protected:
   // Pointer to the device associated with this memory object.
