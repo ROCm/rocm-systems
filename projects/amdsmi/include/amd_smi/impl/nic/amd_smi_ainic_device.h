@@ -46,8 +46,9 @@ class AMDSmiAINICDevice : public AMDSmiProcessor {
   const amdsmi_nic_numa_info_t& numa() const { return ai_nic_info_.numa; }
   const amdsmi_nic_port_info_t& port() const { return ai_nic_info_.port; }
   // The RDMA MTU is probed on first use (the probe forks per port); every read that returns an
-  // MTU goes through get_rdma_dev() or amd_query_nic_info(), which copy under the fill's lock.
-  void get_rdma_dev(amdsmi_nic_rdma_devices_info_t& rdma_dev) const;
+  // MTU goes through copy_rdma_mtu() or amd_query_nic_info(), which copy under the fill's lock.
+  // copy_rdma_mtu() sets the MTU of RDMA info read at call time, matching device name and port.
+  void copy_rdma_mtu(amdsmi_nic_rdma_devices_info_t& rdma_dev) const;
   // For readers that only need which RDMA devices and ports exist, not their MTU.
   const amdsmi_nic_rdma_devices_info_t& rdma_dev_without_mtu() const {
     return ai_nic_info_.rdma_dev;
