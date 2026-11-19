@@ -9,9 +9,10 @@ use std::ffi::{c_char, c_void};
 use rocloader::CodeObject as LoaderCodeObject;
 
 use crate::ffi::*;
+use crate::lifecycle::{initialized_mut, lock};
 use crate::loader::code_object::*;
 use crate::loader::*;
-use crate::runtime::{boundary, initialized_mut, lock};
+use crate::status::boundary;
 
 #[cfg_attr(
     all(hsa_tool_dispatch, not(test)),
@@ -62,7 +63,7 @@ pub unsafe extern "C" fn hsa_code_object_deserialize(
         };
         runtime.loader.code_objects.insert(
             handle,
-            CodeObject {
+            CodeObjectRecord {
                 bytes: bytes.into(),
                 names: HashMap::new(),
                 symbol_handles: Vec::new(),

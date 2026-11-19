@@ -23,9 +23,10 @@ use rocddi::topology::GpuInfo;
 use super::sampling_error;
 use crate::callback_arg::CallbackArg;
 use crate::debugger::TrapRestore;
+use crate::events::CallbackScope;
 use crate::ffi::*;
-use crate::runtime::{CallbackScope, map_error};
 use crate::signal::AmdSignal;
+use crate::status::map_error;
 
 /// Sample size in bytes.
 const SAMPLE_BYTES: usize = 64;
@@ -485,16 +486,12 @@ impl Resources {
             }
         }
         if self.trap_may_be_installed {
-            let address = match self
+            if let Err(status) = self
                 .restore
                 .as_ref()
                 .ok_or(ERROR)
-                .and_then(|restore| restore.address(&self.device))
+                .and_then(|restore| restore.restore(&self.device))
             {
-                Ok(address) => address,
-                Err(status) => return status,
-            };
-            if let Err(status) = self.set_handler(address, 0) {
                 return status;
             }
             self.trap_may_be_installed = false;
@@ -718,10 +715,9 @@ fn deliver_pending(
             break;
         };
         let lost_count = std::mem::take(lost);
-        let _callback_scope = CallbackScope::enter();
         // SAFETY: Pending bytes and the thread-local copy context remain live
         // through this synchronous callback. The token is invalidated below.
-        unsafe {
+        CallbackScope::run(|| unsafe {
             callback(
                 callback_data,
                 available,
@@ -729,7 +725,7 @@ fn deliver_pending(
                 Some(copy_samples),
                 copy.opaque_token(),
             );
-        }
+        });
         let progress = copy.progress();
         drop(copy);
         let Some((consumed, aborted)) = progress else {
@@ -802,7 +798,7 @@ impl SessionHandle {
     pub(super) fn create(
         resources: Resources,
         agent: HsaAgent,
-        quarantine: &crate::runtime::GenerationHealth,
+        quarantine: &crate::session::SessionHealth,
     ) -> Result<Arc<Self>, Status> {
         let session = Arc::new(Self {
             agent,
@@ -822,14 +818,21 @@ impl SessionHandle {
                     if session.stop_worker.load(Ordering::Acquire) {
                         break;
                     }
-                    let Some(_lease) = crate::runtime::enter_runtime_service() else {
+                    let Some(token) = crate::admission::enter_runtime_service() else {
                         continue;
                     };
-                    let Ok(mut resources) = session.resources.lock() else {
+                    if crate::admission::ApiLeaseScope::run(token, || {
+                        let Ok(mut resources) = session.resources.lock() else {
+                            return std::ops::ControlFlow::Break(());
+                        };
+                        if resources.active && resources.drain_all() == SUCCESS {
+                            resources.deliver(false);
+                        }
+                        std::ops::ControlFlow::Continue(())
+                    })
+                    .is_break()
+                    {
                         break;
-                    };
-                    if resources.active && resources.drain_all() == SUCCESS {
-                        resources.deliver(false);
                     }
                 }
             });

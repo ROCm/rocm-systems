@@ -586,6 +586,19 @@ void GDABackend::create_new_team([[maybe_unused]] Team *parent_team,
       GDATeam(this, team_info_wrt_parent, team_info_wrt_world, num_pes,
                 my_pe_in_new_team, new_team_comm, common_index);
 
+  // Barrier to prevent kernel racing with hipMemsets
+  if (new_team_comm != MPI_COMM_NULL) {
+    NET_CHECK(mpilib_ftable_.Barrier(new_team_comm));
+  } else {
+    std::vector<int> world_ranks;
+    world_ranks.reserve(num_pes);
+    for (int i = 0; i < num_pes; i++) {
+      world_ranks.push_back(team_info_wrt_world.pe_start +
+                             i * team_info_wrt_world.stride);
+    }
+    backend_bootstr->groupBarrier(world_ranks);
+  }
+
   *new_team = get_external_team(new_team_obj);
 }
 

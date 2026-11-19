@@ -1617,6 +1617,8 @@ Fields | Description
 `pcie_static` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`max_pcie_width`</td><td>Maximum number of pcie lanes available</td></tr><tr><td>`max_pcie_speed`</td><td>Maximum capable pcie speed in MT/s</td></tr><tr><td>`pcie_interface_version`</td><td>PCIe generation ie. 3,4,5...</td></tr><tr><td>`slot_type`</td><td>The type of form factor of the slot: OAM, PCIE, CEM, or Unknown</td></tr></tbody></table>
 `pcie_metric` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`pcie_width`</td><td>Current number of pcie lanes available</td></tr><tr><td>`pcie_speed`</td><td>Current pcie speed in MT/s</td></tr><tr><td>`pcie_bandwidth`</td><td>Current instantaneous bandwidth usage in Mb/s</td></tr><tr><td>`pcie_replay_count`</td><td>Total number of PCIe replays (NAKs)</td></tr><tr><td>`pcie_l0_to_recovery_count`</td><td>PCIE L0 to recovery state transition accumulated count</td></tr><tr><td>`pcie_replay_roll_over_count`</td><td>PCIe Replay accumulated count</td></tr><tr><td>`pcie_nak_sent_count`</td><td>PCIe NAK sent accumulated count</td></tr><tr><td>`pcie_nak_received_count`</td><td>PCIe NAK received accumulated count</td></tr></tbody></table>
 
+On a GPU that KFD reports as connected to the CPU over xGMI (no PCIe host link), `max_pcie_width`, `max_pcie_speed` and `pcie_interface_version` are `"N/A"`.
+
 Exceptions that can be thrown by `amdsmi_get_pcie_info` function:
 
 * `AmdSmiLibraryException`
@@ -5847,6 +5849,60 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
+### amdsmi_get_gpu_cpu_links
+
+Description: Return this GPU's directly-connected CPU link(s), of any link type, via KFD io_link only.
+
+An empty list is a normal, successful result on GPUs that have no CPU io_link at all -- it means "no such links exist", not a failure.
+
+Input parameters:
+
+* `processor_handle` the device handle for which to query CPU links
+
+Output: list of dictionaries, one per connected CPU, each with fields:
+
+Field | Description
+---|---
+`package_id` | The real physical socket id of the connected CPU (not a NUMA node id -- a package can expose multiple NUMA nodes)
+`link_type` | The connection type as an int. This should be translated according to the enum amdsmi_link_type_t. Refer to the example below for more details.
+
+Exceptions that can be thrown by `amdsmi_get_gpu_cpu_links` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device_num, device in enumerate(devices):
+            cpu_links = amdsmi.amdsmi_get_gpu_cpu_links(device)
+            for link in cpu_links:
+                print(link['package_id'])
+                if link['link_type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_XGMI:
+                    print('xgmi')
+                if link['link_type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_PCIE:
+                    print('pcie')
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
 ### amdsmi_get_link_topology
 
 Description: Return GPU link topology using the host API's fields.
@@ -6299,7 +6355,7 @@ Refer to [amd_smi_partition_example.py](https://github.com/ROCm/rocm-systems/blo
 
 ### amdsmi_set_gpu_memory_partition_mode
 
-Description: Set the memory partition mode for the given GPU using the newer partition mode API. All GPU processes must be idle before calling this function.
+Description: Set the memory partition mode for the given GPU using the newer partition mode API. All GPU processes must be idle before calling this function. The change takes effect at the next driver reload. Requesting the current mode cancels a pending change; older amdgpu drivers ignore that request because of a driver bug.
 
 Input parameters:
 
@@ -6795,6 +6851,116 @@ import amdsmi
 try:
     amdsmi.amdsmi_init()
     amdsmi.amdsmi_reset_ttm_pages_limit()
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_power_stabilization_info
+
+**Supported ASICs and prerequisites:**
+
+- Bare-metal Linux only. Not available on multi-VF devices; both cases
+  return `AMDSMI_STATUS_NOT_SUPPORTED`.
+
+Description: Get Power Stabilization (HAWK dummy-compute insertion plus Ramp Management) info for a GPU. Reads `host_control_enabled`, `enabled`, and all configuration parameters directly from sysfs. A read returns the current effective value of each parameter, which can differ from the last value written, regardless of `host_control_enabled` or `enabled` state. When NPM (Node-level Power Management) coordination is active on a node, every field becomes node-wide rather than per-GPU; a read reflects the current effective node-wide value regardless of which GPU handle on that node is used.
+
+Input parameters:
+
+* `processor_handle` the device handle
+
+Output: Dictionary with fields:
+
+Field | Description
+---|---
+`host_control_enabled` | Read-only: `True` if the host has control of Power Stabilization
+`enabled` | Power Stabilization enabled
+`power_floor` | Power Floor, % of power limit (0-100)
+`delay` | Insertion delay, milliseconds
+`insertion_priority` | HAWK insertion priority (`AmdSmiHawkInsertionPriority`)
+`ramp_enabled` | Ramp Management enabled
+`ramp_max_ramp_up_rate` | Max ramp-up rate, %PL/sec (100 disables ramp-up management)
+`ramp_max_ramp_down_rate` | Max ramp-down rate, %PL/sec (100 disables ramp-down management)
+`ramp_min_time_at_power_floor` | Minimum time at Power Floor, seconds
+`ramp_stop_delay` | Ramp stop delay, seconds
+
+Exceptions that can be thrown by `amdsmi_get_power_stabilization_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Power Stabilization is not implemented on this device, or the device is multi-VF
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            info = amdsmi.amdsmi_get_power_stabilization_info(device)
+            print(f"Enabled: {info['enabled']}")
+            print(f"Power floor: {info['power_floor']}")
+            print(f"Insertion priority: {info['insertion_priority'].name}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_power_stabilization_param
+
+
+**Supported ASICs and prerequisites:**
+
+- Bare-metal Linux only. Not available on multi-VF devices; both cases
+  return `AMDSMI_STATUS_NOT_SUPPORTED`.
+- Writing requires root (or equivalent sysfs write permission).
+
+Description: Set a single Power Stabilization parameter. Applies exactly one parameter per call; a batch of calls is not rolled back if a later call fails. When NPM (Node-level Power Management) coordination is active on a node, every `param_id` becomes node-wide rather than per-GPU; amdsmi does not detect NPM state or reroute the write on the caller's behalf, so the caller is responsible for selecting the node's primary GPU handle (OAM ID 0) before calling this function. Any parameter dependency (for example, ramp-down configuration requiring Power Stabilization to already be enabled) is enforced by the driver via the sysfs write itself; this function performs no client-side dependency or range validation.
+
+Input parameters:
+
+* `processor_handle` the device handle
+* `param_id` parameter to set (`AmdSmiPowerStabilizationParamId`)
+* `value` new value, written as a signed 64-bit integer: every `param_id`, including `RAMP_MAX_RAMP_UP_RATE` and `RAMP_MAX_RAMP_DOWN_RATE` despite being a %PL/sec rate, accepts an `int` only (`bool` is rejected since it is an `int` subclass; this parameter's sysfs node cannot accept floating-point values)
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_set_power_stabilization_param` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Power Stabilization is not implemented on this device, the device is multi-VF, or the driver rejects the write due to an unmet dependency
+- `AMDSMI_STATUS_NO_PERM` - amd-smi lacks permission to write sysfs
+- `AMDSMI_STATUS_INVAL` - `param_id` is invalid, or the driver rejects the value
+- `AMDSMI_STATUS_FILE_ERROR` - The sysfs write could not complete
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            amdsmi.amdsmi_set_power_stabilization_param(
+                device, amdsmi.AmdSmiPowerStabilizationParamId.POWER_FLOOR, 60
+            )
 except amdsmi.AmdSmiException as e:
     print(e)
 finally:

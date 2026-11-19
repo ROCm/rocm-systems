@@ -193,14 +193,26 @@ Between passes, kernel replay restores:
 
 * Coarse-grained device (VRAM) allocations from ``hipMalloc`` /
   ``hsa_amd_memory_pool_allocate`` / ``hsa_memory_allocate``.
-* Module-scope ``__device__`` and ``__constant__`` variables in loaded executables.
+* Module-scope ``__device__`` and ``__constant__`` variables exposed as HSA variable symbols
+  in loaded executables. Internal or static device state not exposed as symbols is not restored.
 
 It does **not** restore:
 
+* Fine-grained device memory.
 * Unified or managed memory.
 * ``hipMallocAsync`` and other pool-backed, stream-ordered allocations.
-* Host, fine-grained, kernarg, or executable allocations (excluded by design).
+* Host memory, or another GPU's memory.
+* Kernarg or executable allocations (excluded by design).
 * HIP graph-managed memory.
+
+Detected unsupported argument memory, failed snapshot capture, or failed required memory checks
+cause the dispatch to run once without replay. The same applies if the kernarg buffer cannot be
+verified and safely inspected. Kernels unknown to the SDK also run once without replay.
+
+Argument-memory checks are best effort: indirect pointers and some aggregate fields can be missed,
+allowing writes outside the snapshot to accumulate across passes. Scalar values can also cause
+false declines. Selected runtime copy/fill kernels bypass the guard; overlapping copies are not
+detected. Guard warnings are diagnostic, not a per-dispatch replay-status API.
 
 Capture is a **full in-memory copy** of every tracked region into host RAM. Cost is
 ``O(tracked_bytes × passes)``, not kernel time alone. The last executed pass is **not** restored,
@@ -213,7 +225,6 @@ Limitations
 
 * **Beta.** The domain, payload, and snapshot policy may change.
 * **Single** ``KERNEL_REPLAY`` **subscriber.**
-* **Coarse-grained device VRAM only**, plus module-scope device/constant variables.
 * **HIP graph launches are not replayed.** The interceptor warns once and the graph runs once on
   the ordinary path. A graph dispatch does **not** hard-error at the replay gate.
 * **Only single-packet, single-dispatch submissions** are replayed. Multi-packet batches warn once

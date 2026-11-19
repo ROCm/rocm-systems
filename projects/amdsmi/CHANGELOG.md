@@ -6,18 +6,42 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ## amd_smi_lib for ROCm 10.3.0
 
+### Added
+
+- **Added Power Stabilization support (HAWK dummy-compute insertion and Ramp Management)**.  
+  - Query and configure GPU power stabilization and ramp management settings via `amd-smi static --power-stabilization` and `amd-smi set --power-stabilization-configure KEY=VALUE [...]` (or `@<path>` to a JSON file, subject to the same file restrictions as `--ampp-configure @<path>`), on supported bare-metal Linux platforms. When NPM (Node-level Power Management) coordination makes settings node-wide, a write against a non-primary GPU still applies but prints an informational/warning note naming the node's primary GPU.
+  - Like `--ampp`, `power_stabilization` is on by default (not opt-in): plain `amd-smi static`, `--all`, and `--json` all gain a `power_stabilization` key for every GPU, reporting "not supported" on platforms without the feature.
+
 ### Changed
+
+- **`amdsmi_get_gpu_kfd_info()` now returns `AMDSMI_STATUS_NOT_SUPPORTED` on WSL**.
+  - WSL has no KFD, so the call previously returned success with placeholder values; it now reports the data as unsupported.
 
 - **Repeated `amd-smi` device selections now combine**.  
   - Repeated `--gpu`, `--cpu`, `--core`, and `--nic` options combine without duplicates. `reset --gpureset -g all -g 0` now resets every GPU (previously GPU 0 only); `set -g 0 -C CPX -g 1 -C SPX` now applies SPX to GPUs 0 and 1 (previously GPU 1 only). Remove earlier device options to retain the previous target set.
 
+- **Hardened the `@<path>` file loader shared by `--ampp-configure` and `--power-stabilization-configure`**.  
+  - The loader now requires a regular file (rejecting symlinks, so not `/dev/stdin`), enforces a 1 MiB cap against bytes actually read, and guards against `UnicodeDecodeError`/`RecursionError`.
+
 ### Resolved Issues
+
+- **Fixed `amd-smi reset --gpureset` resetting only the first GPU on UALink systems**.
+  - Each UALink GPU is now reset individually; GPUs in an XGMI hive are still reset once per hive.
 
 - **Fixed `amd-smi ras --cper` crashing with `TypeError` when no GPU devices are available**.
   - When the `amdgpu` driver is not loaded, the command now exits with a clear driver-not-loaded message and exit code 206 instead of an unhandled exception.
 
+- **Fixed `amd-smi static --bus` reporting a PCIe link on GPUs that connect to the CPU over xGMI, such as MI450**.  
+  - `MAX_PCIE_WIDTH`, `MAX_PCIE_SPEED` and `PCIE_INTERFACE_VERSION` now show `N/A` instead of the emulated link's values, and `amdsmi_get_pcie_info()` returns the maximum value for these fields.
+
 - **Fixed `amd-smi` failures on non-x86 systems where the library is built without ESMI (EPYC CPU) support**.  
   - `amd-smi` no longer tries to initialize CPU monitoring on such builds, and the Python CPU APIs now raise `AmdSmiLibraryException` with `AMDSMI_STATUS_NOT_SUPPORTED` instead of `AttributeError`. CPU affinity is reported again instead of N/A, and the Go shim builds without ESMI.
+
+- **Fixed `amd-smi set --ampp-configure=@<path>` lowercasing its file path**.  
+  - The `=` form of `--ampp-configure` incorrectly lowercased its `@<path>` value, breaking case-sensitive paths. It now preserves case, matching the space-separated form.
+
+- **Setting the current memory partition now cancels a pending memory partition change**.  
+  - Previously, amd-smi did not send this request to the driver, so the next driver reload still applied a different partition requested earlier. Older amdgpu drivers ignore the request because of a driver bug and still apply the partition requested earlier; update to an amdgpu driver that has the fix. If a read-only `/sys` (for example, in a container) refuses the request, amd-smi now reports an error instead of success.
 
 ## amd_smi_lib for ROCm 10.2.0
 
@@ -80,6 +104,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Added a receipt timestamp to `amd-smi event` records**.
   - `AmdSmiEventReader.read()` now attaches a `timestamp` (Unix epoch seconds) to every event record, and the `event` subcommand surfaces it as a `TIMESTAMP` field so events can be correlated across streams.
   - Human-readable output renders one indented block per event (including `TIMESTAMP`); `--csv` writes the header once followed by a row per event, and `--json` emits newline-delimited JSON (one object per line).
+
+- **Added `amdsmi_get_gpu_cpu_links()` to report a GPU's directly-connected CPU link(s) (package id and link type)**.  
+  - On MI450, `amd-smi xgmi --metric` and `--link-status` now show a `CPU(PKG<n>)` column per connected CPU package; `--metric`'s JSON/CSV output carries the same data in a new `cpu_links` field, separate from the existing `links` array.
 
 - **Added a read-only Linux Go module**.  
   - Provides GPU discovery, identity, telemetry, PCIe, XGMI link metrics, nearest GPUs, SOC P-state policies, current partition metadata, and ECC/RAS queries with native units and field availability preserved.
@@ -293,6 +320,14 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed GPU BDFs and sysfs-based queries when `libdrm_amdgpu` cannot be loaded**.  
+  - Without `libdrm_amdgpu`, as in the manylinux wheel on a system without the distro libdrm, `amdsmi_get_gpu_device_bdf()` returned leftover memory as the BDF with `AMDSMI_STATUS_SUCCESS`, `amdsmi_get_processor_handle_from_bdf()` could not find the GPU, and PCIe, clock, power-management and ECC-block information was unavailable.
+  - The BDF and render node now come from sysfs regardless of libdrm. ASIC, VBIOS, driver, VRAM-usage and virtualization-mode queries still need libdrm and keep returning `AMDSMI_STATUS_NOT_SUPPORTED` without it.
+
+- **Fixed AMD SMI reporting no GPUs when another copy of the library was loaded first**.  
+  - When a different `libamd_smi.so` file was already loaded with `RTLD_GLOBAL`, as PyTorch wheels do, the library's calls to its own functions went to that copy, and `amdsmi_get_processor_handles()` returned no GPUs, so `torch.cuda.device_count()` returned 0.
+  - `libamd_smi.so` is now linked with `-Bsymbolic-functions`, as the pip wheel's library already was, so its internal calls stay within the library.
+
 - **Fixed `amdsmi_asic_info_t.oam_id` reporting an incorrect value for multi-digit XGMI node IDs**.  
   - The field was parsed as hex instead of decimal, so any node ID of 10 or greater reported the wrong value; its doxygen comment also incorrectly described it as a socket number rather than the XGMI physical node ID within the hive.
 
@@ -402,6 +437,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed a segmentation fault in the DRM example when run without root**.  
   - `amdsmi_get_gpu_accelerator_partition_profile_config()` returns `AMDSMI_STATUS_NO_PERM` without filling its output, and the example read `num_profiles` from that uninitialized structure, so the profile loop ran past the end of the `profiles` array on every GPU. The loop now runs only when the query succeeds.
+
+- **Fixed board temperatures showing `-1 °C` for sensors the board does not have**.  
+  - `amd-smi metric --base-board` and `--gpu-board` now show `N/A` for them, and `amdsmi_get_temp_metric()` returns `AMDSMI_STATUS_NOT_SUPPORTED`.
 
 - **Fixed misleading errors when a GPU, CPU, or AI NIC driver is not loaded**.  
   - When the device is present, `amd-smi` now names the missing driver (exit code 206) instead of reporting "not supported" or an invalid parameter, and `list`, `static`, `metric`, `firmware`, `monitor`, and `topology` show the available devices with a note about the rest on stderr.

@@ -1032,6 +1032,7 @@ impl<'device, 'cancel> GpuCopySequence<'device, 'cancel> {
         cancel: &'cancel AtomicBool,
         format: KernelQueueFormat,
     ) -> Result<Self, CopyFailure> {
+        let _operation = gpu.driver.admit().map_err(CopyFailure::retired)?;
         if !gpu.supports_linear_copy() {
             return Err(CopyFailure::retired(Error::Operation {
                 kind: ErrorKind::Unsupported,
@@ -1087,6 +1088,7 @@ impl<'device, 'cancel> GpuCopySequence<'device, 'cancel> {
     #[allow(unsafe_code)]
     pub fn enable_timing(&mut self) -> Result<(), CopyFailure> {
         self.active()?;
+        let _operation = self.gpu.driver.admit().map_err(CopyFailure::retired)?;
         if self.timing.is_some() || self.resources.submitted_any {
             return Err(invalid(
                 "SDMA copy timing must start before the first packet",
@@ -1201,6 +1203,7 @@ impl<'device, 'cancel> GpuCopySequence<'device, 'cancel> {
         options: GpuCopyOptions,
     ) -> Result<(), CopyFailure> {
         self.active()?;
+        let _operation = self.gpu.driver.admit().map_err(CopyFailure::retired)?;
         if options.is_plain() {
             // SAFETY: The caller supplied the same direct-range contract.
             return unsafe { self.copy_linear(destination, source, size) };
@@ -1280,6 +1283,7 @@ impl<'device, 'cancel> GpuCopySequence<'device, 'cancel> {
         options: GpuCopyOptions,
     ) -> Result<(), CopyFailure> {
         self.active()?;
+        let _operation = self.gpu.driver.admit().map_err(CopyFailure::retired)?;
         let info = self.gpu.info();
         let gfx125 = info.gfx_major == 12 && info.gfx_minor == 5;
         let cdna = info.gfx_major == 9 && matches!(info.gfx_minor, 4 | 5);
@@ -1328,6 +1332,7 @@ impl<'device, 'cancel> GpuCopySequence<'device, 'cancel> {
     #[allow(unsafe_code)]
     pub unsafe fn copy_rect(&mut self, rect: CopyRect) -> Result<(), CopyFailure> {
         self.active()?;
+        let _operation = self.gpu.driver.admit().map_err(CopyFailure::retired)?;
         if let Err(failure) = rect.validate() {
             return self.record(Err(failure));
         }
@@ -1352,6 +1357,7 @@ impl<'device, 'cancel> GpuCopySequence<'device, 'cancel> {
         source: &[u8],
     ) -> Result<(), CopyFailure> {
         self.active()?;
+        let _operation = self.gpu.driver.admit().map_err(CopyFailure::retired)?;
         if source.is_empty() {
             return Ok(());
         }
@@ -1392,6 +1398,7 @@ impl<'device, 'cancel> GpuCopySequence<'device, 'cancel> {
         source: u64,
     ) -> Result<(), CopyFailure> {
         self.active()?;
+        let _operation = self.gpu.driver.admit().map_err(CopyFailure::retired)?;
         if destination.is_empty() {
             return Ok(());
         }
@@ -1454,6 +1461,7 @@ impl<'device> GpuDevice<'device> {
     /// # Errors
     /// Returns an unqualified-target, allocation, or native queue failure.
     pub fn preload_linear_copy(&self) -> Result<(), CopyFailure> {
+        let _operation = self.driver.admit().map_err(CopyFailure::retired)?;
         if !self.supports_linear_copy() {
             return Err(CopyFailure::retired(Error::Operation {
                 kind: ErrorKind::Unsupported,
@@ -1548,6 +1556,7 @@ impl<'device> GpuDevice<'device> {
         source: &[u8],
         cancel: &AtomicBool,
     ) -> Result<(), CopyFailure> {
+        let _operation = self.driver.admit().map_err(CopyFailure::retired)?;
         if source.is_empty() {
             return Ok(());
         }
@@ -1574,6 +1583,7 @@ impl<'device> GpuDevice<'device> {
         source: u64,
         cancel: &AtomicBool,
     ) -> Result<(), CopyFailure> {
+        let _operation = self.driver.admit().map_err(CopyFailure::retired)?;
         if destination.is_empty() {
             return Ok(());
         }
@@ -1619,6 +1629,7 @@ impl<'device> GpuDevice<'device> {
         rects: &[CopyRect],
         cancel: &AtomicBool,
     ) -> Result<(), CopyFailure> {
+        let _operation = self.driver.admit().map_err(CopyFailure::retired)?;
         for rect in rects {
             rect.validate()?;
         }
@@ -1662,6 +1673,7 @@ impl<'device> GpuDevice<'device> {
         count: u64,
         cancel: &AtomicBool,
     ) -> Result<(), CopyFailure> {
+        let _operation = self.driver.admit().map_err(CopyFailure::retired)?;
         validate_fill_range(destination, count)?;
         if count == 0 {
             return Ok(());
@@ -1697,6 +1709,117 @@ impl<'device> GpuDevice<'device> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    #[test]
+    #[allow(unsafe_code, clippy::unwrap_used)]
+    fn retirement_rejects_submissions_through_a_retained_and_cached_copy_queue() {
+        use crate::driver::DriverInstance;
+        use crate::driver::test_driver::TestDriver;
+        use crate::memory::storage::Shared;
+        use crate::session::{DriverContextLifetime, RetirementOutcome, Session};
+        use crate::topology::{
+            EndpointKind, GpuCopyTransport, GpuInfo, GpuQueueCapabilities, GpuUserQueueCapabilities,
+        };
+
+        let id = [0x73; 16];
+        let driver = TestDriver::new(
+            id,
+            EndpointKind::Gpu {
+                info: GpuInfo {
+                    target_profile: GpuTargetProfile::Gfx9,
+                    queues: GpuQueueCapabilities {
+                        sdma: Some(GpuUserQueueCapabilities::default()),
+                        copy: Some(GpuCopyTransport::User),
+                        ..GpuQueueCapabilities::default()
+                    },
+                    ..GpuInfo::default()
+                },
+            },
+            DriverContextLifetime::Session,
+        )
+        .with_owned_allocation();
+        let destroys = driver.queue_destroys.clone();
+        let mut session = Session::from_drivers(
+            vec![DriverInstance::Test(Shared::new(driver).unwrap())],
+            DriverContextLifetime::Session,
+        )
+        .unwrap();
+        let device = session
+            .activate(&session.open_endpoint(id).unwrap())
+            .unwrap();
+        let gpu = device.gpu().unwrap();
+        let page = crate::memory::host_page_size().unwrap();
+        let command = device
+            .allocate(
+                MemoryKind::System,
+                page,
+                page,
+                DeviceAccess::READ | DeviceAccess::WRITE,
+            )
+            .unwrap();
+        let host_address = command.info().host_address.unwrap();
+        let command_address = command.device_address(&device).unwrap();
+        // SAFETY: The fake queue is numeric-only and receives no external
+        // backing. Cancellation below prevents any ring pointer access even
+        // if admission accidentally lets a submission reach the transport.
+        let queue = unsafe {
+            gpu.create_queue(QueueRequest {
+                control_memory: QueueRingMemory::System,
+                ring_size_bytes: USER_RING_BYTES,
+                parameters: QueueParameters::Sdma,
+                priority: QueuePriority::Normal,
+                device_producer: false,
+            })
+        }
+        .unwrap();
+        gpu.resources.copy_pool.idle.lock().unwrap().default = Some(CopyResources {
+            queue: ManuallyDrop::new(CopyQueue::User(queue)),
+            command: ManuallyDrop::new(command),
+            host_address,
+            command_address,
+            pending: None,
+            submitting: false,
+            submitted_any: false,
+            timing: None,
+            protocol: SdmaProtocol::Gfx9,
+        });
+        let cancel = AtomicBool::new(true);
+        let mut sequence = GpuCopySequence::begin(gpu, &cancel).unwrap();
+        session.begin_retirement().unwrap();
+        // SAFETY: These disjoint ranges belong to the retained fake command
+        // allocation, and cancellation precludes a native submission.
+        let failure =
+            unsafe { sequence.copy_linear(command_address + 16, command_address, 4) }.unwrap_err();
+        assert_eq!(failure.error.kind(), ErrorKind::Unsupported);
+        assert!(!failure.operands_may_be_live);
+        assert!(!sequence.resources.submitted_any);
+        drop(sequence);
+        assert!(
+            gpu.resources
+                .copy_pool
+                .idle
+                .lock()
+                .unwrap()
+                .default
+                .is_some()
+        );
+        assert_eq!(
+            gpu.preload_linear_copy().unwrap_err().error.kind(),
+            ErrorKind::Unsupported
+        );
+        // SAFETY: The retained fake allocation backs this range; cancellation
+        // also prevents publication if the admission check regresses.
+        let failure = unsafe { gpu.fill_u32(command_address, 0, 1, &cancel) }.unwrap_err();
+        assert_eq!(failure.error.kind(), ErrorKind::Unsupported);
+        assert!(matches!(session.try_close(), RetirementOutcome::Busy));
+        drop(device);
+        assert_eq!(destroys.load(Ordering::Relaxed), 1);
+        assert!(matches!(session.try_close(), RetirementOutcome::Closed));
+    }
 
     #[test]
     fn swap_chunks_preserve_encoded_alignment_and_exact_byte_coverage() {
