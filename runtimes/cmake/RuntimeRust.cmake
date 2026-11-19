@@ -43,6 +43,11 @@ macro(runtime_rust_initialize)
         CACHE STRING
         "Optional Cargo parallel-job limit"
     )
+    set(ROCM_RUNTIMES_ADDRLIB_SOURCE_DIR
+        ""
+        CACHE PATH
+        "Optional AddrLib source tree (empty selects the pinned runtime copy)"
+    )
     execute_process(
         COMMAND
             "${Python3_EXECUTABLE}"
@@ -54,6 +59,7 @@ macro(runtime_rust_initialize)
             --system "${CMAKE_SYSTEM_NAME}" --build-type "${CMAKE_BUILD_TYPE}"
             --cargo-home "${ROCM_RUNTIMES_CARGO_HOME}" --cargo-config
             "${ROCM_RUNTIMES_CARGO_CONFIG}" --jobs "${ROCM_RUNTIMES_CARGO_JOBS}"
+            --addrlib-source "${ROCM_RUNTIMES_ADDRLIB_SOURCE_DIR}"
         COMMAND_ERROR_IS_FATAL ANY
     )
     include("${_runtime_binary_dir}/runtime-rust-config.cmake")
@@ -62,6 +68,12 @@ macro(runtime_rust_initialize)
         "${_runtime_cargo_config}"
         CACHE FILEPATH
         "Optional prepared Cargo configuration"
+        FORCE
+    )
+    set(ROCM_RUNTIMES_ADDRLIB_SOURCE_DIR
+        "${_runtime_addrlib_source}"
+        CACHE PATH
+        "Optional AddrLib source tree (empty selects the pinned runtime copy)"
         FORCE
     )
     file(

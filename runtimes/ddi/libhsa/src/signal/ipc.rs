@@ -87,7 +87,7 @@ impl SignalState {
     /// Creates IPC signal and records its ownership.
     pub(crate) fn create_ipc_signal(
         &mut self,
-        gpus: &[crate::runtime::Gpu],
+        gpus: &[crate::agent::Gpu],
         host_page_size: usize,
         value: SignalValue,
     ) -> Result<HsaSignal, Status> {
@@ -136,7 +136,7 @@ impl SignalState {
     pub(crate) unsafe fn attach_ipc_signal(
         &mut self,
         session: &rocddi::session::Session,
-        gpus: &[crate::runtime::Gpu],
+        gpus: &[crate::agent::Gpu],
         words: [u32; 8],
     ) -> Result<HsaSignal, Status> {
         reserve_wait_signal_slots(1)?;

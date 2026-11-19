@@ -5,9 +5,11 @@
 
 use std::ffi::{c_char, c_void};
 
+use crate::agent::cache_handles_in_level_order;
 use crate::ffi::*;
+use crate::lifecycle::lock;
 use crate::memory::pool::*;
-use crate::runtime::{boundary, cache_handles_in_level_order, lock};
+use crate::status::boundary;
 
 #[cfg_attr(
     all(hsa_tool_dispatch, not(test)),
@@ -120,13 +122,13 @@ pub unsafe extern "C" fn hsa_agent_iterate_caches(
             let Some(runtime) = guard.as_ref() else {
                 return NOT_INITIALIZED;
             };
-            if !runtime.is_agent(agent) {
+            if !runtime.agents.is_agent(agent) {
                 return INVALID_AGENT;
             }
             let Some(_) = callback else {
                 return INVALID_ARGUMENT;
             };
-            cache_handles_in_level_order(&runtime.caches, agent)
+            cache_handles_in_level_order(&runtime.agents.caches, agent)
         };
         let Some(callback) = callback else {
             return INVALID_ARGUMENT;
@@ -161,13 +163,13 @@ pub unsafe extern "C" fn hsa_cache_get_info(
         let Some(runtime) = guard.as_ref() else {
             return NOT_INITIALIZED;
         };
-        let Some(index) = runtime.cache_index(cache) else {
+        let Some(index) = runtime.agents.cache_index(cache) else {
             return INVALID_CACHE;
         };
         if value.is_null() {
             return INVALID_ARGUMENT;
         }
-        let cache = &runtime.caches[index];
+        let cache = &runtime.agents.caches[index];
         // SAFETY: Each arm writes the public value type for the attribute.
         unsafe {
             match attribute {
@@ -253,7 +255,9 @@ pub unsafe extern "C" fn hsa_region_get_info(
                 memory_pool_get_info(runtime, pool, pool_attribute, value, INVALID_REGION)
             };
         }
-        if runtime.decode_cpu_pool(pool).is_none() && runtime.decode_gpu_pool(pool).is_none() {
+        if runtime.agents.decode_cpu_pool(pool).is_none()
+            && runtime.agents.decode_gpu_pool(pool).is_none()
+        {
             return INVALID_REGION;
         }
         // SAFETY: Each arm writes the public value type for the attribute.
@@ -262,16 +266,18 @@ pub unsafe extern "C" fn hsa_region_get_info(
                 REGION_INFO_ALLOC_MAX_PRIVATE_WORKGROUP_SIZE => return INVALID_ARGUMENT,
                 AMD_REGION_INFO_HOST_ACCESSIBLE => value
                     .cast::<bool>()
-                    .write(runtime.decode_cpu_pool(pool).is_some()),
+                    .write(runtime.agents.decode_cpu_pool(pool).is_some()),
                 AMD_REGION_INFO_BASE => value.cast::<*mut c_void>().write(std::ptr::null_mut()),
                 AMD_REGION_INFO_BUS_WIDTH => value.cast::<u32>().write(
                     runtime
+                        .agents
                         .pool_bank(pool)
                         .and_then(|bank| bank.width_bits)
                         .unwrap_or(0),
                 ),
                 AMD_REGION_INFO_MAX_CLOCK_FREQUENCY => value.cast::<u32>().write(
                     runtime
+                        .agents
                         .pool_bank(pool)
                         .and_then(|bank| bank.maximum_clock_mhz)
                         .unwrap_or(0),

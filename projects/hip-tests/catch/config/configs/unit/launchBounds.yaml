@@ -1,7 +1,7 @@
 ---
 launchBounds:
   Unit_Kernel_Launch_bounds_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [attributes, kernel]
   Unit_Kernel_Launch_bounds_Negative_OutOfBounds:
     <<: *level_default

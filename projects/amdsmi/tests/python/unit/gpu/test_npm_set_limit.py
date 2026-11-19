@@ -24,8 +24,6 @@ which:
     AMDSMI_STATUS_NOT_SUPPORTED; no exception on AMDSMI_STATUS_SUCCESS)
 """
 
-from __future__ import annotations
-
 import ctypes
 import unittest
 from unittest import mock

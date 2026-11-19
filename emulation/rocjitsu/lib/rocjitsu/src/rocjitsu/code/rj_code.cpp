@@ -8,24 +8,10 @@
 
 #include <cstring>
 #include <string>
-#include <unordered_map>
 
 using namespace rocjitsu;
 
 namespace {
-
-Decoder *create_decoder_for_target(rj_code_target_id_t target) {
-  const IsaTargetRegistry &registry = default_isa_target_registry();
-  const IsaTargetDescriptor *descriptor = registry.find(target);
-  if (descriptor == nullptr)
-    return nullptr;
-
-  static thread_local std::unordered_map<rj_code_target_id_t, std::unique_ptr<Decoder>> decoders;
-  std::unique_ptr<Decoder> &decoder = decoders[target];
-  if (!decoder)
-    decoder = Decoder::create(registry, target);
-  return decoder.get();
-}
 
 rj_code_arch_t arch_for_target(rj_code_target_id_t target) {
   const IsaTargetDescriptor *descriptor = default_isa_target_registry().find(target);
@@ -129,7 +115,7 @@ rj_status_t rj_code_inst_list_create(rj_code_object_t *obj, rj_code_target_id_t 
     if (!code_object_accepts_target(*obj->co, target_id))
       return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-    auto *decoder = create_decoder_for_target(target_id);
+    auto decoder = Decoder::create(default_isa_target_registry(), target_id);
     if (!decoder)
       return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
@@ -194,7 +180,7 @@ rj_status_t rj_code_basic_block_list_create(rj_code_object_t *obj, rj_code_targe
     if (!code_object_accepts_target(*obj->co, target_id))
       return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-    auto *decoder = create_decoder_for_target(target_id);
+    auto decoder = Decoder::create(default_isa_target_registry(), target_id);
     if (!decoder)
       return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
