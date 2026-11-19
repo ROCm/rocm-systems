@@ -2494,6 +2494,32 @@
         }
       ]
     },
+    "ubr_multisegment_hybrid_reuse_sysmem": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_DEBUG_SUBSYS": "REG",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "NCCL_WIN_ENABLE": "1",
+        "NCCL_ELASTIC_BUFFER_REGISTER": "1",
+        "NCCL_SYM_REUSE_SYSMEM_HANDLES": "1",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "UBR_MultiSegment_Symmetric_Elastic_Lsa_ReuseSysmemHandles",
+          "description": "Hybrid device+host symmetric window with NCCL_SYM_REUSE_SYSMEM_HANDLES=1: each host owner exports its POSIX fd, every rank joins the owner-fd allgather, and the LSA AllReduce stays correct",
+          "test_filter": "UBR_MultiSegment.Symmetric_Elastic_Lsa"
+        }
+      ]
+    },
     "ubr_concurrent_reg_hang": {
       "extends": "default",
       "is_gtest": true,
@@ -5966,6 +5992,12 @@
       "name": "UBR Concurrent Registration Hang Tests",
       "description": "Tests demonstrating UBR concurrent registration hang with separate buffers and fix with contiguous buffers. Includes one test expected to hang (run with timeout).",
       "config": "ubr_concurrent_reg_hang",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - Hybrid Window Owner FDs",
+      "description": "Hybrid device+host symmetric window run with NCCL_SYM_REUSE_SYSMEM_HANDLES=1 so the host owner-fd export and allgather run on hardware (single node, 2 ranks)",
+      "config": "ubr_multisegment_hybrid_reuse_sysmem",
       "enabled": true
     },
     {

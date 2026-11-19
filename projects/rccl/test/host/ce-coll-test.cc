@@ -35,6 +35,13 @@
 
 #include CE_COLL_CC_PATH
 
+// src/rma/rma_proxy.cc and src/dev_runtime.cc, which this binary does not link: the hierarchical CE RMA terms.
+bool ncclRmaWantInternalCtx(struct ncclComm*) { return true; }
+std::function<void*(struct ncclDevrWindow*, int)> g_devrGetRmaWin = [](struct ncclDevrWindow*, int) -> void* {
+  return nullptr;
+};
+void* ncclDevrGetRmaWin(struct ncclDevrWindow* winHost, int ctx) { return g_devrGetRmaWin(winHost, ctx); }
+
 namespace {
 
 using RcclUnitTesting::CaptureLog;
@@ -1119,6 +1126,50 @@ TEST_F(CeCollBatchOpsMicrotest, IntraGpuMemcpyDisabled_NoBatchPrefersOverlapWith
       EXPECT_FALSE(batch.prefersOverlap);
     }
   }
+}
+
+// A multi-node comm that passes every other hierarchical CE term, so only the windows' RMA handles decide.
+class HierCeAvailableMicrotest : public ::testing::Test {
+ protected:
+  std::unique_ptr<ncclComm> comm_;
+  ncclDevrWindow send_{};
+  ncclDevrWindow recv_{};
+  int handle_ = 0;
+
+  void SetUp() override {
+    comm_ = std::make_unique<ncclComm>();
+    comm_->nRanks = 16;
+    comm_->nNodes = 2;
+    comm_->maxLocalRanks = 8;
+    comm_->symmetricSupport = 1;
+    comm_->hostRmaSupport = true;
+    comm_->rmaBaseStride = 1;
+    ncclCudaDriverVersionCache = ROCM_VER_7_12_0;
+    g_devrIsOneLsaTeamValue = false;
+  }
+  void TearDown() override {
+    ncclCudaDriverVersionCache = kDefaultCudaDriverVersion;
+    g_devrIsOneLsaTeamValue = true;
+  }
+  bool Available() {
+    return ncclHierCeAvailable(comm_.get(), ncclFuncAllGather, ncclDevSum, ncclFloat32, ncclSymSendRegRecvReg, &send_,
+                               &recv_);
+  }
+};
+
+// A window whose RMA registration was skipped falls back instead of failing the put at launch.
+TEST_F(HierCeAvailableMicrotest, WindowWithoutRmaRegistration_FallsBack) {
+  std::map<ncclDevrWindow*, void*> handles{{&send_, &handle_}, {&recv_, &handle_}};
+  ScopedHook<void*(ncclDevrWindow*, int)> rmaWin{g_devrGetRmaWin, [&](ncclDevrWindow* win, int ctx) -> void* {
+                                                   EXPECT_EQ(0, ctx);
+                                                   return handles[win];
+                                                 }};
+  EXPECT_TRUE(Available());
+  handles[&recv_] = nullptr;
+  EXPECT_FALSE(Available()) << "receive window";
+  handles[&recv_] = &handle_;
+  handles[&send_] = nullptr;
+  EXPECT_FALSE(Available()) << "send window";
 }
 
 }  // namespace

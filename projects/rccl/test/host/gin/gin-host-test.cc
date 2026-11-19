@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <new>
 #include <string>
@@ -45,6 +46,7 @@
 #include "fakes/nccl_device_core_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/os_fakes.h"
+#include "fakes/rccl_mseg_fakes.h"
 #include "fakes/topo_stubs.h"
 
 // Link seam for src/nccl_device/gin_barrier.cc, which ncclGinDevCommSetup calls to
@@ -205,6 +207,12 @@ struct RegMrCall {
   uint64_t mrFlags;
 };
 
+struct RegMrDmaBufCall {
+  void* collComm;
+  uint64_t offset;
+  int fd;
+};
+
 struct FakeGin {
   int ndev = 1;
   bool needsProxyProgress = true;
@@ -257,6 +265,7 @@ struct FakeGin {
   BadContext badContext = BadContext::None;
 
   std::vector<RegMrCall> regMrCalls;
+  std::vector<RegMrDmaBufCall> regMrDmaBufCalls;  // also counted in regMrCalls
   std::vector<std::pair<void*, void*>> deregMrCalls;  // (collComm, mhandle)
   bool regMrSymReturnsNullWindow = false;
   // Call number (1-based) whose queryLastError reports an error. 0: none.
@@ -385,6 +394,13 @@ struct FakeGin {
     return ncclSuccess;
   }
 
+  // Records the fd and offset, then registers like regMrSym so the handles stay distinct per call.
+  ncclResult_t regMrSymDmaBuf(void* collComm, void* address, size_t size, int memType, uint64_t offset, int fd,
+                              uint64_t mrFlags, void** mhandle, void** ginHandle) {
+    regMrDmaBufCalls.push_back(RegMrDmaBufCall{collComm, offset, fd});
+    return regMrSym(collComm, address, size, memType, mrFlags, mhandle, ginHandle);
+  }
+
   ncclResult_t deregMrSym(void* collComm, void* mhandle) {
     deregMrCalls.emplace_back(collComm, mhandle);
     return failDeregMrSym.at(static_cast<int>(deregMrCalls.size()));
@@ -464,6 +480,11 @@ struct FakeGin {
                                void** mhandle, void** ginHandle) {
     return fakeFrom(collComm, FakeHandle::Role::CollComm)
         ->regMrSym(collComm, address, size, memType, mrFlags, mhandle, ginHandle);
+  }
+  static ncclResult_t RegMrSymDmaBuf(void* collComm, void* address, size_t size, int memType, uint64_t offset,
+                                     int fd, uint64_t mrFlags, void** mhandle, void** ginHandle) {
+    return fakeFrom(collComm, FakeHandle::Role::CollComm)
+        ->regMrSymDmaBuf(collComm, address, size, memType, offset, fd, mrFlags, mhandle, ginHandle);
   }
   static ncclResult_t DeregMrSym(void* collComm, void* mhandle) {
     return fakeFrom(collComm, FakeHandle::Role::CollComm)->deregMrSym(collComm, mhandle);
@@ -2084,6 +2105,20 @@ class GinHostRegisterMicrotest : public GinHostFixture {
     configureBackend(0, 2);
   }
 
+  void TearDown() override {
+    g_hostSegmentFdLookup = [](uintptr_t, size_t, uint64_t*) { return -1; };
+    GinHostFixture::TearDown();
+  }
+
+  // Publishes an owner fd for buffer_, as the dev runtime does for a host segment.
+  void publishOwnerFd(int fd, uint64_t offset) {
+    g_hostSegmentFdLookup = [this, fd, offset](uintptr_t addr, size_t len, uint64_t* off) {
+      if (addr != reinterpret_cast<uintptr_t>(buffer_) || len != sizeof(buffer_)) return -1;
+      *off = offset;
+      return fd;
+    };
+  }
+
   // One backend with `ginCommCount` connections, each with its own collComm so a
   // test can tell which connection a registration landed on.
   void configureBackend(int backendIdx, int ginCommCount) {
@@ -2110,6 +2145,14 @@ class GinHostRegisterMicrotest : public GinHostFixture {
   }
 
   ncclResult_t deregisterWindow() { return ncclGinDeregister(comm(), hostWins_, winGenerations_); }
+
+  // One GIN window over several physical segments, with DMA-BUF on every connection.
+  ncclResult_t registerMultiSegWindow() {
+    auto& backend = gin()->backends[0];
+    for (int i = 0; i < backend.ginCommCount; i++) backend.ginProps[i].ptrSupport |= NCCL_PTR_DMABUF;
+    return rcclGinRegisterMultiSeg(comm(), buffer_, sizeof(buffer_), hostWins_, devWins_, winGenerations_,
+                                   /*winFlags=*/0, NCCL_PTR_CUDA);
+  }
 };
 
 // Every connection of every active backend gets its own registration, and the
@@ -2171,6 +2214,69 @@ TEST_F(GinHostRegisterMicrotest, Register_MultiSegmentWithDmabufEverywhere_Regis
 
   EXPECT_EQ(ncclSuccess, registerWindow(/*winFlags=*/0, /*multiSegment=*/true));
   EXPECT_EQ(2u, fake_.regMrCalls.size());
+}
+
+// A published owner fd goes to regMrSymDmaBuf on every connection, at its offset.
+TEST_F(GinHostRegisterMicrotest, Register_OwnerFdPublished_RegistersEveryConnectionThroughRegMrSymDmaBuf) {
+  vtable_.regMrSymDmaBuf = &FakeGin::RegMrSymDmaBuf;
+  publishOwnerFd(/*fd=*/7, /*offset=*/4096);
+
+  ASSERT_EQ(ncclSuccess, registerWindow(/*winFlags=*/0, /*multiSegment=*/false, NCCL_PTR_HOST));
+  ASSERT_EQ(2u, fake_.regMrDmaBufCalls.size());
+  for (int i = 0; i < 2; i++) {
+    EXPECT_EQ(collCommFor(0, i), fake_.regMrDmaBufCalls[i].collComm);
+    EXPECT_EQ(7, fake_.regMrDmaBufCalls[i].fd);
+    EXPECT_EQ(4096u, fake_.regMrDmaBufCalls[i].offset);
+    EXPECT_EQ(NCCL_PTR_HOST, fake_.regMrCalls[i].memType);
+    EXPECT_NE(nullptr, hostWins_[i]);
+  }
+}
+
+// Without a published fd, or without the DMA-BUF entry point, registration stays on regMrSym.
+TEST_F(GinHostRegisterMicrotest, Register_NoOwnerFdOrNoDmaBufEntryPoint_RegistersThroughRegMrSym) {
+  vtable_.regMrSymDmaBuf = &FakeGin::RegMrSymDmaBuf;
+  ASSERT_EQ(ncclSuccess, registerWindow());
+  EXPECT_EQ(2u, fake_.regMrCalls.size());
+  EXPECT_TRUE(fake_.regMrDmaBufCalls.empty());
+  ASSERT_EQ(ncclSuccess, deregisterWindow());
+
+  vtable_.regMrSymDmaBuf = nullptr;
+  publishOwnerFd(/*fd=*/7, /*offset=*/0);
+  ASSERT_EQ(ncclSuccess, registerWindow(/*winFlags=*/0, /*multiSegment=*/false, NCCL_PTR_HOST));
+  EXPECT_EQ(4u, fake_.regMrCalls.size());
+  EXPECT_TRUE(fake_.regMrDmaBufCalls.empty());
+}
+
+// With comm->rcclMultiSegRma a GIN proxy gets fd -1 (offset 0, the export flags) on every
+// connection, so its per-segment RMA backend walks the segments instead of one whole-range export.
+TEST_F(GinHostRegisterMicrotest, RegisterMultiSeg_FlagOnProxyBackend_PassesFdMinusOneOnEveryConnection) {
+  vtable_.regMrSymDmaBuf = &FakeGin::RegMrSymDmaBuf;
+  comm()->rcclMultiSegRma = true;
+
+  ASSERT_EQ(ncclSuccess, registerMultiSegWindow());
+  ASSERT_EQ(2u, fake_.regMrDmaBufCalls.size());
+  for (int i = 0; i < 2; i++) {
+    EXPECT_EQ(collCommFor(0, i), fake_.regMrDmaBufCalls[i].collComm);
+    EXPECT_EQ(-1, fake_.regMrDmaBufCalls[i].fd);
+    EXPECT_EQ(0u, fake_.regMrDmaBufCalls[i].offset);
+    EXPECT_EQ(NCCL_PTR_CUDA, fake_.regMrCalls[i].memType);
+    EXPECT_NE(nullptr, hostWins_[i]);
+  }
+}
+
+// Flag off, or a backend that is not the GIN proxy, keeps the plain registration.
+TEST_F(GinHostRegisterMicrotest, RegisterMultiSeg_FlagOffOrNonProxyBackend_RegistersThroughRegMrSym) {
+  vtable_.regMrSymDmaBuf = &FakeGin::RegMrSymDmaBuf;
+  ASSERT_EQ(ncclSuccess, registerMultiSegWindow());
+  EXPECT_EQ(2u, fake_.regMrCalls.size());
+  EXPECT_TRUE(fake_.regMrDmaBufCalls.empty());
+  ASSERT_EQ(ncclSuccess, deregisterWindow());
+
+  comm()->rcclMultiSegRma = true;
+  gin()->backends[0].ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+  ASSERT_EQ(ncclSuccess, registerMultiSegWindow());
+  EXPECT_EQ(4u, fake_.regMrCalls.size());
+  EXPECT_TRUE(fake_.regMrDmaBufCalls.empty());
 }
 
 // A plugin that reports success but hands back no window is treated as a

@@ -262,6 +262,12 @@ ncclResult_t ncclGinRegister(struct ncclComm* comm, void*, size_t, void*[NCCL_GI
   if (devRuntimeTestGinRegisterFail) return ncclInternalError;
   return ncclSuccess;
 }
+ncclResult_t rcclGinRegisterMultiSeg(struct ncclComm* comm, void* address, size_t size,
+                                     void* hostWins[NCCL_GIN_MAX_CONNECTIONS],
+                                     ncclGinWindow_t devWins[NCCL_GIN_MAX_CONNECTIONS],
+                                     uint32_t gens[NCCL_GIN_MAX_ACTIVE_BACKENDS], int winFlags, int memType) {
+  return ncclGinRegister(comm, address, size, hostWins, devWins, gens, winFlags, true, memType);
+}
 ncclResult_t ncclGinDeregister(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS],
                                uint32_t const[NCCL_GIN_MAX_ACTIVE_BACKENDS]) {
   return ncclSuccess;
@@ -277,6 +283,9 @@ ncclResult_t ncclGinAnvilBindResourceWindowSignals(struct ncclComm*, void*, size
 // ---------------------------------------------------------------------------
 ncclResult_t ncclRmaProxyConnectOnce(struct ncclComm*) { return ncclSuccess; }
 ncclResult_t ncclRmaProxyRegister(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS]) {
+  return ncclSuccess;
+}
+ncclResult_t rcclRmaProxyRegisterMultiSeg(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS]) {
   return ncclSuccess;
 }
 ncclResult_t ncclRmaProxyDeregister(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS]) { return ncclSuccess; }

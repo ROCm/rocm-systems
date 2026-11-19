@@ -34,6 +34,7 @@ struct FakeRmaVtable {
     uint64_t mrFlags;
     int fd;  // -1 for a plain registration
     void* mhandle;
+    bool dmaBuf = false;  // registered through regMrSymDmaBuf
   };
 
   struct Op {
@@ -66,6 +67,8 @@ struct FakeRmaVtable {
                deregMrSymResult = ncclSuccess, opResult = ncclSuccess, testResult = ncclSuccess,
                queryLastErrorResult = ncclSuccess;
   std::deque<ncclResult_t> regMrSymDmaBufResults;  // empty means success
+  // A per-segment backend: regMrSymDmaBuf also takes fd -1 (with offset 0) and walks the range itself.
+  bool walksSegments = false;
 
   int listenDev = -1;
   void* listenHandle = nullptr;
@@ -155,10 +158,10 @@ struct FakeRmaVtable {
       res = f.regMrSymDmaBufResults.front();
       f.regMrSymDmaBufResults.pop_front();
     }
-    if (offset != 0 || fd < 0) return ncclInternalError;
+    if (offset != 0 || (fd < 0 && !(f.walksSegments && fd == -1))) return ncclInternalError;
     if (res != ncclSuccess) return res;
     *mhandle = reinterpret_cast<void*>(0xA000 + f.regs.size());
-    f.regs.push_back({collComm, data, size, type, mrFlags, fd, *mhandle});
+    f.regs.push_back({collComm, data, size, type, mrFlags, fd, *mhandle, true});
     return ncclSuccess;
   }
   static ncclResult_t DeregMrSym(void* collComm, void* mhandle) {

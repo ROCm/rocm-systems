@@ -67,6 +67,7 @@ rccl_add_rma_micro_binary(rccl-UnitTestsMicroRmaProxy rma-proxy-test.cc
     fakes/hsa_fakes.cc
     fakes/nccl_fakes.cc
     fakes/os_fakes.cc
+    fakes/rccl_mseg_fakes.cc
     fakes/rma_fakes.cc
     fakes/rocmwrap_fakes.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc

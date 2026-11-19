@@ -1158,6 +1158,29 @@
       "env_variables": {
         "RCCL_IB_MAX_MSG_SIZE": "268435456"
       }
+    },
+    "ubr_multisegment_hybrid_reuse_sysmem": {
+      "extends": "gtest_base",
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_DEBUG_SUBSYS": "REG",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "NCCL_WIN_ENABLE": "1",
+        "NCCL_ELASTIC_BUFFER_REGISTER": "1",
+        "NCCL_SYM_REUSE_SYSMEM_HANDLES": "1",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "UBR_MultiSegment_Symmetric_Elastic_Lsa_ReuseSysmemHandles",
+          "description": "Hybrid device+host symmetric window with NCCL_SYM_REUSE_SYSMEM_HANDLES=1: each host owner exports its POSIX fd, every rank joins the owner-fd allgather, and the LSA AllReduce stays correct",
+          "test_filter": "UBR_MultiSegment.Symmetric_Elastic_Lsa"
+        }
+      ]
     }
   },
 
@@ -1217,6 +1240,10 @@
     { "config": "ionic_counters",        "enabled": true },
 
     { "config": "gin_proxy_max_msg",          "enabled": true },
-    { "config": "cast_alltoall_full_max_msg", "enabled": true }
+    { "config": "cast_alltoall_full_max_msg", "enabled": true },
+    {
+      "config": "ubr_multisegment_hybrid_reuse_sysmem",
+      "enabled": true
+    }
   ]
 }

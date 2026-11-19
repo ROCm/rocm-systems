@@ -42,6 +42,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <set>
 #include <thread>
@@ -50,6 +51,7 @@
 #include "ScopedHook.h"
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
+#include "fakes/rccl_mseg_fakes.h"
 #include "fakes/rma_fakes.h"
 
 // rma_proxy.cc declares params of its own. Route the generated bodies through
@@ -112,6 +114,10 @@ struct Registration {
     size_t   size     = 0;
     int      type     = 0;
     uint64_t mrFlags  = 0;
+    // Set only for regMrSymDmaBuf, with the fd and offset production passed.
+    bool     dmaBuf   = false;
+    int      fd       = -1;
+    uint64_t offset   = 0;
 };
 
 struct FakeRma {
@@ -179,9 +185,16 @@ private:
         return Rma(collComm)->reg(data, size, type, mrFlags, mhandle);
     }
     static ncclResult_t TrampRegMrSymDmaBuf(void* collComm, void* data, size_t size, int type,
-                                            uint64_t /*offset*/, int /*fd*/, uint64_t mrFlags,
+                                            uint64_t offset, int fd, uint64_t mrFlags,
                                             void** mhandle) {
-        return Rma(collComm)->reg(data, size, type, mrFlags, mhandle);
+        FakeRma* rma = Rma(collComm);
+        ncclResult_t res = rma->reg(data, size, type, mrFlags, mhandle);
+        if (res == ncclSuccess) {
+            rma->regs.back().dmaBuf = true;
+            rma->regs.back().fd     = fd;
+            rma->regs.back().offset = offset;
+        }
+        return res;
     }
     static ncclResult_t TrampDeregMrSym(void* collComm, void* mhandle) {
         Rma(collComm)->deregs.push_back(mhandle);
@@ -449,6 +462,89 @@ TEST_F(RmaProxyAllocGraphTest, FlushBufferStaysCudaOnBothGdrArms) {
         ASSERT_NE(nullptr, reg) << "flushBufDev was never registered, gdr=" << (void*)gdr;
         EXPECT_EQ(NCCL_PTR_CUDA, reg->type) << "gdr=" << (void*)gdr;
         EXPECT_EQ(kFlushBufSize, reg->size) << "gdr=" << (void*)gdr;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The per-peer in-flight limit is the plugin's request count after the
+// multi-segment cap for the comm's rcclMultiSegRma.
+// ---------------------------------------------------------------------------
+TEST_F(RmaProxyAllocGraphTest, MaxInflightRequestsTakesTheMultiSegmentCap) {
+    props_.maxRecvs = 4;
+    comm_->rcclMultiSegRma = true;
+    std::vector<std::pair<bool, uint32_t>> calls;
+    ScopedHook cap(g_rmaMaxInflightRequests, [&](bool multiSeg, uint32_t n) {
+        calls.emplace_back(multiSeg, n);
+        return 32u;
+    });
+    ASSERT_EQ(ncclSuccess, CreateCtx());
+    EXPECT_EQ(32u, ctx_->maxInflightRequests);
+    ASSERT_EQ(1u, calls.size());
+    EXPECT_TRUE(calls[0].first);
+    EXPECT_EQ(uint32_t{NCCL_NET_MAX_REQUESTS * 4}, calls[0].second);
+}
+
+// ---------------------------------------------------------------------------
+// Window registration over one RMA comm whose backend supports DMA-BUF. With
+// DMABUF_ENABLE=1 the develop path still registers plain here: the fixture's
+// cuMem-off and RMA_USE_DMABUF=0 defaults strip its DMA-BUF bit, so it never exports.
+// ---------------------------------------------------------------------------
+class RmaProxyRegisterWindowTest : public RmaProxyAllocGraphTest {
+protected:
+    char  window_[4096] = {};
+    void* wins_[NCCL_GIN_MAX_CONNECTIONS] = {};
+    std::unique_ptr<ScopedHook<int64_t(const char*, int64_t)>> dmaBufOn_;
+
+    void SetUp() override {
+        RmaProxyAllocGraphTest::SetUp();
+        dmaBufOn_ = std::make_unique<ScopedHook<int64_t(const char*, int64_t)>>(
+            g_loadParam, ParamOverride({{"DMABUF_ENABLE", 1}}));
+        auto& state        = comm_->rmaState.rmaProxyState;
+        state.rmaCommCount = 1;
+        state.rmaComms[0]  = &rmaNet_.collH;
+        state.props[0]     = props_;
+    }
+    void TearDown() override {
+        dmaBufOn_.reset();
+        RmaProxyAllocGraphTest::TearDown();
+    }
+};
+
+// With comm->rcclMultiSegRma a multi-segment window reaches the backend as fd -1
+// (offset 0, the export flags), so a per-segment backend walks the segments itself.
+TEST_F(RmaProxyRegisterWindowTest, MultiSeg_FlagOn_PassesFdMinusOneWithoutAnExport) {
+    comm_->rcclMultiSegRma = true;
+    ASSERT_EQ(ncclSuccess, rcclRmaProxyRegisterMultiSeg(comm_.get(), window_, sizeof(window_), wins_));
+    ASSERT_EQ(1u, rmaNet_.regs.size());
+    const Registration& reg = rmaNet_.regs[0];
+    EXPECT_TRUE(reg.dmaBuf);
+    EXPECT_EQ(-1, reg.fd);
+    EXPECT_EQ(0u, reg.offset);
+    EXPECT_EQ(static_cast<void*>(window_), reg.addr);
+    EXPECT_EQ(sizeof(window_), reg.size);
+    EXPECT_EQ(NCCL_PTR_CUDA, reg.type);
+    EXPECT_NE(nullptr, wins_[0]);
+}
+
+// Without DMA-BUF on the backend the per-segment window still exports nothing: it registers plain.
+TEST_F(RmaProxyRegisterWindowTest, MultiSeg_FlagOnWithoutDmaBufSupport_RegistersPlain) {
+    comm_->rcclMultiSegRma = true;
+    comm_->rmaState.rmaProxyState.props[0].ptrSupport &= ~NCCL_PTR_DMABUF;
+    ASSERT_EQ(ncclSuccess, rcclRmaProxyRegisterMultiSeg(comm_.get(), window_, sizeof(window_), wins_));
+    ASSERT_EQ(1u, rmaNet_.regs.size());
+    EXPECT_FALSE(rmaNet_.regs[0].dmaBuf);
+    EXPECT_EQ(NCCL_PTR_CUDA, rmaNet_.regs[0].type);
+}
+
+// Flag off, or the single-segment entry with the flag on, keeps the develop registration.
+TEST_F(RmaProxyRegisterWindowTest, FlagOffOrSingleSegment_KeepsTheDevelopPath) {
+    ASSERT_EQ(ncclSuccess, rcclRmaProxyRegisterMultiSeg(comm_.get(), window_, sizeof(window_), wins_));
+    comm_->rcclMultiSegRma = true;
+    ASSERT_EQ(ncclSuccess, ncclRmaProxyRegister(comm_.get(), window_, sizeof(window_), wins_));
+    ASSERT_EQ(2u, rmaNet_.regs.size());
+    for (const Registration& reg : rmaNet_.regs) {
+        EXPECT_FALSE(reg.dmaBuf);
+        EXPECT_EQ(NCCL_PTR_CUDA, reg.type);
     }
 }
 

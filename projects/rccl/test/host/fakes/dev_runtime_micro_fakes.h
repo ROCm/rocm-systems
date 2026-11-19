@@ -64,6 +64,11 @@ extern std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GI
                                   ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS],
                                   uint32_t[NCCL_GIN_MAX_ACTIVE_BACKENDS], int, bool, int)>
     g_devrGinRegister;
+// rcclGinRegisterMultiSeg: same arguments with multiSegment true; defaults to g_devrGinRegister.
+extern std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS],
+                                  ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS],
+                                  uint32_t[NCCL_GIN_MAX_ACTIVE_BACKENDS], int, bool, int)>
+    g_devrGinRegisterMultiSeg;
 extern std::function<ncclResult_t(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS],
                                   uint32_t const[NCCL_GIN_MAX_ACTIVE_BACKENDS])>
     g_devrGinDeregister;
@@ -98,6 +103,9 @@ extern std::function<ncclResult_t(struct ncclComm*, int* /*cftSize*/, int* /*cft
 extern std::function<ncclResult_t(struct ncclComm*)> g_devrRmaProxyConnectOnce;
 extern std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS])>
     g_devrRmaProxyRegister;
+// rcclRmaProxyRegisterMultiSeg: defaults to g_devrRmaProxyRegister.
+extern std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS])>
+    g_devrRmaProxyRegisterMultiSeg;
 extern std::function<ncclResult_t(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS])> g_devrRmaProxyDeregister;
 
 

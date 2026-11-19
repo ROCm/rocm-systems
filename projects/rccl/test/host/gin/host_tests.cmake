@@ -26,13 +26,15 @@ rccl_add_gin_micro_binary(rccl-UnitTestsMicroGinHost gin-host-test.cc
     fakes/nccl_device_core_fakes.cc
     fakes/nccl_fakes.cc
     fakes/os_fakes.cc
+    fakes/rccl_mseg_fakes.cc
     fakes/search_fakes.cc
     fakes/topo_stubs.cc)
 
 # os_fakes.cc: ncclGinProgress references ncclOsCpuCount/ncclOsSetAffinity; no test starts the thread.
 rccl_add_gin_micro_binary(rccl-UnitTestsMicroGinHostFinalize gin-host-finalize-test.cc
   SOURCES
-    fakes/os_fakes.cc)
+    fakes/os_fakes.cc
+    fakes/rccl_mseg_fakes.cc)
 
 # The test redirects rocmwrap.cc's DmaBufEnable param; keep the name and default in step.
 foreach(_f "${CMAKE_CURRENT_LIST_DIR}/../../../src/misc/rocmwrap.cc"
@@ -42,4 +44,5 @@ endforeach()
 rccl_add_gin_micro_binary(rccl-UnitTestsMicroGinHostProxy gin-host-proxy-test.cc
   SOURCES
     fakes/hip_fakes.cc
-    fakes/nccl_fakes.cc)
+    fakes/nccl_fakes.cc
+    fakes/rccl_mseg_fakes.cc)

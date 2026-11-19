@@ -4425,10 +4425,9 @@ TEST_F(NetProxyRegBufferMicrotest, Reg_PluginFails_DeclinesWithoutError) {
   }
 }
 
-TEST_F(NetProxyRegBufferMicrotest, Reg_HsaDmaBuf_RegistersByFdEvenAcrossSegments) {
+TEST_F(NetProxyRegBufferMicrotest, Reg_HsaDmaBuf_RegistersByFd) {
   pfn_hsa_amd_portable_export_dmabuf = FakeExportDmaBuf;
   sendRes_.useDmaBuf = recvRes_.useDmaBuf = 1;
-  info_.numSegments = 2;
   for (bool send : {true, false}) {
     SCOPED_TRACE(send);
     net_.regMrDmaBufs.clear();
@@ -4441,6 +4440,23 @@ TEST_F(NetProxyRegBufferMicrotest, Reg_HsaDmaBuf_RegistersByFdEvenAcrossSegments
     EXPECT_EQ(fcntl(g_exportedFds.back(), F_GETFD), -1);
     EXPECT_EQ(resp_, reinterpret_cast<void*>(0x10000));
   }
+  EXPECT_TRUE(net_.regMrs.empty());
+}
+
+// RCCL: the HSA export covers only the first VMM segment, so a multi-segment buffer declines.
+TEST_F(NetProxyRegBufferMicrotest, Reg_HsaDmaBuf_MultiSegment_Declines) {
+  pfn_hsa_amd_portable_export_dmabuf = FakeExportDmaBuf;
+  sendRes_.useDmaBuf = recvRes_.useDmaBuf = 1;
+  info_.numSegments = 2;
+  const size_t exported = g_exportedFds.size();
+  for (bool send : {true, false}) {
+    SCOPED_TRACE(send);
+    ASSERT_EQ(Reg(send), ncclSuccess);
+    EXPECT_EQ(resp_, nullptr);
+    EXPECT_TRUE(ncclIntruQueueEmpty(&Conn(send).proxyMemHandleQueue));
+  }
+  EXPECT_EQ(g_exportedFds.size(), exported);
+  EXPECT_TRUE(net_.regMrDmaBufs.empty());
   EXPECT_TRUE(net_.regMrs.empty());
 }
 
@@ -4469,6 +4485,7 @@ class NetProxyRegBufferCuMemMicrotest : public NetProxyRegBufferMicrotest {
     NetProxyRegBufferMicrotest::SetUp();
     g_cuMemEnable = [] { return 1; };
     sendRes_.useDmaBuf = recvRes_.useDmaBuf = 1;
+    proxyState_.rcclMultiSegNet = true;
     exports_.Install();
   }
   void TearDown() override {
@@ -4478,7 +4495,6 @@ class NetProxyRegBufferCuMemMicrotest : public NetProxyRegBufferMicrotest {
 };
 
 TEST_F(NetProxyRegBufferCuMemMicrotest, Reg_RegistersByExportedFdAndClosesIt) {
-  info_.numSegments = 2;  // DMA-BUF handles multi-segment buffers
   for (bool send : {true, false}) {
     SCOPED_TRACE(send);
     net_.regMrDmaBufs.clear();
@@ -4492,6 +4508,79 @@ TEST_F(NetProxyRegBufferCuMemMicrotest, Reg_RegistersByExportedFdAndClosesIt) {
     EXPECT_EQ(resp_, reinterpret_cast<void*>(0x10000));
     EXPECT_EQ(fcntl(exports_.back().fd, F_GETFD), -1);
   }
+  EXPECT_TRUE(net_.regMrs.empty());
+}
+
+// RCCL: a multi-segment buffer exports nothing here; fd -1 asks the plugin for one MR per segment.
+TEST_F(NetProxyRegBufferCuMemMicrotest, Reg_MultiSegment_AsksThePluginForPerSegmentMrs) {
+  info_.numSegments = 2;
+  for (bool send : {true, false}) {
+    SCOPED_TRACE(send);
+    net_.regMrDmaBufs.clear();
+
+    ASSERT_EQ(Reg(send), ncclSuccess);
+
+    ASSERT_EQ(net_.regMrDmaBufs.size(), 1u);
+    const uint64_t flags = (uint32_t)getHandleForAddressRangeFlags(send ? sendRes_.useGdr : recvRes_.useGdr);
+    EXPECT_EQ(net_.regMrDmaBufs[0].comm, Comm(send));
+    EXPECT_EQ(net_.regMrDmaBufs[0].fd, -1);
+    EXPECT_EQ(net_.regMrDmaBufs[0].offset, flags);
+    EXPECT_EQ(resp_, reinterpret_cast<void*>(0x10000));
+  }
+  EXPECT_TRUE(exports_.empty());
+  EXPECT_TRUE(net_.regMrs.empty());
+}
+
+// RCCL: without the comm's multi-segment flag the plugin never receives fd -1.
+TEST_F(NetProxyRegBufferCuMemMicrotest, Reg_MultiSegment_WithoutCommFlag_Declines) {
+  proxyState_.rcclMultiSegNet = false;
+  info_.numSegments = 2;
+  for (bool send : {true, false}) {
+    SCOPED_TRACE(send);
+    net_.regMrDmaBufs.clear();
+    ASSERT_EQ(Reg(send), ncclSuccess);
+    EXPECT_EQ(resp_, nullptr);
+    EXPECT_TRUE(net_.regMrDmaBufs.empty());
+    EXPECT_TRUE(ncclIntruQueueEmpty(&Conn(send).proxyMemHandleQueue));
+  }
+  EXPECT_TRUE(exports_.empty());
+}
+
+// RCCL: with the comm flag set, a plugin without regMrDmaBuf still declines a multi-segment buffer.
+TEST_F(NetProxyRegBufferCuMemMicrotest, Reg_MultiSegment_PluginWithoutRegMrDmaBuf_Declines) {
+  vtable_.regMrDmaBuf = nullptr;
+  info_.numSegments = 2;
+  for (bool send : {true, false}) {
+    SCOPED_TRACE(send);
+    ASSERT_EQ(Reg(send), ncclSuccess);
+    EXPECT_EQ(resp_, nullptr);
+    EXPECT_TRUE(ncclIntruQueueEmpty(&Conn(send).proxyMemHandleQueue));
+  }
+  EXPECT_TRUE(net_.regMrDmaBufs.empty());
+  EXPECT_TRUE(net_.regMrs.empty());
+  EXPECT_TRUE(exports_.empty());
+}
+
+// RCCL: a failed per-segment registration declines; no whole-range export, HSA or regMr fallback.
+TEST_F(NetProxyRegBufferCuMemMicrotest, Reg_MultiSegment_PluginFails_Declines) {
+  pfn_hsa_amd_portable_export_dmabuf = FakeExportDmaBuf;
+  net_.regMrDmaBufResult = ncclSystemError;
+  info_.numSegments = 2;
+  const size_t hsaExported = g_exportedFds.size();
+  for (bool send : {true, false}) {
+    SCOPED_TRACE(send);
+    net_.regMrDmaBufs.clear();
+
+    ASSERT_EQ(Reg(send), ncclSuccess);
+
+    EXPECT_EQ(done_, 1);
+    ASSERT_EQ(net_.regMrDmaBufs.size(), 1u);
+    EXPECT_EQ(net_.regMrDmaBufs[0].fd, -1);
+    EXPECT_EQ(resp_, nullptr);
+    EXPECT_TRUE(ncclIntruQueueEmpty(&Conn(send).proxyMemHandleQueue));
+  }
+  EXPECT_TRUE(exports_.empty());
+  EXPECT_EQ(g_exportedFds.size(), hsaExported);
   EXPECT_TRUE(net_.regMrs.empty());
 }
 

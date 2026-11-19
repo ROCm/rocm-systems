@@ -19,6 +19,7 @@ test_categories:
       - "RmaCe*"
       # rma_proxy.cc
       - "RmaProxyAllocGraphTest.*"
+      - "RmaProxyRegisterWindowTest.*"
       # rma_proxy_launch.cc
       - "RmaProxyBatchMemOpTest.*"
       - "RmaProxyDescriptorTest.*"

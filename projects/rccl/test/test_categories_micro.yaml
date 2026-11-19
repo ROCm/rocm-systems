@@ -44,6 +44,7 @@ test_categories:
       # ce_coll.cc (rccl-UnitTestsMicroCeColl)
       - "CeColl*"
       - "CeInit*"
+      - "HierCeAvailable*"
       - "LaunchPaths/CeAlltoAllvSyncMicrotest.*"
       # dev_runtime.cc
       - "Alloc*"

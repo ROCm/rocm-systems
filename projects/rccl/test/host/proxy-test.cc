@@ -2306,6 +2306,27 @@ class ProxyServiceFixture : public ProxyFixture {
   char op1_, op2_, op3_;
 };
 
+// ncclProxyCreate copies the comm's net multi-segment flag next to dmaBufSupport; both services exit at once here.
+TEST_F(ProxyServiceFixture, Create_CopiesTheCommMultiSegNetFlag) {
+  for (bool multiSeg : {true, false}) {
+    SCOPED_TRACE(multiSeg);
+    auto comm = std::make_unique<ncclComm>();
+    comm->proxyState = &ps_;
+    comm->abortFlag = &abort_;
+    comm->rcclMultiSegNet = multiSeg;
+    comm->dmaBufSupport = true;
+    ps_.refCount = 1;
+    ps_.rcclMultiSegNet = !multiSeg;
+    g_sock.getFdFailAt = g_sock.getFds;
+    g_ipc.getFdResult = ncclInternalError;
+    ASSERT_EQ(ncclProxyCreate(comm.get()), ncclSuccess);
+    ps_.thread.join();
+    ps_.threadUDS.join();
+    EXPECT_EQ(multiSeg, ps_.rcclMultiSegNet);
+    EXPECT_TRUE(ps_.dmaBufSupport);
+  }
+}
+
 class ProxyServiceOpMicrotest : public ProxyServiceFixture {
  protected:
   void SetUp() override {

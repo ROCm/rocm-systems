@@ -778,6 +778,23 @@ TEST_F(RmaProxyDescriptorTest, PutOp_NoSignalCopiesTheDataOperationOnly) {
   EXPECT_EQ(0u, op.signal.op);
 }
 
+// A window whose RMA registration was skipped has no handle; the op fails instead of posting with it.
+TEST_F(RmaProxyDescriptorTest, PutOp_WindowWithoutRmaRegistrationFails) {
+  ncclDevrMemory srcMemory{};
+  ncclDevrMemory dstMemory{};
+  srcMemory.rmaHostWins[kContext] = reinterpret_cast<void*>(0x7550);
+  srcWin_.memory = &srcMemory;
+  dstWin_.memory = &dstMemory;
+  ncclRmaPutSignalOp op{};
+
+  EXPECT_EQ(ncclInvalidUsage, ncclRmaProxyPutBuildOp(comm_.get(), ctx_.get(), kContext, false, &srcWin_, 0, &dstWin_,
+                                                      0, 64, kPeer, 0, NCCL_SIGNAL_NONE, &op));
+  dstMemory.rmaHostWins[kContext] = reinterpret_cast<void*>(0x7660);
+  srcMemory.rmaHostWins[kContext] = nullptr;
+  EXPECT_EQ(ncclInvalidUsage, ncclRmaProxyPutBuildOp(comm_.get(), ctx_.get(), kContext, false, &srcWin_, 0, &dstWin_,
+                                                      0, 64, kPeer, 0, NCCL_SIGNAL_NONE, &op));
+}
+
 // Account for each window's offset within a shared backing allocation.
 TEST_F(RmaProxyDescriptorTest, Put_TwoWindowsCarvedFromOneAllocationDoNotAlias) {
   void* allocation = reinterpret_cast<void*>(0x100000);

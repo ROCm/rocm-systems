@@ -127,6 +127,7 @@ ncclResult_t FakeCudaMemcpy(T* dst, T* src, size_t nelem) {
 #include "ScopedHook.h"
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
+#include "fakes/rccl_mseg_fakes.h"
 #include "fakes/rma_vtable_fake.h"
 
 using RcclUnitTesting::CaptureLog;
@@ -138,7 +139,6 @@ gdr_t ncclGdrCopy = nullptr;
 #include "fakes/param_redirect.h"
 // src/misc/rocmwrap.cc's param, which fakes/rocmwrap_fakes.cc does not define yet.
 NCCL_PARAM(DmaBufEnable, "DMABUF_ENABLE", 1);
-
 // CreateContext's error paths destroy the partial context; Create() records its host allocations to check that
 // none survives a failure (and to release any that would, so one leak cannot cascade into later tests).
 namespace {
@@ -438,6 +438,81 @@ TEST_F(GinHostProxyRegMrMicrotest, Cuda_PluginWithoutDmaBufSupportRegistersPlain
   EXPECT_TRUE(exportSizes_.empty());
   ASSERT_EQ(1u, rma_.regs.size());
   EXPECT_EQ(-1, rma_.regs[0].fd);
+}
+
+// regMrSymDmaBuf forwards the caller's fd unchanged and publishes the plugin handle as the GIN handle.
+TEST_F(GinHostProxyRegMrMicrotest, DmaBuf_ForwardsTheCallersFdToThePlugin) {
+  ASSERT_NE(nullptr, ncclGinProxy.regMrSymDmaBuf);
+  ASSERT_EQ(ncclSuccess, ncclGinProxy.regMrSymDmaBuf(collComm_, buf_, sizeof(buf_), NCCL_PTR_HOST, /*offset=*/0,
+                                                     /*fd=*/23, /*mrFlags=*/7, &mhandle_, &ginHandle_));
+  EXPECT_TRUE(exportSizes_.empty());
+  ASSERT_EQ(1u, rma_.regs.size());
+  EXPECT_EQ(FakeRmaVtable::kCollComm, rma_.regs[0].collComm);
+  EXPECT_EQ(buf_, rma_.regs[0].addr);
+  EXPECT_EQ(NCCL_PTR_HOST, rma_.regs[0].type);
+  EXPECT_EQ(7u, rma_.regs[0].mrFlags);
+  EXPECT_EQ(23, rma_.regs[0].fd);
+  EXPECT_EQ(rma_.regs[0].mhandle, mhandle_);
+  EXPECT_EQ(mhandle_, ginHandle_);
+}
+
+// A plugin without regMrSymDmaBuf, or without DMA-BUF support, falls back to a plain registration.
+TEST_F(GinHostProxyRegMrMicrotest, DmaBuf_PluginWithoutDmaBufFallsBackToPlain) {
+  ASSERT_NE(nullptr, ncclGinProxy.regMrSymDmaBuf);
+  rma_.vtable.regMrSymDmaBuf = nullptr;
+  ASSERT_EQ(ncclSuccess, ncclGinProxy.regMrSymDmaBuf(collComm_, buf_, sizeof(buf_), NCCL_PTR_HOST, /*offset=*/0,
+                                                     /*fd=*/23, /*mrFlags=*/7, &mhandle_, &ginHandle_));
+  ASSERT_EQ(1u, rma_.regs.size());
+  EXPECT_EQ(-1, rma_.regs[0].fd);
+  EXPECT_EQ(mhandle_, ginHandle_);
+
+  rma_.vtable.regMrSymDmaBuf = &FakeRmaVtable::RegMrSymDmaBuf;
+  rma_.ptrSupport = NCCL_PTR_HOST | NCCL_PTR_CUDA;
+  ASSERT_EQ(ncclSuccess, Reconnect());
+  ASSERT_EQ(ncclSuccess, ncclGinProxy.regMrSymDmaBuf(collComm_, buf_, sizeof(buf_), NCCL_PTR_HOST, /*offset=*/0,
+                                                     /*fd=*/23, /*mrFlags=*/7, &mhandle_, &ginHandle_));
+  ASSERT_EQ(2u, rma_.regs.size());
+  EXPECT_EQ(-1, rma_.regs[1].fd);
+  EXPECT_EQ(rma_.regs[1].mhandle, mhandle_);
+  EXPECT_EQ(mhandle_, ginHandle_);
+}
+
+// fd -1 asks a per-segment backend to walk the segments: the proxy forwards it and exports nothing itself.
+TEST_F(GinHostProxyRegMrMicrotest, DmaBuf_FdMinusOne_ForwardedToThePerSegmentBackendWithoutAnExport) {
+  rma_.walksSegments = true;
+  ASSERT_EQ(ncclSuccess, ncclGinProxy.regMrSymDmaBuf(collComm_, buf_, sizeof(buf_), NCCL_PTR_CUDA, /*offset=*/0,
+                                                     /*fd=*/-1, /*mrFlags=*/7, &mhandle_, &ginHandle_));
+  EXPECT_TRUE(exportSizes_.empty());
+  ASSERT_EQ(1u, rma_.regs.size());
+  EXPECT_TRUE(rma_.regs[0].dmaBuf);
+  EXPECT_EQ(-1, rma_.regs[0].fd);
+  EXPECT_EQ(NCCL_PTR_CUDA, rma_.regs[0].type);
+  EXPECT_EQ(rma_.regs[0].mhandle, mhandle_);
+  EXPECT_EQ(mhandle_, ginHandle_);
+}
+
+// Without the backend's DMA-BUF entry, fd -1 registers plain instead of falling back to a whole-range export.
+TEST_F(GinHostProxyRegMrMicrotest, DmaBuf_FdMinusOneWithoutPluginEntry_RegistersPlainWithoutAnExport) {
+  rma_.vtable.regMrSymDmaBuf = nullptr;
+  exportResults_ = {hipErrorNotSupported};  // a stray export fails rather than reaching the missing entry
+  ASSERT_EQ(ncclSuccess, ncclGinProxy.regMrSymDmaBuf(collComm_, buf_, sizeof(buf_), NCCL_PTR_CUDA, /*offset=*/0,
+                                                     /*fd=*/-1, /*mrFlags=*/7, &mhandle_, &ginHandle_));
+  EXPECT_TRUE(exportSizes_.empty());
+  ASSERT_EQ(1u, rma_.regs.size());
+  EXPECT_FALSE(rma_.regs[0].dmaBuf);
+  EXPECT_EQ(NCCL_PTR_CUDA, rma_.regs[0].type);
+  EXPECT_EQ(mhandle_, ginHandle_);
+  rma_.vtable.regMrSymDmaBuf = &FakeRmaVtable::RegMrSymDmaBuf;
+}
+
+// NCCL_DMABUF_ENABLE=0 keeps the caller's fd away from the plugin, as regMrSym does.
+TEST_F(GinHostProxyRegMrMicrotest, DmaBuf_DisabledByParamFallsBackToPlain) {
+  dmaBufEnable_ = 0;
+  ASSERT_EQ(ncclSuccess, ncclGinProxy.regMrSymDmaBuf(collComm_, buf_, sizeof(buf_), NCCL_PTR_HOST, /*offset=*/0,
+                                                     /*fd=*/23, /*mrFlags=*/7, &mhandle_, &ginHandle_));
+  ASSERT_EQ(1u, rma_.regs.size());
+  EXPECT_EQ(-1, rma_.regs[0].fd);
+  EXPECT_EQ(mhandle_, ginHandle_);
 }
 
 #if NCCL_CUMEM_DMABUF_EXPORT_GATE
@@ -774,6 +849,29 @@ TEST_F(GinHostProxyContextMicrotest, Create_QueueLimitScalesWithMaxRecvs) {
   ASSERT_EQ(ncclSuccess, Reconnect());
   EXPECT_EQ(128u, QueueSizeFor(-1));
   EXPECT_EQ(64u, QueueSizeFor(64));
+}
+
+// Branch: the sanitized per-peer queue size goes through the multi-segment in-flight cap with the flag
+// rcclGinProxySetMultiSeg set after ncclGinProxyInit, as init.cc does; Init itself does not read the comm flag.
+TEST_F(GinHostProxyContextMicrotest, Create_MultiSegmentCapClampsQueueSize) {
+  rma_.maxRecvs = 4;
+  for (bool multiSeg : {true, false}) {
+    SCOPED_TRACE(multiSeg);
+    comm_->rcclMultiSegRma = !multiSeg;
+    ASSERT_EQ(ncclSuccess, ncclGinProxyInit(comm_.get()));
+    rcclGinProxySetMultiSeg(multiSeg);
+    ASSERT_EQ(ncclSuccess, Reconnect());
+    std::vector<bool> flags;
+    ScopedHook cap(g_rmaMaxInflightRequests, [&](bool flag, uint32_t n) {
+      flags.push_back(flag);
+      return flag ? std::min<uint32_t>(n, 32) : n;
+    });
+    EXPECT_EQ(multiSeg ? 32u : 128u, QueueSizeFor(-1));
+    EXPECT_EQ(16u, QueueSizeFor(16));
+    EXPECT_EQ(multiSeg ? 32u : 128u, QueueSizeFor(12)) << "the sanitized fallback";
+    ASSERT_EQ(3u, flags.size());
+    for (bool f : flags) EXPECT_EQ(multiSeg, f);
+  }
 }
 
 // The fallback size is never checked itself, so a plugin with a non-power-of-two maxRecvs gets a queue the
