@@ -5286,6 +5286,11 @@
           "name": "DDA_Fabric_ReduceScatter_GridStride",
           "description": "DDA fabric ReduceScatter LL and LL128 with RCCL_DDA_FABRIC_MAXBLOCKS=2 so both kernels grid-stride; stream drain and global MPI barrier at each tier switch",
           "test_filter": "DdaMPI_ReduceScatter.GridStrideWithTwoBlocks"
+        },
+        {
+          "name": "DDA_Fabric_ReduceScatter_LL128_Suite",
+          "description": "DDA fabric ReduceScatter LL128 suite: out-of-place, in-place, repeated and bf16 calls, plus shards that end one 16 B chunk into a partial last slice (small and near the cap, fp32 and both fp8 types) with a guard tail and a check of the kernel each size picks",
+          "test_filter": "DdaMPI_ReduceScatterLL128.*"
         }
       ]
     },

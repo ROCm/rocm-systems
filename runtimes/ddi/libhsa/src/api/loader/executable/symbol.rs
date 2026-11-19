@@ -8,9 +8,10 @@ use std::ffi::{CStr, c_char, c_void};
 use rocloader::{Scope, VariableAllocation, VariableSegment};
 
 use crate::ffi::*;
+use crate::lifecycle::{initialized_mut, lock};
 use crate::loader::code_object::*;
 use crate::loader::executable::symbol::*;
-use crate::runtime::{boundary, initialized_mut, lock};
+use crate::status::boundary;
 
 #[cfg_attr(
     all(hsa_tool_dispatch, not(test)),
@@ -343,7 +344,7 @@ pub unsafe extern "C" fn hsa_executable_agent_global_variable_define(
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        if runtime.gpu_index(agent).is_none() {
+        if runtime.agents.gpu_index(agent).is_none() {
             return INVALID_AGENT;
         }
         define_external_variable(
@@ -386,7 +387,7 @@ pub unsafe extern "C" fn hsa_executable_readonly_variable_define(
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        if runtime.gpu_index(agent).is_none() {
+        if runtime.agents.gpu_index(agent).is_none() {
             return INVALID_AGENT;
         }
         define_external_variable(
@@ -464,7 +465,7 @@ pub unsafe extern "C" fn hsa_executable_iterate_agent_symbols(
             let Some(runtime) = guard.as_ref() else {
                 return NOT_INITIALIZED;
             };
-            if !runtime.is_agent(agent) {
+            if !runtime.agents.is_agent(agent) {
                 return INVALID_AGENT;
             }
             match executable_symbol_handles(runtime, executable, Some(agent)) {

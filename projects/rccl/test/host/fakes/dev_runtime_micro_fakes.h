@@ -68,6 +68,8 @@ extern std::function<ncclResult_t(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIO
                                   uint32_t const[NCCL_GIN_MAX_ACTIVE_BACKENDS])>
     g_devrGinDeregister;
 
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclDevComm const*)> g_devrGinDevCommFree;
+
 extern std::function<ncclResult_t(struct ncclSpace*, int64_t, int64_t, int, int64_t*)> g_devrSpaceAlloc;
 extern std::function<ncclResult_t(struct ncclSpace*, int64_t, int64_t)> g_devrSpaceFree;
 extern std::function<ncclResult_t(struct ncclDevrMemory*, int)> g_devrPopulateSegmentSizes;

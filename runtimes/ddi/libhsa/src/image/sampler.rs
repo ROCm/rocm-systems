@@ -78,10 +78,10 @@ pub(crate) unsafe fn create_sampler(
         Ok(runtime) => runtime,
         Err(status) => return status,
     };
-    let Some(index) = runtime.gpu_index(agent) else {
+    let Some(index) = runtime.agents.gpu_index(agent) else {
         return INVALID_AGENT;
     };
-    let info = runtime.gpus[index].info();
+    let info = runtime.agents.gpus[index].info();
     if !info.target_profile.supports_image_sampler() {
         return NOT_SUPPORTED;
     }
@@ -92,8 +92,8 @@ pub(crate) unsafe fn create_sampler(
     if runtime.image_state.samplers.try_reserve(1).is_err() {
         return OUT_OF_RESOURCES;
     }
-    let device = runtime.gpus[index].device.clone();
-    let page = match u64::try_from(runtime.host_page_size) {
+    let device = runtime.agents.gpus[index].device.clone();
+    let page = match u64::try_from(runtime.agents.host_page_size) {
         Ok(page) if page >= 32 => page,
         _ => return ERROR,
     };
@@ -142,7 +142,7 @@ pub(crate) fn destroy_sampler(agent: HsaAgent, sampler: HsaExtSampler) -> Status
         Ok(runtime) => runtime,
         Err(status) => return status,
     };
-    if runtime.gpu_index(agent).is_none() {
+    if runtime.agents.gpu_index(agent).is_none() {
         return INVALID_AGENT;
     }
     let key = (agent.handle, sampler.handle);

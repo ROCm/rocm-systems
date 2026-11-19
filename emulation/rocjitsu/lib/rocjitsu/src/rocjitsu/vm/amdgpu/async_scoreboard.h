@@ -167,7 +167,7 @@ public:
     if (arithmetic_ && arithmetic_->wait_conflicts(*access))
       ++async_execution::stats.hazards;
     check_errors();
-    if (pending() && !matrix_coexecution::async_candidate(inst.mnemonic()) && !inst.is_memory_op())
+    if (pending() && !matrix_coexecution::async_candidate(inst) && !inst.is_memory_op())
       ++async_execution::stats.inline_overlap;
   }
 
@@ -179,7 +179,7 @@ public:
   // invariant (including any execution-state checks), and cover those checks.
   // Test/custom callbacks submitted here must obey the same restriction.
   bool submit_mma(std::unique_ptr<Instruction> &inst) {
-    if (stopped_ || !matrix_coexecution::async_candidate(inst->mnemonic()))
+    if (stopped_ || !matrix_coexecution::async_candidate(*inst))
       return false;
     auto access = async_execution::footprint(*inst, wf_.num_vgprs(), has_accvgprs_);
     const int sources = inst->num_src_operands();

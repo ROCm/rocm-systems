@@ -110,6 +110,8 @@ ImageLoadMimg::ImageLoadMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 void ImageLoadMimg::implicit_uses(RegisterSet &uses) const {
@@ -182,6 +184,8 @@ ImageLoadMipMimg::ImageLoadMipMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD_MIP);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 void ImageLoadMipMimg::implicit_uses(RegisterSet &uses) const {
@@ -248,7 +252,24 @@ ImageLoadPckMimg::ImageLoadPckMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD_PCK);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
+}
+
+void ImageLoadPckMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageLoadPckMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -282,7 +303,24 @@ ImageLoadPckSgnMimg::ImageLoadPckSgnMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD_PCK_SGN);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
+}
+
+void ImageLoadPckSgnMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageLoadPckSgnMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -316,7 +354,24 @@ ImageLoadMipPckMimg::ImageLoadMipPckMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD_MIP_PCK);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
+}
+
+void ImageLoadMipPckMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageLoadMipPckMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -350,7 +405,24 @@ ImageLoadMipPckSgnMimg::ImageLoadMipPckSgnMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD_MIP_PCK_SGN);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
+}
+
+void ImageLoadMipPckSgnMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageLoadMipPckSgnMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -385,6 +457,8 @@ ImageStoreMimg::ImageStoreMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_STORE);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Store);
 }
 
 void ImageStoreMimg::implicit_uses(RegisterSet &uses) const {
@@ -436,6 +510,8 @@ ImageStoreMipMimg::ImageStoreMipMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_STORE_MIP);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Store);
 }
 
 void ImageStoreMipMimg::implicit_uses(RegisterSet &uses) const {
@@ -479,7 +555,24 @@ ImageStorePckMimg::ImageStorePckMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   capture_nsa_words(inst, &vaddr);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_STORE_PCK);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Store);
+}
+
+void ImageStorePckMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageStorePckMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -509,7 +602,24 @@ ImageStoreMipPckMimg::ImageStoreMipPckMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   capture_nsa_words(inst, &vaddr);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_STORE_MIP_PCK);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Store);
+}
+
+void ImageStoreMipPckMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageStoreMipPckMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -530,7 +640,7 @@ ImageAtomicSwapMimg::ImageAtomicSwapMimg(const MachineInst *inst)
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vdata_return(
           (32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})) +
-              32u * inst_.tfe,
+              32u * mimg_has_status(&inst_, false),
           OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(mimg_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst), "image_atomic_swap"),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -550,9 +660,28 @@ ImageAtomicSwapMimg::ImageAtomicSwapMimg(const MachineInst *inst)
   capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  if (inst_.glc && inst_.tfe)
+  if (inst_.glc && mimg_has_status(&inst_, false))
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT),
+      ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                        : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_SWAP);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
+}
+
+void ImageAtomicSwapMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageAtomicSwapMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -573,7 +702,7 @@ ImageAtomicCmpswapMimg::ImageAtomicCmpswapMimg(const MachineInst *inst)
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vdata_return(
           (32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})) / 2 +
-              32u * inst_.tfe,
+              32u * mimg_has_status(&inst_, false),
           OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(mimg_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst), "image_atomic_cmpswap"),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -593,9 +722,28 @@ ImageAtomicCmpswapMimg::ImageAtomicCmpswapMimg(const MachineInst *inst)
   capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  if (inst_.glc && inst_.tfe)
+  if (inst_.glc && mimg_has_status(&inst_, false))
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT),
+      ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                        : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_CMPSWAP);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
+}
+
+void ImageAtomicCmpswapMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageAtomicCmpswapMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -616,7 +764,7 @@ ImageAtomicAddMimg::ImageAtomicAddMimg(const MachineInst *inst)
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vdata_return(
           (32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})) +
-              32u * inst_.tfe,
+              32u * mimg_has_status(&inst_, false),
           OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(mimg_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst), "image_atomic_add"),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -636,9 +784,28 @@ ImageAtomicAddMimg::ImageAtomicAddMimg(const MachineInst *inst)
   capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  if (inst_.glc && inst_.tfe)
+  if (inst_.glc && mimg_has_status(&inst_, false))
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT),
+      ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                        : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_ADD);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
+}
+
+void ImageAtomicAddMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageAtomicAddMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -659,7 +826,7 @@ ImageAtomicSubMimg::ImageAtomicSubMimg(const MachineInst *inst)
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vdata_return(
           (32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})) +
-              32u * inst_.tfe,
+              32u * mimg_has_status(&inst_, false),
           OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(mimg_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst), "image_atomic_sub"),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -679,9 +846,28 @@ ImageAtomicSubMimg::ImageAtomicSubMimg(const MachineInst *inst)
   capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  if (inst_.glc && inst_.tfe)
+  if (inst_.glc && mimg_has_status(&inst_, false))
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT),
+      ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                        : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_SUB);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
+}
+
+void ImageAtomicSubMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageAtomicSubMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -702,7 +888,7 @@ ImageAtomicSminMimg::ImageAtomicSminMimg(const MachineInst *inst)
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vdata_return(
           (32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})) +
-              32u * inst_.tfe,
+              32u * mimg_has_status(&inst_, false),
           OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(mimg_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst), "image_atomic_smin"),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -722,9 +908,28 @@ ImageAtomicSminMimg::ImageAtomicSminMimg(const MachineInst *inst)
   capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  if (inst_.glc && inst_.tfe)
+  if (inst_.glc && mimg_has_status(&inst_, false))
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT),
+      ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                        : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_SMIN);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
+}
+
+void ImageAtomicSminMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageAtomicSminMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -745,7 +950,7 @@ ImageAtomicUminMimg::ImageAtomicUminMimg(const MachineInst *inst)
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vdata_return(
           (32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})) +
-              32u * inst_.tfe,
+              32u * mimg_has_status(&inst_, false),
           OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(mimg_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst), "image_atomic_umin"),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -765,9 +970,28 @@ ImageAtomicUminMimg::ImageAtomicUminMimg(const MachineInst *inst)
   capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  if (inst_.glc && inst_.tfe)
+  if (inst_.glc && mimg_has_status(&inst_, false))
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT),
+      ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                        : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_UMIN);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
+}
+
+void ImageAtomicUminMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageAtomicUminMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -788,7 +1012,7 @@ ImageAtomicSmaxMimg::ImageAtomicSmaxMimg(const MachineInst *inst)
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vdata_return(
           (32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})) +
-              32u * inst_.tfe,
+              32u * mimg_has_status(&inst_, false),
           OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(mimg_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst), "image_atomic_smax"),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -808,9 +1032,28 @@ ImageAtomicSmaxMimg::ImageAtomicSmaxMimg(const MachineInst *inst)
   capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  if (inst_.glc && inst_.tfe)
+  if (inst_.glc && mimg_has_status(&inst_, false))
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT),
+      ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                        : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_SMAX);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
+}
+
+void ImageAtomicSmaxMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageAtomicSmaxMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -831,7 +1074,7 @@ ImageAtomicUmaxMimg::ImageAtomicUmaxMimg(const MachineInst *inst)
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vdata_return(
           (32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})) +
-              32u * inst_.tfe,
+              32u * mimg_has_status(&inst_, false),
           OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(mimg_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst), "image_atomic_umax"),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -851,9 +1094,28 @@ ImageAtomicUmaxMimg::ImageAtomicUmaxMimg(const MachineInst *inst)
   capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  if (inst_.glc && inst_.tfe)
+  if (inst_.glc && mimg_has_status(&inst_, false))
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT),
+      ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                        : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_UMAX);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
+}
+
+void ImageAtomicUmaxMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageAtomicUmaxMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -874,7 +1136,7 @@ ImageAtomicAndMimg::ImageAtomicAndMimg(const MachineInst *inst)
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vdata_return(
           (32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})) +
-              32u * inst_.tfe,
+              32u * mimg_has_status(&inst_, false),
           OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(mimg_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst), "image_atomic_and"),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -894,9 +1156,28 @@ ImageAtomicAndMimg::ImageAtomicAndMimg(const MachineInst *inst)
   capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  if (inst_.glc && inst_.tfe)
+  if (inst_.glc && mimg_has_status(&inst_, false))
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT),
+      ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                        : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_AND);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
+}
+
+void ImageAtomicAndMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageAtomicAndMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -917,7 +1198,7 @@ ImageAtomicOrMimg::ImageAtomicOrMimg(const MachineInst *inst)
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vdata_return(
           (32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})) +
-              32u * inst_.tfe,
+              32u * mimg_has_status(&inst_, false),
           OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(mimg_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst), "image_atomic_or"),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -937,9 +1218,28 @@ ImageAtomicOrMimg::ImageAtomicOrMimg(const MachineInst *inst)
   capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  if (inst_.glc && inst_.tfe)
+  if (inst_.glc && mimg_has_status(&inst_, false))
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT),
+      ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                        : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_OR);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
+}
+
+void ImageAtomicOrMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageAtomicOrMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -960,7 +1260,7 @@ ImageAtomicXorMimg::ImageAtomicXorMimg(const MachineInst *inst)
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vdata_return(
           (32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})) +
-              32u * inst_.tfe,
+              32u * mimg_has_status(&inst_, false),
           OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(mimg_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst), "image_atomic_xor"),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -980,9 +1280,28 @@ ImageAtomicXorMimg::ImageAtomicXorMimg(const MachineInst *inst)
   capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  if (inst_.glc && inst_.tfe)
+  if (inst_.glc && mimg_has_status(&inst_, false))
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT),
+      ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                        : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_XOR);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
+}
+
+void ImageAtomicXorMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageAtomicXorMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -1003,7 +1322,7 @@ ImageAtomicIncMimg::ImageAtomicIncMimg(const MachineInst *inst)
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vdata_return(
           (32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})) +
-              32u * inst_.tfe,
+              32u * mimg_has_status(&inst_, false),
           OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(mimg_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst), "image_atomic_inc"),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1023,9 +1342,28 @@ ImageAtomicIncMimg::ImageAtomicIncMimg(const MachineInst *inst)
   capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  if (inst_.glc && inst_.tfe)
+  if (inst_.glc && mimg_has_status(&inst_, false))
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT),
+      ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                        : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_INC);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
+}
+
+void ImageAtomicIncMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageAtomicIncMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -1046,7 +1384,7 @@ ImageAtomicDecMimg::ImageAtomicDecMimg(const MachineInst *inst)
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vdata_return(
           (32u * std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})) +
-              32u * inst_.tfe,
+              32u * mimg_has_status(&inst_, false),
           OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(mimg_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst), "image_atomic_dec"),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1066,9 +1404,28 @@ ImageAtomicDecMimg::ImageAtomicDecMimg(const MachineInst *inst)
   capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  if (inst_.glc && inst_.tfe)
+  if (inst_.glc && mimg_has_status(&inst_, false))
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT),
+      ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                        : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_DEC);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
+}
+
+void ImageAtomicDecMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageAtomicDecMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -1099,6 +1456,21 @@ ImageGetResinfoMimg::ImageGetResinfoMimg(const MachineInst *inst)
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GET_RESINFO);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Other);
+}
+
+void ImageGetResinfoMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = (inst_.dmask) ? (1u) : 0u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageGetResinfoMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(!(inst_.dmask) || src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -1132,7 +1504,24 @@ ImageMsaaLoadMimg::ImageMsaaLoadMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_MSAA_LOAD);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
+}
+
+void ImageMsaaLoadMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageMsaaLoadMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -1150,8 +1539,9 @@ ImageBvhIntersectRayMimg::ImageBvhIntersectRayMimg(const MachineInst *inst)
     : ImageAddressInstruction("image_bvh_intersect_ray", reinterpret_cast<const OpEncoding *>(inst),
                               selected_exec_fn(InstructionExecutionId::ImageBvhIntersectRayMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr((reinterpret_cast<const OpEncoding *>(inst)->a16 ? 256 : 352), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(
+          (32 * amdgpu::bvh_address_words(false, reinterpret_cast<const OpEncoding *>(inst)->a16)),
+          OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
@@ -1160,7 +1550,24 @@ ImageBvhIntersectRayMimg::ImageBvhIntersectRayMimg(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_BVH_INTERSECT_RAY);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Bvh);
+}
+
+void ImageBvhIntersectRayMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers = amdgpu::gfx11_bvh_registers(false, inst_.a16, inst_.vaddr,
+                                                     inst_.nsa ? raw_encoding() + 2 : nullptr);
+  const uint32_t count = amdgpu::bvh_address_words(false, inst_.a16);
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageBvhIntersectRayMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -1179,8 +1586,8 @@ ImageBvh64IntersectRayMimg::ImageBvh64IntersectRayMimg(const MachineInst *inst)
                               reinterpret_cast<const OpEncoding *>(inst),
                               selected_exec_fn(InstructionExecutionId::ImageBvh64IntersectRayMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr((reinterpret_cast<const OpEncoding *>(inst)->a16 ? 288 : 384), OperandType::OPR_VGPR,
-            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr((32 * amdgpu::bvh_address_words(true, reinterpret_cast<const OpEncoding *>(inst)->a16)),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
@@ -1189,7 +1596,24 @@ ImageBvh64IntersectRayMimg::ImageBvh64IntersectRayMimg(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_BVH64_INTERSECT_RAY);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Bvh);
+}
+
+void ImageBvh64IntersectRayMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers = amdgpu::gfx11_bvh_registers(true, inst_.a16, inst_.vaddr,
+                                                     inst_.nsa ? raw_encoding() + 2 : nullptr);
+  const uint32_t count = amdgpu::bvh_address_words(true, inst_.a16);
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageBvh64IntersectRayMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -1230,6 +1654,8 @@ ImageSampleMimg::ImageSampleMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleMimg::implicit_uses(RegisterSet &uses) const {
@@ -1307,6 +1733,8 @@ ImageSampleDMimg::ImageSampleDMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_D);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleDMimg::implicit_uses(RegisterSet &uses) const {
@@ -1386,6 +1814,8 @@ ImageSampleLMimg::ImageSampleLMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_L);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleLMimg::implicit_uses(RegisterSet &uses) const {
@@ -1454,7 +1884,41 @@ ImageSampleBMimg::ImageSampleBMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_B);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleBMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleBMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleBMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -1495,6 +1959,8 @@ ImageSampleLzMimg::ImageSampleLzMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_LZ);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageSampleLzMimg::implicit_uses(RegisterSet &uses) const {
@@ -1560,7 +2026,41 @@ ImageSampleCMimg::ImageSampleCMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleCMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleCMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleCMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -1596,7 +2096,41 @@ ImageSampleCDMimg::ImageSampleCDMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_D);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleCDMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleCDMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleCDMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -1632,7 +2166,41 @@ ImageSampleCLMimg::ImageSampleCLMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_L);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleCLMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleCLMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleCLMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -1668,7 +2236,41 @@ ImageSampleCBMimg::ImageSampleCBMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_B);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleCBMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleCBMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleCBMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -1704,7 +2306,41 @@ ImageSampleCLzMimg::ImageSampleCLzMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_LZ);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleCLzMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleCLzMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleCLzMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -1740,7 +2376,41 @@ ImageSampleOMimg::ImageSampleOMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleOMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleOMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleOMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -1776,7 +2446,41 @@ ImageSampleDOMimg::ImageSampleDOMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_D_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleDOMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleDOMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleDOMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -1812,7 +2516,41 @@ ImageSampleLOMimg::ImageSampleLOMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_L_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleLOMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleLOMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleLOMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -1848,7 +2586,41 @@ ImageSampleBOMimg::ImageSampleBOMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_B_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleBOMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleBOMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleBOMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -1884,7 +2656,41 @@ ImageSampleLzOMimg::ImageSampleLzOMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_LZ_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleLzOMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleLzOMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleLzOMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -1920,7 +2726,41 @@ ImageSampleCOMimg::ImageSampleCOMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleCOMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleCOMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleCOMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -1956,7 +2796,41 @@ ImageSampleCDOMimg::ImageSampleCDOMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_D_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleCDOMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleCDOMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleCDOMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -1992,7 +2866,41 @@ ImageSampleCLOMimg::ImageSampleCLOMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_L_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleCLOMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleCLOMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleCLOMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -2028,7 +2936,41 @@ ImageSampleCBOMimg::ImageSampleCBOMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_B_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleCBOMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleCBOMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleCBOMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -2064,7 +3006,41 @@ ImageSampleCLzOMimg::ImageSampleCLzOMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_LZ_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleCLzOMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleCLzOMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleCLzOMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -2100,7 +3076,24 @@ ImageGather4Mimg::ImageGather4Mimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageGather4Mimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageGather4Mimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -2136,7 +3129,24 @@ ImageGather4LMimg::ImageGather4LMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_L);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageGather4LMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageGather4LMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -2172,7 +3182,24 @@ ImageGather4BMimg::ImageGather4BMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_B);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageGather4BMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageGather4BMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -2213,6 +3240,8 @@ ImageGather4LzMimg::ImageGather4LzMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_LZ);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 void ImageGather4LzMimg::implicit_uses(RegisterSet &uses) const {
@@ -2261,7 +3290,24 @@ ImageGather4CMimg::ImageGather4CMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageGather4CMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageGather4CMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -2297,7 +3343,24 @@ ImageGather4CLzMimg::ImageGather4CLzMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_LZ);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageGather4CLzMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageGather4CLzMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -2333,7 +3396,24 @@ ImageGather4OMimg::ImageGather4OMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageGather4OMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageGather4OMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -2369,7 +3449,24 @@ ImageGather4LzOMimg::ImageGather4LzOMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_LZ_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageGather4LzOMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageGather4LzOMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -2405,7 +3502,24 @@ ImageGather4CLzOMimg::ImageGather4CLzOMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_LZ_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageGather4CLzOMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageGather4CLzOMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -2438,10 +3552,25 @@ ImageGetLodMimg::ImageGetLodMimg(const MachineInst *inst)
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
   if (mimg_has_status(&inst_, true))
-    flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+    flags_ |= INCLUDES_UNWRITTEN_LAST_VGPR;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GET_LOD);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Other);
+}
+
+void ImageGetLodMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = (inst_.dmask || inst_.lwe) ? (vaddr.size_bits() / 32u) : 0u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageGetLodMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(!(inst_.dmask || inst_.lwe) || src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -2477,7 +3606,41 @@ ImageSampleDG16Mimg::ImageSampleDG16Mimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_D_G16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleDG16Mimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleDG16Mimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleDG16Mimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -2513,7 +3676,41 @@ ImageSampleCDG16Mimg::ImageSampleCDG16Mimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_D_G16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleCDG16Mimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleCDG16Mimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleCDG16Mimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -2549,7 +3746,41 @@ ImageSampleDOG16Mimg::ImageSampleDOG16Mimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_D_O_G16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleDOG16Mimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleDOG16Mimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleDOG16Mimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -2585,7 +3816,41 @@ ImageSampleCDOG16Mimg::ImageSampleCDOG16Mimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_D_O_G16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleCDOG16Mimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleCDOG16Mimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleCDOG16Mimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -2621,7 +3886,41 @@ ImageSampleClMimg::ImageSampleClMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleClMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleClMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleClMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -2657,7 +3956,41 @@ ImageSampleDClMimg::ImageSampleDClMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_D_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleDClMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleDClMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleDClMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -2693,7 +4026,41 @@ ImageSampleBClMimg::ImageSampleBClMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_B_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleBClMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleBClMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleBClMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -2729,7 +4096,41 @@ ImageSampleCClMimg::ImageSampleCClMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleCClMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleCClMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleCClMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -2765,7 +4166,41 @@ ImageSampleCDClMimg::ImageSampleCDClMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_D_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleCDClMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleCDClMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleCDClMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -2801,7 +4236,41 @@ ImageSampleCBClMimg::ImageSampleCBClMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_B_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleCBClMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleCBClMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleCBClMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -2837,7 +4306,41 @@ ImageSampleClOMimg::ImageSampleClOMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleClOMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleClOMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleClOMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -2873,7 +4376,41 @@ ImageSampleDClOMimg::ImageSampleDClOMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_D_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleDClOMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleDClOMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleDClOMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -2909,7 +4446,41 @@ ImageSampleBClOMimg::ImageSampleBClOMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_B_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleBClOMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleBClOMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleBClOMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -2945,7 +4516,41 @@ ImageSampleCClOMimg::ImageSampleCClOMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleCClOMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleCClOMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleCClOMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -2981,7 +4586,41 @@ ImageSampleCDClOMimg::ImageSampleCDClOMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_D_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleCDClOMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleCDClOMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleCDClOMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -3017,7 +4656,41 @@ ImageSampleCBClOMimg::ImageSampleCBClOMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_B_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleCBClOMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleCBClOMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleCBClOMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -3053,7 +4726,41 @@ ImageSampleCDClG16Mimg::ImageSampleCDClG16Mimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_D_CL_G16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleCDClG16Mimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleCDClG16Mimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleCDClG16Mimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -3089,7 +4796,41 @@ ImageSampleDClOG16Mimg::ImageSampleDClOG16Mimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_D_CL_O_G16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleDClOG16Mimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleDClOG16Mimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleDClOG16Mimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -3127,7 +4868,41 @@ ImageSampleCDClOG16Mimg::ImageSampleCDClOG16Mimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_D_CL_O_G16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleCDClOG16Mimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleCDClOG16Mimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleCDClOG16Mimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -3163,7 +4938,41 @@ ImageSampleDClG16Mimg::ImageSampleDClG16Mimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_D_CL_G16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageSampleDClG16Mimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleDClG16Mimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+      const uint32_t count = vaddr.size_bits() / 32u;
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleDClG16Mimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -3199,7 +5008,24 @@ ImageGather4ClMimg::ImageGather4ClMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageGather4ClMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageGather4ClMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -3235,7 +5061,24 @@ ImageGather4BClMimg::ImageGather4BClMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_B_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageGather4BClMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageGather4BClMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -3271,7 +5114,24 @@ ImageGather4CClMimg::ImageGather4CClMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageGather4CClMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageGather4CClMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -3307,7 +5167,24 @@ ImageGather4CLMimg::ImageGather4CLMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_L);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageGather4CLMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageGather4CLMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -3343,7 +5220,24 @@ ImageGather4CBMimg::ImageGather4CBMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_B);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageGather4CBMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageGather4CBMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -3379,7 +5273,24 @@ ImageGather4CBClMimg::ImageGather4CBClMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_B_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageGather4CBClMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageGather4CBClMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -3415,7 +5326,24 @@ ImageGather4hMimg::ImageGather4hMimg(const MachineInst *inst)
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   else if (inst_.tfe)
     flags_ |= RESERVES_UNWRITTEN_VGPR;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4H);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
+}
+
+void ImageGather4hMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+  const uint32_t count = vaddr.size_bits() / 32u;
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageGather4hMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {

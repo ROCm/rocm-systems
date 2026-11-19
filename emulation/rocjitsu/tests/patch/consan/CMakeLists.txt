@@ -144,6 +144,16 @@ target_link_libraries(
         flatbuffers
         GTest::gtest_main
 )
+if(RJ_BUILD_CONSAN_ANALYZER)
+    target_link_libraries(
+        consan_bootstrap_sim_test
+        PRIVATE rocjitsu_consan_analysis
+    )
+    target_compile_definitions(
+        consan_bootstrap_sim_test
+        PRIVATE CONSAN_ANALYZER_ENABLED=1
+    )
+endif()
 rj_configure_target(consan_bootstrap_sim_test PRIVATE_INCLUDES GENERATED WARNINGS SCHEMAS)
 if(TARGET consan_original_fixtures)
     add_dependencies(consan_bootstrap_sim_test consan_original_fixtures)
@@ -344,9 +354,9 @@ if(TARGET consan_hsa_runner)
                 $<TARGET_FILE:${_plugin}> ${_statistics} ${_analysis_options}
                 --fixtures ${_fixture_dir} --source ${PROJECT_SOURCE_DIR} --root
                 ${RJ_CONSAN_TEST_ARTIFACT_ROOT} --case ${_case} --target ${gpu}
-                --wave-size ${wave_size} --threads ${threads}
-                ${_geometry_options} --fixture-kind ${kind} ${_entry_options}
-                ${_signal_options} ${_execution_options}
+                --wave-size ${wave_size} --threads ${threads} --fixture-kind
+                ${kind} ${_entry_options} ${_signal_options}
+                ${_execution_options} ${_geometry_options}
         )
         set_tests_properties(${_name} PROPERTIES TIMEOUT 120)
         if(environment STREQUAL "Sim")
@@ -495,6 +505,25 @@ if(TARGET consan_hsa_runner)
                     )
                         consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
                             ${_barrier_case} 65 production analysis
+                        )
+                    endforeach()
+                    foreach(
+                        _loop_case
+                        IN
+                        ITEMS
+                            loop_zero
+                            loop_one
+                            loop_three
+                            loop_access_loss
+                            loop_sync_loss
+                            loop_no_b0
+                            loop_no_b0_full_journal
+                            loop_no_b0_sync_loss
+                            loop_no_b1
+                            loop_late
+                    )
+                        consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                            ${_loop_case} 64 production analysis
                         )
                     endforeach()
                 endif()

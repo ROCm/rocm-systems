@@ -153,6 +153,22 @@ struct rcclArchThresholds {
   // The two-shot variant benefits from fewer threads (better occupancy at large messages).
   unsigned ddaLL128BcTwoShotThreads;
 
+  // DDA LL128 ReduceScatter batched kernel block size at every size. 0 keeps 512 threads.
+  int ddaRsLL128Threads;
+  // DDA LL128 ReduceScatter takes its peer-parallel kernel while the shard is at most max(ddaRsLL128PeerMaxShard,
+  // nRanks x ddaRsLL128PeerMaxShardPerRank) and the message at most ddaRsLL128PeerMaxBytes. Zeros keep batched.
+  size_t ddaRsLL128PeerMaxShard;
+  size_t ddaRsLL128PeerMaxShardPerRank;
+  size_t ddaRsLL128PeerMaxBytes;
+  // On comms of at least ddaRsLL128LargeCommMinRanks ranks an enabled DDA LL128 ReduceScatter tier runs to
+  // ddaRsLL128LargeCommMaxBytes when that is above its rank-scaled cap. 0 leaves the tier cap alone.
+  int ddaRsLL128LargeCommMinRanks;
+  size_t ddaRsLL128LargeCommMaxBytes;
+  // On comms of at least ddaRsLLLargeCommMinRanks ranks an enabled DDA LL ReduceScatter tier runs to
+  // ddaRsLLLargeCommMaxBytes when that is above its cap. 0 leaves the tier cap alone.
+  int ddaRsLLLargeCommMinRanks;
+  size_t ddaRsLLLargeCommMaxBytes;
+
   // Ring / Tree crossovers that replace the tuning model's ranges on single-node
   // comms (nNodes == 1). Sizes are per rank as rcclGetSizePerRank() reports them
   // (AllReduce: the whole message, hence nRanks x the entry). 0 = keep the

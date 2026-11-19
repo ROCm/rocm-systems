@@ -22,7 +22,9 @@ use rocloader::{
 };
 
 use crate::ffi::*;
-use crate::runtime::{HsaState, boundary, initialized_mut, lock, map_error};
+use crate::lifecycle::{initialized_mut, lock};
+use crate::session::HsaSession;
+use crate::status::{boundary, map_error};
 
 mod traversal;
 use traversal::ExecutableTraversalGate;
