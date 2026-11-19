@@ -11,7 +11,7 @@ use rocddi::device::gpu::queue::{
 
 /// Queue error callback detached from the registry lock before invocation.
 struct PendingCallback {
-    /// Application callback to invoke synchronously.
+    /// Application or default callback to invoke synchronously.
     callback: unsafe extern "C" fn(Status, *mut HsaQueue, *mut c_void),
     /// HSA status derived from native error details.
     status: Status,
@@ -22,6 +22,24 @@ struct PendingCallback {
 }
 
 impl PendingCallback {
+    /// Selects application policy or the session's default error handler.
+    fn new(
+        callback: QueueErrorCallback,
+        report_errors: bool,
+        status: Status,
+        queue: usize,
+        data: CallbackArg,
+    ) -> Option<Self> {
+        Some(Self {
+            callback: callback.or_else(|| {
+                report_errors.then_some(default_queue_error as unsafe extern "C" fn(_, _, _))
+            })?,
+            status,
+            queue,
+            data,
+        })
+    }
+
     /// Invokes detached callback work while the worker retains queue lifetime.
     fn invoke(self) {
         // SAFETY: Queue destruction joins this worker before callback data expires.
@@ -29,6 +47,16 @@ impl PendingCallback {
             (self.callback)(self.status, self.queue as *mut HsaQueue, self.data.as_ptr())
         });
     }
+}
+
+/// Captures an unhandled AQL error without waiting on application stderr.
+unsafe extern "C" fn default_queue_error(
+    _status: Status,
+    _queue: *mut HsaQueue,
+    _data: *mut c_void,
+) {
+    // Even an unlocked stderr write can block indefinitely on a full pipe.
+    crate::core_dump::fatal_abort();
 }
 
 /// Result of processing one queue event before native rearming.
@@ -74,12 +102,13 @@ fn pending_callback(
     status: Status,
 ) -> Option<PendingCallback> {
     let queue = runtime.queue_state.queues.get(&key)?;
-    Some(PendingCallback {
-        callback: queue.callback?,
+    PendingCallback::new(
+        queue.callback,
+        runtime.config.queue_fault_message_enabled,
         status,
-        queue: queue.public_handle,
-        data: queue.callback_data,
-    })
+        queue.public_handle,
+        queue.callback_data,
+    )
 }
 
 /// Prepares the user error callback after a queue fault.
@@ -530,6 +559,143 @@ pub(super) fn queue_event_worker(
 mod tests {
     use super::*;
     use rocddi::ErrorKind;
+
+    /// Observations recorded without unwinding through the C callback boundary.
+    struct CallbackProbe {
+        status: Status,
+        queue: usize,
+        in_callback: bool,
+    }
+
+    unsafe extern "C" fn record_error(status: Status, queue: *mut HsaQueue, data: *mut c_void) {
+        // SAFETY: The test retains exclusive probe storage until invoke returns.
+        let probe = unsafe { &mut *data.cast::<CallbackProbe>() };
+        probe.status = status;
+        probe.queue = queue as usize;
+        probe.in_callback = CallbackScope::active();
+    }
+
+    #[test]
+    fn explicit_queue_callback_preserves_arguments_and_overrides_default_policy() {
+        for report_errors in [false, true] {
+            let mut probe = CallbackProbe {
+                status: SUCCESS,
+                queue: 0,
+                in_callback: false,
+            };
+            let mut queue_storage = [0u64; 16];
+            let queue = queue_storage.as_mut_ptr() as usize;
+            // SAFETY: The probe remains live until synchronous invocation ends.
+            let data = unsafe { CallbackArg::new((&raw mut probe).cast()) };
+            PendingCallback::new(Some(record_error), report_errors, MEMORY_FAULT, queue, data)
+                .unwrap()
+                .invoke();
+            assert_eq!(probe.status, MEMORY_FAULT);
+            assert_eq!(probe.queue, queue);
+            assert!(probe.in_callback);
+            assert!(!CallbackScope::active());
+        }
+        // SAFETY: The null argument has no storage to retain.
+        let data = unsafe { CallbackArg::new(std::ptr::null_mut()) };
+        assert!(PendingCallback::new(None, false, MEMORY_FAULT, 0, data).is_none());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn default_queue_error_aborts_instead_of_dropping_notification() {
+        use std::io::Write;
+        use std::os::fd::{AsRawFd, FromRawFd};
+        use std::os::unix::process::ExitStatusExt;
+        use std::process::Stdio;
+        use std::time::Instant;
+
+        const CHILD: &str = "ROCDDI_TEST_DEFAULT_QUEUE_ABORT";
+        if std::env::var_os(CHILD).is_some() {
+            let limit = libc::rlimit {
+                rlim_cur: 0,
+                rlim_max: 0,
+            };
+            // SAFETY: These calls affect only this test subprocess. Suppress
+            // host core files and core-pattern helpers for the expected abort.
+            unsafe {
+                assert_eq!(libc::setrlimit(libc::RLIMIT_CORE, &raw const limit), 0);
+                assert_eq!(libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0), 0);
+            }
+            // SAFETY: The default handler does not dereference either pointer.
+            let data = unsafe { CallbackArg::new(std::ptr::null_mut()) };
+            PendingCallback::new(None, true, MEMORY_FAULT, 0, data)
+                .unwrap()
+                .invoke();
+            return;
+        }
+        for blocked_stderr in [false, true] {
+            let (_reader, stderr) = if blocked_stderr {
+                let mut descriptors = [-1; 2];
+                // SAFETY: The writable array has room for both new descriptors.
+                assert_eq!(
+                    unsafe {
+                        libc::pipe2(descriptors.as_mut_ptr(), libc::O_CLOEXEC | libc::O_NONBLOCK)
+                    },
+                    0
+                );
+                // SAFETY: Each successful pipe descriptor is transferred once.
+                let (reader, mut writer) = unsafe {
+                    (
+                        std::fs::File::from_raw_fd(descriptors[0]),
+                        std::fs::File::from_raw_fd(descriptors[1]),
+                    )
+                };
+                loop {
+                    if let Err(error) = writer.write(&[0; 4096]) {
+                        assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
+                        break;
+                    }
+                }
+                // SAFETY: This test owns the live descriptor. Restore blocking
+                // writes before passing it to the child, retaining the unread
+                // reader until the child exits so stderr cannot drain or EPIPE.
+                let flags = unsafe { libc::fcntl(writer.as_raw_fd(), libc::F_GETFL) };
+                assert!(flags >= 0);
+                assert_eq!(
+                    unsafe {
+                        libc::fcntl(writer.as_raw_fd(), libc::F_SETFL, flags & !libc::O_NONBLOCK)
+                    },
+                    0
+                );
+                (Some(reader), Stdio::from(writer))
+            } else {
+                (None, Stdio::null())
+            };
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "queue::event::tests::default_queue_error_aborts_instead_of_dropping_notification",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .stdout(Stdio::null())
+                .stderr(stderr)
+                .spawn()
+                .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let status = loop {
+                if let Some(status) = child.try_wait().unwrap() {
+                    break Some(status);
+                }
+                if Instant::now() >= deadline {
+                    child.kill().unwrap();
+                    child.wait().unwrap();
+                    break None;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            };
+            assert_eq!(
+                status.and_then(|status| status.signal()),
+                Some(libc::SIGABRT),
+                "default handler failed to abort with blocked_stderr={blocked_stderr}"
+            );
+        }
+    }
 
     fn error(kind: ErrorKind) -> rocddi::Error {
         rocddi::Error::Operation {

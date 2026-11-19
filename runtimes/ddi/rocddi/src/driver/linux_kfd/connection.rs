@@ -324,6 +324,16 @@ impl Kfd {
         result
     }
 
+    /// # Safety
+    /// The queue is inactive and its complete writable CWSR allocation remains
+    /// live at `control_stack_address` through this synchronous call.
+    pub(super) unsafe fn queue_wave_state(
+        &self,
+        args: &mut uapi::QueueWaveState,
+    ) -> io::Result<()> {
+        self.call(Call::QueueWaveState(args))
+    }
+
     pub(super) fn enable_runtime(&self) -> io::Result<()> {
         let mut runtime = self.runtime_guard()?;
         self.enable_runtime_locked(&mut runtime)
@@ -375,6 +385,25 @@ impl Kfd {
                 .state
                 .debugger
                 .is_some_and(|active| (active.address, active.setup_ttmp) == (address, setup_ttmp)))
+    }
+
+    pub(super) fn core_runtime_info(
+        &self,
+    ) -> io::Result<crate::device::gpu::diagnostic::CoreRuntimeInfo> {
+        let runtime = self.runtime_guard()?;
+        if !matches!(
+            runtime.state.enable,
+            RuntimeState::Enabled | RuntimeState::Disabled
+        ) {
+            return Err(invalid_data("runtime registration outcome is uncertain"));
+        }
+        let enabled = runtime.state.enable == RuntimeState::Enabled;
+        let registration = runtime.state.debugger.filter(|_| enabled);
+        Ok(crate::device::gpu::diagnostic::CoreRuntimeInfo {
+            r_debug: registration.map_or(0, |value| value.address),
+            runtime_state: u32::from(enabled),
+            ttmp_setup: u32::from(registration.is_some_and(|value| value.setup_ttmp)),
+        })
     }
 
     pub(super) fn enable_runtime_locked(&self, runtime: &mut RuntimeGuard<'_>) -> io::Result<()> {

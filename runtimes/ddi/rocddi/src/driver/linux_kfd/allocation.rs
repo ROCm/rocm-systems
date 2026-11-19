@@ -180,6 +180,17 @@ impl LinuxAllocation {
         }
     }
 
+    pub(crate) fn diagnostic_memory(
+        &self,
+    ) -> Result<crate::device::gpu::diagnostic::DiagnosticMemory<'_>, Error> {
+        match self {
+            Self::Kfd(allocation) => allocation.diagnostic_memory(),
+            Self::KfdHostAlias(alias) => alias.diagnostic_memory(),
+            Self::DrmRegisteredHost(allocation) => allocation.diagnostic_memory(),
+            Self::DrmImportedSystem(allocation) => allocation.diagnostic_memory(),
+        }
+    }
+
     pub(super) fn check(&self) -> Result<(), Error> {
         match self {
             Self::Kfd(allocation) => allocation.check(),

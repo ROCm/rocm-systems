@@ -46,6 +46,8 @@ pub(crate) fn session_without_devices(native_session: NativeSession) -> HsaSessi
             gpus: Vec::new(),
         },
         config: HsaConfig {
+            core_dump: crate::core_dump::Config::default(),
+            queue_fault_message_enabled: true,
             yielding_poll_enabled: false,
             sdma_enabled: false,
             peer_sdma_enabled: false,

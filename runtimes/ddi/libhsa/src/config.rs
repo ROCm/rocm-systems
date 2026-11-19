@@ -17,6 +17,11 @@ pub(super) fn counted_queue_limit(value: Option<&str>) -> usize {
         .unwrap_or(4)
 }
 
+/// `ROCr` disables default queue-error reporting and termination only for `0`.
+pub(super) fn queue_fault_message_enabled(value: Option<&str>) -> bool {
+    value != Some("0")
+}
+
 pub(super) mod cu_mask;
 
 /// Selects native GPU ordinals in the order requested by `ROCr` visibility.
@@ -84,6 +89,11 @@ pub(super) fn supports_execution(gpu: &rocddi::topology::GpuInfo) -> bool {
     reason = "independent immutable frontend policies"
 )]
 pub(crate) struct HsaConfig {
+    /// Fatal GPU capture and output naming policy sampled at initialization.
+    pub(crate) core_dump: crate::core_dump::Config,
+
+    /// Whether an AQL error without an application callback reports and aborts.
+    pub(crate) queue_fault_message_enabled: bool,
     /// Whether polling-only scalar waits back off after their hot-spin window.
     pub(crate) yielding_poll_enabled: bool,
     /// Generation-wide copy-engine configuration.
@@ -97,6 +107,14 @@ pub(crate) struct HsaConfig {
 #[cfg(test)]
 mod tests {
     use super::visible_gpu_indices;
+
+    #[test]
+    fn queue_fault_message_requires_exact_zero_to_disable() {
+        for value in [None, Some(""), Some("1"), Some("false"), Some(" 0")] {
+            assert!(super::queue_fault_message_enabled(value));
+        }
+        assert!(!super::queue_fault_message_enabled(Some("0")));
+    }
 
     #[test]
     fn counted_queue_limit_preserves_zero_and_uses_default_when_unspecified() {

@@ -1235,3 +1235,49 @@ fn ambiguous_runtime_enable_requires_cleanup_without_replaying_enable() {
     assert!(kfd.file.is_none());
     assert_eq!(*modes.lock().unwrap(), [1, 0]);
 }
+
+#[test]
+fn core_runtime_info_uses_effective_registration_and_rejects_uncertain_enablement() {
+    for failure in [
+        None,
+        Some(errno::EINTR),
+        Some(errno::EIO),
+        Some(errno::EBUSY),
+    ] {
+        let kfd = endpoint(Arc::new(move |call| match call {
+            Call::RuntimeEnable(args) if args.mode_mask != 0 => {
+                failure.map_or(Ok(()), |code| Err(io::Error::from_raw_os_error(code)))
+            }
+            Call::RuntimeEnable(_) => Ok(()),
+            _ => panic!("unexpected core runtime ioctl"),
+        }));
+        {
+            let mut runtime = kfd.runtime_guard().unwrap();
+            kfd.configure_debugger_locked(
+                &mut runtime,
+                Some(DebuggerRegistration {
+                    address: 0x4000,
+                    setup_ttmp: true,
+                    mode: DebuggerRegistrationMode::Prefer,
+                }),
+            )
+            .unwrap();
+        }
+        assert_eq!(kfd.core_runtime_info().unwrap().runtime_state, 0);
+        assert_eq!(kfd.core_runtime_info().unwrap().r_debug, 0);
+        let _ = kfd.enable_runtime();
+        match failure {
+            None => {
+                let info = kfd.core_runtime_info().unwrap();
+                assert_eq!(
+                    (info.runtime_state, info.r_debug, info.ttmp_setup),
+                    (1, 0x4000, 1)
+                );
+            }
+            Some(errno::EBUSY) => assert_eq!(kfd.core_runtime_info().unwrap().runtime_state, 0),
+            Some(_) => assert!(kfd.core_runtime_info().is_err()),
+        }
+        kfd.disable_runtime().unwrap();
+        assert_eq!(kfd.core_runtime_info().unwrap().r_debug, 0);
+    }
+}
