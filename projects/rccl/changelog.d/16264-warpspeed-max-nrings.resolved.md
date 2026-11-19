@@ -1,0 +1,1 @@
+* Fixed `NCCL_MAX_NRINGS` doubling the channel count of non-AllReduce/AllGather/ReduceScatter collectives with WarpSpeed on single-node 8-GPU gfx950, and `NCCL_MAX_NCHANNELS` at its maximum halving it. Both now give the same count as the equivalent `NCCL_MAX_NCHANNELS` value.
