@@ -5,6 +5,7 @@ rj_add_object_library(rocjitsu_vm
     soc.cpp
     virtual_machine.cpp
     topology_assembly.cpp
+    ../stats/execution_statistics.cpp
     fabric_backing_kfd.cpp
     canonical_backing_id.cpp
     canonical_line_freshness.cpp

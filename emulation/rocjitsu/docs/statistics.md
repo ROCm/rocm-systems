@@ -95,6 +95,35 @@ wave slot has been reused. Final teardown counts residual owned instructions
 as cancelled. Within one scope, absent overflow, `accepted` equals `completed +
 cancelled + failed + pending`. Queue depth and pending are gauges, not totals.
 
+## Execution observations and plugins
+
+Selecting `execution.*` or `host.dispatch.duration` installs a built-in execution
+adapter on every GPU. It shares the VM session with the direct component
+producers and survives pre-run `rj_vm_load_plugins()` replacement. Existing user
+plugins retain that API's primary-GPU scope. A cache-only selection does not
+install the adapter. The internal name `rocjitsu_statistics` is reserved; a
+conflicting plugin emits a diagnostic and makes the statistics incomplete.
+
+`execution.wave_instructions.{scalar,vector,matrix,lds,global,control,other}`
+counts wave-instruction observations by the shared reporting-plugin classifier.
+Synchronous execution uses the before-execute callback, including terminators;
+asynchronous arithmetic uses its accepted-issue callback. These are observations,
+not retired-instruction or per-lane hardware counts. The adapter accepts async
+execution and does not request register hooks or serialized instruction hooks.
+
+`execution.dispatches_started`, `execution.dispatches_ended`, and
+`execution.dispatches_incomplete` describe dispatch execution lifecycle.
+`execution.waves_halted` and `execution.waves_cancelled` count wave terminal
+observations in the per-GPU execution scope. `host.dispatch.duration` is a
+histogram of host steady-clock intervals between execution begin and end; it
+does not include a later retry of durable completion publication. Zero-workgroup
+packets without execution do not become incomplete dispatches.
+
+Dispatch scopes include instruction families, dispatch lifecycle, duration,
+copied kernel name/symbol, dispatch ID, wave size, and code-target ID. Component
+scopes contain the per-GPU aggregates. Choose one of those levels when summing
+instructions to avoid counting the same observation twice.
+
 ## Library ownership
 
 `lib/util/include/util/statistics.h` contains both owner-local accumulators and
@@ -115,6 +144,38 @@ scope limit, and supplies run provenance and completeness. Core event
 adapters define modeled events and bind to the simulator's existing event
 paths. The rocjitsu adapter
 preserves the `rocjitsu.statistics.v1` format consumed by the offline converter.
+
+## Adding a producer
+
+Include `util/statistics.h` for accumulators and registered metric handles. Core
+components that need common output bind handles from `SoC::statistics()` during
+setup:
+
+```cpp
+std::shared_ptr<stats::RegisteredCounter> events;
+if (const auto &session = soc.statistics()) {
+  if (auto scope = session->scope("example", soc.statistics_gpu_index()))
+    events = scope->counter("example.events", "events", "Accepted example operations");
+}
+// In the producer's existing event path:
+if (events)
+  events->increment();
+```
+
+Registration copies descriptors and labels and returns a stable shared handle.
+Filtered metrics return a null handle. Reusing a name requires the same type,
+unit, description, domain, and histogram layout; conflicts emit a diagnostic
+and mark the session incomplete. Summary/histogram scalar suffixes are reserved.
+Choose a measurement domain such as `model_events`, `scheduler_steps`, or
+`host_wall_time` and state what constitutes an observation. Avoid arbitrary
+address or lane labels that would grow the registry without a bound.
+
+Counters and gauges use atomics; histogram and summary observations use a
+metric-local mutex. Hot recording performs no string lookup or serialization.
+The VM exports only after producer shutdown; binding/rebinding and a coherent
+multi-metric snapshot require quiescence. Custom deferred-completion backends
+must serialize their callbacks with the owning CU's issue, retry, and
+cancellation paths. Statistics adds no timer or background thread.
 
 ## Accumulators
 

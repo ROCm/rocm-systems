@@ -1852,6 +1852,55 @@ TEST(ExecutionPluginTest, KernelLoggingSupportsActualAsyncMma) {
   EXPECT_NE(sink.str().find("mfma detected"), std::string::npos);
 }
 
+TEST(ExecutionPluginTest, RemovingPluginPreservesSinksSlotsAndRemainingHookPolicy) {
+  class RemovedPlugin final : public DestructorWritingPlugin {
+  public:
+    explicit RemovedPlugin(std::vector<std::string> &events) : DestructorWritingPlugin(events) {}
+    bool requires_serial_hot_hooks() const override { return true; }
+    bool observes_memory_routing() const override { return true; }
+    bool observes_tensor_dma_memory_access() const override { return true; }
+    bool observes_tensor_dma_issue() const override { return true; }
+    bool observes_lds_direct_reads() const override { return true; }
+  };
+
+  std::vector<std::string> events;
+  PluginSinkConfig config;
+  config.emplace<DestructionTrackingSink>(events);
+  ExecutionPluginGroup group(std::move(config));
+  auto removed = std::make_unique<RemovedPlugin>(events);
+  RemovedPlugin *removed_ptr = removed.get();
+  ASSERT_TRUE(group.add(std::move(removed)));
+  auto retained = std::make_unique<ParallelSafePlugin>();
+  ParallelSafePlugin *retained_ptr = retained.get();
+  ASSERT_TRUE(group.add(std::move(retained)));
+  EXPECT_EQ(retained_ptr->slot_index(), 1u);
+  EXPECT_TRUE(group.requires_serial_hot_hooks());
+  removed_ptr->onShutdown();
+  ASSERT_TRUE(group.remove(removed_ptr));
+  EXPECT_EQ(events, (std::vector<std::string>{"write:destroyed\n", "plugin"}));
+  EXPECT_EQ(retained_ptr->slot_index(), 0u);
+  EXPECT_EQ(group.num_plugins(), 1u);
+  EXPECT_FALSE(group.requires_serial_hot_hooks());
+  EXPECT_FALSE(group.observes_memory_routing());
+  EXPECT_FALSE(group.observes_tensor_dma_memory_access());
+  EXPECT_FALSE(group.observes_tensor_dma_issue());
+  EXPECT_TRUE(group.observes_before_execute_instruction());
+  EXPECT_FALSE(group.supports_async_instructions());
+  retained_ptr->onShutdown();
+  ASSERT_TRUE(group.remove(retained_ptr));
+  EXPECT_TRUE(group.empty());
+  EXPECT_TRUE(group.supports_async_instructions());
+  EXPECT_FALSE(group.observes_before_execute_instruction());
+  EXPECT_FALSE(group.observes_after_execute_instruction());
+  EXPECT_FALSE(group.observes_async_instruction_issued());
+  EXPECT_FALSE(group.observes_memory_instruction_routing());
+  EXPECT_FALSE(group.observes_vgpr_reads());
+  EXPECT_FALSE(group.observes_vgpr_writes());
+  EXPECT_FALSE(group.observes_sgpr_reads());
+  EXPECT_FALSE(group.observes_scalar_register_writes());
+  EXPECT_FALSE(group.remove(nullptr));
+}
+
 TEST(ExecutionPluginTest, HotHookPolicyComesFromContainedPlugins) {
   ExecutionPluginGroup group(PluginSinkConfig{});
   EXPECT_FALSE(group.requires_serial_hot_hooks());

@@ -107,7 +107,8 @@ public:
 
   /// @brief Set the execution plugin group on CP and all CUs (shared ownership).
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
-    cp_->set_plugin_group(pg);
+    if (cp_)
+      cp_->set_plugin_group(pg);
     for (auto *se : shader_engines_)
       se->set_plugin_group(pg);
   }

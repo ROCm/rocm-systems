@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/soc.h"
+#include "rocjitsu/stats/execution_statistics.h"
 #include "util/result.h"
 
 #include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
@@ -47,6 +48,14 @@ SoC::SoC(std::string name, amdgpu::GpuMemory *memory, rj_code_arch_t arch)
 SoC::~SoC() { release_vm_resources(); }
 
 void SoC::set_statistics(std::shared_ptr<StatisticsSession> session, uint32_t gpu_index) {
+  if (session == statistics_ && gpu_index == statistics_gpu_index_)
+    return;
+  if (execution_statistics_) {
+    execution_statistics_->onShutdown();
+    [[maybe_unused]] const bool removed = plugin_group_->remove(execution_statistics_);
+    assert(removed && "the installed statistics adapter must belong to its plugin group");
+    execution_statistics_ = nullptr;
+  }
   statistics_ = std::move(session);
   statistics_gpu_index_ = gpu_index;
   const auto scope = [&](std::string path) {
@@ -60,6 +69,9 @@ void SoC::set_statistics(std::shared_ptr<StatisticsSession> session, uint32_t gp
     cu->l1_scalar().set_statistics(scope(cu->full_path() + ".l1_scalar"));
     cu->l1_vector().set_statistics(scope(cu->full_path() + ".l1_vector"));
   }
+  // Republish the retained user group even when removal made statistics disabled.
+  std::shared_ptr<ExecutionPluginGroup> group = std::move(plugin_group_);
+  set_plugin_group(std::move(group));
 }
 
 void SoC::mark_statistics_incomplete_if_pending() {
@@ -88,6 +100,8 @@ void SoC::release_vm_resources() {
   sdma_queue_scheduler_.shutdown();
   for (amdgpu::ComputeUnitCore *cu : all_cus())
     cu->finish_statistics();
+  if (execution_statistics_)
+    execution_statistics_->onShutdown();
 }
 
 util::Result SoC::add_xcd(amdgpu::Xcd *xcd, util::DiagnosticEmitter emit_error) {
@@ -303,6 +317,24 @@ std::optional<amdgpu::ComputeQueueBindingPlan> SoC::make_pm4(uint32_t /*queue_or
 }
 
 void SoC::set_plugin_group(std::shared_ptr<ExecutionPluginGroup> plugin_group) {
+  if (plugin_group && plugin_group == plugin_group_ && (!statistics_ || execution_statistics_))
+    return;
+  ExecutionStatistics *incoming_statistics = nullptr;
+  if (statistics_ && ExecutionStatistics::requested(*statistics_)) {
+    // Admission is a pre-run operation. Never append to the shared empty singleton.
+    if (!plugin_group || plugin_group == ExecutionPluginGroup::empty_group())
+      plugin_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    auto adapter = std::make_unique<ExecutionStatistics>(statistics_, statistics_gpu_index_);
+    incoming_statistics = adapter.get();
+    if (!plugin_group->add(std::move(adapter))) {
+      incoming_statistics = nullptr;
+      statistics_->mark_incomplete();
+      util::Logger::warn("statistics adapter rejected: reserved plugin name rocjitsu_statistics");
+    }
+  }
+  if (execution_statistics_)
+    execution_statistics_->onShutdown();
+  execution_statistics_ = incoming_statistics;
   plugin_group_ = plugin_group ? plugin_group : ExecutionPluginGroup::empty_group();
   for (auto *xcd : xcds_)
     xcd->set_plugin_group(plugin_group_);

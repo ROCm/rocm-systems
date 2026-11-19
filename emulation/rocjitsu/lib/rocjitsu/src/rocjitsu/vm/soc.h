@@ -37,6 +37,8 @@
 
 namespace rocjitsu {
 
+class ExecutionStatistics;
+
 namespace test {
 class SoCTestAccess;
 }
@@ -351,6 +353,8 @@ private:
   bool vm_resources_released_ = false;
   std::shared_ptr<StatisticsSession> statistics_;
   uint32_t statistics_gpu_index_ = 0;
+  // Owned by plugin_group_; finalized before VM statistics export on every GPU.
+  ExecutionStatistics *execution_statistics_ = nullptr;
 };
 
 } // namespace rocjitsu

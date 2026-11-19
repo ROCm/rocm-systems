@@ -692,6 +692,7 @@ add_executable(
     statistics_vm_test.cpp
     cache_statistics_test.cpp
     pipeline_statistics_test.cpp
+    execution_statistics_test.cpp
     util_bit_test.cpp
     util_unique_handle_test.cpp
     util_intrusive_shared_ptr_test.cpp
