@@ -210,12 +210,12 @@ public:
   IssueSnapshot issue_snapshot() const { return issued_; }
   bool cancel_last_issue(uint64_t pc, const IssueSnapshot &before);
   /// @brief Apply implicit counter capacity and explicit instruction waits.
-  /// @details Wave state qualifies EXEC-zero and ignored-resource admission.
+  /// @details Wave state qualifies EXEC-zero admission.
   /// Without a wave, producer admission assumes all classified obligations count.
   /// @pre If supplied, wave has the architecture specified by arch.
   void before(const Instruction &inst, rj_code_arch_t arch, const Wavefront *wave = nullptr);
   /// @brief Whether a classified counter obligation survives wave-state filtering.
-  /// @details CDNA5 filters ignored resources and skippable EXEC-zero issues.
+  /// @details CDNA5 filters skippable EXEC-zero obligations.
   /// Other targets keep their existing issue/routing rules. Replay-source XCNT
   /// and counter-only instructions without memory metadata are not filtered.
   /// @pre counter was classified from inst for wave's architecture.

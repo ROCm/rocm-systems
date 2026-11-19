@@ -2637,21 +2637,26 @@ TEST(MemoryWaitExecutionTest, CounterOnlyCacheOperationDoesNotProveOlderLoadComp
   }
 }
 
-TEST(MemoryWaitExecutionTest, IgnoredBufferDoesNotAdmitOrOccupyLoadcnt) {
+TEST(MemoryWaitExecutionTest, BufferTypeMismatchRetainsLoadcntWithoutWritingData) {
   using namespace rocjitsu::amdhsa;
   const util::FailureOr<uint32_t> maximum =
       WaitCounterPolicy::maximum_dependency_wait(ROCJITSU_CODE_ARCH_CDNA5, WaitCounterKind::Load);
   ASSERT_TRUE(maximum.succeeded());
   const unsigned capacity = maximum.value() + 1;
   // Exercise admission at capacity, occupancy before a later admission, and
-  // occupancy used by a partial wait. Each can otherwise hide the first result.
-  for (std::string_view scenario : {"admission", "retention", "partial wait"})
+  // occupancy used by a partial wait. A wait allowing both loads keeps the
+  // first result pending, even when the second load produces no data.
+  for (std::string_view scenario : {"admission", "retention", "partial wait", "insufficient wait"})
     for (uint32_t type : {0u, 2u})
       for (bool zero_exec : {false, true})
         for (bool xcnt : {false, true}) {
           SCOPED_TRACE(std::format("scenario={} type={} zero_exec={} xcnt={}", scenario, type,
                                    zero_exec, xcnt));
           std::vector<uint32_t> code;
+          constexpr uint32_t sentinel = 0xfeedabcd;
+          append_instruction(code,
+                             cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 255, .vdst = 64}));
+          code.push_back(sentinel);
           append_instruction(code,
                              cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 128, .vdst = 100}));
           append_instruction(code, cdna5::build_sop1(cdna5::kSMovB64Sop1, {.ssrc0 = 0, .sdst = 8}));
@@ -2679,10 +2684,15 @@ TEST(MemoryWaitExecutionTest, IgnoredBufferDoesNotAdmitOrOccupyLoadcnt) {
           if (zero_exec)
             append_instruction(code,
                                cdna5::build_sop1(cdna5::kSMovB64Sop1, {.ssrc0 = 193, .sdst = 126}));
+          if (type != 0 || zero_exec)
+            append_instruction(code,
+                               cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 320, .vdst = 67}));
           if (scenario == "retention")
             load(65);
           else if (scenario == "partial wait")
             append_instruction(code, cdna5::build_sopp(cdna5::kSWaitLoadcntSopp, {.simm16 = 1}));
+          else if (scenario == "insufficient wait")
+            append_instruction(code, cdna5::build_sopp(cdna5::kSWaitLoadcntSopp, {.simm16 = 2}));
           append_instruction(code,
                              cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 256, .vdst = 66}));
           append_instruction(code, S_ENDPGM_GFX12);
@@ -2700,7 +2710,13 @@ TEST(MemoryWaitExecutionTest, IgnoredBufferDoesNotAdmitOrOccupyLoadcnt) {
           step_until_halted(*sim.engine, *sim.cu());
           ASSERT_EQ(sim.snapshot->snapshots().size(), 1u);
           EXPECT_EQ(sim.snapshot->snapshots().front().vgpr(66, 0), 0x12345678u);
-          EXPECT_EQ(sim.cu()->memory_wait_diagnostic_count(), type == 2 ? 1u : 0u);
+          EXPECT_EQ(sim.snapshot->snapshots().front().vgpr(64, 0),
+                    type == 0 && !zero_exec ? 0x12345678u : sentinel);
+          if (type != 0 || zero_exec) {
+            EXPECT_EQ(sim.snapshot->snapshots().front().vgpr(67, 0), sentinel);
+          }
+          EXPECT_EQ(sim.cu()->memory_wait_diagnostic_count(),
+                    scenario == "insufficient wait" ? 1u : 0u);
         }
 }
 

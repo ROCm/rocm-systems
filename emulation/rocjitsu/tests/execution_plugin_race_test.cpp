@@ -2286,11 +2286,8 @@ TEST_F(Gfx1250CounterCapacityRaceTest, PartialDscntWaitCountsDsNop) {
   EXPECT_EQ(event_status(read), EventStatus::WAVE_COMPLETE);
 }
 
-// A buffer instruction whose descriptor TYPE is not 0 is ignored (CDNA5 ISA
-// 9.6). The detector gives it no LOADcnt slot, whether EXEC is active or zero,
-// so it proves no older load complete; if hardware still counted it, that only
-// keeps the older load pending longer. A valid buffer load takes a slot in both
-// cases.
+// TYPE mismatch suppresses a buffer load's data effects (CDNA5 ISA 9.6),
+// while its ordered LOADcnt slot still participates in admission and waits.
 TEST_F(Gfx1250CounterCapacityRaceTest, BufferLoadFillsLoadcnt) {
   vmem_load(0, /*vgpr=*/0);
   for (int index = 0; index < kCapacity - 1; ++index)
@@ -2299,12 +2296,12 @@ TEST_F(Gfx1250CounterCapacityRaceTest, BufferLoadFillsLoadcnt) {
   EXPECT_FALSE(vgpr_read(0, 0));
 }
 
-TEST_F(Gfx1250CounterCapacityRaceTest, IgnoredBufferLoadDoesNotFillLoadcnt) {
+TEST_F(Gfx1250CounterCapacityRaceTest, TypeMismatchedBufferLoadFillsLoadcnt) {
   vmem_load(0, /*vgpr=*/0);
   for (int index = 0; index < kCapacity - 1; ++index)
     vmem_load(0, /*vgpr=*/1);
   ASSERT_NO_FATAL_FAILURE(buffer_load(0, /*vgpr=*/2, /*type=*/2));
-  EXPECT_TRUE(vgpr_read(0, 0));
+  EXPECT_FALSE(vgpr_read(0, 0));
 }
 
 TEST_F(Gfx1250CounterCapacityRaceTest, ExecZeroBufferLoadFillsLoadcnt) {
@@ -2315,12 +2312,12 @@ TEST_F(Gfx1250CounterCapacityRaceTest, ExecZeroBufferLoadFillsLoadcnt) {
   EXPECT_FALSE(vgpr_read(0, 0));
 }
 
-TEST_F(Gfx1250CounterCapacityRaceTest, ExecZeroIgnoredBufferLoadDoesNotFillLoadcnt) {
+TEST_F(Gfx1250CounterCapacityRaceTest, ExecZeroTypeMismatchedBufferLoadFillsLoadcnt) {
   vmem_load(0, /*vgpr=*/0);
   for (int index = 0; index < kCapacity - 1; ++index)
     vmem_load(0, /*vgpr=*/1);
   ASSERT_NO_FATAL_FAILURE(buffer_load(0, /*vgpr=*/2, /*type=*/2, /*exec=*/0));
-  EXPECT_TRUE(vgpr_read(0, 0));
+  EXPECT_FALSE(vgpr_read(0, 0));
 }
 
 TEST_F(Gfx1250CounterCapacityRaceTest, PartialLoadcntWaitCountsExecZeroBufferLoad) {
@@ -2330,11 +2327,53 @@ TEST_F(Gfx1250CounterCapacityRaceTest, PartialLoadcntWaitCountsExecZeroBufferLoa
   EXPECT_FALSE(vgpr_read(0, 0));
 }
 
-TEST_F(Gfx1250CounterCapacityRaceTest, PartialLoadcntWaitDoesNotCountIgnoredExecZeroBufferLoad) {
+TEST_F(Gfx1250CounterCapacityRaceTest, PartialLoadcntWaitCountsTypeMismatchedExecZeroBufferLoad) {
   vmem_load(0, /*vgpr=*/0);
   ASSERT_NO_FATAL_FAILURE(buffer_load(0, /*vgpr=*/2, /*type=*/2, /*exec=*/0));
   wait_loadcnt(0, 1);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, TypeMismatchedBufferLoadHoldsALoadcntSlot) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  ASSERT_NO_FATAL_FAILURE(buffer_load(0, /*vgpr=*/2, /*type=*/2));
+  vmem_load(0, /*vgpr=*/1);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, ExecZeroTypeMismatchedBufferLoadHoldsALoadcntSlot) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  ASSERT_NO_FATAL_FAILURE(buffer_load(0, /*vgpr=*/2, /*type=*/2, /*exec=*/0));
+  vmem_load(0, /*vgpr=*/1);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, PartialLoadcntWaitCountsTypeMismatchedBufferLoad) {
+  vmem_load(0, /*vgpr=*/0);
+  ASSERT_NO_FATAL_FAILURE(buffer_load(0, /*vgpr=*/2, /*type=*/2));
+  wait_loadcnt(0, 1);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest,
+       PartialLoadcntWaitAllowingTypeMismatchedLoadKeepsOldestPending) {
+  vmem_load(0, /*vgpr=*/0);
+  ASSERT_NO_FATAL_FAILURE(buffer_load(0, /*vgpr=*/2, /*type=*/2));
+  wait_loadcnt(0, 2);
   EXPECT_TRUE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, TypeMismatchedBufferLoadHasSlotWithoutRegisterDependency) {
+  ASSERT_TRUE(race_state(0).getWaveMemoryEvents().empty());
+  ASSERT_NO_FATAL_FAILURE(buffer_load(0, /*vgpr=*/2, /*type=*/2));
+  EXPECT_EQ(race_state(0).getWaveMemoryEvents().size(), 1u);
+  EXPECT_FALSE(vgpr_read(0, 2));
+  wait_loadcnt(0, 0);
+  EXPECT_FALSE(race_state(0).hasPendingCounter(WaitCounterType::LOADCNT));
 }
 
 // Transfers that move no data still take a TENSORcnt slot.

@@ -2009,12 +2009,6 @@ bool MemoryWaitScoreboard::counts_memory_counter(const Instruction &inst, const 
   const rj_code_arch_t arch = wave.cu().arch();
   if (arch != ROCJITSU_CODE_ARCH_CDNA5)
     return true;
-  if (inst.flags() & CONDITIONAL_MEMORY_LANES) {
-    RegisterModifiers modifiers;
-    inst.amdgpu_register_modifiers(modifiers);
-    if (addr_calc::cdna5_ignores_buffer_resource(modifiers, wave))
-      return false;
-  }
   if (!info->exec_masked || wave.memory_exec(inst) != 0)
     return true;
   const MemoryIssueInfo counted = info->for_exec_zero(arch, inst.mnemonic());

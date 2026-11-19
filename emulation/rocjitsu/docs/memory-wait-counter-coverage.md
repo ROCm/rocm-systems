@@ -51,15 +51,16 @@ and LDS counter positions, even with empty EXEC. On older CDNA, the runtime
 selects counter domains from the resolved requests.
 Functional execution routes the requesting lanes by address space.
 
-Counter admission and occupancy both account for EXEC and resource descriptors.
-An ignored gfx1250 buffer descriptor (TYPE other than 0) neither forces progress
-nor contributes a younger counter position in the checker. The ISA specifies
-ignored data effects; omitting its counter slot conservatively keeps older
-results pending even if hardware counts the ignored instruction. This can report
-a missing wait when hardware would already guarantee completion; the counter
-behavior of mismatched descriptors has not been validated on hardware.
-With EXEC zero, gfx1250 VMEM retains
-its LOAD/STORE/ASYNC/TENSOR obligations, LDS retains DSCNT, and FLAT retains both
+A gfx1250 buffer load with resource TYPE other than 0 produces no register
+result (CDNA5 ISA section 9.6), but retains its ordered LOADcnt position.
+Counter admission and occupancy are independent of those data effects. An
+ordinary load followed by a TYPE-mismatched buffer load can therefore use
+`s_wait_loadcnt 1` before consuming the first load's result. The mismatched
+load leaves its destination unchanged and creates no register dependency.
+This counter behavior has not been validated on hardware.
+
+With EXEC zero, gfx1250 VMEM retains its LOAD/STORE/ASYNC/TENSOR obligations,
+LDS retains DSCNT, and FLAT retains both
 domains, following the skip conditions in CDNA5 ISA section 3.2.2.1. An LDS
 instruction's ASYNC obligation is not guaranteed by those conditions. RDNA retains
 its counter positions. On CDNA1–4, ordinary VMEM and LDS instructions with EXEC

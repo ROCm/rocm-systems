@@ -513,12 +513,19 @@ That is safe even if the instruction was skipped: those counters were then zero,
 so the earlier operations on them had completed. Its other counters are left
 out: `ds_atomic_async_barrier_arrive_b64` is an LDS instruction that counts on
 ASYNCcnt, so with EXEC zero it may be skipped while async loads are pending, and
-it proves none of them complete. An ordinary buffer access whose lanes are all cleared while
-EXEC is active keeps no slot. A VBUFFER instruction whose resource descriptor
-TYPE is not a buffer is ignored (CDNA5 ISA 9.6), so it applies no backpressure
-and keeps no slot, whether EXEC is active or zero. If hardware still counted it,
-leaving it out only keeps older operations pending longer. `global_inv` counts on
-LOADcnt, and `global_wb` and `global_wbinv` on STOREcnt (CDNA5 ISA 5.7.1.2), and
+it proves none of them complete.
+
+An ordinary buffer load with a non-buffer resource TYPE returns no data
+(CDNA5 ISA 9.6), but applies LOADcnt backpressure and retains its ordered slot.
+For example, an ordinary load followed by a TYPE-mismatched buffer load and
+`s_wait_loadcnt 1` makes the first load ready. The second load leaves its
+VGPR destination unchanged and creates no register dependency. Other
+TYPE-mismatched VBUFFER operations retain the plugin's conservative omission
+policy pending validation of their counter behavior; that policy can produce
+false positives. No hardware validation of the TYPE-mismatch accounting is
+claimed here.
+
+`global_inv` counts on LOADcnt, and `global_wb` and `global_wbinv` on STOREcnt (CDNA5 ISA 5.7.1.2), and
 none of them is skipped for EXEC zero (CDNA5 ISA 3.2.2.1), so each applies
 backpressure on its counter when it issues. Each then keeps its slot, recorded
 as an event with no registers, in order with the VMEM operations on its

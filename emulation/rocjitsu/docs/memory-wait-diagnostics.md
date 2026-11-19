@@ -116,10 +116,10 @@ domains. Counter-only operations count, but unordered younger operations
 cannot establish FIFO completion of an older result. RDNA1 and RDNA2 GDS returns form
 their own ordered LGKM class. Scalar-memory results, GDS results on other
 targets, and legacy CDNA FLAT results require a zero wait.
-The checker conservatively omits ignored gfx1250 buffer descriptors from both
-counter admission and occupancy. This can report a missing wait if hardware
-counts those instructions; the ISA specifies their ignored data effects without
-explicitly specifying counter occupancy.
+
+A gfx1250 buffer load with a mismatched resource TYPE returns no data, but
+retains its ordered LOADcnt position for admission and partial waits. Its
+destination remains unchanged and acquires no new register dependency.
 EXEC-zero vector issues retain the counter positions guaranteed on gfx1250 and
 RDNA. CDNA1–4 also retain ordinary VMEM and LDS positions behind pending
 operations; an empty EXEC mask alone does not remove those positions.

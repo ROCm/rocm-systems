@@ -7,6 +7,7 @@
 #include "rocjitsu/code/analysis/waitcheck/target.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/sgpr_layout.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_metadata.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/memory_issue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 #include "rocjitsu/isa/instruction.h"
@@ -128,14 +129,20 @@ bool exec_zero_memory_issue_counts(rj_code_arch_t arch) {
          arch == ROCJITSU_CODE_ARCH_CDNA5;
 }
 
-/// Conservatively omit gfx1250 VBUFFER instructions with a non-buffer TYPE.
-/// CDNA5 ISA 9.6 specifies ignored data effects without explicit counter rules.
-/// If hardware counts the instruction, omitting admission and occupancy keeps
-/// older operations pending longer and can produce false positives.
-bool ignored_memory_issue(const Instruction &inst, const amdgpu::Wavefront &wf) {
+bool is_buffer_load(const Instruction &inst) {
+  return inst.amdgpu_memory_addressing() == amdgpu::MemoryAddressing::Buffer &&
+         inst.amdgpu_memory_kind() == amdgpu::MemoryKind::Load;
+}
+
+/// Ordinary buffer loads retain their counter slot when TYPE suppresses data.
+/// Other mismatched VBUFFER operations remain conservatively uncounted pending
+/// validation of their counter behavior; that omission can cause false positives.
+bool omits_buffer_counter(const Instruction &inst, const amdgpu::Wavefront &wf) {
   // Every gfx1250 VBUFFER instruction has conditional memory lanes, so others
   // skip decoding their register modifiers.
   if (wf.cu().arch() != ROCJITSU_CODE_ARCH_CDNA5 || !(inst.flags() & CONDITIONAL_MEMORY_LANES))
+    return false;
+  if (is_buffer_load(inst))
     return false;
   amdgpu::RegisterModifiers modifiers;
   inst.amdgpu_register_modifiers(modifiers);
@@ -916,7 +923,7 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     const auto &issued = d.routed_issue_info ? *d.routed_issue_info : issue;
     if (d.exec_mask == 0 && !(gfx10 && inst.mnemonic().starts_with("ds_gws_")) &&
         !d.ordered_count && !d.gds_m0) {
-      if (ignored_memory_issue(inst, wf) ||
+      if (omits_buffer_counter(inst, wf) ||
           (!arch_is_rdna(arch) && !exec_zero_memory_issue_counts(arch)) ||
           (arch_is_cdna_4_or_lower(arch) && wf.exec() != 0))
         return;
@@ -941,7 +948,7 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
                                   {}, obligations, memoryOrder);
         return;
       }
-      if (arch == ROCJITSU_CODE_ARCH_CDNA5 && wf.exec() != 0 && !routed)
+      if (arch == ROCJITSU_CODE_ARCH_CDNA5 && wf.exec() != 0 && !routed && !is_buffer_load(inst))
         return;
       const bool local = access.route == amdgpu::MemoryRoute::LOCAL;
       if (local || access.route == amdgpu::MemoryRoute::GLOBAL) {
@@ -950,10 +957,10 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
             local ? MemoryEventType::LDS_TO_VGPR : MemoryEventType::GLOBAL_TO_VGPR;
         const auto reg_store =
             local ? MemoryEventType::VGPR_TO_LDS : MemoryEventType::VGPR_TO_GLOBAL;
-        const bool unconditional =
-            gfx10 || issued.counts_with_empty_exec ||
-            (routed && amdgpu::flat_issues_both_counter_domains(arch)) ||
-            (arch == ROCJITSU_CODE_ARCH_CDNA5 && !rs->getWaveMemoryEvents().empty());
+        const bool unconditional = gfx10 || issued.counts_with_empty_exec ||
+                                   (routed && amdgpu::flat_issues_both_counter_domains(arch)) ||
+                                   (arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+                                    (wf.exec() != 0 || !rs->getWaveMemoryEvents().empty()));
         for (const auto &obligation : counted.counter_obligations()) {
           if (!unconditional && !rs->hasPendingCounter(obligation.wait_counter_type()))
             continue;
@@ -1507,7 +1514,7 @@ void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Ins
     const auto *info = inst.amdgpu_memory_issue_info();
     assert(info && "memory instruction reached the race detector without issue metadata");
     util::Result admitted = util::Result::success();
-    if (info && !ignored_memory_issue(inst, wf)) {
+    if (info && !omits_buffer_counter(inst, wf)) {
       if (!info->exec_masked || wf.exec() != 0 || arch_is_rdna(arch))
         admitted = s->race_state->prepareForMemoryIssue(*info);
       else if (exec_zero_memory_issue_counts(arch))
