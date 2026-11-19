@@ -36,7 +36,7 @@ enum hipRoundMode {
 
 #if (defined(__clang__) && (__clang_major__ > 17)) || (defined(__GNUC__) && (__GNUC__ >= 13))
 
-namespace internal {
+namespace __hip_fp8_internal {
 __host__ __device__ static inline __amd_fp16_storage_t half_to_f16(const __half val) {
   const __half_raw tmp = val;
   return __builtin_bit_cast(__amd_fp16_storage_t, tmp);
@@ -69,6 +69,6 @@ __host__ __device__ static inline __half2_raw f16x2_to_halfraw2(const __amd_fp16
   return __builtin_bit_cast(__half2_raw, val);
 }
 
-}  // namespace internal
+}  // namespace __hip_fp8_internal
 
 #endif
