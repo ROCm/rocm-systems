@@ -1,6 +1,27 @@
 # Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+from __future__ import annotations
+from dataclasses import dataclass
+from amdisa.codegen.execute import (
+    conversion,
+    float_compare,
+    float_fract,
+    float_ldexp,
+    float_minmax,
+    input_policy,
+)
+from amdisa.codegen.execute.floating_policy import (
+    F16_FLUSHED_SOURCE_OPS,
+    F16_TRANSCENDENTAL_OPS,
+    FLUSH_NEAREST_F32_OPS,
+    INPUT_FLUSHED_ROUNDING,
+    TRANS_F32_OPS,
+)
+from amdisa.codegen.execute.cube import CUBE_OPERATIONS, cube_expression, cube_omod
+from amdisa.codegen.execute.fp8_formats import uses_shared_fp8_widening
+from amdisa.semantics import F64_TO_INTEGER_DTYPES
+
 """SIMD fast-path probes for generated AMDGPU execute kernels.
 
 Instruction tables select functors and helpers for each format and encoding.
@@ -13,28 +34,6 @@ selection through SIMD_VOP2_BINARY for register-half handling. Older host-float
 min/max functors remain separate, with their documented NaN/signed-zero limits.
 """
 
-from __future__ import annotations
-
-from dataclasses import dataclass
-
-from amdisa.codegen.execute import (
-    conversion,
-    float_compare,
-    float_fract,
-    float_ldexp,
-    float_minmax,
-    input_policy,
-)
-from amdisa.codegen.execute.floating_policy import (
-    F16_FLUSHED_SOURCE_OPS,
-    FLUSH_NEAREST_F32_OPS,
-    INPUT_FLUSHED_ROUNDING,
-    TRANS_F32_OPS,
-    F16_TRANSCENDENTAL_OPS,
-)
-
-from amdisa.codegen.execute.cube import CUBE_OPERATIONS, cube_expression, cube_omod
-from amdisa.codegen.execute.fp8_formats import uses_shared_fp8_widening
 
 # Operation and operands of each F32 binary functor. SUB and SUBREV add the
 # negated subtrahend, keeping the sources in operand order (see _vec_binop_expr).
@@ -69,25 +68,9 @@ class ArithmeticCore:
 # retain their existing code generation, host NaN selection and flag behavior. A
 # scope would contain the flags they raise, which is why VOPD takes one around its
 # own host multiply in simd_coverage.h; the generated routes stay unscoped.
-_NATIVE_F32_GATE = (
-    'amdgpu::fp_mode::native_arithmetic_matches('
-    'wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32())'
-)
-
-
 _ARITHMETIC_CORES: dict[str, ArithmeticCore] = {
     'amdgpu::binary_f32_simd_unscoped<': ArithmeticCore('wf.fp_round_mode_f32()', None),
     'amdgpu::fma_f32_simd_unscoped(': ArithmeticCore('wf.fp_round_mode_f32()', None),
-    # DX9 keeps the host-matching gate: its zero-product rule is unvalidated
-    # outside the default environment.
-    'amdgpu::fma_dx9_zero_f32_simd_unscoped(': ArithmeticCore(
-        'wf.fp_round_mode_f32()', _NATIVE_F32_GATE
-    ),
-    # binary_f16_simd_unscoped always rounds nearest-even, so directed guest
-    # rounding falls back to scalar while every denormal mode stays eligible.
-    'amdgpu::binary_f16_simd_unscoped<': ArithmeticCore(
-        '0', 'wf.fp_round_mode_f16_f64() == 0'
-    ),
 }
 
 
@@ -123,42 +106,6 @@ def _binary_f32_op(name: str, *, modifiers: bool = False) -> str:
     )
 
 
-# VOP2 F16 counterpart of _BINARY_F32_FORMS. SUB and SUBREV flip the subtrahend's
-# raw half, as the VOP3 NegatedSource cases do: a float negation can fold into a
-# host subtraction, which keeps a NaN subtrahend's sign.
-_SIGN_F16 = 'amdgpu::fp_format::F16::kSign'
-_BINARY_F16_FORMS = {
-    'add': ('ADD', 'a, b'),
-    'sub': ('ADD', f'a, b ^ {_SIGN_F16}'),
-    'subrev': ('ADD', f'a ^ {_SIGN_F16}, b'),
-    'mul': ('MUL', 'a, b'),
-}
-
-
-def _binary_f16_op(name: str) -> str:
-    """Emit a VOP2 F16 functor sharing the VOP3 forms' arithmetic helper.
-
-    The probe scopes the guest environment once per instruction, so this uses the
-    unscoped core rather than paying a save and restore per SIMD chunk.
-    """
-    operation, operands = _BINARY_F16_FORMS[name]
-    return (
-        f'[&wf](auto a, auto b) {{ return '
-        f'amdgpu::binary_f16_simd_unscoped<amdgpu::fp_mode::Arithmetic::{operation}>('
-        f'{operands}, wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl()); }}'
-    )
-
-
-# F16 VOP3 arithmetic with explicit MODE flushing and post-rounding modifiers:
-# template_name -> (operation, amdgpu::NegatedSource). SUB and SUBREV add the
-# negated subtrahend in operand order, as in scalar lowering.
-SIMD_VOP3_BINARY_MODE_FP16 = {
-    'v_add_f16_vop3': ('ADD', 'NONE'),
-    'v_sub_f16_vop3': ('ADD', 'SRC1'),
-    'v_subrev_f16_vop3': ('ADD', 'SRC0'),
-    'v_mul_f16_vop3': ('MUL', 'NONE'),
-}
-
 # template_name -> (cpp_element_type, cpp_binary_op_functor)
 #
 # template_name matches the symbol emitted by _generator.gen_shared_execute:
@@ -167,13 +114,11 @@ SIMD_VOP3_BINARY_MODE_FP16 = {
 # The functor is invoked as `bin_op(simd<T>, simd<T>) -> simd<T>` inside
 # try_execute_binary_vop2_simd. Use std::*<> for stateless ops.
 SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
-    'v_add_f32_vop2': ('float32_t', _binary_f32_op('add')),
+    # --- float32 (IEEE-754 single-rounded, bit-identical to scalar body) ---
+    "v_add_f32_vop2": ("float32_t", _binary_f32_op('add')),
     'v_sub_f32_vop2': ('float32_t', _binary_f32_op('sub')),
     'v_subrev_f32_vop2': ('float32_t', _binary_f32_op('subrev')),
     'v_mul_f32_vop2': ('float32_t', _binary_f32_op('mul')),
-    # Legacy / DX9 zero-multiply: (a==0 || b==0) ? 0 : a*b. The ==0 matches both
-    # ±0 (as the scalar `a == 0.0f` does). Routed via the VOP3 binary fp glue for
-    # the _vop3 twin (which applies abs/neg/omod/clamp around this functor).
     # --- uint32 (wrap-around / bitwise, bit-identical to scalar body) ---
     "v_add_u32_vop2": ("uint32_t", "std::plus<>{}"),
     'v_sub_u32_vop2': ('uint32_t', 'std::minus<>{}'),
@@ -301,21 +246,6 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
         'uint32_t',
         '[](auto a, auto b) { return util::stdx::min(a & 0xFFFFu, b & 0xFFFFu); }',
     ),
-    # Legacy selection shares the raw-bit operation with scalar execution.
-    # IEEE-2019 *_NUM forms use the same selection rules as the scalar path.
-    # float_minmax.simd_probe routes the other IEEE-2019 forms, VOP3 included.
-    # v_cvt_pkrtz_f16_f32 (both spellings): two F32 sources rounded toward
-    # zero into packed halves by the shared/conversion.h stages.
-    # --- f16 binary (low 16 bits f16, result zero-extended). These share the
-    # MODE-aware arithmetic helper the VOP3 forms use, so source flushing,
-    # FP16_OVFL narrowing and NaN selection have one implementation. The probe
-    # installs nearest-even rounding, so only the guest rounding mode gates them. ---
-    'v_add_f16_vop2': ('uint32_t', _binary_f16_op('add')),
-    'v_sub_f16_vop2': ('uint32_t', _binary_f16_op('sub')),
-    'v_subrev_f16_vop2': ('uint32_t', _binary_f16_op('subrev')),
-    'v_mul_f16_vop2': ('uint32_t', _binary_f16_op('mul')),
-    # F16 LDEXP reads raw halves; see float_ldexp.simd_probe for VOP3.
-    'v_ldexp_f16_vop2': ('uint32_t', float_ldexp.simd_functor('f16')),
 }
 
 
@@ -340,33 +270,8 @@ _VOP3_UNARY_FP_F32 = {
     'v_log_f32',
 }
 
-# VOP3 twins excluded from generic VOP1 reuse:
-# - F16 unary/FREXP mantissa: SIMD_VOP3_UNARY_FP16 and SIMD_VOP3_FREXP_FP.
-# - FRACT: VOP3 deliberately has no SIMD path in any format. No raw-bit VOP3
-#   adapter is provided: F32/F64 could reuse try_execute_unary_vop3_rounded_simd's
-#   dispatch, and F16 would need true16 half selection.
-# - FREXP_EXP_I32_F32: SIMD_VOP3_UNARY_INT_EXTRA's integer result route.
-# - MOV_B16: scalar; the VOP1 raw copy lacks VOP3's numeric modifiers.
-# - CVT_F32_FP8/BF8: scalar; VOP3's byte selector differs from VOP1 byte 0.
-# The VOP1 forms remain eligible for SIMD.
-_VOP3_UNARY_SKIP = {
-    'v_fract_f16',
-    'v_fract_f32',
-    'v_floor_f16',
-    'v_ceil_f16',
-    'v_trunc_f16',
-    'v_rndne_f16',
-    'v_rcp_f16',
-    'v_rsq_f16',
-    'v_sqrt_f16',
-    'v_exp_f16',
-    'v_log_f16',
-    'v_mov_b16',
-    'v_frexp_exp_i32_f32',
-    'v_frexp_mant_f16',
-    'v_cvt_f32_fp8',
-    'v_cvt_f32_bf8',
-}
+
+_VOP3_UNARY_SKIP = {'v_cvt_f32_bf8', 'v_cvt_f32_fp8', 'v_mov_b16'}
 
 
 def _flush_input_then(fmt: str, functor: str) -> str:
@@ -401,9 +306,6 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         'uint32_t',
         '[](auto a) { return a & 0xFFFFu; }',
     ),
-    # RDNA f32->i32 floor / nearest conversions (CDNA4 uses flr / rpi). The
-    # probe passes the scalar body's FloorI32/NearestI32 stage object, which
-    # applies ABS/NEG and the F32 input flush; see shared/conversion.h.
     # --- bit-scan (SWAR, no stdx primitive) -----------------------------------
     # All return uint32_t. Most special-case the zero input to 0xFFFFFFFF,
     # matching the scalar bodies (std::countl_zero / countr_zero / popcount);
@@ -481,12 +383,6 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         ' x = ((x & 0x00FF00FFu) << 8) | ((x >> 8) & 0x00FF00FFu);'
         ' return (x << 16) | (x >> 16); }',
     ),
-    # --- frexp (f32 split into mantissa / exponent) ----------------------------
-    # VOP1 returns mantissa floats or integer exponent bits.
-    # VOP3 mantissa uses _VOP3_UNARY_FP_F32; the exponent twin uses
-    # SIMD_VOP3_UNARY_INT_EXTRA (ABS/NEG leave the exponent unchanged).
-    # FREXP F16 mantissa: flush the raw half before widening and normalization.
-    # The VOP3 twin uses SIMD_VOP3_FREXP_FP for modifiers.
     # --- f8 -> f32 (E4M3 / E5M2 8-bit float expand) ----------------------------
     # Scalar reads the low byte of src0 and expands via util::fp8_e4m3_to_f32 /
     # bf8_e5m2_to_f32 (no op_sel / byte-select in the body), so the unary functor
@@ -502,86 +398,6 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         'float32_t',
         '[](auto a) { return util::bf8_e5m2_to_f32_simd(a); }',
     ),
-    # --- ubyte -> f32 (extract byte N, exact int->float) -----------------------
-    # dst = float(byte_N(src0)); byte value is 0..255 so the int->float cast is
-    # exact and bit-identical to the scalar static_cast<float>.
-    # --- float rounding (bit-identical to std::* on host) ---
-    # FRACT reads raw encodings; VOP3 FRACT has no SIMD path (see _VOP3_UNARY_SKIP).
-    # --- transcendental div / sqrt. These mirror amdgpu::transcendental::*_f32
-    # exactly via util::*_f32_simd (FTZ input/output flush + canonical-qNaN and
-    # NaN-input-preservation blends), so the SIMD result is bit-identical to the
-    # forced-scalar body on every input incl NaN/Inf/denormal. ---
-    # LOG and EXP share their integer scalar mappings. Their complete
-    # instruction bodies save the host environment for output scaling.
-    # --- float -> int conversions with NaN->0 and saturating clamp. The float
-    # comparison masks are re-typed to the int lane via simd_mask_as<> before
-    # the where-blend. Masks are mutually exclusive so application order is
-    # irrelevant. Matches the scalar bodies' truncate-toward-zero cast. ---
-    # --- f16 (half) ops. The SIMD functors widen exact half encodings, evaluate,
-    # then narrow to F16. Their wrappers own any required source flush, modifiers,
-    # and output policy so eligibility matches the generated scalar contract.
-    # The F16 result occupies the low 16 bits of the destination and is
-    # zero-extended to the uint32_t lane used by VOP1. ---
-    'v_fract_f16_vop1': ('uint32_t', 'uint32_t', float_fract.simd_functor('f16')),
-    # VOP1 TRANS: flush the raw half, widen, evaluate, round and flush the result.
-    # These forms have no OMOD/CLAMP; VOP3 uses its separate modifier glue.
-    'v_rcp_f16_vop1': (
-        'uint32_t',
-        'uint32_t',
-        _flush_input_then(
-            'F16',
-            '[&wf](auto a) { return util::f32_to_f16_simd('
-            'amdgpu::transcendental::map_f16_simd<amdgpu::transcendental::HalfOperation::RCP>('
-            'util::f16_to_f32_simd(a), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
-            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))); }',
-        ),
-    ),
-    'v_rsq_f16_vop1': (
-        'uint32_t',
-        'uint32_t',
-        _flush_input_then(
-            'F16',
-            '[&wf](auto a) { return util::f32_to_f16_simd('
-            'amdgpu::transcendental::map_f16_simd<amdgpu::transcendental::HalfOperation::RSQ>('
-            'util::f16_to_f32_simd(a), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
-            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))); }',
-        ),
-    ),
-    'v_sqrt_f16_vop1': (
-        'uint32_t',
-        'uint32_t',
-        _flush_input_then(
-            'F16',
-            '[&wf](auto a) { return util::f32_to_f16_simd('
-            'amdgpu::transcendental::map_f16_simd<amdgpu::transcendental::HalfOperation::SQRT>('
-            'util::f16_to_f32_simd(a), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
-            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))); }',
-        ),
-    ),
-    # LOG/EXP helpers return an already-rounded half represented in F32.
-    'v_exp_f16_vop1': (
-        'uint32_t',
-        'uint32_t',
-        _flush_input_then(
-            'F16',
-            '[&wf](auto a) { return util::f32_to_f16_simd('
-            'amdgpu::transcendental::log_exp_f16_simd<false>(util::f16_to_f32_simd(a), '
-            'wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
-            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))); }',
-        ),
-    ),
-    'v_log_f16_vop1': (
-        'uint32_t',
-        'uint32_t',
-        _flush_input_then(
-            'F16',
-            '[&wf](auto a) { return util::f32_to_f16_simd('
-            'amdgpu::transcendental::log_exp_f16_simd<true>(util::f16_to_f32_simd(a), '
-            'wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
-            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))); }',
-        ),
-    ),
-    # --- f16 <-> f32 / int16 conversions ---
 }
 
 
@@ -635,6 +451,8 @@ SIMD_VOP2_CARRY: dict[str, str] = {
         ' return make_simd_carry(t2, bw1 | bw2); }'
     ),
 }
+
+
 # RDNA spells the carry-in forms *_CO_CI. Their VOP2 encoding reads carry-in
 # from VCC, exactly like addc/subb/subbrev, so they use the same fast path.
 SIMD_VOP2_CARRY.update(
@@ -671,16 +489,22 @@ SIMD_VOP2_CARRY.update(
 # so the generator can assert it per ISA.
 # The f16 entries here are the legacy MAD literal forms. They widen each operand
 # to f32 and narrow once after the arithmetic, matching their scalar bodies.
-# Architectural f16 FMA forms use SIMD_VOP2_FMA_F16 below instead: that path
-# performs the fused operation in native<double> chunks and applies the current
-# FP16 MODE controls without an intervening f32 rounding.
+# Architectural F16 FMA forms use rj-arith, which owns guest rounding and CPU
+# dispatch. v_fmac_f64 retains the split-VGPR, MODE-aware SIMD_VOP2_FMA_F64 path.
 _FMA_ACC_F32 = '[&wf](auto a, auto b, auto d, auto) { return amdgpu::fma_f32_simd_unscoped(a, b, d, wf); }'
+
+
 _FMA_ADDK_F32 = '[&wf](auto a, auto b, auto, auto k) { return amdgpu::fma_f32_simd_unscoped(a, b, k, wf); }'
+
+
 _FMA_MULK_F32 = '[&wf](auto a, auto b, auto, auto k) { return amdgpu::fma_f32_simd_unscoped(a, k, b, wf); }'
+
+
 # Inline-literal K read, routed through the RegisterAccess facade (see comment
 # above). Hard-coded operand name `simm32`; simd_ternary_literal_operand_name()
 # parses it back out for the generator's per-ISA assertion.
 _FMA_K_READ = 'amdgpu::RegisterAccess(wf).read_scalar(inst.simm32)'
+
 
 SIMD_VOP2_TERNARY: dict[str, tuple[str, str, str]] = {
     # --- f32 dst-accumulate ---
@@ -747,34 +571,8 @@ SIMD_VOP1_UNARY_F64: dict[str, tuple[str, str]] = {
 }
 
 
-# --- mixed-width f64 <-> 32-bit conversions -------------------------------
-#
-# These VOP1 cvt ops bridge an 8-wide (native_width64) f64 chunk and the same
-# number of 32-bit lanes, so they use dedicated glue rather than the equal-width
-# unary path. The 32-bit side is a util::narrow32<T> (fixed_size_simd<T,8>); a
-# direct static_simd_cast bridges it to/from native<double> with no bit_cast.
-#
-# f64 source -> 32-bit dst. template_name -> (out_lane_cpp_type, functor); the
-# functor is invoked as cvt_op(native<double>) -> narrow32<Tout> inside
-# try_execute_cvt_f64_to_b32_simd. cvt_f32_f64 is a single correctly-rounded
-# narrowing cast (vcvtpd2ps); the int forms do NaN->0 and the saturating clamp in
-# the double domain (all where-masks native<double>, so no cross-width mask cast)
-# then one truncating cast to the 8-wide int — bit-identical to the scalar body
-# for finite/Inf inputs. A NaN *result* of cvt_f32_f64 may differ in payload
-# (accepted; the A/B test skips it). INT32_MAX/MIN and UINT32_MAX are all exactly
-# representable in double, so the clamp constants cast back to the exact integers.
-SIMD_CVT_F64_TO_B32: dict[str, tuple[str, str]] = {
-    # FREXP exponent (F64 -> int32): flush the source under MODE, then narrow
-    # the low 32 exponent bits. The VOP3 twin reuses this functor: ABS/NEG
-    # cannot change the exponent.
-}
-
-# 32-bit source -> f64 dst. template_name -> (in_lane_cpp_type, functor); the
-# functor is invoked as cvt_op(narrow32<Tin>) -> native<double> inside
-# try_execute_cvt_b32_to_f64_simd. Each is an exact widening static_simd_cast
-# (vcvtps2pd for f32; int->double for i32/u32), bit-identical to the scalar body
-# (static_cast<double>) for every input.
-SIMD_CVT_B32_TO_F64: dict[str, tuple[str, str]] = {}
+# FREXP exponent extraction still needs a mixed-width FP64-to-32-bit bridge.
+SIMD_CVT_F64_TO_B32: dict[str, tuple[str, str]] = {}
 
 
 # template_name set for v_cndmask_b32 (VCC-driven per-lane select). No functor:
@@ -784,20 +582,13 @@ SIMD_VOP2_CNDMASK: set[str] = {
     'v_cndmask_b32_vop2',
 }
 
+
 # VOP3 form of v_cndmask_b32: same per-lane select, but the 64-bit selector is
 # read from the SGPR-pair `src2` instead of VCC. Also fixed-op / functorless.
 SIMD_VOP3_CNDMASK: set[str] = {
     'v_cndmask_b32_vop3',
 }
 
-# VOP3 div_fmas: fused FMA and VCC-controlled scaling, rounded once using
-# the guest mode. Fixed-op / functorless.
-SIMD_VOP3_DIV_FMAS_FP32: set[str] = {
-    'v_div_fmas_f32_vop3',
-}
-SIMD_VOP3_DIV_FMAS_FP64: set[str] = {
-    'v_div_fmas_f64_vop3',
-}
 
 # VOP3P packed-16 integer binary family. The glue applies half selectors
 # before the functor and retains scalar execution for integer CLAMP.
@@ -897,6 +688,7 @@ SIMD_VOP3P_PK_BINARY_INT: dict[str, str] = {
     ),
 }
 
+
 # Packed integer MAD applies the target's NEG/NEG_HI sign-bit policy to the
 # selected halves in the SIMD glue. CLAMP uses the scalar saturation path.
 SIMD_VOP3P_PK_TERNARY_INT: dict[str, str] = {
@@ -927,16 +719,6 @@ SIMD_VOP3P_PK_TERNARY_INT: dict[str, str] = {
     ),
 }
 
-# VOP3P packed-f32 binary. Each operand is a 64-bit consecutive-VGPR pair of two
-# f32 (lo/hi). Glue selects each source half at native width, including broadcasts,
-# applies neg/neg_hi (sign-bit toggle), and runs the per-half functor. Rounding,
-# denormal and clamp policies match the scalar helper.
-SIMD_VOP3P_PK_BINARY_F32: dict[str, str] = {}
-
-# pk_fma_f32 — 3-source FMA per half, with independent source-half selection.
-# Scalar and SIMD execution share hardware NaN selection. The glue installs one
-# guest FP environment for the instruction, so the functor uses the unscoped core.
-SIMD_VOP3P_PK_TERNARY_F32: dict[str, str] = {}
 
 # v_pk_mov_b32 — each src is a 64-bit SGPR or VGPR pair. op_sel[0] selects the
 # low output dword from src0 and op_sel[1] selects the high output dword from
@@ -945,13 +727,6 @@ SIMD_VOP3P_MOV_B32: set[str] = {
     'v_pk_mov_b32_vop3p',
 }
 
-# VOP3P integer dot products. dst is a single 32-bit lane (not packed) and
-# src2 is the accumulator, so the fast path vectorizes the reduction across
-# lanes. Parameterised by (ElemBits, Signed). Eligibility: the 16-bit forms
-# decline non-default op_sel packing, the 8/4-bit forms accept it. See
-# try_execute_vop3p_dot_int_simd in simd_glue.h for the arithmetic contract,
-# including how CLAMP and dot4_clamp_supported apply.
-SIMD_VOP3P_DOT_INT: dict[str, str] = {}
 
 # v_dot2_f32_{f16,bf16} — two half-precision products + an f32 accumulator into
 # one f32 lane. Eligibility: the HostF32 accumulation policy and the default
@@ -967,23 +742,6 @@ SIMD_VOP3P_DOT_F16_OR_BF16: set[str] = {
     'v_dot2_f32_bf16_vop3p',
 }
 
-# --- VOPC compare -> VCC ---------------------------------------------------
-#
-# 198 VOPC opcodes on CDNA4 are the single biggest breadth. Each writes one bit
-# into VCC per active EXEC lane (inactive bits preserved); CDNA4 has no v_cmpx
-# (EXEC-writing) form, so one glue shape (try_execute_vopc_simd) covers them all.
-# The table maps template_name -> (lane_cpp_type, cmp_functor); the functor is
-# invoked as cmp_op(native<T> src0, native<T> vsrc1) -> simd_mask and must mirror
-# the scalar body's comparison expression *verbatim* (esp. the ordered vs
-# unordered NaN behaviour, e.g. v_cmp_nlt = !(a < b), true on NaN). It is built
-# programmatically below from per-suffix operand conversions and per-relation
-# expressions.
-#
-# Lane width buckets: the 32-bit (f32/i32/u32) and 16-bit (f16/i16/u16) suffixes
-# all read as 32-bit lanes — the 16-bit ones narrow/convert inside the functor —
-# so they share the existing read_simd<T> path. The 64-bit suffixes (f64/i64/u64)
-# need the 64-bit-lane infra and are wired separately. v_cmp_class_* (a bitfield
-# class test, not a relational compare) is left scalar.
 
 # suffix -> (lane_cpp_type, operand-conversion template using {x})
 _VOPC_SUFFIX: dict[str, tuple[str, str]] = {
@@ -1004,6 +762,7 @@ _VOPC_SUFFIX: dict[str, tuple[str, str]] = {
     'i64': ('int64_t', '{x}'),
     'u64': ('uint64_t', '{x}'),
 }
+
 
 # relation -> mask expression over converted operands {a}, {b}. These mirror the
 # generated scalar comparison expressions exactly (incl. float ordered/unordered
@@ -1029,10 +788,12 @@ _VOPC_REL: dict[str, str] = {
     'u': 'util::stdx::isnan({a}) || util::stdx::isnan({b})',
 }
 
+
 # Constant relations carry no comparison: f is always-false, t/tru always-true.
 # The mask type is taken from the converted-operand compare so it matches lane
 # width regardless of suffix.
 _VOPC_CONST: dict[str, str] = {'f': 'false', 't': 'true', 'tru': 'true'}
+
 
 _VOPC_FLOAT_RELS = [
     'eq',
@@ -1052,6 +813,8 @@ _VOPC_FLOAT_RELS = [
     'f',
     'tru',
 ]
+
+
 _VOPC_INT_RELS = ['eq', 'ge', 'gt', 'le', 'lt', 'ne', 'f', 't']
 
 
@@ -1099,6 +862,8 @@ def _build_simd_vopc64() -> dict[str, tuple[str, str]]:
 
 
 SIMD_VOPC: dict[str, tuple[str, str]] = _build_simd_vopc()
+
+
 SIMD_VOPC64: dict[str, tuple[str, str]] = _build_simd_vopc64()
 
 
@@ -1147,6 +912,8 @@ _CMP_CLASS_F32 = (
     ' util::stdx::where(is_inf && !sgn, cls) = 0x200u;'
     ' return (cls & b) != 0u; }'
 )
+
+
 _CMP_CLASS_F16 = (
     '[](auto a, auto b) {'
     ' using U = util::native<uint32_t>;'
@@ -1173,6 +940,8 @@ _CMP_CLASS_F16 = (
     ' util::stdx::where(is_inf && !sgn, cls) = 0x200u;'
     ' return (cls & b) != 0u; }'
 )
+
+
 SIMD_VOPC_CLASS: dict[str, tuple[str, str]] = {
     'v_cmp_class_f16_vopc': ('uint32_t', _CMP_CLASS_F16),
     'v_cmp_class_f32_vopc': ('uint32_t', _CMP_CLASS_F32),
@@ -1215,6 +984,8 @@ _CMP_CLASS_F64 = (
     ' auto cls32 = util::stdx::static_simd_cast<M>(cls);'
     ' return (cls32 & m) != 0u; }'
 )
+
+
 SIMD_VOPC_CLASS_F64: dict[str, str] = {
     'v_cmp_class_f64_vopc': _CMP_CLASS_F64,
 }
@@ -1232,6 +1003,8 @@ SIMD_VOP3_CLASS: dict[str, tuple[str, str]] = {
     'v_cmp_class_f16_vop3': ('0x8000u', _CMP_CLASS_F16),
     'v_cmp_class_f32_vop3': ('0x80000000u', _CMP_CLASS_F32),
 }
+
+
 SIMD_VOP3_CLASS_F64: dict[str, str] = {
     'v_cmp_class_f64_vop3': _CMP_CLASS_F64,
 }
@@ -1288,6 +1061,8 @@ def _build_simd_vopc_vop3_int_64() -> dict[str, tuple[str, str]]:
 
 
 SIMD_VOPC_VOP3_INT_32: dict[str, tuple[str, str]] = _build_simd_vopc_vop3_int_32()
+
+
 SIMD_VOPC_VOP3_INT_64: dict[str, tuple[str, str]] = _build_simd_vopc_vop3_int_64()
 
 
@@ -1438,10 +1213,11 @@ SIMD_VOP3_BINARY_INT_EXTRA: dict[str, tuple[str, str]] = {
 }
 
 
-SIMD_VOP3_BINARY_TRUE16_SRC: dict[str, tuple[str, str]] = {}
+SIMD_VOP3_BINARY_TRUE16_SRC: dict[str, tuple[str, str]] = {
+    # True16 source selectors choose the f16 half of src0/src1, but these
+    # instructions write a full packed b32 result.
+}
 
-# GFX9 and RDNA1/2 spell the F16 normalized packs *_PKNORM_*. They read the
-# same op_sel-selected halves, so they share the RDNA3+ fast path.
 
 # True16 VOP3 scalar semantics select 16-bit source halves and merge a selected
 # destination half. The generic 32-bit VOP3 SIMD glue overwrites the whole dword.
@@ -1475,6 +1251,7 @@ SIMD_VOP3_TRUE16_UNSAFE = frozenset(
     }
 )
 
+
 # VOP3 unary integer ops without a VOP1 twin. Reuse the VOP1 unary glue
 # (operand shape is identical: src0 in, vdst out, 32-bit lanes) — only the
 # probe routing key differs. RDNA3+; CDNA4 does not decode.
@@ -1489,62 +1266,14 @@ SIMD_VOP3_UNARY_INT_EXTRA: dict[str, tuple[str, str, str]] = {
 }
 
 
-# --- VOP3 f64 unary --------------------------------------------------------
-
-# Remaining FP64 unary math and mantissa operations retain their legacy SIMD probes.
-SIMD_VOP3_UNARY_FP64: dict[str, str] = {
-    # NOTE: v_mov_b64 is deliberately NOT here. It is an integer 64-bit bit-move;
-    # OMOD/CLAMP are float-only, so its generated VOP3 scalar body is a raw copy
-    # that ignores them. Routing it through the f64 modifier glue made the SIMD
-    # path apply clamp/omod the scalar never does (clamp=1: scalar keeps the raw
-    # bits vs simd clamps to 1.0). With no entry here it stays scalar (a 64-bit
-    # register copy gains nothing from vectorization anyway).
-}
-
-
-# F16 unary glue: flush source -> widen + ABS/NEG -> op -> round F16 -> OMOD -> CLAMP.
-# Operation             Source policy             Output policy
-# CEIL/FLOOR            MODE flush                ordinary
-# TRUNC/RNDNE           preserve                  ordinary
-# SQRT/RCP/RSQ/EXP/LOG  MODE flush                TRANS
-# TRANS functors round and apply MODE output flushing before returning to the
-# glue. Ordinary unary functors do not apply a separate output-flush stage.
-SIMD_VOP3_UNARY_FP16: dict[str, str] = {
-    'v_sqrt_f16_vop3': (
-        '[&wf](auto a) { return amdgpu::transcendental::map_f16_simd<'
-        'amdgpu::transcendental::HalfOperation::SQRT>(a, '
-        'wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
-        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())); }'
-    ),
-    'v_rcp_f16_vop3': (
-        '[&wf](auto a) { return amdgpu::transcendental::map_f16_simd<'
-        'amdgpu::transcendental::HalfOperation::RCP>(a, '
-        'wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
-        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())); }'
-    ),
-    'v_rsq_f16_vop3': (
-        '[&wf](auto a) { return amdgpu::transcendental::map_f16_simd<'
-        'amdgpu::transcendental::HalfOperation::RSQ>(a, '
-        'wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
-        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())); }'
-    ),
-    'v_exp_f16_vop3': (
-        '[&wf](auto a) { return amdgpu::transcendental::log_exp_f16_simd<false>(a, '
-        'wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
-        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())); }'
-    ),
-    'v_log_f16_vop3': (
-        '[&wf](auto a) { return amdgpu::transcendental::log_exp_f16_simd<true>(a, '
-        'wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
-        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())); }'
-    ),
-}
-
-
-# Specialized VOP3 FREXP mantissa route (fp16: F16 unary glue; flush the raw
-# half under MODE, then round to half before OMOD/CLAMP). Exponent results are integers and take no output
-# modifiers: F64 reuses its VOP1 functor, and the F16 form stays scalar.
-SIMD_VOP3_FREXP_FP: dict[str, tuple[str, str]] = {}
+# Plain f64 unary: scalar bodies are std::ceil / std::floor / std::trunc /
+# Fixed-direction rounding of the modifier-applied double, then omod/clamp on
+# the result. util::{ceil,floor,trunc,rndne}_simd wrap the stdx native<double>
+# rounding primitives and repair the two edge cases libstdc++ gets wrong at
+# narrow widths (sign-of-zero on a zero-magnitude result, NaN-payload
+# preservation), so they are bit-identical to the scalar libm calls for every
+# finite / Inf / NaN / signed-zero input.
+SIMD_VOP3_UNARY_FP64: dict[str, str] = {}
 
 
 # --- VOP3 floating-point ternary (FMA / MAD family) ------------------------
@@ -1566,6 +1295,7 @@ SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
     },
 }
 
+
 # Non-fused F16 ternaries: widen -> ABS/NEG -> evaluate -> round F16 -> OMOD/CLAMP.
 # MAD retains its existing MODE policy; selection uses the shared raw-bit stage.
 # Fused FMA uses the
@@ -1575,6 +1305,7 @@ SIMD_VOP3_TERNARY_FP16: dict[str, str] = {}
 
 # f64 ternary FMA.
 SIMD_VOP3_TERNARY_FP64: dict[str, str] = {}
+
 
 # --- VOP3 dst-accumulate FMA / MAC (vdst is the accumulator) ----------------
 #
@@ -1586,7 +1317,7 @@ SIMD_VOP3_FMAC_FP32: dict[str, str] = {
     'v_fmac_f32_vop3': '[&inst, &wf](auto a, auto b, auto c) { return amdgpu::fma_f32_simd_unscoped(a, b, c, wf, amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod)); }',
     'v_mac_f32_vop3': '[&inst, &wf](auto a, auto b, auto c) { return amdgpu::fma_f32_simd_unscoped(a, b, c, wf, amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod)); }',
 }
-SIMD_VOP3_FMAC_FP64 = {'v_fmac_f64_vop3'}
+
 
 SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
     # Sum-of-absolute-differences (byte / 16-bit / 32-bit) + accumulate src2.
@@ -1837,6 +1568,7 @@ SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
     ),
 }
 
+
 SIMD_VOP3_TERNARY_TRUE16: dict[str, tuple[str, str]] = {
     'v_max3_i16_vop3': SIMD_VOP3_TERNARY_INT['v_max3_i16_vop3'],
     'v_min3_i16_vop3': SIMD_VOP3_TERNARY_INT['v_min3_i16_vop3'],
@@ -1845,6 +1577,7 @@ SIMD_VOP3_TERNARY_TRUE16: dict[str, tuple[str, str]] = {
     'v_min3_u16_vop3': SIMD_VOP3_TERNARY_INT['v_min3_u16_vop3'],
     'v_med3_u16_vop3': SIMD_VOP3_TERNARY_INT['v_med3_u16_vop3'],
 }
+
 
 SIMD_VOP3_TERNARY_TRUE16_SRC01: dict[str, tuple[str, str]] = {
     # V_MAD_[IU]32_[IU]16 selects 16-bit SRC0/SRC1 halves with OPSEL and adds a
@@ -1878,9 +1611,11 @@ SIMD_SHIFT64_VOP3: dict[str, str] = {
     ),
 }
 
+
 # v_lshl_add_u64 uses a 64-bit value and addend with a 32-bit shift source.
 # The shift encoding differs from the 64-bit reverse shifts.
 SIMD_LSHL_ADD_U64: set[str] = {'v_lshl_add_u64_vop3'}
+
 
 # --- VOP3 wide 32x32->64 multiply-add (v_mad_u64_u32 / v_mad_i64_i32) -------
 #
@@ -1912,80 +1647,6 @@ SIMD_MAD_WIDE64: dict[str, str] = {
     ),
 }
 
-# --- VOP3 carry binary (carry-out -> SGPR sdst, carry-in <- SGPR src2) ------
-#
-# Same SimdCarry functors as the VOP2 carry family, keyed by _vop3, split by
-# whether the form has a carry-in (and thus a src2 member): the carry-OUT forms
-# (add_co/sub_co/subrev_co) have no src2 and route through the _co glue; the
-# carry-IN forms (addc/subb/subbrev) read src2 and route through the _cin glue.
-_VOP3_CARRY_CIN_NAMES = {
-    'v_addc_co_u32',
-    'v_subb_co_u32',
-    'v_subbrev_co_u32',
-    'v_add_co_ci_u32',
-    'v_sub_co_ci_u32',
-    'v_subrev_co_ci_u32',
-}
-SIMD_VOP3_CARRY_CO: dict[str, str] = {
-    name.replace('_vop2', '_vop3'): functor
-    for name, functor in SIMD_VOP2_CARRY.items()
-    if name.replace('_vop2', '') not in _VOP3_CARRY_CIN_NAMES
-}
-SIMD_VOP3_CARRY_CIN: dict[str, str] = {
-    name.replace('_vop2', '_vop3'): functor
-    for name, functor in SIMD_VOP2_CARRY.items()
-    if name.replace('_vop2', '') in _VOP3_CARRY_CIN_NAMES
-}
-
-
-# --- VOP3 64-bit reverse shifts --------------------------------------------
-#
-# v_lshlrev_b64 / v_lshrrev_b64 / v_ashrrev_i64: shift the 64-bit src1 by the
-# 32-bit src0 (masked to [0,63]). Routed through try_execute_shift64_vop3_simd,
-# whose functor receives (native<uint64_t> value, native<uint64_t> shift) with
-# the count already widened+masked. Logical shifts are plain `<< / >>` on the
-# uint64 lane; the signed (arithmetic) form casts through int64.
-SIMD_SHIFT64_VOP3: dict[str, str] = {
-    'v_lshlrev_b64_vop3': '[](auto v, auto sh) { return ::rocjitsu::amdgpu::simd_lshl_u64(v, sh); }',
-    'v_lshrrev_b64_vop3': '[](auto v, auto sh) { return ::rocjitsu::amdgpu::simd_lshr_u64(v, sh); }',
-    'v_ashrrev_i64_vop3': (
-        '[](auto v, auto sh) {' ' return ::rocjitsu::amdgpu::simd_ashr_i64(v, sh); }'
-    ),
-}
-
-# v_lshl_add_u64 uses a 64-bit value and addend with a 32-bit shift source.
-# The shift encoding differs from the 64-bit reverse shifts.
-SIMD_LSHL_ADD_U64: set[str] = {'v_lshl_add_u64_vop3'}
-
-# --- VOP3 wide 32x32->64 multiply-add (v_mad_u64_u32 / v_mad_i64_i32) -------
-#
-# 32-bit src0/src1 multiplicands widened to 64 (zero-/sign-extend), 64-bit
-# low-half product, plus the 64-bit src2 addend. SDST holds unsigned carry-out
-# or signed bit 64 of the 65-bit sum, independently of saturation. Routed through
-# try_execute_mad_wide64_vop3_simd; the functor receives the two narrow operands
-# and the 64-bit addend and returns SimdCarry<native<uint64_t>, mask>.
-SIMD_MAD_WIDE64: dict[str, str] = {
-    'v_mad_u64_u32_vop3': (
-        '[](auto a, auto b, auto c) {'
-        ' auto product = util::stdx::static_simd_cast<util::native<uint64_t>>(a)'
-        ' * util::stdx::static_simd_cast<util::native<uint64_t>>(b);'
-        ' auto result = product + c;'
-        ' return make_simd_carry(result, result < product); }'
-    ),
-    'v_mad_i64_i32_vop3': (
-        '[](auto a, auto b, auto c) {'
-        ' auto wa = util::stdx::static_simd_cast<util::native<uint64_t>>('
-        'util::stdx::static_simd_cast<util::native<int64_t>>('
-        'util::stdx::static_simd_cast<util::narrow32<int32_t>>(a)));'
-        ' auto wb = util::stdx::static_simd_cast<util::native<uint64_t>>('
-        'util::stdx::static_simd_cast<util::native<int64_t>>('
-        'util::stdx::static_simd_cast<util::narrow32<int32_t>>(b)));'
-        ' auto product = wa * wb;'
-        ' auto result = product + c;'
-        ' return make_simd_carry(result,'
-        ' (((product ^ c) >> 63) != 0) ^ (result < product)); }'
-    ),
-}
 
 # --- VOP3 carry binary (carry-out -> SGPR sdst, carry-in <- SGPR src2) ------
 #
@@ -2001,11 +1662,15 @@ _VOP3_CARRY_CIN_NAMES = {
     'v_sub_co_ci_u32',
     'v_subrev_co_ci_u32',
 }
+
+
 SIMD_VOP3_CARRY_CO: dict[str, str] = {
     name.replace('_vop2', '_vop3'): functor
     for name, functor in SIMD_VOP2_CARRY.items()
     if name.replace('_vop2', '') not in _VOP3_CARRY_CIN_NAMES
 }
+
+
 SIMD_VOP3_CARRY_CIN: dict[str, str] = {
     name.replace('_vop2', '_vop3'): functor
     for name, functor in SIMD_VOP2_CARRY.items()
@@ -2066,26 +1731,6 @@ def _fp16_ovfl_cpp_op(cpp_op: str) -> str:
     return cpp_op.replace('f32_to_f16_simd', 'f32_to_f16_ovfl_simd')
 
 
-# Exact packed arithmetic shares SIMD operand access and vector arithmetic;
-# final destination rounding follows the same primitive as scalar execution.
-SIMD_PACKED_FLOAT: dict[str, tuple[str, bool]] = {}
-for _fmt in ('f16', 'bf16'):
-    for _mnemonic, _op in {
-        'add': 'ADD',
-        'mul': 'MUL',
-        'fma': 'FMA',
-        'min': 'MIN',
-        'max': 'MAX',
-        'min_num': 'MIN',
-        'max_num': 'MAX',
-        'minimum': 'MINIMUM',
-        'maximum': 'MAXIMUM',
-    }.items():
-        if _fmt == 'f16':
-            continue
-        SIMD_PACKED_FLOAT[f'v_pk_{_mnemonic}_{_fmt}_vop3p'] = (_op, _fmt == 'bf16')
-
-
 def simd_probe_line(
     template_name: str,
     *,
@@ -2100,11 +1745,6 @@ def simd_probe_line(
 
 def _guard_mode_arithmetic_probe(template_name: str, probe: str | None) -> str | None:
     """Retain native arithmetic only when it implements the guest FP policy."""
-    if template_name in SIMD_VOP3_BINARY_MODE_FP16:
-        # The helper requires guest RNE and handles denormal MODE explicitly.
-        # Its instruction wrapper installs host RNE once and restores the
-        # caller's FP state; the F16 evaluator inside it is unscoped.
-        return probe
     arithmetic_ops = (
         'add',
         'sub',
@@ -2153,29 +1793,16 @@ def _simd_probe_line(
     result_writer: str | None = None,
 ) -> str | None:
     """Return the SIMD fast-path probe block for a kernel, or None."""
-    f16_arithmetic = SIMD_VOP3_BINARY_MODE_FP16.get(template_name)
-    if f16_arithmetic is not None:
-        operation, negated_source = f16_arithmetic
-        return (
-            '  ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16('
-            f'{str(true16_vop3).lower()}, amdgpu::fp_mode::Arithmetic::{operation}, '
-            f'amdgpu::NegatedSource::{negated_source});'
-        )
     minmax_probe = float_minmax.simd_probe(template_name)
     if minmax_probe is not None:
         return minmax_probe
-    ldexp_probe = float_ldexp.simd_probe(template_name, true16_vop3)
+    ldexp_probe = float_ldexp.simd_probe(template_name)
     if ldexp_probe is not None:
         return ldexp_probe
     # Conversions to floating formats, which round in the destination's MODE.
     conversion_probe = conversion.simd_probe(template_name, true16_vop3=true16_vop3)
     if conversion_probe is not None:
         return conversion_probe
-    if template_name == 'v_cvt_pk_u8_f32_vop3':
-        return f'  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t, {conversion.STAGES});'
-    if template_name in SIMD_PACKED_FLOAT:
-        op, bf16 = SIMD_PACKED_FLOAT[template_name]
-        return f'  ROCJITSU_TRY_SIMD_PACKED_FLOAT({op}, {str(bf16).lower()});'
     if template_name in SIMD_VOP3_TRUE16_UNSAFE:
         return None
     if template_name in SIMD_VOP2_CNDMASK:
@@ -2368,10 +1995,6 @@ def _simd_probe_line(
     spec3tf64 = SIMD_VOP3_TERNARY_FP64.get(template_name)
     if spec3tf64 is not None:
         return f'  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP64({spec3tf64});'
-    if template_name in SIMD_VOP3_DIV_FMAS_FP32:
-        return '  ROCJITSU_TRY_SIMD_DIV_FMAS_VOP3_FP32();'
-    if template_name in SIMD_VOP3_DIV_FMAS_FP64:
-        return '  ROCJITSU_TRY_SIMD_DIV_FMAS_VOP3_FP64();'
     # VOP3P packed-16 integer binary family (pk_add/sub/mul_lo/min/max for
     # i16/u16 + pk_lshlrev/lshrrev/ashrrev for b16/i16). The glue applies
     # source half selectors and retains scalar execution for CLAMP.
@@ -2382,18 +2005,8 @@ def _simd_probe_line(
     if specpkt is not None:
         return f'  ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_INT({specpkt});'
 
-    specpkf32 = SIMD_VOP3P_PK_BINARY_F32.get(template_name)
-    if specpkf32 is not None:
-        return f'  ROCJITSU_TRY_SIMD_VOP3P_PK_BINARY_F32({specpkf32});'
-    specpkf32t = SIMD_VOP3P_PK_TERNARY_F32.get(template_name)
-    if specpkf32t is not None:
-        return f'  ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_F32({specpkf32t});'
     if template_name in SIMD_VOP3P_MOV_B32:
         return '  ROCJITSU_TRY_SIMD_VOP3P_MOV_B32();'
-    # VOP3P integer dot products (dot4 i8/u8, dot8 i4/u4, dot2 i16/u16).
-    specdot = SIMD_VOP3P_DOT_INT.get(template_name)
-    if specdot is not None:
-        return f'  ROCJITSU_TRY_SIMD_VOP3P_DOT_INT({specdot});'
     if template_name in SIMD_VOP3P_DOT_F16_OR_BF16:
         fmt = 'BF16' if template_name == 'v_dot2_f32_bf16_vop3p' else 'F16'
         return f'  ROCJITSU_TRY_SIMD_VOP3P_DOT_F16({fmt});'
@@ -2435,38 +2048,6 @@ def _simd_probe_line(
     spec3unaf64 = SIMD_VOP3_UNARY_FP64.get(template_name)
     if spec3unaf64 is not None:
         return f'  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP64({spec3unaf64});'
-    # Specialized FREXP mantissa route.
-    specfrexp = SIMD_VOP3_FREXP_FP.get(template_name)
-    if specfrexp is not None:
-        route, fn = specfrexp
-        if route == 'fp16':
-            macro = (
-                'ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16'
-                if true16_vop3
-                else 'ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16'
-            )
-            # The glue flushes the raw half before widening it for the functor.
-            return f'  {macro}({fn}, false, {input_policy.policy_expr("f16")});'
-        return f'  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(float32_t, float32_t, {fn});'
-    # F16 unary glue: integral rounding and SQRT/RCP/RSQ/EXP/LOG.
-    spec3unaf16 = SIMD_VOP3_UNARY_FP16.get(template_name)
-    if spec3unaf16 is not None:
-        macro = (
-            'ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16'
-            if true16_vop3
-            else 'ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16'
-        )
-        instruction = template_name.rsplit('_', 1)[0].upper()
-        transcendental = instruction in F16_TRANSCENDENTAL_OPS
-        fp16_args = ', true' if transcendental else ''
-        if (
-            instruction in F16_FLUSHED_SOURCE_OPS
-            or template_name.split('_')[1] in INPUT_FLUSHED_ROUNDING
-        ):
-            # The glue flushes the raw half before widening it for the functor.
-            policy = input_policy.policy_expr('f16')
-            fp16_args = f', {"true" if transcendental else "false"}, {policy}'
-        return f'  {macro}({spec3unaf16}{fp16_args});'
     # VOP3-encoded twins of the SIMD VOP2 binary ops. Same operator/lane type;
     # the VOP3 form reads src0/src1 and carries abs/neg/omod/clamp modifiers.
     # f32 ops apply the modifiers in-vector (bit-exact); integer/bitwise ops
@@ -2532,6 +2113,21 @@ def _simd_probe_line(
             if base in ('v_cvt_i16_f16', 'v_cvt_u16_f16'):
                 cpp_op = _modified_conversion_op(cpp_op, bits=16, arity=1)
             probe = f'  ROCJITSU_TRY_SIMD_VOP1_UNARY({cpp_tin}, {cpp_tout}, {cpp_op});'
+            if base in (
+                'v_cvt_f32_ubyte0',
+                'v_cvt_f32_ubyte1',
+                'v_cvt_f32_ubyte2',
+                'v_cvt_f32_ubyte3',
+            ):
+                # The VOP1 shortcut has no output scaling or saturation.
+                return f'  if (!inst.inst_.omod && !inst.inst_.clamp) {{\n{probe}\n  }}'
+            if base in (
+                'v_cvt_i32_f32',
+                'v_cvt_u32_f32',
+            ):
+                # The VOP1 shortcut does not apply floating source modifiers.
+                # Modified F32 inputs use the scalar conversion body.
+                return f'  if (!inst.inst_.abs && !inst.inst_.neg) {{\n{probe}\n  }}'
             if _probe_uses_fp16_ovfl_f16_result_narrow(cpp_op):
                 ovfl_probe = f'  ROCJITSU_TRY_SIMD_VOP1_UNARY({cpp_tin}, {cpp_tout}, {_fp16_ovfl_cpp_op(cpp_op)});'
                 return _mode_aware_f16_result_simd_probe(probe, ovfl_probe)
@@ -2562,19 +2158,6 @@ def vop3p_local_simd_probe_line(
     if vop3p_opsel_fields == ('op_sel', 'op_sel_hi'):
         return None
     op_sel, op_sel_hi = vop3p_opsel_fields
-    specpkf32 = SIMD_VOP3P_PK_BINARY_F32.get(template_name)
-    if specpkf32 is not None:
-        return (
-            '  ROCJITSU_TRY_SIMD_VOP3P_PK_BINARY_F32_SELECTORS('
-            f'inst_.{op_sel}, inst_.{op_sel_hi}, {specpkf32});'
-        )
-    specpkf32_ternary = SIMD_VOP3P_PK_TERNARY_F32.get(template_name)
-    if specpkf32_ternary is not None:
-        return (
-            '  ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_F32_SELECTORS('
-            f'inst_.{op_sel}, inst_.{op_sel_hi}, {op_sel_hi_2_expr}, '
-            f'{specpkf32_ternary});'
-        )
     return simd_probe_line(template_name)
 
 

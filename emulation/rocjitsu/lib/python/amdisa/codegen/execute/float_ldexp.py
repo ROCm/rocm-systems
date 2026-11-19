@@ -89,22 +89,5 @@ def simd_functor(dtype: str) -> str:
 
 
 def simd_probe(template_name: str, true16_vop3: bool = False) -> str | None:
-    """Emit the VOP3 SIMD probe, or None for the regular dispatch.
-
-    The F16 VOP2 form uses its SIMD_VOP2_BINARY entry, so true16 e32 bodies
-    select their register halves through the same functor.
-    """
-    dtype = {
-        'v_ldexp_f16_vop3': 'f16',
-    }.get(template_name)
-    if dtype is None:
-        return None
-    if dtype == 'f16':
-        macro = 'VOP3_LDEXP_TRUE16_RAW_FP16' if true16_vop3 else 'VOP3_LDEXP_RAW_FP16'
-    else:
-        macro = 'VOP3_LDEXP_RAW_FP'
-    omod = (
-        f'amdgpu::output_modifier_policy<{input_policy.fp_format(dtype)}>'
-        '(wf, inst.inst_.omod, inst.inst_.clamp).omod != 0'
-    )
-    return f'  ROCJITSU_TRY_SIMD_{macro}({operation_expr(dtype, policy_expr(dtype, omod))});'
+    """All LDEXP forms route through rj-arith."""
+    return None

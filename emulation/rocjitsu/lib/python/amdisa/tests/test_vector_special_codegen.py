@@ -5,19 +5,14 @@ from pathlib import Path
 from types import SimpleNamespace
 import hashlib, pytest, re
 from amdisa.codegen.execute import float_fract, float_ldexp
-from amdisa.codegen.execute.sema_lower import _INLINE_UNARY_OPS, lower_sema_block
-from amdisa.codegen.execute.simd_codegen import (
-    SIMD_VOP1_UNARY,
-    local_coverage_probe,
-    simd_probe_line,
-)
+from amdisa.codegen.execute.sema_lower import lower_sema_block
+from amdisa.codegen.execute.simd_codegen import local_coverage_probe, simd_probe_line
 from amdisa.codegen.execute.vector_special import (
     _TRIG_PREOP_CHUNK_BITS,
     _TRIG_PREOP_TWO_OVER_PI_CHUNKS,
     _TRIG_PREOP_VALID_BITS,
     gen_vector_bitop3,
     gen_vector_cvt_pk,
-    gen_vector_div_fixup,
     gen_vector_mad_32_16,
     gen_vector_movrel,
     gen_vector_mullit,
@@ -37,18 +32,6 @@ from amdisa.sema_enrich import enrich_block
 from amdisa.semantics import derive_semantics
 
 """Tests for vector-special execute code generation."""
-
-
-def test_cls_i32_codegen():
-    semantic = _INLINE_UNARY_OPS['cls_i32']
-    simd = SIMD_VOP1_UNARY['v_cls_i32_vop1'][2]
-
-    for emitted in (semantic, simd):
-        assert '0xFFFFFFFFu' in emitted or 'static_cast<uint32_t>(-1)' in emitted
-        assert 'countl_zero' in emitted or 'clz_u32_simd' in emitted
-        assert 'countl_zero(abs_val)) - 1' not in emitted
-        assert 'countl_zero(a)) - 1' not in emitted
-        assert 'clz_u32_simd(u) - 1' not in emitted
 
 
 def test_permlane_uses_opsel_fi_and_bound_ctrl_bits():
@@ -233,76 +216,10 @@ def test_arch_local_execute_bodies_are_not_shared():
     assert 'vector_qsad' in CodeGenerator._NON_SHAREABLE_CLASSES
 
 
-def test_ldexp_simd_probes_use_the_shared_raw_operation():
-    operation = (
-        'amdgpu::ldexp::Operation<amdgpu::fp_format::F16>{amdgpu::ldexp::Policy::make('
-    )
-    vop2 = simd_probe_line('v_ldexp_f16_vop2')
-    # Every MODE takes the SIMD path; the helper rounds and saturates itself.
-    # Only SDWA sets OMOD on VOP2, and SDWA OMOD keeps the scalar body.
-    assert vop2 == f'  ROCJITSU_TRY_SIMD_VOP2_BINARY(uint32_t, {operation}' + (
-        'wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64(), wf.fp16_ovfl(), '
-        'false)});'
-    )
-    vop3 = {
-        'f16': simd_probe_line('v_ldexp_f16_vop3'),
-        'f64': simd_probe_line('v_ldexp_f64_vop3'),
-    }
-    assert vop3['f16'].startswith(
-        f'  ROCJITSU_TRY_SIMD_VOP3_LDEXP_RAW_FP16({operation}'
-    )
-    assert simd_probe_line('v_ldexp_f16_vop3', true16_vop3=True).startswith(
-        f'  ROCJITSU_TRY_SIMD_VOP3_LDEXP_TRUE16_RAW_FP16({operation}'
-    )
-    assert simd_probe_line('v_ldexp_f32_vop3') is None
-    assert vop3['f64'] is None
-    # Effective OMOD makes a tiny result flush before scaling.
-    for dtype in ('f16',):
-        line = vop3[dtype]
-        assert line.endswith(
-            f'amdgpu::output_modifier_policy<amdgpu::fp_format::{dtype.upper()}>'
-            '(wf, inst.inst_.omod, inst.inst_.clamp).omod != 0)});'
-        )
-
-
 @pytest.mark.parametrize('module', [float_fract, float_ldexp])
 def test_raw_operation_policies_reject_unknown_formats(module):
     with pytest.raises(ValueError, match='bf16'):
         module.policy_expr('bf16', *(['false'] if module is float_ldexp else []))
-
-
-def test_vop3_f16_simd_probes_split_true16_from_generic():
-    add_generic = simd_probe_line('v_add_f16_vop3')
-    add_true16 = simd_probe_line('v_add_f16_vop3', true16_vop3=True)
-    rcp_generic = simd_probe_line('v_rcp_f16_vop3')
-    rcp_true16 = simd_probe_line('v_rcp_f16_vop3', true16_vop3=True)
-
-    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(false,' in add_generic
-    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(true,' in add_true16
-    assert add_generic.endswith(
-        'amdgpu::fp_mode::Arithmetic::ADD, amdgpu::NegatedSource::NONE);'
-    )
-    assert add_true16.endswith(
-        'amdgpu::fp_mode::Arithmetic::ADD, amdgpu::NegatedSource::NONE);'
-    )
-    assert 'if (!wf.fp16_ovfl())' not in rcp_generic
-    assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16' in rcp_generic
-    assert 'if (!wf.fp16_ovfl())' not in rcp_true16
-    assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16' in rcp_true16
-
-
-@pytest.mark.parametrize('true16', [False, True])
-@pytest.mark.parametrize(('mnemonic', 'negated'), [('sub', 'SRC1'), ('subrev', 'SRC0')])
-def test_vop3_f16_subtraction_uses_mode_aware_add_route(mnemonic, negated, true16):
-    probe = simd_probe_line(f'v_{mnemonic}_f16_vop3', true16_vop3=true16)
-
-    # SUB/SUBREV share ADD's MODE-aware route, negating the subtrahend after
-    # ABS/NEG; no native-environment gate or host subtraction remains.
-    assert probe == (
-        '  ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16('
-        f'{str(true16).lower()}, amdgpu::fp_mode::Arithmetic::ADD, '
-        f'amdgpu::NegatedSource::{negated});'
-    )
 
 
 @pytest.mark.parametrize(
@@ -377,27 +294,6 @@ def _probe_calls(text: str):
             depth += {'(': 1, ')': -1}.get(text[end], 0)
             end += 1
         yield match.group(0), text[match.start() : end]
-
-
-def test_generated_arithmetic_cores_run_under_one_instruction_environment():
-    files = sorted(p for p in _GENERATED.rglob('*') if p.suffix in ('.h', '.cpp'))
-    assert files, f'no generated sources under {_GENERATED}'
-    total = in_scoped_probes = 0
-    for path in files:
-        text = path.read_text()
-        name = path.relative_to(_GENERATED)
-        # Probes own the guest environment, so no route scopes per SIMD chunk.
-        for core in _SCOPED_CORES:
-            assert core not in text, f'{name}: {core} scopes per chunk'
-        total += len(_UNSCOPED_CORE.findall(text))
-        for opener, call in _probe_calls(text):
-            cores = len(_UNSCOPED_CORE.findall(call))
-            if cores:
-                assert _INSTRUCTION_SCOPED_PROBE.fullmatch(
-                    opener
-                ), f'{name}: {opener} runs an unscoped core without an environment'
-                in_scoped_probes += cores
-    assert in_scoped_probes == total > 0
 
 
 def test_true16_vop3_simd_probe_leaves_unsupported_b16_scalar():
@@ -730,16 +626,3 @@ def test_byte_and_halfword_packing_reject_retired_fallbacks(cls, sources):
     for name in ('v_cvt_pk_u8_f32_vop3', 'v_pack_b32_f16_vop3'):
         assert simd_probe_line(name) is None
         assert local_coverage_probe(name) is None
-
-
-@pytest.mark.parametrize('dtype', ['f16', 'f32', 'f64'])
-def test_fract_simd_probes_use_the_remaining_legacy_model(dtype):
-    vop1 = simd_probe_line(f'v_fract_{dtype}_vop1')
-    assert simd_probe_line(f'v_fract_{dtype}_vop3') is None
-    if dtype == 'f16':
-        operation = 'amdgpu::fract::Operation<amdgpu::fp_format::F16>{amdgpu::fract::Policy::make('
-        assert operation in vop1 and 'floor' not in vop1
-        assert simd_probe_line('v_fract_f16_vop3', true16_vop3=True) is None
-    else:
-        # FP32/FP64 use rj-arith's native kernels rather than these legacy probes.
-        assert vop1 is None

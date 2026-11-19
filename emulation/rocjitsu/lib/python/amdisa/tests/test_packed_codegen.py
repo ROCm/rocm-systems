@@ -24,7 +24,7 @@ import pytest
 def test_pk_fma_f16_has_no_legacy_ternary_fallback():
     import pytest
 
-    with pytest.raises(ValueError, match='does not support fma'):
+    with pytest.raises(ValueError, match='does not support f16'):
         gen_pk_ternary(
             ['d'],
             ['a', 'b', 'c'],
@@ -85,36 +85,6 @@ def test_pk_mad_integer_clamp_saturates_both_selected_halves():
     assert signed.count('inst_.clamp') == 2
     assert unsigned.count('vop3_integer_mad<uint16_t, 16>') == 2
     assert unsigned.count('inst_.clamp') == 2
-
-
-def test_pk_bf16_ternary_preserves_fp32_inline_constants():
-    cpp = gen_pk_ternary(
-        ['vdst'],
-        ['src0', 'src1', 'src2'],
-        'fma',
-        'bf16',
-        op_sel_hi_2_expr='inst_.op_sel_hi_2',
-        opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
-    )
-
-    assert 'pk16_src_needs_narrowing' not in cpp
-    assert 'raw0 = util::f32_to_bf16' not in cpp
-    assert 'raw2 = util::f32_to_bf16' not in cpp
-    assert 'f32_to_f16' not in cpp
-
-
-def test_pk_bf16_binary_preserves_fp32_inline_constants():
-    for op in ('add', 'mul', 'min', 'max'):
-        cpp = gen_pk_binop(
-            ['vdst'],
-            ['src0', 'src1'],
-            op,
-            'bf16',
-            opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
-        )
-        assert 'pk16_src_needs_narrowing' not in cpp
-        assert 'raw0 = util::f32_to_bf16' not in cpp
-        assert 'raw1 = util::f32_to_bf16' not in cpp
 
 
 def test_pk_integer_binop_leaves_inline_constants_alone():
@@ -205,18 +175,6 @@ def test_pk_f64_ternary_rejects_unknown_operation():
 
     with pytest.raises(ValueError, match='unsupported packed F64 ternary operation'):
         gen_pk_ternary_f64(['vdst'], ['src0', 'src1', 'src2'], 'mad')
-
-
-def test_renamed_packed_float_routes_use_exact_helpers():
-    for spelling, operation, bf16 in (
-        ('v_pk_add_bf16_vop3p', 'ADD', True),
-        ('v_pk_fma_bf16_vop3p', 'FMA', True),
-    ):
-        probe = vop3p_local_simd_probe_line(spelling, ('opsel', 'opsel_hi'))
-        assert (
-            probe
-            == f'  ROCJITSU_TRY_SIMD_PACKED_FLOAT({operation}, {str(bf16).lower()});'
-        )
 
 
 def test_dot_dispatch_covers_every_semantic_class():

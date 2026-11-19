@@ -6,7 +6,6 @@
 #include "rj_arith/internal/compatibility.h"
 #include "rj_arith/rj_arith.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/conversion.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h"
 #include "rocjitsu/isa/operand.h"

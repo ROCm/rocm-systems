@@ -24,10 +24,8 @@
 ///
 /// CDNA5 VOPD3 V_DUAL_MIN_NUM_F64/V_DUAL_MAX_NUM_F64 still use host selection.
 /// Legacy forms share the encoding selector, with architecture-specific NaN
-/// priority and MODE.IEEE signaling-NaN handling. Packed F16 MIN/MAX and *_NUM
-/// use this selector through fp_mode::packed_minmax_f16. Packed F16 MINIMUM/MAXIMUM,
-/// BF16 and F64 retain separate helpers (packed_binary_f16, packed_select_bf16
-/// and binary_f64).
+/// priority and MODE.IEEE signaling-NaN handling. Packed F16/BF16 arithmetic
+/// is handled by rj-arith. Legacy F64 selection remains in fp_mode::binary_f64.
 ///
 /// Scalar and SIMD callers use the same implementation on raw encodings in
 /// unsigned lanes, so selection preserves signs and NaN payloads.

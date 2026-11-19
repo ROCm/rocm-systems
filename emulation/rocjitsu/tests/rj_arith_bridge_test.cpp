@@ -16315,7 +16315,10 @@ TEST(ArithBridgeTest, Gfx1250Tanh) {
                 if (encoding) {
                   x = -std::abs(x);
                 }
-                float y = transcendental::tanh_f32(x);
+                // Independent host TANH reference with inherited NaN quieting.
+                float y = std::isnan(x)
+                              ? std::bit_cast<float>(std::bit_cast<uint32_t>(x) | 0x00400000U)
+                              : std::tanh(x);
                 uint32_t result;
                 if (half) {
                   result = util::f32_to_f16_mode(y, wave.fp16_ovfl());
