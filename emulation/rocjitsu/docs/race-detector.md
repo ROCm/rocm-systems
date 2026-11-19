@@ -278,7 +278,7 @@ races. Some examples:
 - **LDS races**: an LDS byte is read by one wave while another wave has an
   outstanding write to the same byte, or written by one wave while another
   wave has an outstanding read of the same byte, without an intervening
-  `s_barrier`;
+  barrier that orders them (see Barriers below);
   or a wave reads bytes targeted by its own outstanding direct-to-LDS operation
   before the required `s_waitcnt vmcnt`. A direct-to-LDS write over bytes of
   the same wave's pending DS read is also reported, on every target with
@@ -370,16 +370,74 @@ following lifecycle:
    event. This means the event is no longer in flight from the perspective of
    the wave that issued the operation, but is still in flight from the
    perspective of other waves in the same workgroup.
-1. **RETIRED** — `s_barrier` has synchronized all waves. The event is fully
-   retired and, from the perspective of all threads in all wavefronts, the
-   operation is complete. A workgroup with a single wave has no other wave to
-   race with, so its LDS events are retired as soon as they are wave-complete,
-   without a barrier. They then leave the LDS lists that race checks scan, so
+1. **RETIRED** — every other live wave of the workgroup has passed a barrier
+   that orders the event (see Barriers below). The event is fully retired and,
+   from the perspective of all threads in all wavefronts, the operation is
+   complete. A wave whose workgroup has no other live wave, because it is the
+   only wave or the others have ended, has no other wave to race with, so its
+   LDS events are retired as soon as they are wave-complete, without a
+   barrier. They then leave the LDS lists that race checks scan, so
    those checks do not slow down as completed events add up in long
    single-wave kernels. Retired events stay in the event registry until it
    trims them, and it trims only from the oldest event: an older event that is
    still pending, such as a global load waiting on `loadcnt`, keeps every
    later retired event in the registry.
+
+### Barriers
+
+On gfx1250 a barrier is split into `s_barrier_signal`, which does not block and
+waits for no memory counter, and `s_barrier_wait`, which blocks until the
+barrier completes: for a workgroup barrier, once every wave has signalled or
+ended; for a named barrier, once it has counted as many signals as its member
+count (CDNA5 ISA 5.6 and 15.3). A barrier therefore
+orders a completed event before another wave's access only when:
+
+- the issuing wave completed the event (by a wait or counter-capacity
+  backpressure) before its own signal, and
+- the accessing wave issued the access after its own wait.
+
+The detector models each round of a barrier as a release/acquire channel. A
+signal releases what the wave has completed, and what it has acquired from
+earlier rounds; passing the wait acquires everything released into the round
+that set the wave's completion bit. Ordering is transitive, so waves can pass
+ordering through named barriers, and an LDS event is retired once every other
+live wave has acquired it. A wave that ends releases its completed events into
+every later workgroup round it had not signalled, because such a round cannot
+complete until the wave ends; named and cluster rounds, which can complete
+without it, do not. A round the wave had signalled before ending can also
+complete without its end, so it orders only what that signal released. A named
+round orders events only for the waves that joined it. A cluster round counts
+one signal from each workgroup, so within a workgroup it releases what the
+signalling wave had completed or acquired, for example through an earlier
+workgroup barrier; ordering between workgroups is not modeled. The simulator
+reports each counted signal, each completed round and each passed wait to
+plugins.
+
+A completed LDS event stays in the history, and is still checked, until every
+other live wave of the workgroup has acquired it. A workgroup in which some
+wave never passes a barrier wait, or whose waves synchronize only through
+named barriers among subsets, therefore keeps its completed events until those
+waves end. Each wave's completed events are kept in the order of the signals
+that release them, and a cross-wave check scans only the ones the accessing
+wave has not acquired: waves that keep exchanging LDS data through a named
+barrier do not rescan each other's ordered accesses, which remain in the
+history for the waves outside the barrier.
+
+Targets with a single `s_barrier` instruction are handled the same way, with
+every member's signal and wait at the point where the barrier resolves.
+
+The detector reports an access in the window between a wave's signal and its
+wait, and an event completed after its wave's signal, on every interleaving of
+the waves:
+
+```asm
+; wave 0                         ; wave 1
+ds_store_b32 v0, v1
+s_barrier_signal -1              s_barrier_signal -1
+s_wait_dscnt 0                   s_barrier_wait -1
+s_barrier_wait -1                ds_load_b32 v2, v0   ; race: the store
+                                                      ; completed after the signal
+```
 
 On RDNA and CDNA5 every issued generic `FLAT_*` instruction occupies a
 vector-memory and an LDS counter position, including when EXEC is empty. On
@@ -573,7 +631,7 @@ Naturally aligned atomics of the same width can operate on the same word.
 A returning atomic also protects its result VGPR until its counter completes. Chunks containing only ordinary LDS accesses from the accessing
 wave can bypass the interval scan because those operations are ordered. A
 mixed chunk uses the scan until its count drains. The history remains available
-for checks by other waves until a barrier retires it. Direct-to-LDS and unordered
+for checks by other waves until a barrier orders it for all of them. Direct-to-LDS and unordered
 memory operations still require their own completion checks.
 For a DS or FLAT instruction, the plugin first merges the active lanes' byte
 ranges into intervals and checks the chunk counts under them. When no chunk can
