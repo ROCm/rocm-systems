@@ -1757,12 +1757,45 @@ if(ENABLE_DEVICE_LINKER)
   # device_linker_build compiles DDA sources that pull in comm.h -> rma/rma.h,
   # so it needs the rma_tmp.h symlink in place before it runs.
   add_dependencies(device_linker_build rma_header_symlinks)
-  target_link_libraries(rccl PRIVATE ${DEVICE_LINKER_OBJECTS})
   # clang-linker-wrapper links the device image from the device code the
   # DEVICE_LINKER_OBJECTS carry, and registers it. The new driver is the default
   # in newer compilers; ROCm 7.0 needs it named.
-  target_link_options(rccl PRIVATE -fgpu-rdc --hip-link --offload-new-driver ${DL_OFFLOAD_ARCH_FLAGS})
-  if(BUILD_SHARED_LIBS)
+  set(_dl_device_link_flags -fgpu-rdc --hip-link --offload-new-driver ${DL_OFFLOAD_ARCH_FLAGS})
+  if(NOT BUILD_SHARED_LIBS)
+    # A static library has no link step, and a consumer's ordinary link would
+    # not run clang-linker-wrapper. Do the device link here as a relocatable
+    # link, which leaves one object carrying the image and its registration,
+    # and archive that in librccl.a in place of the DEVICE_LINKER_OBJECTS.
+    set(_dl_archive_object "${DEVICE_BUILD_DIR}/rccl_device.o")
+    # rocSHMEM's device code has to join this link, as it joins librccl.so's.
+    # Whole-archive: some members (e.g. the one defining logd_constants) are
+    # referenced only by other rocSHMEM host code, so this link would skip them
+    # and the consumer's link would pull them in with nothing to register
+    # their device variables.
+    set(_dl_archive_inputs ${DEVICE_LINKER_OBJECTS})
+    set(_dl_archive_link_inputs ${DEVICE_LINKER_OBJECTS})
+    if(ENABLE_ROCSHMEM)
+      list(APPEND _dl_archive_inputs ${ROCSHMEM_LIBRARY})
+      list(APPEND _dl_archive_link_inputs
+           -Wl,--whole-archive ${ROCSHMEM_LIBRARY} -Wl,--no-whole-archive)
+    endif()
+    set(_dl_archive_env "")
+    if(ENABLE_COMPRESS)
+      set(_dl_archive_env ${CMAKE_COMMAND} -E env OFFLOAD_BUNDLER_COMPRESS=1)
+    endif()
+    add_custom_command(
+      OUTPUT  ${_dl_archive_object}
+      COMMAND ${_dl_archive_env} ${CMAKE_CXX_COMPILER} -r ${_dl_device_link_flags}
+              ${_dl_archive_link_inputs} -o ${_dl_archive_object}
+      DEPENDS ${_dl_archive_inputs} device_linker_build
+      COMMENT "DL relocatable device link for librccl.a"
+      VERBATIM
+    )
+    set_source_files_properties(${_dl_archive_object} PROPERTIES EXTERNAL_OBJECT TRUE GENERATED TRUE)
+    target_sources(rccl PRIVATE ${_dl_archive_object})
+  else()
+    target_link_libraries(rccl PRIVATE ${DEVICE_LINKER_OBJECTS})
+    target_link_options(rccl PRIVATE ${_dl_device_link_flags})
     add_custom_command(TARGET rccl POST_BUILD
       COMMAND ${Python3_EXECUTABLE}
               ${PROJECT_SOURCE_DIR}/cmake/scripts/check_single_device_image.py
