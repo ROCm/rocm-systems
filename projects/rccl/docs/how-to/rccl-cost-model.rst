@@ -194,7 +194,7 @@ The first record states what was asked for:
 
 .. code-block:: text
 
-   Input: { .comm = %p, .tuningMask = 0x%016lx%016lx, .func = %s, .redOp = %d, .devRedop = %d, .dataType = %d, .nBytes = %lu, .numPipeOps = %d, .count = %lu, .countMax = %lu, .nWorks = %d, .winRegType = %d, .regBuff = %d }
+   Input: { .comm = %p, .tuningMask = 0x%016lx%016lx, .func = %s, .redOp = %d, .devRedop = %d, .dataType = %d, .nBytes = %zu, .numPipeOps = %d, .count = %zu, .countMax = %zu, .nWorks = %d, .winRegType = %d, .regBuff = %d }
 
 The second record states what was chosen:
 

@@ -14,6 +14,7 @@
 #include "device.h"
 #include "alloc.h"
 #include <cfloat>
+#include <cinttypes>
 
 NCCL_PARAM(SymNoWinEnable, "SYM_NOWIN_ENABLE", 0);
 
@@ -190,9 +191,9 @@ static ncclResult_t ncclTuningSelectBestTuning(
 ncclResult_t ncclTuningCompute(struct ncclTuningInput_t* const input, struct ncclTuningResult_t* const result) {
   ncclResult_t ret = ncclSuccess;
   TRACE(NCCL_TUNING,
-        "Input: { .comm = %p, .tuningMask = 0x%016lx%016lx, .func = %s, .redOp = %d, .devRedop = %d, .dataType = %d, "
-        ".nBytes = %lu, .numPipeOps = %d, .count = %lu, .countMax = %lu, .nWorks = %d, .winRegType = %d, "
-        ".regBuff = %d }",
+        "Input: { .comm = %p, .tuningMask = 0x%016" PRIx64 "%016" PRIx64 ", .func = %s, .redOp = %d, .devRedop = %d, "
+        ".dataType = %d, .nBytes = %zu, .numPipeOps = %d, .count = %zu, .countMax = %zu, .nWorks = %d, "
+        ".winRegType = %d, .regBuff = %d }",
         input->comm, input->tuningMask.w[1], input->tuningMask.w[0], ncclFuncToString(input->func), input->redOp,
         input->devRedOp, input->datatype, input->nBytes, input->numPipeOps, input->count, input->countMax,
         input->nWorks, input->winRegType, input->regBuff);
@@ -346,7 +347,7 @@ ncclResult_t ncclTuningCompute(struct ncclTuningInput_t* const input, struct ncc
       snprintf(ncclProtoEnvStr, 1023, " NCCL_PROTO was set to %s.", protoEnv);
     }
     WARN("No algorithm/protocol nor symKernelId available for function %s with datatype %s tuning mask "
-         "0x%016lx%016lx.%s%s%s",
+         "0x%016" PRIx64 "%016" PRIx64 ".%s%s%s",
          ncclFuncToString(input->func), ncclDatatypeToString(input->datatype), input->tuningMask.w[1],
          input->tuningMask.w[0], ncclAlgoEnvStr, ncclProtoEnvStr, ncclSymKernelIdEnvStr);
     ret = (algoEnv || protoEnv || symKernelIdEnv) ? ncclInvalidUsage : ncclInternalError;

@@ -9,9 +9,8 @@
 
 #include <stdint.h>
 
-// A set of cost-model tuning ids. NCCL keeps tuning masks in a uint64_t, which holds at most 64 tuning ids:
-// NCCL_TUNING_COUNT is already 63, and each symmetric kernel RCCL adds needs one more. This widens the mask to 128 bits,
-// as two 64-bit words.
+// A set of cost-model tuning ids, as two 64-bit words. Wider than NCCL's uint64_t tuning masks, so RCCL can add
+// symmetric kernels past 64 tuning ids.
 struct ncclTuningMask {
   static constexpr int kBits = 128;
   uint64_t w[2]; // tuning id i is bit i % 64 of w[i / 64]
