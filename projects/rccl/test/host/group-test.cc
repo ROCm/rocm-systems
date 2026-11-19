@@ -444,10 +444,12 @@ TEST_F(GroupEndInternalTest, MultiRankSymmetricCommWithoutEligibleTaskAvoidsAsyn
   int prepareCalls = 0;
   ScopedHook prepareTasks(
       g_ncclPrepareTasks,
-      [&prepareCalls](struct ncclComm*, bool* algoNeedConnect, bool* needConnect, ncclSimInfo_t*) {
+      [&prepareCalls](struct ncclComm*, bool* algoNeedConnect, bool* needConnect,
+                      bool* needGenkDevComm, ncclSimInfo_t*) {
         prepareCalls++;
         memset(algoNeedConnect, 0, sizeof(bool) * NCCL_NUM_ALGORITHMS);
         *needConnect = false;
+        *needGenkDevComm = false;
         return ncclSuccess;
       });
   ncclIntruQueue<ncclAsyncJob, &ncclAsyncJob::next> asyncCollJobs;
@@ -487,10 +489,12 @@ TEST_F(GroupEndInternalTest, SymmetricExtractionAndGeneralOnlyMaskPrepareInline)
     int prepareCalls = 0;
     ScopedHook prepareTasks(
         g_ncclPrepareTasks,
-        [&prepareCalls](struct ncclComm*, bool* algoNeedConnect, bool* needConnect, ncclSimInfo_t*) {
+        [&prepareCalls](struct ncclComm*, bool* algoNeedConnect, bool* needConnect,
+                        bool* needGenkDevComm, ncclSimInfo_t*) {
           prepareCalls++;
           memset(algoNeedConnect, 0, sizeof(bool) * NCCL_NUM_ALGORITHMS);
           *needConnect = false;
+          *needGenkDevComm = false;
           return ncclSuccess;
         });
     ncclIntruQueue<ncclAsyncJob, &ncclAsyncJob::next> asyncCollJobs;
@@ -523,7 +527,7 @@ TEST_F(GroupEndInternalTest, GlobalForcedSymmetricSelectionOverridesGeneralOnlyT
                            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
   ScopedHook prepareTasks(
       g_ncclPrepareTasks,
-      [](struct ncclComm*, bool*, bool*, ncclSimInfo_t*) {
+      [](struct ncclComm*, bool*, bool*, bool*, ncclSimInfo_t*) {
         ADD_FAILURE() << "a forced symmetric selection must prepare asynchronously";
         return ncclInternalError;
       });
@@ -562,10 +566,12 @@ TEST_F(GroupEndInternalTest, GlobalForcedGeneralSelectionWithoutSymmetricModelPr
   int prepareCalls = 0;
   ScopedHook prepareTasks(
       g_ncclPrepareTasks,
-      [&prepareCalls](struct ncclComm*, bool* algoNeedConnect, bool* needConnect, ncclSimInfo_t*) {
+      [&prepareCalls](struct ncclComm*, bool* algoNeedConnect, bool* needConnect,
+                      bool* needGenkDevComm, ncclSimInfo_t*) {
         prepareCalls++;
         memset(algoNeedConnect, 0, sizeof(bool) * NCCL_NUM_ALGORITHMS);
         *needConnect = false;
+        *needGenkDevComm = false;
         return ncclSuccess;
       });
   ncclIntruQueue<ncclAsyncJob, &ncclAsyncJob::next> asyncCollJobs;
