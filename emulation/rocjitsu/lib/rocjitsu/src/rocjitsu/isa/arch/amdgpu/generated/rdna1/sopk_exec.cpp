@@ -152,13 +152,28 @@ void SWaitcntLgkmcntSopk::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SSubvectorLoopBeginSopk::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  const uint64_t exec = wf.exec_raw();
+  (void)amdgpu::RegisterAccess(wf).read_scalar(sdst);
+  if (!exec) {
+    wf.pc += int64_t{static_cast<int16_t>(simm16.encoding_value_)} * 4;
+  } else if (static_cast<uint32_t>(exec) == 0) {
+    amdgpu::RegisterAccess(wf).write_scalar(sdst, 0);
+  } else {
+    amdgpu::RegisterAccess(wf).write_scalar(sdst, static_cast<uint32_t>(exec >> 32));
+    wf.write_exec_hi(0);
+  }
 }
 
 void SSubvectorLoopEndSopk::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  const uint64_t exec = wf.exec_raw();
+  const uint32_t saved = amdgpu::RegisterAccess(wf).read_scalar(sdst);
+  if (exec >> 32) {
+    wf.write_exec_lo(saved);
+  } else if (saved != 0) {
+    amdgpu::RegisterAccess(wf).write_scalar(sdst, static_cast<uint32_t>(exec));
+    wf.write_exec(uint64_t{saved} << 32);
+    wf.pc += int64_t{static_cast<int16_t>(simm16.encoding_value_)} * 4;
+  }
 }
 
 } // namespace rdna1
