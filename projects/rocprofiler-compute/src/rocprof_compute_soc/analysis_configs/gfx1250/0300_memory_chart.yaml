@@ -49,9 +49,9 @@ Panel Config:
         value: Value
         unit: Unit
       metric:
-        Dcache Requests:
-          value: SUM(SQC_DCACHE_REQ_sum) / SUM($denom)
-          unit: (Requests + $normUnit)
+        SMEM:
+          value: SUM(SQ_INSTS_SMEM_sum) / SUM($denom)
+          unit: (Instructions + $normUnit)
         Dcache Utilization:
           value: 100 * SUM(SQC_DCACHE_BUSY_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_sum)
           unit: Percent
@@ -111,21 +111,21 @@ Panel Config:
         value: Value
         unit: Unit
       metric:
-        LDS Load Requests:
+        LDS Load Instructions:
           value: SUM(TX_VCA_LDS_LOAD_WAVEFRONTS_sum) / SUM($denom)
-          unit: (Requests + $normUnit)
-        LDS Store Requests:
+          unit: (Instructions + $normUnit)
+        LDS Store Instructions:
           value: SUM(TX_VCA_LDS_STORE_WAVEFRONTS_sum) / SUM($denom)
-          unit: (Requests + $normUnit)
-        LDS Atomic Requests:
+          unit: (Instructions + $normUnit)
+        LDS Atomic Instructions:
           value: SUM(TX_VCA_LDS_ATOMIC_WAVEFRONTS_sum) / SUM($denom)
-          unit: (Requests + $normUnit)
-        Async Load Requests:
+          unit: (Instructions + $normUnit)
+        Async Load Instructions:
           value: SUM(TX_VCA_ASYNC_LOAD_WAVEFRONT_sum) / SUM($denom)
-          unit: (Requests + $normUnit)
-        Async Store Requests:
+          unit: (Instructions + $normUnit)
+        Async Store Instructions:
           value: SUM(TX_VCA_ASYNC_STORE_WAVEFRONT_sum) / SUM($denom)
-          unit: (Requests + $normUnit)
+          unit: (Instructions + $normUnit)
         LDS Utilization:
           value: 100 * SUM(TX_VMW_LDS_INPUT_ACTIVE_sum) / SUM(TX_VMW_VMW_BUSY_sum)
           unit: Percent
@@ -363,8 +363,8 @@ Panel Config:
     ICache-GL1 Request Latency: >-
       Average latency of Instruction Cache requests sent to GL1.
 
-    Dcache Requests: >-
-      Total Scalar Data Cache requests.
+    SMEM: >-
+      Number of scalar memory instructions issued.
 
     Dcache Utilization: >-
       Percentage of WGP cycles the Scalar Data Cache is serving requests.
@@ -402,20 +402,20 @@ Panel Config:
     GL0 Hit Rate: >-
       GL0 cache hit rate.
 
-    LDS Load Requests: >-
-      Number of LDS load requests.
+    LDS Load Instructions: >-
+      Number of LDS load instructions.
 
-    LDS Store Requests: >-
-      Number of LDS store requests.
+    LDS Store Instructions: >-
+      Number of LDS store instructions.
 
-    LDS Atomic Requests: >-
-      Number of LDS atomic requests.
+    LDS Atomic Instructions: >-
+      Number of LDS atomic instructions.
 
-    Async Load Requests: >-
-      Number of async load requests.
+    Async Load Instructions: >-
+      Number of async load instructions.
 
-    Async Store Requests: >-
-      Number of async store requests.
+    Async Store Instructions: >-
+      Number of async store instructions.
 
     LDS Utilization: >-
       Percentage of VMW-busy cycles the LDS is executing any operation.

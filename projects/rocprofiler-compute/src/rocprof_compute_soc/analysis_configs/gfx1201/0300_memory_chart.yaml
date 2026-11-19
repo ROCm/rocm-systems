@@ -26,9 +26,9 @@ Panel Config:
         value: Value
         unit: Unit
       metric:
-        DCache Requests:
-          value: SUM(SQC_DCACHE_REQ_sum) / SUM($denom)
-          unit: (Requests + $normUnit)
+        SMEM:
+          value: SUM(SQ_INSTS_SMEM_sum) / SUM($denom)
+          unit: (Instructions + $normUnit)
         DCache Hit Rate:
           value: 100 * SUM(SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_REQ_sum)
           unit: Percent
@@ -56,9 +56,9 @@ Panel Config:
         value: Value
         unit: Unit
       metric:
-        LDS Req:
+        LDS Instructions:
           value: SUM(SQ_INSTS_LDS_sum) / SUM($denom)
-          unit: (Requests + $normUnit)
+          unit: (Instructions + $normUnit)
         LDS Utilization:
           value: 100 * SUM(SQC_LDS_IDX_ACTIVE_sum) / (SUM(GRBM_GUI_ACTIVE) * $cu_per_gpu)
           unit: Percent
@@ -137,8 +137,10 @@ Panel Config:
       Percentage of instruction cache accesses that are serviced from cache without fetching
       from GL1. High hit rates indicate good instruction locality. Low hit rates
       may indicate large kernels exceeding instruction cache capacity or divergent branches.
-    DCache Requests: >-
-      Scalar data cache requests after bank serialization, normalized by the chosen unit.
+    SMEM: >-
+      Number of scalar memory instructions executed. SMEM loads constant and uniform
+      data through the scalar cache. High counts may indicate heavy use of constant
+      buffers or kernel arguments.
     DCache Hit Rate: >-
       Percentage of scalar data cache accesses that hit in cache. High hit rates indicate
       efficient reuse of constant and uniform data. Low hit rates may indicate excessive
@@ -148,7 +150,7 @@ Panel Config:
       Bounds-check reductions are ignored.
     GL0 Hit Rate: >-
       Percentage of GL0 cache requests serviced from cache without accessing GL1.
-    LDS Req: >-
+    LDS Instructions: >-
       Number of LDS instructions issued by the shader, including FLAT instructions that
       resolve to LDS. This counts instructions rather than data movement, so it does not
       distinguish reads from writes.

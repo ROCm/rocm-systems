@@ -16,8 +16,3 @@ sl1d.hit_rate_excl_dup:
     uniform data accessed by scalar instructions. High hit rates indicate efficient
     reuse of constant and uniform data across wavefronts.
   peak: 100
-sl1d.req:
-  name: sL1D Requests
-  formula: SUM(SQC_DCACHE_REQ_sum) / SUM($denom)
-  unit: (Requests + $normUnit)
-  description: ''

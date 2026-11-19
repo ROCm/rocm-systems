@@ -36,7 +36,7 @@ _DISPLAY_UNITS: dict[str, DisplayUnit] = {
     "Percent": PERCENT,
     "Bytes/s": DisplayUnit("bandwidth", " GB/s", 3, 1e-9),
     "Bytes per Work-item": DisplayUnit("value", " B", 0),
-    "Bytes per Workgroup": DisplayUnit("value", " KB", 1, 1 / 1024),
+    "Bytes per Workgroup": DisplayUnit("value", " B", 0),
     "Cycles": DisplayUnit("value", " cycles"),
     "Registers": DisplayUnit("value", precision=0),
     "Workgroups per CU": DisplayUnit("value"),

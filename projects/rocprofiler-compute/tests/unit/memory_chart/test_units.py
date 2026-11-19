@@ -15,7 +15,7 @@ from memory_chart.units import PLAIN, display_unit, format_value, panel_units
         ("Bytes/s", 1.5e9, "1.500 GB/s"),
         ("Bytes/s", 0, "0.000 GB/s"),
         ("Bytes per Work-item", 640, "640 B"),
-        ("Bytes per Workgroup", 32768, "32.0 KB"),
+        ("Bytes per Workgroup", 32768, "32768 B"),
         ("Cycles", 68.24, "68.2 cycles"),
         ("Registers", 63.7, "64"),
         ("(Requests + $normUnit)", 119, "119 req"),

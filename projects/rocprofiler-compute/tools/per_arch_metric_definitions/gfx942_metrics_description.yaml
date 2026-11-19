@@ -176,7 +176,7 @@ Memory chart:
     plain: The total number of buffer atomic instructions processed by the address processing unit, counted once per wavefront, per normalization unit.
     rst: The total number of buffer atomic instructions processed by the :ref:`address processing unit <desc-ta>`, counted once per :ref:`wavefront <desc-wavefront>`, per :ref:`normalization unit <normalization-units>`.
     unit: Instructions per Normalization Unit
-  LDS Req:
+  LDS Instructions:
     plain: The total number of LDS instructions (including, but not limited to, read/write/atomics and HIP's __shfl instructions) executed per normalization unit.
     rst: The total number of :ref:`LDS <desc-lds>` instructions (including, but not limited to, read/write/atomics and HIP's ``__shfl`` instructions) executed per :ref:`normalization unit <normalization-units>`.
     unit: Instructions per Normalization Unit
@@ -204,10 +204,10 @@ Memory chart:
     plain: Bandwidth of atomic requests from the vL1D cache to the L2 cache per unit time.
     rst: Bandwidth of atomic requests from the vL1D cache to the :doc:`L2 <l2-cache>` cache per unit time.
     unit: Bytes/s
-  sL1D Rd:
-    plain: The total number of requests, of any size or type, made to the sL1D per normalization unit.
-    rst: The total number of requests, of any size or type, made to the :ref:`sL1D <desc-sl1d>` per :ref:`normalization unit <normalization-units>`.
-    unit: Requests per Normalization Unit
+  SMEM:
+    plain: The total number of scalar memory (SMEM) operations issued. These are typically used for loading kernel arguments, base-pointers and loads from HIP's __constant__ memory.
+    rst: The total number of scalar memory (SMEM) operations issued. These are typically used for loading kernel arguments, base-pointers and loads from HIP's ``__constant__`` memory.
+    unit: Instructions per Normalization Unit
   sL1D Hit:
     plain: The percent of sL1D requests that hit on a previously loaded cache line. Calculated as the ratio of the number of sL1D requests that hit over the number of all sL1D requests.
     rst: The percent of :ref:`sL1D <desc-sl1d>` requests that hit on a previously loaded cache line. Calculated as the ratio of the number of sL1D requests that hit over the number of all sL1D requests.

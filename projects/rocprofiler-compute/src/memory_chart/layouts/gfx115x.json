@@ -51,7 +51,7 @@
     {"from": "cu", "to": "gl0_tcp", "direction": "forward", "metric_id": "3.3.1", "title": "Write", "category": "write", "style": "inline"},
 
     {"from": "cu", "to": "sqc", "direction": "backward", "metric_id": "3.1.0", "title": "ICache Read", "category": "read", "style": "inline"},
-    {"from": "cu", "to": "sqc", "direction": "backward", "metric_id": "3.2.0", "title": "DCache Read", "category": "read", "style": "inline"},
+    {"from": "cu", "to": "sqc", "direction": "backward", "metric_id": "3.2.0", "title": "SMEM", "category": "read", "style": "inline"},
 
     {"from": "gl0_tcp", "to": "gl1", "direction": "backward", "metric_id": "3.5.0", "title": "Read BW", "category": "read", "style": "stacked"},
     {"from": "gl0_tcp", "to": "gl1", "direction": "forward", "metric_id": "3.5.1", "title": "Write BW", "category": "write", "style": "stacked"},

@@ -52,9 +52,9 @@ Panel Config:
         value: Value
         unit: Unit
       metric:
-        DCache Requests:
-          value: SUM(SQC_DCACHE_REQ_sum) / SUM($denom)
-          unit: (Requests + $normUnit)
+        SMEM:
+          value: SUM(SQ_INSTS_SMEM_sum) / SUM($denom)
+          unit: (Instructions + $normUnit)
         DCache Hit Rate:
           value: 100 * SUM(SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)
           unit: Percent
@@ -100,9 +100,9 @@ Panel Config:
         value: Value
         unit: Unit
       metric:
-        LDS Req:
+        LDS Instructions:
           value: SUM(SQ_INSTS_LDS_sum) / SUM($denom)
-          unit: (Requests + $normUnit)
+          unit: (Instructions + $normUnit)
         LDS Utilization:
           value: 100 * SUM(SQC_LDS_IDX_ACTIVE_sum) / (SUM(GRBM_GUI_ACTIVE) * $cu_per_gpu)
           unit: Percent
@@ -255,6 +255,10 @@ Panel Config:
           unit: Workgroups per WGP
 
   metrics_description:
+    SMEM: >-
+      Number of scalar memory instructions executed. SMEM loads constant and uniform
+      data through the scalar cache. High counts may indicate heavy use of constant
+      buffers or kernel arguments.
     Wavefront Occupancy: >-
       The time-averaged number of wavefronts resident on the accelerator, as a percent
       of the maximum number of wavefronts all of its CUs can hold.
@@ -287,7 +291,7 @@ Panel Config:
       Percentage of GL0 vector cache (TCP Cache) requests serviced from cache. TCP Cache is the
       first-level cache for vector memory operations. Higher hit rates reduce traffic
       to the GL1 cache and lower memory access latency for vector operations.
-    LDS Req: >-
+    LDS Instructions: >-
       Number of LDS instructions issued by the shader, including FLAT instructions that
       resolve to LDS. This counts instructions rather than data movement, so it does not
       distinguish reads from writes.

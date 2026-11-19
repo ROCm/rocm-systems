@@ -47,7 +47,7 @@ Panel Config:
         Buffer Atomic:
           value: SUM(TA_BUFFER_ATOMIC_WAVEFRONTS_sum) / SUM($denom)
           unit: (Instructions + $normUnit)
-        LDS Req:
+        LDS Instructions:
           value: SUM(SQ_INSTS_LDS) / SUM($denom)
           unit: (Instructions + $normUnit)
         LDS Util:
@@ -77,9 +77,9 @@ Panel Config:
         vL1D_L2 Atomic BW:
           value: 64 * SUM(TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
-        sL1D Rd:
-          value: SUM(SQC_DCACHE_REQ) / SUM($denom)
-          unit: (Requests + $normUnit)
+        SMEM:
+          value: SUM(SQ_INSTS_SMEM) / SUM($denom)
+          unit: (Instructions + $normUnit)
         sL1D Hit:
           value: 100 * SUM(SQC_DCACHE_HITS) / SUM(SQC_DCACHE_REQ)
           unit: Percent
@@ -181,7 +181,7 @@ Panel Config:
     Buffer Atomic: >-
       The total number of buffer atomic instructions processed by the address processing
       unit, counted once per wavefront, per normalization unit.
-    LDS Req: The total number of LDS instructions (including, but not limited to,
+    LDS Instructions: The total number of LDS instructions (including, but not limited to,
       read/write/atomics and HIP's __shfl instructions) executed per normalization
       unit.
     LDS Util: >-
@@ -206,8 +206,10 @@ Panel Config:
       cache per unit time.
     vL1D_L2 Atomic BW: Bandwidth of atomic requests from the vL1D cache to the L2
       cache per unit time.
-    sL1D Rd: The total number of requests, of any size or type, made to the sL1D per
-      normalization unit.
+    SMEM: >-
+      The total number of scalar memory (SMEM) operations issued. These are typically
+      used for loading kernel arguments, base-pointers and loads from HIP's __constant__
+      memory.
     sL1D Hit: >-
       The percent of sL1D requests that hit on a previously loaded cache line. Calculated as
       the ratio of the number of sL1D requests that hit over the number of all sL1D

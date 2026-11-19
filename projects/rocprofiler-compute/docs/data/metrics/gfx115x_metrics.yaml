@@ -56,6 +56,13 @@ System Speed-of-Light:
   Instruction Cache BW:
     rst: Bandwidth of instruction cache requests to the GL1 cache. High values may indicate instruction cache pressure from large kernels or frequent instruction cache misses.
     unit: Bytes/s
+Memory chart - Scalar Data Cache:
+  SMEM:
+    rst: Number of scalar memory instructions executed. SMEM loads constant and uniform data through the scalar cache. High counts may indicate heavy use of constant buffers or kernel arguments.
+    unit: Instructions per Normalization Unit
+  DCache Hit Rate:
+    rst: Percentage of scalar data cache accesses that hit in cache. High hit rates indicate efficient reuse of constant and uniform data. Low hit rates may indicate excessive unique constant data or poor temporal locality.
+    unit: Percent
 Memory chart - Workgroup Processors (WGPs):
   Wavefront Occupancy:
     rst: The time-averaged number of :ref:`wavefronts <desc-wavefront>` resident on the accelerator, as a percent of the maximum number of wavefronts all of its :doc:`CUs <compute-unit>` can hold.
@@ -85,10 +92,6 @@ Memory chart - Instruction Cache:
   ICache-GL1 Read Bandwidth:
     rst: Bytes per second of read traffic from the instruction path toward GL1 (texture-cache path instruction requests), using 128 B per SQC_TC_INST_REQ event.
     unit: Bytes/s
-Memory chart - Scalar Data Cache:
-  DCache Hit Rate:
-    rst: Percentage of scalar data cache accesses that hit in cache. High hit rates indicate efficient reuse of constant and uniform data. Low hit rates may indicate excessive unique constant data or poor temporal locality.
-    unit: Percent
 Memory chart - TCP Cache:
   GL0 Cache Hit Rate (TCP Cache):
     rst: Percentage of GL0 vector cache (TCP Cache) requests serviced from cache. TCP Cache is the first-level cache for vector memory operations. Higher hit rates reduce traffic to the GL1 cache and lower memory access latency for vector operations.
@@ -100,9 +103,9 @@ Memory chart - TCP Cache:
     rst: TCP write requests per normalization unit (TCP_REQ_WRITE_sum).
     unit: Requests per Normalization Unit
 Memory chart - LDS (Local Data Share):
-  LDS Req:
+  LDS Instructions:
     rst: Number of LDS instructions issued by the shader, including FLAT instructions that resolve to LDS. This counts instructions rather than data movement, so it does not distinguish reads from writes.
-    unit: Requests per Normalization Unit
+    unit: Instructions per Normalization Unit
   LDS Utilization:
     rst: Percentage of the LDS cycle budget across all CUs spent servicing indexed (non-direct, non-interpolation) accesses, measured over GPU-active cycles. Because two CUs share a workgroup processor's LDS, a saturated LDS reads well below 100% on this architecture.
     unit: Percent

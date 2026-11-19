@@ -53,10 +53,10 @@ Memory chart - Instruction Cache:
     rst: Percentage of instruction cache accesses that are serviced from cache without fetching from GL1. High hit rates indicate good instruction locality. Low hit rates may indicate large kernels exceeding instruction cache capacity or divergent branches.
     unit: Percent
 Memory chart - Scalar Data Cache:
-  DCache Requests:
-    plain: Scalar data cache requests after bank serialization, normalized by the chosen unit.
-    rst: Scalar data cache requests after bank serialization, normalized by the chosen unit.
-    unit: Requests per Normalization Unit
+  SMEM:
+    plain: Number of scalar memory instructions executed. SMEM loads constant and uniform data through the scalar cache. High counts may indicate heavy use of constant buffers or kernel arguments.
+    rst: Number of scalar memory instructions executed. SMEM loads constant and uniform data through the scalar cache. High counts may indicate heavy use of constant buffers or kernel arguments.
+    unit: Instructions per Normalization Unit
   DCache Hit Rate:
     plain: Percentage of scalar data cache accesses that hit in cache. High hit rates indicate efficient reuse of constant and uniform data. Low hit rates may indicate excessive unique constant data or poor temporal locality.
     rst: Percentage of scalar data cache accesses that hit in cache. High hit rates indicate efficient reuse of constant and uniform data. Low hit rates may indicate excessive unique constant data or poor temporal locality.
@@ -71,10 +71,10 @@ Memory chart - GL0 Cache (Vector L0):
     rst: Percentage of GL0 cache requests serviced from cache without accessing GL1.
     unit: Percent
 Memory chart - LDS (Local Data Share):
-  LDS Req:
+  LDS Instructions:
     plain: Number of LDS instructions issued by the shader, including FLAT instructions that resolve to LDS. This counts instructions rather than data movement, so it does not distinguish reads from writes.
     rst: Number of LDS instructions issued by the shader, including FLAT instructions that resolve to LDS. This counts instructions rather than data movement, so it does not distinguish reads from writes.
-    unit: Requests per Normalization Unit
+    unit: Instructions per Normalization Unit
   LDS Utilization:
     plain: Percentage of the LDS cycle budget across all CUs spent servicing indexed (non-direct, non-interpolation) accesses, measured over GPU-active cycles. Because two CUs share a workgroup processor's LDS, a saturated LDS reads well below 100% on this architecture.
     rst: Percentage of the LDS cycle budget across all CUs spent servicing indexed (non-direct, non-interpolation) accesses, measured over GPU-active cycles. Because two CUs share a workgroup processor's LDS, a saturated LDS reads well below 100% on this architecture.
