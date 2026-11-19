@@ -9,6 +9,7 @@
 #include "rocjitsu/code/rj_code.h"
 
 #include <cstdint>
+#include <optional>
 
 namespace rocjitsu {
 
@@ -43,5 +44,19 @@ enum class Rsrc3Layout : uint8_t {
 
 /// @brief True for the layouts that encode SHARED_VGPR_COUNT in bits 3:0.
 [[nodiscard]] bool rsrc3_layout_has_shared_vgpr_count(Rsrc3Layout layout);
+
+/// @brief INST_PREF_SIZE in @p rsrc3 for @p arch: the instruction-cache lines a
+///        wave prefetches from its entry at launch.
+///
+/// @details The field is 6 bits at 9:4 on GFX11 and 8 bits at 11:4 on GFX12 and
+/// later.
+///
+/// @returns nullopt for a layout without the field.
+[[nodiscard]] std::optional<uint32_t> inst_pref_size(uint32_t rsrc3, rj_code_arch_t arch);
+
+/// @brief Write @p lines into @p rsrc3's INST_PREF_SIZE for @p arch, which must
+///        have the field, leaving every other bit unchanged. @p lines must fit
+///        the field.
+void set_inst_pref_size(uint32_t &rsrc3, rj_code_arch_t arch, uint32_t lines);
 
 } // namespace rocjitsu

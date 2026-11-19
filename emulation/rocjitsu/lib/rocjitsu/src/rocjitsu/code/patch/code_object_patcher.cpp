@@ -460,17 +460,8 @@ bool has_dynamic_write_within_text(std::span<const uint8_t> image, const Elf64_E
     const Rsrc3Layout target_layout = rsrc3_layout(target_arch);
     if (!rsrc3_carries_verbatim(translation.source_arch, target_arch)) {
       desc.compute_pgm_rsrc3 = 0;
-      if (const uint32_t inst_pref = target_default_inst_pref_size(target_arch); inst_pref != 0) {
-        // The field is 6 bits on GFX11 and 8 on GFX12+; write it through the
-        // target's own definition rather than assuming the narrower one.
-        if (target_layout == Rsrc3Layout::Gfx120 || target_layout == Rsrc3Layout::Gfx125) {
-          RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc3,
-                             kd::COMPUTE_PGM_RSRC3_GFX12_PLUS_INST_PREF_SIZE, inst_pref);
-        } else {
-          RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc3,
-                             kd::COMPUTE_PGM_RSRC3_GFX10_PLUS_INST_PREF_SIZE, inst_pref);
-        }
-      }
+      if (const uint32_t inst_pref = target_default_inst_pref_size(target_arch); inst_pref != 0)
+        set_inst_pref_size(desc.compute_pgm_rsrc3, target_arch, inst_pref);
     } else if (rsrc3_layout_has_shared_vgpr_count(target_layout)) {
       // SHARED_VGPR_COUNT is the one carried field this function invalidates by
       // its own edits: it rewrites both the wave size and the RSRC1 VGPR
