@@ -50,6 +50,27 @@ inline hipError_t ihipGraphExecNodeUpdate(GraphExecBase* graphExec,
   return status;
 }
 
+//! True when `graph` is a node's embedded graph rather than a standalone object the caller
+//! owns. hipGraphChildGraphNodeGetGraph returns one for a cloned child; moving it would
+//! hand over a node the parent still owns.
+static inline bool ihipGraphIsEmbedded(hip::Graph* graph) {
+  return graph->IsOwnedByNode();
+}
+
+//! True when `dst` is `src` or sits beneath it: an embedded graph is a ChildGraphNode, so
+//! GetParentGraph() walks up one level, and moved handles resolve to their adopting node.
+//! Moving `src` under such a `dst` would make it contain itself and recurse unboundedly.
+static bool ihipGraphIsSelfOrDescendant(hip::Graph* dst, hip::Graph* src) {
+  for (hip::Graph* g = dst; g != nullptr;) {
+    if (g == src) {
+      return true;
+    }
+    auto* owner = g->GetOwningNode();
+    g = (owner != nullptr) ? owner->GetParentGraph() : nullptr;
+  }
+  return false;
+}
+
 // Accepts a linear 3D description (no arrays, unit height/depth, zero positions) on a 1D-family node.
 inline bool ihipMemcpy3DParmsAsLinear(const hipMemcpy3DParms* params, void** dst,
                                       const void** src, size_t* count) {
@@ -74,6 +95,24 @@ inline hipMemcpy3DParms ihipLinearAsMemcpy3DParms(void* dst, const void* src, si
   params.extent = make_hipExtent(count, 1, 1);
   params.kind = kind;
   return params;
+}
+
+//! The dependency rules ihipGraphAddNode enforces, checked without mutating either graph.
+//! That function inserts the node before it validates, so a child graph node - which is only
+//! half built until CommitMove runs - must know the dependencies are good beforehand.
+static hipError_t ihipValidateDependencies(hip::Graph* graph,
+                                           hip::GraphNode* const* pDependencies,
+                                           size_t numDependencies) {
+  std::unordered_set<hip::GraphNode*> seen;
+  for (size_t i = 0; i < numDependencies; i++) {
+    if (!hip::GraphNode::isNodeValid(pDependencies[i]) ||
+        graph != pDependencies[i]->GetParentGraph() ||
+        seen.find(pDependencies[i]) != seen.end()) {
+      return hipErrorInvalidValue;
+    }
+    seen.insert(pDependencies[i]);
+  }
+  return hipSuccess;
 }
 
 inline hipError_t ihipGraphAddNode(hip::GraphNode* graphNode, hip::Graph* graph,
@@ -1459,6 +1498,9 @@ hipError_t hipGraphDestroy(hipGraph_t graph) {
   if (!hip::Graph::isGraphValid(g)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
+  if (g->IsMovedIntoNode()) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
   delete g;
   HIP_RETURN(hipSuccess);
 }
@@ -1641,7 +1683,8 @@ hipError_t hipGraphAddChildGraphNode(hipGraphNode_t* pGraphNode, hipGraph_t grap
                                      hipGraph_t childGraph) {
   HIP_INIT_API(hipGraphAddChildGraphNode, pGraphNode, pDependencies, numDependencies, childGraph);
   if (pGraphNode == nullptr || graph == nullptr ||
-      (numDependencies > 0 && pDependencies == nullptr) || childGraph == nullptr) {
+      (numDependencies > 0 && pDependencies == nullptr) || childGraph == nullptr || 
+      reinterpret_cast<hip::Graph*>(childGraph)->IsMovedIntoNode()) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   hip::GraphNode* node = new hip::ChildGraphNode(reinterpret_cast<hip::Graph*>(childGraph));
@@ -1734,7 +1777,8 @@ hipError_t ihipGraphInstantiate(hip::GraphExecBase** pGraphExec, hip::Graph* gra
 hipError_t hipGraphInstantiate(hipGraphExec_t* pGraphExec, hipGraph_t graph,
                                hipGraphNode_t* pErrorNode, char* pLogBuffer, size_t bufferSize) {
   HIP_INIT_API(hipGraphInstantiate, pGraphExec, graph);
-  if (pGraphExec == nullptr || graph == nullptr) {
+  if (pGraphExec == nullptr || graph == nullptr ||
+      reinterpret_cast<hip::Graph*>(graph)->IsMovedIntoNode()) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   hip::GraphExecBase* ge;
@@ -1755,7 +1799,10 @@ static constexpr unsigned long long kValidInstantiateParamsFlags =
 hipError_t hipGraphInstantiateWithFlags(hipGraphExec_t* pGraphExec, hipGraph_t graph,
                                         unsigned long long flags = 0) {
   HIP_INIT_API(hipGraphInstantiateWithFlags, pGraphExec, graph, flags);
-  if (pGraphExec == nullptr || graph == nullptr) {
+  // A graph moved into a child graph node is owned by its parent and cannot be
+  // instantiated on its own, same as hipGraphInstantiate/hipGraphInstantiateWithParams.
+  if (pGraphExec == nullptr || graph == nullptr ||
+      reinterpret_cast<hip::Graph*>(graph)->IsMovedIntoNode()) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -1772,7 +1819,8 @@ hipError_t hipGraphInstantiateWithFlags(hipGraphExec_t* pGraphExec, hipGraph_t g
 hipError_t hipGraphInstantiateWithParams(hipGraphExec_t* pGraphExec, hipGraph_t graph,
                                          hipGraphInstantiateParams* instantiateParams) {
   HIP_INIT_API(hipGraphInstantiateWithParams, pGraphExec, graph, instantiateParams);
-  if (pGraphExec == nullptr || graph == nullptr || instantiateParams == nullptr) {
+  if (pGraphExec == nullptr || graph == nullptr || instantiateParams == nullptr ||
+      reinterpret_cast<hip::Graph*>(graph)->IsMovedIntoNode()) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -2108,6 +2156,9 @@ hipError_t hipGraphAddDependencies(hipGraph_t graph, const hipGraphNode_t* from,
   }
   hip::GraphNode* const* fromNode = reinterpret_cast<hip::GraphNode* const*>(from);
   hip::GraphNode* const* toNode = reinterpret_cast<hip::GraphNode* const*>(to);
+  // A moved graph's nodes were re-parented to the graph that adopted them, so comparing
+  // their parent against the caller's empty shell would reject every node the caller still
+  // legitimately holds.
   hip::Graph* g = reinterpret_cast<hip::Graph*>(graph);
   for (size_t i = 0; i < numDependencies; i++) {
     // When the same node is specified for both fromNode and toNode
@@ -2167,7 +2218,7 @@ hipError_t hipGraphChildGraphNodeGetGraph(hipGraphNode_t node, hipGraph_t* pGrap
 
 hipError_t validateChildGraphNodeSetParams(hip::GraphNode* n, hip::Graph* cg, bool exec = true) {
   if (cg == nullptr || n == nullptr || !hip::GraphNode::isNodeValid(n) ||
-      !hip::Graph::isGraphValid(cg) || n->GetType() != hipGraphNodeTypeGraph) {
+      !hip::Graph::isGraphValid(cg) || cg->IsMovedIntoNode() || n->GetType() != hipGraphNodeTypeGraph) {
     return hipErrorInvalidValue;
   }
   // compare with parent graph fron cloned and original node
@@ -2374,6 +2425,7 @@ hipError_t hipGraphRemoveDependencies(hipGraph_t graph, const hipGraphNode_t* fr
   }
   hip::GraphNode* const* fromNode = reinterpret_cast<hip::GraphNode* const*>(from);
   hip::GraphNode* const* toNode = reinterpret_cast<hip::GraphNode* const*>(to);
+  // Resolved for the same reason as hipGraphAddDependencies.
   hip::Graph* g = reinterpret_cast<hip::Graph*>(graph);
   for (size_t i = 0; i < numDependencies; i++) {
     if (toNode[i]->GetParentGraph() != g || fromNode[i]->GetParentGraph() != g ||
@@ -2923,7 +2975,8 @@ hipError_t hipGraphExecUpdate(hipGraphExec_t hGraphExec, hipGraph_t hGraph,
   HIP_INIT_API(hipGraphExecUpdate, hGraphExec, hGraph, hErrorNode_out, updateResult_out);
   // parameter check
   if (hGraphExec == nullptr || hGraph == nullptr || hErrorNode_out == nullptr ||
-      updateResult_out == nullptr) {
+      updateResult_out == nullptr ||
+      reinterpret_cast<hip::Graph*>(hGraph)->IsMovedIntoNode()) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -3071,6 +3124,7 @@ hipError_t hipGraphAddMemAllocNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
   pNodeParams->dptr = nullptr;
   auto mem_alloc_node = new hip::GraphMemAllocNode(pNodeParams);
   hip::GraphNode* node = mem_alloc_node;
+  // Resolved graph handle for moved child graphs
   auto hgraph = reinterpret_cast<hip::Graph*>(graph);
   auto status = ihipGraphAddNode(
       node, hgraph, reinterpret_cast<hip::GraphNode* const*>(pDependencies), numDependencies);
@@ -3333,6 +3387,9 @@ hipError_t hipGraphRetainUserObject(hipGraph_t graph, hipUserObject_t object, un
     HIP_RETURN(hipErrorInvalidValue);
   }
   hip::UserObject* userObject = reinterpret_cast<hip::UserObject*>(object);
+  // A moved graph's owned references were transferred to the child graph node that adopted
+  // them, so retain must register against that graph. Retaining on the empty shell would
+  // make it an owner again and tie the reference's lifetime to the shell instead.
   hip::Graph* g = reinterpret_cast<hip::Graph*>(graph);
   if (!hip::UserObject::isUserObjvalid(userObject) && !g->isUserObjGraphValid(userObject)) {
     HIP_RETURN(hipSuccess);
@@ -3355,6 +3412,9 @@ hipError_t hipGraphReleaseUserObject(hipGraph_t graph, hipUserObject_t object, u
     HIP_RETURN(hipErrorInvalidValue);
   }
   hip::UserObject* userObject = reinterpret_cast<hip::UserObject*>(object);
+  // Resolve for the same reason as retain: the shell owns nothing after a move, so a
+  // release against it would silently find no reference and return success having done
+  // nothing, leaving the caller's reference held until the parent is destroyed.
   hip::Graph* g = reinterpret_cast<hip::Graph*>(graph);
   if (!g->isUserObjGraphValid(userObject) || userObject->referenceCount() < count) {
     HIP_RETURN(hipSuccess);
@@ -3505,15 +3565,48 @@ hipError_t hipGraphAddNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                 reinterpret_cast<hip::GraphNode* const*>(pDependencies),
                                 numDependencies, false);
       break;
-    case hipGraphNodeTypeGraph:
-      if (nodeParams->graph.graph == nullptr) {
+    case hipGraphNodeTypeGraph: {
+      auto* childGraph = reinterpret_cast<hip::Graph*>(nodeParams->graph.graph);
+      const hipGraphChildGraphNodeOwnership ownership = nodeParams->graph.ownership;
+      if (childGraph == nullptr || !hip::Graph::isGraphValid(childGraph) ||
+          childGraph == reinterpret_cast<hip::Graph*>(graph) ||
+          childGraph->IsMovedIntoNode() ||
+          (ownership != hipGraphChildGraphOwnershipClone &&
+           ownership != hipGraphChildGraphOwnershipMove)) {
         HIP_RETURN(hipErrorInvalidValue);
       }
-      node = new hip::ChildGraphNode(reinterpret_cast<hip::Graph*>(nodeParams->graph.graph));
+      // MOVE takes the caller's graph object itself, so it is only legal for a standalone
+      // graph that is not already owned by a node, and only when it does not already
+      // contain the destination. CLONE copies instead and stays unrestricted.
+      if (ownership == hipGraphChildGraphOwnershipMove &&
+          (ihipGraphIsEmbedded(childGraph) ||
+           ihipGraphIsSelfOrDescendant(reinterpret_cast<hip::Graph*>(graph), childGraph))) {
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+      // Validate before constructing: a rejected add must not leave a half-built child node
+      // in the parent, and under MOVE must not consume the caller's graph.
+      status = ihipValidateDependencies(reinterpret_cast<hip::Graph*>(graph),
+                                        reinterpret_cast<hip::GraphNode* const*>(pDependencies),
+                                        numDependencies);
+      if (status != hipSuccess) {
+        HIP_RETURN(status);
+      }
+      const bool moveOwnership = (ownership == hipGraphChildGraphOwnershipMove);
+      auto* childNode = new hip::ChildGraphNode(
+          childGraph, moveOwnership ? hip::ChildGraphNode::Ownership::kMove
+                                    : hip::ChildGraphNode::Ownership::kClone);
+      node = childNode;
       status = ihipGraphAddNode(node, reinterpret_cast<hip::Graph*>(graph),
                                 reinterpret_cast<hip::GraphNode* const*>(pDependencies),
                                 numDependencies, false);
+      // Take the caller's graph only after the node is in place. ihipGraphAddNode rejects
+      // bad dependencies, and a call that fails must leave childGraph intact and
+      // destroyable rather than consuming a graph the caller still owns.
+      if (status == hipSuccess && moveOwnership) {
+        childNode->CommitMove(childGraph);
+      }
       break;
+    }
     case hipGraphNodeTypeWaitEvent:
       if (nodeParams->eventWait.event == nullptr) {
         HIP_RETURN(hipErrorInvalidValue);

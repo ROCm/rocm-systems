@@ -150,6 +150,7 @@ void Graph::RemoveNode(const Node& node) {
   delete node;
 }
 
+
 // ================================================================================================
 std::vector<Node> Graph::GetRootNodes() const {
   // root nodes are all vertices with 0 in-degrees
@@ -226,7 +227,9 @@ hipError_t Graph::ScheduleOneNode(Node start, int stream_id) {
     // Process child graph separately, since there is no connection
     if (cur->GetType() == hipGraphNodeTypeGraph) {
       auto cgn   = reinterpret_cast<hip::ChildGraphNode*>(cur);
-      auto child = cgn->GetChildGraph();
+      // The node is the child's executor; scheduling state lives on it, not on the graph
+      // object it holds.
+      auto child = static_cast<hip::Graph*>(cgn);
       hipError_t status = child->ScheduleNodes();
       if (status != hipSuccess) {
         return status;
@@ -967,7 +970,7 @@ hipError_t Graph::FindPathsDFS(Node start, std::vector<Node>& current_path,
 
       // Get the child graph and recursively process it
       auto childGraphNode = reinterpret_cast<hip::ChildGraphNode*>(node);
-      auto childGraph = childGraphNode->GetChildGraph();
+      auto childGraph = static_cast<hip::Graph*>(childGraphNode);
 
       if (childGraph != nullptr) {
         // Validate and discover the complete child hierarchy.
@@ -1094,7 +1097,8 @@ hipError_t Graph::CreateSegmentsFromPaths(
     // Preserve child graph information from hierarchical path.
     if (h_path.child_graph_node != nullptr && h_path.child_graph_paths_index >= 0) {
       auto childGraphNode = reinterpret_cast<hip::ChildGraphNode*>(h_path.child_graph_node);
-      segment.child_graph_ptr = childGraphNode->GetChildGraph();
+      // Must stay the node: the packet-capture path dynamic_casts this to GraphExecSegmented.
+      segment.child_graph_ptr = static_cast<hip::Graph*>(childGraphNode);
     }
 
     // Cache declared priority from kernel nodes and child graph segments.
@@ -1110,7 +1114,7 @@ hipError_t Graph::CreateSegmentsFromPaths(
       if (node->GetType() == hipGraphNodeTypeKernel) {
         node_priority = static_cast<const GraphKernelNode*>(node)->GetDeclaredPriority();
       } else if (node->GetType() == hipGraphNodeTypeGraph) {
-        Graph* child = node->GetChildGraph();
+        Graph* child = static_cast<ChildGraphNode*>(node);
         if (child == nullptr || child->segments_.empty()) continue;
         node_priority = hip::Stream::Priority::Low;
         for (const auto& child_seg : child->segments_)
@@ -1239,9 +1243,9 @@ void Graph::clone(Graph* newGraph, bool cloneNodes) const {
 }
 
 // ================================================================================================
-Graph* Graph::clone() const {
+Graph* Graph::clone(bool cloneNodes) const {
   Graph* newGraph = new Graph(getCurrentDevice());
-  clone(newGraph);
+  clone(newGraph, cloneNodes);
   return newGraph;
 }
 
@@ -3302,7 +3306,10 @@ GraphExecBase::ResolvedExecNode GraphExecBase::ResolveClonedNode(Node node) {
   }
   // Depth >= 1: the node may live inside a child graph. Its parent graph is then the
   // caller-visible ChildGraphNode; resolve that one level up, then translate within it.
-  auto* parentChildNode = dynamic_cast<ChildGraphNode*>(node->GetParentGraph());
+  // The node's parent graph is the storage of a child graph node; the back-pointer maps it
+  // to that node without RTTI.
+  auto* parentGraph = node->GetParentGraph();
+  auto* parentChildNode = (parentGraph != nullptr) ? parentGraph->GetOwningNode() : nullptr;
   if (parentChildNode == nullptr) {
     return {};  // not a member of any child graph -> not part of this exec
   }
@@ -3372,7 +3379,7 @@ hipError_t Graph::RunOneNode(Node node) {
   }
   if (node->GetType() == hipGraphNodeTypeGraph) {
     // Process child graph separately, since there is no connection
-    auto child = reinterpret_cast<hip::ChildGraphNode*>(node)->GetChildGraph();
+    auto child = static_cast<hip::Graph*>(reinterpret_cast<hip::ChildGraphNode*>(node));
     if (!reinterpret_cast<hip::ChildGraphNode*>(node)->GetGraphCaptureStatus()) {
       auto status = child->RunNodes(node->stream_id_, &streams_, &waitList);
       if (status != hipSuccess) {
