@@ -165,6 +165,11 @@ struct rcclArchThresholds {
   size_t rsRingLL128MaxPerRank1B; // or this (1-byte types)
   size_t rsRingSimpleCappedMaxPerRank;  // Ring Simple ReduceScatter above the LL128 band,
   int rsRingSimpleCappedChannels;       // up to this per rank, runs on at most this many channels
+                                        // (DDA LL128 takes those shards on at most a quarter more blocks)
+
+  // DDA ReduceScatter LL128 from rankScaledMinRanks ranks: shards up to this per rank start at 128-thread blocks
+  // while LL is on, larger ones run the blocks 512 threads would take at 256 threads. 0 = 512 threads throughout.
+  size_t rsDdaLL128NarrowMaxPerRank;
 
   // Force CE-Scratch for unregistered AllGather / AlltoAll / Gather / Scatter
   // whenever the receive fits ddaScratch, on top of the ceNonRegMin/Max window.

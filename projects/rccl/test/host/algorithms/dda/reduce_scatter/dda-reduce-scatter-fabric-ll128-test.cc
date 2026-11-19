@@ -12,6 +12,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <string>
 #include <vector>
@@ -53,6 +54,18 @@ class DdaReduceScatterFabricLL128Microtest : public ::testing::Test {
     };
     // The LL128 tier is off without an arch table; give it a cap well above anything tested.
     g_rcclDdaLL128Threshold = [](const ncclComm*, ncclFunc_t) { return size_t{1} << 30; };
+    // LL at the table's 4 MiB cap, as on gfx1250 SPX, so the shards it ran get narrow blocks.
+    SetLLThreshold(size_t{4} << 20);
+    // The launch-shape entries of the gfx1250 SPX table, on one node.
+    comm().nNodes = 1;
+    table_.ddaLLMax[ncclFuncReduceScatter] = size_t{4} << 20;
+    table_.rsRingLL128MaxPerRank1B = size_t{32} << 20;
+    table_.rankScaledMinRanks = 8;
+    table_.rsRingLL128MaxPerRank = size_t{8} << 20;
+    table_.rsRingSimpleCappedMaxPerRank = size_t{32} << 20;
+    table_.rsRingSimpleCappedChannels = 128;
+    table_.rsDdaLL128NarrowMaxPerRank = size_t{1} << 20;
+    comm().archThresholds = &table_;
     comm().rank = 7;
     comm().addonStopEvent = kStopEvent;
   }
@@ -64,6 +77,14 @@ class DdaReduceScatterFabricLL128Microtest : public ::testing::Test {
   }
 
   ncclComm& comm() { return mock_.comm; }
+
+  // The ReduceScatter LL cap the launcher sees.
+  void SetLLThreshold(size_t cap) {
+    g_rcclDdaLLThreshold = [cap](const ncclComm*, ncclFunc_t func) {
+      EXPECT_EQ(func, ncclFuncReduceScatter);
+      return cap;
+    };
+  }
 
   bool Eligible(size_t recvcount, ncclDataType_t datatype = ncclFloat32, ncclRedOp_t op = ncclSum) {
     return ncclReduceScatterDdaFabricLL128Eligible(mock_.get(), kSendbuff, kRecvbuff, recvcount, datatype, op);
@@ -99,6 +120,7 @@ class DdaReduceScatterFabricLL128Microtest : public ::testing::Test {
 
   DdaFabricMockComm mock_;
   std::map<std::string, int64_t> params_;
+  rcclArchThresholds table_{};
 };
 
 TEST_F(DdaReduceScatterFabricLL128Microtest, Eligible_BaselineFp32Sum) {
@@ -231,7 +253,7 @@ TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_EachDatatypeLaunchesItsOwnKe
 
 TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_TakesTheStopEventOnTheStream) {
   const DdaLaunch& launch = RunOne(4);
-  EXPECT_EQ(launch.block.x, 512u);
+  EXPECT_EQ(launch.block.x, 128u);
   EXPECT_EQ(launch.stream, kStream);
   EXPECT_EQ(launch.startEvent, nullptr);
   EXPECT_EQ(launch.stopEvent, kStopEvent);
@@ -254,22 +276,79 @@ TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_FourAndEightRanksUnrolledOth
   }
 }
 
-// 512 threads are 16 warps, one slice each: a block per 16 slices of the shard.
+// One warp per slice. From the table's rankScaledMinRanks, a shard up to rsDdaLL128NarrowMaxPerRank that LL ran
+// runs 128-thread blocks (4 warps) until ddaFabricMaxBlocks blocks are full, then 256 and 512; a larger shard keeps
+// the blocks 512 threads take but runs 256, and one Ring Simple runs on capped channels gets at most a quarter more
+// of them. Smaller comms, comms without a table and tables without the entry run 512-thread blocks.
 TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_GridFollowsShardSlicesWithinCaps) {
-  EXPECT_EQ(RunOne(8, ncclFloat16).grid.x, 1u);
-  EXPECT_EQ(RunOne(16 * kSliceFloats).grid.x, 1u);
-  EXPECT_EQ(RunOne(16 * kSliceFloats + 4).grid.x, 2u);
-  EXPECT_EQ(RunOne(32 * kSliceFloats, ncclBfloat16).grid.x, 1u);
-  EXPECT_EQ(RunOne(16 * 100 * kSliceFloats).grid.x, 100u);
+  auto shape = [&](size_t count, ncclDataType_t type = ncclFloat32) {
+    const DdaLaunch& launch = RunOne(count, type);
+    return std::make_pair(launch.grid.x, launch.block.x);
+  };
+  using Shape = std::pair<unsigned, unsigned>;
+  constexpr size_t kMiBFloats = (size_t{1} << 20) / sizeof(float);
+  ASSERT_EQ(comm().nRanks, 8);
+  ASSERT_EQ(comm().ddaFabricMaxBlocks, 256);
+  EXPECT_EQ(shape(8, ncclFloat16), Shape(1u, 128u));
+  EXPECT_EQ(shape(4 * kSliceFloats), Shape(1u, 128u));
+  EXPECT_EQ(shape(4 * kSliceFloats + 4), Shape(2u, 128u));
+  EXPECT_EQ(shape(8 * kSliceFloats, ncclBfloat16), Shape(1u, 128u));
+  EXPECT_EQ(shape(100 * kSliceFloats), Shape(25u, 128u));
+  EXPECT_EQ(shape(kMiBFloats), Shape(137u, 128u)) << "a 1 MiB shard, 547 slices";
+  EXPECT_EQ(shape(547 * kSliceFloats), Shape(35u, 256u)) << "past 1 MiB: the blocks 512 threads take, at 256";
+  EXPECT_EQ(shape(600 * kSliceFloats), Shape(38u, 256u));
   comm().ddaFabricMaxBlocks = 6;
-  EXPECT_EQ(RunOne(16 * 100 * kSliceFloats).grid.x, 6u);
+  EXPECT_EQ(shape(24 * kSliceFloats), Shape(6u, 128u));
+  EXPECT_EQ(shape(25 * kSliceFloats), Shape(4u, 256u));
+  EXPECT_EQ(shape(49 * kSliceFloats), Shape(4u, 512u));
+  EXPECT_EQ(shape(1600 * kSliceFloats), Shape(6u, 256u));
+  EXPECT_EQ(shape(4370 * kSliceFloats), Shape(6u, 256u)) << "the grid budget below the Ring limit still holds";
   comm().ddaFabricMaxBlocks = 0;
-  EXPECT_EQ(RunOne(16 * 100 * kSliceFloats).grid.x, 1u);
+  EXPECT_EQ(shape(1600 * kSliceFloats), Shape(1u, 256u));
   comm().ddaFabricMaxBlocks = 256;
   comm().ddaLLEpochLen = 9;
-  EXPECT_EQ(RunOne(16 * 100 * kSliceFloats).grid.x, 9u);
+  EXPECT_EQ(shape(1600 * kSliceFloats), Shape(9u, 256u));
   comm().ddaLLEpochLen = 0;
-  EXPECT_EQ(RunOne(16 * 100 * kSliceFloats).grid.x, 1u);
+  EXPECT_EQ(shape(1600 * kSliceFloats), Shape(1u, 256u));
+  comm().ddaLLEpochLen = 256;
+  EXPECT_EQ(shape(8 * kMiBFloats), Shape(256u, 256u)) << "an 8 MiB shard Ring ran on LL128: no Ring limit";
+  EXPECT_EQ(shape(4370 * kSliceFloats), Shape(160u, 256u)) << "past 8 MiB: 128 Ring channels and a quarter";
+  EXPECT_EQ(shape(32 * kMiBFloats), Shape(160u, 256u)) << "a 32 MiB shard is still within the capped band";
+  EXPECT_EQ(shape(17477 * kSliceFloats), Shape(256u, 256u)) << "past 32 MiB Ring Simple is not capped";
+  EXPECT_EQ(shape(64 * kMiBFloats, ncclFloat8e4m3), Shape(256u, 256u)) << "1-byte types: Ring LL128 to 32 MiB";
+  table_.rsRingLL128MaxPerRank1B = 0;
+  EXPECT_EQ(shape(64 * kMiBFloats, ncclFloat8e4m3), Shape(160u, 256u)) << "no 1-byte entry: the 2/4-byte band";
+  table_.rsRingLL128MaxPerRank1B = size_t{32} << 20;
+  comm().nNodes = 2;
+  EXPECT_EQ(shape(4370 * kSliceFloats), Shape(256u, 256u)) << "Ring caps channels on one node only";
+  comm().nNodes = 1;
+  comm().nRanks = 16;
+  EXPECT_EQ(shape(kMiBFloats), Shape(137u, 128u));
+  EXPECT_EQ(shape(547 * kSliceFloats), Shape(35u, 256u));
+  EXPECT_EQ(shape(4370 * kSliceFloats), Shape(160u, 256u));
+  comm().nRanks = 8;
+  // Shards LL did not run keep full width: LL off, LL below the table's cap, or LL's bank past the scratch.
+  SetLLThreshold(0);
+  EXPECT_EQ(shape(kMiBFloats), Shape(35u, 512u)) << "LL off";
+  EXPECT_EQ(shape(547 * kSliceFloats), Shape(35u, 256u));
+  SetLLThreshold(size_t{1} << 20);
+  EXPECT_EQ(shape(kMiBFloats), Shape(35u, 512u)) << "LL lowered to 1 MiB";
+  SetLLThreshold(size_t{4} << 20);
+  comm().ddaScratchBytes = 2 * dda::common::ddaLLRsBankBytes(8) - 128;
+  EXPECT_EQ(shape(4 * kSliceFloats), Shape(1u, 512u)) << "LL's bank does not fit";
+  comm().ddaScratchBytes = std::numeric_limits<size_t>::max();
+  table_.rsDdaLL128NarrowMaxPerRank = 0;
+  EXPECT_EQ(shape(kMiBFloats), Shape(35u, 512u)) << "a table without the entry keeps 512 threads";
+  EXPECT_EQ(shape(1600 * kSliceFloats), Shape(100u, 512u));
+  table_.rsDdaLL128NarrowMaxPerRank = size_t{1} << 20;
+  comm().nRanks = 7;
+  EXPECT_EQ(shape(4 * kSliceFloats), Shape(1u, 512u)) << "below rankScaledMinRanks every shard keeps 512 threads";
+  EXPECT_EQ(shape(1600 * kSliceFloats), Shape(100u, 512u));
+  EXPECT_EQ(shape(4370 * kSliceFloats), Shape(256u, 512u)) << "and no Ring limit";
+  comm().nRanks = 8;
+  comm().archThresholds = nullptr;
+  EXPECT_EQ(shape(100 * kSliceFloats), Shape(7u, 512u)) << "no table: 512 threads";
+  EXPECT_EQ(shape(4370 * kSliceFloats), Shape(256u, 512u));
 }
 
 TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_LaunchErrorIsReported) {
