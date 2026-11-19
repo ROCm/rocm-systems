@@ -13,6 +13,43 @@
 
 namespace rocjitsu::amdgpu::arith {
 
+// GFX11.5 interpolation is one mixed FMA with fixed quad broadcasts. Reuse
+// the GFX11 exact kernel for NaN priority, guest rounding, and packed writes.
+// VINTERP never raises FP exceptions, including under the strictest policy.
+template <bool P2, bool Half, bool Rtz, typename Mask>
+inline int gfx115_interp(uint64_t flags, Mask exec, uint64_t modifiers, uint32_t *const *dst,
+                         const uint32_t *const *coefficient_lanes,
+                         const uint32_t *const *coordinate, const uint32_t *const *addend_lanes) {
+  constexpr unsigned width = sizeof(Mask) * 8;
+  std::array<uint32_t, width> coefficient{}, addend{};
+  for (Mask active = exec; active; active &= active - 1) {
+    const unsigned lane = std::countr_zero(active);
+    const unsigned quad = lane & ~3u;
+    coefficient[lane] = coefficient_lanes[0][quad + (P2 ? 2 : 1)];
+    addend[lane] = addend_lanes[0][P2 ? lane : quad];
+  }
+  const uint32_t *coefficient_data = coefficient.data();
+  const uint32_t *addend_data = addend.data();
+  flags = (flags & ~RJ_ARITH_SEMANTICS_MASK) | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS;
+  if constexpr (Rtz)
+    flags = (flags & ~RJ_ARITH_FP_ROUND_MASK) | RJ_ARITH_FP_ROUND_ZERO;
+  if constexpr (Half)
+    modifiers |= RJ_ARITH_MIX_F16_A | (P2 ? 0 : RJ_ARITH_MIX_F16_C);
+  const bool high = modifiers & RJ_ARITH_ALU_HIGH_D;
+  modifiers &= ~RJ_ARITH_ALU_HIGH_D;
+  if constexpr (width == 32) {
+    const auto fma = Half && P2
+                         ? (high ? rj_arith_v_fma_mixhi_f16_w32 : rj_arith_v_fma_mixlo_f16_w32)
+                         : rj_arith_v_fma_mix_f32_w32;
+    return fma(flags, exec, modifiers, dst, &coefficient_data, coordinate, &addend_data, nullptr);
+  } else {
+    const auto fma = Half && P2
+                         ? (high ? rj_arith_v_fma_mixhi_f16_w64 : rj_arith_v_fma_mixlo_f16_w64)
+                         : rj_arith_v_fma_mix_f32_w64;
+    return fma(flags, exec, modifiers, dst, &coefficient_data, coordinate, &addend_data, nullptr);
+  }
+}
+
 // Observe the quad-broadcast source lanes even when they are inactive in EXEC.
 // Acquire every input before writes, and preserve the other half for FP16 P2.
 // Interpolation uses guest FP controls and has no FP-status output.
@@ -27,10 +64,11 @@ inline void execute_interp(Wavefront &wave, Wave32 wave32, Wave64 wave64, uint64
       (exec_mask | (exec_mask >> 1) | (exec_mask >> 2) | (exec_mask >> 3)) & 0x1111111111111111ULL;
   if (Half && wave.fp16_ovfl())
     flags |= RJ_ARITH_FP16_OVFL;
-  const bool rdna3 = wave.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3;
-  if (!rdna3 || wave.ieee_mode())
+  const bool guest_controls = wave.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 ||
+                              wave.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5;
+  if (!guest_controls || wave.ieee_mode())
     flags |= RJ_ARITH_FP_IEEE_MODE;
-  if (rdna3 && !wave.dx10_clamp())
+  if (guest_controls && !wave.dx10_clamp())
     flags |= RJ_ARITH_FP_DX10_CLAMP_OFF;
   const auto denorm32 = wave.fp_denorm_mode_f32();
   const auto denorm16 = wave.fp_denorm_mode_f16_f64();
