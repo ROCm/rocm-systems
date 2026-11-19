@@ -832,6 +832,22 @@ TEST_F(NetIbP2pMicrotest, Iflush_GpuScratchPostsWriteBeforeRead) {
   EXPECT_NE(posted[1].sendFlags & IBV_SEND_SIGNALED, 0);
 }
 
+TEST_F(NetIbP2pMicrotest, Iflush_GpuScratchWriteIsPostedInline) {
+  FlushRecvComm flush(66, /*withScratch=*/true);
+  void* data[] = {reinterpret_cast<void*>(0x8500)};
+  int sizes[] = {4};
+  void* handles[] = {&flush.handle};
+  void* request = nullptr;
+
+  ASSERT_EQ(ncclIbIflush(&flush.comm, 1, data, sizes, handles, &request), ncclSuccess);
+  const auto& posted = flush.verbs.posted;
+  ASSERT_EQ(posted.size(), 2u);
+  ASSERT_EQ(posted[0].opcode, IBV_WR_RDMA_WRITE);
+  // Without inline the NIC DMA-reads the payload from host memory before the write, lengthening every flush.
+  EXPECT_NE(posted[0].sendFlags & IBV_SEND_INLINE, 0);
+  EXPECT_EQ(posted[0].sendFlags & IBV_SEND_SIGNALED, 0);
+}
+
 TEST_F(NetIbP2pMicrotest, Iflush_RelaxedOrderingFenceOffReadsLastReceiveDespiteScratch) {
   FlushRecvComm flush(65, /*withScratch=*/true);
   ScopedHook params(g_loadParam, [](const char* name, int64_t fallback) {
