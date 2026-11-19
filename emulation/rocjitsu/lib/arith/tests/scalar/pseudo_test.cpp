@@ -174,21 +174,33 @@ void check_captured_scalar(Call call, const CapturedScalar (&lanes)[N]) {
   }
 }
 
-// gfx1201 (RX 9070 XT, rj-valu-audit-local hw v_s_exp_f16__*, 2026-11-05), dispatch MODE.
+// gfx1201 (RX 9070 XT, rj-valu-audit-local hw v_s_exp_f16__*, 2026-11-05; the 0xcd11 rows from
+// an R9700 run on 2026-11-19), dispatch MODE.
 // FP16_OVFL saturates an overflowing result to 65504; +/-infinity and NaN inputs pass through;
-// a tiny result is flushed only with output denormals flushed (mode 0x0) and otherwise kept as
+// a tiny result is flushed only with output denormals flushed and otherwise kept as
 // a denormal; div:2 flushes a tiny result to +0; CLAMP maps results above 1 to 1.0. A kernel that
 // returns infinity under FP16_OVFL or skips the denormal result fails these rows.
+//
+// The flushing rows use 0xcd11, whose unflushed result is the nonzero subnormal 0x000d: the
+// 0xd0e3 and 0xdbac rows below round to +0 before either stage, so they hold whether or not
+// output flushing and the pre-scale flush run. Keeping one input across the four cases isolates
+// each stage: output flushing alone gives zero, flushing the input instead does not, and with
+// denormals kept div:2 still gives zero, where ordinary FP16 halving would give 0x0006.
 const CapturedScalar exp_f16_lanes[] = {
     {"OvflSaturatesMaxInput", 0, 0x8000f0, 0x55e27bff, 0x7bff},
     {"OvflSaturates1024", 0, 0x8000f0, 0x73846400, 0x7bff},
     {"PositiveInfinity", 0, 0xf0, 0x213c7c00, 0x7c00},
     {"NegativeInfinityGivesZero", 0, 0xf0, 0x65befc00, 0x0},
     {"QuietNan", 0, 0xf0, 0xda8c7e00, 0x7e00},
-    {"TinyResultFlushed", 0, 0x0, 0x099cd0e3, 0x0},
+    {"FarBelowSubnormalFlushed", 0, 0x0, 0x099cd0e3, 0x0},
     {"TinyResultKept", 0, 0xf0, 0xbd36cd11, 0xd},
+    {"TinyResultOutputFlushed", 0, 0x70, 0x0000cd11, 0x0},
+    {"TinyResultKeptWithInputFlushed", 0, 0xb0, 0x0000cd11, 0xd},
+    {"TinyResultBothFlushed", 0, 0x00, 0x0000cd11, 0x0},
+    {"Div2TinyKeptFlushes", RJ_ARITH_ALU_OMOD_HALF, 0xf0, 0x0000cd11, 0x0},
+    {"Mul2TinyKeptFlushes", RJ_ARITH_ALU_OMOD_2, 0xf0, 0x0000cd11, 0x0},
     {"TinyResultKeptLarger", 0, 0xf0, 0xba0dcbad, 0x191},
-    {"Div2TinyFlushes", RJ_ARITH_ALU_OMOD_HALF, 0xf0, 0x95fadbac, 0x0},
+    {"Div2FarBelowSubnormalFlushes", RJ_ARITH_ALU_OMOD_HALF, 0xf0, 0x95fadbac, 0x0},
     {"Div2Halves", RJ_ARITH_ALU_OMOD_HALF, 0xf0, 0x6813ca63, 0x4ae},
     {"ClampAboveOne", RJ_ARITH_ALU_CLAMP, 0xf0, 0xfea73c00, 0x3c00},
     {"ClampNearOne", RJ_ARITH_ALU_CLAMP, 0xf0, 0x89c40400, 0x3c00},
