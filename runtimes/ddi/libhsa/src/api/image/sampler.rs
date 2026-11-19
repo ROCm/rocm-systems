@@ -5,7 +5,7 @@
 
 use crate::ffi::*;
 use crate::image::{create_sampler, destroy_sampler};
-use crate::runtime::boundary;
+use crate::status::boundary;
 
 #[cfg_attr(
     all(hsa_tool_dispatch, not(test)),

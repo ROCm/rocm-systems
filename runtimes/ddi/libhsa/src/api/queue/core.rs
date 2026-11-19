@@ -7,10 +7,12 @@ use std::ffi::c_void;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::callback_arg::CallbackArg;
+use crate::events::CallbackScope;
 use crate::ffi::*;
+use crate::lifecycle::{initialized_mut, lock};
 use crate::queue::*;
-use crate::runtime::{CallbackScope, boundary, initialized_mut, lock, map_error};
 use crate::signal::AsyncCopyClock;
+use crate::status::{boundary, map_error};
 use rocddi::device::gpu::queue::{AqlControlRegion, QueueRingMemory, SdmaEngineSelection};
 
 #[cfg_attr(
@@ -100,7 +102,7 @@ pub unsafe extern "C" fn hsa_amd_counted_queue_acquire(
             if queue_type != QUEUE_TYPE_MULTI {
                 return INVALID_QUEUE_CREATION;
             }
-            if runtime.gpu_index(agent).is_none() {
+            if runtime.agents.gpu_index(agent).is_none() {
                 return INVALID_AGENT;
             }
             if runtime.queue_state.counted_queues.try_reserve(1).is_err()
@@ -326,7 +328,9 @@ pub unsafe extern "C" fn hsa_soft_queue_create(
         let pool = HsaMemoryPool {
             handle: region.handle,
         };
-        if runtime.decode_cpu_pool(pool).is_none() && runtime.decode_gpu_pool(pool).is_none() {
+        if runtime.agents.decode_cpu_pool(pool).is_none()
+            && runtime.agents.decode_gpu_pool(pool).is_none()
+        {
             return INVALID_REGION;
         }
         if !runtime.signal_state.owns_signal(doorbell_signal) {
@@ -422,7 +426,7 @@ pub(crate) unsafe fn create_amd_queues(
             let Some(runtime) = guard.as_ref() else {
                 return NOT_INITIALIZED;
             };
-            if runtime.gpu_index(agent).is_none() {
+            if runtime.agents.gpu_index(agent).is_none() {
                 return INVALID_AGENT;
             }
             let Some(generation) = guard.active_generation() else {
@@ -628,10 +632,10 @@ pub unsafe extern "C" fn hsa_amd_queue_cu_set_mask(
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        if counted_pool_key(runtime, queue).is_some() {
+        if counted_pool_key(&runtime.queue_state, queue).is_some() {
             return INVALID_QUEUE;
         }
-        let Some(hardware_key) = hardware_queue_key(runtime, queue) else {
+        let Some(hardware_key) = hardware_queue_key(&runtime.queue_state, queue) else {
             return INVALID_QUEUE;
         };
         if bit_count % 32 != 0 || (bit_count != 0 && mask.is_null()) {
@@ -645,11 +649,11 @@ pub unsafe extern "C" fn hsa_amd_queue_cu_set_mask(
         else {
             return INVALID_QUEUE;
         };
-        let Some(gpu_index) = runtime.gpu_index(agent) else {
+        let Some(gpu_index) = runtime.agents.gpu_index(agent) else {
             return INVALID_QUEUE;
         };
         let selected = if bit_count == 0 {
-            let compute_units = runtime.gpus[gpu_index].info().compute_unit_count;
+            let compute_units = runtime.agents.gpus[gpu_index].info().compute_unit_count;
             full_cu_mask(compute_units)
         } else {
             // SAFETY: The ABI requires bit_count / 32 readable words. Own them
@@ -660,8 +664,8 @@ pub unsafe extern "C" fn hsa_amd_queue_cu_set_mask(
             }
         };
         let (selected, clipped) = match crate::queue::constrain_cu_mask(
-            &runtime.gpus[gpu_index].info(),
-            runtime.gpus[gpu_index].global_cu_mask.as_deref(),
+            &runtime.agents.gpus[gpu_index].info(),
+            runtime.agents.gpus[gpu_index].global_cu_mask.as_deref(),
             Some(&selected),
         ) {
             Ok(result) => result,
@@ -702,7 +706,7 @@ pub unsafe extern "C" fn hsa_amd_queue_cu_get_mask(
         if mask.is_null() {
             return INVALID_ARGUMENT;
         }
-        let Some(hardware_key) = hardware_queue_key(runtime, queue) else {
+        let Some(hardware_key) = hardware_queue_key(&runtime.queue_state, queue) else {
             return INVALID_QUEUE;
         };
         if bit_count == 0 || bit_count % 32 != 0 {
@@ -711,11 +715,11 @@ pub unsafe extern "C" fn hsa_amd_queue_cu_get_mask(
         let Some(record) = runtime.queue_state.queues.get(&hardware_key) else {
             return INVALID_QUEUE;
         };
-        let Some(gpu_index) = runtime.gpu_index(record.agent) else {
+        let Some(gpu_index) = runtime.agents.gpu_index(record.agent) else {
             return INVALID_QUEUE;
         };
         let enabled = if record.cu_mask.is_empty() {
-            full_cu_mask(runtime.gpus[gpu_index].info().compute_unit_count)
+            full_cu_mask(runtime.agents.gpus[gpu_index].info().compute_unit_count)
         } else {
             record.cu_mask.clone()
         };
@@ -758,10 +762,10 @@ pub unsafe extern "C" fn hsa_amd_queue_set_priority(queue: *mut HsaQueue, priori
             // This entry point applies only to compute queues.
             return INVALID_QUEUE;
         }
-        if counted_pool_key(runtime, queue).is_some() {
+        if counted_pool_key(&runtime.queue_state, queue).is_some() {
             return INVALID_QUEUE;
         }
-        let Some(hardware_key) = hardware_queue_key(runtime, queue) else {
+        let Some(hardware_key) = hardware_queue_key(&runtime.queue_state, queue) else {
             return INVALID_QUEUE;
         };
         let Some(priority) = queue_priority(priority) else {
@@ -902,10 +906,10 @@ pub unsafe extern "C" fn hsa_amd_profiling_set_profiler_enabled(
             Some(runtime) => runtime,
             None => return NOT_INITIALIZED,
         };
-        if !queue_known(runtime, queue) {
+        if !queue_known(&runtime.queue_state, queue) {
             return INVALID_QUEUE;
         }
-        let queue = hardware_queue_key(runtime, queue).unwrap_or(queue as usize);
+        let queue = hardware_queue_key(&runtime.queue_state, queue).unwrap_or(queue as usize);
         // SAFETY: Queue validation proves the public control mapping is live.
         let properties = unsafe {
             let address = AqlControlRegion::properties_address_at(queue);
@@ -1068,7 +1072,7 @@ pub unsafe extern "C" fn hsa_amd_queue_signal_external_semaphore(
         if semaphore.handle == 0 {
             return INVALID_ARGUMENT;
         }
-        if hardware_queue_key(runtime, queue).is_none() {
+        if hardware_queue_key(&runtime.queue_state, queue).is_none() {
             return INVALID_QUEUE;
         }
         NOT_SUPPORTED
@@ -1100,7 +1104,7 @@ pub unsafe extern "C" fn hsa_amd_queue_wait_external_semaphore(
         if semaphore.handle == 0 {
             return INVALID_ARGUMENT;
         }
-        if hardware_queue_key(runtime, queue).is_none() {
+        if hardware_queue_key(&runtime.queue_state, queue).is_none() {
             return INVALID_QUEUE;
         }
         NOT_SUPPORTED
@@ -1131,7 +1135,7 @@ pub unsafe extern "C" fn hsa_amd_profiling_get_dispatch_time(
                 Some(runtime) => runtime,
                 None => return NOT_INITIALIZED,
             };
-            let Some(index) = runtime.gpu_index(agent) else {
+            let Some(index) = runtime.agents.gpu_index(agent) else {
                 return INVALID_AGENT;
             };
             if !runtime.signal_state.owns_signal(signal) {
@@ -1149,12 +1153,12 @@ pub unsafe extern "C" fn hsa_amd_profiling_get_dispatch_time(
             }) else {
                 return INVALID_SIGNAL;
             };
-            let Some(token) = runtime.inflight.enter() else {
+            let Some(token) = runtime.control.inflight.enter() else {
                 return OUT_OF_RESOURCES;
             };
-            (runtime.gpus[index].device.clone(), token, start, end)
+            (runtime.agents.gpus[index].device.clone(), token, start, end)
         };
-        let (start, end) = match crate::runtime::translate_gpu_interval(&device, start, end) {
+        let (start, end) = match crate::clock::translate_gpu_interval(&device, start, end) {
             Ok(interval) => interval,
             Err(status) => return status,
         };
@@ -1206,10 +1210,10 @@ pub unsafe extern "C" fn hsa_amd_profiling_get_async_copy_time(
             let device = match profile.clock {
                 AsyncCopyClock::System => None,
                 AsyncCopyClock::Gpu(index) => {
-                    let Some(gpu) = runtime.gpus.get(index) else {
+                    let Some(gpu) = runtime.agents.gpus.get(index) else {
                         return ERROR;
                     };
-                    let Some(token) = runtime.inflight.enter() else {
+                    let Some(token) = runtime.control.inflight.enter() else {
                         return OUT_OF_RESOURCES;
                     };
                     Some((gpu.device.clone(), token))
@@ -1218,7 +1222,7 @@ pub unsafe extern "C" fn hsa_amd_profiling_get_async_copy_time(
             (profile, device)
         };
         let (start, end) = if let Some((device, _call)) = device {
-            match crate::runtime::translate_gpu_interval(&device, profile.start, profile.end) {
+            match crate::clock::translate_gpu_interval(&device, profile.start, profile.end) {
                 Ok(interval) => interval,
                 Err(status) => return status,
             }
