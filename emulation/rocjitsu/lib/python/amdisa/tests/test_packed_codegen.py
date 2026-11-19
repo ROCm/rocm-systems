@@ -1,9 +1,9 @@
+import pytest
+
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
 """Tests for packed execute code generation."""
-
-import pytest
 
 from amdisa.codegen.execute.packed import (
     gen_pk_binop,

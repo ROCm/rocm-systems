@@ -5,7 +5,10 @@
 // split VGPR layout, overlapping operands and inactive destination preservation.
 
 #include "compute_unit_test_util.h"
+#include "conversion_binding.h"
 #include "decode_test_util.h"
+#include "fp_reference.h"
+#include "rj_arith/rj_arith.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/execution_backend.h"
@@ -16,7 +19,6 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/execution_backend.h"
 #include "rocjitsu/isa/instruction.h"
@@ -39,22 +41,51 @@
 namespace rocjitsu::amdgpu {
 namespace {
 
-// Compare against the inherited raw conversion model, independently of dispatch.
+// Widening and integer destinations use independent standard arithmetic. FP64-to-FP32
+// checks decoder/API binding; its numerical rules have separate lib/arith conversion tests.
 uint64_t reference(int operation, uint64_t raw, const Wavefront &wave, unsigned omod, bool clamp,
                    bool absolute, bool negate) {
-  if (operation == 0) {
-    return conversion_to_float<conversion::I32, fp_format::F64>(wave, 0, 0, omod, clamp)(raw);
-  }
-  if (operation == 1) {
-    return conversion_to_float<conversion::U32, fp_format::F64>(wave, 0, 0, omod, clamp)(raw);
-  }
-  if (operation == 2) {
-    return conversion_to_float<fp_format::F32, fp_format::F64>(wave, absolute, negate, omod,
-                                                               clamp)(raw);
+  if (operation < 3) {
+    double value;
+    if (operation < 2) {
+      value =
+          operation == 0 ? double(std::bit_cast<int32_t>(uint32_t(raw))) : double(uint32_t(raw));
+    } else {
+      uint32_t bits =
+          (absolute ? uint32_t(raw) & 0x7fffffffU : uint32_t(raw)) ^ (negate ? 0x80000000U : 0);
+      if (!(wave.fp_denorm_mode_f32() & 1) && (bits & 0x7fffffffU) < 0x00800000U) {
+        bits &= 0x80000000U;
+      }
+      if ((bits & 0x7fffffffU) > 0x7f800000U) {
+        // Widen payload bits explicitly: an ordinary host cast would always quiet an sNaN.
+        uint64_t widened = (uint64_t(bits & 0x80000000U) << 32) | 0x7ff0000000000000ULL |
+                           (uint64_t(bits & 0x007fffffU) << 29);
+        if (wave.ieee_mode()) {
+          widened |= 0x0008000000000000ULL;
+        }
+        value = std::bit_cast<double>(widened);
+      } else {
+        value = double(std::bit_cast<float>(bits));
+      }
+    }
+    if (wave.ieee_mode() || (wave.fp_denorm_mode_f16_f64() & 2)) {
+      omod = 0;
+    }
+    // Every nonzero widened F32 or integer is normal in F64, including after OMOD.
+    return std::bit_cast<uint64_t>(rocjitsu::test::finish_floating(
+        value, {omod, wave.fp_round_mode_f16_f64(), clamp, wave.dx10_clamp()}));
   }
   if (operation == 3) {
-    return conversion_to_float<fp_format::F64, fp_format::F32>(wave, absolute, negate, omod,
-                                                               clamp)(raw);
+    // Build controls independently of the VM's flag translator. Scalar API evaluation
+    // also checks the decoded SIMD and Wave64 paths against the same public contract.
+    uint64_t flags = RJ_ARITH_SEMANTICS_COMPATIBILITY | (uint64_t(wave.fp_round_mode_f32()) << 24);
+    flags |= wave.ieee_mode() ? RJ_ARITH_FP_IEEE_MODE : 0;
+    flags |= wave.dx10_clamp() ? 0 : RJ_ARITH_FP_DX10_CLAMP_OFF;
+    flags |= (wave.fp_denorm_mode_f16_f64() & 1) ? 0 : RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+    flags |= (wave.fp_denorm_mode_f32() & 2) ? 0 : RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+    uint64_t modifiers = (uint64_t(omod) << 6) | (clamp ? RJ_ARITH_ALU_CLAMP : 0) |
+                         (absolute ? RJ_ARITH_ALU_ABS_A : 0) | (negate ? RJ_ARITH_ALU_NEG_A : 0);
+    return rocjitsu::test::conversion_binding(rj_arith_v_cvt_f32_f64_w32, flags, modifiers, raw);
   }
   raw = (absolute ? raw & 0x7fffffffffffffffULL : raw) ^ (negate ? 0x8000000000000000ULL : 0);
   const double x = std::bit_cast<double>(raw);
@@ -205,7 +236,8 @@ TEST(OlderConversion64, Arithmetic) {
           const auto base = wave->vgpr_alloc().base;
           std::minstd_rand random;
           const auto word = [&]() {
-            return (uint32_t(random() >> 15) << 16) | uint32_t(random() >> 15);
+            const uint32_t high = uint32_t(random() >> 15);
+            return (high << 16) | uint32_t(random() >> 15);
           };
           std::array<uint64_t, 64> input64{};
           std::array<uint32_t, 64> input32{};

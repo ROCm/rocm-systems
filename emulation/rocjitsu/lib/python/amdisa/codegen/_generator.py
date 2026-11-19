@@ -18761,13 +18761,6 @@ class CodeGenerator:
                         'ENC_VOPC',
                     }
                 )
-                if enc.enc_name.upper() in _VOP_ENC_NAMES:
-                    cpp_includes.append(
-                        (
-                            'rocjitsu/isa/arch/amdgpu/shared/transcendental.h',
-                            False,
-                        )
-                    )
                 uses_register_access = any(
                     'RegisterAccess' in str(impl)
                     for impl in class_func_impls.model + class_func_impls.execution
@@ -19830,7 +19823,6 @@ class CodeGenerator:
             '#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/scalar_f16_source.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"',
-            '#include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/lds_direct.h"',
