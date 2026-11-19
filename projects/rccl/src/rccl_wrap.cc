@@ -813,9 +813,7 @@ static ncclResult_t rcclRingFallback(struct ncclComm* comm, const void* sendbuff
                                      size_t count, ncclDataType_t datatype, bool query,
                                      struct rcclCollDecision* decision, uint32_t* threadsPerBlock);
 
-// Decisions that still run when a collective is diverted to ncclEnqueueCheck: the
-// planner's own kernels, the symmetric kernel and CE (enqueue.cc honors info->decision),
-// and the setups collectives.cc runs before enqueue (rcclEnqueueSetupNeedsSwitch).
+// Decisions that still run when collectives.cc diverts a call to ncclEnqueueCheck.
 static bool rcclEnqueueRunsDecision(int algo) {
   if (algo < NCCL_NUM_ALGORITHMS || rcclEnqueueSetupNeedsSwitch(algo)) return true;
   switch (algo) {
@@ -857,10 +855,7 @@ ncclResult_t rcclGetCollImplInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_
       NCCLCHECK(rcclSelectAlltoAll(comm, sendbuff, recvbuff, (size_t)count, dataType, /*stream=*/nullptr,
                                    /*query=*/true, /*graphCapturingHint=*/capturing, &decision));
     }
-    // Check mode diverts to ncclEnqueueCheck (collectives.cc), which runs the planner's plain kernel for
-    // every backend it does not honor; report that kernel instead. Not rcclGetAlgoInfo: it would pick
-    // hierarchical or Direct AllGather again, which the divert skips. Suspended and revoked comms divert
-    // too, but ncclEnqueueCheck rejects them before planning, so nothing runs to report.
+    // Check mode plans the plain kernel for backends ncclEnqueueCheck ignores; suspended/revoked comms never plan.
     const bool divertPlans = comm->checkMode != ncclCheckModeDefault &&
                              !__atomic_load_n(&comm->revokedFlag, __ATOMIC_ACQUIRE) && !ncclCommIsSuspended(comm);
     if (divertPlans && !rcclEnqueueRunsDecision(decision.algo)) {
