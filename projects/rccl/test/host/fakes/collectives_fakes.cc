@@ -23,6 +23,7 @@
 #include "signature-drift.h"
 
 ASSERT_HOOK_MATCHES_PROD(g_collectiveMustUseEnqueuePath, rcclCollectiveMustUseEnqueuePath);
+ASSERT_HOOK_MATCHES_PROD(g_commIsSuspended, ncclCommIsSuspended);
 
 // Algorithm/protocol name tables. Passed to the RCCL tuning override hooks and
 // logged through.
@@ -110,3 +111,6 @@ std::function<bool(struct ncclComm*)> g_collectiveMustUseEnqueuePath = [](struct
 bool rcclCollectiveMustUseEnqueuePath(struct ncclComm* comm) {
   return g_collectiveMustUseEnqueuePath(comm);
 }
+
+std::function<bool(struct ncclComm*)> g_commIsSuspended = [](struct ncclComm*) { return false; };
+bool ncclCommIsSuspended(struct ncclComm* comm) { return g_commIsSuspended(comm); }
