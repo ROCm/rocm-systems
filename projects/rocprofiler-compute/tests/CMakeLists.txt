@@ -103,6 +103,14 @@ set_target_properties(
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/tests
 )
 
+set(MINI_NBODY_BLOCK_SOURCES ../sample/mini-nbody-block.cpp)
+set_source_files_properties(${MINI_NBODY_BLOCK_SOURCES} PROPERTIES LANGUAGE HIP)
+add_executable(mini-nbody-block ${MINI_NBODY_BLOCK_SOURCES})
+set_target_properties(
+    mini-nbody-block
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/tests
+)
+
 add_custom_target(
     simple_net
     ALL
@@ -122,10 +130,10 @@ add_custom_target(
 )
 
 add_custom_target(
-    torch_compile_triton
+    torch_triton_net
     ALL
     COMMAND
-        ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/sample/torch_compile_triton.py
-        ${CMAKE_SOURCE_DIR}/tests/torch_compile_triton.py
-    COMMENT "Copying torch_compile_triton.py to tests directory"
+        ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/sample/torch_triton_net.py
+        ${CMAKE_SOURCE_DIR}/tests/torch_triton_net.py
+    COMMENT "Copying torch_triton_net.py to tests directory"
 )

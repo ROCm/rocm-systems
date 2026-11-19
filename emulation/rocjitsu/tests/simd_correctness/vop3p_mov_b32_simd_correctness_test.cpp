@@ -12,6 +12,7 @@
 /// mixed SGPR-pair/VGPR-pair case covers the legal scalar source encoding.
 /// In-process inactive lanes must keep the sentinel.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
@@ -102,8 +103,10 @@ struct Fixture {
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create(std::string("cu_vop3p_mov_b32_") + arch.name, cfg,
-                                         &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, std::string("cu_vop3p_mov_b32_") + arch.name, cfg,
+                                            &gpu_mem, &l2);
+    if (!cu)
+      return;
     decoder = Decoder::create(arch.arch);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -209,6 +212,8 @@ void check(uint64_t exec) {
                       uint32_t op_sel) -> std::array<uint64_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx(arch);
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[2] = {0u, 0u};
@@ -318,9 +323,12 @@ TEST(Vop3pMovB32SimdCorrectness, MixedSgprPairAndVgprPairGolden) {
        uint64_t{kMixedVgprLo} | (uint64_t{kMixedSgprHi} << 32)},
   }};
 
-  auto run_mode = [&](const ArchCase &arch, const MixedSourceCase &test_case, bool force_scalar) {
+  auto run_mode = [&](const ArchCase &arch, const MixedSourceCase &test_case,
+                      bool force_scalar) -> std::array<uint64_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx(arch);
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[2] = {0u, 0u};

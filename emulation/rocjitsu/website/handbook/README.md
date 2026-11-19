@@ -1,6 +1,6 @@
-# Rocjitsu handbook
+# rocjitsu handbook
 
-Publishing configuration for the Rocjitsu documentation and blog at
+Publishing configuration for the rocjitsu documentation and blog at
 <https://rocm.github.io/rocm-systems/rocjitsu/>. The engineering-handbook
 layout uses Material for MkDocs, system fonts, light/dark themes, search, and
 Mermaid diagrams. The site uses a plain-text name without a logo.
@@ -42,7 +42,7 @@ theme and hook APIs; review compatibility before changing them.
 1. Add the Markdown file under `emulation/rocjitsu/docs/`.
 2. Register its path, relative to `docs/`, in the `nav` section of
    [mkdocs.yml](mkdocs.yml). Choose **User guide** for building, running,
-   configuring, or troubleshooting Rocjitsu; **Developer guide** for understanding
+   configuring, or troubleshooting rocjitsu; **Developer guide** for understanding
    or extending its internals; or **Project** for project information.
    For example, add `- My guide: my-guide.md` under the appropriate existing group.
 3. From `emulation/rocjitsu/website/handbook/`, using the environment configured
@@ -98,7 +98,7 @@ The build adds guide-title icons without editing the canonical Markdown or its
 heading anchors. Use plain text on subsection headings.
 Sidebar icons belong to groups; individual navigation links remain text-only.
 Keep explicit heading IDs stable when changing titles. The repository header
-link points directly to Rocjitsu; its stars/forks describe the containing
+link points directly to rocjitsu; its stars/forks describe the containing
 `ROCm/rocm-systems` repository. A best-effort GitHub request at build time embeds
 the counts in the HTML, so readers do not need API access. Browser requests
 refresh them with a 15-minute session cache; failed refreshes retain existing
@@ -129,7 +129,7 @@ or a specific execution path.
 ## Verification and publishing
 
 The `rocjitsu-handbook` CI workflow runs a strict build and regression tests
-on Rocjitsu changes in pull requests and `develop` pushes, including source files
+on rocjitsu changes in pull requests and `develop` pushes, including source files
 linked from the canonical docs.
 Sphinx-only changes do not trigger it. Tests verify that canonical edits reach
 the site, source links resolve, Sphinx is excluded, and builds do not write back

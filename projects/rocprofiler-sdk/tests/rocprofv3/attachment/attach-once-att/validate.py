@@ -72,7 +72,7 @@ def test_att_filenames_in_json(json_data):
 
 
 def test_att_ui_output_dirs_exist(att_output_dir):
-    """At least one ui_output_agent_* directory must be present."""
+    """At least one selected kernel dispatch must produce an output directory."""
     ui_dirs = [p for p in Path(att_output_dir).glob("ui_output_agent_*") if p.is_dir()]
     assert len(ui_dirs) > 0, (
         f"No ui_output_agent_* directories found in {att_output_dir}. "
@@ -108,8 +108,23 @@ def _iter_wave_filenames(wave_filenames):
                     yield coord, entry[0], entry[1], entry[2]
 
 
+def _get_wave_filenames(filenames_json, filenames_path):
+    """Validate wave_filenames and normalize the decoder's JSON null representation."""
+    assert (
+        "wave_filenames" in filenames_json
+    ), f"wave_filenames missing from {filenames_path}"
+    wave_filenames = filenames_json["wave_filenames"]
+    if wave_filenames is None:
+        wave_filenames = {}
+    assert isinstance(wave_filenames, dict), (
+        f"wave_filenames in {filenames_path} must be an object or null, "
+        f"got {type(wave_filenames).__name__}"
+    )
+    return wave_filenames
+
+
 def test_att_filenames_manifest(att_output_dir):
-    """Every ui_output_agent_* dir must have a valid filenames.json with wave files,
+    """Every ui_output_agent_* dir must have wave entries in filenames.json,
     and every listed wave file must exist on disk."""
     ui_dirs = [p for p in Path(att_output_dir).glob("ui_output_agent_*") if p.is_dir()]
     assert len(ui_dirs) > 0, f"No ui_output_agent_* directories found in {att_output_dir}"
@@ -121,13 +136,15 @@ def test_att_filenames_manifest(att_output_dir):
         with open(filenames_path) as f:
             filenames_json = json.load(f)
 
-        wave_filenames = filenames_json.get("wave_filenames", {})
-        assert (
-            len(wave_filenames) > 0
-        ), f"wave_filenames is empty in {filenames_path} — no wave data was decoded"
+        wave_filenames = _get_wave_filenames(filenames_json, filenames_path)
+        wave_entries = list(_iter_wave_filenames(wave_filenames))
+        assert wave_entries, (
+            f"No wave entries found in {filenames_path}; "
+            "the selected dispatch produced no decoded waves"
+        )
 
         # Verify every listed wave file exists on disk
-        for coord, filename, begin, end in _iter_wave_filenames(wave_filenames):
+        for coord, filename, begin, end in wave_entries:
             wave_file = ui_dir / filename
             assert wave_file.exists(), (
                 f"Wave file {filename} listed in filenames.json "
@@ -136,24 +153,30 @@ def test_att_filenames_manifest(att_output_dir):
 
 
 def test_att_wave_file_content(att_output_dir):
-    """Wave JSON files must contain valid instruction trace data."""
+    """Every dispatch must contain wave JSON files with valid instruction trace data."""
     ui_dirs = [p for p in Path(att_output_dir).glob("ui_output_agent_*") if p.is_dir()]
     assert len(ui_dirs) > 0, f"No ui_output_agent_* directories found in {att_output_dir}"
 
-    found_wave_data = False
     for ui_dir in ui_dirs:
         filenames_path = ui_dir / "filenames.json"
-        if not filenames_path.exists():
-            continue
+        assert filenames_path.exists(), f"filenames.json missing in {ui_dir}"
 
         with open(filenames_path) as f:
             filenames_json = json.load(f)
 
-        wave_filenames = filenames_json.get("wave_filenames", {})
-        for coord, filename, begin, end in _iter_wave_filenames(wave_filenames):
+        wave_filenames = _get_wave_filenames(filenames_json, filenames_path)
+        wave_entries = list(_iter_wave_filenames(wave_filenames))
+        assert wave_entries, (
+            f"No wave entries found in {filenames_path}; "
+            "the selected dispatch produced no decoded waves"
+        )
+
+        for coord, filename, begin, end in wave_entries:
             wave_file = ui_dir / filename
-            if not wave_file.exists():
-                continue
+            assert wave_file.exists(), (
+                f"Wave file {filename} listed in filenames.json "
+                f"(coord {coord}) not found on disk: {wave_file}"
+            )
 
             with open(wave_file) as f:
                 wave_data = json.load(f)
@@ -179,11 +202,6 @@ def test_att_wave_file_content(att_output_dir):
             assert (
                 wave["end"] == end
             ), f"Wave file {wave_file}: end time {wave['end']} != manifest {end}"
-            found_wave_data = True
-
-    assert (
-        found_wave_data
-    ), "No wave files with content found across all ui_output_agent_* directories"
 
 
 if __name__ == "__main__":

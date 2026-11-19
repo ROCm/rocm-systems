@@ -15,11 +15,13 @@
 
 #include "DeviceTestBase.hpp"
 #include <hip/hip_bf16.h>
+#include <cstring>
 #include <numeric>
 #include <vector>
 
 #include "device/ep_common.h"
 #include "device/hip_prims.h"
+#include "include/ep_arch.h"
 #include "include/ep_layout.h"
 
 namespace RcclUnitTesting
@@ -212,6 +214,59 @@ TEST_F(RcclEpWaveTest, WaveCopyMovesEveryElement) {
     for (int i = 0; i < n; ++i) {
       // Values are small integers, so bf16 holds them exactly.
       EXPECT_EQ(__bfloat162float(h_dst[i]), __bfloat162float(h_src[i])) << "element " << i;
+    }
+  }
+}
+
+TEST_F(RcclEpWaveTest, PublishArchWritesOwnSlotInEveryPeerRegion) {
+  constexpr int kRanks = 3;
+  constexpr uint8_t kFill = 0xA5;
+
+  rccl_ep::EpConfig c{};
+  c.num_ranks               = kRanks;
+  c.num_experts             = kRanks * 2;
+  c.num_topk                = 2;
+  c.hidden                  = 128;
+  c.num_max_tokens_per_rank = 2;
+  const rccl_ep::EpWindowLayout l = rccl_ep::EpWindowLayout::make(c, sizeof(uint16_t));
+
+  std::vector<DeviceBuffer<uint8_t>> windows;
+  windows.reserve(kRanks);
+  std::vector<rccl_ep::WindowView> h_views(kRanks);
+  for (int p = 0; p < kRanks; ++p) {
+    windows.emplace_back(l.total_bytes);
+    windows[p].copyFrom(std::vector<uint8_t>(l.total_bytes, kFill));
+    h_views[p].base = windows[p].ptr;
+    h_views[p].l    = l;
+  }
+  DeviceBuffer<rccl_ep::WindowView> d_views(kRanks);
+  d_views.copyFrom(h_views);
+
+  // Distinct NUL-padded strings per rank; the padding (0x00) differs from the fill, so a short copy shows.
+  const int publishers[2]  = {1, 2};
+  const char* const arch[] = {"gfx942:sramecc+:xnack-", "gfx950"};
+  std::vector<std::vector<char>> strs(2, std::vector<char>(rccl_ep::kArchLen, '\0'));
+  for (int i = 0; i < 2; ++i) memcpy(strs[i].data(), arch[i], strlen(arch[i]));
+
+  for (int i = 0; i < 2; ++i) {
+    rccl_ep::EpConfig cr = c;
+    cr.rank              = publishers[i];
+    DeviceBuffer<char> d_mine(rccl_ep::kArchLen);
+    d_mine.copyFrom(strs[i]);
+    rccl_ep::k_ep_publish_arch<<<kRanks, rccl_ep::kArchLen>>>(cr, d_views.ptr, d_mine.ptr);
+    syncAndCheck();
+  }
+
+  for (int p = 0; p < kRanks; ++p) {
+    const std::vector<uint8_t> h = windows[p].copyTo();
+    ASSERT_EQ(h.size(), l.total_bytes);
+    for (size_t b = 0; b < h.size(); ++b) {
+      uint8_t expected = kFill;
+      for (int i = 0; i < 2; ++i) {
+        const size_t begin = l.off_arch + static_cast<size_t>(publishers[i]) * rccl_ep::kArchLen;
+        if (b >= begin && b < begin + rccl_ep::kArchLen) expected = static_cast<uint8_t>(strs[i][b - begin]);
+      }
+      ASSERT_EQ(h[b], expected) << "window " << p << " byte " << b << " (off_arch " << l.off_arch << ")";
     }
   }
 }

@@ -130,8 +130,10 @@ ncclResult_t ncclStrongStreamConstruct(struct ncclStrongStream* ss) {
   return ncclSuccess;
 }
 
+// Tolerates a zeroed or partially constructed ss so init error paths can tear it down.
 ncclResult_t ncclStrongStreamDestruct(struct ncclStrongStream* ss) {
-  CUDACHECK(cudaStreamDestroy(ss->liveStream));
+  if (ss->liveStream != nullptr) CUDACHECK(cudaStreamDestroy(ss->liveStream));
+  ss->liveStream = nullptr;
 #if ROCM_VERSION >= 60100
   struct ncclStrongStreamCapture* cap = ss->captureHead;
   while (cap) {
@@ -140,7 +142,9 @@ ncclResult_t ncclStrongStreamDestruct(struct ncclStrongStream* ss) {
     free(cap);
     cap = next;
   }
-  CUDACHECK(cudaEventDestroy(ss->serialEvent));
+  ss->captureHead = nullptr;
+  if (ss->serialEvent != nullptr) CUDACHECK(cudaEventDestroy(ss->serialEvent));
+  ss->serialEvent = nullptr;
 #endif
   return ncclSuccess;
 }
@@ -175,11 +179,16 @@ ncclResult_t ncclStrongStreamAcquire(struct ncclCudaGraph graph, struct ncclStro
     struct ncclStrongStreamCapture** pcap = &ss->captureHead;
     struct ncclStrongStreamCapture* cap;
     struct ncclStrongStreamCapture* spare = nullptr;
+    struct ncclStrongStreamCapture* fresh = nullptr;  // calloc'd below and not yet linked
     while (*pcap != nullptr) {
       cap = *pcap;
       if (cap->graphId == graph.graphId) { // Capture node already exists.
         *workStream = cap->captureStream;
         cap->acquiredBy = localThreadId();
+        if (spare) { // Unlinked above and not reused.
+          CUDACHECKIGNORE(cudaStreamDestroy(spare->captureStream));
+          free(spare);
+        }
         return ncclSuccess;
       } else {
         cudaStreamCaptureStatus status;
@@ -205,6 +214,7 @@ ncclResult_t ncclStrongStreamAcquire(struct ncclCudaGraph graph, struct ncclStro
         ret = ncclSystemError;
         goto do_unlock;
       }
+      fresh = cap;
       CUDACHECKGOTO(cudaStreamCreateWithFlags(&cap->captureStream, cudaStreamNonBlocking), ret, do_unlock);
     }
     cap->graphId = graph.graphId;
@@ -215,15 +225,28 @@ ncclResult_t ncclStrongStreamAcquire(struct ncclCudaGraph graph, struct ncclStro
 
   do_unlock:
     if (concurrent) lock.unlock();
-    if (ret != ncclSuccess) return ret;
+    if (ret != ncclSuccess) {
+      // Neither entry is on the list any more, so nothing else can release it.
+      if (fresh) free(fresh);
+      if (spare) {
+        CUDACHECKIGNORE(cudaStreamDestroy(spare->captureStream));
+        free(spare);
+      }
+      return ret;
+    }
 
     *workStream = cap->captureStream;
 
       // Bring captureStream into the graph but without any dependencies.
     cudaEvent_t scratch;
     CUDACHECK(cudaEventCreateWithFlags(&scratch, cudaEventDisableTiming));
-    CUDACHECK(cudaEventRecord(scratch, graph.origin));
-    CUDACHECK(cudaStreamWaitEvent(cap->captureStream, scratch, 0));
+    CUDACHECKGOTO(cudaEventRecord(scratch, graph.origin), ret, drop_scratch);
+    CUDACHECKGOTO(cudaStreamWaitEvent(cap->captureStream, scratch, 0), ret, drop_scratch);
+  drop_scratch:
+    if (ret != ncclSuccess) {
+      CUDACHECKIGNORE(cudaEventDestroy(scratch));
+      return ret;
+    }
     CUDACHECK(cudaEventDestroy(scratch));
 #if CUDART_VERSION >= 13000
     CUDACHECK(cudaStreamUpdateCaptureDependencies_v2(cap->captureStream, nullptr, nullptr, 0,
@@ -367,48 +390,57 @@ ncclResult_t ncclStreamWaitStream(cudaStream_t a, cudaStream_t b, cudaEvent_t sc
   return ncclSuccess;
 }
 
-ncclResult_t ncclStreamAdvanceToEvent(struct ncclCudaGraph g, cudaStream_t s, cudaEvent_t e) {
-  if (g.graphId == ULLONG_MAX) {
-    CUDACHECK(cudaStreamWaitEvent(s, e, 0));
-  } else {
-    cudaStream_t tmp;
-    CUDACHECK(cudaStreamCreateWithFlags(&tmp, cudaStreamNonBlocking));
-    CUDACHECK(cudaStreamWaitEvent(tmp, e, 0));
-
-    cudaStreamCaptureStatus status;
-    cudaGraphNode_t const* nodes;
-    size_t count = 0;
+ncclResult_t ncclStreamAdvanceToStream(cudaStream_t s, cudaStream_t source) {
+  cudaStreamCaptureStatus status;
+  cudaGraphNode_t const* nodes = nullptr;
+  size_t count = 0;
 #if CUDART_VERSION >= 13000
-    cudaError_t res = hipStreamGetCaptureInfo_v3(tmp, &status, nullptr, nullptr, &nodes, nullptr, &count);
+  cudaError_t res = hipStreamGetCaptureInfo_v3(source, &status, nullptr, nullptr, &nodes, nullptr, &count);
 #else
-    cudaError_t res = hipStreamGetCaptureInfo_v2(tmp, &status, nullptr, nullptr, &nodes, &count);
+  cudaError_t res = hipStreamGetCaptureInfo_v2(source, &status, nullptr, nullptr, &nodes, &count);
 #endif
 
 #if CUDART_VERSION >= 12030
-    if (res == cudaErrorLossyQuery) { // CUDA is telling us the dependencies have edge annotations.
-      cudaGraphEdgeData const* edges;
-      CUDACHECK(cudaStreamGetCaptureInfo_v3(tmp, &status, nullptr, nullptr, &nodes, &edges, &count));
-      CUDACHECK(cudaStreamUpdateCaptureDependencies_v2(s, (cudaGraphNode_t*)nodes, edges, count,
-                                                       cudaStreamSetCaptureDependencies));
-    }
+  if (res == cudaErrorLossyQuery) { // CUDA is telling us the dependencies have edge annotations.
+    cudaGraphEdgeData const* edges;
+    CUDACHECK(cudaStreamGetCaptureInfo_v3(source, &status, nullptr, nullptr, &nodes, &edges, &count));
+    CUDACHECK(cudaStreamUpdateCaptureDependencies_v2(s, (cudaGraphNode_t*)nodes, edges, count,
+                                                     cudaStreamSetCaptureDependencies));
+  }
 #else
-    if (false) {
-    }
+  if (false) {
+  }
 #endif
-    else {
-      CUDACHECK(res /* = cudaStreamGetCaptureInfo_v2(...)*/);
+  else {
+    CUDACHECK(res /* = cudaStreamGetCaptureInfo_v2(...)*/);
 #if CUDART_VERSION >= 13000
-      CUDACHECK(cudaStreamUpdateCaptureDependencies_v2(s, (cudaGraphNode_t*)nodes, nullptr, count,
-                                                       cudaStreamSetCaptureDependencies));
+    CUDACHECK(cudaStreamUpdateCaptureDependencies_v2(s, (cudaGraphNode_t*)nodes, nullptr, count,
+                                                     cudaStreamSetCaptureDependencies));
 #else
-      CUDACHECK(cudaStreamUpdateCaptureDependencies(s, (cudaGraphNode_t*)nodes, count,
-                                                    cudaStreamSetCaptureDependencies));
+    CUDACHECK(cudaStreamUpdateCaptureDependencies(s, (cudaGraphNode_t*)nodes, count,
+                                                  cudaStreamSetCaptureDependencies));
 #endif
-    }
-
-    CUDACHECK(cudaStreamDestroy(tmp));
   }
   return ncclSuccess;
+}
+
+ncclResult_t ncclStreamAdvanceToEvent(struct ncclCudaGraph g, cudaStream_t s, cudaEvent_t e) {
+  ncclResult_t ret = ncclSuccess;
+  cudaStream_t tmp = nullptr;
+  if (g.graphId == ULLONG_MAX) {
+    CUDACHECK(cudaStreamWaitEvent(s, e, 0));
+  } else {
+    CUDACHECK(cudaStreamCreateWithFlags(&tmp, cudaStreamNonBlocking));
+    // From here on, every failure must destroy the temporary stream.
+    CUDACHECKGOTO(cudaStreamWaitEvent(tmp, e, 0), ret, fail);
+    NCCLCHECKGOTO(ncclStreamAdvanceToStream(s, tmp), ret, fail);
+  }
+  if (tmp) CUDACHECK(cudaStreamDestroy(tmp));
+exit:
+  return ret;
+fail:
+  if (tmp) (void)cudaStreamDestroy(tmp);
+  goto exit;
 }
 
 ncclResult_t ncclStrongStreamSynchronize(struct ncclStrongStream* ss) {

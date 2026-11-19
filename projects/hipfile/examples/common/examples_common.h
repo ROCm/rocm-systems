@@ -43,6 +43,14 @@ align_up(size_t value, size_t align)
     return (value + align - 1) & ~(align - 1);
 }
 
+/// @brief Get a file's size and a common alignment for direct-I/O buffers and offsets.
+/// Uses STATX_DIOALIGN when available, otherwise defaults to 4096 bytes.
+/// @param path [in] Existing file to inspect.
+/// @param size [out] File size in bytes on success.
+/// @param alignment [out] Power-of-two direct-I/O alignment on success.
+/// @return Zero on success, non-zero on statx failure, missing size or invalid/unsupported direct I/O.
+int get_file_info(const char *path, size_t *size, size_t *alignment);
+
 /// @brief Fill a buffer with a deterministic test pattern (byte i = i & 0xFF).
 /// Used so writers can emit known content and verifiers can recompute the
 /// expected hash without keeping the input around.
