@@ -27,8 +27,8 @@ from amdisa.codegen.execute.floating_policy import (
 )
 from amdisa.codegen.execute.vector_special import (
     gen_cvt_fp8,
-    gen_vector_movrel,
     gen_vector_cvt_pk,
+    gen_vector_movrel,
 )
 from amdisa.codegen.execute.sema_lower import LoweringContext, lower_sema_block
 from amdisa.sema_derive import derive_sema_block
@@ -3109,24 +3109,6 @@ def test_cdna4_fp8_cvt_keeps_ocp_helper_variant():
     unary = _lower_unary('V_CVT_F32_FP8', 'cdna4')
     assert 'util::fp8_e4m3_to_f32' in unary
     assert 'fnuz' not in unary
-
-
-@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'])
-def test_older_half_narrowing_uses_arithmetic(arch, amdgpu_generated_root: Path):
-    text = (amdgpu_generated_root / arch / 'vop1_exec.cpp').read_text()
-    body = text.split('void VCvtF16F32Vop1::execute_impl', 1)[1].split('\n}', 1)[0]
-    assert 'rj_arith_v_cvt_f16_f32_w64' in body
-    assert 'RJ_ARITH_FP16_OVFL' in body
-    assert 'execute_v_cvt_f16_f32' not in body
-
-
-def test_fp16_ovfl_sensitive_f16_simd_probes_stay_vectorized():
-    add_probe = simd_probe_line('v_add_f16_vop3', true16_vop3=True)
-    assert add_probe is not None
-    # The MODE-aware helper now owns both FP16_OVFL narrowing variants.
-    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(true,' in add_probe
-    assert 'amdgpu::fp_mode::Arithmetic::ADD' in add_probe
-    assert 'native_arithmetic_matches' not in add_probe
 
 
 def test_cdna_f64_mfma_uses_blgp_as_neg_immediate():

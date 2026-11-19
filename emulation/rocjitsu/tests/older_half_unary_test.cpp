@@ -1,7 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Half-unary arithmetic, guest controls and register layouts across migrated profiles.
+// Decoded half-unary bindings, guest controls and register layouts.
+// Independent numerical coverage lives in lib/arith/tests/math/.
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
@@ -19,9 +20,6 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/fract.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/execution_backend.h"
 #include "rocjitsu/isa/instruction.h"
@@ -31,6 +29,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "unary_binding.h"
 #include "util/data_types.h"
 #include "util/simd.h"
 #include <array>
@@ -40,8 +39,9 @@
 
 namespace rocjitsu::amdgpu {
 namespace {
-// Retain the existing scalar result model, independently of the new dispatch and storage path.
-TEST(OlderHalfUnary, Arithmetic) {
+// Check VM routing/storage against scalar APIs, whose arithmetic has separate
+// literal/reference tests in lib/arith. FREXP exponent keeps a standard reference.
+TEST(OlderHalfUnary, Bindings) {
   struct Family {
     rocjitsu::IsaFamily arch;
     const IsaExecutionBackend *backend;
@@ -232,19 +232,27 @@ TEST(OlderHalfUnary, Arithmetic) {
       {Form::Dpp8, 0xf0, 0, false, true, false, false},
       {Form::SuppressedDpp, 0xf0, 0, false, false, false, false},
   };
-  const auto evaluate = [](int op, float x) {
-    switch (op) {
-    case 0:
-      return util::trunc_scalar(x);
-    case 1:
-      return util::ceil_scalar(x);
-    case 2:
-      return util::rndne_scalar(x);
-    case 3:
-      return util::floor_scalar(x);
-    default:
-      return frexp_f32(x, 3).mantissa;
-    }
+  // The three numerical contracts are older profiles, CDNA3/4, and gfx1250.
+  const rocjitsu::test::Unary32 calls[3][14] = {
+      {rj_arith_v_trunc_f16_w32_gfx908, rj_arith_v_ceil_f16_w32_gfx908,
+       rj_arith_v_rndne_f16_w32_gfx908, rj_arith_v_floor_f16_w32_gfx908,
+       rj_arith_v_frexp_mant_f16_w32_gfx908, nullptr, rj_arith_v_rcp_f16_w32_gfx908,
+       rj_arith_v_rsq_f16_w32_gfx908, rj_arith_v_sqrt_f16_w32_gfx908, rj_arith_v_exp_f16_w32_gfx908,
+       rj_arith_v_log_f16_w32_gfx908, rj_arith_v_sin_f16_w32_gfx908, rj_arith_v_cos_f16_w32_gfx908,
+       rj_arith_v_fract_f16_w32_gfx908},
+      {rj_arith_v_trunc_f16_w32_gfx942, rj_arith_v_ceil_f16_w32_gfx942,
+       rj_arith_v_rndne_f16_w32_gfx942, rj_arith_v_floor_f16_w32_gfx942,
+       rj_arith_v_frexp_mant_f16_w32_gfx942, nullptr, rj_arith_v_rcp_f16_w32_gfx942,
+       rj_arith_v_rsq_f16_w32_gfx942, rj_arith_v_sqrt_f16_w32_gfx942, rj_arith_v_exp_f16_w32_gfx942,
+       rj_arith_v_log_f16_w32_gfx942, rj_arith_v_sin_f16_w32_gfx942, rj_arith_v_cos_f16_w32_gfx942,
+       rj_arith_v_fract_f16_w32_gfx942},
+      {rj_arith_v_trunc_f16_w32_gfx12, rj_arith_v_ceil_f16_w32_gfx12,
+       rj_arith_v_rndne_f16_w32_gfx12, rj_arith_v_floor_f16_w32_gfx12,
+       rj_arith_v_frexp_mant_f16_w32_gfx12, nullptr, rj_arith_v_rcp_f16_w32_gfx1250,
+       rj_arith_v_rsq_f16_w32_gfx1250, rj_arith_v_sqrt_f16_w32_gfx1250,
+       rj_arith_v_exp_f16_w32_gfx1250, rj_arith_v_log_f16_w32_gfx1250,
+       rj_arith_v_sin_f16_w32_gfx1250, rj_arith_v_cos_f16_w32_gfx1250,
+       rj_arith_v_fract_f16_w32_gfx12},
   };
   for (const auto &family : families) {
     ScopedIsaExecutionBackend backend(family.backend);
@@ -341,60 +349,48 @@ TEST(OlderHalfUnary, Arithmetic) {
                                    (((wave->exec() & wave->vgpr_write_mask()) >> lane) & 1);
               if (written) {
                 uint16_t input = uint16_t(original[dpp ? lane ^ 1 : lane] >> (high ? 16 : 0));
-                if (test.abs) {
-                  input &= 0x7fff;
-                }
-                if (test.neg) {
-                  input ^= 0x8000;
-                }
-                if ((op == 1 || op == 3 || op >= 4) && !(wave->fp_denorm_mode_f16_f64() & 1) &&
-                    (input & 0x7fff) < 0x400) {
-                  input &= 0x8000;
-                }
                 uint32_t result;
                 if (op == 5) {
+                  if (test.abs) {
+                    input &= 0x7fff;
+                  }
+                  if (test.neg) {
+                    input ^= 0x8000;
+                  }
+                  if (!(wave->fp_denorm_mode_f16_f64() & 1) && (input & 0x7fff) < 0x400) {
+                    input &= 0x8000;
+                  }
                   const float x = util::f16_to_f32(input);
                   int exponent = 0;
                   if (x != 0 && std::isfinite(x)) {
                     std::frexp(x, &exponent);
                   }
                   result = uint16_t(exponent);
-                } else if (op == 13) {
-                  result = output_modifier::apply<fp_format::F16>(
-                      fract::evaluate<fp_format::F16>(
-                          uint32_t(input), fract::Policy::make(wave->fp_denorm_mode_f16_f64(),
-                                                               wave->fp_round_mode_f16_f64())),
-                      output_modifier_policy<fp_format::F16>(*wave, omod, clamp));
-                  if (input == 0xb401 && (test.mode & 0xf0) == 0xf0 && !omod && !clamp) {
-                    EXPECT_EQ(result, wave->fp_round_mode_f16_f64() < 2 ? 0x3a00U : 0x39ffU);
-                  }
-                } else if (op >= 6) {
-                  const float x = util::f16_to_f32(input);
-                  const uint32_t denorm = wave->fp_denorm_mode_f16_f64();
-                  const bool ovfl = wave->fp16_ovfl(), quiet = gfx1250 || wave->ieee_mode();
-                  float value =
-                      op == 6 ? transcendental::map_f16<transcendental::HalfOperation::RCP>(
-                                    x, denorm, ovfl, quiet)
-                      : op == 7 ? transcendental::map_f16<transcendental::HalfOperation::RSQ>(
-                                      x, denorm, ovfl, quiet)
-                      : op == 8 ? transcendental::map_f16<transcendental::HalfOperation::SQRT>(
-                                      x, denorm, ovfl, quiet)
-                      : op == 9  ? transcendental::detail::log_exp_f16_nearest<false>(x, denorm,
-                                                                                      ovfl, quiet)
-                      : op == 10 ? transcendental::detail::log_exp_f16_nearest<true>(x, denorm,
-                                                                                     ovfl, quiet)
-                      : op == 11 ? transcendental::map_f16<transcendental::HalfOperation::SIN>(
-                                       x, denorm, ovfl, quiet)
-                                 : transcendental::map_f16<transcendental::HalfOperation::COS>(
-                                       x, denorm, ovfl, quiet);
-                  result = output_modifier::apply<fp_format::F16>(
-                      uint32_t(util::f32_to_f16_mode(value, ovfl)),
-                      transcendental_output_modifier_policy<fp_format::F16>(*wave, omod, clamp));
                 } else {
-                  result = output_modifier::apply<fp_format::F16>(
-                      uint32_t(util::f32_to_f16_mode(evaluate(op, util::f16_to_f32(input)),
-                                                     wave->fp16_ovfl())),
-                      output_modifier_policy<fp_format::F16>(*wave, omod, clamp));
+                  const unsigned denorm = wave->fp_denorm_mode_f16_f64();
+                  // Native half math ignores guest rounding; rounding/decomposition does not.
+                  uint64_t flags =
+                      RJ_ARITH_SEMANTICS_COMPATIBILITY |
+                      (op >= 6 && op <= 12 ? 0 : uint64_t(wave->fp_round_mode_f16_f64()) << 24);
+                  flags |= (denorm & 1) ? 0 : RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+                  flags |= (denorm & 2) ? 0 : RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+                  flags |= wave->ieee_mode() ? RJ_ARITH_FP_IEEE_MODE : 0;
+                  flags |= !gfx1250 && !wave->dx10_clamp() ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0;
+                  flags |= wave->fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0;
+                  const uint64_t modifiers =
+                      uint64_t(omod) * RJ_ARITH_ALU_OMOD_2 | (clamp ? RJ_ARITH_ALU_CLAMP : 0) |
+                      (test.abs ? RJ_ARITH_ALU_ABS_A : 0) | (test.neg ? RJ_ARITH_ALU_NEG_A : 0) |
+                      (sdwa && (family.arch == rocjitsu::IsaFamily::Cdna3 ||
+                                family.arch == rocjitsu::IsaFamily::Cdna4)
+                           ? RJ_ARITH_ALU_SDWA
+                           : 0);
+                  const int profile = gfx1250 ? 2
+                                      : family.arch == rocjitsu::IsaFamily::Cdna3 ||
+                                              family.arch == rocjitsu::IsaFamily::Cdna4
+                                          ? 1
+                                          : 0;
+                  result = uint32_t(rocjitsu::test::evaluate_unary32(calls[profile][op], flags,
+                                                                     modifiers, input));
                 }
                 expected = high ? (result << 16) | (original[lane] & 0xffffU)
                                 : (cdna ? 0U : original[lane] & 0xffff0000U) | result;

@@ -1507,6 +1507,10 @@ class TestDerivePseudoScalarUnary:
         assert block is not None
         assert block.pragma == ExecModel.SCALAR
 
+        if name.endswith('_F16'):
+            # FP16 execution uses rj-arith, not the legacy expression lowering.
+            return
+
         cpp = lower_sema_block(block)
         assert 'wf.exec()' not in cpp
         assert 'if (exec != 0)' not in cpp

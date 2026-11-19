@@ -3,9 +3,14 @@
 
 // Tests for packed FP16 selection operations.
 
+#include "common/cpu.h"
 #include "fp/reference.h"
 #include "fp/selection_test.h"
 #include "rj_arith/detail/rj_arith_fp.h"
+#include "rj_arith/rj_arith.h"
+
+#include <array>
+#include <cstdint>
 
 #include <gtest/gtest.h>
 #include <random>
@@ -177,7 +182,8 @@ void check_packed_ternary(Call call, bool maximum, bool propagate) {
   std::minstd_rand random;
   for (int reg = 0; reg < 3; ++reg) {
     for (int lane = 0; lane < Lanes; ++lane) {
-      input.v[reg][lane] = uint32_t(random() >> 15) | (uint32_t(random() >> 15) << 16);
+      const uint32_t low = uint32_t(random() >> 15);
+      input.v[reg][lane] = low | (uint32_t(random() >> 15) << 16);
     }
   }
   // Distinct signaling/quiet payloads, signed zeros, and selected denormals.
@@ -264,4 +270,54 @@ TEST(FpPkTernarySelection, Wave32Gfx950) {
 TEST(FpPkTernarySelection, Wave64Gfx950) {
   check_packed_ternary<64, true>(rj_arith_v_pk_minimum3_f16_w64_gfx950, false, true);
   check_packed_ternary<64, true>(rj_arith_v_pk_maximum3_f16_w64_gfx950, true, true);
+}
+
+// Preserve the inherited NaN-selection captures while exercising the public APIs.
+TEST(FpPackedHalf, CapturedNanSelection) {
+  struct Case {
+    uint16_t a, b;
+    std::array<uint16_t, 3> arithmetic, select;
+  };
+  constexpr Case cases[] = {
+      {0x7fc1, 0xff80, {0x7fc1, 0x7fc1, 0x7fc1}, {0x7fc1, 0x7fc1, 0x7fc1}},
+      {0xff80, 0x7fc1, {0xff80, 0xff80, 0xff80}, {0xff80, 0xff80, 0xff80}},
+      {0x7c01, 0xff80, {0x7c01, 0x7e01, 0x7e01}, {0x7c01, 0x7e01, 0x7e01}},
+      {0x7fc1, 0xfc02, {0x7fc1, 0x7fc1, 0x7fc1}, {0x7fc1, 0xfe02, 0x7fc1}},
+      {0x3c00, 0x7c01, {0x7c01, 0x7e01, 0x7e01}, {0x3c00, 0x7e01, 0x3c00}},
+  };
+  using Call = int (*)(uint64_t, uint32_t, uint64_t, uint32_t *const *, const uint32_t *const *,
+                       const uint32_t *const *, uint32_t *);
+  for (uint64_t cpu : rocjitsu::arith::test::supported_cpu_levels()) {
+    for (bool gfx12 : {false, true}) {
+      const std::array<Call, 4> calls = {
+          gfx12 ? rj_arith_v_pk_add_f16_w32_gfx12 : rj_arith_v_pk_add_f16_w32,
+          gfx12 ? rj_arith_v_pk_mul_f16_w32_gfx12 : rj_arith_v_pk_mul_f16_w32,
+          gfx12 ? rj_arith_v_pk_min_num_f16_w32 : rj_arith_v_pk_min_f16_w32,
+          gfx12 ? rj_arith_v_pk_max_num_f16_w32 : rj_arith_v_pk_max_f16_w32};
+      for (bool ieee : {false, true}) {
+        const int profile = gfx12 ? 2 : int(ieee);
+        const uint64_t flags =
+            cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY | (ieee ? RJ_ARITH_FP_IEEE_MODE : 0);
+        for (int operation = 0; operation < 4; ++operation) {
+          for (const auto &sample : cases) {
+            const uint16_t expected = (operation < 2 ? sample.arithmetic : sample.select)[profile];
+            uint32_t a[32]{}, b[32]{}, output[32]{};
+            a[0] = uint32_t(sample.a) * 0x10001U;
+            b[0] = uint32_t(sample.b) * 0x10001U;
+            const uint32_t *lhs = a, *rhs = b;
+            uint32_t *destination = output, status = 0;
+            for (bool clamp : {false, true}) {
+              ASSERT_EQ(calls[operation](flags, 1U, clamp ? RJ_ARITH_PK_CLAMP : 0, &destination,
+                                         &lhs, &rhs, &status),
+                        RJ_ARITH_SUCCESS);
+              const uint16_t result = clamp ? (expected > 0x7c00U ? 0 : 0x3c00U) : expected;
+              EXPECT_EQ(output[0], uint32_t(result) * 0x10001U)
+                  << "cpu=" << cpu << " profile=" << profile << " op=" << operation
+                  << " clamp=" << clamp << " a=" << sample.a << " b=" << sample.b;
+            }
+          }
+        }
+      }
+    }
+  }
 }
