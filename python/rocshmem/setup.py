@@ -21,7 +21,8 @@ except ImportError:  # setuptools < 71
 # Base release version of the binding's own Python API. The full version
 # reported to pip is this plus a PEP 440 local segment recording the linked
 # rocSHMEM library version (e.g. "0.1.0+rocshmem3.6.0"), so a built wheel is
-# self-documenting about which rocSHMEM it was compiled against.
+# self-documenting about which rocSHMEM it was compiled against, unless
+# ROCSHMEM4PY_VERSION_SUFFIX replaces that segment.
 BASE_VERSION = "0.1.0"
 
 

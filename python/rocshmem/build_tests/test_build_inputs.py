@@ -1,8 +1,9 @@
 """GPU-free tests for the packaging inputs in setup.py and CMakeLists.txt.
 
 Outside tests/ because tests/conftest.py initializes rocSHMEM. The wheel test
-needs nanobind, cmake, readelf and a rocSHMEM install that setup.py would find;
-it is skipped without them, or fails if ROCSHMEM4PY_REQUIRE_WHEEL_BUILD_TESTS=1.
+needs nanobind, cmake, readelf, patchelf and a rocSHMEM install that setup.py
+would find; it is skipped without them, or fails if
+ROCSHMEM4PY_REQUIRE_WHEEL_BUILD_TESTS=1.
 
 Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 """
@@ -154,7 +155,9 @@ def _wheel_build_problem():
         import nanobind  # noqa: F401
     except ImportError:
         return "nanobind is not installed"
-    missing = [tool for tool in ("cmake", "readelf") if shutil.which(tool) is None]
+    missing = [
+        tool for tool in ("cmake", "readelf", "patchelf") if shutil.which(tool) is None
+    ]
     return f"{', '.join(missing)} not on PATH" if missing else _find_rocshmem()[2]
 
 

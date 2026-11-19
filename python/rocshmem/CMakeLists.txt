@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.18)
+cmake_minimum_required(VERSION 3.16)
 
 ###############################################################################
 # Standalone rocshmem4py build
@@ -298,28 +298,20 @@ target_link_options(_rocshmem4py PRIVATE
   -lhsa-runtime64
 )
 
-# Optional RPATH for packaged wheels, e.g. $ORIGIN/_rocm_sdk_core/lib. The wheel
-# ships the build-tree .so, so it is applied at build time. DT_RPATH so it also
-# covers the extension's transitive dependencies.
+# Optional RPATH for packaged wheels, e.g. $ORIGIN/_rocm_sdk_core/lib. Set after
+# linking because ROCm compiler configs can force --enable-new-dtags; patchelf
+# writes DT_RPATH, which LD_LIBRARY_PATH cannot override.
 set(ROCSHMEM4PY_INSTALL_RPATH "" CACHE STRING
     "Colon-separated RPATH for the extension; replaces the build RPATH")
 if(ROCSHMEM4PY_INSTALL_RPATH)
-  string(REPLACE ":" ";" _ROCSHMEM4PY_RPATH "${ROCSHMEM4PY_INSTALL_RPATH}")
-  set_target_properties(_rocshmem4py PROPERTIES
-    BUILD_WITH_INSTALL_RPATH ON
-    INSTALL_RPATH "${_ROCSHMEM4PY_RPATH}"
-    INSTALL_RPATH_USE_LINK_PATH OFF
-  )
-  target_link_options(_rocshmem4py PRIVATE "LINKER:--disable-new-dtags")
-  # --hip-link otherwise appends the build host's <rocm>/lib.
-  include(CheckLinkerFlag)
-  check_linker_flag(CXX "-fno-rtlib-add-rpath" ROCSHMEM4PY_HAS_NO_RTLIB_ADD_RPATH)
-  if(NOT ROCSHMEM4PY_HAS_NO_RTLIB_ADD_RPATH)
-    message(FATAL_ERROR "rocshmem4py: ROCSHMEM4PY_INSTALL_RPATH needs a compiler "
-                        "that supports -fno-rtlib-add-rpath")
+  find_program(ROCSHMEM4PY_PATCHELF patchelf)
+  if(NOT ROCSHMEM4PY_PATCHELF)
+    message(FATAL_ERROR "rocshmem4py: ROCSHMEM4PY_INSTALL_RPATH needs patchelf")
   endif()
-  target_link_options(_rocshmem4py PRIVATE -fno-rtlib-add-rpath)
-  message(STATUS "rocshmem4py: RPATH: ${_ROCSHMEM4PY_RPATH}")
+  add_custom_command(TARGET _rocshmem4py POST_BUILD
+    COMMAND "${ROCSHMEM4PY_PATCHELF}" --set-rpath "${ROCSHMEM4PY_INSTALL_RPATH}"
+            --force-rpath "$<TARGET_FILE:_rocshmem4py>"
+    VERBATIM)
 endif()
 
 # setuptools positions the .so via CMAKE_LIBRARY_OUTPUT_DIRECTORY; install(.)

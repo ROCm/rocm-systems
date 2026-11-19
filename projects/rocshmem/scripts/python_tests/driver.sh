@@ -151,7 +151,7 @@ TestBuild() {
   echo "# ${cmd[*]}" > "$LOG_DIR/$TEST_LOG_NAME.log"
 
   # Build requirements for the tests' --no-build-isolation wheel builds.
-  python3 -m pip install "setuptools>=61.0" wheel "nanobind>=2.12.0,<3.0" \
+  python3 -m pip install "setuptools>=61.2" wheel "nanobind>=2.12.0,<3.0" patchelf \
     >> "$LOG_DIR/$TEST_LOG_NAME.log" 2>&1
   if [ $? -ne 0 ]; then
     echo "FAILED: $TEST_LOG_NAME (build requirement install)"
@@ -187,8 +187,8 @@ HOSTFILE=$4
 ValidateLogDir "$LOG_DIR"
 DetectGPUs
 
-# Ensure rocshmem4py is installed
-if ! python3 -c "import rocshmem4py" 2>/dev/null; then
+# Ensure rocshmem4py is installed (the build tests build their own wheels)
+if [ "$TEST" != "build" ] && ! python3 -c "import rocshmem4py" 2>/dev/null; then
   echo "Installing rocshmem4py from $PYTHON_SRC_DIR ..."
   pip install -e "$PYTHON_SRC_DIR" || { echo "pip install failed"; exit 1; }
 fi

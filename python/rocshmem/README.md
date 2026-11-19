@@ -100,7 +100,7 @@ set these when running `pip wheel`. All are optional.
 | --- | --- | --- |
 | `ROCSHMEM4PY_VERSION_SUFFIX` | Replaces the `+rocshmem<ver>` version suffix. | `+rocm7.10.0` |
 | `ROCSHMEM4PY_EXTRA_INSTALL_REQUIREMENTS` | `\|`-separated requirements added to the wheel. | `rocm-sdk-core==7.10.0` |
-| `ROCSHMEM4PY_INSTALL_RPATH` | Colon-separated RPATH replacing the build RPATH. | `$ORIGIN/_rocm_sdk_core/lib` |
+| `ROCSHMEM4PY_INSTALL_RPATH` | Colon-separated RPATH replacing the build RPATH; needs `patchelf`. | `$ORIGIN/_rocm_sdk_core/lib` |
 
 `build_tests/` covers them without a GPU:
 `CMAKE_PREFIX_PATH=/opt/rocshmem python -m pytest build_tests`.
