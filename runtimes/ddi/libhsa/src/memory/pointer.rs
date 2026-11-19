@@ -6,7 +6,7 @@
 use super::*;
 
 /// Finds the owned allocation containing a device address.
-pub(crate) fn owned_memory(runtime: &HsaState, address: usize) -> Option<&Memory> {
+pub(crate) fn owned_memory(runtime: &HsaSession, address: usize) -> Option<&Memory> {
     runtime
         .memory_state
         .allocations
@@ -30,7 +30,7 @@ pub(crate) fn owned_memory(runtime: &HsaState, address: usize) -> Option<&Memory
 
 /// Builds HSA pointer metadata for an address known to the runtime.
 pub(crate) fn pointer_description(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     address: usize,
 ) -> Option<PointerDescription> {
     vmem_pointer_description(runtime, address).or_else(|| {
@@ -49,7 +49,7 @@ pub(crate) fn pointer_description(
 }
 
 /// Builds pointer metadata for a virtual memory mapping.
-fn vmem_pointer_description(runtime: &HsaState, address: usize) -> Option<PointerDescription> {
+fn vmem_pointer_description(runtime: &HsaSession, address: usize) -> Option<PointerDescription> {
     if let Some((_, mapping)) = runtime
         .memory_state
         .vmem_mappings
@@ -69,7 +69,7 @@ fn vmem_pointer_description(runtime: &HsaState, address: usize) -> Option<Pointe
             .map(|(&agent, _)| HsaAgent { handle: agent })
             .collect();
         let host_access = mapping.access.iter().any(|(handle, access)| {
-            runtime.is_cpu_agent(HsaAgent { handle: *handle })
+            runtime.agents.is_cpu_agent(HsaAgent { handle: *handle })
                 && access.permissions != ACCESS_PERMISSION_NONE
         });
         let owner = pool_owner(runtime, handle.pool).unwrap_or(HsaAgent { handle: 0 });
@@ -110,7 +110,7 @@ fn vmem_pointer_description(runtime: &HsaState, address: usize) -> Option<Pointe
                 description.host_base = Some(start);
                 description.size = size;
                 description.alloc_flags = POINTER_ALLOC_HOST_ACCESS;
-                description.accessible = runtime.cpus.iter().enumerate()
+                description.accessible = runtime.agents.cpus.iter().enumerate()
                     .map(|(index, _)| HsaAgent { handle: CPU_AGENT + index as u64 }).collect();
                 if let Ok(service) = svm_service(runtime, None) {
                     use rocddi::memory::advice::{AdviceProperty, AdviceQuery, AdviceState, AdviceValue};
@@ -131,7 +131,7 @@ fn vmem_pointer_description(runtime: &HsaState, address: usize) -> Option<Pointe
                             };
                         }
                     }
-                    for (index, gpu) in runtime.gpus.iter().enumerate() {
+                    for (index, gpu) in runtime.agents.gpus.iter().enumerate() {
                         let Ok(target) = service.target(&gpu.device) else { continue; };
                         let query = rocddi::memory::advice::AdviceQuery::Access(target);
                         if service.query(start as u64, size as u64, &[query]).is_ok_and(|values| {
@@ -151,7 +151,7 @@ fn vmem_pointer_description(runtime: &HsaState, address: usize) -> Option<Pointe
 
 /// Returns a host-accessible address for a validated copy range.
 pub(crate) fn host_copy_address(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     address: usize,
     size: usize,
     required_access: u32,
@@ -166,7 +166,7 @@ pub(crate) fn host_copy_address(
                 .accessible
                 .iter()
                 .copied()
-                .filter(|agent| runtime.is_cpu_agent(*agent))
+                .filter(|agent| runtime.agents.is_cpu_agent(*agent))
                 .any(|agent| {
                     vmem_copy_access(runtime, &description, agent, required_access).is_ok()
                 })
@@ -260,7 +260,7 @@ pub(crate) unsafe fn write_pointer_info(
 
 /// Attaches caller data to a tracked allocation or reserved address range.
 pub(crate) fn set_pointer_userdata(
-    runtime: &mut HsaState,
+    runtime: &mut HsaSession,
     address: usize,
     user_data: usize,
 ) -> bool {

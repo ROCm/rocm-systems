@@ -781,6 +781,14 @@ public:
   Operand ssrc0;
 };
 
+class SGetBarrierStateSop1 : public Sop1 {
+public:
+  SGetBarrierStateSop1(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand sdst;
+  Operand ssrc0;
+};
+
 } // namespace rdna4
 } // namespace rocjitsu
 

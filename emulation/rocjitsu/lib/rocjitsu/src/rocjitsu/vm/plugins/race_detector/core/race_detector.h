@@ -57,8 +57,11 @@ public:
                           std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
                           IntervalSet ldsIntervals,
                           std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                          MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0,
+                          VgprWriteOrder writeOrder, uint8_t lastRegisterByteMask = 0,
                           LdsAccess ldsAccess = {});
+
+  /// Attach the LDS footprint after a mixed FLAT issue successfully translates its global lanes.
+  void attachLdsIntervals(EventId event, IntervalSet intervals);
 
   /// Transition an event from ACTIVE to WAVE_COMPLETE.
   void markEventWaveComplete(EventId);
@@ -66,11 +69,18 @@ public:
   /// Satisfy the event's obligations covered by one wait-counter update.
   /// Returns true once every obligation for the event has been satisfied.
   bool satisfyEventWaitCounter(EventId, amdgpu::WaitCounterType);
+  bool appendCounterOnly(EventId id, amdgpu::MemoryCounterObligation issue,
+                         EventRegistry::RoutedChanges *changes) {
+    return events_.appendCounterOnly(id, issue, changes);
+  }
 
   /// Retire an event. For LDS-touching events, removes from live lists
   /// and decrements per-byte counts. All events are marked RETIRED in the
   /// registry, enabling prefix trimming.
   void retireEvent(EventId);
+  /// Publish a completed LDS portion at a workgroup barrier. Its VGPR result
+  /// and other counter obligations may still be active.
+  void retireLdsIntervals(EventId);
 
   /// Check for RAW hazards: no outstanding LDS writes overlap the range.
   /// Same-wave operations are ordered only when both belong to the same
@@ -97,6 +107,10 @@ public:
   bool mayConflict(const IntervalSet &accessed, WaveId wave, bool isWrite,
                    MemoryOrderClass currentMemoryOrder) const;
 
+  /// SRC2 reads a second LDS operand and updates its first address atomically.
+  /// Both ranges share the issuing instruction's wait and barrier lifetime.
+  void attachSrc2Source(EventId id, IntervalSet sourceReads);
+
   /// True only when the complete access lies in the CU's logical LDS backing.
   bool validLdsRange(uint64_t address, uint64_t bytes) const {
     return bytes != 0 && address < ldsSizeBytes_ && bytes <= ldsSizeBytes_ - address;
@@ -110,6 +124,16 @@ public:
     return std::min(bytes, ldsSizeBytes_ - address) / elementBytes * elementBytes;
   }
 
+  void restoreRoutedChanges(const EventRegistry::RoutedChanges &changes) {
+    events_.restoreRoutedChanges(changes);
+  }
+  void supersedeFlatResult(EventId id, VgprWriteOrder replacement, uint32_t reg, uint64_t lanes,
+                           uint8_t bytes, EventRegistry::RoutedChanges *changes) {
+    events_.supersedeFlatResult(id, replacement, reg, lanes, bytes, changes);
+  }
+  void setConditionalVgprWrite(EventId id, ConditionalVgprWrite feedback) {
+    events_.setConditionalVgprWrite(id, feedback);
+  }
   const EventRegistry &events() const { return events_; }
 
   const std::vector<EventId> &getLdsWriteEvents() const { return ldsWriteEvents; }
@@ -132,6 +156,8 @@ public:
   }
 
 private:
+  void indexLdsIntervals(EventId event);
+
   struct LdsChunkCounts {
     int bytes = 0;
     /// When bytes > 0, a nonnegative owner proves that every counted event
@@ -146,6 +172,12 @@ private:
   static bool hasPotentialLdsConflict(int addr, int nBytes,
                                       const std::vector<LdsChunkCounts> &counts, WaveId wave,
                                       MemoryOrderClass currentMemoryOrder);
+
+  struct Src2Event {
+    EventId id;
+    IntervalSet sourceReads;
+  };
+  std::vector<Src2Event> src2Events;
 
   /// Active LDS write events (for scanning during read validation).
   std::vector<EventId> ldsWriteEvents;

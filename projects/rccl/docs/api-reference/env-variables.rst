@@ -1687,14 +1687,19 @@ threshold table introduced for gfx1250.
         | ``0``: Use vector loads and stores.
 
     * - | ``RCCL_DDA_BC``
-        | Opt-in for DDA ``ncclBroadcast`` on the gfx1250 fabric path. When ``-1``
-          (default), Broadcast follows the per-architecture table, which has no
-          Broadcast DDA tier, so Broadcast keeps its previous path. When enabled, the
-          DDA LL and LL128 tier ceilings still apply; the table sets both to ``0`` for
-          Broadcast, so also set ``RCCL_DDA_LL_THRESHOLD`` or
-          ``RCCL_DDA_LL128_THRESHOLD``, which apply to every collective. Ignored when
+        | Controls DDA ``ncclBroadcast`` on the gfx1250 fabric path. When ``-1``
+          (default), Broadcast follows the per-architecture table. On gfx1250 the
+          table sets the DDA LL ceiling to 16 KiB and the DDA LL128 ceiling to
+          128 KiB on both SPX and DPX, so DDA Broadcast is on by default there;
+          the other tables have no
+          Broadcast DDA tier, so Broadcast keeps its previous path. The DDA LL and LL128
+          tier ceilings always apply, and ``RCCL_DDA_LL_THRESHOLD`` and
+          ``RCCL_DDA_LL128_THRESHOLD`` apply to every collective: when set they
+          replace the table ceilings, so setting them for another collective also
+          changes the Broadcast ceilings. Where the table has no Broadcast tier,
+          enabling DDA Broadcast also needs one of those thresholds. Ignored when
           ``NCCL_ALGO`` is set or ``RCCL_DDA_ENABLE=0``.
-      - | ``-1``: Follow the per-arch table; currently off (default).
+      - | ``-1``: Follow the per-arch table; on for gfx1250, off elsewhere (default).
         | ``0``: Disable DDA Broadcast.
         | ``1`` (or any positive value): Enable DDA Broadcast, subject to the tier
           ceilings and eligibility checks.
@@ -1706,6 +1711,26 @@ threshold table introduced for gfx1250.
       - | ``0``: Resolved from the per-arch table at runtime (default).
         | ``N``: Use ``N`` threads per block, overriding the table. ``N`` must be a
           multiple of 32 from 32 to 1024. Pre-table default: ``256``.
+
+    * - | ``RCCL_DDA_LL128_RS_THREADS``
+        | Threads per block for the batched gfx1250 DDA fabric LL128
+          ``ncclReduceScatter`` kernel. When ``0`` (default), resolved from
+          ``ddaRsLL128Threads`` in the arch table: the gfx1250 table uses 256
+          threads on every partition but DPX, and every other case uses 512.
+          Values that are not a multiple of 32 from 32 to 512 are ignored. The
+          peer-parallel kernel sizes its own block, a warp per rank, up to 512
+          threads.
+      - | ``0``: Resolved from the per-arch table at runtime (default).
+        | ``N``: Use ``N`` threads per block, overriding the table. ``N`` must be a
+          multiple of 32 from 32 to 512. Pre-table default: ``512``.
+
+    * - | ``RCCL_DDA_LL128_RS_PEER_MAX_BYTES``
+        | Largest message in bytes the gfx1250 DDA fabric LL128 ``ncclReduceScatter``
+          sends through its peer-parallel kernel. Larger messages take the batched
+          kernel.
+      - | ``-1``: Resolved from the per-arch table at runtime (default).
+        | ``0``: Use the batched kernel at every size.
+        | ``N`` (bytes): Use the peer-parallel kernel up to ``N``, overriding the table.
 
     * - | ``RCCL_DDA_BC_MAX_BLOCKS``
         | Lowers the per-rank block budget of the DDA Broadcast kernels. The
@@ -1728,6 +1753,13 @@ threshold table introduced for gfx1250.
           Requires ``RCCL_DDA_BC`` to be enabled.
       - | ``0``: Fabric path only (default).
         | ``1``: Also consider DDA LL on the IPC path.
+
+    * - | ``RCCL_DDA_LL128_BC_THREADS``
+        | Block size (threads per block) of the DDA LL128 one-shot Broadcast
+          kernel. A value that is not a multiple of the LL128 warp (32 on gfx1250),
+          or is larger than 512, is ignored and the default is used.
+      - | ``512``: Default.
+        | ``N``: A multiple of the LL128 warp, at most ``512``.
 
     * - | ``RCCL_CE_ALLREDUCE``
         | Enables the Copy Engine (CE) registered-window AllReduce path. When ``-1`` (auto),

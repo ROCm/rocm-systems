@@ -178,11 +178,14 @@ set(SRC_FILES
   algorithms/dda/alltoall/alltoall_dda_fabric_ll.h
   algorithms/dda/alltoall/alltoall_dda_fabric_ll128.h
   algorithms/dda/broadcast/broadcast_dda_fabric_ll.h
+  algorithms/dda/broadcast/broadcast_dda_fabric_ll128.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll128.h
   algorithms/gin/gin_all_gather.h
+  algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll128_peerpar.h
+  algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll_spread.h
   algorithms/gin/gin_alltoall.h
   algorithms/gin/gin_all_reduce.h
   algorithms/gin/gin_all_reduce_policy.h

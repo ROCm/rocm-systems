@@ -17,31 +17,17 @@
 
 #include "ScopedHook.h"
 #include "fakes/devcomm_fakes.h"
+#include "fakes/gin_fakes.h"
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/param_redirect.h"
 #include "sym_kernels.h"
 
-// Neuter __global__: a real definition needs hipLaunchKernel/__hipRegisterFunction, unavailable under -no-hip-rt.
-#undef __global__
-#define __global__
-
-#include "fakes/sym_kernels_test_stubs.h"
-
-#include SYM_KERNELS_HOST_CC_PATH
-
-#undef __global__
+#include "fakes/sym_kernels_host_include.h"
 
 #include SYM_KERNELS_CC_PATH
 
 #include "SymTdmTestHelpers.h"
-
-// sym_kernels.cc asks for the railed GIN backend; gin_host.cc is not linked into this binary.
-std::function<ncclGinType_t(ncclComm*)> g_railedGinType = [](ncclComm*) { return NCCL_GIN_TYPE_NONE; };
-ncclResult_t ncclGetRailedGinType(struct ncclComm* comm, ncclGinType_t* ginType) {
-  *ginType = g_railedGinType(comm);
-  return ncclSuccess;
-}
 
 namespace {
 
@@ -651,6 +637,20 @@ TEST_F(SymKernelMicrotest, SymkAvailable_AllReduceFloat64_NotAvailable) {
   comm_->symmetricSupport = true;  // otherwise the first guard answers before f64 is considered
   ASSERT_TRUE(ncclSymkAvailable(comm_.get(), ncclFuncAllReduce, ncclDevSum, ncclFloat32, /*nElts=*/1024));
   EXPECT_FALSE(ncclSymkAvailable(comm_.get(), ncclFuncAllReduce, ncclDevSum, ncclFloat64, /*nElts=*/1024));
+}
+
+// An all-direct-link comm without symmetric memory is not offered the symmetric kernels.
+TEST_F(SymKernelMicrotest, SymkAvailable_NoSymmetricSupport_NotAvailable) {
+  comm_->isAllDirectNvlink = true;
+  comm_->symmetricSupport = 0;
+  EXPECT_FALSE(ncclSymkAvailable(comm_.get(), ncclFuncAllGather, ncclDevSum, ncclFloat32, /*nElts=*/1024));
+}
+
+// The same comm with symmetric support is offered them, so the flag alone makes the difference.
+TEST_F(SymKernelMicrotest, SymkAvailable_SymmetricSupport_Available) {
+  comm_->isAllDirectNvlink = true;
+  comm_->symmetricSupport = 1;
+  EXPECT_TRUE(ncclSymkAvailable(comm_.get(), ncclFuncAllGather, ncclDevSum, ncclFloat32, /*nElts=*/1024));
 }
 
 // HIP builds no AlltoAll_LL kernel (it is inline PTX), so the symmetric path must never be offered for AlltoAll, even
