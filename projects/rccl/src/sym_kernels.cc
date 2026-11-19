@@ -455,7 +455,7 @@ bool ncclSymkIsGfx1250(struct ncclComm* comm) {
 #endif
 
 // The hierarchical AllGather is tuned and validated only on gfx1250 in partition mode.
-static bool ncclSymkAgHierAvailable(struct ncclComm* comm) {
+bool ncclSymkAgHierAvailable(struct ncclComm* comm) {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   return ncclSymkIsGfx1250(comm) && comm->hasMloPart;
 #else
