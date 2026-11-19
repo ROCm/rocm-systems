@@ -268,6 +268,24 @@ if [[ -n "$NUM_RANKS" ]]; then
     fi
 fi
 
+# Type coverage: ROCSHMEM_TEST_TYPES=<minimal|full|type1:type2:...> is forwarded
+# to the test binary as -types. The binary's arguments always come last on the
+# command line (after any MPI launcher flags), so appending is safe for both
+# MPI and SLR launch modes. Tests without type variants ignore it.
+# Entries registered with a fixed coverage (the *_typesfull tests) already
+# carry -types and are left untouched.
+HAS_TYPES_ARG=false
+for arg in "$@"; do
+    if [[ "$arg" == "-types" ]]; then
+        HAS_TYPES_ARG=true
+        break
+    fi
+done
+if [[ -n "${ROCSHMEM_TEST_TYPES}" ]] && ! $HAS_TYPES_ARG; then
+    set -- "$@" -types "${ROCSHMEM_TEST_TYPES}"
+    echo "Type coverage: ${ROCSHMEM_TEST_TYPES} (from ROCSHMEM_TEST_TYPES)"
+fi
+
 # Setup log directory and file (matching driver.sh behavior)
 # Use environment variable LOG_DIR if set, otherwise use current directory
 LOG_DIR=${ROCSHMEM_TEST_LOG_DIR:-${LOG_DIR:-.}}

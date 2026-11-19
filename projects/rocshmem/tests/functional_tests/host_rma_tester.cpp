@@ -33,6 +33,11 @@
 using namespace rocshmem;
 
 namespace {
+// Signal values for the host put-with-signal tests (SET writes the absolute
+// value; ADD accumulates onto a zero-initialized word).
+constexpr uint64_t kSigSetVal = 0xC0DEULL;
+constexpr uint64_t kSigAddIncr = 7ULL;
+
 /*
  * Optional host-side benchmark for the host-initiated RMA path (put/get),
  * gated by ROCSHMEM_HOST_BENCH=1 so the default correctness behavior is
@@ -82,6 +87,7 @@ HostRmaTester::HostRmaTester(TesterArguments args) : Tester(args) {
   dest_buf    = reinterpret_cast<char *>(alloc_test_buffer(max_msg_size));
   amo_buf     = reinterpret_cast<long *>(alloc_test_buffer(sizeof(long)));
   amo_int_buf = reinterpret_cast<int  *>(alloc_test_buffer(sizeof(int)));
+  sig_buf     = reinterpret_cast<uint64_t *>(alloc_test_buffer(sizeof(uint64_t)));
   wait_buf    = reinterpret_cast<long *>(alloc_test_buffer(WAIT_NELEMS * sizeof(long)));
 
   // Host RMA is CPU-driven, so the base GPU-cycle-timer table is meaningless
@@ -95,6 +101,7 @@ HostRmaTester::~HostRmaTester() {
   free_test_buffer(dest_buf);
   free_test_buffer(amo_buf);
   free_test_buffer(amo_int_buf);
+  free_test_buffer(sig_buf);
   free_test_buffer(wait_buf);
 }
 
@@ -104,6 +111,8 @@ void HostRmaTester::resetBuffers(size_t size) {
   memset(dest_buf, 0, size);
   *amo_buf     = 0L;
   *amo_int_buf = 0;
+  *sig_buf     = 0ULL;
+  sig_fetched  = 0ULL;
   for (size_t i = 0; i < WAIT_NELEMS; i++)
     wait_buf[i] = 0L;
   p2p_result_idx = SIZE_MAX;
@@ -143,6 +152,34 @@ void HostRmaTester::launchKernel([[maybe_unused]] dim3 gridSize,
           rocshmem_getmem(dest_buf, source_buf, size, peer);
           rocshmem_quiet();
         }
+      }
+      break;
+
+    // -----------------------------------------------------------------------
+    // Host put-with-signal (verbs transport). Both PEs launch here (see
+    // peLaunchesKernel), with NO barrier between them: PE 1 is already spinning
+    // in signal_wait_until while PE 0's put_signal is still in flight, so this
+    // exercises a genuine remote-signal-arrives-mid-spin, not a pre-satisfied
+    // predicate. PE 0 delivers the payload (which naturally precedes the signal
+    // on the same RC QP), guaranteeing PE 1 spins before the signal lands.
+    // -----------------------------------------------------------------------
+    case HostPutmemSignalTestType:
+      if (my_pe == 0) {
+        rocshmem_putmem_signal(dest_buf, source_buf, size, sig_buf, kSigSetVal,
+                               ROCSHMEM_SIGNAL_SET, peer);
+      } else if (my_pe == 1) {
+        rocshmem_signal_wait_until(sig_buf, ROCSHMEM_CMP_EQ, kSigSetVal);
+        sig_fetched = rocshmem_signal_fetch(sig_buf);
+      }
+      break;
+
+    case HostPutmemSignalAddTestType:
+      if (my_pe == 0) {
+        rocshmem_putmem_signal(dest_buf, source_buf, size, sig_buf, kSigAddIncr,
+                               ROCSHMEM_SIGNAL_ADD, peer);
+      } else if (my_pe == 1) {
+        rocshmem_signal_wait_until(sig_buf, ROCSHMEM_CMP_GE, kSigAddIncr);
+        sig_fetched = rocshmem_signal_fetch(sig_buf);
       }
       break;
 
@@ -468,6 +505,30 @@ void HostRmaTester::verifyResults(size_t size) {
                       << " expected " << static_cast<int>(expected) << "\n";
             rocshmem_global_exit(1);
           }
+        }
+      }
+      break;
+
+    case HostPutmemSignalTestType:
+    case HostPutmemSignalAddTestType:
+      // PE 1 already waited on the signal and fetched it in launchKernel (a
+      // genuine wait-then-arrive); here we validate the payload and the value.
+      if (my_pe == 1) {
+        uint64_t expected_sig =
+            (_type == HostPutmemSignalTestType) ? kSigSetVal : kSigAddIncr;
+        for (size_t i = 0; i < size; i++) {
+          char expected = static_cast<char>('A' + (0 + i) % 26);
+          if (dest_buf[i] != expected) {
+            std::cerr << "[PE " << my_pe << "] PutmemSignal data mismatch at ["
+                      << i << "]: got " << static_cast<int>(dest_buf[i])
+                      << " expected " << static_cast<int>(expected) << "\n";
+            rocshmem_global_exit(1);
+          }
+        }
+        if (sig_fetched != expected_sig) {
+          std::cerr << "[PE " << my_pe << "] PutmemSignal signal mismatch: got "
+                    << sig_fetched << " expected " << expected_sig << "\n";
+          rocshmem_global_exit(1);
         }
       }
       break;

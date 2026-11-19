@@ -15,9 +15,9 @@
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 
 // Round four finite FP64 values to FP16 encodings in four 32-bit elements.
-template <bool Rtz> inline __m128i mixed_half_narrow4(__m256d value, bool saturate) {
-  // Adapted from rocjitsu's round_finite_f16_simd, with nearest-even and round-toward-zero
-  // variants.
+inline __m128i mixed_half_narrow4(__m256d value, bool saturate, unsigned rounding = 0) {
+  // Guest controls affect integer
+  // rounding only, leaving host FP controls unchanged.
   auto bits = _mm256_castpd_si256(value);
   auto exponent = _mm256_and_si256(_mm256_srli_epi64(bits, 52), _mm256_set1_epi64x(2047));
   auto significand = _mm256_or_si256(_mm256_and_si256(bits, _mm256_set1_epi64x(0x000fffffffffffff)),
@@ -32,7 +32,13 @@ template <bool Rtz> inline __m128i mixed_half_narrow4(__m256d value, bool satura
       rounded,
       _mm256_and_si256(
           normal, _mm256_slli_epi64(_mm256_sub_epi64(exponent, _mm256_set1_epi64x(1009)), 10)));
-  if constexpr (!Rtz) {
+  const auto zero = _mm256_setzero_si256();
+  const auto ones = _mm256_set1_epi64x(-1);
+  const auto negative = _mm256_cmpgt_epi64(zero, bits);
+  const auto away = rounding == 1   ? _mm256_andnot_si256(negative, ones)
+                    : rounding == 2 ? negative
+                                    : zero;
+  if (rounding == 0) {
     auto unit = _mm256_sllv_epi64(_mm256_set1_epi64x(1), shift);
     auto remainder = _mm256_and_si256(significand, _mm256_sub_epi64(unit, _mm256_set1_epi64x(1)));
 
@@ -43,11 +49,25 @@ template <bool Rtz> inline __m128i mixed_half_narrow4(__m256d value, bool satura
                          _mm256_sub_epi64(_mm256_setzero_si256(),
                                           _mm256_and_si256(rounded, _mm256_set1_epi64x(1)))));
     rounded = _mm256_sub_epi64(rounded, _mm256_and_si256(increment, not_tiny));
+  } else if (rounding != 3) {
+    const auto unit = _mm256_sllv_epi64(_mm256_set1_epi64x(1), shift);
+    const auto remainder =
+        _mm256_and_si256(significand, _mm256_sub_epi64(unit, _mm256_set1_epi64x(1)));
+    const auto nonzero =
+        _mm256_cmpgt_epi64(_mm256_and_si256(bits, _mm256_set1_epi64x(INT64_MAX)), zero);
+    const auto increment =
+        _mm256_and_si256(away, _mm256_andnot_si256(_mm256_cmpeq_epi64(remainder, zero), nonzero));
+    rounded = _mm256_sub_epi64(rounded, increment);
   }
   auto overflow = _mm256_or_si256(_mm256_cmpgt_epi64(exponent, _mm256_set1_epi64x(1038)),
                                   _mm256_cmpgt_epi64(rounded, _mm256_set1_epi64x(0x7bff)));
-  rounded = _mm256_blendv_epi8(rounded, _mm256_set1_epi64x((saturate || Rtz) ? 0x7bff : 0x7c00),
-                               overflow);
+  auto overflow_value = _mm256_set1_epi64x(0x7bff);
+  if (!saturate) {
+    overflow_value = rounding == 0
+                         ? _mm256_set1_epi64x(0x7c00)
+                         : _mm256_blendv_epi8(overflow_value, _mm256_set1_epi64x(0x7c00), away);
+  }
+  rounded = _mm256_blendv_epi8(rounded, overflow_value, overflow);
   auto sign = _mm256_and_si256(_mm256_srli_epi64(bits, 48), _mm256_set1_epi64x(0x8000));
   auto packed = _mm256_shuffle_epi32(_mm256_or_si256(sign, rounded), _MM_SHUFFLE(2, 0, 2, 0));
   return _mm_unpacklo_epi64(_mm256_castsi256_si128(packed), _mm256_extracti128_si256(packed, 1));
@@ -55,9 +75,9 @@ template <bool Rtz> inline __m128i mixed_half_narrow4(__m256d value, bool satura
 
 // Return four FP16 mixed-FMA results with the selected rounding, saturation, and special-value
 // policy.
-template <bool Rtz>
 inline __m128i mixed_half_value4(__m128 a, __m128 b, __m128 c, bool saturate, bool clamp,
-                                 bool flush_output = false, bool keep_nan = false) {
+                                 bool flush_output = false, bool keep_nan = false,
+                                 unsigned rounding = 0) {
   auto x = _mm256_cvtps_pd(a), y = _mm256_cvtps_pd(b), z = _mm256_cvtps_pd(c);
   auto product = _mm256_mul_pd(x, y);
   auto value = _mm256_add_pd(product, z);
@@ -68,6 +88,22 @@ inline __m128i mixed_half_value4(__m128 a, __m128 b, __m128 c, bool saturate, bo
   auto error = _mm256_add_pd(_mm256_sub_pd(product, _mm256_sub_pd(value, virtual_c)),
                              _mm256_sub_pd(z, virtual_c));
   auto bits = _mm256_castpd_si256(value);
+  if (rounding == 2) {
+    // Downward cancellation is -0; matching signed-zero terms keep their sign.
+    const auto zero = _mm256_setzero_pd();
+    const auto sign = _mm256_set1_epi64x(INT64_MIN);
+    const auto matching_sign = _mm256_cmpeq_epi64(
+        _mm256_and_si256(_mm256_xor_si256(_mm256_castpd_si256(product), _mm256_castpd_si256(z)),
+                         sign),
+        _mm256_setzero_si256());
+    const auto matching_zero = _mm256_and_si256(
+        matching_sign, _mm256_castpd_si256(_mm256_and_pd(_mm256_cmp_pd(product, zero, _CMP_EQ_OQ),
+                                                         _mm256_cmp_pd(z, zero, _CMP_EQ_OQ))));
+    const auto cancellation = _mm256_andnot_si256(
+        matching_zero, _mm256_castpd_si256(_mm256_cmp_pd(value, zero, _CMP_EQ_OQ)));
+    bits = _mm256_or_si256(bits, _mm256_and_si256(cancellation, sign));
+  }
+
   auto even =
       _mm256_cmpeq_epi64(_mm256_and_si256(bits, _mm256_set1_epi64x(1)), _mm256_setzero_si256());
   auto adjust = _mm256_and_si256(
@@ -77,13 +113,23 @@ inline __m128i mixed_half_value4(__m128 a, __m128 b, __m128 c, bool saturate, bo
                          _mm256_setzero_si256());
   auto step = _mm256_blendv_epi8(_mm256_set1_epi64x(-1), _mm256_set1_epi64x(1), same_sign);
   bits = _mm256_add_epi64(bits, _mm256_and_si256(adjust, step));
-  auto result = mixed_half_narrow4<Rtz>(_mm256_castsi256_pd(bits), saturate);
+  auto result = mixed_half_narrow4(_mm256_castsi256_pd(bits), saturate, rounding);
 
   if (flush_output) {
     auto magnitude = _mm256_and_pd(_mm256_castsi256_pd(bits),
                                    _mm256_castsi256_pd(_mm256_set1_epi64x(INT64_MAX)));
-    auto tiny = _mm256_castpd_si256(
-        _mm256_cmp_pd(magnitude, _mm256_set1_pd(0x1p-14 - 0x1p-26), _CMP_LT_OQ));
+    const auto negative = _mm256_cmpgt_epi64(_mm256_setzero_si256(), bits);
+    const auto away = rounding == 1   ? _mm256_andnot_si256(negative, _mm256_set1_epi64x(-1))
+                      : rounding == 2 ? negative
+                                      : _mm256_setzero_si256();
+    const auto threshold =
+        rounding == 0 ? _mm256_set1_pd(0x1p-14 - 0x1p-26)
+                      : _mm256_blendv_pd(_mm256_set1_pd(0x1p-14), _mm256_set1_pd(0x1p-14 - 0x1p-25),
+                                         _mm256_castsi256_pd(away));
+    auto tiny = _mm256_or_si256(
+        _mm256_castpd_si256(_mm256_cmp_pd(magnitude, threshold, _CMP_LT_OQ)),
+        _mm256_and_si256(away,
+                         _mm256_castpd_si256(_mm256_cmp_pd(magnitude, threshold, _CMP_EQ_OQ))));
     auto packed = _mm256_shuffle_epi32(tiny, _MM_SHUFFLE(2, 0, 2, 0));
     auto mask =
         _mm_unpacklo_epi64(_mm256_castsi256_si128(packed), _mm256_extracti128_si256(packed, 1));

@@ -603,18 +603,25 @@ inline void execute_mixed_fma(Wavefront &wave, FloatTernaryWave32Function wave32
                               FloatTernaryWave64Function wave64, uint64_t flags, uint64_t modifiers,
                               const Operand &destination, const Operand &lhs, const Operand &rhs,
                               const Operand &third, unsigned narrow_sources,
-                              uint8_t destination_bytes, bool rdna3, bool cdna5 = false) {
+                              uint8_t destination_bytes, bool rdna3,
+                              bool preserve_half_denormals = false, bool gfx908 = false) {
   const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
   if (!wave.exec())
     return;
   const unsigned half_sources = unsigned((modifiers >> 13) & 7);
   const bool half_output = destination_bytes != 0xF;
-  // The inherited gfx1250 mixed model preserves half inputs and half results.
-  // Its FP32-result form still applies MODE to FP32 inputs and outputs.
-  const unsigned denorm32 = cdna5 && half_output ? 3u : wave.fp_denorm_mode_f32();
-  const unsigned denorm16 = cdna5 ? 3u : wave.fp_denorm_mode_f16_f64();
+  // The inherited gfx10/gfx1150/gfx1250 models preserve half inputs and results.
+  // Half outputs also preserve FP32 inputs; FP32 outputs apply their own MODE.
+  const unsigned denorm32 = preserve_half_denormals && half_output ? 3u : wave.fp_denorm_mode_f32();
+  const unsigned denorm16 = gfx908                    ? denorm32
+                            : preserve_half_denormals ? 3u
+                                                      : wave.fp_denorm_mode_f16_f64();
   const unsigned rounding = half_output ? wave.fp_round_mode_f16_f64() : wave.fp_round_mode_f32();
   flags |= uint64_t(rounding) << 24;
+  // gfx908 rounds to guest FP32 before its independently rounded half result.
+  if (gfx908 && half_output) {
+    flags |= uint64_t(wave.fp_round_mode_f32()) << 28;
+  }
   if (rdna3 && !wave.dx10_clamp())
     flags |= RJ_ARITH_FP_DX10_CLAMP_OFF;
   if ((denorm32 ^ denorm16) & 1)
