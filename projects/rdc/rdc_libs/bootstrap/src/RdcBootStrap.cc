@@ -117,6 +117,9 @@ rdc_status_t rdc_job_get_stats(rdc_handle_t p_rdc_handle, const char job_id[64],
   if (!p_rdc_handle) {
     return RDC_ST_INVALID_HANDLER;
   }
+  if (!job_id || !rdc_valid_job_id(job_id, strnlen(job_id, kRdcJobIdSize))) {
+    return RDC_ST_BAD_PARAMETER;
+  }
 
   return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->rdc_job_get_stats(job_id, p_job_info);
 }
@@ -126,6 +129,9 @@ rdc_status_t rdc_job_start_stats(rdc_handle_t p_rdc_handle, rdc_gpu_group_t grou
   if (!p_rdc_handle) {
     return RDC_ST_INVALID_HANDLER;
   }
+  if (!job_id || !rdc_valid_job_id(job_id, strnlen(job_id, kRdcJobIdSize))) {
+    return RDC_ST_BAD_PARAMETER;
+  }
 
   return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
       ->rdc_job_start_stats(groupId, job_id, update_freq);
@@ -134,6 +140,9 @@ rdc_status_t rdc_job_start_stats(rdc_handle_t p_rdc_handle, rdc_gpu_group_t grou
 rdc_status_t rdc_job_remove(rdc_handle_t p_rdc_handle, const char job_id[64]) {
   if (!p_rdc_handle) {
     return RDC_ST_INVALID_HANDLER;
+  }
+  if (!job_id || !rdc_valid_job_id(job_id, strnlen(job_id, kRdcJobIdSize))) {
+    return RDC_ST_BAD_PARAMETER;
   }
 
   return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->rdc_job_remove(job_id);
@@ -151,6 +160,9 @@ rdc_status_t rdc_job_stop_stats(rdc_handle_t p_rdc_handle, const char job_id[64]
   if (!p_rdc_handle) {
     return RDC_ST_INVALID_HANDLER;
   }
+  if (!job_id || !rdc_valid_job_id(job_id, strnlen(job_id, kRdcJobIdSize))) {
+    return RDC_ST_BAD_PARAMETER;
+  }
 
   return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->rdc_job_stop_stats(job_id);
 }
@@ -159,6 +171,9 @@ rdc_status_t rdc_group_gpu_create(rdc_handle_t p_rdc_handle, rdc_group_type_t ty
                                   const char* group_name, rdc_gpu_group_t* p_rdc_group_id) {
   if (!p_rdc_handle) {
     return RDC_ST_INVALID_HANDLER;
+  }
+  if (!group_name || !rdc_valid_name(group_name, strnlen(group_name, RDC_MAX_STR_LENGTH))) {
+    return RDC_ST_BAD_PARAMETER;
   }
 
   return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
@@ -214,6 +229,9 @@ rdc_status_t rdc_group_field_create(rdc_handle_t p_rdc_handle, uint32_t num_fiel
                                     rdc_field_grp_t* rdc_field_group_id) {
   if (!p_rdc_handle || !field_ids || !field_group_name || !rdc_field_group_id) {
     return RDC_ST_INVALID_HANDLER;
+  }
+  if (!rdc_valid_name(field_group_name, strnlen(field_group_name, RDC_MAX_STR_LENGTH))) {
+    return RDC_ST_BAD_PARAMETER;
   }
 
   return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)

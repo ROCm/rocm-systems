@@ -28,6 +28,7 @@ THE SOFTWARE.
 #include <algorithm>
 #include <chrono>  // NOLINT
 #include <csignal>
+#include <cstring>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -43,6 +44,28 @@ THE SOFTWARE.
 
 namespace amd {
 namespace rdc {
+
+namespace {
+
+// A char array from librdc as a string: up to its first NUL, or all of it.
+template <size_t N>
+std::string array_string(const char (&chars)[N]) {
+  return std::string(chars, strnlen(chars, N));
+}
+
+// A count from librdc, at most the length of the array it counts.
+template <typename T, size_t N>
+uint32_t clamp_count(uint64_t count, const T (&)[N]) {
+  return static_cast<uint32_t>(std::min<uint64_t>(count, N));
+}
+
+// The status of a request whose job ID does not fit the C API (char[64]) or
+// has control characters, which rdcd's log would carry; else RDC_ST_OK.
+rdc_status_t check_job_id(const std::string& job_id) {
+  return rdc_valid_job_id(job_id.data(), job_id.size()) ? RDC_ST_OK : RDC_ST_BAD_PARAMETER;
+}
+
+}  // namespace
 
 std::mutex RdcAPIServiceImpl::policy_mutex_;
 std::map<uint32_t, std::vector<std::shared_ptr<RdcAPIServiceImpl::PolicyStream>>>
@@ -130,13 +153,14 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
   if (!reply) {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty reply");
   }
-  uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES];
+  uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES] = {};
   uint32_t count = 0;
   rdc_status_t result = rdc_device_get_all(rdc_handle_, gpu_index_list, &count);
   reply->set_status(result);
   if (result != RDC_ST_OK) {
     return ::grpc::Status::OK;
   }
+  count = clamp_count(count, gpu_index_list);
   for (uint32_t i = 0; i < count; i++) {
     reply->add_gpus(gpu_index_list[i]);
   }
@@ -156,7 +180,7 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
   rdc_status_t result = rdc_device_get_attributes(rdc_handle_, gpu_index, &attribute);
 
   ::rdc::DeviceAttributes* attr = reply->mutable_attributes();
-  attr->set_device_name(attribute.device_name);
+  attr->set_device_name(array_string(attribute.device_name));
 
   reply->set_status(result);
 
@@ -175,7 +199,7 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
   rdc_component_version_t compv = {};
   rdc_status_t result = rdc_device_get_component_version(rdc_handle_, component, &compv);
 
-  reply->set_version(compv.version);
+  reply->set_version(array_string(compv.version));
   reply->set_status(result);
   return ::grpc::Status::OK;
 }
@@ -188,10 +212,14 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
 
+  const std::string& group_name = request->group_name();
+  if (!rdc_valid_name(group_name.data(), group_name.size())) {
+    reply->set_status(RDC_ST_BAD_PARAMETER);
+    return ::grpc::Status::OK;
+  }
   rdc_gpu_group_t group_id = 0;
-  rdc_status_t result =
-      rdc_group_gpu_create(rdc_handle_, static_cast<rdc_group_type_t>(request->type()),
-                           request->group_name().c_str(), &group_id);
+  rdc_status_t result = rdc_group_gpu_create(
+      rdc_handle_, static_cast<rdc_group_type_t>(request->type()), group_name.c_str(), &group_id);
   reply->set_status(result);
   if (result != RDC_ST_OK) {
     return ::grpc::Status::OK;
@@ -224,15 +252,16 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
 
-  rdc_group_info_t group_info;
+  rdc_group_info_t group_info = {};
   rdc_status_t result = rdc_group_gpu_get_info(rdc_handle_, request->group_id(), &group_info);
   reply->set_status(result);
   if (result != RDC_ST_OK) {
     return ::grpc::Status::OK;
   }
 
-  reply->set_group_name(group_info.group_name);
-  for (uint32_t i = 0; i < group_info.count; i++) {
+  reply->set_group_name(array_string(group_info.group_name));
+  const uint32_t count = clamp_count(group_info.count, group_info.entity_ids);
+  for (uint32_t i = 0; i < count; i++) {
     reply->add_entity_ids(group_info.entity_ids[i]);
   }
 
@@ -246,7 +275,7 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
 
-  rdc_gpu_group_t group_id_list[RDC_MAX_NUM_GROUPS];
+  rdc_gpu_group_t group_id_list[RDC_MAX_NUM_GROUPS] = {};
   uint32_t count = 0;
   rdc_status_t result = rdc_group_get_all_ids(rdc_handle_, group_id_list, &count);
   reply->set_status(result);
@@ -254,6 +283,7 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
     return ::grpc::Status::OK;
   }
 
+  count = clamp_count(count, group_id_list);
   for (uint32_t i = 0; i < count; i++) {
     reply->add_group_ids(group_id_list[i]);
   }
@@ -268,7 +298,7 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
 
-  rdc_field_grp_t field_group_id_list[RDC_MAX_NUM_FIELD_GROUPS];
+  rdc_field_grp_t field_group_id_list[RDC_MAX_NUM_FIELD_GROUPS] = {};
   uint32_t count = 0;
   rdc_status_t result = rdc_group_field_get_all_ids(rdc_handle_, field_group_id_list, &count);
   reply->set_status(result);
@@ -276,6 +306,7 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
     return ::grpc::Status::OK;
   }
 
+  count = clamp_count(count, field_group_id_list);
   for (uint32_t i = 0; i < count; i++) {
     reply->add_field_group_ids(field_group_id_list[i]);
   }
@@ -313,8 +344,14 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
                           "field_ids count exceeds RDC_MAX_FIELD_IDS_PER_FIELD_GROUP");
   }
 
-  rdc_field_grp_t field_group_id;
-  rdc_field_t field_ids[RDC_MAX_FIELD_IDS_PER_FIELD_GROUP];
+  const std::string& field_group_name = request->field_group_name();
+  if (!rdc_valid_name(field_group_name.data(), field_group_name.size())) {
+    reply->set_status(RDC_ST_BAD_PARAMETER);
+    return ::grpc::Status::OK;
+  }
+
+  rdc_field_grp_t field_group_id = 0;
+  rdc_field_t field_ids[RDC_MAX_FIELD_IDS_PER_FIELD_GROUP] = {};
   for (int i = 0; i < request_count; i++) {
     // Checked as a number: an ID that RDC does not know is not a value of rdc_field_t.
     if (!amd::rdc::is_field_id_valid(request->field_ids(i))) {
@@ -323,9 +360,8 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
     }
     field_ids[i] = static_cast<rdc_field_t>(request->field_ids(i));
   }
-  rdc_status_t result =
-      rdc_group_field_create(rdc_handle_, request_count, &field_ids[0],
-                             request->field_group_name().c_str(), &field_group_id);
+  rdc_status_t result = rdc_group_field_create(rdc_handle_, request_count, &field_ids[0],
+                                               field_group_name.c_str(), &field_group_id);
   reply->set_status(result);
   if (result != RDC_ST_OK) {
     return ::grpc::Status::OK;
@@ -363,7 +399,7 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
 
-  rdc_field_group_info_t field_info;
+  rdc_field_group_info_t field_info = {};
   rdc_status_t result =
       rdc_group_field_get_info(rdc_handle_, request->field_group_id(), &field_info);
   reply->set_status(result);
@@ -371,8 +407,9 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
     return ::grpc::Status::OK;
   }
 
-  reply->set_filed_group_name(field_info.group_name);
-  for (uint32_t i = 0; i < field_info.count; i++) {
+  reply->set_filed_group_name(array_string(field_info.group_name));
+  const uint32_t count = clamp_count(field_info.count, field_info.field_ids);
+  for (uint32_t i = 0; i < count; i++) {
     reply->add_field_ids(field_info.field_ids[i]);
   }
 
@@ -421,7 +458,7 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
     reply->set_status(RDC_ST_NOT_SUPPORTED);
     return ::grpc::Status::OK;
   }
-  rdc_field_value value;
+  rdc_field_value value = {};
   rdc_status_t result = rdc_field_get_latest_value(
       rdc_handle_, request->gpu_index(), static_cast<rdc_field_t>(request->field_id()), &value);
   reply->set_status(result);
@@ -438,7 +475,7 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
   } else if (value.type == DOUBLE) {
     reply->set_dbl(value.value.dbl);
   } else if (value.type == STRING || value.type == BLOB) {
-    reply->set_str(value.value.str);
+    reply->set_str(array_string(value.value.str));
   }
 
   return ::grpc::Status::OK;
@@ -456,8 +493,8 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
     reply->set_status(RDC_ST_NOT_SUPPORTED);
     return ::grpc::Status::OK;
   }
-  rdc_field_value value;
-  uint64_t next_timestamp;
+  rdc_field_value value = {};
+  uint64_t next_timestamp = 0;
   rdc_status_t result = rdc_field_get_value_since(
       rdc_handle_, request->gpu_index(), static_cast<rdc_field_t>(request->field_id()),
       request->since_time_stamp(), &next_timestamp, &value);
@@ -476,9 +513,10 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
   } else if (value.type == DOUBLE) {
     reply->set_dbl(value.value.dbl);
   } else if (value.type == STRING || value.type == BLOB) {
-    std::string val_str(value.value.str);
-    size_t endpos = val_str.find_last_not_of(" ");
-    val_str[endpos + 1] = '\0';
+    // Without its trailing spaces: an all-space string becomes empty, as
+    // find_last_not_of() then returns npos and npos + 1 is 0.
+    std::string val_str = array_string(value.value.str);
+    val_str.erase(val_str.find_last_not_of(' ') + 1);
     reply->set_str(val_str);
   }
 
@@ -521,9 +559,11 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
   if (!reply || !request) {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
-  rdc_status_t result =
-      rdc_job_start_stats(rdc_handle_, request->group_id(),
-                          const_cast<char*>(request->job_id().c_str()), request->update_freq());
+  rdc_status_t result = check_job_id(request->job_id());
+  if (result == RDC_ST_OK) {
+    result = rdc_job_start_stats(rdc_handle_, request->group_id(), request->job_id().c_str(),
+                                 request->update_freq());
+  }
   reply->set_status(result);
 
   return ::grpc::Status::OK;
@@ -537,20 +577,19 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
 
-  rdc_job_info_t job_info;
-  rdc_status_t result =
-      rdc_job_get_stats(rdc_handle_, const_cast<char*>(request->job_id().c_str()), &job_info);
+  rdc_job_info_t job_info = {};
+  rdc_status_t result = check_job_id(request->job_id());
+  if (result == RDC_ST_OK) {
+    result = rdc_job_get_stats(rdc_handle_, request->job_id().c_str(), &job_info);
+  }
 
   reply->set_status(result);
   if (result != RDC_ST_OK) {
     return ::grpc::Status::OK;
   }
 
-  uint32_t num_gpus =
-      (job_info.num_gpus > RDC_MAX_NUM_GPUS_PER_JOB) ? RDC_MAX_NUM_GPUS_PER_JOB : job_info.num_gpus;
-  uint32_t num_processes = (job_info.num_processes > RDC_MAX_NUM_PROCESSES_STATUS)
-                               ? RDC_MAX_NUM_PROCESSES_STATUS
-                               : job_info.num_processes;
+  const uint32_t num_gpus = clamp_count(job_info.num_gpus, job_info.gpus);
+  const uint32_t num_processes = clamp_count(job_info.num_processes, job_info.processes);
   reply->set_num_gpus(num_gpus);
   ::rdc::GpuUsageInfo* sinfo = reply->mutable_summary();
   copy_gpu_usage_info(job_info.summary, sinfo);
@@ -564,7 +603,7 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
   for (uint32_t i = 0; i < num_processes; i++) {
     ::rdc::RdcProcessStatsInfo* pinfo = reply->add_processes();
     pinfo->set_pid(job_info.processes[i].pid);
-    pinfo->set_process_name(job_info.processes[i].process_name);
+    pinfo->set_process_name(array_string(job_info.processes[i].process_name));
     pinfo->set_start_time(job_info.processes[i].start_time);
     pinfo->set_stop_time(job_info.processes[i].stop_time);
   }
@@ -651,8 +690,10 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
 
-  rdc_status_t result =
-      rdc_job_stop_stats(rdc_handle_, const_cast<char*>(request->job_id().c_str()));
+  rdc_status_t result = check_job_id(request->job_id());
+  if (result == RDC_ST_OK) {
+    result = rdc_job_stop_stats(rdc_handle_, request->job_id().c_str());
+  }
   reply->set_status(result);
 
   return ::grpc::Status::OK;
@@ -665,7 +706,10 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
   if (!reply || !request) {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
-  rdc_status_t result = rdc_job_remove(rdc_handle_, const_cast<char*>(request->job_id().c_str()));
+  rdc_status_t result = check_job_id(request->job_id());
+  if (result == RDC_ST_OK) {
+    result = rdc_job_remove(rdc_handle_, request->job_id().c_str());
+  }
   reply->set_status(result);
 
   return ::grpc::Status::OK;
@@ -724,7 +768,7 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
       writer,
   };
 
-  rdc_diag_response_t diag_response;
+  rdc_diag_response_t diag_response = {};
   rdc_status_t result = rdc_diagnostic_run(
       rdc_handle_, request->group_id(), static_cast<rdc_diag_level_t>(request->level()),
       const_cast<char*>(request->config().c_str()), static_cast<size_t>(request->config().length()),
@@ -754,25 +798,24 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
     // details
     auto to_details = to_diag_info->mutable_details();
     to_details->set_code(test_result.details.code);
-    to_details->set_msg(test_result.details.msg);
+    to_details->set_msg(array_string(test_result.details.msg));
 
     to_diag_info->set_test_case(
         static_cast<::rdc::DiagnosticTestResult_DiagnosticTestCase>(test_result.test_case));
-    to_diag_info->set_per_gpu_result_count(test_result.per_gpu_result_count);
 
     // gpu_results
-    uint32_t gpu_result_count = (test_result.per_gpu_result_count > RDC_MAX_NUM_DEVICES)
-                                    ? RDC_MAX_NUM_DEVICES
-                                    : test_result.per_gpu_result_count;
+    const uint32_t gpu_result_count =
+        clamp_count(test_result.per_gpu_result_count, test_result.gpu_results);
+    to_diag_info->set_per_gpu_result_count(gpu_result_count);
     for (uint32_t j = 0; j < gpu_result_count; j++) {
       auto to_result = to_diag_info->add_gpu_results();
       const rdc_diag_per_gpu_result_t& cur_result = test_result.gpu_results[j];
       to_result->set_gpu_index(cur_result.gpu_index);
       auto to_per_detail = to_result->mutable_gpu_result();
       to_per_detail->set_code(cur_result.gpu_result.code);
-      to_per_detail->set_msg(cur_result.gpu_result.msg);
+      to_per_detail->set_msg(array_string(cur_result.gpu_result.msg));
     }
-    to_diag_info->set_info(test_result.info);
+    to_diag_info->set_info(array_string(test_result.info));
   }
 
   if (!writer->Write(reply)) {
@@ -822,7 +865,7 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
       writer,
   };
 
-  rdc_diag_test_result_t test_result;
+  rdc_diag_test_result_t test_result = {};
   rdc_status_t result = rdc_test_case_run(
       rdc_handle_, request->group_id(), static_cast<rdc_diag_test_cases_t>(request->test_case()),
       const_cast<char*>(request->config().c_str()), static_cast<size_t>(request->config().length()),
@@ -840,25 +883,24 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
   // details
   auto to_details = to_diag_info->mutable_details();
   to_details->set_code(test_result.details.code);
-  to_details->set_msg(test_result.details.msg);
+  to_details->set_msg(array_string(test_result.details.msg));
 
   to_diag_info->set_test_case(
       static_cast<::rdc::DiagnosticTestResult_DiagnosticTestCase>(test_result.test_case));
-  to_diag_info->set_per_gpu_result_count(test_result.per_gpu_result_count);
 
   // gpu_results
-  uint32_t gpu_result_count = (test_result.per_gpu_result_count > RDC_MAX_NUM_DEVICES)
-                                  ? RDC_MAX_NUM_DEVICES
-                                  : test_result.per_gpu_result_count;
+  const uint32_t gpu_result_count =
+      clamp_count(test_result.per_gpu_result_count, test_result.gpu_results);
+  to_diag_info->set_per_gpu_result_count(gpu_result_count);
   for (uint32_t j = 0; j < gpu_result_count; j++) {
     auto to_result = to_diag_info->add_gpu_results();
     const rdc_diag_per_gpu_result_t& cur_result = test_result.gpu_results[j];
     to_result->set_gpu_index(cur_result.gpu_index);
     auto to_per_detail = to_result->mutable_gpu_result();
     to_per_detail->set_code(cur_result.gpu_result.code);
-    to_per_detail->set_msg(cur_result.gpu_result.msg);
+    to_per_detail->set_msg(array_string(cur_result.gpu_result.msg));
   }
-  to_diag_info->set_info(test_result.info);
+  to_diag_info->set_info(array_string(test_result.info));
 
   if (!writer->Write(reply)) {
     return ::grpc::Status::CANCELLED;
@@ -933,7 +975,7 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
   }
 
   uint32_t count = 0;
-  rdc_policy_t policies[RDC_MAX_POLICY_SETTINGS];
+  rdc_policy_t policies[RDC_MAX_POLICY_SETTINGS] = {};
 
   // call RDC Policy API
   rdc_status_t result = rdc_policy_get(rdc_handle_, request->group_id(), &count, policies);
@@ -945,6 +987,7 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
   }
 
   ::rdc::PolicyResponse* to_response = reply->mutable_response();
+  count = clamp_count(count, policies);
   to_response->set_count(count);
   for (uint32_t i = 0; i < count; i++) {
     const rdc_policy_t& policy_ref = policies[i];
@@ -1173,7 +1216,7 @@ void RdcAPIServiceImpl::end_policy_stream(uint32_t group_id,
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
 
-  unsigned int components;
+  unsigned int components = 0;
   rdc_status_t result = rdc_health_get(rdc_handle_, request->group_id(), &components);
 
   reply->set_status(result);
@@ -1194,7 +1237,7 @@ void RdcAPIServiceImpl::end_policy_stream(uint32_t group_id,
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
 
-  rdc_health_response_t response;
+  rdc_health_response_t response = {};
   rdc_status_t result = rdc_health_check(rdc_handle_, request->group_id(), &response);
 
   reply->set_status(result);
@@ -1204,9 +1247,10 @@ void RdcAPIServiceImpl::end_policy_stream(uint32_t group_id,
 
   ::rdc::HealthResponse* to_response = reply->mutable_response();
   to_response->set_overall_health(response.overall_health);
-  to_response->set_incidents_count(response.incidents_count);
+  const uint32_t incidents_count = clamp_count(response.incidents_count, response.incidents);
+  to_response->set_incidents_count(incidents_count);
 
-  for (uint32_t i = 0; i < response.incidents_count; i++) {
+  for (uint32_t i = 0; i < incidents_count; i++) {
     const rdc_health_incidents_t& incident = response.incidents[i];
     ::rdc::HealthIncidents* to_incidents = to_response->add_incidents();
 
@@ -1217,7 +1261,7 @@ void RdcAPIServiceImpl::end_policy_stream(uint32_t group_id,
     // error
     auto to_error = to_incidents->mutable_error();
     to_error->set_code(incident.error.code);
-    to_error->set_msg(incident.error.msg);
+    to_error->set_msg(array_string(incident.error.msg));
   }
 
   return ::grpc::Status::OK;
@@ -1245,7 +1289,7 @@ void RdcAPIServiceImpl::end_policy_stream(uint32_t group_id,
   if (!reply || !request) {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
-  rdc_device_topology_t topology_results;
+  rdc_device_topology_t topology_results = {};
   // call RDC topology API
   rdc_status_t result =
       rdc_device_topology_get(rdc_handle_, request->gpu_index(), &topology_results);
@@ -1254,9 +1298,11 @@ void RdcAPIServiceImpl::end_policy_stream(uint32_t group_id,
     return ::grpc::Status::OK;
   }
   ::rdc::Topology* topology = reply->mutable_toppology();
-  topology->set_num_of_gpus(topology_results.num_of_gpus);
+  const uint32_t num_of_gpus =
+      clamp_count(topology_results.num_of_gpus, topology_results.link_infos);
+  topology->set_num_of_gpus(num_of_gpus);
   topology->set_numa_node(topology_results.numa_node);
-  for (uint32_t i = 0; i < topology_results.num_of_gpus; ++i) {
+  for (uint32_t i = 0; i < num_of_gpus; ++i) {
     ::rdc::TopologyLinkInfo* linkinfos = topology->add_link_infos();
     linkinfos->set_gpu_index(topology_results.link_infos[i].gpu_index);
     linkinfos->set_weight(topology_results.link_infos[i].weight);
@@ -1319,7 +1365,7 @@ void RdcAPIServiceImpl::end_policy_stream(uint32_t group_id,
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
 
-  rdc_link_status_t link_status_results;
+  rdc_link_status_t link_status_results = {};
   // call RDC link status API
   rdc_status_t result = rdc_link_status_get(rdc_handle_, &link_status_results);
   reply->set_status(result);
@@ -1328,14 +1374,18 @@ void RdcAPIServiceImpl::end_policy_stream(uint32_t group_id,
   }
 
   ::rdc::LinkStatus* linkstatus = reply->mutable_linkstatus();
-  linkstatus->set_num_of_gpus(link_status_results.num_of_gpus);
-  for (int32_t i = 0; i < link_status_results.num_of_gpus; ++i) {
+  const uint32_t num_of_gpus =
+      clamp_count(std::max<int32_t>(link_status_results.num_of_gpus, 0), link_status_results.gpus);
+  linkstatus->set_num_of_gpus(num_of_gpus);
+  for (uint32_t i = 0; i < num_of_gpus; ++i) {
     ::rdc::GpuLinkStatus* gpulinkstatus = linkstatus->add_gpus();
     gpulinkstatus->set_gpu_index(link_status_results.gpus[i].gpu_index);
-    gpulinkstatus->set_num_of_links(link_status_results.gpus[i].num_of_links);
+    const uint32_t num_of_links = clamp_count(link_status_results.gpus[i].num_of_links,
+                                              link_status_results.gpus[i].link_states);
+    gpulinkstatus->set_num_of_links(num_of_links);
     gpulinkstatus->set_link_types(
         static_cast<::rdc::GpuLinkStatus_LinkTypes>(link_status_results.gpus[i].link_types));
-    for (uint32_t n = 0; n < link_status_results.gpus[i].num_of_links; n++) {
+    for (uint32_t n = 0; n < num_of_links; n++) {
       gpulinkstatus->add_link_states(
           static_cast<::rdc::GpuLinkStatus_LinkState>(link_status_results.gpus[i].link_states[n]));
     }

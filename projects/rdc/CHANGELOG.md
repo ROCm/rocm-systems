@@ -22,6 +22,9 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `rdc_job_get_stats()` fills `gpus[0]` to `gpus[num_gpus - 1]`, ordered by `gpu_id`, which names the GPU or GPU partition of each entry. It used to place each GPU at the index of its GPU ID. The summary averages each statistic over the GPUs that have samples for it.
 
+- **The RDC job and group calls reject IDs and names that do not fit their buffers.** `rdc_job_start_stats()`, `rdc_job_get_stats()`, `rdc_job_stop_stats()` and `rdc_job_remove()` return `RDC_ST_BAD_PARAMETER` for a job ID of 64 bytes or more or with a control character, and `rdc_group_gpu_create()` and `rdc_group_field_create()` for a name of 256 bytes or more; `rdcd` rejects the same, and IDs or names with a NUL inside, from any gRPC client.
+  - The job ID parameter is a `char[64]`, but RDC accepted longer job IDs and stored them whole, and cut longer names. `rdci stats` with such a job ID, and `rdci group -c` and `rdci fieldgroup -c` with such a name, now fail.
+
 - `rdci stats -j` labels each GPU by its ID, such as `GPU 3`, or `GPU g0.1` for partition 1 of GPU 0, instead of by its position in the job. The JSON keys follow, such as `gpu_3` and `gpu_g0.1`. A statistic without samples prints as `N/A` in the text output and as `null` in JSON, instead of zeros and a minimum of 18446744073709551615. PCIe standard deviations print with two decimals, like the other statistics.
 
 ### Resolved Issues
@@ -58,6 +61,10 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - `RDC_FI_GPU_MEMORY_CUR_BANDWIDTH` is N/A instead of 0 when the GPU reports no memory activity.
 
 - `rdci group -l` lists 64 groups, the most RDC holds; it reported `The max limit reached`.
+
+- `rdcd` no longer sends uninitialized memory, or memory past a buffer, in its replies when the RDC library returns less than a reply holds: device names, component versions, group and field group information, field values, job statistics, policies, health checks, topology, link status and diagnostic results. It sends counts no larger than the entries it sends, and strings no longer than their buffers.
+
+- `rdc_field_get_latest_value()` and `rdc_field_get_value_since()` set the `status` of the value they return, and `rdc_field_get_value_since()` returns all of a `BLOB` value instead of its first 8 bytes. Through `rdcd`, a string or `BLOB` value since a time is sent without its trailing spaces and without a NUL in place of the first of them.
 
 - `rdc_job_get_stats()` and `rdc_policy_get()` with `rdcd` no longer report more GPUs, processes, or policies than the `rdcd` reply carries, or read past the entries it carries.
 
