@@ -342,12 +342,6 @@ def test_get_gpu_model_invalid_arch():
 
 
 @pytest.mark.misc
-@pytest.mark.parametrize("gpu_model", [None, float("nan")])
-def test_get_memory_levels_of_unknown_model(gpu_model):
-    assert MIGPUSpecs.get_memory_levels(gpu_model) == []
-
-
-@pytest.mark.misc
 def test_get_gpu_model_none_result():
     """Test get_gpu_model when result is None - covers lines 246-248"""
     with patch.object(MIGPUSpecs, "_chip_id_dict", {999: None}):

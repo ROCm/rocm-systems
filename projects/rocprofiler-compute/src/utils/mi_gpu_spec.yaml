@@ -12,7 +12,7 @@
 #           |-- perfmon_config, copy from aqlprofile from gfxip/gfx<version>/gfx<version>_block_info.h block counter registers
 #           |-- gpu model
 #           |-- chip_ids: chip id is specific to the environment the gpu is being used on
-#               | -- physical # One chip id, or a list of ids for boards that share a model
+#               | -- physical
 #               | -- virtual # The pattern is physical + 16
 #           |-- partition_mode:
 #               | -- compute partition mode:

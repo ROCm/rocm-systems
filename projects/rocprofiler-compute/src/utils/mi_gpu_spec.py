@@ -438,15 +438,10 @@ class MIGPUSpecs:
         )
 
     @classmethod
-    def get_memory_levels(cls, gpu_model: Optional[str]) -> List[str]:
+    def get_memory_levels(cls, gpu_model: str) -> List[str]:
         """
         Return a list of the cache and memory levels supported by the specific gpu model
-
-        A workload profiled on a board that is not in the spec can have no gpu model.
-        Its memory levels are unknown, so the list is empty.
         """
-        if not isinstance(gpu_model, str):
-            return []
         return cls._gpu_design.get(gpu_model.lower(), {}).get("memory_levels", [])
 
     @classmethod
