@@ -223,7 +223,8 @@ control the behavior of rocSHMEM.
 
     * - ``ROCSHMEM_GDA_SQ_SIZE``
 
-        This environment variable sets the length of the SQ for GDA.
+        This environment variable sets the length of the Send Queue (SQ) for
+        GDA.
       - ``1024``
       - Maximum number of Work Queue Entries (WQEs) posted on the Send Queue (SQ)
 

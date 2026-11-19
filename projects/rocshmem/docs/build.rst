@@ -445,7 +445,10 @@ GDA provider options
       - auto
       - Build the provider multiplexer, which dispatches to the
         hardware-specific provider at runtime. Defaults to ``ON`` when more
-        than one provider is enabled and ``OFF`` otherwise.
+        than one provider is enabled and ``OFF`` otherwise. Required (the
+        build fails otherwise) when more than one hardware GDA provider is
+        enabled; optional, and can be disabled, only when exactly one
+        provider is enabled.
 
 Code generation and tuning options
 """"""""""""""""""""""""""""""""""
