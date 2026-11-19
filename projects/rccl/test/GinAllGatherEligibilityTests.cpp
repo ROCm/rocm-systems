@@ -62,7 +62,7 @@ struct GinAllGatherMockComm {
     comm.devrState.bigSize = 1;
     comm.devrState.lsaTeamSize = comm.nRanks;
     comm.devrState.lsaTeamSelf = comm.rank;
-    // ncclGetGinType reads comm->ginState, not a shared-resources copy.
+    // ncclGinTypeActive reads comm->ginState, not a shared-resources copy.
     comm.ginState.numActiveBackends = 1;
     comm.ginState.backends[0].ginType = (ncclGinType_t)NCCL_NET_DEVICE_GIN_ANVIL_SDMA;
   }

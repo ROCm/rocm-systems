@@ -195,11 +195,9 @@ bool ncclAllGatherGinSdmaEligible(ncclComm* comm, const void* sendbuff, void* re
       comm->globalGinSupport != NCCL_GIN_CONNECTION_FULL) {
     return false;
   }
-  ncclGinType_t ginType = NCCL_GIN_TYPE_NONE;
-  if (ncclGetGinType(comm, &ginType) != ncclSuccess || ginType != (ncclGinType_t)NCCL_NET_DEVICE_GIN_ANVIL_SDMA ||
-      ncclTeamLsa(comm).nRanks != comm->nRanks) {
-    return false;
-  }
+  // The DevComm requests SDMA by type, so SDMA only has to be active, not the default.
+  if (!ncclGinTypeActive(comm, NCCL_GIN_TYPE_ANVIL_SDMA)) return false;
+  if (ncclTeamLsa(comm).nRanks != comm->nRanks) return false;
 
   const size_t bytes = count * ncclTypeSize(datatype);
   if (bytes < (size_t)ncclParamGinAllGatherMinBytes()) return false;
