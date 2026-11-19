@@ -17,6 +17,7 @@ from pc_sampling.pc_sampling_profile import (
     PC_SAMPLING_DEFAULT_INTERVALS,
     pc_sampling_interval_limits,
 )
+from rocprof_compute_soc.metric_library import loader
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from roofline.run_benchmark import BENCHMARKING_SUPPORTED, run_roofline_benchmark
 from utils.analysis_views import arch_panel_configs
@@ -39,7 +40,6 @@ from utils.specs import (
 )
 from utils.utils_common import (
     build_metric_details,
-    canonical_config_arch,
     detect_rocprof,
     format_block_table,
     format_metric_tables,
@@ -388,10 +388,7 @@ class RocProfCompute:
         sys_info: Optional[Dict[str, Any]],
     ) -> Dict[str, Tuple[str, str, str]]:
         """Map the ids of arch's panel configs to (name, unit, description)."""
-        config_root = config.analysis_configs_dir / (
-            canonical_config_arch(arch) or arch
-        )
-        if arch not in self.__supported_archs and not config_root.is_dir():
+        if not loader.has_metric_library(arch):
             console_error("Unsupported arch")
         panel_configs = arch_panel_configs(arch)
         # Converted here: utils.metrics.expression imports utils_common.
@@ -704,11 +701,11 @@ class RocProfCompute:
         if self.__analyze_mode == "cli":
             from rocprof_compute_analyze.analysis_cli import cli_analysis
 
-            analyzer = cli_analysis(self.__args, self.__supported_archs)
+            analyzer = cli_analysis(self.__args)
         elif self.__analyze_mode == "db":
             from rocprof_compute_analyze.analysis_db import db_analysis
 
-            analyzer = db_analysis(self.__args, self.__supported_archs)
+            analyzer = db_analysis(self.__args)
         else:
             console_error(f"Unsupported analysis mode -> {self.__analyze_mode}")
 

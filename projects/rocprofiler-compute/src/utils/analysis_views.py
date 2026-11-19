@@ -14,7 +14,9 @@ from the workload's CSV files. The panel id comes from the file name
 the first table, 3.1.0 its first row).
 
 views_to_panel_configs() builds the panel configs that load_panel_configs() reads from
-analysis_configs/. Analyze reads its panel configs through arch_panel_configs().
+analysis_configs/. Analyze reads its panel configs through arch_panel_configs(). Profile
+still reads analysis_configs/, which test_metric_library_sync.py keeps equal in
+structure to the views' panel configs.
 Standard library and vendored YAML only, because profile imports this module.
 """
 
@@ -23,7 +25,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Union
 
-import config
+from rocprof_compute_soc.metric_library import loader
 from utils.metrics.expression import (
     AGGREGATION_FUNCTIONS,
     format_equation,
@@ -35,9 +37,8 @@ from utils.utils_common import (
     PLACEHOLDER_RANGE_KEY,
     RAW_CSV_TABLE,
     VIEW_FILE_RE,
-    canonical_config_arch,
     iter_view_rows,
-    load_panel_configs,
+    load_views,
     mapping_field_errors,
     numbered_view_tables,
     row_metric_ids,
@@ -101,9 +102,16 @@ def views_to_panel_configs(
 
 
 def arch_panel_configs(arch: str) -> "OrderedDict[int, Dict[str, Any]]":
-    """Return the panel configs analyze shows for arch, from analysis_configs/."""
-    config_arch = canonical_config_arch(arch) or arch
-    return load_panel_configs([str(config.analysis_configs_dir / config_arch)])
+    """Return arch's panel configs, built from its views and metric library.
+
+    An arch without a metric library has no views, so it gets {} and shows no panels.
+    """
+    if not loader.has_metric_library(arch):
+        return OrderedDict()
+    library = loader.MetricLibrary.load(loader.default_metric_library_dir(), arch)
+    return views_to_panel_configs(
+        load_views(arch), library.metrics, library.collectable_formulas()
+    )
 
 
 def row_label(row: Dict[str, Any], metrics: Dict[str, Dict[str, Any]]) -> str:

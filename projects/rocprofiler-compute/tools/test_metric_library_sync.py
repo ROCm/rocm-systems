@@ -60,10 +60,11 @@ from utils.utils_common import (
     PLACEHOLDER_RANGE_KEY,
     ROOFLINE_PANEL_ID,
     canonical_config_arch,
+    config_template_path_for_arch,
     format_row_id,
-    get_arch_panel_id_to_alias,
     load_panel_configs,
     load_views,
+    load_yaml,
     panel_aliases,
     parse_sets_yaml,
     row_metric_ids,
@@ -519,7 +520,12 @@ def shows_equation(row: Dict[str, Any]) -> bool:
 
 def alias_errors(views: Dict[int, Dict[str, Any]], arch: str) -> List[str]:
     """Return each panel whose -b alias differs from the config template's."""
-    template_aliases = get_arch_panel_id_to_alias(arch)
+    template_path = config_template_path_for_arch(arch)
+    template = load_yaml(template_path) if template_path else None
+    template_aliases = {
+        str(panel["panel_id"]): (panel.get("panel_alias") or "")
+        for panel in (template or {}).get("panels") or []
+    }
     return [
         f"panel {panel_number}: -b alias {alias!r}, config template has "
         f"{template_aliases.get(panel_number)!r}"

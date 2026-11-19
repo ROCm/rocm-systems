@@ -11,8 +11,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from rocprof_compute_soc.metric_library import loader
 from utils import schema
+from utils.analysis_views import row_label
 from utils.roofline_calc import (
+    _ROOFLINE_POINTS_TABLE_ID,
     XMAX_DEFAULT,
     GraphPoints,
     _extract_ai_metrics,
@@ -23,6 +26,7 @@ from utils.roofline_calc import (
     roofline_mem_levels,
     sanitize_ai_value,
 )
+from utils.utils_common import format_table_id, iter_view_rows, load_views
 
 
 def assert_graph_points_positive_finite(
@@ -275,6 +279,29 @@ def test_extract_ai_metrics_reads_the_vram_point_into_its_own_field() -> None:
     )
 
     assert ai_metrics["ai_vram"] == 3.5
+
+
+def test_extract_ai_metrics_reads_every_plot_point_row() -> None:
+    """Each AI row of every arch's Roofline Plot Points view table fills its own plot
+    point field, for example gfx1250's AI L0 and AI L2."""
+    points_rows = f"{format_table_id(_ROOFLINE_POINTS_TABLE_ID)}."
+    unread = []
+    for arch in sorted(loader.METRIC_LIBRARY_PARENT_ARCH):
+        library = loader.MetricLibrary.load(loader.default_metric_library_dir(), arch)
+        names = [
+            row_label(row, library.metrics)
+            for row_id, row in iter_view_rows(load_views(arch))
+            if row_id.startswith(points_rows)
+        ]
+        ai_rows = [name for name in names if name.startswith("AI ")]
+        ai_metrics = _extract_ai_metrics(
+            pd.DataFrame({"Metric": ai_rows, "Value": [1.0] * len(ai_rows)})
+        )
+        filled = [field for field, value in ai_metrics.items() if value == 1.0]
+        if len(filled) != len(ai_rows):
+            unread.append((arch, ai_rows, filled))
+
+    assert not unread
 
 
 ##############################################################################

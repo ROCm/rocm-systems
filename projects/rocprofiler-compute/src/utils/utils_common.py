@@ -1007,24 +1007,14 @@ def numbered_view_tables(
 
 
 def get_arch_panel_id_to_alias(arch: str) -> Dict[str, str]:
-    """Return panel_id_str -> alias from the config template for arch.
-
-    Empty or missing aliases stay as "". Returns {} when no template matches.
-    """
-    template_path = config_template_path_for_arch(arch)
-    if template_path is None:
+    """Return panel_aliases() of arch's views; {} for an arch without views."""
+    if not (config.analysis_views_dir / canonical_config_arch(arch)).is_dir():
         return {}
-    panel_yaml = load_yaml(template_path) or {}
-    panels = panel_yaml.get("panels") or []
-    return {
-        str(panel["panel_id"]): (panel.get("panel_alias") or "") for panel in panels
-    }
+    return panel_aliases(load_views(arch))
 
 
 def get_arch_alias_to_panel_id(arch: str) -> Dict[str, str]:
-    """Inverse of get_arch_panel_id_to_alias for resolving --block
-    <alias> tokens: alias -> panel_id_str. Skips panels with empty or
-    None aliases so unknown aliases naturally raise KeyError on lookup."""
+    """Return -b alias -> panel number, for the panels that have an alias."""
     return {
         alias: pid for pid, alias in get_arch_panel_id_to_alias(arch).items() if alias
     }
