@@ -138,10 +138,10 @@ static ssize_t UtilsReadlink(const char* path, char* buf, size_t len) {
   std::memcpy(buf, g_pidNs.data(), g_pidNs.size());  // readlink does not terminate
   return g_pidNs.size();
 }
-static int g_sysconfCalls = 0;
-static long UtilsSysconf(int name) {
-  g_sysconfCalls++;
-  return name == _SC_PAGESIZE ? 4096 : -1;
+static int g_pageSizeCalls = 0;
+size_t ncclOsGetPageSize() {
+  g_pageSizeCalls++;
+  return 4096;
 }
 
 #define malloc(n) UtilsMalloc(n)
@@ -151,7 +151,6 @@ static long UtilsSysconf(int name) {
 #define gethostname(n, l) UtilsGethostname(n, l)
 #define fopen(p, m) UtilsFopen(p, m)
 #define readlink(p, b, l) UtilsReadlink(p, b, l)
-#define sysconf(n) UtilsSysconf(n)
 
 #include UTILS_CC_PATH
 
@@ -162,7 +161,6 @@ static long UtilsSysconf(int name) {
 #undef gethostname
 #undef fopen
 #undef readlink
-#undef sysconf
 
 namespace {
 
@@ -643,10 +641,10 @@ TEST_F(UtilsMicrotest, BitsToString_KnownBug_TruncationWritesPastBufLen) {
 
 TEST_F(UtilsMicrotest, PageSize_IsCachedAfterTheFirstQuery) {
   EXPECT_EQ(4096u, get_sc_page_size());
-  int calls = g_sysconfCalls;
+  int calls = g_pageSizeCalls;
   EXPECT_EQ(4096u, get_sc_page_size());
-  EXPECT_EQ(calls, g_sysconfCalls);
-  EXPECT_LE(calls, 1);
+  EXPECT_EQ(calls, g_pageSizeCalls);
+  EXPECT_EQ(calls, 1);
 }
 
 TEST_F(UtilsMicrotest, AlignedPtrAndSize_CoverWholePages) {

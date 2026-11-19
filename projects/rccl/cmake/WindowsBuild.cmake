@@ -138,25 +138,46 @@ set(_generator_inputs "${PROJECT_SOURCE_DIR}/src/device/generate.py"
   "${PROJECT_SOURCE_DIR}/src/device/ce_reduce/generate.py"
   "${PROJECT_SOURCE_DIR}/src/device/ce_reduce/ce_reduce_impl.h.in"
   "${PROJECT_SOURCE_DIR}/src/device/ce_reduce/ce_reduce_launcher.cpp.in")
-set(_generation_signature "${ONLY_FUNCS};${BUILD_ALL_UNROLLS}")
+set(_generation_signature "manifest-v1;${ONLY_FUNCS};${BUILD_ALL_UNROLLS}")
 foreach(_input IN LISTS _generator_inputs)
   file(SHA256 "${_input}" _input_hash)
   string(APPEND _generation_signature ";${_input_hash}")
 endforeach()
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_generator_inputs})
 set(_generation_stamp "${PROJECT_BINARY_DIR}/windows-generation.txt")
+set(_generation_manifest "${PROJECT_BINARY_DIR}/windows-generation-outputs.txt")
 set(_previous_generation "")
 if(EXISTS "${_generation_stamp}")
   file(READ "${_generation_stamp}" _previous_generation)
 endif()
-if(NOT _previous_generation STREQUAL _generation_signature OR NOT EXISTS "${GEN_DIR}/host_table.cpp"
-    OR NOT EXISTS "${GEN_DIR}/ce_reduce/ce_reduce_impl.h")
+set(_generation_complete FALSE)
+if(EXISTS "${_generation_manifest}")
+  file(STRINGS "${_generation_manifest}" _generated_outputs)
+  if(_generated_outputs)
+    set(_generation_complete TRUE)
+    foreach(_output IN LISTS _generated_outputs)
+      if(NOT EXISTS "${GEN_DIR}/${_output}")
+        set(_generation_complete FALSE)
+        break()
+      endif()
+    endforeach()
+  endif()
+endif()
+if(NOT _previous_generation STREQUAL _generation_signature OR NOT _generation_complete)
   execute_process(COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/src/device/generate.py"
     "${GEN_DIR}" OFF OFF OFF OFF "${BUILD_ALL_UNROLLS}" "${ONLY_FUNCS}" COMMAND_ERROR_IS_FATAL ANY)
   execute_process(COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/src/device/ce_reduce/generate.py"
     "${GEN_DIR}/ce_reduce" COMMAND_ERROR_IS_FATAL ANY)
+  file(GLOB_RECURSE _generated_outputs LIST_DIRECTORIES FALSE RELATIVE "${GEN_DIR}" "${GEN_DIR}/*")
+  list(JOIN _generated_outputs "\n" _generation_manifest_content)
+  file(WRITE "${_generation_manifest}" "${_generation_manifest_content}\n")
   file(WRITE "${_generation_stamp}" "${_generation_signature}")
 endif()
+# A missing generated file must rerun configuration before the build graph uses it.
+set(_generation_dependencies ${_generated_outputs})
+list(TRANSFORM _generation_dependencies PREPEND "${GEN_DIR}/")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+  "${_generation_stamp}" "${_generation_manifest}" ${_generation_dependencies})
 execute_process(COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tuner/embed_tuner_configs.py"
   "${PROJECT_SOURCE_DIR}/tuner" "${PROJECT_BINARY_DIR}/include/rccl_tuner_embedded_configs.h" COMMAND_ERROR_IS_FATAL ANY)
 
