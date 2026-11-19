@@ -23,12 +23,14 @@
 #pragma once
 
 #include "lib/rocprofiler-sdk/hsa/rocprofiler_packet.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
 
 #include <rocprofiler-sdk/experimental/kernel_replay.h>
 #include <rocprofiler-sdk/fwd.h>
 
 #include <cstdint>
+#include <optional>
 
 namespace rocprofiler
 {
@@ -55,7 +57,15 @@ struct replay_plan_t
                            uint64_t                           current_pass,
                            uint64_t                           total_passes,
                            rocprofiler_user_data_t            user_data)        = nullptr;
+
+    // Where the snapshot may live, from the tool's replay_options.
+    memory_snapshot::capture_mode snapshot_mode = memory_snapshot::capture_mode::automatic;
 };
+
+// The snapshot's capture mode for a tool's replay options, or nullopt when the SDK cannot honor
+// them: a size that does not cover flags, or an unknown flag.
+std::optional<memory_snapshot::capture_mode>
+capture_mode_for(const rocprofiler_kernel_replay_options_t* options);
 
 // Per-pass callback context state. Populated during PASS PHASE_ENTER and reused for PASS
 // PHASE_EXIT so the exit record carries the same thread id, correlation ids, operation, and

@@ -102,9 +102,29 @@ tracking_pool_free(void* ptr);
 // the read lock, which blocks a concurrent free for the copy. Callers reachable during finalization
 // must first gate on registration::get_fini_status(): the alloc/free wrappers outlive this static,
 // so touching it after teardown locks a freed mutex. (restore() only runs during active replay, so
-// it is safe without the guard.)
+// it is safe without the guard.) Change it only through modify_inventory().
 rocprofiler::common::Synchronized<tracked_map_t>&
 inventory();
+
+// Counts the inventory's changes, so a replay can tell in one comparison that nothing was recorded
+// or freed since its capture. Read it under the inventory's lock.
+uint64_t
+inventory_generation();
+
+// Bumps inventory_generation(). Called under the write lock, by modify_inventory().
+void
+note_inventory_change();
+
+// Changes the inventory under its write lock. `change(map)` returns whether it changed anything,
+// and each change bumps inventory_generation(). A template, so the call does not allocate.
+template <typename Change>
+void
+modify_inventory(Change&& change)
+{
+    inventory().wlock([&](tracked_map_t& _map) {
+        if(change(_map)) note_inventory_change();
+    });
+}
 }  // namespace memory_tracker
 
 void
