@@ -11,6 +11,11 @@ if(BUILD_TESTS)
   option(RCCL_HAS_RMA_IB_PROXY "Build the IB Proxy RMA transport-level tests" ON)
   option(ENABLE_HOST_API_TESTS "Build the host-API tests" ON)
 
+  # Same __hip_atomic_* poison as the rccl target; set before any test target is defined.
+  if(RCCL_POISON_HIP_ATOMICS)
+    add_compile_options(--include=${PROJECT_SOURCE_DIR}/src/include/poison_hip_atomics.h)
+  endif()
+
 
   message("Building rccl unit tests (Installed in /test/rccl-UnitTests)")
   if(ENABLE_MPI_TESTS)
