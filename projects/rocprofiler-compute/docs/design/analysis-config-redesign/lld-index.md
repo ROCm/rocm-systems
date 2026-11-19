@@ -155,7 +155,7 @@ built-in views (top stats, system info) have fixed panel IDs.
 that `build_dfs()` expects, and analyze `-b`, `profile -b`, `--list-metrics`, the
 database `metric_id` and the memory chart layouts all read the same run-time positions,
 so profile and analyze agree by construction. A numeric ID typed in `-b` means the ID
-analyze shows.
+analyze shows, and prints a deprecation warning naming the string ID.
 
 A numeric ID changes when a view moves its row; string IDs do not. Numeric IDs are
 removed in a later release, so no positions lock keeps them stable.

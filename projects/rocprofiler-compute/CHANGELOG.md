@@ -7,6 +7,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* Added metric IDs to `--block` and `--list-metrics`, for example `--block compute.salu_util`, which selects every row that shows the metric. Numeric metric IDs such as `11.2.2` still work, but print a deprecation warning.
+
 ### Changed
 
 * Analyze no longer shows rows that have no value.
@@ -25,6 +27,14 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Some rows show their metric's name, for example `vL1D Access Latency Cycles` instead of `L1 Access Latency`, `Write and Atomic Bytes` instead of `Write and Atomic BW`, and on gfx1250 `LDS Load Instructions` instead of `LDS Load Requests`.
 
+* With one workload, analyze shows each bandwidth in TB/s, GB/s, MB/s, KB/s, or B/s, depending on its value, for example `1.94 TB/s` instead of `1941.81 GB/s`.
+
+* `--set` selects metric IDs, which `--list-sets` lists, for example `compute.salu_util` instead of `11.2.2`, and analyze then shows only the set's metrics.
+
+* The System Speed-of-Light block (`-b 2`, `-b sol`) shows three tables on every architecture, including gfx1201: GPU Speed-of-Light, Compute Throughput, and Memory Throughput. Its metric IDs change, for example SALU Utilization is `2.2.7` on gfx942.
+
+* The System Speed-of-Light block shows no peak for percentages, for example VALU Utilization, instead of a peak of 100.
+
 ### Removed
 
 * Removed the gfx908 `compute_thruput_flops` set, whose metrics MI100 has no counters for.
@@ -33,17 +43,25 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Removed the duplicate Async Direct Load Instruction and Async Direct Store Instruction rows from the TXA block on gfx1250.
 
+* On AMD Instinct MI100, MI200, MI300, and MI350 Series, the System Speed-of-Light block no longer shows Wavefront Occupancy, the L2-Fabric latencies, and some other rows; their own blocks still show them, for example Wavefront Occupancy as `7.2.7` on gfx942.
+
+* On gfx115x, gfx1201, and gfx1250, analyze no longer shows Wavefront Occupancy; on gfx115x also Wave Issue Wait, and on gfx1250 also the GL2-to-DRAM latencies, the instruction fetch latency, and LDS bank conflicts per access.
+
 ### Optimized
 
 * Profiling on MI200 collects two fewer counters, which saves one profiling pass.
 
 * Profiling on MI100 with no filter collects fewer counters, which saves one profiling pass.
 
+* Profiling with no filter collects fewer counters on gfx1151 and gfx1250, which saves two profiling passes on gfx1250.
+
 ### Resolved issues
 
 * Fixed the gfx1250 roofline missing its L0 and L2 points.
 
 ### Upcoming changes
+
+* Numeric metric IDs in `--block`, such as `11.2.2`, will be removed in a future release. Use metric IDs such as `compute.salu_util` instead.
 
 ### Known issues
 

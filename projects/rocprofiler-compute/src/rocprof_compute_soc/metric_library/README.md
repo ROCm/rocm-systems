@@ -86,9 +86,7 @@ A description says what the metric counts, following these rules:
 ## Sets
 
 `sets.yaml` lists each profiling set by metric id. A set's counters must fit in one
-profiling pass. `--set` still reads the numeric set files in
-[`profile_configs/sets/`](../profile_configs/sets/), whose ids select view rows by
-position.
+profiling pass.
 
 ```yaml
 compute_thruput_util:
