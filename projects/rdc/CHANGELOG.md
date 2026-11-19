@@ -2,19 +2,24 @@
 
 Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](https://rocm.docs.amd.com/projects/rdc/en/latest/).
 
-## RDC 1.4.0 for ROCm 10.1.0
+## RDC 1.5.0 for ROCm 10.3.0
 
 ### Changed
 
 - **`rdc_health_get()` returns `RDC_ST_GROUP_NOT_FOUND` for a GPU group that does not exist**.
   - It returned `RDC_ST_OK` with no health watches, so `rdci health -f` showed every watch as Off and exited successfully, and `rdci health -c` failed asking for watches to be enabled. Both commands now fail with a message that the group does not exist.
 
+- **`rdc_field_watch()` documents that a `max_keep_samples` or `max_keep_age` of 0 keeps no samples**.
+  - The documentation said 0 meant no limit. To keep every sample, pass a large value, such as `UINT32_MAX`.
+
 - **RDC keeps at most 256 jobs, running or stopped**.
   - A job with a new ID that starts when RDC already keeps 256 jobs removes the job that stopped first, and `rdc_job_get_stats()` returns `RDC_ST_NOT_FOUND` for it. If no job has stopped, a start on a group whose job fields are not watched first stops the running job, started first, whose GPU group was destroyed or runs a later job, and that job makes room (it stays stopped if the start then fails); if there is none, `rdc_job_start_stats()` returns `RDC_ST_MAX_LIMIT`. A start that fails removes no other job. Every job used to stay in memory until `rdc_job_remove()` or `rdc_job_remove_all()` removed it.
 
-### Removed
+- `rdc_job_start_stats()` returns `RDC_ST_MAX_LIMIT` for a group of more than `RDC_MAX_NUM_GPUS_PER_JOB` (16) GPUs, the most that `rdc_job_info_t` holds.
 
-- Removed the unused `GetBlockNameStr()` test helper and its GPU block name map. Nothing called it, and its `static_assert` on `AMDSMI_GPU_BLOCK_LAST` broke the RDC build whenever AMD SMI added an IP block (#10949).
+- `rdc_job_get_stats()` fills `gpus[0]` to `gpus[num_gpus - 1]`, ordered by `gpu_id`, which names the GPU or GPU partition of each entry. It used to place each GPU at the index of its GPU ID. The summary averages each statistic over the GPUs that have samples for it.
+
+- `rdci stats -j` labels each GPU by its ID, such as `GPU 3`, or `GPU g0.1` for partition 1 of GPU 0, instead of by its position in the job. The JSON keys follow, such as `gpu_3` and `gpu_g0.1`. A statistic without samples prints as `N/A` in the text output and as `null` in JSON, instead of zeros and a minimum of 18446744073709551615. PCIe standard deviations print with two decimals, like the other statistics.
 
 ### Resolved Issues
 
@@ -30,12 +35,28 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - RDC no longer reports another GPU's XGMI link states, or garbage values that could crash `rdcd`, for a GPU whose link status AMD SMI cannot read. That GPU now reports no links.
   - `rdci link` now prints an error and exits with a nonzero status when it cannot get the link status, instead of printing nothing and exiting with 0.
 
-- `RDC_FI_GPU_MEMORY_CUR_BANDWIDTH` no longer reports zero under DMA or copy-only memory traffic on GPUs whose instantaneous UMC activity does not reflect DMA transfers. It now derives memory activity from the `mem_activity_acc` accumulator over firmware time, and falls back to the instantaneous `umc_activity` reading when the accumulator or firmware timestamp is unavailable.
+- `rdcd` no longer crashes reading `RDC_FI_GPU_CLOCK` or `RDC_FI_MEM_CLOCK` when AMD SMI reports no current clock level, as it does for a power-gated clock domain on some APUs. The field is N/A then.
+
+- Fields that AMD SMI cannot read are N/A instead of AMD SMI's "not available" value, such as 4294967295 for `RDC_FI_GPU_GFX_BUSY_INST` or 65535 for `RDC_FI_GPU_VCN_BUSY_INST` on Radeon GPUs. This covers the utilization and clock fields, the `RDC_FI_GPU_*_BUSY_INST` fields, and the `RDC_HEALTH_*` throttle and residency counters.
+
+- `RDC_FI_ECC_CORRECT_TOTAL`, `RDC_FI_ECC_UNCORRECT_TOTAL`, and `RDC_FI_ECC_DEFERRED_TOTAL` are N/A on GPUs without ECC, like the per-block ECC fields, instead of 0. The memory health check still checks such a GPU's retired pages.
+
+- `RDC_FI_GPU_MEMORY_CUR_BANDWIDTH` is N/A instead of 0 when the GPU reports no memory activity.
+
+- `rdci group -l` lists 64 groups, the most RDC holds; it reported `The max limit reached`.
+
+- `rdc_job_get_stats()` and `rdc_policy_get()` with `rdcd` no longer report more GPUs, processes, or policies than the `rdcd` reply carries, or read past the entries it carries.
 
 - `rdci topo` and `rdc_device_topology_get()` now report the links of the requested GPU. They reported links between other GPU pairs, which showed the wrong link types on systems where GPU pairs are not all linked the same way, such as XGMI hives joined by PCIe.
   - `rdci topo` now exits with an error code when the GPU index is out of range or the topology query fails, instead of exiting 0, and `rdc_device_topology_get()` reports link types RDC does not define as `RDC_IOLINK_TYPE_UNDEFINED`.
 
-- `RDC_FI_ECC_CORRECT_TOTAL`, `RDC_FI_ECC_UNCORRECT_TOTAL`, and `RDC_FI_ECC_DEFERRED_TOTAL` no longer hang when AMD SMI defines GPU blocks above bit 31. The block iteration used a 32-bit counter that wrapped to zero instead of terminating.
+- RDC checks GPU policy conditions every 500 ms, as intended. It checked them every 0.5 ms, which read every GPU in a policy group thousands of times per second and kept `rdcd` busy on a CPU core.
+
+- Deleting a GPU group stops its policies. RDC kept checking the policies of a deleted group on whatever GPUs an uninitialized group record held, and with the GPU reset action could reset those GPUs.
+
+- Setting or deleting policies while RDC checks them, and registering for policy notifications with `rdcd`, are now thread-safe.
+
+- `rdc_policy_set()` returns `RDC_ST_GROUP_NOT_FOUND` for a GPU group that does not exist, instead of accepting the policy, and `rdci policy` exits with the status of a failed set.
 
 - Opening or stopping an RDC handle no longer crashes the process when another handle is in use, and concurrent `rdc_connect()` calls no longer fail at random.
 
@@ -44,18 +65,57 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `rdci discovery` now reports an error instead of exiting successfully with an incomplete GPU list when `rdcd` cannot read a GPU's attributes. Failed `rdc_device_get_attributes()` calls now return zeroed attributes, and `rdcd` replies to failed requests no longer contain garbage values.
 
-- `rdci dmon` and `rdci health -s` name the missing group again, for example `Cannot find the group 4242`. Since ROCm 7.12 they printed only `Group not found` (or `Fieldgroup not found` for a missing field group in `rdci dmon`).
-
-- `RDC_FI_GPU_PARTITION_COUNT` now reports how many compute partitions the GPU is split into, for example 1 in SPX mode. It reported 65535 or N/A in every partition mode on most GPUs.
-  - A GPU that cannot be partitioned now reports 1.
-
-- Stopping `rdcd`, or embedded RDC with `rdc_stop_embedded()`, no longer hangs. Rarely, the stop never returned and the process had to be killed.
+- `rdc_job_get_stats()` and `rdci stats -j` report every GPU of a job. Only the GPU with the lowest ID was summarized, and the entries of the other GPUs were not filled in. Job statistics for a GPU partition, or for a GPU whose ID is above 15, no longer crash `rdcd`. A GPU without a total memory reading reports memory utilization as unavailable instead of failing the call, and memory utilization is no longer inflated on GPUs with 400 GiB of memory or more.
 
 - A job start that fails, for example on a GPU group that runs another job, no longer leaves a running job behind. Its job ID returned `RDC_ST_ALREADY_EXIST` until the job was removed, and stopping it stopped the stats of the group's other job. A start that failed to set up process events, whose job kept collecting stats although `rdc_job_start_stats()` returned the error, no longer leaves a job either.
 
 - `rdc_job_remove()` and `rdc_job_remove_all()` now free the ID of a job that cannot stop, for example after a client unwatched the job fields of its group. Starting a job with that ID returned `RDC_ST_ALREADY_EXIST`.
 
 - Two `rdc_job_start_stats()` calls with the same job ID at the same time no longer both succeed. One of the two GPU groups then kept a watch that failed its later jobs with `RDC_ST_CONFLICT`.
+
+- `rdcd` no longer crashes during `rdci diag`, and later diagnostic runs and profiler fields keep working. Repeated `rdci diag` runs also no longer use up GPU memory in `rdcd`.
+  - After the first `rdci diag`, `rdcd` keeps the ROCm runtime loaded until it stops, as it already does after the first profiler field read, so changing the GPU partition mode needs `rdcd` stopped. `rdci diag` requests now run one at a time.
+
+- `rdci diag` now runs the Compute Queue and System memory checks on AMD Instinct MI455X GPUs instead of skipping them.
+
+- `RDC_FI_GPU_PARTITION_COUNT` now reports how many compute partitions the GPU is split into, for example 1 in SPX mode. It reported 65535 or N/A in every partition mode on most GPUs.
+  - A GPU that cannot be partitioned now reports 1.
+
+- Stopping `rdcd`, or embedded RDC with `rdc_stop_embedded()`, no longer hangs. Rarely, the stop never returned and the process had to be killed.
+
+- Field watches with a `max_keep_samples` above 2147483647, such as `UINT32_MAX`, no longer crash `rdcd` or the process that embeds RDC.
+
+- `rdcd` exits with an error when it cannot listen on its port, for example when another process uses the port. It printed "Server listening" and then crashed.
+
+- `rdc_stop_embedded()` after `rdc_config_set()` no longer aborts with "terminate called without an active exception".
+
+- `rdcd` names the owner of a lock file that it cannot open, instead of reporting "Numerical result out of range". It no longer reports "Bad file descriptor" for a lock file that does not exist, and prints the path of a lock file that it cannot read.
+
+- When `rdcd` takes more than 5 seconds to stop, another SIGTERM or SIGINT ends it at once, with status 1.
+
+- `rdcd` no longer crashes when the watches due in one update read more than 8,192 GPU-field pairs from AMD SMI, for example two `rdci dmon` sessions of 128 fields on 64 GPUs each.
+
+- `rdcd` no longer crashes listing more than 128 (`RDC_MAX_NUM_DEVICES`) GPUs and GPU partitions; `rdc_device_get_all()` lists the first 128.
+
+- `rdci policy --reg` no longer uses a whole CPU core once rdcd goes away, and no longer reads freed memory as it exits. With a connection to rdcd, `rdc_policy_unregister()` and `rdc_disconnect()` now wait for a running policy callback to return, and `rdc_policy_register()` works again for a group that was unregistered; it used to return `RDC_ST_CONFLICT` for that group until the connection was closed.
+
+## RDC 1.4.0 for ROCm 10.2.0
+
+### Resolved Issues
+
+- The `RDC_FI_GPU_MEMORY_CUR_BANDWIDTH` fix for zero readings under DMA or copy-only memory traffic is now included.
+
+- `rdci dmon` and `rdci health -s` name the missing group again, for example `Cannot find the group 4242`. Since ROCm 7.12 they printed only `Group not found` (or `Fieldgroup not found` for a missing field group in `rdci dmon`).
+
+## RDC 1.3.1 for ROCm 10.1.0
+
+### Removed
+
+- Removed the unused `GetBlockNameStr()` test helper and its GPU block name map. Nothing called it, and its `static_assert` on `AMDSMI_GPU_BLOCK_LAST` broke the RDC build whenever AMD SMI added an IP block (#10949).
+
+### Resolved Issues
+
+- `RDC_FI_ECC_CORRECT_TOTAL`, `RDC_FI_ECC_UNCORRECT_TOTAL`, and `RDC_FI_ECC_DEFERRED_TOTAL` no longer hang when AMD SMI defines GPU blocks above bit 31. The block iteration used a 32-bit counter that wrapped to zero instead of terminating.
 
 ## RDC 1.3.1 for ROCm 7.14.0
 

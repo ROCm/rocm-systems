@@ -30,6 +30,7 @@ THE SOFTWARE.
 #include <sstream>
 #include <unordered_map>
 
+#include "amd_smi/amdsmi.h"
 #include "common/rdc_utils.h"
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcLogger.h"
@@ -79,6 +80,12 @@ rdc_status_t RdcWatchTableImpl::rdc_job_start_stats(rdc_gpu_group_t group_id, co
   result = group_settings_->rdc_group_gpu_get_info(group_id, &ginfo);
   if (result != RDC_ST_OK) {
     return result;
+  }
+  if (ginfo.count > RDC_MAX_NUM_GPUS_PER_JOB) {
+    RDC_LOG(RDC_ERROR, "Fail to start job " << job_id << ". The group " << group_id << " has "
+                                            << ginfo.count << " GPUs; a job holds at most "
+                                            << RDC_MAX_NUM_GPUS_PER_JOB << ".");
+    return RDC_ST_MAX_LIMIT;
   }
 
   for (uint32_t ix = 0; ix < ginfo.count; ++ix) {
@@ -397,7 +404,9 @@ rdc_status_t RdcWatchTableImpl::rdc_field_watch(rdc_gpu_group_t group_id,
         fields.push_back({fields_to_watch_iter->first.first, fields_to_watch_iter->first.second});
       }
     }
-    rdc_telemetry->rdc_telemetry_fields_watch(&fields[0], fields.size());
+    if (!fields.empty()) {
+      rdc_telemetry->rdc_telemetry_fields_watch(&fields[0], fields.size());
+    }
   }
 
   return RDC_ST_OK;
@@ -468,7 +477,7 @@ rdc_status_t RdcWatchTableImpl::update_field_in_table_when_unwatch(const RdcFiel
 
   // Notify the telemetry_module to unwatch those fields
   auto rdc_telemetry = rdc_module_mgr_->get_telemetry_module();
-  if (rdc_telemetry) {
+  if (rdc_telemetry && !unwatch_fields.empty()) {
     rdc_telemetry->rdc_telemetry_fields_unwatch(&unwatch_fields[0], unwatch_fields.size());
   }
 
@@ -563,14 +572,14 @@ rdc_status_t RdcWatchTableImpl::rdc_health_set(rdc_gpu_group_t group_id, unsigne
   } while (0);
 
   for (auto fields = fields_in_watch.begin(); fields != fields_in_watch.end(); fields++) {
-    // get initial values
+    // get initial values. A field that cannot be read does not stop the others.
     rdc_field_value value;
-    result = metric_fetcher_->fetch_smi_field(fields->first, fields->second, &value);
-    if (result != RDC_ST_OK) break;
+    if (metric_fetcher_->fetch_smi_field(fields->first, fields->second, &value) != RDC_ST_OK) {
+      continue;
+    }
 
     // set initial values to cache
-    result = cache_mgr_->rdc_health_set(group_id, fields->first, value);
-    if (result != RDC_ST_OK) break;
+    cache_mgr_->rdc_health_set(group_id, fields->first, value);
   }
 
   // Start to watch the fields and update fields per 1 second.
@@ -713,10 +722,12 @@ rdc_status_t RdcWatchTableImpl::memory_check(rdc_gpu_group_t group_id, uint32_t 
   rdc_field_value start = {}, end = {};
   rdc_status_t result =
       get_start_end_values(group_id, gpu_index, RDC_FI_ECC_UNCORRECT_TOTAL, 0, nullptr, &end);
-  if (result != RDC_ST_OK) return result;
+  // A GPU without ECC has no count to check, but can still have retired pages. The
+  // fetcher returns RDC_ST_SMI_ERROR for every failure and keeps amd-smi's status in the value.
+  if (result != RDC_ST_OK && end.status != AMDSMI_STATUS_NOT_SUPPORTED) return result;
 
   uint64_t ecc_uncorrectable_count = 0;
-  ecc_uncorrectable_count = end.value.l_int;
+  if (result == RDC_ST_OK) ecc_uncorrectable_count = end.value.l_int;
   if (ecc_uncorrectable_count > 0) {
     rdc_health_incidents_t* incident = &response->incidents[response->incidents_count];
 
@@ -806,7 +817,11 @@ rdc_status_t RdcWatchTableImpl::eeprom_check(rdc_gpu_group_t group_id, uint32_t 
   rdc_field_value end = {};
   rdc_status_t result =
       get_start_end_values(group_id, gpu_index, RDC_FI_ECC_UNCORRECT_TOTAL, 0, nullptr, &end);
-  if (result != RDC_ST_OK && result != RDC_ST_CORRUPTED_EEPROM) return result;
+  // As in memory_check(), a GPU without ECC has nothing to check.
+  if (result != RDC_ST_OK && result != RDC_ST_CORRUPTED_EEPROM &&
+      end.status != AMDSMI_STATUS_NOT_SUPPORTED) {
+    return result;
+  }
 
   if (result == RDC_ST_CORRUPTED_EEPROM) {
     rdc_health_incidents_t* incident = &response->incidents[response->incidents_count];
@@ -894,14 +909,14 @@ rdc_status_t RdcWatchTableImpl::rdc_health_check(rdc_gpu_group_t group_id,
   if (result != RDC_ST_OK) return result;
 
   for (auto fields = fields_in_watch.begin(); fields != fields_in_watch.end(); fields++) {
-    // get current values
+    // get current values. A field that cannot be read does not stop the others.
     rdc_field_value value;
-    result = metric_fetcher_->fetch_smi_field(fields->first, fields->second, &value);
-    if (result != RDC_ST_OK) break;
+    if (metric_fetcher_->fetch_smi_field(fields->first, fields->second, &value) != RDC_ST_OK) {
+      continue;
+    }
 
     // set current values to cache
-    result = cache_mgr_->rdc_update_health_stats(group_id, fields->first, value);
-    if (result != RDC_ST_OK) break;
+    cache_mgr_->rdc_update_health_stats(group_id, fields->first, value);
   }
 
   // init response

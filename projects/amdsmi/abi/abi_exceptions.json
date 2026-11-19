@@ -1,0 +1,9 @@
+{
+  "append_only": {},
+  "notes": {},
+  "breaks": [
+    {"path": "semantics/field:amdsmi_apu_metrics_t.average_gfx_activity", "old": {}, "new": {"unit": ["%"]}, "why": "#13540: APU activity is reported in whole percent"},
+    {"path": "semantics/field:amdsmi_apu_metrics_t.average_mm_activity", "old": {}, "new": {"unit": ["%"]}, "why": "#13540: APU activity is reported in whole percent"},
+    {"path": "semantics/field:amdsmi_apu_metrics_t.average_vcn_activity", "old": {}, "new": {"unit": ["%"]}, "why": "#13540: APU activity is reported in whole percent"}
+  ]
+}

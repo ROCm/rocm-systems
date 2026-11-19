@@ -3,6 +3,9 @@
 #include "bootstrap.h"
 #include "group.h"
 #include "utils.h"
+#include <cerrno>
+#include <climits>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <iomanip>
@@ -13,6 +16,7 @@ using namespace std::chrono;
 
 namespace rccl {
 __thread int Recorder::rcclReplayThreadIdx = -1;
+thread_local bool Recorder::skipped = false;
 int Recorder::depth = 0;
 
 static char buffer[4096];
@@ -80,16 +84,28 @@ Recorder::Recorder() {
     return;
   }
 
-  logLevel = getenv("RCCL_LOG_LEVEL") ? std::stoi(getenv("RCCL_LOG_LEVEL")) : 1;
+  logLevel = 1;
+  const char* levelStr = getenv("RCCL_LOG_LEVEL");
+  if (levelStr && strlen(levelStr) > 0) {
+    errno = 0;
+    char* end = nullptr;
+    long long level = strtoll(levelStr, &end, 0);
+    if (errno || end == levelStr || *end != '\0' || level < INT_MIN || level > INT_MAX) {
+      ATTN("Invalid value %s for RCCL_LOG_LEVEL, using default 1.", levelStr);
+    } else {
+      logLevel = static_cast<int>(level);
+    }
+  }
   char hostname[256];
   gethostname(hostname, 256);
   pid = getpid();
   output_json = 0;
 
-  size_t dot;
+  const size_t slash = filename.find_last_of('/');
+  const size_t dot = filename.find_last_of('.');
   std::string output_name, output_extension;
 
-  if ((dot = std::string(filename).find(".")) != std::string::npos) {
+  if (dot != std::string::npos && (slash == std::string::npos || dot > slash)) {
     output_name = std::string(filename).substr(0, dot);
     output_extension = std::string(filename).substr(dot);
     if (output_extension.compare(".json") == 0) {
@@ -99,8 +115,12 @@ Recorder::Recorder() {
     output_name = std::string(filename);
   }
 
-  outputFile.open(output_name + "." + std::to_string(pid) + "." + std::string(hostname) + output_extension,
-                  output_json ? std::ofstream::out : std::ofstream::binary);
+  const std::string outputPath = output_name + "." + std::to_string(pid) + "." + hostname + output_extension;
+  outputFile.open(outputPath, output_json ? std::ofstream::out : std::ofstream::binary);
+  if (!outputFile.is_open()) {
+    WARN("Could not open RCCL replay file %s", outputPath.c_str());
+    return;
+  }
   if (output_json) {
     outputFile << "{" << std::endl;
     indent(2, outputFile);

@@ -1,0 +1,43 @@
+/******************************************************************************
+ * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * SPDX-License-Identifier: MIT
+ *****************************************************************************/
+
+/*
+ * rccl-owned GDA config for the GIN rocshmem-GDA device path. The copied rocSHMEM
+ * QueuePair headers include rocSHMEM's "rocshmem/rocshmem_config.h"; the header
+ * copy step rewrites that to this generated gda_config.h (configure_file from
+ * projects/rccl/src/CMakeLists.txt), so the GIN header path needs no rocSHMEM build.
+ *
+ * Only the macros the GIN headers actually consult are emitted. Everything else
+ * in rocSHMEM's full config (USE_GDA/USE_SDMA/USE_IPC/USE_RO, the HAVE_* probes,
+ * BUILD_DEBUG_TRACE_*, the version/vendor strings) is unused by the copied GIN
+ * host+device headers and intentionally omitted.
+ *
+ * Fixed by rccl's design, not discovered at build time:
+ *   - GDA_IONIC/GDA_BNXT/GDA_MLX5: rccl builds all three providers.
+ *   - GDA_MUX: multi-provider runtime dispatch. INVARIANT: GDA_MUX must be ON
+ *     whenever more than one provider is enabled — queue_pair_provider.hpp's
+ *     #elif chain otherwise silently aliases QueuePair to the first-listed
+ *     provider (IONIC>BNXT>MLX5), which is wrong on the other NICs. rccl always
+ *     builds all three, so GDA_MUX is always ON here.
+ *   - USE_CONSTMEM: hardcoded undefined (not a #cmakedefine) — the GIN device
+ *     dispatch reads the provider from the QueuePair instance, not __constant__
+ *     constmem (see queue_pair_mux.hpp); a stray CMake define must not flip it on.
+ *   - BUILD_DEBUG_DEVICE: OFF for now — gates device debug prints in the provider
+ *     QP headers. Retained as a toggle (set BUILD_DEBUG_DEVICE in rccl's CMake to
+ *     re-enable) so the feature can be turned back on later.
+ */
+
+#ifndef RCCL_GIN_ROCSHMEM_CONFIG_H_
+#define RCCL_GIN_ROCSHMEM_CONFIG_H_
+
+#cmakedefine GDA_IONIC
+#cmakedefine GDA_BNXT
+#cmakedefine GDA_MLX5
+#cmakedefine GDA_MUX
+#undef USE_CONSTMEM
+#cmakedefine BUILD_DEBUG_DEVICE
+
+#endif  // RCCL_GIN_ROCSHMEM_CONFIG_H_
