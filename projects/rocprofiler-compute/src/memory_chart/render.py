@@ -55,7 +55,7 @@ _ARROW_GLYPHS = {"backward": "<{}", "forward": "{}>", "both": "<{}>"}
 
 # Columns reserved for a value when sizing a panel, so typical values fit on the
 # label's line; a longer value moves to its own line.
-_VALUE_RESERVE = {"percent": 6, "bandwidth": 12, "count": 8, "value": 9}
+_VALUE_RESERVE = {"percent": 6, "bandwidth": 12, "count": 14, "value": 9}
 
 _BAR_WIDTH = 10
 _MIN_TEXT_WIDTH = 10
