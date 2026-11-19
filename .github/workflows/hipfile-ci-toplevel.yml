@@ -34,11 +34,11 @@ jobs:
     env:
       # Matrix variables go here in JSON notation.
       # '>-' strips newlines
+      # clang++ and g++ run once via MATRIX_INCLUDE (ubuntu + 7.14.0), not
+      # fanned out.
       CXX_COMPILER: >-
         [
-          "amdclang++",
-          "clang++",
-          "g++"
+          "amdclang++"
         ]
       # C++20 is the production standard. C++23 is a forward-compat smoke test
       # run once via MATRIX_INCLUDE (ubuntu + amdclang++ + 10.0.0), not fanned out.
@@ -65,7 +65,9 @@ jobs:
       # combinations can be expressed without abandoning the base cross-product.
       MATRIX_INCLUDE: >-
         [
-          {"supported_platforms": "ubuntu", "rocm_versions": "10.0.0", "cxx_compiler": "amdclang++", "cxx_standard": 23}
+          {"supported_platforms": "ubuntu", "rocm_versions": "10.0.0", "cxx_compiler": "amdclang++", "cxx_standard": 23},
+          {"supported_platforms": "ubuntu", "rocm_versions": "7.14.0", "cxx_compiler": "clang++", "cxx_standard": 20},
+          {"supported_platforms": "ubuntu", "rocm_versions": "7.14.0", "cxx_compiler": "g++", "cxx_standard": 20}
         ]
       # Only test nightly ROCm on non-ubuntu distros.
       MATRIX_EXCLUDE: >-
