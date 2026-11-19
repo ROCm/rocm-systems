@@ -33,8 +33,7 @@ __device__ __forceinline__ uint32_t cas(uint32_t* addr, uint32_t compare, uint32
 #endif
 }
 
-// DDA revoke/abort is gfx1250 only; IpcGpuBarrier and FabricGpuBarrier share these waits. On gfx942/gfx950
-// the abort poll and the sticky bit in the by-value barrier cost every IPC launch, so the waits just spin.
+// Abort poll is gfx1250 only; on gfx942/gfx950 it costs every DDA IPC launch. FabricGpuBarrier shares these waits.
 #if defined(__gfx1250__) || defined(__gfx1250_strict__)
 constexpr bool kDdaWaitPollsAbort = true;
 #else
@@ -167,6 +166,7 @@ private:
   // which all sit in wave 0: once any of them gives up a barrier on abort, the
   // block signals no later barrier, so a late peer cannot pair its earlier flag
   // with this block's next one and read data this rank never finished producing.
+  // Used only where kDdaWaitPollsAbort is set (gfx1250); unused on gfx942/gfx950.
   bool aborted_{false};
 
   __host__ IpcGpuBarrier(int nRanks, int nBlocks, int selfRank, const std::array<DeviceMailbox, NRANKS>& allMailboxes,
