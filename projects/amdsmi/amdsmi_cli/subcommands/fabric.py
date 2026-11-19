@@ -4,6 +4,8 @@
 
 import logging
 
+from amdsmi_cli_exceptions import AmdSmiCommandNotSupportedException
+
 from amdsmi import amdsmi_exception, amdsmi_interface
 
 
@@ -80,6 +82,16 @@ class FabricCommands:
         return:
             Nothing
         """
+        # `fabric` only reports GPU information; --cpu and --core are accepted by
+        # the shared device-argument group but are not serviced by this command.
+        if getattr(args, "cpu", None) or getattr(args, "core", None):
+            raise AmdSmiCommandNotSupportedException(
+                "fabric",
+                self.helpers.get_output_format(),
+                message="fabric reports GPU information. --cpu and --core are not "
+                "supported for this command.",
+            )
+
         # Set args.* from overrides
         if gpu:
             args.gpu = gpu

@@ -6,6 +6,8 @@ import logging
 import os
 import sys
 
+from amdsmi_cli_exceptions import AmdSmiCommandNotSupportedException
+
 from amdsmi import amdsmi_exception, amdsmi_interface
 
 # PCI VPD is mode 0600, so an unprivileged run cannot tell a card with no VPD
@@ -40,12 +42,6 @@ class ListDevicesCommands:
         # Set args.* to passed in arguments
         if gpu:
             args.gpu = gpu
-
-        cpu_attributes = ["cpu"]
-        for attr in cpu_attributes:
-            if hasattr(args, "cpu") and getattr(args, "cpu"):
-                print("N/A")
-                return
 
         # Handle No GPU passed
         if args.gpu == None:
@@ -283,7 +279,92 @@ class ListDevicesCommands:
                     ainics.append(nic)
         return ainics
 
+    def list_cpu(self, args, multiple_devices=False, cpu=None):
+        """List CPU identification for target cpu.
+
+        Always reports the model name, BIOS (SMBIOS processor) model name and
+        cores per socket. With -e (args.enumeration) also reports family, model and stepping.
+        Family, model, model name and cores come from the amd-smi APIs; the BIOS
+        model name is read from the SMBIOS table via the helpers.
+
+        Args:
+            args (Namespace): Namespace containing the parsed CLI args
+            multiple_devices (bool, optional): True if checking for multiple devices. Defaults to False.
+            cpu (device_handle, optional): device_handle for target device. Defaults to None.
+
+        Returns:
+            None: Print output via AMDSMILogger to destination
+        """
+        if cpu:
+            args.cpu = cpu
+
+        if getattr(args, "cpu", None) is None:
+            args.cpu = self.cpu_handles
+
+        if not self.group_check_printed:
+            self.helpers.check_required_groups()
+            self.group_check_printed = True
+
+        # Handle multiple CPUs
+        handled_multiple_cpus, device_handle = self.helpers.handle_cpus(
+            args, self.logger, self.list_cpu
+        )
+        if handled_multiple_cpus:
+            return  # This function is recursive
+
+        args.cpu = device_handle
+
+        cpu_id = self.helpers.get_cpu_id_from_device_handle(args.cpu)
+
+        # Report the identification values as hex (N/A stays as-is).
+        def _as_hex(value):
+            return f"0x{value:X}" if isinstance(value, int) else value
+
+        try:
+            identity = amdsmi_interface.amdsmi_get_cpu_identity_info(args.cpu)
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            identity = {}
+            logging.debug("Failed to get cpu identity for cpu %s | %s", cpu_id, e.get_error_info())
+
+        def _field(key):
+            value = identity.get(key)
+            return "N/A" if value in (None, "") else value
+
+        self.logger.store_cpu_output(args.cpu, "model_name", _field("model_name"))
+        self.logger.store_cpu_output(args.cpu, "bios_model_name", _field("bios_model_name"))
+        self.logger.store_cpu_output(args.cpu, "cores_per_socket", _field("cores_per_socket"))
+
+        if getattr(args, "enumeration", False):
+            self.logger.store_cpu_output(args.cpu, "family", _as_hex(_field("family")))
+            self.logger.store_cpu_output(args.cpu, "model", _as_hex(_field("model")))
+            self.logger.store_cpu_output(args.cpu, "stepping", _field("stepping"))
+
+        if multiple_devices:
+            self.logger.store_multiple_device_output()
+            return  # Skip printing when there are multiple devices
+
+        self.logger.print_output()
+
     def list_devices(self, args, multiple_devices=False, gpu=None, nic=None):
+
+        # `list` reports GPU information. --cpu reports CPU identification
+        # (model name, BIOS model name and cores per socket; with -e also
+        # family/model); --core is still not serviced and is rejected.
+        if getattr(args, "core", None):
+            raise AmdSmiCommandNotSupportedException(
+                "list",
+                self.helpers.get_output_format(),
+                message="list reports GPU information. --core is not supported for this command.",
+            )
+        if getattr(args, "cpu_all_requested", False):
+            raise AmdSmiCommandNotSupportedException(
+                "list",
+                self.helpers.get_output_format(),
+                message="list does not support --cpu all. Select a specific CPU ID with --cpu <id>.",
+            )
+        if getattr(args, "cpu", None):
+            self.list_cpu(args)
+            return
 
         if gpu:
             args.gpu = gpu

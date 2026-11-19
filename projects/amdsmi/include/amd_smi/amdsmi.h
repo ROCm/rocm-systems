@@ -3916,6 +3916,18 @@ typedef struct {
 } amdsmi_cuid_component_t;
 
 /**
+ * @brief CPU identity information.
+ */
+typedef struct {
+  char model_name[AMDSMI_MAX_STRING_LENGTH];
+  char bios_model_name[AMDSMI_MAX_STRING_LENGTH];
+  uint32_t cores_per_socket;
+  uint32_t family;
+  uint32_t model;
+  uint32_t stepping;  //!< CPU stepping (from /proc/cpuinfo)
+} amdsmi_cpu_identity_t;
+
+/**
  *  @brief Lists every component on the node that has a CUID
  *
  *  @ingroup tagProcDiscovery
@@ -10186,6 +10198,29 @@ amdsmi_status_t amdsmi_get_cpu_enabled_commands(amdsmi_processor_handle processo
                                                 bool* r_mask, uint32_t* mask0, uint32_t* mask1,
                                                 uint32_t* mask2);
 
+/**
+ * @brief Get CPU identity information.
+ *
+ * This function retrieves identity information for the specified CPU,
+ * including the CPU model name, BIOS model name, number of cores per
+ * socket, CPU family, CPU model, and CPU stepping.
+ *
+ * @param[in] processor_handle Processor handle for the CPU.
+ *
+ * @param[out] identity Pointer to an @ref amdsmi_cpu_identity_t structure
+ *                      that will contain the CPU identity information.
+ *
+ * @retval ::AMDSMI_STATUS_SUCCESS
+ *         The CPU identity information was retrieved successfully.
+ * @retval ::AMDSMI_STATUS_INVAL
+ *         The processor handle or identity pointer is invalid.
+ * @retval ::AMDSMI_STATUS_NOT_SUPPORTED
+ *         The requested information is not supported.
+ * @retval ::AMDSMI_STATUS_UNKNOWN_ERROR
+ *         An unexpected error occurred while retrieving CPU information.
+ */
+amdsmi_status_t amdsmi_get_cpu_identity_info(amdsmi_processor_handle processor_handle,
+                                             amdsmi_cpu_identity_t* identity);
 /** @} End tagEsmiCPUAuxiliary */
 
 #endif

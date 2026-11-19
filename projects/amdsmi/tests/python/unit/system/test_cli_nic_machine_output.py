@@ -88,6 +88,9 @@ def _stub_cli_imports(test_cls):
                 AmdSmiInvalidParameterException=type(
                     "AmdSmiInvalidParameterException", (Exception,), {}
                 ),
+                AmdSmiCommandNotSupportedException=type(
+                    "AmdSmiCommandNotSupportedException", (Exception,), {}
+                ),
             ),
         },
     )

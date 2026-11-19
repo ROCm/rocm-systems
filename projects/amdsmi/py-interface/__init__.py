@@ -70,6 +70,7 @@ try:
     from .amdsmi_interface import amdsmi_get_hsmp_metrics_table
     from .amdsmi_interface import amdsmi_first_online_core_on_cpu_socket
     from .amdsmi_interface import amdsmi_get_cpu_family
+    from .amdsmi_interface import amdsmi_get_cpu_identity_info
     from .amdsmi_interface import amdsmi_get_cpu_model
     from .amdsmi_interface import amdsmi_get_cpu_model_name
     from .amdsmi_interface import amdsmi_set_cpu_xgmi_pstate_range
