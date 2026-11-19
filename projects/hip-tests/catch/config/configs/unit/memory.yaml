@@ -1178,6 +1178,9 @@ memory:
   Unit_hipExtMallocWithFlags_Negative_Parameters:
     <<: *level_default
     tags: [alloc, P1]
+  Unit_hipExtMallocWithFlags_Uncached_ReusedMemory_PeerWriteVisible:
+    <<: *level_default
+    tags: [alloc, multigpu, P1]
   Unit_hipMallocManaged_MultiThread:
     <<: *level_default
     disabled:
