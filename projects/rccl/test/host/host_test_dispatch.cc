@@ -1114,6 +1114,8 @@ WakePipe g_wake;
 
 volatile std::sig_atomic_t g_stopRequested = 0;
 
+bool stopRequested() { return g_stopRequested != 0; }
+
 extern "C" void requestStop(int)
 {
     g_stopRequested = 1;
@@ -1244,7 +1246,7 @@ pid_t reapAnyChild(ChildExit &exit, std::optional<std::chrono::milliseconds> wit
             exit = ChildExit{1, false};
             return -1;
         }
-        if (returnOnStop && g_stopRequested != 0) {
+        if (returnOnStop && stopRequested()) {
             exit = ChildExit{};
             return 0;
         }
@@ -1373,7 +1375,7 @@ int waitForShellChild(pid_t pid)
             return 1;
         }
         const auto now = std::chrono::steady_clock::now();
-        if ((g_stopRequested != 0 && !escalation.termed()) ||
+        if ((stopRequested() && !escalation.termed()) ||
             (!escalation.killed() && escalation.due() && now >= *escalation.due())) {
             escalation.advance(pid, now, signalChildGroup);
         }
@@ -1953,7 +1955,7 @@ int main(int argc, char **argv)
     installStopHandler();
     const std::optional<std::chrono::seconds> childTimeout =
         resolveChildTimeout(std::getenv(std::string(kChildTimeoutEnv).c_str()));
-    const TerminatedFn terminated = [] { return g_stopRequested != 0; };
+    const TerminatedFn terminated = stopRequested;
 
     const Enumeration enumeration = enumerate(
         directory, binaries,

@@ -2012,7 +2012,7 @@ TEST(HostDispatchShellMicrotest, ASignalArrivingDuringACommandStillReachesTheSto
     const int status = runShell(fmt::format("kill -INT {}; sleep 30", ::getpid()));
     const std::chrono::milliseconds elapsed = since(start);
 
-    EXPECT_NE(g_stopRequested, 0) << "the signal never reached the handler";
+    EXPECT_TRUE(stopRequested()) << "the signal never reached the handler";
     EXPECT_NE(status, 0) << "a command ended by the stop did not finish its work";
     // Generous for a loaded machine, and far below the 30 s the command would otherwise take:
     // anything near that means the stop was noticed only once the command finished of its own
