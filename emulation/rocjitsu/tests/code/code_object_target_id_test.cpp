@@ -390,15 +390,14 @@ TEST(GfxCodeObjectTargets, CApiAcceptsGfx1251ForBasicBlockList) {
   expect_c_api_accepts_target(EF_AMDGPU_MACH_AMDGCN_GFX1251, ROCJITSU_CODE_TARGET_GFX1251);
 }
 
-TEST(GfxCodeObjectTargets, CApiDecoderCacheKeepsGfx1250AndGfx1251Distinct) {
+TEST(GfxCodeObjectTargets, CApiListDecodingKeepsGfx1250AndGfx1251Distinct) {
   constexpr std::array<uint32_t, 2> kGfx1251PackedAdd = {
       0xCC4B4004u,
       0x1A021908u,
   };
 
-  // Populate the thread-local cache with gfx1251 first. A cache keyed only by
-  // the shared CDNA5 descriptor would then incorrectly accept this encoding
-  // for gfx1250.
+  // Concrete target features must remain distinct even though both targets
+  // use the same CDNA5 decoder implementation.
   rj_status_t status{};
   ASSERT_TRUE(c_api_instruction_list_status(status, EF_AMDGPU_MACH_AMDGCN_GFX1251,
                                             ROCJITSU_CODE_TARGET_GFX1251, kGfx1251PackedAdd));
