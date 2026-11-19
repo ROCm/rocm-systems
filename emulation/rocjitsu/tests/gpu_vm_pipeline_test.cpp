@@ -3456,6 +3456,52 @@ TEST(GpuVmPipeline, LegacyAtomicBatchPreservesLaneResultsOnRetry) {
   }
 }
 
+TEST(GpuVmPipeline, PhysicalVectorAtomicRefusesMisalignedLane) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  amdgpu::ComputeUnitCore *cu = sim.cu();
+  amdgpu::Wavefront *wf = sim.dispatch_scratch_wf();
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->process_id(), 0u);
+  wf->set_exec(0x3u);
+
+  constexpr uint64_t kAlignedAddress = 0x10000;
+  constexpr uint64_t kMisalignedWords = 0x10040;
+  constexpr uint32_t kInitial = 10, kSource = 5, kDestination = 30, kSentinel = 0xdeadbeef;
+  constexpr uint32_t kLowWord = 0x11111111, kHighWord = 0x22222222;
+  sim.memory->write32(kAlignedAddress, kInitial);
+  sim.memory->write32(kMisalignedWords, kLowWord);
+  sim.memory->write32(kMisalignedWords + 4, kHighWord);
+
+  auto state = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  state->elem_size = sizeof(uint32_t);
+  state->num_elems = 1;
+  state->is_load = true;
+  state->atomic_op = amdgpu::AtomicOp::ADD;
+  state->wf_size = wf->wf_size();
+  state->exec_mask = 0x3u;
+  state->lane_mask = 0x3u;
+  state->dst_reg_base = wf->vgpr_alloc().base + kDestination;
+  state->per_lane_addr[0] = kAlignedAddress;
+  state->per_lane_addr[1] = kMisalignedWords + 2;
+  state->store_data.resize(state->wf_size * sizeof(uint32_t));
+  for (uint32_t lane = 0; lane < 2; ++lane) {
+    std::memcpy(state->store_data.data() + lane * sizeof(uint32_t), &kSource, sizeof(kSource));
+    cu->write_vgpr(state->dst_reg_base, lane, kSentinel);
+  }
+
+  amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), cu->l2());
+  EXPECT_EQ(pipeline.issue(new TestMemoryInstruction(std::move(state)), *wf),
+            amdgpu::VmAccessOutcome::Malformed);
+  EXPECT_TRUE(wf->wait_counters().empty());
+  // Lanes before the refused one apply, as at a nonzero VMID.
+  EXPECT_EQ(sim.memory->read32(kAlignedAddress), kInitial + kSource);
+  EXPECT_EQ(sim.memory->read32(kMisalignedWords), kLowWord);
+  EXPECT_EQ(sim.memory->read32(kMisalignedWords + 4), kHighWord);
+  for (uint32_t lane = 0; lane < 2; ++lane)
+    EXPECT_EQ(cu->read_vgpr_storage(wf->vgpr_alloc().base + kDestination, lane), kSentinel);
+}
+
 TEST(GpuVmPipeline, TranslatedAtomicRetrySkipsCompletedLanes) {
   TranslatedPipelineContext context;
   ASSERT_NO_FATAL_FAILURE(context.initialize());

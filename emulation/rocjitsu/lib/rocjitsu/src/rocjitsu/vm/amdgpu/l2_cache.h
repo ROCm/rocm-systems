@@ -501,6 +501,10 @@ private:
   [[nodiscard]] VmAccessOutcome
   atomic_rmw_preflighted(uint64_t addr, uint32_t size, F &&fn, uint32_t vmid,
                          const std::optional<GpuVmAccess> &vm_access) {
+    // GpuVmAccess refuses a misaligned operand at a nonzero VMID. VMID 0 reaches
+    // physical memory directly, so refuse it here, per lane, the same way.
+    if (vmid == 0 && addr % size != 0)
+      return VmAccessOutcome::Malformed;
     if (backing_memory_) {
       diagnostics(addr).backing_reads.fetch_add(1, std::memory_order_relaxed);
       diagnostics(addr).backing_writes.fetch_add(1, std::memory_order_relaxed);
