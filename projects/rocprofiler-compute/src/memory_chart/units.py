@@ -38,7 +38,7 @@ _DISPLAY_UNITS: dict[str, DisplayUnit] = {
     "KB per Wave": DisplayUnit("value", " KB", 3),
     "Bytes per Workgroup": DisplayUnit("value", " KB", 1, 1 / 1024),
     "Cycles": DisplayUnit("value", " cycles"),
-    "Registers": DisplayUnit("value"),
+    "Registers": DisplayUnit("value", precision=0),
     "Workgroups per CU": DisplayUnit("value"),
     "Workgroups per WGP": DisplayUnit("value"),
 }
