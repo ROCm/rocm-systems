@@ -15,6 +15,9 @@
 #include "bootstrap.h"
 
 #include <unistd.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <string.h>
 #include <sys/utsname.h>
 #include <fstream>
 #include <mutex>
@@ -412,6 +415,45 @@ error:
 ncclResult_t rocmLibraryInit() {
   pthread_once(&initOnceControl, initOnceFunc);
   return initResult;
+}
+
+static bool ncclFdIsDmabuf(int fd) {
+  char path[64], link[64];
+  snprintf(path, sizeof(path), "/proc/self/fd/%d", fd);
+  ssize_t n = readlink(path, link, sizeof(link) - 1);
+  if (n <= 0) return false;
+  link[n] = '\0';
+  return strncmp(link, "/dmabuf:", 8) == 0 || strncmp(link, "anon_inode:dmabuf", 17) == 0;
+}
+
+ncclResult_t ncclCuMemExportPosixFd(int* fd, CUmemGenericAllocationHandle handle) {
+  int a = -1, b = -1;
+  *fd = -1;
+  CUCHECK(cuMemExportToShareableHandle(&a, handle, CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR, 0));
+  // While a is open, a runtime that creates a new fd per export cannot return the same number again.
+  hipError_t res = cuMemExportToShareableHandle(&b, handle, CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR, 0);
+  if (res != hipSuccess) {
+    // A runtime that caches the fd allocates nothing on a repeat export, so a failure here means a is ours.
+    (void)close(a);
+    CUCHECK(res);
+  }
+  if (a != b) {
+    (void)close(b);
+    *fd = a;
+    return ncclSuccess;
+  }
+  if (!ncclFdIsDmabuf(a)) {
+    WARN("cuMem export returned stale runtime-cached fd %d", a);
+    return ncclSystemError;
+  }
+  int dupFd = fcntl(a, F_DUPFD_CLOEXEC, 0);
+  if (dupFd < 0) {
+    WARN("fcntl(F_DUPFD_CLOEXEC) of runtime-cached fd %d failed: %s", a, strerror(errno));
+    return ncclSystemError;
+  }
+  INFO(NCCL_ALLOC, "cuMem export returned runtime-cached fd %d, using dup %d", a, dupFd);
+  *fd = dupFd;
+  return ncclSuccess;
 }
 
 // librccl depends on libamdhip64, so this runs before HIP's own teardown and
