@@ -91,6 +91,7 @@ struct ginProxyCtx {
 };
 
 static ncclRma_t* rmaBackend;
+static bool rmaMultiSeg; // RCCL: comm->rcclMultiSegRma, via rcclGinProxySetMultiSeg
 
 static struct ginProxyOutstandingOp* proxyGinAllocOutstandingOp(struct ginProxyHostGpuCtx* hostGpuCtx) {
   struct ginProxyOutstandingOp* op = hostGpuCtx->freeOps;
@@ -519,6 +520,25 @@ static ncclResult_t ncclGinProxyRegMrSym(void* ginCtx, void* addr, size_t size, 
   return ncclSuccess;
 }
 
+// RCCL: registers with a caller-supplied DMA-BUF fd, e.g. the owner's fd for an imported host segment, or fd -1
+// for a per-segment backend to walk the segments (never replaced by a whole-range export).
+static ncclResult_t ncclGinProxyRegMrSymDmaBuf(void* ginCtx, void* addr, size_t size, int type, uint64_t offset,
+                                               int fd, uint64_t mrFlags, void** mhandle, void** ginHandle) {
+  struct ncclGinProxyCollComm* cComm = (struct ncclGinProxyCollComm*)ginCtx;
+  if (!ncclParamDmaBufEnable() || rmaBackend->regMrSymDmaBuf == nullptr ||
+      !(cComm->props.ptrSupport & NCCL_PTR_DMABUF)) {
+    if (fd < 0) {
+      NCCLCHECK(rmaBackend->regMrSym(cComm->collComm, addr, size, type, mrFlags, mhandle));
+      *ginHandle = *mhandle;
+      return ncclSuccess;
+    }
+    return ncclGinProxyRegMrSym(ginCtx, addr, size, type, mrFlags, mhandle, ginHandle);
+  }
+  NCCLCHECK(rmaBackend->regMrSymDmaBuf(cComm->collComm, addr, size, type, offset, fd, mrFlags, mhandle));
+  *ginHandle = *mhandle;
+  return ncclSuccess;
+}
+
 static ncclResult_t ncclGinProxyDeregMrSym(void* collComm, void* mhandle) {
   struct ncclGinProxyCollComm* cComm = (struct ncclGinProxyCollComm*)collComm;
   // Deregister the memory region with the GIN plugin
@@ -546,6 +566,7 @@ static ncclResult_t ncclGinProxyCreateContext(void* collComm, ncclGinConfig_t* c
   uint32_t maxRequestsPerPeer = 0;
   size_t gpuCtxArraySize = 0;
   int64_t pollBatchParam = 0;
+  uint64_t cappedQueueSize = 0;
 
   if (config->backendVersion < 0 || config->backendVersion > NCCL_GIN_PROXY_GPU_CONTEXT_VERSION) {
     WARN("Invalid GIN proxy backend version %d", config->backendVersion);
@@ -589,6 +610,13 @@ static ncclResult_t ncclGinProxyCreateContext(void* collComm, ncclGinConfig_t* c
   if (!isPowerOfTwo(queueSize)) {
     INFO(NCCL_NET, "NCCL_GIN_PROXY_QUEUE_SIZE is not a power of two, using the default/maximum value instead");
     queueSize = maxRequestsPerPeer;
+  }
+  // RCCL: a per-peer queue bounds its requests in flight; multi-segment chains must fit the send queue.
+  cappedQueueSize = rcclRmaProxyMaxInflightRequests(rmaMultiSeg, queueSize);
+  if (cappedQueueSize < queueSize) {
+    INFO(NCCL_INIT | NCCL_NET, "NCCL_GIN_PROXY_QUEUE_SIZE %lu capped to %lu for multi-segment RMA chains", queueSize,
+         cappedQueueSize);
+    queueSize = cappedQueueSize;
   }
 
   if (config->nCounters) {
@@ -794,7 +822,7 @@ ncclGin_t ncclGinProxy{
   ncclGinProxyConnect,
   ncclGinProxyCreateContext,
   ncclGinProxyRegMrSym,
-  NULL, // regMrSymDmaBuf() is not used by upper layer at the moment, hidden in RegMrSym.
+  ncclGinProxyRegMrSymDmaBuf, // RCCL: per-segment DMA-BUF registration
   ncclGinProxyDeregMrSym,
   ncclGinProxyDestroyContext,
   ncclGinProxyCloseColl,
@@ -805,6 +833,9 @@ ncclGin_t ncclGinProxy{
 };
 
 int ncclGinProxyVersion = -1;
+
+// RCCL: ncclGinProxyInit runs inside ncclRmaInit, before init.cc knows comm->rcclMultiSegRma.
+void rcclGinProxySetMultiSeg(bool multiSeg) { rmaMultiSeg = multiSeg; }
 
 ncclResult_t ncclGinProxyInit(struct ncclComm* comm) {
   // Use GIN proxy implementation, based on the RMA plugin and

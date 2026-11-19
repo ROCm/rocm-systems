@@ -170,6 +170,14 @@ ncclResult_t ncclGinRegister(struct ncclComm* comm, void* address, size_t size,
   return ncclSuccess;
 }
 
+ncclResult_t rcclGinRegisterMultiSeg(struct ncclComm* comm, void* address, size_t size,
+                                     void* ginHostWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS],
+                                     ncclGinWindow_t ginDevWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS],
+                                     uint32_t ginWinGenerations[NCCL_GIN_MAX_ACTIVE_BACKENDS], int winFlags,
+                                     int memType) {
+  return ncclGinRegister(comm, address, size, ginHostWins, ginDevWins, ginWinGenerations, winFlags, true, memType);
+}
+
 ncclResult_t ncclGinDeregister(struct ncclComm* comm,
                                void* ginHostWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS],
                                uint32_t const ginWinGenerations[NCCL_GIN_MAX_ACTIVE_BACKENDS]) {

@@ -234,6 +234,9 @@ void* ncclRmaProxyProgressThread(struct ncclRmaProxyState* rmaProxyState_);
 // RMA Proxy memory registration
 ncclResult_t ncclRmaProxyRegister(struct ncclComm* comm, void* address, size_t size,
                                   void* rmaHostWins[NCCL_GIN_MAX_CONNECTIONS]);
+// RCCL: a multi-segment window; with comm->rcclMultiSegRma the backend gets fd -1 and walks the segments itself.
+ncclResult_t rcclRmaProxyRegisterMultiSeg(struct ncclComm* comm, void* address, size_t size,
+                                          void* rmaHostWins[NCCL_GIN_MAX_CONNECTIONS]);
 ncclResult_t ncclRmaProxyDeregister(struct ncclComm* comm, void* rmaHostWins[NCCL_GIN_MAX_CONNECTIONS]);
 
 // Circular buffer helpers

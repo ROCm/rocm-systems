@@ -201,7 +201,12 @@ static ncclResult_t ncclRmaProxyCtxAlloc(struct ncclComm* comm, ncclRma_t* rmaCo
   // Sanitize and set up the lock-free circular buffer queue size
   uint64_t queueSize = ncclParamRmaProxyQueueSize();
   uint32_t maxRequests = NCCL_NET_MAX_REQUESTS * rmaProxyCtx->props.maxRecvs;
-  rmaProxyCtx->maxInflightRequests = maxRequests;
+  // RCCL: a multi-segment request may post a whole round of WRs, so the backend's send queue bounds requests in flight.
+  rmaProxyCtx->maxInflightRequests = rcclRmaProxyMaxInflightRequests(comm->rcclMultiSegRma, maxRequests);
+  if (rmaProxyCtx->maxInflightRequests < maxRequests) {
+    INFO(NCCL_INIT | NCCL_NET, "RMA proxy: %u requests in flight per peer (of %u) for multi-segment RMA chains",
+         rmaProxyCtx->maxInflightRequests, maxRequests);
+  }
   if (queueSize == -1) {
     queueSize = maxRequests;
   }
@@ -420,8 +425,18 @@ ncclResult_t ncclRmaProxyDestroyContext(ncclRma_t* rmaComm, void* rmaProxyCtx) {
 
 // ---- Memory registration ----
 
-ncclResult_t ncclRmaProxyRegister(struct ncclComm* comm, void* address, size_t size,
-                                  void* rmaHostWins[NCCL_RMA_MAX_CONNECTIONS]) {
+// RCCL: a per-segment backend walks a multi-segment window itself, so no whole-range fd is exported; fd -1 asks it
+// to (offset carries the export flags, here 0), and without DMA-BUF it gets regMrSym.
+static ncclResult_t rcclRmaProxyRegMrSymSegments(ncclRma_t* rmaComm, void* rmaCollComm, ncclNetProperties_t props,
+                                                 void* addr, size_t size, void** mhandle) {
+  if (ncclParamDmaBufEnable() && rmaComm->regMrSymDmaBuf != nullptr && (props.ptrSupport & NCCL_PTR_DMABUF)) {
+    return rmaComm->regMrSymDmaBuf(rmaCollComm, addr, size, NCCL_PTR_CUDA, 0, -1, 0, mhandle);
+  }
+  return rmaComm->regMrSym(rmaCollComm, addr, size, NCCL_PTR_CUDA, 0, mhandle);
+}
+
+static ncclResult_t rmaProxyRegister(struct ncclComm* comm, void* address, size_t size,
+                                     void* rmaHostWins[NCCL_RMA_MAX_CONNECTIONS], bool walkSegments) {
   struct ncclRmaProxyState* rmaProxyState = &comm->rmaState.rmaProxyState;
   for (int n = 0; n < rmaProxyState->rmaCommCount; n++) {
     // [RCCL] Symmetric windows are cuMem/VMM allocations; export their dmabuf via
@@ -437,14 +452,29 @@ ncclResult_t ncclRmaProxyRegister(struct ncclComm* comm, void* address, size_t s
       props_tmp.ptrSupport &= ~NCCL_PTR_DMABUF;
     }
 #endif
-    NCCLCHECK(ncclRmaProxyRegMrSym(rmaProxyState->ncclRma, rmaProxyState->rmaComms[n], props_tmp, address, size,
-                                   NCCL_PTR_CUDA, 0, &rmaHostWins[n], true));
+    if (walkSegments) {
+      NCCLCHECK(rcclRmaProxyRegMrSymSegments(rmaProxyState->ncclRma, rmaProxyState->rmaComms[n],
+                                             rmaProxyState->props[n], address, size, &rmaHostWins[n]));
+    } else {
+      NCCLCHECK(ncclRmaProxyRegMrSym(rmaProxyState->ncclRma, rmaProxyState->rmaComms[n], props_tmp, address, size,
+                                     NCCL_PTR_CUDA, 0, &rmaHostWins[n], true));
+    }
     if (rmaHostWins[n] == NULL) {
       WARN("rank %d - RMA Symmetric register failed: buff %p, size %ld", comm->rank, address, size);
       return ncclSystemError;
     }
   }
   return ncclSuccess;
+}
+
+ncclResult_t ncclRmaProxyRegister(struct ncclComm* comm, void* address, size_t size,
+                                  void* rmaHostWins[NCCL_RMA_MAX_CONNECTIONS]) {
+  return rmaProxyRegister(comm, address, size, rmaHostWins, false);
+}
+
+ncclResult_t rcclRmaProxyRegisterMultiSeg(struct ncclComm* comm, void* address, size_t size,
+                                          void* rmaHostWins[NCCL_RMA_MAX_CONNECTIONS]) {
+  return rmaProxyRegister(comm, address, size, rmaHostWins, comm->rcclMultiSegRma);
 }
 
 ncclResult_t ncclRmaProxyDeregister(struct ncclComm* comm, void* rmaHostWins[NCCL_RMA_MAX_CONNECTIONS]) {

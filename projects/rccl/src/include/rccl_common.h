@@ -547,6 +547,18 @@ ncclResult_t rcclDevrProbeNonSymWindow(struct ncclComm* comm, void* userPtr, siz
 // GIN MR pointer type for a symmetric segment; host VMM needs DMA-BUF (rccl_dev_runtime.cc).
 ncclResult_t rcclDevrGinSegmentRegType(bool globalHasSysmemSegment, int maxGlobalNumSegments, int* ptrType,
                                        bool* needDmabuf);
+// Comm-level multi-segment flag for a plugin that registers per segment: also needs the switch and DMA-BUF.
+bool rcclMultiSegOn(bool pluginRegistersPerSegment);
+// True when comm->rcclMultiSegRma is set and all ranks share one segment count within its cap (rccl_dev_runtime.cc).
+bool rcclDevrRmaRegistersMultiSegment(struct ncclComm* comm, int minGlobalNumSegments, int maxGlobalNumSegments);
+// Same for GIN: every active GIN backend must be the proxy over that RMA backend (rccl_dev_runtime.cc).
+bool rcclDevrGinRegistersMultiSegment(struct ncclComm* comm, int minGlobalNumSegments, int maxGlobalNumSegments);
+// Per-peer in-flight request cap for the RMA and GIN proxies: a multi-segment chain must fit the SQ.
+uint32_t rcclRmaProxyMaxInflightRequests(bool multiSeg, uint32_t maxRequests);
+// owner fds for host segments, keyed by local VA: the creating rank's own, or the one host owner's for an import.
+void rcclHostSegmentFdRegister(void* base, size_t size, int fd);
+void rcclHostSegmentFdDeregister(int fd);
+int rcclHostSegmentFdLookup(uintptr_t addr, size_t len, uint64_t* offset);
 #ifdef ENABLE_WARP_SPEED
 RCCL_PARAM_DECLARE(WarpSpeedARThreshold);
 RCCL_PARAM_DECLARE(WarpSpeedAutoMode);

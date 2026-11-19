@@ -1489,6 +1489,11 @@ bool ncclHierCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRe
     TRACE(NCCL_TUNING, "Skipping hierarchical CE collective: window registration type %d not supported", winRegType);
     return false;
   }
+  // RCCL: the inter-node puts need RMA handles; every rank skips a window's RMA registration together.
+  if (ncclDevrGetRmaWin(sendWin, 0) == nullptr || ncclDevrGetRmaWin(recvWin, 0) == nullptr) {
+    TRACE(NCCL_TUNING, "Skipping hierarchical CE collective: a window has no RMA registration");
+    return false;
+  }
   return true;
 }
 

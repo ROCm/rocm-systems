@@ -2269,6 +2269,7 @@ ncclResult_t ncclProxyCreate(struct ncclComm* comm) {
     proxyState->nChannels = comm->nChannels;
     proxyState->allocP2pNetLLBuffers = comm->allocP2pNetLLBuffers;
     proxyState->dmaBufSupport = comm->dmaBufSupport;
+    proxyState->rcclMultiSegNet = comm->rcclMultiSegNet;
     proxyState->ncclNet = comm->ncclNet;
     proxyState->ncclCollNet = comm->ncclCollNet;
     proxyState->netContext = comm->netContext;

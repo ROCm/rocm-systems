@@ -461,6 +461,15 @@ void setXferNetAttrs(struct ncclProxyState* proxyState, struct ncclProxyArgs* ar
 // Forward declaration
 static ncclResult_t sendProxyProgress(struct ncclProxyState* proxyState, struct ncclProxyArgs* args);
 
+// RCCL: fd -1 goes only to a plugin that walks a multi-segment buffer itself (proxyState->rcclMultiSegNet);
+// offset carries the export flags. False means stage.
+static bool rcclNetRegMultiSeg(struct ncclProxyState* proxyState, void* netComm, void* buffer, size_t size, int flags,
+                               void** handle) {
+  ncclNet_t* net = proxyState->ncclNet;
+  if (!proxyState->rcclMultiSegNet || net == NULL || net->regMrDmaBuf == NULL) return false;
+  return net->regMrDmaBuf(netComm, buffer, size, NCCL_PTR_CUDA, (uint64_t)(uint32_t)flags, -1, handle) == ncclSuccess;
+}
+
 // Returns the flags to be used by a call to cuMemGetHandleForAddressRange.
 static inline int getHandleForAddressRangeFlags(ncclTopoGdrMode useGdr) {
   int flags = 0;
@@ -2662,6 +2671,14 @@ static ncclResult_t sendProxyRegBuffer(struct ncclProxyConnection* connection, s
   int dmabuf_fd = -1;
   /* DMA-BUF support */
   if (resources->useDmaBuf && ncclCuMemEnable()) {
+    // RCCL: unless the comm's plugin registers per segment, a multi-segment buffer stages.
+    if (numSegments > 1) {
+      if (rcclNetRegMultiSeg(proxyState, resources->netSendComm, (void*)info->buffer, info->size,
+                             getHandleForAddressRangeFlags(resources->useGdr), &handle)) {
+        needReg = false;
+      }
+      goto peermem;
+    }
     CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&dmabuf_fd, (CUdeviceptr)info->buffer, info->size,
                                               CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD,
                                               getHandleForAddressRangeFlags(resources->useGdr)),
@@ -2682,7 +2699,8 @@ peermem:
   }
 #endif
 #if defined(__HIP_PLATFORM_AMD__)
-  if (needReg && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf) {
+  // RCCL: HSA DMA-BUF is whole-range (first VMM segment only); skip it for multi-seg.
+  if (needReg && numSegments <= 1 && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf) {
     if (ncclHsaRegMrDmaBuf(proxyState->ncclNet->regMrDmaBuf, resources->netSendComm, (void*)info->buffer, info->size,
                            NCCL_PTR_CUDA, &handle)) {
       needReg = false;
@@ -2742,6 +2760,14 @@ static ncclResult_t recvProxyRegBuffer(struct ncclProxyConnection* connection, s
   int dmabuf_fd = -1;
   /* DMA-BUF support */
   if (resources->useDmaBuf && ncclCuMemEnable()) {
+    // RCCL: unless the comm's plugin registers per segment, a multi-segment buffer stages.
+    if (numSegments > 1) {
+      if (rcclNetRegMultiSeg(proxyState, resources->netRecvComm, (void*)info->buffer, info->size,
+                             getHandleForAddressRangeFlags(resources->useGdr), &handle)) {
+        needReg = false;
+      }
+      goto peermem;
+    }
     CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&dmabuf_fd, (CUdeviceptr)info->buffer, info->size,
                                               CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD,
                                               getHandleForAddressRangeFlags(resources->useGdr)),
@@ -2762,7 +2788,8 @@ peermem:
   }
 #endif
 #if defined(__HIP_PLATFORM_AMD__)
-  if (needReg && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf) {
+  // RCCL: HSA DMA-BUF is whole-range (first VMM segment only); skip it for multi-seg.
+  if (needReg && numSegments <= 1 && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf) {
     if (ncclHsaRegMrDmaBuf(proxyState->ncclNet->regMrDmaBuf, resources->netRecvComm, (void*)info->buffer, info->size,
                            NCCL_PTR_CUDA, &handle)) {
       needReg = false;

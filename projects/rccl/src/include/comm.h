@@ -836,6 +836,9 @@ struct ncclComm {
 
   ncclCheckMode_t checkMode;
   bool dmaBufSupport;
+  // RCCL: multi-segment registration is on and the comm's net / RMA plugin registers one MR per physical segment.
+  bool rcclMultiSegNet;
+  bool rcclMultiSegRma;
   bool ccEnable;
 
   // Counter for tracking CUDA launches (P2P and collectives included)

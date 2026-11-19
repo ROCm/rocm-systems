@@ -103,6 +103,8 @@ typedef struct {
   // Type is either NCCL_PTR_HOST or NCCL_PTR_CUDA.
   ncclResult_t (*regMr)(void* comm, void* data, size_t size, int type, void** mhandle);
   /* DMA-BUF support */
+  // RCCL: fd -1 asks a per-segment plugin to walk a multi-segment buffer itself; offset then carries the
+  // cuMemGetHandleForAddressRange flags (transport/rccl_mseg.h).
   ncclResult_t (*regMrDmaBuf)(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle);
   ncclResult_t (*deregMr)(void* comm, void* mhandle);
   // Asynchronous send to a peer.

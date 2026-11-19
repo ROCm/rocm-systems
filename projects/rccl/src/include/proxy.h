@@ -389,6 +389,7 @@ struct ncclProxyState {
   int p2pLl128BuffSize;
   bool allocP2pNetLLBuffers;
   bool dmaBufSupport;
+  bool rcclMultiSegNet; // RCCL: copy of comm->rcclMultiSegNet
   bool cuMemHostEnabled;
   ncclNet_t* ncclNet;
   ncclCollNet_t* ncclCollNet;

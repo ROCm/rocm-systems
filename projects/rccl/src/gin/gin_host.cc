@@ -683,16 +683,24 @@ ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) {
   return ret;
 }
 
-ncclResult_t ncclGinRegister(struct ncclComm* comm, void* address, size_t size,
-                             void* ginHostWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS],
-                             ncclGinWindow_t ginDevWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS],
-                             uint32_t ginWinGenerations[NCCL_GIN_MAX_ACTIVE_BACKENDS],
-                             int winFlags, bool multiSegment, int memType) {
+static ncclResult_t ginRegister(struct ncclComm* comm, void* address, size_t size,
+                                void* ginHostWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS],
+                                ncclGinWindow_t ginDevWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS],
+                                uint32_t ginWinGenerations[NCCL_GIN_MAX_ACTIVE_BACKENDS],
+                                int winFlags, bool multiSegment, int memType, bool walkSegments) {
   struct ncclGinState* ginState = &comm->ginState;
   int mrFlags = (winFlags & NCCL_WIN_STRICT_ORDERING) ? NCCL_NET_MR_FLAG_FORCE_SO : 0;
+  // RCCL: a host segment registers with its owner's fd published by VA; an imported handle cannot export one here.
+  uint64_t hostFdOffset = 0;
+  int hostFd = rcclHostSegmentFdLookup((uintptr_t)address, size, &hostFdOffset);
   for (int backendIdx = 0; backendIdx < ginState->numActiveBackends; backendIdx++) {
     struct ncclGinBackendState* backend = &ginState->backends[backendIdx];
     if (backend->closed) continue;
+    // RCCL: fd -1 asks the GIN proxy's per-segment RMA backend to walk the segments (offset carries the export
+    // flags, here 0); other GIN backends keep the plain registration.
+    bool walk = walkSegments && backend->ginType == NCCL_GIN_TYPE_PROXY;
+    int dmabufFd = walk ? -1 : hostFd;
+    uint64_t dmabufOffset = walk ? 0 : hostFdOffset;
     if (multiSegment) {
       // Multi-segment GIN registration requires DMABUF support on all GIN connections
       for (int commIdx = 0; commIdx < backend->ginCommCount; commIdx++) {
@@ -708,8 +716,13 @@ ncclResult_t ncclGinRegister(struct ncclComm* comm, void* address, size_t size,
     ginWinGenerations[backendIdx] = backend->connectGeneration;
     for (int commIdx = 0; commIdx < backend->ginCommCount; commIdx++) {
       int slot = backendIdx * NCCL_GIN_MAX_CONNECTIONS + commIdx;
-      NCCLCHECK(backend->ncclGin->regMrSym(backend->ginComms[commIdx], address, size, memType, mrFlags,
-                                           &ginHostWins[slot], &ginDevWins[slot]));
+      if ((walk || dmabufFd >= 0) && backend->ncclGin->regMrSymDmaBuf != nullptr) {
+        NCCLCHECK(backend->ncclGin->regMrSymDmaBuf(backend->ginComms[commIdx], address, size, memType, dmabufOffset,
+                                                   dmabufFd, mrFlags, &ginHostWins[slot], &ginDevWins[slot]));
+      } else {
+        NCCLCHECK(backend->ncclGin->regMrSym(backend->ginComms[commIdx], address, size, memType, mrFlags,
+                                             &ginHostWins[slot], &ginDevWins[slot]));
+      }
       if (ginHostWins[slot] == NULL) {
         WARN("rank %d - GIN Symmetric register failed: buff %p, size %ld", comm->rank, address, size);
         return ncclSystemError;
@@ -717,6 +730,24 @@ ncclResult_t ncclGinRegister(struct ncclComm* comm, void* address, size_t size,
     }
   }
   return ncclSuccess;
+}
+
+ncclResult_t ncclGinRegister(struct ncclComm* comm, void* address, size_t size,
+                             void* ginHostWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS],
+                             ncclGinWindow_t ginDevWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS],
+                             uint32_t ginWinGenerations[NCCL_GIN_MAX_ACTIVE_BACKENDS],
+                             int winFlags, bool multiSegment, int memType) {
+  return ginRegister(comm, address, size, ginHostWins, ginDevWins, ginWinGenerations, winFlags, multiSegment, memType,
+                     false);
+}
+
+ncclResult_t rcclGinRegisterMultiSeg(struct ncclComm* comm, void* address, size_t size,
+                                     void* ginHostWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS],
+                                     ncclGinWindow_t ginDevWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS],
+                                     uint32_t ginWinGenerations[NCCL_GIN_MAX_ACTIVE_BACKENDS], int winFlags,
+                                     int memType) {
+  return ginRegister(comm, address, size, ginHostWins, ginDevWins, ginWinGenerations, winFlags, true, memType,
+                     comm->rcclMultiSegRma);
 }
 
 ncclResult_t ncclGinDeregister(struct ncclComm* comm,

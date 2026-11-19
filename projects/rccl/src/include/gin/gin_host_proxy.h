@@ -20,6 +20,7 @@ extern ncclGin_t ncclGinProxy;
 extern int ncclGinProxyVersion;
 
 ncclResult_t ncclGinProxyInit(struct ncclComm* comm);
+void rcclGinProxySetMultiSeg(bool multiSeg); // RCCL: in-flight cap for multi-segment RMA chains
 ncclResult_t ncclGinProxyFlushesAllPutsOnAnySignal(void* collComm, bool* flushesAll);
 
 #endif

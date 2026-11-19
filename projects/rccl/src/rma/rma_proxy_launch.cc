@@ -73,6 +73,11 @@ ncclResult_t ncclRmaProxyPutBuildOp(struct ncclComm* comm, struct ncclRmaProxyCt
   op->srcHandle = ncclDevrGetRmaWin(srcWin, rmaProxyCtx->collCommIdx);
   op->dstOff = ncclDevrGetWinOffset(peerWin) + peerOff;
   op->dstHandle = ncclDevrGetRmaWin(peerWin, rmaProxyCtx->collCommIdx);
+  // RCCL: a window whose RMA registration was skipped has no handle; fail the op instead of posting it.
+  if ((srcWin != nullptr && op->srcHandle == nullptr) || (peerWin != nullptr && op->dstHandle == nullptr)) {
+    WARN("RMA: put of %zu bytes to rank %d uses a window without an RMA registration", size, peer);
+    return ncclInvalidUsage;
+  }
   op->size = size;
   op->targetRank = peer;
   op->request = nullptr;

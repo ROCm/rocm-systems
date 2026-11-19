@@ -81,6 +81,7 @@ struct ncclDevrMemory {
   size_t* segmentSizes;    // size of each segment, length numSegments
   // Communicator-wide aggregates over all nRanks, populated via bootstrapAllGather.
   int maxGlobalNumSegments;    // max(numSegments) across all communicator ranks
+  int minGlobalNumSegments;    // RCCL: min(numSegments) across all communicator ranks
   bool globalHasSysmemSegment; // true if any communicator rank has a sysmem segment
   // LSA-domain aggregates, derived from a global allgather.
   int* lsaNumSegments; // numSegments for each LSA-domain rank, length lsaDomainSize
@@ -92,6 +93,9 @@ struct ncclDevrMemory {
   // allocTracker bytes owned by this registration: nonzero only for the devComm resource
   // window, whose handle RCCL creates. User windows retain an existing allocation.
   size_t allocTrackedBytes;
+  // RCCL: owner's DMA-BUF fd per host segment, kept from this rank's export or fetched (-1 otherwise); closed on destroy.
+  int* hostOwnerFds;
+  ncclResult_t hostOwnerFdStatus; // RCCL: rank-local owner-fd result; symMemoryObtain agrees on it before GIN/RMA
 };
 
 ncclResult_t ncclDevrPopulateSegmentSizes(struct ncclDevrMemory* mem, int numSegments);
