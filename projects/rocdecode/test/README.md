@@ -109,7 +109,7 @@ is saved to CSV (which can serve as a future baseline), and the summary reports
 specific reason is printed as a WARNING.
 
 ```shell
-test/perf_regression.py [--perf-dir DIR] [--baseline FILE] [--tolerance PCT] [--runs N] [--device ID] [--gpu NAME] [--quick] [--check-rocm] [--mem-type {0,1,2,3}] [--save-baseline [--force]]
+test/perf_regression.py [--perf-dir DIR] [--baseline FILE] [--tolerance PCT] [--runs N] [--device ID] [--gpu NAME] [--quick] [--check-rocm] [--mem-type {0,1,2,3}] [--save-baseline] [--force]
 ```
 
 | Option | Description |
@@ -118,7 +118,7 @@ test/perf_regression.py [--perf-dir DIR] [--baseline FILE] [--tolerance PCT] [--
 | `--baseline FILE` | Baseline file, HTML or CSV (default: `<perf-dir>/rocDecode_perf_baseline.html` for `--mem-type 3`, `<perf-dir>/local_baselines/<GPU>_m<N>.csv` otherwise). With `--save-baseline`, the CSV to write. |
 | `--mem-type N` | Output surface memory type passed to `videoDecodePerf` as `-m`: 0 device internal, 1 device copied, 2 host copied, 3 not mapped / decode only (default: 3). See [Memory types and local baselines](#memory-types-and-local-baselines). |
 | `--save-baseline` | Measure every stream (averaging `--runs` runs each) and save the result as the local baseline for this GPU and memory type, instead of comparing. Not allowed with `--quick`. |
-| `--force` | With `--save-baseline`, overwrite an existing baseline file. |
+| `--force` | Overwrite an existing baseline file. Only valid together with `--save-baseline`. |
 | `--tolerance PCT` | Regression threshold, % Avg FPS drop (default: `$ROCDECODE_PERF_TOLERANCE` or 5). |
 | `--runs N` | Runs to average when confirming a flagged stream, or per stream with `--save-baseline` (default: 3). |
 | `--device ID` | GPU device id (default: 0). |
