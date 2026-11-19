@@ -3960,11 +3960,11 @@ hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream);
  *  @returns #hipSuccess, #hipErrorNotInitialized, #hipErrorInvalidValue,
  * #hipErrorLaunchFailure
  *
- *  Releases memory associated with the event.  If the event is recording but has not completed
+ * Releases memory associated with the event.  If the event is recording but has not completed
  * recording when hipEventDestroy() is called, the function will return immediately and the
  * completion_future resources will be released later, when the hipDevice is synchronized.
  *
- *  An event may be destroyed before it is complete (i.e., before all work preceding the last
+ * An event may be destroyed before it is complete (i.e., before all work preceding the last
  * hipEventRecord() has finished). Associated resources are automatically released asynchronously
  * at completion. Any hipStreamWaitEvent() waits that were already enqueued on other streams or
  * devices before the event is destroyed will still complete correctly when the recorded work
