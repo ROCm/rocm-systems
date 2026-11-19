@@ -1998,10 +1998,11 @@ def split_counters_by_pass(
     counter_rows = counter_rows.assign(
         Merged_Row=counter_rows.groupby(_MERGE_KEYS).ngroup()
     )
+    counter_names = set(counter_rows["Counter_Name"])
     dispatch_columns = [
         column
         for column in merged_df.columns
-        if column not in set(counter_rows["Counter_Name"])
+        if column not in counter_names
         and column not in ("Start_Timestamp", "End_Timestamp")
     ]
     pass_tables: dict[str, pd.DataFrame] = {}
