@@ -302,6 +302,10 @@ def load_local_baseline(csv_path):
         # FPS is a divisor in the comparison, so it must be finite and positive.
         if pd.isna(fps) or not (0 < float(fps) < float("inf")):
             raise ValueError(f"baseline CSV {csv_path} has invalid FPS for {fname!r}")
+        if fname in baseline:
+            # Streams are identified by file name alone, so a repeat (e.g. the same
+            # name under two codecs) would make one row silently replace the other.
+            raise ValueError(f"baseline CSV {csv_path} lists {fname!r} more than once")
         baseline[fname] = float(fps)
     if not baseline:
         # An empty baseline would compare no streams and report a pass.
@@ -323,14 +327,31 @@ def measure_stream(stream_path, runs, device, mem_type=None):
     return sum(vals) / len(vals) if vals else None
 
 
+STREAM_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".img", ".ivf", ".av1", ".265", ".h265", ".hevc"}
+
+
+def list_streams(codec_dir):
+    """Every stream file under a codec dir, in sorted order."""
+    return sorted(p for p in codec_dir.rglob("*")
+                  if p.is_file() and p.suffix.lower() in STREAM_EXTS)
+
+
 def build_stream_index(codec_dir):
     """Map basename -> full path for every stream file under a codec dir."""
-    exts = {".mp4", ".mov", ".mkv", ".webm", ".img", ".ivf", ".av1", ".265", ".h265", ".hevc"}
-    idx = {}
-    for p in codec_dir.rglob("*"):
-        if p.is_file() and p.suffix.lower() in exts:
-            idx[p.name] = p
-    return idx
+    return {p.name: p for p in list_streams(codec_dir)}
+
+
+def find_duplicate_streams(perf_dir):
+    """Return {basename: [paths]} for stream file names that occur more than once
+    across all codec dirs. Baselines (HTML and CSV) identify a stream by its file
+    name alone, so a repeated name would make two streams share one baseline."""
+    paths = {}
+    for _, subdir in CODECS:
+        codec_dir = perf_dir / subdir
+        if codec_dir.is_dir():
+            for p in list_streams(codec_dir):
+                paths.setdefault(p.name, []).append(p)
+    return {name: ps for name, ps in paths.items() if len(ps) > 1}
 
 
 def summary_box(rows, overall_ok, measure_only=False):
@@ -423,6 +444,14 @@ def main():
     if not PERF_EXE.is_file():
         print(f"ERROR: videodecodeperf not built: {PERF_EXE}", file=sys.stderr)
         print("       Build it first: cmake --build build (or test/build_samples.sh)", file=sys.stderr)
+        return 1
+
+    duplicates = find_duplicate_streams(perf_dir)
+    if duplicates:
+        print("ERROR: stream file names must be unique across the perf dir, because "
+              "baselines are keyed by file name. Duplicates:", file=sys.stderr)
+        for name, ps in sorted(duplicates.items()):
+            print(f"       {name}: {', '.join(str(p) for p in ps)}", file=sys.stderr)
         return 1
 
     label, detail = detect_gpu(args.device, args.gpu)
