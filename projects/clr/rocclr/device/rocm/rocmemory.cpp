@@ -1199,34 +1199,42 @@ bool Buffer::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
       // reach this point locks every device *in this context* in one
       // hsa_amd_memory_lock_to_pool call; the rest reuse that address.
       //
+      // This sharing is HIP-specific: hipHostRegister is the only caller that creates one
+      // owning amd::Memory with device::Memory objects on every context device for the same
+      // host range. OpenCL's CL_MEM_USE_HOST_PTR/CL_MEM_ALLOC_HOST_PTR buffers go through this
+      // same code but have always locked per-device only; gate the shared/all-agent path on
+      // amd::IS_HIP so OpenCL's mapping behavior and resource use are unchanged.
+      //
       // Reading/writing sibling device::Memory state below is safe because
       // Memory::addDeviceMemory() serializes per-owner device creation via
       // owner()->lockMemoryOps() (see platform/memory.cpp). Take that lock explicitly
       // too (it is a recursive_mutex, so this is a no-op when already held) so the
       // invariant holds even for callers that create device memory without going
       // through addDeviceMemory.
-      std::scoped_lock lock(owner()->lockMemoryOps());
-
       const auto& contextDevices = owner()->getContext().devices();
 
       void* shared = nullptr;
-      for (amd::Device* other : contextDevices) {
-        if (other == &dev()) continue;
-        device::Memory* existing = owner()->getDeviceMemory(*other, false);
-        if (existing == nullptr) continue;
-        // Only reuse a sibling's mapping when its lock call actually covered every
-        // device in this context. A sibling that fell back to locking only itself
-        // (see below) was never mapped for our agent and must not be reused.
-        // (existing is always a sibling Buffer here: it's created by this same
-        // Buffer::create() path for every device sharing this host-registered owner.)
-        if (!static_cast<Buffer*>(existing)->hostLockCoversAllDevices_) continue;
-        shared = reinterpret_cast<void*>(existing->virtualAddress());
-        if (shared != nullptr) break;
+      std::unique_lock<std::recursive_mutex> lock;
+      if (amd::IS_HIP) {
+        lock = std::unique_lock<std::recursive_mutex>(owner()->lockMemoryOps());
+        for (amd::Device* other : contextDevices) {
+          if (other == &dev()) continue;
+          device::Memory* existing = owner()->getDeviceMemory(*other, false);
+          if (existing == nullptr) continue;
+          // Only reuse a sibling's mapping when its lock call actually covered every
+          // device in this context. A sibling that fell back to locking only itself
+          // (see below) was never mapped for our agent and must not be reused.
+          // (existing is always a sibling Buffer here: it's created by this same
+          // Buffer::create() path for every device sharing this host-registered owner.)
+          if (!static_cast<Buffer*>(existing)->hostLockCoversAllDevices_) continue;
+          shared = reinterpret_cast<void*>(existing->virtualAddress());
+          if (shared != nullptr) break;
+        }
       }
 
       if (shared != nullptr) {
         deviceMemory_ = shared;
-      } else if (contextDevices.size() > 1) {
+      } else if (amd::IS_HIP && contextDevices.size() > 1) {
         // Build the agent list from this context's own devices, not every GPU visible
         // to the process, so we never lock/map memory onto devices outside the context.
         std::vector<hsa_agent_t> lockAgents;
