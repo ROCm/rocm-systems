@@ -15,7 +15,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Shows every temperature, voltage and power sensor of a NIC with its limits and alarm flags, as the ``sensors`` command does. Also available from Python.
 
 - **Added the FEC symbol-error histogram to ``metric --nic --port --extended``**.  
-  - ionic ports on a kernel that reports it now show ``FEC_SYMBOLS_ERR_0`` to ``FEC_SYMBOLS_ERR_15`` next to the existing FEC counters.
+  - ionic ports on a kernel that reports it now show ``FEC_SYMBOLS_ERR_0`` to ``FEC_SYMBOLS_ERR_15`` next to the other FEC counters.
 
 - **Added debug logging of NIC reads**.  
   - With ``RSMI_LOGGING`` set, each NIC read is logged with its source and result, and serial numbers and MAC addresses are masked to their last four characters.
@@ -64,7 +64,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Repeated `--gpu`, `--cpu`, `--core`, and `--nic` options combine without duplicates. `reset --gpureset -g all -g 0` now resets every GPU (previously GPU 0 only); `set -g 0 -C CPX -g 1 -C SPX` now applies SPX to GPUs 0 and 1 (previously GPU 1 only). Remove earlier device options to retain the previous target set.
 
 - **``--nic`` output now labels each device ``NIC`` instead of ``AI_NIC``**.  
-  - The device key is ``nic`` in JSON and CSV and ``NIC: <n>`` in text, matching the host interface. ``static --nic`` now lists ``ASIC``, ``BUS``, ``DRIVER`` and ``NUMA`` directly under the device instead of under a nested ``nic`` key. ``metric --nic --port --json`` now returns the default counter set, as text does; add ``--extended`` for the full set. Scripts that read ``ai_nic`` or the nested ``nic`` key must be updated.
+  - The device key is ``nic`` in JSON and CSV and ``NIC: <n>`` in text, matching the host interface. ``static --nic`` now lists ``ASIC``, ``BUS``, ``DRIVER`` and ``NUMA`` directly under the device instead of under a nested ``nic`` key. Scripts that read ``ai_nic`` or the nested ``nic`` key must be updated.
 
 - **``amd-smi list --nic`` now enumerates UALoE endpoints**.  
   - They appear as rows with their BDF, and their other fields read ``N/A``. NIC indices are positional, so these rows renumber the AI-NIC cards after them; select a device by BDF where the identity has to be stable.
@@ -75,8 +75,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **``amdsmi_topo_get_link_type()`` now accepts a null ``hops`` for a GPU pair**.  
   - It returned an invalid-argument status before; the hop count is simply not returned.
 
-- **``amd-smi static`` on a host with NICs now also prints the NIC section**.  
-  - This includes ``--csv``, so a script that reads the GPU-only table now finds NIC rows after it.
+- **``amd-smi static`` on a host with Broadcom NICs now also prints the NIC section**.  
+  - This includes ``--csv``, so a script that reads the GPU-only table now finds NIC rows after it. Pass ``--gpu all`` for GPU-only output.
 
 - **Human-readable output indents list items that have no ``key: value`` form one level deeper**.  
   - This applies to every command, not only the NIC ones, so a script that parses the text output sees the new indent.
@@ -90,20 +90,14 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **NIC queries a device cannot answer now return a not-supported status**.  
   - They returned a not-yet-implemented status, so callers that compared against it must check the new one.
 
-- **NIC netlink queries now give up after 5 seconds**.  
-  - A stuck devlink or ethtool call returns an error instead of blocking the command.
-
 - **``amd-smi list --nic`` now notes when PCI VPD was unreadable**.  
   - Without root, a note on stderr says that an ``N/A`` product name, part number or serial number may be unreadable VPD rather than missing. JSON and CSV output are unaffected.
 
-- **AI-NIC identity and telemetry fields now report values instead of ``N/A``**.  
-  - They are read from the port function, and on a card with more than one port they report port 0.
-
 - **``amd-smi firmware --nic`` now reports NIC firmware versions**.  
-  - ``amdsmi_get_nic_fw_info()`` is implemented, and the Python function returns a firmware name to version dictionary. A NIC reports at most 16 entries, and a version that repeats an earlier name shows its kind after it, for example ``fw.version (stored)``. The types and ``AMDSMI_MAX_NIC_FW`` keep their previous layout.
+  - ``amdsmi_get_nic_fw_info()`` is implemented, and the Python function returns a firmware name to version dictionary. A NIC reports at most 16 entries, and a version that repeats an earlier name shows its kind after it, for example ``fw.version (stored)``.
 
 - **RDMA ``MAX_MTU`` and ``ACTIVE_MTU`` now come from libibverbs**.  
-  - They read ``N/A`` when neither the RDMA provider nor sysfs can answer, and a provider that crashes no longer affects ``amd-smi`` or the library. A build without the libibverbs headers reads sysfs only, so more drivers show ``N/A``.
+  - They read ``N/A`` when neither the RDMA provider nor sysfs can answer, and a provider that crashes does not affect ``amd-smi`` or the library. A build without the libibverbs headers reads sysfs only, so more drivers show ``N/A``.
 
 - **``amdsmi_get_nic_port_info()`` now keeps ports whose driver is not loaded**.  
   - A port with no driver now keeps its place in the list with its BDF and netdev, so later port indices no longer shift.
@@ -201,7 +195,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - A link speed, MTU, FEC mode or carrier the NIC could not report now reads ``N/A``.
 
 - **Fixed AI-NICs missing from ``amd-smi list --nic`` and ``amd-smi metric --nic``**.  
-  - A host whose cards present a different upstream bridge device ID listed one NIC, or only the UALoE endpoints, instead of one per card. Every card present is now listed.
+  - A host whose cards present a different upstream bridge device ID listed one NIC instead of one per card. Every card present is now listed.
 
 - **Fixed ``amdsmi_get_nic_rdma_port_statistics()`` listing ``lifespan`` as a counter and reading only the first RDMA device**.  
   - ``lifespan`` is the kernel's refresh interval, not a counter. The counters of every RDMA device are now read.
