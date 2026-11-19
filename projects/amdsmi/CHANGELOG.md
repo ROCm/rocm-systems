@@ -6,6 +6,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ## amd_smi_lib for ROCm 10.3.0
 
+### Added
+
+- **Added `amdsmi_get_rocm_version()` C API**.  
+  - Returns the installed ROCm version (major, minor, release) by locating and querying `librocm-core.so`.
+  - The Python `amdsmi_get_rocm_version()` now calls through this C API instead of loading `librocm-core.so` directly; its `Tuple[bool, str]` return contract (no exceptions raised) is unchanged.
+
 ### Changed
 
 - **`amdsmi_get_gpu_kfd_info()` now returns `AMDSMI_STATUS_NOT_SUPPORTED` on WSL**.

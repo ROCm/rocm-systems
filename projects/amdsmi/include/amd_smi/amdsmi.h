@@ -2096,7 +2096,7 @@ typedef struct {
 /**
  * @brief This structure holds version information.
  *
- * @cond @tag{gpu_bm_linux} @endcond
+ * @cond @tag{gpu_bm_linux} @tag{guest_windows} @endcond
  */
 typedef struct {
   uint32_t major;     //!< Major version
@@ -6419,6 +6419,30 @@ amdsmi_status_t amdsmi_get_gpu_fabric_info(amdsmi_processor_handle processor_han
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_lib_version(amdsmi_version_t* version);
+
+/**
+ *  @brief Get the ROCm version
+ *
+ *  @ingroup tagVersionQuery
+ *
+ *  @platform{gpu_bm_linux} @platform{guest_windows}
+ *
+ *  @details Returns the ROCm version through @p version.
+ *  Does not require ::amdsmi_init. @p version's build field points to storage
+ *  owned by the library, valid for the lifetime of the process; do not free
+ *  it. The ROCm core library is located next to libamd_smi, then under an
+ *  absolute ROCM_HOME/ROCM_PATH, then /opt/rocm/lib, then the dynamic linker,
+ *  and is loaded in-process.
+ *
+ *  @param[in,out] version A pointer to an ::amdsmi_version_t structure that will
+ *  be updated with the ROCm version information upon return.
+ *  Must be allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success;
+ *  ::AMDSMI_STATUS_NOT_SUPPORTED if the ROCm core runtime isn't installed;
+ *  ::AMDSMI_STATUS_API_FAILED if the ROCm core library reports an error
+ */
+amdsmi_status_t amdsmi_get_rocm_version(amdsmi_version_t* version);
 
 /** @} End tagVersionQuery */
 

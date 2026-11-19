@@ -4876,6 +4876,9 @@ extern "C" {
     pub fn amdsmi_get_lib_version(version: *mut AmdsmiVersionT) -> AmdsmiStatusT;
 }
 extern "C" {
+    pub fn amdsmi_get_rocm_version(version: *mut AmdsmiVersionT) -> AmdsmiStatusT;
+}
+extern "C" {
     pub fn amdsmi_get_gpu_ecc_count(
         processor_handle: AmdsmiProcessorHandle,
         block: AmdsmiGpuBlockT,

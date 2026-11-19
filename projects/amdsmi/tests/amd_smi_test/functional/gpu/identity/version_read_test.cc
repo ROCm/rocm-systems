@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <iostream>
+#include <string>
 
 #include "amd_smi/amdsmi.h"
 #include "test_common.h"
@@ -60,4 +61,38 @@ void TestVersionRead::Run(void) {
     std::cout << "\t**AMD SMI Library version: " << ver.major << "." << ver.minor << "."
               << ver.release << " (" << ver.build << ")" << std::endl;
   }
+
+  DISPLAY_AMDSMI_API("amdsmi_get_rocm_version", "nullptr", VERB(STANDARD));
+  err = amdsmi_get_rocm_version(nullptr);
+  DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+  ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
+
+  amdsmi_version_t rocm_ver = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, nullptr};
+  DISPLAY_AMDSMI_API("amdsmi_get_rocm_version", "", VERB(STANDARD));
+  err = amdsmi_get_rocm_version(&rocm_ver);
+  DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+  if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
+    // librocm-core.so is not available on every test host (e.g. a ROCm-less build).
+    GTEST_SKIP() << "librocm-core.so not available on this host";
+  }
+  CHK_ERR_ASRT(err)
+
+  ASSERT_TRUE(rocm_ver.major != 0xFFFFFFFF && rocm_ver.minor != 0xFFFFFFFF &&
+              rocm_ver.release != 0xFFFFFFFF && rocm_ver.build != nullptr);
+  std::string expected_build = std::to_string(rocm_ver.major) + "." +
+                               std::to_string(rocm_ver.minor) + "." +
+                               std::to_string(rocm_ver.release);
+  ASSERT_EQ(std::string(rocm_ver.build), expected_build);
+  IF_VERB(STANDARD) {
+    std::cout << "\t**ROCm version: " << rocm_ver.major << "." << rocm_ver.minor << "."
+              << rocm_ver.release << " (" << rocm_ver.build << ")" << std::endl;
+  }
+
+  // A cached resolution must not mutate between calls within the same process.
+  amdsmi_version_t rocm_ver_2 = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, nullptr};
+  ASSERT_EQ(amdsmi_get_rocm_version(&rocm_ver_2), AMDSMI_STATUS_SUCCESS);
+  ASSERT_EQ(rocm_ver_2.major, rocm_ver.major);
+  ASSERT_EQ(rocm_ver_2.minor, rocm_ver.minor);
+  ASSERT_EQ(rocm_ver_2.release, rocm_ver.release);
+  ASSERT_STREQ(rocm_ver_2.build, rocm_ver.build);
 }
