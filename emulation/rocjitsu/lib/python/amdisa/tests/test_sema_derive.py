@@ -16,7 +16,8 @@ from amdisa.sema_ast import (
     SemaType,
 )
 from amdisa.sema_derive import derive_sema_block
-from amdisa.codegen.execute.sema_lower import lower_sema_block
+from amdisa.codegen.execute import ExecuteContext
+from amdisa.codegen.execute.scalar_state import gen_scalar_state
 from amdisa.sema_fingerprint import fingerprint
 from amdisa.sema_properties import InstructionProperty, derive_properties
 
@@ -320,6 +321,23 @@ class TestDeriveScalarBfe:
 
 
 class TestDeriveScalarSaveexec:
+    @staticmethod
+    def lower_saveexec(sem):
+        """Exercise the dedicated emitter that replaces SemaAST lowering."""
+        return gen_scalar_state(
+            ExecuteContext(
+                inst=None,
+                sem=sem,
+                dst_ops=['sdst'],
+                src_ops=['ssrc0'],
+                profile=None,
+                enc_name='ENC_SOP1',
+                is_vop3=False,
+                has_abs=False,
+                arch_name='rdna3_5',
+            )
+        )
+
     def test_and(self):
         sem = _FakeSem('S_AND_SAVEEXEC_B64', 'scalar_saveexec', 'and', 'b64', 'nonzero')
         block = derive_sema_block(sem)
@@ -329,8 +347,7 @@ class TestDeriveScalarSaveexec:
 
     def test_writes_exec_and_scc(self):
         sem = _FakeSem('S_AND_SAVEEXEC_B64', 'scalar_saveexec', 'and', 'b64', 'nonzero')
-        block = derive_sema_block(sem)
-        cpp = lower_sema_block(block)
+        cpp = self.lower_saveexec(sem)
         assert 'wf.exec_raw()' in cpp
         assert 'wf.write_exec(' in cpp
         assert 'write_scc' in cpp
@@ -345,8 +362,7 @@ class TestDeriveScalarSaveexec:
             'b32',
             'nonzero',
         )
-        block = derive_sema_block(sem)
-        cpp = lower_sema_block(block)
+        cpp = self.lower_saveexec(sem)
         assert 'src & (~old_exec)' in cpp
         assert '(~src) & (~old_exec)' not in cpp
 
@@ -358,8 +374,7 @@ class TestDeriveScalarSaveexec:
             'b32',
             'nonzero',
         )
-        block = derive_sema_block(sem)
-        cpp = lower_sema_block(block)
+        cpp = self.lower_saveexec(sem)
         assert 'src | (~old_exec)' in cpp
         assert '(~src) | old_exec' not in cpp
 
