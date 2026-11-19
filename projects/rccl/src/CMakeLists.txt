@@ -172,6 +172,7 @@ set(SRC_FILES
   algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll128.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll128_peerpar.h
+  algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll_spread.h
   algorithms/gin/gin_alltoall.h
   algorithms/gin/gin_all_reduce.h
   algorithms/gin/gin_all_reduce_policy.h
