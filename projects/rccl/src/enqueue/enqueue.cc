@@ -2574,9 +2574,14 @@ ncclResult_t rcclAddonLaunchEnd(struct ncclComm* comm, cudaStream_t stream,
     if (state.doneEventOrdering && !taken) {
       CUDACHECKGOTO(hipEventRecord(comm->doneEvent, stream), result, release);
     }
-    // The tag advances however the event was recorded, and also when ordering is disabled and it
-    // was not: it is what tells the next collective on another stream that an edge is needed.
-    comm->lastStreamTag = ncclStreamTag(stream);
+    // lastStreamTag is what makes a later launch on another stream wait on doneEvent. Advance it
+    // only when this launch recorded (or fused a record into) that event. With ordering disabled
+    // the event does not cover this addon work, so leaving the tag alone keeps the next native
+    // stream-change wait from blocking on an unrelated older record; the application must order
+    // a native collective after this addon one itself.
+    if (state.doneEventOrdering) {
+      comm->lastStreamTag = ncclStreamTag(stream);
+    }
     if (state.capturing) {
       NCCLCHECKGOTO(rcclAddonCaptureOrderEnd(comm, stream, state), result, release);
     }

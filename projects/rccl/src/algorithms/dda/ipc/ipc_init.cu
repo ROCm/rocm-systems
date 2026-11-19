@@ -254,15 +254,25 @@ ncclResult_t ncclDdaIpcCommClosePeerMappings(ncclComm* comm) {
   auto* barrierState = comm->ddaIpcBarrierState;
   const bool hasBarrierMappings = barrierState != nullptr && barrierState->resources != nullptr &&
                                   barrierState->resources->ipcMemHandler != nullptr;
-  if ((hasBarrierMappings || comm->ddaIpcMemHandler != nullptr) && comm->doneEvent != nullptr) {
+  if (hasBarrierMappings || comm->ddaIpcMemHandler != nullptr) {
     // DDA kernels and CE-scratch copies run on the user stream, which the
-    // hostStream/deviceStream syncs in commDestroySync do not cover. doneEvent
-    // is recorded after every kernel and CE launch, so waiting on it keeps
-    // in-flight work off unmapped peers.
-    cudaError_t syncErr = cudaEventSynchronize(comm->doneEvent);
-    if (syncErr != cudaSuccess) {
-      WARN("ncclDdaIpcCommClosePeerMappings: doneEvent sync failed (%s); continuing cleanup",
-           cudaGetErrorString(syncErr));
+    // hostStream/deviceStream syncs in commDestroySync do not cover. With
+    // RCCL_ADDON_DONE_EVENT_ORDERING=1 (default), doneEvent is recorded after
+    // every addon/CE launch, so waiting on it keeps in-flight work off unmapped
+    // peers. With =0 that record is skipped on the rcclAddonLaunch path, so
+    // doneEvent may be an older fence: use a device-wide sync instead.
+    if (rcclParamAddonDoneEventOrdering() == 0) {
+      cudaError_t syncErr = cudaDeviceSynchronize();
+      if (syncErr != cudaSuccess) {
+        WARN("ncclDdaIpcCommClosePeerMappings: device sync failed (%s); continuing cleanup",
+             cudaGetErrorString(syncErr));
+      }
+    } else if (comm->doneEvent != nullptr) {
+      cudaError_t syncErr = cudaEventSynchronize(comm->doneEvent);
+      if (syncErr != cudaSuccess) {
+        WARN("ncclDdaIpcCommClosePeerMappings: doneEvent sync failed (%s); continuing cleanup",
+             cudaGetErrorString(syncErr));
+      }
     }
   }
   if (hasBarrierMappings) {

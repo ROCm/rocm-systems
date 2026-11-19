@@ -104,7 +104,8 @@ TEST_F(EnqueueMicrotest, AddonLaunch_LaunchFailed_RecordsNothingAndLeavesTheTag)
 }
 
 // RCCL_ADDON_DONE_EVENT_ORDERING. The two cases below differ only in the param: a collective on a new
-// stream waits on doneEvent and offers it as the stop event by default, and does neither when disabled.
+// stream waits on doneEvent, offers it as the stop event, and advances lastStreamTag by default; when
+// disabled it does none of those.
 namespace {
 hipStream_t const kAddonPrevStream = reinterpret_cast<hipStream_t>(0x9E5);
 }  // namespace
@@ -158,8 +159,9 @@ TEST_F(EnqueueMicrotest, AddonLaunch_DoneEventOrderingDisabled_NeitherWaitsNorRe
   EXPECT_EQ(nullptr, stopEvent);
   EXPECT_EQ(0, record.calls);
   EXPECT_EQ(nullptr, ac.c()->addonStopEvent);
-  // The tag still advances, so a later native launch on another stream takes the stream-change path.
-  EXPECT_EQ(ncclStreamTag(kAddonStream), ac.c()->lastStreamTag);
+  // Tag stays on the previous stream: doneEvent was not recorded for this launch, so a later
+  // native stream-change wait must not treat this launch as the doneEvent producer.
+  EXPECT_EQ(ncclStreamTag(kAddonPrevStream), ac.c()->lastStreamTag);
 }
 
 // Begin fails, so launch() must not run. cudaDev 5 != current 3 makes the set and the restore observable.
