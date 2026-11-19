@@ -817,17 +817,12 @@ static ncclResult_t rcclRingFallback(struct ncclComm* comm, const void* sendbuff
 // planner's own kernels, the symmetric kernel and CE (enqueue.cc honors info->decision),
 // and the setups collectives.cc runs before enqueue (rcclEnqueueSetupNeedsSwitch).
 static bool rcclEnqueueRunsDecision(int algo) {
-  if (algo < NCCL_NUM_ALGORITHMS) return true;
+  if (algo < NCCL_NUM_ALGORITHMS || rcclEnqueueSetupNeedsSwitch(algo)) return true;
   switch (algo) {
   case RCCL_SYMMETRIC:
   case RCCL_SYMMETRIC_TDM:
   case RCCL_CE_REGISTERED:
   case RCCL_CE_SCRATCH:
-  case RCCL_DIRECT_ALLGATHER:
-  case RCCL_A2A_PIVOT:
-#ifdef ENABLE_ROCSHMEM
-  case RCCL_A2A_GDA:
-#endif
     return true;
   default:
     return false;
