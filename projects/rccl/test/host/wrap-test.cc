@@ -1941,9 +1941,7 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250RingAllReduceLL128Sc
 
 namespace {
 
-// The gfx1250 SPX launch geometry the Ring LL128 cost model reads: 256 channels, 256-thread LL128 blocks of
-// wave32 warps, 128-byte LL128 lines (15 data words of 16) with 32 words per thread per pass, the default LL128
-// buffer (one-loop chunk 230400 B) and Simple's Unroll 32 (16 KiB hunks).
+// gfx1250 SPX Ring geometry the LL128 cost model reads: wave32, default LL128 buffer and lines, Simple Unroll 32.
 void SetGfx1250RingGeometry(ncclComm* comm, int nChannels = 256) {
   comm->nChannels = nChannels;
   comm->WarpSize = 32;
@@ -1972,7 +1970,7 @@ void DeleteFabricComm(ncclComm* comm) {
 
 }  // namespace
 
-// Past nRanks x 4 MiB, LL128 only where rcclArRingLL128BeatsSimple prices it 4% under Simple: the units decide on 256
+// Past nRanks x 4 MiB, LL128 only where rcclArRingLL128BeatsSimple prices it under Simple: the units decide on 256
 // channels and a 1800000 fabric, the wire on 192 channels and 900000 (LL128 sends 16/15 of C).
 TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250RingAllReduceLL128ByChunkCost) {
   RUN_ISOLATED_TEST(
@@ -9025,12 +9023,17 @@ namespace real_arch_thresholds {
 }  // namespace real_arch_thresholds
 
 // The Ring AllReduce LL128 floor and cost entries the ByChunkCost test runs on are the gfx1250 SPX table's; DPX keeps
-// the cost rule off.
+// the cost rule off, and so does a build without the Simple changes it prices.
 TEST(WrapMicrotest, Gfx1250ArRingLL128CostEntriesMatchTheRealTables) {
   const rcclArchThresholds* spx = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
   const rcclArchThresholds* dpx = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
   ASSERT_NE(nullptr, spx);
   ASSERT_NE(nullptr, dpx);
+  EXPECT_EQ(0u, dpx->arRingLL128PassNs);
+#if !RCCL_GFX1250_AR_RING_LL128_BY_CHUNK
+  EXPECT_EQ(32 * kMiB, spx->arRingLL128MaxPerRank);
+  EXPECT_EQ(0u, spx->arRingLL128PassNs);
+#else
   const rcclArchThresholds* t = Gfx1250Table();
   EXPECT_EQ(t->arRingLL128MaxPerRank, spx->arRingLL128MaxPerRank);
   EXPECT_EQ(t->arRingLL128StepNs, spx->arRingLL128StepNs);
@@ -9040,7 +9043,7 @@ TEST(WrapMicrotest, Gfx1250ArRingLL128CostEntriesMatchTheRealTables) {
   EXPECT_EQ(t->arRingWireNsScale, spx->arRingWireNsScale);
   EXPECT_EQ(t->arRingLL128MarginPct, spx->arRingLL128MarginPct);
   EXPECT_EQ(t->arRingLL128MaxPasses, spx->arRingLL128MaxPasses);
-  EXPECT_EQ(0u, dpx->arRingLL128PassNs);
+#endif
 }
 
 // The registered AllReduce re-route reads its bounds from the arch table: the gfx1250 SPX table re-routes, while the

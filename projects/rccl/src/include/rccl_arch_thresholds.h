@@ -14,6 +14,16 @@
 #include "nccl_common.h"  // ncclFunc_t, ncclFuncAlltoAll
 #include <stddef.h>       // size_t, SIZE_MAX
 
+// The gfx1250 SPX Ring AllReduce LL128 cost rule prices the fused Simple barriers and buffer stores; a build that
+// turns one off keeps nRanks x 32 MiB.
+#if defined(RCCL_DISABLE_GFX1250_AR_RING_LL128_BY_CHUNK) || defined(RCCL_DISABLE_SIMPLE_FUSED_STEP_END) || \
+  defined(RCCL_DISABLE_SIMPLE_STORE_FREE_STEP_START) || defined(RCCL_DISABLE_SIMPLE_BUFFER_STORE) || \
+  defined(DWORDX4_INTRINSICS_FORCE_OFF) || (defined(ENABLE_TDM_SIMPLE) && ENABLE_TDM_SIMPLE)
+#define RCCL_GFX1250_AR_RING_LL128_BY_CHUNK 0
+#else
+#define RCCL_GFX1250_AR_RING_LL128_BY_CHUNK 1
+#endif
+
 // DDA arrays are indexed by ncclFunc_t through AlltoAll (ncclFuncAlltoAll == 8).
 // All collectives compare total message bytes against the table values.
 // 0 disables that tier for that collective. No parallel built-in defaults:

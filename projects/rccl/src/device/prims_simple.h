@@ -100,8 +100,7 @@ class Primitives<T, RedOp, Fan, Direct,
   inline __device__ bool stepEndBarrier() {
 #if RCCL_SIMPLE_FUSED_STEP_END
     if (skip_fence) {
-      __atomic_signal_fence(__ATOMIC_SEQ_CST);
-      asm volatile("s_wait_loadcnt 0x0\n\ts_wait_storecnt 0x0" ::: "memory");
+      __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "global");  // s_wait_loadcnt 0 and s_wait_storecnt 0
       if (nworkers != WARP_SIZE) {
         ldsOrderedBarrier(nworkers, threadsPerBlock, barrier_next, barriers);
       }

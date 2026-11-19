@@ -248,13 +248,10 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ddaVmmMinBlocks = 32,
   .ddaVmmMaxBlocks = 128,
   // Ring / Tree crossovers, same sweep (AllReduce LL128: AICOMRCCL-2874/2875).
-  // The cost rule prices the fused Simple barriers and buffer stores; a build missing one keeps nRanks x 32 MiB.
-#if defined(RCCL_DISABLE_GFX1250_AR_RING_LL128_BY_CHUNK) || defined(RCCL_DISABLE_SIMPLE_FUSED_STEP_END) || \
-  defined(RCCL_DISABLE_SIMPLE_STORE_FREE_STEP_START) || defined(RCCL_DISABLE_SIMPLE_BUFFER_STORE) || \
-  (defined(ENABLE_TDM_SIMPLE) && ENABLE_TDM_SIMPLE)
+#if !RCCL_GFX1250_AR_RING_LL128_BY_CHUNK
   .arRingLL128MaxPerRank = 32ULL*1024*1024,       // Ring LL128 beats Simple to 256M/512M/1G/2G at 8-64
 #else
-  // LL128 to nRanks x 4 MiB, then only where rcclArRingLL128BeatsSimple prices it 4% under Simple.
+  // LL128 to nRanks x 4 MiB, then only where rcclArRingLL128BeatsSimple prices it under Simple.
   .arRingLL128MaxPerRank = 4ULL*1024*1024,
   .arRingLL128StepNs = 5460,
   .arRingLL128PassNs = 7900,

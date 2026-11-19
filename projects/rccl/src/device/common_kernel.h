@@ -185,6 +185,7 @@ __device__ __forceinline__ static void reduceCopyPacks(int nThreads, int& thread
       // coverity[dead_error_condition]
       if (d < MultimemDsts) {
 #pragma unroll Unroll
+        // coverity[dead_error_begin]
         for (int u = 0; u < Unroll; u++) {
           multimem_st_global(minDsts[d], acc[u]);
           minDsts[d] += WARP_SIZE * BytePerPack;
@@ -284,6 +285,7 @@ __device__ __forceinline__ void reduceAndStore(RedFn redFn, BytePack<BytePerPack
     // coverity[dead_error_condition]
     if (d < MultimemDsts) {
 #pragma unroll Unroll
+      // coverity[dead_error_begin]
       for (int u = 0; u < Unroll; u++) {
         multimem_st_global(minDsts[d], buff[0][u]);
         minDsts[d] += WARP_SIZE * BytePerPack;
