@@ -63,7 +63,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Repeated `amd-smi` device selections now combine**.  
   - Repeated `--gpu`, `--cpu`, `--core`, and `--nic` options combine without duplicates. `reset --gpureset -g all -g 0` now resets every GPU (previously GPU 0 only); `set -g 0 -C CPX -g 1 -C SPX` now applies SPX to GPUs 0 and 1 (previously GPU 1 only). Remove earlier device options to retain the previous target set.
 
-- **``--nic`` output now labels each device ``NIC`` instead of ``AI_NIC``**.  
+- **``--nic`` output now labels each device ``NIC`` instead of ``AI_NIC``** (breaking).  
   - The device key is ``nic`` in JSON and CSV and ``NIC: <n>`` in text, matching the host interface. ``static --nic`` now lists ``ASIC``, ``BUS``, ``DRIVER`` and ``NUMA`` directly under the device instead of under a nested ``nic`` key. Scripts that read ``ai_nic`` or the nested ``nic`` key must be updated.
 
 - **``amd-smi list --nic`` now enumerates UALoE endpoints**.  
@@ -84,10 +84,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **A bare ``--nic`` now selects every NIC**.  
   - A command that takes ``--nic`` now accepts it with no value and reports every discovered NIC.
 
-- **``--nic`` is now accepted only by ``list``, ``static``, ``metric`` and ``firmware``**.  
+- **``--nic`` is now accepted only by ``list``, ``static``, ``metric`` and ``firmware``** (breaking).  
   - Other commands, such as ``reset``, now reject it instead of ignoring it and acting on every GPU.
 
-- **NIC queries a device cannot answer now return a not-supported status**.  
+- **NIC queries a device cannot answer now return a not-supported status** (breaking).  
   - They returned a not-yet-implemented status, so callers that compared against it must check the new one.
 
 - **``amd-smi list --nic`` now notes when PCI VPD was unreadable**.  
@@ -119,7 +119,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Removed
 
-- **Removed the ``FW`` block from ``amd-smi static --nic``**.  
+- **Removed the ``FW`` block from ``amd-smi static --nic``** (breaking).  
   - It repeated the driver name and version, not firmware. Use ``amd-smi firmware --nic`` for firmware versions.
 
 - **Removed the Broadcom NIC and switch device path** (breaking).  
@@ -144,7 +144,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - `amdsmi_get_gpu_metrics_info()` and `amdsmi_get_gpu_activity()` failed on APUs such as gfx1103, leaving PLX temperature, GPU utilization and `amd-smi metric` empty. Those devices now report the values they provide with the rest marked N/A, and any GPU without a PLX sensor now reports N/A there instead of a placeholder reading.
 
 - **Fixed APU video engine (VCN) utilization reading 100 times too high**.  
-  - On APUs such as Ryzen AI Max (Strix Halo), `amdsmi_get_gpu_metrics_info()` returned `apu_metrics.average_vcn_activity` in hundredths of a percent (6067 for 61 %), so Python reported it as N/A and `amd-smi metric --usage` left it out. It is now whole percent.
+  - On APUs such as Ryzen AI Max (Strix Halo), `amdsmi_get_gpu_metrics_info()` returned `apu_metrics.average_vcn_activity` in hundredths of a percent (6067 for 61 %), so Python reported it as N/A and `amd-smi metric --usage` left it out. It is now whole percent, a breaking unit change for C callers that divided it by 100.
 
 - **Fixed `amdsmi_get_gpu_total_ecc_count()` reporting `0` errors when the RAS state can't be read**.  
   - It now returns `AMDSMI_STATUS_NOT_SUPPORTED` when `ras/features` can't be opened and `AMDSMI_STATUS_API_FAILED` when it can't be parsed, so the `amd-smi` `UEC` column, `amd-smi monitor --ecc` and `amd-smi metric --ecc` show `N/A`. A GPU with RAS disabled still reports `0`. `amdsmi_get_gpu_ras_block_features_enabled()` also returns `AMDSMI_STATUS_API_FAILED` for an unparsable `ras/features` instead of reporting every block as disabled.
