@@ -15,9 +15,11 @@ import pytest
 from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
 from utils.tty import (
     _render_membw_guidance,
+    _scales_bandwidth,
     convert_time_columns,
     format_table_output,
     has_time_data,
+    process_table_data,
     show_all,
 )
 from utils.utils_common import strip_ansi
@@ -164,23 +166,44 @@ def test_format_table_output_keeps_pc_sampling_table_21_1() -> None:
     assert content.index("Stall reason definitions:") < content.index("vecCopy")
 
 
-def test_format_table_output_scales_bytes_per_second() -> None:
+def test_process_table_data_scales_bandwidth_before_rounding() -> None:
     df = pd.DataFrame({
-        "Metric": ["DRAM Read Bandwidth"],
-        "Value": [1e9],
-        "Unit": ["Bytes/s"],
+        "Metric": ["sL1D-GL1 Read Bandwidth"],
+        "Value": [0.0505],
+        "Unit": ["GB/s"],
+        "Peak": [2866.176],
     })
+    runs = {"run": SimpleNamespace(dfs={1301: df})}
 
-    content = format_table_output(
-        make_args(),
-        {"id": 300, "title": "Memory Chart"},
-        df,
+    scaled = process_table_data(
+        make_args(time_unit=None),
+        runs,
+        {"id": 1301},
         "metric_table",
-        runs={"only": object()},
+        ["Value", "Peak"],
+        scale_bandwidth=True,
     )
 
-    assert "GB/s" in content
-    assert "1000000000" not in content
+    assert scaled.iloc[0][["Value", "Unit", "Peak"]].tolist() == [
+        50.5,
+        "MB/s",
+        2866176.0,
+    ]
+
+
+@pytest.mark.parametrize(
+    ("gpu_arch", "table_id", "scaled"),
+    [
+        ("gfx1151", 1301, True),
+        ("gfx1201", 201, True),
+        ("gfx942", 301, True),
+        ("gfx942", 1701, False),
+    ],
+)
+def test_bandwidth_is_scaled_on_gfx115x_and_gfx1201_and_in_the_memory_chart(
+    gpu_arch, table_id, scaled
+) -> None:
+    assert _scales_bandwidth(gpu_arch, table_id) == scaled
 
 
 def test_has_time_data_detection() -> None:

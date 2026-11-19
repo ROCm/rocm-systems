@@ -91,16 +91,16 @@ _MERGE_KEYS = ["Dispatch_ID", *_KERNEL_ID_KEYS]
 
 
 def get_bw_scale_and_unit(value: float) -> tuple[float, str]:
-    """Return the divisor and suffix for a bandwidth value in Bytes/s."""
-    if value >= 1e12:
-        return 1e12, "TB/s"
-    if value >= 1e9:
-        return 1e9, "GB/s"
-    if value >= 1e6:
-        return 1e6, "MB/s"
+    """Return the divisor and suffix for a bandwidth value in GB/s."""
     if value >= 1e3:
-        return 1e3, "KB/s"
-    return 1.0, "B/s"
+        return 1e3, "TB/s"
+    if value >= 1:
+        return 1.0, "GB/s"
+    if value >= 1e-3:
+        return 1e-3, "MB/s"
+    if value >= 1e-6:
+        return 1e-6, "KB/s"
+    return 1e-9, "B/s"
 
 
 @dataclass(frozen=True)
