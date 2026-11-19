@@ -193,3 +193,19 @@ set_target_properties(
                VERSION
                ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}
                INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")
+
+# tool library for the reattach tests (tests/anytime-tool-config and tests/rocattach):
+# like rocprofiler-systems, it finalizes itself from tool_detach. Built twice so that two
+# clients can be registered in one process.
+foreach(_REATTACH_TOOL rocprofiler-sdk-reattach-tool rocprofiler-sdk-reattach-tool-2)
+    add_library(${_REATTACH_TOOL} SHARED)
+    target_sources(${_REATTACH_TOOL} PRIVATE reattach-tool.cpp)
+    target_compile_definitions(${_REATTACH_TOOL}
+                               PRIVATE REATTACH_TOOL_NAME="${_REATTACH_TOOL}")
+    target_link_libraries(${_REATTACH_TOOL} PRIVATE rocprofiler-sdk::rocprofiler-sdk
+                                                    rocprofiler-sdk::tests-build-flags)
+    set_target_properties(
+        ${_REATTACH_TOOL}
+        PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/rocprofiler-sdk"
+                   INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")
+endforeach()

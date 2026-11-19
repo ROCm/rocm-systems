@@ -20,6 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+#include "attach_test_utils.hpp"
+
 #include <rocprofiler-sdk-rocattach/defines.h>
 #include <rocprofiler-sdk-rocattach/rocattach.h>
 #include <rocprofiler-sdk-rocattach/types.h>
@@ -35,33 +37,6 @@
 #include <iostream>
 #include <sstream>
 #include <thread>
-
-static bool
-wait_for_attach_ready(pid_t pid)
-{
-    constexpr int max_wait_sec = 30;
-    auto          task_dir     = "/proc/" + std::to_string(pid) + "/task";
-
-    std::cout << "Waiting for rocp-bg-attach thread in PID " << pid << "...\n";
-    for(int elapsed = 0; elapsed < max_wait_sec; ++elapsed)
-    {
-        std::error_code ec;
-        for(const auto& entry : std::filesystem::directory_iterator(task_dir, ec))
-        {
-            if(!entry.is_directory()) continue;
-            std::ifstream comm(entry.path() / "comm");
-            std::string   name;
-            if(std::getline(comm, name) && name == "rocp-bg-attach")
-            {
-                std::cout << "Attachment ready (" << elapsed << "s elapsed)\n";
-                return true;
-            }
-        }
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-    }
-    std::cout << "Timed out after " << max_wait_sec << "s waiting for rocp-bg-attach thread\n";
-    return false;
-}
 
 #define ROCATTACH_CALL(func)                                                                       \
     {                                                                                              \
