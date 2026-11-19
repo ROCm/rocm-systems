@@ -137,6 +137,12 @@ if(ENABLE_FULL_COVERAGE)
   set(DL_OPT_FLAGS -O1 -g0)
 elseif(CMAKE_BUILD_TYPE MATCHES "Debug")
   set(DL_OPT_FLAGS -O1 -g)
+elseif(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+  # Release optimization plus source line tables, so device profilers (e.g. ATT/SQTT
+  # thread trace) can map instructions back to source. The per-kernel compiles get
+  # -gline-tables-only from rccl-device-compile; this also covers the fat objects
+  # (DDA, collectives, onerank, ...), which only receive DL_OPT_FLAGS.
+  set(DL_OPT_FLAGS -O3 -gline-tables-only)
 else()
   set(DL_OPT_FLAGS -O3)
 endif()

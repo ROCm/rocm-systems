@@ -9,6 +9,25 @@
 
 #pragma once
 
+// SQTT markers for DDA kernels. These TUs are fat objects (host + device passes) and do
+// not all include device.h, so wire the LLVM-bundled marker header up here the same way
+// device.h does. The header declares the marker functions whenever __AMDGCN__ or
+// __HIP_DEVICE_COMPILE__ is defined -- which includes the HIP host pass -- so it must be
+// included in both passes; defining no-op macros there would break those declarations.
+// Only when the header declares nothing do the no-ops (spelled exactly like device.h's)
+// stand in, so including both headers stays warning-free.
+#if defined(SQTT_ENABLED) && SQTT_ENABLED
+#define AMD_SQTT_MARKER_ENABLE 1
+#include <amd_sqtt_marker/sqtt_marker.h>
+#if !(defined(__AMDGCN__) || defined(__HIP_DEVICE_COMPILE__)) && !defined(sqtt_marker_enter)
+#define sqtt_marker_enter(name) do {} while(0)
+#define sqtt_marker_exit(name) do {} while(0)
+#endif
+#elif !defined(sqtt_marker_enter)
+#define sqtt_marker_enter(name) do {} while(0)
+#define sqtt_marker_exit(name) do {} while(0)
+#endif
+
 #include <algorithm>
 #include <cstdint>
 #include <utility>

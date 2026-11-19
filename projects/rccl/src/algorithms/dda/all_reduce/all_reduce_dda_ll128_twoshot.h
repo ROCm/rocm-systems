@@ -122,6 +122,7 @@ __launch_bounds__(512)
            (wireOff - 2 * lane);
   };
 
+  sqtt_marker_enter("DDA_AR2S_LL128_PUBLISH");
   // Phase 1: send each peer the shard that peer owns, kBatch peers per round.
   // Staged: a push returns once issued, so loading one peer ahead hides the load; a batch of 8 would spill.
   // Coop: load a batch of 8 peers, then store it.
@@ -175,6 +176,8 @@ __launch_bounds__(512)
     }
   }
 
+  sqtt_marker_exit("DDA_AR2S_LL128_PUBLISH");
+  sqtt_marker_enter("DDA_AR2S_LL128_REDUCE");
   // Phase 2: fold every copy of my shard, hand the result back out, then keep it.
   // The staged kernel folds over the runtime count: an unrolled fold on top of the staging state raises register use.
   const int foldRanks = ddaLL128Staged<WIRE>() ? nRanksRt : nRanks;
@@ -196,6 +199,7 @@ __launch_bounds__(512)
       if (!ddaLL128PollWire(gatherSlot + wireOff, vr, flag, lane, params)) {
         ddaLL128StageDrain<WIRE>();
         ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag32);
+        sqtt_marker_exit("DDA_AR2S_LL128_REDUCE");
         return;
       }
       // On a flag lane the odd words hold flags rather than payload, so the sums
@@ -224,6 +228,8 @@ __launch_bounds__(512)
     ddaLL128StoreRegs<int8_t>(dstBytes + (size_t)selfRank * shardBytes + sliceByte, acc, eltInSlice, lane, flagLane);
   }
 
+  sqtt_marker_exit("DDA_AR2S_LL128_REDUCE");
+  sqtt_marker_enter("DDA_AR2S_LL128_GATHER");
   // Phase 3: collect the peers' reduced shards into the rest of recvbuff.
   for (size_t s = gwarp; s < slicesTotal; s += wstride) {
     const size_t sliceByte = s * (size_t)kDdaLL128DataBytesPerSlice;
@@ -239,12 +245,14 @@ __launch_bounds__(512)
       if (!ddaLL128PollWire(gatherSlot + wireOff, vr, flag, lane, params)) {
         ddaLL128StageDrain<WIRE>();
         ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag32);
+        sqtt_marker_exit("DDA_AR2S_LL128_GATHER");
         return;
       }
       ddaLL128StoreRegs<int8_t>(dstBytes + (size_t)peer * shardBytes + sliceByte, vr, eltInSlice, lane, flagLane);
     }
   }
 
+  sqtt_marker_exit("DDA_AR2S_LL128_GATHER");
 #if defined(__gfx1250__) || defined(__gfx1250_strict__)
   asm volatile("s_wait_storecnt 0x0" ::: "memory");
 #endif
