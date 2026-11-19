@@ -1904,6 +1904,75 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_ManyBroadcasts) {
 
   requireBufferEquals(dst, dstValues, LinearAllocs::hipMalloc);
 }
+
+/**
+ * Test Description
+ * ------------------------
+ * - Verifies a batch that is the first operation on its stream and mixes a shader copy with
+ *   enough SDMA broadcast operations for the device-memory signal ring to rearm signals ahead
+ *   of use past the stream's prior signal (ROC_SIGNAL_POOL_SIZE - 47 operations).
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_BroadcastsWithShaderCopy) {
+  const char* poolEnv = std::getenv("ROC_SIGNAL_POOL_SIZE");
+  const size_t pool =
+      poolEnv != nullptr ? std::clamp<size_t>(std::strtoul(poolEnv, nullptr, 10), 1, 1024) : 64;
+  if (pool < 48) {
+    HIP_SKIP_TEST("ROC_SIGNAL_POOL_SIZE is too small for this test");
+  }
+  const size_t kSources = pool - 47;
+  constexpr size_t kDstsPerSource = 2;
+  const size_t kBroadcastCopies = kSources * kDstsPerSource;
+  constexpr size_t kCopySize = 64;
+
+  std::vector<unsigned char> srcValues(kSources * kCopySize);
+  std::vector<unsigned char> dstValues(kBroadcastCopies * kCopySize);
+  for (size_t i = 0; i < kSources; ++i) {
+    std::fill_n(srcValues.begin() + i * kCopySize, kCopySize,
+                static_cast<unsigned char>(i % 251 + 1));
+  }
+  for (size_t i = 0; i < kBroadcastCopies; ++i) {
+    std::copy_n(srcValues.begin() + i / kDstsPerSource * kCopySize, kCopySize,
+                dstValues.begin() + i * kCopySize);
+  }
+  const std::vector<unsigned char> shaderValues(kCopySize, 0xa5);
+  std::vector<LinearAllocGuard<unsigned char>> allocations;
+  char* src = static_cast<char*>(addBuffer(allocations, srcValues, LinearAllocs::hipMalloc));
+  char* dst = static_cast<char*>(addBuffer(
+      allocations, std::vector<unsigned char>(dstValues.size(), 0), LinearAllocs::hipMalloc));
+  void* shaderSrc = addBuffer(allocations, shaderValues, LinearAllocs::hipMalloc);
+  void* shaderDst = addBuffer(allocations, std::vector<unsigned char>(kCopySize, 0),
+                              LinearAllocs::hipMalloc);
+
+  std::vector<void*> srcPtrs(kBroadcastCopies + 1);
+  std::vector<void*> dstPtrs(kBroadcastCopies + 1);
+  std::vector<size_t> sizes(kBroadcastCopies + 1, kCopySize);
+  for (size_t i = 0; i < kBroadcastCopies; ++i) {
+    srcPtrs[i] = src + i / kDstsPerSource * kCopySize;
+    dstPtrs[i] = dst + i * kCopySize;
+  }
+  srcPtrs[kBroadcastCopies] = shaderSrc;
+  dstPtrs[kBroadcastCopies] = shaderDst;
+  // PreferCE keeps the broadcasts on SDMA; the last copy has no preference and uses a shader.
+  hipMemcpyAttributes attrs[2] = {
+      {hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtPreferCE},
+      {hipMemcpySrcAccessOrderStream, {}, {}, 0}};
+  size_t attrsIdxs[2] = {0, kBroadcastCopies};
+
+  // The batch must be the stream's first operation.
+  StreamGuard stream_guard(Streams::created);
+  HIP_CHECK(hipMemcpyBatchAsync(dstPtrs.data(), srcPtrs.data(), sizes.data(), srcPtrs.size(), attrs,
+                                attrsIdxs, 2, nullptr, stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+
+  requireBufferEquals(dst, dstValues, LinearAllocs::hipMalloc);
+  requireBufferEquals(shaderDst, shaderValues, LinearAllocs::hipMalloc);
+}
 #endif
 /**
  * End doxygen group MemoryTest.
