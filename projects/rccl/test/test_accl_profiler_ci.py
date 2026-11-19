@@ -74,11 +74,16 @@ def _write_rank_file(
     rank: int,
     coll: str = "AllReduce",
     complete: bool = True,
+    algo_for_size: dict[int, str] | None = None,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     objects = []
     for size in (1024, 2048):
-        objects.extend(_record(rank, size, coll) for _ in range(3))
+        for _ in range(3):
+            record = _record(rank, size, coll)
+            if algo_for_size and size in algo_for_size:
+                record["coll_perf"]["coll_algo"] = algo_for_size[size]
+            objects.append(record)
     objects.append(
         {
             "summary": {
@@ -279,6 +284,49 @@ def test_message_sizes_match_requested_sweep(collective):
 def test_message_sizes_reject_invalid_sweeps(overrides):
     with pytest.raises(ValueError):
         accl_ci.message_sizes(RunConfig(**overrides), "AllGather")
+
+
+@pytest.mark.parametrize(
+    "nodes,gpus,expected",
+    [
+        (2, 8, 4 * 1024**2 // 16),  # the 2-node Ruby nightly: 256 KiB per rank
+        (1, 8, 8 * 1024**2 // 8),
+        (4, 8, 8 * 1024**2 // 32),
+        (2, 4, 4 * 1024**2 // 8),  # the threshold follows nodes, the divisor ranks
+        (1, 4, None),  # not a multiple of 8 ranks: Direct never runs
+    ],
+)
+def test_direct_allgather_max_bytes(nodes, gpus, expected):
+    config = RunConfig(nodes=nodes, gpus_per_node=gpus)
+    assert accl_ci.direct_allgather_max_bytes(config) == expected
+
+
+def test_validate_collective_output_accepts_p2p_at_and_below_direct_limit(tmp_path):
+    for rank in range(2):
+        _write_rank_file(tmp_path, rank, "AllGather", algo_for_size={1024: "P2P"})
+    result = validate_collective_output(
+        tmp_path, "AllGather", 2, 2, {1024, 2048}, p2p_max_bytes=1024
+    )
+    assert result["message_sizes"] == [1024, 2048]
+
+
+@pytest.mark.parametrize(
+    "algo_for_size,p2p_max_bytes",
+    [
+        ({}, 1024),  # Direct size recorded as Ring: the CollApi bracket is broken
+        ({1024: "P2P", 2048: "P2P"}, 1024),  # P2P above the Direct limit
+        ({1024: "P2P"}, None),  # P2P where no call should fan out
+    ],
+)
+def test_validate_collective_output_rejects_wrong_p2p_path(
+    tmp_path, algo_for_size, p2p_max_bytes
+):
+    for rank in range(2):
+        _write_rank_file(tmp_path, rank, "AllGather", algo_for_size=algo_for_size)
+    with pytest.raises(ValueError, match="P2P path mismatch"):
+        validate_collective_output(
+            tmp_path, "AllGather", 2, 2, {1024, 2048}, p2p_max_bytes=p2p_max_bytes
+        )
 
 
 def test_validate_collective_output_rejects_uniformly_truncated_sweep(tmp_path):
