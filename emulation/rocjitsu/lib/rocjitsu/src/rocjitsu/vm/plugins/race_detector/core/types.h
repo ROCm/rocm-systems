@@ -7,6 +7,7 @@
 #include "rocjitsu/vm/plugins/race_detector/core/dim3d.h"
 #include "rocjitsu/vm/plugins/race_detector/core/instruction_snapshot.h"
 #include <algorithm>
+#include <compare>
 #include <cstdint>
 #include <optional>
 #include <utility>

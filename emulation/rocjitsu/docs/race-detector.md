@@ -389,8 +389,8 @@ On gfx1250 a barrier is split into `s_barrier_signal`, which does not block and
 waits for no memory counter, and `s_barrier_wait`, which blocks until the
 barrier completes: for a workgroup barrier, once every wave has signalled or
 ended; for a named barrier, once it has counted as many signals as its member
-count (CDNA5 ISA 5.6 and 15.3). A barrier therefore
-orders a completed event before another wave's access only when:
+count (CDNA5 ISA 5.6 and 15.3). For a direct handoff from a producer to a
+consumer, the detector recognizes ordering when:
 
 - the issuing wave completed the event (by a wait or counter-capacity
   backpressure) before its own signal, and
@@ -413,6 +413,11 @@ workgroup barrier; ordering between workgroups is not modeled. The simulator
 reports each counted signal, each completed round and each passed wait to
 plugins.
 
+These rules describe the detector's explicit signal/wait model. Other
+protocols, such as polling a publication flag or a necessary reduction of a
+named barrier's threshold by `s_barrier_leave`, can order LDS accesses but are
+not recognized as handoffs by this model.
+
 A completed LDS event stays in the history, and is still checked, until every
 other live wave of the workgroup has acquired it. A workgroup in which some
 wave never passes a barrier wait, or whose waves synchronize only through
@@ -423,7 +428,8 @@ wave has not acquired: waves that keep exchanging LDS data through a named
 barrier do not rescan each other's ordered accesses, which remain in the
 history for the waves outside the barrier.
 
-Targets with a single `s_barrier` instruction are handled the same way, with
+The simulator also reports RDNA4's separate signal and wait through this
+model. Targets with a single `s_barrier` instruction are handled with
 every member's signal and wait at the point where the barrier resolves.
 
 The detector reports an access in the window between a wave's signal and its

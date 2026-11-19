@@ -522,6 +522,13 @@ void WaveRaceState::recordLdsOperandRead(InstructionSnapshot instruction, uint32
 
 void WaveRaceState::queueForBarrier(EventId eventId) {
   detector->stampReleaseEpoch(eventId);
+  if (barrierPendingEvents.empty())
+    barrierPendingBounds = {std::numeric_limits<int>::max(), 0};
+  const IntervalSet &intervals = detector->events().ldsIntervals(eventId);
+  if (!intervals.empty()) {
+    barrierPendingBounds.start = std::min(barrierPendingBounds.start, intervals.begin()->start);
+    barrierPendingBounds.end = std::max(barrierPendingBounds.end, (intervals.end() - 1)->end);
+  }
   barrierPendingEvents.push_back(eventId);
 }
 

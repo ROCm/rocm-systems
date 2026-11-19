@@ -199,7 +199,7 @@ void RaceDetector::barrierRoundCompleted(BarrierRoundId round, std::span<const W
       state.awaiting |= uint64_t{1} << wave.value;
   // The round set these waves' completion bit, so the bit was clear: a wave it
   // arms no longer waits for an older round of this barrier's bit. It passed
-  // that wait, or S_BARRIER_JOIN, S_BARRIER_LEAVE or S_BARRIER_INIT cleared
+  // that wait, or S_BARRIER_JOIN or S_BARRIER_LEAVE cleared
   // the bit without one, which is not reported. Its next wait passes for this
   // round, so the older round's clock is not acquired. Waves this round did
   // not arm keep their older waits.
@@ -355,9 +355,10 @@ void RaceDetector::retireEvent(EventId eventId) {
 }
 
 template <typename Visit>
-void RaceDetector::forEachUnacquiredLdsEvent(WaveId accessor, Visit visit) const {
+void RaceDetector::forEachUnacquiredLdsEvent(WaveId accessor, int start, int end,
+                                             Visit visit) const {
   for (const WaveRaceState &owner : waveRaceStates) {
-    if (owner.getWaveId() == accessor)
+    if (owner.getWaveId() == accessor || !owner.barrierPendingMayOverlap(start, end))
       continue;
     const uint32_t acquiredEpoch = acquired(accessor, owner.getWaveId());
     const std::vector<EventId> &history = owner.getBarrierPendingEvents();
@@ -392,7 +393,7 @@ void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes,
       continue;
     check(eventId);
   }
-  forEachUnacquiredLdsEvent(wave, check);
+  forEachUnacquiredLdsEvent(wave, addr, addr + nBytes, check);
 }
 
 void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
@@ -439,7 +440,7 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
       continue;
     check(eventId);
   }
-  forEachUnacquiredLdsEvent(wave, check);
+  forEachUnacquiredLdsEvent(wave, addr, addr + nBytes, check);
 }
 
 bool RaceDetector::mayConflict(const IntervalSet &accessed, WaveId wave, bool isWrite,
