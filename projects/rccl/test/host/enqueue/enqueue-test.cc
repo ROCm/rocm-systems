@@ -2683,6 +2683,49 @@ TEST_F(EnqueueMicrotest, P2pBatchEligible_Gfx950_UnsetThresholdFollowsNodeCount)
   EXPECT_TRUE(rcclP2pBatchEligible(at15.get(), perPeer, perPeer));
 }
 
+TEST_F(EnqueueMicrotest, P2pBatchEligible_Gfx942EightNode_UnsetThresholdStopsFusingMultiMiB) {
+  // 64-rank AllToAll at 512 MiB-2 GiB is 8-32 MiB per peer. Fusing two such
+  // rounds into one work batch loses busbw against running them one at a time;
+  // up to 1 MiB per peer fusion still wins.
+  SetBatchParam(1);
+  for (int nNodes : {4, 8, 16}) {
+    BatchComm bc(nNodes, "gfx942");
+    for (ssize_t perPeer : {ssize_t(128) << 10, ssize_t(512) << 10, ssize_t(1) << 20})
+      EXPECT_TRUE(rcclP2pBatchEligible(bc.get(), perPeer, perPeer)) << "nNodes=" << nNodes << " perPeer=" << perPeer;
+    for (ssize_t perPeer : {(ssize_t(1) << 20) + 1, ssize_t(8) << 20, ssize_t(32) << 20})
+      EXPECT_FALSE(rcclP2pBatchEligible(bc.get(), perPeer, perPeer)) << "nNodes=" << nNodes << " perPeer=" << perPeer;
+  }
+}
+
+TEST_F(EnqueueMicrotest, P2pBatchEligible_Gfx942EightNode_ExplicitThresholdStillWins) {
+  constexpr ssize_t perPeer = ssize_t(8) << 20;
+  BatchComm bc(/*nNodes=*/8, "gfx942");
+  auto setEnableAndThreshold = [](int64_t threshold) {
+    g_loadParam = [threshold](const char* env, int64_t deft) {
+      if (std::strcmp(env, "RCCL_P2P_BATCH_ENABLE") == 0) return int64_t(1);
+      if (std::strcmp(env, "RCCL_P2P_BATCH_THRESHOLD") == 0) return threshold;
+      return deft;
+    };
+  };
+  setEnableAndThreshold(perPeer);
+  EXPECT_TRUE(rcclP2pBatchEligible(bc.get(), perPeer, perPeer));
+  setEnableAndThreshold(64 * 1024);
+  EXPECT_FALSE(rcclP2pBatchEligible(bc.get(), 128 * 1024, 128 * 1024));
+}
+
+TEST_F(EnqueueMicrotest, P2pBatchEligible_UnsetThresholdOtherArchsKeepNodeScopedCutoff) {
+  // gfx950 keeps 64 KiB at 16+ nodes and no cutoff below that.
+  constexpr ssize_t perPeer = ssize_t(8) << 20;
+  SetBatchParam(1);
+  BatchComm gfx950At8(/*nNodes=*/8, "gfx950");
+  EXPECT_TRUE(rcclP2pBatchEligible(gfx950At8.get(), perPeer, perPeer));
+  BatchComm gfx950At16(/*nNodes=*/16, "gfx950");
+  EXPECT_FALSE(rcclP2pBatchEligible(gfx950At16.get(), 128 * 1024, 128 * 1024));
+  EXPECT_TRUE(rcclP2pBatchEligible(gfx950At16.get(), 64 * 1024, 64 * 1024));
+  BatchComm gfx1250At8(/*nNodes=*/8, "gfx1250");
+  EXPECT_TRUE(rcclP2pBatchEligible(gfx1250At8.get(), perPeer, perPeer));
+}
+
 // ===========================================================================
 // rcclAddonLaunchBegin (enqueue.cc:2092) / rcclAddonLaunchEnd (:2125) -- the
 // bracket an addon collective wraps its own launch in.
