@@ -361,6 +361,8 @@ impl HsaSession {
                 gpus,
             },
             config: HsaConfig {
+                yielding_poll_enabled: std::env::var_os("HSA_ENABLE_YIELDING_POLL")
+                    .is_some_and(|value| value == "1"),
                 sdma_enabled: config::sdma_enabled(
                     std::env::var("HSA_ENABLE_SDMA").ok().as_deref(),
                 ),

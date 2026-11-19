@@ -46,6 +46,7 @@ pub(crate) fn session_without_devices(native_session: NativeSession) -> HsaSessi
             gpus: Vec::new(),
         },
         config: HsaConfig {
+            yielding_poll_enabled: false,
             sdma_enabled: false,
             peer_sdma_enabled: false,
             disable_fragment_allocator: false,

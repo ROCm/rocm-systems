@@ -71,7 +71,13 @@ pub(super) fn supports_execution(gpu: &rocddi::topology::GpuInfo) -> bool {
 }
 
 /// Immutable frontend policy for one initialized HSA generation.
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent immutable frontend policies"
+)]
 pub(crate) struct HsaConfig {
+    /// Whether polling-only scalar waits back off after their hot-spin window.
+    pub(crate) yielding_poll_enabled: bool,
     /// Generation-wide copy-engine configuration.
     pub(crate) sdma_enabled: bool,
     /// Generation-wide peer-copy engine configuration.
