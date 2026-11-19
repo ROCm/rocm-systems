@@ -123,6 +123,29 @@ if(TARGET rdc_client)
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
         COMPONENT ${TESTS_COMPONENT}
     )
+
+    # rdc_client_replies_tests: the client against a server whose replies state more
+    # entries than they carry. It links librdc_client for the generated gRPC service and
+    # messages, so that the process has one copy of them.
+    add_executable(rdc_client_replies_tests ${SRC_DIR}/test_client_replies.cc)
+    target_include_directories(
+        rdc_client_replies_tests
+        PRIVATE ${PROJECT_SOURCE_DIR}/include ${PROTOB_OUT_DIR}
+    )
+    target_link_libraries(
+        rdc_client_replies_tests
+        PRIVATE rdc_bootstrap rdc_client gRPC::grpc++ GTest::gtest_main pthread
+    )
+    set_target_properties(
+        rdc_client_replies_tests
+        PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib:\$ORIGIN/../../../lib/rdc/grpc/lib"
+    )
+    add_test(NAME rdc_client_replies_tests COMMAND rdc_client_replies_tests)
+    install(
+        TARGETS rdc_client_replies_tests
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+        COMPONENT ${TESTS_COMPONENT}
+    )
 endif()
 
 # rdc_link_status_tests: rdc_link_status_get() against fake amdsmi link-status
