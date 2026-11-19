@@ -51,7 +51,9 @@ filter requests the generator's full set, which has not been validated here.
 The toolchain respects explicitly selected compilers. Source staging is a
 build dependency: edits, removed sources, transform changes, and relevant tool
 changes are incorporated by `cmake --build`, without a manual HIPification
-step. Windows uses the ordinary HIP device-link flow. Unsupported Linux-only
+step. Missing generated kernel files also trigger regeneration on the next
+build, including when the build's entire `hipify` directory was removed.
+Windows uses the ordinary HIP device-link flow. Unsupported Linux-only
 build options must not be assumed to work in this Windows path.
 
 Use `RCCL_PERL`, `RCCL_BASH`, and `RCCL_HIPIFY_PERL` CMake cache paths (or

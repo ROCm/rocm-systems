@@ -56,6 +56,9 @@ const auto kGraph = reinterpret_cast<hipGraph_t>(0x6a);
 void* BaseOf(const void* ptr) { return reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(ptr) - 0x10); }
 }  // namespace
 
+uint64_t ncclOsGetPid() { return static_cast<uint64_t>(getpid()); }
+uint64_t ncclOsGetTid() { return static_cast<uint64_t>(syscall(SYS_gettid)); }
+
 hipError_t hipGetDevice(int* dev) {
   *dev = g_device;
   return hipSuccess;
