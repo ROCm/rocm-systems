@@ -173,6 +173,16 @@ TEST(ConversionPackB32F16W64Gfx942, Arithmetic) {
   check_pack<64, false, false>(rj_arith_v_pack_b32_f16_w64_gfx942);
 }
 
+// gfx1250 inherits the gfx12 packing model, including its NaN quieting, but stays loose-only
+// until the gfx1250 captures are reviewed.
+TEST(ConversionPackB32F16W32Gfx1250, Arithmetic) {
+  check_pack<32, true, false>(rj_arith_v_pack_b32_f16_w32_gfx1250);
+}
+
+TEST(ConversionPackB32F16W64Gfx1250, Arithmetic) {
+  check_pack<64, true, false>(rj_arith_v_pack_b32_f16_w64_gfx1250);
+}
+
 // gfx1100 (W7900, mkm2) lanes: hw1100-noieee (2026-09-25, MODE.IEEE clear) keeps a signaling
 // NaN half; hw2-gfx1100 (2026-10-06, IEEE set) quiets it; a denormal half flushes with input
 // denormals flushed (0x100); NEG_B toggles the sign of a NaN half.

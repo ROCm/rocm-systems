@@ -68,6 +68,18 @@ int rj_arith_v_pack_b32_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                        const uint32_t *const *a, const uint32_t *const *b,
                                        uint32_t *trapsts);
 
+// gfx1250 inherits the gfx12 packing model; strict exact stays unsupported until the gfx1250
+// captures are reviewed per entry point.
+int rj_arith_v_pack_b32_f16_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *excp_flag_user);
+
+int rj_arith_v_pack_b32_f16_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *excp_flag_user);
+
 // DPP8/DPP16 permute A before modifiers; B remains in its original lane,
 // including when B is the stochastic seed.
 // Narrow FP32 to OCP E4M3FN (FP8) / E5M2 (BF8). Each operand is one VGPR.

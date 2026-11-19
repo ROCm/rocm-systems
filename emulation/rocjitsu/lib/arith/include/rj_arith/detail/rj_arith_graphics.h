@@ -18,8 +18,10 @@ extern "C" {
 // fma(A[Q+1],B[L],C[Q]); P2 computes fma(A[Q+2],B[L],C[L]). Source lanes are
 // read even if inactive in EXEC. Each operand uses one VGPR; whole VGPRs may
 // alias. Supports NEG_A/B/C, CLAMP, with no ABS or OMOD.
-// Compatibility resolves to bit-exact semantics, which evaluate every lane on
-// the guest path and report no FP status; Loose may take host shortcuts. All semantics require the
+// Compatibility resolves to bit-exact semantics and reports no FP status. Every
+// semantics shares one dispatch: without a guest rounding or denormal control the specialized
+// kernels run and hand back only the lanes the guest model must produce, so Loose, Compatibility
+// and bit-exact return the same bits at the same cost. All semantics require the
 // default host FP environment (nearest-even rounding, denormals enabled); host exception flags may
 // change. A selected NaN keeps its sign and payload. IEEE_MODE quiets FP32 results; DX10_CLAMP_OFF
 // preserves NaNs under CLAMP. For RDNA4, set IEEE_MODE and leave DX10_CLAMP_OFF clear. Guest
