@@ -3282,8 +3282,9 @@ TEST(RaceDetectorPluginTest, CancelledWorkgroupReleasesDetector) {
       waves[w] = f.cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
       ASSERT_NE(waves[w], nullptr);
       waves[w]->set_dispatch_id(1);
-      if (attempt != 0)
+      if (attempt != 0) {
         EXPECT_EQ(waves[w], slots[w]);
+      }
     }
     slots = waves;
     f.cu()->begin_workgroup(1, 0, waves.size());

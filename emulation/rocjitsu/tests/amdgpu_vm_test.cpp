@@ -13286,8 +13286,9 @@ TEST(ClusterDispatchTest, LaterPeerSetupRollbackCancelsOnlyThatWaveIncarnation) 
     observed->on_launch = [&](amdgpu::Wavefront &wave) {
       const auto *state = static_cast<RaceWavefrontState *>(wave.plugin_state(race->slot_index()));
       ASSERT_NE(state, nullptr);
-      if (observed->launches == 2)
+      if (observed->launches == 2) {
         EXPECT_TRUE(detectors.front().expired());
+      }
       detectors.emplace_back(state->race_state);
       EXPECT_EQ(wave.debug_read_sgpr(0), 0x12345678u);
       if (invalidations == 0) {
