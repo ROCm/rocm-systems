@@ -71,7 +71,11 @@ struct MHip : Hip {
     {
         MHIP_PASSTHROUGH(hipPointerGetAttributes);
         MHIP_PASSTHROUGH(hipMemcpy);
+        MHIP_PASSTHROUGH(hipMemcpyWithStream);
         MHIP_PASSTHROUGH(hipStreamSynchronize);
+        MHIP_PASSTHROUGH(hipStreamCreateWithPriority);
+        MHIP_PASSTHROUGH(hipDeviceGetStreamPriorityRange);
+        MHIP_PASSTHROUGH(hipStreamDestroy);
         MHIP_PASSTHROUGH(hipHostMalloc);
         MHIP_PASSTHROUGH(hipHostFree);
         MHIP_PASSTHROUGH(hipHostGetDevicePointer);
