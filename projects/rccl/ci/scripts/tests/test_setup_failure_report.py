@@ -313,9 +313,6 @@ class HarnessSetupFailureTest(ReportCapture):
                 self.assertIn("Failed step: Discover RCCL library", self.summary())
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class FakeProcess:
     """A test process that starts, prints nothing, and exits 1."""
@@ -380,6 +377,16 @@ class HarnessTestLaunchTest(ReportCapture):
                       expected=FileNotFoundError)
         self.assertIn("Failed step: Start pytest", self.summary())
 
+    def test_jax_popen_failure_is_reported(self) -> None:
+        # Fails at Popen itself, so tests_started() must sit after Popen.
+        self.patch_jax_setup()
+        with mock.patch.object(test_jax_collective.subprocess, "Popen",
+                               side_effect=FileNotFoundError("pytest")):
+            self.run_main(test_jax_collective, "RCCL JAX Collective Test",
+                          self.jax_argv(self.tmp / "results.log"),
+                          expected=FileNotFoundError)
+        self.assertIn("Failed step: Start pytest", self.summary())
+
     def patch_pytorch_setup(self) -> None:
         self.patch_all(
             test_pytorch_c10d,
@@ -418,6 +425,16 @@ class HarnessTestLaunchTest(ReportCapture):
                       expected=FileNotFoundError)
         self.assertIn("Failed step: Start pytest", self.summary())
 
+    def test_pytorch_popen_failure_is_reported(self) -> None:
+        # Fails at Popen itself, so tests_started() must sit after Popen.
+        self.patch_pytorch_setup()
+        with mock.patch.object(test_pytorch_c10d.subprocess, "Popen",
+                               side_effect=FileNotFoundError("python")):
+            self.run_main(test_pytorch_c10d, "RCCL PyTorch c10d Test",
+                          self.pytorch_argv(self.tmp / "results.log"),
+                          expected=FileNotFoundError)
+        self.assertIn("Failed step: Start pytest", self.summary())
+
     def madengine_phases(self) -> list[tuple[str, Path]]:
         return [(phase, test_madengine.prepare_phase_dir(self.tmp, phase))
                 for phase in (test_madengine.BASELINE, test_madengine.CANDIDATE)]
@@ -445,3 +462,17 @@ class HarnessTestLaunchTest(ReportCapture):
                 self.run_allocation(report)
         popen.assert_not_called()
         self.assertFalse(report.setup_done)
+
+
+    def test_madengine_salloc_launch_failure_is_setup(self) -> None:
+        report = SetupFailureReport("RCCL MADEngine")
+        with mock.patch.object(test_madengine.subprocess, "run"), \
+                mock.patch.object(test_madengine.subprocess, "Popen",
+                                  side_effect=FileNotFoundError("salloc")):
+            with self.assertRaises(FileNotFoundError):
+                self.run_allocation(report)
+        self.assertFalse(report.setup_done)
+
+
+if __name__ == "__main__":
+    unittest.main()
