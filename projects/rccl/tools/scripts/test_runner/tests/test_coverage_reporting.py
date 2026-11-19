@@ -619,6 +619,7 @@ class CoverageReportingTest(unittest.TestCase):
             result = executor.run_test(config, {})
 
         self.assertEqual(result["result"], "PASSED")
+        self.assertEqual(executor.executed_binaries, {os.path.abspath(binary)})
         return captured["env"]
 
     def test_the_host_coverage_export_cannot_be_turned_off_under_coverage(self):
