@@ -15,6 +15,9 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - **RDC keeps at most 256 jobs, running or stopped**.
   - A job with a new ID that starts when RDC already keeps 256 jobs removes the job that stopped first, and `rdc_job_get_stats()` returns `RDC_ST_NOT_FOUND` for it. If no job has stopped, a start on a group whose job fields are not watched first stops the running job, started first, whose GPU group was destroyed or runs a later job, and that job makes room (it stays stopped if the start then fails); if there is none, `rdc_job_start_stats()` returns `RDC_ST_MAX_LIMIT`. A start that fails removes no other job. Every job used to stay in memory until `rdc_job_remove()` or `rdc_job_remove_all()` removed it.
 
+- **`rdci health -c` reports a health check that did not complete instead of passing it**.
+  - A watched component whose check cannot read the GPU, for example one that the GPU does not support, gets a Warning with the new code `RDC_FR_HEALTH_CHECK_NOT_RUN`.
+
 - `rdc_job_start_stats()` returns `RDC_ST_MAX_LIMIT` for a group of more than `RDC_MAX_NUM_GPUS_PER_JOB` (16) GPUs, the most that `rdc_job_info_t` holds.
 
 - RDC stops listening for a GPU's process start and end events once no job or watch on that GPU uses them. Before, they stayed enabled after a job stopped.
@@ -31,6 +34,10 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `RDC_FI_POWER_USAGE` now reports the socket power of AMD Instinct MI300 and newer GPUs. It reported 4294967295000000 µW, so power policies on these GPUs triggered on every check.
   - Partitions that have no socket power reading of their own now report N/A instead.
+
+- `rdci health --clear` and `rdci health -s` drop the earlier health watch of a group even when its field watch cannot stop, and a failed `rdci health -s` leaves nothing behind. Before, rdcd kept their field groups, and `rdci health -s` kept the old components.
+
+- `rdci health -c` no longer reports huge numbers of PCIe replays, throttling events or retired pages after a GPU counter restarts, for example after a GPU reset.
 
 - `rdci topo` without `-i` now always reports that the GPU index is missing. It could instead skip that check and print the topology of an arbitrary GPU or an unrelated error.
 

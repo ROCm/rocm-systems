@@ -637,15 +637,16 @@ rdc_status_t RdcWatchTableImpl::rdc_health_set(rdc_gpu_group_t group_id, unsigne
     return result;
   }
 
-  // add to the health watch table
+  // add to the health watch table, replacing any entry of the group
   do {  //< lock guard for thread safe
     std::lock_guard<std::mutex> guard(watch_mutex_);
     HealthWatchTableEntry hentry{components, field_group_id, fields_in_watch};
-    health_watch_table_.insert({group_id, hentry});
+    health_watch_table_[group_id] = hentry;
   } while (0);
 
   for (auto fields = fields_in_watch.begin(); fields != fields_in_watch.end(); fields++) {
-    // get initial values. A field that cannot be read does not stop the others.
+    // get initial values. A field that cannot be read gets none; a check that needs it then
+    // reports that it did not complete.
     rdc_field_value value;
     if (metric_fetcher_->fetch_smi_field(fields->first, fields->second, &value) != RDC_ST_OK) {
       continue;
@@ -657,6 +658,10 @@ rdc_status_t RdcWatchTableImpl::rdc_health_set(rdc_gpu_group_t group_id, unsigne
 
   // Start to watch the fields and update fields per 1 second.
   result = rdc_field_watch(group_id, field_group_id, 1000000, 1, 1);
+  if (result != RDC_ST_OK) {
+    // Drop the entry, the field group and the initial values.
+    rdc_health_clear(group_id);
+  }
   return result;
 }
 
@@ -705,9 +710,18 @@ rdc_status_t RdcWatchTableImpl::get_start_end_values(rdc_gpu_group_t group_id, u
                                                      rdc_field_t field, uint64_t start_timestamp,
                                                      rdc_field_value* start_value,
                                                      rdc_field_value* end_value) {
-  if ((nullptr == start_value) && (nullptr == end_value)) return RDC_ST_BAD_PARAMETER;
+  // Every check reads the current value; start_value is for the checks that compare it with an
+  // earlier one.
+  if (nullptr == end_value) return RDC_ST_BAD_PARAMETER;
 
-  rdc_status_t result = RDC_ST_OK;
+  // get end values first, so that a field that cannot be read fails with the status of the read
+  rdc_status_t result = metric_fetcher_->fetch_smi_field(gpu_index, field, end_value);
+  if (result != RDC_ST_OK) {
+    RDC_LOG(RDC_ERROR, "Error get gpu: " << gpu_index << " field: " << field
+                                         << " current data. Return: " << result);
+    return result;
+  }
+
   if (nullptr != start_value) {
     // get the values of the field at the start_timestamp/end_timestampe
     result = cache_mgr_->rdc_health_get_values(group_id, gpu_index, field, start_timestamp, 0,
@@ -715,18 +729,23 @@ rdc_status_t RdcWatchTableImpl::get_start_end_values(rdc_gpu_group_t group_id, u
     if (result != RDC_ST_OK) {
       RDC_LOG(RDC_ERROR, "Error get gpu: " << gpu_index << " field: " << field
                                            << " history data. Return: " << result);
-      return result;
     }
   }
 
-  // get end values
-  result = metric_fetcher_->fetch_smi_field(gpu_index, field, end_value);
-  if (result != RDC_ST_OK)
-    RDC_LOG(RDC_ERROR, "Error get gpu: " << gpu_index << " field: " << field
-                                         << " current data. Return: " << result);
-
   return result;
 }
+
+namespace {
+
+// How much a counter grew from start to end. A counter that went back restarted from zero (after a
+// GPU reset, for example), so it grew by its new value.
+uint64_t counter_increase(const rdc_field_value& start, const rdc_field_value& end) {
+  const uint64_t from = static_cast<uint64_t>(start.value.l_int);
+  const uint64_t to = static_cast<uint64_t>(end.value.l_int);
+  return to >= from ? to - from : to;
+}
+
+}  // namespace
 
 rdc_status_t RdcWatchTableImpl::pcie_check(rdc_gpu_group_t group_id, uint32_t gpu_index,
                                            rdc_health_response_t* response) {
@@ -738,7 +757,7 @@ rdc_status_t RdcWatchTableImpl::pcie_check(rdc_gpu_group_t group_id, uint32_t gp
                                              start_timestamp, &start, &end);
   if (result != RDC_ST_OK) return result;
 
-  uint64_t pcie_replay_count = end.value.l_int - start.value.l_int;
+  uint64_t pcie_replay_count = counter_increase(start, end);
   if (pcie_replay_count > PCIE_MAX_REPLAYS_PERMIN) {
     rdc_health_incidents_t* incident = &response->incidents[response->incidents_count];
 
@@ -866,7 +885,7 @@ rdc_status_t RdcWatchTableImpl::memory_check(rdc_gpu_group_t group_id, uint32_t 
                                   &start, &end);
     if (result != RDC_ST_OK) return result;
 
-    retired_page = end.value.l_int - start.value.l_int;
+    retired_page = counter_increase(start, end);
     if (retired_page > 1) {
       rdc_health_incidents_t* incident = &response->incidents[response->incidents_count];
 
@@ -920,7 +939,7 @@ rdc_status_t RdcWatchTableImpl::thermal_check(rdc_gpu_group_t group_id, uint32_t
                                              start_timestamp, &start, &end);
   if (result != RDC_ST_OK) return result;
 
-  uint64_t acc_socket_thrm = end.value.l_int - start.value.l_int;
+  uint64_t acc_socket_thrm = counter_increase(start, end);
   if (0 < acc_socket_thrm) {
     rdc_health_incidents_t* incident = &response->incidents[response->incidents_count];
 
@@ -947,13 +966,13 @@ rdc_status_t RdcWatchTableImpl::power_check(rdc_gpu_group_t group_id, uint32_t g
                                              start_timestamp, &start, &end);
   if (result != RDC_ST_OK) return result;
 
-  uint64_t acc_ppt_pwr = end.value.l_int - start.value.l_int;
+  uint64_t acc_ppt_pwr = counter_increase(start, end);
   if (0 < acc_ppt_pwr) {
     rdc_health_incidents_t* incident = &response->incidents[response->incidents_count];
 
     std::string err_msg = "Detected ";
     err_msg += std::to_string(acc_ppt_pwr);
-    err_msg += " Detected clock throttling due to power violation in the last minute.";
+    err_msg += " clock throttling due to power violation in the last minute.";
 
     // add incident
     if (add_health_incident(gpu_index, RDC_HEALTH_WATCH_POWER, RDC_HEALTH_RESULT_WARN,
@@ -996,41 +1015,73 @@ rdc_status_t RdcWatchTableImpl::rdc_health_check(rdc_gpu_group_t group_id,
   response->overall_health = RDC_HEALTH_RESULT_PASS;
   response->incidents_count = 0;
 
+  // A check that did not complete adds a warning instead of passing. Returns true when the
+  // incidents are full.
+  auto not_complete = [this, response](uint32_t gpu_index, rdc_health_system_t component,
+                                       const char* name, rdc_status_t status) {
+    std::string err_msg = "The ";
+    err_msg += name;
+    err_msg += " health check did not complete (status ";
+    err_msg += std::to_string(status);
+    err_msg += ").";
+    return add_health_incident(gpu_index, component, RDC_HEALTH_RESULT_WARN,
+                               RDC_FR_HEALTH_CHECK_NOT_RUN, err_msg,
+                               &response->incidents[response->incidents_count], response);
+  };
+
   for (uint32_t gindex = 0; gindex < ginfo.count; gindex++) {
     // PCIe
     if (components & RDC_HEALTH_WATCH_PCIE) {
       result = pcie_check(group_id, ginfo.entity_ids[gindex], response);
       if (result == RDC_ST_MAX_LIMIT) return result;
+      if (result != RDC_ST_OK &&
+          not_complete(ginfo.entity_ids[gindex], RDC_HEALTH_WATCH_PCIE, "PCIe", result))
+        return RDC_ST_MAX_LIMIT;
     }
 
     // XGMI
     if (components & RDC_HEALTH_WATCH_XGMI) {
       result = xgmi_check(group_id, ginfo.entity_ids[gindex], response);
       if (result == RDC_ST_MAX_LIMIT) return result;
+      if (result != RDC_ST_OK &&
+          not_complete(ginfo.entity_ids[gindex], RDC_HEALTH_WATCH_XGMI, "XGMI", result))
+        return RDC_ST_MAX_LIMIT;
     }
 
     // Memory
     if (components & RDC_HEALTH_WATCH_MEM) {
       result = memory_check(group_id, ginfo.entity_ids[gindex], response);
       if (result == RDC_ST_MAX_LIMIT) return result;
+      if (result != RDC_ST_OK &&
+          not_complete(ginfo.entity_ids[gindex], RDC_HEALTH_WATCH_MEM, "memory", result))
+        return RDC_ST_MAX_LIMIT;
     }
 
     // EEPROM
     if (components & RDC_HEALTH_WATCH_EEPROM) {
       result = eeprom_check(group_id, ginfo.entity_ids[gindex], response);
       if (result == RDC_ST_MAX_LIMIT) return result;
+      if (result != RDC_ST_OK &&
+          not_complete(ginfo.entity_ids[gindex], RDC_HEALTH_WATCH_EEPROM, "EEPROM", result))
+        return RDC_ST_MAX_LIMIT;
     }
 
     // Thermal
     if (components & RDC_HEALTH_WATCH_THERMAL) {
       result = thermal_check(group_id, ginfo.entity_ids[gindex], response);
       if (result == RDC_ST_MAX_LIMIT) return result;
+      if (result != RDC_ST_OK &&
+          not_complete(ginfo.entity_ids[gindex], RDC_HEALTH_WATCH_THERMAL, "thermal", result))
+        return RDC_ST_MAX_LIMIT;
     }
 
     // Power
     if (components & RDC_HEALTH_WATCH_POWER) {
       result = power_check(group_id, ginfo.entity_ids[gindex], response);
       if (result == RDC_ST_MAX_LIMIT) return result;
+      if (result != RDC_ST_OK &&
+          not_complete(ginfo.entity_ids[gindex], RDC_HEALTH_WATCH_POWER, "power", result))
+        return RDC_ST_MAX_LIMIT;
     }
   }  // end of for gindex
 
@@ -1047,25 +1098,19 @@ rdc_status_t RdcWatchTableImpl::rdc_health_clear(rdc_gpu_group_t group_id) {
       return RDC_ST_NOT_FOUND;
     }
     field_group_id = health->second.field_group_id;
+    health_watch_table_.erase(health);
   } while (0);
 
-  // at first, unwatch the old fields.
+  // Unwatch the old fields. If that fails (for example, the group was destroyed), the field group
+  // and the cached values go anyway: nothing else uses them.
   rdc_status_t result = rdc_field_unwatch(group_id, field_group_id);
-  if (result != RDC_ST_OK) {
-    return result;
-  }
 
   // destroy the old field group
   group_settings_->rdc_group_field_destroy(field_group_id);
 
-  do {  //< lock guard for thread safe
-    std::lock_guard<std::mutex> guard(watch_mutex_);
-    health_watch_table_.erase(group_id);
-  } while (0);
+  cache_mgr_->rdc_health_clear(group_id);
 
-  result = cache_mgr_->rdc_health_clear(group_id);
-
-  return RDC_ST_OK;
+  return result;
 }
 
 bool RdcWatchTableImpl::is_job_watch_field(uint32_t gpu_index, rdc_field_t field_id,
