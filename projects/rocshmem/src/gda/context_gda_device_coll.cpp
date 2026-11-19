@@ -724,10 +724,16 @@ __device__ void GDAContext::fcollectmem_wg(rocshmem_team_t team, void *dst,
   GDATeam *team_obj_dispatch = reinterpret_cast<GDATeam *>(team);
   // Size the fast path needs: 2 double-buffered slots per PE.
   size_t fcollect_pSync_slots_needed = 2 * team_obj_dispatch->num_pes;
+#if defined(ROCSHMEM_GDA_FCOLLECT_ATOMIC)
+  // the small-message fast path signals with RDMA atomic adds, which not every NIC (MetaRoCE AINIC) supports
   if (nelems < 512 && fcollect_pSync_slots_needed <= ROCSHMEM_ALLTOALL_SYNC_SIZE)
     fcollectmem_linear_thread_puts_wg(team, dst, src, nelems);
   else
     fcollectmem_linear_wg(team, dst, src, nelems);
+#else
+  (void)fcollect_pSync_slots_needed;
+  fcollectmem_linear_wg(team, dst, src, nelems);
+#endif
 }
 
 __device__ void GDAContext::fcollectmem_linear_wg(rocshmem_team_t team, void *dst,
@@ -756,7 +762,7 @@ __device__ void GDAContext::fcollectmem_linear_wg(rocshmem_team_t team, void *ds
     }
   }
   // wait until everyone has obtained their designated data
-  internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, pSync, wf_info);
+  internal_sync_wg_put_only(constmem.my_pe, pe_start, stride, pe_size, pSync, wf_info);
 }
 
 __device__ int GDAContext::fcollectmem_wave(rocshmem_team_t team, void *dst,
@@ -767,10 +773,16 @@ __device__ int GDAContext::fcollectmem_wave(rocshmem_team_t team, void *dst,
   GDATeam *team_obj_dispatch = reinterpret_cast<GDATeam *>(team);
   // Size the fast path needs: 2 double-buffered slots per PE.
   size_t fcollect_pSync_slots_needed = 2 * team_obj_dispatch->num_pes;
+#if defined(ROCSHMEM_GDA_FCOLLECT_ATOMIC)
+  // the small-message fast path signals with RDMA atomic adds, which not every NIC (MetaRoCE AINIC) supports
   if (nelems < 512 && fcollect_pSync_slots_needed <= ROCSHMEM_ALLTOALL_SYNC_SIZE)
     fcollectmem_linear_thread_puts_wave(team, dst, src, nelems);
   else
     fcollectmem_linear_wave(team, dst, src, nelems);
+#else
+  (void)fcollect_pSync_slots_needed;
+  fcollectmem_linear_wave(team, dst, src, nelems);
+#endif
 
   return ROCSHMEM_SUCCESS;
 }
@@ -801,7 +813,7 @@ __device__ void GDAContext::fcollectmem_linear_wave(rocshmem_team_t team, void *
     }
   }
   // wait until everyone has obtained their designated data
-  internal_sync_wave(constmem.my_pe, pe_start, stride, pe_size, pSync, wf_info);
+  internal_sync_wave_put_only(constmem.my_pe, pe_start, stride, pe_size, pSync, wf_info);
 }
 
 
