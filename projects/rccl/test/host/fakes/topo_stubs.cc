@@ -19,6 +19,7 @@
 #include "fakes/fail_loud.h"
 #include "fakes/signature-drift.h"
 #include "graph.h"  // PATH_DIS
+#include "graph/topo.h"
 #include "nccl.h"
 #include "os.h"   // ncclAffinity
 #include "plugin/nccl_tuner.h"  // NCCL_NUM_ALGORITHMS, the width of initTransportsRank's graphs[]
@@ -102,6 +103,15 @@ std::function<ncclResult_t(struct ncclComm*, int*, int*)> g_ncclTopoGetLocalGinD
 ASSERT_HOOK_MATCHES_PROD(g_ncclTopoGetLocalGinDevs, ncclTopoGetLocalGinDevs);
 ncclResult_t ncclTopoGetLocalGinDevs(struct ncclComm* comm, int* localGinDevs, int* localGinCount) {
   return g_ncclTopoGetLocalGinDevs(comm, localGinDevs, localGinCount);
+}
+
+static ncclResult_t DefaultTopoGetNvsCount(struct ncclTopoSystem*, int*) {
+  FailLoudUnfaked("topo_stubs", "ncclTopoGetNvsCount");
+}
+std::function<ncclResult_t(struct ncclTopoSystem*, int*)> g_ncclTopoGetNvsCount = DefaultTopoGetNvsCount;
+ASSERT_HOOK_MATCHES_PROD(g_ncclTopoGetNvsCount, ncclTopoGetNvsCount);
+ncclResult_t ncclTopoGetNvsCount(struct ncclTopoSystem* system, int* count) {
+  return g_ncclTopoGetNvsCount(system, count);
 }
 
 static ncclResult_t DefaultTopoGetNetDev(struct ncclComm*, int, struct ncclTopoGraph*, int, int, int64_t*, int*,
@@ -223,7 +233,17 @@ ncclResult_t ncclTreeBasePostset(struct ncclComm* comm, struct ncclTopoGraph* tr
   return g_ncclTreeBasePostsetResult;
 }
 
+static ncclResult_t DefaultTopoGetNetPropertiesSnapshot(
+    struct ncclComm*, bool, struct ncclTopoNetPropertiesSnapshot**, int*) {
+  FailLoudUnfaked("topo_stubs", "ncclTopoGetNetPropertiesSnapshot");
+}
+
+std::function<ncclResult_t(struct ncclComm*, bool, struct ncclTopoNetPropertiesSnapshot**, int*)>
+    g_ncclTopoGetNetPropertiesSnapshot = DefaultTopoGetNetPropertiesSnapshot;
+ASSERT_HOOK_MATCHES_PROD(g_ncclTopoGetNetPropertiesSnapshot, ncclTopoGetNetPropertiesSnapshot);
+
 void ResetTopoStubs() {
+  g_ncclTopoGetNetPropertiesSnapshot = DefaultTopoGetNetPropertiesSnapshot;
   g_ncclTopoGetSystem = [](struct ncclComm*, struct ncclTopoSystem**, const char*) { return ncclRemoteError; };
   g_ncclGetUserP2pLevel = [](int* level) { *level = 3; return ncclSuccess; };
   g_ncclTopoComputePathsCalls = 0;
@@ -241,6 +261,7 @@ void ResetTopoStubs() {
   };
   g_ncclTopoGetLocalNet = DefaultTopoGetLocalNet;
   g_ncclTopoGetLocalGinDevs = DefaultTopoGetLocalGinDevs;
+  g_ncclTopoGetNvsCount = DefaultTopoGetNvsCount;
   g_ncclTopoPathAllNVLink = [](struct ncclTopoSystem*, int* allNvLink) { *allNvLink = 0; return ncclSuccess; };
   g_ncclTopoPreset = [](struct ncclComm*, struct ncclTopoRanks*) { return ncclSuccess; };
   g_rcclCheckRomeTopoModelIdxConsensusResult = ncclSuccess;

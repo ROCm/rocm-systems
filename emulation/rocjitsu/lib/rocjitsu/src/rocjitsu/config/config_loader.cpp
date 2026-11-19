@@ -680,10 +680,10 @@ const FactoryMap &factories(BuildMode build_mode) {
       soc->set_exec_mode(mode);
       return std::unique_ptr<simdojo::Component>(std::move(soc));
     };
-    f["xcd"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode, rj_code_arch_t,
+    f["xcd"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode mode, rj_code_arch_t,
                   rj_code_target_id_t, amdgpu::GpuMemory *, const AsyncResources &, uint32_t,
                   util::DiagnosticEmitter) -> ComponentResult {
-      return std::unique_ptr<simdojo::Component>(std::make_unique<amdgpu::Xcd>(n));
+      return std::unique_ptr<simdojo::Component>(std::make_unique<amdgpu::Xcd>(n, mode));
     };
     f["shader_engine"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode, rj_code_arch_t,
                             rj_code_target_id_t, amdgpu::GpuMemory *, const AsyncResources &,

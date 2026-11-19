@@ -46,10 +46,9 @@ fn notify(key: usize, status: Status) {
             .map(|callback| (callback, queue.callback_data))
     };
     if let Some((callback, data)) = pending {
-        let _scope = CallbackScope::enter();
         // SAFETY: Queue destruction removes the registry entry, then joins
         // this worker before the descriptor or caller callback data may expire.
-        unsafe { callback(status, key as *mut HsaQueue, data.as_ptr()) };
+        CallbackScope::run(|| unsafe { callback(status, key as *mut HsaQueue, data.as_ptr()) });
     }
 }
 
@@ -78,42 +77,49 @@ fn worker_with(
     let mut retry_delay = Duration::from_millis(1);
     let mut driver_failures = 0u8;
     while !stop.load(Ordering::Acquire) && alive.load(Ordering::Acquire) {
-        let Some(_lease) = crate::runtime::enter_runtime_service() else {
+        let Some(token) = crate::admission::enter_runtime_service() else {
             pause(Duration::from_millis(1));
             continue;
         };
-        let status = match wait(Duration::from_millis(1)) {
-            Ok(event) => {
-                retry_delay = Duration::from_millis(1);
-                driver_failures = 0;
-                event.and_then(|event| event_status(event, endpoint))
-            }
-            Err(error) if error.kind() == rocddi::ErrorKind::Busy => {
-                driver_failures = 0;
-                pause(retry_delay);
-                retry_delay = (retry_delay * 2).min(Duration::from_millis(20));
-                None
-            }
-            Err(error) if error.kind() == rocddi::ErrorKind::Driver && driver_failures < 16 => {
-                driver_failures += 1;
-                pause(retry_delay);
-                retry_delay = (retry_delay * 2).min(Duration::from_millis(20));
-                None
-            }
-            Err(error) => {
-                if !stop.load(Ordering::Acquire) && alive.load(Ordering::Acquire) {
-                    notify(map_error(error));
+        if crate::admission::ApiLeaseScope::run(token, || {
+            let status = match wait(Duration::from_millis(1)) {
+                Ok(event) => {
+                    retry_delay = Duration::from_millis(1);
+                    driver_failures = 0;
+                    event.and_then(|event| event_status(event, endpoint))
                 }
-                return;
+                Err(error) if error.kind() == rocddi::ErrorKind::Busy => {
+                    driver_failures = 0;
+                    pause(retry_delay);
+                    retry_delay = (retry_delay * 2).min(Duration::from_millis(20));
+                    None
+                }
+                Err(error) if error.kind() == rocddi::ErrorKind::Driver && driver_failures < 16 => {
+                    driver_failures += 1;
+                    pause(retry_delay);
+                    retry_delay = (retry_delay * 2).min(Duration::from_millis(20));
+                    None
+                }
+                Err(error) => {
+                    if !stop.load(Ordering::Acquire) && alive.load(Ordering::Acquire) {
+                        notify(map_error(error));
+                    }
+                    return std::ops::ControlFlow::Break(());
+                }
+            };
+            if let Some(status) = status {
+                if stop.load(Ordering::Acquire) || !alive.load(Ordering::Acquire) {
+                    return std::ops::ControlFlow::Break(());
+                }
+                // A device failure terminates this queue's event stream. Deliver
+                // it once even when multiple native fault records are retained.
+                notify(status);
+                return std::ops::ControlFlow::Break(());
             }
-        };
-        if let Some(status) = status {
-            if stop.load(Ordering::Acquire) || !alive.load(Ordering::Acquire) {
-                return;
-            }
-            // A device failure terminates this queue's event stream. Deliver
-            // it once even when multiple native fault records are retained.
-            notify(status);
+            std::ops::ControlFlow::Continue(())
+        })
+        .is_break()
+        {
             return;
         }
     }
