@@ -6,9 +6,10 @@
 use std::ffi::{c_char, c_void};
 
 use crate::ffi::*;
+use crate::lifecycle::{initialized_mut, lock};
 use crate::loader::executable::state::*;
 use crate::loader::*;
-use crate::runtime::{boundary, initialized_mut, lock};
+use crate::status::boundary;
 use rocloader::CodeObject as LoaderCodeObject;
 
 #[cfg_attr(
@@ -48,7 +49,7 @@ pub unsafe extern "C" fn hsa_executable_create(
         };
         runtime.loader.executables.insert(
             handle,
-            Executable {
+            ExecutableRecord {
                 profile,
                 default_rounding: DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT,
                 debugger: crate::debugger::ExecutableDebugInfo::default(),
@@ -103,7 +104,7 @@ pub unsafe extern "C" fn hsa_executable_create_alt(
         };
         runtime.loader.executables.insert(
             handle,
-            Executable {
+            ExecutableRecord {
                 profile,
                 default_rounding: rounding,
                 debugger: crate::debugger::ExecutableDebugInfo::default(),
@@ -269,76 +270,7 @@ pub unsafe extern "C" fn hsa_executable_freeze(
     executable: HsaExecutable,
     _options: *const c_char,
 ) -> Status {
-    boundary(|| {
-        let mut guard = match lock() {
-            Ok(guard) => guard,
-            Err(status) => return status,
-        };
-        let runtime = match initialized_mut(&mut guard) {
-            Ok(runtime) => runtime,
-            Err(status) => return status,
-        };
-        let Some(record) = runtime.loader.executables.get_mut(&executable.handle) else {
-            return INVALID_EXECUTABLE;
-        };
-        if record.core.is_frozen() {
-            return FROZEN_EXECUTABLE;
-        }
-        if !record.core.can_release() {
-            return ERROR;
-        }
-        let Some(inflight) = runtime.inflight.enter() else {
-            return OUT_OF_RESOURCES;
-        };
-        if let Err(status) = record.debugger.prepare(&record.core) {
-            return status;
-        }
-        let publications = match record.core.begin_freeze() {
-            Ok(work) => work,
-            Err(error) => return map_loader_error(error),
-        };
-        let stop = runtime.operation_stop();
-        let health = runtime.health.clone();
-        drop(guard);
-        // The executable remains registered and rejects mutation/destruction
-        // while native copies execute without holding the HSA lifecycle lock.
-        let mut status = SUCCESS;
-        for publication in &publications {
-            if let Err(error) = publication.publish(&stop) {
-                status = map_loader_error(error);
-                break;
-            }
-        }
-        if publications
-            .iter()
-            .any(|publication| !publication.can_release())
-        {
-            health.quarantine();
-        }
-        let mut guard = match lock() {
-            Ok(guard) => guard,
-            Err(status) => {
-                health.quarantine();
-                return status;
-            }
-        };
-        let Some(record) = guard
-            .as_mut()
-            .and_then(|runtime| runtime.loader.executables.get_mut(&executable.handle))
-        else {
-            health.quarantine();
-            return INVALID_RUNTIME_STATE;
-        };
-        if let Err(error) = record.core.finish_freeze() {
-            if status == SUCCESS {
-                status = map_loader_error(error);
-            }
-        } else if status == SUCCESS {
-            record.debugger.publish();
-        }
-        drop(inflight);
-        status
-    })
+    boundary(|| freeze_executable(executable).map_or_else(|status| status, |()| SUCCESS))
 }
 
 #[cfg_attr(
@@ -348,33 +280,7 @@ pub unsafe extern "C" fn hsa_executable_freeze(
 #[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Releases an executable and its loaded code-object owners.
 pub unsafe extern "C" fn hsa_executable_destroy(executable: HsaExecutable) -> Status {
-    boundary(|| {
-        let _mutation = match EXECUTABLE_TRAVERSAL.write() {
-            Ok(guard) => guard,
-            Err(()) => return ERROR,
-        };
-        let mut guard = match lock() {
-            Ok(guard) => guard,
-            Err(status) => return status,
-        };
-        let runtime = match initialized_mut(&mut guard) {
-            Ok(runtime) => runtime,
-            Err(status) => return status,
-        };
-        let Some(record) = runtime.loader.executables.get(&executable.handle) else {
-            return INVALID_EXECUTABLE;
-        };
-        if !record.core.can_release() {
-            return ERROR;
-        }
-        let Some(executable) = runtime.loader.executables.remove(&executable.handle) else {
-            return INVALID_EXECUTABLE;
-        };
-        for &handle in executable.core.symbol_ids() {
-            runtime.loader.symbols.remove(&handle);
-        }
-        SUCCESS
-    })
+    boundary(|| destroy_executable(executable).map_or_else(|status| status, |()| SUCCESS))
 }
 
 #[cfg_attr(
@@ -409,10 +315,10 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_executable_load_agent_code_object_at
         if let Err(error) = record.core.can_load(false) {
             return map_loader_error(error);
         }
-        let Some(index) = runtime.gpu_index(agent) else {
+        let Some(index) = runtime.agents.gpu_index(agent) else {
             return INVALID_AGENT;
         };
-        if runtime.gpus[index].endpoint.local_memory_bytes == 0 {
+        if runtime.agents.gpus[index].endpoint.local_memory_bytes == 0 {
             return INVALID_AGENT;
         }
         let Some((bytes, storage)) = runtime

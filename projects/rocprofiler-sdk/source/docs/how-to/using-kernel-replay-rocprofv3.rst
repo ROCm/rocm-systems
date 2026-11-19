@@ -168,11 +168,16 @@ columns and continues to report the sum across hardware instances.
 What is snapshotted
 ===================
 
-Snapshot and restore are implemented in the SDK. Between passes, kernel replay restores
-coarse-grained device VRAM and module-scope ``__device__`` / ``__constant__`` variables. Unified,
-managed, ``hipMallocAsync``, host, fine-grained, kernarg, and executable allocations are not
-restored. Capture is a full in-memory copy; cost is ``O(tracked_bytes × passes)``. See
-:ref:`kernel-replay-memory-snapshot` and :ref:`using-kernel-replay`.
+Between passes, kernel replay restores tracked coarse-grained device VRAM and module-scope
+``__device__`` / ``__constant__`` variables exposed as HSA variable symbols. Internal or static
+state not exposed as symbols is not restored. Detected unsupported argument memory, failed
+snapshot capture, or failed required memory checks cause the dispatch to run once without replay.
+Capture is a full in-memory copy; cost is ``O(tracked_bytes × passes)``.
+
+The guard is best effort: it checks metadata-described pointers, ``by_value`` arguments of at
+least 16 bytes, and printf/hostcall/heap pointers. Other hidden arguments, smaller aggregates,
+pointer fields off the eight-byte scan stride, and indirect pointers can be missed.
+See :ref:`kernel-replay-memory-snapshot` and :ref:`using-kernel-replay`.
 
 The last executed pass is **not** restored, so the application sees the memory the kernel actually
 produced.
@@ -203,8 +208,8 @@ Limitations (CLI)
   local-context API (see :ref:`using-kernel-replay`) -- so this is a CLI limitation, not a hardware
   or SDK one. Kernel dispatch tracing (``--kernel-trace``) still records every pass.
 * **A dispatch that is not replayed is counted and not thread-traced.** HIP graph launches,
-  multi-packet submissions, and a dispatch whose snapshot is declined run once, with no per-pass
-  callback. Counter collection and thread trace share one user-data slot, so tracing that dispatch
+  multi-packet submissions, a declined snapshot, and detected unsupported argument memory run
+  once, with no per-pass callback. Counter collection and thread trace share one user-data slot, so tracing that dispatch
   would replace the counter record's thread id and pass. When the agent has counter groups, the
   trace is skipped and the counters are kept.
 * **HIP graph launches are not replayed.** A graph seen while replay is active warns once and

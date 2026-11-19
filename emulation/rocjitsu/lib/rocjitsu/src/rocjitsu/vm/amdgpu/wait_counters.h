@@ -4,7 +4,7 @@
 #ifndef ROCJITSU_VM_AMDGPU_WAIT_COUNTERS_H_
 #define ROCJITSU_VM_AMDGPU_WAIT_COUNTERS_H_
 
-#include "rocjitsu/isa/arch/amdgpu/shared/wait_counter.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 
 #include <algorithm>
 #include <cassert>
@@ -167,6 +167,20 @@ struct WaitTarget {
   uint8_t asynccnt = WaitCounters::ASYNCCNT_MAX;
   uint8_t samplecnt = WaitCounters::SAMPLECNT_MAX;
   uint8_t bvhcnt = WaitCounters::BVHCNT_MAX;
+
+  /// Architectural limits installed by a GFX10 SOPK wait after reading SDST.
+  [[nodiscard]] WaitFields gfx10_wait_fields() const {
+    WaitFields fields{};
+    if (vmcnt < WaitCounters::VMCNT_MAX)
+      fields[static_cast<size_t>(WaitCounterKind::Load)] = vmcnt;
+    if (vscnt < WaitCounters::VSCNT_MAX)
+      fields[static_cast<size_t>(WaitCounterKind::Store)] = vscnt;
+    if (lgkmcnt < WaitCounters::LGKMCNT_MAX)
+      fields[static_cast<size_t>(WaitCounterKind::Ds)] = lgkmcnt;
+    if (expcnt < WaitCounters::EXPCNT_MAX)
+      fields[static_cast<size_t>(WaitCounterKind::Exp)] = expcnt;
+    return fields;
+  }
 
   /// @brief Check whether the given counters satisfy all thresholds.
   bool satisfied(const WaitCounters &c) const {

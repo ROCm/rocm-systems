@@ -8,7 +8,7 @@
 Verifies that the script that embeds tuner/*.csv into a C++ header behaves
 correctly in isolation (no GPU, no built library, no CMake). The C++ side of
 the pipeline -- that the embedded bytes are read back correctly by csv_tuner.cc
-and applied to the cost table -- is covered by test/host/csv-tuner-test.cc.
+and applied to the cost table -- is covered by test/host/plugin/tuner/csv-tuner-test.cc.
 
 Two test categories:
 

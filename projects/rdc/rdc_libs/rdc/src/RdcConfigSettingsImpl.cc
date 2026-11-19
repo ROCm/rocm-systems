@@ -36,6 +36,18 @@ namespace rdc {
 RdcConfigSettingsImpl::RdcConfigSettingsImpl(const RdcGroupSettingsPtr& group_settings)
     : group_settings_(group_settings), is_running_(false) {}
 
+// Settings that were never cleared leave the monitoring thread running.
+RdcConfigSettingsImpl::~RdcConfigSettingsImpl() {
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    is_running_ = false;
+  }
+  cv_.notify_all();
+  if (monitor_thread_.joinable()) {
+    monitor_thread_.join();
+  }
+}
+
 // Monitoring thread of gpu settings
 void RdcConfigSettingsImpl::monitorSettings() {
   rdc_gpu_group_t group_id;

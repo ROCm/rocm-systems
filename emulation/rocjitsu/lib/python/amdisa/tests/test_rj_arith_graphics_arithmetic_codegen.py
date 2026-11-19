@@ -60,13 +60,16 @@ def test_mullit_loose_policy_and_modifiers(arch):
     )
 
 
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna3_5', 'rdna4'])
 @pytest.mark.parametrize('name', sorted(INTERP_NAMES))
 def test_interp_operand_controls_and_policy(arch, name):
     body = gen_interp(
         context(arch, name, ['d'], ['a', 'b', 'c'], enc_name='ENC_VINTERP')
     )
-    assert 'rj_arith_' + name.lower() + '_w64' in body
+    if arch == 'rdna3_5':
+        assert 'amdgpu::arith::gfx115_interp<' in body and ', uint64_t>' in body
+    else:
+        assert 'rj_arith_' + name.lower() + '_w64' in body
     assert 'arithmetic_flags()' in body
     assert 'reports_state' not in body
     assert 'wait_exp' not in body

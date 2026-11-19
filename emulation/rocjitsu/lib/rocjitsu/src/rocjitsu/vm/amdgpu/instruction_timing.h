@@ -23,16 +23,16 @@ namespace rocjitsu::amdgpu {
 /// register hazards and the wait-counter increments. The CU decodes the
 /// instruction again when it executes, so this copy is never executed.
 struct InstructionTiming {
-  /// The decoded instruction. Null only in a record built by hand, which has
-  /// no flags: every accessor below requires it.
-  std::unique_ptr<const Instruction> inst;
-  /// Byte address the instruction was fetched from.
-  uint64_t pc = 0;
   /// Registers whose pending writes this instruction must wait for: its
   /// reads (RAW) and its writes (WAW).
   RegisterSet hazards;
   /// Registers this instruction writes.
   RegisterSet writes;
+  /// The decoded instruction. Null only in a record built by hand, which has
+  /// no flags: every accessor below requires it.
+  std::unique_ptr<const Instruction> inst;
+  /// Byte address the instruction was fetched from.
+  uint64_t pc = 0;
   /// Every wait-counter increment the instruction can make at issue, one entry
   /// per increment: the counter capacity to reserve before it issues. For FLAT
   /// this is an upper bound covering every memory domain the decoder allows;

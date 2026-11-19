@@ -476,7 +476,7 @@ amdsmi_status_t WSLGPUBackend::GetClockInfo(amdsmi_clk_type_t clk_type, amdsmi_c
   if (hstatus != HSAKMT_STATUS_SUCCESS) return hsakmt_to_amdsmi(hstatus);
   // Feature support checked before nullptr so NOT_SUPPORTED takes priority over INVAL.
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
-  std::memset(info, 0, sizeof(*info));
+  std::memset(info, 0xFF, sizeof(*info));
   info->clk = rocdxg_info.clk;
   info->min_clk = rocdxg_info.min_clk;
   info->max_clk = rocdxg_info.max_clk;
