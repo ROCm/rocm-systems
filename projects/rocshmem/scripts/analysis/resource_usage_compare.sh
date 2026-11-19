@@ -52,6 +52,13 @@
 #                         same way a --build-config script is (same cwd,
 #                         same appended -D... args) -- see "Portability"
 #                         below.
+#   --commit1-extra-args ARGS  Extra args appended to the build-config
+#                         invocation for commit1 only (e.g. "-DUSE_TDM=1").
+#                         Quote it as one string; it is word-split as-is.
+#                         Folded into the build/cache key, so this commit's
+#                         plain build and its extra-args build are cached
+#                         separately.
+#   --commit2-extra-args ARGS  Same as --commit1-extra-args, for commit2 only.
 #   --skip-build          Reuse cached builds when available (default
 #                         behavior; flag accepted as a no-op for
 #                         explicitness).
@@ -106,6 +113,8 @@ COMMIT_2=""
 GPU_TARGET="gfx950"
 BUILD_CONFIG="all_backends"
 CONFIG_PATH=""
+COMMIT1_EXTRA_ARGS=""
+COMMIT2_EXTRA_ARGS=""
 PR_NUM=""
 BASE_BRANCH="origin/develop"
 SKIP_BUILD=true
@@ -131,6 +140,8 @@ while [[ $# -gt 0 ]]; do
     --gpu-target)    _need_arg "$1" "$#"; GPU_TARGET="$2";    shift 2 ;;
     --build-config)  _need_arg "$1" "$#"; BUILD_CONFIG="$2";  shift 2 ;;
     --config-path)   _need_arg "$1" "$#"; CONFIG_PATH="$2";   shift 2 ;;
+    --commit1-extra-args) _need_arg "$1" "$#"; COMMIT1_EXTRA_ARGS="$2"; shift 2 ;;
+    --commit2-extra-args) _need_arg "$1" "$#"; COMMIT2_EXTRA_ARGS="$2"; shift 2 ;;
     --skip-build)    SKIP_BUILD=true;    shift ;;
     --force-rebuild) FORCE_REBUILD=true; shift ;;
     --match)         _need_arg "$1" "$#"; MATCH="$2";         shift 2 ;;
@@ -178,6 +189,16 @@ _cleanup_worktree() {
   fi
 }
 trap _cleanup_worktree EXIT
+
+# _cache_key_suffix ARGS -> short filesystem-safe tag derived from extra build
+# args, so "same sha, different -D flags" don't collide in build-cache/
+# resource-usage cache dirs. Empty input -> empty output (no change to
+# existing cache keys).
+_cache_key_suffix() {
+  local args="$1"
+  [[ -z "$args" ]] && return
+  echo "-$(echo -n "$args" | tr -c 'A-Za-z0-9' '_' | sed 's/_\+/_/g; s/^_//; s/_$//')"
+}
 
 # Only used for --build-config (name search); --config-path bypasses this
 # entirely. The second candidate is a legacy fallback for rocSHMEM's own
@@ -297,22 +318,25 @@ measure_device_bitcode() {
     --out "$out_csv" --top 0 >&2
 }
 
-# measure_commit <commit> -> prints the path to that commit's cached CSV
+# measure_commit <commit> <sha> <extra_build_args> -> prints the path to that
+# commit's cached CSV
 measure_commit() {
   local commit="$1"
   local sha="$2"
-  local build_dir="$PARENT_DIR/build-cache/${GPU_TARGET}-${CONFIG_LABEL}-${sha}"
-  local cache_dir="$PARENT_DIR/resource-usage/cache/${GPU_TARGET}-${CONFIG_LABEL}-${sha}"
-  local csv="$cache_dir/res-${sha}.csv"
+  local extra_args="$3"
+  local key="${sha}$(_cache_key_suffix "$extra_args")"
+  local build_dir="$PARENT_DIR/build-cache/${GPU_TARGET}-${CONFIG_LABEL}-${key}"
+  local cache_dir="$PARENT_DIR/resource-usage/cache/${GPU_TARGET}-${CONFIG_LABEL}-${key}"
+  local csv="$cache_dir/res-${key}.csv"
 
   if [[ -f "$csv" && "$FORCE_REBUILD" == false ]]; then
-    echo "  [$sha] cached -> $csv" >&2
+    echo "  [$key] cached -> $csv" >&2
     echo "$csv"
     return
   fi
 
-  echo "  [$sha] building ($GPU_TARGET / $CONFIG_LABEL)..." >&2
-  local worktree="/tmp/resource-usage-worktree-${sha}-$$"
+  echo "  [$key] building ($GPU_TARGET / $CONFIG_LABEL${extra_args:+ / $extra_args})..." >&2
+  local worktree="/tmp/resource-usage-worktree-${key}-$$"
 
   git -C "$PROJECT_DIR" worktree add "$worktree" "$commit" --detach >&2
   CURRENT_WORKTREE="$worktree"
@@ -328,17 +352,21 @@ measure_commit() {
   # resource_usage_to_csv.py merges into any pre-existing --out file; without
   # this, a stale CSV from a prior run of this same commit would silently mix
   # with this fresh build's rows instead of being replaced.
-  rm -f "$csv" "$cache_dir/res-${sha}-bitcode.csv"
+  rm -f "$csv" "$cache_dir/res-${key}-bitcode.csv"
   (
     cd "$build_dir"
     # Caller captures this function's stdout as the CSV path -- the build
     # log must go to stderr only, or it corrupts (and bloats) that capture.
     # build.log/resource_usage_summary.log live under cache_dir so they
     # survive a `rm -rf build-cache/`.
+    # $extra_args is intentionally unquoted/word-split here so the caller can
+    # pass e.g. "-DUSE_TDM=1 -DUSE_SDMA=1" as one string and have it expand
+    # into separate cmake args.
+    # shellcheck disable=SC2086
     "$FOUND_BUILD_CONFIG" \
       --fresh \
       -DGPU_TARGETS="$GPU_TARGET" \
-      -DCMAKE_CXX_FLAGS="-Rpass-analysis=kernel-resource-usage" 2>&1 |
+      -DCMAKE_CXX_FLAGS="-Rpass-analysis=kernel-resource-usage" $extra_args 2>&1 |
       tee "$cache_dir/build.log" >&2
     # Under -j>1, multiple TUs write remarks to the log concurrently, so
     # blocks can interleave line-by-line. resource_usage_to_csv.py's parser
@@ -355,7 +383,7 @@ measure_commit() {
   # report to stderr.
   python3 "$TOOLS_DIR/resource_usage_to_csv.py" \
     --log "$cache_dir/resource_usage_summary.log" \
-    --arch "$GPU_TARGET" --build-config "$CONFIG_LABEL" --commit "$sha" \
+    --arch "$GPU_TARGET" --build-config "$CONFIG_LABEL" --commit "$key" \
     --out "$csv" >&2
 
   # rocshmem_device_bitcode is declared ALL, so the build above already
@@ -363,11 +391,11 @@ measure_commit() {
   # the production library's cost-gated-LTO numbers. rocSHMEM-specific:
   # silently skipped (note below) for any other project's build.
   local bc_file="$build_dir/librocshmem_device_${GPU_TARGET}.bc"
-  local bitcode_csv="$cache_dir/res-${sha}-bitcode.csv"
+  local bitcode_csv="$cache_dir/res-${key}-bitcode.csv"
   if [[ -f "$bc_file" ]]; then
-    measure_device_bitcode "$bc_file" "$GPU_TARGET" "$CONFIG_LABEL" "$sha" "$bitcode_csv"
+    measure_device_bitcode "$bc_file" "$GPU_TARGET" "$CONFIG_LABEL" "$key" "$bitcode_csv"
   else
-    echo "  [$sha] note: no $bc_file -- skipping device-bitcode resource-usage measurement" >&2
+    echo "  [$key] note: no $bc_file -- skipping device-bitcode resource-usage measurement" >&2
   fi
 
   echo "$csv"
@@ -414,12 +442,13 @@ fi
 echo "=== resource usage: $COMMIT_1${COMMIT_2:+ vs $COMMIT_2} ($GPU_TARGET / $CONFIG_LABEL) ==="
 
 SHA_1="$(git rev-parse --short=12 "$COMMIT_1")"
-CSV_1="$(measure_commit "$COMMIT_1" "$SHA_1")"
+CSV_1="$(measure_commit "$COMMIT_1" "$SHA_1" "$COMMIT1_EXTRA_ARGS")"
+KEY_1="${SHA_1}$(_cache_key_suffix "$COMMIT1_EXTRA_ARGS")"
 
 if [[ -z "$COMMIT_2" ]]; then
   DASHBOARD_1="$(dirname "$CSV_1")/resource_dashboard.html"
   python3 "$TOOLS_DIR/resource_usage_dashboard.py" \
-    --baseline-csv "$CSV_1" --baseline-commit "$SHA_1" --top "$TOP_N" --out "$DASHBOARD_1" >&2
+    --baseline-csv "$CSV_1" --baseline-commit "$KEY_1" --top "$TOP_N" --out "$DASHBOARD_1" >&2
   echo ""
   echo "Single-commit snapshot -> $CSV_1"
   echo "  Dashboard -> $DASHBOARD_1"
@@ -428,7 +457,7 @@ if [[ -z "$COMMIT_2" ]]; then
   if [[ -f "$BITCODE_CSV_1" ]]; then
     DASHBOARD_1_BITCODE="$(dirname "$CSV_1")/resource_dashboard_bitcode.html"
     python3 "$TOOLS_DIR/resource_usage_dashboard.py" \
-      --baseline-csv "$BITCODE_CSV_1" --baseline-commit "$SHA_1" --top "$TOP_N" \
+      --baseline-csv "$BITCODE_CSV_1" --baseline-commit "$KEY_1" --top "$TOP_N" \
       --out "$DASHBOARD_1_BITCODE" >&2
     echo "  Device bitcode -> $BITCODE_CSV_1"
     echo "  Bitcode dashboard -> $DASHBOARD_1_BITCODE"
@@ -437,12 +466,13 @@ if [[ -z "$COMMIT_2" ]]; then
 fi
 
 SHA_2="$(git rev-parse --short=12 "$COMMIT_2")"
-CSV_2="$(measure_commit "$COMMIT_2" "$SHA_2")"
+CSV_2="$(measure_commit "$COMMIT_2" "$SHA_2" "$COMMIT2_EXTRA_ARGS")"
+KEY_2="${SHA_2}$(_cache_key_suffix "$COMMIT2_EXTRA_ARGS")"
 
-OUTDIR="${OUTPUT_DIR:-$PARENT_DIR/resource-usage/${GPU_TARGET}-${CONFIG_LABEL}-${SHA_1}-vs-${SHA_2}}"
+OUTDIR="${OUTPUT_DIR:-$PARENT_DIR/resource-usage/${GPU_TARGET}-${CONFIG_LABEL}-${KEY_1}-vs-${KEY_2}}"
 mkdir -p "$OUTDIR"
-cp "$CSV_1" "$OUTDIR/res-${SHA_1}.csv"
-cp "$CSV_2" "$OUTDIR/res-${SHA_2}.csv"
+cp "$CSV_1" "$OUTDIR/res-${KEY_1}.csv"
+cp "$CSV_2" "$OUTDIR/res-${KEY_2}.csv"
 
 for sort_by in "${SORT_BY_TYPE[@]}"; do
   python3 "$TOOLS_DIR/resource_usage_diff.py" \
@@ -453,8 +483,8 @@ for sort_by in "${SORT_BY_TYPE[@]}"; do
     --top "$TOP_N" --sort-by "$sort_by" \
     ${MATCH:+--match "$MATCH"}
 done
-generate_dashboard "$OUTDIR/res-${SHA_1}.csv" "$OUTDIR/res-${SHA_2}.csv" \
-  "$SHA_1" "$SHA_2" "$OUTDIR/res_diff_VGPRs.csv" "$OUTDIR/resource_dashboard.html"
+generate_dashboard "$OUTDIR/res-${KEY_1}.csv" "$OUTDIR/res-${KEY_2}.csv" \
+  "$KEY_1" "$KEY_2" "$OUTDIR/res_diff_VGPRs.csv" "$OUTDIR/resource_dashboard.html"
 
 # Device-bitcode (whole-program opt -O3) numbers, when both sides have them --
 # this inliner has no cost model/per-TU boundary, so a change that's
@@ -463,8 +493,8 @@ generate_dashboard "$OUTDIR/res-${SHA_1}.csv" "$OUTDIR/res-${SHA_2}.csv" \
 BITCODE_CSV_1="${CSV_1%.csv}-bitcode.csv"
 BITCODE_CSV_2="${CSV_2%.csv}-bitcode.csv"
 if [[ -f "$BITCODE_CSV_1" && -f "$BITCODE_CSV_2" ]]; then
-  cp "$BITCODE_CSV_1" "$OUTDIR/res-${SHA_1}-bitcode.csv"
-  cp "$BITCODE_CSV_2" "$OUTDIR/res-${SHA_2}-bitcode.csv"
+  cp "$BITCODE_CSV_1" "$OUTDIR/res-${KEY_1}-bitcode.csv"
+  cp "$BITCODE_CSV_2" "$OUTDIR/res-${KEY_2}-bitcode.csv"
   for sort_by in "${SORT_BY_TYPE[@]}"; do
     python3 "$TOOLS_DIR/resource_usage_diff.py" \
       --baseline "$BITCODE_CSV_1" \
@@ -474,8 +504,8 @@ if [[ -f "$BITCODE_CSV_1" && -f "$BITCODE_CSV_2" ]]; then
       --top "$TOP_N" --sort-by "$sort_by" \
       ${MATCH:+--match "$MATCH"}
   done
-  generate_dashboard "$OUTDIR/res-${SHA_1}-bitcode.csv" "$OUTDIR/res-${SHA_2}-bitcode.csv" \
-    "$SHA_1" "$SHA_2" "$OUTDIR/res_diff_bitcode_VGPRs.csv" "$OUTDIR/resource_dashboard_bitcode.html"
+  generate_dashboard "$OUTDIR/res-${KEY_1}-bitcode.csv" "$OUTDIR/res-${KEY_2}-bitcode.csv" \
+    "$KEY_1" "$KEY_2" "$OUTDIR/res_diff_bitcode_VGPRs.csv" "$OUTDIR/resource_dashboard_bitcode.html"
 else
   echo "  note: device-bitcode resource-usage CSV missing for one or both commits" >&2
   echo "  ($BITCODE_CSV_1, $BITCODE_CSV_2) -- skipping bitcode diff." >&2
@@ -483,10 +513,10 @@ fi
 
 echo ""
 echo "Done. Self-contained report -> $OUTDIR/"
-echo "  Production library: res-${SHA_1}.csv, res-${SHA_2}.csv, res_diff_<Column>.{csv,png}"
+echo "  Production library: res-${KEY_1}.csv, res-${KEY_2}.csv, res_diff_<Column>.{csv,png}"
 echo "  Dashboard:           resource_dashboard.html"
-if [[ -f "$OUTDIR/res-${SHA_1}-bitcode.csv" ]]; then
-  echo "  Device bitcode:      res-${SHA_1}-bitcode.csv, res-${SHA_2}-bitcode.csv, res_diff_bitcode_<Column>.{csv,png}"
+if [[ -f "$OUTDIR/res-${KEY_1}-bitcode.csv" ]]; then
+  echo "  Device bitcode:      res-${KEY_1}-bitcode.csv, res-${KEY_2}-bitcode.csv, res_diff_bitcode_<Column>.{csv,png}"
   echo "  Bitcode dashboard:   resource_dashboard_bitcode.html"
 fi
 echo "  (each report set covers: ${SORT_BY_TYPE[*]})"

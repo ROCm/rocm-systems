@@ -27,15 +27,21 @@ THE SOFTWARE.
 //
 // librdc cannot be loaded without a GPU (it initializes amdsmi when loaded), so
 // this binary builds the metric fetcher itself. Building and destroying a
-// fetcher makes no amdsmi calls; the binary links libamd_smi only for the calls
-// the fetcher's other functions make.
+// fetcher makes no amdsmi calls. The amdsmi calls the other tests reach are
+// replaced by the fakes below; the binary links libamd_smi only for the calls
+// no test makes.
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
+#include <limits>
 #include <thread>
 #include <vector>
 
+#include "amd_smi/amdsmi.h"
+#include "rdc/rdc.h"
 #include "rdc_lib/impl/RdcMetricFetcherImpl.h"
+#include "rdc_lib/impl/SmiUtils.h"
 
 // Several threads build and destroy fetchers at once, which hits that window
 // within seconds. If the destructor can hang again, this test hangs until the
@@ -55,4 +61,138 @@ TEST(MetricFetcherLifetimeTest, DestroyingFetchersDoesNotHang) {
   for (auto& thread : threads) {
     thread.join();
   }
+}
+
+// RDC_FI_GPU_MEMORY_CUR_BANDWIDTH. Without an instantaneous memory activity, rdcd
+// derives the activity from the memory-activity accumulator of two samples. The
+// bandwidth is then N/A without a rate: for the first sample, and when firmware
+// time stalled or went back, the accumulator went back, or more than 60 s passed.
+namespace {
+
+// The only GPU, alone on the only socket. Its processor handle points here.
+struct FakeGpu {
+  amdsmi_gpu_metrics_t metrics;
+  amdsmi_vram_info_t vram_info;
+};
+FakeGpu g_gpu;
+int g_socket;
+
+constexpr uint64_t kFirmwareMs = 100000;  // firmware timestamps are in 10 ns units
+
+class MemoryBandwidthTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    g_gpu = {};
+    g_gpu.metrics.average_umc_activity = std::numeric_limits<uint16_t>::max();
+    g_gpu.metrics.firmware_timestamp = 1000 * kFirmwareMs;
+    g_gpu.metrics.mem_activity_acc = 1000;
+    g_gpu.vram_info.vram_max_bandwidth = 2000;
+    amd::rdc::reset_flat_gpu_table();
+  }
+
+  rdc_status_t fetch(rdc_field_value* value) {
+    *value = {};
+    return fetcher_.fetch_smi_field(0, RDC_FI_GPU_MEMORY_CUR_BANDWIDTH, value);
+  }
+
+  // Fetches a first sample, which has no rate yet, then one at firmware_ms with
+  // the accumulator at mem_activity_acc.
+  rdc_status_t fetch_second(uint64_t firmware_ms, uint64_t mem_activity_acc,
+                            rdc_field_value* value) {
+    rdc_field_value first;
+    EXPECT_EQ(fetch(&first), RDC_ST_SMI_ERROR);
+    EXPECT_EQ(first.status, RDC_ST_NOT_SUPPORTED);
+    g_gpu.metrics.firmware_timestamp = firmware_ms * kFirmwareMs;
+    g_gpu.metrics.mem_activity_acc = mem_activity_acc;
+    return fetch(value);
+  }
+
+  amd::rdc::RdcMetricFetcherImpl fetcher_;
+};
+
+}  // namespace
+
+// Fakes for the amdsmi calls the tests reach.
+amdsmi_status_t amdsmi_get_socket_handles(uint32_t* socket_count,
+                                          amdsmi_socket_handle* socket_handles) {
+  if (socket_handles != nullptr && *socket_count > 0) {
+    socket_handles[0] = &g_socket;
+  }
+  *socket_count = 1;
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t amdsmi_get_processor_handles(amdsmi_socket_handle, uint32_t* processor_count,
+                                             amdsmi_processor_handle* processor_handles) {
+  if (processor_handles != nullptr && *processor_count > 0) {
+    processor_handles[0] = &g_gpu;
+  }
+  *processor_count = 1;
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t amdsmi_get_processor_type(amdsmi_processor_handle,
+                                          amdsmi_processor_type_t* processor_type) {
+  *processor_type = AMDSMI_PROCESSOR_TYPE_AMD_GPU;
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle processor_handle,
+                                            amdsmi_gpu_metrics_t* pgpu_metrics) {
+  *pgpu_metrics = static_cast<FakeGpu*>(processor_handle)->metrics;
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t amdsmi_get_gpu_vram_info(amdsmi_processor_handle processor_handle,
+                                         amdsmi_vram_info_t* info) {
+  *info = static_cast<FakeGpu*>(processor_handle)->vram_info;
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+// The accumulator grows by the activity percentage every firmware millisecond.
+TEST_F(MemoryBandwidthTest, ReportsTheAccumulatorRate) {
+  rdc_field_value value;
+  EXPECT_EQ(fetch_second(2000, 1000 + 25 * 1000, &value), RDC_ST_OK);  // 25% for 1 s
+  EXPECT_EQ(value.status, RDC_ST_OK);
+  EXPECT_EQ(value.value.l_int, 500);
+}
+
+TEST_F(MemoryBandwidthTest, ReportsZeroWithoutMemoryTraffic) {
+  rdc_field_value value;
+  EXPECT_EQ(fetch_second(2000, 1000, &value), RDC_ST_OK);
+  EXPECT_EQ(value.status, RDC_ST_OK);
+  EXPECT_EQ(value.value.l_int, 0);
+}
+
+// With an instantaneous memory activity, a first sample has a bandwidth too.
+TEST_F(MemoryBandwidthTest, ReportsTheInstantaneousActivity) {
+  g_gpu.metrics.average_umc_activity = 40;
+  rdc_field_value value;
+  EXPECT_EQ(fetch(&value), RDC_ST_OK);
+  EXPECT_EQ(value.status, RDC_ST_OK);
+  EXPECT_EQ(value.value.l_int, 800);  // 40% of 2000
+}
+
+TEST_F(MemoryBandwidthTest, NotAvailableWhenFirmwareTimeStalls) {
+  rdc_field_value value;
+  EXPECT_EQ(fetch_second(1000, 1000, &value), RDC_ST_SMI_ERROR);
+  EXPECT_EQ(value.status, RDC_ST_NOT_SUPPORTED);
+}
+
+TEST_F(MemoryBandwidthTest, NotAvailableWhenFirmwareTimeGoesBack) {
+  rdc_field_value value;
+  EXPECT_EQ(fetch_second(900, 2000, &value), RDC_ST_SMI_ERROR);
+  EXPECT_EQ(value.status, RDC_ST_NOT_SUPPORTED);
+}
+
+TEST_F(MemoryBandwidthTest, NotAvailableWhenTheAccumulatorGoesBack) {
+  rdc_field_value value;
+  EXPECT_EQ(fetch_second(2000, 0, &value), RDC_ST_SMI_ERROR);
+  EXPECT_EQ(value.status, RDC_ST_NOT_SUPPORTED);
+}
+
+TEST_F(MemoryBandwidthTest, NotAvailableWhenSamplesAreMoreThanAMinuteApart) {
+  rdc_field_value value;
+  EXPECT_EQ(fetch_second(1000 + 61000, 1000 + 61000 * 10, &value), RDC_ST_SMI_ERROR);
+  EXPECT_EQ(value.status, RDC_ST_NOT_SUPPORTED);
 }

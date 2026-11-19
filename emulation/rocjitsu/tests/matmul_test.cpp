@@ -37,7 +37,7 @@ namespace {
 using namespace rocjitsu;
 using test::kernel_path;
 
-const std::string CONFIG_PATH = test::config_path("gfx950_mi355x.json");
+const std::string CONFIG_PATH = test::config_path("gfx950_mi350x.json");
 
 constexpr uint32_t TOTAL_XCDS = 8;
 constexpr uint32_t CUS_PER_XCD = 36; // 4 SEs × 9 physical CUs
@@ -109,6 +109,7 @@ struct KernelExecFixture {
   uint64_t kernel_object = 0;
 
   void setup(const char *kernel_name, uint32_t num_threads = 1) {
+    util::StringDiagnostic admission_diagnostic;
     config::LoadedConfig loaded;
     ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
     soc = loaded.soc();
@@ -116,11 +117,13 @@ struct KernelExecFixture {
     loaded.engine_config.num_threads = num_threads;
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
-    loaded.wire_links(engine->topology());
+    ASSERT_TRUE(loaded.wire_links(engine->topology(), admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
     if (num_threads > 1) {
       ASSERT_TRUE(amdgpu::partition_topology_by_xcds(engine->topology(), soc, num_threads));
     }
-    engine->create();
+    ASSERT_TRUE(engine->create(admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
 
     Executable exec(kernel_path(kernel_name));
     ASSERT_TRUE(exec.is_valid());
@@ -359,8 +362,11 @@ TEST(MatmulStressTest, MfmaAllCUs_MultiThreaded) {
 // and all 288 physical CUs can dispatch and halt wavefronts (engine-driven, no kernel execution).
 
 TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt) {
+  util::StringDiagnostic admission_diagnostic;
   constexpr uint32_t total_wgs = TOTAL_CUS;
-  constexpr uint32_t SOPP_S_ENDPGM = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  constexpr util::FailureOr<uint32_t> maybe_s_endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  static_assert(maybe_s_endpgm.succeeded());
+  constexpr uint32_t SOPP_S_ENDPGM = maybe_s_endpgm.value();
 
   config::LoadedConfig loaded;
   ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
@@ -371,8 +377,10 @@ TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt) {
   loaded.engine_config.num_threads = 1;
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
-  loaded.wire_links(engine->topology());
-  engine->create();
+  ASSERT_TRUE(loaded.wire_links(engine->topology(), admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
+  ASSERT_TRUE(engine->create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   // Write a kernel descriptor + s_endpgm to GPU memory.
   using namespace rocjitsu::amdhsa;
@@ -414,8 +422,11 @@ TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt) {
 
 // Multi-threaded topology-only: 1 thread per XCD, dispatch s_endpgm to all CUs.
 TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt_MultiThreaded) {
+  util::StringDiagnostic admission_diagnostic;
   constexpr uint32_t total_wgs = TOTAL_CUS;
-  constexpr uint32_t SOPP_S_ENDPGM = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  constexpr util::FailureOr<uint32_t> maybe_s_endpgm_2 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  static_assert(maybe_s_endpgm_2.succeeded());
+  constexpr uint32_t SOPP_S_ENDPGM = maybe_s_endpgm_2.value();
 
   config::LoadedConfig loaded;
   ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
@@ -424,10 +435,12 @@ TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt_MultiThreaded) {
   loaded.engine_config.num_threads = TOTAL_XCDS;
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
-  loaded.wire_links(engine->topology());
+  ASSERT_TRUE(loaded.wire_links(engine->topology(), admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   ASSERT_TRUE(amdgpu::partition_topology_by_xcds(engine->topology(), soc, TOTAL_XCDS));
-  engine->create();
+  ASSERT_TRUE(engine->create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   using namespace rocjitsu::amdhsa;
   kernel_descriptor_t kd{};

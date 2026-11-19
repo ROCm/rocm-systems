@@ -20,6 +20,12 @@ class Instruction;
 
 namespace rocjitsu::amdgpu {
 
+/// GFX11 and GFX12 exports retire in independent target streams.
+[[nodiscard]] constexpr bool has_typed_export_waits(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA4;
+}
+
 /// @brief Architectural wait-counter domains.
 ///
 /// @details GFX12 targets use the split counter names directly. Legacy gfx9
@@ -73,6 +79,11 @@ enum class WaitcntModel { LegacyNoVscnt, LegacyVscnt, SplitGfx12 };
   return model != WaitcntModel::SplitGfx12;
 }
 
+/// @brief Name of `counter` as written in `model`'s wait instructions.
+/// @details GFX9-GFX11 models name the Load, Store and Ds domains vmcnt, vscnt
+/// and lgkmcnt.
+[[nodiscard]] std::string_view wait_counter_name(WaitCounterKind counter, WaitcntModel model);
+
 [[nodiscard]] constexpr bool has_legacy_vscnt(WaitcntModel model) {
   return model == WaitcntModel::LegacyVscnt;
 }
@@ -81,10 +92,75 @@ enum class WaitcntModel { LegacyNoVscnt, LegacyVscnt, SplitGfx12 };
   return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
 }
 
-// Counter retirement order does not imply ordered VGPR writeback on GFX12.
-[[nodiscard]] inline bool has_ordered_vmem_writeback(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+// RDNA3 ISA section 5.6, Data Dependency Resolution: VMcnt decrements in issue
+// order even when the VGPR writes return out of order. GFX10 uses the same
+// counter model. LLVM SIInsertWaitcnts also merges the read event kinds here.
+[[nodiscard]] constexpr bool has_ordered_vmem_reads(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
          arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+}
+
+enum class VmemWriteback : uint8_t { Ordinary, Sample, Bvh, GenericFlat, PointSample };
+
+[[nodiscard]] constexpr bool ordered_vmem_writebacks(VmemWriteback first, VmemWriteback second) {
+  return first == second && first != VmemWriteback::PointSample;
+}
+
+[[nodiscard]] constexpr VmemWriteback vmem_read_type(rj_code_arch_t arch,
+                                                     std::string_view mnemonic) {
+  // On gfx1150 these opcodes can use either the sampler or the ordinary VMEM
+  // writeback path. LLVM's PointSampleAccel rule requires a wait even for a
+  // second eligible sample because the two requests can use different paths.
+  if (arch == ROCJITSU_CODE_ARCH_RDNA3_5 &&
+      (mnemonic == "image_sample" || mnemonic == "image_sample_l" || mnemonic == "image_sample_lz"))
+    return VmemWriteback::PointSample;
+  if (mnemonic == "image_msaa_load" || mnemonic == "image_get_lod" ||
+      mnemonic.starts_with("image_sample") || mnemonic.starts_with("image_gather"))
+    return VmemWriteback::Sample;
+  if (mnemonic.starts_with("image_bvh"))
+    return VmemWriteback::Bvh;
+  return VmemWriteback::Ordinary;
+}
+
+// VMEM loads of the same type write their VGPR results in issue order. CDNA1-4
+// section 4.4. RDNA1/2 section 4.4 and RDNA3/3.5 section 5.6 say VGPR data can
+// be written out of order, but we follow LLVM's vmem-write-vgpr-in-order
+// feature, which covers GFX9-GFX11.
+[[nodiscard]] inline bool has_ordered_vmem_writeback(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
+         arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+}
+
+// GFX10 ISA section 4.4 orders VGPR returns within GDS, separately from LDS.
+// EXPCNT tracks outgoing data and has no bearing on that writeback order.
+[[nodiscard]] constexpr bool has_ordered_gds_writeback(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+}
+
+// GFX10 GDS keeps EXEC and its outgoing VGPR sources live until EXPCNT retires.
+[[nodiscard]] constexpr bool checks_gds_source_lifetime(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+}
+
+// FLAT's LDS route stays in order with indexed LDS: RDNA3/3.5 FLAT ordering
+// and RDNA4/CDNA5 sections 5.7.1.3-4. The independently completing VMEM route
+// can still race LDS writes to the same VGPR, so this applies only to LDS lanes.
+// CDNA5 10.1.1 also warns about unordered VGPR writes despite ordered counters;
+// interpret it in that mixed-route context, preserving the explicit within-LDS
+// guarantee in 5.7.1.3-4. No hardware divergence within the LDS route is known.
+[[nodiscard]] inline bool has_ordered_flat_lds_writeback(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+}
+
+// RDNA3/3.5 parameter-load hazard rules and RDNA4's EXPcnt table track these
+// loads through VGPR delivery, in order within their class but not with exports.
+// CDNA5 has neither LDS-direct/parameter instructions nor their EXPcnt class.
+[[nodiscard]] inline bool has_ordered_lds_direct_writeback(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA4;
 }
 
 [[nodiscard]] constexpr WaitCounterKind smem_wait_counter(WaitcntModel model) {
@@ -140,7 +216,7 @@ struct LegacyWaitcnt {
 /// - LegacyNoVscnt: VMCNT, LGKMCNT, EXPCNT.
 /// - LegacyVscnt: those tags plus VSCNT and the GFX11 internal LOADCNT,
 ///   STORECNT, DSCNT, KMCNT subsets.
-/// - SplitGfx12: LOADCNT, STORECNT, DSCNT, KMCNT, EXPCNT, and CDNA5's
+/// - SplitGfx12: LOADCNT, STORECNT, DSCNT, KMCNT, EXPCNT, SAMPLECNT, BVHCNT, and CDNA5's
 ///   ASYNCCNT/TENSORCNT. Aggregate VMCNT/VSCNT/LGKMCNT tags are not supported.
 /// Mapping a supported tag back with memory_wait_counter_type produces a wait
 /// that covers the original event, including subsets of aggregate counters.
@@ -160,6 +236,10 @@ struct LegacyWaitcnt {
     return smem_wait_counter(model);
   case WaitCounterType::EXPCNT:
     return WaitCounterKind::Exp;
+  case WaitCounterType::BVHCNT:
+    return WaitCounterKind::Bvh;
+  case WaitCounterType::SAMPLECNT:
+    return WaitCounterKind::Sample;
   case WaitCounterType::ASYNCCNT:
     return WaitCounterKind::Async;
   case WaitCounterType::TENSORCNT:
@@ -169,8 +249,8 @@ struct LegacyWaitcnt {
 }
 
 /// Returns nullopt for domains without a corresponding memory-pipeline counter.
-/// Callers must leave unrelated counters unchanged for those domains; Sample
-/// and Bvh waits must not be aliased to ordinary LOADCNT events.
+/// Callers must leave unrelated counters unchanged for those domains. Sample
+/// has a separate GFX12 counter; Bvh must not alias ordinary LOADCNT events.
 [[nodiscard]] constexpr std::optional<WaitCounterType>
 memory_wait_counter_type(WaitCounterKind counter, WaitcntModel model) {
   switch (counter) {
@@ -191,6 +271,14 @@ memory_wait_counter_type(WaitCounterKind counter, WaitcntModel model) {
   case WaitCounterKind::Async:
     if (model == WaitcntModel::SplitGfx12)
       return WaitCounterType::ASYNCCNT;
+    return std::nullopt;
+  case WaitCounterKind::Bvh:
+    if (model == WaitcntModel::SplitGfx12)
+      return WaitCounterType::BVHCNT;
+    return std::nullopt;
+  case WaitCounterKind::Sample:
+    if (model == WaitcntModel::SplitGfx12)
+      return WaitCounterType::SAMPLECNT;
     return std::nullopt;
   case WaitCounterKind::Tensor:
     if (model == WaitcntModel::SplitGfx12)
@@ -244,9 +332,14 @@ struct WaitCounterPolicy {
 
   // Absent fields leave their counters unchanged. An engaged result with no
   // active fields represents an explicit no-wait sentinel.
-  // SOPK forms currently use only SIMM16; SGPR addends are not modeled.
+  // Static analysis can prove a split wait with a NULL addend. Runtime
+  // checking uses executed_wait_fields() for a register-dependent limit.
   [[nodiscard]] static util::FailureOr<std::optional<WaitFields>>
   explicit_wait_fields(const Instruction &inst, rj_code_arch_t arch);
+  [[nodiscard]] static util::FailureOr<std::optional<WaitFields>>
+  executed_wait_fields(const Instruction &inst, rj_code_arch_t arch,
+                       const WaitFields &executed_limits);
+  [[nodiscard]] static bool is_gfx10_sopk_wait(const Instruction &inst, rj_code_arch_t arch);
 
   [[nodiscard]] static uint32_t depctr_field(uint32_t value, uint32_t shift, uint32_t width);
 };

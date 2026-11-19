@@ -45,7 +45,7 @@ NOT_AVAILABLE = {
 
 
 @pytest.fixture
-def start_rdcd(tools, tmp_path):
+def start_rdcd(tools, tmp_path):  # noqa: F811 (the fixture)
     """Start rdcd with fake settings; faults apply from the start of the test."""
     started = []
 
@@ -126,6 +126,10 @@ def test_health_checks_pages_of_a_gpu_without_ecc(start_rdcd):
     out = d.ok("health", "-g", gid, "-c")
     # Fake GPU 1 has one bad page, pending retirement.
     assert "Detected 1 pending retired page(s)." in out, out
+    # Health reads the ECC count, which this GPU does not have, first. The bad-page counts
+    # read after it still need a history for the weekly page-retirement check.
+    log = d.out_log.read_text(errors="replace")
+    assert "history data" not in log, log[-4000:]
 
 
 def test_bulk_fetch_leaves_metrics_the_gpu_does_not_report_to_other_calls(start_rdcd):

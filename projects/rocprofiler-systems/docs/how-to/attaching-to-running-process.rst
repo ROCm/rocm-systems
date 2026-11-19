@@ -8,6 +8,7 @@ Attaching to a running process
 
 `ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ can attach
 to and profile an already running process using the ``rocprof-sys-attach`` executable.
+The experimental command ``rocsys attach`` forwards to that executable. See :doc:`using-rocsys`.
 This capability is useful for profiling long-running applications, daemons, or processes
 that are difficult to restart with instrumentation.
 
@@ -211,11 +212,15 @@ timestamp directory.
 
 .. note::
 
-   Configuration settings (environment variables, output format, etc.) are
+   Configuration settings (environment variables, output path, etc.) are
    captured during the first attach and persist across re-attach sessions.
    Changing environment variables between sessions has no effect. To profile
    with different settings, restart the application.
 
+   The output format is the exception: each re-attach uses the formats selected
+   with ``-F`` (or ``ROCPROFSYS_TRACE`` / ``ROCPROFSYS_USE_ROCPD``) for that
+   attach, so one session can produce a RocPD database and the next a Perfetto
+   trace. A re-attach without ``-F`` keeps the formats of the previous session.
 Troubleshooting
 ========================================
 

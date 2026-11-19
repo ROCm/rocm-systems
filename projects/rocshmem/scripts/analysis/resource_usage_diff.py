@@ -139,8 +139,17 @@ def metric_tuple(r):
     return tuple(to_num(r[col]) for col in NUMERIC_COLS)
 
 
-def short_commit(commit):
-    return commit[:10] if commit else ""
+def short_commit(commit, sha_len=10):
+    """Abbreviate the sha portion of a commit label, preserving any
+    extra-args suffix appended after it (resource_usage_compare.sh's
+    _cache_key_suffix produces keys like "13c760526b8d-DUSE_TDM_ON") --
+    naively truncating the whole string would otherwise cut the suffix off
+    and make same-commit, different-config comparisons indistinguishable.
+    """
+    if not commit:
+        return ""
+    sha, sep, suffix = commit.partition("-")
+    return sha[:sha_len] + (sep + suffix if sep else "")
 
 
 def row_key(r):

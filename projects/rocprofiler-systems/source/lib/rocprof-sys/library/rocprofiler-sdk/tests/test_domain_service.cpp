@@ -823,14 +823,14 @@ TEST_F(domain_service_test,
     record.correlation_id.internal = 42U;
 
     auto& pending_standard_callbacks =
-        domains::callback::ompt::detail::open_regions<mock_sdk>::s_standard;
+        domains::callback::ompt::detail::open_regions<mock_sdk>::current().standard;
     pending_standard_callbacks.emplace(
         record.correlation_id.internal,
         domains::callback::ompt::detail::pending_region<mock_sdk>{
-            record, /*begin_timestamp=*/1, function_args_t{} });
+            .record = record, .begin_timestamp = 1, .args = function_args_t{} });
 
     EXPECT_CALL(*g_metadata_registry_mock, add_string(_)).Times(1);
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_)).Times(1);
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_)).Times(1);
 
     service.finalize();
 

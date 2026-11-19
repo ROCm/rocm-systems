@@ -9,6 +9,17 @@
 #define _NCCL_DEVICE_COOP_H_
 #include "utility.h"
 
+// ROCM_VERSION is defined only when building RCCL itself; applications that
+// include these headers get the HIP version instead.
+#if defined(ROCM_VERSION)
+#define NCCL_COOP_HAS_WARP_SYNC (ROCM_VERSION >= 70000)
+#elif defined(__HIP_PLATFORM_AMD__)
+#include <hip/hip_version.h>
+#define NCCL_COOP_HAS_WARP_SYNC (HIP_VERSION_MAJOR >= 7)
+#else
+#define NCCL_COOP_HAS_WARP_SYNC 0
+#endif
+
 // ncclCoop[Foo]: NCCL's versions of CUDA's Cooperative Groups. They conform
 // to just this subset of the CUDA API:
 //   int Coop::thread_rank();
@@ -46,7 +57,10 @@ static constexpr ncclCoopMask_t ncclCoopLaneWindow =
   ~ncclCoopMask_t(0) >> (8 * sizeof(ncclCoopMask_t) - WARP_SIZE);
 #endif
 
-#if NCCL_CHECK_CUDACC
+// Upstream moved ncclCoopAny into bindings/ir/src/coop.h (NVIDIA IR library).
+// RCCL's HIP bitcode is still built from bindings/ir/nccl_device_wrapper__impl.h,
+// which needs it here; keep it AMD-only so it cannot collide with the IR copy.
+#if NCCL_CHECK_CUDACC && defined(__HIP_PLATFORM_AMD__)
 struct ncclCoopAny {
   struct Storage {
     alignas(alignof(void*)) char space[16];
@@ -125,7 +139,7 @@ struct ncclCoopTile { // An aligned pow2 set of threads within the warp.
     return (ncclCoopLaneWindow >> (WARP_SIZE - nThreadsPow2)) << (nccl::utility::lane() & -nThreadsPow2);
   }
   NCCL_DEVICE_INLINE void sync() {
-#if ROCM_VERSION >= 70000
+#if NCCL_COOP_HAS_WARP_SYNC
     if (nThreadsPow2 > 1) __syncwarp(laneMask());
 #else
     __syncthreads();
@@ -156,7 +170,7 @@ struct ncclCoopLanes { // Some lanes of this warp.
     return ncclCoopPopc(lmask);
   }
   NCCL_DEVICE_INLINE void sync() {
-#if ROCM_VERSION >= 70000
+#if NCCL_COOP_HAS_WARP_SYNC
     __syncwarp(lmask);
 #else
     __syncthreads();
@@ -347,7 +361,7 @@ NCCL_DEVICE_INLINE constexpr bool ncclCoopWithinWarp(ncclCoopCta) {
 #ifdef __CUDACC__
 // Pick threads of our warp that are safe to use collectively.
 NCCL_DEVICE_INLINE ncclCoopLanes ncclCoopCoalesced() {
-#if ROCM_VERSION >= 70000
+#if NCCL_COOP_HAS_WARP_SYNC
   return ncclCoopLanes{static_cast<ncclCoopMask_t>(__activemask())};
 #else
   return ncclCoopLanes{static_cast<ncclCoopMask_t>(__ballot(1))};
