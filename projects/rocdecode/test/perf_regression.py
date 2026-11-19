@@ -532,8 +532,20 @@ def main():
         # -m 3 the local CSV is a fallback for GPUs the HTML has no column for.
         if args.baseline:
             p = Path(args.baseline)
-            tries = [(p, "csv" if p.suffix.lower() == ".csv" else "html")]
-            if tries[0][1] == "html" and mem != DEFAULT_MEM_TYPE:
+            suffix = p.suffix.lower()
+            if suffix == ".csv":
+                kind = "csv"
+            elif suffix in (".html", ".htm"):
+                kind = "html"
+            else:
+                # Without this, any other suffix (e.g. a ".cvs" typo) was parsed as
+                # HTML and failed with an unrelated "No tables found" error.
+                print(f"ERROR: unsupported baseline file type: {p}", file=sys.stderr)
+                print("       A baseline must be a .csv (local baseline) or .html "
+                      "(SharePoint baseline).", file=sys.stderr)
+                return 1
+            tries = [(p, kind)]
+            if kind == "html" and mem != DEFAULT_MEM_TYPE:
                 print(f"WARNING: the HTML baseline holds decode-only (-m {DEFAULT_MEM_TYPE}) "
                       f"numbers; comparing -m {mem} against it will over-report regressions.")
         elif mem == DEFAULT_MEM_TYPE:
