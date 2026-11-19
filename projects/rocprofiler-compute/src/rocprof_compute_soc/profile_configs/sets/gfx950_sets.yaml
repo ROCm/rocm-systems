@@ -17,13 +17,13 @@ sets:
   - 2.1.4: MFMA FLOPs (F16)
   - 2.1.5: MFMA FLOPs (F32)
   - 2.1.6: MFMA FLOPs (F64)
-  - 2.1.8: MFMA IOPs (Int8)
+  - 2.1.8: MFMA IOPs (INT8)
 - title: Memory Throughput
   set_option: mem_thruput
   description: Placeholder
   metric:
   - 2.1.17: Theoretical LDS Bandwidth
-  - 2.1.18: LDS Bank Conflicts/Access
+  - 2.1.18: LDS Bank Conflicts per Access
   - 16.1.2: vL1D Cache Utilization
   - 17.1.0: L2 Cache Utilization
 - title: Launch Stats
@@ -32,7 +32,7 @@ sets:
   metric:
   - 7.1.0: Grid Size
   - 7.1.1: Workgroup Size
-  - 7.1.2: Total Wavefronts
+  - 7.1.2: Dispatched Wavefronts
   - 7.1.5: VGPRs
   - 7.1.6: AGPRs
   - 7.1.7: SGPRs
