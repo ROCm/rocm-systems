@@ -311,7 +311,8 @@ namespace rocjitsu::arith {
 template <int Width>
 uint32_t div_scale_x86_64_v3(uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
                              const uint32_t *const *a, const uint32_t *const *b,
-                             const uint32_t *const *c, bool quiet_nan, uint64_t flags) {
+                             const uint32_t *const *c, bool quiet_nan, uint64_t flags,
+                             bool rdna_scale_down) {
   constexpr int lanes = Width == 64 ? 4 : 8;
   uint32_t staged[2][32], conditions = 0;
   for (int lane = 0; lane < 32; lane += lanes) {
@@ -325,7 +326,7 @@ uint32_t div_scale_x86_64_v3(uint32_t exec_mask, uint32_t mode, uint32_t *const 
     } else {
       marked = unsigned(_mm256_movemask_ps(_mm256_castsi256_ps(repair)));
     }
-    if (__builtin_expect(marked != 0, 0)) {
+    if (__builtin_expect(rdna_scale_down && marked != 0, 0)) {
       result = repair_lanes<Width>(result, marked, lane, mode, a, b, c, quiet_nan, flags);
     }
     if constexpr (Width == 64) {
@@ -361,9 +362,9 @@ uint32_t div_scale_x86_64_v3(uint32_t exec_mask, uint32_t mode, uint32_t *const 
 
 template uint32_t div_scale_x86_64_v3<32>(uint32_t, uint32_t, uint32_t *const *,
                                           const uint32_t *const *, const uint32_t *const *,
-                                          const uint32_t *const *, bool, uint64_t);
+                                          const uint32_t *const *, bool, uint64_t, bool);
 template uint32_t div_scale_x86_64_v3<64>(uint32_t, uint32_t, uint32_t *const *,
                                           const uint32_t *const *, const uint32_t *const *,
-                                          const uint32_t *const *, bool, uint64_t);
+                                          const uint32_t *const *, bool, uint64_t, bool);
 
 } // namespace rocjitsu::arith

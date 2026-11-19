@@ -85,11 +85,13 @@ using FloatCompare64Function = int (*)(uint64_t, uint64_t, uint64_t, uint64_t *,
 
 // Report fresh causes separately from sticky state so repeated exceptions still
 // reach trap delivery. A rejected call commits neither its mask nor its causes.
+// Gfx12 may observe full EXEC; gfx1150 retains its routed participation mask.
 template <unsigned Bits, typename Commit>
 inline void execute_float_compare(Wavefront &wave, FloatCompare32Function wave32,
                                   FloatCompare64Function wave64, uint64_t flags, uint64_t modifiers,
                                   const Operand &source_a, const Operand &source_b, bool constant,
-                                  Commit commit, uint64_t exec_mask = ~0ULL) {
+                                  Commit commit, uint64_t exec_mask = ~0ULL,
+                                  bool observe_full_exec = true) {
   const uint32_t denorm = Bits == 32 ? wave.fp_denorm_mode_f32() : wave.fp_denorm_mode_f16_f64();
   if (!(denorm & 1))
     flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
@@ -108,8 +110,9 @@ inline void execute_float_compare(Wavefront &wave, FloatCompare32Function wave32
     result = result32;
     return status;
   };
-  const int status =
-      with_compare_inputs<Bits>(wave, wave.exec(), source_a, source_b, constant, modifiers, invoke);
+  const uint64_t input_exec_mask = observe_full_exec ? wave.exec() : exec_mask;
+  const int status = with_compare_inputs<Bits>(wave, input_exec_mask, source_a, source_b, constant,
+                                               modifiers, invoke);
   if (wave.instruction_execution_failed())
     return;
   if (status != RJ_ARITH_SUCCESS) {

@@ -4,11 +4,6 @@
 #ifndef UTIL_SIMD_H_
 #define UTIL_SIMD_H_
 
-#include "util/amdgpu_exp.h"
-#include "util/amdgpu_log.h"
-#include "util/amdgpu_rcp.h"
-#include "util/amdgpu_rsq.h"
-#include "util/amdgpu_sqrt.h"
 #include "util/bit.h"
 #include "util/host_target.h"
 #include "util/simd_control.h"
@@ -133,22 +128,6 @@ template <class Simd>
   }
 }
 
-/// Expand the low native<uint32_t>::size() bits into 0/1 uint32_t lanes. This
-/// is the numeric form needed by carry-in arithmetic; selection paths should
-/// use simd_mask_from_bits directly. AVX-512 materializes the lanes with a
-/// k-mask zero-masked broadcast; narrower targets use vector bit tests.
-[[gnu::always_inline]] inline native<uint32_t> simd_u32_lanes_from_bits(uint64_t bits) {
-  using U = native<uint32_t>;
-  static_assert(U::size() <= 32);
-#if RJ_HOST_HAS_AVX512F
-  static_assert(U::size() == 16);
-  return std::bit_cast<U>(_mm512_maskz_set1_epi32(static_cast<__mmask16>(bits), 1));
-#else
-  const U lane_bits([](auto i) { return uint32_t{1} << i; });
-  const U lane_indices([](auto i) { return static_cast<uint32_t>(i); });
-  return (U(static_cast<uint32_t>(bits)) & lane_bits) >> lane_indices;
-#endif
-}
 #else
 // Fallback definitions so `if constexpr (has_stdx_simd)` discarded
 // branches compile out even in non-template callers (e.g. gtest TEST
@@ -164,7 +143,6 @@ template <class T> native<T> load(const uint32_t *) { return {}; }
 template <class T> native<T> broadcast(uint32_t) { return {}; }
 template <class Mask> uint64_t simd_mask_to_bits(const Mask &) { return 0; }
 template <class Simd> bool simd_mask_from_bits(uint64_t) { return false; }
-inline native<uint32_t> simd_u32_lanes_from_bits(uint64_t) { return {}; }
 inline native<float> native_fma(native<float>, native<float>, native<float>) { return {}; }
 template <class T> void masked_store(uint32_t *, native<T>, uint64_t) {}
 template <class T> void blit_to_buffer(uint32_t (&)[native<T>::size()], native<T>) {}
@@ -472,55 +450,6 @@ inline native<double> ordered_clamp_f64_simd(native<double> v, double lo, double
   native<double> result;
   result.copy_from(lanes, stdx::element_aligned);
   return result;
-}
-
-inline native<double> cvt_i32_f64_saturate_input_simd(native<double> s) {
-  constexpr std::size_t W = native<double>::size();
-  alignas(64) double lanes[W];
-  s.copy_to(lanes, stdx::element_aligned);
-  for (double &lane : lanes) {
-    if (std::isnan(lane))
-      lane = 0.0;
-    else if (lane >= 2147483648.0)
-      lane = 2147483647.0;
-    else if (lane < -2147483648.0)
-      lane = -2147483648.0;
-  }
-  native<double> result;
-  result.copy_from(lanes, stdx::element_aligned);
-  return result;
-}
-
-inline native<double> cvt_u32_f64_saturate_input_simd(native<double> s) {
-  constexpr std::size_t W = native<double>::size();
-  alignas(64) double lanes[W];
-  s.copy_to(lanes, stdx::element_aligned);
-  for (double &lane : lanes) {
-    if (std::isnan(lane) || lane < 0.0)
-      lane = 0.0;
-    else if (lane >= 4294967296.0)
-      lane = 4294967295.0;
-  }
-  native<double> result;
-  result.copy_from(lanes, stdx::element_aligned);
-  return result;
-}
-
-inline native<double> sqrt_f64_simd(native<double> a) {
-  native<double> r = stdx::sqrt(a);
-  constexpr std::size_t W = native<double>::size();
-  alignas(64) double in[W];
-  alignas(64) double out[W];
-  a.copy_to(in, stdx::element_aligned);
-  r.copy_to(out, stdx::element_aligned);
-  for (std::size_t i = 0; i < W; ++i) {
-    if (std::isnan(in[i]))
-      out[i] = in[i];
-    else if (in[i] < 0.0)
-      out[i] = std::numeric_limits<double>::quiet_NaN();
-  }
-  r.copy_from(out, stdx::element_aligned);
-  return r;
 }
 
 /// Vectorized, bit-exact port of `f16_to_f32` (util/data_types.h). Each lane's
@@ -841,68 +770,6 @@ inline double ceil_scalar(double a) { return quiet_snan_scalar(a, std::ceil(a));
 inline float trunc_scalar(float a) { return quiet_snan_scalar(a, std::trunc(a)); }
 inline double trunc_scalar(double a) { return quiet_snan_scalar(a, std::trunc(a)); }
 
-/// Native-width adapters for the shared integer transcendental mappings.
-inline native<float> rcp_f32_simd(native<float> a, bool quiet_snan = true) {
-  return map_native_convert_scalar<float, float>(
-      a, [quiet_snan](float value) { return amdgpu_rcp_f32(value, quiet_snan); });
-}
-
-inline native<float> rsq_f32_simd(native<float> a, bool quiet_snan = true) {
-  return map_native_convert_scalar<float, float>(
-      a, [quiet_snan](float value) { return amdgpu_rsq_f32(value, quiet_snan); });
-}
-
-inline native<float> sqrt_f32_simd(native<float> a, bool quiet_snan = true) {
-  return map_native_convert_scalar<float, float>(
-      a, [quiet_snan](float value) { return amdgpu_sqrt_f32(value, quiet_snan); });
-}
-
-inline native<float> log_f32_simd(native<float> a, bool quiet_snan = true) {
-  return map_native_convert_scalar<float, float>(
-      a, [quiet_snan](float value) { return amdgpu_log_f32(value, quiet_snan); });
-}
-
-inline native<float> exp_f32_simd(native<float> a, bool quiet_snan = true) {
-  return map_native_convert_scalar<float, float>(
-      a, [quiet_snan](float value) { return amdgpu_exp_f32(value, quiet_snan); });
-}
-
-/// Branchless SWAR population count over a uint32 vector. Each lane holds
-/// std::popcount(lane) in [0, 32], bit-identical to the scalar std::popcount.
-/// Used by the bit-scan VOP1/VOP3 SIMD fast paths (bcnt / ffbh / ffbl / cls).
-inline native<uint32_t> popcount_u32_simd(native<uint32_t> x) {
-  using U = native<uint32_t>;
-  x = x - ((x >> 1) & U(0x55555555u));
-  x = (x & U(0x33333333u)) + ((x >> 2) & U(0x33333333u));
-  x = (x + (x >> 4)) & U(0x0F0F0F0Fu);
-  x = x + (x >> 8);
-  x = x + (x >> 16);
-  return x & U(0x3Fu);
-}
-
-/// Count leading zeros over a uint32 vector. RAW count: a zero input yields 32
-/// (callers blend the AMD `0xFFFFFFFF`-on-zero sentinel themselves). Computed
-/// as 32 - popcount(MSB-smear), so a lane with its MSB at bit b yields 31 - b.
-inline native<uint32_t> clz_u32_simd(native<uint32_t> x) {
-  using U = native<uint32_t>;
-  U s = x;
-  s = s | (s >> 1);
-  s = s | (s >> 2);
-  s = s | (s >> 4);
-  s = s | (s >> 8);
-  s = s | (s >> 16);
-  return U(32u) - popcount_u32_simd(s);
-}
-
-/// Count trailing zeros over a uint32 vector. RAW count: a zero input yields 32
-/// (callers blend the AMD `0xFFFFFFFF`-on-zero sentinel themselves). Computed as
-/// popcount((x & -x) - 1): isolate the lowest set bit, then count the bits below.
-inline native<uint32_t> ctz_u32_simd(native<uint32_t> x) {
-  using U = native<uint32_t>;
-  U lowbit = x & (~x + U(1u));
-  return popcount_u32_simd(lowbit - U(1u));
-}
-
 /// @brief Widen unsigned E5M3 scale values from the low byte of each lane.
 inline native<float> fp8_e5m3_to_f32_simd(native<uint32_t> value) {
   using U = native<uint32_t>;
@@ -1041,37 +908,9 @@ inline native<float> round_to_nearest_even_simd(native<float> value) {
   return lower;
 }
 
-/// Round a normalized value scaled by 32767 or 65535 to the nearest integer,
-/// with ties to even. Clamp inputs to [minimum, 1] and convert NaNs to zero.
-/// An FP32 product can round onto an integer midpoint. The FMA residual
-/// distinguishes these false ties so the conversion rounds only once.
-inline native<float> round_normalized_simd(native<float> f, float scale, float minimum) {
-  using F = native<float>;
-  stdx::where(f < F(minimum), f) = F(minimum);
-  stdx::where(f > F(1.0f), f) = F(1.0f);
-  stdx::where(stdx::isnan(f), f) = F(0.0f);
-  const F product = f * F(scale);
-  const F residual = stdx::fma(f, F(scale), -product);
-  const F lower = stdx::floor(product);
-  const auto midpoint = product == lower + F(0.5f);
-  F rounded = rndne_simd(product);
-  stdx::where(midpoint && (residual < F(0.0f)), rounded) = lower;
-  stdx::where(midpoint && (residual > F(0.0f)), rounded) = lower + F(1.0f);
-  return rounded;
-}
-
-/// Convert to signed normalized integers in [-32767, 32767]; NaNs become zero.
-inline native<int32_t> cvt_pknorm_i16_f32_simd(native<float> f) {
-  return stdx::static_simd_cast<native<int32_t>>(round_normalized_simd(f, 32767.0f, -1.0f));
-}
-/// Convert to unsigned normalized integers in [0, 65535]; NaNs become zero.
-inline native<uint32_t> cvt_pknorm_u16_f32_simd(native<float> f) {
-  return stdx::static_simd_cast<native<uint32_t>>(round_normalized_simd(f, 65535.0f, 0.0f));
-}
-
 /// Vector port of the f32 `std::frexp` mantissa over raw float bits. Returns the
-/// significand m with |m| in [0.5, 1) such that input = m * 2^e (e via
-/// frexp_exp_f32_simd). Normal lanes force the exponent field to 126 and keep
+/// significand m with |m| in [0.5, 1) such that input = m * 2^e.
+/// Normal lanes force the exponent field to 126 and keep
 /// the mantissa; ±0 / Inf / NaN pass through unchanged (matching glibc frexp,
 /// which the scalar body calls unguarded); denormals are renormalized via the
 /// highest-set-bit index p = floor(log2(M)) (M < 2^24, so the int->float cast is
@@ -1096,27 +935,6 @@ inline native<float> frexp_mant_f32_simd(native<uint32_t> v) {
   // payload; qNaN inputs are unchanged by the idempotent OR.
   stdx::where((E == 255u) && (M != 0u), out) = v | U(0x00400000u);
   return std::bit_cast<native<float>>(out);
-}
-
-/// Vector port of the f32 `std::frexp` exponent over raw float bits, returned as
-/// the raw bits of the int32 result. Normal lanes give E - 126; denormals give
-/// p - 148 (p = floor(log2(M))); ±0 / Inf / NaN give 0 (the scalar body only
-/// calls frexp on finite non-zero inputs, leaving exp = 0 otherwise). Negative
-/// results carry the correct two's-complement bits. Bit-identical to the scalar
-/// v_frexp_exp_i32_f32 body.
-inline native<uint32_t> frexp_exp_f32_simd(native<uint32_t> v) {
-  using U = native<uint32_t>;
-  U E = (v >> 23) & U(0xFFu);
-  U M = v & U(0x7FFFFFu);
-  U normal = E - U(126u);
-  const native<float> mf = stdx::static_simd_cast<native<float>>(M);
-  const U p = (std::bit_cast<U>(mf) >> 23) - U(127u);
-  U dn = p - U(148u);
-  U out = normal;
-  stdx::where(E == 0u, out) = U(0u);             // ±0 (M==0); overwritten if denormal
-  stdx::where((E == 0u) && (M != 0u), out) = dn; // denormal exponent
-  stdx::where(E == 255u, out) = U(0u);           // Inf / NaN -> 0
-  return out;
 }
 
 /// 64-bit-lane port of the f64 `std::frexp` mantissa over native<double>. Same
@@ -1323,8 +1141,6 @@ inline native<double> trunc_simd(native<double>) { return {}; }
 inline native<double> ceil_simd(native<double>) { return {}; }
 inline native<double> floor_simd(native<double>) { return {}; }
 inline native<double> rndne_simd(native<double>) { return {}; }
-inline native<uint32_t> mul_hi_u32_simd(native<uint32_t>, native<uint32_t>) { return {}; }
-inline native<uint32_t> mul_hi_i32_simd(native<uint32_t>, native<uint32_t>) { return {}; }
 #endif
 
 } // namespace util

@@ -1,12 +1,13 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Emit shared/fract.h calls for V_FRACT_F16/F32/F64 on raw encodings.
+"""Emit the remaining legacy FP16 FRACT calls on raw encodings.
 
 Scalar bodies and VOP1 SIMD functors use the same helper with the same MODE
 policy, resolved once before the lane loop. VOP3 forms use
 shared/floating_operation.h to apply ABS/NEG before the operation and
-OMOD/CLAMP afterward, and run scalar only: VOP3 FRACT has no SIMD path.
+OMOD/CLAMP afterward, and run scalar only. FP32/FP64 instructions now use
+rj-arith, which owns their native SIMD paths.
 """
 
 from amdisa.codegen.execute import input_policy

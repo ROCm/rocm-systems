@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: MIT
 
 from types import SimpleNamespace
+from amdisa.__main__ import _PROFILES
 from amdisa.codegen.execute import ExecuteContext
+from amdisa.__main__ import _PROFILES
 
 
 from rj_arith_headers import public_headers
@@ -26,7 +28,7 @@ def context(arch, name, dst, src, *, is_vop3=False, result_writer=None):
     return ExecuteContext(
         inst=SimpleNamespace(name=name),
         sem=None,
-        profile=None,
+        profile=_PROFILES[arch.replace('_', '.')](),
         arch_name=arch,
         dst_ops=dst,
         src_ops=src,
@@ -73,7 +75,7 @@ def test_integer_compare_signatures_and_result_commit(name):
         assert 'RJ_ARITH_ALU_HIGH' not in implicit
     assert (
         gen_integer_compare(context('cdna2', name, [], ['a', 'b'], is_vop3=False))
-        is None
+        is not None
     )
 
 
@@ -180,7 +182,8 @@ def test_float_comparisons_preserve_policy_modifiers_and_state_signature(name):
         assert 'inst_.abs' not in implicit
         assert ('wf.set_exec(result)' in implicit) == name.startswith('V_CMPX_')
     assert (
-        gen_float_compare(context('cdna2', name, [], ['a', 'b'], is_vop3=False)) is None
+        gen_float_compare(context('cdna2', name, [], ['a', 'b'], is_vop3=False))
+        is not None
     )
 
 
@@ -217,7 +220,8 @@ def test_class_comparisons_use_one_word_class_masks_without_optional_state(name)
         assert 'arithmetic_reports_fp_status' not in body
         assert 'false, commit_result' in body
     assert (
-        gen_class_compare(context('cdna2', name, [], ['a', 'b'], is_vop3=False)) is None
+        gen_class_compare(context('cdna2', name, [], ['a', 'b'], is_vop3=False))
+        is not None
     )
 
 
@@ -233,18 +237,20 @@ def test_every_vopc_handler_routes_through_rj_arith(arch):
     assert 'ROCJITSU_TRY_SIMD' not in source
 
 
-@pytest.mark.parametrize('arch', ('cdna3', 'cdna4', 'cdna5'))
+@pytest.mark.parametrize(
+    'arch', ('cdna1', 'cdna2', 'cdna3', 'cdna4', 'cdna5', 'rdna1', 'rdna2', 'rdna3_5')
+)
 @pytest.mark.parametrize('cmpx', (False, True))
 @pytest.mark.parametrize('explicit_destination', (False, True))
 def test_cdna_integer_compare_architectural_destinations(
     arch, cmpx, explicit_destination
 ):
-    name = 'V_CMPX_EQ_U32' if cmpx else 'V_CMP_EQ_U32'
+    name = 'V_CMPX_EQ_U16' if cmpx else 'V_CMP_EQ_U16'
     dst = ['dst'] if explicit_destination else []
     body = gen_integer_compare(context(arch, name, dst, ['a', 'b']))
-    assert 'execute_compare<32>' in body
+    assert 'execute_compare<16>' in body
     assert ('wf.set_exec(result)' in body) == cmpx
-    writes_scalar = not cmpx or arch in ('cdna3', 'cdna4')
+    writes_scalar = not cmpx or _PROFILES[arch.replace('_', '.')]().cmpx_writes_vcc
     assert ('write_wave_mask_scalar(dst' in body) == (
         writes_scalar and explicit_destination
     )
@@ -299,13 +305,22 @@ def test_all_cdna_comparison_encodings_use_arithmetic_library(arch, count):
     assert checked == count
 
 
-@pytest.mark.parametrize('prefix', ['V_CMP', 'V_CMPX'])
-def test_tru_alias_matches_profile_spelling(prefix):
-    for arch in ['rdna1', 'rdna2', 'rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5']:
-        body = gen_float_compare(
-            context(arch, prefix + '_TRU_F32', ['d'], ['a', 'b'], is_vop3=True)
-        )
-        assert (body is None) == (arch in ('rdna3', 'rdna4'))
+@pytest.mark.parametrize('arch', ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'))
+@pytest.mark.parametrize('bits', (16, 32, 64))
+@pytest.mark.parametrize('cmpx', (False, True))
+def test_older_class_compare_profile_contract(arch, bits, cmpx):
+    name = ('V_CMPX' if cmpx else 'V_CMP') + f'_CLASS_F{bits}'
+    body = gen_class_compare(context(arch, name, ['dst'], ['a', 'b'], is_vop3=True))
+    assert f'execute_compare<{bits}, {min(bits, 32)}>' in body
+    assert ('wf.set_exec(result)' in body) == cmpx
+    profile = _PROFILES[arch.replace('_', '.')]()
+    assert ('write_wave_mask_scalar(dst' in body) == (
+        not cmpx or profile.cmpx_writes_vcc
+    )
+    assert ('RJ_ARITH_ALU_HIGH_A' in body) == (
+        bits == 16 and profile.uses_true16_vop3_opsel
+    )
+    assert 'excp_flag_user' not in body and 'trapsts' not in body
 
 
 @pytest.mark.parametrize('name', sorted(FLOAT_COMPARISONS))
@@ -336,21 +351,13 @@ def test_gfx908_float_comparisons_have_no_legacy_status_bypass(name):
             assert ('commit_result(result)' if vop3 else 'wf.set_exec(result)') in body
 
 
-@pytest.mark.parametrize('arch', ['rdna1', 'rdna2'])
-@pytest.mark.parametrize(
-    'name',
-    [
-        n
-        for n, (b, _) in FLOAT_COMPARISONS.items()
-        if b in (16, 32, 64) and '_TRU_' not in n
-    ],
-)
-def test_gfx10_float_comparisons_use_library_status(arch, name):
+@pytest.mark.parametrize('name', sorted(FLOAT_COMPARISONS))
+def test_gfx90a_float_comparisons_use_shared_numeric_policy(name):
     bits, constant = FLOAT_COMPARISONS[name]
     for vop3 in (False, True):
         body = gen_float_compare(
             context(
-                arch,
+                'cdna2',
                 name,
                 ['dst'] if vop3 else [],
                 ['a', 'b'],
@@ -358,16 +365,69 @@ def test_gfx10_float_comparisons_use_library_status(arch, name):
                 result_writer='commit_result' if vop3 else None,
             )
         )
-        api = 'rj_arith_' + name.lower()
-        assert f'{api}_w32_gfx10, {api}_w64_gfx10,' in body
+        api = 'rj_arith_' + name.lower().replace('_tru_', '_t_')
+        assert f'{api}_w32, {api}_w64,' in body
         assert f'execute_float_compare<{bits}>' in body
-        assert 'execute_compare_with_exceptions' not in body
-        assert ('RJ_ARITH_SEMANTICS_COMPATIBILITY' in body) == (constant and vop3)
-        assert ('RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL' in body) == (constant and vop3)
-        assert 'RJ_ARITH_ALU_HIGH' not in body
+        assert f'a, b, {str(constant).lower()},' in body
+        assert ('RJ_ARITH_ALU_HIGH_A' in body) == (bits == 16 and vop3)
+        assert (
+            'wf.set_exec(result)' in body or 'commit_result(result)' in body
+        ) == name.startswith('V_CMPX_')
         if name.startswith('V_CMPX_'):
-            assert ('commit_result' if vop3 else 'wf.set_exec(result)') in body
-            assert 'wf.set_vcc_mask(result)' not in body
+            assert (
+                'write_wave_mask_scalar(dst, wf, result)'
+                if vop3
+                else 'wf.set_vcc_mask(result)'
+            ) in body
+        assert 'execute_compare_with_exceptions' not in body
+
+
+@pytest.mark.parametrize('name', [n for n in FLOAT_COMPARISONS if '_TRU_' not in n])
+def test_gfx1150_comparison_bindings_own_signaling_policy(name):
+    bits, constant = FLOAT_COMPARISONS[name]
+    api = 'rj_arith_' + name.lower()
+    for vop3 in (False, True):
+        body = gen_float_compare(
+            context(
+                'rdna3_5',
+                name,
+                ['dst'] if vop3 else [],
+                ['a', 'b'],
+                is_vop3=vop3,
+                result_writer='commit_result' if vop3 else None,
+            )
+        )
+        assert f'{api}_w32_gfx1150, {api}_w64_gfx1150,' in body
+        assert f'execute_float_compare<{bits}>' in body
+        assert 'RJ_ARITH_FP_DX10_CLAMP_OFF' in body
+        assert '/*observe_full_exec=*/false' in body
+        assert ('RJ_ARITH_SEMANTICS_COMPATIBILITY' in body) == constant
+        assert ('RJ_ARITH_ALU_HIGH_A' in body) == (bits == 16 and vop3)
+        assert 'execute_compare_with_exceptions' not in body
+        if name.startswith('V_CMPX_'):
+            assert 'wf.set_vcc_mask' not in body
+
+
+@pytest.mark.parametrize('encoding', ['vopc', 'vop3'])
+def test_gfx1150_compare_translation_units_include_the_bridge_directly(encoding):
+    source = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/rdna3_5'
+        / f'{encoding}_exec.cpp'
+    ).read_text()
+    assert (
+        '#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_compare_exec.h"' in source
+    )
+    assert 'signaling_compare.h' not in source
+
+
+@pytest.mark.parametrize('prefix', ['V_CMP', 'V_CMPX'])
+def test_tru_alias_matches_profile_spelling(prefix):
+    for arch in ['rdna1', 'rdna2', 'rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5']:
+        body = gen_float_compare(
+            context(arch, prefix + '_TRU_F32', ['d'], ['a', 'b'], is_vop3=True)
+        )
+        assert (body is None) == (arch in ('rdna3', 'rdna4'))
 
 
 @pytest.mark.parametrize('arch', ['rdna1', 'rdna2'])
@@ -430,3 +490,37 @@ def test_gfx10_half_float_ownership_per_method(arch, encoding, count):
         assert 'RJ_ARITH_ALU_HIGH' not in body, match[1]
         checked += 1
     assert checked == count
+
+
+@pytest.mark.parametrize('arch', ['rdna1', 'rdna2'])
+@pytest.mark.parametrize(
+    'name',
+    [
+        n
+        for n, (b, _) in FLOAT_COMPARISONS.items()
+        if b in (16, 32, 64) and '_TRU_' not in n
+    ],
+)
+def test_gfx10_float_comparisons_use_library_status(arch, name):
+    bits, constant = FLOAT_COMPARISONS[name]
+    for vop3 in (False, True):
+        body = gen_float_compare(
+            context(
+                arch,
+                name,
+                ['dst'] if vop3 else [],
+                ['a', 'b'],
+                is_vop3=vop3,
+                result_writer='commit_result' if vop3 else None,
+            )
+        )
+        api = 'rj_arith_' + name.lower()
+        assert f'{api}_w32_gfx10, {api}_w64_gfx10,' in body
+        assert f'execute_float_compare<{bits}>' in body
+        assert 'execute_compare_with_exceptions' not in body
+        assert ('RJ_ARITH_SEMANTICS_COMPATIBILITY' in body) == (constant and vop3)
+        assert ('RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL' in body) == (constant and vop3)
+        assert 'RJ_ARITH_ALU_HIGH' not in body
+        if name.startswith('V_CMPX_'):
+            assert ('commit_result' if vop3 else 'wf.set_exec(result)') in body
+            assert 'wf.set_vcc_mask(result)' not in body

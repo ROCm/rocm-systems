@@ -8,6 +8,7 @@
 #include "fixtures/float_dot/rdna_matrix_sample.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -104,9 +105,10 @@ inline Registers float_input(uint32_t width, uint32_t bits, bool bfloat, bool gf
 
 // Execute one instruction, check selected destination words, and verify that
 // registers outside the destination range are unchanged.
-inline void check(rj_code_arch_t arch, uint32_t width, std::array<uint32_t, 2> words, uint32_t mode,
-                  const Registers &input, std::span<const Sample> expected,
-                  uint32_t output_words = 256) {
+inline void
+check(rj_code_arch_t arch, uint32_t width, std::array<uint32_t, 2> words, uint32_t mode,
+      const Registers &input, std::span<const Sample> expected, uint32_t output_words = 256,
+      amdgpu::ArithmeticSemantics semantics = amdgpu::ArithmeticSemantics::Compatibility) {
   SCOPED_TRACE(testing::Message() << "arch=" << arch << " width=" << width << " word0=" << std::hex
                                   << words[0] << " word1=" << words[1] << " mode=" << mode);
   ASSERT_NE(expected.size(), 0u);
@@ -115,6 +117,7 @@ inline void check(rj_code_arch_t arch, uint32_t width, std::array<uint32_t, 2> w
   cache.set_backing_memory(&memory);
   amdgpu::ComputeUnitCore::Config cfg{};
   cfg.arch = arch;
+  cfg.arithmetic = {semantics};
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -150,10 +153,11 @@ inline void check(rj_code_arch_t arch, uint32_t width, std::array<uint32_t, 2> w
   wave->halt();
 }
 // Allow short expectations to stay inline at their call sites.
-inline void check(rj_code_arch_t arch, uint32_t width, std::array<uint32_t, 2> words, uint32_t mode,
-                  const Registers &input, std::initializer_list<Sample> expected,
-                  uint32_t output_words = 256) {
+inline void
+check(rj_code_arch_t arch, uint32_t width, std::array<uint32_t, 2> words, uint32_t mode,
+      const Registers &input, std::initializer_list<Sample> expected, uint32_t output_words = 256,
+      amdgpu::ArithmeticSemantics semantics = amdgpu::ArithmeticSemantics::Compatibility) {
   check(arch, width, words, mode, input, std::span<const Sample>(expected.begin(), expected.size()),
-        output_words);
+        output_words, semantics);
 }
 } // namespace rocjitsu::matrix_test

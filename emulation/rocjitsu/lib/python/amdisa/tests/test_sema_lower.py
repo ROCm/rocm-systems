@@ -298,36 +298,6 @@ class TestLowerVectorAdd:
         assert 'static_cast<uint16_t>' not in result
         assert 'write_vop3_true16_dst' not in result
 
-    @pytest.mark.parametrize('operation', ['cubeid', 'cubesc', 'cubetc', 'cubema'])
-    def test_cube_output_scaling_uses_instruction_policy(self, operation: str):
-        cube = SemaNode(
-            SemaNodeKind.CALL,
-            call_name=operation,
-            ty=SemaType.F32,
-            children=(
-                SemaNode(SemaNodeKind.ID, id_name=operation),
-                *(
-                    SemaNode(SemaNodeKind.LIT, lit_value=value, ty=SemaType.F32)
-                    for value in ('1.0', '-2.0', '0.5')
-                ),
-            ),
-        )
-        node = SemaNode(
-            SemaNodeKind.CALL,
-            call_name='apply_omod',
-            ty=SemaType.F32,
-            children=(SemaNode(SemaNodeKind.ID, id_name='apply_omod'), cube),
-        )
-
-        result = _lower_apply_omod(node, LoweringContext(exec_model=ExecModel.VECTOR))
-
-        assert 'cube::apply_omod(' in result
-        assert 'wf.fp_round_mode_f32()' in result
-        assert 'inst_.omod' in result
-        assert 'effective_omod' not in result
-        assert 'fp_denorm_mode' not in result
-        assert '*=' not in result
-
     def test_apply_clamp_uses_architecture_mode_policy(self):
         node = SemaNode(
             SemaNodeKind.CALL,
@@ -928,29 +898,6 @@ class TestLowerVectorAdd:
         assert 'clamp_floating_result' not in result
         assert 'finalize_omod_' not in result
 
-    def test_vop3_f16_transcendental_overflows_to_nearest(self):
-        rcp = SemaNode(
-            SemaNodeKind.CALL,
-            call_name='rcp',
-            ty=SemaType.F16,
-            children=(
-                SemaNode(SemaNodeKind.ID, id_name='rcp'),
-                _cast(_src(0), SemaType.F16),
-            ),
-        )
-        body = SemaNode(
-            SemaNodeKind.ASSIGN,
-            children=(_cast(_dst(0), SemaType.F16), self._output_modified(rcp)),
-        )
-        result = lower_sema_block(SemaBlock('V_RCP_F16', ExecModel.VECTOR, body))
-
-        assert (
-            'amdgpu::transcendental_output_modifier_policy<amdgpu::fp_format::F16>'
-            in result
-        )
-        assert 'amdgpu::output_modifier::apply<amdgpu::fp_format::F16>(' in result
-        assert 'apply_omod_f16' not in result
-
     @pytest.mark.parametrize(
         ('result_type', 'mode'),
         [
@@ -988,30 +935,18 @@ class TestLowerVectorAdd:
         if result_type == SemaType.F16:
             assert result.index('util::f16_to_f32(') < result.index(flush)
 
-    @pytest.mark.parametrize('operation', ['add', 'rcp'])
-    def test_f16_helpers_receive_flushed_sources(self, operation: str):
-        source = _cast(_src(0), SemaType.F16)
-        if operation == 'add':
-            value = SemaNode(
-                SemaNodeKind.ADD,
-                ty=SemaType.F16,
-                children=(source, _cast(_src(1), SemaType.F16)),
-            )
-        else:
-            value = SemaNode(
-                SemaNodeKind.CALL,
-                call_name='rcp',
-                ty=SemaType.F16,
-                children=(SemaNode(SemaNodeKind.ID, id_name='rcp'), source),
-            )
+    def test_f16_add_receives_flushed_sources(self):
+        value = SemaNode(
+            SemaNodeKind.ADD,
+            ty=SemaType.F16,
+            children=(_cast(_src(0), SemaType.F16), _cast(_src(1), SemaType.F16)),
+        )
         body = SemaNode(
             SemaNodeKind.ASSIGN, children=(_cast(_dst(0), SemaType.F16), value)
         )
         result = lower_sema_block(SemaBlock('V_F16', ExecModel.VECTOR, body))
 
-        # The helpers no longer flush; each F16 source is flushed before widening.
-        flushes = result.count('input_denormal::flush_input<amdgpu::fp_format::F16>(')
-        assert flushes == (2 if operation == 'add' else 1)
+        assert result.count('input_denormal::flush_input<amdgpu::fp_format::F16>(') == 2
         assert 'Policy::make(wf.fp_denorm_mode_f16_f64())' in result
 
     @pytest.mark.parametrize('kind', [SemaNodeKind.FRACT, SemaNodeKind.LDEXP])

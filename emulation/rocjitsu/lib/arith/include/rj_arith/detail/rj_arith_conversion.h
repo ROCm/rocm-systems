@@ -262,8 +262,8 @@ int rj_arith_v_cvt_norm_u16_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t
 // DPP8/DPP16 permute A before conversion and modifiers; B stays in its
 // original lane. Pack two FP32 source VGPRs into one 16-bit-pair destination: A goes to the
 // low half, B to the high half. Supports ABS/NEG on A/B, full EXEC masking and
-// whole-register aliases. Loose semantics only. CLAMP is accepted without
-// numeric effect. The FP16 RTZ form also accepts and ignores OMOD, truncates
+// whole-register aliases. Loose semantics only. Outside legacy CVT_SDWA below,
+// CLAMP has no numeric effect. The FP16 RTZ form accepts and ignores OMOD, truncates
 // toward zero, saturates finite overflow and quiets NaNs while retaining payload
 // bits. Integer forms truncate and saturate to the destination range, with NaNs
 // mapping to zero. RJ_ARITH_FP16_OVFL has no effect. Results do not depend on host
@@ -274,6 +274,8 @@ int rj_arith_v_cvt_norm_u16_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t
 // accept those controls without numerical effect. Guest IEEE has no effect.
 // Loose calls leave FP status untouched; exact reporting is unsupported.
 
+// Unsuffixed RTZ accepts CVT_SDWA: effective OMOD finalizes tiny/zero halves without
+// multiplying; CLAMP and guest IEEE/DX10 gates apply only to that encoding.
 int rj_arith_v_cvt_pk_rtz_f16_f32_w32(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
@@ -519,6 +521,8 @@ int rj_arith_v_cvt_f16_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
                                      uint32_t *const *d, const uint32_t *const *a,
                                      uint32_t *excp_flag_user);
 
+// Unsuffixed F16-to-F32 entry points accept CVT_SDWA for inherited NaN quieting
+// during active SDWA output scaling; guest output controls still gate OMOD.
 int rj_arith_v_cvt_f32_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 
@@ -961,6 +965,9 @@ int rj_arith_v_cvt_pkaccum_u8_f32_w64(uint64_t flags, uint64_t exec_mask,
 // Packed RNE supports ABS/NEG on A/B; single-result SR supports ABS/NEG on A.
 // Packed SR consumes the low/high 16-bit addends of C independently and ignores
 // source sign modifiers. Other arithmetic modifiers are ignored; inactive lanes remain unchanged.
+// Widening with CVT_SDWA enables inherited floating output controls and their guest
+// FP32 policies. Compatibility selects Loose; strict empirical modes are unsupported
+// for this unqualified SDWA policy. Ordinary widening retains its existing qualification.
 int rj_arith_v_cvt_f32_bf16_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode,
                                 uint32_t *const *d, const uint32_t *const *a);
 int rj_arith_v_cvt_f32_bf16_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode,

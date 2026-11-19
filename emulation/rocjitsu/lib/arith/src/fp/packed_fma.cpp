@@ -7,6 +7,7 @@
 #include "fp/packed_fma.h"
 #include "common/alu.h"
 #include "common/packed_alu.h"
+#include "common/sdwa_output.h"
 #include "common/validation.h"
 #include "fp/half_fma_scalar.h"
 #include "rj_arith/detail/rj_arith_fp.h"
@@ -33,8 +34,8 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_t
       RJ_ARITH_PK_HI_C_LOW;
   constexpr uint32_t fmac_modifiers = RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_ABS_B | RJ_ARITH_ALU_NEG_A |
                                       RJ_ARITH_ALU_NEG_B | RJ_ARITH_ALU_CLAMP;
-  constexpr uint32_t allowed =
-      (Accumulate ? fmac_modifiers : packed_modifiers) | (Cdna ? RJ_ARITH_ALU_OMOD_MASK : 0);
+  constexpr uint32_t allowed = (Accumulate ? fmac_modifiers : packed_modifiers) |
+                               (Cdna ? RJ_ARITH_ALU_OMOD_MASK | RJ_ARITH_ALU_SDWA : 0);
   if (int error = rocjitsu::arith::validate(flags, instruction_flags & ~allowed,
                                             fp_flags | (Rdna3 ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0))) {
     return error;
@@ -82,12 +83,13 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_t
     return RJ_ARITH_SUCCESS;
   }
 #endif
+  const auto output = rocjitsu::arith::sdwa_output_policy(flags, instruction_flags);
   uint32_t exceptions = 0;
   uint32_t result[32];
   for (int lane = 0; lane < 32; ++lane) {
     result[lane] = 0;
     for (int half = 0; half < 2; ++half) {
-      uint32_t m = modes[half];
+      uint32_t m = modes[half] & ~RJ_ARITH_ALU_SDWA;
       uint16_t x = uint16_t(a[0][lane] >> (m & RJ_ARITH_ALU_HIGH_A ? 16 : 0));
       uint16_t y = uint16_t(b[0][lane] >> (m & RJ_ARITH_ALU_HIGH_B ? 16 : 0));
       uint16_t z = uint16_t(c[0][lane] >> (m & RJ_ARITH_ALU_HIGH_C ? 16 : 0));
@@ -95,6 +97,9 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_t
           uint32_t(rocjitsu::arith::half_fma_value<Rdna3>(
               x, y, z, m, flags, report && ((exec_mask >> lane) & 1) ? &exceptions : nullptr))
           << (16 * half);
+    }
+    if (instruction_flags & RJ_ARITH_ALU_SDWA) {
+      result[lane] = rocjitsu::arith::sdwa_finalize_packed_f16(result[lane], output);
     }
   }
   for (int lane = 0; lane < 32; ++lane) {

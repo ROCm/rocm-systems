@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 
-from amdisa.codegen.execute.rj_arith_ds import DS_NAMES, gen_ds
+from amdisa.codegen.execute.rj_arith_ds import DS_ARCHITECTURES, DS_NAMES, gen_ds
 
 
 def context(arch, name, dst, src):
@@ -28,7 +28,7 @@ def context(arch, name, dst, src):
     )
 
 
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'])
+@pytest.mark.parametrize('arch', DS_ARCHITECTURES)
 @pytest.mark.parametrize('name', sorted(DS_NAMES))
 def test_ds_routing_preserves_offsets_and_selects_wave64_architecture(arch, name):
     sources = ['addr'] if name == 'DS_SWIZZLE_B32' else ['addr', 'data0']
@@ -42,22 +42,26 @@ def test_ds_routing_preserves_offsets_and_selects_wave64_architecture(arch, name
     assert 'arithmetic_reports_fp_status' not in body
     assert 'VectorMemState' not in body
     if name != 'DS_SWIZZLE_B32':
-        suffix = '_w64_gfx12' if arch != 'rdna3' and '_FI_' not in name else '_w64'
+        suffix = (
+            '_w64_gfx12'
+            if arch not in ('rdna1', 'rdna2', 'rdna3', 'rdna3_5') and '_FI_' not in name
+            else '_w64'
+        )
         assert 'rj_arith_' + name.lower() + suffix in body
-    assert gen_ds(context('cdna2', name, ['vdst'], sources)) is None
+    assert gen_ds(context('unknown', name, ['vdst'], sources)) is None
 
 
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+@pytest.mark.parametrize('arch', DS_ARCHITECTURES)
 def test_generated_ds_register_operations_use_rj_arith_but_memory_stays_local(arch):
     root = (
         Path(__file__).resolve().parents[3]
         / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
     )
-    encoding = 'ds' if arch == 'rdna3' else 'vds'
+    encoding = 'vds' if arch in ('rdna4', 'cdna5') else 'ds'
     body = (root / arch / f'{encoding}_exec.cpp').read_text()
     assert body.count('amdgpu::arith::execute_ds_swizzle(') == 1
     assert body.count('amdgpu::arith::execute_ds_permute<') == (
-        2 if arch == 'rdna3' else 3
+        3 if arch in ('rdna4', 'cdna5') else 2
     )
     assert 'amdgpu::execute_ds_swizzle_b32_' not in body
     assert 'amdgpu::execute_ds_permute_b32_' not in body

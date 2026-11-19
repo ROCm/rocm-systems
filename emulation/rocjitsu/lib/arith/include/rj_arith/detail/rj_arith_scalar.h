@@ -1227,6 +1227,101 @@ int rj_arith_v_s_sqrt_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, ui
 int rj_arith_v_s_sqrt_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
                                   uint32_t a, uint32_t *excp_flag_user);
 
+// gfx1150 scalar FP inherits the existing Rocjitsu software model. Guest IEEE controls
+// NaN quieting where applicable; narrowing always quiets. MIN/MAX use legacy selection.
+// Compatibility accumulates FP status, Loose/allow-Loose may omit it. Strict empirical modes are
+// not qualified. Arithmetic/conversions accept guest rounding where their destination rounds; all
+// forms accept guest denormal controls. FP16 overflow saturation follows MODE.
+int rj_arith_s_add_f16_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
+                               uint32_t b, uint32_t *fp_status);
+
+int rj_arith_s_sub_f16_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
+                               uint32_t b, uint32_t *fp_status);
+
+int rj_arith_s_mul_f16_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
+                               uint32_t b, uint32_t *fp_status);
+
+int rj_arith_s_min_f16_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
+                               uint32_t b, uint32_t *fp_status);
+
+int rj_arith_s_max_f16_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
+                               uint32_t b, uint32_t *fp_status);
+
+int rj_arith_s_add_f32_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
+                               uint32_t b, uint32_t *fp_status);
+
+int rj_arith_s_sub_f32_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
+                               uint32_t b, uint32_t *fp_status);
+
+int rj_arith_s_mul_f32_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
+                               uint32_t b, uint32_t *fp_status);
+
+int rj_arith_s_min_f32_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
+                               uint32_t b, uint32_t *fp_status);
+
+int rj_arith_s_max_f32_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
+                               uint32_t b, uint32_t *fp_status);
+
+int rj_arith_s_fmac_f16_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
+                                uint32_t b, uint32_t *fp_status);
+
+int rj_arith_s_fmac_f32_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
+                                uint32_t b, uint32_t *fp_status);
+
+int rj_arith_s_fmaak_f32_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, uint32_t b, uint32_t c, uint32_t *fp_status);
+
+int rj_arith_s_fmamk_f32_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, uint32_t b, uint32_t c, uint32_t *fp_status);
+
+int rj_arith_s_ceil_f16_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
+                                uint32_t *fp_status);
+
+int rj_arith_s_floor_f16_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, uint32_t *fp_status);
+
+int rj_arith_s_trunc_f16_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, uint32_t *fp_status);
+
+int rj_arith_s_rndne_f16_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, uint32_t *fp_status);
+
+int rj_arith_s_ceil_f32_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
+                                uint32_t *fp_status);
+
+int rj_arith_s_floor_f32_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, uint32_t *fp_status);
+
+int rj_arith_s_trunc_f32_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, uint32_t *fp_status);
+
+int rj_arith_s_rndne_f32_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, uint32_t *fp_status);
+
+int rj_arith_s_cvt_f32_i32_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                   uint32_t a, uint32_t *fp_status);
+
+int rj_arith_s_cvt_f32_u32_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                   uint32_t a, uint32_t *fp_status);
+
+int rj_arith_s_cvt_i32_f32_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                   uint32_t a, uint32_t *fp_status);
+
+int rj_arith_s_cvt_u32_f32_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                   uint32_t a, uint32_t *fp_status);
+
+int rj_arith_s_cvt_f16_f32_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                   uint32_t a, uint32_t *fp_status);
+
+int rj_arith_s_cvt_f32_f16_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                   uint32_t a, uint32_t *fp_status);
+
+int rj_arith_s_cvt_hi_f32_f16_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                      uint32_t a, uint32_t *fp_status);
+
+int rj_arith_s_cvt_pk_rtz_f16_f32_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                          uint32_t a, uint32_t b, uint32_t *fp_status);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif
