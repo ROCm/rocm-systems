@@ -24,6 +24,7 @@ from test_fake_gpu import (  # noqa: F401 (tools is a fixture)
     _created_id,
     tools,
 )
+from test_fake_gpu_job_limits import JOB_FIELD_GROUP, RDC_ST_OK, Client
 
 MASK = "amdsmi_set_gpu_event_notification_mask"
 INIT = "amdsmi_init_gpu_event_notification"
@@ -192,15 +193,22 @@ def test_the_last_job_on_a_gpu_stops_its_process_events(tools, tmp_path):
 
 
 def test_a_job_stop_that_fails_still_stops_its_process_events(tools, tmp_path):
-    # The job's group is gone, so the stop fails at the job's unwatch; it released the job's
-    # listeners before that.
+    # A client unwatched the job fields, and rdcd drops an ended watch within about a second,
+    # so the stop fails at the job's unwatch; it released the job's listeners before that.
     with _rdcd(tools, tmp_path) as d:
         gid = _group(d, "job", "0")
         d.ok("stats", "-s", "job", "-g", gid)
-        d.ok("group", "-d", gid)
+        client = Client(d)
+        try:
+            deadline = time.monotonic() + 10 * FACTOR
+            while client.unwatch(int(gid), JOB_FIELD_GROUP) == RDC_ST_OK:
+                assert time.monotonic() < deadline, "rdcd kept the job's watch"
+                time.sleep(0.1)
+        finally:
+            client.close()
         since = len(d.calls())
         r = d.rdci("stats", "-x", "job")
-        assert r.returncode != 0, f"the stop of a job without its group succeeded\n{r.stdout}"
+        assert r.returncode != 0, f"the stop of a job without its watch succeeded\n{r.stdout}"
         calls = [(a, g) for a, g, _ in d.calls()[since:]]
         assert (STOP, 0) in calls, calls
 

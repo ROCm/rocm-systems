@@ -116,14 +116,17 @@ class RdcWatchTableImpl : public RdcWatchTable {
   //!< Makes room for a job start when every kept job runs: stops the stats of
   //!< the running job, started first, whose GPU group was destroyed or runs a
   //!< later job. A later job keeps its watch; a destroyed group's watch is
-  //!< unwatched, which turns it off even when rdc_field_unwatch() fails. A
-  //!< start that succeeds then removes the job as the job that stopped first.
+  //!< unwatched, and its stats stop even when the unwatch fails. A start that
+  //!< succeeds then removes the job as the job that stopped first.
   //!< Returns false if there is no such job or its stop fails. The caller
   //!< holds job_mutex_.
   bool stop_orphaned_job(const rdc_gpu_gauges_t& gpu_gauge);
 
-  //!< Helper function to Update the fields_in_table when unwatch tables
-  rdc_status_t update_field_in_table_when_unwatch(const RdcFieldGroupKey& entry);
+  //!< Sets the update frequency of each watched field from the watches that hold it, and stops
+  //!< watching the fields that no watch holds, in the telemetry module too. A watch whose group
+  //!< or field group is gone holds no field and loses its event listeners, but stays in
+  //!< watch_table_ until it is unwatched. The caller holds watch_mutex_.
+  void refresh_fields_to_watch();
 
   //!< Helper function to clean up the watch table and cache
   void clean_up();
@@ -145,11 +148,12 @@ class RdcWatchTableImpl : public RdcWatchTable {
   rdc_status_t get_fields_from_group(rdc_gpu_group_t group_id, rdc_field_grp_t field_group_id,
                                      std::vector<RdcFieldKey>& fields);  // NOLINT
 
-  bool is_job_watch_field(uint32_t gpu_index, rdc_field_t field_id,
-                          std::string& job_id) const;  // NOLINT
+  //!< The jobs whose fields hold (gpu_index, field_id). The caller holds watch_mutex_.
+  std::vector<std::string> jobs_holding(uint32_t gpu_index, rdc_field_t field_id) const;
 
-  bool is_health_watch_field(uint32_t gpu_index, rdc_field_t field_id,
-                             rdc_gpu_group_t& group_id) const;
+  //!< The groups whose health watch holds (gpu_index, field_id). The caller holds watch_mutex_.
+  std::vector<rdc_gpu_group_t> health_watches_holding(uint32_t gpu_index,
+                                                      rdc_field_t field_id) const;
 
   rdc_status_t rdc_notif_update_cache(rdc_evnt_notification_t* events, uint32_t num_events);
   //!< The function will be pass as the callback for bulk fetch
@@ -197,7 +201,8 @@ class RdcWatchTableImpl : public RdcWatchTable {
   //!< The settings for each field can be deduced from watch_table. But every
   //!< rdc_field_update_all() call needs to deduce them. To improve the
   //!< performance, the fields_to_watch_ is used to track the field settings.
-  //!< Those settings will only be updated when watching or unwatching.
+  //!< Those settings are updated when watching or unwatching, and once a
+  //!< second by clean_up().
   std::map<RdcFieldKey, FieldSettings> fields_to_watch_;
 
   //!< The health watch table to store the health settings.
