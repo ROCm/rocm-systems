@@ -11,4 +11,3 @@
 # the standard labels ("dbgapi", "unit", OS label), C++17 settings,
 # GTest/GMock linkage, and CTest working directory.
 add_dbgapi_unit_test(dbgapi_smoke_test SOURCES smoke_test.cpp)
-
