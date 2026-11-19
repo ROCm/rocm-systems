@@ -1,7 +1,7 @@
 # ROCdbgapi test suite
 
 This directory holds the GoogleTest-based test suite for the
-`amd-dbgapi` library.  Currently, there is only infrastructure
+`amd-dbgapi` library. Currently, there is only infrastructure
 for unit tests that do not require a GPU.
 The directory structure is as follows:
 
@@ -14,7 +14,7 @@ test/
 
 ## Building
 
-The suite is off by default.  `ENABLE_TESTS` is the master switch that
+The suite is off by default. `ENABLE_TESTS` is the master switch that
 enables every tier. `ENABLE_UNIT_TESTS` enables just the unit tier and
 can be set independently of the master switch. Since the unit tier is
 the only one that exists today, the two options are currently
@@ -55,11 +55,11 @@ Individual binaries accept the standard GoogleTest flags
 Labels are applied automatically by the `add_dbgapi_*_test()` helpers.
 Conventions used across the suite:
 
-| Label                    | Meaning                                              |
-| ----------------------   | ---------------------------------------------------- |
-| `dbgapi`                 | Any rocdbgapi test (applied to every target).        |
-| `unit`                   | Unit-tier test.                                      |
-| `os-linux`, `os-windows` | OS-specific tests.                                   |
+| Label                    | Meaning                                       |
+| ------------------------ | --------------------------------------------- |
+| `dbgapi`                 | Any rocdbgapi test (applied to every target). |
+| `unit`                   | Unit-tier test.                               |
+| `os-linux`, `os-windows` | OS-specific tests.                            |
 
 ## Adding a new unit test
 
@@ -87,8 +87,8 @@ source does not break test builds.  The public library is still built with
 
 Optional knobs:
 
-* `LABELS extra-label ...`: extra CTest labels.
-* `LIBS extra::link ...`: extra link dependencies.
+- `LABELS extra-label ...`: extra CTest labels.
+- `LIBS extra::link ...`: extra link dependencies.
 
 ## Layout reference
 
@@ -101,4 +101,3 @@ test/
 │   ├── *_test.cpp              One file per subsystem under test.
 │   └── support/                Mocks (MockOsDriver), shared fixtures.
 ```
-
