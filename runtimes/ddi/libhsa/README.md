@@ -181,9 +181,12 @@ HSA headers or make the current SDK wrappers descriptor-aware.
 Availability depends on the selected agent and driver. Query system and agent
 extensions, memory pools, and queue capabilities before relying on a feature.
 The finalizer extension and external semaphore operations are not supported.
-`hsa_amd_svm_prefetch_async` requires confirmed migration completion and reports
-`HSA_STATUS_ERROR_NOT_SUPPORTED` on the current Linux KFD backend, which only
-provides best-effort prefetch completion.
+`hsa_amd_svm_prefetch_async` requires confirmed migration completion. Linux KFD
+supports this only when the native endpoint advertises the explicitly negotiated
+checked-prefetch protocol. Ordinary drivers and inactive contexts report
+`HSA_STATUS_ERROR_NOT_SUPPORTED`. The local kernel correction is implemented;
+its hardware qualification status is recorded in
+[the SVM investigation](../../docs/testing/rocr-gfx1201-svm-prefetch.md).
 
 Default fatal handling captures GPU core dumps before aborting on unhandled
 AQL queue errors and registered system events. It does not write to application
