@@ -1007,6 +1007,7 @@ TEST(HostDispatchManifestMicrotest, ABinaryNamedOutsideTheConventionIsStillFront
 
 TEST(HostDispatchManifestMicrotest, ABinaryTheManifestNamesButThatIsMissingWillNotList)
 {
+    const ScopedStopHandling handling;
     // A name with no file behind it has to reach the report rather than quietly shrink the run.
     // It needs no handling of its own: the listing is the first thing done to every binary, and
     // this is what that listing says, which enumerate() already turns into a named failure (see
@@ -1115,6 +1116,7 @@ constexpr std::chrono::seconds kListingSlack{5};
 
 TEST(HostDispatchListTestsMicrotest, ABinaryThatAnswersIsListed)
 {
+    const ScopedStopHandling handling;
     const ScopedDir dir("rccl-host-dispatch-listing", RCCL_HOST_TEST_BUILD_DIR);
     const std::string script = addScript(dir, "lister", "echo 'Suite.'\necho '  Case'\n");
     ASSERT_FALSE(script.empty()) << "cannot execute a file written under " << dir.path();
@@ -1127,6 +1129,7 @@ TEST(HostDispatchListTestsMicrotest, ABinaryThatAnswersIsListed)
 
 TEST(HostDispatchListTestsMicrotest, WhatABinarySaysOnStderrStaysOutOfItsListing)
 {
+    const ScopedStopHandling handling;
     // The listing is parsed, and a line of noise in the middle of it is indistinguishable from a
     // suite name. This used to be a 2>/dev/null in a shell command; the shell has gone, so the
     // redirection has to be done to the child itself.
@@ -1143,6 +1146,7 @@ TEST(HostDispatchListTestsMicrotest, WhatABinarySaysOnStderrStaysOutOfItsListing
 
 TEST(HostDispatchListTestsMicrotest, ABinaryThatWillNotAnswerIsKilledAtItsTimeout)
 {
+    const ScopedStopHandling handling;
     // The failure this exists for. A listing was a popen(), which hands back no pid, so there
     // was nothing to time out and nothing to signal: one binary hanging in a static constructor
     // hung the entire run, and the child timeout the caller had set did not apply to it.
@@ -1980,12 +1984,14 @@ TEST(HostDispatchLcovMicrotest, ATracefilePathWithAQuoteInItStaysData)
 
 TEST(HostDispatchShellMicrotest, ACommandsExitStatusIsWhatIsReported)
 {
+    const ScopedStopHandling handling;
     EXPECT_EQ(runShell("exit 7"), 7);
     EXPECT_EQ(runShell("true"), 0);
 }
 
 TEST(HostDispatchShellMicrotest, ACommandKilledBySignalIsReportedAsAFailure)
 {
+    const ScopedStopHandling handling;
     // The caller only decides whether this binary's coverage survives into the tracefile, and a
     // command that died on a signal produced nothing worth keeping either way.
     EXPECT_NE(runShell("kill -TERM $$"), 0);
@@ -3100,9 +3106,7 @@ TEST(HostDispatchReapMicrotest, AnUnboundedWaitIsWokenByTheChildItIsWaitingFor)
     EXPECT_EQ(reaped, pid);
     EXPECT_EQ(exit.status, 3);
     EXPECT_FALSE(exit.signalled) << "a child that exited by itself was reported as killed";
-    // Below kWakeRecheckInterval deliberately. That safety net would otherwise collect the
-    // child a second late and this would pass with nothing waking the wait at all, which is
-    // the arrangement the test exists to rule out.
+    // An unbounded wait has no timeout of its own, so without the wake it would never return.
     EXPECT_LT(elapsed, std::chrono::milliseconds{500})
         << "the exit took " << elapsed.count() << " ms to wake an unbounded wait";
 }

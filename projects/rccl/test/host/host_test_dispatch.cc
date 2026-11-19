@@ -80,12 +80,6 @@ constexpr std::string_view kChildTimeoutEnv = "RCCL_HOST_DISPATCH_CHILD_TIMEOUT"
 // Time between SIGTERM and SIGKILL.
 constexpr std::chrono::seconds kTerminateGrace{5};
 
-// Poll interval used when there is no wake pipe.
-constexpr std::chrono::milliseconds kReapPollInterval{5};
-
-// Longest a wait sleeps before looking again, even with a wake pipe.
-constexpr std::chrono::milliseconds kWakeRecheckInterval{1000};
-
 // Source files kept out of the exported coverage.
 constexpr std::string_view kCoverageIgnoreRegex = "(/test/|nvtx)";
 
@@ -1083,7 +1077,9 @@ public:
             return;
         }
         if (pipe2(fds_, O_CLOEXEC | O_NONBLOCK) != 0) {
-            fds_[0] = fds_[1] = -1;
+            fmt::print(stderr, "host-test-dispatch: cannot create wake pipe: {}\n",
+                       std::strerror(errno));
+            std::exit(1);
         }
     }
 
@@ -1092,9 +1088,6 @@ public:
     // Async-signal-safe.
     void wake() const
     {
-        if (fds_[1] < 0) {
-            return;
-        }
         const char byte = 1;
         const ssize_t written = ::write(fds_[1], &byte, 1);
         (void)written;
@@ -1160,31 +1153,44 @@ void signalChildGroup(pid_t pid, int signal)
     ::kill(pid, signal);
 }
 
-// Sleep until a signal handler wakes the pipe or *until* passes.
+// The TERM, grace, KILL sequence for one child: each advance() sends the next signal and sets
+// *due* to when the one after it is owed.
+class Escalation {
+public:
+    explicit Escalation(std::chrono::steady_clock::time_point due) : due_(due) {}
+
+    std::chrono::steady_clock::time_point due() const { return due_; }
+    bool termed() const { return signalsSent_ > 0; }
+    bool killed() const { return signalsSent_ > 1; }
+
+    void advance(pid_t pid, std::chrono::steady_clock::time_point now,
+                 const std::function<void(pid_t, int)> &kill)
+    {
+        kill(pid, termed() ? SIGKILL : SIGTERM);
+        ++signalsSent_;
+        due_ = now + kTerminateGrace;
+    }
+
+private:
+    std::chrono::steady_clock::time_point due_;
+    int signalsSent_ = 0;
+};
+
+// Sleep until a signal handler wakes the pipe or *until* passes. Every event a wait cares about
+// (a stop, a child exit) writes the pipe, so with no *until* this blocks until one does.
 void waitForWake(std::optional<std::chrono::steady_clock::time_point> until)
 {
-    const auto remaining = [&until]() -> int {
-        if (!until) {
-            return static_cast<int>(kWakeRecheckInterval.count());
-        }
+    int timeout = -1;
+    if (until) {
         const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
             *until - std::chrono::steady_clock::now());
-        return static_cast<int>(
-            std::min(kWakeRecheckInterval.count(),
-                     std::max<std::chrono::milliseconds::rep>(0, left.count())));
-    };
-
-    if (g_wake.readFd() < 0) {
-        std::this_thread::sleep_for(
-            std::min<std::chrono::milliseconds>(kReapPollInterval,
-                                                std::chrono::milliseconds{remaining()}));
-        return;
+        timeout = static_cast<int>(std::max<std::chrono::milliseconds::rep>(0, left.count()));
     }
 
     struct pollfd woken {};
     woken.fd = g_wake.readFd();
     woken.events = POLLIN;
-    if (::poll(&woken, 1, remaining()) > 0) {
+    if (::poll(&woken, 1, timeout) > 0) {
         g_wake.drain();
     }
 }
@@ -1289,24 +1295,19 @@ std::optional<std::string> listTestsOutput(const std::string &path, std::chrono:
         return std::nullopt;
     }
 
-    const std::optional<std::chrono::steady_clock::time_point> due =
-        timeout.count() > 0
-            ? std::optional<std::chrono::steady_clock::time_point>(
-                  std::chrono::steady_clock::now() + timeout)
-            : std::nullopt;
-
-    bool killed = false;
+    const bool timed = timeout.count() > 0;
+    Escalation escalation(std::chrono::steady_clock::now() + timeout);
     for (;;) {
         std::optional<std::chrono::milliseconds> within;
-        if (due) {
+        if (timed || escalation.termed()) {
             within = std::max(std::chrono::milliseconds{0},
                               std::chrono::duration_cast<std::chrono::milliseconds>(
-                                  *due - std::chrono::steady_clock::now()));
+                                  escalation.due() - std::chrono::steady_clock::now()));
         }
         ChildExit exit;
         const pid_t finished = reapAnyChild(exit, within);
         if (finished == pid) {
-            return (exit.status == 0 && !killed)
+            return (exit.status == 0 && !escalation.termed())
                        ? std::optional<std::string>(readFile(listing.path()))
                        : std::nullopt;
         }
@@ -1316,35 +1317,12 @@ std::optional<std::string> listTestsOutput(const std::string &path, std::chrono:
         if (finished > 0) {
             continue;
         }
-        // Timed out or stopped.
-        signalChildGroup(pid, SIGTERM);
-        killed = true;
-        break;
+        // Timed out, stopped, or a grace period ran out.
+        if (escalation.killed()) {
+            return std::nullopt;
+        }
+        escalation.advance(pid, std::chrono::steady_clock::now(), signalChildGroup);
     }
-
-    std::chrono::steady_clock::time_point grace =
-        std::chrono::steady_clock::now() + kTerminateGrace;
-    bool killedOutright = false;
-    for (;;) {
-        ChildExit exit;
-        const pid_t collected = reapAnyChild(
-            exit, std::max(std::chrono::milliseconds{0},
-                           std::chrono::duration_cast<std::chrono::milliseconds>(
-                               grace - std::chrono::steady_clock::now())));
-        if (collected == pid || collected < 0) {
-            break;
-        }
-        if (collected > 0) {
-            continue;
-        }
-        if (killedOutright) {
-            break;
-        }
-        signalChildGroup(pid, SIGKILL);
-        killedOutright = true;
-        grace = std::chrono::steady_clock::now() + kTerminateGrace;
-    }
-    return std::nullopt;
 }
 
 // The directory LLVM_PROFILE_FILE points into, or empty when coverage is not being collected.
@@ -1367,8 +1345,8 @@ using CommandFn = std::function<int(const std::string &)>;
 // stopped.
 int waitForShellChild(pid_t pid)
 {
-    bool termed = false;
-    std::optional<std::chrono::steady_clock::time_point> killAt;
+    // Not due anything until the run is stopped.
+    Escalation escalation(std::chrono::steady_clock::time_point::max());
     for (;;) {
         int status = 0;
         const pid_t done = waitpid(pid, &status, WNOHANG);
@@ -1379,15 +1357,13 @@ int waitForShellChild(pid_t pid)
             return 1;
         }
         const auto now = std::chrono::steady_clock::now();
-        if (g_stopRequested != 0 && !termed) {
-            signalChildGroup(pid, SIGTERM);
-            termed = true;
-            killAt = now + kTerminateGrace;
-        } else if (termed && killAt && now >= *killAt) {
-            signalChildGroup(pid, SIGKILL);
-            killAt.reset();
+        if ((g_stopRequested != 0 && !escalation.termed()) ||
+            (escalation.termed() && !escalation.killed() && now >= escalation.due())) {
+            escalation.advance(pid, now, signalChildGroup);
         }
-        waitForWake(killAt);
+        waitForWake(escalation.termed() && !escalation.killed()
+                        ? std::optional<std::chrono::steady_clock::time_point>(escalation.due())
+                        : std::nullopt);
     }
 }
 
@@ -1711,8 +1687,7 @@ std::vector<SuiteFragment> runSelections(const std::vector<Selection> &selection
         size_t selection;
         std::string reportPath;
         std::string logPath;
-        std::chrono::steady_clock::time_point due;  // when it is next due a signal
-        bool termed = false;
+        Escalation escalation;  // first due at the child's timeout
         bool timedOut = false;
         bool abandoned = false;
     };
@@ -1738,9 +1713,9 @@ std::vector<SuiteFragment> runSelections(const std::vector<Selection> &selection
             ready.clear();
             for (RunningChild &child : running) {
                 child.abandoned = true;
-                ops.kill(child.pid, SIGTERM);
-                child.termed = true;
-                child.due = now + kTerminateGrace;
+                if (!child.escalation.termed()) {
+                    child.escalation.advance(child.pid, now, ops.kill);
+                }
             }
         }
 
@@ -1786,7 +1761,7 @@ std::vector<SuiteFragment> runSelections(const std::vector<Selection> &selection
                 continue;
             }
             running.push_back({pid, index, reportPath, logPath,
-                               ops.now() + schedule.childTimeout});
+                               Escalation{ops.now() + schedule.childTimeout}});
         }
 
         // Bounded by the nearest deadline, if any.
@@ -1794,11 +1769,11 @@ std::vector<SuiteFragment> runSelections(const std::vector<Selection> &selection
         if ((timed || stopping) && !running.empty()) {
             const auto nearest = std::min_element(running.begin(), running.end(),
                                                   [](const RunningChild &a, const RunningChild &b) {
-                                                      return a.due < b.due;
+                                                      return a.escalation.due() < b.escalation.due();
                                                   });
             within = std::max(std::chrono::milliseconds{0},
                               std::chrono::duration_cast<std::chrono::milliseconds>(
-                                  nearest->due - ops.now()));
+                                  nearest->escalation.due() - ops.now()));
         }
 
         ChildExit exit;
@@ -1810,13 +1785,11 @@ std::vector<SuiteFragment> runSelections(const std::vector<Selection> &selection
             // Signal every child past its deadline and give it another grace period.
             const std::chrono::steady_clock::time_point now = ops.now();
             for (RunningChild &child : running) {
-                if (now < child.due) {
+                if (now < child.escalation.due()) {
                     continue;
                 }
                 child.timedOut = !child.abandoned;
-                ops.kill(child.pid, child.termed ? SIGKILL : SIGTERM);
-                child.termed = true;
-                child.due = now + kTerminateGrace;
+                child.escalation.advance(child.pid, now, ops.kill);
             }
             continue;
         }
