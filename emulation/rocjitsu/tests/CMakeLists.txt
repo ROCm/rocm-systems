@@ -717,6 +717,7 @@ add_executable(
     gfx908_compare_test.cpp
     gfx10_compare_test.cpp
     vop3_conversion_modifiers_test.cpp
+    vop3_modifier_policy_test.cpp
     cube_instruction_test.cpp
     older_graphics_test.cpp
     division_test.cpp
@@ -791,7 +792,6 @@ add_executable(
     simd_correctness/vop1_cvt_f64_simd_correctness_test.cpp
     simd_correctness/vopc_simd_correctness_test.cpp
     simd_correctness/vopc_cmp_class_simd_correctness_test.cpp
-    simd_correctness/vop3_modifier_simd_test.cpp
     simd_correctness/vop3_binary_simd_correctness_test.cpp
     simd_correctness/vop3_unary_simd_correctness_test.cpp
     simd_correctness/vopc_vop3_int_simd_correctness_test.cpp
