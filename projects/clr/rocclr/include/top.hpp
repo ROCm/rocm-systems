@@ -164,10 +164,21 @@ class ReferenceCountedObject {
 
   void* operator new(size_t size) { return ::operator new(size); }
   void operator delete(void* p) { return ::operator delete(p); }
+  // Over-aligned subclasses (for example roc::VirtualGPU with alignas(64) members) need the
+  // aligned forms. Without them new picks operator new(size_t) above and gets only the default
+  // heap alignment, and the compiler's aligned vector stores into the object can fault.
+  void* operator new(size_t size, std::align_val_t align) { return ::operator new(size, align); }
+  void operator delete(void* p, std::align_val_t align) { ::operator delete(p, align); }
   void* operator new(size_t size, size_t extSize) {
     return ReferenceCountedObject::operator new(size + extSize);
   };
   void operator delete(void* obj, size_t extSize) { ReferenceCountedObject::operator delete(obj); }
+  void* operator new(size_t size, std::align_val_t align, size_t extSize) {
+    return ::operator new(size + extSize, align);
+  }
+  void operator delete(void* p, std::align_val_t align, size_t extSize) {
+    ::operator delete(p, align);
+  }
 
   uint referenceCount() const { return referenceCount_.load(std::memory_order_relaxed); }
 

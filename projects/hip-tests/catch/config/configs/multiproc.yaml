@@ -53,6 +53,8 @@ multiproc:
   Unit_hipMemGetInfo_Functional_MultiDevice_Scenario5: *level_default
   Unit_hipMemGetInfo_SetHiddenFreeMemFromChild: *level_default
   Unit_hipMemGetInfo_VerifyHiddenFreeMemForAllGpu: *level_default
+  Unit_hipStreamCreate_FirstStreamInNewProcess: *level_default
+  Unit_hipStreamCreate_FirstStreamInNewProcess_Child: *level_default
   Unit_NoGpuTst_hipGetDeviceCount: *level_default
   Unit_NoGpuTst_hipSetDevice: *level_default
   Unit_NoGpuTst_hipDeviceGetAttribute: *level_default
