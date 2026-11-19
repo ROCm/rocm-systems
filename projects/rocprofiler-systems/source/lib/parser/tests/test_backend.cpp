@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -162,4 +163,21 @@ TEST(parser_backend, a_backend_row_gets_the_verdict_of_a_row_that_lists_the_name
                                          domains->accepts(from_backend, text);
         EXPECT_EQ(stored_and_accepted, accepts_text(listed, text));
     }
+}
+
+TEST(parser_backend, accepts_throws_for_a_row_that_names_another_backend_or_none)
+{
+    backend_registry registry;
+    add_domains(registry);
+    const auto* domains = registry.find("domains");
+    ASSERT_NE(domains, nullptr);
+
+    auto other    = make_param("domains", param_type::enumeration);
+    other.backend = "amd-smi";
+    auto none     = make_param("domains", param_type::enumeration);
+    none.backend.reset();
+    EXPECT_THROW(static_cast<void>(domains->accepts(other, "kernel_dispatch")),
+                 std::logic_error);
+    EXPECT_THROW(static_cast<void>(domains->accepts(none, "kernel_dispatch")),
+                 std::logic_error);
 }

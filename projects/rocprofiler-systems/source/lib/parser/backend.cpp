@@ -5,9 +5,12 @@
 #include "parser/schema.hpp"
 #include "parser/value_text.hpp"
 
+#include <fmt/format.h>
+
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -17,6 +20,11 @@ namespace rocprofsys::parser
 bool
 backend_interface::accepts(const schema_param& param, std::string_view value) const
 {
+    if(param.backend != name())
+    {
+        throw std::logic_error(
+            fmt::format("parameter '{}' does not name backend '{}'", param.id, name()));
+    }
     // Without the backend name, parse_value() checks every name against the list.
     auto       listed = param;
     const auto names  = choices(param);
