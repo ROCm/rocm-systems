@@ -81,7 +81,7 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - `rdc_stop_embedded()` after `rdc_config_set()` no longer aborts with "terminate called without an active exception".
 
 - `rdci config --set` no longer reports success when a setting was not applied to every GPU of the group.
-  - An empty group, an unknown setting type and a power limit too large to apply are rejected, and when one GPU of the group rejects a setting, the GPUs that already took it get their previous setting back.
+  - An empty group, an unknown setting type and a power limit too large to apply are rejected, and when one GPU of the group rejects a setting, the GPUs that already took it get their previous setting back. A clock limit that is put back keeps the group's limit of the other clock, and a GPU that rejects a clock limit goes back to the automatic performance level when the group has no clock limit.
 
 - `rdci config --clear` no longer stops at the first GPU it cannot reset. It resets the other GPUs of the group and reports the failure.
 

@@ -1840,7 +1840,11 @@ rdc_status_t rdc_link_status_get(rdc_handle_t p_rdc_handle, rdc_link_status_t* r
  *  it, until rdc_config_clear(). When a GPU of the group rejects the setting, the
  *  GPUs that took it get back the group's previous setting of that type, or
  *  their default when the group had none, and the group's settings stay as
- *  they were.
+ *  they were. A clock limit's default is the automatic performance level, after
+ *  which a GPU gets the group's limit of the other clock again. amd-smi switches
+ *  a GPU to the manual level before it writes a clock limit, so a GPU that
+ *  rejects one goes back to the automatic level too when the group has no
+ *  clock limit.
  *
  *  @param[in] p_rdc_handle Node handle
  *

@@ -253,8 +253,11 @@ rdc_status_t RdcConfigSettingsImpl::rdc_config_set(rdc_gpu_group_t group_id,
     return RDC_ST_BAD_PARAMETER;
   }
 
-  // The GPUs this call changed, to put back if a later one fails.
+  // The GPUs this call changed, to put back if a later one fails, and the GPU
+  // that rejected the setting: before it writes a clock limit, amd-smi switches
+  // the GPU to the manual performance level, also when the write then fails.
   std::vector<amdsmi_processor_handle> changed;
+  amdsmi_processor_handle rejecting = nullptr;
   amdsmi_status_t amd_ret = AMDSMI_STATUS_SUCCESS;
   for (uint32_t i = 0; i < rdc_group_info.count; ++i) {
     amdsmi_processor_handle processor_handle;
@@ -269,6 +272,7 @@ rdc_status_t RdcConfigSettingsImpl::rdc_config_set(rdc_gpu_group_t group_id,
     if (amd_ret != AMDSMI_STATUS_SUCCESS) {
       RDC_LOG(RDC_ERROR, "RdcConfigSettingsImpl::rdc_config_set(): Failed to set setting "
                              << type << " : " << amd_ret);
+      rejecting = processor_handle;
       break;
     }
     changed.push_back(processor_handle);
@@ -277,17 +281,47 @@ rdc_status_t RdcConfigSettingsImpl::rdc_config_set(rdc_gpu_group_t group_id,
   if (amd_ret != AMDSMI_STATUS_SUCCESS) {
     // Put the GPUs that took the setting back: to the group's setting of this type
     // if it has one, else to the default.
+    const bool clock = setting.type != RDC_CFG_POWER_LIMIT;
     const rdc_config_setting_t* previous = nullptr;
+    const rdc_config_setting_t* other_clock = nullptr;  // the group's limit of the other clock
     auto group_iter = cached_group_settings_.find(group_id);
     if (group_iter != cached_group_settings_.end()) {
       auto setting_iter = group_iter->second.find(setting.type);
       if (setting_iter != group_iter->second.end()) {
         previous = &setting_iter->second;
       }
+      auto other_iter = group_iter->second.find(setting.type == RDC_CFG_GFX_CLOCK_LIMIT
+                                                    ? RDC_CFG_MEMORY_CLOCK_LIMIT
+                                                    : RDC_CFG_GFX_CLOCK_LIMIT);
+      if (clock && other_iter != group_iter->second.end()) {
+        other_clock = &other_iter->second;
+      }
     }
     for (auto it = changed.rbegin(); it != changed.rend(); ++it) {
-      const amdsmi_status_t undo =
-          previous != nullptr ? apply_setting(*it, *previous) : reset_setting(*it, setting.type);
+      amdsmi_status_t undo = AMDSMI_STATUS_SUCCESS;
+      if (previous != nullptr) {
+        undo = apply_setting(*it, *previous);
+      } else if (!clock) {
+        undo = reset_setting(*it, setting.type);
+      } else {
+        // The GPU took the limit at the manual level, even a limit at the top
+        // level. The automatic level also puts the other clock's limit back to
+        // the top, so the group's limit of that clock is set again.
+        undo = amdsmi_set_gpu_perf_level(*it, AMDSMI_DEV_PERF_LEVEL_AUTO);
+        if (undo == AMDSMI_STATUS_SUCCESS && other_clock != nullptr) {
+          undo = apply_setting(*it, *other_clock);
+        }
+      }
+      if (undo != AMDSMI_STATUS_SUCCESS) {
+        RDC_LOG(RDC_ERROR,
+                "RdcConfigSettingsImpl::rdc_config_set(): Failed to put a GPU back : " << undo);
+      }
+    }
+    // The GPU that rejected a clock limit kept its limits, but can be at the
+    // manual level now. With a clock limit of the group, it was at that level
+    // before; else it goes back to the automatic level.
+    if (rejecting != nullptr && clock && previous == nullptr && other_clock == nullptr) {
+      const amdsmi_status_t undo = amdsmi_set_gpu_perf_level(rejecting, AMDSMI_DEV_PERF_LEVEL_AUTO);
       if (undo != AMDSMI_STATUS_SUCCESS) {
         RDC_LOG(RDC_ERROR,
                 "RdcConfigSettingsImpl::rdc_config_set(): Failed to put a GPU back : " << undo);

@@ -83,11 +83,13 @@ struct Call {
   uint64_t value;
 };
 
-// A fake GPU: its power cap and the upper limit of each clock.
+// A fake GPU: its power cap, the upper limit of each clock, and whether it is at
+// the manual performance level.
 struct Gpu {
   uint64_t cap_uw = kDefaultCapUw;
   uint64_t gfx_max_mhz = kTopGfxMhz;
   uint64_t mem_max_mhz = kTopMemMhz;
+  bool manual = false;
 };
 
 // The fakes' state, which the monitoring thread uses too.
@@ -456,7 +458,13 @@ amdsmi_status_t amdsmi_set_gpu_clk_limit(amdsmi_processor_handle processor_handl
                                          amdsmi_clk_limit_type_t limit_type, uint64_t clk_value) {
   std::lock_guard<std::mutex> lock(g_mutex);
   uint32_t gpu = 0;
-  if (auto status = enter(__func__, processor_handle, clk_type, clk_value, &gpu)) {
+  const amdsmi_status_t status = enter(__func__, processor_handle, clk_type, clk_value, &gpu);
+  // As rsmi_dev_clk_extremum_set() does, the GPU goes to the manual level before
+  // the write, also when the write then fails.
+  if (gpu_of(processor_handle, &gpu)) {
+    g_gpus[gpu].manual = true;
+  }
+  if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }
   uint64_t* max = max_mhz(&g_gpus[gpu], clk_type);
@@ -502,6 +510,7 @@ amdsmi_status_t amdsmi_set_gpu_perf_level(amdsmi_processor_handle processor_hand
   if (perf_lvl == AMDSMI_DEV_PERF_LEVEL_AUTO) {
     g_gpus[gpu].gfx_max_mhz = kTopGfxMhz;
     g_gpus[gpu].mem_max_mhz = kTopMemMhz;
+    g_gpus[gpu].manual = false;
   }
   return AMDSMI_STATUS_SUCCESS;
 }
@@ -664,14 +673,39 @@ TEST_F(Config, ARejectedSetPutsTheChangedGpusBackToTheGroupsSetting) {
   EXPECT_EQ(got.second, (std::map<uint32_t, uint64_t>{{kPower, 400}}));
 }
 
-TEST_F(Config, ARejectedClockLimitPutsTheChangedGpusBackToTheAutomaticLevel) {
-  fail("amdsmi_set_gpu_clk_limit", 1);
+// A rejected clock limit puts the GPUs it reached back to the automatic level:
+// the one that took the limit, and the one that rejected it, which amd-smi left
+// at the manual level. A limit at the top level counts too. They used to stay at
+// the manual level.
+TEST_F(Config, ARejectedClockLimitPutsTheGpusItReachedBackToTheAutomaticLevel) {
+  for (const uint64_t mhz : {uint64_t{1500}, kTopGfxMhz}) {
+    reset_fakes();
+    fail("amdsmi_set_gpu_clk_limit", 1);
+    EXPECT_EQ(set(kAll, kGfx, mhz), RDC_ST_UNKNOWN_ERROR) << mhz;
+    for (uint32_t i = 0; i < kGpus; ++i) {
+      EXPECT_EQ(gpu(i).gfx_max_mhz, kTopGfxMhz) << mhz << " MHz, GPU " << i;
+      EXPECT_FALSE(gpu(i).manual) << mhz << " MHz, GPU " << i;
+    }
+    EXPECT_EQ(gpus_of(calls("amdsmi_set_gpu_perf_level")), (std::vector<uint32_t>{0, 1})) << mhz;
+    EXPECT_EQ(get(kAll).first, RDC_ST_NOT_FOUND) << mhz;
+  }
+}
+
+// When the group limits the other clock, a rejected limit keeps that limit on
+// every GPU: the GPUs that took the new limit get it again after the automatic
+// level, and the GPU that rejected it stays as it was. The automatic level used
+// to take it away until the next check.
+TEST_F(Config, ARejectedClockLimitKeepsTheGroupsLimitOfTheOtherClock) {
+  ASSERT_EQ(set(kAll, kMem, 1000), RDC_ST_OK);
+  fail("amdsmi_set_gpu_clk_limit", 2);
   EXPECT_EQ(set(kAll, kGfx, 1500), RDC_ST_UNKNOWN_ERROR);
   for (uint32_t i = 0; i < kGpus; ++i) {
     EXPECT_EQ(gpu(i).gfx_max_mhz, kTopGfxMhz) << "GPU " << i;
+    EXPECT_EQ(gpu(i).mem_max_mhz, 1000u) << "GPU " << i;
   }
-  EXPECT_EQ(gpus_of(calls("amdsmi_set_gpu_perf_level")), std::vector<uint32_t>{0});
-  EXPECT_EQ(get(kAll).first, RDC_ST_NOT_FOUND);
+  const auto got = get(kAll);
+  EXPECT_EQ(got.first, RDC_ST_OK);
+  EXPECT_EQ(got.second, (std::map<uint32_t, uint64_t>{{kMem, 1000}}));
 }
 
 // A GPU that cannot be reset does not stop the others, or its own other
