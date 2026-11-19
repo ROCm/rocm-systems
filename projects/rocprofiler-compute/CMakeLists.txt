@@ -928,6 +928,14 @@ if(NOT TEST_FROM_INSTALL)
     )
 
     add_test(
+        NAME test_metric_description_manager
+        COMMAND
+            ${PYTHON_TEST_COMMAND} -m pytest
+            --junitxml=tests/test_metric_description_manager.xml ${COV_OPTION}
+            tools/test_metric_description_manager.py ${WORKING_DIR_OPTION}
+    )
+
+    add_test(
         NAME test_metric_library_sync
         COMMAND
             ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_metric_library_sync.xml
