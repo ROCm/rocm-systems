@@ -42,7 +42,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <string>
@@ -1781,14 +1780,7 @@ rcclArchThresholds MakeRankScaledTable() {
   t.ddaVmmBlockBudget = 2048;
   t.ddaVmmMinBlocks = 32;
   t.ddaVmmMaxBlocks = 128;
-  t.arRingLL128MaxPerRank = 4 * kMiB;
-  t.arRingLL128StepNs = 5460;
-  t.arRingLL128PassNs = 7900;
-  t.arRingSimpleStepNs = 6460;
-  t.arRingSimpleHunkNs = 2770;
-  t.arRingWireNsScale = 1040;
-  t.arRingLL128MarginPct = 4;
-  t.arRingLL128MaxPasses = 2;
+  t.arRingLL128MaxPerRank = 32 * kMiB;
   t.arTreeLL128Unlimited = true;
   t.arTreeMaxPerRank = 1 * kMiB;
   t.arTreeLLMaxPerRank = 32 * kKiB;
@@ -1907,28 +1899,22 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250TreeAllReduceKeepsLL
       });
 }
 
-// Ring AllReduce keeps LL128 up to the larger of nRanks x 4 MiB (inclusive) and the model's 16 MiB ceiling, then
-// Simple. This comm has no channels, so the cost rule stays off (ByChunkCost below covers it).
+// AICOMRCCL-2875: Ring AllReduce keeps LL128 up to nRanks x 32 MiB (inclusive), past the
+// model's 16 MiB ceiling, and returns to Simple one byte later.
 TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250RingAllReduceLL128ScalesWithRanks) {
   RUN_ISOLATED_TEST(
       "Wrap_UpdateCollectiveProtocol_Gfx1250RingAllReduceLL128ScalesWithRanks",
       []() {
         SetMicroEnvAbsent("NCCL_PROTO");
         // Not a rank-scaled entry: it applies below rankScaledMinRanks too.
-        for (int nRanks : {4, 8, 16, 32, 64}) {
+        for (int nRanks : {4, 8, 16, 64}) {
           ncclComm* comm = MakeGfx1250ProtocolComm(nRanks);
-          const size_t cap = std::max<size_t>(size_t(nRanks) * 4 * kMiB, kGfx1250ArLL128Max);
+          const size_t cap = size_t(nRanks) * 32 * kMiB;
           EXPECT_EQ(NCCL_PROTO_LL128, ArProtocol(comm, NCCL_ALGO_RING, cap)) << nRanks;
           EXPECT_EQ(NCCL_PROTO_SIMPLE, ArProtocol(comm, NCCL_ALGO_RING, cap + 1)) << nRanks;
-          if (nRanks >= 8 && nRanks <= 32) {
-            EXPECT_EQ(NCCL_PROTO_SIMPLE, ArProtocol(comm, NCCL_ALGO_RING, 256 * kMiB)) << nRanks;
-          }
           DeleteCommWithArch(comm);
         }
-        ncclComm* comm32 = MakeGfx1250ProtocolComm(32);
-        EXPECT_EQ(NCCL_PROTO_LL128, ArProtocol(comm32, NCCL_ALGO_RING, 128 * kMiB));
-        DeleteCommWithArch(comm32);
-        // Two ranks with a 128 MiB model ceiling: nRanks x 4 MiB (8 MiB) sits below it,
+        // Two ranks with a 128 MiB model ceiling: nRanks x 32 MiB (64 MiB) sits below it,
         // so the model ceiling is the one that applies.
         constexpr uint64_t kModelCeiling = 128ULL << 20;
         ncclComm* comm = MakeGfx1250ProtocolComm(2);
@@ -1936,165 +1922,6 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250RingAllReduceLL128Sc
         EXPECT_EQ(NCCL_PROTO_LL128, ArProtocol(comm, NCCL_ALGO_RING, kModelCeiling));
         EXPECT_EQ(NCCL_PROTO_SIMPLE, ArProtocol(comm, NCCL_ALGO_RING, kModelCeiling + 1));
         DeleteCommWithArch(comm);
-      });
-}
-
-namespace {
-
-// gfx1250 SPX Ring geometry the LL128 cost model reads: wave32, default LL128 buffer and lines, Simple Unroll 32.
-void SetGfx1250RingGeometry(ncclComm* comm, int nChannels = 256) {
-  comm->nChannels = nChannels;
-  comm->WarpSize = 32;
-  comm->maxThreads[NCCL_ALGO_RING][NCCL_PROTO_LL128] = 256;
-  comm->ll128LineElems = 16;
-  comm->ll128DataElems = 15;
-  comm->ll128ShmemElemsPerThread = 32;
-  comm->buffSizes[NCCL_PROTO_LL128] = 120 * 256 * NCCL_STEPS * 8;
-  comm->unroll = NCCL_UNROLL_32;
-}
-
-// Every rank's peer info reports `bandwidth` as its fabric bandwidth (0 = no fabric). Free with DeleteFabricComm().
-void SetFabricBandwidth(ncclComm* comm, uint32_t bandwidth) {
-  comm->peerInfo = static_cast<ncclPeerInfo*>(calloc(comm->nRanks, sizeof(ncclPeerInfo)));
-  for (int r = 0; r < comm->nRanks; r++) {
-    comm->peerInfo[r].fabricInfo.fabricSupported = bandwidth != 0;
-    comm->peerInfo[r].fabricInfo.bandwidth = bandwidth;
-  }
-}
-
-void DeleteFabricComm(ncclComm* comm) {
-  free(comm->peerInfo);
-  comm->peerInfo = nullptr;
-  DeleteCommWithArch(comm);
-}
-
-}  // namespace
-
-// Past nRanks x 4 MiB, LL128 only where rcclArRingLL128BeatsSimple prices it under Simple: the units decide on 256
-// channels and a 1800000 fabric, the wire on 192 channels and 900000 (LL128 sends 16/15 of C).
-TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250RingAllReduceLL128ByChunkCost) {
-  RUN_ISOLATED_TEST(
-      "Wrap_UpdateCollectiveProtocol_Gfx1250RingAllReduceLL128ByChunkCost",
-      []() {
-        SetMicroEnvAbsent("NCCL_PROTO");
-        constexpr int L = NCCL_PROTO_LL128;
-        constexpr int S = NCCL_PROTO_SIMPLE;
-        struct Row {
-          int nRanks;
-          int proto[5];  // 256M, 512M, 1G, 2G, 4G
-        };
-        struct Fabric {
-          int nChannels;
-          uint32_t bandwidth;
-          Row rows[7];
-        };
-        const Fabric fabrics[] = {
-            {256, 1800000, {{4, {S, S, S, S, S}}, {8, {S, S, S, S, S}}, {12, {L, S, S, S, S}},
-                            {16, {S, S, S, S, S}}, {24, {L, L, S, S, S}}, {28, {L, S, S, S, S}},
-                            {32, {S, S, S, S, S}}}},
-            {192, 900000, {{4, {S, S, S, S, S}}, {8, {S, S, S, S, S}}, {12, {S, S, S, S, S}},
-                           {16, {S, S, S, S, S}}, {24, {S, S, S, S, S}}, {28, {S, S, S, S, S}},
-                           {32, {S, S, S, S, S}}}},
-        };
-        for (const Fabric& f : fabrics) {
-          for (const Row& row : f.rows) {
-            ncclComm* comm = MakeGfx1250ProtocolComm(row.nRanks);
-            SetGfx1250RingGeometry(comm, f.nChannels);
-            SetFabricBandwidth(comm, f.bandwidth);
-            for (int i = 0; i < 5; i++) {
-              const size_t bytes = (256 * kMiB) << i;
-              EXPECT_EQ(row.proto[i], ArProtocol(comm, NCCL_ALGO_RING, bytes))
-                  << f.nChannels << " channels, " << row.nRanks << " ranks, " << bytes;
-            }
-            // The nRanks x 4 MiB floor still holds below the cost model.
-            const size_t floor = std::max<size_t>(size_t(row.nRanks) * 4 * kMiB, kGfx1250ArLL128Max);
-            EXPECT_EQ(L, ArProtocol(comm, NCCL_ALGO_RING, floor)) << f.nChannels << " channels, " << row.nRanks;
-            DeleteFabricComm(comm);
-          }
-        }
-
-        // 12 ranks: C = 21856 B at 64M is one LL128 pass against two Simple hunks, Simple; 43696 B at 128M, LL128.
-        ncclComm* comm = MakeGfx1250ProtocolComm(12);
-        SetGfx1250RingGeometry(comm);
-        SetFabricBandwidth(comm, 1800000);
-        EXPECT_EQ(S, ArProtocol(comm, NCCL_ALGO_RING, 64 * kMiB));
-        EXPECT_EQ(L, ArProtocol(comm, NCCL_ALGO_RING, 128 * kMiB));
-        // Two LL128 passes hold C <= 122880 B: 12 x 122880 B per channel is the last LL128 size at 12 ranks.
-        EXPECT_EQ(L, ArProtocol(comm, NCCL_ALGO_RING, 12ULL * 122880 * 256));
-        EXPECT_EQ(S, ArProtocol(comm, NCCL_ALGO_RING, 12ULL * 122880 * 256 + 12 * 256 * 16));
-        // With no pass limit one LL128 loop holds C <= 230400 B: 12 x 230400 B per channel is the last LL128 size.
-        rcclArchThresholds noPassLimit = *Gfx1250Table();
-        noPassLimit.arRingLL128MaxPasses = 0;
-        comm->archThresholds = &noPassLimit;
-        EXPECT_EQ(L, ArProtocol(comm, NCCL_ALGO_RING, 512 * kMiB)) << "no pass limit";
-        EXPECT_EQ(L, ArProtocol(comm, NCCL_ALGO_RING, 12ULL * 230400 * 256)) << "no pass limit";
-        EXPECT_EQ(S, ArProtocol(comm, NCCL_ALGO_RING, 12ULL * 230400 * 256 + 12 * 256 * 16)) << "no pass limit";
-        comm->archThresholds = Gfx1250Table();
-        DeleteFabricComm(comm);
-        // 28 ranks at 1G (C = 149808 B, 3 LL128 passes) costs LL128 under Simple, but the pass limit keeps Simple.
-        comm = MakeGfx1250ProtocolComm(28);
-        SetGfx1250RingGeometry(comm);
-        SetFabricBandwidth(comm, 1800000);
-        EXPECT_EQ(S, ArProtocol(comm, NCCL_ALGO_RING, 1024 * kMiB));
-        comm->archThresholds = &noPassLimit;
-        EXPECT_EQ(L, ArProtocol(comm, NCCL_ALGO_RING, 1024 * kMiB)) << "no pass limit";
-        comm->archThresholds = Gfx1250Table();
-        DeleteFabricComm(comm);
-        // The chunk is per channel: on 128 channels 24 ranks at 256M has C = 87392 B, LL128, and 512M is 3 passes.
-        comm = MakeGfx1250ProtocolComm(24);
-        SetGfx1250RingGeometry(comm, 128);
-        SetFabricBandwidth(comm, 1800000);
-        EXPECT_EQ(L, ArProtocol(comm, NCCL_ALGO_RING, 256 * kMiB));
-        EXPECT_EQ(S, ArProtocol(comm, NCCL_ALGO_RING, 512 * kMiB));
-        DeleteFabricComm(comm);
-
-        // The wire term is what makes the slow fabric Simple: 8 ranks at 256M on 192 channels (C = 174768 B, 3 LL128
-        // passes vs 11 Simple hunks) is LL128 by the units alone with no pass limit, Simple on a 900000 fabric.
-        comm = MakeGfx1250ProtocolComm(8);
-        SetGfx1250RingGeometry(comm, 192);
-        comm->archThresholds = &noPassLimit;
-        EXPECT_EQ(L, ArProtocol(comm, NCCL_ALGO_RING, 256 * kMiB)) << "no peer info";
-        SetFabricBandwidth(comm, 900000);
-        EXPECT_EQ(S, ArProtocol(comm, NCCL_ALGO_RING, 256 * kMiB)) << "900000 fabric";
-        // One rank without fabric bandwidth turns the wire term off on every rank (the minimum over all peers).
-        comm->peerInfo[5].fabricInfo.fabricSupported = false;
-        EXPECT_EQ(L, ArProtocol(comm, NCCL_ALGO_RING, 256 * kMiB)) << "one rank without fabric";
-        comm->peerInfo[5].fabricInfo.fabricSupported = true;
-        comm->peerInfo[5].fabricInfo.bandwidth = 1800000;
-        EXPECT_EQ(S, ArProtocol(comm, NCCL_ALGO_RING, 256 * kMiB)) << "slowest rank prices the wire";
-        // A zero wire scale turns the wire term off too.
-        rcclArchThresholds noWire = noPassLimit;
-        noWire.arRingWireNsScale = 0;
-        comm->archThresholds = &noWire;
-        EXPECT_EQ(L, ArProtocol(comm, NCCL_ALGO_RING, 256 * kMiB)) << "wire scale 0";
-        comm->archThresholds = Gfx1250Table();
-        DeleteFabricComm(comm);
-
-        // 24 ranks at 256M on 192 channels (C = 58256 B): LL128 is under 1% cheaper on the 900000 fabric, inside the
-        // 4% margin, so Simple; with no margin LL128.
-        comm = MakeGfx1250ProtocolComm(24);
-        SetGfx1250RingGeometry(comm, 192);
-        SetFabricBandwidth(comm, 900000);
-        EXPECT_EQ(S, ArProtocol(comm, NCCL_ALGO_RING, 256 * kMiB)) << "inside the margin";
-        rcclArchThresholds noMargin = *Gfx1250Table();
-        noMargin.arRingLL128MarginPct = 0;
-        comm->archThresholds = &noMargin;
-        EXPECT_EQ(L, ArProtocol(comm, NCCL_ALGO_RING, 256 * kMiB)) << "margin 0";
-        comm->archThresholds = Gfx1250Table();
-        DeleteFabricComm(comm);
-
-        // A zeroed cost entry (every other arch and table) and an unknown geometry keep the floor.
-        rcclArchThresholds noCost = *Gfx1250Table();
-        noCost.arRingLL128PassNs = 0;
-        comm = MakeGfx1250ProtocolComm(24);
-        SetGfx1250RingGeometry(comm);
-        SetFabricBandwidth(comm, 1800000);
-        comm->archThresholds = &noCost;
-        EXPECT_EQ(S, ArProtocol(comm, NCCL_ALGO_RING, 256 * kMiB)) << "cost entry off";
-        comm->archThresholds = Gfx1250Table();
-        comm->nChannels = 0;
-        EXPECT_EQ(S, ArProtocol(comm, NCCL_ALGO_RING, 256 * kMiB)) << "no channels";
-        DeleteFabricComm(comm);
       });
 }
 
@@ -9021,30 +8848,6 @@ namespace real_arch_thresholds {
 // The real tables, namespaced so they do not collide with fakes/rccl_arch_thresholds_fakes.cc.
 #include "rccl_arch_thresholds.cc"
 }  // namespace real_arch_thresholds
-
-// The Ring AllReduce LL128 floor and cost entries the ByChunkCost test runs on are the gfx1250 SPX table's; DPX keeps
-// the cost rule off, and so does a build without the Simple changes it prices.
-TEST(WrapMicrotest, Gfx1250ArRingLL128CostEntriesMatchTheRealTables) {
-  const rcclArchThresholds* spx = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
-  const rcclArchThresholds* dpx = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
-  ASSERT_NE(nullptr, spx);
-  ASSERT_NE(nullptr, dpx);
-  EXPECT_EQ(0u, dpx->arRingLL128PassNs);
-#if !RCCL_GFX1250_AR_RING_LL128_BY_CHUNK
-  EXPECT_EQ(32 * kMiB, spx->arRingLL128MaxPerRank);
-  EXPECT_EQ(0u, spx->arRingLL128PassNs);
-#else
-  const rcclArchThresholds* t = Gfx1250Table();
-  EXPECT_EQ(t->arRingLL128MaxPerRank, spx->arRingLL128MaxPerRank);
-  EXPECT_EQ(t->arRingLL128StepNs, spx->arRingLL128StepNs);
-  EXPECT_EQ(t->arRingLL128PassNs, spx->arRingLL128PassNs);
-  EXPECT_EQ(t->arRingSimpleStepNs, spx->arRingSimpleStepNs);
-  EXPECT_EQ(t->arRingSimpleHunkNs, spx->arRingSimpleHunkNs);
-  EXPECT_EQ(t->arRingWireNsScale, spx->arRingWireNsScale);
-  EXPECT_EQ(t->arRingLL128MarginPct, spx->arRingLL128MarginPct);
-  EXPECT_EQ(t->arRingLL128MaxPasses, spx->arRingLL128MaxPasses);
-#endif
-}
 
 // The registered AllReduce re-route reads its bounds from the arch table: the gfx1250 SPX table re-routes, while the
 // DPX table, no table and RCCL_IGNORE_ARCH_TABLE=1 keep the choice symk's withdrawal leaves, with no grid cap.

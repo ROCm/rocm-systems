@@ -131,7 +131,6 @@ option(ENABLE_STORE_FREE_STEP_BARRIER          "gfx1250 LL and LL128 step barrie
 option(ENABLE_SIMPLE_FUSED_STEP_END            "gfx1250 Simple drains a step's loads and stores once before posting it" ON)
 option(ENABLE_SIMPLE_STORE_FREE_STEP_START     "gfx1250 Simple's start-of-step barrier orders LDS only" ON)
 option(ENABLE_SIMPLE_BUFFER_STORE              "gfx1250 reduceCopy issues 16-byte stores as buffer stores" ON)
-option(ENABLE_GFX1250_AR_RING_LL128_BY_CHUNK   "gfx1250 SPX Ring AllReduce picks LL128 or Simple by per-rank chunk cost" ON)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
 option(ROCTX                                   "Enable ROCTX"                                  ${RCCL_DEFAULT_ROCTX})
@@ -167,9 +166,6 @@ if(NOT ENABLE_SIMPLE_BUFFER_STORE)
   add_compile_definitions(RCCL_DISABLE_SIMPLE_BUFFER_STORE=1)
 endif()
 
-if(NOT ENABLE_GFX1250_AR_RING_LL128_BY_CHUNK)
-  add_compile_definitions(RCCL_DISABLE_GFX1250_AR_RING_LL128_BY_CHUNK=1)
-endif()
 # rocSHMEM integration (mutually exclusive — enabling both causes duplicate
 # rocshmem state between librccl.so and the executable at runtime):
 #   ENABLE_ROCSHMEM: alltoall_wg offload.  Links librocshmem.a into librccl.so

@@ -14,16 +14,6 @@
 #include "nccl_common.h"  // ncclFunc_t, ncclFuncAlltoAll
 #include <stddef.h>       // size_t, SIZE_MAX
 
-// The gfx1250 SPX Ring AllReduce LL128 cost rule prices the fused Simple barriers and buffer stores; a build that
-// turns one off keeps nRanks x 32 MiB.
-#if defined(RCCL_DISABLE_GFX1250_AR_RING_LL128_BY_CHUNK) || defined(RCCL_DISABLE_SIMPLE_FUSED_STEP_END) || \
-  defined(RCCL_DISABLE_SIMPLE_STORE_FREE_STEP_START) || defined(RCCL_DISABLE_SIMPLE_BUFFER_STORE) || \
-  defined(DWORDX4_INTRINSICS_FORCE_OFF) || (defined(ENABLE_TDM_SIMPLE) && ENABLE_TDM_SIMPLE)
-#define RCCL_GFX1250_AR_RING_LL128_BY_CHUNK 0
-#else
-#define RCCL_GFX1250_AR_RING_LL128_BY_CHUNK 1
-#endif
-
 // DDA arrays are indexed by ncclFunc_t through AlltoAll (ncclFuncAlltoAll == 8).
 // All collectives compare total message bytes against the table values.
 // 0 disables that tier for that collective. No parallel built-in defaults:
@@ -166,14 +156,6 @@ struct rcclArchThresholds {
   // model's range. The two AllReduce LL128 entries apply at any rank count, the
   // rest from rankScaledMinRanks ranks.
   size_t arRingLL128MaxPerRank;   // Ring AllReduce LL128 up to nRanks x this
-  // Past that, LL128 only where rcclArRingLL128BeatsSimple prices it under Simple per ring step.
-  uint32_t arRingLL128StepNs;     // LL128 fixed cost per step
-  uint32_t arRingLL128PassNs;     // per pass of all LL128 warps; 0 = no cost rule
-  uint32_t arRingSimpleStepNs;    // Simple fixed cost per step
-  uint32_t arRingSimpleHunkNs;    // per Simple hunk (Unroll x WarpSize x 16 B)
-  uint32_t arRingWireNsScale;     // wire ns = nChannels x wire bytes x this / fabric bandwidth; 0 = no wire term
-  uint32_t arRingLL128MarginPct;  // LL128 must cost this % less than Simple
-  uint32_t arRingLL128MaxPasses;  // LL128 only while C needs at most this many LL128 passes; 0 = no limit
   bool arTreeLL128Unlimited;      // Tree AllReduce keeps LL128 at every size
   size_t arTreeMaxPerRank;        // AllReduce runs Tree instead of Ring up to nRanks x this,
   size_t arTreeLLMaxPerRank;      // with LL up to nRanks x this and LL128 above
