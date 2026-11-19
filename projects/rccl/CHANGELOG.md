@@ -109,8 +109,6 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 
 ### Removed
 
-* `RCCL_DDA_LL128_RS_THREADS` removed (was default `1024`): reduce-scatter LL128 now launches a fixed 512-thread block, one warp per slice, so the thread count is no longer a tuning knob.
-
 ### Resolved issues
 * Fixed `NCCL_CE_BATCH_CAPTURE_ENABLE=1` producing wrong results under HIP graph capture. `hipMemcpyBatchAsync` does not support graph capture, so Copy Engine copies recorded into a graph now always use per-copy `hipMemcpyAsync`, as with the variable unset, and RCCL logs once that it ignored the variable.
 * Fixed hierarchical Copy Engine `ncclAlltoAllv` failing with `ncclInvalidArgument` on rail-only host RMA (`NCCL_CROSS_NIC=0`). Like `ncclAlltoAll`, it puts to every remote rank, so it now falls back to the kernel path unless host RMA reaches every rank.

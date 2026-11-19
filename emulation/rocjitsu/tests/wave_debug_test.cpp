@@ -3087,7 +3087,8 @@ TEST(WaveDebugTest, Gfx10HalfAddReportsBothArithmeticAndOutputModifierCauses) {
       EXPECT_EQ(fx.cu->read_vgpr(base + 4, 1), 0x12345678u);
       EXPECT_EQ(traps - previous_traps, ((c.mode >> 12) & c.causes & 0x7fu) != 0);
       fx.cu->step();
-      EXPECT_EQ(fx.cu->read_sgpr(wf->sgpr_alloc().base), prior | c.causes);
+      // The full read also carries the read-only TRAPSTS.DP_RATE[31:29] = 2.
+      EXPECT_EQ(fx.cu->read_sgpr(wf->sgpr_alloc().base), (2u << 29) | prior | c.causes);
     }
   }
 }

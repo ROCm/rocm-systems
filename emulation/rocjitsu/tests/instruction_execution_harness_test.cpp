@@ -646,11 +646,10 @@ public:
   }
 
   void execute_and_route(Instruction *inst, amdgpu::Wavefront &wf) {
+    std::unique_ptr<Instruction> owner(inst);
     EXPECT_TRUE(this->execute_instruction(inst, wf).succeeded());
     if (inst->is_memory_op())
-      this->route_memory_inst(std::unique_ptr<Instruction>(inst), wf);
-    else
-      delete inst;
+      this->route_memory_inst(owner, wf);
   }
 };
 
@@ -1044,7 +1043,7 @@ template <typename Isa> void check_high_shared_flat_addresses(rj_code_arch_t arc
           std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
           ASSERT_NE(inst, nullptr);
           ASSERT_TRUE(cu.execute_instruction(inst.get(), *wf).succeeded());
-          ASSERT_EQ(cu.route_memory_inst(std::move(inst), *wf), amdgpu::VmAccessOutcome::Complete);
+          ASSERT_EQ(cu.route_memory_inst(inst, *wf), amdgpu::VmAccessOutcome::Complete);
           cu.flush_all();
           EXPECT_EQ(wf->state(), amdgpu::WfState::RUNNING);
           EXPECT_TRUE(wf->wait_counters().empty());
@@ -1149,8 +1148,7 @@ TEST(Rdna4MemoryExecutionHarness, SharedFlatMultiwordBoundsPreserveNeighborAlloc
           std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
           ASSERT_NE(instruction, nullptr);
           ASSERT_TRUE(cu.execute_instruction(instruction.get(), *wave).succeeded());
-          ASSERT_EQ(cu.route_memory_inst(std::move(instruction), *wave),
-                    amdgpu::VmAccessOutcome::Complete);
+          ASSERT_EQ(cu.route_memory_inst(instruction, *wave), amdgpu::VmAccessOutcome::Complete);
           cu.flush_all();
           const uint32_t valid_words = std::min(width, test.valid_words);
           if (!load)
@@ -1233,8 +1231,7 @@ TEST(Rdna4MemoryExecutionHarness, SharedFlatAtomic64RequiresACompleteAllocationE
       std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
       ASSERT_NE(instruction, nullptr);
       ASSERT_TRUE(cu.execute_instruction(instruction.get(), *wave).succeeded());
-      ASSERT_EQ(cu.route_memory_inst(std::move(instruction), *wave),
-                amdgpu::VmAccessOutcome::Complete);
+      ASSERT_EQ(cu.route_memory_inst(instruction, *wave), amdgpu::VmAccessOutcome::Complete);
       cu.flush_all();
       EXPECT_EQ(wave->lds().read64(1024 + 1016), logical_size == 1024 ? initial + 1 : initial);
       EXPECT_EQ(wave->lds().read64(2048), 0x55aa33cc55aa33ccull);
@@ -1301,7 +1298,7 @@ TEST(Gfx1250MemoryExecutionHarness, DdsFaultsWithoutWrappingIntoAnotherLdsAlloca
           std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
           ASSERT_NE(inst, nullptr);
           ASSERT_TRUE(cu.execute_instruction(inst.get(), *wf).succeeded());
-          EXPECT_EQ(cu.route_memory_inst(std::move(inst), *wf), amdgpu::VmAccessOutcome::Faulted);
+          EXPECT_EQ(cu.route_memory_inst(inst, *wf), amdgpu::VmAccessOutcome::Faulted);
           EXPECT_TRUE(wf->wait_counters().empty());
           EXPECT_EQ(wf->state(), amdgpu::WfState::RUNNING);
           for (uint32_t address = 0; address < own_base + wf->lds_size(); address += 4)
@@ -1357,7 +1354,7 @@ TEST(Gfx1250MemoryExecutionHarness, B64AtomicsPreflightEveryParticipatingLane) {
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, local ? ds.data() : flat.data()));
       ASSERT_NE(inst, nullptr);
       ASSERT_TRUE(cu.execute_instruction(inst.get(), *wf).succeeded());
-      EXPECT_EQ(cu.route_memory_inst(std::move(inst), *wf),
+      EXPECT_EQ(cu.route_memory_inst(inst, *wf),
                 local && !valid ? VmAccessOutcome::Faulted : VmAccessOutcome::Complete);
       cu.flush_all();
       EXPECT_EQ(bool(wf->trapsts() & (1u << 8)), !local && !valid);
@@ -1428,7 +1425,7 @@ TEST(Gfx1250MemoryExecutionHarness, MixedFlatLdsAndGlobalLanesPreserveEachResult
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr);
       ASSERT_TRUE(cu.execute_instruction(inst.get(), *wf).succeeded());
-      ASSERT_EQ(cu.route_memory_inst(std::move(inst), *wf), amdgpu::VmAccessOutcome::Complete);
+      ASSERT_EQ(cu.route_memory_inst(inst, *wf), amdgpu::VmAccessOutcome::Complete);
       cu.flush_all();
       for (uint32_t lane = 0; lane < 3; ++lane) {
         for (uint32_t word = 0; word <= test.width; ++word) {
@@ -1537,7 +1534,7 @@ template <typename Isa> void check_mixed_flat_global_scratch_lds(rj_code_arch_t 
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr);
       ASSERT_TRUE(cu.execute_instruction(inst.get(), *wf).succeeded());
-      ASSERT_EQ(cu.route_memory_inst(std::move(inst), *wf), amdgpu::VmAccessOutcome::Complete);
+      ASSERT_EQ(cu.route_memory_inst(inst, *wf), amdgpu::VmAccessOutcome::Complete);
       cu.flush_all();
       auto expected = [&](uint32_t lane, uint32_t word, uint32_t selected_lane) {
         if (lane != selected_lane || word < offset / 4 || word >= offset / 4 + 4)
@@ -1718,7 +1715,7 @@ void check_block_transfer_masks(rj_code_arch_t arch, bool general_completion = f
           inst->data_as<amdgpu::VectorMemState>()->sign_extend = true;
         }
         wf->set_m0(~mask); // Memory access and writeback use the issue-time mask.
-        ASSERT_EQ(cu.route_memory_inst(std::move(inst), *wf), amdgpu::VmAccessOutcome::Complete);
+        ASSERT_EQ(cu.route_memory_inst(inst, *wf), amdgpu::VmAccessOutcome::Complete);
         cu.flush_all();
         for (uint32_t lane = 0; lane < 3; ++lane) {
           for (uint32_t word = 0; word < 32; ++word) {
@@ -1830,7 +1827,7 @@ template <typename Isa> void check_block_transfer_ownership(rj_code_arch_t arch)
         ASSERT_NE(inst, nullptr);
         ASSERT_TRUE(cu.execute_instruction(inst.get(), *wave).succeeded());
         wave->set_m0(~mask);
-        ASSERT_EQ(cu.route_memory_inst(std::move(inst), *wave), amdgpu::VmAccessOutcome::Complete);
+        ASSERT_EQ(cu.route_memory_inst(inst, *wave), amdgpu::VmAccessOutcome::Complete);
         cu.flush_all();
         for (uint32_t lane = 0; lane < 3; ++lane) {
           for (uint32_t word = 0; word < 32; ++word) {
@@ -9549,7 +9546,7 @@ TEST(Rdna4AtomicReturnTest, FlatPackedHalfAddPreservesLdsDenormals) {
             std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
             ASSERT_NE(inst, nullptr);
             EXPECT_TRUE(cu.execute_instruction(inst.get(), *wave).succeeded());
-            cu.route_memory_inst(std::move(inst), *wave);
+            cu.route_memory_inst(inst, *wave);
             const bool flush =
                 direct_ds && (!(denorm & 2u) || (test.input_denorm && !(denorm & 1u)));
             EXPECT_EQ(cu.lds().read32(kLdsBase + kOffset), flush ? 0u : test.expected);
@@ -10893,6 +10890,112 @@ TEST(HwregHelperTest, Rdna3TablesNameXmlHwregIds) {
               amdgpu::HwregAccessResult::ReadOnly);
     EXPECT_STREQ(amdgpu::hwreg_name(*wf, encode_hwreg(63)), "unknown");
 
+    if (!wf->is_halted())
+      wf->halt();
+  }
+}
+
+TEST(HwregTest, TrapstsDpRateIsAReadOnlyRdna1And2Constant) {
+  // gfx1010 and gfx1030 read TRAPSTS.DP_RATE[31:29] = 2 and ignore S_SETREG
+  // to it. gfx1100 moved DP_RATE to HW_ID1 and reads TRAPSTS[31:29] = 0.
+  for (const HwregArchCase &arch_case : kHwregArchCases) {
+    SCOPED_TRACE(arch_case.name);
+    const bool gfx10 =
+        arch_case.arch == ROCJITSU_CODE_ARCH_RDNA1 || arch_case.arch == ROCJITSU_CODE_ARCH_RDNA2;
+    const bool legacy_trapsts = gfx10 || arch_case.arch == ROCJITSU_CODE_ARCH_RDNA3 ||
+                                arch_case.arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+                                arch_case.arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+                                arch_case.arch == ROCJITSU_CODE_ARCH_CDNA4;
+    if (!legacy_trapsts)
+      continue;
+    amdgpu::GpuMemory gpu_mem(std::string("hwreg_dp_rate_mem_") + arch_case.name);
+    amdgpu::L2Cache l2(std::string("hwreg_dp_rate_l2_") + arch_case.name);
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = arch_case.arch;
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = 106;
+    cfg.vgprs_per_wf = 256;
+    cfg.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create(arch_case.name, cfg, &gpu_mem, &l2);
+    ASSERT_NE(cu, nullptr);
+    auto decoder = Decoder::create(arch_case.arch);
+    ASSERT_NE(decoder, nullptr);
+    const auto getreg = encode_sopk(arch_case.getreg_op, 4, encode_hwreg(3));
+    const auto set_dp_rate = encode_sopk(arch_case.setreg_imm_op, 0, encode_hwreg(3, 29, 3), 5);
+    std::unique_ptr<Instruction> read(decode_valid(*decoder, getreg.data()));
+    std::unique_ptr<Instruction> write(decode_valid(*decoder, set_dp_rate.data()));
+    ASSERT_NE(read, nullptr);
+    ASSERT_NE(write, nullptr);
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf, nullptr);
+    const uint32_t dp_rate = gfx10 ? 2u << 29 : 0u;
+    const uint32_t sb = wf->sgpr_alloc().base;
+
+    wf->set_trapsts(0x28u);
+    ASSERT_TRUE(cu->execute_instruction(read.get(), *wf).succeeded());
+    EXPECT_EQ(cu->read_sgpr(sb + 4), dp_rate | 0x28u);
+    uint32_t value = 0;
+    ASSERT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(3, 29, 3), value),
+              amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(value, dp_rate >> 29);
+
+    if (!gfx10) {
+      if (!wf->is_halted())
+        wf->halt();
+      continue;
+    }
+    ASSERT_TRUE(cu->execute_instruction(write.get(), *wf).succeeded());
+    EXPECT_EQ(wf->trapsts(), 0x28u);
+    ASSERT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(3), 0u),
+              amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(wf->trapsts(), 0u);
+    ASSERT_TRUE(cu->execute_instruction(read.get(), *wf).succeeded());
+    EXPECT_EQ(cu->read_sgpr(sb + 4), dp_rate);
+    if (!wf->is_halted())
+      wf->halt();
+  }
+}
+
+TEST(HwregTest, Gfx11ShMemBasesMatchesRdna1And2) {
+  // KFD programs SH_MEM_BASES = 0x00010002 on gfx1010, gfx1030 and gfx1100:
+  // shared aperture bits [63:48] = 1, private = 2.
+  constexpr uint64_t kShared = uint64_t{1} << 48;
+  constexpr uint64_t kPrivate = uint64_t{2} << 48;
+  for (const HwregArchCase &arch_case : kHwregArchCases) {
+    const bool gfx10 =
+        arch_case.arch == ROCJITSU_CODE_ARCH_RDNA1 || arch_case.arch == ROCJITSU_CODE_ARCH_RDNA2;
+    const bool gfx11 =
+        arch_case.arch == ROCJITSU_CODE_ARCH_RDNA3 || arch_case.arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+    if (!gfx10 && !gfx11)
+      continue;
+    SCOPED_TRACE(arch_case.name);
+    amdgpu::GpuMemory gpu_mem(std::string("hwreg_sh_mem_bases_mem_") + arch_case.name);
+    amdgpu::L2Cache l2(std::string("hwreg_sh_mem_bases_l2_") + arch_case.name);
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = arch_case.arch;
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = 106;
+    cfg.vgprs_per_wf = 256;
+    cfg.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create(arch_case.name, cfg, &gpu_mem, &l2);
+    ASSERT_NE(cu, nullptr);
+    auto decoder = Decoder::create(arch_case.arch);
+    ASSERT_NE(decoder, nullptr);
+    cu->set_apertures(kShared, kShared + 0xffffffffu, kPrivate, kPrivate + 0xffffffffu);
+    const auto getreg = encode_sopk(arch_case.getreg_op, 4, encode_hwreg(15));
+    std::unique_ptr<Instruction> read(decode_valid(*decoder, getreg.data()));
+    ASSERT_NE(read, nullptr);
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf, nullptr);
+    ASSERT_TRUE(cu->execute_instruction(read.get(), *wf).succeeded());
+    EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 4), 0x00010002u);
+    uint32_t value = 0;
+    ASSERT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(15, 16, 16), value),
+              amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(value, 1u);
+    // The RDNA3 manual lists SH_MEM_BASES as read-only to shaders.
+    EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(15), 0u),
+              gfx11 ? amdgpu::HwregAccessResult::ReadOnly : amdgpu::HwregAccessResult::Success);
     if (!wf->is_halted())
       wf->halt();
   }

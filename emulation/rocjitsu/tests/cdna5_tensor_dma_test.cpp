@@ -162,6 +162,7 @@ TEST(TensorDmaMemoryAccessObservationTest, PreservesLegacyPositionalInitializati
   EXPECT_EQ(access.data_size, 0u);
   EXPECT_EQ(access.tensor_dim0_stride, 0);
   EXPECT_EQ(access.tensor_dim1_stride, 0);
+  EXPECT_EQ(access.operation, amdgpu::Operation::Unknown);
 }
 
 TEST(Gfx1250ExecutionTest, TensorDmaDescriptorReadPropagatesFailure) {
@@ -1083,6 +1084,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaObservationReportsCompletedDenseLoadAndStore
   observer.inspect = [&](const amdgpu::TensorDmaMemoryAccessObservation &access) {
     if (!access.is_load)
       return;
+    EXPECT_EQ(access.operation, amdgpu::Operation::TENSOR_LOAD_TO_LDS);
     const uint64_t barrier = cu->lds().read64(wf->lds_base() + kBarrierLdsAddr);
     load_was_complete_at_callback =
         cu->lds().read32(wf->lds_base() + 0 * sizeof(uint32_t)) == 0x81000000u &&
@@ -1130,6 +1132,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaObservationReportsCompletedDenseLoadAndStore
   observer.inspect = [&](const amdgpu::TensorDmaMemoryAccessObservation &access) {
     if (access.is_load)
       return;
+    EXPECT_EQ(access.operation, amdgpu::Operation::TENSOR_STORE_FROM_LDS);
     store_was_complete_at_callback =
         store_storage[0] == 0x82000000u && store_storage[1] == 0x82000001u &&
         store_storage[4] == 0x82000003u && store_storage[5] == 0x82000004u;
@@ -4148,6 +4151,7 @@ public:
   std::vector<uint64_t> addresses;
 };
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST(Gfx1250ExecutionTest, TensorDmaCoalescingPreservesClippedAndRefusedExtents) {
   using namespace amdgpu::tensor_dma_detail;
   constexpr uint32_t kProcessId = 81251;
@@ -4231,5 +4235,6 @@ TEST(Gfx1250ExecutionTest, TensorDmaCoalescingPreservesClippedAndRefusedExtents)
   }
   ASSERT_TRUE(legacy_vm.unregister_address_space(address_space));
 }
+#endif
 
 } // namespace
