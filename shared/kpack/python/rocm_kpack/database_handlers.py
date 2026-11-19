@@ -452,9 +452,10 @@ class HotswapCacheHandler(DatabaseHandler):
         return self._DOMAIN_TO_BUNDLE.get(domain)
 
 
-# Matches the device build name hiprtcc gives a test, e.g. "x.gfx1250-strict.gpu".
-# The "-strict" variant is stored in the same per-arch archive as its base arch.
-_HIPRTC_GPU_PATTERN = re.compile(r"\.(gfx[0-9a-z]+)(?:-strict)?\.gpu$")
+# Same architecture id as _GFX_ARCH_PATTERN. "-strict" is its own target, as it
+# is for rocBLAS and composable_kernel. xnack is a feature; base_arch() strips
+# it before the artifact name is chosen.
+_HIPRTC_GPU_PATTERN = re.compile(r"\.(gfx\d+[a-z]*(?:-strict)?(?:-xnack[+-])?)\.gpu$")
 
 
 class LibhipcxxHiprtcHandler(DatabaseHandler):
@@ -485,7 +486,7 @@ class LibhipcxxHiprtcHandler(DatabaseHandler):
         Pattern: bin/libhipcxx/lit-hiprtc/**/*.gfx*.gpu
 
         Returns:
-            Base architecture (e.g., 'gfx1250') or None.
+            Architecture id (e.g., 'gfx1250' or 'gfx1250-strict') or None.
         """
         if path.suffix != ".gpu" or not self._in_test_dir(path, prefix_root):
             return None

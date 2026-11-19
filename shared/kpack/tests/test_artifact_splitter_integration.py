@@ -910,29 +910,36 @@ class TestArtifactSplitterIntegration:
             split_databases=["libhipcxx"],
             verbose=False,
             tmp_dir=tmp_path / "tmp",
-            gpu_targets=["gfx1250", "gfx942"],
+            gpu_targets=["gfx1250", "gfx1250-strict", "gfx942"],
         )
         batch_split(args, toolchain)
 
         relative_test = Path("bin/libhipcxx/lit-hiprtc/test/cuda/float/Output")
         gfx1250_test = output_dir / "libhipcxx_test_gfx1250" / prefix / relative_test
+        strict_test = (
+            output_dir / "libhipcxx_test_gfx1250-strict" / prefix / relative_test
+        )
         gfx942_test = output_dir / "libhipcxx_test_gfx942" / prefix / relative_test
         generic_test = output_dir / "libhipcxx_test_generic" / prefix / relative_test
 
-        # Each architecture archive gets its own device builds and the run
-        # description, so a test machine needs only its own archive.
+        # Each target gets its own archive, including the strict variant, and
+        # every archive carries the same run description.
         assert (
             gfx1250_test / "half.pass.cpp.gfx1250.gpu"
         ).read_bytes() == b"gfx1250 build"
-        assert (gfx1250_test / "half.pass.cpp.gfx1250-strict.gpu").exists()
-        assert not (gfx1250_test / "half.pass.cpp.gfx942.gpu").exists()
-        assert (gfx1250_test / "half.pass.cpp.build.yml").read_text() == run_description
+        assert not (gfx1250_test / "half.pass.cpp.gfx1250-strict.gpu").exists()
+        assert (
+            strict_test / "half.pass.cpp.gfx1250-strict.gpu"
+        ).read_bytes() == b"strict build"
+        assert not (strict_test / "half.pass.cpp.gfx1250.gpu").exists()
         assert (gfx942_test / "half.pass.cpp.gfx942.gpu").exists()
-        assert (gfx942_test / "half.pass.cpp.build.yml").read_text() == run_description
+        for test_dir in (gfx1250_test, strict_test, gfx942_test):
+            assert (test_dir / "half.pass.cpp.build.yml").read_text() == run_description
 
         # The generic archive keeps neither device builds nor the run description.
         assert not (generic_test / "half.pass.cpp.build.yml").exists()
         assert not (generic_test / "half.pass.cpp.gfx1250.gpu").exists()
+        assert not (generic_test / "half.pass.cpp.gfx1250-strict.gpu").exists()
         assert not (generic_test / "half.pass.cpp.gfx942.gpu").exists()
 
     def test_libhipcxx_hiprtc_run_description_kept_without_arch_artifacts(

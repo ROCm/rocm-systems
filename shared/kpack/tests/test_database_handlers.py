@@ -1232,7 +1232,8 @@ class TestLibhipcxxHiprtcHandler:
         [
             ("half_common_type.pass.cpp.gfx942.gpu", "gfx942"),
             ("half_common_type.pass.cpp.gfx1250.gpu", "gfx1250"),
-            ("half_common_type.pass.cpp.gfx1250-strict.gpu", "gfx1250"),
+            ("half_common_type.pass.cpp.gfx1250-strict.gpu", "gfx1250-strict"),
+            ("half_common_type.pass.cpp.gfx942-xnack+.gpu", "gfx942-xnack+"),
         ],
     )
     def test_detect_device_build(self, handler, prefix_root, file_name, expected):
