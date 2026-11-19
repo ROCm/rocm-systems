@@ -27,6 +27,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/memory_issue.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/register_modifiers.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/tensor_dma.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
