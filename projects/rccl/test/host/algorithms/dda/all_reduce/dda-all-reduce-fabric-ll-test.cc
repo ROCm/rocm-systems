@@ -1055,24 +1055,31 @@ TEST_F(DdaAllReduceFabricLL128PeerParMicrotest, RunLL128_BlocksWidenOnlyPastTheB
   EXPECT_EQ(two.grid.x, 2u);
 }
 
-// Every LL128 sweep case, uncapped and capped: the launch is the peer-parallel shape and the reporter reports its grid.
-TEST_F(DdaAllReduceFabricLL128PeerParMicrotest, RunLL128_ShapeAndReporterUnderCaps) {
-  const rcclDdaLaunchCap caps[] = {{0, 0}, {1, 64}, {3, 192}, {17, 256}, {3, 0},  {0, 192},
+// Every LL128 sweep case: uncapped, the launch is the peer-parallel shape. Capped, DDA runs another backend's call,
+// so the launch is the one RCCL_DDA_LL128_AR_PEER_PARALLEL=0 gives under the same cap. The reporter reports its grid.
+TEST_F(DdaAllReduceFabricLL128PeerParMicrotest, RunLL128_PeerParallelOnlyUncapped) {
+  const rcclDdaLaunchCap caps[] = {{1, 64}, {3, 192}, {17, 256}, {3, 0},  {0, 192},
                                    {17, 96}, {2, 1024}, {0, 64}, {0, 480}, {1, 32}, {0, 1}};
   ForEachTierCase([&](int maxBlocks, const FixedTier& tier, int nRanks, ncclDataType_t type, size_t bytes,
                       size_t count) {
     if (!tier.ll128) {
       return;
     }
-    const size_t slices = TierUnits(tier, bytes, nRanks);
-    const void* kernel = RunTier(tier, count, type).kernel;
+    const DdaLaunch uncapped = RunTier(tier, count, type);
+    const PeerParShape shape = PeerParModel(nRanks, TierUnits(tier, bytes, nRanks), maxBlocks, {});
+    EXPECT_EQ(uncapped.block.x, shape.threads);
+    EXPECT_EQ(uncapped.grid.x, shape.blocks);
+    EXPECT_EQ(ReportTier(tier, count, type, {}), uncapped.grid.x * uncapped.grid.y);
     for (const rcclDdaLaunchCap& cap : caps) {
       SCOPED_TRACE(testing::Message() << "cap={" << cap.blocks << "," << cap.threads << "}");
+      params_["RCCL_DDA_LL128_AR_PEER_PARALLEL"] = 0;
+      const DdaLaunch flat = RunTier(tier, count, type, cap);
+      params_.erase("RCCL_DDA_LL128_AR_PEER_PARALLEL");
       const DdaLaunch launch = RunTier(tier, count, type, cap);
-      const PeerParShape shape = PeerParModel(nRanks, slices, maxBlocks, cap);
-      EXPECT_EQ(launch.kernel, kernel);
-      EXPECT_EQ(launch.block.x, shape.threads);
-      EXPECT_EQ(launch.grid.x, shape.blocks);
+      EXPECT_EQ(launch.kernel, flat.kernel);
+      EXPECT_EQ(launch.block.x, flat.block.x);
+      EXPECT_EQ(launch.grid.x, flat.grid.x);
+      EXPECT_EQ(launch.sharedMemBytes, flat.sharedMemBytes);
       EXPECT_EQ(ReportTier(tier, count, type, cap), launch.grid.x * launch.grid.y);
     }
   });
@@ -1098,7 +1105,8 @@ TEST_F(DdaAllReduceFabricLL128PeerParMicrotest, RunLL128_TwoShotPeerParallelOnly
 }
 
 // Past the rank-scaled cap the one-shot gives way, but only to a two-shot that splits the message into whole 16 B
-// shards; anything else stays on the one-shot up to RCCL_DDA_LL128_ONESHOT_THRESHOLD.
+// shards; anything else stays on the one-shot up to RCCL_DDA_LL128_ONESHOT_THRESHOLD. A capped launch keeps that
+// unscaled cap.
 TEST_F(DdaAllReduceFabricLL128PeerParMicrotest, LL128OneShotEligible_PastTheRankScaledCapOnlyForTheTwoShot) {
   comm().nRanks = 4;
   const ncclComm* seen = nullptr;
@@ -1118,6 +1126,10 @@ TEST_F(DdaAllReduceFabricLL128PeerParMicrotest, LL128OneShotEligible_PastTheRank
   EXPECT_EQ(RunOneLL128(ragged).kernel, (LL128OneShotPP<float, 4>()));
   EXPECT_TRUE(Eligible(ddaLL128ArOneShotEligible, 4 * kMiB / 4 - 4)) << "ragged, at the unscaled cap";
   EXPECT_FALSE(Eligible(ddaLL128ArOneShotEligible, 4 * kMiB / 4 + 4)) << "ragged, past the unscaled cap";
+  const rcclDdaLaunchCap cap{2, 256};
+  const DdaLaunch& capped = RunOneLL128(splits, ncclFloat32, cap);
+  EXPECT_EQ(capped.kernel, (LL128OneShot<float, 4>())) << "capped: the one-warp one-shot";
+  EXPECT_EQ(ncclAllReduceDdaFabricLL128Blocks(mock_.get(), splits, ncclFloat32, cap), capped.grid.x);
 }
 
 }  // namespace

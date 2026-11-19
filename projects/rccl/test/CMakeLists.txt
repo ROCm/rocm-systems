@@ -435,6 +435,7 @@ if(BUILD_TESTS)
       device/DdaReduceScatterFabricLLTests.cpp
       device/DdaAllReduceFabricLLTests.cpp
       device/DdaAllReduceFabricLL128TwoShotTests.cpp
+      device/DdaAllReduceFabricLL128PeerParTests.cpp
       device/DdaVecElementAddTests.cpp
       device/DdaLL128PollWireTests.cpp
       device/DdaLL128ArchGeometryTests.cpp

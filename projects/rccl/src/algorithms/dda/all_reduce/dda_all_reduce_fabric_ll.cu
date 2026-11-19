@@ -278,17 +278,23 @@ template <typename T>
 using DdaArLL128Kernel = void (*)(T* const*, T*, const T*, size_t, int, int, uint32_t*, int, size_t, size_t,
                                   dda::common::DdaKernelParams);
 
+// Whether `cap` bounds the launch: a call DDA takes over from another backend (rccl_wrap.cc).
+static inline bool ddaArCapped(rcclDdaLaunchCap cap) {
+  return cap.blocks != 0 || cap.threads != 0;
+}
+
 // Whether an LL128 launch takes the peer-parallel kernel: the one-shot always, the two-shot with the cooperative
-// writer only (the staged writer keeps its kernel). The launchers and ncclAllReduceDdaFabricLL128Blocks all ask here.
-static bool ddaArLL128PeerPar(const ncclComm* comm, size_t bytes, bool oneShot) {
-  return rcclParamDdaLL128ArPeerParallel() != 0 &&
+// writer only (the staged writer keeps its kernel). A capped launch keeps the one-warp kernels, which the table bounds
+// of the calls DDA takes over were measured with. The launchers and ncclAllReduceDdaFabricLL128Blocks all ask here.
+static bool ddaArLL128PeerPar(const ncclComm* comm, size_t bytes, bool oneShot, rcclDdaLaunchCap cap) {
+  return rcclParamDdaLL128ArPeerParallel() != 0 && !ddaArCapped(cap) &&
          (oneShot || ddaArLL128Wire(comm, bytes) == dda::common::kDdaLL128WireCoop);
 }
 
 // LL128 grid and block: slices of the whole message (one-shot) or of one shard (two-shot), in blocks sized for the
 // kernel ddaArLL128PeerPar picks.
 static std::pair<dim3, dim3> ddaArLL128Geom(const ncclComm* comm, size_t bytes, bool oneShot, rcclDdaLaunchCap cap) {
-  const bool peerPar = ddaArLL128PeerPar(comm, bytes, oneShot);
+  const bool peerPar = ddaArLL128PeerPar(comm, bytes, oneShot, cap);
   const size_t slices = ddaLL128Slices(oneShot ? bytes : bytes / (size_t)std::max(comm->nRanks, 1));
   return ddaArFabricLLGrid(comm, slices, ddaArLL128Threads(comm, slices, peerPar, cap),
                            ddaArLL128SliceThreads(comm, peerPar, cap), cap);
@@ -335,7 +341,7 @@ static ncclResult_t ncclAllReduceDdaFabricLL128OneShotTyped(const void* sendbuff
   const size_t slices = ddaLL128Slices(bytes);
   const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
 
-  const bool peerPar = ddaArLL128PeerPar(comm, bytes, /*oneShot=*/true);
+  const bool peerPar = ddaArLL128PeerPar(comm, bytes, /*oneShot=*/true, cap);
   const auto geom = ddaArLL128Geom(comm, bytes, /*oneShot=*/true, cap);
   const dim3 grid = geom.first;
   const dim3 block = geom.second;
@@ -377,7 +383,7 @@ static ncclResult_t ncclAllReduceDdaFabricLL128TwoShotTyped(const void* sendbuff
   const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
 
   const int wire = ddaArLL128Wire(comm, bytes);
-  const bool peerPar = ddaArLL128PeerPar(comm, bytes, /*oneShot=*/false);
+  const bool peerPar = ddaArLL128PeerPar(comm, bytes, /*oneShot=*/false, cap);
   const auto geom = ddaArLL128Geom(comm, bytes, /*oneShot=*/false, cap);
   const dim3 grid = geom.first;
   const dim3 block = geom.second;
@@ -555,16 +561,17 @@ bool ddaLLArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff
   return true;
 }
 
-// Shape/resource eligibility for the LL128 one-shot variant.
-bool ddaLL128ArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
-                               ncclDataType_t datatype, ncclRedOp_t op) {
+// Shape/resource eligibility for the LL128 one-shot variant of a launch under `cap`.
+static bool ddaLL128ArOneShotEligibleCapped(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                            ncclDataType_t datatype, ncclRedOp_t op, rcclDdaLaunchCap cap) {
   // Past the rank-scaled crossover the two-shot is faster, but only on a message it
   // splits into whole shards; anything else stays here up to the unscaled cap
-  // rather than leaving DDA.
+  // rather than leaving DDA. A capped launch keeps the unscaled cap, as it keeps the
+  // one-warp kernels (ddaArLL128PeerPar).
   const size_t msgBytes = count * ncclTypeSize(datatype);
-  if (msgBytes > rcclDdaLL128OneShotThreshold(comm) &&
-      (msgBytes > (size_t)rcclParamDdaLL128OneShotThreshold() ||
-       ddaLL128ArTwoShotEligible(comm, sendbuff, recvbuff, count, datatype, op))) {
+  const size_t unscaledCap = (size_t)rcclParamDdaLL128OneShotThreshold();
+  if (msgBytes > (ddaArCapped(cap) ? unscaledCap : rcclDdaLL128OneShotThreshold(comm)) &&
+      (msgBytes > unscaledCap || ddaLL128ArTwoShotEligible(comm, sendbuff, recvbuff, count, datatype, op))) {
     return false;
   }
 
@@ -608,6 +615,11 @@ bool ddaLL128ArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvb
   }
 
   return true;
+}
+
+bool ddaLL128ArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                               ncclDataType_t datatype, ncclRedOp_t op) {
+  return ddaLL128ArOneShotEligibleCapped(comm, sendbuff, recvbuff, count, datatype, op, {});
 }
 
 // Shape/resource eligibility for the LL128 two-shot variant.
@@ -738,7 +750,7 @@ ncclResult_t ncclAllReduceDdaFabricLL128(const void* sendbuff, void* recvbuff, s
                                          ncclRedOp_t op, ncclComm* comm, cudaStream_t stream, rcclDdaLaunchCap cap) {
   const size_t bytes = count * ncclTypeSize(datatype);
 
-  if (ddaLL128ArOneShotEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+  if (ddaLL128ArOneShotEligibleCapped(comm, sendbuff, recvbuff, count, datatype, op, cap)) {
     INFO(NCCL_COLL,
          "AllReduce: taking DDA fabric LL128 one-shot path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
          comm->nRanks, comm->nNodes, count, (int)datatype, bytes);
@@ -800,7 +812,7 @@ uint32_t ncclAllReduceDdaFabricLLBlocks(ncclComm* comm, size_t count, ncclDataTy
 uint32_t ncclAllReduceDdaFabricLL128Blocks(ncclComm* comm, size_t count, ncclDataType_t datatype,
                                            rcclDdaLaunchCap cap) {
   const size_t bytes = count * ncclTypeSize(datatype);
-  const bool oneShot = ddaLL128ArOneShotEligible(comm, nullptr, nullptr, count, datatype, ncclSum);
+  const bool oneShot = ddaLL128ArOneShotEligibleCapped(comm, nullptr, nullptr, count, datatype, ncclSum, cap);
   const dim3 grid = ddaArLL128Geom(comm, bytes, oneShot, cap).first;
   return grid.x * grid.y;
 }
