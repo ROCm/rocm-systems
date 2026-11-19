@@ -73,7 +73,7 @@ env:
 
 jobs:
   test:
-    runs-on: aws-linux-scale-rocm-prod
+    runs-on: az-linux-scale-rocm-default-prod
     name: test (${{ matrix.name }})
     env:
       ROCJITSU_HOST_CPU_BASELINE: ${{ matrix.host_cpu_baseline }}
@@ -605,7 +605,7 @@ jobs:
 
       - name: Install corpus test dependencies
         id: install_corpus_dependencies
-        if: matrix.run_simulator_corpus
+        if: ${{ !cancelled() && matrix.run_simulator_corpus && steps.build_rocjitsu.outcome == 'success' }}
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         shell: bash
         run: |
@@ -696,7 +696,7 @@ jobs:
           retention-days: 7
 
       - name: Compare plain and translated gfx1250 simulator runs
-        if: ${{ !cancelled() && matrix.name == 'release' && steps.build_rocjitsu.outcome == 'success' }}
+        if: ${{ !cancelled() && matrix.name == 'release' && steps.build_rocjitsu.outcome == 'success' && steps.install_corpus_dependencies.outcome == 'success' }}
         timeout-minutes: 45
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         shell: bash

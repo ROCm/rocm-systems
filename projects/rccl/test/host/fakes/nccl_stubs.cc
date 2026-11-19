@@ -250,6 +250,8 @@ const char* rcclGitHash = "microtest";
 int ncclCudaDriverVersionCache = kDefaultCudaDriverVersion;  // src/misc/cudawrap.cc
 bool ncclCudaLaunchBlocking = false;          // src/misc/cudawrap.cc
 int ncclProfilerEventMask = 0;                // src/profiler.cc
+// src/plugin/profiler.cc (NCCL 2.32.6): with no profiler plugin loaded it is a load of the mask above.
+int ncclProfilerCurrentEventMask(void) { return ncclProfilerEventMask; }
 std::unordered_map<uint64_t, int> ncclDevFuncNameToId;  // generated device table
 
 // Default 1 (!= VerSuccess) means "version unknown", so showVersion()'s runtime-ROCm block is skipped.

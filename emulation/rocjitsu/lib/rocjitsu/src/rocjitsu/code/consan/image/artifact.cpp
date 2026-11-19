@@ -5,6 +5,7 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/consan/image/metadata.h"
 #include "rocjitsu/code/consan/target.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "util/bit.h"
 
 #include <cstring>
@@ -100,6 +101,16 @@ Result inspect_image(const Manifest &manifest, std::span<const uint8_t> image, b
        kernel_descriptor_initial_sgpr_count(target->arch, kernel.descriptor) < 16))
     return reject(error, ContractErrorCode::IdentityMismatch,
                   "artifact descriptor differs from its binding facts");
+  const uint32_t workgroup_id_scalar =
+      RJ_AMDHSA_BITS_GET(kernel.descriptor.compute_pgm_rsrc2,
+                         amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X)
+          ? (isa_properties(target->arch).uses_ttmp_workgroup_ids
+                 ? kWorkgroupIdTtmp9Selector
+                 : kernel_descriptor_user_sgpr_count(target->arch, kernel.descriptor))
+          : UINT32_MAX;
+  if (workgroup_id_scalar != entry.workgroup_id_scalar)
+    return reject(error, ContractErrorCode::IdentityMismatch,
+                  "artifact workgroup-X input differs from its binding facts");
   bool loaded_descriptor = false;
   bool loaded_text = false;
   for (const Elf64_Phdr &segment : *segments) {

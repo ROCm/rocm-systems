@@ -108,6 +108,7 @@ foreach(
         v_div_scale
         v_fma_dx9_zero
         v_fma
+        v_mad_f16
         v_fma_mix
         v_fma_mix_bf16
         v_fmaak
@@ -128,6 +129,7 @@ foreach(
         v_mul_dx9_zero_f32
         v_mul
         v_mad_mix
+        v_mad_mix_gfx908
         v_pk_add_mul_f16
         v_pk_add_mul_f32
         v_pk_bf16

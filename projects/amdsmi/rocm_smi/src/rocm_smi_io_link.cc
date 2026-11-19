@@ -13,6 +13,7 @@
 #include <fstream>
 #include <string>
 
+#include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "rocm_smi/rocm_smi_utils.h"
 
 #define CRAT_IOLINK_FLAGS_ENABLED (1 << 0)
@@ -25,16 +26,7 @@
 
 namespace amd::smi {
 
-namespace {
-const char* g_kfd_nodes_path_root_override = nullptr;
-}  // namespace
-
-const char* KFDNodesPathRoot() {
-  return g_kfd_nodes_path_root_override ? g_kfd_nodes_path_root_override
-                                        : "/sys/class/kfd/kfd/topology/nodes";
-}
-
-void SetKFDNodesPathRootForTesting(const char* path) { g_kfd_nodes_path_root_override = path; }
+const char* KFDNodesPathRoot() { return test_hooks::KfdNodesPathRoot().c_str(); }
 
 static const char* kKFDLinkPath[] = {"io_links", "p2p_links"};
 static_assert(sizeof(kKFDLinkPath) / sizeof(kKFDLinkPath[0]) == P2P_LINK_DIRECTORY + 1,

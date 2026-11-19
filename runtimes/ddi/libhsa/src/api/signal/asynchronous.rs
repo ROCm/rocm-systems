@@ -7,14 +7,15 @@ use std::ffi::c_void;
 
 use crate::callback_arg::CallbackArg;
 use crate::ffi::*;
-use crate::runtime::{boundary, initialized_mut, lock};
+use crate::lifecycle::{initialized_mut, lock};
 use crate::signal::asynchronous::AsyncRequest;
+use crate::status::boundary;
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_async_function")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Queues a function to run on the asynchronous callback worker.
 pub unsafe extern "C" fn hsa_amd_async_function(
     callback: AsyncFunction,
@@ -37,16 +38,16 @@ pub unsafe extern "C" fn hsa_amd_async_function(
                 callback,
                 arg: unsafe { CallbackArg::new(arg) },
             },
-            &runtime.stop_workers,
+            &runtime.control.stop_workers,
         )
     })
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_signal_async_handler")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Registers a callback for a signal condition.
 pub unsafe extern "C" fn hsa_amd_signal_async_handler(
     signal: HsaSignal,
@@ -90,7 +91,7 @@ pub unsafe extern "C" fn hsa_amd_signal_async_handler(
                 handler,
                 arg: unsafe { CallbackArg::new(arg) },
             },
-            &runtime.stop_workers,
+            &runtime.control.stop_workers,
         );
         if status != SUCCESS {
             runtime.signal_state.release_async_signal(signal);
