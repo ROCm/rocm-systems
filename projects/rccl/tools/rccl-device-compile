@@ -130,6 +130,27 @@ def _find_amdhsa_kernel_range(lines):
     return None
 
 
+def _find_function_range(lines, sym):
+    """[start, end) of sym's '-- Begin function' through '-- End function'."""
+    begin = '-- Begin function ' + sym
+    for i, line in enumerate(lines):
+        if line.rstrip().endswith(begin):
+            for j in range(i + 1, len(lines)):
+                if lines[j].strip() == '; -- End function':
+                    return (i, j + 1)
+            break
+    return None
+
+
+_LOCAL_LABEL_DEF_RE = re.compile(r'\s*\.L[\w.$]*:')
+
+# Only resource expressions of functions with opaque calls (added by coverage)
+# read .AMDGPU.gpr_maximums. Dropping it while read leaves an undefined symbol
+# that the assembler accepts.
+_GPR_MAXIMUMS_RE = re.compile(
+    r'\s*(\.section\s+\.AMDGPU\.gpr_maximums\b|\.set\s+amdgpu\.max_num_\w+\s*,)')
+
+
 def _find_metadata_range(lines):
     start = None
     for i, line in enumerate(lines):
@@ -161,18 +182,35 @@ def extract_device_function(asm_lines):
     if metadata_range:
         skip_ranges.append(metadata_range)
 
+    # The kernel is never launched. Keep its .L labels; DWARF refers to them.
+    kernel_range = _find_function_range(asm_lines, kernel_sym) if kernel_sym else None
+    kernel_set_prefix = f'.set .L{kernel_sym}.' if kernel_sym else None
+    drop_gpr_maximums = not any(
+        'amdgpu.max_num_' in line and not _GPR_MAXIMUMS_RE.match(line)
+        and not (kernel_range and kernel_range[0] <= i < kernel_range[1])
+        and not (kernel_set_prefix and line.strip().startswith(kernel_set_prefix))
+        for i, line in enumerate(asm_lines))
+
     def in_skip_range(idx):
         return any(s <= idx < e for s, e in skip_ranges)
 
     out_lines = []
     globl_inserted = False
     for i, line in enumerate(asm_lines):
+        if kernel_range and kernel_range[0] <= i < kernel_range[1]:
+            if _LOCAL_LABEL_DEF_RE.match(line):
+                out_lines.append(line)
+            continue
         if in_skip_range(i):
+            continue
+        if drop_gpr_maximums and _GPR_MAXIMUMS_RE.match(line):
             continue
         stripped = line.strip()
         if '__hip_cuid' in stripped:
             continue
         if kernel_sym and re.match(r'\s*\.globl\s+' + re.escape(kernel_sym), stripped):
+            continue
+        if kernel_set_prefix and stripped.startswith(kernel_set_prefix):
             continue
         # Drop .no_dead_strip directives that reference a local-only symbol
         # (.L*); see _LOCAL_NO_DEAD_STRIP_RE for why the AMDGPU assembler needs
