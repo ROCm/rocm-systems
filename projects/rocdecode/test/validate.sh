@@ -190,19 +190,17 @@ while [[ $# -gt 0 ]]; do
         usage >&2
         exit 1
       fi
-      IFS=',' read -r -a MEM_TYPES <<< "$2"
-      if [[ ${#MEM_TYPES[@]} -eq 0 ]]; then
-        echo "ERROR: --mem-type requires a list such as 1 or 0,1" >&2
+      # Check the whole argument before splitting it: `read -a` drops a trailing
+      # empty field and stops at the first newline, so "0," or "0<newline>3" would
+      # otherwise pass as "0". 3 (not mapped) is excluded: it returns no frames,
+      # so there is nothing to compare against the reference MD5.
+      if [[ ! "$2" =~ ^[012](,[012])*$ ]]; then
+        echo "ERROR: invalid --mem-type '$2' (expected a comma-separated list of 0, 1, 2 such as 1 or 0,1)" >&2
         exit 1
       fi
+      IFS=',' read -r -a MEM_TYPES <<< "$2"
       SEEN=","
       for MT in "${MEM_TYPES[@]}"; do
-        # 3 (not mapped) is excluded: it returns no frames, so there is nothing
-        # to compare against the reference MD5.
-        if [[ ! "$MT" =~ ^[012]$ ]]; then
-          echo "ERROR: invalid --mem-type value '$MT' (allowed: 0, 1, 2)" >&2
-          exit 1
-        fi
         if [[ "$SEEN" == *",$MT,"* ]]; then
           echo "ERROR: --mem-type lists $MT more than once" >&2
           exit 1
