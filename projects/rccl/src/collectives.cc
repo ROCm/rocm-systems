@@ -271,23 +271,6 @@ bool rcclCollectiveMustUseEnqueuePath(ncclComm* comm) {
   return false;
 }
 
-// Direct AllGather sets useDirect, and AlltoAll pivot/GDA enqueue a different
-// ncclInfo, before calling ncclEnqueueCheck. Diverting those here drops the
-// algorithm. Every other selected path either already enqueues that same info
-// or skips enqueue entirely (DDA, hier, GIN, CE 2-shot).
-static bool rcclEnqueueSetupNeedsSwitch(int algo) {
-  switch (algo) {
-  case RCCL_DIRECT_ALLGATHER:
-  case RCCL_A2A_PIVOT:
-#ifdef ENABLE_ROCSHMEM
-  case RCCL_A2A_GDA:
-#endif
-    return true;
-  default:
-    return false;
-  }
-}
-
 bool rcclAlltoAllShouldTakeDdaPath(const ncclComm* comm, size_t totalBytes, bool ceAlltoAllAllowed) {
   // AlltoAll has no symmetric kernel, so DDA must yield here or registered-window
   // CE never dispatches. Full contract is on the declaration in rccl_common.h.

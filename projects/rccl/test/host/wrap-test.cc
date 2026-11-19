@@ -11428,7 +11428,7 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_AllGatherMustEnqueue_ReportsPlannerK
         g_loadParam = ForceParam("RCCL_DDA_LL", int64_t(1));
         ScopedHook llEligible(g_allGatherDdaFabricLLEligible,
                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return true; });
-                ScopedHook getAlgo(g_getAlgoInfo, [](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
+        ScopedHook getAlgo(g_getAlgoInfo, [](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
                                               ncclSimInfo_t*) {
           task->algorithm = NCCL_ALGO_TREE;
           task->protocol = NCCL_PROTO_LL;
@@ -11444,7 +11444,8 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_AllGatherMustEnqueue_ReportsPlannerK
                                                     nullptr, /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, algo)
             << "check mode runs ncclEnqueueCheck, which never runs DDA";
-        EXPECT_LT(algo, NCCL_NUM_ALGORITHMS) << "expected a planner kernel algo, got " << algo;
+        EXPECT_EQ(NCCL_ALGO_TREE, algo) << "the hooked planner kernel";
+        EXPECT_EQ(NCCL_PROTO_LL, protocol);
         DeleteCommWithArch(comm);
       });
 }
@@ -11457,7 +11458,7 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_AllReduceMustEnqueue_ReportsPlannerK
                                  [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
         ScopedHook llEligible(g_allReduceDdaFabricLLEligible,
                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
-                ScopedHook getAlgo(g_getAlgoInfo, [](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
+        ScopedHook getAlgo(g_getAlgoInfo, [](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
                                               ncclSimInfo_t*) {
           task->algorithm = NCCL_ALGO_TREE;
           task->protocol = NCCL_PROTO_LL;
@@ -11473,7 +11474,8 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_AllReduceMustEnqueue_ReportsPlannerK
                                                     nullptr, /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, algo)
             << "check mode runs ncclEnqueueCheck, which never runs DDA";
-        EXPECT_LT(algo, NCCL_NUM_ALGORITHMS) << "expected a planner kernel algo, got " << algo;
+        EXPECT_EQ(NCCL_ALGO_TREE, algo) << "the hooked planner kernel";
+        EXPECT_EQ(NCCL_PROTO_LL, protocol);
         DeleteCommWithArch(comm);
       });
 }
@@ -11487,7 +11489,7 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_ReduceScatterMustEnqueue_ReportsPlan
                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
                                 return true;
                               });
-                ScopedHook getAlgo(g_getAlgoInfo, [](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
+        ScopedHook getAlgo(g_getAlgoInfo, [](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
                                               ncclSimInfo_t*) {
           task->algorithm = NCCL_ALGO_TREE;
           task->protocol = NCCL_PROTO_LL;
@@ -11503,7 +11505,8 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_ReduceScatterMustEnqueue_ReportsPlan
                                                     nullptr, /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, algo)
             << "check mode runs ncclEnqueueCheck, which never runs DDA";
-        EXPECT_LT(algo, NCCL_NUM_ALGORITHMS) << "expected a planner kernel algo, got " << algo;
+        EXPECT_EQ(NCCL_ALGO_TREE, algo) << "the hooked planner kernel";
+        EXPECT_EQ(NCCL_PROTO_LL, protocol);
         DeleteCommWithArch(comm);
       });
 }
@@ -11551,7 +11554,7 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_AllGatherMustEnqueue_KeepsCeRegister
               *out = ncclSymSendNonregRecvReg;
               return ncclSuccess;
             });
-                g_loadParam = ForceParam("RCCL_CE_COLL_MAX_BYTES", int64_t(268435456));
+        g_loadParam = ForceParam("RCCL_CE_COLL_MAX_BYTES", int64_t(268435456));
         ncclComm* comm = MakeCommWithArch("gfx950");
         comm->nRanks = 1;
         comm->nNodes = 1;
@@ -11561,6 +11564,27 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_AllGatherMustEnqueue_KeepsCeRegister
         EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllGather, 8, ncclFloat32, ncclSum, nullptr,
                                                     nullptr, /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Direct AllGather runs its setup before ncclEnqueueCheck even in check mode
+// (rcclEnqueueSetupNeedsSwitch), so the query keeps it, like CE registered above.
+TEST(WrapMicrotestIsolated, GetCollImplInfo_DirectAllGatherCheckModeKeepsDirect) {
+  RUN_ISOLATED_TEST(
+      "Wrap_GetCollImplInfo_DirectAllGatherCheckModeKeepsDirect",
+      []() {
+        SetMicroEnvAbsent("RCCL_DIRECT_ALLGATHER_THRESHOLD");
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 1;  // auto threshold -> 8MiB
+        comm->nRanks = 8;
+        comm->p2pnChannels = 17;
+        comm->checkMode = ncclCheckModeDebugLocal;
+        int algo = -7, protocol = -7, maxChannels = -7;
+        EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllGather, 8, ncclFloat32, ncclSum, nullptr,
+                                                    nullptr, /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DIRECT_ALLGATHER, algo);
+        EXPECT_EQ(17, maxChannels);
         DeleteCommWithArch(comm);
       });
 }
@@ -11597,7 +11621,7 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_HierarchicalAllGatherMustEnqueue_Rep
                                                     nullptr, /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
         ASSERT_EQ((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER, algo) << "setup must pick hierarchical";
         comm->checkMode = ncclCheckModeDebugLocal;
-                EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllGather, 8, ncclFloat32, ncclSum, nullptr,
+        EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllGather, 8, ncclFloat32, ncclSum, nullptr,
                                                     nullptr, /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
         EXPECT_EQ(NCCL_ALGO_TREE, algo);
         EXPECT_EQ(NCCL_PROTO_LL, protocol);
@@ -11633,7 +11657,7 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_AllGatherMustEnqueue_DdaNotRelabeled
                                                     nullptr, /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
         ASSERT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_IPC, algo) << "setup must pick DDA outside check mode";
         comm->checkMode = ncclCheckModeDebugLocal;
-                EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllGather, 8, ncclFloat32, ncclSum, nullptr,
+        EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllGather, 8, ncclFloat32, ncclSum, nullptr,
                                                     nullptr, /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_DIRECT_ALLGATHER, algo);
         EXPECT_EQ(NCCL_ALGO_TREE, algo);
@@ -12990,6 +13014,30 @@ TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250DdaLLOffFallsToLL128) {
           ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, kA2aSend, kA2aRecv, false, &d));
           EXPECT_EQ((int)RCCL_DDA_FABRIC_LL128, d.algo) << perPeer;
         }
+      });
+}
+
+// Check mode diverts a DDA AlltoAll to ncclEnqueueCheck, where taskAppend() splits it into per-peer
+// Send/Recv over the p2p channels; the query must report that, not DDA.
+TEST(WrapMicrotestIsolated, GetCollImplInfo_AlltoAllCheckModeReportsPerPeerSendRecv) {
+  RUN_ISOLATED_TEST(
+      "Wrap_GetCollImplInfo_AlltoAllCheckModeReportsPerPeerSendRecv",
+      []() {
+        A2aGfx1250Comm a2a;
+        ncclComm* const comm = a2a.comm;
+        comm->p2pnChannels = 13;
+        int algo = -7, protocol = -7, maxChannels = -7;
+        ASSERT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAlltoAll, /*count=*/512, ncclInt8, ncclSum,
+                                                    kA2aSend, kA2aRecv, /*graphCapturing=*/0, &algo, &protocol,
+                                                    &maxChannels));
+        ASSERT_EQ((int)RCCL_DDA_FABRIC_LL, algo) << "setup must pick DDA outside check mode";
+        comm->checkMode = ncclCheckModeDebugLocal;
+        EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAlltoAll, /*count=*/512, ncclInt8, ncclSum,
+                                                    kA2aSend, kA2aRecv, /*graphCapturing=*/0, &algo, &protocol,
+                                                    &maxChannels));
+        EXPECT_EQ((int)RCCL_DIRECT_ALLTOALL, algo);
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, protocol);
+        EXPECT_EQ(13, maxChannels);
       });
 }
 

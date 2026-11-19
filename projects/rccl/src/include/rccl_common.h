@@ -330,6 +330,23 @@ bool rcclAlltoAllShouldTakeDdaPath(const struct ncclComm* comm, size_t totalByte
 // True when DDA / CE 2-shot / GIN-SDMA early-returns must yield to ncclEnqueueCheck
 // so NCCL_CHECK_MODE pointer checks and the suspend guard still run.
 bool rcclCollectiveMustUseEnqueuePath(struct ncclComm* comm);
+// Direct AllGather sets useDirect, and AlltoAll pivot/GDA enqueue a different
+// ncclInfo, before calling ncclEnqueueCheck. Diverting those drops the algorithm,
+// so they skip the divert. Every other selected path either already enqueues that
+// same info or skips enqueue entirely (DDA, hier, GIN, CE 2-shot). Shared by the
+// divert in collectives.cc and rcclGetCollImplInfo's report of it.
+inline bool rcclEnqueueSetupNeedsSwitch(int algo) {
+  switch (algo) {
+  case RCCL_DIRECT_ALLGATHER:
+  case RCCL_A2A_PIVOT:
+#ifdef ENABLE_ROCSHMEM
+  case RCCL_A2A_GDA:
+#endif
+    return true;
+  default:
+    return false;
+  }
+}
 // Suspend is in effect, or still queued, and no resume is pending. Shared by
 // the enqueue reject and the collective divert. mem_manager.cc's double-Suspend
 // check is separate: a queued suspend has not set released yet.
