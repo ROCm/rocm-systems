@@ -1426,9 +1426,17 @@ rdc_status_t rdc_group_field_destroy(rdc_handle_t p_rdc_handle, rdc_field_grp_t 
  *
  *  @param[in] update_freq  How often to update fields in usec.
  *
- *  @param[in] max_keep_age How long to keep data for fields in seconds.
+ *  @param[in] max_keep_age How long to keep data for fields in seconds. 0 keeps
+ *  no samples: each is dropped soon after it arrives. See max_keep_samples for
+ *  how the limits of several watches of one field combine.
  *
- *  @param[in] max_keep_samples Maximum number of samples to keep. 0=no limit.
+ *  @param[in] max_keep_samples Maximum number of samples to keep. 0 keeps no
+ *  samples: each is dropped soon after it arrives. To keep every sample, pass a
+ *  large value, such as UINT32_MAX. When several watches cover a field, each
+ *  limit is the largest that any of them sets, also after a watch ends: a new
+ *  watch can raise a limit but not lower it until RDC stops tracking the field,
+ *  which it does only when no watch covers the field and its last update is
+ *  older than the largest max_keep_age set for it.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  *  @retval ::RDC_ST_CONFLICT is returned if the field group is already watched for the GPU group.
