@@ -18,8 +18,8 @@ mod target;
 mod test_support;
 
 pub use code_object::{
-    CodeObject, CodeObjectContract, FloatRoundingMode, Profile, Symbol, SymbolKind, SymbolLinkage,
-    SymbolTableOrder, Target, VariableAllocation, VariableSegment, supports_target,
+    CodeObject, Symbol, SymbolKind, SymbolLinkage, SymbolTableOrder, Target, VariableAllocation,
+    VariableSegment, supports_target,
 };
 pub use executable::{Definition, Executable, LoadedObject, Scope};
 pub use loaded_image::{

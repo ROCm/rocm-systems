@@ -149,26 +149,8 @@ pub(super) unsafe fn parse_and_load(
     destination: Option<(u64, usize)>,
 ) -> Result<(LoadedObject, Vec<rocloader::Symbol>), Status> {
     let object = LoaderCodeObject::parse(&code_object).map_err(map_loader_error)?;
-    let record = runtime
-        .loader
-        .executables
-        .get(&executable.handle)
-        .ok_or(INVALID_EXECUTABLE)?;
-    let profile = match record.profile {
-        PROFILE_BASE => rocloader::Profile::Base,
-        PROFILE_FULL => rocloader::Profile::Full,
-        _ => return Err(INCOMPATIBLE_ARGUMENTS),
-    };
-    let rounding = match record.default_rounding {
-        DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT => rocloader::FloatRoundingMode::Default,
-        DEFAULT_FLOAT_ROUNDING_MODE_ZERO => rocloader::FloatRoundingMode::Zero,
-        DEFAULT_FLOAT_ROUNDING_MODE_NEAR => rocloader::FloatRoundingMode::Near,
-        _ => return Err(INCOMPATIBLE_ARGUMENTS),
-    };
-    object
-        .contract()
-        .validate(profile, rounding)
-        .map_err(map_loader_error)?;
+    // Modern V3 and later objects do not declare the legacy HSAIL profile
+    // or default rounding mode. These are executable properties.
     let (gpu_index, memory_kind, object_kind) = if program {
         let gpu_index = runtime
             .agents
