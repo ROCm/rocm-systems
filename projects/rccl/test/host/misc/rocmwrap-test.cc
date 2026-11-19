@@ -895,3 +895,102 @@ TEST_F(RocmwrapMicrotest, LibraryInit_RunsInitOnceAndReturnsItsResult) {
     },
     ::testing::ExitedWithCode(0), "");
 }
+
+// --- ncclKernelConfigReadFirstAvailable's candidate search. kernel_config.cc is included again here
+// under renamed symbols (the binary also links the real one) with snprintf seamed in its bodies: every
+// absolute candidate path is re-rooted under a scratch dir, so the test owns the whole search.
+
+#include <filesystem>
+
+namespace {
+std::string g_kcRoot;
+__attribute__((format(printf, 3, 4))) int KcSnprintf(char* buf, size_t n, const char* fmt, ...) {
+  char formatted[512];
+  va_list ap;
+  va_start(ap, fmt);
+  std::vsnprintf(formatted, sizeof(formatted), fmt, ap);
+  va_end(ap);
+  const bool candidate = fmt[0] == '/';  // the path templates; "zcat %s" and "%s" pass through
+  return std::snprintf(buf, n, "%s%s", candidate ? g_kcRoot.c_str() : "", formatted);
+}
+}  // namespace
+
+#define snprintf KcSnprintf
+#define ncclKernelConfigContentHasOption KcTestContentHasOption
+#define ncclKernelConfigReadFile KcTestReadFile
+#define ncclKernelConfigReadGzip KcTestReadGzip
+#define ncclKernelConfigReadFirstAvailable KcTestReadFirstAvailable
+#define ncclKernelHasConfigOption KcTestHasConfigOption
+#define ncclIommuPassthroughOk KcTestIommuPassthroughOk
+#include KERNEL_CONFIG_CC_PATH
+#undef ncclIommuPassthroughOk
+#undef ncclKernelHasConfigOption
+#undef ncclKernelConfigReadFirstAvailable
+#undef ncclKernelConfigReadGzip
+#undef ncclKernelConfigReadFile
+#undef ncclKernelConfigContentHasOption
+#undef snprintf
+
+namespace {
+
+// Writes candidates under the scratch root; only the two named here exist, so the search reaches them in
+// template order: /usr/lib/modules/%s/config before /lib/modules/%s/build/.config.
+class KernelConfigSearchMicrotest : public ::testing::Test {
+ protected:
+  std::string release_;
+
+  void SetUp() override {
+    char tmpl[] = "/tmp/rccl-kcfg-XXXXXX";
+    ASSERT_NE(nullptr, mkdtemp(tmpl));
+    g_kcRoot = tmpl;
+    struct utsname u;
+    ASSERT_EQ(0, ::uname(&u));
+    release_ = u.release;
+  }
+  void TearDown() override {
+    if (!g_kcRoot.empty()) std::filesystem::remove_all(g_kcRoot);
+    g_kcRoot.clear();
+  }
+  std::string ModulesConfig() const { return "/usr/lib/modules/" + release_ + "/config"; }
+  std::string BuildConfig() const { return "/lib/modules/" + release_ + "/build/.config"; }
+  static void Write(const std::string& path, const std::string& text) {
+    std::filesystem::create_directories(std::filesystem::path(g_kcRoot + path).parent_path());
+    std::ofstream(g_kcRoot + path) << text;
+  }
+};
+
+TEST_F(KernelConfigSearchMicrotest, ReadFirstAvailable_SkipsEmptyCandidateForLaterOne) {
+  Write(ModulesConfig(), "");
+  Write(BuildConfig(), "CONFIG_PCI_P2PDMA=y\n");
+  std::string content;
+  char path[256] = {};
+
+  ASSERT_TRUE(KcTestReadFirstAvailable(&content, path, sizeof(path)));
+
+  EXPECT_EQ(g_kcRoot + BuildConfig(), path) << "an empty config file was taken as the kernel config";
+  EXPECT_TRUE(KcTestContentHasOption(content, "CONFIG_PCI_P2PDMA=y"));
+}
+
+TEST_F(KernelConfigSearchMicrotest, ReadFirstAvailable_FirstNonEmptyCandidateWins) {
+  Write(ModulesConfig(), "CONFIG_A=y\n");
+  Write(BuildConfig(), "CONFIG_B=y\n");
+  std::string content;
+  char path[256] = {};
+
+  ASSERT_TRUE(KcTestReadFirstAvailable(&content, path, sizeof(path)));
+
+  EXPECT_EQ(g_kcRoot + ModulesConfig(), path);
+  EXPECT_EQ("CONFIG_A=y\n", content);
+}
+
+TEST_F(KernelConfigSearchMicrotest, ReadFirstAvailable_OnlyEmptyCandidatesIsUnavailable) {
+  Write(ModulesConfig(), "");
+  Write(BuildConfig(), "");
+  std::string content;
+  char path[256] = {};
+
+  EXPECT_FALSE(KcTestReadFirstAvailable(&content, path, sizeof(path)))
+      << "returned true with empty content from " << path;
+}
+
+}  // namespace

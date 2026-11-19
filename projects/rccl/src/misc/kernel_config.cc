@@ -90,7 +90,8 @@ bool ncclKernelConfigReadFirstAvailable(std::string* content, char* pathOut, siz
       readOk = ncclKernelConfigReadFile(resolvedPath, content);
     }
 
-    if (!readOk) continue;
+    // An empty candidate (e.g. a zero-length /boot/config-*) is not a kernel config: keep looking.
+    if (!readOk || content->empty()) continue;
 
     if (pathOut != NULL && pathOutLen > 0) {
       snprintf(pathOut, pathOutLen, "%s", resolvedPath);
