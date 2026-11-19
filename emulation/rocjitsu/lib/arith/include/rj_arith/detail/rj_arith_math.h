@@ -167,10 +167,11 @@ int rj_arith_v_cos_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
                                  uint32_t *excp_flag_user);
 
 // FP32 fractional part: x - floor(x), capped below one before OMOD/CLAMP.
-// Supports A ABS/NEG, OMOD, CLAMP and guest input/output flushing in loose
-// semantics. One VGPR per operand; infinite inputs produce NaN.
-// RDNA3 ignores OMOD with IEEE mode or preserved output denormals; RDNA4 does not.
-// Required exact results and FP status reporting are unsupported.
+// Supports A ABS/NEG, OMOD, CLAMP and guest input/output flushing. One numeric
+// model serves Loose and bit-exact semantics; the gfx1201 and gfx1100 captures match
+// it, so Compatibility resolves to mode 2. One VGPR per operand; infinite inputs
+// produce NaN. RDNA3 ignores OMOD with IEEE mode or preserved output denormals; RDNA4
+// does not. FP status reporting (mode 3) is unsupported.
 int rj_arith_v_fract_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                              uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_fract_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
@@ -181,9 +182,10 @@ int rj_arith_v_fract_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t 
 // [0.5,1); zeros and infinities pass through before output modifiers. FP32
 // quiets signaling NaNs in exact semantics on gfx12; gfx11 quiets only with IEEE set.
 // Guest input flushing is supported.
-// Supports A ABS/NEG, OMOD and CLAMP. FP32 uses one VGPR per operand and supports
-// both semantics; FP64 uses low/high VGPR pairs with loose semantics and the
-// FP64 alias contract. RDNA3 FP32 suppresses OMOD when IEEE mode is enabled or
+// Supports A ABS/NEG, OMOD and CLAMP. FP32 uses one VGPR per operand; FP64 uses
+// low/high VGPR pairs and the FP64 alias contract. Both widths support Loose and
+// bit-exact semantics (Compatibility resolves to mode 2); the gfx1201 and gfx1100
+// captures match the FP64 model. RDNA3 FP32 suppresses OMOD when IEEE mode is enabled or
 // output denormals are preserved; RDNA4 scales independently. Non-null exact
 // reporting is unsupported on both architectures; loose calls leave state alone.
 int rj_arith_v_frexp_mant_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,

@@ -6206,6 +6206,55 @@ TEST(ArithBridgeTest, Fp8NarrowPartialWritesModifiersAndSeeds) {
               }
 }
 
+// The shared conversion kernels accept strict exact requests only through the RDNA3 and RDNA4
+// entry points, whose results the gfx1100 and gfx1201 captures cover; the generated CDNA3 and
+// gfx1250 executors call loose-only entry points that still refuse mode 2 while Compatibility
+// executes the same numeric model on every architecture.
+TEST(ArithBridgeTest, ConversionStrictExactAcceptancePerArchitecture) {
+  const uint32_t inputs[] = {0u, 1u, 0xffffffffu, 0x7fffffffu};
+  const uint32_t expected[] = {0u, 0x3f800000u, 0xbf800000u, 0x4f000000u};
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA3,
+                    ROCJITSU_CODE_ARCH_CDNA5})
+    for (bool strict : {false, true}) {
+      ArithmeticPolicy policy{};
+      if (strict)
+        policy.semantics = ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
+      const unsigned lanes = arch == ROCJITSU_CODE_ARCH_CDNA3 ? 64 : 32;
+      BridgeFixture fixture(arch, lanes, policy);
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
+      fixture.wave->set_exec(0xf);
+      for (unsigned lane = 0; lane < lanes; ++lane) {
+        fixture.cu->write_vgpr(fixture.base(), lane, inputs[lane % 4]);
+        fixture.cu->write_vgpr(fixture.base() + 1, lane, 0xdeadbeefu);
+      }
+      std::array<uint32_t, 1> words{};
+      switch (arch) {
+      case ROCJITSU_CODE_ARCH_RDNA3:
+        words = rdna3::build_vop1(rdna3::kVCvtF32I32Vop1, {.src0 = 256, .vdst = 1});
+        break;
+      case ROCJITSU_CODE_ARCH_RDNA4:
+        words = rdna4::build_vop1(rdna4::kVCvtF32I32Vop1, {.src0 = 256, .vdst = 1});
+        break;
+      case ROCJITSU_CODE_ARCH_CDNA3:
+        words = cdna3::build_vop1(cdna3::kVCvtF32I32Vop1, {.src0 = 256, .vdst = 1});
+        break;
+      default:
+        words = cdna5::build_vop1(cdna5::kVCvtF32I32Vop1, {.src0 = 256, .vdst = 1});
+        break;
+      }
+      auto instruction = fixture.decoder->decode_window(words);
+      ASSERT_TRUE(instruction.succeeded());
+      const bool rdna = arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4;
+      const bool success =
+          fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded();
+      SCOPED_TRACE(::testing::Message() << "arch " << int(arch) << " strict " << strict);
+      EXPECT_EQ(success, !strict || rdna);
+      for (unsigned lane = 0; lane < 4; ++lane)
+        EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 1, lane),
+                  success ? expected[lane] : 0xdeadbeefu);
+    }
+}
+
 TEST(ArithBridgeTest, DoubleConversionsLayoutsModesAndPolicies) {
   const uint16_t opcodes[2][2][6] = {
       {{rdna3::kVCvtF64I32Vop1, rdna3::kVCvtF64U32Vop1, rdna3::kVCvtI32F64Vop1,
@@ -6306,7 +6355,7 @@ TEST(ArithBridgeTest, DoubleConversionsLayoutsModesAndPolicies) {
                   const bool success =
                       fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
                           .succeeded();
-                  ASSERT_EQ(success, policy_kind < 2);
+                  ASSERT_EQ(success, policy_kind < 3);
                   uint64_t read_lanes[2] = {}, written[2] = {};
                   for (const auto &read : fixture.recorder->reads) {
                     ASSERT_GE(read.reg, 2u);
@@ -6440,7 +6489,7 @@ TEST(ArithBridgeTest, WordConversionsRoundingSaturationAndPolicies) {
                   const bool success =
                       fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
                           .succeeded();
-                  ASSERT_EQ(success, policy_kind < 2);
+                  ASSERT_EQ(success, policy_kind < 3);
                   uint64_t read_lanes = 0, written = 0;
                   for (const auto &read : fixture.recorder->reads) {
                     EXPECT_EQ(read.reg, 0u);
@@ -6660,7 +6709,7 @@ TEST(ArithBridgeTest, PackedConversionsFixedRoundingModifiersAliasesAndPolicies)
                 ASSERT_TRUE(instruction.succeeded());
                 fixture.recorder->reads.clear();
                 fixture.recorder->writes.clear();
-                const bool success = policy_kind < 2;
+                const bool success = policy_kind < 3;
                 ASSERT_EQ(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
                               .succeeded(),
                           success);
@@ -6791,7 +6840,7 @@ TEST(ArithBridgeTest, NormalizedConversionsLayoutsRoundingAndPolicies) {
                     ASSERT_TRUE(instruction.succeeded());
                     fixture.recorder->reads.clear();
                     fixture.recorder->writes.clear();
-                    const bool success = policy_kind < 2;
+                    const bool success = policy_kind < 3;
                     ASSERT_EQ(
                         fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
                             .succeeded(),
@@ -6909,7 +6958,8 @@ TEST(ArithBridgeTest, BitPackingSelectorsAliasingAndPolicies) {
                 ASSERT_TRUE(instruction.succeeded());
                 fixture.recorder->reads.clear();
                 fixture.recorder->writes.clear();
-                const bool success = policy_kind < 2 || (policy_kind == 2 && half && !rdna3);
+                // Both architectures accept strict exact numeric requests; neither reports status.
+                const bool success = policy_kind < 3;
                 ASSERT_EQ(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
                               .succeeded(),
                           success);
@@ -7026,7 +7076,8 @@ TEST(ArithBridgeTest, DoubleFmaPairAliasesModifiersAndPolicies) {
               ASSERT_TRUE(instruction.succeeded());
               fixture.recorder->reads.clear();
               fixture.recorder->writes.clear();
-              const bool rejected = policy_kind >= 2;
+              // Both architectures accept strict exact numeric requests; neither reports status.
+              const bool rejected = policy_kind == 3;
               EXPECT_EQ(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
                             .failed(),
                         rejected);

@@ -11,7 +11,7 @@ conversion and graphics operations are not included in these percentages.
 | Instructions | Loose | Bit-exact | FP status |
 |---|---:|---:|---:|
 | Matrix (WMMA) | 100% | 100% | N/A |
-| FP arithmetic | 100% | 70% | 3% |
+| FP arithmetic | 100% | 90% | 3% |
 | Math (RCP, RSQ, SQRT, etc.) | 100% | 93% | 7% |
 | Dot products | 100% | 100% | 0% |
 
@@ -20,7 +20,7 @@ conversion and graphics operations are not included in these percentages.
 | Instructions | Loose | Bit-exact | FP status |
 |---|---:|---:|---:|
 | Matrix (WMMA, SWMMAC) | 100% | 100% | N/A |
-| FP arithmetic | 100% | 80% | 10% |
+| FP arithmetic | 100% | 90% | 10% |
 | Math (RCP, RSQ, SQRT, etc.) | 100% | 93% | 20% |
 | Dot products | 100% | 100% | 50% |
 
@@ -39,8 +39,8 @@ mode 3 succeeding on an API without that output is not FP-status coverage.
 
 | Architecture/family | Bit-exact mnemonics | FP-status mnemonics |
 |---|---:|---:|
-| RDNA3 FP | 43/62 | 2/59 |
-| RDNA4 FP | 59/78 | 11/75 |
+| RDNA3 FP | 53/62 | 2/59 |
+| RDNA4 FP | 69/78 | 11/75 |
 | RDNA3 DOT | 8/8 | 0/4 |
 | RDNA4 DOT | 12/12 | 2/4 |
 
@@ -48,6 +48,13 @@ The FP-status numerators are RDNA3 `DIV_FIXUP_F32/F64`; RDNA4 adds
 `DIV_FIXUP_F16`, `DIV_FMAS_F32/F64`, `FMA_F16`, `FMA_MIXLO/HI_F16`, `MUL_F32`,
 `PK_FMA_F16`, and `PK_FMAC_F16`. `DIV_SCALE_F32/F64` and `FMA_DX9_ZERO_F32`
 have no FP-status output and are excluded from these denominators.
+
+FP64 ADD/MUL/FMA, TRUNC/CEIL/RNDNE/FLOOR, FRACT, FREXP_MANT and FREXP_EXP, the FP16/FP32
+FRACT forms, the FP16/FP32/FP64 and normalized/packed/byte conversions, PACK_B32_F16 and
+VINTERP accept mode 2 on RDNA3 and RDNA4 since the gfx1100 and gfx1201 captures match their
+single numeric model; Compatibility resolves to mode 2 for them. The CDNA3/CDNA4 (`_gfx942`),
+gfx1250 (`_gfx1250`) and RDNA2 (`_gfx10`) entry points of the shared conversion, PACK and
+FP64 FMA kernels stay loose-only until their captures are reviewed per instruction.
 
 For DOT, integer instructions and FP8/BF8 DOT4 have no FP-status output and are
 excluded. RDNA4 FP32-output `DOT2_F32_F16/BF16` accepts mode 3 and leaves flags

@@ -320,9 +320,8 @@ template <rocjitsu::arith::Fp64 Op, bool Rdna3 = false, bool AcceptExact = false
 int fp64_wave64(uint64_t flags, uint64_t exec_mask, uint32_t instruction_flags, uint32_t *const *d,
                 const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
   // Validate before either Wave64 half can modify outputs, even when EXEC is empty.
-  if (int error =
-          fp64<Op, Rdna3, AcceptExact>(flags, 0, instruction_flags, nullptr, nullptr, nullptr,
-                                       nullptr)) {
+  if (int error = fp64<Op, Rdna3, AcceptExact>(flags, 0, instruction_flags, nullptr, nullptr,
+                                               nullptr, nullptr)) {
     return error;
   }
   if (!exec_mask) {
@@ -366,7 +365,7 @@ int rj_arith_v_add_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruct
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
   return fp64<rocjitsu::arith::Fp64::Add, true, true>(flags, exec_mask, instruction_flags, d, a, b,
-                                                nullptr);
+                                                      nullptr);
 }
 
 // Add the operands for selected lanes.
@@ -383,7 +382,8 @@ int rj_arith_v_add_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t in
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64<rocjitsu::arith::Fp64::Add, false, true>(flags, exec_mask, instruction_flags, d, a, b, nullptr);
+  return fp64<rocjitsu::arith::Fp64::Add, false, true>(flags, exec_mask, instruction_flags, d, a, b,
+                                                       nullptr);
 }
 
 // Multiply the operands for selected lanes.
@@ -400,7 +400,7 @@ int rj_arith_v_mul_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruct
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
   return fp64<rocjitsu::arith::Fp64::Mul, true, true>(flags, exec_mask, instruction_flags, d, a, b,
-                                                nullptr);
+                                                      nullptr);
 }
 
 // Multiply the operands for selected lanes.
@@ -417,7 +417,8 @@ int rj_arith_v_mul_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t in
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64<rocjitsu::arith::Fp64::Mul, false, true>(flags, exec_mask, instruction_flags, d, a, b, nullptr);
+  return fp64<rocjitsu::arith::Fp64::Mul, false, true>(flags, exec_mask, instruction_flags, d, a, b,
+                                                       nullptr);
 }
 
 // Compute fused A*B+C for selected lanes.
@@ -433,7 +434,8 @@ int rj_arith_v_fma_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruct
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64<rocjitsu::arith::Fp64::Fma, true, true>(flags, exec_mask, instruction_flags, d, a, b, c);
+  return fp64<rocjitsu::arith::Fp64::Fma, true, true>(flags, exec_mask, instruction_flags, d, a, b,
+                                                      c);
 }
 
 // Compute fused A*B+C for selected lanes.
@@ -450,7 +452,8 @@ int rj_arith_v_fma_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t in
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64<rocjitsu::arith::Fp64::Fma, false, true>(flags, exec_mask, instruction_flags, d, a, b, c);
+  return fp64<rocjitsu::arith::Fp64::Fma, false, true>(flags, exec_mask, instruction_flags, d, a, b,
+                                                       c);
 }
 
 // Round toward zero for selected lanes.
@@ -466,8 +469,8 @@ int rj_arith_v_trunc_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t 
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64<rocjitsu::arith::Fp64::Trunc, false, true>(flags, exec_mask, instruction_flags, d, a, nullptr,
-                                            nullptr);
+  return fp64<rocjitsu::arith::Fp64::Trunc, false, true>(flags, exec_mask, instruction_flags, d, a,
+                                                         nullptr, nullptr);
 }
 
 // Round toward positive infinity for selected lanes.
@@ -483,8 +486,8 @@ int rj_arith_v_ceil_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t i
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64<rocjitsu::arith::Fp64::Ceil, false, true>(flags, exec_mask, instruction_flags, d, a, nullptr,
-                                           nullptr);
+  return fp64<rocjitsu::arith::Fp64::Ceil, false, true>(flags, exec_mask, instruction_flags, d, a,
+                                                        nullptr, nullptr);
 }
 
 // Round to the nearest integer with ties to even for selected lanes.
@@ -500,8 +503,8 @@ int rj_arith_v_rndne_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t 
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64<rocjitsu::arith::Fp64::Rndne, false, true>(flags, exec_mask, instruction_flags, d, a, nullptr,
-                                            nullptr);
+  return fp64<rocjitsu::arith::Fp64::Rndne, false, true>(flags, exec_mask, instruction_flags, d, a,
+                                                         nullptr, nullptr);
 }
 
 // Round toward negative infinity for selected lanes.
@@ -517,8 +520,8 @@ int rj_arith_v_floor_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t 
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64<rocjitsu::arith::Fp64::Floor, false, true>(flags, exec_mask, instruction_flags, d, a, nullptr,
-                                            nullptr);
+  return fp64<rocjitsu::arith::Fp64::Floor, false, true>(flags, exec_mask, instruction_flags, d, a,
+                                                         nullptr, nullptr);
 }
 
 // Compute the fractional part for selected lanes.
@@ -534,8 +537,8 @@ int rj_arith_v_fract_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t 
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64<rocjitsu::arith::Fp64::Fract, false, true>(flags, exec_mask, instruction_flags, d, a, nullptr,
-                                            nullptr);
+  return fp64<rocjitsu::arith::Fp64::Fract, false, true>(flags, exec_mask, instruction_flags, d, a,
+                                                         nullptr, nullptr);
 }
 
 // Compute the square root for selected lanes.
@@ -673,8 +676,8 @@ int rj_arith_v_frexp_mant_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask,
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64<rocjitsu::arith::Fp64::FrexpMant, false, true>(flags, exec_mask, instruction_flags, d, a, nullptr,
-                                                nullptr);
+  return fp64<rocjitsu::arith::Fp64::FrexpMant, false, true>(flags, exec_mask, instruction_flags, d,
+                                                             a, nullptr, nullptr);
 }
 
 // Select the minimum for selected lanes.
@@ -724,8 +727,8 @@ int rj_arith_v_add_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruct
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::Add, true, true>(flags, exec_mask, instruction_flags, d, a, b,
-                                                       nullptr);
+  return fp64_wave64<rocjitsu::arith::Fp64::Add, true, true>(flags, exec_mask, instruction_flags, d,
+                                                             a, b, nullptr);
 }
 
 // Add the operands for selected lanes.
@@ -742,8 +745,8 @@ int rj_arith_v_add_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::Add, false, true>(flags, exec_mask, instruction_flags, d, a, b,
-                                                 nullptr);
+  return fp64_wave64<rocjitsu::arith::Fp64::Add, false, true>(flags, exec_mask, instruction_flags,
+                                                              d, a, b, nullptr);
 }
 
 // Multiply the operands for selected lanes.
@@ -759,8 +762,8 @@ int rj_arith_v_mul_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruct
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::Mul, true, true>(flags, exec_mask, instruction_flags, d, a, b,
-                                                       nullptr);
+  return fp64_wave64<rocjitsu::arith::Fp64::Mul, true, true>(flags, exec_mask, instruction_flags, d,
+                                                             a, b, nullptr);
 }
 
 // Multiply the operands for selected lanes.
@@ -777,8 +780,8 @@ int rj_arith_v_mul_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::Mul, false, true>(flags, exec_mask, instruction_flags, d, a, b,
-                                                 nullptr);
+  return fp64_wave64<rocjitsu::arith::Fp64::Mul, false, true>(flags, exec_mask, instruction_flags,
+                                                              d, a, b, nullptr);
 }
 
 // Compute fused A*B+C for selected lanes.
@@ -794,8 +797,8 @@ int rj_arith_v_fma_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruct
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::Fma, true, true>(flags, exec_mask, instruction_flags, d, a, b,
-                                                       c);
+  return fp64_wave64<rocjitsu::arith::Fp64::Fma, true, true>(flags, exec_mask, instruction_flags, d,
+                                                             a, b, c);
 }
 
 // Compute fused A*B+C for selected lanes.
@@ -812,7 +815,8 @@ int rj_arith_v_fma_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::Fma, false, true>(flags, exec_mask, instruction_flags, d, a, b, c);
+  return fp64_wave64<rocjitsu::arith::Fp64::Fma, false, true>(flags, exec_mask, instruction_flags,
+                                                              d, a, b, c);
 }
 
 // Round toward zero for selected lanes.
@@ -828,8 +832,8 @@ int rj_arith_v_trunc_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t 
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::Trunc, false, true>(flags, exec_mask, instruction_flags, d, a,
-                                                   nullptr, nullptr);
+  return fp64_wave64<rocjitsu::arith::Fp64::Trunc, false, true>(flags, exec_mask, instruction_flags,
+                                                                d, a, nullptr, nullptr);
 }
 
 // Round toward positive infinity for selected lanes.
@@ -845,8 +849,8 @@ int rj_arith_v_ceil_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t i
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::Ceil, false, true>(flags, exec_mask, instruction_flags, d, a,
-                                                  nullptr, nullptr);
+  return fp64_wave64<rocjitsu::arith::Fp64::Ceil, false, true>(flags, exec_mask, instruction_flags,
+                                                               d, a, nullptr, nullptr);
 }
 
 // Round to the nearest integer with ties to even for selected lanes.
@@ -862,8 +866,8 @@ int rj_arith_v_rndne_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t 
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::Rndne, false, true>(flags, exec_mask, instruction_flags, d, a,
-                                                   nullptr, nullptr);
+  return fp64_wave64<rocjitsu::arith::Fp64::Rndne, false, true>(flags, exec_mask, instruction_flags,
+                                                                d, a, nullptr, nullptr);
 }
 
 // Round toward negative infinity for selected lanes.
@@ -879,8 +883,8 @@ int rj_arith_v_floor_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t 
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::Floor, false, true>(flags, exec_mask, instruction_flags, d, a,
-                                                   nullptr, nullptr);
+  return fp64_wave64<rocjitsu::arith::Fp64::Floor, false, true>(flags, exec_mask, instruction_flags,
+                                                                d, a, nullptr, nullptr);
 }
 
 // Compute the fractional part for selected lanes.
@@ -896,8 +900,8 @@ int rj_arith_v_fract_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t 
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::Fract, false, true>(flags, exec_mask, instruction_flags, d, a,
-                                                   nullptr, nullptr);
+  return fp64_wave64<rocjitsu::arith::Fp64::Fract, false, true>(flags, exec_mask, instruction_flags,
+                                                                d, a, nullptr, nullptr);
 }
 
 // Compute the square root for selected lanes.
@@ -1037,8 +1041,8 @@ int rj_arith_v_frexp_mant_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask,
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::FrexpMant, false, true>(flags, exec_mask, instruction_flags, d, a,
-                                                       nullptr, nullptr);
+  return fp64_wave64<rocjitsu::arith::Fp64::FrexpMant, false, true>(
+      flags, exec_mask, instruction_flags, d, a, nullptr, nullptr);
 }
 
 // Select the minimum for selected lanes.
@@ -1089,7 +1093,7 @@ int rj_arith_v_trunc_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instru
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
   return fp64<rocjitsu::arith::Fp64::Trunc, true, true>(flags, exec_mask, instruction_flags, d, a,
-                                                  nullptr, nullptr);
+                                                        nullptr, nullptr);
 }
 
 // Round toward zero for selected lanes.
@@ -1105,8 +1109,8 @@ int rj_arith_v_trunc_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instru
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::Trunc, true, true>(flags, exec_mask, instruction_flags, d, a,
-                                                         nullptr, nullptr);
+  return fp64_wave64<rocjitsu::arith::Fp64::Trunc, true, true>(flags, exec_mask, instruction_flags,
+                                                               d, a, nullptr, nullptr);
 }
 
 // Round toward positive infinity for selected lanes.
@@ -1122,8 +1126,8 @@ int rj_arith_v_ceil_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruc
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64<rocjitsu::arith::Fp64::Ceil, true, true>(flags, exec_mask, instruction_flags, d, a, nullptr,
-                                                 nullptr);
+  return fp64<rocjitsu::arith::Fp64::Ceil, true, true>(flags, exec_mask, instruction_flags, d, a,
+                                                       nullptr, nullptr);
 }
 
 // Round toward positive infinity for selected lanes.
@@ -1139,8 +1143,8 @@ int rj_arith_v_ceil_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruc
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::Ceil, true, true>(flags, exec_mask, instruction_flags, d, a,
-                                                        nullptr, nullptr);
+  return fp64_wave64<rocjitsu::arith::Fp64::Ceil, true, true>(flags, exec_mask, instruction_flags,
+                                                              d, a, nullptr, nullptr);
 }
 
 // Round to the nearest integer with ties to even for selected lanes.
@@ -1157,7 +1161,7 @@ int rj_arith_v_rndne_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instru
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
   return fp64<rocjitsu::arith::Fp64::Rndne, true, true>(flags, exec_mask, instruction_flags, d, a,
-                                                  nullptr, nullptr);
+                                                        nullptr, nullptr);
 }
 
 // Round to the nearest integer with ties to even for selected lanes.
@@ -1173,8 +1177,8 @@ int rj_arith_v_rndne_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instru
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::Rndne, true, true>(flags, exec_mask, instruction_flags, d, a,
-                                                         nullptr, nullptr);
+  return fp64_wave64<rocjitsu::arith::Fp64::Rndne, true, true>(flags, exec_mask, instruction_flags,
+                                                               d, a, nullptr, nullptr);
 }
 
 // Round toward negative infinity for selected lanes.
@@ -1191,7 +1195,7 @@ int rj_arith_v_floor_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instru
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
   return fp64<rocjitsu::arith::Fp64::Floor, true, true>(flags, exec_mask, instruction_flags, d, a,
-                                                  nullptr, nullptr);
+                                                        nullptr, nullptr);
 }
 
 // Round toward negative infinity for selected lanes.
@@ -1207,8 +1211,8 @@ int rj_arith_v_floor_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instru
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::Floor, true, true>(flags, exec_mask, instruction_flags, d, a,
-                                                         nullptr, nullptr);
+  return fp64_wave64<rocjitsu::arith::Fp64::Floor, true, true>(flags, exec_mask, instruction_flags,
+                                                               d, a, nullptr, nullptr);
 }
 
 // Compute the fractional part for selected lanes.
@@ -1225,7 +1229,7 @@ int rj_arith_v_fract_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instru
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
   return fp64<rocjitsu::arith::Fp64::Fract, true, true>(flags, exec_mask, instruction_flags, d, a,
-                                                  nullptr, nullptr);
+                                                        nullptr, nullptr);
 }
 
 // Compute the fractional part for selected lanes.
@@ -1241,8 +1245,8 @@ int rj_arith_v_fract_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instru
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::Fract, true, true>(flags, exec_mask, instruction_flags, d, a,
-                                                         nullptr, nullptr);
+  return fp64_wave64<rocjitsu::arith::Fp64::Fract, true, true>(flags, exec_mask, instruction_flags,
+                                                               d, a, nullptr, nullptr);
 }
 
 // Compute the square root for selected lanes.
@@ -1360,8 +1364,8 @@ int rj_arith_v_frexp_mant_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t i
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64<rocjitsu::arith::Fp64::FrexpMant, true, true>(flags, exec_mask, instruction_flags, d, a,
-                                                      nullptr, nullptr);
+  return fp64<rocjitsu::arith::Fp64::FrexpMant, true, true>(flags, exec_mask, instruction_flags, d,
+                                                            a, nullptr, nullptr);
 }
 
 // Extract the requested exponent or mantissa component for selected lanes.
@@ -1377,8 +1381,8 @@ int rj_arith_v_frexp_mant_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t i
   if (instruction_flags >> 32) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  return fp64_wave64<rocjitsu::arith::Fp64::FrexpMant, true, true>(flags, exec_mask, instruction_flags, d,
-                                                             a, nullptr, nullptr);
+  return fp64_wave64<rocjitsu::arith::Fp64::FrexpMant, true, true>(
+      flags, exec_mask, instruction_flags, d, a, nullptr, nullptr);
 }
 
 // CDNA3/4 legacy selection: prefer B for two NaNs; IEEE signaling priority is A then B.
@@ -1450,14 +1454,10 @@ int rj_arith_v_fma_f64_w32_gfx10(uint64_t flags, uint32_t exec_mask, uint64_t in
                                  uint32_t *const *d, const uint32_t *const *a,
                                  const uint32_t *const *b, const uint32_t *const *c,
                                  [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
     return error;
   }
-  if (instruction_flags >> 32) {
-    return RJ_ARITH_ERROR_INVALID_FLAGS;
-  }
-  return fp64<rocjitsu::arith::Fp64::Fma, true>(flags, exec_mask, instruction_flags, d, a, b, c);
+  return rj_arith_v_fma_f64_w32(flags, exec_mask, instruction_flags, d, a, b, c, trapsts);
 }
 
 // RDNA2 FMA inherits the RDNA3 numeric model; strict exact is unsupported pending gfx10 captures.
@@ -1465,13 +1465,8 @@ int rj_arith_v_fma_f64_w64_gfx10(uint64_t flags, uint64_t exec_mask, uint64_t in
                                  uint32_t *const *d, const uint32_t *const *a,
                                  const uint32_t *const *b, const uint32_t *const *c,
                                  [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
     return error;
   }
-  if (instruction_flags >> 32) {
-    return RJ_ARITH_ERROR_INVALID_FLAGS;
-  }
-  return fp64_wave64<rocjitsu::arith::Fp64::Fma, true>(flags, exec_mask, instruction_flags, d, a, b,
-                                                       c);
+  return rj_arith_v_fma_f64_w64(flags, exec_mask, instruction_flags, d, a, b, c, trapsts);
 }

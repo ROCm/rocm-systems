@@ -18,15 +18,14 @@ extern "C" {
 // fma(A[Q+1],B[L],C[Q]); P2 computes fma(A[Q+2],B[L],C[L]). Source lanes are
 // read even if inactive in EXEC. Each operand uses one VGPR; whole VGPRs may
 // alias. Supports NEG_A/B/C, CLAMP, with no ABS or OMOD.
-// Compatibility resolves to Loose. Bit-exact semantics evaluate every lane on
-// the guest path and report no FP status. All semantics require the default
-// host FP environment (nearest-even rounding, denormals enabled); host
-// exception flags may change. A selected NaN keeps its sign and payload.
-// IEEE_MODE quiets FP32 results; DX10_CLAMP_OFF preserves NaNs under CLAMP.
-// For RDNA4, set IEEE_MODE and leave DX10_CLAMP_OFF clear.
-// Guest rounding and precision-specific input/output denormal controls are honored.
-// WAIT_EXP belongs to the scheduler and is not an arithmetic modifier.
-// Both architectures specify that interpolation reports no GPU exceptions.
+// Compatibility resolves to bit-exact semantics, which evaluate every lane on
+// the guest path and report no FP status; Loose may take host shortcuts. All semantics require the
+// default host FP environment (nearest-even rounding, denormals enabled); host exception flags may
+// change. A selected NaN keeps its sign and payload. IEEE_MODE quiets FP32 results; DX10_CLAMP_OFF
+// preserves NaNs under CLAMP. For RDNA4, set IEEE_MODE and leave DX10_CLAMP_OFF clear. Guest
+// rounding and precision-specific input/output denormal controls are honored. WAIT_EXP belongs to
+// the scheduler and is not an arithmetic modifier. Both architectures specify that interpolation
+// reports no GPU exceptions.
 int rj_arith_v_interp_p10_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b, const uint32_t *const *c);

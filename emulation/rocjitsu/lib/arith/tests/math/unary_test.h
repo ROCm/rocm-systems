@@ -200,7 +200,9 @@ void check_unary(Call call, int op, bool iflag = false) {
       }
     }
   }
-  const bool exact = op != 9;
+  // FRACT accepts exact requests but has no goldens; its captured results are pinned by
+  // literal cases, so every mode is checked against the loose reference here.
+  const bool goldens = op != 9;
   const bool reporting = !Half && (op == 4 || iflag);
   Registers<2, Lanes> random_input;
   std::minstd_rand random;
@@ -219,7 +221,7 @@ void check_unary(Call call, int op, bool iflag = false) {
         for (int d : {0, 1}) {
           SCOPED_TRACE(::testing::Message()
                        << cpu << '/' << semantics << '/' << scenario << '/' << d);
-          bool precise = exact && semantics != RJ_ARITH_SEMANTICS_LOOSE;
+          bool precise = goldens && semantics != RJ_ARITH_SEMANTICS_LOOSE;
           auto input = random_input;
           uint64_t mode =
               (scenario & 1 ? RJ_ARITH_ALU_NEG_A : 0) | (scenario & 2 ? RJ_ARITH_ALU_ABS_A : 0) |
@@ -253,8 +255,6 @@ void check_unary(Call call, int op, bool iflag = false) {
           uint32_t status = 0x80000040U;
           int wanted = semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL && !reporting
                            ? RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS
-                       : !exact && semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
-                           ? RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS
                            : RJ_ARITH_SUCCESS;
           ASSERT_EQ(call(cpu | semantics, exec_mask, mode, actual.v + d, actual.v, &status),
                     wanted);
