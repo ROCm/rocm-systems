@@ -2280,21 +2280,21 @@ write_rocpd(
                         tool_metadata.buffer_names.at(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH);
 
                     // Process this dispatch (counter-collection path: no graph attribution).
-                    process_dispatch(info.dispatch_id,                          // dispatch_id
-                                     info.kernel_id,                            // kernel_id
-                                     dispatch_data.correlation_id,              // corr_id
-                                     info,                                      // info
-                                     kind,                                      // kind
-                                     record.thread_id,                          // thread_id
-                                     get_queue_id(info.queue_id),               // queue_id
-                                     get_stream_id(record.stream_id),           // stream_id
-                                     dispatch_data.start_timestamp,             // start_timestamp
-                                     dispatch_data.end_timestamp,               // end_timestamp
-                                     info.grid_size,                            // grid
-                                     info.workgroup_size,                       // workgroup
-                                     0,                                         // graph_exec_id
-                                     0,                                         // graph_node_id
-                                     ROCPROFILER_KERNEL_DISPATCH_PIPE_ID_NONE   // pipe_id
+                    process_dispatch(info.dispatch_id,                         // dispatch_id
+                                     info.kernel_id,                           // kernel_id
+                                     dispatch_data.correlation_id,             // corr_id
+                                     info,                                     // info
+                                     kind,                                     // kind
+                                     record.thread_id,                         // thread_id
+                                     get_queue_id(info.queue_id),              // queue_id
+                                     get_stream_id(record.stream_id),          // stream_id
+                                     dispatch_data.start_timestamp,            // start_timestamp
+                                     dispatch_data.end_timestamp,              // end_timestamp
+                                     info.grid_size,                           // grid
+                                     info.workgroup_size,                      // workgroup
+                                     0,                                        // graph_exec_id
+                                     0,                                        // graph_node_id
+                                     ROCPROFILER_KERNEL_DISPATCH_PIPE_ID_NONE  // pipe_id
                     );
                 }
             }
@@ -2322,13 +2322,13 @@ write_rocpd(
                                      record.thread_id,              // thread_id
                                      get_queue_id(info.queue_id),   // queue_id
                                      get_stream_id(record.stream_id),
-                                     0,                                         // start_timestamp
-                                     0,                                         // end_timestamp
-                                     info.grid_size,                            // grid
-                                     info.workgroup_size,                       // workgroup
-                                     0,                                         // graph_exec_id
-                                     0,                                         // graph_node_id
-                                     ROCPROFILER_KERNEL_DISPATCH_PIPE_ID_NONE   // pipe_id
+                                     0,                                        // start_timestamp
+                                     0,                                        // end_timestamp
+                                     info.grid_size,                           // grid
+                                     info.workgroup_size,                      // workgroup
+                                     0,                                        // graph_exec_id
+                                     0,                                        // graph_node_id
+                                     ROCPROFILER_KERNEL_DISPATCH_PIPE_ID_NONE  // pipe_id
                     );
                 }
             }
