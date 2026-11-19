@@ -809,6 +809,27 @@ ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
   return ncclSuccess;
 }
 
+// Decisions that still run when a collective is diverted to ncclEnqueueCheck: the
+// planner's own kernels, the symmetric kernel and CE (enqueue.cc honors info->decision),
+// and the setups collectives.cc runs before enqueue (rcclEnqueueSetupNeedsSwitch).
+static bool rcclEnqueueRunsDecision(int algo) {
+  if (algo < NCCL_NUM_ALGORITHMS) return true;
+  switch (algo) {
+  case RCCL_SYMMETRIC:
+  case RCCL_SYMMETRIC_TDM:
+  case RCCL_CE_REGISTERED:
+  case RCCL_CE_SCRATCH:
+  case RCCL_DIRECT_ALLGATHER:
+  case RCCL_A2A_PIVOT:
+#ifdef ENABLE_ROCSHMEM
+  case RCCL_A2A_GDA:
+#endif
+    return true;
+  default:
+    return false;
+  }
+}
+
 ncclResult_t rcclGetCollImplInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,
                                  ncclRedOp_t op, const void* sendbuff, void* recvbuff, int graphCapturing, int* algo,
                                  int* protocol, int* maxChannels) {
@@ -820,44 +841,33 @@ ncclResult_t rcclGetCollImplInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_
   // these operands so rccl-tests can label numbers with the implementation that
   // ran. graphCapturing lets the caller declare graph mode, which the
   // (out-of-capture) query cannot detect on its own -- see the header comment.
-  if (coll == ncclFuncAllReduce) {
+  if (coll == ncclFuncAllReduce || coll == ncclFuncAllGather || coll == ncclFuncReduceScatter ||
+      coll == ncclFuncAlltoAll) {
     struct rcclCollDecision decision;
-    NCCLCHECK(rcclSelectAllReduce(comm, sendbuff, recvbuff, (size_t)count, dataType, op, /*stream=*/nullptr,
-                                  /*query=*/true, /*graphCapturingHint=*/graphCapturing != 0, &decision));
-    *algo = decision.algo;
-    *protocol = decision.protocol;
-    *maxChannels = decision.nMaxChannels;
-    return ncclSuccess;
-  }
-
-  if (coll == ncclFuncAllGather) {
-    struct rcclCollDecision decision;
-    NCCLCHECK(rcclSelectAllGather(comm, sendbuff, recvbuff, (size_t)count, dataType, /*stream=*/nullptr,
-                                  /*query=*/true, /*graphCapturingHint=*/graphCapturing != 0, &decision));
-    *algo = decision.algo;
-    *protocol = decision.protocol;
-    *maxChannels = decision.nMaxChannels;
-    return ncclSuccess;
-  }
-
-  if (coll == ncclFuncReduceScatter) {
-    struct rcclCollDecision decision;
-    NCCLCHECK(rcclSelectReduceScatter(comm, sendbuff, recvbuff, (size_t)count, dataType, op, /*query=*/true,
-                                      &decision, /*graphCapturingHint=*/graphCapturing != 0));
-    *algo = decision.algo;
-    *protocol = decision.protocol;
-    *maxChannels = decision.nMaxChannels;
-    return ncclSuccess;
-  }
-
-  if (coll == ncclFuncAlltoAll) {
-    struct rcclCollDecision decision;
-    NCCLCHECK(rcclSelectAlltoAll(comm, sendbuff, recvbuff, (size_t)count, dataType, /*stream=*/nullptr,
-                                 /*query=*/true, /*graphCapturingHint=*/graphCapturing != 0, &decision));
-    *algo = decision.algo;
-    *protocol = decision.protocol;
-    *maxChannels = decision.nMaxChannels;
-    return ncclSuccess;
+    const bool capturing = graphCapturing != 0;
+    if (coll == ncclFuncAllReduce) {
+      NCCLCHECK(rcclSelectAllReduce(comm, sendbuff, recvbuff, (size_t)count, dataType, op, /*stream=*/nullptr,
+                                    /*query=*/true, /*graphCapturingHint=*/capturing, &decision));
+    } else if (coll == ncclFuncAllGather) {
+      NCCLCHECK(rcclSelectAllGather(comm, sendbuff, recvbuff, (size_t)count, dataType, /*stream=*/nullptr,
+                                    /*query=*/true, /*graphCapturingHint=*/capturing, &decision));
+    } else if (coll == ncclFuncReduceScatter) {
+      NCCLCHECK(rcclSelectReduceScatter(comm, sendbuff, recvbuff, (size_t)count, dataType, op, /*query=*/true,
+                                        &decision, /*graphCapturingHint=*/capturing));
+    } else {
+      NCCLCHECK(rcclSelectAlltoAll(comm, sendbuff, recvbuff, (size_t)count, dataType, /*stream=*/nullptr,
+                                   /*query=*/true, /*graphCapturingHint=*/capturing, &decision));
+    }
+    // Check-mode, suspended and revoked comms divert to ncclEnqueueCheck (collectives.cc), which runs
+    // the planner's kernel for every backend it does not honor; report that kernel instead.
+    if (!rcclCollectiveMustUseEnqueuePath(comm) || rcclEnqueueRunsDecision(decision.algo)) {
+      *algo = decision.algo;
+      *protocol = decision.protocol;
+      *maxChannels = decision.nMaxChannels;
+      return ncclSuccess;
+    }
+    return rcclGetAlgoInfo(comm, coll, count, dataType, /*collNetSupport=*/0, /*nvlsSupport=*/0,
+                           /*numPipeOps=*/1, algo, protocol, maxChannels);
   }
 
   // Broadcast: report DDA when picked, else the generic query below. Check-mode, suspended and

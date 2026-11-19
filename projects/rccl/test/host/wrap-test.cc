@@ -11212,6 +11212,124 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_AllGatherReachesCeRegisteredUnlikeGe
       });
 }
 
+// Check-mode, suspended and revoked comms divert every collective to
+// ncclEnqueueCheck (collectives.cc), which runs the planner's kernel for any
+// DDA decision. The query must report that kernel, not DDA, as Broadcast does.
+TEST(WrapMicrotestIsolated, GetCollImplInfo_AllGatherMustEnqueue_ReportsPlannerKernelNotDda) {
+  RUN_ISOLATED_TEST(
+      "Wrap_GetCollImplInfo_AllGatherMustEnqueue_ReportsPlannerKernelNotDda",
+      []() {
+        g_loadParam = ForceParam("RCCL_DDA_LL", int64_t(1));
+        ScopedHook llEligible(g_allGatherDdaFabricLLEligible,
+                              [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return true; });
+        ScopedHook enqueue(g_collectiveMustUseEnqueuePath, [](ncclComm*) { return true; });
+        ScopedHook getAlgo(g_getAlgoInfo, [](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
+                                              ncclSimInfo_t*) {
+          task->algorithm = NCCL_ALGO_TREE;
+          task->protocol = NCCL_PROTO_LL;
+          task->nMaxChannels = 6;
+          return ncclSuccess;
+        });
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->nRanks = 1;
+        comm->nNodes = 1;
+        int algo = -7, protocol = -7, maxChannels = -7;
+        EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllGather, 8, ncclFloat32, ncclSum, nullptr,
+                                                    nullptr, /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, algo)
+            << "check mode runs ncclEnqueueCheck, which never runs DDA";
+        EXPECT_LT(algo, NCCL_NUM_ALGORITHMS) << "expected a planner kernel algo, got " << algo;
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, GetCollImplInfo_AllReduceMustEnqueue_ReportsPlannerKernelNotDda) {
+  RUN_ISOLATED_TEST(
+      "Wrap_GetCollImplInfo_AllReduceMustEnqueue_ReportsPlannerKernelNotDda",
+      []() {
+        ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
+        ScopedHook llEligible(g_allReduceDdaFabricLLEligible,
+                              [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
+        ScopedHook enqueue(g_collectiveMustUseEnqueuePath, [](ncclComm*) { return true; });
+        ScopedHook getAlgo(g_getAlgoInfo, [](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
+                                              ncclSimInfo_t*) {
+          task->algorithm = NCCL_ALGO_TREE;
+          task->protocol = NCCL_PROTO_LL;
+          task->nMaxChannels = 6;
+          return ncclSuccess;
+        });
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->nRanks = 1;
+        comm->nNodes = 1;
+        int algo = -7, protocol = -7, maxChannels = -7;
+        EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllReduce, 8, ncclFloat32, ncclSum, nullptr,
+                                                    nullptr, /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, algo)
+            << "check mode runs ncclEnqueueCheck, which never runs DDA";
+        EXPECT_LT(algo, NCCL_NUM_ALGORITHMS) << "expected a planner kernel algo, got " << algo;
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, GetCollImplInfo_ReduceScatterMustEnqueue_ReportsPlannerKernelNotDda) {
+  RUN_ISOLATED_TEST(
+      "Wrap_GetCollImplInfo_ReduceScatterMustEnqueue_ReportsPlannerKernelNotDda",
+      []() {
+        g_loadParam = ForceParam("RCCL_DDA_LL", int64_t(1));
+        ScopedHook llEligible(g_reduceScatterDdaFabricLLEligible,
+                              [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
+                                return true;
+                              });
+        ScopedHook enqueue(g_collectiveMustUseEnqueuePath, [](ncclComm*) { return true; });
+        ScopedHook getAlgo(g_getAlgoInfo, [](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
+                                              ncclSimInfo_t*) {
+          task->algorithm = NCCL_ALGO_TREE;
+          task->protocol = NCCL_PROTO_LL;
+          task->nMaxChannels = 6;
+          return ncclSuccess;
+        });
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->nRanks = 1;
+        comm->nNodes = 1;
+        int algo = -7, protocol = -7, maxChannels = -7;
+        EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncReduceScatter, 8, ncclFloat32, ncclSum, nullptr,
+                                                    nullptr, /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, algo)
+            << "check mode runs ncclEnqueueCheck, which never runs DDA";
+        EXPECT_LT(algo, NCCL_NUM_ALGORITHMS) << "expected a planner kernel algo, got " << algo;
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The decisions ncclEnqueueCheck still honours (CE registered here) must stay.
+TEST(WrapMicrotestIsolated, GetCollImplInfo_AllGatherMustEnqueue_KeepsCeRegistered) {
+  RUN_ISOLATED_TEST(
+      "Wrap_GetCollImplInfo_AllGatherMustEnqueue_KeepsCeRegistered",
+      []() {
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ScopedHook regType(g_getSymRegType,
+            [](struct ncclDevrWindow*, struct ncclDevrWindow*, ncclSymRegType_t* out) {
+              *out = ncclSymSendNonregRecvReg;
+              return ncclSuccess;
+            });
+        ScopedHook enqueue(g_collectiveMustUseEnqueuePath, [](ncclComm*) { return true; });
+        g_loadParam = ForceParam("RCCL_CE_COLL_MAX_BYTES", int64_t(268435456));
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nRanks = 1;
+        comm->nNodes = 1;
+        comm->config.CTAPolicy = 0;
+        int algo, protocol, maxChannels;
+        EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllGather, 8, ncclFloat32, ncclSum, nullptr,
+                                                    nullptr, /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
 TEST(WrapMicrotestIsolated, GetCollImplInfo_ReduceScatterDelegatesToSelectReduceScatter) {
   RUN_ISOLATED_TEST(
       "Wrap_GetCollImplInfo_ReduceScatterDelegatesToSelectReduceScatter",
