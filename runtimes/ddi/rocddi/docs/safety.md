@@ -57,6 +57,17 @@ tentative interval is removed. A failed host map must restore the reservation
 before the core releases its tentative interval. The same driver-generic
 owners enforce these rules for the current KFD driver and a fake driver.
 
+The process KFD connection records host-visible BO mappings for registration
+reuse. An alias retains a counted source record and the requested VMs; source
+release and access-set changes return BUSY while aliases remain. The source
+removes its record before native cleanup, so a later registration cannot race
+with unmapping. If a source owner is dropped while aliases survive, its native
+handle, reservation, and VM dependencies remain for process teardown. An
+AMDF source publishes its opaque backing identity before exposing its host
+pointer; aliases carry the source offset and full native extent independently
+of the requested page cover. An inherited post-fork owner never takes the
+parent's host-alias registry lock during drop.
+
 Async HSA signal registrations retain their signal storage. Callback-triggered
 shutdown requests worker exit and defers cleanup until another thread can join
 the workers. The async dispatcher stops before invoking another queued callback
@@ -81,9 +92,11 @@ event.
 Explicit transfer detaches its allocation metadata; failed transfer or unwind
 retains the complete owner. The service retries without the page handle only
 after the first call offered the page. A pre-dispatch failure leaves a new page
-reusable or releasable. If no event succeeds after an offer, HSA quarantines
-its runtime registry: a later runtime cannot reuse the page handle from the
-old KFD session.
+reusable or releasable. If the offering service retires without a confirmed
+event, the process page rejects creation by either frontend; another session
+cannot assume KFD installed it. Confirmation by a peer frontend before that
+retirement resolves the uncertainty for both. HSA also quarantines its runtime
+registry after an unresolved offer.
 SVM prefetch workers retain every dependency and their completion signal,
 including repeated handles, until the worker exits. A failed submission rolls
 back the references; final shutdown joins the workers before releasing signal
@@ -108,6 +121,17 @@ implementation after releasing the runtime registry lock. A non-null C
 caller-owned stream is involved. An in-flight token keeps shutdown from
 releasing the runtime while a prepared log write completes. Shutdown disables
 subsequent prepared log records before worker and queue cleanup.
+
+## Explicit owner retention
+
+`memory::storage::RetainOnDrop<T>` suppresses its owner's destructor on normal
+scope exit and unwind. Resources released by that destructor remain retained;
+`into_inner` explicitly returns the owner for normal destruction after cleanup
+proves release is safe. The guard supplies no release proof itself and does
+not pin inline storage or extend borrowed lifetimes. Externally reachable
+backing must already have suitable storage and ownership independent of the
+wrapper's address. `SessionRetirement` and the AMDF/HSA adapters use this
+mechanism with their distinct public handle-consumption and retry rules.
 
 ## Raw address contracts
 
@@ -146,10 +170,30 @@ published into the runtime registry afterward.
 The session owns a registry of driver instances. A passive endpoint names its
 driver instance; activation retains that exact instance with the resulting
 device state. Resource owners retain their concrete driver's cleanup state.
-Session shutdown first checks that no device or resource still borrows any
-driver instance. If one driver shutdown fails, the registry retains unfinished
-instances for retry and never replays a successful shutdown. Linux KFD
-memory and GPU operations accept only activated KFD state.
+The session owns one admission controller shared by its drivers, separately
+from the registry to avoid an ownership cycle. One atomic transition
+linearizes `Open` to `Retiring` against new operations and notification
+leases. An operation retains its admission through native effects and owner
+publication; nested calls on the admitting thread remain part of that
+transaction. Resource leases cover native notification owners that do not
+retain a driver. All process checks precede admission state access.
+
+`begin_retirement` stops new acquisitions and submissions through retained
+core handles. It does not revoke published raw producer addresses or prove
+GPU completion. Freeing, unmapping, stopping, destroying, and required
+completion queries remain available while retiring. Frontends still stop
+their external producers and callback workers before releasing native backing.
+`try_close` checks admitted work, notification leases, session clones, and
+driver owners. An open session stays open on `Busy`; native cleanup starts
+only after the ownership and admission preflight succeeds. If one driver
+shutdown fails, the registry retains unfinished instances for retry and never
+replays a successful shutdown. Only discharged session obligations allow
+`Closed`. Linux KFD memory and GPU operations accept only activated KFD state.
+An adapter that detaches its public runtime before native shutdown can move its
+session into `SessionRetirement`. Failed destruction keeps that owner for a
+later attempt; dropping an unfinished retirement retains its driver state
+until process exit. HSA retries this owner through `hsa_shut_down` while its
+public HSA session remains unavailable.
 
 The workspace-root shared image loads both public ABIs from one shared
 object. Sessions with `DriverContextLifetime::Process` share the primary KFD
@@ -157,8 +201,8 @@ context, one Linux KFD connection, and the exact DRM VM bindings acquired for
 each GPU. A process owner allocated with the Rust system allocator retains
 these driver handles through process exit. A session joins the process owner before any KFD call
 that might enable runtime state. The last joined session disables KFD runtime
-enablement under the owner's lock. Failure leaves the session joined so its
-destruction can be retried. The shared image is marked `NODELETE`, including
+enablement as a serialized transaction. Failure leaves a pending disable that
+must finish before another session joins. The shared image is marked `NODELETE`, including
 after both public ABIs shut down, because a later activation must reuse the
 same DRM file object.
 
@@ -179,8 +223,10 @@ original descriptor.
 Most Linux descriptor and mapping calls and flags come from the `libc` crate.
 `src/os/linux/memory.rs` declares `getpagesize` and `madvise`, and
 `src/os/linux/memory/reservation.rs` defines `MAP_FIXED_NOREPLACE`; the crate
-does not expose these for the supported GNU targets. KFD and DRM calls remain in
-`src/driver/linux_kfd/{sys,drm}.rs`.
+does not expose these for the supported GNU targets. KFD ioctl dispatch lives in
+`src/driver/linux_kfd/connection/ioctl.rs`, and DRM calls live in
+`src/driver/linux_kfd/drm.rs`. The KFD connection and runtime transaction remain
+in `connection.rs`; sysfs directory traversal uses `sysfs/directory.rs`.
 The AMDF and HSA frontends export C ABI entry points and invoke documented
 caller-provided callbacks. These ABI calls do not import a native library.
 HSA has no `libdrm_amdgpu` link and obtains

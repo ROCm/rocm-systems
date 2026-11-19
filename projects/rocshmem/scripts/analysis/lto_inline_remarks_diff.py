@@ -53,6 +53,19 @@ def match_key_name(mangled_name):
     return _INTERN_SUFFIX_RE.sub("", mangled_name or "")
 
 
+def short_commit(commit, sha_len=12):
+    """Abbreviate the sha portion of a commit label, preserving any
+    extra-args suffix appended after it (lto_inline_remarks_compare.sh's
+    _cache_key_suffix produces keys like "13c760526b8d-DUSE_TDM_ON") --
+    naively truncating the whole string would otherwise cut the suffix off
+    and make same-commit, different-config comparisons indistinguishable.
+    """
+    if not commit:
+        return ""
+    sha, sep, suffix = commit.partition("-")
+    return sha[:sha_len] + (sep + suffix if sep else "")
+
+
 def to_num(v):
     try:
         return int(v)

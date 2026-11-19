@@ -571,7 +571,7 @@ def render_comparison_section(pair_rows, baseline_commit, branch_commit):
         return ""
     return f"""
   <section class="comparison-section">
-    <h2>Baseline vs Branch &mdash; {html.escape(baseline_commit[:12])} &rarr; {html.escape(branch_commit[:12])}</h2>
+    <h2>Baseline vs Branch &mdash; {html.escape(lrd.short_commit(baseline_commit))} &rarr; {html.escape(lrd.short_commit(branch_commit))}</h2>
     <p class="legend">Status cell color: green = added, red = removed, blue = common (present in both). &Delta; Cost/&Delta; Threshold text: green = improvement, red = regression.</p>
     {render_comparison_stat_cards(pair_rows)}
     <div class="controls">
@@ -596,8 +596,8 @@ def render_comparison_section(pair_rows, baseline_commit, branch_commit):
 def render_commit_toggle(baseline_commit, branch_commit):
     if not branch_commit:
         return ""
-    b_short = baseline_commit[:12] or "baseline"
-    n_short = branch_commit[:12] or "branch"
+    b_short = lrd.short_commit(baseline_commit) or "baseline"
+    n_short = lrd.short_commit(branch_commit) or "branch"
     return (
         '<div class="commit-toggle">'
         f'<button data-commit="baseline" class="active">Baseline ({html.escape(b_short)})</button>'
@@ -628,9 +628,11 @@ def render_page(args, baseline_rows, branch_rows, pair_rows):
         stats_html_by_commit["branch"] = render_stat_cards(branch_summary)
         views_by_commit["branch"] = views_json(branch_summary)
 
-    baseline_short = args.baseline_commit[:12] if args.baseline_commit else "(working tree)"
+    baseline_short = (
+        lrd.short_commit(args.baseline_commit) if args.baseline_commit else "(working tree)"
+    )
     if args.branch_commit:
-        title = f"LTO inline remarks — {baseline_short} vs {args.branch_commit[:12]}"
+        title = f"LTO inline remarks — {baseline_short} vs {lrd.short_commit(args.branch_commit)}"
     else:
         title = f"LTO inline remarks — {baseline_short}"
 

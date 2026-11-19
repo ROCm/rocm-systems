@@ -180,6 +180,19 @@ print(json.dumps([first, time.monotonic() - t, lib.amdsmi_init(2)]))
     assert out[1] >= 0.3, out
 
 
+def test_init_accepts_the_cpu_flag(fake):
+    # As amd-smi, whose CPU init is not fatal: the flag is accepted and every GPU is there.
+    out = _child(
+        fake,
+        r"""
+st = lib.amdsmi_init(3)  # AMDSMI_INIT_AMD_CPUS | AMDSMI_INIT_AMD_GPUS
+print(json.dumps([st, len(handles())]))
+""",
+        prelude=_LOAD,
+    )
+    assert out == [AMDSMI_STATUS_SUCCESS, 2], out  # _run simulates 2 GPUs
+
+
 def test_delay_slows_down_the_call(fake):
     out = _child(
         fake,
@@ -357,8 +370,9 @@ info = lib.amdsmi_get_gpu_compute_process_info
 gpus = lib.amdsmi_get_gpu_compute_process_gpus
 gpus.restype = ctypes.c_uint32
 def third_known():  # pid 1002, the third process
-    k = ctypes.c_uint32(0)
-    return gpus(1002, None, ctypes.byref(k))
+    k = ctypes.c_uint32(1)
+    ids = (ctypes.c_uint32 * 1)()
+    return gpus(1002, ids, ctypes.byref(k))
 n = ctypes.c_uint32(0)
 st1 = info(None, ctypes.byref(n))           # 2 processes
 before = third_known()
@@ -409,8 +423,8 @@ print(json.dumps({"count": query(1001, 0, with_list=False), "no_room": query(100
 """,
         RDC_FAKE_PROCS="2",
     )
-    # As with amd-smi: a NULL list asks for the count; a list without room keeps the count.
-    assert out["count"] == [AMDSMI_STATUS_SUCCESS, 1, 99]
+    # As with amd-smi: a NULL list is invalid (no count-only query); a list without room keeps the count.
+    assert out["count"] == [AMDSMI_STATUS_INVAL, 0, 99]
     assert out["no_room"] == [AMDSMI_STATUS_INSUFFICIENT_SIZE, 0, 99]
     assert out["fill"] == [AMDSMI_STATUS_SUCCESS, 1, 1]  # pid 1001 runs on GPU 1
     assert out["no_count"][0] == AMDSMI_STATUS_INVAL

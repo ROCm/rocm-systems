@@ -62,11 +62,13 @@ struct bnxt_device_sq : public bnxt_device_wq {
   uint32_t psn_sz_log2;
   uint32_t mtu;
   uint32_t lock;
+  // Slots posted so far. Unlike tail it never wraps, and tail is always this modulo depth.
+  uint64_t posted;
 
   __host__ inline bnxt_device_sq(void *buf, uint32_t depth, void *msntbl, uint32_t msn_tbl_sz,
                                  uint32_t psn_sz_log2, uint32_t mtu)
     : bnxt_device_wq{buf, depth}, msntbl{msntbl}, psn{0}, msn{0}, msn_tbl_sz{msn_tbl_sz},
-      psn_sz_log2{psn_sz_log2}, mtu{mtu}, lock{0} { }
+      psn_sz_log2{psn_sz_log2}, mtu{mtu}, lock{0}, posted{0} { }
 };
 
 struct bnxt_host_cq {

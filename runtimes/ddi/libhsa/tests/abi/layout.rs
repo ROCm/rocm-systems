@@ -44,6 +44,8 @@ macro_rules! member {
 }
 
 fn main() {
+    record!(HsaFile);
+    record!(HsaHandle);
     record!(HsaSignal);
     member!(HsaSignal, handle);
     record!(HsaDim3);
@@ -58,6 +60,12 @@ fn main() {
     member!(HsaQueue, size);
     member!(HsaQueue, reserved);
     member!(HsaQueue, id);
+    record!(HsaKernelDispatchPacket);
+    member!(HsaKernelDispatchPacket, header);
+    member!(HsaKernelDispatchPacket, setup);
+    member!(HsaKernelDispatchPacket, private_segment_size);
+    member!(HsaKernelDispatchPacket, kernarg_address);
+    member!(HsaKernelDispatchPacket, completion_signal);
     record!(HsaExtControlDirectives);
     member!(HsaExtControlDirectives, control_directives_mask);
     member!(HsaExtControlDirectives, break_exceptions_mask);
@@ -70,4 +78,13 @@ fn main() {
     member!(HsaExtControlDirectives, required_workgroup_size);
     member!(HsaExtControlDirectives, required_dim);
     member!(HsaExtControlDirectives, reserved2);
+    record!(HsaExtSamplerDescriptorV3);
+    member!(HsaExtSamplerDescriptorV3, coordinate_mode);
+    member!(HsaExtSamplerDescriptorV3, filter_mode);
+    member!(HsaExtSamplerDescriptorV3, mipmap_filter_mode);
+    member!(HsaExtSamplerDescriptorV3, address_modes);
+    member!(HsaExtSamplerDescriptorV3, max_anisotropy);
+    record!(HsaAmdMemoryCopyRectPtr);
+    member!(HsaAmdMemoryCopyRectPtr, pitched_ptr);
+    member!(HsaAmdMemoryCopyRectPtr, offset);
 }

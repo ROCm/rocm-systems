@@ -31,8 +31,11 @@ def _codegen(arch_name, profile):
         ('cdna4', Cdna4Profile()),
     ],
 )
-@pytest.mark.parametrize('name', ['S_ATOMIC_DEC', 's_atomic_dec'])
-def test_smem_atomic_accepts_derived_global_decrement(arch_name, profile, name):
+@pytest.mark.parametrize(
+    'name',
+    ['S_ATOMIC_DEC', 's_atomic_dec', 'S_BUFFER_ATOMIC_DEC', 's_buffer_atomic_dec'],
+)
+def test_smem_atomic_accepts_derived_decrement(arch_name, profile, name):
     sem = derive_semantics(name, 'ENC_SMEM')
     assert sem is not None
     assert sem.semantic_class == 'smem_atomic'
@@ -42,7 +45,8 @@ def test_smem_atomic_accepts_derived_global_decrement(arch_name, profile, name):
     assert 'd->atomic_op = amdgpu::AtomicOp::DEC;' in body
     assert 'd->elem_size = 4;' in body
     assert 'd->num_dwords = 1;' in body
-    assert 'smem_calculate_address(inst_, wf);' in body
+    # The state receives the buffer bounds mask; global atomics leave it full.
+    assert 'smem_calculate_address(inst_, wf, d.get());' in body
 
 
 @pytest.mark.parametrize(
@@ -85,11 +89,6 @@ def test_smem_atomic_payload_and_return_widths_follow_semantics(
 @pytest.mark.parametrize(
     ('changes', 'message'),
     [
-        pytest.param(
-            {'name': 'S_BUFFER_ATOMIC_DEC'},
-            'supports only global S_ATOMIC_',
-            id='buffer-mnemonic',
-        ),
         pytest.param(
             {'operation': 'unknown'},
             'unsupported smem_atomic operation',

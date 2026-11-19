@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/mubuf.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/decode_factories.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx9_cache_flags.h"
 #include <memory>
@@ -47,6 +48,10 @@ BufferLoadFormatXMubuf::BufferLoadFormatXMubuf(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_FORMAT_X);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  if (inst_.lds)
+    flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -85,6 +90,10 @@ BufferLoadFormatXyMubuf::BufferLoadFormatXyMubuf(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_FORMAT_XY);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  if (inst_.lds)
+    flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -123,6 +132,10 @@ BufferLoadFormatXyzMubuf::BufferLoadFormatXyzMubuf(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_FORMAT_XYZ);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  if (inst_.lds)
+    flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -161,6 +174,10 @@ BufferLoadFormatXyzwMubuf::BufferLoadFormatXyzwMubuf(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_FORMAT_XYZW);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  if (inst_.lds)
+    flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -192,12 +209,11 @@ BufferStoreFormatXMubuf::BufferStoreFormatXMubuf(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_FORMAT_X);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -229,12 +245,11 @@ BufferStoreFormatXyMubuf::BufferStoreFormatXyMubuf(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_FORMAT_XY);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -266,12 +281,11 @@ BufferStoreFormatXyzMubuf::BufferStoreFormatXyzMubuf(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_FORMAT_XYZ);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -303,12 +317,11 @@ BufferStoreFormatXyzwMubuf::BufferStoreFormatXyzwMubuf(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_FORMAT_XYZW);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -347,6 +360,11 @@ BufferLoadFormatD16XMubuf::BufferLoadFormatD16XMubuf(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_FORMAT_D16_X);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
+  if (inst_.lds)
+    flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -392,6 +410,11 @@ BufferLoadFormatD16XyMubuf::BufferLoadFormatD16XyMubuf(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_FORMAT_D16_XY);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
+  if (inst_.lds)
+    flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -430,6 +453,11 @@ BufferLoadFormatD16XyzMubuf::BufferLoadFormatD16XyzMubuf(const MachineInst *inst
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_FORMAT_D16_XYZ);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
+  if (inst_.lds)
+    flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -476,6 +504,11 @@ BufferLoadFormatD16XyzwMubuf::BufferLoadFormatD16XyzwMubuf(const MachineInst *in
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_FORMAT_D16_XYZW);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
+  if (inst_.lds)
+    flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -507,12 +540,13 @@ BufferStoreFormatD16XMubuf::BufferStoreFormatD16XMubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  vdata.set_register_byte_mask(0x3);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_FORMAT_D16_X);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -543,12 +577,12 @@ BufferStoreFormatD16XyMubuf::BufferStoreFormatD16XyMubuf(const MachineInst *inst
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_FORMAT_D16_XY);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -580,12 +614,12 @@ BufferStoreFormatD16XyzMubuf::BufferStoreFormatD16XyzMubuf(const MachineInst *in
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_FORMAT_D16_XYZ);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -617,12 +651,12 @@ BufferStoreFormatD16XyzwMubuf::BufferStoreFormatD16XyzwMubuf(const MachineInst *
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_FORMAT_D16_XYZW);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -664,6 +698,10 @@ BufferLoadUbyteMubuf::BufferLoadUbyteMubuf(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_UBYTE);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  if (inst_.lds)
+    flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -704,6 +742,10 @@ BufferLoadSbyteMubuf::BufferLoadSbyteMubuf(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_SBYTE);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  if (inst_.lds)
+    flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -744,6 +786,10 @@ BufferLoadUshortMubuf::BufferLoadUshortMubuf(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_USHORT);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  if (inst_.lds)
+    flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -784,6 +830,10 @@ BufferLoadSshortMubuf::BufferLoadSshortMubuf(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_SSHORT);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  if (inst_.lds)
+    flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -824,6 +874,10 @@ BufferLoadDwordMubuf::BufferLoadDwordMubuf(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_DWORD);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  if (inst_.lds)
+    flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -864,6 +918,10 @@ BufferLoadDwordx2Mubuf::BufferLoadDwordx2Mubuf(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_DWORDX2);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  if (inst_.lds)
+    flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -904,6 +962,10 @@ BufferLoadDwordx3Mubuf::BufferLoadDwordx3Mubuf(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_DWORDX3);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  if (inst_.lds)
+    flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -944,6 +1006,10 @@ BufferLoadDwordx4Mubuf::BufferLoadDwordx4Mubuf(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_DWORDX4);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  if (inst_.lds)
+    flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -976,12 +1042,11 @@ BufferStoreByteMubuf::BufferStoreByteMubuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   vdata.set_register_byte_mask(0x1);
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_BYTE);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -1014,12 +1079,12 @@ BufferStoreByteD16HiMubuf::BufferStoreByteD16HiMubuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   vdata.set_register_byte_mask(0x4);
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_BYTE_D16_HI);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -1052,12 +1117,11 @@ BufferStoreShortMubuf::BufferStoreShortMubuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   vdata.set_register_byte_mask(0x3);
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_SHORT);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -1090,12 +1154,12 @@ BufferStoreShortD16HiMubuf::BufferStoreShortD16HiMubuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   vdata.set_register_byte_mask(0xc);
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_SHORT_D16_HI);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -1127,12 +1191,11 @@ BufferStoreDwordMubuf::BufferStoreDwordMubuf(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_DWORD);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -1164,12 +1227,11 @@ BufferStoreDwordx2Mubuf::BufferStoreDwordx2Mubuf(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_DWORDX2);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -1201,12 +1263,11 @@ BufferStoreDwordx3Mubuf::BufferStoreDwordx3Mubuf(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_DWORDX3);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -1238,12 +1299,11 @@ BufferStoreDwordx4Mubuf::BufferStoreDwordx4Mubuf(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_DWORDX4);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -1282,6 +1342,11 @@ BufferLoadUbyteD16Mubuf::BufferLoadUbyteD16Mubuf(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_UBYTE_D16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
+  if (inst_.lds)
+    flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -1327,6 +1392,11 @@ BufferLoadUbyteD16HiMubuf::BufferLoadUbyteD16HiMubuf(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_UBYTE_D16_HI);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
+  if (inst_.lds)
+    flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -1372,6 +1442,11 @@ BufferLoadSbyteD16Mubuf::BufferLoadSbyteD16Mubuf(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_SBYTE_D16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
+  if (inst_.lds)
+    flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -1417,6 +1492,11 @@ BufferLoadSbyteD16HiMubuf::BufferLoadSbyteD16HiMubuf(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_SBYTE_D16_HI);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
+  if (inst_.lds)
+    flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -1462,6 +1542,11 @@ BufferLoadShortD16Mubuf::BufferLoadShortD16Mubuf(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_SHORT_D16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
+  if (inst_.lds)
+    flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -1507,6 +1592,11 @@ BufferLoadShortD16HiMubuf::BufferLoadShortD16HiMubuf(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_SHORT_D16_HI);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
+  if (inst_.lds)
+    flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -1552,6 +1642,11 @@ BufferLoadFormatD16HiXMubuf::BufferLoadFormatD16HiXMubuf(const MachineInst *inst
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_FORMAT_D16_HI_X);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
+  if (inst_.lds)
+    flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -1590,12 +1685,13 @@ BufferStoreFormatD16HiXMubuf::BufferStoreFormatD16HiXMubuf(const MachineInst *in
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  vdata.set_register_byte_mask(0xc);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_FORMAT_D16_HI_X);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -1621,6 +1717,8 @@ BufferStoreLdsDwordMubuf::BufferStoreLdsDwordMubuf(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_LDS_DWORD);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -1640,6 +1738,8 @@ BufferWbinvl1Mubuf::BufferWbinvl1Mubuf(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 0;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_WBINVL1);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Cache);
 }
 
 namespace detail {
@@ -1659,6 +1759,8 @@ BufferWbinvl1VolMubuf::BufferWbinvl1VolMubuf(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 0;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_WBINVL1_VOL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Cache);
 }
 
 namespace detail {
@@ -1694,12 +1796,11 @@ BufferAtomicSwapMubuf::BufferAtomicSwapMubuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_SWAP);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1736,12 +1837,11 @@ BufferAtomicCmpswapMubuf::BufferAtomicCmpswapMubuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_CMPSWAP);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1777,12 +1877,11 @@ BufferAtomicAddMubuf::BufferAtomicAddMubuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_ADD);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1818,12 +1917,11 @@ BufferAtomicSubMubuf::BufferAtomicSubMubuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_SUB);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1859,12 +1957,11 @@ BufferAtomicSminMubuf::BufferAtomicSminMubuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_SMIN);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1900,12 +1997,11 @@ BufferAtomicUminMubuf::BufferAtomicUminMubuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_UMIN);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1941,12 +2037,11 @@ BufferAtomicSmaxMubuf::BufferAtomicSmaxMubuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_SMAX);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1982,12 +2077,11 @@ BufferAtomicUmaxMubuf::BufferAtomicUmaxMubuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_UMAX);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2023,12 +2117,11 @@ BufferAtomicAndMubuf::BufferAtomicAndMubuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_AND);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2064,12 +2157,11 @@ BufferAtomicOrMubuf::BufferAtomicOrMubuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_OR);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2105,12 +2197,11 @@ BufferAtomicXorMubuf::BufferAtomicXorMubuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_XOR);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2146,12 +2237,11 @@ BufferAtomicIncMubuf::BufferAtomicIncMubuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_INC);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2187,12 +2277,11 @@ BufferAtomicDecMubuf::BufferAtomicDecMubuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_DEC);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2228,21 +2317,23 @@ BufferAtomicAddF32Mubuf::BufferAtomicAddF32Mubuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_ADD_F32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeBufferAtomicAddF32Mubuf(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
   Result validation = Mubuf::validate_encoding(
       "buffer_atomic_add_f32", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (reinterpret_cast<const Mubuf::OpEncoding *>(inst)->glc) [[unlikely]]
+    return emit_error.emit() << "BUFFER_ATOMIC_ADD_F32 cannot return its result on CDNA1";
   return std::make_unique<BufferAtomicAddF32Mubuf>(opcode);
 }
 } // namespace detail
@@ -2269,21 +2360,23 @@ BufferAtomicPkAddF16Mubuf::BufferAtomicPkAddF16Mubuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_PK_ADD_F16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
 DecodeResult decodeBufferAtomicPkAddF16Mubuf(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
   Result validation = Mubuf::validate_encoding(
       "buffer_atomic_pk_add_f16", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (reinterpret_cast<const Mubuf::OpEncoding *>(inst)->glc) [[unlikely]]
+    return emit_error.emit() << "BUFFER_ATOMIC_PK_ADD_F16 cannot return its result on CDNA1";
   return std::make_unique<BufferAtomicPkAddF16Mubuf>(opcode);
 }
 } // namespace detail
@@ -2310,12 +2403,11 @@ BufferAtomicSwapX2Mubuf::BufferAtomicSwapX2Mubuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_SWAP_X2);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2352,12 +2444,11 @@ BufferAtomicCmpswapX2Mubuf::BufferAtomicCmpswapX2Mubuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_CMPSWAP_X2);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2393,12 +2484,11 @@ BufferAtomicAddX2Mubuf::BufferAtomicAddX2Mubuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_ADD_X2);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2434,12 +2524,11 @@ BufferAtomicSubX2Mubuf::BufferAtomicSubX2Mubuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_SUB_X2);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2475,12 +2564,11 @@ BufferAtomicSminX2Mubuf::BufferAtomicSminX2Mubuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_SMIN_X2);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2516,12 +2604,11 @@ BufferAtomicUminX2Mubuf::BufferAtomicUminX2Mubuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_UMIN_X2);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2557,12 +2644,11 @@ BufferAtomicSmaxX2Mubuf::BufferAtomicSmaxX2Mubuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_SMAX_X2);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2598,12 +2684,11 @@ BufferAtomicUmaxX2Mubuf::BufferAtomicUmaxX2Mubuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_UMAX_X2);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2639,12 +2724,11 @@ BufferAtomicAndX2Mubuf::BufferAtomicAndX2Mubuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_AND_X2);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2680,12 +2764,11 @@ BufferAtomicOrX2Mubuf::BufferAtomicOrX2Mubuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_OR_X2);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2721,12 +2804,11 @@ BufferAtomicXorX2Mubuf::BufferAtomicXorX2Mubuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_XOR_X2);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2762,12 +2844,11 @@ BufferAtomicIncX2Mubuf::BufferAtomicIncX2Mubuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_INC_X2);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2803,12 +2884,11 @@ BufferAtomicDecX2Mubuf::BufferAtomicDecX2Mubuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_DEC_X2);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {

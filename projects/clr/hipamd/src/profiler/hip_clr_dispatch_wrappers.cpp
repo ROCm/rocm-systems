@@ -5057,6 +5057,71 @@ static hipError_t hipLibraryGetManagedLayer(void** dptr, size_t* bytes, hipLibra
   return _r;
 }
 
+// api_id = 514
+static hipError_t hipExtMemcpyBatchAsyncLayer(void** dsts, void** srcs, size_t* sizes,
+                                              size_t* sizesDst, hipExtMemcpyWait* waits,
+                                              hipExtMemcpySignal* signals, size_t count,
+                                              hipExtMemcpyAttributes* attrs, size_t* attrsIdxs,
+                                              size_t numAttrs, hipStream_t stream) {
+  auto* _rec = HipGetActiveRecordExt(514u);
+  _rec->stream = stream;
+  auto _r = g_next.hipExtMemcpyBatchAsync_fn(dsts, srcs, sizes, sizesDst, waits, signals, count,
+                                             attrs, attrsIdxs, numAttrs, stream);
+  _rec->end_ns = NowNs();
+  return _r;
+}
+
+// api_id = 515
+static hipError_t hipGraphNodeGetLocalIdLayer(hipGraphNode_t node, unsigned int* nodeId) {
+  auto* _rec = HipGetActiveRecordExt(515u);
+  auto _r = g_next.hipGraphNodeGetLocalId_fn(node, nodeId);
+  _rec->end_ns = NowNs();
+  return _r;
+}
+
+// api_id = 516
+static hipError_t hipGraphNodeGetToolsIdLayer(hipGraphNode_t node,
+                                               unsigned long long* toolsId) {
+  auto* _rec = HipGetActiveRecordExt(516u);
+  auto _r = g_next.hipGraphNodeGetToolsId_fn(node, toolsId);
+  _rec->end_ns = NowNs();
+  return _r;
+}
+
+// api_id = 517
+static hipError_t hipGraphGetIdLayer(hipGraph_t graph, unsigned int* graphId) {
+  auto* _rec = HipGetActiveRecordExt(517u);
+  auto _r = g_next.hipGraphGetId_fn(graph, graphId);
+  _rec->end_ns = NowNs();
+  return _r;
+}
+
+// api_id = 518
+static hipError_t hipGraphExecGetIdLayer(hipGraphExec_t graphExec, unsigned int* graphId) {
+  auto* _rec = HipGetActiveRecordExt(518u);
+  auto _r = g_next.hipGraphExecGetId_fn(graphExec, graphId);
+  _rec->end_ns = NowNs();
+  return _r;
+}
+
+// api_id = 519
+static hipError_t hipDeviceGetExecAffinitySupportLayer(int* pi, hipExecAffinityType type,
+                                                       hipDevice_t dev) {
+  auto* _rec = HipGetActiveRecordExt(519u);
+  auto _r = g_next.hipDeviceGetExecAffinitySupport_fn(pi, type, dev);
+  _rec->end_ns = NowNs();
+  return _r;
+}
+
+// api_id = 520
+static hipError_t hipArrayGetPlaneLayer(hipArray_t* pPlaneArray, hipArray_t hArray,
+                                        unsigned int planeIdx) {
+  auto* _rec = HipGetActiveRecordExt(520u);
+  auto _r = g_next.hipArrayGetPlane_fn(pPlaneArray, hArray, planeIdx);
+  _rec->end_ns = NowNs();
+  return _r;
+}
+
 // API name table — indexed by api_id (same order as UpdateDispatchTable).
 const char* const kHipApiNamesExt[] = {
   "hipApiName",
@@ -5573,8 +5638,15 @@ const char* const kHipApiNamesExt[] = {
   "hipKernelGetFunction",
   "hipLibraryGetGlobal",
   "hipLibraryGetManaged",
+  "hipExtMemcpyBatchAsync",
+  "hipGraphNodeGetLocalId",
+  "hipGraphNodeGetToolsId",
+  "hipGraphGetId",
+  "hipGraphExecGetId",
+  "hipDeviceGetExecAffinitySupport",
+  "hipArrayGetPlane",
 };
-const size_t kHipApiNamesCountExt = 514;
+const size_t kHipApiNamesCountExt = 521;
 
 #include <cstring>
 
@@ -5588,6 +5660,7 @@ void HipProfilerBuildWrapperTableExt(HipDispatchTable* tbl) {
   g_wrapper_tbl.hipArrayDestroy_fn = hipArrayDestroyLayer;
   g_wrapper_tbl.hipArrayGetDescriptor_fn = hipArrayGetDescriptorLayer;
   g_wrapper_tbl.hipArrayGetInfo_fn = hipArrayGetInfoLayer;
+  g_wrapper_tbl.hipArrayGetPlane_fn = hipArrayGetPlaneLayer;
   g_wrapper_tbl.hipBindTexture_fn = hipBindTextureLayer;
   g_wrapper_tbl.hipBindTexture2D_fn = hipBindTexture2DLayer;
   g_wrapper_tbl.hipBindTextureToArray_fn = hipBindTextureToArrayLayer;
@@ -6095,6 +6168,12 @@ void HipProfilerBuildWrapperTableExt(HipDispatchTable* tbl) {
   g_wrapper_tbl.hipKernelGetFunction_fn = hipKernelGetFunctionLayer;
   g_wrapper_tbl.hipLibraryGetGlobal_fn = hipLibraryGetGlobalLayer;
   g_wrapper_tbl.hipLibraryGetManaged_fn = hipLibraryGetManagedLayer;
+  g_wrapper_tbl.hipExtMemcpyBatchAsync_fn = hipExtMemcpyBatchAsyncLayer;
+  g_wrapper_tbl.hipGraphNodeGetLocalId_fn = hipGraphNodeGetLocalIdLayer;
+  g_wrapper_tbl.hipGraphNodeGetToolsId_fn = hipGraphNodeGetToolsIdLayer;
+  g_wrapper_tbl.hipGraphGetId_fn = hipGraphGetIdLayer;
+  g_wrapper_tbl.hipGraphExecGetId_fn = hipGraphExecGetIdLayer;
+  g_wrapper_tbl.hipDeviceGetExecAffinitySupport_fn = hipDeviceGetExecAffinitySupportLayer;
   // g_wrapper_tbl is fully written before any Install call copies it in.
 }
 

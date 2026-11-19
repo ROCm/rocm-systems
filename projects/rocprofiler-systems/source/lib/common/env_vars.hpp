@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "common/string_utility.hpp"
+
 #include <cctype>
 #include <string_view>
 
@@ -32,7 +34,6 @@ inline constexpr const char* PRINT_ENV          = "ROCPROFSYS_PRINT_ENV";
 
 // --- Tracing ---
 inline constexpr const char* TRACE         = "ROCPROFSYS_TRACE";
-inline constexpr const char* USE_TRACE     = "ROCPROFSYS_USE_TRACE";
 inline constexpr const char* PERFETTO_FILE = "ROCPROFSYS_PERFETTO_FILE";
 inline constexpr const char* PERFETTO_BUFFER_SIZE_KB =
     "ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB";
@@ -161,11 +162,7 @@ inline constexpr const char* FILE_OUTPUT         = "ROCPROFSYS_FILE_OUTPUT";
 inline constexpr const char* TEXT_OUTPUT         = "ROCPROFSYS_TEXT_OUTPUT";
 inline constexpr const char* JSON_OUTPUT         = "ROCPROFSYS_JSON_OUTPUT";
 inline constexpr const char* COUT_OUTPUT         = "ROCPROFSYS_COUT_OUTPUT";
-inline constexpr const char* DIFF_OUTPUT         = "ROCPROFSYS_DIFF_OUTPUT";
 inline constexpr const char* TREE_OUTPUT         = "ROCPROFSYS_TREE_OUTPUT";
-inline constexpr const char* INPUT_PATH          = "ROCPROFSYS_INPUT_PATH";
-inline constexpr const char* INPUT_PREFIX        = "ROCPROFSYS_INPUT_PREFIX";
-inline constexpr const char* INPUT_EXTENSIONS    = "ROCPROFSYS_INPUT_EXTENSIONS";
 inline constexpr const char* USE_ROCPD           = "ROCPROFSYS_USE_ROCPD";
 inline constexpr const char* USE_TEMPORARY_FILES = "ROCPROFSYS_USE_TEMPORARY_FILES";
 inline constexpr const char* USE_UNIFIED_MEMORY_PROFILING =
@@ -203,8 +200,6 @@ inline constexpr const char* SAMPLING_PROCESS_DURATION =
 inline constexpr const char* USE_CAUSAL            = "ROCPROFSYS_USE_CAUSAL";
 inline constexpr const char* CAUSAL_MODE           = "ROCPROFSYS_CAUSAL_MODE";
 inline constexpr const char* CAUSAL_BACKEND        = "ROCPROFSYS_CAUSAL_BACKEND";
-inline constexpr const char* CAUSAL_VERBOSE        = "ROCPROFSYS_CAUSAL_VERBOSE";
-inline constexpr const char* CAUSAL_DEBUG          = "ROCPROFSYS_CAUSAL_DEBUG";
 inline constexpr const char* CAUSAL_BINARY_SCOPE   = "ROCPROFSYS_CAUSAL_BINARY_SCOPE";
 inline constexpr const char* CAUSAL_BINARY_EXCLUDE = "ROCPROFSYS_CAUSAL_BINARY_EXCLUDE";
 inline constexpr const char* CAUSAL_FUNCTION_SCOPE = "ROCPROFSYS_CAUSAL_FUNCTION_SCOPE";
@@ -337,8 +332,6 @@ inline constexpr const char* DEBUG_INIT            = "ROCPROFSYS_DEBUG_INIT";
 inline constexpr const char* DEBUG_FINALIZE        = "ROCPROFSYS_DEBUG_FINALIZE";
 inline constexpr const char* DEBUG_AVAIL           = "ROCPROFSYS_DEBUG_AVAIL";
 inline constexpr const char* DEBUG_MARK            = "ROCPROFSYS_DEBUG_MARK";
-inline constexpr const char* DEBUG_PIDS            = "ROCPROFSYS_DEBUG_PIDS";
-inline constexpr const char* DEBUG_TIDS            = "ROCPROFSYS_DEBUG_TIDS";
 inline constexpr const char* DEBUG_PUSH            = "ROCPROFSYS_DEBUG_PUSH";
 inline constexpr const char* DEBUG_POP             = "ROCPROFSYS_DEBUG_POP";
 inline constexpr const char* DEBUG_SAMPLING        = "ROCPROFSYS_DEBUG_SAMPLING";
@@ -358,30 +351,16 @@ inline constexpr const char* USE_SHMEM =
 [[nodiscard]] inline int
 log_level_to_verbose(std::string_view level) noexcept
 {
-    auto const iequal = [](std::string_view lhs, std::string_view rhs) noexcept {
-        if(lhs.size() != rhs.size())
-        {
-            return false;
-        }
-        for(std::size_t idx = 0; idx < lhs.size(); ++idx)
-        {
-            if(std::tolower(static_cast<unsigned char>(lhs[idx])) !=
-               std::tolower(static_cast<unsigned char>(rhs[idx])))
-            {
-                return false;
-            }
-        }
-        return true;
-    };
-    if(iequal(level, "trace"))
+    using utility::string::equals_ignore_case;
+    if(equals_ignore_case(level, "trace"))
     {
         return 2;
     }
-    if(iequal(level, "debug"))
+    if(equals_ignore_case(level, "debug"))
     {
         return 1;
     }
-    if(iequal(level, "info"))
+    if(equals_ignore_case(level, "info"))
     {
         return 0;
     }

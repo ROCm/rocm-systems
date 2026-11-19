@@ -92,19 +92,30 @@ jobs:
           BASE_REF: ${{ steps.base_ref.outputs.ref }}
           HEAD_REF: ${{ github.head_ref || github.ref_name }}
         run: |
+          set +e
           python3 _base/projects/amdsmi/tests/abi_check/abi_check.py \
             --base-ref "$BASE_REF" \
             --head-ref "$HEAD_REF" \
             --project-path projects/amdsmi \
             --mode major
+          rc=$?
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          exit "$rc"
         continue-on-error: true
 
       - name: Save outcome for PR labeling
         if: always() && github.event_name == 'pull_request'
         env:
           RUN_MAJOR_OUTCOME: ${{ steps.run_major.outcome }}
+          RUN_MAJOR_RC: ${{ steps.run_major.outputs.rc }}
         run: |
-          echo "$RUN_MAJOR_OUTCOME" > outcome.txt
+          # abi_check.py exits 1 for a break and 2 when it could not compare; an error
+          # must not add or clear the label.
+          if [[ "$RUN_MAJOR_OUTCOME" == "failure" && "$RUN_MAJOR_RC" != "1" ]]; then
+            echo error > outcome.txt
+          else
+            echo "$RUN_MAJOR_OUTCOME" > outcome.txt
+          fi
 
       - name: Upload Major ABI Report
         if: always()
@@ -120,8 +131,11 @@ jobs:
         if: always()
         env:
           RUN_MAJOR_OUTCOME: ${{ steps.run_major.outcome }}
+          RUN_MAJOR_RC: ${{ steps.run_major.outputs.rc }}
         run: |
-          if [[ "$RUN_MAJOR_OUTCOME" == "failure" ]]; then
+          if [[ "$RUN_MAJOR_OUTCOME" == "failure" && "$RUN_MAJOR_RC" != "1" ]]; then
+            echo "::error::Major ABI check could not compare the headers. See the Run Major ABI Compliance Check logs."
+          elif [[ "$RUN_MAJOR_OUTCOME" == "failure" ]]; then
             echo "::warning::MAJOR ABI BREAKAGE FOUND. Check Run Major ABI Compliance Check logs or the major-abi-report artifact."
           elif [[ "$RUN_MAJOR_OUTCOME" == "success" ]]; then
             echo "Major ABI check succeeded."
@@ -197,19 +211,30 @@ jobs:
           BASE_REF: ${{ steps.base_ref_minor.outputs.ref }}
           HEAD_REF: ${{ github.head_ref || github.ref_name }}
         run: |
+          set +e
           python3 _base/projects/amdsmi/tests/abi_check/abi_check.py \
             --base-ref "$BASE_REF" \
             --head-ref "$HEAD_REF" \
             --project-path projects/amdsmi \
             --mode minor
+          rc=$?
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          exit "$rc"
         continue-on-error: true
 
       - name: Save outcome for PR labeling
         if: always() && github.event_name == 'pull_request'
         env:
           RUN_MINOR_OUTCOME: ${{ steps.run_minor.outcome }}
+          RUN_MINOR_RC: ${{ steps.run_minor.outputs.rc }}
         run: |
-          echo "$RUN_MINOR_OUTCOME" > outcome.txt
+          # abi_check.py exits 1 for a break and 2 when it could not compare; an error
+          # must not add or clear the label.
+          if [[ "$RUN_MINOR_OUTCOME" == "failure" && "$RUN_MINOR_RC" != "1" ]]; then
+            echo error > outcome.txt
+          else
+            echo "$RUN_MINOR_OUTCOME" > outcome.txt
+          fi
 
       - name: Upload Minor ABI Report
         if: always()
@@ -225,8 +250,11 @@ jobs:
         if: always()
         env:
           RUN_MINOR_OUTCOME: ${{ steps.run_minor.outcome }}
+          RUN_MINOR_RC: ${{ steps.run_minor.outputs.rc }}
         run: |
-          if [[ "$RUN_MINOR_OUTCOME" == "failure" ]]; then
+          if [[ "$RUN_MINOR_OUTCOME" == "failure" && "$RUN_MINOR_RC" != "1" ]]; then
+            echo "::error::Minor ABI check could not compare the headers. See the Run Minor ABI Compliance Check logs."
+          elif [[ "$RUN_MINOR_OUTCOME" == "failure" ]]; then
             echo "::warning::MINOR ABI CHANGES FOUND. Check Run Minor ABI Compliance Check logs or the minor-abi-report artifact."
           elif [[ "$RUN_MINOR_OUTCOME" == "success" ]]; then
             echo "Minor ABI check succeeded."

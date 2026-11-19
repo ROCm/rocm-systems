@@ -39,7 +39,6 @@
 #include <charconv>
 #include <cstddef>
 #include <exception>
-#include <mutex>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -342,15 +341,6 @@ initialize_amdsmi()
     return amdsmi_init();
 }
 
-bool
-reinitialize_amdsmi()
-{
-    static std::mutex                 mtx;
-    const std::lock_guard<std::mutex> lock(mtx);
-    amdsmi_initialized.store(false);
-    return amdsmi_init();
-}
-
 template <typename ArchiveT>
 void
 add_device_metadata(ArchiveT& ar)
@@ -420,16 +410,12 @@ std::vector<bool>                    processors::jpeg_busy_supported    = {};
 std::vector<bool>                    processors::xgmi_supported         = {};
 std::vector<bool>                    processors::pcie_supported         = {};
 
-std::vector<amdsmi_processor_handle> processors::ainic_list        = {};
-std::uint32_t                        processors::total_ainic_count = 0;
-
 void
 get_processor_handles()
 {
     std::uint32_t socket_count;
     std::uint32_t processor_count;
     processors::processors_list.clear();
-    processors::ainic_list.clear();
 
     // Passing nullptr will return us the number of sockets available for read in this
     // system
@@ -464,7 +450,6 @@ get_processor_handles()
 #ifdef AINIC_SUPPORTED
             if(processor_type == AMDSMI_PROCESSOR_TYPE_AMD_NIC)
             {
-                processors::ainic_list.push_back(processor);
                 continue;
             }
 #endif  // AINIC_SUPPORTED
@@ -538,7 +523,6 @@ get_processor_handles()
         }
     }
     processors::total_processor_count = processors::processors_list.size();
-    processors::total_ainic_count     = processors::ainic_list.size();
 }
 
 bool
@@ -605,12 +589,6 @@ std::uint32_t
 get_processor_count()
 {
     return processors::total_processor_count;
-}
-
-amdsmi_processor_handle
-get_handle_from_id(std::uint32_t dev_id)
-{
-    return processors::processors_list[dev_id];
 }
 
 }  // namespace rocprofsys::gpu

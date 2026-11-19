@@ -104,7 +104,7 @@ struct RecordingPutStub {
   }
 };
 
-// The primary GetSignalPtr/GetCounterPtr declare 3 params but gin__funcs.h's ncclGin_C helpers pass 2, so stub both.
+// The primary GetSignalPtr/GetCounterPtr declare 3 params but gin__funcs.h's ncclGinCall sites pass 2, so stub both.
 struct UnusedOffsetPtrStub {
   NCCL_DEVICE_INLINE static ncclGinOffsetPtr call(ncclGinCtx, uint32_t) {
     return {nullptr, 0};
@@ -160,38 +160,6 @@ __global__ void kernelBackendMaskPut(ncclDevComm comm, ncclWindow_t dstWin, nccl
   net.put(ncclTeamWorld(comm), args.peer, dstWin, args.dstOff, srcWin, args.srcOff, args.bytes,
           remoteAction, localAction, ncclCoopThread{}, ncclGin_None{},
           args.given, args.required, args.optFlags, Segment{});
-}
-
-// ncclGinPut_v3 arguments that the template put derives from its RemoteAction, LocalAction and Segment types.
-struct CPutAction {
-  ncclGinSignalType signalType;
-  bool isStrong;
-  ncclGinSignalOp_t signalOp;
-  uint64_t signalOpArg;
-  bool isCounter;
-  ncclGinSegmentType_t segmentType;
-};
-
-// The C API reaches the same backends through ncclGinPut_C_impl, which has its own copy of the multi-segment loop.
-__global__ void kernelCPut(ncclDevComm comm, ncclWindow_t dstWin, ncclWindow_t srcWin, PutArgs args, CPutAction a) {
-  if (threadIdx.x != 0 || blockIdx.x != 0) {
-    return;
-  }
-  ncclGin_C net(comm, NCCL_GIN_BACKEND_MASK_ALL, 0);
-  ncclGinPut_v3(&net, ncclTeamWorld(comm), args.peer, dstWin, args.dstOff, srcWin, args.srcOff, args.bytes,
-                a.signalType, /*signalWin=*/nullptr, /*signalOffset=*/0, args.signalId, a.isStrong, a.signalOp,
-                a.signalOpArg, a.isCounter, args.counterId, ncclCoopThread{}, /*isDescriptor=*/false,
-                /*descriptor=*/nullptr, args.given, args.required, args.optFlags, a.segmentType);
-}
-
-constexpr ncclGinSegmentType_t segmentTypeOf(ncclGin_SegmentDevice) {
-  return ncclGinSegmentTypeDevice;
-}
-constexpr ncclGinSegmentType_t segmentTypeOf(ncclGin_SegmentMixed) {
-  return ncclGinSegmentTypeMixed;
-}
-constexpr ncclGinSegmentType_t segmentTypeOf(ncclGin_SegmentHostNuma) {
-  return ncclGinSegmentTypeHostNuma;
 }
 
 // put()'s action helpers take ncclGin (NCCL_GIN_BACKEND_MASK_ALL), so call ncclGinCall directly with a one-bit mask.
@@ -274,16 +242,6 @@ protected:
   std::vector<PutRecord> runPut(const ncclDevComm& comm, const PutArgs& args, RemoteAction remote, LocalAction local) {
     d_records_.zero();
     kernelBackendMaskPut<Segment><<<1, 1>>>(comm, d_dstWin_.ptr, d_srcWin_.ptr, args, remote, local);
-    syncAndCheck();
-    if (HasFatalFailure()) {
-      return std::vector<PutRecord>(kNumRecords);
-    }
-    return d_records_.copyTo();
-  }
-
-  std::vector<PutRecord> runCPut(const ncclDevComm& comm, const PutArgs& args, const CPutAction& action) {
-    d_records_.zero();
-    kernelCPut<<<1, 1>>>(comm, d_dstWin_.ptr, d_srcWin_.ptr, args, action);
     syncAndCheck();
     if (HasFatalFailure()) {
       return std::vector<PutRecord>(kNumRecords);
@@ -391,23 +349,15 @@ protected:
                  NCCL_GIN_SIGNAL_TYPE_INDEXED, signalOp, signalOpArg, strongSignals, /*lastHasCounter=*/true);
   }
 
-  // Runs the put through ncclGin::put and ncclGinPut_v3 and expects the same chunks from both.
+  // Runs the put through ncclGin::put and expects these chunks. (The ncclGin_C / ncclGinPut_v3 C API that used to be
+  // checked alongside it left nccl_device in NCCL 2.32.6; its successor lives in bindings/ir.)
   template <typename Segment, typename RemoteAction, typename LocalAction>
   void expectPutChunks(const ncclDevComm& comm, int slot, const PutArgs& args, RemoteAction remote, LocalAction local,
                        const std::vector<ExpectedChunk>& chunks, ncclGinSignalType lastSignalType,
                        ncclGinSignalOp_t signalOp, uint64_t signalOpArg, bool strongSignals, bool lastHasCounter) {
-    {
-      SCOPED_TRACE("ncclGin::put");
-      expectChunks(runPut<Segment>(comm, args, remote, local), slot, args, chunks, lastSignalType, signalOp,
-                   signalOpArg, strongSignals, lastHasCounter);
-    }
-    {
-      SCOPED_TRACE("ncclGinPut_v3");
-      const CPutAction action{lastSignalType, strongSignals, signalOp,
-                              signalOpArg,    lastHasCounter, segmentTypeOf(Segment{})};
-      expectChunks(runCPut(comm, args, action), slot, args, chunks, lastSignalType, signalOp, signalOpArg,
-                   strongSignals, lastHasCounter);
-    }
+    SCOPED_TRACE("ncclGin::put");
+    expectChunks(runPut<Segment>(comm, args, remote, local), slot, args, chunks, lastSignalType, signalOp,
+                 signalOpArg, strongSignals, lastHasCounter);
   }
 
   hipError_t setDeviceErr_ = hipSetDevice(0);  // Must precede the DeviceBuffers; they allocate on the current device.

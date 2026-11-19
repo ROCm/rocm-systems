@@ -168,14 +168,12 @@ class OneModule : public amd::rdc::RdcModuleMgr {
 class NoEvents : public amd::rdc::RdcNotification {
  public:
   bool is_notification_event(rdc_field_t) const override { return false; }
-  rdc_status_t add_event_listeners(const std::vector<RdcFieldKey>&) override { return RDC_ST_OK; }
-  rdc_status_t remove_event_listeners(const std::vector<RdcFieldKey>&) override {
-    return RDC_ST_OK;
-  }
+  rdc_status_t set_listen_events(const std::vector<RdcFieldKey>) override { return RDC_ST_OK; }
   rdc_status_t listen(amd::rdc::rdc_evnt_notification_t*, uint32_t* num_events, uint32_t) override {
     *num_events = 0;
     return RDC_ST_OK;
   }
+  rdc_status_t stop_listening(uint32_t) override { return RDC_ST_OK; }
 };
 
 // When asked, holds the next job start right after the cache entered the job,
