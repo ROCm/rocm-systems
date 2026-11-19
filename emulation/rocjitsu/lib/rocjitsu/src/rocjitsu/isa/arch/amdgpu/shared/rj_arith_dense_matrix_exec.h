@@ -6,7 +6,6 @@
 #pragma once
 
 #include "rj_arith/rj_arith.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/dot_packed16.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_exec.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"

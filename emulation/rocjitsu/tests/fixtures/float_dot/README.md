@@ -105,7 +105,7 @@ with the same result each time; none of its 64 forms changes with MODE.
 ### The negative-C floor unit
 
 On `gfx1201`, a negative C whose bits all fall below the alignment grid still
-subtracts one unit. `gfx12_dot_terms` floors C's alignment exponent at 2^-14
+subtracts one unit. The gfx12 model floors C's alignment exponent at 2^-14
 for packed F16 and 2^-126 otherwise, and the unit applies at or below that
 floor, so the two output formats reach it from different directions:
 
@@ -138,4 +138,5 @@ matrix model, with a single group of four products.
 
 The DOT4 arithmetic fixture uses xorshift32 seed `0x713fa225` and retains all
 256 hardware outputs. It checks input format selection, NaN precedence and
-rounding, including independence from the host floating-point rounding mode.
+rounding. Numerical execution now lives in rj-arith and assumes the default host
+floating-point environment.

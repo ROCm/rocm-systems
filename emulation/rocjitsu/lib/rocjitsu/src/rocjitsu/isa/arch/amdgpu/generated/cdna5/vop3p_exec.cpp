@@ -30,39 +30,6 @@
 namespace rocjitsu {
 namespace cdna5 {
 
-namespace {
-struct PkU64Pair {
-  uint64_t lo;
-  uint64_t hi;
-};
-
-uint32_t packed_vgpr_physical_base(const Operand &operand, const amdgpu::Wavefront &wf) {
-  const auto offset = Isa::resolved_vgpr_offset(wf, operand.opr_type_, operand.encoding_value_,
-                                                operand.vgpr_msb_role());
-  assert(offset);
-  return wf.vgpr_alloc().base + *offset;
-}
-
-PkU64Pair read_pk_u64_pair(const Operand &operand, const amdgpu::Wavefront &wf, uint32_t lane) {
-  const uint64_t lo = amdgpu::RegisterAccess(wf).read_lane64(operand, lane);
-  const auto reg = operand.to_register_ref();
-  if (!reg || reg->cls != RegClass::VGPR)
-    return {lo, lo};
-
-  const uint32_t base = packed_vgpr_physical_base(operand, wf);
-  return {lo, amdgpu::RegisterAccess(wf).read_vgpr64(base + 2, lane)};
-}
-
-void write_pk_u64_pair(const Operand &operand, amdgpu::Wavefront &wf, uint32_t lane,
-                       PkU64Pair value) {
-  amdgpu::RegisterAccess access(wf);
-  access.write_lane64(operand, lane, value.lo);
-  const uint32_t base = packed_vgpr_physical_base(operand, wf);
-  access.write_vgpr64(base + 2, lane, value.hi);
-}
-
-} // namespace
-
 void VPkMadI16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   const uint64_t modifiers = (inst_.clamp ? RJ_ARITH_PK_CLAMP : 0u) |
                              ((inst_.opsel & 1) ? RJ_ARITH_PK_LO_A_HIGH : 0u) |

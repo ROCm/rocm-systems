@@ -6371,40 +6371,7 @@ class CodeGenerator:
 
     def _emit_cdna5_matrix_fmt_helpers(self) -> _ImplOutputs:
         """Emit C++ helpers for gfx1250 VOP3P packed and matrix quirks."""
-        execution = textwrap.dedent('''\
-            namespace {
-            struct PkU64Pair {
-              uint64_t lo;
-              uint64_t hi;
-            };
-
-            uint32_t packed_vgpr_physical_base(const Operand &operand,
-                                               const amdgpu::Wavefront &wf) {
-              const auto offset = Isa::resolved_vgpr_offset(
-                  wf, operand.opr_type_, operand.encoding_value_, operand.vgpr_msb_role());
-              assert(offset);
-              return wf.vgpr_alloc().base + *offset;
-            }
-
-            PkU64Pair read_pk_u64_pair(const Operand &operand, const amdgpu::Wavefront &wf,
-                                       uint32_t lane) {
-              const uint64_t lo = amdgpu::RegisterAccess(wf).read_lane64(operand, lane);
-              const auto reg = operand.to_register_ref();
-              if (!reg || reg->cls != RegClass::VGPR)
-                return {lo, lo};
-
-              const uint32_t base = packed_vgpr_physical_base(operand, wf);
-              return {lo, amdgpu::RegisterAccess(wf).read_vgpr64(base + 2, lane)};
-            }
-
-            void write_pk_u64_pair(const Operand &operand, amdgpu::Wavefront &wf, uint32_t lane,
-                                   PkU64Pair value) {
-              amdgpu::RegisterAccess access(wf);
-              access.write_lane64(operand, lane, value.lo);
-              const uint32_t base = packed_vgpr_physical_base(operand, wf);
-              access.write_vgpr64(base + 2, lane, value.hi);
-            }
-            ''')
+        execution = ''
         model = (
             'namespace {\n\n'
             + (
@@ -6496,7 +6463,6 @@ class CodeGenerator:
             )
             + '\n} // namespace'
         ).replace('@OPSEL_HI_2@', self._op_sel_hi_2_field('ENC_VOP3P'))
-        execution += '\n' + ('} // namespace')
         return _ImplOutputs(model=[model], execution=[execution])
 
     @staticmethod
@@ -16383,8 +16349,6 @@ class CodeGenerator:
                     ),
                     ('rocjitsu/isa/arch/amdgpu/shared/simd_glue.h', False),
                     ('rocjitsu/isa/arch/amdgpu/shared/dot_packed16.h', False),
-                    ('rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h', False),
-                    ('rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h', False),
                     ('util/except.h', False),
                 ]
                 if self.isa_spec.arch_name == 'cdna1':
@@ -18077,15 +18041,6 @@ class CodeGenerator:
                 'rocjitsu/isa/arch/amdgpu/shared/dot_packed16.h': 'dot_packed16::',
                 'optional': 'std::optional',
                 'rocjitsu/base/rj_compiler.h': 'RJ_NOINLINE',
-                'rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h': (
-                    'gfx11_dot2_f32',
-                    'gfx11_dot2_packed16',
-                ),
-                'rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h': (
-                    'gfx12_dot2_f32',
-                    'gfx12_dot2_packed16',
-                    'gfx12_dot4_f32_fp8',
-                ),
                 'rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h': 'pseudo_scalar::',
                 'rocjitsu/isa/arch/amdgpu/shared/scalar_f16_source.h': 'read_scalar_f16_carrier',
             }
@@ -18506,10 +18461,8 @@ class CodeGenerator:
             '#include "rocjitsu/isa/arch/amdgpu/shared/scalar_f16_source.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"',
-            '#include "rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/lds_direct.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"',
-            '#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h"',
             '#include "util/data_types.h"',
             '#include "util/except.h"',
             '#include "util/log.h"',
