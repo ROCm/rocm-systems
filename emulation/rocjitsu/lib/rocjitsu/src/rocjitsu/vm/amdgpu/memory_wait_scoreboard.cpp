@@ -1997,7 +1997,9 @@ bool MemoryWaitScoreboard::counts_memory_counter(const Instruction &inst, const 
   if (!info)
     return true;
   const auto arch = wave.cu().arch();
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5 && (inst.flags() & CONDITIONAL_MEMORY_LANES)) {
+  if (arch != ROCJITSU_CODE_ARCH_CDNA5)
+    return true;
+  if (inst.flags() & CONDITIONAL_MEMORY_LANES) {
     RegisterModifiers modifiers;
     inst.amdgpu_register_modifiers(modifiers);
     if (addr_calc::cdna5_ignores_buffer_resource(modifiers, wave))

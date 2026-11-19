@@ -30,6 +30,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
@@ -2669,75 +2670,95 @@ TEST(MemoryWaitExecutionTest, IgnoredBufferDoesNotAdmitOrOccupyLoadcnt) {
         }
 }
 
-TEST(MemoryWaitExecutionTest, ExecZeroCounterProgressFollowsTargetPolicy) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA3,
+TEST(MemoryWaitExecutionTest, ExecZeroIssueCountsForPartialWaitsAndCapacity) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
+                    ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA3,
                     ROCJITSU_CODE_ARCH_RDNA4})
     for (bool lds : {false, true})
-      for (bool capacity : {false, true}) {
-        SCOPED_TRACE(std::format("arch={} lds={} capacity={}", unsigned(arch), lds, capacity));
-        GpuMemory memory("exec_zero_memory");
-        L2Cache l2("exec_zero_l2");
-        ComputeUnitCore::Config config{};
-        config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
-        config.arch = arch;
-        config.num_wf_slots = 1;
-        config.sgprs_per_wf = 128;
-        config.vgprs_per_wf = 32;
-        std::unique_ptr<ComputeUnitCore> cu;
-        ASSERT_NO_FATAL_FAILURE(
-            rocjitsu::test::initialize_compute_unit(cu, "exec_zero_cu", config, &memory, &l2));
-        auto *wave = cu->dispatch_wf(0, 0x100, 128, 32);
-        ASSERT_NE(wave, nullptr);
-        auto decoder = Decoder::create(arch);
-        auto issue = [&](uint8_t dest) {
-          std::vector<uint32_t> words;
-          if (arch == ROCJITSU_CODE_ARCH_CDNA4)
-            append_instruction(words, lds ? cdna4::build_ds(cdna4::kDsReadB32Ds, {.vdst = dest})
-                                          : cdna4::build_flat(cdna4::kFlatLoadDwordFlat,
-                                                              {.seg = 2, .vdst = dest}));
-          else if (arch == ROCJITSU_CODE_ARCH_RDNA3)
-            append_instruction(
-                words, lds ? rdna3::build_ds(rdna3::kDsLoadB32Ds, {.vdst = dest})
-                           : rdna3::build_flat(rdna3::kFlatLoadB32Flat, {.seg = 2, .vdst = dest}));
-          else if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
-            if (lds)
-              append_instruction(words, cdna5::build_vds(cdna5::kDsLoadB32Vds, {.vdst = dest}));
-            else
-              append_instruction(
-                  words, cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal, {.vdst = dest}));
-          } else {
-            if (lds)
-              append_instruction(words, rdna4::build_vds(rdna4::kDsLoadB32Vds, {.vdst = dest}));
-            else
-              append_instruction(
-                  words, rdna4::build_vglobal(rdna4::kGlobalLoadB32Vglobal, {.vdst = dest}));
+      for (bool capacity : {false, true})
+        for (bool issue_masked : {false, true}) {
+          SCOPED_TRACE(std::format("arch={} lds={} capacity={} issue_masked={}", unsigned(arch),
+                                   lds, capacity, issue_masked));
+          GpuMemory memory("exec_zero_memory");
+          L2Cache l2("exec_zero_l2");
+          ComputeUnitCore::Config config{};
+          config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+          config.arch = arch;
+          config.num_wf_slots = 1;
+          config.sgprs_per_wf = 128;
+          config.vgprs_per_wf = 32;
+          std::unique_ptr<ComputeUnitCore> cu;
+          ASSERT_NO_FATAL_FAILURE(
+              rocjitsu::test::initialize_compute_unit(cu, "exec_zero_cu", config, &memory, &l2));
+          auto *wave = cu->dispatch_wf(0, 0x100, 128, 32);
+          ASSERT_NE(wave, nullptr);
+          auto decoder = Decoder::create(arch);
+          auto issue = [&](uint8_t dest) {
+            std::vector<uint32_t> words;
+            if (arch == ROCJITSU_CODE_ARCH_CDNA1)
+              append_instruction(words, lds ? cdna1::build_ds(cdna1::kDsReadB32Ds, {.vdst = dest})
+                                            : cdna1::build_flat(cdna1::kFlatLoadDwordFlat,
+                                                                {.seg = 2, .vdst = dest}));
+            else if (arch == ROCJITSU_CODE_ARCH_CDNA2)
+              append_instruction(words, lds ? cdna2::build_ds(cdna2::kDsReadB32Ds, {.vdst = dest})
+                                            : cdna2::build_flat(cdna2::kFlatLoadDwordFlat,
+                                                                {.seg = 2, .vdst = dest}));
+            else if (arch == ROCJITSU_CODE_ARCH_CDNA3)
+              append_instruction(words, lds ? cdna3::build_ds(cdna3::kDsReadB32Ds, {.vdst = dest})
+                                            : cdna3::build_flat(cdna3::kFlatLoadDwordFlat,
+                                                                {.seg = 2, .vdst = dest}));
+            else if (arch == ROCJITSU_CODE_ARCH_CDNA4)
+              append_instruction(words, lds ? cdna4::build_ds(cdna4::kDsReadB32Ds, {.vdst = dest})
+                                            : cdna4::build_flat(cdna4::kFlatLoadDwordFlat,
+                                                                {.seg = 2, .vdst = dest}));
+            else if (arch == ROCJITSU_CODE_ARCH_RDNA3)
+              append_instruction(words, lds ? rdna3::build_ds(rdna3::kDsLoadB32Ds, {.vdst = dest})
+                                            : rdna3::build_flat(rdna3::kFlatLoadB32Flat,
+                                                                {.seg = 2, .vdst = dest}));
+            else if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+              if (lds)
+                append_instruction(words, cdna5::build_vds(cdna5::kDsLoadB32Vds, {.vdst = dest}));
+              else
+                append_instruction(
+                    words, cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal, {.vdst = dest}));
+            } else {
+              if (lds)
+                append_instruction(words, rdna4::build_vds(rdna4::kDsLoadB32Vds, {.vdst = dest}));
+              else
+                append_instruction(
+                    words, rdna4::build_vglobal(rdna4::kGlobalLoadB32Vglobal, {.vdst = dest}));
+            }
+            util::StringDiagnostic error;
+            auto inst = decoder->decode_window(words, 0, error.emitter());
+            ASSERT_TRUE(inst.succeeded()) << error.message();
+            auto &state = wave->ensure_memory_wait_scoreboard();
+            state.before(*inst.value(), arch, wave);
+            cu->track_memory_wait(*inst.value(), *wave);
+            wave->pc += words.size() * sizeof(uint32_t);
+          };
+          const auto counter = lds ? WaitCounterKind::Ds : WaitCounterKind::Load;
+          const auto maximum = WaitCounterPolicy::maximum_dependency_wait(arch, counter);
+          ASSERT_TRUE(maximum.succeeded());
+          const unsigned limit = maximum.value() + 1;
+          wave->set_exec(1);
+          ASSERT_NO_FATAL_FAILURE(issue(2));
+          if (capacity) {
+            for (unsigned i = 1; i < limit; ++i)
+              ASSERT_NO_FATAL_FAILURE(issue(3));
           }
-          util::StringDiagnostic error;
-          auto inst = decoder->decode_window(words, 0, error.emitter());
-          ASSERT_TRUE(inst.succeeded()) << error.message();
+          wave->set_exec(0);
+          if (issue_masked) {
+            ASSERT_NO_FATAL_FAILURE(issue(4));
+          }
           auto &state = wave->ensure_memory_wait_scoreboard();
-          state.before(*inst.value(), arch, wave);
-          cu->track_memory_wait(*inst.value(), *wave);
-          wave->pc += words.size() * sizeof(uint32_t);
-        };
-        const auto counter = lds ? WaitCounterKind::Ds : WaitCounterKind::Load;
-        const unsigned limit = lds && arch == ROCJITSU_CODE_ARCH_CDNA4 ? 15 : 63;
-        wave->set_exec(1);
-        ASSERT_NO_FATAL_FAILURE(issue(2));
-        if (capacity) {
-          for (unsigned i = 1; i < limit; ++i)
-            ASSERT_NO_FATAL_FAILURE(issue(3));
+          if (!capacity)
+            state.wait(counter, 1);
+          unsigned reports = 0;
+          state.bind(0x1000, &reports,
+                     [](void *p, const auto &) { ++*static_cast<unsigned *>(p); });
+          state.access({RegClass::VGPR, 2, 1}, 1, 0xf, false);
+          EXPECT_EQ(reports, issue_masked ? 0u : 1u);
         }
-        wave->set_exec(0);
-        ASSERT_NO_FATAL_FAILURE(issue(4));
-        auto &state = wave->ensure_memory_wait_scoreboard();
-        if (!capacity)
-          state.wait(counter, 1);
-        unsigned reports = 0;
-        state.bind(0x1000, &reports, [](void *p, const auto &) { ++*static_cast<unsigned *>(p); });
-        state.access({RegClass::VGPR, 2, 1}, 1, 0xf, false);
-        EXPECT_EQ(reports, arch == ROCJITSU_CODE_ARCH_CDNA4 ? 1u : 0u);
-      }
 }
 
 TEST(MemoryWaitExecutionTest, ReusedInstructionResolvesCurrentSourceAndDestinationBanks) {

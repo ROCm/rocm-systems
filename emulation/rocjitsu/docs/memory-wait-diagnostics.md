@@ -119,7 +119,8 @@ targets, and legacy CDNA FLAT results require a zero wait. On gfx1250,
 `global_inv` shares the ordinary load completion order, including with EXEC zero.
 Ignored gfx1250 buffer descriptors neither force progress nor occupy counter slots.
 EXEC-zero vector issues retain the counter positions guaranteed on gfx1250 and
-RDNA; CDNA1–4 conservatively skip masked issues.
+RDNA. CDNA1–4 also retain ordinary VMEM and LDS positions behind pending
+operations; an empty EXEC mask alone does not remove those positions.
 
 Completion dependencies survive ordinary branches and CU scheduling; branches
 implicitly drain XCNT. State is reset when a wave slot is freed and is not serialized
