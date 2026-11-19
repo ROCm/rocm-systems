@@ -3779,9 +3779,10 @@ TEST(WrapMicrotest, CommSetP2pShiftSize_BelowLog2UsesExactValue) {
 // the channel id alone (ncclP2pChannelToPart masks with (p2pnChannels >> shift) - 1).
 static size_t DistinctP2pChannels(const ncclComm* comm, int base) {
   std::set<int> channels;
-  for (int part = 0; part < comm->p2pnChannelsPerPeer; part++)
+  for (int part = 0; part < comm->p2pnChannelsPerPeer; part++) {
     channels.insert(ncclP2pChannelForPart(comm->p2pnChannels, base, part, comm->p2pnChannelsPerPeer,
                                           comm->nNodes, comm->p2pChannelShiftSize));
+  }
   return channels.size();
 }
 
@@ -3792,8 +3793,9 @@ TEST(WrapMicrotest, CommSetP2pShiftSize_TooFewChannelsPerShiftGivesEveryPartItsO
   comm->p2pnChannelsPerPeer = 4;  // ...for 4 parts
   comm->nNodes = 3;               // the shift map is only used for nNodes > 2
   EXPECT_EQ(ncclSuccess, rcclCommSetP2pShiftSize(comm));
-  for (int base = 0; base < comm->p2pnChannels; base++)
+  for (int base = 0; base < comm->p2pnChannels; base++) {
     EXPECT_EQ(4u, DistinctP2pChannels(comm, base)) << "base " << base << " shift " << comm->p2pChannelShiftSize;
+  }
   DeleteCommWithArch(comm);
 }
 
@@ -3805,8 +3807,9 @@ TEST(WrapMicrotest, CommSetP2pShiftSize_EnoughChannelsPerShiftKeepsExactValue) {
   comm->nNodes = 3;
   EXPECT_EQ(ncclSuccess, rcclCommSetP2pShiftSize(comm));
   EXPECT_EQ(1, comm->p2pChannelShiftSize);
-  for (int base = 0; base < comm->p2pnChannels; base++)
+  for (int base = 0; base < comm->p2pnChannels; base++) {
     EXPECT_EQ(4u, DistinctP2pChannels(comm, base)) << "base " << base;
+  }
   DeleteCommWithArch(comm);
 }
 

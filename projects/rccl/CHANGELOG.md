@@ -111,7 +111,6 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 
 ### Resolved issues
 * Fixed `NCCL_CE_BATCH_CAPTURE_ENABLE=1` producing wrong results under HIP graph capture. `hipMemcpyBatchAsync` does not support graph capture, so Copy Engine copies recorded into a graph now always use per-copy `hipMemcpyAsync`, as with the variable unset, and RCCL logs once that it ignored the variable.
-* Fixed `RCCL_P2P_SHIFT_SIZE` values that leave fewer channels than parts per peer (for example `2` with 8 P2P channels and 4 parts on 3 or more nodes). Parts shared a channel, so send/recv and AlltoAll could move stale data or hang. RCCL now falls back to the default channel mapping for such values.
 * Fixed hierarchical Copy Engine `ncclAlltoAllv` failing with `ncclInvalidArgument` on rail-only host RMA (`NCCL_CROSS_NIC=0`). Like `ncclAlltoAll`, it puts to every remote rank, so it now falls back to the kernel path unless host RMA reaches every rank.
 * When mlx5 data-direct DMA-BUF registration is missing or fails, RCCL uses `ibv_reg_dmabuf_mr` and reports a failed data-direct attempt once per protection domain. A missing `mlx5dv_reg_dmabuf_mr` leaves data-direct off.
 * Fixed `RCCL_REPLAY_FILE` output paths containing dotted directories, relative path components or multiple filename dots. Failed output-file opens now produce a warning.
