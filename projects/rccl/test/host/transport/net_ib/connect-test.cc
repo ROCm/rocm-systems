@@ -660,12 +660,14 @@ TEST_F(NetIbConnectMicrotest, QpCreate_OooPathUsesMlx5ExtendedCreation) {
                       EXPECT_NE(dvAttr->create_flags & MLX5DV_QP_CREATE_OOO_DP, 0u);
                       EXPECT_NE(dvAttr->comp_mask & MLX5DV_QP_INIT_ATTR_MASK_QP_CREATE_FLAGS, 0u);
                       EXPECT_NE(attr->comp_mask & IBV_QP_INIT_ATTR_PD, 0u);
+                      EXPECT_GE(attr->cap.max_inline_data, 8u);
                       return &verbsQp;
                     });
   ncclIbQpCreateAttr attrs{};
   attrs.pd = &pd;
   attrs.type = IBV_QPT_RC;
   attrs.oooRq = true;
+  attrs.maxInlineData = 8;
   ncclIbQp qp{};
 
   EXPECT_EQ(ncclIbQpCreate(&qp, &attrs), ncclSuccess);
