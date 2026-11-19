@@ -11302,6 +11302,35 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_ReduceScatterMustEnqueue_ReportsPlan
       });
 }
 
+// Suspended and revoked comms divert too, but ncclEnqueueCheck rejects them before planning: no
+// planner kernel runs, so the query keeps the selector's answer even in check mode.
+TEST(WrapMicrotestIsolated, GetCollImplInfo_SuspendedOrRevokedCheckModeKeepsSelection) {
+  RUN_ISOLATED_TEST(
+      "Wrap_GetCollImplInfo_SuspendedOrRevokedCheckModeKeepsSelection",
+      []() {
+        g_loadParam = ForceParam("RCCL_DDA_LL", int64_t(1));
+        ScopedHook llEligible(g_allGatherDdaFabricLLEligible,
+                              [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return true; });
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->nRanks = 1;
+        comm->nNodes = 1;
+        comm->checkMode = ncclCheckModeDebugLocal;
+        int algo = -7, protocol = -7, maxChannels = -7;
+        {
+          ScopedHook suspended(g_commIsSuspended, [](ncclComm*) { return true; });
+          EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllGather, 8, ncclFloat32, ncclSum, nullptr,
+                                                      nullptr, /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
+          EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, algo) << "suspended";
+        }
+        comm->revokedFlag = 1;
+        EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllGather, 8, ncclFloat32, ncclSum, nullptr,
+                                                    nullptr, /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, algo) << "revoked";
+        comm->revokedFlag = 0;
+        DeleteCommWithArch(comm);
+      });
+}
+
 // The decisions ncclEnqueueCheck still honours (CE registered here) must stay.
 TEST(WrapMicrotestIsolated, GetCollImplInfo_AllGatherMustEnqueue_KeepsCeRegistered) {
   RUN_ISOLATED_TEST(

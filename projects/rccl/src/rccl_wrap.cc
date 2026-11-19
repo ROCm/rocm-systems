@@ -866,7 +866,9 @@ ncclResult_t rcclGetCollImplInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_
     // every backend it does not honor; report that kernel instead. Not rcclGetAlgoInfo: it would pick
     // hierarchical or Direct AllGather again, which the divert skips. Suspended and revoked comms divert
     // too, but ncclEnqueueCheck rejects them before planning, so nothing runs to report.
-    if (comm->checkMode != ncclCheckModeDefault && !rcclEnqueueRunsDecision(decision.algo)) {
+    const bool divertPlans = comm->checkMode != ncclCheckModeDefault &&
+                             !__atomic_load_n(&comm->revokedFlag, __ATOMIC_ACQUIRE) && !ncclCommIsSuspended(comm);
+    if (divertPlans && !rcclEnqueueRunsDecision(decision.algo)) {
       if (coll == ncclFuncAlltoAll) {
         // taskAppend() splits AlltoAll into per-peer Send/Recv over the p2p channels.
         decision.algo = rcclAddonAlgos_t::RCCL_DIRECT_ALLTOALL;
