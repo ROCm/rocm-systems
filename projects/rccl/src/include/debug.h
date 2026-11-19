@@ -47,7 +47,8 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char* file
 extern thread_local int ncclDebugNoWarn;
 extern char ncclLastError[];
 
-#define ERROR(...) ncclDebugLog(NCCL_LOG_ERROR, NCCL_ALL, __FILE__, __LINE__, __VA_ARGS__)
+#define NCCL_ERROR(...) ncclDebugLog(NCCL_LOG_ERROR, NCCL_ALL, __FILE__, __LINE__, __VA_ARGS__)
+#define ERROR(...) NCCL_ERROR(__VA_ARGS__)
 #define VERSION(...) ncclDebugLog(NCCL_LOG_VERSION, NCCL_ALL, __FILE__, __LINE__, __VA_ARGS__)
 #define WARN(...) ncclDebugLog(NCCL_LOG_WARN, NCCL_ALL, __FILE__, __LINE__, __VA_ARGS__)
 #define ATTN(...) ncclDebugLog(NCCL_LOG_ATTN, NCCL_ALL, __FILE__, __LINE__, __VA_ARGS__)
@@ -95,7 +96,9 @@ extern char ncclLastError[];
 
 void ncclSetThreadName(std::thread& thread, const char* fmt, ...);
 // [RCCL] Overload for legacy pthread_t-managed threads (e.g. net_ib*).
+#if defined(NCCL_OS_LINUX)
 void ncclSetThreadName(pthread_t thread, const char* fmt, ...);
+#endif
 
 #ifdef __cplusplus
 extern "C" {

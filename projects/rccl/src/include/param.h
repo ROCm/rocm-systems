@@ -34,7 +34,6 @@ int64_t ncclLoadParam(char const* env, int64_t deftVal, int64_t uninitialized, i
 #define RCCL_PARAM_DECLARE(name) int64_t rcclParam##name()
 
 #define RCCL_PARAM(name, env, deftVal) \
-  pthread_mutex_t rcclParamMutex##name = PTHREAD_MUTEX_INITIALIZER; \
   int64_t rcclParam##name() { \
     constexpr int64_t uninitialized = INT64_MIN; \
     static_assert(deftVal != uninitialized, "default value cannot be the uninitialized value."); \
@@ -49,7 +48,6 @@ int64_t ncclLoadParam(char const* env, int64_t deftVal, int64_t uninitialized, i
 // RCCL_PARAM variant that also accepts the NCCL_ prefix as an alias.
 // Checks RCCL_<env> first; if unset, falls back to NCCL_<env>.
 #define RCCL_PARAM_NCCL_ALIAS(name, env, deftVal) \
-  pthread_mutex_t rcclParamMutex##name = PTHREAD_MUTEX_INITIALIZER; \
   int64_t rcclParam##name() { \
     constexpr int64_t uninitialized = INT64_MIN; \
     static_assert(deftVal != uninitialized, "default value cannot be the uninitialized value."); \

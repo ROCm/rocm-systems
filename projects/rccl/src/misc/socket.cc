@@ -583,13 +583,15 @@ ncclResult_t ncclSocketInit(struct ncclSocket* sock, const union ncclSocketAddre
     // [RCCL] Runtime socket options
     if (rcclParamSocketReuseAddr()) {
       int opt = 1;
-      SYSCHECKGOTO(setsockopt(sock->socketDescriptor, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)), "setsockopt", ret,
+      SYSCHECKGOTO(setsockopt(sock->socketDescriptor, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&opt), sizeof(opt)), "setsockopt", ret,
                    fail);
     }
     int lingerParam = (int)rcclParamSocketLinger();
     if (lingerParam > -1) {
-      linger linger_opt = {1, lingerParam};
-      SYSCHECKGOTO(setsockopt(sock->socketDescriptor, SOL_SOCKET, SO_LINGER, &linger_opt, sizeof(linger_opt)),
+      linger linger_opt{};
+      linger_opt.l_onoff = 1;
+      linger_opt.l_linger = static_cast<decltype(linger_opt.l_linger)>(lingerParam);
+      SYSCHECKGOTO(setsockopt(sock->socketDescriptor, SOL_SOCKET, SO_LINGER, reinterpret_cast<const char*>(&linger_opt), sizeof(linger_opt)),
                    "setsockopt", ret, fail);
     }
   } else {

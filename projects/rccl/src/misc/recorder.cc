@@ -9,13 +9,13 @@
 #include <cstring>
 #include <string>
 #include <iomanip>
-#include <sys/syscall.h>
+#include "os.h"
 #include "debug.h"
 
 using namespace std::chrono;
 
 namespace rccl {
-__thread int Recorder::rcclReplayThreadIdx = -1;
+thread_local int Recorder::rcclReplayThreadIdx = -1;
 thread_local bool Recorder::skipped = false;
 int Recorder::depth = 0;
 
@@ -98,7 +98,7 @@ Recorder::Recorder() {
   }
   char hostname[256];
   gethostname(hostname, 256);
-  pid = getpid();
+  pid = static_cast<int>(ncclOsGetPid());
   output_json = 0;
 
   const size_t slash = filename.find_last_of('/');
@@ -143,7 +143,7 @@ void Recorder::captureGpuContext(rcclApiCall& call) const {
   call.timestamp = duration_cast<duration<double>>(high_resolution_clock::now().time_since_epoch()).count() * 1000;
 
   if (rcclReplayThreadIdx == -1) {
-    rcclReplayThreadIdx = syscall(SYS_gettid);
+    rcclReplayThreadIdx = static_cast<int>(ncclOsGetTid());
   }
 
   int hipDev = -1;

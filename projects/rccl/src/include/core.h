@@ -8,8 +8,10 @@
 #ifndef NCCL_CORE_H_
 #define NCCL_CORE_H_
 
+#if defined(NCCL_OS_LINUX)
 #include <pthread.h>
 #include <unistd.h>
+#endif
 #include <stdlib.h>
 #include <stdint.h>
 #include <algorithm> // For std::min/std::max

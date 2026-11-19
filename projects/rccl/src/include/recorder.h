@@ -107,7 +107,7 @@ private:
   int pid = -1;
   [[maybe_unused]] int numCall = 0; // reserved for future record format/debug
   static thread_local bool skipped;
-  static __thread int rcclReplayThreadIdx;
+  static thread_local int rcclReplayThreadIdx;
   static int depth; // for indentation purpose, will need thread safty later
 
   std::mutex writemtx;

@@ -26,7 +26,7 @@ THE SOFTWARE.
 #include "topo.h"
 #include "xml.h"
 #include <math.h>
-#include <sys/time.h>
+
 #include <algorithm>
 #include <memory>
 #include <vector>
@@ -4636,8 +4636,8 @@ ncclResult_t parseA2a8P(struct ncclTopoSystem* system, struct ncclTopoGraph* gra
     return ncclSystemError;
   }
   std::unique_ptr<int, void (*)(void*)> permutationsOwner(all_gpu_permutations, free);
-  struct timeval tvs, tve;
-  gettimeofday(&tvs, NULL);
+
+
   std::vector<int> r(ngpus), g(ngpus), rdm(ngpus);
   for (i = 0; i < sizeof(romeTopoModels) / sizeof(romeTopoModels[0]); i++) {
     if (romeTopo.nCpus != romeTopoModels[i].nCpus || romeTopo.nGpus != romeTopoModels[i].nGpus ||
@@ -4704,7 +4704,7 @@ ncclResult_t parseA2a8P(struct ncclTopoSystem* system, struct ncclTopoGraph* gra
     }
     if (p < TOTAL_PERMUTE_COUNT) break;
   }
-  gettimeofday(&tve, NULL);
+
   if (i >= sizeof(romeTopoModels) / sizeof(romeTopoModels[0])) {
     // printf("No solution in %.2fms\n", t);
     return ncclSuccess;
@@ -4821,8 +4821,8 @@ ncclResult_t parseRome4P2H(struct ncclTopoSystem* system, struct ncclTopoGraph* 
 
   int g[NCCL_TOPO_MAX_NODES], n[NCCL_TOPO_MAX_NODES], rdm[NCCL_TOPO_MAX_NODES];
   int time = 0;
-  struct timeval tvs, tve;
-  gettimeofday(&tvs, NULL);
+
+
 
   // check if GPUs are directly connected to CPU
   bool match_nbio = true;
@@ -4889,7 +4889,7 @@ ncclResult_t parseRome4P2H(struct ncclTopoSystem* system, struct ncclTopoGraph* 
       } else break;
     }
   }
-  gettimeofday(&tve, NULL);
+
   if (i >= sizeof(romeTopoModels) / sizeof(romeTopoModels[0])) {
     // printf("No solution in %.2fms (%d iter)\n", t, time);
     return ncclSuccess;
@@ -4995,8 +4995,8 @@ ncclResult_t parse1H16P(struct ncclTopoSystem* system, struct ncclTopoGraph* gra
     return ncclSystemError;
   }
   std::unique_ptr<int, void (*)(void*)> permutationsOwner(all_gpu_permutations, free);
-  struct timeval tvs, tve;
-  gettimeofday(&tvs, NULL);
+
+
   std::vector<int> r(ngpus), g(ngpus);
   for (i = 0; i < sizeof(romeTopoModels) / sizeof(romeTopoModels[0]); i++) {
     if (romeTopo.nCpus != romeTopoModels[i].nCpus || romeTopo.nGpus != romeTopoModels[i].nGpus ||
@@ -5070,7 +5070,7 @@ ncclResult_t parse1H16P(struct ncclTopoSystem* system, struct ncclTopoGraph* gra
     }
     if (p < TOTAL_PERMUTE_COUNT) break;
   }
-  gettimeofday(&tve, NULL);
+
   if (i >= sizeof(romeTopoModels) / sizeof(romeTopoModels[0])) {
     // printf("No solution in %.2fms\n", t);
     return ncclSuccess;

@@ -57,7 +57,11 @@ add_compile_definitions(
 # CMake Toolchain file to define compilers and path to ROCm
 #==================================================================================================
 if (NOT CMAKE_TOOLCHAIN_FILE)
-  set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/toolchain-linux.cmake")
+  if(CMAKE_HOST_WIN32)
+    set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/toolchain-windows.cmake")
+  else()
+    set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/toolchain-linux.cmake")
+  endif()
   message(STATUS "CMAKE_TOOLCHAIN_FILE: ${CMAKE_TOOLCHAIN_FILE}")
 endif()
 
@@ -73,6 +77,11 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_definitions(-DNCCL_OS_LINUX)
 endif()
 set(ENV{NCCL_USE_CMAKE} "1")
+
+if(NCCL_OS_WINDOWS)
+  include(cmake/WindowsBuild.cmake)
+  return()
+endif()
 
 # Build options
 #==================================================================================================

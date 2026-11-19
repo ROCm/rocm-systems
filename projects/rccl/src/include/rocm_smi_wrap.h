@@ -23,9 +23,13 @@ THE SOFTWARE.
 #ifndef ROCM_SMI_WRAP_H_
 #define ROCM_SMI_WRAP_H_
 
+#if defined(NCCL_OS_WINDOWS)
+enum RSMI_IO_LINK_TYPE { RSMI_IOLINK_TYPE_UNDEFINED = 0, RSMI_IOLINK_TYPE_PCIEXPRESS = 1, RSMI_IOLINK_TYPE_XGMI = 2 };
+#else
 #include "rocm_smi/rocm_smi.h"
 #ifdef HAVE_ROCM_SMI64CONFIG
 #include "rocm_smi/rocm_smi64Config.h"
+#endif
 #endif
 #include "nccl.h"
 

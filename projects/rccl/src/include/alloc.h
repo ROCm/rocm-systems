@@ -14,7 +14,9 @@
 #include "utils.h"
 #include "p2p.h"
 #include "mem_manager.h"
+#if defined(NCCL_OS_LINUX)
 #include <sys/mman.h>
+#endif
 struct ncclComm;
 #include "os.h"
 #include <memory>
@@ -164,7 +166,7 @@ struct ncclSideStream {
 };
 
 inline std::unordered_map<ncclSideStreamKey, ncclSideStream, ncclSideStreamKeyHash> sideStream;
-inline pthread_mutex_t sideStreamLock = PTHREAD_MUTEX_INITIALIZER;
+inline std::mutex sideStreamLock;
 
 extern ncclResult_t getBusId(int cudaDev, int64_t* busId);
 
@@ -193,7 +195,7 @@ static inline ncclResult_t ncclSideStreamAcquire(int cudaDev, int priority = 0) 
   NCCLCHECK(getBusId(cudaDev, &busId));
   priority = ncclClampStreamPriority(priority);
   ncclSideStreamKey key{busId, priority};
-  pthread_mutex_lock(&sideStreamLock);
+  sideStreamLock.lock();
   if (auto it = sideStream.find(key); it != sideStream.end()) {
     it->second.refCount++;
     INFO(NCCL_ALLOC, "Side stream %p dev %d busid %lx prio %d inc count to %ld", it->second.stream, cudaDev, busId,
@@ -212,7 +214,7 @@ fail:
     WARN("ncclSideStreamAcquire: cudaStreamCreateWithPriority failed for "
          "dev %d busid %lx prio %d (see HIP failure above)",
          cudaDev, busId, priority);
-  pthread_mutex_unlock(&sideStreamLock);
+  sideStreamLock.unlock();
   return res;
 }
 
@@ -224,7 +226,7 @@ static inline ncclResult_t ncclSideStreamRelease(int cudaDev, int priority = 0) 
   NCCLCHECK(getBusId(cudaDev, &busId));
   priority = ncclClampStreamPriority(priority);
   ncclSideStreamKey key{busId, priority};
-  pthread_mutex_lock(&sideStreamLock);
+  sideStreamLock.lock();
   if (auto it = sideStream.find(key); it != sideStream.end()) {
     if (--it->second.refCount == 0) {
       // Drop the map entry before destroy so a CUDACHECKGOTO failure cannot
@@ -247,7 +249,7 @@ fail:
     WARN("ncclSideStreamRelease: cudaStreamDestroy failed for "
          "dev %d busid %lx prio %d (see HIP failure above)",
          cudaDev, busId, priority);
-  pthread_mutex_unlock(&sideStreamLock);
+  sideStreamLock.unlock();
   return res;
 }
 
@@ -259,13 +261,13 @@ static inline ncclResult_t getSideStream(cudaStream_t* stream, int priority = 0)
   CUDACHECK(cudaGetDevice(&cudaDev));
   NCCLCHECK(getBusId(cudaDev, &busId));
   priority = ncclClampStreamPriority(priority);
-  pthread_mutex_lock(&sideStreamLock);
+  sideStreamLock.lock();
   if (auto it = sideStream.find(ncclSideStreamKey{busId, priority}); it != sideStream.end()) {
     *stream = it->second.stream;
   } else {
     *stream = nullptr;
   }
-  pthread_mutex_unlock(&sideStreamLock);
+  sideStreamLock.unlock();
   return ncclSuccess;
 }
 

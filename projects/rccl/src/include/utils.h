@@ -16,7 +16,10 @@
 #include <stdint.h>
 #include <string.h>
 #include <time.h>
+#include <chrono>
+#if defined(NCCL_OS_LINUX)
 #include <sched.h>
+#endif
 #include <algorithm>
 #include <new>
 #include <type_traits>
