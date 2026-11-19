@@ -5393,7 +5393,7 @@ amdsmi_status_t amdsmi_get_clk_freq(amdsmi_processor_handle processor_handle,
                                     amdsmi_clk_type_t clk_type, amdsmi_frequencies_t* f);
 
 /**
- *  @brief Triggers a chain that resets all GPUs.
+ *  @brief Resets the specified GPU (mode-1 reset).
  *  It is not supported on virtual machine guest
  *
  *  @ingroup tagClkPowerPerfQuery
@@ -5404,7 +5404,16 @@ amdsmi_status_t amdsmi_get_clk_freq(amdsmi_processor_handle processor_handle,
  *  any other AMD SMI API functions to allow the GPU reset to complete. Calling other APIs
  *  too soon may result in AMDSMI_STATUS_BUSY or undefined behavior.
  *
- *  @details Given a processor handle @p processor_handle, this function will reset the GPU
+ *  @details Given a processor handle @p processor_handle, this function will reset the GPU.
+ *
+ *  Reset behavior depends on the GPU fabric interconnect:
+ *  - **XGMI hive**: Resets all GPUs in the same hive (hive-wide reset).
+ *  - **UALink**: Resets only the specified GPU (individual reset).
+ *  - **Standalone GPU**: Resets only the specified GPU.
+ *
+ *  Mode-1 reset does **not** reset all GPUs connected by fabric; only XGMI hives
+ *  trigger a multi-GPU reset. UALink GPUs reset independently even when they share
+ *  a KFD hive ID.
  *
  *  @param[in] processor_handle a processor handle
  *
