@@ -30,8 +30,9 @@ __global__ void simpleTestKernel(int* data)
         data[tid] = tid;
 }
 
-// Device-linker LDS accounting: pre-fix, the static per-warp scratch was also requested as
-// dynamic smem, double-counting LDS and overflowing the 64 KB budget.
+// Static LDS accounting: the custom device linker defines the scratch in common.h;
+// ordinary HIP defines it in common.cu because HIP leaves __CUDA_ARCH__ unset.
+// Requesting the same allocation as dynamic smem double-counts the 64 KB budget.
 static constexpr int kDeviceLdsBudget      = 64 * 1024;
 static constexpr int kLegacyDynamicScratch = 32832;
 static constexpr int kRegularStaticScratch = 40 * 1024;
@@ -50,7 +51,7 @@ static constexpr int kIsolatedTestTimeoutSeconds = 120;
 static constexpr int kStridePatternMask = 0x3f;
 static constexpr int kStridePatternBias = 1;
 
-// Regular kernel with static scratch (device-linker model); the barrier + cross-thread read keeps
+// Regular kernel with static scratch (device-linker and ordinary HIP model); the barrier + cross-thread read keeps
 // the compiler from optimizing the shared allocation into registers so it shows in sharedSizeBytes.
 __global__ void dlRegularScratchKernel(int* data)
 {
@@ -99,7 +100,7 @@ __global__ void dlSymmetricNoDynKernel(int* data)
 }
 
 // Mirrors ncclLaunchKernel()'s dynamic-smem selection AFTER the fix: regular collectives use
-// rcclShmemDynamicSize() (0 in device-linker builds, the per-warp scratch size in legacy builds),
+// rcclShmemDynamicSize() (0 in device-linker/HIP builds, the scratch size in legacy CUDA builds),
 // while symmetric collectives ALWAYS use their own plan->kernelDynSmem, regardless of build mode.
 static int modelLaunchDynSmem(bool isSymColl, int rcclShmemDynamicSizeVal, int kernelDynSmem)
 {
@@ -125,9 +126,11 @@ static int modelLaunchDynSmemPreFix(bool isSymColl, int rcclShmemDynamicSizeVal,
 }
 
 // The value rcclShmemDynamicSize() yields for a regular collective in the current build mode:
-// 0 under device-linker (static scratch), the per-warp scratch size otherwise.
+// 0 under device-linker or HIP (static scratch), the scratch size for legacy CUDA.
+// See the actual definitions in src/device/common.{h,cu}; the real-kernel check
+// below calls ncclInitKernelsForDevice so a mismatch is not hidden by this model.
 static constexpr int kRegularLaunchSmem =
-#ifdef RCCL_DEVICE_LINKER
+#if defined(RCCL_DEVICE_LINKER) || defined(__HIP_PLATFORM_AMD__)
     0;
 #else
     kLegacyDynamicScratch;
@@ -533,16 +536,16 @@ TEST_F(EnqueueTests, DeviceLinkerLds_RegularKernel)
                     << "Pre-fix: regular kernel double-counts static scratch (" << regStaticBytes
                     << ") as dynamic smem -> LDS overflow (budget " << kDeviceLdsBudget << ")";
 
-                // AFTER FIX: device-linker builds set rcclShmemDynamicSize() to 0, so the regular
-                // kernel requests no dynamic smem and stays within budget (model is DL-only).
-#ifdef RCCL_DEVICE_LINKER
-                const int postFixDynamic = 0;
+                // Both custom-linker and ordinary HIP kernels have static scratch.
+                // Exercise the actual initializer in both modes: the ordinary HIP
+                // path reproduced this overflow on a wave32 gfx1151 Windows GPU.
+#if defined(RCCL_DEVICE_LINKER) || defined(__HIP_PLATFORM_AMD__)
                 ncclResult_t after = testKernelSharedMemoryLimit(
                     (void*)dlRegularScratchKernel,
                     942,
                     kDeviceLdsBudget,
                     &maxStackSize,
-                    postFixDynamic);
+                    kRegularLaunchSmem);
                 EXPECT_EQ(after, ncclSuccess)
                     << "Post-fix: regular kernel requests 0 dynamic smem -> no overflow";
 
@@ -564,7 +567,7 @@ TEST_F(EnqueueTests, DeviceLinkerLds_RegularKernel)
                 size_t       realStack = 0;
                 ncclResult_t realInit  = ncclInitKernelsForDevice(realArch, deviceSmem, &realStack);
                 EXPECT_EQ(realInit, ncclSuccess)
-                    << "Post-fix: real kernel init must not overflow LDS in device-linker build "
+                    << "Post-fix: real kernel init must not double-count static LDS "
                        "(arch " << realArch << ", smem " << deviceSmem << ")";
 #endif
             }
@@ -599,22 +602,17 @@ TEST_F(EnqueueTests, DeviceLinkerLds_SymmetricKernel)
                     << "Symmetric kernel's dynamic smem must fit the LDS budget";
 
                 // Model ncclLaunchKernel()'s smem selection: regular -> rcclShmemDynamicSize()
-                // (0 in device-linker builds), symmetric -> plan->kernelDynSmem (must stay non-zero).
-                const int regularLaunchSmem =
-#ifdef RCCL_DEVICE_LINKER
-                    0;
-#else
-                    kLegacyDynamicScratch;
-#endif
+                // (0 in device-linker/HIP builds), symmetric -> plan->kernelDynSmem (must stay non-zero).
+                const int regularLaunchSmem = kRegularLaunchSmem;
                 const bool isSymColl     = true;
                 const int  kernelDynSmem = kSymmetricDynamicSmem;
                 const int  symLaunchSmem = isSymColl ? kernelDynSmem : regularLaunchSmem;
 
                 // BEFORE FIX (no symmetric guard): the device-linker path would launch with the
-                // regular value (0), under-allocating ncclSymkSmem[] (DL-only check).
-#ifdef RCCL_DEVICE_LINKER
+                // regular value (0), under-allocating ncclSymkSmem[].
+#if defined(RCCL_DEVICE_LINKER) || defined(__HIP_PLATFORM_AMD__)
                 EXPECT_LT(regularLaunchSmem, kSymmetricDynamicSmem)
-                    << "Without the symmetric guard the device-linker path under-allocates "
+                    << "Without the symmetric guard the static-LDS path under-allocates "
                        "symmetric dynamic smem";
 #endif
 
@@ -812,14 +810,15 @@ TEST_F(EnqueueTests, SymmetricSmem_ZeroKernelDynSmem)
 }
 
 // ---------------------------------------------------------------------------------------------
-// Legacy (non-device-linker) build coverage.
+// Legacy CUDA (non-device-linker) allocation-model coverage.
 //
-// In legacy builds the per-warp scratch is `extern __shared__` (dynamic), so the regular path
+// Unlike HIP, CUDA devices with __CUDA_ARCH__ >= 700 use dynamic per-warp scratch,
+// so the regular CUDA legacy path
 // requests rcclShmemDynamicSize() (modeled here as kLegacyDynamicScratch) and that is correct.
 // The bug was that the symmetric smem override used to be gated behind `#ifdef RCCL_DEVICE_LINKER`,
 // so legacy builds launched symmetric kernels with the regular-scratch size instead of
 // kernelDynSmem. The override is now unconditional; these tests model the legacy launch path with
-// explicit constants so they exercise legacy behavior regardless of the build mode of the binary.
+// explicit constants so they exercise CUDA allocation behavior even in a HIP test binary.
 // ---------------------------------------------------------------------------------------------
 
 // Legacy regular kernel: requests the non-zero dynamic scratch and must stay within the LDS budget.

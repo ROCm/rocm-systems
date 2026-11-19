@@ -14,8 +14,16 @@
 // Some Windows HIP SDKs declare this optional API without exporting it.
 // Resolve it lazily so capability checks can choose host-staged transfers.
 static auto ncclNdHipPointerSetAttribute() -> decltype(&hipPointerSetAttribute) {
-  static auto function = reinterpret_cast<decltype(&hipPointerSetAttribute)>(
-      GetProcAddress(GetModuleHandleA("amdhip64_7.dll"), "hipPointerSetAttribute"));
+  static auto function = []() -> decltype(&hipPointerSetAttribute) {
+    HMODULE runtime = nullptr;
+    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                               GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           reinterpret_cast<LPCSTR>(&hipGetDeviceCount), &runtime)) {
+      return nullptr;
+    }
+    return reinterpret_cast<decltype(&hipPointerSetAttribute)>(
+        GetProcAddress(runtime, "hipPointerSetAttribute"));
+  }();
   return function;
 }
 #define cuPointerSetAttribute (ncclNdHipPointerSetAttribute())
