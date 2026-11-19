@@ -85,12 +85,11 @@ class AMDSMICommands(
         self.logger = AMDSMILogger(format=format, destination=destination, helpers=self.helpers)
         self.device_handles = []
         self.device_handles_gpus = []
-        self.device_handles_brcm_nics = []
         self.device_handles_ainics = []
-        self.device_handles_switchs = []
         self.cpu_handles = []
         self.core_handles = []
         self.node_handle = None
+        self.primary_gpu_handle = None
         self.stop = ""
         self.group_check_printed = False
 
@@ -120,25 +119,17 @@ class AMDSMICommands(
                 )
                 exit_flag = True
 
-        if (
-            self.helpers.is_ainic_initialized()
-            or self.helpers.is_brcm_nic_initialized()
-            or self.helpers.is_brcm_switch_initialized()
-        ):
+        if self.helpers.is_ainic_initialized():
             try:
-                self.device_handles_brcm_nics = self.helpers.get_nic_handles()
                 self.device_handles_ainics = self.helpers.get_ainic_handles()
                 if len(self.device_handles_gpus) == 0:
                     self.device_handles_gpus = self.helpers.get_gpu_handles()
-                self.device_handles_switchs = self.helpers.get_switch_handles()
             except amdsmi_exception.AmdSmiLibraryException as e:
                 if e.err_code in (
                     amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
                     amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED,
                 ):
-                    logging.error(
-                        "Unable to get devices, driver not initialized (BRCMNIC not found in modules)"
-                    )
+                    logging.error("Unable to get devices, NIC driver not initialized")
                 else:
                     _exit_on_init_error(self.logger.format, e, AmdSmiDeviceKind.NIC)
 
@@ -148,6 +139,7 @@ class AMDSMICommands(
                 nh = amdsmi_interface.amdsmi_get_node_handle(dev)
                 if nh is not None:
                     self.node_handle = nh
+                    self.primary_gpu_handle = dev
                     # Only need one handle, break after first success
                     break
             except amdsmi_exception.AmdSmiLibraryException as e:

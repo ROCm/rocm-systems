@@ -4,8 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// See dev_runtime_fakes.h. ncclDevrFindWindow is controllable here; only
-// ncclDevrIsOneLsaTeam remains in nccl_stubs.cc as a fail-loud floor.
+// See dev_runtime_fakes.h. ncclDevrFindWindow is controllable here; ncclDevrIsOneLsaTeam
+// stays in nccl_stubs.cc because rccl-UnitTestsMicroSymKernels links that file without this one.
 
 #include "dev_runtime_fakes.h"
 
@@ -14,6 +14,8 @@
 #include "fail_loud.h"
 #include "signature-drift.h"
 
+#include <algorithm>
+
 ASSERT_HOOK_MATCHES_PROD(g_devrFindWindow, ncclDevrFindWindow);
 ASSERT_HOOK_MATCHES_PROD(g_devrWindowIsMultiSegment, ncclDevrWindowIsMultiSegment);
 ASSERT_HOOK_MATCHES_PROD(g_devrWindowHasSysmemSegment, ncclDevrWindowHasSysmemSegment);
@@ -21,7 +23,7 @@ ASSERT_HOOK_MATCHES_PROD(g_devrInitOnce, ncclDevrInitOnce);
 ASSERT_HOOK_MATCHES_PROD(g_devrGetLsaRankPtr, ncclDevrGetLsaRankPtr);
 ASSERT_HOOK_MATCHES_PROD(g_devrWindowRegisterInGroup, ncclDevrWindowRegisterInGroup);
 ASSERT_HOOK_MATCHES_PROD(g_devrNcclCommWindowDeregister, ncclCommWindowDeregister);
-ASSERT_HOOK_MATCHES_PROD(g_computeLsaSize, computeLsaSize);
+ASSERT_HOOK_MATCHES_PROD(g_computeLsaTeamSize, computeLsaTeamSize);
 ASSERT_HOOK_MATCHES_PROD(g_devrWinRegEnabled, ncclDevrWinRegEnabled);
 ASSERT_HOOK_MATCHES_PROD(g_symTeamObtain, symTeamObtain);
 ASSERT_HOOK_MATCHES_PROD(g_findCommAndHostWindowFromDeviceWindow, findCommAndHostWindowFromDeviceWindow);
@@ -51,6 +53,15 @@ bool ncclDevrWindowIsMultiSegment(struct ncclDevrWindow* window) {
 }
 bool ncclDevrWindowHasSysmemSegment(struct ncclDevrWindow* window) {
   return g_devrWindowHasSysmemSegment(window);
+}
+
+// Same arithmetic as dev_runtime.cc, so ce_coll.cc's receive-window bound sees production sizes.
+size_t ncclDevrWindowPeerSafeSize(struct ncclDevrWindow const* win) {
+  if (win == nullptr) return 0;
+  const size_t allocMin = win->memory != nullptr ? win->memory->lsaMinSize : win->size;
+  const size_t memOffset = win->memory == nullptr ? 0 : win->bigOffset - win->memory->bigOffset;
+  if (allocMin <= memOffset) return 0;
+  return std::min(win->size, allocMin - memOffset);
 }
 
 static ncclResult_t DefaultDevrInitOnce(struct ncclComm*) { return ncclSuccess; }
@@ -85,9 +96,9 @@ ncclResult_t ncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win) {
   return g_devrNcclCommWindowDeregister(comm, win);
 }
 
-static int DefaultComputeLsaSize(struct ncclComm*) { FailLoudUnfaked("dev_runtime_fakes", "computeLsaSize"); }
-std::function<int(struct ncclComm*)> g_computeLsaSize = DefaultComputeLsaSize;
-int computeLsaSize(struct ncclComm* comm) { return g_computeLsaSize(comm); }
+static int DefaultComputeLsaTeamSize(struct ncclComm*) { FailLoudUnfaked("dev_runtime_fakes", "computeLsaTeamSize"); }
+std::function<int(struct ncclComm*)> g_computeLsaTeamSize = DefaultComputeLsaTeamSize;
+int computeLsaTeamSize(struct ncclComm* comm) { return g_computeLsaTeamSize(comm); }
 
 static bool DefaultDevrWinRegEnabled(int, ncclDevrRegisterCapability) {
   FailLoudUnfaked("dev_runtime_fakes", "ncclDevrWinRegEnabled");
@@ -126,25 +137,50 @@ static ncclResult_t ReturnFoundCommAndWindow(ncclWindow_t, ncclComm_t* foundComm
 }
 void UseFoundCommAndWindow() { g_findCommAndHostWindowFromDeviceWindow = ReturnFoundCommAndWindow; }
 
-// Floors for the LSA addressing ce_coll.cc's copy paths reach.
-ncclResult_t ncclDevrWorldToLsaRank(struct ncclComm*, int, int*) {
+// One LSA team: world rank is the LSA rank. A split team has no fake mapping.
+ncclResult_t ncclDevrWorldToLsaRank(struct ncclComm*, int worldRank, int* lsaRank) {
+  if (g_devrIsOneLsaTeamValue) {
+    if (lsaRank) *lsaRank = worldRank;
+    return ncclSuccess;
+  }
   FailLoudUnfaked("dev_runtime_fakes", "ncclDevrWorldToLsaRank");
 }
 ncclResult_t ncclDevrGetLsaTeamPtrMC(struct ncclComm*, struct ncclDevrWindow*, size_t, struct ncclTeam, void**) {
   FailLoudUnfaked("dev_runtime_fakes", "ncclDevrGetLsaTeamPtrMC");
+}
+// group.cc's devcomm-create task path; no suite reaches it.
+ncclResult_t ncclDevrCommCreateInternal(struct ncclComm*, struct ncclDevCommRequirements*, struct ncclDevComm*, bool,
+                                        uint32_t) {
+  FailLoudUnfaked("dev_runtime_fakes", "ncclDevrCommCreateInternal");
+}
+// Same body as dev_runtime.cc's: group.cc frees a queued task's requirements through it.
+void freeDevCommRequirements(struct ncclDevCommRequirements* reqs) {
+  if (reqs == nullptr) return;
+  while (reqs->resourceRequirementsList) {
+    struct ncclDevResourceRequirements* next = reqs->resourceRequirementsList->next;
+    free(reqs->resourceRequirementsList);
+    reqs->resourceRequirementsList = next;
+  }
+  while (reqs->teamRequirementsList) {
+    struct ncclTeamRequirements* next = reqs->teamRequirementsList->next;
+    free(reqs->teamRequirementsList);
+    reqs->teamRequirementsList = next;
+  }
+  free(reqs);
 }
 
 void ResetDevRuntimeFakes() {
   g_devrFindWindow = DefaultDevrFindWindow;
   g_devrWindowIsMultiSegmentValue = false;
   g_devrWindowHasSysmemSegmentValue = false;
+  g_devrIsOneLsaTeamValue = true;
   g_devrWindowIsMultiSegment = DefaultDevrWindowIsMultiSegment;
   g_devrWindowHasSysmemSegment = DefaultDevrWindowHasSysmemSegment;
   g_devrInitOnce = DefaultDevrInitOnce;
   g_devrGetLsaRankPtr = DefaultDevrGetLsaRankPtr;
   g_devrWindowRegisterInGroup = DefaultDevrWindowRegisterInGroup;
   g_devrNcclCommWindowDeregister = DefaultCommWindowDeregister;
-  g_computeLsaSize = DefaultComputeLsaSize;
+  g_computeLsaTeamSize = DefaultComputeLsaTeamSize;
   g_devrWinRegEnabled = DefaultDevrWinRegEnabled;
   g_symTeamObtain = DefaultSymTeamObtain;
   g_findCommAndHostWindowFromDeviceWindow = DefaultFindCommAndHostWindow;

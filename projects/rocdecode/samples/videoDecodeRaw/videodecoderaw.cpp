@@ -226,9 +226,22 @@ int main(int argc, char **argv) {
         }
 
         RocVideoDecoder viddec(device_id, mem_type, rocdec_codec_id, b_force_zero_latency, p_crop_rect, b_extract_sei_messages, disp_delay);
-        if(!viddec.CodecSupported(device_id, rocdec_codec_id, bit_depth)) {
-            std::cerr << "Error: GPU doesn't support codec!" << std::endl;
+        // Query the decode capabilities directly instead of using RocVideoDecoder::CodecSupported(), which reports a
+        // failed query the same way as an unsupported codec. A codec the GPU's VCN doesn't support (e.g. AV1 on gfx90a)
+        // is skipped with exit code 77, the conventional skip code; a failed query is an error.
+        RocdecDecodeCaps decode_caps = {};
+        decode_caps.device_id = device_id;
+        decode_caps.codec_type = rocdec_codec_id;
+        decode_caps.chroma_format = rocDecVideoChromaFormat_420;
+        decode_caps.bit_depth_minus_8 = bit_depth - 8;
+        rocDecStatus caps_status = rocDecGetDecoderCaps(&decode_caps);
+        if (caps_status != ROCDEC_SUCCESS) {
+            std::cerr << "Error: rocDecGetDecoderCaps failed: " << rocDecGetErrorName(caps_status) << std::endl;
             return 1;
+        }
+        if (!decode_caps.is_supported) {
+            std::cout << "info: Codec not supported on GPU, skipping!" << std::endl;
+            return 77;
         }
         std::string device_name, gcn_arch_name;
         int pci_bus_id, pci_domain_id, pci_device_id;

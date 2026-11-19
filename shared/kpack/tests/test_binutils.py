@@ -6,7 +6,8 @@ import struct
 
 import pytest
 
-from elf_test_utils import patch_hip_fatbin_to_nobits
+from bundle_test_utils import make_fatbin
+from elf_test_utils import patch_hip_fatbin_size, patch_hip_fatbin_to_nobits
 from rocm_kpack import binutils
 from rocm_kpack.elf.surgery import ElfSurgery
 from rocm_kpack.tools import bulk_unbundle
@@ -99,6 +100,39 @@ def test_toolchain(test_assets_dir: Path, toolchain: binutils.Toolchain):
                 break
         else:
             raise AssertionError("No target hsaco file")
+
+
+def test_unbundle_reports_source_bundle_indices(tmp_path: Path):
+    """bundle_indices name the source bundle, also when one lacks an arch."""
+    fatbin = tmp_path / "multi_tu.fatbin"
+    fatbin.write_bytes(
+        make_fatbin(
+            [
+                {"gfx942": b"TU0_942", "gfx1100": b"TU0_1100"},
+                {"gfx942": b"TU1_942"},
+                {"gfx942": b"TU2_942", "gfx1100": b"TU2_1100"},
+            ]
+        )
+    )
+    bb = binutils.BundledBinary(fatbin)
+
+    with bb.unbundle() as contents:
+        got = [
+            (target.rsplit("--", 1)[1], index, (contents.dest_dir / name).read_bytes())
+            for (target, name), index in zip(
+                contents.target_list, contents.bundle_indices
+            )
+        ]
+    assert got == [
+        ("gfx942", 0, b"TU0_942"),
+        ("gfx1100", 0, b"TU0_1100"),
+        ("gfx942", 1, b"TU1_942"),
+        ("gfx942", 2, b"TU2_942"),
+        ("gfx1100", 2, b"TU2_1100"),
+    ]
+
+    with bb.unbundle(gfx_arch="gfx1100") as contents:
+        assert contents.bundle_indices == [0, 2]
 
 
 def test_bundled_binary_unbundles_elf_without_external_tools(
@@ -214,6 +248,15 @@ def test_has_fatbin_section_rejects_nobits(test_assets_dir: Path, tmp_path: Path
         source, tmp_path / "test_kernel_single.exe.debug"
     )
     assert ElfSurgery.has_fatbin_section(debug_copy) is False
+
+
+def test_has_fatbin_section_rejects_zero_size(test_assets_dir: Path, tmp_path: Path):
+    """A zero-sized SHT_PROGBITS .hip_fatbin is not device code."""
+    source = test_assets_dir / "bundled_binaries/linux/cov5/test_kernel_single.exe"
+    assert ElfSurgery.has_fatbin_section(source) is True
+
+    empty = patch_hip_fatbin_size(source, tmp_path / "test_kernel_single.exe.empty", 0)
+    assert ElfSurgery.has_fatbin_section(empty) is False
 
 
 def test_bundled_binary_nobits_is_standalone(

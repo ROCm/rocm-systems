@@ -12,9 +12,10 @@
 use crate::device::Device;
 use crate::driver::GpuDriverRef;
 use crate::memory::Allocation;
-use crate::topology::{CacheInfo, GpuInfo};
+use crate::topology::{CacheAssociations, CacheInfo, CacheKind, GpuInfo};
 use crate::{Error, ErrorKind};
 
+mod code_cache;
 mod copy;
 pub mod event;
 pub mod image;
@@ -42,9 +43,10 @@ pub(crate) struct GpuResources {
 #[doc(hidden)]
 #[must_use]
 pub const fn is_compute_data_cache(cache: &CacheInfo) -> bool {
-    const INSTRUCTION: u32 = 1 << 1;
-    const GPU_COMPUTE_UNIT: u32 = 1 << 3;
-    cache.kind & GPU_COMPUTE_UNIT != 0 && cache.kind & INSTRUCTION == 0
+    cache
+        .associations
+        .contains(CacheAssociations::GPU_COMPUTE_UNIT)
+        && matches!(cache.kind, CacheKind::Data | CacheKind::Other)
 }
 
 /// A borrowed GPU capability view of an activated [`Device`].
@@ -71,11 +73,32 @@ pub struct GpuDevice<'a> {
 /// will access the image; topology names alone do not determine its tiling.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct GpuSurfaceConfig {
+    /// Provider-resolved ASIC family for the same activated GPU.
+    pub asic_family_id: u32,
+    /// External ASIC revision in the address-library family namespace.
+    pub chip_revision: u32,
     /// Hardware `GB_ADDR_CONFIG` register value.
     pub gb_addr_config: u32,
 }
 
 impl GpuDevice<'_> {
+    /// Returns the provider-resolved ASIC family captured at activation.
+    /// This performs no native query and leaves discovery metadata unchanged.
+    #[must_use]
+    pub fn asic_family_id(&self) -> u32 {
+        self.driver.asic_family_id()
+    }
+
+    /// Queries the effective XNACK mode of this GPU's native execution context.
+    ///
+    /// GPUs sharing a native KFD context share this recoverable-page-fault mode.
+    ///
+    /// # Errors
+    /// Returns a native or device-lifetime failure when the mode is unavailable.
+    pub fn xnack_enabled(&self) -> Result<bool, Error> {
+        self.driver.xnack_enabled()
+    }
+
     /// Returns the GPU target, geometry, and transport capabilities captured at
     /// endpoint activation.
     #[must_use]
@@ -104,9 +127,6 @@ impl GpuDevice<'_> {
     /// # Errors
     /// Returns a native interface or device-lifetime failure.
     pub fn supports_expert_scheduling(&self) -> Result<bool, Error> {
-        if self.info.gfx_major < 12 {
-            return Ok(false);
-        }
         self.driver.supports_expert_scheduling()
     }
 

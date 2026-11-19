@@ -226,9 +226,12 @@ typedef struct amdf_api_t {
   /// Construction performs no command inspection, queue submission or
   /// device-wide synchronization. Failure leaves out_memory unchanged and
   /// creates no public cleanup owner.
+  /// The original construction error is returned even if rollback also fails.
+  /// Optional out_release_info is written on every call with the independent
+  /// cleanup status and abandoned allocation charge. It never owns resources.
   amdf_status_t(AMDF_CALL* memory_create)(
       amdf_memory_scope_t* scope, const amdf_memory_create_info_t* create_info,
-      amdf_memory_t** out_memory);
+      amdf_memory_t** out_memory, amdf_memory_release_info_t* out_release_info);
 
   /// Acquires external backing and establishes the requested live access set.
   ///
@@ -241,10 +244,13 @@ typedef struct amdf_api_t {
   /// device-wide wait. Import does not release a foreign producer's cache
   /// ownership: the caller completes the external transport's publication and
   /// synchronization protocol before native use.
+  /// Optional out_release_info follows memory_create's result-bearing failure
+  /// protocol. Its allocation charge is zero for imported backing; cleanup
+  /// failure still does not authorize recycling the external source.
   amdf_status_t(AMDF_CALL* memory_import)(
       amdf_memory_scope_t* scope, const amdf_memory_import_info_t* import_info,
-      amdf_external_memory_t* inout_external_memory,
-      amdf_memory_t** out_memory);
+      amdf_external_memory_t* inout_external_memory, amdf_memory_t** out_memory,
+      amdf_memory_release_info_t* out_release_info);
 
   /// Copies immutable backing properties cached when `memory` was created.
   ///
@@ -398,7 +404,12 @@ typedef struct amdf_api_t {
   /// not authorize recycling it: the caller must leave that storage unreclaimed
   /// through the remaining native lifetime. Failure is observable resource
   /// loss, not a retryable memory handle or successful source release.
-  amdf_status_t(AMDF_CALL* memory_destroy)(amdf_memory_t* memory);
+  /// Optional out_release_info is written on every call. Its cleanup status
+  /// matches the returned error for a valid memory object, and its allocation
+  /// charge records backing that could not be relinquished. An invalid argument
+  /// performs no cleanup and writes an empty release record.
+  amdf_status_t(AMDF_CALL* memory_destroy)(
+      amdf_memory_t* memory, amdf_memory_release_info_t* out_release_info);
 
   /// Copies immutable properties cached when `queue` was created.
   ///

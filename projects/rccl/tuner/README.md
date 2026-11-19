@@ -5,7 +5,7 @@ default. Nothing has to be staged on disk, so a cluster does not need the file o
 node. The CSV text is embedded verbatim and parsed exactly as a file would be.
 
 Adding or editing a CSV here and rebuilding is all that is needed to change the shipped defaults. The
-generator is `cmake/GenerateEmbeddedTunerConfigs.cmake`; it writes `rccl_tuner_embedded_configs.h` into the
+generator is `tuner/embed_tuner_configs.py`; it writes `rccl_tuner_embedded_configs.h` into the
 build tree's `include/` directory.
 
 ## How to Use

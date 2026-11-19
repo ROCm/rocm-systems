@@ -42,6 +42,8 @@ inline void CreateMockComm(
     mockComm->pxnDisable      = RCCL_VALUE_UNSET;
     mockComm->p2pNetChunkSize = RCCL_VALUE_UNSET;
     mockComm->p2pMaxPeers     = nRanks; // matches what paths.cc resolves an unset maxP2pPeers to
+    // ncclParseCommConfig's default. NCCL 2.32.6 caps p2pnChannels at pow2Down(config.maxCTAs).
+    mockComm->config.maxCTAs  = MAXCHANNELS;
 
     // Initialize topology
     memset(&mockTopo, 0, sizeof(mockTopo));

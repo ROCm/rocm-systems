@@ -3,6 +3,7 @@
 
 import argparse
 import shutil
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -27,7 +28,7 @@ from utils.utils_exceptions import (
 )
 
 
-def _make_sanitize_args(remaining, torch_trace=False, **overrides):
+def _make_sanitize_args(remaining, trace_ml_api=None, **overrides):
     """Build a minimal argparse.Namespace for profiler_base unit tests.
 
     Defaults satisfy sanitize(); pass **overrides to set or replace fields the
@@ -37,14 +38,13 @@ def _make_sanitize_args(remaining, torch_trace=False, **overrides):
     defaults = dict(
         filter_blocks=[],
         set_selected=None,
-        roof_only=False,
         output_directory="/tmp/test_workload",
         no_native_tool=False,
-        iteration_multiplexing=None,
+        iteration_multiplexing=False,
         attach_pid=None,
         attach_duration_msec=None,
         remaining=["--"] + remaining,
-        torch_trace=torch_trace,
+        trace_ml_api=trace_ml_api,
         kernel_iteration_range=None,
         kernel=None,
     )
@@ -69,6 +69,30 @@ def _setup_test_files(tmp_path, remaining, setup):
         binary.chmod(0o755)
         return [s.replace("{binary}", str(binary)) for s in remaining]
     return remaining
+
+
+def run_pre_processing(tmp_path, selected_blocks, no_roof=False, trace_ml_api=None):
+    """Run pre_processing on a rocprofv3 profiler whose SoC selects the given blocks.
+
+    Returns the gen_sysinfo mock.
+    """
+    profiling_args = argparse.Namespace(
+        attach_pid=None,
+        filter_blocks=[],
+        no_roof=no_roof,
+        output_directory=str(tmp_path),
+        remaining="./app",
+        trace_ml_api=trace_ml_api,
+    )
+    mock_soc = Mock()
+    mock_soc._mspec = SimpleNamespace()
+    mock_soc.profiling_setup.return_value = selected_blocks
+    profiler = rocprof_v3_profiler(
+        profiling_args, profiler_mode="rocprofv3", soc=mock_soc
+    )
+    with patch("rocprof_compute_profile.profiler_base.gen_sysinfo") as gen_sysinfo:
+        profiler.pre_processing()
+    return gen_sysinfo
 
 
 @pytest.mark.parametrize(
@@ -96,9 +120,8 @@ def test_partition_warning_messages(
 
 
 # ---------------------------------------------------------------------------
-# sanitize() with --torch-trace
+# sanitize() with --trace-ml-api
 # ---------------------------------------------------------------------------
-@pytest.mark.torch_trace
 @pytest.mark.parametrize(
     "remaining, expected_exception, setup",
     [
@@ -179,9 +202,9 @@ def test_partition_warning_messages(
     ],
 )
 def test_sanitize_torch_trace(tmp_path, remaining, expected_exception, setup):
-    """Unit test: sanitize() behavior with --torch-trace enabled."""
+    """Unit test: sanitize() behavior with --trace-ml-api torch enabled."""
     remaining = _setup_test_files(tmp_path, remaining, setup)
-    args = _make_sanitize_args(remaining, torch_trace=True)
+    args = _make_sanitize_args(remaining, trace_ml_api=["torch"])
     profiler = RocProfCompute_Base(args, profiler_mode="rocprofiler-sdk", soc=None)
     if expected_exception:
         with pytest.raises(expected_exception):
@@ -194,47 +217,30 @@ def test_sanitize_torch_trace(tmp_path, remaining, expected_exception, setup):
 # sanitize() rejects ML API tracing flags for PC-sampling-only runs
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize(
-    "filter_blocks, trace_flags, expect_error, expected_frameworks",
+    "filter_blocks, trace_flags, expect_error",
     [
         pytest.param(
             ["21"],
-            {"torch_trace": True},
+            {"trace_ml_api": ["torch"]},
             True,
-            None,
-            id="pc_only_torch_trace_errors",
-        ),
-        pytest.param(
-            ["pc_sampling"],
-            {"ml_api_trace": True},
-            True,
-            None,
-            id="pc_only_ml_api_trace_errors",
-        ),
-        pytest.param(
-            ["21"],
-            {"triton_trace": True},
-            True,
-            None,
-            id="pc_only_triton_trace_errors",
+            id="pc_only_trace_ml_api_errors",
         ),
         pytest.param(
             ["2", "21"],
-            {"torch_trace": True, "pc_sampling": True, "experimental": True},
+            {"trace_ml_api": ["torch"], "pc_sampling": True, "experimental": True},
             False,
-            {"torch"},
-            id="mixed_torch_trace_preserved",
+            id="mixed_trace_ml_api_preserved",
         ),
         pytest.param(
             ["21"],
             {"pc_sampling": True, "experimental": True},
             False,
-            set(),
             id="pc_only_no_trace_flag",
         ),
     ],
 )
 def test_sanitize_pc_sampling_only_rejects_ml_api_tracing_flags(
-    tmp_path, filter_blocks, trace_flags, expect_error, expected_frameworks
+    tmp_path, filter_blocks, trace_flags, expect_error
 ):
     """ML API tracing flags are rejected for PC-sampling-only runs and retained when a
     counter block is also requested."""
@@ -246,11 +252,10 @@ def test_sanitize_pc_sampling_only_rejects_ml_api_tracing_flags(
             profiler.sanitize()
     else:
         profiler.sanitize()
-        assert profiler._selected_frameworks == expected_frameworks
 
 
 # ---------------------------------------------------------------------------
-# sanitize() without --torch-trace
+# sanitize() without --trace-ml-api
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize(
     "remaining, expected_exception, setup",
@@ -320,9 +325,9 @@ def test_sanitize_pc_sampling_only_rejects_ml_api_tracing_flags(
     ],
 )
 def test_sanitize_no_torch_trace(tmp_path, remaining, expected_exception, setup):
-    """Unit test: sanitize() behavior without --torch-trace."""
+    """Unit test: sanitize() behavior without --trace-ml-api."""
     remaining = _setup_test_files(tmp_path, remaining, setup)
-    args = _make_sanitize_args(remaining, torch_trace=False)
+    args = _make_sanitize_args(remaining)
     profiler = RocProfCompute_Base(args, profiler_mode="rocprofiler-sdk", soc=None)
     if expected_exception:
         with pytest.raises(expected_exception):
@@ -344,27 +349,30 @@ def test_attach_library_resolution_with_fallback():
         remaining="-- /bin/true",
         rocprofiler_sdk_tool_path="/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so",
         output_directory=str(output_dir),
-        iteration_multiplexing=None,
+        iteration_multiplexing=False,
         attach_pid=12345,
         attach_duration_msec=None,
-        kokkos_trace=False,
         kernel=None,
         kernel_iteration_range=None,
-        torch_trace=False,
+        trace_ml_api=None,
     )
     profiler = rocprofiler_sdk_profiler(args, profiler_mode="rocprofiler-sdk", soc=None)
     resolve_target = (
         "rocprof_compute_profile.profiler_rocprofiler_sdk.resolve_rocm_library_path"
+    )
+    attach_tool_target = (
+        "rocprof_compute_profile.profiler_rocprofiler_sdk.find_attach_tool_library"
     )
     new_lib = output_dir / "librocprofiler-sdk-rocattach.so"
     old_lib = output_dir / "librocprofv3-attach.so"
 
     # Case 1: new library present -> selected, fallback lookup never happens.
     new_lib.write_text("")
-    with patch(
-        resolve_target, side_effect=[str(new_lib), str(old_lib)]
-    ) as mock_resolve:
-        options = profiler.get_profiler_options()
+    with patch(attach_tool_target, return_value=args.rocprofiler_sdk_tool_path):
+        with patch(
+            resolve_target, side_effect=[str(new_lib), str(old_lib)]
+        ) as mock_resolve:
+            options = profiler.get_profiler_options()
     assert options["ROCPROF_ATTACH_LIBRARY"] == str(new_lib)
     assert options["ROCPROF_ATTACH_OUTPUT_GENERATION_SYNC"] == "1"
     assert mock_resolve.call_count == 1
@@ -372,21 +380,73 @@ def test_attach_library_resolution_with_fallback():
     # Case 2: only old library present -> falls back to it.
     new_lib.unlink()
     old_lib.write_text("")
-    with patch(
-        resolve_target, side_effect=[str(new_lib), str(old_lib)]
-    ) as mock_resolve:
-        options = profiler.get_profiler_options()
+    with patch(attach_tool_target, return_value=args.rocprofiler_sdk_tool_path):
+        with patch(
+            resolve_target, side_effect=[str(new_lib), str(old_lib)]
+        ) as mock_resolve:
+            options = profiler.get_profiler_options()
     assert options["ROCPROF_ATTACH_LIBRARY"] == str(old_lib)
     assert options["ROCPROF_ATTACH_OUTPUT_GENERATION_SYNC"] == "1"
     assert mock_resolve.call_count == 2
 
     # Case 3: neither library present -> console_error exits the process.
     old_lib.unlink()
-    with patch(resolve_target, side_effect=[str(new_lib), str(old_lib)]):
-        with pytest.raises(SystemExit):
-            profiler.get_profiler_options()
+    with patch(attach_tool_target, return_value=args.rocprofiler_sdk_tool_path):
+        with patch(resolve_target, side_effect=[str(new_lib), str(old_lib)]):
+            with pytest.raises(SystemExit):
+                profiler.get_profiler_options()
 
     common.clean_output_dir(True, str(output_dir))
+
+
+def test_attach_tool_library_comes_from_target_rocm(tmp_path, monkeypatch):
+    """Use the SDK tool library from the ROCm installation of the target."""
+    target_tool = "/opt/rocm-9.9.9/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+    attach_library = tmp_path / "librocprofiler-sdk-rocattach.so"
+    attach_library.touch()
+    args = _make_sanitize_args(
+        ["/bin/true"],
+        rocprofiler_sdk_tool_path="/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so",
+        output_directory=str(tmp_path),
+        attach_pid=42,
+        kokkos_trace=False,
+    )
+    args.remaining = "-- /bin/true"
+    profiler = rocprofiler_sdk_profiler(args, profiler_mode="rocprofiler-sdk", soc=None)
+    find_tool = Mock(return_value=target_tool)
+    monkeypatch.setattr(
+        "rocprof_compute_profile.profiler_rocprofiler_sdk.find_attach_tool_library",
+        find_tool,
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_profile.profiler_rocprofiler_sdk.resolve_rocm_library_path",
+        lambda _path: str(attach_library),
+    )
+
+    options = profiler.get_profiler_options()
+
+    assert options["ROCPROF_ATTACH_TOOL_LIBRARY"] == target_tool
+    find_tool.assert_called_once_with(42)
+
+
+def test_attach_errors_when_target_rocm_has_no_tool_library(tmp_path, monkeypatch):
+    """Stop before attaching when the ROCm of the target has no tool library."""
+    args = _make_sanitize_args(
+        ["/bin/true"],
+        rocprofiler_sdk_tool_path="/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so",
+        output_directory=str(tmp_path),
+        attach_pid=42,
+        kokkos_trace=False,
+    )
+    args.remaining = "-- /bin/true"
+    profiler = rocprofiler_sdk_profiler(args, profiler_mode="rocprofiler-sdk", soc=None)
+    monkeypatch.setattr(
+        "rocprof_compute_profile.profiler_rocprofiler_sdk.find_attach_tool_library",
+        lambda _pid: None,
+    )
+
+    with pytest.raises(SystemExit):
+        profiler.get_profiler_options()
 
 
 def test_sdk_profiler_options_preserve_ld_preload_and_set_env(tmp_path, monkeypatch):
@@ -396,13 +456,12 @@ def test_sdk_profiler_options_preserve_ld_preload_and_set_env(tmp_path, monkeypa
         remaining="my_app --flag",
         rocprofiler_sdk_tool_path="sdk_tool",
         output_directory=str(tmp_path / "workload"),
-        iteration_multiplexing=None,
+        iteration_multiplexing=False,
         attach_pid=None,
         attach_duration_msec=None,
-        kokkos_trace=False,
         kernel=None,
         kernel_iteration_range=None,
-        torch_trace=False,
+        trace_ml_api=None,
     )
     profiler = rocprofiler_sdk_profiler(args, profiler_mode="rocprofiler-sdk", soc=None)
 
@@ -424,13 +483,41 @@ def test_sdk_profiler_options_preserve_ld_preload_and_set_env(tmp_path, monkeypa
     assert options["ROCPROF_COUNTER_COLLECTION"] == "1"
 
 
+def test_ml_api_trace_enables_marker_tier_on_both_backends(tmp_path, monkeypatch):
+    """--trace-ml-api uses marker trace on rocprofv3 and the SDK."""
+    args = argparse.Namespace(
+        remaining="my_app",
+        rocprofiler_sdk_tool_path="/opt/sdk/tool.so",
+        output_directory=str(tmp_path / "workload"),
+        iteration_multiplexing=None,
+        attach_pid=None,
+        attach_duration_msec=None,
+        kernel=None,
+        kernel_iteration_range=None,
+        trace_ml_api=["torch"],
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_profile.profiler_rocprofiler_sdk.resolve_rocm_library_path",
+        lambda path: path,
+    )
+
+    v3 = rocprof_v3_profiler(args, profiler_mode="rocprofv3", soc=None)
+    v3_opts = v3.get_profiler_options()
+    assert "--marker-trace" in v3_opts
+    assert "--kernel-trace" not in v3_opts
+
+    sdk = rocprofiler_sdk_profiler(args, profiler_mode="rocprofiler-sdk", soc=None)
+    sdk_opts = sdk.get_profiler_options()
+    assert sdk_opts["ROCPROF_MARKER_API_TRACE"] == "1"
+    assert "librocprofiler-sdk-roctx.so" in sdk_opts["LD_PRELOAD"]
+
+
 def test_rocprofv3_live_attach_uses_sync_output():
     """Unit test: rocprofv3 live attach requests synchronous output generation."""
     args = _make_sanitize_args(
         ["/bin/true"],
         attach_pid="12345",
         attach_duration_msec="500",
-        kokkos_trace=False,
     )
     args.remaining = "-- /bin/true"
     profiler = rocprof_v3_profiler(args, profiler_mode="rocprofv3", soc=None)
@@ -452,7 +539,6 @@ def test_kernel_iteration_range_translated_for_both_backends(tmp_path):
         kernel_iteration_range=["1", "3:5"],
         output_directory=str(tmp_path),
         rocprofiler_sdk_tool_path="sdk_tool",
-        kokkos_trace=False,
     )
     args.remaining = "-- /bin/true"
 
@@ -495,7 +581,6 @@ def test_sdk_pc_sampling_options(
         output_directory=str(tmp_path),
         pc_sampling_method=method,
         pc_sampling_interval=1000,
-        kokkos_trace=False,
     )
     args.remaining = "/bin/true"
     profiler = rocprofiler_sdk_profiler(args, profiler_mode="rocprofiler-sdk", soc=None)
@@ -573,12 +658,16 @@ def _make_rpc_args(
     pc_sampling_interval=None,
     membw_analysis=False,
     experimental=False,
+    set_selected=None,
     mode="profile",
+    list_stats=False,
+    output_format="stdout",
 ) -> argparse.Namespace:
     """Build a minimal Namespace for sanitize() unit tests."""
     return argparse.Namespace(
         mode=mode,
         list_metrics=None,
+        debug_list_metrics_gfx_id=None,
         list_blocks=None,
         list_available_metrics=False,
         list_sets=False,
@@ -590,21 +679,22 @@ def _make_rpc_args(
         pc_sampling_interval=pc_sampling_interval,
         membw_analysis=membw_analysis,
         experimental=experimental,
-        set_selected=None,
-        roof_only=False,
+        set_selected=set_selected,
         bench_only=False,
         no_roof=False,
         name="unit-test",
         output_directory="/tmp/unit-test",
         no_native_tool=False,
-        iteration_multiplexing=None,
+        iteration_multiplexing=False,
         attach_pid=None,
         attach_duration_msec=None,
-        torch_trace=False,
-        triton_trace=False,
-        ml_api_trace=False,
+        trace_ml_api=None,
         kernel_iteration_range=None,
         remaining=["--", "./myapp"],
+        list_stats=list_stats,
+        output_format=output_format,
+        operator=None,
+        list_operators=None,
     )
 
 
@@ -660,6 +750,17 @@ def _fake_pc_sampling_limits(method: str, _sdk_tool_path=None) -> PCSamplingLimi
             False,
             ["21"],
             id="pc_sampling_with_experimental_injects_21",
+        ),
+        pytest.param(
+            _make_rpc_args(
+                pc_sampling=True,
+                experimental=True,
+                filter_blocks=[],
+                set_selected="launch_stats",
+            ),
+            True,
+            None,
+            id="pc_sampling_with_set_errors",
         ),
         pytest.param(
             _make_rpc_args(filter_blocks=["21"], pc_sampling=True, experimental=True),
@@ -754,18 +855,17 @@ def test_pre_processing_persists_membw_analysis_config(
     effective_filter_blocks = ["30.13"]
     profiling_args = argparse.Namespace(
         attach_pid=None,
-        config_dir=tmp_path / "analysis_configs",
         experimental=True,
         filter_blocks=[],
         membw_analysis=True,
         no_roof=True,
         output_directory=str(tmp_path),
         remaining="./app",
+        trace_ml_api=None,
     )
     mock_soc = Mock()
     mock_soc._mspec = SimpleNamespace()
     mock_soc.profiling_setup.return_value = effective_filter_blocks
-    mock_soc.get_compatible_profilers.return_value = ["rocprofv3"]
     profiler = rocprof_v3_profiler(
         profiling_args,
         profiler_mode="rocprofv3",
@@ -784,6 +884,34 @@ def test_pre_processing_persists_membw_analysis_config(
 
 
 @pytest.mark.parametrize(
+    "trace_ml_api, expected",
+    [(None, None), ([], ["torch", "triton"]), (["triton"], ["triton"])],
+)
+def test_pre_processing_persists_traced_frameworks(tmp_path, trace_ml_api, expected):
+    """A bare --trace-ml-api is saved as every framework."""
+    run_pre_processing(tmp_path, [], no_roof=True, trace_ml_api=trace_ml_api)
+
+    profiling_config = yaml.safe_load(
+        (tmp_path / "profiling_config.yaml").read_text(encoding="utf-8")
+    )
+    assert profiling_config["trace_ml_api"] == expected
+
+
+@pytest.mark.parametrize(
+    ("selected_blocks", "no_roof", "skip_roof"),
+    [(["2"], False, True), (["2", "4"], False, False), ([], False, False),
+     ([], True, True)],
+    ids=["no_roofline_block", "roofline_block", "full_profile", "no_roof"],
+)  # fmt: skip
+def test_pre_processing_records_roofline_in_sysinfo_only_when_selected(
+    tmp_path: Path, selected_blocks, no_roof, skip_roof
+) -> None:
+    """sysinfo.csv lists roofline only when the selected blocks collect it."""
+    gen_sysinfo = run_pre_processing(tmp_path, selected_blocks, no_roof=no_roof)
+    assert gen_sysinfo.call_args.kwargs["skip_roof"] is skip_roof
+
+
+@pytest.mark.parametrize(
     "perf_level, expect_warning",
     [
         pytest.param("AUTO", True, id="auto"),
@@ -799,18 +927,17 @@ def test_pre_processing_pmc_power_gating_warning(
     """Warn about perfmon gating only when the GPU profiled at AUTO."""
     profiling_args = argparse.Namespace(
         attach_pid=None,
-        config_dir=tmp_path / "analysis_configs",
         experimental=True,
         filter_blocks=[],
         membw_analysis=False,
         no_roof=True,
         output_directory=str(tmp_path),
         remaining="./app",
+        trace_ml_api=None,
     )
     mock_soc = Mock()
     mock_soc._mspec = SimpleNamespace(perf_level=perf_level)
     mock_soc.profiling_setup.return_value = []
-    mock_soc.get_compatible_profilers.return_value = ["rocprofv3"]
     profiler = rocprof_v3_profiler(
         profiling_args,
         profiler_mode="rocprofv3",
@@ -1226,3 +1353,22 @@ def test_run_profiling_native_tool_path(
         assert mocks.profile.called is expect_profile_called
     if expect_error is not None:
         assert mocks.console_error.called is expect_error
+
+
+@pytest.mark.parametrize("trace_ml_api", [["torch", "triton"], []])
+def test_sanitize_trace_ml_api_injects_torch_and_triton(tmp_path, trace_ml_api):
+    """Both frameworks are injected, and a bare --trace-ml-api stays unchanged."""
+    remaining = _setup_test_files(tmp_path, [sys.executable, "{script}"], "script")
+    args = _make_sanitize_args(remaining, trace_ml_api=list(trace_ml_api))
+    profiler = RocProfCompute_Base(args, profiler_mode="rocprofiler-sdk", soc=None)
+    profiler.sanitize()
+    assert args.trace_ml_api == trace_ml_api
+    assert "--frameworks torch triton --" in args.remaining
+
+
+def test_sanitize_rejects_ml_api_trace_with_attach_pid(tmp_path):
+    remaining = _setup_test_files(tmp_path, [sys.executable, "{script}"], "script")
+    args = _make_sanitize_args(remaining, attach_pid=12345, trace_ml_api=["torch"])
+    profiler = RocProfCompute_Base(args, profiler_mode="rocprofiler-sdk", soc=None)
+    with pytest.raises(SystemExit):
+        profiler.sanitize()

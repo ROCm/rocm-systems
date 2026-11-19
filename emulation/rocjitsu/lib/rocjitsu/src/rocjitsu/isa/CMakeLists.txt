@@ -9,6 +9,23 @@ rj_add_object_library(rocjitsu_isa
     target_registry.cpp
 )
 
+rj_add_object_library(
+    rocjitsu_wait_counter_policy
+    arch/amdgpu/shared/wait_counter_policy.cpp
+)
+
+# Only x86 ELF models need an assembly object. Other architectures still
+# carry their own linker properties (e.g. AArch64 BTI) on C++-only links.
+# The per-target code model and ABI are checked when preprocessing the .S.
+include(CheckCXXSourceCompiles)
+check_cxx_source_compiles(
+    "#if !defined(__ELF__) || !(defined(__GNUC__) || defined(__clang__)) || !(defined(__x86_64__) || defined(__i386__))
+     #error GNU-compatible x86 ELF assembler is unavailable
+     #endif
+     int main() {}"
+    RJ_HAVE_X86_ELF_ASSEMBLER
+)
+
 function(rj_add_split_amdgpu_isa_library arch)
     set(options NO_BUILTIN)
     set(one_value_args GENERATED_ROOT INCLUDE_BASE)
@@ -33,7 +50,27 @@ function(rj_add_split_amdgpu_isa_library arch)
     set(_target rocjitsu_isa_${arch})
     set(_generated_dir "${_generated_root}/${arch}")
 
-    file(GLOB _model_sources CONFIGURE_DEPENDS "${_generated_dir}/*.cpp")
+    set(_model_patterns "${_generated_dir}/*.cpp")
+    # Preprocess the assembly with the decoder's C++ target and code-model
+    # options, including those supplied by the parent project or toolchain.
+    if(RJ_HAVE_X86_ELF_ASSEMBLER)
+        set(_tables "${_generated_dir}/decode_tables.S")
+        set_source_files_properties(
+            "${_tables}"
+            PROPERTIES LANGUAGE CXX COMPILE_OPTIONS "-x;assembler-with-cpp"
+        )
+        # Clang forwards the target's C++ flags to its assembler driver.
+        # Options such as -stdlib=libc++ apply only to the C++ sources.
+        if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|IntelLLVM")
+            set_property(
+                SOURCE "${_tables}"
+                APPEND
+                PROPERTY COMPILE_OPTIONS -Wno-unused-command-line-argument
+            )
+        endif()
+        list(APPEND _model_patterns "${_tables}")
+    endif()
+    file(GLOB _model_sources CONFIGURE_DEPENDS ${_model_patterns})
     list(FILTER _model_sources EXCLUDE REGEX "_exec.*\\.cpp$")
     list(APPEND _model_sources model_target_provider.cpp)
     list(SORT _model_sources)
@@ -48,6 +85,9 @@ function(rj_add_split_amdgpu_isa_library arch)
 
     rj_add_object_library(${_target}_model ${_model_sources})
     rj_add_object_library(${_target}_exec ${_execution_sources})
+    # Profiles choose which instructions call rj-arith. Keep the dependency available
+    # to execution targets without duplicating that architecture policy in CMake.
+    target_link_libraries(${_target}_exec PUBLIC rj_arith)
 
     add_library(${_target} INTERFACE)
     target_sources(

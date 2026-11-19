@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/sopk.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/decode_factories.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/execution_backend.h"
 #include <memory>
 
@@ -20,6 +21,7 @@ SMovkI32Sopk::SMovkI32Sopk(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 1;
+  set_amdgpu_operation(amdgpu::Operation::S_MOVK_I32);
 }
 
 namespace detail {
@@ -39,6 +41,7 @@ SVersionSopk::SVersionSopk(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_VERSION);
 }
 
 namespace detail {
@@ -65,6 +68,7 @@ SCmovkI32Sopk::SCmovkI32Sopk(const MachineInst *inst)
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
   flags_ |= PREDICATED_DEF;
+  set_amdgpu_operation(amdgpu::Operation::S_CMOVK_I32);
 }
 
 namespace detail {
@@ -89,6 +93,7 @@ SCmpkEqI32Sopk::SCmpkEqI32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMPK_EQ_I32);
 }
 
 namespace detail {
@@ -113,6 +118,7 @@ SCmpkLgI32Sopk::SCmpkLgI32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMPK_LG_I32);
 }
 
 namespace detail {
@@ -137,6 +143,7 @@ SCmpkGtI32Sopk::SCmpkGtI32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMPK_GT_I32);
 }
 
 namespace detail {
@@ -161,6 +168,7 @@ SCmpkGeI32Sopk::SCmpkGeI32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMPK_GE_I32);
 }
 
 namespace detail {
@@ -185,6 +193,7 @@ SCmpkLtI32Sopk::SCmpkLtI32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMPK_LT_I32);
 }
 
 namespace detail {
@@ -209,6 +218,7 @@ SCmpkLeI32Sopk::SCmpkLeI32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMPK_LE_I32);
 }
 
 namespace detail {
@@ -233,6 +243,7 @@ SCmpkEqU32Sopk::SCmpkEqU32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMPK_EQ_U32);
 }
 
 namespace detail {
@@ -257,6 +268,7 @@ SCmpkLgU32Sopk::SCmpkLgU32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMPK_LG_U32);
 }
 
 namespace detail {
@@ -281,6 +293,7 @@ SCmpkGtU32Sopk::SCmpkGtU32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMPK_GT_U32);
 }
 
 namespace detail {
@@ -305,6 +318,7 @@ SCmpkGeU32Sopk::SCmpkGeU32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMPK_GE_U32);
 }
 
 namespace detail {
@@ -329,6 +343,7 @@ SCmpkLtU32Sopk::SCmpkLtU32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMPK_LT_U32);
 }
 
 namespace detail {
@@ -353,6 +368,7 @@ SCmpkLeU32Sopk::SCmpkLeU32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMPK_LE_U32);
 }
 
 namespace detail {
@@ -378,6 +394,7 @@ SAddkI32Sopk::SAddkI32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_ADDK_I32);
 }
 
 namespace detail {
@@ -400,6 +417,7 @@ SMulkI32Sopk::SMulkI32Sopk(const MachineInst *inst)
   src_operands_[1] = &simm16;
   num_src_ = 2;
   num_dst_ = 1;
+  set_amdgpu_operation(amdgpu::Operation::S_MULK_I32);
 }
 
 namespace detail {
@@ -421,6 +439,7 @@ SGetregB32Sopk::SGetregB32Sopk(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 1;
+  set_amdgpu_operation(amdgpu::Operation::S_GETREG_B32);
 }
 
 namespace detail {
@@ -442,6 +461,7 @@ SSetregB32Sopk::SSetregB32Sopk(const MachineInst *inst)
   src_operands_[0] = &sdst;
   num_src_ = 1;
   num_dst_ = 1;
+  set_amdgpu_operation(amdgpu::Operation::S_SETREG_B32);
 }
 
 namespace detail {
@@ -470,6 +490,7 @@ SSetregImm32B32Sopk::SSetregImm32B32Sopk(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   simm32 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(literal_));
+  set_amdgpu_operation(amdgpu::Operation::S_SETREG_IMM32_B32);
 }
 
 namespace detail {
@@ -504,6 +525,8 @@ SCallB64Sopk::SCallB64Sopk(const MachineInst *inst)
   pc.apply_fieldless_caps(false, false, false);
   pc_in.apply_fieldless_caps(false, false, false);
   flags_ |= INDIRECT_CALL;
+  set_amdgpu_operation(amdgpu::Operation::S_CALL_B64);
+  flags_ |= READS_PC;
 }
 
 namespace detail {
@@ -531,6 +554,7 @@ SWaitcntVscntSopk::SWaitcntVscntSopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  set_amdgpu_operation(amdgpu::Operation::S_WAITCNT_VSCNT);
 }
 
 namespace detail {
@@ -554,6 +578,7 @@ SWaitcntVmcntSopk::SWaitcntVmcntSopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  set_amdgpu_operation(amdgpu::Operation::S_WAITCNT_VMCNT);
 }
 
 namespace detail {
@@ -577,6 +602,7 @@ SWaitcntExpcntSopk::SWaitcntExpcntSopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  set_amdgpu_operation(amdgpu::Operation::S_WAITCNT_EXPCNT);
 }
 
 namespace detail {
@@ -600,6 +626,7 @@ SWaitcntLgkmcntSopk::SWaitcntLgkmcntSopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  set_amdgpu_operation(amdgpu::Operation::S_WAITCNT_LGKMCNT);
 }
 
 namespace detail {

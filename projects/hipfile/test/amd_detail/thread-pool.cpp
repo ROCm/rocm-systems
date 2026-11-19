@@ -47,7 +47,7 @@ TEST(HipFileThreadPool, WaitBlocksUntilRunningWorkCompletes)
     started.wait(false);
 
     auto wait_result = std::async(std::launch::async, [&group]() { group->wait(); });
-    ASSERT_EQ(wait_result.wait_for(20ms), std::future_status::timeout);
+    ASSERT_EQ(wait_result.wait_for(200ms), std::future_status::timeout);
 
     gate.store(true);
     gate.notify_all();
@@ -134,7 +134,7 @@ TEST(HipFileThreadPool, DestructorCancelsAndWaits)
 
     auto destroy_result =
         std::async(std::launch::async, [owned_group = std::move(group)]() mutable { owned_group.reset(); });
-    ASSERT_EQ(destroy_result.wait_for(20ms), std::future_status::timeout);
+    ASSERT_EQ(destroy_result.wait_for(200ms), std::future_status::timeout);
 
     gate.store(true);
     gate.notify_all();

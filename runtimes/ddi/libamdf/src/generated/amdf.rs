@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 // ABI snapshot from the pinned AMDF headers, checked by tests/abi/check_layout.py.
-// Source: api-headers/include/amdf/ at hrx-system 8cd8e8b913c3997f6c63515876edf265dbd4a854.
+// Source: api-headers/include/amdf/ at hrx-system 8bdaeca172e5cbcbcd83edb5284c4407e7e02ee8.
 //! AMDF C ABI declarations. See api-headers/README.md.
 //!
 //! Zero defaults initialize storage only. Callers must set structure tags,
@@ -293,6 +293,29 @@ pub const AMDF_NATIVE_LIFETIME_PROCESS: amdf_native_lifetime_t = 0;
 
 pub const AMDF_NATIVE_LIFETIME_INSTANCE: amdf_native_lifetime_t = 1;
 
+pub type amdf_allocator_allocate_fn_t =
+    Option<unsafe extern "C" fn(*mut ::core::ffi::c_void, u64, u64) -> *mut ::core::ffi::c_void>;
+pub type amdf_allocator_resize_fn_t = Option<
+    unsafe extern "C" fn(
+        *mut ::core::ffi::c_void,
+        *mut ::core::ffi::c_void,
+        u64,
+        u64,
+        u64,
+    ) -> *mut ::core::ffi::c_void,
+>;
+pub type amdf_allocator_free_fn_t =
+    Option<unsafe extern "C" fn(*mut ::core::ffi::c_void, *mut ::core::ffi::c_void)>;
+
+#[repr(C)]
+#[derive(Copy, Clone, Default)]
+pub struct amdf_allocator_t {
+    pub user_data: *mut ::core::ffi::c_void,
+    pub allocate: amdf_allocator_allocate_fn_t,
+    pub resize: amdf_allocator_resize_fn_t,
+    pub free: amdf_allocator_free_fn_t,
+}
+
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct amdf_instance_create_info_t {
@@ -301,6 +324,7 @@ pub struct amdf_instance_create_info_t {
     pub next: *const ::core::ffi::c_void,
     pub native_lifetime: amdf_native_lifetime_t,
     pub reserved: u32,
+    pub host_allocator: amdf_allocator_t,
 }
 impl Default for amdf_instance_create_info_t {
     fn default() -> Self {
@@ -1013,6 +1037,13 @@ pub struct amdf_memory_info_t {
     pub native_allocation_granularity: u64,
     pub physical_backing_id: amdf_physical_memory_id_t,
     pub placement: amdf_memory_placement_t,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Default)]
+pub struct amdf_memory_release_info_t {
+    pub status: amdf_status_t,
+    pub abandoned_byte_length: u64,
 }
 impl Default for amdf_memory_info_t {
     fn default() -> Self {
@@ -1809,6 +1840,7 @@ pub struct amdf_api_t {
             *mut amdf_memory_scope_t,
             *const amdf_memory_create_info_t,
             *mut *mut amdf_memory_t,
+            *mut amdf_memory_release_info_t,
         ) -> amdf_status_t,
     >,
     pub memory_import: Option<
@@ -1817,6 +1849,7 @@ pub struct amdf_api_t {
             *const amdf_memory_import_info_t,
             *mut amdf_external_memory_t,
             *mut *mut amdf_memory_t,
+            *mut amdf_memory_release_info_t,
         ) -> amdf_status_t,
     >,
     pub memory_query_info:
@@ -1866,7 +1899,9 @@ pub struct amdf_api_t {
     >,
     pub host_mapping_destroy:
         Option<unsafe extern "C" fn(*mut amdf_host_mapping_t) -> amdf_status_t>,
-    pub memory_destroy: Option<unsafe extern "C" fn(*mut amdf_memory_t) -> amdf_status_t>,
+    pub memory_destroy: Option<
+        unsafe extern "C" fn(*mut amdf_memory_t, *mut amdf_memory_release_info_t) -> amdf_status_t,
+    >,
     pub kernel_queue_query_info: Option<
         unsafe extern "C" fn(
             *mut amdf_kernel_queue_t,
@@ -2760,7 +2795,11 @@ pub const AMDF_ABI_VERSION_8: amdf_abi_version_t = 8;
 pub const AMDF_ABI_VERSION_9: amdf_abi_version_t = 9;
 pub const AMDF_ABI_VERSION_10: amdf_abi_version_t = 10;
 pub const AMDF_ABI_VERSION_11: amdf_abi_version_t = 11;
-pub const AMDF_ABI_VERSION_LATEST: amdf_abi_version_t = 11;
+pub const AMDF_ABI_VERSION_12: amdf_abi_version_t = 12;
+pub const AMDF_ABI_VERSION_LATEST: amdf_abi_version_t = 12;
+
+pub const AMDF_GPU_PM4_FORMAT_FEATURE_DISPATCH_SCRATCH: amdf_queue_format_features_t = 1 << 3;
+pub const AMDF_GPU_SDMA_FORMAT_FEATURE_SUBMISSION_GCR: amdf_queue_format_features_t = 1 << 7;
 
 pub const AMDF_ADDRESS_DOMAIN_ORDINAL_NONE: u32 = 4294967295;
 
