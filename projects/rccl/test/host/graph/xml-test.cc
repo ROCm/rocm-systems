@@ -120,6 +120,32 @@ TEST_F(XmlMicrotest, GetXmlFromFile_SkipsUnknownElementsWithTheirChildren) {
   EXPECT_TRUE(Logged("Loading unnamed topology"));
 }
 
+// Tab is XML whitespace; a hand-written NCCL_TOPO_FILE indented with tabs must load.
+TEST_F(XmlMicrotest, GetXmlFromFile_TabIndentationIsWhitespace) {
+  EXPECT_EQ(ncclSuccess, Parse("<system version=\"2\">\n"
+                               "\t<cpu numaid=\"0\">\n"
+                               "\t\t<pci busid=\"0000:01:00.0\"/>\n"
+                               "\t</cpu>\n"
+                               "</system>\n"));
+
+  EXPECT_FALSE(Logged("expecting '<'"));
+  EXPECT_EQ(3, xml_->maxIndex);
+  EXPECT_NE(nullptr, Find("pci", "busid", "0000:01:00.0"));
+}
+
+TEST_F(XmlMicrotest, GetXmlFromFile_TabSeparatesAttributesInsideATag) {
+  EXPECT_EQ(ncclSuccess, Parse("<system\tversion=\"2\">"
+                               "<cpu\tnumaid=\"0\"\taffinity=\"ff\"><pci\tbusid=\"0000:01:00.0\"\t/></cpu>"
+                               "</system>"));
+
+  ncclXmlNode* cpu = Find("cpu", "numaid", "0");
+  ASSERT_NE(nullptr, cpu);
+  EXPECT_EQ("ff", Attr(cpu, "affinity"));
+  ncclXmlNode* pci = Find("pci", "busid", "0000:01:00.0");
+  ASSERT_NE(nullptr, pci);
+  EXPECT_EQ(NODE_TYPE_SINGLE, pci->type);
+}
+
 TEST_F(XmlMicrotest, GetXmlFromFile_CommentsMayEndInsideTheTagName) {
   ASSERT_EQ(ncclSuccess, Parse("<!--x--><!-- a > b -- c --><system version=\"2\"/>"));
 

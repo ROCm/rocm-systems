@@ -139,7 +139,7 @@ ncclResult_t xmlGetToken(FILE* file, char* name, char* value, char* last) {
       return ncclInternalError;
     }
     o++;
-  } while (c != ' ' && c != '>' && c != '/' && c != '\n' && c != '\r');
+  } while (c != ' ' && c != '\t' && c != '>' && c != '/' && c != '\n' && c != '\r');  // RCCL: tab separates tokens
   ptr[o - 1] = '\0';
   *last = c;
   return ncclSuccess;
@@ -176,7 +176,8 @@ ncclResult_t xmlSkipComment(FILE* file, char* start, char next) {
 ncclResult_t xmlGetNode(FILE* file, struct ncclXmlNode* node) {
   node->type = NODE_TYPE_NONE;
   char c = ' ';
-  while (c == ' ' || c == '\n' || c == '\r') {
+  // RCCL: tab is whitespace between elements too.
+  while (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
     if (fread(&c, 1, 1, file) == 0) return ncclSuccess;
   }
   if (c != '<') {
@@ -208,7 +209,7 @@ ncclResult_t xmlGetNode(FILE* file, struct ncclXmlNode* node) {
 
   // Get Attributes
   int a = 0;
-  while (c == ' ') {
+  while (c == ' ' || c == '\t') {  // RCCL: tab separates attributes
     NCCLCHECK(xmlGetToken(file, node->attrs[a].key, node->attrs[a].value, &c));
     if (a == MAX_ATTR_COUNT) {
       INFO(NCCL_GRAPH, "XML Parse : Ignoring extra attributes (max %d)", MAX_ATTR_COUNT);
