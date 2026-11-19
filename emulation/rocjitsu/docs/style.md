@@ -76,14 +76,14 @@ private:
 
 ## Namespaces
 
-- Use one namespace per module/library, named after that library (matching its
-  `lib/<name>/` directory). For example, `rocjitsu`, `simdojo`, and `util` each
-  live in their own top-level namespace.
-- Do not scatter code across ad-hoc namespaces. Nest a sub-namespace only when
-  genuinely needed : for example, for arch/ISA specificity (`rocjitsu::amdgpu`).
+- Use the existing namespace for the owning module/library, named after that
+  library (matching its `lib/<name>/` directory). For example, `rocjitsu`,
+  `simdojo`, and `util` each live in their own top-level namespace.
+- Do not introduce new namespaces. Reuse the existing namespace hierarchy,
+  including established sub-namespaces such as `rocjitsu::amdgpu`.
 
 ```cpp
-// Each library gets its own top-level namespace, named after its lib/<name>/ dir:
+// Reuse the owning library's existing top-level namespace:
 //   lib/rocjitsu/ -> namespace rocjitsu
 //   lib/simdojo/  -> namespace simdojo
 //   lib/util/     -> namespace util
@@ -93,7 +93,7 @@ namespace simdojo {
 
 } // namespace simdojo
 
-// Nest a sub-namespace only when justified, e.g. arch/ISA specificity:
+// Reuse existing sub-namespaces for architecture-specific code:
 namespace rocjitsu::amdgpu {
 
 // gfx-specific code lives here

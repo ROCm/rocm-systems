@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include <chrono>  // NOLINT
 #include <future>
 #include <limits>
+#include <utility>
 
 #include "common/rdc_fields_supported.h"
 #include "rdc.grpc.pb.h"  // NOLINT
@@ -60,6 +61,19 @@ RdcStandaloneHandler::RdcStandaloneHandler(const char* ip_and_port, const char* 
 namespace {
 // True on the threads that read policy streams, where the callbacks run.
 thread_local bool t_in_policy_reader = false;
+
+// Runs a function when the scope ends, also by an exception.
+template <typename F>
+class ScopeExit {
+ public:
+  explicit ScopeExit(F fn) : fn_(std::move(fn)) {}
+  ~ScopeExit() { fn_(); }
+  ScopeExit(const ScopeExit&) = delete;
+  ScopeExit& operator=(const ScopeExit&) = delete;
+
+ private:
+  F fn_;
+};
 }  // namespace
 
 RdcStandaloneHandler::~RdcStandaloneHandler() {
@@ -508,7 +522,7 @@ rdc_status_t RdcStandaloneHandler::rdc_group_field_create(uint32_t num_field_ids
 
   request.set_field_group_name(field_group_name);
   for (uint32_t i = 0; i < num_field_ids; i++) {
-    request.add_field_ids(field_ids[i]);
+    request.add_field_ids(rdc_field_id_number(field_ids[i]));  // rdcd checks it
   }
 
   ::grpc::Status status = stub_->CreateFieldGroup(&context, request, &reply);
@@ -527,7 +541,7 @@ rdc_status_t RdcStandaloneHandler::rdc_group_field_add_field(rdc_field_grp_t rdc
   set_timeout(&context, kCallTimeout);
 
   request.set_field_group_id(rdc_field_group_id);
-  request.set_field_id(field_id);
+  request.set_field_id(rdc_field_id_number(field_id));
   ::grpc::Status status = stub_->AddFieldToFieldGroup(&context, request, &reply);
   rdc_status_t err_status = error_handle(status, reply.status());
 
@@ -700,7 +714,7 @@ rdc_status_t RdcStandaloneHandler::rdc_field_get_latest_value(uint32_t gpu_index
   set_timeout(&context, kCallTimeout);
 
   request.set_gpu_index(gpu_index);
-  request.set_field_id(field);
+  request.set_field_id(rdc_field_id_number(field));
   ::grpc::Status status = stub_->GetLatestFieldValue(&context, request, &reply);
   rdc_status_t err_status = error_handle(status, reply.status());
   if (err_status != RDC_ST_OK) return err_status;
@@ -725,7 +739,7 @@ rdc_status_t RdcStandaloneHandler::rdc_field_get_value_since(uint32_t gpu_index,
   set_timeout(&context, kCallTimeout);
 
   request.set_gpu_index(gpu_index);
-  request.set_field_id(field);
+  request.set_field_id(rdc_field_id_number(field));
   request.set_since_time_stamp(since_time_stamp);
   ::grpc::Status status = stub_->GetFieldSince(&context, request, &reply);
   rdc_status_t err_status = error_handle(status, reply.status());
@@ -1104,6 +1118,11 @@ rdc_status_t RdcStandaloneHandler::rdc_policy_register(rdc_gpu_group_t group_id,
     return RDC_ST_CLIENT_ERROR;
   }
   reap_draining_locked();
+  // rdcd unregisters by group: until an rdc_policy_unregister() of the group
+  // returns, it could also end a stream registered now.
+  if (unregistering_.count(group_id) != 0) {
+    return RDC_ST_CONFLICT;
+  }
   auto existing = policy_streams_.find(group_id);
   if (existing != policy_streams_.end()) {
     std::shared_ptr<policy_stream> old = existing->second;
@@ -1272,14 +1291,45 @@ rdc_status_t RdcStandaloneHandler::rdc_policy_unregister(rdc_gpu_group_t group_i
   // to be joined later.
   const bool from_callback = t_in_policy_reader;
   std::shared_ptr<policy_stream> stream;
+  bool counted = false;
+  // However this call returns, also by an exception: the stream is stopped,
+  // its reader is joined unless this is a callback, and the group can be
+  // registered again.
+  ScopeExit finish([&] {
+    if (stream) {
+      stop_policy_stream(stream.get());
+      if (!from_callback && stream->reader.joinable()) {
+        stream->reader.join();
+        // An admission that arrived after the stream was given up still counts.
+        std::lock_guard<std::mutex> guard(policy_streams_mutex_);
+        std::lock_guard<std::mutex> entry_lock(stream->mutex);
+        if (stream->admitted) {
+          policy_server_old_ = false;
+        }
+      }
+    }
+    if (counted) {
+      std::lock_guard<std::mutex> guard(policy_streams_mutex_);
+      auto it = unregistering_.find(group_id);
+      if (--it->second == 0) {
+        unregistering_.erase(it);
+      }
+    }
+  });
   {
     std::lock_guard<std::mutex> guard(policy_streams_mutex_);
     if (destructing_) {
       return RDC_ST_CLIENT_ERROR;
     }
     reap_draining_locked();
+    ++unregistering_[group_id];
+    counted = true;
     auto it = policy_streams_.find(group_id);
     if (it != policy_streams_.end()) {
+      // Pushed before the erase: if the push throws, the stream stays registered.
+      if (from_callback) {
+        draining_.push_back(it->second);
+      }
       stream = it->second;
       policy_streams_.erase(it);
       {
@@ -1290,29 +1340,13 @@ rdc_status_t RdcStandaloneHandler::rdc_policy_unregister(rdc_gpu_group_t group_i
         }
       }
       stream->cv.notify_all();
-      if (from_callback) {
-        draining_.push_back(stream);
-      }
     }
   }
 
-  // rdcd ends the stream, then the reader is stopped and joined, also when
-  // rdcd cannot be reached.
+  // rdcd ends the stream; then the guard stops it and joins the reader, also
+  // when rdcd cannot be reached.
   request.set_group_id(group_id);
   ::grpc::Status status = stub_->UnRegisterPolicy(&context, request, &reply);
-  if (stream) {
-    stop_policy_stream(stream.get());
-    if (!from_callback && stream->reader.joinable()) {
-      stream->reader.join();
-      // An admission that arrived after the stream was given up still counts.
-      std::lock_guard<std::mutex> guard(policy_streams_mutex_);
-      std::lock_guard<std::mutex> entry_lock(stream->mutex);
-      if (stream->admitted) {
-        policy_server_old_ = false;
-      }
-    }
-  }
-
   return error_handle(status, reply.status());
 }
 

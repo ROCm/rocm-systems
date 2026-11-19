@@ -64,13 +64,11 @@
 
 namespace rocprofsys
 {
-namespace api       = ::tim::api;        // NOLINT
 namespace category  = ::tim::category;   // NOLINT
 namespace project   = ::tim::project;    // NOLINT
 namespace process   = ::tim::process;    // NOLINT
 namespace threading = ::tim::threading;  // NOLINT
 namespace scope     = ::tim::scope;      // NOLINT
-namespace policy    = ::tim::policy;     // NOLINT
 namespace trait     = ::tim::trait;      // NOLINT
 namespace cereal    = ::tim::cereal;     // NOLINT
 

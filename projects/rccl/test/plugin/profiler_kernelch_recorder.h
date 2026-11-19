@@ -5,8 +5,9 @@
  ************************************************************************/
 
 // Query interface of the KernelCh recorder profiler plugin, shared by the plugin
-// and ProfilerKernelChMPITests. The test reaches these functions with dlopen on
-// the same path RCCL loaded, so it reads the very records RCCL produced.
+// and the tests that load it (see common/ProfilerRecorderHelpers.hpp). The tests
+// reach these functions with dlopen on the same path RCCL loaded, so they read the
+// very records RCCL produced.
 
 #ifndef RCCL_TEST_PROFILER_KERNELCH_RECORDER_H_
 #define RCCL_TEST_PROFILER_KERNELCH_RECORDER_H_
@@ -43,6 +44,9 @@ typedef struct {
   int phaseId;
   uint64_t startTimer;  // device timer at start
   uint64_t stopTimer;   // device timer at stop
+  // Coll: the algorithm and protocol the core reports, e.g. "PAT" and "SIMPLE"
+  char algo[32];
+  char proto[32];
 } RcclKchRecord;
 
 // Drop every record and counter. Only call while RCCL holds no event handle, that

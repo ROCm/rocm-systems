@@ -16,6 +16,9 @@ namespace rdna1 {
 
 class VInterpP1F32Vintrp : public Vintrp {
 public:
+  void append_src_operand(std::string &out, uint8_t index) const override {
+    append_interp_operand(out, index, attr);
+  }
   VInterpP1F32Vintrp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
@@ -26,6 +29,9 @@ public:
 
 class VInterpP2F32Vintrp : public Vintrp {
 public:
+  void append_src_operand(std::string &out, uint8_t index) const override {
+    append_interp_operand(out, index, attr);
+  }
   VInterpP2F32Vintrp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
@@ -36,6 +42,9 @@ public:
 
 class VInterpMovF32Vintrp : public Vintrp {
 public:
+  void append_src_operand(std::string &out, uint8_t index) const override {
+    append_interp_operand(out, index, attr);
+  }
   VInterpMovF32Vintrp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;

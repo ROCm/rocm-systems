@@ -110,7 +110,7 @@ TEST(ProbeFixture, NopProbeClobberSummaryIsEmpty) {
       build_probe_callable(*co, *resolved, ROCJITSU_CODE_ARCH_CDNA2, /*num_arg_dwords=*/0, &err);
   ASSERT_TRUE(callable.has_value()) << err;
 
-  const auto summary = build_probe_clobber_summary(*callable, &err);
+  const auto summary = build_probe_clobber_summary(*callable, /*wave_size=*/64, &err);
   ASSERT_TRUE(summary.has_value()) << err;
   EXPECT_TRUE(summary->ordinary_clobbers.none());
   EXPECT_FALSE(summary->touches_exec);
@@ -148,7 +148,8 @@ TEST(ProbeFixture, ArgProbeReceivesItsArgumentInV0) {
   ASSERT_TRUE(with_arg.has_value()) << err;
   EXPECT_EQ(with_arg->abi.num_arg_vgprs, 1);
   const auto live_with_arg =
-      analyze_probe_live_ins(*co, *resolved, ROCJITSU_CODE_ARCH_CDNA2, with_arg->abi, &err);
+      analyze_probe_live_ins(*co, *resolved, ROCJITSU_CODE_ARCH_CDNA2, with_arg->abi,
+                             /*wave_size=*/64, &err);
   ASSERT_TRUE(live_with_arg.has_value()) << err;
   EXPECT_TRUE(live_with_arg->none()) << "compiler placed the argument outside the ABI's window: "
                                      << format_register_set(*live_with_arg);
@@ -159,7 +160,8 @@ TEST(ProbeFixture, ArgProbeReceivesItsArgumentInV0) {
       build_probe_callable(*co, *resolved, ROCJITSU_CODE_ARCH_CDNA2, /*num_arg_dwords=*/0, &err);
   ASSERT_TRUE(no_args.has_value()) << err;
   const auto live_no_args =
-      analyze_probe_live_ins(*co, *resolved, ROCJITSU_CODE_ARCH_CDNA2, no_args->abi, &err);
+      analyze_probe_live_ins(*co, *resolved, ROCJITSU_CODE_ARCH_CDNA2, no_args->abi,
+                             /*wave_size=*/64, &err);
   ASSERT_TRUE(live_no_args.has_value()) << err;
   EXPECT_EQ(format_register_set(*live_no_args), "v0");
 }

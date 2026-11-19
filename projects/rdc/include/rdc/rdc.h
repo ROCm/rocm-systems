@@ -577,7 +577,8 @@ typedef struct {
  */
 typedef struct {
   uint64_t max_value;         //!< Maximum value measured
-  uint64_t min_value;         //!< Minimum value measured
+  uint64_t min_value;         //!< Minimum value measured; UINT64_MAX if there are
+                              //!< no samples, and then the other members are 0
   uint64_t average;           //!< Average value measured
   double standard_deviation;  //!< The standard deviation
 } rdc_stats_summary_t;
@@ -630,7 +631,10 @@ typedef struct {
   uint32_t num_gpus;                                    //!< Number of GPUs used by job
   rdc_gpu_usage_info_t summary;                         //!< Job usage summary statistics
                                                         //!< (overall)
-  rdc_gpu_usage_info_t gpus[RDC_MAX_NUM_GPUS_PER_JOB];  //!< Job usage summary statistics by GPU
+  rdc_gpu_usage_info_t gpus[RDC_MAX_NUM_GPUS_PER_JOB];  //!< Job usage summary statistics by GPU,
+                                                        //!< in the first num_gpus entries, ordered
+                                                        //!< by gpu_id, the entity index of the GPU
+                                                        //!< or GPU partition
   uint32_t num_processes;                               //!< Number of processes tracked
   rdc_process_status_info_t
       processes[RDC_MAX_NUM_PROCESSES_STATUS];  //!< Array to track process start/stop times
@@ -1085,6 +1089,8 @@ rdc_status_t rdc_disconnect(rdc_handle_t p_rdc_handle);
  *  @param[in] update_freq  How often to update this field in usec.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_MAX_LIMIT is returned if the group has more than
+ *  ::RDC_MAX_NUM_GPUS_PER_JOB GPUs.
  *  @retval ::RDC_ST_BAD_PARAMETER is returned if job_id is NULL, has no NUL in
  *  its first 64 bytes, or has a control character.
  */
@@ -1105,6 +1111,8 @@ rdc_status_t rdc_job_start_stats(rdc_handle_t p_rdc_handle, rdc_gpu_group_t grou
  *  successful call, the value will contain the stats of the job.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_MAX_LIMIT is returned if the job has more than
+ *  ::RDC_MAX_NUM_GPUS_PER_JOB GPUs.
  *  @retval ::RDC_ST_BAD_PARAMETER is returned if job_id is NULL, has no NUL in
  *  its first 64 bytes, or has a control character, or if p_job_info is NULL.
  */
@@ -1183,9 +1191,11 @@ rdc_status_t rdc_field_update_all(rdc_handle_t p_rdc_handle, uint32_t wait_for_u
  *  @param[in] p_rdc_handle The RDC handler.
  *
  *  @param[out] gpu_index_list Array reference to fill GPU indexes present on
- *  the system.
+ *  the system. At most ::RDC_MAX_NUM_DEVICES GPUs and GPU partitions are
+ *  listed; any beyond that are not.
  *
- *  @param[out] count Number of GPUs returned in gpu_index_list.
+ *  @param[out] count Number of GPUs returned in gpu_index_list, at most
+ *  ::RDC_MAX_NUM_DEVICES.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  *  @retval ::RDC_ST_BAD_PARAMETER is returned if gpu_index_list is NULL, or,
@@ -1446,9 +1456,17 @@ rdc_status_t rdc_group_field_destroy(rdc_handle_t p_rdc_handle, rdc_field_grp_t 
  *
  *  @param[in] update_freq  How often to update fields in usec.
  *
- *  @param[in] max_keep_age How long to keep data for fields in seconds.
+ *  @param[in] max_keep_age How long to keep data for fields in seconds. 0 keeps
+ *  no samples: each is dropped soon after it arrives. See max_keep_samples for
+ *  how the limits of several watches of one field combine.
  *
- *  @param[in] max_keep_samples Maximum number of samples to keep. 0=no limit.
+ *  @param[in] max_keep_samples Maximum number of samples to keep. 0 keeps no
+ *  samples: each is dropped soon after it arrives. To keep every sample, pass a
+ *  large value, such as UINT32_MAX. When several watches cover a field, each
+ *  limit is the largest that any of them sets, also after a watch ends: a new
+ *  watch can raise a limit but not lower it until RDC stops tracking the field,
+ *  which it does only when no watch covers the field and its last update is
+ *  older than the largest max_keep_age set for it.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  *  @retval ::RDC_ST_CONFLICT is returned if the field group is already watched for the GPU group.
@@ -1751,7 +1769,8 @@ typedef int (*rdc_policy_register_callback)(rdc_policy_callback_response_t* user
  *  @retval ::RDC_ST_OK is returned upon successful call.
  *  @retval ::RDC_ST_GROUP_NOT_FOUND The GPU group does not exist.
  *  @retval ::RDC_ST_CONFLICT On a handle from rdc_connect(): a callback is
- *  already registered for the group.
+ *  already registered for the group, or rdc_policy_unregister() for the group
+ *  has not returned yet.
  *  @retval ::RDC_ST_INSUFF_RESOURCES On a handle from rdc_connect(): the
  *  thread for the callback could not start.
  *  @retval ::RDC_ST_MAX_LIMIT On a handle from rdc_connect(): rdcd already
@@ -1767,12 +1786,14 @@ rdc_status_t rdc_policy_register(rdc_handle_t p_rdc_handle, rdc_gpu_group_t grou
  *  @brief un-register a policy callback function for a conditioin.
  *
  *  @details Un-register the policy callback for a condition. On a handle from
- *  rdc_start_embedded(), a check that is already running may still call the
- *  callback once after this returns. On a handle from rdc_connect(), it waits
- *  for a running callback of the group to return. Called from a callback, it
- *  does not wait, and the callback of the group may run again until
- *  rdc_disconnect() returns. Through rdcd, it ends every registration of the
- *  group that rdcd serves, from all of its clients.
+ *  rdc_connect(), it waits for a running callback of the group to return.
+ *  Called from a callback, it does not wait: a callback of the group that is
+ *  running or about to run can still run after it returns, also once the
+ *  group is registered again. On a handle from rdc_start_embedded(), a check
+ *  that is already running may still call the callback after this returns,
+ *  once for each policy and GPU of the group that meets the policy's
+ *  condition. Through rdcd, it ends every registration of the group that
+ *  rdcd serves, from all of its clients.
  *
  *  @param[in] p_rdc_handle The RDC handler.
  *

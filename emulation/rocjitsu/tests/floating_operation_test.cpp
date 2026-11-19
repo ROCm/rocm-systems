@@ -9,6 +9,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/input_denormal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/minmax.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/output_modifier.h"
+#include "util/host_target.h"
 #include "util/simd.h"
 
 #include <gtest/gtest.h>
@@ -92,10 +93,10 @@ TEST(FloatingOperationTest, ScalarModifierStageOrder) {
 }
 
 TEST(FloatingOperationTest, SimdModifierStageOrder) {
-#if __has_include(<experimental/simd>)
+#if RJ_HOST_HAS_STDX_SIMD
   expect_modifier_stage_order<fmt::F16, util::native<uint32_t>>();
   expect_modifier_stage_order<fmt::F32, util::native<uint32_t>>();
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
   expect_modifier_stage_order<fmt::F64, util::stdx::fixed_size_simd<uint64_t, 1>>();
 #else
   expect_modifier_stage_order<fmt::F64, util::native<uint64_t>>();
