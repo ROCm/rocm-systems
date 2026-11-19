@@ -22,7 +22,9 @@ from pathlib import Path
 
 def _load_module():
     here = Path(__file__).resolve().parent
-    spec = importlib.util.spec_from_file_location("run_amdsmi_build", here / "run_amdsmi_build.py")
+    spec = importlib.util.spec_from_file_location(
+        "run_amdsmi_build", here / "run_amdsmi_build.py"
+    )
     mod = importlib.util.module_from_spec(spec)
     # Register before exec: @dataclass resolves its module via sys.modules on
     # Python 3.12+, so a module loaded outside sys.modules fails to import.
@@ -227,9 +229,7 @@ class SummarizeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             results = Path(td)
             (results / "test_nic_vpd_suite.log").write_text("20 tests run, 0 failed\n")
-            (results / "test_nic_stats_suite.log").write_text(
-                "175 tests run, 1 failed\nExit code: 1\n"
-            )
+            (results / "test_nic_stats_suite.log").write_text("175 tests run, 1 failed\nExit code: 1\n")
             summary = results / "summary.md"
             n = rab.summarize_results(results, "TestOS", summary)
             text = summary.read_text()
