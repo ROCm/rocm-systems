@@ -877,6 +877,19 @@ def config_template_path_for_arch(
     return None
 
 
+def mapping_field_errors(
+    entry: Dict[str, Any], required: Tuple[str, ...], optional: Tuple[str, ...]
+) -> List[str]:
+    """Report each missing required field and each unknown field of a YAML mapping."""
+    errors = [f"'{field}' is required" for field in required if field not in entry]
+    errors.extend(
+        f"'{field}' is not a known field"
+        for field in entry
+        if field not in required and field not in optional
+    )
+    return errors
+
+
 def get_arch_panel_id_to_alias(arch: str) -> Dict[str, str]:
     """Return panel_id_str -> alias from the config template for arch.
 
