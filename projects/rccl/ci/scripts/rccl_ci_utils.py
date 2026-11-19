@@ -554,7 +554,8 @@ class SetupFailureReport:
     or Teams message. Wrap main() with run(), call step() before each setup
     step, and call tests_started() once the test process has launched. If
     main() stops before that, run() reports the step and the errors logged
-    so far, then re-raises.
+    so far, then re-raises. A harness that sends its own report for a setup
+    failure calls failure_reported() first, so the failure is reported once.
     """
 
     def __init__(self, subject_prefix: str) -> None:
@@ -563,6 +564,7 @@ class SetupFailureReport:
         self.notify_webhook = ""
         self.current_step = ""
         self.setup_done = False
+        self.already_reported = False
         self._errors = _ErrorLog()
 
     def notify(self, email: str, webhook: str, subject_prefix: str = "") -> None:
@@ -576,6 +578,10 @@ class SetupFailureReport:
 
     def tests_started(self) -> None:
         self.setup_done = True
+
+    def failure_reported(self) -> None:
+        """Record that the harness has already reported this failure itself."""
+        self.already_reported = True
 
     def run(self, main: Callable[[], None]) -> None:
         root = logging.getLogger()
@@ -596,7 +602,7 @@ class SetupFailureReport:
         # Before the first step the notify targets may not be known yet (for
         # example, an argparse error); once the tests launch, the harness
         # reports the result itself.
-        if self.setup_done or not self.current_step:
+        if self.setup_done or self.already_reported or not self.current_step:
             return
         lines = [
             f"{self.subject_prefix}: FAILED before any tests ran",

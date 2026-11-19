@@ -183,6 +183,17 @@ class SetupFailureReportTest(ReportCapture):
             self.run_main(main)
         self.assertEqual(raised.exception.code, 3)
 
+    def test_a_failure_the_harness_reported_itself_is_not_reported_again(self) -> None:
+        def main(report: SetupFailureReport) -> None:
+            report.step("Resolve A/B baseline")
+            report.failure_reported()
+            sys.exit(1)
+
+        with self.assertRaises(SystemExit) as raised:
+            self.run_main(main)
+        self.assertEqual(raised.exception.code, 1)
+        self.assert_not_reported()
+
     def test_only_errors_logged_during_this_run_are_reported(self) -> None:
         # Harnesses build their report at import, long before run().
         report = SetupFailureReport("RCCL Test")
@@ -284,6 +295,22 @@ class HarnessSetupFailureTest(ReportCapture):
         workload, argv = self.madengine_argv()
         self.run_harness(test_madengine, "RCCL MADEngine", argv)
         self.assert_reported(f"RCCL MADEngine {workload}", "Discover RCCL libraries")
+
+    def test_madengine_fail_before_run_reports_once(self) -> None:
+        workload, argv = self.madengine_argv()
+        unreadable = {"md5": "", "version": "", "size": 0}
+        with mock.patch.object(test_madengine, "find_rccl_library",
+                               return_value=self.tmp / "librccl.so"), \
+                mock.patch.object(test_madengine, "get_rccl_commit", return_value="abc1234"), \
+                mock.patch.object(test_madengine, "get_rccl_fingerprint",
+                                  return_value=unreadable), \
+                mock.patch.object(test_madengine, "send_report") as send_report:
+            self.run_harness(test_madengine, "RCCL MADEngine", argv)
+        send_report.assert_called_once()
+        self.assertIn("not run: Could not read the RCCL version", self.summary())
+        self.assertNotIn("FAILED before any tests ran", self.summary())
+        self.email.assert_not_called()
+        self.webhook.assert_not_called()
 
     def test_madengine_argument_error(self) -> None:
         workload, argv = self.madengine_argv(nodes=1)

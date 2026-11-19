@@ -2970,6 +2970,7 @@ def fail_before_run(args: argparse.Namespace, scale: str, reason: str) -> NoRetu
     write_github_summary(report)
     set_github_output("madengine_status", "fail")
     send_report(args, report, 1)
+    setup_report.failure_reported()
     sys.exit(1)
 
 
@@ -3088,6 +3089,7 @@ def main() -> None:
 
     results_dir = args.results_dir or Path(cluster_config["results_base"])
     if args.resolve_baseline:
+        setup_report.step("Resolve A/B baseline")
         try:
             build = resolve_baseline(args.workload, cluster_config["gpu_target"])
         except RuntimeError as exc:
