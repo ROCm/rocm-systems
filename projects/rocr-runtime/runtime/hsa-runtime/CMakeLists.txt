@@ -205,6 +205,20 @@ if ( UNDEFINED_SANITIZER OR THEROCK_SANITIZER STREQUAL "UBSAN" OR DEFINED ENV{UN
   message(STATUS "hsa-runtime64: UndefinedBehaviorSanitizer (UBSAN) enabled")
 endif()
 
+## Enable code coverage
+if(ENABLE_CODE_COVERAGE)
+  target_compile_options(${CORE_RUNTIME_TARGET} PRIVATE
+    -O0
+    -g
+    -fprofile-instr-generate
+    -fcoverage-mapping)
+
+  target_link_options(${CORE_RUNTIME_TARGET} PRIVATE
+    -fprofile-instr-generate)
+
+  message(STATUS "Code coverage enabled")
+endif()
+
 if (UNIX)
   set ( LNKSCR "hsacore.so.link" )
   set ( DRVDEF "${CMAKE_CURRENT_SOURCE_DIR}/hsacore.so.def" )

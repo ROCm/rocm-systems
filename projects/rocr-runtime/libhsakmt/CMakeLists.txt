@@ -131,6 +131,12 @@ else()
       set ( HSAKMT_LINK_FLAGS "${HSAKMT_LINK_FLAGS} -Wl,-undefined,error" )
     endif()
   endif()
+  ## Code coverage flag
+  if(ENABLE_CODE_COVERAGE)
+    set(HSAKMT_C_FLAGS "${HSAKMT_C_FLAGS}" -O0 -g -fprofile-instr-generate -fcoverage-mapping)
+    set(HSAKMT_LINK_FLAGS "${HSAKMT_LINK_FLAGS} -fprofile-instr-generate")
+    message(STATUS "Code coverage enabled")
+  endif()
 
   if (WIN32)
     if (EXISTS "${CMAKE_CURRENT_BINARY_DIR}../inc/shared")
