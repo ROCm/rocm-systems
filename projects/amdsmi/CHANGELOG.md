@@ -135,7 +135,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
-- **Fixed `amd-smi reset --gpureset` resetting only the first GPU on UALink systems**.
+- **Fixed `amd-smi reset --gpureset` resetting only the first GPU on UALink systems**.  
   - Each UALink GPU is now reset individually; GPUs in an XGMI hive are still reset once per hive.
 
 - **Fixed `amd-smi ras --cper` crashing with `TypeError` when no GPU devices are available**.  
@@ -179,7 +179,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed misleading errors when a GPU, CPU, or AI NIC driver is not loaded**.  
   - When the device is present, `amd-smi` now names the missing driver (exit code 206) instead of reporting "not supported" or an invalid parameter, and `list`, `static`, `metric`, `firmware`, `monitor`, and `topology` show the available devices with a note about the rest on stderr.
 
-- **Fixed `amdsmi_init()` printing `Exception caught: rsmi_init.` on systems without ROCm**.
+- **Fixed `amdsmi_init()` printing `Exception caught: rsmi_init.` on systems without ROCm**.  
   - On a system without KFD (`/sys/class/kfd` missing), `amdsmi_init()` with `AMDSMI_INIT_AMD_GPUS` now returns `AMDSMI_STATUS_DRIVER_NOT_LOADED` without printing, instead of `AMDSMI_STATUS_NOT_INIT`. Libraries that use AMD SMI as an optional dependency, such as hwloc, no longer print to stderr on machines without AMD GPUs.
   - Other initialization error handling is unchanged.
 
