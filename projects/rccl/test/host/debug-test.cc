@@ -143,9 +143,10 @@ class DebugMicrotest : public ::testing::Test {
   void Init() {
     if (ncclDebugFile == capture_) ncclDebugFile = stdout;  // a reset would fclose() it
     ncclDebugLevelMask = NCCL_DEBUG_LEVEL_MASK_RESET_TRIGGERED;
-    pthread_mutex_lock(&ncclDebugLock);
-    ncclDebugInit();
-    pthread_mutex_unlock(&ncclDebugLock);
+    {
+      std::lock_guard<std::mutex> lock(ncclDebugLock);
+      ncclDebugInit();
+    }
     if (ncclDebugFile == stdout) ncclDebugFile = capture_;
   }
 
@@ -763,11 +764,13 @@ TEST_F(DebugMicrotest, Log_ConcurrentLinesAreNotInterleaved) {
 TEST_F(DebugMicrotest, Log_WritesUnderTheDebugLock) {
   g_env["NCCL_DEBUG"] = "INFO";
   Init();
-  pthread_mutex_lock(&ncclDebugLock);
-  std::thread writer([] { ncclDebugLog(NCCL_LOG_INFO, NCCL_INIT, "f", 1, "late"); });
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  EXPECT_EQ(Output(), "");
-  pthread_mutex_unlock(&ncclDebugLock);
+  std::thread writer;
+  {
+    std::lock_guard<std::mutex> lock(ncclDebugLock);
+    writer = std::thread([] { ncclDebugLog(NCCL_LOG_INFO, NCCL_INIT, "f", 1, "late"); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    EXPECT_EQ(Output(), "");
+  }
   writer.join();
   EXPECT_EQ(Output(), "node1:4242:77 [3] NCCL INFO late\n");
 }

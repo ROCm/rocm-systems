@@ -26,10 +26,16 @@ ncclResult_t rocmLibraryInit() {
   static ncclResult_t result = ncclSystemError;
   std::call_once(once, [] {
     int count = 0;
+    int driverVersion = -1;
     if (hipGetDeviceCount(&count) != hipSuccess || count == 0) return;
-    if (hipDriverGetVersion(&ncclCudaDriverVersionCache) != hipSuccess) return;
-    const char* blocking = std::getenv("HIP_LAUNCH_BLOCKING");
-    ncclCudaLaunchBlocking = blocking && blocking[0] && blocking[0] != '0';
+    if (hipDriverGetVersion(&driverVersion) != hipSuccess) return;
+    __atomic_store_n(&ncclCudaDriverVersionCache, driverVersion, __ATOMIC_RELAXED);
+    auto launchBlocking = [](const char* name) {
+      const char* value = std::getenv(name);
+      return value != nullptr && value[0] != '\0' && !(value[0] == '0' && value[1] == '\0');
+    };
+    // Keep the CUDA-compatible RCCL setting as well as the native HIP name.
+    ncclCudaLaunchBlocking = launchBlocking("HIP_LAUNCH_BLOCKING") || launchBlocking("CUDA_LAUNCH_BLOCKING");
     result = ncclSuccess;
   });
   return result;
