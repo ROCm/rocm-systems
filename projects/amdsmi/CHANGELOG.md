@@ -28,6 +28,15 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Setting the current memory partition now cancels a pending memory partition change**.  
   - Previously, amd-smi did not send this request to the driver, so the next driver reload still applied a different partition requested earlier. Older amdgpu drivers ignore the request because of a driver bug and still apply the partition requested earlier; update to an amdgpu driver that has the fix. If a read-only `/sys` (for example, in a container) refuses the request, amd-smi now reports an error instead of success.
 
+- **Fixed power readings of exactly 255 W showing as N/A in the Python library**.  
+  - `amd-smi metric --power` showed `N/A` for a socket or UBB power of exactly 255 W.
+
+- **Fixed wrong overdrive clock values in the C and Python libraries**.  
+  - The memory clock range showed the fabric clock range, and the clock limits did not show the values the GPU reported.
+
+- **Fixed wrong CPU DIMM readings in the Python library on Python 3.14 and later**.  
+  - The update rate, DIMM address and temperature were wrong.
+
 ## amd_smi_lib for ROCm 10.2.0
 
 ### Added
@@ -401,15 +410,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed `amd-smi event -g` listening on the wrong GPU**.  
   - Events now come from the GPUs you select.
-
-- **Fixed power readings of exactly 255 W showing as N/A in the Python library**.  
-  - A reading of exactly 255 in any power or voltage field was treated as unavailable.
-
-- **Fixed wrong overdrive clock values in the Python library**.  
-  - The memory clock range showed the fabric clock range, and the clock limits read 0 even when the GPU reported them.
-
-- **Fixed wrong CPU DIMM readings in the Python library on Python 3.14 and later**.  
-  - The update rate, DIMM address and temperature were wrong.
 
 - **Fixed `amdsmi_get_gpu_driver_info()` reporting `0` as the driver date**.  
   - Kernels that no longer use the DRM driver date report it as `0`. `driver_date` is now empty in the C API and `N/A` in Python.
