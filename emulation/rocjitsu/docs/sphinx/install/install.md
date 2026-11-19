@@ -131,7 +131,6 @@ inside the source tree by default. To relocate the download directory
 | Option | Default | Description |
 |--------|---------|-------------|
 | `RJ_SANITIZER` | *(empty)* | Enable a sanitizer build. Accepted values: `asan`, `ubsan`, `tsan`, `msan`. |
-| `RJ_CLANG_TIDY` | `OFF` | Enable clang-tidy static analysis during the build. |
 | `RJ_RUNTIME_API_HEADERS_SOURCE_DIR` | `../../runtimes/api-headers` | Source directory of the shared runtime API headers. For detached rocJITsu checkouts, use a matching revision. |
 | `LTO` | `OFF` | Enable link-time optimization (IPO) for `Release` and `RelWithDebInfo` configurations. Incompatible with `RJ_SANITIZER`; setting both causes a fatal error. |
 | `ROCJITSU_ENABLE_VFIO` | `OFF` | Build Linux VFIO-user support. Requires CMake 3.28 or later and Linux 6.1 or later UAPI headers. |
@@ -174,20 +173,15 @@ cmake --build build
 
 ### Clang-tidy setup
 
-Enable clang-tidy static analysis by setting `RJ_CLANG_TIDY=ON`. The
-build system locates `clang-tidy` on `PATH` and, if found, sets
-`CMAKE_CXX_CLANG_TIDY` so that every C++ compile invocation runs the
-checker. If `clang-tidy` is not found, the option is silently ignored
-with a warning.
+Configure a Clang build and generate the schema headers. From the RocJITsu
+source directory, point `run-clang-tidy` at the directory containing
+`compile_commands.json` and select the source paths to check. This example checks the simulator and its project headers.
 
-``` shell
-cmake -B build -G Ninja -DRJ_CLANG_TIDY=ON
-cmake --build build
+```sh
+cmake -S . -B build -G Ninja -DCMAKE_CXX_COMPILER=clang++
+cmake --build build --target flatbuffers_schemas
+run-clang-tidy -p build -config-file .clang-tidy '/lib/rocjitsu/src/rocjitsu/vm/.*\.cpp$'
 ```
-
-The build also exports `compile_commands.json`
-(`CMAKE_EXPORT_COMPILE_COMMANDS` is always `ON`), which `clang-tidy` and
-other tooling can consume for standalone analysis.
 
 ### Pre-commit formatting hooks
 
