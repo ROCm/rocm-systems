@@ -40,6 +40,7 @@
 #include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
 #include "lib/rocprofiler-sdk/range_replay/replay_callbacks.hpp"
+#include "lib/rocprofiler-sdk/range_replay/untracked_memory.hpp"
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/experimental/range_replay.h>
@@ -51,6 +52,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <unordered_set>
 #include <vector>
 
 namespace rocprofiler
@@ -168,6 +170,12 @@ struct range_context_t
     // free followed by an allocation at the same address is a different allocation, so the pointer
     // alone is not enough.
     kernel_replay::memory_tracker::tracked_map_t snapshot_allocations = {};
+
+    // Untracked-memory check (untracked_memory.hpp): the snapshot's spans, kernarg values already
+    // looked up, and how many recorded dispatches have been checked.
+    std::vector<untracked_memory::address_span_t> covered           = {};
+    std::unordered_set<uint64_t>                  seen              = {};
+    size_t                                        untracked_scanned = 0;
 
     std::shared_ptr<external_decline_t> external = {};
 
