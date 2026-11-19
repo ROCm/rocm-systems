@@ -3782,7 +3782,7 @@ TEST(Cdna4OmodExecutionTest, IeeeSuppressesTrigPreopOmod) {
   }
 }
 
-TEST(Cdna4OmodExecutionTest, MulExceptionClassifierUsesEffectiveOmod) {
+TEST(Cdna4OmodExecutionTest, MulExceptionReportingUsesEffectiveOmod) {
   amdgpu::GpuMemory gpu_mem("cdna4_mul_exception_omod_mem");
   amdgpu::L2Cache l2("cdna4_mul_exception_omod_l2");
 
@@ -3812,10 +3812,12 @@ TEST(Cdna4OmodExecutionTest, MulExceptionClassifierUsesEffectiveOmod) {
 
   constexpr uint32_t kOverflow = 1u << 3;
   wf->set_mode_raw(amdgpu::Wavefront::IEEE_BIT);
-  EXPECT_EQ(amdgpu::classify_mul_f32_vop3(*mul, *wf) & kOverflow, 0u);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+  EXPECT_EQ(wf->pending_alu_causes() & kOverflow, 0u);
 
   wf->set_mode_raw(0u);
-  EXPECT_EQ(amdgpu::classify_mul_f32_vop3(*mul, *wf) & kOverflow, kOverflow);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+  EXPECT_EQ(wf->pending_alu_causes() & kOverflow, kOverflow);
 
   if (!wf->is_halted()) {
     wf->halt();

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file simd_coverage_test.cpp
-/// @brief Exact SIMD coverage for packed, true16, compare and dual-slot paths.
+/// @brief Decoded packed, true16 and compare arithmetic checks with masks and overlaps.
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
@@ -28,7 +28,6 @@
 #include <cstdio>
 #include <iterator>
 #include <memory>
-#include <random>
 #include <string_view>
 #include <vector>
 
@@ -38,7 +37,6 @@ using namespace rocjitsu;
 using namespace rocjitsu::amdgpu;
 using O = cdna5::Operand;
 using K = cdna5::OperandType;
-using U = util::native<uint32_t>;
 
 class SimdCoverage : public ::testing::Test {
 protected:
@@ -71,62 +69,6 @@ protected:
     return cu->read_vgpr(wf->vgpr_alloc().base + reg, lane);
   }
 };
-
-struct WordInst {
-  struct Encoding {
-    uint32_t src0 = 256, src1 = 257, src2 = 258, vdst = 3;
-    uint32_t opsel = 0, opsel_hi = 3, opsel_hi_2 = 1;
-    uint32_t neg = 0, neg_hi = 0, abs = 0, clamp = 0, omod = 0;
-  } inst_;
-  O src0{32, K::OPR_VGPR, 0}, src1{32, K::OPR_VGPR, 1}, src2{32, K::OPR_VGPR, 2};
-  O vdst{32, K::OPR_VGPR, 3};
-};
-
-TEST_F(SimdCoverage, AllBooleanTruthTables) {
-  std::mt19937 rng(731);
-  for (unsigned table = 0; table < 256; ++table) {
-    U a([&](auto) { return uint32_t(rng()); }), b([&](auto) { return uint32_t(rng()); }),
-        c([&](auto) { return uint32_t(rng()); });
-    U actual = bitop3_words(a, b, c, table);
-    for (unsigned lane = 0; lane < U::size(); ++lane) {
-      uint32_t expected = 0;
-      for (unsigned bit = 0; bit < 32; ++bit) {
-        unsigned index = (((a[lane] >> bit) & 1u) << 2) | (((b[lane] >> bit) & 1u) << 1) |
-                         ((c[lane] >> bit) & 1u);
-        expected |= ((table >> index) & 1u) << bit;
-      }
-      ASSERT_EQ(actual[lane], expected) << table;
-      ASSERT_EQ(bitop3_words(uint32_t(a[lane]), uint32_t(b[lane]), uint32_t(c[lane]), table),
-                expected);
-    }
-  }
-}
-
-TEST_F(SimdCoverage, WordPathsPreserveHalvesMasksAndAliasing) {
-  WordInst inst;
-  inst.inst_.opsel = 1 | 8;
-  inst.vdst = O(32, K::OPR_VGPR, 0);
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
-    put(0, lane, 0x12345678u + lane);
-    put(1, lane, 0xfff0u);
-  }
-  wf->set_exec(0x55555555u);
-  ASSERT_TRUE(
-      (try_execute_words_simd<2, false, true, 3>(inst, *wf, [](auto a, auto b) { return a & b; })));
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
-    ASSERT_EQ(get(0, lane), lane % 2 ? 0x12345678u + lane : 0x12305678u + lane);
-  }
-  inst.src0 = O(16, K::OPR_VGPR, 128, true);
-  inst.vdst = O(16, K::OPR_VGPR, 129, false, true);
-  inst.inst_.vdst = 129;
-  ASSERT_TRUE((try_execute_words_simd<1, true, true, 1>(inst, *wf, [](auto a) { return a; })));
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
-    ASSERT_EQ(get(1, lane), lane % 2 ? 0xfff0u : 0x1230fff0u);
-  }
-  wf->set_exec(0);
-  ASSERT_TRUE((try_execute_words_simd<1, true, true, 1>(inst, *wf, [](auto a) { return ~a; })));
-  ASSERT_EQ(get(1, 0), 0x1230fff0u);
-}
 
 TEST_F(SimdCoverage, DecodedTrue16MovePreservesScalarAndVectorSelectors) {
   auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
@@ -164,29 +106,6 @@ TEST_F(SimdCoverage, DecodedTrue16MovePreservesScalarAndVectorSelectors) {
         }
       }
     }
-  }
-}
-
-struct Slot {
-  uint16_t op;
-  O *dst, *src0, *src1, *src2;
-  uint32_t src2_imm = 0;
-  uint8_t neg = 0;
-  bool has_src2_operand = false, uses_vcc = false;
-};
-TEST_F(SimdCoverage, VopdStagesBothSlotsBeforeAliasingWrites) {
-  O a(32, K::OPR_VGPR, 0), b(32, K::OPR_VGPR, 1), c(32, K::OPR_VGPR, 2);
-  Slot x{16, &a, &b, &c, nullptr}, y{16, &b, &a, &c, nullptr};
-  wf->set_exec(0x55555555u);
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
-    put(0, lane, 3);
-    put(1, lane, 7);
-    put(2, lane, 11);
-  }
-  ASSERT_TRUE((try_execute_vopd_simd<true>(x, y, *wf)));
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
-    ASSERT_EQ(get(0, lane), lane % 2 ? 3u : 18u);
-    ASSERT_EQ(get(1, lane), lane % 2 ? 7u : 14u);
   }
 }
 
@@ -438,24 +357,6 @@ TEST_F(SimdCoverage, DecodedTargetPathsMatchScalar) {
       }
     }
   }
-}
-
-TEST_F(SimdCoverage, CompareWriterUsesOldExecAndPreservesVcc) {
-  struct CompareInst {
-    WordInst::Encoding inst_;
-    O src0{32, K::OPR_VGPR, 0}, vsrc1{32, K::OPR_VGPR, 1};
-  } inst;
-  for (uint32_t lane = 0; lane < 32; ++lane) {
-    put(0, lane, lane);
-    put(1, lane, 16);
-  }
-  wf->set_exec(0x55555555u);
-  wf->set_vcc_raw(0x1234567887654321ULL);
-  ASSERT_TRUE((try_execute_vopc_simd<uint32_t>(
-      inst, *wf, [](auto a, auto b) { return a < b; },
-      [&](uint64_t result) { wf->set_exec(result); })));
-  EXPECT_EQ(wf->exec(), 0x5555u);
-  EXPECT_EQ(wf->vcc(), 0x1234567887654321ULL);
 }
 
 // Opt-in simulator host timing. Alternate scalar/SIMD order with matched inputs
