@@ -5408,7 +5408,8 @@ amdsmi_status_t amdsmi_get_clk_freq(amdsmi_processor_handle processor_handle,
  *
  *  @param[in] processor_handle a processor handle
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail.
+ *  ::AMDSMI_STATUS_AMDGPU_RESTART_ERR when the driver reports that the GPU recovery failed.
  */
 amdsmi_status_t amdsmi_reset_gpu(amdsmi_processor_handle processor_handle);
 

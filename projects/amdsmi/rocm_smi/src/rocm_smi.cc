@@ -3966,8 +3966,14 @@ rsmi_status_t rsmi_dev_gpu_reset(uint32_t dv_ind) {
   rsmi_status_t ret;
   uint64_t status_code = 0;
 
-  // Read amdgpu_gpu_recover to reset it
+  // Reading amdgpu_gpu_recover runs the recovery and yields its result (0 or -errno).
   ret = get_dev_value_int(amd::smi::kDevGpuReset, dv_ind, &status_code);
+  if (ret == RSMI_STATUS_SUCCESS && status_code != 0) {
+    ss << __PRETTY_FUNCTION__ << " | GPU recovery failed with "
+       << static_cast<int64_t>(status_code);
+    LOG_ERROR(ss);
+    ret = RSMI_STATUS_AMDGPU_RESTART_ERR;
+  }
   ss << __PRETTY_FUNCTION__ << " | ======= end ======= | returning "
      << getRSMIStatusString(ret, false);
   LOG_INFO(ss);

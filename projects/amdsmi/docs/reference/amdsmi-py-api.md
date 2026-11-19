@@ -4620,6 +4620,7 @@ Exceptions that can be thrown by `amdsmi_reset_gpu` function:
 
 - `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
 - `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_AMDGPU_RESTART_ERR` - The driver reported that the GPU recovery failed
 
 Example:
 
