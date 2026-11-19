@@ -29,8 +29,10 @@ set(_MICRO_RAS_DEFS
   RAS_DIAGNOSTICS_NET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_net.cc"
   RAS_DIAGNOSTICS_PATHS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_paths.cc"
   RAS_DIAGNOSTICS_PCI_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_pci.cc"
+  RAS_DIAGNOSTICS_XID_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_xid.cc"
   RAS_PARAM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/ras_param.cc"
   RAS_PEERS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/peers.cc"
+  RAS_PROGRESS_MONITOR_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/progress_monitor.cc"
   RASNET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/rasnet.cc")
 
 macro(rccl_add_ras_micro_binary _name _test)
@@ -121,6 +123,12 @@ rccl_add_ras_micro_binary(rccl-UnitTestsMicroRasDiagnostics ras-diagnostics-test
     fakes/env_fakes.cc
     fakes/nccl_fakes.cc)
 
+rccl_add_ras_micro_binary(rccl-UnitTestsMicroRasDiagnosticsXid ras-diagnostics-xid-test.cc
+  SOURCES
+    fakes/nccl_fakes.cc
+    fakes/ras_comms_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_checks_common.cc)
+
 rccl_add_ras_micro_binary(rccl-UnitTestsMicroRasParam ras-param-test.cc
   SOURCES
     fakes/env_fakes.cc
@@ -133,6 +141,11 @@ rccl_add_ras_micro_binary(rccl-UnitTestsMicroRasPeers ras-peers-test.cc
     fakes/ras_client_support_fakes.cc
     fakes/ras_message_fakes.cc
     fakes/ras_net_fakes.cc)
+
+rccl_add_ras_micro_binary(rccl-UnitTestsMicroRasProgressMonitor ras-progress-monitor-test.cc
+  SOURCES
+    fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc)
 
 rccl_add_ras_micro_binary(rccl-UnitTestsMicroRas ras-test.cc
   SOURCES

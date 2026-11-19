@@ -15,6 +15,7 @@ gfx1151 (GFX11.5/RDNA3.5), with end-to-end tests for each. Support for gfx1250
 (CDNA5) is limited and under active development; end-to-end tests currently
 cover its tensor DMA races (see Tensor DMA races below) and its counter-capacity
 backpressure. The plugin also tracks partial waits and FLAT destination lanes on RDNA4.
+Native tests cover CDNA1/2 counter capacity and EXEC-zero VMCNT accounting.
 
 ## Quick start
 
@@ -264,7 +265,12 @@ races. Some examples:
 
 - **VGPR races**: a vector register is read or overwritten by an instruction
   before a pending global or LDS load has completed (`s_waitcnt vmcnt` /
-  `s_waitcnt lgkmcnt` insufficient).
+  `s_waitcnt lgkmcnt` insufficient). On GFX10, `DS_ORDERED_COUNT` supplies a
+  whole-wave result under LGKMCNT and an outgoing contribution from the first
+  active lane under EXPCNT. The detector warns when an instruction reads or
+  overwrites the pending result. It also warns when an instruction overwrites
+  the contributing lane of the outgoing VGPR before its EXPCNT event retires.
+  Waiting for one counter leaves the other obligation in effect.
 - **Scalar-register races**: an SGPR or TTMP is read or overwritten before a
   pending scalar-memory load has completed. A later scalar load to the same
   destination is also checked because scalar-memory results can complete out
@@ -458,8 +464,9 @@ proves that the oldest read into `v0` completed. If those pending operations
 belonged to different or unordered classes, the capacity stall would not prove
 which individual event completed.
 
-On RDNA1 and RDNA2, GWS operations hold the contributing source VGPR and EXEC
-until EXPCNT allows an overwrite.
+On RDNA1 and RDNA2, GDS loads and returning atomics expose their destination through
+LGKMCNT. EXPCNT separately protects the source VGPRs and EXEC from overwrite.
+A wait on only one counter releases only its associated dependency.
 
 The detector records the target-specific wait-counter family on every event.
 It handles both the combined wait fields and the standalone counter forms on
@@ -479,16 +486,13 @@ SAMPLECNT, ASYNCCNT and TENSORCNT hold up to 63 positions where implemented,
 KMCNT holds up to 31, and BVHCNT and EXPCNT hold up to 7. Generic FLAT
 uses the target-specific admission rules above.
 
-On CDNA4, a buffer, global or scratch instruction issued with wave
-EXEC zero counts on VMCNT and completes in order with the wave's other vector
-memory instructions (CDNA4 ISA sections 3.3, 4.4 and 10.5). This was measured
-on MI355X (gfx950) for buffer and global loads to VGPRs, buffer and global
-stores, and buffer loads to LDS (#15938). Such an instruction applies VMCNT
-backpressure and keeps its slot, recorded as an event with no registers or LDS
-bytes, so a later `s_waitcnt vmcnt(N)` counts it; an EXEC-zero
-`scratch_load_dword`, for example, counts toward `vmcnt(1)`. DS and FLAT
-instructions issued with wave EXEC zero were not measured on CDNA4 and keep no
-slot.
+On CDNA1 through CDNA4, the detector retains ordered VMCNT slots for buffer,
+global and scratch instructions issued with EXEC zero. These slots count
+toward backpressure and partial waits but have no register or LDS accesses.
+For example, after an active buffer load and an EXEC-zero buffer load,
+`s_waitcnt vmcnt(1)` completes the older load.
+
+EXEC-zero DS and generic FLAT instructions remain outside this accounting.
 
 On gfx1250 it is modeled for each split counter: LOADcnt, STOREcnt, DScnt,
 ASYNCcnt and TENSORcnt are 6-bit counters and KMcnt is a 5-bit counter (the
@@ -540,8 +544,11 @@ ordinary VMEM loads and image samples advance VMCNT in issue order, so a
 partial wait counts younger loads of either kind. Their register writes can
 complete out of order across the two kinds. The detector checks overlapping
 destinations separately when deciding whether to report an overwrite.
-The inline GFX10 query `IMAGE_GET_RESINFO` occupies VMCNT. The detector tracks
-the VGPRs and lanes it writes in ordinary load writeback order.
+
+Inline `IMAGE_GET_LOD` on GFX10/11 and `IMAGE_GET_RESINFO` occupy VMCNT
+(LOADCNT for GFX12 RESINFO). The detector tracks the VGPRs and lanes written
+by each successful query. GET_LOD uses sample writeback order and GET_RESINFO
+uses ordinary load writeback order.
 
 The plugin keeps track, for all registers and LDS memory bytes, of which memory
 operations are in flight. When an instruction in the emulator accesses an LDS
