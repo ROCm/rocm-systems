@@ -308,9 +308,11 @@ __host__ void IpcOnImpl::ipcHostStop() {
 __host__ void IpcSdmaImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
                                        MPI_Comm thread_comm) {
   IpcOnImpl::ipcHostInit(my_pe, heap_bases, thread_comm);
-  // shm_comm is the IPC pod, which vmm_fabric can stretch over several hosts.
+  // shm_comm is the IPC pod, which vmm_fabric can stretch over several hosts. The exchange is raw
+  // bytes; MPI_CHAR, like the other byte allgathers here, because rocshmem_mpi.hpp (used when no
+  // external MPI is found, as in TheRock CI) does not define MPI_BYTE.
   sdmaImpl_.sdmaHostInit(my_pe, shm_size, shm_rank, [&](void *buf, int bytes) {
-    mpilib_ftable_.Allgather(MPI_IN_PLACE, bytes, MPI_BYTE, buf, bytes, MPI_BYTE, shm_comm);
+    mpilib_ftable_.Allgather(MPI_IN_PLACE, bytes, MPI_CHAR, buf, bytes, MPI_CHAR, shm_comm);
   });
 }
 
