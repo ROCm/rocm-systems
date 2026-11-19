@@ -15,6 +15,14 @@ if(BUILD_TESTING)
     endif()
 
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        add_executable(hsa_code_object_info tests/abi/code_object_info.c)
+        target_compile_features(hsa_code_object_info PRIVATE c_std_11)
+        target_link_libraries(hsa_code_object_info PRIVATE rocm_runtime::hsa_shared)
+        add_test(NAME hsa.code_object_info COMMAND hsa_code_object_info)
+        set_tests_properties(hsa.code_object_info PROPERTIES
+            LABELS "host;abi" SKIP_RETURN_CODE 77 TIMEOUT 30
+            ENVIRONMENT "ROCR_VISIBLE_DEVICES="
+            ENVIRONMENT_MODIFICATION "HSA_TOOLS_LIB=unset:")
         add_executable(hsa_loader_extensions tests/abi/loader_extensions.c)
         target_compile_features(hsa_loader_extensions PRIVATE c_std_11)
         target_link_libraries(hsa_loader_extensions PRIVATE rocm_runtime::hsa_shared)

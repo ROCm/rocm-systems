@@ -211,20 +211,10 @@ pub unsafe extern "C" fn hsa_code_object_get_info(
                 CODE_OBJECT_INFO_MACHINE_MODEL => {
                     value.cast::<u32>().write(MACHINE_MODEL_LARGE);
                 }
-                CODE_OBJECT_INFO_PROFILE => {
-                    value.cast::<u32>().write(match object.contract().profile {
-                        rocloader::Profile::Base => PROFILE_BASE,
-                        rocloader::Profile::Full => PROFILE_FULL,
-                    })
-                }
-                CODE_OBJECT_INFO_DEFAULT_FLOAT_ROUNDING_MODE => {
-                    value.cast::<u32>().write(match object.contract().rounding {
-                        rocloader::FloatRoundingMode::Default => {
-                            DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT
-                        }
-                        rocloader::FloatRoundingMode::Zero => DEFAULT_FLOAT_ROUNDING_MODE_ZERO,
-                        rocloader::FloatRoundingMode::Near => DEFAULT_FLOAT_ROUNDING_MODE_NEAR,
-                    });
+                CODE_OBJECT_INFO_PROFILE | CODE_OBJECT_INFO_DEFAULT_FLOAT_ROUNDING_MODE => {
+                    // Modern objects do not carry the legacy HSAIL note that
+                    // defines these attributes.
+                    return INVALID_CODE_OBJECT;
                 }
                 _ => return INVALID_ARGUMENT,
             }
