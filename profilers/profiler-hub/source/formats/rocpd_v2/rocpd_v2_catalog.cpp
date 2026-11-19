@@ -199,15 +199,13 @@ rocpd_v2_reader::build_kernel_symbols(reader_catalog_t& catalog)
         std::optional<size_t> op_type_id;
     };
 
-    const std::string sql = fmt::format(
-        "SELECT O.description_id, O.opType_id FROM rocpd_op O WHERE {} "
-        "GROUP BY O.description_id, O.opType_id",
-        rocpd_v2::op_kind_where("O", false));
+    const std::string sql =
+        fmt::format("SELECT O.description_id, O.opType_id FROM rocpd_op O WHERE {} "
+                    "GROUP BY O.description_id, O.opType_id",
+                    rocpd_v2::op_kind_where("O", false));
     m_backend
         ->create_read_statement_executor<kernel_name_row_t>(
-            sql,
-            &kernel_name_row_t::description_id,
-            &kernel_name_row_t::op_type_id)()
+            sql, &kernel_name_row_t::description_id, &kernel_name_row_t::op_type_id)()
         .for_each([&](const kernel_name_row_t& row) {
             const std::optional<size_t> name_id =
                 op_name_id(row.description_id, row.op_type_id);

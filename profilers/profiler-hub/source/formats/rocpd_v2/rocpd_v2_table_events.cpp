@@ -379,10 +379,10 @@ rocpd_v2_reader::read_table_events(const resolved_event_query& query,
             {
                 out.kernel_id = out.name_id;
             }
-            out.nid         = rocpd_v2::k_node_id;
-            out.process_id  = or_zero(row.pid);
-            out.pid         = or_zero(row.pid);
-            out.tid         = or_zero(row.tid);
+            out.nid        = rocpd_v2::k_node_id;
+            out.process_id = or_zero(row.pid);
+            out.pid        = or_zero(row.pid);
+            out.tid        = or_zero(row.tid);
             if(row.pid.has_value() && row.tid.has_value())
             {
                 if(const auto thread = thread_info(row.pid.value(), row.tid.value()))
