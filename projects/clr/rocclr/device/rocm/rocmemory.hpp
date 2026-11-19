@@ -137,8 +137,9 @@ class Memory : public device::Memory {
   //! a roc::Memory base pointer without a derived-class cast.
   bool HostLockOwner() const { return hostLockOwner_; }
 
-  //! True only when the owner's lock call covered every device in the context. Siblings
-  //! may only reuse the owner's mapping when this is true.
+  //! True only when this object's lock call covered every GPU agent visible to the
+  //! process (see Device::hostLock's mapAllAgents). Siblings may only reuse the owner's
+  //! mapping when this is true.
   bool HostLockAllAgents() const { return hostLockAllAgents_; }
 
  protected:

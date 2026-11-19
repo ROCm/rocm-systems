@@ -1224,8 +1224,9 @@ bool Buffer::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
                                        getHostMemorySegment(memFlags), tryAllAgents);
         const bool lockedAllAgents = tryAllAgents && deviceMemory_ != nullptr;
         if (deviceMemory_ == nullptr && tryAllAgents) {
-          // The group lock failed (e.g. a peer agent is unavailable); fall back to
-          // locking just this device instead of failing the whole hipHostRegister call.
+          // The group lock failed (e.g. a peer agent's pool access or a resource limit);
+          // fall back to locking just this device instead of failing the whole
+          // hipHostRegister call.
           deviceMemory_ = dev().hostLock(owner()->getHostMem(), owner()->getSize(),
                                          getHostMemorySegment(memFlags));
         }
