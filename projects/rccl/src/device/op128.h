@@ -379,11 +379,8 @@ DEFINE_ld_st__size(1, uint8_t, b8, r) DEFINE_ld_st__size(2, uint16_t, b16, h) DE
 #endif
 }
 
-// gfx1250 marks every atomic store "single access": the compiler puts s_wait_xcnt 0 ahead of each one so an XNACK
-// replay never repeats it, which leaves one 16-byte store per address translation in flight. A Simple hunk's stores are
-// plain data behind the step post, so a repeat is harmless: issue them as buffer stores, which keep scope:SCOPE_SYS
-// and the cheap post-send fence, from one wave-uniform base. Configure with -DENABLE_SIMPLE_BUFFER_STORE=OFF to keep
-// the atomic stores.
+// gfx1250 waits s_wait_xcnt 0 before each atomic store. reduceCopy's plain data stores use buffer stores instead:
+// a replayed store rewrites the same value.
 #if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && \
   !defined(RCCL_DISABLE_SIMPLE_BUFFER_STORE) && __has_builtin(__builtin_amdgcn_raw_buffer_store_b128) && \
   __has_builtin(__builtin_amdgcn_make_buffer_rsrc)

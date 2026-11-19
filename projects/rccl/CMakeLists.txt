@@ -130,7 +130,7 @@ option(ENABLE_TDM_PRIM_LL128                   "Build the experimental gfx1250 T
 option(ENABLE_STORE_FREE_STEP_BARRIER          "gfx1250 LL and LL128 step barriers skip waiting for remote stores" ON)
 option(ENABLE_SIMPLE_FUSED_STEP_END            "gfx1250 Simple drains a step's loads and stores once before posting it" ON)
 option(ENABLE_SIMPLE_STORE_FREE_STEP_START     "gfx1250 Simple's start-of-step barrier orders LDS only" ON)
-option(ENABLE_SIMPLE_BUFFER_STORE              "gfx1250 Simple stores a hunk with buffer stores (no xcnt wait per store)" ON)
+option(ENABLE_SIMPLE_BUFFER_STORE              "gfx1250 reduceCopy issues 16-byte stores as buffer stores" ON)
 option(ENABLE_GFX1250_AR_RING_LL128_BY_CHUNK   "gfx1250 SPX Ring AllReduce picks LL128 or Simple by per-rank chunk cost" ON)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)

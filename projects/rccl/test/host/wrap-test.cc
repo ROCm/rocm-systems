@@ -42,6 +42,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <string>
@@ -1906,8 +1907,8 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250TreeAllReduceKeepsLL
       });
 }
 
-// Ring AllReduce keeps LL128 up to the larger of nRanks x 4 MiB (inclusive) and the model's 16 MiB ceiling, and
-// returns to Simple one byte later: Simple from 256M at 8-32 ranks, LL128 at 32 ranks 128M.
+// Ring AllReduce keeps LL128 up to the larger of nRanks x 4 MiB (inclusive) and the model's 16 MiB ceiling, then
+// Simple. This comm has no channels, so the cost rule stays off (ByChunkCost below covers it).
 TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250RingAllReduceLL128ScalesWithRanks) {
   RUN_ISOLATED_TEST(
       "Wrap_UpdateCollectiveProtocol_Gfx1250RingAllReduceLL128ScalesWithRanks",
@@ -1954,8 +1955,7 @@ void SetGfx1250RingGeometry(ncclComm* comm, int nChannels = 256) {
   comm->unroll = NCCL_UNROLL_32;
 }
 
-// Every rank's peer info reports `bandwidth` as its fabric bandwidth (amd-smi field; 0 = no fabric). Caller frees
-// comm->peerInfo with free().
+// Every rank's peer info reports `bandwidth` as its fabric bandwidth (0 = no fabric). Free with DeleteFabricComm().
 void SetFabricBandwidth(ncclComm* comm, uint32_t bandwidth) {
   comm->peerInfo = static_cast<ncclPeerInfo*>(calloc(comm->nRanks, sizeof(ncclPeerInfo)));
   for (int r = 0; r < comm->nRanks; r++) {
@@ -1972,12 +1972,8 @@ void DeleteFabricComm(ncclComm* comm) {
 
 }  // namespace
 
-// Past nRanks x 4 MiB, Ring AllReduce keeps LL128 only where its per-step cost on the per-rank chunk C (bytes per
-// channel per rank) is 4% under Simple's, each the fixed part plus the larger of unit work and wire time.
-// 256 channels on a 1800000 fabric (units decide): 12, 24 and 28 ranks at 256M (C 87392 / 43696 / 37456 B), 24 ranks
-// at 512M; never at a power-of-two C (8/16/32 ranks), whose last LL128 warp pass is nearly empty, nor past 2 LL128
-// passes (C over 122880 B: 12 ranks 512M, 24 ranks 1G, 28 ranks 1G), nor past one LL128 loop.
-// 192 channels on a 900000 fabric (wire decides): Simple wherever the floor ends, as LL128 sends 16/15 of C.
+// Past nRanks x 4 MiB, LL128 only where rcclArRingLL128BeatsSimple prices it 4% under Simple: the units decide on 256
+// channels and a 1800000 fabric, the wire on 192 channels and 900000 (LL128 sends 16/15 of C).
 TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250RingAllReduceLL128ByChunkCost) {
   RUN_ISOLATED_TEST(
       "Wrap_UpdateCollectiveProtocol_Gfx1250RingAllReduceLL128ByChunkCost",
@@ -9027,6 +9023,25 @@ namespace real_arch_thresholds {
 // The real tables, namespaced so they do not collide with fakes/rccl_arch_thresholds_fakes.cc.
 #include "rccl_arch_thresholds.cc"
 }  // namespace real_arch_thresholds
+
+// The Ring AllReduce LL128 floor and cost entries the ByChunkCost test runs on are the gfx1250 SPX table's; DPX keeps
+// the cost rule off.
+TEST(WrapMicrotest, Gfx1250ArRingLL128CostEntriesMatchTheRealTables) {
+  const rcclArchThresholds* spx = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+  const rcclArchThresholds* dpx = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+  ASSERT_NE(nullptr, spx);
+  ASSERT_NE(nullptr, dpx);
+  const rcclArchThresholds* t = Gfx1250Table();
+  EXPECT_EQ(t->arRingLL128MaxPerRank, spx->arRingLL128MaxPerRank);
+  EXPECT_EQ(t->arRingLL128StepNs, spx->arRingLL128StepNs);
+  EXPECT_EQ(t->arRingLL128PassNs, spx->arRingLL128PassNs);
+  EXPECT_EQ(t->arRingSimpleStepNs, spx->arRingSimpleStepNs);
+  EXPECT_EQ(t->arRingSimpleHunkNs, spx->arRingSimpleHunkNs);
+  EXPECT_EQ(t->arRingWireNsScale, spx->arRingWireNsScale);
+  EXPECT_EQ(t->arRingLL128MarginPct, spx->arRingLL128MarginPct);
+  EXPECT_EQ(t->arRingLL128MaxPasses, spx->arRingLL128MaxPasses);
+  EXPECT_EQ(0u, dpx->arRingLL128PassNs);
+}
 
 // The registered AllReduce re-route reads its bounds from the arch table: the gfx1250 SPX table re-routes, while the
 // DPX table, no table and RCCL_IGNORE_ARCH_TABLE=1 keep the choice symk's withdrawal leaves, with no grid cap.

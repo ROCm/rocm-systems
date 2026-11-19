@@ -156,11 +156,9 @@ struct rcclArchThresholds {
   // model's range. The two AllReduce LL128 entries apply at any rank count, the
   // rest from rankScaledMinRanks ranks.
   size_t arRingLL128MaxPerRank;   // Ring AllReduce LL128 up to nRanks x this
-  // Past that, Ring AllReduce keeps LL128 while it costs clearly less than Simple per ring step, priced on the chunk
-  // C one rank sends per channel per step (nBytes / nChannels / nRanks) by rcclArRingLL128BeatsSimple. Per step,
-  // each protocol costs its fixed part plus the larger of its unit work and its wire time on the fabric. 0 = off.
+  // Past that, LL128 only where rcclArRingLL128BeatsSimple prices it under Simple per ring step.
   uint32_t arRingLL128StepNs;     // LL128 fixed cost per step
-  uint32_t arRingLL128PassNs;     // per pass of all LL128 warps
+  uint32_t arRingLL128PassNs;     // per pass of all LL128 warps; 0 = no cost rule
   uint32_t arRingSimpleStepNs;    // Simple fixed cost per step
   uint32_t arRingSimpleHunkNs;    // per Simple hunk (Unroll x WarpSize x 16 B)
   uint32_t arRingWireNsScale;     // wire ns = nChannels x wire bytes x this / fabric bandwidth; 0 = no wire term

@@ -83,41 +83,28 @@ class Primitives<T, RedOp, Fan, Direct,
     else barrier();
   }
 
-  // Start of a step: the wait threads' LDS pointers must reach the workers, and no worker may touch the step's slot
-  // before the wait has seen it. Both are LDS order and execution order: the slot accesses that follow issue after the
-  // barrier, behind the wait thread's system-scope acquire. No global store has to be visible to the block here: the
-  // last step's data and loads drained at its end barrier, and the tail or head the post threads stored after it only
-  // has to reach the peer. On gfx1250 a workgroup fence waits for that store's fabric round trip (s_wait_storecnt);
-  // these fences order LDS only. Comms with a connFifo on either side (net proxy) keep subBarrier().
+  // Orders LDS only: the last step drained at its end barrier, and the post threads' tail or head only has to reach
+  // the peer. Slot loads issue after the wait thread's system-scope acquire. connFifo comms keep subBarrier().
   inline __device__ void stepStartBarrier() {
 #if RCCL_SIMPLE_STORE_FREE_STEP_START
     if (stepStoreFree && nworkers != WARP_SIZE) {
-      __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
-      barrier_generic_ordered(__atomic_signal_fence(__ATOMIC_SEQ_CST), nworkers, barrier_next, barriers,
-                              __ATOMIC_RELAXED, __ATOMIC_RELAXED);
-      __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
+      ldsOrderedBarrier(nworkers, threadsPerBlock, barrier_next, barriers);
       return;
     }
 #endif
     subBarrier();
   }
 
-  // End of a step, ahead of postPeer(). Returns true where it already ran the cheap post-send fence, so postPeer()
-  // skips its second barrier. Store and load counters are per wave, so every wave drains its own before it arrives:
-  // the post thread's step then releases the whole block's data, and the head store hands back a slot no load still
-  // reads. The barrier itself only has to order LDS (srcs/dsts are rewritten for the next slice). A one-warp group
-  // has no other wave to wait for, as in barrier() and the cheap fence.
+  // Each wave drains its own loads and stores, then an LDS-only barrier. Returns true where that replaced the cheap
+  // post-send fence, so postPeer() skips its second barrier.
   inline __device__ bool stepEndBarrier() {
 #if RCCL_SIMPLE_FUSED_STEP_END
     if (skip_fence) {
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
       asm volatile("s_wait_loadcnt 0x0\n\ts_wait_storecnt 0x0" ::: "memory");
-      __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
       if (nworkers != WARP_SIZE) {
-        barrier_generic_ordered(__atomic_signal_fence(__ATOMIC_SEQ_CST), nworkers, barrier_next, barriers,
-                                __ATOMIC_RELAXED, __ATOMIC_RELAXED);
+        ldsOrderedBarrier(nworkers, threadsPerBlock, barrier_next, barriers);
       }
-      __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
       return true;
     }
 #endif

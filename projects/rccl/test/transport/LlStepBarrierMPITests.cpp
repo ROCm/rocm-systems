@@ -8,13 +8,11 @@
  * @file LlStepBarrierMPITests.cpp
  * @brief Ring LL, LL128 and Simple collectives over P2P, checked element by element.
  *
- * On gfx1250 Simple runs stepEndBarrier(): one barrier drains each wave's loads and stores before the post thread
- * publishes the step, where the cheap post-send fence ran a second barrier, and its start-of-step barrier
- * (stepStartBarrier()) does not wait for the last step's tail and head. Every rank and every iteration sends
- * different input, so data read before it landed, or a slot overwritten while it is still read, shows up as a wrong
- * element rather than only as a hang. LL, LL128 and other architectures run their usual barriers through the same
- * test. DDA, CE, direct and symmetric kernels are chosen ahead of Ring and their switches
- * are cached for the process, so run the test in its own process with them off:
+ * On gfx1250 these run the store-free step barriers (storeFreeStepBarrier(), Simple's stepStartBarrier() and
+ * stepEndBarrier()). Every rank and every iteration sends different input, so data read before it landed, or a slot
+ * overwritten while it is still read, shows up as a wrong element rather than only as a hang. Other architectures run
+ * the full-fence barriers through the same test. DDA, CE, direct and symmetric kernels are chosen ahead of Ring and
+ * their switches are cached for the process, so run the test in its own process with them off:
  *   RCCL_LL128_FORCE_ENABLE=1 RCCL_DDA_ENABLE=0 RCCL_DIRECT_ALLGATHER_DISABLE=1 RCCL_DIRECT_REDUCE_SCATTER_DISABLE=1
  *   RCCL_SYM_K_MAX_BYTES=0 RCCL_TDM_LL128_ENABLE=0 mpirun -np 8 ./rccl-UnitTestsMPI --gtest_filter=LlStepBarrierMPITest.*
  */
