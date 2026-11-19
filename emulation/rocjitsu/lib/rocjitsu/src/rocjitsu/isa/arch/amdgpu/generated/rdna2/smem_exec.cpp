@@ -227,5 +227,31 @@ void SMemrealtimeSmem::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_memrealtime_smem(*this, wf);
 }
 
+void SAtcProbeSmem::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->translation_probe = true;
+  d->num_dwords = 1;
+  d->is_load = false;
+  auto addr = smem_calculate_address(inst_, wf, d.get());
+  if (!addr)
+    return;
+  d->addr = *addr;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  set_data(std::move(d));
+}
+
+void SAtcProbeBufferSmem::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->translation_probe = true;
+  d->num_dwords = 1;
+  d->is_load = false;
+  auto addr = smem_calculate_address(inst_, wf, d.get());
+  if (!addr)
+    return;
+  d->addr = *addr;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  set_data(std::move(d));
+}
+
 } // namespace rdna2
 } // namespace rocjitsu

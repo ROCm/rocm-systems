@@ -41,10 +41,18 @@ __device__ void wave_broadcast([[maybe_unused]] rocshmem_ctx_t ctx, [[maybe_unus
 
 BROADCAST_WAVE_DEF_GEN(float, float)
 BROADCAST_WAVE_DEF_GEN(double, double)
+BROADCAST_WAVE_DEF_GEN(char, char)
+// BROADCAST_WAVE_DEF_GEN(long double, longdouble)
+BROADCAST_WAVE_DEF_GEN(signed char, schar)
 BROADCAST_WAVE_DEF_GEN(short, short)
 BROADCAST_WAVE_DEF_GEN(int, int)
 BROADCAST_WAVE_DEF_GEN(long, long)
 BROADCAST_WAVE_DEF_GEN(long long, longlong)
+BROADCAST_WAVE_DEF_GEN(unsigned char, uchar)
+BROADCAST_WAVE_DEF_GEN(unsigned short, ushort)
+BROADCAST_WAVE_DEF_GEN(unsigned int, uint)
+BROADCAST_WAVE_DEF_GEN(unsigned long, ulong)
+BROADCAST_WAVE_DEF_GEN(unsigned long long, ulonglong)
 BROADCAST_WAVE_DEF_GEN(__half, half)
 BROADCAST_WAVE_DEF_GEN(__hip_bfloat16, bfloat16)
 
@@ -196,8 +204,8 @@ void BroadcastWaveTester<T1>::resetBuffers(size_t size) {
       int idx = wave_id * num_elems + i;
       if constexpr (std::is_same<T1, __half>::value ||
                     std::is_same<T1, __hip_bfloat16>::value) {
-        source_buf[idx] = static_cast<T1>(3.14f + n_pes + wave_id);
-        dest_buf[idx]   = static_cast<T1>(3.14f + wave_id);
+        source_buf[idx] = static_cast<T1>(3.5f + n_pes + wave_id);
+        dest_buf[idx]   = static_cast<T1>(3.5f + wave_id);
       } else if constexpr (std::is_floating_point<T1>::value) {
         source_buf[idx] = static_cast<T1>(3.14 + n_pes + wave_id);
         dest_buf[idx]   = static_cast<T1>(3.14 + wave_id);
@@ -220,7 +228,7 @@ void BroadcastWaveTester<T1>::verifyResults(size_t size) {
       T1 expected;
       if constexpr (std::is_same<T1, __half>::value ||
                     std::is_same<T1, __hip_bfloat16>::value) {
-        expected = static_cast<T1>(3.14f + wave_id + n_pes);
+        expected = static_cast<T1>(3.5f + wave_id + n_pes);
       } else if constexpr (std::is_floating_point<T1>::value) {
         expected = static_cast<T1>(3.14 + wave_id + n_pes);
       } else {

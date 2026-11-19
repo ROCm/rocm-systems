@@ -1012,6 +1012,10 @@ struct PerfsimPlugin::Impl {
                   "memory callback could not be matched to its issuing wave");
       return;
     }
+    if (access.decoded_space == amdgpu::DecodedMemorySpace::GDS) {
+      reject_wave(wave, access.dispatch_id, "FFM does not expose a GDS memory space");
+      return;
+    }
     if (access.decoded_space == amdgpu::DecodedMemorySpace::SCRATCH) {
       reject_wave(wave, access.dispatch_id,
                   "dedicated SCRATCH instruction addresses are not FFM-compatible");
@@ -1204,6 +1208,7 @@ struct PerfsimPlugin::Impl {
       }
       return;
 
+    case amdgpu::DecodedMemorySpace::GDS:
     case amdgpu::DecodedMemorySpace::SCALAR:
     case amdgpu::DecodedMemorySpace::SCRATCH:
     case amdgpu::DecodedMemorySpace::UNKNOWN:

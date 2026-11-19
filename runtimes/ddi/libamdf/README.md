@@ -12,9 +12,12 @@ The Rust modules are private implementation details.
 
 ## Runtime model
 
-An instance owns a rocddi session. Creating an instance, enumerating endpoints,
-and opening an endpoint do not activate a GPU. Device creation activates an
-endpoint for execution. CPU memory services work without an available GPU.
+The private `AmdfSession` owner implements each public `amdf_instance_t`. It
+extends a rocddi session through composition with the AMDF allocator policy,
+public child borrows, scopes, IDs, and service attachments. Native admission,
+resource dependencies, process identity, and retirement stay in rocddi.
+Creating an instance, enumerating endpoints, and opening an endpoint do not
+activate a GPU. Device creation activates an endpoint for execution. CPU memory services work without an available GPU.
 Endpoint host NUMA locality is a passive OS hint captured at `endpoint_open`;
 it does not publish a CPU endpoint or determine caller CPU affinity. The host
 profiling clock is a stateless observation service. A host mapping retains its
@@ -28,7 +31,11 @@ INSTANCE GPU activation requires a secondary context supported by KFD UAPI
 Each instance owns its own rocddi session and teardown state. A busy or failed
 destruction attempt on one instance does not close another instance. Native
 teardown failures retain the affected public instance for a destruction retry;
-there is no process-wide AMDF init or shutdown reference count.
+there is no process-wide AMDF init or shutdown reference count. Both frontends
+and native session retirement use rocddi's `RetainOnDrop` ownership guard when
+cleanup cannot prove release. Public handle consumption and retry rules stay
+with the AMDF adapter. See the
+[frontend session model](../../docs/architecture.md#frontend-sessions).
 
 An inherited AMDF instance and its children remain owned by their creating
 process. On Linux, stateful calls in a fork child return
