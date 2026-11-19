@@ -111,6 +111,7 @@ hipError_t Event::elapsedTime(Event& eStop, float& ms) {
     // Events are the same, which indicates the stream is empty and likely
     // eventRecord is called on another stream. For such cases insert and measure a marker.
     auto* command = new amd::Marker(*event_->command().queue(), kMarkerDisableFlush);
+    command->EnableTiming();
     command->enqueue();
     command->awaitCompletion();
     ms = static_cast<float>(static_cast<int64_t>(command->event().profilingInfo().end_) -
@@ -205,13 +206,13 @@ hipError_t Event::recordCommand(amd::Command*& command, amd::HostQueue* stream, 
     return amd::Device::kCacheStateInvalid;
   }();
 
-  constexpr bool kMarkerTs = true;
+  constexpr bool kSignalRequired = true;
   constexpr bool kFlushCache = false;
 
   // Check hipEventDisableTiming flag to skip profiling/timing infrastructure
   const bool enable_profiling = !(flags & hipEventDisableTiming);
 
-  auto* marker = new hip::EventMarker(*stream, kFlushCache, kMarkerTs, releaseFlags,
+  auto* marker = new hip::EventMarker(*stream, kFlushCache, kSignalRequired, releaseFlags,
                                       batch_flush, enable_profiling);
 
   // Only timing-disabled events opt into coalescing: a non-null coalesceEvent()
@@ -508,14 +509,16 @@ hipError_t hipEventRecordWithFlags(hipEvent_t event, hipStream_t stream, uint32_
 // ================================================================================================
 static hipError_t checkEventCaptureRestrictions(hipEvent_t event) {
   auto* e = reinterpret_cast<hip::Event*>(event);
-  const auto hip_stream = e->GetCaptureStream();
+  auto hip_stream = e->GetCaptureStream();
   if (hip_stream == nullptr || hip_stream == hipStreamLegacy) {
     return hipSuccess;
   }
   // Case 1: Event was recorded during an active stream capture and is part of an active capture.
   // The whole sequence is invalidated, not just the stream the query names.
+  // The recording stream may already be destroyed.
   auto* s = reinterpret_cast<hip::Stream*>(hip_stream);
-  if (s->GetCaptureStatus() == hipStreamCaptureStatusActive && s->IsEventCaptured(event)) {
+  if (hip::isValid(hip_stream) && s->GetCaptureStatus() == hipStreamCaptureStatusActive &&
+      s->IsEventCaptured(event)) {
     s->InvalidateCapture();
     return hipErrorCapturedEvent;
   }

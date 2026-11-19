@@ -26,15 +26,14 @@
 
 namespace gfx10
 {
-
 // GFX10 base token encodings. Each row defines one SQTT token type:
 //   {type, pattern, pattern_len, token_bit_length, time_begin, time_end}
 //
 // gfx11 and gfx12 inherit this table and override specific entries in their constructors.
 // To change a token's bit length or time field for a new generation, add an AddEncoding()
 // call in the subclass constructor — it overwrites all matching slots in-place.
+// clang-format off
 static constexpr encoding_t bit_encodings[] = {
-  // clang-format off
  //                               type  pattern  plen  toklen  time_begin  time_end
  // Target
     {INST,               0b010,    3,  20,  4,  7},
@@ -50,7 +49,7 @@ static constexpr encoding_t bit_encodings[] = {
     {WAVE_END,           0b10101,  5,  20,  5,  8},
     {SHADER_DATA,        0b00110,  5,  52,  5,  8},
     {SHADER_DATA_SHORT,  0b10110,  5,  28,  5,  8},
-    {UTIL_COUNTER_GFX10, 0b0110001,7,  64,  7,  9},
+    {UTIL_COUNTER,       0b0110001,7,  64,  7,  9},
  // Reference
     {TIME,               0b1000,   4,   8,  4,  8},
     {NOP,                0b0000,   4,   4,  0,  0},
@@ -61,8 +60,8 @@ static constexpr encoding_t bit_encodings[] = {
     {REG_INIT,           0b1110001,7,  64,  7, 10},
     {TIMESTAMP,          0b0000001,7,  64, 16, 64},
     {HEADER,             0b0010001,7,  64,  0,  0},
-  // clang-format on
 };
+// clang-format on
 
 TokenLookupTable::TokenLookupTable() : std::array<token_info_t, 256>({})
 {

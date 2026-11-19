@@ -115,7 +115,7 @@ TEST_P(SmemSbaseOperandTest, SbaseResolvesToScaledSgpr) {
 
   // The dataflow bridge that feeds liveness must see the scaled SBASE as a use.
   // This is the exact path whose gap let the probe-call planner clobber it.
-  InstDefUse du(*inst);
+  InstDefUse du(*inst, 64);
   EXPECT_TRUE(du.uses.contains(expected_sbase))
       << "InstDefUse.uses is missing s[4:" << hi << "] for " << tc.label;
 }

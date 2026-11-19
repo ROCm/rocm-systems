@@ -138,7 +138,7 @@ int main() {
 #if HIP_TEST
   int gpuCount = 1;
 #if MGPU_TEST
-  hipGetDeviceCount(&gpuCount);
+  CHECK_HIP(hipGetDeviceCount(&gpuCount));
   fprintf(stderr, "Number of GPUs: %d\n", gpuCount);
 #endif
   iterations *= gpuCount;
@@ -150,7 +150,7 @@ int main() {
 #if HIP_TEST
     // set GPU
     const int devIndex = iterations % gpuCount;
-    hipSetDevice(devIndex);
+    CHECK_HIP(hipSetDevice(devIndex));
 
     hipDeviceProp_t devProp;
     CHECK_HIP(hipGetDeviceProperties(&devProp, 0));

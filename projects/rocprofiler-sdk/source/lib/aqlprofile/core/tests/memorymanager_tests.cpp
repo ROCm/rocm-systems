@@ -21,6 +21,8 @@
 // SOFTWARE.
 
 #include "lib/aqlprofile/core/memorymanager.hpp"
+#include "lib/aqlprofile/core/pm4_factory.h"
+#include "lib/common/scope_destructor.hpp"
 #include "gtest/gtest.h"
 #include <cstring>
 
@@ -130,6 +132,95 @@ TEST(TraceMemoryManagerTest, TraceControlBufAndATTParams)
     ASSERT_EQ(mgr.GetSimdMask(), 0xF);
     const auto& att_params = mgr.GetATTParams();
     ASSERT_EQ(att_params.size(), 2u);
+}
+
+TEST(TraceMemoryManagerTest, MultiSEDrainResetsAllSwapCountersOnCallbackError)
+{
+    auto info                 = aqlprofile_agent_info_v1_t{};
+    info.agent_gfxip          = "gfx900";
+    info.cu_num               = 64;
+    info.se_num               = 4;
+    info.xcc_num              = 1;
+    info.shader_arrays_per_se = 2;
+    auto agent                = aql_profile::RegisterAgent(&info);
+    auto mgr                  = std::make_shared<TraceMemoryManager>(
+        agent, dummy_alloc, dummy_dealloc, dummy_copy, nullptr);
+    mgr->CreateTraceControlBuf(info.se_num * sizeof(pm4_builder::TraceControl));
+    auto* control = mgr->GetTraceControlBuf<pm4_builder::TraceControl>();
+    for(size_t se = 0; se < info.se_num; ++se)
+    {
+        control[se]                      = {};
+        control[se].wptr                 = se + 1;
+        mgr->config.target_cu_per_se[se] = se % 2 == 0 ? 0 : -1;
+        mgr->config.buffer_data[se]      = {mgr->AddSqttOutputBuf(256), mgr->AddSqttOutputBuf(256)};
+    }
+    mgr->config.capacity_per_se = 256;
+    mgr->AddExtraCmdBuf(64);
+    mgr->buffer_swaps = {1, 0, 2, 0};
+    mgr->read_offsets.assign(info.se_num, 0);
+    MemoryManager::RegisterManager(mgr);
+    auto cleanup = rocprofiler::common::scope_destructor{
+        [&] { MemoryManager::DeleteManager(mgr->GetHandler()); }};
+
+    struct state_t
+    {
+        TraceMemoryManager*   mgr;
+        std::vector<uint32_t> engines{};
+        hsa_status_t          callback_status;
+    };
+    auto callback = [](uint32_t se, void* data, uint64_t size, void* userdata) {
+        auto& state = *static_cast<state_t*>(userdata);
+        state.engines.push_back(se);
+        EXPECT_EQ(size, (se + 1) * 32u);
+        EXPECT_EQ(data, state.mgr->config.buffer_data.at(se).at(se == 0 ? 0 : 1));
+        return state.callback_status;
+    };
+    for(auto status : {HSA_STATUS_SUCCESS, HSA_STATUS_ERROR})
+    {
+        mgr->buffer_swaps = {1, 0, 2, 0};
+        for(size_t se = 0; se < info.se_num; ++se)
+            control[se].cntr =
+                mgr->buffer_swaps[se] * mgr->config.capacity_per_se / 32 + control[se].wptr;
+        auto state = state_t{mgr.get(), {}, status};
+        EXPECT_EQ(aqlprofile_att_iterate_data({mgr->GetHandler()}, callback, &state), status);
+        EXPECT_EQ(state.engines,
+                  status == HSA_STATUS_SUCCESS ? std::vector<uint32_t>({0, 2})
+                                               : std::vector<uint32_t>({0}));
+        EXPECT_EQ(mgr->buffer_swaps, std::vector<size_t>(info.se_num, 0));
+    }
+}
+
+TEST(TraceMemoryManagerTest, Gfx11FamilyReservesDisabledSEBuffers)
+{
+    for(const auto* gfxip : {"gfx1100", "gfx1151", "gfx1170"})
+    {
+        SCOPED_TRACE(gfxip);
+        auto info                 = aqlprofile_agent_info_v1_t{};
+        info.agent_gfxip          = gfxip;
+        info.cu_num               = 64;
+        info.se_num               = 4;
+        info.xcc_num              = 1;
+        info.shader_arrays_per_se = 2;
+        auto agent                = aql_profile::RegisterAgent(&info);
+        auto parameter            = aqlprofile_att_parameter_t{};
+        parameter.parameter_name  = HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_ATT_BUFFER_SIZE;
+        parameter.value           = 1 << 20;
+        auto profile              = aqlprofile_att_profile_t{agent, &parameter, 1};
+        auto handle               = aqlprofile_handle_t{};
+        auto packets              = aqlprofile_att_control_aql_packets_t{};
+        ASSERT_EQ(aqlprofile_att_create_packets(
+                      &handle, &packets, profile, dummy_alloc, dummy_dealloc, dummy_copy, nullptr),
+                  HSA_STATUS_SUCCESS);
+        auto cleanup =
+            rocprofiler::common::scope_destructor{[&] { aqlprofile_att_delete_packets(handle); }};
+        auto mgr =
+            std::dynamic_pointer_cast<TraceMemoryManager>(MemoryManager::GetManager(handle.handle));
+        ASSERT_NE(mgr, nullptr);
+        const auto alignment =
+            aql_profile::Pm4Factory::Create(agent)->GetSqttBuilder()->BufferAlignment();
+        EXPECT_EQ(mgr->config.capacity_per_disabled_se, uint64_t{1} << alignment);
+        EXPECT_LT(mgr->config.capacity_per_se, parameter.value);
+    }
 }
 
 TEST(CodeobjMemoryManagerTest, CmdBufferAlloc)
