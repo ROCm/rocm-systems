@@ -12,6 +12,7 @@
 
 * Fallback I/O operations now perform their device copies on a pool of per-GPU non-blocking streams instead of the default stream, so they no longer serialize against other work on the GPU's default (null) stream.
 * hipFile now requires CMake 3.25.2 or later, instead of 3.21, to build hipFile, its Python bindings, and the installed examples. Earlier versions couldn't fetch GoogleTest or rocm-cmake, and before 3.22.1, `find_library()` couldn't find system libraries when building with amdclang. Some distributions ship an older CMake, such as Ubuntu 22.04 (3.22.1) and Debian 12 (3.25.1); install a newer one there, for example with `pip install cmake` or from Kitware's APT repository.
+* The `HIPFILE_WARN_UNSAFE_BUFFER_OPS` CMake option now also hardens the C++ standard library, by defining `_GLIBCXX_ASSERTIONS` (libstdc++) and `_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_FAST` (libc++), so that standard library containers and views check their bounds at run time. The option no longer applies to the example programs, which are also built as C++17 when installed.
 
 ### Fixed
 
