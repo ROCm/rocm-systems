@@ -3,10 +3,8 @@
 
 """High-level metric-evaluation pipeline."""
 
-from __future__ import annotations
-
 from collections import ChainMap
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional, Set, Union
 
 import numpy as np
 import pandas as pd
@@ -27,7 +25,7 @@ from utils.utils_common import SUPPORTED_FIELD
 from utils.utils_counter_defs import Collectables, extract_counters_and_variables
 
 
-def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, float]:
+def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> Dict[str, float]:
     """Create empirical peaks dictionary."""
     if empirical_peaks_df.empty:
         # Without roofline.csv, every ceiling is NaN.
@@ -43,7 +41,7 @@ def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, f
     }
 
 
-def create_sys_vars(sys_info: pd.Series) -> dict[str, int | float]:
+def create_sys_vars(sys_info: pd.Series) -> Dict[str, Union[int, float]]:
     """Create variables from sys.info."""
     sys_vars_collection = {}
     sys_info_dict = sys_info.to_dict()
@@ -95,15 +93,15 @@ def create_sys_vars(sys_info: pd.Series) -> dict[str, int | float]:
 
 
 def calc_builtin_vars(
-    raw_pmc_df: pd.DataFrame | ChainMap,
-    sys_vars: dict[str, int | float],
+    raw_pmc_df: Union[pd.DataFrame, ChainMap],
+    sys_vars: Dict[str, Union[int, float]],
     gpu_arch: str,
-    collectable_names: set[str],
-) -> dict[str, Optional[str | float | int]]:
+    collectable_names: Set[str],
+) -> Dict[str, Optional[Union[str, float, int]]]:
     """Evaluate the named collectables on raw_pmc_df, each after the
     collectables it uses."""
     # TODO: fix all $normUnit in Unit column or title
-    values: dict[str, Any] = {}
+    values: Dict[str, Any] = {}
     for name, formula in Collectables.of_arch(gpu_arch).items():
         if name not in collectable_names:
             continue
@@ -121,12 +119,12 @@ def calc_builtin_vars(
 def eval_metric(
     dfs: dict,
     dfs_type: dict,
-    dfs_expressions: dict[int, list[str]],
+    dfs_expressions: Dict[int, List[str]],
     sys_info: pd.Series,
     empirical_peaks_df: pd.DataFrame,
     raw_pmc_df: pd.DataFrame,
     debug: bool,
-    pass_tables: Optional[list[ChainMap]] = None,
+    pass_tables: Optional[List[ChainMap]] = None,
 ) -> None:
     """Execute the expr string for each metric in the df.
 

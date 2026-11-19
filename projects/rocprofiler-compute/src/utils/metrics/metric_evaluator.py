@@ -3,11 +3,9 @@
 
 """MetricEvaluator for YAML metric expression evaluation."""
 
-from __future__ import annotations
-
 import warnings
 from collections import ChainMap
-from typing import Any
+from typing import Any, Dict, List, Set, Union
 
 import numpy as np
 import pandas as pd
@@ -33,8 +31,8 @@ from utils.utils_counter_defs import extract_counters_and_variables
 
 def counter_table_index(
     eval_string: object,
-    tables: list[pd.DataFrame | ChainMap],
-    build_in_vars: dict[str, str],
+    tables: List[Union[pd.DataFrame, ChainMap]],
+    build_in_vars: Dict[str, str],
 ) -> int:
     """Return the index of the table an eval string should read.
 
@@ -50,25 +48,25 @@ def counter_table_index(
     return len(tables) - 1
 
 
-def has_columns(table: pd.DataFrame | ChainMap, columns: set[str]) -> bool:
+def has_columns(table: Union[pd.DataFrame, ChainMap], columns: Set[str]) -> bool:
     """Return whether table has every column in columns."""
     return all(column in table for column in columns)
 
 
 def collectables_per_table(
-    eval_strings: list[object],
-    table_index_of_row: list[int],
-    tables: list[pd.DataFrame | ChainMap],
-    collectables: dict[str, str],
-    used_collectables: set[str],
-) -> list[set[str]]:
+    eval_strings: List[object],
+    table_index_of_row: List[int],
+    tables: List[Union[pd.DataFrame, ChainMap]],
+    collectables: Dict[str, str],
+    used_collectables: Set[str],
+) -> List[Set[str]]:
     """Return the collectables to evaluate on each table.
 
     eval_strings[i] reads tables[table_index_of_row[i]], as counter_table_index
     chose. Callers list the pass tables first and the merged table last.
     """
     merged_index = len(tables) - 1
-    collectables_to_evaluate: list[set[str]] = [set() for _table in tables]
+    collectables_to_evaluate: List[Set[str]] = [set() for _table in tables]
 
     # A pass table evaluates the collectables its eval strings use
     for eval_string, table_index in zip(eval_strings, table_index_of_row):
@@ -80,7 +78,7 @@ def collectables_per_table(
 
     # The merged table takes each collectable from the first table that holds
     # its counters, so that table evaluates it, with the ones it uses
-    tables_holding: dict[str, set[int]] = {}
+    tables_holding: Dict[str, Set[int]] = {}
     for collectable in used_collectables:
         formula = collectables[collectable]
         columns = columns_read(build_eval_string(formula), collectables)
@@ -115,18 +113,18 @@ class MetricEvaluator:
     def __init__(
         self,
         raw_pmc_df: pd.DataFrame,
-        sys_vars: dict[str, Any],
-        empirical_peaks: dict[str, Any],
+        sys_vars: Dict[str, Any],
+        empirical_peaks: Dict[str, Any],
     ) -> None:
         self.raw_pmc_df = raw_pmc_df
         self.sys_vars = sys_vars
         self.empirical_peaks = empirical_peaks
 
-    def eval_expression(self, expr: str) -> str | float | int:
+    def eval_expression(self, expr: str) -> Union[str, float, int]:
         """Evaluate a single expression with proper local context."""
         try:
             # Create comprehensive local context
-            local_expr_context: dict[str, Any] = {}
+            local_expr_context: Dict[str, Any] = {}
             local_expr_context.update({"raw_pmc_df": self.raw_pmc_df})
             local_expr_context.update(self.sys_vars)
             local_expr_context.update(self.empirical_peaks)
