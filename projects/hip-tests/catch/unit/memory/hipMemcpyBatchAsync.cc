@@ -1925,13 +1925,6 @@ constexpr size_t kInnerSize = 8 * kKiB;
 
 uint8_t PatternByte(size_t i) { return static_cast<uint8_t>(i * 7 + 3); }
 
-// Expected errors (a rejected batch, an unsupported feature) set the runtime's sticky last error;
-// consume it so the test leaves none behind (HIP_TEST_STRICT_LAST_ERROR fails the run otherwise).
-void ConsumeExpectedError() {
-  static_cast<void>(hipGetLastError());
-  static_cast<void>(hipExtGetLastError());
-}
-
 // Imports a dmabuf of a device allocation as external memory and creates the nested buffer views.
 // The views are separate memory objects that overlap in the runtime's global memory-object map.
 class NestedViews {
@@ -1979,7 +1972,7 @@ class NestedViews {
     hipError_t err = hipMemGetHandleForAddressRange(&fd, reinterpret_cast<hipDeviceptr_t>(device_alloc),
                                                     kExternalBytes, hipMemRangeHandleTypeDmaBufFd, 0);
     if (err == hipErrorNotSupported) {
-      ConsumeExpectedError();
+      consumeLastError();
       return false;
     }
     HIP_CHECK(err);
@@ -1991,7 +1984,7 @@ class NestedViews {
     handle_desc.size = kExternalBytes;
     err = hipImportExternalMemory(&ext_mem_, &handle_desc);
     if (err == hipErrorNotSupported) {
-      ConsumeExpectedError();
+      consumeLastError();
       return false;
     }
     HIP_CHECK(err);
@@ -2100,7 +2093,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_NestedBufferViews) {
   SECTION("Copy past the inner view alone is rejected") {
     size_t fail_idx = 0;
     HIP_CHECK_ERROR(run({past_inner}, &fail_idx), hipErrorInvalidValue);
-    ConsumeExpectedError();
+    consumeLastError();
     REQUIRE(fail_idx == 0);
   }
 
@@ -2118,21 +2111,21 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_NestedBufferViews) {
   SECTION("Copy past the inner view is rejected after an entry in the outer view") {
     size_t fail_idx = 0;
     HIP_CHECK_ERROR(run({in_outer, past_inner}, &fail_idx), hipErrorInvalidValue);
-    ConsumeExpectedError();
+    consumeLastError();
     REQUIRE(fail_idx == 1);
   }
 
   SECTION("Copy past the inner view is rejected before an entry in the outer view") {
     size_t fail_idx = 0;
     HIP_CHECK_ERROR(run({past_inner, in_outer}, &fail_idx), hipErrorInvalidValue);
-    ConsumeExpectedError();
+    consumeLastError();
     REQUIRE(fail_idx == 0);
   }
 
   SECTION("Copy past the inner view is rejected after an entry in the inner view") {
     size_t fail_idx = 0;
     HIP_CHECK_ERROR(run({in_inner, past_inner}, &fail_idx), hipErrorInvalidValue);
-    ConsumeExpectedError();
+    consumeLastError();
     REQUIRE(fail_idx == 1);
   }
 
