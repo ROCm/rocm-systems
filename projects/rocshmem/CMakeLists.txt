@@ -169,7 +169,6 @@ if(TARGET amd_smi)
     hip/hip_runtime_api.h
     HINTS "${ROCM_PATH}"
     PATH_SUFFIXES include
-    NO_DEFAULT_PATH
   )
   cmake_push_check_state(RESET)
   if(_hip_include_dir)
