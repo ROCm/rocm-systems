@@ -26,7 +26,7 @@ namespace rocjitsu {
 namespace rdna1 {
 
 void SLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 1u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -45,7 +45,7 @@ void SLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 2u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -64,7 +64,7 @@ void SLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 4u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 4u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -83,7 +83,7 @@ void SLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SLoadDwordx8Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 8u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 8u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -102,7 +102,7 @@ void SLoadDwordx8Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SLoadDwordx16Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 16u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 16u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -121,7 +121,7 @@ void SLoadDwordx16Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SScratchLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 1u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -140,7 +140,7 @@ void SScratchLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SScratchLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 2u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -159,7 +159,7 @@ void SScratchLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SScratchLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 4u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 4u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -178,7 +178,7 @@ void SScratchLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SBufferLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 1u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -197,7 +197,7 @@ void SBufferLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SBufferLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 2u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -216,7 +216,7 @@ void SBufferLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SBufferLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 4u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 4u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -235,7 +235,7 @@ void SBufferLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SBufferLoadDwordx8Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 8u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 8u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -254,7 +254,7 @@ void SBufferLoadDwordx8Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SBufferLoadDwordx16Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 16u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 16u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -284,13 +284,34 @@ void SMemrealtimeSmem::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_memrealtime_smem(*this, wf);
 }
 
-void SAtcProbeSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtcProbeSmem::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->translation_probe = true;
+  d->num_dwords = 1;
+  d->is_load = false;
+  auto addr = smem_calculate_address(inst_, wf, d.get());
+  if (!addr)
+    return;
+  d->addr = *addr;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  set_data(std::move(d));
+}
 
-void SAtcProbeBufferSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtcProbeBufferSmem::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->translation_probe = true;
+  d->num_dwords = 1;
+  d->is_load = false;
+  auto addr = smem_calculate_address(inst_, wf, d.get());
+  if (!addr)
+    return;
+  d->addr = *addr;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  set_data(std::move(d));
+}
 
 void SGetWaveidInWorkgroupSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  amdgpu::write_scalar_selector(wf, inst_.sdata, wf.wave_in_group());
 }
 
 } // namespace rdna1

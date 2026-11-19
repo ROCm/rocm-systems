@@ -44,6 +44,10 @@ bool ncclReduceScatterDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, 
 ncclResult_t ncclReduceScatterDdaFabricLL(const void* sendbuff, void* recvbuff, size_t recvcount,
                                           ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 
+// Total CTAs (grid blocks) the DDA LL reduce-scatter launcher would use for the given
+// operands. Mirrors the launch grid math so reporting reflects real occupancy.
+uint32_t ncclReduceScatterDdaFabricLLBlocks(ncclComm* comm, size_t recvcount, ncclDataType_t datatype);
+
 // LL128-protocol fabric path (mid-shard fast lane, 128B lines, no barrier).
 bool ncclReduceScatterDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
                                              ncclDataType_t datatype, ncclRedOp_t op);
@@ -51,5 +55,9 @@ bool ncclReduceScatterDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuf
 ncclResult_t ncclReduceScatterDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t recvcount,
                                              ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm,
                                              cudaStream_t stream);
+
+// Total CTAs (grid blocks) the DDA LL128 reduce-scatter launcher would use for the given
+// operands. Mirrors the launch grid math so reporting reflects real occupancy.
+uint32_t ncclReduceScatterDdaFabricLL128Blocks(ncclComm* comm, size_t recvcount, ncclDataType_t datatype);
 
 #endif

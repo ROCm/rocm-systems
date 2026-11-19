@@ -16,8 +16,12 @@ combine domain flags for composable configuration.
 Quick start
 ===========
 
-The following example runs are using the ``rocprof-sys-run`` tool.
-All of the examples should and will produce the same output when running with ``rocprof-sys-sample`` tool also.
+The following example runs use the ``rocprof-sys-run`` tool.
+``rocprof-sys-sample`` also accepts ``--preset``. Sampling mode enables
+call-stack sampling by default. A ``rocprof-sys-run`` launch enables sampling
+only when the preset or a sampling flag turns it on. The experimental
+``rocsys profile`` command accepts the same preset and domain flags. See
+:doc:`using-rocsys`.
 
 .. code-block:: shell
 

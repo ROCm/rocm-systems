@@ -218,10 +218,6 @@ fs::path only_pid_dir(const fs::path& base) {
   return found.size() == 1 ? found.front() : fs::path{};
 }
 
-bool refused_active_marker(const std::string& output) {
-  return disabled_because(output, "cannot create ", "/active (");
-}
-
 // True if both directories hold the same entries and every file the same bytes.
 // A bool, for the reason given at file_holds.
 bool same_tree(const fs::path& a, const fs::path& b) {
@@ -373,8 +369,10 @@ void plant_marker_link(const char* path) {
       dir.compare(dir.size() - pid_dir.size(), pid_dir.size(), pid_dir) != 0)
     return;
   g_hrr_statvfs_hook = nullptr;
-  if (const char* victim = std::getenv("HRR_TEST_VICTIM"))
-    (void)::link(victim, (dir + "/active").c_str());
+  if (const char* victim = std::getenv("HRR_TEST_VICTIM")) {
+    const int linked = ::link(victim, (dir + "/active").c_str());
+    (void)linked;
+  }
 }
 }  // namespace
 
@@ -478,9 +476,9 @@ TEST_CASE("Unit_HRR_CaptureClosesArchiveDirs_Direct", "[.][hrr-direct]") {
  *     owner's write bit off every file and directory created under it, when
  *     the process can still write in a directory created under that umask.
  *   - Every directory in the archive is 0700 and every regular file 0600: the
- *     archive holds host buffers, kernel arguments and code objects. The parent
- *     the capture had to create is not part of the archive and gets the
- *     default mode.
+ *     archive holds host buffers, kernel arguments and code objects. Its root
+ *     holds NOTICE.txt. The parent the capture had to create is not part of
+ *     the archive and gets the default mode.
  */
 HRR_TEST_CASE(Unit_HRR_CaptureArchiveIsPrivate) {
 #ifdef _WIN32
@@ -513,6 +511,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureArchiveIsPrivate) {
 
   CHECK(perms_of(parent) == fs::perms::all);
   CHECK(perms_of(base) == fs::perms::owner_all);
+  CHECK(perms_of(base / "NOTICE.txt") == (fs::perms::owner_read | fs::perms::owner_write));
   size_t files = 0;
   for (const auto& ent : fs::recursive_directory_iterator(base)) {
     INFO("Path: " << ent.path().string());

@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/comparison.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/input_denormal.h"
+#include "util/host_target.h"
 #include "util/simd.h"
 
 #include <gtest/gtest.h>
@@ -218,7 +219,7 @@ TEST(ComparisonTest, SignedZerosAreEqual) {
 // SIMD lanes evaluate the same relation as the scalar path.
 // ---------------------------------------------------------------------------
 
-#if __has_include(<experimental/simd>)
+#if RJ_HOST_HAS_STDX_SIMD
 template <typename Fmt, typename Rel, typename V> void expect_simd_matches_scalar() {
   using L = typename Fmt::Lane;
   constexpr std::size_t W = V::size();
@@ -270,10 +271,10 @@ TEST(ComparisonTest, SimdMatchesScalar) {
   if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable";
   } else {
-#if __has_include(<experimental/simd>)
+#if RJ_HOST_HAS_STDX_SIMD
     expect_every_simd_relation_matches_scalar<fmt::F16, util::native<uint32_t>>();
     expect_every_simd_relation_matches_scalar<fmt::F32, util::native<uint32_t>>();
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
     expect_every_simd_relation_matches_scalar<fmt::F64, util::stdx::fixed_size_simd<uint64_t, 1>>();
 #else
     expect_every_simd_relation_matches_scalar<fmt::F64, util::native<uint64_t>>();
