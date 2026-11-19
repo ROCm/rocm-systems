@@ -74,10 +74,37 @@ inline uint32_t gfx12_binary_causes(uint64_t flags, uint32_t modifiers, uint32_t
   return causes;
 }
 
+// Retain shared/alu_exceptions.h's native-nearest MUL classifier for RDNA3. Its status
+// behaviour has no gfx1100 capture behind it -- TRAPSTS does not latch there with exceptions
+// disabled -- so an RDNA3 guest keeps the causes it saw before the gfx1201 rule, and a trap
+// handler it reaches today it still reaches. The classifier observes raw operands,
+// independently of the guest flush/rounding applied to the numeric result.
+inline uint32_t rdna3_compatibility_mul_causes(uint32_t a, uint32_t b, uint32_t omod) {
+  const uint32_t ma = a & 0x7fffffff, mb = b & 0x7fffffff;
+  const float x = as_float(a), y = as_float(b);
+  const float scale = omod == 1 ? 2.0f : omod == 2 ? 4.0f : omod == 3 ? 0.5f : 1.0f;
+  const double exact = double(x) * double(y) * scale;
+  const float result = (x * y) * scale;
+  const uint32_t magnitude = as_bits(result) & 0x7fffffff;
+  uint32_t causes =
+      ((ma && ma < 0x800000) || (mb && mb < 0x800000)) ? RJ_ARITH_EXCEPTION_INPUT_DENORM : 0;
+  if (ma < 0x7f800000 && mb < 0x7f800000 && magnitude == 0x7f800000) {
+    causes |= RJ_ARITH_EXCEPTION_OVERFLOW;
+  }
+  if (exact != 0 && magnitude < 0x800000) {
+    causes |= RJ_ARITH_EXCEPTION_UNDERFLOW;
+  }
+  if (__builtin_isfinite(exact) && double(result) != exact) {
+    causes |= RJ_ARITH_EXCEPTION_INEXACT;
+  }
+  return causes;
+}
+
 // Inspect participating source lanes before any possibly aliased destination writes.
-// MUL uses the hardware classifier shared with explicit reporting (fp/mul_exceptions.h):
-// range causes follow participating EXEC lanes, while DPP row/bank controls that suppress
-// a destination also suppress that lane's INVALID, as in the inherited model.
+// On RDNA4 MUL uses the hardware classifier shared with explicit reporting
+// (fp/mul_exceptions.h): range causes follow participating EXEC lanes, while DPP row/bank
+// controls that suppress a destination also suppress that lane's INVALID, as in the inherited
+// model. RDNA3 keeps the inherited classifier until a gfx1100 capture establishes the flags.
 template <Binary Op, bool Rdna3>
 inline uint32_t compatibility_binary_causes(uint64_t flags, uint32_t exec_mask, uint32_t write_mask,
                                             uint32_t modifiers, const uint32_t *a,
@@ -87,7 +114,11 @@ inline uint32_t compatibility_binary_causes(uint64_t flags, uint32_t exec_mask, 
     if (!(exec_mask & (1U << lane))) {
       continue;
     }
-    if constexpr (Op == Binary::Mul) {
+    if constexpr (Op == Binary::Mul && Rdna3) {
+      const uint32_t x = alu_input_bits(a[lane], modifiers);
+      const uint32_t y = alu_input_bits(b[lane], modifiers >> 1);
+      causes |= rdna3_compatibility_mul_causes(x, y, (modifiers >> 6) & 3);
+    } else if constexpr (Op == Binary::Mul) {
       uint32_t lane_causes = mul_exceptions_f32(a[lane], b[lane], flags, modifiers);
       if (!(write_mask & (1U << lane))) {
         lane_causes &= ~RJ_ARITH_EXCEPTION_INVALID;

@@ -7855,16 +7855,17 @@ TEST(ArithBridgeTest, MulReportingPolicyPreservesDirectedNumericalExecution) {
             auto instruction = fixture.decoder->decode_window(words);
             ASSERT_TRUE(instruction.succeeded());
             fixture.recorder->writes.clear();
-            // Only gfx12 nearest-even without CLAMP has qualified reporting.
-            // Compatibility reports the shared hardware classifier in every
-            // configuration; gfx1201 raises nothing under CLAMP.
+            // Only gfx12 nearest-even without CLAMP has qualified reporting. gfx12
+            // Compatibility reports the shared hardware classifier in every configuration,
+            // and gfx1201 raises nothing under CLAMP; RDNA3 keeps the inherited classifier,
+            // which reads the raw operands and so still reports under CLAMP.
             const bool reporting_supported = !rdna3 && !rounding && !clamp;
             const bool rejected = policy_kind == 2 && !reporting_supported;
             EXPECT_EQ(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
                           .succeeded(),
                       !rejected);
-            const bool report =
-                (policy_kind == 0 && !clamp) || (reporting_supported && policy_kind == 2);
+            const bool report = (policy_kind == 0 && (rdna3 || !clamp)) ||
+                                (reporting_supported && policy_kind == 2);
             EXPECT_EQ(fixture.wave->trapsts(), 0x80000000u | (report ? 40u : 0u));
             const uint32_t expected = rejected                           ? 0x7f7fffffu
                                       : clamp                            ? 0x3f800000u

@@ -22,9 +22,10 @@ namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 // without ABS/NEG, OMOD and CLAMP across all 84 MODE settings (2.9M results, 0 mismatches):
 // CLAMP suppresses every cause. NaN operands suppress input-denormal reporting; signaling
 // NaNs and infinity times zero raise INVALID. Input denormals report only when preserved.
-// Overflow and tininess follow the unbounded-exponent rule of rounding_causes; with an
-// output modifier only OVERFLOW survives, raised when the product overflows before or after
-// scaling. Finite FP32 products fit exactly in the FP64 intermediate.
+// Overflow and tininess follow the unbounded-exponent rule of rounding_causes. An output
+// modifier suppresses only UNDERFLOW and INEXACT, and OVERFLOW is then raised when the
+// product overflows before or after scaling; INVALID and INPUT_DENORM describe the operands
+// and survive it. Finite FP32 products fit exactly in the FP64 intermediate.
 inline uint32_t mul_exceptions_f32(uint32_t a, uint32_t b, uint64_t flags, uint32_t modifiers) {
   if (modifiers & RJ_ARITH_ALU_CLAMP) {
     return 0;
