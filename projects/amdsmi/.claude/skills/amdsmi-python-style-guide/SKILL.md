@@ -1,6 +1,6 @@
 ---
 name: amdsmi-python-style-guide
-description: "ROCm Python style guide based on TheRock. Use when: writing Python code, reviewing Python PRs, checking Python style, creating Python scripts, type hints, error handling patterns, pathlib usage, argparse CLI design."
+description: "ROCm Python style guide based on TheRock. Use when: writing Python code, reviewing Python PRs, checking Python style, creating Python scripts, Python 3.6 compatibility, type hints, error handling patterns, pathlib usage, argparse CLI design."
 ---
 
 # Python Style Guide (ROCm / TheRock)
@@ -18,16 +18,19 @@ Source: [TheRock python_style_guide.md](https://github.com/ROCm/TheRock/blob/mai
 ## Type Hints
 
 - Type hints on **all** function signatures
-- Syntax that is compatible with python 3.6.8+
 - **Never** use `Any` except in rare generic code
-- **Never** use `Optional[T]`, `Union[X, Y]`, `List`, `Dict` — use built-in equivalents
-- **Do NOT** use `from __future__ import annotations`
+- Use `typing` generics: `List[str]`, `Dict[str, int]`, `Tuple[int, ...]`, `Optional[T]`, `Union[X, Y]`
+- **Never** write `list[str]` / `dict[str, int]` (3.9+) or `X | None` (3.10+) in an annotation,
+  not even quoted
+- **Do NOT** use `from __future__ import annotations` (a `SyntaxError` on 3.6)
 
 ### Extract Complex Types
 
-- Type appears in multiple signatures → `NamedTuple` or `TypeAlias`
-- Dict/tuple with 3+ fields → `dataclass` or `NamedTuple`
+- Type appears in multiple signatures → `NamedTuple` or a plain alias (`BdfList = List[str]`)
+- Dict/tuple with 3+ fields → `NamedTuple`
 - If you document what tuple fields mean → use `NamedTuple`
+- No `dataclasses` (3.7+), no `TypeAlias` (3.10+)
+- Tuples OK for: simple pairs `(x, y)`, stdlib unpacking, single-use immediate unpacking
 
 ```python
 # Good
@@ -37,13 +40,34 @@ class KpackInfo(NamedTuple):
     kernel_count: int
 
 # Bad
-def get_info() -> tuple[Path, int, int]: ...
+def get_info() -> Tuple[Path, int, int]: ...
 ```
 
-### Dataclasses Over Tuples
+---
 
-Structured data with multiple fields → `@dataclass` or `NamedTuple`, not raw tuples.
-Tuples OK for: simple pairs `(x, y)`, stdlib unpacking, single-use immediate unpacking.
+## Python 3.6.8 Floor
+
+amd-smi supports Python 3.6.8, the `python3` of RHEL 8 and SLES 15. The floor covers:
+
+- Shipped code: `py-interface/`, `amdsmi_cli/`
+- Tests that CI runs on 3.6: `tests/python/unit/` and `tests/python/common/` (AMDSMI CI: RHEL8,
+  AlmaLinux8, SLES) and the `tests/python/test_*.py` guards (AMDSMI Python Version Tests)
+
+CI runs the functional and CLI suites on Python 3.8 and newer only.
+
+| Breaks 3.6 | Since | Use instead |
+|------------|-------|-------------|
+| `from __future__ import annotations`, `dataclasses` | 3.7 | `typing` generics; `NamedTuple` |
+| `subprocess` `text=`, `capture_output=` | 3.7 | `universal_newlines=True`; `stdout=subprocess.PIPE, stderr=subprocess.PIPE` |
+| `namedtuple(defaults=)`, module-level `__getattr__`, `time.*_ns()` | 3.7 | `__new__.__defaults__`; `__getattr__` on a `ModuleType` subclass; the float clock |
+| `open()` / `read_text()` without `encoding=` | 3.7 | `encoding="utf-8"`: 3.6 reads as ASCII in the C locale |
+| `:=`, f-string `{x=}`, positional-only `/` | 3.8 | Plain assignment, `{x}`, regular parameters |
+| `ast.Module(body, [])`; `isinstance(node, ast.Constant)` on parsed code | 3.8 | `ast.Module(body=..., type_ignores=[])`; `ast.literal_eval(node)` |
+| `addClassCleanup()`; mock `call.args`, `call.kwargs` | 3.8 | `common.add_class_cleanup()`; `args, kwargs = call` |
+| `list[str]`, `dict[str, int]` in an annotation; `str.removeprefix()` | 3.9 | `List[str]`, `Dict[str, int]`; slice after `startswith()` |
+| `X \| None`, `TypeAlias`, `match`, parenthesized context managers | 3.10 | `Optional[X]`, plain alias, `if`/`elif`, nested `with` |
+
+Check: `sudo python3.6 tests/python/unit_tests.py -v`
 
 ---
 
@@ -182,9 +206,10 @@ Changes to `_detect_install_context`, `_build_candidate_paths`, or `_load_librar
 
 When reviewing Python code, verify:
 
-- [ ] Type hints on all functions — modern syntax, no `Any`
+- [ ] Type hints on all functions: `typing` generics, no `Any`
 - [ ] No `from __future__ import annotations`
-- [ ] Complex types extracted to `NamedTuple`/`dataclass`
+- [ ] Nothing from the Python 3.6.8 Floor table where the floor applies
+- [ ] Complex types extracted to `NamedTuple`
 - [ ] Specific exception handling — no bare `except Exception`
 - [ ] Fail-fast — no silent `continue` on errors
 - [ ] `from e` on all re-raises
