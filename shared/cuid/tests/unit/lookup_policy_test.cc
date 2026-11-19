@@ -58,6 +58,20 @@ class PrimaryOnlyDevice : public CuidDevice {
   bool temporary_;
 };
 
+// A PCI component whose driver attributes live in a directory the test fills.
+class PublishedDevice : public PrimaryOnlyDevice {
+ public:
+  explicit PublishedDevice(std::string dir) : PrimaryOnlyDevice(false), dir_(std::move(dir)) {}
+  amdcuid_status_t driver_attribute_path(const std::string& attribute,
+                                         std::string& path) const override {
+    path = dir_ + "/" + attribute;
+    return AMDCUID_STATUS_SUCCESS;
+  }
+
+ private:
+  std::string dir_;
+};
+
 // A CPU-like component whose derived CUID needs the node key.
 class KeyGatedDevice : public PrimaryOnlyDevice {
  public:
@@ -131,6 +145,25 @@ TEST(cuidtstUnprivileged, FailedDerivationLeavesNoSource) {
   PrimaryOnlyDevice keyless(false);
   EXPECT_NE(keyless.get_derived_cuid(derived, nullptr), AMDCUID_STATUS_SUCCESS);
   EXPECT_EQ(keyless.derived_source(), AMDCUID_SOURCE_UNKNOWN);
+}
+
+// A cuid_primary without cuid_unit_id is not a driver publication: the device
+// falls through to the later stages instead of failing on a value this library
+// cannot complete, or cannot read without privilege.
+TEST(cuidtstUnprivileged, PrimaryWithoutUnitIdIsUnpublished) {
+  const ScopedTempDir dir("cuid_published_");
+  ASSERT_FALSE(dir.path().empty());
+  const std::string& root = dir.path();
+  const std::string primary = root + "/" + CuidUtilities::kDriverPrimaryAttribute;
+  const std::string unit_id = root + "/" + CuidUtilities::kDriverUnitIdAttribute;
+  std::ofstream(primary) << "10325476-98ba-8dcf-b800-028dcc084200\n";
+
+  PublishedDevice device(root);
+  amdcuid_primary_id id{};
+  EXPECT_EQ(device.driver_primary_cuid(id), AMDCUID_STATUS_UNSUPPORTED);
+
+  std::ofstream(unit_id) << "0\n";
+  EXPECT_EQ(device.driver_primary_cuid(id), AMDCUID_STATUS_SUCCESS);
 }
 
 // Without a key a key-gated component is temporary rather than underived, and
