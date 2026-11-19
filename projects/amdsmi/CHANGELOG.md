@@ -212,6 +212,17 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed ``amdsmi_init()`` failing on a host with GPUs or CPUs when NIC discovery failed**.  
   - The GPUs and CPUs now initialize and the failure is written to the log. An init that asks only for NICs still reports it.
 
+- **Fixed GPU BDFs and sysfs-based queries when `libdrm_amdgpu` cannot be loaded**.  
+  - Without `libdrm_amdgpu`, as in the manylinux wheel on a system without the distro libdrm, `amdsmi_get_gpu_device_bdf()` returned leftover memory as the BDF with `AMDSMI_STATUS_SUCCESS`, `amdsmi_get_processor_handle_from_bdf()` could not find the GPU, and PCIe, clock, power-management and ECC-block information was unavailable.
+  - The BDF and render node now come from sysfs regardless of libdrm. ASIC, VBIOS, driver, VRAM-usage and virtualization-mode queries still need libdrm and keep returning `AMDSMI_STATUS_NOT_SUPPORTED` without it.
+
+- **Fixed AMD SMI reporting no GPUs when another copy of the library was loaded first**.  
+  - When a different `libamd_smi.so` file was already loaded with `RTLD_GLOBAL`, as PyTorch wheels do, the library's calls to its own functions went to that copy, and `amdsmi_get_processor_handles()` returned no GPUs, so `torch.cuda.device_count()` returned 0.
+  - `libamd_smi.so` is now linked with `-Bsymbolic-functions`, as the pip wheel's library already was, so its internal calls stay within the library.
+
+- **Fixed board temperatures showing `-1 °C` for sensors the board does not have**.  
+  - `amd-smi metric --base-board` and `--gpu-board` now show `N/A` for them, and `amdsmi_get_temp_metric()` returns `AMDSMI_STATUS_NOT_SUPPORTED`.
+
 ### Upcoming Changes
 
 - **CUIDs (Component Unified IDs) will replace UUIDs in an upcoming release**.  
@@ -340,14 +351,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
-- **Fixed GPU BDFs and sysfs-based queries when `libdrm_amdgpu` cannot be loaded**.  
-  - Without `libdrm_amdgpu`, as in the manylinux wheel on a system without the distro libdrm, `amdsmi_get_gpu_device_bdf()` returned leftover memory as the BDF with `AMDSMI_STATUS_SUCCESS`, `amdsmi_get_processor_handle_from_bdf()` could not find the GPU, and PCIe, clock, power-management and ECC-block information was unavailable.
-  - The BDF and render node now come from sysfs regardless of libdrm. ASIC, VBIOS, driver, VRAM-usage and virtualization-mode queries still need libdrm and keep returning `AMDSMI_STATUS_NOT_SUPPORTED` without it.
-
-- **Fixed AMD SMI reporting no GPUs when another copy of the library was loaded first**.  
-  - When a different `libamd_smi.so` file was already loaded with `RTLD_GLOBAL`, as PyTorch wheels do, the library's calls to its own functions went to that copy, and `amdsmi_get_processor_handles()` returned no GPUs, so `torch.cuda.device_count()` returned 0.
-  - `libamd_smi.so` is now linked with `-Bsymbolic-functions`, as the pip wheel's library already was, so its internal calls stay within the library.
-
 - **Fixed `amd-smi` printing a Python traceback when an unknown NIC or switch is selected**.  
   - `amd-smi static --nic 999` and `--switch 999` now report `Can not find a device` and exit `196`, like `--gpu`, instead of exiting `1` with a traceback and no parseable `--json`/`--csv` output.
 
@@ -405,9 +408,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed a segmentation fault in the DRM example when run without root**.  
   - When `amdsmi_get_gpu_accelerator_partition_profile_config()` returned `AMDSMI_STATUS_NO_PERM`, the example read an uninitialized profile count and ran past the profile array. It now skips the profile list when that call fails.
-
-- **Fixed board temperatures showing `-1 °C` for sensors the board does not have**.  
-  - `amd-smi metric --base-board` and `--gpu-board` now show `N/A` for them, and `amdsmi_get_temp_metric()` returns `AMDSMI_STATUS_NOT_SUPPORTED`.
 
 - **Fixed `amd-smi` using the `amdsmi` Python library of another ROCm install**.  
   - When `ROCM_PATH` or `ROCM_HOME` named a different ROCm install, `amd-smi` loaded that install's library, so it either failed with an `AttributeError` or reported the other install's library and ROCm versions. `ROCM_PATH` and `ROCM_HOME` no longer redirect which `amdsmi` Python package `amd-smi` loads.
