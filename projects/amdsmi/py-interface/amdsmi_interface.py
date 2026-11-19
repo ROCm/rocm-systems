@@ -7028,7 +7028,8 @@ def amdsmi_get_gpu_od_volt_curve_regions(
 
     result = []
 
-    for index in range(region_count.value):
+    # Read no more records than the buffer holds.
+    for index in range(min(region_count.value, num_regions)):
         result.extend(
             [
                 {

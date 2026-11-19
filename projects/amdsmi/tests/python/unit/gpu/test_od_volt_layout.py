@@ -63,7 +63,7 @@ class TestOdVoltInfo(unittest.TestCase):
 
 
 class TestOdVoltCurveRegions(unittest.TestCase):
-    """Records are read in order."""
+    """Records are read in order, and never past the buffer."""
 
     _WRITTEN = [((100, 200), (300, 400)), ((500, 600), (700, 800))]
 
@@ -92,3 +92,7 @@ class TestOdVoltCurveRegions(unittest.TestCase):
 
     def test_two_regions(self):
         self.assertEqual(self._regions(2), self._EXPECTED)
+
+    def test_count_above_the_buffer_size(self):
+        # A count above the buffer size reads only the records the buffer holds.
+        self.assertEqual(self._regions(5), self._EXPECTED)
