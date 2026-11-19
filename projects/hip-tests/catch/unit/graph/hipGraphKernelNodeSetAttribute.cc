@@ -119,6 +119,76 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeSetAttribute_Positive_Cooperative) {
   HIP_CHECK(hipFree(C_d));
 }
 
+// Priority enum: High = -1, Normal = 0, Low = 1. Values outside [-1, 1] are invalid.
+HIP_TEST_CASE(Unit_hipGraphKernelNodeSetAttribute_Priority) {
+  constexpr int N = 1024;
+
+  HIP_CHECK(hipSetDevice(0));
+
+  int *A_d, *B_d, *C_d;
+  HIP_CHECK(hipMalloc(&A_d, sizeof(int) * N));
+  HIP_CHECK(hipMalloc(&B_d, sizeof(int) * N));
+  HIP_CHECK(hipMalloc(&C_d, sizeof(int) * N));
+
+  hipGraph_t graph;
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+
+  hipKernelNodeParams node_params{};
+  node_params.func = reinterpret_cast<void*>(HipTest::vectorADD<int>);
+  node_params.gridDim = dim3(N / THREADS_PER_BLOCK, 1, 1);
+  node_params.blockDim = dim3(THREADS_PER_BLOCK, 1, 1);
+
+  size_t N_elem{N};
+  void* kernel_params[] = {&A_d, &B_d, &C_d, reinterpret_cast<void*>(&N_elem)};
+  node_params.kernelParams = reinterpret_cast<void**>(kernel_params);
+
+  hipGraphNode_t graph_node;
+  HIP_CHECK(hipGraphAddKernelNode(&graph_node, graph, nullptr, 0, &node_params));
+
+  SECTION("valid priority: High (-1)") {
+    hipKernelNodeAttrValue node_attribute{};
+    node_attribute.priority = -1;
+    HIP_CHECK(hipGraphKernelNodeSetAttribute(graph_node, hipKernelNodeAttributePriority,
+                                             &node_attribute));
+  }
+
+  SECTION("valid priority: Normal (0)") {
+    hipKernelNodeAttrValue node_attribute{};
+    node_attribute.priority = 0;
+    HIP_CHECK(hipGraphKernelNodeSetAttribute(graph_node, hipKernelNodeAttributePriority,
+                                             &node_attribute));
+  }
+
+  SECTION("valid priority: Low (1)") {
+    hipKernelNodeAttrValue node_attribute{};
+    node_attribute.priority = 1;
+    HIP_CHECK(hipGraphKernelNodeSetAttribute(graph_node, hipKernelNodeAttributePriority,
+                                             &node_attribute));
+  }
+
+  SECTION("out-of-range priority: below High (-2)") {
+    hipKernelNodeAttrValue node_attribute{};
+    node_attribute.priority = -2;
+    HIP_CHECK_ERROR(hipGraphKernelNodeSetAttribute(graph_node, hipKernelNodeAttributePriority,
+                                                   &node_attribute),
+                    hipErrorInvalidValue);
+  }
+
+  SECTION("out-of-range priority: above Low (2)") {
+    hipKernelNodeAttrValue node_attribute{};
+    node_attribute.priority = 2;
+    HIP_CHECK_ERROR(hipGraphKernelNodeSetAttribute(graph_node, hipKernelNodeAttributePriority,
+                                                   &node_attribute),
+                    hipErrorInvalidValue);
+  }
+
+  HIP_CHECK(hipGraphDestroy(graph));
+
+  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipFree(B_d));
+  HIP_CHECK(hipFree(C_d));
+}
+
 HIP_TEST_CASE(Unit_hipGraphKernelNodeSetAttribute_Negative_Parameters) {
   constexpr int N = 1024;
 

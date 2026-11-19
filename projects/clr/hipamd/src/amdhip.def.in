@@ -35,6 +35,7 @@ hipDeviceGetLuid
 hipDeviceGetPCIBusId
 hipDeviceGetSharedMemConfig
 hipDeviceGetP2PAttribute
+hipDeviceGetExecAffinitySupport
 hipExternalMemoryGetMappedMipmappedArray
 hipDevicePrimaryCtxGetState
 hipDevicePrimaryCtxRelease
@@ -114,6 +115,7 @@ hipArrayDestroy
 hipArrayGetInfo
 hipArrayGetDescriptor
 hipArray3DGetDescriptor
+hipArrayGetPlane
 hipMallocArray
 hipMemAdvise
 hipMemAllocPitch
@@ -509,6 +511,8 @@ hipStreamSetAttribute
 hipModuleLoadFatBinary
 hipMemcpyBatchAsync
 hipMemcpy3DBatchAsync
+hipMemcpyWithAttributesAsync
+hipMemcpy3DWithAttributesAsync
 hipMemcpy3DPeer
 hipMemcpy3DPeerAsync
 hipGetDriverEntryPoint
@@ -568,4 +572,10 @@ hipMemGetDefaultMemPool
 hipKernelNameRefByPtr
 hipModuleEnumerateFunctions
 hipDeviceFlushGPUDirectRDMAWrites
+hipExtMemcpyBatchAsync
+hipArrayGetSparseProperties
+hipGraphNodeGetLocalId
+hipGraphNodeGetToolsId
+hipGraphGetId
+hipGraphExecGetId
 @HSA_EXPORTS@

@@ -94,8 +94,8 @@ DecodeResult Decoder::decode_window(std::span<const rj_code_binary_inst_t> words
   if (static_cast<std::size_t>(decoded_size) > words.size_bytes())
     return emit_error.emit() << "truncated instruction encoding";
 
-  // Combined encodings and external decoders can retain the input pointer.
-  // Preserve that contract instead of returning a pointer into the tail buffer.
+  // External decoders can retain the input pointer. Preserve that contract
+  // instead of returning a pointer into the tail buffer.
   if (needs_padding && decoded.raw_encoding_ == window.data())
     decoded.raw_encoding_ = words.data();
   return result;

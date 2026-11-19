@@ -17,6 +17,8 @@ class CodegenConfig:
     """Configuration for C++ code generation paths and namespaces.
 
     Attributes:
+        core_operations_header: Selected existing core catalog include path.
+        operation_names: Names in the selected or newly regenerated catalog.
         namespace: Top-level C++ namespace enclosing all generated code.
         include_base: Base path prefix for handwritten AMDGPU includes.
         generated_include_base: Base path prefix for generated AMDGPU includes.
@@ -34,6 +36,10 @@ class CodegenConfig:
     shared_generated_include_base: str = AMDGPU_GENERATED_INCLUDE_BASE
     use_shared_execute_helpers: bool = True
     unshared_execute_keys: frozenset[tuple[str, str]] = field(default_factory=frozenset)
+
+    # A selected core owns both enum representability and table indices.
+    core_operations_header: str | None = None
+    operation_names: frozenset[str] | None = None
 
     @classmethod
     def for_output(
@@ -82,3 +88,9 @@ class CodegenConfig:
     def shared_generated_include(self, *parts: str) -> str:
         """Return an include path rooted in shared generated AMDGPU sources."""
         return '/'.join((self.shared_generated_include_base, 'shared', *parts))
+
+    def operations_include(self) -> str:
+        """Use the consuming core catalog when generating a separate decoder."""
+        return self.core_operations_header or self.shared_generated_include(
+            'operations.h'
+        )

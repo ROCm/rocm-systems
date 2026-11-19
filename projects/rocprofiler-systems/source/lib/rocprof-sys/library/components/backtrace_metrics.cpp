@@ -70,10 +70,8 @@ using namespace ::rocprofsys::tracing;
 
 namespace rocprofsys::component
 {
-using hw_counters           = backtrace_metrics::hw_counters;
-using signal_type_instances = thread_data<std::set<int>, category::sampling>;
-using backtrace_metrics_init_instances =
-    thread_data<backtrace_metrics, category::sampling>;
+using hw_counters               = backtrace_metrics::hw_counters;
+using signal_type_instances     = thread_data<std::set<int>, category::sampling>;
 using sampler_running_instances = thread_data<bool, category::sampling>;
 using papi_vector_instances     = thread_data<hw_counters, category::sampling>;
 using papi_label_instances = thread_data<std::vector<std::string>, category::sampling>;
@@ -90,12 +88,6 @@ unique_ptr_t<hw_counters>&
 get_papi_vector(std::int64_t _tid)
 {
     return papi_vector_instances::instance(construct_on_thread{ _tid });
-}
-
-unique_ptr_t<backtrace_metrics>&
-get_backtrace_metrics_init(std::int64_t _tid)
-{
-    return backtrace_metrics_init_instances::instance(construct_on_thread{ _tid });
 }
 
 unique_ptr_t<bool>&
@@ -115,13 +107,6 @@ std::string
 backtrace_metrics::description()
 {
     return "Records sampling data";
-}
-
-std::vector<std::string>
-backtrace_metrics::get_hw_counter_labels(std::int64_t _tid)
-{
-    auto const& _v = get_papi_labels(_tid);
-    return _v ? *_v : std::vector<std::string>{};
 }
 
 void
@@ -178,20 +163,7 @@ apply_for_all_thread_names(std::int64_t                            _tid,
         auto const _hw_cnt_labels = *get_papi_labels(_tid);
         for(auto const& itr : _hw_cnt_labels)
         {
-            std::string _desc = tim::papi::get_event_info(itr).short_descr;
-            if(_desc.empty())
-            {
-                _desc = itr;
-            }
-            if(_desc.empty())
-            {
-                throw std::runtime_error(
-                    fmt::format("Empty description for {}", itr.c_str()));
-            }
-
-            std::stringstream track_name_ss;
-            track_name_ss << "Thread " << _desc << " [" << _tid << "] (S)";
-            _apply(track_name_ss.str());
+            _apply(hardware_counter_track_name(itr, _tid));
         }
     }
     else
@@ -214,16 +186,17 @@ metadata_init_tracks(std::int64_t _tid)
     }
     auto thread_id = static_cast<std::uint64_t>(t_info->index_data->system_value);
 
-    trace_cache::get_metadata_registry().add_thread_info({ .parent_process_id = getppid(),
-                                                           .process_id        = getpid(),
-                                                           .thread_id         = thread_id,
-                                                           .start   = t_info->get_start(),
-                                                           .end     = t_info->get_stop(),
-                                                           .extdata = "{}" });
+    trace_cache::get_metadata_registry().ensure_thread(thread_id, [&] {
+        return trace_cache::info::thread{ .parent_process_id = getppid(),
+                                          .process_id        = getpid(),
+                                          .thread_id         = thread_id,
+                                          .start             = t_info->get_start(),
+                                          .end               = t_info->get_stop(),
+                                          .extdata           = "{}" };
+    });
 
     apply_for_all_thread_names<Category>(_tid, [&](const std::string& _track_name) {
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name = _track_name, .thread_id = thread_id, .extdata = "{}" });
+        trace_cache::get_metadata_registry().ensure_track(_track_name, thread_id);
     });
 }
 
@@ -244,7 +217,7 @@ metadata_initialize_backtrace_metrics_pmc(size_t dev_id, const char* _units,
         trace_cache::get_metadata_registry().add_pmc_info(
             { agent_type::cpu, dev_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID, _track_name,
               trait::name<Category>::value, trait::name<Category>::description,
-              LONG_DESCRIPTION, COMPONENT, _units, trace_cache::ABSOLUTE, BLOCK,
+              LONG_DESCRIPTION, COMPONENT, _units, trace_cache::k_absolute, BLOCK,
               EXPRESSION, 0, 0, "{}" });
     });
 }

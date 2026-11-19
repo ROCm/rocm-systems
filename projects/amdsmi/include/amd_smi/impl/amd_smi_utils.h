@@ -39,11 +39,12 @@ amdsmi_status_t smi_amdgpu_get_bad_page_info(amd::smi::AMDSmiGPUDevice* device, 
 amdsmi_status_t smi_amdgpu_get_bad_page_threshold(amd::smi::AMDSmiGPUDevice* device,
                                                   uint32_t* threshold);
 amdsmi_status_t smi_amdgpu_validate_ras_eeprom(amd::smi::AMDSmiGPUDevice* device);
-amdsmi_status_t smi_amdgpu_get_ecc_error_count(amd::smi::AMDSmiGPUDevice* device,
-                                               amdsmi_error_count_t* err_cnt);
 amdsmi_status_t smi_amdgpu_get_driver_version(amd::smi::AMDSmiGPUDevice* device, int* length,
                                               char* version);
 amdsmi_status_t smi_amdgpu_get_pcie_speed_from_pcie_type(uint16_t pcie_type, uint32_t* pcie_speed);
+// True when KFD reports the GPU's link to the CPU as xGMI: the GPU has no PCIe host link, and
+// the PCIe link in its config space is emulated. False otherwise, including when the lookup fails.
+bool smi_amdgpu_has_xgmi_host_link(amd::smi::AMDSmiGPUDevice* device);
 // PLX temperature is carried in gpu_metrics rather than hwmon. Reports
 // NOT_SUPPORTED when the reading holds the not-applicable sentinel (an APU has
 // no such sensor), otherwise writes *temperature.
@@ -59,9 +60,7 @@ std::string smi_amdgpu_split_string(std::string str, char delim);
 std::vector<std::string> split_string(const std::string& line, char delim);
 std::string smi_amdgpu_get_status_string(amdsmi_status_t ret, bool fullStatus);
 
-uint32_t smi_brcm_get_value_u32(const std::string& folder, const std::string& file_name);
-std::string smi_brcm_get_value_string(const std::string& folder, const std::string& file_name);
-amdsmi_status_t smi_brcm_execute_cmd_get_data(const std::string& command, std::string* data);
+std::string smi_read_sysfs_string(const std::string& folder, const std::string& file_name);
 
 amdsmi_status_t smi_clear_char_and_reinitialize(char buffer[], uint32_t len, std::string newString);
 

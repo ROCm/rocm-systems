@@ -7,22 +7,23 @@ use std::ffi::{c_char, c_void};
 
 use super::host_alloc_dmabuf_supported;
 use super::output::write_value;
-#[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
+#[cfg(all(hsa_tool_dispatch, not(test)))]
 use crate::api_trace;
 use crate::ffi::{self, *};
-use crate::runtime::{boundary, lock, map_error};
-#[cfg(not(all(target_os = "linux", target_arch = "x86_64", not(test))))]
-use crate::{image_abi, loader};
-use crate::{image_gfx12, runtime};
+use crate::image::descriptor as image_descriptor;
+use crate::lifecycle::lock;
+#[cfg(not(all(hsa_tool_dispatch, not(test))))]
+use crate::loader;
+use crate::status::{boundary, map_error, plain_boundary};
 
 /// Minor version of the HSA runtime ABI reported to clients.
 pub(crate) const HSA_RUNTIME_VERSION_MINOR: u16 = 21;
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_enable_high_precision_timestamps")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Enables high precision timestamp sampling for profiling.
 pub extern "C" fn hsa_amd_enable_high_precision_timestamps() -> Status {
     boundary(|| {
@@ -33,7 +34,7 @@ pub extern "C" fn hsa_amd_enable_high_precision_timestamps() -> Status {
         if guard.as_ref().is_none() {
             return NOT_INITIALIZED;
         }
-        runtime::enable_high_precision_timestamps();
+        crate::clock::enable_high_precision_timestamps();
         SUCCESS
     })
 }
@@ -42,10 +43,10 @@ pub extern "C" fn hsa_amd_enable_high_precision_timestamps() -> Status {
 /// Any non-null `value` must address aligned, writable storage for the type
 /// selected by `attribute`.
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_system_get_info")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_system_get_info(attribute: u32, value: *mut c_void) -> Status {
     boundary(|| {
         let guard = match lock() {
@@ -62,21 +63,13 @@ pub unsafe extern "C" fn hsa_system_get_info(attribute: u32, value: *mut c_void)
             attribute,
             SYSTEM_INFO_TIMESTAMP | SYSTEM_INFO_TIMESTAMP_FREQUENCY
         ) {
-            let Some(gpu) = runtime.gpus.first() else {
-                return ERROR;
-            };
-            let Some(_call) = runtime.inflight.enter() else {
-                return OUT_OF_RESOURCES;
-            };
-            let device = gpu.device.clone();
-            drop(guard);
-            return match runtime::clock_counters(&device) {
+            if attribute == SYSTEM_INFO_TIMESTAMP_FREQUENCY {
                 // SAFETY: The caller supplied writable storage for this attribute.
-                Ok(counters) if attribute == SYSTEM_INFO_TIMESTAMP => unsafe {
-                    write_value(value, counters.system)
-                },
+                return unsafe { write_value(value, rocddi::host::clock::info().frequency_hz) };
+            }
+            return match rocddi::host::clock::read() {
                 // SAFETY: The caller supplied writable storage for this attribute.
-                Ok(counters) => unsafe { write_value(value, counters.system_frequency) },
+                Ok(timestamp) => unsafe { write_value(value, timestamp) },
                 Err(error) => map_error(error),
             };
         }
@@ -92,34 +85,64 @@ pub unsafe extern "C" fn hsa_system_get_info(attribute: u32, value: *mut c_void)
                     value,
                     extension_mask(
                         runtime
+                            .agents
                             .gpus
                             .iter()
-                            .any(|gpu| image_gfx12::supported_gpu(&gpu.info())),
-                        runtime.gpus.iter().any(|gpu| gpu.pc_sampling_supported),
+                            .any(|gpu| image_descriptor::supported_gpu(&gpu.info())),
+                        runtime
+                            .agents
+                            .gpus
+                            .iter()
+                            .any(|gpu| gpu.pc_sampling_supported),
                     ),
                 ),
-                AMD_SYSTEM_INFO_SVM_SUPPORTED => write_value(value, true),
+                AMD_SYSTEM_INFO_SVM_SUPPORTED => write_value(
+                    value,
+                    runtime
+                        .native_session()
+                        .is_some_and(|session| session.memory_advice().is_ok()),
+                ),
                 AMD_SYSTEM_INFO_SVM_ACCESSIBLE_BY_DEFAULT => write_value(value, false),
                 AMD_SYSTEM_INFO_MWAITX_ENABLED => write_value(value, false),
-                AMD_SYSTEM_INFO_DMABUF_SUPPORTED => write_value(value, true),
+                AMD_SYSTEM_INFO_DMABUF_SUPPORTED => {
+                    write_value(
+                        value,
+                        !runtime.agents.gpus.is_empty()
+                            && runtime.agents.gpus.iter().all(|gpu| {
+                                crate::platform::memory::supports_dma_buf(&gpu.endpoint)
+                            }),
+                    )
+                }
                 AMD_SYSTEM_INFO_EXT_VERSION_MAJOR => write_value(value, 1_u16),
-                AMD_SYSTEM_INFO_EXT_VERSION_MINOR => write_value(value, 36_u16),
-                AMD_SYSTEM_INFO_VIRTUAL_MEM_API_SUPPORTED => write_value(value, true),
+                AMD_SYSTEM_INFO_EXT_VERSION_MINOR => write_value(value, 39_u16),
+                AMD_SYSTEM_INFO_VIRTUAL_MEM_API_SUPPORTED => write_value(
+                    value,
+                    !runtime.agents.gpus.is_empty()
+                        && runtime.agents.gpus.iter().all(|gpu| {
+                            crate::platform::memory::supports_virtual_memory(&gpu.endpoint)
+                        }),
+                ),
                 AMD_SYSTEM_INFO_XNACK_ENABLED => write_value(
                     value,
-                    runtime.gpus.first().is_some_and(|gpu| gpu.xnack_enabled),
+                    runtime
+                        .agents
+                        .gpus
+                        .first()
+                        .is_some_and(|gpu| gpu.xnack_enabled),
                 ),
                 AMD_SYSTEM_INFO_FABRIC_HANDLES_SUPPORTED => write_value(
                     value,
-                    !runtime.gpus.is_empty()
+                    !runtime.agents.gpus.is_empty()
                         && runtime
+                            .agents
                             .gpus
                             .iter()
                             .all(|gpu| gpu.info().fabric_handles_supported),
                 ),
-                AMD_SYSTEM_INFO_HOST_ALLOC_DMABUF_SUPPORTED => {
-                    write_value(value, host_alloc_dmabuf_supported(runtime.gpus.len()))
-                }
+                AMD_SYSTEM_INFO_HOST_ALLOC_DMABUF_SUPPORTED => write_value(
+                    value,
+                    host_alloc_dmabuf_supported(runtime.agents.gpus.len()),
+                ),
                 _ => INVALID_ARGUMENT,
             }
         }
@@ -171,13 +194,13 @@ pub(crate) fn legacy_extension_supported(
     version_major: u16,
     version_minor: u16,
 ) -> bool {
-    version_minor == 0
-        && match extension {
-            EXTENSION_AMD_LOADER => matches!(version_major, 0 | 1),
-            EXTENSION_IMAGES => version_major == 1,
-            EXTENSION_AMD_PC_SAMPLING => version_major == 1,
-            _ => false,
+    match extension {
+        EXTENSION_AMD_LOADER => {
+            (version_major == 0 && version_minor == 0) || (version_major == 1 && version_minor <= 4)
         }
+        EXTENSION_IMAGES | EXTENSION_AMD_PC_SAMPLING => version_major == 1 && version_minor == 0,
+        _ => false,
+    }
 }
 
 /// Checks whether an agent exposes a legacy extension.
@@ -209,10 +232,10 @@ pub(crate) fn valid_extension(extension: u16) -> bool {
 /// Any non-null `name` must address writable storage for one C string
 /// pointer.
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_extension_get_name")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_extension_get_name(
     extension: u16,
     name: *mut *const c_char,
@@ -243,10 +266,10 @@ pub unsafe extern "C" fn hsa_extension_get_name(
 /// # Safety
 /// Any non-null `result` must address writable `bool` storage.
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_system_extension_supported")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_system_extension_supported(
     extension: u16,
     version_major: u16,
@@ -267,12 +290,15 @@ pub unsafe extern "C" fn hsa_system_extension_supported(
         let supported = legacy_extension_supported(extension, version_major, version_minor)
             && match extension {
                 EXTENSION_IMAGES => runtime
+                    .agents
                     .gpus
                     .iter()
-                    .any(|gpu| image_gfx12::supported_gpu(&gpu.info())),
-                EXTENSION_AMD_PC_SAMPLING => {
-                    runtime.gpus.iter().any(|gpu| gpu.pc_sampling_supported)
-                }
+                    .any(|gpu| image_descriptor::supported_gpu(&gpu.info())),
+                EXTENSION_AMD_PC_SAMPLING => runtime
+                    .agents
+                    .gpus
+                    .iter()
+                    .any(|gpu| gpu.pc_sampling_supported),
                 _ => true,
             };
         // SAFETY: The caller supplied writable output storage.
@@ -285,10 +311,10 @@ pub unsafe extern "C" fn hsa_system_extension_supported(
 /// Any non-null `version_minor` and `result` must address writable `u16` and
 /// `bool` storage.
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_system_major_extension_supported")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_system_major_extension_supported(
     extension: u16,
     version_major: u16,
@@ -309,12 +335,15 @@ pub unsafe extern "C" fn hsa_system_major_extension_supported(
         let minor =
             supported_extension_minor(extension, version_major).filter(|_| match extension {
                 EXTENSION_IMAGES => runtime
+                    .agents
                     .gpus
                     .iter()
-                    .any(|gpu| image_gfx12::supported_gpu(&gpu.info())),
-                EXTENSION_AMD_PC_SAMPLING => {
-                    runtime.gpus.iter().any(|gpu| gpu.pc_sampling_supported)
-                }
+                    .any(|gpu| image_descriptor::supported_gpu(&gpu.info())),
+                EXTENSION_AMD_PC_SAMPLING => runtime
+                    .agents
+                    .gpus
+                    .iter()
+                    .any(|gpu| gpu.pc_sampling_supported),
                 _ => true,
             });
         // ROCr leaves version_minor untouched when the extension is unsupported.
@@ -332,40 +361,45 @@ pub unsafe extern "C" fn hsa_system_major_extension_supported(
 /// Any non-null `table` must address the writable table extent required by
 /// the selected extension.
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_system_get_extension_table")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_system_get_extension_table(
     extension: u16,
     version_major: u16,
     version_minor: u16,
     table: *mut c_void,
 ) -> Status {
-    let table_length = match (extension, version_major, version_minor) {
-        (EXTENSION_IMAGES, 1, 0) => 10 * size_of::<usize>(),
-        (EXTENSION_AMD_LOADER, 1, 0) => 3 * size_of::<usize>(),
-        (EXTENSION_AMD_LOADER, 1, 1) => 5 * size_of::<usize>(),
-        (EXTENSION_AMD_LOADER, 1, 2) => 6 * size_of::<usize>(),
-        (EXTENSION_AMD_LOADER, 1, 3) => 7 * size_of::<usize>(),
-        (EXTENSION_AMD_PC_SAMPLING, 1, 0) => 7 * size_of::<usize>(),
-        _ => 0,
-    };
-    if table_length == 0 {
-        return ERROR;
-    }
-    // SAFETY: This deprecated entry point selects the historical table length
-    // and delegates the pointer contract to the major-version API.
-    unsafe { hsa_system_get_major_extension_table(extension, version_major, table_length, table) }
+    boundary(|| {
+        let table_length = match (extension, version_major, version_minor) {
+            (EXTENSION_IMAGES, 1, 0) => 10 * size_of::<usize>(),
+            (EXTENSION_AMD_LOADER, 1, 0) => 3 * size_of::<usize>(),
+            (EXTENSION_AMD_LOADER, 1, 1) => 5 * size_of::<usize>(),
+            (EXTENSION_AMD_LOADER, 1, 2) => 6 * size_of::<usize>(),
+            (EXTENSION_AMD_LOADER, 1, 3) => 7 * size_of::<usize>(),
+            (EXTENSION_AMD_LOADER, 1, 4) => 9 * size_of::<usize>(),
+            (EXTENSION_AMD_PC_SAMPLING, 1, 0) => 7 * size_of::<usize>(),
+            _ => 0,
+        };
+        if table_length == 0 {
+            return ERROR;
+        }
+        // SAFETY: This deprecated entry point selects the historical table
+        // length and delegates to the major-version API.
+        unsafe {
+            hsa_system_get_major_extension_table(extension, version_major, table_length, table)
+        }
+    })
 }
 
 /// # Safety
 /// Any non-null `table` must address at least `table_length` writable bytes.
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_system_get_major_extension_table")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_system_get_major_extension_table(
     extension: u16,
     version_major: u16,
@@ -389,17 +423,18 @@ pub unsafe extern "C" fn hsa_system_get_major_extension_table(
         match (extension, version_major) {
             (EXTENSION_IMAGES, 1) => {
                 if !runtime
+                    .agents
                     .gpus
                     .iter()
-                    .any(|gpu| image_gfx12::supported_gpu(&gpu.info()))
+                    .any(|gpu| image_descriptor::supported_gpu(&gpu.info()))
                 {
                     return NOT_SUPPORTED;
                 }
-                #[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
+                #[cfg(all(hsa_tool_dispatch, not(test)))]
                 let functions = api_trace::image_extension_table();
-                #[cfg(not(all(target_os = "linux", target_arch = "x86_64", not(test))))]
-                let functions = image_abi::image_extension_table();
-                #[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
+                #[cfg(not(all(hsa_tool_dispatch, not(test))))]
+                let functions = crate::api::image::image_extension_table();
+                #[cfg(all(hsa_tool_dispatch, not(test)))]
                 if functions.contains(&0) {
                     return ERROR;
                 }
@@ -414,11 +449,11 @@ pub unsafe extern "C" fn hsa_system_get_major_extension_table(
                 }
             }
             (EXTENSION_AMD_LOADER, 1) => {
-                #[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
+                #[cfg(all(hsa_tool_dispatch, not(test)))]
                 let functions = api_trace::loader_extension_table();
-                #[cfg(not(all(target_os = "linux", target_arch = "x86_64", not(test))))]
+                #[cfg(not(all(hsa_tool_dispatch, not(test))))]
                 let functions = loader::loader_extension_table();
-                #[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
+                #[cfg(all(hsa_tool_dispatch, not(test)))]
                 if functions.contains(&0) {
                     return ERROR;
                 }
@@ -433,11 +468,11 @@ pub unsafe extern "C" fn hsa_system_get_major_extension_table(
                 }
             }
             (EXTENSION_AMD_PC_SAMPLING, 1) => {
-                #[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
+                #[cfg(all(hsa_tool_dispatch, not(test)))]
                 let functions = api_trace::pc_sampling_extension_table();
-                #[cfg(not(all(target_os = "linux", target_arch = "x86_64", not(test))))]
+                #[cfg(not(all(hsa_tool_dispatch, not(test))))]
                 let functions = super::pc_sampling::extension_table();
-                #[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
+                #[cfg(all(hsa_tool_dispatch, not(test)))]
                 if functions.contains(&0) {
                     return ERROR;
                 }
@@ -461,12 +496,12 @@ pub unsafe extern "C" fn hsa_system_get_major_extension_table(
 /// Any non-null `output` must address writable storage for one C string
 /// pointer.
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_status_string")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_status_string(status: Status, output: *mut *const c_char) -> Status {
-    boundary(|| {
+    plain_boundary(|| {
         if output.is_null() {
             return INVALID_ARGUMENT;
         }

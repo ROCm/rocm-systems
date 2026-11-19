@@ -6,9 +6,12 @@
 Sampling the call stack
 ****************************************************
 
-`ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ can use call-stack sampling
-on a binary instrumented with either the ``rocprof-sys`` executable
-or the ``rocprof-sys-sample`` executable.
+`ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_
+can use call-stack sampling with ``rocprof-sys-run`` or with the ``rocprof-sys-sample``
+executable. For sampling without instrumentation use ``rocprof-sys-sample``, as shown
+in the examples below. To enable sampling with the experimental ``rocsys``,
+see :doc:`using-rocsys`.
+
 For example, all of the following commands are effectively equivalent:
 
 * Binary rewrite with only the instrumentation necessary to start and stop sampling
@@ -93,7 +96,6 @@ View the help menu of ``rocprof-sys-sample`` with the ``-h`` / ``--help`` option
                                                 --trace-periods (min: 1)
                                                 --trace-clock-id (count: 1)
                                                 --profile-format (min: 1)
-                                                --profile-diff (min: 1)
                                                 --process-freq (count: 1)
                                                 --process-wait (count: 1)
                                                 --process-duration (count: 1)
@@ -162,8 +164,6 @@ View the help menu of ``rocprof-sys-sample`` with the ``-h`` / ``--help`` option
 
       --profile-format [ console | json | text ]
                                     Data formats for profiling results (min: 1)
-      --profile-diff                 Generate a diff output b/t the profile collected and an existing profile from another run Accepts 1-2 parameters
-                                    corresponding to the input path and the input prefix (min: 1)
 
       [HOST/DEVICE (PROCESS SAMPLING) OPTIONS]
                                     Process sampling is background measurements for resources available to the entire process. These samples are not tied
@@ -396,8 +396,8 @@ Here is the full output from the previous
    [rocprof-sys][1785877][0][rocprofsys_finalize]
    [rocprof-sys][1785877][0][rocprofsys_finalize] Finalizing perfetto...
    [rocprof-sys][1785877][perfetto]> Outputting '/home/user/code/rocprofiler-systems/build-release/rocprofiler-systems-output/2024-07-15_16.21/parallel-overhead-locksperfetto-trace-1785877.pftrace' (39.12 KB / 0.04 MB / 0.00 GB)... Done
-   [rocprof-sys][1785877][wall_clock]> Outputting 'rocprof-sys-output/2024-07-15_16.21/parallel-overhead-lockswall_clock-1785877.json'
-   [rocprof-sys][1785877][wall_clock]> Outputting 'rocprof-sys-output/2024-07-15_16.21/parallel-overhead-lockswall_clock-1785877.txt'
+   [16:21:09.601][P:1785877 T:1785885][wall_clock_processor.cpp:74 write_file][info] wall_clock output written to: rocprof-sys-output/2024-07-15_16.21/wall_clock-1785877.json
+   [16:21:09.601][P:1785877 T:1785885][wall_clock_processor.cpp:74 write_file][info] wall_clock output written to: rocprof-sys-output/2024-07-15_16.21/wall_clock-1785877.txt
    [rocprof-sys][1785877][metadata]> Outputting 'rocprof-sys-output/2024-07-15_16.21/parallel-overhead-locksmetadata-1785877.json' and 'rocprof-sys-output/2024-07-15_16.21/parallel-overhead-locksfunctions-1785877.json'
    [rocprof-sys][1785877][0][rocprofsys_finalize] Finalized: 0.054582 sec wall_clock,    0.000 MB peak_rss,   -1.798 MB page_rss, 0.040000 sec cpu_clock,   73.3 % cpu_util
    [989.312]       perfetto.cc:60128 Tracing session 1 ended, total sessions:0

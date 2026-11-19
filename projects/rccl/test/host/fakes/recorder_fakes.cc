@@ -36,12 +36,14 @@ void ResetRecorderFakes() {
   g_recorderLastRank = -12345;
   g_recorderLastNranks = -12345;
   g_recorderCall = DefaultRecorderCall;
+  rccl::Recorder::instance().skip(false);
   g_recorderSkips.clear();
 }
 
 // The overloads the microtest units reach today, not all 12 declared in
 // recorder.h. Add one here when a unit needs it; do not re-add it locally.
 namespace rccl {
+thread_local bool Recorder::skipped = false;
 Recorder::Recorder() {}
 Recorder::~Recorder() {}
 Recorder& Recorder::instance() {
@@ -49,7 +51,10 @@ Recorder& Recorder::instance() {
   return inst;
 }
 
-void Recorder::skip(bool b) { g_recorderSkips.push_back(b); }
+void Recorder::skip(bool enabled) {
+  skipped = enabled;
+  g_recorderSkips.push_back(enabled);
+}
 ncclResult_t Recorder::record(rcclCall_t type, const ncclInfo& info) {  // collective
   return g_recorderCall({type, info.sendbuff, info.recvbuff, info.count, info.root, nullptr, nullptr});
 }
@@ -72,6 +77,7 @@ void Recorder::record(rcclCall_t, int, int, ncclUniqueId*, ncclConfig_t*, ncclCo
 
 ncclResult_t Recorder::record(rcclCall_t, int) { return g_recorderResult; }            // group op
 ncclResult_t Recorder::record(rcclCall_t, ncclComm_t) { return g_recorderResult; }     // comm destroy
+ncclResult_t Recorder::record(rcclCall_t, ncclComm_t, void*, void*, size_t) { return g_recorderResult; }  // UBR
 ncclResult_t Recorder::record(rcclCall_t call, int rank, int nranks, ncclUniqueId* id, ncclComm_t,
                               int) {  // init
   ++g_recorderIdCalls;

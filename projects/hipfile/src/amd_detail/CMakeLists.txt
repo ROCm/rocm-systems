@@ -14,6 +14,7 @@ set(HIPFILE_SOURCES
     backend/memcpy-kernel.hip
     backend/fallback.cpp
     backend/fastpath.cpp
+    backend/host.cpp
     batch/batch.cpp
     buffer.cpp
     configuration.cpp

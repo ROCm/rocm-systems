@@ -21,9 +21,9 @@
 #include "library/thread_info.hpp"
 
 #include <nlohmann/json_fwd.hpp>
-#include <profiler-hub/reader.hpp>
-#include <profiler-hub/reader_types.hpp>
-#include <profiler-hub/storage.hpp>
+#include <profiler-hub/cpp/reader.hpp>
+#include <profiler-hub/cpp/reader_types.hpp>
+#include <profiler-hub/cpp/storage.hpp>
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -350,6 +350,19 @@ expect_stored_json_matches(const std::string& stored, const std::string& expecte
     ASSERT_TRUE(nlohmann::json::accept(stored)) << stored.substr(0, k_max_json_length);
     EXPECT_EQ(nlohmann::json::parse(stored), nlohmann::json::parse(expected));
 }
+
+// rocpd_processor_t adds "output_path" and "output_file" to the process extdata;
+// compare everything else verbatim.
+void
+expect_stored_process_extdata_matches(const std::string& stored,
+                                      const std::string& expected)
+{
+    ASSERT_TRUE(nlohmann::json::accept(stored)) << stored.substr(0, k_max_json_length);
+    auto stored_json = nlohmann::json::parse(stored);
+    stored_json.erase("output_path");
+    stored_json.erase("output_file");
+    EXPECT_EQ(stored_json, nlohmann::json::parse(expected));
+}
 }  // namespace
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -390,9 +403,7 @@ protected:
     static void add_process_scoped_track(
         const std::shared_ptr<metadata_registry>& metadata, const std::string& track_name)
     {
-        metadata->add_track(track{ .track_name = track_name,
-                                   .thread_id  = std::nullopt,
-                                   .extdata    = std::string{} });
+        metadata->ensure_track(track_name, std::nullopt, std::string{});
     }
 
     static void seed_gpu_smi_pmc_row(const std::shared_ptr<metadata_registry>& metadata,
@@ -1049,7 +1060,7 @@ protected:
         thread_info.thread_id         = k_thread_id;
         thread_info.start             = k_process_start;
         thread_info.end               = k_process_end;
-        metadata->add_thread_info(thread_info);
+        metadata->ensure_thread(thread_info.thread_id, [&] { return thread_info; });
     }
 
     static void seed_nic_pmc_catalog(const std::shared_ptr<metadata_registry>& metadata)
@@ -1586,13 +1597,122 @@ TEST_F(rocpd_write_read_test_interface, info_extdata_is_valid_json)
     // Validate: profiler_hub::reader_t read-back matches inserted values.
     const auto processes = m_reader->get_all_processes();
     ASSERT_EQ(processes.size(), 1U);
-    expect_stored_json_matches(processes[0]->extdata, process_extdata);
+    expect_stored_process_extdata_matches(processes[0]->extdata, process_extdata);
     expect_stored_json_matches(processes[0]->environment, process_environment);
 
     const auto agents = m_reader->get_all_agents();
     ASSERT_EQ(agents.size(), 1U);
     expect_stored_json_matches(agents[0]->extdata, gpu.agent_info);
     expect_gpu_agent_mi210();
+}
+
+TEST_F(rocpd_write_read_test_interface, process_extdata_contains_output_path_and_file)
+{
+    // Prepare: default metadata leaves process extdata empty.
+    run_processor_and_open_reader({});
+
+    // Validate: output location of the database is recorded in process extdata.
+    const auto processes = m_reader->get_all_processes();
+    ASSERT_EQ(processes.size(), 1U);
+    ASSERT_TRUE(nlohmann::json::accept(processes[0]->extdata));
+    const auto extdata = nlohmann::json::parse(processes[0]->extdata);
+
+    ASSERT_TRUE(extdata.contains("output_path")) << extdata.dump();
+    ASSERT_TRUE(extdata.contains("output_file")) << extdata.dump();
+    ASSERT_TRUE(extdata["output_path"].is_string()) << extdata.dump();
+    ASSERT_TRUE(extdata["output_file"].is_string()) << extdata.dump();
+
+    const std::filesystem::path output_path{ extdata["output_path"].get<std::string>() };
+    const auto                  output_file = extdata["output_file"].get<std::string>();
+    const std::filesystem::path db_path{ m_db_path };
+
+    EXPECT_TRUE(output_path.is_absolute()) << output_path;
+    EXPECT_TRUE(std::filesystem::equivalent(output_path, db_path.parent_path()))
+        << output_path;
+    EXPECT_EQ(output_file, db_path.filename().string());
+    EXPECT_TRUE(std::filesystem::equivalent(output_path / output_file, db_path))
+        << (output_path / output_file);
+}
+
+namespace
+{
+// Asserts that `extdata` is an object whose output_path/output_file name `db_path`.
+void
+expect_extdata_names_database(const nlohmann::json& extdata, const std::string& db_path)
+{
+    ASSERT_TRUE(extdata.is_object()) << extdata.dump();
+    ASSERT_TRUE(extdata.contains("output_path")) << extdata.dump();
+    ASSERT_TRUE(extdata.contains("output_file")) << extdata.dump();
+
+    const std::filesystem::path db_file{ db_path };
+    EXPECT_EQ(extdata["output_file"].get<std::string>(), db_file.filename().string());
+    EXPECT_TRUE(std::filesystem::equivalent(
+        std::filesystem::path{ extdata["output_path"].get<std::string>() },
+        db_file.parent_path()))
+        << extdata.dump();
+}
+}  // namespace
+
+TEST_F(rocpd_write_read_test_interface, process_extdata_malformed_json_is_replaced)
+{
+    // Prepare: process extdata is not parseable JSON.
+    run_processor_and_open_reader({},
+                                  [](const std::shared_ptr<metadata_registry>& metadata) {
+                                      auto proc    = metadata->get_process_info();
+                                      proc.extdata = "{not json";
+                                      metadata->set_process(proc);
+                                  });
+
+    // Validate: finalization does not throw and the output location is recorded.
+    const auto processes = m_reader->get_all_processes();
+    ASSERT_EQ(processes.size(), 1U);
+    ASSERT_TRUE(nlohmann::json::accept(processes[0]->extdata)) << processes[0]->extdata;
+    const auto extdata = nlohmann::json::parse(processes[0]->extdata);
+    expect_extdata_names_database(extdata, m_db_path);
+    EXPECT_EQ(extdata.size(), 2U) << extdata.dump();
+}
+
+TEST_F(rocpd_write_read_test_interface, process_extdata_non_object_json_is_replaced)
+{
+    // Prepare: process extdata is valid JSON, but an array rather than an object.
+    run_processor_and_open_reader({},
+                                  [](const std::shared_ptr<metadata_registry>& metadata) {
+                                      auto proc    = metadata->get_process_info();
+                                      proc.extdata = "[1, 2, 3]";
+                                      metadata->set_process(proc);
+                                  });
+
+    // Validate: the array is replaced by an object holding the output location.
+    const auto processes = m_reader->get_all_processes();
+    ASSERT_EQ(processes.size(), 1U);
+    ASSERT_TRUE(nlohmann::json::accept(processes[0]->extdata)) << processes[0]->extdata;
+    const auto extdata = nlohmann::json::parse(processes[0]->extdata);
+    expect_extdata_names_database(extdata, m_db_path);
+    EXPECT_EQ(extdata.size(), 2U) << extdata.dump();
+}
+
+TEST_F(rocpd_write_read_test_interface, process_extdata_stale_output_keys_are_overwritten)
+{
+    // Prepare: producer-set output keys that disagree with the real database location,
+    // alongside an unrelated key that must survive.
+    run_processor_and_open_reader({},
+                                  [](const std::shared_ptr<metadata_registry>& metadata) {
+                                      auto proc    = metadata->get_process_info();
+                                      proc.extdata = nlohmann::json{
+                                          { "output_path", "/stale/dir" },
+                                          { "output_file", "stale.db" },
+                                          { "keep", "me" }
+                                      }.dump();
+                                      metadata->set_process(proc);
+                                  });
+
+    // Validate: the processor's values win; unrelated keys are preserved.
+    const auto processes = m_reader->get_all_processes();
+    ASSERT_EQ(processes.size(), 1U);
+    ASSERT_TRUE(nlohmann::json::accept(processes[0]->extdata)) << processes[0]->extdata;
+    const auto extdata = nlohmann::json::parse(processes[0]->extdata);
+    expect_extdata_names_database(extdata, m_db_path);
+    EXPECT_EQ(extdata.value("keep", ""), "me") << extdata.dump();
 }
 
 // ---------------------------------------------------------------------------
@@ -1754,9 +1874,7 @@ TEST_F(rocpd_write_read_test_interface, handle_backtrace_region_pathway)
     run_processor_and_open_reader(
         {},
         [](const std::shared_ptr<metadata_registry>& metadata) {
-            metadata->add_track(track{ .track_name = "Sampling [CPU 0]",
-                                       .thread_id  = k_thread_id,
-                                       .extdata    = std::string{} });
+            metadata->ensure_track("Sampling [CPU 0]", k_thread_id, std::string{});
         },
         [](rocpd_processor_t& processor) {
             const backtrace_region_sample bts{
@@ -1830,9 +1948,7 @@ TEST_F(rocpd_write_read_test_interface, handle_pmc_event_with_sample_pathway)
                                      .name        = "SQ_WAVES",
                                      .target_arch = "GPU",
                                      .description = "Shader wavefronts" }));
-            metadata->add_track(track{ .track_name = "SQ_WAVES [GPU 0]",
-                                       .thread_id  = k_thread_id,
-                                       .extdata    = std::string{} });
+            metadata->ensure_track("SQ_WAVES [GPU 0]", k_thread_id, std::string{});
         },
         [](rocpd_processor_t& processor) {
             constexpr std::uint64_t     k_timestamp = 10000;
@@ -1942,9 +2058,7 @@ TEST_F(rocpd_write_read_test_interface, handle_gpu_perf_counter_sample_pathway)
                                      .target_arch = "GPU",
                                      .description = "Shader wavefronts" }));
             // gpu_perf_counter handle() emits process-scoped tracks (no thread_id).
-            metadata->add_track(track{ .track_name = k_track_name,
-                                       .thread_id  = std::nullopt,
-                                       .extdata    = std::string{} });
+            metadata->ensure_track(k_track_name, std::nullopt, std::string{});
             gpu_perf_counter_name_entry name_entry{};
             name_entry.counter_id    = k_counter_id;
             name_entry.pmc_info_name = k_pmc_name;
@@ -2103,9 +2217,7 @@ TEST_F(rocpd_write_read_test_interface, handle_kfd_sample_pathway)
                                      .name        = "kfd_page_fault",
                                      .target_arch = "GPU",
                                      .description = "KFD page fault counter" }));
-            metadata->add_track(track{ .track_name = "KFD Events [GPU 0]",
-                                       .thread_id  = k_thread_id,
-                                       .extdata    = std::string{} });
+            metadata->ensure_track("KFD Events [GPU 0]", k_thread_id, std::string{});
         },
         [&](rocpd_processor_t& processor) {
             const kfd_sample sample{ k_thread_id,
@@ -2429,9 +2541,7 @@ TEST_F(rocpd_write_read_test_interface, multiple_event_types_in_single_db)
         [](const std::shared_ptr<metadata_registry>& metadata) {
             seed_gpu_queue_stream(metadata);
             seed_kernel_symbol(metadata, 1, "test_kernel");
-            metadata->add_track(track{ .track_name = "Sampling",
-                                       .thread_id  = k_thread_id,
-                                       .extdata    = std::string{} });
+            metadata->ensure_track("Sampling", k_thread_id, std::string{});
         },
         [&timestamps](rocpd_processor_t& processor) {
             insert_multiple_event_type_samples(processor, timestamps);
