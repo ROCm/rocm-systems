@@ -234,10 +234,12 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
   // For index-based matching scheme, immData layout (BY_INDEX):
   //   bits [31:24] - rxReqIndex: receiver's request slot index (from CTS fifo)
   //   bit  [23]    - WR_IMM_SPLIT_DATA_FLAG: set when sending across >1 QPs
-  //   bits [22:0]  - unused; receiver always uses wc->byte_len for size
-  // - nreqs > 1
-  //      Sizes are written directly to remote completion records array
+  //   bits [22:0]  - unused; receiver uses wc->byte_len for size unless the record has it
+  // - nreqs > 1, or one request sent under Adaptive Routing
+  //      Sizes are written directly to remote completion records array. Under Adaptive Routing the data
+  //      goes as plain RDMA Writes and the trailing Write with immediate carries no data, so its byte_len is 0.
   struct ibv_send_wr* lastWr = comm->wrs + nreqs - 1;
+  bool arSizeInRecord = false;
   if (!useWriteOp) {
     uint32_t immData;
     if (comm->base.recvMatchingScheme != BY_INDEX) {
@@ -253,13 +255,16 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
       }
     }
 
-    if (nreqs > 1 ||
-        (!(comm->base.remOooRq && comm->base.localOooRq) && comm->ar && reqs[0]->send.size > IbCastArThreshold)) {
+    const bool arSplit =
+      !(comm->base.remOooRq && comm->base.localOooRq) && comm->ar && reqs[0]->send.size > IbCastArThreshold;
+    // CTS offload has the NIC fill in each data write's remote address, so it keeps its existing trailer.
+    arSizeInRecord = nreqs == 1 && arSplit && !comm->useCtsOffload;
+    if (nreqs > 1 || arSplit) {
       // When Adaptive Routing is enabled, send the bulk of the data first as an
       // RDMA Write.
       lastWr++;
       memset(lastWr, 0, sizeof(struct ibv_send_wr));
-      if (nreqs > 1) {
+      if (nreqs > 1 || arSizeInRecord) {
         // Write remote sizes array
         lastWr->wr.rdma.remote_addr = comm->remCmplsRecords.addr + slot * sizeof(struct ncclIbRequestCompletionRecord);
         lastWr->num_sge = 1;
@@ -362,7 +367,7 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
       }
     }
 
-    if (nreqs > 1) {
+    if (nreqs > 1 || arSizeInRecord) {
       // Populating the correct gather information based on the device and
       // slot used.
       // Note that the lkey is already correct from the initialization phase.
@@ -671,7 +676,7 @@ ncclResult_t IbCastPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
   wr.send_flags = comm->remCtsFifo.flags; // IBV_SEND_INLINE
   // for multi-receive requests, reset inline flag in send_flags as
   // QP max_inline_data attribute limits the inline data to 1 request.
-  if (IbCastAinicCtsInlineData && n > 1) {
+  if (n > 1) {
     wr.send_flags &= ~(IBV_SEND_INLINE);
   }
 
@@ -1199,12 +1204,10 @@ static ncclResult_t IbCastCompletionEventByOrder(struct ncclIbNetCommBase* commB
              wc->status, ibvWcOpcodeStr(wc->opcode), wc->opcode, wc->qp_num);
         return ncclInternalError;
       }
-      if (req->nreqs == 1) {
-        if (commBase->recvMatchingScheme != BY_ID) {
-          req->recv.cmplsRecords->sizes[0] += wc->byte_len;
-        } else if (req->recv.cmplsRecords->sizes[0] == 0) {
-          req->recv.aggSize += wc->byte_len;
-        }
+      // The sender's RDMA Write lands sizes[0] before this completion when it writes the record
+      // (Adaptive Routing); its byte_len then covers only that write, not the data.
+      if (req->nreqs == 1 && req->recv.cmplsRecords->sizes[0] == 0) {
+        req->recv.aggSize += wc->byte_len;
       }
       TRACE(NCCL_NET, "NET/IB: %s: Got completion for a recv request (req=%p, comm=%p, id=%ld, devIndex=%d, qp_num=%u)",
             __func__, req, req->base, req->id, devIndex, wc->qp_num);
@@ -1310,12 +1313,10 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
              wc->status, ibvWcOpcodeStr(wc->opcode), wc->opcode, wc->qp_num);
         return ncclInternalError;
       }
-      if (req->nreqs == 1) {
-        if (commBase->recvMatchingScheme != BY_ID) {
-          req->recv.cmplsRecords->sizes[0] += wc->byte_len;
-        } else if (req->recv.cmplsRecords->sizes[0] == 0) {
-          req->recv.aggSize += wc->byte_len;
-        }
+      // The sender's RDMA Write lands sizes[0] before this completion when it writes the record
+      // (Adaptive Routing); its byte_len then covers only that write, not the data.
+      if (req->nreqs == 1 && req->recv.cmplsRecords->sizes[0] == 0) {
+        req->recv.aggSize += wc->byte_len;
       }
       TRACE(NCCL_NET, "NET/IB: %s: Got completion for a recv request (req=%p, comm=%p, id=%ld, devIndex=%d, qp_num=%u)",
             __func__, req, req->base, req->id, devIndex, wc->qp_num);

@@ -537,8 +537,14 @@ TEST_F(NetIbCastP2pIsendMicrotest, Isend_AdaptiveRouting_SplitsBulkWriteFromTheI
   EXPECT_EQ(chain[0].wr.send_flags, 0);
   EXPECT_EQ(chain[0].sge.length, 1001u);
   EXPECT_EQ(chain[1].wr.opcode, IBV_WR_RDMA_WRITE_WITH_IMM);
-  EXPECT_EQ(chain[1].wr.num_sge, 0);
   EXPECT_EQ(chain[1].wr.send_flags, IBV_SEND_SIGNALED);
+  // The immediate carries no data, so its byte_len cannot give the size: it writes the size record.
+  EXPECT_EQ(chain[1].wr.num_sge, 1);
+  EXPECT_EQ(chain[1].wr.wr.rdma.remote_addr, kCmplsAddr);
+  EXPECT_EQ(chain[1].wr.wr.rdma.rkey, kCmplsRkey);
+  EXPECT_EQ(chain[1].sge.addr, (uint64_t)send_->remCmplsRecords.elems[0]);
+  EXPECT_EQ(chain[1].sge.length, sizeof(int));
+  EXPECT_EQ(send_->remCmplsRecords.elems[0][0], 1001);
 
   // At the threshold, or when both sides have an out-of-order RQ, the data rides the immediate itself.
   for (int variant = 0; variant < 2; variant++) {
@@ -1076,7 +1082,8 @@ TEST_F(NetIbCastP2pIrecvMicrotest, Irecv_LaterSlot_PostsAnUnsignalledCtsAtItsFif
   void* req = nullptr;
   ASSERT_EQ(Irecv(2, &req), ncclSuccess);
   const auto& cts = Chain(0, 0)[0];
-  EXPECT_EQ(cts.wr.send_flags, IBV_SEND_INLINE);
+  // Two CTS entries exceed the QP's one-entry inline limit, so the write is not inlined.
+  EXPECT_EQ(cts.wr.send_flags, 0);
   EXPECT_EQ(cts.wr.wr.rdma.remote_addr, kCtsFifoAddr + 3 * NCCL_NET_IB_MAX_RECVS * sizeof(ncclIbSendFifo));
   EXPECT_EQ(cts.sge.length, 2 * sizeof(ncclIbSendFifo));
   EXPECT_EQ(Req(req)->events[0], 1);
