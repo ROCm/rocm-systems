@@ -18,6 +18,7 @@ test_categories:
       - "RasDiagnosticsPciIsolatedTest.*"
       - "RasDiagnosticsPciMicrotest.*"
       - "RasDiagnosticsMicrotest.*"
+      - "RasDiagnosticsXid*"
       - "RasMicrotest.*"
       - "RasNetMicrotest.*"
       - "RasParamMicrotest.*"
