@@ -9,6 +9,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* The Memory Chart Compute Unit box uses the metric names of the other panels: *VGPRs*, *SGPRs*, *Wavefront Occupancy*, *Scratch Allocation* and *LDS Allocation*, and adds *AGPRs* on GPUs that report them.
+  * *Wavefront Occupancy* is a percent of all CUs, as in the System Speed of Light panel, so it is lower than before when CUs are idle.
+  * *Scratch Allocation* is in bytes per work-item, as in the wavefront panel.
+  * Counts name what they count, for example `1.64e+04 instr`.
+
 ### Removed
 
 ### Optimized
