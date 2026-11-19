@@ -16,6 +16,10 @@
 #include <utility>
 #include <vector>
 
+#ifndef _WIN32
+#include <unistd.h>
+#endif
+
 #include <hip_test_common.hh>
 #include <hip_test_defgroups.hh>
 #include <resource_guards.hh>
@@ -1939,9 +1943,10 @@ class NestedViews {
     static_cast<void>(Release());
   }
 
-  // Frees the views, then destroys the external memory. hipDestroyExternalMemory does not release
-  // the mapped buffers: each view has its own global-map entry and is freed with hipFree. Safe to
-  // call more than once and after a partly completed Create.
+  // Frees the views, destroys the external memory, then closes the exported dmabuf descriptor.
+  // hipDestroyExternalMemory does not release the mapped buffers (each view has its own global-map
+  // entry and is freed with hipFree), and the runtime does not take ownership of the descriptor.
+  // Safe to call more than once and after a partly completed Create.
   hipError_t Release() {
     hipError_t result = hipSuccess;
     const auto keep_first_error = [&result](hipError_t err) {
@@ -1961,6 +1966,10 @@ class NestedViews {
       keep_first_error(hipDestroyExternalMemory(ext_mem_));
       ext_mem_ = nullptr;
     }
+    if (fd_ >= 0) {
+      static_cast<void>(close(fd_));
+      fd_ = -1;
+    }
     return result;
   }
 
@@ -1974,6 +1983,7 @@ class NestedViews {
       return false;
     }
     HIP_CHECK(err);
+    fd_ = fd;
 
     hipExternalMemoryHandleDesc handle_desc{};
     handle_desc.type = hipExternalMemoryHandleTypeOpaqueFd;
@@ -2001,6 +2011,7 @@ class NestedViews {
   uint8_t* inner() const { return static_cast<uint8_t*>(inner_); }
 
  private:
+  int fd_ = -1;
   hipExternalMemory_t ext_mem_ = nullptr;
   void* outer_ = nullptr;
   void* inner_ = nullptr;
