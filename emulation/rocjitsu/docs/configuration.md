@@ -345,6 +345,14 @@ read; the default 32-bit HW_ID read therefore still warns and writes zero.
 Unknown or unrepresentable identity fields likewise issue an `s_getreg_b32`
 warning and write zero.
 
+RDNA3/RDNA4 `HW_ID1` reports the wave slot, the CU's WGP and its half of it,
+SA_ID and SE_ID. A CU's wave slots alternate between its two SIMDs, so slot
+`s` reads SIMD `s % 2` and WAVE_ID `s / 2`. SIMD_ID, WGP_ID and SA_ID require
+an even shader-array width of at most 32 CUs and at most two arrays per shader
+engine; SE_ID must fit in three bits. DP_RATE reads 1 on gfx11 and gfx12 and
+is unsupported on gfx11.5, which has no measured value. Reads touching an
+unrepresentable field warn and write zero.
+
 Omitted geometry fields inherit defaults selected by `gfx_target_version`.
 For a smaller topology, set both `num_cu_per_sh` and
 `num_shader_arrays_per_engine` to match its CU groups; for example, two arrays

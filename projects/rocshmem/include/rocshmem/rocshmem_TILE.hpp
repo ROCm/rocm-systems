@@ -267,6 +267,7 @@ __device__ int rocshmem_tile_allgather_wg(rocshmem_team_t team, dst_tensor_t dst
  * @param[in] dst         Destination tensor object
  * @param[in] start_coord Starting coordinates of the tile
  * @param[in] boundary    Boundary coordinates of the tile
+ * @param[in] pe_root     Root PE (relative to team) that supplies the data
  * @param[in] flags       Operation flags (reserved for future use)
  *
  * @return 0 on success, non-zero on failure
@@ -291,6 +292,7 @@ __device__ int rocshmem_tile_broadcast(rocshmem_team_t team, dst_tensor_t dst,
  * @param[in] dst         Destination tensor object
  * @param[in] start_coord Starting coordinates of the tile
  * @param[in] boundary    Boundary coordinates of the tile
+ * @param[in] pe_root     Root PE (relative to team) that supplies the data
  * @param[in] flags       Operation flags (reserved for future use)
  *
  * @return 0 on success, non-zero on failure
@@ -315,6 +317,7 @@ __device__ int rocshmem_tile_broadcast_wave(rocshmem_team_t team, dst_tensor_t d
  * @param[in] dst         Destination tensor object
  * @param[in] start_coord Starting coordinates of the tile
  * @param[in] boundary    Boundary coordinates of the tile
+ * @param[in] pe_root     Root PE (relative to team) that supplies the data
  * @param[in] flags       Operation flags (reserved for future use)
  *
  * @return 0 on success, non-zero on failure

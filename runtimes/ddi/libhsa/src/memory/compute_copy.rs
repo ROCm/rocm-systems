@@ -48,6 +48,7 @@ fn prepare<D>(device: &Device, dependencies: D) -> Result<Dispatch<D>, CopyRoute
             .as_ref()
             .ok_or_else(|| CopyRouteFailure::retired(NOT_INITIALIZED))?;
         let index = runtime
+            .agents
             .gpus
             .iter()
             .position(|gpu| {
