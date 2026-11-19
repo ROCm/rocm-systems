@@ -1,7 +1,7 @@
 {
   "archs": ["gfx115x"],
   "description": "RDNA 3.5 APU: WGPs, LDS/GL0/SQC, GL1, GL2, GCEA, system DRAM.",
-  "scope": {"labels": ["GPU", "System Memory"], "split": "dram"},
+  "scope": [{"label": "GPU", "columns": [0, 4]}, {"label": "System Memory", "columns": [5, 5]}],
   "blocks": [
     {"id": "cu", "title": "WGPs", "column": 0, "row": 0, "order": 0, "style": "list", "content": [
       {"metric_id": "3.10.0", "title": "Wave Occ", "category": "util", "bar": false},

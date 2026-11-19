@@ -1,7 +1,7 @@
 {
   "archs": ["gfx1250"],
   "description": "gfx1250: WGPs, TCP (LDS, GL0) and SQC, GL1, GLARB, GL2, EA/DF, then HBM, IO, HDM and GMI.",
-  "scope": {"labels": ["XCD", "AID"], "split": "ea_df"},
+  "scope": [{"label": "XCD", "columns": [0, 4]}, {"label": "AID", "columns": [5, 6]}],
   "blocks": [
     {"id": "cu", "title": "WGPs", "column": 0, "row": 0, "order": 0, "style": "list", "content": [
       {"metric_id": "3.9.0", "title": "Wave Occ", "category": "util", "bar": false},
