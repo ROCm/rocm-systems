@@ -51,7 +51,8 @@ def test_mullit_loose_policy_and_modifiers(arch):
         'CLAMP',
     ):
         assert 'RJ_ARITH_ALU_' + modifier in body
-    assert ('rj_arith_v_mullit_f32_w32_gfx12' in body) == (arch in ('rdna4', 'cdna5'))
+    assert ('rj_arith_v_mullit_f32_w32_gfx12,' in body) == (arch == 'rdna4')
+    assert ('rj_arith_v_mullit_f32_w32_gfx1250' in body) == (arch == 'cdna5')
     assert (
         gen_mullit(
             context('cdna2', 'V_MULLIT_F32', ['d'], ['a', 'b', 'c'], is_vop3=True)
