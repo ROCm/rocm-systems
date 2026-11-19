@@ -147,6 +147,8 @@ rccl_add_misc_micro_binary(rccl-UnitTestsMicroMiscMlx5dvwrap mlx5dvwrap-test.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/mlx5dvsymbols.cc
   REMOVE_DEFS ENABLE_QP_TRACKING)  # as for MiscIbvwrap
 
+rccl_add_misc_micro_binary(rccl-UnitTestsMicroMiscKernelConfig kernel-config-test.cc)
+
 rccl_add_misc_micro_binary(rccl-UnitTestsMicroMiscRecorder recorder-test.cc
   SOURCES
     fakes/debug_fakes.cc)
