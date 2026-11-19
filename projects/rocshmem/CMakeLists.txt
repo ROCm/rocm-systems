@@ -594,6 +594,8 @@ if (NOT BUILD_TESTS_ONLY)
     )
   endif()
 
+  # ROCSHMEM_ROCPROFILER_REGISTER comes from rocshmem_config.h (#cmakedefine, set above). Defining
+  # it here as well redefines it in every source that includes that header (-Wmacro-redefined).
   if(USE_ROCPROFILER_REGISTER AND TARGET rocprofiler-register::rocprofiler-register)
     target_link_libraries(${PROJECT_NAME}
                           PRIVATE rocprofiler-register::rocprofiler-register)
