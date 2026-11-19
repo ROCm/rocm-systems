@@ -133,6 +133,7 @@ class GpuPaths(unittest.TestCase):
             "/sys/" + str(device.relative_to(self.sys)),
         )
         self.link(device / "subsystem", "/sys/bus/pci")
+        self.link(device / "driver", "/sys/bus/pci/drivers/amdgpu")
         self.drm(device, card, render)
         self.devices[bdf] = device
 
@@ -150,16 +151,14 @@ class GpuPaths(unittest.TestCase):
             self.publish(self.devices[bdf], serial)
 
     def components(self):
-        """SMBIOS and a two-port NIC whose functions share one PCIe Device
-        Serial Number, so CPU, NIC and Platform are discovered and have a
-        serial."""
+        """Opt in to CPU, NIC and Platform discovery, with a two-port NIC
+        whose functions share one PCIe Device Serial Number. No DMI: the
+        Platform needs only the machine-id. One CPU package, 0, which the
+        host's /proc/cpuinfo describes."""
         self.write(self.sys / ".cuid-path-components", "\n")
-        dmi = self.sys / "devices/virtual/dmi/id"
         self.write(
-            dmi / "product_uuid", "12345678-9abc-4def-8123-456789abcdef\n", 0o400
+            self.sys / "devices/system/cpu/cpu0/topology/physical_package_id", "0\n"
         )
-        self.write(dmi / "board_vendor", "0x1022\n")
-        self.link(self.sys / "class/dmi/id", "/sys/devices/virtual/dmi/id")
         config = bytearray(4096)
         config[0:4] = bytes([0xE4, 0x14, 0x50, 0x17])
         config[0x100:0x104] = bytes([0x03, 0x00, 0x01, 0x00])
@@ -466,6 +465,85 @@ class GpuPaths(unittest.TestCase):
             finally:
                 self.write(path, original)
 
+    def test_whole_device_unit_id_must_be_zero(self):
+        """A whole device's own cuid_unit_id, where published, must read 0;
+        any other value names no component, never the whole GPU."""
+        self.driver()
+        path = self.devices["0000:03:00.0"] / "cuid_unit_id"
+        for value in ("2", "1", "garbage", ""):
+            self.write(path, value + "\n", 0o444)
+            for nonroot in (False, True):
+                with self.subTest(value=value, nonroot=nonroot):
+                    self.run_probe("reject", "bdf=0000:03:00.0", "/dev/dri/renderD128",
+                                   nonroot=nonroot)
+        self.write(path, "0\n", 0o444)
+        self.run_probe("temporary-gpu", "bdf=0000:03:00.0")
+
+    def test_amdgpu_function_without_drm_is_listed_and_found(self):
+        """An amdgpu-bound GPU function with no DRM node is in the inventory and
+        found by its address, with the same CUID either way."""
+        bdf = "0000:a1:00.0"
+        device = self.sys / "devices/pci0000:a0" / bdf
+        self.write(device / "vendor", "0x1002\n")
+        self.write(device / "device", "0x73a3\n")
+        self.write(device / "revision", "0x01\n")
+        self.write(device / "class", "0x030000\n")
+        self.link(self.sys / "bus/pci/devices" / bdf, "/sys/" + str(device.relative_to(self.sys)))
+        self.link(device / "driver", "/sys/bus/pci/drivers/amdgpu")
+        for nonroot in (False, True):
+            with self.subTest(nonroot=nonroot):
+                rows, found = self.listing(f"bdf={bdf}", nonroot=nonroot)
+                path = f"/sys/bus/pci/devices/{bdf}"
+                self.assertIn(path, rows)
+                whole = self.temporary(bdf, 0, 0x01, 0x73A3)
+                self.assertEqual(rows[path][3], whole)
+                self.assertEqual(found[f"bdf={bdf}"], whole)
+
+    def test_amdgpu_function_without_drm_lists_partition_zero(self):
+        """In a split mode, partition 0 of an amdgpu GPU with no DRM node is
+        listed beside the GPU when the driver publishes its UnitID."""
+        bdf = "0000:a1:00.0"
+        device = self.sys / "devices/pci0000:a0" / bdf
+        self.write(device / "vendor", "0x1002\n")
+        self.write(device / "device", "0x73a3\n")
+        self.write(device / "revision", "0x01\n")
+        self.write(device / "class", "0x038000\n")
+        self.write(device / "current_compute_partition", "DPX\n")
+        self.write(device / "xcp/cuid_unit_id", "2\n", 0o444)
+        self.link(self.sys / "bus/pci/devices" / bdf, "/sys/" + str(device.relative_to(self.sys)))
+        self.link(device / "driver", "/sys/bus/pci/drivers/amdgpu")
+        for nonroot in (False, True):
+            with self.subTest(nonroot=nonroot):
+                rows, _ = self.listing(nonroot=nonroot)
+                units = {row[3]: row[0] for row in rows.values()}
+                self.assertEqual(units.get(self.temporary(bdf, 0, 0x01, 0x73A3)), "0x000", rows)
+                self.assertEqual(units.get(self.temporary(bdf, 2, 0x01, 0x73A3)), "0x002", rows)
+
+    def test_malformed_class_is_reported_by_every_lookup(self):
+        """A GPU or NIC function whose PCI class is malformed is refused with
+        INVALID_FORMAT by path and by BDF, not as unsupported or absent. A NIC
+        with no interface is found by its BDF."""
+        self.components()
+        functions = (("0000:a2:00.0", "0x1002", "0x030000junk", "amdgpu"),
+                     ("0000:a3:00.0", "0x14e4", "0x020000junk", None),
+                     ("0000:a3:00.1", "0x14e4", "0x020000", None))
+        for bdf, vendor, pci_class, driver in functions:
+            device = self.sys / "devices/pci0000:a0" / bdf
+            self.write(device / "vendor", vendor + "\n")
+            self.write(device / "device", "0x1750\n")
+            self.write(device / "revision", "0x01\n")
+            self.write(device / "class", pci_class + "\n")
+            self.link(self.sys / "bus/pci/devices" / bdf, "/sys/" + str(device.relative_to(self.sys)))
+            if driver:
+                self.link(device / "driver", f"/sys/bus/pci/drivers/{driver}")
+        names = ["bdf=0000:a2:00.0", "/sys/bus/pci/devices/0000:a2:00.0", "nic=0000:a3:00.0",
+                 "nic=0000:a3:00.1"]
+        want = ["INVALID_FORMAT", "INVALID_FORMAT", "INVALID_FORMAT", "SUCCESS"]
+        for nonroot in (False, True):
+            with self.subTest(nonroot=nonroot):
+                statuses = self.repeated(names, nonroot)
+                self.assertEqual([statuses[n][0] for n in names], want, statuses)
+
     def test_whole_gpu_spelling_matrix(self):
         physical = "/sys/" + str(self.devices["0000:03:00.0"].relative_to(self.sys))
         forms = [
@@ -570,7 +648,7 @@ class GpuPaths(unittest.TestCase):
                     child.kill()
                     child.wait()
 
-    def test_unnamed_vf_cannot_adopt_attributes(self):
+    def test_host_vf_cannot_adopt_attributes(self):
         self.driver()
         self.partitions(count=2, published=2)
         forms = [
@@ -586,7 +664,7 @@ class GpuPaths(unittest.TestCase):
                         (device / name).unlink(missing_ok=True)
             for role in (False, True):
                 with self.subTest(state=state, nonroot=role):
-                    self.run_probe("unnamed-vf", *forms, nonroot=role)
+                    self.run_probe("host-vf", *forms, nonroot=role)
 
     def repeated(self, names, nonroot):
         statuses = {}
@@ -658,15 +736,28 @@ class GpuPaths(unittest.TestCase):
                     self.run_probe("temporary-gpu", *forms, nonroot=role)
 
     def test_gim_device_without_pci_sysfs_node(self):
-        """GIM names two functions sysfs does not show. One is identified from
-        GIM's ASIC information; the other, which GIM cannot describe, is not a
-        GPU."""
+        """A function bound to gim is a GPU, named from PCI sysfs alone. A
+        function only GIM's ioctl names, which sysfs does not show, is not:
+        every caller sees the same components. An unbound display function
+        is not a GPU either."""
         self.write(
             self.sys / ".cuid-path-gim",
             "0000:03:00.0 -\n"
             "0000:a1:00.0 0x1002 0x74a1 0x05 0x1234abcd\n"
-            "0000:b1:00.0 -\n",
+            "0000:b1:00.0 0x1002 0x74a1 0x05 0x5678abcd\n",
         )
+        for bdf, driver in (("0000:a1:00.0", "gim"), ("0000:c1:00.0", None)):
+            device = self.sys / "devices/pci0000:a0" / bdf
+            self.write(device / "vendor", "0x1002\n")
+            self.write(device / "device", "0x74a1\n")
+            self.write(device / "revision", "0x05\n")
+            self.write(device / "class", "0x120000\n")
+            self.link(
+                self.sys / "bus/pci/devices" / bdf,
+                "/sys/" + str(device.relative_to(self.sys)),
+            )
+            if driver:
+                self.link(device / "driver", f"/sys/bus/pci/drivers/{driver}")
         for role in (False, True):
             with self.subTest(nonroot=role):
                 self.run_probe("gim", nonroot=role)
@@ -759,6 +850,7 @@ class GpuPaths(unittest.TestCase):
             self.write(device / "xcp/xcp_metrics", "", 0o444)
             self.link(self.sys / "bus/pci/devices" / bdf, pci["path"])
             self.link(device / "subsystem", "/sys/bus/pci")
+            self.link(device / "driver", "/sys/bus/pci/drivers/amdgpu")
             self.drm(device, *self.drm_numbers(pci["drm"]))
             self.devices[bdf] = device
         for name, drm in data["platform"].items():
@@ -854,8 +946,21 @@ class GpuPaths(unittest.TestCase):
                         child.wait()
 
 
-if __name__ == "__main__":
+def skip_reason():
     if os.geteuid() != 0:
+        return "needs root for a private mount namespace"
+    for hidden in ("/tmp", "/dev", "/run"):
+        if BUILD == Path(hidden) or Path(hidden) in BUILD.parents:
+            return f"build directory {BUILD} is under {hidden}, which the namespace replaces"
+    if os.statvfs(BUILD).f_flag & os.ST_NODEV:
+        return f"build directory {BUILD} is on a nodev filesystem; the fixture needs device nodes"
+    return None
+
+
+if __name__ == "__main__":
+    reason = skip_reason()
+    if reason:
+        print(f"SKIP: {reason}", file=sys.stderr)
         sys.exit(77)
     namespace()
     unittest.main()

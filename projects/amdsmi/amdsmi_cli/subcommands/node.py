@@ -3,13 +3,12 @@
 # SPDX-License-Identifier: MIT
 
 import logging
-import os
 
 from amdsmi import amdsmi_exception, amdsmi_interface
 
 
 class NodeCommands:
-    def _node_cuid_components(self, include_primary):
+    def _node_cuid_components(self):
         """Every component's CUID, named by type and position within its type."""
         try:
             components = amdsmi_interface.amdsmi_get_cuid_components()
@@ -24,17 +23,11 @@ class NodeCommands:
             index = counts.get(kind, 0)
             counts[kind] = index + 1
             name = kind if kind == "PLATFORM" else f"{kind} {index}"
-            if include_primary:
-                primary = component["primary"] or (
-                    "N/A (requires root)" if os.geteuid() != 0 else "N/A"
-                )
-            else:
-                primary = "N/A (not requested)"
             result[name] = {
-                "derived_cuid": component["derived"],
-                "primary_cuid": primary,
+                "cuid": component["derived"],
+                "component_type": kind,
                 "source": component["source"],
-                "auxiliary": component["auxiliary"],
+                "temporary": component["auxiliary"],
                 "bdf": component["bdf"] or "N/A",
                 "device_path": component["device_path"] or "N/A",
             }
@@ -50,7 +43,6 @@ class NodeCommands:
         gtt=None,
         tray=None,
         cuid=None,
-        cuid_primary=None,
     ):
         """List node information
 
@@ -64,8 +56,6 @@ class NodeCommands:
             gtt (bool, optional): Value override for args.gtt. Defaults to None.
             tray (bool, optional): Value override for args.tray. Defaults to None.
             cuid (bool, optional): Value override for args.cuid. Defaults to None.
-            cuid_primary (bool, optional): Value override for args.cuid_primary.
-                Defaults to None.
 
         Returns:
             None: Print output via AMDSMILogger to destination
@@ -79,10 +69,7 @@ class NodeCommands:
             args.tray = tray
         if cuid:
             args.cuid = cuid
-        if cuid_primary:
-            args.cuid_primary = cuid_primary
-        args.cuid_primary = getattr(args, "cuid_primary", False)
-        args.cuid = getattr(args, "cuid", False) or args.cuid_primary
+        args.cuid = getattr(args, "cuid", False)
         # Store args that are applicable to the current platform
         current_platform_args = ["power_management", "base_board_temps", "gtt", "tray"]
 
@@ -96,8 +83,7 @@ class NodeCommands:
             current_platform_values += [args.gtt]
         if args.tray:
             current_platform_values += [args.tray]
-        # CUID is opt-in: it enumerates every component, and without root most
-        # of what it reports is temporary.
+        # CUID is opt-in: it enumerates every component, not only GPUs.
         if args.cuid:
             current_platform_values += [args.cuid]
 
@@ -231,7 +217,7 @@ class NodeCommands:
 
         cuid_dict = {}
         if args.cuid:
-            cuid_dict["components"] = self._node_cuid_components(args.cuid_primary)
+            cuid_dict["components"] = self._node_cuid_components()
 
         # Print output
         if self.logger.is_human_readable_format() and self.logger.destination == "stdout":

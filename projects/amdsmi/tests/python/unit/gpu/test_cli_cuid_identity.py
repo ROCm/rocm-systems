@@ -19,7 +19,7 @@ from pathlib import Path
 from unittest import mock
 from unittest.mock import Mock
 
-from common.common import cli_search_order, find_cli_dir
+from common.common import cli_search_order, fake_module, find_cli_dir, load_cli_module, stub_modules
 
 _CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
 if not _CLI_DIR:
@@ -191,9 +191,7 @@ def run_node(cli, fmt, components=NODE_COMPONENTS, **overrides):
         cli.api.amdsmi_get_cuid_components = Mock(return_value=components)
     cli.api.amdsmi_get_ttm_info = Mock(return_value={"current_pages": 0})
     cli.api.amdsmi_get_tray_info = Mock(return_value={})
-    args = dict.fromkeys(
-        ("power_management", "base_board_temps", "gtt", "tray", "cuid", "cuid_primary"), False
-    )
+    args = dict.fromkeys(("power_management", "base_board_temps", "gtt", "tray", "cuid"), False)
     args.update(overrides)
 
     def node():
@@ -230,7 +228,6 @@ def static_args(**overrides):
             "numa",
             "partition",
             "cuid",
-            "cuid_primary",
         ),
         False,
     )
@@ -253,7 +250,7 @@ class TestCliCuidIdentity(unittest.TestCase):
             with ExitStack() as stack:
                 yield make_cli(stack)
 
-    def test_source_auxiliary_table(self):
+    def test_source_temporary_table(self):
         for source, auxiliary in itertools.product(
             ["DRIVER", "LIBRARY", "UNKNOWN"], [True, False, None]
         ):
@@ -263,8 +260,7 @@ class TestCliCuidIdentity(unittest.TestCase):
                 )
                 result = cli.helpers.get_gpu_cuid_info(1)
                 self.assertEqual(result["source"], source)
-                self.assertEqual(result["auxiliary"], "unknown" if auxiliary is None else auxiliary)
-                self.assertEqual(result["primary_cuid"], "N/A (not requested)")
+                self.assertEqual(result["temporary"], "unknown" if auxiliary is None else auxiliary)
                 self.assertNotIn("effective_seed", result)
 
     def test_enumeration_fields_precede_cuid_fields(self):
@@ -299,8 +295,11 @@ class TestCliCuidIdentity(unittest.TestCase):
 
             output = capture_stdout(list_gpu)
             self.assertIn(f"UUID: {LEGACY_UUID}", output)
-            self.assertIn(f"CUID: {CUID}", output)
-            self.assertNotIn("IDENTIFIER_KIND", output)
+            self.assertIn(
+                f"    CUID: {CUID}\n    SOURCE: DRIVER\n    TEMPORARY: False\n"
+                "    CUID_METADATA_STATUS: available\n",
+                output,
+            )
             self.assertNotIn("SEED", output)
             self.assertNotIn("FINGERPRINT", output)
             self.assertNotIn("PRIMARY", output)
@@ -319,16 +318,14 @@ class TestCliCuidIdentity(unittest.TestCase):
                     ["gpu", "gpu_bdf", "gpu_uuid"] if fmt == "csv" else ["gpu", "bdf", "uuid"]
                 )
                 old_keys += ["kfd_id", "node_id", "partition_id"]
-                self.assertEqual(list(result)[:6], old_keys)
+                self.assertEqual(
+                    list(result), old_keys + ["cuid", "source", "temporary", "cuid_metadata_status"]
+                )
                 self.assertEqual(result[alias], LEGACY_UUID if legacy else "N/A")
                 self.assertEqual(result["cuid"], CUID if cuid else "N/A")
-                self.assertNotIn("identifier_kind", result)
                 self.assertEqual(
                     result["cuid_metadata_status"], "available" if cuid else "not_supported"
                 )
-                self.assertNotIn("effective_seed", result)
-                self.assertNotIn("primary_cuid", result)
-                self.assertNotIn("ready", result)
                 self.assertNotIn(PRIMARY, str(result))
 
     def test_metadata_failure_keeps_available_cuid(self):
@@ -340,11 +337,11 @@ class TestCliCuidIdentity(unittest.TestCase):
                 self.assertEqual(result["gpu_uuid" if fmt == "csv" else "uuid"], LEGACY_UUID)
                 if code == 2:
                     self.assertEqual(result["source"], "N/A")
-                    self.assertEqual(result["auxiliary"], "N/A")
+                    self.assertEqual(result["temporary"], "N/A")
                     self.assertEqual(result["cuid_metadata_status"], "not_supported")
                 else:
                     self.assertEqual(result["source"], "UNKNOWN")
-                    self.assertEqual(result["auxiliary"], "unknown")
+                    self.assertEqual(result["temporary"], "unknown")
                     self.assertEqual(result["cuid_metadata_status"], f"amdsmi_error_{code}")
                 cli.api.amdsmi_get_gpu_enumeration_info.assert_not_called()
 
@@ -354,8 +351,8 @@ class TestCliCuidIdentity(unittest.TestCase):
             cli.api.amdsmi_get_gpu_device_cuid.side_effect = LibraryError(2)
             result = cli.helpers.get_gpu_cuid_info(1)
             self.assertEqual(
-                {k: result[k] for k in ("derived_cuid", "component_type", "auxiliary", "source")},
-                dict.fromkeys(("derived_cuid", "component_type", "auxiliary", "source"), "N/A"),
+                {k: result[k] for k in ("cuid", "component_type", "temporary", "source")},
+                dict.fromkeys(("cuid", "component_type", "temporary", "source"), "N/A"),
             )
             self.assertEqual(result["cuid_metadata_status"], "not_supported")
 
@@ -363,12 +360,11 @@ class TestCliCuidIdentity(unittest.TestCase):
         with self.case() as cli:
             del cli.api.amdsmi_get_gpu_cuid_info
             result = cli.helpers.get_gpu_cuid_info(1)
-            self.assertEqual(result["identifier_kind"], "cuid")
-            self.assertEqual(result["derived_cuid"], CUID)
+            self.assertEqual(result["cuid"], CUID)
             self.assertEqual(result["cuid_metadata_status"], "unsupported")
-            self.assertEqual(result["auxiliary"], "unknown")
+            self.assertEqual(result["temporary"], "unknown")
 
-    def test_auxiliary_serialization(self):
+    def test_temporary_serialization(self):
         for auxiliary, fmt in itertools.product([True, False, None], ["json", "csv"]):
             with self.case(auxiliary=auxiliary, fmt=fmt) as cli:
                 cli.api.amdsmi_get_gpu_cuid_info.return_value["auxiliary"] = auxiliary
@@ -376,7 +372,8 @@ class TestCliCuidIdentity(unittest.TestCase):
                 expected = "unknown" if auxiliary is None else auxiliary
                 if fmt == "csv":
                     expected = str(expected)
-                self.assertEqual(result["auxiliary"], expected)
+                self.assertEqual(result["temporary"], expected)
+                self.assertNotIn("auxiliary", result)
 
     def test_static_reports_identity_without_node_state(self):
         for auxiliary in [False, True]:
@@ -394,18 +391,17 @@ class TestCliCuidIdentity(unittest.TestCase):
                 result = json.loads(capture_stdout(static_gpu))
                 self.assertEqual(list(result), ["gpu_data"])
                 gpu = result["gpu_data"][0]["cuid"]
-                self.assertIs(gpu["auxiliary"], auxiliary)
-                self.assertEqual(gpu["primary_cuid"], "N/A (not requested)")
-                self.assertNotIn("effective_seed", gpu)
+                self.assertEqual(
+                    list(gpu),
+                    ["cuid", "component_type", "source", "temporary", "cuid_metadata_status"],
+                )
+                self.assertIs(gpu["temporary"], auxiliary)
 
-    def test_primary_requires_explicit_selection(self):
+    def test_no_cli_field_carries_the_primary(self):
         with self.case() as cli:
-            self.assertEqual(
-                cli.helpers.get_gpu_cuid_info(1)["primary_cuid"], "N/A (not requested)"
-            )
-            self.assertEqual(
-                cli.helpers.get_gpu_cuid_info(1, include_primary=True)["primary_cuid"], PRIMARY
-            )
+            result = cli.helpers.get_gpu_cuid_info(1)
+        self.assertNotIn(PRIMARY, str(result))
+        self.assertEqual([key for key in result if "primary" in key], [])
 
     def test_static_without_cuid_does_not_query_identity(self):
         with self.case() as cli:
@@ -440,42 +436,37 @@ class TestCliNodeCuid(unittest.TestCase):
         self.assertEqual(list(cuid), ["components"])
         self.assertEqual(list(cuid["components"]), ["PLATFORM", "GPU 0", "GPU 1"])
         platform = cuid["components"]["PLATFORM"]
-        self.assertEqual(platform["derived_cuid"], OTHER_CUID)
-        self.assertIs(platform["auxiliary"], True)
+        self.assertEqual(
+            list(platform), ["cuid", "component_type", "source", "temporary", "bdf", "device_path"]
+        )
+        self.assertEqual(platform["cuid"], OTHER_CUID)
+        self.assertEqual(platform["component_type"], "PLATFORM")
+        self.assertIs(platform["temporary"], True)
         self.assertEqual(platform["bdf"], "N/A")
         self.assertEqual(platform["device_path"], "N/A")
         gpu = cuid["components"]["GPU 1"]
-        self.assertEqual(gpu["derived_cuid"], LEGACY_UUID)
+        self.assertEqual(gpu["cuid"], LEGACY_UUID)
         self.assertEqual(gpu["source"], "DRIVER")
         self.assertEqual(gpu["bdf"], "0000:63:00.0")
-        self.assertEqual(gpu["primary_cuid"], "N/A (not requested)")
-
-    def test_primary_is_opt_in_and_says_when_it_needs_root(self):
-        with self.cli() as cli, mock.patch("os.geteuid", return_value=1000):
-            components = run_node(cli, "json", cuid_primary=True)["cuid"]["components"]
-        self.assertEqual(components["GPU 0"]["primary_cuid"], PRIMARY)
-        self.assertEqual(components["PLATFORM"]["primary_cuid"], "N/A (requires root)")
-
-    def test_an_empty_primary_for_root_does_not_ask_for_root(self):
-        with self.cli() as cli, mock.patch("os.geteuid", return_value=0):
-            components = run_node(cli, "json", cuid_primary=True)["cuid"]["components"]
-            cli.api.amdsmi_get_gpu_cuid_info.return_value["primary"] = ""
-            gpu = cli.helpers.get_gpu_cuid_info(1, include_primary=True)
-        self.assertEqual(components["PLATFORM"]["primary_cuid"], "N/A")
-        self.assertEqual(gpu["primary_cuid"], "N/A")
+        self.assertNotIn(PRIMARY, str(cuid))
 
     def test_csv_has_one_row_per_component(self):
         with self.cli() as cli:
             rows = run_node(cli, "csv", cuid=True)
         self.assertEqual([row["component"] for row in rows], ["PLATFORM", "GPU 0", "GPU 1"])
         self.assertNotIn("seed_fingerprint", rows[0])
-        self.assertEqual(rows[1]["derived_cuid"], CUID)
+        self.assertEqual(rows[1]["cuid"], CUID)
 
     def test_human_readable_lists_each_component(self):
         with self.cli() as cli:
             output = run_node(cli, "human_readable", cuid=True)
         self.assertIn("    CUID:\n        PLATFORM:", output)
-        self.assertIn("        GPU 1:\n            DERIVED_CUID: " + LEGACY_UUID, output)
+        self.assertIn(
+            "        GPU 1:\n            CUID: " + LEGACY_UUID + "\n"
+            "            COMPONENT_TYPE: GPU\n            SOURCE: DRIVER\n"
+            "            TEMPORARY: False\n",
+            output,
+        )
 
     def test_a_library_failure_reports_no_components(self):
         with self.cli() as cli:
@@ -492,3 +483,55 @@ class TestCliNodeCuid(unittest.TestCase):
             node = run_node(cli, "json")
             cli.api.amdsmi_get_cuid_components.assert_not_called()
         self.assertNotIn("cuid", node)
+
+
+class TestCliCuidOptions(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        stub_modules(
+            cls,
+            {
+                "_version": fake_module("_version", __version__="0.0.0+test"),
+                "amdsmi_helpers": fake_module("amdsmi_helpers", AMDSMIHelpers=mock.Mock),
+                "cuid_parser_under_test": None,
+            },
+        )
+        cls.module = load_cli_module(
+            "cuid_parser_under_test", str(CLI / "amdsmi_parser.py"), str(CLI)
+        )
+
+    def options(self, subcommand):
+        helpers = mock.Mock()
+        for name in (
+            "is_amdgpu_initialized",
+            "is_brcm_switch_initialized",
+            "is_ainic_initialized",
+            "is_brcm_nic_initialized",
+            "is_amd_hsmp_initialized",
+            "is_hypervisor",
+            "is_windows",
+            "is_virtual_os",
+        ):
+            getattr(helpers, name).return_value = False
+        helpers.is_amdgpu_initialized.return_value = True
+        helpers.get_gpu_choices.return_value = ({"0": 1}, "0")
+        helpers.is_baremetal.return_value = True
+        helpers.is_linux.return_value = True
+        helpers.os_info.return_value = "Linux Baremetal"
+        helpers.get_rocm_version.return_value = "unknown"
+        helpers.get_clock_types.side_effect = lambda: (["SCLK", "MCLK", "PCIE"], "")
+        with mock.patch.dict(os.environ):
+            os.environ.pop("_ARGCOMPLETE", None)
+            parser = self.module.AMDSMIParser(
+                *([mock.Mock()] * 20), sys_argv=["amd-smi", subcommand], helpers=helpers
+            )
+        return set(parser.subparsers.choices[subcommand]._option_string_actions)
+
+    def test_no_subcommand_offers_a_primary_cuid(self):
+        for subcommand in ("static", "node"):
+            with self.subTest(subcommand=subcommand):
+                options = self.options(subcommand)
+                self.assertIn("--cuid", options)
+                self.assertIn("-Y", options)
+                self.assertNotIn("--cuid-primary", options)
+                self.assertNotIn("-y", options)

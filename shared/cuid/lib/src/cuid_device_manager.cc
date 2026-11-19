@@ -146,21 +146,18 @@ amdcuid_status_t CuidDeviceManager::build_cuid_index() {
   amdcuid_status_t unavailable = AMDCUID_STATUS_DEVICE_NOT_FOUND;
   for (const auto& device : devices_) {
     if (!device) return AMDCUID_STATUS_INVALID_ARGUMENT;
-    // A component with no identity at all, such as an auxiliary one on a host
-    // without a machine identity, is left out. It must not fail the refresh
-    // for every other component.
+    // A component whose identity cannot be formed is left out; it must not
+    // fail the refresh for every other component. Only a failure of the
+    // HMAC itself, shared by every component, fails the refresh.
     const auto skip = [&](amdcuid_status_t status) {
       LOG(DEBUG, "CUID reader: unavailable identity for component type "
                      << device->type() << " (" << amdcuid_status_to_string(status) << ")");
-      unavailable = status;
+      if (unavailable != AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND) unavailable = status;
     };
     amdcuid_derived_id derived{};
     const auto status = device->get_derived_cuid(derived);
     if (status != AMDCUID_STATUS_SUCCESS) {
-      if (status != AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND &&
-          status != AMDCUID_STATUS_UNSUPPORTED && status != AMDCUID_STATUS_PERMISSION_DENIED &&
-          !(geteuid() != 0 && status == AMDCUID_STATUS_INVALID_ARGUMENT))
-        return status;
+      if (status == AMDCUID_STATUS_HMAC_ERROR) return status;
       skip(status);
       continue;
     }

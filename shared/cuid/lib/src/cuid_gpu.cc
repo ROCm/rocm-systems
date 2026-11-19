@@ -102,6 +102,9 @@ int render_minor_of(const std::string& device) {
   return minor;
 }
 
+// The largest minor number Linux gives a character device (20 bits).
+constexpr long long kMaxRenderMinor = (1LL << 20) - 1;
+
 struct KfdNode {
   long long render_minor = -1;
   long long domain = -1;
@@ -127,12 +130,11 @@ KfdSnapshot kfd_nodes_under(const std::string& root) {
     KfdNode node;
     std::string key;
     std::string text;
-    bool any = false;
+    bool malformed = false;
     // Values are read as text: unique_id is a 64-bit serial that exceeds a
     // signed long long for half of all parts, and a failed numeric read would
     // stop the scan.
     while (properties >> key >> text) {
-      any = true;
       long long* field = key == "drm_render_minor" ? &node.render_minor
                          : key == "domain"         ? &node.domain
                          : key == "location_id"    ? &node.location_id
@@ -141,11 +143,21 @@ KfdSnapshot kfd_nodes_under(const std::string& root) {
       char* end = nullptr;
       errno = 0;
       const long long value = std::strtoll(text.c_str(), &end, 10);
-      if (errno != ERANGE && end != text.c_str() && *end == '\0') *field = value;
+      if (errno == ERANGE || end == text.c_str() || *end != '\0' || value < 0)
+        malformed = true;
+      else
+        *field = value;
     }
-    if (!any) snapshot.complete = false;
-    if (node.render_minor > 0 && node.domain >= 0 && node.location_id >= 0)
-      snapshot.nodes.push_back(node);
+    // A node that cannot be read in full, or whose PCI domain or location is
+    // out of range, may be a hidden GPU's, so the topology no longer counts as
+    // complete. A CPU node has render minor 0.
+    if (malformed || node.render_minor < 0 || node.render_minor > kMaxRenderMinor ||
+        (node.render_minor > 0 && (node.domain < 0 || node.domain > UINT32_MAX ||
+                                   node.location_id < 0 || node.location_id > UINT16_MAX))) {
+      snapshot.complete = false;
+      continue;
+    }
+    if (node.render_minor > 0) snapshot.nodes.push_back(node);
   }
   closedir(dir);
   return snapshot;
@@ -219,6 +231,27 @@ unsigned mode_partition_count(const std::string& mode) {
   if (mode == "QPX") return 4;
   return 0;
 }
+
+// The driver bound to a PCI function directory, or "".
+std::string pci_driver(const std::string& function) {
+  char target[256] = {};
+  const ssize_t length = readlink((function + "/driver").c_str(), target, sizeof(target) - 1);
+  if (length <= 0) return "";
+  const char* name = strrchr(target, '/');
+  return name ? name + 1 : target;
+}
+
+// A whole device's own cuid_unit_id, where the driver publishes one, must be
+// 0. `device` is its PCI function directory, or a DRM node whose `device` is.
+bool own_unit_id_is_zero(const std::string& device) {
+  for (const std::string& dir : {device, device + "/device"}) {
+    const std::string path = dir + "/" + CuidUtilities::kDriverUnitIdAttribute;
+    if (access(path.c_str(), F_OK) == 0) return CuidUtilities::read_sysfs_file(path) == "0";
+  }
+  return true;
+}
+
+bool gpu_class(uint16_t pci_class) { return (pci_class >> 8) == 0x03 || (pci_class >> 8) == 0x12; }
 
 constexpr const char kKfdNodes[] = "/sys/class/kfd/kfd/topology/nodes";
 constexpr const char kPciDevices[] = "/sys/bus/pci/devices";
@@ -306,7 +339,7 @@ amdcuid_status_t read_public_partition_metadata(amdcuid_gpu_info& info) {
 }
 
 amdcuid_status_t read_partition_metadata(amdcuid_gpu_info& info) {
-  if (info.unnamed_vf) {
+  if (info.host_vf) {
     info.partition_metadata_valid = false;
     return AMDCUID_STATUS_UNSUPPORTED;
   }
@@ -409,11 +442,10 @@ amdcuid_status_t CuidGpu::resolve_path(const std::string& path, CuidGpuRoute& ro
       route.bdf = bdf;
       route.node = drm_node_for_device(real);
       if (route.node.empty()) {
-        const auto text = CuidUtilities::read_sysfs_file(real + "/class");
-        char* end = nullptr;
-        const auto pci_class = std::strtoul(text.c_str(), &end, 0);
-        if (text.empty() || *end != '\0' || (pci_class >> 16) != 0x03)
-          return AMDCUID_STATUS_UNSUPPORTED;
+        uint16_t pci_class = 0;
+        const amdcuid_status_t class_status = CuidUtilities::read_pci_class(real, bdf, pci_class);
+        if (class_status != AMDCUID_STATUS_SUCCESS) return class_status;
+        if (!gpu_class(pci_class)) return AMDCUID_STATUS_UNSUPPORTED;
         route.node = "/sys/bus/pci/devices/" + bdf;
       }
       return AMDCUID_STATUS_SUCCESS;
@@ -508,13 +540,6 @@ amdcuid_status_t CuidGpu::discover(std::vector<DevicePtr>& gpus) {
   std::set<std::string> seen_bdfs;
   std::set<std::string> seen_nodes;
 
-  // Share one GimClient across all discover_single calls and the GIM
-  // enumeration below to avoid repeating the ioctl handshake per GPU.
-  std::unique_ptr<cuid::gim::GimClient> gim_client;
-  if (cuid::gim::GimClient::is_available()) {
-    gim_client.reset(new cuid::gim::GimClient());
-  }
-
   const char* drm_path = "/sys/class/drm";
   DIR* dir = opendir(drm_path);
   if (dir != nullptr) {
@@ -533,7 +558,7 @@ amdcuid_status_t CuidGpu::discover(std::vector<DevicePtr>& gpus) {
         // Skip partitioned or otherwise unsupported cards; discover_single
         // leaves `info` untouched in that case, so emplacing it would add a
         // zero-filled GPU entry.
-        const auto status = discover_single(&info, device_path, gim_client.get());
+        const auto status = discover_single(&info, device_path);
         std::vector<std::pair<amdcuid_gpu_info, std::string>> found;
         if (status == AMDCUID_STATUS_SUCCESS) {
           found.emplace_back(info, device_path);
@@ -555,8 +580,7 @@ amdcuid_status_t CuidGpu::discover(std::vector<DevicePtr>& gpus) {
           const auto bdf = device.substr(device.find_last_of('/') + 1);
           amdcuid_gpu_info whole = {};
           const auto pci = std::string(kPciDevices) + "/" + bdf;
-          if (pci_bdf(bdf) &&
-              discover_single(&whole, pci, gim_client.get()) == AMDCUID_STATUS_SUCCESS &&
+          if (pci_bdf(bdf) && discover_single(&whole, pci) == AMDCUID_STATUS_SUCCESS &&
               whole.partition_attr_dir.empty())
             found.emplace_back(whole, pci);
         }
@@ -583,35 +607,35 @@ amdcuid_status_t CuidGpu::discover(std::vector<DevicePtr>& gpus) {
     closedir(dir);
   }
 
-  // When the GIM driver is loaded, GPUs may not show up under /sys/class/drm
-  // at all. Enumerate them via the GIM SMI ioctl interface and add any BDFs
-  // we have not already discovered.
-  if (gim_client) {
-    std::vector<cuid::gim::GimDeviceEntry> gim_devices;
-    if (gim_client->get_devices(gim_devices) == AMDCUID_STATUS_SUCCESS) {
-      for (const auto& dev : gim_devices) {
-        if (dev.bdf.empty() || seen_bdfs.count(dev.bdf) > 0) {
-          continue;
-        }
-        // Skip devices GIM reports as failed; they cannot provide useful
-        // identifying information.
-        if (dev.failed) {
-          LOG(DEBUG, "GIM: skipping failed device at BDF " << dev.bdf);
-          continue;
-        }
-        std::string sys_device_path = "/sys/bus/pci/devices/" + dev.bdf;
-        amdcuid_gpu_info info = {};
-        if (discover_single(&info, sys_device_path, gim_client.get(), dev.bdf) !=
-            AMDCUID_STATUS_SUCCESS) {
-          LOG(DEBUG, "GIM: skipping unidentified device at BDF " << dev.bdf);
-          continue;
-        }
-        // A GIM-only device is named by its PCI sysfs directory.
-        info.render_node = sys_device_path;
-        seen_bdfs.insert(dev.bdf);
-        gpus.emplace_back(std::make_shared<CuidGpu>(info));
+  // A GPU without a DRM node, such as one bound to the SR-IOV host driver gim,
+  // is named by its PCI function, which every caller can read.
+  if (DIR* pci = opendir(kPciDevices)) {
+    struct dirent* entry;
+    // NOLINTNEXTLINE(concurrency-mt-unsafe)
+    while ((entry = readdir(pci)) != NULL) {
+      const std::string bdf = entry->d_name;
+      if (!pci_bdf(bdf) || seen_bdfs.count(bdf) > 0) continue;
+      const std::string function = std::string(kPciDevices) + "/" + bdf;
+      const std::string driver = pci_driver(function);
+      if (driver != "gim" && driver != "amdgpu") continue;
+      amdcuid_gpu_info info = {};
+      const auto status = discover_single(&info, function);
+      if (status == AMDCUID_STATUS_SUCCESS && !info.partition_attr_dir.empty()) continue;
+      if (status != AMDCUID_STATUS_SUCCESS) {
+        LOG(DEBUG, "CUID discovery: skipping " << function << " ("
+                                               << amdcuid_status_to_string(status) << ")");
+        continue;
       }
+      info.render_node = function;
+      seen_bdfs.insert(bdf);
+      if (!seen_nodes.insert(info.render_node).second) continue;
+      gpus.emplace_back(std::make_shared<CuidGpu>(info));
+      amdcuid_gpu_info partition = {};
+      if (discover_partition(&partition, function) == AMDCUID_STATUS_SUCCESS &&
+          seen_nodes.insert(partition.render_node).second)
+        gpus.emplace_back(std::make_shared<CuidGpu>(partition));
     }
+    closedir(pci);
   }
 
   if (dir == nullptr && seen_bdfs.empty()) {
@@ -640,12 +664,9 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info* gpu_info, const std:
       resolved == AMDCUID_STATUS_SUCCESS ? route.bdf : CuidUtilities::readlink_bdf(device_path);
   if (bdf.empty()) bdf = gim_bdf;
 
-  // A VF we could not name is recorded as such rather than rounded to unit_id 0,
-  // which would say "the whole card". See CuidUtilities::VfIdentity.
-  const CuidUtilities::VfIdentity vf = CuidUtilities::get_gpu_vf_identity(
-      resolved == AMDCUID_STATUS_SUCCESS ? route.device : device_path);
-  info.header.fields.gpu.unit_id = vf.unit_id;
-  info.unnamed_vf = vf.is_vf && !vf.index_known;
+  info.header.fields.gpu.unit_id = 0;
+  info.host_vf =
+      CuidUtilities::is_host_vf(resolved == AMDCUID_STATUS_SUCCESS ? route.device : device_path);
 
   // No PCI configuration space under a card whose unit_id is 0 means a spatial
   // partition rather than a whole GPU.
@@ -660,21 +681,13 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info* gpu_info, const std:
                              info.header.fields.gpu.device_id, info.header.fields.gpu.revision_id);
   if (identity_status == AMDCUID_STATUS_INVALID_FORMAT) return identity_status;
 
-  std::string pci_class = CuidUtilities::read_sysfs_file(device_path + "/class");
   uint16_t pci_class_integer = 0;
-  if (pci_class.empty() && !bdf.empty()) {
-    // if file read fails, attempt to get from pci config
-    uint8_t class_id_bytes[2] = {0};
-    const uint16_t offset = 0xa;
-    amdcuid_status_t status = PciUtil::read_pci_config_space(bdf, class_id_bytes, 2, offset);
-    uint16_t class_id_int = PciUtil::load_le16(class_id_bytes);
-    pci_class_integer = (status == AMDCUID_STATUS_SUCCESS) ? class_id_int : 0;
-  } else {
-    // sysfs class file returns 24-bit value (class:subclass:prog_if), shift
-    // right by 8 to get 16-bit class:subclass
-    pci_class_integer = (uint16_t)(strtol(pci_class.c_str(), nullptr, 16) >> 8);
-  }
+  const amdcuid_status_t class_status =
+      CuidUtilities::read_pci_class(device_path, bdf, pci_class_integer);
+  if (class_status != AMDCUID_STATUS_SUCCESS && !gim_client) return class_status;
   info.header.fields.gpu.pci_class = pci_class_integer;
+
+  if (!own_unit_id_is_zero(device_path)) return AMDCUID_STATUS_INVALID_FORMAT;
 
   // Prefer the renderD node; without one (e.g., GIM driver), use the card path.
   std::string full_device_node = normalize_render_node(device_path);
@@ -719,6 +732,15 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info* gpu_info, const std:
   if (info.header.fields.gpu.vendor_id != kAmdGpuVendorId) {
     LOG(DEBUG, "not an AMD GPU: " << device_path);
     return AMDCUID_STATUS_UNSUPPORTED;
+  }
+  // Only a display or accelerator function bound to amdgpu or gim is a GPU
+  // component; an unbound or vfio-pci one is not, also when looked up.
+  if (!needs_gim_fallback) {
+    const std::string driver = pci_driver(device_path);
+    if (!gpu_class(info.header.fields.gpu.pci_class) || (driver != "amdgpu" && driver != "gim")) {
+      LOG(DEBUG, "not a GPU component: " << device_path << " (driver '" << driver << "')");
+      return AMDCUID_STATUS_UNSUPPORTED;
+    }
   }
 
   *gpu_info = info;
@@ -796,8 +818,18 @@ amdcuid_status_t CuidGpu::partition_parent(const std::string& attr_dir, const st
   parent.kfd_unit_id = kfd_unit_id(device, pci_root, kfd_nodes);
 
   const std::string pci = pci_root + "/" + parent.bdf;
-  return PciUtil::read_identity(pci, parent.bdf, parent.vendor_id, parent.device_id,
-                                parent.revision_id);
+  const amdcuid_status_t identity = PciUtil::read_identity(pci, parent.bdf, parent.vendor_id,
+                                                           parent.device_id, parent.revision_id);
+  if (identity != AMDCUID_STATUS_SUCCESS) return identity;
+  // The parent is classified like any GPU: only an AMD display or accelerator
+  // function bound to amdgpu, and not a VF, has partitions.
+  uint16_t pci_class = 0;
+  const amdcuid_status_t class_status = CuidUtilities::read_pci_class(pci, parent.bdf, pci_class);
+  if (class_status != AMDCUID_STATUS_SUCCESS) return class_status;
+  if (parent.vendor_id != kAmdGpuVendorId || !gpu_class(pci_class) || pci_driver(pci) != "amdgpu" ||
+      CuidUtilities::is_host_vf(pci))
+    return AMDCUID_STATUS_UNSUPPORTED;
+  return AMDCUID_STATUS_SUCCESS;
 }
 
 // The UnitID of a partition: cuid_unit_id where the driver publishes it,
@@ -810,7 +842,7 @@ uint16_t CuidGpu::partition_unit_id(const CuidPartitionParent& parent) const {
 // A partition's temporary input: its parent's routing and IDs plus its own
 // UnitID, which is what keeps it apart from the whole GPU and its siblings.
 amdcuid_status_t CuidGpu::partition_temporary_input(CuidUtilities::AuxiliaryInput& aux) const {
-  if (m_info.unnamed_vf) return AMDCUID_STATUS_UNSUPPORTED;
+  if (m_info.host_vf) return AMDCUID_STATUS_UNSUPPORTED;
   CuidPartitionParent parent;
   const auto status = partition_parent(
       m_info.partition_attr_dir, m_info.pci_root.empty() ? kPciDevices : m_info.pci_root,
@@ -821,7 +853,8 @@ amdcuid_status_t CuidGpu::partition_temporary_input(CuidUtilities::AuxiliaryInpu
 
   aux = {};
   aux.format = CuidUtilities::kAuxFormatPcie;
-  CuidUtilities::set_pcie_routing(aux, parent.bdf);
+  const amdcuid_status_t routing = CuidUtilities::set_pcie_routing(aux, parent.bdf);
+  if (routing != AMDCUID_STATUS_SUCCESS) return routing;
   aux.revision_id = parent.revision_id;
   aux.device_id = parent.device_id;
   aux.vendor_id = parent.vendor_id;
@@ -836,8 +869,8 @@ amdcuid_status_t CuidGpu::get_hardware_fingerprint(uint64_t& fingerprint) const 
   }
   // Neither PCI nor partition attributes can supply this VF's own serial.
   const bool render_node = m_info.render_node.find("/sys/class/drm/") == 0;
-  if (m_info.unnamed_vf || (render_node && m_info.header.fields.gpu.unit_id == 0 &&
-                            CuidUtilities::gpu_reports_vf_mode(m_info.render_node + "/device"))) {
+  if (m_info.host_vf || (render_node && m_info.header.fields.gpu.unit_id == 0 &&
+                         CuidUtilities::gpu_reports_vf_mode(m_info.render_node + "/device"))) {
     fingerprint = 0;
     return AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND;
   }
@@ -954,10 +987,10 @@ amdcuid_status_t CuidGpu::get_primary_cuid(amdcuid_primary_id& /*id*/) const {
 }
 
 amdcuid_status_t CuidGpu::get_temporary_input(CuidUtilities::AuxiliaryInput& aux) const {
-  if (m_info.unnamed_vf) return AMDCUID_STATUS_UNSUPPORTED;
   // A partition shares its parent's routing id, so only its UnitID keeps it
   // apart; that path reads it from cuid_unit_id or KFD.
   if (!m_info.partition_attr_dir.empty()) return partition_temporary_input(aux);
+  if (!own_unit_id_is_zero(m_info.render_node)) return AMDCUID_STATUS_INVALID_FORMAT;
 
   // Refused whatever the fingerprint source, so every host reports it alike.
   if (m_info.header.fields.gpu.unit_id > CuidUtilities::kMaxUnitId) {
@@ -973,7 +1006,8 @@ amdcuid_status_t CuidGpu::get_temporary_input(CuidUtilities::AuxiliaryInput& aux
   }
   aux = {};
   aux.format = CuidUtilities::kAuxFormatPcie;
-  CuidUtilities::set_pcie_routing(aux, bdf);
+  const amdcuid_status_t routing = CuidUtilities::set_pcie_routing(aux, bdf);
+  if (routing != AMDCUID_STATUS_SUCCESS) return routing;
   aux.revision_id = m_info.header.fields.gpu.revision_id;
   aux.device_id = m_info.header.fields.gpu.device_id;
   aux.vendor_id = m_info.header.fields.gpu.vendor_id;
