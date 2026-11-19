@@ -8,17 +8,21 @@
 //! interrupted destroy has an unknowable native outcome, so the owner records
 //! that uncertainty and refuses to replay the event ID.
 
-use super::{errno, error, native_error, sys, uapi};
+use super::{connection, errno, error, native_error, uapi};
 use crate::driver::kfd_notifications::SignalEventInfo;
 use crate::memory::storage::{Owned, Shared};
+use crate::session::SessionLease;
 use crate::{Error, ErrorKind};
+use std::mem::ManuallyDrop;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 /// One KFD event and the shared native endpoint required to destroy it.
 pub(crate) struct KfdSignalEvent {
     /// Native connection that created this event.
-    kfd: Shared<sys::Kfd>,
+    kfd: Shared<connection::Kfd>,
+    /// Counts every native event until all identifiers are conclusively retired.
+    lease: Option<SessionLease>,
     /// Event ID until native destruction succeeds.
     event_id: Option<u32>,
     /// Cached mailbox and trigger data for HSA signal construction.
@@ -39,7 +43,7 @@ struct SignalWaitState {
 
 impl SignalWaitState {
     fn prepare_event(
-        kfd: &sys::Kfd,
+        kfd: &connection::Kfd,
         event_type: u32,
         id: &mut Option<u32>,
         uncertain: &mut bool,
@@ -54,14 +58,24 @@ impl SignalWaitState {
             return Ok(());
         }
         let mut args = uapi::CreateEvent::default();
-        if let Err(source) = kfd.create_exception_event(event_type, &mut args) {
-            if args.event_id != 0 && kfd.destroy_event(args.event_id).is_err() {
+        // A panic can occur after native acquisition but before its ID is
+        // copied into this owner. Retain the session obligation in that case.
+        *uncertain = true;
+        let result = kfd.create_exception_event(event_type, &mut args);
+        *uncertain = false;
+        if let Err(source) = result {
+            if args.event_id != 0 {
                 *id = Some(args.event_id);
                 *uncertain = true;
+                if kfd.destroy_event(args.event_id).is_ok() {
+                    *id = None;
+                    *uncertain = false;
+                }
             }
             return Err(signal_event_error("KFD fault event creation", source));
         }
         if args.event_id == 0 {
+            *uncertain = true;
             return Err(error(
                 ErrorKind::DriverContract,
                 "KFD returned an invalid fault event",
@@ -71,7 +85,7 @@ impl SignalWaitState {
         Ok(())
     }
 
-    fn prepare(&mut self, kfd: &sys::Kfd) -> Result<(u32, u32), Error> {
+    fn prepare(&mut self, kfd: &connection::Kfd) -> Result<(u32, u32), Error> {
         Self::prepare_event(
             kfd,
             uapi::MEMORY_EXCEPTION,
@@ -95,17 +109,24 @@ impl SignalWaitState {
 
 impl KfdSignalEvent {
     pub(super) fn create(
-        kfd: Shared<sys::Kfd>,
+        kfd: Shared<connection::Kfd>,
+        lease: SessionLease,
         event_page_handle: Option<u64>,
-
         page_offered: &mut bool,
     ) -> Result<Owned<Self>, Error> {
         *page_offered = false;
         let storage = Owned::try_new_uninit()?;
+        // A failed rollback or unwind must retain both native reachability
+        // and the session's retirement obligation before any owner is public.
+        let pending = ManuallyDrop::new((kfd, lease));
         let mut args = uapi::CreateEvent::default();
-        if let Err(source) = kfd.create_signal_event(event_page_handle, &mut args, page_offered) {
-            if args.event_id != 0 && kfd.destroy_event(args.event_id).is_err() {
-                std::mem::forget(kfd);
+        if let Err(source) =
+            pending
+                .0
+                .create_signal_event(event_page_handle, &mut args, page_offered)
+        {
+            if args.event_id == 0 || pending.0.destroy_event(args.event_id).is_ok() {
+                drop(ManuallyDrop::into_inner(pending));
             }
             return Err(signal_event_error("KFD signal event creation", source));
         }
@@ -114,16 +135,18 @@ impl KfdSignalEvent {
             || args.page_offset == 0
             || args.slot_index >= uapi::SIGNAL_EVENT_LIMIT
         {
-            if args.event_id != 0 && kfd.destroy_event(args.event_id).is_err() {
-                std::mem::forget(kfd);
+            if args.event_id != 0 && pending.0.destroy_event(args.event_id).is_ok() {
+                drop(ManuallyDrop::into_inner(pending));
             }
             return Err(error(
                 ErrorKind::DriverContract,
                 "KFD returned an invalid signal event",
             ));
         }
+        let (kfd, lease) = ManuallyDrop::into_inner(pending);
         let event = storage.write(Self {
             kfd,
+            lease: Some(lease),
             event_id: Some(args.event_id),
             info: SignalEventInfo {
                 kfd_event_id: args.event_id,
@@ -242,22 +265,30 @@ impl KfdSignalEvent {
             &mut state.hardware_id,
             &mut state.hardware_uncertain,
         )?;
-        Self::destroy_id(&self.kfd, &mut self.event_id, &mut self.uncertain)
+        Self::destroy_id(&self.kfd, &mut self.event_id, &mut self.uncertain)?;
+        self.lease = None;
+        Ok(())
     }
 
-    fn destroy_id(kfd: &sys::Kfd, id: &mut Option<u32>, uncertain: &mut bool) -> Result<(), Error> {
-        let Some(event_id) = *id else {
-            return Ok(());
-        };
+    fn destroy_id(
+        kfd: &connection::Kfd,
+        id: &mut Option<u32>,
+        uncertain: &mut bool,
+    ) -> Result<(), Error> {
         if *uncertain {
             return Err(error(
                 ErrorKind::DriverContract,
                 "KFD signal event destruction outcome is uncertain",
             ));
         }
+        let Some(event_id) = *id else {
+            return Ok(());
+        };
+        *uncertain = true;
         match kfd.destroy_event(event_id) {
             Ok(()) => {
                 *id = None;
+                *uncertain = false;
                 Ok(())
             }
             Err(source) => {
@@ -270,8 +301,11 @@ impl KfdSignalEvent {
 
 impl Drop for KfdSignalEvent {
     fn drop(&mut self) {
-        if self.destroy().is_err() {
-            std::mem::forget(self.kfd.clone());
+        // This is the sole implicit destruction attempt. Ordinary failures
+        // remain retryable; an uncertain result or unwind retains both owners.
+        let retained = ManuallyDrop::new((self.kfd.clone(), self.lease.take()));
+        if self.destroy().is_ok() {
+            drop(ManuallyDrop::into_inner(retained));
         }
     }
 }
@@ -301,10 +335,15 @@ fn signal_event_error(operation: &'static str, source: std::io::Error) -> Error 
 #[allow(unsafe_code, clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
-    use crate::driver::linux_kfd::sys::{Call, IoctlHook, Kfd};
+    use crate::driver::linux_kfd::connection::{Call, IoctlHook, Kfd};
+    use crate::session::{DriverContextLifetime, RetirementOutcome, Session};
     use std::ffi::c_void;
     use std::fs::File;
     use std::sync::{Arc, Mutex};
+
+    fn session() -> Session {
+        Session::from_drivers(Vec::new(), DriverContextLifetime::Session).unwrap()
+    }
 
     fn endpoint(hook: IoctlHook) -> Shared<Kfd> {
         Shared::new(Kfd::with_hook(File::open("/dev/null").unwrap(), hook)).unwrap()
@@ -352,9 +391,14 @@ mod tests {
             }
             Ok(())
         }));
+        let mut session = session();
+        let lease = session.admission().lease().unwrap();
         let mut page_offered = false;
-        let mut event = KfdSignalEvent::create(kfd, Some(0x1234), &mut page_offered).unwrap();
+        let mut event =
+            KfdSignalEvent::create(kfd, lease, Some(0x1234), &mut page_offered).unwrap();
         assert!(page_offered);
+        session.begin_retirement().unwrap();
+        assert!(matches!(session.try_close(), RetirementOutcome::Busy));
         assert_eq!(
             event.info(),
             SignalEventInfo {
@@ -367,6 +411,7 @@ mod tests {
             ErrorKind::DeviceLost
         );
         event.destroy().unwrap();
+        assert!(matches!(session.try_close(), RetirementOutcome::Closed));
         drop(event);
         assert_eq!(
             *calls.lock().unwrap(),
@@ -394,13 +439,16 @@ mod tests {
             }
             _ => panic!("unexpected event call"),
         }));
+        let mut session = session();
+        let lease = session.admission().lease().unwrap();
         let mut page_offered = false;
-        let error = KfdSignalEvent::create(kfd, Some(0x1234), &mut page_offered)
+        let error = KfdSignalEvent::create(kfd, lease, Some(0x1234), &mut page_offered)
             .err()
             .unwrap();
         assert!(page_offered);
         assert_eq!(error.kind(), ErrorKind::ResourceExhausted);
         assert_eq!(*calls.lock().unwrap(), 1);
+        assert!(matches!(session.try_close(), RetirementOutcome::Closed));
     }
 
     #[test]
@@ -436,8 +484,10 @@ mod tests {
             }
             Ok(())
         }));
+        let mut session = session();
+        let lease = session.admission().lease().unwrap();
         let mut page_offered = false;
-        let error = KfdSignalEvent::create(kfd, Some(0x1234), &mut page_offered)
+        let error = KfdSignalEvent::create(kfd, lease, Some(0x1234), &mut page_offered)
             .err()
             .unwrap();
         assert_eq!(error.kind(), ErrorKind::ResourceExhausted);
@@ -452,23 +502,30 @@ mod tests {
                 "destroy signal"
             ]
         );
+        assert!(matches!(session.try_close(), RetirementOutcome::Closed));
     }
 
     #[test]
     fn invalid_page_handle_is_rejected_before_offer() {
         let kfd = endpoint(Arc::new(|_| panic!("invalid page reached KFD")));
+        let mut session = session();
+        let lease = session.admission().lease().unwrap();
         let mut page_offered = true;
-        assert!(KfdSignalEvent::create(kfd, Some(0), &mut page_offered).is_err());
+        assert!(KfdSignalEvent::create(kfd, lease, Some(0), &mut page_offered).is_err());
         assert!(!page_offered);
+        assert!(matches!(session.try_close(), RetirementOutcome::Closed));
     }
 
     #[test]
     fn closed_kfd_rejects_event_before_page_offer() {
         let mut kfd = endpoint(Arc::new(|_| panic!("closed KFD reached ioctl")));
         Shared::get_mut(&mut kfd).unwrap().close().unwrap();
+        let mut session = session();
+        let lease = session.admission().lease().unwrap();
         let mut page_offered = true;
-        assert!(KfdSignalEvent::create(kfd, Some(0x1234), &mut page_offered).is_err());
+        assert!(KfdSignalEvent::create(kfd, lease, Some(0x1234), &mut page_offered).is_err());
         assert!(!page_offered);
+        assert!(matches!(session.try_close(), RetirementOutcome::Closed));
     }
 
     #[test]
@@ -489,14 +546,17 @@ mod tests {
             )
             .unwrap()
         };
+        let mut session = session();
+        let lease = session.admission().lease().unwrap();
         let mut page_offered = true;
         allocator.with_scope(|| {
-            let error = KfdSignalEvent::create(kfd, Some(0x1234), &mut page_offered)
+            let error = KfdSignalEvent::create(kfd, lease, Some(0x1234), &mut page_offered)
                 .err()
                 .unwrap();
             assert_eq!(error.kind(), ErrorKind::ResourceExhausted);
             assert!(!page_offered);
         });
+        assert!(matches!(session.try_close(), RetirementOutcome::Closed));
     }
 
     #[test]
@@ -525,8 +585,10 @@ mod tests {
             }
             _ => panic!("unexpected event call"),
         }));
+        let mut session = session();
+        let lease = session.admission().lease().unwrap();
         let mut page_offered = false;
-        let mut event = KfdSignalEvent::create(kfd, None, &mut page_offered).unwrap();
+        let mut event = KfdSignalEvent::create(kfd, lease, None, &mut page_offered).unwrap();
         assert!(!page_offered);
         assert_eq!(event.destroy().unwrap_err().kind(), ErrorKind::Driver);
         assert_eq!(
@@ -535,5 +597,187 @@ mod tests {
         );
         drop(event);
         assert_eq!(*destroys.lock().unwrap(), 1);
+        session.begin_retirement().unwrap();
+        assert!(matches!(session.try_close(), RetirementOutcome::Busy));
+    }
+
+    #[test]
+    fn failed_signal_create_releases_its_lease_only_after_confirmed_rollback() {
+        for rollback_succeeds in [true, false] {
+            let destroys = Arc::new(Mutex::new(0));
+            let observed = destroys.clone();
+            let kfd = endpoint(Arc::new(move |call| match call {
+                Call::CreateEvent(args) => {
+                    args.event_id = 19;
+                    Err(std::io::Error::from_raw_os_error(errno::ENOMEM))
+                }
+                Call::DestroyEvent(args) => {
+                    assert_eq!(args.event_id, 19);
+                    *observed.lock().unwrap() += 1;
+                    if rollback_succeeds {
+                        Ok(())
+                    } else {
+                        Err(std::io::Error::from_raw_os_error(errno::EBUSY))
+                    }
+                }
+                _ => panic!("unexpected event call"),
+            }));
+            let mut session = session();
+            let lease = session.admission().lease().unwrap();
+            let mut offered = false;
+            assert!(KfdSignalEvent::create(kfd, lease, None, &mut offered).is_err());
+            assert_eq!(*destroys.lock().unwrap(), 1);
+            session.begin_retirement().unwrap();
+            if rollback_succeeds {
+                assert!(matches!(session.try_close(), RetirementOutcome::Closed));
+            } else {
+                assert!(matches!(session.try_close(), RetirementOutcome::Busy));
+            }
+        }
+    }
+
+    fn successful_create(args: &mut uapi::CreateEvent) {
+        match args.event_type {
+            uapi::SIGNAL_EVENT => {
+                args.page_offset = 1;
+                args.trigger_data = 19;
+                args.event_id = 19;
+                args.slot_index = 7;
+            }
+            uapi::MEMORY_EXCEPTION => args.event_id = 20,
+            uapi::HW_EXCEPTION => args.event_id = 21,
+            _ => panic!("unexpected event type"),
+        }
+    }
+
+    #[test]
+    fn failed_fault_event_rollback_retains_the_whole_event_obligation() {
+        let destroys = Arc::new(Mutex::new(Vec::new()));
+        let observed = destroys.clone();
+        let kfd = endpoint(Arc::new(move |call| match call {
+            Call::CreateEvent(args) => {
+                successful_create(args);
+                if args.event_type == uapi::MEMORY_EXCEPTION {
+                    Err(std::io::Error::from_raw_os_error(errno::ENOMEM))
+                } else {
+                    Ok(())
+                }
+            }
+            Call::DestroyEvent(args) => {
+                observed.lock().unwrap().push(args.event_id);
+                Err(std::io::Error::from_raw_os_error(errno::EBUSY))
+            }
+            _ => panic!("unexpected event call"),
+        }));
+        let mut session = session();
+        let lease = session.admission().lease().unwrap();
+        let mut offered = false;
+        assert!(KfdSignalEvent::create(kfd, lease, None, &mut offered).is_err());
+        assert_eq!(*destroys.lock().unwrap(), [20]);
+        session.begin_retirement().unwrap();
+        assert!(matches!(session.try_close(), RetirementOutcome::Busy));
+    }
+
+    #[test]
+    fn successful_create_without_an_identifier_retains_unknown_native_ownership() {
+        for malformed_signal in [true, false] {
+            let kfd = endpoint(Arc::new(move |call| match call {
+                Call::CreateEvent(args) => {
+                    let malformed = if malformed_signal {
+                        args.event_type == uapi::SIGNAL_EVENT
+                    } else {
+                        args.event_type == uapi::MEMORY_EXCEPTION
+                    };
+                    successful_create(args);
+                    if malformed {
+                        args.event_id = 0;
+                    }
+                    Ok(())
+                }
+                _ => panic!("unknown event identifier must not be destroyed"),
+            }));
+            let mut session = session();
+            let lease = session.admission().lease().unwrap();
+            let mut offered = false;
+            let error = KfdSignalEvent::create(kfd, lease, None, &mut offered)
+                .err()
+                .unwrap();
+            assert_eq!(error.kind(), ErrorKind::DriverContract);
+            session.begin_retirement().unwrap();
+            assert!(matches!(session.try_close(), RetirementOutcome::Busy));
+        }
+    }
+
+    #[test]
+    fn native_drop_and_explicit_retry_release_the_same_session_obligation() {
+        // Cover normal Drop, an explicit retry, and a Drop retry after a
+        // recoverable failure. None may leave a stale counted obligation.
+        for (fail_once, explicit_retry) in [(false, false), (true, true), (true, false)] {
+            let destroys = Arc::new(Mutex::new(Vec::new()));
+            let observed = destroys.clone();
+            let kfd = endpoint(Arc::new(move |call| match call {
+                Call::CreateEvent(args) => {
+                    successful_create(args);
+                    Ok(())
+                }
+                Call::DestroyEvent(args) => {
+                    let mut calls = observed.lock().unwrap();
+                    calls.push(args.event_id);
+                    if fail_once && calls.len() == 1 {
+                        Err(std::io::Error::from_raw_os_error(errno::EBUSY))
+                    } else {
+                        Ok(())
+                    }
+                }
+                _ => panic!("unexpected event call"),
+            }));
+            let mut session = session();
+            let lease = session.admission().lease().unwrap();
+            let mut offered = false;
+            let mut event = KfdSignalEvent::create(kfd, lease, None, &mut offered).unwrap();
+            session.begin_retirement().unwrap();
+            assert!(matches!(session.try_close(), RetirementOutcome::Busy));
+            if fail_once {
+                assert_eq!(event.destroy().unwrap_err().kind(), ErrorKind::Busy);
+                assert!(matches!(session.try_close(), RetirementOutcome::Busy));
+                if explicit_retry {
+                    event.destroy().unwrap();
+                    assert!(matches!(session.try_close(), RetirementOutcome::Closed));
+                }
+            }
+            drop(event);
+            assert!(matches!(session.try_close(), RetirementOutcome::Closed));
+            let expected = if fail_once {
+                vec![20, 20, 21, 19]
+            } else {
+                vec![20, 21, 19]
+            };
+            assert_eq!(*destroys.lock().unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn unwound_native_creation_and_destruction_retain_the_session_lease() {
+        for create_panics in [true, false] {
+            let kfd = endpoint(Arc::new(move |call| match call {
+                Call::CreateEvent(args) => {
+                    successful_create(args);
+                    assert!(!create_panics, "injected create unwind");
+                    Ok(())
+                }
+                Call::DestroyEvent(_) => panic!("injected destroy unwind"),
+                _ => panic!("unexpected event call"),
+            }));
+            let mut session = session();
+            let lease = session.admission().lease().unwrap();
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut offered = false;
+                let mut event = KfdSignalEvent::create(kfd, lease, None, &mut offered).unwrap();
+                event.destroy().unwrap();
+            }));
+            assert!(result.is_err());
+            session.begin_retirement().unwrap();
+            assert!(matches!(session.try_close(), RetirementOutcome::Busy));
+        }
     }
 }

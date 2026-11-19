@@ -68,7 +68,7 @@ include(GNUInstallDirs)
 
 include(rj_sanitizers)
 
-# Sanitizer and static analysis options.
+# Sanitizer options.
 option(RJ_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(RJ_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
 option(RJ_ENABLE_TSAN "Enable ThreadSanitizer" OFF)
@@ -105,7 +105,6 @@ if(NOT RJ_SANITIZER_RUNTIME IN_LIST _rj_sanitizer_runtime_values)
     )
 endif()
 unset(_rj_sanitizer_runtime_values)
-option(RJ_CLANG_TIDY "Enable clang-tidy static analysis" OFF)
 option(
     RJ_ENABLE_EXPENSIVE_CHECKS
     "Enable expensive exhaustive test suites (MFMA/WMMA SIMD bit-exactness)"
@@ -332,16 +331,6 @@ if(_rj_sanitizer_count GREATER 0)
 endif()
 unset(_rj_sanitizer_count)
 unset(_rj_sanitizer_kinds)
-
-if(RJ_CLANG_TIDY)
-    find_program(CLANG_TIDY_EXE NAMES clang-tidy)
-    if(CLANG_TIDY_EXE)
-        message(STATUS "clang-tidy found: ${CLANG_TIDY_EXE}")
-        set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
-    else()
-        message(WARNING "clang-tidy not found, RJ_CLANG_TIDY ignored")
-    endif()
-endif()
 
 # Third-party dependencies (fetched into third_party/).
 # Third-party dependencies (fetched into third_party/).

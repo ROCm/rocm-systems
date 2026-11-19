@@ -23,6 +23,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <span>
 #include <sys/mman.h>
 #include <sys/wait.h>
@@ -40,6 +41,19 @@
 #endif
 
 namespace rocjitsu::amdgpu {
+
+class LegacyGpuVmAdapterTestAccess {
+public:
+  static std::shared_lock<util::DistributedSharedMutex> hold_metadata(LegacyGpuVmAdapter &adapter) {
+    return std::shared_lock(adapter.mutex_);
+  }
+
+  static std::unique_lock<util::DistributedSharedMutex>
+  hold_metadata_exclusively(LegacyGpuVmAdapter &adapter) {
+    return std::unique_lock(adapter.mutex_);
+  }
+};
+
 namespace {
 
 #if defined(RJ_GPU_VM_TRANSLATION_TEST_WITH_ASAN)
@@ -2009,6 +2023,143 @@ TEST(GpuVmTranslation, LegacyExecuteUsesFetchableCompatibilityBacking) {
             VmAccessOutcome::Faulted);
 
   EXPECT_TRUE(gpu_vm.unregister_address_space(handle));
+}
+
+TEST(GpuVmTranslation, LegacySnapshotReadersOverlapAndExcludeReplacement) {
+  GpuMemory memory("memory");
+  KfdProcess::PageTable page_table;
+  util::DistributedSharedMutex page_table_mutex;
+  GpuVm gpu_vm;
+  LegacyGpuVmAdapter adapter(gpu_vm, &memory);
+  const AddressSpaceHandle original =
+      adapter.register_address_space(7, &page_table, &page_table_mutex);
+  ASSERT_TRUE(original);
+  const std::shared_ptr<LegacyAddressSpace> original_space = adapter.address_space_snapshot(7);
+  ASSERT_TRUE(original_space);
+
+  using Snapshots =
+      std::pair<std::shared_ptr<LegacyAddressSpace>, std::shared_ptr<const LegacyAddressSpace>>;
+  std::shared_lock metadata = LegacyGpuVmAdapterTestAccess::hold_metadata(adapter);
+  std::future<Snapshots> reader = std::async(std::launch::async, [&] {
+    const LegacyGpuVmAdapter &constant_adapter = adapter;
+    return Snapshots{adapter.address_space_snapshot(7), constant_adapter.address_space_snapshot(7)};
+  });
+  if (reader.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+    metadata.unlock();
+    reader.get();
+    FAIL() << "Snapshot lookup required exclusive metadata ownership";
+  }
+  const Snapshots snapshots = reader.get();
+  EXPECT_EQ(snapshots.first, original_space);
+  EXPECT_EQ(snapshots.second, original_space);
+
+  // Queue the writer only after readers finish, without choosing a fairness
+  // policy for a shared mutex that already has a waiting writer.
+  std::promise<void> writer_started;
+  std::future<void> writer_start = writer_started.get_future();
+  std::future<bool> writer = std::async(std::launch::async, [&] {
+    writer_started.set_value();
+    return adapter.unregister_address_space(original);
+  });
+  EXPECT_EQ(writer_start.wait_for(std::chrono::seconds(5)), std::future_status::ready);
+  EXPECT_EQ(writer.wait_for(std::chrono::milliseconds(50)), std::future_status::timeout);
+  metadata.unlock();
+  ASSERT_TRUE(writer.get());
+  EXPECT_FALSE(adapter.address_space_snapshot(7));
+  const LegacyGpuVmAdapter &constant_adapter = adapter;
+  EXPECT_FALSE(constant_adapter.address_space_snapshot(7));
+
+  const AddressSpaceHandle replacement =
+      adapter.register_address_space(7, &page_table, &page_table_mutex);
+  ASSERT_TRUE(replacement);
+  EXPECT_EQ(replacement.slot, original.slot);
+  EXPECT_NE(replacement.generation, original.generation);
+  EXPECT_NE(adapter.address_space_snapshot(7), original_space);
+  EXPECT_EQ(snapshots.first, original_space);
+  EXPECT_EQ(snapshots.second, original_space);
+  EXPECT_FALSE(gpu_vm.lookup(original));
+}
+
+class GpuVmSnapshotWriterExclusion : public testing::TestWithParam<bool> {};
+
+TEST_P(GpuVmSnapshotWriterExclusion, SnapshotWaitsForExclusiveMetadataOwner) {
+  GpuMemory memory("memory");
+  KfdProcess::PageTable page_table;
+  util::DistributedSharedMutex page_table_mutex;
+  GpuVm gpu_vm;
+  LegacyGpuVmAdapter adapter(gpu_vm, &memory);
+  const AddressSpaceHandle handle =
+      adapter.register_address_space(7, &page_table, &page_table_mutex);
+  ASSERT_TRUE(handle);
+  const std::shared_ptr<LegacyAddressSpace> original_space = adapter.address_space_snapshot(7);
+  ASSERT_TRUE(original_space);
+
+  const bool use_const_overload = GetParam();
+  std::promise<void> reader_started;
+  std::future<void> reader_start = reader_started.get_future();
+  std::unique_lock metadata = LegacyGpuVmAdapterTestAccess::hold_metadata_exclusively(adapter);
+  // Each overload must take its own lock; a preceding guarded lookup could
+  // otherwise hide an unguarded overload by blocking both calls together.
+  std::future<std::shared_ptr<const LegacyAddressSpace>> reader =
+      std::async(std::launch::async, [&]() -> std::shared_ptr<const LegacyAddressSpace> {
+        reader_started.set_value();
+        if (use_const_overload)
+          return std::as_const(adapter).address_space_snapshot(7);
+        return adapter.address_space_snapshot(7);
+      });
+  const std::future_status started = reader_start.wait_for(std::chrono::seconds(5));
+  const std::future_status before_release = reader.wait_for(std::chrono::milliseconds(50));
+  // Release ownership before checking results or joining, including on failure.
+  metadata.unlock();
+  EXPECT_EQ(started, std::future_status::ready);
+  EXPECT_EQ(before_release, std::future_status::timeout);
+  EXPECT_EQ(reader.get(), original_space);
+}
+
+INSTANTIATE_TEST_SUITE_P(Overloads, GpuVmSnapshotWriterExclusion, testing::Bool(),
+                         [](const testing::TestParamInfo<bool> &info) {
+                           return info.param ? "Const" : "Mutable";
+                         });
+
+TEST(GpuVmTranslation, LegacySnapshotPrunesUnrelatedStaleBinding) {
+  GpuMemory memory("memory");
+  KfdProcess::PageTable page_table;
+  util::DistributedSharedMutex page_table_mutex;
+  RecordingFaultReporter reporter;
+  GpuVm gpu_vm;
+  LegacyGpuVmAdapter adapter(gpu_vm, &memory);
+  auto frontend = std::make_shared<int>(1);
+  const std::weak_ptr<int> old_frontend = frontend;
+  const AddressSpaceHandle retired =
+      adapter.register_address_space(7,
+                                     {.page_table = &page_table,
+                                      .page_table_mutex = &page_table_mutex,
+                                      .request_mutex = {},
+                                      .fault_reporter = &reporter},
+                                     frontend);
+  ASSERT_TRUE(retired);
+  const AddressSpaceHandle live = adapter.register_address_space(8, &page_table, &page_table_mutex);
+  ASSERT_TRUE(live);
+  const std::shared_ptr<LegacyAddressSpace> retained = adapter.address_space_snapshot(7);
+  const std::shared_ptr<LegacyAddressSpace> live_space = adapter.address_space_snapshot(8);
+  ASSERT_TRUE(retained);
+  ASSERT_TRUE(live_space);
+  retained->report_vm_fault(7, 0x4000);
+  ASSERT_EQ(reporter.addresses.size(), 1u);
+  reporter.addresses.clear();
+  frontend.reset();
+
+  ASSERT_TRUE(gpu_vm.unregister_address_space(retired));
+  EXPECT_FALSE(old_frontend.expired());
+  const LegacyGpuVmAdapter &constant_adapter = adapter;
+  EXPECT_EQ(constant_adapter.address_space_snapshot(8), live_space);
+  EXPECT_FALSE(old_frontend.expired());
+  // A successful lookup of another binding must still clean every stale entry.
+  EXPECT_EQ(adapter.address_space_snapshot(8), live_space);
+  EXPECT_TRUE(old_frontend.expired());
+  retained->report_vm_fault(7, 0x5000);
+  EXPECT_TRUE(reporter.addresses.empty());
+  EXPECT_FALSE(adapter.address_space_snapshot(7));
 }
 
 TEST(GpuVmTranslation, LegacySnapshotRetainsStorageButIsRevokedAcrossUnregister) {
