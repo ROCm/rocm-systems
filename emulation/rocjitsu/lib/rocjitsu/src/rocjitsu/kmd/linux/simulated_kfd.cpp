@@ -330,6 +330,17 @@ SimulatedKfd::begin_gem_va_transaction(uint32_t process_id) {
   return std::make_unique<GemVaTransaction>(std::move(process));
 }
 
+bool SimulatedKfd::supports_pm4_gds_wave_id_reset(uint32_t render_minor) const {
+  const auto ordinal = gpu_ordinal_for_render_minor(render_minor);
+  if (!ordinal)
+    return false;
+  const auto *cp = gpus_[*ordinal].soc->assign_queue_owner_cp(0);
+  if (!cp || cp->compute_units().empty())
+    return false;
+  const auto arch = cp->compute_units().front()->arch();
+  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+}
+
 int SimulatedKfd::submit_pm4(uint32_t render_minor, uint64_t queue_key,
                              amdgpu::Pm4Submission submission) {
   const auto process = find_process(local_process_id_);
@@ -5373,12 +5384,8 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
         return MAP_FAILED;
       }
       ptr = client_mapping.get();
-      if (flags & MAP_FIXED) {
-        clear_host_svm_policy_after_change_locked(proc, reinterpret_cast<uint64_t>(ptr), length,
-                                                  &va_transaction);
-        if (on_host_vma_change)
-          on_host_vma_change();
-      }
+      if ((flags & MAP_FIXED) && on_host_vma_change)
+        on_host_vma_change();
       if (ranges_overlap(ptr, length, monitor_ptr, length)) {
         discard_new_fd();
         errno = EINVAL;
@@ -5411,9 +5418,30 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
           errno = EINVAL;
           return MAP_FAILED;
         }
+        // Retire the replaced host view and claim the new doorbell in one
+        // publication. A failed mmap keeps the prior denials and retry state.
+        // Live allocation CPU views were excluded before the host replacement.
+        auto previous_retired_ranges = proc.retired_gpu_ranges_;
+        auto previous_retired_views = proc.retired_identity_views_;
+        auto previous_svm_denials = proc.svm_denied_ranges_;
+        auto previous_svm_access = proc.svm_access_ranges_;
+        try {
+          if (flags & MAP_FIXED) {
+            const auto range = *rounded_host_vma_range(reinterpret_cast<uint64_t>(ptr), length);
+            (void)proc.clear_host_svm_policy_locked(range.first, range.second);
+          }
+          proc.claim_gpu_range_locked(reinterpret_cast<uint64_t>(ptr), length);
+          proc.publish_gpu_grants_locked(va_transaction);
+        } catch (...) {
+          proc.retired_gpu_ranges_.swap(previous_retired_ranges);
+          proc.retired_identity_views_.swap(previous_retired_views);
+          proc.svm_denied_ranges_.swap(previous_svm_denials);
+          proc.svm_access_ranges_.swap(previous_svm_access);
+          throw;
+        }
       } catch (const std::bad_alloc &) {
-        // map_pages may have installed a prefix before an allocation failed.
-        // Retain its CPU backing and the canonical memfd for close to clean up.
+        // PTE installation or grant publication may fail after PTEs were added.
+        // Retain their CPU backing and the canonical memfd for close to clean up.
         map_error = ENOMEM;
       } catch (...) {
         map_error = EIO;
@@ -6209,33 +6237,15 @@ int SimulatedKfd::dispatch_munmap(KfdProcess &proc, void *addr, size_t length,
     if (it == proc.allocations_.end()) {
       const auto retired =
           std::ranges::find_if(proc.retired_identity_views_, [&](const auto &view) {
-            return view.gpu_va == reinterpret_cast<uintptr_t>(addr) && view.mapped_bytes == length;
+            return view.gpu_va < end && start < view.gpu_va + view.mapped_bytes;
           });
       if (retired == proc.retired_identity_views_.end())
         return -ENOENT;
       if (safe_munmap(addr, length) != 0)
         return -errno;
+      clear_host_svm_policy_after_change_locked(proc, start, *unmapped_span);
       if (on_host_vma_change)
         on_host_vma_change();
-      // FREE denied the old BO while its caller-owned fixed CPU view remained
-      // mapped. Once that view is gone, a future host allocation may reuse the
-      // address as ordinary identity memory. A failed publication keeps denial.
-      try {
-        auto previous = proc.retired_gpu_ranges_;
-        auto previous_denials = proc.svm_denied_ranges_;
-        auto previous_access = proc.svm_access_ranges_;
-        try {
-          proc.claim_gpu_range_locked(retired->gpu_va, retired->mapped_bytes);
-          proc.publish_gpu_grants_locked();
-          proc.retired_identity_views_.erase(retired);
-        } catch (...) {
-          proc.retired_gpu_ranges_.swap(previous);
-          proc.svm_denied_ranges_.swap(previous_denials);
-          proc.svm_access_ranges_.swap(previous_access);
-        }
-      } catch (...) {
-        // Leave the tombstone published if its rollback snapshot cannot be made.
-      }
       return 0;
     }
     const auto &alloc = it->second;
@@ -6976,6 +6986,7 @@ int SimulatedKfd::free_memory_ioctl(
     // The final grant publication can allocate. Preserve the descriptor and
     // tombstones until that publication succeeds, then retire IPC and backing.
     auto prior_retired_ranges = proc.retired_gpu_ranges_;
+    const size_t prior_retired_view_count = proc.retired_identity_views_.size();
     try {
       if (alloc.flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) {
         // A separate GPU VA has no host VMA whose removal can clear its
@@ -6987,7 +6998,30 @@ int SimulatedKfd::free_memory_ioctl(
       } else {
         proc.retire_gpu_range_locked(alloc.gpu_va, alloc.size);
       }
+      const uint32_t kind =
+          alloc.flags & (KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_GTT |
+                         KFD_IOC_ALLOC_MEM_FLAGS_USERPTR);
+      if (!daemon_mode_ && alloc.user_va && !alloc.imported &&
+          (kind == KFD_IOC_ALLOC_MEM_FLAGS_VRAM || kind == KFD_IOC_ALLOC_MEM_FLAGS_GTT)) {
+        // Host changes may have split the primary view into client fragments.
+        // Retain only their overlap with this BO's GPU VA, before publication
+        // can commit the FREE and discard the allocation's mapping records.
+        const auto retain_identity_view = [&](void *pointer, size_t size, HostMappingKind mapping) {
+          if (!pointer ||
+              (mapping != HostMappingKind::Caller && mapping != HostMappingKind::CallerMapped))
+            return;
+          const uint64_t address = reinterpret_cast<uintptr_t>(pointer);
+          const uint64_t start = std::max(address, alloc.gpu_va);
+          const uint64_t end = std::min(address + size, alloc.gpu_va + alloc.size);
+          if (start < end)
+            proc.retired_identity_views_.push_back({start, end - start});
+        };
+        retain_identity_view(alloc.host_ptr, alloc.host_mapping_size, alloc.host_mapping_kind);
+        for (const auto &view : alloc.client_views)
+          retain_identity_view(view.ptr, view.size, view.kind);
+      }
     } catch (...) {
+      proc.retired_identity_views_.resize(prior_retired_view_count);
       proc.retired_gpu_ranges_.swap(prior_retired_ranges);
       throw;
     }
@@ -6999,6 +7033,7 @@ int SimulatedKfd::free_memory_ioctl(
       proc.publish_gpu_grants_locked(*va_transaction);
     } catch (...) {
       proc.allocations_.insert(std::move(retired));
+      proc.retired_identity_views_.resize(prior_retired_view_count);
       proc.retired_gpu_ranges_.swap(prior_retired_ranges);
       throw;
     }
@@ -7016,30 +7051,6 @@ int SimulatedKfd::free_memory_ioctl(
           dmabuf_it != proc.imported_dmabufs_.end()) {
         proc.fd_to_import_handle_.erase(dmabuf_it->second.fd);
         proc.imported_dmabufs_.erase(dmabuf_it);
-      }
-    }
-    const uint32_t kind =
-        freed.flags & (KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_GTT |
-                       KFD_IOC_ALLOC_MEM_FLAGS_USERPTR);
-    const bool primary_fixed_identity_view =
-        freed.host_ptr && freed.host_mapping_caller_reserved() &&
-        reinterpret_cast<uintptr_t>(freed.host_ptr) == freed.gpu_va &&
-        (!freed.host_mapping_created_by_driver() || freed.host_mapping_size == freed.size);
-    const bool client_fixed_identity_view =
-        std::ranges::any_of(freed.client_views, [&](const auto &view) {
-          return (view.kind == KfdProcess::GpuAllocation::HostMappingKind::Caller ||
-                  view.kind == KfdProcess::GpuAllocation::HostMappingKind::CallerMapped) &&
-                 reinterpret_cast<uintptr_t>(view.ptr) == freed.gpu_va && view.size == freed.size;
-        });
-    const bool retired_fixed_identity_view =
-        !daemon_mode_ && freed.user_va && !freed.imported && !freed.backing_owner &&
-        (kind == KFD_IOC_ALLOC_MEM_FLAGS_VRAM || kind == KFD_IOC_ALLOC_MEM_FLAGS_GTT) &&
-        (primary_fixed_identity_view || client_fixed_identity_view);
-    if (retired_fixed_identity_view) {
-      try {
-        proc.retired_identity_views_.push_back({freed.gpu_va, freed.size});
-      } catch (const std::bad_alloc &) {
-        // Keep the freed VA denied if its later CPU unmap cannot be tracked.
       }
     }
     release_allocation_mappings(proc, freed);

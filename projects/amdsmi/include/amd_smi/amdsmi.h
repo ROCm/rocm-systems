@@ -7806,6 +7806,10 @@ amdsmi_status_t amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processo
  *  On @platform{gpu_bm_linux} AMDGPU driver restart is REQUIRED to complete updating to
  *  the new memory partition setting.
  *
+ *  Requesting the current mode cancels a different mode requested since the driver was
+ *  loaded. Older amdgpu drivers ignore that request because of a driver bug, so the next
+ *  driver reload still applies the other mode.
+ *
  *  @param[in] processor_handle Device which to query
  *
  *  @param[in] memory_partition using enum ::amdsmi_memory_partition_type_t,
@@ -7859,6 +7863,10 @@ amdsmi_status_t amdsmi_get_gpu_memory_partition_config(amdsmi_processor_handle p
  *
  *  On @platform{gpu_bm_linux} AMDGPU driver restart is REQUIRED to complete updating to
  *  the new memory partition setting.
+ *
+ *  Requesting the current mode cancels a different mode requested since the driver was
+ *  loaded. Older amdgpu drivers ignore that request because of a driver bug, so the next
+ *  driver reload still applies the other mode.
  *
  *  @param[in] processor_handle A processor handle
  *
@@ -8211,6 +8219,11 @@ amdsmi_status_t amdsmi_get_power_cap_info(amdsmi_processor_handle processor_hand
  *
  *  @param[out] info Reference to the PCIe information
  *  returned by the library. Must be allocated by user.
+ *
+ *  @note pcie_static.max_pcie_width, max_pcie_speed and pcie_interface_version describe the
+ *  GPU's PCIe host link, its PCIe connection to the host CPU. When KFD reports that the GPU
+ *  connects to the CPU over xGMI instead, there is no PCIe host link and these fields are set to
+ *  the maximum value of their type.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */

@@ -3231,7 +3231,7 @@ class TestExecutor:
 
         The division of labour: this runner owns the binaries IT launched, and the
         front door owns the ones it forks. A suite can name a host binary directly
-        (gin_micro_finalize runs host/micro/rccl-UnitTestsMicro), and that profile
+        (gin_micro_finalize runs host/micro/rccl-UnitTestsMicroPluginGinPluginInit), and that profile
         lands flat in rawfiles_dir like any other test's, so it needs its object
         here or its coverage cannot be attributed to anything. The binaries the
         front door forks are not here: their profiles nest one directory down,

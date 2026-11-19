@@ -408,7 +408,12 @@ do_coverage() {
         --ignore-filename-regex='(/test/|nvtx)' \
         -format=lcov > "$dir/coverage.lcov" \
         || { echo "    error: llvm-cov export failed for $name" >&2; rc=1; continue; }
-      tracefiles+=("$dir/coverage.lcov")
+      # A binary that only tests test/ code exports no records, and lcov rejects an empty tracefile.
+      if grep -q '^SF:' "$dir/coverage.lcov"; then
+        tracefiles+=("$dir/coverage.lcov")
+      else
+        echo "    $name: no src/ lines covered, left out of the overall report"
+      fi
     fi
 
     echo "    $name text report: $dir/coverage.txt"

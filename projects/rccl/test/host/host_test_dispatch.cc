@@ -1554,6 +1554,14 @@ void writeMergedCoverage(const std::string &directory, const std::vector<std::st
             fs::remove(tracefile, ec);
             continue;
         }
+        // A binary that only tests test/ code exports no records, and lcov rejects an empty
+        // tracefile, which would sink the whole union.
+        const std::string records = readFile(tracefile);
+        if (records.rfind("SF:", 0) != 0 && records.find("\nSF:") == std::string::npos) {
+            fmt::print("{}: no src/ lines covered, left out of {}\n",
+                       fs::path(binary).filename().string(), kCoverageTracefile);
+            continue;
+        }
         tracefiles.push_back(tracefile);
     }
 

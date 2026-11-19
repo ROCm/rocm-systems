@@ -1701,12 +1701,20 @@ BufferStoreLdsDwordMubuf::BufferStoreLdsDwordMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_lds_dword", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::BufferStoreLdsDwordMubuf)),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &srsrc;
   src_operands_[1] = &soffset;
   num_src_ = 2;
   num_dst_ = 0;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 

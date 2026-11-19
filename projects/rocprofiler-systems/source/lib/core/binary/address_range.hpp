@@ -33,7 +33,6 @@ struct address_range
 
     bool contains(uintptr_t) const;
     bool contains(address_range) const;
-    bool overlaps(address_range) const;
     bool contiguous_with(address_range) const;
 
     bool operator==(address_range _v) const;

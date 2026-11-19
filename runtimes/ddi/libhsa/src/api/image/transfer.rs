@@ -6,14 +6,14 @@
 use std::ffi::c_void;
 
 use crate::ffi::*;
-use crate::image_abi::{hsa_ext_image_clear_impl, hsa_ext_image_copy_impl, transfer_image};
-use crate::runtime::boundary;
+use crate::image::{clear_image, copy_images, transfer_image};
+use crate::status::boundary;
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_ext_image_copy")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 #[allow(unsafe_code)]
 /// Copies a region between two images.
 pub unsafe extern "C" fn hsa_ext_image_copy(
@@ -26,14 +26,14 @@ pub unsafe extern "C" fn hsa_ext_image_copy(
 ) -> Status {
     // SAFETY: The image owner validates caller pointers and retains image
     // state through this synchronous operation.
-    unsafe { hsa_ext_image_copy_impl(agent, src_image, src_offset, dst_image, dst_offset, range) }
+    boundary(|| unsafe { copy_images(agent, src_image, src_offset, dst_image, dst_offset, range) })
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_ext_image_import")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 #[allow(unsafe_code)]
 /// Copies host image data into an image region.
 pub unsafe extern "C" fn hsa_ext_image_import(
@@ -58,10 +58,10 @@ pub unsafe extern "C" fn hsa_ext_image_import(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_ext_image_export")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 #[allow(unsafe_code)]
 /// Copies an image region into host storage.
 pub unsafe extern "C" fn hsa_ext_image_export(
@@ -86,10 +86,10 @@ pub unsafe extern "C" fn hsa_ext_image_export(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_ext_image_clear")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 #[allow(unsafe_code)]
 /// Fills an image region with an encoded clear color.
 pub unsafe extern "C" fn hsa_ext_image_clear(
@@ -100,5 +100,5 @@ pub unsafe extern "C" fn hsa_ext_image_clear(
 ) -> Status {
     // SAFETY: The image owner validates caller pointers and retains image
     // state through this synchronous operation.
-    unsafe { hsa_ext_image_clear_impl(agent, image, data, image_region) }
+    boundary(|| unsafe { clear_image(agent, image, data, image_region) })
 }
