@@ -8043,9 +8043,11 @@ TEST(ArithBridgeTest, DivisionDx10ClampAndFixupStatus) {
   }
 }
 
+// Active RDNA3 OMOD is accepted in strict exact (W7900 captures); a reserved modifier bit is the
+// rejected request that must leave the condition untouched even with empty EXEC.
 TEST(ArithBridgeTest, EmptyScaleValidatesBeforeCommittingCondition) {
   for (uint32_t lanes : {32u, 64u}) {
-    for (bool unsupported : {false, true}) {
+    for (bool invalid : {false, true}) {
       BridgeFixture fixture(true, lanes, {ArithmeticSemantics::BitExactEmpiricalNoFpStatus});
       ASSERT_FALSE(::testing::Test::HasFatalFailure());
       fixture.wave->set_mode_raw(0xd0); // OMOD active: FP32 output flushing, IEEE clear.
@@ -8054,10 +8056,10 @@ TEST(ArithBridgeTest, EmptyScaleValidatesBeforeCommittingCondition) {
       rdna3::Operand operand(32, rdna3::OperandType::OPR_VGPR, 0);
       arith::execute_division<32, arith::DivisionOperation::Scale>(
           *fixture.wave, rj_arith_v_div_scale_f32_w32, rj_arith_v_div_scale_f32_w64,
-          fixture.cu->arithmetic_flags(), unsupported ? RJ_ARITH_ALU_OMOD_2 : 0, operand, operand,
-          operand, operand, true, [&](uint64_t value) { condition = value; });
-      EXPECT_EQ(fixture.wave->instruction_execution_failed(), unsupported);
-      EXPECT_EQ(condition, unsupported ? 0x1234u : 0u);
+          fixture.cu->arithmetic_flags(), RJ_ARITH_ALU_OMOD_2 | (invalid ? 1ULL << 30 : 0), operand,
+          operand, operand, operand, true, [&](uint64_t value) { condition = value; });
+      EXPECT_EQ(fixture.wave->instruction_execution_failed(), invalid);
+      EXPECT_EQ(condition, invalid ? 0x1234u : 0u);
       EXPECT_TRUE(fixture.recorder->writes.empty());
     }
   }
