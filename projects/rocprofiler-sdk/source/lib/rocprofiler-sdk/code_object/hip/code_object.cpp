@@ -39,6 +39,7 @@
 #include <hsa/hsa_api_trace.h>
 #include <hsa/hsa_ven_amd_loader.h>
 
+#include <dlfcn.h>
 #include <cstddef>
 #include <cstdlib>
 #include <string>
@@ -228,28 +229,75 @@ get_kernel_symbol_device_name_map_from_metadata(amd_comgr_metadata_node_t kernel
     return kernel_sym_device_func_map;
 }
 
+// Both paths borrow the input only for this call and return independently owned
+// metadata. The optional API avoids importing the whole ELF into a data object.
+amd_comgr_status_t
+get_binary_metadata(size_t size, const void* bytes, amd_comgr_metadata_node_t* metadata)
+{
+    // The SDK's direct COMGR dependency keeps the cached function alive.
+    static auto get_elf_metadata =
+        detail::resolve_elf_metadata(reinterpret_cast<const void*>(&amd_comgr_get_data_metadata));
+    return detail::get_binary_metadata(size, bytes, metadata, get_elf_metadata);
+}
+
 amd_comgr_status_t
 get_kernels_meta_node(const amd_comgr_code_object_info_t& isa_offset,
                       const void*                         fat_bin,
-                      amd_comgr_data_t*                   binary_data,
                       amd_comgr_metadata_node_t*          binary_metadata,
                       amd_comgr_metadata_node_t*          kernels_metadata)
 {
-    CHECK_RETURN_COMGR(amd_comgr_create_data(AMD_COMGR_DATA_KIND_EXECUTABLE, binary_data));
-
     const char* bin_offset = static_cast<const char*>(fat_bin) + isa_offset.offset;
-    CHECK_RETURN_COMGR_EXT(amd_comgr_set_data(*binary_data, isa_offset.size, bin_offset),
-                           "binary_data=" << binary_data->handle << ", isa=(" << isa_offset.isa
-                                          << ", " << isa_offset.size << ", " << isa_offset.offset
-                                          << "), fat_bin=" << fat_bin);
-
-    CHECK_RETURN_COMGR(amd_comgr_get_data_metadata(*binary_data, binary_metadata));
+    CHECK_RETURN_COMGR_EXT(get_binary_metadata(isa_offset.size, bin_offset, binary_metadata),
+                           "isa=(" << isa_offset.isa << ", " << isa_offset.size << ", "
+                                   << isa_offset.offset << "), fat_bin=" << fat_bin);
     CHECK_RETURN_COMGR(
         amd_comgr_metadata_lookup(*binary_metadata, kernels_metadata_lookup, kernels_metadata));
 
     return AMD_COMGR_STATUS_SUCCESS;
 }
 }  // namespace
+
+detail::get_elf_metadata_t
+detail::resolve_elf_metadata(const void* linked_api)
+{
+    auto library_info = Dl_info{};
+    if(!linked_api || dladdr(linked_api, &library_info) == 0 || library_info.dli_fname == nullptr)
+        return nullptr;
+    auto* library = dlopen(library_info.dli_fname, RTLD_LAZY | RTLD_NOLOAD);
+    if(library == nullptr) return nullptr;
+    auto library_fini = common::scope_destructor{[library]() { dlclose(library); }};
+    auto result =
+        reinterpret_cast<get_elf_metadata_t>(dlsym(library, "amd_comgr_get_elf_metadata"));
+    // dlsym also searches dependencies. A metadata handle must be created
+    // by the same COMGR implementation that will traverse and destroy it.
+    auto symbol_info = Dl_info{};
+    if(result && (dladdr(reinterpret_cast<const void*>(result), &symbol_info) == 0 ||
+                  symbol_info.dli_fbase != library_info.dli_fbase))
+        return nullptr;
+    return result;
+}
+
+amd_comgr_status_t
+detail::get_binary_metadata(size_t                     size,
+                            const void*                bytes,
+                            amd_comgr_metadata_node_t* metadata,
+                            get_elf_metadata_t         get_elf_metadata)
+{
+    if(get_elf_metadata &&
+       comgr_success(get_elf_metadata(size, static_cast<const char*>(bytes), metadata),
+                     "amd_comgr_get_elf_metadata (falling back to data import on error)"))
+        return AMD_COMGR_STATUS_SUCCESS;
+
+    // Keep compatibility with older COMGR runtimes and headers: there is no new
+    // required link symbol. A missing or failed optional API uses the original
+    // copying path. The optional API leaves the output unchanged on failure.
+    auto binary_data = amd_comgr_data_t{};
+    CHECK_RETURN_COMGR(amd_comgr_create_data(AMD_COMGR_DATA_KIND_EXECUTABLE, &binary_data));
+    auto binary_data_fini =
+        common::scope_destructor{[binary_data]() { release_data(binary_data); }};
+    CHECK_RETURN_COMGR(amd_comgr_set_data(binary_data, size, static_cast<const char*>(bytes)));
+    return amd_comgr_get_data_metadata(binary_data, metadata);
+}
 
 comgr_code_object_vec_t
 get_isa_offsets(hsa_agent_t hsa_agent, const void* fat_bin)
@@ -285,22 +333,18 @@ kernel_symbol_hip_device_map_t
 get_kernel_symbol_device_name_map(const amd_comgr_code_object_info_t& isa_offset,
                                   const void*                         fat_bin)
 {
-    auto binary_data      = amd_comgr_data_t{};
     auto binary_metadata  = amd_comgr_metadata_node_t{};
     auto kernels_metadata = amd_comgr_metadata_node_t{};
 
     if(get_kernels_meta_node(
-           isa_offset, CHECK_NOTNULL(fat_bin), &binary_data, &binary_metadata, &kernels_metadata) !=
+           isa_offset, CHECK_NOTNULL(fat_bin), &binary_metadata, &kernels_metadata) !=
        AMD_COMGR_STATUS_SUCCESS)
     {
         destroy_metadata(kernels_metadata);
         destroy_metadata(binary_metadata);
-        release_data(binary_data);
         return kernel_symbol_hip_device_map_t{};
     }
 
-    auto binary_data_fini =
-        common::scope_destructor{[binary_data]() { release_data(binary_data); }};
     auto binary_metadata_fini =
         common::scope_destructor{[binary_metadata]() { destroy_metadata(binary_metadata); }};
     auto kernels_metadata_fini =
@@ -315,21 +359,9 @@ get_kernel_symbol_device_name_map_from_executable(const void* executable, size_t
     auto kernel_sym_device_func_map = kernel_symbol_hip_device_map_t{};
     if(executable == nullptr || executable_size == 0) return kernel_sym_device_func_map;
 
-    auto binary_data = amd_comgr_data_t{};
-    if(!comgr_success(amd_comgr_create_data(AMD_COMGR_DATA_KIND_EXECUTABLE, &binary_data),
-                      "amd_comgr_create_data"))
-        return kernel_sym_device_func_map;
-    auto binary_data_fini =
-        common::scope_destructor{[binary_data]() { release_data(binary_data); }};
-
-    if(!comgr_success(
-           amd_comgr_set_data(binary_data, executable_size, static_cast<const char*>(executable)),
-           "amd_comgr_set_data"))
-        return kernel_sym_device_func_map;
-
     auto binary_metadata = amd_comgr_metadata_node_t{};
-    if(!comgr_success(amd_comgr_get_data_metadata(binary_data, &binary_metadata),
-                      "amd_comgr_get_data_metadata"))
+    if(!comgr_success(get_binary_metadata(executable_size, executable, &binary_metadata),
+                      "get_binary_metadata"))
         return kernel_sym_device_func_map;
     auto binary_metadata_fini =
         common::scope_destructor{[binary_metadata]() { destroy_metadata(binary_metadata); }};

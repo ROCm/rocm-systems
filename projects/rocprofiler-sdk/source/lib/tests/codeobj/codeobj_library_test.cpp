@@ -20,8 +20,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <dlfcn.h>
 #include <gtest/gtest.h>
 #include <unistd.h>
+#include <algorithm>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -589,4 +592,115 @@ TEST(codeobj_library, memory_loaded_code_object_symbol_map)
     auto symbol = symbol_map.find("_Z18syncthreads_kernelPi.kd");
     ASSERT_NE(symbol, symbol_map.end());
     EXPECT_EQ(symbol->second, "_Z18syncthreads_kernelPi");
+
+    for(size_t offset = 0; offset < alignof(std::max_align_t); ++offset)
+    {
+        auto padded = std::vector<char>(objdata.size() + offset);
+        std::copy(objdata.begin(), objdata.end(), padded.begin() + offset);
+        auto actual =
+            rocprofiler::code_object::hip::get_kernel_symbol_device_name_map_from_executable(
+                padded.data() + offset, objdata.size());
+        auto info   = amd_comgr_code_object_info_t{};
+        info.offset = offset;
+        info.size   = objdata.size();
+        auto from_bundle =
+            rocprofiler::code_object::hip::get_kernel_symbol_device_name_map(info, padded.data());
+        std::fill(padded.begin(), padded.end(), '\0');
+        padded.clear();
+        padded.shrink_to_fit();
+        EXPECT_EQ(actual, symbol_map);
+        EXPECT_EQ(from_bundle, symbol_map);
+    }
+}
+
+TEST(codeobj_library, invalid_code_object_symbol_map)
+{
+    using rocprofiler::code_object::hip::get_kernel_symbol_device_name_map_from_executable;
+    EXPECT_TRUE(get_kernel_symbol_device_name_map_from_executable(nullptr, 1).empty());
+    EXPECT_TRUE(get_kernel_symbol_device_name_map_from_executable("", 0).empty());
+    EXPECT_TRUE(get_kernel_symbol_device_name_map_from_executable("not an ELF", 10).empty());
+    EXPECT_TRUE(get_kernel_symbol_device_name_map_from_executable("\177ELF", 4).empty());
+
+    // Check the bundled-member entry point too, including a nonzero offset.
+    auto info   = amd_comgr_code_object_info_t{};
+    info.offset = 1;
+    for(auto size : {size_t{0}, size_t{4}, size_t{10}})
+    {
+        info.size = size;
+        EXPECT_TRUE(rocprofiler::code_object::hip::get_kernel_symbol_device_name_map(
+                        info, "x\177ELFgarbage")
+                        .empty());
+    }
+}
+
+TEST(codeobj_library, optional_metadata_failure_fallback)
+{
+    namespace hip = rocprofiler::code_object::hip;
+    auto path     = codeobjhelper::get_data_file_path("syncthreads_kernel.bin");
+    ASSERT_FALSE(path.empty());
+    std::ifstream file(path, std::ios::binary);
+    using iterator_t = std::istreambuf_iterator<char>;
+    std::vector<char> image{iterator_t(file), iterator_t{}};
+    ASSERT_FALSE(image.empty());
+
+    const hip::detail::get_elf_metadata_t parsers[] = {
+        nullptr,
+        +[](size_t, const char*, amd_comgr_metadata_node_t*) { return AMD_COMGR_STATUS_ERROR; },
+        +[](size_t, const char*, amd_comgr_metadata_node_t*) {
+            return AMD_COMGR_STATUS_ERROR_INVALID_ARGUMENT;
+        },
+        +[](size_t, const char*, amd_comgr_metadata_node_t*) {
+            return AMD_COMGR_STATUS_ERROR_OUT_OF_RESOURCES;
+        }};
+    for(size_t i = 0; i < std::size(parsers); ++i)
+    {
+        SCOPED_TRACE(i);
+        auto parser        = parsers[i];
+        auto metadata      = amd_comgr_metadata_node_t{};
+        auto metadata_fini = rocprofiler::common::scope_destructor{[&metadata]() {
+            if(metadata.handle) amd_comgr_destroy_metadata(metadata);
+        }};
+        ASSERT_EQ(hip::detail::get_binary_metadata(image.size(), image.data(), &metadata, parser),
+                  AMD_COMGR_STATUS_SUCCESS);
+        auto kernels      = amd_comgr_metadata_node_t{};
+        auto kernels_fini = rocprofiler::common::scope_destructor{[&kernels]() {
+            if(kernels.handle) amd_comgr_destroy_metadata(kernels);
+        }};
+        ASSERT_EQ(amd_comgr_metadata_lookup(metadata, "amdhsa.kernels", &kernels),
+                  AMD_COMGR_STATUS_SUCCESS);
+        size_t count = 0;
+        ASSERT_EQ(amd_comgr_get_metadata_list_size(kernels, &count), AMD_COMGR_STATUS_SUCCESS);
+        EXPECT_GT(count, 0);
+
+        // The optional path may succeed without importing any ELF. Passing the
+        // existing owned handle through it detects an unintended copying retry.
+        auto forwarded = amd_comgr_metadata_node_t{};
+        auto forward   = +[](size_t size, const char* bytes, amd_comgr_metadata_node_t* result) {
+            if(size != sizeof(*result)) return AMD_COMGR_STATUS_ERROR_INVALID_ARGUMENT;
+            std::memcpy(result, bytes, size);
+            return AMD_COMGR_STATUS_SUCCESS;
+        };
+        ASSERT_EQ(
+            hip::detail::get_binary_metadata(sizeof(metadata), &metadata, &forwarded, forward),
+            AMD_COMGR_STATUS_SUCCESS);
+        EXPECT_EQ(forwarded.handle, metadata.handle);
+    }
+}
+
+TEST(codeobj_library, optional_metadata_library_owner)
+{
+    auto path = codeobjhelper::get_data_file_path("libcodeobj-metadata-owner.so");
+    ASSERT_FALSE(path.empty());
+    auto* owner = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+    ASSERT_NE(owner, nullptr) << dlerror();
+    auto  owner_fini  = rocprofiler::common::scope_destructor{[owner]() { dlclose(owner); }};
+    auto* linked_api  = dlsym(owner, "amd_comgr_get_data_metadata");
+    auto* foreign_api = dlsym(owner, "amd_comgr_get_elf_metadata");
+    ASSERT_NE(linked_api, nullptr);
+    ASSERT_NE(foreign_api, nullptr);
+
+    using rocprofiler::code_object::hip::detail::resolve_elf_metadata;
+    EXPECT_EQ(resolve_elf_metadata(linked_api), nullptr);
+    EXPECT_EQ(reinterpret_cast<const void*>(resolve_elf_metadata(foreign_api)), foreign_api);
+    EXPECT_EQ(resolve_elf_metadata(nullptr), nullptr);
 }
