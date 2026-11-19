@@ -1429,6 +1429,28 @@ TEST_F(NetIbConnectMicrotest, CreateFlushQp_FirstUseCreatesLoopbackQpAndHostMr) 
   EXPECT_EQ(comm.devs[0].gpuFlush.sge.lkey, comm.devs[0].gpuFlush.hostMr->lkey);
 }
 
+TEST_F(NetIbConnectMicrotest, CreateFlushQp_ReservesInlineRoomForTheScratchpadWrite) {
+  ConfigureSingleDevice();
+  InstallSingleDeviceResourceFakes();
+  uint32_t maxInlineData = 0;
+  auto createQp = g_ibvCreateQp;
+  ScopedHook create(g_ibvCreateQp, [&](ibv_qp** out, ibv_pd* pd, ibv_qp_init_attr* attr) {
+    maxInlineData = attr->cap.max_inline_data;
+    return createQp(out, pd, attr);
+  });
+  ncclIbRecvComm comm{};
+  comm.flushEnabled = 1;
+  comm.base.vProps.ndevs = 1;
+  comm.devs[0].base.ibDevN = 0;
+  comm.devs[0].base.pd = &pd_;
+  comm.devs[0].base.cq = &cq_;
+  comm.devs[0].base.gidInfo = ncclIbDevs[0].gidInfo;
+
+  ASSERT_EQ(ncclIbCreateFlushQp(&comm), ncclSuccess);
+  EXPECT_EQ(create.calls, 1);
+  EXPECT_GE(maxInlineData, comm.devs[0].gpuFlush.sge.length);
+}
+
 TEST_F(NetIbConnectMicrotest, PostReceiveWorkRequests_ResiliencyDepthControlsPostCount) {
   IbVerbsScene verbs("mlx5_0", 71);
   ncclIbRecvComm comm{};
