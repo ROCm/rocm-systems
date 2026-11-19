@@ -211,6 +211,8 @@ ncclResult_t xmlGetNode(FILE* file, struct ncclXmlNode* node) {
   int a = 0;
   while (c == ' ' || c == '\t') {  // RCCL: tab separates attributes
     NCCLCHECK(xmlGetToken(file, node->attrs[a].key, node->attrs[a].value, &c));
+    // RCCL: a run of separators, or one before "/>" or ">", reads an empty token: not an attribute.
+    if (node->attrs[a].key[0] == '\0') continue;
     if (a == MAX_ATTR_COUNT) {
       INFO(NCCL_GRAPH, "XML Parse : Ignoring extra attributes (max %d)", MAX_ATTR_COUNT);
       // Actually we need to still consume the extra attributes so we have an extra one.

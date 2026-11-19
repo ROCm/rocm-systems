@@ -141,9 +141,24 @@ TEST_F(XmlMicrotest, GetXmlFromFile_TabSeparatesAttributesInsideATag) {
   ncclXmlNode* cpu = Find("cpu", "numaid", "0");
   ASSERT_NE(nullptr, cpu);
   EXPECT_EQ("ff", Attr(cpu, "affinity"));
+  EXPECT_EQ(2, cpu->nAttrs);
   ncclXmlNode* pci = Find("pci", "busid", "0000:01:00.0");
   ASSERT_NE(nullptr, pci);
   EXPECT_EQ(NODE_TYPE_SINGLE, pci->type);
+  EXPECT_EQ(1, pci->nAttrs) << "the tab before /> is not an attribute";
+}
+
+// Aligned files use runs of separators; each run separates one attribute from the next.
+TEST_F(XmlMicrotest, GetXmlFromFile_SeparatorRunsAddNoEmptyAttributes) {
+  EXPECT_EQ(ncclSuccess, Parse("<system version=\"2\">"
+                               "<cpu\t\tnumaid=\"0\"  \t affinity=\"ff\"\t\t></cpu>"
+                               "</system>"));
+
+  ncclXmlNode* cpu = Find("cpu", "numaid", "0");
+  ASSERT_NE(nullptr, cpu);
+  EXPECT_EQ(2, cpu->nAttrs);
+  EXPECT_EQ("ff", Attr(cpu, "affinity"));
+  EXPECT_EQ(NODE_TYPE_OPEN, cpu->type);
 }
 
 TEST_F(XmlMicrotest, GetXmlFromFile_CommentsMayEndInsideTheTagName) {
