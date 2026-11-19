@@ -23,6 +23,7 @@ set(TEST_SOURCE_FILES
     handle.cpp
     hip.cpp
     hipfile-api.cpp
+    hipfile-span.cpp
     hipfile-stats.cpp
     fallback.cpp
     fastpath.cpp
