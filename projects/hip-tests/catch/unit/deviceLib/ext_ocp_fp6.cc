@@ -155,6 +155,65 @@ HIP_TEST_CASE(Unit_ext_ocp_fp6_fp16_bf16_source_host) {
   }
 }
 
+/**
+ * Test Description
+ * ------------------------
+ *  - Host stochastic-rounding constructors honor the round seed: a value halfway
+ *    between two fp6 values truncates with seed 0 and rounds up with seed ~0.
+ *    Representable values are unaffected by the seed.
+ * Test source
+ * ------------------------
+ *  - /unit/deviceLib/ext_ocp_fp6.cc
+ */
+HIP_TEST_CASE(Unit_ext_ocp_fp6_sr_seed_host) {
+  const __amd_scale_t scale = 0;
+  const unsigned int seed_lo = 0u;
+  const unsigned int seed_hi = 0xFFFFFFFFu;
+
+  SECTION("e2m3") {
+    // E2M3 step in [1,2) is 0.125, in [2,4) is 0.25.
+    const std::vector<float> in_v = {1.0625f, -1.0625f, 2.125f};
+    const std::vector<float> lo_v = {1.0f, -1.0f, 2.0f};
+    const std::vector<float> hi_v = {1.125f, -1.125f, 2.25f};
+    __amd_floatx32_storage_t in = tile32(in_v);
+    __amd_floatx32_storage_t lo =
+        __hipext_ocp_fp6x32_e2m3(in, seed_lo, scale).get_scaled_floatx32(scale);
+    __amd_floatx32_storage_t hi =
+        __hipext_ocp_fp6x32_e2m3(in, seed_hi, scale).get_scaled_floatx32(scale);
+    for (int i = 0; i < 32; ++i) {
+      INFO("lane " << i << " in " << in[i] << " lo " << lo[i] << " hi " << hi[i]);
+      REQUIRE(lo[i] == lo_v[i % lo_v.size()]);
+      REQUIRE(hi[i] == hi_v[i % hi_v.size()]);
+    }
+
+    __amd_floatx32_storage_t exact = tile32(kE2M3);
+    __amd_floatx32_storage_t out =
+        __hipext_ocp_fp6x32_e2m3(exact, seed_hi, scale).get_scaled_floatx32(scale);
+    for (int i = 0; i < 32; ++i) REQUIRE(out[i] == exact[i]);
+  }
+  SECTION("e3m2") {
+    // E3M2 step in [1,2) is 0.25, in [4,8) is 1.0.
+    const std::vector<float> in_v = {1.125f, -1.125f, 4.5f};
+    const std::vector<float> lo_v = {1.0f, -1.0f, 4.0f};
+    const std::vector<float> hi_v = {1.25f, -1.25f, 5.0f};
+    __amd_floatx32_storage_t in = tile32(in_v);
+    __amd_floatx32_storage_t lo =
+        __hipext_ocp_fp6x32_e3m2(in, seed_lo, scale).get_scaled_floatx32(scale);
+    __amd_floatx32_storage_t hi =
+        __hipext_ocp_fp6x32_e3m2(in, seed_hi, scale).get_scaled_floatx32(scale);
+    for (int i = 0; i < 32; ++i) {
+      INFO("lane " << i << " in " << in[i] << " lo " << lo[i] << " hi " << hi[i]);
+      REQUIRE(lo[i] == lo_v[i % lo_v.size()]);
+      REQUIRE(hi[i] == hi_v[i % hi_v.size()]);
+    }
+
+    __amd_floatx32_storage_t exact = tile32(kE3M2);
+    __amd_floatx32_storage_t out =
+        __hipext_ocp_fp6x32_e3m2(exact, seed_hi, scale).get_scaled_floatx32(scale);
+    for (int i = 0; i < 32; ++i) REQUIRE(out[i] == exact[i]);
+  }
+}
+
 // ---- Device consistency -----------------------------------------------------
 
 __global__ void fp6_e2m3_roundtrip_kernel(const float* in, float* out) {

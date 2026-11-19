@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/lds_direct.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"
 #include "rocjitsu/isa/isa_operand_simd_inl.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -13,7 +14,6 @@
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include <format>
 #include <optional>
-#include <stdexcept>
 #include <string>
 
 namespace rocjitsu {
@@ -26,8 +26,7 @@ namespace {
 constexpr int kM0EncodingValue = 124;
 
 bool is_vgpr_only_type(OperandType t) {
-  return t == OperandType::OPR_VGPR || t == OperandType::OPR_VGPR_OR_LDS ||
-         t == OperandType::OPR_SRC_VGPR;
+  return t == OperandType::OPR_VGPR || t == OperandType::OPR_SRC_VGPR;
 }
 
 uint32_t vgpr_index(OperandType opr_type, int ev) {
@@ -58,12 +57,7 @@ std::optional<uint32_t> Isa::resolved_vgpr_offset(OperandType opr_type, int ev) 
 
 bool Isa::simd_capable_value(OperandType opr_type, int ev) {
   return resolved_vgpr_offset(opr_type, ev).has_value() || is_immediate_type(opr_type) ||
-         amdgpu::can_resolve_src_scalar(ev, kM0EncodingValue);
-}
-
-uint32_t Isa::simd_broadcast_value(const amdgpu::Wavefront &wf, OperandType opr_type, int ev) {
-  return is_immediate_type(opr_type) ? static_cast<uint32_t>(ev)
-                                     : amdgpu::resolve_src_scalar(wf, ev, kM0EncodingValue);
+         amdgpu::can_resolve_src_scalar(ev, ROCJITSU_CODE_ARCH_RDNA2);
 }
 
 bool Operand::simd_capable_exec() const {
@@ -92,10 +86,13 @@ void Operand::read_lane_chunk_exec(const amdgpu::Wavefront &wf, uint32_t lane_ba
         count == 0 ? 0 : util::mask<uint64_t>(static_cast<int>(count)) << lane_base;
     auto region =
         amdgpu::RegisterAccess(wf).read_vgpr_region(wf.vgpr_alloc().base + voff, 1, lane_mask);
-    std::ranges::copy_n(region.lanes().begin() + lane_base, count, out);
+    auto maybe_lanes = region.lanes();
+    if (maybe_lanes.failed())
+      return;
+    std::ranges::copy_n(maybe_lanes.value().begin() + lane_base, count, out);
     return;
   }
-  std::ranges::fill_n(out, count, Isa::simd_broadcast_value(wf, opr_type_, encoding_value_));
+  std::ranges::fill_n(out, count, read_lane_exec(wf, lane_base));
 }
 
 void Operand::write_lane_chunk_exec(amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
@@ -145,8 +142,9 @@ uint32_t Operand::read_scalar_exec(const amdgpu::Wavefront &wf) const {
 }
 
 uint32_t Operand::read_lane_exec(const amdgpu::Wavefront &wf, uint32_t lane) const {
-  if (delegate())
+  if (delegate()) {
     return amdgpu::RegisterAccess(wf).read_lane(*delegate(), lane);
+  }
   // Fieldless operands whose capability policy makes this
   // accessor inert (reads yield a benign 0, writes are no-ops).
   // Driven by the construction-time capability flags applied
@@ -154,6 +152,10 @@ uint32_t Operand::read_lane_exec(const amdgpu::Wavefront &wf, uint32_t lane) con
   if (!reads_value())
     return 0u;
   int ev = encoding_value_;
+  if (ev == OpSelSrc::OPR_SRC_SRC_LDS_DIRECT &&
+      (opr_type_ == OperandType::OPR_SRC || opr_type_ == OperandType::OPR_VGPR_OR_LDS ||
+       opr_type_ == OperandType::OPR_SSRC))
+    return amdgpu::read_lds_direct_src0(wf, lane);
   if (auto off = Isa::resolved_vgpr_offset(opr_type_, ev)) {
     uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, vgpr_msb_role());
     return amdgpu::RegisterAccess(wf).read_vgpr(wf.vgpr_alloc().base + voff, lane);
@@ -161,7 +163,7 @@ uint32_t Operand::read_lane_exec(const amdgpu::Wavefront &wf, uint32_t lane) con
   if (is_immediate_type(opr_type_))
     return static_cast<uint32_t>(ev);
   if (size_bits_ == 16)
-    return amdgpu::resolve_src_scalar16(wf, ev, kM0EncodingValue);
+    return amdgpu::resolve_src_scalar16(wf, ev, kM0EncodingValue, lane_inline_float_format());
   return amdgpu::resolve_src_scalar(wf, ev, kM0EncodingValue);
 }
 
@@ -189,7 +191,7 @@ void Operand::write_lane_exec(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val
     amdgpu::RegisterAccess(wf).write_vgpr(wf.vgpr_alloc().base + voff, lane, val);
     return;
   }
-  throw std::logic_error("write_lane called on non-VGPR operand type");
+  wf.report_instruction_execution_error(amdgpu::InstructionExecutionError::UnsupportedOperandValue);
 }
 
 uint64_t Operand::read_lane64_exec(const amdgpu::Wavefront &wf, uint32_t lane) const {
@@ -202,6 +204,10 @@ uint64_t Operand::read_lane64_exec(const amdgpu::Wavefront &wf, uint32_t lane) c
   if (!reads_value())
     return 0;
   int ev = encoding_value_;
+  if (ev == OpSelSrc::OPR_SRC_SRC_LDS_DIRECT &&
+      (opr_type_ == OperandType::OPR_SRC || opr_type_ == OperandType::OPR_VGPR_OR_LDS ||
+       opr_type_ == OperandType::OPR_SSRC))
+    return amdgpu::read_lds_direct_src0(wf, lane);
   if (auto off = Isa::resolved_vgpr_offset(opr_type_, ev)) {
     uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, vgpr_msb_role());
     uint32_t idx = wf.vgpr_alloc().base + voff;
@@ -231,7 +237,7 @@ void Operand::write_lane64_exec(amdgpu::Wavefront &wf, uint32_t lane, uint64_t v
     amdgpu::RegisterAccess(wf).write_vgpr64(idx, lane, val);
     return;
   }
-  throw std::logic_error("write_lane64 called on non-VGPR operand type");
+  wf.report_instruction_execution_error(amdgpu::InstructionExecutionError::UnsupportedOperandValue);
 }
 
 uint64_t Operand::read_scalar64_exec(const amdgpu::Wavefront &wf) const {

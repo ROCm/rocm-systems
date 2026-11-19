@@ -53,6 +53,7 @@ struct GpuMemoryRef;
 struct DoppRef;
 
 enum class VirtualGpuMemAccessMode : uint32;
+enum PresentStage : uint32;
 
 /// Specifies whether presents are windowed or fullscreen.  This will determine whether the present is performed via a
 /// BLT or flip.
@@ -411,25 +412,26 @@ struct MscInfo
 /// Specifies properties for the presentation of an image to the screen.  Input structure to IQueue::PresentSwapChain().
 struct PresentSwapChainInfo
 {
-    PresentMode presentMode;    ///< Chooses between windowed and fullscreen present.
-    IImage*     pSrcImage;      ///< The image to be presented.
-    ISwapChain* pSwapChain;     ///< The swap chain associated with the source image.
-    uint32      imageIndex;     ///< The index of the source image within the swap chain. Owership of this image
-                                ///  index will be released back to the swap chain if this call succeeds.
-    uint32      rectangleCount; ///< Number of valid rectangles in the pRectangles array.
-    uint32      syncInterval;   ///< Applicable only when syncIntervalOverride is set
-                                ///  0 - The presentation occurs immediately, there is no synchronization.
-                                ///  1 through 4 - Synchronize presentation after the nth vertical blank.
-    const Rect* pRectangles;    ///< Array of rectangles defining the regions which will be updated.
-    uint64      presentId;      ///< PresentId functions as an identifier for present operations on a swapchain.
-                                ///  If this PresentId is non-zero, then the application can later use this value
-                                ///  to refer to that image presentation. A value of zero indicates that this
-                                ///  presentation has no associated presentId. A non-zero presentId must be greater
-                                ///  than any non-zero presentId passed previously by the application for the same
-                                ///  swapchain.
-    uint64  frameId;            ///< The frameId will be incremented by the UMD at present time. Only implemented on
-                                ///  WsiPlatform::Win32. XGL/OGLP must fall back to WsiPlatform::Win32 if frameId is
-                                ///  required, otherwise DXXP will update frameId for DXGI presents.
+    PresentMode presentMode;          ///< Chooses between windowed and fullscreen present.
+    IImage*     pSrcImage;            ///< The image to be presented.
+    ISwapChain* pSwapChain;           ///< The swap chain associated with the source image.
+    uint32      imageIndex;           ///< The index of the source image within the swap chain. Owership of this image
+                                      ///  index will be released back to the swap chain if this call succeeds.
+    uint32      rectangleCount;       ///< Number of valid rectangles in the pRectangles array.
+    uint32      syncInterval;         ///< Applicable only when syncIntervalOverride is set
+                                      ///  0 - The presentation occurs immediately, there is no synchronization.
+                                      ///  1 through 4 - Synchronize presentation after the nth vertical blank.
+    const Rect* pRectangles;          ///< Array of rectangles defining the regions which will be updated.
+    uint64      presentId;            ///< PresentId functions as an identifier for present operations on a swapchain.
+                                      ///  If this PresentId is non-zero, then the application can later use this value
+                                      ///  to refer to that image presentation. A value of zero indicates that this
+                                      ///  presentation has no associated presentId. A non-zero presentId must be
+                                      ///  greater than any non-zero presentId passed previously by the application for
+                                      ///  the same swapchain.
+    uint64  frameId;                  ///< The frameId will be incremented by the UMD at present time. Only implemented
+                                      ///  on WsiPlatform::Win32. XGL/OGLP must fall back to WsiPlatform::Win32 if
+                                      ///  frameId is required, otherwise DXXP will update frameId for DXGI presents.
+    PresentStage presentTimingStages; ///< An optional mask of present stages to collect timings for.
 
     const FramePacingPresentInfo* pFramePacingInfo; ///< Optional frame generation pacing info for this present.
 

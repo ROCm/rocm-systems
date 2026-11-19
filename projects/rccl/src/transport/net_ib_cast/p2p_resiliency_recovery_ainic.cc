@@ -30,6 +30,12 @@ ncclResult_t IbCastPortRecoveryQpsRestoreAinic(struct ncclIbPortRecoveryContext*
     }
     int devIndex, qpIdxInDev;
     NCCLCHECK(IbCastQpStripe(qpIndex, recoveryContext->resCtx->baseComm->vProps.ndevs, &devIndex, &qpIdxInDev));
+    if (devIndex != localQp->devIndex) {
+      WARN("NET/IB: %s: QP %d has devIndex %d but striping over %d devices places it on device %d (comm=%p)", __func__,
+           qpIndex, localQp->devIndex, recoveryContext->resCtx->baseComm->vProps.ndevs, devIndex,
+           recoveryContext->resCtx->baseComm);
+      return ncclInternalError;
+    }
 
     uint32_t oldQpn = localQp->qp->qp_num;
     INFO(NCCL_NET, "NET/IB: %s: Destroying QP %d on device %d (comm=%p, old_qp_num=%u)", __func__, qpIndex,
