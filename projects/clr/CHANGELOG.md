@@ -29,6 +29,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ### Resolved issues
 
+* On gfx950, `hipDeviceMallocUncached` allocations (through `hipExtMallocWithFlags`, and uncached virtual memory) are now mapped MTYPE UC instead of MTYPE CC, as on gfx120x. Previously, an uncached buffer that reused VRAM last written by a freed cacheable allocation could return that old data to the owning GPU after a peer GPU wrote to it. Uncached allocations on gfx950 are no longer sub-allocated, so allocations smaller than 2 MiB take longer to allocate and free.
 * `hipDrvLaunchKernelEx` now validates cluster dimensions before dispatch. Previously, an oversized or overflowing cluster size (e.g. exceeding the device maximum, or a product that overflows `uint32_t`) reached the hardware and caused an `HSA_STATUS_ERROR_INVALID_ARGUMENT` queue abort. Both `hipDrvLaunchKernelEx` and `hipLaunchKernelExC` now return `hipErrorInvalidClusterSize` at the API boundary for invalid cluster dimensions, matching CUDA's `cudaErrorInvalidClusterSize` / `CUDA_ERROR_INVALID_CLUSTER_SIZE` behavior. A cluster size greater than 1 on a device that does not support clusters (`clusterMaxSize == 0`) is also rejected.
 * Kernels without an LDS carveout preference now dispatch with no preference instead of a 0% LDS hint, and `hipFuncSetCacheConfig(hipFuncCachePreferNone)` no longer overrides `hipDeviceSetCacheConfig`.
 * `hipDeviceGetCacheConfig` now returns the value set by `hipDeviceSetCacheConfig` on devices with a configurable LDS carveout.

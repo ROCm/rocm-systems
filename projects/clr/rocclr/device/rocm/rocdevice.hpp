@@ -718,7 +718,7 @@ class Device : public NullDevice {
   //!   return that old data to the owning GPU after a peer GPU's first write.
   bool forceUncachedMtype() const {
     return (isa().versionMajor() == 12 && isa().versionMinor() == 0) ||
-           (isa().versionMajor() == 9 && isa().versionMinor() == 5);
+           (isa().versionMajor() == 9 && isa().versionMinor() == 5 && isa().versionStepping() == 0);
   }
 
   // Update the global free memory size
