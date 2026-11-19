@@ -101,6 +101,7 @@ class Primitives<T, RedOp, Fan, Direct,
 #if RCCL_SIMPLE_FUSED_STEP_END
     if (skip_fence) {
       __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "global");  // s_wait_loadcnt 0 and s_wait_storecnt 0
+      __atomic_signal_fence(__ATOMIC_SEQ_CST);  // Keeps the fence above from merging into the barrier's "local" one.
       if (nworkers != WARP_SIZE) {
         ldsOrderedBarrier(nworkers, threadsPerBlock, barrier_next, barriers);
       }
