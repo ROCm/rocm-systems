@@ -31,7 +31,7 @@ jobs:
     name: C/C++ Formatting (clang-format-18)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: |
             profilers/profiler-hub
@@ -63,7 +63,7 @@ jobs:
     name: CMake Formatting (gersemi)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: |
             profilers/profiler-hub
