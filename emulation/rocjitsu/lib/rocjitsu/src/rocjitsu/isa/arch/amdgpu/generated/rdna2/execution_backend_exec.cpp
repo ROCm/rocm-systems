@@ -7,9 +7,11 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/gfx10_memory_exec.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include <array>
+#include <type_traits>
 
 namespace rocjitsu {
 namespace rdna2 {
@@ -40,6 +42,12 @@ template <typename Derived> void execute_with_backend(Instruction &instruction, 
   // indexed SOP1/VOP1 sources). Re-enter the ISA scope so those
   // operands capture the same backend as decode-time operands.
   ScopedIsaExecutionBackend scope(&execution_backend());
+  if constexpr (std::is_base_of_v<Ds, Derived> || std::is_base_of_v<Flat, Derived> ||
+                std::is_base_of_v<Mubuf, Derived> || std::is_base_of_v<Mtbuf, Derived> ||
+                std::is_base_of_v<Mimg, Derived>) {
+    amdgpu::execute_gfx10_vector_memory(static_cast<Derived &>(instruction), wf);
+    return;
+  }
   static_cast<Derived &>(instruction).execute_impl(wf);
 }
 
@@ -257,6 +265,8 @@ constexpr InstructionCallbackTable kInstructionCallbacks{{
     &execute_with_backend<SDcacheInvSmem>,
     &execute_with_backend<SMemtimeSmem>,
     &execute_with_backend<SMemrealtimeSmem>,
+    &execute_with_backend<SAtcProbeSmem>,
+    &execute_with_backend<SAtcProbeBufferSmem>,
     &execute_with_backend<VNopVop1>,
     &execute_with_backend<VMovB32Vop1>,
     &execute_with_backend<VReadfirstlaneB32Vop1>,
@@ -636,6 +646,9 @@ constexpr InstructionCallbackTable kInstructionCallbacks{{
     &execute_with_backend<VFrexpMantF32Vop3>,
     &execute_with_backend<VClrexcpVop3>,
     &execute_with_backend<VMovreldB32Vop3>,
+    &execute_with_backend<VMovrelsB32Vop3>,
+    &execute_with_backend<VMovrelsdB32Vop3>,
+    &execute_with_backend<VMovrelsd2B32Vop3>,
     &execute_with_backend<VCvtF16U16Vop3>,
     &execute_with_backend<VCvtF16I16Vop3>,
     &execute_with_backend<VCvtU16F16Vop3>,

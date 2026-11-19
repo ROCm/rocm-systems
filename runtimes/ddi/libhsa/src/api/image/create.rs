@@ -6,17 +6,17 @@
 use std::ffi::c_void;
 
 use crate::ffi::*;
-use crate::image_abi::{
+use crate::image::{
     IMAGE_LAYOUT_LINEAR, IMAGE_LAYOUT_OPAQUE, ImageRequest, create_image, create_imported_image,
     create_native_mip_image, destroy_image, image_mipmap_array_get_level,
 };
-use crate::runtime::boundary;
+use crate::status::boundary;
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_ext_image_create")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 #[allow(unsafe_code)]
 /// Creates an image using runtime-selected native layout.
 pub unsafe extern "C" fn hsa_ext_image_create(
@@ -49,10 +49,10 @@ pub unsafe extern "C" fn hsa_ext_image_create(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_ext_image_create_with_layout")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 #[allow(unsafe_code)]
 /// Creates an image using the requested native layout.
 pub unsafe extern "C" fn hsa_ext_image_create_with_layout(
@@ -88,10 +88,10 @@ pub unsafe extern "C" fn hsa_ext_image_create_with_layout(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_ext_image_create_v2")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 #[allow(unsafe_code)]
 /// Creates a mipmapped image from a version-two descriptor.
 pub unsafe extern "C" fn hsa_ext_image_create_v2(
@@ -131,10 +131,10 @@ pub unsafe extern "C" fn hsa_ext_image_create_v2(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_image_create")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 #[allow(unsafe_code)]
 /// Creates an AMD image using native descriptor data.
 pub unsafe extern "C" fn hsa_amd_image_create(
@@ -183,10 +183,10 @@ pub unsafe extern "C" fn hsa_amd_image_create(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_image_create_v2")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 #[allow(unsafe_code)]
 /// Creates a version-two AMD image using native descriptor data.
 pub unsafe extern "C" fn hsa_amd_image_create_v2(
@@ -242,33 +242,33 @@ pub unsafe extern "C" fn hsa_amd_image_create_v2(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_ext_image_destroy")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Releases an image handle and its native backing.
 pub extern "C" fn hsa_ext_image_destroy(agent: HsaAgent, image: HsaExtImage) -> Status {
     boundary(|| destroy_image(agent, image))
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_ext_image_destroy_v2")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Destroys a version-two image handle and its native backing.
 pub extern "C" fn hsa_ext_image_destroy_v2(agent: HsaAgent, image: HsaExtImage) -> Status {
     boundary(|| destroy_image(agent, image))
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_ext_image_mipmap_array_get_level")
 )]
 /// # Safety
 /// The non-null pointers must address readable parent and optional descriptor
 /// records and writable storage for one output image handle.
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 #[allow(unsafe_code)]
 pub unsafe extern "C" fn hsa_ext_image_mipmap_array_get_level(
     agent: HsaAgent,
@@ -279,7 +279,7 @@ pub unsafe extern "C" fn hsa_ext_image_mipmap_array_get_level(
 ) -> Status {
     // SAFETY: The owner validates the C pointers and retains the image state
     // through this synchronous view creation call.
-    unsafe {
+    boundary(|| unsafe {
         image_mipmap_array_get_level(
             agent,
             mipmapped_array,
@@ -287,5 +287,5 @@ pub unsafe extern "C" fn hsa_ext_image_mipmap_array_get_level(
             image_descriptor,
             level_image_out,
         )
-    }
+    })
 }

@@ -47,6 +47,8 @@ class MlApiTracePair:
 class Workload:
     sys_info: pd.DataFrame = field(default_factory=pd.DataFrame)
     raw_pmc: pd.DataFrame = field(default_factory=pd.DataFrame)
+    # One counter table per pass, on raw_pmc's rows, keyed by pass name.
+    pass_tables: dict[str, pd.DataFrame] = field(default_factory=dict)
     dfs: dict[int, pd.DataFrame] = field(default_factory=dict)
     dfs_type: dict[int, str] = field(default_factory=dict)
     filter_kernel_ids: list[int] = field(default_factory=list)
@@ -64,4 +66,6 @@ class Workload:
     ml_api_trace_df: pd.DataFrame = field(default_factory=pd.DataFrame)
     # Nested utils_analysis.CallTreeNode roots keyed by Thread_Id.
     ml_api_call_trees: dict[str, list[Any]] = field(default_factory=dict)
+    # --operator patterns keyed by the backend they match in this workload.
+    operator_patterns: dict[str, list[str]] = field(default_factory=dict)
     membw_result: Optional[MemBwAnalysisResult] = None

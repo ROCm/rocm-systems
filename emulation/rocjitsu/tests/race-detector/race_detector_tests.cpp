@@ -29,9 +29,11 @@
 #include "race_test_instruction.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/memory_issue.h"
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
+#include "rocjitsu/vm/plugins/race_detector/core/interval_set.h"
 #include <array>
 #include <cstdint>
 #include <gtest/gtest.h>
+#include <initializer_list>
 #include <limits>
 #include <span>
 #include <utility>
@@ -42,7 +44,7 @@ namespace amdgpu = rocjitsu::amdgpu;
 
 namespace {
 
-constexpr std::array kCdna1To4GenericFlatLoadObligations{
+constexpr std::array kUnorderedVmAndLgkmObligations{
     amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT, MemoryOrderClass::UNORDERED},
     amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT, MemoryOrderClass::UNORDERED}};
 
@@ -69,6 +71,8 @@ TEST(RaceDetectorDefaults, CoversEveryMemoryEventType) {
       {MemoryEventType::GLOBAL_TO_TTMP, amdgpu::WaitCounterType::LGKMCNT,
        MemoryOrderClass::UNORDERED},
       {MemoryEventType::SCALAR_TO_GLOBAL, amdgpu::WaitCounterType::LGKMCNT,
+       MemoryOrderClass::UNORDERED},
+      {MemoryEventType::GDS_ORDERED_COUNT_SOURCE, amdgpu::WaitCounterType::EXPCNT,
        MemoryOrderClass::UNORDERED},
       {MemoryEventType::LDS_TO_GLOBAL, amdgpu::WaitCounterType::TENSORCNT,
        MemoryOrderClass::TENSOR},
@@ -122,9 +126,10 @@ TEST(RaceDetector, Vgpr_WaitcntClearsRace) {
   EXPECT_FALSE(b.hasRace());
 }
 
-TEST(RaceDetector, FlatGlobalLoadRequiresBothCounterWaits) {
+TEST(RaceDetector, UnorderedGlobalLoadRequiresBothCounterWaits) {
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
-  b.flatGlobalLoad(/*wave=*/0, /*vgprBase=*/1, /*numRegs=*/1, kCdna1To4GenericFlatLoadObligations);
+  b.globalLoadWithObligations(/*wave=*/0, /*vgprBase=*/1, /*numRegs=*/1,
+                              kUnorderedVmAndLgkmObligations);
 
   b.waitcnt(/*wave=*/0, /*vmcnt=*/0);
   b.checkVgprRead(/*wave=*/0, /*reg=*/1, /*lane=*/0);
@@ -136,11 +141,11 @@ TEST(RaceDetector, FlatGlobalLoadRequiresBothCounterWaits) {
   EXPECT_FALSE(b.hasRace());
 }
 
-TEST(RaceDetector, FlatLdsLoadRequiresBothCounterWaits) {
+TEST(RaceDetector, UnorderedLdsReadRequiresBothCounterWaits) {
   for (bool vmcnt_first : {false, true}) {
     SCOPED_TRACE(vmcnt_first ? "vmcnt first" : "lgkmcnt first");
     RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
-    b.flatLdsLoad(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/1);
+    b.unorderedLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/1);
 
     b.waitcnt(/*wave=*/0, /*vmcnt=*/vmcnt_first ? 0 : -1, /*lgkmcnt=*/vmcnt_first ? -1 : 0);
     b.checkVgprRead(/*wave=*/0, /*reg=*/1, /*lane=*/0);
@@ -158,11 +163,11 @@ TEST(RaceDetector, FlatLdsLoadRequiresBothCounterWaits) {
   }
 }
 
-TEST(RaceDetector, FlatLdsStoreRequiresBothCounterWaits) {
+TEST(RaceDetector, UnorderedLdsWriteRequiresBothCounterWaits) {
   for (bool vmcnt_first : {false, true}) {
     SCOPED_TRACE(vmcnt_first ? "vmcnt first" : "lgkmcnt first");
     RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
-    b.flatLdsStore(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+    b.unorderedLdsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
 
     b.waitcnt(/*wave=*/0, /*vmcnt=*/vmcnt_first ? 0 : -1, /*lgkmcnt=*/vmcnt_first ? -1 : 0);
     b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
@@ -384,45 +389,45 @@ TEST(RaceDetector, LdsCounterAccountingIgnoresNegativeIntervals) {
   }
 }
 
-TEST(RaceDetector, FlatLdsLoadDoesNotUseSameWaveLdsOrdering) {
+TEST(RaceDetector, UnorderedLdsReadRacesWithSameWaveWrite) {
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
-  b.flatLdsLoad(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/1);
+  b.unorderedLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/1);
 
   b.checkLdsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
 
   EXPECT_TRUE(b.hasLdsRace(0));
 }
 
-TEST(RaceDetector, LdsReadDoesNotOrderBeforeSameWaveFlatLdsStore) {
+TEST(RaceDetector, LdsReadRacesWithSameWaveUnorderedWrite) {
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
   b.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/1);
 
-  b.flatLdsStore(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  b.unorderedLdsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
 
   EXPECT_TRUE(b.hasLdsRace(0));
 }
 
-TEST(RaceDetector, FlatLdsStoreDoesNotUseSameWaveLdsOrdering) {
+TEST(RaceDetector, UnorderedLdsWriteRacesWithSameWaveRead) {
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
-  b.flatLdsStore(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  b.unorderedLdsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
 
   b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
 
   EXPECT_TRUE(b.hasLdsRace(0));
 }
 
-TEST(RaceDetector, LdsStoreDoesNotOrderBeforeSameWaveFlatLdsLoad) {
+TEST(RaceDetector, LdsWriteRacesWithSameWaveUnorderedRead) {
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
   b.ldsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
 
-  b.flatLdsLoad(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/1);
+  b.unorderedLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/1);
 
   EXPECT_TRUE(b.hasLdsRace(0));
 }
 
-TEST(RaceDetector, CompletedFlatLdsStoreIsSafeForSameWaveLdsRead) {
+TEST(RaceDetector, CompletedUnorderedLdsWriteIsSafeForSameWaveRead) {
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
-  b.flatLdsStore(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  b.unorderedLdsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
   b.waitcnt(/*wave=*/0, /*vmcnt=*/0, /*lgkmcnt=*/0);
 
   b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
@@ -430,9 +435,10 @@ TEST(RaceDetector, CompletedFlatLdsStoreIsSafeForSameWaveLdsRead) {
   EXPECT_FALSE(b.hasRace());
 }
 
-TEST(RaceDetector, FlatLoadCombinedZeroWaitClearsBothCounters) {
+TEST(RaceDetector, UnorderedGlobalLoadCombinedZeroWaitClearsBothCounters) {
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
-  b.flatGlobalLoad(/*wave=*/0, /*vgprBase=*/1, /*numRegs=*/1, kCdna1To4GenericFlatLoadObligations);
+  b.globalLoadWithObligations(/*wave=*/0, /*vgprBase=*/1, /*numRegs=*/1,
+                              kUnorderedVmAndLgkmObligations);
 
   b.waitcnt(/*wave=*/0, /*vmcnt=*/0, /*lgkmcnt=*/0);
   b.checkVgprRead(/*wave=*/0, /*reg=*/1, /*lane=*/0);
@@ -953,6 +959,38 @@ TEST(RaceDetector, LdsSameWave_SpanningAccessChecksLaterChunks) {
   }
 }
 
+TEST(RaceDetector, LdsMayConflictChecksOnlyTheAccessedChunks) {
+  for (bool writes : {false, true}) {
+    SCOPED_TRACE(writes ? "RAW" : "WAR");
+    RaceTestBuilder builder(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8);
+    // Wave 1's pending access lies in the gap between wave 0's two ranges.
+    if (writes)
+      builder.ldsWrite(/*wave=*/1, /*lane=*/0, /*addr=*/1024, /*bytes=*/4);
+    else
+      builder.ldsRead(/*wave=*/1, /*lane=*/0, /*addr=*/1024, /*bytes=*/4, /*vgprDst=*/2);
+    auto intervals = [](std::initializer_list<Interval> ranges) {
+      IntervalSet set;
+      for (const Interval &range : ranges)
+        set.append(range.start, range.end);
+      set.finalize();
+      return set;
+    };
+    const IntervalSet around = intervals({{0, 256}, {4096, 4352}});
+    const IntervalSet over = intervals({{0, 256}, {1020, 1028}});
+    const RaceDetector &detector = builder.detector();
+    const bool checkWrite = !writes;
+    const MemoryOrderClass order = MemoryOrderClass::LDS;
+    EXPECT_FALSE(detector.mayConflict(around, WaveId{0}, checkWrite, order));
+    EXPECT_TRUE(detector.mayConflict(over, WaveId{0}, checkWrite, order));
+    // Same-wave LDS accesses are ordered, and a read never conflicts with a
+    // read; WAW is not checked.
+    EXPECT_FALSE(detector.mayConflict(over, WaveId{1}, checkWrite, order));
+    EXPECT_FALSE(detector.mayConflict(over, WaveId{0}, !checkWrite, order));
+    EXPECT_TRUE(detector.mayConflict(over, WaveId{1}, checkWrite, MemoryOrderClass::UNORDERED));
+    EXPECT_FALSE(detector.mayConflict(IntervalSet{}, WaveId{0}, checkWrite, order));
+  }
+}
+
 TEST(RaceDetector, LdsSameWave_MixedOrderingSurvivesPartialRetirement) {
   for (bool writes : {false, true}) {
     SCOPED_TRACE(writes ? "RAW" : "WAR");
@@ -974,9 +1012,9 @@ TEST(RaceDetector, LdsSameWave_MixedOrderingSurvivesPartialRetirement) {
     // An unordered access from the same wave must invalidate the owner of
     // both chunks. Keep its destination distinct from the ordinary read's.
     if (writes)
-      b.flatLdsStore(/*wave=*/0, /*lane=*/0, /*addr=*/14, /*bytes=*/4);
+      b.unorderedLdsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/14, /*bytes=*/4);
     else
-      b.flatLdsLoad(/*wave=*/0, /*lane=*/0, /*addr=*/14, /*bytes=*/4, /*vgprDst=*/4);
+      b.unorderedLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/14, /*bytes=*/4, /*vgprDst=*/4);
     ASSERT_FALSE(b.hasRace());
     check(/*wave=*/0);
     EXPECT_EQ(b.raceCount(), 1);
@@ -1110,8 +1148,8 @@ TEST(RaceDetector, VgprWaw_DifferentCompletionClassesAreUnordered) {
 
 TEST(RaceDetector, VgprWaw_MixedOrderFlatLoadThenGlobalLoadRace) {
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
-  b.flatGlobalLoad(/*wave=*/0, /*vgprBase=*/2, /*numRegs=*/1,
-                   kMixedOrderGenericFlatLoadObligations);
+  b.globalLoadWithObligations(/*wave=*/0, /*vgprBase=*/2, /*numRegs=*/1,
+                              kMixedOrderGenericFlatLoadObligations);
   b.globalLoad(/*wave=*/0, /*vgprBase=*/2, /*numRegs=*/1);
 
   EXPECT_TRUE(b.hasVgprRace(2));
@@ -1120,8 +1158,8 @@ TEST(RaceDetector, VgprWaw_MixedOrderFlatLoadThenGlobalLoadRace) {
 TEST(RaceDetector, VgprWaw_GlobalLoadThenMixedOrderFlatLoadRace) {
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
   b.globalLoad(/*wave=*/0, /*vgprBase=*/2, /*numRegs=*/1);
-  b.flatGlobalLoad(/*wave=*/0, /*vgprBase=*/2, /*numRegs=*/1,
-                   kMixedOrderGenericFlatLoadObligations);
+  b.globalLoadWithObligations(/*wave=*/0, /*vgprBase=*/2, /*numRegs=*/1,
+                              kMixedOrderGenericFlatLoadObligations);
 
   EXPECT_TRUE(b.hasVgprRace(2));
 }
@@ -1152,6 +1190,34 @@ TEST(RaceDetector, VgprWaw_WriteLaneMaskHonorsPendingLoadLanes) {
 
   ASSERT_EQ(b.raceCount(), 1);
   EXPECT_EQ(b.violations().front().lane, 5);
+}
+
+TEST(RaceDetector, OrderedCountExportSourceProtectsOverlappingBytesAndLanes) {
+  std::vector<RaceViolation> reports;
+  RaceDetector detector(
+      1, 8, 8, Dim3d(0), [&](RaceViolation v) { reports.push_back(v); },
+      counterCapacitiesForArch(ROCJITSU_CODE_ARCH_RDNA1), 64 * 1024);
+  auto &wave = detector.getWaveRaceState(0);
+  constexpr uint64_t lane5 = uint64_t{1} << 5;
+  wave.registerEvent(testInstruction(0), MemoryEventType::GDS_ORDERED_COUNT_SOURCE, {1}, lane5,
+                     /*byteMask=*/0xc);
+  wave.registerEvent(testInstruction(8), MemoryEventType::VGPR_TO_LDS, {2}, lane5, 0xc);
+
+  wave.checkVgprReadLanes(1, lane5, 0xf);
+  wave.checkVgprWriteLanes(1, lane5 >> 1, 0xf);
+  wave.checkVgprWriteLanes(1, lane5, 0x3);
+  wave.checkVgprWrite(1, lane5, 0x3, MemoryOrderClass::GDS);
+  wave.checkVgprWriteLanes(2, lane5, 0xc);
+  EXPECT_TRUE(reports.empty());
+
+  wave.checkVgprWriteLanes(1, lane5 | (lane5 >> 1), 0x6);
+  wave.checkVgprWrite(1, lane5, 0x8, MemoryOrderClass::GDS);
+  ASSERT_EQ(reports.size(), 2u);
+  for (const auto &report : reports) {
+    EXPECT_TRUE(report.isWrite);
+    EXPECT_EQ(report.index, 1);
+    EXPECT_EQ(report.lane, 5);
+  }
 }
 
 TEST(RaceDetector, VgprWaw_SubDwordDisjointBytesNoRace) {

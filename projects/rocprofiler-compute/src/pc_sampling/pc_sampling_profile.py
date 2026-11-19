@@ -6,7 +6,7 @@ import os
 import shlex
 import time
 from dataclasses import dataclass
-from typing import Optional, Union, cast
+from typing import Dict, List, Optional, Tuple, Union, cast
 
 from utils import rocprofv3_avail_interface
 from utils.logger import console_debug, console_error, console_log
@@ -14,9 +14,12 @@ from utils.utils_common import (
     PC_SAMPLING_BLOCK_IDS,
     capture_subprocess_output,
     get_rocprof_cmd,
+)
+from utils.utils_profile import (
+    ProfilerOptions,
+    is_live_attach,
     perform_attach_detach,
 )
-from utils.utils_profile import ProfilerOptions, is_live_attach
 
 # Interval defaults: cycles for stochastic, microseconds for host_trap.
 PC_SAMPLING_DEFAULT_INTERVALS = {"stochastic": 1048576, "host_trap": 512}
@@ -65,8 +68,8 @@ def pc_sampling_interval_limits(
 
 
 def _merge_interval_limits(
-    configs: list[tuple[int, ...]],
-) -> dict[str, PCSamplingLimits]:
+    configs: List[Tuple[int, ...]],
+) -> Dict[str, PCSamplingLimits]:
     """Merge every agent's configurations into per-method interval limits.
 
     The SDK configures PC sampling when any single agent supports the request,
@@ -137,15 +140,15 @@ class PCSamplingProfile:
     ) -> None:
         """Run rocprof with pc sampling."""
         if self._profiler == "rocprofiler-sdk":
-            self._launch_sdk(cast(dict[str, Union[str, list[str]]], profiler_options))
+            self._launch_sdk(cast(Dict[str, Union[str, List[str]]], profiler_options))
         else:
-            self._launch_v3(cast(list[str], profiler_options))
+            self._launch_v3(cast(List[str], profiler_options))
 
     def _build_env(
         self,
-        options: dict[str, Union[str, list[str]]],
+        options: Dict[str, Union[str, List[str]]],
         log_label: str,
-    ) -> tuple[Optional[Union[str, list[str]]], dict[str, str]]:
+    ) -> Tuple[Optional[Union[str, List[str]]], Dict[str, str]]:
         """Pop APP_CMD, overlay options onto the environment, log the delta."""
         app_cmd = options.pop("APP_CMD") if "APP_CMD" in options else None
         new_env = os.environ.copy()
@@ -158,8 +161,8 @@ class PCSamplingProfile:
 
     def _run_app(
         self,
-        app_cmd: Optional[Union[str, list[str]]],
-        new_env: dict[str, str],
+        app_cmd: Optional[Union[str, List[str]]],
+        new_env: Dict[str, str],
     ) -> None:
         """Run the workload under the prepared environment."""
         if app_cmd is None:
@@ -177,7 +180,7 @@ class PCSamplingProfile:
 
     def _launch_sdk(
         self,
-        profiler_options: dict[str, Union[str, list[str]]],
+        profiler_options: Dict[str, Union[str, List[str]]],
     ) -> None:
         """Launch the rocprofiler-sdk backend for PC sampling via env vars."""
         options = profiler_options.copy()
@@ -193,7 +196,7 @@ class PCSamplingProfile:
 
     def _launch_v3(
         self,
-        profiler_options: list[str],
+        profiler_options: List[str],
     ) -> None:
         """Launch the rocprofv3 CLI backend for PC sampling via flags."""
         rocprof_cmd = get_rocprof_cmd()

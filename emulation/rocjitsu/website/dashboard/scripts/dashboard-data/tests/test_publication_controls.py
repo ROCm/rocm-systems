@@ -168,11 +168,16 @@ def test_publication_only_rerun_keeps_benchmark_artifact_and_identity(
     )
 
 
-def test_enrichment_preserves_raw_and_types_optional_metadata(publication):
+@pytest.mark.parametrize(
+    'event,trigger', [('workflow_dispatch', 'manual'), ('pull_request', 'auto')]
+)
+def test_enrichment_preserves_raw_and_types_optional_metadata(
+    publication, event, trigger
+):
     ctx = publication
     ctx.env.update(
         BENCHMARK_BRANCH='feature/quoted',
-        GITHUB_EVENT_NAME='workflow_dispatch',
+        GITHUB_EVENT_NAME=event,
         SOURCE_BASE_BRANCH='develop',
         SOURCE_BASE_SHA='b' * 40,
         SOURCE_PULL_REQUEST_NUMBER='42',
@@ -187,7 +192,7 @@ def test_enrichment_preserves_raw_and_types_optional_metadata(publication):
     assert candidate['publication'] == {
         'id': 'github-123-attempt-1',
         'machine_label': 'fictional-machine',
-        'trigger': 'manual',
+        'trigger': trigger,
         'workflow_commit_sha': ctx.env['WORKFLOW_COMMIT_SHA'],
         'tensile_commit_sha': 'd' * 40,
         'source': {

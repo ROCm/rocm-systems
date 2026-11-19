@@ -1617,6 +1617,8 @@ Fields | Description
 `pcie_static` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`max_pcie_width`</td><td>Maximum number of pcie lanes available</td></tr><tr><td>`max_pcie_speed`</td><td>Maximum capable pcie speed in MT/s</td></tr><tr><td>`pcie_interface_version`</td><td>PCIe generation ie. 3,4,5...</td></tr><tr><td>`slot_type`</td><td>The type of form factor of the slot: OAM, PCIE, CEM, or Unknown</td></tr></tbody></table>
 `pcie_metric` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`pcie_width`</td><td>Current number of pcie lanes available</td></tr><tr><td>`pcie_speed`</td><td>Current pcie speed in MT/s</td></tr><tr><td>`pcie_bandwidth`</td><td>Current instantaneous bandwidth usage in Mb/s</td></tr><tr><td>`pcie_replay_count`</td><td>Total number of PCIe replays (NAKs)</td></tr><tr><td>`pcie_l0_to_recovery_count`</td><td>PCIE L0 to recovery state transition accumulated count</td></tr><tr><td>`pcie_replay_roll_over_count`</td><td>PCIe Replay accumulated count</td></tr><tr><td>`pcie_nak_sent_count`</td><td>PCIe NAK sent accumulated count</td></tr><tr><td>`pcie_nak_received_count`</td><td>PCIe NAK received accumulated count</td></tr></tbody></table>
 
+On a GPU that KFD reports as connected to the CPU over xGMI (no PCIe host link), `max_pcie_width`, `max_pcie_speed` and `pcie_interface_version` are `"N/A"`.
+
 Exceptions that can be thrown by `amdsmi_get_pcie_info` function:
 
 * `AmdSmiLibraryException`
@@ -5784,7 +5786,7 @@ finally:
 
 ### amdsmi_topo_get_link_type
 
-Description: Retrieve the hops and the connection type between 2 GPUs
+Description: Retrieve the hops and the connection type between 2 processors (GPUs or NICs)
 
 Input parameters:
 
@@ -5795,8 +5797,8 @@ Output:  Dictionary with fields:
 
 Field | Description
 ---|---
-`hops` | Number of hops
-`type` | The connection type as an int. This should be translated according to the enum amdsmi_link_type_t. Refer to the example below for more details.
+`hops` | Number of hops. Not meaningful when either processor is a NIC; it reads `UINT64_MAX` then
+`type` | The connection type as an int. This should be translated according to the enum amdsmi_link_type_t. For a NIC pair it is `AMDSMI_LINK_TYPE_PCIE` (same PCIe switch), `AMDSMI_LINK_TYPE_NUMA` (same NUMA node, different switch), `AMDSMI_LINK_TYPE_XNUMA` (different NUMA nodes) or `AMDSMI_LINK_TYPE_UNKNOWN`. Refer to the example below for more details.
 
 Exceptions that can be thrown by `amdsmi_topo_get_link_type` function:
 
@@ -5835,6 +5837,10 @@ try:
             print('xgmi')
         if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_NOT_APPLICABLE:
             print('not applicable')
+        if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_NUMA:
+            print('same NUMA node, different PCIe switch (NIC pairs)')
+        if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_XNUMA:
+            print('different NUMA nodes (NIC pairs)')
         if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_UNKNOWN:
             print('unknown')
 except amdsmi.AmdSmiException as e:
@@ -6295,7 +6301,7 @@ Refer to [amd_smi_partition_example.py](https://github.com/ROCm/rocm-systems/blo
 
 ### amdsmi_set_gpu_memory_partition_mode
 
-Description: Set the memory partition mode for the given GPU using the newer partition mode API. All GPU processes must be idle before calling this function.
+Description: Set the memory partition mode for the given GPU using the newer partition mode API. All GPU processes must be idle before calling this function. The change takes effect at the next driver reload. Requesting the current mode cancels a pending change; older amdgpu drivers ignore that request because of a driver bug.
 
 Input parameters:
 

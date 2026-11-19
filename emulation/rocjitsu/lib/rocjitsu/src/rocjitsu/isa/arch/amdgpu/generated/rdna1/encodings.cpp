@@ -805,6 +805,18 @@ bool Vop2::hasImpliedLiteral() {
          inst_.op == 56;
 }
 
+void Vintrp::append_interp_operand(std::string &out, uint8_t index,
+                                   const ::rocjitsu::Operand &attribute) const {
+  const auto *operand = src_operands_[index];
+  if (operand == &attribute) {
+    out += attribute.name();
+    out += '.';
+    out += "xyzw"[inst_.attrchan];
+    return;
+  }
+  Vintrp::append_src_operand(out, index);
+}
+
 Vintrp::Vintrp(std::string_view mnemonic, const VintrpMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   flags_ |= VALU;
@@ -819,6 +831,24 @@ Vintrp::Vintrp(std::string_view mnemonic, const VintrpMachineInst *inst, Execute
 }
 
 bool Vintrp::default_encoding() { return 1; }
+
+void Vop3::append_interp_operand(std::string &out, uint8_t index,
+                                 const ::rocjitsu::Operand &attribute,
+                                 const ::rocjitsu::Operand *interpolant) const {
+  const auto *operand = src_operands_[index];
+  if (operand == &attribute) {
+    out += attribute.name();
+    out += '.';
+    out += "xyzw"[(inst_.src0 >> 6) & 3u];
+    return;
+  }
+  if (operand == interpolant) {
+    amdgpu::vop::append_vop3_operand(out, operand->name(), (inst_.abs >> 1) & 1u,
+                                     (inst_.neg >> 1) & 1u, false, 0);
+    return;
+  }
+  Vop3::append_src_operand(out, index);
+}
 
 bool Vop3::displays_vop3_op_sel() const {
   return inst_.op == 832 || inst_.op == 843 || (inst_.op >= 862 && inst_.op <= 863);
@@ -1445,9 +1475,9 @@ Mimg::Mimg(std::string_view mnemonic, const MimgMachineInst *inst, ExecuteFn exe
 }
 
 void Mimg::capture_nsa_words(const MachineInst *inst, const Operand *vaddr) {
+  nsa_vaddr_operand_ = vaddr;
   if (!inst_.nsa)
     return;
-  nsa_vaddr_operand_ = vaddr;
   size_ = sizeof(OpEncoding) + inst_.nsa * sizeof(MachineInst);
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();

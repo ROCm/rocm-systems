@@ -20,6 +20,7 @@
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/config/kfd_device_config.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/sgpr_layout.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 
 #include <algorithm>
@@ -221,11 +222,7 @@ struct CwsrCapacity {
 [[nodiscard]] CwsrCapacity cwsr_capacity_for_device(const config::KfdDeviceConfig &device,
                                                     uint32_t num_xcc);
 
-/// @brief Number of scalar slots in a saved SGPR block (gfx9.4 sgpr_count).
-/// @details The block is a fixed 112 slots regardless of how many scalars the
-/// dispatch actually allocated. It is also an input to the COMPUTE_RELAUNCH
-/// state word (sgprs_field = kCwsrSavedSgprSlots / 16, which must stay inside
-/// three bits), not just to the alias arithmetic below.
+/// @brief Maximum gfx9.4 SGPR block represented by COMPUTE_RELAUNCH.
 inline constexpr uint32_t kCwsrSavedSgprSlots = 112;
 /// @brief Number of saved scalar slots in a gfx12.5 record.
 /// @details The last 16 slots carry TTMP0-15 rather than ordinary SGPRs.
@@ -236,30 +233,26 @@ inline constexpr uint32_t kCwsrGfx1250SavedSgprSlots = 128;
 inline constexpr uint32_t kCwsrArchScalarRegisters = 102;
 /// @brief One past the last aliased slot (+ gfx9.4 scalar_alias_count() of 6).
 inline constexpr uint32_t kCwsrAliasedSgprEnd = kCwsrArchScalarRegisters + 6; // 108
-/// @brief Slot holding VCC_LO; VCC_HI is the next one up.
-inline constexpr uint32_t kCwsrVccLoSlot = kCwsrAliasedSgprEnd - 2; // 106
-/// @brief Slot holding FLAT_SCRATCH_LO; FLAT_SCRATCH_HI is the next one up.
-inline constexpr uint32_t kCwsrFlatScratchLoSlot = kCwsrAliasedSgprEnd - 6; // 102
 static_assert(kCwsrAliasedSgprEnd <= kCwsrSavedSgprSlots,
               "aliased slots must land inside the saved SGPR block");
 
-/// @brief Whether a saved SGPR slot is occupied by an aliased register.
-///
-/// @details gfx9.4 stores FLAT_SCRATCH and VCC in slots near the top of the
-/// block. gfx12.5 stores FLAT_SCRATCH in its HWREG block, retains the VCC
-/// aliases, and reserves the final 16 scalar slots for TTMP0-15. Every path
-/// that walks the block by slot index must consult this so a round trip does
-/// not read an alias or TTMP back as an SGPR. On gfx9.4 the aliases are not a
-/// contiguous top range: s104 and s105 sit between FLAT_SCRATCH and VCC and
-/// are ordinary registers, so a `slot < 102` bound is not equivalent.
-/// @param slot Index into the saved SGPR block.
-/// @returns True if the slot holds an alias rather than SGPR @p slot.
-constexpr bool cwsr_sgpr_slot_is_aliased(uint32_t slot, rj_code_arch_t arch) {
+/// One past the final special-register slot in the saved block.
+constexpr uint32_t cwsr_sgpr_alias_end(rj_code_arch_t arch, uint32_t sgpr_count) {
+  return arch == ROCJITSU_CODE_ARCH_CDNA3 ? cdna3::sgpr_alias_end(sgpr_count) : kCwsrAliasedSgprEnd;
+}
+
+/// VCC and FLAT_SCRATCH are marshalled from their own wave fields. gfx12.5
+/// stores FLAT_SCRATCH in HWREGs and uses the last 16 saved scalars for TTMP.
+constexpr bool cwsr_sgpr_slot_is_aliased(uint32_t slot, rj_code_arch_t arch,
+                                         uint32_t sgpr_count = kCwsrSavedSgprSlots) {
+  const uint32_t end = cwsr_sgpr_alias_end(arch, sgpr_count);
+  const uint32_t vcc = cdna3::vcc_base(end);
+  if (slot == vcc || slot == vcc + 1)
+    return true;
   if (cwsr_layout_kind(arch) == CwsrLayoutKind::Gfx12_5)
-    return slot == kCwsrVccLoSlot || slot == kCwsrVccLoSlot + 1 ||
-           slot >= kCwsrGfx1250SavedSgprSlots - 16;
-  return slot == kCwsrVccLoSlot || slot == kCwsrVccLoSlot + 1 || slot == kCwsrFlatScratchLoSlot ||
-         slot == kCwsrFlatScratchLoSlot + 1;
+    return slot >= kCwsrGfx1250SavedSgprSlots - 16;
+  const uint32_t flat_scratch = cdna3::flat_scratch_base(end);
+  return slot == flat_scratch || slot == flat_scratch + 1;
 }
 
 /// @brief The saved architectural state of one stopped wave.

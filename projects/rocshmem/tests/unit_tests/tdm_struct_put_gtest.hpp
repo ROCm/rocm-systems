@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: MIT
  *****************************************************************************/
 
-// Phase 2: structured-data put via ipcCopy_wg / memcpy_wg_tdm.
+// Phase 2: structured-data put via ipcCopy_wg / memcpy_wg_lds_stage.
 // Transfers TdmTestRecord arrays and validates field-by-field.
 
 #ifndef ROCSHMEM_TDM_STRUCT_PUT_GTEST_HPP
@@ -79,7 +79,7 @@ void tdm_struct_put_kernel(IpcImplT* ipc_impl, const TdmTestRecord* src,
   const size_t bytes = count * sizeof(TdmTestRecord);
 
   extern __shared__ uint8_t tdm_lds[];
-  rocshmem_set_tdm_lds(tdm_lds, rocshmem_query_tdm_lds_bytes());
+  rocshmem_set_lds_stage(tdm_lds, rocshmem_query_lds_stage_bytes());
 
   ipc_impl->template ipcCopy_wg<MemcpyKind::PutBlocking>(
       remote_dst, const_cast<TdmTestRecord*>(src), bytes, /*local_pe=*/0);
@@ -113,7 +113,7 @@ class TdmStructPutFixture : public ::testing::TestWithParam<size_t> {
     // Force a known tile size so the parameterized sizes land where intended.
     uint32_t tile_bytes = TEST_TDM_TILE_BYTES;
     CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &tile_bytes, sizeof(tile_bytes),
-                                offsetof(constmem_t, tdm_tile_bytes)));
+                                offsetof(constmem_t, lds_stage_tile_bytes)));
     // Force SDMA off: this fixture never sets up an SDMA channel.
     size_t sdma_threshold = SDMA_THRESHOLD_DISABLED;
     CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &sdma_threshold, sizeof(sdma_threshold),
@@ -167,7 +167,7 @@ class TdmStructPutFixture : public ::testing::TestWithParam<size_t> {
 
     const dim3 block(WF_SIZE);
     // Backend-free: compute LDS size from the forced tile size directly.
-    const size_t smem = tdm::lds_bytes_for_tile(TEST_TDM_TILE_BYTES);
+    const size_t smem = lds_stage::lds_bytes_for_tile(TEST_TDM_TILE_BYTES);
 
     if (my_pe == 0) {
       auto* src  = reinterpret_cast<const TdmTestRecord*>(ipc_impl_.ipc_bases[0]);

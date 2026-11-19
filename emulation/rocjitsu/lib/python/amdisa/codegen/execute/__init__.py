@@ -108,15 +108,11 @@ def _register_handlers() -> None:
         gen_vector_permlane_family,
         gen_vector_permlane_idx_gen,
         gen_vector_cvt_pk,
-        gen_vector_cvt_scale,
         gen_cvt_fp8,
-        gen_cvt_scalef32,
     )
     from amdisa.codegen.execute.packed import (
         gen_pk_binop,
         gen_pk_ternary,
-        gen_pk_fmac_vop2,
-        gen_pk_fmac_vop3,
         gen_pk_binop_f32,
         gen_pk_ternary_f32,
         gen_pk_ternary_f64,
@@ -124,9 +120,6 @@ def _register_handlers() -> None:
         gen_pk_binop_f64,
         gen_pk_lshl_add_u64,
         gen_pk_mov_b32,
-        gen_mad_mix_f32,
-        gen_mad_mix_lo_hi,
-        gen_mad_mix_bf16,
         gen_dot2,
         gen_dot2_true16,
         gen_dot4,
@@ -197,14 +190,17 @@ def _register_handlers() -> None:
         c.supports_dpp8,
         c.supports_sdwa,
         c.profile.dpp_bound_ctrl_applies_to_inactive_sources,
-        use_rj_arith=c.arch_name in ('rdna3', 'rdna4'),
+        use_rj_arith=c.arch_name in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'),
         is_vop3=c.is_vop3,
+        stage_after_destination=c.arch_name == 'rdna3_5',
+        # Preserve legacy CDNA bit-move modifiers; RDNA treats signs as FP32.
+        apply_dpp_source_modifiers=c.arch_name in ('rdna3', 'rdna4'),
     )
     DISPATCH['vector_swaprel'] = lambda c: gen_vector_swaprel(
         c.dst_ops,
         c.src_ops,
         c.profile.uses_vgpr_msb_indexing,
-        use_rj_arith=c.arch_name in ('rdna3', 'rdna4'),
+        use_rj_arith=c.arch_name in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'),
     )
     DISPATCH['vector_sat_pack'] = lambda c: gen_vector_sat_pack(
         c.dst_ops,
@@ -224,6 +220,7 @@ def _register_handlers() -> None:
         c.op,
         c.profile.uses_vgpr_msb_indexing,
         c.is_vop3 and c.inst.name in c.profile.integer_clamp_dtypes,
+        c.arch_name == 'rdna3_5',
     )
     DISPATCH['vector_trig_preop'] = lambda c: gen_vector_trig_preop(
         c.dst_ops, c.src_ops, c.is_vop3, c.has_abs
@@ -312,15 +309,16 @@ def _register_handlers() -> None:
         ),
         arch_name=c.arch_name,
     )
-    DISPATCH['vector_cvt_scale'] = lambda c: gen_vector_cvt_scale(
-        c.dst_ops, c.src_ops, c.cls, c.op, c.arch_name
-    )
     DISPATCH['cvt_fp8'] = lambda c: gen_cvt_fp8(c)
-    DISPATCH['cvt_scalef32'] = lambda c: gen_cvt_scalef32(c)
 
     # Packed
     DISPATCH['pk_binop'] = lambda c: gen_pk_binop(
-        c.dst_ops, c.src_ops, c.op, c.dtype, opsel_exprs=c.opsel_exprs
+        c.dst_ops,
+        c.src_ops,
+        c.op,
+        c.dtype,
+        opsel_exprs=c.opsel_exprs,
+        multiply_clamp=c.profile.packed_mul_lo_u16_clamp,
     )
     DISPATCH['pk_ternary'] = lambda c: gen_pk_ternary(
         c.dst_ops,
@@ -330,11 +328,6 @@ def _register_handlers() -> None:
         op_sel_hi_2_expr=c.op_sel_hi_2_expr,
         opsel_exprs=c.opsel_exprs,
         integer_clamp=c.inst.name in c.profile.integer_clamp_dtypes,
-    )
-    DISPATCH['pk_fmac_vop2'] = lambda c: (
-        gen_pk_fmac_vop3(c.dst_ops, c.src_ops)
-        if c.enc_name.upper() == 'ENC_VOP3'
-        else gen_pk_fmac_vop2(c.dst_ops, c.src_ops)
     )
     DISPATCH['pk_binop_f32'] = lambda c: gen_pk_binop_f32(
         c.dst_ops,
@@ -362,56 +355,7 @@ def _register_handlers() -> None:
         c.src_ops,
         opsel_exprs=c.opsel_exprs,
     )
-    DISPATCH['mad_mix_f32'] = lambda c: gen_mad_mix_f32(
-        c.dst_ops,
-        c.src_ops,
-        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
-        opsel_exprs=c.opsel_exprs,
-        use_cdna5_helpers=c.arch_name == 'cdna5',
-        fused_result=c.arch_name.startswith('rdna') or c.arch_name == 'cdna5',
-    )
-    DISPATCH['mad_mixlo_f16'] = lambda c: gen_mad_mix_lo_hi(
-        c.dst_ops,
-        c.src_ops,
-        is_lo=True,
-        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
-        opsel_exprs=c.opsel_exprs,
-        use_cdna5_helpers=c.arch_name == 'cdna5',
-        fused_result=c.arch_name.startswith('rdna') or c.arch_name == 'cdna5',
-    )
-    DISPATCH['mad_mixhi_f16'] = lambda c: gen_mad_mix_lo_hi(
-        c.dst_ops,
-        c.src_ops,
-        is_lo=False,
-        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
-        opsel_exprs=c.opsel_exprs,
-        use_cdna5_helpers=c.arch_name == 'cdna5',
-        fused_result=c.arch_name.startswith('rdna') or c.arch_name == 'cdna5',
-    )
-    DISPATCH['mad_mix_f32_bf16'] = lambda c: gen_mad_mix_bf16(
-        c.dst_ops,
-        c.src_ops,
-        result='f32',
-        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
-        opsel_exprs=c.opsel_exprs,
-        use_cdna5_helpers=c.arch_name == 'cdna5',
-    )
-    DISPATCH['mad_mixlo_bf16'] = lambda c: gen_mad_mix_bf16(
-        c.dst_ops,
-        c.src_ops,
-        result='lo',
-        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
-        opsel_exprs=c.opsel_exprs,
-        use_cdna5_helpers=c.arch_name == 'cdna5',
-    )
-    DISPATCH['mad_mixhi_bf16'] = lambda c: gen_mad_mix_bf16(
-        c.dst_ops,
-        c.src_ops,
-        result='hi',
-        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
-        opsel_exprs=c.opsel_exprs,
-        use_cdna5_helpers=c.arch_name == 'cdna5',
-    )
+    # MIX arithmetic is emitted by rj_arith_float.gen_mixed_fma.
     # DOT: every semantic class routes here, so the generator keeps no
     # dot2_/dot4_/dot8_ fallback. test_dot_dispatch_covers_every_semantic_class
     # fails if a new class arrives without an entry.

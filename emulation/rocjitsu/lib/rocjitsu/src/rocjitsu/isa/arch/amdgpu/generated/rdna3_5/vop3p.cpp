@@ -38,6 +38,9 @@ VPkMadI16Vop3p::VPkMadI16Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
 }
 
 namespace detail {
@@ -47,6 +50,9 @@ DecodeResult decodeVPkMadI16Vop3p(const MachineInst *opcode, const DecodeErrorEm
       "v_pk_mad_i16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3p::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_PK_MAD_I16 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0))
       [[unlikely]]
@@ -74,6 +80,8 @@ VPkMulLoU16Vop3p::VPkMulLoU16Vop3p(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -111,6 +119,8 @@ VPkAddI16Vop3p::VPkAddI16Vop3p(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -147,6 +157,8 @@ VPkSubI16Vop3p::VPkSubI16Vop3p(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -183,6 +195,8 @@ VPkLshlrevB16Vop3p::VPkLshlrevB16Vop3p(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -220,6 +234,8 @@ VPkLshrrevB16Vop3p::VPkLshrrevB16Vop3p(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -257,6 +273,8 @@ VPkAshrrevI16Vop3p::VPkAshrrevI16Vop3p(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -294,6 +312,8 @@ VPkMaxI16Vop3p::VPkMaxI16Vop3p(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -330,6 +350,8 @@ VPkMinI16Vop3p::VPkMinI16Vop3p(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -372,6 +394,9 @@ VPkMadU16Vop3p::VPkMadU16Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
 }
 
 namespace detail {
@@ -381,6 +406,9 @@ DecodeResult decodeVPkMadU16Vop3p(const MachineInst *opcode, const DecodeErrorEm
       "v_pk_mad_u16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3p::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_PK_MAD_U16 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0))
       [[unlikely]]
@@ -408,6 +436,8 @@ VPkAddU16Vop3p::VPkAddU16Vop3p(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -444,6 +474,8 @@ VPkSubU16Vop3p::VPkSubU16Vop3p(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -480,6 +512,8 @@ VPkMaxU16Vop3p::VPkMaxU16Vop3p(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -516,6 +550,8 @@ VPkMinU16Vop3p::VPkMinU16Vop3p(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -558,6 +594,9 @@ VPkFmaF16Vop3p::VPkFmaF16Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
 }
 
 namespace detail {
@@ -567,6 +606,9 @@ DecodeResult decodeVPkFmaF16Vop3p(const MachineInst *opcode, const DecodeErrorEm
       "v_pk_fma_f16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3p::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_PK_FMA_F16 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0))
       [[unlikely]]
@@ -594,6 +636,8 @@ VPkAddF16Vop3p::VPkAddF16Vop3p(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -630,6 +674,8 @@ VPkMulF16Vop3p::VPkMulF16Vop3p(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -666,6 +712,8 @@ VPkMinF16Vop3p::VPkMinF16Vop3p(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -702,6 +750,8 @@ VPkMaxF16Vop3p::VPkMaxF16Vop3p(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -761,6 +811,9 @@ VDot2F32F16Vop3p::VDot2F32F16Vop3p(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
 }
 
 namespace detail {
@@ -771,6 +824,9 @@ DecodeResult decodeVDot2F32F16Vop3p(const MachineInst *opcode,
       "v_dot2_f32_f16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3p::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_DOT2_F32_F16 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3pVopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -805,6 +861,9 @@ VDot4I32Iu8Vop3p::VDot4I32Iu8Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   if ((inst_.neg & 4u) || inst_.neg_hi)
     flags_ |= INVALID_IU_MODIFIERS;
 }
@@ -817,6 +876,9 @@ DecodeResult decodeVDot4I32Iu8Vop3p(const MachineInst *opcode,
       "v_dot4_i32_iu8", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3p::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_DOT4_I32_IU8 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0))
       [[unlikely]]
@@ -850,6 +912,9 @@ VDot4U32U8Vop3p::VDot4U32U8Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
 }
 
 namespace detail {
@@ -860,6 +925,9 @@ DecodeResult decodeVDot4U32U8Vop3p(const MachineInst *opcode,
       "v_dot4_u32_u8", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3p::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_DOT4_U32_U8 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0))
       [[unlikely]]
@@ -893,6 +961,9 @@ VDot8I32Iu4Vop3p::VDot8I32Iu4Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   if ((inst_.neg & 4u) || inst_.neg_hi)
     flags_ |= INVALID_IU_MODIFIERS;
 }
@@ -905,6 +976,9 @@ DecodeResult decodeVDot8I32Iu4Vop3p(const MachineInst *opcode,
       "v_dot8_i32_iu4", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3p::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_DOT8_I32_IU4 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0))
       [[unlikely]]
@@ -938,6 +1012,9 @@ VDot8U32U4Vop3p::VDot8U32U4Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
 }
 
 namespace detail {
@@ -948,6 +1025,9 @@ DecodeResult decodeVDot8U32U4Vop3p(const MachineInst *opcode,
       "v_dot8_u32_u4", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3p::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_DOT8_U32_U4 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0))
       [[unlikely]]
@@ -998,6 +1078,9 @@ VDot2F32Bf16Vop3p::VDot2F32Bf16Vop3p(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
 }
 
 namespace detail {
@@ -1008,6 +1091,9 @@ DecodeResult decodeVDot2F32Bf16Vop3p(const MachineInst *opcode,
       "v_dot2_f32_bf16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3p::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_DOT2_F32_BF16 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3pVopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -1060,6 +1146,9 @@ VFmaMixF32Vop3p::VFmaMixF32Vop3p(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   src0.set_register_byte_mask(
       src0.decoded_vgpr() && (inst_.op_sel_hi & 1) ? ((inst_.op_sel & 1) ? 0xc : 0x3) : 0xf);
   src1.set_register_byte_mask(
@@ -1076,6 +1165,9 @@ DecodeResult decodeVFmaMixF32Vop3p(const MachineInst *opcode,
       "v_fma_mix_f32", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3p::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_FMA_MIX_F32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3pVopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -1129,6 +1221,9 @@ VFmaMixloF16Vop3p::VFmaMixloF16Vop3p(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   src0.set_register_byte_mask(
       src0.decoded_vgpr() && (inst_.op_sel_hi & 1) ? ((inst_.op_sel & 1) ? 0xc : 0x3) : 0xf);
   src1.set_register_byte_mask(
@@ -1146,6 +1241,9 @@ DecodeResult decodeVFmaMixloF16Vop3p(const MachineInst *opcode,
       "v_fma_mixlo_f16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3p::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_FMA_MIXLO_F16 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3pVopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -1205,6 +1303,9 @@ VFmaMixhiF16Vop3p::VFmaMixhiF16Vop3p(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   src0.set_register_byte_mask(
       src0.decoded_vgpr() && (inst_.op_sel_hi & 1) ? ((inst_.op_sel & 1) ? 0xc : 0x3) : 0xf);
   src1.set_register_byte_mask(
@@ -1222,6 +1323,9 @@ DecodeResult decodeVFmaMixhiF16Vop3p(const MachineInst *opcode,
       "v_fma_mixhi_f16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3p::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_FMA_MIXHI_F16 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3pVopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -1251,6 +1355,9 @@ VWmmaF3216x16x16F16Vop3p::VWmmaF3216x16x16F16Vop3p(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
@@ -1263,6 +1370,9 @@ DecodeResult decodeVWmmaF3216x16x16F16Vop3p(const MachineInst *opcode,
       "v_wmma_f32_16x16x16_f16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3p::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 256, op->src1, 256, op->src2, 256)) [[unlikely]]
+    return emit_error.emit() << "V_WMMA_F32_16X16X16_F16 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0))
       [[unlikely]]
@@ -1285,6 +1395,9 @@ VWmmaF3216x16x16Bf16Vop3p::VWmmaF3216x16x16Bf16Vop3p(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
@@ -1297,6 +1410,9 @@ DecodeResult decodeVWmmaF3216x16x16Bf16Vop3p(const MachineInst *opcode,
       "v_wmma_f32_16x16x16_bf16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3p::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 256, op->src1, 256, op->src2, 256)) [[unlikely]]
+    return emit_error.emit() << "V_WMMA_F32_16X16X16_BF16 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0))
       [[unlikely]]
@@ -1319,6 +1435,9 @@ VWmmaF1616x16x16F16Vop3p::VWmmaF1616x16x16F16Vop3p(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
@@ -1331,6 +1450,9 @@ DecodeResult decodeVWmmaF1616x16x16F16Vop3p(const MachineInst *opcode,
       "v_wmma_f16_16x16x16_f16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3p::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 256, op->src1, 256, op->src2, 256)) [[unlikely]]
+    return emit_error.emit() << "V_WMMA_F16_16X16X16_F16 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0))
       [[unlikely]]
@@ -1353,6 +1475,9 @@ VWmmaBf1616x16x16Bf16Vop3p::VWmmaBf1616x16x16Bf16Vop3p(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MATRIX_REGISTER_ACCESSES;
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
@@ -1365,6 +1490,9 @@ DecodeResult decodeVWmmaBf1616x16x16Bf16Vop3p(const MachineInst *opcode,
       "v_wmma_bf16_16x16x16_bf16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3p::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 256, op->src1, 256, op->src2, 256)) [[unlikely]]
+    return emit_error.emit() << "V_WMMA_BF16_16X16X16_BF16 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0))
       [[unlikely]]
@@ -1387,6 +1515,9 @@ VWmmaI3216x16x16Iu8Vop3p::VWmmaI3216x16x16Iu8Vop3p(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   if ((inst_.neg & 4u) || inst_.neg_hi)
     flags_ |= INVALID_IU_MODIFIERS;
   flags_ |= MATRIX_REGISTER_ACCESSES;
@@ -1401,6 +1532,9 @@ DecodeResult decodeVWmmaI3216x16x16Iu8Vop3p(const MachineInst *opcode,
       "v_wmma_i32_16x16x16_iu8", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3p::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 128, op->src1, 128, op->src2, 256)) [[unlikely]]
+    return emit_error.emit() << "V_WMMA_I32_16X16X16_IU8 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0))
       [[unlikely]]
@@ -1423,6 +1557,9 @@ VWmmaI3216x16x16Iu4Vop3p::VWmmaI3216x16x16Iu4Vop3p(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   if ((inst_.neg & 4u) || inst_.neg_hi)
     flags_ |= INVALID_IU_MODIFIERS;
   flags_ |= MATRIX_REGISTER_ACCESSES;
@@ -1437,6 +1574,9 @@ DecodeResult decodeVWmmaI3216x16x16Iu4Vop3p(const MachineInst *opcode,
       "v_wmma_i32_16x16x16_iu4", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3p::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 64, op->src1, 64, op->src2, 256)) [[unlikely]]
+    return emit_error.emit() << "V_WMMA_I32_16X16X16_IU4 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0))
       [[unlikely]]

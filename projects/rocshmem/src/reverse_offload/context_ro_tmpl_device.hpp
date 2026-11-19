@@ -32,6 +32,8 @@
 #include "queue_proxy.hpp"
 #include "ro_net_team.hpp"
 #include "log.hpp"
+#include <hip/hip_fp16.h>
+#include <hip/hip_bf16.h>
 
 namespace rocshmem {
 
@@ -55,12 +57,12 @@ struct GetROType<signed char> {
 
 template <>
 struct GetROType<unsigned short> {
-  static constexpr ro_net_types Type{RO_NET_SHORT};
+  static constexpr ro_net_types Type{RO_NET_UNSIGNED_SHORT};
 };
 
 template <>
 struct GetROType<unsigned int> {
-  static constexpr ro_net_types Type{RO_NET_INT};
+  static constexpr ro_net_types Type{RO_NET_UNSIGNED_INT};
 };
 
 template <>
@@ -70,7 +72,7 @@ struct GetROType<unsigned long> {
 
 template <>
 struct GetROType<unsigned long long> {
-  static constexpr ro_net_types Type{RO_NET_LONG_LONG};
+  static constexpr ro_net_types Type{RO_NET_UNSIGNED_LONG_LONG};
 };
 
 template <>
@@ -106,6 +108,16 @@ struct GetROType<long long> {
 template <>
 struct GetROType<long double> {
   static constexpr ro_net_types Type{RO_NET_LONG_DOUBLE};
+};
+
+template <>
+struct GetROType<__half> {
+  static constexpr ro_net_types Type{RO_NET_HALF};
+};
+
+template <>
+struct GetROType<__hip_bfloat16> {
+  static constexpr ro_net_types Type{RO_NET_BFLOAT16};
 };
 
 /******************************************************************************

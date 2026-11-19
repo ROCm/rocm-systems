@@ -7,8 +7,8 @@
 // Lane selection and inactive-source rules follow rocjitsu's RDNA4 VOP3 models.
 
 #include "register/permlane.h"
-#include "common/internal.h"
-#include "rj_arith/rj_arith.h"
+#include "common/validation.h"
+#include "rj_arith/detail/rj_arith_register.h"
 
 #include <stdint.h>
 
@@ -77,6 +77,105 @@ int run_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *cons
     if (int error = run<Cross, Var>(flags, uint32_t(exec_mask >> (half * 32)), mode, &dest, &source,
                                     &indices, lo, hi)) {
       return error;
+    }
+  }
+  return RJ_ARITH_SUCCESS;
+}
+
+// Preserve inherited group normalization and uint32 selector arithmetic. Sources
+// ignore EXEC, out-of-group indices retain the same lane, and writes may alias the source.
+template <int Lanes>
+int group_permutation(rocjitsu::arith::GroupPermutation op, uint64_t flags, uint64_t exec_mask,
+                      uint64_t mode, uint32_t *const *d, const uint32_t *const *a,
+                      uint32_t selector, uint32_t width) {
+  if (mode >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  if (int error = rocjitsu::arith::validate(flags, uint32_t(mode))) {
+    return error;
+  }
+  if (!exec_mask) {
+    return RJ_ARITH_SUCCESS;
+  }
+  if (!width || (width & (width - 1)) || width > Lanes) {
+    width = Lanes;
+  }
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    rocjitsu::arith::group_permutation_x86_64_v4(op, Lanes, exec_mask, d[0], a[0], selector, width);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+    rocjitsu::arith::group_permutation_x86_64_v3(op, Lanes, exec_mask, d[0], a[0], selector, width);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+  uint32_t result[Lanes];
+  for (int lane = 0; lane < Lanes; ++lane) {
+    uint32_t offset = uint32_t(lane) & (width - 1);
+    uint32_t base = uint32_t(lane) - offset, source = lane;
+    using Op = rocjitsu::arith::GroupPermutation;
+    switch (op) {
+    case Op::Bcast:
+      source = base + (selector & (width - 1));
+      break;
+    case Op::Up:
+      source = selector <= offset ? lane - selector : lane;
+      break;
+    case Op::Down:
+      source = selector < width - offset ? lane + selector : lane;
+      break;
+    case Op::Xor:
+      // XOR may read an earlier group; only the upper group boundary is a limit.
+      source = selector < Lanes && (uint32_t(lane) ^ selector) < base + width
+                   ? uint32_t(lane) ^ selector
+                   : uint32_t(lane);
+      break;
+    }
+    result[lane] = a[0][source];
+  }
+  for (int lane = 0; lane < Lanes; ++lane) {
+    if ((exec_mask >> lane) & 1) {
+      d[0][lane] = result[lane];
+    }
+  }
+  return RJ_ARITH_SUCCESS;
+}
+
+// Generate byte offsets within the selected group from the low six input bits.
+template <int Lanes>
+int index_generation(uint64_t flags, uint64_t exec_mask, uint64_t controls, uint32_t *const *d,
+                     const uint32_t *const *a, uint32_t group_width) {
+  using namespace rocjitsu::arith;
+  flags = resolve_compatibility(flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = validate(flags, controls)) {
+    return error;
+  }
+  if (!exec_mask) {
+    return RJ_ARITH_SUCCESS;
+  }
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    permlane_index_x86_64_v4(Lanes, exec_mask, d[0], a[0], group_width);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+    permlane_index_x86_64_v3(Lanes, exec_mask, d[0], a[0], group_width);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+  uint32_t result[Lanes];
+  for (int lane = 0; lane < Lanes; ++lane) {
+    result[lane] = ((uint32_t(lane) & ~(group_width - 1)) | (a[0][lane] & 63 & (group_width - 1)))
+                   << 2;
+  }
+  for (int lane = 0; lane < Lanes; ++lane) {
+    if ((exec_mask >> lane) & 1) {
+      d[0][lane] = result[lane];
     }
   }
   return RJ_ARITH_SUCCESS;
@@ -250,4 +349,124 @@ int rj_arith_v_permlane64_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t i
     }
   }
   return RJ_ARITH_SUCCESS;
+}
+
+// Route within lane groups, preserving inactive destinations and source aliases.
+int rj_arith_v_permlane_bcast_b32_w32(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, uint32_t selector,
+                                      uint32_t group_width) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return group_permutation<32>(rocjitsu::arith::GroupPermutation::Bcast, flags, exec_mask,
+                               instruction_flags, d, a, selector, group_width);
+}
+
+// Route within lane groups, preserving inactive destinations and source aliases.
+int rj_arith_v_permlane_bcast_b32_w64(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, uint32_t selector,
+                                      uint32_t group_width) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return group_permutation<64>(rocjitsu::arith::GroupPermutation::Bcast, flags, exec_mask,
+                               instruction_flags, d, a, selector, group_width);
+}
+
+// Route within lane groups, preserving inactive destinations and source aliases.
+int rj_arith_v_permlane_up_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a, uint32_t selector,
+                                   uint32_t group_width) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return group_permutation<32>(rocjitsu::arith::GroupPermutation::Up, flags, exec_mask,
+                               instruction_flags, d, a, selector, group_width);
+}
+
+// Route within lane groups, preserving inactive destinations and source aliases.
+int rj_arith_v_permlane_up_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a, uint32_t selector,
+                                   uint32_t group_width) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return group_permutation<64>(rocjitsu::arith::GroupPermutation::Up, flags, exec_mask,
+                               instruction_flags, d, a, selector, group_width);
+}
+
+// Route within lane groups, preserving inactive destinations and source aliases.
+int rj_arith_v_permlane_down_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     uint32_t selector, uint32_t group_width) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return group_permutation<32>(rocjitsu::arith::GroupPermutation::Down, flags, exec_mask,
+                               instruction_flags, d, a, selector, group_width);
+}
+
+// Route within lane groups, preserving inactive destinations and source aliases.
+int rj_arith_v_permlane_down_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     uint32_t selector, uint32_t group_width) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return group_permutation<64>(rocjitsu::arith::GroupPermutation::Down, flags, exec_mask,
+                               instruction_flags, d, a, selector, group_width);
+}
+
+// Route within lane groups, preserving inactive destinations and source aliases.
+int rj_arith_v_permlane_xor_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a, uint32_t selector,
+                                    uint32_t group_width) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return group_permutation<32>(rocjitsu::arith::GroupPermutation::Xor, flags, exec_mask,
+                               instruction_flags, d, a, selector, group_width);
+}
+
+// Route within lane groups, preserving inactive destinations and source aliases.
+int rj_arith_v_permlane_xor_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a, uint32_t selector,
+                                    uint32_t group_width) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return group_permutation<64>(rocjitsu::arith::GroupPermutation::Xor, flags, exec_mask,
+                               instruction_flags, d, a, selector, group_width);
+}
+
+// Generate indices for active lanes, allowing destination/source overlap.
+int rj_arith_v_permlane_idx_gen_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t controls,
+                                        uint32_t *const *d, const uint32_t *const *a,
+                                        uint32_t group_width) {
+  return index_generation<32>(flags, exec_mask, controls, d, a, group_width);
+}
+
+// Generate indices for active lanes, allowing destination/source overlap.
+int rj_arith_v_permlane_idx_gen_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t controls,
+                                        uint32_t *const *d, const uint32_t *const *a,
+                                        uint32_t group_width) {
+  return index_generation<64>(flags, exec_mask, controls, d, a, group_width);
 }

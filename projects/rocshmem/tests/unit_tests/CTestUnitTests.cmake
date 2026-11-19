@@ -181,9 +181,11 @@ function(register_all_unit_tests)
     set(TEST_WITH_TWO_PES "IPCImplSimpleCoarseTestFixture/*:IPCImplSimpleFineTestFixture/*:IPCImplTiledFineTestFixture/*:DegenerateTiledFine.*")
     set(TEST_WITH_TWO_PES "${TEST_WITH_TWO_PES}:SdmaSimpleCoarse/*:SdmaSimpleFine/*:SdmaTiledFine/*")
 
-    # TDM tests drive PE 0/PE 1 roles directly and require exactly 2 ranks
+    # LDS-staged copy tests drive PE 0/PE 1 roles directly and require exactly
+    # 2 ranks. They exercise the real library path (memcpy_wg_lds_stage), so
+    # they cover both the TDM and the async (non-TDM) backend.
     set(TDM_TEST_FILTER "TdmRawPut/*:TdmRawGet/*:TdmWavePut/*:TdmWaveGet/*:TdmStructPut/*")
-    if(USE_IPC AND USE_TDM)
+    if(USE_IPC AND (USE_TDM OR USE_LDS_STAGE))
         set(TEST_WITH_TWO_PES "${TEST_WITH_TWO_PES}:${TDM_TEST_FILTER}")
     endif()
 
@@ -197,7 +199,7 @@ function(register_all_unit_tests)
         LABELS "ALL;IPC;SDMA"
     )
 
-    if(USE_IPC AND USE_TDM)
+    if(USE_IPC AND (USE_TDM OR USE_LDS_STAGE))
         add_rocshmem_unit_test(
             NAME tdm_tests
             RANKS 2
