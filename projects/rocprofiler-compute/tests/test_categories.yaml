@@ -20,6 +20,7 @@ test_categories:
       - test_memory_chart_preview
       - test_schema_visualizer
       - test_validate_metric_library
+      - test_analysis_views
       - test_parser
       - test_argparser
       - test_utils_common
@@ -146,6 +147,7 @@ test_categories:
       - test_memory_chart_preview
       - test_schema_visualizer
       - test_validate_metric_library
+      - test_analysis_views
       - test_parser
       - test_argparser
       - test_analyze_commands
@@ -296,6 +298,7 @@ test_categories:
       - test_memory_chart_preview
       - test_schema_visualizer
       - test_validate_metric_library
+      - test_analysis_views
       - test_parser
       - test_argparser
       - test_analyze_commands
@@ -446,6 +449,7 @@ test_categories:
       - test_memory_chart_preview
       - test_schema_visualizer
       - test_validate_metric_library
+      - test_analysis_views
       - test_parser
       - test_argparser
       - test_analyze_commands
