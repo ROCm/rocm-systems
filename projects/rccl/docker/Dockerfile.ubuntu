@@ -80,7 +80,7 @@ RUN wget https://github.com/openucx/ucx/releases/download/v1.16.0/ucx-1.16.0.tar
     && cd ucx \
     && mkdir build \
     && cd build \
-    && ../configure --prefix=${UCX_INSTALL_PREFIX} --with-rocm=${ROCM_PATH} \
+    && ../configure --prefix=${UCX_INSTALL_PREFIX} --without-rocm \
     && make -j16 install \
     && cd ../.. \
     && rm -rf ucx ucx-1.16.0.tar.gz
@@ -133,3 +133,7 @@ ENV OMPI_ALLOW_RUN_AS_ROOT=1
 ENV OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
 ENV NCCL_DEBUG=VERSION
 
+
+# Build/development image that runs as root by design.
+# trivy:ignore:DS-0002
+USER root

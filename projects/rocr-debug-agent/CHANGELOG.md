@@ -3,6 +3,29 @@
 Full documentation for the ROCR Debug Agent library is available at
 [rocm.docs.amd.com/rocr_debug_agent](https://rocm.docs.amd.com/projects/rocr_debug_agent/en/latest/).
 
+## ROCR Debug Agent 2.2.2 for ROCm 10.3
+
+### Changed
+- Invalid or missing-argument command-line options now print a specific error
+  message followed by the usage message, and exit with a non-zero status
+  instead of aborting.  This changes the exit behavior from `SIGABRT` to a
+  regular non-zero exit status, which may affect scripts or tools that check
+  the process exit status.
+- If the file given with `-o` (`--output`) cannot be opened, the agent now
+  prints an error message and exits with a non-zero status instead of
+  aborting with `SIGABRT`.
+- `-h` (`--help`) now prints the usage message and exits with status 0 instead
+  of aborting the process with `SIGABRT`.
+
+## ROCR Debug Agent 2.2.1 for ROCm 10.3
+
+- After printing the waves on `SIGQUIT`, the agent resumes them and the
+  program continues.  Previously the waves stayed stopped and the program
+  hung after the dump.
+- The agent can be loaded with `LD_PRELOAD` as well as `HSA_TOOLS_LIB`, and no
+  longer links `libhsa-runtime64`.  Without `HSA_TOOLS_LIB`, the code object
+  list is read when waves are printed, as with `--lazy`.
+
 ## ROCR Debug Agent 2.2.0  for ROCm 10.1
 
 - The `--output` and `--save-code-objects` options now support '%' format

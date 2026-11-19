@@ -45,9 +45,12 @@ endif()
 
 option(PROFILE "Enable statistics and timing support" OFF)
 option(USE_RO "Enable RO conduit" OFF)
+option(USE_HOST_VERBS "Enable host-side verbs networking layer (src/net)" OFF)
 option(USE_IPC "Enable IPC support (using HIP)" ON)
 option(USE_GDA "Enable GDA conduit" OFF)
-option(USE_SDMA "Enable SDMA transport (MI300X+)." OFF)
+option(USE_SDMA "Enable SDMA transport (MI300X+). Implied by USE_IPC." ${USE_IPC})
+option(USE_LDS_STAGE "Enable LDS-staged async IPC copy on gfx1250, using the portable async global<->LDS backend" OFF)
+option(USE_TDM "Enable TDM (Tensor Data Mover) specifically for LDS-staged IPC transfers on gfx1250." OFF)
 option(USE_THREADS "Enable workgroup threads to share network queues" OFF)
 option(USE_WF_COAL "Enable wavefront message coalescing" OFF)
 option(USE_FUNC_CALL "Force compiler to use function calls on library API" OFF)
@@ -62,6 +65,34 @@ option(BUILD_EXAMPLES "Build the examples" OFF)
 option(BUILD_UNIT_TESTS "Build the unit tests (Requires MPI)" OFF)
 option(BUILD_TESTS_ONLY "Build only tests. Used to link against rocSHMEM in a ROCm Release" OFF)
 option(BUILD_TOOLS "Build binary tools (e.g., rocshmem_info)" ON)
+
+# Limit this control to final native executable device links. The HIP-wide
+# HIP_CLANG_NUM_PARALLEL_JOBS control also changes compilation options.
+set(ROCSHMEM_NATIVE_LINK_JOBS "31" CACHE STRING
+    "Number of parallel jobs for final executable device links (maps to --offload-jobs)")
+if(NOT ROCSHMEM_NATIVE_LINK_JOBS MATCHES "^[1-9][0-9]*$")
+  message(FATAL_ERROR "ROCSHMEM_NATIVE_LINK_JOBS must be a positive integer")
+endif()
+
+function(_rocshmem_set_native_link_jobs target)
+  if(NOT ROCSHMEM_NATIVE_LINK_JOBS GREATER 1)
+    return()
+  endif()
+  if(NOT HIP_CLANG_SUPPORTS_PARALLEL_JOBS)
+    message(WARNING
+      "HIP --offload-jobs is unavailable; linking ${target} with one device-link job")
+    return()
+  endif()
+  if(DEFINED HIP_CLANG_NUM_PARALLEL_JOBS AND HIP_CLANG_NUM_PARALLEL_JOBS GREATER 1)
+    message(WARNING
+      "HIP_CLANG_NUM_PARALLEL_JOBS already sets --offload-jobs; "
+      "skipping ROCSHMEM_NATIVE_LINK_JOBS for ${target}")
+    return()
+  endif()
+  target_link_options(${target} PRIVATE
+    "--offload-jobs=${ROCSHMEM_NATIVE_LINK_JOBS}")
+endfunction()
+
 option(BUILD_CTESTS "Register tests with CTest for tier-based execution" ON)
 
 option(BUILD_LOCAL_GPU_TARGET_ONLY "Build only for GPUs detected on this machine" OFF)
@@ -92,6 +123,13 @@ endif()
 option(GDA_MUX "Build provider multiplexer with runtime dispatch to hardware-specific provider"
        ${GDA_MUX_DEFAULT})
 
+# Gate the QueuePair device provider dispatch on __constant__ constmem. Always ON
+# for rocSHMEM's own build; consumers that embed only the GDA QueuePair headers
+# (e.g. RCCL's GIN path) set it OFF so device dispatch reads a per-instance
+# provider member instead, carrying no __constant__ global. Internal, not a
+# user-facing option — do not expose in ccmake.
+set(USE_CONSTMEM ON CACHE INTERNAL "QueuePair device dispatch reads __constant__ constmem (internal)")
+
 if(USE_GDA)
   if(GDA_PROVIDER_COUNT EQUAL 0)
     message(WARNING "GDA support requested, but no GDA provider enabled - disabling GDA")
@@ -113,7 +151,7 @@ set_property(CACHE USE_EXTERNAL_MPI PROPERTY STRINGS AUTO ON OFF)
 include(${CMAKE_SOURCE_DIR}/cmake/setup_project.cmake)
 
 ## Setup VERSION
-set(VERSION_STRING 3.8.0)
+set(VERSION_STRING 3.9.0)
 message(STATUS "rocSHMEM Version: " "${VERSION_STRING}")
 
 project(rocshmem VERSION ${VERSION_STRING} LANGUAGES CXX)
@@ -424,6 +462,10 @@ if (NOT BUILD_TESTS_ONLY)
     if(NOT rocprofiler-register_FOUND)
       message(STATUS "rocprofiler-register not found - rocSHMEM tracing disabled.")
     endif()
+    # Set before configure_file so #cmakedefine picks it up in rocshmem_config.h
+    if(TARGET rocprofiler-register::rocprofiler-register)
+      set(ROCSHMEM_ROCPROFILER_REGISTER 1)
+    endif()
   endif()
 
   set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
@@ -553,6 +595,8 @@ if (NOT BUILD_TESTS_ONLY)
   endif()
 
   if(USE_ROCPROFILER_REGISTER AND TARGET rocprofiler-register::rocprofiler-register)
+    target_compile_definitions(${PROJECT_NAME}
+                               PRIVATE ROCSHMEM_ROCPROFILER_REGISTER=1)
     target_link_libraries(${PROJECT_NAME}
                           PRIVATE rocprofiler-register::rocprofiler-register)
   endif()

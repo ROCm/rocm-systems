@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/sopk.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/decode_factories.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/execution_backend.h"
 #include <memory>
 
@@ -628,6 +629,8 @@ SSubvectorLoopBeginSopk::SSubvectorLoopBeginSopk(const MachineInst *inst)
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
+  flags_ |= COND_BRANCH;
+  flags_ |= PREDICATED_DEF;
 }
 
 namespace detail {
@@ -641,6 +644,11 @@ DecodeResult decodeSSubvectorLoopBeginSopk(const MachineInst *opcode,
 }
 } // namespace detail
 
+std::optional<int64_t> SSubvectorLoopBeginSopk::branch_offset_bytes() const {
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
+  return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
+}
+
 SSubvectorLoopEndSopk::SSubvectorLoopEndSopk(const MachineInst *inst)
     : Sopk("s_subvector_loop_end", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SSubvectorLoopEndSopk)),
@@ -652,10 +660,14 @@ SSubvectorLoopEndSopk::SSubvectorLoopEndSopk(const MachineInst *inst)
   src_operands_[0] = &simm16;
   dst_operands_[1] = &sdst_exec;
   src_operands_[1] = &sdst_exec_in;
-  num_src_ = 2;
+  omit_repeated_destination_sources_ = true;
+  src_operands_[2] = &sdst;
+  num_src_ = 3;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
+  flags_ |= COND_BRANCH;
+  flags_ |= PREDICATED_DEF;
 }
 
 namespace detail {
@@ -668,6 +680,11 @@ DecodeResult decodeSSubvectorLoopEndSopk(const MachineInst *opcode,
   return std::make_unique<SSubvectorLoopEndSopk>(opcode);
 }
 } // namespace detail
+
+std::optional<int64_t> SSubvectorLoopEndSopk::branch_offset_bytes() const {
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
+  return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
+}
 
 } // namespace rdna2
 } // namespace rocjitsu

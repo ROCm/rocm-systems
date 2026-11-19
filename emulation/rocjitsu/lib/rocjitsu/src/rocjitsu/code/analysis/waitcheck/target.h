@@ -17,6 +17,7 @@
 
 namespace rocjitsu {
 class Instruction;
+class Operand;
 
 namespace waitcheck_detail {
 using amdgpu::WaitcntModel;
@@ -87,6 +88,11 @@ enum class WaitEventKind {
   AsyncBarrier,
   TensorLdsLoad,
   TensorLdsStore,
+  ExportMrt,
+  ExportZ,
+  ExportPosition,
+  ExportPrimitive,
+  ExportDualSourceBlend,
   Count,
 };
 
@@ -126,6 +132,8 @@ struct ClassifiedEvent {
   bool check_memory_order = false;
   bool check_program_end = false;
   bool check_counter_parity_order = false;
+  // May use ordinary VMEM writeback while keeping the sample's counter order.
+  bool point_sample_accel = false;
 };
 
 // ISA classification and wait-field decoding have no pending-state or CFG
@@ -133,6 +141,9 @@ struct ClassifiedEvent {
 // Each fallible entry point independently rejects unsupported architectures.
 // Successful empty optionals/vectors represent absent counters, waits, or events.
 struct WaitcheckTarget : WaitCounterPolicy {
+  [[nodiscard]] static std::optional<RegisterRef> register_operand(const Operand &operand,
+                                                                   rj_code_arch_t arch);
+
   [[nodiscard]] static util::FailureOr<std::optional<WaitFields>>
   embedded_wait_fields(const Instruction &inst, rj_code_arch_t arch);
 

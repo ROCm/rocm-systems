@@ -23,8 +23,9 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/except.h"
+#include "util/bit.h"
 #include <array>
+#include <bit>
 #include <cassert>
 #include <cstdint>
 #include <memory>
@@ -60,6 +61,9 @@ public:
 
   std::string name() const override { return "staged_src"; }
   bool simd_capable() const override { return true; }
+  bool execution_backend_available() const override {
+    return !delegate() || delegate()->execution_backend_available();
+  }
 
   void set_lane(uint32_t lane, uint32_t value) { lo_[lane] = value; }
   void set_lane64(uint32_t lane, uint64_t value) {
@@ -114,6 +118,39 @@ private:
   simdojo::VectorReg<MAX_LANES, uint32_t> lo_{};
   simdojo::VectorReg<MAX_LANES, uint32_t> hi_{};
   int lane_count_ = 0;
+};
+
+/// A source shared by the status classifier and numeric execution of one VALU.
+class CapturedArithmeticSource {
+public:
+  CapturedArithmeticSource(amdgpu::Wavefront &wf, Operand &source, uint8_t bytes)
+      : CapturedArithmeticSource(wf, source, bytes, wf.exec() & wf.vgpr_write_mask()) {}
+
+  CapturedArithmeticSource(amdgpu::Wavefront &wf, Operand &source, uint8_t bytes, uint64_t active)
+      : values_(source, wf.wf_size()), binding_(source, capture(wf, source, bytes, active)) {}
+
+private:
+  StagedOperand values_;
+  ScopedOperandDelegate binding_;
+
+  Operand *capture(amdgpu::Wavefront &wf, const Operand &source, uint8_t bytes, uint64_t active) {
+    if (!active)
+      return &values_;
+    amdgpu::RegisterAccess regs(wf);
+    if (source.simd_capable()) {
+      const auto view = regs.read_operand(source, active, bytes);
+      for (uint64_t mask = active; mask; mask &= mask - 1) {
+        const unsigned lane = std::countr_zero(mask);
+        values_.set_lane(lane, view.lane(lane));
+      }
+    } else {
+      for (uint64_t mask = active; mask; mask &= mask - 1) {
+        const unsigned lane = std::countr_zero(mask);
+        values_.set_lane(lane, regs.read_lane(source, lane));
+      }
+    }
+    return &values_;
+  }
 };
 
 using DppOperand = StagedOperand;
@@ -304,9 +341,9 @@ inline uint64_t dpp_row_bank_mask(uint32_t wf_size, uint32_t row_mask, uint32_t 
   return mask;
 }
 
-inline DppPlan make_dpp_plan(uint32_t wf_size, uint32_t dpp_ctrl, uint32_t row_mask,
-                             uint32_t bank_mask, uint32_t bound_ctrl, uint32_t fi,
-                             uint64_t exec_mask, bool inactive_uses_bound_ctrl) {
+inline DppPlan compute_dpp_plan(uint32_t wf_size, uint32_t dpp_ctrl, uint32_t row_mask,
+                                uint32_t bank_mask, uint32_t bound_ctrl, uint32_t fi,
+                                uint64_t exec_mask, bool inactive_uses_bound_ctrl) {
   DppPlan plan;
   plan.row_bank_mask = dpp_row_bank_mask(wf_size, row_mask, bank_mask);
   plan.source_lanes.fill(DppPlan::INVALID_LANE);
@@ -328,6 +365,30 @@ inline DppPlan make_dpp_plan(uint32_t wf_size, uint32_t dpp_ctrl, uint32_t row_m
       plan.source_write_mask |= lane_bit;
   }
   return plan;
+}
+
+inline DppPlan make_dpp_plan(uint32_t wf_size, uint32_t dpp_ctrl, uint32_t row_mask,
+                             uint32_t bank_mask, uint32_t bound_ctrl, uint32_t fi,
+                             uint64_t exec_mask, bool inactive_uses_bound_ctrl) {
+  const uint64_t full_wave = util::mask<uint64_t>(wf_size);
+  if ((exec_mask & full_wave) != full_wave || row_mask != 0xf || bank_mask != 0xf)
+    return compute_dpp_plan(wf_size, dpp_ctrl, row_mask, bank_mask, bound_ctrl, fi, exec_mask,
+                            inactive_uses_bound_ctrl);
+
+  // With every source active, only the permutation, the wave width and
+  // BOUND_CTRL affect the plan. Lane values are still read for each issue.
+  struct Entry {
+    uint32_t width = 0, control = 0, bound = 0;
+    DppPlan plan;
+  };
+  static thread_local std::array<Entry, 16> entries{};
+  auto &entry = entries[(dpp_ctrl ^ (dpp_ctrl >> 4)) % entries.size()];
+  if (entry.width != wf_size || entry.control != dpp_ctrl || entry.bound != bound_ctrl) {
+    entry = {wf_size, dpp_ctrl, bound_ctrl,
+             compute_dpp_plan(wf_size, dpp_ctrl, row_mask, bank_mask, bound_ctrl, fi, exec_mask,
+                              inactive_uses_bound_ctrl)};
+  }
+  return entry.plan;
 }
 
 inline uint64_t dpp_physical_source_mask(const DppPlan &plan, uint64_t destination_mask,
@@ -496,10 +557,12 @@ inline void apply_dpp(const Operand &source, const DppPlan &plan, uint64_t read_
 }
 
 /// Apply the DPP16 extension's floating source modifiers after permutation.
-/// Stage an unpermuted second source only when it has a modifier.
+/// Stage an unpermuted second source only when it has a modifier, observing
+/// only its consumed lanes (within EXEC).
 inline void apply_source_modifiers(const Operand &source, std::optional<StagedOperand> &storage,
                                    amdgpu::Wavefront &wf, uint64_t sign, SourceModifiers modifiers,
-                                   uint32_t source_index) {
+                                   uint32_t source_index, uint64_t source_lanes = ~uint64_t{0}) {
+  source_lanes &= wf.exec();
   const bool absolute = modifiers.absolute & (1u << source_index);
   const bool negate = modifiers.negate & (1u << source_index);
   if (!absolute && !negate)
@@ -508,17 +571,17 @@ inline void apply_source_modifiers(const Operand &source, std::optional<StagedOp
     RegisterAccess regs(wf);
     storage.emplace(source, static_cast<int>(wf.wf_size()));
     if (source.size_bits_ > 32) {
-      const auto values = regs.read_operand64(source, wf.exec());
+      const auto values = regs.read_operand64(source, source_lanes);
       for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
         storage->set_lane64(lane, values.lane(lane));
     } else if (!source.simd_capable()) {
       for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
-        if (wf.exec() & (uint64_t{1} << lane))
+        if (source_lanes & (uint64_t{1} << lane))
           storage->set_lane(lane, regs.read_lane(source, lane));
     } else {
       const uint8_t bytes = source.size_bits_ == 16 ? ExecutionPlugin::kLowHalfByteMask
                                                     : ExecutionPlugin::kFullByteMask;
-      const auto values = regs.read_operand(source, wf.exec(), bytes);
+      const auto values = regs.read_operand(source, source_lanes, bytes);
       for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
         storage->set_lane(lane, values.lane(lane));
     }
@@ -531,11 +594,13 @@ inline uint32_t dpp8_src_lane(uint32_t lane, uint32_t lane_sel) {
   return (lane & ~7u) | sel;
 }
 
+/// @brief Stage a DPP8 source whose decoded width is at most one dword.
 inline void apply_dpp8(const Operand &source, uint32_t lane_sel, uint32_t fi,
                        std::optional<StagedOperand> &storage, amdgpu::Wavefront &wf,
                        uint8_t source_byte_mask = 0) {
-  if (source.size_bits() > 32)
-    throw util::InvalidInst("DPP8 requires a source no wider than 32 bits", "");
+  // Generator _instruction_supports_dpp8 checks the encoded source width;
+  // _gen_execute_body separately checks the semantic source used by MOVREL.
+  assert(source.size_bits() <= 32 && "DPP8 requires a source no wider than 32 bits");
   const DppPlan plan = make_dpp8_plan(wf.wf_size(), lane_sel, fi, wf.exec());
   stage_dpp_operand(source, plan, wf.exec(), storage, wf, source_byte_mask);
 }
@@ -549,8 +614,9 @@ namespace sdwa {
 /// For F32, FLUSH_NEAREST uses apply_omod_f32 under the producer's nearest-rounding
 /// environment; MODE uses scale_f32 with guest rounding. For F16, MODE expects the
 /// producer helper to have scaled already. ROUNDED marks an F16 result rounded
-/// without OMOD; the store scales it with output_modifier.h, as MODE does for F32.
-enum class OutputPolicy : uint8_t { MODE, FLUSH_NEAREST, ROUNDED };
+/// without OMOD; the store scales it with output_modifier.h. ARITHMETIC uses
+/// that ordering on GFX10 and retains producer scaling on CDNA.
+enum class OutputPolicy : uint8_t { MODE, FLUSH_NEAREST, ROUNDED, ARITHMETIC };
 
 /// @brief Return the architectural source bytes selected by an SDWA selector.
 inline uint8_t sdwa_src_byte_mask(uint32_t sel) {
@@ -620,14 +686,16 @@ inline uint32_t apply_source_modifiers(uint32_t value, SourceModifierFormat form
 /// execution.
 inline void stage_source(Operand &source, uint32_t selection, bool sign_extend, bool negate,
                          bool absolute, SourceModifierFormat modifier_format,
-                         std::optional<StagedOperand> &storage, Wavefront &wf) {
+                         std::optional<StagedOperand> &storage, Wavefront &wf,
+                         uint64_t source_lanes = ~uint64_t{0}) {
   storage.reset();
   const bool has_float_modifier =
       modifier_format != SourceModifierFormat::NONE && (absolute || negate);
   if (selection == DWORD && !has_float_modifier)
     return;
 
-  const uint64_t exec = wf.exec();
+  // Conditional selection only consumes its chosen source on each lane.
+  const uint64_t exec = wf.exec() & source_lanes;
   const auto source_view =
       RegisterAccess(wf).read_operand(source, exec, sdwa_src_byte_mask(selection));
   storage.emplace(source, static_cast<int>(wf.wf_size()));
@@ -762,15 +830,18 @@ inline uint16_t finish_rounded_f16(const Inst &inst, const Wavefront &wf, float 
       fp_mode::apply_omod_f16(value, output_modifier<ResultFormat::F16>(inst, wf), fp16_ovfl));
 }
 
-/// @brief Apply SDWA scaling before guest-mode rounding of a wide F16 arithmetic result.
-/// @details Keeps the emulator's current order, which gfx1030 SDWA MUL_F16 and
-/// ADD_F16 captures contradict; migrated VOP3 arithmetic modifies the rounded half.
-/// See output_modifier.h.
+/// GFX10 SDWA ADD/MUL captures scale a rounded half, as VOP3 does.
+inline bool arithmetic_scales_rounded_half(const Wavefront &wf) {
+  return wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA1 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2;
+}
+
+/// Round the arithmetic result, deferring GFX10 SDWA scaling to destination placement.
 template <typename Inst>
 inline uint16_t finish_arithmetic_f16(const Inst &inst, const Wavefront &wf, double value,
                                       uint32_t round_mode, uint32_t denorm_mode, bool fp16_ovfl) {
-  return fp_mode::finish_arithmetic_f16(value, round_mode, denorm_mode, fp16_ovfl,
-                                        output_modifier<ResultFormat::F16>(inst, wf));
+  const auto omod =
+      arithmetic_scales_rounded_half(wf) ? 0u : output_modifier<ResultFormat::F16>(inst, wf);
+  return fp_mode::finish_arithmetic_f16(value, round_mode, denorm_mode, fp16_ovfl, omod);
 }
 
 /// @brief Scale F32 bits with explicit rounding and OMOD output finalization.
@@ -820,13 +891,17 @@ inline uint32_t scale_f32(uint32_t value, uint32_t omod, uint32_t round_mode) {
 /// @brief Scale a floating-point SDWA result before destination placement.
 template <ResultFormat Format, OutputPolicy Policy = OutputPolicy::MODE, typename Inst>
 inline uint32_t scale_result(const Inst &inst, const Wavefront &wf, uint32_t value) {
-  static_assert(Policy != OutputPolicy::ROUNDED || Format == ResultFormat::F16);
-  constexpr OutputPolicy kOmodPolicy =
-      Policy == OutputPolicy::ROUNDED ? OutputPolicy::MODE : Policy;
+  constexpr bool half_policy =
+      Policy == OutputPolicy::ROUNDED || Policy == OutputPolicy::ARITHMETIC;
+  static_assert(!half_policy || Format == ResultFormat::F16);
+  constexpr OutputPolicy kOmodPolicy = half_policy ? OutputPolicy::MODE : Policy;
   const uint32_t omod = output_modifier<Format, kOmodPolicy>(inst, wf);
   if (omod == 0)
     return value;
-  if constexpr (Policy == OutputPolicy::ROUNDED) {
+  if constexpr (half_policy) {
+    if constexpr (Policy == OutputPolicy::ARITHMETIC)
+      if (!arithmetic_scales_rounded_half(wf))
+        return value; // finish_arithmetic_f16 already applied and finalized OMOD.
     // The producer rounded without OMOD; scale the half as VOP3 does.
     output_modifier::Policy policy;
     policy.omod = omod;
@@ -844,7 +919,7 @@ inline uint32_t scale_result(const Inst &inst, const Wavefront &wf, uint32_t val
     if constexpr (Policy == OutputPolicy::FLUSH_NEAREST) {
       // The generated LOG/EXP body protects the complete instruction with
       // nearest rounding. Reuse its VOP3 finalizer, including NaN passthrough.
-      return std::bit_cast<uint32_t>(fp_mode::apply_omod_f32(std::bit_cast<float>(value), omod));
+      return std::bit_cast<uint32_t>(fp_mode::apply_omod_f32(std::bit_cast<float>(value), omod, 0));
     }
     return scale_f32(value, omod, wf.fp_round_mode_f32());
   }

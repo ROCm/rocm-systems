@@ -61,6 +61,9 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_Basic) {
   HIP_CHECK(hipMemPoolTrimTo(mem_pool, min_bytes_to_hold));
 
   attr = hipMemPoolReuseFollowEventDependencies;
+  int orig_value = -1;
+  HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &orig_value));
+  MemPoolAttrRestorer restorer{mem_pool, attr, orig_value};
   int value = 0;
 
   HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &value));

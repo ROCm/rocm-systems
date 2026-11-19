@@ -38,6 +38,25 @@ void ncclTopoFree(struct ncclTopoSystem* system);
 ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* comm);
 ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm);
 ncclResult_t ncclTopoComputeP2pChannelsPerPeer(struct ncclComm* comm);
+int64_t rcclParamP2pCeChannelsPerPeer();
+int rcclP2pCeChannelsPerPeerCap(int current, int pool, bool isGfx1250, bool useMemcpy, int64_t configuredCap);
+inline bool rcclP2pUseCeForConnection(bool useMemcpy, int connIndex) {
+  return useMemcpy && connIndex == NCCL_CONN_IDX_P2P_CE;
+}
+// Copy Engine steps must keep the int step and buffer sizes of the connectors and the proxy, and the
+// planner's 32-step part bound, from overflowing.
+constexpr int64_t kRcclP2pCeMaxStepSize = 32 << 20;
+inline size_t rcclP2pCeStepSizePolicy(int cudaArch, bool useMemcpy, int64_t configured, size_t fallback) {
+  if (cudaArch != 1250 || !useMemcpy) return fallback;
+  size_t step = configured > (int64_t)fallback ? (size_t)configured : fallback;
+  return step < (size_t)kRcclP2pCeMaxStepSize ? step : (size_t)kRcclP2pCeMaxStepSize;
+}
+inline bool rcclP2pCeSharesProxyStream(int cudaArch) {
+  return cudaArch == 1250;
+}
+inline int rcclP2pConnectorStepSize(int p2pChunkSize, bool useCe, int connStepSize) {
+  return useCe && connStepSize > 0 ? connStepSize : p2pChunkSize;
+}
 // Resolved NCCL_MAX_P2P_NCHANNELS (MAXCHANNELS when unset, else clamped user value).
 int ncclMaxP2pNchannels();
 // Upper bound for p2pnChannels: 64, MAXCHANNELS on single-node gfx1250, or the
@@ -75,7 +94,6 @@ static inline uint32_t ncclGdcPinFlag(enum ncclTopoFlushType flush) {
 ncclResult_t ncclTopoNeedFlush(struct ncclComm* comm, int64_t netId, int netDev, int rank, bool netManaged,
                                enum ncclTopoFlushType* flush);
 ncclResult_t ncclTopoGetMinNetBw(struct ncclTopoSystem* system, int rank, float* bw);
-ncclResult_t ncclTopoIsGdrAvail(struct ncclTopoSystem* system, int rank, bool* avail);
 ncclResult_t ncclTopoCheckNet(struct ncclTopoSystem* system, int rank1, int rank2, int* net);
 int ncclPxnDisable(struct ncclComm* comm);
 ncclResult_t ncclTopoGetPxnRanks(struct ncclComm* comm, int** intermediateRanks, int* nranks);
@@ -108,11 +126,10 @@ ncclResult_t ncclTopoGetCpuAffinity(struct ncclTopoSystem* system, int rank, ncc
 #define NCCL_TOPO_CPU_MODEL_AMD_ZEN12 1
 #define NCCL_TOPO_CPU_MODEL_AMD_ZEN34 2
 #define NCCL_TOPO_CPU_MODEL_AMD_ZEN5 3
-// RCCL-specific AMD CPU models (values chosen to not collide with the upstream ZEN* ids above)
-#define NCCL_TOPO_CPU_MODEL_AMD_ZEN 5
-#define NCCL_TOPO_CPU_MODEL_AMD_ROME 6
 #define NCCL_TOPO_CPU_MODEL_YONGFENG 1
 ncclResult_t ncclTopoCpuType(struct ncclTopoSystem* system, int* arch, int* vendor, int* model);
+// RCCL: true when the first CPU is an AMD Rome-class host, which enables the Rome presets and GDR relaxation.
+bool rcclTopoCpuIsRome(struct ncclTopoSystem* system);
 ncclResult_t ncclTopoGetGpuCount(struct ncclTopoSystem* system, int* count);
 ncclResult_t ncclTopoGetNetCount(struct ncclTopoSystem* system, int* count);
 ncclResult_t ncclTopoGetNvsCount(struct ncclTopoSystem* system, int* count);
@@ -201,6 +218,7 @@ struct ncclTopoGraph {
   int maxChannels;
   // Output
   int nChannels;
+  int nCtasPerChannel;
   float bwIntra;
   float bwInter;
   float latencyInter;

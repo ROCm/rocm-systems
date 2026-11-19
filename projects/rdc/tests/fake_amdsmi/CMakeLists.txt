@@ -18,7 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-# Fake amd-smi for the GPU-less tests in tests/ci/test_fake_gpu.py. Test-only:
+# Fake amd-smi for the GPU-less tests in tests/ci/test_fake_gpu*.py. Test-only:
 # it is built with BUILD_TESTS and installed with the tests component next to
 # the suite, never on a library search path. It replaces libamd_smi through
 # LD_PRELOAD, so it must not link libamd_smi or any RDC library.
@@ -37,7 +37,19 @@ install(
 # tests/ci skips them.
 file(GLOB FAKE_GPU_TESTS CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/tests/ci/test_fake_gpu*.py)
 install(
-    FILES fake_values.inc ${FAKE_GPU_TESTS} ${PROJECT_SOURCE_DIR}/tests/ci/fake_gpu_golden.py
+    FILES
+        fake_values.inc
+        ${FAKE_GPU_TESTS}
+        ${PROJECT_SOURCE_DIR}/tests/ci/fake_gpu_golden.py
+        ${PROJECT_SOURCE_DIR}/tests/ci/fake_gpu_stress.py
     DESTINATION ${FAKE_GPU_TEST_DIR}
     COMPONENT ${TESTS_COMPONENT}
+)
+# The installed suite's conftest.py carries only the stress plumbing; helpers and fixtures come
+# from test_fake_gpu.py.
+install(
+    FILES ${PROJECT_SOURCE_DIR}/tests/ci/fake_gpu_conftest.py
+    DESTINATION ${FAKE_GPU_TEST_DIR}
+    COMPONENT ${TESTS_COMPONENT}
+    RENAME conftest.py
 )
