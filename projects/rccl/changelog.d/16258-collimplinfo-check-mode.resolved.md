@@ -1,0 +1,1 @@
+* Fixed `rcclGetCollImplInfo` reporting a DDA, hierarchical or other RCCL backend for AllReduce, AllGather, ReduceScatter and AlltoAll on communicators in check mode (`NCCL_CHECK_MODE`), where that backend does not run. It now reports the kernel that runs.
