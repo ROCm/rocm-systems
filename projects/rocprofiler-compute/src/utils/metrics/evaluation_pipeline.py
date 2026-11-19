@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from collections import ChainMap
 from typing import Any, Optional
 
 import numpy as np
@@ -21,7 +22,6 @@ from utils.metrics.metric_evaluator import (
     counter_table_index,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.schema import PassTable
 from utils.utils_analysis import PEAK_COL_PREFERENCE, VALUE_COL_PREFERENCE
 from utils.utils_common import SUPPORTED_FIELD
 from utils.utils_counter_defs import Collectables, extract_counters_and_variables
@@ -95,7 +95,7 @@ def create_sys_vars(sys_info: pd.Series) -> dict[str, int | float]:
 
 
 def calc_builtin_vars(
-    raw_pmc_df: pd.DataFrame | PassTable,
+    raw_pmc_df: pd.DataFrame | ChainMap,
     sys_vars: dict[str, int | float],
     gpu_arch: str,
     names: set[str],
@@ -126,7 +126,7 @@ def eval_metric(
     empirical_peaks_df: pd.DataFrame,
     raw_pmc_df: pd.DataFrame,
     debug: bool,
-    pass_tables: Optional[list[PassTable]] = None,
+    pass_tables: Optional[list[ChainMap]] = None,
 ) -> None:
     """Execute the expr string for each metric in the df.
 
@@ -159,7 +159,9 @@ def eval_metric(
     _, used = extract_counters_and_variables("\n".join(expressions), collectables)
     tables = [*(pass_tables or []), raw_pmc_df]
 
-    # Each metric cell, with the index of the table it reads
+    # Each metric cell, with the index of the table it reads. Picking the
+    # tables before evaluating any collectable lets each table evaluate only
+    # the collectables its cells need.
     cells = []
     # Hmmm... apply + lambda should just work
     # df['Value'] = df['Value'].apply(

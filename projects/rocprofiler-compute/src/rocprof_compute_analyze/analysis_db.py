@@ -5,7 +5,7 @@ import ast
 import json
 import re
 import warnings
-from collections import defaultdict
+from collections import ChainMap, defaultdict
 from pathlib import Path
 from typing import (
     Any,
@@ -96,6 +96,7 @@ from utils.utils_analysis import (
     PEAK_COL_PREFERENCE,
     VALUE_COL_PREFERENCE,
     impute_counters_iteration_multiplex,
+    pass_tables_on_rows,
 )
 from utils.utils_common import get_uuid, get_version, normalize_filter_to_str_list
 from utils.utils_counter_defs import (
@@ -1110,7 +1111,7 @@ class db_analysis(OmniAnalyze_Base):
 
     @staticmethod
     def calc_builtin_vars(
-        pmc_df: Union[pd.DataFrame, schema.PassTable],
+        pmc_df: Union[pd.DataFrame, ChainMap],
         sys_info: dict,
         names: Set[str],
     ) -> None:
@@ -1127,7 +1128,7 @@ class db_analysis(OmniAnalyze_Base):
         pmc_df: pd.DataFrame,
         sys_info: dict,
         expression_df: pd.DataFrame,
-        pass_tables: Optional[List[schema.PassTable]] = None,
+        pass_tables: Optional[List[ChainMap]] = None,
     ) -> pd.Series:
         """Evaluate each expression row.
 
@@ -1142,6 +1143,8 @@ class db_analysis(OmniAnalyze_Base):
         _, used = extract_counters_and_variables("\n".join(expressions), build_in_vars)
         # Pass tables first, pmc_df last. Each gets its own built-in variables.
         tables = [*(pass_tables or []), pmc_df]
+        # Pick the table each row reads before evaluating any collectable, so
+        # that each table evaluates only the collectables its rows need
         indexes = [
             counter_table_index(value, tables, build_in_vars) for value in row_values
         ]
@@ -1232,7 +1235,7 @@ class db_analysis(OmniAnalyze_Base):
 
         for workload_path in self._pmc_df_per_workload.keys():
             pmc_df = self._pmc_df_per_workload[workload_path]
-            pass_tables = self._pass_tables_per_workload[workload_path].values()
+            pass_tables = self._pass_tables_per_workload[workload_path]
             expression_template = self._metric_expression_data_per_workload[
                 workload_path
             ]
@@ -1261,7 +1264,7 @@ class db_analysis(OmniAnalyze_Base):
                     kernel_pmc_df,
                     sys_info.copy(),
                     kernel_expression_df,
-                    pass_tables=[table.rows_of(kernel_pmc_df) for table in pass_tables],
+                    pass_tables=pass_tables_on_rows(pass_tables, kernel_pmc_df),
                 )
                 new_kernel_rows.extend(
                     db_analysis._derive_pct_of_peak_values(
@@ -1288,7 +1291,7 @@ class db_analysis(OmniAnalyze_Base):
                 pmc_df,
                 sys_info.copy(),
                 workload_expression_df,
-                pass_tables=[table.rows_of(pmc_df) for table in pass_tables],
+                pass_tables=pass_tables_on_rows(pass_tables, pmc_df),
             )
             db_analysis.validate_dual_issue_metrics(
                 pmc_df,
@@ -1603,7 +1606,7 @@ class db_analysis(OmniAnalyze_Base):
                 ],
                 columns=["metric_id", "value_name", "value"],
             )
-            pass_tables = self._pass_tables_per_workload[workload_path].values()
+            pass_tables = self._pass_tables_per_workload[workload_path]
             roofline_rows = []
             for kernel_name in top_kernels:
                 kernel_pmc_df = pmc_df[pmc_df["Kernel_Name"] == kernel_name]
@@ -1611,7 +1614,7 @@ class db_analysis(OmniAnalyze_Base):
                     kernel_pmc_df,
                     sys_info.copy(),
                     expression_df,
-                    pass_tables=[table.rows_of(kernel_pmc_df) for table in pass_tables],
+                    pass_tables=pass_tables_on_rows(pass_tables, kernel_pmc_df),
                 )
                 roofline_rows.append({
                     "kernel_name": kernel_name,
