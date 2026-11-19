@@ -935,7 +935,7 @@ namespace {
 
 // Writes candidates under the scratch root; only the two named here exist, so the search reaches them in
 // template order: /usr/lib/modules/%s/config before /lib/modules/%s/build/.config.
-class KernelConfigSearchMicrotest : public ::testing::Test {
+class RocmwrapKernelConfigSearchMicrotest : public ::testing::Test {
  protected:
   std::string release_;
 
@@ -959,7 +959,7 @@ class KernelConfigSearchMicrotest : public ::testing::Test {
   }
 };
 
-TEST_F(KernelConfigSearchMicrotest, ReadFirstAvailable_SkipsEmptyCandidateForLaterOne) {
+TEST_F(RocmwrapKernelConfigSearchMicrotest, ReadFirstAvailable_SkipsEmptyCandidateForLaterOne) {
   Write(ModulesConfig(), "");
   Write(BuildConfig(), "CONFIG_PCI_P2PDMA=y\n");
   std::string content;
@@ -971,7 +971,7 @@ TEST_F(KernelConfigSearchMicrotest, ReadFirstAvailable_SkipsEmptyCandidateForLat
   EXPECT_TRUE(KcTestContentHasOption(content, "CONFIG_PCI_P2PDMA=y"));
 }
 
-TEST_F(KernelConfigSearchMicrotest, ReadFirstAvailable_FirstNonEmptyCandidateWins) {
+TEST_F(RocmwrapKernelConfigSearchMicrotest, ReadFirstAvailable_FirstNonEmptyCandidateWins) {
   Write(ModulesConfig(), "CONFIG_A=y\n");
   Write(BuildConfig(), "CONFIG_B=y\n");
   std::string content;
@@ -983,7 +983,7 @@ TEST_F(KernelConfigSearchMicrotest, ReadFirstAvailable_FirstNonEmptyCandidateWin
   EXPECT_EQ("CONFIG_A=y\n", content);
 }
 
-TEST_F(KernelConfigSearchMicrotest, ReadFirstAvailable_OnlyEmptyCandidatesIsUnavailable) {
+TEST_F(RocmwrapKernelConfigSearchMicrotest, ReadFirstAvailable_OnlyEmptyCandidatesIsUnavailable) {
   Write(ModulesConfig(), "");
   Write(BuildConfig(), "");
   std::string content;
