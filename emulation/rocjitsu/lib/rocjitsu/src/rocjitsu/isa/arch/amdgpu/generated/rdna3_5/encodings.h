@@ -948,6 +948,11 @@ public:
   }
   void capture_nsa_words(const MachineInst *inst, const Operand *vaddr);
   std::string image_vdata_name(int bits) const;
+  bool should_print_src_operand(uint8_t index) const override {
+    // Keep the encoded VDATA operand visible for an illegal zero mask.
+    return (index == 0 && mnemonic_.starts_with("image_atomic_")) ||
+           Instruction::should_print_src_operand(index);
+  }
   void append_dst_operand(std::string &out, uint8_t index) const override {
     const auto *operand = dst_operands_[index];
     const bool status = flags_ & CONDITIONAL_LAST_VGPR_DEF;
@@ -958,6 +963,11 @@ public:
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override {
     const ::rocjitsu::Operand *operand = src_operands_[operand_index];
+    if (operand_index == 0 && !operand->size_bits() && mnemonic_.starts_with("image_atomic_")) {
+      // LLVM spells at least two registers for CMPSWAP or a TFE tuple.
+      out += image_vdata_name(inst_.tfe || mnemonic_ == "image_atomic_cmpswap" ? 64 : 32);
+      return;
+    }
     if (inst_.tfe && operand_index == 0 && operand->is_vgpr() && operand != nsa_vaddr_operand_) {
       // Store and atomic payloads never consume the spelled TFE slot.
       out += image_vdata_name(operand->size_bits() + 32);
