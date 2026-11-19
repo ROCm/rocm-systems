@@ -60,6 +60,7 @@ VMovB32Vop3::VMovB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -88,6 +89,7 @@ VReadfirstlaneB32Vop3::VReadfirstlaneB32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
 namespace detail {
@@ -119,6 +121,7 @@ VCvtI32F64Vop3::VCvtI32F64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -149,6 +152,7 @@ VCvtF64I32Vop3::VCvtF64I32Vop3(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -196,6 +200,7 @@ VCvtF32I32Vop3::VCvtF32I32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -245,6 +250,7 @@ VCvtF32U32Vop3::VCvtF32U32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -294,6 +300,7 @@ VCvtU32F32Vop3::VCvtU32F32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -343,6 +350,7 @@ VCvtI32F32Vop3::VCvtI32F32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -392,6 +400,7 @@ VCvtF16F32Vop3::VCvtF16F32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -451,6 +460,7 @@ VCvtF32F16Vop3::VCvtF32F16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -500,6 +510,7 @@ VCvtNearestI32F32Vop3::VCvtNearestI32F32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -550,6 +561,7 @@ VCvtFloorI32F32Vop3::VCvtFloorI32F32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -600,6 +612,7 @@ VCvtOffF32I4Vop3::VCvtOffF32I4Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -634,6 +647,7 @@ VCvtF32F64Vop3::VCvtF32F64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -664,6 +678,7 @@ VCvtF64F32Vop3::VCvtF64F32Vop3(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -711,6 +726,7 @@ VCvtF32Ubyte0Vop3::VCvtF32Ubyte0Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -761,6 +777,7 @@ VCvtF32Ubyte1Vop3::VCvtF32Ubyte1Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -811,6 +828,7 @@ VCvtF32Ubyte2Vop3::VCvtF32Ubyte2Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -861,6 +879,7 @@ VCvtF32Ubyte3Vop3::VCvtF32Ubyte3Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -895,6 +914,7 @@ VCvtU32F64Vop3::VCvtU32F64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -925,6 +945,7 @@ VCvtF64U32Vop3::VCvtF64U32Vop3(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -956,6 +977,7 @@ VTruncF64Vop3::VTruncF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -987,6 +1009,7 @@ VCeilF64Vop3::VCeilF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -1018,6 +1041,7 @@ VRndneF64Vop3::VRndneF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -1049,6 +1073,7 @@ VFloorF64Vop3::VFloorF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -1117,6 +1142,7 @@ VMovB16Vop3::VMovB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   src0.set_register_byte_mask(
@@ -1177,6 +1203,7 @@ VFractF32Vop3::VFractF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -1226,6 +1253,7 @@ VTruncF32Vop3::VTruncF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -1275,6 +1303,7 @@ VCeilF32Vop3::VCeilF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -1324,6 +1353,7 @@ VRndneF32Vop3::VRndneF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -1373,6 +1403,7 @@ VFloorF32Vop3::VFloorF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -1422,6 +1453,7 @@ VExpF32Vop3::VExpF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
 }
@@ -1472,6 +1504,7 @@ VLogF32Vop3::VLogF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
 }
@@ -1522,6 +1555,7 @@ VRcpF32Vop3::VRcpF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
 }
@@ -1572,6 +1606,7 @@ VRcpIflagF32Vop3::VRcpIflagF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
 }
@@ -1623,6 +1658,7 @@ VRsqF32Vop3::VRsqF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
 }
@@ -1657,6 +1693,7 @@ VRcpF64Vop3::VRcpF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
 }
@@ -1689,6 +1726,7 @@ VRsqF64Vop3::VRsqF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
 }
@@ -1737,6 +1775,7 @@ VSqrtF32Vop3::VSqrtF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
 }
@@ -1771,6 +1810,7 @@ VSqrtF64Vop3::VSqrtF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
 }
@@ -1819,6 +1859,7 @@ VSinF32Vop3::VSinF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
 }
@@ -1869,6 +1910,7 @@ VCosF32Vop3::VCosF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
 }
@@ -1919,6 +1961,7 @@ VNotB32Vop3::VNotB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -1968,6 +2011,7 @@ VBfrevB32Vop3::VBfrevB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2017,6 +2061,7 @@ VClzI32U32Vop3::VClzI32U32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2066,6 +2111,7 @@ VCtzI32B32Vop3::VCtzI32B32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2115,6 +2161,7 @@ VClsI32Vop3::VClsI32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2148,6 +2195,7 @@ VFrexpExpI32F64Vop3::VFrexpExpI32F64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2180,6 +2228,7 @@ VFrexpMantF64Vop3::VFrexpMantF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2212,6 +2261,7 @@ VFractF64Vop3::VFractF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2259,6 +2309,7 @@ VFrexpExpI32F32Vop3::VFrexpExpI32F32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2309,6 +2360,7 @@ VFrexpMantF32Vop3::VFrexpMantF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2362,6 +2414,7 @@ VMovreldB32Vop3::VMovreldB32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   m0.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
 namespace detail {
@@ -2410,6 +2463,7 @@ VMovrelsB32Vop3::VMovrelsB32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   m0.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
 namespace detail {
@@ -2458,6 +2512,7 @@ VMovrelsdB32Vop3::VMovrelsdB32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   m0.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
 namespace detail {
@@ -2506,6 +2561,7 @@ VMovrelsd2B32Vop3::VMovrelsd2B32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   m0.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
 namespace detail {
@@ -2559,6 +2615,7 @@ VCvtF16U16Vop3::VCvtF16U16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
@@ -2619,6 +2676,7 @@ VCvtF16I16Vop3::VCvtF16I16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
@@ -2679,6 +2737,7 @@ VCvtU16F16Vop3::VCvtU16F16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2738,6 +2797,7 @@ VCvtI16F16Vop3::VCvtI16F16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2797,6 +2857,7 @@ VRcpF16Vop3::VRcpF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
 }
@@ -2857,6 +2918,7 @@ VSqrtF16Vop3::VSqrtF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
 }
@@ -2917,6 +2979,7 @@ VRsqF16Vop3::VRsqF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
 }
@@ -2977,6 +3040,7 @@ VLogF16Vop3::VLogF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
 }
@@ -3037,6 +3101,7 @@ VExpF16Vop3::VExpF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
 }
@@ -3097,6 +3162,7 @@ VFrexpMantF16Vop3::VFrexpMantF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3157,6 +3223,7 @@ VFrexpExpI16F16Vop3::VFrexpExpI16F16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3217,6 +3284,7 @@ VFloorF16Vop3::VFloorF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3276,6 +3344,7 @@ VCeilF16Vop3::VCeilF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3335,6 +3404,7 @@ VTruncF16Vop3::VTruncF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3394,6 +3464,7 @@ VRndneF16Vop3::VRndneF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3453,6 +3524,7 @@ VFractF16Vop3::VFractF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3512,6 +3584,7 @@ VSinF16Vop3::VSinF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
 }
@@ -3572,6 +3645,7 @@ VCosF16Vop3::VCosF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= TRANSCENDENTAL;
 }
@@ -3628,6 +3702,7 @@ VSatPkU8I16Vop3::VSatPkU8I16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
 namespace detail {
@@ -3687,6 +3762,7 @@ VCvtNormI16F16Vop3::VCvtNormI16F16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3747,6 +3823,7 @@ VCvtNormU16F16Vop3::VCvtNormU16F16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3807,6 +3884,7 @@ VNotB16Vop3::VNotB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
@@ -3867,6 +3945,7 @@ VCvtI32I16Vop3::VCvtI32I16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
@@ -3921,6 +4000,7 @@ VCvtU32U16Vop3::VCvtU32U16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
@@ -3980,6 +4060,8 @@ VCndmaskB32Vop3::VCndmaskB32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   src2.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3991,6 +4073,9 @@ DecodeResult decodeVCndmaskB32Vop3(const MachineInst *opcode,
       "v_cndmask_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 64)) [[unlikely]]
+    return emit_error.emit() << "V_CNDMASK_B32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -4036,6 +4121,8 @@ VAddF32Vop3::VAddF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -4091,6 +4178,8 @@ VSubF32Vop3::VSubF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -4146,6 +4235,8 @@ VSubrevF32Vop3::VSubrevF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -4185,6 +4276,8 @@ VFmacDx9ZeroF32Vop3::VFmacDx9ZeroF32Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -4239,6 +4332,8 @@ VMulDx9ZeroF32Vop3::VMulDx9ZeroF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -4295,6 +4390,8 @@ VMulF32Vop3::VMulF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -4350,6 +4447,8 @@ VMulI32I24Vop3::VMulI32I24Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -4405,6 +4504,8 @@ VMulHiI32I24Vop3::VMulHiI32I24Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -4461,6 +4562,8 @@ VMulU32U24Vop3::VMulU32U24Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -4516,6 +4619,8 @@ VMulHiU32U24Vop3::VMulHiU32U24Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -4572,6 +4677,8 @@ VMinF32Vop3::VMinF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -4627,6 +4734,8 @@ VMaxF32Vop3::VMaxF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -4682,6 +4791,8 @@ VMinI32Vop3::VMinI32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -4737,6 +4848,8 @@ VMaxI32Vop3::VMaxI32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -4792,6 +4905,8 @@ VMinU32Vop3::VMinU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -4847,6 +4962,8 @@ VMaxU32Vop3::VMaxU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -4902,6 +5019,8 @@ VLshlrevB32Vop3::VLshlrevB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -4958,6 +5077,8 @@ VLshrrevB32Vop3::VLshrrevB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -5014,6 +5135,8 @@ VAshrrevI32Vop3::VAshrrevI32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -5070,6 +5193,8 @@ VAndB32Vop3::VAndB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -5125,6 +5250,8 @@ VOrB32Vop3::VOrB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -5180,6 +5307,8 @@ VXorB32Vop3::VXorB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -5235,6 +5364,8 @@ VXnorB32Vop3::VXnorB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -5290,6 +5421,8 @@ VAddNcU32Vop3::VAddNcU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -5345,6 +5478,8 @@ VSubNcU32Vop3::VSubNcU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -5400,6 +5535,8 @@ VSubrevNcU32Vop3::VSubrevNcU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -5457,6 +5594,8 @@ VFmacF32Vop3::VFmacF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -5512,6 +5651,8 @@ VCvtPkRtzF16F32Vop3::VCvtPkRtzF16F32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -5575,6 +5716,8 @@ VAddF16Vop3::VAddF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -5644,6 +5787,8 @@ VSubF16Vop3::VSubF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -5713,6 +5858,8 @@ VSubrevF16Vop3::VSubrevF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -5782,6 +5929,8 @@ VMulF16Vop3::VMulF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -5852,6 +6001,8 @@ VFmacF16Vop3::VFmacF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -5921,6 +6072,8 @@ VMaxF16Vop3::VMaxF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -5990,6 +6143,8 @@ VMinF16Vop3::VMinF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -6059,6 +6214,8 @@ VLdexpF16Vop3::VLdexpF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -6126,6 +6283,9 @@ VFmaDx9ZeroF32Vop3::VFmaDx9ZeroF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -6137,6 +6297,9 @@ DecodeResult decodeVFmaDx9ZeroF32Vop3(const MachineInst *opcode,
       "v_fma_dx9_zero_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_FMA_DX9_ZERO_F32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -6188,6 +6351,9 @@ VMadI32I24Vop3::VMadI32I24Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -6198,6 +6364,9 @@ DecodeResult decodeVMadI32I24Vop3(const MachineInst *opcode, const DecodeErrorEm
       "v_mad_i32_i24", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 24, op->src1, 24, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_MAD_I32_I24 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -6249,6 +6418,9 @@ VMadU32U24Vop3::VMadU32U24Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -6259,6 +6431,9 @@ DecodeResult decodeVMadU32U24Vop3(const MachineInst *opcode, const DecodeErrorEm
       "v_mad_u32_u24", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 24, op->src1, 24, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_MAD_U32_U24 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -6310,6 +6485,9 @@ VCubeidF32Vop3::VCubeidF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -6320,6 +6498,9 @@ DecodeResult decodeVCubeidF32Vop3(const MachineInst *opcode, const DecodeErrorEm
       "v_cubeid_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_CUBEID_F32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -6371,6 +6552,9 @@ VCubescF32Vop3::VCubescF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -6381,6 +6565,9 @@ DecodeResult decodeVCubescF32Vop3(const MachineInst *opcode, const DecodeErrorEm
       "v_cubesc_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_CUBESC_F32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -6432,6 +6619,9 @@ VCubetcF32Vop3::VCubetcF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -6442,6 +6632,9 @@ DecodeResult decodeVCubetcF32Vop3(const MachineInst *opcode, const DecodeErrorEm
       "v_cubetc_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_CUBETC_F32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -6493,6 +6686,9 @@ VCubemaF32Vop3::VCubemaF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -6503,6 +6699,9 @@ DecodeResult decodeVCubemaF32Vop3(const MachineInst *opcode, const DecodeErrorEm
       "v_cubema_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_CUBEMA_F32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -6554,6 +6753,9 @@ VBfeU32Vop3::VBfeU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -6564,6 +6766,9 @@ DecodeResult decodeVBfeU32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
       "v_bfe_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_BFE_U32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -6615,6 +6820,9 @@ VBfeI32Vop3::VBfeI32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -6625,6 +6833,9 @@ DecodeResult decodeVBfeI32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
       "v_bfe_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_BFE_I32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -6676,6 +6887,9 @@ VBfiB32Vop3::VBfiB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -6686,6 +6900,9 @@ DecodeResult decodeVBfiB32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
       "v_bfi_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_BFI_B32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -6737,6 +6954,9 @@ VFmaF32Vop3::VFmaF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -6747,6 +6967,9 @@ DecodeResult decodeVFmaF32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
       "v_fma_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_FMA_F32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -6784,6 +7007,9 @@ VFmaF64Vop3::VFmaF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -6794,6 +7020,9 @@ DecodeResult decodeVFmaF64Vop3(const MachineInst *opcode, const DecodeErrorEmitt
       "v_fma_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 64, op->src1, 64, op->src2, 64)) [[unlikely]]
+    return emit_error.emit() << "V_FMA_F64 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_FMA_F64 does not support DPP";
@@ -6843,6 +7072,9 @@ VLerpU8Vop3::VLerpU8Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -6853,6 +7085,9 @@ DecodeResult decodeVLerpU8Vop3(const MachineInst *opcode, const DecodeErrorEmitt
       "v_lerp_u8", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_LERP_U8 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -6908,6 +7143,9 @@ VAlignbitB32Vop3::VAlignbitB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
@@ -6920,6 +7158,9 @@ DecodeResult decodeVAlignbitB32Vop3(const MachineInst *opcode,
       "v_alignbit_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 16)) [[unlikely]]
+    return emit_error.emit() << "V_ALIGNBIT_B32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -6975,6 +7216,9 @@ VAlignbyteB32Vop3::VAlignbyteB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
@@ -6987,6 +7231,9 @@ DecodeResult decodeVAlignbyteB32Vop3(const MachineInst *opcode,
       "v_alignbyte_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 16)) [[unlikely]]
+    return emit_error.emit() << "V_ALIGNBYTE_B32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -7038,6 +7285,9 @@ VMullitF32Vop3::VMullitF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
 }
 
 namespace detail {
@@ -7047,6 +7297,9 @@ DecodeResult decodeVMullitF32Vop3(const MachineInst *opcode, const DecodeErrorEm
       "v_mullit_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_MULLIT_F32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -7098,6 +7351,9 @@ VMin3F32Vop3::VMin3F32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -7108,6 +7364,9 @@ DecodeResult decodeVMin3F32Vop3(const MachineInst *opcode, const DecodeErrorEmit
       "v_min3_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_MIN3_F32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -7159,6 +7418,9 @@ VMin3I32Vop3::VMin3I32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -7169,6 +7431,9 @@ DecodeResult decodeVMin3I32Vop3(const MachineInst *opcode, const DecodeErrorEmit
       "v_min3_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_MIN3_I32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -7220,6 +7485,9 @@ VMin3U32Vop3::VMin3U32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -7230,6 +7498,9 @@ DecodeResult decodeVMin3U32Vop3(const MachineInst *opcode, const DecodeErrorEmit
       "v_min3_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_MIN3_U32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -7281,6 +7552,9 @@ VMax3F32Vop3::VMax3F32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -7291,6 +7565,9 @@ DecodeResult decodeVMax3F32Vop3(const MachineInst *opcode, const DecodeErrorEmit
       "v_max3_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_MAX3_F32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -7342,6 +7619,9 @@ VMax3I32Vop3::VMax3I32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -7352,6 +7632,9 @@ DecodeResult decodeVMax3I32Vop3(const MachineInst *opcode, const DecodeErrorEmit
       "v_max3_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_MAX3_I32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -7403,6 +7686,9 @@ VMax3U32Vop3::VMax3U32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -7413,6 +7699,9 @@ DecodeResult decodeVMax3U32Vop3(const MachineInst *opcode, const DecodeErrorEmit
       "v_max3_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_MAX3_U32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -7464,6 +7753,9 @@ VMed3F32Vop3::VMed3F32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -7474,6 +7766,9 @@ DecodeResult decodeVMed3F32Vop3(const MachineInst *opcode, const DecodeErrorEmit
       "v_med3_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_MED3_F32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -7525,6 +7820,9 @@ VMed3I32Vop3::VMed3I32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -7535,6 +7833,9 @@ DecodeResult decodeVMed3I32Vop3(const MachineInst *opcode, const DecodeErrorEmit
       "v_med3_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_MED3_I32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -7586,6 +7887,9 @@ VMed3U32Vop3::VMed3U32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -7596,6 +7900,9 @@ DecodeResult decodeVMed3U32Vop3(const MachineInst *opcode, const DecodeErrorEmit
       "v_med3_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_MED3_U32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -7647,6 +7954,9 @@ VSadU8Vop3::VSadU8Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -7657,6 +7967,9 @@ DecodeResult decodeVSadU8Vop3(const MachineInst *opcode, const DecodeErrorEmitte
       "v_sad_u8", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_SAD_U8 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -7708,6 +8021,9 @@ VSadHiU8Vop3::VSadHiU8Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -7718,6 +8034,9 @@ DecodeResult decodeVSadHiU8Vop3(const MachineInst *opcode, const DecodeErrorEmit
       "v_sad_hi_u8", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_SAD_HI_U8 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -7769,6 +8088,9 @@ VSadU16Vop3::VSadU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -7779,6 +8101,9 @@ DecodeResult decodeVSadU16Vop3(const MachineInst *opcode, const DecodeErrorEmitt
       "v_sad_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_SAD_U16 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -7830,6 +8155,9 @@ VSadU32Vop3::VSadU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -7840,6 +8168,9 @@ DecodeResult decodeVSadU32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
       "v_sad_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_SAD_U32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -7891,6 +8222,9 @@ VCvtPkU8F32Vop3::VCvtPkU8F32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
 }
 
 namespace detail {
@@ -7901,6 +8235,9 @@ DecodeResult decodeVCvtPkU8F32Vop3(const MachineInst *opcode,
       "v_cvt_pk_u8_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_PK_U8_F32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -7935,6 +8272,9 @@ VDivFixupF32Vop3::VDivFixupF32Vop3(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
 }
 
 namespace detail {
@@ -7945,6 +8285,9 @@ DecodeResult decodeVDivFixupF32Vop3(const MachineInst *opcode,
       "v_div_fixup_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_DIV_FIXUP_F32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_DIV_FIXUP_F32 does not support DPP";
@@ -7980,6 +8323,9 @@ VDivFixupF64Vop3::VDivFixupF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
 }
 
 namespace detail {
@@ -7990,6 +8336,9 @@ DecodeResult decodeVDivFixupF64Vop3(const MachineInst *opcode,
       "v_div_fixup_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 64, op->src1, 64, op->src2, 64)) [[unlikely]]
+    return emit_error.emit() << "V_DIV_FIXUP_F64 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_DIV_FIXUP_F64 does not support DPP";
@@ -8025,6 +8374,9 @@ VDivFmasF32Vop3::VDivFmasF32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
 }
 
 namespace detail {
@@ -8035,6 +8387,10 @@ DecodeResult decodeVDivFmasF32Vop3(const MachineInst *opcode,
       "v_div_fmas_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32, true))
+      [[unlikely]]
+    return emit_error.emit() << "V_DIV_FMAS_F32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_DIV_FMAS_F32 does not support DPP";
@@ -8073,6 +8429,9 @@ VDivFmasF64Vop3::VDivFmasF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
 }
 
 namespace detail {
@@ -8083,6 +8442,10 @@ DecodeResult decodeVDivFmasF64Vop3(const MachineInst *opcode,
       "v_div_fmas_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 64, op->src1, 64, op->src2, 64, true))
+      [[unlikely]]
+    return emit_error.emit() << "V_DIV_FMAS_F64 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_DIV_FMAS_F64 does not support DPP";
@@ -8132,6 +8495,9 @@ VMsadU8Vop3::VMsadU8Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -8142,6 +8508,9 @@ DecodeResult decodeVMsadU8Vop3(const MachineInst *opcode, const DecodeErrorEmitt
       "v_msad_u8", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_MSAD_U8 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -8178,6 +8547,9 @@ VQsadPkU16U8Vop3::VQsadPkU16U8Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
 }
 
 namespace detail {
@@ -8188,6 +8560,9 @@ DecodeResult decodeVQsadPkU16U8Vop3(const MachineInst *opcode,
       "v_qsad_pk_u16_u8", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 64, op->src1, 32, op->src2, 64)) [[unlikely]]
+    return emit_error.emit() << "V_QSAD_PK_U16_U8 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_QSAD_PK_U16_U8 does not support DPP";
@@ -8222,6 +8597,9 @@ VMqsadPkU16U8Vop3::VMqsadPkU16U8Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
 }
 
 namespace detail {
@@ -8232,6 +8610,9 @@ DecodeResult decodeVMqsadPkU16U8Vop3(const MachineInst *opcode,
       "v_mqsad_pk_u16_u8", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 64, op->src1, 32, op->src2, 64)) [[unlikely]]
+    return emit_error.emit() << "V_MQSAD_PK_U16_U8 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_MQSAD_PK_U16_U8 does not support DPP";
@@ -8261,6 +8642,9 @@ VMqsadU32U8Vop3::VMqsadU32U8Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
 }
 
 namespace detail {
@@ -8271,6 +8655,9 @@ DecodeResult decodeVMqsadU32U8Vop3(const MachineInst *opcode,
       "v_mqsad_u32_u8", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 64, op->src1, 32, op->src2, 128)) [[unlikely]]
+    return emit_error.emit() << "V_MQSAD_U32_U8 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_MQSAD_U32_U8 does not support DPP";
@@ -8320,6 +8707,9 @@ VXor3B32Vop3::VXor3B32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -8330,6 +8720,9 @@ DecodeResult decodeVXor3B32Vop3(const MachineInst *opcode, const DecodeErrorEmit
       "v_xor3_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_XOR3_B32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -8393,6 +8786,9 @@ VMadU16Vop3::VMadU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   vdst.set_register_byte_mask((amdgpu::vop3_opsel(inst_) & 8u) ? 0xc : 0x3);
   vdst.set_preserve_unwritten_bytes();
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -8408,6 +8804,9 @@ DecodeResult decodeVMadU16Vop3(const MachineInst *opcode, const DecodeErrorEmitt
       "v_mad_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 16, op->src1, 16, op->src2, 16)) [[unlikely]]
+    return emit_error.emit() << "V_MAD_U16 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -8465,6 +8864,9 @@ VPermB32Vop3::VPermB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -8475,6 +8877,9 @@ DecodeResult decodeVPermB32Vop3(const MachineInst *opcode, const DecodeErrorEmit
       "v_perm_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_PERM_B32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -8526,6 +8931,9 @@ VXadU32Vop3::VXadU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -8536,6 +8944,9 @@ DecodeResult decodeVXadU32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
       "v_xad_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_XAD_U32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -8587,6 +8998,9 @@ VLshlAddU32Vop3::VLshlAddU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -8598,6 +9012,9 @@ DecodeResult decodeVLshlAddU32Vop3(const MachineInst *opcode,
       "v_lshl_add_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_LSHL_ADD_U32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -8649,6 +9066,9 @@ VAddLshlU32Vop3::VAddLshlU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -8660,6 +9080,9 @@ DecodeResult decodeVAddLshlU32Vop3(const MachineInst *opcode,
       "v_add_lshl_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_ADD_LSHL_U32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -8723,6 +9146,9 @@ VFmaF16Vop3::VFmaF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   vdst.set_register_byte_mask((amdgpu::vop3_opsel(inst_) & 8u) ? 0xc : 0x3);
   vdst.set_preserve_unwritten_bytes();
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -8735,6 +9161,9 @@ DecodeResult decodeVFmaF16Vop3(const MachineInst *opcode, const DecodeErrorEmitt
       "v_fma_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 16, op->src1, 16, op->src2, 16)) [[unlikely]]
+    return emit_error.emit() << "V_FMA_F16 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -8804,6 +9233,9 @@ VMin3F16Vop3::VMin3F16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -8814,6 +9246,9 @@ DecodeResult decodeVMin3F16Vop3(const MachineInst *opcode, const DecodeErrorEmit
       "v_min3_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 16, op->src1, 16, op->src2, 16)) [[unlikely]]
+    return emit_error.emit() << "V_MIN3_F16 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -8883,6 +9318,9 @@ VMin3I16Vop3::VMin3I16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -8896,6 +9334,9 @@ DecodeResult decodeVMin3I16Vop3(const MachineInst *opcode, const DecodeErrorEmit
       "v_min3_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 16, op->src1, 16, op->src2, 16)) [[unlikely]]
+    return emit_error.emit() << "V_MIN3_I16 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -8965,6 +9406,9 @@ VMin3U16Vop3::VMin3U16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -8978,6 +9422,9 @@ DecodeResult decodeVMin3U16Vop3(const MachineInst *opcode, const DecodeErrorEmit
       "v_min3_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 16, op->src1, 16, op->src2, 16)) [[unlikely]]
+    return emit_error.emit() << "V_MIN3_U16 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -9047,6 +9494,9 @@ VMax3F16Vop3::VMax3F16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -9057,6 +9507,9 @@ DecodeResult decodeVMax3F16Vop3(const MachineInst *opcode, const DecodeErrorEmit
       "v_max3_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 16, op->src1, 16, op->src2, 16)) [[unlikely]]
+    return emit_error.emit() << "V_MAX3_F16 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -9126,6 +9579,9 @@ VMax3I16Vop3::VMax3I16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -9139,6 +9595,9 @@ DecodeResult decodeVMax3I16Vop3(const MachineInst *opcode, const DecodeErrorEmit
       "v_max3_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 16, op->src1, 16, op->src2, 16)) [[unlikely]]
+    return emit_error.emit() << "V_MAX3_I16 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -9208,6 +9667,9 @@ VMax3U16Vop3::VMax3U16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -9221,6 +9683,9 @@ DecodeResult decodeVMax3U16Vop3(const MachineInst *opcode, const DecodeErrorEmit
       "v_max3_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 16, op->src1, 16, op->src2, 16)) [[unlikely]]
+    return emit_error.emit() << "V_MAX3_U16 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -9290,6 +9755,9 @@ VMed3F16Vop3::VMed3F16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -9300,6 +9768,9 @@ DecodeResult decodeVMed3F16Vop3(const MachineInst *opcode, const DecodeErrorEmit
       "v_med3_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 16, op->src1, 16, op->src2, 16)) [[unlikely]]
+    return emit_error.emit() << "V_MED3_F16 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -9369,6 +9840,9 @@ VMed3I16Vop3::VMed3I16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -9382,6 +9856,9 @@ DecodeResult decodeVMed3I16Vop3(const MachineInst *opcode, const DecodeErrorEmit
       "v_med3_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 16, op->src1, 16, op->src2, 16)) [[unlikely]]
+    return emit_error.emit() << "V_MED3_I16 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -9451,6 +9928,9 @@ VMed3U16Vop3::VMed3U16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -9464,6 +9944,9 @@ DecodeResult decodeVMed3U16Vop3(const MachineInst *opcode, const DecodeErrorEmit
       "v_med3_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 16, op->src1, 16, op->src2, 16)) [[unlikely]]
+    return emit_error.emit() << "V_MED3_U16 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -9533,6 +10016,9 @@ VMadI16Vop3::VMadI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   vdst.set_register_byte_mask((amdgpu::vop3_opsel(inst_) & 8u) ? 0xc : 0x3);
   vdst.set_preserve_unwritten_bytes();
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -9548,6 +10034,9 @@ DecodeResult decodeVMadI16Vop3(const MachineInst *opcode, const DecodeErrorEmitt
       "v_mad_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 16, op->src1, 16, op->src2, 16)) [[unlikely]]
+    return emit_error.emit() << "V_MAD_I16 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -9617,6 +10106,9 @@ VDivFixupF16Vop3::VDivFixupF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   vdst.set_register_byte_mask((amdgpu::vop3_opsel(inst_) & 8u) ? 0xc : 0x3);
   vdst.set_preserve_unwritten_bytes();
 }
@@ -9629,6 +10121,9 @@ DecodeResult decodeVDivFixupF16Vop3(const MachineInst *opcode,
       "v_div_fixup_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 16, op->src1, 16, op->src2, 16)) [[unlikely]]
+    return emit_error.emit() << "V_DIV_FIXUP_F16 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -9686,6 +10181,9 @@ VAdd3U32Vop3::VAdd3U32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -9696,6 +10194,9 @@ DecodeResult decodeVAdd3U32Vop3(const MachineInst *opcode, const DecodeErrorEmit
       "v_add3_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_ADD3_U32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -9747,6 +10248,9 @@ VLshlOrB32Vop3::VLshlOrB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -9757,6 +10261,9 @@ DecodeResult decodeVLshlOrB32Vop3(const MachineInst *opcode, const DecodeErrorEm
       "v_lshl_or_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_LSHL_OR_B32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -9808,6 +10315,9 @@ VAndOrB32Vop3::VAndOrB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -9818,6 +10328,9 @@ DecodeResult decodeVAndOrB32Vop3(const MachineInst *opcode, const DecodeErrorEmi
       "v_and_or_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_AND_OR_B32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -9869,6 +10382,9 @@ VOr3B32Vop3::VOr3B32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -9879,6 +10395,9 @@ DecodeResult decodeVOr3B32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
       "v_or3_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_OR3_B32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -9938,6 +10457,9 @@ VMadU32U16Vop3::VMadU32U16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
 }
@@ -9949,6 +10471,9 @@ DecodeResult decodeVMadU32U16Vop3(const MachineInst *opcode, const DecodeErrorEm
       "v_mad_u32_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 16, op->src1, 16, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_MAD_U32_U16 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -10008,6 +10533,9 @@ VMadI32I16Vop3::VMadI32I16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
 }
@@ -10019,6 +10547,9 @@ DecodeResult decodeVMadI32I16Vop3(const MachineInst *opcode, const DecodeErrorEm
       "v_mad_i32_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 16, op->src1, 16, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_MAD_I32_I16 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -10049,6 +10580,7 @@ VPermlane16B32Vop3::VPermlane16B32Vop3(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
 namespace detail {
@@ -10059,6 +10591,9 @@ DecodeResult decodeVPermlane16B32Vop3(const MachineInst *opcode,
       "v_permlane16_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_PERMLANE16_B32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_PERMLANE16_B32 does not support DPP";
@@ -10087,6 +10622,7 @@ VPermlanex16B32Vop3::VPermlanex16B32Vop3(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
 namespace detail {
@@ -10097,6 +10633,9 @@ DecodeResult decodeVPermlanex16B32Vop3(const MachineInst *opcode,
       "v_permlanex16_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_PERMLANEX16_B32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_PERMLANEX16_B32 does not support DPP";
@@ -10151,6 +10690,8 @@ VCndmaskB16Vop3::VCndmaskB16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   src2.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -10164,6 +10705,9 @@ DecodeResult decodeVCndmaskB16Vop3(const MachineInst *opcode,
       "v_cndmask_b16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 16, op->src1, 16, op->src2, 64)) [[unlikely]]
+    return emit_error.emit() << "V_CNDMASK_B16 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -10221,6 +10765,9 @@ VMaxminF32Vop3::VMaxminF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -10231,6 +10778,9 @@ DecodeResult decodeVMaxminF32Vop3(const MachineInst *opcode, const DecodeErrorEm
       "v_maxmin_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_MAXMIN_F32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -10282,6 +10832,9 @@ VMinmaxF32Vop3::VMinmaxF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -10292,6 +10845,9 @@ DecodeResult decodeVMinmaxF32Vop3(const MachineInst *opcode, const DecodeErrorEm
       "v_minmax_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_MINMAX_F32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -10355,6 +10911,9 @@ VMaxminF16Vop3::VMaxminF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -10365,6 +10924,9 @@ DecodeResult decodeVMaxminF16Vop3(const MachineInst *opcode, const DecodeErrorEm
       "v_maxmin_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 16, op->src1, 16, op->src2, 16)) [[unlikely]]
+    return emit_error.emit() << "V_MAXMIN_F16 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -10434,6 +10996,9 @@ VMinmaxF16Vop3::VMinmaxF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -10444,6 +11009,9 @@ DecodeResult decodeVMinmaxF16Vop3(const MachineInst *opcode, const DecodeErrorEm
       "v_minmax_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 16, op->src1, 16, op->src2, 16)) [[unlikely]]
+    return emit_error.emit() << "V_MINMAX_F16 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -10501,6 +11069,9 @@ VMaxminU32Vop3::VMaxminU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -10511,6 +11082,9 @@ DecodeResult decodeVMaxminU32Vop3(const MachineInst *opcode, const DecodeErrorEm
       "v_maxmin_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_MAXMIN_U32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -10562,6 +11136,9 @@ VMinmaxU32Vop3::VMinmaxU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -10572,6 +11149,9 @@ DecodeResult decodeVMinmaxU32Vop3(const MachineInst *opcode, const DecodeErrorEm
       "v_minmax_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_MINMAX_U32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -10623,6 +11203,9 @@ VMaxminI32Vop3::VMaxminI32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -10633,6 +11216,9 @@ DecodeResult decodeVMaxminI32Vop3(const MachineInst *opcode, const DecodeErrorEm
       "v_maxmin_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_MAXMIN_I32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -10684,6 +11270,9 @@ VMinmaxI32Vop3::VMinmaxI32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -10694,6 +11283,9 @@ DecodeResult decodeVMinmaxI32Vop3(const MachineInst *opcode, const DecodeErrorEm
       "v_minmax_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_MINMAX_I32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -10749,6 +11341,9 @@ VDot2F16F16Vop3::VDot2F16F16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
 }
 
 namespace detail {
@@ -10759,6 +11354,9 @@ DecodeResult decodeVDot2F16F16Vop3(const MachineInst *opcode,
       "v_dot2_f16_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 16)) [[unlikely]]
+    return emit_error.emit() << "V_DOT2_F16_F16 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -10820,6 +11418,9 @@ VDot2Bf16Bf16Vop3::VDot2Bf16Bf16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::BF16);
 }
 
@@ -10831,6 +11432,9 @@ DecodeResult decodeVDot2Bf16Bf16Vop3(const MachineInst *opcode,
       "v_dot2_bf16_bf16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 16)) [[unlikely]]
+    return emit_error.emit() << "V_DOT2_BF16_BF16 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -10890,6 +11494,8 @@ VAddNcU16Vop3::VAddNcU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -10961,6 +11567,8 @@ VSubNcU16Vop3::VSubNcU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -11032,6 +11640,8 @@ VMulLoU16Vop3::VMulLoU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -11095,6 +11705,8 @@ VCvtPkI16F32Vop3::VCvtPkI16F32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -11150,6 +11762,8 @@ VCvtPkU16F32Vop3::VCvtPkU16F32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -11213,6 +11827,8 @@ VMaxU16Vop3::VMaxU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -11284,6 +11900,8 @@ VMaxI16Vop3::VMaxI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -11355,6 +11973,8 @@ VMinU16Vop3::VMinU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -11426,6 +12046,8 @@ VMinI16Vop3::VMinI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -11497,6 +12119,8 @@ VAddNcI16Vop3::VAddNcI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -11568,6 +12192,8 @@ VSubNcI16Vop3::VSubNcI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -11639,6 +12265,8 @@ VPackB32F16Vop3::VPackB32F16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -11702,6 +12330,8 @@ VCvtPkNormI16F16Vop3::VCvtPkNormI16F16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -11765,6 +12395,8 @@ VCvtPkNormU16F16Vop3::VCvtPkNormU16F16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -11820,6 +12452,8 @@ VLdexpF32Vop3::VLdexpF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -11875,6 +12509,8 @@ VBfmB32Vop3::VBfmB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -11930,6 +12566,8 @@ VBcntU32B32Vop3::VBcntU32B32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -11985,6 +12623,8 @@ VMbcntLoU32B32Vop3::VMbcntLoU32B32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -12040,6 +12680,8 @@ VMbcntHiU32B32Vop3::VMbcntHiU32B32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -12095,6 +12737,8 @@ VCvtPkNormI16F32Vop3::VCvtPkNormI16F32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -12150,6 +12794,8 @@ VCvtPkNormU16F32Vop3::VCvtPkNormU16F32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -12205,6 +12851,8 @@ VCvtPkU16U32Vop3::VCvtPkU16U32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -12260,6 +12908,8 @@ VCvtPkI16I32Vop3::VCvtPkI16I32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -12315,6 +12965,8 @@ VSubNcI32Vop3::VSubNcI32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -12370,6 +13022,8 @@ VAddNcI32Vop3::VAddNcI32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -12410,6 +13064,8 @@ VAddF64Vop3::VAddF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -12448,6 +13104,8 @@ VMulF64Vop3::VMulF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -12486,6 +13144,8 @@ VMinF64Vop3::VMinF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -12524,6 +13184,8 @@ VMaxF64Vop3::VMaxF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -12561,6 +13223,8 @@ VLdexpF64Vop3::VLdexpF64Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -12597,6 +13261,8 @@ VMulLoU32Vop3::VMulLoU32Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -12633,6 +13299,8 @@ VMulHiU32Vop3::VMulHiU32Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -12669,6 +13337,8 @@ VMulHiI32Vop3::VMulHiI32Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -12706,6 +13376,8 @@ VTrigPreopF64Vop3::VTrigPreopF64Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -12767,6 +13439,8 @@ VLshlrevB16Vop3::VLshlrevB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -12839,6 +13513,8 @@ VLshrrevB16Vop3::VLshrrevB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -12911,6 +13587,8 @@ VAshrrevI16Vop3::VAshrrevI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -12959,6 +13637,8 @@ VLshlrevB64Vop3::VLshlrevB64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -12997,6 +13677,8 @@ VLshrrevB64Vop3::VLshrrevB64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -13035,6 +13717,8 @@ VAshrrevI64Vop3::VAshrrevI64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -13064,6 +13748,7 @@ VReadlaneB32Vop3::VReadlaneB32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
 namespace detail {
@@ -13164,6 +13849,8 @@ VAndB16Vop3::VAndB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -13235,6 +13922,8 @@ VOrB16Vop3::VOrB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -13306,6 +13995,8 @@ VXorB16Vop3::VXorB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -13377,7 +14068,13 @@ VCmpFF16Vop3::VCmpFF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -13441,7 +14138,13 @@ VCmpLtF16Vop3::VCmpLtF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -13505,7 +14208,13 @@ VCmpEqF16Vop3::VCmpEqF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -13569,7 +14278,13 @@ VCmpLeF16Vop3::VCmpLeF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -13633,7 +14348,13 @@ VCmpGtF16Vop3::VCmpGtF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -13697,7 +14418,13 @@ VCmpLgF16Vop3::VCmpLgF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -13761,7 +14488,13 @@ VCmpGeF16Vop3::VCmpGeF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -13825,7 +14558,13 @@ VCmpOF16Vop3::VCmpOF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -13889,7 +14628,13 @@ VCmpUF16Vop3::VCmpUF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -13953,7 +14698,13 @@ VCmpNgeF16Vop3::VCmpNgeF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14017,7 +14768,13 @@ VCmpNlgF16Vop3::VCmpNlgF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14081,7 +14838,13 @@ VCmpNgtF16Vop3::VCmpNgtF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14145,7 +14908,13 @@ VCmpNleF16Vop3::VCmpNleF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14209,7 +14978,13 @@ VCmpNeqF16Vop3::VCmpNeqF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14273,7 +15048,13 @@ VCmpNltF16Vop3::VCmpNltF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14337,7 +15118,13 @@ VCmpTF16Vop3::VCmpTF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14394,6 +15181,8 @@ VCmpFF32Vop3::VCmpFF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14450,6 +15239,8 @@ VCmpLtF32Vop3::VCmpLtF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14506,6 +15297,8 @@ VCmpEqF32Vop3::VCmpEqF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14562,6 +15355,8 @@ VCmpLeF32Vop3::VCmpLeF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14618,6 +15413,8 @@ VCmpGtF32Vop3::VCmpGtF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14674,6 +15471,8 @@ VCmpLgF32Vop3::VCmpLgF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14730,6 +15529,8 @@ VCmpGeF32Vop3::VCmpGeF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14786,6 +15587,8 @@ VCmpOF32Vop3::VCmpOF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14842,6 +15645,8 @@ VCmpUF32Vop3::VCmpUF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14898,6 +15703,8 @@ VCmpNgeF32Vop3::VCmpNgeF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14954,6 +15761,8 @@ VCmpNlgF32Vop3::VCmpNlgF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15010,6 +15819,8 @@ VCmpNgtF32Vop3::VCmpNgtF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15066,6 +15877,8 @@ VCmpNleF32Vop3::VCmpNleF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15122,6 +15935,8 @@ VCmpNeqF32Vop3::VCmpNeqF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15178,6 +15993,8 @@ VCmpNltF32Vop3::VCmpNltF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15234,6 +16051,8 @@ VCmpTF32Vop3::VCmpTF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15275,6 +16094,8 @@ VCmpFF64Vop3::VCmpFF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15314,6 +16135,8 @@ VCmpLtF64Vop3::VCmpLtF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15353,6 +16176,8 @@ VCmpEqF64Vop3::VCmpEqF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15392,6 +16217,8 @@ VCmpLeF64Vop3::VCmpLeF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15431,6 +16258,8 @@ VCmpGtF64Vop3::VCmpGtF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15470,6 +16299,8 @@ VCmpLgF64Vop3::VCmpLgF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15509,6 +16340,8 @@ VCmpGeF64Vop3::VCmpGeF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15548,6 +16381,8 @@ VCmpOF64Vop3::VCmpOF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15587,6 +16422,8 @@ VCmpUF64Vop3::VCmpUF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15626,6 +16463,8 @@ VCmpNgeF64Vop3::VCmpNgeF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15665,6 +16504,8 @@ VCmpNlgF64Vop3::VCmpNlgF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15704,6 +16545,8 @@ VCmpNgtF64Vop3::VCmpNgtF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15743,6 +16586,8 @@ VCmpNleF64Vop3::VCmpNleF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15782,6 +16627,8 @@ VCmpNeqF64Vop3::VCmpNeqF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15821,6 +16668,8 @@ VCmpNltF64Vop3::VCmpNltF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15860,6 +16709,8 @@ VCmpTF64Vop3::VCmpTF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15921,7 +16772,13 @@ VCmpLtI16Vop3::VCmpLtI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -15987,7 +16844,13 @@ VCmpEqI16Vop3::VCmpEqI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -16053,7 +16916,13 @@ VCmpLeI16Vop3::VCmpLeI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -16119,7 +16988,13 @@ VCmpGtI16Vop3::VCmpGtI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -16185,7 +17060,13 @@ VCmpNeI16Vop3::VCmpNeI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -16251,7 +17132,13 @@ VCmpGeI16Vop3::VCmpGeI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -16317,7 +17204,13 @@ VCmpLtU16Vop3::VCmpLtU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -16383,7 +17276,13 @@ VCmpEqU16Vop3::VCmpEqU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -16449,7 +17348,13 @@ VCmpLeU16Vop3::VCmpLeU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -16515,7 +17420,13 @@ VCmpGtU16Vop3::VCmpGtU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -16581,7 +17492,13 @@ VCmpNeU16Vop3::VCmpNeU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -16647,7 +17564,13 @@ VCmpGeU16Vop3::VCmpGeU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -16706,6 +17629,8 @@ VCmpFI32Vop3::VCmpFI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -16762,6 +17687,8 @@ VCmpLtI32Vop3::VCmpLtI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -16818,6 +17745,8 @@ VCmpEqI32Vop3::VCmpEqI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -16874,6 +17803,8 @@ VCmpLeI32Vop3::VCmpLeI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -16930,6 +17861,8 @@ VCmpGtI32Vop3::VCmpGtI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -16986,6 +17919,8 @@ VCmpNeI32Vop3::VCmpNeI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17042,6 +17977,8 @@ VCmpGeI32Vop3::VCmpGeI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17098,6 +18035,8 @@ VCmpTI32Vop3::VCmpTI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17154,6 +18093,8 @@ VCmpFU32Vop3::VCmpFU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17210,6 +18151,8 @@ VCmpLtU32Vop3::VCmpLtU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17266,6 +18209,8 @@ VCmpEqU32Vop3::VCmpEqU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17322,6 +18267,8 @@ VCmpLeU32Vop3::VCmpLeU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17378,6 +18325,8 @@ VCmpGtU32Vop3::VCmpGtU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17434,6 +18383,8 @@ VCmpNeU32Vop3::VCmpNeU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17490,6 +18441,8 @@ VCmpGeU32Vop3::VCmpGeU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17546,6 +18499,8 @@ VCmpTU32Vop3::VCmpTU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17587,6 +18542,8 @@ VCmpFI64Vop3::VCmpFI64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17626,6 +18583,8 @@ VCmpLtI64Vop3::VCmpLtI64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17665,6 +18624,8 @@ VCmpEqI64Vop3::VCmpEqI64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17704,6 +18665,8 @@ VCmpLeI64Vop3::VCmpLeI64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17743,6 +18706,8 @@ VCmpGtI64Vop3::VCmpGtI64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17782,6 +18747,8 @@ VCmpNeI64Vop3::VCmpNeI64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17821,6 +18788,8 @@ VCmpGeI64Vop3::VCmpGeI64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17860,6 +18829,8 @@ VCmpTI64Vop3::VCmpTI64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17899,6 +18870,8 @@ VCmpFU64Vop3::VCmpFU64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17938,6 +18911,8 @@ VCmpLtU64Vop3::VCmpLtU64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17977,6 +18952,8 @@ VCmpEqU64Vop3::VCmpEqU64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -18016,6 +18993,8 @@ VCmpLeU64Vop3::VCmpLeU64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -18055,6 +19034,8 @@ VCmpGtU64Vop3::VCmpGtU64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -18094,6 +19075,8 @@ VCmpNeU64Vop3::VCmpNeU64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -18133,6 +19116,8 @@ VCmpGeU64Vop3::VCmpGeU64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -18172,6 +19157,8 @@ VCmpTU64Vop3::VCmpTU64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -18234,6 +19221,8 @@ VCmpClassF16Vop3::VCmpClassF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -18290,6 +19279,8 @@ VCmpClassF32Vop3::VCmpClassF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -18330,6 +19321,8 @@ VCmpClassF64Vop3::VCmpClassF64Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -18393,8 +19386,14 @@ VCmpxFF16Vop3::VCmpxFF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -18460,8 +19459,14 @@ VCmpxLtF16Vop3::VCmpxLtF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -18527,8 +19532,14 @@ VCmpxEqF16Vop3::VCmpxEqF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -18594,8 +19605,14 @@ VCmpxLeF16Vop3::VCmpxLeF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -18661,8 +19678,14 @@ VCmpxGtF16Vop3::VCmpxGtF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -18728,8 +19751,14 @@ VCmpxLgF16Vop3::VCmpxLgF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -18795,8 +19824,14 @@ VCmpxGeF16Vop3::VCmpxGeF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -18862,8 +19897,14 @@ VCmpxOF16Vop3::VCmpxOF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -18929,8 +19970,14 @@ VCmpxUF16Vop3::VCmpxUF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -18996,8 +20043,14 @@ VCmpxNgeF16Vop3::VCmpxNgeF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -19064,8 +20117,14 @@ VCmpxNlgF16Vop3::VCmpxNlgF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -19132,8 +20191,14 @@ VCmpxNgtF16Vop3::VCmpxNgtF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -19200,8 +20265,14 @@ VCmpxNleF16Vop3::VCmpxNleF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -19268,8 +20339,14 @@ VCmpxNeqF16Vop3::VCmpxNeqF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -19336,8 +20413,14 @@ VCmpxNltF16Vop3::VCmpxNltF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -19404,8 +20487,14 @@ VCmpxTF16Vop3::VCmpxTF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -19465,6 +20554,8 @@ VCmpxFF32Vop3::VCmpxFF32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -19524,6 +20615,8 @@ VCmpxLtF32Vop3::VCmpxLtF32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -19583,6 +20676,8 @@ VCmpxEqF32Vop3::VCmpxEqF32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -19642,6 +20737,8 @@ VCmpxLeF32Vop3::VCmpxLeF32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -19701,6 +20798,8 @@ VCmpxGtF32Vop3::VCmpxGtF32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -19760,6 +20859,8 @@ VCmpxLgF32Vop3::VCmpxLgF32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -19819,6 +20920,8 @@ VCmpxGeF32Vop3::VCmpxGeF32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -19878,6 +20981,8 @@ VCmpxOF32Vop3::VCmpxOF32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -19937,6 +21042,8 @@ VCmpxUF32Vop3::VCmpxUF32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -19996,6 +21103,8 @@ VCmpxNgeF32Vop3::VCmpxNgeF32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -20056,6 +21165,8 @@ VCmpxNlgF32Vop3::VCmpxNlgF32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -20116,6 +21227,8 @@ VCmpxNgtF32Vop3::VCmpxNgtF32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -20176,6 +21289,8 @@ VCmpxNleF32Vop3::VCmpxNleF32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -20236,6 +21351,8 @@ VCmpxNeqF32Vop3::VCmpxNeqF32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -20296,6 +21413,8 @@ VCmpxNltF32Vop3::VCmpxNltF32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -20356,6 +21475,8 @@ VCmpxTF32Vop3::VCmpxTF32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -20400,6 +21521,8 @@ VCmpxFF64Vop3::VCmpxFF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -20442,6 +21565,8 @@ VCmpxLtF64Vop3::VCmpxLtF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -20484,6 +21609,8 @@ VCmpxEqF64Vop3::VCmpxEqF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -20526,6 +21653,8 @@ VCmpxLeF64Vop3::VCmpxLeF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -20568,6 +21697,8 @@ VCmpxGtF64Vop3::VCmpxGtF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -20610,6 +21741,8 @@ VCmpxLgF64Vop3::VCmpxLgF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -20652,6 +21785,8 @@ VCmpxGeF64Vop3::VCmpxGeF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -20694,6 +21829,8 @@ VCmpxOF64Vop3::VCmpxOF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -20736,6 +21873,8 @@ VCmpxUF64Vop3::VCmpxUF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -20778,6 +21917,8 @@ VCmpxNgeF64Vop3::VCmpxNgeF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -20821,6 +21962,8 @@ VCmpxNlgF64Vop3::VCmpxNlgF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -20864,6 +22007,8 @@ VCmpxNgtF64Vop3::VCmpxNgtF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -20907,6 +22052,8 @@ VCmpxNleF64Vop3::VCmpxNleF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -20950,6 +22097,8 @@ VCmpxNeqF64Vop3::VCmpxNeqF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -20993,6 +22142,8 @@ VCmpxNltF64Vop3::VCmpxNltF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -21036,6 +22187,8 @@ VCmpxTF64Vop3::VCmpxTF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -21099,8 +22252,14 @@ VCmpxLtI16Vop3::VCmpxLtI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
@@ -21168,8 +22327,14 @@ VCmpxEqI16Vop3::VCmpxEqI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
@@ -21237,8 +22402,14 @@ VCmpxLeI16Vop3::VCmpxLeI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
@@ -21306,8 +22477,14 @@ VCmpxGtI16Vop3::VCmpxGtI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
@@ -21375,8 +22552,14 @@ VCmpxNeI16Vop3::VCmpxNeI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
@@ -21444,8 +22627,14 @@ VCmpxGeI16Vop3::VCmpxGeI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
@@ -21513,8 +22702,14 @@ VCmpxLtU16Vop3::VCmpxLtU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
@@ -21582,8 +22777,14 @@ VCmpxEqU16Vop3::VCmpxEqU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
@@ -21651,8 +22852,14 @@ VCmpxLeU16Vop3::VCmpxLeU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
@@ -21720,8 +22927,14 @@ VCmpxGtU16Vop3::VCmpxGtU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
@@ -21789,8 +23002,14 @@ VCmpxNeU16Vop3::VCmpxNeU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
@@ -21858,8 +23077,14 @@ VCmpxGeU16Vop3::VCmpxGeU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 1));
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
@@ -21921,6 +23146,8 @@ VCmpxFI32Vop3::VCmpxFI32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -21980,6 +23207,8 @@ VCmpxLtI32Vop3::VCmpxLtI32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -22039,6 +23268,8 @@ VCmpxEqI32Vop3::VCmpxEqI32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -22098,6 +23329,8 @@ VCmpxLeI32Vop3::VCmpxLeI32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -22157,6 +23390,8 @@ VCmpxGtI32Vop3::VCmpxGtI32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -22216,6 +23451,8 @@ VCmpxNeI32Vop3::VCmpxNeI32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -22275,6 +23512,8 @@ VCmpxGeI32Vop3::VCmpxGeI32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -22334,6 +23573,8 @@ VCmpxTI32Vop3::VCmpxTI32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -22393,6 +23634,8 @@ VCmpxFU32Vop3::VCmpxFU32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -22452,6 +23695,8 @@ VCmpxLtU32Vop3::VCmpxLtU32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -22511,6 +23756,8 @@ VCmpxEqU32Vop3::VCmpxEqU32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -22570,6 +23817,8 @@ VCmpxLeU32Vop3::VCmpxLeU32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -22629,6 +23878,8 @@ VCmpxGtU32Vop3::VCmpxGtU32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -22688,6 +23939,8 @@ VCmpxNeU32Vop3::VCmpxNeU32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -22747,6 +24000,8 @@ VCmpxGeU32Vop3::VCmpxGeU32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -22806,6 +24061,8 @@ VCmpxTU32Vop3::VCmpxTU32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -22850,6 +24107,8 @@ VCmpxFI64Vop3::VCmpxFI64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -22892,6 +24151,8 @@ VCmpxLtI64Vop3::VCmpxLtI64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -22934,6 +24195,8 @@ VCmpxEqI64Vop3::VCmpxEqI64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -22976,6 +24239,8 @@ VCmpxLeI64Vop3::VCmpxLeI64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -23018,6 +24283,8 @@ VCmpxGtI64Vop3::VCmpxGtI64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -23060,6 +24327,8 @@ VCmpxNeI64Vop3::VCmpxNeI64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -23102,6 +24371,8 @@ VCmpxGeI64Vop3::VCmpxGeI64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -23144,6 +24415,8 @@ VCmpxTI64Vop3::VCmpxTI64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -23186,6 +24459,8 @@ VCmpxFU64Vop3::VCmpxFU64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -23228,6 +24503,8 @@ VCmpxLtU64Vop3::VCmpxLtU64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -23270,6 +24547,8 @@ VCmpxEqU64Vop3::VCmpxEqU64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -23312,6 +24591,8 @@ VCmpxLeU64Vop3::VCmpxLeU64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -23354,6 +24635,8 @@ VCmpxGtU64Vop3::VCmpxGtU64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -23396,6 +24679,8 @@ VCmpxNeU64Vop3::VCmpxNeU64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -23438,6 +24723,8 @@ VCmpxGeU64Vop3::VCmpxGeU64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -23480,6 +24767,8 @@ VCmpxTU64Vop3::VCmpxTU64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -23545,6 +24834,8 @@ VCmpxClassF16Vop3::VCmpxClassF16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -23605,6 +24896,8 @@ VCmpxClassF32Vop3::VCmpxClassF32Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -23649,6 +24942,8 @@ VCmpxClassF64Vop3::VCmpxClassF64Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -23709,6 +25004,8 @@ VAddCoCiU32Vop3SdstEnc::VAddCoCiU32Vop3SdstEnc(const MachineInst *inst)
   }
   sdst.set_wave_mask();
   src2.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -23720,6 +25017,9 @@ DecodeResult decodeVAddCoCiU32Vop3SdstEnc(const MachineInst *opcode,
       "v_add_co_ci_u32", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 64)) [[unlikely]]
+    return emit_error.emit() << "V_ADD_CO_CI_U32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3SdstEncVopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -23771,6 +25071,8 @@ VSubCoCiU32Vop3SdstEnc::VSubCoCiU32Vop3SdstEnc(const MachineInst *inst)
   }
   sdst.set_wave_mask();
   src2.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -23782,6 +25084,9 @@ DecodeResult decodeVSubCoCiU32Vop3SdstEnc(const MachineInst *opcode,
       "v_sub_co_ci_u32", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 64)) [[unlikely]]
+    return emit_error.emit() << "V_SUB_CO_CI_U32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3SdstEncVopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -23833,6 +25138,8 @@ VSubrevCoCiU32Vop3SdstEnc::VSubrevCoCiU32Vop3SdstEnc(const MachineInst *inst)
   }
   sdst.set_wave_mask();
   src2.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -23844,6 +25151,9 @@ DecodeResult decodeVSubrevCoCiU32Vop3SdstEnc(const MachineInst *opcode,
       "v_subrev_co_ci_u32", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 64)) [[unlikely]]
+    return emit_error.emit() << "V_SUBREV_CO_CI_U32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3SdstEncVopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -23881,6 +25191,9 @@ VDivScaleF32Vop3SdstEnc::VDivScaleF32Vop3SdstEnc(const MachineInst *inst)
                    static_cast<int>(
                        reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32));
   sdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
 }
 
 namespace detail {
@@ -23891,6 +25204,9 @@ DecodeResult decodeVDivScaleF32Vop3SdstEnc(const MachineInst *opcode,
       "v_div_scale_f32", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 32)) [[unlikely]]
+    return emit_error.emit() << "V_DIV_SCALE_F32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst)->src0))
       [[unlikely]]
@@ -23933,6 +25249,9 @@ VDivScaleF64Vop3SdstEnc::VDivScaleF64Vop3SdstEnc(const MachineInst *inst)
             reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   sdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
 }
 
 namespace detail {
@@ -23943,6 +25262,9 @@ DecodeResult decodeVDivScaleF64Vop3SdstEnc(const MachineInst *opcode,
       "v_div_scale_f64", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 64, op->src1, 64, op->src2, 64)) [[unlikely]]
+    return emit_error.emit() << "V_DIV_SCALE_F64 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst)->src0))
       [[unlikely]]
@@ -23981,6 +25303,9 @@ VMadU64U32Vop3SdstEnc::VMadU64U32Vop3SdstEnc(const MachineInst *inst)
             reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   sdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
 }
 
 namespace detail {
@@ -23991,6 +25316,9 @@ DecodeResult decodeVMadU64U32Vop3SdstEnc(const MachineInst *opcode,
       "v_mad_u64_u32", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 64)) [[unlikely]]
+    return emit_error.emit() << "V_MAD_U64_U32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst)->src0))
       [[unlikely]]
@@ -24029,6 +25357,9 @@ VMadI64I32Vop3SdstEnc::VMadI64I32Vop3SdstEnc(const MachineInst *inst)
             reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   sdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
 }
 
 namespace detail {
@@ -24039,6 +25370,9 @@ DecodeResult decodeVMadI64I32Vop3SdstEnc(const MachineInst *opcode,
       "v_mad_i64_i32", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (const auto *op = reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst);
+      !amdgpu::gfx115_scalar_sources_fit(op->src0, 32, op->src1, 32, op->src2, 64)) [[unlikely]]
+    return emit_error.emit() << "V_MAD_I64_I32 exceeds the scalar source limit";
   if (reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst)->src0))
       [[unlikely]]
@@ -24086,6 +25420,8 @@ VAddCoU32Vop3SdstEnc::VAddCoU32Vop3SdstEnc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -24145,6 +25481,8 @@ VSubCoU32Vop3SdstEnc::VSubCoU32Vop3SdstEnc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -24204,6 +25542,8 @@ VSubrevCoU32Vop3SdstEnc::VSubrevCoU32Vop3SdstEnc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst.set_wave_mask();
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 

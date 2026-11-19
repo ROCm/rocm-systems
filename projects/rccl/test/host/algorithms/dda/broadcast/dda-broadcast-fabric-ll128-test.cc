@@ -1,20 +1,21 @@
 /*************************************************************************
  * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
- * Host-only microtests for src/algorithms/dda/broadcast/dda_broadcast_fabric_ll128.cu:
- * eligibility checks (comm resources, rank bounds, alignment, scratch capacity,
- * two-shot threshold), geometry helpers (chunk slices, slot slices), block count,
- * thread-count override via RCCL_DDA_LL128_BC_THREADS, arch-table thread count,
- * fan-out param forwarding, and the kernel launch arguments.
+ * See LICENSE.txt for license information
  ************************************************************************/
+
+// Host-only microtests for src/algorithms/dda/broadcast/dda_broadcast_fabric_ll128.cu: the per-arch slice and
+// threads override, the root/non-root grids, rank-uniform eligibility, and the launch.
 
 #include <gtest/gtest.h>
 
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <map>
+#include <memory>
 #include <string>
+#include <tuple>
+#include <utility>
 
 #include "../common/DdaFabricTestHelpers.hpp"
 #include "algorithms/dda/DdaCollSeams.h"
@@ -22,10 +23,9 @@
 
 #include "fakes/param_redirect.h"
 
+// The LL launcher defines ncclBroadcastDdaBlockBudget, shared with LL128.
+#include DDA_BROADCAST_FABRIC_LL_CC_PATH
 #include DDA_BROADCAST_FABRIC_LL128_CC_PATH
-#include "../common/ScopedEnv.hpp"
-
-using RcclUnitTesting::ScopedEnv;
 
 #undef hipExtLaunchKernelGGL
 
@@ -128,6 +128,24 @@ TEST(DdaBroadcastLL128GeomHelpers, SlotSlicesCs1HasNoConservatism) {
 // ---------------------------------------------------------------------------
 
 
+
+
+constexpr int kRank = 5;
+constexpr int kOtherRoot = 0;
+// Payload per slice: gfx9 64B lines on wave64, gfx1250 128B lines on wave32.
+constexpr size_t kGfx9Slice = 3584;
+constexpr size_t kGfx1250Slice = 1920;
+// One group per block at the default 512 threads: 8 gfx9 slices, 16 gfx1250 slices.
+constexpr size_t kGfx9Group = 8 * kGfx9Slice;
+constexpr size_t kGfx1250Group = 16 * kGfx1250Slice;
+
+template <bool kAligned>
+const void* Kernel() {
+  return KernelPtr(&dda::common::ddaBroadcastFabricLL128<kAligned>);
+}
+
+void* Addr(uintptr_t a) { return reinterpret_cast<void*>(a); }
+
 class DdaBroadcastFabricLL128Microtest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -136,9 +154,16 @@ class DdaBroadcastFabricLL128Microtest : public ::testing::Test {
       auto it = params_.find(env);
       return it == params_.end() ? deftVal : it->second;
     };
-    comm().nRanks = 4;
-    comm().rank = 0;
+    // LL128 is off with no arch table; open the threshold so it is not under test.
+    g_rcclDdaLL128Threshold = [](const ncclComm*, ncclFunc_t) { return size_t{64} << 20; };
+    SetArch("gfx950");
+    comm().WarpSize = 64;
+    comm().rank = kRank;
     comm().addonStopEvent = kStopEvent;
+    comm().cuCount = 128;
+    // Allow ncclInt8 through the two-shot datatype gate so grid tests can use
+    // large byte counts (>= kDdaLL128BcTwoShotMin) without hitting ncclInvalidArgument.
+    g_rcclDdaDatatypeSupported = [](const ncclComm*, ncclDataType_t) { return true; };
   }
 
   void TearDown() override {
@@ -149,275 +174,323 @@ class DdaBroadcastFabricLL128Microtest : public ::testing::Test {
 
   ncclComm& comm() { return mock_.comm; }
 
-  bool Eligible(size_t count, ncclDataType_t datatype = ncclFloat32) {
+  void SetArch(const char* arch) { comm().archName = const_cast<char*>(arch); }
+
+  // int8 so count is bytes; broadcast is datatype-agnostic.
+  bool Eligible(size_t count, ncclDataType_t datatype = ncclInt8) {
     return ncclBroadcastDdaFabricLL128Eligible(mock_.get(), count, datatype);
   }
 
-  ncclResult_t Run(size_t count, ncclDataType_t datatype = ncclFloat32, int root = 0) {
-    return ncclBroadcastDdaFabricLL128(kSendbuff, kRecvbuff, count, datatype, root, mock_.get(), kStream);
+  uint32_t Blocks(size_t count, ncclDataType_t datatype = ncclInt8) {
+    return ncclBroadcastDdaFabricLL128Blocks(mock_.get(), count, datatype);
   }
 
-  const DdaLaunch& RunOne(size_t count, int root = 0) {
+  ncclResult_t Run(int root, size_t count, const void* sendbuff = kSendbuff, void* recvbuff = kRecvbuff,
+                   ncclDataType_t datatype = ncclInt8) {
+    return ncclBroadcastDdaFabricLL128(sendbuff, recvbuff, count, datatype, root, mock_.get(), kStream);
+  }
+
+  DdaLaunch RunOne(int root, size_t count, const void* sendbuff = kSendbuff, void* recvbuff = kRecvbuff) {
     g_ddaLaunches.clear();
-    EXPECT_EQ(Run(count, ncclFloat32, root), ncclSuccess);
+    comm().addonStopEvent = kStopEvent;
+    EXPECT_EQ(Run(root, count, sendbuff, recvbuff), ncclSuccess);
     EXPECT_EQ(g_ddaLaunches.size(), 1u);
-    return g_ddaLaunches.at(0);
+    return g_ddaLaunches.empty() ? DdaLaunch{} : g_ddaLaunches.back();
   }
 
   DdaFabricMockComm mock_;
   std::map<std::string, int64_t> params_;
 };
 
-// ---------------------------------------------------------------------------
-// Eligibility tests
-// ---------------------------------------------------------------------------
-
-TEST_F(DdaBroadcastFabricLL128Microtest, Eligible_BaselineFp32) {
-  EXPECT_TRUE(Eligible(4));
+TEST_F(DdaBroadcastFabricLL128Microtest, Launch_ThreadsOverrideMustBeAnArchWarpMultipleUpTo512) {
+  const std::pair<int64_t, unsigned> wave64[] = {{512, 512}, {64, 64},   {256, 256}, {32, 512},
+                                                 {96, 512},  {576, 512}, {0, 512},   {-64, 512}};
+  for (const auto& [env, threads] : wave64) {
+    params_["RCCL_DDA_LL128_BC_THREADS"] = env;
+    EXPECT_EQ(RunOne(kOtherRoot, 16).block.x, threads) << "gfx950 DDA_LL128_BC_THREADS " << env;
+  }
+  // The warp follows the arch, not comm->WarpSize.
+  SetArch("gfx1250");
+  comm().WarpSize = 64;
+  const std::pair<int64_t, unsigned> wave32[] = {{32, 32}, {96, 96}, {16, 512}, {48, 512}, {1024, 512}};
+  for (const auto& [env, threads] : wave32) {
+    params_["RCCL_DDA_LL128_BC_THREADS"] = env;
+    EXPECT_EQ(RunOne(kOtherRoot, 16).block.x, threads) << "gfx1250 DDA_LL128_BC_THREADS " << env;
+  }
 }
 
-TEST_F(DdaBroadcastFabricLL128Microtest, Eligible_NullCommOrBootstrapRejects) {
-  EXPECT_FALSE(ncclBroadcastDdaFabricLL128Eligible(nullptr, 4, ncclFloat32));
-  comm().bootstrap = nullptr;
-  EXPECT_FALSE(Eligible(4));
+TEST_F(DdaBroadcastFabricLL128Microtest, Launch_NonRootGroupsAreWarpsOfArchSlices) {
+  const std::pair<size_t, unsigned> gfx9[] = {
+      {16, 1}, {kGfx9Group, 1}, {kGfx9Group + 16, 2}, {8 * kGfx9Group, 8}, {9 * kGfx9Group, 9}};
+  for (const auto& [bytes, groups] : gfx9) {
+    const DdaLaunch launch = RunOne(kOtherRoot, bytes);
+    EXPECT_EQ(launch.grid.x, groups) << "gfx950 bytes " << bytes;
+    EXPECT_EQ(launch.grid.y, 1u) << "gfx950 bytes " << bytes;
+  }
+  // Four warps per block at 256 threads.
+  params_["RCCL_DDA_LL128_BC_THREADS"] = 256;
+  EXPECT_EQ(RunOne(kOtherRoot, 4 * kGfx9Slice).grid.x, 1u);
+  EXPECT_EQ(RunOne(kOtherRoot, 4 * kGfx9Slice + 16).grid.x, 2u);
+  params_.erase("RCCL_DDA_LL128_BC_THREADS");
+  SetArch("gfx1250");
+  EXPECT_EQ(RunOne(kOtherRoot, kGfx1250Group).grid.x, 1u);
+  EXPECT_EQ(RunOne(kOtherRoot, kGfx1250Group + 16).grid.x, 2u);
 }
 
-TEST_F(DdaBroadcastFabricLL128Microtest, Eligible_NeedsAllFabricResources) {
+TEST_F(DdaBroadcastFabricLL128Microtest, Launch_NonRootGroupsCappedByBudget) {
+  // 9 * kGfx9Group = 258048 < kDdaLL128BcTwoShotMin=262144: stays in one-shot.
+  // 9 natural groups are capped to 3 by the budget.
+  params_["RCCL_DDA_BC_MAX_BLOCKS"] = 3;
+  EXPECT_EQ(RunOne(kOtherRoot, 9 * kGfx9Group).grid.x, 3u);
+  EXPECT_EQ(RunOne(kOtherRoot, 2 * kGfx9Group).grid.x, 2u);
+}
+
+TEST_F(DdaBroadcastFabricLL128Microtest, Launch_RootGetsOneColumnPerPeerAndGroupRows) {
+  const std::tuple<int, size_t, unsigned, unsigned> cases[] = {
+      {8, 16, 7, 1},       {8, 8 * kGfx9Group, 7, 8},   {8, 9 * kGfx9Group, 7, 9},
+      {2, 8 * kGfx9Group, 1, 8}, {144, 8 * kGfx9Group, 143, 1}};
+  for (const auto& [nRanks, bytes, x, y] : cases) {
+    comm().nRanks = nRanks;
+    const DdaLaunch launch = RunOne(kRank, bytes);
+    EXPECT_EQ(launch.grid.x, x) << "nRanks " << nRanks << " bytes " << bytes;
+    EXPECT_EQ(launch.grid.y, y) << "nRanks " << nRanks << " bytes " << bytes;
+  }
+}
+
+TEST_F(DdaBroadcastFabricLL128Microtest, Launch_RootSplitsBudgetAcrossPeersAtLeastOneRow) {
+  const std::pair<int64_t, unsigned> cases[] = {{21, 3}, {14, 2}, {13, 1}, {3, 1}};
+  for (const auto& [budget, rows] : cases) {
+    params_["RCCL_DDA_BC_MAX_BLOCKS"] = budget;
+    const DdaLaunch launch = RunOne(kRank, 8 * kGfx9Group);
+    EXPECT_EQ(launch.grid.x, 7u) << "budget " << budget;
+    EXPECT_EQ(launch.grid.y, rows) << "budget " << budget;
+  }
+}
+
+TEST_F(DdaBroadcastFabricLL128Microtest, Blocks_IsTheRootGridSize) {
+  EXPECT_EQ(Blocks(16), 7u);
+  EXPECT_EQ(Blocks(8 * kGfx9Group), 56u);
+  params_["RCCL_DDA_BC_MAX_BLOCKS"] = 14;
+  EXPECT_EQ(Blocks(8 * kGfx9Group), 14u);
+}
+
+TEST_F(DdaBroadcastFabricLL128Microtest, Blocks_SizedOnBytesNotElements) {
+  EXPECT_EQ(Blocks(2 * kGfx9Group, ncclInt8), 14u);
+  EXPECT_EQ(Blocks(2 * kGfx9Group, ncclFloat32), 56u);
+}
+
+TEST_F(DdaBroadcastFabricLL128Microtest, Blocks_FollowArchSliceSize) {
+  EXPECT_EQ(Blocks(kGfx9Group + 16), 14u);
+  SetArch("gfx1250");
+  EXPECT_EQ(Blocks(kGfx9Group + 16), 7u);
+}
+
+// gfx9 stays off until a cross-GPU gfx9 data test exists.
+TEST_F(DdaBroadcastFabricLL128Microtest, Eligible_Gfx1250Only) {
+  for (const char* arch : {"gfx950", "gfx942"}) {
+    SetArch(arch);
+    EXPECT_FALSE(Eligible(16)) << arch;
+  }
+  SetArch("gfx1250");
+  EXPECT_TRUE(Eligible(16));
+}
+
+// IPC scratch has no fabric handler.
+TEST_F(DdaBroadcastFabricLL128Microtest, Eligible_RejectsIpcScratch) {
+  SetArch("gfx1250");
+  mock_.setFabricResourcesPresent(true);
+  comm().ddaFabricMemHandler = nullptr;
+  comm().ddaIpcMemHandler = reinterpret_cast<ncclIpcMemHandler*>(0x1);
+  EXPECT_FALSE(Eligible(16));
+  comm().ddaIpcMemHandler = nullptr;
+}
+
+TEST_F(DdaBroadcastFabricLL128Microtest, Eligible_NeedsScratchPeersAndEpoch) {
+  SetArch("gfx1250");
+  EXPECT_FALSE(ncclBroadcastDdaFabricLL128Eligible(nullptr, 16, ncclInt8));
   for (int missing = 0; missing < 5; ++missing) {
     mock_.setFabricResourcesPresent(true);
-    comm().ddaFabricMemHandler = missing == 0 ? nullptr : comm().ddaFabricMemHandler;
-    comm().ddaScratch          = missing == 1 ? nullptr : comm().ddaScratch;
-    comm().ddaPeerPtrsDev      = missing == 2 ? nullptr : comm().ddaPeerPtrsDev;
-    comm().ddaLLEpochDev       = missing == 3 ? nullptr : comm().ddaLLEpochDev;
-    comm().ddaLLEpochLen       = missing == 4 ? 0        : comm().ddaLLEpochLen;
-    EXPECT_FALSE(Eligible(4)) << "missing resource " << missing;
+    comm().ddaFabricMemHandler = missing == 4 ? nullptr : comm().ddaFabricMemHandler;
+    comm().ddaScratch = missing == 0 ? nullptr : comm().ddaScratch;
+    comm().ddaPeerPtrsDev = missing == 1 ? nullptr : comm().ddaPeerPtrsDev;
+    comm().ddaLLEpochDev = missing == 2 ? nullptr : comm().ddaLLEpochDev;
+    comm().ddaLLEpochLen = missing == 3 ? 0 : comm().ddaLLEpochLen;
+    EXPECT_FALSE(Eligible(16)) << "missing resource " << missing;
   }
+}
+
+TEST_F(DdaBroadcastFabricLL128Microtest, Eligible_RanksFromTwoTo144) {
+  SetArch("gfx1250");
+  comm().nRanks = 1;
+  EXPECT_FALSE(Eligible(16));
+  comm().nRanks = 2;
+  EXPECT_TRUE(Eligible(16));
+  comm().nRanks = 144;
+  EXPECT_TRUE(Eligible(16));
+  comm().nRanks = 145;
+  EXPECT_FALSE(Eligible(16));
 }
 
 TEST_F(DdaBroadcastFabricLL128Microtest, Eligible_ZeroCountRejects) {
+  SetArch("gfx1250");
   EXPECT_FALSE(Eligible(0));
 }
 
-TEST_F(DdaBroadcastFabricLL128Microtest, Eligible_RankBoundsEnforced) {
-  comm().nRanks = 1;
-  EXPECT_FALSE(Eligible(4));
-  comm().nRanks = 2;
-  EXPECT_TRUE(Eligible(4));
-  comm().nRanks = 144;
-  EXPECT_TRUE(Eligible(4));
-  comm().nRanks = 145;
-  EXPECT_FALSE(Eligible(4));
-}
-
-TEST_F(DdaBroadcastFabricLL128Microtest, Eligible_SupportedDatatypesOnly) {
-  EXPECT_TRUE(Eligible(8, ncclFloat16));
-  EXPECT_TRUE(Eligible(8, ncclBfloat16));
-  EXPECT_TRUE(Eligible(16, ncclFloat8e4m3));
-  EXPECT_TRUE(Eligible(16, ncclFloat8e5m2));
-  for (ncclDataType_t dt : {ncclInt8, ncclUint8, ncclInt32, ncclUint32, ncclInt64, ncclUint64, ncclFloat64}) {
-    EXPECT_FALSE(Eligible(16, dt)) << "datatype " << dt;
+TEST_F(DdaBroadcastFabricLL128Microtest, Eligible_BytesMultipleOf16ForAnyDatatype) {
+  SetArch("gfx1250");
+  EXPECT_FALSE(Eligible(8));
+  EXPECT_FALSE(Eligible(24));
+  EXPECT_FALSE(Eligible(2, ncclFloat32));
+  EXPECT_FALSE(Eligible(12, ncclFloat16));
+  for (const auto& [count, datatype] : {std::pair{16, ncclInt8}, std::pair{4, ncclUint32}, std::pair{4, ncclFloat32},
+                                        std::pair{8, ncclBfloat16}, std::pair{2, ncclFloat64}}) {
+    EXPECT_TRUE(Eligible(count, datatype)) << "datatype " << datatype;
   }
 }
 
-TEST_F(DdaBroadcastFabricLL128Microtest, Eligible_BytesMustBe16ByteAligned) {
-  // ncclFloat32 = 4 bytes/element; 3 elements = 12 bytes — not 16-aligned
-  EXPECT_FALSE(Eligible(3, ncclFloat32));
-  EXPECT_TRUE(Eligible(4, ncclFloat32));
-  // ncclFloat16 = 2 bytes; 6 elements = 12 bytes — not 16-aligned
-  EXPECT_FALSE(Eligible(6, ncclFloat16));
-  EXPECT_TRUE(Eligible(8, ncclFloat16));
-}
-
-TEST_F(DdaBroadcastFabricLL128Microtest, Eligible_ScratchCapacityGates) {
-  // 4 ranks, 1 chunk slice => need 2*(nRanks+1)*kSliceWire = 2*5*kSliceWire total scratch
-  comm().ddaScratchBytes = 2 * 5 * kSliceWire;
-  EXPECT_TRUE(Eligible(kSliceData / 4));
-  // One byte short
-  comm().ddaScratchBytes = 2 * 5 * kSliceWire - 1;
-  EXPECT_FALSE(Eligible(kSliceData / 4));
-}
-
-// ---------------------------------------------------------------------------
-// Launch tests — grid geometry
-// ---------------------------------------------------------------------------
-
-TEST_F(DdaBroadcastFabricLL128Microtest, Launch_GridXIsNPeers) {
-  for (int nRanks : {2, 4, 8, 16}) {
-    comm().nRanks = nRanks;
-    const DdaLaunch& launch = RunOne(4);
-    EXPECT_EQ(launch.grid.x, static_cast<unsigned>(nRanks - 1)) << "nRanks=" << nRanks;
-  }
-}
-
-TEST_F(DdaBroadcastFabricLL128Microtest, Launch_BlocksPerPeerGrowsWithSlices) {
-  // 512 threads = 16 warps, nPeers=3: bpp = ceil(ceil(totalSlices/3) / 16).
-  // Transition at totalSlices=49: cs=17 -> bpp=2; at 48: cs=16 -> bpp=1.
-  EXPECT_EQ(RunOne(48 * kSliceData / 4).grid.y, 1u);
-  EXPECT_EQ(RunOne(49 * kSliceData / 4).grid.y, 2u);
-}
-
-TEST_F(DdaBroadcastFabricLL128Microtest, Launch_MaxBlocksTooSmallStillGivesOneBpp) {
-  comm().ddaFabricMaxBlocks = 2;  // less than nPeers=3
-  const DdaLaunch& launch = RunOne(1u << 20);
-  EXPECT_GE(launch.grid.x, 1u);
-  EXPECT_EQ(launch.grid.y, 1u);
-}
-
-TEST_F(DdaBroadcastFabricLL128Microtest, Launch_GridTotalNeverExceedsMaxBlocks) {
-  // grid.x * grid.y must never exceed ddaFabricMaxBlocks regardless of cap value.
-  // Large message (1 MiB float32) produces many slices so bpp would be unconstrained.
-  for (unsigned cap : {3u, 4u, 6u, 1024u}) {
-    comm().ddaFabricMaxBlocks = cap;
-    const DdaLaunch& l = RunOne(size_t{1} << 18);  // 262144 float32 elements = 1 MiB
-    EXPECT_LE(l.grid.x * l.grid.y, cap) << "ddaFabricMaxBlocks=" << cap;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Launch tests — thread count
-// ---------------------------------------------------------------------------
-
-TEST_F(DdaBroadcastFabricLL128Microtest, Launch_ThreadsDefaultIs512) {
-  EXPECT_EQ(RunOne(4).block.x, 512u);
-}
-
-TEST_F(DdaBroadcastFabricLL128Microtest, Launch_ThreadsEnvVarOverridesDefault) {
-  ScopedEnv envGuard("RCCL_DDA_LL128_BC_THREADS", "");
-  const std::pair<int64_t, unsigned> cases[] = {
-      {256, 256}, {32, 32}, {512, 512},
-      {16,  512},   // not a warp multiple -> fall back
-      {0,   512},   // zero -> fall back
-      {-32, 512},   // negative -> fall back
-      {1024, 512},  // > kDdaBcMaxThreads=512 -> fall back
+TEST_F(DdaBroadcastFabricLL128Microtest, Eligible_UpToBroadcastLL128Threshold) {
+  SetArch("gfx1250");
+  ncclFunc_t seenFunc = ncclFuncSendRecv;
+  g_rcclDdaLL128Threshold = [&](const ncclComm* c, ncclFunc_t func) {
+    EXPECT_EQ(c, mock_.get());
+    seenFunc = func;
+    return size_t{1024};
   };
-  for (const auto& [env, expected] : cases) {
-    params_["RCCL_DDA_LL128_BC_THREADS"] = env;
-    EXPECT_EQ(RunOne(4).block.x, expected) << "RCCL_DDA_LL128_BC_THREADS=" << env;
+  EXPECT_TRUE(Eligible(1024));
+  EXPECT_EQ(seenFunc, ncclFuncBroadcast);
+  EXPECT_FALSE(Eligible(1040));
+}
+
+TEST_F(DdaBroadcastFabricLL128Microtest, Eligible_SlicesMustFitBankAfterTokenRegion) {
+  // 256-word slices; 8 rank tokens pad to one slice, so a 528-word bank leaves one (two if unpadded).
+  SetArch("gfx1250");
+  comm().ddaScratchBytes = 2 * 528 * 8;
+  EXPECT_TRUE(Eligible(kGfx1250Slice));
+  EXPECT_FALSE(Eligible(kGfx1250Slice + 16));
+  // 144 rank tokens pad to two slices: none left in a 528-word bank, one in a 768-word bank.
+  comm().nRanks = 144;
+  EXPECT_FALSE(Eligible(16));
+  comm().ddaScratchBytes = 2 * 768 * 8;
+  EXPECT_TRUE(Eligible(kGfx1250Slice));
+  EXPECT_FALSE(Eligible(kGfx1250Slice + 16));
+}
+
+TEST_F(DdaBroadcastFabricLL128Microtest, Eligible_TokenRegionKeepsDataSliceAndLineAligned) {
+  for (const char* arch : {"gfx1250", "gfx950"}) {
+    SetArch(arch);
+    const size_t sliceBytes = ddaLL128BcArch(mock_.get()).sliceWords * sizeof(uint64_t);
+    for (int nRanks = 2; nRanks <= 144; ++nRanks) {
+      const size_t offset = dda::common::ddaLL128BcTokenWords(nRanks, sliceBytes / sizeof(uint64_t)) * sizeof(uint64_t);
+      EXPECT_GE(offset, 16u * nRanks) << arch << " nRanks " << nRanks;
+      EXPECT_EQ(offset % 128, 0u) << arch << " nRanks " << nRanks;
+      EXPECT_EQ(offset % sliceBytes, 0u) << arch << " nRanks " << nRanks;
+    }
   }
 }
+
+TEST_F(DdaBroadcastFabricLL128Microtest, Eligible_RootGridMustFitEpoch) {
+  // Root grid 7 x 8; non-root 8.
+  SetArch("gfx1250");
+  comm().ddaLLEpochLen = 56;
+  EXPECT_TRUE(Eligible(8 * kGfx1250Group));
+  comm().ddaLLEpochLen = 55;
+  EXPECT_FALSE(Eligible(8 * kGfx1250Group));
+}
+
+TEST_F(DdaBroadcastFabricLL128Microtest, Eligible_NonRootGridMustFitEpoch) {
+  // Budget 5 on 4 ranks: root grid 3 x 1, non-root 5.
+  SetArch("gfx1250");
+  comm().nRanks = 4;
+  params_["RCCL_DDA_BC_MAX_BLOCKS"] = 5;
+  comm().ddaLLEpochLen = 5;
+  EXPECT_TRUE(Eligible(8 * kGfx1250Group));
+  comm().ddaLLEpochLen = 4;
+  EXPECT_FALSE(Eligible(8 * kGfx1250Group));
+}
+
+TEST_F(DdaBroadcastFabricLL128Microtest, Eligible_SameAnswerOnEveryRank) {
+  SetArch("gfx1250");
+  for (int epochLen : {55, 56}) {
+    comm().ddaLLEpochLen = epochLen;
+    comm().rank = 0;
+    const bool expected = Eligible(8 * kGfx1250Group);
+    for (int rank = 1; rank < comm().nRanks; ++rank) {
+      comm().rank = rank;
+      EXPECT_EQ(Eligible(8 * kGfx1250Group), expected) << "epochLen " << epochLen << " rank " << rank;
+    }
+  }
+}
+
+TEST_F(DdaBroadcastFabricLL128Microtest, Launch_AlignedKernelFrom16ByteOwnBuffersOnly) {
+  struct Case {
+    int root;
+    uintptr_t send, recv;
+    bool aligned;
+  };
+  const Case cases[] = {
+      {kOtherRoot, 0x1008, 0x2000, true},  // a non-root never reads sendbuff
+      {kOtherRoot, 0x1000, 0x2008, false},
+      {kRank, 0x1000, 0x2000, true},
+      {kRank, 0x1000, 0x2010, true},
+      {kRank, 0x1008, 0x2000, false},
+      {kRank, 0x1000, 0x2004, false},
+  };
+  for (const Case& c : cases) {
+    EXPECT_EQ(RunOne(c.root, 16, Addr(c.send), Addr(c.recv)).kernel, c.aligned ? Kernel<true>() : Kernel<false>())
+        << "root " << c.root << " send " << std::hex << c.send << " recv " << c.recv;
+  }
+}
+
+TEST_F(DdaBroadcastFabricLL128Microtest, Launch_PassesBuffersBytesRanksEpochAndBank) {
+  comm().ddaScratchBytes = 4096 + 40;
+  ASSERT_EQ(Run(/*root=*/2, 8, kSendbuff, kRecvbuff, ncclFloat16), ncclSuccess);
+  ASSERT_EQ(g_ddaLaunches.size(), 1u);
+  const DdaLaunch& launch = g_ddaLaunches[0];
+  EXPECT_EQ(launch.kernel, Kernel<true>());
+  EXPECT_EQ(launch.grid.x, 1u);
+  EXPECT_EQ(launch.block.x, 512u);
+  EXPECT_EQ(launch.stream, kStream);
+  EXPECT_EQ(launch.startEvent, nullptr);
+  EXPECT_EQ(launch.stopEvent, kStopEvent);
+  EXPECT_EQ(comm().addonStopEvent, nullptr);
+  EXPECT_EQ(launch.sharedMemBytes, 0u);
+  EXPECT_EQ(launch.flags, 0u);
+  ASSERT_EQ(launch.args.size(), 11u);
+  EXPECT_EQ(launch.Arg<char* const*>(0), comm().ddaPeerPtrsDev);
+  EXPECT_EQ(launch.Arg<char*>(1), kRecvbuff);
+  EXPECT_EQ(launch.Arg<const char*>(2), kSendbuff);
+  EXPECT_EQ(launch.Arg<size_t>(3), 16u);
+  EXPECT_EQ(launch.Arg<int>(4), kRank);
+  EXPECT_EQ(launch.Arg<int>(5), 8);
+  EXPECT_EQ(launch.Arg<int>(6), 2);
+  EXPECT_EQ(launch.Arg<uint32_t*>(7), comm().ddaLLEpochDev);
+  EXPECT_EQ(launch.Arg<int>(8), comm().ddaLLEpochLen);
+  EXPECT_EQ(launch.Arg<size_t>(9), 2048u);
+  EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(10).flag, comm().abortFlagDev);
+}
+
+TEST_F(DdaBroadcastFabricLL128Microtest, Launch_LaunchErrorIsReported) {
+  g_hipGetLastError = [] { return hipErrorLaunchFailure; };
+  EXPECT_EQ(Run(kOtherRoot, 16), ncclUnhandledCudaError);
+}
+
 
 TEST_F(DdaBroadcastFabricLL128Microtest, Launch_ArchTableThreadsUsedWhenEnvAbsent) {
+  // The seam is consulted by the two-shot path (bytes >= kDdaLL128BcTwoShotMin = 262144).
+  // 10 * kGfx1250Group = 307200 > 262144 to ensure the two-shot path is taken.
   g_rcclDdaFabricBcLL128Threads = [](const ncclComm*) { return 256; };
-  EXPECT_EQ(RunOne(4).block.x, 256u);
+  EXPECT_EQ(RunOne(kOtherRoot, 10 * kGfx1250Group).block.x, 256u);
 }
 
 TEST_F(DdaBroadcastFabricLL128Microtest, Launch_EnvVarOverridesArchTable) {
-  ScopedEnv envGuard("RCCL_DDA_LL128_BC_THREADS", "");
   g_rcclDdaFabricBcLL128Threads = [](const ncclComm*) { return 256; };
   params_["RCCL_DDA_LL128_BC_THREADS"] = 384;
-  EXPECT_EQ(RunOne(4).block.x, 384u);
+  EXPECT_EQ(RunOne(kOtherRoot, 16).block.x, 384u);
 }
 
 TEST_F(DdaBroadcastFabricLL128Microtest, Launch_ArchTableZeroFallsBackToDefault) {
   g_rcclDdaFabricBcLL128Threads = [](const ncclComm*) { return 0; };
-  EXPECT_EQ(RunOne(4).block.x, 512u);
-}
-
-TEST_F(DdaBroadcastFabricLL128Microtest, Launch_ThreadCountAffectsBlocksPerPeer) {
-  // 256 threads = 8 warps, nPeers=3: bpp = ceil(ceil(totalSlices/3) / 8).
-  // Transition at totalSlices=25: cs=9 -> bpp=2; at 24: cs=8 -> bpp=1.
-  ScopedEnv envGuard("RCCL_DDA_LL128_BC_THREADS", "");
-  params_["RCCL_DDA_LL128_BC_THREADS"] = 256;
-  EXPECT_EQ(RunOne(25 * kSliceData / 4).grid.y, 2u);
-  EXPECT_EQ(RunOne(24 * kSliceData / 4).grid.y, 1u);
-}
-
-// ---------------------------------------------------------------------------
-// Launch tests — kernel arguments
-// ---------------------------------------------------------------------------
-
-TEST_F(DdaBroadcastFabricLL128Microtest, Launch_PassesAllKernelArgs) {
-  comm().ddaScratchBytes = 4096 + 40;
-  const int root = 2;
-  ASSERT_EQ(Run(1000, ncclBfloat16, root), ncclSuccess);
-  ASSERT_EQ(g_ddaLaunches.size(), 1u);
-  const DdaLaunch& launch = g_ddaLaunches[0];
-
-  EXPECT_EQ(launch.stream, kStream);
-  EXPECT_EQ(launch.startEvent, nullptr);
-  EXPECT_EQ(launch.stopEvent, kStopEvent);
-  EXPECT_EQ(comm().addonStopEvent, nullptr);  // consumed by rcclTakeAddonStopEvent
-  EXPECT_EQ(launch.sharedMemBytes, 0u);
-  EXPECT_EQ(launch.flags, 0u);
-
-  // Arg indices: 0:peerScratch 1:recvbuff 2:sendbuff 3:totalBytes 4:selfRank
-  //              5:nRanksRt 6:root 7:epochDev 8:epochLen 9:totalSlices
-  //              10:chunkSlices 11:bankSize 12:params 13:fanOut
-  ASSERT_GE(launch.args.size(), 14u);
-  EXPECT_EQ(launch.Arg<int8_t**>(0), comm().ddaPeerPtrsDev);
-  EXPECT_EQ(launch.Arg<int8_t*>(1), kRecvbuff);
-  EXPECT_EQ(launch.Arg<const int8_t*>(2), kSendbuff);
-  EXPECT_EQ(launch.Arg<size_t>(3), 2000u);       // 1000 * sizeof(bfloat16)
-  EXPECT_EQ(launch.Arg<int>(4), 0);              // selfRank = comm().rank
-  EXPECT_EQ(launch.Arg<int>(5), 4);              // nRanksRt
-  EXPECT_EQ(launch.Arg<int>(6), root);
-  EXPECT_EQ(launch.Arg<uint32_t*>(7), comm().ddaLLEpochDev);
-  EXPECT_EQ(launch.Arg<int>(8), comm().ddaLLEpochLen);
-  EXPECT_EQ(launch.Arg<size_t>(11), 2048u);  // bankSize = ddaBankSize(4096 + 40)
-  EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(12).flag, comm().abortFlagDev);
-}
-
-TEST_F(DdaBroadcastFabricLL128Microtest, Launch_KernelArgsTotalAndChunkSlicesNonExact) {
-  // 4 ranks (nPeers=3), 10 total slices: 10 % 3 != 0 so cs = ceil(10/3) = 4.
-  // Verifies that totalSlices (arg 9) and chunkSlices (arg 10) are computed and
-  // forwarded correctly for a size that does not divide evenly across peers.
-  constexpr size_t totalSlices = 10;
-  constexpr size_t count = totalSlices * kSliceData / sizeof(float);
-  g_ddaLaunches.clear();
-  ASSERT_EQ(Run(count), ncclSuccess);
-  ASSERT_GE(g_ddaLaunches.size(), 1u);
-  const DdaLaunch& l = g_ddaLaunches[0];
-  EXPECT_EQ(l.Arg<size_t>(9),  10u);  // totalSlices
-  EXPECT_EQ(l.Arg<size_t>(10),  4u);  // chunkSlices = ceil(10/3)
-}
-
-TEST_F(DdaBroadcastFabricLL128Microtest, Launch_FanOutParamForwarded) {
-  for (int fanOut : {0, 1, 3}) {
-    params_["RCCL_DDA_LL128_BC_FANOUT"] = fanOut;
-    g_ddaLaunches.clear();
-    ASSERT_EQ(Run(4), ncclSuccess);
-    ASSERT_EQ(g_ddaLaunches.size(), 1u);
-    EXPECT_EQ(g_ddaLaunches[0].Arg<int>(13), fanOut);
-  }
-}
-
-TEST_F(DdaBroadcastFabricLL128Microtest, Launch_UnsupportedDatatypeReturnsInvalidArgument) {
-  for (ncclDataType_t dt : {ncclInt8, ncclInt32, ncclUint64, ncclFloat64}) {
-    EXPECT_EQ(Run(16, dt), ncclInvalidArgument) << "datatype " << dt;
-  }
-  EXPECT_TRUE(g_ddaLaunches.empty());
-}
-
-TEST_F(DdaBroadcastFabricLL128Microtest, Launch_HipErrorPropagated) {
-  g_hipGetLastError = [] { return hipErrorLaunchFailure; };
-  EXPECT_EQ(Run(4), ncclUnhandledCudaError);
-}
-
-// ---------------------------------------------------------------------------
-// BlockCount helper
-// ---------------------------------------------------------------------------
-
-TEST_F(DdaBroadcastFabricLL128Microtest, Blocks_MatchesGridXTimesGridY) {
-  for (size_t count : {size_t{4}, size_t{17} * kSliceData / 4}) {
-    g_ddaLaunches.clear();
-    ASSERT_EQ(Run(count), ncclSuccess);
-    ASSERT_EQ(g_ddaLaunches.size(), 1u);
-    const auto& l = g_ddaLaunches[0];
-    EXPECT_EQ(ncclBroadcastDdaFabricLL128Blocks(mock_.get(), count, ncclFloat32),
-              l.grid.x * l.grid.y);
-  }
-}
-
-TEST_F(DdaBroadcastFabricLL128Microtest, Blocks_SizedOnBytesNotElements) {
-  // fp32 count=8 is 32 bytes; fp16 count=16 is also 32 bytes -> same blocks
-  EXPECT_EQ(ncclBroadcastDdaFabricLL128Blocks(mock_.get(), 8, ncclFloat32),
-            ncclBroadcastDdaFabricLL128Blocks(mock_.get(), 16, ncclFloat16));
-  // 49 slices worth of data: fp32 and fp16 element counts differ but byte
-  // counts are equal, so the block count must match. A buggy element-based
-  // sizer would see half as many slices for fp32 and return a different count.
-  constexpr size_t bytes = 49 * kSliceData;
-  EXPECT_EQ(ncclBroadcastDdaFabricLL128Blocks(mock_.get(), bytes / sizeof(float), ncclFloat32),
-            ncclBroadcastDdaFabricLL128Blocks(mock_.get(), bytes / sizeof(uint16_t), ncclFloat16));
+  EXPECT_EQ(RunOne(kOtherRoot, 16).block.x, 512u);
 }
 
 }  // namespace

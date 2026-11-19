@@ -4,7 +4,7 @@
 // Tests for conditionally scaled division FMA and FP-status expectations.
 
 #include "fp/div_fmas_test.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <gtest/gtest.h>
 #include <stdint.h>

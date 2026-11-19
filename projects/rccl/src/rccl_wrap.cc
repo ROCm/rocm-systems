@@ -2545,7 +2545,8 @@ ncclResult_t rcclSelectBroadcast(struct ncclComm* comm, size_t count, ncclDataTy
   if (!rcclDdaBcEnabled(archTable, comm->nRanks)) return ncclSuccess;
   const size_t entryMax = rcclDdaEntryThresholdTab(archTable, ncclFuncBroadcast, comm->nRanks);
   if (!rcclDdaEnabled(comm, bytes, entryMax, query, "BC")) return ncclSuccess;
-  const bool fabric = IsArchMatch(comm->archName, "gfx1250");
+  // Gate on the fabric handler, as the other DDA fabric tiers do, not on the arch.
+  const bool fabric = comm->ddaFabricMemHandler != nullptr;
   if (!fabric && !(rcclParamDdaBcAllowIpc() && comm->ddaIpcMemHandler != nullptr)) return ncclSuccess;
 
   const size_t llMax = rcclDdaLLThresholdTab(archTable, ncclFuncBroadcast, comm->nRanks);
@@ -2965,6 +2966,8 @@ bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
   // - 2 nodes: enable for 128KiB .. 2MiB
   // - 4 nodes: enable up to 4MiB
   // - 8 and 16 nodes: enable up to 8MiB
+  // rawTaskAppend does not lower useDirect, so under NCCL_ENQUEUE_REARCH_ENABLE nothing would stage tempBuff.
+  if (ncclParamEnqueueRearchEnable()) return false;
   static int userDirectReduceScatterInput = rcclParamDirectReduceScatterDisable();
   if (userDirectReduceScatterInput != 0) {
     INFO(NCCL_INIT, "RCCL DIRECT REDUCE-SCATTER has been disabled by environment variable.");

@@ -18,7 +18,7 @@
 namespace rocjitsu {
 namespace cdna4 {
 
-void SNopSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_nop_sopp(*this, wf); }
+void SNopSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 void SEndpgmSopp::execute_impl(amdgpu::Wavefront &wf) { wf.end(); }
 
@@ -93,7 +93,12 @@ void SSethaltSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_sethalt_sopp(*this, wf);
 }
 
-void SSleepSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_sleep_sopp(*this, wf); }
+void SSleepSopp::execute_impl(amdgpu::Wavefront &wf) {
+  constexpr uint32_t kSleepClocksPerUnit = 64;
+  wf.set_sleep_cycles(kSleepClocksPerUnit *
+                      (static_cast<uint32_t>(simm16.encoding_value_) & 0x7Fu));
+  wf.cu().request_functional_yield();
+}
 
 void SSetprioSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_setprio_sopp(*this, wf);
@@ -141,7 +146,9 @@ void SCbranchCdbgsysAndUserSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_cbranch_cdbgsys_and_user_sopp(*this, wf);
 }
 
-void SEndpgmSavedSopp::execute_impl(amdgpu::Wavefront &wf) { wf.end(); }
+void SEndpgmSavedSopp::execute_impl(amdgpu::Wavefront &wf) {
+  wf.end(amdgpu::Wavefront::EndReason::Saved);
+}
 
 void SSetGprIdxOffSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_set_gpr_idx_off_sopp(*this, wf);
@@ -151,7 +158,9 @@ void SSetGprIdxModeSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_set_gpr_idx_mode_sopp(*this, wf);
 }
 
-void SEndpgmOrderedPsDoneSopp::execute_impl(amdgpu::Wavefront &wf) { wf.end(); }
+void SEndpgmOrderedPsDoneSopp::execute_impl(amdgpu::Wavefront &wf) {
+  wf.end(amdgpu::Wavefront::EndReason::OrderedPsDone);
+}
 
 void SSetValuCoexecModeSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_set_valu_coexec_mode_sopp(*this, wf);

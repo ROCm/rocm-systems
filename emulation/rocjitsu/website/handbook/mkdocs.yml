@@ -78,6 +78,7 @@ nav:
       - Python execution API: python-api.md
       - Configuration: configuration.md
       - Two-node RCCL NET smoke: rccl-scaleout.md
+      - Same-host pod RCCL gate: same-host-pod-rccl-gate.md
       - Race detection: race-detector.md
       - Native LDS ConSan: consan.md
       - GPU debugging: rocgdb-debugging.md

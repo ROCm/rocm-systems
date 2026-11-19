@@ -85,7 +85,9 @@ in the following table.
     * - | ``NCCL_MAX_CTAS``
         | Maximum number of CTAs (channels) used for a collective. Overrides
           the ``maxCTAs`` field of ``ncclConfig_t``. An unset ``maxCTAs``
-          defaults to the maximum channel count of the build.
+          defaults to the maximum channel count of the build. It also caps the
+          CTAs of the P2P-based ``ncclAlltoAll``, ``ncclGather`` and
+          ``ncclScatter``.
       - | Positive integer (values ``<= 0`` are ignored).
         | Default: unset (uses the RCCL default).
 
@@ -464,7 +466,9 @@ collected in the following table.
 
     * - | ``NCCL_SYM_CTAS``
         | Forces a fixed CTA (block) count for symmetric kernels instead of letting
-          the cost model choose the launch geometry.
+          the cost model choose the launch geometry. It overrides the cost
+          model's resolved CTA bounds, and for ``AlltoAll_LL`` it acts as a cap
+          on the useful CTAs.
       - | Positive integer CTA count.
         | Default: ``0`` (unset; the cost model chooses).
 
@@ -540,6 +544,54 @@ collected in the following table.
       - | ``1``: Use the embedded configurations when no file is found (default).
         | ``0``: Ignore the embedded configurations. File-based tuning is unaffected.
 
+    * - | ``NCCL_SYM_NOWIN_ENABLE``
+        | Allows symmetric LL kernels that do not need registered windows to
+          run when neither buffer is registered. When it is ``0``, the
+          symmetric cost model does not consider those kernels for
+          unregistered buffers.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+
+    * - | ``NCCL_SYM_GENK_ENABLE``
+        | Enables the generic symmetric kernels. RCCL is built without them, so
+          the value is always treated as ``0``; setting it to ``1`` only logs
+          that it is ignored.
+      - | ``0``: Disabled (default).
+
+    * - | ``NCCL_SYMK_LL_SCRATCH_SIZE``
+        | Size of the scratch buffer the symmetric ``AlltoAll_LL`` kernel stages
+          through. RCCL does not provision this kernel's resources on AMD
+          GPUs, so the variable has no effect there.
+      - | Bytes.
+        | Default: ``262144``.
+
+    * - | ``NCCL_RUBIN_SM_BW``
+        | Per-CTA bandwidth used to size ring compute channels on NVIDIA Rubin
+          and later GPUs. It is compiled out on AMD GPUs and has no effect
+          there.
+      - | Positive integer.
+        | Default: ``24``.
+
+    * - | ``NCCL_NVLS_FIFO_LAYOUT``
+        | Selects the slot layout of the NVLS staging FIFO. NVLS is
+          NVIDIA-only and is not built for AMD GPUs, so the variable has no
+          effect there.
+      - | ``0``, ``1`` or ``2``: Select a layout.
+        | ``-1``: Choose automatically (default).
+
+    * - | ``NCCL_CFT_UC_TEAM_SIZE``
+        | Overrides the unicast CFT team size. ROCm has no logical endpoints,
+          so on AMD GPUs CFT teams stay one rank and a positive value is
+          ignored (a value above ``1`` logs a warning).
+      - | ``0``: No override (default).
+        | ``N`` > 0: Request a team of ``N`` ranks.
+
+    * - | ``NCCL_CFT_MC_TEAM_SIZE``
+        | Overrides the multicast CFT team size. Like
+          ``NCCL_CFT_UC_TEAM_SIZE``, it is ignored on AMD GPUs.
+      - | ``0``: No override (default).
+        | ``N`` > 0: Request a team of ``N`` ranks.
+
 Network and topology
 ====================
 
@@ -560,7 +612,8 @@ in the following table.
 
     * - | ``NCCL_IB_GID_INDEX``
         | Defines the Global ID index used in RoCE mode.
-      - | Integer value (default: ``-1``)
+      - | ``AUTO`` (default): RCCL determines the GID. ``-1`` is a legacy alias for ``AUTO``.
+        | Integer ``>= 0``: use that GID index. Other values fall back to ``AUTO``.
         | See InfiniBand ``show_gids`` command for valid values
 
     * - | ``NCCL_IB_QUERY_PORT_SPEED``
@@ -737,6 +790,23 @@ in the following table.
       - | Integer value in bytes (default: ``128``)
         | ``N``: Split only when message size >= N bytes
 
+    * - | ``RCCL_IB_MAX_MSG_SIZE``
+        | Largest data payload, in bytes, of one work request posted by the
+          ``IB-CAST`` transport. A GIN ``iput``, ``iget``, or ``iputSignal``, or
+          a point-to-point send, that is larger than the cap is posted as
+          several work requests on the same queue pair. Only the last data work
+          request is signaled. For ``iputSignal`` the atomic remains the
+          signaled tail, and for a point-to-point send the tail keeps the
+          write-with-immediate.
+      - | Integer bytes. Default: ``-1`` (unset).
+        | A positive value explicitly sets the cap, overriding the automatic
+          gfx1250 and port limits. The result is raised to at least 1 MiB and
+          rounded down to a multiple of 128 bytes.
+        | When unset, gfx1250 is limited to 256 MiB and every architecture is
+          limited by the smallest non-zero port ``max_msg_sz`` across devices.
+          A port that reports 0 does not participate. The same 1 MiB floor and
+          128-byte rounding apply. ``0`` is treated as unset.
+
     * - | ``RCCL_NET_SHARED_HOST_HUGEPAGES``
         | Backs the host-memory shared P2P network staging pools (used by
           connections without GPU Direct RDMA) with 2 MiB pages, so each
@@ -860,6 +930,34 @@ in the following table.
       - | String path to a directory with the same layout as the sysfs tree.
         | Default: unset (falls back silently when sysfs is also absent).
 
+    * - | ``RCCL_P2P_CE_CHANNELS_PER_PEER``
+        | Caps P2P channels per peer on gfx1250 when
+        | ``NCCL_P2P_USE_CUDA_MEMCPY=1`` selects the Copy Engine transport.
+        | Each channel owns a staging buffer and event ring; on gfx1250 the
+        | channels share one non-blocking stream per proxy thread, which
+        | serializes SDMA work. The cap avoids VMM resource exhaustion.
+        | Other architectures and the default kernel P2P path are unchanged.
+        | CE is selected only for direct Send/Recv between fine-grained peers
+        | on the same host; remote, disabled, and indirect paths keep their
+        | normal connector and channel count.
+      - | Positive integer, rounded down to a power of two and bounded by the
+        | P2P channel pool (default: ``16``).
+        | ``0`` or a negative value disables the cap and can substantially
+        | increase staging-buffer and event-ring memory use.
+        | The Copy Engine transport carries send/recv-based operations only;
+        | collectives keep the kernel P2P transport.
+
+    * - | ``NCCL_P2P_CE_CHUNK_SIZE``
+        | Sets the per-channel Copy Engine P2P step size on gfx1250 when
+        | ``NCCL_P2P_USE_CUDA_MEMCPY=1``. The staging buffer contains
+        | ``NCCL_STEPS`` steps of this size.
+        | Other architectures and the default kernel P2P path are unchanged.
+      - | Size in bytes (default: ``4194304``, or 4 MiB).
+        | Values at or below the standard P2P step size keep the standard step;
+        | the effective step is capped to 32 MiB even when ``NCCL_BUFFSIZE``
+        | requests a larger standard step. ``NCCL_CHUNK_SIZE`` is also clamped
+        | to the selected CE connector step.
+
     * - | ``NCCL_RINGS``
         | Defines custom ring topology.
       - | Ring topology specification string
@@ -968,6 +1066,80 @@ in the following table.
         | A short name is resolved against the ``librccl-rma`` prefix, so
           ``example`` loads ``librccl-rma-example.so``
         | See :ref:`using-rccl-rma-plugin`
+
+    * - | ``NCCL_RMA_RANK_STRIDE``
+        | Overrides the rank stride of the user RMA contexts. By default RCCL
+          derives it: ``1`` when cross-NIC communication is allowed, otherwise
+          the LSA team size. If the derived stride does not divide the rank
+          count or the base stride, RCCL logs a warning and runs without host
+          RMA. A stride you set that does not fit fails initialization. Set it
+          identically on all ranks.
+      - | Positive integer.
+        | Default: unset (derived).
+
+    * - | ``NCCL_RMA_MULTI_CTX_THRESHOLD``
+        | Per-peer transfer size below which the hierarchical Copy Engine
+          collectives keep their inter-node rail on a single internal RMA
+          context. At the default, the direct and AllToAll collectives have no
+          size gate: they use all provisioned internal contexts at every size,
+          including under graph capture, capped by the number of distinct rail
+          peers and by ``NCCL_HIER_CE_COLL_NUM_CTX``. The AllGather rail-ring
+          path (``NCCL_HIER_CE_COLL_AG_RAIL_RING_ENABLE``) keeps a 4 MiB
+          per-rank gate at the default, and always uses a single context under
+          graph capture. Set it identically on all ranks.
+      - | ``-1``: Default. No size gate, except the 4 MiB gate on the
+          AllGather rail-ring path.
+        | ``0``: No size gate on any path.
+        | ``N`` > 0 (bytes): Use a single context below ``N``, on every path.
+
+    * - | ``NCCL_HIER_CE_COLL_NUM_CTX``
+        | Number of internal RMA contexts the hierarchical Copy Engine
+          collectives use. Values above ``NCCL_NUM_RMA_INT_CTX`` are clamped
+          with a warning.
+      - | ``-1``: Automatic: all provisioned contexts, capped by the number of
+          rail peers (default).
+        | ``N`` > 0: Use ``N`` contexts.
+
+    * - | ``NCCL_WIN_STRIDE``
+        | Virtual-address stride of each rank's window in the device runtime.
+      - | ``-1`` or ``0``: Use the largest GPU memory size among the ranks
+          (default).
+        | ``N`` > 0 (bytes): Use ``N``.
+
+    * - | ``NCCL_IB_USE_INLINE``
+        | Uses inline data for IB sends on the ``IB`` transport.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled. Accepts ``1``/``T``/``TRUE`` and ``0``/``F``/``FALSE``
+          (case-insensitive); other values use the default.
+
+    * - | ``NCCL_IB_WARN_RAIL_LOCAL``
+        | Warns when the ``IB`` transport uses a local rail.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled. Boolean values as for ``NCCL_IB_USE_INLINE``.
+
+    * - | ``NCCL_GDR_FLUSH_DISABLE``
+        | Disables the GPU Direct RDMA flush on the ``IB`` transport.
+      - | ``0``: Flush enabled (default).
+        | ``1``: Flush disabled. Boolean values as for ``NCCL_IB_USE_INLINE``.
+
+    * - | ``NCCL_IB_ROUTABLE_FLID_GID_INDEX``
+        | GID index used for routable FLID.
+      - | Integer.
+        | Default: ``1``.
+
+    * - | ``NCCL_GIN_GDAKI_CQ_TYPE``
+        | Completion-queue type of the GDAKI GIN backend. The backend is not
+          part of the RCCL build, so the variable has no effect.
+      - | ``0``: Device CQ (default).
+        | ``1``: Device-collapsed CQ.
+        | ``2``: Host-collapsed CQ.
+
+    * - | ``NCCL_GIN_GDAKI_Q_COUNTER``
+        | Gives GDAKI queue pairs a dedicated queue-counter set, for
+          diagnostics. The GDAKI backend is not part of the RCCL build, so the
+          variable has no effect.
+      - | ``1``: Enabled (default).
+        | ``0``: Use the device's default counter set.
 
 QP scheduling (CAST)
 ====================
@@ -1127,6 +1299,15 @@ communicator is configured for it, which is not the default.
           ignored.
         | To use graphs without mixing, leave this variable unset and set
           ``graphUsageMode`` to ``1``.
+
+    * - | ``NCCL_CE_BATCH_CAPTURE_ENABLE``
+        | Requests ``hipMemcpyBatchAsync`` for Copy Engine batch copies
+          recorded into a graph. It also needs ``RCCL_CE_BATCH_ASYNC_ENABLE``
+          and a driver that can capture batch copies. No HIP driver can, so
+          RCCL ignores the variable (one INFO message on rank 0) and captured
+          copies use per-copy ``hipMemcpyAsync``.
+      - | ``0``: Disabled (default).
+        | ``1``: Requested; has no effect on AMD GPUs.
 
 Multi-communicator ordering
 ===========================
@@ -1333,10 +1514,13 @@ plugin must export ``ncclProfiler_v7`` to receive them.
       - **Values**
 
     * - | ``NCCL_PROFILER_PLUGIN``
-        | Selects an external profiler plugin.
-      - | Path or short name
+        | Selects external profiler plugins. Up to two plugins can be loaded
+          at once; each receives only the event types it enabled.
+      - | Path or short name, or a comma-separated list of up to two
         | A short name is resolved against the ``librccl-profiler`` prefix, so
           ``example`` loads ``librccl-profiler-example.so``
+        | Unset or empty: loads ``librccl-profiler.so`` if present.
+          ``none``: loads no plugin.
 
     * - | ``NCCL_PROFILE_EVENT_MASK``
         | Bitmask of the event types the plugin is offered.
@@ -1484,14 +1668,19 @@ threshold table introduced for gfx1250.
         | ``0``: Use vector loads and stores.
 
     * - | ``RCCL_DDA_BC``
-        | Opt-in for DDA ``ncclBroadcast`` on the gfx1250 fabric path. When ``-1``
-          (default), Broadcast follows the per-architecture table, which has no
-          Broadcast DDA tier, so Broadcast keeps its previous path. When enabled, the
-          DDA LL and LL128 tier ceilings still apply; the table sets both to ``0`` for
-          Broadcast, so also set ``RCCL_DDA_LL_THRESHOLD`` or
-          ``RCCL_DDA_LL128_THRESHOLD``, which apply to every collective. Ignored when
+        | Controls DDA ``ncclBroadcast`` on the gfx1250 fabric path. When ``-1``
+          (default), Broadcast follows the per-architecture table. On gfx1250 the
+          table sets the DDA LL ceiling to 16 KiB and the DDA LL128 ceiling to
+          128 KiB on both SPX and DPX, so DDA Broadcast is on by default there;
+          the other tables have no
+          Broadcast DDA tier, so Broadcast keeps its previous path. The DDA LL and LL128
+          tier ceilings always apply, and ``RCCL_DDA_LL_THRESHOLD`` and
+          ``RCCL_DDA_LL128_THRESHOLD`` apply to every collective: when set they
+          replace the table ceilings, so setting them for another collective also
+          changes the Broadcast ceilings. Where the table has no Broadcast tier,
+          enabling DDA Broadcast also needs one of those thresholds. Ignored when
           ``NCCL_ALGO`` is set or ``RCCL_DDA_ENABLE=0``.
-      - | ``-1``: Follow the per-arch table; currently off (default).
+      - | ``-1``: Follow the per-arch table; on for gfx1250, off elsewhere (default).
         | ``0``: Disable DDA Broadcast.
         | ``1`` (or any positive value): Enable DDA Broadcast, subject to the tier
           ceilings and eligibility checks.
@@ -1525,6 +1714,13 @@ threshold table introduced for gfx1250.
           Requires ``RCCL_DDA_BC`` to be enabled.
       - | ``0``: Fabric path only (default).
         | ``1``: Also consider DDA LL on the IPC path.
+
+    * - | ``RCCL_DDA_LL128_BC_THREADS``
+        | Block size (threads per block) of the DDA LL128 one-shot Broadcast
+          kernel. A value that is not a multiple of the LL128 warp (32 on gfx1250),
+          or is larger than 512, is ignored and the default is used.
+      - | ``512``: Default.
+        | ``N``: A multiple of the LL128 warp, at most ``512``.
 
     * - | ``RCCL_CE_ALLREDUCE``
         | Enables the Copy Engine (CE) registered-window AllReduce path. When ``-1`` (auto),

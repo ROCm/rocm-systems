@@ -130,6 +130,9 @@ private:
   bool initialized_ = false;
 };
 
+/// @brief Resolve the host realpath that supports caller-allocated and libc-allocated buffers.
+auto resolve_host_realpath() -> decltype(LibcPassthrough::realpath_fn);
+
 /// @brief Return the process-wide libc pass-through table.
 LibcPassthrough &libc_passthrough();
 
@@ -144,6 +147,13 @@ inline void host_close_fd(int fd) {
   if (fd >= 0)
     host_call(libc_passthrough().close, ::close, fd);
 }
+
+/// @brief Read a pinned proc stat file. Return 1 for an exited group, 0 for a live group, or
+/// a negative errno if its state cannot be determined.
+int proc_stat_is_exited(int stat_fd);
+
+/// @brief Create a private, close-on-exec scratch descriptor with no sealing requirements.
+int create_scratch_fd(const char *name);
 
 /// @brief Compatibility entry points for operations absent from older libc releases.
 /// @details Prefer the resolved libc wrapper. If unavailable, use the syscall

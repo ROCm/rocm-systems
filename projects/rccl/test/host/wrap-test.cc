@@ -370,7 +370,7 @@ ncclTaskColl MakeTask(int protocol, bool hasAcc) {
 }
 }  // namespace
 
-// rccl-UnitTestsMicro always compiles this file with ENABLE_LL128
+// rccl-UnitTestsMicroWrap always compiles this file with ENABLE_LL128
 // (test/host/CMakeLists.txt), matching production librccl. The
 // *_LL128_DisabledAtCompileTime arms are not part of that binary.
 #if defined(ENABLE_LL128)
@@ -854,11 +854,8 @@ TEST(WrapMicrotest, SetP2pNetChunkSize_AlreadyCachedReturnsStoredValueUnchanged)
 // both arms as reached; NCCL_PROTO_LL's assignment is arch-independent and
 // IS a real oracle either way.
 //
-// The divergence tripwire is a RUNTIME check, not a static_assert: this is a
-// shared binary (p2p/rma/group/devcomm/enqueue all link it), and a
-// compile-time assert here would break every one of those builds over a
-// constant none of them read. One failing test names the problem without
-// taking the rest of the suite down with it.
+// The divergence tripwire is a RUNTIME check, not a static_assert: one failing
+// test names the problem without taking the rest of the suite down with it.
 TEST(WrapMicrotest, GetMaxNthreads_ConstantsStillEquivalent) {
   EXPECT_EQ(RCCL_GFX950_MAX_NTHREADS, RCCL_DEFAULT_MAX_NTHREADS)
       << "constants diverged -- GetMaxNthreads_Gfx950Arch/NonGfx950Arch below can now "
@@ -1753,7 +1750,7 @@ namespace {
 constexpr size_t kKiB = 1024, kMiB = 1024 * 1024;
 
 // The gfx1250 arch-table entries this change reads (rccl_arch_thresholds.cc).
-// rccl-UnitTestsMicro links no real tables (the fake rcclGetArchThresholds returns
+// rccl-UnitTestsMicroWrap links no real tables (the fake rcclGetArchThresholds returns
 // null), so tests hand this copy to the comm; RcclDdaTierThresholds.* (GPU) checks
 // that the real table resolves to the same caps.
 rcclArchThresholds MakeRankScaledTable() {
@@ -3012,6 +3009,20 @@ TEST(WrapMicrotestIsolated, UseReduceScatterDirect_TwoNodesInRangeReturnsTrue) {
       });
 }
 
+// rawTaskAppend posts a useDirect ReduceScatter as a plain collective, so no per-peer transfer fills tempBuff.
+TEST(WrapMicrotestIsolated, UseReduceScatterDirect_EnqueueRearchEnabledReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseReduceScatterDirect_EnqueueRearchEnabledReturnsFalse",
+      []() {
+        g_loadParam = ForceParam("ENQUEUE_REARCH_ENABLE", int64_t(1));
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 2;
+        size_t msgSize = 1048576; // the TwoNodesInRangeReturnsTrue case
+        EXPECT_FALSE(rcclUseReduceScatterDirect(comm, msgSize));
+        DeleteCommWithArch(comm);
+      });
+}
+
 TEST(WrapMicrotestIsolated, UseReduceScatterDirect_TwoNodesAtUpperBoundReturnsTrue) {
   RUN_ISOLATED_TEST(
       "Wrap_UseReduceScatterDirect_TwoNodesAtUpperBoundReturnsTrue",
@@ -4224,10 +4235,10 @@ TEST(WrapMicrotestIsolated, UseCeAllReduce_SplitLsaTeamReturnsFalse) {
         comm->symmetricSupport = 1;
         comm->nNodes = 1;
         comm->nRanks = 4;
-        comm->devrState.bigSize = 1; // take computeLsaSize's cached path
-        comm->devrState.lsaSize = 2;
+        comm->devrState.bigSize = 1; // take computeLsaTeamSize's cached path
+        comm->devrState.lsaTeamSize = 2;
         EXPECT_FALSE(rcclUseCeAr2Shot(comm, 8, ncclFloat32, ncclSum, nullptr));
-        comm->devrState.lsaSize = 4;
+        comm->devrState.lsaTeamSize = 4;
         EXPECT_TRUE(rcclUseCeAr2Shot(comm, 8, ncclFloat32, ncclSum, nullptr));
         DeleteCommWithArch(comm);
       });
@@ -4356,9 +4367,9 @@ TEST(WrapMicrotest, DdaEnabled_ImplicitLaunchOrderReturnsFalse) {
 }
 
 // Closes gap 2 of 3: proves the third disjunct, ncclGroupDepth != 0,
-// independently. ncclGroupDepth is the real thread_local global from
-// group.cc (already linked, see wrap-test.cc's file header comment) -- no
-// seam needed, just set and restore it directly around the call.
+// independently. ncclGroupDepth is a plain thread_local global
+// (fakes/dev_runtime_micro_fakes.cc) -- no seam needed, just set and
+// restore it directly around the call.
 TEST(WrapMicrotest, DdaEnabled_InsideGroupReturnsFalse) {
   ncclComm* comm = MakeCommWithArch("gfx942");
   comm->nRanks = 8;
@@ -5208,12 +5219,12 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_ForceUnregisteredNeedsSpanningLsaTea
         comm->nRanks = 2;
         comm->symmetricSupport = 1;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
-        comm->devrState.bigSize = 1; // take computeLsaSize's cached path
+        comm->devrState.bigSize = 1; // take computeLsaTeamSize's cached path
         uint8_t stagingBuf[16];
         for (uint8_t* staging : {static_cast<uint8_t*>(nullptr), stagingBuf}) {
           SCOPED_TRACE(staging ? "staging ready" : "staging not initialized");
           comm->ceColl.ceARTmpBuf = staging;
-          comm->devrState.lsaSize = 2;
+          comm->devrState.lsaTeamSize = 2;
           rcclCollDecision spanning{};
           EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
                                                       /*stream=*/nullptr, /*query=*/true,
@@ -5221,7 +5232,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_ForceUnregisteredNeedsSpanningLsaTea
           EXPECT_EQ((int)(staging ? rcclAddonAlgos_t::RCCL_CE_2SHOT : rcclAddonAlgos_t::RCCL_CE_REGISTERED),
                     spanning.algo);
 
-          comm->devrState.lsaSize = 1;
+          comm->devrState.lsaTeamSize = 1;
           rcclCollDecision split{};
           EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
                                                       /*stream=*/nullptr, /*query=*/true,
@@ -5295,7 +5306,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenAboveTableMax)
         comm->nNodes           = 1;
         comm->symmetricSupport = 1;
         comm->devrState.bigSize = 1;
-        comm->devrState.lsaSize = comm->nRanks;
+        comm->devrState.lsaTeamSize = comm->nRanks;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         uint8_t stagingBuf[16];
         comm->ceColl.ceARTmpBuf = stagingBuf;
@@ -5339,7 +5350,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenAboveEnvMax) {
         comm->nNodes           = 1;
         comm->symmetricSupport = 1;
         comm->devrState.bigSize = 1;
-        comm->devrState.lsaSize = comm->nRanks;
+        comm->devrState.lsaTeamSize = comm->nRanks;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         uint8_t stagingBuf[16];
         comm->ceColl.ceARTmpBuf = stagingBuf;
@@ -5374,7 +5385,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenBelowEnvMin) {
         comm->nNodes           = 1;
         comm->symmetricSupport = 1;
         comm->devrState.bigSize = 1;
-        comm->devrState.lsaSize = comm->nRanks;
+        comm->devrState.lsaTeamSize = comm->nRanks;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         uint8_t stagingBuf[16];
         comm->ceColl.ceARTmpBuf = stagingBuf;
@@ -5411,7 +5422,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotChosenWhenWithinEnvWindow) 
         comm->nNodes           = 1;
         comm->symmetricSupport = 1;
         comm->devrState.bigSize = 1;
-        comm->devrState.lsaSize = comm->nRanks;
+        comm->devrState.lsaTeamSize = comm->nRanks;
         // RCCL_FORCE_CE_ALLREDUCE=1 (above) stands in for symReg=true since null
         // send/recv pointers mean ncclCeAvailable returns false in unit test context.
         // CTAPolicy=ZERO satisfies rcclUseCeAr2Shot; force satisfies ceAllReduceAllowed.
@@ -5545,7 +5556,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_ZeroPolicyCeTwoShotBeatsEligibleDdaO
         comm->nNodes           = 1;
         comm->symmetricSupport = 1;
         comm->devrState.bigSize = 1;
-        comm->devrState.lsaSize = comm->nRanks;
+        comm->devrState.lsaTeamSize = comm->nRanks;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         uint8_t stagingBuf[16];
         comm->ceColl.ceARTmpBuf = stagingBuf;
@@ -5588,7 +5599,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenBelowEnvMinBou
         comm->nNodes           = 1;
         comm->symmetricSupport = 1;
         comm->devrState.bigSize = 1;
-        comm->devrState.lsaSize = comm->nRanks;
+        comm->devrState.lsaTeamSize = comm->nRanks;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         uint8_t stagingBuf[16];
         comm->ceColl.ceARTmpBuf = stagingBuf;
@@ -5624,7 +5635,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotChosenWhenAtEnvMinBound) {
         comm->nNodes           = 1;
         comm->symmetricSupport = 1;
         comm->devrState.bigSize = 1;
-        comm->devrState.lsaSize = comm->nRanks;
+        comm->devrState.lsaTeamSize = comm->nRanks;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         uint8_t stagingBuf[16];
         comm->ceColl.ceARTmpBuf = stagingBuf;
@@ -7732,7 +7743,7 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeForceScratchNotChosenWhenProbeSays
 }
 
 namespace {
-// rccl-UnitTestsMicro links no real arch tables (the host fake rcclGetArchThresholds
+// rccl-UnitTestsMicroWrap links no real arch tables (the host fake rcclGetArchThresholds
 // returns null), so each case hands the comm the table it wants to exercise.
 // Every other CE-Scratch gate is armed: scratch probe true, unregistered windows,
 // no sysmem, receive fits ddaScratch, and ceNonRegMax[AG] = 0 so the window
@@ -8420,7 +8431,7 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeRegisteredViaSymmetricWindowsChose
         comm->nRanks = 1;
         comm->nNodes = 1;
         // rccl_arch_thresholds_fakes.cc returns nullptr from rcclGetArchThresholds
-        // (the real .cc is not linked into rccl-UnitTestsMicro).  When the table is
+        // (the real .cc is not linked into rccl-UnitTestsMicroWrap).  When the table is
         // nullptr rcclCeRegMaxTab() returns 0, which makes rcclAllGatherCeRegisteredWindowTab
         // return false and prevents Branch #3 from firing.  Supply a minimal table
         // directly so extAlgoArchTable() short-circuits to comm->archThresholds.
@@ -9358,13 +9369,13 @@ void EnableCeReduceScatterForSelectTest() {
   g_ceImplemented = true;
 }
 
-// UnitTestsMicro links real computeLsaSize (dev_runtime.cc via
-// #include in dev-runtime-test.cc). Without a cached spanning team,
-// ncclDevrIsOneLsaTeam walks null rankToNode when nRanks > 1 (SIGSEGV).
+// This binary links the real computeLsaTeamSize (dev_runtime.cc, compiled as a
+// source). Without a cached spanning team, ncclDevrIsOneLsaTeam walks null
+// rankToNode when nRanks > 1 (SIGSEGV).
 // Call after the final nRanks assignment, matching the AllReduce CE select tests.
 void ArmSpanningLsaTeam(ncclComm* comm) {
   comm->devrState.bigSize = 1;
-  comm->devrState.lsaSize = comm->nRanks;
+  comm->devrState.lsaTeamSize = comm->nRanks;
 }
 
 constexpr int kCeRsRegisteredArmRanks = 4;
@@ -10475,9 +10486,11 @@ auto BroadcastDdaParams(int64_t llMax, int64_t ll128Max, int64_t ddaEnable = 1, 
   };
 }
 
+// gfx1250 comms get the fabric DDA handler, as after ncclDdaFabricCommInit.
 ncclComm* MakeBroadcastComm(const char* arch = "gfx1250") {
   ncclComm* comm = MakeCommWithArch(arch);
   comm->nRanks = 8;
+  if (std::strcmp(arch, "gfx1250") == 0) comm->ddaFabricMemHandler = reinterpret_cast<ncclFabricMemHandler*>(0x1);
   return comm;
 }
 
@@ -10625,6 +10638,36 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_IpcAllowedNoIpcHandler_ReturnsRingPl
   });
 }
 
+// gfx1250 without the fabric handler is treated as IPC: no tier without the opt-in, never LL128.
+TEST(WrapMicrotestIsolated, SelectBroadcast_Gfx1250IpcScratch_NeedsOptInAndNeverChecksLL128) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_Gfx1250IpcScratch_NeedsOptInAndNeverChecksLL128", []() {
+    int llCalls = 0, ll128Calls = 0;
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [&](ncclComm*, size_t, ncclDataType_t) { return ++llCalls > 0; });
+    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
+                     [&](ncclComm*, size_t, ncclDataType_t) { return ++ll128Calls > 0; });
+    ncclComm* comm = MakeBroadcastComm();
+    comm->ddaFabricMemHandler = nullptr;
+    comm->ddaIpcMemHandler = reinterpret_cast<ncclIpcMemHandler*>(0x1);
+
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+    EXPECT_EQ(0, llCalls);
+
+    auto base = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    g_loadParam = [base](const char* env, int64_t def) -> int64_t {
+      return std::strcmp(env, "RCCL_DDA_BC_ALLOW_IPC") == 0 ? 1 : base(env, def);
+    };
+    d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, d.algo);
+    EXPECT_EQ(0, ll128Calls);
+    comm->ddaIpcMemHandler = nullptr;
+    DeleteCommWithArch(comm);
+  });
+}
+
 TEST(WrapMicrotestIsolated, SelectBroadcast_DdaDisabled_ReturnsRingPlaceholder) {
   RUN_ISOLATED_TEST("Wrap_SelectBroadcast_DdaDisabled_ReturnsRingPlaceholder", []() {
     g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX, /*ddaEnable=*/0);
@@ -10637,7 +10680,7 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_DdaDisabled_ReturnsRingPlaceholder) 
   });
 }
 
-// A global DDA threshold alone must not turn Broadcast on: the gfx1250 table has no Broadcast tier.
+// A global DDA threshold alone must not turn Broadcast on when the table has no Broadcast tier.
 TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetAndNoTableTier_ReturnsRingPlaceholder) {
   RUN_ISOLATED_TEST("Wrap_SelectBroadcast_BcUnsetAndNoTableTier_ReturnsRingPlaceholder", []() {
     g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX, /*ddaEnable=*/1, /*ddaBc=*/-1);
@@ -10741,7 +10784,7 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetSpxTable_PicksTwoShotByCap) {
     comm->archThresholds =
         real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
     ASSERT_NE(nullptr, comm->archThresholds);
-    ASSERT_EQ(0u, comm->archThresholds->ddaLLMax[ncclFuncBroadcast]);
+    // ddaLLMax[Broadcast] is non-zero (LL tier active); test focuses on the LL128 cap.
     const size_t ll128Cap = comm->archThresholds->ddaLL128Max[ncclFuncBroadcast];
     ASSERT_GT(ll128Cap, 0u);
 
@@ -10757,7 +10800,37 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetSpxTable_PicksTwoShotByCap) {
               rcclSelectBroadcast(comm, (ll128Cap + 16) / sizeof(float), ncclFloat32,
                                   0, false, &d));
     EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+    DeleteCommWithArch(comm);
+  });
+}
 
+// Out of the box on DPX: the real table's Broadcast caps pick LL to 16 KiB, LL128 to 128 KiB, then Ring.
+TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetDpxTable_PicksTierByCap) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_BcUnsetDpxTable_PicksTierByCap", []() {
+    g_loadParam = BroadcastDdaParams(/*llMax=*/-1, /*ll128Max=*/-1, /*ddaEnable=*/1, /*ddaBc=*/-1);
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ncclComm* comm = MakeBroadcastComm();
+    comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+    ASSERT_NE(nullptr, comm->archThresholds);
+    const size_t llCap    = comm->archThresholds->ddaLLMax[ncclFuncBroadcast];
+    const size_t ll128Cap = comm->archThresholds->ddaLL128Max[ncclFuncBroadcast];
+    ASSERT_GT(llCap, 0u);
+    ASSERT_GT(ll128Cap, llCap);
+    const struct {
+      size_t bytes;
+      int algo;
+    } cases[] = {
+      {llCap,         (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL},
+      {llCap + 16,    (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
+      {ll128Cap,      (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
+      {ll128Cap + 16, NCCL_ALGO_RING},
+    };
+    for (const auto& c : cases) {
+      rcclCollDecision d = PoisonedDecision();
+      EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, c.bytes / 4, ncclFloat32, 0, false, &d)) << c.bytes;
+      EXPECT_EQ(c.algo, d.algo) << c.bytes;
+    }
     DeleteCommWithArch(comm);
   });
 }
@@ -10775,7 +10848,7 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetDpxTable_PicksTwoShotByCap) {
     comm->archThresholds =
         real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
     ASSERT_NE(nullptr, comm->archThresholds);
-    ASSERT_EQ(0u, comm->archThresholds->ddaLLMax[ncclFuncBroadcast]);
+    // ddaLLMax[Broadcast] is non-zero (LL tier active); test focuses on the LL128 cap.
     const size_t ll128Cap = comm->archThresholds->ddaLL128Max[ncclFuncBroadcast];
     ASSERT_GT(ll128Cap, 0u);
 
@@ -10791,7 +10864,37 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetDpxTable_PicksTwoShotByCap) {
               rcclSelectBroadcast(comm, (ll128Cap + 16) / sizeof(float), ncclFloat32,
                                   0, false, &d));
     EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+    DeleteCommWithArch(comm);
+  });
+}
 
+// Out of the box on SPX: the real table's Broadcast caps pick LL to 16 KiB, LL128 to 128 KiB, then Ring.
+TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetSpxTable_PicksTierByCap) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_BcUnsetSpxTable_PicksTierByCap", []() {
+    g_loadParam = BroadcastDdaParams(/*llMax=*/-1, /*ll128Max=*/-1, /*ddaEnable=*/1, /*ddaBc=*/-1);
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ncclComm* comm = MakeBroadcastComm();
+    comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+    ASSERT_NE(nullptr, comm->archThresholds);
+    const size_t llCap    = comm->archThresholds->ddaLLMax[ncclFuncBroadcast];
+    const size_t ll128Cap = comm->archThresholds->ddaLL128Max[ncclFuncBroadcast];
+    ASSERT_GT(llCap, 0u);
+    ASSERT_GT(ll128Cap, llCap);
+    const struct {
+      size_t bytes;
+      int algo;
+    } cases[] = {
+      {llCap,         (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL},
+      {llCap + 16,    (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
+      {ll128Cap,      (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
+      {ll128Cap + 16, NCCL_ALGO_RING},
+    };
+    for (const auto& c : cases) {
+      rcclCollDecision d = PoisonedDecision();
+      EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, c.bytes / 4, ncclFloat32, 0, false, &d)) << c.bytes;
+      EXPECT_EQ(c.algo, d.algo) << c.bytes;
+    }
     DeleteCommWithArch(comm);
   });
 }

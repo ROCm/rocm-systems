@@ -211,6 +211,21 @@ safe_stol(std::string_view number_str)
     return safe_from_chars<long>(number_str);
 }
 
+/// @brief Strictly parse a whole string as an unsigned long. See safe_from_chars.
+///        A leading '-' or '+' is reported as not_a_number.
+[[nodiscard]] inline result<unsigned long, parse_error>
+safe_stoul(std::string_view number_str)
+{
+    return safe_from_chars<unsigned long>(number_str);
+}
+
+/// @brief Strictly parse a whole string as a double. See safe_from_chars.
+[[nodiscard]] inline result<double, parse_error>
+safe_stod(std::string_view number_str)
+{
+    return safe_from_chars<double>(number_str);
+}
+
 /// @brief Parse a string into a boolean.
 ///
 /// Leading and trailing whitespace is trimmed before interpretation. All-digit

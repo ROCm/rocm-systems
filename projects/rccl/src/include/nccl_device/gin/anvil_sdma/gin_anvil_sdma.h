@@ -804,4 +804,12 @@ struct ncclGinApi_FlushesAllPutsOnAnySignal<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
   }
 };
 
+// Mirrors ginAnvilGetGinProperties()'s barrierOptions on the host side.
+template <>
+struct ncclGinApi_BarrierOptions<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
+  NCCL_DEVICE_INLINE static ncclGinBarrierOptions_t call(ncclGinCtx) {
+    return NCCL_GIN_BARRIER_DEFAULT;
+  }
+};
+
 #endif
