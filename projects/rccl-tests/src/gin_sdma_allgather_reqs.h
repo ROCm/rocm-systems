@@ -133,7 +133,7 @@ static inline int ginSdmaResolveLaunchCtas(size_t chunkBytes, size_t sdmaThresho
 template <typename F>
 static inline testResult_t ginSdmaLaunchDeviceKernel(F kernel, void* sendbuff, size_t sendoffset,
                                                      void* recvbuff, size_t recvoffset, size_t count,
-                                                     int root, ncclComm_t comm, cudaStream_t stream,
+                                                     int root, ncclComm_t comm, hipStream_t stream,
                                                      size_t sdmaThreshold, int gridCtas) {
   if (kernel == nullptr) return testNotImplemented;
   ncclDevComm* devComm = (ncclDevComm*)comm;

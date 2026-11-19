@@ -32,25 +32,44 @@ WaveRaceState &RaceDetector::getWaveRaceState(int waveIndex) {
 EventId RaceDetector::allocateEventId(
     WaveId waveId, InstructionSnapshot instruction, MemoryEventType type,
     std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
-    std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-    MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask, LdsAccess ldsAccess) {
+    std::span<const amdgpu::MemoryCounterObligation> counterObligations, VgprWriteOrder writeOrder,
+    uint8_t lastRegisterByteMask, LdsAccess ldsAccess) {
   bool hasLds = !ldsIntervals.empty();
   EventId eid = events_.add(waveId, instruction, type, std::move(registers), execMask, byteMask,
-                            std::move(ldsIntervals), counterObligations, memoryOrder,
+                            std::move(ldsIntervals), counterObligations, writeOrder,
                             lastRegisterByteMask, ldsAccess);
-  if (hasLds) {
-    const auto &ivs = events_.ldsIntervals(eid);
-    const WaveId orderedWave = memoryOrder == MemoryOrderClass::LDS ? waveId : WaveId{-1};
-    if (events_.writesLds(eid)) {
-      ldsWriteEvents.push_back(eid);
-      adjustByteCounts(ivs, byteWriteCounts, +1, orderedWave);
-    }
-    if (events_.readsLds(eid)) {
-      ldsReadEvents.push_back(eid);
-      adjustByteCounts(ivs, byteReadCounts, +1, orderedWave);
-    }
-  }
+  if (hasLds)
+    indexLdsIntervals(eid);
   return eid;
+}
+
+void RaceDetector::attachLdsIntervals(EventId eid, IntervalSet intervals) {
+  events_.attachLdsIntervals(eid, std::move(intervals));
+  indexLdsIntervals(eid);
+}
+
+void RaceDetector::indexLdsIntervals(EventId eid) {
+  const auto &ivs = events_.ldsIntervals(eid);
+  const WaveId orderedWave =
+      events_.ldsOrder(eid) == MemoryOrderClass::LDS ? events_.waveId(eid) : WaveId{-1};
+  if (events_.writesLds(eid)) {
+    ldsWriteEvents.push_back(eid);
+    adjustByteCounts(ivs, byteWriteCounts, +1, orderedWave);
+  }
+  if (events_.readsLds(eid)) {
+    ldsReadEvents.push_back(eid);
+    adjustByteCounts(ivs, byteReadCounts, +1, orderedWave);
+  }
+}
+
+void RaceDetector::attachSrc2Source(EventId id, IntervalSet sourceReads) {
+  if (sourceReads.empty())
+    return;
+  events_.markLdsSourceReads(id);
+  const auto owner =
+      events_.ldsOrder(id) == MemoryOrderClass::LDS ? events_.waveId(id) : WaveId{-1};
+  adjustByteCounts(sourceReads, byteReadCounts, +1, owner);
+  src2Events.push_back({id, std::move(sourceReads)});
 }
 
 void RaceDetector::markEventWaveComplete(EventId eventId) { events_.markComplete(eventId); }
@@ -59,15 +78,29 @@ bool RaceDetector::satisfyEventWaitCounter(EventId eventId, amdgpu::WaitCounterT
   return events_.satisfyWaitCounter(eventId, waitCounter);
 }
 
-void RaceDetector::retireEvent(EventId eventId) {
+void RaceDetector::retireLdsIntervals(EventId eventId) {
+  const auto src2 = std::ranges::find(src2Events, eventId, &Src2Event::id);
+  if (src2 != src2Events.end()) {
+    adjustByteCounts(src2->sourceReads, byteReadCounts, -1);
+    std::iter_swap(src2, src2Events.end() - 1);
+    src2Events.pop_back();
+  }
+  const auto &bytes = events_.ldsIntervals(eventId);
+  if (!events_.hasLiveLdsIntervals(eventId))
+    return;
   if (events_.writesLds(eventId)) {
     removeFromUnorderedList(ldsWriteEvents, eventId);
-    adjustByteCounts(events_.ldsIntervals(eventId), byteWriteCounts, -1);
+    adjustByteCounts(bytes, byteWriteCounts, -1);
   }
   if (events_.readsLds(eventId)) {
     removeFromUnorderedList(ldsReadEvents, eventId);
-    adjustByteCounts(events_.ldsIntervals(eventId), byteReadCounts, -1);
+    adjustByteCounts(bytes, byteReadCounts, -1);
   }
+  events_.markLdsPublished(eventId);
+}
+
+void RaceDetector::retireEvent(EventId eventId) {
+  retireLdsIntervals(eventId);
   events_.markRetired(eventId);
 }
 
@@ -86,10 +119,10 @@ void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes,
       // Operations in the same non-UNORDERED class complete in issue order.
       // A completed event is safe for its owning wave regardless of class, but
       // remains live for cross-wave checks until a barrier retires it.
-      const MemoryOrderClass pendingMemoryOrder = events_.memoryOrder(eventId);
+      const MemoryOrderClass pendingMemoryOrder = events_.ldsOrder(eventId);
       const bool orderedWithCurrent = currentMemoryOrder != MemoryOrderClass::UNORDERED &&
                                       pendingMemoryOrder == currentMemoryOrder;
-      if (orderedWithCurrent || events_.status(eventId) == EventStatus::WAVE_COMPLETE) {
+      if (orderedWithCurrent || events_.ldsAccessComplete(eventId)) {
         continue;
       }
     }
@@ -109,6 +142,19 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
     return;
   }
 
+  for (const auto &source : src2Events) {
+    const auto id = source.id;
+    if (events_.waveId(id) == wave &&
+        (events_.ldsAccessComplete(id) || (currentMemoryOrder != MemoryOrderClass::UNORDERED &&
+                                           events_.ldsOrder(id) == currentMemoryOrder)))
+      continue;
+    if (const auto byte = source.sourceReads.firstOverlap(addr, addr + nBytes)) {
+      RaceViolation violation{
+          RaceViolation::Space::LDS, *byte, wave.value, lane, true, workgroupId, id};
+      violation.conflictsWithSrc2Read = true;
+      raceHandler(violation);
+    }
+  }
   for (EventId eventId : ldsReadEvents) {
     if (events_.atomicLdsElementMatches(eventId, atomicBytes))
       continue;
@@ -118,10 +164,10 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
       // The read's destination VGPR remains independently protected by its
       // wait-counter obligations. This WAR check does not cover LDS
       // write/write ordering, which is not currently checked.
-      const MemoryOrderClass pendingMemoryOrder = events_.memoryOrder(eventId);
+      const MemoryOrderClass pendingMemoryOrder = events_.ldsOrder(eventId);
       const bool orderedWithCurrent = currentMemoryOrder != MemoryOrderClass::UNORDERED &&
                                       pendingMemoryOrder == currentMemoryOrder;
-      if (orderedWithCurrent || events_.status(eventId) == EventStatus::WAVE_COMPLETE)
+      if (orderedWithCurrent || events_.ldsAccessComplete(eventId))
         continue;
     }
     // Report a byte both accesses touch, not the start of this access.

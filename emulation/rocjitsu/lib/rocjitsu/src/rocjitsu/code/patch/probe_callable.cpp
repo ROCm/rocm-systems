@@ -5,6 +5,7 @@
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/code/file_io.h"
 #include "rocjitsu/code/patch/error_report.h"
 #include "rocjitsu/code/patch/probe_symbol.h"
@@ -122,6 +123,13 @@ template <typename T>
 
 } // namespace
 
+bool may_require_cdna5_valu_spacing(const Instruction &inst) {
+  // MATRIX_REGISTER_ACCESSES describes lane semantics, not every matrix family.
+  // Scaled WMMA pairs need the same admission boundary despite lacking the flag.
+  return (inst.flags() & MATRIX_REGISTER_ACCESSES) != 0 || inst.is_transcendental() ||
+         inst.mnemonic().starts_with("v_wmma_") || inst.mnemonic().starts_with("v_swmmac_");
+}
+
 RegisterSet arg_registers(const ProbeAbi &abi) {
   RegisterSet regs;
   if (!is_valid_probe_abi(abi) || abi.num_arg_vgprs == 0)
@@ -226,6 +234,8 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
   std::string last_src0_name;
   bool last_has_src0 = false;
   const std::span<const uint32_t> body(words);
+  const std::span<const uint8_t> body_bytes(reinterpret_cast<const uint8_t *>(words.data()),
+                                            words.size() * sizeof(uint32_t));
   size_t w = 0;
   while (w < num_words) {
     util::StringDiagnostic decode_error;
@@ -243,9 +253,24 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
     std::unique_ptr<Instruction> inst = std::move(decoded).value();
     const size_t inst_words = static_cast<size_t>(inst->size()) / sizeof(uint32_t);
     const std::string_view m = inst->mnemonic();
+    // Memory waits do not prove these producers complete before guest restores.
+    // Until return-path spacing is analyzed, reject them throughout the body.
+    if (inst->is_mfma() ||
+        (arch == ROCJITSU_CODE_ARCH_CDNA5 && may_require_cdna5_valu_spacing(*inst))) {
+      const std::string message = "probe body contains " + std::string(m) +
+                                  " with unproven register completion before restoration";
+      report(error_out, message.c_str());
+      return std::nullopt;
+    }
     if (arch == ROCJITSU_CODE_ARCH_CDNA5 &&
         (m.starts_with("s_setreg") || m.starts_with("s_set_vgpr_msb"))) {
       report(error_out, "probe body may change the VGPR bank state required by its call ABI");
+      return std::nullopt;
+    }
+    // SGPR restores also use vector instructions through the spill bridge.
+    // Widening EXEC cannot make those instructions execute while VSKIP is set.
+    if (may_enable_vskip(*inst, body_bytes, arch)) {
+      report(error_out, "probe body may enable VSKIP and suppress the call envelope's restores");
       return std::nullopt;
     }
     if (is_call(*inst)) {
