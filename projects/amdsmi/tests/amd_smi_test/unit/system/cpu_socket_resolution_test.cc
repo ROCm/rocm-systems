@@ -131,3 +131,52 @@ TEST(SystemUnit, CpuSocketsFromNumaNodeUnresolvedIsEmpty) {
 
   EXPECT_TRUE(sockets.empty());
 }
+
+TEST(SystemUnit, CpuSocketsFromNumaNodeSkipsMalformedTokens) {
+  ScopedTempDir root;
+  ASSERT_FALSE(root.path().empty());
+  ScopedSysRootOverride root_override(root.path().string());
+
+  // A corrupt cpulist mixing whitespace, non-numeric, and empty (double-comma)
+  // tokens with one real entry: only the real entry should resolve.
+  WriteCpulist(root.path(), 0, " ,abc,,1");
+  WritePhysicalPackageId(root.path(), 1, 7);
+
+  auto sockets = amd::smi::AMDSmiSystem::getInstance().get_cpu_sockets_from_numa_node(0);
+
+  ASSERT_EQ(sockets.size(), 1u);
+  EXPECT_EQ(sockets[0], 7u);
+}
+
+TEST(SystemUnit, CpuSocketsFromNumaNodeRejectsHugeOrNegativeRangesWithoutHanging) {
+  ScopedTempDir root;
+  ASSERT_FALSE(root.path().empty());
+  ScopedSysRootOverride root_override(root.path().string());
+
+  // Each of these previously drove the first-last loop into billions of
+  // iterations (or an outright infinite loop via uint32_t wraparound). They
+  // must all resolve to no sockets, and the test itself must complete.
+  const char* kMalformedCpulists[] = {"-1", "0--1", "0-4294967295", "99999999999"};
+  int numa_node = 0;
+  for (const char* cpulist : kMalformedCpulists) {
+    WriteCpulist(root.path(), numa_node, cpulist);
+    auto sockets = amd::smi::AMDSmiSystem::getInstance().get_cpu_sockets_from_numa_node(numa_node);
+    EXPECT_TRUE(sockets.empty()) << "cpulist=\"" << cpulist << "\"";
+    ++numa_node;
+  }
+}
+
+TEST(SystemUnit, CpuSocketsFromNumaNodeRejectsNegativePhysicalPackageId) {
+  ScopedTempDir root;
+  ASSERT_FALSE(root.path().empty());
+  ScopedSysRootOverride root_override(root.path().string());
+
+  // A CPU with no topology yet can report physical_package_id "-1"; that must
+  // not wrap to UINT32_MAX and be treated as a real package.
+  WriteCpulist(root.path(), 0, "0");
+  WriteFile(root.path() / "cpu" / "cpu0" / "topology" / "physical_package_id", "-1\n");
+
+  auto sockets = amd::smi::AMDSmiSystem::getInstance().get_cpu_sockets_from_numa_node(0);
+
+  EXPECT_TRUE(sockets.empty());
+}
