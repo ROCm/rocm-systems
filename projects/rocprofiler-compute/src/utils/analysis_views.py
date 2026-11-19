@@ -15,7 +15,8 @@ from the workload's CSV files. The panel id comes from the file name
 the first table, 3.1.0 its first row).
 
 views_to_panel_configs() builds the panel configs that load_panel_configs() reads from
-analysis_configs/. Until the cutover, only tools and tests read the views.
+analysis_configs/. Until the cutover, analyze reads only the built-in top stats view
+(--list-stats); tools read the rest.
 view_schema_errors() and view_metric_errors() check the views.
 Standard library and vendored YAML only, so that profile mode can import it.
 """
