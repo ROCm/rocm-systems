@@ -117,7 +117,7 @@ Example usage:
     Output all summaries to console and include domain summary for 1 database
     $ rocpd summary -i db1.db --domain-summary
 
-    Aggregate 3 databases and output all summary files and include summary by rank/process ID, to csv file output
+    Aggregate 3 databases and output by-rank summary showing rank/process ID, to csv file output
     $ rocpd summary -i db{1..3}.db --summary-by-rank --format csv
 
     Output all summaries to console and exclude all regions to save processing time
@@ -126,7 +126,7 @@ Example usage:
     Aggregate 2 databases and output all summary files to HTML, only include HIP and MARKER regions, include domain summary
     $ rocpd summary -i db{0,1}.db --region-categories HIP MARKER --domain-summary --format html
 
-    Do not automerge the databases (4 < limit of 8) and output summary tables organized by rank/process ID, to console
+    Do not automerge the databases (4 < limit of 8) and output by-rank summaries organized by rank/process ID, to console
     $ rocpd summary -i db{0..3}.db --summary-by-rank --automerge-limit 8
 
 """

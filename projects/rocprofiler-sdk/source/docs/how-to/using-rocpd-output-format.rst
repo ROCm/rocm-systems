@@ -120,7 +120,7 @@ The command-line options as displayed using ``rocpd convert --help`` are listed 
 .. code-block:: none
 
    usage: rocpd convert [-h] -i INPUT [INPUT ...] -f {csv,pftrace,otf2} [{csv,pftrace,otf2} ...]
-                        [-o OUTPUT_FILE] [-d OUTPUT_PATH] [--automerge-limit LIMIT]
+                        [-o OUTPUT_FILE] [-d OUTPUT_DIRECTORY] [--automerge-limit LIMIT]
                         [--kernel-rename]
                         [--agent-index-value {absolute,relative,type-relative}]
                         [--perfetto-backend {inprocess,system}]
@@ -545,9 +545,6 @@ rocpd2summary - statistical analysis tool
 
     # HTML report with visualization
     rocpd2summary -i profile.db --format html -d ~/reports/
-
-    # Multiple output formats
-    rocpd2summary -i profile.db --format csv html json
 
 .. _analysis-categories:
 
@@ -1333,7 +1330,7 @@ The following examples demonstrate how to use the :ref:`rocpd conversion tools <
     rocpd2csv -i "$PROFILE_DB" -d "$OUTPUT_DIR" -o raw_data
 
     # Create summary reports
-    rocpd2summary -i "$PROFILE_DB" --format csv html \
+    rocpd2summary -i "$PROFILE_DB" --format html \
                     -d "$OUTPUT_DIR" -o performance_summary
 
     # Generate interactive trace for detailed investigation
@@ -1402,7 +1399,7 @@ Database schema and views
 
     -- Marker and region data
     SELECT * FROM regions;
-    SELECT * FROM regions_and_samples WHERE category LIKE 'MARKERS_%';
+    SELECT * FROM regions_and_samples WHERE category LIKE 'MARKER_%';
 
 - **Summary and analysis views:**
 
@@ -1722,7 +1719,7 @@ The command-line options as displayed using ``rocpd query --help`` are listed he
 
    usage: rocpd query [-h] -i INPUT [INPUT ...] --query QUERY [--script SCRIPT]
                       [--format {console,csv,html,json,md,pdf,dashboard,clipboard}]
-                      [-o OUTPUT_FILE] [-d OUTPUT_PATH] [--automerge-limit LIMIT]
+                      [-o OUTPUT_FILE] [-d OUTPUT_DIRECTORY] [--automerge-limit LIMIT]
                       [--email-to EMAIL_TO] [--email-from EMAIL_FROM]
                       [--email-subject EMAIL_SUBJECT] [--smtp-server SMTP_SERVER]
                       [--smtp-port SMTP_PORT] [--smtp-user SMTP_USER]
