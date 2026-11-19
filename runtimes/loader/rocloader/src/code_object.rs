@@ -125,54 +125,6 @@ pub enum SymbolTableOrder {
     RegularFirst,
 }
 
-/// HSA profile required by a code object or selected for an executable.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Profile {
-    /// Base-profile GPU execution.
-    Base,
-    /// Full-profile execution.
-    Full,
-}
-
-/// Default floating-point rounding policy at the HSA executable boundary.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum FloatRoundingMode {
-    /// Use the implementation's default mode.
-    Default,
-    /// Round toward zero.
-    Zero,
-    /// Round to nearest, ties to even.
-    Near,
-}
-
-/// Execution properties interpreted from the supported code-object format.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct CodeObjectContract {
-    /// Required HSA profile.
-    pub profile: Profile,
-    /// Required default floating-point rounding mode.
-    pub rounding: FloatRoundingMode,
-}
-
-impl CodeObjectContract {
-    /// Checks executable policy before allocating or publishing an image.
-    ///
-    /// # Errors
-    /// Returns `IncompatibleTarget` for a profile or rounding mismatch.
-    pub fn validate(self, profile: Profile, rounding: FloatRoundingMode) -> Result<(), Error> {
-        let rounding = match rounding {
-            FloatRoundingMode::Default => FloatRoundingMode::Near,
-            mode => mode,
-        };
-        if self.profile != profile
-            || (self.rounding != FloatRoundingMode::Default && self.rounding != rounding)
-        {
-            return Err(Error::IncompatibleTarget);
-        }
-        Ok(())
-    }
-}
-
 impl SymbolTableOrder {
     fn section_types(self) -> [u32; 2] {
         match self {
@@ -196,17 +148,6 @@ impl<'a> CodeObject<'a> {
     #[must_use]
     pub(crate) fn layout(&self) -> Layout {
         self.layout
-    }
-
-    /// Returns the execution contract of a modern AMDGPU HSA code object.
-    #[must_use]
-    pub fn contract(&self) -> CodeObjectContract {
-        // V3 and later use the AMDGPU base-profile ABI. Legacy HSAIL notes and
-        // amd_kernel_code_t are rejected by parse_code_object_layout below.
-        CodeObjectContract {
-            profile: Profile::Base,
-            rounding: FloatRoundingMode::Near,
-        }
     }
 
     /// Returns the logical loaded span, independent of device page size.
@@ -661,32 +602,6 @@ mod tests {
             xnack_enabled: Some(false),
             sram_ecc_enabled: Some(false),
         }
-    }
-
-    #[test]
-    fn modern_contract_rejects_mismatched_executable_policy() {
-        let bytes = modern_object(AMDGPU_MACHINE_GFX1201);
-        let contract = CodeObject::parse(&bytes).unwrap().contract();
-        assert!(
-            contract
-                .validate(Profile::Base, FloatRoundingMode::Default)
-                .is_ok()
-        );
-        assert!(
-            contract
-                .validate(Profile::Base, FloatRoundingMode::Near)
-                .is_ok()
-        );
-        assert!(
-            contract
-                .validate(Profile::Base, FloatRoundingMode::Zero)
-                .is_err()
-        );
-        assert!(
-            contract
-                .validate(Profile::Full, FloatRoundingMode::Near)
-                .is_err()
-        );
     }
 
     #[test]

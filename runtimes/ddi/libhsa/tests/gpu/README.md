@@ -30,3 +30,5 @@ submits 16 kernel dispatch packets. Every completion must increment the
 host-visible output exactly once. The script compares the results and prints
 library, code-object, and probe hashes. This checks one dispatch and memory
 path on the current GPU; it does not cover other kernels or hardware.
+Before dispatch, the probe also loads and freezes the modern code object under
+both executable profiles and all three default floating-point rounding modes.
