@@ -22,6 +22,10 @@ namespace amd::smi {
 
 class AMDSmiSocket;
 
+namespace testing {
+class WSLGPUBackendTestPeer;
+}  // namespace testing
+
 // WSL GPU backend: implements IGPUBackend by calling rocdxg_smi_* functions
 // resolved at runtime via dlopen. One instance per GPU device.
 class WSLGPUBackend : public IGPUBackend {
@@ -70,6 +74,9 @@ class WSLGPUBackend : public IGPUBackend {
   amdsmi_bdf_t bdf() const { return bdf_; }
 
  private:
+  // Test seam: constructs a backend for a synthetic node without /dev/dxg.
+  friend class testing::WSLGPUBackendTestPeer;
+
   explicit WSLGPUBackend(uint32_t gpu_id, uint32_t node_id, const HsaNodeProperties& props);
 
   uint32_t gpu_id_;
