@@ -309,7 +309,7 @@ pub extern "C" fn hsa_amd_vmem_map(
     size: usize,
     offset: usize,
     memory_handle: HsaAmdVmemAllocHandle,
-    flags: u64,
+    _flags: u64,
 ) -> Status {
     boundary(|| {
         let page = match current_host_page() {
@@ -321,7 +321,6 @@ pub extern "C" fn hsa_amd_vmem_map(
             || size == 0
             || size % page != 0
             || offset % page != 0
-            || flags != 0
         {
             return INVALID_ARGUMENT;
         }
