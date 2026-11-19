@@ -1867,14 +1867,10 @@ int rj_arith_v_fma_f64_w32_gfx10(uint64_t flags, uint32_t exec_mask, uint64_t in
                                  uint32_t *const *d, const uint32_t *const *a,
                                  const uint32_t *const *b, const uint32_t *const *c,
                                  [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
     return error;
   }
-  if (instruction_flags >> 32) {
-    return RJ_ARITH_ERROR_INVALID_FLAGS;
-  }
-  return fp64<rocjitsu::arith::Fp64::Fma, true>(flags, exec_mask, instruction_flags, d, a, b, c);
+  return rj_arith_v_fma_f64_w32(flags, exec_mask, instruction_flags, d, a, b, c, trapsts);
 }
 
 // RDNA2 FMA inherits the RDNA3 numeric model; strict exact is unsupported pending gfx10 captures.
@@ -1882,13 +1878,8 @@ int rj_arith_v_fma_f64_w64_gfx10(uint64_t flags, uint64_t exec_mask, uint64_t in
                                  uint32_t *const *d, const uint32_t *const *a,
                                  const uint32_t *const *b, const uint32_t *const *c,
                                  [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
     return error;
   }
-  if (instruction_flags >> 32) {
-    return RJ_ARITH_ERROR_INVALID_FLAGS;
-  }
-  return fp64_wave64<rocjitsu::arith::Fp64::Fma, true>(flags, exec_mask, instruction_flags, d, a, b,
-                                                       c);
+  return rj_arith_v_fma_f64_w64(flags, exec_mask, instruction_flags, d, a, b, c, trapsts);
 }
