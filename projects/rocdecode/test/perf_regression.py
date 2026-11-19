@@ -406,6 +406,17 @@ def summary_box(rows, overall_ok, measure_only=False):
     print(line("╚", "═", "╝"))
 
 
+def positive_int(text):
+    """argparse type for counts that must be at least 1 (e.g. --runs, which is a divisor)."""
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"'{text}' is not an integer")
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, got {value}")
+    return value
+
+
 def main():
     ap = argparse.ArgumentParser(description="rocDecode performance regression check")
     ap.add_argument("--perf-dir", default=os.environ.get(
@@ -417,7 +428,7 @@ def main():
     ap.add_argument("--tolerance", type=float,
         default=float(os.environ.get("ROCDECODE_PERF_TOLERANCE", "5")),
         help="regression threshold: %% Avg FPS drop below baseline (default: 5)")
-    ap.add_argument("--runs", type=int, default=3,
+    ap.add_argument("--runs", type=positive_int, default=3,
         help="runs to average when confirming a flagged stream, or per stream with "
              "--save-baseline (default: 3)")
     ap.add_argument("--device", type=int, default=0, help="GPU device id (default: 0)")
