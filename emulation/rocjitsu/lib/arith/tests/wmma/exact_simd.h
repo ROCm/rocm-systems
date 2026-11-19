@@ -14,6 +14,7 @@
 
 #include <gtest/gtest.h>
 #include <random>
+#include <vector>
 #include <stdint.h>
 
 namespace rocjitsu::arith::test {
@@ -204,9 +205,18 @@ template <int Lanes, typename Call> void expect_wmma_fp8_exact_simd(Call call) {
   // E4M3 zero, smallest and largest subnormal, smallest normal, largest finite, NaN and one.
   static constexpr uint32_t kFactors[] = {0x00, 0x80, 0x01, 0x81, 0x07, 0x87,
                                           0x08, 0x7e, 0xfe, 0x7f, 0x38, 0xb8};
+  // Every signed power of two as the accumulator, against the largest finite factors. These
+  // are the tiles where the accumulator's magnitude survives the shift as exactly one: its
+  // floored value is -1, but it has NOT vanished and must still contribute. Random tiles
+  // essentially never land there.
+  std::vector<uint32_t> accumulators(std::begin(kAccumulators), std::end(kAccumulators));
+  for (uint32_t field = 1; field < 255; ++field) {
+    accumulators.push_back(field << 23);
+    accumulators.push_back(0x80000000u | (field << 23));
+  }
   std::minstd_rand random;
   int sample = 0;
-  for (uint32_t accumulator : kAccumulators) {
+  for (uint32_t accumulator : accumulators) {
     for (uint32_t left : kFactors) {
       for (uint32_t right : kFactors) {
         Registers<32, Lanes> input;

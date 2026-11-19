@@ -145,9 +145,12 @@ inline __m256i dot8_avx2(const MatrixAvx2 &A, int row, const MatrixAvx2 &B, int 
       _mm256_max_epi32(down, zero));
   // A negative accumulator that retains no magnitude bit contributes zero rather than one
   // floor unit, above the FP32 normal floor (gfx1201, rocjitsu #13691).
+  // "Keeps no magnitude bit" must be tested on the MAGNITUDE, not on the floored value: a
+  // negative accumulator that is an exact power of two floors to -1 with its magnitude
+  // intact, and still contributes that -1.
+  const __m256i c_magnitude = _mm256_srav_epi32(significand, _mm256_max_epi32(down, zero));
   const __m256i vanished = _mm256_and_si256(
-      _mm256_and_si256(_mm256_cmpeq_epi32(c_units, _mm256_set1_epi32(-1)),
-                       _mm256_cmpgt_epi32(down, zero)),
+      _mm256_and_si256(_mm256_cmpeq_epi32(c_magnitude, zero), _mm256_cmpgt_epi32(down, zero)),
       _mm256_cmpgt_epi32(grid, _mm256_set1_epi32(-126)));
   units = _mm256_add_epi32(units, _mm256_andnot_si256(vanished, c_units));
 
@@ -291,7 +294,10 @@ inline __m512i dot8_avx512(const MatrixAvx512 &A, int row, const MatrixAvx512 &B
   const __m512i c_units = _mm512_srav_epi32(
       _mm512_sllv_epi32(signed_c, _mm512_max_epi32(_mm512_sub_epi32(zero, down), zero)),
       _mm512_max_epi32(down, zero));
-  const __mmask16 vanished = _mm512_cmpeq_epi32_mask(c_units, _mm512_set1_epi32(-1)) &
+  // Tested on the MAGNITUDE, not the floored value: a negative accumulator that is an exact
+  // power of two floors to -1 with its magnitude intact, and still contributes that -1.
+  const __m512i c_magnitude = _mm512_srav_epi32(significand, _mm512_max_epi32(down, zero));
+  const __mmask16 vanished = _mm512_cmpeq_epi32_mask(c_magnitude, zero) &
                              _mm512_cmpgt_epi32_mask(down, zero) &
                              _mm512_cmpgt_epi32_mask(grid, _mm512_set1_epi32(-126));
   units = _mm512_mask_add_epi32(units, __mmask16(~vanished), units, c_units);
