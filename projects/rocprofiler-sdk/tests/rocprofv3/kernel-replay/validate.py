@@ -44,6 +44,7 @@
 
 import collections
 import json
+import re
 import sys
 
 # Python 3.6 compatibility: dataclasses added in 3.7
@@ -336,6 +337,95 @@ def test_dispatch_id_constant_across_replay_passes(json_data, expected_passes):
         )
 
 
+# rocprofv3 names each thread trace file <agent>_shader_engine_<se>_<dispatch_id>.att.
+_ATT_FILENAME = re.compile(r"(\d+)_shader_engine_(\d+)_(\d+)\.att$")
+
+
+def test_one_thread_trace_per_dispatch(json_data, expect_thread_trace):
+    # With --att, replay traces a dispatch once, on a pass of its own after the counter groups. A
+    # trace on every pass would write the same agent/shader-engine/dispatch file once per pass, and
+    # a trace on a dispatch without counter records (or the reverse) would mean the two services
+    # disagreed about which dispatches were profiled.
+    if not expect_thread_trace:
+        pytest.skip("--thread-trace was not specified")
+
+    att_files = _sdk(json_data).get("strings", {}).get("att_filenames")
+    assert att_files, "run used --att but produced no thread trace files"
+
+    keys = []
+    for name in att_files:
+        match = _ATT_FILENAME.search(name)
+        assert match, f"unexpected thread trace file name: {name}"
+        keys.append(tuple(int(group) for group in match.groups()))
+
+    repeated = sorted(
+        key for key, count in collections.Counter(keys).items() if count > 1
+    )
+    assert not repeated, (
+        "dispatches traced more than once, as (agent, shader_engine, dispatch_id): "
+        f"{repeated}"
+    )
+
+    traced = {dispatch_id for _, _, dispatch_id in keys}
+    counted = set(_dispatch_passes(_sdk(json_data)))
+    assert traced == counted, (
+        f"traced dispatch_ids {sorted(traced)} != dispatch_ids with counter records "
+        f"{sorted(counted)}"
+    )
+
+
+def test_thread_trace_pass_has_no_counter_row(
+    json_data, expected_passes, expect_thread_trace
+):
+    # The thread-trace pass follows the counter groups and runs with counter collection stopped, so
+    # it must not add a counter record, and in particular must not wrap onto group 0. Counter
+    # records keep numbering the groups 0..N-1.
+    if not expect_thread_trace:
+        pytest.skip("--thread-trace was not specified")
+
+    beyond = sorted(
+        {
+            (_dispatch_id(rec), _pass_index(rec))
+            for rec in _counter_records(_sdk(json_data))
+            if _pass_index(rec) >= expected_passes
+        }
+    )
+    assert not beyond, (
+        f"counter records for (dispatch_id, replay_pass) {beyond} come from the thread-trace "
+        f"pass; counter groups are passes 0..{expected_passes - 1}"
+    )
+
+    for did, entry in _dispatch_passes(_sdk(json_data)).items():
+        assert len(entry["passes"]) == expected_passes, (
+            f"dispatch {did} has {len(entry['passes'])} counter records, expected one per "
+            f"counter group ({expected_passes}); the thread-trace pass must not add or repeat one"
+        )
+
+
+def test_thread_trace_runs_one_extra_pass(
+    json_data, expected_passes, expect_thread_trace
+):
+    # The kernel trace has a record per execution, so a profiled dispatch has one per counter group
+    # plus the thread-trace pass. This is what separates "groups plus one" from a trace sharing a
+    # counter pass, which would leave the count at the number of groups.
+    if not expect_thread_trace:
+        pytest.skip("--thread-trace was not specified")
+
+    sdk = _sdk(json_data)
+    executions = sdk.get("buffer_records", {}).get("kernel_dispatch", [])
+    if not executions:
+        pytest.skip("generated without --kernel-trace")
+
+    runs = collections.Counter(
+        int(rec["dispatch_info"]["dispatch_id"]) for rec in executions
+    )
+    for did in sorted(_dispatch_passes(sdk)):
+        assert runs[did] == expected_passes + 1, (
+            f"dispatch {did} ran {runs[did]} time(s), expected {expected_passes + 1}: one per "
+            "counter group and one for thread trace"
+        )
+
+
 def test_expected_logical_dispatch_count(json_data, expected_dispatch_count):
     if expected_dispatch_count is None:
         pytest.skip("--expected-dispatch-count was not specified")
@@ -347,10 +437,10 @@ def test_expected_logical_dispatch_count(json_data, expected_dispatch_count):
     )
 
 
-def test_unselected_dispatches_run_once(json_data, expected_passes):
+def test_unselected_dispatches_run_once(json_data, expected_passes, expect_thread_trace):
     # Only the dispatches the kernel filters select are replayed; the others run once. The kernel
     # trace has a record per execution, so a selected dispatch has one per pass and any other has
-    # one.
+    # one. With --att, a selected dispatch has one more for thread trace.
     sdk = _sdk(json_data)
     executions = sdk.get("buffer_records", {}).get("kernel_dispatch", [])
     if not executions:
@@ -367,8 +457,9 @@ def test_unselected_dispatches_run_once(json_data, expected_passes):
 
     unselected = [did for did in runs if did not in selected]
     assert unselected, f"no unselected dispatches to check: dispatch_ids={sorted(runs)}"
+    selected_runs = expected_passes + (1 if expect_thread_trace else 0)
     for did, count in sorted(runs.items()):
-        want = expected_passes if did in selected else 1
+        want = selected_runs if did in selected else 1
         assert (
             count == want
         ), f"dispatch {did} ({kernels[did]}) ran {count} time(s), expected {want}: " + (
@@ -600,7 +691,7 @@ def test_replayed_kernels_present(json_data):
         assert any(kernel in (n or "") for n in names), f"{kernel} not found in {names}"
 
 
-def test_expected_counters_present(json_data):
+def test_expected_counters_present(json_data, expected_counters):
     sdk = _sdk(json_data)
     id_to_name = _counter_id_to_name(sdk)
     seen = set()
@@ -609,7 +700,7 @@ def test_expected_counters_present(json_data):
             name = id_to_name.get(int(sub["counter_id"]["handle"]))
             if name:
                 seen.add(name)
-    for counter in EXPECTED_COUNTERS:
+    for counter in expected_counters or EXPECTED_COUNTERS:
         assert counter in seen, f"counter {counter} not collected; seen={sorted(seen)}"
 
 
