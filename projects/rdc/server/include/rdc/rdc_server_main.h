@@ -25,6 +25,7 @@ THE SOFTWARE.
 #include <grpcpp/grpcpp.h>
 
 #include <memory>
+#include <mutex>
 #include <string>
 
 #include "rdc/rdc_admin_service.h"
@@ -56,10 +57,13 @@ class RDCServer {
  public:
   RDCServer();
   ~RDCServer();
+  RDCServer(const RDCServer&) = delete;
+  RDCServer& operator=(const RDCServer&) = delete;
 
   void Initialize(RdcdCmdLineOpts* cl);
 
-  void Run(void);
+  // Serves until ShutDown(); returns false if the server could not start.
+  bool Run(void);
   void ShutDown(void);
 
   bool start_rdc_admin_service(void) const { return start_rdc_admin_service_; }
@@ -85,6 +89,11 @@ class RDCServer {
 
   bool start_api_service_;
   amd::rdc::RdcAPIServiceImpl* api_service_;
+
+  // Run() and ShutDown() run on different threads: a stop can come in while the
+  // server is still starting.
+  std::mutex mutex_;
+  bool stop_requested_;
 };
 
 #endif  // SERVER_INCLUDE_RDC_RDC_SERVER_MAIN_H_

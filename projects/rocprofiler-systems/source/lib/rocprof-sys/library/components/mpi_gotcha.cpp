@@ -293,15 +293,6 @@ mpi_gotcha::update()
 }
 
 void
-mpi_gotcha::disable_comm_intercept()
-{
-#if defined(ROCPROFSYS_USE_MPI_HEADERS) && ROCPROFSYS_USE_MPI_HEADERS > 0
-    mpi_gotcha_t::revert<3>();
-    mpi_gotcha_t::revert<4>();
-#endif
-}
-
-void
 mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, int*, char***)
 {
     LOG_DEBUG("{}(int*, char***)", _data.tool_id);
