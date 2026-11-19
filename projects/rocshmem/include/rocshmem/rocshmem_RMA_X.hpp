@@ -43,8 +43,6 @@ namespace rocshmem {
  * @param[in] source Source address. Must be an address on the symmetric heap.
  * @param[in] nelems Size of the transfer in number of elements.
  * @param[in] pe     PE of the remote process.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_float_put_wave(
     rocshmem_ctx_t ctx, float *dest, const float *source,
@@ -213,8 +211,6 @@ __device__ ATTR_NO_INLINE void rocshmem_ptrdiff_put_wave(
  * @param[in] source Source address. Must be an address on the symmetric heap.
  * @param[in] nelems Size of the transfer in number of elements.
  * @param[in] pe     PE of the remote process.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_float_put_wg(
     rocshmem_ctx_t ctx, float *dest, const float *source,
@@ -388,8 +384,6 @@ __device__ ATTR_NO_INLINE void rocshmem_ptrdiff_put_wg(
  * @param[in] source Source address. Must be an address on the symmetric heap.
  * @param[in] nelems Size of the transfer in number of elements.
  * @param[in] pe     PE of the remote process.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_putmem_wave(
     rocshmem_ctx_t ctx, void *dest, const void *source, size_t nelems, int pe);
@@ -418,8 +412,6 @@ __device__ ATTR_NO_INLINE void rocshmem_putmem_wave(void *dest,
  * @param[in] source Source address. Must be an address on the symmetric heap.
  * @param[in] nelems Size of the transfer in number of elements.
  * @param[in] pe     PE of the remote process.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_putmem_wg(rocshmem_ctx_t ctx,
                                                        void *dest,
@@ -446,8 +438,6 @@ __device__ ATTR_NO_INLINE void rocshmem_putmem_wg(void *dest,
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_float_get_wave(
     rocshmem_ctx_t ctx, float *dest, const float *source,
@@ -615,8 +605,6 @@ __device__ ATTR_NO_INLINE void rocshmem_ptrdiff_get_wave(
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_float_get_wg(
     rocshmem_ctx_t ctx, float *dest, const float *source,
@@ -789,8 +777,6 @@ __device__ ATTR_NO_INLINE void rocshmem_ptrdiff_get_wg(
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_getmem_wave(
     rocshmem_ctx_t ctx, void *dest, const void *source, size_t nelems, int pe);
@@ -818,8 +804,6 @@ __device__ ATTR_NO_INLINE void rocshmem_getmem_wave(void *dest,
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_getmem_wg(rocshmem_ctx_t ctx,
                                                        void *dest,
@@ -848,8 +832,6 @@ __device__ ATTR_NO_INLINE void rocshmem_getmem_wg(void *dest,
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_float_put_nbi_wave(
     rocshmem_ctx_t ctx, float *dest, const float *source,
@@ -1019,8 +1001,6 @@ __device__ ATTR_NO_INLINE void rocshmem_ptrdiff_put_nbi_wave(
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_float_put_nbi_wg(
     rocshmem_ctx_t ctx, float *dest, const float *source,
@@ -1190,8 +1170,6 @@ __device__ ATTR_NO_INLINE void rocshmem_ptrdiff_put_nbi_wg(
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_putmem_nbi_wave(
     rocshmem_ctx_t ctx, void *dest, const void *source, size_t nelems, int pe);
@@ -1218,8 +1196,6 @@ __device__ ATTR_NO_INLINE void rocshmem_putmem_nbi_wave(void *dest,
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_putmem_nbi_wg(
     rocshmem_ctx_t ctx, void *dest, const void *source, size_t nelems, int pe);
@@ -1246,8 +1222,6 @@ __device__ ATTR_NO_INLINE void rocshmem_putmem_nbi_wg(void *dest,
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_float_get_nbi_wave(
     rocshmem_ctx_t ctx, float *dest, const float *source,
@@ -1417,8 +1391,6 @@ __device__ ATTR_NO_INLINE void rocshmem_ptrdiff_get_nbi_wave(
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_float_get_nbi_wg(
     rocshmem_ctx_t ctx, float *dest, const float *source,
@@ -1588,8 +1560,6 @@ __device__ ATTR_NO_INLINE void rocshmem_ptrdiff_get_nbi_wg(
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_getmem_nbi_wave(
     rocshmem_ctx_t ctx, void *dest, const void *source, size_t nelems, int pe);
@@ -1616,8 +1586,6 @@ __device__ ATTR_NO_INLINE void rocshmem_getmem_nbi_wave(void *dest,
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_getmem_nbi_wg(
     rocshmem_ctx_t ctx, void *dest, const void *source, size_t nelems, int pe);

@@ -66,10 +66,6 @@ template <typename Inst>
 inline void execute_ds_nop_vds([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {}
 
 template <typename Inst>
-inline void execute_lds_param_load_ldsdir([[maybe_unused]] Inst &inst,
-                                          [[maybe_unused]] Wavefront &wf) {}
-
-template <typename Inst>
 inline void execute_s_abs_i32_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   int32_t result = [&]() {
     int32_t v = static_cast<int32_t>(
@@ -422,6 +418,24 @@ inline void execute_s_barrier_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]]
 }
 
 template <typename Inst>
+inline void execute_s_barrier_signal_sop1([[maybe_unused]] Inst &inst,
+                                          [[maybe_unused]] Wavefront &wf) {
+  uint32_t source = amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0);
+  bool source_is_m0 = static_cast<uint32_t>(inst.ssrc0.encoding_value()) ==
+                      amdgpu::scalar_m0_selector(wf.cu().arch());
+  int32_t barrier_id = amdgpu::barrier_operand_id(source, source_is_m0);
+  uint32_t member_count = source_is_m0 ? ((source >> 16) & 0x7fu) : 0;
+  wf.barrier_signal(barrier_id, member_count);
+}
+
+template <typename Inst>
+inline void execute_s_barrier_wait_sopp([[maybe_unused]] Inst &inst,
+                                        [[maybe_unused]] Wavefront &wf) {
+  int32_t barrier_id = static_cast<int16_t>(inst.simm16.encoding_value_);
+  wf.barrier_wait(barrier_id);
+}
+
+template <typename Inst>
 inline void execute_s_bcnt0_i32_b32_sop1([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
   uint32_t result =
@@ -654,25 +668,6 @@ inline void execute_s_brev_b64_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]
   }();
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, result);
 }
-
-template <typename Inst>
-inline void execute_s_cbranch_cdbgsys_sopp([[maybe_unused]] Inst &inst,
-                                           [[maybe_unused]] Wavefront &wf) {}
-
-template <typename Inst>
-inline void execute_s_cbranch_cdbgsys_and_user_sopp([[maybe_unused]] Inst &inst,
-                                                    [[maybe_unused]] Wavefront &wf) {}
-
-template <typename Inst>
-inline void execute_s_cbranch_cdbgsys_or_user_sopp([[maybe_unused]] Inst &inst,
-                                                   [[maybe_unused]] Wavefront &wf) {}
-
-template <typename Inst>
-inline void execute_s_cbranch_cdbguser_sopp([[maybe_unused]] Inst &inst,
-                                            [[maybe_unused]] Wavefront &wf) {}
-
-template <typename Inst>
-inline void execute_s_clause_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {}
 
 template <typename Inst>
 inline void execute_s_cls_i32_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
@@ -973,10 +968,6 @@ inline void execute_s_ctz_i32_b64_sop1([[maybe_unused]] Inst &inst,
 }
 
 template <typename Inst>
-inline void execute_s_decperflevel_sopp([[maybe_unused]] Inst &inst,
-                                        [[maybe_unused]] Wavefront &wf) {}
-
-template <typename Inst>
 inline void execute_s_delay_alu_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {}
 
 template <typename Inst>
@@ -1071,6 +1062,16 @@ inline void execute_s_flbit_i32_i64_sop1([[maybe_unused]] Inst &inst,
 }
 
 template <typename Inst>
+inline void execute_s_get_barrier_state_sop1([[maybe_unused]] Inst &inst,
+                                             [[maybe_unused]] Wavefront &wf) {
+  uint32_t source = amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0);
+  bool source_is_m0 = static_cast<uint32_t>(inst.ssrc0.encoding_value()) ==
+                      amdgpu::scalar_m0_selector(wf.cu().arch());
+  int32_t barrier_id = amdgpu::barrier_operand_id(source, source_is_m0);
+  amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, wf.barrier_state(barrier_id));
+}
+
+template <typename Inst>
 inline void execute_s_gl1_inv_smem([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   wf.cu().l1_vector().invalidate_all();
   if (auto *l2 = wf.cu().l2())
@@ -1083,12 +1084,10 @@ inline void execute_s_icache_inv_sopp([[maybe_unused]] Inst &inst, [[maybe_unuse
 }
 
 template <typename Inst>
-inline void execute_s_incperflevel_sopp([[maybe_unused]] Inst &inst,
-                                        [[maybe_unused]] Wavefront &wf) {}
-
-template <typename Inst>
 inline void execute_s_inst_prefetch_sopp([[maybe_unused]] Inst &inst,
-                                         [[maybe_unused]] Wavefront &wf) {}
+                                         [[maybe_unused]] Wavefront &wf) {
+  wf.set_instruction_prefetch(inst.simm16.encoding_value_ & 3u);
+}
 
 template <typename Inst>
 inline void execute_s_lshl1_add_u32_sop2([[maybe_unused]] Inst &inst,
@@ -1746,14 +1745,18 @@ inline void execute_s_set_gpr_idx_on_sopc([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_s_set_inst_prefetch_distance_sopp([[maybe_unused]] Inst &inst,
-                                                      [[maybe_unused]] Wavefront &wf) {}
+                                                      [[maybe_unused]] Wavefront &wf) {
+  wf.set_instruction_prefetch(inst.simm16.encoding_value_);
+}
 
 template <typename Inst>
 inline void execute_s_set_valu_coexec_mode_sopp([[maybe_unused]] Inst &inst,
                                                 [[maybe_unused]] Wavefront &wf) {}
 
 template <typename Inst>
-inline void execute_s_sethalt_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {}
+inline void execute_s_sethalt_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  wf.set_shader_halt(inst.simm16.encoding_value_);
+}
 
 template <typename Inst>
 inline void execute_s_setkill_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
@@ -1762,7 +1765,9 @@ inline void execute_s_setkill_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]]
 }
 
 template <typename Inst>
-inline void execute_s_setprio_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {}
+inline void execute_s_setprio_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  wf.set_user_priority(inst.simm16.encoding_value_);
+}
 
 template <typename Inst>
 inline void execute_s_setvskip_sopc([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
@@ -1834,15 +1839,6 @@ template <typename Inst>
 inline void execute_s_trap_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {}
 
 template <typename Inst>
-inline void execute_s_ttracedata_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-
-}
-
-template <typename Inst>
-inline void execute_s_ttracedata_imm_sopp([[maybe_unused]] Inst &inst,
-                                          [[maybe_unused]] Wavefront &wf) {}
-
-template <typename Inst>
 inline void execute_s_version_sopk([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {}
 
 template <typename Inst>
@@ -1850,7 +1846,8 @@ inline void execute_s_wait_alu_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]
 
 template <typename Inst>
 inline void execute_s_wait_event_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-
+  if (wf.waits_for_export_grant(inst.simm16.encoding_value_))
+    wf.set_state(amdgpu::WfState::EXPORT_WAIT);
 }
 
 template <typename Inst>
@@ -1863,7 +1860,9 @@ inline void execute_s_waitcnt_depctr_sopp([[maybe_unused]] Inst &inst,
                                           [[maybe_unused]] Wavefront &wf) {}
 
 template <typename Inst>
-inline void execute_s_wakeup_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {}
+inline void execute_s_wakeup_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  wf.cu().wake_sleeping_workgroup(wf);
+}
 
 template <typename Inst>
 inline void execute_s_wqm_b32_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
@@ -3012,10 +3011,14 @@ inline void execute_v_ceil_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
 }
 
 template <typename Inst>
-inline void execute_v_clrexcp_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {}
+inline void execute_v_clrexcp_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  wf.set_trapsts(wf.trapsts() & ~amdgpu::kAluExceptionTrapstsMask);
+}
 
 template <typename Inst>
-inline void execute_v_clrexcp_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {}
+inline void execute_v_clrexcp_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  wf.set_trapsts(wf.trapsts() & ~amdgpu::kAluExceptionTrapstsMask);
+}
 
 template <typename Inst>
 inline void execute_v_cls_i32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {

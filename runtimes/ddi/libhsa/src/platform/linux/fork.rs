@@ -60,7 +60,7 @@ mod tests {
     #[test]
     fn fork_child_rejects_hsa_before_an_inherited_lifecycle_lock() {
         bind_process().unwrap();
-        let guard = crate::runtime::lock().unwrap();
+        let guard = crate::lifecycle::lock().unwrap();
         // SAFETY: The child only checks atomics and calls the guarded HSA ABI
         // entries, then exits without running inherited Rust destructors.
         let child = unsafe { libc::syscall(libc::SYS_fork) };
@@ -71,8 +71,8 @@ mod tests {
             let rejected = !process_is_current()
                 && crate::api::lifecycle::hsa_init() == ERROR
                 && crate::api::lifecycle::hsa_shut_down() == NOT_INITIALIZED
-                && crate::runtime::boundary(|| SUCCESS) == NOT_INITIALIZED
-                && crate::runtime::enter_public_raw_handle().is_none();
+                && crate::status::boundary(|| SUCCESS) == NOT_INITIALIZED
+                && crate::admission::enter_public_raw_handle().is_none();
             // SAFETY: _exit avoids touching inherited runtime locks.
             unsafe { libc::_exit(i32::from(!rejected)) }
         }

@@ -270,13 +270,16 @@ static inline void logAqlDispatchPacketExtended(
   const char* prefix = formatVirtualPipePrefix(buf, sizeof(buf), dev, queue);
   const uint64_t rptr = Hsa::queue_load_read_index_relaxed(queue);
 
+  const bool is_format4 =
+      pkt->amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD;
+
   emitAqlLine(sink, amd::LOG_DETAIL_DEBUG, aqlFormat(
           "SWq=0x%zx, HWq=0x%zx, id=%d, priority=%d,%s Dispatch Header = "
           "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
-          "setup=%d, cluster_count=[%u, %u, %u], cluster_size=[%u, %u, %u], "
+          "amd_format=%d, setup=%d, cluster_count=[%u, %u, %u], cluster_size=[%u, %u, %u], "
           "workgroup=[%u, %u, %u], private_seg_size=%u, group_seg_size=%u, "
           "group_mem_carveout=%u, kernel_obj=0x%zx, "
-          "kernarg_address=0x%zx, dep_signal=0x%zx, completion_signal=0x%zx, "
+          "kernarg_address=0x%zx, %s=0x%zx, completion_signal=0x%zx, "
           "rptr=%" PRIu64 ", wptr=%" PRIu64,
           queue, queue->base_address, queue->id, static_cast<int>(priority), prefix, header,
           extractAqlBits(header, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE),
@@ -285,12 +288,30 @@ static inline void logAqlDispatchPacketExtended(
                          HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE),
           extractAqlBits(header, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
                          HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE),
+          static_cast<int>(pkt->amd_format),
           pkt->setup, pkt->cluster_count_x, pkt->cluster_count_y, pkt->cluster_count_z,
           pkt->cluster_size_x, pkt->cluster_size_y, pkt->cluster_size_z, pkt->workgroup_size_x,
           pkt->workgroup_size_y, pkt->workgroup_size_z, pkt->private_segment_size,
           pkt->group_segment_size, static_cast<unsigned>(pkt->perf_hint.group_mem_carveout),
-          pkt->kernel_object, pkt->kernarg_address, pkt->dep_signal.handle,
+          pkt->kernel_object, pkt->kernarg_address,
+          is_format4 ? "launch_descriptor" : "dep_signal",
+          pkt->dep_signal.handle,
           pkt->completion_signal.handle, rptr, wptr));
+
+  if (is_format4) {
+    auto* ld = pkt->launch_descriptor;
+    if (ld != nullptr) {
+      emitAqlLine(sink, amd::LOG_DETAIL_DEBUG, aqlFormat("launch_desc version=%u, cu_enable=0x%x, "
+                  "dispatch_granularity_limiter=%u, tg_chunk_size=%u", ld->version, ld->cu_enable,
+                  ld->dispatch_granularity_limiter, ld->tg_chunk_size));
+      for (int r = 0; r < AMD_LAUNCH_DESCRIPTOR_MAX_PREFETCH_REGIONS; ++r) {
+        const auto& p = ld->prefetch[r];
+        emitAqlLine(sink, amd::LOG_DETAIL_DEBUG, aqlFormat("prefetch[%d]: mode=%u, num_burst=%u, "
+                    "burst_size=%u, stride=%u, addr=0x%x:%07x, temporal=%u, scope=%u", r, p.mode,
+                   p.num_burst, p.burst_size, p.stride, p.addr_hi, p.addr_lo, p.temporal, p.scope));
+      }
+    }
+  }
 
   logAqlMetadataPacket(dev, queue, meta, wptr, sink);
 }
@@ -766,6 +787,7 @@ VirtualGPU::RetiringSignalTracker::~RetiringSignalTracker() {
     disarm(signal);
   }
   ReleasePins(/*release_all=*/true);
+  ReleaseHeldSignals();
   for (ProfilingSignal* signal : spare_signals_) {
     disarm(signal);
     signal->release();
@@ -1161,6 +1183,9 @@ void VirtualGPU::RetiringSignalTracker::AcquireSlot() {
       MarkCompleted(oldest);
       const bool replaced = oldest->referenceCount() > 1 && ReplaceWithSpare(next);
       if (!replaced) {
+        if (oldest->referenceCount() > 1) {
+          LogError("No spare signal: reusing a signal that another holder may still wait on");
+        }
         assert(oldest->referenceCount() == 1 && "Signal reuse conflicts with another holder!");
         StoreValue(oldest, kInitSignalValueOne);
         FlushStores();
@@ -1800,6 +1825,42 @@ void VirtualGPU::RetiringSignalTracker::NoteGpuWait(ProfilingSignal* signal, boo
 }
 
 // ================================================================================================
+void VirtualGPU::RetiringSignalTracker::HoldSignal(ProfilingSignal* signal) {
+  signal->retain();
+  held_signals_.push_back(signal);
+}
+
+// ================================================================================================
+void VirtualGPU::RetiringSignalTracker::ReleaseHeldSignals(size_t mark) {
+  for (size_t i = mark; i < held_signals_.size(); ++i) {
+    held_signals_[i]->release();
+  }
+  held_signals_.resize(std::min(mark, held_signals_.size()));
+}
+
+// ================================================================================================
+void VirtualGPU::HwQueueTracker::KeepUntilRetired(const std::vector<void*>& pins) {
+  for (void* pin : pins) {
+    reinterpret_cast<ProfilingSignal*>(pin)->release();
+  }
+  ReleaseHeldSignals();
+}
+
+// ================================================================================================
+void VirtualGPU::RetiringSignalTracker::KeepUntilRetired(const std::vector<void*>& pins) {
+  // The references move into open pins, which close at the current queue position
+  for (void* pin : pins) {
+    pins_.push_back(PinnedWait{reinterpret_cast<ProfilingSignal*>(pin)});
+  }
+  for (ProfilingSignal* signal : held_signals_) {
+    pins_.push_back(PinnedWait{signal});
+  }
+  num_open_pins_ += pins.size() + held_signals_.size();
+  held_signals_.clear();
+  ClosePins();
+}
+
+// ================================================================================================
 bool VirtualGPU::RetiringSignalTracker::WaitCurrent() {
   if (!HwQueueTracker::WaitCurrent()) {
     return false;
@@ -2277,12 +2338,14 @@ template <typename AqlPacket>
 void VirtualGPU::writePacketToRingBuffer(AqlPacket* aql_loc, AqlPacket* packet,
                                          uint16_t header, uint16_t rest, uint64_t slot_index) {
   if (use_movdir64b_) {
-    metadata_preloader_.SetMetadata(packet, header, slot_index, true, device_mem_ring_buf_);
+    metadata_preloader_.SetMetadata(packet, header, slot_index, true, device_mem_ring_buf_,
+                                    rest, aql_loc);
     amd::nontemporalStoreFence();
     amd::nontemporalWriteAQL(aql_loc, packet, header, rest);
   } else {
     amd::nontemporalCopyAQL(aql_loc, packet);
-    metadata_preloader_.SetMetadata(packet, header, slot_index, false, device_mem_ring_buf_);
+    metadata_preloader_.SetMetadata(packet, header, slot_index, false, device_mem_ring_buf_,
+                                    rest, aql_loc);
     amd::nontemporalStoreFence();
     packet_store_release(reinterpret_cast<uint32_t*>(aql_loc), header, rest);
   }
@@ -2422,8 +2485,9 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
 
   if (IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) {
     if constexpr (std::is_same_v<AqlPacket, hsa_amd_ext_kernel_dispatch_packet_t>) {
-      // setup travels in `rest`, not in the local packet struct, so the log
-      // would otherwise print setup=0. Populate it before logging.
+      // amd_format and setup travel in `rest`, not in the local packet struct,
+      // so the log would otherwise print amd_format=0 and setup=0.
+      packet->amd_format = static_cast<hsa_amd_packet_type8_t>(rest & 0xFF);
       packet->setup = static_cast<uint8_t>((rest >> 8) & 0xFF);
     }
     if (dev().settings().ext_dispatch_packet_) {
@@ -2444,11 +2508,6 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   bool ring_doorbell = IS_LINUX || dev().IsPm4Emulation() || blocking ||
                        (skippedDispatches_ >= skip_limit) || ring_for_non_profiler_signal;
   if (ring_doorbell) {
-    if constexpr (std::is_same_v<AqlPacket, hsa_amd_ext_kernel_dispatch_packet_t>) {
-      auto* ext_aql = reinterpret_cast<hsa_amd_ext_kernel_dispatch_packet_t*>(aql_loc);
-      ClPrint(amd::LOG_DEBUG, amd::LOG_AQL, "LD_DEBUG: amd_format=%d, rest=0x%x, rest_low_byte=0x%x",
-              static_cast<int>(ext_aql->amd_format), rest, (rest & 0xFF));
-    }
     ringQueueDoorbell(index);
     skippedDispatches_ = 0;
   } else {
@@ -4899,16 +4958,21 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
   // When there are no extra signals (e.g. a pure P2P/D2D batch that collapses to one
   // engine-group op), the sole completion signal already represents the whole batch and
   // the next op waits on it through the engine switch, so the barrier is pure overhead.
-  if (result && !Barriers().IsExternalSignalListEmpty()) {
+  if (!Barriers().IsExternalSignalListEmpty()) {
     dispatchBarrierPacket(kNopPacketHeader);
   }
-
   if (!result) {
     LogError("submitBatchCopyMemory failed!");
+    // The error status drops the command's pins before the GPU passes the waits
+    Barriers().KeepUntilRetired(cmd.TakePinnedHwEvents());
     cmd.setStatus(CL_OUT_OF_RESOURCES);
-  } else if (!amd::IS_HIP) {
-    for (const auto& op : copyOps) {
-      op.dstMemory->signalWrite(&dev());
+  } else {
+    // The barrier pinned the batch signals it waits on
+    Barriers().ReleaseHeldSignals();
+    if (!amd::IS_HIP) {
+      for (const auto& op : copyOps) {
+        op.dstMemory->signalWrite(&dev());
+      }
     }
   }
 

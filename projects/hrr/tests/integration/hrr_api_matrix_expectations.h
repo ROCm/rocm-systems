@@ -17,7 +17,7 @@
  * what keeps the Catch2 tests and the matrix reporter from drifting into
  * disagreeing about what an API is supposed to do at replay.
  *
- * Generated from 567 HIP APIs.
+ * Generated from 568 HIP APIs.
  */
 
 #pragma once
@@ -548,6 +548,7 @@ inline constexpr HrrApiExpectation kHrrApiMatrix[] = {
     {"hipArrayDestroy", "T5", 1, false, true, false, false},
     {"hipArrayGetDescriptor", "T5", 1, false, true, false, false},
     {"hipArrayGetInfo", "T5", 1, false, true, false, false},
+    {"hipArrayGetPlane", "T5", 1, false, true, false, false},
     {"hipArrayGetSparseProperties", "T5", 1, false, true, false, false},
     {"hipBindTexture", "T5", 0, true, true, false, false},
     {"hipBindTexture2D", "T5", 0, true, true, false, false},
