@@ -114,6 +114,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Baremetal reports Broadcom NICs as ``AMDSMI_PROCESSOR_TYPE_AMD_NIC``** (breaking).  
   - ``amdsmi_get_processor_handles_by_type()`` no longer returns ``AMDSMI_PROCESSOR_TYPE_BRCM_NIC`` handles; ask for ``AMDSMI_PROCESSOR_TYPE_AMD_NIC`` and use ``amdsmi_get_nic_type()`` to tell the vendors apart.
 
+- **Node-wide AMPP fields are now reported and set only on the primary GPU** (breaking).  
+  - AMPP fields whose name starts with `node_`, such as `node_power_limit`, apply to the whole node. `amdsmi_get_ampp_fields()` and `amd-smi static --ampp` now return them only for the primary GPU (`oam_id` 0) instead of repeating them on every GPU.
+  - `amdsmi_configure_ampp_profile()` and `amd-smi set --ampp-configure` now reject a `node_` field on any other GPU with `AMDSMI_STATUS_INVAL`. Such a write previously had no effect.
+
 - **Hardened the `@<path>` file loader shared by `--ampp-configure` and `--power-stabilization-configure`**.  
   - The loader now requires a regular file (rejecting symlinks, so not `/dev/stdin`), enforces a 1 MiB cap against bytes actually read, and guards against `UnicodeDecodeError`/`RecursionError`.
 
@@ -216,6 +220,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed board temperatures showing `-1 °C` for sensors the board does not have**.  
   - `amd-smi metric --base-board` and `--gpu-board` now show `N/A` for them, and `amdsmi_get_temp_metric()` returns `AMDSMI_STATUS_NOT_SUPPORTED`.
+
+- **Fixed `amdsmi_get_gpu_total_ecc_count()` in the Rust API returning wrong totals**.  
+  - The counts were added to uninitialized memory, so the totals could be wrong. The Rust activity, power, clock and per-block ECC queries now also zero their output before the call.
 
 ### Upcoming Changes
 
