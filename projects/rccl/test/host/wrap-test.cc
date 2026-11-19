@@ -4247,10 +4247,10 @@ TEST(WrapMicrotestIsolated, UseCeAllReduce_SplitLsaTeamReturnsFalse) {
         comm->symmetricSupport = 1;
         comm->nNodes = 1;
         comm->nRanks = 4;
-        comm->devrState.bigSize = 1; // take computeLsaSize's cached path
-        comm->devrState.lsaSize = 2;
+        comm->devrState.bigSize = 1; // take computeLsaTeamSize's cached path
+        comm->devrState.lsaTeamSize = 2;
         EXPECT_FALSE(rcclUseCeAr2Shot(comm, 8, ncclFloat32, ncclSum, nullptr));
-        comm->devrState.lsaSize = 4;
+        comm->devrState.lsaTeamSize = 4;
         EXPECT_TRUE(rcclUseCeAr2Shot(comm, 8, ncclFloat32, ncclSum, nullptr));
         DeleteCommWithArch(comm);
       });
@@ -5231,12 +5231,12 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_ForceUnregisteredNeedsSpanningLsaTea
         comm->nRanks = 2;
         comm->symmetricSupport = 1;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
-        comm->devrState.bigSize = 1; // take computeLsaSize's cached path
+        comm->devrState.bigSize = 1; // take computeLsaTeamSize's cached path
         uint8_t stagingBuf[16];
         for (uint8_t* staging : {static_cast<uint8_t*>(nullptr), stagingBuf}) {
           SCOPED_TRACE(staging ? "staging ready" : "staging not initialized");
           comm->ceColl.ceARTmpBuf = staging;
-          comm->devrState.lsaSize = 2;
+          comm->devrState.lsaTeamSize = 2;
           rcclCollDecision spanning{};
           EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
                                                       /*stream=*/nullptr, /*query=*/true,
@@ -5244,7 +5244,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_ForceUnregisteredNeedsSpanningLsaTea
           EXPECT_EQ((int)(staging ? rcclAddonAlgos_t::RCCL_CE_2SHOT : rcclAddonAlgos_t::RCCL_CE_REGISTERED),
                     spanning.algo);
 
-          comm->devrState.lsaSize = 1;
+          comm->devrState.lsaTeamSize = 1;
           rcclCollDecision split{};
           EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
                                                       /*stream=*/nullptr, /*query=*/true,
@@ -5318,7 +5318,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenAboveTableMax)
         comm->nNodes           = 1;
         comm->symmetricSupport = 1;
         comm->devrState.bigSize = 1;
-        comm->devrState.lsaSize = comm->nRanks;
+        comm->devrState.lsaTeamSize = comm->nRanks;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         uint8_t stagingBuf[16];
         comm->ceColl.ceARTmpBuf = stagingBuf;
@@ -5362,7 +5362,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenAboveEnvMax) {
         comm->nNodes           = 1;
         comm->symmetricSupport = 1;
         comm->devrState.bigSize = 1;
-        comm->devrState.lsaSize = comm->nRanks;
+        comm->devrState.lsaTeamSize = comm->nRanks;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         uint8_t stagingBuf[16];
         comm->ceColl.ceARTmpBuf = stagingBuf;
@@ -5397,7 +5397,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenBelowEnvMin) {
         comm->nNodes           = 1;
         comm->symmetricSupport = 1;
         comm->devrState.bigSize = 1;
-        comm->devrState.lsaSize = comm->nRanks;
+        comm->devrState.lsaTeamSize = comm->nRanks;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         uint8_t stagingBuf[16];
         comm->ceColl.ceARTmpBuf = stagingBuf;
@@ -5434,7 +5434,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotChosenWhenWithinEnvWindow) 
         comm->nNodes           = 1;
         comm->symmetricSupport = 1;
         comm->devrState.bigSize = 1;
-        comm->devrState.lsaSize = comm->nRanks;
+        comm->devrState.lsaTeamSize = comm->nRanks;
         // RCCL_FORCE_CE_ALLREDUCE=1 (above) stands in for symReg=true since null
         // send/recv pointers mean ncclCeAvailable returns false in unit test context.
         // CTAPolicy=ZERO satisfies rcclUseCeAr2Shot; force satisfies ceAllReduceAllowed.
@@ -5568,7 +5568,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_ZeroPolicyCeTwoShotBeatsEligibleDdaO
         comm->nNodes           = 1;
         comm->symmetricSupport = 1;
         comm->devrState.bigSize = 1;
-        comm->devrState.lsaSize = comm->nRanks;
+        comm->devrState.lsaTeamSize = comm->nRanks;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         uint8_t stagingBuf[16];
         comm->ceColl.ceARTmpBuf = stagingBuf;
@@ -5611,7 +5611,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenBelowEnvMinBou
         comm->nNodes           = 1;
         comm->symmetricSupport = 1;
         comm->devrState.bigSize = 1;
-        comm->devrState.lsaSize = comm->nRanks;
+        comm->devrState.lsaTeamSize = comm->nRanks;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         uint8_t stagingBuf[16];
         comm->ceColl.ceARTmpBuf = stagingBuf;
@@ -5647,7 +5647,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotChosenWhenAtEnvMinBound) {
         comm->nNodes           = 1;
         comm->symmetricSupport = 1;
         comm->devrState.bigSize = 1;
-        comm->devrState.lsaSize = comm->nRanks;
+        comm->devrState.lsaTeamSize = comm->nRanks;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         uint8_t stagingBuf[16];
         comm->ceColl.ceARTmpBuf = stagingBuf;
@@ -9484,13 +9484,13 @@ void EnableCeReduceScatterForSelectTest() {
   g_ceImplemented = true;
 }
 
-// UnitTestsMicro links real computeLsaSize (dev_runtime.cc via
+// UnitTestsMicro links real computeLsaTeamSize (dev_runtime.cc via
 // #include in dev-runtime-test.cc). Without a cached spanning team,
 // ncclDevrIsOneLsaTeam walks null rankToNode when nRanks > 1 (SIGSEGV).
 // Call after the final nRanks assignment, matching the AllReduce CE select tests.
 void ArmSpanningLsaTeam(ncclComm* comm) {
   comm->devrState.bigSize = 1;
-  comm->devrState.lsaSize = comm->nRanks;
+  comm->devrState.lsaTeamSize = comm->nRanks;
 }
 
 constexpr int kCeRsRegisteredArmRanks = 4;

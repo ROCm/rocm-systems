@@ -51,7 +51,7 @@ namespace {
 // dispatch observable. They are renamed below rather than left at external linkage: ring.cc IS on
 // this link line, via tuning-general-test.cc.
 
-enum class ModelKind { None, Tree, Ring, Collnet, Nvls, Pat, Symk, Ce };
+enum class ModelKind { None, Tree, Ring, Collnet, Nvls, Pat, Symk, Ce, Pipeline };
 
 ModelKind g_lastModel = ModelKind::None;
 float g_modelTimeUs = 42.0f;
@@ -102,11 +102,12 @@ ncclResult_t RecordSim(ModelKind kind, struct ncclTuningResult_t* tuning) {
 // Name is both the production symbol infix and the ModelKind enumerator; the five match
 // exactly, so one parameter cannot be paired with the wrong family.
 #define DEFINE_MODEL_FAKE(Name) \
-  ncclResult_t ncclTuning##Name##ModelInit(struct ncclComm*, int id, int[NCCL_NUM_FUNCTIONS]) { \
+  ncclResult_t ncclTuning##Name##ModelInit(struct ncclComm*, int id, int[NCCL_NUM_FUNCTIONS], \
+                                           struct ncclTuningModelState*) { \
     return RecordInit(id); \
   } \
   ncclResult_t ncclTuning##Name##ModelSim(struct ncclTuningInput_t* const, \
-                                          struct ncclTuningResult_t* const tuning) { \
+                                          struct ncclTuningResult_t* const tuning, struct ncclTuningModelState*) { \
     return RecordSim(ModelKind::Name, tuning); \
   }
 
@@ -118,11 +119,37 @@ DEFINE_MODEL_FAKE(Pat)
 #undef DEFINE_MODEL_FAKE
 
 // Symk and CE have no init entry in modelMap[], only a sim.
-ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const, struct ncclTuningResult_t* const tuning) {
+ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const, struct ncclTuningResult_t* const tuning,
+                                    struct ncclTuningModelState*) {
   return RecordSim(ModelKind::Symk, tuning);
 }
-ncclResult_t ncclTuningCeModelSim(struct ncclTuningInput_t* const, struct ncclTuningResult_t* const tuning) {
+ncclResult_t ncclTuningCeModelSim(struct ncclTuningInput_t* const, struct ncclTuningResult_t* const tuning,
+                                  struct ncclTuningModelState*) {
   return RecordSim(ModelKind::Ce, tuning);
+}
+
+// platforms/rubin.h's map names the pipeline models; on AMD it is never selected (ncclTuningIsRubinPlatform).
+#define ncclTuningPipelineTreeModelInit CostModelPipelineTreeModelInit
+#define ncclTuningPipelineRingModelInit CostModelPipelineRingModelInit
+#define ncclTuningPipelineNvlsModelInit CostModelPipelineNvlsModelInit
+#define ncclTuningPipelineNvlsTreeModelInit CostModelPipelineNvlsTreeModelInit
+#define ncclTuningPipelineModelSim CostModelPipelineModelSim
+
+#define DEFINE_PIPELINE_INIT_FAKE(Name) \
+  ncclResult_t ncclTuningPipeline##Name##ModelInit(struct ncclComm*, int id, int[NCCL_NUM_FUNCTIONS], \
+                                                   struct ncclTuningModelState*) { \
+    return RecordInit(id); \
+  }
+
+DEFINE_PIPELINE_INIT_FAKE(Tree)
+DEFINE_PIPELINE_INIT_FAKE(Ring)
+DEFINE_PIPELINE_INIT_FAKE(Nvls)
+DEFINE_PIPELINE_INIT_FAKE(NvlsTree)
+#undef DEFINE_PIPELINE_INIT_FAKE
+
+ncclResult_t ncclTuningPipelineModelSim(struct ncclTuningInput_t* const, struct ncclTuningResult_t* const tuning,
+                                        struct ncclTuningModelState*) {
+  return RecordSim(ModelKind::Pipeline, tuning);
 }
 
 #include COST_MODEL_CC_PATH
@@ -275,6 +302,13 @@ TEST_F(CostModelMicrotest, RegistryNamesEverySymmetricKernelId) {
     int algo = -9, proto = -9, sym = -9, ce = -9;
     ASSERT_EQ(ncclSuccess, ncclTuningExpandId(id, &algo, &proto, &sym, &ce));
     const char* name = ncclAlgNameForSymk(sym);
+    if (sym == ncclSymkKernelId_AlltoAll_LL) {
+      // NCCL 2.32.6's AlltoAll_LL is a symmetric kernel for ncclAlltoAll, which has no general rows and no F_* bit
+      // in the registry, so per-call algSelection cannot name it. Still priced like every other symmetric id.
+      EXPECT_EQ(nullptr, name) << "AlltoAll_LL gained a registry row; drop this exception";
+      EXPECT_NE(nullptr, modelMap[id].model) << "tuning id " << id;
+      continue;
+    }
     ASSERT_NE(nullptr, name) << "symKernelId " << sym << " (tuning id " << id << ") has no registry row";
     EXPECT_NE(0ull, ncclAlgTagMask(name) & (1ull << id)) << name << " -> id " << id;
     // Every symmetric row is priced; modelMap has no null symk entries.
@@ -498,6 +532,13 @@ TEST_F(CostModelMicrotest, NoModelMapRowCarriesAFinalizeYet) {
   }
   ASSERT_EQ(ncclSuccess, ncclTuningCostModelInit(comm_.get()));
   (void)ncclTuningCostModelFinalize(comm_.get());
+}
+
+// The pipeline fakes above only link: dispatch never reaches the Rubin map on AMD, whatever the compute capability.
+TEST_F(CostModelMicrotest, RubinPipelineModelsAreNeverSelectedOnAmd) {
+  for (int compCap : {90, 94, 95, 100, 120, 125}) {
+    EXPECT_FALSE(ncclTuningIsRubinPlatform(compCap)) << "compCap " << compCap;
+  }
 }
 
 }  // namespace

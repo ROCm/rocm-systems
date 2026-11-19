@@ -51,9 +51,18 @@ ComputeTuningHook g_tuningCostModelSimModel;
 GetChannelsHook g_tuningGetChannels;
 NvlsQueryHook g_tuningNvlsRegResourcesQuery;
 std::function<int()> g_tuningSymkLLKernelMask;
+// sym_kernels.cc's genk/symk masks and NCCL_SYM_GENK_ENABLE. Defaults: no genk kernels, every other kernel symk
+// (production's symk mask is its symmetric kernel ids minus the genk ones; never the ncclSymkKernelId_Count bit a
+// legacy result carries), genk off (the param's default and the only
+// value a build without SYM_GENK returns).
+std::function<ncclSymkKernelMask()> g_tuningGenkKernelMask;
+std::function<ncclSymkKernelMask()> g_tuningSymkNonGenkKernelMask;
+std::function<int64_t()> g_tuningSymGenkEnable;
+// The forceMaxTreeThreads argument of the most recent ncclTuningGetChannels call (-1: not called).
+int g_tuningLastForceMaxTreeThreads = -1;
 
 using PluginInitHook = std::function<ncclResult_t(void**, uint64_t, size_t, size_t, ncclDebugLogger_t,
-                                                  ncclNvlDomainInfo_v6_t*, ncclTunerConstants_v6_t*)>;
+                                                  ncclNvlDomainInfo_v7_t*, ncclTunerConstants_v7_t*)>;
 using PluginGetCollInfoHook =
     std::function<ncclResult_t(void*, ncclFunc_t, size_t, int, float**, int, int, int, int*)>;
 using PluginFinalizeHook = std::function<ncclResult_t(void*)>;
@@ -99,8 +108,16 @@ void ResetTuningHooks() {
   g_tuningGetChannels = [](struct ncclTuningInput_t*, struct ncclTuningResult_t*) { return ncclSuccess; };
   g_tuningNvlsRegResourcesQuery = [](struct ncclComm*, ncclFunc_t, int*) { return ncclSystemError; };
   g_tuningSymkLLKernelMask = [] { return 0; };
-  g_tuningPluginInit = [](void**, uint64_t, size_t, size_t, ncclDebugLogger_t, ncclNvlDomainInfo_v6_t*,
-                          ncclTunerConstants_v6_t*) { return ncclSuccess; };
+  g_tuningGenkKernelMask = [] { return ncclSymkKernelMask(0); };
+  g_tuningSymkNonGenkKernelMask = [] {
+    const ncclSymkKernelMask allKernels =
+        ncclSymkKernelId_Count >= 64 ? ~ncclSymkKernelMask(0) : (ncclSymkKernelMask(1) << ncclSymkKernelId_Count) - 1;
+    return allKernels & ~g_tuningGenkKernelMask();
+  };
+  g_tuningSymGenkEnable = [] { return int64_t(0); };
+  g_tuningLastForceMaxTreeThreads = -1;
+  g_tuningPluginInit = [](void**, uint64_t, size_t, size_t, ncclDebugLogger_t, ncclNvlDomainInfo_v7_t*,
+                          ncclTunerConstants_v7_t*) { return ncclSuccess; };
   g_tuningPluginGetCollInfo = [](void*, ncclFunc_t, size_t, int, float**, int, int, int, int*) {
     return ncclSuccess;
   };
@@ -126,13 +143,18 @@ ncclResult_t TuningCostModelSimModel(int id, struct ncclTuningInput_t* input,
                                      struct ncclTuningResult_t* result) {
   return g_tuningCostModelSimModel(id, input, result);
 }
-ncclResult_t TuningGetChannels(struct ncclTuningInput_t* input, struct ncclTuningResult_t* result) {
+ncclResult_t TuningGetChannels(struct ncclTuningInput_t* input, struct ncclTuningResult_t* result,
+                               bool forceMaxTreeThreads) {
+  g_tuningLastForceMaxTreeThreads = forceMaxTreeThreads ? 1 : 0;
   return g_tuningGetChannels(input, result);
 }
 ncclResult_t TuningNvlsRegResourcesQuery(struct ncclComm* comm, ncclFunc_t func, int* recChannels) {
   return g_tuningNvlsRegResourcesQuery(comm, func, recChannels);
 }
 int TuningSymkLLKernelMask() { return g_tuningSymkLLKernelMask(); }
+ncclSymkKernelMask TuningGenkKernelMask() { return g_tuningGenkKernelMask(); }
+ncclSymkKernelMask TuningSymkNonGenkKernelMask() { return g_tuningSymkNonGenkKernelMask(); }
+int64_t TuningParamSymGenkEnable() { return g_tuningSymGenkEnable(); }
 const char* TuningSymkKernelIdToString(int) { return "micro-sym-kernel"; }
 
 const char* TuningFuncStr[NCCL_NUM_FUNCTIONS + 4] = {
@@ -141,8 +163,8 @@ const char* TuningFuncStr[NCCL_NUM_FUNCTIONS + 4] = {
 static_assert(NCCL_NUM_FUNCTIONS == 5, "TuningFuncStr mirrors src/init.cc; add the new function name");
 
 ncclResult_t TuningPluginInit(void** context, uint64_t commId, size_t nRanks, size_t nNodes,
-                              ncclDebugLogger_t logger, ncclNvlDomainInfo_v6_t* nvlDomainInfo,
-                              ncclTunerConstants_v6_t* constants) {
+                              ncclDebugLogger_t logger, ncclNvlDomainInfo_v7_t* nvlDomainInfo,
+                              ncclTunerConstants_v7_t* constants) {
   return g_tuningPluginInit(context, commId, nRanks, nNodes, logger, nvlDomainInfo, constants);
 }
 ncclResult_t TuningPluginGetCollInfo(void* context, ncclFunc_t func, size_t nBytes, int numPipeOps,
@@ -180,6 +202,9 @@ void TuningFree(void* pointer) {
 #define ncclTuningGetChannels TuningGetChannels
 #define ncclNvlsRegResourcesQuery TuningNvlsRegResourcesQuery
 #define ncclSymkLLKernelMask TuningSymkLLKernelMask
+#define ncclGenkKernelMask TuningGenkKernelMask
+#define ncclSymkNonGenkKernelMask TuningSymkNonGenkKernelMask
+#define ncclParamSymGenkEnable TuningParamSymGenkEnable
 #define ncclSymkKernelIdToString TuningSymkKernelIdToString
 #define ncclFuncStr TuningFuncStr
 #define ncclTuningInit TuningMicroInit
@@ -193,6 +218,9 @@ void TuningFree(void* pointer) {
 #undef ncclTuningInit
 #undef ncclFuncStr
 #undef ncclSymkKernelIdToString
+#undef ncclParamSymGenkEnable
+#undef ncclSymkNonGenkKernelMask
+#undef ncclGenkKernelMask
 #undef ncclSymkLLKernelMask
 #undef ncclNvlsRegResourcesQuery
 #undef ncclTuningGetChannels
@@ -393,7 +421,7 @@ TEST_F(TuningMicrotest, InitPassesPluginInputsBeforeCostModelAndPrintsRankZeroTa
   ScopedHook pluginInit(
       g_tuningPluginInit,
       [&](void** context, uint64_t commId, size_t nRanks, size_t nNodes, ncclDebugLogger_t logger,
-          ncclNvlDomainInfo_v6_t* nvlDomainInfo, ncclTunerConstants_v6_t* constants) {
+          ncclNvlDomainInfo_v7_t* nvlDomainInfo, ncclTunerConstants_v7_t* constants) {
         order.push_back("plugin-init");
         EXPECT_EQ(comm_->commHash, commId);
         EXPECT_EQ(16u, nRanks);
@@ -438,8 +466,8 @@ TEST_F(TuningMicrotest, InitStopsAtTheFailingStage) {
       return ncclSuccess;
     });
     ScopedHook pluginInit(g_tuningPluginInit,
-                          [](void**, uint64_t, size_t, size_t, ncclDebugLogger_t, ncclNvlDomainInfo_v6_t*,
-                             ncclTunerConstants_v6_t*) { return ncclInvalidUsage; });
+                          [](void**, uint64_t, size_t, size_t, ncclDebugLogger_t, ncclNvlDomainInfo_v7_t*,
+                             ncclTunerConstants_v7_t*) { return ncclInvalidUsage; });
     ScopedHook cost(g_tuningCostModelInit, [](ncclComm*) { return ncclSuccess; });
     EXPECT_EQ(ncclInvalidUsage, TuningMicroInit(comm_.get()));
     EXPECT_EQ(1, pluginInit.calls);
@@ -694,6 +722,8 @@ TEST_F(TuningMicrotest, ComputeSelectsLowestGeneralCandidateThenGetsChannels) {
   EXPECT_FLOAT_EQ(3.0f, result.timeUs);
   EXPECT_EQ(6, result.nChannels);
   EXPECT_EQ(7, result.nWarps);
+  // NCCL 2.32.6: the final selection always asks for the maximum tree thread count.
+  EXPECT_EQ(1, g_tuningLastForceMaxTreeThreads);
   EXPECT_EQ(2, g_tuningFreeCalls);
 }
 
@@ -1000,20 +1030,25 @@ TEST_F(TuningMicrotest, EfficiencyPolicyPropagatesNvlsQueryFailure) {
   EXPECT_EQ(NCCL_ALGO_UNDEF, result.algo);
 }
 
-TEST_F(TuningMicrotest, SymmetricFallbackUsesGeneralTuningWhenExecutionRequiresIt) {
-  const int treeLl = GeneralId(NCCL_ALGO_TREE, NCCL_PROTO_LL);
+// NCCL 2.32.6 symmetric-LL fallback (tuning.cc): when the best result is a symk (non-genk) LL kernel, the buffers are
+// not both window-registered, the kernel was not forced and NCCL_SYM_NOWIN_ENABLE is off, the LL symk result yields
+// to a non-LL alternative: first the best non-symk result already in the list, else (genk off and no legacy kernels
+// requested) a legacy-only recompute. The old intraRanks/SINGLE_PROC_MEM_REG_ENABLE execution gate is gone.
+
+// The legacy recompute picks a non-LL protocol, so it replaces the symk LL result (and gets its own channels).
+TEST_F(TuningMicrotest, SymmetricLlYieldsToNonLlLegacyRecomputeWhenOnlySymkRequested) {
+  const int treeSimple = GeneralId(NCCL_ALGO_TREE, NCCL_PROTO_SIMPLE);
   ncclTuningInput_t input = MakeInput();
   input.tuningMask = TuningBit(symSecond);
   input.winRegType = ncclSymSendNonregRecvNonreg;
-  comm_->intraRanks = 2;
   ncclTuningResult_t result = EmptyResult();
-  bool sawGeneralMask = false;
+  int generalPasses = 0;
 
   ScopedHook model(g_tuningCostModelSimModel, [&](int id, ncclTuningInput_t* modelInput,
                                                   ncclTuningResult_t* tuning) {
     if (modelInput->tuningMask == NCCL_TUNING_MASK_GENERAL_KERNELS) {
-      sawGeneralMask = true;
-      tuning->valid = id == treeLl;
+      if (id == treeSimple) ++generalPasses;
+      tuning->valid = id == treeSimple;
       tuning->timeUs = 2.0f;
     } else {
       tuning->valid = id == symSecond;
@@ -1022,15 +1057,15 @@ TEST_F(TuningMicrotest, SymmetricFallbackUsesGeneralTuningWhenExecutionRequiresI
     return ncclSuccess;
   });
   ScopedHook llMask(g_tuningSymkLLKernelMask, [] { return 1 << 1; });
-  ScopedHook params(
-      g_loadParam, TuningParams({{"SINGLE_PROC_MEM_REG_ENABLE", 0}, {"SYM_NOWIN_ENABLE", 1}}));
+  ScopedHook params(g_loadParam, TuningParams({{"SYM_NOWIN_ENABLE", 0}}));
   ScopedHook channels(g_tuningGetChannels, ChannelsReturning(5));
 
   ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
-  EXPECT_TRUE(sawGeneralMask);
-  EXPECT_EQ(treeLl, result.id);
+  EXPECT_EQ(1, generalPasses);
+  EXPECT_EQ(treeSimple, result.id);
   EXPECT_EQ(NCCL_ALGO_TREE, result.algo);
-  EXPECT_EQ(NCCL_PROTO_LL, result.proto);
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, result.proto);
+  EXPECT_EQ(ncclSymkKernelId_Count, result.symKernelId);
   EXPECT_EQ(5, result.nChannels);
 }
 
@@ -1066,7 +1101,9 @@ TEST_F(TuningMicrotest, SymmetricRegisteredAndNonLlCasesDoNotFallback) {
   EXPECT_EQ(0, generalCalls);
 }
 
-TEST_F(TuningMicrotest, SymmetricHalfRegisteredBuffersDoNotForceFallback) {
+// Only full registration skips the check: either half-registered combination still consults the legacy kernels, and
+// an LL legacy answer keeps the symk LL kernel.
+TEST_F(TuningMicrotest, SymmetricHalfRegisteredBuffersConsultLegacyAndKeepSymkWhenLegacyIsLl) {
   const int treeLl = GeneralId(NCCL_ALGO_TREE, NCCL_PROTO_LL);
   ncclTuningInput_t input = MakeInput();
   input.tuningMask = TuningBit(symSecond);
@@ -1086,47 +1123,37 @@ TEST_F(TuningMicrotest, SymmetricHalfRegisteredBuffersDoNotForceFallback) {
   });
   ScopedHook llMask(g_tuningSymkLLKernelMask, [] { return 1 << 1; });
   ScopedHook channels(g_tuningGetChannels, ChannelsReturning());
+  ScopedHook params(g_loadParam, TuningParams({{"SYM_NOWIN_ENABLE", 0}}));
 
-  comm_->intraRanks = 2;
-  input.winRegType = ncclSymSendNonregRecvReg;
-  {
-    ScopedHook params(
-        g_loadParam, TuningParams({{"SINGLE_PROC_MEM_REG_ENABLE", 0}, {"SYM_NOWIN_ENABLE", 1}}));
+  for (ncclSymRegType_t regType : {ncclSymSendNonregRecvReg, ncclSymSendRegRecvNonreg}) {
+    SCOPED_TRACE(static_cast<int>(regType));
+    input.winRegType = regType;
+    generalPasses = 0;
     ncclTuningResult_t result = EmptyResult();
     ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
+    EXPECT_EQ(1, generalPasses);
     EXPECT_EQ(1, result.symKernelId);
     EXPECT_EQ(NCCL_ALGO_UNDEF, result.algo);
-    EXPECT_EQ(1, generalPasses);
-  }
-
-  comm_->intraRanks = 1;
-  input.winRegType = ncclSymSendRegRecvNonreg;
-  generalPasses = 0;
-  {
-    ScopedHook params(g_loadParam, TuningParams({{"SYM_NOWIN_ENABLE", 0}}));
-    ncclTuningResult_t result = EmptyResult();
-    ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
-    EXPECT_EQ(1, result.symKernelId);
-    EXPECT_EQ(NCCL_ALGO_UNDEF, result.algo);
-    EXPECT_EQ(1, generalPasses);
   }
 }
 
-TEST_F(TuningMicrotest, SymmetricNoWindowPreferenceUsesGeneralProtocolAsTiebreaker) {
+// NCCL_SYM_NOWIN_ENABLE asks for symmetric kernels even without windows, so the symk LL result stands without the
+// legacy recompute. With it off, the legacy protocol decides: non-LL replaces the symk kernel, LL keeps it.
+TEST_F(TuningMicrotest, SymmetricNoWindowPreferenceKeepsSymkLlWithoutConsultingLegacy) {
   const int treeLl = GeneralId(NCCL_ALGO_TREE, NCCL_PROTO_LL);
   const int treeSimple = GeneralId(NCCL_ALGO_TREE, NCCL_PROTO_SIMPLE);
   ncclTuningInput_t input = MakeInput();
   input.tuningMask = TuningBit(symSecond);
   input.winRegType = ncclSymSendNonregRecvNonreg;
-  int generalProto = NCCL_PROTO_LL;
+  int generalProto = NCCL_PROTO_SIMPLE;
   int generalPasses = 0;
   ncclTuningResult_t result = EmptyResult();
 
   ScopedHook model(g_tuningCostModelSimModel, [&](int id, ncclTuningInput_t* modelInput,
                                                   ncclTuningResult_t* tuning) {
     if (modelInput->tuningMask == NCCL_TUNING_MASK_GENERAL_KERNELS) {
-      if (id == treeLl) ++generalPasses;
       const int selected = generalProto == NCCL_PROTO_LL ? treeLl : treeSimple;
+      if (id == selected) ++generalPasses;
       tuning->valid = id == selected;
       tuning->timeUs = 2.0f;
     } else {
@@ -1136,44 +1163,39 @@ TEST_F(TuningMicrotest, SymmetricNoWindowPreferenceUsesGeneralProtocolAsTiebreak
     return ncclSuccess;
   });
   ScopedHook llMask(g_tuningSymkLLKernelMask, [] { return 1 << 1; });
+  ScopedHook channels(g_tuningGetChannels, ChannelsReturning());
   {
     ScopedHook params(g_loadParam, TuningParams({{"SYM_NOWIN_ENABLE", 1}}));
-
     ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
     EXPECT_EQ(1, result.symKernelId);
     EXPECT_EQ(NCCL_ALGO_UNDEF, result.algo);
-    EXPECT_EQ(1, generalPasses);
-
-    generalProto = NCCL_PROTO_SIMPLE;
-    generalPasses = 0;
-    result = EmptyResult();
-    ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
-    EXPECT_EQ(treeSimple, result.id);
-    EXPECT_EQ(NCCL_ALGO_TREE, result.algo);
-    EXPECT_EQ(NCCL_PROTO_SIMPLE, result.proto);
-    EXPECT_EQ(1, generalPasses);
+    EXPECT_EQ(0, generalPasses);
   }
+
+  ScopedHook params(g_loadParam, TuningParams({{"SYM_NOWIN_ENABLE", 0}}));
+  result = EmptyResult();
+  ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
+  EXPECT_EQ(treeSimple, result.id);
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, result.proto);
+  EXPECT_EQ(1, generalPasses);
 
   generalProto = NCCL_PROTO_LL;
   generalPasses = 0;
   result = EmptyResult();
-  {
-    ScopedHook params(g_loadParam, TuningParams({{"SYM_NOWIN_ENABLE", 0}}));
-    ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
-    EXPECT_EQ(treeLl, result.id);
-    EXPECT_EQ(NCCL_ALGO_TREE, result.algo);
-    EXPECT_EQ(NCCL_PROTO_LL, result.proto);
-    EXPECT_EQ(1, generalPasses);
-  }
+  ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
+  EXPECT_EQ(1, result.symKernelId);
+  EXPECT_EQ(NCCL_ALGO_UNDEF, result.algo);
+  EXPECT_EQ(1, generalPasses);
 }
 
-TEST_F(TuningMicrotest, SingleProcessRegistrationAvoidsImmediateSymmetricFallback) {
+// The 2.32.6 rework dropped the "one thread drives several GPUs without single-process registration" forced fallback:
+// with an LL legacy answer the symk LL kernel is kept whatever intraRanks and SINGLE_PROC_MEM_REG_ENABLE say.
+TEST_F(TuningMicrotest, SymmetricLlFallbackNoLongerDependsOnSingleProcessRegistration) {
   const int treeLl = GeneralId(NCCL_ALGO_TREE, NCCL_PROTO_LL);
   ncclTuningInput_t input = MakeInput();
   input.tuningMask = TuningBit(symSecond);
   input.winRegType = ncclSymSendNonregRecvNonreg;
   comm_->intraRanks = 2;
-  ncclTuningResult_t result = EmptyResult();
 
   ScopedHook model(g_tuningCostModelSimModel, [&](int id, ncclTuningInput_t* modelInput,
                                                   ncclTuningResult_t* tuning) {
@@ -1187,37 +1209,139 @@ TEST_F(TuningMicrotest, SingleProcessRegistrationAvoidsImmediateSymmetricFallbac
     return ncclSuccess;
   });
   ScopedHook llMask(g_tuningSymkLLKernelMask, [] { return 1 << 1; });
-  ScopedHook params(
-      g_loadParam, TuningParams({{"SINGLE_PROC_MEM_REG_ENABLE", 1}, {"SYM_NOWIN_ENABLE", 1}}));
+  ScopedHook channels(g_tuningGetChannels, ChannelsReturning());
 
-  ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
-  EXPECT_EQ(1, result.symKernelId);
-  EXPECT_EQ(NCCL_ALGO_UNDEF, result.algo);
+  for (int singleProc : {0, 1}) {
+    SCOPED_TRACE(singleProc);
+    ScopedHook params(g_loadParam,
+                      TuningParams({{"SINGLE_PROC_MEM_REG_ENABLE", singleProc}, {"SYM_NOWIN_ENABLE", 0}}));
+    ncclTuningResult_t result = EmptyResult();
+    ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
+    EXPECT_EQ(1, result.symKernelId);
+    EXPECT_EQ(NCCL_ALGO_UNDEF, result.algo);
+  }
 }
 
-TEST_F(TuningMicrotest, MissingSymmetricCandidateFallsBackToGeneralMask) {
-  const int ringSimple = GeneralId(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+// When the request already includes legacy kernels, the best non-symk result in the list decides and nothing is
+// recomputed: a non-LL one replaces the symk LL kernel, an LL one keeps it. symk kernels themselves are excluded from
+// that search by ncclSymkNonGenkKernelMask.
+TEST_F(TuningMicrotest, SymmetricLlComparesAgainstNonSymkResultsAlreadyInTheList) {
+  for (int proto : {NCCL_PROTO_SIMPLE, NCCL_PROTO_LL}) {
+    SCOPED_TRACE(proto);
+    const int legacy = GeneralId(NCCL_ALGO_TREE, proto);
+    ncclTuningInput_t input = MakeInput();
+    input.tuningMask = TuningBit(symSecond) | TuningBit(legacy);
+    input.winRegType = ncclSymSendNonregRecvNonreg;
+    int recomputes = 0;
+
+    ScopedHook model(g_tuningCostModelSimModel, [&](int id, ncclTuningInput_t* modelInput,
+                                                    ncclTuningResult_t* tuning) {
+      if (modelInput->tuningMask == NCCL_TUNING_MASK_GENERAL_KERNELS) ++recomputes;
+      tuning->valid = id == symSecond || id == legacy;
+      tuning->timeUs = id == symSecond ? 1.0f : 2.0f;
+      return ncclSuccess;
+    });
+    ScopedHook llMask(g_tuningSymkLLKernelMask, [] { return 1 << 1; });
+    ScopedHook symkMask(g_tuningSymkNonGenkKernelMask, [] { return ncclSymkKernelMask(1) << 1; });
+    ScopedHook params(g_loadParam, TuningParams({{"SYM_NOWIN_ENABLE", 0}}));
+    ScopedHook channels(g_tuningGetChannels, ChannelsReturning());
+
+    ncclTuningResult_t result = EmptyResult();
+    ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
+    EXPECT_EQ(0, recomputes);
+    if (proto == NCCL_PROTO_SIMPLE) {
+      EXPECT_EQ(legacy, result.id);
+      EXPECT_EQ(NCCL_PROTO_SIMPLE, result.proto);
+      EXPECT_EQ(ncclSymkKernelId_Count, result.symKernelId);
+    } else {
+      EXPECT_EQ(1, result.symKernelId);
+      EXPECT_EQ(NCCL_ALGO_UNDEF, result.algo);
+    }
+  }
+}
+
+// Genk kernels count as the non-symk alternative: a non-LL genk kernel replaces the symk LL one; an LL genk kernel
+// does not, and with genk enabled the legacy recompute is skipped (the genk results already stand in for it).
+TEST_F(TuningMicrotest, SymmetricLlAgainstGenkAlternatives) {
+  constexpr int symGenk = NCCL_TUNING_SYM_KERNEL_ID_OFFSET + 2;
+  for (bool genkIsLl : {false, true}) {
+    SCOPED_TRACE(genkIsLl);
+    ncclTuningInput_t input = MakeInput();
+    input.tuningMask = TuningBit(symSecond) | TuningBit(symGenk);
+    input.winRegType = ncclSymSendNonregRecvNonreg;
+    int recomputes = 0;
+
+    ScopedHook model(g_tuningCostModelSimModel, [&](int id, ncclTuningInput_t* modelInput,
+                                                    ncclTuningResult_t* tuning) {
+      if (modelInput->tuningMask == NCCL_TUNING_MASK_GENERAL_KERNELS) ++recomputes;
+      tuning->valid = id == symSecond || id == symGenk;
+      tuning->timeUs = id == symSecond ? 1.0f : 2.0f;
+      return ncclSuccess;
+    });
+    ScopedHook llMask(g_tuningSymkLLKernelMask, [genkIsLl] { return genkIsLl ? (1 << 1) | (1 << 2) : 1 << 1; });
+    ScopedHook genkMask(g_tuningGenkKernelMask, [] { return ncclSymkKernelMask(1) << 2; });
+    ScopedHook symkMask(g_tuningSymkNonGenkKernelMask, [] { return ncclSymkKernelMask(1) << 1; });
+    ScopedHook genkEnable(g_tuningSymGenkEnable, [] { return int64_t(1); });
+    ScopedHook params(g_loadParam, TuningParams({{"SYM_NOWIN_ENABLE", 0}}));
+
+    ncclTuningResult_t result = EmptyResult();
+    ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
+    EXPECT_EQ(0, recomputes);
+    EXPECT_EQ(genkIsLl ? 1 : 2, result.symKernelId);
+  }
+}
+
+// The best result being a genk LL kernel is not a symk LL result, so no fallback check runs at all.
+TEST_F(TuningMicrotest, GenkLlBestResultSkipsSymmetricLlFallback) {
+  constexpr int symGenk = NCCL_TUNING_SYM_KERNEL_ID_OFFSET + 2;
   ncclTuningInput_t input = MakeInput();
-  input.tuningMask = TuningBit(symSecond);
-  ncclTuningResult_t result = EmptyResult();
+  input.tuningMask = TuningBit(symGenk);
+  input.winRegType = ncclSymSendNonregRecvNonreg;
+  int recomputes = 0;
 
   ScopedHook model(g_tuningCostModelSimModel, [&](int id, ncclTuningInput_t* modelInput,
                                                   ncclTuningResult_t* tuning) {
-    if (modelInput->tuningMask == NCCL_TUNING_MASK_GENERAL_KERNELS) {
-      tuning->valid = id == ringSimple;
-      tuning->timeUs = 3.0f;
-    } else {
-      tuning->valid = 0;
-    }
+    if (modelInput->tuningMask == NCCL_TUNING_MASK_GENERAL_KERNELS) ++recomputes;
+    tuning->valid = id == symGenk;
+    tuning->timeUs = 1.0f;
+    return ncclSuccess;
+  });
+  ScopedHook llMask(g_tuningSymkLLKernelMask, [] { return 1 << 2; });
+  ScopedHook genkMask(g_tuningGenkKernelMask, [] { return ncclSymkKernelMask(1) << 2; });
+  ScopedHook params(g_loadParam, TuningParams({{"SYM_NOWIN_ENABLE", 0}}));
+
+  ncclTuningResult_t result = EmptyResult();
+  ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
+  EXPECT_EQ(0, recomputes);
+  EXPECT_EQ(2, result.symKernelId);
+}
+
+// 2.32.6 dropped the "no symmetric candidate, retry with the general mask" fallback: a symk-only request with no
+// valid symk kernel reports no tuning rather than silently switching to legacy kernels.
+TEST_F(TuningMicrotest, MissingSymmetricCandidateNoLongerFallsBackToGeneralMask) {
+  ncclTuningInput_t input = MakeInput();
+  input.tuningMask = TuningBit(symSecond);
+  ncclTuningResult_t result = EmptyResult();
+  SetMicroEnvAbsent("NCCL_ALGO");
+  SetMicroEnvAbsent("NCCL_PROTO");
+  SetMicroEnvAbsent("NCCL_SYM_KERNEL");
+  int generalCalls = 0;
+
+  ScopedHook model(g_tuningCostModelSimModel, [&](int, ncclTuningInput_t* modelInput,
+                                                  ncclTuningResult_t* tuning) {
+    if (modelInput->tuningMask == NCCL_TUNING_MASK_GENERAL_KERNELS) ++generalCalls;
+    tuning->valid = 0;
     return ncclSuccess;
   });
   ScopedHook channels(g_tuningGetChannels, ChannelsReturning(6));
 
-  ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
-  EXPECT_EQ(ringSimple, result.id);
-  EXPECT_EQ(NCCL_ALGO_RING, result.algo);
-  EXPECT_EQ(NCCL_PROTO_SIMPLE, result.proto);
-  EXPECT_EQ(6, result.nChannels);
+  ncclResult_t status = ncclSuccess;
+  RcclUnitTesting::CaptureLog([&] { status = TuningMicroCompute(&input, &result); });
+  EXPECT_EQ(ncclInternalError, status);
+  EXPECT_EQ(0, generalCalls);
+  EXPECT_EQ(NCCL_ALGO_UNDEF, result.algo);
+  EXPECT_EQ(ncclSymkKernelId_Count, result.symKernelId);
+  EXPECT_EQ(0, channels.calls);
 }
 
 TEST_F(TuningMicrotest, NoValidTuningDistinguishesConfigurationErrors) {
