@@ -3092,8 +3092,8 @@ TEST(RcclDdaTierThresholds, Gfx1250_NoEnv_UsesArchTable)
 
 // The rank-scaled caps from the 8-64 rank H13 sweep (AICOMRCCL-1756): below 8 ranks
 // the totals stay in force, from 8 ranks each tier grows with the comm and is
-// clipped at 256 MiB. ReduceScatter LL keeps its 1 MiB total at every rank count, and
-// ReduceScatter LL128 runs to 512 MiB from 32 ranks.
+// clipped at 256 MiB. ReduceScatter LL keeps its 1 MiB total below 32 ranks, and from 32 ranks
+// ReduceScatter LL runs to 2 MiB and LL128 to 512 MiB.
 TEST(RcclDdaTierThresholds, Gfx1250_RankScaledCaps)
 {
     RUN_ISOLATED_TEST_WITH_ENV(
@@ -3117,7 +3117,8 @@ TEST(RcclDdaTierThresholds, Gfx1250_RankScaledCaps)
                 const size_t n = static_cast<size_t>(nRanks);
                 EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllReduce), n * MiB) << nRanks;
                 EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllGather), n * 16 * KiB) << nRanks;
-                EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncReduceScatter), 1 * MiB) << nRanks;
+                EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncReduceScatter), nRanks >= 32 ? 2 * MiB : 1 * MiB)
+                    << nRanks;
                 EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllGather), std::min(n * 16 * MiB, 256 * MiB))
                     << nRanks;
                 EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncReduceScatter),
