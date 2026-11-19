@@ -297,8 +297,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
 - **`rccl-UnitTestsMicroTuning<Unit>`** — `src/tuning/`, one binary per test file under
   `test/host/tuning/`. See `test_categories_micro_tuning.yaml`.
   - `tuning.cc` (`TUNING_CC_PATH`, from `tuning-test.cc`; `rccl-UnitTestsMicroTuning`);
-    suite `TuningMicrotest.*`. Covers tuning lifecycle, candidate selection, tuner
-    overrides, NVLS efficiency policy, and symmetric-kernel fallback. Its
+    suites `TuningMicrotest.*` and `TuningMaskMicrotest.*`. Covers tuning lifecycle,
+    candidate selection, tuner overrides, NVLS efficiency policy, symmetric-kernel fallback,
+    and `ncclTuningMask`. Its
     `ncclParamSingleProcMemRegEnable` comes from `fakes/group_fakes.cc`.
   - `tuning_general.cc` (`TUNING_GENERAL_CC_PATH`, from `tuning-general-test.cc`;
     `rccl-UnitTestsMicroTuningGeneral`); suite `TuningGeneralMicrotest.*`. Covers the

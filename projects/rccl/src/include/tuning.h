@@ -13,6 +13,7 @@
 #include "nccl_tuner.h"
 #include "sym_kernels.h"
 #include "ce_coll.h"
+#include "tuning_mask.h"
 
 #define NCCL_TUNING_SYM_KERNEL_ID_OFFSET (NCCL_NUM_ALGORITHMS * NCCL_NUM_PROTOCOLS)
 #define NCCL_TUNING_CE_METHOD_ID_OFFSET (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_Count)
@@ -28,12 +29,26 @@ static inline int ncclTuningFuncIndex(ncclFunc_t func) {
   return func == ncclFuncAlltoAll ? NCCL_NUM_FUNCTIONS : -1;
 }
 
-#define NCCL_TUNING_MASK_GENERAL_KERNELS ((1ULL << NCCL_TUNING_SYM_KERNEL_ID_OFFSET) - 1ULL)
+#define NCCL_TUNING_MASK_GENERAL_KERNELS ncclTuningMask::range(0, NCCL_TUNING_SYM_KERNEL_ID_OFFSET)
 #define NCCL_TUNING_MASK_SYM_KERNELS \
-  ((1ULL << NCCL_TUNING_CE_METHOD_ID_OFFSET) - 1ULL - NCCL_TUNING_MASK_GENERAL_KERNELS)
-#define NCCL_TUNING_MASK_CE ((1ULL << NCCL_TUNING_COUNT) - (1ULL << NCCL_TUNING_CE_METHOD_ID_OFFSET))
-#define NCCL_TUNING_MASK_ALL ((1ULL << NCCL_TUNING_COUNT) - 1ULL)
-static_assert(NCCL_TUNING_COUNT < 64, "Tuning masks cannot represent every tuning entry");
+  ncclTuningMask::range(NCCL_TUNING_SYM_KERNEL_ID_OFFSET, NCCL_TUNING_CE_METHOD_ID_OFFSET)
+#define NCCL_TUNING_MASK_CE ncclTuningMask::range(NCCL_TUNING_CE_METHOD_ID_OFFSET, NCCL_TUNING_COUNT)
+#define NCCL_TUNING_MASK_ALL ncclTuningMask::range(0, NCCL_TUNING_COUNT)
+static_assert(NCCL_TUNING_COUNT <= ncclTuningMask::kBits, "Tuning masks cannot represent every tuning entry");
+static_assert(NCCL_TUNING_SYM_KERNEL_ID_OFFSET > 0 && NCCL_TUNING_SYM_KERNEL_ID_OFFSET < 64,
+              "NCCL_TUNING_SYM_KERNEL_ID_OFFSET must be between 1 and 63");
+
+static inline constexpr ncclTuningMask ncclTuningMaskFromSymk(ncclSymkKernelMask kernels) {
+  ncclTuningMask m;
+  m.w[0] = kernels << NCCL_TUNING_SYM_KERNEL_ID_OFFSET;
+  m.w[1] = kernels >> (64 - NCCL_TUNING_SYM_KERNEL_ID_OFFSET);
+  return m;
+}
+// Only the symmetric kernel ids of t: general and CE tuning ids are dropped.
+static inline constexpr ncclSymkKernelMask ncclSymkMaskFromTuning(ncclTuningMask t) {
+  t &= NCCL_TUNING_MASK_SYM_KERNELS;
+  return (t.w[0] >> NCCL_TUNING_SYM_KERNEL_ID_OFFSET) | (t.w[1] << (64 - NCCL_TUNING_SYM_KERNEL_ID_OFFSET));
+}
 
 #define NCCL_TUNING_ENTRY_INIT_VALUE -1
 #define NCCL_TUNING_RESULT_INIT \
@@ -69,7 +84,7 @@ struct ncclTuningResult_t {
 
 struct ncclTuningInput_t {
   struct ncclComm* comm;
-  uint64_t tuningMask;
+  ncclTuningMask tuningMask;
   ncclFunc_t func;
   ncclRedOp_t redOp;
   ncclDevRedOp_t devRedOp;
