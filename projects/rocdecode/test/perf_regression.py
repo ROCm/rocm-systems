@@ -538,6 +538,10 @@ def main():
     detail_rows = []
     summary_rows = []
     overall_ok = True
+    # With --save-baseline, anything that could not be measured. Later runs
+    # compare only the streams in the baseline, so saving without them would
+    # silently drop them from regression coverage.
+    save_failures = []
     t0 = time.time()
 
     for disp, subdir in CODECS:
@@ -545,6 +549,8 @@ def main():
         if not codec_dir.is_dir():
             print(f"=== {disp}: stream dir not found ({codec_dir}) -- skipping ===")
             summary_rows.append((disp, "WARNING"))
+            if args.save_baseline:
+                save_failures.append(f"{disp} stream dir not found ({codec_dir})")
             continue
         print(f"=== Measuring {disp} ({codec_dir}) ===")
         index = build_stream_index(codec_dir)
@@ -577,9 +583,14 @@ def main():
             fps = measure_stream(path, runs, args.device, mem)
             if fps is not None:
                 measured[name] = fps
+            elif args.save_baseline:
+                print(f"    {RED}FAILED   {NC} {name}  (no FPS measured)")
+                save_failures.append(name)
         if not measured:
             print(f"    no results produced for {disp}")
             summary_rows.append((disp, "WARNING"))
+            if args.save_baseline and not candidates:
+                save_failures.append(f"{disp} has no streams in {codec_dir}")
             continue
 
         if measure_only:
@@ -642,6 +653,11 @@ def main():
         pd.DataFrame(detail_rows).to_csv(csv_path, index=False)
         summary_box(summary_rows, overall_ok, measure_only=measure_only)
         print(f"Results saved to: {out_dir}/")
+        if args.save_baseline and save_failures:
+            # Any existing baseline is left untouched: it is only written below.
+            print(f"ERROR: baseline not saved; could not measure: {'; '.join(save_failures)}",
+                  file=sys.stderr)
+            return 1
         if args.save_baseline:
             bad = [r["File"] for r in detail_rows if not r["Measured FPS"] > 0]
             if bad:
