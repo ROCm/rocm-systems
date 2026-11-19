@@ -1,0 +1,44 @@
+#!/bin/busybox sh
+
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+# Two-GPU peer coherence probe. The image supplies the matching /modules,
+# firmware, ROCm libraries, and /opt/rocjitsu/bin/hip_owner_peer_refetch.
+set -eu
+
+/bin/busybox --install -s /bin
+mount -t proc none /proc
+mount -t sysfs none /sys
+mount -t devtmpfs none /dev
+mkdir -p /dev/shm
+mount -t tmpfs -o mode=1777,nodev,nosuid tmpfs /dev/shm
+
+amdgpu_args=""
+for word in $(cat /proc/cmdline); do
+  case "$word" in
+    amdgpu.*) amdgpu_args="$amdgpu_args ${word#amdgpu.}" ;;
+  esac
+done
+while read -r module; do
+  case "$module" in
+    "" | \#*) continue ;;
+    amdgpu.ko) insmod "/modules/$module" $amdgpu_args ;;
+    *) insmod "/modules/$module" ;;
+  esac
+done </modules/load-order
+
+if [ ! -e /dev/kfd ]; then
+  echo "guest: owner-peer-refetch FATAL: /dev/kfd missing"
+  poweroff -f
+  exit 1
+fi
+
+export LD_LIBRARY_PATH=/opt/rocm/core-7.14/lib:/opt/rocm/core-7.14/lib/llvm/lib:/opt/rocm/core-7.14/lib/rocm_sysdeps/lib
+if /bin/busybox timeout -s TERM -k 10 300 \
+  /opt/rocjitsu/bin/hip_owner_peer_refetch; then
+  echo "guest: owner-peer-refetch PASS"
+else
+  echo "guest: owner-peer-refetch FAIL"
+fi
+poweroff -f

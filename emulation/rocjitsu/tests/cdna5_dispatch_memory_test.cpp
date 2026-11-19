@@ -436,7 +436,7 @@ TEST(Gfx1250SimulationTest, SLoadB64WritesVccPair) {
   EXPECT_EQ(sim.snapshot->snapshots().front().vcc, kExpected);
 }
 
-TEST(Gfx1250SimulationTest, SLoadB32RoutesSgprTtmpAndNullDestinations) {
+TEST(Gfx1250SimulationTest, SLoadB32WritesSgprAndDiscardsUnprivilegedTtmpAndNullDestinations) {
   using namespace rocjitsu::amdhsa;
 
   constexpr uint64_t kKernelAddr = 0x10000;
@@ -487,7 +487,7 @@ TEST(Gfx1250SimulationTest, SLoadB32RoutesSgprTtmpAndNullDestinations) {
   ASSERT_EQ(sim.snapshot->snapshots().size(), 1u);
   const auto &wf = sim.snapshot->snapshots().front();
   EXPECT_EQ(wf.sgpr(4), kSgprValue);
-  EXPECT_EQ(wf.ttmp(0), kTtmpValue);
+  EXPECT_EQ(wf.ttmp(0), 0u); // User-mode stores to trap temporaries are discarded.
   EXPECT_EQ(wf.sgpr(amdgpu::kModernNullSelector), 0u);
 }
 

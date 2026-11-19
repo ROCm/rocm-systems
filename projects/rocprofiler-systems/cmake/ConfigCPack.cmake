@@ -181,7 +181,7 @@ if(NOT ROCPROFSYS_BUILD_DYNINST)
             "libboost-${_BOOST_COMPONENT}-dev (>= 1.67.0)"
         )
     endforeach()
-    if(NOT ROCPROFSYS_BUILD_LIBIBERTY)
+    if(NOT IBERTY_BUILD)
         list(APPEND _DEBIAN_PACKAGE_DEPENDS "libiberty-dev (>= 20170913)")
     endif()
 endif()

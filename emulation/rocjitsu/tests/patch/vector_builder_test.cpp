@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/builders/vector_builders.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand_types.h"
@@ -12,12 +13,13 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand_types.h"
-#include "util/except.h"
 
 #include <gtest/gtest.h>
 
 #include <array>
 #include <cstdint>
+#include <string>
+#include <string_view>
 
 namespace rocjitsu {
 namespace {
@@ -37,14 +39,19 @@ TEST(VectorBuilder, BuildVMovB32Imm) {
   // dispatch is what keeps that a fact rather than an assumption: each case goes
   // through its own generation's generated builder and opcode table.
   for (const rj_code_arch_t arch : kAmdGpuArchs) {
-    EXPECT_EQ(build_v_mov_b32_imm(/*vdst=*/3, /*imm=*/0xDEADBEEFu, arch),
-              (std::array<uint32_t, 2>{0x7E0602FFu, 0xDEADBEEFu}))
+    const auto literal = build_v_mov_b32_imm(/*vdst=*/3, /*imm=*/0xDEADBEEFu, arch);
+    ASSERT_TRUE(literal.succeeded());
+    EXPECT_EQ(literal.value(), (std::array<uint32_t, 2>{0x7E0602FFu, 0xDEADBEEFu}))
         << "arch " << static_cast<int>(arch);
     // v0 clears the vdst field, so a nonzero one cannot come from a stray bit.
-    EXPECT_EQ(build_v_mov_b32_imm(0, 0, arch), (std::array<uint32_t, 2>{0x7E0002FFu, 0u}))
+    const auto zero = build_v_mov_b32_imm(0, 0, arch);
+    ASSERT_TRUE(zero.succeeded());
+    EXPECT_EQ(zero.value(), (std::array<uint32_t, 2>{0x7E0002FFu, 0u}))
         << "arch " << static_cast<int>(arch);
     // The high vdst bit is reachable: v255 fills the field.
-    EXPECT_EQ(build_v_mov_b32_imm(255, 1, arch), (std::array<uint32_t, 2>{0x7FFE02FFu, 1u}))
+    const auto high = build_v_mov_b32_imm(255, 1, arch);
+    ASSERT_TRUE(high.succeeded());
+    EXPECT_EQ(high.value(), (std::array<uint32_t, 2>{0x7FFE02FFu, 1u}))
         << "arch " << static_cast<int>(arch);
   }
 }
@@ -52,10 +59,9 @@ TEST(VectorBuilder, BuildVMovB32Imm) {
 // The RISC-V targets share the arch enum but have no VOP1 encoding, so they are
 // the non-AMDGPU half of the dispatch rather than an unimplemented AMDGPU case.
 TEST(VectorBuilder, BuildVMovB32ImmRejectsNonAmdGpuArch) {
-  EXPECT_THROW((void)build_v_mov_b32_imm(0, 0, ROCJITSU_CODE_ARCH_RV32I), util::UnimplementedInst);
-  EXPECT_THROW((void)build_v_mov_b32_imm(0, 0, ROCJITSU_CODE_ARCH_RV64I), util::UnimplementedInst);
-  EXPECT_THROW((void)build_v_mov_b32_imm(0, 0, ROCJITSU_CODE_ARCH_INVALID),
-               util::UnimplementedInst);
+  EXPECT_TRUE(build_v_mov_b32_imm(0, 0, ROCJITSU_CODE_ARCH_RV32I).failed());
+  EXPECT_TRUE(build_v_mov_b32_imm(0, 0, ROCJITSU_CODE_ARCH_RV64I).failed());
+  EXPECT_TRUE(build_v_mov_b32_imm(0, 0, ROCJITSU_CODE_ARCH_INVALID).failed());
 }
 
 TEST(VectorBuilder, BuildVMovB32Src) {
@@ -63,12 +69,17 @@ TEST(VectorBuilder, BuildVMovB32Src) {
   // instead of 255 and no second word. An SGPR's src0 code is its index.
   for (const rj_code_arch_t arch : kAmdGpuArchs) {
     // v_mov_b32 v3, s30: vdst 3 << 17, op 1 << 9, src0 30.
-    EXPECT_EQ(build_v_mov_b32_src(/*vdst=*/3, /*src0=*/30, arch), 0x7E06021Eu)
-        << "arch " << static_cast<int>(arch);
+    const auto sgpr = build_v_mov_b32_src(/*vdst=*/3, /*src0=*/30, arch);
+    ASSERT_TRUE(sgpr.succeeded());
+    EXPECT_EQ(sgpr.value(), 0x7E06021Eu) << "arch " << static_cast<int>(arch);
     // v0, s0 clears both fields, so a nonzero one cannot come from a stray bit.
-    EXPECT_EQ(build_v_mov_b32_src(0, 0, arch), 0x7E000200u) << "arch " << static_cast<int>(arch);
+    const auto zero = build_v_mov_b32_src(0, 0, arch);
+    ASSERT_TRUE(zero.succeeded());
+    EXPECT_EQ(zero.value(), 0x7E000200u) << "arch " << static_cast<int>(arch);
     // The high vdst bit is reachable: v255 fills the field.
-    EXPECT_EQ(build_v_mov_b32_src(255, 1, arch), 0x7FFE0201u) << "arch " << static_cast<int>(arch);
+    const auto high = build_v_mov_b32_src(255, 1, arch);
+    ASSERT_TRUE(high.succeeded());
+    EXPECT_EQ(high.value(), 0x7FFE0201u) << "arch " << static_cast<int>(arch);
   }
 }
 
@@ -76,15 +87,52 @@ TEST(VectorBuilder, BuildVMovB32Src) {
 // rejected rather than encoded into an instruction that reads whatever follows.
 TEST(VectorBuilder, BuildVMovB32SrcRejectsLiteralSource) {
   for (const rj_code_arch_t arch : kAmdGpuArchs)
-    EXPECT_THROW((void)build_v_mov_b32_src(0, kVectorSrcLiteral, arch), util::InvalidInst)
+    EXPECT_TRUE(build_v_mov_b32_src(0, kVectorSrcLiteral, arch).failed())
         << "arch " << static_cast<int>(arch);
+  EXPECT_TRUE(
+      build_v_mov_b32_src(0, cdna5::OPR_SRC_SRC_LITERAL64, ROCJITSU_CODE_ARCH_CDNA5).failed());
+}
+
+TEST(VectorBuilder, BuildVMovB32SrcAllowsCdna1LdsDirectSource) {
+  const util::FailureOr<uint32_t> word =
+      build_v_mov_b32_src(0, cdna1::OPR_SRC_SRC_LDS_DIRECT, ROCJITSU_CODE_ARCH_CDNA1);
+  ASSERT_TRUE(word.succeeded());
+  EXPECT_EQ(word.value(), 0x7E0002FEu);
 }
 
 TEST(VectorBuilder, BuildVMovB32SrcRejectsNonAmdGpuArch) {
-  EXPECT_THROW((void)build_v_mov_b32_src(0, 0, ROCJITSU_CODE_ARCH_RV32I), util::UnimplementedInst);
-  EXPECT_THROW((void)build_v_mov_b32_src(0, 0, ROCJITSU_CODE_ARCH_RV64I), util::UnimplementedInst);
-  EXPECT_THROW((void)build_v_mov_b32_src(0, 0, ROCJITSU_CODE_ARCH_INVALID),
-               util::UnimplementedInst);
+  EXPECT_TRUE(build_v_mov_b32_src(0, 0, ROCJITSU_CODE_ARCH_RV32I).failed());
+  EXPECT_TRUE(build_v_mov_b32_src(0, 0, ROCJITSU_CODE_ARCH_RV64I).failed());
+  EXPECT_TRUE(build_v_mov_b32_src(0, 0, ROCJITSU_CODE_ARCH_INVALID).failed());
+}
+
+TEST(VectorBuilder, EmitsOnlyRequestedFailureDiagnostics) {
+  unsigned messages = 0;
+  std::string message;
+  auto callback = [&](std::string_view text) {
+    ++messages;
+    message = text;
+  };
+  const util::DiagnosticEmitter error(callback);
+  EXPECT_TRUE(build_v_mov_b32_imm(0, 0, ROCJITSU_CODE_ARCH_CDNA4, &error).succeeded());
+  EXPECT_TRUE(build_v_mov_b32_src(0, 0, ROCJITSU_CODE_ARCH_CDNA4, &error).succeeded());
+  EXPECT_TRUE(
+      build_v_mov_b32_src(0, cdna1::OPR_SRC_SRC_LDS_DIRECT, ROCJITSU_CODE_ARCH_CDNA1, &error)
+          .succeeded());
+  EXPECT_EQ(messages, 0u);
+  EXPECT_TRUE(build_v_mov_b32_imm(0, 0, ROCJITSU_CODE_ARCH_INVALID, &error).failed());
+  EXPECT_EQ(messages, 1u);
+  EXPECT_EQ(message, "unsupported target architecture for v_mov_b32 with a literal");
+  EXPECT_TRUE(build_v_mov_b32_src(0, 0, ROCJITSU_CODE_ARCH_INVALID, &error).failed());
+  EXPECT_EQ(messages, 2u);
+  EXPECT_EQ(message, "unsupported target architecture for v_mov_b32 from a register");
+  EXPECT_TRUE(build_v_mov_b32_src(0, kVectorSrcLiteral, ROCJITSU_CODE_ARCH_CDNA4, &error).failed());
+  EXPECT_EQ(messages, 3u);
+  EXPECT_EQ(message, "v_mov_b32 from a literal needs build_v_mov_b32_imm");
+  EXPECT_TRUE(build_v_mov_b32_src(0, cdna5::OPR_SRC_SRC_LITERAL64, ROCJITSU_CODE_ARCH_CDNA5, &error)
+                  .failed());
+  EXPECT_EQ(messages, 4u);
+  EXPECT_EQ(message, "v_mov_b32 from a 64-bit literal needs trailing literal words");
 }
 
 // kVectorSrcLiteral is declared once from cdna1's table; this pins that every

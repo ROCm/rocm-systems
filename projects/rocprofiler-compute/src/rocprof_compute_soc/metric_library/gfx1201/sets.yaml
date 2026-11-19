@@ -1,0 +1,24 @@
+compute_thruput_flops:
+  title: Compute Throughput FLOPS
+  metrics:
+  - compute.valu_issue_rate
+  - compute.wmma_flops_f16_16x16x16
+  - compute.valu_issue_rate_fp64
+  - compute.ipc
+launch_stats:
+  title: Launch Stats
+  metrics:
+  - dispatch.grid_size
+  - dispatch.workgroup_size
+  - wave.dispatched_wavefronts
+  - dispatch.vgprs
+  - dispatch.sgprs
+  - dispatch.lds_allocation
+  - dispatch.scratch_allocation
+mem_thruput:
+  title: Memory Throughput
+  metrics:
+  - lds.bank_conflicts
+  - lds.bw
+  - gl2.hit_rate
+  - gl0.hit_rate
