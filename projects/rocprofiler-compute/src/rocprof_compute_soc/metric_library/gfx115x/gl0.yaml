@@ -84,7 +84,6 @@ gl0.hit_rate:
   formula: 100 * SUM(TCP_REQ_sum - TCP_REQ_MISS_sum) / SUM(TCP_REQ_sum)
   unit: Percent
   description: Percentage of GL0 cache requests that hit in the cache.
-  peak: 100
 gl0.miss_req:
   name: GL0 Miss Requests
   formula: SUM(TCP_REQ_MISS_sum) / SUM($denom)

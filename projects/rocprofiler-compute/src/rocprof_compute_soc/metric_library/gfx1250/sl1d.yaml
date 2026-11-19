@@ -40,7 +40,6 @@ sl1d.hit_rate_excl_dup:
     Percentage of sL1D requests that hit on a previously loaded line in the cache.
     Calculated as the number of sL1D hits over the number of hits and misses, excluding
     duplicate misses.
-  peak: 100
 sl1d.hits_per_req:
   name: sL1D Hit Rate
   formula: 100 * SUM(SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_REQ_sum)

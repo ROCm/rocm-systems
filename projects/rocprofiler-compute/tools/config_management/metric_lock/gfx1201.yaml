@@ -153,7 +153,6 @@ gl0.bw:
 gl0.hit_rate:
   formula: 100 * SUM(TCP_REQ_sum - TCP_REQ_MISS_sum) / SUM(TCP_REQ_sum)
   unit: Percent
-  peak: 100
   counters: [GRBM_GUI_ACTIVE, SQ_WAVES, TCP_REQ_MISS_sum, TCP_REQ_sum]
 gl0.miss_req:
   formula: SUM(TCP_REQ_MISS_sum) / SUM($denom)
@@ -186,7 +185,6 @@ gl2.ea_wr_req_dram:
 gl2.hit_rate:
   formula: 100 * SUM(GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
   unit: Percent
-  peak: 100
   counters: [GL2C_HIT_sum, GL2C_MISS_sum, GRBM_GUI_ACTIVE, SQ_WAVES]
 gl2.hits:
   formula: SUM(GL2C_HIT_sum) / SUM($denom)
@@ -232,7 +230,6 @@ grbm.gpu_busy:
 l1i.hits_per_req:
   formula: 100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_REQ_sum)
   unit: Percent
-  peak: 100
   counters: [GRBM_GUI_ACTIVE, SQC_ICACHE_HITS_sum, SQC_ICACHE_REQ_sum, SQ_WAVES]
 l1i.req:
   formula: SUM(SQC_ICACHE_REQ_sum) / SUM($denom)
@@ -266,7 +263,6 @@ lds.util:
 sl1d.hits_per_req:
   formula: 100 * SUM(SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_REQ_sum)
   unit: Percent
-  peak: 100
   counters: [GRBM_GUI_ACTIVE, SQC_DCACHE_HITS_sum, SQC_DCACHE_REQ_sum, SQ_WAVES]
 sl1d.load_bw:
   formula: 4 * SUM(SQC_SMEM_LOAD_DWORDS_sum) / SUM(End_Timestamp - Start_Timestamp)

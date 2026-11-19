@@ -32,7 +32,6 @@ wave.wait_for_any:
     resolve, such as pending memory operations or prior instruction results. High values
     indicate latency-bound execution that could benefit from increased occupancy or
     reduced dependency chains.
-  peak: 100
 wave.wait_for_barrier:
   name: Wait for Barrier
   formula: 100 * SUM(SQ_WAIT_BARRIER) / SUM(SQ_WAVE_CYCLES)

@@ -696,7 +696,6 @@ gl0.gl2_cache_bw:
 gl0.hit_rate:
   formula: 100 * SUM(TX_VMW_REQ_sum - TX_VMW_REQ_MISS_sum) / SUM(TX_VMW_REQ_sum)
   unit: Percent
-  peak: 100
   counters: [GRBM_GUI_ACTIVE_sum, SQ_WAVES, TX_VMW_REQ_MISS_sum, TX_VMW_REQ_sum]
 gl0.lat_fifo_stall_rate:
   formula: 100 * SUM(TX_VMW_LFIFO_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
@@ -893,7 +892,6 @@ gl1.gl1a_return_bus_util:
 gl1.gl1a_util:
   formula: 100 * SUM(GL1A_BUSY_sum) / SUM(GL1A_CYCLE_sum)
   unit: Percent
-  peak: 100
   counters: [GL1A_BUSY_sum, GL1A_CYCLE_sum, GRBM_GUI_ACTIVE_sum, SQ_WAVES]
 gl1.gl1c_buffer_full_stall:
   formula: 100 * SUM(GL1C_STALL_BUFFER_FULL_sum) / SUM(GL1C_BUSY_sum)
@@ -1194,7 +1192,6 @@ gl2.gl2c3_gl2a_return_stall_rate:
 gl2.hit_rate:
   formula: 100 * SUM(GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
   unit: Percent
-  peak: 100
   counters: [GL2C_HIT_sum, GL2C_MISS_sum, GRBM_GUI_ACTIVE_sum, SQ_WAVES]
 gl2.lat_fifo_full_stall:
   formula: 100 * SUM(GL2C_LATENCY_FIFO_FULL_sum) / SUM(GL2C_BUSY_sum)
@@ -1348,7 +1345,6 @@ l1i.gl1_rd_bw:
 l1i.hit_rate_excl_dup:
   formula: 100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)
   unit: Percent
-  peak: 100
   counters: [GRBM_GUI_ACTIVE_sum, SQC_ICACHE_HITS_sum, SQC_ICACHE_MISSES_sum, SQ_WAVES]
 l1i.hits_per_req:
   formula: 100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_REQ_sum)
@@ -1464,7 +1460,6 @@ sl1d.gl1_rd_bw:
 sl1d.hit_rate_excl_dup:
   formula: 100 * SUM(SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)
   unit: Percent
-  peak: 100
   counters: [GRBM_GUI_ACTIVE_sum, SQC_DCACHE_HITS_sum, SQC_DCACHE_MISSES_sum, SQ_WAVES]
 sl1d.hits_per_req:
   formula: 100 * SUM(SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_REQ_sum)

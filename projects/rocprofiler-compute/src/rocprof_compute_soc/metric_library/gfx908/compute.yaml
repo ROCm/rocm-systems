@@ -7,7 +7,6 @@ compute.cu_util:
     doing any work, summed over all CUs. Low values (less than 100%) indicate that the
     accelerator was not fully saturated by the kernel, or a potential load-imbalance
     issue.
-  peak: 100
 compute.inst_mix_branch:
   name: Branch Instructions
   formula: SUM(SQ_INSTS_BRANCH) / SUM($denom)
@@ -61,7 +60,6 @@ compute.salu_util:
     Percentage of the kernel's duration the SALU was busy executing instructions.
     Computed as the ratio of the total number of cycles spent by the scheduler issuing
     SALU or SMEM instructions over the total CU cycles.
-  peak: 100
 compute.se_util:
   name: Shader Engine Utilization
   formula: 100 * SUM(SQ_BUSY_CYCLES) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $se_per_gpu)
@@ -89,4 +87,3 @@ compute.valu_util:
     Percentage of the kernel's duration the VALU was busy executing instructions. Does
     not include VMEM operations. Computed as the ratio of the total number of cycles
     spent by the scheduler issuing VALU instructions over the total CU cycles.
-  peak: 100

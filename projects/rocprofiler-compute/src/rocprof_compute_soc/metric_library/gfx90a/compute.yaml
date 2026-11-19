@@ -13,7 +13,6 @@ compute.branch_util:
     Percentage of the kernel's duration the branch unit was busy executing instructions.
     Computed as the ratio of the total number of cycles spent by the scheduler issuing
     branch instructions over the total CU cycles.
-  peak: 100
 compute.f16_ops:
   name: F16 OPs
   formula: SUM(64 * SQ_INSTS_VALU_ADD_F16 + 64 * SQ_INSTS_VALU_MUL_F16 + 64 * SQ_INSTS_VALU_TRANS_F16 + 128 * SQ_INSTS_VALU_FMA_F16 + 512 * SQ_INSTS_VALU_MFMA_MOPS_F16) / SUM($denom)
@@ -269,7 +268,6 @@ compute.mfma_util:
     Percentage of the kernel's duration the MFMA unit was busy executing instructions.
     Computed as the ratio of the total number of cycles the MFMA was busy over the total
     CU cycles.
-  peak: 100
 compute.smem_lat:
   name: SMEM Latency
   formula: SUM(SQ_INST_LEVEL_SMEM_ACCUM) / SUM(SQ_INSTS_SMEM)
@@ -354,4 +352,3 @@ compute.vmem_util:
   description: >-
     Percentage of the kernel's duration the VMEM unit was busy executing instructions,
     including global, generic, spill and scratch operations, but not VALU operations.
-  peak: 100
