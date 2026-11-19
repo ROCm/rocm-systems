@@ -278,7 +278,10 @@ TEST(ConcurrentDispatchFuzzTest, DataIslandCannotBecomeInstructionStream) {
     const RunStats stats = run_input(input);
     ASSERT_EQ(stats.modes, 2u);
     EXPECT_EQ(stats.terminal_faulted_modes, stats.modes);
-    EXPECT_EQ(stats.fatal_exit_modes, 0u);
+    // VMID 0 has no VM fault reporter and this queue has no exception status
+    // address, so the fetch fault cannot reach an owner; the engine fails
+    // rather than leave the completion signal pending.
+    EXPECT_EQ(stats.fatal_exit_modes, stats.modes);
     EXPECT_EQ(stats.completed_modes, 0u);
   }
 }

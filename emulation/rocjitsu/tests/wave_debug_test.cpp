@@ -942,15 +942,28 @@ TEST(WaveDebugTest, MisalignedFlatLdsAtomicPrecedesGlobalFaultAndWatchpoint) {
             });
         fx.cu->set_memory_violation_handler(
             [&](auto &wave, uint64_t address, bool write, uint64_t) {
-              // The synchronous memory violation has no translated address.
-              EXPECT_EQ(write, address == global);
+              EXPECT_TRUE(write);
               faults.push_back(address);
               wave.debug_trap(0);
               return true;
             });
+        unsigned aperture_stops = 0;
+        fx.cu->set_aperture_violation_handler([&](auto &wave) {
+          ++aperture_stops;
+          wave.debug_trap(0);
+          return true;
+        });
+        // MEMVIOL is delivered before the next instruction issues.
         fx.cu->step();
+        fx.cu->step();
+        // Misaligned LDS MEMVIOL stops at the aperture-violation owner, which
+        // does not wait for a VM fault event. Beyond the LDS allocation the
+        // lane is DDS, which fails before any VM fault report and aborts the
+        // queue instead.
+        EXPECT_EQ(aperture_stops, offset == 5 ? 1u : 0u);
+        EXPECT_EQ((wf->trapsts() & (1u << 8)) != 0, offset == 5);
         if (offset != 4) {
-          EXPECT_EQ(faults, (std::vector<uint64_t>{0}));
+          EXPECT_TRUE(faults.empty());
         } else if (!mapped) {
           EXPECT_EQ(faults, (std::vector<uint64_t>{global}));
         } else {
