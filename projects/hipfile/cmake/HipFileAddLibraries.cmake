@@ -27,8 +27,9 @@ function(hipfile_add_libraries)
     # Add the library target
     add_library(${arg_NAME} ${arg_SRCS})
 
-    # Set C++ standard
-    target_compile_features(${arg_NAME} PUBLIC cxx_std_${HIPFILE_CXX_STANDARD})
+    # Set C++ standard. PRIVATE, since the public headers are C and
+    # consumers shouldn't inherit the library's C++ standard.
+    target_compile_features(${arg_NAME} PRIVATE cxx_std_${HIPFILE_CXX_STANDARD})
     set_target_properties(${arg_NAME} PROPERTIES CXX_EXTENSIONS OFF)
 
     # Set position-independent code

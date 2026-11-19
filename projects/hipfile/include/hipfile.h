@@ -189,7 +189,8 @@ const char *hipFileGetOpErrorString(hipFileOpError_t status);
 
 // Ignoring return values from hipFile APIs is discouraged.
 // In C++17 and C23 and up, we can make that emit a warning.
-#if (defined(__cplusplus) && __cplusplus >= 201703L) || __STDC_VERSION__ >= 202311L
+#if (defined(__cplusplus) && __cplusplus >= 201703L) ||                                                      \
+    (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L)
 #define __HIPFILE_NODISCARD [[nodiscard]]
 #else
 #define __HIPFILE_NODISCARD
