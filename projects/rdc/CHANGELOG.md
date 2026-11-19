@@ -61,7 +61,7 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `rdcd` names the owner of a lock file that it cannot open, instead of reporting "Numerical result out of range". It no longer reports "Bad file descriptor" for a lock file that does not exist, and prints the path of a lock file that it cannot read.
 
-- `rdcd` exits at once, with status 1, on a second SIGTERM or SIGINT, or on one that arrives while it shuts down, so another stop request ends a stalled shutdown.
+- When `rdcd` takes more than 5 seconds to stop, another SIGTERM or SIGINT ends it at once, with status 1.
 
 - `rdcd` no longer crashes when the watches due in one update read more than 8,192 GPU-field pairs from AMD SMI, for example two `rdci dmon` sessions of 128 fields on 64 GPUs each.
 
