@@ -101,12 +101,11 @@ template <rocjitsu::arith::Unary Op, bool GuestDenormals = true, bool PreserveCl
 [[gnu::noinline]] int unary(uint64_t flags, uint32_t exec_mask, uint64_t modifiers,
                             uint32_t *const *d, const uint32_t *const *a) {
   if (modifiers >> 32) {
-    return rocjitsu::arith::execute_dpp(flags, exec_mask, modifiers, a,
-                                        [&](uint32_t exec_mask, const uint32_t *const *source) {
-                                          return unary<Op, GuestDenormals, PreserveClampNan,
-                                                       AcceptExact>(flags, exec_mask,
-                                                                    uint32_t(modifiers), d, source);
-                                        });
+    return rocjitsu::arith::execute_dpp(
+        flags, exec_mask, modifiers, a, [&](uint32_t exec_mask, const uint32_t *const *source) {
+          return unary<Op, GuestDenormals, PreserveClampNan, AcceptExact>(
+              flags, exec_mask, uint32_t(modifiers), d, source);
+        });
   }
   const uint32_t known = RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_OMOD_MASK |
                          RJ_ARITH_ALU_CLAMP | RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_D;
@@ -568,7 +567,7 @@ int rj_arith_v_fract_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instru
     return error;
   }
   return run<rocjitsu::arith::Unary::Fract, true, true>(flags, exec_mask, instruction_flags, d, a,
-                                                  trapsts);
+                                                        trapsts);
 }
 
 // Compute the fractional part for selected lanes.
@@ -583,7 +582,7 @@ int rj_arith_v_fract_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t 
     return error;
   }
   return run<rocjitsu::arith::Unary::Fract, false, true>(flags, exec_mask, instruction_flags, d, a,
-                                                   excp_flag_user);
+                                                         excp_flag_user);
 }
 
 // Extract the requested exponent or mantissa component for selected lanes.
@@ -858,8 +857,8 @@ int rj_arith_v_fract_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instru
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return unary_wave64<rocjitsu::arith::Unary::Fract, true, true>(flags, exec_mask, instruction_flags, d,
-                                                           a, trapsts);
+  return unary_wave64<rocjitsu::arith::Unary::Fract, true, true>(flags, exec_mask,
+                                                                 instruction_flags, d, a, trapsts);
 }
 
 // Compute the fractional part for selected lanes.
@@ -873,8 +872,8 @@ int rj_arith_v_fract_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t 
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return unary_wave64<rocjitsu::arith::Unary::Fract, false, true>(flags, exec_mask, instruction_flags, d,
-                                                            a, excp_flag_user);
+  return unary_wave64<rocjitsu::arith::Unary::Fract, false, true>(
+      flags, exec_mask, instruction_flags, d, a, excp_flag_user);
 }
 
 // Extract the requested exponent or mantissa component for selected lanes.

@@ -92,7 +92,11 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
     return lanes ? rocjitsu::arith::interp_guest<P2, true, Rtz>(flags, lanes, mode, d, a, b, c)
                  : RJ_ARITH_SUCCESS;
   };
-  if (rocjitsu::arith::is_exact(flags) || (flags & rocjitsu::arith::interp_round_denorm_flags)) {
+  // The specialized kernel serves exact requests too: interp_guest runs exact semantics for
+  // every caller, and the backend hands back the lanes from the first block holding a
+  // non-finite operand, which is the only way the native FMA differs from the guest model
+  // once the guest rounding and denormal controls are known to be default.
+  if (flags & rocjitsu::arith::interp_round_denorm_flags) {
     return guest(exec_mask);
   }
 #if defined(RJ_ARITH_HAVE_X86_64_V3)

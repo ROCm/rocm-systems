@@ -45,7 +45,7 @@ void check_integer(Call call, IntegerConversion operation) {
       call, input,
       [=](uint64_t a, uint32_t b, uint32_t, uint32_t d, uint64_t, uint32_t mode) {
         return op == 5   ? pack_reference(bool(mode & RJ_ARITH_ALU_HIGH_D), uint32_t(a), b,
-                                          mode & RJ_ARITH_ALU_HIGH_D ? d : 0)
+                                        mode & RJ_ARITH_ALU_HIGH_D ? d : 0)
                : op == 4 ? pack_reference(bool(mode & RJ_ARITH_ALU_HIGH_D), uint32_t(a), b, d)
                          : integer_conversion_reference(op, uint32_t(a), b, mode);
       },
@@ -171,6 +171,16 @@ TEST(ConversionPackB32F16W32Gfx942, Arithmetic) {
 
 TEST(ConversionPackB32F16W64Gfx942, Arithmetic) {
   check_pack<64, false, false>(rj_arith_v_pack_b32_f16_w64_gfx942);
+}
+
+// gfx1250 inherits the gfx12 packing model, including its NaN quieting, but stays loose-only
+// until the gfx1250 captures are reviewed.
+TEST(ConversionPackB32F16W32Gfx1250, Arithmetic) {
+  check_pack<32, true, false>(rj_arith_v_pack_b32_f16_w32_gfx1250);
+}
+
+TEST(ConversionPackB32F16W64Gfx1250, Arithmetic) {
+  check_pack<64, true, false>(rj_arith_v_pack_b32_f16_w64_gfx1250);
 }
 
 // gfx1100 (W7900, mkm2) lanes: hw1100-noieee (2026-09-25, MODE.IEEE clear) keeps a signaling

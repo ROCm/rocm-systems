@@ -70,6 +70,14 @@ CONVERSION_ARCH_SUFFIX = {
     'cdna5': '_gfx1250',
 }
 
+# Architecture suffix of the FP64 FMA entry points. RDNA2 has no capture yet, so it
+# calls the loose-only _gfx10 entry rather than the shared RDNA3 one.
+FMA64_ARCH_SUFFIX = {
+    'rdna2': '_gfx10',
+    'rdna3': '',
+    'rdna4': '_gfx12',
+}
+
 CONVERSION16_NAMES = {
     'V_CVT_F16_I16',
     'V_CVT_F16_U16',
@@ -1349,13 +1357,8 @@ def gen_bit_pack(ctx: ExecuteContext) -> str | None:
     half = mnemonic == 'V_PACK_B32_F16'
     if len(dst) != 1 or len(src) != (2 if half else 3):
         return None
-    # The gfx12 PACK entry already accepts bit-exact semantics on gfx1250; byte packing and
-    # the CDNA PACK entries stay loose-only until their captures are reviewed.
-    api = 'rj_arith_' + mnemonic.lower()
-    if half and arch == 'cdna5':
-        api += '_gfx12'
-    else:
-        api += CONVERSION_ARCH_SUFFIX[arch]
+    # Byte packing and the CDNA PACK entries stay loose-only until their captures are reviewed.
+    api = 'rj_arith_' + mnemonic.lower() + CONVERSION_ARCH_SUFFIX[arch]
     lines = ['  uint64_t flags = wf.cu().arithmetic_flags();']
     denorm = 'fp_denorm_mode_f16_f64' if half else 'fp_denorm_mode_f32'
     lines += [
@@ -1430,16 +1433,11 @@ def gen_float_fma64(ctx: ExecuteContext) -> str | None:
     dst = ctx.dst_ops
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
-    if (
-        arch not in ('rdna2', 'rdna3', 'rdna4')
-        or mnemonic != 'V_FMA_F64'
-        or not is_vop3
-    ):
+    if arch not in FMA64_ARCH_SUFFIX or mnemonic != 'V_FMA_F64' or not is_vop3:
         return None
     if len(dst) != 1 or len(src) != 3:
         return None
-    # RDNA2 has no capture yet; its entry stays loose-only.
-    api = 'rj_arith_v_fma_f64' + {'rdna2': '_gfx10', 'rdna3': '', 'rdna4': '_gfx12'}[arch]
+    api = 'rj_arith_v_fma_f64' + FMA64_ARCH_SUFFIX[arch]
     return '\n'.join(
         [
             '  const uint64_t modifiers = ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |',
