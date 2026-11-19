@@ -935,9 +935,11 @@ WriteInterceptor(const void* packets,
                 kernel_packet,
                 kernel_id,
                 dispatch_id,
+                &_packet_data.user_data,
                 _packet_data.tracing_data.external_correlation_ids,
                 corr_id,
-                _packet_data);
+                _packet_data.instrumentation_packets,
+                _packet_data.is_serialized);
 
             bool inserted_before = false;
             if(_packet_data.is_serialized)

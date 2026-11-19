@@ -127,10 +127,6 @@ public:
     void enable_serialization(const agent_handle_set_t& agents);
     void disable_serialization(const agent_handle_set_t& agents);
 
-    // Adds a reference only while serialization is enabled for this agent. A successful
-    // retain must be paired with disable_serialization for the same agent.
-    bool try_retain_serialization(rocprofiler_agent_id_t agent_id);
-
     // Whether the given agent currently has serialization enabled. Exposed for tests and for
     // callers that need to reason about scope rather than trigger a transition.
     bool is_serialization_enabled(rocprofiler_agent_id_t agent_id) const;

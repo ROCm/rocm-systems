@@ -278,9 +278,9 @@ TEST(thread_trace, shared_buffer_reuse)
     recorded_output_allocations.clear();
 
     auto buffers = std::vector<void*>{};
-    for(auto size : requested_sizes)
+    for(size_t i = 0; i < requested_sizes.size(); ++i)
     {
-        void* buffer = pool_a.allocate_output(size);
+        void* buffer = pool_a.allocate_output(i == 0 ? kSmall : requested_sizes.at(i));
         ASSERT_NE(buffer, nullptr);
         for(void* previous : buffers)
             EXPECT_NE(buffer, previous) << "distinct ring slots must be distinct buffers";
@@ -303,17 +303,6 @@ TEST(thread_trace, shared_buffer_reuse)
     }
     EXPECT_FALSE(resources->owns_output_buffer(nullptr));
 
-    auto first_dispatch  = resources->acquire_dispatch_trace();
-    auto second_dispatch = resources->acquire_dispatch_trace();
-    ASSERT_TRUE(first_dispatch);
-    ASSERT_TRUE(second_dispatch);
-    auto [busy_status, busy_lease] =
-        thread_trace::acquire_device_trace(agent_id, rocprofiler_context_id_t{42});
-    EXPECT_EQ(busy_status, ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT);
-    EXPECT_FALSE(busy_lease);
-    first_dispatch.reset();
-    second_dispatch.reset();
-
     thread_trace::free_shared_trace_resources();
     EXPECT_EQ(resources->queue().hsa_queue, nullptr);
     EXPECT_FALSE(thread_trace::att_queue_enabled(resources->queue()));
@@ -323,58 +312,6 @@ TEST(thread_trace, shared_buffer_reuse)
     pool_a.resources.reset();
     pool_b.resources.reset();
     same_resources.reset();
-    resources.reset();
-    thread_trace::free_shared_trace_resources();
-}
-
-// Sequential device contexts reuse the same output allocation on either backend.
-// Dispatch reservations are excluded until each device reservation is released.
-TEST(thread_trace, shared_trace_lease_handoff)
-{
-    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-    test_init();
-
-    registration::init_logging();
-    registration::set_init_status(-1);
-
-    thread_trace::free_shared_trace_resources();
-
-    auto agents = hsa::get_queue_controller()->get_supported_agents();
-    ASSERT_GT(agents.size(), 0);
-
-    const auto&        agent       = begin(agents)->second;
-    const auto         agent_id    = CHECK_NOTNULL(agent.get_rocp_agent())->id;
-    constexpr uint64_t kBufferSize = 0x1000000;
-    thread_trace::register_shared_trace_requirements(agent_id, kBufferSize, 1);
-    auto resources = thread_trace::acquire_shared_trace_resources(agent_id);
-
-    void* expected = nullptr;
-    for(uint64_t i = 0; i < 8; ++i)
-    {
-        // Each context builds its own pool, so the ring index restarts at slot 0.
-        hsa::TraceMemoryPool pool{};
-        pool.allocate_fn     = get_ext_table().hsa_amd_memory_pool_allocate_fn;
-        pool.allow_access_fn = get_ext_table().hsa_amd_agents_allow_access_fn;
-        pool.free_fn         = get_ext_table().hsa_amd_memory_pool_free_fn;
-        pool.gpu_agent       = agent.get_hsa_agent();
-        pool.gpu_pool_       = agent.gpu_pool();
-        pool.resources       = resources;
-
-        auto context_id      = rocprofiler_context_id_t{i + 1};
-        auto [status, lease] = thread_trace::acquire_device_trace(agent_id, context_id);
-        ASSERT_EQ(status, ROCPROFILER_STATUS_SUCCESS);
-        ASSERT_TRUE(lease);
-        EXPECT_FALSE(resources->acquire_dispatch_trace());
-
-        void* buffer = pool.allocate_output(kBufferSize);
-        ASSERT_NE(buffer, nullptr);
-        if(expected == nullptr) expected = buffer;
-        EXPECT_EQ(buffer, expected) << "each context must reuse the agent's output slot";
-
-        lease.reset();
-        pool.resources.reset();
-    }
-
     resources.reset();
     thread_trace::free_shared_trace_resources();
 }

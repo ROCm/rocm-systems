@@ -121,16 +121,6 @@ att_queue_submit_packets(const att_queue_t& queue, VecType& packets, att_signal_
     return true;
 }
 
-template <typename VecType>
-signal_ptr_t
-att_queue_submit_signal_last(const att_queue_t& queue, VecType& packets)
-{
-    if(packets.empty()) return nullptr;
-    auto signal = make_signal(queue);
-    if(!signal || !att_queue_submit_packets(queue, packets, signal.get())) return nullptr;
-    return signal;
-}
-
 using att_queue_ptr_t = std::unique_ptr<att_queue_t>;
 
 /// @param max_copy_size Largest single GPU-to-CPU copy the queue has to service.

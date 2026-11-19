@@ -41,7 +41,6 @@
 #include <algorithm>
 #include <map>
 #include <mutex>
-#include <optional>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -52,25 +51,33 @@ namespace thread_trace
 {
 struct trace_usage_t
 {
-    std::mutex                              mutex{};
-    std::optional<rocprofiler_context_id_t> device_context{};
-    uint64_t                                dispatches = 0;
+    std::mutex mutex{};
+    bool       device_active = false;
+    uint64_t   dispatches    = 0;
 };
 
 namespace
 {
-trace_lease_t
-acquire_trace(const std::shared_ptr<trace_usage_t>&   usage,
-              std::optional<rocprofiler_context_id_t> device_context)
+std::pair<rocprofiler_status_t, trace_lease_t>
+acquire_trace(const std::shared_ptr<trace_usage_t>& usage, bool is_device, const att_queue_t* queue)
 {
-    auto lock = std::lock_guard{usage->mutex};
-    if(usage->device_context || (device_context && usage->dispatches != 0)) return {};
+    // Keep the queue enabled check and lease acquisition ordered against disabling the agent.
+    auto queue_lock = std::unique_lock<std::mutex>{};
+    if(queue)
+    {
+        queue_lock = std::unique_lock{queue->submit_mutex};
+        if(!queue->submit_fn) return {ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE, trace_lease_t{}};
+    }
 
-    if(device_context)
-        usage->device_context = device_context;
+    auto usage_lock = std::lock_guard{usage->mutex};
+    if(usage->device_active || (is_device && usage->dispatches != 0))
+        return {ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT, trace_lease_t{}};
+
+    if(is_device)
+        usage->device_active = true;
     else
         ++usage->dispatches;
-    return trace_lease_t{usage, device_context.has_value()};
+    return {ROCPROFILER_STATUS_SUCCESS, trace_lease_t{usage, is_device}};
 }
 
 // Over-allocate, then round the returned pointer up to a 4K page. The round-up consumes
@@ -160,18 +167,12 @@ public:
         return entry.resources;
     }
 
-    std::pair<rocprofiler_status_t, trace_lease_t> acquire_device(
-        rocprofiler_agent_id_t   agent_id,
-        rocprofiler_context_id_t context_id)
+    std::pair<rocprofiler_status_t, trace_lease_t> acquire_device(rocprofiler_agent_id_t agent_id)
     {
         auto  lock  = std::lock_guard{m_mutex};
         auto& entry = m_agents[agent_id];
-        if(entry.resources && !att_queue_enabled(entry.resources->queue()))
-            return {ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE, trace_lease_t{}};
-        auto       lease = acquire_trace(entry.usage, context_id);
-        const auto status =
-            lease ? ROCPROFILER_STATUS_SUCCESS : ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
-        return {status, std::move(lease)};
+        return acquire_trace(
+            entry.usage, true, entry.resources ? &entry.resources->queue() : nullptr);
     }
 
     void shutdown()
@@ -260,7 +261,7 @@ trace_lease_t::reset()
     auto is_device = std::exchange(m_is_device, false);
     auto lock      = std::lock_guard{usage->mutex};
     if(is_device)
-        usage->device_context.reset();
+        usage->device_active = false;
     else
     {
         ROCP_FATAL_IF(usage->dispatches == 0) << "ATT dispatch ownership underflow";
@@ -288,6 +289,17 @@ att_queue_t&
 AgentTraceResources::queue()
 {
     return *CHECK_NOTNULL(m_queue.get());
+}
+
+void
+AgentTraceResources::disable_unretired_trace()
+{
+    // Block new users without destroying the queue or storage at the failure site.
+    auto& submission = queue();
+    auto  lock       = std::lock_guard{submission.submit_mutex};
+    if(std::exchange(submission.submit_fn, nullptr))
+        ROCP_ERROR << "Cannot confirm ATT trace retirement for agent " << m_agent_id.handle
+                   << "; disabling ATT on this agent";
 }
 
 void
@@ -385,14 +397,13 @@ AgentTraceResources::agent_id() const
 trace_lease_t
 AgentTraceResources::acquire_dispatch_trace()
 {
-    if(!att_queue_enabled(queue())) return {};
-    return acquire_trace(m_usage, std::nullopt);
+    return acquire_trace(m_usage, false, &queue()).second;
 }
 
 std::pair<rocprofiler_status_t, trace_lease_t>
-acquire_device_trace(rocprofiler_agent_id_t agent_id, rocprofiler_context_id_t context_id)
+acquire_device_trace(rocprofiler_agent_id_t agent_id)
 {
-    return get_manager().acquire_device(agent_id, context_id);
+    return get_manager().acquire_device(agent_id);
 }
 
 rocprofiler_status_t

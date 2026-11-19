@@ -81,6 +81,11 @@ class CounterPacketConstruct;
 class ThreadTraceAQLPacketFactory;
 }  // namespace aql
 
+namespace thread_trace
+{
+class dispatch_serialization_t;
+}  // namespace thread_trace
+
 namespace hsa
 {
 #define HSA_AMD_INTERFACE_VERSION                                                                  \
@@ -125,7 +130,6 @@ public:
 
     virtual void populate_before() = 0;
     virtual void populate_after()  = 0;
-    virtual void complete_trace() {}
 
     aqlprofile_handle_t GetHandle() const { return handle; }
     aqlprofile_handle_t handle = {.handle = 0};
@@ -274,7 +278,11 @@ public:
     uint64_t               GetOwner() const { return owner; }
     void                   SetOwner(uint64_t value) { owner = value; }
     void SetTraceLease(thread_trace::trace_lease_t lease) { trace_lease = std::move(lease); }
-    void complete_trace() override { trace_lease.reset(); }
+    void complete_trace() { trace_lease.reset(); }
+    void retain_serialization(std::shared_ptr<thread_trace::dispatch_serialization_t> pin)
+    {
+        serialization = std::move(pin);
+    }
 
     void populate_before() override
     {
@@ -292,10 +300,11 @@ public:
     bool remove_codeobj(code_object_id_t id) { return loaded_codeobj.erase(id) != 0; }
 
 protected:
-    std::shared_ptr<TraceMemoryPool>     tracepool;
-    aqlprofile_att_control_aql_packets_t packets;
-    uint64_t                             owner = 0;
-    thread_trace::trace_lease_t          trace_lease{};
+    std::shared_ptr<TraceMemoryPool>                        tracepool;
+    aqlprofile_att_control_aql_packets_t                    packets;
+    uint64_t                                                owner = 0;
+    std::shared_ptr<thread_trace::dispatch_serialization_t> serialization{};
+    thread_trace::trace_lease_t                             trace_lease{};
 
     std::unordered_map<code_object_id_t, std::shared_ptr<CodeobjMarkerAQLPacket>> loaded_codeobj;
 };

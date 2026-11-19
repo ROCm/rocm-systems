@@ -173,20 +173,27 @@ TEST(ThreadTraceQueueHooks, StopContextInFlightCompletionRoutesViaHookPath)
     auto packet_data            = hsa::packet_data_t{};
     packet_data.user_data.value = corr_id.internal;
     auto& inst_pkt              = packet_data.instrumentation_packets;
-    thread_trace::kernel_dispatch_phase_enter_hook(fq, pkt, 1, 1, {}, &corr_id, packet_data);
+    thread_trace::kernel_dispatch_phase_enter_hook(
+        fq, pkt, 1, 1, &packet_data.user_data, {}, &corr_id, inst_pkt, packet_data.is_serialized);
 
     ASSERT_FALSE(inst_pkt.empty())
         << "kernel_dispatch_phase_enter_hook must inject ATT control packet";
     EXPECT_GE(tracer.pending_post_moves(), 1);
+    EXPECT_TRUE(packet_data.is_serialized);
 
     ASSERT_EQ(rocprofiler_stop_context(ctx), ROCPROFILER_STATUS_SUCCESS);
     EXPECT_FALSE(thread_trace::is_any_active());
+    const auto agent_id   = att_agent->get_rocp_agent()->id;
+    auto*      controller = hsa::get_queue_controller();
+    EXPECT_TRUE(controller->is_serialization_enabled(agent_id));
 
     auto sess = std::make_shared<hsa::queue_info_session_t>(hsa::queue_info_session_t{.queue = fq});
     thread_trace::kernel_dispatch_phase_exit_hook(fq, pkt, sess, packet_data, inst_pkt, {});
 
     EXPECT_EQ(tracer.pending_post_moves(), 0)
         << "post_move_data must drain via kernel_dispatch_phase_exit_hook after stop_context";
+    inst_pkt.clear();
+    EXPECT_FALSE(controller->is_serialization_enabled(agent_id));
 
     registration::set_init_status(1);
     registration::finalize();
@@ -242,8 +249,15 @@ TEST(ThreadTraceQueueHooks, CompletionRoutingStaysWithTheProducingTracer)
         auto corr_id                  = context::correlation_id{};
         corr_id.internal              = static_cast<int64_t>(queue_id);
         data.dispatch.user_data.value = corr_id.internal;
-        thread_trace::kernel_dispatch_phase_enter_hook(
-            *data.queue, data.pkt, 1, 1, {}, &corr_id, data.dispatch);
+        thread_trace::kernel_dispatch_phase_enter_hook(*data.queue,
+                                                       data.pkt,
+                                                       1,
+                                                       1,
+                                                       &data.dispatch.user_data,
+                                                       {},
+                                                       &corr_id,
+                                                       data.dispatch.instrumentation_packets,
+                                                       data.dispatch.is_serialized);
         EXPECT_FALSE(data.dispatch.instrumentation_packets.empty());
 
         return data;
@@ -328,7 +342,8 @@ TEST(ThreadTraceQueueHooks, CompletionAfterResourceDeinitStillDrains)
     auto packet_data            = hsa::packet_data_t{};
     packet_data.user_data.value = corr_id.internal;
     auto& inst_pkt              = packet_data.instrumentation_packets;
-    thread_trace::kernel_dispatch_phase_enter_hook(fq, pkt, 1, 1, {}, &corr_id, packet_data);
+    thread_trace::kernel_dispatch_phase_enter_hook(
+        fq, pkt, 1, 1, &packet_data.user_data, {}, &corr_id, inst_pkt, packet_data.is_serialized);
 
     ASSERT_FALSE(inst_pkt.empty())
         << "kernel_dispatch_phase_enter_hook must inject ATT control packet";
@@ -339,11 +354,6 @@ TEST(ThreadTraceQueueHooks, CompletionAfterResourceDeinitStillDrains)
     // Tear down the agent map with the dispatch still outstanding.
     tracer.resource_deinit();
     EXPECT_TRUE(tracer.get_agents().empty());
-    auto [busy_status, busy_lease] = thread_trace::acquire_device_trace(
-        att_agent->get_rocp_agent()->id, rocprofiler_context_id_t{123});
-    EXPECT_EQ(busy_status, ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT);
-    EXPECT_EQ(busy_lease, nullptr);
-
     auto late_ctx = rocprofiler_context_id_t{};
     ASSERT_EQ(rocprofiler_create_context(&late_ctx), ROCPROFILER_STATUS_SUCCESS);
     ASSERT_EQ(rocprofiler_configure_device_thread_trace_service(
@@ -354,6 +364,10 @@ TEST(ThreadTraceQueueHooks, CompletionAfterResourceDeinitStillDrains)
                   [](rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t) {},
                   {}),
               ROCPROFILER_STATUS_SUCCESS);
+    auto* late = context::get_mutable_registered_context(late_ctx);
+    ASSERT_TRUE(late && late->device_thread_trace);
+    late->device_thread_trace->resource_init();
+    ASSERT_FALSE(late->device_thread_trace->get_agents().empty());
     EXPECT_EQ(rocprofiler_start_context(late_ctx), ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT);
     int active = -1;
     ASSERT_EQ(rocprofiler_context_is_active(late_ctx, &active), ROCPROFILER_STATUS_SUCCESS);
@@ -364,18 +378,7 @@ TEST(ThreadTraceQueueHooks, CompletionAfterResourceDeinitStillDrains)
 
     EXPECT_EQ(tracer.pending_post_moves(), 0)
         << "a completion racing resource_deinit() must still drain post_move_data";
-    auto [status, lease] = thread_trace::acquire_device_trace(att_agent->get_rocp_agent()->id,
-                                                              rocprofiler_context_id_t{123});
-    EXPECT_EQ(status, ROCPROFILER_STATUS_SUCCESS);
-    ASSERT_NE(lease, nullptr);
-    lease.reset();
-
     ASSERT_EQ(rocprofiler_start_context(late_ctx), ROCPROFILER_STATUS_SUCCESS);
-    auto* late = context::get_mutable_registered_context(late_ctx);
-    ASSERT_TRUE(late && late->device_thread_trace);
-    late->device_thread_trace->resource_init();
-    ASSERT_FALSE(late->device_thread_trace->get_agents().empty());
-    EXPECT_EQ(late->device_thread_trace->reserve_context(), ROCPROFILER_STATUS_SUCCESS);
     ASSERT_EQ(rocprofiler_stop_context(late_ctx), ROCPROFILER_STATUS_SUCCESS);
 
     registration::set_init_status(1);
@@ -383,7 +386,9 @@ TEST(ThreadTraceQueueHooks, CompletionAfterResourceDeinitStillDrains)
     context::pop_client(1);
 }
 
-TEST(ThreadTraceQueueHooks, StoppedContextDoesNotRequestUnownedSerialization)
+// A dispatch that reaches a stopping tracer must keep the SERIALIZE_ALL request, like any
+// untraced dispatch. This asserts the request a disabled tracer returns.
+TEST(ThreadTraceQueueHooks, StoppingContextKeepsSerializeAllRequest)
 {
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     test_init();
@@ -428,9 +433,9 @@ TEST(ThreadTraceQueueHooks, StoppedContextDoesNotRequestUnownedSerialization)
     corr_id.internal = 44;
     auto user_data   = rocprofiler_user_data_t{.value = corr_id.internal};
 
-    auto [packet, serialization] = tracer.pre_kernel_call(fq, 1, 1, &user_data, &corr_id);
+    auto [packet, serialize] = tracer.pre_kernel_call(fq, 1, 1, &user_data, &corr_id);
     EXPECT_FALSE(packet) << "a stopped tracer must not inject ATT packets";
-    EXPECT_FALSE(serialization) << "the request must not enable serialization on an idle agent";
+    EXPECT_TRUE(serialize) << "a stopping SERIALIZE_ALL tracer must keep requesting serialization";
     EXPECT_EQ(tracer.pending_post_moves(), 0);
 
     registration::set_init_status(1);

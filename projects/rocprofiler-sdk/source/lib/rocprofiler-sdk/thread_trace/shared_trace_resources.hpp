@@ -34,7 +34,6 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
-#include <optional>
 #include <utility>
 #include <vector>
 
@@ -57,7 +56,7 @@ clamp_shader_engine_mask(uint64_t mask, uint32_t num_shader_banks)
 }
 
 std::pair<rocprofiler_status_t, trace_lease_t>
-acquire_device_trace(rocprofiler_agent_id_t agent_id, rocprofiler_context_id_t context_id);
+acquire_device_trace(rocprofiler_agent_id_t agent_id);
 
 struct trace_resource_requirements_t
 {
@@ -88,6 +87,7 @@ public:
 
     att_queue_t& queue();
     void         close_submission_queue();
+    void         disable_unretired_trace();
 
     // Null when the KFD backend was unavailable and the queue fell back to ROCr.
     const std::shared_ptr<kfd_memory_pool_t>& kfd_memory() const;

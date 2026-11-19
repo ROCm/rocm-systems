@@ -149,9 +149,7 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
               drain_t                                         drain_fn            = {},
               query_clock_t                                   clock               = {},
               size_t                                          shader_engine_count = 1,
-              size_t                                          num_buffers        = MOCK_NUM_BUFFERS,
-              size_t                                          active_buffer_size = MOCK_BUFFER_SIZE,
-              size_t                                          staging_buffer_size = 0)
+              size_t                                          num_buffers = MOCK_NUM_BUFFERS)
 {
     // Build a synthetic queue + packet stack that mimics the runtime so we can
     // exercise the producer/consumer pairing without a real GPU.
@@ -178,7 +176,7 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
 
     auto params               = thread_trace_parameter_pack{};
     params.num_buffers        = num_buffers;
-    params.buffer_size        = active_buffer_size;
+    params.buffer_size        = MOCK_BUFFER_SIZE;
     params.shader_cb_fn       = cb_fn;
     params.callback_userdata  = userdata;
     params.shader_engine_mask = (uint64_t{1} << shader_engine_count) - 1;
@@ -189,11 +187,6 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
 
     // Each harness run wants its own queue, so drop whatever a previous one left behind.
     free_shared_trace_resources();
-    // Register the wider context first when asked, so the shared staging slots end up
-    // larger than the size this trace actually uses.
-    if(staging_buffer_size > active_buffer_size)
-        register_shared_trace_requirements(
-            agent_id, staging_buffer_size, num_buffers, params.shader_engine_mask);
     register_shared_trace_requirements(
         agent_id, params.buffer_size, params.num_buffers, params.shader_engine_mask);
 
@@ -685,56 +678,6 @@ TEST(thread_trace, data_integrity)
             expected++;
         }
     }
-}
-
-// Staging slots are sized for the largest context on the agent, so a trace has to copy
-// and report only the size it requested, not the slot capacity it borrows.
-TEST(thread_trace, active_buffer_size_below_shared_staging_capacity)
-{
-    using namespace rocprofiler::thread_trace;
-    test_init();
-
-    constexpr size_t ACTIVE_SIZE = MOCK_BUFFER_SIZE / 2;
-    constexpr size_t ENGINES     = 2;
-    constexpr auto   ALL_ENGINES = (uint64_t{1} << ENGINES) - 1;
-
-    auto received = std::atomic<uint64_t>{0};
-    auto fetch_cb = [](rocprofiler_thread_trace_shader_data_t shader_data,
-                       rocprofiler_user_data_t                userdata) {
-        if(shader_data.data_size == ACTIVE_SIZE)
-            static_cast<std::atomic<uint64_t>*>(userdata.ptr)
-                ->fetch_or(uint64_t{1} << shader_data.shader_engine_id);
-    };
-
-    auto input_buffer = std::vector<std::byte>(ACTIVE_SIZE);
-    auto queries      = std::atomic<size_t>{0};
-    auto query_once   = [&]() -> std::optional<rocprofiler::hsa::sqtt_buffer_status_t> {
-        if(queries.fetch_add(1) >= ENGINES) return std::nullopt;
-        auto status = rocprofiler::hsa::sqtt_buffer_status_t{};
-        status.data = input_buffer.data();
-        status.size = ACTIVE_SIZE;
-        return status;
-    };
-
-    auto userdata = rocprofiler_user_data_t{.ptr = &received};
-    auto threads  = start_threads(fetch_cb,
-                                 query_once,
-                                 userdata,
-                                 mock_submit,
-                                 {},
-                                 {},
-                                 ENGINES,
-                                 MOCK_NUM_BUFFERS,
-                                 ACTIVE_SIZE,
-                                 MOCK_BUFFER_SIZE);
-
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while(received.load() != ALL_ENGINES && std::chrono::steady_clock::now() < deadline)
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-
-    threads.flag->store(WORKER_FLAG_STOP);
-    threads.join_all();
-    EXPECT_EQ(received.load(), ALL_ENGINES);
 }
 
 TEST(thread_trace, slow_cpu)

@@ -249,7 +249,9 @@ producer_loop(
         buffer.cv.notify_one();
     };
 
-    auto stop_trace = [&]() {
+    // An early exit is safe for reuse only after the last START has been stopped.
+    bool trace_may_be_running = true;
+    auto stop_trace           = [&]() {
         ROCP_INFO << "Stopping the trace";
         if(!att_queue_submit(
                queue, &parameters.control_packet->after_krn_pkt.at(0), &submit_signal))
@@ -259,6 +261,7 @@ producer_loop(
             return false;
         }
         signal_wait(submit_signal);
+        trace_may_be_running = false;
         return true;
     };
 
@@ -337,6 +340,7 @@ producer_loop(
     buffers_requiring_swap.reserve(buffer_packets.size());
 
     auto finish = common::scope_destructor{[&] {
+        if(trace_may_be_running) resources.disable_unretired_trace();
         // Wake consumers on every exit; they drain filled slots before returning.
         parameters.shared->stopping.store(true);
         for(size_t i = 0; i < num_buffers; i++)
@@ -527,6 +531,7 @@ producer_loop(
             iterate_trace();
             send_header();
 
+            trace_may_be_running = true;
             if(!parameters.restart_trace(parameters.control_packet)) return;
             any_full = false;
             // Read each restarted engine's clock after the next query or final stop.

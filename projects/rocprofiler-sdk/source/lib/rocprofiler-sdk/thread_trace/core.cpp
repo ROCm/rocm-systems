@@ -301,7 +301,7 @@ ThreadTracerAgent::load_codeobj(code_object_id_t id, uint64_t addr, uint64_t siz
         // A device context may have started before this agent loaded any code objects.
         // Include the first code-object marker in the start packets and wait before
         // allowing the application's code-object load to finish.
-        if(worker_flag && worker_flag->load() == WORKER_FLAG_RUNNING)
+        if(device_lease && worker_flag && worker_flag->load() == WORKER_FLAG_RUNNING)
         {
             auto sig = start_thread_trace_locked();
             if(sig) signal_wait(*sig);
@@ -334,7 +334,7 @@ ThreadTracerAgent::reserve_device_trace()
 {
     auto lock = std::unique_lock{trace_resources_mut};
     if(device_lease) return ROCPROFILER_STATUS_SUCCESS;
-    auto [status, lease] = acquire_device_trace(agent_id, params.context_id);
+    auto [status, lease] = acquire_device_trace(agent_id);
     device_lease         = std::move(lease);
     return status;
 }
@@ -392,6 +392,16 @@ ThreadTracerAgent::start_thread_trace_locked()
                     std::make_unique<hsa::SQTTBufferingPackets>(control_packet->GetHandle(), i));
         }
     }
+    // Reserve completion signals before submitting any START packets.
+    auto start_signal = make_signal(queue);
+    if(!start_signal) return nullptr;
+    auto stop_signal = signal_ptr_t{};
+    if(params.num_buffers == 1)
+    {
+        stop_signal = make_signal(queue);
+        if(!stop_signal) return nullptr;
+    }
+
     auto control_packet_copy = get_control(true);
     control_packet_copy->populate_before();
     control_packet_copy->populate_after();
@@ -408,12 +418,14 @@ ThreadTracerAgent::start_thread_trace_locked()
     }
 
     // Submit without waiting so all agents can be started in parallel.
-    auto start_signal = att_queue_submit_signal_last(queue, control_packet_copy->before_krn_pkt);
-    if(!start_signal)
+    if(!att_queue_submit_packets(queue, control_packet_copy->before_krn_pkt, start_signal.get()))
     {
+        resources->disable_unretired_trace();
         active_traces.fetch_sub(1);
         return nullptr;
     }
+    device_stop_signal = std::move(stop_signal);
+    committed          = true;
     if(params.num_buffers > 1)
     {
         // Emit the optional buffer header first so consumers can prime state
@@ -470,7 +482,6 @@ ThreadTracerAgent::start_thread_trace_locked()
             internal_threading::notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
         }
     }
-    committed = true;
     return start_signal;
 }
 
@@ -493,6 +504,7 @@ ThreadTracerAgent::stop_thread_trace()
         worker_flag->compare_exchange_strong(expected, WORKER_FLAG_STOP);
 
         // agent_mut serializes lifecycle calls; the producer may lock resources while finishing.
+        if(!producer.joinable()) resources->disable_unretired_trace();
         lock.unlock();
         if(producer.joinable()) producer.join();
         for(auto& t : consumers)
@@ -512,7 +524,16 @@ ThreadTracerAgent::stop_thread_trace()
         // Submit without waiting; DeviceThreadTracer::stop_context fans out
         // submissions across agents and waits on every signal in parallel
         // before calling iterate_data.
-        return att_queue_submit_signal_last(resources->queue(), control_packet->after_krn_pkt);
+        if(device_stop_signal &&
+           att_queue_submit_packets(
+               resources->queue(), control_packet->after_krn_pkt, device_stop_signal.get()))
+            return std::move(device_stop_signal);
+
+        resources->disable_unretired_trace();
+        device_stop_signal.reset();
+        active_traces.fetch_sub(1);
+        device_lease.reset();
+        return nullptr;
     }
 }
 
@@ -593,28 +614,15 @@ public:
         CHECK_NOTNULL(hsa::get_queue_controller())->enable_serialization(m_agents);
     }
 
-    explicit dispatch_serialization_t(rocprofiler_agent_id_t agent_id)
-    : m_agents{agent_id}
-    , m_retained{CHECK_NOTNULL(hsa::get_queue_controller())->try_retain_serialization(agent_id)}
-    {}
-
-    static std::shared_ptr<dispatch_serialization_t> try_retain(rocprofiler_agent_id_t agent_id)
-    {
-        auto pin = std::make_shared<dispatch_serialization_t>(agent_id);
-        if(!pin->m_retained) return {};
-        return pin;
-    }
-
     ~dispatch_serialization_t()
     {
-        if(!m_retained || registration::get_fini_status() > 0) return;
+        if(registration::get_fini_status() > 0) return;
         if(auto* controller = hsa::get_queue_controller())
             controller->disable_serialization(m_agents);
     }
 
 private:
     std::unordered_set<rocprofiler_agent_id_t> m_agents;
-    bool                                       m_retained = true;
 };
 
 void
@@ -637,7 +645,7 @@ DispatchThreadTracer::resource_deinit()
  * Callback we get from HSA interceptor when a kernel packet is being enqueued.
  * We return an AQLPacket containing the start/stop/read packets for injection.
  */
-DispatchThreadTracer::dispatch_packet_t
+hsa::write_packet_t
 DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
                                       rocprofiler_kernel_id_t        kernel_id,
                                       rocprofiler_dispatch_id_t      dispatch_id,
@@ -662,31 +670,18 @@ DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
     auto&       agent      = *CHECK_NOTNULL(it->second);
     const auto& parameters = agent.params;
 
-    auto admission_lock = std::unique_lock{serialization_mut};
-    auto admission      = serialization;
-    if(!admission)
+    auto pin = std::shared_ptr<dispatch_serialization_t>{};
     {
-        if(!parameters.bSerialize) return {};
-        auto       pin      = draining_serialization.lock();
-        const auto agent_id = agent.agent_id;
-        admission_lock.unlock();
-        lk.unlock();
-        // A trace from another context may still own the serializer on this agent.
-        if(!pin) pin = dispatch_serialization_t::try_retain(agent_id);
-        return {nullptr, std::move(pin)};
+        auto lock = std::lock_guard{serialization_mut};
+        pin       = serialization;
     }
-    const auto generation = activation_generation;
-    admission_lock.unlock();
-
-    auto untraced = [&]() -> dispatch_packet_t {
-        return {nullptr, parameters.bSerialize ? std::move(admission) : nullptr};
-    };
+    if(!pin) return {nullptr, parameters.bSerialize};
 
     // Kernel-replay localized context control: a replay pass may disable this ATT context for the
     // pass -- skip the trace (but keep serialization) when it's forced off. No-op outside a replay
     // loop. See kernel_replay/local_context.hpp.
     if(auto ov = kernel_replay::local_context_override(parameters.context_id); ov && !*ov)
-        return untraced();
+        return {nullptr, parameters.bSerialize};
 
     auto control_flags = parameters.dispatch_cb_fn(queue.get_agent().get_rocp_agent()->id,
                                                    queue.get_id(),
@@ -696,20 +691,17 @@ DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
                                                    parameters.callback_userdata.ptr,
                                                    user_data);
 
-    // Only the activation that invoked the callback can admit a trace. SERIALIZE_ALL
-    // also protects previously admitted traces from kernels that won't be traced.
-    admission_lock.lock();
-    const bool active = serialization && generation == activation_generation;
-    admission_lock.unlock();
-    if(!active || control_flags == ROCPROFILER_THREAD_TRACE_CONTROL_NONE) return untraced();
+    if(control_flags == ROCPROFILER_THREAD_TRACE_CONTROL_NONE)
+        return {nullptr, parameters.bSerialize};
 
     auto packet = agent.get_start_packet();
-    if(!packet) return untraced();
+    if(!packet) return {nullptr, parameters.bSerialize};
     packet->SetOwner(tracer_id);
+    packet->retain_serialization(std::move(pin));
     post_move_data.fetch_add(1);
     packet->populate_before();
     packet->populate_after();
-    return {std::move(packet), std::move(admission)};
+    return {std::move(packet), true};
 }
 
 void
@@ -781,18 +773,11 @@ DispatchThreadTracer::start_context()
     auto lock  = std::unique_lock{serialization_mut};
     if(serialization) return;
 
-    // Reactivating the context shares the serializer with any work still draining.
-    // Trace admission still uses a distinct generation for each start.
-    owner = draining_serialization.lock();
-    if(!owner)
-    {
-        lock.unlock();
-        owner = std::make_shared<dispatch_serialization_t>(configured_agents());
-        lock.lock();
-        draining_serialization = owner;
-    }
-    ++activation_generation;
-    serialization.swap(owner);
+    // Take a reference without holding serialization_mut across the controller call.
+    lock.unlock();
+    owner = std::make_shared<dispatch_serialization_t>(configured_agents());
+    lock.lock();
+    if(!serialization) serialization.swap(owner);
 }
 
 void
@@ -885,7 +870,7 @@ DeviceThreadTracer::reserve_context()
             status = tracer->second->reserve_device_trace();
         else if(pending_leases.count(id) == 0)
         {
-            auto [result, lease] = acquire_device_trace(id, pack.context_id);
+            auto [result, lease] = acquire_device_trace(id);
             status               = result;
             if(lease) pending_leases.emplace(id, std::move(lease));
         }
@@ -957,17 +942,14 @@ DeviceThreadTracer::stop_context()
     int expected = WORKER_FLAG_RUNNING;
     if(auto flag = worker_flag) flag->compare_exchange_strong(expected, WORKER_FLAG_STOP);
 
-    auto wait_list = std::vector<signal_ptr_t>{};
-
+    auto wait_list = std::vector<std::pair<ThreadTracerAgent*, signal_ptr_t>>{};
     for(auto& [_, tracer] : agents)
-        wait_list.emplace_back(tracer->stop_thread_trace());
+        if(auto signal = tracer->stop_thread_trace())
+            wait_list.emplace_back(tracer.get(), std::move(signal));
 
-    // Wait on every agent's after-packets explicitly so iterate_data only runs
-    // once the GPU has drained the trace; mirrors start_context's parallel wait.
-    for(auto& sig : wait_list)
-        if(sig) signal_wait(*sig);
-
-    for(auto& [_, tracer] : agents)
+    for(auto& [_, signal] : wait_list)
+        signal_wait(*signal);
+    for(auto& [tracer, _] : wait_list)
         tracer->iterate_data();
     pending_leases.clear();
 }

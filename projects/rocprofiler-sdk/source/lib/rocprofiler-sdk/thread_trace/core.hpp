@@ -145,6 +145,7 @@ private:
     // Retained by every packet/worker that uses the shared queue or output slots.
     agent_trace_resources_ptr_t resources = {};
     trace_lease_t               device_lease{};
+    signal_ptr_t                device_stop_signal{};
 
     std::atomic<int> active_traces{0};
     std::mutex       trace_resources_mut{};
@@ -180,13 +181,11 @@ public:
 
     rocprofiler_status_t add_agent(rocprofiler_agent_id_t agent, thread_trace_parameter_pack pack);
 
-    using dispatch_packet_t = std::pair<AQLPacketPtr, std::shared_ptr<dispatch_serialization_t>>;
-
-    dispatch_packet_t pre_kernel_call(const hsa::Queue&              queue,
-                                      uint64_t                       kernel_id,
-                                      rocprofiler_dispatch_id_t      dispatch_id,
-                                      rocprofiler_user_data_t*       user_data,
-                                      const context::correlation_id* corr_id);
+    hsa::write_packet_t pre_kernel_call(const hsa::Queue&              queue,
+                                        uint64_t                       kernel_id,
+                                        rocprofiler_dispatch_id_t      dispatch_id,
+                                        rocprofiler_user_data_t*       user_data,
+                                        const context::correlation_id* corr_id);
 
     void        post_kernel_call(inst_pkt_t&                      aql,
                                  const hsa::queue_info_session_t& session,
@@ -211,8 +210,6 @@ private:
     std::atomic<int>                          post_move_data{0};
     std::mutex                                serialization_mut{};
     std::shared_ptr<dispatch_serialization_t> serialization{};
-    std::weak_ptr<dispatch_serialization_t>   draining_serialization{};
-    uint64_t                                  activation_generation{0};
 };
 
 class DeviceThreadTracer

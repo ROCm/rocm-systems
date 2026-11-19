@@ -93,7 +93,14 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
             &agents),
         "Failed to iterate agents");
 
-    auto configure_context = [&](rocprofiler_context_id_t context) {
+    const auto num_contexts = context_count();
+    for(size_t i = 0; i < num_contexts; ++i)
+    {
+        auto context = i == 0 ? client_ctx : rocprofiler_context_id_t{};
+        if(i != 0)
+        {
+            ROCPROFILER_CALL(rocprofiler_create_context(&context), "context creation");
+        }
         for(const auto* agent : agents)
         {
             auto parameters = std::vector<rocprofiler_thread_trace_parameter_t>{};
@@ -111,14 +118,6 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
                                  const_cast<rocprofiler_agent_v0_t*>(agent)),
                              "thread trace service configure");
         }
-    };
-    configure_context(client_ctx);
-
-    for(size_t i = 1; i < context_count(); ++i)
-    {
-        auto context = rocprofiler_context_id_t{};
-        ROCPROFILER_CALL(rocprofiler_create_context(&context), "context creation");
-        configure_context(context);
     }
 
     int valid_ctx = 0;

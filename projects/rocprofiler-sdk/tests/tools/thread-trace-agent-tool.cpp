@@ -35,10 +35,9 @@ namespace ATTTest
 {
 namespace Agent
 {
-rocprofiler_client_id_t*              client_id   = nullptr;
-rocprofiler_context_id_t              agent_ctx   = {};
-rocprofiler_context_id_t              tracing_ctx = {};
-std::vector<rocprofiler_context_id_t> extra_contexts{};
+rocprofiler_client_id_t* client_id   = nullptr;
+rocprofiler_context_id_t agent_ctx   = {};
+rocprofiler_context_id_t tracing_ctx = {};
 
 size_t
 context_count()
@@ -229,24 +228,19 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
                                                        nullptr),
         "dispatch tracing service configure");
 
-    ROCPROFILER_CALL(rocprofiler_query_available_agents(ROCPROFILER_AGENT_INFO_VERSION_0,
-                                                        &query_available_agents,
-                                                        sizeof(rocprofiler_agent_t),
-                                                        &agent_ctx),
-                     "Failed to find GPU agents");
-
     const auto num_contexts = context_count();
-    if(num_contexts > 1) extra_contexts.reserve(num_contexts - 1);
-    for(size_t i = 1; i < num_contexts; ++i)
+    for(size_t i = 0; i < num_contexts; ++i)
     {
-        auto context = rocprofiler_context_id_t{};
-        ROCPROFILER_CALL(rocprofiler_create_context(&context), "context creation");
+        auto context = i == 0 ? agent_ctx : rocprofiler_context_id_t{};
+        if(i != 0)
+        {
+            ROCPROFILER_CALL(rocprofiler_create_context(&context), "context creation");
+        }
         ROCPROFILER_CALL(rocprofiler_query_available_agents(ROCPROFILER_AGENT_INFO_VERSION_0,
                                                             &query_available_agents,
                                                             sizeof(rocprofiler_agent_t),
                                                             &context),
                          "Failed to find GPU agents");
-        extra_contexts.emplace_back(context);
     }
 
     int valid_ctx = 0;
