@@ -81,7 +81,7 @@ amd-smi --rocm-smi
 ```
 
 ```{note}
-For command-specific help, use `amd-smi [command] --help` for see more detailed
+For command-specific help, use `amd-smi [command] --help` to see more detailed
 usage information. See [Commands](#cmds).
 
 For more detailed version information, use `amd-smi version`.
@@ -90,7 +90,17 @@ To display GPU information in the legacy ROCm-SMI format, use `amd-smi --rocm-sm
 See [ROCm-SMI compatibility mode](#cli-ex-rocm-smi).
 ```
 
-Environment variables:
+### Selecting devices
+
+`--gpu`, `--cpu`, `--core`, and `--nic` accept space-separated or repeated
+selections without duplicates, preserving first-selected order (`--gpu 2 --gpu all`
+reports GPU 2 first). Comma-separated lists such as `--gpu=0,1` aren't supported.
+Repeating an option adds devices rather than narrowing an earlier selection, so
+`--gpu all --gpu 0` selects every GPU, including for `set` and `reset`.
+In `amd-smi set`, one value applies to every selected device; run separate commands
+for different values.
+
+### Environment variables
 
 You can set one or more variables in front of any `amd-smi` invocation. For example:
 
@@ -115,6 +125,8 @@ details for usage.
 ### amd-smi list
 
 Lists GPU information, including identifier kind and CUID provenance.
+
+`--gpu 2 --gpu all` keeps GPU 2 first; `--gpu 2 all` uses device enumeration order.
 
 #### CUID identity and compatibility
 
@@ -528,6 +540,29 @@ section that is only partly suppressed is still filtered, so `amd-smi metric
 nothing and `amd-smi metric --partition` filters exactly like plain `amd-smi
 metric`.
 
+#### NIC metrics
+
+`amd-smi metric --nic` reports NICs instead of GPUs. A bare `--nic` selects every NIC, or pass an
+ID, BDF or UUID. Each NIC shows a `TYPE` field (`AINIC`, `UALoE` or the vendor name, `N/A` when
+the type is unknown) next to its health state and port split.
+
+| Argument | Output |
+|---|---|
+| `--port [idx]` | Standard per-port counters. A bare `--port` shows every port. |
+| `--port [idx] --extended` | The catalogued vendor counters as well. `--extended` requires `--port`. |
+| `--rdma [idx]` | RDMA hardware counters per RDMA port. The index counts the NIC's RDMA ports from 0, across its RDMA devices. `static --nic` lists them. |
+| `--sensors` | Every temperature, voltage and power sensor of the NIC with its limits and alarm flags. |
+
+```shell-session
+~$ sudo amd-smi metric --nic 0 --port 0 --extended
+~$ sudo amd-smi metric --nic 0 --rdma --json
+~$ sudo amd-smi metric --nic 0 --sensors
+```
+
+`--port`, `--rdma` and `--sensors` are rejected without `--nic`. With `--nic`, the GPU and CPU
+metric arguments and the watch arguments (`--watch`, `--watch_time`, `--iterations`) are rejected
+too, because the NIC path prints once and never reads them.
+
 (cmd-process)=
 ### amd-smi process
 
@@ -745,8 +780,10 @@ Set Arguments:
                                               Set one of the following the accelerator TYPE or profile INDEX:
                                                 N/A.
                                                 Use `sudo amd-smi partition --accelerator` to find acceptable values.
-  -M, --memory-partition PARTITION            Set one of the following the memory partition modes:
+  -M, --memory-partition PARTITION            Set one of the following memory partition modes:
                                                 NPS1, NPS2, NPS4, NPS8
+                                                The mode applies at the next driver reload.
+                                                Setting the current mode cancels a pending change.
   -a, --compute-partition-mem-alloc-mode MODE Set compute partition memory allocation mode (requires sudo):
                                                 CAPPING - each XCP is capped to an even share of partition memory
                                                 ALL     - each XCP may use the full partition memory
@@ -842,6 +879,9 @@ Command Modifiers:
 Reset options for specified devices.
 
 ```{warning}
+
+* Repeated GPU options combine: `amd-smi reset --gpureset -g all -g 0`
+  resets every GPU, not just GPU 0. Remove `-g all` to target only GPU 0.
 
 * On systems with XGMI/Infinity Fabric (for example, AMD Instinct MI Series), resetting one
   GPU resets all GPUs in the same XGMI hive. Use `amd-smi xgmi` or `amd-smi topology` to find the XGMI link connected GPUs or check `/sys/class/drm/card*/device/xgmi_info/xgmi_hive_id` to identify GPUs having the same hive id, before issuing a reset.
@@ -1269,7 +1309,7 @@ information, GPU status, and running processes.
 ~$ amd-smi
 +------------------------------------------------------------------------------+
 | AMD-SMI            27.2.0                                                    |
-| amdgpu Version:    6.19.14.31400000-2370381                                  |
+| amdgpu Version:    6.19.4                                                    |
 | ROCm Version:      10.2.0                                                    |
 | Platform:          Linux Baremetal                                           |
 |-------------------------------------+----------------------------------------|
@@ -1444,7 +1484,7 @@ GPU: 0
         PTL_FORMAT: N/A
     DRIVER:
         NAME: amdgpu
-        VERSION: 6.19.14.31400000-2370381
+        VERSION: 6.19.4
         OS_KERNEL_VERSION: 5.15.0-generic
     BOARD:
         MODEL_NUMBER: N/A

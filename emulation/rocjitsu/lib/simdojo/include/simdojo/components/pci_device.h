@@ -97,6 +97,7 @@ struct BarSpec {
   bool is_64bit = false;            ///< True if this BAR is the low half of a 64-bit pair.
   int backing_fd = -1;              ///< Backing file descriptor, or negative to always trap.
   uint64_t fd_offset = 0;           ///< Offset into @ref backing_fd of the region base.
+  uint64_t backing_id = 0;          ///< Canonical backing identity, or zero when anonymous.
   std::vector<MmapArea> mmap_areas; ///< Directly mappable windows; empty means always trap.
 };
 
@@ -181,6 +182,13 @@ struct InterruptSpec {
 /// AtomicOp completion merely because it can forward ordinary DMA: software
 /// uses these bits to decide whether the device may issue atomic requests.
 struct PcieSpec {
+  /// PCIe link speed encoding (1=2.5, 2=5, 3=8, 4=16, 5=32 GT/s).
+  uint8_t max_link_speed = 1;
+  /// Maximum and currently negotiated link width, in lanes. Until a transport
+  /// supplies a negotiated link, status defaults to a valid Gen1 x1 link.
+  uint8_t max_link_width = 1;
+  uint8_t current_link_speed = 1;
+  uint8_t current_link_width = 1;
   bool atomic_completer_32 = false; ///< Completes 32-bit PCIe AtomicOps.
   bool atomic_completer_64 = false; ///< Completes 64-bit PCIe AtomicOps.
 };

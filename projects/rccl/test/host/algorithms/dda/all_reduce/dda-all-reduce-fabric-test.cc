@@ -66,13 +66,13 @@ class DdaAllReduceFabricMicrotest : public ::testing::Test {
     return ncclAllReduceDdaFabricEligible(mock_.get(), kSendbuff, kRecvbuff, count, datatype, op);
   }
 
-  ncclResult_t Run(size_t count, ncclDataType_t datatype = ncclFloat32) {
-    return ncclAllReduceDdaFabric(kSendbuff, kRecvbuff, count, datatype, ncclSum, mock_.get(), kStream);
+  ncclResult_t Run(size_t count, ncclDataType_t datatype = ncclFloat32, rcclDdaLaunchCap cap = {}) {
+    return ncclAllReduceDdaFabric(kSendbuff, kRecvbuff, count, datatype, ncclSum, mock_.get(), kStream, cap);
   }
 
-  const DdaLaunch& RunOne(size_t count, ncclDataType_t datatype = ncclFloat32) {
+  const DdaLaunch& RunOne(size_t count, ncclDataType_t datatype = ncclFloat32, rcclDdaLaunchCap cap = {}) {
     g_ddaLaunches.clear();
-    EXPECT_EQ(Run(count, datatype), ncclSuccess);
+    EXPECT_EQ(Run(count, datatype, cap), ncclSuccess);
     EXPECT_EQ(g_ddaLaunches.size(), 1u);
     return g_ddaLaunches.at(0);
   }
@@ -299,6 +299,41 @@ TEST_F(DdaAllReduceFabricMicrotest, Launch_GridMatchesBlocksAndCapsAtVmmBlocks) 
     EXPECT_EQ(launch.grid.x, c.blocks) << "count " << c.count;
     EXPECT_EQ(launch.block.x, c.threads) << "count " << c.count;
     EXPECT_EQ(ncclAllReduceDdaFabricBlocks(mock_.get(), c.count, c.datatype), c.blocks);
+  }
+}
+
+// The shared clamps: no cap keeps the grid, else at most the cap, threads in whole 64-thread granules floored at one.
+TEST_F(DdaAllReduceFabricMicrotest, CapClamps_StayWithinTheCapInWholeGranules) {
+  const struct {
+    uint32_t threads, cap, want;
+  } widths[] = {{512, 0, 512},   {256, 256, 256},  {256, 224, 192}, {256, 160, 128}, {512, 480, 448},
+                {1024, 992, 960}, {512, 4096, 512}, {512, 96, 64},   {512, 32, 64}};
+  for (const auto& w : widths) {
+    EXPECT_EQ(dda::common::ddaCapThreads(w.threads, w.cap), w.want) << w.threads << " threads, cap " << w.cap;
+  }
+  EXPECT_EQ(dda::common::ddaCapBlocks(128, 0), 128u);
+  EXPECT_EQ(dda::common::ddaCapBlocks(128, 46), 46u);
+  EXPECT_EQ(dda::common::ddaCapBlocks(5, 46), 5u);
+}
+
+// A call's cap bounds that launch's VMM grid and its reporter, threads in whole granules; the next call is uncapped.
+TEST_F(DdaAllReduceFabricMicrotest, Launch_CapBoundsThatLaunchOnly) {
+  g_rcclDdaFabricVmmBlocks = [](const ncclComm*) { return 256; };
+  constexpr size_t kCount = 1u << 18;
+  const struct {
+    size_t count;
+    rcclDdaLaunchCap cap;
+    unsigned blocks, threads;
+  } cases[] = {{kCount, {}, 128, 512},       {kCount, {46, 256}, 46, 256}, {kCount, {1000, 4096}, 128, 512},
+               {kCount, {0, 96}, 128, 64},   {kCount, {0, 160}, 128, 128}, {kCount, {0, 32}, 128, 64},
+               {kCount, {3, 192}, 3, 192},   {kCount, {0, 1}, 128, 64},    {1024, {}, 1, 256},
+               {1024, {0, 224}, 1, 192},     {1024, {0, 160}, 1, 128},     {kCount, {}, 128, 512}};
+  for (const auto& c : cases) {
+    SCOPED_TRACE(testing::Message() << "count=" << c.count << " cap={" << c.cap.blocks << "," << c.cap.threads << "}");
+    const DdaLaunch& launch = RunOne(c.count, ncclFloat32, c.cap);
+    EXPECT_EQ(launch.grid.x, c.blocks);
+    EXPECT_EQ(launch.block.x, c.threads);
+    EXPECT_EQ(ncclAllReduceDdaFabricBlocks(mock_.get(), c.count, ncclFloat32, c.cap), launch.grid.x * launch.grid.y);
   }
 }
 

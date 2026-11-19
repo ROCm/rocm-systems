@@ -128,7 +128,7 @@ get_sw_config(std::string_view _v)
         return sw_config::emulation_faults;
     }
 
-    throw std::runtime_error(fmt::format("Unknown perf hw cache config: {}", _v.data()));
+    throw std::runtime_error(fmt::format("Unknown perf software config: {}", _v.data()));
 
 #undef SW_CONFIG_REGEX
 
@@ -174,7 +174,7 @@ get_hw_cache_config(std::string_view _v)
     else
     {
         throw std::runtime_error(
-            fmt::format("Unknown perf software config: {}", _v.data()));
+            fmt::format("Unknown perf hw cache config: {}", _v.data()));
     }
 
 #undef HW_CACHE_CONFIG_REGEX

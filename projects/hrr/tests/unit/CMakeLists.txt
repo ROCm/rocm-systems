@@ -11,6 +11,7 @@
 
 add_executable(hrr-unit-tests
   hrr_format_test.cc
+  hrr_host_rect_test.cc
   hrr_limits_test.cc
   hrr_recovery_test.cc
   hrr_repair_test.cc
@@ -45,6 +46,7 @@ find_package(Threads REQUIRED)
 
 target_link_libraries(hrr-unit-tests PRIVATE
   hrr::reader
+  hrr::warnings
   hip::host
   Threads::Threads
   Catch2::Catch2WithMain)
@@ -103,7 +105,13 @@ if(TARGET hrr-playback AND NOT WIN32)
     hrr_refusals_test.cc
     hrr_blob_refusal_test.cc
     hrr_access_policy_window_test.cc
+    hrr_capture_state_test.cc
     hrr_unmapped_note_test.cc
+    hrr_symbol_copy_bounds_test.cc
+    hrr_unregister_fail_test.cc
+    hrr_snapshot_order_test.cc
+    hrr_kernel_args_signature_test.cc
+    hrr_memcpy3d_array_test.cc
   )
 
   add_executable(hrr-handler-tests
@@ -122,7 +130,7 @@ if(TARGET hrr-playback AND NOT WIN32)
     __HIP_PLATFORM_AMD__)
   find_package(Threads REQUIRED)
   target_link_libraries(hrr-handler-tests PRIVATE
-    hrr::reader hip::host Threads::Threads Catch2::Catch2WithMain)
+    hrr::reader hrr::warnings hip::host Threads::Threads Catch2::Catch2WithMain)
   if(HRR_HANDLER_TESTS_ASAN AND NOT WIN32)
     target_compile_options(hrr-handler-tests PRIVATE -fsanitize=address -fno-omit-frame-pointer)
     target_link_options(hrr-handler-tests PRIVATE -fsanitize=address)

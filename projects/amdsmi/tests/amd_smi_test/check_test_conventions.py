@@ -15,12 +15,10 @@ from it. Run manually:
     python3 projects/amdsmi/tests/amd_smi_test/check_test_conventions.py
 """
 
-from __future__ import annotations
-
 import re
 import sys
-from collections.abc import Iterator
 from pathlib import Path
+from typing import Dict, Iterator, List, Optional, Tuple
 
 # --------------------------------------------------------------------------- #
 # Configuration — edit these to evolve the conventions.
@@ -56,7 +54,7 @@ def _pascal(component: str) -> str:
     return "Ifoe" if component == "ifoe" else component.capitalize()
 
 
-def expected_suites(tier: str, component: str) -> list[str]:
+def expected_suites(tier: str, component: str) -> List[str]:
     """Suite name(s) a test under ``<tier>/<component>/`` is allowed to use."""
     prefix = _pascal(component)
     if tier == "unit":
@@ -84,7 +82,7 @@ def _strip_comments(text: str) -> str:
     return re.sub(r"//[^\n]*", "", text)
 
 
-def _suites_in(path: Path) -> list[str]:
+def _suites_in(path: Path) -> List[str]:
     """GTest suite names registered via TEST()/TEST_F() in a source file."""
     return _TEST_MACRO_RE.findall(_strip_comments(path.read_text(errors="replace")))
 
@@ -101,7 +99,7 @@ def _bad_pattern(path: Path, suite: str) -> str:
 # --------------------------------------------------------------------------- #
 
 
-def _iter_tier_sources() -> Iterator[tuple[str, str | None, Path]]:
+def _iter_tier_sources() -> Iterator[Tuple[str, Optional[str], Path]]:
     """Yield (tier, component, path) for every .cc under unit/ and functional/.
 
     ``component`` is None when the file sits loose directly under the tier dir.
@@ -116,7 +114,7 @@ def _iter_tier_sources() -> Iterator[tuple[str, str | None, Path]]:
             yield tier, component, path
 
 
-def _check_layout_and_naming(tier: str, component: str | None, path: Path) -> Iterator[str]:
+def _check_layout_and_naming(tier: str, component: Optional[str], path: Path) -> Iterator[str]:
     """Placement (component subdir) and file-name (_test.cc) rules."""
     if component is None:
         yield (
@@ -142,7 +140,7 @@ def _check_layout_and_naming(tier: str, component: str | None, path: Path) -> It
         )
 
 
-def _check_suites(tier: str, component: str | None, path: Path) -> Iterator[str]:
+def _check_suites(tier: str, component: Optional[str], path: Path) -> Iterator[str]:
     """GTest suite-name rules for a test source file."""
     suites = _suites_in(path)
 
@@ -163,7 +161,7 @@ def _check_suites(tier: str, component: str | None, path: Path) -> Iterator[str]
                 )
 
 
-def _main_cc_tests() -> Iterator[tuple[str, str]]:
+def _main_cc_tests() -> Iterator[Tuple[str, str]]:
     """Yield ``(suite, body)`` for each TEST()/TEST_F() block in main.cc.
 
     Comments are stripped first (so disabled/example tests are ignored), and
@@ -186,13 +184,13 @@ def _check_main_cc() -> Iterator[str]:
             yield _bad_pattern(TEST_ROOT / "main.cc", suite)
 
 
-def _functional_fixture_components() -> dict[str, str]:
+def _functional_fixture_components() -> Dict[str, str]:
     """Map each functional fixture class to its component directory.
 
     Reads every header under ``functional/<component>/…``; each declares one
     ``class <Fixture> : public TestBase``.
     """
-    components: dict[str, str] = {}
+    components: Dict[str, str] = {}
     functional = TEST_ROOT / "functional"
     if not functional.is_dir():
         return components
@@ -206,7 +204,7 @@ def _functional_fixture_components() -> dict[str, str]:
     return components
 
 
-def _fixture_instantiated(body: str, fixtures: dict[str, str]) -> str | None:
+def _fixture_instantiated(body: str, fixtures: Dict[str, str]) -> Optional[str]:
     """Return the fixture class a TEST body instantiates (``TestFoo tst;``)."""
     for fixture in fixtures:
         if re.search(rf"\b{re.escape(fixture)}\s+\w+\s*;", body):
@@ -252,9 +250,9 @@ def _check_stray_test_files() -> Iterator[str]:
             )
 
 
-def collect_violations() -> list[str]:
+def collect_violations() -> List[str]:
     """Run every check and return all violation messages."""
-    violations: list[str] = []
+    violations: List[str] = []
     for tier, component, path in _iter_tier_sources():
         violations += _check_layout_and_naming(tier, component, path)
         violations += _check_suites(tier, component, path)
