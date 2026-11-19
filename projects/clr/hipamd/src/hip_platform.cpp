@@ -720,7 +720,7 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
                                      device->info().maxGridDim_, 0, 0, 0, clusterDim.x,
                                      clusterDim.y, clusterDim.z, clusterDimsSpecified);
   if (!launch_params.IsValidConfig()) {
-    return hipErrorInvalidConfiguration;
+    return hipErrorInvalidValue;
   }
 
   return ihipModuleLaunchKernel(func, launch_params, stream, args, nullptr, startEvent, stopEvent,

@@ -141,7 +141,7 @@ hipError_t ihipGraphAddKernelNode(
                                      globalWorkSizeY_remainder, globalWorkSizeZ_remainder,
                                      clusterDim.x, clusterDim.y, clusterDim.z);
   if (!launch_params.IsValidConfig()) {
-    return hipErrorInvalidConfiguration;
+    return hipErrorInvalidValue;
   }
   hipError_t status = ihipLaunchKernel_validate(func, launch_params, pNodeParams->kernelParams,
                                                 pNodeParams->extra, deviceId, coopKernel);

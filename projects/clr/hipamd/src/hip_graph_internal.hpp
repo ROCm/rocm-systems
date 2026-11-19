@@ -2211,7 +2211,7 @@ class GraphKernelNode : public GraphNode {
                                          globalWorkSizeZ_remainder_, clusterDim.x, clusterDim.y,
                                          clusterDim.z);
       if (!launch_params.IsValidConfig()) {
-        return hipErrorInvalidConfiguration;
+        return hipErrorInvalidValue;
       }
       clusterDim_ = clusterDim;
       clusterDimsSpecified_ = true;
@@ -2293,7 +2293,7 @@ class GraphKernelNode : public GraphNode {
                                        clusterDim.x, clusterDim.y, clusterDim.z);
 
     if (!launch_params.IsValidConfig()) {
-      HIP_RETURN(hipErrorInvalidConfiguration);
+      HIP_RETURN(hipErrorInvalidValue);
     }
 
     hipError_t status = ihipLaunchKernel_validate(func, launch_params, pNodeParams->kernelParams,

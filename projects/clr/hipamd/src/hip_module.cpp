@@ -868,7 +868,7 @@ hipError_t hipExtModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
 
   if (!launch_params.IsValidConfig() ||
        launch_params.local_.product() > device->info().maxWorkGroupSize_) {
-    HIP_RETURN(hipErrorInvalidConfiguration);
+    HIP_RETURN(hipErrorInvalidValue);
   }
 
   if (sharedMemBytes > device->info().localMemSizePerCU_) {
@@ -1050,7 +1050,7 @@ hipError_t ihipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams*
                                        device.info().maxGridDim_, 0, 0, 0, 1, 1, 1);
 
     if (!launch_params.IsValidConfig()) {
-      return hipErrorInvalidConfiguration;
+      return hipErrorInvalidValue;
     }
 
     result = ihipModuleLaunchKernel(launch.function, launch_params, launch.hStream,
@@ -1185,7 +1185,7 @@ hipError_t hipLaunchCooperativeKernel_common(const void* f, dim3 gridDim, dim3 b
 
   if (!launch_params.IsValidConfig() ||
       launch_params.local_.product() > device->info().maxWorkGroupSize_) {
-    return hipErrorInvalidConfiguration;
+    return hipErrorInvalidValue;
   }
 
   if (sharedMemBytes > device->info().localMemSizePerCU_) {
@@ -1651,7 +1651,7 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
                                      drvDevice->info().maxGridDim_, 0, 0, 0, 1, 1, 1);
 
   if (!launch_params.IsValidConfig()) {
-    HIP_RETURN(hipErrorInvalidConfiguration);
+    HIP_RETURN(hipErrorInvalidValue);
   }
 
   if (config->numAttrs == 0) {
