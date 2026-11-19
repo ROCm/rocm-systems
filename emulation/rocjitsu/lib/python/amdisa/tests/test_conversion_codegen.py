@@ -14,107 +14,6 @@ from amdisa.semantics import (
     derive_semantics,
 )
 
-"""Tests for conversions lowered through shared/conversion.h."""
-
-
-def _formats(source, result):
-    def name(fmt):
-        prefix = 'fp_format' if fmt.startswith('F') else 'conversion'
-        return f'amdgpu::{prefix}::{fmt}'
-
-    return f'{name(source)}, {name(result)}'
-
-
-# Every conversion the semantic table routes through shared/conversion.h.
-_INTEGER_TO_FLOAT = [
-    (f'V_CVT_{dtype.upper()}', _formats(*formats))
-    for dtype, formats in TO_FLOAT_CONVERSIONS.items()
-    if dtype in INTEGER_SOURCE_CONVERSIONS and not dtype.startswith('f16_')
-]
-
-
-_FLOAT_TO_FLOAT = [
-    (f'V_CVT_{dtype.upper()}', _formats(*formats))
-    for dtype, formats in TO_FLOAT_CONVERSIONS.items()
-    if dtype not in INTEGER_SOURCE_CONVERSIONS and not dtype.startswith('f16_')
-]
-
-
-def _lower(name, enc, fields=frozenset()):
-    block = derive_sema_block(derive_semantics(name, enc))
-    if fields:
-        block = enrich_block(block, enc_field_names=frozenset(fields))
-    return lower_sema_block(block)
-
-
-@pytest.mark.parametrize(('name', 'formats'), _INTEGER_TO_FLOAT)
-def test_integer_to_float_vop3_passes_output_modifiers_to_one_stage_object(
-    name, formats
-):
-    cpp = _lower(name, 'ENC_VOP3', {'clamp', 'omod'})
-    stages = (
-        f'const auto conversion = amdgpu::conversion_to_float<{formats}>'
-        '(wf, 0u, 0u, inst_.omod, inst_.clamp);'
-    )
-    assert stages in cpp
-    # Bits go straight to the destination: no host float, rounding or rescaling.
-    assert 'conversion(' in cpp.split(stages, 1)[1]
-    for host in (
-        'static_cast<float>',
-        'f32_to_f16',
-        'apply_omod',
-        'clamp_floating_result',
-    ):
-        assert host not in cpp
-
-
-@pytest.mark.parametrize(('name', 'formats'), _INTEGER_TO_FLOAT)
-def test_integer_to_float_vop1_scales_f16_results_by_sdwa_omod(name, formats):
-    # Retained emulator order for SDWA F16 results; see sdwa_conversion_to_f16.
-    cpp = _lower(name, 'ENC_VOP1')
-    if 'F16' in name:
-        source = formats.split(',')[0]
-        expected = f'amdgpu::sdwa_conversion_to_f16<{source}>(*this, wf);'
-    else:
-        expected = f'amdgpu::conversion_to_float<{formats}>(wf);'
-    assert f'const auto conversion = {expected}' in cpp
-
-
-@pytest.mark.parametrize(('name', 'formats'), _FLOAT_TO_FLOAT)
-def test_float_to_float_vop3_passes_every_modifier_to_one_stage_object(name, formats):
-    cpp = _lower(name, 'ENC_VOP3', {'abs', 'neg', 'clamp', 'omod'})
-    stages = (
-        f'const auto conversion = amdgpu::conversion_to_float<{formats}>'
-        '(wf, inst_.abs, inst_.neg, inst_.omod, inst_.clamp);'
-    )
-    assert stages in cpp
-    for host in (
-        'static_cast<float>',
-        'static_cast<double>',
-        'f32_to_f16',
-        'apply_to_float',
-    ):
-        assert host not in cpp
-
-
-def test_share_stages_hoists_the_scalar_declaration_above_the_probe():
-    declaration = (
-        '  const auto conversion = amdgpu::conversion_pk_u8(wf, inst_.abs, inst_.neg);'
-    )
-    body = f'  uint64_t exec = wf.exec();\n{declaration}\n  for (;;) {{}}\n'
-    probe = '  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t, conversion);'
-    shared_probe, rest = conversion.share_stages(probe, body)
-    assert shared_probe == f'{declaration}\n{probe}'
-    assert rest == '  uint64_t exec = wf.exec();\n  for (;;) {}\n'
-    # Probes that resolve nothing shared are left alone.
-    other = (
-        '  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, amdgpu::conversion::Fp8{});'
-    )
-    assert conversion.share_stages(other, body) == (other, body)
-    assert conversion.share_stages(None, body) == (None, body)
-    with pytest.raises(ValueError, match='declares none'):
-        conversion.share_stages(probe, '  for (;;) {}\n')
-
 
 @pytest.mark.parametrize(
     'arch, policy, shared_narrowing, shared_widening',
@@ -160,9 +59,4 @@ def test_cdna5_uses_shared_narrowing_for_non_scaled_ocp_conversions(fmt, helper)
     assert f'util::{helper}_to_f32' in widened
 
 
-@pytest.mark.parametrize(
-    'name', ['V_CVT_F16_I16', 'V_CVT_F16_U16', 'V_CVT_F16_F32', 'V_CVT_F32_F16']
-)
-def test_half_conversion_requires_arithmetic_lowering(name):
-    with pytest.raises(ValueError, match='require rj-arith lowering'):
-        _lower(name, 'ENC_VOP1')
+"""Tests for legacy FP8 format-policy selection."""

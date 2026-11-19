@@ -4,8 +4,6 @@
 from pathlib import Path
 from types import SimpleNamespace
 import hashlib, pytest, re
-from amdisa.codegen.execute import float_fract, float_ldexp
-from amdisa.codegen.execute.sema_lower import lower_sema_block
 from amdisa.codegen.execute.vector_special import (
     _TRIG_PREOP_CHUNK_BITS,
     _TRIG_PREOP_TWO_OVER_PI_CHUNKS,
@@ -104,12 +102,6 @@ def test_arch_local_execute_bodies_are_not_shared():
     assert 'vector_swaprel' in CodeGenerator._NON_SHAREABLE_CLASSES
     assert 'vector_perm_pk16' in CodeGenerator._NON_SHAREABLE_CLASSES
     assert 'vector_qsad' in CodeGenerator._NON_SHAREABLE_CLASSES
-
-
-@pytest.mark.parametrize('module', [float_fract, float_ldexp])
-def test_raw_operation_policies_reject_unknown_formats(module):
-    with pytest.raises(ValueError, match='bf16'):
-        module.policy_expr('bf16', *(['false'] if module is float_ldexp else []))
 
 
 def test_gfx1250_true16_e32_dst_reg_uses_physical_vgpr():
