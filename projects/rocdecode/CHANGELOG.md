@@ -7,6 +7,7 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 ### Added
 
 * Reference MD5 digests of the planar YUV 4:2:0 decoded output for the AVC, HEVC, AV1 and VP9 test streams, installed to `share/rocdecode/md5`. The `video_decode-AVC`, `video_decode-HEVC`, `video_decode-AV1`, `video_decode-VP9` and `video_decodeMem-HEVC` CTests now pass them to the samples' `-md5_check` option, so a test fails when the decoded output doesn't match its reference.
+* A `--mem-type` option for the `perf_regression.py` performance check and the `/perf-check` skill, which measures decode FPS with any output surface memory type and compares the copied and mapped modes against a local per-GPU baseline recorded with the new `--save-baseline` option.
 
 ### Resolved issues
 
