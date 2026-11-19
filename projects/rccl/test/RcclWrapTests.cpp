@@ -2539,6 +2539,61 @@ TEST(Rcclwrap, AdjustChannels_Gfx950SingleNode8Ranks_MainColl_NoDouble)
     );
 }
 
+// NCCL_MAX_NRINGS caps channels like NCCL_MAX_NCHANNELS: rcclWarpSpeedComputeNChannels
+// skipped its halving (ncclMaxNchannels() != MAXCHANNELS), so the doubling must be
+// skipped too. 16 rings * multiplier 4 = 64 -> 64/4 = 16.
+TEST(Rcclwrap, AdjustChannels_Gfx950SingleNode8Ranks_MaxNringsSkipsDoubling)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AdjustChannels_Gfx950SingleNode8Ranks_MaxNringsSkipsDoubling",
+        []()
+        {
+            ncclComm_t            comm = nullptr;
+            auto                  topo = std::make_unique<ncclTopoSystem>();
+            struct ncclTopoNode   gpu;
+            CreateMockComm(comm, *topo, gpu, "gfx950", /*nRanks=*/8);
+            comm->nNodes                     = 1;
+            comm->topo->warpSpeedEnabled     = true;
+            comm->warpSpeedChannelMultiplier = 4;
+
+            ncclTaskColl info = {};
+            info.func         = ncclFuncBroadcast;
+
+            EXPECT_EQ(rcclWarpSpeedAdjustChannels(comm, &info, /*nc=*/64), 16);
+
+            CleanupMockComm(comm);
+        },
+        {{"NCCL_MAX_NRINGS", "16"}}
+    );
+}
+
+// NCCL_MAX_NCHANNELS=MAXCHANNELS leaves ncclMaxNchannels() at its default, so the
+// halving ran and the doubling must restore it: 32/4 = 8, *2 = 16.
+TEST(Rcclwrap, AdjustChannels_Gfx950SingleNode8Ranks_MaxNchannelsAtDefaultKeepsDoubling)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AdjustChannels_Gfx950SingleNode8Ranks_MaxNchannelsAtDefaultKeepsDoubling",
+        []()
+        {
+            ncclComm_t            comm = nullptr;
+            auto                  topo = std::make_unique<ncclTopoSystem>();
+            struct ncclTopoNode   gpu;
+            CreateMockComm(comm, *topo, gpu, "gfx950", /*nRanks=*/8);
+            comm->nNodes                     = 1;
+            comm->topo->warpSpeedEnabled     = true;
+            comm->warpSpeedChannelMultiplier = 4;
+
+            ncclTaskColl info = {};
+            info.func         = ncclFuncBroadcast;
+
+            EXPECT_EQ(rcclWarpSpeedAdjustChannels(comm, &info, /*nc=*/32), 16);
+
+            CleanupMockComm(comm);
+        },
+        {{"NCCL_MAX_NCHANNELS", std::to_string(MAXCHANNELS)}}
+    );
+}
+
 #endif // ENABLE_WARP_SPEED
 
 // Builds a mock comm that satisfies every CE AllReduce eligibility rule except
