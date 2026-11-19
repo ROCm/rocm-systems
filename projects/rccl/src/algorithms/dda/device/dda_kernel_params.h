@@ -5,6 +5,8 @@
  * observe comm->abortFlagDev via ncclShmem; DDA kernels are standalone and
  * take it in a DdaKernelParams argument (or via FabricGpuBarrier /
  * IpcGpuBarrier) so ncclCommRevoke can unblock an incomplete collective.
+ * The barrier waits poll it only on gfx1250 (kDdaWaitPollsAbort); DDA IPC
+ * on gfx942/gfx950 does not.
  *
  * See LICENSE.txt for license information.
  ************************************************************************/
