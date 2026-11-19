@@ -141,10 +141,15 @@ enum InstFlags : uint64_t {
   /// @brief The memory result requires one additional allocated VGPR which it never writes.
   /// A dropped texture fetch with TFE and no LWE checks this slot at issue.
   RESERVES_UNWRITTEN_VGPR = (1ULL << 39),
+  /// Ordinary indexed GFX11 GDS reads inputs and writes results in the first active lane.
+  FIRST_ACTIVE_MEMORY_LANE = (1ULL << 40),
   /// Global transpose addresses come from lanes 0-31. Each wave64 lane gets half the encoded width.
   COMPACT_WAVE64_MEMORY_RESULT = (1ULL << 41),
   /// Global load-transpose instructions acquire no register operands when EXEC is zero.
   GLOBAL_TRANSPOSE_LOAD = (1ULL << 43),
+  /// The decoded VDATA tuple includes a trailing allocation-only status word.
+  /// RESERVES_UNWRITTEN_VGPR instead extends the decoded tuple for allocation.
+  INCLUDES_UNWRITTEN_LAST_VGPR = (1ULL << 42),
   /// CDNA5 packed widening disallows overlap after applying each operand's VGPR bank.
   CHECK_CVT_SCALE_OVERLAP = (1ULL << 45),
   /// CDNA5 Table 37 reserves FP8/BF8 scale selectors 12..15.
@@ -407,6 +412,8 @@ public:
   RegisterRef wave_sized_destination(const Operand &op, RegisterRef ref, uint8_t wave_size) const {
     if (ref.cls == RegClass::VGPR && wave_size == 64 && (flags_ & COMPACT_WAVE64_MEMORY_RESULT))
       ref.width /= 2;
+    if (ref.cls == RegClass::VGPR && (flags_ & INCLUDES_UNWRITTEN_LAST_VGPR))
+      --ref.width;
     return wave_sized_register(op, ref, wave_size);
   }
 
@@ -565,9 +572,10 @@ protected:
 
   void
   set_memory_issue_info(std::initializer_list<amdgpu::MemoryCounterObligation> counter_obligations,
-                        bool exec_masked = true) {
+                        bool exec_masked = true, bool counts_with_empty_exec = false) {
     memory_issue_info_ = {};
     memory_issue_info_.exec_masked = exec_masked;
+    memory_issue_info_.counts_with_empty_exec = counts_with_empty_exec;
     for (const auto obligation : counter_obligations) {
       if (!obligation.valid())
         continue;

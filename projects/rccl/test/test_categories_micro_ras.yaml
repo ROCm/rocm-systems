@@ -18,10 +18,12 @@ test_categories:
       - "RasDiagnosticsPciIsolatedTest.*"
       - "RasDiagnosticsPciMicrotest.*"
       - "RasDiagnosticsMicrotest.*"
+      - "RasDiagnosticsXid*"
       - "RasMicrotest.*"
       - "RasNetMicrotest.*"
       - "RasParamMicrotest.*"
       - "RasPeersMicrotest.*"
+      - "RasProgressMonitorMicrotest.*"
     exclude_windows:
       - "*"
     labels:

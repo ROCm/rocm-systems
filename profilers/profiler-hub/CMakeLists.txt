@@ -482,8 +482,11 @@ file(
     DESTINATION ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-set(CMAKE_EXPORT_PACKAGE_REGISTRY ON)
-export(PACKAGE ${PACKAGE_NAME})
+# Registry entries are for standalone builds; a parent project's build must not write one.
+if(PROJECT_IS_TOP_LEVEL)
+    set(CMAKE_EXPORT_PACKAGE_REGISTRY ON)
+    export(PACKAGE ${PACKAGE_NAME})
+endif()
 
 # ------------------------------------------------------------ #
 # Clang-Tidy Custom Target

@@ -110,8 +110,8 @@ __device__ __forceinline__ void quiet(SdmaQueueDeviceHandle& handle) {
   uint64_t* observed = g_sdmaStubObserveDirtyOnQuiet;
   if (observed != nullptr) {
     atomicOr(&g_sdmaStubDirtyAtQuiet,
-             static_cast<unsigned long long>(__hip_atomic_load(observed, __ATOMIC_RELAXED,
-                                                               __HIP_MEMORY_SCOPE_AGENT)));
+             static_cast<unsigned long long>(
+               __scoped_atomic_load_n(observed, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE)));
   }
   uint64_t* dirty = g_sdmaStubMarkDirtyOnQuiet;
   if (dirty != nullptr) {
@@ -121,7 +121,7 @@ __device__ __forceinline__ void quiet(SdmaQueueDeviceHandle& handle) {
   // Hold only the first quieter so a second CTA can race Flush without also
   // parking inside quiet() and deadlocking on the same release flag.
   if (g_sdmaStubHoldQuiet != 0 && entry == 0) {
-    while (__hip_atomic_load(&g_sdmaStubReleaseQuiet, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT) == 0) {
+    while (__scoped_atomic_load_n(&g_sdmaStubReleaseQuiet, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE) == 0) {
     }
   }
 }

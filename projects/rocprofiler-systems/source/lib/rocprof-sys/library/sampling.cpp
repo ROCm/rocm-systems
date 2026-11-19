@@ -132,13 +132,6 @@ namespace
 {
 using sampler_allocator_t = sampler_t::allocator_t;
 
-template <typename Category>
-inline std::string
-get_category_track_name(std::uint64_t tid)
-{
-    return std::string(trait::name<Category>::value) + "_" + std::to_string(tid);
-}
-
 std::string
 generate_call_stack_json(const tim::unwind::processed_entry& stack_entry)
 {
