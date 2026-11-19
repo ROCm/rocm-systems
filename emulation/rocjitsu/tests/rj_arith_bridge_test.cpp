@@ -10756,8 +10756,9 @@ TEST(ArithBridgeTest, CdnaFp8Narrowing) {
                              0x7fc12345U, 0xff800001U, 0x3f880001U, 0xbf980000U,
                              0x3b000001U, 0x37800001U, 0x43e80000U, 0x47700000U,
                              0x43780000U, 0x80000001U, 0x3f800000U, 0x7f7fffffU};
-  // OCP bytes for inputs[] after ABS+NEG: [BF8][saturate][RNE/SR-zero/SR-ones][input].
-  // The two SR methods distinguish zero/all-ones seed addition from nearest rounding.
+  // gfx950/gfx1250 OCP bytes for inputs[] after ABS+NEG:
+  // [BF8][saturate][RNE/SR-zero/SR-ones][input]. The two SR methods distinguish zero/all-ones seed
+  // addition from nearest rounding.
   // clang-format off
   constexpr uint8_t ocp[2][2][3][16] = {
       {
@@ -10858,17 +10859,9 @@ TEST(ArithBridgeTest, CdnaFp8Narrowing) {
             }
             raw = (raw & 0x7fffffffU) | 0x80000000U; // ABS then NEG on each FP source.
             value = std::bit_cast<float>(raw);
-            if (arch == rocjitsu::IsaFamily::Cdna5) {
+            if (arch == rocjitsu::IsaFamily::Cdna4 || arch == rocjitsu::IsaFamily::Cdna5) {
               EXPECT_TRUE(!sr || seed == 0 || seed == UINT32_MAX);
               return ocp[bf8][saturate][sr ? (seed ? 2 : 1) : 0][input_index];
-            }
-            if (arch == rocjitsu::IsaFamily::Cdna4) {
-              if (bf8) {
-                return sr ? conversion::encode_fp8_stochastic<conversion::Bf8>(raw, seed, saturate)
-                          : conversion::encode_fp8<conversion::Bf8>(raw, saturate);
-              }
-              return sr ? conversion::encode_fp8_stochastic<conversion::Fp8>(raw, seed, saturate)
-                        : conversion::encode_fp8<conversion::Fp8>(raw, saturate);
             }
             if (arch == rocjitsu::IsaFamily::Cdna3) {
               if (bf8) {
