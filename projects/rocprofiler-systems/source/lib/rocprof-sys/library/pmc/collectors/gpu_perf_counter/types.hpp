@@ -33,6 +33,9 @@ struct counter_value
     double       value{ 0.0 };
 };
 
+static_assert(sizeof(counter_value) == sizeof(counter_id_t) + sizeof(double),
+              "counter_value is cached as raw bytes and must not have padding");
+
 using metrics = std::vector<counter_value>;
 
 struct counter_definition

@@ -6,6 +6,7 @@
 
 #include "rocjitsu/code/rj_code.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -36,6 +37,7 @@ inline constexpr int EI_MAGIC_SIZE = sizeof(EI_MAGIC);
 inline constexpr uint8_t ELFCLASSNONE = 0;
 inline constexpr uint8_t ELFCLASS32 = 1;
 inline constexpr uint8_t ELFCLASS64 = 2;
+inline constexpr uint8_t ELFDATA2LSB = 1;
 
 inline constexpr uint8_t ELFOSABI_NONE = 0;
 inline constexpr uint8_t ELFOSABI_AMDGPU_HSA = 64;
@@ -254,6 +256,7 @@ inline constexpr uint32_t NT_AMDGPU_METADATA = 32;
 
 // Program header types.
 inline constexpr uint32_t PT_LOAD = 1;
+inline constexpr uint32_t PF_X = 1;
 inline constexpr uint32_t PT_DYNAMIC = 2;
 inline constexpr uint32_t PT_NOTE = 4;
 
@@ -310,6 +313,42 @@ struct Elf64_Phdr {
   uint64_t p_align;
 };
 
+/// @brief Whether one LOAD supplies the requested virtual range from the specified file bytes.
+[[nodiscard]] inline constexpr bool elf_load_maps_file_range(const Elf64_Phdr &segment,
+                                                             uint64_t file_offset, uint64_t vaddr,
+                                                             uint64_t size) {
+  if (segment.p_type != PT_LOAD || vaddr < segment.p_vaddr)
+    return false;
+  const uint64_t offset = vaddr - segment.p_vaddr;
+  return offset <= segment.p_filesz && size <= segment.p_filesz - offset &&
+         offset <= std::numeric_limits<uint64_t>::max() - segment.p_offset &&
+         segment.p_offset + offset == file_offset;
+}
+
+/// @brief Whether all LOAD file copies overlapping a virtual range use its expected file bytes.
+/// @details Does not require coverage or treat zero-fill tails as copies. Callers validate
+/// image bounds separately; modern ROCr zeroes its shared allocation before copying segments.
+[[nodiscard]] inline bool elf_load_file_mappings_match_range(std::span<const Elf64_Phdr> segments,
+                                                             uint64_t file_offset, uint64_t vaddr,
+                                                             uint64_t size) {
+  if (size > std::numeric_limits<uint64_t>::max() - vaddr ||
+      size > std::numeric_limits<uint64_t>::max() - file_offset)
+    return false;
+  for (const Elf64_Phdr &segment : segments) {
+    if (segment.p_type != PT_LOAD || segment.p_filesz == 0)
+      continue;
+    if (segment.p_filesz > std::numeric_limits<uint64_t>::max() - segment.p_vaddr ||
+        segment.p_filesz > std::numeric_limits<uint64_t>::max() - segment.p_offset)
+      return false;
+    const uint64_t begin = std::max(vaddr, segment.p_vaddr);
+    const uint64_t end = std::min(vaddr + size, segment.p_vaddr + segment.p_filesz);
+    if (begin < end &&
+        !elf_load_maps_file_range(segment, file_offset + (begin - vaddr), begin, end - begin))
+      return false;
+  }
+  return true;
+}
+
 /**
  * @brief ELF section header.
  */
@@ -361,6 +400,21 @@ struct Elf64_Rela {
   int64_t r_addend;
 };
 
+/// @brief Resolve a signed ELF displacement without wrapping the address.
+[[nodiscard]] inline std::optional<uint64_t> add_signed_offset(uint64_t base, int64_t offset) {
+  if (offset >= 0) {
+    const uint64_t positive = static_cast<uint64_t>(offset);
+    if (positive > std::numeric_limits<uint64_t>::max() - base)
+      return std::nullopt;
+    return base + positive;
+  }
+  // Form the magnitude without negating INT64_MIN.
+  const uint64_t magnitude = static_cast<uint64_t>(-(offset + 1)) + 1;
+  if (magnitude > base)
+    return std::nullopt;
+  return base - magnitude;
+}
+
 /// @brief Copy a possibly strided ELF record table from an unaligned image.
 /// @details The declared stride may include trailing bytes, but it must hold a
 /// complete record. The entire table is bounds checked before any record is
@@ -396,6 +450,25 @@ inline constexpr bool rocr_dynamic_relocation_uses_symbol_value(uint32_t relocat
     return true;
   default:
     return false;
+  }
+}
+
+/// @brief Write size of a relocation supported by ROCr's modern dynamic path.
+/// @details Callers classify the relocation section separately. An absent size
+/// means unsupported, including NONE; it never means an inert zero-byte write.
+/// Explicit-target/static records retain their separate dispatch and policy.
+[[nodiscard]] inline constexpr std::optional<uint64_t>
+rocr_dynamic_relocation_write_size(uint32_t relocation_type) {
+  switch (relocation_type) {
+  case R_AMDGPU_ABS32_LO:
+  case R_AMDGPU_ABS32_HI:
+  case R_AMDGPU_ABS32:
+    return sizeof(uint32_t);
+  case R_AMDGPU_ABS64:
+  case R_AMDGPU_RELATIVE64:
+    return sizeof(uint64_t);
+  default:
+    return std::nullopt;
   }
 }
 

@@ -31,6 +31,7 @@ THE SOFTWARE.
 #include <memory>
 #include <set>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
@@ -71,12 +72,18 @@ static const std::unordered_map<rdc_field_t, amdsmi_event_type_t> rdc_evnt_2_smi
     {RDC_EVNT_XGMI_5_THRPUT, AMDSMI_EVNT_XGMI_DATA_OUT_5},
 };
 
-// amd-smi reports a value it cannot read as the maximum of the field's type. Some uint32_t
-// fields hold the uint16_t maximum of the gpu_metrics field they are copied from, as older
-// amd-smi did for power. Only for values that stay far below 65535: percentages, W, MHz,
-// counts.
-static bool smi_not_available(uint32_t v) {
-  return v == std::numeric_limits<uint32_t>::max() || v == std::numeric_limits<uint16_t>::max();
+// amd-smi reports a value it cannot read as the maximum of the value's type.
+template <typename T>
+static bool smi_not_available(T v) {
+  static_assert(std::is_unsigned_v<T>, "amd-smi marks unsigned values only");
+  return v == std::numeric_limits<T>::max();
+}
+
+// smi_not_available() for a uint32_t field amd-smi copies from a uint16_t gpu_metrics field:
+// such a field can hold the uint16_t maximum, as older amd-smi did for power. Only for values
+// that stay far below 65535: percentages, W, MHz, counts.
+static bool smi_not_available_from_u16(uint32_t v) {
+  return smi_not_available(v) || v == std::numeric_limits<uint16_t>::max();
 }
 
 RdcMetricFetcherImpl::RdcMetricFetcherImpl() : task_started_(true) {
@@ -598,10 +605,6 @@ rdc_status_t RdcMetricFetcherImpl::bulk_fetch_smi_fields(
       RDC_FI_GPU_UTIL      // average_gfx_activity
   };
 
-  // gpu_metrics reports a value it does not have as UINT16_MAX. Such a field is left out
-  // here, as for a power of 0, and fetched one by one.
-  constexpr uint16_t kU16NotSupported = std::numeric_limits<uint16_t>::max();
-
   // Organize the fields per GPU. A partition's fields are left to its own read
   // (fetch_gpu_partition_field_()): gpu_metrics holds the whole GPU's clock and activity.
   std::map<uint32_t, std::vector<rdc_field_t>> bulk_fields;
@@ -638,18 +641,20 @@ rdc_status_t RdcMetricFetcherImpl::bulk_fetch_smi_fields(
       value.field_value.status = RDC_ST_OK;
       value.field_value.ts = cur_time;
 
+      // A value amd-smi does not have is left out here, as for a power of 0, and fetched one
+      // by one.
       switch (field_id) {
         case RDC_FI_GPU_CLOCK:  // current_gfxclk * 1000000
-          if (gpu_metrics.current_gfxclk == kU16NotSupported) continue;
+          if (smi_not_available(gpu_metrics.current_gfxclk)) continue;
           value.field_value.value.l_int =
               static_cast<int64_t>(gpu_metrics.current_gfxclk) * 1000000;
           break;
         case RDC_FI_MEMORY_TEMP:  // temperature_mem * 1000
-          if (gpu_metrics.temperature_mem == kU16NotSupported) continue;
+          if (smi_not_available(gpu_metrics.temperature_mem)) continue;
           value.field_value.value.l_int = static_cast<int64_t>(gpu_metrics.temperature_mem) * 1000;
           break;
         case RDC_FI_GPU_TEMP:  // temperature_edge * 1000
-          if (gpu_metrics.temperature_edge == kU16NotSupported) continue;
+          if (smi_not_available(gpu_metrics.temperature_edge)) continue;
           value.field_value.value.l_int = static_cast<int64_t>(gpu_metrics.temperature_edge) * 1000;
           break;
         case RDC_FI_POWER_USAGE:  // average_socket_power
@@ -673,7 +678,7 @@ rdc_status_t RdcMetricFetcherImpl::bulk_fetch_smi_fields(
           value.field_value.value.l_int *= 1000000;
           break;
         case RDC_FI_GPU_UTIL:  // average_gfx_activity
-          if (gpu_metrics.average_gfx_activity == kU16NotSupported) continue;
+          if (smi_not_available(gpu_metrics.average_gfx_activity)) continue;
           value.field_value.value.l_int = static_cast<int64_t>(gpu_metrics.average_gfx_activity);
           break;
         default:
@@ -759,8 +764,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
 
     // Map a narrower field's "not available" maximum to uint64_t's maximum.
     auto widen = [](auto v) -> uint64_t {
-      using T = decltype(v);
-      return v == std::numeric_limits<T>::max() ? std::numeric_limits<uint64_t>::max() : v;
+      return smi_not_available(v) ? std::numeric_limits<uint64_t>::max() : v;
     };
     const std::unordered_map<rdc_field_t, uint64_t> rdc_field_to_gpu_metrics = {
         {RDC_FI_XGMI_0_READ_KB, gpu_metrics.xgmi_read_data_acc[0]},
@@ -833,7 +837,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       value->status = amdsmi_get_gpu_activity(processor_handle, &engine_usage);
       value->type = INTEGER;
       if (value->status == AMDSMI_STATUS_SUCCESS) {
-        if (smi_not_available(engine_usage.umc_activity)) {
+        if (smi_not_available_from_u16(engine_usage.umc_activity)) {
           value->status = AMDSMI_STATUS_NOT_SUPPORTED;
         } else {
           value->value.l_int = static_cast<int64_t>(engine_usage.umc_activity);
@@ -886,11 +890,12 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
         std::lock_guard<std::mutex> lock(mem_activity_mutex_);
         auto prev = mem_activity_cache_.find(gpu_index);
         const bool have_prev = prev != mem_activity_cache_.end();
-        have_activity = have_activity || have_prev;  // a first sample has no rate yet
+        bool have_rate = false;
         activity_pct = derive_mem_activity_percent(
             activity_pct, have_prev, have_prev ? prev->second.mem_activity_acc : 0,
             have_prev ? prev->second.firmware_timestamp : 0, gpu_metrics.mem_activity_acc,
-            gpu_metrics.firmware_timestamp);
+            gpu_metrics.firmware_timestamp, &have_rate);
+        have_activity = have_activity || have_rate;
         // Only advance the cache with a newer firmware sample: the metrics read
         // happens before the lock, so concurrent fetches can take the lock out of
         // firmware-timestamp order and would otherwise cache an older sample last.
@@ -1100,7 +1105,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       value->status = amdsmi_get_clock_info(processor_handle, clk_type, &clk_info);
       value->type = INTEGER;
       if (value->status == AMDSMI_STATUS_SUCCESS) {
-        if (smi_not_available(clk_info.clk)) {
+        if (smi_not_available_from_u16(clk_info.clk)) {
           value->status = AMDSMI_STATUS_NOT_SUPPORTED;
         } else {
           value->value.l_int = static_cast<int64_t>(clk_info.clk) * 1000000;
@@ -1113,7 +1118,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       value->status = amdsmi_get_gpu_activity(processor_handle, &engine_usage);
       value->type = INTEGER;
       if (value->status == AMDSMI_STATUS_SUCCESS) {
-        if (smi_not_available(engine_usage.gfx_activity)) {
+        if (smi_not_available_from_u16(engine_usage.gfx_activity)) {
           value->status = AMDSMI_STATUS_NOT_SUPPORTED;
         } else {
           value->value.l_int = static_cast<int64_t>(engine_usage.gfx_activity);
@@ -1462,8 +1467,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       value->type = INTEGER;
       if (value->status == AMDSMI_STATUS_SUCCESS) {
         // amd-smi reports a counter the GPU does not provide as UINT64_MAX.
-        constexpr uint64_t kU64NotSupported = std::numeric_limits<uint64_t>::max();
-        uint64_t raw = kU64NotSupported;
+        uint64_t raw = std::numeric_limits<uint64_t>::max();
         switch (field_id) {
           case RDC_HEALTH_POWER_THROTTLE_TIME:
             raw = violation_status.acc_ppt_pwr;
@@ -1541,7 +1545,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
           default:
             break;
         }
-        if (raw == kU64NotSupported) {
+        if (smi_not_available(raw)) {
           value->status = AMDSMI_STATUS_NOT_SUPPORTED;
         } else {
           value->value.l_int = static_cast<int64_t>(raw);

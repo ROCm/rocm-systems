@@ -13,6 +13,7 @@
 #include <Symbol.h>
 
 #include "common/path.hpp"
+#include "common/regex_utility.hpp"
 #include "common/string_utility.hpp"
 #include "core/demangler.hpp"
 
@@ -209,13 +210,6 @@ get_parameter_types(procedure_t* func)
     return _param_names;
 }
 
-// True if any regex in _res matches _name.
-bool
-regex_match_any(const std::string& _name, const regexvec_t& _res)
-{
-    return std::ranges::any_of(
-        _res, [&](const auto& _re) { return std::regex_search(_name, _re); });
-}
 }  // namespace
 
 //======================================================================================//
@@ -468,40 +462,6 @@ get_basic_block_file_line_info(module_t* module, procedure_t* func)
 //
 //  We create a new name that embeds the file and line information in the name
 //
-std::vector<statement_t>
-get_source_code(module_t* module, procedure_t* func)
-{
-    ROCPROFSYS_ADD_LOG_ENTRY("Getting source code for", get_name(func));
-
-    std::vector<statement_t> _lines{};
-    if(!module || !func)
-    {
-        return _lines;
-    }
-    auto*                        _cfg = func->getCFG();
-    std::set<BPatch_basicBlock*> _basic_blocks{};
-    _cfg->getAllBasicBlocks(_basic_blocks);
-
-    for(auto&& itr : _basic_blocks)
-    {
-        // NOLINTNEXTLINE(misc-const-correctness) - decltype(_base_addr) below must stay
-        // non-const, or the loop counter can't be incremented
-        auto       _base_addr = itr->getStartAddress();
-        auto const _last_addr = itr->getEndAddress();
-        for(decltype(_base_addr) _addr = _base_addr; _addr <= _last_addr; ++_addr)
-        {
-            std::vector<statement_t> _src{};
-            if(module->getSourceLines(_addr, _src))
-            {
-                for(auto&& iitr : _src)
-                {
-                    _lines.emplace_back(iitr);
-                }
-            }
-        }
-    }
-    return _lines;
-}
 
 //======================================================================================//
 //
@@ -787,46 +747,14 @@ rocprofsys_get_link_map(const char* _lib, const std::string& _exclude_linked_by,
     }
 
     auto const _get_chain = [&_open_modes](const char* _name) {
-        void* _handle = nullptr;
-        bool  _noload = false;
-        for(auto const _mode : _open_modes)
+        auto chain =
+            rocprofsys::path::get_link_map(_name, std::vector<int>{ _open_modes }, true);
+        if(_name == nullptr)
         {
-            _handle = dlopen(_name, _mode);
-            _noload = (_mode & RTLD_NOLOAD) == RTLD_NOLOAD;
-            if(_handle)
-            {
-                break;
-            }
+            // dlopen(nullptr) names the exe with an empty first entry
+            chain.insert(chain.begin(), rocprofsys_get_exe_realpath());
         }
-
-        auto _chain = std::vector<std::string>{};
-        if(_handle)
-        {
-            struct link_map* _link_map = nullptr;
-            dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
-            struct link_map const* _next = _link_map;
-            while(_next)
-            {
-                if(_name == nullptr && _next == _link_map &&
-                   std::string_view{ _next->l_name }.empty())
-                {
-                    // only insert exe name if dlopened the exe and
-                    // empty name is first entry
-                    _chain.emplace_back(rocprofsys_get_exe_realpath());
-                }
-                else if(!std::string_view{ _next->l_name }.empty())
-                {
-                    _chain.emplace_back(_next->l_name);
-                }
-                _next = _next->l_next;
-            }
-
-            if(!_noload)
-            {
-                dlclose(_handle);
-            }
-        }
-        return _chain;
+        return chain;
     };
 
     auto const _full_chain = _get_chain(_lib);
@@ -860,94 +788,16 @@ rocprofsys_get_link_map(const char* _lib, const std::string& _exclude_linked_by,
 //
 //  Get the path of a loaded dynamic binary
 //
-std::optional<std::string>
-rocprofsys_get_loaded_path(const char* _name, std::vector<int>&& _open_modes)
-{
-    if(_open_modes.empty())
-    {
-        _open_modes = { (RTLD_LAZY | RTLD_NOLOAD) };
-    }
-
-    void* _handle = nullptr;
-    bool  _noload = false;
-    for(auto const _mode : _open_modes)
-    {
-        _handle = dlopen(_name, _mode);
-        _noload = (_mode & RTLD_NOLOAD) == RTLD_NOLOAD;
-        if(_handle)
-        {
-            break;
-        }
-    }
-
-    if(_handle)
-    {
-        struct link_map* _link_map = nullptr;
-        dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
-        if(_link_map != nullptr && !std::string_view{ _link_map->l_name }.empty())
-        {
-            return rocprofsys::path::realpath(_link_map->l_name);
-        }
-        if(!_noload)
-        {
-            dlclose(_handle);
-        }
-    }
-
-    return std::optional<std::string>{};
-}
 
 //======================================================================================//
 //
 //  Get the path of a loaded dynamic binary
 //
-std::optional<std::string>
-rocprofsys_get_origin(const char* _name, std::vector<int>&& _open_modes)
-{
-    if(_open_modes.empty())
-    {
-        _open_modes = { (RTLD_LAZY | RTLD_NOLOAD) };
-    }
-
-    void* _handle = nullptr;
-    bool  _noload = false;
-    for(auto const _mode : _open_modes)
-    {
-        _handle = dlopen(_name, _mode);
-        _noload = (_mode & RTLD_NOLOAD) == RTLD_NOLOAD;
-        if(_handle)
-        {
-            break;
-        }
-    }
-
-    if(_handle)
-    {
-        char _buffer[PATH_MAX + 1];
-        memset(_buffer, '\0', PATH_MAX * sizeof(char));
-        dlinfo(_handle, RTLD_DI_ORIGIN, _buffer);
-        if(strnlen(_buffer, PATH_MAX + 1) <= PATH_MAX)
-        {
-            return rocprofsys::path::realpath(_buffer);
-        }
-        if(!_noload)
-        {
-            dlclose(_handle);
-        }
-    }
-
-    return std::optional<std::string>{};
-}
 
 //======================================================================================//
 //
 //  Error callback routine.
 //
-void
-errorFunc(error_level_t level, int num, const char* const* params)
-{
-    error_func_real(level, num, params);
-}
 
 //======================================================================================//
 //
@@ -1000,19 +850,6 @@ error_func_real(error_level_t level, int num, const char* const* params)
 //
 //  Just log it
 //
-void
-error_func_fake(error_level_t level, int num, const char* const* params)
-{
-    char line[4096];
-
-    const char* msg = bpatch->getEnglishErrorString(num);
-    bpatch->formatErrorString(line, sizeof(line), msg, params);
-
-    // just log it
-    ROCPROFSYS_ADD_LOG_ENTRY("Dyninst error function called with level", level,
-                             ":: ID# =", num, "::", line)
-        .force(level < BPatchInfo);
-}
 
 #include "internal_libs.hpp"
 
@@ -1079,7 +916,7 @@ filter_objects(std::vector<object_t*> const* app_objects)
                     continue;
                 }
                 auto const _module_name = std::string{ get_name(mod) };
-                if(regex_match_any(_module_name, file_include))
+                if(rocprofsys::utility::regex_match_any(_module_name, file_include))
                 {
                     _included_module = true;
                     verbprintf(2,
@@ -1089,7 +926,7 @@ filter_objects(std::vector<object_t*> const* app_objects)
                     break;
                 }
 
-                if(regex_match_any(_module_name, file_restrict))
+                if(rocprofsys::utility::regex_match_any(_module_name, file_restrict))
                 {
                     _included_module = true;
                     verbprintf(2,
@@ -1222,7 +1059,7 @@ filter_modules(std::vector<module_t*> const* app_modules)
         }
 
         // -ME: skip if module matches an exclude regex
-        if(regex_match_any(_module_name, file_exclude))
+        if(rocprofsys::utility::regex_match_any(_module_name, file_exclude))
         {
             _is_excluded = true;
             verbprintf(2, "[filter] skipping module-exclude-regex: '%s'\n",
@@ -1231,7 +1068,7 @@ filter_modules(std::vector<module_t*> const* app_modules)
 
         // -MR: skip if restrict is specified and module does NOT match
         if(!_is_excluded && !file_restrict.empty() &&
-           !regex_match_any(_module_name, file_restrict))
+           !rocprofsys::utility::regex_match_any(_module_name, file_restrict))
         {
             _is_excluded = true;
             verbprintf(2, "[filter] skipping module-restrict-regex: '%s'\n",
@@ -1239,7 +1076,8 @@ filter_modules(std::vector<module_t*> const* app_modules)
         }
 
         // -MI: if module matches an include regex, force it through
-        if(_is_excluded && regex_match_any(_module_name, file_include))
+        if(_is_excluded &&
+           rocprofsys::utility::regex_match_any(_module_name, file_include))
         {
             _is_excluded = false;
             verbprintf(2, "[filter] forcing module-include-regex: '%s'\n",

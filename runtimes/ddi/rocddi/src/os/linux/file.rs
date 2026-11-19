@@ -13,7 +13,7 @@ use super::errno;
 use libc::close;
 use std::fs::File;
 use std::io;
-use std::os::fd::{BorrowedFd, IntoRawFd};
+use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd};
 use std::os::unix::fs::{FileExt, MetadataExt};
 
 /// Stable size and filesystem identity obtained from one DMA-BUF descriptor.
@@ -30,25 +30,14 @@ pub(crate) fn duplicate_file(descriptor: i32) -> io::Result<File> {
     if descriptor < 0 {
         return Err(io::Error::from(io::ErrorKind::InvalidInput));
     }
-    // SAFETY: The caller keeps its descriptor live for this synchronous clone.
-    let borrowed = unsafe { BorrowedFd::borrow_raw(descriptor) };
-    Ok(File::from(borrowed.try_clone_to_owned()?))
-}
-
-/// Gets the file length from an owned duplicate of a borrowed descriptor.
-pub(crate) fn descriptor_length(descriptor: i32) -> io::Result<u64> {
-    duplicate_file(descriptor)?
-        .metadata()
-        .map(|metadata| metadata.len())
-}
-
-/// Reads an exact range without closing or moving the caller's descriptor.
-pub(crate) fn read_descriptor_exact_at(
-    descriptor: i32,
-    buffer: &mut [u8],
-    offset: u64,
-) -> io::Result<()> {
-    duplicate_file(descriptor)?.read_exact_at(buffer, offset)
+    // SAFETY: fcntl validates this raw integer in the kernel. A stale or
+    // closed descriptor reports EBADF without creating a Rust BorrowedFd.
+    let duplicate = unsafe { libc::fcntl(descriptor, libc::F_DUPFD_CLOEXEC, 0) };
+    if duplicate < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: A successful F_DUPFD_CLOEXEC returns a new owned descriptor.
+    Ok(unsafe { File::from_raw_fd(duplicate) })
 }
 
 /// Consumes one owned descriptor even when the underlying close reports an error.
@@ -71,7 +60,7 @@ pub(crate) fn read_descriptor_at(
         return Err(io::Error::from_raw_os_error(errno::EBADF));
     }
     let offset = u64::try_from(offset).map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
-    duplicate_file(descriptor)?.read_at(buffer, offset)
+    read_at(&duplicate_file(descriptor)?, buffer, offset)
 }
 
 /// Writes at a fixed file offset without changing the shared file position.
@@ -84,7 +73,37 @@ pub(crate) fn write_descriptor_at(
         return Err(io::Error::from_raw_os_error(errno::EBADF));
     }
     let offset = u64::try_from(offset).map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
-    duplicate_file(descriptor)?.write_at(buffer, offset)
+    write_at(&duplicate_file(descriptor)?, buffer, offset)
+}
+
+pub(crate) fn read_at(file: &File, bytes: &mut [u8], offset: u64) -> io::Result<usize> {
+    file.read_at(bytes, offset)
+}
+
+pub(crate) fn write_at(file: &File, bytes: &[u8], offset: u64) -> io::Result<usize> {
+    // Linux pwrite ignores the offset on append-mode open-file descriptions.
+    // SAFETY: File keeps the descriptor live; F_GETFL only reads status flags.
+    let flags = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETFL) };
+    if flags < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if flags & libc::O_APPEND != 0 {
+        return Err(io::Error::from_raw_os_error(errno::EINVAL));
+    }
+    file.write_at(bytes, offset)
+}
+
+pub(crate) fn path(file: &File) -> io::Result<std::path::PathBuf> {
+    let path = std::fs::read_link(format!("/proc/self/fd/{}", file.as_raw_fd()))?;
+    if !path.is_absolute() {
+        return Err(io::Error::from(io::ErrorKind::InvalidData));
+    }
+    let source = file.metadata()?;
+    let target = std::fs::metadata(&path)?;
+    if (source.dev(), source.ino()) != (target.dev(), target.ino()) {
+        return Err(io::Error::from(io::ErrorKind::InvalidData));
+    }
+    Ok(path)
 }
 
 /// Reads a DMA-BUF's nonzero size and filesystem identity from one owner.
@@ -118,6 +137,56 @@ mod tests {
     static NEXT_FILE: AtomicUsize = AtomicUsize::new(0);
 
     #[test]
+    fn positioned_writes_reject_append_mode_without_changing_shared_flags() {
+        let path = std::env::temp_dir().join(format!(
+            "rocddi-append-test-{}-{}",
+            std::process::id(),
+            NEXT_FILE.fetch_add(1, Ordering::Relaxed)
+        ));
+        let mut caller = std::fs::OpenOptions::new()
+            .read(true)
+            .append(true)
+            .create_new(true)
+            .open(&path)
+            .unwrap();
+        std::fs::remove_file(path).unwrap();
+        caller.write_all(b"abc").unwrap();
+        caller.seek(SeekFrom::Start(1)).unwrap();
+        let retained = duplicate_file(caller.as_raw_fd()).unwrap();
+        // SAFETY: The caller retains the descriptor throughout this flag query.
+        let original_flags = unsafe { libc::fcntl(caller.as_raw_fd(), libc::F_GETFL) };
+        assert!(original_flags >= 0);
+
+        let error = crate::host::file::write_at(&retained, b"X", 0).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(error.raw_os_error(), Some(errno::EINVAL));
+        let result = crate::memory::interop::linux::ais_host_transfer(
+            caller.as_raw_fd(),
+            crate::memory::interop::linux::AisHostBuffer::Write(b"X"),
+            0,
+        );
+        assert_eq!(result.status, -errno::EINVAL);
+        assert_eq!(result.size_copied, 0);
+
+        assert_eq!(caller.stream_position().unwrap(), 1);
+        assert_eq!(caller.metadata().unwrap().len(), 3);
+        let mut bytes = [0; 4];
+        crate::host::file::read_exact_at(&retained, &mut bytes[..3], 0).unwrap();
+        assert_eq!(&bytes[..3], b"abc");
+        for file in [&caller, &retained] {
+            // SAFETY: Each File retains its descriptor throughout the query.
+            assert_eq!(
+                unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETFL) },
+                original_flags
+            );
+        }
+
+        caller.write_all(b"Y").unwrap();
+        crate::host::file::read_exact_at(&retained, &mut bytes, 0).unwrap();
+        assert_eq!(&bytes, b"abcY");
+    }
+
+    #[test]
     fn descriptor_snapshot_preserves_caller_ownership_and_file_position() {
         let path = std::env::temp_dir().join(format!(
             "rocddi-descriptor-test-{}-{}",
@@ -135,21 +204,23 @@ mod tests {
         file.seek(SeekFrom::Start(2)).unwrap();
         let descriptor = file.as_raw_fd();
 
-        assert_eq!(descriptor_length(descriptor).unwrap(), 6);
+        let snapshot = duplicate_file(descriptor).unwrap();
+        assert_eq!(snapshot.metadata().unwrap().len(), 6);
         let mut bytes = [0; 3];
-        read_descriptor_exact_at(descriptor, &mut bytes, 1).unwrap();
+        crate::host::file::read_exact_at(&snapshot, &mut bytes, 1).unwrap();
         assert_eq!(&bytes, b"bcd");
+        assert_eq!(file.stream_position().unwrap(), 2);
+        assert_eq!(crate::host::file::write_at(&snapshot, b"Z", 5).unwrap(), 1);
         assert_eq!(file.stream_position().unwrap(), 2);
         file.read_exact(&mut bytes[..1]).unwrap();
         assert_eq!(bytes[0], b'c');
 
         assert_eq!(
-            read_descriptor_exact_at(descriptor, &mut bytes, 5)
+            crate::host::file::read_exact_at(&snapshot, &mut bytes, 5)
                 .unwrap_err()
                 .kind(),
             io::ErrorKind::UnexpectedEof
         );
-        assert!(descriptor_length(-1).is_err());
-        assert!(read_descriptor_exact_at(-1, &mut bytes, 0).is_err());
+        assert!(duplicate_file(-1).is_err());
     }
 }
