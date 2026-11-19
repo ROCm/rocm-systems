@@ -4,12 +4,12 @@
   "scope": {"labels": ["GPU", "System Memory"], "split": "dram"},
   "blocks": [
     {"id": "cu", "title": "WGPs", "column": 0, "row": 0, "order": 0, "style": "list", "content": [
-      {"metric_id": "3.10.0", "title": "Wave Occ", "category": "util", "bar": false},
-      {"metric_id": "3.10.1", "title": "vGPRs", "category": "util", "bar": false},
-      {"metric_id": "3.10.2", "title": "sGPRs", "category": "util", "bar": false},
-      {"metric_id": "3.10.4", "title": "Scratch/Wave", "category": "util", "bar": false},
-      {"metric_id": "3.10.3", "title": "LDS Alloc", "category": "util", "bar": false},
-      {"metric_id": "3.10.5", "title": "Workgroups/WGP", "category": "util", "bar": false}
+      {"metric_id": "3.10.0", "title": "Wavefront Occupancy", "category": "util", "bar": true},
+      {"metric_id": "3.10.1", "title": "VGPRs", "category": "neutral", "bar": false},
+      {"metric_id": "3.10.2", "title": "SGPRs", "category": "neutral", "bar": false},
+      {"metric_id": "3.10.4", "title": "Scratch Allocation", "category": "neutral", "bar": false},
+      {"metric_id": "3.10.3", "title": "LDS Allocation", "category": "neutral", "bar": false},
+      {"metric_id": "3.10.5", "title": "Workgroups per WGP", "category": "neutral", "bar": false}
     ]},
 
     {"id": "lds", "title": "LDS", "column": 1, "row": 0, "order": 0, "style": "panel", "content": [

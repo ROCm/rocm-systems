@@ -18,15 +18,6 @@ dispatch.scratch_allocation:
   unit: Bytes per Work-item
   description: >-
     Bytes of scratch memory allocated per work-item, from dispatch metadata.
-dispatch.scratch_allocation_per_wave:
-  name: Scratch Allocation per Wave
-  formula: AVG(Scratch_Per_Workitem) * $wave_size / 1024
-  unit: KB per Wavefront
-  description: >-
-    The amount of scratch memory requested per wavefront, in KB: the scratch bytes
-    requested per work-item multiplied by the wavefront size. Scratch memory is used
-    for stack memory on the accelerator, as well as for register spills and
-    restores.
 dispatch.sgprs:
   name: SGPRs
   formula: AVG(SGPR)

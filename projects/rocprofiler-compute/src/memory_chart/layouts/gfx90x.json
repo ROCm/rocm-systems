@@ -4,15 +4,16 @@
   "scope": {"labels": ["GPU (XCD)", "Fabric / Memory"], "split": "data_fabric"},
   "blocks": [
     {"id": "cu", "title": "Compute Units", "column": 0, "row": 0, "order": 0, "style": "list", "content": [
-      {"metric_id": "3.1.0", "title": "Wave Occ", "category": "util", "bar": false},
-      {"metric_id": "3.1.1", "title": "vGPRs", "category": "util", "bar": false},
-      {"metric_id": "3.1.2", "title": "sGPRs", "category": "util", "bar": false},
-      {"metric_id": "3.1.4", "title": "Scratch/Wave", "category": "util", "bar": false},
-      {"metric_id": "3.1.3", "title": "LDS Alloc", "category": "util", "bar": false},
-      {"metric_id": "3.1.5", "title": "Workgroups/CU", "category": "util", "bar": false}
+      {"metric_id": "3.1.0", "title": "Wavefront Occupancy", "category": "util", "bar": true},
+      {"metric_id": "3.1.1", "title": "VGPRs", "category": "neutral", "bar": false},
+      {"metric_id": "3.1.2", "title": "SGPRs", "category": "neutral", "bar": false},
+      {"metric_id": "3.1.28", "title": "AGPRs", "category": "neutral", "bar": false},
+      {"metric_id": "3.1.4", "title": "Scratch Allocation", "category": "neutral", "bar": false},
+      {"metric_id": "3.1.3", "title": "LDS Allocation", "category": "neutral", "bar": false},
+      {"metric_id": "3.1.5", "title": "Workgroups per CU", "category": "neutral", "bar": false}
     ]},
 
-    {"id": "vl1d", "title": "VL1D", "column": 1, "row": 0, "order": 0, "style": "panel", "content": [
+    {"id": "vl1d", "title": "vL1D", "column": 1, "row": 0, "order": 0, "style": "panel", "content": [
       {"metric_id": "3.1.14", "title": "Hit", "category": "hit", "bar": true},
       {"metric_id": "3.1.15", "title": "Coalesce", "category": "neutral", "bar": true}
     ]},

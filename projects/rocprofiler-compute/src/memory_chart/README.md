@@ -22,7 +22,7 @@ has no comments; the comments here only explain the fields.
   "blocks": [
     {"id": "cu", "title": "Compute Units", "column": 0, "row": 0, "order": 0,
      "style": "list", "content": [
-      {"metric_id": "3.1.0", "title": "vGPRs", "category": "util", "bar": false}
+      {"metric_id": "3.1.0", "title": "VGPRs", "category": "util", "bar": false}
     ]},
     {"id": "l2", "title": "L2", "column": 1, "row": 0, "order": 0,
      "style": "panel", "content": [
@@ -56,7 +56,7 @@ The terminal chart looks roughly like this sketch. The ids and values are made u
 |------------------------ GPU -------------------------|- Fabric -|
 
 ╭─ Compute Units ─╮            ╭──── L2 ────╮          ╭─ Fabric ─╮
-│ vGPRs 12.5      │Read : 100  │ Hit 42.0%  │Read BW   │          │   row 0
+│ VGPRs 12        │Read : 100  │ Hit 42.0%  │Read BW   │          │   row 0
 │                 │<---------- │ ████░░░░░░ │1.0 GB/s  │          │
 │                 │            │            │<-------- │          │
 ╰─────────────────╯            ╰────────────╯          ╰──────────╯
@@ -107,7 +107,7 @@ All fields are required.
 | `metric_id` | Id of the metric in panel 3 of the analysis config, such as `3.1.24`. |
 | `title` | Label shown before the value. |
 | `category` | Kind of metric. It sets the color; see [Categories](#categories). |
-| `bar` | `true` draws a bar under the value. Use it only for percentages, and never in a `list` block. |
+| `bar` | `true` draws a bar under the value. Use it only for percentages. |
 
 ### Arrows
 

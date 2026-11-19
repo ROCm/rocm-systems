@@ -143,6 +143,19 @@ def test_every_shown_unit_has_a_display_rule(path, arch):
 
 
 @pytest.mark.parametrize(("path", "arch"), LAYOUT_ARCHS, ids=LAYOUT_ARCH_IDS)
+def test_util_marks_only_percentages(path, arch):
+    """The Util color says a value is a utilization; counts and sizes are neutral."""
+    units = panel_units(PanelConfigs.for_arch(arch))
+    not_percent = [
+        item.title
+        for block in load_layout(path).blocks()
+        for item in block.items
+        if item.category == "util" and units[item.metric_id] != "Percent"
+    ]
+    assert not not_percent
+
+
+@pytest.mark.parametrize(("path", "arch"), LAYOUT_ARCHS, ids=LAYOUT_ARCH_IDS)
 def test_arrow_style_fits_the_metric_unit(path, arch):
     # A count reads best as one "title : value" line; a rate as title, value, arrow
     units = panel_units(PanelConfigs.for_arch(arch))
@@ -238,7 +251,6 @@ def test_block_list_order_does_not_matter(tmp_path):
         (with_blocks({**NESTED, "column": 2}), "the column of 'mall'"),
         (with_blocks({**NESTED, "parent": "inner"}), "nest inside each other"),
         (with_blocks({**NESTED, "parent": "vl1d", "column": 1}), "nested blocks"),
-        (with_metric_change("3.1.1", bar=True), "compact list"),
         (with_metric_change("3.1.28", category="x"), "category"),
         (with_metric_change("3.1.28", bar=1), "bar of '3.1.28'"),
         (with_metric_change("3.1.28", metric_id=None), "metric_id of None"),
@@ -282,7 +294,6 @@ def test_block_list_order_does_not_matter(tmp_path):
         "nested-block-in-another-column",
         "parent-cycle",
         "parent-has-metrics",
-        "bar-in-a-list",
         "metric-category",
         "bar-not-a-bool",
         "metric-id-not-a-string",
