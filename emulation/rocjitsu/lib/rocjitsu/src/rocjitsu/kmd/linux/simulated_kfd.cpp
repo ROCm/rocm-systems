@@ -330,6 +330,17 @@ SimulatedKfd::begin_gem_va_transaction(uint32_t process_id) {
   return std::make_unique<GemVaTransaction>(std::move(process));
 }
 
+bool SimulatedKfd::supports_pm4_gds_wave_id_reset(uint32_t render_minor) const {
+  const auto ordinal = gpu_ordinal_for_render_minor(render_minor);
+  if (!ordinal)
+    return false;
+  const auto *cp = gpus_[*ordinal].soc->assign_queue_owner_cp(0);
+  if (!cp || cp->compute_units().empty())
+    return false;
+  const auto arch = cp->compute_units().front()->arch();
+  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+}
+
 int SimulatedKfd::submit_pm4(uint32_t render_minor, uint64_t queue_key,
                              amdgpu::Pm4Submission submission) {
   const auto process = find_process(local_process_id_);

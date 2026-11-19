@@ -193,11 +193,36 @@ constexpr uint64_t valu_swap_write_lanes(uint64_t exec, unsigned wave_size, unsi
   return exec & wave & (upper ? lower << stride : lower);
 }
 
+/// VMEM and EXP substitute v0 independently for each missing source DWORD.
+constexpr uint16_t gfx115_source_vgpr(uint32_t selector, uint32_t allocation) {
+  return selector < allocation ? static_cast<uint16_t>(selector) : 0;
+}
+
 template <typename Encoding>
 constexpr std::array<uint8_t, 4> shader_export_sources(const Encoding &inst) {
   return {static_cast<uint8_t>(inst.vsrc0), static_cast<uint8_t>(inst.vsrc1),
           static_cast<uint8_t>(inst.vsrc2), static_cast<uint8_t>(inst.vsrc3)};
 }
+
+class Gfx10ShaderExportOperands {
+public:
+  uint8_t target, enabled;
+  bool compressed;
+  std::array<uint8_t, 4> sources;
+
+  bool valid() const {
+    return (target <= 9 || (target >= 12 && target <= 16) || target == 20 || target >= 32) &&
+           (!compressed || !((enabled ^ (enabled >> 1)) & 5u));
+  }
+
+  template <typename Visit> void for_each_source(uint32_t allocation, Visit visit) const {
+    if (target == 9)
+      return;
+    for (unsigned channel = 0; channel < 4; channel += compressed ? 2 : 1)
+      if (enabled & (1u << channel))
+        visit(channel, gfx115_source_vgpr(sources[compressed ? channel / 2 : channel], allocation));
+  }
+};
 
 class ShaderExportOperands {
 public:
@@ -205,16 +230,35 @@ public:
                            kPrimitive = 20, kDualSource0 = 21, kDualSource1 = 22;
   uint8_t target;
   uint8_t components;
+  bool done;
   bool row_from_m0;
   std::array<uint8_t, 4> sources;
 
   /// Decode the shared GFX11 EXP and GFX12 VEXPORT operand layout.
   template <typename Encoding> static ShaderExportOperands decode(const Encoding &inst) {
-    return {static_cast<uint8_t>(inst.tgt), static_cast<uint8_t>(inst.en), bool(inst.row_en),
-            shader_export_sources(inst)};
+    return {static_cast<uint8_t>(inst.tgt), static_cast<uint8_t>(inst.en), bool(inst.done),
+            bool(inst.row_en), shader_export_sources(inst)};
+  }
+
+  uint64_t source_lanes(uint64_t exec) const {
+    if (target == kDualSource0) {
+      const uint64_t even = exec & 0x5555555555555555ULL;
+      return even | (even << 1);
+    }
+    if (target == kDualSource1) {
+      const uint64_t odd = exec & 0xaaaaaaaaaaaaaaaaULL;
+      return odd | (odd >> 1);
+    }
+    return exec;
   }
 
   bool channel_enabled(unsigned channel) const { return components & (1u << channel); }
+
+  template <typename Visit> void for_each_source(uint32_t allocation, Visit visit) const {
+    for (unsigned channel = 0; channel < sources.size(); ++channel)
+      if (channel_enabled(channel))
+        visit(channel, gfx115_source_vgpr(sources[channel], allocation));
+  }
 };
 
 /// E8M0 scale location for a CDNA5 V_CVT_SCALE_PK widening conversion.
@@ -258,11 +302,6 @@ constexpr bool has_gfx11_plus_image_operands(rj_code_arch_t arch) {
          arch == ROCJITSU_CODE_ARCH_RDNA4;
 }
 
-/// VMEM and EXP substitute v0 independently for each missing source DWORD.
-constexpr uint16_t gfx115_source_vgpr(uint32_t selector, uint32_t allocation) {
-  return selector < allocation ? static_cast<uint16_t>(selector) : 0;
-}
-
 /// @brief Decoded register-access modifiers.
 /// @details This view contains no wave state or values.
 struct RegisterModifiers {
@@ -294,6 +333,7 @@ struct RegisterModifiers {
   /// Sampling controls select active lanes and implicit derivative inputs from the 2x2 quad.
   std::optional<ImageSampleSources> image_sample_sources;
   const Operand *image_store_data = nullptr;
+  std::optional<Gfx10ShaderExportOperands> gfx10_export;
   /// Coordinate VGPR selectors, including NSA selectors.
   ImageAddressRegisters image_coordinates{};
   /// Number of tracked coordinate components.

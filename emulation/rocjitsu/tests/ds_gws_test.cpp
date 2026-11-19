@@ -274,6 +274,23 @@ public:
   }
 };
 
+TEST(Gfx10OrderedAppend, AllocationAndReleaseWrapAtTheProgrammedMaximum) {
+  amdgpu::GwsDevice device;
+  // Three CUs program GDS_COMPUTE_MAX_WAVE_ID to 95. The 20th five-wave
+  // group crosses that boundary and receives IDs 95, 0, 1, 2 and 3.
+  constexpr uint32_t period = 3 * 32, waves_per_group = 5;
+  for (uint32_t group = 0; group < 20; ++group) {
+    const uint32_t base = device.reserve_ordered_ids(0, 1, waves_per_group, period);
+    ASSERT_EQ(base, group * waves_per_group % period);
+    for (uint32_t wave = 0; wave < waves_per_group; ++wave) {
+      const uint32_t id = (base + wave) % period;
+      EXPECT_FALSE(device.ordered_count(0, 1, (id + 1) % period, 0, 1, false, true));
+      ASSERT_EQ(device.ordered_count(0, 1, id, 0, 1, false, true), group * waves_per_group + wave);
+    }
+  }
+  EXPECT_EQ(device.reserve_ordered_ids(0, 1, 1, period), 4u);
+}
+
 TEST(DsGwsFixture, FailedWorkgroupSetupPreservesLiveGroupAndReleasesAllocatedWaves) {
   GwsTestContext context(ROCJITSU_CODE_ARCH_RDNA3);
   std::unique_ptr<amdgpu::ComputeUnitCore> cu;

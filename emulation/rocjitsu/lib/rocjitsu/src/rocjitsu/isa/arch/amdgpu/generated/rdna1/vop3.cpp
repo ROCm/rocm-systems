@@ -48,11 +48,12 @@ VInterpP2F32Vop3::VInterpP2F32Vop3(const MachineInst *inst)
       src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src0(32, OperandType::OPR_ATTR, (reinterpret_cast<const OpEncoding *>(inst)->src0 & 0x3fu)),
       m0(32, OperandType::OPR_SDST_M0, 124) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src1;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &m0;
-  num_src_ = 3;
+  src_operands_[1] = &src1;
+  src_operands_[2] = &src0;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
   m0.apply_fieldless_caps(false, false, false);
   flags_ |= EMBEDDED_MEMORY_WAIT;
@@ -1609,6 +1610,81 @@ DecodeResult decodeVMovreldB32Vop3(const MachineInst *opcode,
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   return std::make_unique<VMovreldB32Vop3>(opcode);
+}
+} // namespace detail
+
+VMovrelsB32Vop3::VMovrelsB32Vop3(const MachineInst *inst)
+    : Vop3("v_movrels_b32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMovrelsB32Vop3)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      m0(32, OperandType::OPR_SDST_M0, 124) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
+  num_dst_ = 1;
+  m0.apply_fieldless_caps(false, false, false);
+}
+
+namespace detail {
+DecodeResult decodeVMovrelsB32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_movrels_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMovrelsB32Vop3>(opcode);
+}
+} // namespace detail
+
+VMovrelsdB32Vop3::VMovrelsdB32Vop3(const MachineInst *inst)
+    : Vop3("v_movrelsd_b32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMovrelsdB32Vop3)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      m0(32, OperandType::OPR_SDST_M0, 124) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
+  num_dst_ = 1;
+  m0.apply_fieldless_caps(false, false, false);
+}
+
+namespace detail {
+DecodeResult decodeVMovrelsdB32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_movrelsd_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMovrelsdB32Vop3>(opcode);
+}
+} // namespace detail
+
+VMovrelsd2B32Vop3::VMovrelsd2B32Vop3(const MachineInst *inst)
+    : Vop3("v_movrelsd_2_b32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMovrelsd2B32Vop3)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      m0(32, OperandType::OPR_SDST_M0, 124) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
+  num_dst_ = 1;
+  m0.apply_fieldless_caps(false, false, false);
+}
+
+namespace detail {
+DecodeResult decodeVMovrelsd2B32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_movrelsd_2_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMovrelsd2B32Vop3>(opcode);
 }
 } // namespace detail
 
@@ -6310,12 +6386,15 @@ VInterpP1llF16Vop3::VInterpP1llF16Vop3(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::VInterpP1llF16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src0(16, OperandType::OPR_ATTR, (reinterpret_cast<const OpEncoding *>(inst)->src0 & 0x3fu)) {
+      src0(16, OperandType::OPR_ATTR, (reinterpret_cast<const OpEncoding *>(inst)->src0 & 0x3fu)),
+      lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src1;
   src_operands_[1] = &src0;
   num_src_ = 2;
   num_dst_ = 1;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  src_operands_[num_src_++] = &lds_m0;
   flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
@@ -6336,13 +6415,16 @@ VInterpP1lvF16Vop3::VInterpP1lvF16Vop3(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src0(16, OperandType::OPR_ATTR, (reinterpret_cast<const OpEncoding *>(inst)->src0 & 0x3fu)),
-      src2(16, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src2(16, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2),
+      lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src1;
   src_operands_[1] = &src0;
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  src_operands_[num_src_++] = &lds_m0;
   flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
@@ -7034,13 +7116,16 @@ VInterpP2F16Vop3::VInterpP2F16Vop3(const MachineInst *inst)
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src0(16, OperandType::OPR_ATTR, (reinterpret_cast<const OpEncoding *>(inst)->src0 & 0x3fu)),
-      src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2),
+      lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src1;
   src_operands_[1] = &src0;
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  src_operands_[num_src_++] = &lds_m0;
   vdst.set_register_byte_mask((amdgpu::vop3_opsel(inst_) & 8) ? 0xc : 0x3);
   vdst.set_preserve_unwritten_bytes();
   flags_ |= EMBEDDED_MEMORY_WAIT;

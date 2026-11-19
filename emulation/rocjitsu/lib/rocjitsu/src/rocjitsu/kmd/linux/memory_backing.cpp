@@ -544,21 +544,27 @@ private:
 
   bool helper_disconnected() const {
     const int socket = connect_socket();
-    if (socket < 0)
-      return errno == ECONNREFUSED;
-    // A live keeper replies to an empty batch. A stopped keeper can keep its
-    // lease even when it cannot reply within the deadline.
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
-    kmd::KeeperRequest request{0, O_RDWR, kmd::KeeperOperation::FlushFiles, {}};
-    bool closed;
-    if (kmd::send_keeper_descriptor(socket, &request, sizeof(request), -1) != 0)
-      closed = errno == EPIPE || errno == ECONNRESET;
-    else
-      closed = poll_until(socket, POLLIN | POLLRDHUP, deadline) & (POLLHUP | POLLRDHUP | POLLERR);
-    finish_private_request(socket);
-    host_close_fd(socket);
-    if (!closed)
-      return false;
+    if (socket < 0) {
+      if (errno == ECONNREFUSED)
+        return true;
+      // The cookie exchange can lose its connection before pidfd reports exit.
+      if (errno != EPIPE && errno != ECONNRESET)
+        return false;
+    } else {
+      // A live keeper replies to an empty batch. A stopped keeper can keep its
+      // lease even when it cannot reply within the deadline.
+      kmd::KeeperRequest request{0, O_RDWR, kmd::KeeperOperation::FlushFiles, {}};
+      bool closed;
+      if (kmd::send_keeper_descriptor(socket, &request, sizeof(request), -1) != 0)
+        closed = errno == EPIPE || errno == ECONNRESET;
+      else
+        closed = poll_until(socket, POLLIN | POLLRDHUP, deadline) & (POLLHUP | POLLRDHUP | POLLERR);
+      finish_private_request(socket);
+      host_close_fd(socket);
+      if (!closed)
+        return false;
+    }
 
     // The helper can reject a private channel under memory pressure. During
     // exit it can close the channel before releasing the listener. Give it the
