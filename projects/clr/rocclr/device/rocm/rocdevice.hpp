@@ -676,11 +676,13 @@ class Device : public NullDevice {
   void* hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg) const;
 
   //! Pin a host pointer allocated by C/C++ or OS allocator (i.e. ordinary system DRAM) and
-  //! return a new device pointer accessible by the GPU agent.
-  // mapAllAgents locks the range to every enumerated GPU in one call. The default
-  // locks only this device.
+  //! return a new device pointer accessible by the GPU agent(s).
+  // lockAgents, when non-empty, locks/maps the range to exactly that set of agents in a
+  // single hsa_amd_memory_lock_to_pool call (used when several devices in the same context
+  // share one host-registered buffer, so they don't each lock the same range separately).
+  // When empty (the default), only this device's own agent is locked.
   void* hostLock(void* hostMem, size_t size, MemorySegment memSegment,
-                 bool mapAllAgents = false) const;
+                 const std::vector<hsa_agent_t>& lockAgents = {}) const;
 
   [[nodiscard]] bool writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
                                        const void* src) const override;

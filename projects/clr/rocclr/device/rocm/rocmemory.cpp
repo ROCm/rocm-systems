@@ -1194,23 +1194,62 @@ bool Buffer::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
     owner()->setHostMem(deviceMemory_);
   } else if (owner()->getSvmPtr() != owner()->getHostMem()) {
     if (memFlags & (CL_MEM_USE_HOST_PTR | CL_MEM_ALLOC_HOST_PTR)) {
-      // hipHostRegister creates this buffer on every device. Locking each device
-      // separately repeats register+map once per GPU. The first device locks every
-      // GPU in one call; the rest reuse that address.
+      // hipHostRegister creates this buffer on every device in the context. Locking each
+      // device separately repeats register+map once per GPU. Instead, the first device to
+      // reach this point locks every device *in this context* in one
+      // hsa_amd_memory_lock_to_pool call; the rest reuse that address.
+      //
+      // Reading/writing sibling device::Memory state below is safe because
+      // Memory::addDeviceMemory() serializes per-owner device creation via
+      // owner()->lockMemoryOps() (see platform/memory.cpp). Take that lock explicitly
+      // too (it is a recursive_mutex, so this is a no-op when already held) so the
+      // invariant holds even for callers that create device memory without going
+      // through addDeviceMemory.
+      std::scoped_lock lock(owner()->lockMemoryOps());
+
+      const auto& contextDevices = owner()->getContext().devices();
+
       void* shared = nullptr;
-      for (amd::Device* other : owner()->getContext().devices()) {
+      for (amd::Device* other : contextDevices) {
         if (other == &dev()) continue;
         device::Memory* existing = owner()->getDeviceMemory(*other, false);
         if (existing == nullptr) continue;
+        // Only reuse a sibling's mapping when its lock call actually covered every
+        // device in this context. A sibling that fell back to locking only itself
+        // (see below) was never mapped for our agent and must not be reused.
+        // (existing is always a sibling Buffer here: it's created by this same
+        // Buffer::create() path for every device sharing this host-registered owner.)
+        if (!static_cast<Buffer*>(existing)->hostLockCoversAllDevices_) continue;
         shared = reinterpret_cast<void*>(existing->virtualAddress());
         if (shared != nullptr) break;
       }
+
       if (shared != nullptr) {
         deviceMemory_ = shared;
-      } else {
-        const bool mapAllAgents = owner()->getContext().devices().size() > 1;
+      } else if (contextDevices.size() > 1) {
+        // Build the agent list from this context's own devices, not every GPU visible
+        // to the process, so we never lock/map memory onto devices outside the context.
+        std::vector<hsa_agent_t> lockAgents;
+        lockAgents.reserve(contextDevices.size());
+        for (amd::Device* d : contextDevices) {
+          lockAgents.push_back(static_cast<const roc::Device*>(d)->getBackendDevice());
+        }
         deviceMemory_ = dev().hostLock(owner()->getHostMem(), owner()->getSize(),
-                                       getHostMemorySegment(memFlags), mapAllAgents);
+                                       getHostMemorySegment(memFlags), lockAgents);
+        if (deviceMemory_ != nullptr) {
+          hostLockOwner_ = true;
+          hostLockCoversAllDevices_ = true;
+        } else {
+          // The group lock failed (e.g. one peer agent is unavailable). Fall back to
+          // locking just this device so the remaining devices can still succeed
+          // independently, instead of failing the whole hipHostRegister call.
+          deviceMemory_ = dev().hostLock(owner()->getHostMem(), owner()->getSize(),
+                                         getHostMemorySegment(memFlags));
+          hostLockOwner_ = deviceMemory_ != nullptr;
+        }
+      } else {
+        deviceMemory_ = dev().hostLock(owner()->getHostMem(), owner()->getSize(),
+                                       getHostMemorySegment(memFlags));
         hostLockOwner_ = deviceMemory_ != nullptr;
       }
     } else {

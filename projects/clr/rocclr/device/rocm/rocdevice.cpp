@@ -2492,7 +2492,7 @@ void* Device::hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg
 }
 
 void* Device::hostLock(void* hostMem, size_t size, const MemorySegment memSegment,
-                        bool mapAllAgents) const {
+                        const std::vector<hsa_agent_t>& lockAgents) const {
   hsa_amd_memory_pool_t pool = getHostMemoryPool(memSegment);
   void* deviceMemory = nullptr;
   uint32_t memFlags = 0;
@@ -2500,15 +2500,15 @@ void* Device::hostLock(void* hostMem, size_t size, const MemorySegment memSegmen
     memFlags |= HSA_AMD_MEMORY_POOL_UNCACHED_FLAG;
   }
 
-  hsa_agent_t* agents = const_cast<hsa_agent_t*>(&bkendDevice_);
-  int numAgents = 1;
-  if (mapAllAgents && !gpu_agents_.empty()) {
-    agents = gpu_agents_.data();
-    numAgents = static_cast<int>(gpu_agents_.size());
-  }
+  // Default to locking just this device's own agent. Callers that want the range mapped
+  // for a specific set of devices (e.g. every device sharing one host-registered buffer)
+  // pass that set explicitly, so we never lock agents outside what the caller asked for.
+  hsa_agent_t self = bkendDevice_;
+  const hsa_agent_t* agents = lockAgents.empty() ? &self : lockAgents.data();
+  int numAgents = lockAgents.empty() ? 1 : static_cast<int>(lockAgents.size());
 
   hsa_status_t status = Hsa::memory_lock_to_pool(
-      hostMem, size, agents, numAgents, pool, memFlags, &deviceMemory);
+      hostMem, size, const_cast<hsa_agent_t*>(agents), numAgents, pool, memFlags, &deviceMemory);
   ClPrint(amd::LOG_DEBUG, amd::LOG_MEM,
           "Locking to pool %p, size 0x%zx, hostMem = %p,"
           " deviceMemory = %p, memSegment = %d",
