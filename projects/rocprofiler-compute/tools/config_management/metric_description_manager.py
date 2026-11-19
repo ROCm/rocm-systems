@@ -21,13 +21,11 @@ Usage (paths relative to project root):
     python $SCRIPT --generate-docs --docs-arch gfx115x
 """
 
-from __future__ import annotations
-
 import argparse
 import re
 import sys
 from pathlib import Path
-from typing import Union
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 import yaml
 
@@ -39,7 +37,7 @@ from config_management import utils_ruamel as cm_utils
 
 # gfx1250 metric_table ids -> documentation section names (disambiguated
 # where multiple panels reuse generic titles like "Utilization").
-GFX1250_PANEL_ID_TO_SECTION: dict[int, str] = {
+GFX1250_PANEL_ID_TO_SECTION: Dict[int, str] = {
     1: "Top Kernels",
     2: "Dispatch List",
     101: "System Info",
@@ -134,7 +132,7 @@ GFX1250_PANEL_ID_TO_SECTION: dict[int, str] = {
     2101: "PC Sampling",
 }
 
-GFX1201_PANEL_ID_TO_SECTION: dict[int, str] = {
+GFX1201_PANEL_ID_TO_SECTION: Dict[int, str] = {
     201: "System Speed-of-Light",
     301: "Memory chart - Instruction Cache",
     302: "Memory chart - Scalar Data Cache",
@@ -167,7 +165,7 @@ GFX1201_PANEL_ID_TO_SECTION: dict[int, str] = {
 }
 
 # All CDNA architectures share the same panel ID mapping.
-CDNA_PANEL_ID_TO_SECTION: dict[int, str] = {
+CDNA_PANEL_ID_TO_SECTION: Dict[int, str] = {
     201: "System Speed-of-Light",
     301: "Memory chart",
     401: "Roofline Performance Rates",
@@ -208,7 +206,7 @@ CDNA_PANEL_ID_TO_SECTION: dict[int, str] = {
 }
 
 # RDNA 3.5 (gfx115x) metric_table ids -> section names
-RDNA35_PANEL_ID_TO_SECTION_BY_ARCH: dict[int, str] = {
+RDNA35_PANEL_ID_TO_SECTION_BY_ARCH: Dict[int, str] = {
     1: "Top Kernels",
     2: "Dispatch List",
     101: "System Info",
@@ -331,7 +329,7 @@ def normalize_docs_metric_name(arch_name: str, metric_name: str) -> str:
     return replacements.get(metric_name, metric_name)
 
 
-def panel_id_to_section(arch_name: str, table_id: int | None) -> str | None:
+def panel_id_to_section(arch_name: str, table_id: Optional[int]) -> Optional[str]:
     """Resolve documentation section name for a metric_table id (arch-specific)."""
     if table_id is None:
         return None
@@ -344,12 +342,12 @@ def panel_id_to_section(arch_name: str, table_id: int | None) -> str | None:
     return CDNA_PANEL_ID_TO_SECTION.get(table_id)
 
 
-def validate_rst_syntax(text: str) -> tuple[bool, str]:
+def validate_rst_syntax(text: str) -> Tuple[bool, str]:
     """Basic RST syntax validation."""
     if not text:
         return True, ""
 
-    errors: list[str] = []
+    errors: List[str] = []
 
     single_backticks = text.count("`")
     if single_backticks % 2 != 0:
@@ -379,14 +377,14 @@ def validate_rst_syntax(text: str) -> tuple[bool, str]:
 
 def extract_descriptions_from_arch(
     arch_dir: Union[str, Path],
-) -> dict[str, dict[str, dict]]:
+) -> Dict[str, Dict[str, dict]]:
     """
     Extract metric descriptions from all config YAMLs in an arch.
     Returns dict organized by section name.
     """
     arch_path = Path(arch_dir)
     arch_name = arch_path.name
-    descriptions_by_section: dict[str, dict[str, dict]] = {}
+    descriptions_by_section: Dict[str, Dict[str, dict]] = {}
 
     for yaml_file in sorted(arch_path.glob("*.yaml")):
         data = cm_utils.load_yaml(yaml_file)
@@ -397,8 +395,8 @@ def extract_descriptions_from_arch(
 
         panel_descriptions: dict = panel_config.get("metrics_description", {})
 
-        metrics_with_units: dict[str, dict[str, str]] = {}
-        metrics_sections: dict[str, str] = {}  # Track ALL metrics and their sections
+        metrics_with_units: Dict[str, Dict[str, str]] = {}
+        metrics_sections: Dict[str, str] = {}  # Track ALL metrics and their sections
         for ds in panel_config.get("data source", []):
             for key, value in ds.items():
                 if isinstance(value, dict) and "metric" in value:
@@ -470,7 +468,7 @@ def update_per_arch_metrics_file(
     output_path = Path(output_dir) / f"{arch_name}_metrics_description.yaml"
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    per_arch_descriptions: dict[str, dict[str, dict]] = {}
+    per_arch_descriptions: Dict[str, Dict[str, dict]] = {}
     for section, metrics in descriptions.items():
         per_arch_descriptions[section] = {}
         for metric_name, desc_data in metrics.items():
@@ -554,18 +552,18 @@ def preserve_manual_rst_edits(new_descriptions: dict, existing_per_arch: dict) -
     return new_descriptions
 
 
-def resolved_docs_target_archs(per_arch_dir: Union[str, Path]) -> list[str]:
+def resolved_docs_target_archs(per_arch_dir: Union[str, Path]) -> List[str]:
     """Doc emit list: the arch of every per-arch YAML on disk."""
     suffix = "_metrics_description.yaml"
     return sorted(
-        path.name.removesuffix(suffix) for path in Path(per_arch_dir).glob(f"*{suffix}")
+        path.name[: -len(suffix)] for path in Path(per_arch_dir).glob(f"*{suffix}")
     )
 
 
 def generate_docs_from_per_arch(
     per_arch_dir: Union[str, Path],
     docs_output_dir: Union[str, Path],
-    target_archs: list[str] | None = None,
+    target_archs: Optional[List[str]] = None,
 ) -> bool:
     """
     Generate per-arch documentation YAMLs from per-arch metric definitions.
@@ -618,11 +616,11 @@ def generate_docs_from_per_arch(
 
 def validate_descriptions(
     arch_dir: Union[str, Path],
-) -> tuple[bool, list[str], list[str]]:
+) -> Tuple[bool, List[str], List[str]]:
     """Validate: missing descriptions and basic RST syntax."""
     arch_path = Path(arch_dir)
-    warnings: list[str] = []
-    errors: list[str] = []
+    warnings: List[str] = []
+    errors: List[str] = []
 
     for yaml_file in sorted(arch_path.glob("*.yaml")):
         with open(yaml_file) as f:
@@ -633,7 +631,7 @@ def validate_descriptions(
             continue
 
         panel_descriptions: dict = panel_config.get("metrics_description", {})
-        all_metrics: set[str] = set()
+        all_metrics: Set[str] = set()
 
         for ds in panel_config.get("data source", []):
             for _, value in ds.items():
