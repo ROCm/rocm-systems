@@ -948,6 +948,13 @@ if(NOT TEST_FROM_INSTALL)
             --junitxml=tests/test_validate_metric_library.xml ${COV_OPTION}
             tools/test_validate_metric_library.py ${WORKING_DIR_OPTION}
     )
+
+    add_test(
+        NAME test_validate_views
+        COMMAND
+            ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_validate_views.xml
+            ${COV_OPTION} tools/test_validate_views.py ${WORKING_DIR_OPTION}
+    )
 endif()
 
 add_test(
