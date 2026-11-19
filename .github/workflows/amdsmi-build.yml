@@ -76,11 +76,13 @@ jobs:
               image: "debian:12@sha256:6ebd97fa83deb272194a2cf015b3d26a4d538e9ad3a7a79d544c8af5b0a01443" } # bookworm, 2026-08-24
           - { os: Debian13,    package_format: deb, arch_suffix: _amd64.deb,
               image: "debian:13@sha256:f324c7ff54321e8d9c588493a20244965938ce0aa50bbd1022d38010e9ffc4b1" } # trixie, 2026-08-24
-          - { os: SLES,        package_format: rpm, arch_suffix: .rpm }
-          - { os: RHEL8,       package_format: rpm, arch_suffix: .rpm }
+          # python36: the distro python3 is 3.6, the oldest supported. run_amdsmi_build.py
+          # moves python3 to a newer one, so the unit suite also runs on /usr/bin/python3.6.
+          - { os: SLES,        package_format: rpm, arch_suffix: .rpm, python36: true }
+          - { os: RHEL8,       package_format: rpm, arch_suffix: .rpm, python36: true }
           - { os: RHEL9,       package_format: rpm, arch_suffix: .rpm }
           - { os: RHEL10,      package_format: rpm, arch_suffix: .rpm }
-          - { os: AlmaLinux8,  package_format: rpm, arch_suffix: .rpm }
+          - { os: AlmaLinux8,  package_format: rpm, arch_suffix: .rpm, python36: true }
           - { os: AzureLinux3, package_format: rpm, arch_suffix: .rpm }
     container:
       image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] || matrix.image }}
@@ -268,6 +270,10 @@ jobs:
           cd /opt/rocm/share/amd_smi/tests/python_unittest
           run "$RESULTS_DIR/integration_test_output.txt" ./integration_test.py -v
           run "$RESULTS_DIR/unit_test_output.txt" ./unit_tests.py -v
+          # By path, not guarded by a file test: a leg that loses the interpreter fails here.
+          if [ "${{ matrix.python36 }}" = "true" ]; then
+            run "$RESULTS_DIR/unit_test_py36_output.txt" /usr/bin/python3.6 ./unit_tests.py -v
+          fi
           run "$RESULTS_DIR/cli_test_output.txt" ./cli_unit_test.py -v
           run "$RESULTS_DIR/abi_compat_output.txt" python3 test_abi_compat.py -v
 
@@ -296,6 +302,10 @@ jobs:
       - name: Unit Test Results
         if: always()
         run: cat /tmp/test-results-${{ matrix.os }}/unit_test_output.txt || echo "No unit test results"
+
+      - name: Unit Test Results (Python 3.6)
+        if: ${{ always() && matrix.python36 }}
+        run: cat /tmp/test-results-${{ matrix.os }}/unit_test_py36_output.txt || echo "No Python 3.6 unit test results"
 
       - name: CLI Test Results
         if: always()

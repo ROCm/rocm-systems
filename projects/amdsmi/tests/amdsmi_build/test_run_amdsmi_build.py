@@ -22,9 +22,7 @@ from pathlib import Path
 
 def _load_module():
     here = Path(__file__).resolve().parent
-    spec = importlib.util.spec_from_file_location(
-        "run_amdsmi_build", here / "run_amdsmi_build.py"
-    )
+    spec = importlib.util.spec_from_file_location("run_amdsmi_build", here / "run_amdsmi_build.py")
     mod = importlib.util.module_from_spec(spec)
     # Register before exec: @dataclass resolves its module via sys.modules on
     # Python 3.12+, so a module loaded outside sys.modules fails to import.
@@ -229,7 +227,9 @@ class SummarizeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             results = Path(td)
             (results / "test_nic_vpd_suite.log").write_text("20 tests run, 0 failed\n")
-            (results / "test_nic_stats_suite.log").write_text("175 tests run, 1 failed\nExit code: 1\n")
+            (results / "test_nic_stats_suite.log").write_text(
+                "175 tests run, 1 failed\nExit code: 1\n"
+            )
             summary = results / "summary.md"
             n = rab.summarize_results(results, "TestOS", summary)
             text = summary.read_text()
@@ -242,6 +242,15 @@ class SummarizeTests(unittest.TestCase):
             results = Path(td)
             (results / "cli_test_output.txt").write_text("FAIL: test_command\n")
             self.assertEqual(rab.summarize_results(results, "TestOS", None), 1)
+
+    def test_python36_unit_test_failures_are_counted(self):
+        with tempfile.TemporaryDirectory() as td:
+            results = Path(td)
+            (results / "unit_test_output.txt").write_text("Ran 3 tests\n\nOK\n")
+            (results / "unit_test_py36_output.txt").write_text("ERROR: test_a\nExit code: 1\n")
+            summary = results / "summary.md"
+            self.assertEqual(rab.summarize_results(results, "TestOS", summary), 1)
+            self.assertIn("unit test py36 (1)", summary.read_text())
 
     def test_suite_output_cannot_hide_the_exit_code_line(self):
         with tempfile.TemporaryDirectory() as td:

@@ -943,12 +943,7 @@ def verify_wheel_site_packages(cfg: "RunnerConfig") -> None:
         # instead. The runner is a disposable container, so overriding PEP 668
         # is safe here.
         install_cmd.append("--break-system-packages")
-    run_command(
-        install_cmd,
-        name="pip-install-wheel",
-        retries=1,
-        log_dir=cfg.log_dir,
-    )
+    run_command(install_cmd, name="pip-install-wheel", retries=1, log_dir=cfg.log_dir)
 
     run_command(
         ["python3", "-m", "pip", "show", "amdsmi"],
@@ -1310,6 +1305,7 @@ def summarize_results(results_dir: Path, os_label: str, summary_file: Optional[P
     for test_file in (
         "integration_test_output.txt",
         "unit_test_output.txt",
+        "unit_test_py36_output.txt",
         "cli_test_output.txt",
         "abi_compat_output.txt",
     ):
