@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <ostream>
@@ -1307,6 +1308,89 @@ TEST(Gfx1250SimulationTest, ClusterRoundIgnoresAWorkgroupsSecondSignal) {
   ASSERT_EQ(waits.size(), 4u);
   for (const auto &wait : waits)
     EXPECT_EQ(wait.round, round);
+}
+
+// A workgroup that ends completes the cluster round its peer signalled
+// (CDNA5 ISA 5.6.6), and that completion starts the barrier's next generation
+// like any other: the surviving workgroup's second round is generation 1, and
+// each of its waves passes one wait for each round.
+TEST(Gfx1250SimulationTest, ClusterRoundCompletedByAnExitingWorkgroupAdvancesTheGeneration) {
+  // Long enough for workgroup 0 to signal and park in its first wait before
+  // workgroup 1 ends.
+  constexpr int16_t kDelay = 16;
+  // TTMP6[3:0] is the workgroup's X position in its cluster.
+  constexpr uint16_t kTtmp6 = 114;
+  constexpr auto is_first_workgroup =
+      cdna5::build_sopc(cdna5::kSBitcmp0B32Sopc, {.ssrc0 = kTtmp6, .ssrc1 = 128});
+  constexpr auto exit_workgroup = cdna5::build_sopp(cdna5::kSCbranchScc0Sopp, {.simm16 = 8});
+  constexpr auto read_first_workitem =
+      cdna5::build_vop1(cdna5::kVReadfirstlaneB32Vop1, {.src0 = 256, .vdst = 4});
+  constexpr auto is_first_wave =
+      cdna5::build_sopc(cdna5::kSCmpEqU32Sopc, {.ssrc0 = 4, .ssrc1 = 128});
+  constexpr auto skip_signal = cdna5::build_sopp(cdna5::kSCbranchScc0Sopp, {.simm16 = 1});
+  std::vector<uint32_t> code = {
+      is_first_workgroup[0],  // s_bitcmp0_b32 ttmp6, 0
+      exit_workgroup[0],      // s_cbranch_scc0 end
+      read_first_workitem[0], // v_readfirstlane_b32 s4, v0
+      is_first_wave[0],       // s_cmp_eq_u32 s4, 0
+      skip_signal[0],         // s_cbranch_scc0 first_wait
+      0xBE804EC3u,            // s_barrier_signal -3
+      0xBF94FFFDu,            // first_wait: s_barrier_wait -3
+      skip_signal[0],         // s_cbranch_scc0 second_wait
+      0xBE804EC3u,            // s_barrier_signal -3
+      0xBF94FFFDu,            // second_wait: s_barrier_wait -3
+  };
+  code.insert(code.end(), kDelay, 0xBF800000u); // end: s_nop
+  code.push_back(S_ENDPGM_GFX12);
+
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto plugin = std::make_unique<BarrierHookRecorder>();
+  auto *recorder = plugin.get();
+  ASSERT_TRUE(sim.plugin_group->add(std::move(plugin)));
+  sim.cp()->set_dispatch_threads(2);
+  ASSERT_EQ(sim.cp()->dispatch_threads(), 2u);
+  uint64_t kernel_object = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32, 2, false,
+                                            false, false, 0, 0, 0, 0, 0, 1);
+  test::AqlQueue queue(sim.memory, sim.cp());
+  // Two workgroups of two wave32 waves each.
+  queue.dispatch_clustered(kernel_object, /*cluster_count_x=*/1, /*cluster_size_x=*/2,
+                           /*workgroup_size_x=*/64);
+  step_until_xcd_halted(sim);
+  ASSERT_EQ(sim.snapshot->snapshots().size(), 4u);
+
+  using Hook = BarrierHookRecorder::Hook;
+  const BarrierRound round0 = clusterRound(0);
+  const BarrierRound round1 = clusterRound(1);
+
+  // Only workgroup 0's first wave signals, once for each round.
+  const auto signals = recorder->events(Hook::Signaled);
+  ASSERT_EQ(signals.size(), 2u);
+  EXPECT_EQ(signals[0].round, round0);
+  EXPECT_EQ(signals[1].round, round1);
+  EXPECT_EQ(signals[0].wave, signals[1].wave);
+  EXPECT_EQ(signals[0].workgroups, (std::vector<uint32_t>{0}));
+
+  // Each round notifies the two waves of the surviving workgroup.
+  const auto completions = recorder->events(Hook::RoundCompleted);
+  ASSERT_EQ(completions.size(), 2u);
+  EXPECT_EQ(completions[0].round, round0);
+  EXPECT_EQ(completions[0].workgroups, (std::vector<uint32_t>{0, 0}));
+  EXPECT_EQ(completions[1].round, round1);
+  EXPECT_EQ(completions[1].workgroups, (std::vector<uint32_t>{0, 0}));
+
+  // Each surviving wave passes a wait for round 0, then one for round 1.
+  const auto waits = recorder->events(Hook::WaitPassed);
+  ASSERT_EQ(waits.size(), 4u);
+  std::map<const amdgpu::Wavefront *, std::vector<uint64_t>> generations;
+  for (const auto &wait : waits) {
+    EXPECT_EQ(wait.round.kind, BarrierKind::Cluster);
+    EXPECT_EQ(wait.workgroups, (std::vector<uint32_t>{0}));
+    generations[wait.wave].push_back(wait.round.generation);
+  }
+  ASSERT_EQ(generations.size(), 2u);
+  for (const auto &[wave, passed] : generations)
+    EXPECT_EQ(passed, (std::vector<uint64_t>{0, 1}));
 }
 
 TEST(Gfx1250SimulationTest, VgprMsbModeTracksModeRegisterLayout) {
