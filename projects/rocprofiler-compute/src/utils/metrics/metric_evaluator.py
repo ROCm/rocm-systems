@@ -26,12 +26,14 @@ from utils.metrics.aggregation import (
     to_sum,
 )
 from utils.metrics.common import EVAL_BUILTINS
-from utils.metrics.expression import columns_read
+from utils.metrics.expression import build_eval_string, columns_read
+from utils.schema import PassTable
+from utils.utils_counter_defs import extract_counters_and_variables
 
 
 def counter_table_index(
     eval_string: object,
-    tables: list[pd.DataFrame],
+    tables: list[pd.DataFrame | PassTable],
     build_in_vars: dict[str, str],
 ) -> int:
     """Return the index of the table an eval string should read.
@@ -41,17 +43,66 @@ def counter_table_index(
     the merged table wins.
     """
     if isinstance(eval_string, str):
+        columns = columns_read(eval_string, build_in_vars)
         for index, table in enumerate(tables[:-1]):
-            if table_holds(eval_string, table, build_in_vars):
+            if has_columns(table, columns):
                 return index
     return len(tables) - 1
 
 
-def table_holds(
-    eval_string: str, table: pd.DataFrame, build_in_vars: dict[str, str]
-) -> bool:
-    """Return whether table has every column the eval string reads."""
-    return columns_read(eval_string, build_in_vars) <= set(table.columns)
+def has_columns(table: pd.DataFrame | PassTable, columns: set[str]) -> bool:
+    """Return whether table has every column in columns."""
+    return all(column in table.columns for column in columns)
+
+
+def collectables_per_table(
+    eval_strings: list[object],
+    table_indexes: list[int],
+    tables: list[pd.DataFrame | PassTable],
+    collectables: dict[str, str],
+    used: set[str],
+) -> list[set[str]]:
+    """Return the collectables to evaluate on each table.
+
+    eval_strings[i] reads tables[table_indexes[i]], as counter_table_index
+    chose. Callers list the pass tables first and the merged table last.
+    """
+    merged_index = len(tables) - 1
+    to_evaluate: list[set[str]] = [set() for _table in tables]
+
+    # A pass table evaluates the collectables its eval strings use
+    for eval_string, index in zip(eval_strings, table_indexes):
+        if index != merged_index:
+            to_evaluate[index].update(_collectables_used(eval_string, collectables))
+
+    # The merged table takes each collectable from the first table that holds
+    # its counters, so that table evaluates it, with the ones it uses
+    holders: dict[str, set[int]] = {}
+    for name in used:
+        columns = columns_read(build_eval_string(collectables[name]), collectables)
+        holders[name] = {
+            index for index, table in enumerate(tables) if has_columns(table, columns)
+        }
+        if holders[name]:
+            first_holder = min(holders[name])
+            to_evaluate[first_holder].add(name)
+            to_evaluate[first_holder].update(
+                _collectables_used(collectables[name], collectables)
+            )
+
+    # Leave out a collectable the expressions do not use or the table lacks
+    return [
+        {name for name in names if name in used and index in holders[name]}
+        for index, names in enumerate(to_evaluate)
+    ]
+
+
+def _collectables_used(text: object, collectables: dict[str, str]) -> set[str]:
+    """Return the collectables text uses, and the ones those use in turn."""
+    _, names = extract_counters_and_variables(
+        str(text), collectables, include_supported_denom=False
+    )
+    return names
 
 
 class MetricEvaluator:
