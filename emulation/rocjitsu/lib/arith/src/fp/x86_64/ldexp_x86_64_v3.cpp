@@ -4,6 +4,7 @@
 // AVX2 FP32/FP64 scaling by powers of two with guest rounding and denormal policies.
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
+#include "common/bits.h"
 #include "common/compiler.h"
 #include "common/x86_64/alu_x86_64_v3.h"
 #include "fp/ldexp.h"
@@ -301,6 +302,80 @@ void ldexp_guest_x86_64_v3(bool fp64, uint64_t flags, uint32_t exec_mask,
                            uint32_t instruction_flags, uint32_t *const *d, const uint32_t *const *a,
                            const uint32_t *b) {
   run<true>(fp64, flags, exec_mask, instruction_flags, d, a, b);
+}
+
+// Exact normal scales change only the exponent. Boundary and subnormal lanes
+// retain the baseline rounding model; no lane forces a whole-wave fallback.
+void ldexp_f32_exact_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
+                               uint32_t *d, const uint32_t *a, const uint32_t *b, bool quiet_snan) {
+  uint32_t result[32];
+  uint32_t repairs = 0;
+  const unsigned omod = (instruction_flags >> 6) & 3;
+  const auto delta = _mm256_set1_epi32(omod == 3 ? -1 : int(omod));
+  const auto zero = _mm256_setzero_si256(), infinity = _mm256_set1_epi32(0x7f800000);
+  RJ_ARITH_UNROLL(4)
+  for (int lane = 0; lane < 32; lane += 8) {
+    auto raw = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(a + lane));
+    if (instruction_flags & RJ_ARITH_ALU_ABS_A) {
+      raw = _mm256_and_si256(raw, _mm256_set1_epi32(INT32_MAX));
+    }
+    if (instruction_flags & RJ_ARITH_ALU_NEG_A) {
+      raw = _mm256_xor_si256(raw, _mm256_set1_epi32(INT32_MIN));
+    }
+    if (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) {
+      raw = _mm256_castps_si256(flush_denorm_f32(_mm256_castsi256_ps(raw)));
+    }
+    const auto magnitude = _mm256_and_si256(raw, _mm256_set1_epi32(INT32_MAX));
+    const auto exponent = _mm256_srli_epi32(magnitude, 23);
+    auto adjustment = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(b + lane));
+    adjustment = _mm256_min_epi32(_mm256_max_epi32(adjustment, _mm256_set1_epi32(-4096)),
+                                  _mm256_set1_epi32(4096));
+    const auto scaled = _mm256_add_epi32(exponent, adjustment);
+    const auto final_exponent = _mm256_add_epi32(scaled, delta);
+    // Check pre-OMOD and final ranges independently: OMOD cannot rescue a tiny
+    // or overflowing intermediate. All admitted normal operations are exact.
+    auto normal = _mm256_and_si256(_mm256_cmpgt_epi32(exponent, zero),
+                                   _mm256_cmpgt_epi32(_mm256_set1_epi32(255), exponent));
+    normal = _mm256_and_si256(normal,
+                              _mm256_and_si256(_mm256_cmpgt_epi32(scaled, zero),
+                                               _mm256_cmpgt_epi32(_mm256_set1_epi32(255), scaled)));
+    normal = _mm256_and_si256(
+        normal, _mm256_and_si256(_mm256_cmpgt_epi32(final_exponent, zero),
+                                 _mm256_cmpgt_epi32(_mm256_set1_epi32(255), final_exponent)));
+    const auto zeros = _mm256_cmpeq_epi32(magnitude, zero);
+    const auto special =
+        _mm256_or_si256(zeros, _mm256_cmpgt_epi32(magnitude, _mm256_set1_epi32(0x7f7fffff)));
+    const auto quiet = _mm256_and_si256(_mm256_cmpgt_epi32(magnitude, infinity),
+                                        _mm256_set1_epi32(quiet_snan ? 0x00400000 : 0));
+    auto special_value = _mm256_or_si256(raw, quiet);
+    if (omod) {
+      special_value = _mm256_andnot_si256(zeros, special_value);
+    }
+    auto value = _mm256_or_si256(_mm256_and_si256(raw, _mm256_set1_epi32(INT32_MIN | 0x7fffff)),
+                                 _mm256_slli_epi32(final_exponent, 23));
+    value = _mm256_blendv_epi8(value, special_value, special);
+    if (instruction_flags & RJ_ARITH_ALU_CLAMP) {
+      value = _mm256_castps_si256(
+          clamp_f32(_mm256_castsi256_ps(value), flags & RJ_ARITH_FP_DX10_CLAMP_OFF));
+    }
+    _mm256_storeu_si256(reinterpret_cast<__m256i *>(result + lane), value);
+    repairs |=
+        (~unsigned(_mm256_movemask_ps(_mm256_castsi256_ps(_mm256_or_si256(normal, special)))) &
+         0xffU)
+        << lane;
+  }
+  while (repairs) {
+    const int lane = int(bit_count_zero<true>(repairs));
+    repairs &= repairs - 1;
+    result[lane] = ldexp_f32_value_baseline(a[lane], bit_cast<int32_t>(b[lane]), flags,
+                                            instruction_flags, quiet_snan);
+  }
+  for (int lane = 0; lane < 32; lane += 8) {
+    const auto active = _mm256_sllv_epi32(_mm256_set1_epi32(int(exec_mask >> lane)),
+                                          _mm256_setr_epi32(31, 30, 29, 28, 27, 26, 25, 24));
+    _mm256_maskstore_epi32(reinterpret_cast<int *>(d + lane), active,
+                           _mm256_loadu_si256(reinterpret_cast<const __m256i *>(result + lane)));
+  }
 }
 
 } // namespace rocjitsu::arith

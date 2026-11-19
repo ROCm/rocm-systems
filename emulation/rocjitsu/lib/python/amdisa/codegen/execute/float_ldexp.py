@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Emit shared/ldexp.h calls for V_LDEXP_F16/F32/F64 on raw encodings.
+"""Emit shared/ldexp.h calls for the remaining legacy LDEXP formats.
 
 Scalar bodies and SIMD functors use the same helper with the same MODE policy,
 resolved once before the lane loop. VOP3 forms use shared/floating_operation.h
@@ -96,7 +96,6 @@ def simd_probe(template_name: str, true16_vop3: bool = False) -> str | None:
     """
     dtype = {
         'v_ldexp_f16_vop3': 'f16',
-        'v_ldexp_f32_vop3': 'f32',
     }.get(template_name)
     if dtype is None:
         return None

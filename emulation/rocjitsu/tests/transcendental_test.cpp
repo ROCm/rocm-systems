@@ -274,17 +274,6 @@ TEST(TranscendentalTest, SinCosF32CapturedArithmeticStages) {
     }
 }
 
-TEST(TranscendentalTest, RcpF64SpecialCases) {
-  EXPECT_EQ(rcp_f64(0.0), std::numeric_limits<double>::infinity());
-  EXPECT_EQ(rcp_f64(-0.0), -std::numeric_limits<double>::infinity());
-  EXPECT_DOUBLE_EQ(rcp_f64(2.0), 0.5);
-}
-
-TEST(TranscendentalTest, SqrtF64SpecialCases) {
-  EXPECT_TRUE(std::isnan(sqrt_f64(-1.0)));
-  EXPECT_DOUBLE_EQ(sqrt_f64(4.0), 2.0);
-}
-
 // ---------------------------------------------------------------------------
 // ULP accuracy tests (pseudorandom inputs)
 // ---------------------------------------------------------------------------

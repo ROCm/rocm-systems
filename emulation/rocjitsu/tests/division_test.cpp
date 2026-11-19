@@ -2,20 +2,116 @@
 // SPDX-License-Identifier: MIT
 
 /// @file division_test.cpp
-/// @brief Independent numerical tests for shared division instruction helpers.
+/// @brief Numerical goldens for division instructions through public arithmetic APIs.
 
-#include "rocjitsu/isa/arch/amdgpu/shared/division.h"
+#include "rj_arith/detail/rj_arith_common.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <gtest/gtest.h>
 
 #include <bit>
-#include <cfenv>
 #include <cmath>
 #include <cstdint>
 #include <limits>
 
 namespace {
-using namespace rocjitsu::amdgpu;
+// Pack one active lane so the existing numerical goldens exercise public APIs.
+// CPU baseline is intentional: SIMD coverage lives in the arithmetic tests.
+template <typename Float> struct DivisionOperands {
+  uint32_t words[4][2][32]{};
+  const uint32_t *a[2] = {words[0][0], words[0][1]};
+  const uint32_t *b[2] = {words[1][0], words[1][1]};
+  const uint32_t *c[2] = {words[2][0], words[2][1]};
+  uint32_t *d[2] = {words[3][0], words[3][1]};
+
+  DivisionOperands(Float x, Float y, Float z) {
+    const Float values[] = {x, y, z};
+    for (int operand = 0; operand < 3; ++operand) {
+      if constexpr (sizeof(Float) == 4) {
+        words[operand][0][0] = std::bit_cast<uint32_t>(values[operand]);
+      } else {
+        const uint64_t bits = std::bit_cast<uint64_t>(values[operand]);
+        words[operand][0][0] = static_cast<uint32_t>(bits);
+        words[operand][1][0] = static_cast<uint32_t>(bits >> 32);
+      }
+    }
+  }
+
+  Float result() const {
+    if constexpr (sizeof(Float) == 4) {
+      return std::bit_cast<float>(words[3][0][0]);
+    } else {
+      return std::bit_cast<double>(uint64_t(words[3][0][0]) | (uint64_t(words[3][1][0]) << 32));
+    }
+  }
+};
+
+// Translate the legacy guest MODE representation without changing host controls.
+uint64_t division_flags(uint32_t rounding, uint32_t denorm) {
+  return RJ_ARITH_SEMANTICS_COMPATIBILITY | (uint64_t(rounding) << 24) |
+         ((denorm & 1) ? 0 : RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) |
+         ((denorm & 2) ? 0 : RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
+}
+
+template <typename Float> struct DivisionScaleResult {
+  Float value;
+  bool post_scale;
+};
+
+// Return the rescaled operand and its lane's condition bit.
+template <typename Float>
+DivisionScaleResult<Float> div_scale(Float a, Float b, Float c, uint32_t rounding = 0,
+                                     uint32_t denorm = 3) {
+  DivisionOperands<Float> operands(a, b, c);
+  uint32_t condition = 0;
+  auto api = [] {
+    if constexpr (sizeof(Float) == 4) {
+      return rj_arith_v_div_scale_f32_w32_gfx942;
+    } else {
+      return rj_arith_v_div_scale_f64_w32_gfx942;
+    }
+  }();
+  EXPECT_EQ(api(division_flags(rounding, denorm), 1, 0, operands.d, &condition, operands.a,
+                operands.b, operands.c),
+            RJ_ARITH_SUCCESS);
+  return {operands.result(), (condition & 1) != 0};
+}
+
+// Return the inherited fused, conditionally scaled FMA result.
+template <typename Float>
+Float div_fmas(Float a, Float b, Float c, bool scale, uint32_t rounding, uint32_t denorm) {
+  DivisionOperands<Float> operands(a, b, c);
+  auto api = [] {
+    if constexpr (sizeof(Float) == 4) {
+      return rj_arith_v_div_fmas_f32_w32_gfx942;
+    } else {
+      return rj_arith_v_div_fmas_f64_w32_gfx942;
+    }
+  }();
+  uint32_t status = 0;
+  EXPECT_EQ(api(division_flags(rounding, denorm), 1, 0, operands.d, operands.a, operands.b,
+                operands.c, scale ? 1 : 0, &status),
+            RJ_ARITH_SUCCESS);
+  return operands.result();
+}
+
+// Apply quotient recovery and exceptional-operand handling to one lane.
+template <typename Float>
+Float div_fixup(Float a, Float b, Float c, uint32_t rounding, uint32_t denorm) {
+  DivisionOperands<Float> operands(a, b, c);
+  auto api = [] {
+    if constexpr (sizeof(Float) == 4) {
+      return rj_arith_v_div_fixup_f32_w32_gfx942;
+    } else {
+      return rj_arith_v_div_fixup_f64_w32_gfx942;
+    }
+  }();
+  uint32_t status = 0;
+  EXPECT_EQ(api(division_flags(rounding, denorm), 1, 0, operands.d, operands.a, operands.b,
+                operands.c, &status),
+            RJ_ARITH_SUCCESS);
+  return operands.result();
+}
 
 // Expected instruction results were checked on physical gfx1100 and gfx1201.
 // Unlike scalar-vs-SIMD comparisons, these are independent numerical oracles.
@@ -90,21 +186,15 @@ TEST(DivisionTest, ScalingIsFusedWithRounding) {
 }
 
 TEST(DivisionTest, RoundingAndDenormModesAreExplicit) {
-  std::fenv_t saved;
-  ASSERT_EQ(std::fegetenv(&saved), 0);
-  for (int host_mode : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-    ASSERT_EQ(std::fesetround(host_mode), 0);
-    for (uint32_t mode = 0; mode < 4; ++mode) {
-      EXPECT_EQ(std::bit_cast<uint32_t>(div_fmas(1.f, 1.f, -1.f, false, mode, 3)),
-                mode == 2 ? 0x80000000u : 0u);
-      EXPECT_EQ(std::bit_cast<uint32_t>(div_fmas(0.f, 0.f, 0x1p-86f, true, mode, 3)),
-                mode == 1 ? 1u : 0u);
-      EXPECT_EQ(std::bit_cast<uint64_t>(div_fmas(0., 0., -0x1p-947, true, mode, 3)),
-                mode == 2 ? 0x8000000000000001ULL : 0x8000000000000000ULL);
-      EXPECT_EQ(std::fegetround(), host_mode);
-    }
+  // Guest rounding is explicit; the public API assumes the default host environment.
+  for (uint32_t mode = 0; mode < 4; ++mode) {
+    EXPECT_EQ(std::bit_cast<uint32_t>(div_fmas(1.f, 1.f, -1.f, false, mode, 3)),
+              mode == 2 ? 0x80000000u : 0u);
+    EXPECT_EQ(std::bit_cast<uint32_t>(div_fmas(0.f, 0.f, 0x1p-86f, true, mode, 3)),
+              mode == 1 ? 1u : 0u);
+    EXPECT_EQ(std::bit_cast<uint64_t>(div_fmas(0., 0., -0x1p-947, true, mode, 3)),
+              mode == 2 ? 0x8000000000000001ULL : 0x8000000000000000ULL);
   }
-  EXPECT_EQ(std::fesetenv(&saved), 0);
   const float subnormal = std::bit_cast<float>(1u);
   for (uint32_t mode = 0; mode < 4; ++mode) {
     const DivisionScaleResult<float> scaled = div_scale(subnormal, 1.f, subnormal, 0, mode);

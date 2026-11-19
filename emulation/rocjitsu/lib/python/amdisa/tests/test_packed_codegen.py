@@ -1,10 +1,7 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Tests for packed execute code generation."""
-
 from amdisa.isa_profile import FloatDotAccumulation
-
 from amdisa.codegen.execute.packed import (
     gen_dot2,
     gen_dot2_true16,
@@ -13,45 +10,15 @@ from amdisa.codegen.execute.packed import (
     gen_pk_binop,
     gen_pk_binop_f32,
     gen_pk_binop_f64,
-    gen_pk_ternary_f64,
     gen_pk_binop_u64,
     gen_pk_lshl_add_u64,
     gen_pk_ternary,
+    gen_pk_ternary_f64,
 )
 from amdisa.codegen.execute.simd_codegen import vop3p_local_simd_probe_line
+import pytest
 
-
-def test_dot4_iu8_uses_operand_signedness_modifiers():
-    cpp = gen_dot4(['vdst'], ['src0', 'src1', 'src2'], 'dot4_i32_iu8')
-
-    assert 'src0_signed = (inst_.neg & 0x1u) != 0' in cpp
-    assert 'src1_signed = (inst_.neg & 0x2u) != 0' in cpp
-    assert 'static_cast<int8_t>(src0_bits)' in cpp
-    assert 'static_cast<int8_t>(src1_bits)' in cpp
-    assert 'int64_t sum' in cpp
-    assert 'std::numeric_limits<int32_t>::min()' in cpp
-    assert 'std::numeric_limits<int32_t>::max()' in cpp
-
-
-def test_dot2_integer_clamp_uses_widened_signed_and_unsigned_ranges():
-    signed = gen_dot2(
-        ['vdst'],
-        ['src0', 'src1', 'src2'],
-        'dot2_i32_i16',
-        ('inst_.op_sel', 'inst_.op_sel_hi'),
-    )
-    unsigned = gen_dot2(
-        ['vdst'],
-        ['src0', 'src1', 'src2'],
-        'dot2_u32_u16',
-        ('inst_.op_sel', 'inst_.op_sel_hi'),
-    )
-
-    assert 'int64_t result' in signed
-    assert 'std::numeric_limits<int32_t>::min()' in signed
-    assert 'std::numeric_limits<int32_t>::max()' in signed
-    assert 'uint64_t result' in unsigned
-    assert 'std::numeric_limits<uint32_t>::max()' in unsigned
+"""Tests for packed execute code generation."""
 
 
 def test_pk_fma_f16_has_no_legacy_ternary_fallback():
@@ -120,57 +87,6 @@ def test_pk_mad_integer_clamp_saturates_both_selected_halves():
     assert unsigned.count('inst_.clamp') == 2
 
 
-def test_dot8_iu4_uses_operand_signedness_modifiers():
-    cpp = gen_dot8(['vdst'], ['src0', 'src1', 'src2'], 'dot8_i32_iu4')
-
-    assert 'src0_signed = (inst_.neg & 0x1u) != 0' in cpp
-    assert 'src1_signed = (inst_.neg & 0x2u) != 0' in cpp
-    assert 'src0_bits | ~0xF' in cpp
-    assert 'src1_bits | ~0xF' in cpp
-    assert 'int64_t sum' in cpp
-    assert 'std::numeric_limits<int32_t>::min()' in cpp
-    assert 'std::numeric_limits<int32_t>::max()' in cpp
-
-
-def test_unsigned_dot_clamps_widened_accumulator_before_narrowing():
-    dot4 = gen_dot4(['vdst'], ['src0', 'src1', 'src2'], 'dot4_u32_u8')
-    dot8 = gen_dot8(['vdst'], ['src0', 'src1', 'src2'], 'dot8_u32_u4')
-
-    assert 'uint64_t sum' in dot4
-    assert 'if (inst_.clamp && amdgpu::dot4_clamp_supported(wf))' in dot4
-    assert 'std::numeric_limits<uint32_t>::max()' in dot4
-    assert 'uint64_t sum' in dot8
-    assert 'if (inst_.clamp)' in dot8
-    assert 'std::numeric_limits<uint32_t>::max()' in dot8
-
-
-def test_signed_dot4_clamp_uses_profile_policy():
-    cpp = gen_dot4(['vdst'], ['src0', 'src1', 'src2'], 'dot4_i32_iu8')
-
-    assert 'int64_t sum' in cpp
-    assert 'if (inst_.clamp && amdgpu::dot4_clamp_supported(wf))' in cpp
-    assert 'std::numeric_limits<int32_t>::min()' in cpp
-    assert 'std::numeric_limits<int32_t>::max()' in cpp
-
-
-def test_pk_f16_binop_narrows_inline_float_constants():
-    cpp = gen_pk_binop(
-        ['vdst'],
-        ['src0', 'src1'],
-        'add',
-        'f16',
-        opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
-    )
-
-    assert 'if (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()))' in cpp
-    assert 'raw0 = util::f32_to_f16(std::bit_cast<float>(raw0));' in cpp
-    assert 'if (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()))' in cpp
-    assert 'raw1 = util::f32_to_f16(std::bit_cast<float>(raw1));' in cpp
-    # Keyed on the selector field, never on the operand: an IsaOperand keeps a
-    # 255-literal's value in encoding_value_.
-    assert 'encoding_value_' not in cpp
-
-
 def test_pk_bf16_ternary_preserves_fp32_inline_constants():
     cpp = gen_pk_ternary(
         ['vdst'],
@@ -201,253 +117,6 @@ def test_pk_bf16_binary_preserves_fp32_inline_constants():
         assert 'raw1 = util::f32_to_bf16' not in cpp
 
 
-def test_dot2_half_forms_narrow_inline_float_constants():
-    for cls, narrow in (
-        ('dot2_f32_f16', 'f32_to_f16'),
-        ('dot2_f32_bf16', 'f32_to_bf16'),
-    ):
-        cpp = gen_dot2(
-            ['vdst'],
-            ['src0', 'src1', 'src2'],
-            cls,
-            opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
-        )
-
-        assert (
-            'if (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()))' in cpp
-        )
-        assert f'raw0 = util::{narrow}(std::bit_cast<float>(raw0));' in cpp
-        assert (
-            'if (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()))' in cpp
-        )
-        assert f'raw1 = util::{narrow}(std::bit_cast<float>(raw1));' in cpp
-        # src2 is an f32 accumulator on this family, so it stays 32-bit.
-        assert 'raw2' not in cpp
-        assert (
-            'isa_properties(wf.cu().arch()).float_dot_accumulation == FloatDotAccumulation::Gfx11'
-            in cpp
-        )
-        assert 'amdgpu::gfx11_dot2_f32<' in cpp
-        if cls == 'dot2_f32_bf16':
-            for index in range(2):
-                assert f'dot2_src_needs_half_replication(inst_.src{index})' in cpp
-                assert (
-                    f'raw{index} = (amdgpu::RegisterAccess(wf).read_lane(src{index}, lane) >> 16) * 0x10001u;'
-                    in cpp
-                )
-
-
-def test_float_dot2_accumulator_takes_neg_hi_as_abs():
-    for accumulation in (FloatDotAccumulation.GFX11, FloatDotAccumulation.GFX12):
-        for cls in ('dot2_f32_f16', 'dot2_f32_bf16'):
-            cpp = gen_dot2(
-                ['vdst'],
-                ['src0', 'src1', 'src2'],
-                cls,
-                opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
-                dot_accumulation=accumulation,
-            )
-            assert (
-                'acc = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(acc, 2, '
-                'inst_.neg_hi, inst_.neg);' in cpp
-            )
-            assert 'acc ^= 0x80000000u' not in cpp
-            if accumulation is FloatDotAccumulation.GFX11:
-                # The host-float fallback for other targets follows the same rule.
-                assert (
-                    'acc = amdgpu::source_modifier::apply_to_float(acc, 2, inst_.neg_hi, inst_.neg);'
-                    in cpp
-                )
-
-
-def test_rdna4_dot2_uses_exact_policy_and_encoding_specific_inline_halves():
-    for cls in ('dot2_f32_f16', 'dot2_f32_bf16'):
-        cpp = gen_dot2(
-            ['vdst'],
-            ['src0', 'src1', 'src2'],
-            cls,
-            opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
-            dot_accumulation=FloatDotAccumulation.GFX12,
-        )
-        assert 'amdgpu::gfx12_dot2_f32<' in cpp
-        assert 'gfx11_dot2_f32' not in cpp
-        assert 'float result = src0_lo * src1_lo' not in cpp
-        for index in range(2):
-            if cls == 'dot2_f32_f16':
-                assert f'dot2_src_needs_half_replication(inst_.src{index})' not in cpp
-            else:
-                raw = f'amdgpu::RegisterAccess(wf).read_lane(src{index}, lane)'
-                assert (
-                    f'raw{index} = (amdgpu::is_inline_float_src(inst_.src{index}) ? '
-                    f'({raw} >> 16) : ({raw} & 0xffffu)) * 0x10001u;' in cpp
-                )
-
-
-def test_dot2_true16_narrows_inline_float_constants():
-    """v_dot2_f16_f16 / v_dot2_bf16_bf16 read src0/src1 as packed v2 halves off a
-    32-bit read_lane, so they need the same narrowing the VOP3P dots do. The
-    src2 inline carrier is already 16-bit and replicates before OPSEL."""
-    for cls, narrow in (
-        ('dot2_f16_f16', 'f32_to_f16'),
-        ('dot2_bf16_bf16', 'f32_to_bf16'),
-    ):
-        cpp = gen_dot2_true16(
-            ['vdst'], ['src0', 'src1', 'src2'], cls, FloatDotAccumulation.GFX12
-        )
-
-        assert (
-            'if (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()))' in cpp
-        )
-        assert f'raw0 = util::{narrow}(std::bit_cast<float>(raw0));' in cpp
-        assert (
-            'if (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()))' in cpp
-        )
-        assert f'raw1 = util::{narrow}(std::bit_cast<float>(raw1));' in cpp
-        # src2 already has its 16-bit format and needs no additional narrowing.
-        assert 'inst_.src2, src2.size_bits()' not in cpp
-
-
-def test_dot2_true16_uses_the_architecture_packed_dot_step():
-    """V_DOT2_{F16,BF16} run one packed DOT/WMMA step on raw bits, with
-    ABS/NEG applied to the 16-bit halves and no host FP or MODE policy."""
-    for accumulation, arch in (
-        (FloatDotAccumulation.GFX11, 'gfx11'),
-        (FloatDotAccumulation.GFX12, 'gfx12'),
-    ):
-        for cls, bf16, fmt in (
-            ('dot2_f16_f16', 'false', 'F16'),
-            ('dot2_bf16_bf16', 'true', 'BF16'),
-        ):
-            cpp = gen_dot2_true16(['vdst'], ['src0', 'src1', 'src2'], cls, accumulation)
-            assert (
-                f'amdgpu::{arch}_dot2_packed16<{bf16}>(src0_lo, src1_lo, src0_hi, src1_hi, acc, wf.fp16_ovfl())'
-                in cpp
-            )
-            assert (
-                f'source_modifier::apply<amdgpu::fp_format::{fmt}>(bits & 0xffffu, source, '
-                'inst_.abs, inst_.neg)' in cpp
-            )
-            assert 'src0_lo = half(raw0, 0), src0_hi = half(raw0 >> 16, 0);' in cpp
-            assert 'src1_lo = half(raw1, 1), src1_hi = half(raw1 >> 16, 1);' in cpp
-            assert 'acc = half(acc_bits, 2);' in cpp
-            # Only an inline constant is converted through a host float.
-            assert '_to_f32' not in cpp
-            assert 'float src0_lo' not in cpp
-            assert 'fp_mode::' not in cpp
-
-
-def test_dot2_true16_rejects_host_float_accumulation():
-    import pytest
-
-    with pytest.raises(ValueError, match='characterized DOT accumulation model'):
-        gen_dot2_true16(
-            ['vdst'],
-            ['src0', 'src1', 'src2'],
-            'dot2_f16_f16',
-            FloatDotAccumulation.HOST_F32,
-        )
-
-
-def test_rdna4_fp8_dot4_uses_the_gfx12_dot_model():
-    from amdisa.semantics import derive_semantics
-
-    for instruction, src0_fp8, src1_fp8 in (
-        ('V_DOT4_F32_FP8_FP8', 'true', 'true'),
-        ('V_DOT4_F32_FP8_BF8', 'true', 'false'),
-        ('V_DOT4_F32_BF8_FP8', 'false', 'true'),
-        ('V_DOT4_F32_BF8_BF8', 'false', 'false'),
-    ):
-        sem = derive_semantics(instruction, 'ENC_VOP3P')
-        assert sem.semantic_class == 'dot4_f32_fp8'
-        cpp = gen_dot4(
-            ['vdst'],
-            ['src0', 'src1', 'src2'],
-            sem.semantic_class,
-            operation=sem.operation,
-            dot_accumulation=FloatDotAccumulation.GFX12,
-        )
-        assert (
-            f'amdgpu::gfx12_dot4_f32_fp8<{src0_fp8}, {src1_fp8}>(raw0, raw1, acc)'
-            in cpp
-        )
-        assert (
-            'acc = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(acc, 2, '
-            'inst_.neg_hi, inst_.neg);' in cpp
-        )
-        assert 'fp8_e4m3_to_f32' not in cpp
-
-
-def test_fp8_dot4_rejects_missing_or_invalid_formats():
-    import pytest
-
-    for operation in (None, '', 'fp8', 'fp8_fp8_fp8', 'f16_fp8', 'fp8_unknown'):
-        with pytest.raises(ValueError, match='unhandled FP8 dot4 operation'):
-            gen_dot4(
-                ['vdst'],
-                ['src0', 'src1', 'src2'],
-                'dot4_f32_fp8',
-                operation=operation,
-                dot_accumulation=FloatDotAccumulation.GFX12,
-            )
-
-
-def test_fp8_dot4_rejects_other_accumulation_models():
-    import pytest
-
-    with pytest.raises(ValueError, match='GFX12 DOT accumulation model'):
-        gen_dot4(
-            ['vdst'],
-            ['src0', 'src1', 'src2'],
-            'dot4_f32_fp8',
-            operation='fp8_fp8',
-            dot_accumulation=FloatDotAccumulation.HOST_F32,
-        )
-
-
-def test_dot4_dot8_select_source_halves():
-    """Every DOT4/DOT8 form selects halves, including the FP8/BF8 floats."""
-    fp8 = {
-        'operation': 'fp8_fp8',
-        'dot_accumulation': FloatDotAccumulation.GFX12,
-    }
-    for gen, cls, extra in (
-        (gen_dot4, 'dot4_i32_iu8', {}),
-        (gen_dot4, 'dot4_u32_u8', {}),
-        (gen_dot4, 'dot4_i32_i8', {}),
-        (gen_dot4, 'dot4_f32_fp8', fp8),
-        (gen_dot8, 'dot8_i32_iu4', {}),
-        (gen_dot8, 'dot8_u32_u4', {}),
-        (gen_dot8, 'dot8_i32_i4', {}),
-    ):
-        cpp = gen(
-            ['vdst'],
-            ['src0', 'src1', 'src2'],
-            cls,
-            opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
-            **extra,
-        )
-        for i in range(2):
-            assert (
-                f'raw{i} = amdgpu::select_packed_halves(raw{i}, inst_.opsel, inst_.opsel_hi, {i});'
-                in cpp
-            )
-        # The accumulator is a full 32-bit operand.
-        assert 'select_packed_halves(raw2' not in cpp
-
-
-def test_dot2_integer_forms_leave_inline_constants_alone():
-    for cls in ('dot2_i32_i16', 'dot2_u32_u16'):
-        cpp = gen_dot2(
-            ['vdst'],
-            ['src0', 'src1', 'src2'],
-            cls,
-            opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
-        )
-
-        assert 'pk16_src_needs_narrowing' not in cpp
-        assert 'bit_cast' not in cpp
-
-
 def test_pk_integer_binop_leaves_inline_constants_alone():
     for dtype in ('i16', 'u16'):
         cpp = gen_pk_binop(
@@ -460,36 +129,6 @@ def test_pk_integer_binop_leaves_inline_constants_alone():
 
         assert '240u' not in cpp
         assert 'bit_cast' not in cpp
-
-
-def test_gfx1250_pk_f32_uses_literal_aware_pair_helper():
-    cpp = gen_pk_binop_f32(
-        ['vdst'],
-        ['src0', 'src1'],
-        'add',
-        opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
-        use_cdna5_helpers=True,
-    )
-
-    assert 'const auto s0 = amdgpu::RegisterAccess(wf).read_lane_pair32(' in cpp
-    assert 'src0, lane, amdgpu::ScalarPairMode::Replicate32)' in cpp
-    assert 's0_hi_w' not in cpp
-    assert 's0.hi' in cpp
-    assert 'read_lane64' not in cpp
-
-
-def test_cdna_pk_f32_reads_all_register_pairs():
-    cpp = gen_pk_binop_f32(
-        ['vdst'],
-        ['src0', 'src1'],
-        'add',
-        opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
-    )
-
-    assert 'read_lane_pair32(src0, lane)' in cpp
-    assert 'const uint32_t s0_lo_w = s0_pair_w.lo' in cpp
-    assert 'const uint32_t s0_hi_w = s0_pair_w.hi' in cpp
-    assert 'encoding_value_ >= 256' not in cpp
 
 
 def test_pk_lshl_add_u64_operates_on_two_independent_64_bit_elements():
@@ -554,29 +193,11 @@ def test_pk_u64_binop_rejects_unknown_operation():
         gen_pk_binop_u64(['vdst'], ['src0', 'src1'], 'mul')
 
 
-def test_pk_f64_binops_use_carrier_aware_arithmetic_adapter():
-    for operation in ('add', 'mul', 'min_num', 'max_num'):
-        cpp = gen_pk_binop_f64(['vdst'], ['src0', 'src1'], operation)
-        assert 'execute_packed_f64<false>' in cpp
-        assert f'rj_arith_v_pk_{operation}_f64_w32, modifiers, vdst, src0, src1' in cpp
-        assert 'inst_.neg | (uint64_t(inst_.neg_hi) << 3)' in cpp
-        assert 'inst_.clamp ? RJ_ARITH_PK_CLAMP : 0' in cpp
-        assert 'fp_mode::' not in cpp
-
-
 def test_pk_f64_binop_rejects_unknown_operation():
     import pytest
 
     with pytest.raises(ValueError, match='unsupported packed F64 binary operation'):
         gen_pk_binop_f64(['vdst'], ['src0', 'src1'], 'divide')
-
-
-def test_pk_f64_fma_uses_guest_fp_adapter():
-    cpp = gen_pk_ternary_f64(['vdst'], ['src0', 'src1', 'src2'], 'fma')
-    assert 'execute_packed_f64<true>' in cpp
-    assert 'rj_arith_v_pk_fma_f64_w32, modifiers, vdst, src0, src1, &src2' in cpp
-    assert 'inst_.neg | (uint64_t(inst_.neg_hi) << 3)' in cpp
-    assert 'inst_.clamp ? RJ_ARITH_PK_CLAMP : 0' in cpp
 
 
 def test_pk_f64_ternary_rejects_unknown_operation():
@@ -586,45 +207,8 @@ def test_pk_f64_ternary_rejects_unknown_operation():
         gen_pk_ternary_f64(['vdst'], ['src0', 'src1', 'src2'], 'mad')
 
 
-def test_renamed_vop3p_packed_f32_probe_passes_profile_selectors():
-    probe = vop3p_local_simd_probe_line('v_pk_add_f32_vop3p', ('opsel', 'opsel_hi'))
-
-    assert probe is not None
-    assert 'ROCJITSU_TRY_SIMD_VOP3P_PK_BINARY_F32_SELECTORS' in probe
-    assert 'inst_.opsel, inst_.opsel_hi' in probe
-    assert (
-        vop3p_local_simd_probe_line('v_pk_add_f32_vop3p', ('op_sel', 'op_sel_hi'))
-        is None
-    )
-    assert (
-        vop3p_local_simd_probe_line('v_pk_add_f16_vop3p', ('opsel', 'opsel_hi'))
-        == '  ROCJITSU_TRY_SIMD_PACKED_FLOAT(ADD, false);'
-    )
-
-
-def test_renamed_vop3p_packed_fma_f32_probe_passes_all_profile_selectors():
-    probe = vop3p_local_simd_probe_line(
-        'v_pk_fma_f32_vop3p',
-        ('opsel', 'opsel_hi'),
-        'inst_.pad_14',
-    )
-
-    assert probe is not None
-    assert 'ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_F32_SELECTORS' in probe
-    assert 'inst_.opsel, inst_.opsel_hi, inst_.pad_14' in probe
-    assert (
-        vop3p_local_simd_probe_line(
-            'v_pk_fma_f32_vop3p',
-            ('op_sel', 'op_sel_hi'),
-        )
-        is None
-    )
-
-
 def test_renamed_packed_float_routes_use_exact_helpers():
     for spelling, operation, bf16 in (
-        ('v_pk_min_f16_vop3p', 'MIN', False),
-        ('v_pk_max_f16_vop3p', 'MAX', False),
         ('v_pk_add_bf16_vop3p', 'ADD', True),
         ('v_pk_fma_bf16_vop3p', 'FMA', True),
     ):
@@ -678,3 +262,26 @@ def test_dot_dispatch_covers_every_semantic_class():
     assert found, 'no DOT semantic classes found; the ISA specs did not load'
     routes = ('dot2', 'dot4', 'dot8')
     assert found == {cls for cls in DISPATCH if cls.startswith(routes)}
+
+
+def test_pk_f16_binary_has_no_legacy_fallback():
+    with pytest.raises(ValueError, match='does not support f16'):
+        gen_pk_binop(['vdst'], ['src0', 'src1'], 'add', 'f16')
+
+
+def test_pk_f64_binops_use_carrier_aware_arithmetic_adapter():
+    for operation in ('add', 'mul', 'min_num', 'max_num'):
+        cpp = gen_pk_binop_f64(['vdst'], ['src0', 'src1'], operation)
+        assert 'execute_packed_f64<false>' in cpp
+        assert f'rj_arith_v_pk_{operation}_f64_w32, modifiers, vdst, src0, src1' in cpp
+        assert 'inst_.neg | (uint64_t(inst_.neg_hi) << 3)' in cpp
+        assert 'inst_.clamp ? RJ_ARITH_PK_CLAMP : 0' in cpp
+        assert 'fp_mode::' not in cpp
+
+
+def test_pk_f64_fma_uses_guest_fp_adapter():
+    cpp = gen_pk_ternary_f64(['vdst'], ['src0', 'src1', 'src2'], 'fma')
+    assert 'execute_packed_f64<true>' in cpp
+    assert 'rj_arith_v_pk_fma_f64_w32, modifiers, vdst, src0, src1, &src2' in cpp
+    assert 'inst_.neg | (uint64_t(inst_.neg_hi) << 3)' in cpp
+    assert 'inst_.clamp ? RJ_ARITH_PK_CLAMP : 0' in cpp

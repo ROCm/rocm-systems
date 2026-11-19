@@ -10,11 +10,16 @@ import pytest
 from amdisa.codegen import CodeGenerator
 from amdisa.codegen.config import CodegenConfig
 from amdisa.codegen.execute.rj_arith_vopd import gen_vopd_execution
-from amdisa.isa_profile import Rdna3Profile, Rdna4Profile
+from amdisa.isa_profile import Rdna3Profile, Rdna4Profile, Rdna3_5Profile
 
 
 @pytest.mark.parametrize(
-    'arch,profile', [('rdna3', Rdna3Profile()), ('rdna4', Rdna4Profile())]
+    'arch,profile',
+    [
+        ('rdna3', Rdna3Profile()),
+        ('rdna4', Rdna4Profile()),
+        ('rdna3_5', Rdna3_5Profile()),
+    ],
 )
 def test_dual_routes_every_slot_and_removes_old_execution(
     tmp_path, monkeypatch, arch, profile
@@ -46,6 +51,8 @@ def test_dual_routes_every_slot_and_removes_old_execution(
     for legacy in ('execute_slot', 'uses_src_neg_modifier', 'apply_neg', 'bitop2'):
         assert legacy not in header
         assert legacy not in body
+    assert 'gfx12_compat_dual_mul' not in body
+    assert 'fp_status::' not in body
     assert 'try_execute_vopd' not in body
     assert 'fp_mode::arithmetic' not in body
     assert 'gfx12_dot' not in body and 'gfx11_dot' not in body
@@ -87,7 +94,7 @@ def test_dual_checked_in_execution_matches_generator():
         Path(__file__).resolve().parents[3]
         / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
     )
-    for arch in ('rdna3', 'rdna4'):
+    for arch in ('rdna3', 'rdna4', 'rdna3_5'):
         text = (root / arch / 'vopd_exec.cpp').read_text()
         assert text.count('return rj_arith_v_dual_') == 17
         assert 'execute_dual_pair' in text

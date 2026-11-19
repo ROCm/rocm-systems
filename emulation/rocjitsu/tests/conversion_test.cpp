@@ -25,102 +25,6 @@ namespace denorm = rocjitsu::amdgpu::input_denormal;
 
 constexpr denorm::Policy kKeep{false};
 constexpr denorm::Policy kFlush{true};
-
-// Saturating floor and floor(x + 0.5) of a finite value, computed exactly in double.
-int32_t reference(float value, bool nearest) {
-  const double rounded = std::floor(static_cast<double>(value) + (nearest ? 0.5 : 0.0));
-  if (rounded >= 2147483647.0)
-    return std::numeric_limits<int32_t>::max();
-  if (rounded <= -2147483648.0)
-    return std::numeric_limits<int32_t>::min();
-  return static_cast<int32_t>(rounded);
-}
-
-TEST(ConversionTest, FloorAndNearestMatchExactRoundingOfFiniteValues) {
-  for (uint64_t i = 0; i < (uint64_t{1} << 32); i += 997) {
-    const auto bits = static_cast<uint32_t>(i);
-    const float value = std::bit_cast<float>(bits);
-    if (std::isnan(value))
-      continue;
-    ASSERT_EQ(conversion::FloorI32{.input = kKeep}(bits),
-              static_cast<uint32_t>(reference(value, false)))
-        << std::hex << bits;
-    ASSERT_EQ(conversion::NearestI32{.input = kKeep}(bits),
-              static_cast<uint32_t>(reference(value, true)))
-        << std::hex << bits;
-  }
-}
-
-TEST(ConversionTest, FloorAndNearestSaturateNanBySign) {
-  for (const uint32_t nan : {0x7fc00000u, 0x7f800001u, 0x7fffffffu}) {
-    EXPECT_EQ(conversion::FloorI32{.input = kKeep}(nan), 0x7fffffffu);
-    EXPECT_EQ(conversion::FloorI32{.input = kKeep}(nan | 0x80000000u), 0x80000000u);
-    EXPECT_EQ(conversion::NearestI32{.input = kKeep}(nan), 0x7fffffffu);
-    EXPECT_EQ(conversion::NearestI32{.input = kKeep}(nan | 0x80000000u), 0x80000000u);
-  }
-}
-
-TEST(ConversionTest, InputFlushPrecedesRounding) {
-  EXPECT_EQ(conversion::FloorI32{.input = kKeep}(0x80000001u), 0xffffffffu);
-  EXPECT_EQ(conversion::FloorI32{.input = kFlush}(0x80000001u), 0u);
-  EXPECT_EQ(conversion::NearestI32{.input = kFlush}(0x807fffffu), 0u);
-  // Ties round toward +infinity.
-  EXPECT_EQ(conversion::NearestI32{.input = kKeep}(0xbfc00000u), 0xffffffffu); // -1.5 -> -1
-  EXPECT_EQ(conversion::NearestI32{.input = kKeep}(0x3fc00000u), 2u);          // 1.5 -> 2
-}
-
-TEST(ConversionTest, FloorAndNearestApplySourceModifiersBeforeFlush) {
-  EXPECT_EQ((conversion::FloorI32{.abs = 1, .input = kKeep}(0xbfc00000u)), 1u);          // |-1.5|
-  EXPECT_EQ((conversion::FloorI32{.neg = 1, .input = kKeep}(0x3fc00000u)), 0xfffffffeu); // -1.5
-  EXPECT_EQ((conversion::NearestI32{.abs = 1, .neg = 1, .input = kKeep}(0x3fc00000u)),
-            0xffffffffu); // -|1.5| -> -1
-  // NEG makes the positive subnormal negative, and the flush keeps that sign.
-  EXPECT_EQ((conversion::FloorI32{.neg = 1, .input = kKeep}(0x00000001u)), 0xffffffffu);
-  EXPECT_EQ((conversion::FloorI32{.neg = 1, .input = kFlush}(0x00000001u)), 0u);
-}
-
-TEST(ConversionTest, SimdLanesMatchScalarLanes) {
-  using V = util::native<uint32_t>;
-  std::mt19937 random(5);
-  for (int i = 0; i < 20000; ++i) {
-    const V input([&](auto) { return static_cast<uint32_t>(random()); });
-    for (const denorm::Policy policy : {kKeep, kFlush}) {
-      const V floor = conversion::FloorI32{.input = policy}(input);
-      const V nearest = conversion::NearestI32{.input = policy}(input);
-      for (std::size_t lane = 0; lane < V::size(); ++lane) {
-        ASSERT_EQ(floor[lane], conversion::FloorI32{.input = policy}(uint32_t(input[lane])));
-        ASSERT_EQ(nearest[lane], conversion::NearestI32{.input = policy}(uint32_t(input[lane])));
-      }
-    }
-  }
-}
-
-TEST(ConversionTest, PackU8RoundsInModeAndKeepsOtherBytes) {
-  const conversion::PackU8 nearest{0, 0, kKeep, conversion::mode_rounding(0)};
-  const conversion::PackU8 down{0, 0, kKeep, conversion::mode_rounding(2)};
-  const conversion::PackU8 up{0, 0, kKeep, conversion::mode_rounding(1)};
-  EXPECT_EQ(nearest(0x3fc00000u, 0u, 0u), 2u); // 1.5
-  EXPECT_EQ(nearest(0x40200000u, 0u, 0u), 2u); // 2.5 ties to even
-  EXPECT_EQ(down(0x3fc00000u, 0u, 0u), 1u);
-  EXPECT_EQ(up(0x3f000000u, 0u, 0u), 1u);                        // 0.5
-  EXPECT_EQ(up(0xbf000000u, 0u, 0u), 0u);                        // -0.5 rounds to -0
-  EXPECT_EQ(nearest(0x437f8000u, 2u, 0x11223344u), 0x11ff3344u); // 255.5 saturates
-  EXPECT_EQ(nearest(0x7fc00000u, 3u, 0x11223344u), 0x00223344u); // NaN gives zero
-  const conversion::PackU8 negated{0, 1, kKeep, conversion::mode_rounding(0)};
-  EXPECT_EQ(negated(0xc0400000u, 1u, 0u), 0x300u); // -(-3)
-}
-
-TEST(ConversionTest, PackB32F16ModifiesFlushesAndQuietsEachHalf) {
-  const conversion::PackB32F16 keep{0, 0, kKeep, true};
-  EXPECT_EQ(keep(0x12347c01u, 0x5678fc00u), 0xfc007e01u); // upper source bits are ignored
-  EXPECT_EQ(keep(0x03ffu, 0x8001u), 0x800103ffu);
-  const conversion::PackB32F16 flush{0, 0, kFlush, true};
-  EXPECT_EQ(flush(0x03ffu, 0x8001u), 0x80000000u);
-  const conversion::PackB32F16 modified{1, 2, kKeep, true};
-  EXPECT_EQ(modified(0xbc00u, 0x3c00u), 0xbc003c00u);
-  // Targets that keep signaling NaNs copy their payload unchanged.
-  const conversion::PackB32F16 raw{0, 0, kKeep, false};
-  EXPECT_EQ(raw(0x7c01u, 0u), 0x7c01u);
 }
 
 TEST(ConversionTest, Fp8DecodeIsExactAndCanonicalizesNan) {
@@ -419,33 +323,6 @@ TEST(FloatRoundingTest, OverflowFollowsModeUnlessSaturated) {
   EXPECT_EQ(integer_to_f16(65535u, true, saturate), 0xfbffu);
   // Saturation applies to finite values only.
   EXPECT_EQ(f32_to_f16(0xff800000u, saturate), 0xfc00u);
-}
-
-// A prescale multiplies the exact value before its single rounding.
-TEST(FloatRoundingTest, PrescaleAppliesBeforeRounding) {
-  FloatRounding halve;
-  halve.prescale = -1;
-  // 131008 overflows F16, but 65504 is its largest finite value.
-  EXPECT_EQ(f32_to_f16(0x47ffe000u, FloatRounding{}), 0x7c00u);
-  EXPECT_EQ(f32_to_f16(0x47ffe000u, halve), 0x7bffu);
-  // Halving the smallest normal gives a subnormal, not a flushed or rounded value.
-  EXPECT_EQ(f32_to_f16(0x38800000u, halve), 0x0200u);
-  FloatRounding quadruple;
-  quadruple.prescale = 2;
-  EXPECT_EQ(integer_to_f16(2u, false, quadruple), 0x4800u);
-  EXPECT_EQ(integer_to_f16(32767u, true, quadruple), 0xfc00u);
-}
-
-// Pins the SDWA ordering that simd_glue.h's sdwa_conversion_to_f16 documents as
-// a known hardware mismatch: scaling the exact value first rounds 65535 div:2 to
-// 32768, while gfx1030 rounds to infinity first and halves that. Measured on
-// gfx1030 (RX 6800 XT) for SDWA v_cvt_f16_{u16,i16,f32} at mul:2/mul:4/div:2,
-// which match VOP3 on every lane; left for the SDWA F16 migration follow-up.
-TEST(FloatRoundingTest, PrescaleBeforeRoundingDisagreesWithGfx1030Sdwa) {
-  FloatRounding halve;
-  halve.prescale = -1;
-  EXPECT_EQ(integer_to_f16(65535u, false, FloatRounding{}), 0x7c00u);
-  EXPECT_EQ(integer_to_f16(65535u, false, halve), 0x7800u);
 }
 
 TEST(FloatRoundingTest, NarrowQuietsNanAndKeepsLeadingPayload) {

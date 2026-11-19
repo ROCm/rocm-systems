@@ -13,9 +13,6 @@ from __future__ import annotations
 from amdisa.codegen.execute import input_policy
 from amdisa.codegen.execute.conversion import (
     decode_fp8_expr,
-    pack_b32_f16_expr,
-    pk_rtz_f16_expr,
-    pk_u8_expr,
     to_fp8_expr,
 )
 from amdisa.codegen.execute.fp8_formats import (
@@ -378,60 +375,8 @@ def gen_vector_swaprel(
 def gen_vector_sat_pack(
     dst: list[str], src: list[str], op: str | None, *, true16_dst: bool = False
 ) -> str:
-    """Generate signed/unsigned saturating narrow-and-pack operations.
-
-    V_SAT_PK_U8_I16 has a 16-bit result. With ``true16_dst`` its VOP3 form
-    writes the half selected by OP_SEL[3] and keeps the other half.
-    """
-    if op not in ('u8_i16', 'i4_i8', 'u4_u8'):
-        raise ValueError(f'unsupported saturating-pack operation: {op}')
-    L = [
-        '  uint64_t exec = wf.exec();',
-        '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
-        '    if (!(exec & (1ULL << lane))) continue;',
-        f'    uint32_t raw = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);',
-    ]
-    if op == 'u8_i16':
-        L.extend(
-            [
-                '    int32_t lo = static_cast<int16_t>(raw);',
-                '    int32_t hi = static_cast<int16_t>(raw >> 16);',
-                '    uint32_t result = static_cast<uint32_t>(std::clamp(lo, 0, 255)) |',
-                '                      (static_cast<uint32_t>(std::clamp(hi, 0, 255)) << 8);',
-            ]
-        )
-    elif op == 'i4_i8':
-        L.extend(
-            [
-                '    uint32_t result = 0;',
-                '    for (uint32_t i = 0; i < 4; ++i) {',
-                '      int32_t value = static_cast<int8_t>(raw >> (i * 8));',
-                '      result |= (static_cast<uint32_t>(std::clamp(value, -8, 7)) & 0xfu) << (i * 4);',
-                '    }',
-            ]
-        )
-    elif op == 'u4_u8':
-        L.extend(
-            [
-                '    uint32_t result = 0;',
-                '    for (uint32_t i = 0; i < 4; ++i)',
-                '      result |= std::min((raw >> (i * 8)) & 0xffu, 15u) << (i * 4);',
-            ]
-        )
-    if true16_dst and op == 'u8_i16':
-        write = (
-            f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst[0]}, wf, lane, '
-            'amdgpu::vop3_opsel(inst_), result, true);'
-        )
-    else:
-        write = f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, result);'
-    L.extend(
-        [
-            write,
-            '  }',
-        ]
-    )
-    return '\n'.join(L)
+    """Reject legacy lowering; saturating packing is owned by rj-arith."""
+    raise ValueError('Saturating packing requires rj-arith lowering')
 
 
 def gen_vector_mullit(
@@ -936,252 +881,6 @@ def gen_vector_mad_32_16(
     return '\n'.join(L)
 
 
-def gen_vector_div_fixup(
-    dst: list[str],
-    src: list[str],
-    dtype: str | None,
-    is_vop3: bool = False,
-    has_abs: bool = False,
-) -> str:
-    """Generate V_DIV_FIXUP body (corrects division result)."""
-    if dtype != 'f16':
-        return _gen_division_result(dst, src, dtype, 'fixup', is_vop3, has_abs)
-    L = []
-    opsel = _default_vop3_opsel_expr(dst + src) if is_vop3 and dtype == 'f16' else None
-    L.append('  uint64_t exec = wf.exec();')
-    if opsel is not None:
-        L.append(f'  uint32_t opsel = {opsel};')
-    L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-    L.append('    if (!(exec & (1ULL << lane))) continue;')
-    if is_vop3:
-        L.append(
-            f'    float p = util::f16_to_f32(static_cast<uint16_t>({_read_vop3_true16_src(src[0], "opsel", 0)}));'
-        )
-        L.append(
-            f'    float b = util::f16_to_f32(static_cast<uint16_t>({_read_vop3_true16_src(src[1], "opsel", 1)}));'
-        )
-        L.append(
-            f'    float c = util::f16_to_f32(static_cast<uint16_t>({_read_vop3_true16_src(src[2], "opsel", 2)}));'
-        )
-    else:
-        L.append(
-            f'    float p = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane)));'
-        )
-        L.append(
-            f'    float b = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane)));'
-        )
-        L.append(
-            f'    float c = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src[2]}, lane)));'
-        )
-    if is_vop3:
-        L.extend(vop3_src_mod('p', 0, has_abs))
-        L.extend(vop3_src_mod('b', 1, has_abs))
-        L.extend(vop3_src_mod('c', 2, has_abs))
-    L.append(
-        '    float result = amdgpu::div_fixup_f16(p, b, c, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64());'
-    )
-    if is_vop3:
-        L.extend(vop3_dst_mod('result', omod_result_type='f16'))
-        L.append(
-            '    uint32_t result_bits = amdgpu::narrow_div_fixup_f16(result, wf.fp16_ovfl());'
-        )
-        L.append(
-            '    result_bits = amdgpu::fp_mode::finalize_omod_f16(result_bits, effective_omod);'
-        )
-        L.append(
-            f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst[0]}, wf, lane, opsel, result_bits, true);'
-        )
-    else:
-        L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, amdgpu::narrow_div_fixup_f16(result, wf.fp16_ovfl()));'
-        )
-    L.append('  }')
-    return '\n'.join(L)
-
-
-def gen_vector_div_scale(
-    dst: list[str],
-    src: list[str],
-    dtype: str | None,
-    is_vop3: bool = False,
-    has_abs: bool = False,
-    result_writer: str | None = None,
-) -> str:
-    """Generate V_DIV_SCALE through the shared division pre-scaling helper.
-
-    S1 = denominator, S2 = numerator. S0 selects which to scale
-    (S0==S1 → scale denominator, S0==S2 → scale numerator).
-    VCC is set when V_DIV_FMAS must apply post-scaling.
-    """
-    is_f64 = dtype == 'f64'
-    fp_type = 'double' if is_f64 else 'float'
-    read_fn = 'read_lane64' if is_f64 else 'read_lane'
-    write_fn = 'write_lane64' if is_f64 else 'write_lane'
-    cast_to = 'uint64_t' if is_f64 else 'uint32_t'
-
-    L = []
-    L.append('  uint64_t exec = wf.exec();')
-    L.append('  uint64_t vcc = wf.vcc();')
-    L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-    L.append('    if (!(exec & (1ULL << lane))) continue;')
-    L.append(
-        f'    {fp_type} s0 = std::bit_cast<{fp_type}>(amdgpu::RegisterAccess(wf).{read_fn}({src[0]}, lane));'
-    )
-    L.append(
-        f'    {fp_type} s1 = std::bit_cast<{fp_type}>(amdgpu::RegisterAccess(wf).{read_fn}({src[1]}, lane));'
-    )
-    L.append(
-        f'    {fp_type} s2 = std::bit_cast<{fp_type}>(amdgpu::RegisterAccess(wf).{read_fn}({src[2]}, lane));'
-    )
-    if is_vop3:
-        L.extend(vop3_src_mod('s0', 0, has_abs))
-        L.extend(vop3_src_mod('s1', 1, has_abs))
-        L.extend(vop3_src_mod('s2', 2, has_abs))
-    mode = 'f16_f64' if is_f64 else 'f32'
-    # RDNA3 preserves F64 signaling NaNs; physical gfx1100 and gfx1201 differ.
-    quiet_nan = ', wf.cu().arch() != ROCJITSU_CODE_ARCH_RDNA3' if is_f64 else ''
-    L.append(
-        f'    const amdgpu::DivisionScaleResult<{fp_type}> scaled = amdgpu::div_scale(s0, s1, s2, wf.fp_round_mode_{mode}(), wf.fp_denorm_mode_{mode}(){quiet_nan});'
-    )
-    L.append(f'    const {fp_type} result = scaled.value;')
-    L.append('    const bool set_vcc = scaled.post_scale;')
-    L.append('    if (set_vcc) vcc |= (1ULL << lane);')
-    L.append('    else vcc &= ~(1ULL << lane);')
-    L.append(
-        f'    amdgpu::RegisterAccess(wf).{write_fn}({dst[0]}, lane, std::bit_cast<{cast_to}>(result));'
-    )
-    L.append('  }')
-    if len(dst) > 1:
-        if result_writer is not None:
-            L.append(f'  {result_writer}(vcc);')
-        else:
-            L.append(f'  amdgpu::write_wave_mask_scalar({dst[1]}, wf, vcc);')
-    else:
-        L.append('  wf.set_vcc_mask(vcc);')
-    return '\n'.join(L)
-
-
-def gen_vector_div_fmas(
-    dst: list[str],
-    src: list[str],
-    dtype: str | None,
-    is_vop3: bool = False,
-    has_abs: bool = False,
-) -> str:
-    """Generate a fused scaled FMA with explicit guest rounding controls."""
-    return _gen_division_result(dst, src, dtype, 'fmas', is_vop3, has_abs)
-
-
-def _gen_division_result(
-    dst: list[str],
-    src: list[str],
-    dtype: str | None,
-    operation: str,
-    is_vop3: bool,
-    has_abs: bool,
-) -> str:
-    is_f64 = dtype == 'f64'
-    fp_type, bits = ('double', 'uint64_t') if is_f64 else ('float', 'uint32_t')
-    read = 'read_lane64' if is_f64 else 'read_lane'
-    write = 'write_lane64' if is_f64 else 'write_lane'
-    mode = 'f16_f64' if is_f64 else 'f32'
-    L = ['  uint64_t exec = wf.exec();']
-    if operation == 'fmas':
-        L.append('  const uint64_t vcc = wf.vcc_mask();')
-    if is_vop3:
-        L.append(output_policy_decl(dtype or 'f32'))
-    L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-    L.append('    if (!(exec & (1ULL << lane))) continue;')
-    for index, operand in enumerate(src):
-        L.append(
-            f'    {fp_type} s{index} = std::bit_cast<{fp_type}>(amdgpu::RegisterAccess(wf).{read}({operand}, lane));'
-        )
-        if is_vop3:
-            L.extend(vop3_src_mod(f's{index}', index, has_abs))
-    post_scale = '(vcc & (1ULL << lane)) != 0, ' if operation == 'fmas' else ''
-    L.append(
-        f'    {fp_type} result = div_{operation}(s0, s1, s2, {post_scale}wf.fp_round_mode_{mode}(), wf.fp_denorm_mode_{mode}());'
-    )
-    result = f'std::bit_cast<{bits}>(result)'
-    if is_vop3:
-        # Both scale the rounded result, then clamp (checked on gfx1201).
-        result = apply_output(dtype or 'f32', result)
-    L.append(f'    amdgpu::RegisterAccess(wf).{write}({dst[0]}, lane, {result});')
-    L.append('  }')
-    return '\n'.join(L)
-
-
-def gen_vector_dot(
-    dst: list[str], src: list[str], op: str | None, dtype: str | None
-) -> str:
-    """Generate V_DOT*C body (dot product accumulate)."""
-    L = []
-    d = dst[0] if dst else src[0]
-    s0, s1 = (src[0], src[1]) if dst else (src[1], src[2])
-    L.append('  uint64_t exec = wf.exec();')
-    L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-    L.append('    if (!(exec & (1ULL << lane))) continue;')
-    L.append(f'    uint32_t a = amdgpu::RegisterAccess(wf).read_lane({s0}, lane);')
-    L.append(f'    uint32_t b = amdgpu::RegisterAccess(wf).read_lane({s1}, lane);')
-    L.append(f'    uint32_t acc = amdgpu::RegisterAccess(wf).read_lane({d}, lane);')
-    if op == 'dot4c':
-        L.append('    for (int i = 0; i < 4; ++i) {')
-        L.append('      int8_t ea = static_cast<int8_t>((a >> (i * 8)) & 0xFF);')
-        L.append('      int8_t eb = static_cast<int8_t>((b >> (i * 8)) & 0xFF);')
-        L.append(
-            '      acc += static_cast<uint32_t>(static_cast<int32_t>(ea) * static_cast<int32_t>(eb));'
-        )
-        L.append('    }')
-    elif op == 'dot8c':
-        L.append('    for (int i = 0; i < 8; ++i) {')
-        L.append('      int32_t ea = static_cast<int32_t>((a >> (i * 4)) & 0xF);')
-        L.append('      if (ea & 8) ea |= ~0xF;')
-        L.append('      int32_t eb = static_cast<int32_t>((b >> (i * 4)) & 0xF);')
-        L.append('      if (eb & 8) eb |= ~0xF;')
-        L.append('      acc += static_cast<uint32_t>(ea * eb);')
-        L.append('    }')
-    elif op == 'dot2c' and dtype == 'f32':
-        # V_DOT2C_F32_F16: D.f32 += f16_lo(A)*f16_lo(B) + f16_hi(A)*f16_hi(B)
-        L.append('    if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 ||')
-        L.append('        wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5) {')
-        L.append(
-            f'      if (amdgpu::pk16_src_needs_narrowing(inst_.src0, {s0}.size_bits()))'
-        )
-        L.append('        a = util::f32_to_f16(std::bit_cast<float>(a));')
-        L.append(
-            '      acc = amdgpu::gfx11_dot2_f32<false>(a, b, a >> 16, b >> 16, acc);'
-        )
-        L.append(f'      amdgpu::RegisterAccess(wf).write_lane({d}, lane, acc);')
-        L.append('      continue;')
-        L.append('    }')
-        L.append('    float a0 = util::f16_to_f32(static_cast<uint16_t>(a & 0xFFFF));')
-        L.append(
-            '    float a1 = util::f16_to_f32(static_cast<uint16_t>((a >> 16) & 0xFFFF));'
-        )
-        L.append('    float b0 = util::f16_to_f32(static_cast<uint16_t>(b & 0xFFFF));')
-        L.append(
-            '    float b1 = util::f16_to_f32(static_cast<uint16_t>((b >> 16) & 0xFFFF));'
-        )
-        L.append('    float facc = std::bit_cast<float>(acc);')
-        L.append('    facc += a0 * b0 + a1 * b1;')
-        L.append('    acc = std::bit_cast<uint32_t>(facc);')
-    elif op == 'dot2c' and dtype == 'i32':
-        # V_DOT2C_I32_I16: D.i32 += i16_lo(A)*i16_lo(B) + i16_hi(A)*i16_hi(B)
-        L.append('    int16_t a0 = static_cast<int16_t>(a & 0xFFFF);')
-        L.append('    int16_t a1 = static_cast<int16_t>((a >> 16) & 0xFFFF);')
-        L.append('    int16_t b0 = static_cast<int16_t>(b & 0xFFFF);')
-        L.append('    int16_t b1 = static_cast<int16_t>((b >> 16) & 0xFFFF);')
-        L.append(
-            '    int64_t dot = static_cast<int64_t>(a0) * b0 + static_cast<int64_t>(a1) * b1;'
-        )
-        L.append('    acc += static_cast<uint32_t>(dot);')
-    else:
-        L.append(f'    (void)a; (void)b; // unhandled dot variant: {op}/{dtype}')
-    L.append(f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, acc);')
-    L.append('  }')
-    return '\n'.join(L)
-
-
 def gen_vector_dot2c_bf16(dst: list[str], src: list[str]) -> str:
     """Generate V_DOT2C_F32_BF16 body: D.f32 += A.bf16[0]*B.bf16[0] + A.bf16[1]*B.bf16[1]."""
     L = []
@@ -1498,116 +1197,17 @@ def gen_vector_cvt_pk(
     arch_name: str = '',
 ) -> str:
     """Generate pack/convert instructions."""
+    if cls == 'vector_cvt_pkrtz_f16_f32':
+        raise ValueError('Packed RTZ conversion requires rj-arith lowering')
+    if cls == 'vector_cvt_pknorm':
+        raise ValueError('Normalized packing requires rj-arith lowering')
+    if cls in ('vector_cvt_pk_u8_f32', 'vector_pack_b32_f16'):
+        raise ValueError('Byte and halfword packing requires rj-arith lowering')
     L = []
     L.append('  uint64_t exec = wf.exec();')
-    if cls == 'vector_cvt_pknorm' and dtype == 'f16':
-        L.append(input_policy.policy_decl('f16'))
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
-    if cls == 'vector_cvt_pk_u8_f32' and len(src) > 2:
-        # shared/conversion.h stages, resolved before the lane loop.
-        L.insert(
-            0, f'  const auto conversion = {pk_u8_expr(is_vop3, has_abs, "inst_")};'
-        )
-        L.extend(
-            f'    uint32_t s{i} = amdgpu::RegisterAccess(wf).read_lane({src[i]}, lane);'
-            for i in range(3)
-        )
-        L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, conversion(s0, s1, s2));'
-        )
-    elif cls == 'vector_cvt_pk_u8_f32':
-        L.append(
-            f'    float fval = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));'
-        )
-        L.append(
-            f'    uint32_t byte_sel = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane) & 3;'
-        )
-        # V_CVT_PKACCUM_U8_F32 (CDNA1-4) reads the packed bytes from its
-        # destination. It keeps truncation and ignores ABS/NEG and input
-        # flushing: no target with it has been captured.
-        old_src = dst[0]
-        L.append(
-            f'    uint32_t old = amdgpu::RegisterAccess(wf).read_lane({old_src}, lane);'
-        )
-        L.append('    uint32_t byte = amdgpu::cvt_u8_f32(fval);')
-        L.append('    uint32_t mask = ~(0xFFu << (byte_sel * 8));')
-        L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, (old & mask) | (byte << (byte_sel * 8)));'
-        )
-    elif cls == 'vector_cvt_pknorm':
-        if dtype == 'f16':
-            if is_vop3:
-                reads = [_read_vop3_true16_src(src[i], opsel, i) for i in range(2)]
-            else:
-                reads = [
-                    f'amdgpu::RegisterAccess(wf).read_lane({src[i]}, lane)'
-                    for i in range(2)
-                ]
-            abs_field = 'inst_.abs' if has_abs else '0u'
-            for i, read in enumerate(reads):
-                L.append(
-                    f'    uint32_t s{i}_bits = amdgpu::input_denormal::prepare<amdgpu::fp_format::F16>('
-                    f'amdgpu::source_modifier::apply<amdgpu::fp_format::F16>('
-                    f'static_cast<uint32_t>({read}), {i}, {abs_field}, inst_.neg), '
-                    f'{input_policy.NAME});'
-                )
-                L.append(
-                    f'    float s{i} = util::f16_to_f32(static_cast<uint16_t>(s{i}_bits));'
-                )
-        else:
-            L.append(
-                f'    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));'
-            )
-            L.append(
-                f'    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
-            )
-        if is_vop3 and dtype != 'f16':
-            L.extend(vop3_src_mod('s0', 0, has_abs))
-            L.extend(vop3_src_mod('s1', 1, has_abs))
-        # Round to nearest even under every MODE.FP_ROUND setting. The ISA applies
-        # FP_ROUND to VALU float operations, and the packed NORM entries
-        # (V_CVT_PK_NORM_* and V_CVT_PKNORM_*) give no exception. gfx1100 and
-        # gfx1201 captures of V_CVT_PK_NORM_{I,U}16_{F16,F32} nevertheless do not
-        # change with FP_ROUND. CDNA1-5, RDNA1-2 and RDNA3.5 reuse this rounding
-        # without hardware verification.
-        if op == 'i16':
-            L.append('    auto cvt_i16 = [](float f) -> int16_t {')
-            L.append('      if (std::isnan(f)) return 0;')
-            L.append(
-                '      return static_cast<int16_t>(util::rndne_scalar(std::clamp(static_cast<double>(f) * 32767.0, -32767.0, 32767.0)));'
-            )
-            L.append('    };')
-            L.append('    int16_t lo = cvt_i16(s0);')
-            L.append('    int16_t hi = cvt_i16(s1);')
-        else:  # u16
-            L.append('    auto cvt_u16 = [](float f) -> uint16_t {')
-            L.append('      if (std::isnan(f)) return 0;')
-            L.append(
-                '      return static_cast<uint16_t>(util::rndne_scalar(std::clamp(static_cast<double>(f) * 65535.0, 0.0, 65535.0)));'
-            )
-            L.append('    };')
-            L.append('    uint16_t lo = cvt_u16(s0);')
-            L.append('    uint16_t hi = cvt_u16(s1);')
-        L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, (static_cast<uint32_t>(hi) << 16) | (static_cast<uint32_t>(lo) & 0xFFFF));'
-        )
-    elif cls == 'vector_cvt_pkrtz_f16_f32':
-        # shared/conversion.h stages, resolved before the lane loop.
-        L.insert(
-            0,
-            f'  const auto conversion = {pk_rtz_f16_expr(is_vop3, has_abs, "inst_")};',
-        )
-        L.append(
-            f'    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);'
-        )
-        L.append(
-            f'    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);'
-        )
-        L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, conversion(s0, s1));'
-        )
-    elif cls == 'vector_cvt_pk':
+    if cls == 'vector_cvt_pk':
         if op in ('fp8_f32', 'bf8_f32') and uses_shared_fp8_narrowing(arch_name):
             _gen_ocp_pk_fp8(
                 L,
@@ -1724,24 +1324,7 @@ def gen_vector_cvt_pk(
                     f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, lo_bits | (hi_bits << 16));'
                 )
         elif op in ('u16_f32', 'i16_f32'):
-            L.append(
-                f'    float f0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));'
-            )
-            L.append(
-                f'    float f1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
-            )
-            if is_vop3:
-                L.extend(vop3_src_mod('f0', 0, has_abs))
-                L.extend(vop3_src_mod('f1', 1, has_abs))
-            if op == 'u16_f32':
-                L.append('    uint32_t lo = amdgpu::cvt_u16_f32(f0);')
-                L.append('    uint32_t hi = amdgpu::cvt_u16_f32(f1);')
-            else:
-                L.append('    uint32_t lo = amdgpu::cvt_i16_f32(f0);')
-                L.append('    uint32_t hi = amdgpu::cvt_i16_f32(f1);')
-            L.append(
-                f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, (hi << 16) | (lo & 0xFFFFu));'
-            )
+            raise ValueError('Packed integer conversion requires rj-arith lowering')
         else:
             L.append(
                 f'    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);'
@@ -1820,25 +1403,6 @@ def gen_vector_cvt_pk(
         )
         L.append(
             f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, lo | (hi << 16));'
-        )
-    elif cls == 'vector_pack_b32_f16':
-        # shared/conversion.h stages, resolved before the lane loop.
-        L.insert(
-            0,
-            f'  const auto conversion = {pack_b32_f16_expr(is_vop3, has_abs, "inst_")};',
-        )
-        if is_vop3:
-            L.append(f'    uint32_t s0 = {_read_vop3_true16_src(src[0], opsel, 0)};')
-            L.append(f'    uint32_t s1 = {_read_vop3_true16_src(src[1], opsel, 1)};')
-        else:
-            L.append(
-                f'    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);'
-            )
-            L.append(
-                f'    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);'
-            )
-        L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, conversion(s0, s1));'
         )
     elif cls == 'vector_cvt_sr_f16_f32':
         # Stochastic rounding: use src1 as random bits for rounding

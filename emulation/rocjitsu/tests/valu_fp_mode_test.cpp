@@ -1347,6 +1347,9 @@ std::vector<ArithmeticCase> host_mxcsr_cases() {
                          FE_TONEAREST,
                          kControlMask,
                          uses_default_host_controls(arch) ? (0x1f80u & kControlMask) : daz});
+        if (arch == ROCJITSU_CODE_ARCH_RDNA3_5) {
+          use_arith_host_contract(cases.back());
+        }
       };
       add("Preserve", 0x00000001u, 0x4b000000u, 0x00800000u, 0xf0u);
       add("PreserveNegative", 0x80000001u, 0x4b000000u, 0x80800000u, 0xf0u);
@@ -1857,6 +1860,8 @@ std::vector<ArithmeticCase> half_log_exp_arithmetic_cases() {
         ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA1,
         ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
         ROCJITSU_CODE_ARCH_RDNA4}) {
+    // All half EXP/LOG paths assume default host controls.
+    const bool arith_half = true;
     const bool gcn = arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
                      arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
     const bool preserves_high_half = !gcn;
@@ -1892,9 +1897,10 @@ std::vector<ArithmeticCase> half_log_exp_arithmetic_cases() {
                            {{0, sample.source}},
                            {{6, expected}},
                            sample.mode | (rounding << 2),
-                           uses_default_host_controls(arch) ? FE_TONEAREST : (FE_UPWARD),
+                           arith_half ? FE_TONEAREST : (FE_UPWARD),
                            0x9fc0u,
-                           uses_default_host_controls(arch) ? (0x1f80u & (0x9fc0u)) : (0x9f60u)});
+                           arith_half ? (0x1f80u & (0x9fc0u)) : (0x9f60u)});
+          cases.back().arith_host_contract = arith_half;
         }
       }
     }
@@ -1912,9 +1918,10 @@ std::vector<ArithmeticCase> half_log_exp_arithmetic_cases() {
                            {{0, (source << 16) | 0x1234u}},
                            {{6, (result << 16) | 0xbeefu}},
                            48u | (rounding << 2),
-                           uses_default_host_controls(arch) ? FE_TONEAREST : (FE_UPWARD),
+                           arith_half ? FE_TONEAREST : (FE_UPWARD),
                            0x9fc0u,
-                           uses_default_host_controls(arch) ? (0x1f80u & (0x9fc0u)) : (0x9f60u)});
+                           arith_half ? (0x1f80u & (0x9fc0u)) : (0x9f60u)});
+          cases.back().arith_host_contract = arith_half;
         }
         cases.push_back(
             {"Arch" + std::to_string(arch) + "SdwaLogClampRound" + std::to_string(rounding),
@@ -1923,9 +1930,10 @@ std::vector<ArithmeticCase> half_log_exp_arithmetic_cases() {
              {{0, 0x7c011234u}},
              {{6, 0x0000beefu}},
              304u | (rounding << 2),
-             uses_default_host_controls(arch) ? FE_TONEAREST : (FE_UPWARD),
+             arith_half ? FE_TONEAREST : (FE_UPWARD),
              0x9fc0u,
-             uses_default_host_controls(arch) ? (0x1f80u & (0x9fc0u)) : (0x9f60u)});
+             arith_half ? (0x1f80u & (0x9fc0u)) : (0x9f60u)});
+        cases.back().arith_host_contract = arith_half;
       }
     }
   }
@@ -2102,16 +2110,13 @@ std::vector<ArithmeticCase> minimum_maximum_cases() {
            {{0, 1u}, {1, 0u}, {2, 1u}}, {{6, 0u}}, 0x00u),
       make("Maximum3F16KeepsNegativeNan", RDNA4, {0xd6300006u, 0x040a0300u, 0u},
            {{0, 0xfd2du}, {1, 0x21c8u}, {2, 0xb723u}, {6, 0u}}, {{6, 0xff2du}}, 0xf0u,
-           expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)),
+           SimdPathExpectation{}),
       make("Minimum3F16FlushesInput", RDNA4, {0xd62f0006u, 0x040a0300u, 0u},
-           {{0, 0x83ffu}, {1, 0u}, {2, 0u}, {6, 0u}}, {{6, 0x8000u}}, 0x00u,
-           expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)),
+           {{0, 0x83ffu}, {1, 0u}, {2, 0u}, {6, 0u}}, {{6, 0x8000u}}, 0x00u, SimdPathExpectation{}),
       make("MaximumMinimumF16QuietsSrc2", RDNA4, {0xd66f0006u, 0x040a0300u, 0u},
-           {{0, 0u}, {1, 0u}, {2, 0x7c01u}, {6, 0u}}, {{6, 0x7e01u}}, 0xf0u,
-           expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)),
+           {{0, 0u}, {1, 0u}, {2, 0x7c01u}, {6, 0u}}, {{6, 0x7e01u}}, 0xf0u, SimdPathExpectation{}),
       make("MinimumMaximumF16FlushesSrc2", RDNA4, {0xd66e0006u, 0x040a0300u, 0u},
-           {{0, 0u}, {1, 0u}, {2, 1u}, {6, 0u}}, {{6, 0u}}, 0x00u,
-           expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)),
+           {{0, 0u}, {1, 0u}, {2, 1u}, {6, 0u}}, {{6, 0u}}, 0x00u, SimdPathExpectation{}),
   };
 }
 
@@ -2156,19 +2161,18 @@ std::vector<ArithmeticCase> min_max_num_cases() {
             {{0, 0x80000000u}, {1, 0x80000000u}, {2, 1u}}, {{6, 0u}}, 0x00u),
       rdna4("Min3NumF16OrdersSignedZero", {0xd62b0006u, 0x040a0300u, 0u},
             {{0, 0u}, {1, 0x8000u}, {2, 0u}, {6, 0u}}, {{6, 0x8000u}}, 0xf0u,
-            expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)),
+            SimdPathExpectation{}),
       rdna4("Med3NumF32NanSelectsMin3", MED3_NUM_F32, {{0, 0x7fc00000u}, {1, 1u}, {2, 0u}},
             {{6, 0u}}, 0xf0u),
       rdna4("Med3NumF32NegativeZeroMedian", MED3_NUM_F32,
             {{0, 0x80000000u}, {1, 0u}, {2, 0x80000000u}}, {{6, 0x80000000u}}, 0xf0u),
       rdna4("Med3NumF16FlushesInput", {0xd6320006u, 0x040a0300u, 0u},
-            {{0, 1u}, {1, 0u}, {2, 1u}, {6, 0u}}, {{6, 0u}}, 0x00u,
-            expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)),
+            {{0, 1u}, {1, 0u}, {2, 1u}, {6, 0u}}, {{6, 0u}}, 0x00u, SimdPathExpectation{}),
       rdna4("MinMaxNumF32IgnoresInnerNanPair", MINMAX_NUM_F32,
             {{0, 0x7f800001u}, {1, 0x7fc00000u}, {2, 0x3f800000u}}, {{6, 0x3f800000u}}, 0xf0u),
       rdna4("MaxMinNumF16OrdersSignedZero", {0xd66b0006u, 0x040a0300u, 0u},
             {{0, 0x8000u}, {1, 0u}, {2, 0x3c00u}, {6, 0u}}, {{6, 0u}}, 0xf0u,
-            expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)),
+            SimdPathExpectation{}),
       // v_dual_max_num_f32 v6, v0, v1 :: v_dual_mov_b32 v7, v2
       // Expected from V_MAX_NUM_F32 rules; VOPD was not captured on hardware.
       rdna4("DualMaxNumF32OrdersSignedZero", {0xca900300u, 0x06060102u, 0u},
@@ -2278,10 +2282,8 @@ std::vector<ArithmeticCase> minmax_input_flush_cases() {
       {"MinimumF64", vop3(rdna4::kVMinimumF64Vop3, 64), 64, true, {}},
       {"MaximumF64", vop3(rdna4::kVMaximumF64Vop3, 64), 64, false, {}},
       // Ternary forms use separate SIMD helpers from the binary forms.
-      {"Min3NumF16", vop3(rdna4::kVMin3NumF16Vop3, 16), 16, true,
-       expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)},
-      {"Max3NumF16", vop3(rdna4::kVMax3NumF16Vop3, 16), 16, false,
-       expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)},
+      {"Min3NumF16", vop3(rdna4::kVMin3NumF16Vop3, 16), 16, true, SimdPathExpectation{}},
+      {"Max3NumF16", vop3(rdna4::kVMax3NumF16Vop3, 16), 16, false, SimdPathExpectation{}},
       {"Min3NumF32", vop3(rdna4::kVMin3NumF32Vop3, 32), 32, true, {}},
       {"Max3NumF32", vop3(rdna4::kVMax3NumF32Vop3, 32), 32, false, {}},
   }};
@@ -2333,16 +2335,14 @@ std::vector<ArithmeticCase> minmax_input_flush_cases() {
             sources.emplace_back(source, high | uint32_t(input));
           expected = {{6, (form.width == 16 ? 0xdead0000u : 0u) | uint32_t(result)}};
         }
-        cases.push_back(
-            {std::string(form.name) + "AllSources" + (negative ? "Negative" : "Positive") + "Mode" +
-                 std::to_string(mode.mode),
-             ROCJITSU_CODE_ARCH_RDNA4, vop3(form.op, form.width), std::move(sources),
-             std::move(expected), mode.mode, FE_TONEAREST, 0, 0,
-             form.width == 16
-                 ? expect_simd_path(form.sources == 2
-                                        ? amdgpu::SimdFastPath::VOP3_BINARY_FP16
-                                        : amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)
-                 : SimdPathExpectation{}});
+        cases.push_back({std::string(form.name) + "AllSources" +
+                             (negative ? "Negative" : "Positive") + "Mode" +
+                             std::to_string(mode.mode),
+                         ROCJITSU_CODE_ARCH_RDNA4, vop3(form.op, form.width), std::move(sources),
+                         std::move(expected), mode.mode, FE_TONEAREST, 0, 0,
+                         form.width == 16 && form.sources == 2
+                             ? expect_simd_path(amdgpu::SimdFastPath::VOP3_BINARY_FP16)
+                             : SimdPathExpectation{}});
       }
   return cases;
 }
@@ -2499,21 +2499,18 @@ std::vector<ArithmeticCase> minmax_output_modifier_cases() {
                    {2, high | uint32_t(sample.value)}};
         expected = {{6, (form.width == 16 ? 0xdead0000u : 0u) | uint32_t(sample.expected)}};
       }
-      cases.push_back(
-          {std::string(form.name) + sample.name,
-           ROCJITSU_CODE_ARCH_RDNA4,
-           {words[0], words[1], 0u},
-           std::move(sources),
-           std::move(expected),
-           sample.mode,
-           FE_TONEAREST,
-           0,
-           0,
-           form.width == 16
-               ? expect_simd_path(form.sources == 2
-                                      ? amdgpu::SimdFastPath::VOP3_BINARY_FP16
-                                      : amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)
-               : SimdPathExpectation{}});
+      cases.push_back({std::string(form.name) + sample.name,
+                       ROCJITSU_CODE_ARCH_RDNA4,
+                       {words[0], words[1], 0u},
+                       std::move(sources),
+                       std::move(expected),
+                       sample.mode,
+                       FE_TONEAREST,
+                       0,
+                       0,
+                       form.width == 16 && form.sources == 2
+                           ? expect_simd_path(amdgpu::SimdFastPath::VOP3_BINARY_FP16)
+                           : SimdPathExpectation{}});
     }
   }
   // Emulator regression expectations, not additional hardware captures.
@@ -2548,7 +2545,7 @@ std::vector<ArithmeticCase> minmax_output_modifier_cases() {
                    FE_TONEAREST,
                    0,
                    0,
-                   expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)});
+                   SimdPathExpectation{}});
   return cases;
 }
 
@@ -4862,9 +4859,6 @@ std::vector<DotLane> dot_family_lanes() {
                        uint32_t src1, uint32_t acc, uint32_t gfx1201,
                        std::optional<uint32_t> gfx1100, std::vector<uint32_t> modes,
                        SimdPathExpectation simd = {}) {
-    if (RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS && modifiers.clamp &&
-        simd.path == amdgpu::SimdFastPath::VOP3P_DOT_INT)
-      simd = expect_simd_fallback();
     lanes.push_back(
         {name, opcode, modifiers, {src0, src1, acc}, gfx1201, gfx1100, std::move(modes), simd});
   };
@@ -4959,41 +4953,40 @@ std::vector<DotLane> dot_family_lanes() {
       0xc8bff16cu, {}, fp8_modes);
   // Integer DOT4/DOT8 read each source as two 16-bit halves: OP_SEL picks the
   // half for bits 15:0 and OP_SEL_HI the half for bits 31:16. Both cards agree.
-  // These lanes must also take the integer DOT SIMD path.
+  // Library backends are checked by the direct arithmetic CPU-level tests.
   const uint16_t dot4_iu8 = rdna4::kVDot4I32Iu8Vop3p;
   const uint16_t dot4_u8 = rdna4::kVDot4U32U8Vop3p;
   const uint16_t dot8_iu4 = rdna4::kVDot8I32Iu4Vop3p;
   const uint16_t dot8_u4 = rdna4::kVDot8U32U4Vop3p;
   const std::vector<uint32_t> int_modes{0xf0u, 0x00u};
-  const SimdPathExpectation int_simd = expect_simd_path(amdgpu::SimdFastPath::VOP3P_DOT_INT);
   add("Dot4Iu8HighHalfSrc0", dot4_iu8, {.opsel = 1}, 0x32bf5f5eu, 0xf9c54f6bu, 0x00b85d08u,
-      0x00b97fe8u, 0x00b97fe8u, int_modes, int_simd);
+      0x00b97fe8u, 0x00b97fe8u, int_modes);
   add("Dot4Iu8LowHalves", dot4_iu8, {.opsel_hi = 0}, 0xe9d6d2a3u, 0xffffffefu, 0x00000031u,
-      0x0002d2e7u, 0x0002d2e7u, int_modes, int_simd);
+      0x0002d2e7u, 0x0002d2e7u, int_modes);
   add("Dot4U8LowHalves", dot4_u8, {.opsel_hi = 0}, 0x2e1ae63eu, 0x14771051u, 0x00dc74cbu,
-      0x00dcb8c7u, 0x00dcb8c7u, int_modes, int_simd);
+      0x00dcb8c7u, 0x00dcb8c7u, int_modes);
   add("Dot8Iu4HighHalfSrc0", dot8_iu4, {.opsel = 1}, 0x8d7fb53du, 0x64aeeb2fu, 0x5385deddu,
-      0x5385e247u, 0x5385e247u, int_modes, int_simd);
+      0x5385e247u, 0x5385e247u, int_modes);
   add("Dot8Iu4LowHalves", dot8_iu4, {.opsel_hi = 0}, 0x041e0e34u, 0x3f5b683eu, 0xb7a86fa9u,
-      0xb7a8710bu, 0xb7a8710bu, int_modes, int_simd);
+      0xb7a8710bu, 0xb7a8710bu, int_modes);
   add("Dot8U4LowHalves", dot8_u4, {.opsel_hi = 0}, 0xfffffffdu, 0x00000c75u, 0xffffd984u,
-      0xffffdc40u, 0xffffdc40u, int_modes, int_simd);
+      0xffffdc40u, 0xffffdc40u, int_modes);
   // Selection combined with signedness and CLAMP: the selected elements are
   // negative and C is near the limit, so each modifier changes the result.
   add("Dot4Iu8HighHalfSrc1SignedClamp", dot4_iu8, {.neg = 2, .opsel = 2, .clamp = 1}, 0x7f7f8080u,
-      0x88887777u, 0x800002cfu, 0x80000000u, 0x80000000u, int_modes, int_simd);
+      0x88887777u, 0x800002cfu, 0x80000000u, 0x80000000u, int_modes);
   add("Dot4Iu8HighHalfSrc0SignedClamp", dot4_iu8, {.neg = 3, .opsel = 1, .clamp = 1}, 0xffff8000u,
-      0x7fffffffu, 0x80000000u, 0x80000000u, 0x80000000u, int_modes, int_simd);
+      0x7fffffffu, 0x80000000u, 0x80000000u, 0x80000000u, int_modes);
   add("Dot4Iu8MixedHalvesSigned", dot4_iu8, {.neg = 3, .opsel_hi = 2}, 0x7fffffffu, 0xffffffffu, 0u,
-      0x00000004u, 0x00000004u, int_modes, int_simd);
+      0x00000004u, 0x00000004u, int_modes);
   add("Dot8Iu4HighHalfSrc1SignedClamp", dot8_iu4, {.neg = 2, .opsel = 2, .clamp = 1}, 0x88887777u,
-      0x88887777u, 0x80000059u, 0x80000000u, 0x80000000u, int_modes, int_simd);
+      0x88887777u, 0x80000059u, 0x80000000u, 0x80000000u, int_modes);
   add("Dot8Iu4LowHalvesSignedClamp", dot8_iu4, {.neg = 1, .opsel_hi = 0, .clamp = 1}, 0x77778888u,
-      0x7f807f80u, 0x8000014eu, 0x80000000u, 0x80000000u, int_modes, int_simd);
+      0x7f807f80u, 0x8000014eu, 0x80000000u, 0x80000000u, int_modes);
   add("Dot4U8HighHalfSrc0Clamp", dot4_u8, {.opsel = 1, .clamp = 1}, 0x80000000u, 0xffffffffu,
-      0xffff8000u, 0xffffffffu, 0xffffffffu, int_modes, int_simd);
+      0xffff8000u, 0xffffffffu, 0xffffffffu, int_modes);
   add("Dot8U4LowHalvesClamp", dot8_u4, {.opsel_hi = 0, .clamp = 1}, 0x0bffe1c2u, 0x00000015u,
-      0xffffffe8u, 0xffffffffu, 0xffffffffu, int_modes, int_simd);
+      0xffffffe8u, 0xffffffffu, 0xffffffffu, int_modes);
   return lanes;
 }
 
@@ -5444,8 +5437,6 @@ SimdPathExpectation simd_expectation_for_run(const ArithmeticCase &test, bool fo
 void expect_arithmetic_case(const ArithmeticCase &test, SimdPathExpectation simd = {},
                             bool uses_arith = false, amdgpu::ArithmeticPolicy policy = {}) {
   uses_arith = test.arith_host_contract || (uses_arith && uses_default_host_controls(test.arch));
-  // Migrated handlers assume default host controls; guest MODE remains unchanged.
-  const int host_rounding = uses_arith ? FE_TONEAREST : test.host_rounding;
   amdgpu::GpuMemory memory("mode_memory");
   amdgpu::L2Cache cache("mode_cache");
   cache.set_backing_memory(&memory);
@@ -5465,6 +5456,22 @@ void expect_arithmetic_case(const ArithmeticCase &test, SimdPathExpectation simd
   DecodeResult decoded = decoder->decode(test.words.data());
   ASSERT_FALSE(decoded.failed());
   std::unique_ptr<Instruction> instruction = std::move(decoded).value();
+  auto mnemonic = instruction->mnemonic();
+  if (mnemonic.ends_with("_e32") || mnemonic.ends_with("_e64")) {
+    mnemonic.remove_suffix(4);
+  }
+  if (mnemonic.ends_with("_sdwa")) {
+    mnemonic.remove_suffix(5);
+  }
+  if (mnemonic == "v_cvt_f16_i16" || mnemonic == "v_cvt_f16_u16" || mnemonic == "v_cvt_i16_f16" ||
+      mnemonic == "v_cvt_u16_f16" || mnemonic == "v_cvt_f16_f32" || mnemonic == "v_cvt_f32_f16") {
+    // These conversions use rj-arith on every profile, outside the legacy tracker.
+    uses_arith = true;
+    simd = {};
+  }
+
+  // Apply the default-host contract after classifying the migrated instruction.
+  const int host_rounding = uses_arith ? FE_TONEAREST : test.host_rounding;
   const uint32_t base = wave->vgpr_alloc().base;
   const uint64_t full_exec = wave->wf_size() == 64 ? ~uint64_t{0} : 0xffffffffu;
   for (uint64_t exec : {uint64_t{1}, full_exec}) {

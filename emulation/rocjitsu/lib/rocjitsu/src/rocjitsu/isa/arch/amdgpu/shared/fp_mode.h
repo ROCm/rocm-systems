@@ -9,7 +9,6 @@
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/denormal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/denormal_value.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/division.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/input_denormal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/minmax.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/output_denormal.h"
@@ -268,17 +267,6 @@ inline minmax::LegacyPolicy legacy_minmax_policy(rj_code_arch_t arch, bool ieee_
 /// @brief Whether floating operations with exception support quiet signaling NaNs.
 inline bool quiets_nan(rj_code_arch_t arch, bool ieee_mode) {
   return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5 || ieee_mode;
-}
-
-/// @brief Apply V_CVT_F32_F16 policy to an already decoded and modified half.
-/// @details Raw half decoding preserves signaling NaNs. The caller flushes the
-/// half under MODE before widening it; this applies target-specific NaN quieting.
-inline uint32_t cvt_f32_f16(float source, rj_code_arch_t arch, bool ieee_mode) {
-  uint32_t bits = std::bit_cast<uint32_t>(source);
-  const uint32_t magnitude = bits & 0x7fffffffu;
-  if (quiets_nan(arch, ieee_mode) && magnitude > 0x7f800000u)
-    bits |= 0x00400000u;
-  return bits;
 }
 
 /// @brief Pack two rounded F16 results, applying the destination denormal mode to each half.
@@ -1176,14 +1164,6 @@ inline uint64_t scale_u53_f64_rtz(uint64_t significand, int exponent) {
 } // namespace rocjitsu::amdgpu::fp_mode
 
 namespace rocjitsu::amdgpu {
-
-/// @brief Preserve the FIXUP NaN payload when narrowing its promoted result.
-inline uint16_t narrow_div_fixup_f16(float value, bool fp16_ovfl) {
-  const uint32_t bits = std::bit_cast<uint32_t>(value);
-  if ((bits & 0x7fffffffu) > 0x7f800000u)
-    return static_cast<uint16_t>(((bits >> 16) & 0x8000u) | 0x7c00u | ((bits >> 13) & 0x3ffu));
-  return util::f32_to_f16_mode(value, fp16_ovfl);
-}
 
 /// Convert the F32 source of a scaled narrowing instruction before applying its E8M0 scale.
 /// A preserved F32 subnormal is normal in double, even if the host flushes F32 operands.

@@ -5,20 +5,16 @@ from pathlib import Path
 from types import SimpleNamespace
 from amdisa.codegen.execute import ExecuteContext
 from amdisa.__main__ import _PROFILES
-import re
-
+import pytest, re
 from rj_arith_headers import public_headers
-
-import pytest
-
 from amdisa.codegen.execute.rj_arith_vector import (
     ACCUMULATOR_MOVES,
     BINARY32,
-    CDNA5_COMBINED32,
-    UNARY32,
-    TERNARY32,
-    UNMODIFIED_MULTIPLIES,
     CARRY32_NAMES,
+    CDNA5_COMBINED32,
+    TERNARY32,
+    UNARY32,
+    UNMODIFIED_MULTIPLIES,
     gen_carry32,
     gen_vector32,
 )
@@ -408,7 +404,7 @@ def test_packed_integer_selector_mapping_and_compatibility(arch):
         assert 'arithmetic_flags()' in body
 
 
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+@pytest.mark.parametrize('arch', ['rdna3_5', 'rdna3', 'rdna4'])
 def test_integer_dot_signedness_bits_are_not_negation_or_half_selectors(arch):
     from amdisa.codegen.execute.rj_arith_vector import (
         MODERN_INTEGER_DOT_NAMES,
@@ -435,7 +431,7 @@ def test_integer_dot_signedness_bits_are_not_negation_or_half_selectors(arch):
         assert (
             gen_integer_dot(
                 context(
-                    'cdna2',
+                    'rdna1',
                     name,
                     ['d'],
                     ['a', 'b', 'c'],
@@ -830,3 +826,90 @@ def test_gfx942_half_multiply_forwards_sdwa_clamp():
     )
     assert 'inst_.src0 == amdgpu::SRC_SDWA && sdwa_clamp_' in body
     assert 'rj_arith_v_mul_lo_u16_w64_gfx942' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna2', 'rdna3_5'])
+def test_older_integer_dot_routes_preserve_modifiers(arch):
+    from amdisa.codegen.execute.rj_arith_vector import gen_integer_dot
+
+    names = (
+        ('V_DOT4_I32_IU8', 'V_DOT4_U32_U8', 'V_DOT8_I32_IU4')
+        if arch == 'rdna3_5'
+        else ('V_DOT4_I32_I8', 'V_DOT4_U32_U8', 'V_DOT8_I32_I4')
+    )
+    for name in names:
+        body = gen_integer_dot(
+            context(
+                arch,
+                name,
+                ['d'],
+                ['a', 'b', 'c'],
+                False,
+                enc_name='ENC_VOP3P',
+                opsel_exprs=('low', 'high'),
+            )
+        )
+        assert f'rj_arith_{name.lower()}_w64' in body
+        assert 'RJ_ARITH_DOT_CLAMP' in body
+        assert 'RJ_ARITH_DOT_LO_A_HIGH' in body
+        assert 'RJ_ARITH_DOT_HI_B_LOW' in body
+        assert ('RJ_ARITH_DOT_SIGNED' in body) == ('_I32_IU' in name)
+    if arch != 'rdna3_5':
+        for encoding in ('ENC_VOP2', 'ENC_VOP3'):
+            body = gen_integer_dot(
+                context(
+                    arch,
+                    'V_DOT4C_I32_I8',
+                    ['d'],
+                    ['a', 'b'],
+                    encoding == 'ENC_VOP3',
+                    enc_name=encoding,
+                )
+            )
+            assert 'rj_arith_v_dot4_i32_i8_w64' in body
+            assert '0, d, a, b, d' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna2', 'rdna3_5'])
+def test_older_integer_dot_generated_methods_have_no_legacy_route(arch):
+    import re
+    from pathlib import Path
+
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    count = 0
+    for source in root.glob('*_exec.cpp'):
+        text = source.read_text()
+        for match in re.finditer(
+            r'void (VDot[248]c?(?:I32|U32)\w*)::execute(?:_modifier)?_impl\([^)]*\)\s*\{',
+            text,
+        ):
+            end, depth = match.end(), 1
+            while depth:
+                depth += (text[end] == '{') - (text[end] == '}')
+                end += 1
+            body = text[match.end() : end - 1]
+            assert 'execute_ternary32' in body, match[1]
+            assert 'amdgpu::execute_v_' not in body, match[1]
+            assert 'try_execute_' not in body, match[1]
+            assert 'shared/rj_arith_vector_exec.h"' in text
+            count += 1
+    assert count > 0
+
+
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'])
+def test_older_saturation_retains_word_or_selected_half_policy(arch):
+    for vop3 in (False, True):
+        body = gen_vector32(context(arch, 'V_SAT_PK_U8_I16', ['dst'], ['a'], vop3))
+        legacy = arch != 'rdna3_5'
+        assert ('rj_arith_v_sat_pk_u8_i16_w64_gfx942' in body) == legacy
+        assert ('execute_saturating_pack_sdwa' in body) == (legacy and not vop3)
+        assert ('vop3_opsel' in body) == (vop3 and arch not in ('rdna1', 'rdna2'))
+        assert ('word_destination' in body) == (not legacy and not vop3)
+    # The independent word-integer migration remains separate.
+    assert (
+        gen_vector32(context(arch, 'V_ADD_NC_U32', ['dst'], ['a', 'b'], True)) is None
+    )

@@ -2462,7 +2462,7 @@ VCvtNormI16F16Vop3::VCvtNormI16F16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
-  vdst.set_register_byte_mask(0x3);
+  vdst.set_register_byte_mask((amdgpu::vop3_opsel(inst_) & 8) ? 0xc : 0x3);
   vdst.set_preserve_unwritten_bytes();
   flags_ |= DIRECT_REGISTER_ACCESSES;
   set_amdgpu_operation(amdgpu::Operation::V_CVT_NORM_I16_F16);
@@ -2499,7 +2499,7 @@ VCvtNormU16F16Vop3::VCvtNormU16F16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
-  vdst.set_register_byte_mask(0x3);
+  vdst.set_register_byte_mask((amdgpu::vop3_opsel(inst_) & 8) ? 0xc : 0x3);
   vdst.set_preserve_unwritten_bytes();
   flags_ |= DIRECT_REGISTER_ACCESSES;
   set_amdgpu_operation(amdgpu::Operation::V_CVT_NORM_U16_F16);
@@ -3595,6 +3595,10 @@ VSubF16Vop3::VSubF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   vdst.set_register_byte_mask(0x3);
   vdst.set_preserve_unwritten_bytes();
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -3638,6 +3642,10 @@ VSubrevF16Vop3::VSubrevF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   vdst.set_register_byte_mask(0x3);
   vdst.set_preserve_unwritten_bytes();
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -3681,6 +3689,10 @@ VMulF16Vop3::VMulF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   vdst.set_register_byte_mask(0x3);
   vdst.set_preserve_unwritten_bytes();
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -3854,6 +3866,10 @@ VLdexpF16Vop3::VLdexpF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   vdst.set_register_byte_mask(0x3);
   vdst.set_preserve_unwritten_bytes();
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -6883,7 +6899,7 @@ VMin3F16Vop3::VMin3F16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
-  vdst.set_register_byte_mask(0x3);
+  vdst.set_register_byte_mask((amdgpu::vop3_opsel(inst_) & 8u) ? 0xc : 0x3);
   vdst.set_preserve_unwritten_bytes();
   flags_ |= DIRECT_REGISTER_ACCESSES;
   set_amdgpu_operation(amdgpu::Operation::V_MIN3_F16);
@@ -7039,7 +7055,7 @@ VMax3F16Vop3::VMax3F16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
-  vdst.set_register_byte_mask(0x3);
+  vdst.set_register_byte_mask((amdgpu::vop3_opsel(inst_) & 8u) ? 0xc : 0x3);
   vdst.set_preserve_unwritten_bytes();
   flags_ |= DIRECT_REGISTER_ACCESSES;
   set_amdgpu_operation(amdgpu::Operation::V_MAX3_F16);
@@ -7195,7 +7211,7 @@ VMed3F16Vop3::VMed3F16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
-  vdst.set_register_byte_mask(0x3);
+  vdst.set_register_byte_mask((amdgpu::vop3_opsel(inst_) & 8u) ? 0xc : 0x3);
   vdst.set_preserve_unwritten_bytes();
   flags_ |= DIRECT_REGISTER_ACCESSES;
   set_amdgpu_operation(amdgpu::Operation::V_MED3_F16);

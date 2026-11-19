@@ -4,11 +4,6 @@
 #ifndef UTIL_SIMD_H_
 #define UTIL_SIMD_H_
 
-#include "util/amdgpu_exp.h"
-#include "util/amdgpu_log.h"
-#include "util/amdgpu_rcp.h"
-#include "util/amdgpu_rsq.h"
-#include "util/amdgpu_sqrt.h"
 #include "util/bit.h"
 #include "util/host_target.h"
 #include "util/simd_control.h"
@@ -474,55 +469,6 @@ inline native<double> ordered_clamp_f64_simd(native<double> v, double lo, double
   return result;
 }
 
-inline native<double> cvt_i32_f64_saturate_input_simd(native<double> s) {
-  constexpr std::size_t W = native<double>::size();
-  alignas(64) double lanes[W];
-  s.copy_to(lanes, stdx::element_aligned);
-  for (double &lane : lanes) {
-    if (std::isnan(lane))
-      lane = 0.0;
-    else if (lane >= 2147483648.0)
-      lane = 2147483647.0;
-    else if (lane < -2147483648.0)
-      lane = -2147483648.0;
-  }
-  native<double> result;
-  result.copy_from(lanes, stdx::element_aligned);
-  return result;
-}
-
-inline native<double> cvt_u32_f64_saturate_input_simd(native<double> s) {
-  constexpr std::size_t W = native<double>::size();
-  alignas(64) double lanes[W];
-  s.copy_to(lanes, stdx::element_aligned);
-  for (double &lane : lanes) {
-    if (std::isnan(lane) || lane < 0.0)
-      lane = 0.0;
-    else if (lane >= 4294967296.0)
-      lane = 4294967295.0;
-  }
-  native<double> result;
-  result.copy_from(lanes, stdx::element_aligned);
-  return result;
-}
-
-inline native<double> sqrt_f64_simd(native<double> a) {
-  native<double> r = stdx::sqrt(a);
-  constexpr std::size_t W = native<double>::size();
-  alignas(64) double in[W];
-  alignas(64) double out[W];
-  a.copy_to(in, stdx::element_aligned);
-  r.copy_to(out, stdx::element_aligned);
-  for (std::size_t i = 0; i < W; ++i) {
-    if (std::isnan(in[i]))
-      out[i] = in[i];
-    else if (in[i] < 0.0)
-      out[i] = std::numeric_limits<double>::quiet_NaN();
-  }
-  r.copy_from(out, stdx::element_aligned);
-  return r;
-}
-
 /// Vectorized, bit-exact port of `f16_to_f32` (util/data_types.h). Each lane's
 /// low 16 bits hold the f16; high bits are ignored. All branch selection is
 /// done with `where`-masks in the uint32 domain. Bit-identical to the scalar
@@ -841,32 +787,6 @@ inline double ceil_scalar(double a) { return quiet_snan_scalar(a, std::ceil(a));
 inline float trunc_scalar(float a) { return quiet_snan_scalar(a, std::trunc(a)); }
 inline double trunc_scalar(double a) { return quiet_snan_scalar(a, std::trunc(a)); }
 
-/// Native-width adapters for the shared integer transcendental mappings.
-inline native<float> rcp_f32_simd(native<float> a, bool quiet_snan = true) {
-  return map_native_convert_scalar<float, float>(
-      a, [quiet_snan](float value) { return amdgpu_rcp_f32(value, quiet_snan); });
-}
-
-inline native<float> rsq_f32_simd(native<float> a, bool quiet_snan = true) {
-  return map_native_convert_scalar<float, float>(
-      a, [quiet_snan](float value) { return amdgpu_rsq_f32(value, quiet_snan); });
-}
-
-inline native<float> sqrt_f32_simd(native<float> a, bool quiet_snan = true) {
-  return map_native_convert_scalar<float, float>(
-      a, [quiet_snan](float value) { return amdgpu_sqrt_f32(value, quiet_snan); });
-}
-
-inline native<float> log_f32_simd(native<float> a, bool quiet_snan = true) {
-  return map_native_convert_scalar<float, float>(
-      a, [quiet_snan](float value) { return amdgpu_log_f32(value, quiet_snan); });
-}
-
-inline native<float> exp_f32_simd(native<float> a, bool quiet_snan = true) {
-  return map_native_convert_scalar<float, float>(
-      a, [quiet_snan](float value) { return amdgpu_exp_f32(value, quiet_snan); });
-}
-
 /// Branchless SWAR population count over a uint32 vector. Each lane holds
 /// std::popcount(lane) in [0, 32], bit-identical to the scalar std::popcount.
 /// Used by the bit-scan VOP1/VOP3 SIMD fast paths (bcnt / ffbh / ffbl / cls).
@@ -1041,37 +961,9 @@ inline native<float> round_to_nearest_even_simd(native<float> value) {
   return lower;
 }
 
-/// Round a normalized value scaled by 32767 or 65535 to the nearest integer,
-/// with ties to even. Clamp inputs to [minimum, 1] and convert NaNs to zero.
-/// An FP32 product can round onto an integer midpoint. The FMA residual
-/// distinguishes these false ties so the conversion rounds only once.
-inline native<float> round_normalized_simd(native<float> f, float scale, float minimum) {
-  using F = native<float>;
-  stdx::where(f < F(minimum), f) = F(minimum);
-  stdx::where(f > F(1.0f), f) = F(1.0f);
-  stdx::where(stdx::isnan(f), f) = F(0.0f);
-  const F product = f * F(scale);
-  const F residual = stdx::fma(f, F(scale), -product);
-  const F lower = stdx::floor(product);
-  const auto midpoint = product == lower + F(0.5f);
-  F rounded = rndne_simd(product);
-  stdx::where(midpoint && (residual < F(0.0f)), rounded) = lower;
-  stdx::where(midpoint && (residual > F(0.0f)), rounded) = lower + F(1.0f);
-  return rounded;
-}
-
-/// Convert to signed normalized integers in [-32767, 32767]; NaNs become zero.
-inline native<int32_t> cvt_pknorm_i16_f32_simd(native<float> f) {
-  return stdx::static_simd_cast<native<int32_t>>(round_normalized_simd(f, 32767.0f, -1.0f));
-}
-/// Convert to unsigned normalized integers in [0, 65535]; NaNs become zero.
-inline native<uint32_t> cvt_pknorm_u16_f32_simd(native<float> f) {
-  return stdx::static_simd_cast<native<uint32_t>>(round_normalized_simd(f, 65535.0f, 0.0f));
-}
-
 /// Vector port of the f32 `std::frexp` mantissa over raw float bits. Returns the
-/// significand m with |m| in [0.5, 1) such that input = m * 2^e (e via
-/// frexp_exp_f32_simd). Normal lanes force the exponent field to 126 and keep
+/// significand m with |m| in [0.5, 1) such that input = m * 2^e.
+/// Normal lanes force the exponent field to 126 and keep
 /// the mantissa; ±0 / Inf / NaN pass through unchanged (matching glibc frexp,
 /// which the scalar body calls unguarded); denormals are renormalized via the
 /// highest-set-bit index p = floor(log2(M)) (M < 2^24, so the int->float cast is
@@ -1096,27 +988,6 @@ inline native<float> frexp_mant_f32_simd(native<uint32_t> v) {
   // payload; qNaN inputs are unchanged by the idempotent OR.
   stdx::where((E == 255u) && (M != 0u), out) = v | U(0x00400000u);
   return std::bit_cast<native<float>>(out);
-}
-
-/// Vector port of the f32 `std::frexp` exponent over raw float bits, returned as
-/// the raw bits of the int32 result. Normal lanes give E - 126; denormals give
-/// p - 148 (p = floor(log2(M))); ±0 / Inf / NaN give 0 (the scalar body only
-/// calls frexp on finite non-zero inputs, leaving exp = 0 otherwise). Negative
-/// results carry the correct two's-complement bits. Bit-identical to the scalar
-/// v_frexp_exp_i32_f32 body.
-inline native<uint32_t> frexp_exp_f32_simd(native<uint32_t> v) {
-  using U = native<uint32_t>;
-  U E = (v >> 23) & U(0xFFu);
-  U M = v & U(0x7FFFFFu);
-  U normal = E - U(126u);
-  const native<float> mf = stdx::static_simd_cast<native<float>>(M);
-  const U p = (std::bit_cast<U>(mf) >> 23) - U(127u);
-  U dn = p - U(148u);
-  U out = normal;
-  stdx::where(E == 0u, out) = U(0u);             // ±0 (M==0); overwritten if denormal
-  stdx::where((E == 0u) && (M != 0u), out) = dn; // denormal exponent
-  stdx::where(E == 255u, out) = U(0u);           // Inf / NaN -> 0
-  return out;
 }
 
 /// 64-bit-lane port of the f64 `std::frexp` mantissa over native<double>. Same
@@ -1201,6 +1072,115 @@ inline native<uint64_t> frexp_exp_f64_simd(native<double> x) {
 #endif
 }
 
+/// Sum of the four per-byte absolute differences of two uint32 lanes (the core
+/// of v_sad_u8 / v_sad_hi_u8). Each byte difference is in [0,255], so the sum is
+/// in [0,1020]; bit-identical to the scalar byte loop.
+inline native<uint32_t> sad_bytes_u32_simd(native<uint32_t> a, native<uint32_t> b) {
+  using U = native<uint32_t>;
+  U r(0u);
+  for (int i = 0; i < 4; ++i) {
+    U ai = (a >> (i * 8)) & U(0xFFu);
+    U bi = (b >> (i * 8)) & U(0xFFu);
+    U d = ai - bi;
+    stdx::where(bi > ai, d) = bi - ai; // |ai - bi|
+    r += d;
+  }
+  return r;
+}
+
+/// Masked per-byte SAD (v_msad_u8): like sad_bytes_u32_simd but a byte whose
+/// reference (src1) value is zero contributes nothing. Bit-identical to scalar.
+inline native<uint32_t> msad_bytes_u32_simd(native<uint32_t> a, native<uint32_t> b) {
+  using U = native<uint32_t>;
+  U r(0u);
+  for (int i = 0; i < 4; ++i) {
+    U ai = (a >> (i * 8)) & U(0xFFu);
+    U bi = (b >> (i * 8)) & U(0xFFu);
+    U d = ai - bi;
+    stdx::where(bi > ai, d) = bi - ai;
+    stdx::where(bi == 0u, d) = 0u; // skip masked-out (zero reference) bytes
+    r += d;
+  }
+  return r;
+}
+
+/// Per-byte unsigned lerp (v_lerp_u8): out_byte = (a + b + (c & 1)) >> 1,
+/// computed independently per byte and repacked. Bit-identical to the scalar.
+inline native<uint32_t> lerp_u8_simd(native<uint32_t> a, native<uint32_t> b, native<uint32_t> c) {
+  using U = native<uint32_t>;
+  U r(0u);
+  for (int i = 0; i < 4; ++i) {
+    const int sh = i * 8;
+    U ab = (a >> sh) & U(0xFFu);
+    U bb = (b >> sh) & U(0xFFu);
+    U round_up = (c >> sh) & U(1u);
+    r = r | (((ab + bb + round_up) >> 1) << sh);
+  }
+  return r;
+}
+
+/// Byte permute (v_perm_b32): build each output byte from a selector byte of
+/// src2 indexing the 8 bytes of the {src0:src1} 64-bit source (src1 = low word).
+/// Selector 0..7 picks a source byte; 8..11 sign-extend source bytes 1, 3, 5,
+/// and 7; 12 yields zero; and every selector >= 13 yields 0xFF.
+inline native<uint32_t> perm_b32_simd(native<uint32_t> a, native<uint32_t> b, native<uint32_t> c) {
+  using U = native<uint32_t>;
+  U srcbyte[8];
+  for (int k = 0; k < 4; ++k)
+    srcbyte[k] = (b >> (k * 8)) & U(0xFFu); // bytes 0..3 from the low word (src1)
+  for (int k = 0; k < 4; ++k)
+    srcbyte[k + 4] = (a >> (k * 8)) & U(0xFFu); // bytes 4..7 from the high word (src0)
+  U r(0u);
+  for (int i = 0; i < 4; ++i) {
+    U sel = (c >> (i * 8)) & U(0xFFu);
+    U byte(0u);
+    for (int k = 0; k < 8; ++k)
+      stdx::where(sel == U(static_cast<uint32_t>(k)), byte) = srcbyte[k];
+    for (int k = 0; k < 4; ++k)
+      stdx::where(sel == U(static_cast<uint32_t>(k + 8)), byte) =
+          (srcbyte[k * 2 + 1] >> 7) * U(0xFFu);
+    stdx::where(sel >= U(13u), byte) = U(0xFFu);
+    r = r | (byte << (i * 8));
+  }
+  return r;
+}
+
+/// High 32 bits of the 64-bit UNSIGNED product a*b (v_mul_hi_u32 semantics).
+///
+/// Computed purely with 32-bit-lane SIMD ops via the 16x16 partial-product
+/// decomposition, deliberately avoiding `fixed_size_simd<uint64_t, N>`: clang +
+/// libstdc++ miscompile the 64-bit-lane multiply/shift of an over-native-width
+/// `fixed_size_simd` (the high half comes out wrong), so the int64-widening
+/// approach diverges from the scalar `(uint64)a * b >> 32` at every SIMD width.
+/// This decomposition uses only native<uint32_t> arithmetic, so it is
+/// bit-identical to the scalar reference on every host. aHi/bHi/aLo/bLo are the
+/// 16-bit halves; each 16x16 partial fits in 32 bits and the carry chain stays
+/// below 2^32 (cross <= 3*0xFFFF), so no intermediate overflows.
+inline native<uint32_t> mul_hi_u32_simd(native<uint32_t> a, native<uint32_t> b) {
+  using U = native<uint32_t>;
+  const U aLo = a & U(0xFFFFu), aHi = a >> 16;
+  const U bLo = b & U(0xFFFFu), bHi = b >> 16;
+  const U lolo = aLo * bLo;
+  const U hilo = aHi * bLo;
+  const U lohi = aLo * bHi;
+  const U hihi = aHi * bHi;
+  const U cross = (lolo >> 16) + (hilo & U(0xFFFFu)) + (lohi & U(0xFFFFu));
+  return hihi + (hilo >> 16) + (lohi >> 16) + (cross >> 16);
+}
+
+/// High 32 bits of the 64-bit SIGNED product a*b (v_mul_hi_i32 semantics).
+/// Derived from the unsigned high word with the standard signed correction
+/// `hi_s = hi_u - (a<0 ? b : 0) - (b<0 ? a : 0)`. Same clang/libstdc++
+/// motivation as `mul_hi_u32_simd`: no `fixed_size_simd<int64_t, N>`.
+inline native<uint32_t> mul_hi_i32_simd(native<uint32_t> a, native<uint32_t> b) {
+  using U = native<uint32_t>;
+  U hi = mul_hi_u32_simd(a, b);
+  // Sign correction in the uint domain (the negative test is the high bit, so
+  // the where-mask type matches `hi` and avoids a signed/unsigned mask mismatch).
+  stdx::where((a >> 31) != U(0u), hi) = hi - b;
+  stdx::where((b >> 31) != U(0u), hi) = hi - a;
+  return hi;
+}
 /// Sum of the four per-byte absolute differences of two uint32 lanes (the core
 /// of v_sad_u8 / v_sad_hi_u8). Each byte difference is in [0,255], so the sum is
 /// in [0,1020]; bit-identical to the scalar byte loop.

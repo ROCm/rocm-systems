@@ -20,9 +20,52 @@ TEST(DualMulF32W32Gfx11, Arithmetic) {
 // Check VOPD results and status against the corresponding ordinary instruction.
 TEST(DualMulF32W32Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_dual(
-      rj_arith_v_dual_mul_f32_w32_gfx12,
+      rocjitsu::arith::test::numeric_compatibility_reference(rj_arith_v_dual_mul_f32_w32_gfx12),
       rocjitsu::arith::test::numeric_compatibility_reference(rj_arith_v_mul_f32_w32_gfx12),
       0x40000000U, 0x40400000U, 0x40800000U, 0x40c00000U, false);
+  // Literal causes follow shared/fp_status.h::fma, the pre-migration VOPD model.
+  // In particular it retains INPUT_DENORM for a denormal paired with a NaN.
+  struct Case {
+    uint32_t a, b;
+    uint64_t flags;
+    uint32_t causes;
+  };
+  const Case cases[] = {
+      {0x3f800000, 0x3f800000, 0, 0},
+      {0x7f800001, 0x3f800000, 0, RJ_ARITH_EXCEPTION_INVALID},
+      {1, 0x7fc12345, 0, RJ_ARITH_EXCEPTION_INPUT_DENORM},
+      {1, 0x7f800000, RJ_ARITH_FP_FLUSH_INPUT_DENORMALS, RJ_ARITH_EXCEPTION_INVALID},
+      {0x7f7fffff, 0x40000000, 0, RJ_ARITH_EXCEPTION_OVERFLOW | RJ_ARITH_EXCEPTION_INEXACT},
+      {0x00800000, 0x3f000000, 0, 0},
+      {0x00800000, 0x3f000000, RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+       RJ_ARITH_EXCEPTION_UNDERFLOW | RJ_ARITH_EXCEPTION_INEXACT},
+      {0x3f800001, 0x3f800001, RJ_ARITH_FP_ROUND_UP, RJ_ARITH_EXCEPTION_INEXACT},
+  };
+  for (uint64_t cpu : rocjitsu::arith::test::supported_cpu_levels()) {
+    for (const auto &test : cases) {
+      for (uint32_t exec_mask : {0U, 1U << 31}) {
+        for (int aliasing_offset : {0, 1, 3}) {
+          rocjitsu::arith::test::Registers<4, 32> input;
+          input.v[0][31] = test.a;
+          input.v[1][31] = test.b;
+          uint32_t expected[32], *reference = expected;
+          ASSERT_EQ(rj_arith_v_mul_f32_w32_gfx12(
+                        cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS | test.flags,
+                        exec_mask, 0, &reference, input.v, input.v + 1, nullptr),
+                    RJ_ARITH_SUCCESS);
+          uint32_t status = 0x80000040U;
+          ASSERT_EQ(rj_arith_v_dual_mul_f32_w32_gfx12(
+                        cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY | test.flags, exec_mask, 0,
+                        input.v + aliasing_offset, input.v, input.v + 1, &status),
+                    RJ_ARITH_SUCCESS);
+          EXPECT_EQ(status, 0x80000040U | (exec_mask ? test.causes : 0));
+          if (exec_mask) {
+            EXPECT_EQ(input.v[aliasing_offset][31], expected[31]);
+          }
+        }
+      }
+    }
+  }
 }
 
 // Check VOPD results and status against the corresponding ordinary instruction.

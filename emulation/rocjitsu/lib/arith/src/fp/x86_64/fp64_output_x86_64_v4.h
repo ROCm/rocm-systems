@@ -15,12 +15,20 @@ namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 // Scale encoded normal values, selecting the guest-directed overflow encoding.
 // OMOD flushes input/output subnormals independently of the guest denormal mode.
 inline __m512d fp64_output_x86_64_v4(__m512d value, uint32_t instruction_flags, uint64_t flags,
-                                     unsigned rounding) {
+                                     unsigned rounding, bool native_math = false) {
   auto bits = _mm512_castpd_si512(value);
   auto sign = _mm512_and_si512(bits, _mm512_set1_epi64(INT64_MIN));
   auto exponent = _mm512_and_si512(_mm512_srli_epi64(bits, 52), _mm512_set1_epi64(2047));
   unsigned omod = (instruction_flags >> 6) & 3;
-  if (omod) {
+  if (omod && native_math) {
+    // Preserve legacy staging: a subnormal core result may become normal after scaling.
+    const double scales[] = {1, 2, 4, 0.5};
+    value = _mm512_mul_pd(value, _mm512_set1_pd(scales[omod]));
+    bits = _mm512_castpd_si512(value);
+    auto tiny = _mm512_cmpeq_epi64_mask(
+        _mm512_and_si512(bits, _mm512_set1_epi64(0x7ff0000000000000LL)), _mm512_setzero_si512());
+    bits = _mm512_mask_mov_epi64(bits, tiny, _mm512_setzero_si512());
+  } else if (omod) {
     auto normal = _mm512_cmpneq_epi64_mask(exponent, _mm512_setzero_si512()) &
                   _mm512_cmpneq_epi64_mask(exponent, _mm512_set1_epi64(2047));
     auto adjusted = _mm512_add_epi64(exponent, _mm512_set1_epi64(omod == 3 ? -1 : int(omod)));
