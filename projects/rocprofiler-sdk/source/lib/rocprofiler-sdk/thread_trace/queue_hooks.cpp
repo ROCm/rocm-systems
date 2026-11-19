@@ -94,8 +94,7 @@ kernel_dispatch_phase_exit_hook(const hsa::Queue& /*queue*/,
         for(auto& tagged_pkt : inst_pkt)
         {
             if(tagged_pkt.second != hsa::queue_hooks::THREAD_TRACE_CLIENT_ID) continue;
-            if(auto* packet = dynamic_cast<hsa::TraceControlAQLPacket*>(tagged_pkt.first.get()))
-                packet->CompleteTrace();
+            if(tagged_pkt.first) tagged_pkt.first->complete_trace();
         }
     }};
 

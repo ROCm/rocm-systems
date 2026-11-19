@@ -26,6 +26,7 @@
 #include "lib/common/container/small_vector.hpp"
 #include "lib/common/scope_destructor.hpp"
 #include "lib/common/synchronized.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/trace_lease.hpp"
 
 #include <rocprofiler-sdk/experimental/spm.h>
 #include <rocprofiler-sdk/hsa.h>
@@ -124,6 +125,7 @@ public:
 
     virtual void populate_before() = 0;
     virtual void populate_after()  = 0;
+    virtual void complete_trace() {}
 
     aqlprofile_handle_t GetHandle() const { return handle; }
     aqlprofile_handle_t handle = {.handle = 0};
@@ -271,11 +273,11 @@ public:
     rocprofiler_agent_id_t GetAgent() const { return tracepool->agent_id; }
     uint64_t               GetOwner() const { return owner; }
     void                   SetOwner(uint64_t value) { owner = value; }
-    void                   SetTraceLease(std::unique_ptr<common::scope_destructor> lease)
+    void                   SetTraceLease(thread_trace::trace_lease_t lease)
     {
         trace_lease = std::move(lease);
     }
-    void CompleteTrace() { trace_lease.reset(); }
+    void complete_trace() override { trace_lease.reset(); }
 
     void populate_before() override
     {
@@ -293,10 +295,10 @@ public:
     bool remove_codeobj(code_object_id_t id) { return loaded_codeobj.erase(id) != 0; }
 
 protected:
-    std::shared_ptr<TraceMemoryPool>          tracepool;
-    aqlprofile_att_control_aql_packets_t      packets;
-    uint64_t                                  owner = 0;
-    std::unique_ptr<common::scope_destructor> trace_lease{};
+    std::shared_ptr<TraceMemoryPool>     tracepool;
+    aqlprofile_att_control_aql_packets_t packets;
+    uint64_t                             owner = 0;
+    thread_trace::trace_lease_t          trace_lease{};
 
     std::unordered_map<code_object_id_t, std::shared_ptr<CodeobjMarkerAQLPacket>> loaded_codeobj;
 };

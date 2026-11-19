@@ -247,8 +247,6 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
     // if we have fully finalized, delete the data and return
     if(registration::get_fini_status() > 0)
     {
-        for(auto& packet : (*_session_ptr)->packet_data)
-            if(packet.pooled_signal) packet.pooled_signal->release();
         _session_ptr->reset();
         delete _session_ptr;
         return false;
@@ -1068,8 +1066,8 @@ WriteInterceptor(const void* packets,
         // completion to hang off of.
         if(!_info_session.packet_data.empty())
         {
-            auto last_pooled_signal     = _info_session.packet_data.back().pooled_signal;
-            auto last_completion_signal = _info_session.packet_data.back().completion_signal;
+            auto* last_pooled_signal     = _info_session.packet_data.back().pooled_signal;
+            auto  last_completion_signal = _info_session.packet_data.back().completion_signal;
 
             hip::event::bind_staged_waits(last_completion_signal);
 
@@ -1529,9 +1527,7 @@ Queue::~Queue()
 }
 
 void
-Queue::signal_async_handler(const pooled_signal_ptr_t& signal,
-                            hsa_signal_t               raw_signal,
-                            void*                      data) const
+Queue::signal_async_handler(pooled_signal_t* signal, hsa_signal_t raw_signal, void* data) const
 {
 #if !defined(NDEBUG)
     CHECK_NOTNULL(hsa::get_queue_controller())->_debug_signals.wlock([&](auto& signals) {
@@ -1554,16 +1550,16 @@ Queue::signal_async_handler(const pooled_signal_ptr_t& signal,
                        hsa::get_hsa_status_string(status));
 }
 
-pooled_signal_ptr_t
+Queue::pooled_signal_t*
 Queue::create_signal(uint32_t attribute, hsa_signal_t* signal, bool use_pool)
 {
-    if(use_pool && attribute == 0)
+    if(auto* pool = get_signal_pool(); use_pool && pool && attribute == 0)
     {
-        if(auto pooled = acquire_pooled_signal(1))
-        {
-            *signal = pooled->get().value;
-            return pooled;
-        }
+        auto& _signal = pool->acquire(construct_hsa_signal, 0, 0, nullptr, attribute);
+        ROCP_FATAL_IF(!_signal.in_use()) << "Acquired signal from pool that is not in use";
+        *signal = _signal.get().value;
+        get_core_table()->hsa_signal_store_screlease_fn(_signal.get().value, 1);
+        return &_signal;
     }
 
     hsa_status_t status =
@@ -1576,15 +1572,29 @@ Queue::create_signal(uint32_t attribute, hsa_signal_t* signal, bool use_pool)
 }
 
 void
-Queue::release_signal(const pooled_signal_ptr_t& signal)
+Queue::release_signal(pooled_signal_t* signal)
 {
     if(signal && signal->in_use())
     {
-        auto handle = signal->get().value.handle;
-        auto index  = signal->index();
+        // signal->get().data = nullptr;
         ROCP_WARNING_IF(!signal->release())
-            << fmt::format("Failed to release a pooled signal: hsa_signal_t{{.handle={}}}", handle);
-        ROCP_TRACE << fmt::format("released signal {}: hsa_signal_t{{.handle={}}}", index, handle);
+            << fmt::format("Failed to release a pooled signal: hsa_signal_t{{.handle={}}}",
+                           signal->get().value.handle);
+        ROCP_TRACE << fmt::format("released signal {}: hsa_signal_t{{.handle={}}}",
+                                  signal->index(),
+                                  signal->get().value.handle);
+    }
+}
+
+void
+Queue::destroy_signal(pooled_signal_t* signal)
+{
+    release_signal(signal);
+
+    if(signal && get_core_table() && get_core_table()->hsa_signal_destroy_fn)
+    {
+        get_core_table()->hsa_signal_destroy_fn(signal->get().value);
+        signal->get().value = null_hsa_signal;
     }
 }
 

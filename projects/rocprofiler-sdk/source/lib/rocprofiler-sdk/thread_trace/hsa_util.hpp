@@ -95,6 +95,9 @@ make_signal(const att_queue_t& queue);
 bool
 att_queue_enabled(const att_queue_t& queue);
 
+void
+att_queue_close(att_queue_t& queue);
+
 signal_ptr_t
 att_queue_submit(const att_queue_t& queue, hsa_ext_amd_aql_pm4_packet_t* packet, bool wait);
 

@@ -243,10 +243,12 @@ correlation_id_finalize()
         {
             if(itr && itr->get_ref_count() > 0)
             {
-                // Completion owns IDs while kernels are pending. Lost signal-less
-                // completions also retain their IDs.
-                if(itr->get_kern_count() > 0 || kfd::signal_less_id_is_leaked(itr->internal))
-                    continue;
+                // "Leaked" = a signal-less dispatch whose firmware completion record was
+                // lost (ring overrun, slot quarantine, or teardown), so no record is
+                // emitted and the id is intentionally not retired here: its kernel may
+                // still be running, and force-retiring would release state the GPU can
+                // still reach.
+                if(kfd::signal_less_id_is_leaked(itr->internal)) continue;
 
                 ++ndangling;
                 ROCP_WARNING << "retiring dangling correlation ID " << itr->internal

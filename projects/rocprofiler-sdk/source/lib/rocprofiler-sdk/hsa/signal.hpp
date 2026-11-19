@@ -24,18 +24,8 @@
 
 #include <rocprofiler-sdk/hsa.h>
 
-#include <memory>
-
 namespace rocprofiler
 {
-namespace common
-{
-namespace container
-{
-template <typename Tp>
-struct pool_object;
-}  // namespace container
-}  // namespace common
 namespace hsa
 {
 // pair of hsa signal and user data pointer for async handler
@@ -43,7 +33,5 @@ struct signal_t
 {
     hsa_signal_t value = {.handle = 0};
 };
-
-using pooled_signal_ptr_t = std::shared_ptr<common::container::pool_object<signal_t>>;
 }  // namespace hsa
 }  // namespace rocprofiler

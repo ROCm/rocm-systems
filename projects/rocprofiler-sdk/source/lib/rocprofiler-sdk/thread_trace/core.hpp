@@ -130,7 +130,7 @@ public:
     signal_ptr_t         stop_thread_trace();
     rocprofiler_status_t reserve_device_trace();
     void                 release_device_trace();
-    void                 adopt_device_trace(trace_lease_ptr_t lease);
+    void                 adopt_device_trace(trace_lease_t lease);
 
 private:
     /// Allocate GPU resources once the configured initialization event occurs.
@@ -144,7 +144,7 @@ private:
     uint32_t num_shader_engines = 0;
     // Retained by every packet/worker that uses the shared queue or output slots.
     agent_trace_resources_ptr_t resources = {};
-    trace_lease_ptr_t           device_lease{};
+    trace_lease_t               device_lease{};
 
     std::atomic<int> active_traces{0};
     std::mutex       trace_resources_mut{};
@@ -176,15 +176,7 @@ public:
     bool collects_on(rocprofiler_agent_id_t agent_id) const;
     bool intersects(const DispatchThreadTracer& rhs) const;
 
-    rocprofiler_status_t add_agent(rocprofiler_agent_id_t agent, thread_trace_parameter_pack pack)
-    {
-        auto lk = std::unique_lock{agents_map_mut};
-        if(!agents.empty()) return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
-        auto status = register_shared_trace_requirements(
-            agent, pack.buffer_size, pack.num_buffers, pack.shader_engine_mask);
-        if(status == ROCPROFILER_STATUS_SUCCESS) params[agent] = std::move(pack);
-        return status;
-    }
+    rocprofiler_status_t add_agent(rocprofiler_agent_id_t agent, thread_trace_parameter_pack pack);
 
     hsa::write_packet_t pre_kernel_call(const hsa::Queue&              queue,
                                         uint64_t                       kernel_id,
@@ -232,15 +224,7 @@ public:
     bool                 intersects(const DispatchThreadTracer& rhs) const;
     bool                 intersects(const DeviceThreadTracer& rhs) const;
 
-    rocprofiler_status_t add_agent(rocprofiler_agent_id_t id, thread_trace_parameter_pack pack)
-    {
-        std::unique_lock<std::mutex> lk(agent_mut);
-        if(!agents.empty()) return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
-        auto status = register_shared_trace_requirements(
-            id, pack.buffer_size, pack.num_buffers, pack.shader_engine_mask);
-        if(status == ROCPROFILER_STATUS_SUCCESS) params[id] = std::move(pack);
-        return status;
-    }
+    rocprofiler_status_t add_agent(rocprofiler_agent_id_t id, thread_trace_parameter_pack pack);
     bool has_agent(rocprofiler_agent_id_t id)
     {
         std::unique_lock<std::mutex> lk(agent_mut);
@@ -260,7 +244,7 @@ private:
     std::map<rocprofiler_agent_id_t, std::unique_ptr<ThreadTracerAgent>> agents{};
     std::map<rocprofiler_agent_id_t, thread_trace_parameter_pack>        params{};
 
-    std::unordered_map<rocprofiler_agent_id_t, trace_lease_ptr_t> pending_leases{};
+    std::unordered_map<rocprofiler_agent_id_t, trace_lease_t> pending_leases{};
     mutable std::mutex                                            agent_mut;
     std::shared_ptr<std::atomic<int>>                             worker_flag{nullptr};
 };

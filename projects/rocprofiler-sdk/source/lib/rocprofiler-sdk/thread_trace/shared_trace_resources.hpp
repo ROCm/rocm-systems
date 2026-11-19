@@ -24,6 +24,7 @@
 
 #include "lib/common/scope_destructor.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/hsa_util.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/trace_lease.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 
@@ -48,10 +49,14 @@ namespace thread_trace
 {
 inline constexpr uint64_t GPU_RING_BUFFERS = 3;
 
-struct trace_usage_t;
-using trace_lease_ptr_t = std::unique_ptr<common::scope_destructor>;
+inline uint64_t
+clamp_shader_engine_mask(uint64_t mask, uint32_t num_shader_banks)
+{
+    if(num_shader_banks < 64) mask &= (uint64_t{1} << num_shader_banks) - 1;
+    return mask;
+}
 
-std::pair<rocprofiler_status_t, trace_lease_ptr_t>
+std::pair<rocprofiler_status_t, trace_lease_t>
 acquire_device_trace(rocprofiler_agent_id_t agent_id, rocprofiler_context_id_t context_id);
 
 struct trace_resource_requirements_t
@@ -97,7 +102,7 @@ public:
 
     // Dispatch packets execute under the per-agent serializer. Their leases prevent
     // a device trace from starting until all queued dispatches have retired.
-    trace_lease_ptr_t acquire_dispatch_trace();
+    trace_lease_t acquire_dispatch_trace();
 
 private:
     struct shared_buffer_t

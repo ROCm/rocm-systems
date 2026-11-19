@@ -305,12 +305,12 @@ TEST(thread_trace, shared_buffer_reuse)
 
     auto first_dispatch  = resources->acquire_dispatch_trace();
     auto second_dispatch = resources->acquire_dispatch_trace();
-    ASSERT_NE(first_dispatch, nullptr);
-    ASSERT_NE(second_dispatch, nullptr);
+    ASSERT_TRUE(first_dispatch);
+    ASSERT_TRUE(second_dispatch);
     auto [busy_status, busy_lease] =
         thread_trace::acquire_device_trace(agent_id, rocprofiler_context_id_t{42});
     EXPECT_EQ(busy_status, ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT);
-    EXPECT_EQ(busy_lease, nullptr);
+    EXPECT_FALSE(busy_lease);
     first_dispatch.reset();
     second_dispatch.reset();
 
@@ -363,8 +363,8 @@ TEST(thread_trace, shared_trace_lease_handoff)
         auto context_id      = rocprofiler_context_id_t{i + 1};
         auto [status, lease] = thread_trace::acquire_device_trace(agent_id, context_id);
         ASSERT_EQ(status, ROCPROFILER_STATUS_SUCCESS);
-        ASSERT_NE(lease, nullptr);
-        EXPECT_EQ(resources->acquire_dispatch_trace(), nullptr);
+        ASSERT_TRUE(lease);
+        EXPECT_FALSE(resources->acquire_dispatch_trace());
 
         void* buffer = pool.allocate_output(kBufferSize);
         ASSERT_NE(buffer, nullptr);

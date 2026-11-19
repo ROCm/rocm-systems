@@ -31,7 +31,10 @@
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/kfd/resource.hpp"
 #include "lib/rocprofiler-sdk/platform/wsl/agent.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/hsa_util.hpp"
+
+#include <rocprofiler-sdk/cxx/operators.hpp>
 
 #include <hsa/hsa_ext_amd.h>
 
@@ -56,28 +59,18 @@ struct trace_usage_t
 
 namespace
 {
-trace_lease_ptr_t
+trace_lease_t
 acquire_trace(const std::shared_ptr<trace_usage_t>&   usage,
               std::optional<rocprofiler_context_id_t> device_context)
 {
     auto lock = std::lock_guard{usage->mutex};
-    if(usage->device_context || (device_context && usage->dispatches != 0)) return nullptr;
+    if(usage->device_context || (device_context && usage->dispatches != 0)) return {};
 
-    auto lease = std::make_unique<common::scope_destructor>([usage, device_context]() {
-        auto release_lock = std::lock_guard{usage->mutex};
-        if(device_context)
-            usage->device_context.reset();
-        else
-        {
-            ROCP_FATAL_IF(usage->dispatches == 0) << "ATT dispatch ownership underflow";
-            --usage->dispatches;
-        }
-    });
     if(device_context)
         usage->device_context = device_context;
     else
         ++usage->dispatches;
-    return lease;
+    return trace_lease_t{usage, device_context.has_value()};
 }
 
 // Over-allocate, then round the returned pointer up to a 4K page. The round-up consumes
@@ -106,8 +99,8 @@ public:
         if(num_buffers > 1)
         {
             const auto* agent = CHECK_NOTNULL(rocprofiler::agent::get_agent(agent_id));
-            if(agent->num_shader_banks < 64)
-                shader_engine_mask &= (uint64_t{1} << agent->num_shader_banks) - 1;
+            shader_engine_mask =
+                clamp_shader_engine_mask(shader_engine_mask, agent->num_shader_banks);
             uint64_t active_se = 0;
             for(; shader_engine_mask != 0; shader_engine_mask >>= 1)
                 active_se += shader_engine_mask & 1;
@@ -119,7 +112,7 @@ public:
         const uint64_t staging_slot_count = num_buffers > 1 ? num_buffers : 0;
 
         auto  lk    = std::lock_guard{m_mutex};
-        auto& entry = m_agents[agent_id.handle];
+        auto& entry = m_agents[agent_id];
 
         auto& output_slot_sizes  = entry.requirements.output_slot_sizes;
         auto& staging_slot_sizes = entry.requirements.staging_slot_sizes;
@@ -152,7 +145,7 @@ public:
     agent_trace_resources_ptr_t acquire(rocprofiler_agent_id_t agent_id)
     {
         auto lk = std::lock_guard{m_mutex};
-        auto it = m_agents.find(agent_id.handle);
+        auto it = m_agents.find(agent_id);
 
         if(it == m_agents.end())
             throw std::runtime_error{"ATT resource requirements were not registered"};
@@ -167,14 +160,14 @@ public:
         return entry.resources;
     }
 
-    std::pair<rocprofiler_status_t, trace_lease_ptr_t> acquire_device(
+    std::pair<rocprofiler_status_t, trace_lease_t> acquire_device(
         rocprofiler_agent_id_t   agent_id,
         rocprofiler_context_id_t context_id)
     {
         auto  lock  = std::lock_guard{m_mutex};
-        auto& entry = m_agents[agent_id.handle];
+        auto& entry = m_agents[agent_id];
         if(entry.resources && !att_queue_enabled(entry.resources->queue()))
-            return {ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE, nullptr};
+            return {ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE, trace_lease_t{}};
         auto       lease = acquire_trace(entry.usage, context_id);
         const auto status =
             lease ? ROCPROFILER_STATUS_SUCCESS : ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
@@ -183,7 +176,7 @@ public:
 
     void shutdown()
     {
-        auto retired = decltype(m_agents){};
+        auto retired = agent_resource_map_t{};
         {
             auto lock = std::lock_guard{m_mutex};
             retired.swap(m_agents);
@@ -193,8 +186,10 @@ public:
     }
 
 private:
-    std::mutex                          m_mutex  = {};
-    std::map<uint64_t, manager_entry_t> m_agents = {};
+    using agent_resource_map_t = std::map<rocprofiler_agent_id_t, manager_entry_t>;
+
+    std::mutex           m_mutex  = {};
+    agent_resource_map_t m_agents = {};
 };
 
 SharedTraceResourceManager&
@@ -257,6 +252,22 @@ AgentTraceResources::AgentTraceResources(rocprofiler_agent_id_t         agent_id
     if(!m_queue) throw std::runtime_error{"Could not create thread-trace queue"};
 }
 
+void
+trace_lease_t::reset()
+{
+    if(!m_usage) return;
+    auto usage     = std::move(m_usage);
+    auto is_device = std::exchange(m_is_device, false);
+    auto lock      = std::lock_guard{usage->mutex};
+    if(is_device)
+        usage->device_context.reset();
+    else
+    {
+        ROCP_FATAL_IF(usage->dispatches == 0) << "ATT dispatch ownership underflow";
+        --usage->dispatches;
+    }
+}
+
 AgentTraceResources::~AgentTraceResources()
 {
     // Close the engines while all command, signal and trace allocations are still owned.
@@ -267,7 +278,7 @@ AgentTraceResources::~AgentTraceResources()
         if(!buffer.raw) continue;
         if(m_kfd_memory)
             m_kfd_memory->deallocate(buffer.raw);
-        else if(buffer.free_fn)
+        else if(buffer.free_fn && registration::get_fini_status() <= 0)
             buffer.free_fn(buffer.raw);
     }
     m_queue.reset();
@@ -282,18 +293,7 @@ AgentTraceResources::queue()
 void
 AgentTraceResources::close_submission_queue()
 {
-    hsa_queue_t* retired = nullptr;
-    {
-        auto lock = std::lock_guard{m_queue->submit_mutex};
-        retired   = std::exchange(m_queue->hsa_queue, nullptr);
-        if(retired) m_queue->submit_fn = nullptr;
-    }
-    if(retired)
-    {
-        auto status = CHECK_NOTNULL(hsa::get_core_table())->hsa_queue_destroy_fn(retired);
-        ROCP_CI_LOG_IF(WARNING, status != HSA_STATUS_SUCCESS)
-            << "Failed to close thread trace submission queue";
-    }
+    if(m_queue) att_queue_close(*m_queue);
 }
 
 const std::shared_ptr<kfd_memory_pool_t>&
@@ -382,14 +382,14 @@ AgentTraceResources::agent_id() const
     return m_agent_id;
 }
 
-trace_lease_ptr_t
+trace_lease_t
 AgentTraceResources::acquire_dispatch_trace()
 {
-    if(!att_queue_enabled(queue())) return nullptr;
+    if(!att_queue_enabled(queue())) return {};
     return acquire_trace(m_usage, std::nullopt);
 }
 
-std::pair<rocprofiler_status_t, trace_lease_ptr_t>
+std::pair<rocprofiler_status_t, trace_lease_t>
 acquire_device_trace(rocprofiler_agent_id_t agent_id, rocprofiler_context_id_t context_id)
 {
     return get_manager().acquire_device(agent_id, context_id);

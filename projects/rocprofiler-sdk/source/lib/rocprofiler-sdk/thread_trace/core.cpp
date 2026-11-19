@@ -27,6 +27,7 @@
 #include "lib/rocprofiler-sdk/thread_trace/threading.hpp"
 
 #include "lib/common/container/stable_vector.hpp"
+#include "lib/common/scope_destructor.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
@@ -160,9 +161,9 @@ ThreadTracerAgent::initialize_resources()
 {
     // Subsequent starts reuse the queue and packet factory.
     ROCP_TRACE << "Constructing ATT instance for agent " << agent_id.handle;
-    const auto* agent  = CHECK_NOTNULL(rocprofiler::agent::get_agent(agent_id));
-    num_shader_engines = agent->num_shader_banks;
-    params.shader_engine_mask &= (uint64_t{1} << num_shader_engines) - 1;
+    const auto* agent         = CHECK_NOTNULL(rocprofiler::agent::get_agent(agent_id));
+    num_shader_engines        = agent->num_shader_banks;
+    params.shader_engine_mask = clamp_shader_engine_mask(params.shader_engine_mask, num_shader_engines);
 
     // All contexts targeting an agent retain the same resource handle. It owns the
     // memory backend, submission queue, staging allocations, and GPU output slots for
@@ -223,7 +224,13 @@ ThreadTracerAgent::get_start_packet()
     auto lock = std::unique_lock{trace_resources_mut};
     if(!control_packet) return nullptr;
     auto lease = resources->acquire_dispatch_trace();
-    if(!lease) return nullptr;
+    if(!lease)
+    {
+        ROCP_WARNING << "Cannot start dispatch thread trace for context "
+                     << params.context_id.handle << " on agent " << agent_id.handle
+                     << ": agent trace resources are busy or disabled";
+        return nullptr;
+    }
     auto packet = get_control(true);
     packet->SetTraceLease(std::move(lease));
     return packet;
@@ -339,7 +346,7 @@ ThreadTracerAgent::release_device_trace()
 }
 
 void
-ThreadTracerAgent::adopt_device_trace(trace_lease_ptr_t lease)
+ThreadTracerAgent::adopt_device_trace(trace_lease_t lease)
 {
     auto lock    = std::unique_lock{trace_resources_mut};
     device_lease = std::move(lease);
@@ -358,6 +365,11 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
 signal_ptr_t
 ThreadTracerAgent::start_thread_trace_locked()
 {
+    bool committed       = false;
+    auto release_on_fail = common::scope_destructor{[this, &committed]() {
+        if(!committed) device_lease.reset();
+    }};
+
     ROCP_TRACE << "Starting thread trace for agent " << agent_id.handle;
     auto& queue = resources->queue();
     if(!att_queue_enabled(queue))
@@ -390,7 +402,6 @@ ThreadTracerAgent::start_thread_trace_locked()
         if(!att_queue_copy(queue, buffer.at(0), buffer.at(1), MIN_BUFFER_SIZE))
         {
             active_traces.fetch_sub(1);
-            device_lease.reset();
             return nullptr;
         }
     }
@@ -400,7 +411,6 @@ ThreadTracerAgent::start_thread_trace_locked()
     if(!start_signal)
     {
         active_traces.fetch_sub(1);
-        device_lease.reset();
         return nullptr;
     }
     if(params.num_buffers > 1)
@@ -459,6 +469,7 @@ ThreadTracerAgent::start_thread_trace_locked()
             internal_threading::notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
         }
     }
+    committed = true;
     return start_signal;
 }
 
@@ -502,6 +513,37 @@ ThreadTracerAgent::stop_thread_trace()
         // before calling iterate_data.
         return att_queue_submit_signal_last(resources->queue(), control_packet->after_krn_pkt);
     }
+}
+
+namespace
+{
+template <typename MutexT, typename AgentsMapT, typename ParamsMapT>
+rocprofiler_status_t
+add_agent_locked(MutexT&                     mut,
+                 const AgentsMapT&           agents,
+                 ParamsMapT&                 params,
+                 rocprofiler_agent_id_t      agent_id,
+                 thread_trace_parameter_pack pack)
+{
+    auto lk = std::unique_lock{mut};
+    if(!agents.empty()) return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
+    auto status = register_shared_trace_requirements(
+        agent_id, pack.buffer_size, pack.num_buffers, pack.shader_engine_mask);
+    if(status == ROCPROFILER_STATUS_SUCCESS) params[agent_id] = std::move(pack);
+    return status;
+}
+}  // namespace
+
+rocprofiler_status_t
+DispatchThreadTracer::add_agent(rocprofiler_agent_id_t agent, thread_trace_parameter_pack pack)
+{
+    return add_agent_locked(agents_map_mut, agents, params, agent, std::move(pack));
+}
+
+rocprofiler_status_t
+DeviceThreadTracer::add_agent(rocprofiler_agent_id_t id, thread_trace_parameter_pack pack)
+{
+    return add_agent_locked(agent_mut, agents, params, id, std::move(pack));
 }
 
 // Single buffering: inject the stop packets directly and return.

@@ -24,6 +24,7 @@
 #include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/kfd/resource.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/spm/decode.hpp"
 #include "lib/rocprofiler-sdk/spm/interface.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/dl.hpp"
@@ -192,7 +193,7 @@ TraceMemoryPool::Free(void* ptr, void* data)
 
     if(pool.kfd_memory)
         pool.kfd_memory->deallocate(ptr);
-    else if(pool.free_fn)
+    else if(pool.free_fn && registration::get_fini_status() <= 0)
         pool.free_fn(ptr);
 }
 
