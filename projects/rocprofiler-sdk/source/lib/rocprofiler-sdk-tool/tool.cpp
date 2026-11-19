@@ -29,6 +29,7 @@
 #include "graph_stack.hpp"
 #include "helper.hpp"
 #include "kernel_iteration_filter.hpp"
+#include "kernel_replay_att.hpp"
 #include "stream_stack.hpp"
 
 #include "lib/att-tool/att_lib_wrapper.hpp"
@@ -1977,14 +1978,13 @@ att_dispatch_callback(rocprofiler_agent_id_t agent_id,
                       void* /*userdata_config*/,
                       rocprofiler_user_data_t* userdata_shader)
 {
-    // Counter collection and dispatch thread trace are handed the same user_data slot. The value
-    // written here is what the counter record callback later unpacks as thread id and replay pass.
-    // Inside a replay pass only one of the two services is enabled, so the write is safe. A
-    // dispatch that is not inside a pass — replay declined, a HIP graph, a multi-packet submission
-    // — runs both. When this agent has counter groups, that record is real: leave the packed value
-    // in place and do not trace the dispatch.
-    if(tool::get_config().kernel_replay && !tl_current_replay_pass.has_value() &&
-       get_replay_group_count(agent_id) > 0)
+    // A dispatch outside any replay pass runs counters and thread trace together and they share
+    // user_data; see thread_trace_yields_to_counters. Runs without kernel replay never read the
+    // per-agent counter profiles here.
+    const bool kernel_replay = tool::get_config().kernel_replay;
+    const auto groups        = kernel_replay ? get_replay_group_count(agent_id) : size_t{0};
+    if(tool::kernel_replay_att::thread_trace_yields_to_counters(
+           kernel_replay, tl_current_replay_pass.has_value(), groups))
         return ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
 
     static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
@@ -2114,7 +2114,7 @@ counter_dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_
         // The pass after the last counter group is the thread-trace pass. It must not wrap onto
         // group 0: that pass has no PMC row, and averaging later ignores passes that collected
         // nothing.
-        if(group_count > 0 && pass >= group_count)
+        if(tool::kernel_replay_att::pass_has_no_counter_group(pass, group_count))
         {
             user_data->value = pack_replay_user_data(common::get_tid(), pass);
             return;
@@ -2659,9 +2659,7 @@ kernel_replay_pass_count_callback(rocprofiler_kernel_dispatch_info_t dispatch_in
     const auto profiles       = agent_profiles.profiles.find(dispatch_info.agent_id);
     const auto n =
         (profiles == agent_profiles.profiles.end()) ? size_t{0} : profiles->second.size();
-    if(n == 0) return 1;
-    if(kernel_replay_att_pass_enabled()) return n + 1;
-    return n;
+    return tool::kernel_replay_att::pass_count(n, true, kernel_replay_att_pass_enabled());
 }
 
 // Counter passes stop the thread-trace context; the last pass stops counters and starts thread
@@ -2677,11 +2675,12 @@ configure_kernel_replay_att_pass(rocprofiler_callback_tracing_kernel_replay_data
         << "kernel replay: thread trace pass control requires localized context callbacks";
 
     const auto groups   = get_replay_group_count(payload->dispatch_info.agent_id);
-    const bool att_pass = groups > 0 && payload->current_pass >= groups;
-    const auto stop     = payload->replay_stop_context;
-    const auto start    = payload->replay_start_context;
+    const auto services = tool::kernel_replay_att::services_for_pass(
+        payload->current_pass, groups, /*thread_trace=*/true);
+    const auto stop  = payload->replay_stop_context;
+    const auto start = payload->replay_start_context;
 
-    if(att_pass)
+    if(services.thread_trace)
     {
         ROCPROFILER_CALL(stop(counter_collection_ctx),
                          "stop counter collection for the thread-trace replay pass");
