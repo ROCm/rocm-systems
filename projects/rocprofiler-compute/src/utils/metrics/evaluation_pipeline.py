@@ -10,6 +10,7 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
+from rocprof_compute_soc.metric_library.loader import Collectables
 from utils.logger import console_error, console_warning, demarcate
 from utils.metrics.aggregation import calc_pct_of_peak
 from utils.metrics.common import ValuDualIssueDetector
@@ -23,7 +24,7 @@ from utils.metrics.metric_evaluator import (
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_analysis import PEAK_COL_PREFERENCE, VALUE_COL_PREFERENCE
 from utils.utils_common import SUPPORTED_FIELD
-from utils.utils_counter_defs import Collectables, extract_counters_and_variables
+from utils.utils_counter_defs import extract_counters_and_variables
 
 
 def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, float]:

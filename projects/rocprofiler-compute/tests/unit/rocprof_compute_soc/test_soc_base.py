@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 import common
 import pytest
 
+from rocprof_compute_soc.metric_library.loader import Collectables
 from rocprof_compute_soc.soc_base import (
     OmniSoC_Base,
     PanelConfigMetric,
@@ -31,7 +32,6 @@ from utils.utils_common import (
 )
 from utils.utils_counter_defs import (
     PER_DISPATCH_SUFFIX,
-    Collectables,
     extract_counters_and_variables,
     parse_counters_text,
 )

@@ -628,7 +628,7 @@ def test_calc_builtin_vars_processes_per_xcd_first():
         return_value="MI300",
     ):
         with patch(
-            "utils.utils_counter_defs.Collectables.of_arch",
+            "rocprof_compute_soc.metric_library.loader.Collectables.of_arch",
             return_value=mock_builtin_vars,
         ):
             db_analysis.calc_builtin_vars(
@@ -660,7 +660,7 @@ def test_calc_builtin_vars_with_dataframe_expressions():
         return_value="MI300",
     ):
         with patch(
-            "utils.utils_counter_defs.Collectables.of_arch",
+            "rocprof_compute_soc.metric_library.loader.Collectables.of_arch",
             return_value=mock_builtin_vars,
         ):
             db_analysis.calc_builtin_vars(
@@ -711,7 +711,10 @@ def test_calc_dataframe_expressions_applies_evaluate_to_rows():
         ],
     })
 
-    with patch("utils.utils_counter_defs.Collectables.of_arch", return_value={}):
+    with patch(
+        "rocprof_compute_soc.metric_library.loader.Collectables.of_arch",
+        return_value={},
+    ):
         result = db_analysis.calc_dataframe_expressions(pmc_df, sys_info, expression_df)
 
     assert isinstance(result, pd.Series)
@@ -744,7 +747,7 @@ def test_calc_dataframe_expressions_with_builtin_vars():
         return_value="MI300",
     ):
         with patch(
-            "utils.utils_counter_defs.Collectables.of_arch",
+            "rocprof_compute_soc.metric_library.loader.Collectables.of_arch",
             return_value=mock_builtin_vars,
         ):
             result = db_analysis.calc_dataframe_expressions(
@@ -773,7 +776,10 @@ def test_calc_dataframe_expressions_reads_each_row_from_its_pass():
         ],
     })
 
-    with patch("utils.utils_counter_defs.Collectables.of_arch", return_value={}):
+    with patch(
+        "rocprof_compute_soc.metric_library.loader.Collectables.of_arch",
+        return_value={},
+    ):
         result = db_analysis.calc_dataframe_expressions(
             pmc_df, {"gpu_arch": "gfx942"}, expression_df, pass_tables=pass_tables
         )
@@ -807,7 +813,8 @@ def test_calc_dataframe_expressions_reads_each_collectable_from_its_own_pass():
     })
 
     with patch(
-        "utils.utils_counter_defs.Collectables.of_arch", return_value=collectables
+        "rocprof_compute_soc.metric_library.loader.Collectables.of_arch",
+        return_value=collectables,
     ):
         result = db_analysis.calc_dataframe_expressions(
             pmc_df, {"gpu_arch": "gfx942"}, expression_df, pass_tables=pass_tables

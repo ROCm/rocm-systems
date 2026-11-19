@@ -50,13 +50,6 @@ PANEL_WITH_STD_DEV_AND_EXPR = textwrap.dedent("""\
               expr: 100 * TCP_PENDING_STALL_CYCLES_sum /
 """)
 
-# Panel collectables: top-level name: formula pairs, with one formula to format
-COLLECTABLES = textwrap.dedent("""\
-    # Named formulas that metric formulas use as $name.
-    GRBM_GUI_ACTIVE_PER_XCD: GRBM_GUI_ACTIVE / $num_xcd
-    hbm_write_bytes: ((TCC_EA0_WRREQ_sum-TCC_EA0_WRREQ_64B_sum)*32)
-""")
-
 # Metric library descriptions: one too long for its line, one folded although it fits
 # the key line, one folded too narrow, and an empty one
 LDS_UTIL = (
@@ -146,18 +139,6 @@ def test_unformatted_library_formula_reported(tmp_path):
     is_valid, issues = check_file(path)
     assert not is_valid
     assert "l2.ai.formula: equation needs normalization" in issues[0]
-
-
-def test_panel_collectables_fixed_in_place(tmp_path):
-    """Each top-level value of a panel collectables file is an equation."""
-    path = write_config(
-        tmp_path, "analysis_configs/collectables/gfx942_collectables.yaml", COLLECTABLES
-    )
-    check_file(path, fix=True)
-    assert path.read_text(encoding="utf-8") == COLLECTABLES.replace(
-        "((TCC_EA0_WRREQ_sum-TCC_EA0_WRREQ_64B_sum)*32)",
-        "(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32",
-    )
 
 
 def test_library_descriptions_filled(tmp_path):

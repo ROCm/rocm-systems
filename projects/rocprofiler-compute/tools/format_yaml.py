@@ -22,14 +22,10 @@ from utils.equation_format import normalize_equation
 # Configuration - Edit these to accommodate future YAML updates
 # =============================================================================
 
-# Path pattern of the panel collectables, whose top-level values are all equations
-COLLECTABLES_FILE_PATTERN = "analysis_configs/collectables/"
-
 # Path patterns that contain metric equations to check (substrings matched against path)
 EQUATION_FILE_PATTERNS = [
     "analysis_configs/gfx",
     "metric_library/gfx",
-    COLLECTABLES_FILE_PATTERN,
 ]
 
 # Path suffixes to exclude from equation checking
@@ -94,13 +90,6 @@ def extract_metric_equations(
                             extract_metric_equations(item, f"{current_path}[{i}]")
                         )
     return equations
-
-
-def file_equations(path: Path, data: Dict[str, Any]) -> List[Tuple[str, str]]:
-    """Return (key path, equation) of each equation in the YAML data of a file."""
-    if COLLECTABLES_FILE_PATTERN in str(path):
-        return [(name, value) for name, value in data.items() if isinstance(value, str)]
-    return extract_metric_equations(data)
 
 
 def _should_check_equations(path: Path) -> bool:
@@ -183,7 +172,7 @@ def check_file(
     format_issues = []
     fixes = []
 
-    for eq_path, value in file_equations(path, data):
+    for eq_path, value in extract_metric_equations(data):
         try:
             normalized = normalize_equation(value)
         except ValueError as e:

@@ -20,6 +20,7 @@ from typing import (
 )
 
 import config
+from rocprof_compute_soc.metric_library.loader import Collectables
 from roofline.run_benchmark import BENCHMARKING_SUPPORTED, run_roofline_benchmark
 from utils import amdsmi_interface, rocprofv3_avail_interface
 from utils.analysis_views import (
@@ -56,7 +57,6 @@ from utils.utils_common import (
     validate_roofline_csv,
 )
 from utils.utils_counter_defs import (
-    Collectables,
     extract_counters_and_variables,
     metric_expressions,
 )
