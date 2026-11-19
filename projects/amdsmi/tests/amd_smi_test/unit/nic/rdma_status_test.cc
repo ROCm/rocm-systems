@@ -116,7 +116,7 @@ TEST_F(NicUnit, AllGettersSucceed) {
 // but to neither map would take: nic_status_str() must not throw, and
 // ainic_to_amdsmi_status() must report the miss.
 TEST_F(NicUnit, UnmappedStatusReportsMapError) {
-  g_status[kRdma] = static_cast<smi_nic_status_t>(SMI_NIC_STATUS_DRIVER_NOT_LOADED + 1);
+  g_status[kRdma] = static_cast<smi_nic_status_t>(SMI_NIC_STATUS_NO_PERM + 1);
   EXPECT_EQ(Populate(), AMDSMI_STATUS_MAP_ERROR);
 }
 

@@ -3609,7 +3609,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
 
         # Add common modifiers and device selection arguments.
-        self._add_device_arguments(ras_parser, required=False)
+        self._add_device_arguments(ras_parser, required=False, nic=True)
         self._add_command_modifiers(ras_parser)
 
     def _add_node_parser(self, subparsers: argparse._SubParsersAction, func):

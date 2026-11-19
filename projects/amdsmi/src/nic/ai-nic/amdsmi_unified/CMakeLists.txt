@@ -42,6 +42,7 @@ set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${NIC_LINKER_FLAGS}")
 set(CPP_SRCS
     "${NIC_SOURCE_DIR}/smi_ethtool_ioctl.cpp"
     "${NIC_SOURCE_DIR}/smi_nic.cpp"
+    "${NIC_SOURCE_DIR}/smi_nic_cper.cpp"
     "${NIC_SOURCE_DIR}/smi_ibverbs.cpp"
     "${NIC_SOURCE_DIR}/smi_nic_hwmon.cpp"
     "${NIC_SOURCE_DIR}/smi_pci_topology.cpp"

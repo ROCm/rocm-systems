@@ -21,6 +21,8 @@ _CLI_DIR = find_cli_dir(*cli_search_order(str(Path(__file__).parent)))
 _PARSER_PATH = str(Path(_CLI_DIR) / "amdsmi_parser.py") if _CLI_DIR else None
 
 _NIC_CONSUMERS = ("list", "static", "metric", "firmware")
+# Commands that register --nic but require other flags (e.g. --cper) alongside it.
+_NIC_CONSUMERS_WITH_REQUIRED = ("ras",)
 _LINUX_BAREMETAL = {"is_amdgpu_initialized", "is_ainic_initialized", "is_linux", "is_baremetal"}
 # ``profile`` registers only on a Windows hypervisor, where the full parser does not build.
 _WINDOWS_HYPERVISOR = {
@@ -108,7 +110,7 @@ class TestNicArgScope(unittest.TestCase):
         ]
 
     def test_every_device_subcommand_is_classified(self):
-        # Each _add_device_arguments call site is one subcommand; the four consumers pass nic=True.
+        # Each _add_device_arguments call site is one subcommand; NIC consumers pass nic=True.
         tree = ast.parse(Path(_PARSER_PATH).read_text())
         call_sites = [
             node
@@ -127,14 +129,16 @@ class TestNicArgScope(unittest.TestCase):
                 for keyword in call.keywords
             )
         ]
+        all_nic_consumers = set(_NIC_CONSUMERS) | set(_NIC_CONSUMERS_WITH_REQUIRED)
         self.assertEqual(
-            len(self._device_subcommands()) - len(_NIC_CONSUMERS),
+            len(self._device_subcommands()) - len(all_nic_consumers),
             len(call_sites) - len(consumer_sites),
         )
 
     def test_other_subcommands_reject_nic(self):
         subcommands = self._device_subcommands()
-        others = sorted(set(subcommands) - set(_NIC_CONSUMERS))
+        all_nic_consumers = set(_NIC_CONSUMERS) | set(_NIC_CONSUMERS_WITH_REQUIRED)
+        others = sorted(set(subcommands) - all_nic_consumers)
         self.assertTrue(others)
         for command in others:
             for flag in ("--nic", "-N"):

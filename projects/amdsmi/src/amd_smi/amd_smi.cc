@@ -819,6 +819,12 @@ static amdsmi_status_t get_nic_bdf(amdsmi_processor_handle processor_handle, uin
   return AMDSMI_STATUS_SUCCESS;
 }
 
+// Resolve the pds_core management function BDF for a given NIC bridge BDF.
+// pds_core registers under a downstream PCIe function (e.g. 0000:03:00.2)
+// that is not the ionic NIC BDF. Its sysfs canonical path passes through
+// the NIC bridge, so we scan /sys/kernel/debug/pds_core/ and match on ancestry.
+// Falls back to nic_bridge_bdf so the caller gets FILE_NOT_FOUND if absent.
+
 amdsmi_status_t amdsmi_get_ainic_info(amdsmi_processor_handle processor_handle,
                                       amd::smi::AMDSmiAINICDevice::AINICInfo* info) {
   AMDSMI_CHECK_INIT();
@@ -6081,6 +6087,24 @@ amdsmi_status_t amdsmi_get_gpu_cper_entries(amdsmi_processor_handle processor_ha
   return amdsmi_get_gpu_cper_entries_by_path(path.c_str(), severity_mask, cper_data, buf_size,
                                              cper_hdrs, entry_count, cursor,
                                              get_product_serial_number(processor_handle));
+}
+
+amdsmi_status_t amdsmi_get_nic_cper_entries(amdsmi_processor_handle processor_handle,
+                                            uint32_t severity_mask, char* cper_data,
+                                            uint64_t* buf_size, amdsmi_cper_hdr_t** cper_hdrs,
+                                            uint64_t* entry_count, uint64_t* cursor) {
+  AMDSMI_CHECK_INIT();
+  if (!cper_data || !buf_size || !cper_hdrs || !entry_count || !cursor) {
+    return AMDSMI_STATUS_INVAL;
+  }
+  amd::smi::AMDSmiAINICDevice* nic_device = nullptr;
+  amdsmi_status_t status = get_ainic_device_from_handle(processor_handle, &nic_device);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    return status;
+  }
+  smi_nic_ctx_t ctx = amd::smi::AMDSmiSystem::getInstance().get_ainic_ctx();
+  return amd::smi::ainic_to_amdsmi_status(smi_get_nic_cper_entries(
+      ctx, nic_device->bdf(), severity_mask, cper_data, buf_size, cper_hdrs, entry_count, cursor));
 }
 
 amdsmi_status_t amdsmi_get_afids_from_cper(char* cper_buffer, uint32_t buf_size, uint64_t* afids,
