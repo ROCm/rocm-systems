@@ -532,7 +532,8 @@ static ncclResult_t ncclIbCreateQpMlx5(struct ncclIbQpCreateAttr* createQpAttrs,
   qpInitAttr.cap.max_send_wr = createQpAttrs->maxSendWorkRequest;
   qpInitAttr.cap.max_send_sge = 1;
   qpInitAttr.cap.max_recv_sge = 1;
-  qpInitAttr.cap.max_inline_data = ncclParamIbUseInline() ? sizeof(struct ncclIbSendFifo) : 0;
+  qpInitAttr.cap.max_inline_data = std::max<uint32_t>(createQpAttrs->maxInlineData,
+                                                      ncclParamIbUseInline() ? sizeof(struct ncclIbSendFifo) : 0);
 
   qpInitAttr.comp_mask = IBV_QP_INIT_ATTR_PD;
   qpInitAttr.pd = createQpAttrs->pd;
@@ -565,7 +566,8 @@ ncclResult_t ncclIbQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* crea
   qpInitAttr.cap.max_send_wr = createQpAttrs->maxSendWorkRequest;
   qpInitAttr.cap.max_send_sge = 1;
   qpInitAttr.cap.max_recv_sge = 1;
-  qpInitAttr.cap.max_inline_data = ncclParamIbUseInline() ? sizeof(struct ncclIbSendFifo) : 0;
+  qpInitAttr.cap.max_inline_data = std::max<uint32_t>(createQpAttrs->maxInlineData,
+                                                      ncclParamIbUseInline() ? sizeof(struct ncclIbSendFifo) : 0);
   NCCLCHECK(wrap_ibv_create_qp(&qp->qp, createQpAttrs->pd, &qpInitAttr));
   return ncclSuccess;
 }
@@ -1510,6 +1512,8 @@ ncclResult_t ncclIbCreateFlushQp(struct ncclIbRecvComm* comm) {
     qpCreateAttrs.maxRecvWorkRequest = 0;
     // Each flush may post a scratchpad write in addition to the read.
     qpCreateAttrs.maxSendWorkRequest = 2 * NET_IB_MAX_REQUESTS;
+    // ncclIbIflush posts the scratchpad write inline.
+    qpCreateAttrs.maxInlineData = sizeof(comm->gpuFlushHostMem);
     qpCreateAttrs.qpContext = &comm->base.stats;
     NCCLCHECK(ncclIbQpCreate(flushQp, &qpCreateAttrs));
     INFO(NCCL_NET, "NET/IB: %s: Flush QP created: port=%d dev=%d devName=%s ndevs=%d nmdevs=%d qp_num=%u pkey=%u pd=%p",
