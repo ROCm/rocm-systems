@@ -89,9 +89,10 @@ def test_rdcd_exits_with_an_error_when_its_port_is_in_use(tools, tmp_path):
     # rdcd checks both lock files; it closed fd -1 for a missing one and said so.
     a_lock_file_is_missing = not (os.path.exists(ROOT_LOCK) and os.path.exists(USER_LOCK))
     # gRPC binds with SO_REUSEPORT, which works only if every socket on the port
-    # sets it; this one does not, so rdcd cannot bind.
+    # sets it; this one does not, so rdcd cannot bind. rdcd's 0.0.0.0 includes
+    # the loopback address that this socket holds.
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as busy:
-        busy.bind(("0.0.0.0", 0))
+        busy.bind(("127.0.0.1", 0))
         busy.listen()
         port = busy.getsockname()[1]
         code, out = _run([d.rdcd_path, "-u", "-p", str(port)], d.env, "port in use")
