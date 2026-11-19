@@ -1,9 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Check that the metric library matches the analysis configs, arch by arch.
+"""Check that the metric library and the analysis views match the analysis configs,
+arch by arch.
 
-Until the cutover, the library copies the analysis configs:
+Temporary: this test is deleted with the analysis configs. Until then, the library
+copies the analysis configs:
 
 - every equation of a panel row is a library formula, and every formula has a row;
 - every row has the unit of its metric;
@@ -12,12 +14,26 @@ Until the cutover, the library copies the analysis configs:
 - the library collectables equal the analysis config collectables;
 - each library set lists the metrics of its old set in profile_configs/sets.
 
-The check skips the roofline panel of an arch without a roofline benchmark (gfx908).
+And each view is one analysis config panel:
+
+- the same panels, tables, headers and table settings, in order (table ids are
+  positions in the views, so they are not compared);
+- the same rows in order, compared by the metric ids they show (row_metric_id() finds
+  a panel row's ids), leaving out only rows that show no equation (and tables left
+  empty by them);
+- each panel's -b alias is the config template's.
+
+Row texts are not compared: a view row shows its label or its metric's library name.
+Values, units, peaks and descriptions come from the metric library and are not compared.
+The views leave out the panels in LEFT_OUT_PANELS.
+
+The checks skip the roofline panel of an arch without a roofline benchmark (gfx908).
 """
 
+import json
 from collections import defaultdict
 from types import SimpleNamespace
-from typing import Any, Dict, List, NamedTuple, Optional, Set
+from typing import Any, Dict, List, NamedTuple, Optional, Set, Tuple
 
 import pytest
 from validate_metric_library import (
@@ -31,11 +47,25 @@ from validate_metric_library import (
 import config
 from rocprof_compute_soc.metric_library import loader
 from rocprof_compute_soc.soc_base import OmniSoC_Base, iter_analysis_config_metrics
+from utils.analysis_views import (
+    MAIN_COLUMNS,
+    METRIC_TABLE,
+    NO_VALUE,
+    TABLE_CONFIG_KEYS,
+    load_views,
+    panel_aliases,
+    row_metric_ids,
+    views_to_panel_configs,
+)
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_common import (
     MEMBW_ANALYSIS_PANEL_ID,
+    PLACEHOLDER_RANGE_KEY,
     ROOFLINE_PANEL_ID,
     canonical_config_arch,
+    format_row_id,
+    get_arch_panel_id_to_alias,
+    load_panel_configs,
     parse_sets_yaml,
 )
 from utils.utils_counter_defs import Collectables, metric_value_keys
@@ -51,8 +81,6 @@ class Row(NamedTuple):
     unit: Optional[str]
 
 
-# Main equation columns, in order of preference.
-MAIN_FORMS = ("avg", "value", "expr")
 # Row value columns read as fields, not as equations.
 ROW_FIELDS = ("unit", "peak")
 # Kernel time divisors in seconds (Bytes/s rows) and in nanoseconds (GB/s rows).
@@ -184,6 +212,10 @@ UNIT_VARIANTS["gfx1250"] = {
     "6.2.1": ("Dispatched Wavefronts", "Count"),
     "7.2.5": ("LDS Allocation", "Bytes"),
 }
+# Row columns that show no equation.
+NON_EQUATION_COLUMNS = ("unit", "peak", "pct_of_peak")
+# Analysis config panels with no view: the SDK has no PC sampling on gfx908.
+LEFT_OUT_PANELS = {"gfx908": (2100,)}
 
 
 def member_arch(arch: str) -> str:
@@ -204,7 +236,7 @@ def unshown_file_ids(arch: str) -> Set[str]:
 
 def row_forms(table: Dict[str, Any], row: Dict[str, Any]) -> List[str]:
     """Return the columns of row with an equation."""
-    main_forms = [form for form in MAIN_FORMS if form in row]
+    main_forms = [form for form in MAIN_COLUMNS if form in row]
     if main_forms:
         return main_forms[:1]
     return [
@@ -221,7 +253,7 @@ def read_rows(arch: str) -> List[Row]:
     for item in iter_analysis_config_metrics(
         config.analysis_configs_dir / arch, unshown_file_ids(arch)
     ):
-        legacy_id = f"{item.table_id // 100}.{item.table_id % 100}.{item.metric_idx}"
+        legacy_id = format_row_id(item.table_id, item.metric_idx)
         rows.extend(
             Row(
                 legacy_id,
@@ -343,10 +375,9 @@ def old_sets_by_metric_id(arch_view: SimpleNamespace) -> Dict[str, Dict[str, Any
     return old_sets
 
 
-@pytest.fixture(scope="module", params=list(loader.METRIC_LIBRARY_PARENT_ARCH))
-def arch_view(request) -> SimpleNamespace:
-    """One arch's library, its analysis config rows and the metric id of each row."""
-    arch = request.param
+def load_arch_view(arch: str) -> SimpleNamespace:
+    """Return one arch's library, its analysis config rows and the metric id of each
+    row."""
     library = loader.MetricLibrary.load(loader.default_metric_library_dir(), arch)
     rows = read_rows(arch)
     return SimpleNamespace(
@@ -355,6 +386,169 @@ def arch_view(request) -> SimpleNamespace:
         rows=rows,
         metric_ids=[row_metric_id(row, library, arch) for row in rows],
     )
+
+
+def structure_errors(
+    views: Dict[int, Dict[str, Any]], arch_view: SimpleNamespace
+) -> List[str]:
+    """Return how one arch's views differ from its analysis configs' structure."""
+    arch = arch_view.arch
+    expected = load_panel_configs([str(config.analysis_configs_dir / arch)])
+    for panel_id in LEFT_OUT_PANELS.get(arch, ()):
+        del expected[panel_id]
+    actual = views_to_panel_configs(views, arch_view.library.metrics, {})
+    for file_id in unshown_file_ids(arch):
+        expected.pop(int(file_id), None)
+        actual.pop(int(file_id), None)
+    if list(expected) != list(actual):
+        return [f"panels: analysis configs have {list(expected)}, views {list(actual)}"]
+    row_ids = panel_row_metric_ids(arch_view)
+    errors = []
+    for panel_id, panel in expected.items():
+        errors.extend(
+            f"panel {panel_id}: {error}"
+            for error in panel_errors(panel, actual[panel_id], views[panel_id], row_ids)
+        )
+    errors.extend(alias_errors(views, arch))
+    return errors
+
+
+def panel_row_metric_ids(arch_view: SimpleNamespace) -> Dict[str, List[str]]:
+    """Return the metric ids each shown analysis config row shows, by row id."""
+    row_ids: Dict[str, List[str]] = {}
+    for row, metric_id in zip(arch_view.rows, arch_view.metric_ids):
+        row_ids.setdefault(row.legacy_id, [])
+        if metric_id is not None:
+            row_ids[row.legacy_id].append(metric_id)
+    return row_ids
+
+
+def panel_errors(
+    expected: Dict[str, Any],
+    actual: Dict[str, Any],
+    view: Dict[str, Any],
+    row_ids: Dict[str, List[str]],
+) -> List[str]:
+    """Return how a view's panel config differs from its analysis config panel."""
+    if expected["title"] != actual["title"]:
+        return [f"title {actual['title']!r}, analysis configs {expected['title']!r}"]
+    kept = [
+        source
+        for source in expected["data source"]
+        if not left_out_table(*table_of_source(source))
+    ]
+    kinds = [list(source) for source in kept]
+    if kinds != [list(source) for source in actual["data source"]]:
+        return ["tables differ from the analysis configs' tables with rows"]
+    errors = []
+    for want, got, table in zip(kept, actual["data source"], view["tables"]):
+        errors.extend(
+            table_errors(
+                table_of_source(want)[1], table_of_source(got)[1], table, row_ids
+            )
+        )
+    return errors
+
+
+def table_of_source(source: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    """Return the render type and the table of a panel's data source entry."""
+    ((render, table),) = source.items()
+    return render, table
+
+
+def left_out_table(render: str, table: Dict[str, Any]) -> bool:
+    """Return whether a panel table is left out of the views: rows, none showing one."""
+    rows = table_rows(table) if render == METRIC_TABLE else {}
+    return bool(rows) and not any(map(shows_equation, rows.values()))
+
+
+def table_errors(
+    want: Dict[str, Any],
+    got: Dict[str, Any],
+    view_table: Dict[str, Any],
+    row_ids: Dict[str, List[str]],
+) -> List[str]:
+    """Return how a view's table differs from its analysis config table."""
+    where = f"table {want['id']}"
+    errors = [
+        f"{where}: {key} {got.get(key)!r}, analysis configs {want.get(key)!r}"
+        for key in TABLE_CONFIG_KEYS
+        if json.dumps(want.get(key)) != json.dumps(got.get(key))
+    ]
+    shown = [
+        ids
+        for name, row, ids in rows_with_metric_ids(want, row_ids)
+        if shows_equation(row)
+    ]
+    got_ids = [row_metric_ids(row) for row in view_table.get("metrics", [])]
+    if got_ids != shown:
+        errors.append(f"{where}: rows {got_ids}, analysis configs {shown}")
+    placeholder = (want.get("metric") or {}).get(PLACEHOLDER_RANGE_KEY)
+    if placeholder != (got.get("metric") or {}).get(PLACEHOLDER_RANGE_KEY):
+        errors.append(f"{where}: {PLACEHOLDER_RANGE_KEY} differs")
+    return errors
+
+
+def table_rows(table: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a panel table's rows without its placeholder range."""
+    rows = table.get("metric") or {}
+    return {name: row for name, row in rows.items() if name != PLACEHOLDER_RANGE_KEY}
+
+
+def rows_with_metric_ids(
+    table: Dict[str, Any], row_ids: Dict[str, List[str]]
+) -> List[Tuple[str, Dict[str, Any], List[str]]]:
+    """Return each row of a panel table with its metric ids; a row's id counts the
+    placeholder range key, as read_rows() does."""
+    rows = table.get("metric") or {}
+    return [
+        (name, row, row_ids.get(format_row_id(table["id"], index), []))
+        for index, (name, row) in enumerate(rows.items())
+        if name != PLACEHOLDER_RANGE_KEY
+    ]
+
+
+def shows_equation(row: Dict[str, Any]) -> bool:
+    """Return whether a panel row shows an equation in any column."""
+    return any(
+        str(value) != NO_VALUE
+        for column, value in row.items()
+        if column not in NON_EQUATION_COLUMNS
+    )
+
+
+def alias_errors(views: Dict[int, Dict[str, Any]], arch: str) -> List[str]:
+    """Return each panel whose -b alias differs from the config template's."""
+    template_aliases = get_arch_panel_id_to_alias(arch)
+    return [
+        f"panel {panel_number}: -b alias {alias!r}, config template has "
+        f"{template_aliases.get(panel_number)!r}"
+        for panel_number, alias in panel_aliases(views).items()
+        if template_aliases.get(panel_number) != alias
+    ]
+
+
+def swap_rows(views: Dict[int, Dict[str, Any]]) -> None:
+    table = views[1100]["tables"][1]
+    table["metrics"][0], table["metrics"][1] = table["metrics"][1], table["metrics"][0]
+
+
+def drop_row(views: Dict[int, Dict[str, Any]]) -> None:
+    del views[1100]["tables"][1]["metrics"][2]
+
+
+def drop_column(views: Dict[int, Dict[str, Any]]) -> None:
+    del views[1100]["tables"][1]["header"]["max"]
+
+
+def change_alias(views: Dict[int, Dict[str, Any]]) -> None:
+    views[1100]["alias"] = "pipeline"
+
+
+@pytest.fixture(scope="module", params=list(loader.METRIC_LIBRARY_PARENT_ARCH))
+def arch_view(request) -> SimpleNamespace:
+    """One arch's library, its analysis config rows and the metric id of each row."""
+    return load_arch_view(request.param)
 
 
 def test_every_row_shows_a_library_formula(arch_view):
@@ -469,3 +663,24 @@ def test_collectables_match_analysis_configs(arch_view):
 def test_sets_match_profile_configs(arch_view):
     """Each library set has the title of its old set and the metrics of its rows."""
     assert arch_view.library.sets == old_sets_by_metric_id(arch_view)
+
+
+def test_views_keep_the_panel_structure(arch_view):
+    assert structure_errors(load_views(arch_view.arch), arch_view) == []
+
+
+@pytest.mark.parametrize(
+    "change, error",
+    [
+        (swap_rows, "panel 1100: table 1102: rows"),
+        (drop_row, "panel 1100: table 1102: rows"),
+        (drop_column, "panel 1100: table 1102: header"),
+        (change_alias, "panel 11: -b alias 'pipeline', config template has 'cu_pipe'"),
+    ],
+)
+def test_a_changed_structure_is_reported(change, error):
+    """gfx942's views with one change no longer keep its panels' structure."""
+    views = load_views("gfx942")
+    change(views)
+    errors = structure_errors(views, load_arch_view("gfx942"))
+    assert any(e.startswith(error) for e in errors), errors
