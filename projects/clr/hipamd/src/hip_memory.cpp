@@ -3302,6 +3302,10 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
                   ? srcMemories[i]->getUserData().deviceId
                   : dstMemories[i]->getUserData().deviceId;
         }
+        // Size the vector once on first use: this device receives at most the remaining entries.
+        if (copy_ops_by_device[device_id].capacity() == 0) {
+          copy_ops_by_device[device_id].reserve(count - i);
+        }
         if (sizeB > 0 && sizeB != sizes[i]
             && !stream.device().settings().sdma_asymmetric_swap_supported_) {
           // Decompose: symmetric swap of [0, sizeB) plus a linear copy of the src tail
