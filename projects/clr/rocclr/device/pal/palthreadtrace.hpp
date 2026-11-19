@@ -81,7 +81,7 @@ class ThreadTrace : public device::ThreadTrace {
   ) const;
 
   //! Set isNewBufferBinded_ to true/false if new buffer was binded/unbinded respectively
-  void setNewBufferBinded(bool isNewBufferBinded) {}
+  void setNewBufferBinded(bool /*isNewBufferBinded*/) {}
 
   //! Returns the GPU device, associated with the current object
   const Device& dev() const { return gpuDevice_; }

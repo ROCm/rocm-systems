@@ -178,7 +178,7 @@ hipError_t ihipGraphAddKernelNode(
 hipError_t ihipGraphAddMemcpyNode(hip::GraphNode** pGraphNode, hip::Graph* graph,
                                   hip::GraphNode* const* pDependencies, size_t numDependencies,
                                   const hipMemcpy3DParms* pCopyParams, bool capture = true,
-                                  int devId = 0) {
+                                  int /*devId*/ = 0) {
   if (pGraphNode == nullptr || graph == nullptr ||
       (numDependencies > 0 && pDependencies == nullptr) || pCopyParams == nullptr) {
     return hipErrorInvalidValue;
@@ -199,8 +199,8 @@ hipError_t ihipGraphAddMemcpyNode(hip::GraphNode** pGraphNode, hip::Graph* graph
 
 hipError_t ihipDrvGraphAddMemcpyNode(hip::GraphNode** pGraphNode, hip::Graph* graph,
                                      hip::GraphNode* const* pDependencies, size_t numDependencies,
-                                     const HIP_MEMCPY3D* pCopyParams, hipCtx_t ctx,
-                                     bool capture = true, int devId = 0) {
+                                     const HIP_MEMCPY3D* pCopyParams, hipCtx_t /*ctx*/,
+                                     bool capture = true, int /*devId*/ = 0) {
   if (pGraphNode == nullptr || graph == nullptr ||
       (numDependencies > 0 && pDependencies == nullptr) || pCopyParams == nullptr) {
     return hipErrorInvalidValue;
@@ -217,7 +217,7 @@ hipError_t ihipDrvGraphAddMemcpyNode(hip::GraphNode** pGraphNode, hip::Graph* gr
 hipError_t ihipGraphAddMemcpyNode1D(hip::GraphNode** pGraphNode, hip::Graph* graph,
                                     hip::GraphNode* const* pDependencies, size_t numDependencies,
                                     void* dst, const void* src, size_t count, hipMemcpyKind kind,
-                                    bool capture = true, int devId = 0) {
+                                    bool capture = true, int /*devId*/ = 0) {
   if (pGraphNode == nullptr || graph == nullptr ||
       (numDependencies > 0 && pDependencies == nullptr) || count == 0) {
     return hipErrorInvalidValue;
@@ -1795,8 +1795,8 @@ hipError_t hipGraphInstantiateWithParams(hipGraphExec_t* pGraphExec, hipGraph_t 
   instantiateParams->errNode_out = nullptr;
 
   if ((flags & hipGraphInstantiateFlagUpload) != 0) {
-    hipError_t status = ihipGraphUpload(*pGraphExec, instantiateParams->uploadStream);
-    HIP_RETURN(status);
+    hipError_t uploadStatus = ihipGraphUpload(*pGraphExec, instantiateParams->uploadStream);
+    HIP_RETURN(uploadStatus);
   }
 
   HIP_RETURN(hipSuccess, ReturnPtrValue(pGraphExec));

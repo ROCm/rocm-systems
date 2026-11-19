@@ -127,7 +127,7 @@ DWORD threadIndex_ = TlsAlloc();
 
 }  // namespace details
 
-void Thread::registerStack(address base, address top) {
+void Thread::registerStack(address /*base*/, address /*top*/) {
   // Nothing to do.
 }
 

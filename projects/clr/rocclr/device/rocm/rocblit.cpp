@@ -205,7 +205,7 @@ bool DmaBlitManager::writeImage(const void* srcHost, device::Memory& dstMemory,
 // ================================================================================================
 bool DmaBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& dstMemory,
                                 const amd::Coord3D& srcOrigin, const amd::Coord3D& dstOrigin,
-                                const amd::Coord3D& size, bool entire,
+                                const amd::Coord3D& size, bool /*entire*/,
                                 amd::CopyMetadata copyMetadata) const {
   // When FFM/DTIF fast-copy is enabled, plain device allocations are marked
   // HostMemoryDirectAccess so HtoD/DtoH can short-circuit to a host memcpy. DtoD
@@ -2641,7 +2641,7 @@ static inline void copyFillPattern(void* kernarg_block, const void* pattern, siz
 
 // ================================================================================================
 bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern,
-                                     size_t patternSize, const amd::Coord3D& surface,
+                                     size_t patternSize, const amd::Coord3D& /*surface*/,
                                      const amd::Coord3D& origin, const amd::Coord3D& size,
                                      bool entire, bool forceBlit) const {
   std::scoped_lock k(lockXferOps_);
@@ -2881,10 +2881,10 @@ bool KernelBlitManager::fillBuffer2D(device::Memory& memory, const void* pattern
 }
 
 // ================================================================================================
-bool KernelBlitManager::fillBuffer3D(device::Memory& memory, const void* pattern,
-                                     size_t patternSize, const amd::Coord3D& surface,
-                                     const amd::Coord3D& origin, const amd::Coord3D& size,
-                                     bool entire, bool forceBlit) const {
+bool KernelBlitManager::fillBuffer3D(device::Memory& /*memory*/, const void* /*pattern*/,
+                                     size_t /*patternSize*/, const amd::Coord3D& /*surface*/,
+                                     const amd::Coord3D& /*origin*/, const amd::Coord3D& /*size*/,
+                                     bool /*entire*/, bool /*forceBlit*/) const {
   ShouldNotReachHere();
   return false;
 }
@@ -2892,8 +2892,9 @@ bool KernelBlitManager::fillBuffer3D(device::Memory& memory, const void* pattern
 // ================================================================================================
 bool KernelBlitManager::shaderCopyBuffer(address dst, address src, const amd::Coord3D& dstOrigin,
                                          const amd::Coord3D& srcOrigin, const amd::Coord3D& sizeIn,
-                                         bool entire, const uint32_t blitWg,
-                                         amd::CopyMetadata copyMetadata, bool attachSignal) const {
+                                         bool /*entire*/, const uint32_t blitWg,
+                                         amd::CopyMetadata /*copyMetadata*/,
+                                         bool attachSignal) const {
   constexpr uint32_t kBlitType = BlitCopyBuffer;
   constexpr uint32_t kMaxAlignment = 2 * sizeof(uint64_t);
   amd::Coord3D size(sizeIn[0]);
@@ -3192,7 +3193,6 @@ bool KernelBlitManager::WriteBufferBatch(
 
   const size_t held_mark = gpu().Barriers().HeldSignalCount();
   if (!pinned_copy_ops.empty()) {
-    constexpr bool kSkipCpuWait = true;
     gpu().releaseGpuMemoryFence(kSkipCpuWait);
     if (!hsaCopyBatch(pinned_copy_ops)) {
       LogWarning(
@@ -3316,7 +3316,6 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
 
   const size_t held_mark = gpu().Barriers().HeldSignalCount();
   if (!pinned_copy_ops.empty()) {
-    constexpr bool kSkipCpuWait = true;
     gpu().releaseGpuMemoryFence(kSkipCpuWait);
     if (!hsaCopyBatch(pinned_copy_ops)) {
       LogWarning(
@@ -3369,7 +3368,6 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
   }
 
   //If there is intra-device copies, SDMA copies can overlap
-  const bool kSkipCpuWait = true;
   gpu().releaseGpuMemoryFence(kSkipCpuWait);
 
   // Capture prior wait events and signal before any work.
@@ -3965,7 +3963,7 @@ address KernelBlitManager::captureArguments(const amd::Kernel* kernel) const {
   return kernel->parameters().values();
 }
 
-void KernelBlitManager::releaseArguments(address args) const {}
+void KernelBlitManager::releaseArguments(address /*args*/) const {}
 
 // ================================================================================================
 bool KernelBlitManager::runScheduler(uint64_t vqVM, hsa_queue_t* schedulerQueue, uint threads,
@@ -3995,7 +3993,7 @@ bool KernelBlitManager::runScheduler(uint64_t vqVM, hsa_queue_t* schedulerQueue,
     // Use a device side global atomics to workaround the reliance of PCIe 3 atomics
     sp->write_index = Hsa::queue_load_write_index_relaxed(schedulerQueue);
   } else {
-    sp->write_index = static_cast<uint64_t>(-1ULL);
+    sp->write_index = ~uint64_t{0};
   }
 
   constexpr bool kDirectVa = true;

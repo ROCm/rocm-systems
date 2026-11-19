@@ -123,7 +123,8 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
 
   // The count above is per scheduling unit of the kernel: a WGP for a WGP mode
   // kernel, a single CU for a kernel compiled with -mcumode.
-  if (wrkGrpInfo->isWGPMode_ != device.settings().enableWgpMode_) {
+  const bool deviceWgpMode = static_cast<bool>(device.settings().enableWgpMode_);
+  if (wrkGrpInfo->isWGPMode_ != deviceWgpMode) {
     *maxBlocksPerCU = wrkGrpInfo->isWGPMode_
         ? (*maxBlocksPerCU / 2) : (*maxBlocksPerCU * 2);
   }
@@ -132,7 +133,7 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
   *bestBlockSize = std::min(alu_limited_threads, aligned_input_size);
   // Calculate blocks per CU for full occupancy
   const int bestBlocksPerCU = alu_limited_threads / (*bestBlockSize);
-  const uint32_t maxCUs = (wrkGrpInfo->isWGPMode_ != device.settings().enableWgpMode_)
+  const uint32_t maxCUs = (wrkGrpInfo->isWGPMode_ != deviceWgpMode)
       ? (wrkGrpInfo->isWGPMode_
           ? device.info().maxComputeUnits_ / 2
           : device.info().maxComputeUnits_ * 2)
@@ -196,9 +197,9 @@ void** __hipRegisterFatBinary(const void* data) {
 }
 
 // ================================================================================================
-void __hipRegisterFunction(void** modules, const void* hostFunction, char* deviceFunction,
-                           const char* deviceName, unsigned int threadLimit, uint3* tid, uint3* bid,
-                           dim3* blockDim, dim3* gridDim, int* wSize) {
+void __hipRegisterFunction(void** modules, const void* hostFunction, char* /*deviceFunction*/,
+                           const char* deviceName, unsigned int /*threadLimit*/, uint3* /*tid*/,
+                           uint3* /*bid*/, dim3* /*blockDim*/, dim3* /*gridDim*/, int* /*wSize*/) {
   auto* fat_binary_modules = reinterpret_cast<hip::FatBinaryInfo**>(modules);
 
   static const bool enable_deferred_loading = []() {
@@ -232,11 +233,11 @@ void __hipRegisterFunction(void** modules, const void* hostFunction, char* devic
 void __hipRegisterVar(void** modules,       // The device modules containing code object
                       void* var,            // The shadow variable in host code
                       char* hostVar,        // Variable name in host code
-                      char* deviceVar,      // Variable name in device code
-                      int ext,              // Whether this variable is external
+                      char* /*deviceVar*/,      // Variable name in device code
+                      int /*ext*/,              // Whether this variable is external
                       size_t size,          // Size of the variable
-                      int constant,         // Whether this variable is constant
-                      int global) {         // Unknown, always 0
+                      int /*constant*/,         // Whether this variable is constant
+                      int /*global*/) {         // Unknown, always 0
   auto* fat_binary_modules = reinterpret_cast<hip::FatBinaryInfo**>(modules);
   hip::Var* var_ptr = new hip::Var(std::string(hostVar), hip::Var::DeviceVarKind::DVK_Variable,
                                    size, fat_binary_modules);
@@ -249,8 +250,8 @@ void __hipRegisterSurface(
     void** modules,       // The device modules containing code object
     void* var,            // The shadow variable in host code
     char* hostVar,        // Variable name in host code
-    char* deviceVar,      // Variable name in device code
-    int type, int ext) {
+    char* /*deviceVar*/,      // Variable name in device code
+    int /*type*/, int /*ext*/) {
   auto* fat_binary_modules = reinterpret_cast<hip::FatBinaryInfo**>(modules);
   hip::Var* var_ptr = new hip::Var(std::string(hostVar), hip::Var::DeviceVarKind::DVK_Surface,
                                    sizeof(surfaceReference), fat_binary_modules);
@@ -309,8 +310,8 @@ void __hipRegisterTexture(
     void** modules,       // The device modules containing code object
     void* var,            // The shadow variable in host code
     char* hostVar,        // Variable name in host code
-    char* deviceVar,      // Variable name in device code
-    int type, int norm, int ext) {
+    char* /*deviceVar*/,      // Variable name in device code
+    int /*type*/, int /*norm*/, int /*ext*/) {
   auto* fat_binary_modules = reinterpret_cast<hip::FatBinaryInfo**>(modules);
   hip::Var* var_ptr = new hip::Var(std::string(hostVar), hip::Var::DeviceVarKind::DVK_Texture,
                                    sizeof(textureReference), fat_binary_modules);

@@ -100,8 +100,8 @@ bool associateD3D11Device(const Device* device, ID3D11Device* pd3d11Device,
   PFNAmdDxExtCreate11 AmdDxExtCreate11 = GetAmdDxExtCreate11();
   if (AmdDxExtCreate11) {
     IAmdDxExt* pExt = nullptr;
-    HRESULT hr = AmdDxExtCreate11(pd3d11Device, &pExt);
-    if (SUCCEEDED(hr) && pExt) {
+    HRESULT extHr = AmdDxExtCreate11(pd3d11Device, &pExt);
+    if (SUCCEEDED(extHr) && pExt) {
       IAmdDxExtCLInterop* pCLExt =
           static_cast<IAmdDxExtCLInterop*>(pExt->GetExtInterface(AmdDxExtCLInteropID));
       if (pCLExt) {
@@ -115,7 +115,7 @@ bool associateD3D11Device(const Device* device, ID3D11Device* pd3d11Device,
   return true;
 }
 
-void dissociateD3D11Device(const Device* device, void* const gfxDevice[], void* gfxContext) {
+void dissociateD3D11Device(const Device* /*device*/, void* const gfxDevice[], void* gfxContext) {
   if (!gfxDevice || !gfxContext) return;
   void* d3d11Device = gfxDevice[amd::Context::DeviceFlagIdx::D3D11DeviceKhrIdx];
   if (!d3d11Device) return;

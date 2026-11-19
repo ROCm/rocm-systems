@@ -29,7 +29,7 @@ using namespace amd::option;
 #define OPTION(type, a, sn, ln, var, ideft, imin, imax, sdeft, desc)                               \
   {sn,                                                                                             \
    ln,                                                                                             \
-   (type) | (a),                                                                                   \
+   static_cast<uint32_t>(type) | (a),                                                              \
    (uint32_t)reinterpret_cast<size_t>(&(((OptionVariables*)0)->var)),                              \
    (int64_t)ideft,                                                                                 \
    imin,                                                                                           \
@@ -38,7 +38,7 @@ using namespace amd::option;
    desc},
 
 #define NOPTION(type, a, sn, ln, var, ideft, imin, imax, sdeft, desc)                              \
-  {sn, ln, (type) | (a), 0, (int64_t)ideft, imin, imax, sdeft, desc},
+  {sn, ln, static_cast<uint32_t>(type) | (a), 0, (int64_t)ideft, imin, imax, sdeft, desc},
 
 /*
    FLAG is a special option with the form
@@ -47,7 +47,7 @@ using namespace amd::option;
 #define FLAG(type, a, sn, var, deft, desc)                                                         \
   {sn,                                                                                             \
    NULL,                                                                                           \
-   (type) | (a) | OA_RUNTIME | OVA_REQUIRED | OA_SEPARATOR_EQUAL,                                  \
+   static_cast<uint32_t>(type) | (a) | OA_RUNTIME | OVA_REQUIRED | OA_SEPARATOR_EQUAL,             \
    (uint32_t)reinterpret_cast<size_t>(&(((OptionVariables*)0)->var)),                              \
    (type == OT_CSTRING) ? (int64_t)0 : (int64_t)deft,                                              \
    (type == OT_INT32) ? -0x80000000LL : 0LL,                                                       \
@@ -140,7 +140,8 @@ void getDefault2(int OptDescTableIx, int64_t& idefault2, const char*& sdefault2)
   }
 }
 
-bool setAliasOptionVariable(int OptDescTableIx, Options& Opts, int64_t IValue, const char* SValue) {
+bool setAliasOptionVariable(int OptDescTableIx, Options& Opts,
+                            [[maybe_unused]] int64_t IValue, const char* SValue) {
   OptionDescriptor* od;
   OptionVariables* oVars = Opts.oVariables;
 
@@ -213,7 +214,7 @@ bool setAliasOptionVariable(int OptDescTableIx, Options& Opts, int64_t IValue, c
   return true;
 }
 
-void ShowOptionsHelp(const char* helpValue, Options& Opts) {
+void ShowOptionsHelp([[maybe_unused]] const char* helpValue, Options& Opts) {
   // -h[--help][=public|all]  : public is the second default
   bool showAll = false;
   bool showSupport = false;
@@ -577,8 +578,8 @@ int getOptionDesc(std::string& options, size_t StartPos, bool IsShortForm, Optio
   return option_ndx;
 }
 
-bool processOption(int OptDescTableIx, Options& Opts, const std::string& Value, bool IsPrefixOption,
-                   bool IsOffFlag) {
+bool processOption(int OptDescTableIx, Options& Opts, const std::string& Value,
+                   bool /*IsPrefixOption*/, bool IsOffFlag) {
   OptionVariables* ovars = Opts.oVariables;
   OptionDescriptor* od = &OptDescTable[OptDescTableIx];
 
@@ -1333,7 +1334,7 @@ static std::string getValidDumpPath(const std::string& path) {
   if (path.size() > pathname_max) {
     // On Windows the max file path is 32,767 if you prefix "\\?\" with full path
     if (isFullPath(path)) {
-      const unsigned new_win_path = _MAX_ENV;
+      [[maybe_unused]] const unsigned new_win_path = _MAX_ENV;
       // prefix "\\?\"
       validPath = "\\\\?\\" + path;
       assert(path.size() < new_win_path);
@@ -1360,7 +1361,7 @@ static std::string getValidDumpPath(const std::string& path) {
 
 #endif
 
-static std::string getValidDumpBaseName(const std::string& path, const std::string& file,
+static std::string getValidDumpBaseName(const std::string& /*path*/, const std::string& file,
                                         long basename_max, const std::string& ext) {
   if (file.size() + ext.size() < static_cast<unsigned long>(basename_max)) {
     return file;

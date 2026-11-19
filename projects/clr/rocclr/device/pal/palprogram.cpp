@@ -146,7 +146,7 @@ void Segment::copy(size_t offset, const void* src, size_t size) {
   }
 }
 
-bool Segment::freeze(bool destroySysmem) {
+bool Segment::freeze([[maybe_unused]] bool destroySysmem) {
   VirtualGPU& gpu = *gpuAccess_->dev().xferQueue();
   bool result = true;
   if (cpuAccess_ != nullptr) {
@@ -271,7 +271,6 @@ bool Program::createGlobalVarObj(amd::Memory** amd_mem_obj, void** device_pptr, 
   uint32_t flags = 0;
   amd::Memory* parent = nullptr;
   hsa_symbol_kind_t type;
-  hsa_status_t status = HSA_STATUS_SUCCESS;
   amd::hsa::loader::Symbol* symbol = nullptr;
 
   if (amd_mem_obj == nullptr) {
@@ -436,8 +435,8 @@ bool Program::createKernels(void* binary, size_t binSize, bool useUniformWorkGro
   return true;
 }
 
-bool Program::setKernels(void* binary, size_t binSize, amd::Os::FileDesc fdesc,
-                                  size_t foffset, std::string uri) {
+bool Program::setKernels(void* binary, size_t binSize, amd::Os::FileDesc /*fdesc*/,
+                                  size_t /*foffset*/, std::string /*uri*/) {
   // Collect the information about compiled binary, except the trap handler
   if (!isNull() && (palDevice().captureMgr() != nullptr) && !isTrapHandler()) {
     apiHash_ = palDevice().captureMgr()->AddElfBinary(binary, binSize, binary, binSize,
@@ -475,7 +474,7 @@ hsa_isa_t PALHSALoaderContext::IsaFromName(const char* name) {
   return {amd::Isa::toHandle(isa_p)};
 }
 
-bool PALHSALoaderContext::IsaSupportedByAgent(hsa_agent_t agent, hsa_isa_t isa) {
+bool PALHSALoaderContext::IsaSupportedByAgent(hsa_agent_t /*agent*/, hsa_isa_t isa) {
   // The HSA loader uses a handle value of 0 to indicate the ISA is invalid.
   const amd::Isa* code_object_isa_p = amd::Isa::fromHandle(isa.handle);
   if (!code_object_isa_p || !code_object_isa_p->runtimePalSupported()) {
@@ -486,7 +485,7 @@ bool PALHSALoaderContext::IsaSupportedByAgent(hsa_agent_t agent, hsa_isa_t isa) 
   return amd::Isa::isCompatible(*code_object_isa_p, program_->device().isa());
 }
 
-void* PALHSALoaderContext::SegmentAlloc(amdgpu_hsa_elf_segment_t segment, hsa_agent_t agent,
+void* PALHSALoaderContext::SegmentAlloc(amdgpu_hsa_elf_segment_t segment, hsa_agent_t /*agent*/,
                                         size_t size, size_t align, bool zero) {
   assert(size);
   assert(align);
@@ -507,7 +506,7 @@ void* PALHSALoaderContext::SegmentAlloc(amdgpu_hsa_elf_segment_t segment, hsa_ag
   return seg.release();
 }
 
-bool PALHSALoaderContext::SegmentCopy(amdgpu_hsa_elf_segment_t segment, hsa_agent_t agent,
+bool PALHSALoaderContext::SegmentCopy(amdgpu_hsa_elf_segment_t /*segment*/, hsa_agent_t /*agent*/,
                                       void* dst, size_t offset, const void* src, size_t size) {
   if (program_->isNull()) {
     std::memcpy(reinterpret_cast<address>(dst) + offset, src, size);
@@ -518,8 +517,8 @@ bool PALHSALoaderContext::SegmentCopy(amdgpu_hsa_elf_segment_t segment, hsa_agen
   return true;
 }
 
-void PALHSALoaderContext::SegmentFree(amdgpu_hsa_elf_segment_t segment, hsa_agent_t agent,
-                                      void* seg, size_t size) {
+void PALHSALoaderContext::SegmentFree(amdgpu_hsa_elf_segment_t /*segment*/, hsa_agent_t /*agent*/,
+                                      void* seg, size_t /*size*/) {
   if (program_->isNull()) {
     amd::Os::alignedFree(seg);
   } else {
@@ -528,8 +527,8 @@ void PALHSALoaderContext::SegmentFree(amdgpu_hsa_elf_segment_t segment, hsa_agen
   }
 }
 
-void* PALHSALoaderContext::SegmentAddress(amdgpu_hsa_elf_segment_t segment, hsa_agent_t agent,
-                                          void* seg, size_t offset) {
+void* PALHSALoaderContext::SegmentAddress(amdgpu_hsa_elf_segment_t /*segment*/,
+                                          hsa_agent_t /*agent*/, void* seg, size_t offset) {
   assert(seg);
   if (program_->isNull()) {
     return (reinterpret_cast<address>(seg) + offset);
@@ -538,8 +537,8 @@ void* PALHSALoaderContext::SegmentAddress(amdgpu_hsa_elf_segment_t segment, hsa_
   return reinterpret_cast<void*>(s->gpuAddress(offset));
 }
 
-void* PALHSALoaderContext::SegmentHostAddress(amdgpu_hsa_elf_segment_t segment, hsa_agent_t agent,
-                                              void* seg, size_t offset) {
+void* PALHSALoaderContext::SegmentHostAddress(amdgpu_hsa_elf_segment_t /*segment*/,
+                                              hsa_agent_t /*agent*/, void* seg, size_t offset) {
   assert(seg);
   if (program_->isNull()) {
     return (reinterpret_cast<address>(seg) + offset);
@@ -548,8 +547,8 @@ void* PALHSALoaderContext::SegmentHostAddress(amdgpu_hsa_elf_segment_t segment, 
   return s->cpuAddress(offset);
 }
 
-bool PALHSALoaderContext::SegmentFreeze(amdgpu_hsa_elf_segment_t segment, hsa_agent_t agent,
-                                        void* seg, size_t size) {
+bool PALHSALoaderContext::SegmentFreeze(amdgpu_hsa_elf_segment_t segment, hsa_agent_t /*agent*/,
+                                        void* seg, size_t /*size*/) {
   assert(seg);
   if (program_->isNull()) {
     return true;
@@ -639,33 +638,6 @@ hsa_status_t PALHSALoaderContext::SamplerDestroy(hsa_agent_t agent,
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
   // Samplers will be destroyed by the pal::Program destructor.
-  return HSA_STATUS_SUCCESS;
-}
-
-static hsa_status_t GetKernelNamesCallback(hsa_executable_t hExec, hsa_executable_symbol_t hSymbol,
-                                           void* data) {
-  auto symbol = amd::hsa::loader::Symbol::Object(hSymbol);
-  auto symbolNameList = reinterpret_cast<std::vector<std::string>*>(data);
-
-  hsa_symbol_kind_t type;
-  if (!symbol->GetInfo(HSA_EXECUTABLE_SYMBOL_INFO_TYPE, &type)) {
-    return HSA_STATUS_ERROR;
-  }
-
-  if (type == HSA_SYMBOL_KIND_KERNEL) {
-    uint32_t length;
-    if (!symbol->GetInfo(HSA_EXECUTABLE_SYMBOL_INFO_NAME_LENGTH, &length)) {
-      return HSA_STATUS_ERROR;
-    }
-
-    char* name = reinterpret_cast<char*>(alloca(length + 1));
-    if (!symbol->GetInfo(HSA_EXECUTABLE_SYMBOL_INFO_NAME, name)) {
-      return HSA_STATUS_ERROR;
-    }
-    name[length] = '\0';
-
-    symbolNameList->push_back(std::string(name));
-  }
   return HSA_STATUS_SUCCESS;
 }
 

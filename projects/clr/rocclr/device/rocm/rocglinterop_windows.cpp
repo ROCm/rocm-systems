@@ -103,7 +103,7 @@ bool initGLInteropPrivateExt(void* GLdeviceContext) {
 }
 
 // ================================================================================================
-bool glCanInterop(Device* device, void* GLplatformContext, void* GLdeviceContext) {
+bool glCanInterop(Device* device, void* GLplatformContext, void* /*GLdeviceContext*/) {
   bool canInteroperate = false;
 
   LUID glAdapterLuid = {0, 0};
@@ -114,8 +114,9 @@ bool glCanInterop(Device* device, void* GLplatformContext, void* GLdeviceContext
   if (wglGetContextGPUInfoAMD(hRC, &glAdapterLuid, &glChainBitMask)) {
     // match the adapter
     canInteroperate = device->info().luidLowPart_ == glAdapterLuid.LowPart &&
-                      device->info().luidHighPart_ == glAdapterLuid.HighPart &&
-                      (((1 << device->index()) & glChainBitMask) != 0);
+                      device->info().luidHighPart_ ==
+                          static_cast<uint32_t>(glAdapterLuid.HighPart) &&
+                      (((1u << device->index()) & glChainBitMask) != 0);
   }
 
   return canInteroperate;
@@ -150,7 +151,7 @@ bool glDissociate(Device* device, void* GLplatformContext, void* GLdeviceContext
 }
 
 // ================================================================================================
-bool Export(amd::Memory* mem, GLenum targetType, int miplevel, hsa_handle_t* handle,
+bool Export(amd::Memory* mem, GLenum /*targetType*/, int /*miplevel*/, hsa_handle_t* handle,
            hsa_handle_t* resHandle, int* offset, void* image_srd, const unsigned image_srd_size) {
   assert(mem->getInteropObj() != nullptr);
   assert(mem->getInteropObj()->asGLObject() != nullptr);

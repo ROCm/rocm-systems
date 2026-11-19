@@ -113,7 +113,6 @@ bool Kernel::postLoad() {
       // Copy the kernel_object pointer to the runtime handle symbol GPU address
       const Memory& codeSegGpu = prog().codeSegGpu();
       uint64_t offset = symbol_address - codeSegGpu.vmAddress();
-      uint64_t kernel_object = gpuAqlCode();
       VirtualGPU* gpu = codeSegGpu.dev().xferQueue();
 
       const struct RuntimeHandle runtime_handle = {gpuAqlCode(), spillSegSize(), ldsSize()};

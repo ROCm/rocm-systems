@@ -87,6 +87,11 @@ class VirtualGPU : public device::VirtualDevice {
     // Placement new overloads required by MSVC when operator new(size_t) is deleted
     void* operator new(size_t, void* p) noexcept { return p; }
     void* operator new(size_t, std::align_val_t, void* p) noexcept { return p; }
+    // Matching placement deletes. The compiler calls these if the constructor
+    // throws; they are no-ops because the storage belongs to
+    // amd::AllocWithTrailing, whose catch block frees it.
+    void operator delete(void*, void*) noexcept {}
+    void operator delete(void*, std::align_val_t, void*) noexcept {}
 
     static Queue* Create(VirtualGPU& gpu,                       //!< ROCCLR virtual GPU object
                          Pal::QueueType queueType,              //!< PAL queue type
@@ -355,7 +360,7 @@ class VirtualGPU : public device::VirtualDevice {
 
   void flush(amd::Command* list = nullptr, bool wait = false);
 
-  void profilerAttach(bool enable = false) {}
+  void profilerAttach(bool /*enable*/ = false) {}
 
   bool isFenceDirty() const { return false; }
 

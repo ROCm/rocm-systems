@@ -49,7 +49,7 @@ class D3D11Object : public InteropObject {
 
   bool releaseResources_;
 
-  static std::vector<std::pair<void*, std::pair<UINT, UINT>>> resources_;
+  static std::vector<std::pair<void*, std::pair<UINT, INT>>> resources_;
 
  protected:
   //! Global lock.

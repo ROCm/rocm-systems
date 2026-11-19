@@ -2892,7 +2892,8 @@ hipError_t GraphExecSegmented::UpdatePacketBatchesForNodeEnableDisable(hip::Grap
   return hipSuccess;
 }
 
-void GraphExecBase::OnLaunchComplete(cl_event event, cl_int command_exec_status, void* user_data) {
+void GraphExecBase::OnLaunchComplete(cl_event event, cl_int /*command_exec_status*/,
+                                     void* user_data) {
   auto* cleanup = reinterpret_cast<GraphLaunchCleanup*>(user_data);
   GraphExecBase* execBase = cleanup->exec;
   // DEBUG_CLR_GRAPH_FAST_LAUNCH: the launch's end marker holds the command its side queues' fork
@@ -3681,8 +3682,8 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
     graph_dumped_ = true;
     std::string filename =
         "graph_" + std::to_string(amd::Os::getProcessId()) + "_dot_print_launch_1";
-    hipError_t status = ihipGraphDebugDotPrint(this, filename.c_str(), 0);
-    if (status == hipSuccess) {
+    hipError_t dotPrintStatus = ihipGraphDebugDotPrint(this, filename.c_str(), 0);
+    if (dotPrintStatus == hipSuccess) {
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE, "[hipGraph] graph dump:%s", filename.c_str());
     }
   }

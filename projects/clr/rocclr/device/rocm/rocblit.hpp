@@ -38,7 +38,7 @@ class DmaBlitManager : public device::HostBlitManager {
   virtual ~DmaBlitManager() {}
 
   //! Creates DmaBlitManager object
-  virtual bool create(amd::Device& device) { return true; }
+  virtual bool create(amd::Device& /*device*/) { return true; }
 
   //! Copies a buffer object to system memory
   virtual bool readBuffer(
@@ -176,36 +176,36 @@ class DmaBlitManager : public device::HostBlitManager {
   ) const;
 
   //! Stream memory write operation - Write a 'value' at 'memory'.
-  virtual bool streamOpsWrite(device::Memory& memory,  //!< Memory to write the 'value'
-                              uint64_t value, size_t offset, size_t sizeBytes) const {
+  virtual bool streamOpsWrite(device::Memory& /*memory*/,  //!< Memory to write the 'value'
+                              uint64_t /*value*/, size_t /*offset*/, size_t /*sizeBytes*/) const {
     assert(!"Unimplemented");
     return false;
   }
 
   //! Stream memory increment operation - Increment memory by a 'value'.
-  virtual bool streamOpsIncrement(device::Memory& memory, uint64_t value, size_t offset,
-                                  size_t sizeBytes) const {
+  virtual bool streamOpsIncrement(device::Memory& /*memory*/, uint64_t /*value*/, size_t /*offset*/,
+                                  size_t /*sizeBytes*/) const {
     assert(!"Unimplemented");
     return false;
   }
 
   //! Stream memory decrement operation - Decrement memory by a 'value'.
-  virtual bool streamOpsDecrement(device::Memory& memory, uint64_t value, size_t offset,
-                                  size_t sizeBytes) const {
+  virtual bool streamOpsDecrement(device::Memory& /*memory*/, uint64_t /*value*/, size_t /*offset*/,
+                                  size_t /*sizeBytes*/) const {
     assert(!"Unimplemented");
     return false;
   }
 
   //! Stream memory ops- Waits for a 'value' at 'memory' and wait is released based on compare op.
-  virtual bool streamOpsWait(device::Memory& memory,  //!< Memory to compare the 'value' against
-                             uint64_t value, size_t offset, size_t sizeBytes, uint64_t flags,
-                             uint64_t mask) const {
+  virtual bool streamOpsWait(device::Memory& /*memory*/,  //!< Memory to compare the 'value' against
+                             uint64_t /*value*/, size_t /*offset*/, size_t /*sizeBytes*/,
+                             uint64_t /*flags*/, uint64_t /*mask*/) const {
     assert(!"Unimplemented");
     return false;
   }
 
-  virtual bool initHeap(device::Memory* heap_to_initialize, device::Memory* initial_blocks,
-                        uint heap_size, uint number_of_initial_blocks) const {
+  virtual bool initHeap(device::Memory* /*heap_to_initialize*/, device::Memory* /*initial_blocks*/,
+                        uint /*heap_size*/, uint /*number_of_initial_blocks*/) const {
     assert(!"Unimplemented");
     return false;
   }
@@ -703,10 +703,14 @@ inline void KernelBlitManager::setArgument(amd::Kernel* kernel, size_t index, si
         // cannot see that this T_POINTER path is only taken when 'value' points to a cl_mem
         // (not the smaller scalar object seen at some call sites). The runtime kernel arg
         // descriptor guarantees the correct type/size for this path.
+#if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Warray-bounds"
+#endif
         amd::Memory* mem = as_amd(*static_cast<const cl_mem*>(value));
+#if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic pop
+#endif
 
         reinterpret_cast<amd::Memory**>(
             kernel->parameters().values() +
@@ -744,10 +748,14 @@ inline void KernelBlitManager::setArgument(amd::Kernel* kernel, size_t index, si
           // GCC's -Warray-bounds gives a false positive here: setArgument is inlined and GCC
           // cannot see that this case is only taken when desc.size_ == 8, i.e. 'value' points
           // to an 8-byte object rather than the smaller scalar seen at some call sites.
+#if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Warray-bounds"
+#endif
           uint64_value = *static_cast<const uint64_t*>(value);
+#if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic pop
+#endif
         }
         break;
       default:

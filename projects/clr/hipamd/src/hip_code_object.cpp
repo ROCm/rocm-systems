@@ -373,7 +373,7 @@ FatBinaryInfo** StatCO::AddFatBinary(const void* data, bool& success) {
   return &modules_[data];
 }
 
-FatBinaryInfo** StatCO::AddKpackBinary(const void* hipk_metadata, const void* wrapper_addr,
+FatBinaryInfo** StatCO::AddKpackBinary(const void* /*hipk_metadata*/, const void* wrapper_addr,
                                        bool& success) {
   std::scoped_lock lock(sclock_);
 

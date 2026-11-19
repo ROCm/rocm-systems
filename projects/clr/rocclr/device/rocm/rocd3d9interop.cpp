@@ -373,7 +373,7 @@ bool associateD3D9Device(const Device* device, void* gfxDevice, AdapterKind kind
   return true;
 }
 
-void dissociateD3D9Device(const Device* device, void* const gfxDevice[], void* gfxContext) {
+void dissociateD3D9Device(const Device* /*device*/, void* const /*gfxDevice*/[], void* gfxContext) {
   if (!gfxContext) return;
 
   // Entries are populated lazily and keyed by the surface's owning device rather than

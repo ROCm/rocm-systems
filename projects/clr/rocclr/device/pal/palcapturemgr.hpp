@@ -240,6 +240,11 @@ struct RgpSqttMarkerUserEventWithString {
 // ================================================================================================
 class ICaptureMgr {
  public:
+  // Implementations are owned and deleted through this interface (see
+  // Device::~Device and Device::create in paldevice.cpp), so the destructor
+  // must be virtual
+  virtual ~ICaptureMgr() = default;
+
   virtual bool Update(Pal::IPlatform* platform) = 0;
 
   virtual void PreDispatch(VirtualGPU* gpu, const pal::Kernel& kernel, size_t x, size_t y,

@@ -211,7 +211,7 @@ static inline uint32_t metadataPreloadDword(
   return meta->kernarg_preload_30_31[dword_idx - kSection0Dwords - kSection1Dwords];
 }
 
-static inline void logAqlMetadataPacket(const Device& dev, const hsa_queue_t* queue,
+static inline void logAqlMetadataPacket(const Device& /*dev*/, const hsa_queue_t* queue,
                                         const hsa_amd_metadata_kernel_dispatch_packet_t* meta,
                                         uint64_t wptr, AqlLogSink sink = AqlLogSink::kLog) {
   if (meta == nullptr) {
@@ -1282,7 +1282,8 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
   // Check if the signal doesn't match the requested one.
   // Note: runtime needs the interrupts for the callbacks and the marker events, but it can reuse
   // the non-interrupt signals for the regular dispatches
-  if ((signal_list_[current_id_]->flags_.interrupt_ != use_irq) && gpu_.dev().ActiveWait()) {
+  if ((static_cast<bool>(signal_list_[current_id_]->flags_.interrupt_) != use_irq) &&
+      gpu_.dev().ActiveWait()) {
     // Use different stacks if an interrupt is required or not.
     // @note: if runtime needs an interrupt, then the tracking list replaces the original signal
     // with the interrupt signal and saves the signal without interrupt, or vise versa
@@ -2003,9 +2004,9 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
         } else {
           gpuMem = static_cast<Memory*>(mem->getDeviceMemory(dev()));
 
-          const void* globalAddress = *reinterpret_cast<const void* const*>(params + desc.offset_);
+          const void* argGlobalAddress = *reinterpret_cast<const void* const*>(params + desc.offset_);
           ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = ptr:%p obj:[%p-%p]", i,
-                  desc.typeName_.c_str(), desc.name_.c_str(), globalAddress,
+                  desc.typeName_.c_str(), desc.name_.c_str(), argGlobalAddress,
                   gpuMem->getDeviceMemory(),
                   reinterpret_cast<address>(gpuMem->getDeviceMemory()) + mem->getSize());
 
@@ -2068,10 +2069,10 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
     } else if (desc.type_ == T_VOID) {
       const_address srcArgPtr = params + desc.offset_;
       if (desc.info_.oclObject_ == amd::KernelParameterDescriptor::ReferenceObject) {
-        void* mem = allocKernArg(desc.size_, 128);
-        memcpy(mem, srcArgPtr, desc.size_);
+        void* argKernArg = allocKernArg(desc.size_, 128);
+        memcpy(argKernArg, srcArgPtr, desc.size_);
         const auto it = hsaKernel.patch().find(desc.offset_);
-        WriteAqlArgAt(const_cast<address>(params), mem, sizeof(void*), it->second);
+        WriteAqlArgAt(const_cast<address>(params), argKernArg, sizeof(void*), it->second);
       }
 
       if (IsLogEnabled(amd::LOG_INFO, amd::LOG_KERN)) {
@@ -3240,7 +3241,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
 // ================================================================================================
 bool VirtualGPU::dispatchCounterAqlPacket(hsa_ext_amd_aql_pm4_packet_t* packet,
                                           const uint32_t gfxVersion, bool blocking,
-                                          const hsa_ven_amd_aqlprofile_1_00_pfn_t* extApi) {
+                                          const hsa_ven_amd_aqlprofile_1_00_pfn_t* /*extApi*/) {
   // PM4 IB packet submission is different between GFX8 and GFX9:
   //  In GFX8 the PM4 IB packet blob is writing directly to AQL queue
   //  In GFX9 the PM4 IB is submitting by AQL Vendor Specific packet and
@@ -4226,13 +4227,13 @@ void VirtualGPU::submitReadMemory(amd::ReadMemoryCommand& cmd) {
     case CL_COMMAND_READ_IMAGE: {
       if ((cmd.source().parent() != nullptr) &&
           (cmd.source().parent()->getType() == CL_MEM_OBJECT_BUFFER)) {
-        Image* imageBuffer = static_cast<Image*>(devMem);
+        Image* copyImage = static_cast<Image*>(devMem);
         // Check if synchronization has to be performed
-        if (nullptr != imageBuffer->CopyImageBuffer()) {
-          amd::Memory* memory = imageBuffer->CopyImageBuffer();
+        if (nullptr != copyImage->CopyImageBuffer()) {
+          amd::Memory* memory = copyImage->CopyImageBuffer();
           devMem = dev().getGpuMemory(memory);
-          Memory* buffer = dev().getGpuMemory(imageBuffer->owner()->parent());
-          amd::Image* image = imageBuffer->owner()->asImage();
+          Memory* buffer = dev().getGpuMemory(copyImage->owner()->parent());
+          amd::Image* image = copyImage->owner()->asImage();
           amd::Coord3D offs(0);
           // Copy memory from the original image buffer into the backing store image
           result = blitMgr().copyBufferToImage(*buffer, *devMem, offs, offs, image->getRegion(),
@@ -4750,8 +4751,8 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
       break;
     }
 
-    for (auto agent : srcDevMem->dev().p2pAgents()) {
-      if (agent.handle == dev().getBackendDevice().handle) {
+    for (auto peerAgent : srcDevMem->dev().p2pAgents()) {
+      if (peerAgent.handle == dev().getBackendDevice().handle) {
         p2pAllowed = true;
         break;
       }
@@ -4776,7 +4777,7 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
         // Sync the current queue, since P2P staging uses the device queues for transfer
         releaseGpuMemoryFence();
 
-        std::scoped_lock lock(dev().P2PStageOps());
+        std::scoped_lock p2pStageLock(dev().P2PStageOps());
         Memory* dstStgMem = static_cast<Memory*>(
             dev().P2PStage()->getDeviceMemory(*cmd.source().getContext().devices()[0]));
         Memory* srcStgMem = static_cast<Memory*>(
@@ -4814,7 +4815,7 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
         // Sync the current queue, since P2P staging uses the device queues for transfer
         releaseGpuMemoryFence();
 
-        std::scoped_lock lock(dev().P2PStageOps());
+        std::scoped_lock p2pStageLock(dev().P2PStageOps());
         Memory* dstStgMem = static_cast<Memory*>(
             dev().P2PStage()->getDeviceMemory(*cmd.source().getContext().devices()[0]));
         Memory* srcStgMem = static_cast<Memory*>(
@@ -5919,7 +5920,7 @@ hsa_amd_packet_type8_t VirtualGPU::SelectExtDispatchAmdFormat(
 
 // ================================================================================================
 bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const amd::Kernel& kernel,
-                                      const_address parameters, void* event_handle,
+                                      const_address parameters, void* /*event_handle*/,
                                       uint32_t sharedMemBytes, amd::NDRangeKernelCommand* vcmd,
                                       hsa_kernel_dispatch_packet_t* aql_packet,
                                       bool attach_signal) {
@@ -6299,7 +6300,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
 
   if (vcmd != nullptr) {
     if (vcmd->getAnyOrderLaunchFlag()) {
-      constexpr uint32_t kAqlHeaderMask = ~(1 << HSA_PACKET_HEADER_BARRIER);
+      constexpr uint32_t kAqlHeaderMask = ~(uint32_t{1} << HSA_PACKET_HEADER_BARRIER);
       aqlHeaderWithOrder &= kAqlHeaderMask;
     }
     if (vcmd->getCommandEntryScope() == amd::Device::kCacheStateSystem) {
@@ -6481,7 +6482,7 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
 }
 
 // ================================================================================================
-void VirtualGPU::submitNativeFn(amd::NativeFnCommand& cmd) {}
+void VirtualGPU::submitNativeFn(amd::NativeFnCommand& /*cmd*/) {}
 
 // ================================================================================================
 void VirtualGPU::submitMarker(amd::Marker& vcmd) {
@@ -6771,7 +6772,7 @@ void VirtualGPU::submitReleaseExtObjects(amd::ReleaseExtObjectsCommand& vcmd) {
 }
 
 // ================================================================================================
-void VirtualGPU::flush(amd::Command* list, bool wait) {
+void VirtualGPU::flush(amd::Command* list, bool /*wait*/) {
   // If barrier is requested, then wait for everything, otherwise
   // a per disaptch wait will occur later in updateCommandsState()
   releaseGpuMemoryFence();

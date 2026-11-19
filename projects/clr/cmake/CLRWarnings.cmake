@@ -9,7 +9,8 @@
 
 include_guard(GLOBAL)
 
-option(CLR_ENABLE_WERROR "Build first-party CLR targets with -Wall -Werror" OFF)
+option(CLR_ENABLE_WERROR
+  "Build first-party CLR targets with -Wall -Werror (/W4 /WX on Windows)" OFF)
 
 add_library(clr_warnings INTERFACE)
 add_library(clr::warnings ALIAS clr_warnings)
@@ -18,12 +19,47 @@ if(NOT CLR_ENABLE_WERROR)
   return()
 endif()
 
-# Only supporting Linux for now
+if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"
+    OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+  target_compile_options(clr_warnings INTERFACE /W4 /WX)
+
+  # Ignore C4714: "function marked as __forceinline not inlined". Whether the compiler
+  # honours __forceinline is its own decision, so this can be ignored.
+  target_compile_options(clr_warnings INTERFACE /wd4714)
+
+  # Ignore C4201: "nonstandard extension used: nameless struct/union". This
+  # is required for our vector implementation.
+  target_compile_options(clr_warnings INTERFACE /wd4201)
+
+  # Ignore C4324: "structure was padded due to alignment specifier". Padding is
+  # fine and not a problem
+  target_compile_options(clr_warnings INTERFACE /wd4324)
+
+  # Ingore C4702: "unreachable code". Every site is a defensive trailing return after
+  # a construct MSVC can prove already returns on all paths.
+  target_compile_options(clr_warnings INTERFACE /wd4702)
+
+  # Ignore C4200: "nonstandard extension used: zero-sized array in struct/union".
+  # rocglinterop.hpp's metadata_amd_ci_vi_t ends in a flexible array member
+  # overlaid on a hardware descriptor.
+  target_compile_options(clr_warnings INTERFACE /wd4200)
+
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(clr_warnings INTERFACE
+      -Wno-error=deprecated-declarations)
+  endif()
+
+  message(STATUS "CLR warnings: /W4 /WX enabled")
+  return()
+endif()
+
+# Everything else: GCC/Clang on Linux.
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux"
     OR NOT CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang)$")
   message(WARNING
-    "CLR_ENABLE_WERROR is supported for GCC/Clang on Linux only; ignoring it "
-    "for ${CMAKE_CXX_COMPILER_ID} on ${CMAKE_SYSTEM_NAME}.")
+    "CLR_ENABLE_WERROR is supported for GCC/Clang on Linux and MSVC/clang-cl "
+    "on Windows only; ignoring it for ${CMAKE_CXX_COMPILER_ID} on "
+    "${CMAKE_SYSTEM_NAME}.")
   return()
 endif()
 

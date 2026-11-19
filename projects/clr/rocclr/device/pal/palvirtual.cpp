@@ -195,16 +195,16 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
         int usage = std::numeric_limits<int>::max();
         uint indexBase = std::numeric_limits<uint32_t>::max();
         // Loop through all allocated queues and find the lowest usage
-        for (const auto& it : gpu.dev().QueuePool()) {
-          if ((qCreateInfo.engineType == it.second->engineType_) &&
-              (it.second->counter_ <= usage)) {
-            if ((it.second->counter_ < usage) ||
+        for (const auto& queueIt : gpu.dev().QueuePool()) {
+          if ((qCreateInfo.engineType == queueIt.second->engineType_) &&
+              (queueIt.second->counter_ <= usage)) {
+            if ((queueIt.second->counter_ < usage) ||
                 // Preserve the order of allocations, because SDMA engines
                 // should be used in round-robin manner
-                ((it.second->counter_ == usage) && (it.second->index_ < indexBase))) {
-              queue->iQueue_ = it.first;
-              usage = it.second->counter_;
-              indexBase = it.second->index_;
+                ((queueIt.second->counter_ == usage) && (queueIt.second->index_ < indexBase))) {
+              queue->iQueue_ = queueIt.first;
+              usage = queueIt.second->counter_;
+              indexBase = queueIt.second->index_;
             }
           }
         }
@@ -1765,7 +1765,7 @@ void VirtualGPU::submitUnmapMemory(amd::UnmapMemoryCommand& vcmd) {
     // and therefore are treated like a remote resource
     else if (memory->isPersistentMapped()) {
       // Map/unmap must be serialized
-      std::scoped_lock lock(owner->lockMemoryOps());
+      std::scoped_lock memoryOpsLock(owner->lockMemoryOps());
       memory->unmap(this);
       if (memory->getMapCount() == 0) {
         memory->setPersistentMapFlag(false);
@@ -1974,7 +1974,7 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
         result = blitMgr().copyBuffer(*srcDevMem, *dstDevMem, srcOrigin, dstOrigin, size,
                                       cmd.isEntireMemory());
       } else {
-        std::scoped_lock lock(dev().P2PStageOps());
+        std::scoped_lock p2pStageLock(dev().P2PStageOps());
         Memory* dstStgMem = static_cast<pal::Memory*>(
             dev().P2PStage()->getDeviceMemory(*cmd.source().getContext().devices()[0]));
         Memory* srcStgMem = static_cast<pal::Memory*>(
@@ -2007,7 +2007,7 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
         result = blitMgr().copyBufferRect(*srcDevMem, *dstDevMem, cmd.srcRect(), cmd.dstRect(),
                                           size, cmd.isEntireMemory(), cmd.copyMetadata());
       } else {
-        std::scoped_lock lock(dev().P2PStageOps());
+        std::scoped_lock p2pStageLock(dev().P2PStageOps());
         Memory* dstStgMem = static_cast<pal::Memory*>(
             dev().P2PStage()->getDeviceMemory(*cmd.source().getContext().devices()[0]));
         Memory* srcStgMem = static_cast<pal::Memory*>(
@@ -2310,7 +2310,7 @@ void VirtualGPU::submitSvmFillMemory(amd::SvmFillMemoryCommand& vcmd) {
     size_t offset = reinterpret_cast<uintptr_t>(vcmd.dst()) -
                     reinterpret_cast<uintptr_t>(dstMemory->getSvmPtr());
 
-    pal::Memory* memory = dev().getGpuMemory(dstMemory);
+    dev().getGpuMemory(dstMemory);
 
     amd::Coord3D origin(offset, 0, 0);
     amd::Coord3D size(fillSize, 1, 1);
@@ -2402,7 +2402,7 @@ void VirtualGPU::submitStreamOperation(amd::StreamOperationCommand& cmd) {
       LogError("submitStreamOperation: Wait failed!");
     }
   } else if (type == ROCCLR_COMMAND_STREAM_WRITE_VALUE) {
-    bool result;
+    bool result = false;
     switch (flags) {
       case ROCCLR_STREAM_WRITE_VALUE_DEFAULT: {
         result = blitMgr().streamOpsWrite(*memory, value, offset, sizeBytes);
@@ -2651,14 +2651,14 @@ bool VirtualGPU::PreDeviceEnqueue(const amd::Kernel& kernel, const pal::Kernel& 
 
 // ================================================================================================
 void VirtualGPU::PostDeviceEnqueue(const amd::Kernel& kernel, const pal::Kernel& hsaKernel,
-                                   VirtualGPU* gpuDefQueue, uint64_t vmDefQueue,
+                                   VirtualGPU* gpuDefQueue, uint64_t /*vmDefQueue*/,
                                    uint64_t vmParentWrap, GpuEvent* gpuEvent) {
   uint32_t id = gpuEvent->id_;
   amd::DeviceQueue* defQueue = kernel.program().context().defDeviceQueue(dev());
 
   // Make sure exculsive access to the device queue
   amd::ScopedLock(defQueue->lock());
-  Memory& schedParams = xferWrite().Acquire(sizeof(SchedulerParam));
+  xferWrite().Acquire(sizeof(SchedulerParam));
 
   if (GPU_PRINT_CHILD_KERNEL != 0) {
     waitForEvent(gpuEvent);
@@ -2960,9 +2960,10 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
       amd::Image* image = imageBuffer->owner()->asImage();
       amd::Coord3D offs(0);
       // Copy memory from the the backing store image into original buffer
-      bool result = blitMgr().copyImageToBuffer(*imageBuffer->CopyImageBuffer(), *buffer, offs,
-                                                offs, image->getRegion(), true,
-                                                image->getRowPitch(), image->getSlicePitch());
+      [[maybe_unused]] bool result =
+          blitMgr().copyImageToBuffer(*imageBuffer->CopyImageBuffer(), *buffer, offs, offs,
+                                      image->getRegion(), true, image->getRowPitch(),
+                                      image->getSlicePitch());
     }
   }
 
@@ -2975,7 +2976,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
 }
 
 // ================================================================================================
-void VirtualGPU::submitNativeFn(amd::NativeFnCommand& vcmd) {
+void VirtualGPU::submitNativeFn(amd::NativeFnCommand& /*vcmd*/) {
   // Make sure VirtualGPU has an exclusive access to the resources
   std::scoped_lock lock(execution());
 
@@ -3021,7 +3022,7 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
 }
 
 // ================================================================================================
-void VirtualGPU::submitAccumulate(amd::AccumulateCommand& vcmd) {}
+void VirtualGPU::submitAccumulate(amd::AccumulateCommand& /*vcmd*/) {}
 
 // ================================================================================================
 void VirtualGPU::submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) {
@@ -3196,8 +3197,6 @@ void VirtualGPU::submitThreadTrace(amd::ThreadTraceCommand& cmd) {
       } else {
         Pal::IPerfExperiment* palPerf = threadTrace->iPerf();
         if (cmd.getState() == amd::ThreadTraceCommand::Begin) {
-          amd::ThreadTrace::ThreadTraceConfig* traceCfg =
-              static_cast<amd::ThreadTrace::ThreadTraceConfig*>(cmd.threadTraceConfig());
           iCmd()->CmdBeginPerfExperiment(palPerf);
         } else if (cmd.getState() == amd::ThreadTraceCommand::End) {
           GpuEvent event;
@@ -3231,7 +3230,7 @@ void VirtualGPU::submitAcquireExtObjects(amd::AcquireExtObjectsCommand& vcmd) {
   for (const auto& it : vcmd.getMemList()) {
     // amd::Memory object should never be nullptr
     assert(it && "Memory object for interop is nullptr");
-    pal::Memory* memory = dev().getGpuMemory(it);
+    dev().getGpuMemory(it);
 
     // If resource is a shared copy of original resource, then
     // runtime needs to copy data from original resource. A failure leaves the staged
@@ -3255,7 +3254,7 @@ void VirtualGPU::submitReleaseExtObjects(amd::ReleaseExtObjectsCommand& vcmd) {
   for (const auto& it : vcmd.getMemList()) {
     // amd::Memory object should never be nullptr
     assert(it && "Memory object for interop is nullptr");
-    pal::Memory* memory = dev().getGpuMemory(it);
+    dev().getGpuMemory(it);
 
     // If resource is a shared copy of original resource, then
     // runtime needs to copy data back to original resource
@@ -3710,7 +3709,7 @@ void VirtualGPU::addDoppRef(const Memory* memory, bool lastDoppCmd, bool pfpaDop
   queues_[MainEngine]->addCmdDoppRef(memory->iMem(), lastDoppCmd, pfpaDoppCmd);
 }
 
-void VirtualGPU::profileEvent(EngineType engine, bool type) const {
+void VirtualGPU::profileEvent(EngineType /*engine*/, bool type) const {
   if (nullptr == profileTs_) {
     return;
   }
@@ -3871,7 +3870,6 @@ bool VirtualGPU::processMemObjectsHSA(const amd::Kernel& kernel, const_address p
           gpuMem->wait(*this, WaitOnBusyEngine);
 
           addVmMemory(gpuMem);
-          const void* globalAddress = *reinterpret_cast<const void* const*>(params + desc.offset_);
           logVmMemory(desc.name_, gpuMem);
 
           //! Check if compiler expects read/write.
@@ -3891,7 +3889,7 @@ bool VirtualGPU::processMemObjectsHSA(const amd::Kernel& kernel, const_address p
                 amd::Image* image = mem->asImage();
                 amd::Coord3D offs(0);
                 // Copy memory from the original image buffer into the backing store image
-                bool result = blitMgr().copyBufferToImage(
+                [[maybe_unused]] bool result = blitMgr().copyBufferToImage(
                     *buffer, *imageBuffer->CopyImageBuffer(), offs, offs, image->getRegion(), true,
                     image->getRowPitch(), image->getSlicePitch());
                 // Make sure the copy operation is done

@@ -95,15 +95,15 @@ class PALHSALoaderContext final : public hsa::loader::Context {
 
   bool ImageExtensionSupported() override { return false; }
 
-  hsa_status_t ImageCreate(hsa_agent_t agent, hsa_access_permission_t image_permission,
-                           const hsa_ext_image_descriptor_t* image_descriptor,
-                           const void* image_data, hsa_ext_image_t* image_handle) override {
+  hsa_status_t ImageCreate(hsa_agent_t /*agent*/, hsa_access_permission_t /*image_permission*/,
+                           const hsa_ext_image_descriptor_t* /*image_descriptor*/,
+                           const void* /*image_data*/, hsa_ext_image_t* /*image_handle*/) override {
     // not supported
     assert(false);
     return HSA_STATUS_ERROR;
   }
 
-  hsa_status_t ImageDestroy(hsa_agent_t agent, hsa_ext_image_t image_handle) override {
+  hsa_status_t ImageDestroy(hsa_agent_t /*agent*/, hsa_ext_image_t /*image_handle*/) override {
     // not supported
     assert(false);
     return HSA_STATUS_ERROR;
@@ -136,7 +136,7 @@ class Program : public device::Program {
 
   void addGlobalStore(Memory* mem) { globalStores_.push_back(mem); }
 
-  void setCodeObjects(Segment* seg, Memory* codeGpu, address codeCpu) {
+  void setCodeObjects(Segment* seg, Memory* codeGpu, address /*codeCpu*/) {
     codeSegGpu_ = codeGpu;
     codeSegment_ = seg;
   }

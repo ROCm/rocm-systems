@@ -71,8 +71,8 @@ int D3D11Object::initD3D11Object(const Context& amdContext, ID3D11Resource* pRes
     return CL_INVALID_D3D11_DEVICE_KHR;
   }
 
-  D3D11_QUERY_DESC desc = {D3D11_QUERY_EVENT, 0};
-  pDev->CreateQuery(&desc, &obj.pQuery_);
+  D3D11_QUERY_DESC queryDesc = {D3D11_QUERY_EVENT, 0};
+  pDev->CreateQuery(&queryDesc, &obj.pQuery_);
 
 #define SET_SHARED_FLAGS()                                                                         \
   {                                                                                                \
@@ -400,7 +400,7 @@ bool D3D11Object::copySharedToOrig() {
   return true;
 }
 
-std::vector<std::pair<void*, std::pair<UINT, UINT>>> D3D11Object::resources_;
+std::vector<std::pair<void*, std::pair<UINT, INT>>> D3D11Object::resources_;
 Monitor D3D11Object::resLock_;
 
 //

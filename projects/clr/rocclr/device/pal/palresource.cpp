@@ -86,7 +86,6 @@ GpuMemoryReference* GpuMemoryReference::Create(const Device& dev,
   }
 
   GpuMemoryReference* memRef = new (gpuMemSize) GpuMemoryReference(dev);
-  Pal::VaRange vaRange = Pal::VaRange::Default;
   if (memRef != nullptr) {
     result = dev.iDev()->CreatePinnedGpuMemory(createInfo, &memRef[1], &memRef->gpuMem_);
     if (result == Pal::Result::Success) {
@@ -1298,12 +1297,6 @@ bool Resource::CreateSvm(CreateParams* params, Pal::gpusize svmPtr) {
 
 // ================================================================================================
 bool Resource::create(MemoryType memType, CreateParams* params, bool forceLinear) {
-  bool imageCreateView = false;
-  bool foundCalRef = false;
-  bool viewDefined = false;
-  uint viewLayer = 0;
-  uint viewLevel = 0;
-  uint viewFlags = 0;
   Pal::ChannelMapping channels;
   Pal::ChNumFormat format = dev().getPalFormat(desc().format_, &channels);
   // Set the initial offset value for any resource to 0.
@@ -1626,7 +1619,8 @@ bool Resource::partialMemCopyTo(VirtualGPU& gpu, const amd::Coord3D& srcOrigin,
   gpu.queue(gpu.engineID_).addCmdMemRef(dstResource.memRef());
   if (desc().buffer_ && !dstResource.desc().buffer_) {
     uint32_t arraySliceIdx = img2Darray ? dstOrigin[2] : img1Darray ? dstOrigin[1] : 0;
-    Pal::SubresId ImgSubresId = {0, dstResource.desc().baseLevel_, arraySliceIdx};
+    Pal::SubresId ImgSubresId = {0, static_cast<Pal::uint8>(dstResource.desc().baseLevel_),
+                                 static_cast<Pal::uint16>(arraySliceIdx)};
     Pal::MemoryImageCopyRegion copyRegion = {};
     copyRegion.imageSubres = ImgSubresId;
     copyRegion.imageOffset.x = dstOrigin[0];
@@ -1656,7 +1650,8 @@ bool Resource::partialMemCopyTo(VirtualGPU& gpu, const amd::Coord3D& srcOrigin,
   } else if (!desc().buffer_ && dstResource.desc().buffer_) {
     Pal::MemoryImageCopyRegion copyRegion = {};
     uint32_t arraySliceIdx = img2Darray ? srcOrigin[2] : img1Darray ? srcOrigin[1] : 0;
-    Pal::SubresId ImgSubresId = {0, desc().baseLevel_, arraySliceIdx};
+    Pal::SubresId ImgSubresId = {0, static_cast<Pal::uint8>(desc().baseLevel_),
+                                 static_cast<Pal::uint16>(arraySliceIdx)};
     copyRegion.imageSubres = ImgSubresId;
     copyRegion.imageOffset.x = srcOrigin[0];
     copyRegion.imageOffset.y = img1Darray ? 0 : srcOrigin[1];
@@ -1758,7 +1753,7 @@ void Resource::wait(VirtualGPU& gpu, bool waitOnBusyEngine) const {
   // Check if we have to wait unconditionally
   if (!waitOnBusyEngine ||
       // or we have to wait only if another engine was used on this resource
-      (gpuEvent->engineId_ != gpu.engineID_)) {
+      (gpuEvent->engineId_ != static_cast<uint32_t>(gpu.engineID_))) {
     gpu.waitForEvent(gpuEvent);
   }
 
@@ -1908,7 +1903,7 @@ bool Resource::hostRead(VirtualGPU* gpu, void* hostPtr, const amd::Coord3D& orig
 }
 
 // ================================================================================================
-void* Resource::gpuMemoryMap(size_t* pitch, uint flags, Pal::IGpuMemory* resource) const {
+void* Resource::gpuMemoryMap(size_t* pitch, uint /*flags*/, Pal::IGpuMemory* resource) const {
   if (desc_.cardMemory_ && !isPersistentDirectMap()) {
     // @todo remove const cast
     Unimplemented();
@@ -2041,7 +2036,7 @@ bool Resource::isPersistentDirectMap(bool writeMap) const {
 }
 
 // ================================================================================================
-void* Resource::map(VirtualGPU* gpu, uint flags, uint startLayer, uint numLayers) {
+void* Resource::map(VirtualGPU* gpu, uint flags, uint /*startLayer*/, uint /*numLayers*/) {
   if (isMemoryType(Pinned)) {
     // Check if we have to wait
     if (!(flags & NoWait)) {
@@ -2097,7 +2092,7 @@ void* Resource::map(VirtualGPU* gpu, uint flags, uint startLayer, uint numLayers
 }
 
 // ================================================================================================
-void Resource::unmap(VirtualGPU* gpu) {
+void Resource::unmap(VirtualGPU* /*gpu*/) {
   if (isMemoryType(Pinned)) {
     return;
   }
@@ -2148,7 +2143,7 @@ void MemorySubAllocator::forceResident(GpuMemoryReference* mem_ref) {
 }
 
 // ================================================================================================
-bool MemorySubAllocator::CreateChunk(const Pal::IGpuMemory* reserved_va) {
+bool MemorySubAllocator::CreateChunk(const Pal::IGpuMemory* /*reserved_va*/) {
   Pal::GpuMemoryCreateInfo createInfo = {};
   createInfo.size = device_->settings().subAllocationChunkSize_;
   createInfo.alignment = device_->properties().gpuMemoryProperties.fragmentSize;

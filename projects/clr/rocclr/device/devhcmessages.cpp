@@ -66,7 +66,7 @@ static uint64_t getEndFlag(uint64_t desc) {
 }
 
 static uint64_t resetBeginFlag(uint64_t desc) {
-  uint64_t resetMask = ~(1 << DESCRIPTOR_OFFSET_FLAG_BEGIN);
+  uint64_t resetMask = ~(uint64_t{1} << DESCRIPTOR_OFFSET_FLAG_BEGIN);
   return desc & resetMask;
 }
 
@@ -97,8 +97,8 @@ Message* MessageHandler::newMessage() {
 }
 
 MessageHandler::~MessageHandler() {
-  for (auto M : messageSlots_) {
-    delete M;
+  for (auto slot : messageSlots_) {
+    delete slot;
   }
 }
 

@@ -329,8 +329,6 @@ bool Memory::createInterop() {
 
     d3dRes.owner_ = owner();
 
-    const amd::D3D9ObjDesc_t* objDesc = d3d9Object->getObjDesc();
-
     memType = Resource::D3D9Interop;
 
     // Get shared handle
@@ -479,7 +477,7 @@ void Memory::syncCacheFromHost(VirtualGPU& gpu, device::Memory::SyncFlags syncFl
       // Make sure the parent sync is an unique operation.
       // If the app uses multiple subbuffers from multiple queues,
       // then the parent sync can be called from multiple threads
-      std::scoped_lock lock(owner()->parent()->lockMemoryOps());
+      std::scoped_lock parentLock(owner()->parent()->lockMemoryOps());
       gpuMemory->syncCacheFromHost(gpu, syncFlagsTmp);
       //! \note Don't do early exit here, since we still have to sync
       //! this view, if the parent sync operation was a NOP.
@@ -732,8 +730,6 @@ void Memory::decIndMapCount() {
   if (--indirectMapCount_ == 0) {
     if (nullptr != mapMemory_) {
       amd::Memory* memory = mapMemory_;
-      amd::Memory* empty = nullptr;
-
       // Get GPU memory
       Memory* gpuMemory = mapMemory();
       gpuMemory->unmap(nullptr);
@@ -753,7 +749,7 @@ void Memory::decIndMapCount() {
 // Note - must be called by the device under the async lock, so no spinning
 // or long pauses allowed in this function.
 void* Memory::allocMapTarget(const amd::Coord3D& origin, const amd::Coord3D& region, uint mapFlags,
-                             size_t* rowPitch, size_t* slicePitch) {
+                             size_t* /*rowPitch*/, size_t* /*slicePitch*/) {
   // Sanity checks
   assert(owner() != nullptr);
 
@@ -777,7 +773,7 @@ void* Memory::allocMapTarget(const amd::Coord3D& origin, const amd::Coord3D& reg
         return nullptr;
       }
       //! \note Ignore pinning result
-      bool ok = pinSystemMemory(owner()->getHostMem(), owner()->getSize());
+      pinSystemMemory(owner()->getHostMem(), owner()->getSize());
     }
   }
 
@@ -874,7 +870,7 @@ void* Memory::allocMapTarget(const amd::Coord3D& origin, const amd::Coord3D& reg
   return mapAddress + offset;
 }
 
-bool Memory::pinSystemMemory(void* hostPtr, size_t size) {
+bool Memory::pinSystemMemory(void* /*hostPtr*/, size_t size) {
   bool result = false;
 
   // If memory has a direct access already, then skip the host memory pinning
@@ -978,7 +974,7 @@ void Memory::mgpuCacheWriteBack(VirtualGPU& gpu) {
   // Make synchronization
   if (owner()->getHostMem() != nullptr) {
     //! \note Ignore pinning result
-    bool ok = pinSystemMemory(owner()->getHostMem(), owner()->getSize());
+    pinSystemMemory(owner()->getHostMem(), owner()->getSize());
     owner()->cacheWriteBack(&gpu);
   }
 }

@@ -122,7 +122,7 @@ For detailed instructions, please refer to [How to build HIP](https://rocm.docs.
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `CLR_ENABLE_WERROR` | `OFF` | Build the CLR targets (`rocclr`, `amdhip64`, and `hiprtc`) with `-Wall -Werror` |
+| `CLR_ENABLE_WERROR` | `OFF` | Build the CLR targets (`rocclr`, `amdhip64`, and `hiprtc`) with `-Wall -Werror` on Linux (GCC/Clang) and `/W4 /WX` on Windows (MSVC/clang-cl) |
 
 ## Tests
 

@@ -29,7 +29,7 @@ namespace amd::pal {
 static bool queryD3D11DeviceGPUMask(ID3D11Device* pd3d11Device, UINT* pd3d11DeviceGPUMask) {
   IAmdDxExt* pExt = nullptr;
   IAmdDxExtCLInterop* pCLExt = nullptr;
-  PFNAmdDxExtCreate11 AmdDxExtCreate11;
+  PFNAmdDxExtCreate11 AmdDxExtCreate11 = nullptr;
   HRESULT hr = S_OK;
 
 // Get a handle to the DXX DLL with extension API support
