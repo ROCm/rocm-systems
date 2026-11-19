@@ -45,9 +45,12 @@ constexpr uint32_t kPid = 42;
 struct Replies {
   int group_ids = 0;  // ids in each group and field group list
   int processes = 1;  // processes of the job
+  int gpus = 1;       // GPUs of the job
+  int policies = 1;   // policies of the group
 };
 
-// Replies that claim more GPUs, processes and policies than they carry.
+// Replies that claim more GPUs, processes and policies than they carry, or carry more
+// than RDC holds.
 class OverstatingService final : public ::rdc::RdcAPI::Service {
  public:
   explicit OverstatingService(Replies replies) : replies_(replies) {}
@@ -56,7 +59,9 @@ class OverstatingService final : public ::rdc::RdcAPI::Service {
                              ::rdc::GetJobStatsResponse* reply) override {
     reply->set_status(RDC_ST_OK);
     reply->set_num_gpus(RDC_MAX_NUM_GPUS_PER_JOB);
-    reply->add_gpus()->set_gpu_id(kGpuId);
+    for (int i = 0; i < replies_.gpus; i++) {
+      reply->add_gpus()->set_gpu_id(kGpuId + i);
+    }
     reply->set_num_processes(RDC_MAX_NUM_PROCESSES_STATUS);
     for (int i = 0; i < replies_.processes; i++) {
       ::rdc::RdcProcessStatsInfo* process = reply->add_processes();
@@ -71,9 +76,11 @@ class OverstatingService final : public ::rdc::RdcAPI::Service {
     reply->set_status(RDC_ST_OK);
     ::rdc::PolicyResponse* response = reply->mutable_response();
     response->set_count(RDC_MAX_POLICY_SETTINGS);
-    ::rdc::Policy* policy = response->add_policies();
-    policy->mutable_condition()->set_type(::rdc::PolicyCondition_Type_COND_THERMAL);
-    policy->mutable_condition()->set_value(90);
+    for (int i = 0; i < replies_.policies; i++) {
+      ::rdc::Policy* policy = response->add_policies();
+      policy->mutable_condition()->set_type(::rdc::PolicyCondition_Type_COND_THERMAL);
+      policy->mutable_condition()->set_value(90);
+    }
     return ::grpc::Status::OK;
   }
 
@@ -185,6 +192,28 @@ TEST_F(RdcClientRepliesTest, PoliciesCountWhatTheReplyCarries) {
       ::testing::ExitedWithCode(0), "");
 }
 
+TEST_F(RdcClientRepliesTest, RejectsMorePoliciesThanRdcHolds) {
+  EXPECT_EXIT(
+      {
+        bool ok = false;
+        {
+          Replies replies;
+          replies.policies = RDC_MAX_POLICY_SETTINGS + 1;
+          Session session(replies);
+          rdc_policy_t policies[RDC_MAX_POLICY_SETTINGS] = {};
+          constexpr uint32_t kUnset = 12345;  // the count must stay as it is
+          uint32_t count = kUnset;
+          rdc_status_t status = rdc_policy_get(session.handle(), 1, &count, policies);
+          ok = status == RDC_ST_BAD_PARAMETER && count == kUnset;
+          if (!ok) {
+            fprintf(stderr, "status %d, count %u\n", status, count);
+          }
+        }
+        _exit(ok ? 0 : 1);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
 // RDC holds as many groups as field groups; the service lists that many of each.
 static_assert(RDC_MAX_NUM_GROUPS == RDC_MAX_NUM_FIELD_GROUPS);
 
@@ -246,6 +275,26 @@ TEST_F(RdcClientRepliesTest, RejectsMoreProcessesThanAJobHolds) {
         bool ok = false;
         {
           Session session({0, RDC_MAX_NUM_PROCESSES_STATUS + 1});
+          auto info = std::make_unique<rdc_job_info_t>();
+          rdc_status_t status = rdc_job_get_stats(session.handle(), "job", info.get());
+          ok = status == RDC_ST_BAD_PARAMETER;
+          if (!ok) {
+            fprintf(stderr, "status %d\n", status);
+          }
+        }
+        _exit(ok ? 0 : 1);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
+TEST_F(RdcClientRepliesTest, RejectsMoreGpusThanAJobHolds) {
+  EXPECT_EXIT(
+      {
+        bool ok = false;
+        {
+          Replies replies;
+          replies.gpus = RDC_MAX_NUM_GPUS_PER_JOB + 1;
+          Session session(replies);
           auto info = std::make_unique<rdc_job_info_t>();
           rdc_status_t status = rdc_job_get_stats(session.handle(), "job", info.get());
           ok = status == RDC_ST_BAD_PARAMETER;

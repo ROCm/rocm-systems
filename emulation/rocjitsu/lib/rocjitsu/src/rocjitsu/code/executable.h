@@ -14,6 +14,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -40,8 +41,16 @@ public:
   ~Executable() override;
 
   /// @brief Load an executable from the file at @p path.
+  /// @details Expected loading and parsing failures leave is_valid() false.
   /// @param[in] path Path to an x86 HIP fat binary or standalone device ELF.
+  /// @throws std::bad_alloc if memory allocation fails.
   explicit Executable(const std::string &path);
+
+  /// @brief Load an executable from an in-memory image.
+  /// @details Copies @p image, then accepts the same standalone AMDGPU ELF and
+  /// host HIP fat-binary formats as the path constructor.
+  /// @param[in] image Executable bytes to copy and parse.
+  explicit Executable(std::span<const uint8_t> image);
 
   /// @brief Number of code objects for the given target.
   /// @param[in] target Target ID to query.
@@ -78,6 +87,7 @@ private:
   void load_fat_binary();
   void load_hip_fatbin(const Section &fatbin_section);
   void register_code_object(std::unique_ptr<AmdGpuCodeObject> co);
+  void parse_image();
 
   std::vector<std::unique_ptr<AmdGpuCodeObject>> owned_code_objs_;
   std::unordered_map<rj_code_target_id_t, std::vector<AmdGpuCodeObject *>> code_objs_by_target_;

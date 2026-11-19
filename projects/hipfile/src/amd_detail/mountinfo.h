@@ -18,6 +18,7 @@ namespace hipFile {
 enum class FilesystemType {
     ext4,
     xfs,
+    nfs,
     other,
 };
 
@@ -34,9 +35,26 @@ struct Ext4MountOptions {
     ExtJournalingMode journaling_mode;
 };
 
+/// @brief NFS transport protocol
+enum class NfsProto {
+    unknown,
+    tcp,
+    tcp6,
+    udp,
+    udp6,
+    rdma,
+    rdma6,
+};
+
+/// @brief NFS mount options
+struct NfsMountOptions {
+    NfsProto proto;
+};
+
 /// @brief The options specified when the filesystem was mounted
 union MountOptions {
     Ext4MountOptions ext4;
+    NfsMountOptions  nfs;
 };
 
 /// @brief File system mount information
