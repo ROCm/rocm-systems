@@ -2634,18 +2634,22 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   }
   // Append in the laid-out order: probe bodies first (one per distinct probe),
   // then the padding and the entry stub, then the per-site trampolines.
+  auto record_append_error = [&](std::string_view message) { result.errors.emplace_back(message); };
+  const util::DiagnosticEmitter append_error(record_append_error);
   for (const ProbeCallable &probe : resolved.probes)
     append_words(new_text, probe.body_words);
   if (entry_patch) {
-    auto record_error = [&](std::string_view message) { result.errors.emplace_back(message); };
-    const util::DiagnosticEmitter error(record_error);
-    if (append_nop_padding(new_text, entry_patch->padding_bytes, arch_, &error).failed()) {
+    if (append_nop_padding(new_text, entry_patch->padding_bytes, arch_, &append_error).failed()) {
       return result;
     }
     append_words(new_text, entry_patch->words);
   }
   for (const auto &a : applied)
     append_words(new_text, a.bytes.trampoline_words);
+  // The cave follows the original code's end padding, so it ends with the same:
+  // the instruction prefetcher runs ahead of the last trampoline.
+  if (append_code_end_padding(new_text, arch_, &append_error).failed())
+    return result;
   if (!patcher.replace_text(new_text)) {
     result.errors.emplace_back("failed to replace .text with the instrumented code");
     return result;

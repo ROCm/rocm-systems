@@ -276,9 +276,10 @@ The intermediate site/plan types are expected to thicken as the framework grows 
 Owns ELF-level mutations. The orchestrator applies validated original-text
 anchor edits to a local text buffer, then
 assembles the new `.text` (the already-edited original text,
-then the probe bodies, the `s_nop`-padded entry-prologue stub if there is one, and
+then the probe bodies, the `s_nop`-padded entry-prologue stub if there is one,
 every trampoline appended after the original bytes with `append_words()` /
-`append_nop_padding()`), and applies it with a single `replace_text()`. A patch
+`append_nop_padding()`, and the code-end padding from `append_code_end_padding()`),
+and applies it with a single `replace_text()`. A patch
 carrying an entry prologue first calls `redirect_kernel_entry()` to point the
 descriptor at the stub, at the descriptor's original file offset, before
 `replace_text()` shifts the entry field with everything else. After text
@@ -540,7 +541,7 @@ For a code object with one queued `InstrumentationPoint` at `anchor_offset`:
 1. **Lazy block decode:** On the first stage that needs the CFG, check source-target admission and select the concrete-target decoder, or the caller architecture's decoder when no concrete target binding exists. `BasicBlock::build` populates `blocks_`, and decoded instructions populate the full-text `InstructionBoundaries` index. An unsupported architecture or recognized source mismatch surfaces as a fatal error here. The final checked batch uses this same selection.
 2. **Validate:** `validate_points()` walks `points_`; for each, `find_instruction_at_offset()` locates the decoded `Instruction`, then `validate_anchor()` runs milestone-scoped + structural checks and produces a `ResolvedInstrumentationSite` capturing the original bytes.
 3. **Plan + build (preflight):** For each site, `make_trampoline_plan(site, arch, trampoline_offset)` produces a canonical inline-nop plan (`before_items = {{ s_nop 0 }}`, `emit_original = true`); `validate_inline_nop_plan()` rechecks shape; `TrampolineBuilder::build(plan)` lowers it to `TrampolineBytes`. The trampoline cursor begins at `patcher.text_size()` (the first byte of the local cave) and advances by each built trampoline's size. Nothing is written to the patcher yet.
-4. **Assemble + replace:** Once every site preflighted, collect the original-text anchor edits and apply them as one local checked transaction to the private text buffer, borrowing the source, selected decoder, full-text index, patcher, and collected kernel entries. Append probe bodies, the entry stub, and trampolines in their planned order. A KernelEntry callback changes the appended stub branch and does not produce an original-text anchor edit. A single `patcher.replace_text()` grows `.text` in place and fixes up the surrounding ELF (section/segment sizes, moved symbols, descriptor entries); Instrumentor retains responsibility for resource metadata.
+4. **Assemble + replace:** Once every site preflighted, collect the original-text anchor edits and apply them as one local checked transaction to the private text buffer, borrowing the source, selected decoder, full-text index, patcher, and collected kernel entries. Append probe bodies, the entry stub, and trampolines in their planned order, then the code-end padding. A KernelEntry callback changes the appended stub branch and does not produce an original-text anchor edit. A single `patcher.replace_text()` grows `.text` in place and fixes up the surrounding ELF (section/segment sizes, moved symbols, descriptor entries); Instrumentor retains responsibility for resource metadata.
 5. **Emit:** `patcher.emit()` returns the patched ELF.
 
 The trampolines live inside `.text`, immediately after the original kernel bytes (like what DBT currently does). Keeping a single executable `.text` section avoids loaders that only treat `.text` as executable, and keeps cave offsets expressible as `.text`-relative bytes. Because the original bytes do not move, no branch offsets in the original code are relocated — only the in-place `s_branch` at each anchor is rewritten. One site lays out as:
@@ -557,7 +558,10 @@ The trampolines live inside `.text`, immediately after the original kernel bytes
     s_nop 0                     <-- inline-nop body (the probe-call variant is described below)
     <relocated original word(s)> <-- 4 or 8 bytes, same encoding as the anchor
     s_branch <return>           <-- back to anchor_offset + original_size
+  [code-end padding]
 ```
+
+The cave ends with the padding the compiler ends `.text` with (LLVM's `EmitCodeEnd`, built by `append_code_end_padding()`), because the instruction prefetcher runs ahead of the last instruction it executes. GFX10 and later pad with `s_code_end` to an instruction-cache line (64 bytes on GFX10, 128 from GFX11), then 3 more lines; gfx90a, gfx94x and gfx950 pad with `s_nop 0` to 64 bytes, then 16 more lines; gfx908 has none. A patched object grows by at most 508 bytes more on GFX11+, 252 on GFX10 and 1,084 on CDNA2-4.
 
 Branch offsets are computed in SOPP `simm16` units; the trampoline must lie within `±32768 * 4` bytes of the anchor. For unusually large kernels this would require trampoline islands, which remain future work (same constraint as DBT code caves).
 
@@ -565,7 +569,7 @@ Branch offsets are computed in SOPP `simm16` units; the trampoline must lie with
 
 ## Instrumentation Flow (probe-call)
 
-A probe-call point sets `probe_obj` + `probe_symbol`. Resolution copies the probe's self-contained body (`rj_nop_probe`: `s_waitcnt` then `s_setpc_b64 s[30:31]`) once into the cave; sites sharing a `(probe_obj, probe_symbol)` reuse that one copy. The cave is laid out as `[probe bodies][s_nop padding][entry stub][trampolines]` after the original kernel bytes; the padding and stub are present only when the kernel has an entry prologue. The forward `s_branch` at the anchor targets the trampoline (not the body); the trampoline *calls* the body via `s_swappc_b64`.
+A probe-call point sets `probe_obj` + `probe_symbol`. Resolution copies the probe's self-contained body (`rj_nop_probe`: `s_waitcnt` then `s_setpc_b64 s[30:31]`) once into the cave; sites sharing a `(probe_obj, probe_symbol)` reuse that one copy. The cave is laid out as `[probe bodies][s_nop padding][entry stub][trampolines][code-end padding]` after the original kernel bytes; the padding and stub are present only when the kernel has an entry prologue. The forward `s_branch` at the anchor targets the trampoline (not the body); the trampoline *calls* the body via `s_swappc_b64`.
 
 The relocated original precedes the call envelope for `AfterInst` and follows
 it for `BeforeInst`:
@@ -612,6 +616,7 @@ it for `BeforeInst`:
     s_wait_alu 0xf1fc                   <-- RDNA4: completed restores before guest resume
     <relocated original word(s)>        <-- BeforeInst only: after the envelope
     s_branch <return>                   <-- back to anchor_offset + original_size
+  [code-end padding]                    <-- after the last trampoline
 ```
 
 The diagram labels both placements. With `probe_after_original=true`, the
@@ -739,7 +744,7 @@ The kernarg pair is the loads' address operand while the storage pairs are their
 
 ### Placement
 
-`Instrumentor::plan_entry_prologue` places the prologue in a stub in the cave, ending in an `s_branch` to the kernel's original entry, and `CodeObjectPatcher::redirect_kernel_entry` points the descriptor's `kernel_code_entry_byte_offset` at the stub. The original entry keeps its bytes, so it is an ordinary anchor and a point on it runs after the prologue. The cave becomes `[probe bodies][s_nop padding][entry stub][trampolines]`. Hardware takes the entry address shifted right by 8, so the padding (`padding_for_residue` / `append_nop_padding`, shared with DBT's launch stubs) gives the stub the original entry's 256-byte residue; `.text` grows in place, so the stub is as aligned as the entry. The padding is unreachable, since the probe bodies ahead of it end in their return. DBT's `append_relocated_kernel_text` is not reusable here: it builds a fresh `.text` around a relocated body, and DBI patches in place.
+`Instrumentor::plan_entry_prologue` places the prologue in a stub in the cave, ending in an `s_branch` to the kernel's original entry, and `CodeObjectPatcher::redirect_kernel_entry` points the descriptor's `kernel_code_entry_byte_offset` at the stub. The original entry keeps its bytes, so it is an ordinary anchor and a point on it runs after the prologue. The cave becomes `[probe bodies][s_nop padding][entry stub][trampolines][code-end padding]`. Hardware takes the entry address shifted right by 8, so the padding (`padding_for_residue` / `append_nop_padding`, shared with DBT's launch stubs) gives the stub the original entry's 256-byte residue; `.text` grows in place, so the stub is as aligned as the entry. The padding is unreachable, since the probe bodies ahead of it end in their return. DBT's `append_relocated_kernel_text` is not reusable here: it builds a fresh `.text` around a relocated body, and DBI patches in place.
 
 The prologue is **not idempotent**: a second run would load through the guest kernarg pointer the first run restored. Dispatch is the only way into the stub, so a loop, call, rewritten return, or indirect jump that reaches the original entry runs guest code only. The simulator does not check the entry's alignment, so the 256-byte residue is asserted statically.
 

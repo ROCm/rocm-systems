@@ -1536,12 +1536,13 @@ TEST(InstrumentorPatch, PatchesEightByteAnchorEndToEnd) {
 
   // Reparse and decode out of the grown .text. The cave (tail of .text) for an
   // 8-byte anchor is [s_nop 0][orig word0][orig word1][s_branch return] = 16
-  // bytes, so .text grows from 12 to 28 bytes.
+  // bytes, ending at 28. CDNA4's code-end padding (s_nop 0 to a 64-byte line,
+  // then 1,024 bytes) follows, so .text grows from 12 to 1,088 bytes.
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_FALSE(patched.text_sections().empty());
   const Section *text = patched.text_sections().front();
-  ASSERT_EQ(text->size(), 28u);
+  ASSERT_EQ(text->size(), 1088u);
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
@@ -1787,6 +1788,11 @@ protected:
   uint64_t original_text_size() const { return num_elf_nops_ * sizeof(uint32_t); }
   // Byte size of the appended trampoline cave: 3 words per inline-nop site.
   uint64_t cave_size() const { return num_points_ * 3 * sizeof(uint32_t); }
+  // .text after patching: the cave, then CDNA4's code-end padding (s_nop 0 to a
+  // 64-byte line, then 1,024 bytes).
+  uint64_t patched_text_size() const {
+    return (original_text_size() + cave_size() + 63) / 64 * 64 + 1024;
+  }
 
   // The trampoline cave lives at the tail of .text, immediately after the
   // original bytes. Reads it back as decoded words.
@@ -1810,16 +1816,16 @@ TEST_F(InstrumentorPatchElfShape, TrampolineCaveAppendedToText) {
   Init(2, 1);
   const Section *text = find_section(".text");
   ASSERT_NE(text, nullptr);
-  EXPECT_EQ(text->size(), original_text_size() + cave_size())
-      << ".text must grow by exactly the appended trampoline cave";
+  EXPECT_EQ(text->size(), patched_text_size())
+      << ".text must grow by exactly the appended trampoline cave and its padding";
 }
 
 TEST_F(InstrumentorPatchElfShape, TrampolineCaveAppendedToTextMultiple) {
   Init(100, 50);
   const Section *text = find_section(".text");
   ASSERT_NE(text, nullptr);
-  EXPECT_EQ(text->size(), original_text_size() + cave_size())
-      << ".text must grow by exactly the appended trampoline cave";
+  EXPECT_EQ(text->size(), patched_text_size())
+      << ".text must grow by exactly the appended trampoline cave and its padding";
 }
 
 TEST_F(InstrumentorPatchElfShape, TextRemainsExecutable) {
@@ -5554,7 +5560,7 @@ TEST(InstrumentorKernelBoundary, EntryAndAccessAtTheSameAnchorRunInDispatchOrder
   EXPECT_EQ(target_of(0), result.sites[1].instrumentation_offset);
   EXPECT_EQ(target_of(4), result.sites[2].instrumentation_offset);
   EXPECT_EQ(words.at(result.sites[2].guest_offset / 4), endpgm.value());
-  EXPECT_EQ(result.sites[2].guest_offset / 4 + 1, words.size());
+  EXPECT_EQ(result.sites[2].guest_offset + 4, code_end_offset(words, kArch));
 
   const InstrumentedCodeObjectDebug debug = debug_instrumentor.patch_with_debug_summaries();
   ASSERT_TRUE(debug.errors.empty()) << debug.errors.front();

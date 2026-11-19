@@ -9,8 +9,10 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -389,6 +391,55 @@ TEST(InstructionBuilder, UnsupportedPaddingAndIslandPoolLeaveOutputsUnchanged) {
     EXPECT_EQ(message, "Unimplemented instruction: s_nop for target architecture");
     ASSERT_NO_THROW(EXPECT_FALSE(append_skipped_kernel_stub(text, {}, arch).ok));
     EXPECT_EQ(text, original);
+    message.clear();
+    ASSERT_NO_THROW(EXPECT_TRUE(append_code_end_padding(text, arch, &error).failed()));
+    EXPECT_EQ(text, original);
+    EXPECT_EQ(message, "Unimplemented code-end padding for target architecture");
+  }
+}
+
+// The padding LLVM ends .text with (AMDGPUTargetStreamer::EmitCodeEnd), as the
+// toolchain emits it after a kernel's last instruction: the pad word up to a
+// line, then a fill. 0x128 bytes of gfx1201 code end at 0x300 in a compiled
+// object.
+TEST(InstructionBuilder, CodeEndPaddingMatchesTheCompiler) {
+  constexpr uint32_t kSCodeEnd = 0xbf9f0000u;
+  constexpr uint32_t kSNop0 = 0xbf800000u;
+  struct Case {
+    rj_code_arch_t arch;
+    size_t code_bytes;
+    uint32_t pad_word;
+    size_t padded_bytes;
+  };
+  const Case cases[] = {
+      // GFX11 and later: 128-byte lines, then 3 lines.
+      {ROCJITSU_CODE_ARCH_RDNA4, 0x128, kSCodeEnd, 0x300},
+      {ROCJITSU_CODE_ARCH_RDNA4, 0x100, kSCodeEnd, 0x280},
+      {ROCJITSU_CODE_ARCH_RDNA3, 0x128, kSCodeEnd, 0x300},
+      {ROCJITSU_CODE_ARCH_RDNA3_5, 0x128, kSCodeEnd, 0x300},
+      {ROCJITSU_CODE_ARCH_CDNA5, 0x128, kSCodeEnd, 0x300},
+      // GFX10: 64-byte lines, then 3 lines.
+      {ROCJITSU_CODE_ARCH_RDNA1, 0x128, kSCodeEnd, 0x200},
+      {ROCJITSU_CODE_ARCH_RDNA2, 0x128, kSCodeEnd, 0x200},
+      // gfx90a, gfx94x, gfx950: 64-byte lines, then 16 lines.
+      {ROCJITSU_CODE_ARCH_CDNA2, 0x128, kSNop0, 0x540},
+      {ROCJITSU_CODE_ARCH_CDNA3, 0x128, kSNop0, 0x540},
+      {ROCJITSU_CODE_ARCH_CDNA4, 0x128, kSNop0, 0x540},
+      // gfx908: none.
+      {ROCJITSU_CODE_ARCH_CDNA1, 0x128, 0, 0x128},
+  };
+  for (const Case &c : cases) {
+    SCOPED_TRACE(testing::Message() << "arch " << c.arch << ", code bytes " << c.code_bytes);
+    const std::vector<uint8_t> code(c.code_bytes, 0x11);
+    std::vector<uint8_t> text = code;
+    ASSERT_TRUE(append_code_end_padding(text, c.arch).succeeded());
+    ASSERT_EQ(text.size(), c.padded_bytes);
+    EXPECT_TRUE(std::equal(code.begin(), code.end(), text.begin()));
+    for (size_t offset = c.code_bytes; offset < text.size(); offset += sizeof(uint32_t)) {
+      uint32_t word = 0;
+      std::memcpy(&word, text.data() + offset, sizeof(word));
+      ASSERT_EQ(word, c.pad_word) << "at " << offset;
+    }
   }
 }
 

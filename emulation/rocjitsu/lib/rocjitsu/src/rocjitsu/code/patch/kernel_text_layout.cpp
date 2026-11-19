@@ -7,6 +7,7 @@
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/error_report.h"
 #include "rocjitsu/isa/instruction.h"
+#include "util/bit.h"
 
 #include <algorithm>
 #include <cassert>
@@ -119,6 +120,49 @@ util::Result append_nop_padding(std::vector<uint8_t> &text, uint64_t byte_count,
     std::memcpy(text.data() + old_size + filled, text.data() + old_size, copy_size);
     filled += copy_size;
   }
+  return util::Result::success();
+}
+
+util::Result append_code_end_padding(std::vector<uint8_t> &text, rj_code_arch_t arch,
+                                     const util::DiagnosticEmitter *error) {
+  assert(text.size() % sizeof(uint32_t) == 0 && "code ends on a word boundary");
+  uint64_t line_bytes = 0;
+  uint64_t fill_lines = 0;
+  bool pads_with_code_end = true;
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+    return util::Result::success();
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    line_bytes = 64;
+    fill_lines = 16;
+    pads_with_code_end = false;
+    break;
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    line_bytes = 64;
+    fill_lines = 3;
+    break;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    line_bytes = 128;
+    fill_lines = 3;
+    break;
+  default:
+    return error != nullptr
+               ? error->emit() << "Unimplemented code-end padding for target architecture"
+               : util::Result::failure();
+  }
+  const util::FailureOr<uint32_t> pad_word =
+      pads_with_code_end ? build_s_code_end(arch, error) : build_s_nop(0, arch, error);
+  if (pad_word.failed())
+    return util::Result::failure();
+  const uint64_t end = util::align_up<uint64_t>(text.size(), line_bytes) + fill_lines * line_bytes;
+  const std::vector<uint32_t> words((end - text.size()) / sizeof(uint32_t), pad_word.value());
+  append_words(text, words);
   return util::Result::success();
 }
 
