@@ -391,6 +391,9 @@ SAtcProbeSmem::SAtcProbeSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 0;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::KMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -415,6 +418,9 @@ SAtcProbeBufferSmem::SAtcProbeBufferSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 0;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::KMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 

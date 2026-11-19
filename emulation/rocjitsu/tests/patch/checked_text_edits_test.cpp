@@ -681,19 +681,22 @@ TEST(CheckedTextEdits, ConcreteVariantDecoderIsUsedForSourceAndFinalAnchor) {
   }
 }
 
-TEST(CheckedTextEdits, RejectsDebugBranchesWhoseDestinationsAreUnavailable) {
+TEST(CheckedTextEdits, ChecksDecodedDebugBranchDestinations) {
   constexpr rj_code_arch_t kCdna3 = ROCJITSU_CODE_ARCH_CDNA3;
   const util::FailureOr<uint32_t> endpgm = build_s_endpgm(kCdna3);
   ASSERT_TRUE(endpgm.succeeded());
-  // Gfx942 SOPP encodings for the four conditional-debug branch forms. Their
-  // displacement is one dword, targeting the literal at offset 8 of [4,12).
-  constexpr std::array<uint32_t, 4> kDebugBranches = {0xbf970001u, 0xbf980001u, 0xbf990001u,
-                                                      0xbf9a0001u};
+  // The patch spans [4,12). Its literal at offset 8 is the only interior target.
+  constexpr std::array<uint32_t, 4> kDebugBranches = {0xbf970000u, 0xbf980000u, 0xbf990000u,
+                                                      0xbf9a0000u};
   for (const uint32_t branch : kDebugBranches) {
     SCOPED_TRACE(branch);
-    const std::vector<uint8_t> image =
-        test::make_gfx942_kernel_elf({branch, 0xbe8000ffu, 0x12345678u, endpgm.value()}, 0);
-    expect_reference_result(image, 4, 0, kCdna3);
+    for (const uint32_t displacement : {0u, 1u, 2u}) {
+      SCOPED_TRACE(displacement);
+      const std::vector<uint8_t> image = test::make_gfx942_kernel_elf(
+          {branch | displacement, 0xbe8000ffu, 0x12345678u, endpgm.value()}, 0);
+      expect_reference_result(
+          image, 4, displacement == 1 ? std::optional<uint64_t>(8) : std::nullopt, kCdna3);
+    }
   }
   // A normal branch to the anchor's boundary remains supported.
   const util::FailureOr<uint32_t> branch = build_s_branch(0, kCdna3);
@@ -703,7 +706,7 @@ TEST(CheckedTextEdits, RejectsDebugBranchesWhoseDestinationsAreUnavailable) {
   expect_reference_result(control, 4, std::nullopt, kCdna3);
 }
 
-TEST(CheckedTextEdits, RejectsSubvectorLoopsWhoseDestinationsAreUnavailable) {
+TEST(CheckedTextEdits, ChecksDecodedSubvectorLoopDestinations) {
   for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
     SCOPED_TRACE(arch);
     const uint32_t machine = arch == ROCJITSU_CODE_ARCH_RDNA1 ? EF_AMDGPU_MACH_AMDGCN_GFX1010
@@ -721,13 +724,15 @@ TEST(CheckedTextEdits, RejectsSubvectorLoopsWhoseDestinationsAreUnavailable) {
     ASSERT_TRUE(endpgm.succeeded());
     for (const uint16_t opcode : opcodes) {
       SCOPED_TRACE(opcode);
-      // Both loop forms have label operands but no displacement metadata. At
-      // offset zero, simm16=1 refers to the literal at offset 8 of [4,12).
-      const util::FailureOr<uint32_t> loop = build_sopk_encoding(arch, opcode, 0, 1);
-      ASSERT_TRUE(loop.succeeded());
-      const std::vector<uint8_t> image = test::make_amdgpu_kernel_elf(
-          {loop.value(), move.value(), 0x12345678u, endpgm.value()}, 0, 3, machine);
-      expect_reference_result(image, 4, 0, arch);
+      for (const uint16_t displacement : {0u, 1u, 2u}) {
+        SCOPED_TRACE(displacement);
+        const util::FailureOr<uint32_t> loop = build_sopk_encoding(arch, opcode, 0, displacement);
+        ASSERT_TRUE(loop.succeeded());
+        const std::vector<uint8_t> image = test::make_amdgpu_kernel_elf(
+            {loop.value(), move.value(), 0x12345678u, endpgm.value()}, 0, 3, machine);
+        expect_reference_result(
+            image, 4, displacement == 1 ? std::optional<uint64_t>(8) : std::nullopt, arch);
+      }
     }
     // Ordinary branches with known destinations at either boundary still pass.
     for (const int16_t displacement : {0, 2}) {

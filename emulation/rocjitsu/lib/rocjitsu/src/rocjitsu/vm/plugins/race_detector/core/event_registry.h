@@ -68,6 +68,7 @@ class EventRegistry {
     // Younger counter-only units in this FIFO, before its next tracked event.
     std::array<uint8_t, amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS> followingUnits{};
     ConditionalVgprWrite feedback{};
+    bool hasLdsSourceReads = false;
   };
 
 public:
@@ -369,6 +370,8 @@ public:
     event.ldsIntervals = std::move(intervals);
   }
 
+  void markLdsSourceReads(EventId id) { get(id).hasLdsSourceReads = true; }
+
   // -- Test helpers --
 
   /// Number of events currently stored (live + not-yet-trimmed dead).
@@ -400,7 +403,7 @@ private:
     if (e.status == EventStatus::RETIRED)
       return true;
     return e.status == EventStatus::WAVE_COMPLETE &&
-           (isWaveLocal(e.type) || e.ldsIntervals.empty());
+           (isWaveLocal(e.type) || (e.ldsIntervals.empty() && !e.hasLdsSourceReads));
   }
 
   void tryTrimEvents() {

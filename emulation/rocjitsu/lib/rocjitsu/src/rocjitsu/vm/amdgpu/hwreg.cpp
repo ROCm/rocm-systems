@@ -361,7 +361,9 @@ constexpr HwregDescriptor RDNA4_HWREGS[] = {
     {19, "WAVE_TRAP_CTRL", HwregState::TrapCtrlGfx12, HwregWritePolicy::Privileged},
     {20, "WAVE_SCRATCH_BASE_LO", HwregState::Unsupported, HwregWritePolicy::Privileged},
     {21, "WAVE_SCRATCH_BASE_HI", HwregState::Unsupported, HwregWritePolicy::Privileged},
-    {23, "WAVE_HW_ID1", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
+    // The RDNA4 manual omits SE_ID and DP_RATE, but gc_12_0_0 SQ_WAVE_HW_ID1
+    // keeps GFX11's layout and gfx1201 reports both there.
+    {23, "WAVE_HW_ID1", HwregState::HwId1Gfx11, HwregWritePolicy::ReadOnly},
     {24, "WAVE_HW_ID2", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {28, "IB_STS2", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {29, "SHADER_CYCLES_LO", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
@@ -468,6 +470,34 @@ bool field_aliases_scc(const Wavefront &wf, HwregState state, const DecodedHwreg
          field_intersects(decoded, 0, 1);
 }
 
+// RocJITsu issues all of a CU's waves from one slot array, so the slot is the
+// wave's only physical identity. Interleave the slots over the CU's two SIMDs:
+// slot s is wave s / 2 of SIMD s % 2. On an idle CU this matches the placement
+// gfx1100 and gfx1201 report for a CU-mode workgroup (wave w on SIMD w % 2,
+// WAVE_ID w / 2). Slot identity survives reuse and checkpoint restoration.
+// SIMD_ID[0] is the CU within the WGP and SIMD_ID[1] the SIMD within that CU.
+// DP_RATE 1 is one FP64 lane per clock per SIMD, as gfx1100 and gfx1201 report.
+uint32_t rdna3_4_hw_id1_raw(const Wavefront &wf) {
+  const auto &cu = wf.cu();
+  const uint32_t cu_index = cu.shader_array_cu_id();
+  return field_value(wf.wf_id() / 2, 0, 5) |
+         field_value((cu_index & 1u) | (wf.wf_id() % 2) << 1, 8, 2) |
+         field_value(cu_index / 2, 10, 4) | field_value(cu.shader_array_id(), 16, 1) |
+         field_value(cu.shader_engine_id(), 18, 3) | field_value(1, 29, 3);
+}
+
+// Fields past WAVE_ID need a known shader-array width with whole WGPs, and
+// every location must fit its field rather than alias another unit.
+bool rdna3_4_hw_id1_location_fits(const Wavefront &wf, const DecodedHwreg &decoded) {
+  const auto &cu = wf.cu();
+  const uint32_t width = cu.cus_per_shader_array();
+  if (field_intersects(decoded, 8, 9) && (!width || width % 2 || width > 32))
+    return false;
+  if (field_intersects(decoded, 16, 1) && cu.shader_array_id() > 1)
+    return false;
+  return !field_intersects(decoded, 18, 3) || cu.shader_engine_id() < 8;
+}
+
 HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_value) {
   switch (state) {
   case HwregState::Mode:
@@ -498,15 +528,9 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
   case HwregState::IbDbgGfx11:
     raw_value = field_value(wf.wait_counters().empty(), 24, 1);
     return HwregAccessResult::Success;
-  case HwregState::HwId1Gfx11: {
-    const auto &cu = wf.cu();
-    const uint32_t index = cu.shader_array_cu_id();
-    raw_value = field_value(wf.wf_id() / 2, 0, 5) |
-                field_value(2 * (index & 1) + wf.wf_id() % 2, 8, 2) |
-                field_value(index / 2, 10, 4) | field_value(cu.shader_array_id(), 16, 1) |
-                field_value(cu.shader_engine_id(), 18, 3);
+  case HwregState::HwId1Gfx11:
+    raw_value = rdna3_4_hw_id1_raw(wf);
     return HwregAccessResult::Success;
-  }
   case HwregState::IbStsGfx11: {
     const auto &counters = wf.wait_counters();
     raw_value = field_value(counters.expcnt, 0, 3) | field_value(counters.lgkmcnt, 4, 6) |
@@ -556,8 +580,8 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
     constexpr uint32_t live_fields = (1u << 6) | (1u << 8) | (15u << 9) | (1u << 16);
     raw_value =
         (wf.status_raw() & ~live_fields) | (uint32_t{wf.cu().trap_addresses().first != 0} << 6) |
-        (uint32_t{wf.exec() == 0} << 9) | (uint32_t{wf.vcc_mask() == 0} << 10) |
-        (uint32_t{wf.cu().in_multiwave_workgroup()} << 11) |
+        (uint32_t{wf.cu().shader_export_ready()} << 8) | (uint32_t{wf.exec() == 0} << 9) |
+        (uint32_t{wf.vcc_mask() == 0} << 10) | (uint32_t{wf.cu().in_multiwave_workgroup()} << 11) |
         (uint32_t{wf.state() == WfState::BARRIER} << 12) | (uint32_t{!wf.is_halted()} << 16);
     return HwregAccessResult::Success;
   }
@@ -941,10 +965,11 @@ HwregAccessResult read_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t &valu
     return HwregAccessResult::Unsupported;
   }
 
-  // DP_RATE is a physical implementation parameter, independent of CU placement.
+  // DP_RATE is a physical implementation parameter. No gfx11.5 part has been
+  // measured, so do not assume it matches gfx1100.
   if (desc->state == HwregState::HwId1Gfx11 &&
-      (field_intersects(decoded, 29, 3) ||
-       (field_intersects(decoded, 8, 13) && !wf.cu().cus_per_shader_array()))) {
+      ((field_intersects(decoded, 29, 3) && wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5) ||
+       !rdna3_4_hw_id1_location_fits(wf, decoded))) {
     value = 0;
     return HwregAccessResult::Unsupported;
   }

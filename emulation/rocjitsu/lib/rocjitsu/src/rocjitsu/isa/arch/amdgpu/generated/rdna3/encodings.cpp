@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_address.h"
 #include "util/except.h"
 #include <cstring>
 #include <string>
@@ -1598,24 +1599,14 @@ bool Mimg::omits_gfx11_mimg_dim_dmask() const { return (inst_.op >= 25 && inst_.
 
 uint32_t Mimg::gfx11_mimg_nsa_group_width(uint32_t index, uint32_t vaddr_words) const {
   switch (inst_.op) {
-  case 25:
-    if (inst_.a16) {
-      static constexpr uint8_t widths[] = {1, 1, 3, 3};
-      return index < 4 ? widths[index] : 0;
-    }
-    {
-      static constexpr uint8_t widths[] = {1, 1, 3, 3, 3};
-      return index < 5 ? widths[index] : 0;
-    }
-  case 26:
-    if (inst_.a16) {
-      static constexpr uint8_t widths[] = {2, 1, 3, 3};
-      return index < 4 ? widths[index] : 0;
-    }
-    {
-      static constexpr uint8_t widths[] = {2, 1, 3, 3, 3};
-      return index < 5 ? widths[index] : 0;
-    }
+  case 25: {
+    const auto widths = amdgpu::gfx11_bvh_group_widths(false, inst_.a16);
+    return index < widths.size() ? widths[index] : 0;
+  }
+  case 26: {
+    const auto widths = amdgpu::gfx11_bvh_group_widths(true, inst_.a16);
+    return index < widths.size() ? widths[index] : 0;
+  }
   default:
     if (index < 4)
       return 1;
