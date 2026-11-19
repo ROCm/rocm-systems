@@ -1031,14 +1031,12 @@ def show_all(
                 )
 
                 if is_mem_chart and len(runs) == 1:
-                    # Metric tables are indexed by Metric_ID
-                    has_cols = (
-                        processed_df.index.name == "Metric_ID"
-                        and "Value" in processed_df.columns
-                    )
-                    if has_cols:
-                        table_mem = dict(zip(processed_df.index, processed_df["Value"]))
-                        mem_chart_data.update(table_mem)
+                    # The chart rounds each value once, for display, so it reads the
+                    # evaluated table rather than the one rounded to --decimal.
+                    # Metric tables are indexed by Metric_ID.
+                    table_df = first_run.dfs[table_config["id"]]
+                    if table_df.index.name == "Metric_ID" and "Value" in table_df:
+                        mem_chart_data.update(zip(table_df.index, table_df["Value"]))
                     # Skip individual table output; merged chart emitted below
                     continue
 
