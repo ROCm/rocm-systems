@@ -1667,6 +1667,9 @@ std::optional<uint32_t> completion_order_kind(const waitcheck_detail::Classified
                                               rj_code_arch_t arch) {
   using namespace waitcheck_detail;
   const auto model = waitcnt_model(arch).value();
+  // GLOBAL_INV occupies a LOADcnt slot in order with VMEM on gfx1250.
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5 && event.kind == WaitEventKind::GlobalInv)
+    return uint32_t{1} << static_cast<unsigned>(WaitEventKind::VmemNoSamplerLoad);
   const bool legacy_flat =
       model == WaitcntModel::LegacyNoVscnt &&
       (event.kind == WaitEventKind::FlatLoad || event.kind == WaitEventKind::FlatStore);

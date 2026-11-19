@@ -2569,7 +2569,7 @@ TEST(MemoryWaitExecutionTest, MessageResultsCheckM0AndOnlyConsumedExecWords) {
   }
 }
 
-TEST(MemoryWaitExecutionTest, CounterOnlyCacheOperationDoesNotProveOlderLoadComplete) {
+TEST(MemoryWaitExecutionTest, CounterOnlyCacheOperationSharesLoadCompletionOrder) {
   using namespace rocjitsu::amdhsa;
   for (bool zero_exec : {false, true}) {
     for (unsigned threshold : {0u, 1u, 2u}) {
@@ -2602,9 +2602,8 @@ TEST(MemoryWaitExecutionTest, CounterOnlyCacheOperationDoesNotProveOlderLoadComp
       step_until_halted(*sim.engine, *sim.cu());
       ASSERT_EQ(sim.snapshot->snapshots().size(), 1u);
       EXPECT_EQ(sim.snapshot->snapshots().front().vgpr(3, 0), 0x12345678u);
-      // Invalidation contributes to LOADcnt even with zero EXEC, but does not
-      // share the load's completion order. Only a zero wait proves it ready.
-      EXPECT_EQ(sim.cu()->memory_wait_diagnostic_count(), threshold != 0 ? 1u : 0u);
+      // Invalidation takes an ordered LOADcnt slot even with zero EXEC.
+      EXPECT_EQ(sim.cu()->memory_wait_diagnostic_count(), threshold > 1 ? 1u : 0u);
     }
   }
 }

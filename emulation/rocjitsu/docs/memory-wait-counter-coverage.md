@@ -39,6 +39,10 @@ positions too. An instruction contributing to two counters contributes to both
 independently. Counter occupancy and the readiness of individual returned lanes are
 separate: each register dependency follows the pipeline that writes those lanes.
 
+On gfx1250, `global_inv` occupies an ordered LOADcnt position alongside ordinary
+loads, even with EXEC zero. A load followed by `global_inv` and `s_wait_loadcnt 1`
+therefore has a ready result.
+
 Scalar memory is unordered: nonzero waits do not prove individual results ready. This
 includes cache operations; their bank-level counter increments are not simulated. Routed
 SMEM transfers use the decoded `MemoryCounterObligation::counter_increment()` for
