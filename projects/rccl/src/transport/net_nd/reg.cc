@@ -10,6 +10,17 @@
 #include "alloc.h"
 #include <unordered_map>
 
+#if defined(__HIP_PLATFORM_AMD__)
+// Some Windows HIP SDKs declare this optional API without exporting it.
+// Resolve it lazily so capability checks can choose host-staged transfers.
+static auto ncclNdHipPointerSetAttribute() -> decltype(&hipPointerSetAttribute) {
+  static auto function = reinterpret_cast<decltype(&hipPointerSetAttribute)>(
+      GetProcAddress(GetModuleHandleA("amdhip64_7.dll"), "hipPointerSetAttribute"));
+  return function;
+}
+#define cuPointerSetAttribute (ncclNdHipPointerSetAttribute())
+#endif
+
 // Page size for alignment
 static size_t ncclNdPageSize = 0;
 static std::once_flag ncclNdPageSizeFlag;
@@ -131,7 +142,11 @@ ncclResult_t ncclNdGetGpuDirectSupport(struct ncclNdDev* dev, int* supported, in
     return ncclSuccess;
   }
 
+#if defined(__HIP_PLATFORM_AMD__)
+  if (rocmLibraryInit() != ncclSuccess) return ncclSuccess;
+#else
   if (ncclCudaLibraryInit() != ncclSuccess) return ncclSuccess;
+#endif
 
   std::lock_guard<std::mutex> lock(dev->mutex);
   if (dev->gpuCaps.gpuDirectSupported[cudaDev] != -1) {
@@ -145,9 +160,15 @@ ncclResult_t ncclNdGetGpuDirectSupport(struct ncclNdDev* dev, int* supported, in
   int flushOptions = 0;
   int writeOrdering = cudaGPUDirectRDMAWritesOrderingNone;
   bool cudaAttrsOk =
+#if defined(__HIP_PLATFORM_AMD__)
+    hipDeviceGetAttribute(&cudaGdr, hipDeviceAttributeGPUDirectRDMASupported, cudaDev) == hipSuccess &&
+    hipDeviceGetAttribute(&flushOptions, hipDeviceAttributeGPUDirectRDMAFlushWritesOptions, cudaDev) == hipSuccess &&
+    hipDeviceGetAttribute(&writeOrdering, hipDeviceAttributeGPUDirectRDMAWritesOrdering, cudaDev) == hipSuccess;
+#else
     cudaDeviceGetAttribute(&cudaGdr, cudaDevAttrGPUDirectRDMASupported, cudaDev) == cudaSuccess &&
     cudaDeviceGetAttribute(&flushOptions, cudaDevAttrGPUDirectRDMAFlushWritesOptions, cudaDev) == cudaSuccess &&
     cudaDeviceGetAttribute(&writeOrdering, cudaDevAttrGPUDirectRDMAWritesOrdering, cudaDev) == cudaSuccess;
+#endif
   if (!cudaAttrsOk) {
     (void)cudaGetLastError();
     INFO(NCCL_NET, "NET/ND : Device [%d] GPU %d GPUDirect RDMA capability query failed; will retry", dev->device,

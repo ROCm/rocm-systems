@@ -27,9 +27,10 @@
 #include "nccl_net.h"
 #include "register_inline.h"
 #include <stdio.h>
-#include <glob.h>
+#if defined(NCCL_OS_LINUX)
 #include <dirent.h>
 #include <linux/limits.h>
+#endif
 #include <mutex>
 
 static_assert(sizeof(ncclNetHandle_t) <= CONNECT_SIZE, "NET Connect info is too large");
@@ -227,6 +228,7 @@ static int netBuffSize(struct ncclProxyState* proxyState, int isP2p, int p) {
 static rcclIBNicInfo rcclPrimaryNicInfo = {rcclIBNicTypeUnknown, 0, 0};
 
 RCCL_PARAM(AinicRoce, "AINIC_ROCE", -1);
+#if defined(NCCL_OS_LINUX)
 static const char* sysfsIBPath = "/sys/class/infiniband";
 
 static int readIBNicRate(const char* devName) {
@@ -352,6 +354,13 @@ static void rcclDetectIBNics() {
   rcclPrimaryNicInfo.rate = _NicsRate[primaryNicsType];
   rcclPrimaryNicInfo.count = maxCount;
 }
+
+#else
+static void rcclDetectIBNics() {
+  // Win32 adapter discovery belongs to the NetworkDirect transport.
+  rcclPrimaryNicInfo.type = rcclIBNicTypeDefault;
+}
+#endif
 
 static std::once_flag rcclDetectIBNicsOnce;
 
@@ -1103,8 +1112,12 @@ static ncclResult_t sharedNetBuffersDestroy(struct ncclProxyState* proxyState, i
 
 static ncclResult_t proxySharedInit(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState,
                                     int nChannels) {
+#if defined(NCCL_OS_LINUX)
   static int is_wsl2 = -1;
   if (is_wsl2 == -1) is_wsl2 = (access("/dev/dxg", F_OK) == -1) ? 0 : 1;
+#else
+  const int is_wsl2 = 0;
+#endif
   NCCLCHECK(sharedNetBuffersInit(proxyState, is_wsl2 == 0 ? 1 : 0, connection->tpLocalRank, 0, connection->sameProcess,
                                  nChannels, NULL, NULL, NULL, NULL));
   return ncclSuccess;
@@ -1218,7 +1231,9 @@ static ncclResult_t recvProxySetup(struct ncclProxyConnection* connection, struc
 
   if (respSize != sizeof(ncclNetHandle_t)) return ncclInternalError;
   NCCLCHECK(proxyState->ncclNet->listen(proxyState->netContext, req->netDev, respBuff, &resources->netListenComm));
+#if defined(NCCL_OS_LINUX)
   if (proxyState->ncclNet == &ncclNetIb) ncclIbSetListenGdrFlushFlag(resources->netListenComm, req->gdrFlushFlag);
+#endif
   *done = 1;
 
   return ncclSuccess;
@@ -1262,6 +1277,7 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
                                    &resources->netDeviceHandle));
 
   // Only call rcclNetP2pPolicy for ncclNetIb
+#if defined(NCCL_OS_LINUX)
   if (proxyState->ncclNet == &ncclNetIb) {
     NCCLCHECK(rcclNetP2pPolicy(req->handle, resources->isP2p));
   }
@@ -1270,6 +1286,7 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
   if (proxyState->ncclNet == &netIbCast) {
     NCCLCHECK(rcclCastNetP2pPolicy(req->handle, resources->isP2p));
   }
+#endif
 #endif
 
   if (resources->shared) {
@@ -1489,7 +1506,7 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
         }
       } else // FALL-THROUGH to the HSA DMA-BUF export path
 #endif
-#if defined(__HIP_PLATFORM_AMD__)
+#if defined(__HIP_PLATFORM_AMD__) && defined(NCCL_OS_LINUX)
         if (type == NCCL_PTR_CUDA && resources->useDmaBuf && proxyState->dmaBufSupport &&
             pfn_hsa_amd_portable_export_dmabuf) {
         int dmabuf_fd;
@@ -1744,7 +1761,7 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
         }
       } else // FALL-THROUGH to the HSA DMA-BUF export path
 #endif
-#if defined(__HIP_PLATFORM_AMD__)
+#if defined(__HIP_PLATFORM_AMD__) && defined(NCCL_OS_LINUX)
         if (type == NCCL_PTR_CUDA && resources->useDmaBuf && proxyState->dmaBufSupport &&
             pfn_hsa_amd_portable_export_dmabuf) {
         int dmabuf_fd;
@@ -1776,7 +1793,7 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
 
   map->gdrFlushFlag = NULL;
   map->gdrFlushSeq = NULL;
-#if defined(__HIP_PLATFORM_AMD__)
+#if defined(__HIP_PLATFORM_AMD__) && defined(NCCL_OS_LINUX)
   if (proxyState->ncclNet == &ncclNetIb && map->sameProcess && resources->useGdr && resources->needFlush &&
       resources->gdcFlush == NULL && ncclIbGetGpuFlushFlag(resources->netRecvComm) != NULL) {
 #if defined(HIP_UNCACHED_MEMORY)
@@ -2250,7 +2267,9 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
                                 (subCount == 1);
         if (!checkedNetAttr++) setXferNetAttrs(proxyState, args, 0);
         if (ignoreCompletion) *requestPtr = (void*)NCCL_NET_OPTIONAL_RECV_COMPLETION;
+#if defined(NCCL_OS_LINUX)
         if (resources->gdrFlushFlag) ncclIbSetGpuFlushFlagHint(resources->netRecvComm, p == NCCL_PROTO_SIMPLE);
+#endif
         NCCLCHECK(proxyState->ncclNet->irecv(resources->netRecvComm, subCount, ptrs, sizes, tags, mhandles, phandles,
                                              requestPtr));
         if (*requestPtr) {
@@ -2322,6 +2341,7 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
                 INFO(NCCL_INIT, "%s: flushed HDP %p", __func__, resources->curr_hdp_reg);
               }
             }
+#if defined(NCCL_OS_LINUX)
             if (gpuFlagWait) {
               uint64_t flagSeq = ncclIbGetGpuFlushFlagSeq(resources->netRecvComm);
               for (int i = 0; i < subGroup->groupSize; i++) {
@@ -2337,7 +2357,9 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
                 once = false;
                 INFO(NCCL_INIT, "%s: GDR flush deferred to GPU flag wait", __func__);
               }
-            } else if (resources->gdcFlush) {
+            } else
+#endif
+            if (resources->gdcFlush) {
 #if defined(__x86_64__)
               // Force a PCI-E read from GPU memory
               static bool once = true;

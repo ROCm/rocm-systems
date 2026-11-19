@@ -83,9 +83,10 @@ constexpr int rcclShmemScratchWarpSize(int cudaArch = NCCL_CUDA_ARCH, int WarpSi
 
 /* Copy of ncclShmemDynamicSize */
 constexpr int rcclShmemDynamicSize(int cudaArch = NCCL_CUDA_ARCH, int WarpSize = 32) {
-#ifdef RCCL_DEVICE_LINKER
-  // In device-linker builds the scratch/ncclShmem are static __shared__ (see device/common.h);
-  // requesting it as dynamic shmem too would double-count and overflow the per-block LDS budget.
+#if defined(RCCL_DEVICE_LINKER) || defined(__HIP_PLATFORM_AMD__)
+  // HIP has no __CUDA_ARCH__, so common.cu uses the static shared-memory
+  // definitions even without the custom device linker. Requesting dynamic
+  // scratch as well would double-count LDS and can exceed a wave32 GPU's budget.
   (void)cudaArch;
   (void)WarpSize;
   return 0;
@@ -544,11 +545,11 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
       if (directReduceScatterLimit >= 0) {
         // set threshold to 8MiB hard limit
         if (comm->nNodes == 8 || comm->nNodes == 16) {
-          directReduceScatterLimit = std::min(directReduceScatterLimit, (int64_t)8388608);
+          directReduceScatterLimit = std::min({directReduceScatterLimit, (int64_t)8388608});
         } else if (comm->nNodes == 4) {
-          directReduceScatterLimit = std::min(directReduceScatterLimit, (int64_t)4194304);
+          directReduceScatterLimit = std::min({directReduceScatterLimit, (int64_t)4194304});
         } else if (comm->nNodes == 2) {
-          directReduceScatterLimit = std::min(directReduceScatterLimit, (int64_t)2097152);
+          directReduceScatterLimit = std::min({directReduceScatterLimit, (int64_t)2097152});
         }
         devWork.directReduceScatterLimitBytes = (uint32_t)directReduceScatterLimit;
       } else {
@@ -1452,7 +1453,7 @@ static int computeP2pChannels(ssize_t bytes, int nChannelsMin, int nChannelsMax,
 // using it directly.
 static int computeP2pChunkSize(int stepSize, int protocol, ssize_t bytes, bool network, bool copyEngine,
                                ssize_t paramChunkSize) {
-  if (paramChunkSize != 0) return copyEngine ? (int)std::min<ssize_t>(paramChunkSize, stepSize) : (int)paramChunkSize;
+  if (paramChunkSize != 0) return copyEngine ? (int)std::min<ssize_t>({paramChunkSize, stepSize}) : (int)paramChunkSize;
   int chunkSize = stepSize;
   if (network) {
     if (protocol == NCCL_PROTO_SIMPLE && bytes < stepSize) chunkSize /= 4;
@@ -1642,7 +1643,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
       ssize_t llEligibleMax = (ssize_t)p2pChMax[dir] * p2pLlThreshold;
       if (comm->nNodes <= 1 && comm->isAllNvlink && (comm->cudaArch == 940 || comm->cudaArch == 950) &&
           !userSetP2pLLThreshold) {
-        llEligibleMax = std::max<ssize_t>(llEligibleMax, std::min<ssize_t>(comm->p2pChunkSize / 8, 65536));
+        llEligibleMax = std::max<ssize_t>(llEligibleMax, std::min<ssize_t>({comm->p2pChunkSize / 8, 65536}));
       }
       protocol[dir] = hasLL[dir] && bytes[dir] <= (ssize_t)nChannels[dir] * p2pLlThreshold ? NCCL_PROTO_LL
                                                                                            : NCCL_PROTO_SIMPLE;
@@ -2073,7 +2074,7 @@ static ncclResult_t waitWorkFifoAvailable(struct ncclComm* comm, uint32_t desire
       NCCLCHECK(ncclCommPollEventCallbacks(comm, /*waitSome=*/true));
       hasRoom = (desiredProduced - comm->workFifoConsumed) <= comm->workFifoBytes;
       if (hasRoom) break;
-      sched_yield();
+      std::this_thread::yield();
 
       /* Warn if we get stuck waiting for workFifo. */
       count++;

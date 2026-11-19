@@ -3550,12 +3550,16 @@ ncclResult_t rcclCommSetP2pShiftSize(struct ncclComm* comm) {
 }
 
 int getFirmwareVersion() {
+#if defined(NCCL_OS_WINDOWS)
+  return -1; // Firmware telemetry is not provided by the Windows HIP SDK.
+#else
   uint64_t fw_version = 0;
   ncclResult_t res = amd_smi_getFirmwareVersion(0, &fw_version);
   if (res != ncclSuccess) {
     return -1;
   }
   return fw_version;
+#endif
 }
 
 bool validHsaScratchEnvSetting(const char* hsaScratchEnv, int hipRuntimeVersion, int firmwareVersion,

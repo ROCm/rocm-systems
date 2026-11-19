@@ -1001,6 +1001,7 @@ ncclResult_t ncclTopoComputePaths(struct ncclTopoSystem* system, struct ncclComm
 
   // Special handling of gfx94x and gfx950
 
+#if defined(NCCL_OS_LINUX) || defined(TOPO_EXPL)
 #if !defined(TOPO_EXPL)
   char strValue[1024];
   NCCLCHECK(ncclOsTopoGetStrFromSys("/sys/devices/virtual/dmi/id", "bios_version", strValue, sizeof(strValue)));
@@ -1018,6 +1019,7 @@ ncclResult_t ncclTopoComputePaths(struct ncclTopoSystem* system, struct ncclComm
     }
 #if !defined(TOPO_EXPL)
   }
+#endif
 #endif
 
   // Update paths for NICs (no GPU Direct, PXN, ...)
