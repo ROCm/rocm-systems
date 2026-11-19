@@ -8,7 +8,12 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <array>
+#include <cstddef>
 #include <memory>
+#include <optional>
+#include <vector>
 
 using namespace rocprofsys::pmc::collectors::gpu_perf_counter;
 using ::testing::_;
@@ -397,6 +402,173 @@ TEST_F(SdkPmcDeviceTest, SampleWithZeroRecords)
     auto const            result = dev.sample_metrics(enabled, 1000000);
 
     EXPECT_TRUE(result.empty());
+}
+
+namespace
+{
+[[nodiscard]] std::optional<double>
+find_value(const metrics& result, counter_id_t counter_id)
+{
+    auto const itr = std::ranges::find(result, counter_id, &counter_value::counter_id);
+    if(itr == result.end())
+    {
+        return std::nullopt;
+    }
+    return itr->value;
+}
+
+// The SDK device counting service returns raw counters as totals since start_context.
+// This feeds one cumulative total per sample and identifies each record by its own id.
+void
+expect_cumulative_samples(MockBackendImpl& mock_impl,
+                          std::vector<std::vector<MockBackend::counter_record_t>> samples)
+{
+    EXPECT_CALL(mock_impl, start_context(_)).WillOnce(Return());
+
+    auto sample_index = std::make_shared<size_t>(0);
+    EXPECT_CALL(mock_impl, sample_device_counting_service(_, _, _, _, _))
+        .Times(static_cast<int>(samples.size()))
+        .WillRepeatedly([samples = std::move(samples), sample_index](
+                            MockBackend::context_id_t, MockBackend::user_data_t,
+                            MockBackend::counter_flag_t,
+                            MockBackend::counter_record_t* out, size_t* count) {
+            const auto& records = samples.at((*sample_index)++);
+            std::ranges::copy(records, out);
+            *count = records.size();
+            return MockBackend::status_success;
+        });
+
+    EXPECT_CALL(mock_impl, query_record_counter_id(_, _))
+        .WillRepeatedly(
+            [](MockBackend::counter_record_t record, MockBackend::counter_id_t* out) {
+                out->handle = record.id;
+                return MockBackend::status_success;
+            });
+}
+}  // namespace
+
+// A raw hardware counter is cumulative in the SDK; each sample must be the count
+// accumulated during that sample interval.
+TEST_F(SdkPmcDeviceTest, RawCounterSampleIsIntervalDelta)
+{
+    constexpr counter_id_t                 k_waves_id         = 10;
+    constexpr std::array<double, 3>        k_waves_cumulative = { 100.0, 250.0, 450.0 };
+    constexpr std::array<double, 3>        k_waves_interval   = { 100.0, 150.0, 200.0 };
+    constexpr std::array<std::uint64_t, 3> k_timestamps       = { 1000, 2000, 3000 };
+
+    device<MockBackend> dev(
+        mock_backend, test_context, test_agent, test_profile_config,
+        { counter_metadata{ .counter_id = k_waves_id, .name = "SQ_WAVES" } });
+
+    auto samples = std::vector<std::vector<MockBackend::counter_record_t>>{};
+    for(const double total : k_waves_cumulative)
+    {
+        samples.push_back({ { .id = k_waves_id, .counter_value = total } });
+    }
+    expect_cumulative_samples(*m_mock_impl, std::move(samples));
+
+    const enabled_metrics enabled{ {} };
+    for(size_t i = 0; i < k_waves_interval.size(); ++i)
+    {
+        auto const value =
+            find_value(dev.sample_metrics(enabled, k_timestamps.at(i)), k_waves_id);
+        ASSERT_TRUE(value.has_value()) << "sample " << i;
+        EXPECT_DOUBLE_EQ(*value, k_waves_interval.at(i)) << "sample " << i;
+    }
+}
+
+// SIMD_NUM is a derived counter whose expression is the agent constant simd_count. It
+// does not accumulate, so every sample must report its value.
+TEST_F(SdkPmcDeviceTest, ConstantDerivedCounterSampleIsItsValue)
+{
+    constexpr counter_id_t                 k_simd_num_id   = 30;
+    constexpr counter_id_t                 k_simd_count_id = 31;
+    constexpr double                       k_simd_num      = 4.0;
+    constexpr std::array<std::uint64_t, 3> k_timestamps    = { 1000, 2000, 3000 };
+
+    device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
+                            { counter_metadata{ .counter_id = k_simd_num_id,
+                                                .name       = "SIMD_NUM",
+                                                .expression = "simd_count",
+                                                .is_derived = true },
+                              counter_metadata{ .counter_id  = k_simd_count_id,
+                                                .name        = "simd_count",
+                                                .is_constant = true } });
+
+    auto samples = std::vector<std::vector<MockBackend::counter_record_t>>(
+        k_timestamps.size(), { { .id = k_simd_num_id, .counter_value = k_simd_num },
+                               { .id = k_simd_count_id, .counter_value = k_simd_num } });
+    expect_cumulative_samples(*m_mock_impl, std::move(samples));
+
+    const enabled_metrics enabled{ {} };
+    for(size_t i = 0; i < k_timestamps.size(); ++i)
+    {
+        auto const value =
+            find_value(dev.sample_metrics(enabled, k_timestamps.at(i)), k_simd_num_id);
+        ASSERT_TRUE(value.has_value()) << "sample " << i;
+        EXPECT_DOUBLE_EQ(*value, k_simd_num) << "sample " << i;
+    }
+}
+
+// Reproduces ISS-116 / the MfmaUtil field report. The SDK evaluates a derived counter on
+// totals since start_context, so under a steady 87 % MFMA load its MfmaUtil climbs
+// 43.5 -> 65.25 -> 72.5. Subtracting consecutive samples gives 43.5, 21.75, 7.25.
+// A sample must be the derived expression evaluated on the interval deltas of its
+// inputs, which is what per-kernel collection reports for the same load.
+TEST_F(SdkPmcDeviceTest, DerivedRatioCounterSampleIsEvaluatedOnIntervalDeltas)
+{
+    constexpr counter_id_t k_busy_id       = 1;
+    constexpr counter_id_t k_active_id     = 2;
+    constexpr counter_id_t k_simd_num_id   = 3;
+    constexpr counter_id_t k_simd_count_id = 4;
+    constexpr counter_id_t k_mfma_util_id  = 50;
+    constexpr double       k_simd_num      = 4.0;
+    constexpr double       k_percent       = 100.0;
+
+    constexpr std::array<double, 3> k_busy_cumulative    = { 1740.0, 5220.0, 8700.0 };
+    constexpr std::array<double, 3> k_active_cumulative  = { 1000.0, 2000.0, 3000.0 };
+    constexpr std::array<double, 3> k_mfma_util_interval = { 43.5, 87.0, 87.0 };
+    constexpr std::array<std::uint64_t, 3> k_timestamps  = { 1000, 2000, 3000 };
+
+    device<MockBackend> dev(
+        mock_backend, test_context, test_agent, test_profile_config,
+        { counter_metadata{ .counter_id = k_mfma_util_id,
+                            .name       = "MfmaUtil",
+                            .expression = "reduce(SQ_VALU_MFMA_BUSY_CYCLES,sum)/"
+                                          "(reduce(GRBM_GUI_ACTIVE,max)*SIMD_NUM)*100",
+                            .is_derived = true },
+          counter_metadata{ .counter_id = k_busy_id, .name = "SQ_VALU_MFMA_BUSY_CYCLES" },
+          counter_metadata{ .counter_id = k_active_id, .name = "GRBM_GUI_ACTIVE" },
+          counter_metadata{ .counter_id = k_simd_num_id,
+                            .name       = "SIMD_NUM",
+                            .expression = "simd_count",
+                            .is_derived = true },
+          counter_metadata{ .counter_id  = k_simd_count_id,
+                            .name        = "simd_count",
+                            .is_constant = true } });
+
+    auto samples = std::vector<std::vector<MockBackend::counter_record_t>>{};
+    for(size_t i = 0; i < k_timestamps.size(); ++i)
+    {
+        const double busy          = k_busy_cumulative.at(i);
+        const double active        = k_active_cumulative.at(i);
+        const double sdk_mfma_util = k_percent * busy / (active * k_simd_num);
+        samples.push_back({ { .id = k_busy_id, .counter_value = busy },
+                            { .id = k_active_id, .counter_value = active },
+                            { .id = k_simd_num_id, .counter_value = k_simd_num },
+                            { .id = k_simd_count_id, .counter_value = k_simd_num },
+                            { .id = k_mfma_util_id, .counter_value = sdk_mfma_util } });
+    }
+    expect_cumulative_samples(*m_mock_impl, std::move(samples));
+
+    const enabled_metrics enabled{ {} };
+    for(size_t i = 0; i < k_timestamps.size(); ++i)
+    {
+        auto const value =
+            find_value(dev.sample_metrics(enabled, k_timestamps.at(i)), k_mfma_util_id);
+        ASSERT_TRUE(value.has_value()) << "sample " << i;
+        EXPECT_DOUBLE_EQ(*value, k_mfma_util_interval.at(i)) << "sample " << i;
+    }
 }
 
 }  // namespace rocprofsys::pmc::collectors::gpu_perf_counter::testing
