@@ -1113,12 +1113,12 @@ class db_analysis(OmniAnalyze_Base):
     def calc_builtin_vars(
         pmc_df: Union[pd.DataFrame, ChainMap],
         sys_info: dict,
-        names: Set[str],
+        collectable_names: Set[str],
     ) -> None:
         """Evaluate the named collectables on pmc_df, each after the
         collectables it uses. Mutates sys_info in place."""
         for name, formula in Collectables.of_arch(sys_info["gpu_arch"]).items():
-            if name in names:
+            if name in collectable_names:
                 sys_info[name] = db_analysis.evaluate(
                     name, formula, pmc_df, sys_info, parse=True
                 )
@@ -1140,22 +1140,24 @@ class db_analysis(OmniAnalyze_Base):
             v for v in row_values if isinstance(v, str) and v and v != "None"
         ]
         build_in_vars = Collectables.of_arch(sys_info["gpu_arch"])
-        _, used = extract_counters_and_variables("\n".join(expressions), build_in_vars)
+        _, used_collectables = extract_counters_and_variables(
+            "\n".join(expressions), build_in_vars
+        )
         # Pass tables first, pmc_df last. Each gets its own built-in variables.
         tables = [*(pass_tables or []), pmc_df]
         # Pick the table each row reads before evaluating any collectable, so
         # that each table evaluates only the collectables its rows need
-        indexes = [
+        table_index_of_row = [
             counter_table_index(value, tables, build_in_vars) for value in row_values
         ]
-        names_by_table = collectables_per_table(
-            row_values, indexes, tables, build_in_vars, used
+        collectables_by_table = collectables_per_table(
+            row_values, table_index_of_row, tables, build_in_vars, used_collectables
         )
         table_sys_infos = [sys_info.copy() for _table in tables[:-1]] + [sys_info]
-        for table, table_sys_info, names in zip(
-            tables, table_sys_infos, names_by_table
+        for table, table_sys_info, collectable_names in zip(
+            tables, table_sys_infos, collectables_by_table
         ):
-            db_analysis.calc_builtin_vars(table, table_sys_info, names)
+            db_analysis.calc_builtin_vars(table, table_sys_info, collectable_names)
         # On pmc_df a collectable takes its value from the first pass table that
         # holds its counters, so it never mixes counters from two passes
         for pass_sys_info in reversed(table_sys_infos[:-1]):
@@ -1166,13 +1168,15 @@ class db_analysis(OmniAnalyze_Base):
             })
 
         values = []
-        for row, index in zip(expression_df.itertuples(index=False), indexes):
+        for row, table_index in zip(
+            expression_df.itertuples(index=False), table_index_of_row
+        ):
             values.append(
                 db_analysis.evaluate(
                     f"{row.metric_id} - {row.value_name}",
                     row.value,
-                    tables[index],
-                    table_sys_infos[index],
+                    tables[table_index],
+                    table_sys_infos[table_index],
                 )
             )
         return pd.Series(values, index=expression_df.index)

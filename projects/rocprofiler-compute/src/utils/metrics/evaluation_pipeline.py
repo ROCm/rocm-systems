@@ -98,14 +98,14 @@ def calc_builtin_vars(
     raw_pmc_df: pd.DataFrame | ChainMap,
     sys_vars: dict[str, int | float],
     gpu_arch: str,
-    names: set[str],
+    collectable_names: set[str],
 ) -> dict[str, Optional[str | float | int]]:
     """Evaluate the named collectables on raw_pmc_df, each after the
     collectables it uses."""
     # TODO: fix all $normUnit in Unit column or title
     values: dict[str, Any] = {}
     for name, formula in Collectables.of_arch(gpu_arch).items():
-        if name not in names:
+        if name not in collectable_names:
             continue
         result = MetricEvaluator(
             raw_pmc_df, {**sys_vars, **values}, {}
@@ -156,7 +156,9 @@ def eval_metric(
     ]
     gpu_arch = sys_info["gpu_arch"]
     collectables = Collectables.of_arch(gpu_arch)
-    _, used = extract_counters_and_variables("\n".join(expressions), collectables)
+    _, used_collectables = extract_counters_and_variables(
+        "\n".join(expressions), collectables
+    )
     tables = [*(pass_tables or []), raw_pmc_df]
 
     # Each metric cell, with the index of the table it reads. Picking the
@@ -190,16 +192,16 @@ def eval_metric(
                             # as string but not number if there is NONE
                             df.at[row_id, expr] = ""
 
-    names_by_table = collectables_per_table(
+    collectables_by_table = collectables_per_table(
         [cell[3] for cell in cells],
         [cell[4] for cell in cells],
         tables,
         collectables,
-        used,
+        used_collectables,
     )
     table_values = [
-        calc_builtin_vars(table, sys_vars, gpu_arch, names)
-        for table, names in zip(tables, names_by_table)
+        calc_builtin_vars(table, sys_vars, gpu_arch, collectable_names)
+        for table, collectable_names in zip(tables, collectables_by_table)
     ]
     # On raw_pmc_df a collectable takes its value from the first pass table
     # that holds its counters, so it never mixes counters from two passes

@@ -57,52 +57,56 @@ def has_columns(table: pd.DataFrame | ChainMap, columns: set[str]) -> bool:
 
 def collectables_per_table(
     eval_strings: list[object],
-    table_indexes: list[int],
+    table_index_of_row: list[int],
     tables: list[pd.DataFrame | ChainMap],
     collectables: dict[str, str],
-    used: set[str],
+    used_collectables: set[str],
 ) -> list[set[str]]:
     """Return the collectables to evaluate on each table.
 
-    eval_strings[i] reads tables[table_indexes[i]], as counter_table_index
+    eval_strings[i] reads tables[table_index_of_row[i]], as counter_table_index
     chose. Callers list the pass tables first and the merged table last.
     """
     merged_index = len(tables) - 1
-    to_evaluate: list[set[str]] = [set() for _table in tables]
+    collectables_to_evaluate: list[set[str]] = [set() for _table in tables]
 
     # A pass table evaluates the collectables its eval strings use
-    for eval_string, index in zip(eval_strings, table_indexes):
-        if index != merged_index:
-            to_evaluate[index].update(_collectables_used(eval_string, collectables))
+    for eval_string, table_index in zip(eval_strings, table_index_of_row):
+        if table_index != merged_index:
+            _, row_collectables = extract_counters_and_variables(
+                eval_string, collectables, include_supported_denom=False
+            )
+            collectables_to_evaluate[table_index].update(row_collectables)
 
     # The merged table takes each collectable from the first table that holds
     # its counters, so that table evaluates it, with the ones it uses
-    holders: dict[str, set[int]] = {}
-    for name in used:
-        columns = columns_read(build_eval_string(collectables[name]), collectables)
-        holders[name] = {
-            index for index, table in enumerate(tables) if has_columns(table, columns)
+    tables_holding: dict[str, set[int]] = {}
+    for collectable in used_collectables:
+        formula = collectables[collectable]
+        columns = columns_read(build_eval_string(formula), collectables)
+        tables_holding[collectable] = {
+            table_index
+            for table_index, table in enumerate(tables)
+            if has_columns(table, columns)
         }
-        if holders[name]:
-            first_holder = min(holders[name])
-            to_evaluate[first_holder].add(name)
-            to_evaluate[first_holder].update(
-                _collectables_used(collectables[name], collectables)
+        if tables_holding[collectable]:
+            first_holding = min(tables_holding[collectable])
+            _, collectables_it_uses = extract_counters_and_variables(
+                formula, collectables, include_supported_denom=False
             )
+            collectables_to_evaluate[first_holding].add(collectable)
+            collectables_to_evaluate[first_holding].update(collectables_it_uses)
 
     # Leave out a collectable the expressions do not use or the table lacks
     return [
-        {name for name in names if name in used and index in holders[name]}
-        for index, names in enumerate(to_evaluate)
+        {
+            collectable
+            for collectable in collectable_names
+            if collectable in used_collectables
+            and table_index in tables_holding[collectable]
+        }
+        for table_index, collectable_names in enumerate(collectables_to_evaluate)
     ]
-
-
-def _collectables_used(text: object, collectables: dict[str, str]) -> set[str]:
-    """Return the collectables text uses, and the ones those use in turn."""
-    _, names = extract_counters_and_variables(
-        str(text), collectables, include_supported_denom=False
-    )
-    return names
 
 
 class MetricEvaluator:
