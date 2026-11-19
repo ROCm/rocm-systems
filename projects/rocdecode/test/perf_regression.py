@@ -495,6 +495,9 @@ def main():
         return 1
 
     label, detail = detect_gpu(args.device, args.gpu)
+    # label is replaced by a generic "device-N" below when detection fails, so
+    # remember the failure for messages that need a real GPU name.
+    gpu_unidentified = label is None
     baseline = {}
     col = None
     baseline_kind = None
@@ -591,7 +594,22 @@ def main():
         print(f"WARNING: {measure_only_reason}")
         print("Running in measure-only mode — all streams will be measured and")
         print("saved to CSV; no regression comparison.")
-        print(f"To record a baseline: test/perf_regression.py --mem-type {mem} --save-baseline")
+        # Repeat the options that decide what gets measured and where the baseline
+        # is written, so the suggested command records the baseline this run needs.
+        hint = ["test/perf_regression.py", "--mem-type", str(mem)]
+        if args.perf_dir != ap.get_default("perf_dir"):
+            hint += ["--perf-dir", args.perf_dir]
+        if args.device != 0:
+            hint += ["--device", str(args.device)]
+        if gpu_unidentified:
+            hint += ["--gpu", "<name>"]
+        elif args.gpu:
+            hint += ["--gpu", args.gpu]
+        hint.append("--save-baseline")
+        print(f"To record a baseline: {' '.join(hint)}")
+        if gpu_unidentified:
+            print("  (the GPU could not be identified: replace <name> with its baseline name,")
+            print("   e.g. Navi31, or set ROCDECODE_PERF_GPU)")
     elif baseline_kind == "csv":
         print(f"Baseline file: {col}  ({len(baseline)} streams)  tolerance: {tol}%")
     else:
