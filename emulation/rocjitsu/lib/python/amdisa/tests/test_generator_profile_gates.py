@@ -22,20 +22,12 @@ from amdisa.codegen.execute.floating_policy import (
 from amdisa.codegen.execute.vector_special import (
     gen_cvt_fp8,
     gen_vector_cvt_pk,
-    gen_vector_div_scale,
-    gen_vector_mad_64_32,
     gen_vector_movrel,
 )
 from amdisa.codegen.execute.sema_lower import LoweringContext, lower_sema_block
 from amdisa.sema_derive import derive_sema_block
 from amdisa.codegen.execute.matrix import gen_mfma as emit_mfma
-from amdisa.codegen.execute.vector_cmp import (
-    gen_vector_add_co,
-    gen_vector_cmp,
-    gen_vector_cmp_class,
-    gen_vector_cmpx,
-)
-from amdisa.codegen.execute.simd_codegen import simd_probe_line
+from amdisa.codegen.execute.vector_cmp import gen_vector_cmp, gen_vector_cmpx
 from amdisa.cross_isa import CrossIsaAnalyzer
 from amdisa.gpuisa import Instruction, Operand
 from amdisa.isa_profile import (
@@ -762,10 +754,10 @@ def test_generated_execution_helper_includes_are_scoped(
         source = path.read_text()
         assert fp_include not in source, path
 
-    # Unary and binary CDNA math now use rj-arith; dual still has legacy handlers.
+    # CDNA math and dual arithmetic now use rj-arith.
     assert fp_include not in (gfx1250_generated_root / 'vop2_exec.cpp').read_text()
     assert fp_include not in (gfx1250_generated_root / 'vop1_exec.cpp').read_text()
-    assert fp_include in (gfx1250_generated_root / 'vopd_exec.cpp').read_text()
+    assert fp_include not in (gfx1250_generated_root / 'vopd_exec.cpp').read_text()
 
     shared = execute_shared_path.read_text()
     assert fp_include in shared
@@ -1990,38 +1982,6 @@ def test_vop3_cmp_writes_explicit_mask_width_for_wave_size():
 
     assert 'amdgpu::write_wave_mask_scalar(vdst, wf, vcc);' in body
     assert 'wf.set_vcc' not in body
-
-
-def test_vector_cmpx_can_delegate_exec_commit():
-    body = gen_vector_cmpx(
-        ['src0', 'src1'],
-        'eq',
-        'u32',
-        is_vop3=True,
-        result_writer='commit_result',
-    )
-
-    assert 'commit_result(result);' in body
-    assert 'wf.set_exec(result);' not in body
-
-
-def test_true16_vop3_integer_ops_do_not_use_whole_dword_simd_probe():
-    assert simd_probe_line('v_mul_lo_u16_vop3') is None
-    assert simd_probe_line('v_mad_u16_vop3') is None
-    assert simd_probe_line('v_mad_i16_vop3') is None
-    assert simd_probe_line('v_cmp_lt_i16_vop3') is None
-    assert simd_probe_line('v_cmp_eq_u16_vop3') is None
-    assert simd_probe_line('v_or_b16_vop3') is None
-
-
-def test_vop3_compare_simd_probe_can_commit_raw_result():
-    default_probe = simd_probe_line('v_cmp_eq_f32_vop3')
-    commit_probe = simd_probe_line('v_cmp_eq_f32_vop3', result_writer='commit_result')
-
-    assert default_probe is not None
-    assert commit_probe is not None
-    assert 'ROCJITSU_TRY_SIMD_VOPC_VOP3_INT(' in default_probe
-    assert 'ROCJITSU_TRY_SIMD_VOPC_VOP3_INT_RESULT(commit_result,' in commit_probe
 
 
 def test_matrix_resolved_dense_operands_support_vgpr_and_inline_accumulators():
@@ -7980,36 +7940,13 @@ def test_vopd_execution_failure_stops_before_either_slot_commits(
         # rj-arith evaluates both slots into temporaries and commits only on success.
         wave_check, invoke = cpp.split('amdgpu::arith::execute_dual_pair', 1)
         assert 'if (wf.wf_size() != 32)' in wave_check
-        assert ('InvalidInstructionEncoding' in wave_check) == (arch_name != 'rdna3')
+        assert ('InvalidInstructionEncoding' in wave_check) == (
+            arch_name not in ('rdna3', 'rdna3_5')
+        )
         assert 'return;' in wave_check
         assert 'amdgpu::InstructionExecutionError::UnimplementedInstruction' in invoke
         assert 'return RJ_ARITH_ERROR_INVALID_FLAGS;' in invoke
         return
-    helpers, body = cpp.split('void Vopd::execute_impl', 1)
-    # Each defensive non-void failure reports the reason and returns a placeholder.
-    failures = helpers.split('wf.report_instruction_execution_error(')[1:]
-    assert len(failures) == (2 if arch_name == 'cdna5' else 1)
-    for failure in failures:
-        assert failure.lstrip().startswith(
-            'amdgpu::InstructionExecutionError::UnimplementedInstruction);'
-        )
-        assert failure.split(';', 2)[1].strip() == 'return 0'
-    wave_check, probes = body.split('try_execute_vopd_integer_pair_simd', 1)
-    assert 'if (wf.wf_size() != 32)' in wave_check
-    if arch_name in ('rdna3', 'rdna3_5'):
-        assert 'report_instruction_execution_error' not in wave_check
-    else:
-        assert 'InvalidInstructionEncoding' in wave_check
-    assert 'return;' in wave_check
-    evaluations = list(
-        re.finditer(r'uint(?:32|64)_t \w+_result\w* = [^;]*execute_slot[^;]*;', probes)
-    )
-    assert len(evaluations) == (4 if arch_name == 'cdna5' else 2)
-    first_store = probes.index('amdgpu::RegisterAccess(wf).write_lane')
-    for evaluation in evaluations:
-        following = probes[evaluation.end() :].lstrip()
-        assert following.startswith('if (wf.instruction_execution_failed()) return;')
-        assert evaluation.end() < first_store
 
 
 def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
@@ -8072,63 +8009,6 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
     assert 'constexpr uint16_t kVopdMaxNumF64 = 35;' in exec_cpp
     assert 'constexpr uint16_t kVopdMinNumF64 = 36;' in exec_cpp
     assert 'kVopdFmacF64' not in exec_cpp
-
-
-@pytest.mark.parametrize('missing_op', [None, 'VopdAddNcU32', 'VopdLshlrevB32'])
-@pytest.mark.parametrize(
-    'arch,profile', [('rdna4', Rdna4Profile), ('cdna5', Cdna5Profile)]
-)
-def test_vopd_integer_simd_probe_requires_available_opcodes(
-    tmp_path, missing_op, arch, profile
-):
-    class ReducedVopdProfile(profile):
-        @property
-        def vopd_slot_ops(self):
-            return tuple(
-                op for op in super().vopd_slot_ops if op.enum_name != missing_op
-            )
-
-        @property
-        def vopd_y_slot_opcodes(self):
-            return super().vopd_y_slot_opcodes.intersection(
-                op.opcode for op in self.vopd_slot_ops
-            )
-
-        @property
-        def vopd3_x_slot_opcodes(self):
-            return super().vopd3_x_slot_opcodes.intersection(
-                op.opcode for op in self.vopd_slot_ops
-            )
-
-        @property
-        def vopd3_y_slot_opcodes(self):
-            return super().vopd3_y_slot_opcodes.intersection(
-                op.opcode for op in self.vopd_slot_ops
-            )
-
-    codegen = object.__new__(CodeGenerator)
-    codegen.isa_spec = SimpleNamespace(
-        arch_name=arch,
-        generated_dir_name=arch,
-        cpp_namespace=arch,
-        profile=ReducedVopdProfile(),
-        operand_types={'OPR_SRC'},
-    )
-    codegen.out_path = str(tmp_path)
-    codegen.config = CodegenConfig()
-    codegen.gen_vopd()
-    exec_cpp = (tmp_path / arch / 'vopd_exec.cpp').read_text()
-    if missing_op is not None:
-        assert f'k{missing_op}' not in exec_cpp
-
-    # All targeted architectures delegate SIMD dispatch to rj-arith.
-    assert 'try_execute_vopd_integer_pair_simd<' not in exec_cpp
-    assert 'execute_dual_pair' in exec_cpp
-    start = exec_cpp.index('case kVopdMovB32:')
-    mov_case = exec_cpp[start : exec_cpp.index('case kVopdCndmaskB32:', start)]
-    assert '*slot.src0' in mov_case
-    assert '*slot.src1' not in mov_case
-    assert 'rj_arith_v_dual_mov_b32_w32' in mov_case
 
 
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
@@ -9820,9 +9700,10 @@ def test_generated_flat_saddr_null_selector_follows_encoding(
 def test_shared_wave_mask_reads_qualify_instruction_operands(
     amdgpu_generated_root: Path,
 ):
-    shared = (amdgpu_generated_root / 'shared' / 'execute_shared.h').read_text()
-    assert 'read_wave_mask_scalar(inst.src2, wf)' in shared
-    assert 'read_wave_mask_scalar(src2, wf)' not in shared
+    source = (amdgpu_generated_root / 'rdna2' / 'vop3_exec.cpp').read_text()
+    body = _generated_function_body(source, 'void VCndmaskB32Vop3::execute_impl')
+    assert 'read_wave_mask_scalar(src2, wf)' in body
+    assert 'rj_arith_v_cndmask_b32_w32' in body
 
 
 def _preserved_dst_codegen(*, uses_vgpr_msb_indexing: bool, supports_dpp: bool):
@@ -10556,3 +10437,60 @@ def test_older_half_narrowing_uses_arithmetic(arch, amdgpu_generated_root: Path)
     assert 'rj_arith_v_cvt_f16_f32_w64' in body
     assert 'RJ_ARITH_FP16_OVFL' in body
     assert 'execute_v_cvt_f16_f32' not in body
+
+
+@pytest.mark.parametrize('missing_op', [None, 'VopdAddNcU32', 'VopdLshlrevB32'])
+@pytest.mark.parametrize(
+    'arch,profile', [('rdna4', Rdna4Profile), ('cdna5', Cdna5Profile)]
+)
+def test_vopd_arith_binding_requires_available_opcodes(
+    tmp_path, missing_op, arch, profile
+):
+    class ReducedVopdProfile(profile):
+        @property
+        def vopd_slot_ops(self):
+            return tuple(
+                op for op in super().vopd_slot_ops if op.enum_name != missing_op
+            )
+
+        @property
+        def vopd_y_slot_opcodes(self):
+            return super().vopd_y_slot_opcodes.intersection(
+                op.opcode for op in self.vopd_slot_ops
+            )
+
+        @property
+        def vopd3_x_slot_opcodes(self):
+            return super().vopd3_x_slot_opcodes.intersection(
+                op.opcode for op in self.vopd_slot_ops
+            )
+
+        @property
+        def vopd3_y_slot_opcodes(self):
+            return super().vopd3_y_slot_opcodes.intersection(
+                op.opcode for op in self.vopd_slot_ops
+            )
+
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name=arch,
+        generated_dir_name=arch,
+        cpp_namespace=arch,
+        profile=ReducedVopdProfile(),
+        operand_types={'OPR_SRC'},
+    )
+    codegen.out_path = str(tmp_path)
+    codegen.config = CodegenConfig()
+    codegen.gen_vopd()
+    exec_cpp = (tmp_path / arch / 'vopd_exec.cpp').read_text()
+    if missing_op is not None:
+        assert f'k{missing_op}' not in exec_cpp
+
+    # All targeted architectures delegate SIMD dispatch to rj-arith.
+    assert 'try_execute_vopd_integer_pair_simd<' not in exec_cpp
+    assert 'execute_dual_pair' in exec_cpp
+    start = exec_cpp.index('case kVopdMovB32:')
+    mov_case = exec_cpp[start : exec_cpp.index('case kVopdCndmaskB32:', start)]
+    assert '*slot.src0' in mov_case
+    assert '*slot.src1' not in mov_case
+    assert 'rj_arith_v_dual_mov_b32_w32' in mov_case

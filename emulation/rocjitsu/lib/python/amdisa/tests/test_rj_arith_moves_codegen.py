@@ -114,5 +114,5 @@ def test_accumulator_moves_reuse_raw_word_copy(arch):
         body = gen_vector32(context(arch, name, ['acc_dst'], ['acc_src'], is_vop3=True))
         assert 'execute_move32(*this, wf, acc_dst, acc_src)' in body
         assert 'inst_.' not in body
-        assert gen_vector32(context('cdna2', name, ['d'], ['a'])) is None
-        assert gen_vector32(context('cdna2', name, ['d'], ['a'])) is None
+        assert gen_vector32(context('cdna2', name, ['d'], ['a'])) is not None
+        assert gen_vector32(context('cdna2', name, ['d'], ['a'])) is not None

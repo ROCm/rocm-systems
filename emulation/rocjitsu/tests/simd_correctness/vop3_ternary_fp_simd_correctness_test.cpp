@@ -23,7 +23,6 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_path_test_hooks.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -37,7 +36,6 @@
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <memory>
-#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -79,7 +77,6 @@ struct Case {
   const char *name;
   uint32_t opcode;
   Kind kind;
-  std::optional<amdgpu::SimdFastPath> expected_simd_path = std::nullopt;
 };
 
 const std::array<Case, 10> kCases = {{
@@ -254,16 +251,9 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
                 neg, omod, clamp, words);
     Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
-    amdgpu::ScopedSimdFastPathTracker tracker;
+
     auto out = fx.run(inst, c.kind, rot, exec);
-    if (c.expected_simd_path.has_value()) {
-      if (force_scalar)
-        EXPECT_TRUE(tracker.no_tracked_path_executed())
-            << c.name << ": forced-scalar execution used SIMD";
-      else
-        EXPECT_TRUE(tracker.only_tracked_path_executed(*c.expected_simd_path))
-            << c.name << ": eligible execution did not use its expected SIMD path";
-    }
+
     delete inst;
     return out;
   };
@@ -393,7 +383,6 @@ struct F16OutputCase {
   uint8_t omod;
   uint16_t expected;
   uint8_t clamp = 0;
-  std::optional<amdgpu::SimdFastPath> expected_simd_path = amdgpu::SimdFastPath::VOP3_TERNARY_FP16;
 };
 
 // These cases separate destination-format rounding from OMOD/CLAMP ordering.
@@ -464,7 +453,6 @@ std::vector<F16OutputCase> f16_output_cases() {
                      0x3c00});
   }
   const auto add_selections = [&](const char *target, rj_code_arch_t arch, auto operations) {
-    const auto first = cases.size();
     for (const auto &[name, opcode] : operations) {
       const auto prefix = std::string(target) + name;
       cases.push_back(
@@ -487,9 +475,6 @@ std::vector<F16OutputCase> f16_output_cases() {
                        3,
                        0x8400});
     }
-    // Selection now uses rj-arith's CPU dispatch rather than the legacy tracker.
-    for (auto i = first; i != cases.size(); ++i)
-      cases[i].expected_simd_path.reset();
   };
   // MODE 0x80 cases exercise the emulator's old-target output-denormal gate.
   // The available gfx1030/gfx1100 captures keep output denormals disabled, so
@@ -592,24 +577,8 @@ TEST_P(Vop3F16TernaryOutputOrderTest, MatchesScalarOutputContractWithSimdEnabled
         }
         fx.wf->set_exec(exec);
         fx.wf->set_mode_raw(test.mode);
-        amdgpu::ScopedSimdFastPathTracker tracker;
+
         ASSERT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
-        if (force_scalar) {
-          EXPECT_TRUE(tracker.no_tracked_path_executed())
-              << test.name << ": forced-scalar execution used SIMD";
-        } else if (test.expected_simd_path && test.arch != ROCJITSU_CODE_ARCH_RDNA3 &&
-                   !(test.arch == ROCJITSU_CODE_ARCH_RDNA2 &&
-                     test.opcode == rdna2::kVDivFixupF16Vop3) &&
-                   !(test.arch == ROCJITSU_CODE_ARCH_CDNA4 &&
-                     (test.opcode == cdna4::kVMin3F16Vop3 || test.opcode == cdna4::kVMax3F16Vop3 ||
-                      test.opcode == cdna4::kVMed3F16Vop3 || test.opcode == cdna4::kVMadF16Vop3 ||
-                      test.opcode == cdna4::kVMadLegacyF16Vop3 ||
-                      test.opcode == cdna4::kVDivFixupF16Vop3 ||
-                      test.opcode == cdna4::kVDivFixupLegacyF16Vop3))) {
-          // Migrated operations use rj-arith, whose SIMD paths do not use this tracker.
-          EXPECT_TRUE(tracker.only_tracked_path_executed(*test.expected_simd_path))
-              << test.name << ": eligible execution did not use the ternary F16 SIMD path";
-        }
         for (uint32_t lane = 0; lane < fx.wf->wf_size(); ++lane) {
           const uint32_t actual = fx.cu->read_vgpr(vb + kDstVgpr32, lane);
           if (!(exec & (1ULL << lane))) {

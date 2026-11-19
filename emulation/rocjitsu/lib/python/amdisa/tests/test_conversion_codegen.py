@@ -80,15 +80,6 @@ def test_integer_to_float_vop1_scales_f16_results_by_sdwa_omod(name, formats):
     assert f'const auto conversion = {expected}' in cpp
 
 
-@pytest.mark.parametrize('dtype', ['f32_i32', 'f32_u32'])
-def test_f32_integer_conversion_simd_passes_the_scalar_stage_object(dtype):
-    # The probe passes the scalar body's object, OMOD and CLAMP included, so a
-    # modified VOP3 encoding stays on the SIMD path.
-    probe = '  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, conversion);'
-    assert simd_probe_line(f'v_cvt_{dtype}_vop1') == probe
-    assert simd_probe_line(f'v_cvt_{dtype}_vop3') == probe
-
-
 @pytest.mark.parametrize(('name', 'formats'), _FLOAT_TO_FLOAT)
 def test_float_to_float_vop3_passes_every_modifier_to_one_stage_object(name, formats):
     cpp = _lower(name, 'ENC_VOP3', {'abs', 'neg', 'clamp', 'omod'})
@@ -123,26 +114,6 @@ def test_share_stages_hoists_the_scalar_declaration_above_the_probe():
     assert conversion.share_stages(None, body) == (None, body)
     with pytest.raises(ValueError, match='declares none'):
         conversion.share_stages(probe, '  for (;;) {}\n')
-
-
-@pytest.mark.parametrize('name', ['fp8', 'bf8'])
-def test_fp8_decode_simd_probe_follows_the_target_policy(name):
-    layout = 'Fp8' if name == 'fp8' else 'Bf8'
-    probe = local_coverage_probe(f'v_cvt_f32_{name}_vop3', arch_name='rdna4')
-    assert (
-        f'amdgpu::conversion::decode_fp8<amdgpu::conversion::{layout}>(byte)' in probe
-    )
-    assert ('util::fp8_e5m3_to_f32_simd' in probe) == (name == 'fp8')
-    assert 'util::fp8_e4m3_to_f32_simd' not in probe
-    assert 'util::bf8_e5m2_to_f32_simd' not in probe
-    # The SIMD decode matches the scalar body's util helpers elsewhere.
-    helper = (
-        'util::fp8_e4m3_to_f32_simd' if name == 'fp8' else 'util::bf8_e5m2_to_f32_simd'
-    )
-    for arch in ('cdna4', 'cdna5', None):
-        util = local_coverage_probe(f'v_cvt_f32_{name}_vop3', arch_name=arch)
-        assert 'amdgpu::conversion::decode_fp8' not in util
-        assert f'{helper}(byte)' in util
 
 
 @pytest.mark.parametrize(
@@ -187,22 +158,6 @@ def test_cdna5_uses_shared_narrowing_for_non_scaled_ocp_conversions(fmt, helper)
         ['dst'], ['a'], 'vector_cvt_pk', f'f32_{fmt}', arch_name='cdna5'
     )
     assert f'util::{helper}_to_f32' in widened
-
-
-def test_half_conversion_simd_uses_raw_lane_glue():
-    f16 = simd_probe_line('v_cvt_f16_f32_vop3', true16_vop3=True)
-    assert f16 == (
-        '  if (amdgpu::try_execute_words_simd<1, false, true, 0>(inst, wf, conversion))'
-        ' return;'
-    )
-
-
-@pytest.mark.parametrize(
-    'dtype', ['f16_i16', 'f16_u16', 'i16_f16', 'u16_f16', 'f16_f32', 'f32_f16']
-)
-def test_half_conversions_have_no_legacy_simd_probe(dtype):
-    for encoding in ('vop1', 'vop3'):
-        assert simd_probe_line(f'v_cvt_{dtype}_{encoding}') is None
 
 
 @pytest.mark.parametrize(
