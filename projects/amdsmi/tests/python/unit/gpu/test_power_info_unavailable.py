@@ -36,9 +36,9 @@ def _power_info_with(values: dict) -> dict:
 
 
 class TestPowerInfoUnavailable(unittest.TestCase):
-    """UINT32_MAX and UINT64_MAX mean "unavailable"; smaller maxima are readings."""
+    """UINT32_MAX and UINT64_MAX mean "unavailable"; smaller maxima pass through."""
 
-    def test_narrower_maxima_are_real_readings(self):
+    def test_narrower_maxima_pass_through(self):
         for value in (0xFF, 0xFFFF):
             readings = dict.fromkeys(_FIELDS, value)
             self.assertEqual(_power_info_with(readings), readings)
