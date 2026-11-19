@@ -1016,6 +1016,12 @@ pid_t spawnChild(const std::string &path, const std::vector<std::string> &args,
 
     const std::vector<std::string> strip = gtestVariablesToStrip();
     const std::string profile = childProfileFile(path);
+    if (!profile.empty()) {
+        // The profile runtime creates this directory only for some patterns (those with %m),
+        // so a child given a plain %p one would otherwise fail to write its profile.
+        std::error_code ec;
+        fs::create_directories(fs::path(profile).parent_path(), ec);
+    }
     const pid_t parent = getpid();
 
     const pid_t pid = fork();

@@ -505,6 +505,23 @@ TEST(HostDispatchEndToEnd, EachChildWritesItsProfileUnderItsOwnName)
                              .string()));
 }
 
+TEST(HostDispatchEndToEnd, EachChildsProfileDirectoryIsMadeForIt)
+{
+    // The profile runtime makes the directory itself only for patterns with %m; a child handed a
+    // plain %p one, as an outside collector may use, would otherwise write no profile at all.
+    FixtureTree tree;
+    RCCL_REQUIRE_TREE(tree, kFirstBinary, kSecondBinary);
+
+    const fs::path profiles = fs::path(tree.path()) / "profiles";
+    std::vector<EnvVar> environment = baseEnvironment(tree);
+    environment.push_back({"LLVM_PROFILE_FILE", (profiles / "rccl_%p.profraw").string()});
+
+    runFrontDoor(tree, {"--gtest_output=xml:" + tree.reportPath()}, environment);
+
+    EXPECT_TRUE(fs::is_directory(profiles / kFirstBinary));
+    EXPECT_TRUE(fs::is_directory(profiles / kSecondBinary));
+}
+
 TEST(HostDispatchEndToEnd, AChildThatHangsIsKilledAtItsTimeoutAndReportedAsOne)
 {
     // A hung binary used to cost the whole run: the merged report is written once, after the
