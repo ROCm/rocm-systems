@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/vintrp.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/gfx10_interp.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
@@ -18,15 +19,15 @@ namespace rocjitsu {
 namespace rdna2 {
 
 void VInterpP1F32Vintrp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
+  amdgpu::execute_gfx10_interp<amdgpu::Gfx10Interp::P1>(*this, wf);
 }
 
 void VInterpP2F32Vintrp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
+  amdgpu::execute_gfx10_interp<amdgpu::Gfx10Interp::P2>(*this, wf);
 }
 
 void VInterpMovF32Vintrp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
+  amdgpu::execute_gfx10_interp<amdgpu::Gfx10Interp::Mov>(*this, wf);
 }
 
 } // namespace rdna2

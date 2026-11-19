@@ -6,8 +6,10 @@ Tests for the jpegdecode example.
 """
 
 from __future__ import annotations
-import pytest
+
 from pathlib import Path
+
+import pytest
 from conftest import RocprofsysTest
 
 pytestmark = [
@@ -37,11 +39,22 @@ def jpeg_decode_env() -> dict[str, str]:
 def jpeg_decode_rules(validation_rules_dir, gpu_info) -> list[Path]:
     """Get validation rules for JPEG decode tests."""
     rules_dir = validation_rules_dir / "jpeg-decode"
-    rules = [
-        validation_rules_dir / "default-rules.json",
-        rules_dir / "validation-rules.json",
-        rules_dir / "sdk-metrics-rules.json",
-    ]
+    # gfx1250 uses VCN hardware-accelerated JPEG decode which
+    # dispatches few or no HIP compute kernels and produces fewer API trace
+    # entries than the compute-based path on older GPUs.
+    # gfx1250-validation-rules.json replaces default-rules.json, since the
+    # default kernels checks require at least one kernel.
+    if gpu_info._is_gfx1250:
+        rules = [
+            rules_dir / "gfx1250-validation-rules.json",
+            rules_dir / "gfx1250-sdk-metrics-rules.json",
+        ]
+    else:
+        rules = [
+            validation_rules_dir / "default-rules.json",
+            rules_dir / "validation-rules.json",
+            rules_dir / "sdk-metrics-rules.json",
+        ]
     if "instinct" in gpu_info.categories:
         rules.append(rules_dir / "amd-smi-rules.json")
     return rules

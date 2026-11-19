@@ -3,11 +3,11 @@
 
 #pragma once
 
+#include "common/clocks.hpp"
 #include "common/defines.h"
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
-#include "core/control/clocks/timeline.hpp"
 #include "core/demangler.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
@@ -22,7 +22,6 @@
 #include <timemory/components/network/types.hpp>
 #include <timemory/components/papi/types.hpp>
 #include <timemory/components/rusage/components.hpp>
-#include <timemory/components/timing/backends.hpp>
 #include <timemory/components/timing/components.hpp>
 #include <timemory/enum.h>
 #include <timemory/hash/types.hpp>
@@ -45,8 +44,6 @@
 
 namespace rocprofsys::tracing
 {
-using interval_data_instances = thread_data<std::vector<bool>>;
-
 //
 //  declarations
 //
@@ -66,15 +63,10 @@ record_thread_start_time();
 void
 thread_init();
 
-template <typename CategoryT>
-auto&
-get_category_stack();
-
-template <typename Tp = std::uint64_t>
 ROCPROFSYS_INLINE auto
 now()
 {
-    return control::clocks::timeline_ns<Tp>();
+    return clocks::timeline::now_ns();
 }
 
 inline auto&
@@ -97,25 +89,12 @@ pop_count()
     return _v;
 }
 
-struct category_stack
-{
-    std::int32_t profile = 0;  // use signed so compiler doesn't have to
-                               // account for underflow/overflow
-};
-
 template <typename CategoryT>
-auto&
-get_category_stack()
+bool&
+thread_has_pushed()
 {
-    static thread_local auto _v = category_stack{};
+    static thread_local bool _v = false;
     return _v;
-}
-
-template <typename CategoryT>
-auto&
-get_profile_stack()
-{
-    return get_category_stack<CategoryT>().profile;
 }
 
 template <typename CategoryT>
@@ -136,24 +115,42 @@ template <typename CategoryT>
 auto
 category_pop_disabled()
 {
-    return !trait::runtime_enabled<CategoryT>::get() &&
-           get_profile_stack<CategoryT>() <= 0;
+    return !trait::runtime_enabled<CategoryT>::get() && !thread_has_pushed<CategoryT>();
 }
 
 template <typename CategoryT>
 auto
 profile_pop_disabled()
 {
-    return !trait::runtime_enabled<CategoryT>::get() &&
-           get_profile_stack<CategoryT>() <= 0;
+    return !trait::runtime_enabled<CategoryT>::get() && !thread_has_pushed<CategoryT>();
+}
+
+inline std::atomic<bool> timemory_components_enabled{ false };
+
+inline bool
+has_timemory_components()
+{
+    return timemory_components_enabled.load(std::memory_order_acquire);
+}
+
+inline void
+enable_timemory_components()
+{
+    timemory_components_enabled.store(true, std::memory_order_release);
 }
 
 template <typename CategoryT, typename... Args>
 inline void
 push_timemory(CategoryT, std::string_view name, Args&&... args)
 {
-    // skip if category is disabled
+    // skip if the category is disabled
     if(category_push_disabled<CategoryT>())
+    {
+        return;
+    }
+
+    thread_has_pushed<CategoryT>() = true;
+    if(!has_timemory_components())
     {
         return;
     }
@@ -164,8 +161,6 @@ push_timemory(CategoryT, std::string_view name, Args&&... args)
         // this generates a hash for the raw string array
         auto const _hash = tim::add_hash_id(name);
         _data->construct(_hash)->start(std::forward<Args>(args)...);
-        // increment the profile stack
-        ++get_profile_stack<CategoryT>();
     }
 }
 
@@ -245,8 +240,9 @@ template <typename CategoryT, typename... Args>
 inline void
 pop_timemory(CategoryT, std::string_view name, Args&&... args)
 {
-    // skip if category is disabled and not pushed on this thread
-    if(profile_pop_disabled<CategoryT>())
+    // skip if no component records regions, or the category is disabled and not
+    // pushed on this thread
+    if(!has_timemory_components() || profile_pop_disabled<CategoryT>())
     {
         return;
     }
@@ -256,42 +252,5 @@ pop_timemory(CategoryT, std::string_view name, Args&&... args)
     {
         destroy_timemory(std::move(_data));
     }
-}
-
-template <typename FuncT>
-std::int64_t
-get_clock_skew(FuncT&& _timestamp_func, std::int64_t _n = 1)
-{
-    namespace cpu = tim::cpu;
-    // synchronize timestamps
-    // We'll take a CPU timestamp before and after taking a GPU timestmp, then
-    // take the average of those two, hoping that it's roughly at the same time
-    // as the GPU timestamp.
-    auto _cpu_now = []() {
-        cpu::fence();
-        return now();
-    };
-
-    auto _gpu_now = [&_timestamp_func]() {
-        cpu::fence();
-        return std::forward<FuncT>(_timestamp_func)();
-    };
-
-    auto _compute = [&_cpu_now, &_gpu_now]() {
-        volatile std::uint64_t _cpu_ts = 0;
-        volatile std::uint64_t _gpu_ts = 0;
-        _cpu_ts += _cpu_now();
-        _gpu_ts += _gpu_now();
-        _cpu_ts += _cpu_now();
-        return static_cast<std::int64_t>(_cpu_ts / 2) -
-               static_cast<std::int64_t>(_gpu_ts);
-    };
-
-    std::int64_t _diff = 0;
-    for(std::int64_t i = 0; i < _n; ++i)
-    {
-        _diff += _compute();
-    }
-    return (_diff / _n);
 }
 }  // namespace rocprofsys::tracing

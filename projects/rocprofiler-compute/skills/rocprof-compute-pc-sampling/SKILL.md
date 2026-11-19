@@ -12,7 +12,39 @@ have already identified the kernel worth this level of detail.
 PC sampling is experimental. Every command below needs `--experimental`, and
 option names can change between releases, so run
 `rocprof-compute profile --experimental --help` before choosing flags.
-Never use the GUI or TUI.
+
+## Before you start
+
+If `command -v rocprof-compute` finds the tool and
+`rocprof-compute analyze --debug-verify-deps` passes, skip this section.
+On ROCm 10.2, use `--verify-deps` instead of `--debug-verify-deps`.
+
+Otherwise, check that ROCm and a GPU are present:
+
+```bash
+rocminfo
+amd-smi list
+```
+
+If either command fails, ROCm is not installed or no GPU is visible. Stop and
+point the user to "Install the ROCm Core SDK" in the
+[install guide](../../docs/install/core-install.rst). Installing rocprof-compute
+alone does not help.
+
+Check the GPU against
+[compatible accelerators](../../docs/reference/compatible-accelerators.rst).
+The table lists product families, so match the `Marketing Name` that `rocminfo`
+prints, and use the `gfx` name to confirm. If the GPU is not supported, stop and
+tell the user.
+
+Then follow "Install the analyze mode dependencies" in the
+[install guide](../../docs/install/core-install.rst), which installs
+rocprof-compute in a virtual environment of its own. Use the nightly index so the
+version matches these skills. Activate that environment with
+`source <venv>/bin/activate` before you run rocprof-compute, and confirm with
+`rocprof-compute analyze --debug-verify-deps`. If the application is a Python
+script, note the full path of its Python before you activate, and run the
+script with that path.
 
 ## 1. Check what the hardware supports
 
@@ -31,15 +63,16 @@ interval range. Two methods exist:
 `--pc-sampling-method` defaults to `stochastic`. Fall back to `host_trap` only
 when the device rejects stochastic.
 
-Never hardcode an interval. Stochastic intervals are counted in cycles and must
-be a power of two; host-trap intervals are microseconds. The accepted range
-comes from the device, so take it from the command above.
+Start with the default interval: leave out `--pc-sampling-interval`. Change it
+only when the analysis shows too few or too many samples, and keep it within
+the range the command above prints. Stochastic intervals are counted in cycles
+and must be a power of two. Host-trap intervals are in microseconds.
 
 ## 2. Build for source attribution
 
 Samples always map to the kernel's assembly. Mapping assembly back to a source
 line requires debug info in the application, for example `hipcc -g`. Without
-it, `source_line` reads `N/A` and the `Source` column in CSV output is empty.
+it, the `Source` column in CSV output is empty.
 Keep optimization flags on; profiling a `-O0` build measures the wrong program.
 
 Ask about the build before collecting, because rebuilding afterwards means
@@ -52,7 +85,6 @@ rocprof-compute profile \
     --experimental \
     --pc-sampling \
     --pc-sampling-method stochastic \
-    --pc-sampling-interval <interval-from-the-query> \
     --name <workload_name> \
     -- <application> <args>
 ```
@@ -64,26 +96,22 @@ counter panels. When the user needs both, collect two workloads.
 ## 4. Analyze
 
 ```bash
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> --list-stats
-
-rocprof-compute analyze \
-    --path ./workloads/<name>/<gpu_model> \
-    -k <kernel_id> \
-    --pc-sampling-sorting-type count \
-    --pc-sampling-rows 20
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model>
 ```
 
-Sorting defaults to `count`, which puts the hottest instruction first. Use
-`offset` to read the kernel in program order instead. `--pc-sampling-rows`
-defaults to 10; pass `0` for every row.
+The PC sampling table shows one row per kernel, hottest first, so it picks the
+kernel to look at. `--pc-sampling-rows` defaults to 10 kernels; pass `0` for
+every kernel.
 
 Read the table as:
 
 | Column | Meaning |
 |---|---|
-| PC offset | where the instruction sits in the kernel's ISA |
-| Sample count | how often execution was there |
-| Stall reason | what the wavefront was waiting on, stochastic sampling only |
+| Sample count | how often execution was in the kernel |
+| Stall reason | what the kernel's wavefronts were waiting on, stochastic sampling only |
+
+For the hot instructions of that kernel, export the annotated disassembly
+(step 5) and open the kernel's ISA CSV.
 
 A high sample count marks a hot instruction, not a defective one. A loop body
 is supposed to be hot. What matters is a hot instruction whose stall reason
@@ -107,12 +135,18 @@ CSV output writes per-kernel annotated disassembly into a
 each instruction. `--output-format db` stores the same content in the analysis
 database. Both disable terminal output.
 
+CSV output also writes `<file>_pc_sampling.csv` beside each captured source
+file, with the sample counts of every source line and the ISA rows each line
+compiled to. Start there to find the hottest source line.
+
 ## 6. When there are too few samples
 
 A short kernel may not accumulate enough samples to be meaningful. Increase the
 work the kernel does, or shorten the interval within the range the device
 accepts, rather than drawing conclusions from a handful of samples.
 
-For multi-process workloads, keep each process or rank separate; see the
-multi-process sections of
+For multi-process workloads, the PC sampling table combines each kernel's
+samples from all processes, so use it only to pick the kernel. The per-kernel
+ISA files keep each process and code object separate; read the instructions
+there. See the multi-process sections of
 [pc_sampling.rst](../../docs/how-to/pc_sampling.rst).

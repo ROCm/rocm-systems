@@ -375,7 +375,7 @@ def render_comparison_section(diff_rows, baseline_commit, branch_commit):
         return ""
     return f"""
   <section class="comparison-section">
-    <h2>Baseline vs Branch &mdash; {html.escape(baseline_commit[:12])} &rarr; {html.escape(branch_commit[:12])}</h2>
+    <h2>Baseline vs Branch &mdash; {html.escape(rud.short_commit(baseline_commit, 12))} &rarr; {html.escape(rud.short_commit(branch_commit, 12))}</h2>
     <p class="legend">Each cell shows the branch value with &Delta; from baseline; background: green = improved, red = regressed, gray = unchanged (lower is better except Occupancy, where higher is better).</p>
     <div class="controls">
       <select id="diffMetricPicker"></select>
@@ -395,8 +395,8 @@ def render_comparison_section(diff_rows, baseline_commit, branch_commit):
 def render_commit_toggle(baseline_commit, branch_commit):
     if not branch_commit:
         return ""
-    b_short = baseline_commit[:12] or "baseline"
-    n_short = branch_commit[:12] or "branch"
+    b_short = rud.short_commit(baseline_commit, 12) or "baseline"
+    n_short = rud.short_commit(branch_commit, 12) or "branch"
     return (
         '<div class="commit-toggle">'
         f'<button data-commit="baseline" class="active">Baseline ({html.escape(b_short)})</button>'
@@ -426,9 +426,11 @@ def render_page(args, baseline_rows, branch_rows, diff_rows):
         kernels_by_commit["branch"] = kernels_json(branch_rows)
         stats_html_by_commit["branch"] = render_stat_cards(compute_stats(branch_rows))
 
-    baseline_short = args.baseline_commit[:12] if args.baseline_commit else "(working tree)"
+    baseline_short = (
+        rud.short_commit(args.baseline_commit, 12) if args.baseline_commit else "(working tree)"
+    )
     if args.branch_commit:
-        title = f"Resource usage — {baseline_short} vs {args.branch_commit[:12]}"
+        title = f"Resource usage — {baseline_short} vs {rud.short_commit(args.branch_commit, 12)}"
     else:
         title = f"Resource usage — {baseline_short}"
 
