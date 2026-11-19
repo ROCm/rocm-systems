@@ -23,6 +23,7 @@
 #include "KFDSVMRangeTest.hpp"
 #include <poll.h>
 #include <sys/mman.h>
+#include <chrono>
 #include <vector>
 #include "PM4Queue.hpp"
 #include "PM4Packet.hpp"
@@ -2418,6 +2419,489 @@ TEST_P(KFDSVMRangeTest, IntegerOverflowProtection) {
     }
 
     LOG() << "All integer overflow protection tests PASSED" << std::endl;
+    TEST_END
+}
+
+/*
+ * Measure the cost of SVM registration and VMA teardown on the current KFD
+ * context. Whether that context is the primary or a secondary context is
+ * selected at build time via HSAKMT_SECONDARY_CTX (see KFDBaseComponentTest).
+ *
+ * A large anonymous VMA is reserved once, then SVM SET_ATTR is issued for each
+ * 16KB chunk (iterations times) and timed as a whole; afterwards each 16KB chunk
+ * is munmap'd and the teardown time is measured separately. A non-zero gapSize
+ * leaves a hole between consecutive chunks so the kernel cannot coalesce them
+ * into a single range, keeping every registration an independent SVM range.
+ */
+void KFDSVMRangeTest::RegisterCtxPerfTest(int gpuNode, HSAuint64 gapSize) {
+    if (!SVMAPISupported_GPU(gpuNode)) {
+        LOG() << "Skipping test: SVM not supported on gpuNode." << gpuNode << std::endl;
+        return;
+    }
+
+    unsigned int m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
+    if (m_FamilyId < FAMILY_AI) {
+        LOG() << std::hex << "Skipping test: No svm range support for family ID 0x"
+              << m_FamilyId << "." << std::endl;
+        return;
+    }
+
+    const HSAuint64 chunkSize = 16 * 1024;          // 16KB per registration
+    const HSAuint64 iterations = 10000;             // number of registrations
+    const HSAuint64 stride = chunkSize + gapSize;
+    const HSAuint64 vmaSize = stride * iterations;
+
+    HSA_SVM_ATTRIBUTE attrs[] = {
+        {HSA_SVM_ATTR_PREFETCH_LOC, 0},
+        {HSA_SVM_ATTR_PREFERRED_LOC, 0},
+        {HSA_SVM_ATTR_SET_FLAGS, HSA_SVM_FLAG_HOST_ACCESS | HSA_SVM_FLAG_COHERENT},
+        {HSA_SVM_ATTR_ACCESS, (HSAuint32)gpuNode},
+    };
+    const HSAuint32 nattr = sizeof(attrs) / sizeof(attrs[0]);
+
+    char *base = reinterpret_cast<char *>(mmap(NULL, vmaSize, PROT_READ | PROT_WRITE,
+                            MAP_ANONYMOUS | MAP_PRIVATE | MAP_NORESERVE, -1, 0));
+    ASSERT_NE_GPU(reinterpret_cast<void *>(base), MAP_FAILED, gpuNode);
+
+    HSAuint64 regFailures = 0;
+    auto regStart = std::chrono::steady_clock::now();
+    for (HSAuint64 i = 0; i < iterations; i++) {
+        if (HSAKMT_CALL(hsaKmtSVMSetAttr, m_hsakmt_current_ctx,
+                        base + i * stride, chunkSize, nattr, attrs))
+            regFailures++;
+    }
+    auto regEnd = std::chrono::steady_clock::now();
+
+    auto unmapStart = std::chrono::steady_clock::now();
+    for (HSAuint64 i = 0; i < iterations; i++)
+        munmap(base + i * stride, chunkSize);
+    auto unmapEnd = std::chrono::steady_clock::now();
+
+    double regMs = std::chrono::duration<double, std::milli>(regEnd - regStart).count();
+    double unmapMs = std::chrono::duration<double, std::milli>(unmapEnd - unmapStart).count();
+
+    LOG() << "gap " << (gapSize >> 10) << "KB: register " << iterations << " x "
+          << (chunkSize >> 10) << "KB = " << regMs << " ms ("
+          << (regMs * 1e3 / iterations) << " us/op, " << regFailures
+          << " failures); munmap = " << unmapMs << " ms ("
+          << (unmapMs * 1e3 / iterations) << " us/op)" << std::endl;
+
+    if (gapSize)
+        munmap(base, vmaSize);
+}
+
+TEST_P(KFDSVMRangeTest, RegisterCtxPerfTest) {
+    TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
+    TEST_START(TESTPROFILE_RUNALL);
+
+    if (!SVMAPISupported())
+        return;
+
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->RegisterCtxPerfTest(gpuNode, 0);
+    }));
+
+    TEST_END
+}
+
+TEST_P(KFDSVMRangeTest, RegisterCtxPerfHoleTest) {
+    TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
+    TEST_START(TESTPROFILE_RUNALL);
+
+    if (!SVMAPISupported())
+        return;
+
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->RegisterCtxPerfTest(gpuNode, PAGE_SIZE);
+    }));
+
+    TEST_END
+}
+
+/*
+ * Measure the cost of SVM prefetch migration on the current KFD context.
+ *
+ * A large anonymous VMA is reserved and registered once, then each 16KB chunk is
+ * prefetched to the GPU (system memory -> VRAM) and the total time is measured;
+ * afterwards each chunk is prefetched back to the CPU (VRAM -> system memory) and
+ * timed separately. Whether the current context is primary or secondary is
+ * selected at build time via HSAKMT_SECONDARY_CTX (see KFDBaseComponentTest).
+ */
+void KFDSVMRangeTest::PrefetchPerfTest(int gpuNode) {
+    if (!SVMAPISupported_GPU(gpuNode)) {
+        LOG() << "Skipping test: SVM not supported on gpuNode." << gpuNode << std::endl;
+        return;
+    }
+
+    unsigned int m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
+    if (m_FamilyId < FAMILY_AI) {
+        LOG() << std::hex << "Skipping test: No svm range support for family ID 0x"
+              << m_FamilyId << "." << std::endl;
+        return;
+    }
+
+    if (!GetVramSize(gpuNode)) {
+        LOG() << "Skipping test: No VRAM found." << std::endl;
+        return;
+    }
+
+    const HSAuint64 chunkSize = 16 * 1024;          // 16KB per prefetch
+    const HSAuint64 iterations = 10000;             // number of prefetches
+    const HSAuint64 vmaSize = chunkSize * iterations;
+
+    char *base = reinterpret_cast<char *>(mmap(NULL, vmaSize, PROT_READ | PROT_WRITE,
+                            MAP_ANONYMOUS | MAP_PRIVATE | MAP_NORESERVE, -1, 0));
+    ASSERT_NE_GPU(reinterpret_cast<void *>(base), MAP_FAILED, gpuNode);
+
+    EXPECT_SUCCESS_GPU(RegisterSVMRange(gpuNode, base, vmaSize, 0,
+                       HSA_SVM_FLAG_HOST_ACCESS | HSA_SVM_FLAG_COHERENT), gpuNode);
+
+    HSAuint64 toGpuFailures = 0;
+    auto toGpuStart = std::chrono::steady_clock::now();
+    for (HSAuint64 i = 0; i < iterations; i++) {
+        if (SVMRangePrefetchToNode(base + i * chunkSize, chunkSize, gpuNode))
+            toGpuFailures++;
+    }
+    auto toGpuEnd = std::chrono::steady_clock::now();
+
+    HSAuint64 toCpuFailures = 0;
+    auto toCpuStart = std::chrono::steady_clock::now();
+    for (HSAuint64 i = 0; i < iterations; i++) {
+        if (SVMRangePrefetchToNode(base + i * chunkSize, chunkSize, 0))
+            toCpuFailures++;
+    }
+    auto toCpuEnd = std::chrono::steady_clock::now();
+
+    double toGpuMs = std::chrono::duration<double, std::milli>(toGpuEnd - toGpuStart).count();
+    double toCpuMs = std::chrono::duration<double, std::milli>(toCpuEnd - toCpuStart).count();
+
+    LOG() << "prefetch " << iterations << " x " << (chunkSize >> 10)
+          << "KB to_gpu = " << toGpuMs << " ms (" << (toGpuMs * 1e3 / iterations)
+          << " us/op, " << toGpuFailures << " failures); to_cpu = " << toCpuMs
+          << " ms (" << (toCpuMs * 1e3 / iterations) << " us/op, " << toCpuFailures
+          << " failures)" << std::endl;
+
+    munmap(base, vmaSize);
+}
+
+TEST_P(KFDSVMRangeTest, PrefetchPerfTest) {
+    TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
+    TEST_START(TESTPROFILE_RUNALL);
+
+    if (!SVMAPISupported())
+        return;
+
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->PrefetchPerfTest(gpuNode);
+    }));
+
+    TEST_END
+}
+
+/*
+ * Compare SVM vs userptr registration cost using the generic register/map API.
+ *
+ * hsaKmtRegisterMemory + hsaKmtMapMemoryToGPU dispatch to either the SVM path
+ * (GPU VA = CPU VA) or the userptr BO path (GPU VA from the dGPU aperture) based
+ * on ctx->hsakmt_is_svm_api_supported, which is controlled by the HSA_USE_SVM
+ * environment variable (HSA_USE_SVM=0 forces the userptr path on the primary
+ * context). Run this test twice (HSA_USE_SVM=1 and HSA_USE_SVM=0) to compare.
+ *
+ * Note: userptr pins pages at map time (get_user_pages) while SVM is lazy, so
+ * register+map and unmap+deregister are timed together to keep the two paths
+ * comparable. The userptr path is only available on the primary context.
+ */
+void KFDSVMRangeTest::RegisterMapPerfTest(int gpuNode) {
+    unsigned int m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
+    if (m_FamilyId < FAMILY_AI) {
+        LOG() << std::hex << "Skipping test: No svm range support for family ID 0x"
+              << m_FamilyId << "." << std::endl;
+        return;
+    }
+
+    const char *useSvm = getenv("HSA_USE_SVM");
+    const bool svmPath = !(useSvm && !strcmp(useSvm, "0"));
+    const char *pathName = svmPath ? "svm" : "userptr";
+
+    const HSAuint64 chunkSize = 16 * 1024;          // 16KB per registration
+    const HSAuint64 iterations = 10000;             // number of registrations
+    const HSAuint64 vmaSize = chunkSize * iterations;
+
+    char *base = reinterpret_cast<char *>(mmap(NULL, vmaSize, PROT_READ | PROT_WRITE,
+                            MAP_ANONYMOUS | MAP_PRIVATE | MAP_NORESERVE, -1, 0));
+    ASSERT_NE_GPU(reinterpret_cast<void *>(base), MAP_FAILED, gpuNode);
+
+    HSAuint64 regFailures = 0;
+    auto regStart = std::chrono::steady_clock::now();
+    for (HSAuint64 i = 0; i < iterations; i++) {
+        HSAuint64 altVA = 0;
+        if (HSAKMT_CALL(hsaKmtRegisterMemory, m_hsakmt_current_ctx,
+                        base + i * chunkSize, chunkSize) ||
+            HSAKMT_CALL(hsaKmtMapMemoryToGPU, m_hsakmt_current_ctx,
+                        base + i * chunkSize, chunkSize, &altVA))
+            regFailures++;
+    }
+    auto regEnd = std::chrono::steady_clock::now();
+
+    HSAuint64 unregFailures = 0;
+    auto unregStart = std::chrono::steady_clock::now();
+    for (HSAuint64 i = 0; i < iterations; i++) {
+        if (HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx,
+                        base + i * chunkSize) ||
+            HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx,
+                        base + i * chunkSize))
+            unregFailures++;
+    }
+    auto unregEnd = std::chrono::steady_clock::now();
+
+    double regMs = std::chrono::duration<double, std::milli>(regEnd - regStart).count();
+    double unregMs = std::chrono::duration<double, std::milli>(unregEnd - unregStart).count();
+
+    LOG() << "regmap " << pathName << ": register+map " << iterations << " x "
+          << (chunkSize >> 10) << "KB = " << regMs << " ms ("
+          << (regMs * 1e3 / iterations) << " us/op, " << regFailures
+          << " failures); unmap+dereg = " << unregMs << " ms ("
+          << (unregMs * 1e3 / iterations) << " us/op, " << unregFailures
+          << " failures)" << std::endl;
+
+    munmap(base, vmaSize);
+}
+
+TEST_P(KFDSVMRangeTest, RegisterMapPerfTest) {
+    TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
+    TEST_START(TESTPROFILE_RUNALL);
+
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->RegisterMapPerfTest(gpuNode);
+    }));
+
+    TEST_END
+}
+
+/*
+ * Simulate the gemma-pt model load H2D copy phase: stream a (scaled-down)
+ * sharded model through the > 1MiB / 32MiB pin path.
+ *
+ * Mirrors the dominant cost of transformers loading safetensors:
+ *   warmup  - allocate the destination VRAM BO once (hsaKmtAllocMemory + Map)
+ *   copy    - for each "shard" (serial, like HF_DEACTIVATE_ASYNC_LOAD=1):
+ *               pin host block (RegisterMemory + MapMemoryToGPU)
+ *               -> SDMA H2D into the VRAM BO
+ *               -> unpin (UnmapMemoryToGPU + DeregisterMemory)
+ *
+ * N independent MAP_PRIVATE (rw-p) temp files back the shards, like separate
+ * safetensors shard files. Each iteration maps a fresh VMA of the next shard
+ * (round-robin), pins a random 8-32MiB region, SDMAs it, unpins, then unmaps.
+ * The SVM vs userptr pin path is selected by HSA_USE_SVM (userptr needs the
+ * primary context). Run twice (HSA_USE_SVM=1 / 0) to compare, matching the
+ * baremetal/dom0/domU measurements in docs/gemma4_pt_load_data.md.
+ */
+void KFDSVMRangeTest::GemmaModelLoadSimTest(int gpuNode) {
+    unsigned int m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
+    if (m_FamilyId < FAMILY_AI) {
+        LOG() << std::hex << "Skipping test: No svm range support for family ID 0x"
+              << m_FamilyId << "." << std::endl;
+        return;
+    }
+
+    if (!GetVramSize(gpuNode)) {
+        LOG() << "Skipping test: No VRAM found." << std::endl;
+        return;
+    }
+
+    const HSAuint64 iterations = 1000;              // number of shard loads
+    const HSAuint64 minBlock = 8 * 1024 * 1024;     // 8 MiB
+    const HSAuint64 maxBlock = 32 * 1024 * 1024;    // 32 MiB (== GPU_PINNED_XFER_SIZE)
+    const unsigned numShards = 8;                   // distinct backing files
+
+    const char *useSvm = getenv("HSA_USE_SVM");
+    const bool svmPath = !(useSvm && !strcmp(useSvm, "0"));
+    const char *pathName = svmPath ? "svm" : "userptr";
+
+    /* GEMMA_READONLY=1 pins the source read-only (PROT_READ + ReadOnly flag), so
+     * the GPU read-faults without COW; default is a read/write pin (matches the
+     * real gemma-pt pin which write-faults and triggers COW on MAP_PRIVATE).
+     */
+    const char *roEnv = getenv("GEMMA_READONLY");
+    const bool readOnly = roEnv && strcmp(roEnv, "0");
+    const char *mode = readOnly ? "ro" : "rw";
+    const int srcProt = readOnly ? PROT_READ : (PROT_READ | PROT_WRITE);
+
+    /* GEMMA_PERSIST_MAP=1 maps each shard file once up front and pins sub-regions
+     * (like real gemma: safe_open maps the shard once, pin/unpin per tensor, one
+     * munmap at close) so per-iteration munmap drops out of the hot path.
+     */
+    const char *pmEnv = getenv("GEMMA_PERSIST_MAP");
+    const bool persistMap = pmEnv && strcmp(pmEnv, "0");
+
+    HsaMemFlags roFlags = {0};
+    roFlags.ui32.PageSize = HSA_PAGE_SIZE_4KB;
+    roFlags.ui32.HostAccess = 1;
+    roFlags.ui32.ReadOnly = 1;
+
+    /* Pre-create N independent shard files (distinct inodes / page cache), each
+     * sized to the max block so any 8-32MiB shard map is valid.
+     */
+    int fds[numShards];
+    char fnames[numShards][32];
+    char *maps[numShards];
+    for (unsigned s = 0; s < numShards; s++) {
+        snprintf(fnames[s], sizeof(fnames[s]), "/tmp/kfdtest-gemma-%u-XXXXXX", s);
+        fds[s] = mkostemp(fnames[s], 0600);
+        ASSERT_NE_GPU(-1, fds[s], gpuNode);
+        ASSERT_EQ_GPU(0, ftruncate(fds[s], maxBlock), gpuNode);
+        maps[s] = NULL;
+        if (persistMap) {
+            maps[s] = reinterpret_cast<char *>(mmap(NULL, maxBlock, srcProt,
+                                    MAP_PRIVATE, fds[s], 0));
+            ASSERT_NE_GPU(reinterpret_cast<void *>(maps[s]), MAP_FAILED, gpuNode);
+        }
+    }
+
+    /* warmup: allocate + map the destination VRAM BO (reused by every copy). */
+    HsaMemFlags memFlags = {0};
+    memFlags.ui32.PageSize = HSA_PAGE_SIZE_4KB;
+    memFlags.ui32.HostAccess = 0;
+    memFlags.ui32.NonPaged = 1;
+
+    void *dst = NULL;
+    auto warmupStart = std::chrono::steady_clock::now();
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtAllocMemory, m_hsakmt_current_ctx, gpuNode,
+                                   maxBlock, memFlags, &dst), gpuNode);
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtMapMemoryToGPU, m_hsakmt_current_ctx, dst,
+                                   maxBlock, NULL), gpuNode);
+    auto warmupEnd = std::chrono::steady_clock::now();
+
+    SDMAQueue sdmaQueue;
+    ASSERT_SUCCESS_GPU(sdmaQueue.Create(gpuNode), gpuNode);
+
+    srand(1);  // deterministic shard sizes across runs
+
+    /* Per-phase accumulators to pinpoint where each pin path spends time. */
+    typedef std::chrono::steady_clock clk;
+    auto now = []() { return clk::now(); };
+    auto addMs = [](double &acc, clk::time_point a, clk::time_point b) {
+        acc += std::chrono::duration<double, std::milli>(b - a).count();
+    };
+    double mmapMs = 0, regMs = 0, mapMs = 0, sdmaMs = 0, unmapMs = 0, deregMs = 0, munmapMs = 0;
+
+    HSAuint64 pinFailures = 0;
+    HSAuint64 totalBytes = 0;
+    auto copyStart = clk::now();
+    for (HSAuint64 i = 0; i < iterations; i++) {
+        HSAuint64 span = maxBlock - minBlock + 1;
+        HSAuint64 size = minBlock + (((HSAuint64)rand() << 12) % span);
+        size &= ~(HSAuint64)(PAGE_SIZE - 1);
+        if (size < minBlock)
+            size = minBlock;
+
+        /* Fresh VMA per shard: map the next backing file round-robin. */
+        int fd = fds[i % numShards];
+        char *src;
+        if (persistMap) {
+            src = maps[i % numShards];
+        } else {
+            auto t0 = now();
+            src = reinterpret_cast<char *>(mmap(NULL, size, srcProt,
+                                    MAP_PRIVATE, fd, 0));
+            auto t1 = now(); addMs(mmapMs, t0, t1);
+            if (src == MAP_FAILED) {
+                pinFailures++;
+                continue;
+            }
+        }
+
+        auto t2 = now();
+        HSAKMT_STATUS rr = readOnly ?
+            HSAKMT_CALL(hsaKmtRegisterMemoryWithFlags, m_hsakmt_current_ctx, src, size, roFlags) :
+            HSAKMT_CALL(hsaKmtRegisterMemory, m_hsakmt_current_ctx, src, size);
+        auto t3 = now(); addMs(regMs, t2, t3);
+        if (rr) {
+            pinFailures++;
+            if (!persistMap) munmap(src, size);
+            continue;
+        }
+
+        HSAuint64 altVA = 0;
+        auto t4 = now();
+        HSAKMT_STATUS mr = HSAKMT_CALL(hsaKmtMapMemoryToGPU, m_hsakmt_current_ctx,
+                                       src, size, &altVA);
+        auto t5 = now(); addMs(mapMs, t4, t5);
+        if (mr) {
+            pinFailures++;
+            HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, src);
+            if (!persistMap) munmap(src, size);
+            continue;
+        }
+
+        void *srcGpuVA = altVA ? reinterpret_cast<void *>(altVA) : src;
+        auto t6 = now();
+        sdmaQueue.PlaceAndSubmitPacket(SDMACopyDataPacket(sdmaQueue.GetFamilyId(),
+                                       dst, srcGpuVA, size));
+        sdmaQueue.Wait4PacketConsumption();
+        auto t7 = now(); addMs(sdmaMs, t6, t7);
+
+        auto t8 = now();
+        HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, src);
+        auto t9 = now(); addMs(unmapMs, t8, t9);
+        HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, src);
+        auto t10 = now(); addMs(deregMs, t9, t10);
+        if (!persistMap) munmap(src, size);
+        auto t11 = now(); addMs(munmapMs, t10, t11);
+
+        totalBytes += size;
+    }
+    auto copyEnd = clk::now();
+
+    double warmupMs = std::chrono::duration<double, std::milli>(warmupEnd - warmupStart).count();
+    double copyMs = std::chrono::duration<double, std::milli>(copyEnd - copyStart).count();
+    double totalMiB = totalBytes / (1024.0 * 1024.0);
+    double n = (double)(iterations - pinFailures ? iterations - pinFailures : 1);
+
+    LOG() << std::dec << "gemma-load " << pathName << " " << mode << ": warmup = "
+          << warmupMs << " ms; copy " << iterations << " shards (" << totalMiB
+          << " MiB) = " << copyMs << " ms (" << (copyMs ? totalMiB / (copyMs / 1000.0) : 0)
+          << " MiB/s, " << pinFailures << " pin failures)" << std::endl;
+    LOG() << std::dec << "gemma-phase " << pathName << " " << mode
+          << " [total ms | us/op]:"
+          << " mmap " << mmapMs << "|" << (mmapMs * 1e3 / n)
+          << " reg " << regMs << "|" << (regMs * 1e3 / n)
+          << " map " << mapMs << "|" << (mapMs * 1e3 / n)
+          << " sdma " << sdmaMs << "|" << (sdmaMs * 1e3 / n)
+          << " unmap " << unmapMs << "|" << (unmapMs * 1e3 / n)
+          << " dereg " << deregMs << "|" << (deregMs * 1e3 / n)
+          << " munmap " << munmapMs << "|" << (munmapMs * 1e3 / n) << std::endl;
+
+    EXPECT_SUCCESS_GPU(sdmaQueue.Destroy(), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, dst), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, dst, maxBlock), gpuNode);
+
+    /* One-time teardown of the persistent shard maps (amortized, not per-op). */
+    double finalMunmapMs = 0;
+    for (unsigned s = 0; s < numShards; s++) {
+        if (maps[s]) {
+            auto a = clk::now();
+            munmap(maps[s], maxBlock);
+            addMs(finalMunmapMs, a, clk::now());
+        }
+        close(fds[s]);
+        remove(fnames[s]);
+    }
+    if (persistMap)
+        LOG() << std::dec << "gemma-persist " << pathName << " " << mode
+              << ": final munmap " << numShards << " shards = " << finalMunmapMs
+              << " ms (" << (finalMunmapMs * 1e3 / iterations) << " us/op amortized)"
+              << std::endl;
+}
+
+TEST_P(KFDSVMRangeTest, GemmaModelLoadSimTest) {
+    TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
+    TEST_START(TESTPROFILE_RUNALL);
+
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->GemmaModelLoadSimTest(gpuNode);
+    }));
+
     TEST_END
 }
 

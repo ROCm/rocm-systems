@@ -54,6 +54,10 @@ class KFDSVMRangeTest : public KFDBaseComponentTest,
     void HMMProfilingEvent(int gpuNode);
     void VramOvercommitTest(int gpuNode);
     void PrefaultPartialRangeTest(int gpuNode);
+    void RegisterCtxPerfTest(int gpuNode, HSAuint64 gapSize);
+    void PrefetchPerfTest(int gpuNode);
+    void RegisterMapPerfTest(int gpuNode);
+    void GemmaModelLoadSimTest(int gpuNode);
 
  protected:
     virtual void SetUp();
