@@ -55,7 +55,7 @@ pub(crate) fn session_without_devices(native_session: NativeSession) -> HsaSessi
         debugger: None,
         logging: Arc::new(LogOutput::new()),
         next_handle: 0x4853_4101_0000_0000,
-        queue_state: QueueState::new(),
+        queue_state: QueueState::new(4),
         loader: LoaderState::new(),
         image_state: ImageState::new(),
         memory_state: MemoryState::new(health.clone()),

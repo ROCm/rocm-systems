@@ -210,6 +210,7 @@ identity is independent of the resulting HSA agent order.
 | `HSA_SCRATCH_SINGLE_LIMIT`, `HSA_SCRATCH_SINGLE_LIMIT_ASYNC` | Per-queue byte thresholds, clamped to the device scratch aperture. The asynchronous threshold can also be updated through the AMD agent API. |
 | `HSA_DISABLE_FRAGMENT_ALLOCATOR` | `1` disables allocation fragments. |
 | `HSA_ENABLE_YIELDING_POLL` | `1` enables bounded sleep backoff for polling-only scalar signal waits after a 200 microsecond hot window (10 milliseconds for an active hint). |
+| `GPU_MAX_HW_QUEUES` | Limits counted hardware queues per agent and priority (default `4`); `0` prevents acquisition. Unset, empty, or invalid values use the default. |
 | `HSA_FORCE_FINE_GRAIN_PCIE` | `1` exposes the fine-grain PCIe pool policy. |
 
 ## Build and verification

@@ -595,7 +595,7 @@ pub(crate) struct QueueState {
     pub(crate) counted_queue_pools: HashMap<(u64, u32), Vec<CountedHardwareQueue>>,
     /// Public counted queue pointers already released by the caller.
     pub(crate) released_counted_queues: HashSet<usize>,
-    /// Maximum counted queues accepted by this HSA generation.
+    /// Maximum counted hardware queues per agent and priority.
     pub(crate) counted_queue_limit: usize,
     /// Ring size selected for counted hardware queues.
     pub(crate) counted_queue_size: u32,
@@ -603,7 +603,7 @@ pub(crate) struct QueueState {
 
 impl QueueState {
     /// Initializes empty queue registries and the next queue ID.
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(counted_queue_limit: usize) -> Self {
         Self {
             next_queue_id: 0,
             queue_event: None,
@@ -616,7 +616,7 @@ impl QueueState {
             counted_queues: HashMap::new(),
             counted_queue_pools: HashMap::new(),
             released_counted_queues: HashSet::new(),
-            counted_queue_limit: 4,
+            counted_queue_limit,
             counted_queue_size: 16_384,
         }
     }

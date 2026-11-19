@@ -311,7 +311,7 @@ fn counted_inactivation_rejects_without_stopping_shared_indices() {
         assert_eq!(hsa_queue_add_write_index_relaxed(public, 2), 23);
         assert_eq!((*write).load(Ordering::Relaxed), 25);
         assert_eq!(hsa_queue_load_write_index_relaxed(public), 25);
-        let mut state = QueueState::new();
+        let mut state = QueueState::new(4);
         state.counted_queues.insert(public as usize, counted);
         assert_eq!(
             inactivate_unintercepted_queue(&mut state, public),
