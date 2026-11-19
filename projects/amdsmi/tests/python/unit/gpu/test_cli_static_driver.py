@@ -28,13 +28,11 @@ _DRIVER_INFO = {
     "driver_name": "amdgpu",
     "driver_full_version": "6.19.14.31400000-2370381",
     "driver_package": "amdgpu-dkms",
-    "driver_package_version": "6.19.14-2370381",
 }
 _NO_PACKAGE_DRIVER_INFO = {
     **_DRIVER_INFO,
     "driver_full_version": "6.19.14.31400000",
     "driver_package": "N/A",
-    "driver_package_version": "N/A",
 }
 
 
@@ -168,27 +166,24 @@ class TestCliStaticDriver(unittest.TestCase):
 
     def test_json_reports_full_version_and_package(self):
         driver = self._run_driver("json")
-        self.assertEqual(
-            list(driver), ["name", "version", "os_kernel_version", "package", "package_version"]
-        )
+        self.assertEqual(list(driver), ["name", "version", "os_kernel_version", "package"])
         self.assertEqual(driver["name"], "amdgpu")
         self.assertEqual(driver["version"], "6.19.14.31400000-2370381")
         self.assertEqual(driver["package"], "amdgpu-dkms")
-        self.assertEqual(driver["package_version"], "6.19.14-2370381")
 
     def test_human_readable_reports_full_version_and_package(self):
         driver = self._run_driver("human")
+        self.assertEqual(list(driver), ["name", "version", "os_kernel_version", "package"])
         self.assertEqual(driver["version"], "6.19.14.31400000-2370381")
         self.assertEqual(driver["package"], "amdgpu-dkms")
-        self.assertEqual(driver["package_version"], "6.19.14-2370381")
 
-    def test_json_and_csv_keep_package_keys_without_a_package(self):
+    def test_json_and_csv_keep_the_package_key_without_a_package(self):
         for fmt in ("json", "csv"):
             with self.subTest(fmt=fmt):
                 driver = self._run_driver(fmt, _NO_PACKAGE_DRIVER_INFO)
+                self.assertEqual(list(driver), ["name", "version", "os_kernel_version", "package"])
                 self.assertEqual(driver["version"], "6.19.14.31400000")
                 self.assertEqual(driver["package"], "N/A")
-                self.assertEqual(driver["package_version"], "N/A")
 
     def test_human_readable_hides_package_without_a_package(self):
         driver = self._run_driver("human", _NO_PACKAGE_DRIVER_INFO)
@@ -199,4 +194,3 @@ class TestCliStaticDriver(unittest.TestCase):
         self.assertEqual(driver["name"], "N/A")
         self.assertEqual(driver["version"], "N/A")
         self.assertEqual(driver["package"], "N/A")
-        self.assertEqual(driver["package_version"], "N/A")

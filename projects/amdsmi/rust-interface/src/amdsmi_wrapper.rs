@@ -1737,9 +1737,8 @@ pub struct AmdsmiDriverInfoV2T {
     pub amdgpu_driver_version: [::std::os::raw::c_char; 256usize],
     pub driver_build_version: [::std::os::raw::c_char; 256usize],
     pub driver_full_version: [::std::os::raw::c_char; 256usize],
-    pub driver_package_version: [::std::os::raw::c_char; 256usize],
     pub driver_package: AmdsmiDriverPackageT,
-    pub reserved: [u32; 511usize],
+    pub reserved: [u32; 575usize],
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
@@ -1759,12 +1758,10 @@ const _: () = {
         [::std::mem::offset_of!(AmdsmiDriverInfoV2T, driver_build_version) - 1280usize];
     ["Offset of field: AmdsmiDriverInfoV2T::driver_full_version"]
         [::std::mem::offset_of!(AmdsmiDriverInfoV2T, driver_full_version) - 1536usize];
-    ["Offset of field: AmdsmiDriverInfoV2T::driver_package_version"]
-        [::std::mem::offset_of!(AmdsmiDriverInfoV2T, driver_package_version) - 1792usize];
     ["Offset of field: AmdsmiDriverInfoV2T::driver_package"]
-        [::std::mem::offset_of!(AmdsmiDriverInfoV2T, driver_package) - 2048usize];
+        [::std::mem::offset_of!(AmdsmiDriverInfoV2T, driver_package) - 1792usize];
     ["Offset of field: AmdsmiDriverInfoV2T::reserved"]
-        [::std::mem::offset_of!(AmdsmiDriverInfoV2T, reserved) - 2052usize];
+        [::std::mem::offset_of!(AmdsmiDriverInfoV2T, reserved) - 1796usize];
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]

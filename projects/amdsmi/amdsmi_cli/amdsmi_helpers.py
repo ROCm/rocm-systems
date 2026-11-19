@@ -451,7 +451,6 @@ class AMDSMIHelpers:
             "driver_build_version": "N/A",
             "driver_full_version": info["driver_version"],
             "driver_package": "N/A",
-            "driver_package_version": "N/A",
         }
 
     def get_gpu_cuid_info(self, device_handle, include_primary=False):

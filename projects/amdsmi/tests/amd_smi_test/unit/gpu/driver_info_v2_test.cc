@@ -33,8 +33,8 @@ TEST(GpuUnit, DriverInfoV1LayoutIsUnchanged) {
 TEST(GpuUnit, DriverInfoV2ReservedTailFillsStruct) {
   EXPECT_EQ(sizeof(amdsmi_driver_info_v2_t), 4096U);
   EXPECT_EQ(offsetof(amdsmi_driver_info_v2_t, driver_kernel_version), 768U);
-  EXPECT_EQ(offsetof(amdsmi_driver_info_v2_t, driver_package), 2048U);
-  EXPECT_EQ(offsetof(amdsmi_driver_info_v2_t, reserved), 2052U);
+  EXPECT_EQ(offsetof(amdsmi_driver_info_v2_t, driver_package), 1792U);
+  EXPECT_EQ(offsetof(amdsmi_driver_info_v2_t, reserved), 1796U);
   EXPECT_EQ(offsetof(amdsmi_driver_info_v2_t, reserved) + sizeof(amdsmi_driver_info_v2_t::reserved),
             sizeof(amdsmi_driver_info_v2_t));
 }

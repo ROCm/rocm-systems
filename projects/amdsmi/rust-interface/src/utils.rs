@@ -180,8 +180,7 @@ impl_cstr_getters!(
     driver_kernel_version,
     amdgpu_driver_version,
     driver_build_version,
-    driver_full_version,
-    driver_package_version
+    driver_full_version
 );
 
 // Implement the getters for the C string fields in AmdsmiNameValueT

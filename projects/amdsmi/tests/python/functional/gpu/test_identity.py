@@ -125,7 +125,7 @@ class TestGpuIdentity(unittest.TestCase):
 
         # A.B.C[.D] for the module, A.B.C[.D]-<build>[.<distro>] for the package.
         dkms = re.fullmatch(
-            r"((\d+\.\d+\.\d+)(?:\.\d+)*-(\d+))(?:\..*)?", _dkms_version_of_running_kernel() or ""
+            r"(\d+\.\d+\.\d+)(?:\.\d+)*-(\d+)(?:\..*)?", _dkms_version_of_running_kernel() or ""
         )
         answered = 0
         for gpu in self.common.processors:
@@ -146,7 +146,6 @@ class TestGpuIdentity(unittest.TestCase):
                     "driver_build_version",
                     "driver_full_version",
                     "driver_package",
-                    "driver_package_version",
                 },
             )
 
@@ -156,12 +155,11 @@ class TestGpuIdentity(unittest.TestCase):
             self.assertEqual(
                 info["amdgpu_driver_version"], (module.group(2) or "N/A") if module else "N/A"
             )
-            if module and dkms and dkms.group(2) == module.group(1):
+            if module and dkms and dkms.group(1) == module.group(1):
                 # DKMS recorded a package with the kernel version of the loaded module.
                 self.assertEqual(info["driver_package"], "amdgpu-dkms")
-                self.assertEqual(info["driver_package_version"], dkms.group(1))
-                self.assertEqual(info["driver_build_version"], dkms.group(3))
-                self.assertEqual(info["driver_full_version"], f"{version}-{dkms.group(3)}")
+                self.assertEqual(info["driver_build_version"], dkms.group(2))
+                self.assertEqual(info["driver_full_version"], f"{version}-{dkms.group(2)}")
             else:
                 # A package is reported only together with its build.
                 self.assertEqual(

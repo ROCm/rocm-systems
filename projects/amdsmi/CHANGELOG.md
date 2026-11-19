@@ -66,7 +66,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ### Changed
 
 - **`amd-smi` now shows the driver package build in the amdgpu version**.  
-  - `amd-smi`, `amd-smi version`, and `amd-smi static --driver` report the version as `6.19.14.31400000-2370381` and add the driver package when the installed `amdgpu-dkms` or `amdgpu-kmod` package matches the loaded driver. Scripts that parse the amdgpu version now get the `-<build>` suffix, and `amd-smi static --csv` has two new columns after `os_kernel_version`.
+  - `amd-smi`, `amd-smi version`, and `amd-smi static --driver` report the version as `6.19.14.31400000-2370381` and name the driver package when the installed `amdgpu-dkms` or `amdgpu-kmod` package matches the loaded driver. Scripts that parse the amdgpu version now get the `-<build>` suffix, and `amd-smi static --csv` has a new `package` column after `os_kernel_version`.
 
 - **The `amdsmi` Python module no longer loads an AMD SMI library newer than itself**.  
   - A newer library's structures can be larger than the module allocates, so it is now skipped, and an older library loads with a warning. To load a specific library anyway, set `AMDSMI_LIB_OVERRIDE` to its absolute path.

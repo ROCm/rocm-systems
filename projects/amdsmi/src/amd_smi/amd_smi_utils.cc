@@ -1963,8 +1963,6 @@ auto smi_amdgpu_parse_driver_versions(std::string_view module_version,
                                   (package != nullptr) ? package->build : std::string{});
   smi_clear_char_and_reinitialize(info->driver_full_version, AMDSMI_MAX_STRING_LENGTH,
                                   full_version);
-  smi_clear_char_and_reinitialize(info->driver_package_version, AMDSMI_MAX_STRING_LENGTH,
-                                  (package != nullptr) ? package->version : std::string{});
   info->driver_package = package_type;
 
   return AMDSMI_STATUS_SUCCESS;
