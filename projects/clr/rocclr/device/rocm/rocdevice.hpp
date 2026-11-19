@@ -677,9 +677,7 @@ class Device : public NullDevice {
 
   //! Pin a host pointer allocated by C/C++ or OS allocator (i.e. ordinary system DRAM) and
   //! return a new device pointer accessible by the GPU agent(s).
-  // mapAllAgents maps the range to every GPU agent visible to this process in one call
-  // (used when several devices sharing one host-registered buffer would otherwise each
-  // lock the same range separately). Default (false): only this device's own agent.
+  //! mapAllAgents locks the range to every GPU agent in one call instead of just this one.
   void* hostLock(void* hostMem, size_t size, MemorySegment memSegment,
                  bool mapAllAgents = false) const;
 

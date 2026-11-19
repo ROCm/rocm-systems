@@ -2500,10 +2500,7 @@ void* Device::hostLock(void* hostMem, size_t size, const MemorySegment memSegmen
     memFlags |= HSA_AMD_MEMORY_POOL_UNCACHED_FLAG;
   }
 
-  // gpu_agents_ is every GPU visible to this process. The only caller that passes
-  // mapAllAgents is HIP's hipHostRegister path, whose owning buffer always lives in
-  // hip::host_context -- a context built once from every device in the process -- so
-  // gpu_agents_ is exactly that context's device list, not a superset of it.
+  // gpu_agents_ is every GPU visible to this process.
   hsa_agent_t* agents = const_cast<hsa_agent_t*>(&bkendDevice_);
   int numAgents = 1;
   if (mapAllAgents && !gpu_agents_.empty()) {

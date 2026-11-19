@@ -132,14 +132,12 @@ class Memory : public device::Memory {
   //! Returns the reconstructed-SRD interop image descriptor (may be null).
   hsa_amd_image_descriptor_t* getAmdImageDesc() const { return amdImageDesc_; }
 
-  //! True only for the device::Memory that actually called hsa_amd_memory_lock; only it
-  //! may call Hsa::memory_unlock. Public (not protected) so a sibling can read it through
-  //! a roc::Memory base pointer without a derived-class cast.
+  //! True only for the device::Memory that called hsa_amd_memory_lock; only it may call
+  //! Hsa::memory_unlock. Public so a sibling can read it through a roc::Memory base pointer.
   bool HostLockOwner() const { return hostLockOwner_; }
 
-  //! True only when this object's lock call covered every GPU agent visible to the
-  //! process (see Device::hostLock's mapAllAgents). Siblings may only reuse the owner's
-  //! mapping when this is true.
+  //! True only when this object's lock covered every GPU agent. Siblings may only reuse
+  //! the owner's mapping when this is true.
   bool HostLockAllAgents() const { return hostLockAllAgents_; }
 
  protected:
@@ -155,7 +153,7 @@ class Memory : public device::Memory {
     owningAgentDriverNodeId_.store(Device::agentDriverNodeId(agent), std::memory_order_release);
   }
 
-  //! Record the outcome of this object's own host-lock attempt (see Buffer::create()).
+  //! Record the outcome of this object's host-lock attempt (see Buffer::create()).
   void setHostLockState(bool owner, bool allAgents) {
     hostLockOwner_ = owner;
     hostLockAllAgents_ = allAgents;
