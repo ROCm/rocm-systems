@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/sopp.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/decode_factories.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/execution_backend.h"
 #include <memory>
 
@@ -58,6 +59,7 @@ SSethaltSopp::SSethaltSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= SUSPENDS_WAVE;
 }
 
 namespace detail {
@@ -77,6 +79,7 @@ SSleepSopp::SSleepSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= SUSPENDS_WAVE;
 }
 
 namespace detail {
@@ -235,6 +238,8 @@ STrapSopp::STrapSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= SOFTWARE_TRAP;
+  flags_ |= WRITES_PC;
 }
 
 namespace detail {
@@ -516,6 +521,8 @@ SCbranchCdbgsysSopp::SCbranchCdbgsysSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= COND_BRANCH;
+  flags_ |= IGNORES_EXEC;
 }
 
 namespace detail {
@@ -529,6 +536,11 @@ DecodeResult decodeSCbranchCdbgsysSopp(const MachineInst *opcode,
 }
 } // namespace detail
 
+std::optional<int64_t> SCbranchCdbgsysSopp::branch_offset_bytes() const {
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
+  return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
+}
+
 SCbranchCdbguserSopp::SCbranchCdbguserSopp(const MachineInst *inst)
     : Sopp("s_cbranch_cdbguser", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCbranchCdbguserSopp)),
@@ -536,6 +548,8 @@ SCbranchCdbguserSopp::SCbranchCdbguserSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= COND_BRANCH;
+  flags_ |= IGNORES_EXEC;
 }
 
 namespace detail {
@@ -549,6 +563,11 @@ DecodeResult decodeSCbranchCdbguserSopp(const MachineInst *opcode,
 }
 } // namespace detail
 
+std::optional<int64_t> SCbranchCdbguserSopp::branch_offset_bytes() const {
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
+  return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
+}
+
 SCbranchCdbgsysOrUserSopp::SCbranchCdbgsysOrUserSopp(const MachineInst *inst)
     : Sopp("s_cbranch_cdbgsys_or_user", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCbranchCdbgsysOrUserSopp)),
@@ -556,6 +575,8 @@ SCbranchCdbgsysOrUserSopp::SCbranchCdbgsysOrUserSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= COND_BRANCH;
+  flags_ |= IGNORES_EXEC;
 }
 
 namespace detail {
@@ -569,6 +590,11 @@ DecodeResult decodeSCbranchCdbgsysOrUserSopp(const MachineInst *opcode,
 }
 } // namespace detail
 
+std::optional<int64_t> SCbranchCdbgsysOrUserSopp::branch_offset_bytes() const {
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
+  return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
+}
+
 SCbranchCdbgsysAndUserSopp::SCbranchCdbgsysAndUserSopp(const MachineInst *inst)
     : Sopp("s_cbranch_cdbgsys_and_user", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCbranchCdbgsysAndUserSopp)),
@@ -576,6 +602,8 @@ SCbranchCdbgsysAndUserSopp::SCbranchCdbgsysAndUserSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= COND_BRANCH;
+  flags_ |= IGNORES_EXEC;
 }
 
 namespace detail {
@@ -588,6 +616,11 @@ DecodeResult decodeSCbranchCdbgsysAndUserSopp(const MachineInst *opcode,
   return std::make_unique<SCbranchCdbgsysAndUserSopp>(opcode);
 }
 } // namespace detail
+
+std::optional<int64_t> SCbranchCdbgsysAndUserSopp::branch_offset_bytes() const {
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
+  return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
+}
 
 SEndpgmSopp::SEndpgmSopp(const MachineInst *inst)
     : Sopp("s_endpgm", reinterpret_cast<const OpEncoding *>(inst),
@@ -715,6 +748,7 @@ SSendmsghaltSopp::SSendmsghaltSopp(const MachineInst *inst)
   num_dst_ = 0;
   m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= SUSPENDS_WAVE;
 }
 
 namespace detail {

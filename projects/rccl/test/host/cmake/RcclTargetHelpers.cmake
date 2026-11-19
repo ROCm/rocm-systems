@@ -74,13 +74,14 @@ endfunction()
 # Apply the host-only compile/link flags shared by the in-build micro targets,
 # plus the optional AddressSanitizer wiring.
 function(rccl_apply_host_only_flags _tgt)
-  target_compile_options(${_tgt} PRIVATE
-    --offload-host-only -ffunction-sections
-    -fprofile-instr-generate -fcoverage-mapping)
-  target_link_options(${_tgt} PRIVATE
-    -no-hip-rt
-    -fprofile-instr-generate -fcoverage-mapping
-    -Wl,--gc-sections)
+  set(_host_only_compile_options --offload-host-only -ffunction-sections)
+  set(_host_only_link_options -no-hip-rt -Wl,--gc-sections)
+  if(ENABLE_CODE_COVERAGE)
+    list(APPEND _host_only_compile_options -fprofile-instr-generate -fcoverage-mapping)
+    list(APPEND _host_only_link_options -fprofile-instr-generate -fcoverage-mapping)
+  endif()
+  target_compile_options(${_tgt} PRIVATE ${_host_only_compile_options})
+  target_link_options(${_tgt} PRIVATE ${_host_only_link_options})
   if(BUILD_ADDRESS_SANITIZER)
     target_compile_options(${_tgt} PRIVATE -fsanitize=address)
     target_link_options(${_tgt} PRIVATE -fsanitize=address -shared-libasan)

@@ -201,6 +201,10 @@ public:
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
+  bool uses_data1() const { return inst_.offset0 != inst_.offset1; }
+  bool tracks_explicit_source(uint8_t index) const override {
+    return src_operand(index) != &data1 || uses_data1();
+  }
   Operand addr;
   Operand data0;
   Operand data1;
@@ -213,6 +217,10 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
+  }
+  bool uses_data1() const { return inst_.offset0 != inst_.offset1; }
+  bool tracks_explicit_source(uint8_t index) const override {
+    return src_operand(index) != &data1 || uses_data1();
   }
   Operand addr;
   Operand data0;
@@ -527,6 +535,10 @@ public:
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
+  bool uses_data1() const { return inst_.offset0 != inst_.offset1; }
+  bool tracks_explicit_source(uint8_t index) const override {
+    return src_operand(index) != &data1 || uses_data1();
+  }
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -541,6 +553,10 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
+  }
+  bool uses_data1() const { return inst_.offset0 != inst_.offset1; }
+  bool tracks_explicit_source(uint8_t index) const override {
+    return src_operand(index) != &data1 || uses_data1();
   }
   Operand vdst;
   Operand addr;
@@ -929,6 +945,10 @@ public:
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
+  bool uses_data1() const { return inst_.offset0 != inst_.offset1; }
+  bool tracks_explicit_source(uint8_t index) const override {
+    return src_operand(index) != &data1 || uses_data1();
+  }
   Operand addr;
   Operand data0;
   Operand data1;
@@ -941,6 +961,10 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
+  }
+  bool uses_data1() const { return inst_.offset0 != inst_.offset1; }
+  bool tracks_explicit_source(uint8_t index) const override {
+    return src_operand(index) != &data1 || uses_data1();
   }
   Operand addr;
   Operand data0;
@@ -1305,6 +1329,10 @@ public:
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
+  bool uses_data1() const { return inst_.offset0 != inst_.offset1; }
+  bool tracks_explicit_source(uint8_t index) const override {
+    return src_operand(index) != &data1 || uses_data1();
+  }
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -1319,6 +1347,10 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
+  }
+  bool uses_data1() const { return inst_.offset0 != inst_.offset1; }
+  bool tracks_explicit_source(uint8_t index) const override {
+    return src_operand(index) != &data1 || uses_data1();
   }
   Operand vdst;
   Operand addr;
@@ -1544,6 +1576,314 @@ public:
   Operand vdst;
   Operand addr;
   Operand dsmem;
+};
+
+class DsAddSrc2U32Ds : public Ds {
+public:
+  DsAddSrc2U32Ds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand dsmem;
+  Operand dsmem_out;
+  Operand dsmem_in;
+};
+
+class DsSubSrc2U32Ds : public Ds {
+public:
+  DsSubSrc2U32Ds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand dsmem;
+  Operand dsmem_out;
+  Operand dsmem_in;
+};
+
+class DsRsubSrc2U32Ds : public Ds {
+public:
+  DsRsubSrc2U32Ds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand dsmem;
+  Operand dsmem_out;
+  Operand dsmem_in;
+};
+
+class DsIncSrc2U32Ds : public Ds {
+public:
+  DsIncSrc2U32Ds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand dsmem;
+  Operand dsmem_out;
+  Operand dsmem_in;
+};
+
+class DsDecSrc2U32Ds : public Ds {
+public:
+  DsDecSrc2U32Ds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand dsmem;
+  Operand dsmem_out;
+  Operand dsmem_in;
+};
+
+class DsMinSrc2I32Ds : public Ds {
+public:
+  DsMinSrc2I32Ds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand dsmem;
+  Operand dsmem_out;
+  Operand dsmem_in;
+};
+
+class DsMaxSrc2I32Ds : public Ds {
+public:
+  DsMaxSrc2I32Ds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand dsmem;
+  Operand dsmem_out;
+  Operand dsmem_in;
+};
+
+class DsMinSrc2U32Ds : public Ds {
+public:
+  DsMinSrc2U32Ds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand dsmem;
+  Operand dsmem_out;
+  Operand dsmem_in;
+};
+
+class DsMaxSrc2U32Ds : public Ds {
+public:
+  DsMaxSrc2U32Ds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand dsmem;
+  Operand dsmem_out;
+  Operand dsmem_in;
+};
+
+class DsAndSrc2B32Ds : public Ds {
+public:
+  DsAndSrc2B32Ds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand dsmem;
+  Operand dsmem_out;
+  Operand dsmem_in;
+};
+
+class DsOrSrc2B32Ds : public Ds {
+public:
+  DsOrSrc2B32Ds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand dsmem;
+  Operand dsmem_out;
+  Operand dsmem_in;
+};
+
+class DsXorSrc2B32Ds : public Ds {
+public:
+  DsXorSrc2B32Ds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand dsmem;
+  Operand dsmem_out;
+  Operand dsmem_in;
+};
+
+class DsWriteSrc2B32Ds : public Ds {
+public:
+  DsWriteSrc2B32Ds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand dsmem;
+  Operand dsmem_out;
+};
+
+class DsMinSrc2F32Ds : public Ds {
+public:
+  DsMinSrc2F32Ds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand dsmem;
+  Operand dsmem_out;
+  Operand dsmem_in;
+};
+
+class DsMaxSrc2F32Ds : public Ds {
+public:
+  DsMaxSrc2F32Ds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand dsmem;
+  Operand dsmem_out;
+  Operand dsmem_in;
+};
+
+class DsAddSrc2F32Ds : public Ds {
+public:
+  DsAddSrc2F32Ds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand dsmem;
+  Operand dsmem_out;
+  Operand dsmem_in;
+};
+
+class DsAddSrc2U64Ds : public Ds {
+public:
+  DsAddSrc2U64Ds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand dsmem;
+  Operand dsmem_out;
+  Operand dsmem_in;
+};
+
+class DsSubSrc2U64Ds : public Ds {
+public:
+  DsSubSrc2U64Ds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand dsmem;
+  Operand dsmem_out;
+  Operand dsmem_in;
+};
+
+class DsRsubSrc2U64Ds : public Ds {
+public:
+  DsRsubSrc2U64Ds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand dsmem;
+  Operand dsmem_out;
+  Operand dsmem_in;
+};
+
+class DsIncSrc2U64Ds : public Ds {
+public:
+  DsIncSrc2U64Ds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand dsmem;
+  Operand dsmem_out;
+  Operand dsmem_in;
+};
+
+class DsDecSrc2U64Ds : public Ds {
+public:
+  DsDecSrc2U64Ds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand dsmem;
+  Operand dsmem_out;
+  Operand dsmem_in;
+};
+
+class DsMinSrc2I64Ds : public Ds {
+public:
+  DsMinSrc2I64Ds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand dsmem;
+  Operand dsmem_out;
+  Operand dsmem_in;
+};
+
+class DsMaxSrc2I64Ds : public Ds {
+public:
+  DsMaxSrc2I64Ds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand dsmem;
+  Operand dsmem_out;
+  Operand dsmem_in;
+};
+
+class DsMinSrc2U64Ds : public Ds {
+public:
+  DsMinSrc2U64Ds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand dsmem;
+  Operand dsmem_out;
+  Operand dsmem_in;
+};
+
+class DsMaxSrc2U64Ds : public Ds {
+public:
+  DsMaxSrc2U64Ds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand dsmem;
+  Operand dsmem_out;
+  Operand dsmem_in;
+};
+
+class DsAndSrc2B64Ds : public Ds {
+public:
+  DsAndSrc2B64Ds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand dsmem;
+  Operand dsmem_out;
+  Operand dsmem_in;
+};
+
+class DsOrSrc2B64Ds : public Ds {
+public:
+  DsOrSrc2B64Ds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand dsmem;
+  Operand dsmem_out;
+  Operand dsmem_in;
+};
+
+class DsXorSrc2B64Ds : public Ds {
+public:
+  DsXorSrc2B64Ds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand dsmem;
+  Operand dsmem_out;
+  Operand dsmem_in;
+};
+
+class DsWriteSrc2B64Ds : public Ds {
+public:
+  DsWriteSrc2B64Ds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand dsmem;
+  Operand dsmem_out;
+};
+
+class DsMinSrc2F64Ds : public Ds {
+public:
+  DsMinSrc2F64Ds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand dsmem;
+  Operand dsmem_out;
+  Operand dsmem_in;
+};
+
+class DsMaxSrc2F64Ds : public Ds {
+public:
+  DsMaxSrc2F64Ds(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand dsmem;
+  Operand dsmem_out;
+  Operand dsmem_in;
 };
 
 } // namespace cdna1

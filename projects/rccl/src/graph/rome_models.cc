@@ -28,6 +28,7 @@ THE SOFTWARE.
 #include <math.h>
 #include <sys/time.h>
 #include <algorithm>
+#include <memory>
 #include <vector>
 #include <string.h>
 #include "rome_models.h"
@@ -3817,6 +3818,17 @@ static struct rcclRomeModel romeTopoModels[] = {
 // This environment variable allows disabling of the reversal the graph parsing
 RCCL_PARAM(ModelReversalDisable, "MODEL_REVERSAL_DISABLE", 0);
 
+/* Accumulate one decimal digit into a number being parsed, refusing to overflow it.
+ */
+static ncclResult_t accumulateDigit(int* value, int digit, int max, const char* what) {
+  if (*value > (max - digit) / 10) {
+    WARN("%s; initialization will fail", what);
+    return ncclInvalidUsage;
+  }
+  *value = *value * 10 + digit;
+  return ncclSuccess;
+}
+
 /* Parse user defined rings. Format is like :
  * "0 1|1 0|0 1 2 3|3 2 1 0|N0 0 2 3 1 N1|1 3 2 0|0 1 2 3 4 5 6 7|N2 7 6 5 4 3 2 1 0 N1"
  * GPUs are numberd from 0 to ngpus, represening GPU-index for the current communicator
@@ -3832,10 +3844,15 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
   int gpu = 0;
   int offset = 0;
   int status = 0; // 0 : between numbers, 1 : inside number, 2: start NET, 3: inside NET
-  int nets[NCCL_TOPO_MAX_NODES * 2];
+  int nets[NCCL_TOPO_MAX_NODES * 2] = {};
   int net_offset = 0, net_count = 0;
   int ngpus = system->nodes[GPU].count;
   int nnets = system->nodes[NET].count;
+
+  if (str == NULL) {
+    WARN("No user-defined rings to parse");
+    return ncclInvalidArgument;
+  }
 
   if (rcclParamModelReversalDisable()) reverse = 0;
 
@@ -3849,25 +3866,40 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
       if (digit >= 0 && digit <= 9) {
         switch (status) {
         case 0:
+          if (gpu >= NCCL_TOPO_MAX_NODES) {
+            WARN("Too many GPUs in one ring (max %d) in user-defined rings (NCCL_RINGS); initialization will fail",
+                 NCCL_TOPO_MAX_NODES);
+            return ncclInvalidUsage;
+          }
           gpus[gpu] = digit;
           status = 1;
           break;
         case 1:
-          gpus[gpu] = gpus[gpu] * 10 + digit;
+          NCCLCHECK(accumulateDigit(&gpus[gpu], digit, INT_MAX,
+                                    "GPU number too large in user-defined rings (NCCL_RINGS)"));
           break;
         case 2:
+          if (net_offset >= NCCL_TOPO_MAX_NODES * 2) {
+            WARN("Too many NETs in one ring (max %d) in user-defined rings (NCCL_RINGS); initialization will fail",
+                 NCCL_TOPO_MAX_NODES * 2);
+            return ncclInvalidUsage;
+          }
           nets[net_offset] = digit + 'N';
           status = 3;
           break;
-        case 3:
-          nets[net_offset] = (nets[net_offset] - 'N') * 10 + digit + 'N';
+        case 3: {
+          // Held biased by 'N', so the number itself may only reach INT_MAX - 'N'.
+          int net = nets[net_offset] - 'N';
+          NCCLCHECK(accumulateDigit(&net, digit, INT_MAX - 'N',
+                                    "NET number too large in user-defined rings (NCCL_RINGS)"));
+          nets[net_offset] = net + 'N';
           break;
+        }
         }
       } else {
         if (status == 1) {
           gpu++;
           net_offset = 2 * gpu - 1;
-          if (gpu > NCCL_TOPO_MAX_NODES) goto end;
         } else if (status == 2 || status == 3) {
           net_offset++;
           net_count++;
@@ -3879,6 +3911,11 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
           if (gpu != ngpus) goto newchannel;
           // Ignore if net_count is not 0 or odd number
           if (net_count && net_count % 2) goto newchannel;
+          if (nChannels >= MAXCHANNELS) {
+            WARN("Too many channels in user-defined rings (max %d) (NCCL_RINGS); initialization will fail",
+                 MAXCHANNELS);
+            return ncclInvalidUsage;
+          }
 
           for (int r = 0; r < ngpus; r++) {
             int g = gpus[r];
@@ -3912,7 +3949,11 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
             }
             memcpy(&graph->intraNets[ngpus * nChannels * 2], nets, ngpus * 2 * sizeof(int));
             graph->nIntraChannels++;
-            if (nets[0] - 'N' >= nnets || nets[ngpus * 2 - 1] - 'N' >= nnets) goto newchannel;
+            // A slot the ring did not name is still 0 here, which reads as a negative
+            // NET id. Without the lower bound it passes the limit and lands in inter[],
+            // where multi-node init then fails in ncclTopoIdToNetDev.
+            if (nets[0] - 'N' < 0 || nets[0] - 'N' >= nnets ||
+                nets[ngpus * 2 - 1] - 'N' < 0 || nets[ngpus * 2 - 1] - 'N' >= nnets) goto newchannel;
             graph->inter[nChannels * 2] = nets[0] - 'N';
             graph->inter[nChannels * 2 + 1] = nets[ngpus * 2 - 1] - 'N';
           } else if (nnets) {
@@ -3924,13 +3965,14 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
           gpu = 0;
           net_offset = 0;
           net_count = 0;
+          memset(nets, 0, sizeof(nets));
         }
       }
     }
   } while (str[offset++] != 0);
 end:
   graph->nChannels = nChannels;
-  graph->bwIntra = graph->bwInter = system->totalBw / nChannels;
+  graph->bwIntra = graph->bwInter = nChannels ? system->totalBw / nChannels : 0;
   if (graph->id == 1) {
     for (int i = 0; i < graph->nChannels; i++) {
       int64_t netId;
@@ -4004,11 +4046,8 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
         status = 1;
         break;
       case 1:
-        if (gpus[gpu] > (INT_MAX - digit) / 10) {
-          WARN("GPU number too large in user-defined trees (RCCL_TREES); initialization will fail");
-          return ncclInvalidUsage;
-        }
-        gpus[gpu] = gpus[gpu] * 10 + digit;
+        NCCLCHECK(accumulateDigit(&gpus[gpu], digit, INT_MAX,
+                                  "GPU number too large in user-defined trees (RCCL_TREES)"));
         break;
       }
     } else {
@@ -4596,6 +4635,7 @@ ncclResult_t parseA2a8P(struct ncclTopoSystem* system, struct ncclTopoGraph* gra
     WARN("Failed to allocate memory for GPU permutations");
     return ncclSystemError;
   }
+  std::unique_ptr<int, void (*)(void*)> permutationsOwner(all_gpu_permutations, free);
   struct timeval tvs, tve;
   gettimeofday(&tvs, NULL);
   std::vector<int> r(ngpus), g(ngpus), rdm(ngpus);
@@ -4752,8 +4792,6 @@ ncclResult_t parseA2a8P(struct ncclTopoSystem* system, struct ncclTopoGraph* gra
     NCCLCHECK(rcclTopoSetPresetRomeModelIdx(system, i));
   }
 
-  // clean up
-  free(all_gpu_permutations);
   return ncclSuccess;
 }
 
@@ -4767,9 +4805,7 @@ ncclResult_t parseRome4P2H(struct ncclTopoSystem* system, struct ncclTopoGraph* 
   if (graph->pattern != NCCL_TOPO_PATTERN_RING && graph->pattern != NCCL_TOPO_PATTERN_BALANCED_TREE) return ncclSuccess;
 
   if (ngpus > 8) return ncclSuccess;
-  // only valid on Rome
-  int arch, vendor, model;
-  NCCLCHECK(ncclTopoCpuType(system, &arch, &vendor, &model));
+  const bool isRome = rcclTopoCpuIsRome(system);
 
   // number of GPUs and NICs on each numa node is used as first screening pattern
   struct rcclRomeModel romeTopo;
@@ -4800,9 +4836,7 @@ ncclResult_t parseRome4P2H(struct ncclTopoSystem* system, struct ncclTopoGraph* 
 
   for (i = 0; i < sizeof(romeTopoModels) / sizeof(romeTopoModels[0]); i++) {
     bool ignore_cpu = checkOption(romeTopoModels[i].options, "noCpuCheck");
-    if (!ignore_cpu &&
-        (arch != NCCL_TOPO_CPU_ARCH_X86 || vendor != NCCL_TOPO_CPU_VENDOR_AMD || model != NCCL_TOPO_CPU_MODEL_AMD_ROME))
-      continue;
+    if (!ignore_cpu && !isRome) continue;
     bool ignore_numa = checkOption(romeTopoModels[i].options, "disableNumaMatching");
     if (!ignore_numa && romeTopo.nCpus != romeTopoModels[i].nCpus) continue;
     if (romeTopo.nGpus != romeTopoModels[i].nGpus || romeTopo.nNics != romeTopoModels[i].nNics ||
@@ -4943,10 +4977,7 @@ ncclResult_t parse1H16P(struct ncclTopoSystem* system, struct ncclTopoGraph* gra
   const int nnets = system->nodes[NET].count;
 
   // only valid on Rome
-  int arch, vendor, model;
-  NCCLCHECK(ncclTopoCpuType(system, &arch, &vendor, &model));
-  if (arch != NCCL_TOPO_CPU_ARCH_X86 || vendor != NCCL_TOPO_CPU_VENDOR_AMD || model != NCCL_TOPO_CPU_MODEL_AMD_ROME)
-    return ncclSuccess;
+  if (!rcclTopoCpuIsRome(system)) return ncclSuccess;
 
   // number of GPUs and NICs on each numa node is used as first screening pattern
   struct rcclRomeModel romeTopo;
@@ -4963,6 +4994,7 @@ ncclResult_t parse1H16P(struct ncclTopoSystem* system, struct ncclTopoGraph* gra
     WARN("Failed to allocate memory for GPU permutations");
     return ncclSystemError;
   }
+  std::unique_ptr<int, void (*)(void*)> permutationsOwner(all_gpu_permutations, free);
   struct timeval tvs, tve;
   gettimeofday(&tvs, NULL);
   std::vector<int> r(ngpus), g(ngpus);
@@ -5073,8 +5105,6 @@ ncclResult_t parse1H16P(struct ncclTopoSystem* system, struct ncclTopoGraph* gra
   if (graph->nChannels) {
     NCCLCHECK(rcclTopoSetPresetRomeModelIdx(system, i));
   }
-  // clean up
-  free(all_gpu_permutations);
   return ncclSuccess;
 }
 
@@ -5120,10 +5150,7 @@ ncclResult_t parse4H4P(struct ncclTopoSystem* system, struct ncclTopoGraph* grap
   const int nnets = system->nodes[NET].count;
 
   // only valid on Rome
-  int arch, vendor, model;
-  NCCLCHECK(ncclTopoCpuType(system, &arch, &vendor, &model));
-  if (arch != NCCL_TOPO_CPU_ARCH_X86 || vendor != NCCL_TOPO_CPU_VENDOR_AMD || model != NCCL_TOPO_CPU_MODEL_AMD_ROME)
-    return ncclSuccess;
+  if (!rcclTopoCpuIsRome(system)) return ncclSuccess;
 
   // number of GPUs and NICs on each numa node is used as first screening pattern
   struct rcclRomeModel romeTopo;
@@ -5182,8 +5209,7 @@ ncclResult_t parse4H4P(struct ncclTopoSystem* system, struct ncclTopoGraph* grap
     }
   }
   INFO(NCCL_GRAPH, "%s", line);
-  if (arch == NCCL_TOPO_CPU_ARCH_X86 && vendor == NCCL_TOPO_CPU_VENDOR_AMD && model == NCCL_TOPO_CPU_MODEL_AMD_ROME)
-    system->type |= RCCL_TOPO_4P2H_ROME;
+  system->type |= RCCL_TOPO_4P2H_ROME;
   parseOptions(system, rome_model_68.options);
   // create 4P4H based on reference and remapped ids
   NCCLCHECK(parseGraph(rome_model_68.ringBase, system, graph, rdm, n_hives.data(), false));
@@ -5270,7 +5296,7 @@ ncclResult_t parseGIOTopos(struct ncclTopoSystem* system, struct ncclTopoGraph* 
   const int ncpus = system->nodes[CPU].count;
   const int nnets = system->nodes[NET].count;
 
-  if (ngpus < NGPUS || ncpus > 2 || nnets != 0) return ncclSuccess;
+  if (ngpus != NGPUS || ncpus > 2 || nnets != 0) return ncclSuccess;
 
   struct rcclRomeModel romeTopo;
   char pattern[256];

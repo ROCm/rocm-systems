@@ -1,0 +1,79 @@
+cp.cpc_l2_util:
+  name: CPC-L2 Utilization
+  formula: 100 * SUM(CPC_CPC_TCIU_BUSY) / SUM(CPC_CPC_TCIU_BUSY + CPC_CPC_TCIU_IDLE)
+  unit: Percent
+  description: >-
+    Percent of total cycles counted by the CPC-L2 interface where the CPC-L2 interface
+    was active doing any work.
+cp.cpc_packet_decoding_util:
+  name: CPC Packet Decoding Utilization
+  formula: 100 * SUM(CPC_ME1_BUSY_FOR_PACKET_DECODE) / SUM(CPC_CPC_STAT_BUSY)
+  unit: Percent
+  description: >-
+    Percent of CPC busy cycles spent decoding commands for processing.
+cp.cpc_stall_rate:
+  name: CPC Stall Rate
+  formula: 100 * SUM(CPC_CPC_STAT_STALL) / SUM(CPC_CPC_STAT_BUSY)
+  unit: Percent
+  description: >-
+    Percent of CPC busy cycles where the CPC was stalled for any reason.
+cp.cpc_utcl1_stall:
+  name: CPC-UTCL1 Stall
+  formula: 100 * SUM(CPC_UTCL1_STALL_ON_TRANSLATION) / SUM(CPC_CPC_STAT_BUSY)
+  unit: Percent
+  description: >-
+    Percent of CPC busy cycles where the CPC was stalled by address translation
+cp.cpc_utcl2_util:
+  name: CPC-UTCL2 Utilization
+  formula: 100 * SUM(CPC_CPC_UTCL2IU_BUSY) / SUM(CPC_CPC_UTCL2IU_BUSY + CPC_CPC_UTCL2IU_IDLE)
+  unit: Percent
+  description: >-
+    Percent of total cycles counted by the CPC's L2 address translation interface
+    where the CPC was busy doing address translation work.
+cp.cpc_util:
+  name: CPC Utilization
+  formula: 100 * SUM(CPC_CPC_STAT_BUSY) / SUM(CPC_CPC_STAT_BUSY + CPC_CPC_STAT_IDLE)
+  unit: Percent
+  description: >-
+    Percent of total cycles where the CPC was busy actively doing any work. The ratio
+    of CPC busy cycles over total cycles counted by the CPC.
+cp.cpc_workgroup_manager_util:
+  name: CPC-Workgroup Manager Utilization
+  formula: 100 * SUM(CPC_ME1_DC0_SPI_BUSY) / SUM(CPC_CPC_STAT_BUSY)
+  unit: Percent
+  description: >-
+    Percent of CPC busy cycles spent dispatching workgroups to the workgroup manager.
+cp.cpf_l2_stall:
+  name: CPF-L2 Stall
+  formula: 100 * SUM(CPF_CPF_TCIU_STALL) / SUM(CPF_CPF_TCIU_BUSY)
+  unit: Percent
+  description: >-
+    Percent of CPF-L2 L2 busy cycles where the CPF-L2 interface was stalled for any
+    reason.
+cp.cpf_l2_util:
+  name: CPF-L2 Utilization
+  formula: 100 * SUM(CPF_CPF_TCIU_BUSY) / SUM(CPF_CPF_TCIU_BUSY + CPF_CPF_TCIU_IDLE)
+  unit: Percent
+  description: >-
+    Percent of total cycles counted by the CPF-L2 interface where the CPF-L2 interface
+    was active doing any work. The ratio of CPF-L2 busy cycles over total cycles counted
+    by the CPF-L2.
+cp.cpf_stall:
+  name: CPF Stall
+  formula: 100 * SUM(CPF_CPF_STAT_STALL) / SUM(CPF_CPF_STAT_BUSY)
+  unit: Percent
+  description: >-
+    Percent of CPF busy cycles where the CPF was stalled for any reason.
+cp.cpf_utcl1_stall:
+  name: CPF-UTCL1 Stall
+  formula: 100 * SUM(CPF_CMP_UTCL1_STALL_ON_TRANSLATION) / SUM(CPF_CPF_STAT_BUSY)
+  unit: Percent
+  description: >-
+    Percent of CPF busy cycles where the CPF was stalled by address translation.
+cp.cpf_util:
+  name: CPF Utilization
+  formula: 100 * SUM(CPF_CPF_STAT_BUSY) / SUM(CPF_CPF_STAT_BUSY + CPF_CPF_STAT_IDLE)
+  unit: Percent
+  description: >-
+    Percent of total cycles where the CPF was busy actively doing any work. The ratio
+    of CPF busy cycles over total cycles counted by the CPF.

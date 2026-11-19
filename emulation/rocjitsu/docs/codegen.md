@@ -16,7 +16,7 @@ layout formulas and a fixed inventory of source/target layout names.
 | `isa_profile.py` | Per-ISA profile constants and encoding rules |
 | `semantics.py` | Derive instruction semantics from mnemonics |
 | `cross_isa.py` | Cross-ISA instruction overlap analysis |
-| `codegen/` | Generate C++ decoders, encoders, and instruction execute bodies |
+| `codegen/` | Generate C++ decoders, encoders and execute bodies, and native assembly dispatch tables |
 | `legalization.py` | Generate cross-ISA legalization tables (Action classification) |
 | `legalization_codegen.py` | Emit C++20 `InstructionLegalization[]` legalization table headers |
 | `encoding_translator_codegen.py` | Emit C++20 neutral field structs + decode/encode functions |
@@ -201,9 +201,12 @@ python -m amdisa cdna5:/path/to/amdgpu_isa_cdna5.xml \
 
 ## Generated file locations
 
+The portable C++ switches and native assembly tables share the same
+opcode-to-factory rows.
+
 | Generated files | Location | Generator |
 |---|---|---|
-| ISA decoders, encoders, execute bodies, and `insts.h` | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/<output-directory>/` | `codegen/` |
+| ISA decoders (including `decode_factories.h`, `decode_tables.inc`, and `decode_tables.S`), encoders, execute bodies, and `insts.h` | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/<output-directory>/` | `codegen/` |
 | Shared execute templates | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/shared/` | `codegen/` |
 | ISA files generated at a custom path | A caller-selected tree such as `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/custom/generated/` | `codegen/` |
 | Cross-ISA legalization tables | `lib/rocjitsu/src/rocjitsu/code/dbt/generated/` | `legalization_codegen.py` |
@@ -317,9 +320,12 @@ python -m amdisa \
     rdna4:$MRISA/amdgpu_isa_rdna4.xml \
     cdna5:$MRISA/amdgpu_isa_cdna5.xml \
   --isa-additions cdna1:$MRISA/amdgpu_isa_cdna1_legacy_math.xml \
+  --isa-additions cdna1:$MRISA/amdgpu_isa_cdna1_ds_src2.xml \
   --isa-additions cdna2:$MRISA/amdgpu_isa_cdna2_legacy_math.xml \
   --isa-additions cdna3:$MRISA/amdgpu_isa_cdna3_legacy_math.xml \
   --isa-additions cdna4:$MRISA/amdgpu_isa_cdna4_legacy_math.xml \
+  --isa-additions rdna2:$MRISA/amdgpu_isa_rdna2_atc_probe.xml \
+  --isa-additions rdna4:$MRISA/amdgpu_isa_rdna4_barrier_state.xml \
   --isa-additions cdna5:$MRISA/amdgpu_isa_cdna5_gfx1251_delta.xml \
   --isa-variants cdna5:$MRISA/amdgpu_isa_cdna5_variants.json \
   --isa-output lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated \
@@ -345,9 +351,12 @@ python -m amdisa \
     rdna4:$MRISA/amdgpu_isa_rdna4.xml \
     cdna5:$MRISA/amdgpu_isa_cdna5.xml \
   --isa-additions cdna1:$MRISA/amdgpu_isa_cdna1_legacy_math.xml \
+  --isa-additions cdna1:$MRISA/amdgpu_isa_cdna1_ds_src2.xml \
   --isa-additions cdna2:$MRISA/amdgpu_isa_cdna2_legacy_math.xml \
   --isa-additions cdna3:$MRISA/amdgpu_isa_cdna3_legacy_math.xml \
   --isa-additions cdna4:$MRISA/amdgpu_isa_cdna4_legacy_math.xml \
+  --isa-additions rdna2:$MRISA/amdgpu_isa_rdna2_atc_probe.xml \
+  --isa-additions rdna4:$MRISA/amdgpu_isa_rdna4_barrier_state.xml \
   --isa-additions cdna5:$MRISA/amdgpu_isa_cdna5_gfx1251_delta.xml \
   --isa-variants cdna5:$MRISA/amdgpu_isa_cdna5_variants.json \
   --gen-isas \
@@ -373,9 +382,12 @@ python -m amdisa \
     rdna4:$MRISA/amdgpu_isa_rdna4.xml \
     cdna5:$MRISA/amdgpu_isa_cdna5.xml \
   --isa-additions cdna1:$MRISA/amdgpu_isa_cdna1_legacy_math.xml \
+  --isa-additions cdna1:$MRISA/amdgpu_isa_cdna1_ds_src2.xml \
   --isa-additions cdna2:$MRISA/amdgpu_isa_cdna2_legacy_math.xml \
   --isa-additions cdna3:$MRISA/amdgpu_isa_cdna3_legacy_math.xml \
   --isa-additions cdna4:$MRISA/amdgpu_isa_cdna4_legacy_math.xml \
+  --isa-additions rdna2:$MRISA/amdgpu_isa_rdna2_atc_probe.xml \
+  --isa-additions rdna4:$MRISA/amdgpu_isa_rdna4_barrier_state.xml \
   --isa-additions cdna5:$MRISA/amdgpu_isa_cdna5_gfx1251_delta.xml \
   --isa-variants cdna5:$MRISA/amdgpu_isa_cdna5_variants.json \
   --gen-dbt \

@@ -75,6 +75,7 @@ target_sources(
     buffer_register_symmetric_tester.cpp
     fence_ordering_tester.cpp
     tile_rma_tester.cpp
+    tile_nd_rma_tester.cpp
     host_team_sync_barrier_tester.cpp
     host_rma_tester.cpp
     tile_broadcast_tester.cpp
@@ -125,6 +126,8 @@ target_link_libraries(
     $<TARGET_NAME_IF_EXISTS:PMIx::pmix>
     hiprtc
 )
+
+_rocshmem_set_native_link_jobs(${PROJECT_NAME})
 
 ###############################################################################
 # ASAN SETTINGS

@@ -40,7 +40,7 @@ vector_types:
     <<: *level_default
     tags: [types]
   Unit_dim3_XYZ_Positive_Device:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [types]
   Unit_dim3_Empty_Positive_Host:
     <<: *level_default
@@ -52,5 +52,5 @@ vector_types:
     <<: *level_default
     tags: [types]
   Unit_dim3_XYZ_Positive_Host:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [types]

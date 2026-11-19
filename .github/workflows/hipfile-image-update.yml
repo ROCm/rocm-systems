@@ -5,9 +5,8 @@ env:
   AIS_DOCKER_REGISTRY: ghcr.io/${{ github.repository_owner }}/hipfile
 
 on:
-  pull_request_target: # A.K.A. This is a privileged action. See `pull_request`.
-    types:
-      - closed # CAUTION: Includes un-merged PRs
+  # We only expect merges into develop
+  push:
     branches:
       - develop
     paths:
@@ -25,7 +24,7 @@ on:
         type: boolean
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request_target' && github.event.pull_request.base.ref || github.ref_name }}
+  group: ${{ github.workflow }}-${{ github.ref_name }}
   cancel-in-progress: true
 
 permissions:
@@ -38,7 +37,6 @@ jobs:
     env:
       AIS_CI_IMAGE_NAME: ais_ci_${{ matrix.supported_platforms }}
       AIS_INPUT_PLATFORM: ${{ matrix.supported_platforms }}
-    if: ${{ github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch' }}
     runs-on: [ubuntu-24.04]
     container: docker:28.5
     # NOTE: nightly is intentionally absent here. This job refreshes the static
@@ -82,7 +80,7 @@ jobs:
 
       - name: Set Docker Cache Instruction
         id: use-cache
-        # If triggered by a pull_request, pull_from_cache will be null. Note
+        # If triggered by a push, pull_from_cache will be null. Note
         # however `false == null` resolves to `true`. Use empty string to check
         # for 'null'.
         # See: https://docs.github.com/en/actions/reference/workflows-and-actions/expressions
