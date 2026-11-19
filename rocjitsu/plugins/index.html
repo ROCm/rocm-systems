@@ -203,7 +203,7 @@
       ROCm/rocm-systems
       <ul class="md-source__facts">
         <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 567 · build snapshot" aria-label="Stars: 567">567</li>
-        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 508 · build snapshot" aria-label="Forks: 508">508</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 509 · build snapshot" aria-label="Forks: 509">509</li>
       </ul>
     </div>
   </a>
@@ -256,7 +256,7 @@
       ROCm/rocm-systems
       <ul class="md-source__facts">
         <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 567 · build snapshot" aria-label="Stars: 567">567</li>
-        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 508 · build snapshot" aria-label="Forks: 508">508</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 509 · build snapshot" aria-label="Forks: 509">509</li>
       </ul>
     </div>
   </a>
@@ -2192,7 +2192,7 @@ Dispatches that never reach the execution-end callback are omitted from both
 per-dispatch output and the summary.</p>
 <p>Memory instructions take precedence over their scalar or vector encoding. The
 <code>lds</code> and <code>global</code> families describe the instruction's pre-routing pipeline tag
-or mnemonic fallback: <code>lds</code> covers DS/LDS local-memory instructions, while
+or decoded addressing metadata: <code>lds</code> covers DS/LDS local-memory instructions, while
 <code>global</code> covers global, scalar-memory, flat, buffer, typed-buffer, image,
 tensor, and scratch instructions. A later shared-aperture FLAT-to-LDS remap is
 therefore still reported as <code>global</code>. Their <code>execution_seconds</code> measure
@@ -2201,18 +2201,14 @@ deferred pipeline completion, or stalls charged to wait instructions. Matrix
 includes MFMA, SMFMAC, WMMA, and SWMMAC instructions. Control covers branches,
 waits, barriers, termination, no-ops, sleeps, and delays, including the LDS-pipe
 <code>ds_nop</code> and the GWS barrier/semaphore instructions, which move no data.</p>
-<p>The mnemonic fallback is not just for synthetic instructions: whole prefix
-families never set the memory-op flag — RDNA4 <code>ds_direct_load</code> and <code>tbuffer_*</code>,
-RDNA3.5 <code>lds_direct_load</code>, the image encodings, the CDNA5 tensor transfers, and
-every scalar-memory encoding, since <code>smem</code> stopped setting the flag when the
-decoded memory-issue metadata landed — and some mnemonics carry it on one
-architecture but not another. Classification is by flag <em>and</em> by prefix so that
-a mnemonic reports the same family whichever architecture executed it.</p>
-<p>Where neither applies, the decoded memory-issue metadata is consulted last: it
-names the completion domain, so an encoding that follows no naming convention
-is still placed. The CDNA5 <code>cluster_load_*</code> set is the live case. The metadata
-is checked after the prefix so that generic FLAT, which reports both LDS and
-VMEM obligations, keeps the <code>global</code> bucket described above.</p>
+<p>Classification uses numeric operation identity, instruction flags, and decoded
+memory addressing. Addressing metadata covers direct LDS, typed-buffer, image,
+tensor, cluster, and scalar-memory instructions even when they do not set the
+memory-op flag. Generic FLAT keeps the <code>global</code> bucket described above, while
+scalar timestamp reads report scalar work. Existing pipeline flags and
+memory-issue completion domains provide a final fallback when addressing
+metadata is absent. Synthetic instructions must supply the same metadata;
+their mnemonic text does not determine their family.</p>
 <p>For a machine-readable report:</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"plugins"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"throughput"</span><span class="p">:</span><span class="w"> </span><span class="p">{}</span><span class="w"> </span><span class="p">},</span>
