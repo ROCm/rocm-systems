@@ -13,7 +13,6 @@
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <random>
-#include <vector>
 namespace {
 using namespace rocjitsu::arith::test;
 using Entry = decltype(&rj_arith_v_mfma_i32_16x16x32_i8_w64);
@@ -42,13 +41,7 @@ template <int M, int K, int Batch, bool Wmma = false> void arithmetic(Entry entr
                                                                         4 << 7,
                                                                         5 << 7,
                                                                         7 | (7 << 7)};
-  std::vector<uint64_t> control_cases(controls_set.begin(), controls_set.end());
-  if constexpr (!Wmma && Batch > 1) {
-    for (uint64_t controls : controls_set) {
-      control_cases.push_back(controls | RJ_ARITH_MFMA_A_ADJACENT_BLOCKS);
-    }
-  }
-  for (uint64_t controls : control_cases) {
+  for (uint64_t controls : controls_set) {
     uint32_t expected[Outputs][Lanes];
     for (int batch = 0; batch < Batch; ++batch) {
       for (int row = 0; row < M; ++row) {
@@ -73,7 +66,7 @@ template <int M, int K, int Batch, bool Wmma = false> void arithmetic(Entry entr
               source_lane = batch * M + k / per_lane * M * Batch + i;
               int size = int(controls & 7), permutation = int(controls >> 7 & 7);
               if (a && size > 0 && size <= 4) {
-                if (controls & RJ_ARITH_MFMA_A_ADJACENT_BLOCKS) {
+                if constexpr (Batch > 1) {
                   const int blocks = 1 << size;
                   if (blocks <= 64 / M) {
                     const int selected =
@@ -140,11 +133,6 @@ template <int M, int K, int Batch, bool Wmma = false> void arithmetic(Entry entr
   }
   EXPECT_EQ(entry(RJ_ARITH_SEMANTICS_LOOSE, 1ULL << 63, nullptr, nullptr, nullptr, nullptr),
             RJ_ARITH_ERROR_INVALID_FLAGS);
-  if constexpr (Wmma || Batch == 1) {
-    EXPECT_EQ(entry(RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_MFMA_A_ADJACENT_BLOCKS, nullptr, nullptr,
-                    nullptr, nullptr),
-              RJ_ARITH_ERROR_INVALID_FLAGS);
-  }
 }
 TEST(DenseIntegerMatrix, MfmaOverflowModeSaturatesSignedResults) {
   std::array<uint32_t, 64> a, b;
@@ -211,9 +199,9 @@ TEST(DenseIntegerMatrix, wmma_i32_16x16x64_iu8_w32) {
 }
 } // namespace
 
-TEST(MfmaBroadcast, Gfx942I8HardwareCapture) {
+TEST(MfmaBroadcast, I8HardwareCapture) {
   const auto encode = [](int value) { return uint32_t(value) * 0x01010101u; };
-  expect_gfx942_broadcast<4, 4, 8, true>(rj_arith_v_mfma_i32_4x4x4_16b_i8_w64, encode);
-  expect_gfx942_broadcast<16, 4, 8, true>(rj_arith_v_mfma_i32_16x16x4_4b_i8_w64, encode);
-  expect_gfx942_broadcast<32, 4, 8, true>(rj_arith_v_mfma_i32_32x32x4_2b_i8_w64, encode);
+  expect_hardware_broadcast<4, 4, 8, true>(rj_arith_v_mfma_i32_4x4x4_16b_i8_w64, encode);
+  expect_hardware_broadcast<16, 4, 8, true>(rj_arith_v_mfma_i32_16x16x4_4b_i8_w64, encode);
+  expect_hardware_broadcast<32, 4, 8, true>(rj_arith_v_mfma_i32_32x32x4_2b_i8_w64, encode);
 }

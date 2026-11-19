@@ -12,10 +12,11 @@
 
 namespace rocjitsu::arith::test {
 
-// MI300X captures from tests/kernels/mfma_broadcast_gfx942.hip: A[lane] = lane + 1,
+// MI300X and MI355X captures from tests/kernels/mfma_broadcast.hip: A[lane] = lane + 1,
 // B = 1, C = 0. All legal CBSZ/ABID combinations were captured for these batched forms.
 template <int M, int K, int Bits, bool Integer = false>
-void expect_gfx942_broadcast(decltype(&rj_arith_v_mfma_f32_4x4x1_16b_f32_w64) entry, auto encode) {
+void expect_hardware_broadcast(decltype(&rj_arith_v_mfma_f32_4x4x1_16b_f32_w64) entry,
+                               auto encode) {
   constexpr int inputs = K * Bits / 32;
   constexpr int outputs = M;
   std::array<std::array<uint32_t, 64>, inputs> a{}, b{};
@@ -43,7 +44,7 @@ void expect_gfx942_broadcast(decltype(&rj_arith_v_mfma_f32_4x4x1_16b_f32_w64) en
         for (auto &reg : d) {
           reg.fill(0xdeadbeef);
         }
-        const uint64_t controls = RJ_ARITH_MFMA_A_ADJACENT_BLOCKS | uint64_t(cbsz | (abid << 3));
+        const uint64_t controls = uint64_t(cbsz | (abid << 3));
         ASSERT_EQ(entry(cpu | RJ_ARITH_SEMANTICS_LOOSE, controls, d_ptr.data(), a_ptr.data(),
                         b_ptr.data(), c_ptr.data()),
                   RJ_ARITH_SUCCESS);

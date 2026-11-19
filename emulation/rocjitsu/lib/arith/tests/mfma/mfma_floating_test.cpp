@@ -15,7 +15,6 @@
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <random>
-#include <vector>
 
 namespace {
 using namespace rocjitsu::arith::test;
@@ -48,13 +47,8 @@ void arithmetic(Entry entry, uint32_t factor_mask = UINT32_MAX) {
                           : kF16PositiveInfinityBits;
   }
   const auto levels = supported_cpu_levels();
-  std::vector<uint64_t> control_cases = {0, 1 | (1 << 3) | (3 << 7), 4 | (13 << 3) | (7 << 7), 7};
-  if constexpr (Batch > 1) {
-    const std::vector<uint64_t> legacy_controls = control_cases;
-    for (uint64_t controls : legacy_controls) {
-      control_cases.push_back(controls | RJ_ARITH_MFMA_A_ADJACENT_BLOCKS);
-    }
-  }
+  const std::array<uint64_t, 4> control_cases = {0, 1 | (1 << 3) | (3 << 7),
+                                                 4 | (13 << 3) | (7 << 7), 7};
   for (uint64_t controls : control_cases) {
     std::array<std::array<float, 64>, OutputRegs> expected{};
     for (int batch = 0; batch < Batch; ++batch) {
@@ -64,14 +58,14 @@ void arithmetic(Entry entry, uint32_t factor_mask = UINT32_MAX) {
           const int reg = batch * (M * M / 64) + row / (4 * (64 / M)) * 4 + row % 4;
           const int lane = batch % groups * M + row / 4 % (64 / M) * groups * M + col;
           float sum = std::bit_cast<float>(input[2 * InputRegs + reg][lane]);
-          // Reference indexing follows the legacy GFX9 executor; do not call
-          // the implementation's layout helpers from this test.
+          // Reference indexing follows the GFX9 layout and captured broadcasts;
+          // do not call the implementation's layout helpers from this test.
           auto read = [&](int operand, int index, int k) {
             const int per_lane = K / (64 / (M * Batch));
             int source_lane = batch * M + k / per_lane * M * Batch + index;
             int cbsz = int(controls & 7), blgp = int(controls >> 7 & 7);
             if (operand == 0 && cbsz > 0 && cbsz <= 4) {
-              if (controls & RJ_ARITH_MFMA_A_ADJACENT_BLOCKS) {
+              if constexpr (Batch > 1) {
                 const int blocks = 1 << cbsz;
                 if (blocks <= 64 / M) {
                   const int selected =
@@ -144,13 +138,8 @@ void arithmetic(Entry entry, uint32_t factor_mask = UINT32_MAX) {
       }
     }
   }
-  EXPECT_EQ(entry(RJ_ARITH_SEMANTICS_LOOSE, 1ULL << 11, nullptr, nullptr, nullptr, nullptr),
+  EXPECT_EQ(entry(RJ_ARITH_SEMANTICS_LOOSE, 1ULL << 10, nullptr, nullptr, nullptr, nullptr),
             RJ_ARITH_ERROR_INVALID_FLAGS);
-  if constexpr (Batch == 1) {
-    EXPECT_EQ(entry(RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_MFMA_A_ADJACENT_BLOCKS, nullptr, nullptr,
-                    nullptr, nullptr),
-              RJ_ARITH_ERROR_INVALID_FLAGS);
-  }
 }
 
 TEST(MfmaF32, F32ClampsFiniteOverflowAndPreservesInfinities) {
@@ -313,27 +302,27 @@ TEST(MfmaF32, mfma_f32_16x16x4_f32_w64) {
 }
 } // namespace
 
-TEST(MfmaBroadcast, Gfx942F32HardwareCapture) {
+TEST(MfmaBroadcast, F32HardwareCapture) {
   const auto encode = [](int value) { return std::bit_cast<uint32_t>(float(value)); };
-  expect_gfx942_broadcast<4, 1, 32>(rj_arith_v_mfma_f32_4x4x1_16b_f32_w64, encode);
-  expect_gfx942_broadcast<16, 1, 32>(rj_arith_v_mfma_f32_16x16x1_4b_f32_w64, encode);
-  expect_gfx942_broadcast<32, 1, 32>(rj_arith_v_mfma_f32_32x32x1_2b_f32_w64, encode);
+  expect_hardware_broadcast<4, 1, 32>(rj_arith_v_mfma_f32_4x4x1_16b_f32_w64, encode);
+  expect_hardware_broadcast<16, 1, 32>(rj_arith_v_mfma_f32_16x16x1_4b_f32_w64, encode);
+  expect_hardware_broadcast<32, 1, 32>(rj_arith_v_mfma_f32_32x32x1_2b_f32_w64, encode);
 }
 
-TEST(MfmaBroadcast, Gfx942F16HardwareCapture) {
+TEST(MfmaBroadcast, F16HardwareCapture) {
   const auto encode = [](int value) {
     return uint32_t(std::bit_cast<uint16_t>(_Float16(value))) * 0x10001u;
   };
-  expect_gfx942_broadcast<4, 4, 16>(rj_arith_v_mfma_f32_4x4x4_16b_f16_w64, encode);
-  expect_gfx942_broadcast<16, 4, 16>(rj_arith_v_mfma_f32_16x16x4_4b_f16_w64, encode);
-  expect_gfx942_broadcast<32, 4, 16>(rj_arith_v_mfma_f32_32x32x4_2b_f16_w64, encode);
+  expect_hardware_broadcast<4, 4, 16>(rj_arith_v_mfma_f32_4x4x4_16b_f16_w64, encode);
+  expect_hardware_broadcast<16, 4, 16>(rj_arith_v_mfma_f32_16x16x4_4b_f16_w64, encode);
+  expect_hardware_broadcast<32, 4, 16>(rj_arith_v_mfma_f32_32x32x4_2b_f16_w64, encode);
 }
 
-TEST(MfmaBroadcast, Gfx942BF16HardwareCapture) {
+TEST(MfmaBroadcast, BF16HardwareCapture) {
   const auto encode = [](int value) {
     return (std::bit_cast<uint32_t>(float(value)) >> 16) * 0x10001u;
   };
-  expect_gfx942_broadcast<4, 4, 16>(rj_arith_v_mfma_f32_4x4x4_16b_bf16_w64, encode);
-  expect_gfx942_broadcast<16, 4, 16>(rj_arith_v_mfma_f32_16x16x4_4b_bf16_w64, encode);
-  expect_gfx942_broadcast<32, 4, 16>(rj_arith_v_mfma_f32_32x32x4_2b_bf16_w64, encode);
+  expect_hardware_broadcast<4, 4, 16>(rj_arith_v_mfma_f32_4x4x4_16b_bf16_w64, encode);
+  expect_hardware_broadcast<16, 4, 16>(rj_arith_v_mfma_f32_16x16x4_4b_bf16_w64, encode);
+  expect_hardware_broadcast<32, 4, 16>(rj_arith_v_mfma_f32_32x32x4_2b_bf16_w64, encode);
 }

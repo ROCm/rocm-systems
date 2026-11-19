@@ -257,11 +257,10 @@ TEST_P(IsaDiagnosticsTest, MfmaBroadcastBlockBoundary) {
   }
 }
 
-TEST_P(IsaDiagnosticsTest, BatchedMfmaBroadcastUsesTargetPolicy) {
+TEST_P(IsaDiagnosticsTest, BatchedMfmaBroadcastMatchesHardware) {
   if (GetParam() != ROCJITSU_CODE_ARCH_CDNA3 && GetParam() != ROCJITSU_CODE_ARCH_CDNA4)
     GTEST_SKIP();
-  // CBSZ=2, ABID=1 on gfx942 selects A lanes 4-7, 20-23, 36-39 and 52-55.
-  // The gfx950 expectation preserves the emulator's model, pending hardware qualification.
+  // MI300X and MI355X select A lanes 4-7, 20-23, 36-39 and 52-55 for CBSZ=2, ABID=1.
   constexpr std::array<uint32_t, 16> first_rows = {5,  5,  5,  5,  21, 21, 21, 21,
                                                    37, 37, 37, 37, 53, 53, 53, 53};
   for (uint64_t exec : {~uint64_t{0}, uint64_t{1}, uint64_t{0}}) {
@@ -283,8 +282,7 @@ TEST_P(IsaDiagnosticsTest, BatchedMfmaBroadcastUsesTargetPolicy) {
     execute(instruction, 0, "v_mfma_f32_4x4x1");
     for (uint32_t lane = 0; lane < 64; ++lane) {
       for (uint32_t reg = 0; reg < 4; ++reg) {
-        const uint32_t first =
-            GetParam() == ROCJITSU_CODE_ARCH_CDNA3 ? first_rows[lane / 4] : 17 + 4 * (lane / 4 % 4);
+        const uint32_t first = first_rows[lane / 4];
         EXPECT_EQ(wf->debug_read_vgpr(32 + reg, lane), std::bit_cast<uint32_t>(float(first + reg)));
       }
     }

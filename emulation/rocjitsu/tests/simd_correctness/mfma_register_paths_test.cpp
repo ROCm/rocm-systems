@@ -457,9 +457,7 @@ template <uint32_t M> void expect_batched_broadcast_paths() {
             const uint32_t batch = M == 4 ? lane / 4 : reg / (M * M / 64);
             const uint32_t row =
                 M == 4 ? reg : (reg % (M * M / 64) / 4) * (256 / M) + 4 * (lane / M) + reg % 4;
-            const uint32_t source = arch == ROCJITSU_CODE_ARCH_CDNA4
-                                        ? (batch * M + row) % (64 >> cbsz) + (64 >> cbsz)
-                                        : ((batch >> cbsz << cbsz) + 1) * M + row;
+            const uint32_t source = ((batch >> cbsz << cbsz) + 1) * M + row;
             const uint32_t value = k * (source + 1);
             ASSERT_EQ(result[reg * 64 + lane],
                       format == Fmt::I8 ? value : std::bit_cast<uint32_t>(float(value)))
@@ -471,7 +469,7 @@ template <uint32_t M> void expect_batched_broadcast_paths() {
   }
 }
 
-TEST(MfmaRegisterPathsTest, BatchedBroadcastPathsMatchGfx942Capture) {
+TEST(MfmaRegisterPathsTest, BatchedBroadcastPathsUseAdjacentBlocks) {
   expect_batched_broadcast_paths<4>();
   expect_batched_broadcast_paths<16>();
   expect_batched_broadcast_paths<32>();

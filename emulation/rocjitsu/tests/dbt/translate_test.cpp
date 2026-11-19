@@ -1016,7 +1016,7 @@ TEST(BinaryTranslatorE2E, LegacyAtomicMinMaxRequiresSemanticExpansion) {
   }
 }
 
-TEST(BinaryTranslatorE2E, MfmaABroadcastTranslationRequiresAgreedLaneSelection) {
+TEST(BinaryTranslatorE2E, MfmaABroadcastTranslationPreservesHardwareLaneSelection) {
   struct BroadcastCase {
     uint16_t opcode;
     uint8_t max_cbsz;
@@ -1054,16 +1054,7 @@ TEST(BinaryTranslatorE2E, MfmaABroadcastTranslationRequiresAgreedLaneSelection) 
           ASSERT_TRUE(source.is_valid());
           BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
           const TranslatedCodeObject result = translator.translate(source);
-          // Both interpretations select the same A lanes with no broadcast or
-          // one source block broadcast to all matrix blocks in the wave.
-          if (cbsz != 0 && cbsz != test.max_cbsz) {
-            EXPECT_FALSE(result.dispatchable());
-            EXPECT_EQ(result.elf_bytes, image);
-            EXPECT_TRUE(has_error_containing(
-                result, DiagnosticKind::ExpandFailed,
-                "MFMA A broadcast lane selection is unverified for gfx950-to-gfx942 translation"));
-            continue;
-          }
+          // MI300X and MI355X captures agree on every legal A-broadcast control.
           ASSERT_TRUE(result.dispatchable())
               << (result.diagnostics.empty() ? "" : result.diagnostics.front().message);
           AmdGpuCodeObject output(result.elf_bytes.data(), result.elf_bytes.size());

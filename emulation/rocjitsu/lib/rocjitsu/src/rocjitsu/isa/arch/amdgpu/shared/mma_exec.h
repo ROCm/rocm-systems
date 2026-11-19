@@ -779,7 +779,9 @@ inline uint32_t permute_a_lane(uint32_t lane, uint32_t cbsz, uint32_t abid,
 }
 
 inline uint32_t mfma_a_block_lanes(rj_code_arch_t arch, uint32_t matrix_rows, uint32_t batches) {
-  return arch == ROCJITSU_CODE_ARCH_CDNA2 || (arch == ROCJITSU_CODE_ARCH_CDNA3 && batches > 1)
+  return arch == ROCJITSU_CODE_ARCH_CDNA2 ||
+                 ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+                  batches > 1)
              ? matrix_rows
              : 0;
 }

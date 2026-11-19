@@ -1,8 +1,9 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Standalone gfx942 hardware capture. Build with hipcc --offload-arch=gfx942 -O2
-// and run with HIP_VISIBLE_DEVICES=0. Each JSON line retains every output word.
+// Standalone gfx942/gfx950 hardware capture. Build with hipcc -O2 and
+// --offload-arch=gfx942 --offload-arch=gfx950; run with HIP_VISIBLE_DEVICES=0.
+// Each JSON line retains every output word.
 // A controls are swept with BLGP=0; B controls are swept with CBSZ=ABID=0.
 #include <cstdio>
 #include <cstdlib>
@@ -204,7 +205,9 @@ int main() {
   check(hipGetDeviceProperties(&properties, 0), "device properties");
   std::fprintf(stderr, "device=%s arch=%s warpSize=%d\n", properties.name, properties.gcnArchName,
                properties.warpSize);
-  if (std::strncmp(properties.gcnArchName, "gfx942", 6) || properties.warpSize != 64)
+  if ((std::strncmp(properties.gcnArchName, "gfx942", 6) &&
+       std::strncmp(properties.gcnArchName, "gfx950", 6)) ||
+      properties.warpSize != 64)
     return 1;
   float *device = nullptr;
   check(hipMalloc(&device, 64 * 32 * sizeof(float)), "allocate");

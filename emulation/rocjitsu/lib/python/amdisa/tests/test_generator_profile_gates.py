@@ -10904,7 +10904,7 @@ def test_cdna_screen_partition_uses_wave64_library_bridge():
 @pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
 @pytest.mark.parametrize('fmt', ['F32', 'F16', 'BF16', 'I8'])
 @pytest.mark.parametrize('m', [4, 16, 32])
-def test_batched_gfx942_mfma_selects_adjacent_a_blocks(arch, fmt, m):
+def test_batched_cdna3_cdna4_mfma_selects_adjacent_a_blocks(arch, fmt, m):
     k = 1 if fmt == 'F32' else 4
     result = 'I32' if fmt == 'I8' else 'F32'
     name = f'V_MFMA_{result}_{m}X{m}X{k}_{64 // m}B_{fmt}'
@@ -10914,6 +10914,4 @@ def test_batched_gfx942_mfma_selects_adjacent_a_blocks(arch, fmt, m):
         arch,
         enc_field_names={'acc_cd'},
     )
-    assert ('controls |= RJ_ARITH_MFMA_A_ADJACENT_BLOCKS;' in body) == (arch == 'cdna3')
-    width = f', {m}' if arch == 'cdna3' else ''
-    assert f'permute_a_lane(lane, inst_.cbsz, inst_.abid{width})' in body
+    assert f'permute_a_lane(lane, inst_.cbsz, inst_.abid, {m})' in body

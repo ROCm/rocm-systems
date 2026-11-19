@@ -31,10 +31,10 @@ constexpr int mfma_input_index(int index, int k, int batch) {
   return (local / PerWord * 64 + lane) * PerWord + local % PerWord;
 }
 
-inline int mfma_a_lane(int lane, uint64_t controls, int matrix_rows) {
-  const uint32_t block_lanes = controls & RJ_ARITH_MFMA_A_ADJACENT_BLOCKS ? matrix_rows : 0;
+inline int mfma_a_lane(int lane, uint64_t controls, int matrix_block_lanes) {
   return int(rj_arith_mfma_a_source_lane(uint32_t(lane), uint32_t(controls & 7),
-                                         uint32_t(controls >> 3 & 15), block_lanes));
+                                         uint32_t(controls >> 3 & 15),
+                                         uint32_t(matrix_block_lanes)));
 }
 
 // Apply the eight encoded B lane permutations, keeping the lane inside Wave64.
@@ -53,9 +53,10 @@ inline int mfma_b_lane(int lane, uint64_t controls) {
 }
 
 // Apply lane controls without changing the element position inside its source word.
-template <int PerWord, int M> inline int mfma_permute_input(int index, uint64_t controls, bool a) {
+template <int PerWord, int M, int Batch>
+inline int mfma_permute_input(int index, uint64_t controls, bool a) {
   int lane = index / PerWord % 64;
-  int mapped = a ? mfma_a_lane(lane, controls, M) : mfma_b_lane(lane, controls);
+  int mapped = a ? mfma_a_lane(lane, controls, Batch > 1 ? M : 0) : mfma_b_lane(lane, controls);
   return index + PerWord * (mapped - lane);
 }
 
@@ -67,9 +68,9 @@ inline float mfma_clamp_overflow(float result, float initial, const float *a, co
     return result;
   }
   for (int k = 0; k < K; ++k) {
-    const int ai = mfma_permute_input<PerWord, M>(
+    const int ai = mfma_permute_input<PerWord, M, Batch>(
         mfma_input_index<M, K, Batch, PerWord>(row, k, batch), controls, true);
-    const int bi = mfma_permute_input<PerWord, M>(
+    const int bi = mfma_permute_input<PerWord, M, Batch>(
         mfma_input_index<M, K, Batch, PerWord>(col, k, batch), controls, false);
     if (!__builtin_isfinite(a[ai]) || !__builtin_isfinite(b[bi])) {
       return result;

@@ -12357,14 +12357,16 @@ TEST(ExecutionPluginTest, MfmaSnapshotsReportRacesOnlyOnBroadcastLanes) {
     bool old = util::force_scalar();
     ~ForceScalarGuard() { util::set_force_scalar_for_testing(old); }
   } guard;
-  // cbsz=2 broadcasts A's 16-lane block abid=1 (lanes 16-31); blgp=4 broadcasts B lanes 0-15.
+  // MI355X captures select A lanes 4-7, 20-23, 36-39 and 52-55 for CBSZ=2, ABID=1.
+  // BLGP=4 broadcasts B lanes 0-15.
   const mfma_race::Run run = [](ComputeUnitCore &cu, uint32_t vb, uint32_t acc) {
     exec_i32_i8(cu, 4, 4, 4, 16, vb + D, vb + A, vb + B, vb + C, acc, /*cbsz=*/2, /*abid=*/1,
                 /*blgp=*/4);
   };
   for (bool force_scalar : {false, true}) {
     SCOPED_TRACE(testing::Message() << "force_scalar=" << force_scalar);
-    EXPECT_TRUE(races_on(run, A, /*lane=*/16, ACC_FROM_VGPR, force_scalar));
+    EXPECT_TRUE(races_on(run, A, /*lane=*/4, ACC_FROM_VGPR, force_scalar));
+    EXPECT_FALSE(races_on(run, A, /*lane=*/16, ACC_FROM_VGPR, force_scalar));
     EXPECT_FALSE(races_on(run, A, /*lane=*/0, ACC_FROM_VGPR, force_scalar));
     EXPECT_TRUE(races_on(run, B, /*lane=*/15, ACC_FROM_VGPR, force_scalar));
     EXPECT_FALSE(races_on(run, B, /*lane=*/63, ACC_FROM_VGPR, force_scalar));
