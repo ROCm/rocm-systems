@@ -21,7 +21,7 @@ MI300X_WORKLOAD = (
 # The only kernel in the MI300X fixture.
 FIXTURE_KERNEL = "vecCopy(double*, double*, double*, int, int) (.kd)"
 # MIN(SQ_INSTS / SQ_WAVES): 327680 / 16384 in every dispatch of the fixture.
-INSTS_PER_WAVE_KEY = "7.2.2|Instructions per wavefront"
+INSTS_PER_WAVE_KEY = "7.2.2|Instructions per Wavefront"
 INSTS_PER_WAVE = 20.0
 PERCENT_KEY = "2.1.9|CP Busy"
 PERCENT_FORMULAS = {PERCENT_KEY: ("", "Percent", False)}

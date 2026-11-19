@@ -45,13 +45,13 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-import config
-from rocprof_compute_soc.soc_base import iter_analysis_config_metrics
+from rocprof_compute_soc.soc_base import iter_panel_config_metrics
 from utils import file_io, parser, schema
+from utils.analysis_views import arch_panel_configs
 from utils.metrics.evaluation_pipeline import eval_metric
 from utils.metrics.expression import build_metric_value_string
 from utils.utils_analysis import pass_tables_on_rows
-from utils.utils_common import canonical_config_arch, load_panel_configs
+from utils.utils_common import canonical_config_arch
 
 # Changes at least this large go in the delta table.
 DELTA_REL_THRESHOLD = 0.05
@@ -323,7 +323,7 @@ def min_formula_to_median_expr(min_formula: str) -> Optional[str]:
     """Rewrite a Min formula into a Median expression.
 
     Handles `MIN(x)` and `c * MIN(x)` / `MIN(x) * c` patterns that
-    appear in analysis_configs.
+    appear in metric formulas.
     """
     formula = min_formula.strip()
     if not formula or formula == "None":
@@ -406,9 +406,8 @@ def load_workload_metric_tables(wl_dir: Path) -> Tuple[object, pd.DataFrame]:
     Returns the arch config, with one table per panel, and the sysinfo frame.
     """
     sys_info, arch = read_sysinfo(wl_dir)
-    config_dir = config.analysis_configs_dir / (canonical_config_arch(arch) or arch)
     arch_config = schema.ArchConfig()
-    arch_config.panel_configs = load_panel_configs([str(config_dir)])
+    arch_config.panel_configs = arch_panel_configs(arch)
     parser.build_dfs(
         arch_configs=arch_config,
         filter_metrics=None,
@@ -703,11 +702,9 @@ def render_zero_sub_bucket_lines(summary: Dict[str, int]) -> str:
     return "".join(lines)
 
 
-def count_yaml_metric_entries(config_arch: str) -> Tuple[int, int]:
-    """Return (metric table entries, unique metric names) for analysis_configs."""
-    metrics = list(
-        iter_analysis_config_metrics(config.analysis_configs_dir / config_arch, set())
-    )
+def count_view_metric_entries(config_arch: str) -> Tuple[int, int]:
+    """Return (metric table entries, unique metric names) of the arch's views."""
+    metrics = list(iter_panel_config_metrics(arch_panel_configs(config_arch), set()))
     return len(metrics), len({metric.metric_name for metric in metrics})
 
 
@@ -717,12 +714,12 @@ def build_total_note(
     summary: Dict[str, Dict[str, int]],
     all_keys_count: int,
 ) -> str:
-    """Arch-specific explanation of card Total vs YAML metric definitions."""
-    yaml_entries, yaml_unique = count_yaml_metric_entries(config_arch)
-    yaml_bit = (
-        f"YAML metric definitions (~{yaml_entries} table entries / "
-        f"~{yaml_unique} unique names in "
-        f"<code>analysis_configs/{html.escape(config_arch)}</code>)"
+    """Arch-specific explanation of card Total vs the metrics of the views."""
+    view_entries, view_unique = count_view_metric_entries(config_arch)
+    view_bit = (
+        f"view metrics (~{view_entries} table entries / "
+        f"~{view_unique} unique names in "
+        f"<code>views/{html.escape(config_arch)}</code>)"
     )
     totals = ", ".join(f"{html.escape(wl)}={s['total']}" for wl, s in summary.items())
     common_tail = (
@@ -739,7 +736,7 @@ def build_total_note(
         return (
             "<p style='font-size:11px;color:#555;margin:4px 0 10px;max-width:960px'>"
             "<b>Total</b> counts analyze-table rows (from the analyze CSV export), "
-            f"not {yaml_bit}. "
+            f"not {view_bit}. "
             "Block 18 (L2 Cache per Channel) has one row per L2 channel: "
             "<code>$total_l2_chan</code>, which is "
             "<code>l2_banks × num_xcd</code> from the profile sysinfo. "
@@ -752,7 +749,7 @@ def build_total_note(
         return (
             "<p style='font-size:11px;color:#555;margin:4px 0 10px;max-width:960px'>"
             "<b>Total</b> counts analyze-table rows (from the analyze CSV export), "
-            f"not {yaml_bit}. "
+            f"not {view_bit}. "
             "gfx115x has no per-channel Block 18 rows, so Total stays close to "
             "the YAML entry count. "
             f"{common_tail}"
@@ -762,7 +759,7 @@ def build_total_note(
     return (
         "<p style='font-size:11px;color:#555;margin:4px 0 10px;max-width:960px'>"
         "<b>Total</b> counts analyze-table rows (from the analyze CSV export), "
-        f"not {yaml_bit}. "
+        f"not {view_bit}. "
         f"{common_tail}"
         "</p>"
     )
@@ -1012,7 +1009,7 @@ tr.row-overflow{{box-shadow:inset 0 0 0 2px #c62828}}
  | <b>Arch:</b> {html.escape(arch)}
  | <b>Workloads:</b> {html.escape(", ".join(wl_names))}</p>
 {iter_banner}
-<p style="font-size:11px;color:#555">Analysis configs: <code>{html.escape(config_arch)}
+<p style="font-size:11px;color:#555">Views: <code>{html.escape(config_arch)}
 </code>.
 All-workload zeros are split into sub-buckets (healthy / optional path / SDK bug suspect
 / other).
