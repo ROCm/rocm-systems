@@ -237,9 +237,8 @@ TEST(SymIsHostSegment, Invalid_ReturnsFalse) {
 // The shared HIP fakes default to fail-loud (hipErrorInvalidValue) so that an
 // unstubbed call surfaces. dev_runtime.cc cannot run a single symmetric-memory
 // path against that, so the working emulator has to be installed per test
-// rather than relied on as a process-wide default -- these tests share a binary
-// with p2p/devcomm/group, and any of those suites' TearDown restores the
-// fail-loud defaults between two of ours.
+// rather than relied on as a process-wide default -- other fixtures in this
+// file reset to the fail-loud defaults between two of ours.
 //
 // SetUp, not just TearDown: a TearDown-only reset leaves whichever test runs
 // first after another suite with no emulator at all.
@@ -272,10 +271,9 @@ protected:
   }
   void TearDown() override { ResetDevRuntimeMicroFakes(); }
 
-  // Hand the shared fakes back in their pristine state, so the p2p/devcomm
-  // suites that share this binary do not inherit working HIP memory from
-  // whichever of our tests ran before them -- the fail-loud defaults are
-  // precisely what those suites rely on being in place.
+  // Hand the shared fakes back in their pristine state, so a later test that
+  // relies on the fail-loud defaults does not inherit working HIP memory from
+  // whichever of our tests ran before it.
   //
   // The destructor rather than TearDown: most fixtures here override TearDown
   // without chaining to the base, and their cleanup still needs the emulator
@@ -2719,8 +2717,8 @@ TEST_F(SymMemoryObtainRegisterTest, GinDisabled_DefaultsToOneSegment) {
 
 // Branch: the proxy is available and the layout is single segment, so RMA
 // registration runs. 2.31 asks rma.cc's ncclRmaProxyEnabled, which this binary
-// now compiles in (see rma-test.cc), so the test drives that predicate's terms
-// rather than stubbing its answer.
+// compiles real, so the test drives that predicate's terms rather than stubbing
+// its answer.
 TEST_F(SymMemoryObtainRegisterTest, RmaProxyAvailable_RegistersWithRma) {
   RmaProxyTerms(comm, true);
   ScopedHook gather(g_devrBootstrapAllGather, agreeing);
@@ -6582,11 +6580,8 @@ TEST_F(DeepCopyDevCommRequirementsTest, FreeNull_IsSafe) {
 // caller compiled against, refusing a caller newer than the library.
 //
 // The compat table is three globals owned by the devcomm shim sources, which
-// this binary now compiles for real (devcomm-test.cc). Each test needs its own
-// version window, so the fixture zeroes them -- but it has to hand the real
-// tables back afterwards, because devcomm-test.cc's CompatTables_* cases assert
-// on the callbacks static initialisation put there. They were throwaway stubs
-// when this suite had a binary to itself; they are production state now.
+// this binary compiles for real. Each test needs its own version window, so the
+// fixture zeroes them and hands the real tables back afterwards.
 
 class NcclVersionCompatTest : public DevRuntimeMicroTest {
 protected:
@@ -6783,6 +6778,20 @@ TEST_F(CommQueryPropertiesTest, UninitialisedProps_ReturnsInvalidUsage) {
   ncclCommProperties_t raw{};
   raw.magic = 0;
   EXPECT_EQ(ncclCommQueryProperties(comm, &raw), ncclInvalidUsage);
+}
+
+// nLsaTeams comes from the topology, so a property query leaves device-runtime state (bigSize) untouched.
+TEST_F(CommQueryPropertiesTest, NLsaTeams_DoesNotInitialiseDeviceRuntime) {
+  ScopedHook granularity(g_hipMemGetAllocationGranularity,
+                         [](size_t* g, const hipMemAllocationProp*, hipMemAllocationGranularity_flags) {
+                           *g = 4096;
+                           return hipSuccess;
+                         });
+
+  ASSERT_EQ(ncclCommQueryProperties(comm, &props), ncclSuccess);
+  EXPECT_EQ(props.nLsaTeams, 1);  // all 8 ranks on node 0
+  EXPECT_EQ(granularity.calls, 0);
+  EXPECT_EQ(comm->devrState.bigSize, 0u);
 }
 
 // A caller that JIT-compiles its device code must allocate the devComm in the

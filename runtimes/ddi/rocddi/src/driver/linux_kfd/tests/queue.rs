@@ -101,10 +101,10 @@ fn user_sdma_engine_masks_follow_qualified_topology() {
     use crate::driver::GpuKernelQueueOperations;
 
     let driver = LinuxKfdDriver::new();
-    let kfd = shared(sys::Kfd::with_hook(
+    let kfd = shared(connection::Kfd::with_hook(
         File::open("/dev/null").unwrap(),
         Arc::new(|call| match call {
-            sys::Call::DestroyEvent(_) => Ok(()),
+            connection::Call::DestroyEvent(_) => Ok(()),
             _ => panic!("engine enumeration must not issue KFD ioctls"),
         }),
     ));
@@ -219,7 +219,7 @@ struct State {
 struct Fixture {
     state: Arc<Mutex<State>>,
     contents: File,
-    kfd: Shared<sys::Kfd>,
+    kfd: Shared<connection::Kfd>,
     vm: Shared<DeviceVm>,
 }
 
@@ -240,12 +240,12 @@ impl Fixture {
         } else {
             File::open("/dev/null").unwrap()
         };
-        let kfd = shared(sys::Kfd::with_hook(
+        let kfd = shared(connection::Kfd::with_hook(
             endpoint,
             Arc::new(move |call| {
                 let mut state = observed.lock().unwrap();
                 match call {
-                    sys::Call::Wait(args, event) if event.event_id == 19 => {
+                    connection::Call::Wait(args, event) if event.event_id == 19 => {
                         if state.lost {
                             event.payload[0] = 42;
                             event.payload[1] = 1;
@@ -254,14 +254,14 @@ impl Fixture {
                             args.result = uapi::WAIT_TIMEOUT;
                         }
                     }
-                    sys::Call::Wait(args, event) if event.event_id == 20 => {
+                    connection::Call::Wait(args, event) if event.event_id == 20 => {
                         args.result = uapi::WAIT_TIMEOUT;
                     }
-                    sys::Call::ResetEvent(args) if args.event_id == 19 => {
+                    connection::Call::ResetEvent(args) if args.event_id == 19 => {
                         state.lost = false;
                     }
-                    sys::Call::DestroyEvent(_) => {}
-                    sys::Call::SetScratchBackingVa(args) => {
+                    connection::Call::DestroyEvent(_) => {}
+                    connection::Call::SetScratchBackingVa(args) => {
                         assert_eq!(args.gpu_id, 42);
                         assert_ne!(args.va_address, 0);
                         assert_eq!(args.pad, 0);
@@ -270,7 +270,7 @@ impl Fixture {
                             return Err(io::Error::from_raw_os_error(errno));
                         }
                     }
-                    sys::Call::Allocate(args) => {
+                    connection::Call::Allocate(args) => {
                         let page = os_memory::page_size().unwrap() as u64;
                         if state.reject_userptr && args.flags & uapi::USERPTR != 0 {
                             return Err(io::Error::from_raw_os_error(errno::EOPNOTSUPP));
@@ -286,7 +286,7 @@ impl Fixture {
                         assert_eq!(args.size % page, 0);
                         state.buffers.insert(args.handle, **args);
                     }
-                    sys::Call::Map(args, devices) => {
+                    connection::Call::Map(args, devices) => {
                         let doorbell = state
                             .buffers
                             .get(&args.handle)
@@ -306,7 +306,7 @@ impl Fixture {
                         }
                         args.success = args.count;
                     }
-                    sys::Call::Unmap(args, devices) => {
+                    connection::Call::Unmap(args, devices) => {
                         let doorbell = state
                             .buffers
                             .get(&args.handle)
@@ -323,7 +323,7 @@ impl Fixture {
                         }
                         args.success = args.count;
                     }
-                    sys::Call::Free(args) => {
+                    connection::Call::Free(args) => {
                         let doorbell = state
                             .buffers
                             .get(&args.handle)
@@ -340,7 +340,7 @@ impl Fixture {
                         }
                         assert!(state.buffers.remove(&args.handle).is_some());
                     }
-                    sys::Call::Svm(args, attributes) => {
+                    connection::Call::Svm(args, attributes) => {
                         let page = os_memory::page_size().unwrap() as u64;
                         let flags = uapi::SVM_FLAG_HOST_ACCESS
                             | uapi::SVM_FLAG_GPU_EXECUTE
@@ -384,7 +384,7 @@ impl Fixture {
                         }
                         state.svm_context = Some((args.start_address, args.size));
                     }
-                    sys::Call::CreateQueue(args) => {
+                    connection::Call::CreateQueue(args) => {
                         let page = os_memory::page_size().unwrap() as u64;
                         state.creates += 1;
                         let expected_scratch = state.expected_scratch;
@@ -691,7 +691,7 @@ impl Fixture {
                         args.queue_id = 0;
                         args.doorbell_offset = 24;
                     }
-                    sys::Call::UpdateQueue(args) => {
+                    connection::Call::UpdateQueue(args) => {
                         assert!(state.live, "updated a queue after native destruction");
                         assert_eq!(args.queue_id, 0, "zero is a valid queue ID");
                         state.updates.push(**args);
@@ -699,14 +699,14 @@ impl Fixture {
                             return Err(io::Error::from_raw_os_error(errno));
                         }
                     }
-                    sys::Call::SetCuMask(args, mask) => {
+                    connection::Call::SetCuMask(args, mask) => {
                         assert!(state.live, "masked a queue after native destruction");
                         assert_eq!(args.queue_id, 0, "zero is a valid queue ID");
                         assert_eq!(args.count as usize, mask.len() * 32);
                         assert_eq!(args.mask, mask.as_ptr() as u64);
                         state.cu_masks.push((**args, mask.to_vec()));
                     }
-                    sys::Call::AllocQueueGws(args) => {
+                    connection::Call::AllocQueueGws(args) => {
                         assert!(state.live, "GWS requires a live native queue");
                         assert_eq!(args.queue_id, 0, "zero is a valid queue ID");
                         assert_eq!(args.num_gws, 1);
@@ -717,7 +717,7 @@ impl Fixture {
                         }
                         args.first_gws = 0;
                     }
-                    sys::Call::DestroyQueue(args) => {
+                    connection::Call::DestroyQueue(args) => {
                         assert_eq!(args.queue_id, 0, "zero is a valid queue ID");
                         assert!(
                             state.live,
@@ -868,10 +868,10 @@ fn concurrent_queue_creation_enables_runtime_once_before_acquisition() {
     let allocations = Arc::new(AtomicUsize::new(0));
     let observed_enables = enables.clone();
     let observed_allocations = allocations.clone();
-    let mut kfd = shared(sys::Kfd::with_hook(
+    let mut kfd = shared(connection::Kfd::with_hook(
         File::open("/dev/null").unwrap(),
         Arc::new(move |call| match call {
-            sys::Call::RuntimeEnable(args) => {
+            connection::Call::RuntimeEnable(args) => {
                 assert_eq!(args.r_debug, 0);
                 assert_eq!(args.capabilities_mask, 0);
                 if args.mode_mask == 1 {
@@ -879,15 +879,15 @@ fn concurrent_queue_creation_enables_runtime_once_before_acquisition() {
                 }
                 Ok(())
             }
-            sys::Call::Wait(args, _) => {
+            connection::Call::Wait(args, _) => {
                 args.result = uapi::WAIT_TIMEOUT;
                 Ok(())
             }
-            sys::Call::Allocate(_) => {
+            connection::Call::Allocate(_) => {
                 observed_allocations.fetch_add(1, Ordering::Relaxed);
                 Err(io::Error::from_raw_os_error(errno::ENOMEM))
             }
-            sys::Call::DestroyEvent(_) => Ok(()),
+            connection::Call::DestroyEvent(_) => Ok(()),
             _ => panic!("unexpected queue admission call"),
         }),
     ));
@@ -927,18 +927,18 @@ fn concurrent_queue_creation_enables_runtime_once_before_acquisition() {
 fn runtime_enable_failure_prevents_queue_backing_acquisition() {
     let allocations = Arc::new(AtomicUsize::new(0));
     let observed = allocations.clone();
-    let mut kfd = shared(sys::Kfd::with_hook(
+    let mut kfd = shared(connection::Kfd::with_hook(
         File::open("/dev/null").unwrap(),
         Arc::new(move |call| match call {
-            sys::Call::RuntimeEnable(args) if args.mode_mask == 1 => {
+            connection::Call::RuntimeEnable(args) if args.mode_mask == 1 => {
                 Err(io::Error::from_raw_os_error(errno::EIO))
             }
-            sys::Call::RuntimeEnable(args) if args.mode_mask == 0 => Ok(()),
-            sys::Call::Allocate(_) => {
+            connection::Call::RuntimeEnable(args) if args.mode_mask == 0 => Ok(()),
+            connection::Call::Allocate(_) => {
                 observed.fetch_add(1, Ordering::Relaxed);
                 panic!("queue backing was acquired after runtime-enable failure")
             }
-            sys::Call::DestroyEvent(_) => Ok(()),
+            connection::Call::DestroyEvent(_) => Ok(()),
             _ => panic!("unexpected queue admission call"),
         }),
     ));
