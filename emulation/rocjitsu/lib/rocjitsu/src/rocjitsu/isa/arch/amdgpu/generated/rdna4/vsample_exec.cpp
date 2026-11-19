@@ -299,13 +299,101 @@ void ImageSampleCLzOVsample::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageGather4Vsample::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  if (inst_.dmask && !inst_.r128 && !inst_.tfe && !inst_.lwe &&
+      amdgpu::use_linear_image_path(wf, inst_.rsrc, inst_.samp, inst_.dim, inst_.unorm, true)) {
+    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    d->is_load = true;
+    d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+    d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+    d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+    if (amdgpu::prepare_image_sample(wf, *d, inst_.rsrc, inst_.samp,
+                                     amdgpu::gfx12_image_address_registers(inst_),
+                                     {.dmask = inst_.dmask,
+                                      .dim = inst_.dim,
+                                      .a16 = bool(inst_.a16),
+                                      .d16 = bool(inst_.d16),
+                                      .r128 = bool(inst_.r128),
+                                      .tfe = bool(inst_.tfe),
+                                      .lwe = bool(inst_.lwe),
+                                      .da = true,
+                                      .unorm = bool(inst_.unorm),
+                                      .mip = false,
+                                      .gather = true},
+                                     amdgpu::ImageSampleMode::Implicit)
+            .failed()) {
+      return;
+    }
+    set_data(std::move(d));
+    return;
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (amdgpu::prepare_image_transfer(wf, *d, inst_.rsrc, inst_.vdata,
+                                     amdgpu::gfx12_image_address_registers(inst_),
+                                     {.dmask = uint32_t(inst_.dmask),
+                                      .dim = uint32_t(inst_.dim),
+                                      .a16 = bool(inst_.a16),
+                                      .d16 = bool(inst_.d16),
+                                      .r128 = bool(inst_.r128),
+                                      .tfe = bool(inst_.tfe),
+                                      .lwe = bool(inst_.lwe),
+                                      .unorm = bool(inst_.unorm),
+                                      .gather = true},
+                                     inst_.samp, amdgpu::ImageSampleMode::Implicit)
+          .failed())
+    return;
+  set_data(std::move(d));
 }
 
 void ImageGather4LVsample::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  if (inst_.dmask && !inst_.r128 && !inst_.tfe && !inst_.lwe &&
+      amdgpu::use_linear_image_path(wf, inst_.rsrc, inst_.samp, inst_.dim, inst_.unorm, true)) {
+    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    d->is_load = true;
+    d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+    d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+    d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+    if (amdgpu::prepare_image_sample(wf, *d, inst_.rsrc, inst_.samp,
+                                     amdgpu::gfx12_image_address_registers(inst_),
+                                     {.dmask = inst_.dmask,
+                                      .dim = inst_.dim,
+                                      .a16 = bool(inst_.a16),
+                                      .d16 = bool(inst_.d16),
+                                      .r128 = bool(inst_.r128),
+                                      .tfe = bool(inst_.tfe),
+                                      .lwe = bool(inst_.lwe),
+                                      .da = true,
+                                      .unorm = bool(inst_.unorm),
+                                      .mip = false,
+                                      .gather = true},
+                                     amdgpu::ImageSampleMode::Explicit)
+            .failed()) {
+      return;
+    }
+    set_data(std::move(d));
+    return;
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (amdgpu::prepare_image_transfer(wf, *d, inst_.rsrc, inst_.vdata,
+                                     amdgpu::gfx12_image_address_registers(inst_),
+                                     {.dmask = uint32_t(inst_.dmask),
+                                      .dim = uint32_t(inst_.dim),
+                                      .a16 = bool(inst_.a16),
+                                      .d16 = bool(inst_.d16),
+                                      .r128 = bool(inst_.r128),
+                                      .tfe = bool(inst_.tfe),
+                                      .lwe = bool(inst_.lwe),
+                                      .unorm = bool(inst_.unorm),
+                                      .gather = true},
+                                     inst_.samp, amdgpu::ImageSampleMode::Explicit)
+          .failed())
+    return;
+  set_data(std::move(d));
 }
 
 void ImageGather4BVsample::execute_impl(amdgpu::Wavefront &wf) {

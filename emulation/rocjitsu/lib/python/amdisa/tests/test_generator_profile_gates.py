@@ -4555,6 +4555,61 @@ def test_single_isa_cdna1_sources_preprocess_with_source_includes(
     )
 
 
+def test_standard_profile_addition_compiles_against_stock_operation_catalog(
+    tmp_path, rocjitsu_source_root: Path, runtime_api_headers_include_root: Path
+):
+    compiler = shutil.which('clang++') or shutil.which('c++')
+    if compiler is None:
+        pytest.skip('C++ compiler is unavailable')
+    additions = tmp_path / 'legacy_math.xml'
+    additions.write_text(
+        (_mrisa_dir() / 'amdgpu_isa_cdna1_legacy_math.xml')
+        .read_text()
+        .replace(
+            '<InstructionName>V_EXP_LEGACY_F32</InstructionName>',
+            '<InstructionName>V_EXP_LEGACY_EXAMPLE_F32</InstructionName>',
+        )
+    )
+    output = tmp_path / 'generated'
+    _run(
+        SimpleNamespace(
+            isafiles=[f'cdna1:{_mrisa_dir() / "amdgpu_isa_cdna1.xml"}'],
+            isa_additions=[f'cdna1:{additions}'],
+            gen_isas=True,
+            gen_dbt=False,
+            isa_output=str(output),
+            dbt_output=None,
+        )
+    )
+    source = output / 'cdna1' / 'vop1.cpp'
+    body = _generated_function_body(
+        source.read_text(), 'VExpLegacyExampleF32Vop1::VExpLegacyExampleF32Vop1'
+    )
+    assert 'set_amdgpu_operation(amdgpu::Operation::Unknown);' in body
+    assert 'set_amdgpu_operation(amdgpu::Operation::V_MOV_B32);' in source.read_text()
+    include_roots = (
+        rocjitsu_source_root / 'lib' / 'rocjitsu' / 'src',
+        rocjitsu_source_root / 'lib' / 'rocjitsu' / 'include',
+        runtime_api_headers_include_root,
+        rocjitsu_source_root / 'lib' / 'arith' / 'include',
+        rocjitsu_source_root / 'lib' / 'util' / 'include',
+        rocjitsu_source_root / 'lib' / 'simdojo' / 'include',
+    )
+    result = subprocess.run(
+        [
+            compiler,
+            '-std=c++20',
+            '-fsyntax-only',
+            *(flag for root in include_roots for flag in ('-I', str(root))),
+            str(source),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_custom_identity_preprocesses_with_profile_handwritten_includes(
     tmp_path, rocjitsu_source_root: Path, runtime_api_headers_include_root: Path
 ):
@@ -5400,20 +5455,6 @@ def test_gfx11_profiles_share_image_operand_layout():
     assert rdna3_5.gfx11_mimg_gather_style_instructions == frozenset(
         {'IMAGE_MSAA_LOAD'}
     )
-    assert rdna3_5.gfx11_mimg_fixed_vdata_words == {
-        'IMAGE_BVH_INTERSECT_RAY': 4,
-        'IMAGE_BVH64_INTERSECT_RAY': 4,
-    }
-    fixed_bvh_vaddr_words = {
-        'IMAGE_BVH_INTERSECT_RAY': (11, 8),
-        'IMAGE_BVH64_INTERSECT_RAY': (12, 9),
-    }
-    assert rdna3.gfx11_mimg_fixed_vaddr_words == fixed_bvh_vaddr_words
-    assert rdna3_5.gfx11_mimg_fixed_vaddr_words == fixed_bvh_vaddr_words
-    assert rdna3_5.gfx11_mimg_nsa_group_words == {
-        'IMAGE_BVH_INTERSECT_RAY': ((1, 1, 3, 3, 3), (1, 1, 3, 3)),
-        'IMAGE_BVH64_INTERSECT_RAY': ((2, 1, 3, 3, 3), (2, 1, 3, 3)),
-    }
     assert rdna3_5.sendmsg_return_symbolic
 
 
@@ -5439,10 +5480,10 @@ def test_generated_rdna3_5_fuzz_disassembly_rules(amdgpu_generated_root: Path):
     assert 'vdata(128, OperandType::OPR_VGPR' in _generated_constructor_body(
         mimg, 'ImageBvhIntersectRayMimg'
     )
-    assert '(reinterpret_cast<const OpEncoding *>(inst)->a16 ? 256 : 352)' in (
+    assert 'amdgpu::bvh_address_words(false,' in (
         _generated_constructor_body(mimg, 'ImageBvhIntersectRayMimg')
     )
-    assert '(reinterpret_cast<const OpEncoding *>(inst)->a16 ? 288 : 384)' in (
+    assert 'amdgpu::bvh_address_words(true,' in (
         _generated_constructor_body(mimg, 'ImageBvh64IntersectRayMimg')
     )
     assert 'capture_nsa_words(inst, &vaddr);' in mimg
@@ -5492,6 +5533,35 @@ def test_mimg_r128_resource_sizing(profile, ordinary, bvh, multi):
         ('IMAGE_LOAD_BY2', multi),
     ]:
         assert profile().mimg_r128_resource(name) == expected
+
+
+def test_pixel_transfer_forms_keep_target_availability_and_payload_together():
+    generator = CodeGenerator(SimpleNamespace(arch_name='rdna1'), '')
+    for name, pixels, raw, signed, mip in [
+        ('IMAGE_LOAD_MIP_PCK_SGN', 1, True, True, True),
+        ('IMAGE_STORE_PCK', 1, True, False, False),
+        ('IMAGE_LOAD_BY2', 2, False, False, False),
+        ('IMAGE_STORE_MIP_PCK4', 4, True, False, True),
+    ]:
+        form = generator._image_pixel_form(name)
+        assert (form.pixels, form.raw, form.signed, form.mip) == (
+            pixels,
+            raw,
+            signed,
+            mip,
+        )
+        for arch in ('cdna2', 'rdna1', 'rdna2', 'rdna3', 'rdna3_5', 'rdna4'):
+            generator.isa_spec.arch_name = arch
+            assert generator._uses_image_access_or_sample(name) == (
+                arch in ('rdna1', 'rdna2')
+                or (pixels == 1 and arch in ('cdna2', 'rdna4'))
+            )
+        assert (generator._graphics_image_form(name) is not None) == (pixels == 1)
+
+    for arch in ('rdna3', 'rdna3_5'):
+        generator.isa_spec.arch_name = arch
+        assert not generator._uses_image_access_or_sample('IMAGE_MSAA_LOAD')
+        assert generator._graphics_image_form('IMAGE_MSAA_LOAD') is not None
 
 
 @pytest.mark.parametrize(
@@ -5558,14 +5628,52 @@ def test_extended_image_controls_emit_execution_and_source_footprints(
     if arch == 'rdna3':
         ordinary = generator._ordinary_image_encoding()
         assert f'.linear_candidate = bool({ordinary})' in derivative
-        assert '.filtered_feedback_candidate = bool(' in derivative
+        sample = _generated_class_body(header, 'ImageSampleMimg')
+        assert '.query = false' in sample
+        assert (
+            '.filtered_feedback_candidate = bool(inst_.dmask && !inst_.r128)' in sample
+        )
+        assert '.texel_fault = bool(inst_.tfe)' in sample
+        query = _generated_class_body(header, 'ImageGetLodMimg')
+        assert '.query = true' in query
+        assert (
+            '.filtered_feedback_candidate' not in query and '.texel_fault' not in query
+        )
         assert f'if ({ordinary} &&' in body
     else:
         assert '.linear_candidate = false' in derivative
-    assert '.filtered_feedback_candidate' not in gather
+    for excluded in (derivative, gather):
+        assert '.filtered_feedback_candidate' not in excluded
+        assert '.texel_fault' not in excluded
     assert 'modifiers.image_prefix_words = 3;' in gather
     assert 'amdgpu::image_prefix_low16_words(3, 0, inst_.a16, true, true)' in gather
     assert 'amdgpu::image_coordinate_count(inst_.dim) + 0' in gather
+
+
+def test_sampler_suffix_controls_are_shared_across_targets():
+    generator = CodeGenerator(SimpleNamespace(arch_name='rdna1'), '')
+    coarse = generator._image_sample_form('IMAGE_SAMPLE_CD_CL_O_G16')
+    assert coarse.coarse_derivatives and coarse.derivatives and coarse.gradient16
+    assert coarse.offset and coarse.lod_clamp and coarse.sample_mode == 'Derivatives16'
+    assert '.coarse_derivatives = true' in coarse.sample_control_initializers
+    assert generator._graphics_image_form('IMAGE_SAMPLE_CD_CL_O_G16') is None
+    gfx12 = CodeGenerator(SimpleNamespace(arch_name='rdna4'), '')
+    for name in ('IMAGE_GATHER4', 'IMAGE_GATHER4_L'):
+        assert gfx12._image_instruction_form(name) == generator._image_instruction_form(
+            name
+        )
+    bias = generator._graphics_image_form('IMAGE_SAMPLE_B_CL')
+    assert bias.lod_bias and bias.lod_clamp and bias.sample_mode == 'Bias'
+    for pixels in (4, 8):
+        name = f'IMAGE_GATHER{pixels}H_PCK'
+        form = generator._image_sample_form(name)
+        assert (
+            form.sampled
+            and form.gather
+            and form.horizontal
+            and form.packed_texels == pixels
+        )
+        assert generator._graphics_image_form(name) is None
 
 
 def test_supported_image_opcodes_have_explicit_operand_forms():
@@ -5583,7 +5691,7 @@ def test_supported_image_opcodes_have_explicit_operand_forms():
     generator = CodeGenerator(SimpleNamespace(arch_name='rdna3'), '')
     assert set(forms) == set(generator._IMAGE_INSTRUCTION_FORMS)
     for name, flags in forms.items():
-        assert generator._issues_image_memory(name)
+        assert generator._uses_image_access_or_sample(name)
         form = generator._image_instruction_form(name)
         assert {
             key for key, value in vars(form).items() if value and key != 'sampled'
@@ -5601,11 +5709,11 @@ def test_supported_image_opcodes_have_explicit_operand_forms():
         }.get(name, 'Implicit')
         assert form.sample_mode == expected_sample
     for name in ('IMAGE_SAMPLE_D_CL', 'IMAGE_SAMPLE_L_O'):
-        assert not generator._issues_image_memory(name)
+        assert not generator._uses_image_access_or_sample(name)
         with pytest.raises(KeyError):
             generator._image_instruction_form(name)
     generator.isa_spec = SimpleNamespace(arch_name='cdna5')
-    assert not any(generator._issues_image_memory(name) for name in forms)
+    assert not any(generator._uses_image_access_or_sample(name) for name in forms)
 
 
 @pytest.mark.parametrize(
@@ -5660,10 +5768,10 @@ def test_generated_gfx11_image_address_width_uses_dim_and_preserves_fixed_bvh(
     image_sample = _generated_constructor_body(mimg, 'ImageSampleMimg')
     assert '(reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)' in image_sample
     assert '(reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)' in image_sample
-    assert '(reinterpret_cast<const OpEncoding *>(inst)->a16 ? 256 : 352)' in (
+    assert 'amdgpu::bvh_address_words(false,' in (
         _generated_constructor_body(mimg, 'ImageBvhIntersectRayMimg')
     )
-    assert '(reinterpret_cast<const OpEncoding *>(inst)->a16 ? 288 : 384)' in (
+    assert 'amdgpu::bvh_address_words(true,' in (
         _generated_constructor_body(mimg, 'ImageBvh64IntersectRayMimg')
     )
 

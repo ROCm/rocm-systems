@@ -43,7 +43,8 @@ using namespace rocjitsu;
 namespace mc = amdgpu::matrix_coexecution;
 
 TEST(MmaAdmissionCacheTest, ReusesAcceptedAndRejectedPlansAcrossLoopsAndInvalidation) {
-  if (!amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+  if (!amdgpu::async_mma_policy::candidate(
+          mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4)))
     GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   decoder->enable_pool();
@@ -97,7 +98,8 @@ TEST(MmaAdmissionCacheTest, ReusesAcceptedAndRejectedPlansAcrossLoopsAndInvalida
 }
 
 TEST(MmaAdmissionCacheTest, RejectsDependenciesBoundsAndUnknownInstructions) {
-  if (!amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+  if (!amdgpu::async_mma_policy::candidate(
+          mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4)))
     GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   constexpr uint64_t pc = 0x490000;
@@ -132,7 +134,8 @@ TEST(MmaAdmissionCacheTest, RejectsDependenciesBoundsAndUnknownInstructions) {
 }
 
 TEST(MmaAdmissionCacheTest, KeepsWiderGroupsAndStopsAtANonAdjacentHazard) {
-  if (!amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+  if (!amdgpu::async_mma_policy::candidate(
+          mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4)))
     GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   constexpr uint64_t pc = 0x4a0000;
@@ -180,12 +183,16 @@ static_assert(!amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL,
                                           rdna4::Isa>::supports_async_execution);
 
 TEST(MatrixCoexecutionTest, SelectsOnlySupportedLargeMatrixInstructions) {
-  EXPECT_FALSE(mc::async_candidate("v_wmma_f32_16x16x64_fp8_fp8"));
-  EXPECT_FALSE(mc::async_candidate("v_wmma_f32_16x16x128_bf8_bf8"));
-  EXPECT_FALSE(mc::async_candidate("v_wmma_f32_32x16x128_f4"));
-  EXPECT_FALSE(mc::async_candidate("v_wmma_f32_16x16x32_f16"));
-  EXPECT_FALSE(mc::async_candidate("v_wmma_f32_16x16x128_f8f6f4"));
-  EXPECT_FALSE(mc::async_candidate("v_add_f32"));
+  using amdgpu::Operation;
+  for (Operation operation : {
+           Operation::V_WMMA_F32_16X16X64_FP8_FP8,
+           Operation::V_WMMA_F32_16X16X128_BF8_BF8,
+           Operation::V_WMMA_F32_32X16X128_F4,
+           Operation::V_WMMA_F32_16X16X32_F16,
+           Operation::V_WMMA_F32_16X16X128_F8F6F4,
+           Operation::V_ADD_F32,
+       })
+    EXPECT_FALSE(mc::async_candidate(mma_test::PolicyInstruction(operation)));
 }
 
 TEST(MatrixCoexecutionTest, BatchOverlapsEightCallbacksAndJoinsBeforeReturning) {
