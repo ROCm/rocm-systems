@@ -252,6 +252,26 @@ class SummarizeTests(unittest.TestCase):
             self.assertEqual(rab.summarize_results(results, "TestOS", summary), 1)
             self.assertIn("unit test (exit 1)", summary.read_text())
 
+    def test_a_huge_log_gives_a_short_summary_that_keeps_the_failures(self):
+        with tempfile.TemporaryDirectory() as td:
+            results = Path(td)
+            noise = "".join(f"[       OK ] Suite.Test{i} (1 ms)\n" for i in range(200000))
+            failed = "[  FAILED  ] Suite.Broken (5 ms)\n"
+            (results / "amdsmi_tests.log").write_text(noise + failed + "[  FAILED  ] 1 test\nExit code: 1\n")
+            (results / "build_result.txt").write_text("BUILD FAILED: make exited 2\n" + "x" * 3_000_000 + "\nlast error\n")
+            summary = results / "summary.md"
+            n = rab.summarize_results(results, "TestOS", summary)
+            text = summary.read_text()
+            self.assertEqual(n, 2)
+            self.assertLess(len(text), 100_000)
+            self.assertIn("Suite.Broken", text)
+            self.assertIn("last error", text)
+            self.assertIn("BUILD FAILED: make exited 2", text)
+            self.assertIn("lines not shown", text)
+
+    def test_excerpt_of_a_short_log_is_the_whole_log(self):
+        self.assertEqual(rab._excerpt("a\nb\nc"), "```\na\nb\nc\n```")
+
 
 if __name__ == "__main__":
     unittest.main()

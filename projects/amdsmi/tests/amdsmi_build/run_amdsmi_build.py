@@ -1244,6 +1244,37 @@ def _fenced(text: str) -> str:
     return "```\n" + text + "\n```"
 
 
+SUMMARY_TAIL_LINES = 40
+SUMMARY_MAX_MATCHES = 60
+SUMMARY_MAX_LINE = 400
+
+
+def _excerpt(text: str, pattern=None, head: int = 0) -> str:
+    """Short, fenced view of a log: the first *head* lines, up to
+    SUMMARY_MAX_MATCHES lines matching *pattern* (the failing tests), and the
+    last SUMMARY_TAIL_LINES lines. A whole log can pass GitHub's 1024k step
+    summary limit, which drops the summary of every stage after it; the full
+    logs stay in the uploaded test-results artifact.
+    """
+    lines = text.splitlines()
+    keep = set(range(min(head, len(lines))))
+    keep.update(range(max(0, len(lines) - SUMMARY_TAIL_LINES), len(lines)))
+    if pattern is not None:
+        matches = [i for i, ln in enumerate(lines) if pattern.search(ln)]
+        keep.update(matches[:SUMMARY_MAX_MATCHES])
+    out: List[str] = []
+    last = -1
+    for i in sorted(keep):
+        if i > last + 1:
+            out.append(f"... ({i - last - 1} lines not shown)")
+        ln = lines[i]
+        out.append(ln if len(ln) <= SUMMARY_MAX_LINE else ln[:SUMMARY_MAX_LINE] + "...")
+        last = i
+    if last < len(lines) - 1:
+        out.append(f"... ({len(lines) - last - 1} lines not shown)")
+    return _fenced("\n".join(out))
+
+
 def summarize_results(results_dir: Path, os_label: str, summary_file: Optional[Path]) -> int:
     """Render a CI summary for *results_dir*.
 
@@ -1263,7 +1294,7 @@ def summarize_results(results_dir: Path, os_label: str, summary_file: Optional[P
         if "FAILED" in content:
             stage = result_file.stem.replace("_result", "").replace("_", " ")
             failures.append(stage)
-            details.append(f"#### {stage}\n\n" + _fenced(content))
+            details.append(f"#### {stage}\n\n" + _excerpt(content, head=3))
             print(f"FAILED: {stage}")
 
     # 2. amd-smi command test logs. The workflow appends "Error code: <rc>"
@@ -1303,7 +1334,7 @@ def summarize_results(results_dir: Path, os_label: str, summary_file: Optional[P
             count = gtest_fails if gtest_fails else f"exit {rc}"
             title = f"{gtest_fails} failure(s)" if gtest_fails else f"exit {rc}"
             failures.append(f"AMDSMI Tests ({count})")
-            details.append(f"#### AMDSMI Tests \u2014 {title}\n\n" + _fenced(text))
+            details.append(f"#### AMDSMI Tests \u2014 {title}\n\n" + _excerpt(text, _re.compile(r"\[  FAILED  \]")))
 
     # 4. Python test outputs
     fail_re = _re.compile(r"^(FAIL|ERROR):", _re.MULTILINE)
@@ -1324,7 +1355,7 @@ def summarize_results(results_dir: Path, os_label: str, summary_file: Optional[P
             count = py_fails if py_fails else f"exit {rc}"
             title = f"{py_fails} failure(s)" if py_fails else f"exit {rc}"
             failures.append(f"{name} ({count})")
-            details.append(f"#### {name} \u2014 {title}\n\n" + _fenced(text))
+            details.append(f"#### {name} \u2014 {title}\n\n" + _excerpt(text, fail_re))
 
     # 4b. standalone NIC suites run next to amdsmitst; they print no FAIL: line the gtest or
     # unittest checks above would match, so the exit code is the only signal.
@@ -1333,7 +1364,7 @@ def summarize_results(results_dir: Path, os_label: str, summary_file: Optional[P
         rc = _exit_code(text)
         if rc:
             failures.append(f"{suite_log.stem} (exit {rc})")
-            details.append(f"#### {suite_log.stem}: exit {rc}\n\n" + _fenced(text))
+            details.append(f"#### {suite_log.stem}: exit {rc}\n\n" + _excerpt(text))
 
     # 5. example test results (segfault detection)
     crash_re = _re.compile(r"segfault|SIGSEGV|abort", _re.IGNORECASE)
@@ -1345,7 +1376,7 @@ def summarize_results(results_dir: Path, os_label: str, summary_file: Optional[P
         if crash_re.search(text) or _exit_code(text):
             name = ex_log.replace(".log", "")
             failures.append(f"Example {name}")
-            details.append(f"#### Example {name}\n\n" + _fenced(text))
+            details.append(f"#### Example {name}\n\n" + _excerpt(text, crash_re))
 
     # Render. Every failure above drives the exit status.
     if failures:
