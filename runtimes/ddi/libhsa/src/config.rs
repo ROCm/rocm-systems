@@ -9,6 +9,14 @@ pub(super) fn sdma_enabled(value: Option<&str>) -> bool {
     value != Some("0")
 }
 
+/// Counted hardware queue limit per agent and priority, sampled at startup.
+/// Zero deliberately prevents acquisition; invalid or absent values use four.
+pub(super) fn counted_queue_limit(value: Option<&str>) -> usize {
+    value
+        .and_then(|value| value.trim().parse().ok())
+        .unwrap_or(4)
+}
+
 pub(super) mod cu_mask;
 
 /// Selects native GPU ordinals in the order requested by `ROCr` visibility.
@@ -89,6 +97,23 @@ pub(crate) struct HsaConfig {
 #[cfg(test)]
 mod tests {
     use super::visible_gpu_indices;
+
+    #[test]
+    fn counted_queue_limit_preserves_zero_and_uses_default_when_unspecified() {
+        for (value, expected) in [
+            (None, 4),
+            (Some(""), 4),
+            (Some("1"), 1),
+            (Some("2"), 2),
+            (Some("4"), 4),
+            (Some("0"), 0),
+            (Some(" 2 "), 2),
+            (Some("-1"), 4),
+            (Some("invalid"), 4),
+        ] {
+            assert_eq!(super::counted_queue_limit(value), expected);
+        }
+    }
 
     #[test]
     fn sdma_override_disables_only_the_explicit_zero_value() {

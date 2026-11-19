@@ -376,7 +376,9 @@ impl HsaSession {
             debugger: pending.debugger.take(),
             logging: Arc::new(LogOutput::new()),
             next_handle: 0x4853_4101_0000_0000,
-            queue_state: QueueState::new(),
+            queue_state: QueueState::new(config::counted_queue_limit(
+                std::env::var("GPU_MAX_HW_QUEUES").ok().as_deref(),
+            )),
             loader: LoaderState::new(),
             image_state: ImageState::new(),
             memory_state: MemoryState::new(health.clone()),
