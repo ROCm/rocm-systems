@@ -1821,7 +1821,7 @@ def test_diagnostics_prioritizes_failure_evidence_under_file_cap(
     phase = ctx.root / 'phase-gluon-verify.json'
     report = ctx.root / 'reports/gluon-verification.json'
     report.write_text(json.dumps({'verified': False}))
-    critical = {commands, failed_log, phase, report}
+    critical = {commands, failed_log, phase, report, ctx.root / 'reports/ccache.conf'}
     expected = {path.relative_to(ctx.root).as_posix() for path in critical}
     with mock.patch.object(ctx, 'sources'):
         ctx.diagnostics()
@@ -1868,9 +1868,10 @@ def test_diagnostics_size_limits_and_symlink_exclusion(tmp_path):
         inventory = json.load(stream)
         assert inventory['per_file_limit_bytes'] == 256 * 1024
         assert inventory['file_limit'] == len(inventory['entries']) == 128
-        assert inventory['omitted_files'] == 3
+        assert inventory['omitted_files'] == 4  # Includes the ccache config report.
         assert len(archive.getmembers()) == 129  # Files plus inventory.
-        assert inventory['entries'][0]['truncated'] is True
+        large = next(e for e in inventory['entries'] if e['path'] == 'logs/large.log')
+        assert large['truncated'] is True
         assert archive.getmember('logs/large.log').size == 256 * 1024
 
 

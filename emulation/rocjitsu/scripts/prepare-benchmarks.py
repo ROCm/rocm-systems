@@ -119,6 +119,26 @@ class Preparation:
             'UV_CACHE_DIR must remain within the package cache',
         )
         self.env['UV_PYTHON_DOWNLOADS'] = 'never'
+        # CMake initializes launchers from these variables for every fresh build,
+        # including scikit-build's ROCISA wheel. The pinned llama builder opts out.
+        for key in list(self.env):
+            if key.startswith('CCACHE_') or key in (
+                'CMAKE_C_COMPILER_LAUNCHER',
+                'CMAKE_CXX_COMPILER_LAUNCHER',
+                'CMAKE_HIP_COMPILER_LAUNCHER',
+            ):
+                self.env.pop(key)
+        base_dir = os.path.commonpath([str(p.resolve()) for p in protected])
+        if base_dir == '/':
+            base_dir = str(self.root.parent)
+        self.env.update(
+            CCACHE_DIR=str(package_cache / 'ccache'),
+            CCACHE_BASEDIR=base_dir,
+            CCACHE_CONFIGPATH=str(self.root / 'reports/ccache.conf'),
+            CCACHE_STATSLOG=str(self.logs / 'ccache-stats.log'),
+            CMAKE_C_COMPILER_LAUNCHER='ccache',
+            CMAKE_CXX_COMPILER_LAUNCHER='ccache',
+        )
         for key, directory in {
             'HOME': 'home',
             'TMPDIR': 'tmp',
@@ -130,6 +150,7 @@ class Preparation:
             self.env[key] = str(self.root / directory)
         for directory in [
             Path(self.env['UV_CACHE_DIR']),
+            Path(self.env['CCACHE_DIR']),
             self.logs,
             self.cwd,
             self.root / 'reports',
@@ -151,6 +172,9 @@ class Preparation:
             )
             directory.mkdir(parents=True, exist_ok=True)
             require(not directory.is_symlink(), 'Attempt directory contains a symlink')
+        Path(self.env['CCACHE_CONFIGPATH']).write_text(
+            'compiler_check = content\nmax_size = 5G\n'
+        )
         for key in (
             'LD_PRELOAD',
             'PYTHONPATH',
@@ -178,6 +202,7 @@ class Preparation:
             'Refusing to replay a preparation phase',
         )
         self.phase, self.started = phase, time.monotonic()
+        self.env['CCACHE_STATSLOG'] = str(self.logs / f'{phase}-ccache-stats.log')
         if phase == 'rocjitsu':
             deps = json.loads((self.root / 'phase-dependencies.json').read_text())
             require(deps['success'], 'Dependencies did not complete')
@@ -592,6 +617,7 @@ class Preparation:
         ]
 
     def preflight(self):
+        self.run('ccache-version', ['ccache', '--version'])
         for relative in (
             'lib/cmake/hip/hip-config.cmake',
             'share/rocmcmakebuildtools/cmake/ROCmCMakeBuildToolsConfig.cmake',
@@ -1333,6 +1359,17 @@ class Preparation:
         )
 
     def diagnostics(self):
+        for stats in sorted(self.logs.glob('*ccache-stats.log')):
+            if not self.diagnostic_file(stats):
+                continue
+            try:
+                self.run(
+                    'ccache-summary-' + stats.stem,
+                    ['ccache', '--show-log-stats', '--verbose'],
+                    env_overrides={'CCACHE_STATSLOG': str(stats)},
+                )
+            except (ValueError, OSError) as error:
+                (self.root / 'reports/ccache-summary-error.txt').write_text(str(error))
         try:
             self.sources()
         except (ValueError, OSError) as error:

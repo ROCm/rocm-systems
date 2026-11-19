@@ -131,7 +131,7 @@ The benchmark container requires two pre-provisioned, dedicated host directories
 | Host directory | Container mount | Purpose |
 | --- | --- | --- |
 | `/srv/rocjitsu-ci/sources` | `/__w/rocm-systems/rocm-systems/ci-sources` | Separate pinned measurement, corpus, TensileLite, full Tensile, llama and nanobind checkouts |
-| `/srv/rocjitsu-ci/cache` | `/opt/rocjitsu-cache` | uv package cache (`uv/`) |
+| `/srv/rocjitsu-ci/cache` | `/opt/rocjitsu-cache` | uv packages (`uv/`) and compiler objects (`ccache/`) |
 
 These are bind mounts, not restored Actions cache archives. They must exist before
 Docker starts the job; the workflow does not provision the host. The cache root
@@ -168,7 +168,8 @@ read installed metadata with stdlib `importlib.metadata`; command logs retain
 verbose registry resolution information. No pip bootstrap, cache or configuration
 is used by benchmark preparation.
 
-Only downloaded/package setup data persists. Builds, venvs, generated artifacts,
+Only package setup data and compiler-cache entries persist alongside sources.
+Complete builds, venvs, generated artifacts,
 Tensile helper caches, Triton caches and measurements remain attempt-local.
 Preparation rejects package-cache roots overlapping scratch or source roots and
 symbolic paths. Owned-scratch cleanup leaves both host mounts intact. Package
@@ -186,6 +187,30 @@ failed command stops the grouped step and blocks suite admission. See the
 [preparation contract](../website/dashboard/docs/architecture-and-publication.md#isolated-preparation-before-measurement)
 for validation and environment-export boundaries. This split adds no wheel or
 artifact reuse and does not change measurement or JIT policy.
+
+## Compiler caching
+
+The workflow installs ccache inside the job container. Preparation shares
+`/opt/rocjitsu-cache/ccache` across C/C++ builds; no additional runner directory
+or mount needs provisioning. Fresh CMake builds initialize both C and C++ compiler
+launchers from the helper's environment, including the scikit-build ROCISA wheel,
+rocjitsu, the TensileLite adapter/host tests and the full-Tensile adapter.
+The pinned corpus llama builder explicitly disables caching and clears launchers;
+it remains excluded. HIP kernel generation/assembly and Gluon verification are
+not compiler-cache reuse paths.
+
+The helper removes inherited ccache/launcher overrides and writes an attempt-owned
+configuration with compiler-content checking and a `5G` shared size limit. A common
+source/scratch base directory normalizes changing attempt paths; `/` is not used.
+No sloppiness options or ignored headers are enabled. Per-phase ccache statistics
+logs, configuration and diagnostic summaries distinguish real hits from compiler
+fallbacks. Existing source, package, import/loader, host-test and artifact checks
+remain active.
+
+Only compilation results are reused. Configuration, linking, wheel packaging and
+validation still run against fresh attempt outputs. The helper does not export
+ccache settings or compiler launchers to the measured suite. No completed-artifact,
+Tensile helper/JIT, Triton cache or benchmark-result reuse is enabled here.
 
 ## Run benchmarks
 
