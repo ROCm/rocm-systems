@@ -2,7 +2,8 @@
 
 Runs like test_fake_gpu.py (same environment variables and helpers). Also runs
 rdc_client_replies_tests, the gtest of the client against replies that state more
-entries than they carry, from the tested prefix.
+entries than they carry, or carry more than the C API holds, and of the deadlines of
+its calls, from the tested prefix.
 """
 
 import os
