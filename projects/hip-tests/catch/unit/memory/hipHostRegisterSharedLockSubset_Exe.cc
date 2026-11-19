@@ -24,7 +24,17 @@
 #include <cstdlib>
 #include <vector>
 
-__global__ void MarkIndex(int* ptr, int idx, int value) { ptr[idx] = value; }
+// Each device gets its own kElemsPerDevice-int region of the shared buffer to mark and
+// verify. 4096 ints (16 KiB) per device is large enough to exercise a real mapped range
+// rather than a single cache line, while keeping the total registration small.
+constexpr int kElemsPerDevice = 4096;
+
+__global__ void MarkRange(int* ptr, int count, int value) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < count) {
+    ptr[i] = value;
+  }
+}
 
 namespace {
 
@@ -36,11 +46,12 @@ bool Check(hipError_t err, const char* what) {
   return true;
 }
 
-// Registers buf (numDevices ints), confirms every device in [0, numDevices) gets an
-// identical, working device pointer, exercises it with a kernel from every device, then
-// unregisters. Returns false on any failure.
+// Registers buf (numDevices * kElemsPerDevice ints), confirms every device in
+// [0, numDevices) gets an identical, working device pointer, exercises each device's own
+// region of the mapping with a kernel, then unregisters. Returns false on any failure.
 bool RegisterAccessUnregisterOnce(int* buf, int numDevices) {
-  if (!Check(hipHostRegister(buf, numDevices * sizeof(int), 0), "hipHostRegister")) {
+  const size_t totalElems = static_cast<size_t>(numDevices) * kElemsPerDevice;
+  if (!Check(hipHostRegister(buf, totalElems * sizeof(int), 0), "hipHostRegister")) {
     return false;
   }
 
@@ -59,24 +70,33 @@ bool RegisterAccessUnregisterOnce(int* buf, int numDevices) {
     }
   }
 
-  for (int dev = 0; dev < numDevices; ++dev) {
-    buf[dev] = -1;
+  for (size_t i = 0; i < totalElems; ++i) {
+    buf[i] = -1;
   }
 
   // Exercise the mapping from every device, not just device 0, so a mapping that is
   // only valid for the owning device (but reused by siblings) would show up as a
-  // kernel fault or a stale/incorrect value instead of silently passing.
+  // kernel fault or stale/incorrect values instead of silently passing. Each device
+  // writes its own kElemsPerDevice-sized region so a bad/aliased per-device mapping
+  // would also corrupt a neighboring device's region rather than going unnoticed.
   for (int dev = 0; dev < numDevices; ++dev) {
     if (!Check(hipSetDevice(dev), "hipSetDevice")) return false;
-    int* devPtr = reinterpret_cast<int*>(devPtrs[dev]);
-    hipLaunchKernelGGL(MarkIndex, dim3(1), dim3(1), 0, 0, devPtr, dev, 100 + dev);
+    int* devRegion = reinterpret_cast<int*>(devPtrs[dev]) + (dev * kElemsPerDevice);
+    constexpr int kThreadsPerBlock = 256;
+    int blocks = (kElemsPerDevice + kThreadsPerBlock - 1) / kThreadsPerBlock;
+    hipLaunchKernelGGL(MarkRange, dim3(blocks), dim3(kThreadsPerBlock), 0, 0, devRegion,
+                        kElemsPerDevice, 100 + dev);
     if (!Check(hipGetLastError(), "kernel launch")) return false;
     if (!Check(hipDeviceSynchronize(), "hipDeviceSynchronize")) return false;
   }
   for (int dev = 0; dev < numDevices; ++dev) {
-    if (buf[dev] != 100 + dev) {
-      fprintf(stderr, "buf[%d] = %d, expected %d\n", dev, buf[dev], 100 + dev);
-      return false;
+    for (int i = 0; i < kElemsPerDevice; ++i) {
+      int value = buf[dev * kElemsPerDevice + i];
+      if (value != 100 + dev) {
+        fprintf(stderr, "buf[%d] = %d, expected %d (device %d region)\n",
+                dev * kElemsPerDevice + i, value, 100 + dev, dev);
+        return false;
+      }
     }
   }
 
@@ -93,7 +113,14 @@ int main() {
     return 0;
   }
 
-  std::vector<int> buf(static_cast<size_t>(numDevices), 0);
+  // Note: this process only has HIP_VISIBLE_DEVICES-restricted visibility (see the
+  // parent test, Unit_hipHostRegister_SharedLockDeviceSubset), so any GPU excluded from
+  // that subset is invisible here -- there is no HIP API this process can call to
+  // directly confirm the excluded device received no mapping. What this test does
+  // confirm is that the subset it *can* see all got one correctly working shared
+  // mapping, i.e. the lock call was scoped to (and only to) this context's own devices
+  // rather than, say, every device in the process by default.
+  std::vector<int> buf(static_cast<size_t>(numDevices) * kElemsPerDevice, 0);
 
   // Round 1: exercise the shared-lock path end to end.
   if (!RegisterAccessUnregisterOnce(buf.data(), numDevices)) return 0;

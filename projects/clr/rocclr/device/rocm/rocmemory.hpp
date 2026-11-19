@@ -177,6 +177,21 @@ class Memory : public device::Memory {
   // otherwise each device must lock its own agent individually (see Buffer::create).
   bool hostLockCoversAllDevices_ = false;
 
+  // True once some device in this context has tried the multi-agent group lock and
+  // had it fail (e.g. one peer agent unavailable), and therefore fell back to locking
+  // only itself. Later devices check this on siblings (see Buffer::create) and skip
+  // straight to their own individual lock instead of repeating a group lock attempt
+  // that is very likely to fail again for the same reason.
+  bool hostLockGroupAttemptFailed_ = false;
+
+ public:
+  // Read-only accessors so Buffer::create() can inspect a *sibling* device::Memory's
+  // lock-ownership state via a roc::Memory* (rather than a derived Buffer* cast) when
+  // deciding whether to reuse its mapping.
+  bool HostLockCoversAllDevices() const { return hostLockCoversAllDevices_; }
+  bool HostLockGroupAttemptFailed() const { return hostLockGroupAttemptFailed_; }
+
+ protected:
   // Pointer to the device associated with this memory object.
   const roc::Device& dev_;
 
