@@ -783,7 +783,7 @@ TEST(MfmaExecTest, Gfx12Wave64SwmmacK32LocUsesSparseHardwareLayout) {
   EXPECT_EQ(fp8_idx_g2s0.local_compressed_k, 0u);
 }
 
-TEST(MfmaExecTest, Cdna3CvtFp8Bf8UsesSameFnuzDecodeAsMfma) {
+TEST(MfmaExecTest, Cdna3CvtFp8Bf8UsesFnuzEncoding) {
   ScopedIsaExecutionBackend execution_backend_scope{&cdna3::execution_backend()};
   amdgpu::GpuMemory mem("cdna3_cvt_fnuz_mem");
   amdgpu::L2Cache l2("cdna3_cvt_fnuz_l2");
@@ -825,14 +825,13 @@ TEST(MfmaExecTest, Cdna3CvtFp8Bf8UsesSameFnuzDecodeAsMfma) {
   cvt_bf8.execute_impl(*wf);
 
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
-    amdgpu::InputLoc loc{/*vgpr_offset=*/0, lane, /*sub_element=*/0};
-    float mfma_fp8 = amdgpu::extract_fp8_fnuz(*cu, vbase + kSrc, loc);
+    // FNUZ encodes +1 and -1 as 0x40 and 0xc0 in both formats.
+    const float expected = (lane & 1u) ? -1.0f : 1.0f;
     float cvt_fp8_value = std::bit_cast<float>(cu->read_vgpr(vbase + kDstFp8, lane));
-    EXPECT_EQ(cvt_fp8_value, mfma_fp8) << "fp8 lane=" << lane;
+    EXPECT_EQ(cvt_fp8_value, expected) << "fp8 lane=" << lane;
 
-    float mfma_bf8 = amdgpu::extract_bf8_fnuz(*cu, vbase + kSrc, loc);
     float cvt_bf8_value = std::bit_cast<float>(cu->read_vgpr(vbase + kDstBf8, lane));
-    EXPECT_EQ(cvt_bf8_value, mfma_bf8) << "bf8 lane=" << lane;
+    EXPECT_EQ(cvt_bf8_value, expected) << "bf8 lane=" << lane;
   }
 }
 

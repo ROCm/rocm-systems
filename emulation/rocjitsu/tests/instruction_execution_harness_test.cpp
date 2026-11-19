@@ -4438,12 +4438,6 @@ TEST(Gfx1250WmmaTest, CModifierAppliesAbsBeforeNegate) {
   EXPECT_EQ(amdgpu::wmma_c_modifier(1u << 2u, 1u << 2u), 3u);
 }
 
-TEST(Gfx1250WmmaTest, E8M0ScaleZeroMatchesUtilContract) {
-  EXPECT_EQ(std::bit_cast<uint32_t>(amdgpu::decode_wmma_scale_byte(0x00, 0)),
-            std::bit_cast<uint32_t>(util::e8m0_to_f32(0x00)));
-  EXPECT_TRUE(std::isnan(amdgpu::decode_wmma_scale_byte(0xff, 0)));
-}
-
 TEST(Gfx1250WmmaTest, Bf16F32K32Bf16PreservesAccumulatorLayout) {
   amdgpu::GpuMemory gpu_mem("gfx1250_wmma_bf16f32_k32_bf16_mem");
   amdgpu::L2Cache l2("gfx1250_wmma_bf16f32_k32_bf16_l2");

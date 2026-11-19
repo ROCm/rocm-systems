@@ -10,8 +10,6 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/lds_direct.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_f16_source.h"
