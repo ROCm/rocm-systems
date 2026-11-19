@@ -27,7 +27,6 @@ Execution semantics are provided by ``SemanticsSpec`` from
 import cgen
 
 from amdisa.codegen.execute import input_policy
-from amdisa.codegen.execute.conversion import share_stages
 from amdisa.codegen.execute.required_vgpr import append_required_vgpr_offset
 from amdisa.codegen.execute.floating_policy import (
     F16_TRANSCENDENTAL_OPS,
@@ -3337,10 +3336,6 @@ class CodeGenerator:
         status_setup = ''
         status_before_switch = ''
         status_after_switch = ''
-        execute_impl_body = (
-            f'  if (amdgpu::try_execute_vopd_simd<{str(has_vopd3).lower()}>(x_, y_, wf)) return;\n'
-            + execute_impl_body
-        )
         vopd_impl_includes = textwrap.dedent('''\
             #include "@GENERATED_ARCH@/vopd.h"
             #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -3536,27 +3531,16 @@ class CodeGenerator:
                 .replace('@VOPD_EXECUTE_SLOT_CASES@', vopd_execute_slot_cases)
                 .replace('@SCALAR_ARITHMETIC@', scalar_arithmetic)
             )
-            vopd_integer_simd_probe = ''
-            if all(
-                has_op(op) for op in ('VopdMovB32', 'VopdAddNcU32', 'VopdLshlrevB32')
-            ):
-                vopd_integer_simd_probe = cpp_block('''\
-                  if (amdgpu::try_execute_vopd_integer_pair_simd<
-                          kVopdMovB32, kVopdAddNcU32, kVopdLshlrevB32>(wf, x_, y_))
-                    return;
-                ''')
             execution_method = (
                 textwrap.dedent('''\
                 void Vopd::execute_impl(amdgpu::Wavefront &wf) {
                   if (wf.wf_size() != 32) {
                 @WAVE64_GUARD@
                   }
-                @VOPD_INTEGER_SIMD_PROBE@
                 @EXECUTE_IMPL_BODY@
                 }
                 ''')
                 .replace('@EXECUTE_IMPL_BODY@', execute_impl_body)
-                .replace('@VOPD_INTEGER_SIMD_PROBE@', vopd_integer_simd_probe)
                 .replace('@WAVE64_GUARD@', textwrap.indent(wave64_guard, '    '))
             )
 
@@ -12205,57 +12189,6 @@ class CodeGenerator:
             (op.is_input or op.is_output) and op.size == 16 for op in inst.operands
         )
 
-    def _true16_vop3_local_simd_probe(
-        self,
-        inst: Instruction | None,
-        sem: InstructionSemantics | None = None,
-        enc_name: str | None = None,
-        result_writer: str | None = None,
-    ) -> str | None:
-        if inst is not None and self._uses_cdna2_mad(inst.name):
-            # The MI200 helper selects its separately rounded SIMD operation.
-            return None
-        if sem is not None and inst is not None:
-            uses_true16_probe = self._true16_vop3_info(
-                inst, sem, enc_name or inst.enc_name
-            ).enabled
-        else:
-            uses_true16_probe = self._uses_true16_vop3_execute(inst, enc_name)
-        if not uses_true16_probe:
-            return None
-
-        from amdisa.codegen.execute.simd_codegen import (
-            simd_probe_line,
-        )
-
-        enc_key = (enc_name or inst.enc_name).lower().replace('enc_', '')
-        return simd_probe_line(
-            f'{inst.mnemonic}_{enc_key}',
-            true16_vop3=True,
-            result_writer=result_writer,
-        )
-
-    def _renamed_vop3p_local_simd_probe(
-        self,
-        inst: Instruction | None,
-        enc_name: str | None = None,
-    ) -> str | None:
-        if inst is None:
-            return None
-        enc_key = (enc_name or inst.enc_name).lower().replace('enc_', '')
-        if enc_key != 'vop3p':
-            return None
-
-        from amdisa.codegen.execute.simd_codegen import (
-            vop3p_local_simd_probe_line,
-        )
-
-        return vop3p_local_simd_probe_line(
-            f'{inst.mnemonic}_{enc_key}',
-            self.isa_spec.profile.vop3p_opsel_fields,
-            self._op_sel_hi_2_expr(enc_name or inst.enc_name),
-        )
-
     def _e32_true16_dst_reg_expr(
         self, inst: Instruction | None, enc_name: str | None = None
     ) -> str:
@@ -12327,24 +12260,6 @@ class CodeGenerator:
                 if arch in info.isa_names and len(info.isa_names) >= 2:
                     return True
         return False
-
-    def _can_force_shared_simd_probe(
-        self, inst: Instruction | None, enc_name: str | None = None
-    ) -> bool:
-        if not self.config.use_shared_execute_helpers:
-            return False
-        if inst is None or self._requires_arch_local_execute(inst, enc_name):
-            return False
-        if self._shared_execute_key_denied(inst.mnemonic, inst, enc_name):
-            return False
-
-        from amdisa.codegen.execute.simd_codegen import simd_probe_arch_portable
-
-        enc_key = (enc_name or inst.enc_name).lower().replace('enc_', '')
-        return simd_probe_arch_portable(
-            f'{inst.mnemonic}_{enc_key}',
-            self.isa_spec.profile.vop3p_opsel_fields,
-        )
 
     @staticmethod
     def _fold_acc_bank_selector(ctx: _OperandCtx, expr: str) -> str:
@@ -16895,49 +16810,13 @@ class CodeGenerator:
                         can_share = self._can_share_execute(
                             inst.mnemonic, inst, enc.enc_name
                         )
-                        # Ops with an arch-portable SIMD fast-path probe must
-                        # route through the shared execute template even when
-                        # _can_share_execute is False for this ISA: the probe
-                        # lives only in the shared kernel (simd_probe_line is
-                        # emitted in _write_shared_execute_templates), and
-                        # delegating keeps the DPP/SDWA cleanup + postamble
-                        # running around the call (an inlined body with the
-                        # probe's early `return` would skip them). Without this,
-                        # the dst-accumulate v_fmac_f64 / v_fmac_f32 / v_mac_*
-                        # family inlines its scalar loop on CDNA4 and the probe
-                        # is dead code. Only *arch-portable* probes qualify: the
-                        # inline-literal FMA forms (v_fmaak/fmamk/madak/madmk)
-                        # read the literal through an ISA-divergent member, so a
-                        # single shared body can't serve every ISA — those are
-                        # left to the genuine shared plan.
-                        _portable_probe = self._can_force_shared_simd_probe(
-                            inst, enc.enc_name
-                        )
-                        # rj-arith owns SIMD selection for migrated instructions. Never
-                        # run a legacy arithmetic probe ahead of the rj-arith body.
+                        # rj-arith owns arithmetic and SIMD policy. Keep the
+                        # architecture-specific register/status wrappers local.
                         from amdisa.codegen.execute.rj_arith_compare import (
                             FLOAT_COMPARISONS,
                             INTEGER_COMPARISONS,
                         )
 
-                        if (
-                            self.isa_spec.arch_name in ('rdna1', 'rdna2')
-                            and _enc_upper == 'ENC_VOP3'
-                            and not _rj_arith_arithmetic
-                            and inst.name.replace('_TRU_', '_T_') in FLOAT_COMPARISONS
-                        ):
-                            _, _, predicate, dtype = inst.name.split('_')
-                            relation = 'T' if predicate == 'TRU' else predicate.title()
-                            # On GFX10, VOPC opcodes using VOP3 cannot select halves with OPSEL.
-                            compare = (
-                                f'  if (inst_.clamp) {{\n'
-                                f'    amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::{dtype}, '
-                                f'amdgpu::comparison::{relation}>(wf, src0, src1, 0, '
-                                'inst_.abs, inst_.neg, wf.exec(), true, true, commit_result);\n'
-                                '    return;\n  }\n'
-                            )
-                            _ordinary_result_commit_setup += compare
-                            _result_commit_setup += compare
                         # Migrated F16 arithmetic snapshots inputs inside rj-arith.
                         # Retained F32 status classifiers still need the VM capture.
                         if (
@@ -17002,7 +16881,6 @@ class CodeGenerator:
                             _result_commit_setup += capture
                         if _rj_arith_arithmetic:
                             can_share = False
-                            _portable_probe = False
                             if inst.name in FLOAT_COMPARISONS:
                                 _ordinary_result_commit_setup += (
                                     '  const uint64_t exec_mask = wf.exec();\n'
@@ -17015,93 +16893,12 @@ class CodeGenerator:
                                         '  if (inst_.src0 == amdgpu::SRC_DPP)\n'
                                         '    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;\n'
                                     )
-                        if not body_unimplemented and (can_share or _portable_probe):
+                        if not body_unimplemented and can_share:
                             self._shared_execute_candidates[
                                 (inst.mnemonic, enc.enc_name)
                             ] = (inst, sem, body, enc.enc_name, body_true16_vop3)
-                        _local_true16_probe = self._true16_vop3_local_simd_probe(
-                            inst,
-                            sem,
-                            enc.enc_name,
-                            result_writer=_mask_result_writer,
-                        )
-                        _renamed_vop3p_probe = self._renamed_vop3p_local_simd_probe(
-                            inst, enc.enc_name
-                        )
-                        assert not (_local_true16_probe and _renamed_vop3p_probe)
-                        from amdisa.codegen.execute.simd_codegen import (
-                            local_coverage_probe,
-                        )
-
-                        _coverage_probe = (
-                            local_coverage_probe(
-                                f'{inst.mnemonic}_{enc.enc_name.lower().replace("enc_", "")}',
-                                true16_vop3=self._uses_true16_vop3_execute(
-                                    inst, enc.enc_name
-                                ),
-                                e32=(
-                                    self.isa_spec.profile.uses_packed_16bit_e32_source_selectors
-                                    and enc.enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2')
-                                    and any(op.size == 16 for op in inst.operands)
-                                ),
-                                e32_half_dst=any(
-                                    op.is_output and op.size == 16
-                                    for op in inst.operands
-                                ),
-                                e32_half_inputs=sum(
-                                    1 << i
-                                    for i, name in enumerate(('src0', 'vsrc1'))
-                                    if any(
-                                        op.name == name and op.size == 16
-                                        for op in inst.operands
-                                    )
-                                ),
-                                cmpx_writes_vcc=self.isa_spec.profile.cmpx_writes_vcc,
-                                result_writer=_mask_result_writer,
-                                arch_name=self.generated_dir_name,
-                            )
-                            if self.generated_dir_name in ('cdna5', 'cdna4', 'rdna4')
-                            else None
-                        )
-                        if _coverage_probe:
-                            can_share = False
-                            _portable_probe = False
-                        _local_simd_probe = (
-                            _coverage_probe
-                            or _local_true16_probe
-                            or _renamed_vop3p_probe
-                        )
-                        if _rj_arith_arithmetic:
-                            _local_simd_probe = None
-                        _local_simd_probe_body = ''
-                        _local_simd_probe, _local_scalar_body = share_stages(
-                            _local_simd_probe, _local_body
-                        )
-                        _local_execute_body = _local_scalar_body
-                        if _local_simd_probe:
-                            _local_simd_body = (
-                                f'  auto &inst = *this;\n{_local_simd_probe}\n'
-                            )
-                            if _dpp_cleanup or _sdwa_postamble:
-                                # SIMD probe macros return from their containing
-                                # function on success. Keep architecture-local
-                                # SIMD enabled for DPP/SDWA by containing
-                                # the probe and scalar fallback in a lambda; the
-                                # return then exits only the lambda, so result
-                                # cleanup still runs exactly once afterward.
-                                _local_execute_body = (
-                                    '  [&]() -> void {\n'
-                                    + textwrap.indent(_local_simd_body, '  ')
-                                    + textwrap.indent(_local_scalar_body, '  ')
-                                    + '\n  }();'
-                                )
-                            else:
-                                _local_simd_probe_body = _local_simd_body
-                        _ordinary_local_execute_body = _local_scalar_body
-                        if _local_simd_probe:
-                            _ordinary_local_execute_body = (
-                                _local_simd_body + _local_scalar_body
-                            )
+                        _local_execute_body = _local_body
+                        _ordinary_local_execute_body = _local_body
                         if _has_dpp_encoding and not body_unimplemented:
                             class_members.extend(
                                 [
@@ -17133,35 +16930,9 @@ class CodeGenerator:
                                 '      amdgpu::InstructionExecutionError::UnimplementedInstruction);\n'
                                 '}'
                             )
-                        elif can_share or _portable_probe:
+                        elif can_share:
                             enc_key = enc.enc_name.lower().replace('enc_', '')
                             tmpl_name = f'{inst.mnemonic}_{enc_key}'
-                            # Tripwire for the hard-coded inline-literal operand
-                            # name in the shared SIMD ternary table. If this ISA
-                            # reaches the shared SIMD path for an inline-literal
-                            # FMA, its instruction must carry the operand the
-                            # template reads `k` from (today `simm32`). gfx1250
-                            # names its literal `literal` and is kept out of this
-                            # path by the sharing preflight; if that ever changes
-                            # this fails loudly at generation instead of emitting
-                            # `inst.simm32` into a C++ file that will not compile.
-                            from amdisa.codegen.execute.simd_codegen import (
-                                simd_ternary_literal_operand_name,
-                            )
-
-                            _lit_name = simd_ternary_literal_operand_name(tmpl_name)
-                            if _lit_name is not None:
-                                assert any(
-                                    o.name == _lit_name for o in inst.operands
-                                ), (
-                                    f'{inst.name}: shared SIMD ternary template '
-                                    f'{tmpl_name!r} reads its inline literal from '
-                                    f'operand {_lit_name!r}, but this instruction '
-                                    f'has no such operand (operands: '
-                                    f'{[o.name for o in inst.operands]}). An ISA '
-                                    f'whose literal is named differently must stay '
-                                    f'out of this shared SIMD path.'
-                                )
                             _shared_execute_call = f'  amdgpu::execute_{tmpl_name}(*this, wf{_result_shared_arg});\n'
                             if _has_dpp_encoding:
                                 exec_impl = cgen.Line(
@@ -17193,12 +16964,9 @@ class CodeGenerator:
                                     f'{_shared_execute_call}'
                                     '}'
                                 )
-                            # Store the shared template body. First writer wins:
-                            # for a can_share op that is its plan owner; for a
-                            # force-shared portable probe op (no plan owner on any
-                            # ISA) the body is arch-independent, so whichever ISA
-                            # writes first is correct. That arch-independence is an
-                            # invariant, not a hope: verify it. If a later ISA
+                            # Store one representative body, checking its architecture
+                            # independence rather than assuming the first writer is valid.
+                            # If a later ISA
                             # produces a DIFFERENT body for the same
                             # (mnemonic, enc) key, the "shared" body is silently
                             # arch-dependent and emitting just the first writer's
@@ -17252,7 +17020,6 @@ class CodeGenerator:
                                     f'(amdgpu::Wavefront &wf) {{\n'
                                     f'{_dpp_preamble}'
                                     f'{_result_commit_setup}'
-                                    f'{_local_simd_probe_body}'
                                     f'{_local_execute_body}\n'
                                     f'{_dpp_observation_restore}'
                                     f'{_dpp_cleanup}'
@@ -17263,7 +17030,6 @@ class CodeGenerator:
                                     f'void {inst.fmt_name}::execute_impl'
                                     f'(amdgpu::Wavefront &wf) {{\n'
                                     f'{_result_commit_setup}'
-                                    f'{_local_simd_probe_body}'
                                     f'{_local_execute_body}\n'
                                     '}'
                                 )
@@ -17837,14 +17603,6 @@ class CodeGenerator:
                     CLASS_COMPARISONS,
                     supports_integer_compare,
                 )
-
-                if (
-                    self.isa_spec.arch_name in ('rdna1', 'rdna2')
-                    and enc.enc_name == 'ENC_VOP3'
-                ):
-                    cpp_includes.append(
-                        ('rocjitsu/isa/arch/amdgpu/shared/signaling_compare.h', False)
-                    )
 
                 if (
                     self.isa_spec.arch_name
@@ -18904,14 +18662,10 @@ class CodeGenerator:
 
                 # Include the unified shared execute template header when
                 # any instruction in this encoding delegates to a template.
-                # Portable SIMD probes can delegate even without a shared
-                # plan, so this cannot be gated solely on shared_plan.
                 def _delegates_to_shared(i: Instruction) -> bool:
                     if not self.semantics or i.name not in self.semantics.instructions:
                         return False
-                    return self._can_share_execute(
-                        i.mnemonic, i, enc.enc_name
-                    ) or self._can_force_shared_simd_probe(i, enc.enc_name)
+                    return self._can_share_execute(i.mnemonic, i, enc.enc_name)
 
                 has_shared = any(_delegates_to_shared(i) for i in all_insts)
                 if has_shared:
@@ -19814,11 +19568,6 @@ class CodeGenerator:
         shared_dir = os.path.join(self.out_path, 'shared')
         os.makedirs(shared_dir, exist_ok=True)
 
-        from amdisa.codegen.execute.simd_codegen import (
-            simd_extra_includes,
-            simd_probe_line,
-        )
-
         guard = 'ROCJITSU_ISA_AMDGPU_SHARED_EXECUTE_SHARED_H_'
         lines = CppFile._prologue_comment().splitlines()
         lines += [
@@ -19834,11 +19583,10 @@ class CodeGenerator:
             '#include "rocjitsu/isa/arch/amdgpu/shared/scalar_f16_source.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"',
-            '#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/lds_direct.h"',
+            '#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h"',
-            *simd_extra_includes(),
             '#include "util/data_types.h"',
             '#include "util/except.h"',
             '#include "util/log.h"',
@@ -19877,39 +19625,6 @@ class CodeGenerator:
                 f'[[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf'
                 f'{result_parameter}) {{'
             )
-            probe, prefixed_body = share_stages(
-                simd_probe_line(
-                    mnemonic,
-                    true16_vop3=is_true16_vop3,
-                    result_writer='commit_result' if uses_result_writer else None,
-                ),
-                prefixed_body,
-            )
-            alu_classifiers = {
-                'v_mul_f32_vop2': 'classify_mul_f32_vop2',
-                'v_mul_f32_vop3': 'classify_mul_f32_vop3',
-            }
-            if mnemonic in ('v_add_f16_vop2', 'v_add_f16_vop3'):
-                lines.append(
-                    '  if (wf.cu().arch() == rocjitsu::IsaFamily::Rdna1 || '
-                    'wf.cu().arch() == rocjitsu::IsaFamily::Rdna2)'
-                )
-                lines.append('    record_gfx10_add_f16_exceptions(inst, wf);')
-            classifier = alu_classifiers.get(mnemonic)
-            if classifier is not None:
-                lines.append(f'  uint32_t alu_causes = {classifier}(inst, wf);')
-                # SIMD probes return directly after a successful fast-path
-                # execution. Latch the architectural sticky status before any
-                # such return; the classifier separately records the transient
-                # per-instruction causes used for trap delivery.
-                lines.append('  wf.set_trapsts(wf.trapsts() | alu_causes);')
-            if probe is not None:
-                if classifier is None:
-                    lines.append(probe)
-                else:
-                    lines.append('  if (!alu_exception_trap_enables(wf)) {')
-                    lines.append(probe.replace('  ', '    ', 1))
-                    lines.append('  }')
             lines.append(prefixed_body)
             lines.append('}')
             lines.append('')

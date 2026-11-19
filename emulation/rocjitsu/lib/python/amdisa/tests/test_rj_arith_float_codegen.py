@@ -691,7 +691,7 @@ def test_trig_all_encodings_route_rj_arith_instead_of_shared_legacy_helpers(arch
     assert count == 16
 
 
-@pytest.mark.parametrize('arch,count', [('rdna3', 20), ('rdna4', 36)])
+@pytest.mark.parametrize('arch,count', [('rdna3', 20), ('rdna3_5', 20), ('rdna4', 36)])
 def test_ternary_selection_routes_all_encodings_and_modifiers(arch, count):
     from amdisa.codegen.execute.rj_arith_float import (
         TERNARY_SELECTION_RDNA3,
@@ -699,7 +699,7 @@ def test_ternary_selection_routes_all_encodings_and_modifiers(arch, count):
         gen_float_ternary_selection,
     )
 
-    names = TERNARY_SELECTION_RDNA3 if arch == 'rdna3' else TERNARY_SELECTION_RDNA4
+    names = TERNARY_SELECTION_RDNA4 if arch == 'rdna4' else TERNARY_SELECTION_RDNA3
     root = (
         Path(__file__).resolve().parents[3]
         / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
@@ -2326,9 +2326,11 @@ def test_cdna_legacy_half_fma_reuses_architectural_model(arch, name):
     assert 'rj_arith_v_fma_f16_w64' in body
     assert ('d, a, b, d' if name == 'V_MAC_F16' else 'd, a, b, c') in body
     assert 'true, true' in body
+    assert body.index('if (!wf.exec())') < body.index('const uint64_t semantics')
     if name == 'V_MAC_F16':
         body = gen_float_fma16(context(arch, name, ['d'], inputs, enc_name='ENC_VOP2'))
         assert 'd, a, b, d' in body
+        assert body.index('if (!wf.exec())') < body.index('const uint64_t semantics')
 
 
 @pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'cdna3', 'cdna4'])
