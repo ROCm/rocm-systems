@@ -32,6 +32,16 @@ cuid::DeviceRoute cuid::device_route(const CuidDeviceEntry& entry) {
 
 namespace {
 
+// Is this derived id temporary? Only a constructed CUID has a payload to read
+// the Auxiliary Value Identifier, payload bit 117, out of. A kernel never sets
+// it.
+bool id_is_auxiliary(const amdcuid_derived_id& id) {
+  if (!CuidUtilities::is_constructed(&id.UUIDv8_representation)) {
+    return false;
+  }
+  return (id.raw_bits[14] & 0x20) != 0;
+}
+
 // get_primary_cuid() reports a component that has no permanent primary, and so
 // takes its temporary CUID, as HW_FINGERPRINT_NOT_FOUND.
 bool no_permanent_primary(amdcuid_status_t status) {
@@ -96,6 +106,21 @@ amdcuid_status_t CuidDevice::driver_primary_cuid(amdcuid_primary_id& id) const {
   return drv;
 }
 
+amdcuid_status_t CuidDevice::driver_derived_cuid(amdcuid_derived_id& id) const {
+  // cuid_derived is 0444, so this stage answers for an unprivileged caller
+  // even where cuid_primary does not: an ordinary user must get the kernel's
+  // value rather than falling through and deriving a competing one.
+  amdcuid_derived_id published = {};
+  const amdcuid_status_t drv = read_driver_published(
+      CuidUtilities::kDriverDerivedAttribute, published.UUIDv8_representation, published.raw_bits);
+  if (drv == AMDCUID_STATUS_SUCCESS) {
+    cuid::get_hash_from_raw(published.raw_bits, published.hash);
+    id = published;
+    return AMDCUID_STATUS_SUCCESS;
+  }
+  return drv;
+}
+
 amdcuid_status_t CuidDevice::get_temporary_cuid(amdcuid_derived_id& id) const {
   CuidUtilities::AuxiliaryInput input;
   const amdcuid_status_t status = get_temporary_input(input);
@@ -104,10 +129,16 @@ amdcuid_status_t CuidDevice::get_temporary_cuid(amdcuid_derived_id& id) const {
 }
 
 amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id& id, cuid_hmac* hmac) const {
+  amdcuid_status_t status = driver_derived_cuid(id);
+  if (status != AMDCUID_STATUS_UNSUPPORTED) {
+    last_source_ =
+        status == AMDCUID_STATUS_SUCCESS ? AMDCUID_SOURCE_DRIVER : AMDCUID_SOURCE_UNKNOWN;
+    return status;
+  }
+
   // A key-gated component takes its temporary identity outright when no key
   // is available, and any component does when it has no permanent primary.
   // Without a primary for another reason there is no derived CUID to be had.
-  amdcuid_status_t status;
   const bool key_available = hmac && hmac->is_valid();
   if (key_gated_identity() && !key_available) {
     status = get_temporary_cuid(id);
@@ -128,7 +159,13 @@ amdcuid_status_t CuidDevice::is_temporary_cuid(bool* is_temp, cuid_hmac* hmac) c
     return AMDCUID_STATUS_INVALID_ARGUMENT;
   }
   amdcuid_derived_id derived = {};
-  amdcuid_status_t status;
+  amdcuid_status_t status = driver_derived_cuid(derived);
+  if (status == AMDCUID_STATUS_SUCCESS) {
+    *is_temp = id_is_auxiliary(derived);
+    return AMDCUID_STATUS_SUCCESS;
+  }
+  if (status != AMDCUID_STATUS_UNSUPPORTED) return status;
+
   if (!(key_gated_identity() && !(hmac && hmac->is_valid()))) {
     amdcuid_primary_id primary = {};
     status = get_primary_cuid(primary);

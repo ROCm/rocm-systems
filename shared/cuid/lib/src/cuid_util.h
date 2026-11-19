@@ -71,8 +71,11 @@ inline amdcuid_status_t validate_fingerprint(uint64_t fingerprint) {
 // /sys/bus/pci/devices/<bdf>/ and under each partition's xcp directory. It is
 // 0444, so any caller can read it, and its presence is what says the driver
 // publishes a CUID there. cuid_primary beside it is 0400 and gated on
-// CAP_SYS_ADMIN because its payload embeds the raw serial.
+// CAP_SYS_ADMIN because its payload embeds the raw serial; cuid_derived is
+// 0444 and is what unprivileged tools consume. cuid_seed is deliberately
+// absent here: it is the secret.
 constexpr const char kDriverPrimaryAttribute[] = "cuid_primary";
+constexpr const char kDriverDerivedAttribute[] = "cuid_derived";
 constexpr const char kDriverUnitIdAttribute[] = "cuid_unit_id";
 
 // Read a driver-published CUID attribute and parse its RFC 9562 UUID string
@@ -81,8 +84,10 @@ constexpr const char kDriverUnitIdAttribute[] = "cuid_unit_id";
 //
 // The three failure modes are distinct because the caller acts on each
 // differently:
-//   FILE_NOT_FOUND    no attribute (pre-CUID driver, or no serial found), so
-//                     there is no kernel CUID to have. Logged at DEBUG.
+//   FILE_NOT_FOUND    no attribute (pre-CUID driver, or no serial found), or
+//                     a read that fails with ENODATA (cuid_derived without a
+//                     node key), so there is no kernel CUID to have. Logged
+//                     at DEBUG.
 //   PERMISSION_DENIED present but not readable by us. The kernel still holds
 //                     the authoritative value, so do not compute a rival one.
 //   INVALID_FORMAT    readable, but not a UUID.
@@ -91,8 +96,8 @@ constexpr const char kDriverUnitIdAttribute[] = "cuid_unit_id";
 // errno is meaningful and nothing escapes into hosts built without exceptions.
 amdcuid_status_t read_driver_cuid_from_path(const std::string& path, amdcuid_id_t* id);
 
-// Read `attribute` (kDriverPrimaryAttribute) for the device at `bdf`, in the standard
-// "dddd:bb:dd.f" form.
+// Read `attribute` (kDriverPrimaryAttribute or kDriverDerivedAttribute) for
+// the device at `bdf`, in the standard "dddd:bb:dd.f" form.
 amdcuid_status_t read_driver_cuid(const std::string& bdf, const std::string& attribute,
                                   amdcuid_id_t* id);
 
@@ -113,11 +118,6 @@ inline void pack_component_type_bits(uint8_t value, uint8_t raw_bits[16]) {
   raw_bits[15] = static_cast<uint8_t>((raw_bits[15] & 0xFC) | ((value & 0xC) >> 2));
 }
 
-// Whether this process holds CAP_SYS_ADMIN in its effective set. amdgpu gates
-// reading cuid_primary on it, so root without it (a default
-// container) is unprivileged as far as the driver is concerned.
-bool has_cap_sys_admin();
-
 std::string read_sysfs_file(const std::string& path);
 std::string readlink_bdf(const std::string& device_path);
 std::string bdf_to_device_path(const std::string& bdf, amdcuid_device_type_t device_type);
@@ -134,13 +134,13 @@ amdcuid_status_t generate_primary_cuid(uint64_t serial_number, uint16_t unit_id,
                                        amdcuid_primary_id* primary_id, bool temp = false);
 void remove_UUIDv8_bits(amdcuid_id_t* id, uint8_t out_raw_bits[16]);
 
-// True when `id` was constructed from the 122-bit CUID payload, and so its
-// fields can be decoded; false when it was adopted verbatim from firmware.
-//
-// The Platform CUID is the exception: where firmware supplies a system UUID,
-// that UUID is the identifier, carrying whatever version bits firmware wrote
-// (1, 3 or 4 in practice, never 8). So the version nibble is the discriminator
-// and must be checked before any field is read.
+// A firmware UUID taken as a PrimaryID as it is. Its HMAC message is the
+// sixteen octets firmware wrote, never a de-framed payload, whatever its version
+// nibble: firmware may write a UUIDv8 too.
+void adopt_primary(const uint8_t uuid[16], amdcuid_primary_id* id);
+
+// True when `id` has a UUIDv8 version nibble. An adopted firmware UUID can
+// have one too, so this does not say whether its payload can be decoded.
 bool is_constructed(const amdcuid_id_t* id);
 void add_UUIDv8_bits(const uint8_t raw_bits[16], amdcuid_id_t* id);
 std::string get_cuid_as_string(const amdcuid_id_t* id);
