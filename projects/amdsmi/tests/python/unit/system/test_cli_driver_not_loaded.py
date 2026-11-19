@@ -454,14 +454,16 @@ class TestDriverLiveness(unittest.TestCase):
     def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        self.modules = Path(tmp.name)
+        self.modules = Path(tmp.name) / "module"
+        self.pci_drivers = Path(tmp.name) / "pci_drivers"
+        self.modules.mkdir()
+        self.pci_drivers.mkdir()
+        fake_sysfs = {"/sys/module": self.modules, "/sys/bus/pci/drivers": self.pci_drivers}
         real_path = Path
         patcher = mock.patch.object(
             helpers_module,
             "Path",
-            lambda first, *rest: (
-                self.modules if str(first) == "/sys/module" else real_path(first, *rest)
-            ),
+            lambda first, *rest: fake_sysfs.get(str(first)) or real_path(first, *rest),
         )
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -477,6 +479,28 @@ class TestDriverLiveness(unittest.TestCase):
         self.assertTrue(self.helpers.is_driver_loaded("ionic"))
         self.assertFalse(self.helpers.is_driver_loaded("bnxt_en"))
         self.assertFalse(self.helpers.is_driver_loaded("bng_en"))
+
+    def test_a_built_in_driver_is_loaded(self) -> None:
+        # A driver built into the kernel has /sys/module/<name> but no initstate file.
+        (self.modules / "bnxt_en").mkdir()
+        self.assertTrue(self.helpers.is_driver_loaded("bnxt_en"))
+
+    def test_a_driver_registered_on_the_pci_bus_is_loaded(self) -> None:
+        (self.pci_drivers / "ionic").mkdir()
+        self.assertTrue(self.helpers.is_driver_loaded("ionic"))
+
+    def test_a_built_in_amdgpu_is_loaded_before_the_cli_initializes_it(self) -> None:
+        (self.modules / "amdgpu").mkdir()
+        with mock.patch.object(self.helpers, "is_amdgpu_initialized", return_value=False):
+            self.assertTrue(self.helpers.is_driver_loaded("amdgpu"))
+
+    def test_no_missing_driver_for_nics_bound_to_a_built_in_driver(self) -> None:
+        (self.modules / "bnxt_en").mkdir()
+        with mock.patch.object(
+            self.helpers, "get_pci_devices_without_driver", return_value=["0000:05:00.0"]
+        ) as scan:
+            self.assertEqual(self.helpers.get_devices_without_driver("bnxt_en"), [])
+        scan.assert_not_called()
 
     def test_amdgpu_counts_as_loaded_when_the_cli_initialized_it(self) -> None:
         with mock.patch.object(self.helpers, "is_amdgpu_initialized", return_value=True):
