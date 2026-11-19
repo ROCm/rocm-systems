@@ -17,7 +17,6 @@ from utils.specs import _extract_gpu_info
 def warnings_logged(monkeypatch):
     """The messages that mi_gpu_spec passes to console_warning."""
     messages = []
-    monkeypatch.setattr(MIGPUSpecs, "_warned_unknown_model", False)
     monkeypatch.setattr("utils.mi_gpu_spec.console_warning", messages.append)
     return messages
 
@@ -360,14 +359,13 @@ def test_get_gpu_model_unknown_chip_id_uses_only_model_of_arch(warnings_logged):
 def test_get_gpu_model_unknown_chip_id_of_arch_with_several_models(warnings_logged):
     assert MIGPUSpecs.get_gpu_model("gfx942", "12345") is None
     assert not any("Using the only" in message for message in warnings_logged)
+    assert "The GPU model is unknown, so its memory levels are too." in warnings_logged
 
 
 @pytest.mark.misc
 @pytest.mark.parametrize("gpu_model", [None, float("nan")])
-def test_get_memory_levels_of_unknown_model(gpu_model, warnings_logged):
+def test_get_memory_levels_of_unknown_model(gpu_model):
     assert MIGPUSpecs.get_memory_levels(gpu_model) == []
-    assert MIGPUSpecs.get_memory_levels(gpu_model) == []  # no second warning
-    assert len(warnings_logged) == 1
 
 
 @pytest.mark.misc

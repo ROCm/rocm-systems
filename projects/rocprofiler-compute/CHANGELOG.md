@@ -38,6 +38,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * `analyze --debug-verify-deps`: check that the Python dependencies of analyze mode are installed, then exit.
 
 * Added GPU metrics, the Memory Chart and the roofline for gfx1201.
+  * Added support for RX 9070, RX 9070 XT and R9700.
   * gfx1201 support is experimental and requires the `--experimental` option.
   * Set the GPU performance level to `STABLE_STD` before profiling, as described in [Setting GPU performance level for PMC profiling](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#setting-gpu-performance-level-for-pmc-profiling).
 
@@ -164,8 +165,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fixed the Cache Lookup Hit Rate and Cache Sector Lookup Hit Rate averages in the GL0 Cache and LDS panel on gfx1250, which showed negative values.
 
 * Fixed `-b 21` and `-b 30` rejecting `--experimental` when it comes before the mode, as in `rocprof-compute --experimental profile --pc-sampling -b 21`.
-
-* Fixed gfx1201 boards whose chip ID the GPU spec did not list, such as the Radeon AI PRO R9700 (0x7551). Profile did not create the GPU model folder in the workload, and analyze stopped in the roofline step. The spec now lists the R9700, and an unknown chip ID on an architecture with a single model uses that model with a warning.
 
 ### Upcoming changes
 

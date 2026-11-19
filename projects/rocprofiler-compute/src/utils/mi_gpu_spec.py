@@ -54,7 +54,6 @@ class MIGPUSpecs:
     _num_xcds_dict: Dict[str, Dict[str, int]] = {}  # key: gpu_model
     _chip_id_dict: Dict[int, str] = {}  # key: chip_id (int)
     _perfmon_config: Dict[str, Any] = {}  # key: gpu_arch
-    _warned_unknown_model: bool = False
 
     # key: gpu_model, identifies die specs, and allows for reverse search of gpu arch
     # and gpu series by model identifier
@@ -323,6 +322,7 @@ class MIGPUSpecs:
 
         gpu_models = cls._gpu_model_dict.get(gpu_arch, [])
         if len(gpu_models) != 1:
+            console_warning("The GPU model is unknown, so its memory levels are too.")
             return None
 
         console_warning(f"Using the only {gpu_arch} model, {gpu_models[0]}.")
@@ -475,11 +475,6 @@ class MIGPUSpecs:
         Its memory levels are unknown, so the list is empty.
         """
         if not isinstance(gpu_model, str):
-            if not cls._warned_unknown_model:
-                cls._warned_unknown_model = True
-                console_warning(
-                    "The GPU model is unknown, so its memory levels are too."
-                )
             return []
         return cls._gpu_design.get(gpu_model.lower(), {}).get("memory_levels", [])
 
