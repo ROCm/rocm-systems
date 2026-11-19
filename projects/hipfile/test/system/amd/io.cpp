@@ -31,7 +31,6 @@
 extern SystemTestOptions test_env;
 
 using namespace hipFile;
-using ::testing::NiceMock;
 
 HIPFILE_WARN_NO_GLOBAL_CTOR_OFF
 
@@ -332,6 +331,9 @@ struct HipFileIoHipErrors : public testing::Test {
 // The HIP Runtime only sets the HIP error value on a failed fastpath request
 // on ROCm >= 10.3 (HIP 7.18).
 #if HIP_VERSION_MAJOR > 7 || (HIP_VERSION_MAJOR == 7 && HIP_VERSION_MINOR >= 18)
+// Declaring to keep clang-tidy happy
+using ::testing::NiceMock;
+
 // Writing to a read-only file should not be retried, and sets the HIP error for Fastpath.
 TEST_F(HipFileIoHipErrors, FailedFastpathIoSetsHipError)
 {
