@@ -573,16 +573,10 @@ struct ncclLsaPointerGetter {
   }
 };
 
-// [RCCL] World-rank peer pointers for the single-LSA-team kernels (ReduceScatter LD, AllReduce RSxLD).
-// ncclSymPtr::peerPtr(world, r) resolves every peer through the window's lsaPeerDelta4G table since
-// 2.32.6: a chain of dependent global loads per peer and iteration. These kernels run only when the
-// world is one LSA team, whose ranks are consecutive, so a world rank maps to an LSA rank and the
-// pointer comes from lsaFlatBase and stride4G, as before 2.32.6.
-// [RCCL] Read the window fields per call, not once: holding them across the loops costs registers, a wave
-// of occupancy on gfx942/gfx950/gfx1250 and, with TDM, the LDS read overlap of reduceDeep().
-// [RCCL] StoreTarget reads them with scalar loads (constant address space). A vector load there waits on
-// vmcnt, which on gfx9 also drains the peer stores issued before it. Load sources keep vector loads: as
-// scalar loads the compiler hoists them out of the loops into SGPRs, which costs occupancy again.
+// [RCCL] World-rank peer pointers for the single-LSA-team kernels (ReduceScatter LD, AllReduce RSxLD): a world rank
+// maps to an LSA rank, so the pointer comes from lsaFlatBase/stride4G instead of the lsaPeerDelta4G table.
+// [RCCL] Fields are read per call: caching them costs registers and a wave of occupancy. StoreTarget uses scalar loads
+// so the lookup does not drain earlier peer stores on gfx9; load sources stay vector, not hoisted into SGPRs.
 template <typename T, bool StoreTarget = false>
 struct ncclSymkWorldPointerGetter {
   ncclSymPtr<T> ptr;
