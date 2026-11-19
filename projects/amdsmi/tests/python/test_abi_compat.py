@@ -35,7 +35,7 @@ import textwrap
 import unittest
 from pathlib import Path
 from unittest import mock
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -721,9 +721,29 @@ class DisableSystemFallbackToolTest(unittest.TestCase):
 
 GENERATOR_TOOL = REPO_ROOT / "tools" / "generator.py"
 
+# amdsmi_dimm_power_t as clang2py writes it, before the generator's own passes.
+_CLANG2PY_DIMM_POWER = textwrap.dedent(
+    """\
+    import ctypes
+
+    class struct_dimm_power(ctypes.Structure):
+        pass
+
+    struct_dimm_power._pack_ = 1 # source:False
+    struct_dimm_power._fields_ = [
+        ('power', ctypes.c_uint16, 15),
+        ('PADDING_0', ctypes.c_uint8, 1),
+        ('update_rate', ctypes.c_uint16, 9),
+        ('PADDING_1', ctypes.c_uint8, 7),
+        ('dimm_addr', ctypes.c_uint16, 8),
+        ('PADDING_2', ctypes.c_uint8, 8),
+    ]
+    """
+)
+
 
 def _load_generator() -> ModuleType:
-    """Import tools/generator.py with a stub ctypeslib; only its text passes run here."""
+    """Import tools/generator.py with a stub ctypeslib, so clang2py never runs."""
     clang2py = ModuleType("ctypeslib.clang2py")
     clang2py.main = None
     stubs = {"ctypeslib": ModuleType("ctypeslib"), "ctypeslib.clang2py": clang2py}
@@ -908,40 +928,48 @@ class GeneratorBitfieldPaddingTest(unittest.TestCase):
             [("PADDING_2", ctypes.c_uint16, 8), ("PADDING_2_1", ctypes.c_uint16, 16)],
         )
 
-    def test_finish_wrapper_unifies_padding_and_sets_ms_layout(self):
-        # main() hands the written wrapper to finish_wrapper(); dropping either
-        # step from it fails here.
-        source = textwrap.dedent(
-            """\
-            import ctypes
-
-            class struct_dimm_power(ctypes.Structure):
-                pass
-
-            struct_dimm_power._pack_ = 1 # source:False
-            struct_dimm_power._fields_ = [
-                ('power', ctypes.c_uint16, 15),
-                ('PADDING_0', ctypes.c_uint8, 1),
-                ('update_rate', ctypes.c_uint16, 9),
-                ('PADDING_1', ctypes.c_uint8, 7),
-                ('dimm_addr', ctypes.c_uint16, 8),
-                ('PADDING_2', ctypes.c_uint8, 8),
-            ]
-            """
-        )
-        tmp = Path(tempfile.mkdtemp(prefix="amdsmi-finish-"))
-        try:
-            path = tmp / "wrapper.py"
-            path.write_text(source)
-            _load_generator().finish_wrapper(str(path))
-            namespace = {}
-            exec(path.read_text(), namespace)
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
+    def _assert_finished(self, wrapper_source):
+        namespace = {}
+        exec(wrapper_source, namespace)
         record = namespace["struct_dimm_power"]
         self.assertEqual(record.__dict__.get("_layout_"), "ms")
         self.assertEqual(_ms_bitfield_layout_problems(record._fields_), [])
         self.assertEqual(ctypes.sizeof(record), 6)
+
+    def test_finish_wrapper_unifies_padding_and_sets_ms_layout(self):
+        # Dropping either step from finish_wrapper() fails here.
+        tmp = Path(tempfile.mkdtemp(prefix="amdsmi-finish-"))
+        try:
+            path = tmp / "wrapper.py"
+            path.write_text(_CLANG2PY_DIMM_POWER)
+            _load_generator().finish_wrapper(str(path))
+            source = path.read_text()
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+        self._assert_finished(source)
+
+    def test_main_finishes_the_wrapper(self):
+        # main() with clang and clang2py stubbed out; dropping its
+        # finish_wrapper() call fails here.
+        generator = _load_generator()
+        tmp = Path(tempfile.mkdtemp(prefix="amdsmi-main-"))
+        try:
+            header = tmp / "amdsmi.h"
+            header.write_text("#define AMDSMI_LIB_VERSION_MAJOR 27\n")
+            output = tmp / "amdsmi_wrapper.py"
+
+            def clang2py(arguments):
+                Path(arguments[arguments.index("-o") + 1]).write_text(_CLANG2PY_DIMM_POWER)
+
+            argv = ["generator.py", "-o", str(output), "-i", str(header), "-l", "libamd_smi.so"]
+            clang = mock.Mock(return_value=SimpleNamespace(stdout=""))
+            with mock.patch.multiple(generator, clangToPy=clang2py, run=clang):
+                with mock.patch.object(sys, "argv", argv):
+                    generator.main()
+            source = output.read_text()
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+        self._assert_finished(source)
 
 
 def _stdlib_top_level_names() -> frozenset:
