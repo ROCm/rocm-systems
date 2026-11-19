@@ -49,11 +49,9 @@ kernel_dispatch_phase_enter_hook(
     const hsa::rocprofiler_packet& /*kernel_packet*/,
     rocprofiler_kernel_id_t   kernel_id,
     rocprofiler_dispatch_id_t dispatch_id,
-    rocprofiler_user_data_t*  user_data,
     const hsa::queue_info_session_t::external_corr_id_map_t& /*ext_corr_ids*/,
     const context::correlation_id* correlation_id,
-    hsa::inst_pkt_t&               inst_pkt,
-    bool&                          is_serialized)
+    hsa::packet_data_t&            packet_data)
 {
     const auto agent_id = CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id;
 
@@ -63,11 +61,16 @@ kernel_dispatch_phase_enter_hook(
         auto& tracer = *ctx->dispatch_thread_trace;
         if(!tracer.collects_on(agent_id)) continue;
 
-        auto [packet, bSerial] =
-            tracer.pre_kernel_call(queue, kernel_id, dispatch_id, user_data, correlation_id);
+        auto [packet, serialization] = tracer.pre_kernel_call(
+            queue, kernel_id, dispatch_id, &packet_data.user_data, correlation_id);
         if(packet)
-            inst_pkt.emplace_back(std::move(packet), hsa::queue_hooks::THREAD_TRACE_CLIENT_ID);
-        is_serialized |= bSerial;
+            packet_data.instrumentation_packets.emplace_back(
+                std::move(packet), hsa::queue_hooks::THREAD_TRACE_CLIENT_ID);
+        if(serialization)
+        {
+            packet_data.att_serialization = std::move(serialization);
+            packet_data.is_serialized     = true;
+        }
     }
 }
 

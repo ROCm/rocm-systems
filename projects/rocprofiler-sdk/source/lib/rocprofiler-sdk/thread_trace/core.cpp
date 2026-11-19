@@ -161,9 +161,10 @@ ThreadTracerAgent::initialize_resources()
 {
     // Subsequent starts reuse the queue and packet factory.
     ROCP_TRACE << "Constructing ATT instance for agent " << agent_id.handle;
-    const auto* agent         = CHECK_NOTNULL(rocprofiler::agent::get_agent(agent_id));
-    num_shader_engines        = agent->num_shader_banks;
-    params.shader_engine_mask = clamp_shader_engine_mask(params.shader_engine_mask, num_shader_engines);
+    const auto* agent  = CHECK_NOTNULL(rocprofiler::agent::get_agent(agent_id));
+    num_shader_engines = agent->num_shader_banks;
+    params.shader_engine_mask =
+        clamp_shader_engine_mask(params.shader_engine_mask, num_shader_engines);
 
     // All contexts targeting an agent retain the same resource handle. It owns the
     // memory backend, submission queue, staging allocations, and GPU output slots for
@@ -583,15 +584,43 @@ DispatchThreadTracer::allocate_tracer_id()
     return _counter.fetch_add(1, std::memory_order_relaxed);
 }
 
+class dispatch_serialization_t
+{
+public:
+    explicit dispatch_serialization_t(std::unordered_set<rocprofiler_agent_id_t> agents)
+    : m_agents{std::move(agents)}
+    {
+        CHECK_NOTNULL(hsa::get_queue_controller())->enable_serialization(m_agents);
+    }
+
+    explicit dispatch_serialization_t(rocprofiler_agent_id_t agent_id)
+    : m_agents{agent_id}
+    , m_retained{CHECK_NOTNULL(hsa::get_queue_controller())->try_retain_serialization(agent_id)}
+    {}
+
+    static std::shared_ptr<dispatch_serialization_t> try_retain(rocprofiler_agent_id_t agent_id)
+    {
+        auto pin = std::make_shared<dispatch_serialization_t>(agent_id);
+        if(!pin->m_retained) return {};
+        return pin;
+    }
+
+    ~dispatch_serialization_t()
+    {
+        if(!m_retained || registration::get_fini_status() > 0) return;
+        if(auto* controller = hsa::get_queue_controller())
+            controller->disable_serialization(m_agents);
+    }
+
+private:
+    std::unordered_set<rocprofiler_agent_id_t> m_agents;
+    bool                                       m_retained = true;
+};
+
 void
 DispatchThreadTracer::resource_deinit()
 {
-    if(enabled.exchange(false, std::memory_order_acq_rel))
-    {
-        const auto serialization_agents = configured_agents();
-        if(auto* controller = hsa::get_queue_controller())
-            controller->disable_serialization(serialization_agents);
-    }
+    stop_context();
 
     ROCP_TRACE << "Clearing agents";
     // Destroy the agents only after releasing agents_map_mut: a completion can be waiting for it
@@ -608,7 +637,7 @@ DispatchThreadTracer::resource_deinit()
  * Callback we get from HSA interceptor when a kernel packet is being enqueued.
  * We return an AQLPacket containing the start/stop/read packets for injection.
  */
-hsa::write_packet_t
+DispatchThreadTracer::dispatch_packet_t
 DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
                                       rocprofiler_kernel_id_t        kernel_id,
                                       rocprofiler_dispatch_id_t      dispatch_id,
@@ -628,22 +657,36 @@ DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
 
     auto it = agents.find(queue.get_agent().get_rocp_agent()->id);
 
-    if(it == agents.end()) return {nullptr, false};
+    if(it == agents.end()) return {};
 
     auto&       agent      = *CHECK_NOTNULL(it->second);
     const auto& parameters = agent.params;
 
-    // stop_context() clears enabled before it drops the serialization reference, and the context
-    // stays in the active array until both are done. A dispatch in that window is treated like an
-    // untraced one: with SERIALIZE_ALL it must still take the barriers, or it overlaps a traced
-    // dispatch that is still running. Once serialization is disabled the serializer ignores it.
-    if(!enabled.load(std::memory_order_acquire)) return {nullptr, parameters.bSerialize};
+    auto admission_lock = std::unique_lock{serialization_mut};
+    auto admission      = serialization;
+    if(!admission)
+    {
+        if(!parameters.bSerialize) return {};
+        auto       pin      = draining_serialization.lock();
+        const auto agent_id = agent.agent_id;
+        admission_lock.unlock();
+        lk.unlock();
+        // A trace from another context may still own the serializer on this agent.
+        if(!pin) pin = dispatch_serialization_t::try_retain(agent_id);
+        return {nullptr, std::move(pin)};
+    }
+    const auto generation = activation_generation;
+    admission_lock.unlock();
+
+    auto untraced = [&]() -> dispatch_packet_t {
+        return {nullptr, parameters.bSerialize ? std::move(admission) : nullptr};
+    };
 
     // Kernel-replay localized context control: a replay pass may disable this ATT context for the
     // pass -- skip the trace (but keep serialization) when it's forced off. No-op outside a replay
     // loop. See kernel_replay/local_context.hpp.
     if(auto ov = kernel_replay::local_context_override(parameters.context_id); ov && !*ov)
-        return {nullptr, parameters.bSerialize};
+        return untraced();
 
     auto control_flags = parameters.dispatch_cb_fn(queue.get_agent().get_rocp_agent()->id,
                                                    queue.get_id(),
@@ -653,16 +696,20 @@ DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
                                                    parameters.callback_userdata.ptr,
                                                    user_data);
 
-    if(control_flags == ROCPROFILER_THREAD_TRACE_CONTROL_NONE)
-        return {nullptr, parameters.bSerialize};
+    // Only the activation that invoked the callback can admit a trace. SERIALIZE_ALL
+    // also protects previously admitted traces from kernels that won't be traced.
+    admission_lock.lock();
+    const bool active = serialization && generation == activation_generation;
+    admission_lock.unlock();
+    if(!active || control_flags == ROCPROFILER_THREAD_TRACE_CONTROL_NONE) return untraced();
 
     auto packet = agent.get_start_packet();
-    if(!packet) return {nullptr, parameters.bSerialize};
+    if(!packet) return untraced();
     packet->SetOwner(tracer_id);
     post_move_data.fetch_add(1);
     packet->populate_before();
     packet->populate_after();
-    return {std::move(packet), true};
+    return {std::move(packet), std::move(admission)};
 }
 
 void
@@ -730,23 +777,31 @@ DispatchThreadTracer::intersects(const DispatchThreadTracer& rhs) const
 void
 DispatchThreadTracer::start_context()
 {
-    // An empty agent set means every agent.
-    const auto serialization_agents = configured_agents();
-    CHECK_NOTNULL(hsa::get_queue_controller())->enable_serialization(serialization_agents);
-    enabled.store(true, std::memory_order_release);
+    auto owner = std::shared_ptr<dispatch_serialization_t>{};
+    auto lock  = std::unique_lock{serialization_mut};
+    if(serialization) return;
+
+    // Reactivating the context shares the serializer with any work still draining.
+    // Trace admission still uses a distinct generation for each start.
+    owner = draining_serialization.lock();
+    if(!owner)
+    {
+        lock.unlock();
+        owner = std::make_shared<dispatch_serialization_t>(configured_agents());
+        lock.lock();
+        draining_serialization = owner;
+    }
+    ++activation_generation;
+    serialization.swap(owner);
 }
 
 void
 DispatchThreadTracer::stop_context()
 {
-    // Stop injecting ATT packets before transitioning serialization. Completion hooks continue
-    // to route already-tagged packets via kernel_dispatch_phase_exit_hook even after the context
-    // stops.
-    if(!enabled.exchange(false, std::memory_order_acq_rel)) return;
-
-    const auto serialization_agents = configured_agents();
-    if(auto* controller = hsa::get_queue_controller())
-        controller->disable_serialization(serialization_agents);
+    // Close trace admission without waiting for dispatches that retain serialization.
+    auto activation = std::shared_ptr<dispatch_serialization_t>{};
+    auto lock       = std::lock_guard{serialization_mut};
+    serialization.swap(activation);
 }
 
 DeviceThreadTracer::DeviceThreadTracer()

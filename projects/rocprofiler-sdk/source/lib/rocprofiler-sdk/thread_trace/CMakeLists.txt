@@ -9,8 +9,15 @@ set(ROCPROFILER_LIB_THREAD_TRACE_SOURCES
     queue_hooks.cpp
     shared_trace_resources.cpp)
 set(ROCPROFILER_LIB_THREAD_TRACE_HEADERS
-    core.hpp code_object.hpp dl.hpp threading.hpp hsa_util.hpp shared_trace_resources.hpp
-    trace_decoder_api.h trace_lease.hpp queue_hooks.hpp)
+    core.hpp
+    code_object.hpp
+    dl.hpp
+    threading.hpp
+    hsa_util.hpp
+    shared_trace_resources.hpp
+    trace_decoder_api.h
+    trace_lease.hpp
+    queue_hooks.hpp)
 target_sources(
     rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_THREAD_TRACE_SOURCES}
                                            ${ROCPROFILER_LIB_THREAD_TRACE_HEADERS})

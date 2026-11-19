@@ -157,6 +157,8 @@ private:
     std::shared_ptr<std::atomic<int>> worker_flag{nullptr};
 };
 
+class dispatch_serialization_t;
+
 class DispatchThreadTracer
 {
     using code_object_id_t = uint64_t;
@@ -178,11 +180,13 @@ public:
 
     rocprofiler_status_t add_agent(rocprofiler_agent_id_t agent, thread_trace_parameter_pack pack);
 
-    hsa::write_packet_t pre_kernel_call(const hsa::Queue&              queue,
-                                        uint64_t                       kernel_id,
-                                        rocprofiler_dispatch_id_t      dispatch_id,
-                                        rocprofiler_user_data_t*       user_data,
-                                        const context::correlation_id* corr_id);
+    using dispatch_packet_t = std::pair<AQLPacketPtr, std::shared_ptr<dispatch_serialization_t>>;
+
+    dispatch_packet_t pre_kernel_call(const hsa::Queue&              queue,
+                                      uint64_t                       kernel_id,
+                                      rocprofiler_dispatch_id_t      dispatch_id,
+                                      rocprofiler_user_data_t*       user_data,
+                                      const context::correlation_id* corr_id);
 
     void        post_kernel_call(inst_pkt_t&                      aql,
                                  const hsa::queue_info_session_t& session,
@@ -202,10 +206,13 @@ private:
     std::unordered_map<rocprofiler_agent_id_t, std::unique_ptr<ThreadTracerAgent>> agents{};
     std::unordered_map<rocprofiler_agent_id_t, thread_trace_parameter_pack>        params{};
 
-    const uint64_t            tracer_id = allocate_tracer_id();
-    mutable std::shared_mutex agents_map_mut{};
-    std::atomic<int>          post_move_data{0};
-    std::atomic<bool>         enabled{false};
+    const uint64_t                            tracer_id = allocate_tracer_id();
+    mutable std::shared_mutex                 agents_map_mut{};
+    std::atomic<int>                          post_move_data{0};
+    std::mutex                                serialization_mut{};
+    std::shared_ptr<dispatch_serialization_t> serialization{};
+    std::weak_ptr<dispatch_serialization_t>   draining_serialization{};
+    uint64_t                                  activation_generation{0};
 };
 
 class DeviceThreadTracer
@@ -225,7 +232,7 @@ public:
     bool                 intersects(const DeviceThreadTracer& rhs) const;
 
     rocprofiler_status_t add_agent(rocprofiler_agent_id_t id, thread_trace_parameter_pack pack);
-    bool has_agent(rocprofiler_agent_id_t id)
+    bool                 has_agent(rocprofiler_agent_id_t id)
     {
         std::unique_lock<std::mutex> lk(agent_mut);
         return params.find(id) != params.end();
@@ -245,8 +252,8 @@ private:
     std::map<rocprofiler_agent_id_t, thread_trace_parameter_pack>        params{};
 
     std::unordered_map<rocprofiler_agent_id_t, trace_lease_t> pending_leases{};
-    mutable std::mutex                                            agent_mut;
-    std::shared_ptr<std::atomic<int>>                             worker_flag{nullptr};
+    mutable std::mutex                                        agent_mut;
+    std::shared_ptr<std::atomic<int>>                         worker_flag{nullptr};
 };
 
 /// Install the thread trace service for newly created contexts (builds per-agent

@@ -59,7 +59,7 @@ public:
         return *this;
     }
 
-    trace_lease_t(const trace_lease_t&)            = delete;
+    trace_lease_t(const trace_lease_t&) = delete;
     trace_lease_t& operator=(const trace_lease_t&) = delete;
 
     explicit operator bool() const noexcept { return m_usage != nullptr; }
