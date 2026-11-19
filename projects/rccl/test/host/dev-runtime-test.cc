@@ -3135,6 +3135,39 @@ TEST_F(AllocAndPopulateSegmentWindowsTest, GinEnabled_PopulatesEachSegmentPerBac
   }
 }
 
+// Branch: GIN on, so window (b, s) gets backend b's ginDevWins slice of segment s, never ginHostWins.
+TEST_F(AllocAndPopulateSegmentWindowsTest, GinEnabled_CopiesEachBackendsDeviceWindows) {
+  comm->devrState.ginEnabled = true;
+  static_assert(NCCL_GIN_MAX_CONNECTIONS <= 16, "Connection tokens must fit within each backend's stride");
+  static_assert(NCCL_GIN_MAX_ACTIVE_BACKENDS <= 16, "Backend tokens must fit within each segment's stride");
+  auto devToken = [](int seg, int backend, int conn) {
+    return reinterpret_cast<ncclGinWindow_t>(uintptr_t{0x10000} + seg * 0x1000 + backend * 0x100 + conn * 0x10);
+  };
+  auto hostToken = [](int seg, int backend, int conn) {
+    return reinterpret_cast<void*>(uintptr_t{0x900000} + seg * 0x1000 + backend * 0x100 + conn * 0x10);
+  };
+  for (int s = 0; s < mem.numGinSegments; s++) {
+    for (int b = 0; b < NCCL_GIN_MAX_ACTIVE_BACKENDS; b++) {
+      for (int i = 0; i < NCCL_GIN_MAX_CONNECTIONS; i++) {
+        ginInfos[s].ginDevWins[b * NCCL_GIN_MAX_CONNECTIONS + i] = devToken(s, b, i);
+        // Host handles get distinct values so copying the wrong array shows up.
+        ginInfos[s].ginHostWins[b * NCCL_GIN_MAX_CONNECTIONS + i] = hostToken(s, b, i);
+      }
+    }
+  }
+
+  ASSERT_EQ(Alloc(), ncclSuccess);
+  ASSERT_NE(dev, nullptr);
+  for (int b = 0; b < NCCL_GIN_MAX_ACTIVE_BACKENDS; b++) {
+    for (int s = 0; s < mem.numGinSegments; s++) {
+      const ncclSegmentWindow& win = dev[b * mem.numGinSegments + s];
+      for (int i = 0; i < NCCL_GIN_MAX_CONNECTIONS; i++) {
+        EXPECT_EQ(win.ginWins[i], devToken(s, b, i)) << "backend " << b << " segment " << s << " conn " << i;
+      }
+    }
+  }
+}
+
 // Branch: the shadow-pool allocation fails, so no windows are reported back.
 TEST_F(AllocAndPopulateSegmentWindowsTest, AllocFails_ReturnsErrorWithoutOutputs) {
   comm->devrState.ginEnabled = true;
@@ -6778,6 +6811,20 @@ TEST_F(CommQueryPropertiesTest, UninitialisedProps_ReturnsInvalidUsage) {
   ncclCommProperties_t raw{};
   raw.magic = 0;
   EXPECT_EQ(ncclCommQueryProperties(comm, &raw), ncclInvalidUsage);
+}
+
+// nLsaTeams comes from the topology, so a property query leaves device-runtime state (bigSize) untouched.
+TEST_F(CommQueryPropertiesTest, NLsaTeams_DoesNotInitialiseDeviceRuntime) {
+  ScopedHook granularity(g_hipMemGetAllocationGranularity,
+                         [](size_t* g, const hipMemAllocationProp*, hipMemAllocationGranularity_flags) {
+                           *g = 4096;
+                           return hipSuccess;
+                         });
+
+  ASSERT_EQ(ncclCommQueryProperties(comm, &props), ncclSuccess);
+  EXPECT_EQ(props.nLsaTeams, 1);  // all 8 ranks on node 0
+  EXPECT_EQ(granularity.calls, 0);
+  EXPECT_EQ(comm->devrState.bigSize, 0u);
 }
 
 // A caller that JIT-compiles its device code must allocate the devComm in the

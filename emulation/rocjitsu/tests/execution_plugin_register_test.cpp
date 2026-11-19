@@ -1330,8 +1330,11 @@ TEST(ExecutionPluginTest, Rdna2F16TernaryPreservesDestinationWithoutObservingAnE
         amdgpu::ScopedSimdFastPathTracker tracker;
         ASSERT_TRUE(f.cu->execute_instruction(inst.get(), *wf).succeeded());
         const bool fma = opcode == rdna2::kVFmaF16Vop3;
-        EXPECT_TRUE(tracker.only_tracked_path_executed(
-            fma ? amdgpu::SimdFastPath::VOP3_FMA_FP16 : amdgpu::SimdFastPath::VOP3_TERNARY_FP16));
+        // FMA now uses library dispatch, whose CPU-level paths are tested in lib/arith.
+        // The remaining DIV_FIXUP path still uses the VM's legacy SIMD tracker.
+        if (!fma) {
+          EXPECT_TRUE(tracker.only_tracked_path_executed(amdgpu::SimdFastPath::VOP3_TERNARY_FP16));
+        }
 
         std::array<uint64_t, 3> read_lanes{};
         for (const auto &read : vgpr_read_events(*plugin)) {

@@ -112,8 +112,28 @@ uint8_t vector_memory_byte_mask(const amdgpu::VectorMemState &state, const amdgp
   return ExecutionPlugin::kFullByteMask;
 }
 
-/// The obligations on which a gfx1250 memory instruction issued with EXEC zero
-/// is sure to count. It is skipped only when the counters its encoding names are
+/// gfx1250 (CDNA5) issues an EXEC-zero memory instruction and counts it, unless
+/// it is skipped: "VMEM can be skipped only if: EXEC == 0 and LOADcnt / STOREcnt
+/// / ASYNCcnt / TENSORcnt == 0", FLAT also requires DScnt == 0, and "LDS can be
+/// skipped only if: DScnt==0 and EXEC==0" (CDNA5 ISA 3.2.2.1). A skipped
+/// instruction leaves no older operation on those counters to complete, so
+/// either way its admission is sound.
+///
+/// On CDNA1 through CDNA4, a buffer, global or scratch instruction issued with EXEC
+/// zero counts on VMCNT, in order with the wave's other non-FLAT VMEM
+/// instructions (all four ISA manuals, sections 3.3, 4.4 and 10.4–10.5).
+bool exec_zero_memory_issue_counts(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
+         arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+         arch == ROCJITSU_CODE_ARCH_CDNA5;
+}
+
+/// Counter obligations retained when wave EXEC is zero.
+/// On CDNA1 through CDNA4, buffer, global and scratch instructions keep VMCNT.
+/// DS and generic FLAT are excluded pending validation of their counter,
+/// routing and completion rules (see docs/race-detector.md).
+///
+/// A gfx1250 memory instruction is skipped only when the counters its encoding names are
 /// all zero (CDNA5 ISA 3.2.2.1): "VMEM can be skipped only if: EXEC == 0 and
 /// LOADcnt / STOREcnt / ASYNCcnt / TENSORcnt == 0", FLAT also requires DScnt ==
 /// 0, and "LDS can be skipped only if: DScnt==0 and EXEC==0". On those counters
@@ -138,6 +158,9 @@ amdgpu::MemoryIssueInfo exec_zero_counted_obligations(const amdgpu::MemoryIssueI
     case amdgpu::WaitCounterType::ASYNCCNT:
     case amdgpu::WaitCounterType::TENSORCNT:
       counts = !lds;
+      break;
+    case amdgpu::WaitCounterType::VMCNT:
+      counts = !lds && !flat;
       break;
     default:
       break;
@@ -928,13 +951,19 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     const auto &issued = d.routed_issue_info ? *d.routed_issue_info : issue;
     if (d.exec_mask == 0 && !(gfx10 && inst.mnemonic().starts_with("ds_gws_"))) {
       if (ignored_memory_issue(inst, wf) ||
-          (!arch_is_rdna(arch) && arch != ROCJITSU_CODE_ARCH_CDNA5))
+          (!arch_is_rdna(arch) && !exec_zero_memory_issue_counts(arch)) ||
+          (arch_is_cdna_4_or_lower(arch) && wf.exec() != 0))
         return;
       auto counted = issued;
-      if (arch == ROCJITSU_CODE_ARCH_CDNA5 && wf.exec() == 0)
+      if (exec_zero_memory_issue_counts(arch) && wf.exec() == 0)
         counted = exec_zero_counted_obligations(issued, inst.mnemonic());
       if (counted.empty())
         return;
+      if (arch_is_cdna_4_or_lower(arch)) {
+        register_counter_slot(*rs, instruction, counted.counter_obligations(),
+                              memoryOrderForObligations(counted.counter_obligations()), d.is_load);
+        return;
+      }
       // An empty CDNA5 async copy still takes an ASYNCcnt slot. Keep its direction
       // for barrier arrivals and partial waits even though it touches no LDS bytes.
       if ((d.lds_src || d.lds_dst) && std::ranges::any_of(obligations, [](const auto &obligation) {
@@ -1455,7 +1484,7 @@ void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Ins
     if (info && !ignored_memory_issue(inst, wf)) {
       if (!info->exec_masked || wf.exec() != 0 || arch_is_rdna(arch))
         admitted = s->race_state->prepareForMemoryIssue(*info);
-      else if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+      else if (exec_zero_memory_issue_counts(arch))
         admitted = s->race_state->prepareForMemoryIssue(
             exec_zero_counted_obligations(*info, inst.mnemonic()));
     }

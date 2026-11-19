@@ -1505,7 +1505,7 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent, const 
   }
 
   // gfx125+ fast path: WaitSignal packets in one doorbell submission.
-  // Each chunk carries wait+copy+signal inline; no prologue signal needed.
+  // Profiled copies defer completion until after the end timestamp.
   if (blit->isSDMA()) {
     BlitSdmaBase* sdma_blit = static_cast<BlitSdmaBase*>((*blit).get());
     if (sdma_blit->IsGfx125Plus()) {

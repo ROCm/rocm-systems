@@ -23,6 +23,7 @@ struct LdsRaceParticipant {
   uint64_t original_offset = 0;
   AccessKind access = AccessKind::Read;
   uint32_t phase = 0;
+  uint32_t workgroup = 0;
   bool operator==(const LdsRaceParticipant &) const = default;
 };
 
@@ -41,15 +42,23 @@ struct LdsRaceIntegrityIssue {
   uint32_t wave = UINT32_MAX;
   uint32_t site = UINT32_MAX;
   std::string reason;
+  uint32_t workgroup = UINT32_MAX;
   bool operator==(const LdsRaceIntegrityIssue &) const = default;
 };
 
 struct LdsRaceExecutionResult {
   uint64_t serial = 0;
+  uint32_t workgroup_count = 1;
+  uint32_t waves_per_workgroup = 0;
   uint64_t valid_observations = 0;
   uint64_t rejected_records = 0;
-  // Loss counts exhausted instruction occurrences, not missing lane records.
+  // Legacy access-loss total: dropped representatives plus occurrences that
+  // exceed the four-address-group limit. Saturated counts are lower bounds.
   uint64_t lost_occurrences = 0;
+  uint64_t dropped_representatives = 0;
+  uint64_t synchronization_loss = 0;
+  uint64_t address_group_exhaustion = 0;
+  uint32_t counter_exhausted_waves = 0;
   // Qualified candidate pairs excluded by a complete workgroup certificate.
   uint64_t ordered_pairs = 0;
   uint64_t ordering_unresolved_pairs = 0;
@@ -68,7 +77,7 @@ struct LdsRaceExecutionResult {
   // scope. Gaps never establish ordering for missing data.
   bool ordering_uncertain = false;
   uint64_t integrity_events = 0;
-  // Retain at most kMaxIntegrityIssueExamples; integrity_events remains complete.
+  // Bounded reasons include coverage loss; integrity_events counts only malformed evidence.
   std::vector<LdsRaceIntegrityIssue> issues;
   std::vector<LdsRaceFinding> cross_wave_examples;
   std::vector<LdsRaceFinding> collision_examples;

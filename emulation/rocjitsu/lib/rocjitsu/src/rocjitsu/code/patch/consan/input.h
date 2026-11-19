@@ -59,10 +59,11 @@ struct InputProgram {
   std::vector<uint64_t> exit_offsets;
   std::vector<NativeLdsAccess> accesses;
   std::vector<BarrierFacts> barriers;
+  bool repeated = false;
 };
 
-/// @brief Build an owning, qualified input program for the native LDS b32 MVP.
-/// @details The closed, acyclic reachable CFG admits a deliberately explicit
+/// @brief Build an owning, qualified input program for the bounded native LDS profile.
+/// @details A closed acyclic CFG, or a qualified gfx1250 single-block loop, admits an explicit
 /// integer/argument/output instruction subset. Unsupported memory or sync is a
 /// preparation failure, never an omitted operation interpreted as no ordering.
 /// The profile must match a supported table entry; copies/temporaries are valid.
