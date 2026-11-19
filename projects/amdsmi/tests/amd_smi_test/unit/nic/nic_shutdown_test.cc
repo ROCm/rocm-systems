@@ -15,6 +15,10 @@
 #include "rocm_smi/rocm_smi.h"
 #include "smi_nic_log.h"
 
+#if defined(ENABLE_WSL_BACKEND)
+#include "amd_smi/impl/amd_smi_wsl_device.h"
+#endif
+
 namespace {
 
 void discard_message(const std::string& /* message */) {}
@@ -34,13 +38,17 @@ TEST_F(NicUnit, ShutdownUninstallsTheNicLogSinkWhenTheGpuShutdownFails) {
   if (amdsmi_init(AMDSMI_INIT_AMD_GPUS | AMDSMI_INIT_AMD_NICS) != AMDSMI_STATUS_SUCCESS) {
     GTEST_SKIP() << "needs a host with a GPU";
   }
-  // Release the library's own ROCm SMI reference, so the shutdown below finds it already closed.
-  // On WSL, rsmi library is never actually initialized, so skip if that is the case.
-  if (access("/dev/dxg", F_OK) != 0) {
+  // Close ROCm SMI first so the library's own rsmi_shut_down() fails and the GPU branch of
+  // amdsmi_shut_down() reports an error; the NIC branch must still uninstall the log sink.
+  // WSL never initializes ROCm SMI, so there the shutdown succeeds and only the sink is checked.
+#if defined(ENABLE_WSL_BACKEND)
+  if (amd::smi::WSLGPUBackend::IsActive()) {
+    EXPECT_EQ(amdsmi_shut_down(), AMDSMI_STATUS_SUCCESS);
+  } else
+#endif
+  {
     ASSERT_EQ(rsmi_shut_down(), RSMI_STATUS_SUCCESS);
     EXPECT_NE(amdsmi_shut_down(), AMDSMI_STATUS_SUCCESS);
-  } else {
-    EXPECT_EQ(amdsmi_shut_down(), AMDSMI_STATUS_SUCCESS);
   }
 
   EXPECT_FALSE(amd::smi::nic::log::is_enabled());
