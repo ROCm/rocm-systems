@@ -21,6 +21,7 @@
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <mutex>
 #include <thread>
 #include <condition_variable>
@@ -2304,6 +2305,22 @@ ncclResult_t ncclProfilerStartAddonEvent(struct ncclInfo* info, bool isGraphCapt
                                          struct ncclProfilerEventRef* collEventHandle) {
   memset(groupEventHandle, 0, sizeof(*groupEventHandle));
   memset(collEventHandle, 0, sizeof(*collEventHandle));
+
+  uint64_t seqNumber = std::numeric_limits<uint64_t>::max();
+  // info->coll can be ncclFuncAlltoAll = 8, comm->seqNumber has length NCCL_NUM_FUNCTIONS = 5
+  if (info->coll < NCCL_NUM_FUNCTIONS) {
+    // Same logic for incrementing comm->seqNumber as in ncclProfilerStartTaskEvents.
+    // When Addon Collectives support generation of KernelCh events and properly handle graph capture,
+    // change the below condition to:
+    //
+    // !isGraphCaptured || (COMPILER_EXPECT(ncclProfiler != NULL, 0) &&
+    //                      (profilerLive(groupEventHandle) ||
+    //                       profilerLive(&ncclProfilerApiState.collApiEventHandle)) &&
+    //                      (ncclProfilerApiState.eActivationMask & ncclProfileKernelCh))))
+    if (!isGraphCaptured)
+      seqNumber = COMPILER_ATOMIC_FETCH_ADD(&info->comm->seqNumber[info->coll], 1ULL, std::memory_order_relaxed);
+  }
+
   if (COMPILER_EXPECT(ncclProfiler != NULL, 0)) {
     if (ncclProfilerApiState.eActivationMask & profilerEventGate(ncclProfileGroup)) {
       ncclProfilerEventDescr_t eDescr = {0};
@@ -2314,7 +2331,7 @@ ncclResult_t ncclProfilerStartAddonEvent(struct ncclInfo* info, bool isGraphCapt
       ncclProfilerEventDescr_t eDescr = {0};
       eDescr.type = ncclProfileColl;
       eDescr.rank = info->comm->rank;
-      eDescr.coll.seqNumber = info->comm->seqNumber[info->coll];
+      eDescr.coll.seqNumber = seqNumber;
       eDescr.coll.func = ncclFuncToString(info->coll);
       eDescr.coll.sendBuff = info->sendbuff;
       eDescr.coll.recvBuff = info->recvbuff;
@@ -2344,16 +2361,6 @@ ncclResult_t ncclProfilerStartAddonEvent(struct ncclInfo* info, bool isGraphCapt
                     &ncclProfilerApiState.collApiEventHandle, groupEventHandle);
     }
   }
-
-  // Same logic for incrementing comm->seqNumber as in ncclProfilerStartTaskEvents.
-  // When Addon Collectives support generation of KernelCh events and properly handle graph capture,
-  // change the below condition to:
-  //
-  // !isGraphCaptured || (COMPILER_EXPECT(ncclProfiler != NULL, 0) &&
-  //                      (profilerLive(groupEventHandle) || profilerLive(&ncclProfilerApiState.collApiEventHandle)) &&
-  //                      (ncclProfilerApiState.eActivationMask & ncclProfileKernelCh))))
-  if (!isGraphCaptured)
-    COMPILER_ATOMIC_FETCH_ADD(&info->comm->seqNumber[info->coll], 1ULL, std::memory_order_relaxed);
   return ncclSuccess;
 }
 
