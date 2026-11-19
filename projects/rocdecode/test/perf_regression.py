@@ -295,9 +295,17 @@ def load_local_baseline(csv_path):
     baseline = {}
     for _, row in df.iterrows():
         fname = str(row["File"]).strip()
+        # str(NaN) is "nan", so test the raw cell as well as the stripped name.
+        if pd.isna(row["File"]) or not fname:
+            raise ValueError(f"baseline CSV {csv_path} contains an empty File value")
         fps = pd.to_numeric(row["FPS"], errors="coerce")
-        if fname and pd.notna(fps):
-            baseline[fname] = float(fps)
+        # FPS is a divisor in the comparison, so it must be finite and positive.
+        if pd.isna(fps) or not (0 < float(fps) < float("inf")):
+            raise ValueError(f"baseline CSV {csv_path} has invalid FPS for {fname!r}")
+        baseline[fname] = float(fps)
+    if not baseline:
+        # An empty baseline would compare no streams and report a pass.
+        raise ValueError(f"baseline CSV {csv_path} contains no usable entries")
     return baseline
 
 
@@ -635,6 +643,13 @@ def main():
         summary_box(summary_rows, overall_ok, measure_only=measure_only)
         print(f"Results saved to: {out_dir}/")
         if args.save_baseline:
+            bad = [r["File"] for r in detail_rows if not r["Measured FPS"] > 0]
+            if bad:
+                # load_local_baseline rejects non-positive FPS, so do not write a
+                # baseline that could never be loaded.
+                print(f"ERROR: no valid FPS measured for {', '.join(bad)}; baseline not saved.",
+                      file=sys.stderr)
+                return 1
             # The loader reads File and FPS; the other columns record where the
             # baseline came from.
             recorded = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
