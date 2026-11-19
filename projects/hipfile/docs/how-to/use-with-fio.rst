@@ -1,4 +1,5 @@
-hipFile I/O performance.
+.. meta::
+   :description: How to build and run the ROCm fio fork with the libhipfile engine to benchmark hipFile I/O performance.
    :keywords: hipFile, fio, benchmark, ROCm, GPU I/O, libhipfile, direct I/O
 
 
