@@ -766,6 +766,7 @@ VirtualGPU::RetiringSignalTracker::~RetiringSignalTracker() {
     disarm(signal);
   }
   ReleasePins(/*release_all=*/true);
+  ReleaseHeldSignals();
   for (ProfilingSignal* signal : spare_signals_) {
     disarm(signal);
     signal->release();
@@ -1161,6 +1162,9 @@ void VirtualGPU::RetiringSignalTracker::AcquireSlot() {
       MarkCompleted(oldest);
       const bool replaced = oldest->referenceCount() > 1 && ReplaceWithSpare(next);
       if (!replaced) {
+        if (oldest->referenceCount() > 1) {
+          LogError("No spare signal: reusing a signal that another holder may still wait on");
+        }
         assert(oldest->referenceCount() == 1 && "Signal reuse conflicts with another holder!");
         StoreValue(oldest, kInitSignalValueOne);
         FlushStores();
@@ -1797,6 +1801,42 @@ void VirtualGPU::RetiringSignalTracker::NoteGpuWait(ProfilingSignal* signal, boo
     return;
   }
   HwQueueTracker::NoteGpuWait(signal, aql_waiter);
+}
+
+// ================================================================================================
+void VirtualGPU::RetiringSignalTracker::HoldSignal(ProfilingSignal* signal) {
+  signal->retain();
+  held_signals_.push_back(signal);
+}
+
+// ================================================================================================
+void VirtualGPU::RetiringSignalTracker::ReleaseHeldSignals(size_t mark) {
+  for (size_t i = mark; i < held_signals_.size(); ++i) {
+    held_signals_[i]->release();
+  }
+  held_signals_.resize(std::min(mark, held_signals_.size()));
+}
+
+// ================================================================================================
+void VirtualGPU::HwQueueTracker::KeepUntilRetired(const std::vector<void*>& pins) {
+  for (void* pin : pins) {
+    reinterpret_cast<ProfilingSignal*>(pin)->release();
+  }
+  ReleaseHeldSignals();
+}
+
+// ================================================================================================
+void VirtualGPU::RetiringSignalTracker::KeepUntilRetired(const std::vector<void*>& pins) {
+  // The references move into open pins, which close at the current queue position
+  for (void* pin : pins) {
+    pins_.push_back(PinnedWait{reinterpret_cast<ProfilingSignal*>(pin)});
+  }
+  for (ProfilingSignal* signal : held_signals_) {
+    pins_.push_back(PinnedWait{signal});
+  }
+  num_open_pins_ += pins.size() + held_signals_.size();
+  held_signals_.clear();
+  ClosePins();
 }
 
 // ================================================================================================
@@ -4899,16 +4939,21 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
   // When there are no extra signals (e.g. a pure P2P/D2D batch that collapses to one
   // engine-group op), the sole completion signal already represents the whole batch and
   // the next op waits on it through the engine switch, so the barrier is pure overhead.
-  if (result && !Barriers().IsExternalSignalListEmpty()) {
+  if (!Barriers().IsExternalSignalListEmpty()) {
     dispatchBarrierPacket(kNopPacketHeader);
   }
-
   if (!result) {
     LogError("submitBatchCopyMemory failed!");
+    // The error status drops the command's pins before the GPU passes the waits
+    Barriers().KeepUntilRetired(cmd.TakePinnedHwEvents());
     cmd.setStatus(CL_OUT_OF_RESOURCES);
-  } else if (!amd::IS_HIP) {
-    for (const auto& op : copyOps) {
-      op.dstMemory->signalWrite(&dev());
+  } else {
+    // The barrier pinned the batch signals it waits on
+    Barriers().ReleaseHeldSignals();
+    if (!amd::IS_HIP) {
+      for (const auto& op : copyOps) {
+        op.dstMemory->signalWrite(&dev());
+      }
     }
   }
 
