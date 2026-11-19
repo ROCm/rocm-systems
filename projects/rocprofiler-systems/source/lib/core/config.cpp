@@ -78,6 +78,7 @@
 #include <unistd.h>
 #include <unordered_set>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace rocprofsys
@@ -1265,7 +1266,7 @@ configure_settings(bool _init)
     ROCPROFSYS_CONFIG_SETTING(
         std::string, env_vars::TIMEMORY_COMPONENTS,
         "List of components to collect via timemory (see `rocprof-sys-avail -C`)",
-        "wall_clock", "timemory", "component");
+        std::string{}, "timemory", "component");
 
     ROCPROFSYS_CONFIG_SETTING(std::string, env_vars::OUTPUT_FILE,
                               "[DEPRECATED] See ROCPROFSYS_PERFETTO_FILE", std::string{},
@@ -1514,14 +1515,10 @@ configure_settings(bool _init)
     _add_advanced_category(env_vars::JSON_OUTPUT);
     _add_advanced_category(env_vars::TREE_OUTPUT);
     _add_advanced_category(env_vars::TEXT_OUTPUT);
-    _add_advanced_category(env_vars::DIFF_OUTPUT);
     _add_advanced_category(env_vars::DEBUG_MODE);
     _add_advanced_category(env_vars::LOG_LEVEL);
     _add_advanced_category(env_vars::ENABLE_SIGNAL_HANDLER);
     _add_advanced_category(env_vars::FLAT_PROFILE);
-    _add_advanced_category(env_vars::INPUT_EXTENSIONS);
-    _add_advanced_category(env_vars::INPUT_PATH);
-    _add_advanced_category(env_vars::INPUT_PREFIX);
     _add_advanced_category(env_vars::MAX_DEPTH);
     _add_advanced_category(env_vars::MAX_WIDTH);
     _add_advanced_category(env_vars::MEMORY_PRECISION);
@@ -2218,7 +2215,8 @@ configure_disabled_settings(const std::shared_ptr<settings>& _config)
         "FREQ|STACK_CLEARING|TARGET_PID|THROTTLE_(COUNT|VALUE)|(AUTO|FLAMEGRAPH)_"
         "OUTPUT|"
         "(ENABLE|DISABLE)_ALL_SIGNALS|ALLOW_SIGNAL_HANDLER|CTEST_NOTES|INSTRUCTION_"
-        "ROOFLINE|ADD_SECONDARY|MAX_THREAD_BOOKMARKS)$";
+        "ROOFLINE|ADD_SECONDARY|MAX_THREAD_BOOKMARKS|DIFF_OUTPUT|"
+        "INPUT_(PATH|PREFIX|EXTENSIONS))$";
 
     //  leading matches, e.g. ROCPROFSYS_MPI_[A-Z_]+
     const std::string _hidden_begin_re =
@@ -3436,6 +3434,19 @@ reset_database_path_memo()
     s_db_path_memo.clear();
 }
 
+void
+refresh_output_format_settings()
+{
+    for(const auto* name : { env_vars::TRACE, env_vars::USE_ROCPD })
+    {
+        const auto value = rocprofsys::get_env<std::string>(name, "");
+        if(!value.empty())
+        {
+            set_setting_value(std::string{ name }, utility::string::to_bool(value));
+        }
+    }
+}
+
 std::string
 get_output_absolute_path(std::string_view basename, std::string_view extension,
                          std::string_view tag, std::string_view dir)
@@ -3643,13 +3654,11 @@ get_use_unified_memory_profiling()
     return static_cast<tim::tsettings<bool>&>(*_v).get();
 }
 
-bool&
+bool
 get_use_perfetto()
 {
     static auto const _trace_setting = get_config()->at(env_vars::TRACE);
-    auto const&       _trace = static_cast<tim::tsettings<bool>&>(*_trace_setting).get();
-    static bool       _v     = _trace;
-    return _v;
+    return static_cast<tim::tsettings<bool>&>(*_trace_setting).get();
 }
 
 int
@@ -3718,25 +3727,41 @@ get_first_mpi_env_uint(const std::vector<std::string>& env_var_options,
     return std::nullopt;
 }
 
-[[nodiscard]] std::optional<std::uint64_t>
+#endif
+}  // namespace
+
+std::optional<std::uint64_t>
 get_mpi_rank_from_env()
 {
+#if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
     // global rank env-vars: user-provided, then runtime-specific
     auto env_var_options = std::vector<std::string>{ get_rank_filter_id() };
     env_var_options.insert(env_var_options.end(), k_mpi_rank_env_names.begin(),
                            k_mpi_rank_env_names.end());
     return get_first_mpi_env_uint(env_var_options, "MPI rank");
+#else
+    return std::nullopt;
+#endif
 }
 
-[[nodiscard]] std::optional<std::uint64_t>
+std::optional<std::uint64_t>
 get_mpi_world_size_from_env()
 {
+#if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
     return get_first_mpi_env_uint({ "OMPI_COMM_WORLD_SIZE", "MV2_COMM_WORLD_SIZE",
                                     "PMI_SIZE", "SLURM_NTASKS", "SLURM_NPROCS" },
                                   "MPI world size");
-}
+#else
+    return std::nullopt;
 #endif
-}  // namespace
+}
+
+std::string
+get_output_process_suffix()
+{
+    return std::visit([](const auto& value) { return fmt::format("{}", value); },
+                      settings::default_process_suffix());
+}
 
 namespace output_filtering
 {

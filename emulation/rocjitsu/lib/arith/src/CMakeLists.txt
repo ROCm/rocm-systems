@@ -52,12 +52,14 @@ add_library(
     fp/div_scale.cpp
     fp/fp64.cpp
     fp/frexp_exp.cpp
+    fp/half_mad.cpp
     fp/half_binary.cpp
     fp/half_exponent.cpp
     fp/half_fma.cpp
     fp/half_minmax.cpp
     fp/ldexp.cpp
     fp/minmax.cpp
+    fp/mixed_fma_gfx908.cpp
     fp/mixed_mad.cpp
     fp/mixed_bf16.cpp
     fp/packed_bf16.cpp

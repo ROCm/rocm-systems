@@ -509,10 +509,36 @@ fn repeated_queue_index_access_does_not_wait_for_the_registry_mutex() {
                 .unwrap();
         });
         ready_rx.recv().unwrap();
-        let guard = crate::runtime::LIFECYCLE.lock().unwrap();
+        let guard = crate::lifecycle::LIFECYCLE.lock().unwrap();
         go_tx.send(()).unwrap();
         let value = done_rx.recv_timeout(Duration::from_millis(200));
         drop(guard);
         assert_eq!(value.unwrap(), 42);
     });
+}
+
+#[test]
+fn scratch_faults_decode_both_extended_dispatch_formats() {
+    #[repr(align(64))]
+    struct Packet([u8; 64]);
+    let mut packet = Packet([0; 64]);
+    packet.0[4..6].copy_from_slice(&64_u16.to_ne_bytes());
+    packet.0[6..8].copy_from_slice(&2_u16.to_ne_bytes());
+    packet.0[8..10].copy_from_slice(&1_u16.to_ne_bytes());
+    packet.0[24..28].copy_from_slice(&256_u32.to_ne_bytes());
+    for (kind, format, expected) in [
+        (2_u16, 0, Some((256, 128))),
+        (0, 3, Some((256, 128))),
+        (0, 4, Some((256, 128))),
+        (0, 2, None),
+        (3, 4, None),
+    ] {
+        packet.0[..2].copy_from_slice(&kind.to_ne_bytes());
+        packet.0[2] = format;
+        // SAFETY: The complete aligned packet is initialized and unpublished.
+        assert_eq!(
+            unsafe { dispatch_scratch_requirements(packet.0.as_ptr() as usize) },
+            expected
+        );
+    }
 }

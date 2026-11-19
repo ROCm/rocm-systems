@@ -2840,8 +2840,11 @@ SimulatedKfd::~SimulatedKfd() {
   }
   // CPs may outlive this frontend. Revoke callback admission and drain any
   // callback already executing before touching the state captured by them.
-  for (GpuDevice &gpu : gpus_)
+  for (GpuDevice &gpu : gpus_) {
     gpu.interrupt_subscription.reset();
+    gpu.cp_interrupt_subscription.reset();
+    gpu.exception_event_subscription.reset();
+  }
 
   debug_session_reaper_.request_stop();
   debug_session_reaper_.join();
@@ -3178,24 +3181,58 @@ void SimulatedKfd::init_command_processors_locked() {
     // SH_MEM_BASES bank through Wavefront::set_process_id.
     const kfd_process_device_apertures ap = gpu_apertures(static_cast<uint32_t>(i));
     g.soc->set_apertures(ap.lds_base, ap.lds_limit, ap.scratch_base, ap.scratch_limit);
-    g.interrupt_subscription =
+    const auto subscribe_interrupts = [this](bool signal_mailbox_updated) {
+      return amdgpu::InterruptSubscription(
+          [this, signal_mailbox_updated](uint32_t process_id, uint32_t event_id) {
+            if (const auto override = interrupt_override_for_testing_.sink()) {
+              override.deliver(process_id, event_id);
+              return;
+            }
+            std::lock_guard<std::mutex> ilk(interrupt_mutex_);
+            const std::unordered_map<uint32_t, EventState *>::iterator event =
+                event_dispatch_.find(process_id);
+            if (event != event_dispatch_.end()) {
+              util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id,
+                               " found=true");
+              event->second->signal_interrupt(event_id, signal_mailbox_updated);
+            } else {
+              util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id,
+                               " found=false");
+            }
+          },
+          {},
+          [this](uint32_t process_id) {
+            if (const auto override = interrupt_override_for_testing_.sink()) {
+              override.notify_idle(process_id);
+              return;
+            }
+            std::lock_guard<std::mutex> lock(interrupt_mutex_);
+            const auto event = event_dispatch_.find(process_id);
+            if (event != event_dispatch_.end())
+              event->second->notify_idle();
+          });
+    };
+    g.exception_event_subscription =
         amdgpu::InterruptSubscription([this](uint32_t process_id, uint32_t event_id) {
           if (const auto override = interrupt_override_for_testing_.sink()) {
             override.deliver(process_id, event_id);
             return;
           }
-          std::lock_guard<std::mutex> ilk(interrupt_mutex_);
-          const std::unordered_map<uint32_t, EventState *>::iterator event =
-              event_dispatch_.find(process_id);
+          std::lock_guard<std::mutex> lock(interrupt_mutex_);
+          const auto event = event_dispatch_.find(process_id);
           if (event != event_dispatch_.end()) {
-            util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id,
-                             " found=true");
-            event->second->signal_interrupt(event_id);
-          } else {
-            util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id,
-                             " found=false");
+            kfd_ioctl_set_event_args args{};
+            args.event_id = event_id;
+            static_cast<void>(event->second->set_event(&args));
           }
         });
+    // SDMA and SQ always require marked mailboxes. Only GC 12.1 CP completions
+    // can signal directly by ID, so compute queues retain a distinct route.
+    g.interrupt_subscription = subscribe_interrupts(true);
+    g.cp_interrupt_subscription =
+        subscribe_interrupts(i >= gpu_infos_.size() || kmd::gc_ip_version_for_gfx_target_version(
+                                                           gpu_infos_[i].gfx_target_version) !=
+                                                           kmd::make_gc_ip_version(12, 1, 0));
     g.soc->for_each_cp([this, i](amdgpu::CommandProcessor *cp) {
       // Tests register synthetic queues directly with these CPs without the
       // KFD queue ABI. Only those queues use these backing hooks;
@@ -5336,12 +5373,8 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
         return MAP_FAILED;
       }
       ptr = client_mapping.get();
-      if (flags & MAP_FIXED) {
-        clear_host_svm_policy_after_change_locked(proc, reinterpret_cast<uint64_t>(ptr), length,
-                                                  &va_transaction);
-        if (on_host_vma_change)
-          on_host_vma_change();
-      }
+      if ((flags & MAP_FIXED) && on_host_vma_change)
+        on_host_vma_change();
       if (ranges_overlap(ptr, length, monitor_ptr, length)) {
         discard_new_fd();
         errno = EINVAL;
@@ -5374,9 +5407,30 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
           errno = EINVAL;
           return MAP_FAILED;
         }
+        // Retire the replaced host view and claim the new doorbell in one
+        // publication. A failed mmap keeps the prior denials and retry state.
+        // Live allocation CPU views were excluded before the host replacement.
+        auto previous_retired_ranges = proc.retired_gpu_ranges_;
+        auto previous_retired_views = proc.retired_identity_views_;
+        auto previous_svm_denials = proc.svm_denied_ranges_;
+        auto previous_svm_access = proc.svm_access_ranges_;
+        try {
+          if (flags & MAP_FIXED) {
+            const auto range = *rounded_host_vma_range(reinterpret_cast<uint64_t>(ptr), length);
+            (void)proc.clear_host_svm_policy_locked(range.first, range.second);
+          }
+          proc.claim_gpu_range_locked(reinterpret_cast<uint64_t>(ptr), length);
+          proc.publish_gpu_grants_locked(va_transaction);
+        } catch (...) {
+          proc.retired_gpu_ranges_.swap(previous_retired_ranges);
+          proc.retired_identity_views_.swap(previous_retired_views);
+          proc.svm_denied_ranges_.swap(previous_svm_denials);
+          proc.svm_access_ranges_.swap(previous_svm_access);
+          throw;
+        }
       } catch (const std::bad_alloc &) {
-        // map_pages may have installed a prefix before an allocation failed.
-        // Retain its CPU backing and the canonical memfd for close to clean up.
+        // PTE installation or grant publication may fail after PTEs were added.
+        // Retain their CPU backing and the canonical memfd for close to clean up.
         map_error = ENOMEM;
       } catch (...) {
         map_error = EIO;
@@ -6172,33 +6226,15 @@ int SimulatedKfd::dispatch_munmap(KfdProcess &proc, void *addr, size_t length,
     if (it == proc.allocations_.end()) {
       const auto retired =
           std::ranges::find_if(proc.retired_identity_views_, [&](const auto &view) {
-            return view.gpu_va == reinterpret_cast<uintptr_t>(addr) && view.mapped_bytes == length;
+            return view.gpu_va < end && start < view.gpu_va + view.mapped_bytes;
           });
       if (retired == proc.retired_identity_views_.end())
         return -ENOENT;
       if (safe_munmap(addr, length) != 0)
         return -errno;
+      clear_host_svm_policy_after_change_locked(proc, start, *unmapped_span);
       if (on_host_vma_change)
         on_host_vma_change();
-      // FREE denied the old BO while its caller-owned fixed CPU view remained
-      // mapped. Once that view is gone, a future host allocation may reuse the
-      // address as ordinary identity memory. A failed publication keeps denial.
-      try {
-        auto previous = proc.retired_gpu_ranges_;
-        auto previous_denials = proc.svm_denied_ranges_;
-        auto previous_access = proc.svm_access_ranges_;
-        try {
-          proc.claim_gpu_range_locked(retired->gpu_va, retired->mapped_bytes);
-          proc.publish_gpu_grants_locked();
-          proc.retired_identity_views_.erase(retired);
-        } catch (...) {
-          proc.retired_gpu_ranges_.swap(previous);
-          proc.svm_denied_ranges_.swap(previous_denials);
-          proc.svm_access_ranges_.swap(previous_access);
-        }
-      } catch (...) {
-        // Leave the tombstone published if its rollback snapshot cannot be made.
-      }
       return 0;
     }
     const auto &alloc = it->second;
@@ -6939,6 +6975,7 @@ int SimulatedKfd::free_memory_ioctl(
     // The final grant publication can allocate. Preserve the descriptor and
     // tombstones until that publication succeeds, then retire IPC and backing.
     auto prior_retired_ranges = proc.retired_gpu_ranges_;
+    const size_t prior_retired_view_count = proc.retired_identity_views_.size();
     try {
       if (alloc.flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) {
         // A separate GPU VA has no host VMA whose removal can clear its
@@ -6950,7 +6987,30 @@ int SimulatedKfd::free_memory_ioctl(
       } else {
         proc.retire_gpu_range_locked(alloc.gpu_va, alloc.size);
       }
+      const uint32_t kind =
+          alloc.flags & (KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_GTT |
+                         KFD_IOC_ALLOC_MEM_FLAGS_USERPTR);
+      if (!daemon_mode_ && alloc.user_va && !alloc.imported &&
+          (kind == KFD_IOC_ALLOC_MEM_FLAGS_VRAM || kind == KFD_IOC_ALLOC_MEM_FLAGS_GTT)) {
+        // Host changes may have split the primary view into client fragments.
+        // Retain only their overlap with this BO's GPU VA, before publication
+        // can commit the FREE and discard the allocation's mapping records.
+        const auto retain_identity_view = [&](void *pointer, size_t size, HostMappingKind mapping) {
+          if (!pointer ||
+              (mapping != HostMappingKind::Caller && mapping != HostMappingKind::CallerMapped))
+            return;
+          const uint64_t address = reinterpret_cast<uintptr_t>(pointer);
+          const uint64_t start = std::max(address, alloc.gpu_va);
+          const uint64_t end = std::min(address + size, alloc.gpu_va + alloc.size);
+          if (start < end)
+            proc.retired_identity_views_.push_back({start, end - start});
+        };
+        retain_identity_view(alloc.host_ptr, alloc.host_mapping_size, alloc.host_mapping_kind);
+        for (const auto &view : alloc.client_views)
+          retain_identity_view(view.ptr, view.size, view.kind);
+      }
     } catch (...) {
+      proc.retired_identity_views_.resize(prior_retired_view_count);
       proc.retired_gpu_ranges_.swap(prior_retired_ranges);
       throw;
     }
@@ -6962,6 +7022,7 @@ int SimulatedKfd::free_memory_ioctl(
       proc.publish_gpu_grants_locked(*va_transaction);
     } catch (...) {
       proc.allocations_.insert(std::move(retired));
+      proc.retired_identity_views_.resize(prior_retired_view_count);
       proc.retired_gpu_ranges_.swap(prior_retired_ranges);
       throw;
     }
@@ -6979,30 +7040,6 @@ int SimulatedKfd::free_memory_ioctl(
           dmabuf_it != proc.imported_dmabufs_.end()) {
         proc.fd_to_import_handle_.erase(dmabuf_it->second.fd);
         proc.imported_dmabufs_.erase(dmabuf_it);
-      }
-    }
-    const uint32_t kind =
-        freed.flags & (KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_GTT |
-                       KFD_IOC_ALLOC_MEM_FLAGS_USERPTR);
-    const bool primary_fixed_identity_view =
-        freed.host_ptr && freed.host_mapping_caller_reserved() &&
-        reinterpret_cast<uintptr_t>(freed.host_ptr) == freed.gpu_va &&
-        (!freed.host_mapping_created_by_driver() || freed.host_mapping_size == freed.size);
-    const bool client_fixed_identity_view =
-        std::ranges::any_of(freed.client_views, [&](const auto &view) {
-          return (view.kind == KfdProcess::GpuAllocation::HostMappingKind::Caller ||
-                  view.kind == KfdProcess::GpuAllocation::HostMappingKind::CallerMapped) &&
-                 reinterpret_cast<uintptr_t>(view.ptr) == freed.gpu_va && view.size == freed.size;
-        });
-    const bool retired_fixed_identity_view =
-        !daemon_mode_ && freed.user_va && !freed.imported && !freed.backing_owner &&
-        (kind == KFD_IOC_ALLOC_MEM_FLAGS_VRAM || kind == KFD_IOC_ALLOC_MEM_FLAGS_GTT) &&
-        (primary_fixed_identity_view || client_fixed_identity_view);
-    if (retired_fixed_identity_view) {
-      try {
-        proc.retired_identity_views_.push_back({freed.gpu_va, freed.size});
-      } catch (const std::bad_alloc &) {
-        // Keep the freed VA denied if its later CPU unmap cannot be tracked.
       }
     }
     release_allocation_mappings(proc, freed);
@@ -7698,7 +7735,8 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
     }
 
     queue_request.identity = {.address_space = gs.address_space,
-                              .interrupt_sink = gpu->interrupt_subscription.sink(),
+                              .interrupt_sink = is_sdma ? gpu->interrupt_subscription.sink()
+                                                        : gpu->cp_interrupt_subscription.sink(),
                               .process_id = proc.process_id(),
                               .queue_id = queue_id};
     queue_request.ring = {.base_address = args->ring_base_address,
@@ -7823,6 +7861,7 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
                   sizeof(exception_event));
       queue_request.exception_status_address = exception_status;
       queue_request.exception_event_id = static_cast<uint32_t>(exception_event);
+      queue_request.exception_event_sink = gpu->exception_event_subscription.sink();
     }
     if (is_sdma && !daemon_mode_) {
       auto *wptr = reinterpret_cast<uint64_t *>(args->write_pointer_address);
@@ -8197,9 +8236,9 @@ int SimulatedKfd::destroy_queue_ioctl(KfdProcess &proc, void *arg) {
     (void)gpus_[queue->gpu_ordinal].soc->queue_registry().unregister_queue(
         queue->queue_handle, amdgpu::QueueCloseMode::ForceCancel);
   }
-  // Real CP sends EOP interrupt when queue is deactivated; KFD broadcasts to
-  // all type-0 events. This wakes ROCR's signal threads blocked on queue events.
-  proc.event_state_.signal_interrupt(0);
+  // Preserve the simulator's queue-deactivation wake without treating a
+  // hardware event context of zero as a broadcast.
+  proc.event_state_.notify_idle();
   return 0;
 }
 

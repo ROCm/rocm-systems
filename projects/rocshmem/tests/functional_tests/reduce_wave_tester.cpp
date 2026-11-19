@@ -22,6 +22,8 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
+#include <hip/hip_version.h>
+
 /* Declare the template with a generic implementation */
 template <typename T, ROCSHMEM_OP Op>
 __device__ int wave_reduce([[maybe_unused]] rocshmem_ctx_t ctx,
@@ -60,12 +62,23 @@ __device__ int wave_reduce([[maybe_unused]] rocshmem_ctx_t ctx,
 #define FLOAT_REDUCTION_WAVE_DEF_GEN(T, TNAME) \
   ARITH_REDUCTION_WAVE_DEF_GEN(T, TNAME)
 
-INT_REDUCTION_WAVE_DEF_GEN(int, int)
+INT_REDUCTION_WAVE_DEF_GEN(char, char)
+INT_REDUCTION_WAVE_DEF_GEN(signed char, schar)
+INT_REDUCTION_WAVE_DEF_GEN(unsigned char, uchar)
 INT_REDUCTION_WAVE_DEF_GEN(short, short)
+INT_REDUCTION_WAVE_DEF_GEN(unsigned short, ushort)
+INT_REDUCTION_WAVE_DEF_GEN(int, int)
+INT_REDUCTION_WAVE_DEF_GEN(unsigned int, uint)
 INT_REDUCTION_WAVE_DEF_GEN(long, long)
+INT_REDUCTION_WAVE_DEF_GEN(unsigned long, ulong)
 INT_REDUCTION_WAVE_DEF_GEN(long long, longlong)
+INT_REDUCTION_WAVE_DEF_GEN(unsigned long long, ulonglong)
 FLOAT_REDUCTION_WAVE_DEF_GEN(float, float)
 FLOAT_REDUCTION_WAVE_DEF_GEN(double, double)
+FLOAT_REDUCTION_WAVE_DEF_GEN(__half, half)
+#if !(HIP_VERSION_MAJOR == 7 && (HIP_VERSION_MINOR == 16 || HIP_VERSION_MINOR == 17))
+FLOAT_REDUCTION_WAVE_DEF_GEN(__hip_bfloat16, bfloat16)
+#endif
 
 /******************************************************************************
  * DEVICE TEST KERNEL

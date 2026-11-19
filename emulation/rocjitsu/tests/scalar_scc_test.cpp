@@ -248,6 +248,47 @@ public:
   amdgpu::Wavefront *wf = nullptr;
 };
 
+TEST(ScalarSccTest, Gfx10WaitRegisterValueIsDynamicAndWraps) {
+  using amdgpu::WaitCounterKind;
+  using amdgpu::WaitCounterPolicy;
+  for (const auto &profile : kScalarSccProfiles) {
+    if (profile.arch != ROCJITSU_CODE_ARCH_RDNA1 && profile.arch != ROCJITSU_CODE_ARCH_RDNA2)
+      continue;
+    ScalarSccFixture f(profile, "wait_register");
+    ASSERT_TRUE(f.ready());
+    const auto dynamic = f.decode(encode_sopk(profile, "s_waitcnt_vmcnt", /*sdst=*/0, /*simm16=*/1),
+                                  "s_waitcnt_vmcnt");
+    const auto immediate = f.decode(
+        encode_sopk(profile, "s_waitcnt_vmcnt", /*sdst=*/125, /*simm16=*/0x40), "s_waitcnt_vmcnt");
+    ASSERT_TRUE(dynamic && immediate);
+    const auto unknown = WaitCounterPolicy::explicit_wait_fields(*dynamic, profile.arch);
+    ASSERT_TRUE(unknown.succeeded());
+    // Without the executing wave's SGPR, a static checker cannot prove a threshold.
+    EXPECT_FALSE(unknown.value());
+    const auto zero = WaitCounterPolicy::explicit_wait_fields(*immediate, profile.arch);
+    ASSERT_TRUE(zero.succeeded() && zero.value());
+    const auto load = static_cast<size_t>(WaitCounterKind::Load);
+    EXPECT_EQ((*zero.value())[load], 0u);
+    // Adding SIMM16 to the SGPR wraps at the counter width: (63 + 1) & 0x3f == 0.
+    f.cu->write_sgpr(f.sgpr_base(), 63);
+    f.wf->wait_counters().vmcnt = 1;
+    ASSERT_TRUE(f.cu->execute_instruction(dynamic.get(), *f.wf).succeeded());
+    const auto resolved = WaitCounterPolicy::executed_wait_fields(
+        *dynamic, profile.arch, f.wf->wait_target().gfx10_wait_fields());
+    ASSERT_TRUE(resolved.succeeded() && resolved.value());
+    EXPECT_EQ((*resolved.value())[load], 0u);
+    EXPECT_EQ(f.wf->wait_target().vmcnt, 0u);
+    EXPECT_EQ(f.wf->state(), amdgpu::WfState::WAITCNT);
+    f.wf->wait_counters().vmcnt = 0;
+    f.wf->set_state(amdgpu::WfState::RUNNING);
+    f.wf->wait_for({.expcnt = 0});
+    f.wf->wait_counters().expcnt = 1;
+    EXPECT_TRUE(f.cu->execute_instruction(immediate.get(), *f.wf).succeeded());
+    EXPECT_EQ(f.wf->state(), amdgpu::WfState::RUNNING);
+    f.wf->wait_counters().expcnt = 0;
+  }
+}
+
 TEST(ScalarSccTest, Rdna2HwregsUseTheExecutingWavesState) {
   const auto profile =
       std::ranges::find(kScalarSccProfiles, ROCJITSU_CODE_ARCH_RDNA2, &ScalarSccProfile::arch);
@@ -619,6 +660,29 @@ TEST(ScalarSccTest, B32ExecInstructionsPreserveTheOtherHalfOfAWave) {
       EXPECT_EQ(fixture.cu->read_sgpr(fixture.sgpr_base() + 4),
                 mnemonic == "s_and_saveexec_b32" ? 15u : 0u);
     }
+  }
+}
+
+TEST(ScalarSccTest, Gfx10WaitUsesTheRegisterAndForgetsEarlierCounterLimits) {
+  for (const auto &profile : kScalarSccProfiles) {
+    if (profile.arch != ROCJITSU_CODE_ARCH_RDNA1 && profile.arch != ROCJITSU_CODE_ARCH_RDNA2)
+      continue;
+    ScalarSccFixture f(profile, "gfx10_wait");
+    ASSERT_TRUE(f.ready());
+    auto vm = f.decode(encode_sopk(profile, "s_waitcnt_vmcnt", /*sdst=*/4, /*simm16=*/2),
+                       "s_waitcnt_vmcnt");
+    auto ds = f.decode(encode_sopk(profile, "s_waitcnt_lgkmcnt", /*sdst=*/4, /*simm16=*/1),
+                       "s_waitcnt_lgkmcnt");
+    ASSERT_NE(vm, nullptr);
+    ASSERT_NE(ds, nullptr);
+    f.cu->write_sgpr(f.sgpr_base() + 4, 63);
+    ASSERT_TRUE(f.cu->execute_instruction(vm.get(), *f.wf).succeeded());
+    EXPECT_EQ(f.wf->wait_target().vmcnt, 1u);
+    f.wf->wait_counters().vmcnt = 2;
+    ASSERT_TRUE(f.cu->execute_instruction(ds.get(), *f.wf).succeeded());
+    EXPECT_EQ(f.wf->wait_target().lgkmcnt, 0u);
+    EXPECT_EQ(f.wf->state(), amdgpu::WfState::RUNNING);
+    f.wf->wait_counters().vmcnt = 0;
   }
 }
 

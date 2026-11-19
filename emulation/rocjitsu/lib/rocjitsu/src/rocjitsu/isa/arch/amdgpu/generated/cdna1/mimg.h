@@ -29,8 +29,7 @@ public:
     modifiers.gfx9_image_tuple.mip = false;
     modifiers.gfx9_image_tuple.derivatives = false;
     if (inst_.d16)
-      modifiers.set_packed_image_result(std::popcount(uint32_t{inst_.dmask}),
-                                        vdata.size_bits() / 32);
+      modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -53,8 +52,7 @@ public:
     modifiers.gfx9_image_tuple.mip = true;
     modifiers.gfx9_image_tuple.derivatives = false;
     if (inst_.d16)
-      modifiers.set_packed_image_result(std::popcount(uint32_t{inst_.dmask}),
-                                        vdata.size_bits() / 32);
+      modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -342,8 +340,7 @@ public:
     modifiers.gfx9_image_tuple.mip = false;
     modifiers.gfx9_image_tuple.derivatives = false;
     if (inst_.d16)
-      modifiers.set_packed_image_result(std::popcount(uint32_t{inst_.dmask}),
-                                        vdata.size_bits() / 32);
+      modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -377,8 +374,7 @@ public:
     modifiers.gfx9_image_tuple.mip = false;
     modifiers.gfx9_image_tuple.derivatives = true;
     if (inst_.d16)
-      modifiers.set_packed_image_result(std::popcount(uint32_t{inst_.dmask}),
-                                        vdata.size_bits() / 32);
+      modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -412,8 +408,7 @@ public:
     modifiers.gfx9_image_tuple.mip = true;
     modifiers.gfx9_image_tuple.derivatives = false;
     if (inst_.d16)
-      modifiers.set_packed_image_result(std::popcount(uint32_t{inst_.dmask}),
-                                        vdata.size_bits() / 32);
+      modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;
@@ -457,8 +452,7 @@ public:
     modifiers.gfx9_image_tuple.mip = false;
     modifiers.gfx9_image_tuple.derivatives = false;
     if (inst_.d16)
-      modifiers.set_packed_image_result(std::popcount(uint32_t{inst_.dmask}),
-                                        vdata.size_bits() / 32);
+      modifiers.set_packed_image_result(amdgpu::image_result_components(inst_.dmask, false));
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool implicit_preservation_uses(RegisterSet &uses) const override;

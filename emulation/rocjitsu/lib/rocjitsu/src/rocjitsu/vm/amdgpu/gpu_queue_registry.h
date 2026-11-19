@@ -217,8 +217,12 @@ struct QueueRegistrationRequest {
   std::optional<uint64_t> initial_consumer_cursor = std::nullopt;
   QueueAbi abi = QueueAbi::Generic;
   uint64_t queue_descriptor_address = 0;
+  /// GPU virtual address of the runtime queue exception status word.
   uint64_t exception_status_address = 0;
+  /// Runtime event ID for software queue exceptions.
   uint32_t exception_event_id = 0;
+  /// Software exception route, independent of packet mailbox interrupts.
+  InterruptSink exception_event_sink{};
   uint32_t engine_id = 0;
   bool xcd_fanout = false;
   QueueType type = QueueType::Compute;

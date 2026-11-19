@@ -33,6 +33,7 @@ namespace rocjitsu::amdgpu {
 class GpuVm;
 class GpuVmAccess;
 class GpuVmAccessState;
+class GpuVmTransferBatch;
 class DeviceCacheMaintenanceLease;
 class VmTransferEffectGate;
 
@@ -738,7 +739,7 @@ public:
 
 private:
   friend class GpuVmAccess;
-  static constexpr std::size_t kSnapshotCount = 256;
+  static constexpr std::size_t kSnapshotCount = 512;
   using Snapshots = std::array<VmMtypeSnapshot, kSnapshotCount>;
   // Interleaved lanes revisit short page runs in widely separated rows.
   // Offset each 128-page block by eight slots to separate those runs without
@@ -994,6 +995,7 @@ private:
               std::shared_ptr<GpuVmAccessState> access_state)
       : address_space_(address_space), info_(info), access_state_(std::move(access_state)) {}
 
+  friend class GpuVmTransferBatch;
   void report_terminal_fault(uint64_t address, VmAccessKind access, VmAccessOutcome outcome) const;
   [[nodiscard]] VmAccessOutcome probe_impl(uint64_t address, std::size_t size, VmAccessKind access,
                                            bool report_fault) const;
@@ -1002,7 +1004,8 @@ private:
   transfer_tokenized(uint64_t address, Span bytes, std::size_t &completed_bytes,
                      VmTransferToken &token, VmAccessKind access, bool allow_deferred,
                      const VmTransferMaintenance &maintenance, const VmTransferIngress &ingress,
-                     const VmPrivateUcGttCopySource &copy_source) const;
+                     const VmPrivateUcGttCopySource &copy_source,
+                     GpuVmTransferBatch *batch = nullptr) const;
 
   AddressSpaceHandle address_space_;
   AddressSpaceInfo info_;

@@ -53,7 +53,7 @@ struct SubmitError {
 #[derive(Clone, Copy)]
 struct ImportOrigin<'a> {
     /// Native connection queried for the DMA-BUF's placement.
-    kfd: &'a super::sys::Kfd,
+    kfd: &'a super::connection::Kfd,
     /// Maps a native GPU ID to an activated endpoint identity.
     endpoint_id: &'a dyn Fn(u32) -> Option<[u8; 16]>,
 }
@@ -339,7 +339,7 @@ impl KfdVirtualAddress {
         Ok(())
     }
 
-    fn check(&self) -> Result<(), Error> {
+    pub(super) fn check(&self) -> Result<(), Error> {
         let Some(reservation) = self.reservation.as_ref() else {
             return Err(error(
                 ErrorKind::InvalidArgument,
@@ -565,7 +565,7 @@ impl KfdVirtualMemory {
 
     pub(super) fn import_with_kfd(
         descriptor: i32,
-        kfd: &super::sys::Kfd,
+        kfd: &super::connection::Kfd,
         endpoint_id: impl Fn(u32) -> Option<[u8; 16]>,
     ) -> Result<Owned<Self>, Error> {
         Self::import_impl(

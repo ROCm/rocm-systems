@@ -71,6 +71,16 @@ class WorkflowsMatchConfigs(unittest.TestCase):
             if required is not None:
                 self.assertEqual(int(leg["nodes"]), required, leg)
 
+    def test_schedule_matches_the_job_that_runs_it(self):
+        jobs = load_workflow("therock-rccl-ci-linux.yml")["jobs"]
+        nightly = jobs["therock-test-madengine"]["with"]["workload"]
+        weekly = [e["workload"] for e in
+                  jobs["therock-test-madengine-weekly"]["strategy"]["matrix"]["include"]]
+        self.assertEqual(tm.WORKLOAD_CONFIGS[nightly]["schedule"], "nightly")
+        for workload in weekly:
+            self.assertEqual(tm.WORKLOAD_CONFIGS[workload]["schedule"], "weekly", workload)
+        self.assertEqual(sorted([nightly, *weekly]), sorted(tm.WORKLOAD_CONFIGS))
+
     def test_job_budget_covers_time_limit(self):
         for leg in madengine_legs():
             config = tm.WORKLOAD_CONFIGS[leg["workload"]]

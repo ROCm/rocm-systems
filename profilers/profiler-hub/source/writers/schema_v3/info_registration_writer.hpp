@@ -12,7 +12,7 @@
 
 #include "common/string_conversions.hpp"
 #include "debug.hpp"
-#include "profiler-hub/writer_types.hpp"
+#include "profiler-hub/cpp/writer_types.hpp"
 
 #include <memory>
 #include <optional>
