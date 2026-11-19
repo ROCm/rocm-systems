@@ -590,7 +590,7 @@ protected:
     PluginSinkConfig sink_config;
     sink = &sink_config.emplace<StringSink>();
     fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
-    auto race_plugin = std::make_unique<RaceDetectorPlugin>();
+    auto race_plugin = std::make_unique<RaceDetectorPlugin>(R"({"lds_waw":true})");
     plugin = race_plugin.get();
     ASSERT_TRUE(fixture.plugin_group_->add(std::move(race_plugin)));
     fixture.soc->set_plugin_group(fixture.plugin_group_);
@@ -909,8 +909,10 @@ TEST(RaceDetectorPluginTest, LdsWawOptionControlsOnlyLdsWriteWriteReports) {
     const char *json;
     bool enabled;
   };
-  constexpr Config configs[] = {{nullptr, true},
-                                {"{}", true},
+  constexpr Config configs[] = {{nullptr, false},
+                                {"", false},
+                                {"{}", false},
+                                {R"({"trace_context":2})", false},
                                 {R"({"lds_waw":true})", true},
                                 {R"({"lds_waw":false})", false},
                                 {R"({"lds_waw":false,"trace_context":2})", false}};

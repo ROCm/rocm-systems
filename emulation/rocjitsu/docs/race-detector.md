@@ -263,21 +263,25 @@ races. Some examples:
 
 ## LDS write-after-write reporting
 
-LDS write-after-write checking is enabled by default. An instruction that
-writes bytes also written by an unordered memory instruction is reported at
-the later write, including when the values are identical or no later
+LDS write-after-write checking is off by default because the current check
+does not compare stored values. It reports unordered overlapping writes even
+when both write identical bytes, so their order does not change the value
+left in LDS. We intend to add value-aware filtering for this case in a
+follow-up.
+
+When enabled, an instruction that writes bytes also written by an unordered
+memory instruction is reported at the later write, even if no later
 instruction reads those bytes. The check uses the existing LDS ordering,
 wait and barrier rules, including the exemption for matching LDS atomics.
-
-For workloads where these reports are unhelpful, disable only LDS
-write-after-write checking with:
+Enable LDS write-after-write checking with:
 
 ```json
-{ "plugins": { "race": { "lds_waw": false } } }
+{ "plugins": { "race": { "lds_waw": true } } }
 ```
 
 LDS read-after-write and write-after-read checks and register race checks
-remain enabled. The detector continues tracking LDS writes for those checks.
+remain enabled regardless of this option. The detector continues tracking
+LDS writes for those checks.
 
 ## What this plugin detects
 
@@ -813,12 +817,13 @@ this source tree. The original
 - **Limited WAW detection**: VGPR WAW covers instruction writes and
   asynchronous memory writes that overlap a pending load. Scalar-register WAW
   covers instruction writes and scalar loads that overlap pending scalar-memory
-  destinations. LDS WAW is reported under the rules for LDS reads: an earlier
-  write of another wave must be waited for and followed by a barrier, and an
-  earlier write of the same wave must be waited for or share an in-order
-  completion class with the later write. Overlapping lanes within a single
-  instruction are not checked against each other. See LDS write-after-write
-  reporting above for the reporting policy and the `lds_waw` option.
+  destinations. When enabled, LDS WAW is reported under the rules for LDS
+  reads: an earlier write of another wave must be waited for and followed by
+  a barrier, and an earlier write of the same wave must be waited for or share
+  an in-order completion class with the later write. Overlapping lanes within
+  a single instruction are not checked against each other. See LDS
+  write-after-write reporting above for the reporting policy and the
+  `lds_waw` option.
 
 - **Embedded waits**: the race detector applies the VINTERP EXPCNT threshold before
   checking its VGPR sources on GFX11, GFX11.5 and GFX12. A threshold of 7 leaves

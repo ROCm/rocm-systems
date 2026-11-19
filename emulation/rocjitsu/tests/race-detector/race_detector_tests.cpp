@@ -238,7 +238,8 @@ TEST(RaceDetector, LdsValidationRejectsNegativeAndOverflowingRanges) {
   std::vector<RaceViolation> violations;
   RaceDetector detector(
       2, 8, 8, Dim3d(0), [&](RaceViolation v) { violations.push_back(v); },
-      counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5), /*ldsSizeBytes=*/64 * 1024);
+      counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5), /*ldsSizeBytes=*/64 * 1024,
+      /*checkLdsWaw=*/true);
   for (const auto type : {MemoryEventType::LDS_TO_VGPR, MemoryEventType::VGPR_TO_LDS}) {
     IntervalSet intervals;
     intervals.append(64, 68);
@@ -373,7 +374,8 @@ TEST(RaceDetector, LdsCounterAccountingIgnoresNegativeIntervals) {
     std::vector<RaceViolation> violations;
     RaceDetector detector(
         2, 8, 8, Dim3d(0), [&](RaceViolation v) { violations.push_back(v); },
-        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5), /*ldsSizeBytes=*/64 * 1024);
+        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5), /*ldsSizeBytes=*/64 * 1024,
+        /*checkLdsWaw=*/true);
     IntervalSet intervals;
     intervals.append(std::numeric_limits<int>::min() + 64, std::numeric_limits<int>::min() + 68);
     intervals.append(64, 68);

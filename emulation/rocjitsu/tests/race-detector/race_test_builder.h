@@ -28,6 +28,7 @@ namespace rocjitsu::plugins::race_detector {
 
 class RaceTestBuilder {
 public:
+  // Enable LDS WAW by default here so core tests exercise all race checks.
   RaceTestBuilder(
       int numWaves, int vgprs, int sgprs, int waveSize = 64, Dim3d wgId = Dim3d(0),
       CounterCapacities counterCapacities = counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4),

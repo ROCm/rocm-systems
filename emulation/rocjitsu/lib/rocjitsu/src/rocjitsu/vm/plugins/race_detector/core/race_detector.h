@@ -65,7 +65,7 @@ public:
   /// checkLdsWaw controls only LDS write-after-write reporting.
   RaceDetector(int nWaves, int vgprCount, int sgprCount, Dim3d workgroupId,
                std::function<void(RaceViolation)> raceHandler, CounterCapacities,
-               size_t ldsSizeBytes, bool checkLdsWaw = true);
+               size_t ldsSizeBytes, bool checkLdsWaw = false);
 
   /// Allocate an event using the counter and ordering implied by its type.
   EventId allocateEventId(WaveId wave, InstructionSnapshot instruction, MemoryEventType type,
@@ -118,8 +118,8 @@ public:
   /// @brief Check for WAR and WAW hazards against outstanding LDS accesses.
   /// @details Same-wave accesses are ordered when the earlier LDS access has
   /// completed or both accesses belong to the same non-UNORDERED completion class.
-  /// WAW is reported at the write, independent of values or later reads, unless
-  /// disabled by checkLdsWaw at construction.
+  /// If checkLdsWaw is enabled at construction, WAW is reported at the write,
+  /// independent of values or later reads.
   void validateWrite(int addr, WaveId, int lane, int nBytes,
                      MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS,
                      uint8_t atomicBytes = 0) const;
