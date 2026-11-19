@@ -20,6 +20,9 @@
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/cwsr.h"
 #include "rocjitsu/kmd/linux/kfd_topology.h"
+#include "rocjitsu/kmd/linux/libc_passthrough.h"
+#include "rocjitsu/kmd/linux/memory_backing.h"
+#include "rocjitsu/kmd/linux/memory_keeper.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device.h"
@@ -47,6 +50,7 @@ RJ_DIAGNOSTIC_POP
 #include <limits>
 #include <sstream>
 #include <string>
+#include <unistd.h>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -289,8 +293,9 @@ TEST(SysfsTopologyTest, RejectsCuLdsCapacityBeyondAdvertisedCwsrBound) {
   EXPECT_TRUE(loaded.failed());
   EXPECT_EQ(diagnostic.message(), "CWSR CU LDS capacity exceeds advertised device LDS capacity");
 
-  test::ScopedTempFile file("rocjitsu-cwsr-config-");
-  file.write(config);
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rocjitsu-cwsr-config-"));
+  ASSERT_TRUE(file.write(config));
   util::StringDiagnostic validate_diagnostic;
   EXPECT_TRUE(config::validate_config(file.path(), kEmbeddedSchema, validate_diagnostic.emitter())
                   .failed());
@@ -314,8 +319,9 @@ TEST(SysfsTopologyTest, RejectsCuWaveSlotsBeyondAdvertisedCwsrBound) {
   EXPECT_TRUE(loaded.failed());
   EXPECT_EQ(diagnostic.message(), "CWSR CU wave slots exceed advertised device wave capacity");
 
-  test::ScopedTempFile file("rocjitsu-cwsr-config-");
-  file.write(config);
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rocjitsu-cwsr-config-"));
+  ASSERT_TRUE(file.write(config));
   util::StringDiagnostic validate_diagnostic;
   EXPECT_TRUE(config::validate_config(file.path(), kEmbeddedSchema, validate_diagnostic.emitter())
                   .failed());
@@ -342,8 +348,9 @@ TEST(SysfsTopologyTest, RejectsCuCountBeyondAdvertisedCwsrBound) {
   EXPECT_TRUE(loaded.failed());
   EXPECT_EQ(diagnostic.message(), "CWSR CU count exceeds advertised device CU capacity");
 
-  test::ScopedTempFile file("rocjitsu-cwsr-config-");
-  file.write(config);
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rocjitsu-cwsr-config-"));
+  ASSERT_TRUE(file.write(config));
   util::StringDiagnostic validate_diagnostic;
   EXPECT_TRUE(config::validate_config(file.path(), kEmbeddedSchema, validate_diagnostic.emitter())
                   .failed());
@@ -384,6 +391,56 @@ TEST(SysfsTopologyTest, LegacyMultiGpuTopologyKeepsPeerLinks) {
     EXPECT_TRUE(std::filesystem::exists(path / "io_links" / "1" / "properties"));
     EXPECT_TRUE(std::filesystem::exists(path / "p2p_links" / "0" / "properties"));
   }
+}
+
+void check_topology_batching() {
+  ASSERT_EQ(prepare_memory_keeper(), 0);
+  static unsigned connections = 0;
+  static size_t inline_files = 0;
+  static std::vector<size_t> flush_sizes;
+  LibcPassthrough &libc = libc_passthrough();
+  libc.connect = [](int socket, const sockaddr *address, socklen_t length) {
+    ++connections;
+    return ::connect(socket, address, length);
+  };
+  libc.sendmsg = [](int socket, const msghdr *message, int flags) {
+    const ssize_t sent = ::sendmsg(socket, message, flags);
+    if (sent >= 0 && message->msg_iovlen &&
+        message->msg_iov[0].iov_len == sizeof(kmd::KeeperRequest)) {
+      const auto &request = *static_cast<const kmd::KeeperRequest *>(message->msg_iov[0].iov_base);
+      if (request.operation == kmd::KeeperOperation::BatchFile &&
+          request.size <= kmd::kKeeperInlineFileSize)
+        ++inline_files;
+      else if (request.operation == kmd::KeeperOperation::FlushFiles)
+        flush_sizes.push_back(request.size);
+    }
+    return sent;
+  };
+
+  const Sysfs::GpuInfo first = make_gpu_info(120500);
+  Sysfs::GpuInfo second = first;
+  second.gpu_id = 2;
+  second.drm_render_minor = 129;
+  Sysfs sysfs;
+  ASSERT_FALSE(sysfs.generate({first, second}).empty());
+  EXPECT_EQ(connections, 1u);
+  ASSERT_GT(inline_files, kmd::kKeeperMaxBatchFiles);
+  for (size_t count : flush_sizes) {
+    const size_t expected = std::min(inline_files, kmd::kKeeperMaxBatchFiles);
+    ASSERT_GT(expected, 0u);
+    EXPECT_EQ(count, expected);
+    inline_files -= expected;
+  }
+  EXPECT_EQ(inline_files, 0u);
+}
+
+TEST(SysfsTopologyDeathTest, MultiGpuTopologyBatchesNonemptyFilesOnOneConnection) {
+  ASSERT_EXIT(
+      {
+        check_topology_batching();
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
 }
 
 TEST(SysfsTopologyTest, W7900PublishesComputeIpDiscoveryVersions) {
@@ -943,7 +1000,8 @@ TEST(SysfsTopologyGeometryTest, ShippedConfigsMatchTheSimulatedSoC) {
     SCOPED_TRACE(name);
 
     config::LoadedConfig loaded;
-    if (name == "gfx1250_mi455x_kmd_2node_net.json") {
+    if (name == "gfx1250_mi455x_kmd_2node_net.json" ||
+        name == "gfx1250_mi455x_kmd_4node_2gpu_if.json") {
       ASSERT_TRUE(test::load_valid_config_for_node(entry.path().string(), loaded, "node0"));
     } else {
       ASSERT_TRUE(test::load_valid_config(entry.path().string(), loaded));

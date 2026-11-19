@@ -3,6 +3,8 @@
 
 #include "rocjitsu/vm/amdgpu/pci/vram_store.h"
 
+#include "rocjitsu/vm/canonical_backing_id.h"
+
 #include "util/log.h"
 
 #include <fcntl.h>
@@ -59,7 +61,9 @@ VramStore::VramStore(const std::string &name, uint64_t bytes, uint64_t aperture_
     mapping_ = nullptr;
     ::close(fd_);
     fd_ = -1;
+    return;
   }
+  backing_id_ = allocate_canonical_backing_id();
 }
 
 VramStore::~VramStore() {

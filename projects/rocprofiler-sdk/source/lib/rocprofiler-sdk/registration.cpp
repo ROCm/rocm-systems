@@ -1208,25 +1208,25 @@ finalize()
     if(get_fini_status() > 0) __gcov_dump();
 #endif
 
-    if(get_fini_status() != 0)
+    if(get_fini_status() > 0)
     {
         ROCP_INFO << "ignoring finalization request (value=" << get_fini_status() << ")";
         return;
     }
 
-    static auto _sync = std::atomic_flag{};
-    if(_sync.test_and_set())
+    static thread_local bool _finalizing = false;
+    if(_finalizing)
     {
-        ROCP_INFO << "ignoring finalization request [already finalized] (value="
-                  << get_fini_status() << ")";
+        ROCP_INFO << "ignoring re-entrant finalization request (value=" << get_fini_status() << ")";
         return;
     }
-    // above returns true for all invocations after the first one
 
     ROCP_INFO << "finalizing rocprofiler (value=" << get_fini_status() << ")";
 
     static auto _once = std::once_flag{};
     std::call_once(_once, []() {
+        auto finalizing_scope =
+            common::scope_destructor{[]() { _finalizing = false; }, []() { _finalizing = true; }};
         auto num_clients = get_num_clients();
         set_fini_status(-1);
 

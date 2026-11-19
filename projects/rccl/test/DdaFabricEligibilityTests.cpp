@@ -1951,7 +1951,10 @@ TEST_F(DdaFabricEligibilityTest, Fp8DispatchReachesTypedLauncher)
     expectDdaLaunches(
         {
             {"AllGather", ddaLaunchIgnoringOp<ncclAllGatherDdaFabric>},
-            {"AllReduce", ncclAllReduceDdaFabric},
+            {"AllReduce",
+             [](const void* s, void* r, size_t n, ncclDataType_t t, ncclRedOp_t o, ncclComm* c, hipStream_t st) {
+                 return ncclAllReduceDdaFabric(s, r, n, t, o, c, st);
+             }},
             {"AlltoAll", ddaLaunchIgnoringOp<ncclAllToAllDdaFabric>},
             {"ReduceScatter", ncclReduceScatterDdaFabric},
         },

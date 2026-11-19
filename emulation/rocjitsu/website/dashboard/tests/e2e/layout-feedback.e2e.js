@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { expectRunPicker } from './helpers/runPicker.js';
 import { expectNoDocumentOverflow, openDashboard } from './helpers/dashboard.js';
 
 for (const width of [1440, 390]) {
@@ -36,9 +37,9 @@ test('comparison displays candidate before baseline without swapping the selecte
   const candidate = page.getByRole('combobox', { name: 'Candidate run', exact: true });
   const baseline = page.getByRole('combobox', { name: 'Baseline run', exact: true });
   expect((await candidate.boundingBox()).x).toBeLessThan((await baseline.boundingBox()).x);
-  await expect(page.getByTestId('candidate-run-selected-identity')).toContainText('fictional-branch-01');
-  await expect(page.getByTestId('baseline-run-selected-identity')).toContainText('fictional-develop-20');
+  await expectRunPicker(page, 'candidate-run', 'fictional-branch-01');
+  await expectRunPicker(page, 'baseline-run', 'fictional-develop-20');
   await page.getByRole('button', { name: 'Swap', exact: true }).click();
-  await expect(page.getByTestId('candidate-run-selected-identity')).toContainText('fictional-develop-20');
-  await expect(page.getByTestId('baseline-run-selected-identity')).toContainText('fictional-branch-01');
+  await expectRunPicker(page, 'candidate-run', 'fictional-develop-20');
+  await expectRunPicker(page, 'baseline-run', 'fictional-branch-01');
 });

@@ -4,12 +4,20 @@
 //! Signal waits, groups, retained wait registrations, and timeout clocks.
 
 use super::*;
-use crate::api::signal::wait::hsa_amd_signal_wait_any;
 
 /// Time spent spinning before a blocked wait yields the CPU.
 const BLOCKED_SPIN_BUDGET: Duration = Duration::from_micros(200);
-/// Cached system clock frequency in hertz for timeout conversion.
-static SYSTEM_FREQUENCY_HZ: AtomicU64 = AtomicU64::new(0);
+#[cfg(test)]
+thread_local! {
+    /// Pauses one single-signal wait after admission and before its first read.
+    static AFTER_WAIT_ADMISSION: std::cell::RefCell<Option<(Sender<()>, Receiver<()>)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn pause_after_wait_admission(entered: Sender<()>, release: Receiver<()>) {
+    AFTER_WAIT_ADMISSION.with(|slot| *slot.borrow_mut() = Some((entered, release)));
+}
 
 #[cfg(test)]
 thread_local! {
@@ -21,46 +29,6 @@ thread_local! {
 #[cfg(test)]
 pub(crate) fn notify_first_unsatisfied_poll(sender: Sender<()>) {
     FIRST_UNSATISFIED_POLL.with(|slot| *slot.borrow_mut() = Some(sender));
-}
-
-/// Caches the frequency reported by native system clock discovery.
-pub(crate) fn set_system_frequency(frequency: u64) {
-    SYSTEM_FREQUENCY_HZ.store(frequency, Ordering::Release);
-}
-
-/// Returns the system-clock frequency used for timeout conversion.
-fn system_frequency() -> u64 {
-    let cached = SYSTEM_FREQUENCY_HZ.load(Ordering::Acquire);
-    if cached != 0 {
-        return cached;
-    }
-    let retained = lock().ok().and_then(|guard| {
-        let generation = guard.active_generation()?;
-        let runtime = guard.as_ref()?;
-        let gpu = runtime.gpus.first()?;
-        let token = runtime.inflight.enter()?;
-        Some((gpu.device.clone(), generation, token))
-    });
-    let Some((device, generation, _call)) = retained else {
-        return 0;
-    };
-    let frequency = crate::runtime::clock_counters(&device)
-        .ok()
-        .map_or(0, |counters| counters.system_frequency);
-    if frequency == 0 {
-        return 0;
-    }
-    // Shutdown can clear the cache while the ioctl runs. Publish only while
-    // the runtime generation that started the query is still active.
-    let Ok(guard) = lock() else {
-        return 0;
-    };
-    if guard.active_generation() == Some(generation) {
-        SYSTEM_FREQUENCY_HZ.store(frequency, Ordering::Release);
-        frequency
-    } else {
-        0
-    }
 }
 
 /// Checks whether an HSA timeout hint has elapsed.
@@ -83,85 +51,94 @@ pub(crate) unsafe fn signal_wait(
     // Keep the generation alive for the complete wait. The blocking path
     // observes stop_workers and releases its retained slot before this drops.
     // Publish the lease so nested slot reads still enter after final closure.
-    let Some(call) = crate::runtime::enter_public_raw_handle() else {
+    let Some(call) = crate::admission::enter_public_raw_handle() else {
         return 0;
     };
-    let _lease_scope = crate::runtime::ApiLeaseScope::enter(call);
-    let (generation, observed) = {
-        let handles = WAIT_SIGNAL_HANDLES
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let Some(&generation) = handles.get(&(signal.handle as usize)) else {
-            drop(handles);
-            // Unit tests exercise raw signal entry points with stack-owned
-            // slots and no published runtime generation.
-            #[cfg(test)]
-            if lock().is_ok_and(|guard| guard.as_ref().is_none()) {
-                return unsafe { with_public_signal(signal, |slot| slot.value.load(order)) }
-                    .unwrap_or(0);
+    crate::admission::ApiLeaseScope::run(call, || {
+        #[cfg(test)]
+        AFTER_WAIT_ADMISSION.with(|slot| {
+            let hook = slot.borrow_mut().take();
+            if let Some((entered, release)) = hook {
+                let _ = entered.send(());
+                let _ = release.recv();
             }
-            return 0;
+        });
+        let (generation, observed) = {
+            let handles = WAIT_SIGNAL_HANDLES
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let Some(&generation) = handles.get(&(signal.handle as usize)) else {
+                drop(handles);
+                // Unit tests exercise raw signal entry points with stack-owned
+                // slots and no published runtime generation.
+                #[cfg(test)]
+                if lock().is_ok_and(|guard| guard.as_ref().is_none()) {
+                    return unsafe { with_public_signal(signal, |slot| slot.value.load(order)) }
+                        .unwrap_or(0);
+                }
+                return 0;
+            };
+            // SAFETY: The registry read lock excludes destruction and storage
+            // release through the entire atomic load. The raw gate excludes
+            // generation teardown while the slot is read.
+            (
+                generation,
+                unsafe { with_public_signal(signal, |slot| slot.value.load(order)) }.unwrap_or(0),
+            )
         };
-        // SAFETY: The registry read lock excludes destruction and storage
-        // release through the entire atomic load. The raw gate excludes
-        // generation teardown while the slot is read.
-        (
-            generation,
-            unsafe { with_public_signal(signal, |slot| slot.value.load(order)) }.unwrap_or(0),
+        if condition_met(condition, observed, compare_value) {
+            return observed;
+        }
+        if timeout_hint == 0 {
+            return observed;
+        }
+        let mut guard = match lock() {
+            Ok(guard) => guard,
+            Err(_) => return observed,
+        };
+        let Some(runtime) = guard.as_mut() else {
+            return observed;
+        };
+        if !runtime.signal_state.owns_signal(signal) {
+            return observed;
+        }
+        // A destroyed slab slot may already have been recycled at the same raw
+        // address. Do not turn this wait into one for the new signal lifetime.
+        if WAIT_SIGNAL_HANDLES
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&(signal.handle as usize))
+            .copied()
+            != Some(generation)
+        {
+            return observed;
+        }
+        // SAFETY: The runtime lock now prevents destruction until the per-slot
+        // reference and in-flight token have been acquired for the blocking path.
+        let Some(registration) = (unsafe { prepare_multi_wait(runtime, &[signal]) }) else {
+            return observed;
+        };
+        drop(guard);
+        let Some(entry) = registration.entries.first() else {
+            return observed;
+        };
+        let Some(pointer) = entry.signal else {
+            return observed;
+        };
+        // SAFETY: The registration retains this slot through signal_wait_open.
+        signal_wait_open(
+            unsafe { pointer.as_ref() },
+            entry.retired.as_deref(),
+            &registration.stop,
+            SignalWaitConfig {
+                condition,
+                compare_value,
+                timeout_hint,
+                wait_state_hint,
+                order,
+            },
         )
-    };
-    if condition_met(condition, observed, compare_value) {
-        return observed;
-    }
-    if timeout_hint == 0 {
-        return observed;
-    }
-    let mut guard = match lock() {
-        Ok(guard) => guard,
-        Err(_) => return observed,
-    };
-    let Some(runtime) = guard.as_mut() else {
-        return observed;
-    };
-    if !runtime.signal_state.owns_signal(signal) {
-        return observed;
-    }
-    // A destroyed slab slot may already have been recycled at the same raw
-    // address. Do not turn this wait into one for the new signal lifetime.
-    if WAIT_SIGNAL_HANDLES
-        .read()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .get(&(signal.handle as usize))
-        .copied()
-        != Some(generation)
-    {
-        return observed;
-    }
-    // SAFETY: The runtime lock now prevents destruction until the per-slot
-    // reference and in-flight token have been acquired for the blocking path.
-    let Some(registration) = (unsafe { prepare_multi_wait(runtime, &[signal]) }) else {
-        return observed;
-    };
-    drop(guard);
-    let Some(entry) = registration.entries.first() else {
-        return observed;
-    };
-    let Some(pointer) = entry.signal else {
-        return observed;
-    };
-    // SAFETY: The registration retains this slot through signal_wait_open.
-    signal_wait_open(
-        unsafe { pointer.as_ref() },
-        entry.retired.as_deref(),
-        &registration.stop,
-        SignalWaitConfig {
-            condition,
-            compare_value,
-            timeout_hint,
-            wait_state_hint,
-            order,
-        },
-    )
+    })
 }
 
 /// Inputs that stay fixed while one signal wait polls a retained slot.
@@ -187,7 +164,7 @@ pub(crate) fn signal_wait_open(
     config: SignalWaitConfig,
 ) -> SignalValue {
     let start = Instant::now();
-    let frequency = system_frequency();
+    let frequency = rocddi::host::clock::info().frequency_hz;
     loop {
         let observed = signal.value.load(config.order);
         if stop.load(Ordering::Acquire)
@@ -211,12 +188,12 @@ pub(crate) unsafe fn signal_group_wait_any(
     signal: *mut HsaSignal,
     value: *mut SignalValue,
 ) -> Status {
-    let signals = {
-        let guard = match lock() {
+    let prepared = {
+        let mut guard = match lock() {
             Ok(guard) => guard,
             Err(status) => return status,
         };
-        let Some(runtime) = guard.as_ref() else {
+        let Some(runtime) = guard.as_mut() else {
             return NOT_INITIALIZED;
         };
         if conditions.is_null() || compare_values.is_null() || signal.is_null() || value.is_null() {
@@ -225,26 +202,33 @@ pub(crate) unsafe fn signal_group_wait_any(
         let Some(signals) = runtime.signal_state.signal_groups.get(&group.handle) else {
             return INVALID_SIGNAL_GROUP;
         };
-        signals.clone()
+        // SAFETY: The caller supplies one condition/value for every signal in
+        // the group. Copy the arrays before any result can alias their storage.
+        let Some(inputs) = (unsafe {
+            signal_wait_inputs(
+                signals.len() as u32,
+                signals.as_ptr(),
+                conditions,
+                compare_values,
+            )
+        }) else {
+            return INVALID_ARGUMENT;
+        };
+        // SAFETY: The registry lock covers validation and signal retention.
+        let Some(prepared) = (unsafe { inputs.prepare(runtime) }) else {
+            return INVALID_ARGUMENT;
+        };
+        prepared
     };
-    // SAFETY: The group retains signals.len() handles and the caller supplies
-    // matching condition/value arrays and writable outputs.
-    let index = unsafe {
-        hsa_amd_signal_wait_any(
-            signals.len() as u32,
-            signals.as_ptr(),
-            conditions,
-            compare_values,
-            u64::MAX,
-            wait_state_hint,
-            value,
-        )
-    };
-    let Some(satisfied) = signals.get(index as usize) else {
+    let Some(satisfied) = prepared.wait_any(u64::MAX, wait_state_hint) else {
         return INVALID_ARGUMENT;
     };
-    // SAFETY: The caller supplied writable output storage.
-    unsafe { signal.write(*satisfied) };
+    // SAFETY: The caller supplied writable result storage; input snapshots no
+    // longer borrow those addresses.
+    unsafe {
+        value.write(satisfied.value);
+        signal.write(satisfied.signal);
+    }
     SUCCESS
 }
 
@@ -256,6 +240,77 @@ pub(crate) struct WaitInputs {
     pub(crate) conditions: Vec<u32>,
     /// Comparison value for each signal.
     pub(crate) values: Vec<SignalValue>,
+}
+
+/// A wait owns both its input snapshot and the matching signal registrations.
+pub(crate) struct PreparedWait {
+    /// Immutable arrays keep each condition paired with its retained signal.
+    inputs: WaitInputs,
+    /// Signals and generation stay live until polling completes.
+    registration: WaitRegistration,
+}
+
+/// The signal and value that satisfied one retained wait.
+pub(crate) struct SatisfiedSignal {
+    /// Original input position, including skipped invalid handles.
+    pub(crate) index: u32,
+    /// Handle retained by the wait while its value was observed.
+    pub(crate) signal: HsaSignal,
+    /// Observed value satisfying the corresponding condition.
+    pub(crate) value: SignalValue,
+}
+
+impl WaitInputs {
+    /// Retains matching signals for a wait that can leave the registry lock.
+    ///
+    /// # Safety
+    /// The caller holds the process HSA registry lock until preparation returns.
+    pub(crate) unsafe fn prepare(self, runtime: &mut HsaSession) -> Option<PreparedWait> {
+        if self.signals.len() != self.conditions.len() || self.signals.len() != self.values.len() {
+            return None;
+        }
+        // SAFETY: Exclusive runtime access protects each validated signal until
+        // registration takes its own reference and in-flight generation lease.
+        let registration = unsafe { prepare_multi_wait(runtime, &self.signals) }?;
+        Some(PreparedWait {
+            inputs: self,
+            registration,
+        })
+    }
+}
+
+impl PreparedWait {
+    /// Polls retained signals without holding the HSA registry lock or exposing
+    /// foreign output pointers to the wait mechanism.
+    pub(crate) fn wait_any(
+        &self,
+        timeout_hint: u64,
+        wait_state_hint: u32,
+    ) -> Option<SatisfiedSignal> {
+        let mut value = 0;
+        // SAFETY: The registration retains every signal slot through this call,
+        // input lengths match, and the stack result is writable.
+        let index = unsafe {
+            signal_wait_any_open(
+                &self.registration.entries,
+                &self.inputs.conditions,
+                &self.inputs.values,
+                timeout_hint,
+                wait_state_hint,
+                &raw mut value,
+                &self.registration.stop,
+            )
+        };
+        self.inputs
+            .signals
+            .get(index as usize)
+            .copied()
+            .map(|signal| SatisfiedSignal {
+                index,
+                signal,
+                value,
+            })
+    }
 }
 
 /// Copies wait input after validating its source and destination.
@@ -348,7 +403,7 @@ impl Drop for WaitRegistration {
 }
 
 /// Releases the retained wait entries reference.
-fn release_wait_entries(runtime: &mut HsaState, entries: &mut [WaitEntry]) {
+fn release_wait_entries(runtime: &mut HsaSession, entries: &mut [WaitEntry]) {
     for entry in entries {
         if entry.retained {
             entry.signal = None;
@@ -363,10 +418,10 @@ fn release_wait_entries(runtime: &mut HsaState, entries: &mut [WaitEntry]) {
 /// The caller must hold the runtime registry lock until every accepted signal
 /// is retained, and must keep the returned registration alive through the wait.
 pub(crate) unsafe fn prepare_multi_wait(
-    runtime: &mut HsaState,
+    runtime: &mut HsaSession,
     handles: &[HsaSignal],
 ) -> Option<WaitRegistration> {
-    let token = runtime.inflight.enter()?;
+    let token = runtime.control.inflight.enter()?;
     // SAFETY: The runtime lock protects every accepted handle while its
     // storage reference is acquired, and the references are retained below.
     let mut entries =
@@ -394,7 +449,7 @@ pub(crate) unsafe fn prepare_multi_wait(
     Some(WaitRegistration {
         entries,
         _token: token,
-        stop: runtime.stop_workers.clone(),
+        stop: runtime.control.operation_stop(),
     })
 }
 
@@ -440,7 +495,7 @@ pub(crate) unsafe fn signal_wait_any_open(
         return u32::MAX;
     }
     let start = std::time::Instant::now();
-    let frequency = system_frequency();
+    let frequency = rocddi::host::clock::info().frequency_hz;
     loop {
         if stop.load(Ordering::Acquire) {
             return u32::MAX;
@@ -490,7 +545,7 @@ pub(crate) unsafe fn signal_wait_all_open(
         unsafe { std::ptr::write_bytes(satisfying_values, 0, pending.len()) };
     }
     let start = std::time::Instant::now();
-    let frequency = system_frequency();
+    let frequency = rocddi::host::clock::info().frequency_hz;
     loop {
         if stop.load(Ordering::Acquire) {
             return u32::MAX;

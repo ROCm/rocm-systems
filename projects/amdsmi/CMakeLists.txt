@@ -483,6 +483,8 @@ set(CMN_SRC_LIST
     "${ROCM_SRC_DIR}/rocm_smi_board_temp.cc"
     "${ROCM_SRC_DIR}/rocm_smi_npm.cc"
     "${ROCM_SRC_DIR}/rocm_smi_ampp.cc"
+    "${ROCM_SRC_DIR}/rocm_smi_power_stabilization.cc"
+    "${PROJECT_SOURCE_DIR}/src/amd_smi/amd_smi_test_overrides.cc" # Required for both rocm-smi & amd-smi paths
 )
 
 if(ENABLE_ESMI_LIB)
@@ -520,6 +522,8 @@ add_subdirectory("src")
 
 if(BUILD_TESTS)
     set(TESTS_COMPONENT "tests")
+    # Top-level scope, so ctest works from the build root.
+    enable_testing()
     add_subdirectory("tests/amd_smi_test")
     add_subdirectory("tests/python")
 endif()

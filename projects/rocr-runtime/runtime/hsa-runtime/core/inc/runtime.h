@@ -130,6 +130,8 @@ class MemoryRegion;
 namespace core {
 extern bool g_use_interrupt_wait;
 extern bool g_use_mwaitx;
+extern bool g_use_yielding_poll;
+extern bool g_use_clflushopt;
 
 /// @brief  Runtime class provides the following functions:
 /// - open and close connection to kernel driver.
@@ -573,7 +575,11 @@ class Runtime {
       kfd_version.supports_event_age = true;
 
     if (thunkLoader()->IsDXG()) {
+#if !defined(_WIN32)
       kfd_version.supports_event_age = false;
+#else
+      kfd_version.supports_event_age = true;
+#endif
     }
 
     kfd_version.supports_metadata_prefetch = false;
@@ -1136,11 +1142,6 @@ class Runtime {
     MemoryRegion::AllocateFlags alloc_flag;
     core::Agent* drm_owner;  // Gpu agent used for import of host memory, NULL for device
                              // memory/imported handles
-
-    /* An import's placement is recovered lazily, on the first query that needs
-     * it, and then cached in region/alloc_flag/driver_handle.size. Set once the
-     * driver has been asked, so a buffer it cannot describe is not re-queried. */
-    bool import_info_queried;
   };
   // hsa_amd_vmem_alloc_handle_t (MemoryHandle*) to MemoryHandle mapping. Owns MemoryHandle
   // lifetime. Uniqueness is guaranteed by the runtime, independent of any driver-supplied
@@ -1151,10 +1152,6 @@ class Runtime {
   void ReleaseMemoryHandle(MemoryHandle* handle);
 
   const MemoryRegion* ResolveImportedRegion(const core::DmaBufInfo& info);
-
-  /// @brief Recover an imported handle's placement and size on first use, caching
-  /// the result. No-op for locally created handles and for repeat calls.
-  void EnsureImportInfo(MemoryHandle* memoryHandle);
 
   struct MappedHandle;
   struct MappedHandleAllowedAgent {

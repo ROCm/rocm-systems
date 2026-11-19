@@ -16,10 +16,10 @@ use std::sync::atomic::{AtomicPtr, AtomicU64, AtomicUsize, Ordering};
 #[test]
 fn reset_epoch_advances_once_for_observed_native_loss() {
     let epoch = AtomicU64::new(7);
-    instance::advance_reset_epoch(&epoch, 7);
-    instance::advance_reset_epoch(&epoch, 7);
+    session::advance_reset_epoch(&epoch, 7);
+    session::advance_reset_epoch(&epoch, 7);
     assert_eq!(epoch.load(Ordering::Acquire), 8);
-    instance::advance_reset_epoch(&epoch, u64::MAX);
+    session::advance_reset_epoch(&epoch, u64::MAX);
     assert_eq!(epoch.load(Ordering::Acquire), u64::MAX);
 }
 
@@ -40,28 +40,36 @@ fn reset_epoch_policy_uses_reset_evidence_and_device_identity() {
         imprecise: false,
         cause: GpuMemoryFaultCause::None,
     });
-    assert!(!instance::event_resets_device(memory_fault, endpoint_id));
+    assert!(!session::event_resets_device(
+        memory_fault,
+        endpoint_id,
+        None
+    ));
 
     let exception = GpuHardwareException {
         endpoint_id: Some(endpoint_id),
+        origin_id: None,
         scope: GpuResetScope::Other,
         memory_lost: false,
         cause: GpuResetCause::Hang,
     };
-    assert!(instance::event_resets_device(
+    assert!(session::event_resets_device(
         DeviceEvent::GpuHardwareException(exception),
-        endpoint_id
+        endpoint_id,
+        None
     ));
-    assert!(!instance::event_resets_device(
+    assert!(!session::event_resets_device(
         DeviceEvent::GpuHardwareException(exception),
-        [2; 16]
+        [2; 16],
+        None
     ));
-    assert!(instance::event_resets_device(
+    assert!(session::event_resets_device(
         DeviceEvent::GpuHardwareException(GpuHardwareException {
             memory_lost: true,
             ..exception
         }),
-        [2; 16]
+        [2; 16],
+        None
     ));
 }
 
@@ -69,19 +77,19 @@ fn reset_epoch_policy_uses_reset_evidence_and_device_identity() {
 fn sdma_format_features_follow_native_encoding_rules() {
     use rocddi::topology::GpuTargetProfile;
     assert_eq!(
-        instance::sdma_format_features(GpuTargetProfile::Gfx11, false),
+        session::sdma_format_features(GpuTargetProfile::Gfx11, false),
         0
     );
     assert_eq!(
-        instance::sdma_format_features(GpuTargetProfile::Gfx11, true),
+        session::sdma_format_features(GpuTargetProfile::Gfx11, true),
         AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR
     );
     assert_eq!(
-        instance::sdma_format_features(GpuTargetProfile::Gfx1201, true),
+        session::sdma_format_features(GpuTargetProfile::Gfx1201, true),
         AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR | AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_SYSTEM
     );
     assert_eq!(
-        instance::sdma_format_features(GpuTargetProfile::Gfx1250, false),
+        session::sdma_format_features(GpuTargetProfile::Gfx1250, false),
         AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_SYSTEM | AMDF_GPU_SDMA_FORMAT_FEATURE_MEMORY_SCOPE
     );
 }
@@ -121,7 +129,7 @@ fn negotiation_and_short_records_preserve_outputs() {
         };
         let mut owner = std::ptr::dangling_mut::<amdf_instance_t>();
         assert_eq!(
-            instance::create((&raw const short).cast(), &raw mut owner),
+            session::create((&raw const short).cast(), &raw mut owner),
             INVALID
         );
         assert_eq!(owner, std::ptr::dangling_mut());
@@ -145,8 +153,8 @@ fn busy_instance_does_not_affect_an_independent_instance() {
     // SAFETY: Each input and output remains live for its call; destruction is
     // serialized and the reservation is released before its parent instance.
     unsafe {
-        assert_eq!(instance::create(&raw const create, &raw mut first), 0);
-        assert_eq!(instance::create(&raw const create, &raw mut second), 0);
+        assert_eq!(session::create(&raw const create, &raw mut first), 0);
+        assert_eq!(session::create(&raw const create, &raw mut second), 0);
         assert_ne!(first, second);
 
         let mut caps = amdf_memory_reservation_capabilities_t {
@@ -173,7 +181,7 @@ fn busy_instance_does_not_affect_an_independent_instance() {
             reservation::create(first, &raw const reservation_create, &raw mut owner),
             0
         );
-        assert_eq!(instance::destroy(first), support::BUSY);
+        assert_eq!(session::destroy(first), support::BUSY);
 
         let mut scope = std::ptr::null_mut();
         let mut count = 0;
@@ -182,10 +190,51 @@ fn busy_instance_does_not_affect_an_independent_instance() {
             0
         );
         assert!(!scope.is_null());
-        assert_eq!(instance::destroy(second), 0);
+        assert_eq!(session::destroy(second), 0);
         assert_eq!(reservation::destroy(owner), 0);
-        assert_eq!(instance::destroy(first), 0);
+        assert_eq!(session::destroy(first), 0);
     }
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[cfg(target_os = "linux")]
+#[test]
+fn fork_child_rejects_inherited_instance_before_its_mutex() {
+    let mut pointer = std::ptr::null_mut();
+    // SAFETY: The descriptor and output slot remain live for instance creation.
+    assert_eq!(
+        unsafe { session::create(&parameters(), &raw mut pointer) },
+        0
+    );
+    // SAFETY: The public instance remains live until its serialized destroy.
+    let owner = unsafe { &*pointer.cast::<session::AmdfSession>() };
+    let held = owner.host_backing_head.lock().unwrap();
+    // SAFETY: The child makes only guarded ABI calls and uses _exit instead
+    // of running destructors that could enter inherited locks.
+    let child = unsafe { libc::syscall(libc::SYS_fork) };
+    assert!(child >= 0);
+    if child == 0 {
+        // SAFETY: Bound a regression if a call enters the inherited mutex.
+        unsafe { libc::alarm(3) };
+        let mut count = 0;
+        // SAFETY: The inherited handle is still addressable but cannot be
+        // used for stateful AMDF work in the child process.
+        let rejected = unsafe {
+            session::enumerate(pointer, 0, std::ptr::null_mut(), &raw mut count)
+                == support::PRECONDITION
+                && session::destroy(pointer) == support::PRECONDITION
+        };
+        // SAFETY: _exit leaves the copied parent ownership graph untouched.
+        unsafe { libc::_exit(i32::from(!rejected)) }
+    }
+    let pid = i32::try_from(child).unwrap();
+    let mut status = 0;
+    // SAFETY: This waits only for the child created above.
+    assert_eq!(unsafe { libc::waitpid(pid, &raw mut status, 0) }, pid);
+    assert_eq!(status, 0);
+    drop(held);
+    // SAFETY: The parent still owns the instance and has no live children.
+    assert_eq!(unsafe { session::destroy(pointer) }, 0);
 }
 
 #[test]
@@ -197,7 +246,7 @@ fn larger_records_keep_their_tail_and_unknown_extensions_are_rejected() {
     }
     unsafe {
         let mut instance = std::ptr::null_mut();
-        assert_eq!(instance::create(&parameters(), &raw mut instance), 0);
+        assert_eq!(session::create(&parameters(), &raw mut instance), 0);
         let mut scope = std::ptr::null_mut();
         let mut count = 0;
         assert_eq!(
@@ -223,7 +272,7 @@ fn larger_records_keep_their_tail_and_unknown_extensions_are_rejected() {
         );
         assert_eq!(extended.info.memory_profile_count, 99);
         assert_eq!(extended.tail, [0xface; 3]);
-        assert_eq!(instance::destroy(instance), 0);
+        assert_eq!(session::destroy(instance), 0);
     }
 }
 

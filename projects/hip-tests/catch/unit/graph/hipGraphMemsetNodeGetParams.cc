@@ -24,6 +24,7 @@
  * ------------------------
  *    - Verify API behaviour with invalid arguments:
  *      -# node is nullptr
+ *      -# node is not a memset node
  *      -# pNodeParams is nullptr
  *      -# node is destroyed
  * Test source
@@ -52,6 +53,13 @@ HIP_TEST_CASE(Unit_hipGraphMemsetNodeGetParams_Negative_Parameters) {
     HIP_CHECK(hipGraphCreate(&graph, 0));
     HIP_CHECK(hipGraphAddMemsetNode(&node, graph, nullptr, 0, &params));
     HIP_CHECK_ERROR(hipGraphMemsetNodeGetParams(node, nullptr), hipErrorInvalidValue);
+    HIP_CHECK(hipGraphDestroy(graph));
+  }
+
+  SECTION("node is not a memset node") {
+    HIP_CHECK(hipGraphCreate(&graph, 0));
+    HIP_CHECK(hipGraphAddEmptyNode(&node, graph, nullptr, 0));
+    HIP_CHECK_ERROR(hipGraphMemsetNodeGetParams(node, &params), hipErrorInvalidValue);
     HIP_CHECK(hipGraphDestroy(graph));
   }
 

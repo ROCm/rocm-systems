@@ -78,6 +78,7 @@ nav:
       - Python execution API: python-api.md
       - Configuration: configuration.md
       - Two-node RCCL NET smoke: rccl-scaleout.md
+      - Same-host pod RCCL gate: same-host-pod-rccl-gate.md
       - Race detection: race-detector.md
       - Native LDS ConSan: consan.md
       - GPU debugging: rocgdb-debugging.md
@@ -114,7 +115,7 @@ extra:
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu
-      name: Rocjitsu on GitHub
+      name: rocjitsu on GitHub
     - icon: material/bug-outline
       link: https://github.com/ROCm/rocm-systems/issues
       name: Report an issue

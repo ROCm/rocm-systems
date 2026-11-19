@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/exp.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/decode_factories.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/execution_backend.h"
 #include <memory>
 
@@ -30,6 +31,7 @@ ExpExp::ExpExp(const MachineInst *inst)
   num_dst_ = 1;
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::EXP);
 }
 
 namespace detail {

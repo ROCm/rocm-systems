@@ -9,8 +9,10 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <set>
+#include <utility>
 #include <vector>
 
 #include "FailWhen.h"
@@ -68,7 +70,11 @@ class FabricMemHandlerMicrotest : public FabricLedgerTest {
       *handle = HandleForDesc(desc);
       return hipSuccess;
     };
-    g_bootstrapAllGather = [this](void*, void* allData, int) {
+    g_bootstrapAllGather = [this](void*, void* allData, int size) {
+      if (size == static_cast<int>(sizeof(int))) {  // ready vote: every peer mapped its peers
+        for (int r : PeerRanks(nRanks_, rank_)) static_cast<int*>(allData)[r] = 1;
+        return ncclSuccess;
+      }
       auto* entries = static_cast<FabricExchEntry*>(allData);
       for (int r : PeerRanks(nRanks_, rank_)) {
         entries[r].desc.data = PeerDesc(r);
@@ -118,10 +124,30 @@ class FabricMemHandlerMicrotest : public FabricLedgerTest {
     return p;
   }
 
+  // HIP keeps the last error until hipGetLastError reads it.
+  void UseStickyLastError() {
+    g_hipGetLastError = [this] { return std::exchange(lastError_, hipSuccess); };
+  }
+  hipError_t Fail(hipError_t err) {
+    lastError_ = err;
+    return err;
+  }
+
+  // Calls `onVote` with the ready slots after the peers have voted.
+  void OnReadyVote(std::function<void(int*)> onVote) {
+    auto fill = g_bootstrapAllGather;
+    g_bootstrapAllGather = [fill, onVote](void* state, void* allData, int size) {
+      ncclResult_t res = fill(state, allData, size);
+      if (res == ncclSuccess && size == static_cast<int>(sizeof(int))) onVote(static_cast<int*>(allData));
+      return res;
+    };
+  }
+
   int nRanks_ = kNRanks;
   int rank_ = kRank;
   std::unique_ptr<ncclFabricMemHandler> handler_;
   std::vector<uint64_t> importedDescs_;
+  hipError_t lastError_ = hipSuccess;
 };
 
 // ---------------------------------------------------------------------------
@@ -275,16 +301,124 @@ TEST_F(FabricMemHandlerMicrotest, ExchangeMemPtrs_NoSelfMem_ReturnsInvalidUsageW
   EXPECT_EQ(gather.calls, 0);
 }
 
-TEST_F(FabricMemHandlerMicrotest, ExchangeMemPtrs_ExportFails_ReturnsCudaErrorWithoutGathering) {
+// A rank whose export fails still joins the allgather, so peers are not left
+// blocked in the collective; it publishes an empty entry even if export wrote
+// part of a descriptor, then reports the export error and imports nothing.
+TEST_F(FabricMemHandlerMicrotest, ExchangeMemPtrs_ExportFails_PublishesEmptyEntryThenReturnsCudaError) {
   ncclFabricMemHandler* h = MakeRegisteredHandler();
   ScopedHook exportHook(g_hipMemExportToShareableHandle,
-                        [](void*, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType,
-                           unsigned long long) { return hipErrorInvalidValue; });
-  ScopedHook gather(g_bootstrapAllGather, g_bootstrapAllGather);  // count only
+                        [](void* shareable, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType,
+                           unsigned long long) {
+                          static_cast<ncclCuDesc*>(shareable)->data = kSelfDesc;
+                          return hipErrorInvalidValue;
+                        });
+  auto fillPeers = g_bootstrapAllGather;
+  ScopedHook gather(g_bootstrapAllGather, [fillPeers](void* state, void* allData, int size) {
+    const auto* entries = static_cast<const FabricExchEntry*>(allData);
+    EXPECT_EQ(entries[kRank].desc.data, 0u);
+    EXPECT_EQ(entries[kRank].size, 0u);
+    return fillPeers(state, allData, size);
+  });
 
   EXPECT_EQ(h->exchangeMemPtrs(), ncclUnhandledCudaError);
 
-  EXPECT_EQ(gather.calls, 0);
+  EXPECT_EQ(gather.calls, 1);
+  EXPECT_TRUE(importedDescs_.empty());
+}
+
+// A peer that publishes a zero-size entry failed to export. This rank must
+// reject the exchange before importing, the same way the failing rank does.
+TEST_F(FabricMemHandlerMicrotest, ExchangeMemPtrs_PeerPublishesEmptyEntry_ReturnsCudaErrorWithoutImporting) {
+  ncclFabricMemHandler* h = MakeRegisteredHandler();
+  auto fillPeers = g_bootstrapAllGather;
+  constexpr int kEmptyPeer = 2;
+  ScopedHook gather(g_bootstrapAllGather, [fillPeers](void* state, void* allData, int size) {
+    ncclResult_t res = fillPeers(state, allData, size);
+    if (res != ncclSuccess) return res;
+    if (size == static_cast<int>(sizeof(FabricExchEntry))) static_cast<FabricExchEntry*>(allData)[kEmptyPeer] = {};
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(h->exchangeMemPtrs(), ncclUnhandledCudaError);
+
+  EXPECT_EQ(gather.calls, 1);
+  EXPECT_TRUE(importedDescs_.empty());
+  void* p = nullptr;
+  EXPECT_EQ(h->getPeerDeviceMemPtr(kEmptyPeer, &p), ncclInvalidUsage);
+}
+
+TEST_F(FabricMemHandlerMicrotest, ExchangeMemPtrs_AllSucceed_VotesReadyAfterImporting) {
+  ncclFabricMemHandler* h = MakeRegisteredHandler();
+  int vote = -1;
+  OnReadyVote([&vote](int* ready) { vote = ready[kRank]; });
+
+  ASSERT_EQ(h->exchangeMemPtrs(), ncclSuccess);
+
+  EXPECT_EQ(vote, 1);
+}
+
+// A rank that fails after the handle allgather still votes, so its peers fail
+// together with it instead of continuing into the next collective.
+TEST_F(FabricMemHandlerMicrotest, ExchangeMemPtrs_ImportFails_VotesNotReadyAndReturnsItsError) {
+  ncclFabricMemHandler* h = MakeRegisteredHandler();
+  ScopedHook import(g_hipMemImportFromShareableHandle, FailImportOfPeer(2));
+  int vote = -1;
+  OnReadyVote([&vote](int* ready) { vote = ready[kRank]; });
+
+  EXPECT_EQ(h->exchangeMemPtrs(), ncclUnhandledCudaError);
+
+  EXPECT_EQ(vote, 0);
+}
+
+TEST_F(FabricMemHandlerMicrotest, ExchangeMemPtrs_PeerVotesNotReady_ReturnsCudaErrorAndKeepsPeersUnavailable) {
+  ncclFabricMemHandler* h = MakeRegisteredHandler();
+  OnReadyVote([](int* ready) { ready[3] = 0; });
+
+  EXPECT_EQ(h->exchangeMemPtrs(), ncclUnhandledCudaError);
+
+  EXPECT_EQ(importedDescs_.size(), static_cast<size_t>(kNRanks - 1));
+  void* p = nullptr;
+  EXPECT_EQ(h->getPeerDeviceMemPtr(0, &p), ncclInvalidUsage);
+}
+
+// A failed hipMem* call must not leave HIP's last error set for the
+// application, since fabric setup falls back and init still succeeds.
+TEST_F(FabricMemHandlerMicrotest, ExchangeMemPtrs_ExportFails_ClearsLastError) {
+  ncclFabricMemHandler* h = MakeRegisteredHandler();
+  UseStickyLastError();
+  ScopedHook exportHook(g_hipMemExportToShareableHandle,
+                        [this](void*, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType,
+                               unsigned long long) { return Fail(hipErrorInvalidValue); });
+
+  EXPECT_EQ(h->exchangeMemPtrs(), ncclUnhandledCudaError);
+
+  EXPECT_EQ(lastError_, hipSuccess);
+}
+
+TEST_F(FabricMemHandlerMicrotest, ExchangeMemPtrs_ImportFails_ClearsLastError) {
+  ncclFabricMemHandler* h = MakeRegisteredHandler();
+  UseStickyLastError();
+  auto failPeer2 = FailImportOfPeer(2);
+  ScopedHook import(g_hipMemImportFromShareableHandle,
+                    [this, failPeer2](hipMemGenericAllocationHandle_t* handle, void* shareable,
+                                      hipMemAllocationHandleType type) {
+                      hipError_t err = failPeer2(handle, shareable, type);
+                      return err == hipSuccess ? err : Fail(err);
+                    });
+
+  EXPECT_EQ(h->exchangeMemPtrs(), ncclUnhandledCudaError);
+
+  EXPECT_EQ(lastError_, hipSuccess);
+}
+
+TEST_F(FabricMemHandlerMicrotest, ExchangeMemPtrs_ReleaseFails_ClearsLastError) {
+  ncclFabricMemHandler* h = MakeRegisteredHandler();
+  UseStickyLastError();
+  ScopedHook release(g_hipMemRelease, [this](hipMemGenericAllocationHandle_t) { return Fail(hipErrorInvalidValue); });
+
+  EXPECT_EQ(h->exchangeMemPtrs(), ncclUnhandledCudaError);
+
+  EXPECT_EQ(lastError_, hipSuccess);
 }
 
 TEST_F(FabricMemHandlerMicrotest, ExchangeMemPtrs_AllGatherFails_PropagatesErrorWithoutImporting) {

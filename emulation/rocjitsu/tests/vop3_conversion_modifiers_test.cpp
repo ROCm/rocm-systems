@@ -1,7 +1,11 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -37,6 +41,76 @@ struct ForceScalarGuard {
   bool old_force_scalar;
 };
 
+TEST(CdnaVop3ConversionTest, NarrowingHonorsSourceModifiersAndDestinationSelection) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(arch);
+    const bool cdna5_target = arch == ROCJITSU_CODE_ARCH_CDNA5;
+    amdgpu::GpuMemory memory("narrowing_memory");
+    amdgpu::L2Cache l2("narrowing_l2");
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = arch;
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = cdna5_target ? 106 : 102;
+    cfg.vgprs_per_wf = 16;
+    cfg.lds_size_kb = 64;
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(test::initialize_compute_unit(cu, "narrowing_cu", cfg, &memory, &l2));
+    auto decoder = Decoder::create(arch);
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(~uint64_t{0});
+    const uint32_t vb = wf->vgpr_alloc().base;
+    auto check = [&](uint32_t opcode, uint32_t src0, std::optional<uint32_t> src1, uint32_t abs,
+                     uint32_t neg, uint32_t opsel, uint32_t expected) {
+      SCOPED_TRACE(opcode);
+      std::array<uint32_t, 2> words{
+          (cdna5_target ? 0xd4000002u : 0xd0000002u) | (opcode << 16) | (abs << 8) | (opsel << 11),
+          256u | ((src1 ? 257u : 128u) << 9) | (128u << 18) | (neg << 29)};
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+      ASSERT_NE(inst, nullptr);
+      for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+        cu->write_vgpr(vb, lane, src0);
+        cu->write_vgpr(vb + 1, lane, src1.value_or(0));
+        cu->write_vgpr(vb + 2, lane, 0xa55af00d);
+      }
+      ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+      EXPECT_EQ(cu->read_vgpr(vb + 2, 0), expected);
+    };
+    for (bool scalar : {false, true}) {
+      ForceScalarGuard guard(scalar);
+      SCOPED_TRACE(scalar);
+      constexpr auto one = std::bit_cast<uint32_t>(1.0f);
+      constexpr auto minus_one = std::bit_cast<uint32_t>(-1.0f);
+      // The FNUZ encoding of 1 is 0x40 in both formats on CDNA3.
+      const bool fnuz = arch == ROCJITSU_CODE_ARCH_CDNA3;
+      check(cdna5_target ? cdna5::kVCvtPkFp8F32Vop3 : cdna3::kVCvtPkFp8F32Vop3, one, minus_one, 2,
+            1, 0, fnuz ? 0xa55a40c0 : 0xa55a38b8);
+      check(cdna5_target ? cdna5::kVCvtPkBf8F32Vop3 : cdna3::kVCvtPkBf8F32Vop3, one, minus_one, 2,
+            1, 8, fnuz ? 0x40c0f00d : 0x3cbcf00d);
+      check(cdna5_target ? cdna5::kVCvtSrFp8F32Vop3 : cdna3::kVCvtSrFp8F32Vop3, one, 0, 0, 1, 0,
+            fnuz ? 0xa55af0c0 : 0xa55af0b8);
+      check(cdna5_target ? cdna5::kVCvtSrBf8F32Vop3 : cdna3::kVCvtSrBf8F32Vop3, minus_one, 0, 1, 0,
+            0, fnuz ? 0xa55af040 : 0xa55af03c);
+      if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+        check(cdna4::kVCvtPkF16F32Vop3, one, minus_one, 2, 1, 0, 0x3c00bc00);
+        check(cdna4::kVCvtPkBf16F32Vop3, one, minus_one, 2, 1, 0, 0x3f80bf80);
+        check(cdna4::kVCvtSrF16F32Vop3, minus_one, 0, 1, 0, 0, 0xa55a3c00);
+        check(cdna4::kVCvtSrBf16F32Vop3, one, 0, 0, 1, 0, 0xa55abf80);
+      } else if (cdna5_target) {
+        // The same paired and stochastic forms on gfx1201 give these raw results.
+        check(cdna5::kVCvtPkFp8F32Vop3, 0x7fc00000, 0, 0, 0, 0, 0xa55a00ff);
+        check(cdna5::kVCvtPkBf8F32Vop3, 0x7f800001, 0, 0, 0, 0, 0xa55a00fe);
+        check(cdna5::kVCvtSrFp8F32Vop3, 0x33000000, 0xffff0000, 0, 0, 0, 0xa55af001);
+        check(cdna5::kVCvtSrBf8F32Vop3, 0x33000000, 0xffff0000, 0, 0, 0, 0xa55af001);
+        // One SRC0 modifier applies to both halves of {-1, +1}.
+        check(cdna5::kVCvtPkFp8F16Vop3, 0xbc003c00, std::nullopt, 0, 1, 0, 0xa55a38b8);
+        check(cdna5::kVCvtPkBf8F16Vop3, 0xbc003c00, std::nullopt, 1, 0, 0, 0xa55a3c3c);
+      }
+    }
+    wf->halt();
+  }
+}
+
 TEST(RdnaVop3ConversionTest, IntegerToFloatAppliesOutputModifiers) {
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4}) {
     for (bool force_scalar : {false, true}) {
@@ -49,7 +123,9 @@ TEST(RdnaVop3ConversionTest, IntegerToFloatAppliesOutputModifiers) {
       cfg.sgprs_per_wf = 106;
       cfg.vgprs_per_wf = 256;
       cfg.lds_size_kb = 64;
-      auto cu = amdgpu::ComputeUnitCore::create("conversion_cu", cfg, &memory, &l2);
+      std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+      ASSERT_NO_FATAL_FAILURE(
+          rocjitsu::test::initialize_compute_unit(cu, "conversion_cu", cfg, &memory, &l2));
       auto decoder = Decoder::create(arch);
       auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
       ASSERT_NE(wf, nullptr);
@@ -109,7 +185,9 @@ TEST(RdnaVop3ConversionTest, FloatToHalfPreservesOverflowMode) {
       cfg.num_wf_slots = 1;
       cfg.sgprs_per_wf = 106;
       cfg.vgprs_per_wf = 16;
-      auto cu = amdgpu::ComputeUnitCore::create("half_conversion_cu", cfg, &memory, &l2);
+      std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+      ASSERT_NO_FATAL_FAILURE(
+          rocjitsu::test::initialize_compute_unit(cu, "half_conversion_cu", cfg, &memory, &l2));
       auto decoder = Decoder::create(arch);
       auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
       ASSERT_NE(wf, nullptr);
@@ -171,7 +249,9 @@ TEST_P(Vop3ConversionModifierTest, FloatToIntegerConversionAppliesSourceModifier
       cfg.sgprs_per_wf = gfx9() ? 102 : 106;
       cfg.vgprs_per_wf = 16;
       cfg.lds_size_kb = 64;
-      auto cu = amdgpu::ComputeUnitCore::create("cvt_modifier", cfg, &mem, &l2);
+      std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+      ASSERT_NO_FATAL_FAILURE(
+          rocjitsu::test::initialize_compute_unit(cu, "cvt_modifier", cfg, &mem, &l2));
       auto decoder = Decoder::create(arch);
       auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
       ASSERT_NE(wf, nullptr);
@@ -221,7 +301,9 @@ TEST_P(Vop3ConversionModifierTest, FloatToDoubleConversionAppliesModifiers) {
     cfg.sgprs_per_wf = gfx9() ? 102 : 106;
     cfg.vgprs_per_wf = 16;
     cfg.lds_size_kb = 64;
-    auto cu = amdgpu::ComputeUnitCore::create("cvt_f64_f32_modifier", cfg, &memory, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "cvt_f64_f32_modifier", cfg, &memory, &l2));
     auto decoder = Decoder::create(GetParam());
     auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
     ASSERT_NE(wf, nullptr);
@@ -303,7 +385,9 @@ TEST_P(Vop3ConversionModifierTest, NearestRoundsTiesUpWithoutRoundingAdjacentInp
     cfg.sgprs_per_wf = gfx9() ? 102 : 106;
     cfg.vgprs_per_wf = 16;
     cfg.lds_size_kb = 64;
-    auto cu = amdgpu::ComputeUnitCore::create("nearest", cfg, &memory, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "nearest", cfg, &memory, &l2));
     auto decoder = Decoder::create(GetParam());
     auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
     ASSERT_NE(wf, nullptr);
@@ -325,7 +409,15 @@ TEST_P(Vop3ConversionModifierTest, NearestRoundsTiesUpWithoutRoundingAdjacentInp
         ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
         for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
           const auto &c = cases[(first + lane) % std::size(cases)];
-          EXPECT_EQ(cu->read_vgpr(vb + 2, lane), static_cast<uint32_t>(c.expected))
+          // ISA V_CVT_NEAREST_I32_F32 does not specify a NaN result.
+          // gfx1100 and gfx1201 select the signed limit following the sign after
+          // source modifiers, unlike ordinary CVT's NaN-to-zero.
+          const bool signed_nan =
+              (GetParam() == ROCJITSU_CODE_ARCH_RDNA3 || GetParam() == ROCJITSU_CODE_ARCH_RDNA4) &&
+              (c.bits & 0x7fffffffu) > 0x7f800000u;
+          const uint32_t expected = signed_nan ? (c.bits >> 31 ? 0x80000000u : 0x7fffffffu)
+                                               : static_cast<uint32_t>(c.expected);
+          EXPECT_EQ(cu->read_vgpr(vb + 2, lane), expected)
               << "arch=" << GetParam() << " input=" << c.bits << " vop3=" << vop3
               << " scalar=" << force_scalar;
         }
@@ -356,7 +448,9 @@ TEST_P(Vop3ConversionModifierTest, PackedRtzPreservesIndependentSourceModifiers)
     cfg.sgprs_per_wf = gfx9() ? 102 : 106;
     cfg.vgprs_per_wf = 16;
     cfg.lds_size_kb = 64;
-    auto cu = amdgpu::ComputeUnitCore::create("packed_rtz", cfg, &memory, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "packed_rtz", cfg, &memory, &l2));
     auto decoder = Decoder::create(GetParam());
     auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
     ASSERT_NE(wf, nullptr);
@@ -419,7 +513,9 @@ TEST_P(Vop3ConversionModifierTest, PackedRtzDppPermutesBeforeSourceModifiers) {
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 16;
     cfg.lds_size_kb = 64;
-    auto cu = amdgpu::ComputeUnitCore::create("packed_rtz_dpp", cfg, &memory, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "packed_rtz_dpp", cfg, &memory, &l2));
     auto decoder = Decoder::create(GetParam());
     auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
     ASSERT_NE(wf, nullptr);
@@ -486,7 +582,9 @@ TEST_P(Vop3ConversionModifierTest, PackedNormalizedRoundsOnceAndSaturatesSymmetr
     cfg.sgprs_per_wf = gfx9() ? 102 : 106;
     cfg.vgprs_per_wf = 16;
     cfg.lds_size_kb = 64;
-    auto cu = amdgpu::ComputeUnitCore::create("packed_normalized", cfg, &memory, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "packed_normalized", cfg, &memory, &l2));
     auto decoder = Decoder::create(GetParam());
     auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
     ASSERT_NE(wf, nullptr);
@@ -577,7 +675,9 @@ TEST_P(Vop3ConversionModifierTest, PackedNormalizedHalfReadsOpSelSelectedHalves)
     cfg.sgprs_per_wf = gfx9() ? 102 : 106;
     cfg.vgprs_per_wf = 16;
     cfg.lds_size_kb = 64;
-    auto cu = amdgpu::ComputeUnitCore::create("packed_normalized_opsel", cfg, &memory, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "packed_normalized_opsel", cfg, &memory, &l2));
     auto decoder = Decoder::create(GetParam());
     auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
     ASSERT_NE(wf, nullptr);
@@ -642,7 +742,9 @@ TEST_P(Vop3ConversionModifierTest, PackedNormalizedHalfFlushesSubnormalSourcesUn
     cfg.sgprs_per_wf = gfx9() ? 102 : 106;
     cfg.vgprs_per_wf = 16;
     cfg.lds_size_kb = 64;
-    auto cu = amdgpu::ComputeUnitCore::create("packed_normalized_subnormal", cfg, &memory, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(
+        cu, "packed_normalized_subnormal", cfg, &memory, &l2));
     auto decoder = Decoder::create(GetParam());
     auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
     ASSERT_NE(wf, nullptr);
@@ -695,7 +797,9 @@ TEST_P(Vop3ConversionModifierTest, UnaryNormalizedHalfRoundsOnceAndAppliesModifi
     cfg.sgprs_per_wf = gfx9() ? 102 : 106;
     cfg.vgprs_per_wf = 16;
     cfg.lds_size_kb = 64;
-    auto cu = amdgpu::ComputeUnitCore::create("unary_normalized", cfg, &memory, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "unary_normalized", cfg, &memory, &l2));
     auto decoder = Decoder::create(GetParam());
     auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
     ASSERT_NE(wf, nullptr);
@@ -781,7 +885,9 @@ TEST_P(Vop3ConversionModifierTest, FrexpExponentIsSignedIntegerWithoutOutputModi
     cfg.sgprs_per_wf = gfx9() ? 102 : 106;
     cfg.vgprs_per_wf = 16;
     cfg.lds_size_kb = 64;
-    auto cu = amdgpu::ComputeUnitCore::create("frexp_exponent", cfg, &memory, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "frexp_exponent", cfg, &memory, &l2));
     auto decoder = Decoder::create(GetParam());
     auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
     ASSERT_NE(wf, nullptr);
@@ -865,7 +971,9 @@ TEST_P(Vop3ConversionModifierTest, FrexpMantissaFlushesSubnormalSourcesUnderMode
     cfg.sgprs_per_wf = gfx9() ? 102 : 106;
     cfg.vgprs_per_wf = 16;
     cfg.lds_size_kb = 64;
-    auto cu = amdgpu::ComputeUnitCore::create("frexp_mantissa", cfg, &memory, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "frexp_mantissa", cfg, &memory, &l2));
     auto decoder = Decoder::create(GetParam());
     auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
     ASSERT_NE(wf, nullptr);
@@ -949,7 +1057,9 @@ TEST_P(Vop3ConversionModifierTest, HalfToFloatAppliesOutputModifiers) {
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = gfx9() ? 102 : 106;
   cfg.vgprs_per_wf = 16;
-  auto cu = amdgpu::ComputeUnitCore::create("half_output", cfg, &memory, &l2);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "half_output", cfg, &memory, &l2));
   auto decoder = Decoder::create(GetParam());
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
   ASSERT_NE(wf, nullptr);
@@ -1016,7 +1126,9 @@ TEST_P(Vop3ConversionModifierTest, HalfInputConversionsApplyModifiersAndMode) {
     cfg.sgprs_per_wf = gfx9() ? 102 : 106;
     cfg.vgprs_per_wf = 16;
     cfg.lds_size_kb = 64;
-    auto cu = amdgpu::ComputeUnitCore::create("half_input", cfg, &memory, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "half_input", cfg, &memory, &l2));
     auto decoder = Decoder::create(GetParam());
     auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
     ASSERT_NE(wf, nullptr);

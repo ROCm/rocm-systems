@@ -20,6 +20,9 @@ namespace rocjitsu {
 // same type as the friend declaration in Instrumentor.
 struct InstrumentorTestAccess {
   static void skip_patch_gates(Instrumentor &instr) { instr.skip_patch_gates_ = true; }
+  static const void *callable_state_analysis(const Instrumentor &instr) {
+    return instr.callable_state_analysis_.get();
+  }
 };
 
 } // namespace rocjitsu

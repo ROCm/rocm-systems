@@ -187,7 +187,8 @@ class PythonApiTest(unittest.TestCase):
                 rocjitsu.RemoteError, "ZeroDivisionError"
             ) as caught:
                 session.run(lambda: 1 / 0)
-            self.assertIn("test_api.py", caught.exception.remote_traceback)
+            # Cloudpickle can elide the source filename of a dynamic callable.
+            self.assertIn("in <lambda>\n", caught.exception.remote_traceback)
             self.assertEqual(session.run(lambda: 42), 42)
         with self.assertRaisesRegex(RuntimeError, "closed"):
             session.run(lambda: 1)
@@ -610,7 +611,7 @@ assert not rocjitsu.run(lambda: importlib.util.find_spec('parent_only_framework'
         self.assertEqual(rocjitsu.cli(["--help"]).returncode, 0)
         with self.assertRaises(subprocess.CalledProcessError) as caught:
             rocjitsu.cli(["--not-a-real-option"])
-        self.assertIn("unknown option", caught.exception.stderr)
+        self.assertIn("unknown flag", caught.exception.stderr)
         self.assertEqual(CONFIG.read_bytes(), original)
 
     def test_launch_environment_directory_and_budget(self):

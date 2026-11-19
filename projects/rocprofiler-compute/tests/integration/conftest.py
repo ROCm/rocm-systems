@@ -11,6 +11,7 @@ isolation this layout exists to provide.
 import shutil
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
+from typing import List
 from unittest.mock import patch
 
 import common
@@ -32,6 +33,21 @@ if not rocprof_compute_script_path.exists():
 if not rocprof_compute_script_path.exists():
     raise FileNotFoundError("Cannot find rocprof-compute script")
 rocprof_compute_script_path = str(rocprof_compute_script_path)
+
+
+def run_main_in_process(command_line: List[str]) -> int:
+    """Run rocprof-compute main() in the pytest process and return its exit code.
+
+    Stubs set_signal_handlers so tests never change the signal handling of pytest.
+    """
+    with pytest.raises(SystemExit) as exit_info:
+        with patch("sys.argv", command_line):
+            rocprof_compute = SourceFileLoader(
+                "rocprof-compute", rocprof_compute_script_path
+            ).load_module()
+            with patch.object(rocprof_compute, "set_signal_handlers", lambda: None):
+                rocprof_compute.main()
+    return exit_info.value.code
 
 
 @pytest.fixture(scope="session")
@@ -167,24 +183,16 @@ def binary_handler_profile_rocprof_compute(request):
 
             return process.returncode
 
-        # Default single-rank mode: patch sys.argv and call main() directly
+        # Default single-rank mode: call main() directly
         # Guard imports during profile execution (test-time enforcement)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                command_rocprof_compute,
-            ):
-                with ProfileModeImportGuard():
-                    rocprof_compute = SourceFileLoader(
-                        "rocprof-compute", rocprof_compute_script_path
-                    ).load_module()
-                    rocprof_compute.main()
-        if e.value.code == OUTDATED_FIRMWARE_EXIT_CODE:
+        with ProfileModeImportGuard():
+            exit_code = run_main_in_process(command_rocprof_compute)
+        if exit_code == OUTDATED_FIRMWARE_EXIT_CODE:
             pytest.skip(OUTDATED_FIRMWARE_SKIP_REASON)
         # verify run status
         if check_success:
-            assert e.value.code == 0
-        return e.value.code
+            assert exit_code == 0
+        return exit_code
 
     return _handler
 
@@ -202,16 +210,7 @@ def binary_handler_analyze_rocprof_compute():
     """
 
     def _handler(arguments):
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                ["rocprof-compute", *arguments],
-            ):
-                # Load module (no guard needed for analyze mode)
-                rocprof_compute = SourceFileLoader(
-                    "rocprof-compute", rocprof_compute_script_path
-                ).load_module()
-                rocprof_compute.main()
-        return e.value.code
+        # No import guard needed for analyze mode
+        return run_main_in_process(["rocprof-compute", *arguments])
 
     return _handler

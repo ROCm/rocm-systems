@@ -49,12 +49,6 @@ struct perf_event
     std::optional<std::string> open(double, std::uint32_t = 0, pid_t pid = 0,
                                     int cpu = -1);
 
-    /// Return file descriptor
-    long get_fileno() const;
-
-    /// Read event count
-    std::uint64_t get_count() const;
-
     /// Get the batch size
     std::uint32_t get_batch_size() const { return m_batch_size; }
 
@@ -112,11 +106,7 @@ struct perf_event
         bool is_mmap2() const { return get_type() == record_type::mmap2; }
 
         std::uint64_t                     get_ip() const;
-        std::uint64_t                     get_pid() const;
-        std::uint64_t                     get_tid() const;
         std::uint64_t                     get_time() const;
-        std::uint64_t                     get_period() const;
-        std::uint32_t                     get_cpu() const;
         container::c_array<std::uint64_t> get_callchain() const;
 
     private:
