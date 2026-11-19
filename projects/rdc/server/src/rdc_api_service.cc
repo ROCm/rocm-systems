@@ -1014,18 +1014,21 @@ void RdcAPIServiceImpl::end_policy_stream(uint32_t group_id,
       return ::grpc::Status(::grpc::StatusCode::RESOURCE_EXHAUSTED,
                             "rdcd serves the most policy registrations it can");
     }
+    // Also when the group has streams already: it may have been destroyed since,
+    // and a stream of a group that is gone never gets a notification. Registering
+    // the group again only checks it and keeps the callback.
+    rdc_status_t result = rdc_policy_register(rdc_handle_, group_id, PolicyCallback);
+    if (result == RDC_ST_GROUP_NOT_FOUND) {
+      RDC_LOG(RDC_DEBUG, "Policy stream for group " << group_id << " rejected: no such group");
+      return ::grpc::Status(::grpc::StatusCode::NOT_FOUND, "GPU group not found");
+    }
+    if (result != RDC_ST_OK) {
+      RDC_LOG(RDC_ERROR,
+              "Policy stream for group " << group_id << " rejected: " << rdc_status_string(result));
+      return ::grpc::Status(::grpc::StatusCode::INTERNAL, rdc_status_string(result));
+    }
     auto group = policy_streams_.find(group_id);
     if (group == policy_streams_.end()) {
-      rdc_status_t result = rdc_policy_register(rdc_handle_, group_id, PolicyCallback);
-      if (result == RDC_ST_GROUP_NOT_FOUND) {
-        RDC_LOG(RDC_DEBUG, "Policy stream for group " << group_id << " rejected: no such group");
-        return ::grpc::Status(::grpc::StatusCode::NOT_FOUND, "GPU group not found");
-      }
-      if (result != RDC_ST_OK) {
-        RDC_LOG(RDC_ERROR, "Policy stream for group "
-                               << group_id << " rejected: " << rdc_status_string(result));
-        return ::grpc::Status(::grpc::StatusCode::INTERNAL, rdc_status_string(result));
-      }
       group = policy_streams_.emplace(group_id, std::vector<std::shared_ptr<PolicyStream>>()).first;
     }
     group->second.push_back(stream);

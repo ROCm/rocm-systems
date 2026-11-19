@@ -317,6 +317,26 @@ def test_registering_a_missing_group_fails(rdcd):
         client.disconnect()
 
 
+def test_registering_a_destroyed_group_fails_while_it_has_a_stream(rdcd):
+    """A stream of a group that is then destroyed does not let another client
+    register the group: rdcd checks the group on every admission. It used to
+    check it only for the group's first stream, and admitted a stream that could
+    never notify."""
+    lib = _lib()
+    first = Client(lib, rdcd)
+    second = Client(lib, rdcd)
+    try:
+        group = first.create_group("destroyed_group")
+        code = first.register(group, IGNORE)
+        assert code == RDC_ST_OK, first.status(code)
+        rdcd.ok("group", "-d", str(group))
+        code = second.register(group, IGNORE)
+        assert code == RDC_ST_GROUP_NOT_FOUND, second.status(code)
+    finally:
+        second.disconnect()
+        first.disconnect()
+
+
 def test_rdcd_serves_64_policy_streams(rdcd):
     lib = _lib()
     first, second = Client(lib, rdcd), Client(lib, rdcd)
