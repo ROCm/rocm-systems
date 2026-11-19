@@ -126,9 +126,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   in-memory socket layer and net plugin in `fakes/bootstrap_micro_fakes.cc`, which replace
   `misc/socket.cc` wholesale. See `test_categories_micro_bootstrap.yaml`.
 - **`rccl-UnitTestsMicroEnqueue`** — `enqueue.cc` (via `ENQUEUE_CC_PATH`); suite
-  `EnqueueMicrotest.*`. All tests live in `enqueue/enqueue-test.cc`, grouped by unit under
-  test; several fixtures are reused by later groups, so the order within the file
-  matters. `enqueue.cc:28` pulls in the device header `src/device/common.h`,
+  `EnqueueMicrotest.*`. `enqueue/enqueue-test.cc` is the harness; the tests live in
+  `enqueue/enqueue-test.d/*.inc`, one file per functional area, with helpers that
+  several of those files share in `enqueue/enqueue-test-scenes.inc`. CMake globs the
+  directory, so a new file needs no build-system edit. `enqueue.cc:28` pulls in the device header `src/device/common.h`,
   which cannot compile host-only; the TU pre-sets that header's include guard and
   supplies the six `ncclDevKernel_Generic_N` kernels as host surrogates (their
   addresses are stored in a table, never launched). Two shared `nccl_stubs.cc`
