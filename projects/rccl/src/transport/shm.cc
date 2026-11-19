@@ -621,25 +621,23 @@ ncclResult_t ncclShmImportShareableBuffer(struct ncclComm* comm, int proxyRank, 
     size_t size = desc->shmci.size;
     CUmemAllocationProp prop = {};
 
+    ncclResult_t ret = ncclSuccess;
+    // Some ROCm 7.14 runtimes read the imported fd only in cuMemSetAccess, so keep it open until then.
+    ncclIpcFd fd = NCCL_INVALID_IPC_FD;
     // Import and map the remote memory descriptor to the local GPU
     if (type == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
       // UDS fd support
-      ncclIpcFd fd = NCCL_INVALID_IPC_FD;
       // Send cuMem handle to remote for conversion to an fd
       NCCLCHECK(ncclProxyClientGetFdBlocking(comm, proxyRank, &desc->shmci.data, &fd));
-      ncclResult_t ret = ncclSuccess;
       CUCHECKGOTO(cuMemImportFromShareableHandle(&handle, (void*)(uintptr_t)fd, type), ret, closeFd);
-    closeFd:
-      (void)ncclIpcFdClose(fd);
-      NCCLCHECK(ret);
     } else {
       CUCHECK(cuMemImportFromShareableHandle(&handle, &desc->shmci.handle, type));
     }
 
     // Get cpu numa id
-    CUDACHECK(cudaGetDevice(&cudaDev));
-    CUCHECK(cuDeviceGet(&currentDev, cudaDev));
-    CUCHECK(cuDeviceGetAttribute(&cpuNumaNodeId, CU_DEVICE_ATTRIBUTE_HOST_NUMA_ID, currentDev));
+    CUDACHECKGOTO(cudaGetDevice(&cudaDev), ret, closeFd);
+    CUCHECKGOTO(cuDeviceGet(&currentDev, cudaDev), ret, closeFd);
+    CUCHECKGOTO(cuDeviceGetAttribute(&cpuNumaNodeId, CU_DEVICE_ATTRIBUTE_HOST_NUMA_ID, currentDev), ret, closeFd);
     if (cpuNumaNodeId < 0) cpuNumaNodeId = 0;
 
     // Get granularity
@@ -647,25 +645,28 @@ ncclResult_t ncclShmImportShareableBuffer(struct ncclComm* comm, int proxyRank, 
     prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
     prop.requestedHandleTypes = type;
     prop.location.id = cpuNumaNodeId;
-    CUCHECK(cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM));
+    CUCHECKGOTO(cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM), ret, closeFd);
 
     ALIGN_SIZE(size, granularity);
 
     // Reserve and map address
-    CUCHECK(cuMemAddressReserve(&hostptr, size, /* alignment */ 0, /* addr */ 0, /* flags */ 0));
-    CUCHECK(cuMemMap(hostptr, size, /* offset */ 0, handle, /* flags */ 0));
+    CUCHECKGOTO(cuMemAddressReserve(&hostptr, size, /* alignment */ 0, /* addr */ 0, /* flags */ 0), ret, closeFd);
+    CUCHECKGOTO(cuMemMap(hostptr, size, /* offset */ 0, handle, /* flags */ 0), ret, closeFd);
 
     // Allow access by the local GPU
     accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
     accessDesc.location.id = cudaDev;
     accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-    CUCHECK(cuMemSetAccess(hostptr, size, &accessDesc, 1));
+    CUCHECKGOTO(cuMemSetAccess(hostptr, size, &accessDesc, 1), ret, closeFd);
 
     // Allow access by the local numa
     accessDesc.location.type = CU_MEM_LOCATION_TYPE_HOST_NUMA;
     accessDesc.location.id = cpuNumaNodeId;
     accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-    CUCHECK(cuMemSetAccess(hostptr, size, &accessDesc, 1));
+    CUCHECKGOTO(cuMemSetAccess(hostptr, size, &accessDesc, 1), ret, closeFd);
+  closeFd:
+    if (fd != NCCL_INVALID_IPC_FD) (void)ncclIpcFdClose(fd);
+    NCCLCHECK(ret);
 
     descOut->shmci.ptr = *hptr = (void*)hostptr;
     descOut->legacy = false;
