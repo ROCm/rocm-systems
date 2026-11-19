@@ -1,58 +1,55 @@
-AMD ROCm Debug Agent Library (ROCdebug-agent)
-=============================================
+# AMD ROCm Debug Agent Library (ROCdebug-agent)
 
 > [!NOTE]
 > The published documentation is available at [ROCR Debug
 > Agent](https://rocm.docs.amd.com/projects/rocr_debug_agent/en/latest/index.html)
 > in an organized, easy-to-read format, with search and a table of contents.
 > The documentation source files reside in the `rocr_debug_agent/docs` folder
-> of this repository.  As with all ROCm projects, the documentation is open
-> source.  For more information on contributing to the documentation, see
+> of this repository. As with all ROCm projects, the documentation is open
+> source. For more information on contributing to the documentation, see
 > [Contribute to ROCm
 > documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
 
-Introduction
-------------
+## Introduction
 
 The AMD ROCm Debug Agent (ROCdebug-agent) is a library that can be loaded by the
 ROCm Platform Runtime (ROCr) to provide the following functionality:
 
 - Print the state of all AMD GPU wavefronts that caused a queue error (for
-  example, causing a memory violation, executing an ``s_trap 2``, or executing
+  example, causing a memory violation, executing an `s_trap 2`, or executing
   an illegal instruction).
 
 - Print the state of all AMD GPU wavefronts by sending a SIGQUIT signal to the
-  process (for example, by pressing ``Ctrl-\``) while the program is executing.
+  process (for example, by pressing `Ctrl-\`) while the program is executing.
 
 This functionality is provided for all AMD GPUs supported by the ROCm Debugger
 API Library (ROCdbgapi).
 
-Usage
------
+## Usage
 
 To display the source text location with the machine code instructions around
-the wavefronts' pc, compile the AMD GPU code objects with ``-ggdb``.  In
-addition, ``-O0``, while not required, will help the source text location
+the wavefronts' pc, compile the AMD GPU code objects with `-ggdb`. In
+addition, `-O0`, while not required, will help the source text location
 displayed to be more intuitive as higher optimization levels can reorder
-machine code instructions.  If ``-ggdb`` is not used, source line information
+machine code instructions. If `-ggdb` is not used, source line information
 will not be available and only machine code instructions starting at the
-wavefronts' pc will be printed.  For example:
+wavefronts' pc will be printed. For example:
 
-````sh
+```sh
 /opt/rocm/bin/hipcc -O0 -ggdb -o my_program my_program.cpp
-````
+```
 
-To use the ROCdebug-agent set the ``HSA_TOOLS_LIB`` environment variable to the
-file name or path of the library.  For example:
+To use the ROCdebug-agent set the `HSA_TOOLS_LIB` environment variable to the
+file name or path of the library. For example:
 
-````sh
+```sh
 HSA_TOOLS_LIB=/opt/rocm/lib/librocm-debug-agent.so.2 ./my_program
-````
+```
 
 If the application encounters a triggering event, it will print the state of
-some or all AMD GPU wavefronts.  For example, a sample print out is:
+some or all AMD GPU wavefronts. For example, a sample print out is:
 
-````console
+```console
 Queue error (HSA_STATUS_ERROR_EXCEPTION: An HSAIL operation resulted in a hardware exception.)
 
 --------------------------------------------------------
@@ -123,73 +120,72 @@ Disassembly for function vector_add_assert_trap(int*, int*, int*):
 
 End of disassembly.
 Aborted (core dumped)
-````
+```
 
 The supported triggering events are:
 
 - __Memory fault__
 
   A memory fault happens when an AMD GPU accesses a page that is not
-  accessible.  The information about the memory fault is printed.  For example:
+  accessible. The information about the memory fault is printed. For example:
 
-  ````console
+  ```console
   System event (HSA_AMD_GPU_MEMORY_FAULT_EVENT: page not present or supervisor privilege, write access to a read-only page)
   Faulting page: 0x7fbe4cc01000
-  ````
+  ```
 
   There could be multiple memory faults, but the information about only one is
   printed.
 
-  A memory fault does not specify the wavefront that caused it.  However, the
+  A memory fault does not specify the wavefront that caused it. However, the
   stop reason for each wavefront is available. For example:
 
-  ````console
+  ```console
   wave_0: pc=0x7fbe4cc0d0b4 (stopped, reason: MEMORY_VIOLATION)
-  ````
+  ```
 
 - __Assert trap__
 
-  This occurs when an ``s_trap 2`` instruction is executed.  The
-  ``__builtin_trap()`` language builtin, or ``llvm.trap`` LLVM IR instruction,
+  This occurs when an `s_trap 2` instruction is executed. The
+  `__builtin_trap()` language builtin, or `llvm.trap` LLVM IR instruction,
   can be used to generate this AMD GPU instruction.
 
 - __Illegal instruction__
 
   This occurs when the hardware detects an illegal instruction.
 
-- __SIGQUIT ``(Ctrl-\)``__
+- __SIGQUIT `(Ctrl-\)`__
 
-  A SIGQUIT signal can be sent to a process with the ``kill -s SIGQUIT <pid>``
-  command or by pressing ``Ctrl-\``.  See the ``--disable-linux-signals``
+  A SIGQUIT signal can be sent to a process with the `kill -s SIGQUIT <pid>`
+  command or by pressing `Ctrl-\`. See the `--disable-linux-signals`
   option for more information.
 
-Options
--------
+## Options
 
-Options are passed through the ``ROCM_DEBUG_AGENT_OPTIONS`` environment
-variable.  For example:
+Options are passed through the `ROCM_DEBUG_AGENT_OPTIONS` environment
+variable. For example:
 
-````shell
+```shell
 ROCM_DEBUG_AGENT_OPTIONS="--all --save-code-objects" \
     HSA_TOOLS_LIB=librocm-debug-agent.so.2 ./my_program
-````
+```
 
 The supported options are:
 
-- __``-a``, ``--all``__
+- __`-a`, `--all`__
 
   Prints all wavefronts.
 
   If not specified, only wavefronts that have a triggering event are printed.
 
-- __``-p``, ``--precise-memory``__
+- __`-p`, `--precise-memory`__
 
   Enables precise memory operations if supported by the devices.
 
   When an exception occurs, precise memory ensures that the PC points to the
   instruction immediately following the one causing the exception.
 
-- __``-e``, ``--precise-alu-exceptions``__
+- __`-e`, `--precise-alu-exceptions`__
 
   Enables precise ALU exceptions reporting if supported by the devices.
 
@@ -197,39 +193,41 @@ The supported options are:
   PC points to the instruction immediately following the one causing the
   exception.
 
-- __``-s [DIR]``, ``--save-code-objects[=DIR]``__
+- __`-s [DIR]`, `--save-code-objects[=DIR]`__
 
-  Saves all loaded code objects.  If the directory is not specified, the code
+  Saves all loaded code objects. If the directory is not specified, the code
   objects are saved in the current directory.
 
   The `%` foramt tokens in the DIR name are expanded according to the supported
   tokens list below.
 
   The file name in which the code object is saved is the same as the code
-  object URI with special characters replaced by ``'_'``, prefixed with a
-  unique code object ID.  For example, the code object URI:
+  object URI with special characters replaced by `'_'`, prefixed with a
+  unique code object ID. For example, the code object URI:
 
-  ````
+  ```
   file:///rocm-debug-agent/rocm-debug-agent-test#offset=14309&size=31336
-  ````
-  is saved in a file with the name:
-  ````
-  1_file____rocm-debug-agent_rocm-debug-agent-test_offset_14309_size_31336
-  ````
+  ```
 
-- __``-c``, ``--load-all-code-objects``__
+  is saved in a file with the name:
+
+  ```
+  1_file____rocm-debug-agent_rocm-debug-agent-test_offset_14309_size_31336
+  ```
+
+- __`-c`, `--load-all-code-objects`__
 
   Load all code objects as soon as they are loaded by the runtime.
 
-- __``-z``, ``--lazy``__
+- __`-z`, `--lazy`__
 
   Delay inspecting the content of all loaded code obects until after an
-  exception is reported.  Note that the application must not free the code
+  exception is reported. Note that the application must not free the code
   objects' memory while they are loaded on the device.
 
   This option is incompatible with -c.
 
-- __``-o <file-path>``, ``--output=<file-path>``__
+- __`-o <file-path>`, `--output=<file-path>`__
 
   Saves the output produced by the ROCdebug-agent in the specified file.
 
@@ -238,9 +236,9 @@ The supported options are:
 
   Unrecognised `%` tokens are left unchanged, including the `%` character.
 
-  By default, the output is redirected to ``stderr``.
+  By default, the output is redirected to `stderr`.
 
-- __``-d``, ``--disable-linux-signals``__
+- __`-d`, `--disable-linux-signals`__
 
   Disables installing a SIGQUIT signal handler, so that the default Linux
   handler may dump a core file.
@@ -248,19 +246,20 @@ The supported options are:
   By default, the ROCdebug-agent installs a SIGQUIT handler to print the state of
   all wavefronts when a SIGQUIT signal is sent to the process.
 
-- __``-l <log-level>``, ``--log-level=<log-level>``__
+- __`-l <log-level>`, `--log-level=<log-level>`__
 
   Changes the ROCdebug-agent and ROCdbgapi log level. The log level can be
   `none`, `info`, `warning`, or `error`.
 
-  The default log level is ``none``.
+  The default log level is `none`.
 
-- __``-h``, ``--help``__
+- __`-h`, `--help`__
 
   Displays a usage message and exits.
 
 For options supporting `%` format tokens expansions, the following tokens are
 supported:
+
 - `%p`: process ID of the application being debuggged
 - `%h`: host name
 - `%t`: timestanp (seconds since the Epoch) when the patch is expanded
@@ -269,23 +268,21 @@ supported:
 - `%g`: real group ID (GID) of the process
 - `%%`: the literal `%` character
 
-Code Formatting
----------------
+## Code Formatting
 
 This project uses [clang-format](https://clang.llvm.org/docs/ClangFormat.html)
-to enforce consistent code style.  The style is based on the GNU style with
+to enforce consistent code style. The style is based on the GNU style with
 minor adjustments documented in `.clang-format`.
 
 Only modified lines are reformatted, using
 [clang-format-diff](https://clang.llvm.org/docs/ClangFormat.html#script-for-patch-reformatting).
 To reformat the changes in your working tree against the upstream branch:
 
-````shell
+```shell
 git diff origin/develop | clang-format-diff -p1 -i
-````
+```
 
-Build the ROCdebug-agent library
----------------------------------
+## Build the ROCdebug-agent library
 
 The ROCdebug-agent library can be built on Ubuntu 18.04, Ubuntu 20.04, Centos
 8.1, RHEL 8.1, and SLES 15 Service Pack 1.
@@ -294,79 +291,78 @@ Building the ROCdebug-agent library has the following prerequisites:
 
 1. A C++17 compiler such as GCC 7 or Clang 5.
 
-2. The AMD ROCm software stack which can be installed as part of the AMD ROCm
-   release by the ``rocm-dev`` package.
+1. The AMD ROCm software stack which can be installed as part of the AMD ROCm
+   release by the `rocm-dev` package.
 
-3. For Ubuntu 22.04 and Ubuntu 24.04 the following adds the needed packages:
+1. For Ubuntu 22.04 and Ubuntu 24.04 the following adds the needed packages:
 
-   ````shell
+   ```shell
    apt install gcc g++ make cmake libelf-dev libdw-dev
-   ````
+   ```
 
-4. For CentOS 8 and RHEL 8/9 the following adds the needed packages:
+1. For CentOS 8 and RHEL 8/9 the following adds the needed packages:
 
-   ````shell
+   ```shell
    yum install gcc gcc-c++ make cmake elfutils-libelf-devel elfutils-devel
-   ````
+   ```
 
-5. For SLES 15 the following adds the needed packages:
+1. For SLES 15 the following adds the needed packages:
 
-   ````shell
+   ```shell
    zypper install gcc gcc-c++ make cmake libelf-devel libdw-devel
-   ````
+   ```
 
-6. Python version 3.6 or later is required to run the tests.
+1. Python version 3.6 or later is required to run the tests.
 
 An example command-line to build and install the ROCdebug-agent library on
 Linux is:
 
-````shell
+```shell
 cd rocm-debug-agent
 mkdir build && cd build
 cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=../install ..
 make
-````
+```
 
-Use the ``CMAKE_INSTALL_PREFIX`` to specify where the ROCdebug-agent library
-should be installed.  The default location is `/usr`.
+Use the `CMAKE_INSTALL_PREFIX` to specify where the ROCdebug-agent library
+should be installed. The default location is `/usr`.
 
-Use ``CMAKE_MODULE_PATH`` to specify a ``';'`` separated list of paths that
-will be used to locate cmake modules.  It is used to locate the HIP cmake
-modules required to build the tests.  The default is ``/opt/rocm/hip/cmake``
+Use `CMAKE_MODULE_PATH` to specify a `';'` separated list of paths that
+will be used to locate cmake modules. It is used to locate the HIP cmake
+modules required to build the tests. The default is `/opt/rocm/hip/cmake`
 
 The built ROCdebug-agent library will be placed in:
 
-- ``build/librocm-debug-agent.so.2*``
+- `build/librocm-debug-agent.so.2*`
 
 To install the ROCdebug-agent library:
 
-````shell
+```shell
 make install
-````
+```
 
 The installed ROCdebug-agent library and tests will be placed in:
 
-- ``<install-prefix>/lib/librocm-debug-agent.so.2*``
-- ``<install-prefix>/share/rocm-debug-agent/LICENSE.txt``
-- ``<install-prefix>/share/rocm-debug-agent/README.md``
-- ``<install-prefix>/src/rocm-debug-agent-test/*``
+- `<install-prefix>/lib/librocm-debug-agent.so.2*`
+- `<install-prefix>/share/rocm-debug-agent/LICENSE.txt`
+- `<install-prefix>/share/rocm-debug-agent/README.md`
+- `<install-prefix>/src/rocm-debug-agent-test/*`
 
 To use the ROCdebug-agent library, the ROCdbgapi library must be installed.
-This can be installed as part of the ROCm release by the ``rocm-dbgapi``
+This can be installed as part of the ROCm release by the `rocm-dbgapi`
 package.
 
-Test the ROCdebug-agent library
---------------------------------
+## Test the ROCdebug-agent library
 
 To test the ROCdebug-agent library:
 
-````shell
+```shell
 make test
-````
+```
 
 The output should be:
 
-````console
+```console
 Running tests...
 Test project /rocm-debug-agent/build
     Start 1: rocm-debug-agent-test
@@ -375,53 +371,51 @@ Test project /rocm-debug-agent/build
 100% tests passed, 0 tests failed out of 1
 
 Total Test time (real) =   1.59 sec
-````
+```
 
-Tests can be run individually outside of the CTest harness.  For example:
+Tests can be run individually outside of the CTest harness. For example:
 
-````shell
+```shell
 HSA_TOOLS_LIB=librocm-debug-agent.so.2 test/rocm-debug-agent-test 0
 HSA_TOOLS_LIB=librocm-debug-agent.so.2 test/rocm-debug-agent-test 1
 HSA_TOOLS_LIB=librocm-debug-agent.so.2 test/rocm-debug-agent-test 2
-````
+```
 
-Known Limitations and Restrictions
-----------------------------------
+## Known Limitations and Restrictions
 
 - A disassembly of the wavefront faulting PC is only provided if it is within a
   code object.
 - A disassembly of the wavefront faulting PC only includes source text
-  correlation and surrounding context if the ``libdw.so`` library included with
+  correlation and surrounding context if the `libdw.so` library included with
   the distribution supports the DWARF present in the code object. Otherwise,
   the disassembly may only shows the instructions immediately after the
   faulting PC.
 
-Disclaimer
-----------
+## Disclaimer
 
 The information contained herein is for informational purposes only and is
 subject to change without notice. While every precaution has been taken in the
 preparation of this document, it may contain technical inaccuracies, omissions
 and typographical errors, and AMD is under no obligation to update or otherwise
-correct this information.  Advanced Micro Devices, Inc. makes no
+correct this information. Advanced Micro Devices, Inc. makes no
 representations or warranties with respect to the accuracy or completeness of
 the contents of this document, and assumes no liability of any kind, including
 the implied warranties of noninfringement, merchantability or fitness for
 particular purposes, with respect to the operation or use of AMD hardware,
-software or other products described herein.  No license, including implied or
+software or other products described herein. No license, including implied or
 arising by estoppel, to any intellectual property rights is granted by this
 document. Terms and limitations applicable to the purchase or use of AMD’s
 products are as set forth in a signed agreement between the parties or in AMD’s
 Standard Terms and Conditions of Sale.
 
 AMD®, the AMD Arrow logo, ROCm® and combinations thereof are trademarks of
-Advanced Micro Devices, Inc.  Linux® is the registered trademark of Linus
-Torvalds in the U.S. and other countries.  RedHat® and the Shadowman logo are
+Advanced Micro Devices, Inc. Linux® is the registered trademark of Linus
+Torvalds in the U.S. and other countries. RedHat® and the Shadowman logo are
 registered trademarks of Red Hat, Inc. www.redhat.com in the U.S. and other
-countries.  SUSE® is a registered trademark of SUSE LLC in the United Stated
-and other countries.  Ubuntu® and the Ubuntu logo are registered trademarks of
-Canonical Ltd.  Other product names used in this publication are for
+countries. SUSE® is a registered trademark of SUSE LLC in the United Stated
+and other countries. Ubuntu® and the Ubuntu logo are registered trademarks of
+Canonical Ltd. Other product names used in this publication are for
 identification purposes only and may be trademarks of their respective
 companies.
 
-Copyright (c) 2018-2020 Advanced Micro Devices, Inc.  All rights reserved.
+Copyright (c) 2018-2020 Advanced Micro Devices, Inc. All rights reserved.
