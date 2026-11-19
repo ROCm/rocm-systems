@@ -4430,6 +4430,36 @@ def amdsmi_get_gpu_process_list_by_pid(processor_handles: list) -> list:
     return result
 
 
+def amdsmi_get_gpu_process_info_self(processor_handle: processor_handle_t) -> Dict[str, Any]:
+    """Get the calling process's usage of a GPU.
+
+    Works inside a container with its own PID namespace. cu_occupancy,
+    sdma_usage and evicted_time come from KFD and are always "N/A".
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    info = amdsmi_wrapper.amdsmi_proc_info_t()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_gpu_process_info_self(processor_handle, ctypes.byref(info))
+    )
+
+    return {
+        "name": info.name.decode("utf-8").strip() or "N/A",
+        "pid": info.pid,
+        "mem": info.mem,
+        "engine_usage": {"gfx": info.engine_usage.gfx, "enc": info.engine_usage.enc},
+        "memory_usage": {
+            "gtt_mem": info.memory_usage.gtt_mem,
+            "cpu_mem": info.memory_usage.cpu_mem,
+            "vram_mem": info.memory_usage.vram_mem,
+        },
+        "cu_occupancy": _validate_if_max_uint(info.cu_occupancy, MaxUIntegerTypes.UINT32_T),
+        "sdma_usage": _validate_if_max_uint(info.sdma_usage, MaxUIntegerTypes.UINT64_T),
+        "evicted_time": _validate_if_max_uint(info.evicted_time, MaxUIntegerTypes.UINT32_T),
+    }
+
+
 def amdsmi_get_gpu_driver_info(processor_handle: processor_handle_t) -> Dict[str, Any]:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)

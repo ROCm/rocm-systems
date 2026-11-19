@@ -6,6 +6,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ## amd_smi_lib for ROCm 10.3.0
 
+### Added
+
+- **Added `amdsmi_get_gpu_process_info_self()` to get the calling process's GPU usage inside a container**.
+  - Unlike the process list, it works in a container with its own PID namespace. New C and Python API.
+
 ### Changed
 
 - **`amdsmi_get_gpu_kfd_info()` now returns `AMDSMI_STATUS_NOT_SUPPORTED` on WSL**.
