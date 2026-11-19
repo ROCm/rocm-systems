@@ -56,10 +56,10 @@ fn gfx942_saved_waves(
     Ok(saved_waves)
 }
 
-// The gfx942 trap-save protocol on kernels without size properties matches
+// The gfx942 trap-save protocol without positive size overrides matches
 // libhsakmt's update_ctx_save_restore_size: each XCC owns a page-aligned
-// control stack followed by CU register/LDS state. Only an absent pair reaches
-// this path; reported sizes remain authoritative. Other targets need their
+// control stack followed by CU register/LDS state. Only an absent or zero pair
+// reaches this path; positive sizes remain authoritative. Other targets need their
 // own qualified register-file and control-stack contracts.
 fn legacy_gfx942_sizes(
     properties: sysfs::KfdQueueProperties,

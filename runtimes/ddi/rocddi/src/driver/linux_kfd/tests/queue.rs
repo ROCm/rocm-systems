@@ -134,13 +134,13 @@ fn gfx942_missing_sizes_use_per_xcc_trap_save_layout() {
         let request =
             Request::validate(&native, descriptor(aql(QueueProducerMode::Single))).unwrap();
         let compute = request.compute.as_ref().unwrap();
-        assert_eq!(compute.context_size, 0x1621000);
+        assert_eq!(compute.context_size, 0x0162_1000);
         assert_eq!(compute.control_stack_size, 12288);
         assert_eq!(compute.debug_size, 48640);
         assert_eq!(compute.xcc_count, xcc_count);
         assert_eq!(compute.total_size, total_size);
         let reservation = os_memory::Reservation::new_aligned_host(
-            total_size as usize,
+            usize::try_from(total_size).unwrap(),
             CWSR_ALIGNMENT,
             (0, isize::MAX as u64),
         )
@@ -173,7 +173,7 @@ fn gfx942_legacy_stack_and_debugger_share_rocr_wave_cap() {
     native.queues.simd_arrays_per_engine = 2;
     let compute = compute_storage(native.queues).unwrap();
     assert_eq!(compute.control_stack_size, 8192);
-    assert_eq!(compute.context_size, 0x174a000);
+    assert_eq!(compute.context_size, 0x0174_a000);
     assert_eq!(compute.debug_size, 16384);
     assert_eq!(compute.total_size, 24_436_736);
 }
@@ -189,7 +189,7 @@ fn reported_context_sizes_remain_authoritative() {
     assert_eq!(compute.context_size, 65536);
     assert_eq!(compute.control_stack_size, 4096);
     assert_eq!(compute.debug_size, 48640);
-    assert_eq!(compute.total_size, 913408);
+    assert_eq!(compute.total_size, 913_408);
     for (context_size, control_stack_size) in [
         (0, 4096),
         (65536, 0),
@@ -253,7 +253,7 @@ fn legacy_context_rejects_unqualified_geometry_and_overflow_before_acquisition()
             ..base
         },
         sysfs::KfdQueueProperties {
-            local_data_share_byte_length: 131072,
+            local_data_share_byte_length: 131_072,
             ..base
         },
         sysfs::KfdQueueProperties {
