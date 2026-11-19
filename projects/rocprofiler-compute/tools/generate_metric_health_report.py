@@ -521,7 +521,7 @@ def compute_dispatch_stats_for_workload(
         filtered,
         debug=False,
         pass_tables=[
-            table.loc[filtered.index] for table in workload.pass_tables.values()
+            table.rows_of(filtered) for table in workload.pass_tables.values()
         ],
     )
     return (

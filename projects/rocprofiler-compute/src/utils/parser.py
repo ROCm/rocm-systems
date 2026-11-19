@@ -605,7 +605,7 @@ def load_table_data(
         workload.roofline_peaks,
         filtered_pmc,
         args.debug_metric_expression,
-        [table.loc[filtered_pmc.index] for table in workload.pass_tables.values()],
+        [table.rows_of(filtered_pmc) for table in workload.pass_tables.values()],
     )
 
 

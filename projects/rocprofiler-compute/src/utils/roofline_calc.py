@@ -380,7 +380,7 @@ def _evaluate_kernel_tables(
         kernel_pmc_df,
         debug=False,
         pass_tables=[
-            table.loc[kernel_pmc_df.index] for table in workload.pass_tables.values()
+            table.rows_of(kernel_pmc_df) for table in workload.pass_tables.values()
         ],
     )
     return kernel_dfs

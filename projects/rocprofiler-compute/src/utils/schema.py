@@ -4,7 +4,7 @@
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 import pandas as pd
 
@@ -44,11 +44,48 @@ class MlApiTracePair:
 
 
 @dataclass
+class PassTable:
+    """The counters and timestamps one perfmon pass collected, per dispatch.
+
+    The dispatch columns come from the merged counter table, so all passes
+    share one copy of them. Read a column with table[name], as on a DataFrame.
+    """
+
+    counters: pd.DataFrame
+    merged: pd.DataFrame
+    # The dispatch columns, then the pass's own timestamps and counters
+    columns: pd.Index
+
+    @classmethod
+    def of(
+        cls,
+        counters: pd.DataFrame,
+        merged: pd.DataFrame,
+        dispatch_columns: pd.Index,
+    ) -> "PassTable":
+        """Return the table of counters, on the rows of merged."""
+        counters = counters.reindex(merged.index)
+        return cls(counters, merged, dispatch_columns.append(counters.columns))
+
+    def __getitem__(self, column: str) -> pd.Series:
+        # The pass's own timestamps win over the merged table's
+        if column in self.counters.columns:
+            return self.counters[column]
+        if column in self.columns:
+            return self.merged[column]
+        raise KeyError(column)
+
+    def rows_of(self, merged: pd.DataFrame) -> "PassTable":
+        """Return this table on the rows of merged, a part of the merged table."""
+        return PassTable(self.counters.loc[merged.index], merged, self.columns)
+
+
+@dataclass
 class Workload:
     sys_info: pd.DataFrame = field(default_factory=pd.DataFrame)
     raw_pmc: pd.DataFrame = field(default_factory=pd.DataFrame)
     # One counter table per pass, on raw_pmc's rows, keyed by pass name.
-    pass_tables: dict[str, pd.DataFrame] = field(default_factory=dict)
+    pass_tables: Dict[str, PassTable] = field(default_factory=dict)
     dfs: dict[int, pd.DataFrame] = field(default_factory=dict)
     dfs_type: dict[int, str] = field(default_factory=dict)
     filter_kernel_ids: list[int] = field(default_factory=list)
