@@ -553,6 +553,8 @@ hsa_status_t KfdVirtioDriver::Map(const core::DriverMemoryHandle& handle, void* 
                        drm_perm(perms), AMDGPU_VA_OP_MAP) != 0)
     return HSA_STATUS_ERROR;
 
+  printf("test\n");
+
   return HSA_STATUS_SUCCESS;
 }
 
