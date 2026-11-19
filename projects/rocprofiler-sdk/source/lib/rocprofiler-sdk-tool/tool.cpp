@@ -1098,7 +1098,7 @@ void
 snapshot_code_object(const tool::rocprofiler_code_object_info_t& obj_data)
 {
     if(obj_data.storage_type != ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY) return;
-    if(obj_data.uri && std::string_view{obj_data.uri}.substr(0, 7) == "file://") return;
+    if(obj_data.uri != nullptr && std::string_view{obj_data.uri}.substr(0, 7) == "file://") return;
 
     try
     {
