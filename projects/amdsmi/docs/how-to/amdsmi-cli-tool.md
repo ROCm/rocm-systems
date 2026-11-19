@@ -1323,7 +1323,7 @@ information, GPU status, and running processes.
 +------------------------------------------------------------------------------+
 | AMD-SMI            27.3.0                                                    |
 | amdgpu Version:    6.19.14.31400000-2370381                                  |
-| amdgpu Package:    amdgpu-dkms 6.19.14-2370381                               |
+| amdgpu Package:    amdgpu-dkms                                               |
 | ROCm Version:      10.3.0                                                    |
 | Platform:          Linux Baremetal                                           |
 |-------------------------------------+----------------------------------------|
@@ -1462,20 +1462,17 @@ The build is read from the installed package. After a package upgrade it is the
 build of the loaded driver only once the driver has been reloaded, for example
 by a restart.
 
-The package is reported next to the version:
+The package the build was read from is reported next to the version:
 
 | Command | Human-readable | JSON keys |
 |---|---|---|
-| `amd-smi` | `amdgpu Package: amdgpu-dkms 6.19.14-2370381` | With `amd-smi default --json`: `driver_full_version`, `driver_package`, `driver_package_version` in `version_info`, `amdgpu version` |
-| `amd-smi version` | `amdgpu package: amdgpu-dkms 6.19.14-2370381` | `amdgpu_version`, `amdgpu_package`, `amdgpu_package_version` |
-| `amd-smi static --driver` | `PACKAGE: amdgpu-dkms`, `PACKAGE_VERSION: 6.19.14-2370381` | `version`, `package`, `package_version` in `driver` |
-
-The package version is the version and build of the package without its
-distribution suffix: `6.19.14-2370381.24.04` is shown as `6.19.14-2370381`.
+| `amd-smi` | `amdgpu Package: amdgpu-dkms` | With `amd-smi default --json`: `driver_full_version`, `driver_package` in `version_info`, `amdgpu version` |
+| `amd-smi version` | `amdgpu package: amdgpu-dkms` | `amdgpu_version`, `amdgpu_package` |
+| `amd-smi static --driver` | `PACKAGE: amdgpu-dkms` | `version`, `package` in `driver` |
 
 Human-readable output leaves the package out when there is none. The JSON and
 CSV output of `amd-smi version` and `amd-smi static --driver` always carry the
-keys and report `N/A`. A container usually cannot see the host's DKMS tree or
+key and report `N/A`. A container usually cannot see the host's DKMS tree or
 RPM database, so there the version has no build and the package is `N/A`. The
 same is shown with a `libamd_smi.so` that predates
 `amdsmi_get_gpu_driver_info_v2()`, also when a matching package is installed.
@@ -1545,7 +1542,6 @@ GPU: 0
         VERSION: 6.19.14.31400000-2370381
         OS_KERNEL_VERSION: 5.15.0-generic
         PACKAGE: amdgpu-dkms
-        PACKAGE_VERSION: 6.19.14-2370381
     BOARD:
         MODEL_NUMBER: N/A
         PRODUCT_SERIAL: N/A

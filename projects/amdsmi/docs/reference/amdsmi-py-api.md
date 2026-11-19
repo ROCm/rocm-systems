@@ -724,8 +724,8 @@ and the build number of the driver package. Supersedes
 The driver package is the `amdgpu-dkms` package installed for the running
 kernel, or else its `amdgpu-kmod` RPM. It is reported only when it has the same
 base kernel version (`6.19.14` in `6.19.14.31400000`) as the loaded driver, and
-its build is then added to `driver_full_version`. Without such a package the
-three package values are `N/A`.
+its build is then added to `driver_full_version`. Without such a package
+`driver_package` and `driver_build_version` are `N/A`.
 
 The build is read from the installed package, which is matched to the loaded
 driver by kernel version only. After a package upgrade it is the build of the
@@ -759,7 +759,6 @@ Field | Content
 `driver_build_version` | build number of the driver package, such as `2370381`
 `driver_full_version` | `driver_version` followed by the build, such as `6.19.14.31400000-2370381`; the same as `driver_version` when there is no build
 `driver_package` | `amdgpu-dkms` or `amdgpu-kmod`
-`driver_package_version` | version and build of that package without its distribution suffix, such as `6.19.14-2370381`
 
 Exceptions that can be thrown by `amdsmi_get_gpu_driver_info_v2` function:
 
@@ -787,7 +786,7 @@ try:
             info = amdsmi.amdsmi_get_gpu_driver_info_v2(device)
             print("amdgpu version:", info['driver_full_version'])
             if info['driver_package'] != "N/A":
-                print("amdgpu package:", info['driver_package'], info['driver_package_version'])
+                print("amdgpu package:", info['driver_package'])
 except amdsmi.AmdSmiException as e:
     print(e)
 finally:

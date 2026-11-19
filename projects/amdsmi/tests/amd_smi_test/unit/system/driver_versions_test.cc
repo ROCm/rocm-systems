@@ -279,7 +279,6 @@ TEST(SystemUnit, DriverVersionsSplitModuleVersionAndAttachDkmsBuild) {
   EXPECT_STREQ(info.driver_build_version, "2370381");
   EXPECT_STREQ(info.driver_full_version, "6.19.14.31400000-2370381");
   EXPECT_EQ(info.driver_package, AMDSMI_DRIVER_PACKAGE_DKMS);
-  EXPECT_STREQ(info.driver_package_version, "6.19.14-2370381");
 }
 
 TEST(SystemUnit, DriverVersionsReadDkmsBuildWithAnyDistroSuffix) {
@@ -289,7 +288,6 @@ TEST(SystemUnit, DriverVersionsReadDkmsBuildWithAnyDistroSuffix) {
     EXPECT_EQ(smi_amdgpu_parse_driver_versions("6.19.14.31400000", dkms_version, "", &info),
               AMDSMI_STATUS_SUCCESS);
     EXPECT_STREQ(info.driver_build_version, "2370381") << dkms_version;
-    EXPECT_STREQ(info.driver_package_version, "6.19.14-2370381") << dkms_version;
   }
 }
 
@@ -303,7 +301,6 @@ TEST(SystemUnit, DriverVersionsWithoutPackageHaveNoBuild) {
   EXPECT_STREQ(info.driver_build_version, "");
   EXPECT_STREQ(info.driver_full_version, "6.19.14.31400000");
   EXPECT_EQ(info.driver_package, AMDSMI_DRIVER_PACKAGE_NONE);
-  EXPECT_STREQ(info.driver_package_version, "");
 }
 
 TEST(SystemUnit, DriverVersionsTakeKmodBuildWithoutDkmsPackage) {
@@ -317,7 +314,6 @@ TEST(SystemUnit, DriverVersionsTakeKmodBuildWithoutDkmsPackage) {
   EXPECT_STREQ(info.driver_build_version, "2412345");
   EXPECT_STREQ(info.driver_full_version, "6.16.13-2412345");
   EXPECT_EQ(info.driver_package, AMDSMI_DRIVER_PACKAGE_KMOD);
-  EXPECT_STREQ(info.driver_package_version, "6.16.13.000000-2412345");
 }
 
 TEST(SystemUnit, DriverVersionsPreferDkmsWhenBothPackagesMatch) {
@@ -339,7 +335,6 @@ TEST(SystemUnit, DriverVersionsTakeKmodWhenDkmsIsForAnotherModule) {
   EXPECT_STREQ(info.driver_build_version, "2412345");
   EXPECT_STREQ(info.driver_full_version, "6.16.13-2412345");
   EXPECT_EQ(info.driver_package, AMDSMI_DRIVER_PACKAGE_KMOD);
-  EXPECT_STREQ(info.driver_package_version, "6.16.13.000000-2412345");
 }
 
 TEST(SystemUnit, DriverVersionsIgnorePackagesOfAnotherModule) {
@@ -353,7 +348,6 @@ TEST(SystemUnit, DriverVersionsIgnorePackagesOfAnotherModule) {
   EXPECT_STREQ(info.driver_build_version, "");
   EXPECT_STREQ(info.driver_full_version, "6.19.4");
   EXPECT_EQ(info.driver_package, AMDSMI_DRIVER_PACKAGE_NONE);
-  EXPECT_STREQ(info.driver_package_version, "");
 }
 
 TEST(SystemUnit, DriverVersionsIgnorePackagesWhenModuleHasNoVersion) {
@@ -368,7 +362,6 @@ TEST(SystemUnit, DriverVersionsIgnorePackagesWhenModuleHasNoVersion) {
     EXPECT_STREQ(info.driver_build_version, "") << module_version;
     EXPECT_STREQ(info.driver_full_version, "") << module_version;
     EXPECT_EQ(info.driver_package, AMDSMI_DRIVER_PACKAGE_NONE) << module_version;
-    EXPECT_STREQ(info.driver_package_version, "") << module_version;
   }
 }
 
@@ -383,7 +376,6 @@ TEST(SystemUnit, DriverVersionsPassThroughUnexpectedModuleFormat) {
   EXPECT_STREQ(info.driver_build_version, "");
   EXPECT_STREQ(info.driver_full_version, "6.8.0-60-generic");
   EXPECT_EQ(info.driver_package, AMDSMI_DRIVER_PACKAGE_NONE);
-  EXPECT_STREQ(info.driver_package_version, "");
 }
 
 TEST(SystemUnit, DriverVersionsIgnoreMalformedPackageVersion) {
@@ -394,7 +386,6 @@ TEST(SystemUnit, DriverVersionsIgnoreMalformedPackageVersion) {
   EXPECT_STREQ(info.driver_build_version, "");
   EXPECT_STREQ(info.driver_full_version, "6.19.14.31400000");
   EXPECT_EQ(info.driver_package, AMDSMI_DRIVER_PACKAGE_NONE);
-  EXPECT_STREQ(info.driver_package_version, "");
 }
 
 TEST(SystemUnit, DriverVersionsOverwriteStaleFieldsAndKeepBaseFields) {
@@ -406,7 +397,6 @@ TEST(SystemUnit, DriverVersionsOverwriteStaleFieldsAndKeepBaseFields) {
   std::strcpy(info.amdgpu_driver_version, "stale");
   std::strcpy(info.driver_build_version, "stale");
   std::strcpy(info.driver_full_version, "stale");
-  std::strcpy(info.driver_package_version, "stale");
   info.driver_package = AMDSMI_DRIVER_PACKAGE_KMOD;
 
   EXPECT_EQ(smi_amdgpu_parse_driver_versions("N/A", "", "", &info), AMDSMI_STATUS_SUCCESS);
@@ -417,7 +407,6 @@ TEST(SystemUnit, DriverVersionsOverwriteStaleFieldsAndKeepBaseFields) {
   EXPECT_STREQ(info.amdgpu_driver_version, "");
   EXPECT_STREQ(info.driver_build_version, "");
   EXPECT_STREQ(info.driver_full_version, "");
-  EXPECT_STREQ(info.driver_package_version, "");
   EXPECT_EQ(info.driver_package, AMDSMI_DRIVER_PACKAGE_NONE);
 }
 
@@ -464,7 +453,6 @@ TEST(SystemUnit, DriverVersionsReportNoPackageWhenTheFullVersionDoesNotFit) {
               AMDSMI_STATUS_SUCCESS);
     EXPECT_EQ(info.driver_package, fits ? AMDSMI_DRIVER_PACKAGE_DKMS : AMDSMI_DRIVER_PACKAGE_NONE);
     EXPECT_EQ(std::string{info.driver_build_version}, fits ? build : "");
-    EXPECT_EQ(std::string{info.driver_package_version}, fits ? "6.19.14-" + build : "");
     EXPECT_EQ(std::string{info.driver_full_version},
               fits ? module_version + "-" + build : module_version);
   }
@@ -482,7 +470,6 @@ TEST(SystemUnit, DriverLookupReportsDkmsPackageWithoutAskingKmod) {
             AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(kmod.calls, 0);
   EXPECT_EQ(info.driver_package, AMDSMI_DRIVER_PACKAGE_DKMS);
-  EXPECT_STREQ(info.driver_package_version, "6.19.13-2370380");
   EXPECT_STREQ(info.driver_full_version, "6.19.13.31400000-2370380");
 }
 
@@ -512,7 +499,7 @@ TEST(SystemUnit, DriverLookupAsksKmodWhenDkmsPackageIsForAnotherModule) {
             AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(kmod.calls, 1);
   EXPECT_EQ(info.driver_package, AMDSMI_DRIVER_PACKAGE_KMOD);
-  EXPECT_STREQ(info.driver_package_version, "6.16.13.000000-2412345");
+  EXPECT_STREQ(info.driver_build_version, "2412345");
 }
 
 TEST(SystemUnit, DriverLookupTakesTheOnlyKmodVersionOfTheModule) {
@@ -528,7 +515,6 @@ TEST(SystemUnit, DriverLookupTakesTheOnlyKmodVersionOfTheModule) {
                                              kmod.AsFunction(), &info),
               AMDSMI_STATUS_SUCCESS);
     EXPECT_EQ(info.driver_package, AMDSMI_DRIVER_PACKAGE_KMOD) << versions.front();
-    EXPECT_STREQ(info.driver_package_version, "6.16.13.000000-2412345") << versions.front();
     EXPECT_STREQ(info.driver_full_version, "6.16.13-2412345") << versions.front();
   }
 }

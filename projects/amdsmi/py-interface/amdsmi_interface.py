@@ -4494,8 +4494,8 @@ def amdsmi_get_gpu_driver_info_v2(processor_handle: processor_handle_t) -> Dict[
     the build of the driver package.
 
     The package is the installed amdgpu-dkms or amdgpu-kmod package that has the
-    kernel version of the loaded driver. Without one, the three package values
-    are "N/A" and driver_full_version is driver_version.
+    kernel version of the loaded driver. Without one, driver_package and
+    driver_build_version are "N/A" and driver_full_version is driver_version.
 
     When no amdgpu-dkms package matches, the first call in a process runs
     /usr/bin/rpm to look for amdgpu-kmod and can wait up to about 5 seconds for
@@ -4517,7 +4517,6 @@ def amdsmi_get_gpu_driver_info_v2(processor_handle: processor_handle_t) -> Dict[
             - driver_full_version: driver_version followed by the build, such as
               6.19.14.31400000-2370381.
             - driver_package: "amdgpu-dkms" or "amdgpu-kmod".
-            - driver_package_version: package version and build, such as 6.19.14-2370381.
 
     Raises:
         AmdSmiParameterException: If processor_handle is not a processor handle.
@@ -4540,7 +4539,6 @@ def amdsmi_get_gpu_driver_info_v2(processor_handle: processor_handle_t) -> Dict[
         "driver_build_version": info.driver_build_version.decode("utf-8"),
         "driver_full_version": info.driver_full_version.decode("utf-8"),
         "driver_package": _DRIVER_PACKAGE_NAMES.get(info.driver_package, ""),
-        "driver_package_version": info.driver_package_version.decode("utf-8"),
     }
     return {key: value or "N/A" for key, value in driver_info.items()}
 

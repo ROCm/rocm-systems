@@ -22,13 +22,11 @@ _DRIVER_INFO = {
     "driver_version": "6.19.14.31400000",
     "driver_full_version": "6.19.14.31400000-2370381",
     "driver_package": "amdgpu-dkms",
-    "driver_package_version": "6.19.14-2370381",
 }
 _NO_PACKAGE_DRIVER_INFO = {
     **_DRIVER_INFO,
     "driver_full_version": "6.19.14.31400000",
     "driver_package": "N/A",
-    "driver_package_version": "N/A",
 }
 
 
@@ -131,13 +129,11 @@ class TestVersionDriverOutput(unittest.TestCase):
         output = _run_version()
         self.assertEqual(output["amdgpu_version"], "6.19.14.31400000-2370381")
         self.assertEqual(output["amdgpu_package"], "amdgpu-dkms")
-        self.assertEqual(output["amdgpu_package_version"], "6.19.14-2370381")
 
-    def test_json_keeps_package_keys_after_the_older_keys(self) -> None:
+    def test_json_keeps_the_package_key_after_the_older_keys(self) -> None:
         output = _run_version(driver_info=_NO_PACKAGE_DRIVER_INFO)
         self.assertEqual(output["amdgpu_version"], "6.19.14.31400000")
         self.assertEqual(output["amdgpu_package"], "N/A")
-        self.assertEqual(output["amdgpu_package_version"], "N/A")
         self.assertEqual(
             list(output),
             [
@@ -149,7 +145,6 @@ class TestVersionDriverOutput(unittest.TestCase):
                 "amd_hsmp_driver_version",
                 "nic_driver_version",
                 "amdgpu_package",
-                "amdgpu_package_version",
             ],
         )
 
@@ -160,9 +155,7 @@ class TestVersionDriverOutput(unittest.TestCase):
 
         line = stdout.getvalue()
         self.assertIn(
-            "| amdgpu version: 6.19.14.31400000-2370381"
-            " | amdgpu package: amdgpu-dkms 6.19.14-2370381\n",
-            line,
+            "| amdgpu version: 6.19.14.31400000-2370381 | amdgpu package: amdgpu-dkms\n", line
         )
 
     def test_human_readable_hides_package_without_a_package(self) -> None:
@@ -201,7 +194,6 @@ class TestVersionDriverOutput(unittest.TestCase):
 
         self.assertEqual(output["amdgpu_version"], "N/A")
         self.assertEqual(output["amdgpu_package"], "N/A")
-        self.assertEqual(output["amdgpu_package_version"], "N/A")
 
 
 def _run_version_without_flags(loaded: set, hsmp_devices: list) -> dict:

@@ -22,7 +22,6 @@ _V2_STRINGS = (
     "amdgpu_driver_version",
     "driver_build_version",
     "driver_full_version",
-    "driver_package_version",
 )
 _FULL_INFO = {
     "driver_version": "6.19.14.31400000",
@@ -32,7 +31,6 @@ _FULL_INFO = {
     "amdgpu_driver_version": "31400000",
     "driver_build_version": "2370381",
     "driver_full_version": "6.19.14.31400000-2370381",
-    "driver_package_version": "6.19.14-2370381",
 }
 
 wrapper = amdsmi.amdsmi_wrapper

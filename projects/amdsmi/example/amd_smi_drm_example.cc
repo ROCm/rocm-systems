@@ -1232,10 +1232,9 @@ int main() {
         printf("\tDriver build version: %s\n", driver_info.driver_build_version);
         printf("\tDriver full version: %s\n", driver_info.driver_full_version);
         if (driver_info.driver_package != AMDSMI_DRIVER_PACKAGE_NONE) {
-          printf("\tDriver package: %s %s\n",
-                 driver_info.driver_package == AMDSMI_DRIVER_PACKAGE_DKMS ? "amdgpu-dkms"
-                                                                          : "amdgpu-kmod",
-                 driver_info.driver_package_version);
+          printf("\tDriver package: %s\n", driver_info.driver_package == AMDSMI_DRIVER_PACKAGE_DKMS
+                                               ? "amdgpu-dkms"
+                                               : "amdgpu-kmod");
         }
         printf("\n");
       } else {

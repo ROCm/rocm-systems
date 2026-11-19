@@ -5335,10 +5335,9 @@ pub fn amdsmi_get_gpu_driver_info(
 ///     // Retrieve the GPU driver information
 ///     match amdsmi_get_gpu_driver_info_v2(processor_handle) {
 ///         Ok(info) => println!(
-///             "amdgpu version: {} ({:?} {})",
+///             "amdgpu version: {} ({:?})",
 ///             info.driver_full_version(),
-///             info.driver_package,
-///             info.driver_package_version()
+///             info.driver_package
 ///         ),
 ///         Err(e) => panic!("Failed to get GPU driver information: {}", e),
 ///     }

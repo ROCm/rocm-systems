@@ -50,7 +50,6 @@ _V2_INFO = {
     "driver_build_version": "2370381",
     "driver_full_version": "6.19.14.31400000-2370381",
     "driver_package": "amdgpu-dkms",
-    "driver_package_version": "6.19.14-2370381",
 }
 
 
@@ -163,7 +162,6 @@ class TestGetGpuDriverInfo(unittest.TestCase):
                 "driver_build_version": "N/A",
                 "driver_full_version": "6.19.14.31400000",
                 "driver_package": "N/A",
-                "driver_package_version": "N/A",
             },
         )
         # The commands read the same keys whichever call answered.

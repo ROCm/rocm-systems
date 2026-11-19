@@ -1381,25 +1381,22 @@ typedef enum {
  * @cond @tag{gpu_bm_linux} @tag{guest_1vf} @tag{guest_mvf} @endcond
  */
 typedef struct {
-  char driver_version[AMDSMI_MAX_STRING_LENGTH];          //!< amdgpu module version, such as
-                                                          //!< 6.19.14.31400000, or N/A when the
-                                                          //!< module has none
-  char driver_date[AMDSMI_MAX_STRING_LENGTH];             //!< Driver date
-  char driver_name[AMDSMI_MAX_STRING_LENGTH];             //!< Driver name
-  char driver_kernel_version[AMDSMI_MAX_STRING_LENGTH];   //!< Kernel version of the amdgpu
-                                                          //!< source, such as 6.19.14
-  char amdgpu_driver_version[AMDSMI_MAX_STRING_LENGTH];   //!< amdgpu release, such as 31400000
-  char driver_build_version[AMDSMI_MAX_STRING_LENGTH];    //!< Build of driver_package, such
-                                                          //!< as 2370381
-  char driver_full_version[AMDSMI_MAX_STRING_LENGTH];     //!< driver_version followed by the
-                                                          //!< build, such as
-                                                          //!< 6.19.14.31400000-2370381
-  char driver_package_version[AMDSMI_MAX_STRING_LENGTH];  //!< Version and build of
-                                                          //!< driver_package, such as
-                                                          //!< 6.19.14-2370381
-  amdsmi_driver_package_t driver_package;                 //!< Installed package that matches
-                                                          //!< the loaded driver
-  uint32_t reserved[511];                                 //!< Reserved for future fields
+  char driver_version[AMDSMI_MAX_STRING_LENGTH];         //!< amdgpu module version, such as
+                                                         //!< 6.19.14.31400000, or N/A when the
+                                                         //!< module has none
+  char driver_date[AMDSMI_MAX_STRING_LENGTH];            //!< Driver date
+  char driver_name[AMDSMI_MAX_STRING_LENGTH];            //!< Driver name
+  char driver_kernel_version[AMDSMI_MAX_STRING_LENGTH];  //!< Kernel version of the amdgpu
+                                                         //!< source, such as 6.19.14
+  char amdgpu_driver_version[AMDSMI_MAX_STRING_LENGTH];  //!< amdgpu release, such as 31400000
+  char driver_build_version[AMDSMI_MAX_STRING_LENGTH];   //!< Build of driver_package, such
+                                                         //!< as 2370381
+  char driver_full_version[AMDSMI_MAX_STRING_LENGTH];    //!< driver_version followed by the
+                                                         //!< build, such as
+                                                         //!< 6.19.14.31400000-2370381
+  amdsmi_driver_package_t driver_package;                //!< Installed package that matches
+                                                         //!< the loaded driver
+  uint32_t reserved[575];                                //!< Reserved for future fields
 } amdsmi_driver_info_v2_t;
 
 /**

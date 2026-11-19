@@ -29,13 +29,11 @@ _DRIVER_INFO = {
     "driver_build_version": "2370381",
     "driver_full_version": "6.19.14.31400000-2370381",
     "driver_package": "amdgpu-dkms",
-    "driver_package_version": "6.19.14-2370381",
 }
 _NO_PACKAGE = {
     "driver_build_version": "N/A",
     "driver_full_version": "6.19.14.31400000",
     "driver_package": "N/A",
-    "driver_package_version": "N/A",
 }
 
 
@@ -192,8 +190,7 @@ class TestDefaultDriverHeader(unittest.TestCase):
         version_index = lines.index(_row(lines, "amdgpu Version:"))
 
         self.assertIn(" 6.19.14.31400000-2370381 ", lines[version_index])
-        self.assertTrue(lines[version_index + 1].startswith("| amdgpu Package:"))
-        self.assertIn(" amdgpu-dkms 6.19.14-2370381 ", lines[version_index + 1])
+        self.assertRegex(lines[version_index + 1], r"^\| amdgpu Package:    amdgpu-dkms +\|$")
         self.assertEqual(len(lines[version_index + 1]), len(lines[version_index]))
         self.assertTrue(lines[version_index + 2].startswith("| ROCm Version:"))
 
@@ -203,12 +200,11 @@ class TestDefaultDriverHeader(unittest.TestCase):
                 **_DRIVER_INFO,
                 "driver_full_version": "6.16.13-2412345",
                 "driver_package": "amdgpu-kmod",
-                "driver_package_version": "6.16.13.000000-2412345",
             }
         )
 
         self.assertIn(" 6.16.13-2412345 ", _row(lines, "amdgpu Version:"))
-        self.assertIn(" amdgpu-kmod 6.16.13.000000-2412345 ", _row(lines, "amdgpu Package:"))
+        self.assertRegex(_row(lines, "amdgpu Package:"), r"^\| amdgpu Package:    amdgpu-kmod +\|$")
 
     def test_banner_hides_package_row_without_a_package(self) -> None:
         lines = _banner_lines({**_DRIVER_INFO, **_NO_PACKAGE})

@@ -1288,10 +1288,7 @@ class AMDSMILogger:
                     amdgpu_version = "N/A"
             else:
                 amdgpu_version = str(driver_version["driver_full_version"])[:80]
-            if driver_version["driver_package"] != "N/A":
-                amdgpu_package = "{} {}".format(
-                    driver_version["driver_package"], driver_version["driver_package_version"]
-                )
+            amdgpu_package = driver_version["driver_package"]
         fw_pldm_version = str(output["version_info"]["fw pldm version"])
         vbios_version = str(output["version_info"]["vbios version"])
         kernel_version = str(output["version_info"]["kernel version"])

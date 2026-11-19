@@ -79,7 +79,7 @@ void TestDriverInfoRead::Run(void) {
 
   // A.B.C[.D] for the module, A.B.C[.D]-<build>[.<distro>] for the package.
   static const std::regex module_format{R"(^(\d+\.\d+\.\d+)(?:\.(\d+))?$)"};
-  static const std::regex package_format{R"(^((\d+\.\d+\.\d+)(?:\.\d+)*-(\d+))(?:\..*)?$)"};
+  static const std::regex package_format{R"(^(\d+\.\d+\.\d+)(?:\.\d+)*-(\d+)(?:\..*)?$)"};
   const std::string dkms_version = DkmsVersionOfRunningKernel();
   std::smatch dkms;
   const bool has_dkms = std::regex_match(dkms_version, dkms, package_format);
@@ -116,7 +116,6 @@ void TestDriverInfoRead::Run(void) {
       std::cout << "\t**Driver build version: " << info.driver_build_version << std::endl;
       std::cout << "\t**Driver full version: " << info.driver_full_version << std::endl;
       std::cout << "\t**Driver package: " << info.driver_package << std::endl;
-      std::cout << "\t**Driver package version: " << info.driver_package_version << std::endl;
     }
 
     EXPECT_STREQ(info.driver_version, v1.driver_version);
@@ -130,26 +129,19 @@ void TestDriverInfoRead::Run(void) {
     EXPECT_EQ(std::string{info.amdgpu_driver_version}, has_module ? module[2].str() : "");
 
     const std::string build = info.driver_build_version;
-    const std::string package_version = info.driver_package_version;
-    if (has_module && has_dkms && (dkms[2] == module[1])) {
+    if (has_module && has_dkms && (dkms[1] == module[1])) {
       // DKMS recorded a package with the kernel version of the loaded module for this kernel.
       EXPECT_EQ(info.driver_package, AMDSMI_DRIVER_PACKAGE_DKMS);
-      EXPECT_EQ(package_version, dkms[1].str());
-      EXPECT_EQ(build, dkms[3].str());
-      EXPECT_EQ(std::string{info.driver_full_version}, version + "-" + dkms[3].str());
+      EXPECT_EQ(build, dkms[2].str());
+      EXPECT_EQ(std::string{info.driver_full_version}, version + "-" + dkms[2].str());
     } else if (info.driver_package == AMDSMI_DRIVER_PACKAGE_NONE) {
       EXPECT_EQ(build, "");
-      EXPECT_EQ(package_version, "");
       EXPECT_EQ(std::string{info.driver_full_version}, (version == "N/A") ? "" : version);
     } else {
-      // A package this test cannot look up itself, such as amdgpu-kmod: it has the kernel version
-      // of the module and is reported together with its build.
+      // A package this test cannot look up itself, such as amdgpu-kmod, comes with its build.
       ASSERT_TRUE(has_module);
       ASSERT_FALSE(build.empty());
       EXPECT_EQ(std::string{info.driver_full_version}, version + "-" + build);
-      EXPECT_EQ(package_version.rfind(module[1].str(), 0), 0U);
-      ASSERT_GT(package_version.size(), build.size());
-      EXPECT_EQ(package_version.substr(package_version.size() - build.size() - 1), "-" + build);
     }
 
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_driver_info_v2", "gpu=" + std::to_string(i) + ", info=null",

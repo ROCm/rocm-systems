@@ -6597,7 +6597,7 @@ amdsmi_status_t amdsmi_get_gpu_driver_info_v2(amdsmi_processor_handle processor_
      << " | amdgpu driver version: " << info->amdgpu_driver_version << "\n"
      << " | Driver build version: " << info->driver_build_version << "\n"
      << " | Driver full version: " << info->driver_full_version << "\n"
-     << " | Driver package: " << package_name << " " << info->driver_package_version << "\n"
+     << " | Driver package: " << package_name << "\n"
      << " | Returning: " << smi_amdgpu_get_status_string(status, false);
   LOG_INFO(ss);
   return status;
