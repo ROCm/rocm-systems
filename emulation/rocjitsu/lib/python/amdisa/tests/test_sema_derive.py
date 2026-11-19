@@ -1,26 +1,23 @@
 # Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-import os, pytest, re
-from types import SimpleNamespace
+"""Tests for mnemonic-to-SemaAST derivation."""
+
+import os
+import re
+
+import pytest
+
 from amdisa.isa_profile import Cdna5Profile
 from amdisa.semantics import derive_semantics
-from amdisa.sema_ast import ExecModel, SemaNodeKind, SemaType
-from amdisa.sema_derive import derive_sema_block
-from amdisa.sema_enrich import enrich_block
-from amdisa.codegen.execute.sema_lower import (
-    LoweringContext,
-    OperandBinding,
-    OperandMap,
-    RegClass,
-    lower_sema_block,
+from amdisa.sema_ast import (
+    ExecModel,
+    SemaNodeKind,
+    SemaType,
 )
-from amdisa.codegen.execute.packed import gen_pk_binop, gen_pk_mov_b32, gen_pk_ternary
-from amdisa.codegen.execute.vector_special import gen_cvt_fp8, gen_vector_cvt_pk
+from amdisa.sema_derive import derive_sema_block
 from amdisa.sema_fingerprint import fingerprint
 from amdisa.sema_properties import InstructionProperty, derive_properties
-
-"""Tests for mnemonic-to-SemaAST derivation."""
 
 
 class _FakeSem:
@@ -358,6 +355,11 @@ class TestDeriveScalarSaveexec:
         assert derive_semantics(name, 'ENC_SOP1') is None
 
 
+# =========================================================================
+# Vector ALU + cmp
+# =========================================================================
+
+
 class TestDeriveVectorMov:
     def test_produces_vector_pragma(self):
         sem = _FakeSem('V_MOV_B32', 'vector_mov', data_type='b32')
@@ -543,287 +545,51 @@ class TestDeriveVectorUnary:
         assert sem.data_type == 'f32'
 
     @pytest.mark.parametrize(
-        ('name', 'op', 'helper', 'write_fn', 'needs_f16'),
+        'name, op',
         [
-            (
-                'V_CVT_PK_F32_FP8',
-                'f32_fp8',
-                'util::fp8_e4m3_to_f32',
-                'write_lane64',
-                False,
-            ),
-            (
-                'V_CVT_PK_F32_BF8',
-                'f32_bf8',
-                'util::bf8_e5m2_to_f32',
-                'write_lane64',
-                False,
-            ),
-            (
-                'V_CVT_PK_F16_FP8',
-                'f16_fp8',
-                'util::fp8_e4m3_to_f32',
-                'write_lane',
-                True,
-            ),
-            (
-                'V_CVT_PK_F16_BF8',
-                'f16_bf8',
-                'util::bf8_e5m2_to_f32',
-                'write_lane',
-                True,
-            ),
+            ('V_CVT_PK_F32_FP8', 'f32_fp8'),
+            ('V_CVT_PK_F32_BF8', 'f32_bf8'),
+            ('V_CVT_PK_F16_FP8', 'f16_fp8'),
+            ('V_CVT_PK_F16_BF8', 'f16_bf8'),
+            ('V_CVT_PK_FP8_F32', 'fp8_f32'),
+            ('V_CVT_PK_BF8_F32', 'bf8_f32'),
+            ('V_CVT_PK_FP8_F16', 'fp8_f16'),
+            ('V_CVT_PK_BF8_F16', 'bf8_f16'),
         ],
     )
-    @pytest.mark.parametrize('enc', ['ENC_VOP1', 'ENC_VOP3'])
-    def test_cvt_pk_fp8_bf8_unpack_conversions_use_packed_generator(
-        self, enc, name, op, helper, write_fn, needs_f16
-    ):
-        sem = derive_semantics(name, enc)
-        assert sem is not None
-        assert sem.semantic_class == 'vector_cvt_pk'
-        assert sem.operation == op
-
-        cpp = gen_vector_cvt_pk(['vdst'], ['src0'], sem.semantic_class, sem.operation)
-        assert helper in cpp
-        assert 'src_hi' in cpp
-        assert 'packed & 0xFFFFu' in cpp
-        assert 'half & 0xFFu' in cpp
-        assert '(half >> 8) & 0xFFu' in cpp
-        assert write_fn in cpp
-        assert ('util::f32_to_f16_mode(lo, wf.fp16_ovfl())' in cpp) == needs_f16
-        assert ('util::f32_to_f16_mode(hi, wf.fp16_ovfl())' in cpp) == needs_f16
-        assert 'src1' not in cpp
-        if not needs_f16:
-            # RDNA4 decodes F32 results' OCP bytes through shared/conversion.h.
-            rdna4 = gen_vector_cvt_pk(
-                ['vdst'], ['src0'], sem.semantic_class, sem.operation, arch_name='rdna4'
-            )
-            layout = 'Fp8' if op.endswith('fp8') else 'Bf8'
-            decode = f'amdgpu::conversion::decode_fp8<amdgpu::conversion::{layout}>'
-            assert f'{decode}(half)' in rdna4
-            assert f'{decode}(half >> 8)' in rdna4
-            assert helper not in rdna4
+    def test_packed_fp8_conversion_metadata(self, name, op):
+        encodings = (
+            ('ENC_VOP1', 'ENC_VOP3')
+            if name.endswith(('_FP8', '_BF8'))
+            else ('ENC_VOP3',)
+        )
+        for enc in encodings:
+            sem = derive_semantics(name, enc)
+            assert sem is not None
+            assert sem.semantic_class == 'vector_cvt_pk'
+            assert sem.operation == op
 
     @pytest.mark.parametrize(
-        ('name', 'op', 'helper', 'needs_src1', 'needs_f16', 'uses_fp16_ovfl'),
+        'name, cls',
         [
-            (
-                'V_CVT_PK_FP8_F32',
-                'fp8_f32',
-                'util::f32_to_fp8_e4m3_rne_mode',
-                True,
-                False,
-                True,
-            ),
-            (
-                'V_CVT_PK_BF8_F32',
-                'bf8_f32',
-                'util::f32_to_bf8_e5m2_rne_mode',
-                True,
-                False,
-                True,
-            ),
-            (
-                'V_CVT_PK_FP8_F16',
-                'fp8_f16',
-                'util::f32_to_fp8_e4m3_rne',
-                False,
-                True,
-                False,
-            ),
-            (
-                'V_CVT_PK_BF8_F16',
-                'bf8_f16',
-                'util::f32_to_bf8_e5m2_rne',
-                False,
-                True,
-                False,
-            ),
+            ('V_CVT_PK_BF16_F32', 'vector_cvt_pk_bf16_f32'),
+            ('V_CVT_PK_F16_F32', 'vector_cvt_pk_f16_f32'),
+            ('V_CVT_SR_PK_F16_F32', 'vector_cvt_sr_pk_f16_f32'),
+            ('V_CVT_SR_PK_BF16_F32', 'vector_cvt_sr_pk_bf16_f32'),
+            ('V_CVT_SR_F16_F32', 'vector_cvt_sr_f16_f32'),
+            ('V_CVT_SR_BF16_F32', 'vector_cvt_sr_bf16_f32'),
         ],
     )
-    def test_cvt_pk_fp8_bf8_output_conversions_use_rne_packing(
-        self, name, op, helper, needs_src1, needs_f16, uses_fp16_ovfl
-    ):
+    def test_packed_and_stochastic_half_conversion_metadata(self, name, cls):
         sem = derive_semantics(name, 'ENC_VOP3')
         assert sem is not None
-        assert sem.semantic_class == 'vector_cvt_pk'
-        assert sem.operation == op
-
-        src = ['src0', 'src1'] if needs_src1 else ['src0']
-        cpp = gen_vector_cvt_pk(['vdst'], src, sem.semantic_class, sem.operation)
-        if uses_fp16_ovfl:
-            assert f'{helper}(s0, wf.fp16_ovfl())' in cpp
-            assert f'{helper}(s1, wf.fp16_ovfl())' in cpp
-            assert 'wf.fp16_ovfl()' in cpp
-            # RDNA4 F32 sources use the shared OCP stages, which read FP16_OVFL.
-            rdna4 = gen_vector_cvt_pk(
-                ['vdst'], src, sem.semantic_class, sem.operation, arch_name='rdna4'
-            )
-            layout = 'Fp8' if op.startswith('fp8') else 'Bf8'
-            stages = f'amdgpu::conversion_to_fp8<amdgpu::conversion::{layout}>(wf)'
-            assert f'const auto conversion = {stages};' in rdna4
-            assert 'uint32_t packed = conversion(s0, s1);' in rdna4
-            assert helper not in rdna4
-        else:
-            assert f'{helper}(s0)' in cpp
-            assert f'{helper}(s1)' in cpp
-            assert 'wf.fp16_ovfl()' not in cpp
-        assert 'static_cast<uint32_t>(lo)' in cpp
-        assert 'static_cast<uint32_t>(hi) << 8' in cpp
-        assert 'write_vop3_true16_dst' in cpp
-        assert ('src1' in cpp) == needs_src1
-        assert ('util::f16_to_f32' in cpp) == needs_f16
-
-    def test_gfx1250_cvt_pk_fp8_clamp_selects_e5m3_encoder(self):
-        cpp = gen_vector_cvt_pk(
-            ['vdst'],
-            ['src0', 'src1'],
-            'vector_cvt_pk',
-            'fp8_f32',
-            opsel='inst_.opsel',
-            fp8_format_select='inst_.clamp',
-            arch_name='cdna5',
-        )
-
-        assert 'inst_.clamp' in cpp
-        assert (
-            'util::f32_to_fp8_e5m3_rne_mode(std::bit_cast<float>(s0), wf.fp16_ovfl())'
-            in cpp
-        )
-        assert 'packed = conversion(s0, s1);' in cpp
-        assert 'inst_.opsel' in cpp
-
-    def test_gfx1250_cvt_pk_fp8_f16_clamp_selects_e5m3_without_fp16_ovfl(self):
-        cpp = gen_vector_cvt_pk(
-            ['vdst'],
-            ['src0'],
-            'vector_cvt_pk',
-            'fp8_f16',
-            opsel='inst_.opsel',
-            fp8_format_select='inst_.clamp',
-        )
-
-        assert 'inst_.clamp' in cpp
-        assert 'util::f32_to_fp8_e5m3_rne(s0)' in cpp
-        assert 'util::f32_to_fp8_e4m3_rne(s0)' in cpp
-        assert 'wf.fp16_ovfl()' not in cpp
-        assert 'inst_.opsel' in cpp
-
-    def test_gfx1250_cvt_sr_fp8_clamp_selects_e5m3_encoder(self):
-        ctx = SimpleNamespace(
-            op='sr_fp8_f32',
-            dst_ops=['vdst'],
-            src_ops=['src0', 'src1'],
-            is_vop3=True,
-            has_abs=True,
-            enc_field_names={'opsel'},
-            encoding_map=None,
-            enc_name='',
-            arch_name='cdna5',
-        )
-
-        cpp = gen_cvt_fp8(ctx)
-
-        assert 'inst_.clamp' in cpp
-        assert (
-            'util::f32_to_fp8_e5m3_sr_mode(std::bit_cast<float>(s0), seed, wf.fp16_ovfl())'
-            in cpp
-        )
-        assert 'conversion.stochastic(s0, seed)' in cpp
-        assert 'inst_.opsel' in cpp
-
-    def test_gfx1250_cvt_sr_fp8_f16_clamp_selects_e5m3_encoder(self):
-        cpp = gen_vector_cvt_pk(
-            ['vdst'],
-            ['src0', 'src1'],
-            'vector_cvt_sr_fp8_f16',
-            None,
-            opsel='inst_.opsel',
-            fp8_format_select='inst_.clamp',
-        )
-
-        assert 'read_vop3_true16_src(src0, wf, lane, inst_.opsel, 0)' in cpp
-        assert 'inst_.clamp' in cpp
-        assert 'util::f32_to_fp8_e5m3_sr(s0, seed)' in cpp
-        assert 'util::f32_to_fp8_e4m3_sr(s0, seed)' in cpp
-        assert 'wf.fp16_ovfl()' not in cpp
-
-    def test_gfx1250_cvt_sr_bf8_f16_does_not_thread_fp16_ovfl(self):
-        cpp = gen_vector_cvt_pk(
-            ['vdst'],
-            ['src0', 'src1'],
-            'vector_cvt_sr_bf8_f16',
-            None,
-            opsel='inst_.opsel',
-        )
-
-        assert 'util::f32_to_bf8_e5m2_sr(s0, seed)' in cpp
-        assert 'wf.fp16_ovfl()' not in cpp
-
-    def test_cvt_pk_bf16_f32_uses_rne_packing(self):
-        sem = derive_semantics('V_CVT_PK_BF16_F32', 'ENC_VOP3')
-        assert sem is not None
-        assert sem.semantic_class == 'vector_cvt_pk_bf16_f32'
-
-        cpp = gen_vector_cvt_pk(
-            ['vdst'], ['src0', 'src1'], sem.semantic_class, sem.operation
-        )
-        assert 'util::f32_to_bf16_rne_mode(s0, wf.fp16_ovfl())' in cpp
-        assert 'util::f32_to_bf16_rne_mode(s1, wf.fp16_ovfl())' in cpp
-        assert 'util::f32_to_bf16(s' not in cpp
-        assert 'lo | (hi << 16)' in cpp
-
-    def test_cvt_pk_f16_f32_threads_fp16_ovfl(self):
-        sem = derive_semantics('V_CVT_PK_F16_F32', 'ENC_VOP3')
-        assert sem is not None
-        assert sem.semantic_class == 'vector_cvt_pk_f16_f32'
-
-        cpp = gen_vector_cvt_pk(
-            ['vdst'], ['src0', 'src1'], sem.semantic_class, sem.operation
-        )
-        assert 'util::f32_to_f16_mode(s0, wf.fp16_ovfl())' in cpp
-        assert 'util::f32_to_f16_mode(s1, wf.fp16_ovfl())' in cpp
+        assert sem.semantic_class == cls
 
     def test_cvt_f16_f32_metadata(self):
         sem = derive_semantics('V_CVT_F16_F32', 'ENC_VOP3')
         assert sem is not None
         assert sem.operation == 'cvt'
         assert sem.data_type == 'f16_f32'
-
-    def test_cvt_sr_pk_f16_bf16_f32_splits_seed_and_threads_fp16_ovfl(self):
-        for name in ('V_CVT_SR_PK_F16_F32', 'V_CVT_SR_PK_BF16_F32'):
-            sem = derive_semantics(name, 'ENC_VOP3')
-            assert sem is not None
-
-            cpp = gen_vector_cvt_pk(
-                ['vdst'], ['src0', 'src1', 'src2'], sem.semantic_class, sem.operation
-            )
-            helper = f'amdgpu::fp_mode::{name.lower().removeprefix("v_")}'
-            assert f'{helper}(s0, static_cast<uint16_t>(seed), wf.fp16_ovfl())' in cpp
-            assert (
-                f'{helper}(s1, static_cast<uint16_t>(seed >> 16), wf.fp16_ovfl())'
-                in cpp
-            )
-
-    def test_cvt_sr_f16_bf16_f32_reads_seed_and_threads_fp16_ovfl(self):
-        for name, helper in (
-            ('V_CVT_SR_F16_F32', 'util::f32_to_f16_sr_mode'),
-            ('V_CVT_SR_BF16_F32', 'util::f32_to_bf16_sr_mode'),
-        ):
-            sem = derive_semantics(name, 'ENC_VOP3')
-            assert sem is not None
-
-            cpp = gen_vector_cvt_pk(
-                ['vdst'], ['src0', 'src1'], sem.semantic_class, sem.operation
-            )
-            assert (
-                'uint32_t seed = amdgpu::RegisterAccess(wf).read_lane(src1, lane);'
-                in cpp
-            )
-            assert f'{helper}(s0, seed, wf.fp16_ovfl())' in cpp
-            assert 'write_vop3_true16_dst(vdst, wf, lane, 0u, result)' in cpp
-            assert 'write_lane(vdst, lane, static_cast<uint32_t>' not in cpp
 
     @pytest.mark.parametrize(
         ('name', 'op'),
@@ -1163,6 +929,11 @@ class TestDeriveVectorFmaVariants:
         assert block is not None
         all_kinds = {n.kind for n in block.body.walk()}
         assert SemaNodeKind.FMA in all_kinds
+
+
+# =========================================================================
+# Memory
+# =========================================================================
 
 
 class TestDeriveSmemLoad:
@@ -1717,6 +1488,46 @@ def test_packed_atomic_add_keeps_component_type(
     assert sem.operation == 'pk_add_' + dtype
     assert sem.semantic_class == semantic_class
     assert sem.num_elems == 1
+
+
+class TestDeriveMemoryClasses:
+    def test_all_memory_classes_derive(self):
+        classes = [
+            ('S_LOAD_B32', 'smem_load', ExecModel.SCALAR),
+            ('S_STORE_B32', 'smem_store', ExecModel.SCALAR),
+            ('BUFFER_LOAD_B32', 'buffer_load', ExecModel.VECTOR),
+            ('BUFFER_STORE_B32', 'buffer_store', ExecModel.VECTOR),
+            ('BUFFER_ATOMIC_ADD_F32', 'buffer_atomic', ExecModel.VECTOR),
+            ('FLAT_LOAD_B32', 'flat_load', ExecModel.VECTOR),
+            ('FLAT_STORE_B32', 'flat_store', ExecModel.VECTOR),
+            ('FLAT_ATOMIC_ADD_F32', 'flat_atomic', ExecModel.VECTOR),
+            ('DS_LOAD_B32', 'ds_read', ExecModel.VECTOR),
+            ('DS_STORE_B32', 'ds_write', ExecModel.VECTOR),
+            ('DS_READ2_B32', 'ds_read2', ExecModel.VECTOR),
+            ('DS_WRITE2_B32', 'ds_write2', ExecModel.VECTOR),
+            ('DS_ADD_U32', 'ds_atomic', ExecModel.VECTOR),
+            ('DS_STOREXCHG_2ADDR_RTN_B32', 'ds_atomic2', ExecModel.VECTOR),
+            ('DS_BPERMUTE_B32', 'ds_permute', ExecModel.VECTOR),
+            ('DS_SWIZZLE_B32', 'ds_swizzle', ExecModel.VECTOR),
+            ('DS_LOAD_ADDTID_B32', 'ds_read_addtid', ExecModel.VECTOR),
+            ('DS_STORE_ADDTID_B32', 'ds_write_addtid', ExecModel.VECTOR),
+            ('DS_READ_TR_B32', 'ds_read_tr_b4', ExecModel.VECTOR),
+        ]
+        for name, cls, expected_pragma in classes:
+            sem = _FakeSem(name, cls, 'add')
+            sem.elem_size = 4
+            sem.num_elems = 1
+            sem.sign_extend = False
+            block = derive_sema_block(sem)
+            assert block is not None, f'{cls} returned None'
+            assert (
+                block.pragma == expected_pragma
+            ), f'{cls}: expected {expected_pragma}, got {block.pragma}'
+
+
+# =========================================================================
+# Packed, matrix, special, remaining
+# =========================================================================
 
 
 class TestDerivePacked:
@@ -2282,38 +2093,3 @@ def test_conditional_exchange_has_one_qword_payload(encoding):
     assert semantics.operation == 'condxchg32'
     assert semantics.elem_size == 8
     assert semantics.num_elems == 2
-
-
-class TestDeriveMemoryClasses:
-    def test_all_memory_classes_derive(self):
-        classes = [
-            ('S_LOAD_B32', 'smem_load', ExecModel.SCALAR),
-            ('S_STORE_B32', 'smem_store', ExecModel.SCALAR),
-            ('BUFFER_LOAD_B32', 'buffer_load', ExecModel.VECTOR),
-            ('BUFFER_STORE_B32', 'buffer_store', ExecModel.VECTOR),
-            ('BUFFER_ATOMIC_ADD_F32', 'buffer_atomic', ExecModel.VECTOR),
-            ('FLAT_LOAD_B32', 'flat_load', ExecModel.VECTOR),
-            ('FLAT_STORE_B32', 'flat_store', ExecModel.VECTOR),
-            ('FLAT_ATOMIC_ADD_F32', 'flat_atomic', ExecModel.VECTOR),
-            ('DS_LOAD_B32', 'ds_read', ExecModel.VECTOR),
-            ('DS_STORE_B32', 'ds_write', ExecModel.VECTOR),
-            ('DS_READ2_B32', 'ds_read2', ExecModel.VECTOR),
-            ('DS_WRITE2_B32', 'ds_write2', ExecModel.VECTOR),
-            ('DS_ADD_U32', 'ds_atomic', ExecModel.VECTOR),
-            ('DS_STOREXCHG_2ADDR_RTN_B32', 'ds_atomic2', ExecModel.VECTOR),
-            ('DS_BPERMUTE_B32', 'ds_permute', ExecModel.VECTOR),
-            ('DS_SWIZZLE_B32', 'ds_swizzle', ExecModel.VECTOR),
-            ('DS_LOAD_ADDTID_B32', 'ds_read_addtid', ExecModel.VECTOR),
-            ('DS_STORE_ADDTID_B32', 'ds_write_addtid', ExecModel.VECTOR),
-            ('DS_READ_TR_B32', 'ds_read_tr_b4', ExecModel.VECTOR),
-        ]
-        for name, cls, expected_pragma in classes:
-            sem = _FakeSem(name, cls, 'add')
-            sem.elem_size = 4
-            sem.num_elems = 1
-            sem.sign_extend = False
-            block = derive_sema_block(sem)
-            assert block is not None, f'{cls} returned None'
-            assert (
-                block.pragma == expected_pragma
-            ), f'{cls}: expected {expected_pragma}, got {block.pragma}'

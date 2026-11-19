@@ -16339,11 +16339,8 @@ TEST(ArithBridgeTest, Gfx1250Tanh) {
                                 ? std::bit_cast<float>(std::bit_cast<uint32_t>(x) | 0x00400000U)
                                 : std::tanh(x);
                   if (encoding) {
-                    y = fp_mode::apply_omod_f32(y, omod, wave.fp_round_mode_f32());
-                    if (clamp) {
-                      // CLAMP canonicalizes negative zero as well as negative values.
-                      y = std::isnan(y) || y <= 0.0f ? 0.0f : std::min(y, 1.0f);
-                    }
+                    y = rocjitsu::test::finish_floating(
+                        y, {omod, wave.fp_round_mode_f32(), clamp, true});
                   }
                   expected[lane] = std::bit_cast<uint32_t>(y);
                 }

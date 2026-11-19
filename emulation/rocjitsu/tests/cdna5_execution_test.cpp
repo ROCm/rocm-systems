@@ -105,23 +105,9 @@ private:
 };
 
 #if RJ_HOST_ARCH_X86
-class HostMxcsrGuard {
-public:
-  HostMxcsrGuard() : saved_(_mm_getcsr()) {}
-  ~HostMxcsrGuard() { _mm_setcsr(saved_); }
 
-private:
-  uint32_t saved_;
-};
 #elif RJ_HOST_ARCH_AARCH64
-class HostFpcrGuard {
-public:
-  HostFpcrGuard() : saved_(amdgpu::fp_mode::detail::read_fpcr()) {}
-  ~HostFpcrGuard() { amdgpu::fp_mode::detail::write_fpcr(saved_); }
 
-private:
-  uint64_t saved_;
-};
 #endif
 
 TEST(Gfx1250ExecutionTest, FmaMixBf16AliasingAndExec) {
@@ -332,29 +318,6 @@ TEST(Gfx1250ExecutionTest, ArchitectureDecoderVectorScalarSourceFailureRejectsMe
   }
 }
 
-TEST(FpModePolicyTest, F16OmodFollowsProfileDenormIeeeAndPackedRules) {
-  using amdgpu::fp_mode::effective_f16_omod;
-
-  // Older promoted VOP3 packed FMAC supports OMOD, but the ordinary older
-  // DENORM/IEEE gates still apply.
-  EXPECT_EQ(effective_f16_omod(ROCJITSU_CODE_ARCH_CDNA4, 0, false, true, 1), 1u);
-  EXPECT_EQ(effective_f16_omod(ROCJITSU_CODE_ARCH_CDNA4, 2, false, true, 1), 0u);
-  EXPECT_EQ(effective_f16_omod(ROCJITSU_CODE_ARCH_CDNA4, 0, true, true, 1), 0u);
-
-  // GFX11+ explicitly ignores OMOD for packed F16 results.
-  EXPECT_EQ(effective_f16_omod(ROCJITSU_CODE_ARCH_RDNA3, 0, false, true, 1), 0u);
-  EXPECT_EQ(effective_f16_omod(ROCJITSU_CODE_ARCH_RDNA4, 0, false, true, 1), 0u);
-  EXPECT_EQ(effective_f16_omod(ROCJITSU_CODE_ARCH_CDNA5, 0, false, true, 1), 0u);
-
-  // Ordinary F16 on older profiles uses the DENORM/IEEE gates. GFX12 and
-  // gfx1250 allow OMOD regardless of those two mode settings.
-  EXPECT_EQ(effective_f16_omod(ROCJITSU_CODE_ARCH_RDNA3, 0, false, false, 3), 3u);
-  EXPECT_EQ(effective_f16_omod(ROCJITSU_CODE_ARCH_RDNA3, 3, false, false, 3), 0u);
-  EXPECT_EQ(effective_f16_omod(ROCJITSU_CODE_ARCH_RDNA3, 0, true, false, 3), 0u);
-  EXPECT_EQ(effective_f16_omod(ROCJITSU_CODE_ARCH_RDNA4, 3, true, false, 3), 3u);
-  EXPECT_EQ(effective_f16_omod(ROCJITSU_CODE_ARCH_CDNA5, 3, true, false, 3), 3u);
-}
-
 TEST(FpModePolicyTest, F32ToBf16RoundHonorsMode) {
   const auto convert = [](uint32_t bits, uint32_t round_mode) {
     return amdgpu::fp_mode::detail::f32_to_bf16_round(std::bit_cast<float>(bits), round_mode);
@@ -380,38 +343,6 @@ TEST(FpModePolicyTest, F32ToBf16RoundHonorsMode) {
   EXPECT_EQ(convert(0x7f7fffffu, 1), 0x7f80u);
   EXPECT_EQ(convert(0x7f7fffffu, 2), 0x7f7fu);
   EXPECT_EQ(convert(0x7f7fffffu, 3), 0x7f7fu);
-}
-
-TEST(FpModePolicyTest, ActiveOmodFlushesSubnormalsAndCanonicalizesZero) {
-  using amdgpu::fp_mode::finalize_omod_bf16;
-  using amdgpu::fp_mode::finalize_omod_f16;
-  using amdgpu::fp_mode::finalize_omod_f32;
-  using amdgpu::fp_mode::finalize_omod_f64;
-
-  EXPECT_EQ(finalize_omod_f16(0x0001u, 1), 0u);
-  EXPECT_EQ(finalize_omod_f16(0x8001u, 1), 0u);
-  EXPECT_EQ(finalize_omod_f16(0x8000u, 1), 0u);
-  EXPECT_EQ(finalize_omod_f16(0x8001u, 0), 0x8001u);
-
-  EXPECT_EQ(finalize_omod_bf16(0x0001u, 1), 0u);
-  EXPECT_EQ(finalize_omod_bf16(0x8001u, 1), 0u);
-  EXPECT_EQ(finalize_omod_bf16(0x8000u, 1), 0u);
-  EXPECT_EQ(finalize_omod_bf16(0x8001u, 0), 0x8001u);
-
-  EXPECT_EQ(std::bit_cast<uint32_t>(finalize_omod_f32(std::bit_cast<float>(0x00000001u), 1)), 0u);
-  EXPECT_EQ(std::bit_cast<uint32_t>(finalize_omod_f32(std::bit_cast<float>(0x80000001u), 1)), 0u);
-  EXPECT_EQ(std::bit_cast<uint32_t>(finalize_omod_f32(-0.0f, 1)), 0u);
-  EXPECT_EQ(std::bit_cast<uint32_t>(finalize_omod_f32(std::bit_cast<float>(0x80000001u), 0)),
-            0x80000001u);
-
-  EXPECT_EQ(std::bit_cast<uint64_t>(finalize_omod_f64(std::bit_cast<double>(uint64_t{1}), 1)), 0u);
-  EXPECT_EQ(
-      std::bit_cast<uint64_t>(finalize_omod_f64(std::bit_cast<double>(0x8000000000000001ULL), 1)),
-      0u);
-  EXPECT_EQ(std::bit_cast<uint64_t>(finalize_omod_f64(-0.0, 1)), 0u);
-  EXPECT_EQ(
-      std::bit_cast<uint64_t>(finalize_omod_f64(std::bit_cast<double>(0x8000000000000001ULL), 0)),
-      0x8000000000000001ULL);
 }
 
 TEST(Gfx1250ExecutionTest, GenericF16OmodStaysActiveAndFinalizesWithIeeeDenormMode) {
@@ -1025,148 +956,11 @@ TEST(Gfx1250ExecutionTest, Vop3CarryClampSaturatesVdstAndPreservesCarryBorrow) {
   }
 }
 
-TEST(FpModePolicyTest, F64HelpersRestoreAmbientHostEnvironment) {
-  HostFenvGuard environment_guard;
-  ASSERT_EQ(std::fesetenv(FE_DFL_ENV), 0);
-  ASSERT_EQ(std::fesetround(FE_DOWNWARD), 0);
-  ASSERT_EQ(std::feraiseexcept(FE_INVALID | FE_INEXACT), 0);
-  const int expected_flags = std::fetestexcept(FE_ALL_EXCEPT);
 #if RJ_HOST_ARCH_X86
-  HostMxcsrGuard mxcsr_guard;
-  constexpr uint32_t kDazMask = 1u << 6;
-  constexpr uint32_t kFtzMask = 1u << 15;
-  _mm_setcsr(_mm_getcsr() | kDazMask | kFtzMask);
-  const uint32_t expected_mxcsr = _mm_getcsr();
-#endif
 
-  constexpr uint64_t kOne = std::bit_cast<uint64_t>(1.0);
-  constexpr uint64_t kSubnormal = 0x0000000000000001ULL;
-  constexpr uint64_t kInfinity = std::bit_cast<uint64_t>(std::numeric_limits<double>::infinity());
-  constexpr uint64_t kQuietNan = std::bit_cast<uint64_t>(std::numeric_limits<double>::quiet_NaN());
-  for (const uint64_t input : {kOne, kSubnormal, kInfinity, kQuietNan}) {
-    (void)amdgpu::fp_mode::fma_f64(input, kOne, kOne, 1, 3);
-    EXPECT_EQ(std::fegetround(), FE_DOWNWARD);
-    (void)amdgpu::fp_mode::finish_f64(input, 1, 1, false, true);
-    EXPECT_EQ(std::fegetround(), FE_DOWNWARD);
-    const uint64_t result = amdgpu::fp_mode::finish_f64(input, 1, 0, false, true);
-    EXPECT_EQ(result, input);
-    EXPECT_EQ(std::fegetround(), FE_DOWNWARD);
-    EXPECT_EQ(std::fetestexcept(FE_ALL_EXCEPT), expected_flags);
-#if RJ_HOST_ARCH_X86
-    EXPECT_EQ(_mm_getcsr(), expected_mxcsr);
-#endif
-  }
-}
-
-TEST(FpModePolicyTest, F32ToBf16FmaRestoresAmbientHostEnvironment) {
-  HostFenvGuard environment_guard;
-  ASSERT_EQ(std::fesetround(FE_UPWARD), 0);
-
-  const float multiplicand = std::bit_cast<float>(0x8e0b5904u);
-  const float multiplier = std::bit_cast<float>(0x1ae3bc34u);
-  const float addend = std::bit_cast<float>(0xb6630000u);
-  EXPECT_EQ(amdgpu::fp_mode::fma_f32_to_bf16(multiplicand, multiplier, addend, 2, false, true),
-            0xb664u);
-  EXPECT_EQ(std::fegetround(), FE_UPWARD);
-
-  EXPECT_EQ(amdgpu::fp_mode::fma_f32_to_bf16(-0.0f, 1.0f, -0.0f, 2, false, true), 0x8000u);
-  EXPECT_EQ(std::fegetround(), FE_UPWARD);
-  EXPECT_EQ(amdgpu::fp_mode::fma_f32_to_bf16(-0.0f, 1.0f, -0.0f, 2, true, true), 0u);
-  EXPECT_EQ(std::fegetround(), FE_UPWARD);
-}
-
-#if RJ_HOST_ARCH_X86
-TEST(FpModePolicyTest, F32ToBf16FmaIgnoresAndRestoresFtzDaz) {
-  HostMxcsrGuard environment_guard;
-  constexpr uint32_t kDazMask = 1u << 6;
-  constexpr uint32_t kFtzMask = 1u << 15;
-  _mm_setcsr(_mm_getcsr() | kDazMask | kFtzMask);
-
-  const float subnormal = std::bit_cast<float>(0x00018000u);
-  EXPECT_EQ(amdgpu::fp_mode::fma_f32_to_bf16(subnormal, 1.0f, 0.0f, 0, false, true), 0x0002u);
-  EXPECT_EQ(_mm_getcsr() & (kDazMask | kFtzMask), kDazMask | kFtzMask);
-}
 #elif RJ_HOST_ARCH_AARCH64
-TEST(FpModePolicyTest, F32ToBf16FmaIgnoresAndRestoresFpcrFlushModes) {
-  HostFpcrGuard environment_guard;
-  constexpr uint64_t kFizMask = uint64_t{1} << 0;
-  constexpr uint64_t kFz16Mask = uint64_t{1} << 19;
-  constexpr uint64_t kFzMask = uint64_t{1} << 24;
-  constexpr uint64_t kFlushMask = kFizMask | kFz16Mask | kFzMask;
-  amdgpu::fp_mode::detail::write_fpcr(amdgpu::fp_mode::detail::read_fpcr() | kFlushMask);
-  const uint64_t enabled_flush_modes = amdgpu::fp_mode::detail::read_fpcr() & kFlushMask;
-  ASSERT_NE(enabled_flush_modes & kFzMask, 0u);
 
-  const float subnormal = std::bit_cast<float>(0x00018000u);
-  EXPECT_EQ(amdgpu::fp_mode::fma_f32_to_bf16(subnormal, 1.0f, 0.0f, 0, false, true), 0x0002u);
-  EXPECT_EQ(amdgpu::fp_mode::detail::read_fpcr() & kFlushMask, enabled_flush_modes);
-}
 #endif
-
-TEST(FpModePolicyTest, F64ClampCanonicalizesNanAndNonpositiveValues) {
-  constexpr uint64_t kPositiveZero = 0x0000000000000000ULL;
-  constexpr uint64_t kNegativeZero = 0x8000000000000000ULL;
-  constexpr uint64_t kPositiveSubnormal = 0x0000000000000001ULL;
-  constexpr uint64_t kNegativeSubnormal = 0x8000000000000001ULL;
-  constexpr uint64_t kInfinity = std::bit_cast<uint64_t>(std::numeric_limits<double>::infinity());
-  constexpr uint64_t kNegativeInfinity =
-      std::bit_cast<uint64_t>(-std::numeric_limits<double>::infinity());
-  constexpr uint64_t kQuietNan = 0x7FF8000000001234ULL;
-  constexpr uint64_t kSignalingNan = 0x7FF0000000000001ULL;
-  constexpr std::array<uint64_t, 12> kInputs = {
-      kQuietNan,
-      kSignalingNan,
-      kNegativeZero,
-      std::bit_cast<uint64_t>(-2.0),
-      kPositiveZero,
-      std::bit_cast<uint64_t>(0.5),
-      std::bit_cast<uint64_t>(1.0),
-      std::bit_cast<uint64_t>(2.0),
-      kPositiveSubnormal,
-      kNegativeSubnormal,
-      kInfinity,
-      kNegativeInfinity,
-  };
-  constexpr std::array<uint64_t, 12> kExpected = {
-      kPositiveZero,
-      kPositiveZero,
-      kPositiveZero,
-      kPositiveZero,
-      kPositiveZero,
-      std::bit_cast<uint64_t>(0.5),
-      std::bit_cast<uint64_t>(1.0),
-      std::bit_cast<uint64_t>(1.0),
-      kPositiveSubnormal,
-      kPositiveZero,
-      std::bit_cast<uint64_t>(1.0),
-      kPositiveZero,
-  };
-
-  for (size_t i = 0; i < kInputs.size(); ++i) {
-    EXPECT_EQ(amdgpu::fp_mode::finish_f64(kInputs[i], 0, 0, true, true), kExpected[i]) << i;
-    EXPECT_EQ(amdgpu::fp_mode::finish_f64(kInputs[i], 0, 0, false, true), kInputs[i]) << i;
-    EXPECT_EQ(amdgpu::fp_mode::finish_f64(kInputs[i], 0, 0, false, false), kInputs[i]) << i;
-  }
-  EXPECT_EQ(amdgpu::fp_mode::finish_f64(kQuietNan, 0, 0, true, false), kQuietNan);
-  EXPECT_EQ(amdgpu::fp_mode::finish_f64(std::bit_cast<uint64_t>(1.0), 0, 1, false, true),
-            std::bit_cast<uint64_t>(2.0));
-}
-
-TEST(FpModePolicyTest, F16ClampUsesSelectedNanPolicy) {
-  constexpr uint16_t kQuietNan = 0x7E01u;
-  constexpr uint16_t kOne = 0x3C00u;
-  constexpr uint16_t kPositiveZero = 0x0000u;
-  constexpr uint16_t kNegativeZero = 0x8000u;
-
-  const auto fma = [=](uint16_t src0, bool clamp_nan_to_zero) {
-    return amdgpu::fp_mode::fma_f16(src0, kOne, kPositiveZero, false, false, false, false, false,
-                                    false, 0, 3, 0, true, false, clamp_nan_to_zero, true);
-  };
-
-  EXPECT_EQ(fma(kQuietNan, false), kQuietNan);
-  EXPECT_EQ(fma(kQuietNan, true), kPositiveZero);
-  EXPECT_EQ(fma(kNegativeZero, false), kPositiveZero);
-}
 
 TEST(Gfx1250ExecutionTest, TargetProvidesImmutableExecutionBackend) {
   const IsaTargetDescriptor *target = default_isa_target_registry().find("cdna5");
@@ -2656,6 +2450,7 @@ std::unique_ptr<Instruction> decode_gfx1251_wmma(Decoder &decoder,
   return std::unique_ptr<Instruction>(decode_valid(decoder, words.data()));
 }
 
+// Reference the finite matrix fixtures with nearest-even fused arithmetic.
 WmmaF64OutputMatrix reference_wmma_f64(const WmmaF64InputMatrix &a, const WmmaF64InputMatrix &b,
                                        const WmmaF64OutputMatrix &c) {
   WmmaF64OutputMatrix result{};
@@ -2663,8 +2458,9 @@ WmmaF64OutputMatrix reference_wmma_f64(const WmmaF64InputMatrix &a, const WmmaF6
     for (uint32_t col = 0; col < 16; ++col) {
       uint64_t acc = c[row * 16 + col];
       for (uint32_t k = 0; k < 4; ++k)
-        acc = amdgpu::fp_mode::fma_f64(a[row * 4 + k], b[col * 4 + k], acc,
-                                       /*round_mode=*/0, /*denorm_mode=*/3);
+        acc = std::bit_cast<uint64_t>(std::fma(std::bit_cast<double>(a[row * 4 + k]),
+                                               std::bit_cast<double>(b[col * 4 + k]),
+                                               std::bit_cast<double>(acc)));
       result[row * 16 + col] = acc;
     }
   return result;

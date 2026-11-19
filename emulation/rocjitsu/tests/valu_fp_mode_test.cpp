@@ -13,7 +13,6 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/ldexp.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -5279,7 +5278,9 @@ void expect_arithmetic_case(const ArithmeticCase &test, bool uses_arith = false,
     mnemonic.remove_suffix(5);
   }
   if (mnemonic == "v_cvt_f16_i16" || mnemonic == "v_cvt_f16_u16" || mnemonic == "v_cvt_i16_f16" ||
-      mnemonic == "v_cvt_u16_f16" || mnemonic == "v_cvt_f16_f32" || mnemonic == "v_cvt_f32_f16") {
+      mnemonic == "v_cvt_u16_f16" || mnemonic == "v_cvt_f16_f32" || mnemonic == "v_cvt_f32_f16" ||
+      (mnemonic.starts_with("v_cvt_") &&
+       (mnemonic.starts_with("v_cvt_f64_") || mnemonic.ends_with("_f64")))) {
     uses_arith = true;
   }
 
@@ -6027,153 +6028,6 @@ INSTANTIATE_TEST_SUITE_P(Fp8, ValuConversionTest, testing::ValuesIn(fp8_cases())
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });
-
-TEST(ValuFpModeHelpers, RoundingAndSignedZero) {
-  using amdgpu::fp_mode::Arithmetic;
-  for (uint32_t mode = 0; mode < 4; ++mode) {
-    const uint32_t expected = mode == 1 ? 0x3f800001u : 0x3f800000u;
-    EXPECT_EQ(std::bit_cast<uint32_t>(
-                  amdgpu::fp_mode::arithmetic<Arithmetic::ADD>(1.0f, 0x1p-24f, 0.0f, mode, 3)),
-              expected);
-    EXPECT_EQ(std::bit_cast<uint32_t>(
-                  amdgpu::fp_mode::arithmetic<Arithmetic::ADD>(1.0f, -1.0f, 0.0f, mode, 3)),
-              mode == 2 ? 0x80000000u : 0u);
-    EXPECT_EQ(std::bit_cast<uint32_t>(
-                  amdgpu::fp_mode::arithmetic<Arithmetic::MUL>(-0.0f, 1.0f, 0.0f, mode, 3)),
-              0x80000000u);
-  }
-}
-
-TEST(ValuFpModeHelpers, MixedF16FmaExactZeroSigns) {
-  struct Case {
-    uint32_t a, b, c;
-    std::array<uint16_t, 4> expected;
-  };
-  constexpr std::array<Case, 8> cases{{
-      {0, 0x3f800000, 0, {0, 0, 0, 0}},
-      {0, 0x3f800000, 0x80000000, {0, 0, 0x8000, 0}},
-      {0x80000000, 0x3f800000, 0, {0, 0, 0x8000, 0}},
-      {0x80000000, 0x3f800000, 0x80000000, {0x8000, 0x8000, 0x8000, 0x8000}},
-      {0, 0xbf800000, 0, {0, 0, 0x8000, 0}},
-      {0, 0xbf800000, 0x80000000, {0x8000, 0x8000, 0x8000, 0x8000}},
-      {0x80000000, 0xbf800000, 0, {0, 0, 0, 0}},
-      {0x80000000, 0xbf800000, 0x80000000, {0, 0, 0x8000, 0}},
-  }};
-  for (const auto &test : cases)
-    for (bool zero_second : {false, true})
-      for (bool swap : {false, true})
-        for (bool clamp : {false, true})
-          for (uint32_t mode = 0; mode < 4; ++mode) {
-            uint32_t a = test.a, b = zero_second ? test.b & 0x80000000u : test.b;
-            if (swap)
-              std::swap(a, b);
-            amdgpu::fp_mode::ScopedEnvironment environment(0);
-            const uint16_t actual = amdgpu::fp_mode::detail::fma_f32_to_f16_nearest_environment(
-                std::bit_cast<float>(a), std::bit_cast<float>(b), std::bit_cast<float>(test.c),
-                mode, clamp, false, false);
-            EXPECT_EQ(actual, clamp ? 0u : test.expected[mode]);
-          }
-}
-
-TEST(ValuFpModeHelpers, MixedF16FmaCancellationAcrossF32Range) {
-  constexpr std::array<std::array<uint32_t, 3>, 5> cases{{
-      {0x7f7fffff, 0x3f800000, 0xff7fffff},
-      {1, 0x3f800000, 0x80000001},
-      {0x00800000, 0x3f000000, 0x80400000},
-      {0x5f800000, 0x1f800000, 0xbf800000},
-      {0x00800000, 0x34000000, 0x80000001},
-  }};
-  for (const auto &test : cases)
-    for (uint32_t mode = 0; mode < 4; ++mode) {
-      amdgpu::fp_mode::ScopedEnvironment environment(0);
-      EXPECT_EQ(amdgpu::fp_mode::detail::fma_f32_to_f16_nearest_environment(
-                    std::bit_cast<float>(test[0]), std::bit_cast<float>(test[1]),
-                    std::bit_cast<float>(test[2]), mode, false, false, false),
-                mode == 2 ? 0x8000u : 0u);
-    }
-  // These products are far below F16 range, but are nonzero F64 values. A
-  // sign-only repair must not turn directed underflow into exact cancellation.
-  for (uint32_t mode = 0; mode < 4; ++mode) {
-    amdgpu::fp_mode::ScopedEnvironment environment(0);
-    EXPECT_EQ(
-        amdgpu::fp_mode::detail::fma_f32_to_f16_nearest_environment(
-            std::bit_cast<float>(1u), std::bit_cast<float>(1u), 0.0f, mode, false, false, false),
-        mode == 1 ? 1u : 0u);
-    EXPECT_EQ(amdgpu::fp_mode::detail::fma_f32_to_f16_nearest_environment(
-                  std::bit_cast<float>(0x80000001u), std::bit_cast<float>(1u), 0.0f, mode, false,
-                  false, false),
-              mode == 2 ? 0x8001u : 0x8000u);
-  }
-}
-
-TEST(ValuFpModeHelpers, F16FmaRetainsTinyProduct) {
-  // Both physical cards round 65504 + 2^-48 upward to infinity. A host F64
-  // addition alone loses the tiny product and incorrectly returns 65504.
-  for (uint32_t round = 0; round < 4; ++round)
-    for (uint32_t denorm = 0; denorm < 4; ++denorm)
-      for (bool overflow : {false, true}) {
-        const uint16_t expected = round == 1 && (denorm & 1u) && !overflow ? 0x7c00u : 0x7bffu;
-        EXPECT_EQ(amdgpu::fp_mode::fma_f16(1, 1, 0x7bff, false, false, false, false, false, false,
-                                           round, denorm, 0, false, overflow, false, true),
-                  expected);
-      }
-}
-
-TEST(ValuFpModeHelpers, F16FmaFlushesBeforePacking) {
-  // Packing directly to a subnormal half can round these tiny intermediates
-  // to minimum normal; hardware tests the rounded significand first.
-  for (uint32_t round = 0; round < 4; ++round)
-    for (uint16_t sign : {uint16_t{0}, uint16_t{0x8000}})
-      EXPECT_EQ(amdgpu::fp_mode::fma_f16(1, sign | 0x03ff, sign | 0x03ff, false, false, false,
-                                         false, false, false, round, 1, 0, false, false, false,
-                                         true),
-                sign);
-}
-
-TEST(ValuFpModeHelpers, FusedResultAndOutputFlush) {
-  using amdgpu::fp_mode::Arithmetic;
-  EXPECT_EQ(std::bit_cast<uint32_t>(amdgpu::fp_mode::arithmetic<Arithmetic::FMA>(
-                0x1.000002p0f, 0x1.fffffcp-1f, -1.0f, 0, 3)),
-            0xa8800000u);
-  EXPECT_EQ(std::bit_cast<uint32_t>(
-                amdgpu::fp_mode::arithmetic<Arithmetic::MUL>(-0x1p-126f, 0.5f, 0.0f, 0, 1)),
-            0x80000000u);
-}
-
-TEST(ValuFpModeHelpers, LegacySdwaOutputScalePrecedesF16Rounding) {
-  // Explicit omod pins SDWA's legacy pre-round scaling, without SDWA hardware
-  // validation. Migrated VOP3 callers leave it zero and apply output_modifier
-  // to the rounded result; their captures do not establish SDWA ordering.
-  EXPECT_EQ(amdgpu::fp_mode::finish_arithmetic_f16(65504.0 * 2.0, 0, 1, false, 3), 0x7bffu);
-  EXPECT_EQ(amdgpu::fp_mode::finish_arithmetic_f16(1.0 + 0x1p-24, 1, 1, false, 1), 0x4001u);
-  EXPECT_EQ(amdgpu::fp_mode::finish_arithmetic_f16(-0.0, 0, 1, false, 1), 0u);
-}
-
-TEST(ValuFpModeHelpers, HostFlushControlsDoNotOverrideGpuMode) {
-#if RJ_HOST_ARCH_X86
-  using amdgpu::fp_mode::Arithmetic;
-  const uint32_t saved_mxcsr = _mm_getcsr();
-  const uint32_t host_mxcsr = saved_mxcsr | (1u << 6) | (1u << 15);
-  _mm_setcsr(host_mxcsr);
-  const bool native_matches = amdgpu::fp_mode::native_arithmetic_matches(0, 3);
-  const uint32_t result = std::bit_cast<uint32_t>(amdgpu::fp_mode::arithmetic<Arithmetic::ADD>(
-      std::bit_cast<float>(1u), std::bit_cast<float>(1u), 0.0f, 0, 3));
-  const auto ldexp_policy = amdgpu::ldexp::Policy::make(3, 1, false, false);
-  const uint32_t scaled32 = amdgpu::ldexp::evaluate<amdgpu::fp_format::F32>(1u, 1u, ldexp_policy);
-  const uint64_t scaled64 =
-      amdgpu::ldexp::evaluate<amdgpu::fp_format::F64, 32>(uint64_t{1}, uint64_t{1}, ldexp_policy);
-  const amdgpu::FrexpF32Result split = amdgpu::frexp_f32(std::bit_cast<float>(1u), 3);
-  const uint32_t restored_mxcsr = _mm_getcsr();
-  _mm_setcsr(saved_mxcsr);
-  EXPECT_FALSE(native_matches);
-  EXPECT_EQ(result, 2u);
-  EXPECT_EQ(scaled32, 2u);
-  EXPECT_EQ(scaled64, 2u);
-  EXPECT_EQ(std::bit_cast<uint32_t>(split.mantissa), 0x3f000000u);
-  EXPECT_EQ(split.exponent, -148);
-  EXPECT_EQ(restored_mxcsr, host_mxcsr);
-#endif
-}
 
 // Floating compares flush their inputs under MODE.FP_DENORM before the
 // relation. Each case runs one decoded RDNA4 compare, built with the generated

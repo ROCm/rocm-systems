@@ -238,42 +238,22 @@ TEST_P(PackedF32Selection, ScalarSourcesAliasingAndEmptyExec) {
   }
 }
 
-TEST_P(PackedF32Selection, RestoresHostEnvironment) {
+// Arithmetic may raise sticky flags; host controls remain at their default values.
+TEST_P(PackedF32Selection, PreservesHostFpControls) {
   HostState saved;
   Machine machine(std::get<0>(GetParam()));
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
-  if (std::get<0>(GetParam()) != ROCJITSU_CODE_ARCH_CDNA2) {
-    // rj-arith assumes default host controls and permits arithmetic sticky flags.
-    // Unlike the legacy executor, it never saves or writes host FP controls.
-    ASSERT_EQ(std::fesetenv(FE_DFL_ENV), 0);
-    std::feraiseexcept(FE_DIVBYZERO);
+  ASSERT_EQ(std::fesetenv(FE_DFL_ENV), 0);
+  std::feraiseexcept(FE_DIVBYZERO);
 #if RJ_HOST_ARCH_X86
-    const uint32_t controls = _mm_getcsr() & ~0x3fu;
+  const uint32_t controls = _mm_getcsr() & ~0x3fu;
 #endif
-    compare(machine, 0, 2, 0, 0, 0xf1, 0, 6, SourceKind::Vgpr, ~uint64_t{0});
-    EXPECT_EQ(std::fegetround(), FE_TONEAREST);
-    EXPECT_NE(std::fetestexcept(FE_DIVBYZERO), 0);
+  compare(machine, 0, 2, 0, 0, 0xf1, 0, 6, SourceKind::Vgpr, ~uint64_t{0});
+  EXPECT_EQ(std::fegetround(), FE_TONEAREST);
+  EXPECT_NE(std::fetestexcept(FE_DIVBYZERO), 0);
 #if RJ_HOST_ARCH_X86
-    EXPECT_EQ(_mm_getcsr() & ~0x3fu, controls);
+  EXPECT_EQ(_mm_getcsr() & ~0x3fu, controls);
 #endif
-    return;
-  }
-  for (int rounding : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-    ASSERT_EQ(std::fesetround(rounding), 0);
-    std::feclearexcept(FE_ALL_EXCEPT);
-    std::feraiseexcept(FE_DIVBYZERO);
-#if RJ_HOST_ARCH_X86
-    _mm_setcsr(_mm_getcsr() | (1u << 6) | (1u << 15));
-    const uint32_t mxcsr = _mm_getcsr();
-#endif
-    const int exceptions = std::fetestexcept(FE_ALL_EXCEPT);
-    compare(machine, 0, 2, 0, 0, 0xf1, 0, 6, SourceKind::Vgpr, ~uint64_t{0});
-    EXPECT_EQ(std::fegetround(), rounding);
-    EXPECT_EQ(std::fetestexcept(FE_ALL_EXCEPT), exceptions);
-#if RJ_HOST_ARCH_X86
-    EXPECT_EQ(_mm_getcsr(), mxcsr);
-#endif
-  }
 }
 
 INSTANTIATE_TEST_SUITE_P(

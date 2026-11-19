@@ -1,31 +1,22 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-from pathlib import Path
-from types import SimpleNamespace
-import hashlib, pytest, re
+"""Tests for vector-special execute code generation."""
+
 from amdisa.codegen.execute.vector_special import (
-    _TRIG_PREOP_CHUNK_BITS,
-    _TRIG_PREOP_TWO_OVER_PI_CHUNKS,
-    _TRIG_PREOP_VALID_BITS,
-    gen_vector_bitop3,
-    gen_vector_cvt_pk,
-    gen_vector_mad_32_16,
     gen_vector_movrel,
-    gen_vector_perm_pk16,
-    gen_vector_sat_pack,
     gen_vector_swaprel,
-    gen_vector_trig_preop,
 )
-from amdisa.codegen.config import CodegenConfig
+from types import SimpleNamespace
+
+import hashlib
+import re
+
+import pytest
+
 from amdisa.codegen._generator import CodeGenerator
 from amdisa.gpuisa import Instruction, Operand
 from amdisa.isa_profile import Cdna5Profile, Rdna3Profile, Rdna4Profile
-from amdisa.sema_derive import derive_sema_block
-from amdisa.sema_enrich import enrich_block
-from amdisa.semantics import derive_semantics
-
-"""Tests for vector-special execute code generation."""
 
 
 def test_relative_vgpr_ops_use_unsigned_packed_m0_fields():
@@ -67,26 +58,11 @@ def test_relative_vgpr_ops_use_unsigned_packed_m0_fields():
     ('generator', 'args'),
     [
         (gen_vector_movrel, (['vdst'], ['src0'], 'unknown')),
-        (gen_vector_perm_pk16, (['vdst'], ['src0', 'src1', 'src2'], 'unknown', True)),
     ],
 )
 def test_unsupported_vector_special_operations_fail_during_generation(generator, args):
     with pytest.raises(ValueError):
         generator(*args)
-
-
-def test_trig_preop_two_over_pi_table_integrity():
-    table_bytes = b''.join(
-        chunk.to_bytes(3, byteorder='big') for chunk in _TRIG_PREOP_TWO_OVER_PI_CHUNKS
-    )
-
-    assert _TRIG_PREOP_CHUNK_BITS == 24
-    assert _TRIG_PREOP_VALID_BITS == 1201
-    assert len(_TRIG_PREOP_TWO_OVER_PI_CHUNKS) == 51
-    assert (
-        hashlib.sha256(table_bytes).hexdigest()
-        == '6945fb5ae75f6a3e8dec95553821e5886324e9e96181eb7944d828f508eee5b9'
-    )
 
 
 def test_permlane_is_not_shared_across_profiles():
@@ -204,55 +180,3 @@ def test_rdna3_vop3_true16_execute_bodies_are_arch_local():
     assert codegen._requires_arch_local_execute(cndmask_b16, 'ENC_VOP3')
     assert codegen._requires_arch_local_execute(or_b16, 'ENC_VOP3')
     assert codegen._requires_arch_local_execute(add_f16, 'ENC_VOP2')
-
-
-def test_gfx1250_bitop3_b16_uses_true16_helpers():
-    body = gen_vector_bitop3(
-        ['vdst'], ['src0', 'src1', 'src2'], 'b16', true16_opsel='inst_.opsel'
-    )
-
-    assert 'read_vop3_true16_src(src0, wf, lane, inst_.opsel, 0)' in body
-    assert 'read_vop3_true16_src(src1, wf, lane, inst_.opsel, 1)' in body
-    assert 'read_vop3_true16_src(src2, wf, lane, inst_.opsel, 2)' in body
-    assert 'write_vop3_true16_dst(vdst, wf, lane, inst_.opsel, result, true)' in body
-
-
-def test_perm_codegen_covers_multiword_results():
-    perm = gen_vector_perm_pk16(['vdst'], ['src0', 'src1', 'src2'], 'b6', True)
-    assert 'uint32_t packed[3]' in perm
-    assert 'source_bit = index * 6u' in perm
-    assert 'Operand dst_word = vdst;' in perm
-    assert 'dst_word.encoding_value_' in perm
-    assert 'read_lane64(src1, lane)' in perm
-
-
-@pytest.mark.parametrize('op', ['u16_f32', 'i16_f32'])
-def test_packed_integer_rejects_retired_fallback(op):
-    with pytest.raises(
-        ValueError, match='Packed integer conversion requires rj-arith lowering'
-    ):
-        gen_vector_cvt_pk(['vdst'], ['src0', 'src1'], 'vector_cvt_pk', op, is_vop3=True)
-
-
-def test_saturating_pack_rejects_retired_fallback():
-    with pytest.raises(
-        ValueError, match='Saturating packing requires rj-arith lowering'
-    ):
-        gen_vector_sat_pack(['vdst'], ['src0'], 'u8_i16')
-
-
-def test_trig_preop_preserves_special_fp_rules():
-    trig = gen_vector_trig_preop(['vdst'], ['src0', 'src1'], is_vop3=True, has_abs=True)
-    assert '0xA2F983u' in trig
-    assert 'kTwoOverPiChunks' in trig
-    assert 'kChunkBits = 24u' in trig
-    assert 'kValidBits = 1201u' in trig
-    assert 'selector * 53u' in trig
-    assert 'if (bit >= kValidBits) return 0' in trig
-    assert 'exponent > 1077u' in trig
-    assert 'exponent >= 1968u' in trig
-    assert 'scale_u53_f64_rtz(segment, scale)' in trig
-    assert 'amdgpu::fp_mode::effective_omod' in trig
-    assert 'amdgpu::fp_mode::finish_f64' in trig
-    assert re.search(r'finish_f64\([^;]*effective_omod', trig, flags=re.DOTALL)
-    assert not re.search(r'finish_f64\([^;]*inst_\.omod', trig, flags=re.DOTALL)

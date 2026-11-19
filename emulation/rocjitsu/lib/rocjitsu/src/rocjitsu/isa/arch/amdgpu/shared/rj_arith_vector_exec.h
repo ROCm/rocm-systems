@@ -318,7 +318,7 @@ inline void execute_conditional(Inst &inst, Wavefront &wave, Wave32 wave32, Wave
       if (!wave.instruction_execution_failed()) {
         for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
           if ((exec_mask >> lane) & 1)
-            sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+            sdwa::write_lane(inst, wave, destination, lane, result[lane]);
         }
       }
       return;
@@ -662,7 +662,7 @@ inline void execute_sdwa_carry32(Inst &inst, Wavefront &wave, Wave32 wave32, Wav
       } else {
         for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
           if ((write_mask >> lane) & 1)
-            sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+            sdwa::write_lane(inst, wave, destination, lane, result[lane]);
         }
       }
     }
@@ -822,7 +822,7 @@ inline bool try_execute_sdwa_integer32(Inst &inst, Wavefront &wave, Wave32 wave3
         }
         for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
           if ((exec_mask >> lane) & 1)
-            sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+            sdwa::write_lane(inst, wave, destination, lane, result[lane]);
         }
       }
       return true;
@@ -904,7 +904,7 @@ inline void execute_saturating_pack_sdwa(Inst &inst, Wavefront &wave, Unary32Fun
   }
   for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
     if (exec_mask & (1ULL << lane)) {
-      sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+      sdwa::write_lane(inst, wave, destination, lane, result[lane]);
     }
   }
 }
@@ -937,7 +937,7 @@ inline void execute_move32(Inst &inst, Wavefront &wave, const Operand &destinati
       }
       for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
         if (exec_mask & (uint64_t{1} << lane)) {
-          sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+          sdwa::write_lane(inst, wave, destination, lane, result[lane]);
         }
       }
       return;
@@ -972,7 +972,7 @@ inline void execute_screen_partition(Inst &inst, Wavefront &wave, const Operand 
       }
       for (uint32_t lane = 0; lane < 64; ++lane) {
         if ((exec_mask >> lane) & 1) {
-          sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+          sdwa::write_lane(inst, wave, destination, lane, result[lane]);
         }
       }
       return;

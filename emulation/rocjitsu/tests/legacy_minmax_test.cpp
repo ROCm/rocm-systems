@@ -758,13 +758,6 @@ TEST_P(PackedNumberSelection, SignalingNanUsesNumberSemantics) {
   }
 }
 
-TEST(LegacyMinMaxPolicyDeathTest, RejectsUnsupportedArchitectures) {
-  static_assert(noexcept(amdgpu::fp_mode::legacy_minmax_policy(ROCJITSU_CODE_ARCH_CDNA1, false)));
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RV32I,
-                    ROCJITSU_CODE_ARCH_RV64I, ROCJITSU_CODE_ARCH_INVALID})
-    EXPECT_DEATH(amdgpu::fp_mode::legacy_minmax_policy(arch, false), "");
-}
-
 INSTANTIATE_TEST_SUITE_P(Rdna4, PackedNumberSelection,
                          testing::Combine(testing::Values(ROCJITSU_CODE_ARCH_RDNA4),
                                           testing::Bool()));

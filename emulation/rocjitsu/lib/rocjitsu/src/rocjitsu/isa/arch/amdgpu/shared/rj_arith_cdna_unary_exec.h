@@ -53,7 +53,7 @@ inline void execute_cdna_integral_unary(Inst &inst, Wavefront &wave, FloatUnary3
       }
       for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
         if ((exec_mask >> lane) & 1) {
-          sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+          sdwa::write_lane(inst, wave, destination, lane, result[lane]);
         }
       }
       return;
@@ -93,7 +93,7 @@ inline void execute_cdna_float_unary(Inst &inst, Wavefront &wave, FloatUnary32Fu
     }
     for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
       if (((exec_mask & wave.vgpr_write_mask()) >> lane) & 1) {
-        sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+        sdwa::write_lane(inst, wave, destination, lane, result[lane]);
       }
     }
     return !wave.instruction_execution_failed();

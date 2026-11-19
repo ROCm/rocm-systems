@@ -482,3 +482,38 @@ TEST(FpLegacySelection, SdwaRounding) {
     }
   }
 }
+
+// Selected output-stage literals retain tiny-value and modifier-order boundaries.
+TEST(FpMinMax, OutputBoundaries) {
+  using namespace rocjitsu::arith::test;
+  const struct {
+    decltype(&rj_arith_v_min_num_f32_w32) call;
+    int width;
+    uint64_t a, b, expected;
+    uint32_t modifiers;
+  } cases[] = {
+      {rj_arith_v_max_num_f16_w32, 16, 1, 0, 0, RJ_ARITH_ALU_OMOD_2},
+      {rj_arith_v_max_num_f32_w32, 32, 0x80000000, 0x80000000, 0, RJ_ARITH_ALU_OMOD_2},
+      {rj_arith_v_max_num_f16_w32, 16, 0x8400, 0xbc00, 0x8000, RJ_ARITH_ALU_OMOD_HALF},
+      {rj_arith_v_max_num_f32_w32, 32, 0x80800000, 0xbf800000, 0x80000000, RJ_ARITH_ALU_OMOD_HALF},
+      {rj_arith_v_max_num_f64_w32, 64, 0x8010000000000000ULL, 0xbff0000000000000ULL,
+       0x8000000000000000ULL, RJ_ARITH_ALU_OMOD_HALF},
+      // ABS -> selection -> scaling -> clamp. Clamping before scaling would give 1.5.
+      {rj_arith_v_min_num_f16_w32, 16, 0xba00, 0x4000, 0x3c00,
+       RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_OMOD_2 | RJ_ARITH_ALU_CLAMP},
+  };
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (const auto &sample : cases) {
+      Registers<6, 32> r;
+      write_fp(r.v, 0, sample.width, sample.a);
+      write_fp(r.v + 2, 0, sample.width, sample.b);
+      uint32_t status = 0x1234;
+      ASSERT_EQ(sample.call(cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS, 1,
+                            sample.modifiers, r.v + 4, r.v, r.v + 2, &status),
+                RJ_ARITH_SUCCESS);
+      EXPECT_EQ(read_fp(r.v + 4, 0, sample.width), sample.expected)
+          << "width=" << sample.width << " cpu=" << cpu;
+      EXPECT_EQ(status, 0x1234U);
+    }
+  }
+}
