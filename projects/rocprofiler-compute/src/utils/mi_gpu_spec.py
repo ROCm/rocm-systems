@@ -110,21 +110,6 @@ class MIGPUSpecs:
             return data or {}
 
     @classmethod
-    def _register_chip_ids(cls, chip_ids: Dict[str, Any], gpu_model: str) -> None:
-        """
-        Map each physical and virtual chip id of a gpu model to the model.
-
-        Each entry of chip_ids is one chip id or a list of ids, so that boards of
-        different products can share a model.
-        """
-        for chip_id_kind in ("physical", "virtual"):
-            entry = chip_ids.get(chip_id_kind)
-            if entry is None:
-                continue
-            for chip_id in entry if isinstance(entry, list) else [entry]:
-                cls._chip_id_dict[chip_id] = gpu_model
-
-    @classmethod
     def _parse_mi_gpu_spec(cls) -> None:
         """
         Parse out mi gpu data from yaml file and store in memory.
@@ -134,8 +119,8 @@ class MIGPUSpecs:
                     |-- perfmon_config
                     |-- gpu model
                     |-- chip_ids
-                        | -- physical (one chip id, or a list of ids)
-                        | -- virtual (one chip id, or a list of ids)
+                        | -- physical
+                        | -- virtual
                     |-- partition_mode
                         | -- compute partition mode
                         | -- memory partition mode
@@ -186,7 +171,14 @@ class MIGPUSpecs:
                         .get("num_xcds", {})
                     )
 
-                    cls._register_chip_ids(models.get("chip_ids", {}), curr_gpu_model)
+                    if "chip_ids" in models and "physical" in models["chip_ids"]:
+                        cls._chip_id_dict[models["chip_ids"]["physical"]] = (
+                            curr_gpu_model
+                        )
+                    if "chip_ids" in models and "virtual" in models["chip_ids"]:
+                        cls._chip_id_dict[models["chip_ids"]["virtual"]] = (
+                            curr_gpu_model
+                        )
 
                     cls._gpu_design[curr_gpu_model] = models.get("design", {})
                     cls._gpu_design[curr_gpu_model]["gpu_arch"] = curr_gpu_arch
@@ -281,8 +273,15 @@ class MIGPUSpecs:
 
         # Handle gfx942 with chip_id mapping
         if gpu_arch_lower not in ("gfx908", "gfx90a"):
-            gpu_model = cls._model_from_chip_id(gpu_arch_lower, chip_id)
-            if gpu_model is None:
+            if chip_id and chip_id.isdigit():
+                chip_id_int = int(chip_id)
+                if chip_id_int in cls._chip_id_dict:
+                    gpu_model = cls._chip_id_dict[chip_id_int]
+                else:
+                    console_warning(f"No gpu model found for chip id: {chip_id}")
+                    return None
+            else:
+                console_warning(f"No valid chip id provided: {chip_id}")
                 return None
 
         # Otherwise use gpu_model_dict mapping for other mi architectures
@@ -299,34 +298,6 @@ class MIGPUSpecs:
             return None
 
         return gpu_model.upper() if gpu_model else None
-
-    @classmethod
-    def _model_from_chip_id(
-        cls, gpu_arch: str, chip_id: Optional[str]
-    ) -> Optional[str]:
-        """
-        Return the gpu model of a chip id.
-
-        A chip id that is missing or not in the spec falls back to the only model of
-        the arch, with a warning. An arch with several models has no such fallback,
-        because its models differ in more than the design.
-        """
-        has_chip_id = bool(chip_id) and chip_id.isdigit()
-        if has_chip_id and int(chip_id) in cls._chip_id_dict:
-            return cls._chip_id_dict[int(chip_id)]
-
-        if has_chip_id:
-            console_warning(f"No gpu model found for chip id: {chip_id}")
-        else:
-            console_warning(f"No valid chip id provided: {chip_id}")
-
-        gpu_models = cls._gpu_model_dict.get(gpu_arch, [])
-        if len(gpu_models) != 1:
-            console_warning("The GPU model is unknown, so its memory levels are too.")
-            return None
-
-        console_warning(f"Using the only {gpu_arch} model, {gpu_models[0]}.")
-        return gpu_models[0]
 
     @classmethod
     def set_default_gpu_settings(

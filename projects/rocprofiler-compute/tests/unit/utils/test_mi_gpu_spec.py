@@ -13,14 +13,6 @@ from utils.mi_gpu_spec import ROOFLINE_DATA_TYPES, MIGPUSpecs
 from utils.specs import _extract_gpu_info
 
 
-@pytest.fixture
-def warnings_logged(monkeypatch):
-    """The messages that mi_gpu_spec passes to console_warning."""
-    messages = []
-    monkeypatch.setattr("utils.mi_gpu_spec.console_warning", messages.append)
-    return messages
-
-
 class TestMIGPUSpecs:
     # -- YAML parsing / initialization ---------------------------------------
 
@@ -347,19 +339,6 @@ def test_get_gpu_model_invalid_arch():
     """Test get_gpu_model with invalid architecture - covers lines 243-244"""
     result = MIGPUSpecs.get_gpu_model("gfx999", "12345")
     assert result is None
-
-
-@pytest.mark.misc
-def test_get_gpu_model_unknown_chip_id_uses_only_model_of_arch(warnings_logged):
-    assert MIGPUSpecs.get_gpu_model("gfx1201", "12345") == "RDNA4_NAVI48"
-    assert "Using the only gfx1201 model, rdna4_navi48." in warnings_logged
-
-
-@pytest.mark.misc
-def test_get_gpu_model_unknown_chip_id_of_arch_with_several_models(warnings_logged):
-    assert MIGPUSpecs.get_gpu_model("gfx942", "12345") is None
-    assert not any("Using the only" in message for message in warnings_logged)
-    assert "The GPU model is unknown, so its memory levels are too." in warnings_logged
 
 
 @pytest.mark.misc
