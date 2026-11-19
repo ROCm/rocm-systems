@@ -6,6 +6,9 @@
 //! Queue objects retain their backing and platform state until explicit
 //! destruction succeeds. Packet-format policy and public ABI behavior remain
 //! responsibilities of the frontend using rocddi.
+//! Session retirement rejects new producer mappings and queue updates while
+//! allowing progress checks, inactivation, and destruction. Already published
+//! transport addresses retain their explicit producer lifetime contract.
 
 mod exception;
 mod layout;
@@ -25,14 +28,32 @@ use crate::driver::{self, Driver, UserQueueResource};
 use crate::memory::storage::{Owned, Shared};
 use crate::{Error, ErrorKind};
 
-/// Drains host packet stores before notifying a GPU queue through its doorbell.
+/// Completes prior host stores before publishing a packet or notifying a queue.
 ///
 /// CPU mappings of local rings can be write-combined. An ordinary release
-/// fence does not drain those writes on x86, so the engine could observe the
-/// doorbell before the packet. On the x86-64 host path, this
-/// operation orders earlier stores before the 64-bit notification, including
-/// stores to write-combined ring memory. Other hosts use a sequentially
-/// consistent fence and require native queue-publication qualification.
+/// fence does not drain those writes on x86. AQL producers must complete the
+/// body stores before publishing the header; a later doorbell barrier is too
+/// late for an engine already inspecting the ring. The x86-64 path uses SFENCE,
+/// and `AArch64` uses an outer-shareable store-completion barrier. Other hosts
+/// still require a native queue-publication implementation.
+#[inline]
+#[allow(unsafe_code)]
+pub fn complete_host_stores() {
+    #[cfg(target_arch = "x86_64")]
+    // SAFETY: x86-64 has SSE2, and SFENCE drains earlier write-combined stores.
+    unsafe {
+        std::arch::x86_64::_mm_sfence();
+    }
+    #[cfg(target_arch = "aarch64")]
+    // SAFETY: The barrier completes prior stores in the outer-shareable domain.
+    unsafe {
+        core::arch::asm!("dsb oshst", options(nostack, preserves_flags))
+    };
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    std::sync::atomic::fence(std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Drains host packet stores before notifying a GPU queue through its doorbell.
 ///
 /// # Safety
 /// `address` must be a live, aligned, writable 64-bit MMIO doorbell mapping
@@ -41,13 +62,7 @@ use crate::{Error, ErrorKind};
 /// ring, index storage, and doorbell mapping live through this call.
 #[allow(unsafe_code)]
 pub unsafe fn store_ordered_mmio64(address: usize, value: u64) {
-    #[cfg(target_arch = "x86_64")]
-    // SAFETY: x86-64 has SSE2, and SFENCE drains earlier write-combined stores.
-    unsafe {
-        std::arch::x86_64::_mm_sfence();
-    }
-    #[cfg(not(target_arch = "x86_64"))]
-    std::sync::atomic::fence(std::sync::atomic::Ordering::SeqCst);
+    complete_host_stores();
     // SAFETY: The caller retains the live, aligned MMIO mapping.
     unsafe { (address as *mut u64).write_volatile(value) };
 }
@@ -108,6 +123,7 @@ impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> DriverQueue<
         device_driver: &Shared<D>,
         state: &D::DeviceState,
     ) -> Result<QueueTransport, Error> {
+        let _operation = self.driver.admission().enter()?;
         if !Shared::ptr_eq(&self.driver, device_driver) {
             return Err(Error::Operation {
                 kind: ErrorKind::InvalidArgument,
@@ -133,10 +149,12 @@ impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> DriverQueue<
     }
 
     pub(crate) fn set_priority(&mut self, priority: QueuePriority) -> Result<(), Error> {
+        let _operation = self.driver.admission().enter()?;
         self.inner.set_priority(priority)
     }
 
     pub(crate) fn set_cu_mask(&mut self, mask: &[u32]) -> Result<(), Error> {
+        let _operation = self.driver.admission().enter()?;
         self.inner.set_cu_mask(mask)
     }
 
@@ -145,9 +163,27 @@ impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> DriverQueue<
     /// the new scratch backing and synchronizes its inactive signal until
     /// replacement or conclusive queue teardown.
     #[allow(unsafe_code)]
-    pub(crate) unsafe fn set_scratch(&mut self, scratch: QueueScratch) -> Result<(), Error> {
+    pub(crate) unsafe fn set_scratch(
+        &mut self,
+        scratch: Option<QueueScratch>,
+    ) -> Result<(), Error> {
+        let _operation = scratch
+            .map(|_| self.driver.admission().enter())
+            .transpose()?;
         // SAFETY: The caller keeps the stopped-queue and backing obligations.
         unsafe { self.inner.set_scratch(scratch) }
+    }
+
+    pub(crate) fn enable_async_scratch(&mut self) -> Result<(), Error> {
+        let _operation = self.driver.admission().enter()?;
+        self.inner.enable_async_scratch()
+    }
+
+    pub(crate) fn reclaim_scratch(
+        &mut self,
+        cancel: &std::sync::atomic::AtomicBool,
+    ) -> Result<(), Error> {
+        self.inner.reclaim_scratch(cancel)
     }
 
     pub(crate) fn check(&self) -> Result<(), Error> {
@@ -466,7 +502,38 @@ impl Queue {
     #[allow(unsafe_code)]
     pub unsafe fn set_scratch(&mut self, scratch: QueueScratch) -> Result<(), Error> {
         // SAFETY: The public caller supplies the stopped-queue and backing contract.
-        unsafe { self.inner.set_scratch(scratch) }
+        unsafe { self.inner.set_scratch(Some(scratch)) }
+    }
+    /// Clears scratch after CP has reported that its last use has retired.
+    ///
+    /// # Errors
+    /// Propagates native control-publication or queue availability failures.
+    ///
+    /// # Safety
+    /// CP must be stopped for its use-once reclamation event. The old backing
+    /// must stay live until this update succeeds and the inactive signal is
+    /// released by the caller.
+    #[allow(unsafe_code)]
+    pub unsafe fn clear_scratch(&mut self) -> Result<(), Error> {
+        // SAFETY: Caller supplies the stopped-queue and retired-use contract.
+        unsafe { self.inner.set_scratch(None) }
+    }
+    /// Enables CP V2 bookkeeping on an empty, unpublished AQL queue.
+    ///
+    /// # Errors
+    /// Rejects published or unsupported queues and propagates native errors.
+    pub fn enable_async_scratch(&mut self) -> Result<(), Error> {
+        self.inner.enable_async_scratch()
+    }
+    /// Bounds the current scratch lifetime and checks whether its last user retired.
+    /// A busy result retains the bound for a later retry without polling.
+    /// Caller keeps all scratch backing until success or conclusive queue destruction.
+    ///
+    /// # Errors
+    /// Returns unsupported, cancellation, or native errors without permitting
+    /// the caller to free the current scratch on failure.
+    pub fn reclaim_scratch(&mut self, cancel: &std::sync::atomic::AtomicBool) -> Result<(), Error> {
+        self.inner.reclaim_scratch(cancel)
     }
     /// Checks loss and transport availability without reading queue progress.
     /// Success establishes no completion frontier and does not refresh the
@@ -611,6 +678,7 @@ mod queue_resource_tests {
     struct FakeDevice;
 
     struct FakeDriver {
+        admission: crate::session::SessionAdmission,
         dropped: Arc<AtomicBool>,
         queue_drops: Arc<AtomicUsize>,
     }
@@ -645,6 +713,10 @@ mod queue_resource_tests {
 
     impl Driver for FakeDriver {
         type DeviceState = FakeDevice;
+
+        fn admission(&self) -> &crate::session::SessionAdmission {
+            &self.admission
+        }
 
         fn driver_instance(&self) -> crate::driver::DriverInstanceId {
             crate::driver::DriverInstanceId::TEST
@@ -698,6 +770,7 @@ mod queue_resource_tests {
 
     fn request() -> QueueRequest {
         QueueRequest {
+            control_memory: crate::device::gpu::queue::QueueRingMemory::System,
             ring_size_bytes: 4096,
             parameters: QueueParameters::Sdma,
             priority: QueuePriority::Normal,
@@ -790,7 +863,7 @@ mod queue_resource_tests {
             self.check()
         }
 
-        unsafe fn set_scratch(&mut self, _: QueueScratch) -> Result<(), Error> {
+        unsafe fn set_scratch(&mut self, _: Option<QueueScratch>) -> Result<(), Error> {
             Err(failure("fake queue has no scratch"))
         }
 
@@ -823,10 +896,60 @@ mod queue_resource_tests {
     }
 
     #[test]
+    fn retiring_queue_rejects_new_producers_and_keeps_cleanup_available() -> Result<(), Error> {
+        let driver_dropped = Arc::new(AtomicBool::new(false));
+        let queue_drops = Arc::new(AtomicUsize::new(0));
+        let driver = Shared::new(FakeDriver {
+            admission: crate::session::SessionAdmission::new(
+                crate::os::ProcessIdentity::capture().map_err(|source| {
+                    crate::os::native_error("test session process identity", source)
+                })?,
+            ),
+            dropped: driver_dropped.clone(),
+            queue_drops: queue_drops.clone(),
+        })?;
+        let inner = Owned::new(FakeQueue {
+            info: transport(),
+            driver_dropped,
+            queue_drops: queue_drops.clone(),
+            fail_destroy: false,
+            released: false,
+        })?;
+        let mut queue = DriverQueue::new(driver.clone(), inner, request())?;
+        queue.set_priority(QueuePriority::Normal)?;
+        driver.admission.begin_retirement()?;
+        assert!(matches!(
+            queue.map_device(&driver, &FakeDevice),
+            Err(error) if error.kind() == ErrorKind::Unsupported
+        ));
+        assert!(matches!(
+            queue.set_priority(QueuePriority::Normal),
+            Err(error) if error.kind() == ErrorKind::Unsupported
+        ));
+        assert!(matches!(
+            queue.set_cu_mask(&[1]),
+            Err(error) if error.kind() == ErrorKind::Unsupported
+        ));
+        queue.check()?;
+        assert_eq!(queue.progress()?, (0, 0));
+        queue.inactivate()?;
+        // SAFETY: The fake never publishes addresses to a native producer.
+        unsafe { queue.destroy()? };
+        drop(queue);
+        assert_eq!(queue_drops.load(Ordering::Relaxed), 1);
+        Ok(())
+    }
+
+    #[test]
     fn driver_queue_retains_native_owner_and_driver_through_failed_cleanup() -> Result<(), Error> {
         let driver_dropped = Arc::new(AtomicBool::new(false));
         let queue_drops = Arc::new(AtomicUsize::new(0));
         let driver = Shared::new(FakeDriver {
+            admission: crate::session::SessionAdmission::new(
+                crate::os::ProcessIdentity::capture().map_err(|source| {
+                    crate::os::native_error("test session process identity", source)
+                })?,
+            ),
             dropped: driver_dropped.clone(),
             queue_drops: queue_drops.clone(),
         })?;
@@ -841,6 +964,11 @@ mod queue_resource_tests {
         let mut queue = DriverQueue::new(driver.clone(), driver_queue, request())?;
         assert_eq!(queue.info(), transport());
         let foreign = Shared::new(FakeDriver {
+            admission: crate::session::SessionAdmission::new(
+                crate::os::ProcessIdentity::capture().map_err(|source| {
+                    crate::os::native_error("test session process identity", source)
+                })?,
+            ),
             dropped: Arc::new(AtomicBool::new(false)),
             queue_drops: Arc::new(AtomicUsize::new(0)),
         })?;
@@ -876,6 +1004,11 @@ mod queue_resource_tests {
         let driver_dropped = Arc::new(AtomicBool::new(false));
         let queue_drops = Arc::new(AtomicUsize::new(0));
         let driver = Shared::new(FakeDriver {
+            admission: crate::session::SessionAdmission::new(
+                crate::os::ProcessIdentity::capture().map_err(|source| {
+                    crate::os::native_error("test session process identity", source)
+                })?,
+            ),
             dropped: driver_dropped.clone(),
             queue_drops: queue_drops.clone(),
         })?;
@@ -904,6 +1037,11 @@ mod queue_resource_tests {
             let driver_dropped = Arc::new(AtomicBool::new(false));
             let queue_drops = Arc::new(AtomicUsize::new(0));
             let driver = Shared::new(FakeDriver {
+                admission: crate::session::SessionAdmission::new(
+                    crate::os::ProcessIdentity::capture().map_err(|source| {
+                        crate::os::native_error("test session process identity", source)
+                    })?,
+                ),
                 dropped: driver_dropped.clone(),
                 queue_drops: queue_drops.clone(),
             })?;

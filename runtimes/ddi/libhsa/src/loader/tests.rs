@@ -26,8 +26,9 @@ fn memory_reader_rejects_oversized_slice_before_access() {
 }
 
 #[test]
-/// Verifies that loader extension table contains every version 1 03 entry point.
-fn loader_extension_table_contains_every_version_1_03_entry_point() {
+/// Verifies that loader extension table contains every version 1.04 entry point.
+fn loader_extension_table_contains_every_version_1_04_entry_point() {
+    assert_eq!(loader_extension_table().len(), 9);
     assert!(loader_extension_table().into_iter().all(|entry| entry != 0));
 }
 
@@ -38,6 +39,17 @@ fn file_reader_entry_point_matches_the_public_abi() {
         hsa_code_object_reader_create_from_file;
     let _: unsafe extern "C" fn(HsaFile, usize, usize, *mut HsaCodeObjectReader) -> Status =
         crate::api::loader::query::hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size;
+    let _: unsafe extern "C" fn(HsaCodeObjectReader, *mut usize) -> Status =
+        crate::api::loader::query::hsa_ven_amd_loader_code_object_reader_get_load_size;
+    let _: unsafe extern "C" fn(
+        HsaExecutable,
+        HsaAgent,
+        HsaCodeObjectReader,
+        *const c_char,
+        *mut c_void,
+        usize,
+        *mut HsaLoadedCodeObject,
+    ) -> Status = hsa_ven_amd_loader_executable_load_agent_code_object_at_address;
 }
 
 #[test]
@@ -111,46 +123,6 @@ fn public_loader_constants_match_hsa_headers() {
     assert_eq!(SYMBOL_KIND_VARIABLE, 0);
     assert_eq!(SYMBOL_KIND_KERNEL, 1);
     assert_eq!(SYMBOL_KIND_INDIRECT_FUNCTION, 2);
-}
-
-#[test]
-/// Checks reporting of one combined segment for v2 code objects.
-fn reports_one_combined_segment_for_v2_code_objects() {
-    let loads = [
-        LoadSegment {
-            file_offset: 0,
-            virtual_address: 0,
-            file_size: 0x17c0,
-            memory_size: 0x17c0,
-        },
-        LoadSegment {
-            file_offset: 0x1800,
-            virtual_address: 0x2800,
-            file_size: 0x6c8,
-            memory_size: 0x6c8,
-        },
-        LoadSegment {
-            file_offset: 0x1ec8,
-            virtual_address: 0x3ec8,
-            file_size: 0x70,
-            memory_size: 0x138,
-        },
-        LoadSegment {
-            file_offset: 0x1f38,
-            virtual_address: 0x4f38,
-            file_size: 4,
-            memory_size: 4,
-        },
-    ];
-    let segments = loaded_segments(&loads, 0x0010_0000, 0);
-    assert!(segments.is_ok());
-    let Some(segments) = segments.ok() else {
-        return;
-    };
-    assert_eq!(segments.len(), 1);
-    assert_eq!(segments[0].storage_offset, 0);
-    assert_eq!(segments[0].address, 0x0010_0000);
-    assert_eq!(segments[0].size, 0x4f3c);
 }
 
 #[test]

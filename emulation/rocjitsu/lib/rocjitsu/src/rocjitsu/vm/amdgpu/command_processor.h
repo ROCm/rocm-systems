@@ -280,7 +280,7 @@ public:
   /// signal_queue_exception(..., false). This operation is safe to serialize
   /// under a driver status-publication mutex because it cannot flush CU
   /// notifications back into the driver. With wait_for_ack=false, success
-  /// means the status and interrupt were published, not consumed by ROCr.
+  /// means the status and software event were published, not consumed by ROCr.
   bool publish_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status,
                                bool wait_for_ack = true);
 
@@ -755,6 +755,7 @@ private:
   [[nodiscard]] bool execute_aql_pm4(ComputeQueueRecord &queue, DispatchEntry &entry,
                                      simdojo::Tick now);
   void cancel_queue_dispatches(const ComputeQueueRecord &queue);
+  void reset_ordered_ids(const ComputeQueueRecord &queue);
   void fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchState &qs);
   void complete_failed_queue(ComputeQueueRecord &queue);
   void drain_pending_queue_failures();

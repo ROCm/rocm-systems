@@ -648,9 +648,12 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
       cu->write_sgpr(sbase + sys_idx++, wg_id_z);
   }
   if (pkt.enable_wg_info) {
-    cu->write_sgpr(sbase + sys_idx,
-                   ShaderProcessorInput::workgroup_info(arch, pkt.wfs_per_workgroup, wf_index_in_wg,
-                                                        wf_index_in_wg));
+    // Without ordered append the ABI supplies the wave-in-group as the term.
+    // An ordered launch reserves terms when the whole workgroup commits below.
+    if (pkt.ordered_append == DispatchEntry::OrderedAppend::Disabled)
+      cu->write_sgpr(sbase + sys_idx,
+                     ShaderProcessorInput::workgroup_info(arch, pkt.wfs_per_workgroup,
+                                                          wf_index_in_wg, wf_index_in_wg));
     ++sys_idx;
   }
   if (properties.uses_ttmp_workgroup_ids) {
@@ -894,6 +897,8 @@ void CommandProcessor::startup() {
       });
   completion_->set_dispatch_retired_callback([this](const DispatchEntry &entry) {
     erase_cluster_workgroups(entry.dispatch_id);
+    if (gws_device_)
+      gws_device_->retire_ordered_dispatch(entry.process_id, entry.queue_id, entry.dispatch_id);
     dispatch_launch_metadata_.erase(entry.dispatch_id);
     // Resume fetch after the blocking packet's completion is durable.
     if (entry.blocks_following && engine()) {
@@ -1454,7 +1459,7 @@ bool CommandProcessor::publish_queue_exception(uint32_t queue_id, uint32_t proce
   uint64_t exception_status_va = 0;
   uint32_t exception_event_id = 0;
   AddressSpaceHandle address_space;
-  InterruptSink interrupt_sink;
+  InterruptSink exception_event_sink;
   std::chrono::milliseconds ack_timeout;
   {
     std::lock_guard<std::recursive_mutex> lk(hw_queue_mutex_);
@@ -1467,7 +1472,7 @@ bool CommandProcessor::publish_queue_exception(uint32_t queue_id, uint32_t proce
     exception_event_id = queue->exception_event_id;
     ack_timeout = runtime_exception_ack_timeout_;
     address_space = queue->address_space;
-    interrupt_sink = queue->interrupt_sink;
+    exception_event_sink = queue->exception_event_sink;
   }
 
   const AtomicLoadResult previous =
@@ -1478,7 +1483,7 @@ bool CommandProcessor::publish_queue_exception(uint32_t queue_id, uint32_t proce
   if (gpu_vm_->atomic_store(address_space, exception_status_va, sizeof(combined_status),
                             combined_status) != VmAccessOutcome::Complete)
     return false;
-  interrupt_sink.deliver(process_id, exception_event_id);
+  exception_event_sink.deliver(process_id, exception_event_id);
   if (!wait_for_ack)
     return true;
   const auto deadline = std::chrono::steady_clock::now() + ack_timeout;
@@ -1580,6 +1585,7 @@ QueuePrepareCloseStatus CommandProcessor::close_queue_registration(uint64_t regi
       // every XCD at once: the KFD paths sweep all command processors, and an
       // owner cascades to its replicas below. No XCD is left holding a grid that
       // can no longer retire. Unregistering a lone replica is not supported.
+      reset_ordered_ids(*queue);
       compute_queues_.erase(queue);
     }
   }
@@ -2042,7 +2048,7 @@ void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
         }
       }
       for (const auto &[interrupt_sink, process_id] : idle_queues)
-        interrupt_sink.deliver(process_id, 0);
+        interrupt_sink.notify_idle(process_id);
     }
 
     if (poll_count % 5000 == 1) {
@@ -2563,7 +2569,8 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       }
     }
 
-    // All fallible per-wave work succeeded: commit WG bookkeeping and the cluster pin.
+    // All fallible per-wave work succeeded: commit the launch terms, WG and cluster pin.
+    ShaderProcessorInput::init_ordered_append(*cu, entry, wg_wavefronts);
     cu->begin_workgroup(entry.dispatch_id, global_wg_id, entry.wfs_per_workgroup,
                         entry.num_named_barriers);
     register_cluster_workgroup(entry, local_wg_id, global_wg_id, cu, lds_base);
@@ -3192,6 +3199,8 @@ void CommandProcessor::service_command_streams(simdojo::Tick now) {
       if (entry.execution_begun)
         plugin_group_->onAmdgpuDispatchExecutionEnd(entry.dispatch_id);
       erase_cluster_workgroups(entry.dispatch_id);
+      if (gws_device_)
+        gws_device_->retire_ordered_dispatch(entry.process_id, entry.queue_id, entry.dispatch_id);
       state.entries.pop_front();
       if (flushed != VmAccessOutcome::Complete) {
         util::Logger::warn("PM4 queue failed: PM4 cache flush failed");
@@ -3302,6 +3311,13 @@ util::Result CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4
   dp.interrupt_sink = queue.interrupt_sink;
   dp.enabled_cus = queue.enabled_cus;
   dp.kernel_wave_size = (initiator & (1u << 15)) ? 32 : 64;
+  if ((initiator & (1u << 3)) &&
+      (arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2)) {
+    dp.ordered_append = (initiator & (1u << 4)) ? DispatchEntry::OrderedAppend::PerWorkgroup
+                                                : DispatchEntry::OrderedAppend::PerWave;
+    // AMD's GFX10 compute-ring initialization programs 32 ordered IDs per physical CU.
+    dp.ordered_id_count = std::min<size_t>(cus_.size() * 32, GwsDevice::kComputeWaveIdMask + 1);
+  }
   if (RJ_AMDHSA_BITS_GET(rsrc2, COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT)) {
     dp.enable_private_segment = true;
     dp.pm4_scratch_waves_per_se = regs[kPm4ComputeTmpringSize] & 0xfff;
@@ -3470,9 +3486,20 @@ void CommandProcessor::cancel_queue_dispatches(const ComputeQueueRecord &queue) 
     erase_cluster_workgroups(dispatch_id);
     for (auto *cu : cus_)
       cu->abort_dispatch(dispatch_id);
+    if (gws_device_)
+      gws_device_->retire_ordered_dispatch(queue.process_id, queue.queue_id, dispatch_id);
     for (auto *spi : spis_)
       spi->release_wgp_dispatch(dispatch_id);
   }
+}
+
+void CommandProcessor::reset_ordered_ids(const ComputeQueueRecord &queue) {
+  // Production CUs share one device. Standalone CPs can own CU-local GDS stores.
+  if (gws_device_)
+    gws_device_->reset_ordered_ids(queue.process_id, queue.queue_id);
+  else
+    for (auto *cu : cus_)
+      cu->gws_device().reset_ordered_ids(queue.process_id, queue.queue_id);
 }
 
 void CommandProcessor::fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchState &qs) {
@@ -3496,6 +3523,10 @@ void CommandProcessor::fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchStat
 }
 
 void CommandProcessor::complete_failed_queue(ComputeQueueRecord &queue) {
+  // Completion callbacks can release command resources. Cancel queued data
+  // effects first; entered effects retain their backing until retirement drains.
+  for (auto &submission : queue.commands.submissions)
+    submission.data_transfer.reset();
   if (flush_gpu_caches(queue.address_space) != VmAccessOutcome::Complete)
     util::Logger::warn("PM4 queue cancellation cache flush failed");
   for (auto &submission : queue.commands.submissions)
@@ -3543,6 +3574,7 @@ void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs
                 arm_stall_recheck(now);
               },
           .fault_queue = [this, &queue, &qs] { fail_pm4_queue(queue, qs); },
+          .reset_gds_wave_id = [this, &queue] { reset_ordered_ids(queue); },
       });
 }
 
@@ -3719,8 +3751,18 @@ AqlAdmissionResult CommandProcessor::request_dynamic_scratch(ComputeQueueRecord 
       queue.interrupt_sink.deliver(queue.process_id, state.event_id);
       return {.status = AqlAdmissionStatus::Blocked};
 
-    case QueueScratchRequestPhase::WaitingForRuntime:
+    case QueueScratchRequestPhase::WaitingForRuntime: {
+      // Replacing the backing may revoke the request's publication snapshot.
+      const AtomicLoadResult released = transaction_access.atomic_load(
+          state.signal_address + kSignalValueOffset, sizeof(uint64_t));
+      if (released.outcome != VmAccessOutcome::Complete)
+        return admission_from_vm_outcome(released.outcome);
+      if (released.value == 0)
+        state.reset();
+      // The replacement may include new mappings. End this transaction so the
+      // next admission takes a VM snapshot after the runtime's release.
       return {.status = AqlAdmissionStatus::Blocked};
+    }
     }
   }
 }
@@ -3945,6 +3987,10 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
     const hsa_kernel_dispatch_packet_t &pkt, ComputeQueueRecord &queue,
     const GpuVmAccess &transaction_access, uint64_t pkt_addr, uint32_t queue_packet_id,
     uint64_t aql_packet_id, ClusterDispatchShape cluster_shape) {
+  // The runtime owns descriptor fields until it releases a scratch request.
+  if (queue.scratch_request.active())
+    return request_dynamic_scratch(queue, transaction_access, aql_packet_id,
+                                   queue.scratch_request.status);
   const bool uses_kfd_queue_abi = queue.uses_kfd_queue_abi;
   using namespace rocjitsu::amdhsa;
   const KernelDescriptorReadResult descriptor =
@@ -4158,7 +4204,6 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
             wave_size == 32 ? kInsufficientScratchWave32 : kInsufficientScratchWave64;
         return request_dynamic_scratch(queue, transaction_access, aql_packet_id, status);
       }
-      queue.scratch_request.reset();
 
       uint32_t queue_properties = 0;
       const VmAccessOutcome properties_outcome =
@@ -4646,31 +4691,31 @@ void CommandProcessor::fetch_from_queue(ComputeQueueRecord &queue, simdojo::Tick
                         write_idx - read_idx);
   });
 
-  // AQL doorbell clamping (compute queues only).
+  static_assert(sizeof(hsa_kernel_dispatch_packet_t) == kAqlPacketBytes);
+  const uint32_t num_slots = queue.ring_size / kAqlPacketBytes;
+  // Reservations can advance beyond a full ring while its live headers remain
+  // valid. Bound admission by the public retirement cursor before replacing it
+  // with the private fetch cursor; a reservation does not release a ring slot.
+  uint64_t process_limit = write_idx;
+  if (write_idx > read_idx && write_idx - read_idx > num_slots)
+    process_limit = read_idx + num_slots;
+
   // Use the CP-private fetch cursor as the authoritative next-packet index. It
   // stays ahead of the consumer cursor while admitted dispatches are live, so
   // those packets remain visible without being fetched twice.
   read_idx = std::max(read_idx, queue.fetch_cursor);
-  uint64_t process_limit = write_idx;
   if (queue.doorbell_mode != QueueDoorbellMode::VmPolled) {
     const uint64_t doorbell = queue.last_doorbell;
-    // KFD initializes a new queue's doorbell to UINT64_MAX, meaning that no
-    // packet has been published yet. The producer may reserve a ring slot by
-    // advancing write_ptr before it initializes the packet and release-stores
-    // the header. Treating the sentinel as an unclamped producer cursor lets a
-    // concurrent CP read that partially initialized slot.
+    // KFD leaves the queue unarmed until its first doorbell notification.
     if (doorbell == std::numeric_limits<uint64_t>::max())
       return;
-    uint64_t doorbell_limit = doorbell + 1;
-    if (doorbell_limit < process_limit)
-      process_limit = doorbell_limit;
-    process_limit = std::max(process_limit, read_idx);
-  } else {
-    process_limit = std::max(process_limit, read_idx);
+    // Explicit frontends provide an admission bound. A polled host doorbell
+    // can lose a higher value when publishers ring out of reservation order;
+    // its write index and acquired valid headers below govern admission.
+    if (queue.doorbell_mode == QueueDoorbellMode::Explicit)
+      process_limit = std::min(process_limit, doorbell + 1);
   }
-
-  static_assert(sizeof(hsa_kernel_dispatch_packet_t) == kAqlPacketBytes);
-  const uint32_t num_slots = queue.ring_size / kAqlPacketBytes;
+  process_limit = std::max(process_limit, read_idx);
 
   while (read_idx < process_limit) {
     const uint32_t slot = static_cast<uint32_t>(read_idx % num_slots);

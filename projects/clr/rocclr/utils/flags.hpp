@@ -293,19 +293,24 @@ release(bool, DEBUG_CLR_DIRECT_DOORBELL, false,                               \
         "Write the hardware doorbell directly from CLR")                      \
 release(uint, DEBUG_CLR_AQL_DEV_QUEUE, 1,                                     \
         "Device-memory AQL ring buffer for supported asics "                  \
-        "(1=enabled, 0=force system mem (default))")                          \
+        "(1=enabled (default), 0=force system mem)")                          \
 release(uint, DEBUG_CLR_USE_MOVDIR64B, 1,                                     \
         "Use MOVDIR64B full-packet writes for AQL + metadata rings"           \
         "(1=enabled (default), 0=non-temporal store path)")                   \
 release(bool, DEBUG_CLR_ENABLE_KDQ, true,                                     \
         "Kernel dispatch metadata (prefetch) queue, 0 = disable")             \
 release(bool, DEBUG_CLR_GRAPH_DEV_SIGNALS, true,                              \
-        "Place graph signals in device memory (large BAR only)")              \
-release(bool, DEBUG_CLR_DEV_SIGNALS, false,                                   \
-        "Place queue signals in device memory (large BAR only)")              \
+        "Place graph signals in device memory when ROCr reports a "           \
+        "signal-capable device pool, the device has a large BAR, and no "     \
+        "profiler tool is attached")                                          \
+release(bool, DEBUG_CLR_DEV_SIGNALS, true,                                    \
+        "Place queue signals in device memory when ROCr reports a "           \
+        "signal-capable device pool, the device has a large BAR, and no "     \
+        "profiler tool is attached")                                          \
 release(bool, DEBUG_CLR_GRAPH_FAST_LAUNCH, true,                             \
-        "Graph launches on several streams: one-packet end markers with a "  \
-        "gate for the other queues, fork waits without marker commands, "     \
+        "Graph launches on several streams: end markers that complete a "    \
+        "signal without interrupt for the other queues, fork waits without "  \
+        "marker commands, "                                                    \
         "empty nodes carrying their waits, no host read-backs of device "     \
         "memory on the launch path (0 = the previous launch path)")           \
 

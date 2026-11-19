@@ -11,7 +11,7 @@ The first domains are:
 - `driver_memcpy`: driver-style directed 1D synchronous and stream-ordered copy contracts
 - `driver_memcpy_2d`: driver-style struct-based 2D synchronous and stream-ordered copy contracts
 - `runtime`: runtime initialization, device visibility, version, and error-state contracts
-- `device`: portable current-device property contracts, plus GPUDirect RDMA write-flush accepted-or-unsupported and invalid-enumerator contracts
+- `device`: portable current-device property contracts, GPUDirect RDMA write-flush accepted-or-unsupported and invalid-enumerator contracts, and execution-affinity support-query boolean-shape, AMD-gated CU/WGP masking-granularity, and invalid-pointer/type/device rejection contracts
 - `device_identity`: device PCI identity, device selection, and single-device peer-query contracts
 - `device_texture_query`: image-gated device texture-width query contracts
 - `peer_query`: peer-to-peer attribute and AMD link-type query invalid-input contracts
@@ -74,6 +74,7 @@ The first domains are:
 - `graph_node_params`: graph memcpy, memset, event, and lifecycle node parameter contracts
 - `graph_node_setters`: pre-instantiation graph node parameter setter and attribute-copy contracts
 - `graph_symbol_copy_nodes`: graph memcpy-to/from-symbol node add, set-params, and exec-set-params contracts
+- `graph_id`: IDs for graphs, executable graphs, and graph nodes
 - `host_memory`: host allocation, registration, device-pointer, and flag contracts
 - `host_alloc_aliases`: alternate host allocation/free entry point and extended allocation contracts
 - `pitched_memory`: pitched allocation and host/device 2D copy contracts
@@ -91,7 +92,7 @@ The first domains are:
 - `memory_pool`: default memory pool, release-threshold, and stream-ordered allocation contracts
 - `vmm`: virtual memory management granularity, reserve, map, access, and roundtrip contracts
 - `vmm_handle`: VMM allocation-handle retain, property query, and dma-buf address-range export contracts
-- `mem_map_array`: sparse array map/unmap (`hipMemMapArrayAsync`) invalid-input rejection contracts
+- `mem_map_array`: sparse array map/unmap (`hipMemMapArrayAsync`) and sparse layout query (`hipArrayGetSparseProperties`) invalid-input rejection contracts
 - `copy3d`: 3D pitched allocation and host-device 3D copy contracts
 - `async_copy3d`: stream-ordered 3D copy, 3D memset, and memcpy-with-stream contracts
 - `driver_copy3d`: driver-style 3D copy contracts
@@ -250,7 +251,7 @@ because the legacy texref API it exercises existed on NVIDIA only through CUDA 1
 In addition, several domains that do compile on NVIDIA gate only their AMD-only
 tests behind `#if HT_AMD` (for example `library`, `kernel_object_attributes`,
 `library_file`, `driver_graph_node`, `host_alloc_aliases`, `pointer_query`,
-`device_config`, `occupancy_ext`, `driver_texture_object`, `texture`), so their
+`device`, `device_config`, `occupancy_ext`, `driver_texture_object`, `texture`), so their
 portable subset still runs on NVIDIA.
 
 ### Tests skipped at execution on NVIDIA

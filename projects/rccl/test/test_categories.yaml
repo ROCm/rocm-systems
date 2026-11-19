@@ -117,6 +117,7 @@ test_categories:
       - "TunerPluginConstants.*"
       - "CpuAffinity.*"
       - "DdaReduceScatterFabricLL.*"
+      - "DdaReduceScatterFabricSpreadLL.*"
       - "DdaAllReduceFabricLL.*"
       - "RasDiagnostics.*"
       - "ProfilerApiEventRank.*"

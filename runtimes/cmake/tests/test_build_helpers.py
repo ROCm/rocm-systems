@@ -18,7 +18,7 @@ from configure_rust import cmake_set, rust_flags, validate_host
 
 
 class ConfigureTests(unittest.TestCase):
-    def test_cargo_config_paths_survive_working_directory_changes(self):
+    def test_configured_paths_survive_working_directory_changes(self):
         helpers = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -33,12 +33,19 @@ class ConfigureTests(unittest.TestCase):
             config.write_text("# fixture config\n")
             alias = root / "config alias.toml"
             alias.symlink_to(config)
+            addrlib = root / "AddrLib source"
+            (addrlib / "inc").mkdir(parents=True)
+            (addrlib / "inc" / "addrinterface.h").write_text("// fixture\n")
+            vendor = source / "image" / "rocaddr3" / "vendor" / "addrlib"
+            (vendor / "inc").mkdir(parents=True)
+            (vendor / "inc" / "addrinterface.h").write_text("// fixture\n")
             # Fake provisioned tools validate actual subprocess arguments; no Rust
             # build is needed to exercise configure, generated commands or Ninja.
             for tool in ("cargo", "rustc", "ld.lld"):
                 executable = root / tool
                 executable.write_text(f"""#!{sys.executable}
 import json
+import os
 from pathlib import Path
 import sys
 tool = Path(sys.argv[0]).name
@@ -49,6 +56,8 @@ elif tool == "ld.lld":
 elif "--version" in sys.argv:
     print("cargo 1.98.0")
 else:
+    addrlib = Path(os.environ["ROCADDR_SOURCE_DIR"])
+    assert addrlib.is_absolute() and (addrlib / "inc/addrinterface.h").is_file(), str(addrlib)
     if "--config" in sys.argv:
         config = Path(sys.argv[sys.argv.index("--config") + 1])
         assert config.is_absolute() and config.is_file(), str(config)
@@ -68,10 +77,17 @@ add_custom_target(check ALL COMMAND ${_runtime_cargo_command} metadata --frozen
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}" VERBATIM)
 """
             )
-            for index, value in enumerate(
-                (config.name, str(config), alias.name, "", "missing.toml")
-            ):
-                with self.subTest(config=value):
+            selections = (
+                (config.name, addrlib.name),
+                (str(config), str(addrlib)),
+                (alias.name, ""),
+                ("", addrlib.name),
+                ("", ""),
+                ("missing.toml", ""),
+                ("", "missing-addrlib"),
+            )
+            for index, (value, addr_source) in enumerate(selections):
+                with self.subTest(config=value, addrlib=addr_source):
                     binary = root / f"build-{index}"
                     result = subprocess.run(
                         [
@@ -86,6 +102,7 @@ add_custom_target(check ALL COMMAND ${_runtime_cargo_command} metadata --frozen
                             f"-DROCM_RUNTIMES_RUSTC={root / 'rustc'}",
                             f"-DROCM_RUNTIMES_LLD={root / 'ld.lld'}",
                             f"-DROCM_RUNTIMES_CARGO_CONFIG:FILEPATH={value}",
+                            f"-DROCM_RUNTIMES_ADDRLIB_SOURCE_DIR:PATH={addr_source}",
                         ],
                         cwd=root,
                         capture_output=True,
@@ -96,6 +113,10 @@ add_custom_target(check ALL COMMAND ${_runtime_cargo_command} metadata --frozen
                         self.assertIn(
                             "Cargo configuration does not exist", result.stderr
                         )
+                        continue
+                    if addr_source == "missing-addrlib":
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertIn("AddrLib source tree is incomplete", result.stderr)
                         continue
                     self.assertEqual(
                         result.returncode, 0, result.stdout + result.stderr
@@ -112,6 +133,14 @@ add_custom_target(check ALL COMMAND ${_runtime_cargo_command} metadata --frozen
                         )
                     else:
                         self.assertNotIn('"--config"', settings)
+                    expected_addr = os.path.abspath(root / addr_source) if addr_source else ""
+                    self.assertIn(
+                        cmake_set("_runtime_addrlib_source", [expected_addr]), settings
+                    )
+                    self.assertIn(
+                        f"ROCM_RUNTIMES_ADDRLIB_SOURCE_DIR:PATH={expected_addr}",
+                        (binary / "CMakeCache.txt").read_text(),
+                    )
                     subprocess.run(
                         ["cmake", "--build", str(binary)],
                         cwd=source,

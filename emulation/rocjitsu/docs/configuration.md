@@ -345,6 +345,14 @@ read; the default 32-bit HW_ID read therefore still warns and writes zero.
 Unknown or unrepresentable identity fields likewise issue an `s_getreg_b32`
 warning and write zero.
 
+RDNA3/RDNA4 `HW_ID1` reports the wave slot, the CU's WGP and its half of it,
+SA_ID and SE_ID. A CU's wave slots alternate between its two SIMDs, so slot
+`s` reads SIMD `s % 2` and WAVE_ID `s / 2`. SIMD_ID, WGP_ID and SA_ID require
+an even shader-array width of at most 32 CUs and at most two arrays per shader
+engine; SE_ID must fit in three bits. DP_RATE reads 1 on gfx11 and gfx12 and
+is unsupported on gfx11.5, which has no measured value. Reads touching an
+unrepresentable field warn and write zero.
+
 Omitted geometry fields inherit defaults selected by `gfx_target_version`.
 For a smaller topology, set both `num_cu_per_sh` and
 `num_shader_arrays_per_engine` to match its CU groups; for example, two arrays
@@ -430,11 +438,11 @@ outside the contract in every semantics mode. `RJ_FORCE_SCALAR`
 selects rj-arith's baseline CPU path; the test override also applies to existing CUs.
 It does not change semantics.
 
-Scalar FP arithmetic currently retains a guest-rounding limitation from the legacy
-handlers: Compatibility uses nearest-even for scalar F16/F32 add, subtract,
-multiply, and integer-to-F32 conversion. For example, `S_CVT_F32_I32 0x01000001`
-produces `0x4b800000` even with guest rounding toward +infinity; gfx1201 produces
-`0x4b800001`. The corresponding library entry points reject nonzero rounding flags.
+Scalar F16/F32 add, subtract, multiply, FMAC and the rounding conversions follow the
+MODE rounding field of their destination format (MODE[1:0] for FP32, MODE[3:2] for FP16).
+For example, under guest rounding toward +infinity `S_CVT_F32_I32 0x01000001` produces
+`0x4b800001`, as on gfx1201, both in decoded RDNA4 Compatibility, which also records FP
+causes, and through the rj-arith entry points in the configured semantics.
 
 
 ### Memory wait diagnostics

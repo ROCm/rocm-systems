@@ -5,6 +5,8 @@
 
 #include <fmt/format.h>
 
+#include <stdexcept>
+
 #if !defined(TIMEMORY_USE_BFD)
 #    error "BFD support not enabled"
 #endif
@@ -137,7 +139,7 @@ symbol::operator+=(const symbol& _rhs)
     }
     else
     {
-        throw exception<std::runtime_error>("incompatible symbol+=");
+        throw std::runtime_error("incompatible symbol+=");
     }
 
     return *this;

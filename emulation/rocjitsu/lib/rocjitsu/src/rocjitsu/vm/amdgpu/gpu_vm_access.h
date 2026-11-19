@@ -33,6 +33,7 @@ namespace rocjitsu::amdgpu {
 class GpuVm;
 class GpuVmAccess;
 class GpuVmAccessState;
+class GpuVmTransferBatch;
 class DeviceCacheMaintenanceLease;
 class VmTransferEffectGate;
 
@@ -47,7 +48,25 @@ using VmTransferMaintenance = std::function<util::FailureOr<DeviceCacheMaintenan
 /// until the outer guard exits, but each operation independently checks and
 /// leases its access state. Revoked entries are skipped on subsequent lookups.
 class GpuVmAccessBatchGuard {
+  class Cache;
+
 public:
+  /// @brief Bound synchronous execution caches to the call instead of its host thread.
+  /// @details Engine workers keep their persistent cache outside this scope.
+  class ScopedCache {
+  public:
+    ScopedCache();
+    ~ScopedCache();
+    ScopedCache(const ScopedCache &) = delete;
+    ScopedCache &operator=(const ScopedCache &) = delete;
+
+  private:
+    // Lazily allocated snapshots used by this host call's execution batches.
+    std::unique_ptr<Cache> cache_;
+    // Borrowed enclosing scope, restored when this call returns.
+    std::unique_ptr<Cache> *previous_;
+  };
+
   GpuVmAccessBatchGuard();
   ~GpuVmAccessBatchGuard();
 
@@ -60,6 +79,10 @@ public:
 
 private:
   friend class GpuVm;
+
+  static Cache &thread_cache();
+  // Borrowed host-call cache owner, or null for ordinary engine-worker caching.
+  inline static thread_local std::unique_ptr<Cache> *scoped_cache_ = nullptr;
 
   [[nodiscard]] static const GpuVmAccess *find_snapshot(const GpuVm *vm, AddressSpaceHandle handle);
   [[nodiscard]] static const GpuVmAccess *find_snapshot_vmid(const GpuVm *vm, uint32_t vmid);
@@ -192,6 +215,43 @@ public:
   explicit operator bool() const { return outcome == VmAccessOutcome::Complete; }
 };
 
+/// One ordinary local grant. All access kinds and subspans share its policy.
+struct VmLocalGrant {
+  uint64_t begin = 0;
+  uint64_t end = 0;
+  uint64_t generation = 0;
+};
+
+/// Copied local policy. The snapshot identified by identity() owns the counters
+/// and must be live whenever covers() is called on a populated view.
+class VmLocalGrantView {
+public:
+  VmLocalGrantView() = default;
+  explicit operator bool() const { return grant_.end != 0; }
+  uint64_t generation() const { return grant_.generation; }
+  uint64_t identity() const { return identity_; }
+
+  bool covers(uint64_t address, size_t size) const {
+    return address >= grant_.begin && address < grant_.end && size &&
+           size <= grant_.end - address &&
+           publication_->load(std::memory_order_acquire) == epoch_ &&
+           valid_->load(std::memory_order_acquire);
+  }
+
+private:
+  friend class GpuVmAccess;
+  VmLocalGrantView(VmLocalGrant grant, const std::atomic<uint64_t> &publication,
+                   const std::atomic<bool> &valid, uint64_t epoch, uint64_t identity)
+      : grant_(grant), publication_(&publication), valid_(&valid), epoch_(epoch),
+        identity_(identity) {}
+
+  VmLocalGrant grant_;
+  const std::atomic<uint64_t> *publication_ = nullptr;
+  const std::atomic<bool> *valid_ = nullptr;
+  uint64_t epoch_ = 0;
+  uint64_t identity_ = 0;
+};
+
 /// @brief Memory domain selected by a translation.
 enum class VmMemoryDomain : uint8_t {
   System,
@@ -315,6 +375,12 @@ private:
   std::atomic<uint64_t> state_{0};
 };
 
+/// @brief Owner of cache maintenance for a deferred VM write.
+/// @details A controlled-local endpoint prepares and proves selected alias
+/// maintenance at effect time. Every other transfer retains caller maintenance
+/// before submission.
+enum class VmDeferredWriteMaintenance : uint8_t { Caller, ControlledLocalEndpoint };
+
 /// @brief One owned request handed to an execution owner's event loop.
 /// @details Preparation may retain backing leases and copy write data, but
 /// must not send or affect memory. submit() queues owned work for the owner
@@ -342,13 +408,21 @@ public:
     return std::nullopt;
   }
   virtual void cancel() noexcept = 0;
-};
 
-/// @brief Owner of cache maintenance for a deferred VM write.
-/// @details A controlled-local endpoint prepares and proves selected alias
-/// maintenance at effect time. Every other transfer retains caller maintenance
-/// before submission.
-enum class VmDeferredWriteMaintenance : uint8_t { Caller, ControlledLocalEndpoint };
+private:
+  friend class VmTransferToken;
+  friend class GpuVmAccess;
+  // Retry bookkeeping exists only for operations actually handed to an owner.
+  std::vector<std::byte> read_result_;
+  std::shared_ptr<GpuVmAccessState> state_;
+  std::size_t total_bytes_ = 0;
+  std::size_t offset_ = 0;
+  uint64_t address_ = 0;
+  VmAccessKind kind_ = VmAccessKind::Read;
+  VmDeferredWriteMaintenance write_maintenance_ = VmDeferredWriteMaintenance::Caller;
+  bool peer_origin_ = false;
+  bool submitted_ = false;
+};
 
 /// @brief Move-only identity and storage for one outstanding VM request.
 /// @details An owner keeps this token across Unavailable retries. The token
@@ -360,10 +434,13 @@ public:
   VmTransferToken(std::unique_ptr<VmDeferredTransfer> operation, std::size_t bytes,
                   VmDeferredWriteMaintenance write_maintenance = VmDeferredWriteMaintenance::Caller,
                   bool peer_origin = false);
-  ~VmTransferToken();
+  ~VmTransferToken() {
+    if (operation_)
+      operation_->cancel();
+  }
   VmTransferToken(const VmTransferToken &) = delete;
   VmTransferToken &operator=(const VmTransferToken &) = delete;
-  VmTransferToken(VmTransferToken &&other) noexcept;
+  VmTransferToken(VmTransferToken &&other) noexcept = default;
   VmTransferToken &operator=(VmTransferToken &&other) noexcept;
 
   [[nodiscard]] bool pending() const noexcept { return operation_ != nullptr; }
@@ -377,17 +454,7 @@ public:
 private:
   friend class GpuVmAccess;
   std::unique_ptr<VmDeferredTransfer> operation_;
-  bool peer_origin_ = false;
   std::optional<VmCompletedRead> completed_read_;
-  std::vector<std::byte> read_result_;
-  std::size_t bytes_ = 0;
-  std::size_t total_bytes_ = 0;
-  std::size_t offset_ = 0;
-  uint64_t address_ = 0;
-  VmAccessKind kind_ = VmAccessKind::Read;
-  std::shared_ptr<GpuVmAccessState> state_;
-  VmDeferredWriteMaintenance write_maintenance_ = VmDeferredWriteMaintenance::Caller;
-  bool submitted_ = false;
 };
 
 /// @brief Result of one strong compare/exchange against physical backing.
@@ -672,7 +739,7 @@ class VmMtypeCache {
 public:
   VmMtypeCache() = default;
   VmMtypeCache(const VmMtypeCache &other)
-      : access_state_(other.access_state_),
+      : cache_identity_(other.cache_identity_),
         snapshots_(other.snapshots_ ? std::make_unique<Snapshots>(*other.snapshots_) : nullptr) {}
   VmMtypeCache &operator=(const VmMtypeCache &other) {
     if (this != &other) {
@@ -688,24 +755,23 @@ public:
   /// @details Unused CUs retain neither a snapshot table nor work to clear
   /// during VM setup and teardown.
   void clear() noexcept {
-    access_state_.reset();
+    cache_identity_ = 0;
     snapshots_.reset();
   }
 
 private:
   friend class GpuVmAccess;
-  static constexpr std::size_t kSnapshotCount = 128;
+  static constexpr std::size_t kSnapshotCount = 512;
   using Snapshots = std::array<VmMtypeSnapshot, kSnapshotCount>;
   // Interleaved lanes revisit short page runs in widely separated rows.
   // Offset each 128-page block by eight slots to separate those runs without
-  // mirroring adjacent pages at block boundaries; adding page >> 10 spreads
-  // 4 MiB strides. Runs of up to 119 pages are conflict-free, but pages about
-  // 120 apart can alias. Range and mutation-token checks validate every hit.
+  // mirroring adjacent pages at block boundaries. Adding page >> 10 spreads
+  // 4 MiB strides. Range and mutation-token checks validate every hit.
   [[nodiscard]] static std::size_t snapshot_index(uint64_t address) {
     const uint64_t page = address >> 12;
     return (page + ((page >> 7) << 3) + (page >> 10)) % kSnapshotCount;
   }
-  std::weak_ptr<GpuVmAccessState> access_state_;
+  uint64_t cache_identity_ = 0;
   std::unique_ptr<Snapshots> snapshots_;
 };
 
@@ -782,6 +848,19 @@ public:
   /// @brief Whether this binding's execute policy permits resident I$ hits
   /// without consulting live frontend grants.
   [[nodiscard]] bool execute_admission_is_fixed() const;
+  /// Whether this snapshot belongs to the frontend that published the local grants.
+  [[nodiscard]] bool uses_local_grants(const std::atomic<uint64_t> &publication) const;
+  [[nodiscard]] bool local_ingress_mapped(std::span<const MemoryIngressSpan> spans, uint64_t begin,
+                                          uint64_t end) const;
+  /// Generation of a uniform local grant covering the entire span, including generation zero.
+  [[nodiscard]] std::optional<uint64_t> local_grant_generation(uint64_t address, size_t size) const;
+  [[nodiscard]] std::optional<VmAccessAdmission> local_admission(uint64_t address,
+                                                                 size_t size) const {
+    if (const auto generation = local_grant_generation(address, size))
+      return VmAccessAdmission{.generation = *generation};
+    return std::nullopt;
+  }
+  [[nodiscard]] VmLocalGrantView local_grant_view(uint64_t address, size_t size) const;
   [[nodiscard]] bool supports_translated_local_cache() const;
   /// Saturating count of admitted cache writes and atomics under this root.
   /// Invalidation and pinned snapshots share the count; explicit root
@@ -938,6 +1017,7 @@ private:
               std::shared_ptr<GpuVmAccessState> access_state)
       : address_space_(address_space), info_(info), access_state_(std::move(access_state)) {}
 
+  friend class GpuVmTransferBatch;
   void report_terminal_fault(uint64_t address, VmAccessKind access, VmAccessOutcome outcome) const;
   [[nodiscard]] VmAccessOutcome probe_impl(uint64_t address, std::size_t size, VmAccessKind access,
                                            bool report_fault) const;
@@ -946,7 +1026,8 @@ private:
   transfer_tokenized(uint64_t address, Span bytes, std::size_t &completed_bytes,
                      VmTransferToken &token, VmAccessKind access, bool allow_deferred,
                      const VmTransferMaintenance &maintenance, const VmTransferIngress &ingress,
-                     const VmPrivateUcGttCopySource &copy_source) const;
+                     const VmPrivateUcGttCopySource &copy_source,
+                     GpuVmTransferBatch *batch = nullptr) const;
 
   AddressSpaceHandle address_space_;
   AddressSpaceInfo info_;
