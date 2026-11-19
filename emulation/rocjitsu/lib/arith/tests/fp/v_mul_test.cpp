@@ -159,9 +159,10 @@ TEST(FpMulF64W64Gfx11, Arithmetic) {
       rj_arith_v_mul_f64_w64, [](double x, double y) { return x * y; }, /*gfx12=*/false);
 }
 
-// Reject unqualified status domains before touching outputs; Compatibility reports the
-// shared hardware classifier even where explicit mode 3 is unqualified: CLAMP suppresses
-// every cause and an output modifier keeps only OVERFLOW (gfx1201 captures).
+// Reject unqualified status domains before touching outputs; on gfx12 Compatibility reports
+// the shared hardware classifier even where explicit mode 3 is unqualified: CLAMP suppresses
+// every cause, while an output modifier suppresses only UNDERFLOW and INEXACT and leaves the
+// operand causes in place (gfx1201 captures).
 TEST(FpMulF32, ReportingDomain) {
   using namespace rocjitsu::arith::test;
   for (uint64_t cpu : supported_cpu_levels()) {
@@ -182,11 +183,12 @@ TEST(FpMulF32, ReportingDomain) {
           ASSERT_EQ(call(cpu | fp | RJ_ARITH_SEMANTICS_COMPATIBILITY, 1, instruction_flags, r.v + 2,
                          r.v, r.v + 1, &status),
                     RJ_ARITH_SUCCESS);
-          // RDNA3 applies OMOD only with output flushing and IEEE mode clear.
-          const bool omod =
-              (instruction_flags & RJ_ARITH_ALU_OMOD_MASK) &&
-              (call == rj_arith_v_mul_f32_w32_gfx12 || fp == RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
-          const uint32_t causes = instruction_flags & RJ_ARITH_ALU_CLAMP ? 0U : omod ? 8U : 0x28U;
+          // The inherited RDNA3 classifier reads the raw operands, so neither CLAMP nor an
+          // output modifier changes what this overflowing product reports there.
+          const uint32_t causes = call != rj_arith_v_mul_f32_w32_gfx12 ? 0x28U
+                                  : instruction_flags & RJ_ARITH_ALU_CLAMP
+                                      ? 0U
+                                      : ((instruction_flags & RJ_ARITH_ALU_OMOD_MASK) ? 8U : 0x28U);
           EXPECT_EQ(status, 0x80000000U | causes);
         }
       }
@@ -261,9 +263,8 @@ uint64_t mul_capture_flags(uint32_t mode) {
 
 // Check captured values and causes under Compatibility on a lane in a later SIMD chunk, and
 // under explicit mode 3 where it is qualified (default MODE, no OMOD/CLAMP), which must
-// report the same bits. Gfx11 lacks a status capture (TRAPSTS.EXCP does not latch with
-// exceptions disabled); its entry points share the classifier, checked here in IEEE mode
-// (NaN quieting as on gfx12) for rows without an output modifier.
+// report the same bits. Only the gfx12 entry points carry this classifier: gfx11 has no
+// status capture, because TRAPSTS.EXCP does not latch there with exceptions disabled.
 template <int Lanes, typename Call> void check_mul_captures(Call call, bool gfx12) {
   using namespace rocjitsu::arith::test;
   using Mask = std::conditional_t<Lanes == 32, uint32_t, uint64_t>;
@@ -271,9 +272,6 @@ template <int Lanes, typename Call> void check_mul_captures(Call call, bool gfx1
   for (uint64_t cpu : supported_cpu_levels()) {
     for (const auto &test : mul_f32_captures) {
       const uint64_t fp = mul_capture_flags(test.mode) | (gfx12 ? 0 : RJ_ARITH_FP_IEEE_MODE);
-      if (!gfx12 && (test.modifiers & RJ_ARITH_ALU_OMOD_MASK)) {
-        continue;
-      }
       SCOPED_TRACE(::testing::Message()
                    << std::hex << cpu << " mode 0x" << test.mode << ": 0x" << test.a << ", 0x"
                    << test.b << " mods 0x" << test.modifiers);
@@ -306,9 +304,53 @@ TEST(FpMulF32Gfx12, Gfx1201StatusCaptures) {
   check_mul_captures<64>(rj_arith_v_mul_f32_w64_gfx12, /*gfx12=*/true);
 }
 
-TEST(FpMulF32Gfx11, SharedStatusClassifier) {
-  check_mul_captures<32>(rj_arith_v_mul_f32_w32, /*gfx12=*/false);
-  check_mul_captures<64>(rj_arith_v_mul_f32_w64, /*gfx12=*/false);
+namespace {
+
+// RDNA3 Compatibility causes, which keep the inherited classifier until a gfx1100 capture
+// establishes the gfx1201 rule there. Both rows differ from that rule, so unifying the two
+// architectures changes what an RDNA3 guest with the matching trap enabled runs into:
+// decoded MUL passes these causes to TRAPSTS and trap delivery.
+struct Gfx11Cause {
+  uint64_t fp;
+  uint32_t a, b, modifiers, causes;
+};
+
+const Gfx11Cause gfx11_inherited_causes[] = {
+    // A clamped multiply that overflows in IEEE mode still reports it; the gfx1201 rule
+    // suppresses every cause under CLAMP.
+    {RJ_ARITH_FP_IEEE_MODE, 0x7f7fffff, 0x40000000, RJ_ARITH_ALU_CLAMP,
+     RJ_ARITH_EXCEPTION_OVERFLOW | RJ_ARITH_EXCEPTION_INEXACT},
+    // An inexact product scaled by an output modifier still reports INEXACT; the gfx1201
+    // rule keeps only OVERFLOW there.
+    {RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS, 0x3f800001, 0x3f800001, RJ_ARITH_ALU_OMOD_2,
+     RJ_ARITH_EXCEPTION_INEXACT},
+};
+
+} // namespace
+
+// Pin the two causes above on the RDNA3 entry points, and check the gfx12 entry points give
+// the requalified answer for the same inputs, so re-unifying the two is a test failure
+// rather than a silent change in RDNA3 trap delivery.
+TEST(FpMulF32Gfx11, KeepsInheritedCompatibilityCauses) {
+  using namespace rocjitsu::arith::test;
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (const Gfx11Cause &test : gfx11_inherited_causes) {
+      SCOPED_TRACE(::testing::Message() << std::hex << cpu << ": 0x" << test.a << ", 0x" << test.b
+                                        << " mods 0x" << test.modifiers);
+      for (bool gfx12 : {false, true}) {
+        Registers<3, 32> r;
+        r.v[0][0] = test.a;
+        r.v[1][0] = test.b;
+        r.v[2][0] = 0xdeadbeefU;
+        uint32_t status = 0x80000000U;
+        auto call = gfx12 ? rj_arith_v_mul_f32_w32_gfx12 : rj_arith_v_mul_f32_w32;
+        ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY | test.fp, 1, test.modifiers, r.v + 2,
+                       r.v, r.v + 1, &status),
+                  RJ_ARITH_SUCCESS);
+        EXPECT_EQ(status, 0x80000000U | (gfx12 ? 0U : test.causes)) << "gfx12 " << gfx12;
+      }
+    }
+  }
 }
 
 namespace {

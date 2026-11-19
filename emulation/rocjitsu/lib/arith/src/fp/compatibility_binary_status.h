@@ -74,10 +74,12 @@ inline uint32_t gfx12_binary_causes(uint64_t flags, uint32_t modifiers, uint32_t
   return causes;
 }
 
-// Retain shared/alu_exceptions.h's native-nearest MUL classifier for gfx1250, whose
-// inherited Compatibility policy reports range-only MUL causes; the shared hardware rule is
-// fitted to gfx1201 captures only. It observes raw operands, independently of the guest
-// flush/rounding applied to the numeric result.
+// Retain shared/alu_exceptions.h's native-nearest MUL classifier for RDNA3 and gfx1250.
+// Neither has a capture behind the gfx1201 rule -- gfx1100 TRAPSTS does not latch with
+// exceptions disabled, and gfx1250's inherited Compatibility policy reports range-only MUL
+// causes -- so their guests keep the causes they saw before it, and a trap handler they
+// reach today they still reach. The classifier observes raw operands, independently of the
+// guest flush/rounding applied to the numeric result.
 inline uint32_t compatibility_mul_causes(uint32_t a, uint32_t b, uint32_t omod, bool gfx12) {
   const uint32_t ma = a & 0x7fffffff, mb = b & 0x7fffffff;
   const float x = as_float(a), y = as_float(b);
@@ -102,9 +104,10 @@ inline uint32_t compatibility_mul_causes(uint32_t a, uint32_t b, uint32_t omod, 
 }
 
 // Inspect participating source lanes before any possibly aliased destination writes.
-// MUL uses the hardware classifier shared with explicit reporting (fp/mul_exceptions.h):
-// range causes follow participating EXEC lanes, while DPP row/bank controls that suppress
-// a destination also suppress that lane's INVALID, as in the inherited model.
+// On RDNA4 MUL uses the hardware classifier shared with explicit reporting
+// (fp/mul_exceptions.h): range causes follow participating EXEC lanes, while DPP row/bank
+// controls that suppress a destination also suppress that lane's INVALID, as in the inherited
+// model. RDNA3 and gfx1250 keep the inherited classifier until captures establish the flags.
 template <Binary Op, bool Rdna3, bool Gfx1250 = false>
 inline uint32_t compatibility_binary_causes(uint64_t flags, uint32_t exec_mask, uint32_t write_mask,
                                             uint32_t modifiers, const uint32_t *a,
@@ -114,10 +117,10 @@ inline uint32_t compatibility_binary_causes(uint64_t flags, uint32_t exec_mask, 
     if (!(exec_mask & (1U << lane))) {
       continue;
     }
-    if constexpr (Op == Binary::Mul && Gfx1250) {
+    if constexpr (Op == Binary::Mul && (Rdna3 || Gfx1250)) {
       const uint32_t x = alu_input_bits(a[lane], modifiers);
       const uint32_t y = alu_input_bits(b[lane], modifiers >> 1);
-      causes |= compatibility_mul_causes(x, y, (modifiers >> 6) & 3, true);
+      causes |= compatibility_mul_causes(x, y, (modifiers >> 6) & 3, Gfx1250);
     } else if constexpr (Op == Binary::Mul) {
       uint32_t lane_causes = mul_exceptions_f32(a[lane], b[lane], flags, modifiers);
       if (!(write_mask & (1U << lane))) {

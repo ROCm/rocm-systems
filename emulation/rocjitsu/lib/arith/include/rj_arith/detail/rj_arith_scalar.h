@@ -559,8 +559,12 @@ int rj_arith_s_rndne_f16(uint64_t flags, uint64_t instruction_flags, uint32_t *d
 // Operands and literals are raw IEEE bits. FP16 reads low halves and writes a
 // zero upper half. Rounds once to the destination format. SCC is unchanged.
 // instruction_flags must be zero. FP32 and FP16 support loose and exact semantics;
-// explicit mode 3 reporting is unsupported. Compatibility accumulates the inherited
-// gfx12 scalar FMA causes into required excp_flag_user storage. Loose NaN signs/payloads are
+// explicit mode 3 reporting is unsupported. Compatibility accumulates the gfx12 scalar FMA
+// causes into required excp_flag_user storage, judging overflow and tininess after rounding
+// the significand with the guest rounding mode and an unbounded exponent, as ADD and MUL do
+// (fp/rounding_status.h). A result stored as the minimum normal therefore still reports
+// UNDERFLOW when that rounding stays below it: at MODE 0xfa s_fmac_f32 stores 0x80800000 and
+// reports UNDERFLOW. Loose NaN signs/payloads are
 // unspecified. Exact results follow the borrowed FMA NaN ordering. Guest
 // input/output flushing, FP16_OVFL and RJ_ARITH_FP_ROUND_MASK (the destination
 // format's MODE field) are supported, with tininess detected before destination
