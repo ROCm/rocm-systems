@@ -9,6 +9,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* Analyze mode no longer needs the `tabulate` Python package. rocprofiler-compute now ships it.
+
 ### Removed
 
 ### Optimized
