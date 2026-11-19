@@ -4,17 +4,20 @@
 
 """CPU DIMM power and thermal struct layout (hardware-free).
 
-The generated ctypes structs must keep the C layout on every supported Python;
-Python 3.14 lays out bit-fields with MSVC rules.
+The generated ctypes structs must keep the C layout on every supported Python.
+Python 3.14 lays out bit-fields with MSVC rules. Only 3.14 and later can fail
+these checks. test_abi_compat.py guards the wrapper declarations on every version.
 """
 
 import ctypes
 import struct
+import sys
 import unittest
 
 from common.common import amdsmi
 
 
+@unittest.skipUnless(sys.version_info >= (3, 14), "Python before 3.14 ignores _layout_")
 class TestDimmStructLayout(unittest.TestCase):
     """Decode byte images laid out as the C compiler lays out these structs."""
 
