@@ -8,8 +8,11 @@
 //! current native identity before publication and again before activation.
 //! Parsers reject incomplete, duplicate, overflowing, or internally inconsistent
 //! properties rather than filling important device facts with defaults.
+
+mod directory;
+
 use super::target::KfdTargetProfile;
-use super::{errno, error, native_error, sys};
+use super::{errno, error, native_error};
 use crate::driver::{DriverInstanceId, KfdAccessTarget};
 use crate::memory::storage::Shared;
 use crate::memory::storage::TryPush;
@@ -313,7 +316,7 @@ fn caches(root: &str, node: u32, count: u32) -> Result<DiscoveredCaches, Error> 
         .map_err(|_| error(ErrorKind::ResourceExhausted, "native cache count overflow"))?;
     let mut records = crate::memory::storage::try_vec_with_capacity(capacity)?;
     let path = StackPath::new(format_args!("{root}/nodes/{node}/caches"))?;
-    sys::numeric_directories(path.path(), &mut |ordinal| {
+    directory::numeric_directories(path.path(), &mut |ordinal| {
         if ordinal >= count || records.iter().any(|(seen, _)| *seen == ordinal) {
             return Err(error(
                 ErrorKind::InvalidData,
@@ -408,7 +411,7 @@ fn memory_banks(root: &str, node: u32, count: u32) -> Result<Vec<DiscoveredBank>
     })?;
     let mut records = crate::memory::storage::try_vec_with_capacity(capacity)?;
     let path = StackPath::new(format_args!("{root}/nodes/{node}/mem_banks"))?;
-    sys::numeric_directories(path.path(), &mut |ordinal| {
+    directory::numeric_directories(path.path(), &mut |ordinal| {
         if ordinal >= count || records.iter().any(|(seen, _)| *seen == ordinal) {
             return Err(error(
                 ErrorKind::InvalidData,
@@ -513,7 +516,7 @@ fn read_all(
         };
         let mut records = Vec::new();
         let nodes = StackPath::new(format_args!("{root}/nodes"))?;
-        let result = sys::numeric_directories(nodes.path(), &mut |node| {
+        let result = directory::numeric_directories(nodes.path(), &mut |node| {
             let gpu_id = u32::try_from(scalar(format_args!("{root}/nodes/{node}/gpu_id"))?)
                 .map_err(|_| error(ErrorKind::InvalidData, "GPU ID exceeds u32"))?;
             let record = if gpu_id == 0 && include_host_facts {
@@ -844,7 +847,7 @@ fn node_memory_links(
         }
         let path = StackPath::new(format_args!("{root}/nodes/{node}/{directory}"))?;
         let mut seen = 0u32;
-        sys::numeric_directories(path.path(), &mut |link| {
+        directory::numeric_directories(path.path(), &mut |link| {
             seen = seen
                 .checked_add(1)
                 .ok_or_else(|| error(ErrorKind::ResourceExhausted, "native link count overflow"))?;

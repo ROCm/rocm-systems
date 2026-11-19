@@ -299,6 +299,14 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed GPU BDFs and sysfs-based queries when `libdrm_amdgpu` cannot be loaded**.  
+  - Without `libdrm_amdgpu`, as in the manylinux wheel on a system without the distro libdrm, `amdsmi_get_gpu_device_bdf()` returned leftover memory as the BDF with `AMDSMI_STATUS_SUCCESS`, `amdsmi_get_processor_handle_from_bdf()` could not find the GPU, and PCIe, clock, power-management and ECC-block information was unavailable.
+  - The BDF and render node now come from sysfs regardless of libdrm. ASIC, VBIOS, driver, VRAM-usage and virtualization-mode queries still need libdrm and keep returning `AMDSMI_STATUS_NOT_SUPPORTED` without it.
+
+- **Fixed AMD SMI reporting no GPUs when another copy of the library was loaded first**.  
+  - When a different `libamd_smi.so` file was already loaded with `RTLD_GLOBAL`, as PyTorch wheels do, the library's calls to its own functions went to that copy, and `amdsmi_get_processor_handles()` returned no GPUs, so `torch.cuda.device_count()` returned 0.
+  - `libamd_smi.so` is now linked with `-Bsymbolic-functions`, as the pip wheel's library already was, so its internal calls stay within the library.
+
 - **Fixed `amdsmi_asic_info_t.oam_id` reporting an incorrect value for multi-digit XGMI node IDs**.  
   - The field was parsed as hex instead of decimal, so any node ID of 10 or greater reported the wrong value; its doxygen comment also incorrectly described it as a socket number rather than the XGMI physical node ID within the hive.
 
@@ -405,6 +413,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed a segmentation fault in the DRM example when run without root**.  
   - `amdsmi_get_gpu_accelerator_partition_profile_config()` returns `AMDSMI_STATUS_NO_PERM` without filling its output, and the example read `num_profiles` from that uninitialized structure, so the profile loop ran past the end of the `profiles` array on every GPU. The loop now runs only when the query succeeds.
+
+- **Fixed board temperatures showing `-1 °C` for sensors the board does not have**.  
+  - `amd-smi metric --base-board` and `--gpu-board` now show `N/A` for them, and `amdsmi_get_temp_metric()` returns `AMDSMI_STATUS_NOT_SUPPORTED`.
 
 - **Fixed misleading errors when a GPU, CPU, or AI NIC driver is not loaded**.  
   - When the device is present, `amd-smi` now names the missing driver (exit code 206) instead of reporting "not supported" or an invalid parameter, and `list`, `static`, `metric`, `firmware`, `monitor`, and `topology` show the available devices with a note about the rest on stderr.

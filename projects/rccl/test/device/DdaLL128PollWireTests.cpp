@@ -332,17 +332,15 @@ __global__ void waitBatchLive(uint64_t* wire, int validMask, int late, uint32_t*
   const bool flagLane = ddaLL128IsFlagLane(lane);
   const uint64_t* lines[kBatch];
   bool valid[kBatch];
-  bool read[kBatch];
   for (int k = 0; k < kBatch; ++k) {
     lines[k] = batchSlice(wire, k);
     valid[k] = ((validMask >> k) & 1) != 0;
-    read[k] = true;
   }
   if (lane == 0) {
     __scoped_atomic_store_n(started, 1u, __ATOMIC_RELEASE, __MEMORY_SCOPE_SYSTEM);
   }
   uint64_t vr[kBatch][kDdaLL128WordsPerThread];
-  const bool ok = dda::common::ddaLL128RsWaitBatch(lines, valid, read, 2 * lane, kBatchFlag, flagLane, params, vr);
+  const bool ok = dda::common::ddaLL128RsWaitBatch(lines, valid, 2 * lane, kBatchFlag, flagLane, params, vr);
   unsigned long long mismatches = 0;
   for (int k = 0; k < kBatch; ++k) {
     if (!ok || !valid[k]) {
@@ -544,6 +542,13 @@ protected:
     {
       SCOPED_TRACE("entry 1 lands late");
       const BatchResult r = WaitBatch<kBatch>(kAll & ~2, 2, kAll, 1, false, timedOut);
+      EXPECT_FALSE(timedOut);
+      EXPECT_EQ(r.returned, 1);
+      EXPECT_EQ(r.mismatches, 0ull) << "the wait returned before the late entry's flag was current";
+    }
+    if constexpr (kLast > 1) {
+      SCOPED_TRACE("last entry lands late");
+      const BatchResult r = WaitBatch<kBatch>(kAll & ~(1 << kLast), 1 << kLast, kAll, kLast, false, timedOut);
       EXPECT_FALSE(timedOut);
       EXPECT_EQ(r.returned, 1);
       EXPECT_EQ(r.mismatches, 0ull) << "the wait returned before the late entry's flag was current";
@@ -754,6 +759,18 @@ TEST_F(DdaLL128PollWire, WaitBatchOfTwo) {
 
 TEST_F(DdaLL128PollWire, WaitBatchOfThree) {
   ExpectWaitBatchCases<3>();
+}
+
+TEST_F(DdaLL128PollWire, WaitBatchOfFour) {
+  ExpectWaitBatchCases<4>();
+}
+
+TEST_F(DdaLL128PollWire, WaitBatchOfSeven) {
+  ExpectWaitBatchCases<7>();
+}
+
+TEST_F(DdaLL128PollWire, WaitBatchOfEight) {
+  ExpectWaitBatchCases<8>();
 }
 
 } // namespace RcclUnitTesting
