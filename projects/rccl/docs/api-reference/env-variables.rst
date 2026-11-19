@@ -1207,6 +1207,19 @@ in the following table.
       - | ``1``: Register GIN backends (default).
         | ``0``: Disable GIN; GIN reports as unsupported.
 
+    * - | ``NCCL_SYM_GIN_KERNELS_ENABLE``
+        | Controls whether RCCL may use symmetric kernels that carry their
+          network traffic over GIN (GPU-Initiated Networking). Only consulted
+          when the communicator spans more than one LSA team
+          (``lsaRanks < nRanks``); within a single LSA team no GIN-only kernel
+          is eligible and this variable has no effect. It also has no effect
+          when the resolved GIN backend is Anvil SDMA, which cannot reach rail
+          peers outside the LSA team: RCCL disables the symmetric GIN kernels
+          regardless of this setting and logs the reason under
+          ``NCCL_DEBUG=INFO``.
+      - | ``1``: Allow symmetric GIN kernels (default).
+        | ``0``: Disable symmetric GIN kernels.
+
     * - | ``NCCL_GIN_TYPE``
         | Selects the GPU-Initiated Networking (GIN) backend. Unset or
           ``-1`` leaves backend selection automatic. In RCCL on AMD, the
