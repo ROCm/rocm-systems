@@ -150,9 +150,9 @@ Memory chart:
   vL1D_L2 Atomic BW:
     rst: Bandwidth of atomic requests from the vL1D cache to the :doc:`L2 <l2-cache>` cache per unit time.
     unit: Bytes/s
-  SMEM:
-    rst: The total number of scalar memory (SMEM) operations issued. These are typically used for loading kernel arguments, base-pointers and loads from HIP's ``__constant__`` memory.
-    unit: Instructions per Normalization Unit
+  sL1D Rd:
+    rst: The total number of requests, of any size or type, made to the :ref:`sL1D <desc-sl1d>` per :ref:`normalization unit <normalization-units>`.
+    unit: Requests per Normalization Unit
   sL1D Hit:
     rst: The percent of :ref:`sL1D <desc-sl1d>` requests that hit on a previously loaded cache line. Calculated as the ratio of the number of sL1D requests that hit over the number of all sL1D requests.
     unit: Percent

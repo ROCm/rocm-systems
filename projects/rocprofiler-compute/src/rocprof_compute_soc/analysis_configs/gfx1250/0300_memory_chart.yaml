@@ -49,9 +49,9 @@ Panel Config:
         value: Value
         unit: Unit
       metric:
-        SMEM:
-          value: SUM(SQ_INSTS_SMEM_sum) / SUM($denom)
-          unit: (Instructions + $normUnit)
+        Dcache Requests:
+          value: SUM(SQC_DCACHE_REQ_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
         Dcache Utilization:
           value: 100 * SUM(SQC_DCACHE_BUSY_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_sum)
           unit: Percent
@@ -363,8 +363,8 @@ Panel Config:
     ICache-GL1 Request Latency: >-
       Average latency of Instruction Cache requests sent to GL1.
 
-    SMEM: >-
-      Number of scalar memory instructions issued.
+    Dcache Requests: >-
+      Total Scalar Data Cache requests.
 
     Dcache Utilization: >-
       Percentage of WGP cycles the Scalar Data Cache is serving requests.

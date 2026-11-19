@@ -155,9 +155,9 @@ Memory chart - Instruction Cache:
     rst: Average latency of Instruction Cache requests sent to GL1.
     unit: Cycles
 Memory chart - Scalar Data Cache:
-  SMEM:
-    rst: Number of scalar memory instructions issued.
-    unit: Instructions per Normalization Unit
+  Dcache Requests:
+    rst: Total Scalar Data Cache requests.
+    unit: Requests per Normalization Unit
   Dcache Utilization:
     rst: Percentage of WGP cycles the Scalar Data Cache is serving requests.
     unit: Percent

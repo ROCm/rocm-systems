@@ -7,6 +7,13 @@ sl1d.hits_per_req:
     efficient reuse of constant and uniform data. Low rates may suggest excessive
     unique constant data or poor temporal locality.
   peak: 100
+sl1d.req:
+  name: sL1D Requests
+  formula: SUM(SQC_DCACHE_REQ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    Scalar data cache requests after bank serialization, normalized by the chosen
+    unit.
 sl1d.req_bw:
   name: Dcache Request Bandwidth
   formula: 4 * SUM(SQC_SMEM_LOAD_DWORDS_sum) / SUM(End_Timestamp - Start_Timestamp)
