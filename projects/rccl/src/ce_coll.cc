@@ -932,7 +932,9 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
     // Force an even sync count so useCompletePtr returns to its pre-launch
     // state; an odd count leaves the toggle flipped and desyncs the next
     // ready/complete barrier on graph replay. (ported from NCCL)
-    if (params->intraBatchSync &&
+    // [RCCL] Only under capture, as on the batch path: the legacy null stream also lands here, and an extra
+    // barrier there would pair against a peer on another stream kind that does not issue it.
+    if (capturing && params->intraBatchSync &&
         ((params->numOps + comm->ceColl.intraBatchSyncFreq - 1) / comm->ceColl.intraBatchSyncFreq) % 2 == 0) {
       NCCLCHECKGOTO(ncclMemOpSync(comm, stream, args), ret, fail);
     }

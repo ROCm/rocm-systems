@@ -807,6 +807,56 @@ class CeAlltoAllvSyncMicrotest : public ::testing::TestWithParam<LaunchPath> {
   std::function<void(std::vector<size_t>&)> corruptGathered_;  // edits the gathered matrix before any rank runs
 };
 
+// Peers wait for an equal ceSeqNum, so the barrier count of one batch must not depend on the caller's stream
+// kind: 16 ops at freq 8 is one intra-batch barrier on every arm, rounded up to two only under graph capture.
+TEST_P(CeAlltoAllvSyncMicrotest, LaunchBatchOps16OpsFreq8_BarrierCountDoesNotDependOnStreamKind) {
+  constexpr int kRanks = 16;
+  constexpr int kOps = 16;
+  std::vector<int> lsaRankList(kRanks);
+  for (int r = 0; r < kRanks; ++r) lsaRankList[r] = r;
+  std::vector<uint32_t> syncFlags(2 * kRanks, 0);
+  ncclDevrWindow syncWin = {};
+  syncWin.userPtr = syncFlags.data();
+
+  auto comm = std::make_unique<ncclComm>();
+  comm->rank = 0;
+  comm->nRanks = kRanks;
+  comm->devrState.lsaTeamSize = kRanks;
+  comm->devrState.lsaTeamSelf = 0;
+  comm->devrState.lsaTeamRankList = lsaRankList.data();
+  comm->symkState.hasLsaMultimem = false;
+  comm->planner.capturingGraph.graphId = GetParam() == LaunchPath::kGraphCapture ? kCaptureGraphId : ULLONG_MAX;
+  comm->ceColl.intraBatchSyncFreq = 8;
+  comm->ceColl.intraBatchSyncMsgThreshold = CE_COLL_INTRA_BATCH_SYNC_MSG_THRESHOLD;
+  comm->ceColl.baseUCSymReadyPtr = reinterpret_cast<uint8_t*>(syncFlags.data());
+  comm->ceColl.baseUCSymComplPtr = reinterpret_cast<uint8_t*>(syncFlags.data() + kRanks);
+  comm->ceColl.ceSyncWin = &syncWin;
+
+  ncclCeBatchOpsParams params = {};
+  ASSERT_EQ(ncclSuccess, ncclCeInitBatchOpsParams(&params, kOps));
+  for (int i = 0; i < kOps; ++i) {
+    params.dsts[i] = reinterpret_cast<void*>(kPeerWindowBase + i * kPeerWindowStride);
+    params.srcs[i] = reinterpret_cast<void*>(kSendBase + i * 64 * kMiB);
+    params.sizes[i] = 64 * kMiB;
+  }
+  params.numOps = kOps;
+  params.intraBatchSync = true;
+
+  ncclCeCollArgs args = {};
+  args.func = ncclFuncAllGather;
+  current_ = RankRun{};
+  current_.slotEpochs.assign(kRanks, 0);
+  activeComm_ = comm.get();
+  hipStream_t stream =
+      GetParam() == LaunchPath::kLegacyNullStream ? nullptr : reinterpret_cast<hipStream_t>(0x5717);
+  EXPECT_EQ(ncclSuccess, ncclCeLaunchBatchOps(comm.get(), &params, stream, &args));
+  activeComm_ = nullptr;
+  ncclCeFreeBatchOpsParams(&params);
+
+  EXPECT_EQ(static_cast<size_t>(kOps), current_.copies);
+  EXPECT_EQ(GetParam() == LaunchPath::kGraphCapture ? 2u : 1u, comm->ceColl.ceSeqNum);
+}
+
 TEST_P(CeAlltoAllvSyncMicrotest, Sparse16Ranks_EqualTotalsAt512MiB_EveryRankIssuesSameBarrierCount) {
   const int kNRanks = 16;
   const uint32_t kFreq = CE_COLL_INTRA_BATCH_SYNC_FREQ;
