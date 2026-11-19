@@ -215,10 +215,15 @@ bool ncclCeImplemented(ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType
 bool ncclHierCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
                          ncclSymRegType_t winRegType, struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin);
 
+// Single-node DPX/CPX: the hierScaleInSize partitions of each physical GPU are
+// treated as local ranks and physical GPUs as virtual nodes (CE rail, no RMA).
+bool ncclHierCePartitionMode(struct ncclComm* comm);
+
 // True when an admitted CE task must run on the hierarchical path. The launch
 // site and the selection marker share this so they cannot disagree about which
-// algorithm a task got.
-bool ncclHierCeDispatch(struct ncclComm* comm);
+// algorithm a task got. Partition mode is AllGather-only; other CE collectives
+// on a partition-mode comm stay on the flat path.
+bool ncclHierCeDispatch(struct ncclComm* comm, ncclFunc_t func);
 
 ncclResult_t ncclCeInit(struct ncclComm* comm);
 

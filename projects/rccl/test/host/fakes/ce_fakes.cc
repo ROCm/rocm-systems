@@ -100,6 +100,19 @@ bool ncclHierCeAvailable(struct ncclComm* comm, ncclFunc_t func, int op, ncclDat
   return g_hierCeAvailable(comm, func, op, type, regType, sendWin, recvWin);
 }
 
+bool ncclHierCePartitionMode(struct ncclComm* comm) {
+  if (comm == nullptr || comm->nNodes != 1) return false;
+  const int scaleIn = comm->symkState.kcomm.hierScaleInSize;
+  if (scaleIn < 2 || comm->nRanks % scaleIn != 0) return false;
+  return (comm->nRanks / scaleIn) >= 2;
+}
+
+// The multi-node arm needs devr state these binaries do not link; it is
+// exercised against the real src/ce_coll.cc in rccl-UnitTestsMicroCe.
+bool ncclHierCeDispatch(struct ncclComm* comm, ncclFunc_t func) {
+  return ncclHierCePartitionMode(comm) && func == ncclFuncAllGather;
+}
+
 // Allocates the op arrays, as src/ce_coll.cc does: callers write straight into
 // params->srcs[numOps]. A capacity of 0 leaves them null and still succeeds,
 // which is what ncclCalloc does for zero elements.

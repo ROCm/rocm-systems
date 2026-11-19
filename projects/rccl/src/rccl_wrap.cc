@@ -2441,9 +2441,12 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
       if (!query) INFO(NCCL_TUNING, "AG CE-registered disqualified: ceAvailable=%d hasSysmem=%d symEligible=%d ceRegWindow=%d",
            (int)ceAvailable, (int)hasSysmemSegment, (int)symEligible,
            (int)rcclAllGatherCeRegisteredWindowTab(archTable, totalBytes, winRegType, ceCapturing));
-      // Branch #3.5: Hierarchical CE (multi-node, both buffers registered).
-      // ceCollTaskAppend routes to ncclHierCeAllGather via ncclHierCeDispatch(comm),
-      // so RCCL_CE_REGISTERED is correct here — same as rcclSelectAlltoAll Branch #5.
+      // Branch #3.5: Hierarchical CE (both buffers registered): multi-node over an
+      // RMA rail, or single-node DPX/CPX over a CE rail between physical GPUs.
+      // ncclLaunchCeColl routes to ncclHierCeAllGather via ncclHierCeDispatch, so
+      // RCCL_CE_REGISTERED is correct here — same as rcclSelectAlltoAll Branch #5.
+      // On DPX/CPX Branch #3 usually returns first with the same algo, and the
+      // launch-time dispatch still picks the hierarchical path.
       // It uses none of the hierarchical AllGather sub-communicators, which need not
       // exist on this comm, so it is reported like the other CE branches.
       const bool hierCeAvailable =

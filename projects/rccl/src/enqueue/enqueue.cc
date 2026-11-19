@@ -2567,9 +2567,9 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
         plan->ceCollArgs->sizes = (task->func == ncclFuncAlltoAllv) ? task->sizes : nullptr;
 
         if (comm->rank == 0) {
-          if (!ncclDevrIsOneLsaTeam(comm)) {
-            INFO(NCCL_TUNING, "%s [Hierarchical CE]: %ld Bytes -> RMA proxy + CE", ncclFuncToString(task->func),
-                 task->count * ncclTypeSize(task->datatype));
+          if (ncclHierCeDispatch(comm, task->func)) {
+            INFO(NCCL_TUNING, "%s [Hierarchical CE]: %ld Bytes -> %s + CE", ncclFuncToString(task->func),
+                 task->count * ncclTypeSize(task->datatype), ncclHierCePartitionMode(comm) ? "CE rail" : "RMA proxy");
           } else {
             const char* nvlsSync = comm->nvlsSupport ? "; CE synchronization with NVLS" : "";
             INFO(NCCL_TUNING, "%s [Copy Engine]: %ld Bytes -> cudaMemcpy%s", ncclFuncToString(task->func),
@@ -4813,9 +4813,10 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       // AlltoAll, Scatter, Gather) as well as AllReduce, which may bypass the
       // ceCollTaskAppend path when user buffers are not symmetrically registered.
       // Without this trigger, CE AllReduce-only workloads would never initialize
-      // the CE runtime (ceARTmpBuf stays NULL). Hierarchical CE is multi-node by
-      // construction, so it needs the same trigger despite nNodes > 1. Keep
-      // that arm behind the policy bit which actually selects hierarchical CE;
+      // the CE runtime (ceARTmpBuf stays NULL). Hierarchical CE needs the same
+      // trigger on multi-node (RMA rail) and on single-node partition mode
+      // (DPX/CPX CE rail; nNodes==1 already covers that). Keep the multi-node
+      // arm behind the policy bit which actually selects hierarchical CE;
       // otherwise a default-policy collective initializes and registers CE
       // resources only to take the kernel path.
       // ReduceScatter is opt-in (RCCL_CE_REDUCESCATTER defaults to 0). The other

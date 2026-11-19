@@ -1385,6 +1385,13 @@ fail:
   goto exit;
 }
 
+bool ncclHierCePartitionMode(struct ncclComm* comm) {
+  if (comm == nullptr || comm->nNodes != 1) return false;
+  const int scaleIn = comm->symkState.kcomm.hierScaleInSize;
+  if (scaleIn < 2 || comm->nRanks % scaleIn != 0) return false;
+  return (comm->nRanks / scaleIn) >= 2;
+}
+
 bool ncclHierCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
                          ncclSymRegType_t winRegType, struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin) {
   if (!ncclCeImplemented(coll, red, ty)) {
@@ -1403,8 +1410,28 @@ bool ncclHierCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRe
     TRACE(NCCL_TUNING, "Skipping hierarchical CE collective: symmetric support is not enabled");
     return false;
   }
+  // Need registered windows for both send and recv buffers
+  if (winRegType != ncclSymSendRegRecvReg) {
+    TRACE(NCCL_TUNING, "Skipping hierarchical CE collective: window registration type %d not supported", winRegType);
+    return false;
+  }
 
-  // Must be multi-node (single-node uses the regular CE path)
+  // Single-node DPX/CPX: virtual nodes = physical GPUs, local ranks = partitions.
+  // Rail is CE over LSA (no RMA). AllGather only for now.
+  if (ncclHierCePartitionMode(comm)) {
+    if (coll != ncclFuncAllGather) {
+      TRACE(NCCL_TUNING, "Skipping hierarchical CE collective: partition mode supports AllGather only");
+      return false;
+    }
+    // Rail peers live on other virtual nodes; LSA must cover the whole comm.
+    if (ncclTeamLsa(comm).nRanks < comm->nRanks) {
+      TRACE(NCCL_TUNING, "Skipping hierarchical CE collective: LSA team does not cover partition-mode ranks");
+      return false;
+    }
+    return true;
+  }
+
+  // Must be multi-node (plain single-node uses the regular CE path)
   if (comm->nNodes <= 1) {
     TRACE(NCCL_TUNING, "Skipping hierarchical CE collective: not multi-node");
     return false;
@@ -1430,15 +1457,11 @@ bool ncclHierCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRe
     TRACE(NCCL_TUNING, "Skipping hierarchical CE collective: RMA proxy not available");
     return false;
   }
-  // Need registered windows for both send and recv buffers
-  if (winRegType != ncclSymSendRegRecvReg) {
-    TRACE(NCCL_TUNING, "Skipping hierarchical CE collective: window registration type %d not supported", winRegType);
-    return false;
-  }
   return true;
 }
 
-bool ncclHierCeDispatch(struct ncclComm* comm) {
+bool ncclHierCeDispatch(struct ncclComm* comm, ncclFunc_t func) {
+  if (ncclHierCePartitionMode(comm)) return func == ncclFuncAllGather;
   return comm->nNodes > 1 && !ncclDevrIsOneLsaTeam(comm);
 }
 
@@ -2640,8 +2663,124 @@ fail:
   goto exit;
 }
 
+// Single-node DPX/CPX hierarchical CE AllGather: same rail+intra shape as the
+// multi-node Direct path, but virtual nodes = physical GPUs (hierScaleInSize
+// partitions each) and the rail is CE over LSA instead of RMA.
+static ncclResult_t ncclHierCeAllGatherPartition(struct ncclComm* comm, struct ncclKernelPlan* plan,
+                                                 cudaStream_t stream) {
+  ncclResult_t ret = ncclSuccess;
+  struct ncclCeCollArgs* args = plan->ceCollArgs;
+  const int scaleIn = comm->symkState.kcomm.hierScaleInSize;
+  const int nVirNodes = comm->nRanks / scaleIn;
+  const int myRank = comm->rank;
+  const int myVirNode = myRank / scaleIn;
+  const int localRank = myRank % scaleIn;
+  const size_t perRankBytes = args->nElts * args->eltSize;
+  const void* sendbuff = args->sendBuff;
+  void* recvbuff = args->recvBuff;
+  struct ncclDevrWindow* recvWin = args->recvWin;
+  const size_t recvWinBase = (uint8_t*)recvbuff - (uint8_t*)recvWin->userPtr;
+  struct ncclCeBatchOpsParams sendOps = {};
+  struct ncclCeBatchOpsParams intraOps = {};
+  const size_t mySlotOffset = recvWinBase + myRank * perRankBytes;
+  uint8_t* myRecvSlot = (uint8_t*)recvbuff + myRank * perRankBytes;
+
+  // ====================================================================
+  // Phase 1: Entry barrier (full LSA; all virtual nodes participate)
+  // ====================================================================
+  NCCLCHECKGOTO(ncclMemOpSync(comm, stream, args), ret, fail);
+
+  // ====================================================================
+  // Phase 2: One batch carrying every copy of the own slice: the CE rail to
+  // counterpart partitions on other virtual nodes (railPeer = v * scaleIn +
+  // localRank), plus the self-bcast to this rank and its local partitions.
+  // Both halves only read sendbuff and write disjoint recvbuff[myRank] slots,
+  // so batching them lets the copy engines run them concurrently.
+  // ====================================================================
+  NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&sendOps, (nVirNodes - 1) + scaleIn), ret, fail);
+  for (int s = 1; s < nVirNodes; s++) {
+    const int v = (myVirNode + s) % nVirNodes;
+    const int railPeer = v * scaleIn + localRank;
+    void* peerSlot;
+    NCCLCHECKGOTO(ncclCePeerLsaPtr(comm, recvWin, mySlotOffset, railPeer, &peerSlot), ret, fail);
+    sendOps.srcs[sendOps.numOps] = (void*)sendbuff;
+    sendOps.dsts[sendOps.numOps] = peerSlot;
+    sendOps.sizes[sendOps.numOps] = perRankBytes;
+    sendOps.numOps++;
+  }
+  if (myRecvSlot != (const uint8_t*)sendbuff) {
+    sendOps.srcs[sendOps.numOps] = (void*)sendbuff;
+    sendOps.dsts[sendOps.numOps] = (void*)myRecvSlot;
+    sendOps.sizes[sendOps.numOps] = perRankBytes;
+    sendOps.numOps++;
+  }
+  for (int lr = 0; lr < scaleIn; lr++) {
+    if (lr == localRank) continue;
+    const int localPeer = myVirNode * scaleIn + lr;
+    void* peerSlot;
+    NCCLCHECKGOTO(ncclCePeerLsaPtr(comm, recvWin, mySlotOffset, localPeer, &peerSlot), ret, fail);
+    sendOps.srcs[sendOps.numOps] = (void*)sendbuff;
+    sendOps.dsts[sendOps.numOps] = peerSlot;
+    sendOps.sizes[sendOps.numOps] = perRankBytes;
+    sendOps.numOps++;
+  }
+  NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &sendOps, stream, args), ret, fail);
+
+  // ====================================================================
+  // Phase 3: Barrier — rail peers' puts are visible before intra scatter
+  // ====================================================================
+  NCCLCHECKGOTO(ncclMemOpSync(comm, stream, args), ret, fail);
+
+  // ====================================================================
+  // Phase 4: Scatter each remote rail peer's slice within the virtual node
+  // ====================================================================
+  for (int s = 1; s < nVirNodes; s++) {
+    const int v = (myVirNode - s + nVirNodes) % nVirNodes;
+    const int railPeer = v * scaleIn + localRank;
+    uint8_t* chunkSlot = (uint8_t*)recvbuff + railPeer * perRankBytes;
+    const size_t winOffset = recvWinBase + railPeer * perRankBytes;
+
+    NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&intraOps, scaleIn - 1), ret, fail);
+    for (int lr = 0; lr < scaleIn; lr++) {
+      if (lr == localRank) continue;
+      const int localPeer = myVirNode * scaleIn + lr;
+      void* peerSlot;
+      NCCLCHECKGOTO(ncclCePeerLsaPtr(comm, recvWin, winOffset, localPeer, &peerSlot), ret, fail);
+      intraOps.srcs[intraOps.numOps] = chunkSlot;
+      intraOps.dsts[intraOps.numOps] = peerSlot;
+      intraOps.sizes[intraOps.numOps] = perRankBytes;
+      intraOps.numOps++;
+    }
+    if (intraOps.numOps > 0) {
+      NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &intraOps, stream, args), ret, fail);
+    }
+    ncclCeFreeBatchOpsParams(&intraOps);
+    intraOps = {};
+  }
+
+  // ====================================================================
+  // Phase 5: Final barrier
+  // ====================================================================
+  NCCLCHECKGOTO(ncclMemOpSync(comm, stream, args), ret, fail);
+
+exit:
+  ncclCeFreeBatchOpsParams(&sendOps);
+  ncclCeFreeBatchOpsParams(&intraOps);
+  return ret;
+fail:
+  goto exit;
+}
+
 ncclResult_t ncclHierCeAllGather(struct ncclComm* comm, struct ncclKernelPlan* plan, cudaStream_t stream) {
   size_t perRankBytes = plan->ceCollArgs->nElts * plan->ceCollArgs->eltSize;
+  if (ncclHierCePartitionMode(comm)) {
+    const int scaleIn = comm->symkState.kcomm.hierScaleInSize;
+    if (comm->rank == 0)
+      INFO(NCCL_TUNING, "AllGather [Hierarchical CE]: %zu Bytes -> CE rail + CE (partition scaleIn=%d virtualNodes=%d)",
+           perRankBytes, scaleIn, comm->nRanks / scaleIn);
+    return ncclHierCeAllGatherPartition(comm, plan, stream);
+  }
+
   bool useRing = ncclParamHierCeCollAgRailRingEnable() > 0;
   const char* railAlgo = useRing ? "Ring" : "Direct";
   if (comm->rank == 0)
@@ -3809,13 +3948,14 @@ ncclResult_t ncclLaunchCeColl(struct ncclComm* comm, struct ncclKernelPlan* plan
   // Start CE collective profiling
   NCCLCHECKGOTO(ncclProfilerStartCeCollEvent(comm, args, stream), ret, fail);
 
-  // Hierarchical path: inter-node RMA plus intra-node CE. This predicate must
-  // match the one ncclHierCeAvailable admitted the task under, otherwise a
-  // single-node comm with a reduced LSA team (NCCL_LSA_TEAM_SIZE) would be
-  // dispatched here without the RMA prerequisites having been checked. The
-  // single-node ncclCe* paths treat every global rank as an LSA rank and fail
-  // ncclDevrGetLsaRankPtr once nRanks > lsaSize.
-  if (ncclHierCeDispatch(comm)) {
+  // Hierarchical path: inter-node RMA plus intra-node CE, or on a single-node
+  // DPX/CPX comm a CE rail between physical GPUs. This predicate must match the
+  // one ncclHierCeAvailable admitted the task under, otherwise a single-node comm
+  // with a reduced LSA team (NCCL_LSA_TEAM_SIZE) would be dispatched here without
+  // the RMA prerequisites having been checked. The single-node ncclCe* paths
+  // treat every global rank as an LSA rank and fail ncclDevrGetLsaRankPtr once
+  // nRanks > lsaSize.
+  if (ncclHierCeDispatch(comm, args->func)) {
     switch (args->func) {
     case ncclFuncAllGather:
       NCCLCHECKGOTO(ncclHierCeAllGather(comm, plan, stream), ret, fail);
@@ -3947,7 +4087,7 @@ ncclResult_t scheduleCeCollTaskToPlan(struct ncclComm* comm, struct ncclKernelPl
     // Same predicate ncclLaunchCeColl dispatches on, so the marker cannot claim
     // a path the launch did not take. AllGather logs its own marker (with the
     // rail algorithm) from ncclHierCeAllGather.
-    if (ncclHierCeDispatch(comm)) {
+    if (ncclHierCeDispatch(comm, task->func)) {
       if (task->func != ncclFuncAllGather)
         INFO(NCCL_TUNING, "%s " RCCL_CE_HIER_SELECTED_TAG ": %ld Bytes -> RMA proxy + CE", ncclFuncToString(task->func),
              task->count * ncclTypeSize(task->datatype));

@@ -490,6 +490,53 @@ TEST_F(CeAlltoAllEligibilityTest, UnsupportedWindowRegistrationRejected)
                                         /*capturing=*/false));
 }
 
+TEST_F(CeAlltoAllEligibilityTest, PartitionMode_SingleNodeDpxAdmitsAllGatherOnly)
+{
+    if (!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE driver not in supported range";
+
+    mockComm_.reset();
+    mockComm_.comm.nNodes = 1;
+    mockComm_.comm.nRanks = 8;
+    mockComm_.comm.symkState.kcomm.hierScaleInSize = 2;
+    mockComm_.comm.symmetricSupport = true;
+    mockComm_.comm.devrState.bigSize = 1;
+    mockComm_.comm.devrState.lsaSize = 8;
+    mockComm_.comm.devrState.lsaSelf = 0;
+
+    ASSERT_TRUE(ncclHierCePartitionMode(mockComm_.get()));
+    EXPECT_TRUE(ncclHierCeDispatch(mockComm_.get(), ncclFuncAllGather));
+    // Other CE collectives on a partition-mode comm stay on the flat path.
+    EXPECT_FALSE(ncclHierCeDispatch(mockComm_.get(), ncclFuncAlltoAll));
+    EXPECT_FALSE(ncclHierCeDispatch(mockComm_.get(), ncclFuncAlltoAllv));
+    EXPECT_TRUE(ncclHierCeAvailable(mockComm_.get(), ncclFuncAllGather, ncclDevSum, ncclFloat32,
+                                    ncclSymSendRegRecvReg, /*sendWin=*/nullptr, /*recvWin=*/nullptr));
+    EXPECT_FALSE(ncclHierCeAvailable(mockComm_.get(), ncclFuncAlltoAll, ncclDevSum, ncclFloat32,
+                                     ncclSymSendRegRecvReg, /*sendWin=*/nullptr, /*recvWin=*/nullptr));
+    // No RMA required for partition-mode AllGather.
+    mockComm_.comm.hostRmaSupport = false;
+    mockComm_.comm.globalRmaProxySupport = false;
+    EXPECT_TRUE(ncclHierCeAvailable(mockComm_.get(), ncclFuncAllGather, ncclDevSum, ncclFloat32,
+                                    ncclSymSendRegRecvReg, /*sendWin=*/nullptr, /*recvWin=*/nullptr));
+}
+
+TEST_F(CeAlltoAllEligibilityTest, PartitionMode_RequiresScaleInAndVirtualNodes)
+{
+    mockComm_.reset();
+    mockComm_.comm.nNodes = 1;
+    mockComm_.comm.nRanks = 8;
+    mockComm_.comm.symkState.kcomm.hierScaleInSize = 0;
+    EXPECT_FALSE(ncclHierCePartitionMode(mockComm_.get()));
+
+    mockComm_.comm.symkState.kcomm.hierScaleInSize = 2;
+    mockComm_.comm.nRanks = 2; // only one virtual node
+    EXPECT_FALSE(ncclHierCePartitionMode(mockComm_.get()));
+
+    mockComm_.comm.nRanks = 8;
+    mockComm_.comm.nNodes = 2; // real multi-node uses the RMA rail instead
+    EXPECT_FALSE(ncclHierCePartitionMode(mockComm_.get()));
+}
+
 // ncclHierCeAlltoAllvEligible: multi-node AlltoAllv over RMA rail + intra-node CE.
 // Same hier gates as AlltoAll (ncclHierCeAvailable), plus the AlltoAllv call-site gates.
 class CeHierAlltoAllvEligibilityTest : public ::testing::Test
