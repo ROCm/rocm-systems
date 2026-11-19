@@ -5,7 +5,7 @@
 """Pre-commit hook: verify gfx*_sets.yaml files.
 
 Checks:
-  1. Every metric ID maps to the correct metric name in the analysis config.
+  1. Every metric ID maps to the correct metric name in the analysis views.
   2. Each set's counters fit within a single profiling pass (per-block limits
      from perfmon_config in mi_gpu_spec.yaml).
 
@@ -18,19 +18,19 @@ Metric ID format X.Y.Z:
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict
 
 import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SETS_DIR = PROJECT_ROOT / "src" / "rocprof_compute_soc" / "profile_configs" / "sets"
-ANALYSIS_DIR = PROJECT_ROOT / "src" / "rocprof_compute_soc" / "analysis_configs"
 GPU_SPEC_PATH = PROJECT_ROOT / "src" / "utils" / "mi_gpu_spec.yaml"
 
 # Make src/ importable so we can reuse the canonical counter definitions.
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
-from utils.utils_common import canonical_config_arch  # noqa: E402
-from utils.utils_counter_defs import (  # noqa: E402
+from utils.analysis_views import arch_panel_configs
+from utils.utils_common import metric_tables_by_id
+from utils.utils_counter_defs import (
     Collectables,
     counter_to_block,
     extract_counters_and_variables,
@@ -54,27 +54,18 @@ def resolve_metric_id(metric_id: str) -> tuple[int | None, int | None]:
     return x * 100 + y, z
 
 
-def load_analysis_configs(arch: str) -> dict[int, dict[str, Any]]:
-    """Return {metric_table_id: metric_table} for *arch*.
+def load_view_tables(arch: str) -> Dict[int, Dict[str, Any]]:
+    """Return {metric_table_id: metric_table} of the tables with rows that *arch*'s
+    views give.
 
-    Metric names keep their YAML order, so list(result[table_id]["metric"])
+    Metric names keep the views' row order, so list(result[table_id]["metric"])
     gives the names for index-based lookups.
     """
-    arch_dir = ANALYSIS_DIR / (canonical_config_arch(arch) or arch)
-    if not arch_dir.is_dir():
-        return {}
-    result: dict[int, dict[str, Any]] = {}
-    for config_path in sorted(arch_dir.glob("*.yaml")):
-        data = yaml.safe_load(config_path.read_text())
-        panel = (data or {}).get("Panel Config", {})
-        for source in panel.get("data source", []):
-            metric_table = source.get("metric_table", {})
-            table_id = metric_table.get("id")
-            if table_id is None:
-                continue
-            if metric_table.get("metric"):
-                result[table_id] = metric_table
-    return result
+    return {
+        table_id: table
+        for table_id, table in metric_tables_by_id(arch_panel_configs(arch)).items()
+        if table.get("metric")
+    }
 
 
 def load_perfmon_configs() -> dict[str, dict[str, int]]:
@@ -126,7 +117,7 @@ def validate() -> list[str]:
     for sets_path in sorted(SETS_DIR.glob("gfx*_sets.yaml")):
         arch = sets_path.stem.replace("_sets", "")
         sets_data = yaml.safe_load(sets_path.read_text())
-        analysis = load_analysis_configs(arch)
+        analysis = load_view_tables(arch)
         target_arches = shared_arch_expansions.get(arch, [arch])
 
         for s in sets_data.get("sets", []):
@@ -150,7 +141,7 @@ def validate() -> list[str]:
                     if table_id not in analysis:
                         errors.append(
                             f"[{arch}] set '{set_option}': metric_table "
-                            f"{table_id} not found in analysis configs "
+                            f"{table_id} not found in the analysis views "
                             f"(metric ID {metric_id})"
                         )
                         continue
@@ -177,7 +168,7 @@ def validate() -> list[str]:
                         errors.append(
                             f"[{arch}] set '{set_option}': metric ID "
                             f"{metric_id} is labeled '{expected_name}' but "
-                            f"analysis config (table {table_id}) has "
+                            f"the analysis views (table {table_id}) have "
                             f"'{actual}' at index {idx}. "
                             f"Full table: {metric_names}"
                         )

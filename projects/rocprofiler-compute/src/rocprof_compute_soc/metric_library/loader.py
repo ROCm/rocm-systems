@@ -214,15 +214,23 @@ class MetricLibrary:
                 f"Unknown metric ids for {self.arch}: {unknown_metric_ids}"
             )
         expressions = [
-            str(self.metrics[metric_id][field])
+            expression
             for metric_id in metric_ids
-            for field in COUNTER_EXPRESSION_FIELDS
-            if self.metrics[metric_id].get(field) is not None
+            for expression in self.counter_expressions(metric_id)
         ]
         counters, _ = extract_counters_and_variables(
             "\n".join(expressions), self.collectable_formulas()
         )
         return counters
+
+    def counter_expressions(self, metric_id: str) -> List[str]:
+        """Return the formula and peak of a metric as text: the expressions that
+        name its counters."""
+        return [
+            str(self.metrics[metric_id][field])
+            for field in COUNTER_EXPRESSION_FIELDS
+            if self.metrics[metric_id].get(field) is not None
+        ]
 
     def collectable_formulas(self) -> Dict[str, str]:
         """Return the formula of each collectable, by name."""
