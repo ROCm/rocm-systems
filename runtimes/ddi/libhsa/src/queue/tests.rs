@@ -437,6 +437,33 @@ fn firmware_queue_errors_map_to_public_status_codes() {
 }
 
 #[test]
+fn kfd_queue_exceptions_preserve_public_status_codes() {
+    for (code, status) in [
+        (1, EXCEPTION),
+        (2, EXCEPTION),
+        (3, EXCEPTION),
+        (4, ILLEGAL_INSTRUCTION),
+        (5, MEMORY_FAULT),
+        (6, MEMORY_APERTURE_VIOLATION),
+        (16, INCOMPATIBLE_ARGUMENTS),
+        (17, INVALID_ALLOCATION),
+        (18, INVALID_CODE_OBJECT),
+        (20, INVALID_PACKET_FORMAT),
+        (21, INVALID_ARGUMENT),
+        (22, INVALID_DISPATCH_PARAMETERS),
+        (23, INVALID_PACKET_FORMAT),
+        (30, ERROR),
+        (33, MEMORY_APERTURE_VIOLATION),
+        (34, ERROR),
+        (35, ERROR),
+        (36, ERROR),
+        (49, ERROR),
+    ] {
+        assert_eq!(event::queue_exception_status(1 << (code - 1)), status);
+    }
+}
+
+#[test]
 /// Verifies that base atomic entry points preserve queue indices.
 fn base_atomic_entry_points_preserve_queue_indices() {
     let mut storage = PublicQueueStorage([0; 256]);

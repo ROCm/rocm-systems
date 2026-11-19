@@ -5,7 +5,8 @@
 
 use super::*;
 use rocddi::device::gpu::queue::{
-    AqlQueueException, aql_scratch_lanes, decode_aql_queue_exception, replace_scratch_owner,
+    AqlQueueException, aql_scratch_lanes, decode_aql_queue_exception, decode_kfd_queue_exception,
+    replace_scratch_owner,
 };
 
 /// Queue error callback detached from the registry lock before invocation.
@@ -38,9 +39,19 @@ struct QueueEventOutcome {
     rearm: bool,
 }
 
-/// Maps a native queue error code to an HSA status.
+/// Maps the legacy CP inactive-signal payload to an HSA status.
 pub(super) fn queue_error_status(error: u64) -> Status {
-    match decode_aql_queue_exception(error) {
+    exception_status(decode_aql_queue_exception(error))
+}
+
+/// Maps the separate KFD error-event payload to an HSA status.
+pub(super) fn queue_exception_status(error: u64) -> Status {
+    exception_status(decode_kfd_queue_exception(error))
+}
+
+/// Translates a decoded native queue exception into the public HSA ABI.
+fn exception_status(exception: AqlQueueException) -> Status {
+    match exception {
         AqlQueueException::Scratch { .. } | AqlQueueException::Unknown => ERROR,
         AqlQueueException::IncompatibleArguments => INCOMPATIBLE_ARGUMENTS,
         AqlQueueException::InvalidAllocation => INVALID_ALLOCATION,
@@ -49,6 +60,7 @@ pub(super) fn queue_error_status(error: u64) -> Status {
         AqlQueueException::InvalidPacketFormat => INVALID_PACKET_FORMAT,
         AqlQueueException::InvalidArgument => INVALID_ARGUMENT,
         AqlQueueException::OutOfRegisters => OUT_OF_REGISTERS,
+        AqlQueueException::InvalidDispatchParameters => INVALID_DISPATCH_PARAMETERS,
         AqlQueueException::MemoryApertureViolation => MEMORY_APERTURE_VIOLATION,
         AqlQueueException::IllegalInstruction => ILLEGAL_INSTRUCTION,
         AqlQueueException::Exception => EXCEPTION,
@@ -457,7 +469,7 @@ pub(super) fn queue_event_worker(
                     return std::ops::ControlFlow::Break(());
                 }
                 let callback =
-                    pending_error_callback(runtime, key, queue_error_status(error as u64));
+                    pending_error_callback(runtime, key, queue_exception_status(error as u64));
                 signal.release_error();
                 callback
             } else {
