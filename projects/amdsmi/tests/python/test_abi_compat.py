@@ -928,6 +928,11 @@ class GeneratorBitfieldPaddingTest(unittest.TestCase):
             [("PADDING_2", ctypes.c_uint16, 8), ("PADDING_2_1", ctypes.c_uint16, 16)],
         )
 
+    def test_padding_that_leaves_a_unit_partly_filled_raises(self):
+        # 8 + 32 bits in 16-bit units end with a unit that holds 8 of its 16 bits.
+        with self.assertRaisesRegex(RuntimeError, "partly filled"):
+            self._unify(["('a', ctypes.c_uint16, 8)", "('PADDING_0', ctypes.c_uint32, 32)"])
+
     def _assert_finished(self, wrapper_source):
         namespace = {}
         exec(wrapper_source, namespace)

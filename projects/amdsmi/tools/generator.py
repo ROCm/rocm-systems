@@ -126,38 +126,49 @@ def unify_bitfield_padding(full_path_file_name):
     # each padding bit-field the type of the unit it completes. Sizes come from
     # ctypes, so aliases such as c_ubyte and c_ushort are handled too.
     bitfield = re.compile(r"^(\s*)\('(\w+)', ctypes\.(c_\w+), (\d+)\),\s*$")
+    owner = re.compile(r"^(?:class (\w+)\(|(\w+)\._fields_ = )")
+    lines = []
+    with open(full_path_file_name, "r", encoding="UTF-8") as old_file:
+        struct_name, unit_type, unit_width, used = None, None, 0, 0
+        for line in old_file:
+            m = owner.match(line)
+            if m:
+                struct_name = m.group(1) or m.group(2)
+            m = bitfield.match(line)
+            storage = m and getattr(ctypes, m.group(3), None)
+            if not storage:
+                unit_type, unit_width, used = None, 0, 0
+                lines.append(line)
+                continue
+            indent, name, ctype, bits = m.group(1, 2, 3, 4)
+            width = ctypes.sizeof(storage) * 8
+            bits = int(bits)
+            if name.startswith("PADDING_") and unit_type and width != unit_width:
+                part = 0
+                while bits:
+                    if used == unit_width:
+                        used = 0
+                    chunk = min(bits, unit_width - used)
+                    suffix = f"_{part}" if part else ""
+                    lines.append(f"{indent}('{name}{suffix}', ctypes.{unit_type}, {chunk}),\n")
+                    used += chunk
+                    bits -= chunk
+                    part += 1
+                # MSVC rules give a partly filled unit its full size, so the
+                # fields after it would not match the C layout.
+                if used != unit_width:
+                    raise RuntimeError(
+                        f"{struct_name}.{name}: padding leaves a {unit_type} unit partly filled"
+                    )
+                continue
+            if width != unit_width or used + bits > width:
+                unit_type, unit_width, used = ctype, width, 0
+            used += bits
+            lines.append(line)
+
     fh, abs_path = tempfile.mkstemp()
     with os.fdopen(fh, "w", encoding="UTF-8") as new_file:
-        with open(full_path_file_name, "r", encoding="UTF-8") as old_file:
-            unit_type, unit_width, used = None, 0, 0
-            for line in old_file:
-                m = bitfield.match(line)
-                storage = m and getattr(ctypes, m.group(3), None)
-                if not storage:
-                    unit_type, unit_width, used = None, 0, 0
-                    new_file.write(line)
-                    continue
-                indent, name, ctype, bits = m.group(1, 2, 3, 4)
-                width = ctypes.sizeof(storage) * 8
-                bits = int(bits)
-                if name.startswith("PADDING_") and unit_type and width != unit_width:
-                    part = 0
-                    while bits:
-                        if used == unit_width:
-                            used = 0
-                        chunk = min(bits, unit_width - used)
-                        suffix = f"_{part}" if part else ""
-                        new_file.write(
-                            f"{indent}('{name}{suffix}', ctypes.{unit_type}, {chunk}),\n"
-                        )
-                        used += chunk
-                        bits -= chunk
-                        part += 1
-                    continue
-                if width != unit_width or used + bits > width:
-                    unit_type, unit_width, used = ctype, width, 0
-                used += bits
-                new_file.write(line)
+        new_file.writelines(lines)
 
     shutil.copymode(full_path_file_name, abs_path)
     os.remove(full_path_file_name)
