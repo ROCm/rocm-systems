@@ -48,6 +48,10 @@ The video decode memory sample illustrates a way to pass the data chunk-by-chunk
 
 The sample provides a user class `FileStreamProvider` derived from the existing `VideoDemuxer::StreamProvider` to read a video file and fill the buffer owned by the demuxer. It then takes frames from this buffer for further parsing and decoding.
 
+## [Video decode async](videoDecodeAsync)
+
+This sample decodes a stream with a producer thread, which parses and decodes, and a consumer thread, which receives the decoded frames through a bounded queue. It uses the rocDecode parser and decoder APIs directly and compares ways of handing frames from the display callback to another thread: copying each frame in the callback (safe), or passing the decoded surface pointer on without a copy, which the decoder may reuse before the consumer reads it.
+
 ## [Video decode multi files](videoDecodeMultiFiles)
 
 The video decodes multiple files sample illustrates the use of providing a list of files as input to showcase the reconfigure option in the rocDecode library. The input video files have to be of the same codec type to use the reconfigure option but can have different resolutions or resize parameters.
