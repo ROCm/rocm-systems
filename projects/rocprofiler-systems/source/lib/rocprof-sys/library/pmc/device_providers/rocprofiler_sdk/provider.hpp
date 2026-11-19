@@ -155,9 +155,10 @@ private:
                 continue;
             }
 
-            m_devices.push_back(std::make_shared<device_t>(m_backend_api, counter_context,
-                                                           gpu_agent, profile,
-                                                           std::move(counter_meta)));
+            m_devices.push_back(
+                std::make_shared<device_t>(m_backend_api, counter_context, gpu_agent,
+                                           collectors::gpu_perf_counter::device_counters{
+                                               .requested = std::move(counter_meta) }));
         }
     }
 

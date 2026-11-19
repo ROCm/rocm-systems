@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/pmc/collectors/gpu_perf_counter/device.hpp"
+#include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 #include "mock_backend.hpp"
 #include <cstdint>
 
@@ -13,6 +14,8 @@
 #include <cstddef>
 #include <memory>
 #include <optional>
+#include <string>
+#include <utility>
 #include <vector>
 
 using namespace rocprofsys::pmc::collectors::gpu_perf_counter;
@@ -39,15 +42,13 @@ protected:
     std::shared_ptr<MockBackend>       mock_backend;
     std::shared_ptr<rocprofsys::agent> test_agent;
     MockBackend::context_id_t          test_context{};
-    MockBackend::counter_config_id_t   test_profile_config{};
 
     void SetUp() override
     {
         m_mock_impl = std::make_shared<MockBackendImpl>();
         MockBackend::bind(m_mock_impl);
-        mock_backend               = std::make_shared<MockBackend>();
-        test_context.handle        = 1;
-        test_profile_config.handle = 100;
+        mock_backend        = std::make_shared<MockBackend>();
+        test_context.handle = 1;
 
         test_agent                    = std::make_shared<rocprofsys::agent>();
         test_agent->type              = agent_type::gpu;
@@ -76,7 +77,7 @@ TEST_F(SdkPmcDeviceTest, DeviceProperties)
     };
 
     const device<MockBackend> dev(mock_backend, test_context, test_agent,
-                                  test_profile_config, std::move(meta));
+                                  { .requested = std::move(meta) });
 
     EXPECT_EQ(dev.get_index(), 0U);
     EXPECT_EQ(dev.get_name(), "GPU 0");
@@ -87,7 +88,7 @@ TEST_F(SdkPmcDeviceTest, DeviceProperties)
 TEST_F(SdkPmcDeviceTest, EmptyDeviceNotSupported)
 {
     const device<MockBackend> dev(mock_backend, test_context, test_agent,
-                                  test_profile_config, {});
+                                  device_counters{});
 
     EXPECT_FALSE(dev.is_supported());
 }
@@ -100,8 +101,7 @@ TEST_F(SdkPmcDeviceTest, DeviceWithIndex3)
     agent3->product_name      = "GPU 3";
     agent3->vendor_name       = "AMD";
 
-    const device<MockBackend> dev(mock_backend, test_context, agent3, test_profile_config,
-                                  {});
+    const device<MockBackend> dev(mock_backend, test_context, agent3, device_counters{});
 
     EXPECT_EQ(dev.get_index(), 3U);
     EXPECT_EQ(dev.get_name(), "GPU 3");
@@ -129,8 +129,8 @@ TEST_F(SdkPmcDeviceTest, SampleWithScalarCounters)
                           .dimensions  = {} },
     };
 
-    device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
-                            std::move(meta));
+    device<MockBackend> dev(mock_backend, test_context, test_agent,
+                            { .requested = std::move(meta) });
 
     MockBackend::counter_record_t records[2];
     records[0].id            = 10;
@@ -217,8 +217,8 @@ TEST_F(SdkPmcDeviceTest, SampleWithMultiDimCounters)
                                            { .name = "SE", .position = 0 } } },
     };
 
-    device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
-                            std::move(meta));
+    device<MockBackend> dev(mock_backend, test_context, test_agent,
+                            { .requested = std::move(meta) });
 
     MockBackend::counter_record_t records[4];
     for(int i = 0; i < 4; ++i)
@@ -281,8 +281,8 @@ TEST_F(SdkPmcDeviceTest, CounterIdDecodedFromInstanceId)
                           .dimensions  = {} },
     };
 
-    device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
-                            std::move(meta));
+    device<MockBackend> dev(mock_backend, test_context, test_agent,
+                            { .requested = std::move(meta) });
 
     MockBackend::counter_record_t record{};
     record.id            = sdk_instance_id;
@@ -328,8 +328,8 @@ TEST_F(SdkPmcDeviceTest, ResultCacheReusedAcrossSamples)
                           .dimensions  = {} },
     };
 
-    device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
-                            std::move(meta));
+    device<MockBackend> dev(mock_backend, test_context, test_agent,
+                            { .requested = std::move(meta) });
 
     MockBackend::counter_record_t record{};
     record.id            = 5;
@@ -369,8 +369,7 @@ TEST_F(SdkPmcDeviceTest, ResultCacheReusedAcrossSamples)
 
 TEST_F(SdkPmcDeviceTest, SampleFailureReturnsEmpty)
 {
-    device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
-                            {});
+    device<MockBackend> dev(mock_backend, test_context, test_agent, device_counters{});
 
     EXPECT_CALL(*m_mock_impl, start_context(_)).WillOnce(Return());
 
@@ -385,8 +384,7 @@ TEST_F(SdkPmcDeviceTest, SampleFailureReturnsEmpty)
 
 TEST_F(SdkPmcDeviceTest, SampleWithZeroRecords)
 {
-    device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
-                            {});
+    device<MockBackend> dev(mock_backend, test_context, test_agent, device_counters{});
 
     EXPECT_CALL(*m_mock_impl, start_context(_)).WillOnce(Return());
 
@@ -417,8 +415,43 @@ find_value(const metrics& result, counter_id_t counter_id)
     return itr->value;
 }
 
-// The SDK device counting service returns raw counters as totals since start_context.
-// This feeds one cumulative total per sample and identifies each record by its own id.
+counter_metadata
+raw_counter(counter_id_t counter_id, std::string name)
+{
+    auto meta       = counter_metadata{};
+    meta.counter_id = counter_id;
+    meta.name       = std::move(name);
+    return meta;
+}
+
+counter_metadata
+constant_counter(counter_id_t counter_id, std::string name)
+{
+    auto meta        = raw_counter(counter_id, std::move(name));
+    meta.is_constant = true;
+    return meta;
+}
+
+counter_metadata
+derived_counter(counter_id_t counter_id, std::string name, std::string expression)
+{
+    auto meta       = raw_counter(counter_id, std::move(name));
+    meta.expression = std::move(expression);
+    meta.is_derived = true;
+    return meta;
+}
+
+MockBackend::counter_record_t
+record_of(counter_id_t counter_id, double value)
+{
+    auto record          = MockBackend::counter_record_t{};
+    record.id            = counter_id;
+    record.counter_value = value;
+    return record;
+}
+
+// The SDK device counting service returns counters as totals since start_context.
+// This feeds one set of totals per sample and identifies each record by its own id.
 void
 expect_cumulative_samples(MockBackendImpl& mock_impl,
                           std::vector<std::vector<MockBackend::counter_record_t>> samples)
@@ -432,7 +465,8 @@ expect_cumulative_samples(MockBackendImpl& mock_impl,
                             MockBackend::context_id_t, MockBackend::user_data_t,
                             MockBackend::counter_flag_t,
                             MockBackend::counter_record_t* out, size_t* count) {
-            const auto& records = samples.at((*sample_index)++);
+            const auto& records = samples.at(*sample_index);
+            ++*sample_index;
             std::ranges::copy(records, out);
             *count = records.size();
             return MockBackend::status_success;
@@ -456,14 +490,13 @@ TEST_F(SdkPmcDeviceTest, RawCounterSampleIsIntervalDelta)
     constexpr std::array<double, 3>        k_waves_interval   = { 100.0, 150.0, 200.0 };
     constexpr std::array<std::uint64_t, 3> k_timestamps       = { 1000, 2000, 3000 };
 
-    device<MockBackend> dev(
-        mock_backend, test_context, test_agent, test_profile_config,
-        { counter_metadata{ .counter_id = k_waves_id, .name = "SQ_WAVES" } });
+    device<MockBackend> dev(mock_backend, test_context, test_agent,
+                            { .requested = { raw_counter(k_waves_id, "SQ_WAVES") } });
 
     auto samples = std::vector<std::vector<MockBackend::counter_record_t>>{};
     for(const double total : k_waves_cumulative)
     {
-        samples.push_back({ { .id = k_waves_id, .counter_value = total } });
+        samples.push_back({ record_of(k_waves_id, total) });
     }
     expect_cumulative_samples(*m_mock_impl, std::move(samples));
 
@@ -481,23 +514,17 @@ TEST_F(SdkPmcDeviceTest, RawCounterSampleIsIntervalDelta)
 // does not accumulate, so every sample must report its value.
 TEST_F(SdkPmcDeviceTest, ConstantDerivedCounterSampleIsItsValue)
 {
-    constexpr counter_id_t                 k_simd_num_id   = 30;
-    constexpr counter_id_t                 k_simd_count_id = 31;
-    constexpr double                       k_simd_num      = 4.0;
-    constexpr std::array<std::uint64_t, 3> k_timestamps    = { 1000, 2000, 3000 };
+    constexpr counter_id_t                 k_simd_num_id = 30;
+    constexpr double                       k_simd_num    = 4.0;
+    constexpr std::array<std::uint64_t, 3> k_timestamps  = { 1000, 2000, 3000 };
 
-    device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
-                            { counter_metadata{ .counter_id = k_simd_num_id,
-                                                .name       = "SIMD_NUM",
-                                                .expression = "simd_count",
-                                                .is_derived = true },
-                              counter_metadata{ .counter_id  = k_simd_count_id,
-                                                .name        = "simd_count",
-                                                .is_constant = true } });
+    device<MockBackend> dev(
+        mock_backend, test_context, test_agent,
+        { .requested = { derived_counter(k_simd_num_id, "SIMD_NUM", "simd_count") },
+          .inputs    = { constant_counter(0, "simd_count") } });
 
     auto samples = std::vector<std::vector<MockBackend::counter_record_t>>(
-        k_timestamps.size(), { { .id = k_simd_num_id, .counter_value = k_simd_num },
-                               { .id = k_simd_count_id, .counter_value = k_simd_num } });
+        k_timestamps.size(), { record_of(k_simd_num_id, k_simd_num) });
     expect_cumulative_samples(*m_mock_impl, std::move(samples));
 
     const enabled_metrics enabled{ {} };
@@ -531,21 +558,14 @@ TEST_F(SdkPmcDeviceTest, DerivedRatioCounterSampleIsEvaluatedOnIntervalDeltas)
     constexpr std::array<std::uint64_t, 3> k_timestamps  = { 1000, 2000, 3000 };
 
     device<MockBackend> dev(
-        mock_backend, test_context, test_agent, test_profile_config,
-        { counter_metadata{ .counter_id = k_mfma_util_id,
-                            .name       = "MfmaUtil",
-                            .expression = "reduce(SQ_VALU_MFMA_BUSY_CYCLES,sum)/"
-                                          "(reduce(GRBM_GUI_ACTIVE,max)*SIMD_NUM)*100",
-                            .is_derived = true },
-          counter_metadata{ .counter_id = k_busy_id, .name = "SQ_VALU_MFMA_BUSY_CYCLES" },
-          counter_metadata{ .counter_id = k_active_id, .name = "GRBM_GUI_ACTIVE" },
-          counter_metadata{ .counter_id = k_simd_num_id,
-                            .name       = "SIMD_NUM",
-                            .expression = "simd_count",
-                            .is_derived = true },
-          counter_metadata{ .counter_id  = k_simd_count_id,
-                            .name        = "simd_count",
-                            .is_constant = true } });
+        mock_backend, test_context, test_agent,
+        { .requested = { derived_counter(k_mfma_util_id, "MfmaUtil",
+                                         "reduce(SQ_VALU_MFMA_BUSY_CYCLES,sum)/"
+                                         "(reduce(GRBM_GUI_ACTIVE,max)*SIMD_NUM)*100") },
+          .inputs    = { raw_counter(k_busy_id, "SQ_VALU_MFMA_BUSY_CYCLES"),
+                         raw_counter(k_active_id, "GRBM_GUI_ACTIVE"),
+                         derived_counter(k_simd_num_id, "SIMD_NUM", "simd_count"),
+                         constant_counter(k_simd_count_id, "simd_count") } });
 
     auto samples = std::vector<std::vector<MockBackend::counter_record_t>>{};
     for(size_t i = 0; i < k_timestamps.size(); ++i)
@@ -553,21 +573,20 @@ TEST_F(SdkPmcDeviceTest, DerivedRatioCounterSampleIsEvaluatedOnIntervalDeltas)
         const double busy          = k_busy_cumulative.at(i);
         const double active        = k_active_cumulative.at(i);
         const double sdk_mfma_util = k_percent * busy / (active * k_simd_num);
-        samples.push_back({ { .id = k_busy_id, .counter_value = busy },
-                            { .id = k_active_id, .counter_value = active },
-                            { .id = k_simd_num_id, .counter_value = k_simd_num },
-                            { .id = k_simd_count_id, .counter_value = k_simd_num },
-                            { .id = k_mfma_util_id, .counter_value = sdk_mfma_util } });
+        samples.push_back({ record_of(k_busy_id, busy), record_of(k_active_id, active),
+                            record_of(k_simd_count_id, k_simd_num),
+                            record_of(k_mfma_util_id, sdk_mfma_util) });
     }
     expect_cumulative_samples(*m_mock_impl, std::move(samples));
 
     const enabled_metrics enabled{ {} };
     for(size_t i = 0; i < k_timestamps.size(); ++i)
     {
-        auto const value =
-            find_value(dev.sample_metrics(enabled, k_timestamps.at(i)), k_mfma_util_id);
+        auto const result = dev.sample_metrics(enabled, k_timestamps.at(i));
+        auto const value  = find_value(result, k_mfma_util_id);
         ASSERT_TRUE(value.has_value()) << "sample " << i;
         EXPECT_DOUBLE_EQ(*value, k_mfma_util_interval.at(i)) << "sample " << i;
+        EXPECT_EQ(result.size(), 1U) << "inputs must not be reported, sample " << i;
     }
 }
 
