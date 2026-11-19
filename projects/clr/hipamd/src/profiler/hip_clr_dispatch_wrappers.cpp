@@ -5113,6 +5113,17 @@ static hipError_t hipDeviceGetExecAffinitySupportLayer(int* pi, hipExecAffinityT
   return _r;
 }
 
+// api_id = 520
+static hipError_t hipStreamBeginRecaptureToGraphLayer(
+    hipStream_t stream, hipStreamCaptureMode mode, hipGraph_t graph,
+    hipGraphRecaptureCallbackData* callbackData) {
+  auto* _rec = HipGetActiveRecordExt(520u);
+  _rec->stream = stream;
+  auto _r = g_next.hipStreamBeginRecaptureToGraph_fn(stream, mode, graph, callbackData);
+  _rec->end_ns = NowNs();
+  return _r;
+}
+
 // API name table — indexed by api_id (same order as UpdateDispatchTable).
 const char* const kHipApiNamesExt[] = {
   "hipApiName",
@@ -5635,8 +5646,9 @@ const char* const kHipApiNamesExt[] = {
   "hipGraphGetId",
   "hipGraphExecGetId",
   "hipDeviceGetExecAffinitySupport",
+  "hipStreamBeginRecaptureToGraph",
 };
-const size_t kHipApiNamesCountExt = 520;
+const size_t kHipApiNamesCountExt = 521;
 
 #include <cstring>
 
@@ -6163,6 +6175,7 @@ void HipProfilerBuildWrapperTableExt(HipDispatchTable* tbl) {
   g_wrapper_tbl.hipGraphGetId_fn = hipGraphGetIdLayer;
   g_wrapper_tbl.hipGraphExecGetId_fn = hipGraphExecGetIdLayer;
   g_wrapper_tbl.hipDeviceGetExecAffinitySupport_fn = hipDeviceGetExecAffinitySupportLayer;
+  g_wrapper_tbl.hipStreamBeginRecaptureToGraph_fn = hipStreamBeginRecaptureToGraphLayer;
   // g_wrapper_tbl is fully written before any Install call copies it in.
 }
 

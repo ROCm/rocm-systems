@@ -577,4 +577,5 @@ hipGraphNodeGetLocalId
 hipGraphNodeGetToolsId
 hipGraphGetId
 hipGraphExecGetId
+hipStreamBeginRecaptureToGraph
 @HSA_EXPORTS@

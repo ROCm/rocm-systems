@@ -4226,7 +4226,8 @@ hipError_t playback_hipStreamEndCapture(PlaybackContext& ctx,
                                         const uint8_t* payload) {
     const auto* a = reinterpret_cast<const hrr_args_hipStreamEndCapture*>(payload);
     // Capture records a failed EndCapture only when the failure ended the
-    // capture (invalidated or unjoined); every recorded EndCapture ends ours.
+    // capture (invalidated, unjoined, or an incomplete recapture); every
+    // recorded EndCapture ends ours.
     ctx.in_graph_capture = false;
 
     hipStream_t stream = ctx.translate_stream(a->stream);

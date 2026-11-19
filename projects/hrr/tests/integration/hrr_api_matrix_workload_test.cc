@@ -1546,6 +1546,13 @@ TEST_CASE("Unit_HRR_ApiMatrix_GraphNodes_Direct", "[.][hrr-direct]") {
   {
     hipGraph_t target = nullptr;
     if (hipGraphCreate(&target, 0) == hipSuccess) {
+      // Recapturing an empty graph with no work matches every (zero) node, so
+      // the end succeeds and leaves s ready for the capture below.
+      if (hipStreamBeginRecaptureToGraph(s, hipStreamCaptureModeThreadLocal, target, nullptr)
+              == hipSuccess) {
+        hipGraph_t recaptured = nullptr;
+        (void)hipStreamEndCapture(s, &recaptured);
+      }
       if (hipStreamBeginCaptureToGraph(s, target, nullptr, nullptr, 0,
                                        hipStreamCaptureModeThreadLocal)
               == hipSuccess) {

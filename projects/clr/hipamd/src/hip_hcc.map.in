@@ -717,6 +717,7 @@ global:
     hipGraphGetId;
     hipGraphExecGetId;
     hipDeviceGetExecAffinitySupport;
+    hipStreamBeginRecaptureToGraph;
 local:
     *;
 } hip_7.17;

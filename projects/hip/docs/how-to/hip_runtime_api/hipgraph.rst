@@ -150,6 +150,8 @@ the operations assigned to the stream are captured into a graph instead of being
 executed. The associated graph is returned when calling :cpp:func:`hipStreamEndCapture`, which
 also stops capturing operations.
 In order to capture to an already existing graph use :cpp:func:`hipStreamBeginCaptureToGraph`.
+To capture the same operations again into a graph from an earlier capture, see
+`Recapturing into an existing graph`_.
 
 The functions assigned to the capturing stream are not executed, but instead are
 captured and defined as nodes in the graph, to be run when the instantiated
@@ -188,6 +190,37 @@ graph from a stream.
     :start-after: // [sphinx-start]
     :end-before: // [sphinx-end]
     :language: cpp
+
+Recapturing into an existing graph
+--------------------------------------------------------------------------------
+
+:cpp:func:`hipStreamBeginRecaptureToGraph` captures the same sequence of
+operations again, into the graph that an earlier capture produced. Instead of
+adding nodes, each captured operation is matched, in order, against the next
+existing node. It must have the same node type and the same dependencies. The
+node keeps its handle and takes the newly captured parameters, so an executable
+graph instantiated from the graph can be refreshed with
+:cpp:func:`hipGraphExecUpdate` instead of being instantiated again.
+
+An optional :cpp:type:`hipGraphRecaptureCallbackData` callback is called for
+every node whose parameters changed. Its :cpp:type:`hipGraphRecaptureStatus`
+argument tells whether :cpp:func:`hipGraphExecUpdate` can apply the change.
+Returning an error from the callback terminates the recapture. A rejected
+update still consumes that original node. A status of
+``hipGraphRecaptureError`` does not.
+
+:cpp:func:`hipStreamEndCapture` returns ``hipErrorGraphRecaptureFailure`` when
+an original node is left unmatched. That includes a ``hipGraphRecaptureError``
+status, a rejected update followed by more nodes, an operation that does not
+match, and a node that was never recaptured. Rejecting the update of the last
+node still consumes it, so end returns ``hipSuccess`` and that node keeps its
+previous parameters.
+
+A captured operation can return ``hipErrorGraphRecaptureFailure``. Adding a
+node directly to a graph that is being recaptured returns the same error.
+:cpp:func:`hipGraphDestroyNode` returns ``hipErrorIllegalState`` and leaves the
+node in place. User objects owned by the graph are released when recapture
+begins.
 
 Explicit graph creation
 ================================================================================

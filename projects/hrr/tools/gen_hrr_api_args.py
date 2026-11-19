@@ -2115,8 +2115,11 @@ _HEADER_PREAMBLE = """\
  * wrong API.
  * v16: hipDeviceGetExecAffinitySupport was appended to HipDispatchTable,
  * shifting the compiler API IDs up by one. A v15 reader would decode
+ * those events as the wrong API.
+ * v17: hipStreamBeginRecaptureToGraph was appended to HipDispatchTable,
+ * shifting the compiler API IDs up by one. A v16 reader would decode
  * those events as the wrong API. */
-#define HRR_VERSION ((uint16_t)16u)
+#define HRR_VERSION ((uint16_t)17u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
@@ -2688,15 +2691,16 @@ CUSTOM_CAPTURE_SHIMS: Dict[str, str] = {
         "  return r;\n"
         "}\n"
     ),
-    # hipStreamEndCapture on an invalidated or unjoined capture fails, yields no
-    # graph, and still ends the capture. Record those failures too, or replay
-    # never ends its own capture and treats every later call as captured.
+    # hipStreamEndCapture on an invalidated, unjoined, or incomplete recapture
+    # fails, yields no graph, and still ends the capture. Record those failures
+    # too, or replay never ends its own capture and treats every later call as
+    # captured.
     "hipStreamEndCapture": (
         "// Generated shim (custom: also record the failures that end the capture)\n"
         "static hipError_t capture_hipStreamEndCapture(hipStream_t stream, hipGraph_t* pGraph) {\n"
         "  hipError_t r = g_real_table.hipStreamEndCapture_fn(stream, pGraph);\n"
         "  if (r == hipSuccess || r == hipErrorStreamCaptureInvalidated ||\n"
-        "      r == hipErrorStreamCaptureUnjoined) {\n"
+        "      r == hipErrorStreamCaptureUnjoined || r == hipErrorGraphRecaptureFailure) {\n"
         "    hrr_args_hipStreamEndCapture a{};\n"
         "    a.ret         = static_cast<int32_t>(r);\n"
         "    a.stream = reinterpret_cast<uint64_t>(stream);\n"
@@ -2717,6 +2721,30 @@ CUSTOM_PLAYBACK_BODIES: Dict[str, str] = {
         "  const auto* a = reinterpret_cast<const hrr_args_hipThreadExchangeStreamCaptureMode*>(payload);\n"
         "  hipStreamCaptureMode mode = static_cast<hipStreamCaptureMode>(a->mode);\n"
         "  hipError_t _r = (hipError_t)hipThreadExchangeStreamCaptureMode(&mode);\n"
+        "  return _r;\n"
+        "}\n"
+    ),
+    # Callback-bearing recaptures are marked unreplayable by the capture shim.
+    # A null callback (or a callback-data object with callbackFunc == nullptr)
+    # has the same API behavior as passing nullptr, so replay uses that form.
+    "hipStreamBeginRecaptureToGraph": (
+        "static hipError_t playback_hipStreamBeginRecaptureToGraph(PlaybackContext& ctx, const uint8_t* payload) {\n"
+        "  const auto* a = reinterpret_cast<const hrr_args_hipStreamBeginRecaptureToGraph*>(payload);\n"
+        "  static const auto _fn = reinterpret_cast<decltype(&hipStreamBeginRecaptureToGraph)>(\n"
+        "      hrr_runtime_symbol(\"hipStreamBeginRecaptureToGraph\"));\n"
+        "  if (_fn == nullptr) {\n"
+        "    static bool warned = false;\n"
+        "    if (!warned) {\n"
+        "      warned = true;\n"
+        "      fprintf(stderr, \"[HRR] hipStreamBeginRecaptureToGraph is not exported by this \"\n"
+        "              \"HIP runtime; skipping it during replay, results may differ from capture.\\n\");\n"
+        "    }\n"
+        "    return hipSuccess;\n"
+        "  }\n"
+        "  hipError_t _r = (hipError_t)_fn(\n"
+        "      (hipStream_t)ctx.translate_stream(a->stream), (hipStreamCaptureMode)a->mode,\n"
+        "      (hipGraph_t)ctx.translate_graph(a->graph), nullptr);\n"
+        "  if (_r == hipSuccess) ctx.in_graph_capture = true;\n"
         "  return _r;\n"
         "}\n"
     ),
@@ -2845,6 +2873,12 @@ def _note_unreplayable(lines: List[str], entry: ApiEntry) -> None:
     if entry.name in UNREPLAYABLE_PLAYBACK_APIS:
         lines.append(f'    hrr_cap::writer::note_unreplayable("{entry.name}",')
         lines.append(f'        "{UNREPLAYABLE_PLAYBACK_APIS[entry.name]}");')
+    elif entry.name == "hipStreamBeginRecaptureToGraph":
+        lines.append("    if (callbackData != nullptr && callbackData->callbackFunc != nullptr) {")
+        lines.append('      hrr_cap::writer::note_unreplayable("hipStreamBeginRecaptureToGraph",')
+        lines.append('          "the callback is a host function pointer belonging to the capturing "')
+        lines.append('          "process, so it cannot be invoked during replay");')
+        lines.append("    }")
 
 
 def generate_build_table(entries: List[ApiEntry]) -> str:
