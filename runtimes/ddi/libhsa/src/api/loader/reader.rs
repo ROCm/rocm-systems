@@ -6,8 +6,9 @@
 use std::ffi::c_void;
 
 use crate::ffi::*;
+use crate::lifecycle::{initialized_mut, lock};
 use crate::loader::Reader;
-use crate::runtime::{boundary, initialized_mut, lock};
+use crate::status::boundary;
 
 #[cfg_attr(
     all(hsa_tool_dispatch, not(test)),

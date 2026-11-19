@@ -7,7 +7,6 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/memory_issue.h"
 
 #include <cassert>
-#include <string_view>
 #include <utility>
 
 namespace rocjitsu::amdgpu {
@@ -58,11 +57,12 @@ InstructionTiming::classify(std::unique_ptr<const Instruction> inst, uint64_t pc
     } else if (block == ExecutionBlock::LDS) {
       add_counter(timing.counters, WaitCounterType::DSCNT);
     } else {
-      add_counter(timing.counters, inst->mnemonic().find("store") != std::string_view::npos
+      add_counter(timing.counters, inst->amdgpu_memory_kind() == MemoryKind::Store
                                        ? WaitCounterType::STORECNT
                                        : WaitCounterType::LOADCNT);
     }
-  } else if (inst->mnemonic().starts_with("s_sendmsg_rtn_")) {
+  } else if (inst->amdgpu_operation() == Operation::S_SENDMSG_RTN_B32 ||
+             inst->amdgpu_operation() == Operation::S_SENDMSG_RTN_B64) {
     // KMCNT also counts against LGKMCNT, the counter legacy waits read.
     add_counter(timing.counters, WaitCounterType::KMCNT, 2);
   }

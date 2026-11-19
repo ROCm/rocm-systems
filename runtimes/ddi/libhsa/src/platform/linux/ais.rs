@@ -4,8 +4,8 @@
 //! Linux AIS wire status and descriptor adaptation.
 
 use crate::ffi::*;
+use crate::lifecycle::lock;
 use crate::memory::pointer::{owned_memory, pointer_description};
-use crate::runtime::lock;
 use linux_interop::AisFileOperation as AisOperation;
 use rocddi::memory::interop::linux as linux_interop;
 use std::ffi::c_void;
@@ -93,7 +93,7 @@ pub(crate) unsafe fn ais_file_io(
     let Some(description) = pointer_description(runtime, device_pointer as usize) else {
         return ERROR;
     };
-    if runtime.is_cpu_agent(description.owner) {
+    if runtime.agents.is_cpu_agent(description.owner) {
         return ERROR;
     }
     let address = device_pointer as usize;

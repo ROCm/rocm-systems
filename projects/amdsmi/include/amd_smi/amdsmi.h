@@ -7806,6 +7806,10 @@ amdsmi_status_t amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processo
  *  On @platform{gpu_bm_linux} AMDGPU driver restart is REQUIRED to complete updating to
  *  the new memory partition setting.
  *
+ *  Requesting the current mode cancels a different mode requested since the driver was
+ *  loaded. Older amdgpu drivers ignore that request because of a driver bug, so the next
+ *  driver reload still applies the other mode.
+ *
  *  @param[in] processor_handle Device which to query
  *
  *  @param[in] memory_partition using enum ::amdsmi_memory_partition_type_t,
@@ -7859,6 +7863,10 @@ amdsmi_status_t amdsmi_get_gpu_memory_partition_config(amdsmi_processor_handle p
  *
  *  On @platform{gpu_bm_linux} AMDGPU driver restart is REQUIRED to complete updating to
  *  the new memory partition setting.
+ *
+ *  Requesting the current mode cancels a different mode requested since the driver was
+ *  loaded. Older amdgpu drivers ignore that request because of a driver bug, so the next
+ *  driver reload still applies the other mode.
  *
  *  @param[in] processor_handle A processor handle
  *
@@ -8211,6 +8219,11 @@ amdsmi_status_t amdsmi_get_power_cap_info(amdsmi_processor_handle processor_hand
  *
  *  @param[out] info Reference to the PCIe information
  *  returned by the library. Must be allocated by user.
+ *
+ *  @note pcie_static.max_pcie_width, max_pcie_speed and pcie_interface_version describe the
+ *  GPU's PCIe host link, its PCIe connection to the host CPU. When KFD reports that the GPU
+ *  connects to the CPU over xGMI instead, there is no PCIe host link and these fields are set to
+ *  the maximum value of their type.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
@@ -11015,6 +11028,148 @@ amdsmi_status_t amdsmi_set_ttm_pages_limit(uint64_t pages);
 amdsmi_status_t amdsmi_reset_ttm_pages_limit(void);
 
 /** @} End tagMemConfig */
+
+/** @defgroup tagPowerStabilization Power Stabilization
+ *  These functions configure Power Stabilization (HAWK dummy-compute
+ *  insertion plus Ramp Management), which holds GPU power draw above a
+ *  Power Floor to reduce grid-visible power swings during workloads such
+ *  as LLM training.
+ *
+ *  @note Available only when the platform firmware implements Power
+ *  Stabilization; never available for multi-VF devices.
+ *  @{
+ */
+
+/**
+ * @brief HAWK dummy-compute insertion priority
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef enum {
+  AMDSMI_HAWK_INSERTION_PRIORITY_OPPORTUNISTIC = 0,  //!< Insert only when otherwise idle
+  AMDSMI_HAWK_INSERTION_PRIORITY_GUARANTEED = 1,     //!< Always insert to hold the Power Floor
+  AMDSMI_HAWK_INSERTION_PRIORITY_DYNAMIC = 2,        //!< Firmware chooses based on conditions
+  AMDSMI_HAWK_INSERTION_PRIORITY_LAST =
+      AMDSMI_HAWK_INSERTION_PRIORITY_DYNAMIC  //!< Highest valid priority value
+} amdsmi_hawk_insertion_priority_t;
+
+/**
+ * @brief Identifies a single Power Stabilization parameter for
+ * amdsmi_set_power_stabilization_param(). Every parameter, including the two
+ * ramp rates below, is a plain int64_t.
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef enum {
+  AMDSMI_POWER_STABILIZATION_PARAM_ENABLE = 0,   //!< Enable/disable Power Stabilization (0/1)
+  AMDSMI_POWER_STABILIZATION_PARAM_POWER_FLOOR,  //!< Power Floor, % of power limit (0-100;
+                                                 //!< 0 disables Power Stabilization)
+  AMDSMI_POWER_STABILIZATION_PARAM_DELAY,        //!< Insertion delay, milliseconds
+  AMDSMI_POWER_STABILIZATION_PARAM_INSERTION_PRIORITY,     //!< ::amdsmi_hawk_insertion_priority_t
+                                                           //!< value
+  AMDSMI_POWER_STABILIZATION_PARAM_RAMP_ENABLE,            //!< Enable/disable Ramp Management (0/1)
+  AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_UP_RATE,  //!< Max ramp-up rate, %PL/sec
+                                                           //!< (100 disables ramp-up management)
+  AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_DOWN_RATE,       //!< Max ramp-down rate, %PL/sec
+                                                                  //!< (100 disables ramp-down
+                                                                  //!< management)
+  AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MIN_TIME_AT_POWER_FLOOR,  //!< Minimum time at Power Floor,
+                                                                  //!< seconds
+  AMDSMI_POWER_STABILIZATION_PARAM_RAMP_STOP_DELAY,               //!< Ramp stop delay, seconds
+  AMDSMI_POWER_STABILIZATION_PARAM_LAST =
+      AMDSMI_POWER_STABILIZATION_PARAM_RAMP_STOP_DELAY  //!< Highest valid parameter ID
+} amdsmi_power_stabilization_param_id_t;
+
+/**
+ * @brief Snapshot of all Power Stabilization and Ramp Management state for
+ * a device, as returned by amdsmi_get_power_stabilization_info().
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef struct {
+  bool host_control_enabled;  //!< Read-only: true if host has control of
+                              //!< Power Stabilization
+  bool enabled;               //!< Power Stabilization enabled
+  uint32_t power_floor;       //!< Power Floor, % of power limit (0-100)
+  uint32_t delay;             //!< Insertion delay, milliseconds
+  amdsmi_hawk_insertion_priority_t
+      insertion_priority;                 //!< HAWK insertion priority. If the driver
+                                          //!< reports a value outside OPPORTUNISTIC..
+                                          //!< LAST, amdsmi_get_power_stabilization_info()
+                                          //!< returns ::AMDSMI_STATUS_UNEXPECTED_DATA
+                                          //!< and leaves this field unwritten
+  bool ramp_enabled;                      //!< Ramp Management enabled
+  uint32_t ramp_max_ramp_up_rate;         //!< Max ramp-up rate, %PL/sec
+  uint32_t ramp_max_ramp_down_rate;       //!< Max ramp-down rate, %PL/sec
+  uint32_t ramp_min_time_at_power_floor;  //!< Minimum time at Power Floor, seconds
+  uint32_t ramp_stop_delay;               //!< Ramp stop delay, seconds
+  uint64_t reserved[11];                  //!< Reserved for future use
+} amdsmi_power_stabilization_info_t;
+
+/**
+ *  @brief Get Power Stabilization info
+ *
+ *  @ingroup tagPowerStabilization
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details A read returns the current effective
+ *  value of each parameter, which can differ from the last value written,
+ *  regardless of host_control_enabled or enabled state.
+ *
+ *  @param[in] processor_handle GPU device handle
+ *  @param[out] info Pointer to receive the Power Stabilization info
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED if Power Stabilization is not
+ *          implemented on this device, or the device is multi-VF,
+ *          ::AMDSMI_STATUS_INVAL if info is nullptr,
+ *          ::AMDSMI_STATUS_NO_PERM if amd-smi lacks permission to read this info,
+ *          ::AMDSMI_STATUS_FILE_ERROR if a field could not be read,
+ *          ::AMDSMI_STATUS_UNEXPECTED_DATA if a field's content does
+ *          not parse as the documented type or range
+ */
+amdsmi_status_t amdsmi_get_power_stabilization_info(amdsmi_processor_handle processor_handle,
+                                                    amdsmi_power_stabilization_info_t* info);
+
+/**
+ *  @brief Set a single Power Stabilization parameter
+ *
+ *  @ingroup tagPowerStabilization
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details Applies exactly one parameter per call; a batch of calls is not
+ *  rolled back if a later call fails. When NPM (Node-level Power Management)
+ *  coordination is active on a node, param_id may become node-wide
+ *  rather than per-GPU; amdsmi does not detect NPM state or reroute the
+ *  write on the caller's behalf, so the caller is responsible for
+ *  selecting the node's primary GPU handle (OAM ID 0) before calling this
+ *  function. Any parameter dependency is enforced by the
+ *  underlying driver write itself; this function performs no
+ *  client-side dependency or range validation.
+ *
+ *  @param[in] processor_handle GPU device handle
+ *  @param[in] param_id Parameter to set
+ *  @param[in] value New value. Every parameter, including
+ *  ::AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_UP_RATE and
+ *  ::AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_DOWN_RATE despite being a
+ *  %PL/sec rate, is a plain int64_t; this parameter's sysfs node does not
+ *  accept floating-point values.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED if Power Stabilization is not
+ *          implemented on this device, the device is multi-VF, or the
+ *          driver rejects the write due to an unmet dependency,
+ *          ::AMDSMI_STATUS_NO_PERM if amd-smi lacks permission to write this parameter,
+ *          ::AMDSMI_STATUS_INVAL if param_id is invalid or the driver rejects the value,
+ *          ::AMDSMI_STATUS_FILE_ERROR if the write could not complete
+ */
+amdsmi_status_t amdsmi_set_power_stabilization_param(amdsmi_processor_handle processor_handle,
+                                                     amdsmi_power_stabilization_param_id_t param_id,
+                                                     int64_t value);
+
+/** @} End tagPowerStabilization */
 
 #ifdef __cplusplus
 }

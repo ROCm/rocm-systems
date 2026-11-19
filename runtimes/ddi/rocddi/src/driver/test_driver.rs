@@ -5,7 +5,8 @@
 //! routing without relying on KFD hardware.
 
 use super::{
-    AddressSpaceInfo, AllocationOperations, CachedInfo, Driver, EndpointSelector, UserQueueResource,
+    AddressSpaceInfo, AllocationOperations, CachedInfo, ConfigurableDriver, Driver, DriverInstance,
+    EndpointSelector, UserQueueResource,
 };
 use crate::device::event::DeviceEvent;
 use crate::device::gpu::queue::{
@@ -14,7 +15,7 @@ use crate::device::gpu::queue::{
 use crate::memory::host::HostBackingLease;
 use crate::memory::storage::Owned;
 use crate::memory::{AllocationInfo, DeviceAccess, HostRegistration, MemoryKind};
-use crate::session::DriverContextLifetime;
+use crate::session::{DriverContextLifetime, Session};
 use crate::topology::{Endpoint, EndpointKind};
 use crate::{Error, ErrorKind};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -136,8 +137,35 @@ impl Drop for TestEventSubscription {
     }
 }
 
+/// Test-only options for exercising typed configuration without KFD.
+pub(crate) struct TestConfiguration {
+    pub(crate) host_registration: bool,
+}
+
+impl super::configuration::Apply for TestConfiguration {
+    fn apply(self, session: &mut Session) -> Result<(), Error> {
+        session.configure_driver(self, |driver| match driver {
+            DriverInstance::Test(driver) => Some(driver),
+            #[cfg(target_os = "linux")]
+            DriverInstance::LinuxKfd(_) => None,
+            #[cfg(not(target_os = "linux"))]
+            DriverInstance::Unavailable(never) => match *never {},
+        })
+    }
+}
+
+impl ConfigurableDriver for TestDriver {
+    type Configuration = TestConfiguration;
+
+    fn configure(&mut self, configuration: Self::Configuration) -> Result<(), Error> {
+        self.host_registration = configuration.host_registration;
+        Ok(())
+    }
+}
+
 /// Test driver instance with common routing and a numeric-only GPU queue.
 pub(crate) struct TestDriver {
+    pub(super) admission: crate::session::SessionAdmission,
     instance: super::DriverInstanceId,
     id: [u8; 16],
     kind: EndpointKind,
@@ -312,10 +340,14 @@ impl CachedInfo for TestAllocation {
 impl TestDriver {
     #[allow(
         clippy::large_types_passed_by_value,
-        reason = "test driver takes ownership of its endpoint snapshot"
+        clippy::expect_used,
+        reason = "test driver owns its snapshot and requires a process witness"
     )]
     pub(crate) fn new(id: [u8; 16], kind: EndpointKind, lifetime: DriverContextLifetime) -> Self {
         Self {
+            admission: crate::session::SessionAdmission::new(
+                crate::os::ProcessIdentity::capture().expect("test process identity"),
+            ),
             instance: super::new_driver_instance(),
             id,
             kind,
@@ -483,6 +515,10 @@ impl AddressSpaceInfo for TestDevice {
 
 impl Driver for TestDriver {
     type DeviceState = TestDevice;
+
+    fn admission(&self) -> &crate::session::SessionAdmission {
+        &self.admission
+    }
 
     fn driver_instance(&self) -> super::DriverInstanceId {
         self.instance

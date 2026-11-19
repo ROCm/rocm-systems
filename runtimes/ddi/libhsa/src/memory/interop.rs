@@ -37,10 +37,10 @@ pub(crate) unsafe fn portable_export_dmabuf(
     else {
         return INVALID_ALLOCATION;
     };
-    if runtime.is_cpu_agent(memory.description.owner) {
+    if runtime.agents.is_cpu_agent(memory.description.owner) {
         return INVALID_AGENT;
     }
-    let Some(index) = runtime.gpu_index(memory.description.owner) else {
+    let Some(index) = runtime.agents.gpu_index(memory.description.owner) else {
         return INVALID_AGENT;
     };
     if flags & DMABUF_MAPPING_PCIE != 0 && !gpu_pcie_dmabuf_supported(runtime, index) {
@@ -92,10 +92,15 @@ pub(crate) unsafe fn memory_lock_to_pool(
         Err(status) => return status,
     };
     let pool = pool.unwrap_or_else(|| {
-        runtime.cpus.iter().position(|cpu| !cpu.apu).map_or_else(
-            || HsaState::cpu_pool(0, CpuPoolKind::Fine),
-            |index| HsaState::cpu_pool(index, CpuPoolKind::Coarse),
-        )
+        runtime
+            .agents
+            .cpus
+            .iter()
+            .position(|cpu| !cpu.apu)
+            .map_or_else(
+                || crate::agent::Agents::cpu_pool(0, CpuPoolKind::Fine),
+                |index| crate::agent::Agents::cpu_pool(index, CpuPoolKind::Coarse),
+            )
     });
     if host_ptr.is_null() || size == 0 || agent_ptr.is_null() {
         return INVALID_ARGUMENT;
@@ -106,7 +111,7 @@ pub(crate) unsafe fn memory_lock_to_pool(
     {
         return INVALID_ARGUMENT;
     }
-    if runtime.decode_cpu_pool(pool).is_none() {
+    if runtime.agents.decode_cpu_pool(pool).is_none() {
         return INVALID_MEMORY_POOL;
     }
     let global_flags = match pool_global_flags(runtime, pool) {
@@ -118,7 +123,7 @@ pub(crate) unsafe fn memory_lock_to_pool(
         Ok(owner) => owner,
         Err(status) => return status,
     };
-    if runtime.full_profile {
+    if runtime.agents.full_profile {
         // SAFETY: The caller supplied writable pointer storage.
         unsafe { agent_ptr.write(host_ptr) };
         return SUCCESS;
@@ -128,7 +133,7 @@ pub(crate) unsafe fn memory_lock_to_pool(
     // two may share storage under the public C ABI.
     let mut gpu_indexes = Vec::new();
     if agents.is_null() {
-        gpu_indexes.extend(0..runtime.gpus.len());
+        gpu_indexes.extend(0..runtime.agents.gpus.len());
     } else {
         let count = match usize::try_from(num_agents) {
             Ok(count) => count,
@@ -137,10 +142,10 @@ pub(crate) unsafe fn memory_lock_to_pool(
         // SAFETY: The ABI requires num_agents readable handles when agents is non-null.
         let requested = unsafe { std::slice::from_raw_parts(agents, count) };
         for agent in requested {
-            if runtime.is_cpu_agent(*agent) {
+            if runtime.agents.is_cpu_agent(*agent) {
                 continue;
             }
-            let Some(index) = runtime.gpu_index(*agent) else {
+            let Some(index) = runtime.agents.gpu_index(*agent) else {
                 return INVALID_AGENT;
             };
             if !gpu_indexes.contains(&index) {
@@ -161,10 +166,10 @@ pub(crate) unsafe fn memory_lock_to_pool(
     let (allocation, device_base) =
         if let Some((&first_index, peer_indexes)) = gpu_indexes.split_first() {
             let (allocation, page_offset) = {
-                let first = &runtime.gpus[first_index].device;
+                let first = &runtime.agents.gpus[first_index].device;
                 let peers: Vec<_> = peer_indexes
                     .iter()
-                    .map(|&index| &runtime.gpus[index].device)
+                    .map(|&index| &runtime.agents.gpus[index].device)
                     .collect();
                 // SAFETY: The HSA lock caller retains the complete host page
                 // cover until unlock succeeds; ambiguous native failures keep
@@ -175,7 +180,7 @@ pub(crate) unsafe fn memory_lock_to_pool(
                         host_base,
                         cpu_pool_mapping_policy(pool, flags & ALLOC_UNCACHED),
                         size as u64,
-                        runtime.host_page_size as u64,
+                        runtime.agents.host_page_size as u64,
                         DeviceAccess::READ | DeviceAccess::WRITE,
                     )
                 } {
@@ -253,17 +258,17 @@ pub(crate) unsafe fn interop_map_buffer(
         return OUT_OF_RESOURCES;
     }
     for agent in agents {
-        let Some(index) = runtime.gpu_index(*agent) else {
+        let Some(index) = runtime.agents.gpu_index(*agent) else {
             return INVALID_AGENT;
         };
-        devices.push(&runtime.gpus[index].device);
+        devices.push(&runtime.agents.gpus[index].device);
         accessible.push(*agent);
     }
     let descriptor = match native_memory::duplicate_graphics_handle(interop_handle) {
         Ok(descriptor) => descriptor,
         Err(error) => return map_error(error),
     };
-    let Some(session) = runtime.session() else {
+    let Some(session) = runtime.native_session() else {
         return ERROR;
     };
     let allocation = match native_memory::import_graphics_dma_buf(
@@ -289,6 +294,7 @@ pub(crate) unsafe fn interop_map_buffer(
     };
     let imported_pointer = info.device_address as usize;
     let owner = runtime
+        .agents
         .gpus
         .iter()
         .enumerate()
