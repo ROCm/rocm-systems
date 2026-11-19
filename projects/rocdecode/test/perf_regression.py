@@ -373,9 +373,15 @@ def find_duplicate_streams(perf_dir):
     return {name: ps for name, ps in paths.items() if len(ps) > 1}
 
 
-def summary_box(rows, overall_ok, measure_only=False):
+SUMMARY_TITLES = {"compare": "rocDecode Performance Regression",
+                  "measure": "rocDecode Performance (measure only)",
+                  "save": "rocDecode Performance (saving baseline)"}
+
+
+def summary_box(rows, overall_ok, mode="compare"):
+    """mode: "compare" against a baseline, "measure" with no baseline, or "save" a baseline."""
     labels = [r[0] for r in rows] + ["Overall"]
-    title = "rocDecode Performance" + (" (measure only)" if measure_only else " Regression")
+    title = SUMMARY_TITLES[mode]
     width = max(len(x) for x in labels + [title])
     inner = width + 12
     line = lambda l, f, r: l + f * inner + r
@@ -395,7 +401,7 @@ def summary_box(rows, overall_ok, measure_only=False):
     failed = any(st == "FAILED" for _, st in rows)
     if failed:
         color, lbl = RED, "✗ FAILED"
-    elif measure_only:
+    elif mode != "compare":
         color, lbl = YELLOW, "— MEASURED"
     elif overall_ok:
         color, lbl = GREEN, "✓ PASSED"
@@ -492,6 +498,9 @@ def main():
     baseline = {}
     col = None
     baseline_kind = None
+    # measure_only: every stream is measured and none is compared. That is the case
+    # both with no usable baseline and with --save-baseline; the reporting tells them
+    # apart through summary_mode. measure_only_reason is set only for the former.
     measure_only = False
     measure_only_reason = ""
     save_path = None
@@ -514,7 +523,6 @@ def main():
             print("       Pass --force to overwrite it.", file=sys.stderr)
             return 1
         measure_only = True
-        measure_only_reason = f"recording a new baseline: {save_path}"
     else:
         # Baseline files to try, in order, as (path, kind). The HTML baseline holds
         # decode-only (-m 3) numbers, so other memory types use a local CSV; for
@@ -591,6 +599,8 @@ def main():
     if args.quick:
         print("Quick mode: one stream per leaf subfolder, capped at <=4K")
     print()
+
+    summary_mode = "save" if args.save_baseline else ("measure" if measure_only else "compare")
 
     ts = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     # Write results outside the repo tree (default: $HOME) so they do not clutter
@@ -743,7 +753,7 @@ def main():
         out_dir.mkdir(parents=True, exist_ok=True)
         csv_path = out_dir / "perf_comparison.csv"
         pd.DataFrame(detail_rows).to_csv(csv_path, index=False)
-        summary_box(summary_rows, overall_ok, measure_only=measure_only)
+        summary_box(summary_rows, overall_ok, mode=summary_mode)
         print(f"Results saved to: {out_dir}/")
         if args.save_baseline and save_failures:
             # Any existing baseline is left untouched: it is only written below.
@@ -772,7 +782,7 @@ def main():
             print("These measurements can serve as a future baseline for this GPU.")
     else:
         if measure_only:
-            summary_box(summary_rows, overall_ok, measure_only=measure_only)
+            summary_box(summary_rows, overall_ok, mode=summary_mode)
             print("ERROR: No streams were measured; no results CSV was saved.",
                   file=sys.stderr)
             return 1
