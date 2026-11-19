@@ -83,6 +83,7 @@ nav:
       - Native LDS ConSan: consan.md
       - GPU debugging: rocgdb-debugging.md
       - Benchmarking: benchmarking.md
+      - Statistics: statistics.md
       - Benchmark runner setup: benchmark-runner-setup.md
       - QEMU VFIO-user compute: qemu-vfio.md
       - Vulkan compute: vulkan-compute.md

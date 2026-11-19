@@ -30,6 +30,22 @@ target_include_directories(
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
+add_library(rocjitsu_statistics STATIC src/rocjitsu/stats/statistics.cpp)
+set_target_properties(
+    rocjitsu_statistics
+    PROPERTIES POSITION_INDEPENDENT_CODE ON
+)
+target_include_directories(
+    rocjitsu_statistics
+    PUBLIC $<BUILD_INTERFACE:${ROCJITSU_SRC_DIR}>
+)
+target_link_libraries(
+    rocjitsu_statistics
+    PUBLIC util
+    PRIVATE rocjitsu_version Threads::Threads
+)
+rj_configure_target(rocjitsu_statistics WARNINGS HIDDEN)
+
 option(
     RJ_BUILD_CONSAN_COMPILER
     "Build the experimental offline ConSan compiler"

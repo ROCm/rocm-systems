@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
+#include "rocjitsu/stats/statistics.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -20,6 +21,7 @@
 #include "rocjitsu/vm/soc.h"
 #include "rocjitsu/vm/topology_assembly.h"
 #include "rocjitsu/vm/virtual_machine.h"
+#include "scoped_temp.h"
 #include "util/diagnostic.h"
 #include "util/distributed_shared_mutex.h"
 
@@ -36,8 +38,10 @@
 #include <condition_variable>
 #include <cstdint>
 #include <cstring>
+#include <fstream>
 #include <functional>
 #include <future>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <mutex>
@@ -1584,6 +1588,14 @@ TEST_F(GpuDeviceMes, DropsADoorbellQueuedByARevokedTransportGeneration) {
 }
 
 TEST_F(GpuDeviceMes, ResetDropsDoorbellsQueuedInTheSameTransportGeneration) {
+  rocjitsu::test::ScopedTempDirectory temporary;
+  ASSERT_TRUE(temporary.initialize("rocjitsu-stats-reset-doorbell-"));
+  auto created = rocjitsu::StatisticsSession::create(
+      {.enabled = true, .directory = temporary.path()}, "node", "functional");
+  ASSERT_TRUE(created.succeeded());
+  auto session = std::move(created).value();
+  soc_.set_statistics(session, 0);
+  session->mark_run_complete();
   store_dword(kRingPhysical, 0x00040001);
   store_qword(kRingPhysical + 50 * 4, kApiStatusGpu);
   store_qword(kRingPhysical + 52 * 4, 1);
@@ -1601,6 +1613,38 @@ TEST_F(GpuDeviceMes, ResetDropsDoorbellsQueuedInTheSameTransportGeneration) {
   EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 0u);
   EXPECT_EQ(transport_.dword_at(kReadPointerPhysical), 0u)
       << "pre-reset semantic work crossed the reset epoch";
+  session->finish();
+  std::ifstream input(session->output_path());
+  const std::string output{std::istreambuf_iterator<char>(input), {}};
+  EXPECT_NE(output.find("\"record\":\"session_end\",\"complete\":false"), std::string::npos);
+}
+
+TEST_F(GpuDeviceMes, LostConnectionKeepsCancelledPm4WorkIncomplete) {
+  rocjitsu::test::ScopedTempDirectory temporary;
+  ASSERT_TRUE(temporary.initialize("rocjitsu-stats-reset-pm4-"));
+  auto created = rocjitsu::StatisticsSession::create(
+      {.enabled = true, .directory = temporary.path()}, "node", "functional");
+  ASSERT_TRUE(created.succeeded());
+  auto session = std::move(created).value();
+  soc_.set_statistics(session, 0);
+  ASSERT_NO_FATAL_FAILURE(submit_default_compute_queue());
+  constexpr uint32_t kQueueId = uint32_t{1} << 31;
+  command_processor_.set_queue_debug_suspended(kQueueId, 3, true);
+  ASSERT_TRUE(command_processor_.queue_debug_suspended_for_test(kQueueId, 3));
+  store_dword(kDefaultComputeRingPhysical, 0x80000000);
+  auto doorbell = std::bit_cast<std::array<std::byte, 4>>(uint32_t{1});
+  ring_doorbell(kDefaultComputeDoorbell, doorbell);
+  ASSERT_EQ(transport_.dword_at(kDefaultComputeReadPointerPhysical), 0u);
+  ASSERT_FALSE(command_processor_.has_pending_aql_dispatch_work());
+
+  ASSERT_NO_THROW(device_.reset(simdojo::ResetKind::LostConnection));
+  EXPECT_EQ(soc_.queue_registry().active_queues(), 0u);
+  EXPECT_EQ(command_processor_.registered_pm4_queue_count_for_test(), 0u);
+  session->mark_run_complete();
+  session->finish();
+  std::ifstream input(session->output_path());
+  const std::string output{std::istreambuf_iterator<char>(input), {}};
+  EXPECT_NE(output.find("\"record\":\"session_end\",\"complete\":false"), std::string::npos);
 }
 
 TEST_F(GpuDeviceMes, MesInitializationRewalksAfterReset) {

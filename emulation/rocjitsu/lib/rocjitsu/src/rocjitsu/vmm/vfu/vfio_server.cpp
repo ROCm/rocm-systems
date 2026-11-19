@@ -4,6 +4,7 @@
 #include "rocjitsu/vmm/vfu/vfio_server.h"
 
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/stats/statistics.h"
 #include "rocjitsu/vm/amdgpu/pci/bar_access_trace.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device_spec.h"
@@ -620,6 +621,18 @@ int run_vfio_server_impl(const std::string &config_path,
   // owns the complete topology. Frontends release their borrowed SoC state
   // before the engine object later destroys that topology.
   engine_run.stop();
+  if (const auto &statistics = machine_ptr->statistics()) {
+    statistics->mark_run_complete();
+    const bool orderly_stop = engine_status.reason == simdojo::ExitReason::EXIT_REQUEST &&
+                              engine_status.message == "serving ended";
+    if (status != 0 || engine_status.code != 0 ||
+        (engine_status.reason != simdojo::ExitReason::COMPLETED && !orderly_stop) ||
+        engine_status.cause == simdojo::ExitCause::MAX_TICKS ||
+        engine_status.cause == simdojo::ExitCause::ACTIVE_PRIMARY_STALL)
+      statistics->mark_incomplete();
+    for (uint32_t gpu = 0; gpu < machine_ptr->num_socs(); ++gpu)
+      machine_ptr->soc(gpu)->mark_statistics_incomplete_if_pending();
+  }
   if (socket_paths.size() > 1) {
     if (FabricEndpoint *fabric = machine_ptr->fabric_endpoint()) {
       const FabricEndpoint::Diagnostics diagnostics = fabric->diagnostics();
@@ -649,8 +662,11 @@ int run_vfio_server_impl(const std::string &config_path,
   interrupt_rings.reserve(pci_devices.size());
   for (GpuPciDevice *device : pci_devices)
     interrupt_rings.push_back(device->interrupt_ring());
-  if (!frontend_shutdown.shutdown())
+  if (!frontend_shutdown.shutdown()) {
     status = 1;
+    if (const auto &statistics = machine_ptr->statistics())
+      statistics->mark_incomplete();
+  }
   if (engine_status.code != 0)
     status = engine_status.code;
 

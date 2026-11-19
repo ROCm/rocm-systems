@@ -8,6 +8,7 @@
 #include "rocjitsu/kmd/linux/host_mapping_lock.h"
 #include "rocjitsu/kmd/linux/memory_backing.h"
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
+#include "rocjitsu/stats/statistics.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/gpu_info.h"
 #include "rocjitsu/vm/plugins/plugin_loader.h"
@@ -36,6 +37,19 @@ RJ_DIAGNOSTIC_POP
 using namespace rocjitsu;
 
 namespace {
+
+void record_statistics_exit(rj_vm_t *vm, const simdojo::ExitStatus &exit) {
+  if (!vm->vm || !vm->vm->statistics())
+    return;
+  const auto &statistics = vm->vm->statistics();
+  statistics->mark_run_complete();
+  if (exit.code != 0 || exit.reason != simdojo::ExitReason::COMPLETED ||
+      exit.cause == simdojo::ExitCause::MAX_TICKS ||
+      exit.cause == simdojo::ExitCause::ACTIVE_PRIMARY_STALL)
+    statistics->mark_incomplete();
+  for (uint32_t gpu = 0; gpu < vm->vm->num_socs(); ++gpu)
+    vm->vm->soc(gpu)->mark_statistics_incomplete_if_pending();
+}
 
 void shutdown_plugin_group(rj_vm_t *vm) {
   // Host API preconditions keep this outside the simulation-callback interval:
@@ -342,6 +356,8 @@ rj_status_t rj_vm_step(rj_vm_t *vm, int *active) {
     return ROCJITSU_STATUS_UNSUPPORTED;
 
   bool any_active = vm->engine->step();
+  if (!any_active)
+    record_statistics_exit(vm, vm->engine->last_exit());
   if (vm->engine->exit_code() != 0)
     return ROCJITSU_STATUS_ERROR;
   if (active)
@@ -356,6 +372,7 @@ rj_status_t rj_vm_run(rj_vm_t *vm, uint64_t *ticks_executed) {
     return ROCJITSU_STATUS_ERROR;
 
   auto exit = vm->engine->run();
+  record_statistics_exit(vm, exit);
 
   if (ticks_executed)
     *ticks_executed = exit.tick;

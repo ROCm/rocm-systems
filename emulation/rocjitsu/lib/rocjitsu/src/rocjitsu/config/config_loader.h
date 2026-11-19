@@ -12,6 +12,7 @@
 #include "rocjitsu/config/kfd_device_config.h"
 #include "rocjitsu/config/pci_device_config.h"
 #include "rocjitsu/config/system_graph.h"
+#include "rocjitsu/stats/statistics.h"
 
 #include "simdojo/sim/simulation.h"
 #include "simdojo/sim/topology.h"
@@ -226,6 +227,7 @@ struct TopologyBuildResult {
 /// @endcode
 struct LoadedConfig {
   simdojo::SimulationEngine::Config engine_config;
+  StatisticsConfig statistics;
   TopologyBuildResult build_result;
   std::vector<TopologyBuildResult>
       extra_gpu_builds; ///< Additional GPU SoC trees (for num_gpus > 1).

@@ -1,8 +1,9 @@
 # Shared Utilities
 
 The `util` library provides low-level building blocks shared across
-rocjitsu and simdojo. It is header-only: the CMake target is an
-INTERFACE library that contributes an include path and nothing to link.
+rocjitsu and simdojo. The `util` CMake target supplies public headers and a
+static library containing the statistics registry and JSONL exporter. Most
+other utilities and the owner-local statistics accumulators are header-only.
 
 ## Headers
 
@@ -49,10 +50,12 @@ INTERFACE library that contributes an include path and nothing to link.
 
 ### Statistics
 
-`statistics.h` supplies owner-local accumulators in the standalone `stats`
-namespace. The namespace describes the package; its headers belong to the
-`util` target. The accumulators have no simulator, clock, or output
-dependencies. Callers must synchronize shared updates and snapshots.
+`statistics.h` supplies owner-local accumulators and a reusable statistics
+registry in the standalone `stats` namespace. The namespace describes the
+package; its headers and compiled implementation belong to the `util` target.
+Neither API depends on the simulator, ISA, configuration loader, or plugin
+system. The accumulators have no clock or output dependency; callers must
+synchronize their shared updates and snapshots.
 
 | Type | Description |
 |------|-------------|
@@ -76,6 +79,33 @@ means at least one bucket counter exceeded `UINT64_MAX` and saturated; a sample
 in the unbounded bucket does not indicate overflow. The summary separately
 reports count overflow through `SummarySnapshot::count_overflowed`.
 
+The compiled registry uses the same header:
+
+| Type | Description |
+|------|-------------|
+| `stats::RegisteredCounter`, `stats::RegisteredGauge` | Registered atomic values with owned descriptors and stable shared handles. |
+| `stats::RegisteredSummary`, `stats::RegisteredHistogram` | Registered distributions protected by a metric-local mutex. Recording does not allocate. |
+| `stats::Scope` | Named collection of metrics with copied attributes, metric selection, and descriptor-conflict detection. |
+| `stats::Session` | Registry and output owner. Creates an exclusive JSONL file and exports a final snapshot after producers stop. |
+| `stats::Config` | Metric selection, output directory and format, schema identifier, and default measurement domain. |
+
+Generic scopes use caller-supplied keys and display names. Applications can add
+JSON metadata to scope, run, and session-end records through metadata writers;
+the writers append comma-prefixed JSON members and must not reenter the
+registry. `stats::json_string()` escapes string values. Scope writers own
+their captures for the scope lifetime. The session adds no background thread;
+call `finish(complete)` only after producers are quiescent. Registration conflicts
+make the exported snapshot incomplete even when the caller passes `true`.
+
+Rocjitsu's adapter in `rocjitsu/stats/statistics.h` supplies GPU identities,
+component/dispatch selection, the dispatch scope limit, build provenance,
+and VM completion policy. Those concepts are not part of the generic
+utility API.
+
+The default `util.statistics.v1` JSONL output is accepted by
+`scripts/rocjitsu-stats.py` for SQLite and CSV conversion. The rocjitsu adapter
+adds its own metadata under the also-supported `rocjitsu.statistics.v1` schema.
+
 ### Miscellaneous
 
 | File | Description |
@@ -92,5 +122,5 @@ All headers are under `lib/util/include/util/` and can be included as:
 #include "util/bit.h"
 ```
 
-`util` is header-only: consumers link the `util` INTERFACE target in CMake,
-which contributes the include path and nothing else.
+Consumers link the `util` target in CMake to obtain its include path and
+compiled statistics implementation. It does not link rocjitsu core libraries.

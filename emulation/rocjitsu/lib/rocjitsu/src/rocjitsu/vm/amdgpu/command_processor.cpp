@@ -218,6 +218,65 @@ bool CommandProcessor::has_pending_aql_dispatch_work() const {
   });
 }
 
+bool CommandProcessor::has_pending_statistics_work() const {
+  {
+    std::lock_guard lock(fanout_inbox_mutex_);
+    if (!fanout_inbox_.empty())
+      return true;
+  }
+  {
+    std::lock_guard lock(doorbell_inbox_mutex_);
+    if (!doorbell_inbox_.empty())
+      return true;
+  }
+  std::lock_guard lock(hw_queue_mutex_);
+  return std::ranges::any_of(compute_queues_, [&](const ComputeQueueRecord &queue) {
+    if (queue.has_pending_commands() || queue.faulted || queue.command_fault_pending ||
+        queue.publication_faulted || queue.publication_retry_pending ||
+        queue.idle_publication.active() || queue.scratch_request.active() ||
+        queue.scratch_reclaim.active())
+      return true;
+    if (queue.fanout_replica || queue.submission_queue)
+      return false;
+
+    uint64_t producer = queue.last_doorbell;
+    if (queue.doorbell_mode == QueueDoorbellMode::HostPolled && queue.doorbell_base)
+      producer = std::atomic_ref<uint64_t>(
+                     *reinterpret_cast<uint64_t *>(static_cast<char *>(queue.doorbell_base) +
+                                                   queue.doorbell_offset))
+                     .load(std::memory_order_acquire);
+    if (queue.doorbell_mode != QueueDoorbellMode::VmPolled &&
+        producer == std::numeric_limits<uint64_t>::max())
+      return false;
+
+    if (queue.packet_format == QueuePacketFormat::Pm4) {
+      uint64_t consumer = queue.read_pointer_journal.cursor();
+      if (!queue.read_pointer_journal.initialized()) {
+        const AtomicLoadResult loaded = read_gpu_u32(queue.address_space, queue.read_ptr_va);
+        if (loaded.outcome != VmAccessOutcome::Complete)
+          return true;
+        consumer = loaded.value;
+      }
+      const auto normalized =
+          normalize_pm4_producer_cursor(producer, consumer, queue.ring_size / 4);
+      return !normalized || *normalized != consumer;
+    }
+
+    // Explicit AQL notifications name the last packet, not the next cursor.
+    // Once all announced packets were fetched and retired, no transport read
+    // is needed; that transport may already have disconnected during reset.
+    if (queue.doorbell_mode == QueueDoorbellMode::Explicit && producer < queue.fetch_cursor)
+      return false;
+    const AtomicLoadResult consumer = read_gpu_u64(queue.address_space, queue.read_ptr_va);
+    const AtomicLoadResult reserved = read_gpu_u64(queue.address_space, queue.write_ptr_va);
+    if (consumer.outcome != VmAccessOutcome::Complete ||
+        reserved.outcome != VmAccessOutcome::Complete)
+      return true;
+    return reserved.value > consumer.value &&
+           (queue.doorbell_mode != QueueDoorbellMode::Explicit || producer >= consumer.value);
+  });
+}
+
 void CommandProcessor::configure_for_arch(rj_code_arch_t arch) {
   // Matches LLVM's FeaturePackedTID: gfx90a and later CDNA targets, plus
   // GFX11 and later RDNA targets, receive work-item IDs packed in v0.

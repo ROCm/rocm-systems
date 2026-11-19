@@ -27,6 +27,7 @@
 third_party
 Testing
 tmp
+/stats/
 .cache
 CMakePresets.json
 

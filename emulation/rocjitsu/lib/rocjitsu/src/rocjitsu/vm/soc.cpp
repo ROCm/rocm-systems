@@ -46,6 +46,23 @@ SoC::SoC(std::string name, amdgpu::GpuMemory *memory, rj_code_arch_t arch)
 
 SoC::~SoC() { release_vm_resources(); }
 
+void SoC::set_statistics(std::shared_ptr<StatisticsSession> session, uint32_t gpu_index) {
+  statistics_ = std::move(session);
+  statistics_gpu_index_ = gpu_index;
+}
+
+void SoC::mark_statistics_incomplete_if_pending() {
+  if (!statistics_)
+    return;
+  for_each_cp([&](amdgpu::CommandProcessor *cp) {
+    if (cp->has_pending_statistics_work())
+      statistics_->mark_incomplete();
+  });
+  for (const amdgpu::ComputeUnitCore *cu : all_cus())
+    if (cu->has_active_wfs())
+      statistics_->mark_incomplete();
+}
+
 void SoC::release_vm_resources() {
   if (vm_resources_released_)
     return;

@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "rocjitsu/stats/statistics.h"
 #include "rocjitsu/vm/amdgpu/cpu_dispatch_pool.h"
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -87,6 +88,12 @@ public:
   const simdojo::CompositeComponent &component_root() const { return *component_root_; }
 
   uint32_t gpu_id() const { return gpu_id_; }
+  void set_statistics(std::shared_ptr<StatisticsSession> session, uint32_t gpu_index);
+  const std::shared_ptr<StatisticsSession> &statistics() const { return statistics_; }
+  uint32_t statistics_gpu_index() const { return statistics_gpu_index_; }
+
+  /// @brief Preserve incomplete statistics before outstanding work is cancelled.
+  void mark_statistics_incomplete_if_pending();
 
   /// @brief Attach an XCD during topology construction, before its CUs can execute.
   /// @details A null pointer returns failure without changes. Failure diagnostics
@@ -340,6 +347,8 @@ private:
   std::shared_ptr<ExecutionPluginGroup> plugin_group_;
   std::vector<amdgpu::ComputeUnitCore *> all_cus_cache_;
   bool vm_resources_released_ = false;
+  std::shared_ptr<StatisticsSession> statistics_;
+  uint32_t statistics_gpu_index_ = 0;
 };
 
 } // namespace rocjitsu

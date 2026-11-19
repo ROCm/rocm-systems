@@ -367,6 +367,20 @@ table SystemManifestDef {
 }
 
 /// Top-level simulation configuration.
+/// Structured statistics are independent of execution-plugin log sinks.
+table StatisticsOutputConfig {
+  format: string;
+  directory: string;
+}
+
+table StatisticsConfig {
+  enabled: bool = false;
+  include: [string];
+  scopes: [string];
+  max_dispatch_scopes: uint32 = 1024;
+  output: StatisticsOutputConfig;
+}
+
 table SimulationConfig {
   max_ticks: uint64;             // Maximum simulation ticks before halting.
   num_threads: uint32;           // Engine partitions. 0/omitted selects the execution-budget policy.
@@ -401,6 +415,8 @@ table SimulationConfig {
   local_node: string;
   // Omission preserves per-CU policies; an empty object selects Compatibility for all CUs.
   arithmetic: ArithmeticPolicyConfig;
+  // Appended to preserve the field IDs shared with checkpoints.
+  statistics: StatisticsConfig;
 }
 
 root_type SimulationConfig;
