@@ -1865,11 +1865,6 @@ configuration. Keep that header tree at a matching revision.</p>
 <td>Select <code>AUTO</code>, <code>SHARED</code>, or <code>STATIC</code> sanitizer runtime linkage</td>
 </tr>
 <tr>
-<td><code>RJ_CLANG_TIDY</code></td>
-<td><code>OFF</code></td>
-<td>Enable clang-tidy static analysis</td>
-</tr>
-<tr>
 <td><code>RJ_RUNTIME_API_HEADERS_SOURCE_DIR</code></td>
 <td><code>../../runtimes/api-headers</code></td>
 <td>Source directory of the shared runtime API headers</td>
@@ -1930,7 +1925,12 @@ so interposer tests that depend on specific file descriptor numbers or exhaust
 the descriptor table are not registered. They run in unsanitized builds and in
 UBSan builds with <code>RJ_UBSAN_VPTR=OFF</code>, including GCC's default.</p>
 <h3 id="static-analysis">Static analysis<a class="headerlink" href="#static-analysis" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>cmake<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </span>-G<span class="w"> </span>Ninja<span class="w"> </span>-DRJ_CLANG_TIDY<span class="o">=</span>ON
+<p>Configure a Clang build and generate the schema headers. From the RocJITsu
+source directory, point <code>run-clang-tidy</code> at the directory containing
+<code>compile_commands.json</code> and select the source paths to check. This example checks the simulator and its project headers.</p>
+<div class="highlight"><pre><span></span><code>cmake<span class="w"> </span>-S<span class="w"> </span>.<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </span>-G<span class="w"> </span>Ninja<span class="w"> </span>-DCMAKE_CXX_COMPILER<span class="o">=</span>clang++
+cmake<span class="w"> </span>--build<span class="w"> </span>build<span class="w"> </span>--target<span class="w"> </span>flatbuffers_schemas
+run-clang-tidy<span class="w"> </span>-p<span class="w"> </span>build<span class="w"> </span>-config-file<span class="w"> </span>.clang-tidy<span class="w"> </span><span class="s1">'/lib/rocjitsu/src/rocjitsu/vm/.*\.cpp$'</span>
 </code></pre></div>
 <h2 id="formatting">Formatting<a class="headerlink" href="#formatting" title="Permanent link">&para;</a></h2>
 <p>The repo uses pre-commit hooks for formatting (clang-format for C++,
