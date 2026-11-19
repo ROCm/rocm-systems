@@ -852,6 +852,14 @@ void Buffer::destroy() {
 
     if (needUnlockHostMem && hostLockOwner_) {
       if (memFlags & (CL_MEM_USE_HOST_PTR | CL_MEM_ALLOC_HOST_PTR)) {
+        // Safe only because Memory::~Memory() destroys deviceMemories_ synchronously, in
+        // insertion order, and the lock owner is always inserted first: it's the first
+        // device to reach Buffer::create() for this owner, which is a precondition for
+        // any sibling being able to find and reuse its mapping (see the sibling scan in
+        // Buffer::create()). So by the time any sibling's destroy() runs, this unlock has
+        // already happened -- a sibling only ever reads deviceMemory_, never unlocks it
+        // itself. If deviceMemories_ teardown order ever stops matching insertion order,
+        // this would unlock while a sibling still holds the shared pointer.
         if (dev().agent_profile() != HSA_PROFILE_FULL) Hsa::memory_unlock(owner()->getHostMem());
       }
     }
@@ -1201,11 +1209,14 @@ bool Buffer::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
       // so gate on amd::IS_HIP to leave OpenCL unchanged.
       //
       // lockMemoryOps() serializes sibling device::Memory creation (see
-      // Memory::addDeviceMemory() in platform/memory.cpp); take it explicitly (recursive,
-      // so a no-op if already held) so reading sibling state below is always safe.
+      // Memory::addDeviceMemory() in platform/memory.cpp, which already holds this same
+      // mutex on every call into here); re-taking it must use recursive_mutex, since the
+      // calling thread already owns it. Taking it again explicitly just documents that
+      // reading sibling state below relies on that lock being held.
       const auto& contextDevices = owner()->getContext().devices();
 
       void* shared = nullptr;
+      bool priorGroupLockFailed = false;
       std::unique_lock<std::recursive_mutex> lock;
       if (amd::IS_HIP) {
         lock = std::unique_lock<std::recursive_mutex>(owner()->lockMemoryOps());
@@ -1213,9 +1224,15 @@ bool Buffer::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
           if (other == &dev()) continue;
           device::Memory* existing = owner()->getDeviceMemory(*other, false);
           if (existing == nullptr) continue;
+          roc::Memory* existingMem = static_cast<roc::Memory*>(existing);
+          // A sibling that already tried and failed the group lock tells us not to
+          // bother retrying it ourselves (see hostLockGroupAttemptFailed_ below).
+          if (existingMem->HostLockGroupAttemptFailed()) {
+            priorGroupLockFailed = true;
+          }
           // Reuse only if the sibling's lock covered every context device; one that
           // fell back to locking only itself was never mapped for our agent.
-          if (!static_cast<Buffer*>(existing)->hostLockCoversAllDevices_) continue;
+          if (!existingMem->HostLockCoversAllDevices()) continue;
           shared = reinterpret_cast<void*>(existing->virtualAddress());
           if (shared != nullptr) break;
         }
@@ -1223,7 +1240,7 @@ bool Buffer::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
 
       if (shared != nullptr) {
         deviceMemory_ = shared;
-      } else if (amd::IS_HIP && contextDevices.size() > 1) {
+      } else if (amd::IS_HIP && contextDevices.size() > 1 && !priorGroupLockFailed) {
         // Build the agent list from this context's own devices, not every GPU visible
         // to the process, so we never lock/map memory onto devices outside the context.
         std::vector<hsa_agent_t> lockAgents;
@@ -1239,15 +1256,24 @@ bool Buffer::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
         } else {
           // The group lock failed (e.g. one peer agent is unavailable). Fall back to
           // locking just this device so the remaining devices can still succeed
-          // independently, instead of failing the whole hipHostRegister call.
+          // independently, instead of failing the whole hipHostRegister call. Record
+          // the failure so later siblings skip straight to this fallback too, instead
+          // of each repeating the same doomed group-lock attempt.
           deviceMemory_ = dev().hostLock(owner()->getHostMem(), owner()->getSize(),
                                          getHostMemorySegment(memFlags));
           hostLockOwner_ = deviceMemory_ != nullptr;
+          hostLockGroupAttemptFailed_ = true;
         }
       } else {
+        // Single-device context, non-HIP caller, or a sibling already established that
+        // the group lock isn't viable for this context (priorGroupLockFailed) -- lock
+        // just this device.
         deviceMemory_ = dev().hostLock(owner()->getHostMem(), owner()->getSize(),
                                        getHostMemorySegment(memFlags));
         hostLockOwner_ = deviceMemory_ != nullptr;
+        if (amd::IS_HIP && contextDevices.size() > 1) {
+          hostLockGroupAttemptFailed_ = true;
+        }
       }
     } else {
       deviceMemory_ = owner()->getHostMem();

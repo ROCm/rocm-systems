@@ -977,6 +977,10 @@ HIP_TEST_CASE(Unit_hipHostRegister_with_fine_grain) {
  * re-registering the same range works cleanly with no leaked or double-released lock.
  * Run in a child process because HIP_VISIBLE_DEVICES is only read once, at HIP's first
  * initialization in the process.
+ * Known limitation: because the excluded GPU is outside HIP_VISIBLE_DEVICES, the child
+ * process has no HIP-level visibility into it at all, so this test cannot directly
+ * confirm the excluded device received no mapping -- only that the subset it can see
+ * all share one correctly working mapping.
  * Test source
  * ------------------------
  *    - catch\unit\memory\hipHostRegister.cc
@@ -995,16 +999,29 @@ HIP_TEST_CASE(Unit_hipHostRegister_SharedLockDeviceSubset) {
     return;
   }
 
+  // Save any pre-existing HIP_VISIBLE_DEVICES so it can be restored afterwards instead
+  // of unconditionally clobbering whatever the test environment had set.
+  const char* prevVisibleDevices = getenv("HIP_VISIBLE_DEVICES");
+  const bool hadPrevVisibleDevices = (prevVisibleDevices != nullptr);
+  const std::string prevVisibleDevicesValue = hadPrevVisibleDevices ? prevVisibleDevices : "";
+
   // Restrict the child process to the first two visible devices, so its context has
   // more than one device (exercises the shared/all-agent lock path) while leaving at
   // least one real GPU out of the context entirely.
-  unsetenv("HIP_VISIBLE_DEVICES");
   setenv("HIP_VISIBLE_DEVICES", "0,1", 1);
   hip::SpawnProc proc("hipHostRegisterSharedLockSubset_Exe", true, true);
   int exitCode = proc.run();
   INFO(proc.getOutput());
+
+  // Restore the environment before REQUIRE, so a failing assertion still leaves
+  // HIP_VISIBLE_DEVICES the way this test found it rather than stuck at "0,1".
+  if (hadPrevVisibleDevices) {
+    setenv("HIP_VISIBLE_DEVICES", prevVisibleDevicesValue.c_str(), 1);
+  } else {
+    unsetenv("HIP_VISIBLE_DEVICES");
+  }
+
   REQUIRE(exitCode == 1);
-  unsetenv("HIP_VISIBLE_DEVICES");
 }
 #endif
 
