@@ -1,7 +1,9 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Decoded F32/F64 fractional parts: inherited guest rounding, controls and routed operands.
+// Decoded FRACT bindings: guest controls, source routing, overlap and masked stores.
+// Numerical expectations are tested independently in lib/arith.
+
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
@@ -19,8 +21,6 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/fract.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/execution_backend.h"
 #include "rocjitsu/isa/instruction.h"
@@ -30,6 +30,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "unary_binding.h"
 #include "util/simd_test_hooks.h"
 
 #include <array>
@@ -48,15 +49,33 @@ struct ScalarGuard {
   ~ScalarGuard() { util::set_force_scalar_for_testing(saved); }
 };
 
-// Use the pre-migration integer model as an independent oracle for optimized arithmetic.
-uint64_t reference(uint64_t bits, bool wide, uint32_t denorm, unsigned rounding) {
-  const auto policy = fract::Policy::make(denorm, rounding);
-  return wide ? fract::evaluate<fp_format::F64>(bits, policy)
-              : uint64_t(fract::evaluate<fp_format::F32>(uint32_t(bits), policy));
+// Check decoded bindings against independently tested scalar FRACT entry points.
+// Guest controls are assembled here rather than using the VM's flag translator.
+uint64_t reference(uint64_t bits, bool wide, const Wavefront &wave, unsigned omod, bool clamp,
+                   bool sdwa) {
+  const auto arch = wave.cu().arch();
+  const bool modern = arch == rocjitsu::IsaFamily::Cdna5;
+  const bool cdna = arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4;
+  const unsigned denorm = wide ? wave.fp_denorm_mode_f16_f64() : wave.fp_denorm_mode_f32();
+  const unsigned rounding = wide ? wave.fp_round_mode_f16_f64() : wave.fp_round_mode_f32();
+  uint64_t flags = RJ_ARITH_SEMANTICS_COMPATIBILITY | (uint64_t(rounding) << 24);
+  flags |= (denorm & 1) ? 0 : RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+  flags |= (denorm & 2) ? 0 : RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  flags |= wave.ieee_mode() ? RJ_ARITH_FP_IEEE_MODE : 0;
+  flags |= !modern && !wave.dx10_clamp() ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0;
+  const auto call = wide     ? modern ? rj_arith_v_fract_f64_w32_gfx12
+                               : cdna ? rj_arith_v_fract_f64_w32_gfx942
+                                      : rj_arith_v_fract_f64_w32_gfx908
+                    : modern ? rj_arith_v_fract_f32_w32_gfx12
+                    : cdna   ? rj_arith_v_fract_f32_w32_gfx942
+                             : rj_arith_v_fract_f32_w32_gfx908;
+  const uint64_t modifiers = uint64_t(omod) * RJ_ARITH_ALU_OMOD_2 |
+                             (clamp ? RJ_ARITH_ALU_CLAMP : 0) | (sdwa ? RJ_ARITH_ALU_SDWA : 0);
+  return rocjitsu::test::evaluate_unary32(call, flags, modifiers, bits);
 }
 
 // Check inherited fractional parts, directed rounding, output controls and routed operand forms.
-TEST(FractionalPart, Arithmetic) {
+TEST(FractionalPart, Bindings) {
   ScalarGuard guard;
   struct Family {
     rocjitsu::IsaFamily arch;
@@ -278,19 +297,8 @@ TEST(FractionalPart, Arithmetic) {
                       bits &= wide ? 0x7fffffffffffffffULL : 0x7fffffffULL;
                       bits ^= wide ? 0x8000000000000000ULL : 0x80000000ULL;
                     }
-                    const uint32_t denorm =
-                        wide ? wave->fp_denorm_mode_f16_f64() : wave->fp_denorm_mode_f32();
-                    const unsigned rounding =
-                        wide ? wave->fp_round_mode_f16_f64() : wave->fp_round_mode_f32();
-                    const auto fraction = reference(bits, wide, denorm, rounding);
-                    const uint32_t omod = sample.modifiers ? 3 : 0;
-                    const auto value =
-                        wide ? output_modifier::apply<fp_format::F64>(
-                                   fraction, output_modifier_policy<fp_format::F64>(
-                                                 *wave, omod, sample.modifiers == 2))
-                             : uint64_t(output_modifier::apply<fp_format::F32>(
-                                   uint32_t(fraction), output_modifier_policy<fp_format::F32>(
-                                                           *wave, omod, sample.modifiers == 2)));
+                    const auto value = reference(bits, wide, *wave, sample.modifiers ? 3 : 0,
+                                                 sample.modifiers == 2, sdwa);
                     expected = sdwa ? (expected & 0xffff) | (uint32_t(value) << 16) : value;
                   }
                   for (int word = 0; word < (wide ? 2 : 1); ++word) {
