@@ -373,7 +373,7 @@ warn_if_outputs_may_collide(std::size_t pid_count)
     }
 }
 
-bool
+[[nodiscard("a failed attach must reach the exit code")]] bool
 attach_all(const std::vector<pid_t>& pids, active_sessions& sessions)
 {
     // read once: the loop below overwrites this variable for every target
@@ -408,7 +408,7 @@ attach_all(const std::vector<pid_t>& pids, active_sessions& sessions)
     return all_attached;
 }
 
-bool
+[[nodiscard("a failed detach must reach the exit code")]] bool
 detach(active_sessions& sessions, session target)
 {
     if(rocattach_detach(target.pid) != ROCATTACH_STATUS_SUCCESS)
@@ -422,7 +422,7 @@ detach(active_sessions& sessions, session target)
     return true;
 }
 
-bool
+[[nodiscard("a failed detach must reach the exit code")]] bool
 detach_all(active_sessions& sessions)
 {
     bool all_detached = true;
@@ -448,7 +448,7 @@ print_sessions(const active_sessions& sessions)
 
 // An empty line detaches only when a single session remains, so a stray ENTER never
 // detaches one of several targets by accident.
-bool
+[[nodiscard("a failed detach must reach the exit code")]] bool
 handle_prompt_input(std::string_view line, active_sessions& sessions)
 {
     const auto input = rocprofsys::utility::string::trim(line);
@@ -472,7 +472,7 @@ handle_prompt_input(std::string_view line, active_sessions& sessions)
     return detach(sessions, *target);
 }
 
-bool
+[[nodiscard("a failed detach must reach the exit code")]] bool
 run_detach_prompt(active_sessions& sessions)
 {
     bool        all_detached = true;

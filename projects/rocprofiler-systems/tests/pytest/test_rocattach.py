@@ -117,6 +117,7 @@ class TestRocattach:
                     target_proc.wait()
 
 
+@pytest.mark.class_name("rocattach")
 class TestRocattachReattachFormat:
     """Re-attach to one target with a different output format on each session."""
 
@@ -213,6 +214,7 @@ class TestRocattachReattachFormat:
                     target_proc.wait()
 
 
+@pytest.mark.class_name("rocattach")
 class TestRocattachMultiPid:
     """Attach one rocprof-sys-attach invocation to several transpose targets."""
 
@@ -305,6 +307,7 @@ class TestRocattachMultiPid:
                     target.wait()
 
 
+@pytest.mark.class_name("rocattach")
 class TestRocattachPartialAttach:
     """One PID in ``-p`` cannot be attached; the others must still be profiled."""
 
