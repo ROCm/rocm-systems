@@ -1760,19 +1760,20 @@ rcclArchThresholds MakeRankScaledTable() {
   rcclArchThresholds t{};
   t.ddaLLMax[ncclFuncAllReduce] = 32 * kMiB;
   t.ddaLLMax[ncclFuncAllGather] = 128 * kKiB;
-  t.ddaLLMax[ncclFuncReduceScatter] = 4 * kMiB;
+  t.ddaLLMax[ncclFuncReduceScatter] = 1 * kMiB;
   t.ddaLL128Max[ncclFuncAllReduce] = 256 * kMiB;
   t.ddaLL128Max[ncclFuncAllGather] = 128 * kMiB;
   t.ddaLL128Max[ncclFuncReduceScatter] = 224 * kMiB;
   t.ddaVmmMax[ncclFuncAllReduce] = 16 * kMiB;
   t.ddaLLMaxPerRank[ncclFuncAllReduce] = 1 * kMiB;
   t.ddaLLMaxPerRank[ncclFuncAllGather] = 16 * kKiB;
-  t.ddaLLMaxPerRank[ncclFuncReduceScatter] = 1 * kMiB;
   t.ddaLL128MaxPerRank[ncclFuncAllGather] = 16 * kMiB;
-  t.ddaLL128MaxPerRank[ncclFuncReduceScatter] = 15 * kMiB / 2;
+  t.ddaLL128MaxPerRank[ncclFuncReduceScatter] = 32 * kMiB;
   t.ddaVmmMaxPerRank[ncclFuncReduceScatter] = 2 * kMiB;
   t.rankScaledMinRanks = 8;
   t.rankScaledMaxBytes = 256 * kMiB;
+  t.ddaRsLL128LargeCommMinRanks = 32;
+  t.ddaRsLL128LargeCommMaxBytes = 512 * kMiB;
   t.ddaArVmmFirstMinRanks = 32;
   t.ddaArVmmFirstMinBytes = 2 * kMiB;
   t.ddaArVmmFirstMaxPerRank = 512 * kKiB;
@@ -7960,35 +7961,53 @@ TEST(WrapMicrotestIsolated, DdaTierCaps_RankScaledFromMinRanks) {
         ncclComm* comm = MakeCommWithArch("gfx1250");
         comm->archThresholds = Gfx1250Table();
         comm->nRanks = 4;
-        EXPECT_EQ(4 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(1 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
         comm->nRanks = 7;
         EXPECT_EQ(32 * kMiB, rcclDdaLLThreshold(comm, ncclFuncAllReduce));
         EXPECT_EQ(128 * kKiB, rcclDdaLLThreshold(comm, ncclFuncAllGather));
-        EXPECT_EQ(4 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(1 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
         EXPECT_EQ(224 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter));
         EXPECT_EQ(0u, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter));
         comm->nRanks = 8;
         EXPECT_EQ(8 * kMiB, rcclDdaLLThreshold(comm, ncclFuncAllReduce));
         EXPECT_EQ(128 * kKiB, rcclDdaLLThreshold(comm, ncclFuncAllGather));
-        EXPECT_EQ(8 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(1 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter)) << "no per-rank entry";
         EXPECT_EQ(128 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllGather));
-        EXPECT_EQ(60 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(256 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter));
         EXPECT_EQ(16 * kMiB, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter));
         EXPECT_EQ(256 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllReduce)) << "no per-rank entry";
         EXPECT_EQ(16 * kMiB, rcclDdaVmmThreshold(comm, ncclFuncAllReduce)) << "no per-rank entry";
         comm->nRanks = 16;
-        EXPECT_EQ(16 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
-        EXPECT_EQ(120 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(1 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(256 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter)) << "clipped";
         comm->nRanks = 32;
         EXPECT_EQ(256 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllGather)) << "clipped";
         EXPECT_EQ(64 * kMiB, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter));
-        // The entry gate admits the widest tier, so it scales too.
-        EXPECT_EQ(240 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter));
-        EXPECT_EQ(240 * kMiB, rcclDdaEntryThreshold(comm, ncclFuncReduceScatter));
+        // From 32 ranks ReduceScatter LL128 takes its large-comm cap, and the entry gate admits the widest tier.
+        EXPECT_EQ(512 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(512 * kMiB, rcclDdaEntryThreshold(comm, ncclFuncReduceScatter));
         comm->nRanks = 64;
-        EXPECT_EQ(64 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
-        EXPECT_EQ(256 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter)) << "clipped";
+        EXPECT_EQ(1 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(512 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter));
         EXPECT_EQ(128 * kMiB, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// A ReduceScatter LL128 tier the table turns off stays off on large comms.
+TEST(WrapMicrotestIsolated, DdaTierCaps_RsLL128OffStaysOffOnLargeComms) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaTierCaps_RsLL128OffStaysOffOnLargeComms",
+      []() {
+        rcclArchThresholds table = MakeRankScaledTable();
+        table.ddaLL128Max[ncclFuncReduceScatter] = 0;
+        table.ddaLL128MaxPerRank[ncclFuncReduceScatter] = 0;
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = &table;
+        for (int nRanks : {32, 64}) {
+          comm->nRanks = nRanks;
+          EXPECT_EQ(0u, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter)) << nRanks << " ranks";
+        }
         DeleteCommWithArch(comm);
       });
 }
@@ -8930,6 +8949,60 @@ TEST(WrapMicrotestIsolated, DdaFabricAgLL128Shape_FromDpxTable) {
       });
 }
 
+// Only the gfx1250 SPX table runs the batched ReduceScatter LL128 kernel on 256 threads. The DPX table,
+// RCCL_IGNORE_ARCH_TABLE=1 and no comm leave 0, which keeps 512.
+TEST(WrapMicrotestIsolated, DdaFabricRsLL128Threads_FromSpxTable) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaFabricRsLL128Threads_FromSpxTable",
+      []() {
+        int64_t ignoreTable = 0;
+        g_loadParam = [&ignoreTable](const char* env, int64_t def) -> int64_t {
+          return std::strcmp(env, "RCCL_IGNORE_ARCH_TABLE") == 0 ? ignoreTable : def;
+        };
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+        ASSERT_NE(nullptr, comm->archThresholds);
+        EXPECT_EQ(0, rcclDdaFabricRsLL128Threads(comm)) << "DPX";
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        ASSERT_NE(nullptr, comm->archThresholds);
+        EXPECT_EQ(256, rcclDdaFabricRsLL128Threads(comm)) << "SPX";
+        ignoreTable = 1;
+        EXPECT_EQ(0, rcclDdaFabricRsLL128Threads(comm)) << "RCCL_IGNORE_ARCH_TABLE=1";
+        EXPECT_EQ(0, rcclDdaFabricRsLL128Threads(nullptr));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The gfx1250 SPX table runs the peer-parallel ReduceScatter LL128 kernel to 2M/4M/16M at 4/8/16 ranks and 32M from 32.
+// The DPX table, RCCL_IGNORE_ARCH_TABLE=1 and no comm leave 0, which keeps the batched kernel.
+TEST(WrapMicrotestIsolated, DdaFabricRsLL128PeerMaxBytes_FromSpxTable) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaFabricRsLL128PeerMaxBytes_FromSpxTable",
+      []() {
+        int64_t ignoreTable = 0;
+        g_loadParam = [&ignoreTable](const char* env, int64_t def) -> int64_t {
+          return std::strcmp(env, "RCCL_IGNORE_ARCH_TABLE") == 0 ? ignoreTable : def;
+        };
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->nRanks = 8;
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+        ASSERT_NE(nullptr, comm->archThresholds);
+        EXPECT_EQ(0u, rcclDdaFabricRsLL128PeerMaxBytes(comm)) << "DPX";
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        ASSERT_NE(nullptr, comm->archThresholds);
+        const std::pair<int, size_t> cases[] = {
+            {4, 2 * kMiB}, {8, 4 * kMiB}, {16, 16 * kMiB}, {32, 32 * kMiB}, {64, 32 * kMiB}};
+        for (const auto& c : cases) {
+          comm->nRanks = c.first;
+          EXPECT_EQ(c.second, rcclDdaFabricRsLL128PeerMaxBytes(comm)) << c.first;
+        }
+        ignoreTable = 1;
+        EXPECT_EQ(0u, rcclDdaFabricRsLL128PeerMaxBytes(comm)) << "RCCL_IGNORE_ARCH_TABLE=1";
+        EXPECT_EQ(0u, rcclDdaFabricRsLL128PeerMaxBytes(nullptr));
+        DeleteCommWithArch(comm);
+      });
+}
+
 // DDA LL128 AlltoAll reads its own ddaA2aLL128* window, inclusive at both ends; a synthetic table pins
 // the accessors. The real tables and no table keep 0 threads; SPX and no table keep the init cap, and DPX
 // caps the grid at 72 blocks from 256 KiB to 16 MiB, where DPX runs LL128 (LL stops at 128 KiB).
@@ -9018,7 +9091,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250NeverPicksSymmetric) {
       });
 }
 
-// gfx1250 SPX ReduceScatter: DDA LL to its cap, LL128 to 224M below 8 ranks, nRanks x 7.5M to 256M, then Ring.
+// gfx1250 SPX ReduceScatter: DDA LL to 1M, LL128 to 224M below 8 ranks, 256M from 8 and 512M from 32, then Ring.
 TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250SpxLL128Caps) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_Gfx1250SpxLL128Caps",
@@ -9044,14 +9117,14 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250SpxLL128Caps) {
         };
         const int ll = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL;
         const int ll128 = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128;
-        const std::pair<int, size_t> llCases[] = {{4, 4 * kMiB}, {8, 8 * kMiB}, {16, 16 * kMiB}};
+        const std::pair<int, size_t> llCases[] = {{4, 1 * kMiB}, {8, 1 * kMiB}, {16, 1 * kMiB}};
         for (const auto& c : llCases) {
           comm->nRanks = c.first;
           EXPECT_EQ(ll, algo(c.second)) << c.first;
           EXPECT_EQ(ll128, algo(c.second + (size_t)c.first * sizeof(float))) << c.first;
         }
         const std::pair<int, size_t> cases[] = {
-            {4, 224 * kMiB}, {8, 60 * kMiB}, {16, 120 * kMiB}, {32, 240 * kMiB}, {64, 256 * kMiB}};
+            {4, 224 * kMiB}, {8, 256 * kMiB}, {16, 256 * kMiB}, {32, 512 * kMiB}, {64, 512 * kMiB}};
         for (const auto& c : cases) {
           comm->nRanks = c.first;
           EXPECT_EQ(ll128, algo(c.second)) << c.first;
@@ -9097,6 +9170,16 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_DdaFabricLL128ChosenWhenLLNotEli
                                  [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
                                    return true;
                                  });
+        ncclComm* blocksComm = nullptr;
+        size_t blocksCount = 0;
+        ncclDataType_t blocksType = ncclInt8;
+        ScopedHook ll128Blocks(g_reduceScatterDdaFabricLL128Blocks,
+                               [&](ncclComm* c, size_t count, ncclDataType_t type) -> uint32_t {
+                                 blocksComm = c;
+                                 blocksCount = count;
+                                 blocksType = type;
+                                 return 134;
+                               });
         ncclComm* comm = MakeCommWithArch("gfx1250");
         comm->nRanks = 1;
         comm->nNodes = 1;
@@ -9106,6 +9189,10 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_DdaFabricLL128ChosenWhenLLNotEli
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, decision.algo);
 
         EXPECT_EQ(NCCL_PROTO_LL128, decision.protocol);
+        EXPECT_EQ(134u, decision.nMaxChannels);  // proves ncclReduceScatterDdaFabricLL128Blocks ran, not a sibling
+        EXPECT_EQ(comm, blocksComm);
+        EXPECT_EQ(8u, blocksCount);
+        EXPECT_EQ(ncclFloat32, blocksType);
         DeleteCommWithArch(comm);
       });
 }
