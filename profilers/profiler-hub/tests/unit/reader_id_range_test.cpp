@@ -342,29 +342,22 @@ protected:
 };
 
 TEST_F(reader_id_range_all_tables_test,
-       every_event_table_has_its_events_visited_with_their_names)
+       a_host_thread_visit_keeps_regions_and_drops_device_rows)
 {
     const auto region = visit_whole_table(event_type_t::region);
-    const auto kernel = visit_whole_table(event_type_t::kernel_dispatch);
-    const auto copy   = visit_whole_table(event_type_t::memory_copy);
-    const auto alloc  = visit_whole_table(event_type_t::memory_allocate);
 
     ASSERT_EQ(region.size(), 2U);
     EXPECT_EQ(region[0].name, "region-a");
-    ASSERT_EQ(kernel.size(), 1U);
-    EXPECT_EQ(kernel[0].name, "kernel-k");
-    EXPECT_EQ(kernel[0].start, 3000U);
-    EXPECT_EQ(kernel[0].end, 3500U);
-    ASSERT_EQ(copy.size(), 1U);
-    EXPECT_EQ(copy[0].name, "copy-c");
-    EXPECT_EQ(copy[0].start, 7000U);
-    ASSERT_EQ(alloc.size(), 1U);
-    EXPECT_EQ(alloc[0].name, "alloc-cat");
-    EXPECT_EQ(alloc[0].end, 8200U);
+    EXPECT_EQ(region[0].start, 1000U);
+    EXPECT_EQ(region[1].name, "region-b");
+    // The kernel, copy and allocation resolve onto their agent queue.
+    EXPECT_TRUE(visit_whole_table(event_type_t::kernel_dispatch).empty());
+    EXPECT_TRUE(visit_whole_table(event_type_t::memory_copy).empty());
+    EXPECT_TRUE(visit_whole_table(event_type_t::memory_allocate).empty());
 }
 
 TEST_F(reader_id_range_all_tables_test,
-       visiting_every_table_matches_reading_the_track_in_one_query)
+       visiting_every_table_matches_the_rows_that_belong_on_the_track)
 {
     std::vector<std::tuple<uint64_t, uint64_t, std::string>> by_visit;
     for(const auto type : { event_type_t::region,
@@ -381,12 +374,13 @@ TEST_F(reader_id_range_all_tables_test,
     std::vector<std::tuple<uint64_t, uint64_t, std::string>> by_query;
     for(const auto& event : m_reader->get_events_for_track(m_track))
     {
+        if(event.track && event.track->id != m_track->id) continue;
         by_query.emplace_back(event.start_timestamp,
                               event.end_timestamp,
                               std::string{ event.display_name });
     }
 
-    EXPECT_EQ(by_visit.size(), 5U);
+    EXPECT_EQ(by_visit.size(), 2U);
     EXPECT_THAT(by_visit, ::testing::UnorderedElementsAreArray(by_query));
 }
 

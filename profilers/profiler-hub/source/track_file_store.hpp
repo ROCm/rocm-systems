@@ -48,12 +48,13 @@ struct stored_histogram_t
  * table. The record files are read for a slice; they are not kept in memory.
  *
  * The files are little-endian. A change of k_format_version, or of the
- * source identity, makes the next open rewrite them.
+ * source identity, makes the next open rewrite them. Version 2 drops
+ * kernel, copy, and allocation rows from host thread tracks.
  */
 class track_file_store
 {
 public:
-    static constexpr uint32_t k_format_version      = 1;
+    static constexpr uint32_t k_format_version      = 2;
     static constexpr uint32_t k_checkpoint_interval = 4096;
 
     explicit track_file_store(uint32_t checkpoint_interval = k_checkpoint_interval);

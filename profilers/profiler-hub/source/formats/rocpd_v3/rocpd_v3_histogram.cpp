@@ -118,15 +118,14 @@ duration_source_sql(const reader_catalog_t&                         catalog,
         {
             const auto topology = catalog.topology_by_track.find(track);
             if(topology == catalog.topology_by_track.end()) return {};
-            for(const duration_source_t& source :
-                { k_region, k_kernel, k_allocate, k_copy })
-            {
-                append_union(sql,
-                             interval_select(source,
-                                             uuid,
-                                             sample_table,
-                                             thread_where(source, topology->second)));
-            }
+            // Device rows share the launching thread's nid/pid/tid, and they
+            // are drawn on the agent queue. The thread histogram is host
+            // regions only, matching the events a thread track shows.
+            append_union(sql,
+                         interval_select(k_region,
+                                         uuid,
+                                         sample_table,
+                                         thread_where(k_region, topology->second)));
             break;
         }
         case reader_types::track_kind_t::thread_sample:

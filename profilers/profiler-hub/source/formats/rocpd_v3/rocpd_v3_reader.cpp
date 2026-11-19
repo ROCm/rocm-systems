@@ -58,6 +58,15 @@ public:
         return event;
     }
 
+    // The track this row is drawn on. A kernel, copy, or allocation prefers
+    // its agent queue, then its stream. A region stays on the host thread.
+    [[nodiscard]] reader_types::track_info_ptr_t track_of(
+        const data_storage::schema_v3::timeline_event_result& row,
+        reader_types::event_type_t                            type)
+    {
+        return resolve_track(row, type);
+    }
+
 private:
     struct cached_string
     {
@@ -459,12 +468,24 @@ rocpd_v3_reader::visit_track_events_in_id_range(
     std::optional<size_t> last_id;
     std::string_view      last_name;
 
-    // Same rows as get_events_for_track: a thread's nid/pid/tid also selects
-    // kernel, copy and allocation rows. The timeline drops the ones that
-    // resolve onto a queue or stream; this visit reports every selected row.
+    // A thread's nid/pid/tid also selects kernel, copy and allocation rows.
+    // Those belong on the queue or stream, the same choice resolve_track and
+    // the single-query timeline make. This visit is what a large thread reads,
+    // so it has to drop them here. A row with no queue and no stream stays.
+    timeline_event_builder build_event{ *m_catalog };
     statements_for(*m_read_statements, type)
         .track_range_filtered(topo.nid, topo.pid, topo.tid, id_begin, id_end)
         .for_each([&](const data_storage::schema_v3::event_range_result& row) {
+            data_storage::schema_v3::timeline_event_result placed{};
+            placed.nid          = topo.nid;
+            placed.pid          = topo.pid;
+            placed.tid          = topo.tid;
+            placed.agent_id     = row.agent_id;
+            placed.queue_id     = row.queue_id;
+            placed.stream_id    = row.stream_id;
+            const auto resolved = build_event.track_of(placed, type);
+            if(resolved && resolved->id != track->id) return;
+
             std::string_view name;
             if(row.display_name_id.has_value())
             {
