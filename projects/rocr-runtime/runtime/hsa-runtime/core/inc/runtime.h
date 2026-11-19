@@ -1188,6 +1188,9 @@ class Runtime {
 
   AddressHandle* VMemoryFindReservedAddressHandle(const void* va);
   void MarkReservedAddressSvm(const void* ptr, size_t size);
+  // True when [ptr, ptr + size) overlaps a VMemoryAddressReserve reservation that
+  // MarkReservedAddressSvm has not yet marked.
+  bool IsFirstReservedSvmRegistration(const void* ptr, size_t size);
   hsa_status_t VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, void* (*alloc)(size_t),
                               uint32_t* num_agents_accessible, hsa_agent_t** accessible);
 

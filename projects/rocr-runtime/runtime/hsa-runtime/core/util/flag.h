@@ -292,6 +292,18 @@ class Flag {
     var = os::GetEnvVar("HSA_SVM_PROFILE");
     svm_profile_ = var;
 
+    // log2(page count), valid 0-63. -1 means unset or not a value in that range.
+    // Applied once, on the first hsa_amd_svm_attributes_set for a virtual address
+    // that does not itself set HSA_AMD_SVM_ATTRIB_MIGRATION_GRANULARITY.
+    svm_granularity_ = -1;
+    if (os::IsEnvVarSet("HSA_SVM_GRANULARITY")) {
+      var = os::GetEnvVar("HSA_SVM_GRANULARITY");
+      char* end = nullptr;
+      long value = strtol(var.c_str(), &end, 10);
+      if (end != var.c_str() && *end == '\0' && value >= 0 && value <= 63)
+        svm_granularity_ = static_cast<int>(value);
+    }
+
     var = os::GetEnvVar("HSA_ENABLE_SRAMECC");
     sramecc_enable_ =
         (var == "0") ? SRAMECC_DISABLED : ((var == "1") ? SRAMECC_ENABLED : SRAMECC_DEFAULT);
@@ -534,6 +546,9 @@ class Flag {
 
   const std::string& svm_profile() const { return svm_profile_; }
 
+  // -1 when HSA_SVM_GRANULARITY is unset or outside 0-63.
+  int svm_granularity() const { return svm_granularity_; }
+
   SRAMECC_ENABLE sramecc_enable() const { return sramecc_enable_; }
 
   bool enable_ipc_mode_legacy() const { return enable_ipc_mode_legacy_; }
@@ -680,6 +695,7 @@ class Flag {
 
   std::string tools_lib_names_;
   std::string svm_profile_;
+  int svm_granularity_ = -1;
 
   size_t force_sdma_size_;
 
