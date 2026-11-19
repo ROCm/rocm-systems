@@ -50,9 +50,7 @@ class TestCpuXgmi(unittest.TestCase):
         # reprogram a real socket's XGMI link width on a combined GPU + EPYC host,
         # so that sweep is intentionally omitted.
         # A write-back of a just-read value is valid input, so INVAL is not accepted.
-        correct_processor = [
-            amdsmi.AmdSmiStatus.SUCCESS,
-        ]
+        correct_processor = [amdsmi.AmdSmiStatus.SUCCESS]
         # NO_PERM is only legitimate when /dev/hsmp really is not writable.
         if not os.access("/dev/hsmp", os.W_OK):
             correct_processor.append(amdsmi.AmdSmiStatus.NO_PERM)
@@ -147,9 +145,7 @@ class TestCpuXgmi(unittest.TestCase):
         # handle reuses its index as a socket index and can legitimately succeed on
         # a combined GPU + EPYC host; there is no well-defined status to assert for
         # a GPU handle, and that sweep is intentionally omitted.
-        correct_processor = [
-            amdsmi.AmdSmiStatus.SUCCESS,
-        ]
+        correct_processor = [amdsmi.AmdSmiStatus.SUCCESS]
         if not os.access("/dev/hsmp", os.R_OK):
             correct_processor.append(amdsmi.AmdSmiStatus.NO_PERM)
         # A null (default-constructed) handle hits the C-layer null check -> INVAL.
