@@ -6,6 +6,7 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "mma_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/addr_calc.h"
@@ -71,6 +72,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/vop3p.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/vopc.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
@@ -291,7 +293,7 @@ public:
   void execute_and_route(Instruction *inst, amdgpu::Wavefront &wf) {
     EXPECT_TRUE(execute_instruction(inst, wf).succeeded());
     if (inst->is_memory_op())
-      route_memory_inst(inst, wf);
+      route_memory_inst(std::unique_ptr<Instruction>(inst), wf);
     else
       delete inst;
   }
@@ -878,9 +880,13 @@ TEST(MfmaExecTest, SwmmacI32K64U4VaryingSelectorsMatchSparseReference) {
     for (uint32_t col = 0; col < 16; ++col)
       write_nibble(b_base, amdgpu::swmmac_b_input_loc<16, 64>(32, col, k, 4), (k % 15u) + 1u);
 
-  amdgpu::exec_rdna_swmmac_i32<4, 64>(*cu, 32, d_base, a_base, b_base, index_base, /*index_key=*/0,
-                                      /*a_signed=*/false,
-                                      /*b_signed=*/false, /*clamp=*/false);
+  ASSERT_NO_FATAL_FAILURE(
+      mma_test::execute(*cu, *wf,
+                        rdna4::build_vop3p(rdna4::kVSwmmacI3216x16x64Iu4Vop3p,
+                                           {.vdst = uint8_t(d_base - vb),
+                                            .src0 = uint16_t(256 + a_base - vb),
+                                            .src1 = uint16_t(256 + b_base - vb),
+                                            .src2 = uint16_t(256 + index_base - vb)})));
   for (uint32_t row = 0; row < 16; ++row)
     for (uint32_t col = 0; col < 16; ++col) {
       uint32_t expected = 0;
@@ -916,7 +922,7 @@ TEST(MfmaExecTest, SwmmacF32K32Fp8MatchesSparseReference) {
   const uint32_t vb = wf->vgpr_alloc().base;
   const uint32_t a_base = vb + 0;
   const uint32_t b_base = vb + 4;
-  const uint32_t c_base = vb + 12;
+  const uint32_t c_base = vb + 20; // SWMMAC ties C to D.
   const uint32_t d_base = vb + 20;
   const uint32_t index_base = vb + 32;
 
@@ -970,8 +976,13 @@ TEST(MfmaExecTest, SwmmacF32K32Fp8MatchesSparseReference) {
     }
   }
 
-  amdgpu::exec_swmmac_f32<M, N, K>(*cu, 8, d_base, a_base, b_base, c_base, index_base, 16,
-                                   /*index_key=*/0, amdgpu::extract_fp8, amdgpu::extract_fp8);
+  ASSERT_NO_FATAL_FAILURE(
+      mma_test::execute(*cu, *wf,
+                        rdna4::build_vop3p(rdna4::kVSwmmacF3216x16x32Fp8Fp8Vop3p,
+                                           {.vdst = uint8_t(d_base - vb),
+                                            .src0 = uint16_t(256 + a_base - vb),
+                                            .src1 = uint16_t(256 + b_base - vb),
+                                            .src2 = uint16_t(256 + index_base - vb)})));
 
   for (uint32_t row = 0; row < M; ++row) {
     for (uint32_t col = 0; col < N; ++col) {
@@ -3270,6 +3281,29 @@ TEST(DppPermuteTest, True16SourceByteMaskFollowsOpSel) {
             ExecutionPlugin::kLowHalfByteMask);
   EXPECT_EQ(rocjitsu::amdgpu::true16_source_byte_mask(/*opsel=*/0b0010, /*source_index=*/1),
             ExecutionPlugin::kHighHalfByteMask);
+}
+
+TEST(DppPermuteTest, FullWavePlansTrackControlWidthAndBoundAcrossReuse) {
+  using namespace amdgpu::dpp;
+  for (uint32_t width : {32u, 64u, 32u}) {
+    const uint64_t full = util::mask<uint64_t>(width);
+    // These distinct permutations occupy the same slot in the full-wave plan cache.
+    for (uint32_t ctrl : std::array<uint32_t, 3>{ROW_SHR1, ROW_XMASK_BASE + 6, ROW_SHR1}) {
+      for (bool bound : {false, true, false}) {
+        for (uint64_t exec : {full, full & uint64_t{0x5555555555555555}, full}) {
+          for (bool fi : {false, true}) {
+            const auto expected = compute_dpp_plan(width, ctrl, 15, 15, bound, fi, exec, true);
+            const auto plan = make_dpp_plan(width, ctrl, 15, 15, bound, fi, exec, true);
+            EXPECT_EQ(plan.source_lanes, expected.source_lanes);
+            EXPECT_EQ(plan.physical_read_dest_mask, expected.physical_read_dest_mask);
+            EXPECT_EQ(plan.zero_source_mask, expected.zero_source_mask);
+            EXPECT_EQ(plan.source_write_mask, expected.source_write_mask);
+            EXPECT_EQ(plan.row_bank_mask, expected.row_bank_mask);
+          }
+        }
+      }
+    }
+  }
 }
 
 TEST(DppPermuteTest, AccessPlanTracksSelectedSources) {
@@ -5669,15 +5703,47 @@ TEST(DppPermuteTest, Rdna4GeneratedVop1F64PreservesInactiveDestination) {
   rdna4_generated_vop1_64_preserves_inactive_destination();
 }
 
-TEST(DppPermuteTest, Cdna2DoublePrecisionFmacDppSelectsOnlyRowBroadcasts) {
+TEST(DppPermuteTest, Cdna2BroadcastsDoublePrecisionOperationsWithinRows) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
   ASSERT_NE(decoder, nullptr);
-  for (uint32_t lane = 0; lane < 16; ++lane) {
-    const std::array words{0x080008fau, 0xff015004u | (lane << 8)};
-    EXPECT_TRUE(decoder->decode_window(words).succeeded());
+  // LLVM gfx90a encodings. CVT has a 32-bit source and 64-bit destination,
+  // RCP is absent from the XML DPP alternates, and FMAC is a VOP2 operation.
+  for (uint32_t opcode : {0x7e0420fau, 0x7e044afau, 0x080008fau}) {
+    for (uint32_t lane = 0; lane < 16; ++lane) {
+      const std::array words{opcode, 0xff015004u | (lane << 8)};
+      EXPECT_TRUE(decoder->decode_window(words).succeeded()) << std::hex << opcode;
+    }
+    const std::array shift{opcode, 0xff011104u};
+    EXPECT_TRUE(decoder->decode_window(shift).failed()) << std::hex << opcode;
   }
-  const std::array shift{0x080008fau, 0xff011104u};
-  EXPECT_TRUE(decoder->decode_window(shift).failed());
+
+  amdgpu::GpuMemory memory("gfx90a_dpp_fp64_memory");
+  amdgpu::L2Cache cache("gfx90a_dpp_fp64_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA2;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 32;
+  config.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("gfx90a_dpp_fp64", config, &memory, &cache);
+  ASSERT_NE(cu, nullptr);
+  auto *wave = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+  ASSERT_NE(wave, nullptr);
+  const auto base = wave->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < 64; ++lane)
+    cu->write_vgpr(base + 4, lane, std::bit_cast<uint32_t>(1.5f + lane));
+  wave->set_exec(~uint64_t{0});
+  // v_cvt_f64_f32_dpp v[2:3], v4 row_newbcast:7
+  const std::array words{0x7e0420fau, 0xff015704u};
+  auto instruction = decoder->decode_window(words);
+  ASSERT_TRUE(instruction.succeeded());
+  ASSERT_TRUE(cu->execute_instruction(instruction.value().get(), *wave).succeeded());
+  for (uint32_t lane = 0; lane < 64; ++lane) {
+    const uint64_t value =
+        (uint64_t{cu->read_vgpr(base + 3, lane)} << 32) | cu->read_vgpr(base + 2, lane);
+    EXPECT_EQ(std::bit_cast<double>(value), 1.5 + ((lane & ~15u) + 7));
+  }
+  wave->halt();
 }
 
 TEST(DppPermuteTest, Cdna4GeneratedVop1Dpp64InputPermutesBothWords) {
@@ -7294,6 +7360,36 @@ TEST(Gfx1250AddrCalcTest, VbufferRangeCheckAcceptsExactEndOnly) {
   expect_element_lane_masks(boundary_state.element_lane_masks, {0x1ULL});
   EXPECT_EQ(boundary_state.per_lane_addr[0], kBase + 4);
   EXPECT_EQ(boundary_state.per_lane_addr[1], 0ULL);
+
+  // Exercise the full-wave linear path with a nonzero bias and alternating
+  // exact-end and crossing halfwords, bounded by either STRIDE or NUM_RECORDS.
+  wf->set_exec(UINT64_MAX);
+  const uint64_t even_lanes = wf->exec() & 0x5555'5555'5555'5555ULL;
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+    cu->write_vgpr(vbase + 4, lane, 3 + (lane & 1));
+  cu->write_sgpr(wf->sgpr_alloc().base + 4, 2);
+  inst.soffset = 4;
+  inst.ioffset = 1;
+  for (const bool structured : {false, true}) {
+    write_gfx1250_buffer_resource(
+        *cu, *wf, 40,
+        encode_gfx1250_buffer_resource(kBase, structured ? 64 : 8, 8, 0, false, structured));
+    amdgpu::VectorMemState full(amdgpu::GLOBAL_MEM);
+    full.elem_size = 2;
+    full.num_elems = 1;
+    cdna5::mubuf_calculate_addresses(inst, *wf, full);
+    EXPECT_EQ(full.lane_mask, even_lanes);
+    expect_element_lane_masks(full.element_lane_masks, {even_lanes});
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+      EXPECT_EQ(full.per_lane_addr[lane], lane & 1 ? 0 : kBase + 6);
+    cu->write_sgpr(wf->sgpr_alloc().base + 4, UINT32_MAX);
+    cdna5::mubuf_calculate_addresses(inst, *wf, full);
+    EXPECT_EQ(full.lane_mask, 0u);
+    expect_element_lane_masks(full.element_lane_masks, {0});
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+      EXPECT_EQ(full.per_lane_addr[lane], 0u);
+    cu->write_sgpr(wf->sgpr_alloc().base + 4, 2);
+  }
 }
 
 TEST(Gfx1250AddrCalcTest, VbufferZeroNumRecordsMasksAllLanes) {

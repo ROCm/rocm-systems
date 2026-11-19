@@ -9,6 +9,7 @@
 #include "rocjitsu/kmd/linux/kfd_topology.h"
 #include "rocjitsu/kmd/linux/memory_backing.h"
 #include "rocjitsu/kmd/linux/rpc.h"
+#include "rocjitsu/vm/amdgpu/hsa_clock.h"
 #include "util/log.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
@@ -32,6 +33,23 @@ RJ_DIAGNOSTIC_POP
 #include <vector>
 
 namespace rocjitsu {
+
+uint32_t Sysfs::GpuInfo::clock_frequency_mhz() const {
+  switch (gfx_target_version) {
+  case 90008:
+    return amdgpu::gpu_clock_mhz(ROCJITSU_CODE_ARCH_CDNA1);
+  case 90010:
+    return amdgpu::gpu_clock_mhz(ROCJITSU_CODE_ARCH_CDNA2);
+  case 90400:
+  case 90401:
+  case 90402:
+    return amdgpu::gpu_clock_mhz(ROCJITSU_CODE_ARCH_CDNA3);
+  case 90500:
+    return amdgpu::gpu_clock_mhz(ROCJITSU_CODE_ARCH_CDNA4);
+  default:
+    return amdgpu::gpu_clock_mhz(ROCJITSU_CODE_ARCH_INVALID);
+  }
+}
 
 namespace fs = std::filesystem;
 
@@ -577,7 +595,7 @@ std::string Sysfs::generate(const std::vector<GpuInfo> &gpus, bool publish_peer_
 }
 
 Sysfs::GpuInfo gpu_info_from_config(const config::KfdDeviceConfig &dev, uint32_t num_xcc,
-                                    const config::PciDeviceConfig &pci) {
+                                    const config::PciDeviceConfig &pci, bool publish_peer_links) {
   Sysfs::GpuInfo gpu{};
   gpu.gpu_id = dev.gpu_id;
   gpu.gfx_target_version = dev.gfx_target_version;
@@ -628,6 +646,13 @@ Sysfs::GpuInfo gpu_info_from_config(const config::KfdDeviceConfig &dev, uint32_t
   gpu.num_cp_queues = dev.num_cp_queues;
   gpu.max_engine_clk_fcompute = dev.max_engine_clk_fcompute;
   gpu.num_xcc = num_xcc;
+  if (!publish_peer_links) {
+    // Executable manifest routes model local effects, but they do not
+    // establish native XGMI discovery through the stock driver. Keep the
+    // KFD metadata that ROCr uses to infer that path conservative.
+    gpu.hive_id = 0;
+    gpu.num_sdma_xgmi_engines = 0;
+  }
   return gpu;
 }
 

@@ -185,18 +185,9 @@ impl Device {
                 detail: "registered peers must belong to one driver",
             });
         }
-        if !self.driver_state.supports_host_registration(&self.endpoint)
-            || peers
-                .iter()
-                .any(|peer| !peer.driver_state.supports_host_registration(&peer.endpoint))
-        {
-            return Err(Error::Operation {
-                kind: ErrorKind::Unsupported,
-                detail: "device does not support host registration",
-            });
-        }
         let backing = host.registration_lease()?;
         let (address, size) = backing.extent()?;
+        self.validate_registration(peers, address, policy, size, alignment, permissions)?;
         let request = HostRegistration {
             address,
             policy,

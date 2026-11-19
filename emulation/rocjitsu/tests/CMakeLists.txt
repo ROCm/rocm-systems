@@ -18,6 +18,34 @@ if(RJ_ENABLE_UBSAN)
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # A separate executable lets --wrap hide modern stat symbols without
+    # affecting any other test or the interposer's own symbol resolution.
+    add_executable(
+        libc_passthrough_test
+        libc_passthrough_test.cpp
+        ../lib/rocjitsu/src/rocjitsu/kmd/linux/libc_passthrough.cpp
+    )
+    target_include_directories(
+        libc_passthrough_test
+        PRIVATE ../lib/rocjitsu/src ../lib/util/include
+    )
+    target_link_libraries(
+        libc_passthrough_test
+        PRIVATE GTest::gtest_main ${CMAKE_DL_LIBS}
+    )
+    target_link_options(libc_passthrough_test PRIVATE "-Wl,--wrap=dlsym")
+    rj_configure_target(libc_passthrough_test WARNINGS)
+    add_test(NAME LibcPassthrough.NativeStat COMMAND libc_passthrough_test)
+    # Force the old ABI only on hosts for which the resolver knows the
+    # stat version even when the build headers omit _STAT_VER.
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64|aarch64|arm64)$")
+        add_test(
+            NAME LibcPassthrough.LegacyStat
+            COMMAND
+                ${CMAKE_COMMAND} -E env RJ_TEST_LEGACY_STAT=1
+                $<TARGET_FILE:libc_passthrough_test>
+        )
+    endif()
     add_test(
         NAME MemoryKeeper.ScrubbedEnvironmentStartup
         COMMAND
@@ -68,6 +96,15 @@ if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
 endif()
 
 # --- Unit / integration test suite ---
+
+# Host-only coverage for the TCP rendezvous used by the HIP RCCL rank test.
+add_executable(rccl_tcp_bootstrap_test rccl_tcp_bootstrap_test.cpp)
+target_link_libraries(
+    rccl_tcp_bootstrap_test
+    PRIVATE GTest::gtest_main Threads::Threads
+)
+rj_configure_target(rccl_tcp_bootstrap_test TEST)
+rj_add_gtest_tests(rccl_tcp_bootstrap_test)
 
 add_test(NAME RocjitsuVersion COMMAND $<TARGET_FILE:rocjitsu_bin> --version)
 set_tests_properties(
@@ -325,6 +362,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             ${Python3_EXECUTABLE} -B
             ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_run_rccl_scaleout.py -v
     )
+    add_test(
+        NAME RcclPodEmulatedNodeUnitTest
+        COMMAND
+            ${Python3_EXECUTABLE} -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_run_rccl_pod_emulated_node.py
+            -v
+    )
 endif()
 
 add_test(
@@ -444,9 +488,13 @@ add_executable(
     coalesced_lane_runs_test.cpp
     gpu_vm_service_test.cpp
     gpu_vm_translation_test.cpp
+    fabric_endpoint_test.cpp
+    canonical_line_freshness_test.cpp
     legacy_page_table_cache_test.cpp
     config_test.cpp
+    rj_vm_config_test.cpp
     checkpoint_restore_errors_test.cpp
+    cdna_integer_arith_test.cpp
     rj_arith_policy_test.cpp
     rj_arith_config_test.cpp
     rj_arith_bridge_test.cpp
@@ -469,6 +517,7 @@ add_executable(
     mes_engine_test.cpp
     aql_packet_processor_test.cpp
     pm4_packet_processor_test.cpp
+    pm4_data_transfer_test.cpp
     packet_processor_contract_test.cpp
     pm4_compute_queue_test.cpp
     sdma_queue_scheduler_test.cpp
@@ -498,6 +547,7 @@ add_executable(
     simdojo_sim_test.cpp
     simdojo_pipe_latch_test.cpp
     simdojo_issue_queue_test.cpp
+    pci_bar_address_decoder_test.cpp
     partitioning_test.cpp
     simulated_kfd_test.cpp
     kfd_events_test.cpp
@@ -627,8 +677,8 @@ add_executable(
     util_simd_test.cpp
     v_add_simd_benchmark.cpp
     mfma_simd_benchmark.cpp
-    smfmac_simd_benchmark.cpp
     wmma_simd_benchmark.cpp
+    smfmac_simd_benchmark.cpp
     swmmac_k64_simd_benchmark.cpp
     swmmac_k128_simd_benchmark.cpp
     simd_correctness/simd_coverage_test.cpp
@@ -687,6 +737,7 @@ add_executable(
     execution_plugin_register_test.cpp
     execution_plugin_memory_test.cpp
     execution_plugin_race_test.cpp
+    race_report_test.cpp
     plugin_config_resolver_test.cpp
     plugin_loader_test.cpp
     race-detector/race_detector_counter_capacity_tests.cpp
@@ -767,9 +818,7 @@ endif()
 if(RJ_ENABLE_EXPENSIVE_CHECKS)
     target_sources(
         rocjitsu_tests
-        PRIVATE
-            simd_correctness/mfma_simd_exact_test.cpp
-            simd_correctness/wmma_simd_exact_test.cpp
+        PRIVATE simd_correctness/mfma_simd_exact_test.cpp
     )
 endif()
 target_link_libraries(
@@ -839,11 +888,31 @@ set(_rj_idle_wakeup_cases
     AsyncCausalityTest.StaleWakeDoesNotHideConcurrentPublication
     AsyncCausalityTest.QuiescentPublicationsToEveryPartitionMakeProgress
 )
+# Linux accounts SCM_RIGHTS descriptors in flight per UID, but compares that
+# count with the sender's RLIMIT_NOFILE. A sibling test can exhaust the low
+# limit in these fixtures before their own descriptor-pressure exercise starts.
+set(_rj_low_nofile_cases
+    MemoryBackingDeathTest.ClosesInheritedDescriptorsAboveLoweredHardLimit
+    MemoryBackingDeathTest.MetadataBatchPreservesContentsWithFewDescriptors
+    MemoryBackingDeathTest.MetadataBatchReportsIndividualFileErrors
+)
+set(_rj_pm4_interrupt_cases
+    KfdIoctlCdna5Test.Pm4InterruptSignalsAnUnmarkedNamedEvent
+    KfdTargets/KfdNativePm4Test.ReleaseInterruptUsesContextAndMarkedMailboxes/gfx1100
+    KfdTargets/KfdNativePm4Test.ReleaseInterruptUsesContextAndMarkedMailboxes/gfx1201
+    KfdTargets/KfdNativePm4Test.ReleaseInterruptUsesContextAndMarkedMailboxes/gfx1151
+)
 # Exclude exactly the cases registered below, so future cases still participate
-# in normal discovery until they receive an explicit timeout registration.
+# in normal discovery until they receive an explicit registration.
 set(_rj_gtest_exclusions
     "-*Benchmark*:*RequestExitWakesAllPartitions*:MatrixCoexecutionTest.SharedPoolMakesProgressUnderConcurrentHandoffs:*DispatchedWaitSurvivesAConcurrentFinalClose*:*EffectiveConfigTest.ReadsNativeLaunchConfigHandoff:*EffectiveConfigTest.ReadsSelectedNodeLaunchConfigHandoff"
 )
+foreach(_low_nofile_case IN LISTS _rj_low_nofile_cases)
+    string(APPEND _rj_gtest_exclusions ":${_low_nofile_case}")
+endforeach()
+foreach(_pm4_interrupt_case IN LISTS _rj_pm4_interrupt_cases)
+    string(APPEND _rj_gtest_exclusions ":${_pm4_interrupt_case}")
+endforeach()
 foreach(_idle_wakeup_case IN LISTS _rj_idle_wakeup_cases)
     string(APPEND _rj_gtest_exclusions ":${_idle_wakeup_case}")
 endforeach()
@@ -853,6 +922,96 @@ foreach(_l2_mutex_case IN LISTS _rj_l2_mutex_cases)
         ":L2MaintenanceMutexTest.${_l2_mutex_case}"
     )
 endforeach()
+if(RJ_ENABLE_TSAN)
+    # These KFD alias and mapping cases can enter scoped maintenance. The
+    # one-page IPC-import mmap reaches the ordinary mapping drain on a single
+    # gfx950 GPU. Keep exact, bounded TSan cases for lock-order regressions.
+    set(_rj_tsan_scoped_cases
+        KfdIoctlTest.FixedAllocationRemapPublishesDirtyAliasAndRetries
+        Architecture/KfdPreparedSdmaTest.FencePublishesDirtyPromotedCanonicalAlias/Gfx1250
+        Architecture/KfdPreparedSdmaTest.FencePublishesDirtyPromotedCanonicalAlias/Gfx950
+        KfdCdna5PeerBindingTest.ControlledOwnerSdmaCopyAndFillRefreshCachedRequester
+        KfdCdna5PeerClientMappingTest.ControlledOwnerSdmaCopyFromPrivateGttPreservesDisjointDirtyLine
+        KfdCdna5PeerBindingTest.ControlledOwnerSdmaWriteAndFillPreserveDisjointDirtyLine
+        KfdCdna5PeerBindingTest.ControlledOwnerTensorDmaStoresRefreshCachedRequester
+        KfdCdna5PeerBindingTest.ControlledRequesterVectorStoreRefreshesCachedPeerLine
+        KfdCdna5PeerBindingTest.ProductionAqlTensorStoreRefreshesCachedRequester
+        KfdIoctlTest.IpcPromotionPublishesDirtyLocalL2AndMscBeforeCanonicalAlias
+        KfdIoctlTest.IpcPromotionRetriesBeforeAndAfterLocalWriteback
+        KfdIoctlTest.IpcPromotionWaitsForLocalIngressBeforeChangingPolicy
+        KfdIoctlTest.IpcVramGrantLeasesCanonicalBytesAcrossVaReuseAndClose
+        KfdIoctlTest.MunmapWaitsForInFlightFixedAllocationMmap
+        KfdIoctlTest.UncachedVramExportKeepsUcPolicyAcrossUnmapAndRemap
+        KfdMissingPeerRouteTest.PublicPeerMapRejectsAbsentSameNodeRouteBeforePublishingGrant
+        KfdOwnerNoPeerRouteTest.ControlledOwnerWriteUsesEndpointWithoutPeerRoute
+        KfdPeerBindingTest.AdmittedPeerWriteDrainsBeforeRequesterUnmap
+        KfdPeerBindingTest.CApiCloseReportsFailureAndRetainsCheckedDestroy
+        KfdPeerClientMappingTest.CanonicalFreeBlocksImportedAliasPublicationUntilRetirement
+        KfdPeerBindingTest.CanonicalFreeCloseDoesNotBlockOrdinaryGttRetirement
+        KfdPeerBindingTest.CanonicalOwnerCuIngressRetriesAndRechecksLiveBinding
+        KfdPeerBindingTest.CanonicalOwnerSdmaWriteRetriesClosedIngressAndNewAliasGeneration
+        KfdPeerBindingTest.CloseAllRetainsAndRetriesFailedProcessClose
+        KfdPeerBindingTest.CloseFlushesOpenDirtyAliasOfPreclaimPendingProcess
+        KfdPeerBindingTest.ConcurrentProcessUnmapWaitsForExclusiveCloseClaim
+        KfdPeerBindingTest.ControlledBackingRejectsDmabufAliasesAndSurvivesIpcReexport
+        KfdPeerBindingTest.ControlledOwnerCuStoreUsesLocalEffect
+        KfdPeerBindingTest.ControlledOwnerWritePreservesDisjointDirtyLocalLine
+        KfdPeerBindingTest.ControlledOwnerWriteUsesSelectedLocalEffectForCanonicalAliases
+        KfdPeerBindingTest.ControlledPeerCacheHitSurvivesRefusedOwnerDirtyWriteback
+        KfdPeerBindingTest.ControlledRequesterCuStoreRefreshesCachedPeerLine
+        KfdPeerBindingTest.ControlledRequesterWriteRetriesBusyCanonicalAlias
+        KfdPeerBindingTest.CuScalarAndVectorPeerReadsReuseRequesterCache
+        KfdPeerBindingTest.FailedCloseKeepsOtherDirtyProcessResolverVisible
+        KfdPeerBindingTest.FreeAdoptsFailedUnmapAndPublishesItsDirtyRequesterByte
+        KfdPeerClientMappingTest.FreeAndCloseSettleFailedOrdinaryMunmap
+        KfdPeerBindingTest.FreeDiscardsAbandonedFailedUnmapGeneration
+        KfdPeerBindingTest.FreeImportedAllocationDrainsItsAliasesButRetainsSourceBacking
+        KfdPeerBindingTest.FreePublishesDirtyOwnerAndRequesterBytesBeforeRetirement
+        KfdPeerBindingTest.FreeRefusesOverlappingDirtyWritersInRetiringBatch
+        KfdPeerBindingTest.FreeRetriesAfterFinalGrantPublicationFailure
+        KfdPeerClientMappingTest.FreeRetriesClosedAliasBatchAfterGrantPublicationFailure
+        KfdPeerBindingTest.FreeRetriesClosedBatchAfterPreMaintenanceFailure
+        KfdPeerBindingTest.FreeWaitsForEveryCanonicalAliasPermitBeforeRetiringBacking
+        KfdPeerBindingTest.ImportedPeerAliasCopiesBothDirectionsThroughKfdSdmaQueue
+        KfdPeerBindingTest.ImportedPeerFreeAndVaReuseRejectQueuedWriteWithoutEffect
+        KfdPeerBindingTest.ImportedPeerRemainsLiveAfterExporterFreeAndClose
+        KfdPeerBindingTest.IpcExportPublishesDirtyOwnerBytesBeforeUncachedPeerAlias
+        KfdPeerBindingTest.LastAliasUnmapPublishesDirtyRequesterLineBeforeRetirement
+        KfdPeerBindingTest.LivePeerEffectSelectsDistinctVaAliasesWithoutFlushingDirtySibling
+        KfdPeerBindingTest.MixedLocalAndUcPeerRequestsKeepRequesterCacheSemantics
+        KfdPeerClientMappingTest.OrdinaryMunmapAndMmapDrainEveryLiveAlias
+        KfdPeerClientMappingTest.OrdinaryMunmapPublishesDirtyRequesterByteAndRetries
+        KfdPeerBindingTest.PreparedCanonicalWritebackPermitDrainsBeforeUnmapPublication
+        KfdPeerBindingTest.PreparedCanonicalWritebackPinsRawGrantAndExactVmGate
+        KfdPeerBindingTest.PreparedCanonicalWritebackRejectsIncompleteRequesterPte
+        KfdPeerBindingTest.ProcessClosePublishesDirtyRequesterLineBeforeRetirement
+        KfdPeerBindingTest.ProcessCloseSettlesFailedFreeAliasBatch
+        KfdPeerBindingTest.ProcessCloseSettlesFailedUnmapGeneration
+        KfdPeerBindingTest.ProcessCloseWaitsForImportedOwnerAndRequesterAliasPermits
+        KfdPeerBindingTest.ProductionAqlCompletionRetriesAfterSelectedPeerWriteback
+        KfdPeerBindingTest.ProductionProviderPublishesTwoDirtyPeerRunsBeforeFabricRead
+        KfdPeerBindingTest.ProductionSdmaCopiesBetweenLocalAndPeerBacking
+        KfdPeerBindingTest.PublicPeerMapAdmitsImportedAliasAndUnmapRejectsQueuedWrite
+        KfdPeerBindingTest.PublicPeerMapAndUnmapKeepOrderedPrefixAcrossBackingRetry
+        KfdPeerBindingTest.QueuedPeerReadRejectsIncompleteRequesterHostExtent
+        KfdPeerBindingTest.QueuedPeerWriteRejectsRetiredAndReboundRequesterGrant
+        KfdPeerBindingTest.QueuedSameLinePeerWriteFollowsFirstEffect
+        KfdPeerBindingTest.RoutesOnlyGrantedLeasedPeerChunksAndRetainsPreparedBacking
+        KfdPeerBindingTest.ScopedMaintenanceRejectsOmittedDirtyImportedAlias
+        KfdPeerBindingTest.UnmapPreservesUnrelatedDirtyCanonicalLine
+        KfdPeerBindingTest.UnmapRetriesClosedAliasAfterPreMaintenanceFailure
+        KfdPeerClientMappingTest.UnmapRetriesClosedGenerationAfterPublicationFailure
+        KfdPeerBindingTest.UnmapRetryAfterFinalMaintenanceDoesNotWriteBackTwice
+        KfdPeerBindingTest.UnmapWaitsForExactAliasIngressBeforeRetiringGrant
+        KfdPeerBindingTest.UnrelatedDrainCannotPublishControlledDirtyLine
+        KfdTwoRequesterBindingTest.CanonicalAliasSnapshotFollowsGpuGrantsAndBackingLifetime
+        KfdTwoRequesterBindingTest.PublicPeerMapsRemainIndependentAcrossRequesterUnmap
+        SimulatedKfdTest.IpcImportRetainsBackingAcrossViewAndReleasesItOnFree
+    )
+    foreach(_rj_tsan_case IN LISTS _rj_tsan_scoped_cases)
+        string(APPEND _rj_gtest_exclusions ":${_rj_tsan_case}")
+    endforeach()
+endif()
 
 # Benchmarks are timing tools, not correctness tests; keep them out of the
 # default ctest run (invoke them directly via
@@ -866,6 +1025,62 @@ if(RJ_INSTALL_TESTS)
         "include(\"rocjitsu_tests.cmake\")\n"
     )
 endif()
+
+if(RJ_ENABLE_TSAN)
+    # Mirror each selected case in both CTest trees without changing its
+    # GoogleTest name or grouping unrelated tests under one process. The
+    # wrapper rejects a stale filter while preserving a nonzero sanitizer
+    # exit status; PASS_REGULAR_EXPRESSION would override that status.
+    foreach(_rj_tsan_case IN LISTS _rj_tsan_scoped_cases)
+        rj_add_test(
+            NAME "${_rj_tsan_case}"
+            COMMAND
+                ${CMAKE_COMMAND}
+                "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_tests>"
+                "-DTEST_FILTER=${_rj_tsan_case}"
+                -P
+                "${PROJECT_SOURCE_DIR}/cmake/rj_run_exact_gtest.cmake"
+            TIMEOUT 120
+            INSTALL_COMMAND
+                "cmake"
+                "-DTEST_EXECUTABLE=bin/rocjitsu_tests"
+                "-DTEST_FILTER=${_rj_tsan_case}"
+                -P
+                "rj_run_exact_gtest.cmake"
+        )
+    endforeach()
+endif()
+
+# Keep the low-limit senders exclusive in both build-tree and installed CTest
+# runs. The other fixtures exhaust open/receive slots or restore their limit
+# before sending descriptors; they do not need this UID-wide exclusion.
+foreach(_low_nofile_case IN LISTS _rj_low_nofile_cases)
+    rj_add_test(
+        NAME "${_low_nofile_case}"
+        COMMAND
+            $<TARGET_FILE:rocjitsu_tests>
+            "--gtest_filter=${_low_nofile_case}"
+        RUN_SERIAL
+        INSTALL_COMMAND
+            "bin/rocjitsu_tests"
+            "--gtest_filter=${_low_nofile_case}"
+    )
+endforeach()
+
+# Native queue progress is asynchronous; bound a lost doorbell or stalled
+# retirement in the outer harness, including installed tests.
+foreach(_pm4_interrupt_case IN LISTS _rj_pm4_interrupt_cases)
+    rj_add_test(
+        NAME "${_pm4_interrupt_case}"
+        COMMAND
+            $<TARGET_FILE:rocjitsu_tests>
+            "--gtest_filter=${_pm4_interrupt_case}"
+        TIMEOUT 30
+        INSTALL_COMMAND
+            "bin/rocjitsu_tests"
+            "--gtest_filter=${_pm4_interrupt_case}"
+    )
+endforeach()
 
 # Bound worker joins in the idle notification and CPU-use regressions.
 # Register explicitly so build-tree and installed tests have the same timeout.
@@ -1088,7 +1303,11 @@ if(RJ_BUILD_CONSAN_ANALYZER)
 endif()
 
 # Host-only checked anchor regressions use model ISA providers.
-add_executable(rocjitsu_text_edit_tests patch/checked_text_edits_test.cpp)
+add_executable(
+    rocjitsu_text_edit_tests
+    patch/checked_text_edits_test.cpp
+    patch/bi_edit_safety_test.cpp
+)
 target_include_directories(
     rocjitsu_text_edit_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -1217,6 +1436,37 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
     rj_configure_target(queue_registration_allocation_failure_test PRIVATE_INCLUDES WARNINGS)
     rj_add_gtest_tests(queue_registration_allocation_failure_test)
+
+    add_executable(
+        kfd_mmap_allocation_failure_test
+        kfd_mmap_allocation_failure_test.cpp
+    )
+    target_link_libraries(
+        kfd_mmap_allocation_failure_test
+        PRIVATE
+            ${RJ_OBJECT_LIBS}
+            util
+            flatbuffers
+            Threads::Threads
+            GTest::gtest_main
+    )
+    rj_configure_target(kfd_mmap_allocation_failure_test TEST)
+    rj_add_gtest_tests(kfd_mmap_allocation_failure_test)
+    if(RJ_INSTALL_TESTS)
+        file(
+            APPEND "${RJ_INSTALL_CTEST_FILE}"
+            "include(\"kfd_mmap_allocation_failure_test.cmake\")\n"
+        )
+    endif()
+    rj_add_test(
+        NAME KfdMmapAllocationFailureTest.FixedDoorbellReplacementPublishesOnceAndRetries.token
+        COMMAND $<TARGET_FILE:kfd_mmap_allocation_failure_test>
+            --gtest_filter=KfdMmapAllocationFailureTest.FixedDoorbellReplacementPublishesOnceAndRetries
+        ENVIRONMENT "RJ_TEST_FORCE_TOKEN_BACKING=1"
+        INSTALL_COMMAND "bin/kfd_mmap_allocation_failure_test"
+            --gtest_filter=KfdMmapAllocationFailureTest.FixedDoorbellReplacementPublishesOnceAndRetries
+        INSTALL_ENVIRONMENT "RJ_TEST_FORCE_TOKEN_BACKING=1"
+    )
 
     # Native dispatch must extract both the relative tables and their factories
     # from a static archive, including when the C++ objects use LTO.
@@ -1355,8 +1605,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     if(HAS_GFX1250_DBT_FIXTURE)
         rj_add_test_path(
             gfx1250_b0_to_a0_library_test
-            GFX1250_B0_TO_A0_FIXTURE
-            "${KERNEL_OUTPUT_DIR}/relocation_function_table_dispatch_gfx1250.hsaco"
+            KERNEL_DIR
+            "${KERNEL_OUTPUT_DIR}"
         )
         add_dependencies(
             gfx1250_b0_to_a0_library_test
@@ -1368,7 +1618,30 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         PRIVATE_INCLUDES
         WARNINGS
     )
+    # Test the translator built or installed alongside this binary even when
+    # LD_LIBRARY_PATH points to an SDK that provides the same SONAME.
+    _rj_path_from_installed_test_bin(_translator_lib "${CMAKE_INSTALL_LIBDIR}"
+        "$<TARGET_SONAME_FILE_NAME:rocjitsu_gfx1250_b0_to_a0>"
+    )
+    cmake_path(GET _translator_lib PARENT_PATH _translator_rpath)
+    if(NOT IS_ABSOLUTE "${_translator_rpath}")
+        set(_translator_rpath "$ORIGIN/${_translator_rpath}")
+    endif()
+    set_target_properties(
+        gfx1250_b0_to_a0_library_test
+        PROPERTIES INSTALL_RPATH "${_translator_rpath}"
+    )
+    target_link_options(
+        gfx1250_b0_to_a0_library_test
+        PRIVATE "LINKER:--disable-new-dtags"
+    )
     rj_add_gtest_tests(gfx1250_b0_to_a0_library_test)
+    if(RJ_INSTALL_TESTS)
+        file(
+            APPEND "${RJ_INSTALL_CTEST_FILE}"
+            "include(\"gfx1250_b0_to_a0_library_test.cmake\")\n"
+        )
+    endif()
     # Checked on the translator rather than the hook. The hook used to link the
     # translator as a static archive and so carried the model code itself; now it
     # loads a shared object, and the boundary this guards -- model in, execution
@@ -2237,6 +2510,36 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             $<TARGET_FILE:register_observer_probe>
     )
 
+    # Compile as C and link only the shared library's public ABI.
+    add_executable(vm_config_c_api_test vm_config_c_api_test.c)
+    target_link_libraries(vm_config_c_api_test PRIVATE rocjitsu_shared)
+    if(RJ_ENABLE_UBSAN AND RJ_UBSAN_VPTR)
+        # Compile the consumer as C, but link the C++ runtime needed by the
+        # instrumented library's vptr checks.
+        set_target_properties(
+            vm_config_c_api_test
+            PROPERTIES LINKER_LANGUAGE CXX
+        )
+    endif()
+    target_include_directories(
+        vm_config_c_api_test
+        PRIVATE ${PROJECT_SOURCE_DIR}/lib/rocjitsu/include
+    )
+    rj_configure_target(vm_config_c_api_test WARNINGS)
+    add_test(
+        NAME VmConfigCApi
+        COMMAND
+            vm_config_c_api_test
+            ${CMAKE_CURRENT_SOURCE_DIR}/race-detector/race_test_config.json
+    )
+    # An installed ROCm SDK may provide an older library with the same SONAME.
+    set_tests_properties(
+        VmConfigCApi
+        PROPERTIES
+            ENVIRONMENT_MODIFICATION
+                "LD_LIBRARY_PATH=path_list_prepend:$<TARGET_FILE_DIR:rocjitsu_shared>"
+    )
+
     # Resolve only public C symbols through RTLD_LOCAL. Linking simulator
     # objects here would hide whether an ordinary embedder can map its handles.
     add_executable(vm_shared_memory_api_test vm_shared_memory_api_test.cpp)
@@ -2318,7 +2621,12 @@ target_link_libraries(
     interposer_dup_test
     PRIVATE GTest::gtest_main ${CMAKE_DL_LIBS}
 )
-add_dependencies(interposer_dup_test rocjitsu_bin rocjitsu_shared)
+add_dependencies(
+    interposer_dup_test
+    rocjitsu_bin
+    rocjitsu_shared
+    rocjitsu_test_bin
+)
 if(RJ_INSTALL_TESTS)
     rj_install_test_target(interposer_dup_test)
 endif()
@@ -2363,6 +2671,17 @@ foreach(_config IN ITEMS gfx1100_w7900 gfx1201_r9700 gfx950_mi350x_kmd_2gpu)
     endforeach()
 endforeach()
 
+set(_rj_maintenance_interposer_cases
+    FinalKfdCloseReportsDeferredWritebackFailure
+    FinalDrmCloseReportsDeferredWritebackFailure
+    FinalKfdCloseWaitsForSnapshotOnWritebackFailure
+    FinalDrmCloseWaitsForSnapshotOnWritebackFailure
+)
+set(_rj_hook_interposer_cases
+    LiveSvmDenialEndsOnHostVmaReplacement
+    ${_rj_maintenance_interposer_cases}
+)
+
 function(rj_add_interposer_test_suite _suite)
     cmake_parse_arguments(
         PARSE_ARGV
@@ -2382,26 +2701,36 @@ function(rj_add_interposer_test_suite _suite)
     string(APPEND _suffix "${ARG_SUFFIX}")
     get_filename_component(_config_name "${_config}" NAME)
     foreach(_case IN LISTS ARG_UNPARSED_ARGUMENTS)
+        set(_launcher "${RJ_CLI}")
+        set(_case_env ${ARG_ENVIRONMENT})
+        set(_installed_command
+            "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+            "--config"
+            "\${RJ_INSTALLED_CONFIG_DIR}/${_config_name}"
+            "--"
+            "bin/interposer_dup_test"
+            "--gtest_filter=${_suite}.${_case}"
+        )
+        if(_case IN_LIST _rj_hook_interposer_cases)
+            # These cases inspect interposer internals. The test CLI
+            # selects the non-installed library with those hooks compiled in.
+            set(_launcher "$<TARGET_FILE:rocjitsu_test_bin>")
+            set(_installed_command)
+        endif()
         rj_add_test(
             NAME "${_suite}.${_case}${_suffix}"
             COMMAND
-                ${ARG_PREFIX} ${RJ_CLI}
+                ${ARG_PREFIX} ${_launcher}
                 --config
                 ${_config}
                 --
                 $<TARGET_FILE:interposer_dup_test>
                 "--gtest_filter=${_suite}.${_case}"
-            ENVIRONMENT ${ARG_ENVIRONMENT}
+            ENVIRONMENT ${_case_env}
             WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
             SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
-            INSTALL_COMMAND
-                ${ARG_PREFIX} "\${RJ_INSTALLED_BINDIR}/rocjitsu"
-                "--config"
-                "\${RJ_INSTALLED_CONFIG_DIR}/${_config_name}"
-                "--"
-                "bin/interposer_dup_test"
-                "--gtest_filter=${_suite}.${_case}"
-            INSTALL_ENVIRONMENT ${ARG_ENVIRONMENT}
+            INSTALL_COMMAND ${_installed_command}
+            INSTALL_ENVIRONMENT ${_case_env}
         )
     endforeach()
     if(_suite MATCHES "^Interposer(Gem|Drm)Test$" AND NOT ARG_SUFFIX)
@@ -2417,6 +2746,12 @@ endfunction()
 set(_rj_interposer_dup_tests
     ConstructorPreservesDescriptorLimit
     ConstructorPreparesTopologyBeforeFileLimitDrops
+    TrackedMunmapFailureUsesLibcErrno
+    LiveSvmDenialEndsOnHostVmaReplacement
+    FinalKfdCloseReportsDeferredWritebackFailure
+    FinalDrmCloseReportsDeferredWritebackFailure
+    FinalKfdCloseWaitsForSnapshotOnWritebackFailure
+    FinalDrmCloseWaitsForSnapshotOnWritebackFailure
     DupKeepsKfdRoutingAfterPrimaryClose
     FcntlDupfdKeepsKfdRouting
     Dup2OverPrimaryInvalidatesKfdIdentity
@@ -2450,6 +2785,7 @@ set(_rj_interposer_drm_tests
     DupRacingTheCloseOfAPrimeExportKeepsTheBoState
     ExportOfAUserptrBufferFailsAndLeavesTheCallersMemoryAlone
     GemMappingsFollowGpuCoreDumpPolicy
+    UserptrDmabufAndIpcExportsFailWithoutChangingCallerMemory
     GemMetadataRoundTripsOnABuffer
     GemOpReportsTheCreateSize
     GemOpSetPlacementChangesTheReportedDomain
@@ -2459,13 +2795,14 @@ set(_rj_interposer_drm_tests
     KfdExportKeepsItsMetadataAfterTheAllocationIsFreed
     KfdImportsRetainMetadataAfterTheOriginalOwnerCloses
     MappingFlagsMatchBackingCapabilities
+    MissingMemfdRoutesRenderNodeIoctls
     OpensWithinCurrentDescriptorLimit
     PrimeHandleToFdReturnsTheBuffer
     PrimeImportKeepsTheBoStateAfterTheHandleCloses
     PrimeImportSharesTheBufferAndItsMetadata
     PrimaryNodePathHasCharacterDeviceMetadata
     RenderNodePathMetadataMatchesDescriptor
-    TimestampUsesAdvertisedNanosecondClock
+    TimestampUsesAdvertisedDeviceClock
 )
 set(_rj_interposer_gem_tests
     LowAddressMappingHonorsMap32Bit
@@ -2656,6 +2993,17 @@ foreach(
         CONFIG "${CMAKE_SOURCE_DIR}/configs/${_config}.json"
     )
 endforeach()
+
+# The gfx1100 GEM_CREATE fixture is not available on all DRM-less test hosts.
+rj_add_interposer_test_suite(
+    InterposerPm4Test
+    CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx1201_r9700.json"
+    KfdResidentVaRejectsGemMapAndReplace
+    GemResidentVaRejectsCallerVaKfdAllocation
+    GemResidentVaRejectsCallerVaKfdDmabufImport
+    KfdGrantWithoutPteRejectsGemMap
+    SameBoPrimeMapRejectsActiveKfdVaAndAllowsDisjointVa
+)
 
 rj_add_interposer_test_suite(
     InterposerFreshForkTest
@@ -3473,6 +3821,25 @@ if(HSA_RUNTIME64)
             TIMEOUT 300
         )
 
+        register_hsa_dbi_nop_asm_case(
+            Cdna2
+            Hardware
+            RejectsAppendedCodePastFileBackedLoad
+            SIM
+            CONFIG ${RJ_CDNA2_KMD_CONFIG}
+            CONFIG_NAME ${RJ_CDNA2_KMD_CONFIG_NAME}
+            TIMEOUT 300
+        )
+        register_hsa_dbi_nop_asm_case(
+            Cdna2
+            Hardware
+            AcceptsAppendedCodeAtFileBackedLoadEnd
+            SIM
+            CONFIG ${RJ_CDNA2_KMD_CONFIG}
+            CONFIG_NAME ${RJ_CDNA2_KMD_CONFIG_NAME}
+            TIMEOUT 300
+        )
+
         if(HAS_CDNA2_GPU)
             # Hardware-gated tests. The two that dispatch get an explicit
             # timeout; the load+validate one runs quickly enough for the
@@ -4037,6 +4404,7 @@ if(RJ_ENABLE_HIP_TESTS)
     rj_hip_runtime_supports_arch(RJ_HIP_RUNTIME_SUPPORTS_GFX950 "gfx950")
     rj_hip_runtime_supports_arch(RJ_HIP_RUNTIME_SUPPORTS_GFX942 "gfx942")
     rj_hip_runtime_supports_arch(RJ_HIP_RUNTIME_SUPPORTS_GFX1250 "gfx1250")
+    rj_hip_runtime_supports_arch(RJ_HIP_RUNTIME_SUPPORTS_GFX1251 "gfx1251")
 endif()
 
 if(RJ_ENABLE_HIP_TESTS)
@@ -4239,6 +4607,11 @@ if(RJ_ENABLE_HIP_TESTS)
             "HipMemcpyTest.RoundTripInt"
             CONFIG ${RJ_HIP_TEST_CONFIG}
         )
+        rj_add_hip_test_case(
+            hip_memcpy_test
+            "HipMemcpyTest.VmmShareableAliasesRoundTrip"
+            CONFIG ${RJ_HIP_TEST_CONFIG}
+        )
         # These cases reach ROCr's pinned SDMA blit, and both sanitizers
         # report that library rather than rocjitsu. TSan sees the blit's memcpy
         # into the ring but not the release store on the doorbell that follows
@@ -4310,9 +4683,15 @@ if(RJ_ENABLE_HIP_TESTS)
         )
         _rj_path_from_installed_test_bin(
             _rj_installed_preload_lib
-            "${CMAKE_INSTALL_LIBDIR}"
-            "${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu${CMAKE_SHARED_LIBRARY_SUFFIX}"
+            "${RJ_INSTALL_TEST_BIN_DIR}"
+            "${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu_test_interposer${CMAKE_SHARED_LIBRARY_SUFFIX}"
         )
+        if(RJ_INSTALL_TESTS)
+            install(
+                TARGETS rocjitsu_test_interposer
+                LIBRARY DESTINATION ${RJ_INSTALL_TEST_BIN_DIR}
+            )
+        endif()
 
         # Daemon-mode plugin coverage uses a placeholder sink directory that
         # the test rewrites to a private runtime path.
@@ -4344,7 +4723,7 @@ if(RJ_ENABLE_HIP_TESTS)
         rj_add_test_path(daemon_test RJ_DAEMON_CONFIG "${RJ_HIP_TEST_CONFIG}")
         rj_add_test_path(daemon_test RJ_DAEMON_CONFIG_2GPU "${RJ_HIP_TEST_2GPU_CONFIG}")
         rj_add_test_path(daemon_test RJ_DAEMON_SANITIZER_PRELOAD "${RJ_SANITIZER_PRELOAD_PREFIX}")
-        rj_add_test_path(daemon_test RJ_PRELOAD_LIB "$<TARGET_FILE:rocjitsu_shared>")
+        rj_add_test_path(daemon_test RJ_PRELOAD_LIB "$<TARGET_FILE:rocjitsu_test_interposer>")
         rj_add_test_path(daemon_test RJ_HIP_VECTOR_ADD_BIN "${CMAKE_CURRENT_BINARY_DIR}/hip_vector_add_test")
         rj_add_test_path(daemon_test RJ_HIP_MEMCPY_BIN "${CMAKE_CURRENT_BINARY_DIR}/hip_memcpy_test")
         rj_add_test_path(daemon_test RJ_HIP_RCCL_BIN "${CMAKE_CURRENT_BINARY_DIR}/hip_rccl_test")
@@ -4365,6 +4744,7 @@ if(RJ_ENABLE_HIP_TESTS)
         add_dependencies(
             daemon_test
             rocjitsu_bin
+            rocjitsu_test_interposer
             hip_vector_add_test_target
             hip_memcpy_test_target
             interposer_dup_test
@@ -4377,8 +4757,10 @@ if(RJ_ENABLE_HIP_TESTS)
             DaemonTest.HipVectorAdd
             DaemonTest.HipMemcpyRoundTripFloat
             DaemonTest.HipMemcpyRoundTripInt
+            DaemonTest.HipVmmShareableAliasesRoundTrip
             DaemonTest.HipMemcpyDeviceToDevice
             DaemonTest.TwoIndependentClients
+            DaemonTest.TwoIndependentVmmClients
         )
         set(RJ_DAEMON_FAILURE_TESTS)
         if(TARGET hip_instruction_failure_test_target)
@@ -4403,6 +4785,12 @@ if(RJ_ENABLE_HIP_TESTS)
             DaemonTest.InterposerDupKeepsRoutingAfterPrimaryCloseRemote
             DaemonTest.InterposerDup2OverPrimaryInvalidatesRemote
             DaemonTest.InterposerProcMapsNamesRemoteKfdMarker
+            DaemonTest.ClientMunmapClearsOnlyReplacedSvmPolicy
+            DaemonTest.RemotePrimeImportRetainsExportedBacking
+            TokenBackingDaemonTest.RemotePrimeImportRetainsExportedBacking
+            DaemonTest.RemoteGemVaPartialClearKeepsRemainingRange
+            DaemonTest.RemoteGemVaRejectedReplacePreservesOriginal
+            DaemonTest.RemoteGemVaReplacePreservesOriginalTail
         )
         # ROCr leaks also affect masked LDS reuse in daemon mode. Its TSan
         # case passes, so keep that coverage as well as regular builds.
@@ -4486,7 +4874,12 @@ if(RJ_ENABLE_HIP_TESTS)
 
         # --- RCCL collective test ---
         if(RCCL_LIB AND RJ_HIP_RUNTIME_SUPPORTS_GFX950)
-            rj_add_hip_test(hip_rccl_test ARCH gfx950 EXTRA_LIBS ${RCCL_LIB})
+            rj_add_hip_test(
+                hip_rccl_test
+                ARCH gfx950
+                DEPENDENCIES ${CMAKE_CURRENT_SOURCE_DIR}/rccl_tcp_bootstrap.h
+                EXTRA_LIBS ${RCCL_LIB}
+            )
             add_dependencies(daemon_test hip_rccl_test_target)
             set(RJ_RCCL_TESTS
                 RcclDaemonTest.AllReduce
@@ -4537,6 +4930,17 @@ if(RJ_ENABLE_HIP_TESTS)
         )
     endif()
 
+    if(HAS_GFX1251_DEVICE_KERNELS AND RJ_HIP_RUNTIME_SUPPORTS_GFX1251)
+        rj_add_hip_test(hip_vector_add_gfx1251_test ARCH gfx1251 SOURCE hip_vector_add_test.cpp)
+        rj_add_hip_test_case(
+            hip_vector_add_gfx1251_test
+            "HipVectorAddTest.PackedF64"
+            NAME "HipVectorAddTest.PackedF64.Gfx1251"
+            CONFIG ${PROJECT_SOURCE_DIR}/configs/gfx1251_synthetic.json
+            TIMEOUT 60
+        )
+    endif()
+
     # Build the same numerically checked rank workload for CDNA5 without
     # changing the existing gfx950 daemon fixture or its CTest registrations.
     if(
@@ -4548,6 +4952,7 @@ if(RJ_ENABLE_HIP_TESTS)
             hip_rccl_gfx1250_test
             ARCH gfx1250
             SOURCE hip_rccl_test.cpp
+            DEPENDENCIES ${CMAKE_CURRENT_SOURCE_DIR}/rccl_tcp_bootstrap.h
             EXTRA_LIBS ${RCCL_LIB}
         )
         message(STATUS "gfx1250 RCCL rank binary enabled (found ${RCCL_LIB})")
@@ -4559,6 +4964,10 @@ if(RJ_ENABLE_HIP_TESTS)
     endif()
 
     if(RJ_HIP_RUNTIME_SUPPORTS_GFX950)
+        if(HSA_RUNTIME64)
+            rj_add_hip_test(hip_shader_rtc_test ARCH gfx950 EXTRA_LIBS ${HSA_RUNTIME64})
+            rj_add_hip_test_case(hip_shader_rtc_test "HipShaderRtcTest.AqlKernelReadsTheCalibratedGpuClock")
+        endif()
         rj_add_hip_test(hip_hw_id_test ARCH gfx950)
         rj_add_hip_test_case(
             hip_hw_id_test

@@ -62,6 +62,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vopd.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_address.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/register_modifiers.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -473,20 +474,43 @@ TEST(DecoderSmokeTest, Gfx90aAccumulatorOnlySourcesRequireRegisters) {
   }
 }
 
+TEST(DecoderSmokeTest, Gfx90aRejectsUnassignedImageAndFlatEncodings) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
+  ASSERT_NE(decoder, nullptr);
+  // MIMG bit 0 is bit 7 of the opcode. FLAT bit 15:14 selects the segment,
+  // with separate opcode tables for generic, scratch and global addresses.
+  constexpr std::array valid = {
+      std::array{0xf0000100u, 0x00020000u}, // image_load
+      std::array{0xdd080000u, 0x00000000u}, // flat_atomic_add
+      std::array{0xdd088000u, 0x007f0000u}, // global_atomic_add
+      std::array{0xdc504000u, 0x007f0000u}, // scratch_load_dword
+  };
+  for (const auto &words : valid)
+    EXPECT_TRUE(decoder->decode_window(words).succeeded()) << std::hex << words[0];
+  constexpr std::array invalid = {
+      std::array{0xf0000101u, 0x00020000u}, // unassigned MIMG opcode 128
+      std::array{0xdd084000u, 0x007f0000u}, // scratch has no atomic_add
+      std::array{0xdc50c000u, 0x007f0000u}, // reserved segment 3
+  };
+  for (const auto &words : invalid)
+    EXPECT_TRUE(decoder->decode_window(words).failed()) << std::hex << words[0];
+}
+
 TEST(DecoderSmokeTest, Gfx942ClassifiesTimestampTrapAndDebugBranchBlocks) {
   using amdgpu::ExecutionBlock;
   struct TestCase {
     uint32_t word;
     const char *mnemonic;
     ExecutionBlock block;
+    std::optional<int64_t> direct_offset = std::nullopt;
   };
   constexpr TestCase cases[] = {
       // SMEM-encoded and returned through the scalar memory path.
       {0xC0900000u, "s_memtime", ExecutionBlock::SMEM},
       {0xBF920000u, "s_trap", ExecutionBlock::BRANCH},
       {0xBE801F00u, "s_rfe_b64", ExecutionBlock::BRANCH},
-      // Modelled as never taken, but architecturally a conditional PC update.
-      {0xBF970001u, "s_cbranch_cdbgsys", ExecutionBlock::BRANCH},
+      // STATUS.COND_DBG_SYS controls the signed PC-relative branch.
+      {0xBF970001u, "s_cbranch_cdbgsys", ExecutionBlock::BRANCH, 4},
   };
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
@@ -499,9 +523,8 @@ TEST(DecoderSmokeTest, Gfx942ClassifiesTimestampTrapAndDebugBranchBlocks) {
     EXPECT_TRUE(inst->mnemonic().starts_with(test_case.mnemonic));
     EXPECT_EQ(inst->amdgpu_execution_block(), test_case.block);
     EXPECT_EQ(inst->writes_pc(), test_case.block == ExecutionBlock::BRANCH);
-    // None of these carries a CFG branch flag: s_cbranch_cdbgsys is modelled as
-    // falling through and has no decoded branch offset.
-    EXPECT_FALSE(inst->is_branch());
+    EXPECT_EQ(inst->is_branch(), test_case.direct_offset.has_value());
+    EXPECT_EQ(inst->branch_offset_bytes(), test_case.direct_offset);
   }
 }
 
@@ -806,7 +829,7 @@ TEST(DecoderSmokeTest, Gfx1201ImageDataWidthUsesMaskPackingAndStatus) {
           }
 }
 
-TEST(DecoderSmokeTest, MultiPixelImageLoadsKeepTheirXmlTuple) {
+TEST(DecoderSmokeTest, MultiPixelImageLoadsRetainConservativeDataFootprint) {
   struct TestCase {
     rj_code_arch_t arch;
     uint16_t opcode;
@@ -820,13 +843,28 @@ TEST(DecoderSmokeTest, MultiPixelImageLoadsKeepTheirXmlTuple) {
   for (const auto &tc : cases) {
     SCOPED_TRACE(static_cast<unsigned>(tc.arch));
     SCOPED_TRACE(tc.opcode);
-    const auto words = tc.arch == ROCJITSU_CODE_ARCH_RDNA1
-                           ? rdna1::build_mimg(tc.opcode, {.dmask = 1, .vdata = 8})
-                           : rdna2::build_mimg(tc.opcode, {.dmask = 1, .vdata = 8});
     auto decoder = Decoder::create(tc.arch);
-    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
-    ASSERT_NE(inst, nullptr);
-    EXPECT_EQ(inst->dst_operand(0)->size_bits(), 128);
+    for (uint8_t mask : {1, 5})
+      for (uint8_t d16 : {0, 1})
+        for (uint8_t tfe : {0, 1}) {
+          SCOPED_TRACE(testing::Message()
+                       << "dmask=" << +mask << " d16=" << +d16 << " tfe=" << +tfe);
+          const auto words =
+              tc.arch == ROCJITSU_CODE_ARCH_RDNA1
+                  ? rdna1::build_mimg(tc.opcode,
+                                      {.dmask = mask, .tfe = tfe, .vdata = 8, .d16 = d16})
+                  : rdna2::build_mimg(tc.opcode,
+                                      {.dmask = mask, .tfe = tfe, .vdata = 8, .d16 = d16});
+          auto inst = decoder->decode_window(words);
+          ASSERT_TRUE(inst.succeeded());
+          const auto width = static_cast<uint8_t>(4 + tfe);
+          EXPECT_EQ(inst.value()->dst_operand(0)->size_bits(), width * 32);
+          InstDefUse def_use(*inst.value(), 32);
+          EXPECT_TRUE(def_use.defs.contains({RegClass::VGPR, 8, width}));
+          EXPECT_FALSE(
+              def_use.defs.contains({RegClass::VGPR, static_cast<uint16_t>(8 + width), 1}));
+          EXPECT_TRUE(def_use.has_predicated_def);
+        }
   }
 }
 
@@ -935,6 +973,40 @@ TEST(DecoderSmokeTest, ImageAtomicsSeparatePayloadFromOptionalReturn) {
               EXPECT_EQ(def_use.defs.contains(reg), returns && word < result_words + tfe);
             }
           }
+}
+
+TEST(Cdna1DecodeTest, PackedImageLoadMasksThePayloadBeforeTfeStatus) {
+  struct Case {
+    uint8_t dmask;
+    uint8_t tfe;
+    std::vector<uint8_t> bytes;
+  };
+  const Case cases[] = {
+      {1, 0, {0x3}},
+      {1, 1, {0x3, 0xf}},
+      {7, 0, {0xf, 0x3}},
+      {7, 1, {0xf, 0x3, 0xf}},
+  };
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA1);
+  for (const auto &tc : cases) {
+    SCOPED_TRACE(testing::Message() << "dmask=" << +tc.dmask << " tfe=" << +tc.tfe);
+    const auto words = cdna1::build_mimg(cdna1::kImageLoadMimg,
+                                         {.dmask = tc.dmask, .tfe = tc.tfe, .vdata = 8, .d16 = 1});
+    auto inst = decoder->decode_window(words);
+    ASSERT_TRUE(inst.succeeded());
+    auto dst = inst.value()->dst_operand(0)->to_register_ref();
+    ASSERT_TRUE(dst.has_value());
+    amdgpu::RegisterModifiers modifiers{};
+    inst.value()->amdgpu_register_modifiers(modifiers);
+    std::vector<uint8_t> bytes;
+    amdgpu::for_each_memory_result_range(*dst, modifiers, false,
+                                         [&](RegisterRef range, uint8_t mask) {
+                                           EXPECT_EQ(range.cls, RegClass::VGPR);
+                                           EXPECT_EQ(range.index, 8 + bytes.size());
+                                           bytes.insert(bytes.end(), range.width, mask);
+                                         });
+    EXPECT_EQ(bytes, tc.bytes);
+  }
 }
 
 TEST(DecoderSmokeTest, LegacyImageLoadWidthsUseMaskPackingAndStatus) {
@@ -1106,7 +1178,7 @@ INSTANTIATE_TEST_SUITE_P(
       return name;
     });
 
-TEST(Rdna2DecodeTest, DecodesSplitOpcodes) {
+TEST(Rdna2DecodeTest, DecodesSplitOpcodesAndPromotedRelativeMoves) {
   const struct {
     std::array<uint32_t, 2> words;
     std::string_view mnemonic;
@@ -1118,6 +1190,11 @@ TEST(Rdna2DecodeTest, DecodesSplitOpcodes) {
       {{0xf19c9f01, 0x00000000}, "image_bvh64_intersect_ray", 231},
       {{0xe8a00000, 0x00200000}, "tbuffer_load_format_d16_x", 8},
       {{0xe2000000, 0x00000000}, "buffer_load_format_d16_x", 128},
+      {{0xd5c30000, 0x00000100}, "v_movrels_b32", 451},
+      {{0xd5c40000, 0x00000100}, "v_movrelsd_b32", 452},
+      {{0xd5c80000, 0x00000100}, "v_movrelsd_2_b32", 456},
+      {{0xf4980000, 0xfa000000}, "s_atc_probe", 38},
+      {{0xf49c0000, 0xfa000000}, "s_atc_probe_buffer", 39},
   };
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA2);
   ASSERT_NE(decoder, nullptr);
@@ -1537,6 +1614,10 @@ TEST(RdnaMimgDecodeTest, Gfx10OpcodeHighBitAndReservedFlatSegments) {
     decoded = decoder->decode_window(interp);
     ASSERT_TRUE(decoded.succeeded());
     EXPECT_EQ(decoded.value()->disassemble(), "v_interp_p1_f32_e64 v4, v1, attr0.y");
+    const std::array<uint32_t, 2> relative{0xd5c30002, 0x02010101};
+    decoded = decoder->decode_window(relative);
+    ASSERT_TRUE(decoded.succeeded());
+    EXPECT_EQ(decoded.value()->mnemonic(), "v_movrels_b32");
   }
 }
 
@@ -1614,6 +1695,35 @@ TEST(RdnaMimgDecodeTest, Gfx10NsaDecodesCompleteAndRejectsTruncatedWindows) {
         const std::vector<uint32_t> truncated(encoding.begin(), encoding.begin() + length);
         EXPECT_TRUE(decoder->decode_window(truncated).failed()) << length;
       }
+    }
+  }
+}
+
+TEST(RdnaMimgDecodeTest, Gfx10R128SpellsEightResourceRegistersAndReadsFour) {
+  struct Case {
+    std::array<uint32_t, 2> words;
+    const char *assembly;
+  };
+  // LLVM round-trips both encodings on gfx1010 and gfx1030.
+  constexpr Case cases[] = {
+      {{0xf0008100, 0x00020100}, "image_load v1, v0, s[8:15] dmask:0x1 dim:SQ_RSRC_IMG_1D r128"},
+      {{0xf0808108, 0x00820100},
+       "image_sample v1, v[0:1], s[8:15], s[16:19] dmask:0x1 dim:SQ_RSRC_IMG_2D r128"},
+  };
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    for (const auto &test : cases) {
+      SCOPED_TRACE(testing::Message() << arch << " " << test.assembly);
+      auto decoded = decoder->decode_window(test.words);
+      ASSERT_TRUE(decoded.succeeded());
+      const auto &inst = *decoded.value();
+      EXPECT_EQ(inst.disassemble(), test.assembly);
+      ASSERT_GE(inst.num_src_operands(), 2);
+      EXPECT_EQ(inst.src_operand(1)->size_bits(), 128);
+      InstDefUse def_use(inst, 64);
+      EXPECT_TRUE(def_use.uses.contains({RegClass::SGPR, 8, 4}));
+      EXPECT_FALSE(def_use.uses.contains({RegClass::SGPR, 12, 1}));
     }
   }
 }
@@ -3178,10 +3288,27 @@ TEST(Cdna2DecodeTest, MemoryDisassemblyPreservesInactiveAddressesAndModifiers) {
   struct Case {
     std::array<uint32_t, 2> words;
     std::string_view assembly;
+    std::optional<RegisterRef> image_result = std::nullopt;
+    bool conditional_status = false;
   };
   const Case cases[] = {
       {{0xdd089fff, 0x00660201}, "global_atomic_add v1, v2, flat_scratch offset:-1"},
       {{0xdd089fff, 0x006a0201}, "global_atomic_add v1, v2, vcc offset:-1"},
+      {{0xf0820100, 0x00620501},
+       "image_sample v5, v1, s[8:15], s[12:15] dmask:0x1 lwe",
+       RegisterRef{RegClass::VGPR, 5, 2},
+       true},
+      {{0xf0800100, 0x00400400},
+       "image_sample v4, v0, s[0:7], s[8:11] dmask:0x1",
+       RegisterRef{RegClass::VGPR, 4, 1}},
+      {{0xf0820100, 0x00400400},
+       "image_sample v4, v0, s[0:7], s[8:11] dmask:0x1 lwe",
+       RegisterRef{RegClass::VGPR, 4, 2},
+       true},
+      {{0xf0830300, 0x00400400},
+       "image_sample acc[4:5], v0, s[0:7], s[8:11] dmask:0x3 lwe",
+       RegisterRef{RegClass::ACC_VGPR, 4, 3},
+       true},
       {{0xe0503000, 0x00010100}, "buffer_load_dword v1, v[0:1], s[4:7], s0 idxen offen"},
       {{0xe9783000, 0x00010100},
        "tbuffer_load_format_x v1, v[0:1], s[4:7], s0 format:47 idxen offen"},
@@ -3191,6 +3318,10 @@ TEST(Cdna2DecodeTest, MemoryDisassemblyPreservesInactiveAddressesAndModifiers) {
       {{0xdc704000, 0x00040200}, "scratch_store_dword off, v2, s4"},
       {{0xde508000, 0x027f0002}, "global_load_dword v2, v[2:3], off scc"},
       {{0xdc50a000, 0x007f0002}, "global_load_dword v[2:3], off lds"},
+      {{0xf202f180, 0x80020502},
+       "image_load v5, v2, s[8:15] dmask:0x1 unorm glc slc scc a16 lwe da d16",
+       RegisterRef{RegClass::VGPR, 5, 1}},
+      {{0xf0489100, 0x00020501}, "image_atomic_add v5, v1, s[8:15] dmask:0x1 unorm a16"},
   };
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
@@ -3200,6 +3331,20 @@ TEST(Cdna2DecodeTest, MemoryDisassemblyPreservesInactiveAddressesAndModifiers) {
     auto inst = decoder->decode_window(test.words);
     ASSERT_TRUE(inst.succeeded());
     EXPECT_EQ(inst.value()->disassemble(), test.assembly);
+    if (test.image_result) {
+      const auto result = *test.image_result;
+      EXPECT_EQ(inst.value()->dst_operand(0)->size_bits(), result.width * 32);
+      InstDefUse def_use(*inst.value(), 64);
+      EXPECT_TRUE(def_use.defs.contains(result));
+      const uint16_t end = result.index + result.width;
+      EXPECT_FALSE(def_use.defs.contains({result.cls, end, 1}));
+      if (test.conditional_status) {
+        const RegisterRef status{result.cls, static_cast<uint16_t>(end - 1), 1};
+        EXPECT_EQ(def_use.conditional_vgpr_def, status);
+      } else {
+        EXPECT_FALSE(def_use.conditional_vgpr_def.has_value());
+      }
+    }
   }
 }
 

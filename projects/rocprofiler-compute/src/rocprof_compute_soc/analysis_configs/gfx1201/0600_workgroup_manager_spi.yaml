@@ -1,0 +1,30 @@
+Panel Config:
+  id: 600
+  alias: spi
+  title: Workgroup Manager (SPI)
+  data source:
+  - metric_table:
+      id: 602
+      title: Wave Dispatch Statistics
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Compute Wave Dispatches:
+          avg: SUM(SQ_WAVES_sum) / SUM($denom)
+          min: MIN(SQ_WAVES_sum / $denom)
+          max: MAX(SQ_WAVES_sum / $denom)
+          unit: (Count + $normUnit)
+        Wave Dispatch Rate:
+          avg: SUM(SQ_WAVES_sum) / SUM(GRBM_GUI_ACTIVE)
+          min: MIN(SQ_WAVES_sum / GRBM_GUI_ACTIVE)
+          max: MAX(SQ_WAVES_sum / GRBM_GUI_ACTIVE)
+          unit: Wavefronts per Cycle
+  metrics_description:
+    Compute Wave Dispatches: >-
+      Total wavefronts dispatched (SQ_WAVES_sum).
+    Wave Dispatch Rate: >-
+      Average wavefronts launched per busy cycle.

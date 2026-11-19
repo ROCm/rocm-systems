@@ -95,6 +95,7 @@ public:
     virtual bool               isRegularFile() const noexcept  = 0;
     virtual bool               onExt4Ordered() const noexcept  = 0;
     virtual bool               onXfs() const noexcept          = 0;
+    virtual bool               onNfsRdma() const noexcept      = 0;
 };
 
 class FileMap;
@@ -154,6 +155,10 @@ public:
     /// @return True if the file is on an xfs filesystem, false otherwise
     virtual bool onXfs() const noexcept override;
 
+    /// @brief Whether this file is on NFS using RDMA. Returns false if mountinfo is unavailable.
+    /// @return True if the file is on an NFS filesystem with proto=rdma or proto=rdma6, false otherwise
+    virtual bool onNfsRdma() const noexcept override;
+
     /// @brief Construct a registered file
     /// @param uf An unregistered file
     /// @param k  Key class instance (see passkey.h)
@@ -188,6 +193,9 @@ private:
 
     /// @brief Whether the file is on an xfs filesystem
     bool m_on_xfs;
+
+    /// @brief Whether the file is on an NFS filesystem using RDMA
+    bool m_on_nfs_rdma;
 };
 
 class FileMap {

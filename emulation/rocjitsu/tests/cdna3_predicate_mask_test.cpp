@@ -93,6 +93,23 @@ struct Fixture {
   }
 };
 
+TEST(Cdna3VectorStateTest, ConditionalSdwaPreservesUnselectedBytesAndLanes) {
+  Fixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  fx.wf->write_exec(1);
+  fx.write_vgpr(0, 0, 0x11223344);
+  fx.write_vgpr(1, 0, 0xaabbcc55);
+  fx.write_vgpr(2, 1, 0xdeadbeef);
+  for (uint64_t condition : {0ULL, 1ULL}) {
+    fx.wf->set_vcc(condition);
+    fx.write_vgpr(2, 0, 0xdeadbeef);
+    // v_cndmask_b32 v2, v0, v1; BYTE_1, UNUSED_PRESERVE, DWORD sources.
+    fx.execute({0x000402f9, 0x06061100});
+    EXPECT_EQ(fx.read_vgpr(2, 0), condition ? 0xdead55efU : 0xdead44efU);
+    EXPECT_EQ(fx.read_vgpr(2, 1), 0xdeadbeefU);
+  }
+}
+
 TEST(Cdna3VectorStateTest, AccumulatorMovesKeepTheSourceBankAcrossModifiers) {
   Fixture fx;
   ASSERT_NE(fx.wf, nullptr);
@@ -110,6 +127,42 @@ TEST(Cdna3VectorStateTest, AccumulatorMovesKeepTheSourceBankAcrossModifiers) {
   }
 }
 
+TEST(Cdna3ScalarControlTest, PredicateSelectorsAndStatus) {
+  Fixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  for (unsigned masks = 0; masks < 4; ++masks) {
+    fx.wf->write_exec(masks & 1 ? 0 : 1ull << 32);
+    fx.wf->set_vcc_raw(masks & 2 ? 0 : 1ull << 63);
+    fx.execute({0xbe8201fc, 0}); // s_mov_b64 s[2:3],src_execz
+    EXPECT_EQ(fx.read_sgpr_pair(2), masks & 1u);
+    fx.execute({0xbe8201fb, 0}); // s_mov_b64 s[2:3],src_vccz
+    EXPECT_EQ(fx.read_sgpr_pair(2), masks >> 1);
+    fx.execute({0xb8820a42, 0}); // s_getreg_b32 s2,hwreg(STATUS,9,2)
+    EXPECT_EQ(fx.read_sgpr_pair(2), masks);
+  }
+}
+
+TEST(Cdna3ScalarControlTest, UnallocatedScalarRegistersAndTrapTemporaries) {
+  Fixture fx(16);
+  ASSERT_NE(fx.wf, nullptr);
+  fx.write_sgpr_pair(0, 0xabcdef1234ull);
+  fx.write_sgpr_pair(32, 0x1badf00dull);
+  fx.execute({0xbe820120, 0}); // s_mov_b64 s[2:3],s[32:33]
+  EXPECT_EQ(fx.read_sgpr_pair(2), fx.read_sgpr_pair(0));
+  fx.execute({0xbea00100, 0}); // s_mov_b64 s[32:33],s[0:1]
+  EXPECT_EQ(fx.read_sgpr_pair(32), 0x1badf00dull);
+  fx.wf->set_ttmp(0, 0x73);
+  fx.execute({0xbe82016c, 0}); // s_mov_b64 s[2:3],ttmp[0:1]
+  EXPECT_EQ(fx.read_sgpr_pair(2), 0u);
+  fx.execute({0xbeec0081, 0}); // s_mov_b32 ttmp0,1
+  EXPECT_EQ(fx.wf->ttmp(0), 0x73u);
+  fx.wf->set_in_trap_handler(true);
+  fx.execute({0xbe82016c, 0});
+  EXPECT_EQ(fx.read_sgpr_pair(2), 0x73u);
+  fx.execute({0xbeec0081, 0});
+  EXPECT_EQ(fx.wf->ttmp(0), 1u);
+}
+
 TEST(Cdna3ScalarControlTest, DescriptorSgprGranuleRoundsUpToPhysicalStorage) {
   Fixture fx(8);
   ASSERT_NE(fx.wf, nullptr);
@@ -119,6 +172,88 @@ TEST(Cdna3ScalarControlTest, DescriptorSgprGranuleRoundsUpToPhysicalStorage) {
   EXPECT_EQ(fx.read_sgpr_pair(2), 0xabcdef1234ull);
   fx.execute({0xbe880100, 0}); // s_mov_b64 s[8:9],s[0:1]
   EXPECT_EQ(fx.read_sgpr_pair(8), 0x9876u);
+}
+
+TEST(Cdna3ScalarControlTest, DebugBranchesTestIndependentConditions) {
+  Fixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  for (unsigned bits = 0; bits < 4; ++bits) {
+    fx.wf->set_status_raw(bits << 20);
+    const bool taken[] = {bool(bits & 2), bool(bits & 1), bits != 0, bits == 3};
+    for (unsigned opcode = 0; opcode < 4; ++opcode) {
+      fx.wf->pc = 0x1000;
+      fx.execute({0xbf970001 + (opcode << 16), 0});
+      EXPECT_EQ(fx.wf->pc + 4, taken[opcode] ? 0x1008u : 0x1004u);
+    }
+  }
+}
+
+TEST(Cdna3ScalarControlTest, HaltPriorityAndTrapReturn) {
+  Fixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  fx.execute({0xbf8f0003, 0}); // s_setprio 3
+  EXPECT_EQ((fx.wf->status_raw() >> 3) & 3u, 3u);
+  fx.execute({0xbf8d0001, 0}); // s_sethalt 1
+  EXPECT_TRUE(fx.wf->status_halt());
+  EXPECT_TRUE(fx.wf->debug_halted());
+  fx.wf->set_debug_halted(false);
+  fx.wf->set_status_raw(1u << 5);
+  fx.wf->set_in_trap_handler(true);
+  fx.execute({0xbf8d0001, 0});
+  EXPECT_TRUE(fx.wf->status_halt());
+  EXPECT_FALSE(fx.wf->debug_halted());
+  fx.write_sgpr_pair(0, 0x3000);
+  fx.execute({0x95800200, 0}); // s_rfe_restore_b64 s[0:1],s2
+  EXPECT_EQ(fx.wf->pc + 4, 0x3000u);
+  EXPECT_EQ(fx.wf->status_raw() & (1u << 5), 0u);
+  EXPECT_FALSE(fx.wf->in_trap_handler());
+  EXPECT_TRUE(fx.wf->debug_halted());
+}
+
+TEST(Cdna3ScalarControlTest, WakeupOnlyInterruptsSleepInTheIssuingWorkgroup) {
+  Fixture fx(SGPRS_PER_WF, 4);
+  ASSERT_NE(fx.wf, nullptr);
+  auto *peer = fx.cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
+  auto *other_group = fx.cu->dispatch_wf(1, 0, SGPRS_PER_WF, VGPRS_PER_WF);
+  auto *other_dispatch = fx.cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
+  ASSERT_NE(peer, nullptr);
+  ASSERT_NE(other_group, nullptr);
+  ASSERT_NE(other_dispatch, nullptr);
+  other_dispatch->set_dispatch_id(fx.wf->dispatch_id() + 1);
+  for (auto *wave : {peer, other_group, other_dispatch})
+    wave->set_sleep_cycles(64);
+  fx.execute({0xbf830000, 0}); // s_wakeup without IN_TG
+  EXPECT_EQ(peer->sleep_cycles(), 64u);
+  for (auto *wave : {fx.wf, peer})
+    wave->set_workgroup_dispatch(fx.wf->dispatch_id(), 2);
+  fx.execute({0xbf830000, 0});
+  EXPECT_EQ(peer->sleep_cycles(), 0u);
+  EXPECT_EQ(other_group->sleep_cycles(), 64u);
+  EXPECT_EQ(other_dispatch->sleep_cycles(), 64u);
+}
+
+TEST(Cdna3ScalarControlTest, GetregReadsLdsCountersAndTrapAddresses) {
+  Fixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  fx.wf->set_lds_base(512);
+  fx.wf->set_lds_size(1024);
+  fx.wf->wait_counters().vmcnt = 37;
+  fx.wf->wait_counters().expcnt = 3;
+  fx.wf->wait_counters().lgkmcnt = 9;
+  fx.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
+    return amdgpu::ComputeUnitCore::TrapHandlerConfig{0x123456788000, 0x432112340000, false};
+  });
+  const std::array<std::pair<unsigned, uint32_t>, 6> fields{{{6, 0x4002},
+                                                             {7, (2u << 22) | 0x935},
+                                                             {16, 0x34567880},
+                                                             {17, 0x12},
+                                                             {18, 0x21123400},
+                                                             {19, 0x43}}};
+  for (const auto &[id, expected] : fields) {
+    fx.execute({0xb882f800u + id, 0}); // s_getreg_b32 s2,hwreg(id)
+    EXPECT_EQ(fx.read_sgpr_pair(2), expected);
+  }
+  fx.wf->wait_counters() = {};
 }
 
 struct ForceScalarGuard {
@@ -158,6 +293,17 @@ TEST(Cdna3PredicateMaskTest, ClassCmpxUpdatesExplicitScalarPairAndExec) {
     EXPECT_EQ(fx.wf->exec(), expected);
     EXPECT_EQ(fx.read_sgpr_pair(6), expected);
     EXPECT_EQ(fx.wf->vcc(), vcc);
+  }
+}
+
+TEST(Cdna3VectorStateTest, ClearVectorExceptionsPreservesOtherTrapStatus) {
+  Fixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  for (const std::array<uint32_t, 2> encoding :
+       {std::array<uint32_t, 2>{0x7e006a00u, 0}, {0xd1750000u, 0}}) {
+    fx.wf->set_trapsts(0xb07fu);
+    fx.execute(encoding);
+    EXPECT_EQ(fx.wf->trapsts(), 0xb000u);
   }
 }
 

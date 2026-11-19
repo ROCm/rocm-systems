@@ -13,13 +13,17 @@ previously been able to silently drop.
 
 from types import SimpleNamespace
 
+from amdisa.__main__ import _PROFILES
 from amdisa.codegen import CodeGenerator
 from amdisa.semantics import derive_semantics
 
 
-def _body(name: str) -> str:
+def _body(name: str, arch: str = 'cdna4') -> str:
     """Emitted execute() body for a trap-control op, straight from the generator."""
     generator = CodeGenerator.__new__(CodeGenerator)
+    generator.isa_spec = SimpleNamespace(
+        arch_name=arch, profile=_PROFILES[arch.replace('_', '.')]()
+    )
     sem = SimpleNamespace(
         name=name,
         semantic_class='true_nop',
@@ -37,21 +41,14 @@ class TestSRfeBody:
         assert 'read_scalar64(ssrc0)' in body
         assert 'kPcAddressMask' in body
 
-    def test_restores_the_interrupted_exec(self):
-        """Regression: a handler that returns without stopping the wave used to
-        leave its own EXEC mask installed, silently un-diverging a branch for
-        the rest of the kernel. gdb.rocm/lane-info.exp catches it, as does
-        WaveDebugTest.TrapHandlerRestoresInterruptedExecWhenReturningWithoutStopping.
-        This block once existed only in the checked-in generated header, so the
-        next regeneration would have removed it."""
+    def test_preserves_the_guest_handlers_exec(self):
         body = _body('S_RFE_B64')
-        assert 'wf.set_exec(wf.trap_saved_exec());' in body
-        assert 'if (wf.in_trap_handler())' in body
-        # The restore has to happen while the flag still says we are in the
-        # handler, so it must precede the clear.
-        assert body.index('wf.set_exec(wf.trap_saved_exec());') < body.index(
-            'wf.set_in_trap_handler(false);'
-        )
+        assert 'wf.set_exec(' not in body
+        assert 'wf.return_from_trap();' in body
+
+    def test_rdna_handler_selects_the_return_exec(self):
+        for arch in ('rdna1', 'rdna2', 'rdna3', 'rdna3_5', 'rdna4'):
+            assert 'wf.set_exec' not in _body('S_RFE_B64', arch)
 
     def test_honours_status_halt_on_the_way_out(self):
         body = _body('S_RFE_B64')
@@ -66,7 +63,7 @@ class TestSRfeBody:
         for name in ('S_RFE', 'S_RFE_B64', 'S_RFE_I64', 'S_RFE_RESTORE_B64'):
             body = _body(name)
             assert 'kPcAddressMask' in body, f'{name} has no trap-return body'
-            assert 'wf.set_exec(wf.trap_saved_exec());' in body, name
+            assert 'wf.return_from_trap();' in body, name
 
     def test_rfe_restore_is_rfe_with_its_second_operand_ignored(self):
         """The GFX9 manuals define S_RFE_RESTORE_B64 as `PRIV = 0; PC = S0.u64`
@@ -97,7 +94,7 @@ class TestSendmsgBody:
     def test_reports_msg_interrupt_from_inside_the_handler(self):
         body = _body('S_SENDMSG')
         assert 'wf.set_trap_interrupt_sent(true);' in body
-        assert 'wf.cu().handle_sendmsg(wf, message);' in body
+        assert 'if (!wf.cu().deliver_sendmsg(wf, message)) return;' in body
 
     def test_sendmsghalt_halts_through_architectural_status(self):
         """S_SENDMSGHALT halts the wave -- that is the instruction, not a

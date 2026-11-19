@@ -51,6 +51,10 @@ inline constexpr uint32_t kFlatScratchBaseSelectorLast = 231;
   }
 }
 
+[[nodiscard]] inline constexpr uint32_t scalar_m0_selector(rj_code_arch_t arch) {
+  return scalar_selector_is_null(arch, kModernNullSelector) ? kModernM0Selector : kLegacyM0Selector;
+}
+
 /// Backing selected by a decoded scalar-register operand.
 enum class ScalarRegisterStorage : uint8_t {
   SGPR,

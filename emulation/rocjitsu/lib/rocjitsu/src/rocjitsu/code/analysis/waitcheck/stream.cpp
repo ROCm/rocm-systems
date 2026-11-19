@@ -87,7 +87,7 @@ RegisterEffects register_effects(const Instruction &inst, rj_code_arch_t arch, u
       const auto *op = inst.dst_operand(i);
       if (!op)
         continue;
-      if (auto ref = op->to_register_ref())
+      if (auto ref = WaitcheckTarget::register_operand(*op, arch))
         effects.defs.expand(inst.wave_sized_destination(*op, *ref, wave_size));
     }
   }
@@ -98,7 +98,7 @@ RegisterEffects register_effects(const Instruction &inst, rj_code_arch_t arch, u
     const auto *op = inst.src_operand(i);
     if (!op)
       continue;
-    auto ref = op->to_register_ref();
+    auto ref = WaitcheckTarget::register_operand(*op, arch);
     if (!ref)
       continue;
     if (i == 0 && name.starts_with("scratch_") && !scratch_vector_address_enabled(inst, arch))
@@ -331,9 +331,19 @@ private:
         ++age;
     }
     ages[static_cast<size_t>(event.kind)] = 0;
+    const bool ordered_exp =
+        event.counter == WaitCounterKind::Exp && amdgpu::has_typed_export_waits(arch_) &&
+        (event.kind == WaitEventKind::ExportMrt || event.kind == WaitEventKind::ExportZ ||
+         event.kind == WaitEventKind::ExportPosition ||
+         event.kind == WaitEventKind::ExportPrimitive ||
+         event.kind == WaitEventKind::ExportDualSourceBlend ||
+         event.kind == WaitEventKind::LdsDirect);
     for (auto &pending : state_.pending[idx]) {
       if (pending.min_younger < max_wait.value())
         ++pending.min_younger;
+      if (ordered_exp && pending.kind == event.kind &&
+          pending.min_younger_in_fifo < max_wait.value())
+        ++pending.min_younger_in_fifo;
     }
     // Counter-only operations must age older requests without accumulating a
     // dependency record of their own (notably long sequences of stores).
