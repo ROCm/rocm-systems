@@ -43,16 +43,15 @@ function(add_range_replay_sample NAME CLIENT_SRC)
     add_executable(${NAME})
     target_sources(${NAME} PRIVATE main.cpp range.hpp)
 
-    # Unlike the kernel replay samples, this application calls the SDK: range boundaries
-    # are the tool's to declare but the application's to place. It resolves the two range
-    # entry points with dlsym out of the preloaded client and links only the headers,
-    # because linking the SDK into the HIP executable makes HIP report
-    # hipErrorInvalidDeviceFunction on the first kernel launch on gfx942 (see
-    # samples/kernel_replay/CMakeLists.txt).
+    # The application calls the range API (begin/end, or the scoped host macros). It does
+    # not link librocprofiler-sdk: that link makes the first kernel launch fail on gfx942
+    # (see samples/kernel_replay/CMakeLists.txt). The preloaded tool brings the SDK in,
+    # and the link leaves the API references unresolved so that library satisfies them.
     target_link_libraries(
-        ${NAME}
-        PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers
-                rocprofiler-sdk::samples-build-flags Threads::Threads ${CMAKE_DL_LIBS})
+        ${NAME} PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers
+                        rocprofiler-sdk::samples-build-flags Threads::Threads)
+    target_link_options(${NAME} PRIVATE
+                        "LINKER:--unresolved-symbols=ignore-in-object-files")
     add_dependencies(${NAME} ${NAME}-client)
 
     rocprofiler_samples_get_preload_env(PRELOAD_ENV ${NAME}-client)
@@ -77,9 +76,10 @@ endfunction()
 add_range_replay_sample(range-replay-basic basic_client.cpp ENVIRONMENT
                         "ROCPROF_RANGE_REPLAY_VERIFY=1")
 
-# Same checks as range-replay-basic, but the extra passes re-enter main() through
-# siglongjmp instead of re-submitting the recorded packets. RR_APP_MODE=host is what arms
-# the sigsetjmp; RR_HOST_REPLAY is what tells the tool to request that mode.
+# Same checks as range-replay-basic, but the extra passes re-enter the range through
+# siglongjmp instead of re-submitting the recorded packets. RR_APP_MODE=host opens the
+# range with ROCPROFILER_REPLAY_RANGE_BEGIN; RR_HOST_REPLAY tells the tool to request that
+# mode.
 add_range_replay_sample(
     range-replay-host basic_client.cpp ENVIRONMENT "ROCPROF_RANGE_REPLAY_VERIFY=1"
     "RR_APP_MODE=host" "RR_HOST_REPLAY=1")

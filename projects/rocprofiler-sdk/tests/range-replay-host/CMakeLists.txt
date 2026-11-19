@@ -53,9 +53,10 @@ target_link_libraries(
     range-replay-host-timestep-client PRIVATE rocprofiler-sdk::rocprofiler-sdk
                                               rocprofiler-sdk::tests-build-flags)
 
-# The application resolves the range replay entry points with dlsym instead of linking the
-# SDK, for the same reason as the range replay samples (linking rocprofiler-sdk into a HIP
-# executable breaks the first launch on gfx942).
+# The application opens the range with ROCPROFILER_REPLAY_RANGE_BEGIN / _END, the same
+# macros a user writes. It does not link librocprofiler-sdk: that link makes the first
+# kernel launch fail on gfx942. The preloaded tool brings the SDK in, and the link leaves
+# the API references unresolved so that library satisfies them.
 set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
 add_executable(range-replay-host-timestep-testapp)
 target_sources(range-replay-host-timestep-testapp PRIVATE main.cpp range.hpp)
@@ -64,7 +65,9 @@ target_include_directories(range-replay-host-timestep-testapp
 target_link_libraries(
     range-replay-host-timestep-testapp
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers rocprofiler-sdk::tests-build-flags
-            Threads::Threads ${CMAKE_DL_LIBS})
+            Threads::Threads)
+target_link_options(range-replay-host-timestep-testapp PRIVATE
+                    "LINKER:--unresolved-symbols=ignore-in-object-files")
 add_dependencies(range-replay-host-timestep-testapp range-replay-host-timestep-client)
 
 if(ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE)

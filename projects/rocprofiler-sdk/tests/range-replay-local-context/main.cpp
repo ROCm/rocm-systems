@@ -26,8 +26,6 @@
 
 #include <hip/hip_runtime.h>
 
-#include <dlfcn.h>
-
 #include <cstdio>
 #include <cstdlib>
 
@@ -54,17 +52,6 @@ rr_local_context_step(int* acc, int add)
 int
 main()
 {
-    auto* begin_fn = reinterpret_cast<decltype(&rocprofiler_range_replay_begin)>(
-        dlsym(RTLD_DEFAULT, "rocprofiler_range_replay_begin"));
-    auto* end_fn = reinterpret_cast<decltype(&rocprofiler_range_replay_end)>(
-        dlsym(RTLD_DEFAULT, "rocprofiler_range_replay_end"));
-
-    if(begin_fn == nullptr || end_fn == nullptr)
-    {
-        fprintf(stderr, "[app] FAIL: the range replay API is not in this process\n");
-        return EXIT_FAILURE;
-    }
-
     int* acc = nullptr;
     HIP_CHECK(hipMalloc(&acc, sizeof(int)));
     HIP_CHECK(hipMemset(acc, 0, sizeof(int)));
@@ -73,7 +60,8 @@ main()
     // allocated and settled before it opens.
     HIP_CHECK(hipDeviceSynchronize());
 
-    if(const auto status = begin_fn(kRangeId); status != ROCPROFILER_STATUS_SUCCESS)
+    if(const auto status = rocprofiler_range_replay_begin(kRangeId);
+       status != ROCPROFILER_STATUS_SUCCESS)
     {
         fprintf(stderr,
                 "[app] FAIL: rocprofiler_range_replay_begin returned status %d\n",
@@ -89,7 +77,7 @@ main()
 
     HIP_CHECK(hipDeviceSynchronize());
 
-    if(const auto status = end_fn(); status != ROCPROFILER_STATUS_SUCCESS)
+    if(const auto status = rocprofiler_range_replay_end(); status != ROCPROFILER_STATUS_SUCCESS)
     {
         fprintf(stderr,
                 "[app] FAIL: rocprofiler_range_replay_end returned status %d\n",

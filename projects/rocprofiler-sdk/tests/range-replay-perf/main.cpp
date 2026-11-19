@@ -12,18 +12,15 @@
 // A regression that reintroduced per-dispatch window cost would still pass a pass-count scaling
 // test and only shows up when this axis moves.
 //
-// Like the range replay samples, this resolves the two API entry points with dlsym rather than
-// linking rocprofiler-sdk, because linking the SDK into a HIP executable makes HIP report
-// hipErrorInvalidDeviceFunction on the first launch on gfx942. The tool is LD_PRELOADed, so the
-// symbols are already in the process.
+// The ranges are rocprofiler_range_replay_begin / _end around the dispatches. The tool is
+// LD_PRELOADed; the executable does not link librocprofiler-sdk, because that link makes HIP
+// report hipErrorInvalidDeviceFunction on the first launch on gfx942.
 
 #include "client.hpp"
 
 #include <rocprofiler-sdk/experimental/range_replay.h>
 
 #include <hip/hip_runtime.h>
-
-#include <dlfcn.h>
 
 #include <chrono>
 #include <cstdio>
@@ -87,16 +84,6 @@ main(int argc, char** argv)
     if(ranges < 1) ranges = 1;
     if(warmup < 0) warmup = 0;
 
-    auto* begin_fn = reinterpret_cast<decltype(&rocprofiler_range_replay_begin)>(
-        dlsym(RTLD_DEFAULT, "rocprofiler_range_replay_begin"));
-    auto* end_fn = reinterpret_cast<decltype(&rocprofiler_range_replay_end)>(
-        dlsym(RTLD_DEFAULT, "rocprofiler_range_replay_end"));
-    if(begin_fn == nullptr || end_fn == nullptr)
-    {
-        fprintf(stderr, "[rr-perf] FAIL the range replay API is not in this process\n");
-        return EXIT_FAILURE;
-    }
-
     const size_t ballast_bytes = static_cast<size_t>(ballast_mb) * 1024U * 1024U;
     const int    ballast_elems = static_cast<int>(ballast_bytes / sizeof(float));
     const int    work_elems    = (ballast_elems < kWorkElems) ? ballast_elems : kWorkElems;
@@ -111,7 +98,8 @@ main(int argc, char** argv)
     // One range, start to finish. Allocation inside a range is a decline reason, so everything the
     // range touches is allocated above and only launches happen in here.
     const auto run_range = [&](uint64_t range_id) -> hipError_t {
-        if(const auto status = begin_fn(range_id); status != ROCPROFILER_STATUS_SUCCESS)
+        if(const auto status = rocprofiler_range_replay_begin(range_id);
+           status != ROCPROFILER_STATUS_SUCCESS)
         {
             // Distinct from a decline, which is reported to the tool at CLOSE and leaves this
             // call successful. Reaching here means the range never opened at all.
@@ -128,7 +116,7 @@ main(int argc, char** argv)
         // The range's own work must complete before it closes: _end re-executes the recording from
         // the entry snapshot, and the host has to have observed the live run first.
         if(auto err = hipDeviceSynchronize(); err != hipSuccess) return err;
-        if(const auto status = end_fn(); status != ROCPROFILER_STATUS_SUCCESS)
+        if(const auto status = rocprofiler_range_replay_end(); status != ROCPROFILER_STATUS_SUCCESS)
         {
             fprintf(stderr,
                     "[rr-perf] FAIL rocprofiler_range_replay_end returned status %d\n",
