@@ -4,7 +4,7 @@
 # Multi-Arch CI ASAN for rocm-systems
 #
 # Presubmit and on-demand ASAN builds. This workflow requests host-asan and
-# pins TheRock at the #10034 merge on main.
+# follows TheRock main (includes #10034).
 # run_rocm_tests lets a pull request keep its test runners. The default
 # family is gfx90a, which has no sandbox runner, so it uses its normal runner
 # (linux-gfx90a-1gpu-ossci-rocm). A pull request runs when it has ci:host-asan.
@@ -67,7 +67,7 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@2143e68ddf3b44ea4cd83969af01dc74a6bd546a # TheRock#10034 on main
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@main
     with:
       build_variant: "host-asan"
       # Required by TheRock#10034. Without it a pull request clears the test runner.
@@ -88,7 +88,7 @@ jobs:
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
       baseline_repository: ${{ inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository) || '' }}
       repository: ROCm/TheRock
-      ref: 2143e68ddf3b44ea4cd83969af01dc74a6bd546a # TheRock#10034 on main
+      ref: main
       external_repo: >-
         {
           "repository": "${{ github.repository }}",
@@ -108,7 +108,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@2143e68ddf3b44ea4cd83969af01dc74a6bd546a # TheRock#10034 on main
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@main
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
@@ -118,7 +118,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       repository: ROCm/TheRock
-      ref: 2143e68ddf3b44ea4cd83969af01dc74a6bd546a # TheRock#10034 on main
+      ref: main
     permissions:
       contents: read
       id-token: write
@@ -136,7 +136,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: 2143e68ddf3b44ea4cd83969af01dc74a6bd546a # TheRock#10034 on main
+          ref: main
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
