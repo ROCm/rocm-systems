@@ -123,6 +123,29 @@ if(TARGET rdc_client)
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
         COMPONENT ${TESTS_COMPONENT}
     )
+
+    # rdc_client_replies_tests: the client against a server whose replies state more
+    # entries than they carry. It links librdc_client for the generated gRPC service and
+    # messages, so that the process has one copy of them.
+    add_executable(rdc_client_replies_tests ${SRC_DIR}/test_client_replies.cc)
+    target_include_directories(
+        rdc_client_replies_tests
+        PRIVATE ${PROJECT_SOURCE_DIR}/include ${PROTOB_OUT_DIR}
+    )
+    target_link_libraries(
+        rdc_client_replies_tests
+        PRIVATE rdc_bootstrap rdc_client gRPC::grpc++ GTest::gtest_main pthread
+    )
+    set_target_properties(
+        rdc_client_replies_tests
+        PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib:\$ORIGIN/../../../lib/rdc/grpc/lib"
+    )
+    add_test(NAME rdc_client_replies_tests COMMAND rdc_client_replies_tests)
+    install(
+        TARGETS rdc_client_replies_tests
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+        COMPONENT ${TESTS_COMPONENT}
+    )
 endif()
 
 # rdc_link_status_tests: rdc_link_status_get() against fake amdsmi link-status
@@ -180,6 +203,23 @@ install(
     COMPONENT ${TESTS_COMPONENT}
 )
 
+# rdc_telemetry_tests: how RdcTelemetryModule hands watched fields to the telemetry
+# libraries, checked with a stub library. Builds the module from source instead of
+# linking librdc, whose load-time amd-smi initialization needs a GPU, so it runs on
+# GPU-less CI.
+add_executable(
+    rdc_telemetry_tests
+    ${SRC_DIR}/test_telemetry_module.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcTelemetryModule.cc
+)
+target_include_directories(
+    rdc_telemetry_tests
+    PRIVATE ${PROJECT_SOURCE_DIR}/include ${AMD_SMI_INCLUDE_DIR}
+)
+target_link_libraries(rdc_telemetry_tests PRIVATE rdc_bootstrap GTest::gtest_main pthread)
+set_target_properties(rdc_telemetry_tests PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib")
+add_test(NAME rdc_telemetry_tests COMMAND rdc_telemetry_tests)
+
 # rdc_unit_tests: hardware-aware SmiUtils tests. Links librdc (flat table,
 # partition helpers) and amd_smi. Provides its own main() to init amdsmi once.
 # Hardware-dependent tests self-skip when no AMD GPU is present.
@@ -201,7 +241,12 @@ set_target_properties(
 add_test(NAME ${RDC_UNIT_TESTS} COMMAND ${RDC_UNIT_TESTS})
 
 install(
-    TARGETS ${RDC_CODEC_TESTS} ${RDC_UNIT_TESTS} rdc_diag_kernel_tests rdc_topology_tests
+    TARGETS
+        ${RDC_CODEC_TESTS}
+        ${RDC_UNIT_TESTS}
+        rdc_diag_kernel_tests
+        rdc_topology_tests
+        rdc_telemetry_tests
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
     COMPONENT ${TESTS_COMPONENT}
 )

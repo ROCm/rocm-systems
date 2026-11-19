@@ -262,7 +262,101 @@ __host__ void HostInterface::maybe_setup_verbs_host(SymmetricHeap* heap) {
                     "setup failed");
   }
 }
+
+/*
+ * 8-byte AMO over the verbs host transport. bnxt RoCE atomics are 8-byte and
+ * native byte order, so the operand and returned pre-image pass through as-is
+ * (validated on Broadcom bnxt: fetch_add 0->1, compare_swap 0->42).
+ *
+ * TODO(mlx5/ionic): Mellanox and Pensando HCAs perform RDMA atomics in
+ * big-endian (mirrored by the device GDA path, which does endian::to_be on the
+ * atomic operands in provider_gda_mlx5.hpp). ibverbs abstracts the WQE binary
+ * format but NOT the atomic value byte order, so before enabling verbs AMO on
+ * those NICs the operand AND the returned result must be byteswapped
+ * (htobe64/be64toh), gated on the HCA atomic-endianness capability from
+ * ibv_query_device (IBV_ATOMIC_HCA vs IBV_ATOMIC_GLOB). Put/get are byte copies
+ * and unaffected; only atomics need this.
+ */
+__host__ bool HostInterface::verbs_amo_fetch_add(WindowInfo* window_info,
+                                                 void* dst, uint64_t value,
+                                                 int pe, uint64_t* fetch_val) {
+#if defined(GDA_MLX5) || defined(GDA_IONIC)
+  LOG_ERROR_ABORT("host verbs AMO not implemented for mlx5/ionic");
+#endif
+  auto* wiv = dynamic_cast<WindowInfoVerbs*>(window_info);
+  if (!wiv) {
+    return false;
+  }
+  *fetch_val = wiv->amo_fadd(dst, value, pe);
+  return true;
+}
+
+__host__ bool HostInterface::verbs_amo_fetch_cas(WindowInfo* window_info,
+                                                 void* dst, uint64_t swap,
+                                                 uint64_t compare, int pe,
+                                                 uint64_t* fetch_val) {
+#if defined(GDA_MLX5) || defined(GDA_IONIC)
+  LOG_ERROR_ABORT("host verbs AMO not implemented for mlx5/ionic");
+#endif
+  auto* wiv = dynamic_cast<WindowInfoVerbs*>(window_info);
+  if (!wiv) {
+    return false;
+  }
+  /* WindowInfoVerbs::amo_cas(dst, compare, swap, pe). */
+  *fetch_val = wiv->amo_cas(dst, compare, swap, pe);
+  return true;
+}
 #endif  // USE_HOST_VERBS
+
+/*
+ * Blocking host-initiated signal ops, reached from the public C API. Dispatched
+ * by window subtype like the blocking putmem/amo: served by WindowInfoVerbs on
+ * the verbs transport; a non-verbs window aborts rather than silently no-op.
+ */
+__host__ void HostInterface::putmem_signal(
+    [[maybe_unused]] void* dest, [[maybe_unused]] const void* source,
+    [[maybe_unused]] size_t nelems, [[maybe_unused]] uint64_t* sig_addr,
+    [[maybe_unused]] uint64_t signal, [[maybe_unused]] int sig_op,
+    [[maybe_unused]] int pe, [[maybe_unused]] WindowInfo* window_info) {
+#ifdef USE_HOST_VERBS
+  if (auto* w = dynamic_cast<WindowInfoVerbs*>(window_info)) {
+    w->put_signal(dest, source, nelems, sig_addr, signal, sig_op, pe);
+    return;
+  }
+#endif
+  LOG_ERROR_ABORT(
+      "blocking host putmem_signal is only supported on the verbs host "
+      "transport");
+}
+
+__host__ uint64_t HostInterface::signal_fetch(
+    [[maybe_unused]] const uint64_t* sig_addr,
+    [[maybe_unused]] WindowInfo* window_info) {
+#ifdef USE_HOST_VERBS
+  if (auto* w = dynamic_cast<WindowInfoVerbs*>(window_info)) {
+    return w->signal_fetch(sig_addr);
+  }
+#endif
+  LOG_ERROR_ABORT(
+      "blocking host signal_fetch is only supported on the verbs host "
+      "transport");
+  return 0;
+}
+
+__host__ void HostInterface::signal_wait_until(
+    [[maybe_unused]] uint64_t* sig_addr, [[maybe_unused]] int cmp,
+    [[maybe_unused]] uint64_t cmp_value,
+    [[maybe_unused]] WindowInfo* window_info) {
+#ifdef USE_HOST_VERBS
+  if (auto* w = dynamic_cast<WindowInfoVerbs*>(window_info)) {
+    w->signal_wait_until(sig_addr, cmp, cmp_value);
+    return;
+  }
+#endif
+  LOG_ERROR_ABORT(
+      "blocking host signal_wait_until is only supported on the verbs host "
+      "transport");
+}
 
 __host__ HostInterface::~HostInterface() {
 #if defined USE_HDP_FLUSH

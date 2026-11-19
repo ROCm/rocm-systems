@@ -92,6 +92,7 @@
 #include <exception>
 #include <limits>
 #include <memory>
+#include <set>
 #include <span>
 #include <string>
 #include <string_view>
@@ -721,10 +722,6 @@ inline bool should_skip_inst(std::string_view mn) {
   return mnemonic_has_any_prefix(mn, SKIP_PREFIXES);
 }
 
-constexpr std::array<std::string_view, 3> EXPECTED_RDNA1_UNIMPLEMENTED = {
-    "s_subvector_loop_begin", "s_subvector_loop_end", "s_get_waveid_in_workgroup"};
-constexpr std::array<std::string_view, 2> EXPECTED_RDNA2_UNIMPLEMENTED = {"s_subvector_loop_begin",
-                                                                          "s_subvector_loop_end"};
 constexpr std::array<std::string_view, 0> EXPECTED_NO_UNIMPLEMENTED = {};
 
 struct HarnessExpectation {
@@ -733,11 +730,11 @@ struct HarnessExpectation {
 };
 
 constexpr HarnessExpectation HARNESS_EXPECTATIONS[] = {
-    {"cdna1", EXPECTED_NO_UNIMPLEMENTED},    {"cdna2", EXPECTED_NO_UNIMPLEMENTED},
-    {"cdna3", EXPECTED_NO_UNIMPLEMENTED},    {"cdna4", EXPECTED_NO_UNIMPLEMENTED},
-    {"rdna1", EXPECTED_RDNA1_UNIMPLEMENTED}, {"rdna2", EXPECTED_RDNA2_UNIMPLEMENTED},
-    {"rdna3", EXPECTED_NO_UNIMPLEMENTED},    {"rdna3_5", EXPECTED_NO_UNIMPLEMENTED},
-    {"rdna4", EXPECTED_NO_UNIMPLEMENTED},    {"gfx1250", EXPECTED_NO_UNIMPLEMENTED},
+    {"cdna1", EXPECTED_NO_UNIMPLEMENTED}, {"cdna2", EXPECTED_NO_UNIMPLEMENTED},
+    {"cdna3", EXPECTED_NO_UNIMPLEMENTED}, {"cdna4", EXPECTED_NO_UNIMPLEMENTED},
+    {"rdna1", EXPECTED_NO_UNIMPLEMENTED}, {"rdna2", EXPECTED_NO_UNIMPLEMENTED},
+    {"rdna3", EXPECTED_NO_UNIMPLEMENTED}, {"rdna3_5", EXPECTED_NO_UNIMPLEMENTED},
+    {"rdna4", EXPECTED_NO_UNIMPLEMENTED}, {"gfx1250", EXPECTED_NO_UNIMPLEMENTED},
 };
 
 const HarnessExpectation *harness_expectation(std::string_view arch_name) {
@@ -9167,7 +9164,8 @@ TEST(Cdna1ValuTest, AccumulatorInputsAndVectorResults) {
   cu->write_vgpr(base + 2, 0, 0x7f7fffff);
   ASSERT_NO_FATAL_FAILURE(run(0x02000501)); // ADD maximum finite to itself
   EXPECT_EQ(wf->trapsts(), 0x129u);
-  wf->set_trapsts(0x100u);
+  ASSERT_NO_FATAL_FAILURE(run(0x7e006a00)); // CLREXCP preserves the memory violation
+  EXPECT_EQ(wf->trapsts(), 0x100u);
   cu->write_vgpr(base + 1, 0, 0x7fc00000);
   ASSERT_NO_FATAL_FAILURE(run(0xd042006a, 0x00020501)); // Quiet CMP_EQ_F32
   EXPECT_EQ(wf->trapsts(), 0x100u);
@@ -10086,13 +10084,14 @@ TEST(HwregTest, OtherArchitecturesPreserveHardwareRegisterMappings) {
       if (state_priv) {
         EXPECT_STREQ(amdgpu::hwreg_name(*wf, field), "WAVE_STATE_PRIV");
       }
-      // On GFX11, HW_ID1[4] is the high wave-slot bit. Slot 1 reads zero.
-      const bool gfx11_wave_slot = id == 23 && (cfg.arch == ROCJITSU_CODE_ARCH_RDNA3 ||
-                                                cfg.arch == ROCJITSU_CODE_ARCH_RDNA3_5);
+      // On GFX11 and GFX12, HW_ID1[4] is the high wave-slot bit. Slot 1 reads zero.
+      const bool rdna_wave_slot = id == 23 && (cfg.arch == ROCJITSU_CODE_ARCH_RDNA3 ||
+                                               cfg.arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+                                               cfg.arch == ROCJITSU_CODE_ARCH_RDNA4);
       uint32_t value = UINT32_MAX;
       EXPECT_EQ(amdgpu::read_hwreg_field(*wf, field, value),
-                (state_priv || gfx11_wave_slot) ? amdgpu::HwregAccessResult::Success
-                                                : amdgpu::HwregAccessResult::Unsupported);
+                (state_priv || rdna_wave_slot) ? amdgpu::HwregAccessResult::Success
+                                               : amdgpu::HwregAccessResult::Unsupported);
       EXPECT_EQ(value, 0u);
       const auto words = encode_sopk(arch_case.getreg_op, 4, field);
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
@@ -10417,6 +10416,158 @@ TEST(HwregHelperTest, Gfx1250WgpIdRequiresRepresentableShaderArrayWidth) {
     }
   }
   wf->halt();
+}
+
+struct RdnaHwId1Case {
+  rj_code_arch_t arch;
+  uint32_t getreg_op;
+  // gfx11.5 refuses its unmeasured DP_RATE[31:29], so its widest read stops at bit 28.
+  bool dp_rate;
+  uint16_t widest_read;
+};
+
+constexpr RdnaHwId1Case kRdnaHwId1Cases[] = {
+    {ROCJITSU_CODE_ARCH_RDNA3, rdna3::kSGetregB32Sopk, true, encode_hwreg(23)},
+    {ROCJITSU_CODE_ARCH_RDNA3_5, rdna3_5::kSGetregB32Sopk, false, encode_hwreg(23, 0, 29)},
+    {ROCJITSU_CODE_ARCH_RDNA4, rdna4::kSGetregB32Sopk, true, encode_hwreg(23)},
+};
+
+TEST(HwregTest, RdnaHwId1ReportsTheResidentSlotAndItsWgp) {
+  for (const auto &arch_case : kRdnaHwId1Cases) {
+    SCOPED_TRACE(arch_case.arch);
+    amdgpu::GpuMemory memory("rdna_hw_id1_mem");
+    amdgpu::L2Cache l2("rdna_hw_id1_l2");
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = arch_case.arch;
+    cfg.num_wf_slots = 32;
+    cfg.sgprs_per_wf = 106;
+    cfg.vgprs_per_wf = 64;
+    cfg.lds_size_kb = 64;
+    auto decoder = Decoder::create(cfg.arch);
+    ASSERT_NE(decoder, nullptr);
+    const auto words = encode_sopk(arch_case.getreg_op, 4, arch_case.widest_read);
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+
+    // Two CUs of one WGP: shader engine 3, second array of eight CUs, CUs 6 and 7.
+    constexpr uint32_t kShaderEngine = 3, kCusPerArray = 8, kFirstCu = kCusPerArray + 6;
+    constexpr uint32_t kLocation = 0x1fu | (3u << 8) | (15u << 10) | (1u << 16) | (7u << 18);
+    // gfx1100 and gfx1201 report DP_RATE 1, one FP64 lane per clock per SIMD.
+    const uint32_t dp_rate = arch_case.dp_rate ? 1u << 29 : 0u;
+    for (uint32_t cu_in_wgp = 0; cu_in_wgp < 2; ++cu_in_wgp) {
+      SCOPED_TRACE(cu_in_wgp);
+      auto cu = amdgpu::ComputeUnitCore::create("rdna_hw_id1_cu", cfg, &memory, &l2);
+      ASSERT_NE(cu, nullptr);
+      cu->set_shader_engine_location(kShaderEngine, kFirstCu + cu_in_wgp, kCusPerArray,
+                                     2 * kCusPerArray);
+      std::set<std::pair<uint32_t, uint32_t>> simd_waves;
+      std::vector<uint32_t> ids;
+      for (uint32_t wave = 0; wave < cfg.num_wf_slots; ++wave) {
+        SCOPED_TRACE(wave);
+        auto *wf = cu->dispatch_wf(wave / 4, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+        ASSERT_NE(wf, nullptr);
+        uint32_t id = UINT32_MAX;
+        ASSERT_EQ(amdgpu::read_hwreg_field(*wf, arch_case.widest_read, id),
+                  amdgpu::HwregAccessResult::Success);
+        cu->write_sgpr(wf->sgpr_alloc().base + 4, UINT32_MAX);
+        ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+        EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 4), id);
+        EXPECT_EQ(id & ~kLocation, dp_rate);
+        EXPECT_EQ((id >> 8) & 1u, cu_in_wgp);
+        EXPECT_EQ((id >> 10) & 15u, 3u);
+        EXPECT_EQ((id >> 16) & 1u, 1u);
+        EXPECT_EQ((id >> 18) & 7u, kShaderEngine);
+        // Two SIMDs of 16 wave slots each name every resident wave once.
+        EXPECT_LT(id & 31u, 16u);
+        EXPECT_TRUE(simd_waves.insert({(id >> 9) & 1u, id & 31u}).second);
+        ids.push_back(id);
+        EXPECT_EQ(amdgpu::write_hwreg_field(*wf, arch_case.widest_read, 0),
+                  amdgpu::HwregAccessResult::ReadOnly);
+      }
+      // An idle CU alternates SIMDs as it places consecutive waves.
+      for (uint32_t wave = 1; wave < ids.size(); ++wave)
+        EXPECT_NE((ids[wave] >> 9) & 1u, (ids[wave - 1] >> 9) & 1u) << wave;
+
+      // A wave reusing a halted slot takes over that slot's SIMD and wave ID.
+      auto *retired = cu->wf(5);
+      retired->halt();
+      auto *reused = cu->dispatch_wf(42, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+      ASSERT_EQ(reused, retired);
+      uint32_t id = UINT32_MAX;
+      EXPECT_EQ(amdgpu::read_hwreg_field(*reused, arch_case.widest_read, id),
+                amdgpu::HwregAccessResult::Success);
+      EXPECT_EQ(id, ids[5]);
+      for (uint32_t slot = 0; slot < cfg.num_wf_slots; ++slot)
+        cu->wf(slot)->halt();
+    }
+  }
+}
+
+TEST(HwregHelperTest, RdnaHwId1RejectsLocationsItsFieldsCannotHold) {
+  for (const auto &arch_case : kRdnaHwId1Cases) {
+    SCOPED_TRACE(arch_case.arch);
+    amdgpu::GpuMemory memory("rdna_hw_id1_limits_mem");
+    amdgpu::L2Cache l2("rdna_hw_id1_limits_l2");
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = arch_case.arch;
+    cfg.num_wf_slots = 4;
+    cfg.sgprs_per_wf = 106;
+    cfg.vgprs_per_wf = 64;
+    cfg.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create("rdna_hw_id1_limits_cu", cfg, &memory, &l2);
+    ASSERT_NE(cu, nullptr);
+    auto *wf = cu->dispatch_wf_at(3, 0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf, nullptr);
+    using Result = amdgpu::HwregAccessResult;
+    const auto check = [&](uint16_t field, Result result, uint32_t expected) {
+      SCOPED_TRACE(field);
+      uint32_t value = UINT32_MAX;
+      EXPECT_EQ(amdgpu::read_hwreg_field(*wf, field, value), result);
+      EXPECT_EQ(value, expected);
+    };
+    constexpr uint16_t kWaveId = encode_hwreg(23, 0, 5), kSimdId = encode_hwreg(23, 8, 2),
+                       kWgpId = encode_hwreg(23, 10, 4), kSaId = encode_hwreg(23, 16, 1);
+    constexpr uint16_t kSeId = encode_hwreg(23, 18, 3);
+
+    // Without a shader-array width only the wave slot and shader engine are known.
+    cu->set_shader_engine_location(2, 5);
+    check(kWaveId, Result::Success, 1);
+    check(kSeId, Result::Success, 2);
+    for (uint16_t field : {kSimdId, kWgpId, kSaId, arch_case.widest_read})
+      check(field, Result::Unsupported, 0);
+
+    // An odd array width splits a WGP across arrays; WGP_ID has four bits.
+    for (uint32_t width : {7u, 34u}) {
+      SCOPED_TRACE(width);
+      cu->set_shader_engine_location(2, 5, width, 2 * width);
+      for (uint16_t field : {kSimdId, kWgpId, kSaId})
+        check(field, Result::Unsupported, 0);
+    }
+    cu->set_shader_engine_location(2, 31, 32, 64);
+    check(kWgpId, Result::Success, 15);
+    check(kSimdId, Result::Success, 3);
+
+    // SA_ID has one bit.
+    cu->set_shader_engine_location(2, 17, 8, 24);
+    check(kSaId, Result::Unsupported, 0);
+    check(kWgpId, Result::Success, 0);
+
+    // SE_ID has three bits.
+    cu->set_shader_engine_location(7, 5, 8, 16);
+    check(kSeId, Result::Success, 7);
+    cu->set_shader_engine_location(8, 5, 8, 16);
+    check(kSeId, Result::Unsupported, 0);
+    check(arch_case.widest_read, Result::Unsupported, 0);
+    check(kWgpId, Result::Success, 2);
+
+    // DP_RATE does not depend on placement; gfx11.5 has no measured value.
+    cu->set_shader_engine_location(1, 5, 8, 16);
+    const Result dp_rate = arch_case.dp_rate ? Result::Success : Result::Unsupported;
+    check(encode_hwreg(23, 29, 3), dp_rate, arch_case.dp_rate ? 1u : 0u);
+    check(encode_hwreg(23), dp_rate, arch_case.dp_rate ? 0x20040b01u : 0u);
+    check(encode_hwreg(23, 0, 29), Result::Success, 0x00040b01u);
+    wf->halt();
+  }
 }
 
 TEST(HwregTest, Gfx10GetregReadsSplitIbStsCounters) {
