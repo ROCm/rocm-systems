@@ -117,7 +117,8 @@ cannot establish FIFO completion of an older result. RDNA1 and RDNA2 GDS returns
 their own ordered LGKM class. Scalar-memory results, GDS results on other
 targets, and legacy CDNA FLAT results require a zero wait. On gfx1250,
 `global_inv` shares the ordinary load completion order, including with EXEC zero.
-Ignored gfx1250 buffer descriptors neither force progress nor occupy counter slots.
+The checker conservatively omits ignored gfx1250 buffer descriptors from both
+counter admission and occupancy, so they cannot hide an older pending result.
 EXEC-zero vector issues retain the counter positions guaranteed on gfx1250 and
 RDNA. CDNA1–4 also retain ordinary VMEM and LDS positions behind pending
 operations; an empty EXEC mask alone does not remove those positions.

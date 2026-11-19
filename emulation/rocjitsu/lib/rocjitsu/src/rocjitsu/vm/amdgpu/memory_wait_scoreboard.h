@@ -10,6 +10,7 @@
 
 #include <array>
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -208,9 +209,16 @@ public:
   /// may issue before cancelling that instruction with this snapshot.
   IssueSnapshot issue_snapshot() const { return issued_; }
   bool cancel_last_issue(uint64_t pc, const IssueSnapshot &before);
-  /// Wave state qualifies EXEC-zero and ignored-resource admission. Counter-only
-  /// clients may omit it when their instruction is already known to issue.
+  /// @brief Apply implicit counter capacity and explicit instruction waits.
+  /// @details Wave state qualifies EXEC-zero and ignored-resource admission.
+  /// Without a wave, producer admission assumes all classified obligations count.
+  /// @pre If supplied, wave has the architecture specified by arch.
   void before(const Instruction &inst, rj_code_arch_t arch, const Wavefront *wave = nullptr);
+  /// @brief Whether a classified counter obligation survives wave-state filtering.
+  /// @details CDNA5 filters ignored resources and skippable EXEC-zero issues.
+  /// Other targets keep their existing issue/routing rules. Replay-source XCNT
+  /// and counter-only instructions without memory metadata are not filtered.
+  /// @pre counter was classified from inst for wave's architecture.
   static bool counts_memory_counter(const Instruction &inst, const Wavefront &wave,
                                     WaitCounterKind counter);
   /// Return whether address preparation can change which lanes supply VDATA.

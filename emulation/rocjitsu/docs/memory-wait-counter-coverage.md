@@ -53,7 +53,10 @@ Functional execution routes the requesting lanes by address space.
 
 Counter admission and occupancy both account for EXEC and resource descriptors.
 An ignored gfx1250 buffer descriptor (TYPE other than 0) neither forces progress
-nor contributes a younger counter position. With EXEC zero, gfx1250 VMEM retains
+nor contributes a younger counter position in the checker. The ISA specifies
+ignored data effects; omitting its counter slot conservatively keeps older
+results pending even if hardware counts the ignored instruction.
+With EXEC zero, gfx1250 VMEM retains
 its LOAD/STORE/ASYNC/TENSOR obligations, LDS retains DSCNT, and FLAT retains both
 domains, following the skip conditions in CDNA5 ISA section 3.2.2.1. An LDS
 instruction's ASYNC obligation is not guaranteed by those conditions. RDNA retains
