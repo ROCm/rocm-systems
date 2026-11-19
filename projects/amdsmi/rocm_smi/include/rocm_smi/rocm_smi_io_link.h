@@ -79,7 +79,7 @@ class IOLink {
  private:
   uint32_t node_indx_;
   uint32_t link_indx_;
-  // Zero until Initialize() reads them: discovery keeps a link whose Initialize() failed.
+  // Zero until Initialize() reads them, so a failed Initialize() leaves none indeterminate.
   IO_LINK_TYPE type_ = IOLINK_TYPE_UNDEFINED;
   uint32_t node_from_ = 0;
   uint32_t node_to_ = 0;

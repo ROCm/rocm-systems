@@ -193,9 +193,10 @@ static int DiscoverLinks(std::map<std::pair<uint32_t, uint32_t>, std::shared_ptr
       link_indx = static_cast<uint32_t>(std::stoi(dentry_io_link->d_name));
       link = std::make_shared<IOLink>(node_indx, link_indx, directory);
 
-      link->Initialize();
-
-      (*links)[std::make_pair(link->node_from(), link->node_to())] = link;
+      // An unread link names node 0 and would replace that node's real link.
+      if (link->Initialize() == 0) {
+        (*links)[std::make_pair(link->node_from(), link->node_to())] = link;
+      }
 
       dentry_io_link = readdir(io_link_dir);
     }
@@ -261,9 +262,10 @@ static int DiscoverLinksPerNode(uint32_t node_indx,
     link_indx = static_cast<uint32_t>(std::stoi(dentry->d_name));
     link = std::make_shared<IOLink>(node_indx, link_indx, directory);
 
-    link->Initialize();
-
-    (*links)[link->node_to()] = link;
+    // An unread link names node 0 and would replace that node's real link.
+    if (link->Initialize() == 0) {
+      (*links)[link->node_to()] = link;
+    }
 
     dentry = readdir(io_link_dir);
   }
