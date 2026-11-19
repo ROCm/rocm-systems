@@ -850,7 +850,7 @@ void Buffer::destroy() {
       }
     }
 
-    if (needUnlockHostMem && hostLockOwner_) {
+    if (needUnlockHostMem && HostLockOwner()) {
       if (memFlags & (CL_MEM_USE_HOST_PTR | CL_MEM_ALLOC_HOST_PTR)) {
         // Safe because Memory::~Memory() destroys in insertion order and the owner is
         // always inserted first, so no sibling's destroy() can still be pending.
@@ -1196,70 +1196,40 @@ bool Buffer::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
     owner()->setHostMem(deviceMemory_);
   } else if (owner()->getSvmPtr() != owner()->getHostMem()) {
     if (memFlags & (CL_MEM_USE_HOST_PTR | CL_MEM_ALLOC_HOST_PTR)) {
-      // hipHostRegister maps this host range on every device in the context, so locking
-      // each device separately repeats register+map per GPU. The first device here locks
-      // all context devices in one hsa_amd_memory_lock_to_pool call; the rest reuse that
-      // mapping. HIP-only: OpenCL shares this code path but has always locked per-device,
-      // so gate on amd::IS_HIP to leave OpenCL unchanged.
-      //
-      // lockMemoryOps() serializes sibling device::Memory creation (see
-      // Memory::addDeviceMemory()); must be recursive_mutex since the caller already
-      // holds it.
-      const auto& contextDevices = owner()->getContext().devices();
+      // hipHostRegister maps this host range on every device in its context, so locking
+      // each device separately repeats register+map per GPU. HIP's context always spans
+      // every device in the process (see hip::host_context), so one device can lock every
+      // agent in a single hsa_amd_memory_lock_to_pool call and the rest just reuse that
+      // address. OpenCL's context can be a genuine subset, so it keeps locking per-device.
+      const bool shareLock = amd::IS_HIP && owner()->getContext().devices().size() > 1;
 
-      void* shared = nullptr;
-      bool priorGroupLockFailed = false;
-      std::unique_lock<std::recursive_mutex> lock;
-      if (amd::IS_HIP) {
-        lock = std::unique_lock<std::recursive_mutex>(owner()->lockMemoryOps());
-        for (amd::Device* other : contextDevices) {
-          if (other == &dev()) continue;
-          device::Memory* existing = owner()->getDeviceMemory(*other, false);
-          if (existing == nullptr) continue;
-          roc::Memory* existingMem = static_cast<roc::Memory*>(existing);
-          // A sibling's failed group-lock attempt means ours would fail too.
-          if (existingMem->HostLockGroupAttemptFailed()) {
-            priorGroupLockFailed = true;
-          }
-          // Reuse only if the sibling's lock covered every context device; one that
-          // fell back to locking only itself was never mapped for our agent.
-          if (!existingMem->HostLockCoversAllDevices()) continue;
-          shared = reinterpret_cast<void*>(existing->virtualAddress());
-          if (shared != nullptr) break;
-        }
-      }
+      // Memory::addDeviceMemory() creates this object while already holding
+      // owner()->lockMemoryOps(), serializing sibling creation, so the first device to
+      // reach this point for a given owner is always fully initialized (or not yet
+      // present) by the time any other device gets here -- safe to read it directly.
+      roc::Memory* first =
+          shareLock ? static_cast<roc::Memory*>(owner()->getOriginalDeviceMemory()) : nullptr;
 
-      if (shared != nullptr) {
-        deviceMemory_ = shared;
-      } else if (amd::IS_HIP && contextDevices.size() > 1 && !priorGroupLockFailed) {
-        // Build the agent list from this context's own devices, not every GPU visible
-        // to the process, so we never lock/map memory onto devices outside the context.
-        std::vector<hsa_agent_t> lockAgents;
-        lockAgents.reserve(contextDevices.size());
-        for (amd::Device* d : contextDevices) {
-          lockAgents.push_back(static_cast<const roc::Device*>(d)->getBackendDevice());
-        }
+      if (first != nullptr && first != this && first->HostLockAllAgents()) {
+        // Reuse the first device's mapping; it remains the sole unlock owner.
+        assert(first->HostLockOwner() && "An all-agent lock must have an unlock owner!");
+        deviceMemory_ = reinterpret_cast<void*>(first->virtualAddress());
+        assert(!HostLockOwner() && "Only the locking device may unlock the range!");
+      } else {
+        // Only the first device for this owner ever attempts the group lock; every other
+        // sibling either reused it above or falls straight to locking just itself here,
+        // so a failed group lock is never retried.
+        const bool tryAllAgents = shareLock && (first == nullptr || first == this);
         deviceMemory_ = dev().hostLock(owner()->getHostMem(), owner()->getSize(),
-                                       getHostMemorySegment(memFlags), lockAgents);
-        if (deviceMemory_ != nullptr) {
-          hostLockOwner_ = true;
-          hostLockCoversAllDevices_ = true;
-        } else {
-          // Group lock failed (e.g. peer agent unavailable); fall back to locking just
-          // this device, and flag it so later siblings skip straight to the fallback too.
+                                       getHostMemorySegment(memFlags), tryAllAgents);
+        const bool lockedAllAgents = tryAllAgents && deviceMemory_ != nullptr;
+        if (deviceMemory_ == nullptr && tryAllAgents) {
+          // The group lock failed (e.g. a peer agent is unavailable); fall back to
+          // locking just this device instead of failing the whole hipHostRegister call.
           deviceMemory_ = dev().hostLock(owner()->getHostMem(), owner()->getSize(),
                                          getHostMemorySegment(memFlags));
-          hostLockOwner_ = deviceMemory_ != nullptr;
-          hostLockGroupAttemptFailed_ = true;
         }
-      } else {
-        // Single-device context, non-HIP caller, or group lock already known to fail.
-        deviceMemory_ = dev().hostLock(owner()->getHostMem(), owner()->getSize(),
-                                       getHostMemorySegment(memFlags));
-        hostLockOwner_ = deviceMemory_ != nullptr;
-        if (amd::IS_HIP && contextDevices.size() > 1) {
-          hostLockGroupAttemptFailed_ = true;
-        }
+        setHostLockState(deviceMemory_ != nullptr, lockedAllAgents);
       }
     } else {
       deviceMemory_ = owner()->getHostMem();

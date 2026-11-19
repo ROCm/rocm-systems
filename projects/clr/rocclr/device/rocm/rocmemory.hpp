@@ -132,6 +132,15 @@ class Memory : public device::Memory {
   //! Returns the reconstructed-SRD interop image descriptor (may be null).
   hsa_amd_image_descriptor_t* getAmdImageDesc() const { return amdImageDesc_; }
 
+  //! True only for the device::Memory that actually called hsa_amd_memory_lock; only it
+  //! may call Hsa::memory_unlock. Public (not protected) so a sibling can read it through
+  //! a roc::Memory base pointer without a derived-class cast.
+  bool HostLockOwner() const { return hostLockOwner_; }
+
+  //! True only when the owner's lock call covered every device in the context. Siblings
+  //! may only reuse the owner's mapping when this is true.
+  bool HostLockAllAgents() const { return hostLockAllAgents_; }
+
  protected:
   bool allocateMapMemory(size_t allocationSize);
 
@@ -143,6 +152,12 @@ class Memory : public device::Memory {
   void setOwningAgent(hsa_agent_t agent) {
     owningAgentHandle_.store(agent.handle, std::memory_order_release);
     owningAgentDriverNodeId_.store(Device::agentDriverNodeId(agent), std::memory_order_release);
+  }
+
+  //! Record the outcome of this object's own host-lock attempt (see Buffer::create()).
+  void setHostLockState(bool owner, bool allAgents) {
+    hostLockOwner_ = owner;
+    hostLockAllAgents_ = allAgents;
   }
 
   // Free / deregister device memory.
@@ -167,27 +182,6 @@ class Memory : public device::Memory {
 
   void destroyInteropBuffer();
 
-  // True only for the device memory object that called hsa_amd_memory_lock.
-  // Sibling devices reuse that mapping and must not unlock it.
-  bool hostLockOwner_ = false;
-
-  // True only when hostLockOwner_'s lock call included every device in the owning
-  // context (i.e. it used the multi-agent hostLock path and that call succeeded).
-  // Sibling devices may only reuse hostLockOwner_'s mapping when this is true;
-  // otherwise each device must lock its own agent individually (see Buffer::create).
-  bool hostLockCoversAllDevices_ = false;
-
-  // True once a device in this context tried the multi-agent group lock and it failed,
-  // falling back to an individual lock. Siblings check this to skip retrying (see
-  // Buffer::create).
-  bool hostLockGroupAttemptFailed_ = false;
-
- public:
-  // Accessors so Buffer::create() can inspect a sibling's lock state via roc::Memory*.
-  bool HostLockCoversAllDevices() const { return hostLockCoversAllDevices_; }
-  bool HostLockGroupAttemptFailed() const { return hostLockGroupAttemptFailed_; }
-
- protected:
   // Pointer to the device associated with this memory object.
   const roc::Device& dev_;
 
@@ -220,6 +214,9 @@ class Memory : public device::Memory {
 
   // Disable operator=
   Memory& operator=(const Memory&);
+
+  bool hostLockOwner_ = false;      //!< This object called hsa_amd_memory_lock
+  bool hostLockAllAgents_ = false;  //!< This object's lock covered every GPU agent
 
   amd::Memory* pinnedMemory_;        //!< Memory used as pinned system memory
   std::atomic<uint64_t> owningAgentHandle_;  //!< HSA agent handle (atomic for thread-safety)
