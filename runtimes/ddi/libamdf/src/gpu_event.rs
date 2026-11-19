@@ -4,7 +4,7 @@
 //! Public GPU native events over the qualified provider notification services.
 
 use crate::generated::amdf::*;
-use crate::instance::{self, Device};
+use crate::session::{self, Device};
 use crate::support::*;
 use rocddi::device::gpu::event::{SignalEvent, SignalEventAddressing, SignalEventProtocol};
 use rocddi::memory::storage::Owned;
@@ -35,7 +35,7 @@ pub(crate) unsafe extern "C" fn create(
         }
         let device = object(pointer.cast::<Device>())?;
         device.require_current_process()?;
-        let instance = instance::device_instance(device);
+        let instance = session::device_instance(device);
         if !instance.process_lifetime() {
             return Err(UNSUPPORTED);
         }

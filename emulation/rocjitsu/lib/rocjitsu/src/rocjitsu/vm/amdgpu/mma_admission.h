@@ -128,7 +128,7 @@ public:
           const auto access = async_execution::footprint(*next, num_vgprs, has_accvgprs);
           if (!access || pending.conflicts(*access))
             break;
-          if (matrix_coexecution::async_candidate(next->mnemonic())) {
+          if (matrix_coexecution::async_candidate(*next)) {
             plan.issuer_offset = offset;
             // Preserve wider independent groups: offload their prefix and
             // reserve the final MMA for useful work on the issuing thread.
