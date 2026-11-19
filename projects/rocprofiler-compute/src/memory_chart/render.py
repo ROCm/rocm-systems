@@ -46,9 +46,9 @@ _LEGEND_ENTRIES: tuple[tuple[str, str, str], ...] = (
     ("<----", "Read", "read"),
     ("---->", "Write", "write"),
     ("<--->", "Atomic", "atomic"),
-    ("█", "Util", "util"),
-    ("█", "Hit%", "hit"),
-    ("█", "Stall", "stall"),
+    ("█", "Util %", "util"),
+    ("█", "Hit %", "hit"),
+    ("█", "Stall %", "stall"),
 )
 
 _ARROW_GLYPHS = {"backward": "<{}", "forward": "{}>", "both": "<{}>"}
@@ -218,7 +218,7 @@ class MemChart:
             if lines and not compact:
                 lines.append("")
             shown = self._shown(item.metric_id)
-            color = COLORS["util"] if compact else COLORS[item.category]
+            color = COLORS[item.category]
             if len(item.title) + 1 + len(shown) > width:
                 lines += [item.title, _colored(shown, color)]
             else:
@@ -232,6 +232,7 @@ class MemChart:
                 lines.append("")
             shown = format_value(row.value, PERCENT)
             lines.append(f"{row.label} {_colored(shown, COLORS['stall'])}")
+            lines.append(f"[dim]{progress_bar(row.value)}[/dim]")
         return lines
 
     # -- edges -------------------------------------------------------------

@@ -311,11 +311,15 @@ def test_progress_bar_is_clamped(percent, filled):
 )
 def test_active_stall_is_annotated_on_its_block(level, block):
     output = render("gfx950", membw=make_membw(make_node(f"{level} stall", level)))
-    row = next(line for line in output.splitlines() if f"[!] {level} stall" in line)
+    lines = output.splitlines()
+    index = next(i for i, line in enumerate(lines) if f"[!] {level} stall" in line)
+    row = lines[index]
     title_row = next(
         line for line in output.splitlines() if f" {block} " in line and "╭" in line
     )
     assert "18.7%" in row
+    # The stall's percentage also shows as a bar, below its row
+    assert progress_bar(18.7) in lines[index + 1]
     assert abs(row.index("[!]") - title_row.index(block)) < 20
     assert "Stall" in output.splitlines()[-1]
 
