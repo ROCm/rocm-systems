@@ -5,9 +5,12 @@
  */
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <numeric>
+#include <thread>
 #include <vector>
 
 #include <hip_test_common.hh>
@@ -577,20 +580,25 @@ HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_PreferLinearBroadcast_D2D) {
 /**
  * Test Description
  * ------------------------
- * - The GPU-side wait/signal parameters are reserved and must be NULL. Passing a
- *   non-NULL waits or signals array returns hipErrorNotSupported. Device-
- *   independent: the check runs before any device/op dispatch.
+ * - Per-entry wait/signal validation: zero-initialized entries are accepted; out-of-range ops,
+ *   NULL or misaligned addresses, stray fields on no-op entries and non-zero reserved fields
+ *   return hipErrorInvalidValue. Waits/signals on pageable host memory, on pinned host-to-host
+ *   copies, on asymmetric swaps or combined with hipMemcpyFlagExtPreferComputeEngine return
+ *   hipErrorNotSupported.
  * Test source
  * ------------------------
  * - catch/unit/memory/hipExtMemcpyBatchAsync.cc
  */
-HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_WaitsSignals_Reserved_Negative) {
+HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_WaitsSignals_Negative) {
   constexpr size_t kBytes = 1024;
 
   void* d_a = nullptr;
   void* d_b = nullptr;
+  uint64_t* d_flag = nullptr;
   HIP_CHECK(hipMalloc(&d_a, kBytes));
   HIP_CHECK(hipMalloc(&d_b, kBytes));
+  HIP_CHECK(hipMalloc(&d_flag, 2 * sizeof(uint64_t)));
+  std::vector<char> pageable(kBytes);
 
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
@@ -602,24 +610,1098 @@ HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_WaitsSignals_Reserved_Negative) {
   hipExtMemcpyAttributes attr{};
   attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
 
-  hipExtMemcpyWait waits[1] = {};
-  hipExtMemcpySignal signals[1] = {};
+  auto call = [&](hipExtMemcpyWait* w, hipExtMemcpySignal* s) {
+    return hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr, w, s, 1, &attr, attrsIdxs, 1, stream);
+  };
 
-  // Non-NULL waits -> reserved -> hipErrorNotSupported.
-  hipError_t errW = hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr,
-                                           waits, nullptr, 1,
-                                           &attr, attrsIdxs, 1, stream);
-  REQUIRE(errW == hipErrorNotSupported);
+  // Zero-initialized entries mean no wait / no signal.
+  {
+    hipExtMemcpyWait w{};
+    hipExtMemcpySignal s{};
+    HIP_CHECK(call(&w, &s));
+    HIP_CHECK(hipStreamSynchronize(stream));
+  }
 
-  // Non-NULL signals -> reserved -> hipErrorNotSupported.
-  hipError_t errS = hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr,
-                                           nullptr, signals, 1,
-                                           &attr, attrsIdxs, 1, stream);
-  REQUIRE(errS == hipErrorNotSupported);
+  SECTION("wait compareOp out of range") {
+    hipExtMemcpyWait w{};
+    w.addr = d_flag;
+    w.compareOp = hipExtMemcpyWaitGt + 1;
+    REQUIRE(call(&w, nullptr) == hipErrorInvalidValue);
+  }
+  SECTION("wait NULL addr") {
+    hipExtMemcpyWait w{};
+    w.compareOp = hipExtMemcpyWaitEq;
+    REQUIRE(call(&w, nullptr) == hipErrorInvalidValue);
+  }
+  SECTION("wait misaligned addr") {
+    hipExtMemcpyWait w{};
+    w.addr = reinterpret_cast<char*>(d_flag) + 4;
+    w.compareOp = hipExtMemcpyWaitEq;
+    REQUIRE(call(&w, nullptr) == hipErrorInvalidValue);
+  }
+  SECTION("wait none with addr") {
+    hipExtMemcpyWait w{};
+    w.addr = d_flag;
+    REQUIRE(call(&w, nullptr) == hipErrorInvalidValue);
+  }
+  SECTION("wait reserved non-zero") {
+    hipExtMemcpyWait w{};
+    w.addr = d_flag;
+    w.compareOp = hipExtMemcpyWaitEq;
+    w.reserved[3] = 1;
+    REQUIRE(call(&w, nullptr) == hipErrorInvalidValue);
+  }
+  SECTION("signal op out of range") {
+    hipExtMemcpySignal s{};
+    s.addr = d_flag;
+    s.signalOp = hipExtMemcpySignalSub + 1;
+    REQUIRE(call(nullptr, &s) == hipErrorInvalidValue);
+  }
+  SECTION("signal NULL addr") {
+    hipExtMemcpySignal s{};
+    s.signalOp = hipExtMemcpySignalWrite;
+    REQUIRE(call(nullptr, &s) == hipErrorInvalidValue);
+  }
+  SECTION("signal misaligned addr") {
+    hipExtMemcpySignal s{};
+    s.addr = reinterpret_cast<char*>(d_flag) + 4;
+    s.signalOp = hipExtMemcpySignalWrite;
+    REQUIRE(call(nullptr, &s) == hipErrorInvalidValue);
+  }
+  SECTION("signal none with data") {
+    hipExtMemcpySignal s{};
+    s.data = 1;
+    REQUIRE(call(nullptr, &s) == hipErrorInvalidValue);
+  }
+  SECTION("signal reserved non-zero") {
+    hipExtMemcpySignal s{};
+    s.addr = d_flag;
+    s.signalOp = hipExtMemcpySignalWrite;
+    s.reserved0 = 1;
+    REQUIRE(call(nullptr, &s) == hipErrorInvalidValue);
+  }
+  SECTION("signal on pageable host copy") {
+    hipExtMemcpySignal s{};
+    s.addr = d_flag;
+    s.signalOp = hipExtMemcpySignalWrite;
+    dsts[0] = pageable.data();
+    REQUIRE(call(nullptr, &s) == hipErrorNotSupported);
+  }
+  SECTION("signal with prefer compute engine") {
+    hipExtMemcpySignal s{};
+    s.addr = d_flag;
+    s.signalOp = hipExtMemcpySignalWrite;
+    attr.flags = hipMemcpyFlagExtPreferComputeEngine;
+    REQUIRE(call(nullptr, &s) == hipErrorNotSupported);
+  }
+  SECTION("signal on pinned host-to-host copy") {
+    void* h_a = nullptr;
+    void* h_b = nullptr;
+    HIP_CHECK(hipHostMalloc(&h_a, kBytes));
+    HIP_CHECK(hipHostMalloc(&h_b, kBytes));
+    hipExtMemcpySignal s{};
+    s.addr = d_flag;
+    s.signalOp = hipExtMemcpySignalWrite;
+    dsts[0] = h_a;
+    srcs[0] = h_b;
+    REQUIRE(call(nullptr, &s) == hipErrorNotSupported);
+    HIP_CHECK(hipHostFree(h_a));
+    HIP_CHECK(hipHostFree(h_b));
+  }
+  SECTION("wait on asymmetric swap") {
+    hipExtMemcpyWait w{};
+    w.addr = d_flag;
+    w.mask = 0xffffffffull;
+    w.compareOp = hipExtMemcpyWaitEq;
+    size_t sizesDst[] = {kBytes / 2};
+    attr.flags = hipMemcpyFlagExtOpSwap;
+    REQUIRE(hipExtMemcpyBatchAsync(dsts, srcs, sizes, sizesDst, &w, nullptr, 1, &attr, attrsIdxs,
+                                   1, stream) == hipErrorNotSupported);
+  }
 
+  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipFree(d_a));
+  HIP_CHECK(hipFree(d_b));
+  HIP_CHECK(hipFree(d_flag));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - A per-entry signal applies its atomic (write/add/sub) to a device or pinned host word
+ *   after the copy; the copy data is correct and entries without a signal leave it alone.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipExtMemcpyBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_Signal) {
+  constexpr size_t kNumElements = 1 << 16;
+  constexpr size_t kSizeBytes = kNumElements * sizeof(int);
+  constexpr uint64_t kInit = 0x100000000ull + 100;
+  constexpr uint64_t kData = 7;
+
+  const uint32_t op = GENERATE(static_cast<uint32_t>(hipExtMemcpySignalWrite),
+                               static_cast<uint32_t>(hipExtMemcpySignalAdd),
+                               static_cast<uint32_t>(hipExtMemcpySignalSub));
+  const bool hostCounter = GENERATE(false, true);
+  const uint64_t expected = (op == hipExtMemcpySignalWrite) ? kData
+                            : (op == hipExtMemcpySignalAdd) ? kInit + kData
+                                                            : kInit - kData;
+  CAPTURE(op, hostCounter);
+
+  uint64_t* counter = nullptr;
+  if (hostCounter) {
+    HIP_CHECK(hipHostMalloc(&counter, sizeof(uint64_t), hipHostMallocCoherent));
+    *counter = kInit;
+  } else {
+    HIP_CHECK(hipMalloc(&counter, sizeof(uint64_t)));
+    HIP_CHECK(hipMemcpy(counter, &kInit, sizeof(uint64_t), hipMemcpyHostToDevice));
+  }
+
+  void* d_src[2] = {};
+  void* d_dst[2] = {};
+  std::vector<int> host(kNumElements, 0x5a);
+  for (int k = 0; k < 2; ++k) {
+    HIP_CHECK(hipMalloc(&d_src[k], kSizeBytes));
+    HIP_CHECK(hipMalloc(&d_dst[k], kSizeBytes));
+    HIP_CHECK(hipMemcpy(d_src[k], host.data(), kSizeBytes, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemset(d_dst[k], 0, kSizeBytes));
+  }
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  size_t sizes[] = {kSizeBytes, kSizeBytes};
+  size_t attrsIdxs[] = {0};
+  hipExtMemcpyAttributes attr{};
+  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  hipExtMemcpySignal signals[2] = {};
+  signals[0].addr = counter;
+  signals[0].data = kData;
+  signals[0].signalOp = op;
+
+  hipError_t err = hipExtMemcpyBatchAsync(d_dst, d_src, sizes, nullptr, nullptr, signals, 2, &attr,
+                                          attrsIdxs, 1, stream);
+  if (err == hipErrorNotSupported) {
+    for (int k = 0; k < 2; ++k) {
+      HIP_CHECK(hipFree(d_src[k]));
+      HIP_CHECK(hipFree(d_dst[k]));
+    }
+    HIP_CHECK(hostCounter ? hipHostFree(counter) : hipFree(counter));
+    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_SKIP_TEST(HipTest::SkipReason::kSdmaWaitSignalUnsupported);
+  }
+  HIP_CHECK(err);
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  uint64_t value = 0;
+  if (hostCounter) {
+    value = __atomic_load_n(counter, __ATOMIC_ACQUIRE);
+  } else {
+    HIP_CHECK(hipMemcpy(&value, counter, sizeof(uint64_t), hipMemcpyDeviceToHost));
+  }
+  REQUIRE(value == expected);
+
+  std::vector<int> out(kNumElements);
+  for (int k = 0; k < 2; ++k) {
+    HIP_CHECK(hipMemcpy(out.data(), d_dst[k], kSizeBytes, hipMemcpyDeviceToHost));
+    REQUIRE(out == host);
+    HIP_CHECK(hipFree(d_src[k]));
+    HIP_CHECK(hipFree(d_dst[k]));
+  }
+  if (hostCounter) {
+    HIP_CHECK(hipHostFree(counter));
+  } else {
+    HIP_CHECK(hipFree(counter));
+  }
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - The signal is ordered after the copy: the host spins on a pinned counter (without
+ *   synchronizing the stream) and, once it changes, the pinned destination is complete.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipExtMemcpyBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_Signal_AfterCopy) {
+  constexpr size_t kNumElements = 16 << 20;
+  constexpr size_t kSizeBytes = kNumElements * sizeof(int);
+
+  uint64_t* counter = nullptr;
+  int* h_dst = nullptr;
+  void* d_src = nullptr;
+  HIP_CHECK(hipHostMalloc(&counter, sizeof(uint64_t), hipHostMallocCoherent));
+  HIP_CHECK(hipHostMalloc(&h_dst, kSizeBytes));
+  HIP_CHECK(hipMalloc(&d_src, kSizeBytes));
+  *counter = 0;
+  std::fill_n(h_dst, kNumElements, 0);
+  std::vector<int> host(kNumElements);
+  for (size_t i = 0; i < kNumElements; ++i) host[i] = static_cast<int>(i);
+  HIP_CHECK(hipMemcpy(d_src, host.data(), kSizeBytes, hipMemcpyHostToDevice));
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  void* dsts[] = {h_dst};
+  void* srcs[] = {d_src};
+  size_t sizes[] = {kSizeBytes};
+  size_t attrsIdxs[] = {0};
+  hipExtMemcpyAttributes attr{};
+  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  hipExtMemcpySignal signal{};
+  signal.addr = counter;
+  signal.data = 1;
+  signal.signalOp = hipExtMemcpySignalWrite;
+
+  hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr, nullptr, &signal, 1, &attr,
+                                          attrsIdxs, 1, stream);
+  if (err == hipErrorNotSupported) {
+    HIP_CHECK(hipHostFree(counter));
+    HIP_CHECK(hipHostFree(h_dst));
+    HIP_CHECK(hipFree(d_src));
+    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_SKIP_TEST(HipTest::SkipReason::kSdmaWaitSignalUnsupported);
+  }
+  HIP_CHECK(err);
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  while (__atomic_load_n(counter, __ATOMIC_ACQUIRE) != 1 &&
+         std::chrono::steady_clock::now() < deadline) {
+  }
+  REQUIRE(__atomic_load_n(counter, __ATOMIC_ACQUIRE) == 1);
+  REQUIRE(std::equal(host.begin(), host.end(), h_dst));
+
+  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipHostFree(counter));
+  HIP_CHECK(hipHostFree(h_dst));
+  HIP_CHECK(hipFree(d_src));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - A per-entry wait holds the copy until a pinned host word satisfies the compare: the
+ *   destination and the completion signal stay untouched until the host releases the flag.
+ *   Covers a low-dword and a high-dword masked compare.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipExtMemcpyBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_Wait) {
+  constexpr size_t kNumElements = 1 << 16;
+  constexpr size_t kSizeBytes = kNumElements * sizeof(int);
+
+  const bool highDword = GENERATE(false, true);
+  CAPTURE(highDword);
+  const uint64_t release = highDword ? (3ull << 32) : 3ull;
+  const uint64_t mask = highDword ? 0xffffffff00000000ull : 0xffffffffull;
+
+  uint64_t* flags = nullptr;  // [0] = wait flag, [1] = done counter
+  int* h_dst = nullptr;
+  void* d_src = nullptr;
+  HIP_CHECK(hipHostMalloc(&flags, 2 * sizeof(uint64_t), hipHostMallocCoherent));
+  HIP_CHECK(hipHostMalloc(&h_dst, kSizeBytes));
+  HIP_CHECK(hipMalloc(&d_src, kSizeBytes));
+  flags[0] = 0;
+  flags[1] = 0;
+  std::fill_n(h_dst, kNumElements, 0);
+  std::vector<int> host(kNumElements, 0x3c);
+  HIP_CHECK(hipMemcpy(d_src, host.data(), kSizeBytes, hipMemcpyHostToDevice));
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  void* dsts[] = {h_dst};
+  void* srcs[] = {d_src};
+  size_t sizes[] = {kSizeBytes};
+  size_t attrsIdxs[] = {0};
+  hipExtMemcpyAttributes attr{};
+  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  hipExtMemcpyWait wait{};
+  wait.addr = &flags[0];
+  wait.value = release;
+  wait.mask = mask;
+  wait.compareOp = hipExtMemcpyWaitGe;
+  hipExtMemcpySignal signal{};
+  signal.addr = &flags[1];
+  signal.data = 1;
+  signal.signalOp = hipExtMemcpySignalAdd;
+
+  hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr, &wait, &signal, 1, &attr,
+                                          attrsIdxs, 1, stream);
+  if (err == hipErrorNotSupported) {
+    HIP_CHECK(hipHostFree(flags));
+    HIP_CHECK(hipHostFree(h_dst));
+    HIP_CHECK(hipFree(d_src));
+    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_SKIP_TEST(HipTest::SkipReason::kSdmaWaitSignalUnsupported);
+  }
+  HIP_CHECK(err);
+
+  // Below the threshold: still blocked.
+  __atomic_store_n(&flags[0], release - (highDword ? (1ull << 32) : 1), __ATOMIC_RELEASE);
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  CHECK(hipStreamQuery(stream) == hipErrorNotReady);
+  CHECK(__atomic_load_n(&flags[1], __ATOMIC_ACQUIRE) == 0);
+  CHECK(std::all_of(h_dst, h_dst + kNumElements, [](int v) { return v == 0; }));
+
+  __atomic_store_n(&flags[0], release, __ATOMIC_RELEASE);
+  HIP_CHECK(hipStreamSynchronize(stream));
+  REQUIRE(__atomic_load_n(&flags[1], __ATOMIC_ACQUIRE) == 1);
+  REQUIRE(std::equal(host.begin(), host.end(), h_dst));
+
+  HIP_CHECK(hipHostFree(flags));
+  HIP_CHECK(hipHostFree(h_dst));
+  HIP_CHECK(hipFree(d_src));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - A full-width (mask 0) equal wait compares all 64 bits: a flag matching only the low or
+ *   only the high dword keeps the copy blocked; the full value releases it. Skipped on devices
+ *   whose polls compare one dword.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipExtMemcpyBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_Wait_FullWidth) {
+  constexpr size_t kNumElements = 1 << 16;
+  constexpr size_t kSizeBytes = kNumElements * sizeof(int);
+  constexpr uint64_t kRelease = 0x0000000500000007ull;
+
+  uint64_t* flags = nullptr;  // [0] = wait flag, [1] = done counter
+  int* h_dst = nullptr;
+  void* d_src = nullptr;
+  HIP_CHECK(hipHostMalloc(&flags, 2 * sizeof(uint64_t), hipHostMallocCoherent));
+  HIP_CHECK(hipHostMalloc(&h_dst, kSizeBytes));
+  HIP_CHECK(hipMalloc(&d_src, kSizeBytes));
+  flags[0] = 0;
+  flags[1] = 0;
+  std::fill_n(h_dst, kNumElements, 0);
+  std::vector<int> host(kNumElements, 0x4b);
+  HIP_CHECK(hipMemcpy(d_src, host.data(), kSizeBytes, hipMemcpyHostToDevice));
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  void* dsts[] = {h_dst};
+  void* srcs[] = {d_src};
+  size_t sizes[] = {kSizeBytes};
+  size_t attrsIdxs[] = {0};
+  hipExtMemcpyAttributes attr{};
+  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  hipExtMemcpyWait wait{};
+  wait.addr = &flags[0];
+  wait.value = kRelease;
+  wait.compareOp = hipExtMemcpyWaitEq;
+  hipExtMemcpySignal signal{};
+  signal.addr = &flags[1];
+  signal.data = 1;
+  signal.signalOp = hipExtMemcpySignalAdd;
+
+  hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr, &wait, &signal, 1, &attr,
+                                          attrsIdxs, 1, stream);
+  if (err == hipErrorNotSupported) {
+    HIP_CHECK(hipHostFree(flags));
+    HIP_CHECK(hipHostFree(h_dst));
+    HIP_CHECK(hipFree(d_src));
+    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_SKIP_TEST(HipTest::SkipReason::kSdmaPoll64Unsupported);
+  }
+  HIP_CHECK(err);
+
+  // Only one dword matches: still blocked.
+  for (const uint64_t partial : {kRelease & 0xffffffffull, kRelease & ~0xffffffffull}) {
+    CAPTURE(partial);
+    __atomic_store_n(&flags[0], partial, __ATOMIC_RELEASE);
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    CHECK(hipStreamQuery(stream) == hipErrorNotReady);
+    CHECK(__atomic_load_n(&flags[1], __ATOMIC_ACQUIRE) == 0);
+    CHECK(std::all_of(h_dst, h_dst + kNumElements, [](int v) { return v == 0; }));
+  }
+
+  __atomic_store_n(&flags[0], kRelease, __ATOMIC_RELEASE);
+  HIP_CHECK(hipStreamSynchronize(stream));
+  REQUIRE(__atomic_load_n(&flags[1], __ATOMIC_ACQUIRE) == 1);
+  REQUIRE(std::equal(host.begin(), host.end(), h_dst));
+
+  HIP_CHECK(hipHostFree(flags));
+  HIP_CHECK(hipHostFree(h_dst));
+  HIP_CHECK(hipFree(d_src));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
+// Sleeps for `ticks` wall-clock ticks, records whether the copy already ran, then releases it.
+__global__ void waitSignalProducer(uint64_t* waitFlag, const uint64_t* signalWord, const int* dst,
+                                   uint64_t ticks, int* early) {
+  const uint64_t start = wall_clock64();
+  while (wall_clock64() - start < ticks) __builtin_amdgcn_s_sleep(100);
+  *early = __hip_atomic_load(signalWord, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM) != 0 ||
+           dst[0] != 0;
+  __hip_atomic_store(waitFlag, 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+}
+
+// Spins on the copy's signal word (bounded by timeoutTicks), then checks the copied data.
+__global__ void waitSignalConsumer(const uint64_t* signalWord, const int* dst, int expected,
+                                   size_t n, uint64_t timeoutTicks, int* mismatches,
+                                   int* timedOut) {
+  const uint64_t start = wall_clock64();
+  while (__hip_atomic_load(signalWord, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM) != 1) {
+    if (wall_clock64() - start > timeoutTicks) {
+      if (threadIdx.x == 0) *timedOut = 1;
+      return;
+    }
+    __builtin_amdgcn_s_sleep(1);
+  }
+  for (size_t i = threadIdx.x; i < n; i += blockDim.x) {
+    if (dst[i] != expected) atomicAdd(mismatches, 1);
+  }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Kernel producer/consumer around a copy on three streams: the copy waits on a device word
+ *   that a kernel stores after a delay, and a second kernel spins on the copy's signal before
+ *   reading the destination. The copy must not run before the producer releases it.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipExtMemcpyBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_WaitSignal_Kernel) {
+  constexpr size_t kNumElements = 1 << 20;
+  constexpr size_t kSizeBytes = kNumElements * sizeof(int);
+  constexpr int kVal = 0x2d;
+  constexpr uint64_t kDelayMs = 50;
+  constexpr uint64_t kTimeoutMs = 10000;
+
+  const bool fineGrained = GENERATE(true, false);
+  CAPTURE(fineGrained);
+  const unsigned int mallocFlags =
+      fineGrained ? hipDeviceMallocFinegrained : hipDeviceMallocDefault;
+
+  int clockRateKHz = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&clockRateKHz, hipDeviceAttributeWallClockRate, 0));
+
+  uint64_t* flags = nullptr;  // [0] = wait flag, [1] = signal word
+  int* d_dst = nullptr;
+  int* results = nullptr;  // [0] = early, [1] = mismatches, [2] = consumer timed out
+  void* d_src = nullptr;
+  HIP_CHECK(
+      hipExtMallocWithFlags(reinterpret_cast<void**>(&flags), 2 * sizeof(uint64_t), mallocFlags));
+  HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&d_dst), kSizeBytes, mallocFlags));
+  HIP_CHECK(hipMalloc(&results, 3 * sizeof(int)));
+  HIP_CHECK(hipMalloc(&d_src, kSizeBytes));
+  HIP_CHECK(hipMemset(flags, 0, 2 * sizeof(uint64_t)));
+  HIP_CHECK(hipMemset(d_dst, 0, kSizeBytes));
+  HIP_CHECK(hipMemset(results, 0, 3 * sizeof(int)));
+  std::vector<int> host(kNumElements, kVal);
+  HIP_CHECK(hipMemcpy(d_src, host.data(), kSizeBytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  hipStream_t copyStream, producerStream, consumerStream;
+  HIP_CHECK(hipStreamCreate(&copyStream));
+  HIP_CHECK(hipStreamCreate(&producerStream));
+  HIP_CHECK(hipStreamCreate(&consumerStream));
+
+  void* dsts[] = {d_dst};
+  void* srcs[] = {d_src};
+  size_t sizes[] = {kSizeBytes};
+  size_t attrsIdxs[] = {0};
+  hipExtMemcpyAttributes attr{};
+  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  hipExtMemcpyWait wait{};
+  wait.addr = &flags[0];
+  wait.value = 1;
+  wait.mask = 0xffffffffull;
+  wait.compareOp = hipExtMemcpyWaitEq;
+  hipExtMemcpySignal signal{};
+  signal.addr = &flags[1];
+  signal.data = 1;
+  signal.signalOp = hipExtMemcpySignalWrite;
+
+  hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr, &wait, &signal, 1, &attr,
+                                          attrsIdxs, 1, copyStream);
+  if (err == hipErrorNotSupported) {
+    HIP_CHECK(hipFree(flags));
+    HIP_CHECK(hipFree(d_dst));
+    HIP_CHECK(hipFree(results));
+    HIP_CHECK(hipFree(d_src));
+    HIP_CHECK(hipStreamDestroy(copyStream));
+    HIP_CHECK(hipStreamDestroy(producerStream));
+    HIP_CHECK(hipStreamDestroy(consumerStream));
+    HIP_SKIP_TEST(HipTest::SkipReason::kSdmaWaitSignalUnsupported);
+  }
+  HIP_CHECK(err);
+  // Clear any error left by earlier tests so the launch checks below are meaningful.
+  static_cast<void>(hipGetLastError());
+  // Producer before consumer: if they share a hardware queue the consumer cannot starve it.
+  hipLaunchKernelGGL(waitSignalProducer, dim3(1), dim3(1), 0, producerStream, &flags[0], &flags[1],
+                     d_dst, static_cast<uint64_t>(clockRateKHz) * kDelayMs, &results[0]);
+  HIP_CHECK(hipGetLastError());
+  hipLaunchKernelGGL(waitSignalConsumer, dim3(1), dim3(1024), 0, consumerStream, &flags[1], d_dst,
+                     kVal, kNumElements, static_cast<uint64_t>(clockRateKHz) * kTimeoutMs,
+                     &results[1], &results[2]);
+  HIP_CHECK(hipGetLastError());
+
+  HIP_CHECK(hipStreamSynchronize(consumerStream));
+  HIP_CHECK(hipStreamSynchronize(producerStream));
+  HIP_CHECK(hipStreamSynchronize(copyStream));
+
+  int h_results[3] = {};
+  HIP_CHECK(hipMemcpy(h_results, results, sizeof(h_results), hipMemcpyDeviceToHost));
+  REQUIRE(h_results[2] == 0);
+  REQUIRE(h_results[0] == 0);
+  REQUIRE(h_results[1] == 0);
+  std::vector<int> out(kNumElements);
+  HIP_CHECK(hipMemcpy(out.data(), d_dst, kSizeBytes, hipMemcpyDeviceToHost));
+  REQUIRE(out == host);
+
+  HIP_CHECK(hipFree(flags));
+  HIP_CHECK(hipFree(d_dst));
+  HIP_CHECK(hipFree(results));
+  HIP_CHECK(hipFree(d_src));
+  HIP_CHECK(hipStreamDestroy(copyStream));
+  HIP_CHECK(hipStreamDestroy(producerStream));
+  HIP_CHECK(hipStreamDestroy(consumerStream));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Wait-only, signal-only and wait+signal on a swap between pinned host and device memory
+ *   (not a single linear copy, so the wait and signal are separate commands). Each submission
+ *   is held until the host releases its wait, and the swapped data is visible once its signal
+ *   lands. A burst of back-to-back submissions follows.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipExtMemcpyBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_WaitSignal_Swap) {
+  constexpr size_t kNumElements = 1 << 16;
+  constexpr size_t kSizeBytes = kNumElements * sizeof(int);
+  constexpr int kValA = 0x11;
+  constexpr int kValB = 0x22;
+  constexpr int kIters = 4;
+  constexpr int kBurst = 64;
+
+  const bool hasWait = GENERATE(true, false);
+  const bool hasSignal = GENERATE(true, false);
+  if (!hasWait && !hasSignal) return;
+  CAPTURE(hasWait, hasSignal);
+
+  uint64_t* flags = nullptr;  // [0] = wait flag, [1] = done counter
+  int* h_a = nullptr;
+  void* d_b = nullptr;
+  HIP_CHECK(hipHostMalloc(&flags, 2 * sizeof(uint64_t), hipHostMallocCoherent));
+  HIP_CHECK(hipHostMalloc(&h_a, kSizeBytes));
+  HIP_CHECK(hipMalloc(&d_b, kSizeBytes));
+  flags[0] = 0;
+  flags[1] = 0;
+  std::fill_n(h_a, kNumElements, kValA);
+  std::vector<int> hostB(kNumElements, kValB);
+  HIP_CHECK(hipMemcpy(d_b, hostB.data(), kSizeBytes, hipMemcpyHostToDevice));
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  void* dsts[] = {d_b};
+  void* srcs[] = {h_a};
+  size_t sizes[] = {kSizeBytes};
+  size_t attrsIdxs[] = {0};
+  hipExtMemcpyAttributes attr{};
+  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  attr.flags = hipMemcpyFlagExtOpSwap;
+  hipExtMemcpyWait wait{};
+  wait.addr = &flags[0];
+  wait.mask = 0xffffffffull;
+  wait.compareOp = hipExtMemcpyWaitGe;
+  hipExtMemcpySignal signal{};
+  signal.addr = &flags[1];
+  signal.data = 1;
+  signal.signalOp = hipExtMemcpySignalAdd;
+
+  auto submit = [&](uint64_t release) {
+    wait.value = release;
+    return hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr, hasWait ? &wait : nullptr,
+                                  hasSignal ? &signal : nullptr, 1, &attr, attrsIdxs, 1, stream);
+  };
+  // After n swaps the host side holds A when n is even and B when it is odd.
+  auto hostIs = [&](int v) {
+    return std::all_of(h_a, h_a + kNumElements, [=](int x) { return x == v; });
+  };
+
+  for (int i = 0; i < kIters; ++i) {
+    hipError_t err = submit(i + 1);
+    if (i == 0 && err == hipErrorNotSupported) {
+      HIP_CHECK(hipHostFree(flags));
+      HIP_CHECK(hipHostFree(h_a));
+      HIP_CHECK(hipFree(d_b));
+      HIP_CHECK(hipStreamDestroy(stream));
+      HIP_SKIP_TEST(HipTest::SkipReason::kSdmaWaitSignalUnsupported);
+    }
+    HIP_CHECK(err);
+    const int before = (i % 2 == 0) ? kValA : kValB;
+    const int after = (i % 2 == 0) ? kValB : kValA;
+    if (hasWait) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      CHECK(hipStreamQuery(stream) == hipErrorNotReady);
+      CHECK(__atomic_load_n(&flags[1], __ATOMIC_ACQUIRE) == 0);
+      CHECK(hostIs(before));
+      __atomic_store_n(&flags[0], i + 1, __ATOMIC_RELEASE);
+    }
+    if (hasSignal) {
+      const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+      while (__atomic_load_n(&flags[1], __ATOMIC_ACQUIRE) != 1 &&
+             std::chrono::steady_clock::now() < deadline) {
+      }
+      REQUIRE(__atomic_load_n(&flags[1], __ATOMIC_ACQUIRE) == 1);
+      REQUIRE(hostIs(after));
+      __atomic_store_n(&flags[1], 0, __ATOMIC_RELEASE);
+    }
+    HIP_CHECK(hipStreamSynchronize(stream));
+    REQUIRE(hostIs(after));
+    RequireDeviceFilled(d_b, kSizeBytes, before);
+  }
+
+  // Back-to-back submissions; the waits are already satisfied.
+  for (int i = 0; i < kBurst; ++i) HIP_CHECK(submit(kIters));
+  HIP_CHECK(hipStreamSynchronize(stream));
+  REQUIRE(__atomic_load_n(&flags[1], __ATOMIC_ACQUIRE) == (hasSignal ? kBurst : 0));
+  const bool even = (kIters + kBurst) % 2 == 0;
+  REQUIRE(hostIs(even ? kValA : kValB));
+  RequireDeviceFilled(d_b, kSizeBytes, even ? kValB : kValA);
+
+  HIP_CHECK(hipHostFree(flags));
+  HIP_CHECK(hipHostFree(h_a));
+  HIP_CHECK(hipFree(d_b));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
+__global__ void countMismatches(const int* data, size_t n, int expected, int* mismatches) {
+  for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += gridDim.x * blockDim.x) {
+    if (data[i] != expected) atomicAdd(mismatches, 1);
+  }
+}
+
+__global__ void releaseFlags(uint64_t* f0, uint64_t* f1, uint64_t* f2, uint64_t* f3,
+                             uint64_t value) {
+  for (uint64_t* f : {f0, f1, f2, f3}) {
+    __hip_atomic_store(f, value, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+  }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Two-GPU ping-pong synchronised only by copy waits/signals: each round, each GPU copies its
+ *   source into the peer's receive buffer (waiting until the peer has consumed the previous
+ *   round, then signalling "ready"), and copies its own receive buffer out (waiting on "ready",
+ *   then signalling "consumed"). A kernel checks every received round. The flags live either
+ *   on the polling GPU (signals cross xGMI) or on the signalling GPU (polls cross xGMI); the
+ *   copies are either separate batches or one two-entry batch.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipExtMemcpyBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_WaitSignal_Peer) {
+  constexpr int kIters = 8;
+  constexpr uint64_t kRescue = 0xffffffffull;
+
+  if (HipTest::getDeviceCount() < 2) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+  }
+  int canAccess01 = 0, canAccess10 = 0;
+  HIP_CHECK(hipDeviceCanAccessPeer(&canAccess01, 0, 1));
+  HIP_CHECK(hipDeviceCanAccessPeer(&canAccess10, 1, 0));
+  if (!canAccess01 || !canAccess10) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+  }
+
+  const size_t sizeBytes = GENERATE(kSmallCopySize, size_t{16} << 20);
+  const bool fineGrained = GENERATE(true, false);
+  const bool flagsOnPoller = GENERATE(true, false);
+  const bool oneBatch = GENERATE(false, true);
+  CAPTURE(sizeBytes, fineGrained, flagsOnPoller, oneBatch);
+  const size_t numElements = sizeBytes / sizeof(int);
+  const unsigned int mallocFlags =
+      fineGrained ? hipDeviceMallocFinegrained : hipDeviceMallocDefault;
+  auto pattern = [](int dev, int round) { return ((dev + 1) << 16) | round; };
+
+  for (int dev = 0; dev < 2; ++dev) {
+    HIP_CHECK(hipSetDevice(dev));
+    const hipError_t err = hipDeviceEnablePeerAccess(1 - dev, 0);
+    if (err != hipErrorPeerAccessAlreadyEnabled) HIP_CHECK(err);
+  }
+
+  struct Side {
+    hipStream_t stream;
+    int* src;
+    int* recv;
+    int* out;
+    int* mismatches;
+    uint64_t* ready;     // recv holds the current round; signalled by the peer, polled here
+    uint64_t* consumed;  // recv has been copied out; signalled here, polled by the peer
+  };
+  Side side[2] = {};
+  for (int dev = 0; dev < 2; ++dev) {
+    HIP_CHECK(hipSetDevice(dev));
+    Side& s = side[dev];
+    HIP_CHECK(hipStreamCreateWithFlags(&s.stream, hipStreamNonBlocking));
+    HIP_CHECK(hipMalloc(&s.src, sizeBytes));
+    HIP_CHECK(hipMalloc(&s.recv, sizeBytes));
+    HIP_CHECK(hipMalloc(&s.out, sizeBytes));
+    HIP_CHECK(hipMalloc(&s.mismatches, sizeof(int)));
+    HIP_CHECK(hipMemset(s.mismatches, 0, sizeof(int)));
+  }
+  for (int dev = 0; dev < 2; ++dev) {
+    Side& s = side[dev];
+    HIP_CHECK(hipSetDevice(flagsOnPoller ? dev : 1 - dev));
+    HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&s.ready), sizeof(uint64_t),
+                                    mallocFlags));
+    HIP_CHECK(hipMemset(s.ready, 0, sizeof(uint64_t)));
+    HIP_CHECK(hipSetDevice(flagsOnPoller ? 1 - dev : dev));
+    HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&s.consumed), sizeof(uint64_t),
+                                    mallocFlags));
+    HIP_CHECK(hipMemset(s.consumed, 0, sizeof(uint64_t)));
+  }
+  for (int dev = 0; dev < 2; ++dev) {
+    HIP_CHECK(hipSetDevice(dev));
+    HIP_CHECK(hipDeviceSynchronize());
+  }
+
+  auto cleanup = [&]() {
+    for (int dev = 0; dev < 2; ++dev) {
+      HIP_CHECK(hipSetDevice(dev));
+      Side& s = side[dev];
+      HIP_CHECK(hipStreamDestroy(s.stream));
+      HIP_CHECK(hipFree(s.src));
+      HIP_CHECK(hipFree(s.recv));
+      HIP_CHECK(hipFree(s.out));
+      HIP_CHECK(hipFree(s.mismatches));
+      HIP_CHECK(hipFree(s.ready));
+      HIP_CHECK(hipFree(s.consumed));
+    }
+    for (int dev = 0; dev < 2; ++dev) {
+      HIP_CHECK(hipSetDevice(dev));
+      HIP_CHECK(hipDeviceDisablePeerAccess(1 - dev));
+    }
+    HIP_CHECK(hipSetDevice(0));
+  };
+  auto drained = [&]() {
+    return hipStreamQuery(side[0].stream) == hipSuccess &&
+           hipStreamQuery(side[1].stream) == hipSuccess;
+  };
+  // Keeps releasing every pending wait (later signals lower the flags again) until both drain.
+  auto releaseAndDrain = [&]() {
+    HIP_CHECK(hipSetDevice(0));
+    hipStream_t rescue;
+    HIP_CHECK(hipStreamCreateWithFlags(&rescue, hipStreamNonBlocking));
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (!drained() && std::chrono::steady_clock::now() < deadline) {
+      hipLaunchKernelGGL(releaseFlags, dim3(1), dim3(1), 0, rescue, side[0].ready,
+                         side[0].consumed, side[1].ready, side[1].consumed, kRescue);
+      HIP_CHECK(hipGetLastError());
+      HIP_CHECK(hipStreamSynchronize(rescue));
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    HIP_CHECK(hipStreamDestroy(rescue));
+    REQUIRE(drained());
+  };
+
+  hipExtMemcpyAttributes attr{};
+  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  size_t attrsIdxs[] = {0};
+  size_t sizes[] = {sizeBytes, sizeBytes};
+
+  for (int i = 1; i <= kIters; ++i) {
+    for (int dev = 0; dev < 2; ++dev) {
+      HIP_CHECK(hipSetDevice(dev));
+      HIP_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(side[dev].src),
+                                  pattern(dev, i), numElements, side[dev].stream));
+    }
+    for (int dev = 0; dev < 2; ++dev) {
+      Side& s = side[dev];
+      Side& peer = side[1 - dev];
+      HIP_CHECK(hipSetDevice(dev));
+      // [0] = send into the peer, [1] = copy out of our receive buffer.
+      void* dsts[] = {peer.recv, s.out};
+      void* srcs[] = {s.src, s.recv};
+      hipExtMemcpyWait waits[2] = {};
+      waits[0].addr = peer.consumed;
+      waits[0].value = i - 1;
+      waits[1].addr = s.ready;
+      waits[1].value = i;
+      hipExtMemcpySignal signals[2] = {};
+      signals[0].addr = peer.ready;
+      signals[1].addr = s.consumed;
+      for (int e = 0; e < 2; ++e) {
+        waits[e].mask = 0xffffffffull;
+        waits[e].compareOp = hipExtMemcpyWaitGe;
+        signals[e].data = i;
+        signals[e].signalOp = hipExtMemcpySignalWrite;
+      }
+      hipError_t err = hipSuccess;
+      if (oneBatch) {
+        err = hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr, waits, signals, 2, &attr,
+                                     attrsIdxs, 1, s.stream);
+      } else {
+        err = hipExtMemcpyBatchAsync(&dsts[0], &srcs[0], &sizes[0], nullptr, &waits[0],
+                                     &signals[0], 1, &attr, attrsIdxs, 1, s.stream);
+        if (err == hipSuccess) {
+          err = hipExtMemcpyBatchAsync(&dsts[1], &srcs[1], &sizes[1], nullptr, &waits[1],
+                                       &signals[1], 1, &attr, attrsIdxs, 1, s.stream);
+        }
+      }
+      if (i == 1 && err == hipErrorNotSupported) {
+        (void)hipGetLastError();  // Clear it for the checks in releaseAndDrain
+        releaseAndDrain();
+        cleanup();
+        HIP_SKIP_TEST(HipTest::SkipReason::kSdmaWaitSignalUnsupported);
+      }
+      HIP_CHECK(err);
+    }
+    for (int dev = 0; dev < 2; ++dev) {
+      HIP_CHECK(hipSetDevice(dev));
+      hipLaunchKernelGGL(countMismatches, dim3(64), dim3(256), 0, side[dev].stream, side[dev].out,
+                         numElements, pattern(1 - dev, i), side[dev].mismatches);
+      HIP_CHECK(hipGetLastError());
+    }
+  }
+
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  bool done = drained();
+  while (!done && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    done = drained();
+  }
+  if (!done) releaseAndDrain();
+  CHECK(done);
+
+  for (int dev = 0; dev < 2; ++dev) {
+    CAPTURE(dev);
+    HIP_CHECK(hipSetDevice(dev));
+    int mismatches = -1;
+    uint64_t ready = 0, consumed = 0;
+    HIP_CHECK(hipMemcpy(&mismatches, side[dev].mismatches, sizeof(int), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(&ready, side[dev].ready, sizeof(uint64_t), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(&consumed, side[dev].consumed, sizeof(uint64_t), hipMemcpyDeviceToHost));
+    CHECK(mismatches == 0);
+    CHECK(ready == kIters);
+    CHECK(consumed == kIters);
+    std::vector<int> out(numElements);
+    HIP_CHECK(hipMemcpy(out.data(), side[dev].out, sizeBytes, hipMemcpyDeviceToHost));
+    const int expected = pattern(1 - dev, kIters);
+    CHECK(std::all_of(out.begin(), out.end(), [=](int v) { return v == expected; }));
+  }
+
+  cleanup();
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - One batch where a swap with a device source waits on a flag that a lower-index
+ *   host-to-device entry (copy or swap) signals. The batch completes without a host release.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipExtMemcpyBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_WaitSignal_MixedDirection) {
+  constexpr size_t kNumElements = 1 << 16;
+  constexpr size_t kSizeBytes = kNumElements * sizeof(int);
+  constexpr int kValA = 0x11;
+  constexpr int kValB = 0x22;
+  constexpr int kValC = 0x33;
+
+  const bool producerIsSwap = GENERATE(false, true);
+  CAPTURE(producerIsSwap);
+
+  uint64_t* flag = nullptr;
+  int* h_a = nullptr;
+  int* h_c = nullptr;
+  void* d_a = nullptr;
+  void* d_b = nullptr;
+  HIP_CHECK(hipHostMalloc(&flag, sizeof(uint64_t), hipHostMallocCoherent));
+  HIP_CHECK(hipHostMalloc(&h_a, kSizeBytes));
+  HIP_CHECK(hipHostMalloc(&h_c, kSizeBytes));
+  HIP_CHECK(hipMalloc(&d_a, kSizeBytes));
+  HIP_CHECK(hipMalloc(&d_b, kSizeBytes));
+  *flag = 0;
+  std::fill_n(h_a, kNumElements, kValA);
+  std::fill_n(h_c, kNumElements, kValC);
+  std::vector<int> hostB(kNumElements, kValB);
+  HIP_CHECK(hipMemcpy(d_a, hostB.data(), kSizeBytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_b, hostB.data(), kSizeBytes, hipMemcpyHostToDevice));
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  // Entry 0: host to device, signals. Entry 1: swap with the device as source, waits.
+  void* srcs[] = {h_a, d_b};
+  void* dsts[] = {d_a, h_c};
+  size_t sizes[] = {kSizeBytes, kSizeBytes};
+  size_t attrsIdxs[] = {0, 1};
+  hipExtMemcpyAttributes attrs[2] = {};
+  attrs[0].srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  attrs[0].flags = producerIsSwap ? hipMemcpyFlagExtOpSwap : hipMemcpyFlagExtPreferCE;
+  attrs[1].srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  attrs[1].flags = hipMemcpyFlagExtOpSwap;
+  hipExtMemcpyWait waits[2] = {};
+  waits[1].addr = flag;
+  waits[1].value = 1;
+  waits[1].mask = 0xffffffffull;
+  waits[1].compareOp = hipExtMemcpyWaitEq;
+  hipExtMemcpySignal signals[2] = {};
+  signals[0].addr = flag;
+  signals[0].data = 1;
+  signals[0].signalOp = hipExtMemcpySignalWrite;
+
+  hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr, waits, signals, 2, attrs,
+                                          attrsIdxs, 2, stream);
+  if (err == hipErrorNotSupported) {
+    HIP_CHECK(hipHostFree(flag));
+    HIP_CHECK(hipHostFree(h_a));
+    HIP_CHECK(hipHostFree(h_c));
+    HIP_CHECK(hipFree(d_a));
+    HIP_CHECK(hipFree(d_b));
+    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_SKIP_TEST(HipTest::SkipReason::kSdmaWaitSignalUnsupported);
+  }
+  HIP_CHECK(err);
+
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  bool completed = false;
+  while (!completed && std::chrono::steady_clock::now() < deadline) {
+    completed = hipStreamQuery(stream) == hipSuccess;
+  }
+  // Release a stuck wait so the stream can drain before the failure is reported.
+  if (!completed) __atomic_store_n(flag, 1, __ATOMIC_RELEASE);
+  HIP_CHECK(hipStreamSynchronize(stream));
+  REQUIRE(completed);
+
+  RequireDeviceFilled(d_a, kSizeBytes, kValA);
+  RequireDeviceFilled(d_b, kSizeBytes, kValC);
+  REQUIRE(std::all_of(h_c, h_c + kNumElements, [](int x) { return x == kValB; }));
+  if (producerIsSwap) {
+    REQUIRE(std::all_of(h_a, h_a + kNumElements, [](int x) { return x == kValB; }));
+  }
+
+  HIP_CHECK(hipHostFree(flag));
+  HIP_CHECK(hipHostFree(h_a));
+  HIP_CHECK(hipHostFree(h_c));
   HIP_CHECK(hipFree(d_a));
   HIP_CHECK(hipFree(d_b));
   HIP_CHECK(hipStreamDestroy(stream));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - One batch where a copy waits on a device flag that a lower-index plain copy from pageable
+ *   host memory sets, with and without another waiting copy ahead of that producer. The batch
+ *   completes without a host release.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipExtMemcpyBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_Wait_PageableProducer) {
+  constexpr size_t kNumElements = 1 << 14;
+  constexpr size_t kSizeBytes = kNumElements * sizeof(int);
+  constexpr int kVal = 0x5a;
+
+  const bool leadingWait = GENERATE(false, true);
+  CAPTURE(leadingWait);
+
+  uint64_t* d_flags = nullptr;  // [0] set before the batch, [1] set by the pageable producer
+  void* d_src = nullptr;
+  void* d_dst = nullptr;
+  void* d_dst_lead = nullptr;
+  HIP_CHECK(hipMalloc(&d_flags, 2 * sizeof(uint64_t)));
+  HIP_CHECK(hipMalloc(&d_src, kSizeBytes));
+  HIP_CHECK(hipMalloc(&d_dst, kSizeBytes));
+  HIP_CHECK(hipMalloc(&d_dst_lead, kSizeBytes));
+  const uint64_t initialFlags[2] = {1, 0};
+  HIP_CHECK(hipMemcpy(d_flags, initialFlags, sizeof(initialFlags), hipMemcpyHostToDevice));
+  std::vector<int> values(kNumElements, kVal);
+  HIP_CHECK(hipMemcpy(d_src, values.data(), kSizeBytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemset(d_dst, 0, kSizeBytes));
+  HIP_CHECK(hipMemset(d_dst_lead, 0, kSizeBytes));
+  std::vector<uint64_t> pageableOne(1, 1);
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  // [lead: copy waiting on flags[0]], producer: pageable host -> flags[1], copy waiting on flags[1]
+  std::vector<void*> srcs, dsts;
+  std::vector<size_t> sizes;
+  std::vector<hipExtMemcpyWait> waits;
+  std::vector<hipExtMemcpyAttributes> attrs;
+  auto addEntry = [&](void* src, void* dst, size_t size, uint64_t* waitFlag) {
+    srcs.push_back(src);
+    dsts.push_back(dst);
+    sizes.push_back(size);
+    hipExtMemcpyWait wait{};
+    hipExtMemcpyAttributes attr{};
+    attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+    if (waitFlag != nullptr) {
+      wait.addr = waitFlag;
+      wait.value = 1;
+      wait.mask = 0xffffffffull;
+      wait.compareOp = hipExtMemcpyWaitEq;
+      attr.flags = hipMemcpyFlagExtPreferCE;
+    }
+    waits.push_back(wait);
+    attrs.push_back(attr);
+  };
+  if (leadingWait) addEntry(d_src, d_dst_lead, kSizeBytes, &d_flags[0]);
+  addEntry(pageableOne.data(), &d_flags[1], sizeof(uint64_t), nullptr);
+  addEntry(d_src, d_dst, kSizeBytes, &d_flags[1]);
+  std::vector<size_t> attrsIdxs(srcs.size());
+  std::iota(attrsIdxs.begin(), attrsIdxs.end(), 0);
+
+  auto cleanup = [&]() {
+    HIP_CHECK(hipFree(d_flags));
+    HIP_CHECK(hipFree(d_src));
+    HIP_CHECK(hipFree(d_dst));
+    HIP_CHECK(hipFree(d_dst_lead));
+    HIP_CHECK(hipStreamDestroy(stream));
+  };
+  hipError_t err =
+      hipExtMemcpyBatchAsync(dsts.data(), srcs.data(), sizes.data(), nullptr, waits.data(), nullptr,
+                             srcs.size(), attrs.data(), attrsIdxs.data(), attrs.size(), stream);
+  if (err == hipErrorNotSupported) {
+    cleanup();
+    HIP_SKIP_TEST(HipTest::SkipReason::kSdmaWaitSignalUnsupported);
+  }
+  HIP_CHECK(err);
+
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  bool completed = false;
+  while (!completed && std::chrono::steady_clock::now() < deadline) {
+    completed = hipStreamQuery(stream) == hipSuccess;
+  }
+  if (!completed) {
+    // Release a stuck wait from another stream so this one can drain before the failure.
+    hipStream_t rescue;
+    HIP_CHECK(hipStreamCreateWithFlags(&rescue, hipStreamNonBlocking));
+    HIP_CHECK(hipMemcpyAsync(&d_flags[1], pageableOne.data(), sizeof(uint64_t),
+                             hipMemcpyHostToDevice, rescue));
+    HIP_CHECK(hipStreamSynchronize(rescue));
+    HIP_CHECK(hipStreamDestroy(rescue));
+  }
+  HIP_CHECK(hipStreamSynchronize(stream));
+  CHECK(completed);
+  RequireDeviceFilled(d_dst, kSizeBytes, kVal);
+  if (leadingWait) RequireDeviceFilled(d_dst_lead, kSizeBytes, kVal);
+
+  cleanup();
 }
 
 /**

@@ -390,6 +390,12 @@ contract:
   Contract_MemBatchCopy_HipExtMemcpyBatchAsync_TwoOps_RoundTripBytes:
     <<: *level_0
     tags: [mem_batch_copy, P0]
+  Contract_MemBatchCopy_HipExtMemcpyBatchAsync_NoneWaitSignal_RoundTripBytes:
+    <<: *level_0
+    tags: [mem_batch_copy, P0]
+  Contract_MemBatchCopy_HipExtMemcpyBatchAsync_MalformedWaitSignal_ReturnsInvalidValue:
+    <<: *level_0
+    tags: [mem_batch_copy, P0]
   Contract_MemCopyWithAttributes_HipMemcpyWithAttributesAsync_HostDeviceHostRoundTrip_IsVisibleAfterSync:
     <<: *level_0
     tags: [mem_copy_with_attributes, P0]

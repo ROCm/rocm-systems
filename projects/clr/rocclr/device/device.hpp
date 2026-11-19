@@ -697,6 +697,7 @@ struct Info : public amd::EmbeddedObject {
   bool aqlBarrierValue_;
 
   bool pcie_atomics_;  //!< Pcie atomics support flag
+  bool pcie_atomics64_;  //!< 64-bit Pcie atomics support flag
 
   bool virtualMemoryManagement_;       //!< Virtual memory management support
   size_t virtualMemAllocGranularityMinimum_;  //!< minimum virtual memory allocation size/addr granularity
@@ -767,7 +768,9 @@ class Settings {
       uint groupMemCarveout_ : 1;             //!< Group memory carveout functionality
       uint sdma_indirect_supported_ : 1;     //!< SDMA linear indirect copy (gfx1250+)
       uint aql_device_ring_buf_ : 1;          //!< Place the AQL queue ring buffer in device memory
-      uint reserved_ : 7;
+      uint sdma_wait_signal_supported_ : 1;   //!< SDMA memory wait/signal in batch copies
+      uint sdma_poll64_supported_ : 1;        //!< SDMA 64-bit masked memory poll (gfx1250+)
+      uint reserved_ : 5;
     };
     uint value_;
   };
@@ -1775,7 +1778,8 @@ class Device : public RuntimeObject {
     kLinkLinkType = 0,
     kLinkHopCount,
     kLinkDistance,
-    kLinkAtomicSupport
+    kLinkAtomicSupport,
+    kLinkAtomic64Support
   } LinkAttribute;
 
   typedef enum MemorySegment {
@@ -2498,6 +2502,9 @@ class Device : public RuntimeObject {
   virtual bool findLinkInfo(const amd::Device& other_device, std::vector<LinkAttrType>* link_attr) {
     return false;
   }
+
+  //! True unless the memory is owned by another device whose link lacks 64-bit atomics
+  virtual bool HasAtomics64Link(amd::Memory& memory) { return true; }
 
   //! Returns the queues that have at least one submitted command
   std::vector<amd::CommandQueue*> getActiveQueues();

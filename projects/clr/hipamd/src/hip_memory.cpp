@@ -2971,7 +2971,8 @@ template <typename Command, typename Operation>
 static hipError_t EnqueueBatchCommands(std::vector<std::vector<Operation>>& operations_by_device,
                                        cl_command_type command_type, hip::Stream& stream,
                                        bool is_async, amd::Command* stream_wait_cmd,
-                                       amd::Command::EventWaitList& marker_wait_list) {
+                                       amd::Command::EventWaitList& marker_wait_list,
+                                       const amd::Command::EventWaitList* earlier_cmds = nullptr) {
   for (size_t device_id = 0; device_id < operations_by_device.size(); ++device_id) {
     std::vector<Operation>& operations = operations_by_device[device_id];
     if (operations.empty()) {
@@ -2984,6 +2985,9 @@ static hipError_t EnqueueBatchCommands(std::vector<std::vector<Operation>>& oper
     amd::Command::EventWaitList wait_list;
     if (queue_stream != &stream && stream_wait_cmd != nullptr) {
       wait_list.push_back(stream_wait_cmd);
+    }
+    if (earlier_cmds != nullptr) {
+      wait_list.insert(wait_list.end(), earlier_cmds->begin(), earlier_cmds->end());
     }
 
     Command* batch_cmd = nullptr;
@@ -3046,6 +3050,36 @@ static inline unsigned int getBatchCopyFlags(hipExtMemcpyAttributes* attrs, size
   if (attrs == nullptr || numAttrs == 0) return 0;
   while (attrIdx + 1 < numAttrs && attrsIdxs[attrIdx + 1] <= copyIdx) ++attrIdx;
   return attrs[attrIdx].flags;
+}
+
+// ================================================================================================
+// Returns true if the per-entry wait and signal are well formed.
+static bool validateBatchWaitSignal(const hipExtMemcpyWait* wait,
+                                    const hipExtMemcpySignal* signal) {
+  auto aligned8 = [](const void* p) { return (reinterpret_cast<uintptr_t>(p) & 7) == 0; };
+  if (wait != nullptr) {
+    if (wait->compareOp > hipExtMemcpyWaitGt || wait->reserved0 != 0) return false;
+    for (uint64_t r : wait->reserved) {
+      if (r != 0) return false;
+    }
+    if (wait->compareOp == hipExtMemcpyWaitNone) {
+      if (wait->addr != nullptr || wait->value != 0 || wait->mask != 0) return false;
+    } else if (wait->addr == nullptr || !aligned8(wait->addr)) {
+      return false;
+    }
+  }
+  if (signal != nullptr) {
+    if (signal->signalOp > hipExtMemcpySignalSub || signal->reserved0 != 0) return false;
+    for (uint64_t r : signal->reserved) {
+      if (r != 0) return false;
+    }
+    if (signal->signalOp == hipExtMemcpySignalNone) {
+      if (signal->addr != nullptr || signal->data != 0) return false;
+    } else if (signal->addr == nullptr || !aligned8(signal->addr)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // ================================================================================================
@@ -3138,9 +3172,13 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
     }
   }
 
-  // Per-entry waits/signals are reserved.
   if (waits != nullptr || signals != nullptr) {
-    return hipErrorNotSupported;
+    for (size_t i = 0; i < count; ++i) {
+      if (!validateBatchWaitSignal(waits != nullptr ? &waits[i] : nullptr,
+                                   signals != nullptr ? &signals[i] : nullptr)) {
+        return fail(i, hipErrorInvalidValue);
+      }
+    }
   }
 
   // Pre-compute memory objects once per copy to avoid repeated expensive
@@ -3226,118 +3264,224 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
   std::vector<std::vector<amd::BatchReadMemoryOp>> read_ops_by_device(g_devices.size());
   std::vector<size_t> hostToHostIndices;
 
+  // A wait may depend on any lower-index entry, so a batch with waits is submitted as contiguous
+  // runs of one kind, in input order.
+  enum class RunKind { kNone, kCopy, kWrite, kRead };
+  struct Run {
+    std::vector<std::vector<amd::BatchCopyOp>> copy_ops;
+    std::vector<std::vector<amd::BatchWriteMemoryOp>> write_ops;
+    std::vector<std::vector<amd::BatchReadMemoryOp>> read_ops;
+  };
+  std::vector<Run> runs;
+  RunKind run_kind = RunKind::kNone;
+  bool ordered = false;
+  for (size_t i = 0; waits != nullptr && !ordered && i < count; ++i) {
+    ordered = waits[i].compareOp != hipExtMemcpyWaitNone;
+  }
+  auto closeRun = [&]() {
+    runs.push_back({std::move(copy_ops_by_device), std::move(write_ops_by_device),
+                    std::move(read_ops_by_device)});
+    copy_ops_by_device.assign(g_devices.size(), {});
+    write_ops_by_device.assign(g_devices.size(), {});
+    read_ops_by_device.assign(g_devices.size(), {});
+  };
+  auto startRun = [&](RunKind kind) {
+    if (ordered && run_kind != RunKind::kNone && run_kind != kind) {
+      closeRun();
+    }
+    run_kind = kind;
+  };
+
   // Swap and indirect operations require the SDMA batch path. Allow device-to-device
   // and pinned host/device transfers; reject host-only and pageable-host copies.
   const unsigned int kExtOpFlagMask =
       hipMemcpyFlagExtOpSwap | hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst;
   size_t attrIdx = 0;
 
-  for (size_t i = 0; i < count; ++i) {
-    hip::MemcpyType type;
-    if (srcMemories[i] == nullptr && dstMemories[i] == nullptr) {
-      type = hipHostToHost;
-    } else if (srcMemories[i] == nullptr) {
-      type = (getMemoryType(dstMemories[i]) == hipMemoryTypeHost) ? hipHostToHost : hipWriteBuffer;
-    } else if (dstMemories[i] == nullptr) {
-      type = (getMemoryType(srcMemories[i]) == hipMemoryTypeHost) ? hipHostToHost : hipReadBuffer;
-    } else {
-      type = ihipGetMemcpyType(srcMemories[i], dstMemories[i], hipMemcpyDefault);
-    }
-
-    const unsigned int copyFlags = getBatchCopyFlags(attrs, attrsIdxs, numAttrs, i, attrIdx);
-    if (copyFlags & kExtOpFlagMask) {
-      switch (type) {
-        case hipCopyBuffer:
-        case hipCopyBufferSDMA: {
-          amd::Memory* sMem = srcMemories[i];
-          amd::Memory* dMem = dstMemories[i];
-          if (sMem == nullptr || dMem == nullptr ||
-              (getMemoryType(sMem) == hipMemoryTypeHost &&
-               getMemoryType(dMem) == hipMemoryTypeHost)) {
-            return fail(i, hipErrorNotSupported);
-          }
-          break;
-        }
-        case hipCopyBufferP2P:
-          break;
-        case hipHostToHost:
-        case hipWriteBuffer:
-        case hipReadBuffer:
-          return fail(i, hipErrorNotSupported);
+  auto classifyEntries = [&](auto waitSignalTag) -> hipError_t {
+    constexpr bool withWaitSignal = decltype(waitSignalTag)::value;
+    for (size_t i = 0; i < count; ++i) {
+      hip::MemcpyType type;
+      if (srcMemories[i] == nullptr && dstMemories[i] == nullptr) {
+        type = hipHostToHost;
+      } else if (srcMemories[i] == nullptr) {
+        type =
+            (getMemoryType(dstMemories[i]) == hipMemoryTypeHost) ? hipHostToHost : hipWriteBuffer;
+      } else if (dstMemories[i] == nullptr) {
+        type = (getMemoryType(srcMemories[i]) == hipMemoryTypeHost) ? hipHostToHost : hipReadBuffer;
+      } else {
+        type = ihipGetMemcpyType(srcMemories[i], dstMemories[i], hipMemcpyDefault);
       }
 
-      // ROCr would reject it asynchronously, too late to report.
-      if (copyFlags & hipMemcpyFlagExtOpSwap) {
-        const uintptr_t alignMask = stream.device().settings().sdma_swap_alignment_ - 1;
-        if (((reinterpret_cast<uintptr_t>(srcs[i]) | reinterpret_cast<uintptr_t>(dsts[i])) &
-             alignMask) != 0) {
+      const unsigned int copyFlags = getBatchCopyFlags(attrs, attrsIdxs, numAttrs, i, attrIdx);
+
+      // Waits/signals run on SDMA and need memory objects on both sides.
+      amd::BatchCopyWait wait;
+      amd::BatchCopySignal signal;
+      if (withWaitSignal && waits != nullptr && waits[i].compareOp != hipExtMemcpyWaitNone) {
+        wait.addr = waits[i].addr;
+        wait.value = waits[i].value;
+        wait.mask = (waits[i].mask == 0) ? UINT64_MAX : waits[i].mask;
+        wait.function = waits[i].compareOp;
+      }
+      if (withWaitSignal && signals != nullptr && signals[i].signalOp != hipExtMemcpySignalNone) {
+        signal.addr = signals[i].addr;
+        signal.data = signals[i].data;
+        signal.operation = signals[i].signalOp;
+      }
+      const bool hasWaitSignal = wait.function != 0 || signal.operation != 0;
+      if (hasWaitSignal &&
+          ((type != hipCopyBuffer && type != hipCopyBufferSDMA && type != hipCopyBufferP2P) ||
+           (copyFlags & hipMemcpyFlagExtPreferComputeEngine) ||
+           (getMemoryType(srcMemories[i]) == hipMemoryTypeHost &&
+            getMemoryType(dstMemories[i]) == hipMemoryTypeHost))) {
+        return fail(i, hipErrorNotSupported);
+      }
+
+      if (copyFlags & kExtOpFlagMask) {
+        switch (type) {
+          case hipCopyBuffer:
+          case hipCopyBufferSDMA: {
+            amd::Memory* sMem = srcMemories[i];
+            amd::Memory* dMem = dstMemories[i];
+            if (sMem == nullptr || dMem == nullptr ||
+                (getMemoryType(sMem) == hipMemoryTypeHost &&
+                 getMemoryType(dMem) == hipMemoryTypeHost)) {
+              return fail(i, hipErrorNotSupported);
+            }
+            break;
+          }
+          case hipCopyBufferP2P:
+            break;
+          case hipHostToHost:
+          case hipWriteBuffer:
+          case hipReadBuffer:
+            return fail(i, hipErrorNotSupported);
+        }
+
+        // ROCr would reject it asynchronously, too late to report.
+        if (copyFlags & hipMemcpyFlagExtOpSwap) {
+          const uintptr_t alignMask = stream.device().settings().sdma_swap_alignment_ - 1;
+          if (((reinterpret_cast<uintptr_t>(srcs[i]) | reinterpret_cast<uintptr_t>(dsts[i])) &
+               alignMask) != 0) {
+            return fail(i, hipErrorInvalidValue);
+          }
+        }
+
+        // An indirect packet can't be split, so ROCr rejects larger entries.
+        if ((copyFlags & (hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst)) &&
+            sizes[i] > stream.device().settings().sdma_indirect_max_size_) {
           return fail(i, hipErrorInvalidValue);
         }
       }
 
-      // An indirect packet can't be split, so ROCr rejects larger entries.
-      if ((copyFlags & (hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst)) &&
-          sizes[i] > stream.device().settings().sdma_indirect_max_size_) {
-        return fail(i, hipErrorInvalidValue);
+      amd::CopyMetadata metadata =
+          buildCopyMetadataFromAttrs(attrs, attrsIdxs, numAttrs, i, isAsync);
+
+      // Validated up front; non-zero only for swap entries.
+      const size_t sizeB = (sizesDst != nullptr) ? sizesDst[i] : 0;
+
+      switch (type) {
+        case hipCopyBuffer:
+        case hipCopyBufferSDMA:
+        case hipCopyBufferP2P: {
+          int device_id;
+          if (type == hipCopyBufferP2P) {
+            device_id = stream.DeviceId();
+          } else {
+            const hipMemoryType src_memory_type = getMemoryType(srcMemories[i]);
+            const hipMemoryType dst_memory_type = getMemoryType(dstMemories[i]);
+            device_id =
+                (src_memory_type == hipMemoryTypeDevice && dst_memory_type == hipMemoryTypeHost)
+                    ? srcMemories[i]->getUserData().deviceId
+                    : dstMemories[i]->getUserData().deviceId;
+          }
+          if (hasWaitSignal) {
+            // ROCr on the executing device would reject these asynchronously, too late to report.
+            const amd::Device& sdmaDev = *g_devices[device_id]->devices()[0];
+            if (!sdmaDev.settings().sdma_wait_signal_supported_ ||
+                (signal.operation != 0 && !sdmaDev.info().pcie_atomics64_)) {
+              return fail(i, hipErrorNotSupported);
+            }
+            if (wait.function != 0 && !sdmaDev.settings().sdma_poll64_supported_) {
+              // The masked compare must fit in one dword.
+              const bool lo = (wait.mask >> 32) == 0 && (wait.value >> 32) == 0;
+              const bool hi =
+                  static_cast<uint32_t>(wait.mask) == 0 && static_cast<uint32_t>(wait.value) == 0;
+              if (!lo && !hi) return fail(i, hipErrorNotSupported);
+            }
+            // SDMA needs the executing device's mapping, which can differ for registered host
+            // memory.
+            auto resolve = [&](void*& addr, bool atomic) {
+              if (addr == nullptr) return hipSuccess;
+              size_t offset = 0;
+              amd::Memory* mem = getMemoryObject(dev, addr, offset);
+              if (mem == nullptr || offset + sizeof(uint64_t) > mem->getSize()) {
+                return hipErrorInvalidValue;
+              }
+              // A signal in another device's memory needs 64-bit atomics on the link to that
+              // device.
+              if (atomic && !g_devices[device_id]->devices()[0]->HasAtomics64Link(*mem)) {
+                return hipErrorNotSupported;
+              }
+              if (device::Memory* devMem = mem->getDeviceMemory(sdmaDev, false)) {
+                addr = reinterpret_cast<void*>(devMem->virtualAddress() + offset);
+              }
+              return hipSuccess;
+            };
+            hipError_t status = resolve(wait.addr, false);
+            if (status == hipSuccess) status = resolve(signal.addr, true);
+            if (status != hipSuccess) return fail(i, status);
+          }
+          if constexpr (withWaitSignal) startRun(RunKind::kCopy);
+          auto& ops = copy_ops_by_device[device_id];
+          if (sizeB > 0 && sizeB != sizes[i] &&
+              !stream.device().settings().sdma_asymmetric_swap_supported_) {
+            // A wait/signal can't be applied once across the two decomposed ops.
+            if (hasWaitSignal) {
+              return fail(i, hipErrorNotSupported);
+            }
+            // Decompose: symmetric swap of [0, sizeB) plus a linear copy of the src tail
+            // [sizeB, sizes[i]). The ranges are disjoint, so the two ops are order-independent.
+            ops.emplace_back(srcMemories[i], dstMemories[i], srcOffsets[i], dstOffsets[i], sizeB,
+                             metadata);
+            amd::CopyMetadata tailMeta = metadata;
+            tailMeta.copyOpType_ = amd::CopyMetadata::kCopyOpLinear;
+            ops.emplace_back(srcMemories[i], dstMemories[i], srcOffsets[i] + sizeB,
+                             dstOffsets[i] + sizeB, sizes[i] - sizeB, tailMeta);
+          } else {
+            ops.emplace_back(srcMemories[i], dstMemories[i], srcOffsets[i], dstOffsets[i], sizes[i],
+                             metadata, sizeB);
+            if constexpr (withWaitSignal) ops.back().wait = wait;
+            if constexpr (withWaitSignal) ops.back().signal = signal;
+          }
+          break;
+        }
+        case hipHostToHost:
+          hostToHostIndices.push_back(i);
+          break;
+        case hipWriteBuffer: {
+          const int device_id = dstMemories[i]->getUserData().deviceId;
+          if constexpr (withWaitSignal) startRun(RunKind::kWrite);
+          write_ops_by_device[device_id].emplace_back(srcs[i], dstMemories[i], dstOffsets[i],
+                                                      sizes[i], metadata);
+          break;
+        }
+        case hipReadBuffer: {
+          const int device_id = srcMemories[i]->getUserData().deviceId;
+          if constexpr (withWaitSignal) startRun(RunKind::kRead);
+          read_ops_by_device[device_id].emplace_back(srcMemories[i], dsts[i], srcOffsets[i],
+                                                     sizes[i], metadata);
+          break;
+        }
       }
     }
 
-    amd::CopyMetadata metadata = buildCopyMetadataFromAttrs(attrs, attrsIdxs, numAttrs, i, isAsync);
-
-    // Validated up front; non-zero only for swap entries.
-    const size_t sizeB = (sizesDst != nullptr) ? sizesDst[i] : 0;
-
-    switch (type) {
-      case hipCopyBuffer:
-      case hipCopyBufferSDMA:
-      case hipCopyBufferP2P: {
-        int device_id;
-        if (type == hipCopyBufferP2P) {
-          device_id = stream.DeviceId();
-        } else {
-          const hipMemoryType src_memory_type = getMemoryType(srcMemories[i]);
-          const hipMemoryType dst_memory_type = getMemoryType(dstMemories[i]);
-          device_id =
-              (src_memory_type == hipMemoryTypeDevice && dst_memory_type == hipMemoryTypeHost)
-                  ? srcMemories[i]->getUserData().deviceId
-                  : dstMemories[i]->getUserData().deviceId;
-        }
-        if (sizeB > 0 && sizeB != sizes[i]
-            && !stream.device().settings().sdma_asymmetric_swap_supported_) {
-          // Decompose: symmetric swap of [0, sizeB) plus a linear copy of the src tail
-          // [sizeB, sizes[i]). The ranges are disjoint, so the two ops are order-independent.
-          copy_ops_by_device[device_id].emplace_back(srcMemories[i], dstMemories[i], srcOffsets[i],
-                                                     dstOffsets[i], sizeB, metadata);
-          amd::CopyMetadata tailMeta = metadata;
-          tailMeta.copyOpType_ = amd::CopyMetadata::kCopyOpLinear;
-          copy_ops_by_device[device_id].emplace_back(srcMemories[i], dstMemories[i],
-                                                     srcOffsets[i] + sizeB, dstOffsets[i] + sizeB,
-                                                     sizes[i] - sizeB, tailMeta);
-        } else {
-          copy_ops_by_device[device_id].emplace_back(srcMemories[i], dstMemories[i], srcOffsets[i],
-                                                     dstOffsets[i], sizes[i], metadata, sizeB);
-        }
-        break;
-      }
-      case hipHostToHost:
-        hostToHostIndices.push_back(i);
-        break;
-      case hipWriteBuffer: {
-        const int device_id = dstMemories[i]->getUserData().deviceId;
-        write_ops_by_device[device_id].emplace_back(srcs[i], dstMemories[i], dstOffsets[i],
-                                                    sizes[i], metadata);
-        break;
-      }
-      case hipReadBuffer: {
-        const int device_id = srcMemories[i]->getUserData().deviceId;
-        read_ops_by_device[device_id].emplace_back(srcMemories[i], dsts[i], srcOffsets[i], sizes[i],
-                                                   metadata);
-        break;
-      }
-    }
-  }
-
-  hipError_t status = hipSuccess;
+    return hipSuccess;
+  };
+  hipError_t status = (waits != nullptr || signals != nullptr) ? classifyEntries(std::true_type{})
+                                                               : classifyEntries(std::false_type{});
+  if (status != hipSuccess) return status;
 
   // Handle Host-to-Host copies synchronously
   if (!hostToHostIndices.empty()) {
@@ -3350,18 +3494,47 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
   amd::Command::EventWaitList marker_wait_list;
   amd::Command* stream_wait_cmd = stream.getLastQueuedCommand(true);
 
-  status = EnqueueBatchCommands<amd::BatchCopyMemoryCommand>(
-      copy_ops_by_device, ROCCLR_COMMAND_BATCH_COPY_BUFFER, stream, isAsync, stream_wait_cmd,
-      marker_wait_list);
-  if (status == hipSuccess) {
-    status = EnqueueBatchCommands<amd::BatchWriteMemoryCommand>(
-        write_ops_by_device, ROCCLR_COMMAND_BATCH_WRITE_BUFFER, stream, isAsync, stream_wait_cmd,
-        marker_wait_list);
+  if (!ordered) {
+    status = EnqueueBatchCommands<amd::BatchCopyMemoryCommand>(copy_ops_by_device, ROCCLR_COMMAND_BATCH_COPY_BUFFER, stream, isAsync, stream_wait_cmd, marker_wait_list);
+    if (status == hipSuccess)
+      status = EnqueueBatchCommands<amd::BatchWriteMemoryCommand>(
+          write_ops_by_device, ROCCLR_COMMAND_BATCH_WRITE_BUFFER, stream, isAsync, stream_wait_cmd,
+          marker_wait_list);
+    if (status == hipSuccess)
+      status = EnqueueBatchCommands<amd::BatchReadMemoryCommand>(
+          read_ops_by_device, ROCCLR_COMMAND_BATCH_READ_BUFFER, stream, isAsync, stream_wait_cmd,
+          marker_wait_list);
+    if (stream_wait_cmd != nullptr) stream_wait_cmd->release();
+    return EnqueueBatchMarker(status, stream, marker_wait_list);
   }
-  if (status == hipSuccess) {
-    status = EnqueueBatchCommands<amd::BatchReadMemoryCommand>(
-        read_ops_by_device, ROCCLR_COMMAND_BATCH_READ_BUFFER, stream, isAsync, stream_wait_cmd,
-        marker_wait_list);
+  closeRun();
+  size_t prev_run_begin = 0;
+  for (Run& run : runs) {
+    // A run also follows what the previous run queued on other devices' streams. That run
+    // followed its own predecessor, so the earlier ones are covered.
+    const amd::Command::EventWaitList earlier_cmds(marker_wait_list.begin() + prev_run_begin,
+                                                   marker_wait_list.end());
+    prev_run_begin = marker_wait_list.size();
+    const amd::Command::EventWaitList* earlier = ordered ? &earlier_cmds : nullptr;
+    amd::Command* run_wait_cmd = ordered ? stream.getLastQueuedCommand(true) : stream_wait_cmd;
+    if (status == hipSuccess) {
+      status = EnqueueBatchCommands<amd::BatchCopyMemoryCommand>(
+          run.copy_ops, ROCCLR_COMMAND_BATCH_COPY_BUFFER, stream, isAsync, run_wait_cmd,
+          marker_wait_list, earlier);
+    }
+    if (status == hipSuccess) {
+      status = EnqueueBatchCommands<amd::BatchWriteMemoryCommand>(
+          run.write_ops, ROCCLR_COMMAND_BATCH_WRITE_BUFFER, stream, isAsync, run_wait_cmd,
+          marker_wait_list, earlier);
+    }
+    if (status == hipSuccess) {
+      status = EnqueueBatchCommands<amd::BatchReadMemoryCommand>(
+          run.read_ops, ROCCLR_COMMAND_BATCH_READ_BUFFER, stream, isAsync, run_wait_cmd,
+          marker_wait_list, earlier);
+    }
+    if (ordered && run_wait_cmd != nullptr) {
+      run_wait_cmd->release();
+    }
   }
 
   if (stream_wait_cmd != nullptr) {

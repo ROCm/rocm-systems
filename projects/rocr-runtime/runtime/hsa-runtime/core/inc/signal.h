@@ -593,6 +593,9 @@ class Signal {
   void Retain() { retained_++; }
   void Release();
 
+  /// @brief Checks if anything besides the handle (async handler, waiter) holds the signal.
+  bool IsRetained() const { return retained_ > 1; }
+
   /// @brief Checks if signal is currently in use by a wait API.
   bool InWaiting() const { return waiting_ != 0; }
 

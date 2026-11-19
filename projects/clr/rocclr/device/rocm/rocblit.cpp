@@ -811,6 +811,20 @@ bool DmaBlitManager::hsaCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
       break;
     }
 
+    if (op.wait.function != 0) {
+      hsaOp.wait.function = static_cast<uint16_t>(op.wait.function);
+      hsaOp.wait.scope = HSA_FENCE_SCOPE_SYSTEM;
+      hsaOp.wait.addr = op.wait.addr;
+      hsaOp.wait.value = op.wait.value;
+      hsaOp.wait.mask = op.wait.mask;
+    }
+    if (op.signal.operation != 0) {
+      hsaOp.signal.operation = static_cast<uint16_t>(op.signal.operation);
+      hsaOp.signal.scope = HSA_FENCE_SCOPE_SYSTEM;
+      hsaOp.signal.addr = op.signal.addr;
+      hsaOp.signal.data = op.signal.data;
+    }
+
     hsaCopyOps.push_back(hsaOp);
   }
 
@@ -834,6 +848,8 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
   // Only SdmaD2H(1), SdmaH2D(2), SdmaD2D(3) are used; size must cover max index + 1.
   constexpr size_t kNumCopyOpBins = HwQueueEngine::SdmaD2D + 1;
   std::vector<hsa_amd_memory_copy_op_t> engineOps[kNumCopyOpBins];
+  // Ops with a wait or signal are submitted as-is; merging would change their scope.
+  std::vector<std::pair<HwQueueEngine, hsa_amd_memory_copy_op_t>> waitSignalOps;
 
   for (const auto& op : copyOps) {
     HwQueueEngine engine;
@@ -843,6 +859,11 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
       engine = HwQueueEngine::SdmaD2H;
     } else {
       engine = HwQueueEngine::SdmaD2D;
+    }
+    if (op.wait.function != HSA_AMD_MEMORY_COPY_WAIT_ALWAYS ||
+        op.signal.operation != HSA_AMD_MEMORY_COPY_SIGNAL_NONE) {
+      waitSignalOps.emplace_back(engine, op);
+      continue;
     }
     engineOps[engine].push_back(op);
   }
@@ -863,6 +884,97 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
   // Remaining LINEAR ops → one MULTI or LINEAR.
   hsa_status_t status = HSA_STATUS_SUCCESS;
   std::vector<ProfilingSignal*> groupSignals;
+
+  // Assigns one completion signal per op and submits the ops in chunks
+  auto submitOps = [&](std::vector<hsa_amd_memory_copy_op_t>& finalOps, HwQueueEngine engine) {
+    // Submit in chunks so a capped signal ring never waits on a signal of an unsubmitted op.
+    const size_t chunk = std::max<size_t>(gpu().Barriers().MaxUnsubmittedSignals(), 1);
+    for (size_t first = 0; first < finalOps.size(); first += chunk) {
+      const size_t last = std::min(finalOps.size(), first + chunk);
+      for (size_t i = first; i < last; ++i) {
+        finalOps[i].completion_signal = gpu().Barriers().ActiveSignal(1, gpu().timestamp());
+        groupSignals.push_back(gpu().Barriers().GetLastSignal());
+      }
+
+      for (size_t i = first; i < last; ++i) {
+        const auto& op = finalOps[i];
+        if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST) {
+          for (uint32_t d = 0; d < op.num_entries; ++d) {
+            ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
+                    "HSA BatchCopy Broadcast [%u/%u] engineOp=%s, src=%p, dst=%p, "
+                    "size=%zu, wait_event=0x%zx, completion_signal=0x%zx",
+                    d + 1, op.num_entries, EngineOpName(engine), op.src, op.dst_list[d], op.size,
+                    (wait_events.size() != 0) ? wait_events[0].handle : 0,
+                    op.completion_signal.handle);
+          }
+        } else if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP) {
+          for (uint32_t d = 0; d < op.num_entries; ++d) {
+            ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
+                    "HSA BatchCopy Swap [%u/%u] engineOp=%s, addr_a=%p, addr_b=%p, "
+                    "size=%zu, wait_event=0x%zx, completion_signal=0x%zx",
+                    d + 1, op.num_entries, EngineOpName(engine), op.src_list[d], op.dst_list[d],
+                    op.size_list[d], (wait_events.size() != 0) ? wait_events[0].handle : 0,
+                    op.completion_signal.handle);
+          }
+        } else if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC ||
+                   op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST ||
+                   op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST) {
+          const char* indirect_kind =
+              (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC)   ? "Src"
+              : (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST) ? "Dst"
+                                                                        : "SrcDst";
+          for (uint32_t d = 0; d < op.num_entries; ++d) {
+            ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
+                    "HSA BatchCopy Indirect%s [%u/%u] engineOp=%s, dst=%p, src=%p, "
+                    "size=%zu, wait_event=0x%zx, completion_signal=0x%zx",
+                    indirect_kind, d + 1, op.num_entries, EngineOpName(engine), op.dst_list[d],
+                    op.src_list[d], op.size_list[d],
+                    (wait_events.size() != 0) ? wait_events[0].handle : 0,
+                    op.completion_signal.handle);
+          }
+        } else if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR && op.num_entries > 0) {
+          for (uint32_t d = 0; d < op.num_entries; ++d) {
+            ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
+                    "HSA BatchCopy Multi [%u/%u] engineOp=%s, src=%p, dst=%p, "
+                    "size=%zu, wait_event=0x%zx, completion_signal=0x%zx",
+                    d + 1, op.num_entries, EngineOpName(engine), op.src_list[d], op.dst_list[d],
+                    op.size_list[d], (wait_events.size() != 0) ? wait_events[0].handle : 0,
+                    op.completion_signal.handle);
+          }
+        } else {
+          ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
+                  "HSA BatchCopy Linear [%zu/%zu] engineOp=%s, dst=%p, src=%p, size=%zu, "
+                  "src_agent=0x%zx, dst_agent=0x%zx, wait_event=0x%zx, completion_signal=0x%zx",
+                  i, finalOps.size(), EngineOpName(engine), op.dst, op.src, op.size,
+                  op.src_agent.handle, op.dst_agent.handle,
+                  (wait_events.size() != 0) ? wait_events[0].handle : 0,
+                  op.completion_signal.handle);
+        }
+      }
+
+      status =
+          Hsa::memory_async_batch_copy(finalOps.data() + first, static_cast<uint32_t>(last - first),
+                                       wait_events.size(), wait_events.data());
+
+      if (status != HSA_STATUS_SUCCESS) {
+        for (size_t s = first; s < last; ++s) {
+          gpu().Barriers().ResetCurrentSignal();
+        }
+        LogPrintfError("HSA batch copy failed with code %d for engine %d", status, engine);
+        // The next dispatch waits on the submitted chunks on the GPU; holds stay until then
+        groupSignals.resize(groupSignals.size() - (last - first));
+        for (auto* sig : groupSignals) {
+          gpu().Barriers().AddExternalSignal(sig);
+        }
+        return false;
+      }
+      // Later acquisitions must not rearm these before the final barrier waits on them.
+      for (size_t s = groupSignals.size() - (last - first); s < groupSignals.size(); ++s) {
+        gpu().Barriers().HoldSignal(groupSignals[s]);
+      }
+    }
+    return true;
+  };
 
   for (uint32_t e = 0; e < kNumCopyOpBins; ++e) {
     auto& ops = engineOps[e];
@@ -1073,91 +1185,20 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
       finalOps.push_back(indirect);
     }
 
-    // Submit in chunks so a capped signal ring never waits on a signal of an unsubmitted op.
-    const size_t chunk = std::max<size_t>(gpu().Barriers().MaxUnsubmittedSignals(), 1);
-    for (size_t first = 0; first < finalOps.size(); first += chunk) {
-      const size_t last = std::min(finalOps.size(), first + chunk);
-      for (size_t i = first; i < last; ++i) {
-        finalOps[i].completion_signal = gpu().Barriers().ActiveSignal(1, gpu().timestamp());
-        groupSignals.push_back(gpu().Barriers().GetLastSignal());
-      }
+    if (!finalOps.empty() && !submitOps(finalOps, engine)) {
+      return false;
+    }
+  }
 
-      for (size_t i = first; i < last; ++i) {
-        const auto& op = finalOps[i];
-        if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST) {
-          for (uint32_t d = 0; d < op.num_entries; ++d) {
-            ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
-                    "HSA BatchCopy Broadcast [%u/%u] engineOp=%s, src=%p, dst=%p, "
-                    "size=%zu, wait_event=0x%zx, completion_signal=0x%zx",
-                    d + 1, op.num_entries, EngineOpName(engine), op.src, op.dst_list[d], op.size,
-                    (wait_events.size() != 0) ? wait_events[0].handle : 0,
-                    op.completion_signal.handle);
-          }
-        } else if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP) {
-          for (uint32_t d = 0; d < op.num_entries; ++d) {
-            ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
-                    "HSA BatchCopy Swap [%u/%u] engineOp=%s, addr_a=%p, addr_b=%p, "
-                    "size=%zu, wait_event=0x%zx, completion_signal=0x%zx",
-                    d + 1, op.num_entries, EngineOpName(engine), op.src_list[d], op.dst_list[d],
-                    op.size_list[d], (wait_events.size() != 0) ? wait_events[0].handle : 0,
-                    op.completion_signal.handle);
-          }
-        } else if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC ||
-                   op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST ||
-                   op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST) {
-          const char* indirect_kind =
-              (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC)   ? "Src"
-              : (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST) ? "Dst"
-                                                                        : "SrcDst";
-          for (uint32_t d = 0; d < op.num_entries; ++d) {
-            ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
-                    "HSA BatchCopy Indirect%s [%u/%u] engineOp=%s, dst=%p, src=%p, "
-                    "size=%zu, wait_event=0x%zx, completion_signal=0x%zx",
-                    indirect_kind, d + 1, op.num_entries, EngineOpName(engine), op.dst_list[d],
-                    op.src_list[d], op.size_list[d],
-                    (wait_events.size() != 0) ? wait_events[0].handle : 0,
-                    op.completion_signal.handle);
-          }
-        } else if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR && op.num_entries > 0) {
-          for (uint32_t d = 0; d < op.num_entries; ++d) {
-            ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
-                    "HSA BatchCopy Multi [%u/%u] engineOp=%s, src=%p, dst=%p, "
-                    "size=%zu, wait_event=0x%zx, completion_signal=0x%zx",
-                    d + 1, op.num_entries, EngineOpName(engine), op.src_list[d], op.dst_list[d],
-                    op.size_list[d], (wait_events.size() != 0) ? wait_events[0].handle : 0,
-                    op.completion_signal.handle);
-          }
-        } else {
-          ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
-                  "HSA BatchCopy Linear [%zu/%zu] engineOp=%s, dst=%p, src=%p, size=%zu, "
-                  "src_agent=0x%zx, dst_agent=0x%zx, wait_event=0x%zx, completion_signal=0x%zx",
-                  i, finalOps.size(), EngineOpName(engine), op.dst, op.src, op.size,
-                  op.src_agent.handle, op.dst_agent.handle,
-                  (wait_events.size() != 0) ? wait_events[0].handle : 0,
-                  op.completion_signal.handle);
-        }
-      }
-
-      status =
-          Hsa::memory_async_batch_copy(finalOps.data() + first, static_cast<uint32_t>(last - first),
-                                       wait_events.size(), wait_events.data());
-
-      if (status != HSA_STATUS_SUCCESS) {
-        for (size_t s = first; s < last; ++s) {
-          gpu().Barriers().ResetCurrentSignal();
-        }
-        LogPrintfError("HSA batch copy failed with code %d for engine %d", status, engine);
-        // The next dispatch waits on the submitted chunks on the GPU; holds stay until then
-        groupSignals.resize(groupSignals.size() - (last - first));
-        for (auto* sig : groupSignals) {
-          gpu().Barriers().AddExternalSignal(sig);
-        }
-        return false;
-      }
-      // Later acquisitions must not rearm these before the final barrier waits on them.
-      for (size_t s = groupSignals.size() - (last - first); s < groupSignals.size(); ++s) {
-        gpu().Barriers().HoldSignal(groupSignals[s]);
-      }
+  // Waits may depend on lower-index entries, so these keep the input order across engines
+  for (size_t first = 0; first < waitSignalOps.size();) {
+    const HwQueueEngine engine = waitSignalOps[first].first;
+    std::vector<hsa_amd_memory_copy_op_t> run;
+    for (; first < waitSignalOps.size() && waitSignalOps[first].first == engine; ++first) {
+      run.push_back(waitSignalOps[first].second);
+    }
+    if (!submitOps(run, engine)) {
+      return false;
     }
   }
 
@@ -3395,9 +3436,9 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
     const Memory& srcMem = gpuMem(*srcDevMem);
     const Memory& dstMem = gpuMem(*dstDevMem);
     bool isLinearCopyOp = op.metadata.copyOpType_ == amd::CopyMetadata::kCopyOpLinear;
-    // ShaderCopyBufferBatch only describes linear copies; route swap/other ops through DMA.
-    bool useShaderCopyPath =
-        isLinearCopyOp && useShaderCopyBufferPath(srcMem, dstMem, op.size, op.metadata);
+    // ShaderCopyBufferBatch only describes linear copies without wait/signal.
+    bool useShaderCopyPath = isLinearCopyOp && !op.hasWaitSignal() &&
+                             useShaderCopyBufferPath(srcMem, dstMem, op.size, op.metadata);
 
     if (useShaderCopyPath) {
       d2dCopyOps.push_back(op);
@@ -3413,16 +3454,18 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
   if (!p2pCopyOps.empty()) {
     // Always pass prior wait events to maintain stream ordering for the batch.
     if (!hsaCopyBatch(p2pCopyOps, &priorWaitEvents, &batchSignals)) {
-      // Shader copy is linear only; fail the batch if it has swap/indirect ops.
+      // Shader copy is linear only and can't wait/signal; fail the batch otherwise.
       bool hasNonLinear = false;
       for (const auto& op : p2pCopyOps) {
-        if (op.metadata.copyOpType_ != amd::CopyMetadata::kCopyOpLinear) {
+        if (op.metadata.copyOpType_ != amd::CopyMetadata::kCopyOpLinear || op.hasWaitSignal()) {
           hasNonLinear = true;
           break;
         }
       }
       if (hasNonLinear) {
-        LogError("KernelBlitManager::copyBufferBatch: SDMA batch with swap/indirect ops failed");
+        LogError(
+            "KernelBlitManager::copyBufferBatch: SDMA batch with swap/indirect or "
+            "wait/signal ops failed");
         return false;
       }
       LogWarning(
