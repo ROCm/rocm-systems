@@ -1,0 +1,127 @@
+view: Workgroup Processor (WGP)
+alias: wgp
+tables:
+- title: Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: wgp.util
+- title: Wavefront Launch Stats
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: dispatch.grid_size
+  - metric: dispatch.workgroup_size
+  - metric: dispatch.vgprs
+  - metric: dispatch.sgprs
+  - metric: dispatch.lds_allocation
+  - metric: dispatch.scratch_allocation
+- title: Wavefront Dispatch
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: wave.dispatched_wavefronts
+    label: Dispatched Wavefronts
+  - metric: wave.dispatched_threads
+- title: Wavefront Life
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: wave.life
+- title: Wavefront Instruction Mix
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.total_insts
+  - metric: compute.insts_internal
+  - metric: compute.insts_valu
+  - metric: compute.insts_salu
+  - metric: compute.insts_smem
+  - metric: compute.insts_transcendental
+  - metric: compute.insts_vmem
+  - metric: compute.insts_lds
+- title: VMEM Instruction Mix
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.insts_vmem_flat
+  - metric: compute.insts_tex_load
+  - metric: compute.insts_tex_store
+  - metric: compute.insts_flat_load
+  - metric: compute.insts_flat_store
+- title: LDS Instruction Mix
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.lds_direct_load_insts
+  - metric: compute.lds_parameter_load_insts
+- title: VALU Instruction Mix
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: compute.valu_insts
+    round: 0
+    pct_of_peak: false
+  - metric: compute.valu_inst_cycles
+    round: 0
+    pct_of_peak: false
+- title: WMMA Instruction FLOPs and IOPs Counting
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: compute.wmma_insts
+    round: 0
+    pct_of_peak: false
+  - metric: compute.wmma_inst_cycles
+    round: 0
+    pct_of_peak: false
+- title: Instruction Cache
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: l1i.hits_per_req
+- title: Scalar Data Cache
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: sl1d.hits_per_req

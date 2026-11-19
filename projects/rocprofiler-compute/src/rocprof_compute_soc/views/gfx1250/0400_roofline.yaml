@@ -1,0 +1,57 @@
+view: Roofline
+alias: roof
+tables:
+- title: Roofline Performance Rates
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+    peak: Peak (Empirical)
+  metrics:
+  - metric: compute.valu_flops_fp16
+  - metric: compute.valu_flops_fp32
+  - metric: compute.valu_flops_fp64
+  - metric: compute.valu_iops
+  - metric: compute.valu_trans_flops_fp16
+  - metric: compute.valu_trans_flops_fp32
+  - metric: compute.valu_trans_flops_fp64
+  - metric: compute.wmma_flops_fp64
+  - metric: compute.wmma_flops_fp32
+    peak: empirical
+  - metric: compute.wmma_flops_fp16
+    peak: empirical
+  - metric: compute.wmma_flops_bf16
+    peak: empirical
+  - metric: compute.wmma_flops_fp8
+    peak: empirical
+  - metric: compute.wmma_flops_mxfp8
+    peak: empirical
+  - metric: compute.wmma_flops_fp6
+    peak: empirical
+  - metric: compute.wmma_flops_fp4
+    peak: empirical
+  - metric: compute.wmma_flops_f6f4
+    peak: empirical
+  - metric: compute.wmma_iops_int8
+    peak: empirical
+  - metric: fabric.hbm_bw
+    peak: empirical
+  - metric: gl0.gl2_cache_bw
+    peak: empirical
+  - metric: gl0.bw
+    peak: empirical
+  - metric: lds.theoretical_bw
+    peak: empirical
+- title: Roofline Plot Points
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: fabric.ai_hbm
+    label: AI HBM
+  - metric: l2.ai
+    label: AI L2
+  - metric: gl0.ai
+    label: AI L0
+  - metric: compute.total_flops

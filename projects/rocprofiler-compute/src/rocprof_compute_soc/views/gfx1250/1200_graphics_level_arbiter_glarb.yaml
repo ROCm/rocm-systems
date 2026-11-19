@@ -1,0 +1,64 @@
+view: GLARB (Graphics Level Arbiter)
+alias: glarb
+tables:
+- title: GLARBA Processing
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: glarb.glarba_util
+    label: Utilization
+  - metric: glarb.glarba_req_bus_util
+  - metric: glarb.glarba_return_bus_util
+  - metric: glarb.glarba_req
+  - metric: glarb.glarba_req_lat
+- title: GLARBC Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: glarb.glarbc_util
+    label: Utilization
+  - metric: glarb.glarbc_return_arbitration_lat
+  - metric: glarb.glarbc_buffer_full_stall
+- title: GLARBC Request
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: glarb.glarbc_req
+  - metric: glarb.glarbc_req_rd
+  - metric: glarb.glarbc_req_wr
+  - metric: glarb.glarbc_req_atomic_with_return
+  - metric: glarb.glarbc_req_atomic_without_return
+- title: GLARBC Request Bandwidth
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: glarb.glarbc_req_bw_rd
+  - metric: glarb.glarbc_req_bw_wr
+  - metric: glarb.glarbc_client_wr_acks
+- title: GLARBC-GL2 Interface
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: glarb.glarbc_gl2_rd_lat
+  - metric: glarb.glarbc_gl2_wr_lat
+  - metric: glarb.glarbc_gl2_wr_acks

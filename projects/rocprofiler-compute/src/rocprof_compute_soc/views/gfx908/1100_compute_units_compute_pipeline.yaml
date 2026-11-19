@@ -1,0 +1,31 @@
+view: Compute Units - Compute Pipeline
+alias: cu_pipe
+tables:
+- title: Compute Speed-of-Light
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+    peak: Peak
+  metrics: []
+- title: Pipeline Statistics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.ipc
+  - metric: compute.ipc_issued
+  - metric: compute.salu_util
+  - metric: compute.valu_util
+  - metric: compute.valu_active_threads
+- title: Arithmetic Operations
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics: []

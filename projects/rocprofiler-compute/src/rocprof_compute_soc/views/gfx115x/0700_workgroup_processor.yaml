@@ -1,0 +1,108 @@
+view: Workgroup Processor (WGP)
+alias: wgp
+tables:
+- title: Wavefront Launch Stats
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: dispatch.grid_size
+  - metric: dispatch.workgroup_size
+  - metric: dispatch.vgprs
+  - metric: dispatch.sgprs
+  - metric: dispatch.lds_allocation
+  - metric: dispatch.scratch_allocation
+- title: Wave Dispatch
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: wave.dispatched_wavefronts
+    label: Dispatched Wavefronts
+  - metric: wave.dispatched_threads
+- title: Wave Life
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: wave.life
+- title: Wave Instruction Mix
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.total_insts
+  - metric: compute.insts_internal
+  - metric: compute.insts_valu
+  - metric: compute.insts_salu
+  - metric: compute.insts_smem
+  - metric: compute.insts_transcendental
+  - metric: compute.insts_dual_valu_vopd
+  - metric: compute.insts_vmem
+  - metric: compute.insts_lds
+- title: VMEM Instruction Mix
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.insts_vmem_flat
+  - metric: compute.insts_tex_load
+  - metric: compute.insts_tex_store
+  - metric: compute.insts_flat_load
+  - metric: compute.insts_flat_store
+- title: LDS Instruction Mix
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.lds_direct_load_insts
+  - metric: compute.lds_parameter_load_insts
+  - metric: compute.wave32_lds_parameter_load_insts
+- title: Wait State Analysis
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: wave.wait_for_any
+  - metric: wave.wait_for_inst_fetch
+  - metric: wave.wait_for_barrier
+  - metric: wave.wait_for_counter
+- title: Instruction Cache
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: l1i.hit_rate_excl_dup
+- title: Scalar Data Cache
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: sl1d.hit_rate_excl_dup

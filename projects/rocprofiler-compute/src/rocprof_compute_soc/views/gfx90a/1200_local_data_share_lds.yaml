@@ -1,0 +1,43 @@
+view: Local Data Share (LDS)
+alias: lds
+tables:
+- title: LDS Speed-of-Light
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: lds.util
+    label: Utilization
+  - metric: lds.access_rate
+    label: Access Rate
+  - metric: lds.theoretical_bw_util
+    label: Theoretical Bandwidth Utilization
+  - metric: lds.bank_conflict_rate
+    label: Bank Conflict Rate
+- title: LDS Statistics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: lds.insts
+  - metric: lds.theoretical_bw
+    label: Theoretical Bandwidth
+  - metric: lds.lat
+  - metric: lds.bank_conflicts_access
+    label: Bank Conflicts/Access
+  - metric: lds.index_accesses
+    label: Index Accesses
+  - metric: lds.atomic_return_cycles
+    label: Atomic Return Cycles
+  - metric: lds.bank_conflict
+    label: Bank Conflict
+  - metric: lds.addr_conflict
+    label: Addr Conflict
+  - metric: lds.unaligned_stall
+    label: Unaligned Stall
+  - metric: lds.mem_violations
+    label: Mem Violations

@@ -1,0 +1,63 @@
+view: GL0 Cache (TCP Cache)
+alias: gl0
+tables:
+- title: GL0 Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl0.busy
+- title: GL0 Request Statistics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl0.total_req
+    label: Total Requests
+  - metric: gl0.rd_req
+    label: Read Requests
+  - metric: gl0.wr_req
+    label: Write Requests
+  - metric: gl0.miss_req
+    label: Miss Requests
+- title: GL0 Cache Performance
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl0.hit_rate
+    label: Hit Rate
+- title: GL0-GL1 Interface
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl0.gl1_rd_req
+    label: GL1 Read Requests
+  - metric: gl0.gl1_rd_128b_req
+  - metric: gl0.gl1_wr_req
+    label: GL1 Write Requests
+- title: GL0 Stalls
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl0.ta_req_stall
+  - metric: gl0.gl1_back_pressure
+  - metric: gl0.data_fifo_stall
+    label: Data FIFO Stall
