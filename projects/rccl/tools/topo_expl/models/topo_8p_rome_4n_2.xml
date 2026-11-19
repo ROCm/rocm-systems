@@ -3,7 +3,7 @@
  - See LICENSE.txt for license information
  -->
 <system version="2">
-  <cpu numaid="1" affinity="00000000,00000000,00000000,ffff0000,00000000,00000000,00000000,ffff0000" arch="x86_64" vendor="AuthenticAMD" familyid="143" modelid="49">
+  <cpu numaid="1" affinity="00000000,00000000,00000000,ffff0000,00000000,00000000,00000000,ffff0000" arch="x86_64" vendor="AuthenticAMD" familyid="23" modelid="49">
     <pci busid="0000:43:00.0" class="0x060400" vendor="0x11f8" device="0x4000" subsystem_vendor="0x11f8" subsystem_device="0xbeef" link_speed="16 GT/s" link_width="16">
       <pci busid="0000:46:00.0" class="0x060400" vendor="0x11f8" device="0x4000" subsystem_vendor="0x11f8" subsystem_device="0xbeef" link_speed="16 GT/s" link_width="16">
         <pci busid="0000:48:00.0" class="0x060400" vendor="0x1002" device="0x14a0" subsystem_vendor="0x0000" subsystem_device="0x0000" link_speed="16 GT/s" link_width="16">
@@ -34,7 +34,7 @@
       </pci>
     </pci>
   </cpu>
-  <cpu numaid="3" affinity="00000000,00000000,ffff0000,00000000,00000000,00000000,ffff0000,00000000" arch="x86_64" vendor="AuthenticAMD" familyid="143" modelid="49">
+  <cpu numaid="3" affinity="00000000,00000000,ffff0000,00000000,00000000,00000000,ffff0000,00000000" arch="x86_64" vendor="AuthenticAMD" familyid="23" modelid="49">
     <pci busid="0000:03:00.0" class="0x060400" vendor="0x11f8" device="0x4000" subsystem_vendor="0x11f8" subsystem_device="0xbeef" link_speed="16 GT/s" link_width="16">
       <pci busid="0000:05:00.0" class="0x060400" vendor="0x11f8" device="0x4000" subsystem_vendor="0x11f8" subsystem_device="0xbeef" link_speed="16 GT/s" link_width="16">
         <pci busid="0000:08:00.0" class="0x060400" vendor="0x1002" device="0x14a0" subsystem_vendor="0x0000" subsystem_device="0x0000" link_speed="16 GT/s" link_width="16">
@@ -65,7 +65,7 @@
       </pci>
     </pci>
   </cpu>
-  <cpu numaid="5" affinity="00000000,ffff0000,00000000,00000000,00000000,ffff0000,00000000,00000000" arch="x86_64" vendor="AuthenticAMD" familyid="143" modelid="49">
+  <cpu numaid="5" affinity="00000000,ffff0000,00000000,00000000,00000000,ffff0000,00000000,00000000" arch="x86_64" vendor="AuthenticAMD" familyid="23" modelid="49">
     <pci busid="0000:c3:00.0" class="0x060400" vendor="0x11f8" device="0x4000" subsystem_vendor="0x11f8" subsystem_device="0xbeef" link_speed="16 GT/s" link_width="16">
       <pci busid="0000:c6:00.0" class="0x060400" vendor="0x11f8" device="0x4000" subsystem_vendor="0x11f8" subsystem_device="0xbeef" link_speed="16 GT/s" link_width="16">
         <pci busid="0000:c8:00.0" class="0x060400" vendor="0x1002" device="0x14a0" subsystem_vendor="0x0000" subsystem_device="0x0000" link_speed="16 GT/s" link_width="16">
@@ -96,7 +96,7 @@
       </pci>
     </pci>
   </cpu>
-  <cpu numaid="7" affinity="ffff0000,00000000,00000000,00000000,ffff0000,00000000,00000000,00000000" arch="x86_64" vendor="AuthenticAMD" familyid="143" modelid="49">
+  <cpu numaid="7" affinity="ffff0000,00000000,00000000,00000000,ffff0000,00000000,00000000,00000000" arch="x86_64" vendor="AuthenticAMD" familyid="23" modelid="49">
     <pci busid="0000:83:00.0" class="0x060400" vendor="0x11f8" device="0x4000" subsystem_vendor="0x11f8" subsystem_device="0xbeef" link_speed="16 GT/s" link_width="16">
       <pci busid="0000:86:00.0" class="0x060400" vendor="0x11f8" device="0x4000" subsystem_vendor="0x11f8" subsystem_device="0xbeef" link_speed="16 GT/s" link_width="16">
         <pci busid="0000:88:00.0" class="0x060400" vendor="0x1002" device="0x14a0" subsystem_vendor="0x0000" subsystem_device="0x0000" link_speed="16 GT/s" link_width="16">

@@ -13,22 +13,22 @@ contract tier intentionally pins only small, portable semantic guarantees.
 ## Snapshot
 
 <!-- contract-coverage-snapshot
-contract_tests: 627
-contract_domains: 118
-declared_apis: 503
-covered_apis: 490
+contract_tests: 655
+contract_domains: 120
+declared_apis: 514
+covered_apis: 501
 uncovered_allowlisted: 13
-coverage_pct: 97.4
+coverage_pct: 97.5
 -->
 
-- Snapshot date: 2026-08-26
-- Snapshot commit: `920418c484`
-- Contract tests: 627
-- Contract domains: 118
-- Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 503
-- Declared HIP runtime APIs directly exercised by contract tests: 490
+- Snapshot date: 2026-11-17
+- Snapshot commit: `6f9d517d5c6`
+- Contract tests: 655
+- Contract domains: 120
+- Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 513
+- Declared HIP runtime APIs directly exercised by contract tests: 500
 - Intentionally uncovered, allowlisted APIs: 13
-- Approximate declared API-name coverage: 97.4%
+- Approximate declared API-name coverage: 97.5%
 - Additional public macro exercised: `hipLaunchKernelGGL`
 - Additional non-runtime-header APIs exercised: HIPRTC (`hiprtcCreateProgram`,
   `hiprtcCompileProgram`, `hiprtcGetCodeSize`, `hiprtcGetCode`,
@@ -55,14 +55,14 @@ plan or the full covered-API listing here.
 
 ## Current allowlisted gaps
 
-The checker currently reports these 11 uncovered declared APIs, all intentionally
+The checker currently reports these 13 uncovered declared APIs, all intentionally
 allowlisted:
 
 ### External-semaphore graph nodes
 
 These APIs require a valid external semaphore node. The device-only contract harness
-cannot construct such a node without an external producer, and the add path faults when
-fed an invalid handle on some runtime paths.
+cannot construct such a node without an external producer. Invalid-argument checks for
+all eight live in `catch/unit/graph/hipGraphExternalSemaphoresNodes.cc`.
 
 - `hipGraphAddExternalSemaphoresSignalNode`
 - `hipGraphAddExternalSemaphoresWaitNode`
@@ -137,6 +137,7 @@ binaries instead of exposing portable state to assert.
 | `graph_exec_lifecycle` | 5 |
 | `graph_generic_node` | 3 |
 | `graph_host` | 3 |
+| `graph_id` | 8 |
 | `graph_instantiate_params` | 2 |
 | `graph_kernel` | 3 |
 | `graph_mem_nodes` | 7 |
@@ -160,18 +161,18 @@ binaries instead of exposing portable state to assert.
 | `kernel` | 4 |
 | `kernel_launch` | 7 |
 | `kernel_name_ref` | 3 |
-| `kernel_object_attributes` | 3 |
+| `kernel_object_attributes` | 5 |
 | `library` | 14 |
 | `library_file` | 3 |
 | `logging` | 3 |
 | `managed_memory` | 5 |
 | `mem_advise` | 6 |
 | `mem_advise_v2` | 4 |
-| `mem_batch_copy` | 3 |
+| `mem_batch_copy` | 4 |
 | `mem_batch_copy_3d` | 4 |
 | `mem_batch_discard` | 7 |
 | `mem_location_pool` | 4 |
-| `mem_map_array` | 2 |
+| `mem_map_array` | 3 |
 | `memory` | 5 |
 | `memory_pool` | 6 |
 | `memory_pool_access` | 3 |

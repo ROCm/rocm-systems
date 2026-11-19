@@ -32,6 +32,7 @@ THE SOFTWARE.
 #include <memory>
 #include <string>
 
+#include "common/rdc_fields_supported.h"
 #include "rdc.grpc.pb.h"  // NOLINT
 #include "rdc.pb.h"
 #include "rdc/rdc.h"
@@ -315,6 +316,11 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
   rdc_field_grp_t field_group_id;
   rdc_field_t field_ids[RDC_MAX_FIELD_IDS_PER_FIELD_GROUP];
   for (int i = 0; i < request_count; i++) {
+    // Checked as a number: an ID that RDC does not know is not a value of rdc_field_t.
+    if (!amd::rdc::is_field_id_valid(request->field_ids(i))) {
+      reply->set_status(RDC_ST_NOT_SUPPORTED);
+      return ::grpc::Status::OK;
+    }
     field_ids[i] = static_cast<rdc_field_t>(request->field_ids(i));
   }
   rdc_status_t result =
@@ -338,6 +344,10 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
 
+  if (!amd::rdc::is_field_id_valid(request->field_id())) {
+    reply->set_status(RDC_ST_NOT_SUPPORTED);
+    return ::grpc::Status::OK;
+  }
   rdc_status_t result = rdc_group_field_add_field(rdc_handle_, request->field_group_id(),
                                                   static_cast<rdc_field_t>(request->field_id()));
   reply->set_status(result);
@@ -407,6 +417,10 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
 
+  if (!amd::rdc::is_field_id_valid(request->field_id())) {
+    reply->set_status(RDC_ST_NOT_SUPPORTED);
+    return ::grpc::Status::OK;
+  }
   rdc_field_value value;
   rdc_status_t result = rdc_field_get_latest_value(
       rdc_handle_, request->gpu_index(), static_cast<rdc_field_t>(request->field_id()), &value);
@@ -438,6 +452,10 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
 
+  if (!amd::rdc::is_field_id_valid(request->field_id())) {
+    reply->set_status(RDC_ST_NOT_SUPPORTED);
+    return ::grpc::Status::OK;
+  }
   rdc_field_value value;
   uint64_t next_timestamp;
   rdc_status_t result = rdc_field_get_value_since(
@@ -967,7 +985,7 @@ int RdcAPIServiceImpl::PolicyCallback(rdc_policy_callback_response_t* userData) 
     return 1;
   }
 
-  // Every stream of the group gets the notification; a stream keeps only the latest one.
+  // Every stream of the group queues the notification.
   std::lock_guard<std::mutex> guard(policy_mutex_);
   auto group = policy_streams_.find(userData->group_id);
   if (group == policy_streams_.end()) {
@@ -975,8 +993,11 @@ int RdcAPIServiceImpl::PolicyCallback(rdc_policy_callback_response_t* userData) 
   }
   for (auto& stream : group->second) {
     std::lock_guard<std::mutex> lock(stream->mutex);
-    stream->response = *userData;
-    stream->pending = true;
+    if (stream->pending.size() >= kMaxPendingNotifications) {
+      stream->pending.pop_front();
+      stream->dropped++;
+    }
+    stream->pending.push_back(*userData);
     stream->cv.notify_all();
   }
   return 0;
@@ -1055,22 +1076,30 @@ void RdcAPIServiceImpl::end_policy_stream(uint32_t group_id,
   while (true) {
     rdc_policy_callback_response_t response;
     bool send = false;
+    size_t dropped = 0;
     {
       std::unique_lock<std::mutex> lock(stream->mutex);
       stream->cv.wait_for(lock, std::chrono::seconds(1),
-                          [&stream] { return stream->pending || stream->stop; });
+                          [&stream] { return !stream->pending.empty() || stream->stop; });
+      // A stopped stream drops the notifications it still holds.
       if (stream->stop) {
         shutdown = stream->shutdown;
         break;
       }
-      if (stream->pending) {
-        response = stream->response;
-        stream->pending = false;
+      if (!stream->pending.empty()) {
+        response = stream->pending.front();
+        stream->pending.pop_front();
         send = true;
       }
+      dropped = stream->dropped;
+      stream->dropped = 0;
     }
     if (context->IsCancelled()) {
       break;
+    }
+    if (dropped > 0) {
+      RDC_LOG(RDC_DEBUG, "Policy stream for group " << group_id << " dropped " << dropped
+                                                    << " notifications its client did not read");
     }
     // Written without a lock: a slow client must not block RDC's policy thread.
     if (send) {

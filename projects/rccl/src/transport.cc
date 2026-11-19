@@ -373,17 +373,15 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
     int sendPeer = (comm->rank + i) % comm->nRanks;
 
     for (int j = 0; j < MAXCHANNELS / CHANNELS_PER_MASK_WORD; j++) {
+      uint64_t sendMask = comm->connectSend[sendPeer + CHANNEL_MASK_OFFSET(comm->nRanks, connIndex)].masks[j];
+      uint64_t recvMask = comm->connectRecv[recvPeer + CHANNEL_MASK_OFFSET(comm->nRanks, connIndex)].masks[j];
       if (recvPeer != sendPeer) {
-        if (comm->connectSend[sendPeer].masks[j] != 0UL)
-          NCCLCHECKGOTO(bootstrapSend(comm->bootstrap, sendPeer, bootstrapTag, NULL, 0), ret, fail);
-        if (comm->connectRecv[recvPeer].masks[j] != 0UL)
-          NCCLCHECKGOTO(bootstrapSend(comm->bootstrap, recvPeer, bootstrapTag, NULL, 0), ret, fail);
-        if (comm->connectSend[sendPeer].masks[j] != 0UL)
-          NCCLCHECKGOTO(bootstrapRecv(comm->bootstrap, sendPeer, bootstrapTag, NULL, 0), ret, fail);
-        if (comm->connectRecv[recvPeer].masks[j] != 0UL)
-          NCCLCHECKGOTO(bootstrapRecv(comm->bootstrap, recvPeer, bootstrapTag, NULL, 0), ret, fail);
+        if (sendMask != 0UL) NCCLCHECKGOTO(bootstrapSend(comm->bootstrap, sendPeer, bootstrapTag, NULL, 0), ret, fail);
+        if (recvMask != 0UL) NCCLCHECKGOTO(bootstrapSend(comm->bootstrap, recvPeer, bootstrapTag, NULL, 0), ret, fail);
+        if (sendMask != 0UL) NCCLCHECKGOTO(bootstrapRecv(comm->bootstrap, sendPeer, bootstrapTag, NULL, 0), ret, fail);
+        if (recvMask != 0UL) NCCLCHECKGOTO(bootstrapRecv(comm->bootstrap, recvPeer, bootstrapTag, NULL, 0), ret, fail);
       } else {
-        if (comm->connectSend[sendPeer].masks[j] != 0UL || comm->connectRecv[recvPeer].masks[j] != 0UL) {
+        if (sendMask != 0UL || recvMask != 0UL) {
           NCCLCHECKGOTO(bootstrapSend(comm->bootstrap, sendPeer, bootstrapTag, NULL, 0), ret, fail);
           NCCLCHECKGOTO(bootstrapRecv(comm->bootstrap, sendPeer, bootstrapTag, NULL, 0), ret, fail);
         }
@@ -400,8 +398,8 @@ exit:
     if (data[i]) free(data[i]);
   }
   free(data);
-  if (sendData) free(sendData);
-  if (recvData) free(recvData);
+  free(sendData);
+  free(recvData);
 
   NCCLCHECK(ncclStreamWaitStream(deviceStream, hostStream, comm->sharedRes->scratchEvent));
   NCCLCHECK(ncclStrongStreamRelease(ncclCudaGraphNone(comm->config.graphUsageMode), &comm->sharedRes->hostStream,
@@ -488,8 +486,8 @@ bool ncclTransportCollNetSetup(struct ncclComm* comm, struct ncclTopoGraph* coll
           comm->node, nMasters, masterPeer);
   }
 cleanup:
-  if (allConnects != NULL) free(allConnects);
-  if (masterConnects != NULL) free(masterConnects);
+  free(allConnects);
+  free(masterConnects);
   return ret != ncclSuccess;
 }
 

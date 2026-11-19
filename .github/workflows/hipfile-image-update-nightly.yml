@@ -6,18 +6,16 @@ env:
 
 on:
   schedule:
-    # ~10:00 UTC daily. The ROCm nightly publish runs ~02:00 UTC, leaving ~8h of
+    # ~08:00 UTC daily. The ROCm nightly publish runs ~00:00 UTC, leaving ~8h of
     # buffer. This job is purely an optimization: if it is late/failed/builds
     # against an incomplete nightly, per-PR runs fall back to building the nightly
     # image on demand.
-    - cron: "0 2 * * *"
+    - cron: "0 8 * * *"
   workflow_dispatch:
   # Refresh on merge of a Dockerfile/resolver change so the published nightly
   # image + floating cache track develop. Without this, the per-PR registry
   # skip could serve an image built from an out-of-date Dockerfile.
-  pull_request_target:
-    types:
-      - closed
+  push:
     branches:
       - develop
     paths:
@@ -37,9 +35,6 @@ jobs:
   # Resolve runs on the runner (not the docker:28.5 container) because the
   # resolver needs curl/bash, which the Alpine-based docker image lacks.
   resolve_nightly:
-    # pull_request_target/closed fires for un-merged PRs too; only act on merges.
-    # (The downstream build job needs this one, so skipping here skips both.)
-    if: ${{ github.event_name != 'pull_request_target' || github.event.pull_request.merged == true }}
     runs-on: [ubuntu-24.04]
     outputs:
       nightly_build: ${{ steps.nightly.outputs.nightly_build }}

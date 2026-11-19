@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include "cpu.hpp"
-#include "agent_manager.hpp"
 #include "common/string_utility.hpp"
 
 #include <algorithm>
@@ -13,6 +12,7 @@
 #include <functional>
 #include <map>
 #include <set>
+#include <string_view>
 #include <unistd.h>
 #include <unordered_map>
 
@@ -33,14 +33,8 @@ process_cpu_info_data()
     cpu_info    current_cpu;
     bool        has_processor_entry = false;
 
-    auto parse_long = [](const std::string& value) -> long {
-        try
-        {
-            return std::stol(value);
-        } catch(const std::exception&)
-        {
-            return -1;
-        }
+    auto parse_long = [](std::string_view value) -> long {
+        return utility::string::safe_stol(value).value_or(-1L);
     };
 
     static const std::unordered_map<std::string,
@@ -97,7 +91,8 @@ process_cpu_info_data()
 
         const std::string key =
             utility::string::to_lower(utility::string::trim(line.substr(0, colon_pos)));
-        const auto value = utility::string::trim(line.substr(colon_pos + 1));
+        const auto value =
+            utility::string::trim(std::string_view{ line }.substr(colon_pos + 1));
 
         auto const it = field_parsers.find(key);
         if(it != field_parsers.end())
@@ -138,52 +133,4 @@ device_count()
     return sockets.empty() ? (cpu_data.empty() ? 0 : 1) : sockets.size();
 }
 
-void
-query_cpu_agents()
-{
-    auto const cpu_data = get_cpu_info();
-    if(cpu_data.empty())
-    {
-        return;
-    }
-
-    // Group CPUs by socket (physical_id), collect model_name per socket
-    std::map<size_t, std::string> socket_model_names;
-    std::map<size_t, std::string> socket_vendor_ids;
-
-    for(const auto& cpu : cpu_data)
-    {
-        const auto socket_id = static_cast<size_t>(std::max(0L, cpu.physical_id));
-        if(!socket_model_names.contains(socket_id))
-        {
-            socket_model_names[socket_id] = cpu.model_name;
-            socket_vendor_ids[socket_id]  = cpu.vendor_id;
-        }
-    }
-
-    // Insert one agent per socket in ascending socket_id order
-    // so that device_type_index == socket_id
-    auto&         mgr        = get_agent_manager_instance();
-    std::uint32_t node_count = 0;
-
-    for(const auto& [socket_id, model_name] : socket_model_names)
-    {
-        const auto node_id     = node_count++;
-        const auto device_name = "CPU" + std::to_string(socket_id);
-        auto       cur_agent =
-            agent{ .type                 = agent_type::cpu,
-                   .handle               = 0,
-                   .device_id            = static_cast<std::uint32_t>(socket_id),
-                   .node_id              = node_id,
-                   .logical_node_id      = static_cast<std::int32_t>(socket_id),
-                   .logical_node_type_id = static_cast<std::int32_t>(socket_id),
-                   .name                 = device_name,
-                   .model_name           = model_name,
-                   .vendor_name          = socket_vendor_ids[socket_id],
-                   .product_name         = "",
-                   .device_type_index    = 0,
-                   .agent_info           = "" };
-        mgr.insert_agent(cur_agent);
-    }
-}
 }  // namespace rocprofsys::cpu

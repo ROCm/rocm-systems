@@ -14,6 +14,11 @@
 #include <cmath>
 #endif
 
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpsabi"
+#endif
+
 namespace fcbx {
 constexpr __hip_int8_t OCP_SCALE_EXP_NAN = -128;
 
@@ -819,7 +824,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ OutType fp6_cvt_packedx16(InType in, __hip_int8_t 
   constexpr bool in_float = __hip_internal::is_same<InType, __amd_floatx16_storage_t>::value ||
       __hip_internal::is_same<InType, __amd_fp16x16_storage_t>::value ||
       __hip_internal::is_same<InType, __amd_bf16x16_storage_t>::value;
-  using other_type = __hip_internal::conditional<in_float, OutType, InType>::type;
+  using other_type = typename __hip_internal::conditional<in_float, OutType, InType>::type;
 
   union {
     other_type o;
@@ -860,7 +865,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ OutType fp6_cvt_packedx32(InType in, __hip_int8_t 
   constexpr bool in_float = __hip_internal::is_same<InType, __amd_floatx32_storage_t>::value ||
                             __hip_internal::is_same<InType, __amd_fp16x32_storage_t>::value ||
                             __hip_internal::is_same<InType, __amd_bf16x32_storage_t>::value;
-  using other_type = __hip_internal::conditional<in_float, OutType, InType>::type;
+  using other_type = typename __hip_internal::conditional<in_float, OutType, InType>::type;
 
   union {
     other_type o;
@@ -892,3 +897,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ OutType fp6_cvt_packedx32(InType in, __hip_int8_t 
   }
 }
 }  // namespace fcbx
+
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif

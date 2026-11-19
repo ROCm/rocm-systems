@@ -37,7 +37,7 @@ _FUNCTION = re.compile(r"^(?:static\s+)?(?:inline\s+)?[\w:<>*&]+(?:\s+[\w:<>*&]+
 LOOKUP_ALLOWED = {
     "decode_kernel_args",
     "hrr_block_guard_relocate",
-    "playback_hipFreeHost",
+    "free_host_memory",
     "playback_hipHostUnregister",
     "playback_hipFree",
     "playback_hipFreeAsync",

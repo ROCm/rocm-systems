@@ -15,15 +15,18 @@ import pytest
 # tests/ci/conftest.py is not installed with the suite (share/rdc/rdctst_tests/fake_gpu).
 from test_fake_gpu import FACTOR, Rdcd, _created_id, tools  # noqa: F401 (fixture)
 
-RDC_ST_GROUP_NOT_FOUND = 17  # rdc_status_t in include/rdc/rdc.h; rdci exits with it
+RDC_ST_NOT_SUPPORTED = 1  # rdc_status_t in include/rdc/rdc.h; rdci exits with it
+RDC_ST_GROUP_NOT_FOUND = 17
 TEMP_READ = "amdsmi_get_temp_metric"  # one per GPU and check of a temperature policy
 GPU_RESET = "amdsmi_reset_gpu"
 WINDOW_S = 3
 
 
 @pytest.fixture
-def rdcd(tools, tmp_path):
-    d = Rdcd(tools, tmp_path).start()
+def rdcd(tools, tmp_path, request):  # noqa: F811 (the fixture)
+    # Fake settings come from @pytest.mark.parametrize("rdcd", [{...}], indirect=True).
+    d = Rdcd(tools, tmp_path, **getattr(request, "param", {})).start()
+    d.arm()
     yield d
     code = d.stop()
     assert code == 0, f"rdcd exited with {code} after SIGTERM\n{d.output()}"
@@ -80,6 +83,22 @@ def test_policy_set_on_a_missing_group_fails(rdcd):
     assert r.returncode == RDC_ST_GROUP_NOT_FOUND, (
         f"want {RDC_ST_GROUP_NOT_FOUND}, got {r.returncode}\n{r.stdout}{r.stderr}"
     )
+
+
+@pytest.mark.parametrize(
+    "rdcd",
+    [{"RDC_FAKE_FAIL": "amdsmi_get_gpu_bad_page_info@0=AMDSMI_STATUS_NOT_SUPPORTED"}],
+    indirect=True,
+)
+def test_policy_set_that_a_gpu_does_not_support_fails(rdcd):
+    # RDC sets no page-retirement policy for a group with a GPU that cannot count bad pages.
+    gid = _group(rdcd, [0])
+    r = rdcd.rdci("policy", "-g", gid, "-M", "10", "-A", "0")
+    assert r.returncode == RDC_ST_NOT_SUPPORTED, (
+        f"want {RDC_ST_NOT_SUPPORTED}, got {r.returncode}\n{r.stdout}{r.stderr}"
+    )
+    assert "GPU NO SUPPORT SET" in r.stdout, r.stdout
+    assert "Page Retirement" not in rdcd.rdci("policy", "-g", gid, "--get").stdout
 
 
 def test_policy_get_lists_every_condition_of_a_group(rdcd):

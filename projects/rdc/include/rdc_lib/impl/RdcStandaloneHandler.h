@@ -179,10 +179,14 @@ class RdcStandaloneHandler : public RdcHandler {
   // The RDC status of a RegisterPolicy stream that rdcd ended.
   static rdc_status_t policy_stream_status(const ::grpc::Status& status);
 
-  // Guards policy_streams_, draining_ and the waiter state below. A stream is
-  // in one of the containers, or held by the call that joins it.
+  // Guards policy_streams_, unregistering_, draining_ and the waiter state
+  // below. A stream is in one of the containers, or held by the call that
+  // joins it.
   std::mutex policy_streams_mutex_;
   std::map<uint32_t, std::shared_ptr<policy_stream>> policy_streams_;
+  // Per group, the rdc_policy_unregister() calls that have not returned. rdcd
+  // unregisters by group, so the group cannot be registered again until then.
+  std::map<uint32_t, int> unregistering_;
   // Streams unregistered from a callback, joined later.
   std::vector<std::shared_ptr<policy_stream>> draining_;
   // rdc_policy_register() calls waiting for admission; the destructor waits

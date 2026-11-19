@@ -30,7 +30,7 @@ def test_client_replies_gtest():
     )
 
 
-def test_rdci_lists_as_many_groups_as_rdcd_holds(rdcd):
+def test_rdci_lists_as_many_groups_as_rdcd_holds(rdcd):  # noqa: F811 (the fixture)
     for i in range(RDC_MAX_NUM_GROUPS):
         _created_id(rdcd.ok("group", "-c", f"limit_{i}"))
     r = rdcd.rdci("group", "-c", "one_too_many")
