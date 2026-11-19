@@ -40,6 +40,9 @@
 #   6. With --rocpd-input, the rocpd counters_collection view reports each (dispatch, counter) as
 #      the mean of the passes that collected it, so the common counters are not multiplied by N,
 #      and every raw rocpd row carries the replay pass that pmc_events reports.
+#   7. With --expected-pass-counts, each dispatch carries the passes its memory allowed: a dispatch
+#      replay cannot save runs once, so a run mixing such memory with replayable memory yields
+#      dispatches of different lengths, in the order the dispatches were issued.
 # (The app verifies its own results in the generate step, guarding the restored data itself.)
 
 import collections
@@ -412,6 +415,24 @@ def test_iteration_range_selects_launches(json_data, selected_kernel, selected_l
     assert got == want, (
         f"counters came from {selected_kernel} dispatches {got}, expected launches "
         f"{selected_launches} of {len(launches)}, which are dispatches {want}"
+    )
+
+
+def test_pass_counts_per_dispatch(json_data, expected_pass_counts):
+    # Each dispatch carries the passes its memory allowed, in the order the dispatches were issued.
+    # A dispatch whose kernel arguments point at memory the snapshot does not cover runs once instead
+    # of once per counter group, so a run mixing such memory with replayable memory yields dispatches
+    # of different lengths. The sequence says which ones were replayed, which the application's own
+    # result cannot: running once and running twice-then-restoring both leave y correct.
+    if expected_pass_counts is None:
+        pytest.skip("--expected-pass-counts was not specified")
+
+    table = _dispatch_passes(_sdk(json_data))
+    got = [sorted(table[did]["passes"]) for did in sorted(table)]
+    want = [list(range(count)) for count in expected_pass_counts]
+    assert got == want, (
+        f"per-dispatch replay_pass sequences {got} != {want}: "
+        f"dispatch_ids={sorted(table)} kernel_ids={[table[d]['kernel_id'] for d in sorted(table)]}"
     )
 
 

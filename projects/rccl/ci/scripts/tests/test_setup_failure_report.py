@@ -271,6 +271,7 @@ class HarnessSetupFailureTest(ReportCapture):
         required = test_madengine.WORKLOAD_CONFIGS[workload].get("required_nodes")
         return workload, [
             "--artifact-dir", self.empty_artifact_dir(),
+            "--baseline-artifact-dir", self.empty_artifact_dir(),
             "--workload", workload,
             "--cluster", next(iter(test_madengine.CLUSTER_CONFIGS)),
             "--nodes", str(nodes or required or 2),
@@ -282,7 +283,7 @@ class HarnessSetupFailureTest(ReportCapture):
     def test_madengine(self) -> None:
         workload, argv = self.madengine_argv()
         self.run_harness(test_madengine, "RCCL MADEngine", argv)
-        self.assert_reported(f"RCCL MADEngine {workload}", "Discover RCCL library")
+        self.assert_reported(f"RCCL MADEngine {workload}", "Discover RCCL libraries")
 
     def test_madengine_argument_error(self) -> None:
         workload, argv = self.madengine_argv(nodes=1)
@@ -296,13 +297,16 @@ class HarnessSetupFailureTest(ReportCapture):
         artifact_dir = self.empty_artifact_dir()
         _, madengine_argv = self.madengine_argv()
         cases = {
-            test_jax_collective: ["--artifact-dir", artifact_dir,
-                                  "--jax-src", str(self.tmp / "jax-src")],
-            test_pytorch_c10d: ["--artifact-dir", artifact_dir,
-                                "--pytorch-src", str(self.tmp / "pytorch-src")],
-            test_madengine: madengine_argv[:madengine_argv.index("--notify-email")],
+            test_jax_collective: (["--artifact-dir", artifact_dir,
+                                   "--jax-src", str(self.tmp / "jax-src")],
+                                  "Discover RCCL library"),
+            test_pytorch_c10d: (["--artifact-dir", artifact_dir,
+                                 "--pytorch-src", str(self.tmp / "pytorch-src")],
+                                "Discover RCCL library"),
+            test_madengine: (madengine_argv[:madengine_argv.index("--notify-email")],
+                             "Discover RCCL libraries"),
         }
-        for module, argv in cases.items():
+        for module, (argv, step) in cases.items():
             with self.subTest(script=Path(script_path(module)).name):
                 self.summary_file.unlink(missing_ok=True)
                 result = subprocess.run(
@@ -310,7 +314,7 @@ class HarnessSetupFailureTest(ReportCapture):
                     capture_output=True, text=True, env=os.environ.copy(),
                 )
                 self.assertEqual(result.returncode, 1, result.stderr)
-                self.assertIn("Failed step: Discover RCCL library", self.summary())
+                self.assertIn(f"Failed step: {step}", self.summary())
 
 
 

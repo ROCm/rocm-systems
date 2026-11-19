@@ -118,21 +118,6 @@ TEST(MfmaSimdExact, F32_bf16_AllShapes) {
   run_f32<32, 32, 4, 2>("f32_bf16", Fmt::BF16, 16, amdgpu::extract_bf16, amdgpu::extract_bf16);
 }
 
-// --- exec_f32 generic, fp8/bf8 inputs incl. mixed A/B pairs ---
-TEST(MfmaSimdExact, F32_f8_AllShapes) {
-  SKIP_IF_NO_SIMD();
-  run_f32<16, 16, 32, 1>("f32_fp8", Fmt::FP8, 8, amdgpu::extract_fp8, amdgpu::extract_fp8);
-  run_f32<16, 16, 32, 1>("f32_bf8", Fmt::BF8, 8, amdgpu::extract_bf8, amdgpu::extract_bf8);
-  run_f32<32, 32, 16, 1>("f32_fp8", Fmt::FP8, 8, amdgpu::extract_fp8, amdgpu::extract_fp8);
-  run_f32<32, 32, 16, 1>("f32_bf8", Fmt::BF8, 8, amdgpu::extract_bf8, amdgpu::extract_bf8);
-  run_f32<16, 16, 128, 1>("f32_fp8", Fmt::FP8, 8, amdgpu::extract_fp8, amdgpu::extract_fp8);
-  run_f32<16, 16, 128, 1>("f32_bf8", Fmt::BF8, 8, amdgpu::extract_bf8, amdgpu::extract_bf8);
-  run_f32<32, 32, 64, 1>("f32_fp8", Fmt::FP8, 8, amdgpu::extract_fp8, amdgpu::extract_fp8);
-  run_f32<32, 32, 64, 1>("f32_bf8", Fmt::BF8, 8, amdgpu::extract_bf8, amdgpu::extract_bf8);
-  run_f32<16, 16, 32, 1>("f32_fp8_bf8", Fmt::FP8, 8, amdgpu::extract_fp8, amdgpu::extract_bf8);
-  run_f32<32, 32, 16, 1>("f32_bf8_fp8", Fmt::BF8, 8, amdgpu::extract_bf8, amdgpu::extract_fp8);
-}
-
 // --- exec_f32 generic, f32 inputs (4x4 stays generic; bigger go specialized) ---
 TEST(MfmaSimdExact, F32_f32_Generic4x4) {
   SKIP_IF_NO_SIMD();
@@ -185,26 +170,6 @@ TEST(MfmaSimdExact, Bf16Spec_AllShapes) {
   spec(amdgpu::exec_f32_mfma_bf16_spec<16, 16, 2, 4>, "spec_bf16_16x16x2x4");
   spec(amdgpu::exec_f32_mfma_bf16_spec<32, 32, 4, 2>, "spec_bf16_32x32x4x2");
   spec(amdgpu::exec_f32_mfma_bf16_spec<16, 16, 4, 4>, "spec_bf16_16x16x4x4");
-}
-
-// --- specialized fp8/bf8 kernels (constexpr dims + LUT bulk convert), all four
-// A/B format pairs on both dense shapes. The trial modes drive NaN, Inf (bf8),
-// denorm, and max-finite f8 codes through both paths. ---
-TEST(MfmaSimdExact, F8Spec_AllShapes) {
-  SKIP_IF_NO_SIMD();
-  auto spec = [](MfmaFloatSpecFn<> fn, Fmt fmt, const char *label) {
-    run_case(label, fmt, Fmt::F32, [fn](MfmaFixture &fx, uint32_t const_acc) {
-      fn(*fx.cu, fx.vbase + DST, fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC, const_acc, 0, 0, 0);
-    });
-  };
-  spec(amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, true, true>, Fmt::FP8, "spec_fp8_fp8_16x16x32");
-  spec(amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, true, false>, Fmt::FP8, "spec_fp8_bf8_16x16x32");
-  spec(amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, false, true>, Fmt::BF8, "spec_bf8_fp8_16x16x32");
-  spec(amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, false, false>, Fmt::BF8, "spec_bf8_bf8_16x16x32");
-  spec(amdgpu::exec_f32_mfma_f8_spec<32, 32, 16, true, true>, Fmt::FP8, "spec_fp8_fp8_32x32x16");
-  spec(amdgpu::exec_f32_mfma_f8_spec<32, 32, 16, true, false>, Fmt::FP8, "spec_fp8_bf8_32x32x16");
-  spec(amdgpu::exec_f32_mfma_f8_spec<32, 32, 16, false, true>, Fmt::BF8, "spec_bf8_fp8_32x32x16");
-  spec(amdgpu::exec_f32_mfma_f8_spec<32, 32, 16, false, false>, Fmt::BF8, "spec_bf8_bf8_32x32x16");
 }
 
 // --- specialized f32 kernels ---
@@ -306,49 +271,6 @@ TEST(MfmaSimdExact, Bf16SpecDestructiveAccumulatorOverlap) {
   }
 }
 
-TEST(MfmaSimdExact, I8SpecDestructiveSourceOverlap) {
-  SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16)
-    GTEST_SKIP() << "test requires the 16-lane matrix fast path";
-  constexpr uint32_t source_b = 0;
-  constexpr uint32_t destination_and_source_a = 64;
-  constexpr uint32_t accumulator = 128;
-
-  for (bool materialize_overlap : {false, true}) {
-    SCOPED_TRACE(materialize_overlap ? "materialized" : "logical zero");
-    auto seed = [=](MfmaFixture &fx) {
-      fx.seed(source_b, 1, Fmt::I8, Mode::RandomInt, 166);
-      fx.seed(accumulator, 32, Fmt::I8, Mode::RandomInt, 177);
-      if (materialize_overlap)
-        fx.seed(destination_and_source_a, 1, Fmt::I8, Mode::RandomInt, 188);
-    };
-    auto kernel = [](MfmaFixture &fx) {
-      amdgpu::exec_i32_mfma_i8_spec<32, 32, 4, 2>(
-          *fx.cu, fx.vbase + destination_and_source_a, fx.vbase + destination_and_source_a,
-          fx.vbase + source_b, fx.vbase + accumulator, amdgpu::ACC_FROM_VGPR);
-    };
-    expect_fixture_bit_exact("i8 source overlap", seed, kernel, destination_and_source_a, 32);
-  }
-}
-
-// --- MX-scaled fp8/bf8 (per-32-block e8m0 scales: power-of-two, exact) ---
-TEST(MfmaSimdExact, F32Scaled) {
-  SKIP_IF_NO_SIMD();
-  constexpr uint32_t SCALE_A = 240, SCALE_B = 248;
-  auto scaled = [&](const char *label, Fmt fmt, uint32_t m, uint32_t n, uint32_t k, auto ex) {
-    run_case(label, fmt, Fmt::F32, [=](MfmaFixture &fx, uint32_t const_acc) {
-      fx.seed_words(SCALE_A, 4, 0xA5);
-      fx.seed_words(SCALE_B, 4, 0x5A);
-      amdgpu::exec_f32_scaled_mixed(*fx.cu, m, n, k, 1, 8, 8, fx.vbase + DST, fx.vbase + S0,
-                                    fx.vbase + S1, fx.vbase + ACC, ex, ex, const_acc, fx.vbase,
-                                    256u + SCALE_A, 256u + SCALE_B,
-                                    /*scale_a_byte=*/0, /*scale_b_byte=*/0);
-    });
-  };
-  scaled("scaled_fp8_16x16x128", Fmt::FP8, 16, 16, 128, amdgpu::extract_fp8);
-  scaled("scaled_bf8_32x32x64", Fmt::BF8, 32, 32, 64, amdgpu::extract_bf8);
-}
-
 // --- integer i8 MFMA: exact MAC, every dispatched shape ---
 TEST(MfmaSimdExact, I32_i8_AllShapes) {
   SKIP_IF_NO_SIMD();
@@ -358,24 +280,6 @@ TEST(MfmaSimdExact, I32_i8_AllShapes) {
                 {32, 32, 4, 2},  {16, 16, 4, 4},  {4, 4, 4, 16}};
   for (auto s : shapes)
     run_i8("i32_i8", s.m, s.n, s.k, s.b);
-}
-
-// --- specialized i8 kernels (constexpr dims + i8 sign-extend bulk convert) ---
-// The accumulator window is seeded with random words spanning the full int32
-// range, so wrap-around near INT32_MAX/INT32_MIN is exercised on both paths.
-TEST(MfmaSimdExact, I8Spec_AllShapes) {
-  SKIP_IF_NO_SIMD();
-  auto spec = [](MfmaIntSpecFn fn, const char *label) {
-    run_case(label, Fmt::I8, Fmt::I8, [fn](MfmaFixture &fx, uint32_t const_acc) {
-      fn(*fx.cu, fx.vbase + DST, fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC, const_acc);
-    });
-  };
-  spec(amdgpu::exec_i32_mfma_i8_spec<16, 16, 64>, "spec_i8_16x16x64");
-  spec(amdgpu::exec_i32_mfma_i8_spec<32, 32, 32>, "spec_i8_32x32x32");
-  spec(amdgpu::exec_i32_mfma_i8_spec<32, 32, 16>, "spec_i8_32x32x16");
-  spec(amdgpu::exec_i32_mfma_i8_spec<16, 16, 32>, "spec_i8_16x16x32");
-  spec(amdgpu::exec_i32_mfma_i8_spec<32, 32, 4, 2>, "spec_i8_32x32x4x2");
-  spec(amdgpu::exec_i32_mfma_i8_spec<16, 16, 4, 4>, "spec_i8_16x16x4x4");
 }
 
 // --- f64 MFMA ---

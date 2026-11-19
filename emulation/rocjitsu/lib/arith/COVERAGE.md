@@ -77,7 +77,9 @@ gfx1250 supports numeric and propagating binary/ternary selection, including
 packed FP16 forms. Loose and Compatibility retain their respective numerical
 and output-control policies, with scalar, AVX2 and AVX-512 paths.
 
-FP-status reporting is not implemented for these selection entry points, so
+Gfx1250 binary FP32 selection uses `_gfx1250` entry points to preserve its
+numeric-only Compatibility policy separately from gfx12's reporting policy.
+FP-status reporting is not implemented for these CDNA selection entry points, so
 explicit mode 3 stops execution. Mode 2 also rejects effective OMOD scaling on
 gfx950 propagating FP32 ternary selection. Selected NaN inputs are also rejected
 for gfx950/gfx1250 packed FP16 MINIMUM3/MAXIMUM3 and gfx1250 packed FP16
@@ -104,3 +106,44 @@ including the inherited whole-wave nonfinite gate. The VM owns operand views,
 VCC/EXEC writes and trap delivery. Ordinary Compatibility comparisons remain
 numeric-only; explicit reporting qualification is unchanged. Gfx10 signaling
 policy remains in the partially migrated RDNA2 adapter until that migration.
+
+## Scalar floating point
+
+gfx12 scalar arithmetic, comparisons, rounding and conversions use rj-arith in
+every semantics, including Compatibility. Compatibility retains the inherited
+scalar FP-status model; arithmetic and conversions still reject explicit mode 3
+where reporting is not qualified. Scalar comparisons and rounding support mode 3.
+The VM owns SGPR/SCC writes and trap delivery. gfx1150 retains its legacy scalar
+FP implementation pending migration; gfx1250 has its own documented library policy.
+
+## Older native FP16 FMA
+
+Gfx908/gfx90a native and legacy FMA and gfx908 fused MAC, plus gfx1010/gfx1030/
+gfx1150 FMA/FMAC and literal FMA, use the inherited gfx11 numeric model in
+Compatibility and the existing scalar/AVX2/AVX-512 paths. Source/destination
+half selection, partial EXEC, guest rounding/denormals, IEEE NaN quieting and
+round-before-OMOD remain profile-specific bindings. They do not gain new
+empirical qualification or FP-status reporting; active explicit strict decoded
+requests are rejected. Loose and allow-Loose remain supported.
+
+Gfx90a separately rounded MAD/MAC uses its own rj-arith model, described below;
+it is not folded into native FMA. Packed/mixed half arithmetic is also migrated.
+Graphics/division still have live legacy users.
+
+## gfx908 FP16 MAD
+
+Ordinary/legacy MAD and literal MADMK/MADAK reuse the existing CDNA3/4 rounded
+FP32-intermediate half-MAD model, including scalar/AVX2/AVX-512 dispatch,
+source/destination halves, output modifiers, FP16_OVFL, aliases and partial EXEC.
+This inherited approximation supports Compatibility/Loose/allow-Loose, not
+explicit bit-exact or FP-status semantics. Gfx90a's separately rounded half
+MAD/MAC remains a different model and is not enabled through these entry points.
+
+### gfx90a half MAD/MAC Compatibility
+
+MAD/MAD_LEGACY, MAC and literal MADMK/MADAK use the inherited two-half-rounding
+model in Compatibility, sharing existing scalar/AVX2/AVX-512 half MUL and ADD.
+Loose uses FP32-intermediate MAD. Guest rounding, forced intermediate flushing,
+IEEE NaN quieting, FP16_OVFL and final output modifiers are retained. This is
+software-model reuse, not new empirical qualification; strict modes reject and
+FP status is unchanged. The native half FMA migration is independent.

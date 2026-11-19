@@ -62,4 +62,36 @@ inline void execute_lds_direct_load(Instruction &inst, Wavefront &wf, uint32_t d
   inst.set_data(std::move(d));
 }
 
+/// Each primitive stores P0, P10, and P20 as three consecutive XYZW vectors.
+inline void execute_lds_parameter_load(Instruction &inst, Wavefront &wf, uint32_t dst,
+                                       uint32_t attribute, uint32_t component) {
+  if (!wf.exec())
+    return;
+  if ((wf.m0() & 0x8000007f) || attribute > 32) {
+    wf.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const unsigned quads = wf.wf_size() / 4;
+  const uint32_t starts = ((wf.m0() >> 15) | 1u) & ((1u << quads) - 1);
+  const uint32_t primitives = std::popcount(starts);
+  const uint64_t parameter_base = wf.lds_base() + (wf.m0() & 0xffffu);
+  auto data = std::make_unique<VectorMemState>(LOCAL_MEM);
+  data->wf_size = wf.wf_size();
+  data->dst_reg_base = wf.vgpr_alloc().base + dst;
+  data->elem_size = 4;
+  data->num_elems = 1;
+  data->wait_counter_type = WaitCounterType::EXPCNT;
+  // Lane 3 receives zero at writeback without reading a fourth coefficient.
+  data->exec_mask = whole_active_quads(wf.exec());
+  data->lane_mask = data->exec_mask & 0x7777777777777777ULL;
+  for (unsigned quad = 0; quad < quads; ++quad) {
+    const uint32_t primitive = std::popcount(starts & ((2u << quad) - 1u)) - 1;
+    const uint32_t primitive_offset = (attribute * primitives + primitive) * 12;
+    for (unsigned coefficient = 0; coefficient < 3; ++coefficient)
+      data->per_lane_addr[4 * quad + coefficient] =
+          parameter_base + 4 * (primitive_offset + coefficient * 4 + component);
+  }
+  inst.set_data(std::move(data));
+}
+
 } // namespace rocjitsu::amdgpu
