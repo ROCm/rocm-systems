@@ -290,6 +290,13 @@ public:
 
   const std::vector<EventId> &getBarrierPendingEvents() const { return barrierPendingEvents; }
 
+  /// Whether retained LDS history could overlap [start, end). The bounds may
+  /// include retired prefixes, but never exclude a retained access.
+  bool barrierPendingMayOverlap(int start, int end) const {
+    return !barrierPendingEvents.empty() && start < barrierPendingBounds.end &&
+           barrierPendingBounds.start < end;
+  }
+
   RaceDetector *getDetector() { return detector; }
   const RaceDetector *getDetector() const { return detector; }
 
@@ -333,6 +340,9 @@ private:
 
   std::vector<EventId> waveMemoryEvents;
   std::vector<EventId> barrierPendingEvents;
+  /// Conservative bounds avoid scanning another group's history when its
+  /// LDS tile is disjoint. Reset when starting a new, previously empty history.
+  Interval barrierPendingBounds{0, 0};
   // GFX10 direct reads cover the first 1, 2, or 4 bytes of an aligned DWORD.
   std::unordered_map<uint32_t, uint8_t> directLdsReadWidths;
 

@@ -32,13 +32,14 @@ namespace rocjitsu::plugins::race_detector {
 ///      no other wave of the workgroup is live, an LDS event is retired as
 ///      soon as it completes.
 ///
-/// Barrier ordering: a barrier orders an access before it only if the issuing
-/// wave completed the access before its own signal, and orders an access after
-/// it only if the accessing wave issued it after its own wait. Each round of a
+/// Barrier ordering: for a direct handoff, the detector requires the issuing
+/// wave to complete its LDS access before signalling, and the accessing wave
+/// to pass its wait before accessing those bytes. Each round of a
 /// barrier is a release/acquire channel, tracked with a vector clock over the
 /// workgroup's waves:
-///   - Each wave has an epoch, advanced by each of its signals. An event that
-///     completes records its wave's current epoch (EventRegistry::releaseEpoch).
+///   - Each wave has an epoch, advanced by each of its signals. An event records
+///     that epoch when its LDS access completes (EventRegistry::releaseEpoch),
+///     even if its register result remains pending.
 ///   - A signal releases into the round everything the wave has completed or
 ///     acquired; passing the wait of a round acquires everything released into
 ///     it. A wave that ends releases into every later workgroup round it had
@@ -229,11 +230,13 @@ private:
     return acquired_[static_cast<size_t>(accessor.value) * waveCount() + owner.value];
   }
 
-  /// Call `visit` with each event of another wave whose LDS access completed
-  /// in an epoch `accessor` has not acquired. A wave's history is in epoch
+  /// Call `visit` with candidate events of other waves whose LDS access
+  /// completed in an epoch `accessor` has not acquired. Histories with bounds
+  /// disjoint from [start, end) are skipped. A wave's history is in epoch
   /// order, so these are a suffix of it, and the events a barrier has ordered
   /// before `accessor`'s access are never visited.
-  template <typename Visit> void forEachUnacquiredLdsEvent(WaveId accessor, Visit visit) const;
+  template <typename Visit>
+  void forEachUnacquiredLdsEvent(WaveId accessor, int start, int end, Visit visit) const;
 
   /// Whether a barrier has ordered another wave's completed event before
   /// `accessor`'s access.
