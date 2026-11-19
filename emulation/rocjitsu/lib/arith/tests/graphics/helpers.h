@@ -32,8 +32,10 @@ enum class GraphicsFamily { Cube, Interp16, Interp32, Mullit };
 // Check family references, modifiers, aliases and unsupported semantics.
 // Cube selection follows the ISA. Interpolation and lighting use numerical
 // references in loose mode; ties, signed zeros and special values are explicit.
+// loose_only marks a lighting entry point that still refuses strict exact.
 template <int Lanes, typename Call>
-void check_graphics(Call call, int op, GraphicsFamily family, bool gfx12 = true) {
+void check_graphics(Call call, int op, GraphicsFamily family, bool gfx12 = true,
+                    bool loose_only = false) {
   const int interpolation = family == GraphicsFamily::Interp16   ? 16
                             : family == GraphicsFamily::Interp32 ? 32
                                                                  : 0;
@@ -133,7 +135,8 @@ void check_graphics(Call call, int op, GraphicsFamily family, bool gfx12 = true)
           int error = invoke(cpu | semantics | guest, exec_mask, mode, actual.v + d, actual.v,
                              actual.v + 1, actual.v + 2, &status);
           int expected_error = RJ_ARITH_SUCCESS;
-          if (lighting && semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+          if (lighting && loose_only &&
+              semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
             expected_error = RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
           }
           if (lighting && semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
