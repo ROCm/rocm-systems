@@ -401,3 +401,85 @@ TEST(FpDivScale, RepairedLaneKeepsItsOperands) {
   check_repaired_lane<64, 32>(rj_arith_v_div_scale_f64_w32);
   check_repaired_lane<64, 64>(rj_arith_v_div_scale_f64_w64);
 }
+
+// CDNA ignores output modifiers and retains its inherited gradual-underflow rule.
+template <int Width, int Lanes, typename Call>
+static void check_cdna_scale(Call call, Call inherited) {
+  using namespace rocjitsu::arith::test;
+  using Mask = std::conditional_t<Lanes == 32, uint32_t, uint64_t>;
+  auto input = make_div_scale_inputs<Width, Lanes>();
+  constexpr uint64_t snan = Width == 32 ? 0x7f800001ULL : 0x7ff0000000000001ULL;
+  constexpr uint64_t quiet = Width == 32 ? 0x400000ULL : 0x8000000000000ULL;
+  write_fp(input.v, 0, Width, snan);
+  write_fp(input.v + 2, 0, Width, snan);
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (int sample = 0; sample < 64; ++sample) {
+      const uint64_t fp = (uint64_t(sample & 3) << 24) |
+                          (sample & 4 ? RJ_ARITH_FP_FLUSH_INPUT_DENORMALS : 0) |
+                          (sample & 8 ? RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS : 0) |
+                          (sample & 16 ? RJ_ARITH_FP_IEEE_MODE : 0);
+      const uint64_t signs = sample & 32 ? RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_NEG_B : 0;
+      const uint64_t ignored = uint64_t(sample & 3) * RJ_ARITH_ALU_OMOD_2 | RJ_ARITH_ALU_CLAMP;
+      const Mask exec_mask = Mask(0xaaaaaaaaaaaaaaaaULL) | 1;
+      const int destination = sample & 1 ? 0 : 6;
+      auto expected = input;
+      Mask expected_condition = 0;
+      ASSERT_EQ(inherited(fp | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS, exec_mask,
+                          signs, expected.v + destination, &expected_condition, expected.v,
+                          expected.v + 2, expected.v + 4),
+                0);
+      for (uint64_t semantics :
+           {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE,
+            RJ_ARITH_SEMANTICS_COMPATIBILITY}) {
+        auto actual = input;
+        Mask condition = ~Mask(0);
+        ASSERT_EQ(call(cpu | fp | semantics, exec_mask, signs | ignored, actual.v + destination,
+                       &condition, actual.v, actual.v + 2, actual.v + 4),
+                  0);
+        EXPECT_EQ(condition, expected_condition);
+        actual.expect_preserved(input, destination, Width / 32);
+        for (int reg = 0; reg < Width / 32; ++reg) {
+          for (int lane = 0; lane < Lanes; ++lane) {
+            EXPECT_EQ(actual.v[destination + reg][lane], expected.v[destination + reg][lane]);
+          }
+        }
+        EXPECT_EQ(read_fp(actual.v + destination, 0, Width) & ~(1ULL << (Width - 1)), snan | quiet);
+      }
+    }
+    // The RDNA below-window overflow rule must not replace inherited CDNA underflow.
+    auto tiny = input;
+    for (int lane = 0; lane < Lanes; ++lane) {
+      write_fp(tiny.v, lane, Width, Width == 32 ? 0x00800000ULL : 0x0010000000000000ULL);
+      write_fp(tiny.v + 2, lane, Width, Width == 32 ? 0x7f000000ULL : 0x7fe0000000000000ULL);
+      write_fp(tiny.v + 4, lane, Width, Width == 32 ? 0x64000000ULL : 0x6000000000000000ULL);
+    }
+    for (uint64_t semantics : {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_COMPATIBILITY}) {
+      auto actual = tiny;
+      for (int lane = 0; lane < Lanes; ++lane) {
+        write_fp(actual.v + 6, lane, Width, 0xdeadbeefULL);
+      }
+      Mask condition = ~Mask(0);
+      ASSERT_EQ(call(cpu | semantics, ~Mask(0), 0, actual.v + 6, &condition, actual.v, actual.v + 2,
+                     actual.v + 4),
+                RJ_ARITH_SUCCESS);
+      EXPECT_EQ(condition, Mask(0));
+      for (int lane = 0; lane < Lanes; ++lane) {
+        EXPECT_EQ(read_fp(actual.v + 6, lane, Width), 0U);
+      }
+    }
+  }
+  Mask condition = 7;
+  EXPECT_EQ(call(RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL, Mask(0), 0, nullptr, &condition, nullptr,
+                 nullptr, nullptr),
+            RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+  EXPECT_EQ(condition, Mask(7));
+  EXPECT_EQ(call(0, Mask(0), 0, nullptr, &condition, nullptr, nullptr, nullptr), 0);
+  EXPECT_EQ(condition, Mask(0));
+}
+
+TEST(CdnaDivScale, Arithmetic) {
+  check_cdna_scale<32, 32>(rj_arith_v_div_scale_f32_w32_gfx942, rj_arith_v_div_scale_f32_w32_gfx12);
+  check_cdna_scale<32, 64>(rj_arith_v_div_scale_f32_w64_gfx942, rj_arith_v_div_scale_f32_w64_gfx12);
+  check_cdna_scale<64, 32>(rj_arith_v_div_scale_f64_w32_gfx942, rj_arith_v_div_scale_f64_w32_gfx12);
+  check_cdna_scale<64, 64>(rj_arith_v_div_scale_f64_w64_gfx942, rj_arith_v_div_scale_f64_w64_gfx12);
+}

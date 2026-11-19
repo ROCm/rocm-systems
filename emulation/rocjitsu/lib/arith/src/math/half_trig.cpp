@@ -46,47 +46,6 @@ uint16_t output(uint16_t bits, uint32_t mode, bool preserve_nan) {
   return bits;
 }
 
-#if defined(RJ_ARITH_HAVE_X86_64_V3)
-// Compute loose results with guest half-precision policies. Consume all inputs
-// before writing selected destination halves; preserve the other halves.
-template <bool Rdna3, bool Cosine>
-[[gnu::noinline]] void loose_policy(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
-                                    const uint32_t *a) {
-  uint32_t input[32], result[32]{};
-  unsigned a_shift = mode & RJ_ARITH_ALU_HIGH_A ? 16 : 0;
-  unsigned d_shift = mode & RJ_ARITH_ALU_HIGH_D ? 16 : 0;
-  for (int lane = 0; lane < 32; ++lane) {
-    uint16_t bits = uint16_t(a[lane] >> a_shift);
-    if (mode & RJ_ARITH_ALU_ABS_A) {
-      bits &= 0x7fff;
-    }
-    if (mode & RJ_ARITH_ALU_NEG_A) {
-      bits ^= 0x8000;
-    }
-    if ((flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) && (bits & 0x7fff) < 0x400) {
-      bits &= 0x8000;
-    }
-    input[lane] = bits;
-  }
-  rocjitsu::arith::half_trig_x86_64_v3(Cosine, UINT32_MAX, 0, result, input);
-  for (int lane = 0; lane < 32; ++lane) {
-    uint16_t bits = uint16_t(result[lane]);
-    if constexpr (Rdna3) {
-      if ((input[lane] & 0x7fff) > 0x7c00) {
-        bits = uint16_t(input[lane] | (flags & RJ_ARITH_FP_IEEE_MODE ? 0x200 : 0));
-      }
-    }
-    if ((flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) && (bits & 0x7fff) < 0x400) {
-      bits &= 0x8000;
-    }
-    if ((exec_mask >> lane) & 1) {
-      d[lane] = (d[lane] & ~(0xffffU << d_shift)) |
-                (uint32_t(output(bits, mode, flags & RJ_ARITH_FP_DX10_CLAMP_OFF)) << d_shift);
-    }
-  }
-}
-#endif
-
 // Evaluate FP16 sine/cosine for the selected lanes. Reject invalid controls before changing
 // outputs.
 template <bool Cosine, bool Rdna3>
@@ -121,15 +80,17 @@ int trig(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
   }
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (!report && rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    rocjitsu::arith::half_trig_x86_64_v4(Cosine, flags | (Rdna3 ? 0 : RJ_ARITH_FP_IEEE_MODE),
+                                         exec_mask, uint32_t(mode), d[0], a[0]);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3) &&
-      !rocjitsu::arith::is_exact(flags)) {
-    if (Rdna3 ||
-        (flags & (RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS))) {
-      loose_policy<Rdna3, Cosine>(flags, exec_mask, mode, d[0], a[0]);
-    } else {
-      rocjitsu::arith::half_trig_x86_64_v3(Cosine, exec_mask, mode, d[0], a[0]);
-    }
+  if (!report && rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+    rocjitsu::arith::half_trig_x86_64_v3(Cosine, flags | (Rdna3 ? 0 : RJ_ARITH_FP_IEEE_MODE),
+                                         exec_mask, uint32_t(mode), d[0], a[0]);
     return RJ_ARITH_SUCCESS;
   }
 #endif
@@ -209,6 +170,19 @@ int trig_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *con
     *excp_flag_user |= exceptions;
   }
   return RJ_ARITH_SUCCESS;
+}
+
+// Resolve inherited half trig behavior without qualifying new target semantics.
+int older_half_trig_flags(uint64_t &flags) {
+  const auto semantics = flags & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  flags &= ~RJ_ARITH_FP_ROUND_MASK;
+  return rocjitsu::arith::validate_semantics(flags);
 }
 
 } // namespace
@@ -319,4 +293,40 @@ int rj_arith_v_cos_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t mo
     return error;
   }
   return trig_wave64<true, false>(flags, exec_mask, mode, d, a, excp_flag_user);
+}
+
+// Older half SIN reuses the inherited mapping and selected-half policy.
+int rj_arith_v_sin_f16_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts) {
+  if (int error = older_half_trig_flags(flags)) {
+    return error;
+  }
+  return trig<false, true>(flags, exec_mask, mode, d, a, trapsts);
+}
+
+// Older half SIN reuses the inherited mapping and selected-half policy.
+int rj_arith_v_sin_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts) {
+  if (int error = older_half_trig_flags(flags)) {
+    return error;
+  }
+  return trig_wave64<false, true>(flags, exec_mask, mode, d, a, trapsts);
+}
+
+// Older half COS reuses the inherited mapping and selected-half policy.
+int rj_arith_v_cos_f16_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts) {
+  if (int error = older_half_trig_flags(flags)) {
+    return error;
+  }
+  return trig<true, true>(flags, exec_mask, mode, d, a, trapsts);
+}
+
+// Older half COS reuses the inherited mapping and selected-half policy.
+int rj_arith_v_cos_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts) {
+  if (int error = older_half_trig_flags(flags)) {
+    return error;
+  }
+  return trig_wave64<true, true>(flags, exec_mask, mode, d, a, trapsts);
 }

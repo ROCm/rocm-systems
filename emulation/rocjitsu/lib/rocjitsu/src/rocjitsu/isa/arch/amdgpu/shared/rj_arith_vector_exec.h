@@ -84,9 +84,7 @@ public:
                                                  util::stdx::element_aligned);
     } else {
       values_.fill(0);
-      for (uint32_t lane = 0; lane < wave.wf_size(); ++lane)
-        if (exec_mask & (uint64_t{1} << lane))
-          values_[lane] = registers.read_lane(operand, lane);
+      registers.read_active_lanes(operand, exec_mask, values_.data());
     }
     data = values_.data();
   }
@@ -644,9 +642,28 @@ inline void execute_sdwa_carry32(Inst &inst, Wavefront &wave, Wave32 wave32, Wav
   }
   if (!wave.instruction_execution_failed()) {
     const uint64_t write_mask = exec_mask & wave.vgpr_write_mask();
-    for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
-      if ((write_mask >> lane) & 1) {
-        sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+    if (write_mask) {
+      if (destination.is_vgpr() && destination.simd_capable() &&
+          inst.dst_operand(0) == &destination) {
+        // Resolve one write view for all lanes; selected-byte merging has no FP controls.
+        const auto selection = inst.sdwa_dst_sel_;
+        const auto unused = inst.sdwa_dst_unused_;
+        if (selection != sdwa::DWORD) {
+          for (uint32_t lane = 0; lane < wave.wf_size(); ++lane)
+            result[lane] = sdwa::sdwa_dst_merge(result[lane], 0, selection, unused);
+        }
+        auto output = registers.write_operand(destination, write_mask,
+                                              sdwa::sdwa_dst_byte_mask(selection, unused));
+        for (uint32_t lane = 0; lane < wave.wf_size(); lane += util::native_width_v<uint32_t>) {
+          if (output.store_native(lane, util::load<uint32_t>(result + lane), write_mask >> lane)
+                  .failed())
+            return;
+        }
+      } else {
+        for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+          if ((write_mask >> lane) & 1)
+            sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+        }
       }
     }
     commit(carry);
@@ -690,6 +707,14 @@ inline void execute_qsad(Wavefront &wave, Ternary32Function wave32, Ternary64Fun
     packed_c.emplace(registers, wave, source_c, exec_mask);
     c[0] = packed_c->data[0];
     c[1] = packed_c->data[1];
+  } else if (auto region = registers.read_operand_region(source_c, exec_mask, 4)) {
+    // Bulk reads are admitted only when the logical words resolve contiguously.
+    for (unsigned reg = 0; reg < 4; ++reg) {
+      auto lanes = region->lanes(reg);
+      if (lanes.failed())
+        return;
+      c[reg] = lanes.value().data();
+    }
   } else {
     auto word = source_c;
     word.size_bits_ = 32;
@@ -771,6 +796,30 @@ inline bool try_execute_sdwa_integer32(Inst &inst, Wavefront &wave, Wave32 wave3
       if (status != RJ_ARITH_SUCCESS)
         wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
       if (!wave.instruction_execution_failed()) {
+        if constexpr (requires {
+                        inst.sdwa_dst_unused_;
+                        inst.dst_operand(0);
+                      }) {
+          if (destination.is_vgpr() && destination.simd_capable() &&
+              inst.dst_operand(0) == &destination) {
+            // Place selected bytes in scratch, then resolve and observe the destination once.
+            // NONE has no FP scaling/clamping; PRESERVE is handled by the write view's byte mask.
+            const auto selection = inst.sdwa_dst_sel_;
+            const auto unused = inst.sdwa_dst_unused_;
+            if (selection != sdwa::DWORD) {
+              for (uint32_t lane = 0; lane < wave.wf_size(); ++lane)
+                result[lane] = sdwa::sdwa_dst_merge(result[lane], 0, selection, unused);
+            }
+            auto output = registers.write_operand(destination, exec_mask,
+                                                  sdwa::sdwa_dst_byte_mask(selection, unused));
+            for (uint32_t lane = 0; lane < wave.wf_size(); lane += util::native_width_v<uint32_t>) {
+              if (output.store_native(lane, util::load<uint32_t>(result + lane), exec_mask >> lane)
+                      .failed())
+                return true;
+            }
+            return true;
+          }
+        }
         for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
           if ((exec_mask >> lane) & 1)
             sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);

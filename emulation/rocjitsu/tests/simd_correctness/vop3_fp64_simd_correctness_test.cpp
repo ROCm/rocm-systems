@@ -6,7 +6,7 @@
 /// binary (add/mul/max/min) and unary (ceil/floor/trunc/rndne/sqrt) ops on
 /// CDNA4. Reads src0/src1 as native<double> via split lo/hi VGPR pairs, applies
 /// per-source abs/neg and result omod/clamp in the f64 domain (the new
-/// apply_vop3_*_mod_f64 helpers), then op. Bit-exact for finite/Inf on the
+/// source/destination modifiers), then op. Bit-exact for finite/Inf on the
 /// add/mul/cvt/sqrt ops; the min/max ops accept the standard ±0 / NaN payload
 /// divergences. Each (case, mods, rot) runs TWICE in the same process -- once
 /// forcing the scalar body, once the SIMD fast path, with identical inputs/EXEC

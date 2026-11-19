@@ -10,7 +10,6 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_path_test_hooks.h"
 #include "rocjitsu/isa/target_provider.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
@@ -124,6 +123,50 @@ private:
   uint64_t saved_;
 };
 #endif
+
+TEST(Gfx1250ExecutionTest, FmaMixBf16AliasingAndExec) {
+  for (const uint16_t opcode :
+       {cdna5::kVFmaMixF32Bf16Vop3p, cdna5::kVFmaMixloBf16Vop3p, cdna5::kVFmaMixhiBf16Vop3p}) {
+    for (bool clamp : {false, true}) {
+      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+      const auto words = cdna5::build_vop3p(opcode, {.vdst = 0,
+                                                     .neg_hi = 1,
+                                                     .opsel = 5,
+                                                     .opsel_hi_2 = 1,
+                                                     .clamp = uint8_t(clamp),
+                                                     .src0 = 256,
+                                                     .src1 = 257,
+                                                     .src2 = 258,
+                                                     .opsel_hi = 3,
+                                                     .neg = 1});
+      std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+      ASSERT_NE(instruction, nullptr);
+      Gfx1250Sim sim;
+      ASSERT_NO_FATAL_FAILURE(sim.initialize());
+      auto *cu = sim.cu();
+      auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+      ASSERT_NE(wf, nullptr);
+      wf->set_exec(0x80000001U);
+      wf->set_trapsts(0x80000000U);
+      const auto base = wf->vgpr_alloc().base;
+      for (unsigned lane = 0; lane < 32; ++lane) {
+        cu->write_vgpr(base, lane, 0xc0003f80U);
+        cu->write_vgpr(base + 1, lane, 0x40404000U);
+        cu->write_vgpr(base + 2, lane, 0x3f803f00U);
+      }
+      ASSERT_TRUE(cu->execute_instruction(instruction.get(), *wf).succeeded());
+      // -abs(-2) * 2 + 1 = -3; CLAMP instead writes +0.
+      const uint32_t half = clamp ? 0 : 0xc040U;
+      const uint32_t result = opcode == cdna5::kVFmaMixF32Bf16Vop3p  ? half << 16
+                              : opcode == cdna5::kVFmaMixloBf16Vop3p ? 0xc0000000U | half
+                                                                     : (half << 16) | 0x3f80U;
+      for (unsigned lane = 0; lane < 32; ++lane) {
+        EXPECT_EQ(cu->read_vgpr(base, lane), lane == 0 || lane == 31 ? result : 0xc0003f80U);
+      }
+      EXPECT_EQ(wf->trapsts(), 0x80000000U);
+    }
+  }
+}
 
 TEST(Gfx1250ExecutionTest, GlobalTransposePromotesNonzeroExecToAllWave32Lanes) {
   amdgpu::GpuMemory memory("gfx1250_transpose_memory");
@@ -1002,8 +1045,6 @@ TEST(FpModePolicyTest, F64HelpersRestoreAmbientHostEnvironment) {
   constexpr uint64_t kQuietNan = std::bit_cast<uint64_t>(std::numeric_limits<double>::quiet_NaN());
   for (const uint64_t input : {kOne, kSubnormal, kInfinity, kQuietNan}) {
     (void)amdgpu::fp_mode::fma_f64(input, kOne, kOne, 1, 3);
-    EXPECT_EQ(std::fegetround(), FE_DOWNWARD);
-    (void)amdgpu::fp_mode::binary_f64(input, kOne, amdgpu::fp_mode::BinaryF64Op::Add, 1, 3);
     EXPECT_EQ(std::fegetround(), FE_DOWNWARD);
     (void)amdgpu::fp_mode::finish_f64(input, 1, 1, false, true);
     EXPECT_EQ(std::fegetround(), FE_DOWNWARD);
@@ -2363,17 +2404,6 @@ TEST(Gfx1250LiteralOperandTest, NegativeI64CompareCoversScalarAndAvailableSimdPa
 
     auto *typed_compare = dynamic_cast<cdna5::VCmpLtI64Vop3 *>(compare.get());
     ASSERT_NE(typed_compare, nullptr);
-    if (!force_scalar) {
-      EXPECT_TRUE(amdgpu::try_execute_vopc64_vop3_int_simd<int64_t>(
-          *typed_compare, *wf, [](auto a, auto b) { return a < b; },
-          [&](uint64_t result) {
-            amdgpu::write_explicit_lane_mask(typed_compare->vdst, *wf, result);
-          }));
-      EXPECT_EQ(read_wave_sgpr(*cu, *wf, 0), 0x3u);
-      write_wave_sgpr(*cu, *wf, 0, 0u);
-      write_wave_sgpr(*cu, *wf, 1, 0u);
-    }
-
     EXPECT_TRUE(cu->execute_instruction(compare.get(), *wf).succeeded());
     EXPECT_EQ(read_wave_sgpr(*cu, *wf, 0), 0x3u);
   };
@@ -2472,17 +2502,6 @@ TEST(Gfx1250LiteralOperandTest, PkF32LiteralReplicatesAndUsesAvailableSimdPath) 
     EXPECT_EQ(amdgpu::RegisterAccess(*wf).read_lane64(*literal_operand, 0), replicated);
 
     const uint32_t vgpr_base = wf->vgpr_alloc().base;
-    if (!force_scalar) {
-      EXPECT_TRUE(amdgpu::try_execute_vop3p_pk_binary_f32_simd(
-          *typed_add, *wf, 0u, 3u, [](auto a, auto b) { return a + b; }));
-      for (uint32_t lane = 0; lane < 2; ++lane) {
-        EXPECT_EQ(cu->read_vgpr(vgpr_base, lane), literal);
-        EXPECT_EQ(cu->read_vgpr(vgpr_base + 1, lane), literal);
-        cu->write_vgpr(vgpr_base, lane, 0u);
-        cu->write_vgpr(vgpr_base + 1, lane, 0u);
-      }
-    }
-
     EXPECT_TRUE(cu->execute_instruction(add.get(), *wf).succeeded());
     for (uint32_t lane = 0; lane < 2; ++lane) {
       EXPECT_EQ(cu->read_vgpr(vgpr_base, lane), literal);
@@ -3353,7 +3372,15 @@ TEST(Gfx1251PackedF64ExecutionTest, FusedOperationExecutesCrossWindowVgprTuples)
   wf->set_exec(1u);
   wf->set_mode_raw(3u << 6);
 
+  auto plugin_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto recorder = std::make_unique<VgprReadRecorder>();
+  auto *recorder_ptr = recorder.get();
+  ASSERT_TRUE(plugin_group->add(std::move(recorder)));
+  plugin_group->onInit();
+
   for (const auto &test_case : kCases) {
+    // Exercise observed publication at the destination boundary; source cases keep direct stores.
+    cu->set_plugin_group(test_case.name == "vdst" ? plugin_group : nullptr);
     SCOPED_TRACE(test_case.name);
     write_vgpr_packed_u64(*cu, *wf, 8, 0, kMultiplicand);
     write_vgpr_packed_u64(*cu, *wf, 12, 0, kMultiplier);
@@ -3365,6 +3392,9 @@ TEST(Gfx1251PackedF64ExecutionTest, FusedOperationExecutesCrossWindowVgprTuples)
     ASSERT_NE(decoded->execute, nullptr);
     EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
     EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, test_case.destination, 0), kExpected);
+    if (test_case.name == "vdst") {
+      EXPECT_GT(recorder_ptr->read_count, 0u);
+    }
   }
 }
 
@@ -5364,9 +5394,7 @@ TEST(Gfx1251PackedU64ExecutionTest, ReadsOverlappingSourcesBeforeWritingDestinat
   EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 8, 0), (PackedU64Pair{0x0000000000000017ULL, 59u}));
 }
 
-TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralVgprSourcesUseAvailableSimdPath) {
-  if constexpr (!util::has_stdx_simd)
-    GTEST_SKIP() << "requires stdx SIMD";
+TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralVgprSources) {
 
   ForceScalarGuard force_scalar_guard;
   util::set_force_scalar_for_testing(false);
@@ -5433,36 +5461,13 @@ TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralVgprSourcesUseAvailableSimdPath
     cu->write_vgpr(vgpr_base + 4, 0, std::bit_cast<uint32_t>(7.0f));
     cu->write_vgpr(vgpr_base + 5, 0, std::bit_cast<uint32_t>(8.0f));
 
-    bool accepted = false;
-    if (test_case.operation == Operation::Add) {
-      auto *typed = dynamic_cast<cdna5::VPkAddF32Vop3p *>(instruction.get());
-      ASSERT_NE(typed, nullptr);
-      accepted = amdgpu::try_execute_vop3p_pk_binary_f32_simd(*typed, *wf, 0u, 3u,
-                                                              [](auto a, auto b) { return a + b; });
-    } else if (test_case.operation == Operation::Mul) {
-      auto *typed = dynamic_cast<cdna5::VPkMulF32Vop3p *>(instruction.get());
-      ASSERT_NE(typed, nullptr);
-      accepted = amdgpu::try_execute_vop3p_pk_binary_f32_simd(*typed, *wf, 0u, 3u,
-                                                              [](auto a, auto b) { return a * b; });
-    } else {
-      auto *typed = dynamic_cast<cdna5::VPkFmaF32Vop3p *>(instruction.get());
-      ASSERT_NE(typed, nullptr);
-      accepted = amdgpu::try_execute_vop3p_pk_ternary_f32_simd(
-          *typed, *wf, 0u, 3u, 1u, [](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); });
-    }
-    EXPECT_TRUE(accepted);
-    EXPECT_EQ(cu->read_vgpr(vgpr_base + 6, 0), std::bit_cast<uint32_t>(test_case.expected_lo));
-    EXPECT_EQ(cu->read_vgpr(vgpr_base + 7, 0), std::bit_cast<uint32_t>(test_case.expected_hi));
-
-    cu->write_vgpr(vgpr_base + 6, 0, 0u);
-    cu->write_vgpr(vgpr_base + 7, 0, 0u);
     EXPECT_TRUE(cu->execute_instruction(instruction.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vgpr_base + 6, 0), std::bit_cast<uint32_t>(test_case.expected_lo));
     EXPECT_EQ(cu->read_vgpr(vgpr_base + 7, 0), std::bit_cast<uint32_t>(test_case.expected_hi));
   }
 }
 
-TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralSourceSpecificSelectorUsesSimd) {
+TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralSourceSpecificSelector) {
   ForceScalarGuard force_scalar_guard;
   util::set_force_scalar_for_testing(false);
   constexpr uint32_t kLiteral = 0x40000000u; // 2.0f
@@ -5486,14 +5491,6 @@ TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralSourceSpecificSelectorUsesSimd)
   cu->write_vgpr(vgpr_base + 2, 0, std::bit_cast<uint32_t>(5.0f));
   cu->write_vgpr(vgpr_base + 3, 0, std::bit_cast<uint32_t>(6.0f));
 
-  if constexpr (util::has_stdx_simd) {
-    EXPECT_TRUE(amdgpu::try_execute_vop3p_pk_binary_f32_simd(*typed, *wf, 0u, 2u,
-                                                             [](auto a, auto b) { return a + b; }));
-    EXPECT_EQ(cu->read_vgpr(vgpr_base + 4, 0), std::bit_cast<uint32_t>(7.0f));
-    EXPECT_EQ(cu->read_vgpr(vgpr_base + 5, 0), std::bit_cast<uint32_t>(8.0f));
-    cu->write_vgpr(vgpr_base + 4, 0, 0u);
-    cu->write_vgpr(vgpr_base + 5, 0, 0u);
-  }
   EXPECT_TRUE(cu->execute_instruction(instruction.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vgpr_base + 4, 0), std::bit_cast<uint32_t>(7.0f));
   EXPECT_EQ(cu->read_vgpr(vgpr_base + 5, 0), std::bit_cast<uint32_t>(8.0f));
@@ -5546,26 +5543,6 @@ TEST(Gfx1250ExecutionTest, PkF32AddMulSimdMatchesScalarWithPartialExec) {
         cu->write_vgpr(vgpr_base + 5, lane, kDstHiSeed);
       }
 
-      if (!force_scalar) {
-        bool accepted = false;
-        if (test_case.opcode == cdna5::kVPkAddF32Vop3p) {
-          auto *typed = dynamic_cast<cdna5::VPkAddF32Vop3p *>(instruction.get());
-          ASSERT_NE(typed, nullptr);
-          accepted = amdgpu::try_execute_vop3p_pk_binary_f32_simd(
-              *typed, *wf, 0u, 3u, [](auto a, auto b) { return a + b; });
-        } else {
-          auto *typed = dynamic_cast<cdna5::VPkMulF32Vop3p *>(instruction.get());
-          ASSERT_NE(typed, nullptr);
-          accepted = amdgpu::try_execute_vop3p_pk_binary_f32_simd(
-              *typed, *wf, 0u, 3u, [](auto a, auto b) { return a * b; });
-        }
-        EXPECT_TRUE(accepted);
-        for (uint32_t lane = 0; lane < 32; ++lane) {
-          cu->write_vgpr(vgpr_base + 4, lane, kDstLoSeed);
-          cu->write_vgpr(vgpr_base + 5, lane, kDstHiSeed);
-        }
-      }
-
       EXPECT_TRUE(cu->execute_instruction(instruction.get(), *wf).succeeded());
       for (uint32_t lane = 0; lane < 32; ++lane) {
         result[lane * 2] = cu->read_vgpr(vgpr_base + 4, lane);
@@ -5597,7 +5574,7 @@ TEST(Gfx1250ExecutionTest, PkF32AddMulSimdMatchesScalarWithPartialExec) {
   }
 }
 
-TEST(Gfx1250ExecutionTest, PkF32NondefaultSelectorsUseSimd) {
+TEST(Gfx1250ExecutionTest, PkF32NondefaultSelectors) {
   ForceScalarGuard force_scalar_guard;
   enum class Operation { Add, Mul, Fma };
   struct TestCase {
@@ -5665,33 +5642,6 @@ TEST(Gfx1250ExecutionTest, PkF32NondefaultSelectorsUseSimd) {
         cu->write_vgpr(vgpr_base + 7, lane, kDstHiSeed);
       }
 
-      if (!force_scalar) {
-        if (test_case.operation == Operation::Fma) {
-          auto *typed = dynamic_cast<cdna5::VPkFmaF32Vop3p *>(instruction.get());
-          ASSERT_NE(typed, nullptr);
-          EXPECT_TRUE(amdgpu::try_execute_vop3p_pk_ternary_f32_simd(
-              *typed, *wf, test_case.op_sel, test_case.op_sel_hi, test_case.op_sel_hi_2,
-              [](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }));
-        } else if (test_case.operation == Operation::Mul) {
-          auto *typed = dynamic_cast<cdna5::VPkMulF32Vop3p *>(instruction.get());
-          ASSERT_NE(typed, nullptr);
-          EXPECT_TRUE(amdgpu::try_execute_vop3p_pk_binary_f32_simd(
-              *typed, *wf, test_case.op_sel, test_case.op_sel_hi,
-              [](auto a, auto b) { return a * b; }));
-        } else {
-          auto *typed = dynamic_cast<cdna5::VPkAddF32Vop3p *>(instruction.get());
-          ASSERT_NE(typed, nullptr);
-          EXPECT_TRUE(amdgpu::try_execute_vop3p_pk_binary_f32_simd(
-              *typed, *wf, test_case.op_sel, test_case.op_sel_hi,
-              [](auto a, auto b) { return a + b; }));
-        }
-        for (uint32_t lane = 0; lane < 32; ++lane) {
-          EXPECT_EQ(cu->read_vgpr(vgpr_base + 6, lane), scalar_result[lane * 2]);
-          EXPECT_EQ(cu->read_vgpr(vgpr_base + 7, lane), scalar_result[lane * 2 + 1]);
-          cu->write_vgpr(vgpr_base + 6, lane, kDstLoSeed);
-          cu->write_vgpr(vgpr_base + 7, lane, kDstHiSeed);
-        }
-      }
       EXPECT_TRUE(cu->execute_instruction(instruction.get(), *wf).succeeded());
       for (uint32_t lane = 0; lane < 32; ++lane) {
         result[lane * 2] = cu->read_vgpr(vgpr_base + 6, lane);
@@ -5751,16 +5701,6 @@ TEST(Gfx1250ExecutionTest, PkFmaF32SimdMatchesScalarWithPartialExec) {
       cu->write_vgpr(vgpr_base + 7, lane, kDstHiSeed);
     }
 
-    if (!force_scalar) {
-      EXPECT_TRUE(amdgpu::try_execute_vop3p_pk_ternary_f32_simd(
-          *typed, *wf, 0u, 3u, 1u,
-          [](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }));
-      for (uint32_t lane = 0; lane < 32; ++lane) {
-        cu->write_vgpr(vgpr_base + 6, lane, kDstLoSeed);
-        cu->write_vgpr(vgpr_base + 7, lane, kDstHiSeed);
-      }
-    }
-
     EXPECT_TRUE(cu->execute_instruction(instruction.get(), *wf).succeeded());
     for (uint32_t lane = 0; lane < 32; ++lane) {
       result[lane * 2] = cu->read_vgpr(vgpr_base + 6, lane);
@@ -5785,49 +5725,32 @@ TEST(Gfx1250ExecutionTest, PkFmaF32SimdMatchesScalarWithPartialExec) {
   }
 }
 
-// Selected BF16 halves and source modifiers survive overlapping destination storage.
-TEST(Gfx1250ExecutionTest, FmaMixBf16AliasingAndExec) {
-  for (const uint16_t opcode :
-       {cdna5::kVFmaMixF32Bf16Vop3p, cdna5::kVFmaMixloBf16Vop3p, cdna5::kVFmaMixhiBf16Vop3p}) {
-    for (bool clamp : {false, true}) {
-      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
-      const auto words = cdna5::build_vop3p(opcode, {.vdst = 0,
-                                                     .neg_hi = 1,
-                                                     .opsel = 5,
-                                                     .opsel_hi_2 = 1,
-                                                     .clamp = uint8_t(clamp),
-                                                     .src0 = 256,
-                                                     .src1 = 257,
-                                                     .src2 = 258,
-                                                     .opsel_hi = 3,
-                                                     .neg = 1});
-      std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
-      ASSERT_NE(instruction, nullptr);
-      Gfx1250Sim sim;
-      ASSERT_NO_FATAL_FAILURE(sim.initialize());
-      auto *cu = sim.cu();
-      auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
-      ASSERT_NE(wf, nullptr);
-      wf->set_exec(0x80000001U);
-      wf->set_trapsts(0x80000000U);
-      const auto base = wf->vgpr_alloc().base;
-      for (unsigned lane = 0; lane < 32; ++lane) {
-        cu->write_vgpr(base, lane, 0xc0003f80U);
-        cu->write_vgpr(base + 1, lane, 0x40404000U);
-        cu->write_vgpr(base + 2, lane, 0x3f803f00U);
-      }
-      ASSERT_TRUE(cu->execute_instruction(instruction.get(), *wf).succeeded());
-      // -abs(-2) * 2 + 1 = -3; CLAMP instead writes +0.
-      const uint32_t half = clamp ? 0 : 0xc040U;
-      const uint32_t result = opcode == cdna5::kVFmaMixF32Bf16Vop3p  ? half << 16
-                              : opcode == cdna5::kVFmaMixloBf16Vop3p ? 0xc0000000U | half
-                                                                     : (half << 16) | 0x3f80U;
-      for (unsigned lane = 0; lane < 32; ++lane) {
-        EXPECT_EQ(cu->read_vgpr(base, lane), lane == 0 || lane == 31 ? result : 0xc0003f80U);
-      }
-      EXPECT_EQ(wf->trapsts(), 0x80000000U);
-    }
+// DX9 zero-product handling retains EXEC and overlapping source/destination storage.
+TEST(Gfx1250ExecutionTest, FmaDx9ZeroAliasingAndExec) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  const auto words = cdna5::build_vop3(
+      cdna5::kVFmaDx9ZeroF32Vop3, {.vdst = 0, .src0 = 256, .src1 = 257, .src2 = 258, .omod = 1});
+  std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+  ASSERT_NE(instruction, nullptr);
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0x80000001U);
+  wf->set_mode_raw(0x230U); // IEEE and preserved denormals do not disable DX9/OMOD.
+  wf->set_trapsts(0x80000000U);
+  const auto base = wf->vgpr_alloc().base;
+  for (unsigned lane = 0; lane < 32; ++lane) {
+    cu->write_vgpr(base, lane, 0x80000001U);
+    cu->write_vgpr(base + 1, lane, 0x7f800000U);
+    cu->write_vgpr(base + 2, lane, 0x3f800000U);
   }
+  ASSERT_TRUE(cu->execute_instruction(instruction.get(), *wf).succeeded());
+  for (unsigned lane = 0; lane < 32; ++lane) {
+    EXPECT_EQ(cu->read_vgpr(base, lane), lane == 0 || lane == 31 ? 0x40000000U : 0x80000001U);
+  }
+  EXPECT_EQ(wf->trapsts(), 0x80000000U);
 }
 
 TEST(Gfx1250ExecutionTest, FmaMixBf16ResultsHonorRoundModeAndClamp) {

@@ -33,13 +33,22 @@ constexpr int mfma_input_index(int index, int k, int batch) {
 // MI300 §7.1.5.1 and CDNA4 §7.1.6.1 give this full-wave A-lane formula.
 // Their §13.3.6.1 ABID tables describe adjacent block groups instead. The
 // reduction follows the formula pending a distinguishing hardware capture.
-inline int mfma_a_lane(int lane, uint64_t controls) {
+// gfx90a instead uses adjacent M-lane groups, matching its inherited model.
+inline int mfma_a_lane(int lane, uint64_t controls, int matrix_block_lanes = 0) {
   int cbsz = int(controls & 7);
   if (!cbsz || cbsz > 4) {
     return lane;
   }
   int blocks = 1 << cbsz;
-  return lane % (64 / blocks) + (64 / blocks) * (int(controls >> 3 & 15) % blocks);
+  if (!matrix_block_lanes) {
+    return lane % (64 / blocks) + (64 / blocks) * (int(controls >> 3 & 15) % blocks);
+  }
+  int width = matrix_block_lanes;
+  if (width > 64 / blocks) {
+    return lane;
+  }
+  int group = width * blocks;
+  return lane / group * group + width * (int(controls >> 3 & 15) % blocks) + lane % width;
 }
 
 // Apply the eight encoded B lane permutations, keeping the lane inside Wave64.
@@ -58,9 +67,10 @@ inline int mfma_b_lane(int lane, uint64_t controls) {
 }
 
 // Apply lane controls without changing the element position inside its source word.
-template <int PerWord> inline int mfma_permute_input(int index, uint64_t controls, bool a) {
+template <int PerWord, int ABlockLanes = 0>
+inline int mfma_permute_input(int index, uint64_t controls, bool a) {
   int lane = index / PerWord % 64;
-  int mapped = a ? mfma_a_lane(lane, controls) : mfma_b_lane(lane, controls);
+  int mapped = a ? mfma_a_lane(lane, controls, ABlockLanes) : mfma_b_lane(lane, controls);
   return index + PerWord * (mapped - lane);
 }
 

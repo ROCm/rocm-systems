@@ -205,7 +205,7 @@ void run_words(const char *label, uint32_t w0, uint32_t w1, bool sanitize_finite
   // by the *SimdCorrectness* suites (in-process double-run + EXPECT_EQ). To
   // compare throughput, run the benchmark twice: `RJ_FORCE_SCALAR=1 ...`
   // (scalar) and unset (SIMD).
-  const char *mode = amdgpu::simd_force_scalar() ? "scalar" : "simd";
+  const char *mode = util::force_scalar() ? "scalar" : "simd";
   ModeStats s = time_mode(fx, inst, SEED, sanitize_finite);
 
   std::printf("\n  === %s (CDNA4, wave64) [%s] ===\n"
@@ -582,7 +582,7 @@ TEST(VAddSimdBenchmark, Cdna4_VCmpEqF32_Vop3_Modifiers) {
 }
 
 // v_cmp_eq_f16_e64 vcc, v0, v1  (CDNA4 VOP3 opcode 34) — f16 widen-then-compare.
-// Pays the f16_to_f32_simd widen tax on both operands; no modifiers.
+// Includes FP16 operand decoding on both operands; no modifiers.
 TEST(VAddSimdBenchmark, Cdna4_VCmpEqF16_Vop3) {
   if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
@@ -633,8 +633,7 @@ TEST(VAddSimdBenchmark, Cdna4_VCvtI32F64_Vop3) {
   run_words("v_cvt_i32_f64_e64 v2, v0:v1", w0, w1, /*sanitize_finite=*/false);
 }
 
-// v_add_f64_e64 v2:v3, v0:v1, v4:v5  (CDNA4 VOP3 opcode 640) — 64-bit-lane f64
-// binary via the new try_execute_binary_vop3_fp64_simd glue.
+// v_add_f64_e64 v2:v3, v0:v1, v4:v5 (CDNA4 VOP3 opcode 640).
 TEST(VAddSimdBenchmark, Cdna4_VAddF64_Vop3) {
   if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";

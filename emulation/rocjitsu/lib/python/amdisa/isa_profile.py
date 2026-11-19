@@ -460,6 +460,8 @@ class IsaProfile(ABC):
 
     paired_special_register_names: frozenset[str] = frozenset()
     # Saturation of V_PK_MUL_LO_U16 is target-specific.
+    # Legacy halfword MAD wraps except on CDNA2, which honors encoded CLAMP.
+    legacy_integer_mad_clamp = False
     packed_mul_lo_u16_clamp = False
     # The VOP2 form of V_MUL_LO_U16 carries CLAMP in its SDWA extension.
     mul_lo_u16_clamp_encodings: frozenset[str] = frozenset()
@@ -2317,6 +2319,7 @@ class Cdna2Profile(CdnaProfile):
     - Older float-atomic rules; the MI300A/MI350X captures do not cover it.
     """
 
+    legacy_integer_mad_clamp = True
     mul_lo_u16_clamp_encodings = frozenset()
 
     @property
@@ -2942,11 +2945,6 @@ class Rdna3_5Profile(Rdna3Profile):
             'S_ATC_PROBE': 'atc_probe',
             'S_ATC_PROBE_BUFFER': 'atc_probe',
         }
-
-    @property
-    def uses_rj_arith_matrix(self) -> bool:
-        # RDNA3.5 retains its legacy implementation despite sharing the RDNA3 layout.
-        return False
 
     @property
     def dpp_subrev_zeroes_non_vgpr_src1(self) -> bool:

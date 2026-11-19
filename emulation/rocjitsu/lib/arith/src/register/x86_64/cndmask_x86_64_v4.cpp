@@ -4,6 +4,7 @@
 // AVX-512 per-lane conditional selection between two source registers.
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
+#include "common/compiler.h"
 #include "register/cndmask.h"
 #include "rj_arith/detail/rj_arith_register.h"
 
@@ -25,6 +26,7 @@ void cndmask_x86_64_v4(uint32_t exec_mask, uint32_t mode, uint32_t *d, const uin
   auto clear_b = _mm512_set1_epi32(int(mode & RJ_ARITH_ALU_ABS_B ? ~sign : UINT32_MAX));
   auto flip_a = _mm512_set1_epi32(int(mode & RJ_ARITH_ALU_NEG_A ? sign : 0));
   auto flip_b = _mm512_set1_epi32(int(mode & RJ_ARITH_ALU_NEG_B ? sign : 0));
+  RJ_ARITH_UNROLL(2)
   for (int lane = 0; lane < 32; lane += 16) {
     auto x = _mm512_loadu_si512(reinterpret_cast<const __m512i *>(a + lane));
     auto y = _mm512_loadu_si512(reinterpret_cast<const __m512i *>(b + lane));

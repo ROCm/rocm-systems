@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 // CDNA screen-partition coverage using rocjitsu's inherited CDNA2 table.
-// gfx942/gfx950 retain its extrapolated model; strict empirical modes are unsupported.
+// gfx908/gfx942/gfx950 inherit the model; strict empirical modes remain unqualified.
 
 #include "register/screen_partition.h"
 #include "common/validation.h"

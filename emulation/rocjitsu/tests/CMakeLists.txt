@@ -519,8 +519,20 @@ add_executable(
     rj_vm_config_test.cpp
     checkpoint_restore_errors_test.cpp
     cdna_integer_arith_test.cpp
+    older_relative_move_test.cpp
+    older_word_routing_test.cpp
+    older_lane_routing_test.cpp
+    older_ds_routing_test.cpp
+    older_carry_wide_integer_test.cpp
+    older_packed_integer_test.cpp
+    older_integer16_compare_test.cpp
+    older_integer_compare_test.cpp
+    older_integer64_compare_test.cpp
+    older_fp_class_compare_test.cpp
     rj_arith_policy_test.cpp
     rj_arith_config_test.cpp
+    gfx90a_f64_mfma_test.cpp
+    older_scalar_integer_test.cpp
     rj_arith_bridge_test.cpp
     gfx1251_compiled_kernel_test.cpp
     daemon_api_test.cpp
@@ -534,6 +546,15 @@ add_executable(
     cdna5_dispatch_memory_test.cpp
     cdna5_execution_test.cpp
     numeric_encoding_regression_test.cpp
+    older_accumulator_transfer_test.cpp
+    older_integer_mfma_test.cpp
+    older_packed_routing_test.cpp
+    older_screen_partition_test.cpp
+    older_conversion32_test.cpp
+    older_conversion64_test.cpp
+    older_conversion16_test.cpp
+    older_half_unary_test.cpp
+    older_f32_mfma_test.cpp
     cdna5_gfx1251_simulation_test.cpp
     cdna5_instruction_test.cpp
     cdna5_sdma_test.cpp
@@ -595,9 +616,14 @@ add_executable(
     scalar_buffer_test.cpp
     scalar_cache_policy_test.cpp
     scalar_cache_discard_test.cpp
-    transcendental_test.cpp
+    legacy_native_f32_test.cpp
+    legacy_special_f32_test.cpp
     comparison_test.cpp
-    conversion_test.cpp
+    gfx1150_compare_test.cpp
+    older_packed_conversion_test.cpp
+    older_byte_conversion_test.cpp
+    older_normalized_conversion_test.cpp
+    older_packing_test.cpp
     denormal_test.cpp
     floating_operation_test.cpp
     input_denormal_test.cpp
@@ -660,9 +686,20 @@ add_executable(
     simd_correctness/mfma_register_paths_test.cpp
     vgpr_redispatch_test.cpp
     instruction_execution_harness_test.cpp
+    gfx908_compare_test.cpp
+    gfx10_compare_test.cpp
     vop3_conversion_modifiers_test.cpp
     cube_instruction_test.cpp
+    older_graphics_test.cpp
     division_test.cpp
+    integral_rounding_f32_test.cpp
+    integral_rounding_f64_test.cpp
+    frexp_exponent_test.cpp
+    frexp_mantissa_test.cpp
+    fract_test.cpp
+    legacy_native_f64_test.cpp
+    legacy_division_test.cpp
+    gfx1150_dual_test.cpp
     division_macro_test.cpp
     valu_floating_policy_test.cpp
     gfx11_dot2_test.cpp
@@ -670,6 +707,7 @@ add_executable(
     packed_wmma_test.cpp
     rdna_wmma_i32_test.cpp
     rdna_swmmac_i32_test.cpp
+    gfx1150_wmma_test.cpp
     rdna_wmma_float_test.cpp
     rdna_swmmac_float_test.cpp
     atomic_semantics_and_decode_test.cpp
@@ -725,7 +763,6 @@ add_executable(
     simd_correctness/vop1_cvt_f64_simd_correctness_test.cpp
     simd_correctness/vopc_simd_correctness_test.cpp
     simd_correctness/vopc_cmp_class_simd_correctness_test.cpp
-    simd_correctness/vop3_modifier_simd_test.cpp
     simd_correctness/vop3_binary_simd_correctness_test.cpp
     simd_correctness/vop3_unary_simd_correctness_test.cpp
     simd_correctness/vopc_vop3_int_simd_correctness_test.cpp
@@ -741,8 +778,6 @@ add_executable(
     simd_correctness/vop_alias_rdna_simd_correctness_test.cpp
     simd_correctness/vop3_shift64_simd_correctness_test.cpp
     simd_correctness/vop3_shift64_scalar_correctness_test.cpp
-    simd_correctness/vop3_fp16_unary_simd_correctness_test.cpp
-    simd_correctness/vop3_fp16_transcendental_simd_correctness_test.cpp
     simd_correctness/vop3_cndmask_pack_simd_correctness_test.cpp
     simd_correctness/vop3_div_helpers_simd_correctness_test.cpp
     simd_correctness/vop3_b16_rdna_simd_correctness_test.cpp

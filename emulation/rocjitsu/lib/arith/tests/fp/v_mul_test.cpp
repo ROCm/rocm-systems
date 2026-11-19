@@ -109,7 +109,7 @@ template <int Lanes, typename Call> void check_status(Call call) {
 TEST(FpMulF32W32Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<32, 32>(
       rj_arith_v_mul_f32_w32_gfx12, [](double x, double y) { return x * y; }, /*gfx12=*/true,
-      /*fp_status_supported=*/true, /*compatibility_status=*/true);
+      /*fp_status_supported=*/true, {.compatibility_reports_status = true});
   check_status<32>(rj_arith_v_mul_f32_w32_gfx12);
 }
 
@@ -117,14 +117,14 @@ TEST(FpMulF32W32Gfx12, Arithmetic) {
 TEST(FpMulF32W32Gfx11, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<32, 32>(
       rj_arith_v_mul_f32_w32, [](double x, double y) { return x * y; }, /*gfx12=*/false,
-      /*fp_status_supported=*/false, /*compatibility_status=*/true);
+      /*fp_status_supported=*/false, {.compatibility_reports_status = true});
 }
 
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
 TEST(FpMulF32W64Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<32, 64>(
       rj_arith_v_mul_f32_w64_gfx12, [](double x, double y) { return x * y; }, /*gfx12=*/true,
-      /*fp_status_supported=*/true, /*compatibility_status=*/true);
+      /*fp_status_supported=*/true, {.compatibility_reports_status = true});
   check_status<64>(rj_arith_v_mul_f32_w64_gfx12);
 }
 
@@ -132,7 +132,7 @@ TEST(FpMulF32W64Gfx12, Arithmetic) {
 TEST(FpMulF32W64Gfx11, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<32, 64>(
       rj_arith_v_mul_f32_w64, [](double x, double y) { return x * y; }, /*gfx12=*/false,
-      /*fp_status_supported=*/false, /*compatibility_status=*/true);
+      /*fp_status_supported=*/false, {.compatibility_reports_status = true});
 }
 
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
@@ -479,7 +479,8 @@ TEST(FpMulF16Cdna, RoundedMinimumNormal) {
       r.v[1][0] = 0x0400;
       const uint64_t flags =
           cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
-      ASSERT_EQ(call(flags, 1, RJ_ARITH_ALU_OMOD_2, r.v + 2, r.v, r.v + 1, nullptr),
+      uint32_t status = 0;
+      ASSERT_EQ(call(flags, 1, RJ_ARITH_ALU_OMOD_2, r.v + 2, r.v, r.v + 1, &status),
                 RJ_ARITH_SUCCESS);
       EXPECT_EQ(r.v[2][0] & 0xffffU, 0x0800U);
     }
@@ -515,6 +516,31 @@ TEST(FpMulF32Gfx12, CompatibilityDppWave64Causes) {
         EXPECT_EQ(r.v[2][lane], expected) << "lane=" << lane;
       }
       r.expect_preserved(before, 2, 1);
+    }
+  }
+}
+
+// Neither strict mode borrows another target's qualification.
+TEST(FpMulF32Gfx1250, NumericAndFpStatusQualification) {
+  for (auto cpu : rocjitsu::arith::test::supported_cpu_levels()) {
+    uint32_t a[64] = {0x7f800123}, b[64] = {0x3f800000}, out[64] = {};
+    const uint32_t *x = a, *y = b;
+    uint32_t *d = out;
+    for (auto semantics : {RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS,
+                           RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
+      const uint64_t flags = cpu | semantics;
+      const int expected = semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
+                               ? RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS
+                               : RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+      for (bool wave64 : {false, true}) {
+        uint32_t status = 0x80;
+        out[0] = 0xdeadbeef;
+        const int error = wave64 ? rj_arith_v_mul_f32_w64_gfx1250(flags, 1, 0, &d, &x, &y, &status)
+                                 : rj_arith_v_mul_f32_w32_gfx1250(flags, 1, 0, &d, &x, &y, &status);
+        EXPECT_EQ(error, expected);
+        EXPECT_EQ(out[0], 0xdeadbeefU);
+        EXPECT_EQ(status, 0x80U);
+      }
     }
   }
 }

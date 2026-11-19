@@ -87,4 +87,30 @@ template void integer_wmma_avx512vnni<4, 16>(uint32_t, uint32_t *const *, const 
 template void integer_wmma_avx512vnni<4, 32>(uint32_t, uint32_t *const *, const uint32_t *const *,
                                              const uint32_t *const *, const uint32_t *const *);
 
+// Compute a gfx11 integer tile with sixteen-column VNNI dot products.
+// Requires validated modifiers; D may overlap A/B/C.
+template <int Bits, int Lanes>
+void integer_wmma_replicated_avx512vnni(uint32_t modifiers, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c) {
+  integer_wmma<Bits, 16, Ops, Lanes, true>(modifiers, d, a, b, c);
+}
+
+template void integer_wmma_replicated_avx512vnni<4, 32>(uint32_t, uint32_t *const *,
+                                                        const uint32_t *const *,
+                                                        const uint32_t *const *,
+                                                        const uint32_t *const *);
+template void integer_wmma_replicated_avx512vnni<4, 64>(uint32_t, uint32_t *const *,
+                                                        const uint32_t *const *,
+                                                        const uint32_t *const *,
+                                                        const uint32_t *const *);
+template void integer_wmma_replicated_avx512vnni<8, 32>(uint32_t, uint32_t *const *,
+                                                        const uint32_t *const *,
+                                                        const uint32_t *const *,
+                                                        const uint32_t *const *);
+template void integer_wmma_replicated_avx512vnni<8, 64>(uint32_t, uint32_t *const *,
+                                                        const uint32_t *const *,
+                                                        const uint32_t *const *,
+                                                        const uint32_t *const *);
+
 } // namespace rocjitsu::arith
