@@ -258,6 +258,19 @@ TEST_F(DdaAllReduceFabricLLMicrotest, LLOneShotEligible_UpToOneShotThresholdOnWh
   EXPECT_TRUE(Eligible(ddaLLArOneShotEligible, 512, ncclFloat16));
 }
 
+// The ceiling is this comm's rcclDdaLLOneShotThreshold (the arch table's 32-rank 4 MiB, for one), not the env default.
+TEST_F(DdaAllReduceFabricLLMicrotest, LLOneShotEligible_UpToOneShotThresholdOfThisComm) {
+  const ncclComm* seen = nullptr;
+  g_rcclDdaLLOneShotThreshold = [&](const ncclComm* c) {
+    seen = c;
+    return size_t{4} << 20;
+  };
+  comm().ddaScratchBytes = 1u << 30;
+  EXPECT_TRUE(Eligible(ddaLLArOneShotEligible, (4u << 20) / 4));
+  EXPECT_EQ(seen, mock_.get());
+  EXPECT_FALSE(Eligible(ddaLLArOneShotEligible, (4u << 20) / 4 + 4));
+}
+
 TEST_F(DdaAllReduceFabricLLMicrotest, LLOneShotEligible_WholeMessageIn16ByteUnitsWithinTheSlot) {
   EXPECT_FALSE(Eligible(ddaLLArOneShotEligible, 6));
   EXPECT_TRUE(Eligible(ddaLLArOneShotEligible, 12));

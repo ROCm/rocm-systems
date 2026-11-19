@@ -1773,7 +1773,7 @@ rcclArchThresholds MakeRankScaledTable() {
   t.ddaRsLL128LargeCommMaxBytes = 512 * kMiB;
   t.ddaRsLLLargeCommMinRanks = 32;
   t.ddaRsLLLargeCommMaxBytes = 2 * kMiB;
-  t.ddaArVmmFirstMinRanks = 32;
+  t.ddaArVmmFirstMinRanks = 33;
   t.ddaArVmmFirstMinBytes = 2 * kMiB;
   t.ddaArVmmFirstMaxPerRank = 512 * kKiB;
   t.ddaArRegCaptureMinBytes = 32 * kMiB;
@@ -1793,7 +1793,7 @@ rcclArchThresholds MakeRankScaledTable() {
   t.rsRingLL128MaxPerRank1B = 32 * kMiB;
   t.rsRingSimpleCappedMaxPerRank = 32 * kMiB;
   t.rsRingSimpleCappedChannels = 128;
-  t.rsSmallCommMaxRanks = 16;
+  t.rsSmallCommMaxRanks = 32;
   t.rsSmallCommRingLL128MaxPerRank = 32 * kMiB;
   t.symTdmMinR2[ncclFuncAllGather] = 64 * kMiB;
   t.symTdmMaxR2[ncclFuncAllGather] = 128 * kMiB;
@@ -1984,7 +1984,7 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250AllGatherRingLL128To
 }
 
 // ReduceScatter Ring on 8+ rank single-node gfx1250 comms: LL to 512 KiB per rank, LL128
-// to 32 MiB per rank at 8-16 ranks and 8 MiB above (32 MiB for 1-byte types), Simple above.
+// to 32 MiB per rank at 8-32 ranks and 8 MiB above (32 MiB for 1-byte types), Simple above.
 // Two-node and 4-rank comms keep the model ranges.
 TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250ReduceScatterRingRanges) {
   RUN_ISOLATED_TEST(
@@ -2002,8 +2002,11 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250ReduceScatterRingRan
         EXPECT_EQ(NCCL_PROTO_LL128, RingProtocol(comm, ncclFuncReduceScatter, 32 * kMiB)) << "16 ranks";
         EXPECT_EQ(NCCL_PROTO_SIMPLE, RingProtocol(comm, ncclFuncReduceScatter, 32 * kMiB + 16)) << "16 ranks";
         comm->nRanks = 32;
-        EXPECT_EQ(NCCL_PROTO_LL128, RingProtocol(comm, ncclFuncReduceScatter, 8 * kMiB)) << "32 ranks";
-        EXPECT_EQ(NCCL_PROTO_SIMPLE, RingProtocol(comm, ncclFuncReduceScatter, 8 * kMiB + 16)) << "32 ranks";
+        EXPECT_EQ(NCCL_PROTO_LL128, RingProtocol(comm, ncclFuncReduceScatter, 32 * kMiB)) << "32 ranks";
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, RingProtocol(comm, ncclFuncReduceScatter, 32 * kMiB + 16)) << "32 ranks";
+        comm->nRanks = 64;
+        EXPECT_EQ(NCCL_PROTO_LL128, RingProtocol(comm, ncclFuncReduceScatter, 8 * kMiB)) << "64 ranks";
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, RingProtocol(comm, ncclFuncReduceScatter, 8 * kMiB + 16)) << "64 ranks";
         comm->nRanks = 8;
         comm->nNodes = 2;
         EXPECT_EQ(NCCL_PROTO_LL, RingProtocol(comm, ncclFuncReduceScatter, 1 * kMiB)) << "two nodes";
@@ -8145,23 +8148,26 @@ TEST(WrapMicrotestIsolated, DdaFabricVmmBlocks_BudgetPerRank) {
 }
 
 
-// From 32 ranks, DDA VMM claims (2 MiB, nRanks x 512 KiB] ahead of LL; at and below
-// 2 MiB, past the window, or on a 16-rank comm, LL keeps it.
+// From 33 ranks, DDA VMM claims (2 MiB, nRanks x 512 KiB] ahead of LL; at and below
+// 2 MiB, past the window, or on a 16- or 32-rank comm, LL keeps it.
 TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstWindow) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_Gfx1250VmmFirstWindow",
       []() {
         ArDdaHooks hooks;
         ArVmmEligible vmmHook;
-        ncclComm* comm = MakeArDdaComm(32);
+        ncclComm* comm = MakeArDdaComm(64);
         const int vmm = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_VMM;
         const int ll = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL;
         EXPECT_EQ(ll, SelectAllReduceDdaAlgo(comm, 2 * kMiB));
         EXPECT_EQ(vmm, SelectAllReduceDdaAlgo(comm, 2 * kMiB + 16));
-        EXPECT_EQ(vmm, SelectAllReduceDdaAlgo(comm, 16 * kMiB));
-        EXPECT_EQ(ll, SelectAllReduceDdaAlgo(comm, 16 * kMiB + 16));
-        comm->nRanks = 64;
         EXPECT_EQ(vmm, SelectAllReduceDdaAlgo(comm, 24 * kMiB)) << "past ddaVmmMax (16 MiB) inside the window";
+        EXPECT_EQ(vmm, SelectAllReduceDdaAlgo(comm, 32 * kMiB));
+        EXPECT_EQ(ll, SelectAllReduceDdaAlgo(comm, 32 * kMiB + 16));
+        comm->nRanks = 33;
+        EXPECT_EQ(vmm, SelectAllReduceDdaAlgo(comm, 4 * kMiB)) << "the floor";
+        comm->nRanks = 32;
+        EXPECT_EQ(ll, SelectAllReduceDdaAlgo(comm, 4 * kMiB));
         comm->nRanks = 16;
         EXPECT_EQ(ll, SelectAllReduceDdaAlgo(comm, 4 * kMiB));
         DeleteCommWithArch(comm);
@@ -8180,7 +8186,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstUnregisteredOnly) {
           *out = ncclSymSendNonregRecvReg;
           return ncclSuccess;
         });
-        ncclComm* comm = MakeArDdaComm(32);
+        ncclComm* comm = MakeArDdaComm(64);
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, SelectAllReduceDdaAlgo(comm, 8 * kMiB));
         DeleteCommWithArch(comm);
       });
@@ -8237,7 +8243,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstFallsBackUnderZeroPol
         RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_WARN, NCCL_ALL);
         ArDdaHooks hooks;
         ArVmmEligible vmmHook;
-        ncclComm* comm = MakeArDdaComm(32);
+        ncclComm* comm = MakeArDdaComm(64);
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         // ceARTmpBuf stays null → CE 2-shot not available → vmmFirst VMM is the
         // only candidate, but CE is preferred → fallback is used with a warning.
@@ -8440,14 +8446,12 @@ int CappedChannels(ncclComm* comm, ncclFunc_t func, int proto, size_t perRank) {
 }  // namespace
 
 // Ring Simple ReduceScatter between 8 and 32 MiB per rank runs on 128 channels on
-// 32+ rank single-node gfx1250 comms. At 8-16 ranks Ring LL128 covers that band.
+// 8+ rank single-node gfx1250 comms.
 TEST(WrapMicrotestIsolated, UpdateCollectiveChannels_ReduceScatterSimpleBand) {
   RUN_ISOLATED_TEST(
       "Wrap_UpdateCollectiveChannels_ReduceScatterSimpleBand",
       []() {
         ncclComm* comm = MakeTuningComm(16);
-        EXPECT_EQ(192, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_SIMPLE, 32 * kMiB)) << "16 ranks";
-        comm->nRanks = 32;
         EXPECT_EQ(192, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_SIMPLE, 8 * kMiB));
         EXPECT_EQ(128, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_SIMPLE, 8 * kMiB + 16));
         EXPECT_EQ(128, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_SIMPLE, 32 * kMiB));
@@ -8471,7 +8475,7 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveChannels_UserChannelCountTurnsItOff)
   RUN_ISOLATED_TEST(
       "Wrap_UpdateCollectiveChannels_UserChannelCountTurnsItOff",
       []() {
-        ncclComm* comm = MakeTuningComm(32);
+        ncclComm* comm = MakeTuningComm(16);
         g_paramMaxNchannels = 192;
         EXPECT_EQ(192, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_SIMPLE, 16 * kMiB));
         g_paramMaxNchannels = -2;
@@ -9044,6 +9048,22 @@ TEST(WrapMicrotestIsolated, DdaLargeComm_FromSpxTable) {
         comm->nRanks = 32;
         comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
         EXPECT_EQ(kMiB, rcclDdaLLOneShotThreshold(comm)) << "DPX";
+        DeleteCommWithArch(comm);
+      });
+}
+
+// RCCL_DDA_LL_ONESHOT_THRESHOLD, when set, wins over the SPX table's 32-rank one-shot ceiling.
+TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_EnvOverridesLargeComm) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaLLOneShotThreshold_EnvOverridesLargeComm",
+      []() {
+        SetMicroEnv("RCCL_DDA_LL_ONESHOT_THRESHOLD", "2097152");
+        g_loadParam = ForceParam("RCCL_DDA_LL_ONESHOT_THRESHOLD", int64_t(2) << 20);
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        ASSERT_NE(nullptr, comm->archThresholds);
+        comm->nRanks = 32;
+        EXPECT_EQ(2 * kMiB, rcclDdaLLOneShotThreshold(comm));
         DeleteCommWithArch(comm);
       });
 }

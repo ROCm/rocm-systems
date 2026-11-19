@@ -523,7 +523,7 @@ void rcclUpdateCollectiveChannels(struct ncclComm* comm, size_t nBytes, const st
   const rcclArchThresholds* t = rcclRingTreeTable(comm, /*rankScaled=*/true);
   if (t == nullptr || t->rsRingSimpleCappedChannels <= 0) return;
   const size_t perRank = nBytes / (size_t)comm->nRanks;
-  if (perRank > rcclRsRingLL128MaxPerRank(t, comm->nRanks) && perRank <= t->rsRingSimpleCappedMaxPerRank)
+  if (perRank > t->rsRingLL128MaxPerRank && perRank <= t->rsRingSimpleCappedMaxPerRank)
     nc = std::min(nc, t->rsRingSimpleCappedChannels);
 }
 
