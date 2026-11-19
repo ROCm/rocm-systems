@@ -6,11 +6,11 @@
 #include "common/path.hpp"
 #include "common/string_utility.hpp"
 #include "config.hpp"
-#include "exception.hpp"
 #include "gpu.hpp"
 #include "state.hpp"
 #include <algorithm>
 #include <cstdint>
+#include <stdexcept>
 
 #include <timemory/settings/types.hpp>
 
@@ -1103,7 +1103,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                     if(p.exists("sampling-overflow-event") &&
                        _v.front() != p.get<std::string>("sampling-overflow-event"))
                     {
-                        throw exception<std::runtime_error>(fmt::format(
+                        throw std::runtime_error(fmt::format(
                             "'--sample-overflow {} ...' conflicts with "
                             "'--sampling-overflow-event {}' option",
                             _v.front(), p.get<std::string>("sampling-overflow-event")));
@@ -1240,8 +1240,7 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
 
         if(_name.empty())
         {
-            throw exception<std::runtime_error>("Error! empty name for " +
-                                                itr->get_name());
+            throw std::runtime_error("Error! empty name for " + itr->get_name());
         }
 
         _data.reg.processed_settings.emplace(itr.get());
@@ -1263,7 +1262,7 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
                 }
                 if(_value.empty())
                 {
-                    throw exception<std::runtime_error>(
+                    throw std::runtime_error(
                         fmt::format("Error! no value for {}", _name));
                 }
                 update_env(_data, itr->get_env_name(), _value);
@@ -1278,7 +1277,7 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
                         fmt::format("{}", fmt::join(p.get<strvec_t>(_name), " "));
                     if(_value.empty())
                     {
-                        throw exception<std::runtime_error>(
+                        throw std::runtime_error(
                             fmt::format("Error! no value for {}", _name));
                     }
                     update_env(_data, itr->get_env_name(), _value);

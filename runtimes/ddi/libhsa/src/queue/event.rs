@@ -23,9 +23,10 @@ struct PendingCallback {
 impl PendingCallback {
     /// Invokes detached callback work while the worker retains queue lifetime.
     fn invoke(self) {
-        let _scope = CallbackScope::enter();
         // SAFETY: Queue destruction joins this worker before callback data expires.
-        unsafe { (self.callback)(self.status, self.queue as *mut HsaQueue, self.data.as_ptr()) };
+        CallbackScope::run(|| unsafe {
+            (self.callback)(self.status, self.queue as *mut HsaQueue, self.data.as_ptr())
+        });
     }
 }
 
@@ -56,7 +57,7 @@ pub(super) fn queue_error_status(error: u64) -> Status {
 
 /// Prepares a callback for a queue event without holding the registry lock.
 fn pending_callback(
-    runtime: &crate::runtime::HsaState,
+    runtime: &crate::session::HsaSession,
     key: usize,
     status: Status,
 ) -> Option<PendingCallback> {
@@ -71,16 +72,15 @@ fn pending_callback(
 
 /// Prepares the user error callback after a queue fault.
 fn pending_error_callback(
-    runtime: &mut crate::runtime::HsaState,
+    runtime: &mut crate::session::HsaSession,
     key: usize,
     status: Status,
 ) -> Option<PendingCallback> {
     if status == MEMORY_FAULT {
         // Publish the affected queue so a running system event worker can
         // attach the process fault's address and reason.
-        let details = runtime.vm_fault_details;
-        let defer_to_system = runtime.system_event_worker.is_some()
-            && !runtime.system_event_failed.load(Ordering::Acquire);
+        let details = runtime.events.fault_details();
+        let defer_to_system = runtime.events.observing();
         let queue = runtime.queue_state.queues.get_mut(&key)?;
         queue.vm_faulted = true;
         if let Some((_, address, reason)) = details.filter(|(agent, _, _)| *agent == queue.agent) {
@@ -166,7 +166,7 @@ fn handle_queue_event(key: usize, observed: SignalValue) -> Option<QueueEventOut
         cooperative,
     ) = {
         let queue = runtime.queue_state.queues.get(&key)?;
-        let index = runtime.gpu_index(queue.agent)?;
+        let index = runtime.agents.gpu_index(queue.agent)?;
         let Some((private_segment_size, dispatch_id, lanes_per_group)) =
             dispatch_private_segment(queue)
         else {
@@ -176,8 +176,8 @@ fn handle_queue_event(key: usize, observed: SignalValue) -> Option<QueueEventOut
             });
         };
         (
-            runtime.gpus[index].device.clone(),
-            runtime.gpus[index].info(),
+            runtime.agents.gpus[index].device.clone(),
+            runtime.agents.gpus[index].info(),
             queue.public_handle,
             private_segment_size,
             dispatch_id,
@@ -420,88 +420,96 @@ pub(super) fn queue_event_worker(
     let mut reclaim_check = std::time::Instant::now();
     let mut reclaim_enabled = true;
     while !stop.load(Ordering::Acquire) && alive.load(Ordering::Acquire) {
-        let Some(_lease) = crate::runtime::enter_runtime_service() else {
+        let Some(token) = crate::admission::enter_runtime_service() else {
             thread::sleep(Duration::from_millis(1));
             continue;
         };
-        let error = signal.load_error();
-        let callback = if !observer_failure_checked && observer_failed.load(Ordering::Acquire) {
-            observer_failure_checked = true;
-            let mut guard = match lock() {
-                Ok(guard) => guard,
-                Err(_) => return,
-            };
-            let Some(runtime) = guard.as_mut() else {
-                return;
-            };
-            let Some(queue) = runtime.queue_state.queues.get_mut(&key) else {
-                return;
-            };
-            if queue.vm_fault_callback_state.take_after_system_failure() {
-                pending_callback(runtime, key, MEMORY_FAULT)
+        if crate::admission::ApiLeaseScope::run(token, || {
+            let error = signal.load_error();
+            let callback = if !observer_failure_checked && observer_failed.load(Ordering::Acquire) {
+                observer_failure_checked = true;
+                let mut guard = match lock() {
+                    Ok(guard) => guard,
+                    Err(_) => return std::ops::ControlFlow::Break(()),
+                };
+                let Some(runtime) = guard.as_mut() else {
+                    return std::ops::ControlFlow::Break(());
+                };
+                let Some(queue) = runtime.queue_state.queues.get_mut(&key) else {
+                    return std::ops::ControlFlow::Break(());
+                };
+                if queue.vm_fault_callback_state.take_after_system_failure() {
+                    pending_callback(runtime, key, MEMORY_FAULT)
+                } else {
+                    None
+                }
+            } else if error != 0 && error_armed {
+                reclaim_enabled = false;
+                error_armed = false;
+                let mut guard = match lock() {
+                    Ok(guard) => guard,
+                    Err(_) => return std::ops::ControlFlow::Break(()),
+                };
+                let Some(runtime) = guard.as_mut() else {
+                    return std::ops::ControlFlow::Break(());
+                };
+                if !runtime.queue_state.queues.contains_key(&key) {
+                    return std::ops::ControlFlow::Break(());
+                }
+                let callback =
+                    pending_error_callback(runtime, key, queue_error_status(error as u64));
+                signal.release_error();
+                callback
             } else {
-                None
-            }
-        } else if error != 0 && error_armed {
-            reclaim_enabled = false;
-            error_armed = false;
-            let mut guard = match lock() {
-                Ok(guard) => guard,
-                Err(_) => return,
+                if error == 0 {
+                    error_armed = true;
+                }
+                let observed = signal.load_inactive();
+                if observed == 0 {
+                    inactive_armed = true;
+                    None
+                } else if inactive_armed {
+                    inactive_armed = false;
+                    handle_queue_event(key, observed).and_then(|outcome| {
+                        inactive_armed = outcome.rearm;
+                        reclaim_enabled &= outcome.rearm;
+                        outcome.callback
+                    })
+                } else {
+                    None
+                }
             };
-            let Some(runtime) = guard.as_mut() else {
-                return;
-            };
-            if !runtime.queue_state.queues.contains_key(&key) {
-                return;
+            if let Some(callback) = callback {
+                if stop.load(Ordering::Acquire) || !alive.load(Ordering::Acquire) {
+                    return std::ops::ControlFlow::Break(());
+                }
+                callback.invoke();
             }
-            let callback = pending_error_callback(runtime, key, queue_error_status(error as u64));
-            signal.release_error();
-            callback
-        } else {
-            if error == 0 {
-                error_armed = true;
+            if reclaim_enabled && reclaim_check.elapsed() >= Duration::from_millis(25) {
+                reclaim_check = std::time::Instant::now();
+                if !reclaim_and_notify(
+                    || reclaim_idle_scratch(key, stop),
+                    |status| {
+                        let callback = lock()
+                            .ok()
+                            .and_then(|guard| pending_callback(guard.as_ref()?, key, status));
+                        if let Some(callback) = callback {
+                            callback.invoke();
+                        }
+                    },
+                    stop,
+                    alive,
+                ) {
+                    return std::ops::ControlFlow::Break(());
+                }
             }
-            let observed = signal.load_inactive();
-            if observed == 0 {
-                inactive_armed = true;
-                None
-            } else if inactive_armed {
-                inactive_armed = false;
-                handle_queue_event(key, observed).and_then(|outcome| {
-                    inactive_armed = outcome.rearm;
-                    reclaim_enabled &= outcome.rearm;
-                    outcome.callback
-                })
-            } else {
-                None
-            }
-        };
-        if let Some(callback) = callback {
-            if stop.load(Ordering::Acquire) || !alive.load(Ordering::Acquire) {
-                return;
-            }
-            callback.invoke();
+            thread::sleep(Duration::from_micros(20));
+            std::ops::ControlFlow::Continue(())
+        })
+        .is_break()
+        {
+            return;
         }
-        if reclaim_enabled && reclaim_check.elapsed() >= Duration::from_millis(25) {
-            reclaim_check = std::time::Instant::now();
-            if !reclaim_and_notify(
-                || reclaim_idle_scratch(key, stop),
-                |status| {
-                    let callback = lock()
-                        .ok()
-                        .and_then(|guard| pending_callback(guard.as_ref()?, key, status));
-                    if let Some(callback) = callback {
-                        callback.invoke();
-                    }
-                },
-                stop,
-                alive,
-            ) {
-                return;
-            }
-        }
-        thread::sleep(Duration::from_micros(20));
     }
 }
 

@@ -78,7 +78,7 @@ def generate_atomic_fetch_api():
  * @param[in] val     The value to be atomically added.
  * @param[in] pe      PE of the remote process.
  *
- * @return            The value of \\p dest.
+ * @return The value of \\p dest.
  */\n"""
 
     for type_, tname_ in float_types:
@@ -119,8 +119,6 @@ def generate_atomic_set_api():
                       heap.
  * @param[in] val     The value to be atomically added.
  * @param[in] pe      PE of the remote process.
- *
- * @return void
  */\n"""
 
     for type_, tname_ in float_types:
@@ -165,7 +163,7 @@ def generate_atomic_compare_swap_api():
  * @param[in] val     The value to be atomically swapped.
  * @param[in] pe      PE of the remote process.
  *
- * @return            The old value of \\p dest.
+ * @return The old value of \\p dest.
  */\n"""
     for type_, tname_ in types:
         expanded_code += atomic_compare_swap_api(type_, tname_)
@@ -245,7 +243,7 @@ def generate_atomic_fetch_inc_api():
                       heap.
  * @param[in] pe      PE of the remote process.
  *
- * @return            The old value of \\p dest before it was incremented by 1.
+ * @return The old value of \\p dest before it was incremented by 1.
  */\n"""
     for type_, tname_ in types:
         expanded_code += atomic_fetch_inc_api(type_, tname_)
@@ -281,8 +279,6 @@ def generate_atomic_inc_api():
  * @param[in] dest    Destination address. Must be an address on the symmetric
                       heap.
  * @param[in] pe      PE of the remote process.
- *
- * @return void
  */\n"""
     for type_, tname_ in types:
         expanded_code += atomic_inc_api(type_, tname_)
@@ -321,7 +317,7 @@ def generate_atomic_fetch_add_api():
  * @param[in] val     The value to be atomically added.
  * @param[in] pe      PE of the remote process.
  *
- * @return            The old value of \\p dest before the \\p val was added.
+ * @return The old value of \\p dest before the \\p val was added.
  */\n"""
     for type_, tname_ in types:
         expanded_code += atomic_fetch_add_api(type_, tname_)
@@ -358,8 +354,6 @@ def generate_atomic_add_api():
                       heap.
  * @param[in] val     The value to be atomically added.
  * @param[in] pe      PE of the remote process.
- *
- * @return void
  */\n"""
     for type_, tname_ in types:
         expanded_code += atomic_add_api(type_, tname_)
@@ -434,8 +428,6 @@ def generate_atomic_and_api():
                       heap.
  * @param[in] val     The value to be atomically added.
  * @param[in] pe      PE of the remote process.
- *
- * @return void
  */\n"""
     for type_, tname_ in bitwise_types:
         expanded_code += atomic_and_api(type_, tname_)
@@ -510,8 +502,6 @@ def generate_atomic_or_api():
                       heap.
  * @param[in] val     The value to be atomically added.
  * @param[in] pe      PE of the remote process.
- *
- * @return void
  */\n"""
     for type_, tname_ in bitwise_types:
         expanded_code += atomic_or_api(type_, tname_)
@@ -586,8 +576,6 @@ def generate_atomic_xor_api():
                       heap.
  * @param[in] val     The value to be atomically added.
  * @param[in] pe      PE of the remote process.
- *
- * @return void
  */\n"""
     for type_, tname_ in bitwise_types:
         expanded_code += atomic_xor_api(type_, tname_)

@@ -6,9 +6,12 @@
 //! These layouts follow the vendored `ROCm` Systems KFD UAPI in
 //! `runtimes/api-headers/include/uapi/linux/kfd_ioctl.h`. Rust unit tests pin
 //! selected record sizes and offsets. The queue path requires UAPI 1.17's
-//! extended create record. Keep pointer-bearing records here as integers: only
-//! `sys` constructs their pointers and keeps referenced storage alive for the
-//! complete synchronous ioctl.
+//! extended create record. Address fields remain integers to match the UAPI.
+//!
+//! The `connection` ioctl boundary owns or borrows temporary argument buffers
+//! through each synchronous syscall. Resource owners supply queue ring,
+//! context-save, and other resource addresses and retain their backing until
+//! kernel and GPU access has ended, including after the ioctl returns.
 
 use std::mem::{offset_of, size_of};
 
@@ -518,7 +521,7 @@ pub(super) struct ResetEvent {
 }
 
 /// The kernel's event union occupies 32 bytes and has eight-byte alignment.
-/// `sys` decodes the hardware- and memory-exception layouts only after a
+/// `connection` decodes the hardware- and memory-exception layouts only after a
 /// successful wait on an event created with the matching type.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]

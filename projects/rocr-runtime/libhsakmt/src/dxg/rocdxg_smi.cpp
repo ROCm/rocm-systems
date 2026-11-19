@@ -259,6 +259,11 @@ HSAKMT_STATUS HSAKMTAPI rocdxg_smi_get_clock_info(uint32_t node_id, uint32_t clk
   HSAKMT_STATUS status = clear_out(info);
   if (status != HSAKMT_STATUS_SUCCESS) return status;
 
+  // prefill min_clk, clk_locked, and clk_deep_sleep with sentinel values for ease of validation later
+  info->min_clk = std::numeric_limits<uint32_t>::max();
+  info->clk_locked = std::numeric_limits<uint8_t>::max();
+  info->clk_deep_sleep = std::numeric_limits<uint8_t>::max();
+
   auto* wdev = checked_device(node_id);
   if (wdev == nullptr) return HSAKMT_STATUS_INVALID_NODE_UNIT;
 

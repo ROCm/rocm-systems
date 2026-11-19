@@ -78,6 +78,7 @@ struct RaceViolation {
 
   // Wave-local source locks own their instruction outside the event registry.
   std::optional<InstructionSnapshot> sourceInstruction;
+  bool conflictsWithSrc2Read = false; ///< The conflicting bytes are the LDS source operand.
 
   RaceViolation(Space space, int index, int wave, int lane, bool isWrite, Dim3d workgroupId,
                 EventId conflictingEvent)
