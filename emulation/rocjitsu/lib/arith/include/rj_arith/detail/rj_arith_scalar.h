@@ -466,8 +466,9 @@ int rj_arith_s_cmp_nlt_f16(uint64_t flags, uint64_t instruction_flags, uint32_t 
 // d is required and SCC is unchanged. Operands are raw register bits. Sources
 // may originate from d storage. instruction_flags must be zero. Loose and exact
 // semantics are supported; explicit mode 3 reporting is unsupported. Compatibility
-// requires valid excp_flag_user storage and accumulates inherited gfx12 conversion
-// causes; RTZ packing leaves the status pointer unused.
+// requires valid excp_flag_user storage and accumulates gfx12 conversion causes matching
+// gfx1201 captures, with OVERFLOW and UNDERFLOW judged after rounding with an unbounded
+// exponent; RTZ packing leaves the status pointer unused.
 // Integer-to-FP32
 // and FP32-to-FP16 accept RJ_ARITH_FP_ROUND_MASK (the destination format's MODE
 // field). Errors leave d unchanged. Requires host nearest-even rounding and enabled
@@ -593,8 +594,11 @@ int rj_arith_s_fmamk_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d
 // overflow. Multiplication flushes tiny results before destination subnormal
 // rounding, so a value that would round up to the smallest normal may flush.
 // Loose and exact semantics are supported; explicit mode 3 reporting is unsupported.
-// Compatibility requires valid excp_flag_user storage and accumulates inherited
-// gfx12 scalar arithmetic/selection causes. Modes 0–2 leave status unused.
+// Compatibility requires valid excp_flag_user storage and accumulates gfx12 scalar
+// arithmetic/selection causes matching gfx1201 captures in every MODE: OVERFLOW and
+// UNDERFLOW are judged after rounding with the guest rounding mode and an unbounded
+// exponent, so a result stored as the minimum normal still underflows when that rounding
+// stays below it. Modes 0–2 leave status unused.
 // Add/subtract/multiply accept RJ_ARITH_FP_ROUND_MASK (the destination format's MODE
 // field). Exact results equal FMA(a, 1, b), FMA(a, 1, -b) and FMA(a, b, signed zero),
 // so subtraction negates a NaN b. A NaN selection result is the first NaN operand,
