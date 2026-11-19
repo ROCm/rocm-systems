@@ -4308,6 +4308,17 @@ TEST_F(EnqueueMicrotest, FinishPlan_DevFlags_BothOn_SetsBoth) {
   EXPECT_EQ(RCCL_DEV_FLAG_PROFILER | RCCL_DEV_FLAG_PROGRESS, devFlagsAfterFinishPlan(true, true));
 }
 
+TEST_F(EnqueueMicrotest, DevWorkBatchProfiler_UnprofiledFirstProfiledSecond_RequiresFinalSync) {
+  ncclDevWorkP2p works[2]{};
+  works[1].profilerEnabled = 1;
+
+  EXPECT_TRUE(ncclDevWorkBatchHasProfiler(ncclDevWorkTypeP2p, reinterpret_cast<const char*>(works),
+                                          sizeof(works[0]), 2));
+  works[1].profilerEnabled = 0;
+  EXPECT_FALSE(ncclDevWorkBatchHasProfiler(ncclDevWorkTypeP2p, reinterpret_cast<const char*>(works),
+                                           sizeof(works[0]), 2));
+}
+
 TEST_F(EnqueueMicrotest, FinishPlan_OneBatchPerChannel_LandsAtItsOwnSlot) {
   // The core layout contract: with one batch on each of channels 0..2, the first
   // batch of channel c must be at batchZero[c]. funcId identifies which is which.

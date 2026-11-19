@@ -404,6 +404,8 @@ struct ncclKernelComm;
 #pragma pack(push) /* push current alignment to stack */
 #pragma pack(8) /* set alignment to 8 bytes boundary */
 
+constexpr int ncclDevWorkP2pMaxChannels = 1 << 8;
+
 struct alignas(16) ncclDevWorkP2p {
   void *sendAddr, *recvAddr;
   size_t sendBytes, recvBytes;
@@ -411,7 +413,9 @@ struct alignas(16) ncclDevWorkP2p {
   uint64_t sendOpCount, recvOpCount;
   // From the part index, nP2pChannels, and channelBase the device code can
   // calculate which part of the transfer a channel is responsible for.
-  uint8_t nP2pChannels; // Always equal to comm->p2pnChannels
+  // Always equal to comm->p2pnChannels. Zero encodes ncclDevWorkP2pMaxChannels,
+  // which is one past the largest value this byte can store.
+  uint8_t nP2pChannels;
   uint8_t channelBase; // Channel owning first part.
   // Zero channels indicates no work in that direction.
   uint8_t nSendChannels, nRecvChannels;
@@ -602,6 +606,19 @@ enum ncclDevWorkType : uint8_t {
   ncclDevWorkTypeCollReg,
   ncclDevWorkTypeBcast, // for batched broadcast
 };
+
+inline __host__ __device__ bool ncclDevWorkProfilerEnabled(enum ncclDevWorkType type, const void* work) {
+  if (type == ncclDevWorkTypeP2p) return ((const struct ncclDevWorkP2p*)work)->profilerEnabled;
+  if (type == ncclDevWorkTypeBcast) return false;
+  return ((const struct ncclDevWorkColl*)work)->profilerEnabled;
+}
+
+inline __host__ __device__ bool ncclDevWorkBatchHasProfiler(enum ncclDevWorkType type, const char* workStorage,
+                                                             size_t workSize, int nWorks) {
+  for (int i = 0; i < nWorks; i++)
+    if (ncclDevWorkProfilerEnabled(type, workStorage + i * workSize)) return true;
+  return false;
+}
 
 constexpr size_t ncclDevWorkSize(enum ncclDevWorkType type) {
   return type == ncclDevWorkTypeP2p     ? sizeof(ncclDevWorkP2p) :
