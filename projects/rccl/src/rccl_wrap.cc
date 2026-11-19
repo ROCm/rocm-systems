@@ -866,10 +866,11 @@ ncclResult_t rcclGetCollImplInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_
       NCCLCHECK(rcclSelectAlltoAll(comm, sendbuff, recvbuff, (size_t)count, dataType, /*stream=*/nullptr,
                                    /*query=*/true, /*graphCapturingHint=*/capturing, &decision));
     }
-    // Check-mode, suspended and revoked comms divert to ncclEnqueueCheck (collectives.cc), which runs
-    // the planner's plain kernel for every backend it does not honor; report that kernel instead.
-    // Not rcclGetAlgoInfo: it would pick hierarchical or Direct AllGather again, which the divert skips.
-    if (rcclCollectiveMustUseEnqueuePath(comm) && !rcclEnqueueRunsDecision(decision.algo)) {
+    // Check mode diverts to ncclEnqueueCheck (collectives.cc), which runs the planner's plain kernel for
+    // every backend it does not honor; report that kernel instead. Not rcclGetAlgoInfo: it would pick
+    // hierarchical or Direct AllGather again, which the divert skips. Suspended and revoked comms divert
+    // too, but ncclEnqueueCheck rejects them before planning, so nothing runs to report.
+    if (comm->checkMode != ncclCheckModeDefault && !rcclEnqueueRunsDecision(decision.algo)) {
       if (coll == ncclFuncAlltoAll) {
         // taskAppend() splits AlltoAll into per-peer Send/Recv over the p2p channels.
         decision.algo = rcclAddonAlgos_t::RCCL_DIRECT_ALLTOALL;
