@@ -232,6 +232,13 @@ using rocjitsu::arith::test::DivOmodGfx11;
 // precision, is scaled, and overflows per the guest rounding: infinity for nearest and the
 // rounding toward the sign, max-finite otherwise. A denormal result becomes +0 before the scale,
 // while the smallest normal halved keeps its sign. Signaling NaNs pass through; CLAMP applies last.
+//
+// The rows above the separator all hold an operand outside the exact AVX-512 backend's admitted
+// exponent range, so they exercise the scalar model. The rows below it keep every operand inside
+// that range, so with VCC clear they reach the backend this change newly selects: a product that
+// rounds differently under each guest mode, the same product scaled up and down, an output
+// modifier dropped because output denormals are preserved, and the zero-sign rule that makes an
+// exact -0 come back as +0 once a modifier scales it.
 const DivOmodGfx11 omod_lanes_f32[] = {
     {"mul2 overflow nearest", 0x100, 0x7f000000, 0x3f800000, 0, 0x7f800000, RJ_ARITH_ALU_OMOD_2},
     {"mul2 overflow round up", 0x101, 0x7f000000, 0x3f800000, 0, 0x7f800000, RJ_ARITH_ALU_OMOD_2},
@@ -279,6 +286,16 @@ const DivOmodGfx11 omod_lanes_f32[] = {
      RJ_ARITH_ALU_OMOD_2 | RJ_ARITH_ALU_CLAMP},
     {"mul2 clamp keeps a NaN without DX10_CLAMP", 0x000, 0x7f800001, 0x3f800000, 0, 0x7f800001,
      RJ_ARITH_ALU_OMOD_2 | RJ_ARITH_ALU_CLAMP},
+
+    // Operands inside the exact backend's admitted exponent range; VCC is clear in all of them.
+    {"mul2 round down", 0x102, 0x436a3cd0, 0xb75bb10b, 0x42bff051, 0x433feebe, RJ_ARITH_ALU_OMOD_2},
+    {"mul2 of exact -0", 0x100, 0x80000000, 0x3f800000, 0x80000000, 0x00000000,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 round up", 0x101, 0x3fc00001, 0x40200003, 0x3f000001, 0x41080004, RJ_ARITH_ALU_OMOD_2},
+    {"div2 nearest", 0x100, 0x3fc00001, 0x40200003, 0x3f000001, 0x40080003, RJ_ARITH_ALU_OMOD_HALF},
+    {"mul2 ignored with output denormals", 0x130, 0x3fc00001, 0x40200003, 0x3f000001, 0x40880003,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul4 round up", 0x101, 0x3f7fffff, 0x3f7fffff, 0x33800000, 0x40800000, RJ_ARITH_ALU_OMOD_4},
 };
 
 const DivOmodGfx11 omod_lanes_f64[] = {

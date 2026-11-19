@@ -8065,6 +8065,41 @@ TEST(ArithBridgeTest, EmptyScaleValidatesBeforeCommittingCondition) {
   }
 }
 
+// The decoded path carries an active RDNA3 output modifier to a lane that receives the scaled
+// result. W7900 capture (gfx1100, MODE 0x100: DX10_CLAMP set, IEEE clear, FP32 denormals
+// flushed): 0x7f000000 scaled by the window and then mul:2 overflows to infinity under nearest
+// rounding, and the condition stays clear.
+TEST(ArithBridgeTest, DecodedScaleAppliesOutputModifierToActiveLanes) {
+  for (uint32_t lanes : {32u, 64u}) {
+    BridgeFixture fixture(true, lanes, {ArithmeticSemantics::BitExactEmpiricalNoFpStatus});
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
+    // OMOD applies only with FP32 output denormals flushed and IEEE clear.
+    fixture.wave->set_mode_raw(0xc0u | Wavefront::DX10_CLAMP_BIT);
+    const unsigned last = lanes - 1;
+    fixture.wave->set_exec(uint64_t(1) << last);
+    const uint32_t operands[] = {0x7f000000u, 0x3f800000u, 0x3f800000u};
+    for (unsigned input = 0; input < 3; ++input) {
+      fixture.cu->write_vgpr(fixture.base() + 2 * input, last, operands[input]);
+    }
+    fixture.cu->write_vgpr(fixture.base() + 4, last, 0xa5a5a5a5u);
+    const auto sb = fixture.wave->sgpr_alloc().base;
+    fixture.cu->write_sgpr(sb + 4, 0x12345678);
+    fixture.cu->write_sgpr(sb + 5, 0xabcdef01);
+
+    const auto words = rdna3::build_vop3_sdst_enc(
+        rdna3::kVDivScaleF32Vop3SdstEnc,
+        {.vdst = 4, .sdst = 4, .src0 = 256, .src1 = 258, .src2 = 260, .omod = 1});
+    auto instruction = fixture.decoder->decode_window(words);
+    ASSERT_TRUE(instruction.succeeded());
+    ASSERT_TRUE(
+        fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+
+    EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 4, last), 0x7f800000u);
+    EXPECT_EQ(fixture.cu->read_sgpr(sb + 4), 0u);
+    EXPECT_EQ(fixture.cu->read_sgpr(sb + 5), lanes == 64 ? 0u : 0xabcdef01U);
+  }
+}
+
 TEST(ArithBridgeTest, HalfFixupGuestRoundingNanClampAndPartialWrites) {
   for (bool rdna3 : {false, true})
     for (uint32_t lanes : {32u, 64u})
