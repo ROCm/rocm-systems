@@ -871,6 +871,9 @@ memory:
     <<: *level_default
     tags: [transfer]
   Unit_hipMemcpyBatchAsync_D2D_Functional: *level_default
+  Unit_hipMemcpyBatchAsync_NestedBufferViews:
+    <<: *level_default
+    tags: [transfer]
   Unit_hipMemcpyBatchAsync_D2D_LargeBatch: *level_default
   Unit_hipMemcpyBatchAsync_D2D_ManyBroadcasts:
     <<: *level_default
