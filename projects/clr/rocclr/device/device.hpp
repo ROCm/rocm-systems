@@ -1573,7 +1573,9 @@ class MemObjMap : public AllStatic {
     amd::Memory* memory;
     size_t offset;
     size_t size;        //!< size == 0 for Windows overlapping VA range or a miss, and is
-                        //!< not cacheable. Otherwise it should be non-zero for global ranges
+                        //!< not cacheable. Otherwise (global map hit) the length from the entry's
+                        //!< start over which a fresh lookup returns this same entry: its size, cut
+                        //!< at the next key so overlapping entries cannot be served from the cache
   };
 
   //!< Core lookup helper used by all FindMemObj* functions. Caller must hold AllocatedLock_.

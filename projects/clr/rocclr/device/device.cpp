@@ -369,9 +369,12 @@ void MemObjMap::RemoveMemObj(const void* k) {
 MemObjMap::LookupResult MemObjMap::findMemObjNoLock(const void* ptr, Device* dev) {
   uintptr_t key = reinterpret_cast<uintptr_t>(ptr);
 
-  // Global (non-overlapping) map: upper_bound - 1 is the only candidate. A hit
-  // returns the allocation size, which marks the result as cacheable.
-  auto it = MemObjMap_.upper_bound(key);
+  // Global map: upper_bound - 1 is the only candidate. Entries can overlap or nest (for example
+  // buffer views from hipExternalMemoryGetMappedBuffer), so a later key may take over part of an
+  // entry's range. A hit returns the length over which this same entry stays the answer: the
+  // allocation size, cut at the next key. That length is non-zero and marks the result cacheable.
+  auto next = MemObjMap_.upper_bound(key);
+  auto it = next;
   if (it != MemObjMap_.begin()) {
     --it;
     amd::Memory* mem = it->second;
@@ -379,7 +382,11 @@ MemObjMap::LookupResult MemObjMap::findMemObjNoLock(const void* ptr, Device* dev
                           ? sizeof(mem->getUserData().hsa_handle)
                           : mem->getSize();
     if (key >= it->first && key < (it->first + mem_size)) {
-      return {mem, key - it->first, mem_size};
+      size_t valid_size = mem_size;
+      if (next != MemObjMap_.end()) {
+        valid_size = std::min<size_t>(mem_size, next->first - it->first);
+      }
+      return {mem, key - it->first, valid_size};
     }
   }
 
@@ -523,8 +530,9 @@ void MemObjMap::FindMemObjBatchPairs(const void* const* srcs, const void* const*
 
     if (!resolved) {
       result = findMemObjNoLock(ptr, dev);
-      // size != 0 marks a non-overlapping global-map hit, which is safe to cache
-      // (the range base is key - offset); Windows VA-map hits report size 0.
+      // size != 0 marks a global-map hit; [base, base + size) is exactly the keys a fresh
+      // lookup resolves to this entry (the range base is key - offset). Windows VA-map hits
+      // report size 0.
       if (cache_active && result.size != 0) {
         const uintptr_t base = key - result.offset;
         range_cache[cache_next] = {base, base + result.size, result.memory};
