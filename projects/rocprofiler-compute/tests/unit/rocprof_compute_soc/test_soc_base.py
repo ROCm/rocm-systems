@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 import common
 import pytest
 
+from rocprof_compute_soc.metric_library.loader import Collectables
 from rocprof_compute_soc.soc_base import (
     OmniSoC_Base,
     ProfileMetric,
@@ -28,7 +29,7 @@ from utils.utils_common import (
     canonical_config_arch,
     load_views,
 )
-from utils.utils_counter_defs import Collectables, extract_counters_and_variables
+from utils.utils_counter_defs import extract_counters_and_variables
 
 # =============================================================================
 # Fixtures

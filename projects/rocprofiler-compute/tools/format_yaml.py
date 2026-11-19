@@ -2,8 +2,8 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Write the metric equations of the panel configs, panel collectables and metric
-library YAML files in one form, which CONTRIBUTING.md describes."""
+"""Write the metric equations of the panel configs and metric library YAML files in
+one form, which CONTRIBUTING.md describes."""
 
 import argparse
 import re
@@ -21,14 +21,10 @@ from utils.metrics.expression import normalize_equation
 # Configuration - Edit these to accommodate future YAML updates
 # =============================================================================
 
-# Path pattern of the panel collectables, whose top-level values are all equations
-COLLECTABLES_FILE_PATTERN = "analysis_configs/collectables/"
-
 # Path patterns that contain metric equations to check (substrings matched against path)
 EQUATION_FILE_PATTERNS = [
     "analysis_configs/gfx",
     "metric_library/gfx",
-    COLLECTABLES_FILE_PATTERN,
 ]
 
 # Path suffixes to exclude from equation checking
@@ -86,13 +82,6 @@ def extract_metric_equations(
     return equations
 
 
-def file_equations(path: Path, data: Dict[str, Any]) -> List[Tuple[str, str]]:
-    """Return (key path, equation) of each equation in the YAML data of a file."""
-    if COLLECTABLES_FILE_PATTERN in str(path):
-        return [(name, value) for name, value in data.items() if isinstance(value, str)]
-    return extract_metric_equations(data)
-
-
 def _should_check_equations(path: Path) -> bool:
     """Return True if the file contains metric equations to check."""
     path_str = str(path)
@@ -144,7 +133,7 @@ def check_file(
     format_issues = []
     fixes = []
 
-    for eq_path, value in file_equations(path, data):
+    for eq_path, value in extract_metric_equations(data):
         try:
             normalized = normalize_equation(value)
         except ValueError as e:

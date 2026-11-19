@@ -28,10 +28,10 @@ GPU_SPEC_PATH = PROJECT_ROOT / "src" / "utils" / "mi_gpu_spec.yaml"
 
 # Make src/ importable so we can reuse the canonical counter definitions.
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
+from rocprof_compute_soc.metric_library.loader import Collectables
 from utils.analysis_views import arch_panel_configs
 from utils.utils_common import metric_tables_by_id
 from utils.utils_counter_defs import (
-    Collectables,
     counter_to_block,
     extract_counters_and_variables,
     metric_expressions,

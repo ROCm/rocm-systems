@@ -10,7 +10,6 @@ copies the analysis configs:
 - every equation of a panel row is a library formula, and every formula has a row;
 - every row has the unit of its metric;
 - every row peak is a peak of its metric, and every library peak has a row;
-- the library collectables equal the analysis config collectables;
 - each library set lists the metrics of its old set in profile_configs/sets.
 
 And each view is one analysis config panel:
@@ -68,7 +67,7 @@ from utils.utils_common import (
     parse_sets_yaml,
     row_metric_ids,
 )
-from utils.utils_counter_defs import Collectables, metric_value_keys
+from utils.utils_counter_defs import metric_value_keys
 
 
 class Row(NamedTuple):
@@ -602,18 +601,6 @@ def test_listed_variants_have_rows(arch_view):
         *UNIT_VARIANTS.get(arch_view.arch, {}),
     ]
     assert sorted(set(listed) - positions) == []
-
-
-def test_collectables_match_analysis_configs(arch_view):
-    library_collectables = {
-        name: canonical_formula(collectable["formula"])
-        for name, collectable in arch_view.library.collectables.items()
-    }
-    expected = {
-        name: canonical_formula(formula)
-        for name, formula in Collectables.of_arch(arch_view.arch).items()
-    }
-    assert library_collectables == expected
 
 
 def test_sets_match_profile_configs(arch_view):
