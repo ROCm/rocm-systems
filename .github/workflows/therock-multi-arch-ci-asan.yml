@@ -3,16 +3,16 @@
 
 # Multi-Arch CI ASAN for rocm-systems
 #
-# Presubmit and on-demand ASAN builds. This workflow requests host-asan and
-# pins TheRock at the #10034 merge on main.
+# On-demand host-asan builds for every component. The reusable workflow YAML
+# is called from TheRock main (includes #10034). The source ref is
+# users/dileepr1/host-asan-all-5405 (9c073c680 plus llvm-project #5405
+# cherry-picked onto the amd-llvm pin). Those are different commits because a
+# reusable workflow is only callable from the default branch.
 # run_rocm_tests lets a pull request keep its test runners. The default
 # family is gfx90a, which has no sandbox runner, so it uses its normal runner
 # (linux-gfx90a-1gpu-ossci-rocm). A pull request runs when it has ci:host-asan.
-# ci:gfx90a forces the gfx90a tests on that pull request.
-#
-# The presubmit is scoped to a runtime-only build (compiler-runtime and
-# runtime-tests) testing hip-tests and rocrtst, so that it is cheap enough to
-# run automatically on every pull request. See ROCm/TheRock#7202.
+# ci:gfx90a forces the gfx90a tests on that pull request. A workflow_dispatch
+# builds every stage and tests every component at the default quick tier.
 #
 # For scheduled nightly runs with full ASAN, see therock-multi-arch-ci-asan-nightly.yml.
 
@@ -67,14 +67,14 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@2143e68ddf3b44ea4cd83969af01dc74a6bd546a # TheRock#10034 on main
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@3a449c0e6ba8f35c5d56470e103f6f473d0061d2 # TheRock main, includes #10034
     with:
       build_variant: "host-asan"
       # Required by TheRock#10034. Without it a pull request clears the test runner.
       run_rocm_tests: true
       pull_request_opt_out_label: "ci:no-host-asan"
       pull_request_opt_in_label: "ci:host-asan"
-      build_stages: "compiler-runtime,runtime-tests"
+      # build_stages left unset so every stage builds.
       # Python/PyTorch/JAX builds are not supported with ASAN yet
       build_python_packages: false
       build_pytorch: false
@@ -83,12 +83,12 @@ jobs:
       # gfx90a is the host-asan pull request test target. An empty value would
       # fall back to the presubmit families, which do not include it.
       linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx90a' }}
-      pr_labels: ${{ inputs.pr_labels || 'test:hip-tests,test:rocrtst' }}
+      pr_labels: ${{ inputs.pr_labels || '' }}
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
       baseline_repository: ${{ inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository) || '' }}
       repository: ROCm/TheRock
-      ref: 2143e68ddf3b44ea4cd83969af01dc74a6bd546a # TheRock#10034 on main
+      ref: e12a2a324dad7d0c51cf6b40c0c82fc6a3679c52 # users/dileepr1/host-asan-all-5405 (#5405)
       external_repo: >-
         {
           "repository": "${{ github.repository }}",
@@ -108,7 +108,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@2143e68ddf3b44ea4cd83969af01dc74a6bd546a # TheRock#10034 on main
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@3a449c0e6ba8f35c5d56470e103f6f473d0061d2 # TheRock main, includes #10034
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
@@ -118,7 +118,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       repository: ROCm/TheRock
-      ref: 2143e68ddf3b44ea4cd83969af01dc74a6bd546a # TheRock#10034 on main
+      ref: e12a2a324dad7d0c51cf6b40c0c82fc6a3679c52 # users/dileepr1/host-asan-all-5405 (#5405)
     permissions:
       contents: read
       id-token: write
@@ -136,7 +136,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: 2143e68ddf3b44ea4cd83969af01dc74a6bd546a # TheRock#10034 on main
+          ref: e12a2a324dad7d0c51cf6b40c0c82fc6a3679c52 # users/dileepr1/host-asan-all-5405 (#5405)
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
