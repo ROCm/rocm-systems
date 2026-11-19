@@ -542,8 +542,7 @@ bool RaceDetector::mayConflict(const IntervalSet &accessed, WaveId wave, bool is
     return false;
   // Scan the events once for the whole instruction, by the rules the per-lane
   // checks apply, so a clean access does not repeat the scan for each lane.
-  if (isWrite &&
-      anyCheckedSrc2Read(wave, currentMemoryOrder, [&](const Src2Event &source) {
+  if (isWrite && anyCheckedSrc2Read(wave, currentMemoryOrder, [&](const Src2Event &source) {
         return std::ranges::any_of(accessed, [&](const Interval &interval) {
           return source.sourceReads.overlapsRange(interval.start, interval.end);
         });
