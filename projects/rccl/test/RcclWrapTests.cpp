@@ -2540,9 +2540,7 @@ TEST(Rcclwrap, AdjustChannels_Gfx950SingleNode8Ranks_MainColl_NoDouble)
     );
 }
 
-// NCCL_MAX_NRINGS caps channels like NCCL_MAX_NCHANNELS: rcclWarpSpeedComputeNChannels
-// skipped its halving (ncclMaxNchannels() != MAXCHANNELS), so the doubling must be
-// skipped too. 16 rings * multiplier 4 = 64 -> 64/4 = 16.
+// NCCL_MAX_NRINGS skips the gfx950 halving, so the doubling is skipped too: 64/4 = 16.
 TEST(Rcclwrap, AdjustChannels_Gfx950SingleNode8Ranks_MaxNringsSkipsDoubling)
 {
     RUN_ISOLATED_TEST_WITH_ENV(
