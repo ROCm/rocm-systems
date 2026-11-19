@@ -6190,26 +6190,53 @@ pub fn amdsmi_get_gpu_total_ecc_count(
 ///
 /// # Errors
 ///
-/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_gpu_process_list` call fails.
+/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_gpu_process_list` call fails,
+/// including [`AmdsmiStatusT::AmdsmiStatusOutOfResources`] when processes keep starting through three attempts.
 pub fn amdsmi_get_gpu_process_list(
     processor_handle: AmdsmiProcessorHandle,
 ) -> AmdsmiResult<Vec<AmdsmiProcInfoT>> {
-    let mut num_processes: u32 = 0;
-    call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_process_list(
-        processor_handle,
-        &mut num_processes,
-        std::ptr::null_mut()
-    ));
+    // A process that starts between the count and the read makes the read
+    // return OUT_OF_RESOURCES; count again, as the compute-process APIs do.
+    // Processes that keep starting make the call fail after COUNT_ATTEMPTS.
+    const COUNT_ATTEMPTS: u32 = 3;
+    let mut attempt = 1;
+    loop {
+        let mut num_processes: u32 = 0;
+        call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_process_list(
+            processor_handle,
+            &mut num_processes,
+            std::ptr::null_mut()
+        ));
+        // A read with a capacity of 0 is another count: it reports processes
+        // that started since without writing them.
+        if num_processes == 0 {
+            return Ok(Vec::new());
+        }
 
-    let mut processes: Vec<AmdsmiProcInfoT> = Vec::with_capacity(num_processes as usize);
-    call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_process_list(
-        processor_handle,
-        &mut num_processes,
-        processes.as_mut_ptr()
-    ));
-    unsafe { processes.set_len(num_processes as usize) };
-
-    Ok(processes)
+        let mut processes: Vec<AmdsmiProcInfoT> = Vec::with_capacity(num_processes as usize);
+        let status = unsafe {
+            amdsmi_wrapper::amdsmi_get_gpu_process_list(
+                processor_handle,
+                &mut num_processes,
+                processes.as_mut_ptr(),
+            )
+        };
+        match status {
+            AmdsmiStatusT::AmdsmiStatusSuccess => {
+                debug_assert!(num_processes as usize <= processes.capacity());
+                // SAFETY: given a capacity above 0, the library writes at most
+                // that many records, and returns SUCCESS only when every
+                // running process fit, with num_processes set to the number
+                // it wrote. So the first num_processes records are initialized.
+                unsafe { processes.set_len(num_processes as usize) };
+                return Ok(processes);
+            }
+            AmdsmiStatusT::AmdsmiStatusOutOfResources if attempt < COUNT_ATTEMPTS => {
+                attempt += 1;
+            }
+            _ => return Err(status),
+        }
+    }
 }
 
 /// Get the library version information.

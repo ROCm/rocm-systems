@@ -55,8 +55,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `amdsmi_get_gpu_compute_process_gpus()` failing when it counts a process's GPUs**.  
   - The documented count call, with a NULL index list, returned an invalid-argument error, so the Python and Rust APIs always failed.
 
-- **Fixed the Rust `amdsmi_get_gpu_compute_process_info()` returning invalid entries**.  
-  - When processes exited between its count and its read, the list ended with entries of undefined content; when processes started, the call failed.
+- **Fixed the Rust `amdsmi_get_gpu_compute_process_info()` and `amdsmi_get_gpu_process_list()` returning invalid entries**.  
+  - The list could end with entries of undefined content: in `amdsmi_get_gpu_compute_process_info()` when processes exited between its count and its read, and in `amdsmi_get_gpu_process_list()` when a process started after a count of 0. When processes started between a count above 0 and the read, both calls failed.
 
 - **Fixed the documented units of `amdsmi_process_info_t`'s `vram_usage` and `cu_occupancy`** (documentation-only ABI change).  
   - The header gave `vram_usage` in MB and `cu_occupancy` as a percent; `amdsmi_get_gpu_compute_process_info()` and `amdsmi_get_gpu_compute_process_info_by_pid()` return bytes and a number of compute units.
