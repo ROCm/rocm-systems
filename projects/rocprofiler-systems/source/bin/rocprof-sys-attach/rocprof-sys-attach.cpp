@@ -411,7 +411,18 @@ attach_all(const std::vector<pid_t>& pids, active_sessions& sessions)
 [[nodiscard("a failed detach must reach the exit code")]] bool
 detach(active_sessions& sessions, session target)
 {
-    if(rocattach_detach(target.pid) != ROCATTACH_STATUS_SUCCESS)
+    const auto status = rocattach_detach(target.pid);
+    if(status == ROCATTACH_STATUS_ERROR_PTRACE_PROCESS_NOT_FOUND)
+    {
+        // The target exited while attached, so there is nothing left to retry and a
+        // later detach cannot succeed. Drop the session so the prompt can finish.
+        sessions.remove(target.id);
+        LOG_ERROR("Process {} (session {}) no longer exists; its output may be "
+                  "incomplete",
+                  target.pid, target.id);
+        return false;
+    }
+    if(status != ROCATTACH_STATUS_SUCCESS)
     {
         LOG_ERROR("Failed to detach from process {} (session {}); it stays active",
                   target.pid, target.id);

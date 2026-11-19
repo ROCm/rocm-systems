@@ -14,6 +14,7 @@ survives all sessions.
 from __future__ import annotations
 
 import os
+import select
 import subprocess
 import time
 from pathlib import Path
@@ -296,6 +297,150 @@ class TestRocattachMultiPid:
                     f"found {sorted(test_output_dir.rglob('*.pftrace'))}"
                 )
         finally:
+            for target in targets:
+                if target.poll() is None:
+                    target.terminate()
+            for target in targets:
+                try:
+                    target.wait(timeout=self.TARGET_TERMINATE_TIMEOUT_S)
+                except subprocess.TimeoutExpired:
+                    target.kill()
+                    target.wait()
+
+
+@pytest.mark.class_name("rocattach")
+class TestRocattachExitedTarget:
+    """A target that exits while attached must not trap the interactive prompt."""
+
+    TARGET_WARMUP_S = 2
+    PROMPT_TIMEOUT_S = 60
+    DETACH_TIMEOUT_S = 60
+    TARGET_TERMINATE_TIMEOUT_S = 10
+    PROMPT_MARKER = b"to detach all:"
+
+    def _read_until(
+        self, proc: subprocess.Popen, marker: bytes, timeout_s: float
+    ) -> bytes:
+        """Read ``proc`` stdout until ``marker`` appears (the prompt has no newline)."""
+        assert proc.stdout is not None
+        fd = proc.stdout.fileno()
+        deadline = time.monotonic() + timeout_s
+        data = b""
+        while marker not in data:
+            remaining = deadline - time.monotonic()
+            assert remaining > 0, f"timed out waiting for {marker!r}; got:\n{data!r}"
+            ready, _, _ = select.select([fd], [], [], remaining)
+            if not ready:
+                continue
+            chunk = os.read(fd, 4096)
+            assert chunk, f"attach tool exited before printing {marker!r}:\n{data!r}"
+            data += chunk
+        return data
+
+    def test_exited_target_does_not_block_detach_all(
+        self,
+        rocprof_config,
+        test_output_dir: Path,
+    ) -> None:
+        """Kill one of two attached targets, then enter ``a`` and keep stdin open.
+
+        The exited target cannot be detached from, so its session is dropped and
+        reported as a failure. The live target is still detached (and finalized),
+        the tool exits on its own without waiting for end of input, and its exit
+        status is non-zero.
+        """
+        if rocprof_config.rocprofsys_attach is None:
+            pytest.skip("rocprof-sys-attach binary not found")
+
+        try:
+            transpose = rocprof_config.get_target_executable("transpose")
+        except FileNotFoundError:
+            pytest.skip("transpose target not found")
+
+        target_env = {**os.environ, "ROCP_TOOL_ATTACH": "1"}
+        targets = [
+            subprocess.Popen(
+                [str(transpose), "2", "0"],  # 2 threads, nitr=0 (infinite)
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                cwd=str(test_output_dir),
+                env=target_env,
+            )
+            for _ in range(2)
+        ]
+        doomed, survivor = targets
+        attach = None
+
+        try:
+            time.sleep(self.TARGET_WARMUP_S)
+            for target in targets:
+                assert target.poll() is None, (
+                    "transpose target exited before attach "
+                    f"(returncode={target.returncode})"
+                )
+
+            attach = subprocess.Popen(
+                [
+                    str(rocprof_config.rocprofsys_attach),
+                    "-p",
+                    f"{doomed.pid},{survivor.pid}",
+                    "-F",
+                    "perfetto",
+                    "-o",
+                    str(test_output_dir / "exited_target"),
+                ],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                bufsize=0,
+            )
+            output = self._read_until(attach, self.PROMPT_MARKER, self.PROMPT_TIMEOUT_S)
+
+            doomed.kill()
+            doomed.wait()
+
+            # Keep stdin open: if the exited session were kept, the prompt would
+            # wait for more input here and this wait() would time out.
+            assert attach.stdin is not None
+            attach.stdin.write(b"a\n")
+            attach.stdin.flush()
+            try:
+                returncode = attach.wait(timeout=self.DETACH_TIMEOUT_S)
+            except subprocess.TimeoutExpired:
+                pytest.fail(
+                    "rocprof-sys-attach did not exit after 'a' although all remaining "
+                    "sessions were handled: the exited target's session was kept\n"
+                    f"output so far:\n{output.decode(errors='replace')}"
+                )
+            assert attach.stdout is not None
+            output += attach.stdout.read()
+            text = output.decode(errors="replace")
+
+            assert returncode != 0, (
+                "attach reported success although a target exited while attached\n"
+                f"output:\n{text}"
+            )
+            assert survivor.poll() is None, (
+                f"transpose target {survivor.pid} died "
+                f"(returncode={survivor.returncode})"
+            )
+            traces = list(
+                test_output_dir.rglob(f"perfetto-trace-{survivor.pid}[-.]*pftrace")
+            )
+            assert traces, (
+                f"no perfetto trace for pid {survivor.pid} under {test_output_dir}: "
+                "the live target was not detached after the exited one failed\n"
+                f"output:\n{text}"
+            )
+        finally:
+            if attach is not None:
+                if attach.stdin is not None:
+                    attach.stdin.close()
+                if attach.poll() is None:
+                    attach.kill()
+                attach.wait()
+                if attach.stdout is not None:
+                    attach.stdout.close()
             for target in targets:
                 if target.poll() is None:
                     target.terminate()

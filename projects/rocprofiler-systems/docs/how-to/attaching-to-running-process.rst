@@ -237,6 +237,9 @@ At the prompt:
 * End of input (for example, ``Ctrl+D``) detaches from all remaining processes.
 
 If detaching from a process fails, its session stays in the list so you can retry.
+The exception is a process that has exited: it can no longer be detached from, so
+its session is removed and reported as a failed detach (the output of that process
+may be incomplete), and the exit status is non-zero.
 
 Each process writes its own output, named after its PID. Keep
 ``ROCPROFSYS_USE_PID`` enabled (the default) when attaching to several processes;
