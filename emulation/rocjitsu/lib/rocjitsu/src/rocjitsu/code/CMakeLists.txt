@@ -63,6 +63,7 @@ rj_add_object_library(rocjitsu_analysis
 )
 
 rj_add_object_library(rocjitsu_code
+    kernel_descriptor_rsrc3.cpp
     rj_code.cpp
     builders/instruction_builder.cpp
     dbt/binary_translator.cpp

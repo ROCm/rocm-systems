@@ -8,6 +8,7 @@
 #include "rocjitsu/code/amdhsa_metadata.h"
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
 #include "rocjitsu/code/kernel_descriptor_abi.h"
+#include "rocjitsu/code/kernel_descriptor_rsrc3.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 
