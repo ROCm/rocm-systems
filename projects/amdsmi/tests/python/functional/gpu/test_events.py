@@ -64,7 +64,9 @@ def _decimal_and_hex(value):
 
 def _boot_time_ns():
     """The clock the kernel stamps events with; it includes time spent suspended."""
-    return time.clock_gettime_ns(time.CLOCK_BOOTTIME)
+    if hasattr(time, "clock_gettime_ns"):
+        return time.clock_gettime_ns(time.CLOCK_BOOTTIME)
+    return int(time.clock_gettime(7) * 1e9)  # Linux CLOCK_BOOTTIME; both names are Python 3.7+
 
 
 def _process_name(pid):

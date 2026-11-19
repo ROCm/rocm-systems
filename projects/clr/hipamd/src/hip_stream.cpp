@@ -291,7 +291,9 @@ bool Stream::StreamCaptureOngoing(hipStream_t hStream) {
   if (hip::tls.stream_capture_mode_ == hipStreamCaptureModeRelaxed) {
     return false;
   }
-  // Global mode — invalidate all capturing streams in any thread.
+  // Global mode — invalidate all capturing streams in any thread regardless of
+  // stream flags. StreamCaptureOngoing guards APIs (hipStreamSynchronize, etc.)
+  // where the capture mode alone determines interference, not stream flags.
   if (hip::tls.stream_capture_mode_ == hipStreamCaptureModeGlobal) {
     amd::ScopedLock lock(g_captureStreamsLock);
     if (!g_captureStreams.empty()) {

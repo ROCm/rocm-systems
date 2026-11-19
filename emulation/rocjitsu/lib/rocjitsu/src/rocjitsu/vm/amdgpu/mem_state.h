@@ -20,8 +20,11 @@
 #include "rocjitsu/vm/amdgpu/gpu_vm_access.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/lds_allocation.h"
+#include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
+#include "rocjitsu/vm/graphics/image_access.h"
+#include "rocjitsu/vm/graphics/image_bc.h"
 
 #include <algorithm>
 #include <array>
@@ -90,18 +93,49 @@ public:
   bool mixed_local_peer_route = false;
 };
 
+/// Per-lane texture status. A resident fetch leaves the status VGPR unchanged.
+class TexelStatus {
+public:
+  bool report_failure = false;
+  std::array<uint8_t, 64> lod{};
+  uint64_t failures = 0;
+  uint64_t lod_warnings = 0;
+  uint64_t written_lanes() const {
+    return (lod_warnings & ~failures) | (report_failure ? failures : 0);
+  }
+};
+
 /// @brief Texel footprint captured at issue time for one filtered image instruction.
 struct ImageSampleAccess {
   struct Tap {
     std::array<uint64_t, 64> addresses{};
     std::array<float, 64> weights{};
     uint64_t lane_mask = 0;
+    uint64_t border_mask = 0;
     std::vector<uint8_t> response;
     TranslatedMemoryProgress translated;
   };
   std::vector<Tap> taps;
   uint32_t next_tap = 0;
+  // A group load/store uses the same independently addressed texel requests
+  // as filtering. Its four VDATA slots concatenate the participating texels.
+  struct Transfer {
+    uint32_t dmask;
+    uint32_t slots_per_texel;
+    bool raw;
+    bool sign_extend;
+  };
+  std::optional<Transfer> transfer;
   bool gather = false;
+  bool horizontal = false;
+  bool packed_row = false;
+  uint8_t fp32_filter_taps = 0;
+  uint32_t border_color = 0;
+  struct DepthCompare {
+    uint8_t function;
+    std::array<float, 64> reference{};
+  };
+  std::unique_ptr<DepthCompare> depth_compare;
   /// GFX12 quads with an active fractional-mip lane blend every active lane.
   uint64_t mip_blend_mask = 0;
 };
@@ -112,7 +146,8 @@ public:
   ScalarMemState() { tag_ = SCALAR_MEM; }
   uint64_t addr = 0;
   bool request_force_l1_bypass = false;
-  bool memviol = false; ///< Invalid scalar-buffer offset faults before memory access.
+  bool translation_probe = false; ///< Nonfaulting ATC probe, with no register writeback.
+  bool memviol = false;           ///< Invalid scalar-buffer offset faults before memory access.
   /// Architectural destination resolved and range-checked at issue time.
   ScalarRegisterRange dst_register;
   uint32_t num_dwords = 0;
@@ -253,7 +288,20 @@ public:
   int32_t flat_aperture_offset = 0;
   std::optional<uint64_t> flat_local_allocation_end;
   std::optional<LdsAllocationRange> lds_allocation;
+  bool gds = false;
+  // GFX11 execute and direct routing can qualify the same GDS request.
+  bool gds_addresses_normalized = false;
   bool ds_memviol = false;
+  struct GdsRegisterAccess {
+    uint32_t operand;
+    uint16_t logical_wave;
+    uint8_t index;
+    uint8_t flags;
+    uint8_t crawler_increment;
+    bool ordered;
+    bool subtract;
+  };
+  std::optional<GdsRegisterAccess> gds_register;
   uint64_t buffer_missing_lanes = 0;
   bool buffer_residency_checked = false;
   bool buffer_tfe = false; ///< Include the extra PRT status VGPR when validating a buffer load.
@@ -273,11 +321,38 @@ public:
   uint32_t buffer_components = 0;
   bool buffer_d16 = false;
   bool check_texel_residency = false;
+  std::unique_ptr<TexelStatus> texel_status;
   // Image DMASK packs only enabled shader components into the data tuple.
   // A nonzero mask asks store capture to scatter that tuple back into its
   // original X/Y/Z/W slots before applying image selector/padding semantics.
   uint32_t image_store_component_mask = 0;
+  struct BlockCompressedImage {
+    ImageBlockFormat format{};
+    std::vector<std::array<uint8_t, 64>> texels; // Per-tap in-block texel per lane.
+  };
+  std::unique_ptr<BlockCompressedImage> image_bc;
   bool image_srgb = false;
+  std::optional<ImageBlockFormat> image_bc_format;
+  std::array<uint8_t, 64> image_bc_texels{};
+  bool image_sampling = false;
+  std::unique_ptr<ImageFeedback> image_status;
+  // Completion supplies the status write mask before the wave can resume.
+  std::unique_ptr<MemoryWaitScoreboard::DeferredWrite> feedback_wait;
+  [[nodiscard]] bool has_feedback_result() const {
+    return texel_status || (image_status && image_status->returns_status()) ||
+           reports_buffer_residency();
+  }
+  [[nodiscard]] uint64_t feedback_write_lanes() const {
+    if (texel_status)
+      return texel_status->written_lanes();
+    if (image_status)
+      return image_status->written_misses() | image_status->written_warnings();
+    return buffer_missing_lanes;
+  }
+
+  std::unique_ptr<BvhIntersectionAccess> bvh;
+  std::unique_ptr<ImageMetadataAccess> image_metadata;
+  std::unique_ptr<GraphicsSampleAccess> graphics_sample;
   std::unique_ptr<ImageSampleAccess> image_sample;
   // Some accesses use an interleaved ("swizzled") layout: consecutive units
   // of a lane are separated rather than contiguous. Units are 4 bytes for
@@ -317,10 +392,13 @@ public:
   /// Separate LDS and L2 modes cover FLAT requests routed to either pipeline.
   uint32_t atomic_denorm_mode = 3;
   uint32_t atomic_lds_denorm_mode = 3;
-  /// Older MIN/MAX compare flushed inputs but return the original selected bits.
-  /// They also propagate signaling NaNs instead of treating them as missing numbers.
+  /// Current emulator policy for older MIN/MAX: compare flushed inputs, return the original
+  /// selected bits and propagate signaling NaNs instead of treating them as missing numbers.
   bool atomic_legacy_minmax = true;
-  /// L2 ADD on qualified RDNA4 targets selects the incoming NaN first.
+  /// MI300A/MI350X MIN/MAX select flushed inputs but still return a quieted
+  /// signaling NaN, the data operand's first.
+  bool atomic_minmax_snan_wins = false;
+  /// L2 ADD on qualified RDNA4 and CDNA3/4 targets selects the incoming NaN first.
   /// Indexed LDS has an independent source-first policy.
   bool atomic_source_nan_first = false;
   bool lds_dword_extend = false; ///< Narrow LDS transfers extend to a full DWORD per lane.
@@ -364,14 +442,27 @@ public:
   // LDS stack inputs are snapshotted in store_data; the second-result slot returns
   // the stack pointer. Flags: bit 0 = RDNA4, bit 1 = triangle pairs, bit 2 = primitive ranges.
   uint8_t lds_stack_inputs = 0, lds_stack_size = 0, lds_stack_flags = 0;
+  /// M0 captured by indexed GDS instructions. The high half supplies the byte
+  /// base and the low half bounds accesses to the process's GDS allocation.
+  std::optional<uint32_t> gds_m0;
+  uint32_t ds_base(uint32_t lds_base) const { return gds_m0 ? *gds_m0 >> 16 : lds_base; }
+  struct OrderedCount {
+    uint64_t result_lanes; ///< The allocated destination broadcasts independently of EXEC.
+    uint32_t address;
+    uint32_t value;
+    bool exchange;
+    bool release;
+  };
+  std::optional<OrderedCount> ordered_count;
 
+  bool ds_src2 = false; ///< Atomic operand read from ds2_per_lane_addr at issue.
   bool ds2_active = false;
   std::array<uint64_t, 64> ds2_per_lane_addr = {};
   uint32_t ds2_dst_reg_base = 0;
   std::vector<uint8_t> ds2_store_data;
   std::vector<uint8_t> ds2_response_data;
   TranslatedMemoryProgress translated;
-  /// RDNA2 FLAT or SCRATCH lanes reporting MEM_VIOL on completion.
+  /// RDNA2 FLAT, SCRATCH or indexed GDS lanes reporting MEM_VIOL on completion.
   uint64_t address_range_violation_lanes = 0;
 
   /// Visit each transferred physical span in swizzled lanes, with its lane payload offset.
@@ -452,6 +543,8 @@ public:
   [[nodiscard]] uint32_t destination_vgpr_count() const {
     if (compact_wave64_global_transpose())
       return num_elems / 2;
+    if (bvh)
+      return 4;
     if (buffer_components)
       return buffer_d16 ? (buffer_components + 1) / 2 : buffer_components;
     const uint32_t result_bytes = atomic_op == AtomicOp::NONE ? num_elems * elem_size : elem_size;
@@ -497,6 +590,8 @@ inline void prepare_lds_destination(VectorMemState &state, uint32_t allocation_b
   state.lds_base = allocation_base;
   state.lds_per_lane_addr = true;
   const auto allocation = LdsAllocationRange::from_size(allocation_base, allocation_size);
+  if (!state.is_load && !state.lds_dst)
+    state.lds_allocation = allocation; // LDS-to-buffer source, captured with its payload.
   state.per_lane_lds_addr.fill(kInvalidLdsAddress);
   for (uint32_t lane = 0; lane < state.wf_size; ++lane) {
     if (!(state.exec_mask & (uint64_t{1} << lane)))

@@ -577,7 +577,8 @@ typedef struct {
  */
 typedef struct {
   uint64_t max_value;         //!< Maximum value measured
-  uint64_t min_value;         //!< Minimum value measured
+  uint64_t min_value;         //!< Minimum value measured; UINT64_MAX if there are
+                              //!< no samples, and then the other members are 0
   uint64_t average;           //!< Average value measured
   double standard_deviation;  //!< The standard deviation
 } rdc_stats_summary_t;
@@ -630,7 +631,10 @@ typedef struct {
   uint32_t num_gpus;                                    //!< Number of GPUs used by job
   rdc_gpu_usage_info_t summary;                         //!< Job usage summary statistics
                                                         //!< (overall)
-  rdc_gpu_usage_info_t gpus[RDC_MAX_NUM_GPUS_PER_JOB];  //!< Job usage summary statistics by GPU
+  rdc_gpu_usage_info_t gpus[RDC_MAX_NUM_GPUS_PER_JOB];  //!< Job usage summary statistics by GPU,
+                                                        //!< in the first num_gpus entries, ordered
+                                                        //!< by gpu_id, the entity index of the GPU
+                                                        //!< or GPU partition
   uint32_t num_processes;                               //!< Number of processes tracked
   rdc_process_status_info_t
       processes[RDC_MAX_NUM_PROCESSES_STATUS];  //!< Array to track process start/stop times
@@ -1075,6 +1079,8 @@ rdc_status_t rdc_disconnect(rdc_handle_t p_rdc_handle);
  *  @param[in] update_freq  How often to update this field in usec.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_MAX_LIMIT is returned if the group has more than
+ *  ::RDC_MAX_NUM_GPUS_PER_JOB GPUs.
  */
 rdc_status_t rdc_job_start_stats(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                                  const char job_id[64], uint64_t update_freq);
@@ -1093,6 +1099,8 @@ rdc_status_t rdc_job_start_stats(rdc_handle_t p_rdc_handle, rdc_gpu_group_t grou
  *  successful call, the value will contain the stats of the job.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_MAX_LIMIT is returned if the job has more than
+ *  ::RDC_MAX_NUM_GPUS_PER_JOB GPUs.
  */
 rdc_status_t rdc_job_get_stats(rdc_handle_t p_rdc_handle, const char job_id[64],
                                rdc_job_info_t* p_job_info);
@@ -1165,9 +1173,11 @@ rdc_status_t rdc_field_update_all(rdc_handle_t p_rdc_handle, uint32_t wait_for_u
  *  @param[in] p_rdc_handle The RDC handler.
  *
  *  @param[out] gpu_index_list Array reference to fill GPU indexes present on
- *  the system.
+ *  the system. At most ::RDC_MAX_NUM_DEVICES GPUs and GPU partitions are
+ *  listed; any beyond that are not.
  *
- *  @param[out] count Number of GPUs returned in gpu_index_list.
+ *  @param[out] count Number of GPUs returned in gpu_index_list, at most
+ *  ::RDC_MAX_NUM_DEVICES.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
@@ -1279,11 +1289,13 @@ rdc_status_t rdc_group_gpu_get_info(rdc_handle_t p_rdc_handle, rdc_gpu_group_t p
  *  @param[in] p_rdc_handle The RDC handler.
  *
  *  @param[out] group_id_list Array reference to fill GPU group
- *  ids in the system.
+ *  ids in the system, of ::RDC_MAX_NUM_GROUPS entries.
  *
  *  @param[out] count Number of GPU group returned in group_id_list.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_MAX_LIMIT there are more than ::RDC_MAX_NUM_GROUPS
+ *  groups; count is not set.
  */
 rdc_status_t rdc_group_get_all_ids(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id_list[],
                                    uint32_t* count);
@@ -1372,11 +1384,13 @@ rdc_status_t rdc_group_field_get_info(rdc_handle_t p_rdc_handle, rdc_field_grp_t
  *  @param[in] p_rdc_handle The RDC handler.
  *
  *  @param[out] field_group_id_list Array reference to fill field group
- *  ids in the system.
+ *  ids in the system, of ::RDC_MAX_NUM_FIELD_GROUPS entries.
  *
  *  @param[out] count Number of field group returned in field_group_id_list.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_MAX_LIMIT there are more than
+ *  ::RDC_MAX_NUM_FIELD_GROUPS field groups; count is not set.
  */
 rdc_status_t rdc_group_field_get_all_ids(rdc_handle_t p_rdc_handle,
                                          rdc_field_grp_t field_group_id_list[], uint32_t* count);
@@ -1594,6 +1608,10 @@ const char* rdc_diagnostic_result_string(rdc_diag_result_t result);
  *
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_BAD_PARAMETER is returned for an unknown condition or action.
+ *  @retval ::RDC_ST_GROUP_NOT_FOUND is returned if the GPU group does not exist.
+ *  @retval ::RDC_ST_NOT_SUPPORTED is returned if a GPU of the group cannot report
+ *  the retired pages that a ::RDC_POLICY_COND_MAX_PAGE_RETRIED condition needs.
  */
 rdc_status_t rdc_policy_set(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                             rdc_policy_t policy);
@@ -1673,7 +1691,10 @@ rdc_status_t rdc_policy_register(rdc_handle_t p_rdc_handle, rdc_gpu_group_t grou
 /**
  *  @brief un-register a policy callback function for a conditioin.
  *
- *  @details Un-register the policy callback for a condition.
+ *  @details Un-register the policy callback for a condition. On a handle from
+ *  rdc_start_embedded(), a check that is already running may still call the
+ *  callback after this returns, once for each policy and GPU of the group that
+ *  meets the policy's condition.
  *
  *  @param[in] p_rdc_handle The RDC handler.
  *
