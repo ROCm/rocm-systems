@@ -98,6 +98,7 @@ test_categories:
       - "RcclEpLayoutTest.*"
       - "DeviceApi.RejectedCreate*"
       - "GinDeviceTest.*"
+      - "SymkWorldPointerGetterTest.*"
     exclude_windows:
       - "*"
     labels:
