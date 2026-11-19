@@ -128,10 +128,10 @@ bool exec_zero_memory_issue_counts(rj_code_arch_t arch) {
          arch == ROCJITSU_CODE_ARCH_CDNA5;
 }
 
-/// A gfx1250 VBUFFER instruction whose resource descriptor TYPE is not a buffer
-/// is ignored (CDNA5 ISA 9.6), so it applies no backpressure and holds no
-/// counter slot. If hardware still counted it, leaving it out only keeps older
-/// operations pending longer.
+/// Conservatively omit gfx1250 VBUFFER instructions with a non-buffer TYPE.
+/// CDNA5 ISA 9.6 specifies ignored data effects without explicit counter rules.
+/// If hardware counts the instruction, omitting admission and occupancy keeps
+/// older operations pending longer and can produce false positives.
 bool ignored_memory_issue(const Instruction &inst, const amdgpu::Wavefront &wf) {
   // Every gfx1250 VBUFFER instruction has conditional memory lanes, so others
   // skip decoding their register modifiers.
