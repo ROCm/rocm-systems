@@ -16,7 +16,8 @@ mod scratch;
 mod types;
 pub use super::kernel_queue::*;
 pub use exception::{
-    AqlQueueException, aql_scratch_lanes, decode_aql_queue_exception, replace_scratch_owner,
+    AqlQueueException, aql_scratch_lanes, decode_aql_queue_exception, decode_kfd_queue_exception,
+    replace_scratch_owner,
 };
 #[cfg(target_os = "linux")]
 pub(crate) use layout::{AqlControlLayout, AqlQueueHeader};
