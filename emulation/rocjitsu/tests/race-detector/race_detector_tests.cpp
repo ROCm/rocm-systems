@@ -261,7 +261,8 @@ TEST(RaceDetector, LdsValidationRejectsNegativeAndOverflowingRanges) {
   }
   detector.validateRead(64, WaveId{1}, 0, 4);
   detector.validateWrite(64, WaveId{1}, 0, 4);
-  EXPECT_EQ(violations.size(), 2u);
+  // The read conflicts with the pending write; the write with both events.
+  EXPECT_EQ(violations.size(), 3u);
 }
 
 TEST(RaceDetector, InvalidLdsAddressesKeepRegisterAndCounterDependencies) {
@@ -382,7 +383,8 @@ TEST(RaceDetector, LdsCounterAccountingIgnoresNegativeIntervals) {
         MemoryOrderClass::LDS);
     detector.validateRead(64, WaveId{1}, 0, 4);
     detector.validateWrite(64, WaveId{1}, 0, 4);
-    EXPECT_EQ(violations.size(), 1u);
+    // A pending write conflicts with both the read and the write.
+    EXPECT_EQ(violations.size(), type == MemoryEventType::VGPR_TO_LDS ? 2u : 1u);
     detector.retireEvent(event);
     violations.clear();
     detector.validateRead(64, WaveId{1}, 0, 4);
@@ -820,6 +822,86 @@ TEST(RaceDetector, LdsCrossWave_WarNoOverlap) {
   EXPECT_FALSE(b.hasRace());
 }
 
+TEST(RaceDetector, LdsCrossWave_WawMissingBarrier) {
+  // WAW: wave 0 writes LDS[0], waitcnt, then wave 1 writes LDS[0] without a
+  // barrier. Either write can land last, so the write races.
+  RaceTestBuilder builder(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8);
+  builder.ldsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  builder.waitcnt(/*wave=*/0, /*vmcnt=*/-1, /*lgkmcnt=*/0);
+  builder.checkLdsWrite(/*wave=*/1, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  EXPECT_TRUE(builder.hasLdsRace(0));
+}
+
+TEST(RaceDetector, LdsCrossWave_WawWithBarrier) {
+  // WAW: wave 0 writes LDS[0], waitcnt, barrier, then wave 1 writes → safe.
+  RaceTestBuilder builder(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8);
+  builder.ldsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  builder.waitcnt(/*wave=*/0, /*vmcnt=*/-1, /*lgkmcnt=*/0);
+  builder.barrier();
+  builder.checkLdsWrite(/*wave=*/1, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  EXPECT_FALSE(builder.hasRace());
+}
+
+TEST(RaceDetector, LdsCrossWave_WawBarrierWithoutWait) {
+  // WAW: a barrier does not order wave 0's write before wave 1's until wave 0
+  // has waited for it.
+  RaceTestBuilder builder(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8);
+  builder.ldsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  builder.barrier();
+  builder.checkLdsWrite(/*wave=*/1, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  EXPECT_TRUE(builder.hasLdsRace(0));
+}
+
+TEST(RaceDetector, LdsCrossWave_WawNoOverlap) {
+  // WAW: wave 0 writes LDS[0..4), wave 1 writes LDS[4..8) → safe (no overlap).
+  RaceTestBuilder builder(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8);
+  builder.ldsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  builder.checkLdsWrite(/*wave=*/1, /*lane=*/0, /*addr=*/4, /*bytes=*/4);
+  EXPECT_FALSE(builder.hasRace());
+}
+
+TEST(RaceDetector, LdsWawDisabledPreservesReadWriteChecks) {
+  RaceTestBuilder builder(2, 8, 8, 64, Dim3d(0), counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4),
+                          /*checkLdsWaw=*/false);
+  builder.ldsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  builder.ldsWrite(/*wave=*/1, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  EXPECT_FALSE(builder.hasRace());
+
+  IntervalSet accessed;
+  accessed.append(0, 4);
+  const auto &detector = builder.detector();
+  EXPECT_FALSE(detector.mayConflict(accessed, WaveId{1}, true, MemoryOrderClass::LDS));
+  EXPECT_TRUE(detector.mayConflict(accessed, WaveId{1}, false, MemoryOrderClass::LDS));
+  builder.checkLdsRead(/*wave=*/1, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  EXPECT_TRUE(builder.hasLdsRace(0));
+
+  builder.clearViolations();
+  builder.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/8, /*bytes=*/4, /*vgprDst=*/0);
+  builder.checkLdsWrite(/*wave=*/1, /*lane=*/0, /*addr=*/8, /*bytes=*/4);
+  EXPECT_TRUE(builder.hasLdsRace(8));
+
+  builder.clearViolations();
+  builder.tensorLoadToLds(/*wave=*/0, {{.address = 16, .bytes = 4}});
+  builder.tensorLoadToLds(/*wave=*/0, {{.address = 16, .bytes = 4}});
+  EXPECT_FALSE(builder.hasRace());
+}
+
+TEST(RaceDetector, LdsCrossWave_WawGlobalToLdsMissingBarrier) {
+  // WAW: two waves' Direct-to-LDS loads write the same bytes with no barrier
+  // between them; the second load races. A barrier after wave 0's vmcnt wait
+  // orders them.
+  for (bool barrier : {false, true}) {
+    SCOPED_TRACE(barrier);
+    RaceTestBuilder builder(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8, /*waveSize=*/4);
+    builder.globalToLds(/*wave=*/0, /*ldsAddrs=*/{0, 4, 8, 12}, /*bytesPerLane=*/4);
+    builder.waitcnt(/*wave=*/0, /*vmcnt=*/0, /*lgkmcnt=*/-1);
+    if (barrier)
+      builder.barrier();
+    builder.globalToLds(/*wave=*/1, /*ldsAddrs=*/{0, 4, 8, 12}, /*bytesPerLane=*/4);
+    EXPECT_EQ(builder.hasLdsRace(0), !barrier);
+  }
+}
+
 // ---- LDS same-wave ordering ----
 
 TEST(RaceDetector, LdsSameWave_WriteWriteOk) {
@@ -892,7 +974,8 @@ TEST(RaceDetector, LdsSameWave_LongHistoryRemainsVisibleToOtherWaves) {
   ASSERT_FALSE(b.hasRace());
   b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/76, /*bytes=*/4);
   b.checkLdsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/76, /*bytes=*/4);
-  EXPECT_EQ(b.raceCount(), 2 * iterations);
+  // The read conflicts with wave 1's writes; the write with its reads and writes.
+  EXPECT_EQ(b.raceCount(), 3 * iterations);
 
   b.clearViolations();
   b.barrier();
@@ -906,7 +989,7 @@ TEST(RaceDetector, LdsSameWave_LongHistoryRemainsVisibleToOtherWaves) {
   b.ldsRead(/*wave=*/1, /*lane=*/0, /*addr=*/12, /*bytes=*/8, /*vgprDst=*/2);
   b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/12, /*bytes=*/4);
   b.checkLdsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/12, /*bytes=*/4);
-  EXPECT_EQ(b.raceCount(), 2);
+  EXPECT_EQ(b.raceCount(), 3);
 }
 
 TEST(RaceDetector, LdsSameWave_SharedChunksKeepOtherWaveHazards) {
@@ -929,7 +1012,9 @@ TEST(RaceDetector, LdsSameWave_SharedChunksKeepOtherWaveHazards) {
     issue(/*wave=*/0, /*addr=*/12, /*bytes=*/8);
     issue(/*wave=*/1, /*addr=*/4, /*bytes=*/2);
     issue(/*wave=*/1, /*addr=*/16, /*bytes=*/2);
-    ASSERT_FALSE(b.hasRace());
+    // Wave 1's write at byte 16 overlaps wave 0's pending write at bytes 12 to 19.
+    ASSERT_EQ(b.raceCount(), writes ? 1 : 0);
+    b.clearViolations();
     check(/*addr=*/6, /*bytes=*/6); // Same chunk, no overlapping bytes.
     ASSERT_FALSE(b.hasRace());
     check(/*addr=*/4, /*bytes=*/4);
@@ -984,10 +1069,10 @@ TEST(RaceDetector, LdsMayConflictChecksOnlyTheAccessedChunks) {
     const MemoryOrderClass order = MemoryOrderClass::LDS;
     EXPECT_FALSE(detector.mayConflict(around, WaveId{0}, checkWrite, order));
     EXPECT_TRUE(detector.mayConflict(over, WaveId{0}, checkWrite, order));
-    // Same-wave LDS accesses are ordered, and a read never conflicts with a
-    // read; WAW is not checked.
+    // Same-wave LDS accesses are ordered. A read never conflicts with a read,
+    // and a write may conflict with another wave's pending write.
     EXPECT_FALSE(detector.mayConflict(over, WaveId{1}, checkWrite, order));
-    EXPECT_FALSE(detector.mayConflict(over, WaveId{0}, !checkWrite, order));
+    EXPECT_EQ(detector.mayConflict(over, WaveId{0}, !checkWrite, order), writes);
     EXPECT_TRUE(detector.mayConflict(over, WaveId{1}, checkWrite, MemoryOrderClass::UNORDERED));
     EXPECT_FALSE(detector.mayConflict(IntervalSet{}, WaveId{0}, checkWrite, order));
   }
@@ -1017,17 +1102,20 @@ TEST(RaceDetector, LdsSameWave_MixedOrderingSurvivesPartialRetirement) {
       b.unorderedLdsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/14, /*bytes=*/4);
     else
       b.unorderedLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/14, /*bytes=*/4, /*vgprDst=*/4);
-    ASSERT_FALSE(b.hasRace());
+    // The unordered store overlaps the wave's own pending DS write.
+    ASSERT_EQ(b.raceCount(), writes ? 1 : 0);
+    b.clearViolations();
     check(/*wave=*/0);
     EXPECT_EQ(b.raceCount(), 1);
 
-    // Only the ordinary event completes and retires; FLAT still needs VMCNT.
+    // Only the ordinary event completes and retires; the unordered access
+    // still needs VMCNT. The new DS write overlaps the pending unordered store.
     b.clearViolations();
     b.waitcnt(/*wave=*/0, /*vmcnt=*/-1, /*lgkmcnt=*/0);
     b.barrier();
     ordinary(/*wave=*/0);
     check(/*wave=*/0);
-    EXPECT_EQ(b.raceCount(), 1);
+    EXPECT_EQ(b.raceCount(), writes ? 2 : 1);
 
     // Completion makes the history safe for this wave, but other waves
     // must still see both events until a barrier retires them.
@@ -1595,13 +1683,26 @@ TEST(RaceDetector, TensorDma_SameWaveStoresOfTheSameTileAreSafe) {
   EXPECT_FALSE(b.hasRace());
 }
 
-TEST(RaceDetector, TensorDma_SameWaveLoadsOverTheSameTileAreNotReported) {
-  // Two loads writing the same bytes are an LDS write/write conflict, which the
-  // detector does not check; this pins that documented limitation.
-  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
-  b.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
-  b.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
-  EXPECT_FALSE(b.hasRace());
+TEST(RaceDetector, TensorDma_SameWaveLoadsOverTheSameTileRace) {
+  // The detector treats tensor LDS accesses as unordered until a tensor wait.
+  RaceTestBuilder builder(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  builder.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
+  builder.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
+  EXPECT_TRUE(builder.hasRace());
+  builder.waitTensorcnt(/*wave=*/0, /*tensorcnt=*/0);
+  builder.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  EXPECT_TRUE(builder.hasRace());
+}
+
+TEST(RaceDetector, TensorDma_SameWaveLoadsAfterTensorcntAreSafe) {
+  RaceTestBuilder builder(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  builder.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
+  builder.waitTensorcnt(/*wave=*/0, /*tensorcnt=*/0);
+  builder.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
+  EXPECT_FALSE(builder.hasRace());
+  builder.waitTensorcnt(/*wave=*/0, /*tensorcnt=*/0);
+  builder.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  EXPECT_FALSE(builder.hasRace());
 }
 
 TEST(RaceDetector, TensorDma_SameWaveDisjointTransfersAreSafe) {
@@ -1970,18 +2071,15 @@ TEST(RaceDetector, LdsSameWave_ScatterBroadcastOk) {
   EXPECT_FALSE(b.hasRace());
 }
 
-TEST(RaceDetector, LdsSameWave_AllLanesWriteSameAddr) {
-  // All lanes write same address (WAW). Currently not detected as a race.
-  // TODO(newling): WAW detection is not implemented — this documents current
-  // behavior.
+TEST(RaceDetector, LdsSameWave_SeparateWritesToSameAddrAreOrdered) {
+  // Each call issues a separate DS instruction, so these writes are ordered
+  // even though the active lane differs between instructions.
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
   b.ldsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
   b.ldsWrite(/*wave=*/0, /*lane=*/1, /*addr=*/0, /*bytes=*/4);
   b.ldsWrite(/*wave=*/0, /*lane=*/2, /*addr=*/0, /*bytes=*/4);
   b.waitcnt(/*wave=*/0, /*vmcnt=*/-1, /*lgkmcnt=*/0);
   b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
-  // Currently passes (WAW not flagged). If WAW detection is added, this
-  // test should be updated to EXPECT_TRUE(b.hasRace()).
   EXPECT_FALSE(b.hasRace());
 }
 

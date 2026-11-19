@@ -644,6 +644,12 @@ RaceDetectorPlugin::RaceDetectorPlugin(const char *config_json) : ExecutionPlugi
   const flexbuffers::Reference root = flexbuffers::GetRoot(builder.GetBuffer());
   if (!root.IsMap())
     throw std::invalid_argument("Race plugin configuration must be an object");
+  const flexbuffers::Reference lds_waw = root.AsMap()["lds_waw"];
+  if (!lds_waw.IsNull()) {
+    if (!lds_waw.IsBool())
+      throw std::invalid_argument("Race plugin 'lds_waw' must be a boolean");
+    lds_waw_ = lds_waw.AsBool();
+  }
   const flexbuffers::Reference context = root.AsMap()["trace_context"];
   if (context.IsNull())
     return;
@@ -785,7 +791,7 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
                            : physical_sgpr_count),
       Dim3d(static_cast<int>(wg_id)), std::move(handler),
       counterCapacitiesForArch(wavefronts.front()->cu().arch()),
-      wavefronts.front()->lds().size_bytes());
+      wavefronts.front()->lds().size_bytes(), lds_waw_);
 
   auto &det = *detectors_[key];
   for (uint32_t w = 0; w < num_waves; ++w) {

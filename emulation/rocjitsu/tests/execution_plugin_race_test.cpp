@@ -62,6 +62,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -890,6 +891,119 @@ TEST_F(TensorDmaRaceTest, TransferIsCheckedAgainstPendingLdsAccesses) {
   const std::string report = sink->str().substr(previous);
   EXPECT_NE(report.find("type=LDS access=write"), std::string::npos) << report;
   EXPECT_NE(report.find("wave=0 lane=-1"), std::string::npos) << report;
+}
+
+// A DS write over bytes another wave has written is checked even though no read
+// is pending, and is ordered only by that wave's wait and a barrier.
+TEST_F(TensorDmaRaceTest, DsWriteOverAnotherWavesWriteRacesUntilWaitAndBarrier) {
+  EXPECT_FALSE(ds_write(0, 4));
+  EXPECT_TRUE(ds_write(1, 4));
+  wait_dscnt(0);
+  wait_dscnt(1);
+  barrier();
+  EXPECT_FALSE(ds_write(0, 4));
+}
+
+TEST(RaceDetectorPluginTest, LdsWawOptionControlsOnlyLdsWriteWriteReports) {
+  struct Config {
+    const char *json;
+    bool enabled;
+  };
+  constexpr Config configs[] = {{nullptr, true},
+                                {"{}", true},
+                                {R"({"lds_waw":true})", true},
+                                {R"({"lds_waw":false})", false},
+                                {R"({"lds_waw":false,"trace_context":2})", false}};
+  for (const Config config : configs) {
+    for (uint32_t later_value : {7u, 8u}) {
+      SCOPED_TRACE(config.json ? config.json : "default");
+      SCOPED_TRACE(later_value);
+      PluginFixture fixture;
+      ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/2, "cdna4"));
+      PluginSinkConfig sinks;
+      StringSink &sink = sinks.emplace<StringSink>();
+      fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sinks));
+      ASSERT_TRUE(fixture.plugin_group_->add(std::make_unique<RaceDetectorPlugin>(config.json)));
+      fixture.soc->set_plugin_group(fixture.plugin_group_);
+      fixture.plugin_group_->onInit();
+      auto &cu = *fixture.cu();
+      std::array waves{cu.dispatch_wf(0, 0x1000, 104, 256), cu.dispatch_wf(0, 0x2000, 104, 256)};
+      const uint32_t lds_base = cu.allocate_lds(256);
+      for (Wavefront *wave : waves) {
+        ASSERT_NE(wave, nullptr);
+        wave->set_exec(1);
+        wave->set_lds_base(lds_base);
+        wave->set_lds_size(256);
+      }
+      fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 104, waves);
+      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+      ASSERT_NE(decoder, nullptr);
+      std::string report;
+      auto ds = [&](int wave_index, uint32_t offset, std::optional<uint32_t> value) {
+        Wavefront &wave = *waves[wave_index];
+        wave.pc += 16;
+        cu.write_vgpr(wave.vgpr_alloc().base, 0, offset);
+        if (value)
+          cu.write_vgpr(wave.vgpr_alloc().base + 1, 0, *value);
+        const auto words = value ? cdna4::build_ds(cdna4::kDsWriteB32Ds, {.addr = 0, .data0 = 1})
+                                 : cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 0, .vdst = 8});
+        auto instruction = decoder->decode_window(words);
+        ASSERT_TRUE(instruction.succeeded());
+        const size_t previous = sink.str().size();
+        fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave.pc, *instruction.value(),
+                                                                wave);
+        ASSERT_TRUE(cu.execute_instruction(instruction.value().get(), wave).succeeded());
+        ASSERT_EQ(test::ComputeUnitTestAccess::route_memory_inst(cu, std::move(instruction.value()),
+                                                                 wave),
+                  VmAccessOutcome::Complete);
+        report = sink.str().substr(previous);
+      };
+
+      ASSERT_NO_FATAL_FAILURE(ds(0, 0, 7u));
+      ASSERT_EQ(report.find("RACE "), std::string::npos) << report;
+      ASSERT_NO_FATAL_FAILURE(ds(1, 0, later_value));
+      // Check before any read, including when both instructions store 7.
+      EXPECT_EQ(report.find("write-after-write (WAW)") != std::string::npos, config.enabled)
+          << report;
+      EXPECT_EQ(report.find("RACE ") != std::string::npos, config.enabled) << report;
+
+      // Use fresh instructions and addresses so PC deduplication cannot hide
+      // one hazard after reporting another.
+      ASSERT_NO_FATAL_FAILURE(ds(0, 4, 7u));
+      ASSERT_EQ(report.find("RACE "), std::string::npos) << report;
+      ASSERT_NO_FATAL_FAILURE(ds(1, 4, std::nullopt));
+      EXPECT_NE(report.find("read-after-write (RAW)"), std::string::npos) << report;
+      ASSERT_NO_FATAL_FAILURE(ds(0, 8, std::nullopt));
+      ASSERT_EQ(report.find("RACE "), std::string::npos) << report;
+      ASSERT_NO_FATAL_FAILURE(ds(1, 8, 7u));
+      EXPECT_NE(report.find("write-after-read (WAR)"), std::string::npos) << report;
+
+      ASSERT_NO_FATAL_FAILURE(execute_wait(*fixture.plugin_group_, *waves[0],
+                                           legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, 63, 0)));
+      ASSERT_NO_FATAL_FAILURE(ds(0, 12, std::nullopt));
+      ASSERT_EQ(report.find("RACE "), std::string::npos) << report;
+      waves[0]->pc += 16;
+      ASSERT_NO_FATAL_FAILURE(record_register_probe(*fixture.plugin_group_, *waves[0]));
+      const size_t previous = sink.str().size();
+      fixture.plugin_group_->onAmdgpuWriteVgprLanes(waves[0], waves[0]->vgpr_alloc().base + 8, 1,
+                                                    0xf);
+      report = sink.str().substr(previous);
+      EXPECT_NE(report.find("type=VGPR"), std::string::npos) << report;
+      EXPECT_NE(report.find("write-after-write (WAW)"), std::string::npos) << report;
+    }
+  }
+}
+
+TEST(RaceDetectorPluginTest, RejectsNonBooleanLdsWawOption) {
+  for (const char *config : {R"({"lds_waw":0})", R"({"lds_waw":"false"})"}) {
+    SCOPED_TRACE(config);
+    try {
+      RaceDetectorPlugin plugin(config);
+      FAIL() << "Expected invalid lds_waw configuration to be rejected";
+    } catch (const std::invalid_argument &error) {
+      EXPECT_STREQ(error.what(), "Race plugin 'lds_waw' must be a boolean");
+    }
+  }
 }
 
 TEST_F(TensorDmaRaceTest, StoreIsCheckedAgainstAPendingDsWrite) {
