@@ -179,7 +179,10 @@ def load_summary_module():
     return module
 
 
-summary = load_summary_module()
+@pytest.fixture(scope="module")
+def summary():
+    """rocpd.summary, loaded on first use so only the tests that need it import it."""
+    return load_summary_module()
 
 
 @pytest.fixture
@@ -637,7 +640,7 @@ def test_standalone_main_reports_invalid_window_without_traceback(intervals, mon
     assert str(excinfo.value).startswith("ERROR: Invalid --start value")
 
 
-def _rank_name_for_env(env):
+def _rank_name_for_env(summary, env):
     """Return the rank variable chosen from a one-row rocpd_info_process table."""
     import json
 
@@ -660,7 +663,7 @@ def _rank_name_for_env(env):
             del summary.get_rank_env_variable_name._rank_env_name_cached
 
 
-def test_rank_env_var_rejects_malicious_name():
+def test_rank_env_var_rejects_malicious_name(summary):
     """ROCPROF_MPI_RANK_VAR must be a plain identifier that exists in the environment.
 
     A name with a quote would otherwise be interpolated into json_extract().
@@ -670,33 +673,39 @@ def test_rank_env_var_rejects_malicious_name():
     # Even when the malicious string is a real environment key, it is not used.
     assert (
         _rank_name_for_env(
+            summary,
             {
                 "ROCPROF_MPI_RANK_VAR": malicious,
                 malicious: "0",
                 "OMPI_COMM_WORLD_RANK": "0",
-            }
+            },
         )
         == "OMPI_COMM_WORLD_RANK"
     )
 
     # With nothing else to fall back on, no rank column is produced at all.
-    assert _rank_name_for_env({"ROCPROF_MPI_RANK_VAR": malicious, malicious: "0"}) is None
+    assert (
+        _rank_name_for_env(summary, {"ROCPROF_MPI_RANK_VAR": malicious, malicious: "0"})
+        is None
+    )
 
     # A well-formed name that was not actually set is ignored.
     assert (
         _rank_name_for_env(
-            {"ROCPROF_MPI_RANK_VAR": "NOT_A_REAL_VAR", "OMPI_COMM_WORLD_RANK": "1"}
+            summary,
+            {"ROCPROF_MPI_RANK_VAR": "NOT_A_REAL_VAR", "OMPI_COMM_WORLD_RANK": "1"},
         )
         == "OMPI_COMM_WORLD_RANK"
     )
 
     # A custom variable wins when it is a plain name and a real environment key.
     chosen = _rank_name_for_env(
+        summary,
         {
             "ROCPROF_MPI_RANK_VAR": "MY_RANK",
             "MY_RANK": "3",
             "OMPI_COMM_WORLD_RANK": "0",
-        }
+        },
     )
     assert chosen == "MY_RANK"
     _, sql = summary.generate_summary_query(
