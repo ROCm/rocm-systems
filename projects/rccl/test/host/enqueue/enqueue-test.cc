@@ -321,7 +321,7 @@ TEST_F(EnqueueMicrotest, ShmemScratchWarpSize_NvlsTermNeverWins) {
       << "the gate is inert while ncclCollUnroll(899) == ncclCollUnroll(900)";
 }
 
-#ifndef RCCL_DEVICE_LINKER
+#if !defined(RCCL_DEVICE_LINKER) && !defined(__HIP_PLATFORM_AMD__)
 TEST_F(EnqueueMicrotest, ShmemDynamicSize_BelowArch700_IsZero) {
   // The `cudaArch < 700 ? 0` gate.
   EXPECT_EQ(0, rcclShmemDynamicSize(600, 32));
@@ -349,29 +349,19 @@ TEST_F(EnqueueMicrotest, ShmemDynamicSize_Gfx950_UsesItsOwnMaxNthreads) {
   EXPECT_EQ(rcclShmemScratchWarpSize(950, 32) * kWarps950, rcclShmemDynamicSize(950, 32));
 }
 #else
-TEST_F(EnqueueMicrotest, ShmemDynamicSize_DeviceLinker_IsAlwaysZero) {
-  // The arm this build actually SHIPS. ENABLE_DEVICE_LINKER defaults ON
-  // (projects/rccl/CMakeLists.txt:92) and reaches this binary through the rccl
-  // target's COMPILE_DEFINITIONS (src/CMakeLists.txt:1065 ->
-  // test/CMakeLists.txt:208 -> RCCL_COMMON_COMPILE_DEFS), so the three tests
-  // above are compiled out of the default configuration and this is the only
-  // ShmemDynamicSize coverage there.
-  //
-  // Under RCCL_DEVICE_LINKER the scratch and ncclShmem are static __shared__
-  // (device/common.h), so asking for the same bytes as DYNAMIC shmem would
-  // double-count and overflow the per-block LDS budget. enqueue.cc:73-78
-  // therefore returns 0 for every input, with both parameters cast to void.
-  // HONEST SCOPE: on this arm the preprocessor has DELETED the arch gate and the
-  // gfx950 ternary, so the inputs below do not exercise them -- they are not
-  // evaluated at all. Varying the inputs proves only that the arm ignores them,
-  // which is exactly what `(void)cudaArch; (void)WarpSize;` promises. What this
-  // test actually guards is REMOVAL of the guard: mutating the arm's body to the
-  // non-linker formula fails here and nowhere else in the suite.
-  EXPECT_EQ(0, rcclShmemDynamicSize(600, 32));
-  EXPECT_EQ(0, rcclShmemDynamicSize(700, 32));
-  EXPECT_EQ(0, rcclShmemDynamicSize(942, 32));
-  EXPECT_EQ(0, rcclShmemDynamicSize(950, 32));
-  EXPECT_EQ(0, rcclShmemDynamicSize(950, 64));
+TEST_F(EnqueueMicrotest, ShmemDynamicSize_StaticScratch_IsAlwaysZero) {
+  // The custom device linker defines static __shared__ scratch in common.h.
+  // Ordinary HIP uses common.cu's static definition because __CUDA_ARCH__ is
+  // unset. Both must request zero additional dynamic scratch, even when the
+  // scratch itself is nonzero, to avoid counting it twice against the LDS limit.
+  // The CUDA-only boundary/product tests above apply when scratch is dynamic.
+  for (int arch : {600, 700, 942, 950, 1151, 1250}) {
+    for (int warpSize : {32, 64}) {
+      SCOPED_TRACE(::testing::Message() << "arch=" << arch << " warpSize=" << warpSize);
+      EXPECT_GT(rcclShmemScratchWarpSize(arch, warpSize), 0);
+      EXPECT_EQ(0, rcclShmemDynamicSize(arch, warpSize));
+    }
+  }
 }
 #endif
 

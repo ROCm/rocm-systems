@@ -383,6 +383,9 @@ namespace {
 using RcclUnitTesting::LogHas;
 using RcclUnitTesting::ScopedDebugLogging;
 
+// showVersion uses this portable buffer capacity rather than Linux's HOST_NAME_MAX.
+constexpr size_t kShowVersionHostnameCapacity = 256;
+
 // The single log LINE containing `needle`, or "" if none does. Two separate LogHas calls over one
 // buffer cannot tell which line satisfied which, and init.cc has format strings that share a tail --
 // :1547's TRACE and :1550's WARN both end in "intraProcRank %d intraProcRanks %d intraProcRank0 %d".
@@ -402,7 +405,7 @@ std::string RunShowVersion(int debugLevel) {
 }  // namespace
 
 TEST_F(InitMicrotest, ShowVersion_HappyPath_LogsVersionHostAndLibPath) {
-  char host[HOST_NAME_MAX] = {};
+  char host[kShowVersionHostnameCapacity] = {};
   ASSERT_EQ(0, gethostname(host, sizeof(host) - 1));
   Dl_info self{};
   ASSERT_NE(0, dladdr((void*)ncclCommInitRank, &self));
@@ -423,7 +426,7 @@ TEST_F(InitMicrotest, ShowVersion_HappyPath_LogsVersionHostAndLibPath) {
 TEST_F(InitMicrotest, ShowVersion_DebugLevelVersion_UsesVersionLog) {
   const std::string log = RunShowVersion(NCCL_LOG_VERSION);
   // showVersion passes sizeof(hostBuf)-1, reserving the byte gethostname need not NUL-terminate.
-  EXPECT_EQ(static_cast<size_t>(HOST_NAME_MAX), LastGethostnameLen());
+  EXPECT_EQ(kShowVersionHostnameCapacity - 1, LastGethostnameLen());
   EXPECT_TRUE(LogHas(log, "RCCL version")) << "actual log:\n" << log;
   EXPECT_TRUE(LogHas(log, "init.cc:")) << "VERSION arm not taken:\n" << log;
   EXPECT_FALSE(LogHas(log, "showVersion:")) << "took the INFO arm:\n" << log;
@@ -505,7 +508,8 @@ TEST_F(InitMicrotest, ShowVersion_GethostnameFillsBufferUnterminated_LogsAMaxLen
     return 0;
   });
   const std::string log = RunShowVersion(NCCL_LOG_INFO);
-  const std::string expect = "Hostname     : " + std::string(HOST_NAME_MAX, 'x') + "\n";
+  EXPECT_EQ(kShowVersionHostnameCapacity - 1, LastGethostnameLen());
+  const std::string expect = "Hostname     : " + std::string(kShowVersionHostnameCapacity - 1, 'x') + "\n";
   EXPECT_TRUE(LogHas(log, expect.c_str())) << "actual log:\n" << log;
 }
 
