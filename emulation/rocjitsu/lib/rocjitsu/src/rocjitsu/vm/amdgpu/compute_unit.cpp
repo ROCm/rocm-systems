@@ -3692,6 +3692,23 @@ ComputeUnitCore::IssueOutcome ComputeUnitCore::issue_instruction(Wavefront *acti
   return issue_instruction_impl<false>(active);
 }
 
+void ComputeUnitCore::set_statistics(const std::shared_ptr<stats::Scope> &scope) {
+  std::lock_guard<std::recursive_mutex> lock(wave_state_mutex_);
+  statistics_.bind(scope);
+  scalar_mem_pipeline_.set_statistics(scope, "scalar");
+  global_mem_pipeline_.set_statistics(scope, "global");
+  local_mem_pipeline_.set_statistics(scope, "local");
+  tensor_dma_pipeline_.set_statistics(scope, "tensor");
+}
+
+void ComputeUnitCore::finish_statistics() {
+  std::lock_guard<std::recursive_mutex> lock(wave_state_mutex_);
+  scalar_mem_pipeline_.finish_statistics();
+  global_mem_pipeline_.finish_statistics();
+  local_mem_pipeline_.finish_statistics();
+  tensor_dma_pipeline_.finish_statistics();
+}
+
 template <bool EnableAsync>
 [[gnu::always_inline]] inline bool
 ComputeUnitCore::step_impl(MmaAdmissionCache *admission, uint32_t async_wave_size,
@@ -3701,11 +3718,60 @@ ComputeUnitCore::step_impl(MmaAdmissionCache *admission, uint32_t async_wave_siz
   WaveStateGuard wave_state_lock(*this);
   tick_pipelines();
   update_wf_states();
+  statistics_.step();
 
   for (uint32_t slot = 0; slot < active_slot_limit_; ++slot) {
     auto &wf = wfs_[slot];
     if (!wf)
       continue;
+    if (statistics_.observes_waves() && !wf->is_halted()) {
+      statistics_.active_wave();
+      using Reason = ComputeStatistics::BlockedReason;
+      if (wf->debug_stopped())
+        statistics_.blocked_wave(Reason::DebugPaused);
+      else if (wf->runtime_suspended())
+        statistics_.blocked_wave(Reason::RuntimePaused);
+      else if (wf->debug_paused())
+        statistics_.blocked_wave(Reason::StatusHalted);
+      else {
+        switch (wf->state()) {
+        case WfState::WAITCNT:
+          statistics_.blocked_wave(Reason::Waitcnt);
+          break;
+        case WfState::BARRIER:
+          statistics_.blocked_wave(Reason::Barrier);
+          break;
+        case WfState::GWS_WAIT:
+          statistics_.blocked_wave(Reason::GwsWait);
+          break;
+        case WfState::EXPORT_WAIT:
+          statistics_.blocked_wave(Reason::ExportWait);
+          break;
+        case WfState::PARAM_WAIT:
+          statistics_.blocked_wave(Reason::ParamWait);
+          break;
+        case WfState::VM_RETRY:
+          statistics_.blocked_wave(Reason::VmRetry);
+          break;
+        case WfState::ENDING:
+          statistics_.blocked_wave(Reason::Ending);
+          break;
+        case WfState::MEMORY_TRAP:
+          statistics_.blocked_wave(Reason::MemoryTrap);
+          break;
+        case WfState::RUNNING:
+          if (!wf->debug_single_step()) {
+            if (wf->nop_ready_cycle_ > cycle_counter_)
+              statistics_.blocked_wave(Reason::NotReady);
+            else if (wf->sleep_cycles() != 0)
+              statistics_.blocked_wave(Reason::Sleep);
+          }
+          break;
+        case WfState::HALTED:
+          break;
+        }
+      }
+    }
     if (wf->state() == WfState::RUNNING && !wf->debug_paused()) {
       // Burn down an in-flight S_SLEEP before issuing anything else. A
       // single-step request cancels the remainder instead of spending the

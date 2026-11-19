@@ -59,6 +59,42 @@ Stores, cache maintenance, and the memory-side cache do not currently have a
 full hit/miss metric family. Cache observations describe the functional model;
 they do not claim measured hardware misses or modeled cache latency.
 
+## Scheduler and memory pipelines
+
+The `scheduler.*` family measures functional CU scheduler steps, after wave
+state updates. `scheduler.steps` counts iterations and
+`scheduler.active_wave_steps` counts resident active-wave observations. Blocked
+wave counters cover wait counters, barriers, GWS, export-buffer allocation,
+pixel-parameter readiness, unavailable-memory retries,
+ending, memory traps, debugger/runtime pauses, STATUS halt, instruction
+readiness, and sleep. Each observed blocked wave receives one reason, with
+debugger/runtime/STATUS pauses taking priority over its wait state, then
+readiness before sleep. Selection of another runnable slot is not a blocked
+reason. These counts cannot be interpreted as cycle-accurate pipeline stalls.
+
+Each CU also exposes `memory.{scalar,global,local,tensor}.*`:
+
+| Suffix | Meaning |
+|---|---|
+| `accepted` | Instructions whose ownership entered the pipeline |
+| `completed`, `cancelled`, `failed` | Mutually exclusive terminal outcomes |
+| `pending` | Accepted instructions without a terminal outcome |
+| `unavailable_attempts` | Attempts returning transient unavailability |
+| `retry_attempts` | Attempts after entering the unavailable queue |
+| `retry_depth` | Instructions currently retained in that queue |
+
+`memory.tensor.*` covers tensor DMA instructions handed to the retry queue.
+Transfers that complete or fail on their first attempt never enter that pipeline
+and do not contribute to these metrics; a kernel whose transfers all complete
+on the first attempt can report zero tensor accepted and completed instructions.
+
+An unavailable access discarded for replay is cancelled; a retained retry
+remains pending. Deferred architectural writeback also remains pending.
+Cancellation and a late callback settle ownership only once, including when a
+wave slot has been reused. Final teardown counts residual owned instructions
+as cancelled. Within one scope, absent overflow, `accepted` equals `completed +
+cancelled + failed + pending`. Queue depth and pending are gauges, not totals.
+
 ## Library ownership
 
 `lib/util/include/util/statistics.h` contains both owner-local accumulators and

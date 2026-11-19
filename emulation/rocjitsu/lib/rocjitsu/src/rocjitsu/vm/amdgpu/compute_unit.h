@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/stats/compute_statistics.h"
 #include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/decoded_instruction_cache.h"
@@ -745,6 +746,11 @@ public:
   /// @details Used by the command processor after a terminal dispatch fault.
   /// No normal wave/workgroup completion or plugin-completion callback is fired.
   void abort_dispatch(uint32_t dispatch_id);
+
+  /// @brief Bind statistics before execution begins with no owned memory instructions.
+  void set_statistics(const std::shared_ptr<stats::Scope> &scope);
+  /// @brief Settle memory instruction accounting after all producers are quiescent.
+  void finish_statistics();
 
   /// @brief Set the execution plugin group (shared ownership).
   /// @details Replacement refreshes resident waves' hot-hook subscriptions but
@@ -1921,6 +1927,7 @@ protected:
   ClusterLdsMulticastEngine *cluster_lds_multicast_engine_ = &default_cluster_lds_multicast_engine_;
   uint32_t next_lds_alloc_ = 0; ///< Next free LDS offset for per-WG allocation.
   std::unordered_set<uint64_t> lds_pinned_clusters_;
+  ComputeStatistics statistics_;
   ScalarMemPipeline scalar_mem_pipeline_;
   GlobalMemPipeline global_mem_pipeline_;
   LocalMemPipeline local_mem_pipeline_;

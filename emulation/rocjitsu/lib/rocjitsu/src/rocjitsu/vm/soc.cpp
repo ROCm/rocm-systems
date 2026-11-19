@@ -56,6 +56,7 @@ void SoC::set_statistics(std::shared_ptr<StatisticsSession> session, uint32_t gp
     if (amdgpu::L2Cache *cache = xcd->l2_cache())
       cache->set_statistics(scope(cache->full_path()));
   for (amdgpu::ComputeUnitCore *cu : all_cus()) {
+    cu->set_statistics(scope(cu->full_path()));
     cu->l1_scalar().set_statistics(scope(cu->full_path() + ".l1_scalar"));
     cu->l1_vector().set_statistics(scope(cu->full_path() + ".l1_vector"));
   }
@@ -85,6 +86,8 @@ void SoC::release_vm_resources() {
   queue_registry_.close_all();
   for_each_cp([](amdgpu::CommandProcessor *cp) { cp->shutdown(); });
   sdma_queue_scheduler_.shutdown();
+  for (amdgpu::ComputeUnitCore *cu : all_cus())
+    cu->finish_statistics();
 }
 
 util::Result SoC::add_xcd(amdgpu::Xcd *xcd, util::DiagnosticEmitter emit_error) {

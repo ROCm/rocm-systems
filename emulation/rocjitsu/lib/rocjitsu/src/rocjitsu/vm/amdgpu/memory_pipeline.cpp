@@ -45,7 +45,44 @@
 namespace rocjitsu {
 namespace amdgpu {
 
+void MemoryPipeline::set_statistics(const std::shared_ptr<stats::Scope> &scope,
+                                    std::string_view pipeline) {
+  assert(statistics_operations_.empty() && empty());
+  statistics_.bind(scope, pipeline);
+  if (statistics_.track_lifecycle())
+    statistics_operations_.reserve(1);
+}
+
+void MemoryPipeline::begin_statistics(Instruction *inst, const Wavefront &wf) {
+  if (!statistics_.track_lifecycle())
+    return;
+  statistics_operations_.push_back({inst, &wf, wf.dispatch_generation()});
+  statistics_.accept();
+}
+
+void MemoryPipeline::finish_statistics(Instruction *inst,
+                                       MemoryPipelineStatistics::Terminal terminal) {
+  if (!statistics_.track_lifecycle())
+    return;
+  const auto operation =
+      std::ranges::find(statistics_operations_, inst, &StatisticsOperation::inst);
+  // Cancellation can settle deferred writeback before its callback arrives.
+  if (operation == statistics_operations_.end())
+    return;
+  *operation = statistics_operations_.back();
+  statistics_operations_.pop_back();
+  statistics_.finish(terminal);
+}
+
+void MemoryPipeline::finish_statistics() {
+  for ([[maybe_unused]] const auto &operation : statistics_operations_)
+    statistics_.finish(MemoryPipelineStatistics::Terminal::Cancelled);
+  statistics_operations_.clear();
+  statistics_.retry_depth(0);
+}
+
 MemoryPipeline::~MemoryPipeline() {
+  finish_statistics();
   while (!issued_.empty()) {
     delete issued_.front().inst;
     issued_.pop();
@@ -110,6 +147,7 @@ VmAccessOutcome MemoryPipeline::complete_entry(PipelineEntry entry) {
   const MemoryAccessCompletion completion =
       complete_access(*entry.inst, *entry.wf, std::move(deferred_completion));
   if (completion == MemoryAccessCompletion::Failed) {
+    finish_statistics(entry.inst, MemoryPipelineStatistics::Terminal::Failed);
     [[maybe_unused]] const bool cancelled = cancel_wait_check_issue(entry);
     assert(cancelled && "Rejected writeback has no matching wait-check producer");
     // Failure cleanup must not resume a waiter or retire an ENDING wave.
@@ -129,9 +167,12 @@ VmAccessOutcome MemoryPipeline::complete_entry(PipelineEntry entry) {
 
 VmAccessOutcome MemoryPipeline::issue_impl(Instruction *inst, Wavefront &wf,
                                            bool retain_unavailable, bool routing_observed) {
+  begin_statistics(inst, wf);
   const WaitCounterTokens counters = issue_counters(*inst);
   acquire_wait_counters(wf, counters);
   const VmAccessOutcome access = initiate_access(*inst, wf);
+  if (access == VmAccessOutcome::Unavailable)
+    statistics_.unavailable();
   if (access == VmAccessOutcome::Unavailable && retain_unavailable) {
     issued_.push({.inst = inst,
                   .wf = &wf,
@@ -139,11 +180,16 @@ VmAccessOutcome MemoryPipeline::issue_impl(Instruction *inst, Wavefront &wf,
                   .wave_generation = wf.dispatch_generation(),
                   .issue_pc = wf.pc,
                   .routing_observed = routing_observed});
+    statistics_.retry_depth(issued_.size());
     wf.set_state(WfState::VM_RETRY);
     wf.cu().request_functional_yield();
     return VmAccessOutcome::Complete;
   }
   if (access != VmAccessOutcome::Complete) {
+    finish_statistics(inst,
+                      access == VmAccessOutcome::Unavailable && !wf.instruction_execution_failed()
+                          ? MemoryPipelineStatistics::Terminal::Cancelled
+                          : MemoryPipelineStatistics::Terminal::Failed);
     if (access != VmAccessOutcome::Unavailable || wf.instruction_execution_failed()) {
       // An immediate fault can be retained by the same exception owner as a
       // retry fault. Discard its diagnostic producer before losing the instruction.
@@ -180,6 +226,8 @@ VmAccessOutcome MemoryPipeline::issue_deferred(Instruction *inst, Wavefront &wf,
 }
 
 void MemoryPipeline::defer_unavailable(Instruction *inst, Wavefront &wf) {
+  begin_statistics(inst, wf);
+  statistics_.unavailable();
   const WaitCounterTokens counters = issue_counters(*inst);
   acquire_wait_counters(wf, counters);
   issued_.push({.inst = inst,
@@ -187,6 +235,7 @@ void MemoryPipeline::defer_unavailable(Instruction *inst, Wavefront &wf) {
                 .counters = counters,
                 .wave_generation = wf.dispatch_generation(),
                 .issue_pc = wf.pc});
+  statistics_.retry_depth(issued_.size());
   wf.set_state(WfState::VM_RETRY);
   wf.cu().request_functional_yield();
 }
@@ -232,11 +281,13 @@ bool MemoryPipeline::rewind_unavailable_load(Wavefront &wf) {
       issued_.push(entry);
       continue;
     }
+    finish_statistics(entry.inst, MemoryPipelineStatistics::Terminal::Cancelled);
     wf.pc = entry.issue_pc;
     release_wait_counters(wf, entry.counters);
     delete entry.inst;
     wf.set_state(WfState::RUNNING);
   }
+  statistics_.retry_depth(issued_.size());
   return true;
 }
 
@@ -283,6 +334,12 @@ bool MemoryPipeline::cancel_wait_check_issue(const PipelineEntry &entry) {
 }
 
 void MemoryPipeline::cancel(Wavefront &wf) {
+  std::erase_if(statistics_operations_, [&](const StatisticsOperation &operation) {
+    if (operation.wf != &wf || operation.wave_generation != wf.dispatch_generation())
+      return false;
+    statistics_.finish(MemoryPipelineStatistics::Terminal::Cancelled);
+    return true;
+  });
   std::queue<PipelineEntry> retained;
   while (!issued_.empty()) {
     PipelineEntry entry = issued_.front();
@@ -294,6 +351,7 @@ void MemoryPipeline::cancel(Wavefront &wf) {
     retained.push(entry);
   }
   issued_.swap(retained);
+  statistics_.retry_depth(issued_.size());
 }
 
 void MemoryPipeline::tick() { retry_entries(true, 0, 0); }
@@ -307,17 +365,23 @@ void MemoryPipeline::retry_entries(bool all_queues, uint32_t process_id, uint32_
   for (std::size_t index = 0; index < pending && !issued_.empty(); ++index) {
     PipelineEntry entry = issued_.front();
     issued_.pop();
+    statistics_.retry_depth(issued_.size());
     if (!all_queues && (entry.wf->process_id() != process_id || entry.wf->queue_id() != queue_id)) {
       issued_.push(entry);
+      statistics_.retry_depth(issued_.size());
       continue;
     }
     if (entry.wf->dispatch_generation() != entry.wave_generation) {
+      finish_statistics(entry.inst, MemoryPipelineStatistics::Terminal::Cancelled);
       delete entry.inst;
       continue;
     }
+    statistics_.retry();
     const VmAccessOutcome access = initiate_access(*entry.inst, *entry.wf);
     if (access == VmAccessOutcome::Unavailable) {
+      statistics_.unavailable();
       issued_.push(entry);
+      statistics_.retry_depth(issued_.size());
       if (all_queues)
         entry.wf->cu().request_functional_yield();
       continue;
@@ -332,6 +396,7 @@ void MemoryPipeline::retry_entries(bool all_queues, uint32_t process_id, uint32_
       continue;
     }
 
+    finish_statistics(entry.inst, MemoryPipelineStatistics::Terminal::Failed);
     // The retained instruction no longer owns a retry or a diagnostic producer.
     // An exception owner may keep this wave for replay; settle both before the
     // callback can suspend it, enter a trap handler, or cancel its dispatch.
