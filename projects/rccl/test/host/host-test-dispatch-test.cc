@@ -59,7 +59,6 @@ public:
         sigaction(SIGCHLD, nullptr, &child_);
         installStopHandler();
         g_stopRequested = 0;
-        g_stopReported = false;
     }
 
     ~ScopedStopHandling()
@@ -68,7 +67,6 @@ public:
         sigaction(SIGINT, &int_, nullptr);
         sigaction(SIGCHLD, &child_, nullptr);
         g_stopRequested = 0;
-        g_stopReported = false;
         g_wake.drain();
     }
 
@@ -2122,8 +2120,10 @@ public:
     // the interval the scheduler asked to wait, which is what makes the deadline deterministic.
     ReapFn reapNewestFirst()
     {
-        return [this](ChildExit &exit, std::optional<std::chrono::milliseconds> within) {
+        return [this](ChildExit &exit, std::optional<std::chrono::milliseconds> within,
+                      bool returnOnStop) {
             exit = ChildExit{};
+            returnOnStops_.push_back(returnOnStop);
             boundedReaps_ += within.has_value() ? 1 : 0;
             if (strayReaps_ > 0) {
                 --strayReaps_;
@@ -2234,6 +2234,8 @@ public:
     const std::vector<std::pair<pid_t, int>> &signals() const { return signals_; }
     // How many reaps were given a deadline to wait until rather than left to block.
     size_t boundedReaps() const { return boundedReaps_; }
+    // The returnOnStop each reap was given, in order.
+    const std::vector<bool> &returnOnStops() const { return returnOnStops_; }
 
     ReportPathFn reportPaths()
     {
@@ -2261,6 +2263,7 @@ private:
     static constexpr size_t kMaxExpiries = 16;
     size_t expiries_ = 0;
     size_t boundedReaps_ = 0;
+    std::vector<bool> returnOnStops_;
     size_t inFlightHighWater_ = 0;
     std::optional<size_t> stopAfter_;
     size_t strayReaps_ = 0;
@@ -2694,6 +2697,33 @@ TEST(HostDispatchSchedulerMicrotest, AStoppedRunKillsItsChildrenAndKeepsWhatFini
     EXPECT_EQ(failures, 2);
 }
 
+TEST(HostDispatchSchedulerMicrotest, AStoppedRunAsksToHearOfTheStopOnlyUntilItIsStopping)
+{
+    // Once winding down, a reap that still returned on the stop would come straight back every
+    // time, and the scheduler would spin through the teardown grace at 100% of a core.
+    const ScopedDir dir("rccl-host-dispatch-scheduler");
+    FakeScheduler fake(dir.path());
+    std::vector<Selection> selections;
+    std::vector<std::vector<std::string>> filters;
+    for (const std::string &qualifier : {"Alpha", "Beta", "Gamma"}) {
+        selections.push_back(schedulerSelection(qualifier, 1));
+        filters.push_back(childFilters(selections.back()));
+    }
+    fake.stopAfter(2);
+
+    int failures = 0;
+    runSelections(selections, filters, ScheduleOptions{3, ReportFormat::Xml, {}, ""}, fake.ops(),
+                  failures);
+
+    const std::vector<bool> &asked = fake.returnOnStops();
+    ASSERT_FALSE(asked.empty());
+    EXPECT_TRUE(asked.front()) << "the scheduler did not ask to hear of a stop before stopping";
+    const auto firstFalse = std::find(asked.begin(), asked.end(), false);
+    EXPECT_NE(firstFalse, asked.end()) << "the scheduler kept asking to hear of the stop";
+    EXPECT_EQ(std::find(firstFalse, asked.end(), true), asked.end())
+        << "the scheduler asked to hear of the stop again after it had started stopping";
+}
+
 TEST(HostDispatchSchedulerMicrotest, AStoppedRunKeepsTheReportOfAChildThatBeatItsKill)
 {
     // The race the stop path has to survive: the child was signalled, but it had already
@@ -2988,7 +3018,7 @@ TEST(HostDispatchReapMicrotest, ABoundedWaitComesBackWhileTheChildIsStillRunning
 
     ChildExit exit{-1, true};
     const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
-    const pid_t reaped = reapAnyChild(exit, std::chrono::milliseconds{50});
+    const pid_t reaped = reapAnyChild(exit, std::chrono::milliseconds{50}, true);
     const std::chrono::milliseconds elapsed =
         std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() -
                                                               start);
@@ -3024,7 +3054,7 @@ TEST(HostDispatchReapMicrotest, AStopEndsATimedWaitLongBeforeItsDeadline)
 
     const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
     ChildExit exit{-1, true};
-    const pid_t reaped = reapAnyChild(exit, std::chrono::seconds{20});
+    const pid_t reaped = reapAnyChild(exit, std::chrono::seconds{20}, true);
     const std::chrono::milliseconds elapsed = since(start);
 
     stopper.join();
@@ -3037,24 +3067,23 @@ TEST(HostDispatchReapMicrotest, AStopEndsATimedWaitLongBeforeItsDeadline)
         << "the stop took " << elapsed.count() << " ms to reach a timed wait";
 }
 
-TEST(HostDispatchReapMicrotest, AWaitAfterTheStopHasBeenReportedStillWaits)
+TEST(HostDispatchReapMicrotest, AWaitThatDoesNotReturnOnStopStillWaitsAfterTheStop)
 {
-    // The stop flag never clears, so the news has to be delivered on the edge. Delivered on the
-    // level instead, every wait from the stop onwards returns at once, and the scheduler -- which
-    // has children to wind down and nothing to do until they go -- spins through the whole
-    // teardown grace at 100% of a core. The second wait below is the one that shows it: it must
-    // sit out its bound rather than come straight back.
+    // The stop flag never clears, so a wait that returned on it every time would come straight
+    // back, and the scheduler -- which has children to wind down and nothing to do until they go
+    // -- would spin through the whole teardown grace at 100% of a core. The second wait below,
+    // which opts out of the stop, must sit out its bound rather than come straight back.
     const ScopedStopHandling handling;
     const pid_t pid = spawnChild("/bin/sh", {"-c", "sleep 30"});
     ASSERT_GT(pid, 0);
 
     ::kill(::getpid(), SIGTERM);
     ChildExit first{-1, true};
-    ASSERT_EQ(reapAnyChild(first, std::chrono::seconds{20}), 0) << "the stop was not reported";
+    ASSERT_EQ(reapAnyChild(first, std::chrono::seconds{20}, true), 0) << "the stop was not reported";
 
     const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
     ChildExit second{-1, true};
-    const pid_t reaped = reapAnyChild(second, std::chrono::milliseconds{300});
+    const pid_t reaped = reapAnyChild(second, std::chrono::milliseconds{300}, false);
     const std::chrono::milliseconds elapsed = since(start);
 
     discardChild(pid);
@@ -3079,7 +3108,7 @@ TEST(HostDispatchReapMicrotest, AStopThatArrivesBeforeTheWaitBeginsIsNotLost)
 
     const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
     ChildExit exit{-1, true};
-    const pid_t reaped = reapAnyChild(exit, std::nullopt);
+    const pid_t reaped = reapAnyChild(exit, std::nullopt, true);
     const std::chrono::milliseconds elapsed = since(start);
 
     discardChild(pid);
@@ -3100,7 +3129,7 @@ TEST(HostDispatchReapMicrotest, AnUnboundedWaitIsWokenByTheChildItIsWaitingFor)
 
     const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
     ChildExit exit{-1, true};
-    const pid_t reaped = reapAnyChild(exit, std::nullopt);
+    const pid_t reaped = reapAnyChild(exit, std::nullopt, true);
     const std::chrono::milliseconds elapsed = since(start);
 
     EXPECT_EQ(reaped, pid);
@@ -3122,7 +3151,7 @@ TEST(HostDispatchReapMicrotest, ABoundedWaitStillReapsAChildThatFinishesWithinIt
     ASSERT_GT(pid, 0);
 
     ChildExit exit;
-    const pid_t reaped = reapAnyChild(exit, std::chrono::seconds{5});
+    const pid_t reaped = reapAnyChild(exit, std::chrono::seconds{5}, true);
 
     EXPECT_EQ(reaped, pid);
     EXPECT_EQ(exit.status, 7);

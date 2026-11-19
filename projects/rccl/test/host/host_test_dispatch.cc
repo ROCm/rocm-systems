@@ -1114,9 +1114,6 @@ WakePipe g_wake;
 
 volatile std::sig_atomic_t g_stopRequested = 0;
 
-// Whether reapAnyChild has already returned once for the stop.
-bool g_stopReported = false;
-
 extern "C" void requestStop(int)
 {
     g_stopRequested = 1;
@@ -1225,9 +1222,10 @@ struct ChildExit {
     bool signalled = false;
 };
 
-// Wait for whichever child finishes first and return its pid; 0 when *within* elapsed or a stop
-// was first requested; -1 when there is nothing left to wait for.
-pid_t reapAnyChild(ChildExit &exit, std::optional<std::chrono::milliseconds> within)
+// Wait for whichever child finishes first and return its pid; 0 when *within* elapsed, or when a
+// stop is requested and *returnOnStop*; -1 when there is nothing left to wait for.
+pid_t reapAnyChild(ChildExit &exit, std::optional<std::chrono::milliseconds> within,
+                   bool returnOnStop)
 {
     const std::optional<std::chrono::steady_clock::time_point> deadline =
         within ? std::optional<std::chrono::steady_clock::time_point>(
@@ -1246,9 +1244,7 @@ pid_t reapAnyChild(ChildExit &exit, std::optional<std::chrono::milliseconds> wit
             exit = ChildExit{1, false};
             return -1;
         }
-        // Reported once; later waits block normally.
-        if (g_stopRequested != 0 && !g_stopReported) {
-            g_stopReported = true;
+        if (returnOnStop && g_stopRequested != 0) {
             exit = ChildExit{};
             return 0;
         }
@@ -1325,7 +1321,8 @@ std::optional<std::string> listTestsOutput(const std::string &path,
     for (;;) {
         ChildExit exit;
         const pid_t finished =
-            reapAnyChild(exit, timeUntil(escalation.due(), std::chrono::steady_clock::now()));
+            reapAnyChild(exit, timeUntil(escalation.due(), std::chrono::steady_clock::now()),
+                         !escalation.termed());
         if (finished == pid) {
             return (exit.status == 0 && !escalation.termed())
                        ? std::optional<std::string>(readFile(listing.path()))
@@ -1585,8 +1582,10 @@ void writeMergedCoverage(const std::string &directory, const std::vector<std::st
 // The operations runSelections() performs on the world outside its loop.
 using SpawnFn = std::function<pid_t(const std::string &path, const std::vector<std::string> &args,
                                     const std::string &logPath)>;
-// Returns the pid reaped, 0 if *within* elapsed first, or -1 if there was nothing to wait for.
-using ReapFn = std::function<pid_t(ChildExit &exit, std::optional<std::chrono::milliseconds> within)>;
+// Returns the pid reaped, 0 if *within* elapsed first (or a stop was requested and
+// *returnOnStop*), or -1 if there was nothing to wait for.
+using ReapFn = std::function<pid_t(ChildExit &exit, std::optional<std::chrono::milliseconds> within,
+                                   bool returnOnStop)>;
 using KillFn = std::function<void(pid_t pid, int signal)>;
 using NowFn = std::function<std::chrono::steady_clock::time_point()>;
 using ReportPathFn = std::function<std::string(const std::string &qualifier, size_t part)>;
@@ -1791,7 +1790,7 @@ std::vector<SuiteFragment> runSelections(const std::vector<Selection> &selection
         }
 
         ChildExit exit;
-        const pid_t finished = ops.reap(exit, timeUntil(nearest, ops.now()));
+        const pid_t finished = ops.reap(exit, timeUntil(nearest, ops.now()), !stopping);
         if (finished == 0) {
             // Signal every child past its deadline and give it another grace period.
             const std::chrono::steady_clock::time_point now = ops.now();
