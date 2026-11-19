@@ -30,7 +30,7 @@ use crate::memory::storage::TryPush;
 use std::fs::File;
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use super::errno;
 use super::uapi;
@@ -62,6 +62,8 @@ pub(super) struct Kfd {
     process: ProcessIdentity,
     /// Serialized context selection and runtime enablement.
     runtime: Mutex<RuntimeControl>,
+    /// Checked migration support negotiated on this native endpoint.
+    checked_prefetch: OnceLock<bool>,
     /// Optional unit-test replacement for native ioctls.
     #[cfg(test)]
     hook: Option<IoctlHook>,
@@ -105,6 +107,7 @@ impl Kfd {
     pub(super) fn new(file: File, process: ProcessIdentity) -> Self {
         Self {
             file: Some(file),
+            checked_prefetch: OnceLock::new(),
             process,
             runtime: Mutex::new(RuntimeControl {
                 context: ContextState::Primary,
@@ -121,6 +124,7 @@ impl Kfd {
     pub(super) fn with_hook(file: File, hook: IoctlHook) -> Self {
         Self {
             file: Some(file),
+            checked_prefetch: OnceLock::new(),
             process: ProcessIdentity::capture().expect("test process identity"),
             runtime: Mutex::new(RuntimeControl {
                 context: ContextState::Primary,
@@ -145,6 +149,18 @@ impl Kfd {
         let mut version = uapi::Version::default();
         self.call(Call::Version(&mut version))?;
         Ok(version)
+    }
+
+    pub(super) fn checked_prefetch(&self) -> io::Result<bool> {
+        self.check_process()?;
+        if let Some(supported) = self.checked_prefetch.get() {
+            return Ok(*supported);
+        }
+        let mut extension = uapi::VersionExtension::default();
+        self.call(Call::VersionExtension(&mut extension))?;
+        let supported = extension.checked_prefetch();
+        let _ = self.checked_prefetch.set(supported);
+        Ok(supported)
     }
 
     pub(super) fn clock_counters(&self, gpu_id: u32) -> io::Result<uapi::ClockCounters> {
@@ -671,7 +687,10 @@ impl Kfd {
             || size == 0
             || address % page_size != 0
             || size % page_size != 0
-            || !matches!(operation, uapi::SVM_OP_SET_ATTR | uapi::SVM_OP_GET_ATTR)
+            || !matches!(
+                operation,
+                uapi::SVM_OP_SET_ATTR | uapi::SVM_OP_GET_ATTR | uapi::SVM_OP_PREFETCH_CHECKED
+            )
             || uapi::svm_request(attributes.len()).is_none()
         {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));

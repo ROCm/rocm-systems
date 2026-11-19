@@ -22,6 +22,13 @@ const fn request(direction: u32, number: u32, size: u32) -> u64 {
 }
 
 pub(super) const GET_VERSION: u64 = request(2, 0x01, 8);
+// Output-only extension of GET_VERSION; old KFD zero-fills the extra bytes.
+pub(super) const GET_VERSION_EXTENSION: u64 = request(2, 0x01, 24);
+// Local checked-SVM protocol v1, shared with the qualified kernel patch.
+// This identifier and operation are not upstream UAPI allocations.
+pub(super) const SVM_EXTENSION_ID: u64 = 0x3156_4d53_5244_4443;
+pub(super) const SVM_FEATURE_CHECKED_PREFETCH: u64 = 1;
+pub(super) const SVM_OP_PREFETCH_CHECKED: u32 = 0x0052_5301;
 // Since UAPI 1.17, CREATE includes an SDMA engine ordinal. The final word
 // became metadata_ring_size in 1.22; we keep it zero on every supported kernel.
 pub(super) const CREATE_QUEUE: u64 = request(3, 0x02, 96);
@@ -133,6 +140,23 @@ pub(super) const SVM_FLAG_GPU_ALWAYS_MAPPED: u32 = 0x40;
 pub(super) struct Version {
     pub major: u32,
     pub minor: u32,
+}
+
+/// Negotiated local extension; the standard KFD version prefix is unchanged.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct VersionExtension {
+    pub version: Version,
+    pub extension_id: u64,
+    pub features: u64,
+}
+
+impl VersionExtension {
+    pub(super) fn checked_prefetch(self) -> bool {
+        self.version.major == 1
+            && self.extension_id == SVM_EXTENSION_ID
+            && self.features & SVM_FEATURE_CHECKED_PREFETCH != 0
+    }
 }
 
 /// Wave-state query; the control address points at retained writable CWSR memory.
@@ -593,6 +617,7 @@ const _: () = {
     assert!(offset_of!(AllocQueueGws, first_gws) == 8);
     assert!(ALLOC_QUEUE_GWS == 0xc010_4b1e);
     assert!(size_of::<Version>() == 8);
+    assert!(size_of::<VersionExtension>() == 24);
     assert!(size_of::<ClockCounters>() == 40);
     assert!(offset_of!(ClockCounters, gpu_id) == 32);
     assert!(size_of::<AvailableMemory>() == 16);
