@@ -607,6 +607,17 @@ __device__ __forceinline__ bool ddaLLWaitLineFlagsBatched(const uint32_t* const 
   }
 }
 
+// Workgroup barrier for LDS only: on gfx1250 __syncthreads() would also wait for every remote store in flight.
+__device__ __forceinline__ void ddaLLSpreadLdsBarrier() {
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
+  __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
+  __builtin_amdgcn_s_barrier();
+  __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
+#else
+  __syncthreads();
+#endif
+}
+
 __device__ __forceinline__ uint32_t ddaGetLLEpochInc(const uint32_t* __restrict__ epochDev, int flatBlockId, uint32_t inc) {
   uint32_t flag = epochDev[flatBlockId] + inc;
   if (flag == 0u) flag = 2u; // skip 0 sentinel; keep bank parity
