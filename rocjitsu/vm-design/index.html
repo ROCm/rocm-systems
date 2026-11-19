@@ -1281,6 +1281,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#cdna5-named-barrier-wakeups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CDNA5 named-barrier wakeups
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2124,6 +2135,17 @@
     <span class="md-ellipsis">
       
         Continuous Execution (rj_vm_run)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cdna5-named-barrier-wakeups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CDNA5 named-barrier wakeups
       
     </span>
   </a>
@@ -3041,6 +3063,17 @@ without LBTS synchronization. The CP schedules doorbell events during
 <code>startup()</code> for pre-loaded packets and via <code>schedule_event_async()</code> for
 external submissions.</p>
 <hr />
+<h3 id="cdna5-named-barrier-wakeups">CDNA5 named-barrier wakeups<a class="headerlink" href="#cdna5-named-barrier-wakeups" title="Permanent link">&para;</a></h3>
+<p><code>S_WAKEUP_BARRIER</code> targets peers in the issuer's workgroup. Sleeping recipients
+wake immediately, and awake recipients receive one credit for a later sleep.
+A positive ID selects peers associated with that named barrier. ID zero
+selects peers without a named association.</p>
+<p>The CDNA5 ISA also allows an unjoined wave to receive a named wake. It
+specifies that <code>S_BARRIER_SIGNAL</code> changes the barrier count without recording
+the signaler's identity. When a positive-ID wake could change an unassociated
+peer's sleep or credit, the VM reports an unsupported instruction before
+changing any peer. A peer that is already awake with a credit can keep it
+under either interpretation.</p>
 <h2 id="simulation-integration">Simulation Integration<a class="headerlink" href="#simulation-integration" title="Permanent link">&para;</a></h2>
 <p>The hardware hierarchy plugs into simdojo's <code>SimulationEngine</code> directly. The C
 API layer (<code>rj_vm.cpp</code>) owns the engine and wires that hierarchy into the
