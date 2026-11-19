@@ -618,9 +618,15 @@ __device__ __forceinline__ void ddaLLSpreadLdsBarrier() {
 #endif
 }
 
+// This block's next LL epoch flag. It adds no barrier, so the caller needs one before ddaSetLLEpoch rewrites the cell.
+__device__ __forceinline__ uint32_t ddaNextLLEpoch(const uint32_t* __restrict__ epochDev, int flatBlockId,
+                                                   uint32_t inc) {
+  const uint32_t flag = epochDev[flatBlockId] + inc;
+  return flag == 0u ? 2u : flag; // skip the 0 sentinel and keep bank parity
+}
+
 __device__ __forceinline__ uint32_t ddaGetLLEpochInc(const uint32_t* __restrict__ epochDev, int flatBlockId, uint32_t inc) {
-  uint32_t flag = epochDev[flatBlockId] + inc;
-  if (flag == 0u) flag = 2u; // skip 0 sentinel; keep bank parity
+  const uint32_t flag = ddaNextLLEpoch(epochDev, flatBlockId, inc);
   __syncthreads();
   return flag;
 }
