@@ -40,6 +40,178 @@ constexpr size_t ddaLL128BcTwoShotSlotSlices(size_t bankSize, int nRanks, size_t
   return (bankSlices / totalSlotsNeeded >= cs) ? cs : 0;
 }
 
+// Root phase 1: load chunk[col] from sendbuff, store wire to peer's scatter slot,
+// and fuse recvbuff write for the in-place case.
+__device__ __forceinline__ void ddaBcLL128RootScatter(
+    int8_t* const* __restrict__ peerScratch,
+    int8_t* __restrict__ recvbuff,
+    const int8_t* __restrict__ sendbuff,
+    size_t totalBytes,
+    size_t chunkSlices,
+    int col,
+    int peer,
+    uint64_t bankWords,
+    size_t gwarp,
+    size_t wstride,
+    int lane,
+    bool flagLane,
+    uint64_t flag) {
+  uint64_t* scatterDst = reinterpret_cast<uint64_t*>(peerScratch[peer]) + bankWords;
+  for (size_t s = gwarp; s < chunkSlices; s += wstride) {
+    const size_t wireOff = s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane;
+    const size_t dOff = (size_t)col * chunkSlices * (size_t)kDdaLL128DataBytesPerSlice
+                       + s * (size_t)kDdaLL128DataBytesPerSlice;
+    const size_t rem = totalBytes > dOff ? totalBytes - dOff : 0;
+    const int elt = rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
+    uint64_t regs[kDdaLL128WordsPerThread];
+    if (elt > 0)
+      ddaLL128LoadRegsBatched<int8_t>(regs, sendbuff + dOff, elt, lane, flagLane);
+    else
+      for (int u = 0; u < kDdaLL128WordsPerThread; ++u) regs[u] = 0;
+    ddaLL128StoreWire(scatterDst + wireOff, regs, flag, flagLane);
+    if (elt > 0 && sendbuff != reinterpret_cast<const int8_t*>(recvbuff))
+      ddaLL128StoreRegs<int8_t>(recvbuff + dOff, regs, elt, lane, flagLane);
+  }
+}
+
+// Root phase 2: poll the 1-slice completion token that each non-root forwards,
+// then clear the gather slot. Only warp 0 participates.
+__device__ __forceinline__ void ddaBcLL128RootWait(
+    int8_t* const* __restrict__ peerScratch,
+    int selfRank,
+    int peer,
+    uint64_t gatherOff,
+    size_t slotWireWords,
+    size_t gwarp,
+    int lane,
+    uint64_t flag,
+    DdaKernelParams params) {
+  const uint64_t* myGather = reinterpret_cast<const uint64_t*>(peerScratch[selfRank])
+                             + gatherOff + (uint64_t)peer * slotWireWords;
+  if (gwarp == 0) {
+    uint64_t vr[kDdaLL128WordsPerThread];
+#if RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
+    if (ddaLL128PollWireBatched(myGather + 2 * lane, vr, flag, lane, params))
+#else
+    if (ddaLL128PollWire(myGather + 2 * lane, vr, flag, lane, params))
+#endif
+      ddaLL128ClearWire(const_cast<uint64_t*>(myGather) + 2 * lane, lane);
+  }
+}
+
+// Non-root phase 1: poll own scatter slot, forward slices to gather slots on all
+// target peers (fan-out limited), and fuse recvbuff write for the own chunk.
+__device__ __forceinline__ void ddaBcLL128NonRootForward(
+    int8_t* const* __restrict__ peerScratch,
+    int8_t* __restrict__ recvbuff,
+    size_t totalBytes,
+    size_t chunkSlices,
+    int selfRank,
+    int col,
+    int root,
+    int nPeers,
+    uint64_t bankWords,
+    uint64_t gatherOff,
+    size_t slotWireWords,
+    int kFanOut,
+    int nFanRounds,
+    int nwarps,
+    int warp,
+    int lane,
+    bool flagLane,
+    uint64_t flag,
+    DdaKernelParams params) {
+  const uint64_t* myScatter = reinterpret_cast<const uint64_t*>(peerScratch[selfRank]) + bankWords;
+  const int selfCol = selfRank < root ? selfRank : selfRank - 1;
+  bool aborted = false;
+  for (int fRound = 0; fRound < nFanRounds && !aborted; ++fRound) {
+    const int kActive = kFanOut < (nPeers - fRound * kFanOut)
+                      ? kFanOut : (nPeers - fRound * kFanOut);
+    if (kActive <= 0) break;
+    const int peerGroup = col % kActive;
+    const int tgtCol = fRound * kFanOut + peerGroup;
+    if (tgtCol >= nPeers) continue;
+    const int tgtPeer = tgtCol < selfRank ? tgtCol : tgtCol + 1;
+    const int localCol = col / kActive;
+    const int myColCount = (int)ddaCeilDiv((size_t)(nPeers - peerGroup), (size_t)kActive);
+    if (localCol >= myColCount) continue;
+    const size_t gwarp_r = ((size_t)localCol * (size_t)gridDim.y + (size_t)blockIdx.y)
+                           * (size_t)nwarps + (size_t)warp;
+    const size_t wstride_r = (size_t)gridDim.y * (size_t)myColCount * (size_t)nwarps;
+    uint64_t* tgtGather = reinterpret_cast<uint64_t*>(peerScratch[tgtPeer]) + gatherOff
+                        + (uint64_t)selfRank * slotWireWords;
+    for (size_t s = gwarp_r; s < chunkSlices; s += wstride_r) {
+      uint64_t vr[kDdaLL128WordsPerThread];
+#if RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
+      if (!ddaLL128PollWireBatched(myScatter + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane,
+                            vr, flag, lane, params)) {
+#else
+      if (!ddaLL128PollWire(myScatter + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane,
+                            vr, flag, lane, params)) {
+#endif
+        aborted = true;
+        break;
+      }
+      // for the root peer, only forward 1 padding slice (s==0).
+      if (tgtPeer != root || s == 0) {
+        ddaLL128StoreWire(tgtGather + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane,
+                          vr, flag, flagLane);
+      }
+      if (nFanRounds > 1 ? (fRound == 0) : (col == (int)(s % (size_t)nPeers))) {
+        const size_t dOff = (size_t)selfCol * chunkSlices * (size_t)kDdaLL128DataBytesPerSlice
+                           + s * (size_t)kDdaLL128DataBytesPerSlice;
+        const size_t rem = totalBytes > dOff ? totalBytes - dOff : 0;
+        const int elt = rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
+        if (elt > 0)
+          ddaLL128StoreRegs<int8_t>(recvbuff + dOff, vr, elt, lane, flagLane);
+      }
+    }
+  }
+}
+
+// Non-root phase 2: poll own gather slot for peer's chunk, unpack into recvbuff,
+// and clear each wire slice after consumption.
+// Caller must guard: only called when peer != root.
+__device__ __forceinline__ void ddaBcLL128NonRootGather(
+    int8_t* const* __restrict__ peerScratch,
+    int8_t* __restrict__ recvbuff,
+    size_t totalBytes,
+    size_t chunkSlices,
+    int selfRank,
+    int peer,
+    int root,
+    uint64_t gatherOff,
+    size_t slotWireWords,
+    size_t gwarp,
+    size_t wstride,
+    int lane,
+    bool flagLane,
+    uint64_t flag,
+    DdaKernelParams params) {
+  const uint64_t* myGather = reinterpret_cast<const uint64_t*>(peerScratch[selfRank])
+                             + gatherOff + (uint64_t)peer * slotWireWords;
+  for (size_t s = gwarp; s < chunkSlices; s += wstride) {
+    const int peerCol = peer < root ? peer : peer - 1;
+    const size_t dOff = (size_t)peerCol * chunkSlices * (size_t)kDdaLL128DataBytesPerSlice
+                       + s * (size_t)kDdaLL128DataBytesPerSlice;
+    const size_t rem = totalBytes > dOff ? totalBytes - dOff : 0;
+    const int elt = rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
+    uint64_t vr[kDdaLL128WordsPerThread];
+#if RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
+    if (!ddaLL128PollWireBatched(myGather + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane,
+                          vr, flag, lane, params))
+#else
+    if (!ddaLL128PollWire(myGather + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane,
+                          vr, flag, lane, params))
+#endif
+      break;
+    if (elt > 0)
+      ddaLL128StoreRegs<int8_t>(recvbuff + dOff, vr, elt, lane, flagLane);
+    ddaLL128ClearWire(const_cast<uint64_t*>(myGather) +
+      s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, lane);
+  }
+}
+
 template <int NRANKS_CT>
 __launch_bounds__(512)
 __global__ void ddaBroadcastFabricLL128TwoShot(
@@ -82,124 +254,25 @@ __global__ void ddaBroadcastFabricLL128TwoShot(
   const int col = (int)blockIdx.x;
   const int peer = col < selfRank ? col : col + 1;
 
-
   // Fan-out: 0 or >= nPeers means full fan-out
   const int kFanOut = (fanOut <= 0 || fanOut >= nPeers) ? nPeers : fanOut;
   const int nFanRounds = (int)ddaCeilDiv((size_t)nPeers, (size_t)kFanOut);
 
   if (isRoot) {
-    // scatter chunk[col] to peer (nPeers chunks, no root chunk).
-    // no gather push needed.
-    // Recvbuff write fused: each column writes chunk[col] to recvbuff.
-    uint64_t* scatterDst = reinterpret_cast<uint64_t*>(peerScratch[peer]) + bankWords;
-    for (size_t s = gwarp; s < chunkSlices; s += wstride) {
-      const size_t wireOff = s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane;
-      const size_t dOff = (size_t)col * chunkSlices * (size_t)kDdaLL128DataBytesPerSlice + s * (size_t)kDdaLL128DataBytesPerSlice;
-      const size_t rem = totalBytes > dOff ? totalBytes - dOff : 0;
-      const int elt = rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
-      uint64_t regs[kDdaLL128WordsPerThread];
-      if (elt > 0)
-        ddaLL128LoadRegsBatched<int8_t>(regs, sendbuff + dOff, elt, lane, flagLane);
-      else
-        for (int u = 0; u < kDdaLL128WordsPerThread; ++u) regs[u] = 0;
-      ddaLL128StoreWire(scatterDst + wireOff, regs, flag, flagLane);
-      if (elt > 0 && sendbuff != reinterpret_cast<const int8_t*>(recvbuff))
-        ddaLL128StoreRegs<int8_t>(recvbuff + dOff, regs, elt, lane, flagLane);
-    }
-
-
-
-    // wait for every peer's allgather contribution.
-    // non-roots forward only 1 padding slice to the root (see Phase 1).
-    // The root uses its own sendbuff, so only 1 slice per peer is needed here.
-    const uint64_t* myScratch = reinterpret_cast<const uint64_t*>(peerScratch[selfRank]);
-    const uint64_t* myGather = myScratch + gatherOff + (uint64_t)peer * slotWireWords;
-    if (gwarp == 0) {
-      uint64_t vr[kDdaLL128WordsPerThread];
-#if RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
-      if (ddaLL128PollWireBatched(myGather + 2 * lane, vr, flag, lane, params))
-#else
-      if (ddaLL128PollWire(myGather + 2 * lane, vr, flag, lane, params))
-#endif
-        ddaLL128ClearWire(const_cast<uint64_t*>(myGather) + 2 * lane, lane);
-    }
+    ddaBcLL128RootScatter(peerScratch, recvbuff, sendbuff, totalBytes, chunkSlices,
+                          col, peer, bankWords, gwarp, wstride, lane, flagLane, flag);
+    ddaBcLL128RootWait(peerScratch, selfRank, peer, gatherOff, slotWireWords,
+                       gwarp, lane, flag, params);
   } else {
-    // --- NON-ROOT ---
-
-    // Phase 1: poll scatter slot, forward to gather slots -- fan-out limited.
-    // recvbuff write happens in round 0 only.
-    const uint64_t* myScatter = reinterpret_cast<const uint64_t*>(peerScratch[selfRank]) + bankWords;
-    // chunk index for this non-root (0..nPeers-1, skipping root)
-    const int selfCol = selfRank < root ? selfRank : selfRank - 1;
-    bool aborted = false;
-    for (int fRound = 0; fRound < nFanRounds && !aborted; ++fRound) {
-      const int kActive = kFanOut < (nPeers - fRound * kFanOut)
-                        ? kFanOut : (nPeers - fRound * kFanOut);
-      if (kActive <= 0) break;
-      const int peerGroup = col % kActive;
-      const int tgtCol = fRound * kFanOut + peerGroup;
-      if (tgtCol >= nPeers) continue;
-      const int tgtPeer = tgtCol < selfRank ? tgtCol : tgtCol + 1;
-      const int localCol = col / kActive;
-      const int myColCount = (int)ddaCeilDiv((size_t)(nPeers - peerGroup), (size_t)kActive);
-      if (localCol >= myColCount) continue;
-      const size_t gwarp_r = ((size_t)localCol * (size_t)gridDim.y + (size_t)blockIdx.y)
-                             * (size_t)nwarps + (size_t)warp;
-      const size_t wstride_r = (size_t)gridDim.y * (size_t)myColCount * (size_t)nwarps;
-      uint64_t* tgtGather = reinterpret_cast<uint64_t*>(peerScratch[tgtPeer]) + gatherOff +
-        (uint64_t)selfRank * slotWireWords;
-      for (size_t s = gwarp_r; s < chunkSlices; s += wstride_r) {
-        uint64_t vr[kDdaLL128WordsPerThread];
-#if RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
-        if (!ddaLL128PollWireBatched(myScatter + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane,
-                              vr, flag, lane, params)) {
-#else
-        if (!ddaLL128PollWire(myScatter + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane,
-                              vr, flag, lane, params)) {
-#endif
-          aborted = true;
-          break;
-        }
-        // for the root peer, only forward 1 padding slice (s==0).
-        if (tgtPeer != root || s == 0) {
-          ddaLL128StoreWire(tgtGather + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane,
-                            vr, flag, flagLane);
-        }
-        if (nFanRounds > 1 ? (fRound == 0) : (col == (int)(s % (size_t)nPeers))) {
-          const size_t dOff = (size_t)selfCol * chunkSlices * (size_t)kDdaLL128DataBytesPerSlice + s * (size_t)kDdaLL128DataBytesPerSlice;
-          const size_t rem = totalBytes > dOff ? totalBytes - dOff : 0;
-          const int elt = rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
-          if (elt > 0)
-            ddaLL128StoreRegs<int8_t>(recvbuff + dOff, vr, elt, lane, flagLane);
-        }
-      }
-    }
-
-    // Phase 2: gather -- poll own gather slot[peer], unpack into recvbuff.
-    // skip for root column (root has no chunk in the allgather).
-    if (peer != root) {
-    const uint64_t* myGather = reinterpret_cast<const uint64_t*>(peerScratch[selfRank]) +
-      gatherOff + (uint64_t)peer * slotWireWords;
-    for (size_t s = gwarp; s < chunkSlices; s += wstride) {
-      const int peerCol = peer < root ? peer : peer - 1;
-      const size_t dOff = (size_t)peerCol * chunkSlices * (size_t)kDdaLL128DataBytesPerSlice + s * (size_t)kDdaLL128DataBytesPerSlice;
-      const size_t rem = totalBytes > dOff ? totalBytes - dOff : 0;
-      const int elt = rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
-      uint64_t vr[kDdaLL128WordsPerThread];
-#if RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
-      if (!ddaLL128PollWireBatched(myGather + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane,
-                            vr, flag, lane, params))
-#else
-      if (!ddaLL128PollWire(myGather + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane,
-                            vr, flag, lane, params))
-#endif
-        break;
-      if (elt > 0)
-        ddaLL128StoreRegs<int8_t>(recvbuff + dOff, vr, elt, lane, flagLane);
-      ddaLL128ClearWire(const_cast<uint64_t*>(myGather) +
-        s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, lane);
-    }
-    } // if (peer != root)
+    ddaBcLL128NonRootForward(peerScratch, recvbuff, totalBytes, chunkSlices,
+                             selfRank, col, root, nPeers,
+                             bankWords, gatherOff, slotWireWords,
+                             kFanOut, nFanRounds, nwarps, warp,
+                             lane, flagLane, flag, params);
+    if (peer != root)
+      ddaBcLL128NonRootGather(peerScratch, recvbuff, totalBytes, chunkSlices,
+                              selfRank, peer, root, gatherOff, slotWireWords,
+                              gwarp, wstride, lane, flagLane, flag, params);
   }
 
 #if (defined(__gfx1250__) || defined(__gfx1250_strict__))
