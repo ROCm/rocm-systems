@@ -972,8 +972,9 @@ TestOnStream() {
   ExecTest  "sync_all_on_stream"     2  1           1
   ExecTest  "alltoallmem_on_stream"  2  1           64        1048576
   ExecTest  "broadcastmem_on_stream" 2  1           64        1048576
-  export ROCSHMEM_MAX_NUM_CONTEXTS=1024
-  export ROCSHMEM_MAX_NUM_HOST_CONTEXTS=1024
+  # GDA providers might limit the number of contexts, use < 1024 to be safe
+  export ROCSHMEM_MAX_NUM_CONTEXTS=256
+  export ROCSHMEM_MAX_NUM_HOST_CONTEXTS=256
   ExecTest  "reduce_on_stream"       2  1           64        1048576
   unset ROCSHMEM_MAX_NUM_CONTEXTS
   unset ROCSHMEM_MAX_NUM_HOST_CONTEXTS
@@ -1085,7 +1086,8 @@ TestOther() {
   else echo "Skip:   flood_* (AIROCSHMEM-324: RO flood tests fail in UCX)"; fi
 
   # This test requires more contexts than workgroups
-  export ROCSHMEM_MAX_NUM_CONTEXTS=1024
+  # GDA providers might limit the number of contexts, use < 1024 to be safe
+  export ROCSHMEM_MAX_NUM_CONTEXTS=256
   ExecTest  "teamctxinfra"        2       1            1
   ExecTest  "teamctxsingleinfra"  2       1            1
   ExecTest  "teamctxblockinfra"   4       1            1
@@ -1096,7 +1098,7 @@ TestOther() {
   ExecTest  "teamctxsharedinfra"  5       1            1
   ExecTest  "teamctxsubsetparentinfra" 4  1            1
   ExecTest  "teamctxsubsetparentinfra" 5  1            1
-  export ROCSHMEM_MAX_NUM_HOST_CONTEXTS=1024
+  export ROCSHMEM_MAX_NUM_HOST_CONTEXTS=256
   ExecTest  "host_ctx_create"          2       1            1
   if [[ $TEST != ro* ]]; then # host team sync/barrier hangs on RO
   ExecTest  "hostteamsyncbarrier"      2  1            1
