@@ -4,7 +4,8 @@
 
 """Check memory chart layouts and rewrite them in the canonical style.
 
-The loader checks each file first. The file is then written with keys in the
+The loader checks each file first, including that each arch of the file has a
+memory chart view row for every metric id. The file is then written with keys in the
 loader's order, blocks column by column (each block followed by its nested
 blocks, then the column's blocks above and below the grid), one block, metric, or
 arrow per line, and a blank line between columns and between arrows of different
@@ -113,7 +114,8 @@ def main() -> int:
     stale = []
     for path in layout_files():
         try:
-            load_layout(path)
+            for arch in load_layout(path).archs:
+                load_layout(path, arch)
         except LayoutError as error:
             print(f"error: {error}", file=sys.stderr)
             return 1

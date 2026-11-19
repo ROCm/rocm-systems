@@ -66,7 +66,7 @@ def chart_from_layout(tmp_path, arch, data):
     path = tmp_path / "layout.json"
     path.write_text(json.dumps(data), encoding="utf-8")
     units = panel_units(PanelConfigs.for_arch(arch))
-    return MemChart(load_layout(path), sample_values(arch), units)
+    return MemChart(load_layout(path, arch), sample_values(arch), units)
 
 
 def render_layout(tmp_path, arch, data):
@@ -280,7 +280,7 @@ def test_stall_metrics_get_a_bar(gpu_arch, label):
 
 def test_item_bar_follows_the_layout(tmp_path):
     data = common.memory_chart_layout_data("gfx942")
-    no_bar = common.with_metric_change(data, "3.1.25", bar=False)  # L2 Hit
+    no_bar = common.with_metric_change(data, "l2.hit_rate", bar=False)
     assert count_bars(render_layout(tmp_path, "gfx942", no_bar)) == (
         count_bars(render("gfx942")) - 1
     )
@@ -288,7 +288,7 @@ def test_item_bar_follows_the_layout(tmp_path):
 
 def test_arrow_style_follows_the_layout(tmp_path):
     data = common.memory_chart_layout_data("gfx942")
-    inline = common.with_metric_change(data, "3.1.16", style="inline")  # VL1_L2 Read
+    inline = common.with_metric_change(data, "vl1d.l2_rd_bw", style="inline")
     assert not re.search(r"Read BW\s+: ", render("gfx942"))
     assert re.search(r"Read BW\s+: ", render_layout(tmp_path, "gfx942", inline))
 
