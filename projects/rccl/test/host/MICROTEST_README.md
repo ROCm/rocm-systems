@@ -573,6 +573,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `gin/gin-host-test.cc` defines the same ConnectOnce seams. It does not link
   `fakes/dev_runtime_micro_fakes.cc`, which fakes those entry points. See
   `test_categories_micro_gin.yaml`.
+- **`rccl-UnitTestsMicroGinAnvilReach`**: `src/gin/gin_anvil_reach.cc` (via
+  `GIN_ANVIL_REACH_CC_PATH`, suite `GinAnvilReachMicrotest.*`): when the Anvil SDMA backend
+  registers windows through fabric memory. Links the real `src/misc/archinfo.cc` for
+  `IsArchMatch`.
 - **`rccl-UnitTestsMicroDda<SubDir><Unit>`** — `src/algorithms/dda/`, one binary per test
   file; tests mirror the source tree under `test/host/algorithms/dda/`, and the name drops a
   `<Unit>` prefix that repeats the dir (`all_gather/dda-all-gather-fabric-ll-test.cc` builds
@@ -1540,6 +1544,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroGraphTopo          # src/graph/topo.cc; one binary per src/graph/ test file
 ./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
 ./build/rccl-UnitTestsMicroGinHostFinalize    # src/gin/gin_host.cc host finalize
+./build/rccl-UnitTestsMicroGinAnvilReach      # src/gin/gin_anvil_reach.cc fabric memory gate
 ./build/rccl-UnitTestsMicroNcclDeviceRequirements  # nccl_device requirement builders tests
 ./build/rccl-UnitTestsMicroNcclDeviceCore     # nccl_device/core.cc tests
 ./build/rccl-UnitTestsMicroDevcomm            # devcomm/devcomm_v22902.cc, devcomm_v22907.cc tests

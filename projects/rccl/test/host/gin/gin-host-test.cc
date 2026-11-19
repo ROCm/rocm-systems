@@ -147,6 +147,11 @@ void ResetGinHostGlobals() {
 // which is why it does not need one.
 int64_t ncclParamGinType() { return g_paramGinType; }
 
+// src/gin/gin_anvil_reach.cc has its own binary (rccl-UnitTestsMicroGinAnvilReach). gin_host.cc's
+// splitShare check reads it, and GinHostSplitShareTest (gin-host-finalize-test.cc) covers that
+// check, so no rank opts in here.
+bool ginAnvilUseFabricMem(struct ncclComm*) { return false; }
+
 // The os_fakes.cc affinity seams (src/os/linux.cc) do double duty here.
 // ncclOsCpuCount is the first thing every progress thread calls and the progress
 // loop has no counter of its own while writePending is set, so
@@ -525,6 +530,7 @@ class GinHostFixture : public ::testing::Test {
 
     comm_ = std::make_unique<ncclComm>();
     sr_ = std::make_unique<ncclSharedResources>();
+    sr_->owner = comm_.get();
     comm_->sharedRes = sr_.get();
     comm_->nRanks = 1;
     comm_->rank = 0;
