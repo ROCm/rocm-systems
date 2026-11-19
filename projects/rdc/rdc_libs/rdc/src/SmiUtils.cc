@@ -575,7 +575,9 @@ uint64_t count_pending_bad_pages(const amdsmi_retired_page_record_t* records, ui
 
 double derive_mem_activity_percent(double umc_activity_pct, bool have_prev,
                                    uint64_t prev_mem_activity_acc, uint64_t prev_firmware_ts,
-                                   uint64_t cur_mem_activity_acc, uint64_t cur_firmware_ts) {
+                                   uint64_t cur_mem_activity_acc, uint64_t cur_firmware_ts,
+                                   bool* have_rate) {
+  if (have_rate != nullptr) *have_rate = false;
   // In gpu_metrics the max value of the type means "not supported"; never treat the
   // sentinel as real accumulator/timestamp data (a huge unsigned delta would otherwise
   // clamp to 100%).
@@ -595,6 +597,7 @@ double derive_mem_activity_percent(double umc_activity_pct, bool have_prev,
     // activity percentage every firmware millisecond (1ms == 100000 units).
     const double elapsed_ms = static_cast<double>(cur_firmware_ts - prev_firmware_ts) / 100000.0;
     if (elapsed_ms > 0.0 && elapsed_ms <= kMaxSampleWindowMs) {
+      if (have_rate != nullptr) *have_rate = true;
       double acc_pct =
           static_cast<double>(cur_mem_activity_acc - prev_mem_activity_acc) / elapsed_ms;
       if (acc_pct < 0.0) acc_pct = 0.0;

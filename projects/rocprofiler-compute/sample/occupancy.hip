@@ -1,6 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
+// Keep in sync with its copies under projects/rocprofiler-compute/:
+//   skills/rocprof-compute-kernel-bottleneck/evals/samples/occupancy.hip
+
 /*
 An example to explore achieved occupancy, and various occupancy limiters.
 Written by Nicholas Curtis [AMD].

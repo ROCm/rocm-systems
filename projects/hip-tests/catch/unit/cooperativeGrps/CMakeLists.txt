@@ -23,6 +23,7 @@ set(TEST_SRC
   cg_ballot.cc
   cg_any_all.cc
   split_barrier.cc
+  invoke_one.cc
 )
 
 set(AMD_TEST_SRC 

@@ -10,6 +10,7 @@ set(TEST_SRC
     hipDrvGetErrorName.cc
     hipDrvGetErrorString.cc
     hipGetLastError.cc
+    hipLastErrorReset.cc
     hipPeekAtLastError.cc
 )
 

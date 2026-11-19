@@ -1,0 +1,1 @@
+../../projects/amdsmi/.github/agents/amdsmi-review-security.agent.md

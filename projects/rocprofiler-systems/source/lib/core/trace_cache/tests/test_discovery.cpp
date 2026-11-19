@@ -158,8 +158,8 @@ TEST(discovery_test, find_cache_files_skips_mismatched_parent_pid)
 
 TEST(discovery_test, find_cache_files_skips_unparsable_pid_without_aborting)
 {
-    // A PID that overflows int (regression: try/catch around stoi).
     auto m = find_cache_files(100, { "buffered_storage_99999999999999999999_42.bin",
+                                     "metadata_100_99999999999999999999.json",
                                      "buffered_storage_100_42.bin" });
     EXPECT_EQ(m.size(), 1U);
     EXPECT_NE(m.find(42), m.end());

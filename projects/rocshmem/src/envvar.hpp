@@ -130,6 +130,7 @@ namespace envvar {
       REVERSE_OFFLOAD,
       GDA,
       SDMA,
+      LDS_STAGE,
     };
 
     // env var string prefixes
@@ -141,6 +142,7 @@ namespace envvar {
     template <> inline constexpr const char* prefix<tag::REVERSE_OFFLOAD> = "ROCSHMEM_RO";
     template <> inline constexpr const char* prefix<tag::GDA> = "ROCSHMEM_GDA";
     template <> inline constexpr const char* prefix<tag::SDMA> = "ROCSHMEM_SDMA";
+    template <> inline constexpr const char* prefix<tag::LDS_STAGE> = "ROCSHMEM_LDS_STAGE";
   }  // namespace category
 
   namespace parser {
@@ -527,6 +529,12 @@ namespace envvar {
     extern const var<std::string> hca_list;
 
     /**
+     * @brief Selects the transport for the host-initiated API. Empty (default)
+     * keeps the MPI-window host path; "verbs" uses the native host-verbs stack.
+     */
+    extern const var<std::string> host_transport;
+
+    /**
      * @brief Maximum number of symmetric user buffers that can be registered
      * with rocshmem_buffer_register_symmetric.
      *
@@ -579,6 +587,13 @@ namespace envvar {
     extern const var<int32_t> num_channels;
     extern const var<bool> spread_channels;
   }  // namespace sdma
+
+  namespace lds_stage {
+    template <typename T> using var = var<T, category::tag::LDS_STAGE>;
+    extern const var<uint32_t> tile_bytes;
+    extern const var<size_t> put_threshold;
+    extern const var<size_t> get_threshold;
+  }  // namespace lds_stage
 
   /**
    * @brief Print mode for environment variables

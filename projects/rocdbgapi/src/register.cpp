@@ -44,6 +44,9 @@ namespace amd::dbgapi
 bool
 register_class_t::add_registers (amdgpu_regnum_t first, amdgpu_regnum_t last)
 {
+  if (last == amdgpu_regnum_t::absent)
+    return false;
+
   dbgapi_assert (last >= first);
   return m_register_map.emplace (first, last).second;
 }

@@ -13,7 +13,7 @@ import os
 import sys
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from utils.logger import console_debug, console_error
 from utils.utils_common import resolve_rocm_library_path
@@ -33,7 +33,7 @@ _library_path: Optional[str] = None
 
 def get_pc_sample_configs(
     sdk_tool_path: Optional[str],
-) -> Optional[list[tuple[int, ...]]]:
+) -> Optional[List[Tuple[int, ...]]]:
     """Return (method, unit, min, max, flags) for every agent configuration.
 
     None means the library could not be reached at all, which is distinct from
@@ -49,7 +49,7 @@ def get_pc_sample_configs(
     return configs
 
 
-def get_counters(sdk_tool_path: Optional[str]) -> dict[str, Any]:
+def get_counters(sdk_tool_path: Optional[str]) -> Dict[str, Any]:
     """Return the avail module's per-agent counter listing."""
     # Load through ctypes first so the beta gate is applied before the avail
     # module dlopens the same file and settles what the library reports.
@@ -130,7 +130,7 @@ def _bind_signatures(library: ctypes.CDLL) -> None:
     ] * _CONFIG_FIELD_COUNT
 
 
-def _agent_handles(library: ctypes.CDLL) -> list[int]:
+def _agent_handles(library: ctypes.CDLL) -> List[int]:
     """Return a handle for every agent the library knows about."""
     agent_count = library.get_number_of_agents()
     library.agent_handles.argtypes = [ctypes.c_ulong * agent_count, ctypes.c_ulong]
@@ -139,7 +139,7 @@ def _agent_handles(library: ctypes.CDLL) -> list[int]:
     return list(handles)
 
 
-def _agent_configs(library: ctypes.CDLL, agent_handle: int) -> list[tuple[int, ...]]:
+def _agent_configs(library: ctypes.CDLL, agent_handle: int) -> List[Tuple[int, ...]]:
     """Marshal one agent's PC sampling configurations out of the library."""
     configs = []
     for config_index in range(library.get_number_of_pc_sample_configs(agent_handle)):

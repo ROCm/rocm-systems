@@ -1,0 +1,22 @@
+{
+    "required_tables": [
+        {
+            "min_rows": 1,
+            "name_prefix": "rocpd_pmc_event_",
+            "required_columns": [
+                "event_id",
+                "pmc_id",
+                "value"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "Device sampling covers exactly two GPU agents",
+                    "error_message": "--gpus=0-1 did not limit PMC sampling to exactly two GPU agents",
+                    "expected_result": 2,
+                    "query": "SELECT COUNT(DISTINCT info.agent_id) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.target_arch = 'GPU'"
+                }
+            ]
+        }
+    ]
+}
