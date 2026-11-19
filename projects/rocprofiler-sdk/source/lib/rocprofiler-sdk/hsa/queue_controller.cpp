@@ -878,6 +878,16 @@ QueueController::enable_serialization(const agent_handle_set_t& agents)
 }
 
 bool
+QueueController::try_retain_serialization(rocprofiler_agent_id_t agent_id)
+{
+    return _serialization_refcount.wlock([&](auto& state) {
+        if(!state.enabled(agent_id)) return false;
+        ++state.per_agent[agent_id];
+        return true;
+    });
+}
+
+bool
 QueueController::is_serialization_enabled(rocprofiler_agent_id_t agent_id) const
 {
     bool enabled = false;

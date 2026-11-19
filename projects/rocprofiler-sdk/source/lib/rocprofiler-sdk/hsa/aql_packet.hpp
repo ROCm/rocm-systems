@@ -273,10 +273,7 @@ public:
     rocprofiler_agent_id_t GetAgent() const { return tracepool->agent_id; }
     uint64_t               GetOwner() const { return owner; }
     void                   SetOwner(uint64_t value) { owner = value; }
-    void                   SetTraceLease(thread_trace::trace_lease_t lease)
-    {
-        trace_lease = std::move(lease);
-    }
+    void SetTraceLease(thread_trace::trace_lease_t lease) { trace_lease = std::move(lease); }
     void complete_trace() override { trace_lease.reset(); }
 
     void populate_before() override

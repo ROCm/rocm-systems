@@ -32,6 +32,7 @@
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
 
+#include <memory>
 #include <unordered_map>
 
 namespace rocprofiler
@@ -41,6 +42,11 @@ namespace context
 struct context;
 struct correlation_id;
 }  // namespace context
+
+namespace thread_trace
+{
+class dispatch_serialization_t;
+}  // namespace thread_trace
 
 namespace hsa
 {
@@ -61,6 +67,9 @@ struct packet_data_t
     rocprofiler_user_data_t user_data               = {.value = 0};
     pooled_signal_t*        pooled_signal           = nullptr;
     bool                    is_serialized           = false;
+
+    // Both traced and serialization-only ATT dispatches retain the serializer through completion.
+    std::shared_ptr<thread_trace::dispatch_serialization_t> att_serialization{};
 };
 
 // Internal session information that is used by write interceptor
