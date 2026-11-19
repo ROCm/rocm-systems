@@ -16311,28 +16311,38 @@ TEST(ArithBridgeTest, Gfx1250Tanh) {
                 if (!(wave.exec() & (1ULL << lane))) {
                   continue;
                 }
-                float x = half ? util::f16_to_f32(uint16_t(bits)) : std::bit_cast<float>(bits);
-                if (encoding) {
-                  x = -std::abs(x);
-                }
-                // Independent host TANH reference with inherited NaN quieting.
-                float y = std::isnan(x)
-                              ? std::bit_cast<float>(std::bit_cast<uint32_t>(x) | 0x00400000U)
-                              : std::tanh(x);
                 uint32_t result;
                 if (half) {
-                  result = util::f32_to_f16_mode(y, wave.fp16_ovfl());
-                  if (encoding) {
-                    result = output_modifier::apply<fp_format::F16>(
-                        result, output_modifier_policy<fp_format::F16>(wave, omod, clamp));
-                  }
+                  // Numerical TANH/half rounding is covered in the library;
+                  // independently construct guest flags to check decoded binding.
+                  uint64_t flags = RJ_ARITH_SEMANTICS_COMPATIBILITY |
+                                   (uint64_t(wave.fp_round_mode_f16_f64()) << 24);
+                  const unsigned denorm = wave.fp_denorm_mode_f16_f64();
+                  flags |= (denorm & 1) ? 0 : RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+                  flags |= (denorm & 2) ? 0 : RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+                  flags |= wave.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0;
+                  flags |= wave.ieee_mode() ? RJ_ARITH_FP_IEEE_MODE : 0;
+                  const uint64_t modifiers =
+                      encoding ? uint64_t(omod) * RJ_ARITH_ALU_OMOD_2 | RJ_ARITH_ALU_ABS_A |
+                                     RJ_ARITH_ALU_NEG_A | (clamp ? RJ_ARITH_ALU_CLAMP : 0)
+                               : 0;
+                  result = uint32_t(rocjitsu::test::evaluate_unary32(
+                      rj_arith_v_tanh_f16_w32_gfx1250, flags, modifiers, bits));
                   expected[lane] = (expected[lane] & (high ? 0xffffU : 0xffff0000U)) |
                                    (result << (high ? 16 : 0));
                 } else {
+                  float x = std::bit_cast<float>(bits);
+                  if (encoding) {
+                    x = -std::abs(x);
+                  }
+                  float y = std::isnan(x)
+                                ? std::bit_cast<float>(std::bit_cast<uint32_t>(x) | 0x00400000U)
+                                : std::tanh(x);
                   if (encoding) {
                     y = fp_mode::apply_omod_f32(y, omod, wave.fp_round_mode_f32());
                     if (clamp) {
-                      y = clamp_floating_result(y, wave);
+                      // CLAMP canonicalizes negative zero as well as negative values.
+                      y = std::isnan(y) || y <= 0.0f ? 0.0f : std::min(y, 1.0f);
                     }
                   }
                   expected[lane] = std::bit_cast<uint32_t>(y);
