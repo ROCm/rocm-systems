@@ -15,6 +15,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
+* Fixed the percent of peak of *L2 Cache BW* in the System Speed of Light panel on MI200 (gfx90a). It was twice the real value.
+
 ### Upcoming changes
 
 ### Known issues
