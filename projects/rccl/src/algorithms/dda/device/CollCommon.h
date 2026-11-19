@@ -34,6 +34,7 @@ using bf162 = __nv_bfloat162;
 #endif
 
 #include "algorithms/dda/device/dda_kernel_params.h"
+#include "bitops.h"
 #include "nccl_device/rccl_ptr.h"
 
 namespace dda::common {
@@ -396,10 +397,8 @@ constexpr size_t ddaLLPeerSlotPkts(size_t bankSize, int nRanks) {
 constexpr size_t kDdaLLPeerPktsPerBlock = 256;
 constexpr unsigned ddaLLBlocksPerPeer(size_t perPeerBytes, int nRanks, size_t maxPerPeer, size_t totalBlockCap) {
   const size_t nPk = perPeerBytes >> 3; // 8 payload bytes per packet
-  const size_t wanted = (nPk + kDdaLLPeerPktsPerBlock - 1) / kDdaLLPeerPktsPerBlock;
   const size_t share = totalBlockCap / (nRanks < 1 ? 1 : (size_t)nRanks);
-  const size_t capped = wanted < maxPerPeer ? wanted : maxPerPeer;
-  const size_t bpp = capped < share ? capped : share;
+  const size_t bpp = minval(divUp(nPk, kDdaLLPeerPktsPerBlock), maxPerPeer, share);
   return bpp < 1 ? 1u : (unsigned)bpp;
 }
 
