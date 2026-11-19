@@ -393,18 +393,22 @@ void WaveRaceState::satisfyOldestCounterObligations(int count, amdgpu::WaitCount
         retireEventRegisters(eventId);
         detector->markEventWaveComplete(eventId);
         if (!events.isTrimmable(eventId)) {
-          if (detector->hasSingleWave() || (ldsWasComplete && !events.hasLiveLdsIntervals(eventId)))
+          // An event whose LDS access completed earlier is already queued for a
+          // barrier while its LDS bytes are live, and leaves that queue only
+          // when a barrier retires it.
+          if (ldsWasComplete ? !events.hasLiveLdsIntervals(eventId)
+                             : detector->isOnlyLiveWave(waveId))
             detector->retireEvent(eventId);
           else if (!ldsWasComplete)
-            barrierPendingEvents.push_back(eventId);
+            queueForBarrier(eventId);
         }
       } else if (!ldsWasComplete && events.ldsAccessComplete(eventId) &&
                  events.hasLiveLdsIntervals(eventId)) {
         // The LDS acknowledgment can precede the destination VGPR writeback.
-        if (detector->hasSingleWave())
+        if (detector->isOnlyLiveWave(waveId))
           detector->retireLdsIntervals(eventId);
         else
-          barrierPendingEvents.push_back(eventId);
+          queueForBarrier(eventId);
       }
     }
     if (!eventComplete)
@@ -499,6 +503,9 @@ void WaveRaceState::recordLdsOperandRead(InstructionSnapshot instruction, uint32
   // Each actual read can conflict with a newer write, even when these bytes
   // are already represented in the wave's completed read history.
   detector->validateRead(address, waveId, lane, bytes, MemoryOrderClass::UNORDERED);
+  // The read is recorded only so that other waves can race with it.
+  if (detector->isOnlyLiveWave(waveId))
+    return;
   auto &covered = directLdsReadWidths[address];
   if (bytes <= covered)
     return;
@@ -509,19 +516,36 @@ void WaveRaceState::recordLdsOperandRead(InstructionSnapshot instruction, uint32
   auto event = detector->allocateEventId(
       waveId, instruction, MemoryEventType::LDS_OPERAND_READ, {}, 0, 0, std::move(intervals),
       std::span<const amdgpu::MemoryCounterObligation>{}, MemoryOrderClass::UNORDERED);
-  barrierPendingEvents.push_back(event);
+  queueForBarrier(event);
   covered = bytes;
 }
 
-void WaveRaceState::flushBarrierPendingEvents() {
-  for (EventId eventId : barrierPendingEvents) {
+void WaveRaceState::queueForBarrier(EventId eventId) {
+  detector->stampReleaseEpoch(eventId);
+  barrierPendingEvents.push_back(eventId);
+}
+
+void WaveRaceState::retireReleasedThrough(uint32_t epoch) {
+  size_t retired = 0;
+  bool retiredOperandRead = false;
+  while (retired < barrierPendingEvents.size() &&
+         detector->events().releaseEpoch(barrierPendingEvents[retired]) <= epoch) {
+    const EventId eventId = barrierPendingEvents[retired++];
+    retiredOperandRead |= detector->events().type(eventId) == MemoryEventType::LDS_OPERAND_READ;
+    // An event whose LDS access completed before the event did only has its
+    // LDS bytes published; it retires when it completes.
     if (detector->events().status(eventId) == EventStatus::WAVE_COMPLETE)
       detector->retireEvent(eventId);
     else
       detector->retireLdsIntervals(eventId);
   }
-  barrierPendingEvents.clear();
-  directLdsReadWidths.clear();
+  barrierPendingEvents.erase(barrierPendingEvents.begin(),
+                             barrierPendingEvents.begin() + static_cast<std::ptrdiff_t>(retired));
+  // A DWORD recorded as read must have a live operand-read event, or a later
+  // read of it would go unrecorded. Forget every recorded width once any of
+  // those events retires; a still-live DWORD only gains a redundant event.
+  if (retiredOperandRead)
+    directLdsReadWidths.clear();
 }
 
 void WaveRaceState::checkVgprReadLanes(int reg, uint64_t laneMask, uint8_t byteMask) const {
