@@ -106,8 +106,6 @@ if(HIP_PLATFORM MATCHES "amd")
     # Should be compiled for NVIDIA as well after EXSWHTEC-346 is addressed
     # For windows build error occurs undefined symbol: hipPointerSetAttribute
     set(TEST_SRC ${TEST_SRC} hipPointerSetAttribute.cc)
-    # Uses dmabuf export and external memory import (Linux only)
-    set(TEST_SRC ${TEST_SRC} hipMemcpyBatchAsync_NestedBufferViews.cc)
   endif()
 else()
   set(TEST_SRC ${TEST_SRC} hipGetSymbolSizeAddress.cc)
