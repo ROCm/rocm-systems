@@ -332,7 +332,7 @@ def summary_files_expected(request):
     """Expected database base filenames in the files CSV"""
     expected = request.config.getoption("--summary-files-expected")
     if not expected:
-        pytest.skip("--summary-files-expected not provided")
+        pytest.fail("--summary-files-expected not provided")
     return expected
 
 

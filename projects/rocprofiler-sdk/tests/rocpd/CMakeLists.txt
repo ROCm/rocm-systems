@@ -113,6 +113,7 @@ rocprofiler_add_integration_validate_test(
     CONFIG pytest.ini validate.py
     BUNDLE_TESTS
     ARGS validate.py::test_rank_env_var_rejects_malicious_name
+         validate.py::test_rank_env_cache_is_per_connection
     TIMEOUT 60
     LABELS "integration-tests;rocpd"
     PYTHON_PATH "${rocpd-site-packages}")

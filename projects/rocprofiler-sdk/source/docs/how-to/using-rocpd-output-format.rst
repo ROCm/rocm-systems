@@ -593,7 +593,7 @@ The following commands demonstrate the usage of advanced analysis options such a
 
 **Output files:**
 
-- ``files.{format}`` - List of files provided to help map the file to hostname, process ID, and rank number (when by rank is generated).
+- ``files.{format}`` - List of filenames to help map the file to process ID, hostname, and rank number (when by-rank is generated).
 
 - ``kernels_summary.{format}`` - GPU kernel execution summary.
 
@@ -601,9 +601,15 @@ The following commands demonstrate the usage of advanced analysis options such a
 
 - ``hsa_summary.{format}`` - HSA runtime API analysis.
 
-- ``memory_summary.{format}`` - Memory operation statistics.
+- ``memory_*_summary.{format}`` - Memory operation statistics, * represents ``copies``, ``allocations``, etc.
 
 - ``marker_summary.{format}`` - Marker event analysis.
+
+When generating summary-by-rank, the output files will be appended with ``summary_by_rank.{format}``, for example:
+
+- ``kernels_summary_by_rank.{format}`` - GPU kernel execution summary by rank.
+
+- ``hip_summary_by_rank.{format}`` - HIP API call statistics by rank.
 
 Generating performance summary using rocpd
 -------------------------------------------

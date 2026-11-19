@@ -29,7 +29,7 @@ import math
 import os
 import re
 
-from typing import Any, List, Tuple
+from typing import Any, List, Optional, Tuple
 from .importer import RocpdImportData, execute_statement
 from .query import export_sqlite_query
 
@@ -46,7 +46,6 @@ __all__ = [
     "main",
 ]
 
-_MISSING = object()
 # POSIX environment-variable names. Rejects quotes and other characters that would
 # change the SQL text when the name is placed in a json_extract path literal.
 _RANK_ENV_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -163,63 +162,68 @@ def export_query(
     )
 
 
-def get_rank_env_variable_name(connection: RocpdImportData) -> str:
-    """
-    Determine the environment variable name used to represent the MPI rank in the profiling database.
+# Same list and order as rocprofv3
+_POSSIBLE_RANK_COLUMNS = (
+    "MPI_RANK",  # most generic to most runtime-specific
+    "MPI_LOCALRANKID",
+    "MPI_RANKID",
+    "OMPI_COMM_WORLD_RANK",
+    "MV2_COMM_WORLD_RANK",
+    "PMI_RANK",
+    "SLURM_PROCID",
+    "PBS_NODENUM",
+)
 
-    This function inspects the 'environment' field in the 'rocpd_info_process' table to identify
-    which environment variable (e.g., MPI_RANK, OMPI_COMM_WORLD_RANK, etc.) is present and should
-    be used to group or identify ranks in summary queries. The result is cached for subsequent calls.
 
-    Args:
-        connection (RocpdImportData): The database connection object.
+class _RankEnvCache:
+    """Cache the MPI rank variable name per connection; a new connection is looked up again."""
 
-    Returns:
-        str: The name of the environment variable representing the MPI rank, or None if not found.
+    def __init__(self):
+        self.reset()
 
-    Raises:
-        ValueError: If no environment data is found in the rocpd_info_process table.
-    """
+    def reset(self):
+        """Forget the stored name so the next get() queries the database."""
+        self._connection = None
+        self._found = False
+        self._name = None
 
-    possible_rank_columns = [
-        "MPI_RANK",  # most generic to most runtime-specific
-        "MPI_LOCALRANKID",
-        "MPI_RANKID",
-        "OMPI_COMM_WORLD_RANK",
-        "MV2_COMM_WORLD_RANK",
-        "PMI_RANK",
-        "SLURM_PROCID",
-        "PBS_NODENUM",
-    ]
+    def get(self, connection):
+        """Return the rank variable name, querying only for a new connection."""
+        if not self._found or self._connection is not connection:
+            self._name = self._lookup(connection)
+            self._connection = connection
+            self._found = True
+        return self._name
 
-    cached = getattr(get_rank_env_variable_name, "_rank_env_name_cached", _MISSING)
-    if cached is not _MISSING:
-        return cached
+    @staticmethod
+    def _lookup(connection):
+        """Return ROCPROF_MPI_RANK_VAR if valid, else the most specific known rank variable, else None."""
+        rows = execute_statement(
+            connection,
+            "SELECT environment FROM rocpd_info_process ORDER BY pid, guid",
+        ).fetchall()
+        for (env_text,) in rows:
+            try:
+                env = json.loads(env_text or "{}")
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(env, dict):
+                continue
+            requested = env.get("ROCPROF_MPI_RANK_VAR")
+            if _usable_rank_env_name(requested, env):
+                return requested
+            for name in reversed(_POSSIBLE_RANK_COLUMNS):  # same precedence as today
+                if name in env:
+                    return name
+        return None
 
-    environment_vars = execute_statement(
-        connection, "SELECT environment FROM rocpd_info_process LIMIT 1"
-    ).fetchall()
 
-    if not environment_vars:
-        raise ValueError("No environment data found in rocpd_info_process table.")
+_rank_env_cache = _RankEnvCache()
 
-    env_data = json.loads(environment_vars[0][0])
 
-    # rocprofv3 records the variable it used. Accept it only when it is a plain
-    # identifier and that variable is actually present in the environment.
-    requested = env_data.get("ROCPROF_MPI_RANK_VAR")
-    if _usable_rank_env_name(requested, env_data):
-        current_rank_column = requested
-    else:
-        current_rank_column = None
-        for rank_column in possible_rank_columns:
-            if rank_column in env_data:
-                current_rank_column = (
-                    rank_column  # later matches override, most specific wins
-                )
-
-    get_rank_env_variable_name._rank_env_name_cached = current_rank_column
-    return current_rank_column
+def get_rank_env_variable_name(connection: RocpdImportData) -> Optional[str]:
+    """Return the environment variable name holding the MPI rank, or None; cached per connection."""
+    return _rank_env_cache.get(connection)
 
 
 def generate_summary_query(
@@ -885,13 +889,11 @@ def generate_all_summaries(connection: RocpdImportData, **kwargs: Any) -> None:
     )
 
     if domain_summary:
-        if not by_rank:
-            summary_queries.update(create_domain_query(connection, summary_queries))
-        else:
-            # Create domain summary per rank only if both domain_summary and summary_by_rank are enabled
-            summary_queries.update(
-                create_domain_query(connection, summary_queries, by_rank=True)
-            )
+        # by_rank selects the per-rank domain summary, which is only built when both
+        # domain_summary and summary_by_rank are enabled.
+        summary_queries.update(
+            create_domain_query(connection, summary_queries, by_rank=by_rank)
+        )
 
     # Export all summary queries
     for query_name, query in summary_queries.items():
@@ -939,7 +941,7 @@ def add_args(parser):
         "--summary-by-rank",
         action="store_true",
         default=False,
-        help="Generate summary views by-rank (or Process ID)",
+        help="Generate per-rank (per-process) summaries instead of the aggregate summaries",
     )
     summary_options.add_argument(
         "--region-categories",
