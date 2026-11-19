@@ -938,9 +938,9 @@ invoke_client_attaches()
     ROCP_INFO << "Calling tool_attach for all registered clients. # of clients: "
               << get_num_clients();
     if(!get_clients()) return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
-    auto       ret = ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
-    const bool was_attached =
-        get_attach_status() && get_attach_status()->is_attached.load(std::memory_order_acquire);
+    auto       ret          = ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+    const bool was_attached = get_attach_status() != nullptr &&
+                              get_attach_status()->is_attached.load(std::memory_order_acquire);
     std::vector<client_library*> attempted;
     bool                         invoked_attaches = false;
     for(auto& itr : *get_clients())
@@ -1001,7 +1001,7 @@ invoke_client_attaches()
         invoked_attaches = true;
         ret              = ROCPROFILER_STATUS_SUCCESS;
     }
-    if(invoked_attaches && get_attach_status())
+    if(invoked_attaches && get_attach_status() != nullptr)
         get_attach_status()->is_attached.store(true, std::memory_order_release);
     return ret;
 }
@@ -1017,6 +1017,10 @@ invoke_client_detaches()
         if(!itr) continue;
         if(!itr->configure_attach_result || !itr->configure_attach_result->tool_detach)
         {
+            // A legacy client has no detach table. Leaving it running is a successful no-op.
+            if(itr->configure_attach_result == nullptr &&
+               ret == ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED)
+                ret = ROCPROFILER_STATUS_SUCCESS;
             ROCP_WARNING << fmt::format(
                 "rocprofiler-sdk client '{}' does not implement tool_detach and does not "
                 "support detach. It remains active",

@@ -31,6 +31,12 @@
 #include <gtest/gtest.h>
 
 #include <dlfcn.h>
+#include <stdexcept>
+
+extern "C" rocprofiler_status_t
+rocprofiler_attach();
+extern "C" rocprofiler_status_t
+rocprofiler_detach();
 
 TEST(rocprofiler_lib, configure_attach_uses_configure_symbol_owner)
 {
@@ -64,4 +70,40 @@ TEST(rocprofiler_lib, configure_attach_uses_configure_symbol_owner)
               nullptr);
     EXPECT_EQ(rocprofiler::registration::resolve_attach_for_configure(nullptr, attach), nullptr);
     EXPECT_EQ(rocprofiler::registration::resolve_attach_for_configure(configure, nullptr), nullptr);
+}
+
+TEST(rocprofiler_lib, detach_with_legacy_and_attachable_clients)
+{
+    auto  path   = fmt::format("$ORIGIN/../lib/{}", ROCPROFILER_TEST_REGISTRATION_ATTACH_FIXTURE);
+    auto* handle = dlopen(path.c_str(), RTLD_NOW | RTLD_GLOBAL);
+    ASSERT_NE(handle, nullptr) << dlerror();
+    auto close_handle = rocprofiler::common::scope_destructor{[handle]() { dlclose(handle); }};
+
+    rocprofiler_configure_attach_func_t configure_attach = nullptr;
+    *(void**) (&configure_attach) = dlsym(handle, "rocprofiler_configure_attach");
+    ASSERT_NE(configure_attach, nullptr);
+    auto* callbacks = configure_attach(0, nullptr, 0, nullptr);
+    ASSERT_NE(callbacks, nullptr);
+    static int detach_calls = 0;
+    callbacks->tool_attach =
+        [](rocprofiler_client_detach_t, rocprofiler_context_id_t*, uint64_t, void*) { return 0; };
+    callbacks->tool_detach = [](void*) {
+        if(++detach_calls == 1) throw std::runtime_error{"test detach failure"};
+    };
+
+    // A forced legacy client has no attach table; the fixture joins only on attach.
+    auto legacy = [](uint32_t, const char*, uint32_t, rocprofiler_client_id_t*) {
+        static auto result = rocprofiler_tool_configure_result_t{
+            sizeof(rocprofiler_tool_configure_result_t), nullptr, nullptr, nullptr};
+        return &result;
+    };
+    ASSERT_EQ(rocprofiler_force_configure(legacy), ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_EQ(rocprofiler_detach(), ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_EQ(detach_calls, 0);
+
+    ASSERT_EQ(rocprofiler_attach(), ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_EQ(rocprofiler_detach(), ROCPROFILER_STATUS_ERROR);
+    ASSERT_EQ(rocprofiler_attach(), ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_EQ(rocprofiler_detach(), ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_EQ(detach_calls, 2);
 }
