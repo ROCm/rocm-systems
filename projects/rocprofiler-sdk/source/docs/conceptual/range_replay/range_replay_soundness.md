@@ -43,7 +43,7 @@ GPU dependencies so the table below can be unit tested directly.
 | Another thread dispatches to the bound agent | `CONCURRENT_DISPATCH` | cross-thread, folded in |
 | Async copy writes memory owned by the bound agent | `MEMORY_COPY_IN_RANGE` | cross-thread, folded in |
 | Any code object is unloaded while the range is bound | `CODE_OBJECT_CHANGED_IN_RANGE` | cross-thread, folded in |
-| Device allocation created or freed inside the range | `ALLOCATION_CHANGED_IN_RANGE` | close time |
+| Device allocation created or freed inside the range, including a free followed by an allocation at the same address | `ALLOCATION_CHANGED_IN_RANGE` | close time |
 | Snapshot capture or a later snapshot failed | `SNAPSHOT_FAILED` | snapshot time |
 | Kernarg staging allocation failed | `STAGING_FAILED` | close time |
 | Queue interposition is enabled | `UNSUPPORTED_QUEUE_PATH` | `begin` |

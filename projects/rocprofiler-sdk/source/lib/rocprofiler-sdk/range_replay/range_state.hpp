@@ -38,6 +38,7 @@
 
 #include "lib/rocprofiler-sdk/hsa/rocprofiler_packet.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
 #include "lib/rocprofiler-sdk/range_replay/replay_callbacks.hpp"
 
 #include <rocprofiler-sdk/agent.h>
@@ -161,10 +162,12 @@ struct range_context_t
 
     kernel_replay::memory_snapshot::device_snapshot_t snapshot       = {};
     bool                                              snapshot_taken = false;
-    // Base pointers of the tracked allocations the snapshot covers, sorted. Re-checked at close: a
-    // range that allocated or freed device memory while open has regions the snapshot cannot
-    // restore, so it is declined rather than replayed against partially-restored inputs.
-    std::vector<void*> snapshot_ptrs = {};
+    // The tracked allocations the snapshot covers: base pointer, size and lifetime. Re-checked at
+    // close: a range that allocated or freed device memory while open has regions the snapshot
+    // cannot restore, so it is declined rather than replayed against partially-restored inputs. A
+    // free followed by an allocation at the same address is a different allocation, so the pointer
+    // alone is not enough.
+    kernel_replay::memory_tracker::tracked_map_t snapshot_allocations = {};
 
     std::shared_ptr<external_decline_t> external = {};
 

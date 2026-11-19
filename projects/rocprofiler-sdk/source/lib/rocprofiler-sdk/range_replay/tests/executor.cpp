@@ -40,6 +40,7 @@
 
 #include "lib/rocprofiler-sdk/range_replay/executor.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
 #include "lib/rocprofiler-sdk/range_replay/digest.hpp"
 #include "lib/rocprofiler-sdk/range_replay/range_state.hpp"
 
@@ -395,4 +396,64 @@ TEST(range_replay_executor, only_changed_regions_are_counted_as_divergent)
 TEST(range_replay_executor, an_empty_snapshot_digests_to_nothing)
 {
     EXPECT_TRUE(rr::snapshot_digests(snapshot_t{}).empty());
+}
+
+// The entry snapshot is restored into whatever lives at its addresses at close, so the close-time
+// check has to tell a surviving allocation from one that was freed and allocated again at the same
+// address. A list of base pointers cannot: it is identical in both cases.
+namespace
+{
+namespace mt = rocprofiler::kernel_replay::memory_tracker;
+
+constexpr auto kAgent      = hsa_agent_t{.handle = 1};
+constexpr auto kOtherAgent = hsa_agent_t{.handle = 2};
+
+mt::alloc_info_t
+allocation(size_t size, uint64_t lifetime, hsa_agent_t agent = kAgent)
+{
+    return mt::alloc_info_t{size, agent, lifetime};
+}
+}  // namespace
+
+TEST(range_replay_executor, unchanged_allocations_match_the_entry_snapshot)
+{
+    const auto entry =
+        mt::tracked_map_t{{ADDR_LOW, allocation(4096, 1)}, {ADDR_MID, allocation(8192, 2)}};
+    EXPECT_TRUE(mt::allocations_match(kAgent, entry, entry));
+    EXPECT_TRUE(mt::allocations_match(kAgent, mt::tracked_map_t{}, mt::tracked_map_t{}));
+}
+
+TEST(range_replay_executor, a_freed_address_allocated_again_is_a_different_allocation)
+{
+    const auto entry = mt::tracked_map_t{{ADDR_LOW, allocation(4096, 1)}};
+    // Same address and same size: the pointer list is unchanged, the allocation is not.
+    const auto reused = mt::tracked_map_t{{ADDR_LOW, allocation(4096, 7)}};
+    EXPECT_FALSE(mt::allocations_match(kAgent, entry, reused));
+}
+
+TEST(range_replay_executor, an_address_reused_at_another_size_does_not_match)
+{
+    const auto entry   = mt::tracked_map_t{{ADDR_LOW, allocation(8192, 1)}};
+    const auto smaller = mt::tracked_map_t{{ADDR_LOW, allocation(4096, 7)}};
+    EXPECT_FALSE(mt::allocations_match(kAgent, entry, smaller));
+}
+
+TEST(range_replay_executor, an_allocation_made_or_freed_in_the_range_does_not_match)
+{
+    const auto entry =
+        mt::tracked_map_t{{ADDR_LOW, allocation(4096, 1)}, {ADDR_MID, allocation(4096, 2)}};
+    const auto added = mt::tracked_map_t{{ADDR_LOW, allocation(4096, 1)},
+                                         {ADDR_MID, allocation(4096, 2)},
+                                         {ADDR_HIGH, allocation(4096, 3)}};
+    const auto freed = mt::tracked_map_t{{ADDR_LOW, allocation(4096, 1)}};
+    EXPECT_FALSE(mt::allocations_match(kAgent, entry, added));
+    EXPECT_FALSE(mt::allocations_match(kAgent, entry, freed));
+}
+
+TEST(range_replay_executor, another_agents_allocations_are_not_compared)
+{
+    const auto entry = mt::tracked_map_t{{ADDR_LOW, allocation(4096, 1)}};
+    const auto now   = mt::tracked_map_t{{ADDR_LOW, allocation(4096, 1)},
+                                       {ADDR_HIGH, allocation(4096, 9, kOtherAgent)}};
+    EXPECT_TRUE(mt::allocations_match(kAgent, entry, now));
 }
