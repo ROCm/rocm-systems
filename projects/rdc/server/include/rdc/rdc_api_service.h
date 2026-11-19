@@ -25,6 +25,7 @@ THE SOFTWARE.
 #include <grpcpp/server_context.h>
 
 #include <condition_variable>  // NOLINT
+#include <deque>
 #include <map>
 #include <memory>
 #include <mutex>  // NOLINT
@@ -206,14 +207,17 @@ class RdcAPIServiceImpl final : public ::rdc::RdcAPI::Service {
 
   // The most RegisterPolicy streams rdcd serves at once, over all clients and groups.
   static constexpr size_t kMaxPolicyStreams = 64;
+  // The most notifications a stream holds for its client; a full stream drops its oldest.
+  // One check of a full group notifies up to 192 (64 GPUs, 3 conditions).
+  static constexpr size_t kMaxPendingNotifications = 1024;
 
-  // One RegisterPolicy stream. PolicyCallback() leaves the latest notification in it; the
-  // stream's own handler thread writes it to the client.
+  // One RegisterPolicy stream. PolicyCallback() queues each notification in it; the
+  // stream's own handler thread writes them to the client in order.
   struct PolicyStream {
     std::mutex mutex;  // guards the fields below
     std::condition_variable cv;
-    rdc_policy_callback_response_t response;
-    bool pending = false;   // response is not written yet
+    std::deque<rdc_policy_callback_response_t> pending;  // not written yet, oldest first
+    size_t dropped = 0;     // dropped from a full stream and not logged yet
     bool stop = false;      // UnRegisterPolicy or shutdown ends the stream
     bool shutdown = false;  // shutdown ended it: the client learns that rdcd stops
   };

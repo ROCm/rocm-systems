@@ -21,7 +21,8 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `rdcd` no longer keeps a thread and memory for each policy registration whose client went away, and no longer hangs at shutdown while policy registrations arrive.
 
-- All clients registered for the policies of one GPU group receive every notification. Each notification went to only one of them.
+- All clients registered for the policies of one GPU group receive every notification. Each notification went to only one of them, and a client could miss some when several GPUs met a condition at once.
+  - `rdcd` holds up to 1,024 notifications for a client that is slow to read them, and drops the oldest beyond that.
 
 - `rdc_policy_register()` through `rdcd` works again for a group whose registration ended by itself, for example because `rdcd` restarted. It returned `RDC_ST_CONFLICT` for that group until the connection was closed.
 

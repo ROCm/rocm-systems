@@ -932,7 +932,7 @@ int RdcAPIServiceImpl::PolicyCallback(rdc_policy_callback_response_t* userData) 
     return 1;
   }
 
-  // Every stream of the group gets the notification; a stream keeps only the latest one.
+  // Every stream of the group queues the notification.
   std::lock_guard<std::mutex> guard(policy_mutex_);
   auto group = policy_streams_.find(userData->group_id);
   if (group == policy_streams_.end()) {
@@ -940,8 +940,11 @@ int RdcAPIServiceImpl::PolicyCallback(rdc_policy_callback_response_t* userData) 
   }
   for (auto& stream : group->second) {
     std::lock_guard<std::mutex> lock(stream->mutex);
-    stream->response = *userData;
-    stream->pending = true;
+    if (stream->pending.size() >= kMaxPendingNotifications) {
+      stream->pending.pop_front();
+      stream->dropped++;
+    }
+    stream->pending.push_back(*userData);
     stream->cv.notify_all();
   }
   return 0;
@@ -1020,22 +1023,30 @@ void RdcAPIServiceImpl::end_policy_stream(uint32_t group_id,
   while (true) {
     rdc_policy_callback_response_t response;
     bool send = false;
+    size_t dropped = 0;
     {
       std::unique_lock<std::mutex> lock(stream->mutex);
       stream->cv.wait_for(lock, std::chrono::seconds(1),
-                          [&stream] { return stream->pending || stream->stop; });
+                          [&stream] { return !stream->pending.empty() || stream->stop; });
+      // A stopped stream drops the notifications it still holds.
       if (stream->stop) {
         shutdown = stream->shutdown;
         break;
       }
-      if (stream->pending) {
-        response = stream->response;
-        stream->pending = false;
+      if (!stream->pending.empty()) {
+        response = stream->pending.front();
+        stream->pending.pop_front();
         send = true;
       }
+      dropped = stream->dropped;
+      stream->dropped = 0;
     }
     if (context->IsCancelled()) {
       break;
+    }
+    if (dropped > 0) {
+      RDC_LOG(RDC_DEBUG, "Policy stream for group " << group_id << " dropped " << dropped
+                                                    << " notifications its client did not read");
     }
     // Written without a lock: a slow client must not block RDC's policy thread.
     if (send) {
