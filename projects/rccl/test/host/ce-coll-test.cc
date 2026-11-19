@@ -819,8 +819,7 @@ class CeAlltoAllvSyncMicrotest : public ::testing::TestWithParam<LaunchPath> {
   std::function<void(std::vector<size_t>&)> corruptGathered_;  // edits the gathered matrix before any rank runs
 };
 
-// Peers wait for an equal ceSeqNum, so the barrier count of one batch must not depend on the caller's stream
-// kind: 16 ops at freq 8 is one intra-batch barrier on every arm, rounded up to two only under graph capture.
+// Peers wait for equal ceSeqNum: 16 ops at freq 8 is one barrier on every stream kind, two only under capture.
 TEST_P(CeAlltoAllvSyncMicrotest, LaunchBatchOps16OpsFreq8_BarrierCountDoesNotDependOnStreamKind) {
   constexpr int kRanks = 16;
   constexpr int kOps = 16;
