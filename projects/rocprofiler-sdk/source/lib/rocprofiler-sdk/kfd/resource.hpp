@@ -92,7 +92,8 @@ public:
     amd_signal_t* abi() const { return _signal; }
 
     void reset(int64_t value = 1);
-    void wait() const;
+    /// With spin, busy-waits instead of sleeping between polls (for short, bounded waits).
+    void wait(bool spin = false) const;
 
 private:
     kfd_signal_t(std::shared_ptr<kfd_memory_pool_t> memory, amd_signal_t* signal);

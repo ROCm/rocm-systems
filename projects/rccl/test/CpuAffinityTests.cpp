@@ -14,6 +14,8 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <thread>
+#include <vector>
 
 #include "StandaloneUtils.hpp"
 #include "common/ErrCode.hpp"
@@ -91,6 +93,37 @@ namespace RcclUnitTesting
       }
       return count;
     }
+
+    // Widen the calling thread to all online CPUs (capped at CPU_SETSIZE); 'granted' gets what the kernel allowed.
+    bool WidenToOnlineCpus(cpu_set_t* granted)
+    {
+      long numCpus = sysconf(_SC_NPROCESSORS_ONLN);
+      if (numCpus <= 0) return false;
+
+      cpu_set_t fullMask;
+      CPU_ZERO(&fullMask);
+      int maxCpus = static_cast<int>(std::min<long>(numCpus, CPU_SETSIZE));
+      for (int cpu = 0; cpu < maxCpus; ++cpu) {
+        CPU_SET(cpu, &fullMask);
+      }
+      if (sched_setaffinity(0, sizeof(fullMask), &fullMask) != 0) return false;
+
+      CPU_ZERO(granted);
+      return sched_getaffinity(0, sizeof(*granted), granted) == 0;
+    }
+
+    // Set 'expected' to the mask RCCL pins a thread on 'device' to: (process mask) AND (GPU-local
+    // mask), or the process mask if that is empty. Returns -1 if sysfs lacks the GPU-local mask,
+    // else whether 'expected' is narrower than 'before'.
+    int ExpectedPinnedMask(int device, const cpu_set_t& before, cpu_set_t* expected)
+    {
+      cpu_set_t localMask;
+      if (GetDeviceLocalCpuMask(device, &localMask) < 0) return -1;
+      CPU_AND(expected, &before, &localMask);
+      // RCCL's ncclOsCpuCount() guard skips the affinity call on an empty intersection.
+      if (CPU_COUNT(expected) == 0) memcpy(expected, &before, sizeof(before));
+      return CPU_COUNT(expected) < CPU_COUNT(&before) ? 1 : 0;
+    }
   }
 
   /**
@@ -116,57 +149,23 @@ namespace RcclUnitTesting
         GTEST_SKIP() << "No devices available.";
       }
 
-      // Widen to the full online CPU set so the GPU-local subset is more likely to be
-      // strictly narrower, then record what the kernel actually granted.
-      long numCpus = sysconf(_SC_NPROCESSORS_ONLN);
-      ASSERT_GT(numCpus, 0);
-
-      cpu_set_t fullMask;
-      CPU_ZERO(&fullMask);
-
-      // cpu_set_t is fixed at CPU_SETSIZE, so on larger hosts the widening is partial.
-      // That only narrows the test's reach; dynamic CPU_ALLOC sets are out of scope.
-      int maxCpus = static_cast<int>(std::min<long>(numCpus, CPU_SETSIZE));
-      for (int cpu = 0; cpu < maxCpus; ++cpu) {
-        CPU_SET(cpu, &fullMask);
-      }
-
-      if (sched_setaffinity(0, sizeof(fullMask), &fullMask) != 0) {
+      cpu_set_t before;
+      if (!WidenToOnlineCpus(&before)) {
         GTEST_SKIP() << "Could not widen CPU affinity, cannot exercise the "
                      << "GPU-local subset case: " << strerror(errno);
       }
 
-      cpu_set_t before;
-      CPU_ZERO(&before);
-      ASSERT_EQ(sched_getaffinity(0, sizeof(before), &before), 0)
-          << "sched_getaffinity failed: " << strerror(errno);
-
-      cpu_set_t localMask;
-      int localCpus = GetDeviceLocalCpuMask(0, &localMask);
-
-      // RCCL pins the calling thread to (process mask) AND (GPU-local mask). Predict that
-      // set from what we can read, so we can assert the exact mask below.
+      // Predict the mask RCCL pins the calling thread to, so we can assert it exactly below.
       cpu_set_t expected;
-      CPU_ZERO(&expected);
-      bool haveExpected = false;
-      if (localCpus < 0) {
+      int narrows = ExpectedPinnedMask(0, before, &expected);
+      bool haveExpected = narrows >= 0;
+      if (!haveExpected) {
         TEST_WARN("Could not read the NUMA-local CPU set of GPU 0 from sysfs, cannot tell "
                   "whether this host narrows the affinity mask.");
-      } else {
-        CPU_AND(&expected, &before, &localMask);
-        haveExpected = true;
-        if (CPU_COUNT(&expected) == 0) {
-          // Empty intersection: RCCL's ncclOsCpuCount() guard skips the affinity call, so
-          // the calling thread keeps the process mask.
-          CPU_ZERO(&expected);
-          memcpy(&expected, &before, sizeof(before));
-          TEST_WARN("GPU 0 has no NUMA-local CPU in the process mask, so RCCL never pins "
-                    "here: the invariant is still checked, but the behavior is not exercised.");
-        } else if (CPU_COUNT(&expected) >= CPU_COUNT(&before)) {
-          TEST_WARN("GPU 0 is local to all %d CPUs of the process mask, so RCCL never narrows it "
-                    "here: the invariant is still checked, but the behavior is not exercised. "
-                    "Real coverage requires a multi-NUMA host.", CPU_COUNT(&before));
-        }
+      } else if (!narrows) {
+        TEST_WARN("GPU 0 does not narrow the %d CPUs of the process mask, so RCCL never narrows it "
+                  "here: the invariant is still checked, but the behavior is not exercised. "
+                  "Real coverage requires a multi-NUMA host.", CPU_COUNT(&before));
       }
 
       ncclComm_t comm;
@@ -202,6 +201,77 @@ namespace RcclUnitTesting
             << "ncclCommInitRank (expected " << CPU_COUNT(&expected) << " CPUs, got "
             << CPU_COUNT(&after) << "): RCCL 2.29.7 comm-init affinity behavior "
             << "(AICOMRCCL-1537) regressed";
+      }
+    });
+  }
+
+  /**
+   * \brief Verify concurrent ncclCommInitRank calls each pin their thread to their own GPU's NUMA CPUs.
+   *
+   * Multi-rank form of PinnedToLocalAfterInitRank; only bites on multi-NUMA hosts.
+   * The strtok() race is covered by CpusetMicrotest.StrToCpuset_ConcurrentParsesDoNotInterfere.
+   * ******************************************************************************************/
+  TEST(CpuAffinity, ConcurrentInitRanksPinnedToOwnLocalCpus)
+  {
+    RUN_ISOLATED_TEST("CpuAffinity_ConcurrentInitRanksPinnedToOwnLocalCpus", []()
+    {
+      int numDevices;
+      HIPCALL(hipGetDeviceCount(&numDevices));
+      if (numDevices < 2) {
+        GTEST_SKIP() << "Requires at least 2 devices.";
+      }
+
+      // Threads created below inherit this widened mask.
+      cpu_set_t before;
+      if (!WidenToOnlineCpus(&before)) {
+        GTEST_SKIP() << "Could not widen CPU affinity, cannot exercise the "
+                     << "GPU-local subset case: " << strerror(errno);
+      }
+
+      std::vector<cpu_set_t> expected(numDevices);
+      bool narrowed = false;
+      for (int dev = 0; dev < numDevices; ++dev) {
+        int narrows = ExpectedPinnedMask(dev, before, &expected[dev]);
+        if (narrows < 0) {
+          GTEST_SKIP() << "Could not read the NUMA-local CPU set of GPU " << dev << " from sysfs.";
+        }
+        narrowed |= narrows == 1;
+      }
+      if (!narrowed) {
+        TEST_WARN("No GPU is local to a strict subset of the process mask, so RCCL never narrows it "
+                  "here: the invariant is still checked, but the behavior is not exercised. "
+                  "Real coverage requires a multi-NUMA host.");
+      }
+
+      ncclUniqueId id;
+      NCCLCHECK(ncclGetUniqueId(&id));
+
+      std::vector<ncclComm_t>   comms(numDevices, nullptr);
+      std::vector<ncclResult_t> initResults(numDevices, ncclInternalError);
+      std::vector<cpu_set_t>    after(numDevices);
+      std::vector<int>          getAffinityStatus(numDevices, -1);
+      std::vector<std::thread>  threads;
+      for (int dev = 0; dev < numDevices; ++dev) {
+        threads.emplace_back([&, dev]() {
+          HIPCALL(hipSetDevice(dev));
+          initResults[dev] = ncclCommInitRank(&comms[dev], numDevices, id, dev);
+          CPU_ZERO(&after[dev]);
+          getAffinityStatus[dev] = sched_getaffinity(0, sizeof(after[dev]), &after[dev]);
+        });
+      }
+      for (auto& thread : threads) thread.join();
+
+      for (int dev = 0; dev < numDevices; ++dev) {
+        if (initResults[dev] == ncclSuccess) NCCLCHECK(ncclCommDestroy(comms[dev]));
+      }
+
+      for (int dev = 0; dev < numDevices; ++dev) {
+        ASSERT_EQ(initResults[dev], ncclSuccess) << "ncclCommInitRank failed for rank " << dev;
+        ASSERT_EQ(getAffinityStatus[dev], 0) << "sched_getaffinity failed for rank " << dev;
+        EXPECT_TRUE(CPU_EQUAL(&expected[dev], &after[dev]))
+            << "Rank " << dev << " was pinned to " << CPU_COUNT(&after[dev]) << " CPUs instead of the "
+            << CPU_COUNT(&expected[dev]) << " NUMA-local CPUs of its GPU after concurrent "
+            << "ncclCommInitRank";
       }
     });
   }

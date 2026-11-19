@@ -38,7 +38,9 @@ public:
   ~AmdGpuCodeObject();
 
   /// @brief Load a standalone device ELF from @p elf_path.
+  /// @details Expected loading and parsing failures leave is_valid() false.
   /// @param[in] elf_path Path to a standalone device ELF file.
+  /// @throws std::bad_alloc if memory allocation fails.
   explicit AmdGpuCodeObject(const std::string &elf_path);
 
   /// @brief Construct from raw ELF bytes in memory.

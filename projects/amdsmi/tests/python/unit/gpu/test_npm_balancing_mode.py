@@ -42,8 +42,6 @@ here by patching AMDSMI_NPM_BALANCING_MODE_MAX up by one and checking its bit
 decodes too (falling back to "N/A" since no name is registered for it).
 """
 
-from __future__ import annotations
-
 import unittest
 from unittest import mock
 

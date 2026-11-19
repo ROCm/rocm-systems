@@ -141,9 +141,10 @@ class RdcCacheManagerImpl : public RdcCacheManager {
                                        const rdc_field_value& value) override;
 
  private:
-  void set_summary(const FieldSummaryStats& stats, rdc_stats_summary_t& gpu,
+  // Returns whether `stats` has samples, which are then added to `summary`.
+  bool set_summary(const FieldSummaryStats& stats, rdc_stats_summary_t& gpu,
                    rdc_stats_summary_t& summary,  // NOLINT
-                   unsigned int adjuster);
+                   int64_t adjuster);
   void set_average_summary(rdc_stats_summary_t& summary,
                            uint32_t num_gpus);  // NOLINT
   // The stopped job that stopped first (ties: the one started first), or

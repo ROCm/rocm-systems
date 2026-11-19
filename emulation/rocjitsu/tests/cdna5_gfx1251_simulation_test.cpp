@@ -73,6 +73,7 @@ private:
 class Gfx1251SimulatorInstructionTest : public testing::TestWithParam<Gfx1251E2eCase> {};
 
 TEST_P(Gfx1251SimulatorInstructionTest, DispatchesCodeObjectAndVerifiesExactOutput) {
+  util::StringDiagnostic admission_diagnostic;
   using namespace rocjitsu::amdhsa;
 
   const Gfx1251E2eCase &test_case = GetParam();
@@ -172,8 +173,10 @@ TEST_P(Gfx1251SimulatorInstructionTest, DispatchesCodeObjectAndVerifiesExactOutp
   soc->set_plugin_group(std::move(plugin_group));
   simdojo::SimulationEngine engine(loaded.engine_config);
   engine.topology().set_root(loaded.take_root());
-  loaded.wire_links(engine.topology());
-  engine.create();
+  ASSERT_TRUE(loaded.wire_links(engine.topology(), admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   code_object.load_to_memory(memory, kCodeObjectBase);
   for (uint32_t lane = 0; lane < kWaveSize; ++lane)
@@ -216,49 +219,49 @@ INSTANTIATE_TEST_SUITE_P(AllNineInstructions, Gfx1251SimulatorInstructionTest,
                              Gfx1251E2eCase{"PkLshlAddU64",
                                             "v_pk_lshl_add_u64",
                                             Gfx1251E2eSetup::PackedLshlAddU64,
-                                            {0xCC7E4004u, 0x1C421908u},
+                                            {0xCC7E0004u, 0x04421908u},
                                             {39u, 0u, 59u, 0u},
                                             4},
                              Gfx1251E2eCase{"PkAddNcU64",
                                             "v_pk_add_nc_u64",
                                             Gfx1251E2eSetup::PackedAddU64,
-                                            {0xCC4C4004u, 0x1A021908u},
+                                            {0xCC4C0004u, 0x02021908u},
                                             {9u, 0u, 14u, 0u},
                                             4},
                              Gfx1251E2eCase{"PkSubNcU64",
                                             "v_pk_sub_nc_u64",
                                             Gfx1251E2eSetup::PackedSubU64,
-                                            {0xCC4D4004u, 0x1A021908u},
+                                            {0xCC4D0004u, 0x02021908u},
                                             {2u, 0u, 3u, 0u},
                                             4},
                              Gfx1251E2eCase{"PkAddF64",
                                             "v_pk_add_f64",
                                             Gfx1251E2eSetup::PackedF64Binary,
-                                            {0xCC4B4004u, 0x1A021908u},
+                                            {0xCC4B0004u, 0x02021908u},
                                             {0u, 0x40180000u, 0u, 0x40200000u},
                                             4},
                              Gfx1251E2eCase{"PkMulF64",
                                             "v_pk_mul_f64",
                                             Gfx1251E2eSetup::PackedF64Binary,
-                                            {0xCC3C4004u, 0x1A021908u},
+                                            {0xCC3C0004u, 0x02021908u},
                                             {0u, 0x40200000u, 0u, 0x402e0000u},
                                             4},
                              Gfx1251E2eCase{"PkMaxNumF64",
                                             "v_pk_max_num_f64",
                                             Gfx1251E2eSetup::PackedF64Binary,
-                                            {0xCC4E4004u, 0x1A021908u},
+                                            {0xCC4E0004u, 0x02021908u},
                                             {0u, 0x40100000u, 0u, 0x40140000u},
                                             4},
                              Gfx1251E2eCase{"PkMinNumF64",
                                             "v_pk_min_num_f64",
                                             Gfx1251E2eSetup::PackedF64Binary,
-                                            {0xCC4F4004u, 0x1A021908u},
+                                            {0xCC4F0004u, 0x02021908u},
                                             {0u, 0x40000000u, 0u, 0x40080000u},
                                             4},
                              Gfx1251E2eCase{"PkFmaF64",
                                             "v_pk_fma_f64",
                                             Gfx1251E2eSetup::PackedF64Fma,
-                                            {0xCC3B4004u, 0x1C421908u},
+                                            {0xCC3B0004u, 0x04421908u},
                                             {0u, 0x402e0000u, 0u, 0x403a0000u},
                                             4},
                              // Exact public LLVM gfx1251_asm_wmma_w32.s base-form encoding.
@@ -273,6 +276,7 @@ INSTANTIATE_TEST_SUITE_P(AllNineInstructions, Gfx1251SimulatorInstructionTest,
                          });
 
 TEST(Gfx1251SimulatorTest, DispatchesTargetSpecificSetregSemantics) {
+  util::StringDiagnostic admission_diagnostic;
   using namespace rocjitsu::amdhsa;
 
   constexpr uint64_t kCodeObjectBase = 0x100000;
@@ -350,8 +354,10 @@ TEST(Gfx1251SimulatorTest, DispatchesTargetSpecificSetregSemantics) {
   ASSERT_NE(memory, nullptr);
   simdojo::SimulationEngine engine(loaded.engine_config);
   engine.topology().set_root(loaded.take_root());
-  loaded.wire_links(engine.topology());
-  engine.create();
+  ASSERT_TRUE(loaded.wire_links(engine.topology(), admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   code_object.load_to_memory(memory, kCodeObjectBase);
   for (uint32_t lane = 0; lane < kWaveSize; ++lane)

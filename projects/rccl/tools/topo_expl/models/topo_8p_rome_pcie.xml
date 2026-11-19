@@ -3,7 +3,7 @@
  - See LICENSE.txt for license information
  -->
 <system version="2">
-  <cpu numaid="0" affinity="00000000,00000000,ffffffff,ffffffff" arch="x86_64" vendor="AuthenticAMD" familyid="143" modelid="49">
+  <cpu numaid="0" affinity="00000000,00000000,ffffffff,ffffffff" arch="x86_64" vendor="AuthenticAMD" familyid="23" modelid="49">
     <pci busid="0000:41:00.0" class="0x060400" link_speed="16 GT/s" link_width="16">
       <pci busid="0000:43:00.0" class="0x038000" link_speed="16 GT/s" link_width="16">
         <gpu dev="0" sm="64" gcn="906" arch="38911" rank="0" gdr="1"/>
@@ -25,7 +25,7 @@
       </pci>
     </pci>
   </cpu>
-  <cpu numaid="1" affinity="ffffffff,ffffffff,00000000,00000000" arch="x86_64" vendor="AuthenticAMD" familyid="143" modelid="49">
+  <cpu numaid="1" affinity="ffffffff,ffffffff,00000000,00000000" arch="x86_64" vendor="AuthenticAMD" familyid="23" modelid="49">
     <pci busid="0000:e1:00.0" class="0x060400" link_speed="16 GT/s" link_width="16">
       <pci busid="0000:e3:00.0" class="0x038000" link_speed="16 GT/s" link_width="16">
         <gpu dev="4" sm="64" gcn="906" arch="38911" rank="4" gdr="1"/>
