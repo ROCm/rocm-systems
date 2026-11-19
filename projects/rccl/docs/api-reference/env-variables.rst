@@ -1665,6 +1665,15 @@ threshold table introduced for gfx1250.
       - | ``0``: Cooperative writer for every launch, no dynamic LDS (default).
         | ``1``: Staged writer from 2 MiB shards on gfx1250 wave32 communicators.
 
+    * - | ``RCCL_DDA_LL128_AR_PEER_PARALLEL``
+        | Selects the DDA LL128 ``ncclAllReduce`` one-shot and two-shot kernels.
+          The peer-parallel kernels give each slice a group of up to 16 warps, one
+          per rank, that split its peers, so the per-slice peer loop shrinks as
+          ``nRanks`` grows. With them, the one-shot cap is rank-scaled (4 MiB /
+          ``nRanks`` on gfx1250 SPX).
+      - | ``1``: Peer-parallel kernels (default).
+        | ``0``: One warp per slice, and the fixed one-shot cap.
+
     * - | ``RCCL_DDA_A2A_PUSH``
         | Selects the ``ncclAllToAll`` kernel on the DDA fabric (VMM) tier. The push
           kernels write each rank's chunks straight into its peers' DDA scratch
