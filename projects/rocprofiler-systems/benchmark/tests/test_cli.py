@@ -70,7 +70,11 @@ def test_end_to_end_json(tmp_path, capsys):
     assert rc == 0
     assert doc["meta"]["repetitions"] == 5
     assert len(doc["commands"]["A"]["runs"]) == 5
-    run_keys = {f.name for f in dataclasses.fields(runner.RunResult)} - {"name", "index"}
+    run_keys = {f.name for f in dataclasses.fields(runner.RunResult)} - {
+        "name",
+        "index",
+        "timed_out",
+    }
     assert set(doc["commands"]["A"]["runs"][0]) == run_keys
     assert doc["comparison"]["B_vs_A"]["resolvable_from_noise"]
     assert "WALL-CLOCK TIME" in capsys.readouterr().out
@@ -163,6 +167,11 @@ def test_run_session_records_env_per_command(tmp_path, capsys):
     assert rc == 0
     assert doc["commands"]["A"]["env"] == {}
     assert doc["commands"]["B"]["env"] == {"X": "y"}
+
+
+def test_timeout_has_a_default_and_the_flag_overrides_it() -> None:
+    assert config(parse()).timeout == cli.DEFAULT_TIMEOUT_S
+    assert config(parse("--timeout", "7")).timeout == 7
 
 
 def test_mode_flag_overrides_runs_from_run_block():

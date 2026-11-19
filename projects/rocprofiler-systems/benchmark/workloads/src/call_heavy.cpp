@@ -7,6 +7,9 @@
 
 namespace
 {
+// 32-byte frames: an 8 MiB stack overflows at depth 262144.
+constexpr std::uint64_t k_max_depth = 100000;
+
 __attribute__((noinline)) std::uint64_t
                           chain(std::uint64_t x, std::uint64_t depth)
 {
@@ -34,6 +37,7 @@ main(int argc, char** argv)
         workload::parse_args(argc, argv, { 16, 77000000, 1 }, "call_heavy",
                              "size = call depth per chain, iters = number of chains "
                              "(total calls = size * iters).");
+    if(a.size > k_max_depth) return 2;
     bench_hook(BENCH_HOOK_WORK_BEGIN);
     const std::uint64_t sum = run(a);
     bench_hook(BENCH_HOOK_WORK_END);

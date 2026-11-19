@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <charconv>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -61,9 +62,10 @@ parse_args(int argc, char** argv, args defaults, const char* name, const char* h
         }
         else if(i + 1 < argc)
             value = argv[++i];
-        char*         end = nullptr;
-        std::uint64_t v   = std::strtoull(value.c_str(), &end, 10);
-        if(value.empty() || *end != '\0') usage(2);
+        std::uint64_t v      = 0;
+        const char*   last   = value.data() + value.size();
+        const auto [ptr, ec] = std::from_chars(value.data(), last, v);
+        if(ec != std::errc{} || ptr != last) usage(2);
         if(key == "--size")
             defaults.size = v;
         else if(key == "--iters")

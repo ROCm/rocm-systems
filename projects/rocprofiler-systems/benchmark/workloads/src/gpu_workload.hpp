@@ -34,7 +34,7 @@ check(hipError_t err, const char* what)
 {
     if(err == hipSuccess) return;
     std::fprintf(stderr, "gpu workload: %s failed: %s\n", what, hipGetErrorString(err));
-    std::exit(1);
+    std::quick_exit(1);  // no static destructors: other threads may still be inside HIP
 }
 
 #define HIP_CHECK(call) check((call), #call)

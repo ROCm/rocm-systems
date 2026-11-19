@@ -17,7 +17,7 @@ from bench.runner import RunResult
 
 # Deny-list, not allow-list: a new RunResult field is exported without touching this file.
 # name and index are implied by the position in commands[name]["runs"].
-OMITTED_RUN_FIELDS = {"name", "index"}
+OMITTED_RUN_FIELDS = {"name", "index", "timed_out"}
 
 
 def env_info() -> dict[str, str | None]:

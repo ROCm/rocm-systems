@@ -58,6 +58,7 @@ class RunResult:
     output_bytes: int = 0
     sampled_rss_kb: int | None = None
     error: str | None = None
+    timed_out: bool = False
     metrics: dict[str, float] = field(default_factory=dict)
 
     @property
@@ -242,6 +243,7 @@ def run_once(
     if sampler:
         result.sampled_rss_kb = peak[0]
     if timed_out.is_set():
+        result.timed_out = True
         result.error = f"timeout after {cfg.timeout}s"
     elif proc.returncode != 0:
         result.error = f"exit code {proc.returncode}"
@@ -256,6 +258,8 @@ def fill_result(
     result.exit = code
     result.wall_ns = t3 - t0
     result.user_s, result.sys_s = ru.ru_utime, ru.ru_stime
+    # ru_maxrss never reads below the bench process's own RSS (the child is forked
+    # from it); commands with a smaller peak are over-reported.
     result.max_rss_kb = ru.ru_maxrss
     result.ctx_vol, result.ctx_invol = ru.ru_nvcsw, ru.ru_nivcsw
     result.minflt, result.majflt = ru.ru_minflt, ru.ru_majflt
@@ -277,13 +281,19 @@ def fill_result(
 def run_command(
     name: str, command: str, cfg: RunConfig, env: dict[str, str] | None = None
 ) -> Iterator[RunResult]:
-    """Yield one RunResult per measured run; warm-up runs are executed silently."""
+    """Yield one RunResult per measured run; warm-up runs are executed silently.
+
+    A run that times out, warm-up or measured, is yielded and ends the command.
+    """
     argv = build_argv(command, cfg.cpu_affinity)
     for i in range(-cfg.warmup, cfg.runs):
         result = run_once(name, i, argv, cfg, env)
         output_bytes = clean_paths(cfg.clean)
-        if i >= 0:
+        if i >= 0 or result.timed_out:
             result.output_bytes = output_bytes
             yield result
+        if result.timed_out:
+            # a hang usually repeats: every further run would wait the full timeout
+            return
         if cfg.pause_ms:
             time.sleep(cfg.pause_ms / 1000)

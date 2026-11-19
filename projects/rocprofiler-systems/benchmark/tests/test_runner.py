@@ -36,6 +36,12 @@ def test_timeout_recorded_as_error():
     assert r.wall_ns < 3e9
 
 
+@pytest.mark.parametrize("warmup,index", [(0, 0), (1, -1)])
+def test_timeout_stops_the_command(warmup: int, index: int) -> None:
+    (r,) = run("sleep 5", runs=3, warmup=warmup, timeout=0.2)
+    assert r.timed_out and r.index == index
+
+
 def test_spawn_failure_is_error():
     (r,) = run("/nonexistent/binary", runs=1, warmup=0)
     assert "spawn failed" in r.error

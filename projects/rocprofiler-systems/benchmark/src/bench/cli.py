@@ -21,12 +21,14 @@ from bench import analysis, progress, report, scenario, snapshot, system, text_r
 from bench.runner import RunConfig, RunResult, run_command
 
 MODES = {"light": 30, "medium": 100, "precise": 300}
+# Far above a normal run (the shipped workloads take ~1 s): a hung run must not block a suite.
+DEFAULT_TIMEOUT_S = 300.0
 # Keys equal the scenario "run" block keys. Precedence: CLI flag > run block > these defaults.
 RUN_DEFAULTS: dict[str, Any] = {
     "mode": "medium",
     "runs": None,
     "warmup": 3,
-    "timeout": None,
+    "timeout": DEFAULT_TIMEOUT_S,
     "pause_ms": 10.0,
     "cpu_affinity": None,
     "mem_sample_ms": None,
@@ -75,7 +77,12 @@ def add_run_options(p: argparse.ArgumentParser) -> None:
     p.add_argument("--mode", choices=MODES)
     p.add_argument("--runs", type=positive_int, help="overrides --mode")
     p.add_argument("--warmup", type=non_negative_int)
-    p.add_argument("--timeout", type=positive_float)
+    p.add_argument(
+        "--timeout",
+        type=positive_float,
+        metavar="S",
+        help=f"per run (default: {DEFAULT_TIMEOUT_S:g}); a run that exceeds it ends its command",
+    )
     p.add_argument("--pause", dest="pause_ms", type=non_negative_float, metavar="MS")
     p.add_argument("--cpu-affinity", metavar="LIST")
     p.add_argument("--mem-sample-ms", type=positive_float)

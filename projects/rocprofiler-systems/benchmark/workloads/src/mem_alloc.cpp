@@ -9,6 +9,8 @@
 
 namespace
 {
+constexpr std::uint64_t k_max_mb = 1ULL << 20;  // size * 2^20 must not wrap
+
 std::uint64_t
 run(const workload::args& a)
 {
@@ -33,7 +35,7 @@ main(int argc, char** argv)
         workload::parse_args(argc, argv, { 256, 60000000, 1 }, "mem_alloc",
                              "size = buffer size in MB (allocated and page-touched), "
                              "iters = number of random read-modify-write accesses.");
-    if(a.size == 0) return 2;
+    if(a.size == 0 || a.size > k_max_mb) return 2;
     bench_hook(BENCH_HOOK_WORK_BEGIN);
     const std::uint64_t sum = run(a);
     bench_hook(BENCH_HOOK_WORK_END);

@@ -12,6 +12,8 @@ namespace
 {
 using matrix = std::vector<double>;
 
+constexpr std::uint64_t k_max_dim = 1ULL << 16;  // n * n must not wrap
+
 matrix
 random_matrix(std::uint64_t n, std::uint64_t& rng)
 {
@@ -60,6 +62,7 @@ main(int argc, char** argv)
     const auto a = workload::parse_args(
         argc, argv, { 256, 280, 1 }, "cpu_compute",
         "size = matrix dimension N, iters = number of NxN multiplications.");
+    if(a.size > k_max_dim) return 2;
     bench_hook(BENCH_HOOK_WORK_BEGIN);
     const std::uint64_t sum = run(a);
     bench_hook(BENCH_HOOK_WORK_END);
