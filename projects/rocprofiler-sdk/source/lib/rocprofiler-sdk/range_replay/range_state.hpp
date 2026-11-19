@@ -169,6 +169,11 @@ struct range_context_t
     // alone is not enough.
     kernel_replay::memory_tracker::tracked_map_t snapshot_allocations = {};
 
+    // Whether the application's kernarg blocks are device memory of the range's agent, from the
+    // first recorded dispatch with arguments. Replay stages its copies in the same kind of memory.
+    bool device_kernargs         = false;
+    bool kernarg_placement_known = false;
+
     std::shared_ptr<external_decline_t> external = {};
 
     // What the tool asked for at CONFIG, and the contexts this range's PASS/CLOSE callbacks go to.
