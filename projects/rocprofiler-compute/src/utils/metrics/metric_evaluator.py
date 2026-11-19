@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import warnings
+from collections import ChainMap
 from typing import Any
 
 import numpy as np
@@ -27,13 +28,12 @@ from utils.metrics.aggregation import (
 )
 from utils.metrics.common import EVAL_BUILTINS
 from utils.metrics.expression import build_eval_string, columns_read
-from utils.schema import PassTable
 from utils.utils_counter_defs import extract_counters_and_variables
 
 
 def counter_table_index(
     eval_string: object,
-    tables: list[pd.DataFrame | PassTable],
+    tables: list[pd.DataFrame | ChainMap],
     build_in_vars: dict[str, str],
 ) -> int:
     """Return the index of the table an eval string should read.
@@ -50,15 +50,15 @@ def counter_table_index(
     return len(tables) - 1
 
 
-def has_columns(table: pd.DataFrame | PassTable, columns: set[str]) -> bool:
+def has_columns(table: pd.DataFrame | ChainMap, columns: set[str]) -> bool:
     """Return whether table has every column in columns."""
-    return all(column in table.columns for column in columns)
+    return all(column in table for column in columns)
 
 
 def collectables_per_table(
     eval_strings: list[object],
     table_indexes: list[int],
-    tables: list[pd.DataFrame | PassTable],
+    tables: list[pd.DataFrame | ChainMap],
     collectables: dict[str, str],
     used: set[str],
 ) -> list[set[str]]:
