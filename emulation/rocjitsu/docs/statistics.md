@@ -35,6 +35,25 @@ unique names and are created exclusively; existing files are never truncated.
 The current producer writes one final snapshot after producer teardown. A run
 that never starts, is interrupted, or leaves active waves or dispatches is
 marked incomplete. The generic reader also accepts multiple completed snapshots.
+The run record retains the build version, node, execution model, selected metric
+patterns and scopes, dispatch limit, and GPU reset summaries. Keep the simulation
+configuration alongside the JSONL file to retain topology and device settings.
+
+### Device resets
+
+The current producer accumulates across resets for the lifetime of the VM and
+emits only epoch `0`. The run's `accumulation_scope` is `session`. Each registered
+GPU has attempt, completed, failed, and overflow fields for function-level, bus,
+and lost-connection resets, independently of metric and scope filters. An
+unfinished reset marks output incomplete. A completed reset failure is recorded
+as a failure even if the VM subsequently recovers.
+
+PCI reset drains frontend operations and owned queues but can preserve other
+queues and does not establish a barrier for every producer. Consequently it
+does not clear counters, replace handles, or claim a coherent boundary snapshot.
+Per-reset epochs and periodic/live export are future extensions requiring that
+ownership and snapshot contract. Current cache/dispatch statistics remain
+session totals after reset.
 
 ## Cache observations
 
@@ -140,9 +159,9 @@ retaining application metadata in both SQLite and CSV output.
 
 `rocjitsu/stats/statistics.h` provides the VM adapter. It maps GPU/path identities
 to utility scopes, translates rocjitsu configuration, enforces the dispatch
-scope limit, and supplies run provenance and completeness. Core event
-adapters define modeled events and bind to the simulator's existing event
-paths. The rocjitsu adapter
+scope limit, and supplies run provenance, GPU reset metadata, and completeness.
+Cache, compute, and execution adapters stay in core because they define modeled
+events and bind to the simulator's existing event paths. The rocjitsu adapter
 preserves the `rocjitsu.statistics.v1` format consumed by the offline converter.
 
 ## Adding a producer

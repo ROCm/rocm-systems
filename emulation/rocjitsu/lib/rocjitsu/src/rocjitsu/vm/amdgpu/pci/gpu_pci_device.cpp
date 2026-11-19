@@ -1,9 +1,9 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocjitsu/stats/statistics.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device.h"
 
+#include "rocjitsu/stats/statistics.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
 #include "rocjitsu/vm/amdgpu/pci/graphics_block_model.h"
@@ -1569,6 +1569,14 @@ bool GpuPciDevice::program_shader_apertures(uint32_t vmid, uint64_t shared_base,
 
 void GpuPciDevice::reset(simdojo::ResetKind kind) {
   const std::lock_guard reset_lock(doorbell_reset_mutex_);
+  const StatisticsReset::Kind statistics_kind =
+      kind == simdojo::ResetKind::FunctionLevel    ? StatisticsReset::Kind::FunctionLevel
+      : kind == simdojo::ResetKind::LostConnection ? StatisticsReset::Kind::LostConnection
+                                                   : StatisticsReset::Kind::Bus;
+  StatisticsReset statistics_reset =
+      soc_ && soc_->statistics()
+          ? soc_->statistics()->observe_reset(soc_->statistics_gpu_index(), statistics_kind)
+          : StatisticsReset{};
   close_doorbell_admission_for_reset();
   if (soc_)
     soc_->mark_statistics_incomplete_if_pending();
@@ -1616,6 +1624,7 @@ void GpuPciDevice::reset(simdojo::ResetKind kind) {
     throw;
   }
   reopen_doorbell_admission_after_reset();
+  statistics_reset.complete();
 }
 
 } // namespace rocjitsu
