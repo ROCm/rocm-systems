@@ -712,6 +712,11 @@ global:
     hipMemcpyWithAttributesAsync;
     hipMemcpy3DWithAttributesAsync;
     hipArrayGetSparseProperties;
+    hipGraphNodeGetLocalId;
+    hipGraphNodeGetToolsId;
+    hipGraphGetId;
+    hipGraphExecGetId;
+    hipDeviceGetExecAffinitySupport;
 local:
     *;
 } hip_7.17;

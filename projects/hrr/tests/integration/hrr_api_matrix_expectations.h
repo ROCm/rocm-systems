@@ -17,7 +17,7 @@
  * what keeps the Catch2 tests and the matrix reporter from drifting into
  * disagreeing about what an API is supposed to do at replay.
  *
- * Generated from 562 HIP APIs.
+ * Generated from 567 HIP APIs.
  */
 
 #pragma once
@@ -238,6 +238,7 @@ inline constexpr HrrApiExpectation kHrrApiMatrix[] = {
     {"hipDeviceGetCacheConfig", "T4", 0, false, true, false, false},
     {"hipDeviceGetDefaultMemPool", "T4", 0, false, true, false, false},
     {"hipDeviceGetDevResource", "T4", 0, false, true, false, false},
+    {"hipDeviceGetExecAffinitySupport", "T4", 0, false, true, false, false},
     {"hipDeviceGetExecutionCtx", "T4", 0, false, true, false, false},
     {"hipDeviceGetGraphMemAttribute", "T4", 1, false, true, false, false},
     {"hipDeviceGetLimit", "T4", 0, false, true, false, false},
@@ -348,6 +349,7 @@ inline constexpr HrrApiExpectation kHrrApiMatrix[] = {
     {"hipGraphExecExternalSemaphoresSignalNodeSetParams", "T4", 0, true, true, false, false},
     {"hipGraphExecExternalSemaphoresWaitNodeSetParams", "T4", 0, true, true, false, false},
     {"hipGraphExecGetFlags", "T4", 1, false, true, false, false},
+    {"hipGraphExecGetId", "T4", 1, false, true, false, false},
     {"hipGraphExecMemcpyNodeSetParamsFromSymbol", "T4", 0, false, true, true, false},
     {"hipGraphExecMemcpyNodeSetParamsToSymbol", "T4", 0, false, true, true, false},
     {"hipGraphExternalSemaphoresSignalNodeGetParams", "T4", 0, false, true, false, false},
@@ -355,6 +357,7 @@ inline constexpr HrrApiExpectation kHrrApiMatrix[] = {
     {"hipGraphExternalSemaphoresWaitNodeGetParams", "T4", 0, false, true, false, false},
     {"hipGraphExternalSemaphoresWaitNodeSetParams", "T4", 0, true, true, false, false},
     {"hipGraphGetEdges", "T4", 1, false, true, false, false},
+    {"hipGraphGetId", "T4", 1, false, true, false, false},
     {"hipGraphGetNodes", "T4", 1, false, true, false, false},
     {"hipGraphGetRootNodes", "T4", 1, false, true, false, false},
     {"hipGraphHostNodeGetParams", "T4", 1, false, true, false, false},
@@ -375,6 +378,8 @@ inline constexpr HrrApiExpectation kHrrApiMatrix[] = {
     {"hipGraphNodeGetDependencies", "T4", 1, false, true, false, false},
     {"hipGraphNodeGetDependentNodes", "T4", 1, false, true, false, false},
     {"hipGraphNodeGetEnabled", "T4", 1, false, true, false, false},
+    {"hipGraphNodeGetLocalId", "T4", 1, false, true, false, false},
+    {"hipGraphNodeGetToolsId", "T4", 1, false, true, false, false},
     {"hipGraphNodeGetType", "T4", 1, false, true, false, false},
     {"hipGraphNodeSetEnabled", "T4", 0, false, true, false, false},
     {"hipGraphReleaseUserObject", "T4", 1, false, true, false, false},
@@ -445,7 +450,7 @@ inline constexpr HrrApiExpectation kHrrApiMatrix[] = {
     {"hipMemcpy3DAsync", "T4", 0, false, true, false, false},
     {"hipMemcpy3DAsync_spt", "T4", 0, false, true, false, false},
     {"hipMemcpy3DBatchAsync", "T4", 0, false, true, false, false},
-    {"hipMemcpy3DWithAttributesAsync", "T4", 0, false, true, false, false},
+    {"hipMemcpy3DWithAttributesAsync", "T4", 0, false, false, false, false},
     {"hipMemcpy3D_spt", "T4", 0, false, true, false, false},
     {"hipMemcpyAsync_spt", "T4", 1, false, true, false, false},
     {"hipMemcpyAtoA", "T4", 1, false, true, false, false},
@@ -463,7 +468,7 @@ inline constexpr HrrApiExpectation kHrrApiMatrix[] = {
     {"hipMemcpyParam2DAsync", "T4", 0, false, true, false, false},
     {"hipMemcpyToSymbolAsync_spt", "T4", 1, false, true, false, false},
     {"hipMemcpyToSymbol_spt", "T4", 1, false, true, false, false},
-    {"hipMemcpyWithAttributesAsync", "T4", 0, false, true, false, false},
+    {"hipMemcpyWithAttributesAsync", "T4", 0, false, false, false, false},
     {"hipMemcpy_spt", "T4", 1, false, true, false, false},
     {"hipMemset2D", "T4", 0, false, true, false, false},
     {"hipMemset2DAsync", "T4", 0, false, true, false, false},
@@ -714,7 +719,7 @@ inline constexpr HrrTierFloor kHrrTierFloors[] = {
     {"T1", 14, 1, kHrrWorkloadsT1},
     {"T2", 34, 1, kHrrWorkloadsT2},
     {"T3", 20, 2, kHrrWorkloadsT3},
-    {"T4", 254, 1, kHrrWorkloadsT4},
+    {"T4", 264, 1, kHrrWorkloadsT4},
     {"T5", 12, 1, kHrrWorkloadsT5},
 };
 

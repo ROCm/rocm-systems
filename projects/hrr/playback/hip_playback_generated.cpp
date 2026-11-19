@@ -5545,6 +5545,57 @@ static hipError_t playback_hipArrayGetSparseProperties(PlaybackContext& ctx, con
   return hipSuccess;
 }
 
+static hipError_t playback_hipGraphNodeGetLocalId(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphNodeGetLocalId — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
+}
+
+static hipError_t playback_hipGraphNodeGetToolsId(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphNodeGetToolsId — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
+}
+
+static hipError_t playback_hipGraphGetId(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphGetId — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
+}
+
+static hipError_t playback_hipGraphExecGetId(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphExecGetId — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
+}
+
+static hipError_t playback_hipDeviceGetExecAffinitySupport(PlaybackContext& ctx, const uint8_t* payload) {
+  const auto* a = reinterpret_cast<const hrr_args_hipDeviceGetExecAffinitySupport*>(payload);
+  int _out_pi{};
+  hipError_t _r = (hipError_t)hipDeviceGetExecAffinitySupport(&_out_pi, (hipExecAffinityType)a->type, (hipDevice_t)a->dev);
+  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
+    hrr_note_recorded_error(ctx, "hipDeviceGetExecAffinitySupport", a->ret);
+    return hipSuccess;
+  }
+  return _r;
+}
+
 static hipError_t playback___hipPopCallConfiguration(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
   return hipSuccess;
@@ -6144,15 +6195,20 @@ const uint32_t hrr_api_min_payload_size[HRR_API_COUNT] = {
     static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyWithAttributesAsync)),  // [550] HRR_API_HIPMEMCPYWITHATTRIBUTESASYNC
     static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy3DWithAttributesAsync)),  // [551] HRR_API_HIPMEMCPY3DWITHATTRIBUTESASYNC
     static_cast<uint32_t>(sizeof(hrr_args_hipArrayGetSparseProperties)),  // [552] HRR_API_HIPARRAYGETSPARSEPROPERTIES
-    static_cast<uint32_t>(sizeof(hrr_args___hipPopCallConfiguration)),  // [553] HRR_API_HIPPOPCALLCONFIGURATION
-    static_cast<uint32_t>(sizeof(hrr_args___hipPushCallConfiguration)),  // [554] HRR_API_HIPPUSHCALLCONFIGURATION
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterFatBinary)),  // [555] HRR_API_HIPREGISTERFATBINARY
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterFunction)),  // [556] HRR_API_HIPREGISTERFUNCTION
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterManagedVar)),  // [557] HRR_API_HIPREGISTERMANAGEDVAR
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterSurface)),  // [558] HRR_API_HIPREGISTERSURFACE
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterTexture)),  // [559] HRR_API_HIPREGISTERTEXTURE
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterVar)),  // [560] HRR_API_HIPREGISTERVAR
-    static_cast<uint32_t>(sizeof(hrr_args___hipUnregisterFatBinary)),  // [561] HRR_API_HIPUNREGISTERFATBINARY
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphNodeGetLocalId)),  // [553] HRR_API_HIPGRAPHNODEGETLOCALID
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphNodeGetToolsId)),  // [554] HRR_API_HIPGRAPHNODEGETTOOLSID
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphGetId)),  // [555] HRR_API_HIPGRAPHGETID
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecGetId)),  // [556] HRR_API_HIPGRAPHEXECGETID
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetExecAffinitySupport)),  // [557] HRR_API_HIPDEVICEGETEXECAFFINITYSUPPORT
+    static_cast<uint32_t>(sizeof(hrr_args___hipPopCallConfiguration)),  // [558] HRR_API_HIPPOPCALLCONFIGURATION
+    static_cast<uint32_t>(sizeof(hrr_args___hipPushCallConfiguration)),  // [559] HRR_API_HIPPUSHCALLCONFIGURATION
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterFatBinary)),  // [560] HRR_API_HIPREGISTERFATBINARY
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterFunction)),  // [561] HRR_API_HIPREGISTERFUNCTION
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterManagedVar)),  // [562] HRR_API_HIPREGISTERMANAGEDVAR
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterSurface)),  // [563] HRR_API_HIPREGISTERSURFACE
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterTexture)),  // [564] HRR_API_HIPREGISTERTEXTURE
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterVar)),  // [565] HRR_API_HIPREGISTERVAR
+    static_cast<uint32_t>(sizeof(hrr_args___hipUnregisterFatBinary)),  // [566] HRR_API_HIPUNREGISTERFATBINARY
 };
 
 // ============================================================
@@ -6712,13 +6768,18 @@ hrr_playback_fn_t hrr_playback_dispatch[HRR_API_COUNT] = {
     playback_hipMemcpyWithAttributesAsync,  // [550] HRR_API_HIPMEMCPYWITHATTRIBUTESASYNC
     playback_hipMemcpy3DWithAttributesAsync,  // [551] HRR_API_HIPMEMCPY3DWITHATTRIBUTESASYNC
     playback_hipArrayGetSparseProperties,  // [552] HRR_API_HIPARRAYGETSPARSEPROPERTIES
-    playback___hipPopCallConfiguration,  // [553] HRR_API_HIPPOPCALLCONFIGURATION
-    playback___hipPushCallConfiguration,  // [554] HRR_API_HIPPUSHCALLCONFIGURATION
-    playback___hipRegisterFatBinary,  // [555] HRR_API_HIPREGISTERFATBINARY
-    playback___hipRegisterFunction,  // [556] HRR_API_HIPREGISTERFUNCTION
-    playback___hipRegisterManagedVar,  // [557] HRR_API_HIPREGISTERMANAGEDVAR
-    playback___hipRegisterSurface,  // [558] HRR_API_HIPREGISTERSURFACE
-    playback___hipRegisterTexture,  // [559] HRR_API_HIPREGISTERTEXTURE
-    playback___hipRegisterVar,  // [560] HRR_API_HIPREGISTERVAR
-    playback___hipUnregisterFatBinary,  // [561] HRR_API_HIPUNREGISTERFATBINARY
+    playback_hipGraphNodeGetLocalId,  // [553] HRR_API_HIPGRAPHNODEGETLOCALID
+    playback_hipGraphNodeGetToolsId,  // [554] HRR_API_HIPGRAPHNODEGETTOOLSID
+    playback_hipGraphGetId,  // [555] HRR_API_HIPGRAPHGETID
+    playback_hipGraphExecGetId,  // [556] HRR_API_HIPGRAPHEXECGETID
+    playback_hipDeviceGetExecAffinitySupport,  // [557] HRR_API_HIPDEVICEGETEXECAFFINITYSUPPORT
+    playback___hipPopCallConfiguration,  // [558] HRR_API_HIPPOPCALLCONFIGURATION
+    playback___hipPushCallConfiguration,  // [559] HRR_API_HIPPUSHCALLCONFIGURATION
+    playback___hipRegisterFatBinary,  // [560] HRR_API_HIPREGISTERFATBINARY
+    playback___hipRegisterFunction,  // [561] HRR_API_HIPREGISTERFUNCTION
+    playback___hipRegisterManagedVar,  // [562] HRR_API_HIPREGISTERMANAGEDVAR
+    playback___hipRegisterSurface,  // [563] HRR_API_HIPREGISTERSURFACE
+    playback___hipRegisterTexture,  // [564] HRR_API_HIPREGISTERTEXTURE
+    playback___hipRegisterVar,  // [565] HRR_API_HIPREGISTERVAR
+    playback___hipUnregisterFatBinary,  // [566] HRR_API_HIPUNREGISTERFATBINARY
 };

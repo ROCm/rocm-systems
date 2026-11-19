@@ -8,7 +8,6 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/sop1.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_f16_source.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/scalar_fp.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -1119,9 +1118,19 @@ void SSendmsgRtnB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_sendmsg_rtn_b64_sop1(*this, wf);
 }
 
-void SBarrierSignalSop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBarrierSignalSop1::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_barrier_signal_sop1(*this, wf);
+}
 
-void SBarrierSignalIsfirstSop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBarrierSignalIsfirstSop1::execute_impl(amdgpu::Wavefront &wf) {
+  uint32_t source = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);
+  bool source_is_m0 =
+      static_cast<uint32_t>(ssrc0.encoding_value()) == amdgpu::scalar_m0_selector(wf.cu().arch());
+  int32_t barrier_id = amdgpu::barrier_operand_id(source, source_is_m0);
+  uint32_t member_count = source_is_m0 ? ((source >> 16) & 0x7fu) : 0;
+  if (wf.cu().in_multiwave_workgroup())
+    wf.write_scc(wf.barrier_signal(barrier_id, member_count));
+}
 
 void SAllocVgprSop1::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_alloc_vgpr_sop1(*this, wf);
@@ -1132,11 +1141,6 @@ void SSleepVarSop1::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SCeilF32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  if ((wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY) {
-    amdgpu::scalar_fp::round_integral<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::Op::Ceil>(wf, sdst,
-                                                                                           ssrc0);
-    return;
-  }
   amdgpu::RegisterAccess registers(wf);
   uint64_t flags = wf.cu().arithmetic_flags();
   if (!(wf.fp_denorm_mode_f32() & 1u))
@@ -1158,11 +1162,6 @@ void SCeilF32Sop1::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SFloorF32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  if ((wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY) {
-    amdgpu::scalar_fp::round_integral<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::Op::Floor>(
-        wf, sdst, ssrc0);
-    return;
-  }
   amdgpu::RegisterAccess registers(wf);
   uint64_t flags = wf.cu().arithmetic_flags();
   if (!(wf.fp_denorm_mode_f32() & 1u))
@@ -1184,11 +1183,6 @@ void SFloorF32Sop1::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void STruncF32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  if ((wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY) {
-    amdgpu::scalar_fp::round_integral<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::Op::Trunc>(
-        wf, sdst, ssrc0);
-    return;
-  }
   amdgpu::RegisterAccess registers(wf);
   uint64_t flags = wf.cu().arithmetic_flags();
   if (!(wf.fp_denorm_mode_f32() & 1u))
@@ -1210,11 +1204,6 @@ void STruncF32Sop1::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SRndneF32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  if ((wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY) {
-    amdgpu::scalar_fp::round_integral<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::Op::Rndne>(
-        wf, sdst, ssrc0);
-    return;
-  }
   amdgpu::RegisterAccess registers(wf);
   uint64_t flags = wf.cu().arithmetic_flags();
   if (!(wf.fp_denorm_mode_f32() & 1u))
@@ -1236,10 +1225,6 @@ void SRndneF32Sop1::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SCvtF32I32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  if ((wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY) {
-    amdgpu::scalar_fp::convert<amdgpu::scalar_fp::I32, amdgpu::scalar_fp::F32>(wf, sdst, ssrc0);
-    return;
-  }
   amdgpu::RegisterAccess registers(wf);
   uint64_t flags = wf.cu().arithmetic_flags();
   if (!(wf.fp_denorm_mode_f32() & 2u))
@@ -1262,10 +1247,6 @@ void SCvtF32I32Sop1::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SCvtF32U32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  if ((wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY) {
-    amdgpu::scalar_fp::convert<amdgpu::scalar_fp::U32, amdgpu::scalar_fp::F32>(wf, sdst, ssrc0);
-    return;
-  }
   amdgpu::RegisterAccess registers(wf);
   uint64_t flags = wf.cu().arithmetic_flags();
   if (!(wf.fp_denorm_mode_f32() & 2u))
@@ -1288,10 +1269,6 @@ void SCvtF32U32Sop1::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SCvtI32F32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  if ((wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY) {
-    amdgpu::scalar_fp::convert<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::I32>(wf, sdst, ssrc0);
-    return;
-  }
   amdgpu::RegisterAccess registers(wf);
   uint64_t flags = wf.cu().arithmetic_flags();
   if (!(wf.fp_denorm_mode_f32() & 1u))
@@ -1313,10 +1290,6 @@ void SCvtI32F32Sop1::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SCvtU32F32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  if ((wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY) {
-    amdgpu::scalar_fp::convert<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::U32>(wf, sdst, ssrc0);
-    return;
-  }
   amdgpu::RegisterAccess registers(wf);
   uint64_t flags = wf.cu().arithmetic_flags();
   if (!(wf.fp_denorm_mode_f32() & 1u))
@@ -1338,10 +1311,6 @@ void SCvtU32F32Sop1::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SCvtF16F32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  if ((wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY) {
-    amdgpu::scalar_fp::convert<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::F16>(wf, sdst, ssrc0);
-    return;
-  }
   amdgpu::RegisterAccess registers(wf);
   uint64_t flags = wf.cu().arithmetic_flags();
   if (wf.fp16_ovfl())
@@ -1368,10 +1337,6 @@ void SCvtF16F32Sop1::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SCvtF32F16Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  if ((wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY) {
-    amdgpu::scalar_fp::convert<amdgpu::scalar_fp::F16, amdgpu::scalar_fp::F32>(wf, sdst, ssrc0);
-    return;
-  }
   amdgpu::RegisterAccess registers(wf);
   uint64_t flags = wf.cu().arithmetic_flags();
   if (!(wf.fp_denorm_mode_f16_f64() & 1u))
@@ -1395,11 +1360,6 @@ void SCvtF32F16Sop1::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SCvtHiF32F16Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  if ((wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY) {
-    amdgpu::scalar_fp::convert<amdgpu::scalar_fp::F16, amdgpu::scalar_fp::F32>(wf, sdst, ssrc0,
-                                                                               true);
-    return;
-  }
   amdgpu::RegisterAccess registers(wf);
   uint64_t flags = wf.cu().arithmetic_flags();
   if (!(wf.fp_denorm_mode_f16_f64() & 1u))
@@ -1423,11 +1383,6 @@ void SCvtHiF32F16Sop1::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SCeilF16Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  if ((wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY) {
-    amdgpu::scalar_fp::round_integral<amdgpu::scalar_fp::F16, amdgpu::scalar_fp::Op::Ceil>(wf, sdst,
-                                                                                           ssrc0);
-    return;
-  }
   amdgpu::RegisterAccess registers(wf);
   uint64_t flags = wf.cu().arithmetic_flags();
   if (!(wf.fp_denorm_mode_f16_f64() & 1u))
@@ -1449,11 +1404,6 @@ void SCeilF16Sop1::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SFloorF16Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  if ((wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY) {
-    amdgpu::scalar_fp::round_integral<amdgpu::scalar_fp::F16, amdgpu::scalar_fp::Op::Floor>(
-        wf, sdst, ssrc0);
-    return;
-  }
   amdgpu::RegisterAccess registers(wf);
   uint64_t flags = wf.cu().arithmetic_flags();
   if (!(wf.fp_denorm_mode_f16_f64() & 1u))
@@ -1475,11 +1425,6 @@ void SFloorF16Sop1::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void STruncF16Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  if ((wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY) {
-    amdgpu::scalar_fp::round_integral<amdgpu::scalar_fp::F16, amdgpu::scalar_fp::Op::Trunc>(
-        wf, sdst, ssrc0);
-    return;
-  }
   amdgpu::RegisterAccess registers(wf);
   uint64_t flags = wf.cu().arithmetic_flags();
   if (!(wf.fp_denorm_mode_f16_f64() & 1u))
@@ -1501,11 +1446,6 @@ void STruncF16Sop1::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SRndneF16Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  if ((wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY) {
-    amdgpu::scalar_fp::round_integral<amdgpu::scalar_fp::F16, amdgpu::scalar_fp::Op::Rndne>(
-        wf, sdst, ssrc0);
-    return;
-  }
   amdgpu::RegisterAccess registers(wf);
   uint64_t flags = wf.cu().arithmetic_flags();
   if (!(wf.fp_denorm_mode_f16_f64() & 1u))
@@ -1524,6 +1464,10 @@ void SRndneF16Sop1::execute_impl(amdgpu::Wavefront &wf) {
   registers.write_scalar(sdst, result);
   wf.set_trapsts(wf.trapsts() | causes);
   wf.raise_alu_causes(causes);
+}
+
+void SGetBarrierStateSop1::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_get_barrier_state_sop1(*this, wf);
 }
 
 } // namespace rdna4

@@ -115,3 +115,99 @@ class TestRocattach:
                 except subprocess.TimeoutExpired:
                     target_proc.kill()
                     target_proc.wait()
+
+
+class TestRocattachReattachFormat:
+    """Re-attach to one target with a different output format on each session."""
+
+    SESSION_DURATION_S = 5
+    TARGET_WARMUP_S = 2
+    INTER_SESSION_PAUSE_S = 1
+    ATTACH_TIMEOUT_S = 60
+    TARGET_TERMINATE_TIMEOUT_S = 10
+
+    def test_reattach_uses_selected_format(
+        self,
+        rocprof_config,
+        test_output_dir: Path,
+    ) -> None:
+        """Attach with ``-F rocpd`` then ``-F perfetto``; expect one output of each kind.
+
+        Before the re-attach fix the second session reused the first session's
+        format, so no perfetto trace was produced.
+        """
+        if rocprof_config.rocprofsys_attach is None:
+            pytest.skip("rocprof-sys-attach binary not found")
+
+        try:
+            transpose = rocprof_config.get_target_executable("transpose")
+        except FileNotFoundError:
+            pytest.skip("transpose target not found")
+
+        target_env = {
+            **os.environ,
+            "ROCP_TOOL_ATTACH": "1",
+            "LD_LIBRARY_PATH": rocprof_config.get_library_path(),
+        }
+        target_proc = subprocess.Popen(
+            [str(transpose), "2", "0"],  # 2 threads, nitr=0 (infinite)
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            cwd=str(test_output_dir),
+            env=target_env,
+        )
+
+        try:
+            time.sleep(self.TARGET_WARMUP_S)
+            assert target_proc.poll() is None, (
+                "transpose target exited before first attach "
+                f"(returncode={target_proc.returncode})"
+            )
+
+            for output_format in ("rocpd", "perfetto"):
+                result = subprocess.run(
+                    [
+                        str(rocprof_config.rocprofsys_attach),
+                        "-p",
+                        str(target_proc.pid),
+                        "-d",
+                        str(self.SESSION_DURATION_S),
+                        "-F",
+                        output_format,
+                        "-o",
+                        str(test_output_dir / "attach_output"),
+                    ],
+                    timeout=self.ATTACH_TIMEOUT_S,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                assert result.returncode == 0, (
+                    f"-F {output_format} session failed (rc={result.returncode})\n"
+                    f"stdout:\n{result.stdout}\n"
+                    f"stderr:\n{result.stderr}"
+                )
+                assert target_proc.poll() is None, (
+                    f"transpose target died after the -F {output_format} session "
+                    f"(returncode={target_proc.returncode})"
+                )
+                time.sleep(self.INTER_SESSION_PAUSE_S)
+
+            databases = sorted(test_output_dir.rglob("rocpd-*.db"))
+            traces = sorted(test_output_dir.rglob("perfetto-trace*.pftrace"))
+            assert len(databases) == 1, (
+                f"expected exactly one rocpd-*.db under {test_output_dir} "
+                f"(from the -F rocpd session), found {len(databases)}: {databases}"
+            )
+            assert len(traces) == 1, (
+                f"expected exactly one perfetto-trace*.pftrace under {test_output_dir} "
+                f"(from the -F perfetto session), found {len(traces)}: {traces}"
+            )
+        finally:
+            if target_proc.poll() is None:
+                target_proc.terminate()
+                try:
+                    target_proc.wait(timeout=self.TARGET_TERMINATE_TIMEOUT_S)
+                except subprocess.TimeoutExpired:
+                    target_proc.kill()
+                    target_proc.wait()

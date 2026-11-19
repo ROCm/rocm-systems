@@ -138,8 +138,11 @@ enum InstFlags : uint64_t {
   /// @brief The trailing DWORD of the VGPR result can preserve the shader's incoming value,
   /// even at full EXEC. Memory feedback writes only lanes with a fault or warning.
   CONDITIONAL_LAST_VGPR_DEF = (1ULL << 44),
-  /// The result requires an extra allocated VGPR beyond its data registers.
+  /// @brief The memory result requires one additional allocated VGPR which it never writes.
+  /// A dropped texture fetch with TFE and no LWE checks this slot at issue.
   RESERVES_UNWRITTEN_VGPR = (1ULL << 39),
+  /// Ordinary indexed GFX11 GDS reads inputs and writes results in the first active lane.
+  FIRST_ACTIVE_MEMORY_LANE = (1ULL << 40),
   /// Global transpose addresses come from lanes 0-31. Each wave64 lane gets half the encoded width.
   COMPACT_WAVE64_MEMORY_RESULT = (1ULL << 41),
   /// Global load-transpose instructions acquire no register operands when EXEC is zero.
@@ -564,9 +567,10 @@ protected:
 
   void
   set_memory_issue_info(std::initializer_list<amdgpu::MemoryCounterObligation> counter_obligations,
-                        bool exec_masked = true) {
+                        bool exec_masked = true, bool counts_with_empty_exec = false) {
     memory_issue_info_ = {};
     memory_issue_info_.exec_masked = exec_masked;
+    memory_issue_info_.counts_with_empty_exec = counts_with_empty_exec;
     for (const auto obligation : counter_obligations) {
       if (!obligation.valid())
         continue;
