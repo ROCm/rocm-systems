@@ -871,6 +871,13 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_analysis_views
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_analysis_views.xml
+        ${COV_OPTION} tests/unit/utils/test_analysis_views.py ${WORKING_DIR_OPTION}
+)
+
 # Tests of tools/ scripts. An install tree has no tools/.
 if(NOT TEST_FROM_INSTALL)
     add_test(
@@ -1350,6 +1357,7 @@ if(${ENABLE_COVERAGE})
         test_counter_file
         test_utils_counter_defs
         test_metric_library_loader
+        test_analysis_views
         test_parser
         test_argparser
         test_L1_cache_counters
