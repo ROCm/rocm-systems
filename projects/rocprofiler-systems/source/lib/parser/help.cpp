@@ -8,7 +8,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <ostream>
-#include <ranges>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -118,10 +117,16 @@ spellings(const schema_param& param)
 std::size_t
 description_column(const std::vector<help_group>& groups)
 {
-    auto rows = groups | std::views::transform(&help_group::params) | std::views::join;
-    const auto width = [](const schema_param* param) { return spellings(*param).size(); };
-    const auto widest = std::ranges::max_element(rows, {}, width);
-    return widest == rows.end() ? 0 : width(*widest) + k_column_gap;
+    // A plain loop: amdclang++ 22 (ROCm 7.2) crashes on max_element over a joined view.
+    std::size_t widest = 0;
+    for(const auto& group : groups)
+    {
+        for(const auto* param : group.params)
+        {
+            widest = std::max(widest, spellings(*param).size());
+        }
+    }
+    return widest == 0 ? 0 : widest + k_column_gap;
 }
 
 void

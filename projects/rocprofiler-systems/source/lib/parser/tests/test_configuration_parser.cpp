@@ -65,15 +65,6 @@ preset_with(std::string name, preset_parser::settings_t settings)
         };
 }
 
-configuration_parser
-make_parser()
-{
-    configuration_parser parser;
-    parser.set_environment([](std::string_view) { return std::optional<std::string>{}; });
-    EXPECT_TRUE(parser.initialize()) << parser.failure();
-    return parser;
-}
-
 class scoped_temp_file
 {
 public:
@@ -133,6 +124,72 @@ void
 add_param(schema& value, schema_param param)
 {
     ASSERT_TRUE(value.add_param(std::move(param)));
+}
+
+/// The catalog most tests parse: where output goes, the preset and config file, a
+/// bounded verbosity, and three switches.
+schema
+demo_schema()
+{
+    constexpr double k_verbose_minimum = -1.0;
+    constexpr double k_verbose_maximum = 4.0;
+
+    const auto row = [](std::string param_id, std::string description,
+                        std::string category, param_type type) {
+        auto param        = named(std::move(param_id), type);
+        param.description = std::move(description);
+        param.category    = std::move(category);
+        return param;
+    };
+    auto output = row("output_path", "Directory for output files", "configuration",
+                      param_type::path);
+    output.env  = "ROCPROFSYS_OUTPUT_PATH";
+    output.arg  = "--output";
+    auto preset =
+        row("preset", "Named preset to apply", "configuration", param_type::string);
+    preset.arg       = "--preset";
+    auto config_file = row("config_file", "JSON file of parameter values",
+                           "configuration", param_type::path);
+    config_file.arg  = "--config";
+    auto verbose =
+        row("verbose", "Verbosity level from -1 to 4", "logging", param_type::integer);
+    verbose.default_value = "0";
+    verbose.min           = k_verbose_minimum;
+    verbose.max           = k_verbose_maximum;
+    verbose.env           = "ROCPROFSYS_VERBOSE";
+    verbose.arg           = "--verbose";
+    auto debug = row("debug", "Enable debug mode", "logging", param_type::boolean);
+    debug.default_value = "false";
+    debug.env           = "ROCPROFSYS_DEBUG";
+    debug.arg           = "--debug";
+    auto trace = row("trace", "Enable Perfetto tracing", "tracing", param_type::boolean);
+    trace.default_value = "false";
+    trace.env           = "ROCPROFSYS_TRACE";
+    trace.arg           = "--trace";
+    auto profile =
+        row("profile", "Enable call-stack profiling", "tracing", param_type::boolean);
+    profile.default_value = "false";
+    profile.env           = "ROCPROFSYS_PROFILE";
+    profile.arg           = "--profile";
+
+    schema catalog{};
+    catalog.set_version("1.0");
+    for(auto& param : std::vector<schema_param>{
+            std::move(output), std::move(preset), std::move(config_file),
+            std::move(verbose), std::move(debug), std::move(trace), std::move(profile) })
+    {
+        add_param(catalog, std::move(param));
+    }
+    return catalog;
+}
+
+configuration_parser
+make_parser()
+{
+    configuration_parser parser;
+    parser.set_environment([](std::string_view) { return std::optional<std::string>{}; });
+    EXPECT_TRUE(parser.initialize(demo_schema())) << parser.failure();
+    return parser;
 }
 
 schema
@@ -721,6 +778,59 @@ TEST(parser_configuration, assigns_need_the_option_on)
     EXPECT_FALSE(parser.parse({}).contains("log_level"));
     debug_variable = "true";
     EXPECT_EQ(parser.parse({}).at("log_level"), "debug");
+}
+
+TEST(parser_configuration, a_second_parse_drops_what_the_first_one_set)
+{
+    auto       parser = make_parser();
+    const auto first  = parser.parse({ "--output", "first", "--trace" });
+    ASSERT_EQ(first.at("output_path"), "first");
+    ASSERT_EQ(first.at("trace"), "true");
+    const auto second = parser.parse({});
+    EXPECT_TRUE(parser.errors().empty());
+    EXPECT_FALSE(second.contains("output_path"));
+    EXPECT_FALSE(parser.get<std::string>("output_path").has_value());
+    EXPECT_EQ(second.at("trace"), "false");
+    EXPECT_EQ(parser.get<bool>("trace"), std::optional<bool>{ false });
+}
+
+TEST(parser_configuration,
+     an_assign_that_contradicts_a_value_from_the_same_source_is_an_error)
+{
+    configuration_parser parser;
+    parser.set_environment([](std::string_view) { return std::optional<std::string>{}; });
+    ASSERT_TRUE(parser.initialize(effect_schema())) << parser.failure();
+
+    const auto expect_contradiction = [&parser](const std::vector<std::string>& args) {
+        const auto values = parser.parse(args);
+        EXPECT_EQ(parser.errors(),
+                  std::vector<std::string>{
+                      "parameter 'debug' assigns 'debug' to 'log_level', which the "
+                      "command line sets to 'quiet'" });
+        EXPECT_EQ(values.at("log_level"), "quiet");
+    };
+    expect_contradiction({ "--debug", "--log-level", "quiet" });
+    expect_contradiction({ "--log-level", "quiet", "--debug" });
+    EXPECT_EQ(parser.parse({ "--debug", "--log-level", "debug" }).at("log_level"),
+              "debug");
+    EXPECT_TRUE(parser.errors().empty());
+}
+
+TEST(parser_configuration, an_assigned_value_the_backend_refuses_is_reported)
+{
+    auto catalog = letter_schema();
+    auto all     = named("all_letters", param_type::boolean);
+    all.category = "demo";
+    all.arg      = "--all-letters";
+    all.assigns  = { { "letter", "nope" } };
+    add_param(catalog, std::move(all));
+    configuration_parser parser;
+    parser.set_environment([](std::string_view) { return std::optional<std::string>{}; });
+    ASSERT_TRUE(parser.initialize(std::move(catalog))) << parser.failure();
+    ASSERT_TRUE(parser.add_backend(std::make_unique<letter_backend>()));
+    const auto values = parser.parse({ "--all-letters" });
+    EXPECT_FALSE(values.contains("letter"));
+    EXPECT_TRUE(contains_text(parser.errors(), "letter"));
 }
 
 TEST(parser_configuration, failed_initialize_keeps_the_previous_catalog)

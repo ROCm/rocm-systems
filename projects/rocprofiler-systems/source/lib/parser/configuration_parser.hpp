@@ -49,12 +49,6 @@ public:
     void set_preset_lookup(preset_lookup_t lookup);
 
     /**
-     * Install the demo catalog and an empty backend registry.
-     * @return false, leaving any previously loaded schema in place, when setup fails.
-     */
-    [[nodiscard]] bool initialize();
-
-    /**
      * Install this catalog and an empty backend registry.
      * @return false, leaving any previously loaded schema in place, when setup fails.
      */

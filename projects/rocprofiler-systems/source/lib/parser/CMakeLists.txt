@@ -21,7 +21,6 @@ target_sources(
         ${CMAKE_CURRENT_SOURCE_DIR}/config_store.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/configuration_parser.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/default_parser.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/default_schema.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/env_parser.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/file_parser.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/help.cpp
@@ -36,7 +35,6 @@ target_sources(
         ${CMAKE_CURRENT_SOURCE_DIR}/config_store.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/configuration_parser.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/default_parser.hpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/default_schema.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/env_parser.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/file_parser.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/help.hpp

@@ -6,7 +6,6 @@
 #include "parser/cli_parser.hpp"
 #include "parser/config_store.hpp"
 #include "parser/default_parser.hpp"
-#include "parser/default_schema.hpp"
 #include "parser/env_parser.hpp"
 #include "parser/file_parser.hpp"
 #include "parser/help.hpp"
@@ -219,33 +218,58 @@ resolve_collected(const collected_input& collected)
     });
 }
 
-/// Write what @p param assigns, under @p source, to each target that does not have a
-/// higher source: gpu set in a config file leaves --use-process-sampling=false alone.
-/// initialize() refused a catalog that assigns an unknown parameter or a value its
-/// target refuses.
+/// Write what @p param assigns, under @p source, to each target whose value comes from a
+/// lower source: gpu set in a config file leaves --use-process-sampling=false alone. A
+/// value from @p source that the assign contradicts, as in --debug --log-level quiet,
+/// and a value the target's backend refuses are reported and not written. initialize()
+/// refused a catalog that assigns an unknown parameter or a value its target refuses,
+/// but it could not ask a backend registered after it.
 void
-assign_targets(resolved_config& resolved, const schema& config_schema,
+assign_targets(resolved_config& resolved, const parse_request& request,
                const schema_param& param, config_source source)
 {
     for(const auto& [target_id, text] : param.assigns)
     {
-        const auto* target = config_schema.find_param(target_id);
+        const auto* target = request.config_schema.find_param(target_id);
         const auto parsed = target == nullptr ? std::nullopt : parse_value(*target, text);
         const auto existing = resolved.find(target_id);
-        if(parsed && (existing == resolved.end() || existing->second.source <= source))
+        if(!parsed || (existing != resolved.end() && existing->second.source > source))
         {
-            resolved.insert_or_assign(
-                target_id, resolved_value{ .value = *parsed, .source = source });
+            continue;
         }
+        const bool same_source =
+            existing != resolved.end() && existing->second.source == source;
+        if(same_source && existing->second.value != *parsed)
+        {
+            request.errors.push_back(fmt::format(
+                "parameter '{}' assigns '{}' to '{}', which the {} sets to '{}'",
+                param.id, text, target_id, source_label(source),
+                format_value(existing->second.value)));
+        }
+        if(same_source)
+        {
+            continue;
+        }
+        const auto* backend =
+            target->backend ? request.backends.find(*target->backend) : nullptr;
+        if(backend != nullptr && !backend->accepts(*target, text))
+        {
+            request.errors.push_back(
+                fmt::format("parameter '{}' assigns invalid value '{}' to '{}'", param.id,
+                            text, target_id));
+            continue;
+        }
+        resolved.insert_or_assign(target_id,
+                                  resolved_value{ .value = *parsed, .source = source });
     }
 }
 
 /// Ex, --gpu sets use_amd_smi and use_process_sampling to true through its assigns.
 void
-apply_assigns(resolved_config& resolved, const schema& config_schema)
+apply_assigns(resolved_config& resolved, const parse_request& request)
 {
     std::vector<std::pair<const schema_param*, config_source>> origins;
-    for(const auto& param : config_schema.params())
+    for(const auto& param : request.config_schema.params())
     {
         const auto found = resolved.find(param.id);
         if(found != resolved.end() &&
@@ -257,7 +281,7 @@ apply_assigns(resolved_config& resolved, const schema& config_schema)
     }
     for(const auto& [param, source] : origins)
     {
-        assign_targets(resolved, config_schema, *param, source);
+        assign_targets(resolved, request, *param, source);
     }
 }
 
@@ -324,19 +348,6 @@ void
 configuration_parser::set_preset_lookup(preset_lookup_t lookup)
 {
     m_presets = std::move(lookup);
-}
-
-bool
-configuration_parser::initialize()
-{
-    try
-    {
-        return initialize(get_default_schema());
-    } catch(const std::exception& err)
-    {
-        m_failure = err.what();
-        return false;
-    }
 }
 
 bool
@@ -407,7 +418,7 @@ configuration_parser::parse(const std::vector<std::string>& arguments)
     m_unparsed            = std::move(collected.command_line.unparsed);
 
     auto resolved = resolve_collected(collected);
-    apply_assigns(resolved, request.config_schema);
+    apply_assigns(resolved, request);
     append_violations(m_errors, request.config_schema, resolved);
     m_store->clear();
     apply_resolved(*m_store, resolved);
