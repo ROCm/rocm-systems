@@ -364,6 +364,7 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_Nvls_UsesNvlsChannelsCappedByCommOnlyFo
   }
 }
 
+// ===========================================================================
 // ncclGroupSimulateEnd estimatedTime: a tuner-forced 0 reports the cost-model
 // time of the chosen algorithm, and a direct AllGather is still costed.
 // ===========================================================================
