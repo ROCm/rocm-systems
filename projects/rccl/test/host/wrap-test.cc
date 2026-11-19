@@ -11418,9 +11418,7 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_AllGatherReachesCeRegisteredUnlikeGe
       });
 }
 
-// Check mode (NCCL_CHECK_MODE) diverts every collective to ncclEnqueueCheck
-// (collectives.cc), which runs the planner's kernel for any DDA decision. The
-// query must report that kernel, not DDA, as Broadcast does.
+// Check mode runs the planner's kernel, not DDA, as for Broadcast.
 TEST(WrapMicrotestIsolated, GetCollImplInfo_AllGatherMustEnqueue_ReportsPlannerKernelNotDda) {
   RUN_ISOLATED_TEST(
       "Wrap_GetCollImplInfo_AllGatherMustEnqueue_ReportsPlannerKernelNotDda",
@@ -11511,8 +11509,7 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_ReduceScatterMustEnqueue_ReportsPlan
       });
 }
 
-// Suspended and revoked comms divert too, but ncclEnqueueCheck rejects them before planning: no
-// planner kernel runs, so the query keeps the selector's answer even in check mode.
+// Suspended/revoked comms never plan, so check mode keeps the selector's answer.
 TEST(WrapMicrotestIsolated, GetCollImplInfo_SuspendedOrRevokedCheckModeKeepsSelection) {
   RUN_ISOLATED_TEST(
       "Wrap_GetCollImplInfo_SuspendedOrRevokedCheckModeKeepsSelection",
@@ -11568,8 +11565,30 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_AllGatherMustEnqueue_KeepsCeRegister
       });
 }
 
-// Direct AllGather runs its setup before ncclEnqueueCheck even in check mode
-// (rcclEnqueueSetupNeedsSwitch), so the query keeps it, like CE registered above.
+// taskAppend() extracts the symmetric kernel from a diverted call too, so check mode keeps it.
+TEST(WrapMicrotestIsolated, GetCollImplInfo_SymmetricAllReduceCheckModeKeepsSymmetric) {
+  RUN_ISOLATED_TEST(
+      "Wrap_GetCollImplInfo_SymmetricAllReduceCheckModeKeepsSymmetric",
+      []() {
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                  size_t, const void*, void*, bool) { return true; });
+        ScopedHook symkAvailable(g_symkAvailable,
+                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+        ScopedHook tuningCompute(g_tuningCompute,
+                                 SelectSymkTuning(ncclFuncAllReduce, ncclSymkKernelId_AllReduce_RSxLD_AGxST,
+                                                  /*maxChannels=*/6));
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->checkMode = ncclCheckModeDebugLocal;
+        int algo = -7, protocol = -7, maxChannels = -7;
+        EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllReduce, 8, ncclFloat32, ncclSum, nullptr,
+                                                    nullptr, /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Direct AllGather sets up before the divert (rcclEnqueueSetupNeedsSwitch), so check mode keeps it.
 TEST(WrapMicrotestIsolated, GetCollImplInfo_DirectAllGatherCheckModeKeepsDirect) {
   RUN_ISOLATED_TEST(
       "Wrap_GetCollImplInfo_DirectAllGatherCheckModeKeepsDirect",
@@ -11589,8 +11608,7 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_DirectAllGatherCheckModeKeepsDirect)
       });
 }
 
-// The divert skips the hierarchical launch, so the planner's plain kernel runs. rcclGetAlgoInfo would
-// re-pick hierarchical, so the report must come from the plain-kernel query, packed channels included.
+// rcclGetAlgoInfo would re-pick hierarchical; check mode runs the plain kernel, packed channels included.
 TEST(WrapMicrotestIsolated, GetCollImplInfo_HierarchicalAllGatherMustEnqueue_ReportsPlannerKernel) {
   RUN_ISOLATED_TEST(
       "Wrap_GetCollImplInfo_HierarchicalAllGatherMustEnqueue_ReportsPlannerKernel",
@@ -11633,8 +11651,7 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_HierarchicalAllGatherMustEnqueue_Rep
       });
 }
 
-// gfx950 single-node AllGather is Direct-eligible, but a diverted DDA decision never sets useDirect, so
-// the ring/tree kernel runs. Reporting Direct AllGather would name a path that does not run.
+// A diverted DDA AllGather never sets useDirect, so check mode must not report Direct AllGather.
 TEST(WrapMicrotestIsolated, GetCollImplInfo_AllGatherMustEnqueue_DdaNotRelabeledDirect) {
   RUN_ISOLATED_TEST(
       "Wrap_GetCollImplInfo_AllGatherMustEnqueue_DdaNotRelabeledDirect",
@@ -13017,8 +13034,7 @@ TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250DdaLLOffFallsToLL128) {
       });
 }
 
-// Check mode diverts a DDA AlltoAll to ncclEnqueueCheck, where taskAppend() splits it into per-peer
-// Send/Recv over the p2p channels; the query must report that, not DDA.
+// A diverted DDA AlltoAll runs as per-peer Send/Recv over the p2p channels.
 TEST(WrapMicrotestIsolated, GetCollImplInfo_AlltoAllCheckModeReportsPerPeerSendRecv) {
   RUN_ISOLATED_TEST(
       "Wrap_GetCollImplInfo_AlltoAllCheckModeReportsPerPeerSendRecv",
