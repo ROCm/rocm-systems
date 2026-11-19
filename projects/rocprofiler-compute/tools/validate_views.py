@@ -14,6 +14,9 @@ For every arch in METRIC_LIBRARY_PARENT_ARCH, check that:
   summed collectable without its per-dispatch partner;
 - the views show every metric of the arch's library, and each measured peak in a row
   that asks for it.
+
+test_metric_library_sync.py checks that the views keep the analysis configs'
+structure.
 """
 
 import sys
