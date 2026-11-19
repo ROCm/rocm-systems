@@ -6,6 +6,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ## amd_smi_lib for ROCm 10.3.0
 
+### Added
+
+- **Added CPU read APIs for APB status, XGMI link width, and DF P-state range**, with corresponding Python APIs and `amd-smi metric` flags for AMD EPYC CPUs.
+
 ### Resolved Issues
 
 - **Fixed `amd-smi` failures on non-x86 systems where the library is built without ESMI (EPYC CPU) support**.  
@@ -14,8 +18,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ## amd_smi_lib for ROCm 10.2.0
 
 ### Added
-
-- **Added CPU read APIs for APB status, XGMI link width, and DF P-state range**, with corresponding Python APIs and `amd-smi metric` flags for AMD EPYC CPUs.  
 
 - **Added unified `amdsmi_get_link_topology()` API on baremetal**.  
   - Returns link weight, status, type, hop count, and framebuffer-sharing data.

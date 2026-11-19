@@ -9761,6 +9761,9 @@ amdsmi_status_t amdsmi_cpu_apb_disable(amdsmi_processor_handle processor_handle,
  *
  * @platform{cpu_bm}
  *
+ * @note HSMP protocol version 7 or later is required. Returns
+ * ::AMDSMI_STATUS_NOT_SUPPORTED for older protocol versions.
+ *
  * @param[in] processor_handle Cpu socket which to query
  *
  * @param[out] apb_status - Output buffer to receive APB status (0 = APB enabled/automatic
@@ -9856,6 +9859,9 @@ amdsmi_status_t amdsmi_set_cpu_df_pstate_range(amdsmi_processor_handle processor
  * @ingroup tagEsmiPstateSelect
  *
  * @platform{cpu_bm}
+ *
+ * @note HSMP protocol version 7 or later is required. Returns
+ * ::AMDSMI_STATUS_NOT_SUPPORTED for older protocol versions.
  *
  * @param[in] processor_handle Cpu socket which to query
  *

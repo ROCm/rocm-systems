@@ -11,6 +11,15 @@ import common.common as common
 from common.common import amdsmi
 
 
+_HSMP_WRITES_ENV = "AMDSMI_TEST_ALLOW_HSMP_WRITES"
+
+
+def _skip_unless_hsmp_writes_allowed(test):
+    """Skip a test that issues real HSMP writes unless explicitly opted in."""
+    if os.environ.get(_HSMP_WRITES_ENV) != "1":
+        test.skipTest(f"issues real HSMP writes; set {_HSMP_WRITES_ENV}=1 to run")
+
+
 class TestCpuXgmi(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -33,6 +42,7 @@ class TestCpuXgmi(unittest.TestCase):
 
     def test_set_cpu_xgmi_width(self):
         self.common.print_func_name("")
+        _skip_unless_hsmp_writes_allowed(self)
 
         # amdsmi_set_cpu_xgmi_width derives the socket index from the handle's
         # processor index and forwards it to ESMI; it does not validate that the
@@ -42,9 +52,10 @@ class TestCpuXgmi(unittest.TestCase):
         # A write-back of a just-read value is valid input, so INVAL is not accepted.
         correct_processor = [
             amdsmi.AmdSmiStatus.SUCCESS,
-            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,  # firmware/protocol lacks the message (ENOMSG)
-            amdsmi.AmdSmiStatus.NO_PERM,  # no write access to /dev/hsmp (root/LSM/container)
         ]
+        # NO_PERM is only legitimate when /dev/hsmp really is not writable.
+        if not os.access("/dev/hsmp", os.W_OK):
+            correct_processor.append(amdsmi.AmdSmiStatus.NO_PERM)
         null_check = [amdsmi.AmdSmiStatus.INVAL]
 
         # Independent sections: a bug in one (anything expect_status re-raises, ie.
@@ -78,6 +89,9 @@ class TestCpuXgmi(unittest.TestCase):
         if not cpu_handles:
             self.common.print("\tNo CPU sockets on machine, unable to test with valid cpu handles.")
 
+        # Original value of every socket, restored in the finally below so a failure
+        # on one socket cannot leave any socket reprogrammed.
+        originals = []
         try:
             with self.common.status_sweep():
                 for i, cpu in enumerate(cpu_handles):
@@ -90,16 +104,36 @@ class TestCpuXgmi(unittest.TestCase):
                             f"\t### amdsmi_get_cpu_xgmi_width(cpu={i}): {e}; skipping set"
                         )
                         continue
+                    originals.append((i, cpu, current))
                     msg = (
                         f"\t### amdsmi_set_cpu_xgmi_width(cpu={i}, "
                         f"min_width={current['min_width']}, max_width={current['max_width']}):"
                     )
+                    wrote = False
                     with self.common.expect_status(msg, correct_processor):
                         amdsmi.amdsmi_set_cpu_xgmi_width(
                             cpu, current["min_width"], current["max_width"]
                         )
+                        wrote = True
+                    # A rejected write must not read as success: re-read and
+                    # require the value to be unchanged.
+                    if wrote:
+                        self.assertEqual(
+                            amdsmi.amdsmi_get_cpu_xgmi_width(cpu),
+                            current,
+                            f"cpu={i}: xgmi width changed after write-back",
+                        )
         except Exception as e:
             failures.append(e)
+        finally:
+            for i, cpu, original in originals:
+                try:
+                    if amdsmi.amdsmi_get_cpu_xgmi_width(cpu) != original:
+                        amdsmi.amdsmi_set_cpu_xgmi_width(
+                            cpu, original["min_width"], original["max_width"]
+                        )
+                except amdsmi.AmdSmiLibraryException as e:
+                    self.common.print(f"\t### restore xgmi width cpu={i} failed: {e}")
 
         if failures:
             raise AssertionError("\n\n".join(str(f) for f in failures)) from failures[0]
@@ -115,7 +149,6 @@ class TestCpuXgmi(unittest.TestCase):
         # a GPU handle, and that sweep is intentionally omitted.
         correct_processor = [
             amdsmi.AmdSmiStatus.SUCCESS,
-            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,  # firmware/protocol lacks the message (ENOMSG)
         ]
         if not os.access("/dev/hsmp", os.R_OK):
             correct_processor.append(amdsmi.AmdSmiStatus.NO_PERM)

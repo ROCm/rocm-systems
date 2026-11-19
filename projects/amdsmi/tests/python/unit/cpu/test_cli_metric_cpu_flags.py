@@ -77,6 +77,11 @@ class _FakeLibraryException(_FakeAmdSmiException):
         return self._message
 
 
+class _FakeParameterException(_FakeAmdSmiException):
+    """Stands in for ``AmdSmiParameterException``: a sibling of the library
+    exception that carries no ``get_error_info()``."""
+
+
 def _build_fake_amdsmi():
     """Build a stub ``amdsmi`` package so ``metric.py`` imports cleanly.
 
@@ -103,6 +108,7 @@ def _build_fake_amdsmi():
 
     exception.AmdSmiException = _FakeAmdSmiException
     exception.AmdSmiLibraryException = _FakeLibraryException
+    exception.AmdSmiParameterException = _FakeParameterException
 
     amdsmi_pkg.amdsmi_interface = interface
     amdsmi_pkg.amdsmi_exception = exception
@@ -251,4 +257,72 @@ class TestCliMetricCpuFlags(unittest.TestCase):
         self.interface.amdsmi_get_cpu_df_pstate_range = _raise
         captured = self._run_metric_cpu(cpu_df_pstate_range=True)
         self.assertEqual(set(captured), {"df_pstate_range"})
+        self.assertEqual(captured["df_pstate_range"], {"min_pstate": "N/A", "max_pstate": "N/A"})
+
+    def test_bad_handle_reports_na_for_every_new_section(self):
+        # A non-handle raises AmdSmiParameterException, which is not an
+        # AmdSmiLibraryException; it must degrade to N/A, not escape metric_cpu.
+        def _raise(_cpu):
+            raise _FakeParameterException("not a processor handle")
+
+        self.interface.amdsmi_get_cpu_apb_status = _raise
+        self.interface.amdsmi_get_cpu_xgmi_width = _raise
+        self.interface.amdsmi_get_cpu_df_pstate_range = _raise
+        captured = self._run_metric_cpu(
+            cpu_apb_status=True, cpu_xgmi_link_width=True, cpu_df_pstate_range=True
+        )
+        self.assertEqual(captured["apb_status"], {"status": "N/A", "pstate": "N/A"})
+        self.assertEqual(captured["xgmi_link_width"], {"min_width": "N/A", "max_width": "N/A"})
+        self.assertEqual(captured["df_pstate_range"], {"min_pstate": "N/A", "max_pstate": "N/A"})
+
+
+class TestCliMetricCpuBadHandleRealInterface(unittest.TestCase):
+    """metric_cpu with the real ``amdsmi`` getters and a non-handle.
+
+    Unlike TestCliMetricCpuFlags nothing in ``amdsmi`` is stubbed: the real getters
+    raise the real ``AmdSmiParameterException`` before any C call, so this runs
+    without hardware and ties the getter rejection to the handler's N/A fallback.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        if not METRIC_PATH or not os.path.isfile(METRIC_PATH):
+            raise unittest.SkipTest(
+                f"amd-smi CLI metric.py not found (looked in {_CLI_DIR or amdsmi_path})"
+            )
+        from common.common import amdsmi as real_amdsmi
+
+        missing = [
+            name
+            for name in (
+                "amdsmi_get_cpu_apb_status",
+                "amdsmi_get_cpu_xgmi_width",
+                "amdsmi_get_cpu_df_pstate_range",
+            )
+            if not hasattr(real_amdsmi, name)
+        ]
+        if missing:
+            raise unittest.SkipTest(
+                f"installed amdsmi lacks {', '.join(missing)}; "
+                "set AMDSMI_PATH to a build of this branch to run"
+            )
+        cls.metric_module = load_cli_module(
+            "metric_cpu_real_interface_under_test", METRIC_PATH, sys_path_dir=_CLI_DIR
+        )
+
+    def test_non_handle_reports_na_for_every_new_section(self):
+        commands = object.__new__(self.metric_module.MetricCommands)
+        commands.logger = _FakeLogger()
+        commands.helpers = _FakeHelpers()
+        commands.cpu_handles = []
+
+        # _build_args' placeholder object() is not a processor handle.
+        commands.metric_cpu(
+            _build_args(cpu_apb_status=True, cpu_xgmi_link_width=True, cpu_df_pstate_range=True)
+        )
+
+        captured = commands.logger.captured_values
+        self.assertIsNotNone(captured, "metric_cpu did not store a values payload")
+        self.assertEqual(captured["apb_status"], {"status": "N/A", "pstate": "N/A"})
+        self.assertEqual(captured["xgmi_link_width"], {"min_width": "N/A", "max_width": "N/A"})
         self.assertEqual(captured["df_pstate_range"], {"min_pstate": "N/A", "max_pstate": "N/A"})

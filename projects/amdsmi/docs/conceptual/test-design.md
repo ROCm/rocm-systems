@@ -180,7 +180,7 @@ names lets a feature line up across both suites. Adapt them as the APIs warrant.
 | Component | Suggested feature subdirectories |
 | :--- | :--- |
 | `cpu/` | `clock/`, `dimm/`, `energy/`, `hsmp/`, `identity/`, `power/`, `pstate/`, `thermal/`, `xgmi/` |
-| `nic/` | `discovery/`, `identity/` |
+| `nic/` | `discovery/`, `identity/`, `telemetry/`, `transport/` |
 | `ifoe/` | `fabric/`, `identity/` |
 
 ### Naming conventions
@@ -406,7 +406,8 @@ tests/python/
 ├── unit/                              # No hardware required — pure logic tests only
 │   ├── __init__.py
 │   ├── cpu/
-│   │   └── test_cli_metric_cpu_flags.py   # amd-smi metric --cpu-* flag rendering (mock-based, stubs amdsmi)
+│   │   ├── test_cli_metric_cpu_flags.py   # amd-smi metric --cpu-* flag rendering (mock-based, stubs amdsmi)
+│   │   └── test_cpu_getter_handle_validation.py  # CPU getters reject non-handle args (real interface, no hardware)
 │   ├── gpu/
 │   │   ├── test_apu_metrics.py            # APU metrics interface helpers (unit conversions, N/A parity)
 │   │   └── test_cli_metric_partition.py   # amd-smi metric --partition clock assembly (mock-based, stubs amdsmi)

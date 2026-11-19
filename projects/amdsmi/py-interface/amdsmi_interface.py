@@ -1445,7 +1445,7 @@ def amdsmi_get_cpu_apb_status(processor_handle: processor_handle_t) -> dict:
     apb_status = ctypes.c_uint8()
     pstate = ctypes.c_uint8()
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_apb_status(
+        _amdsmi_entry_point("amdsmi_get_cpu_apb_status")(
             processor_handle, ctypes.byref(apb_status), ctypes.byref(pstate)
         )
     )
@@ -1819,7 +1819,7 @@ def amdsmi_get_cpu_xgmi_width(processor_handle: processor_handle_t) -> dict:
     max_width = ctypes.c_uint8()
 
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_xgmi_width(
+        _amdsmi_entry_point("amdsmi_get_cpu_xgmi_width")(
             processor_handle, ctypes.byref(min_width), ctypes.byref(max_width)
         )
     )
@@ -1955,7 +1955,7 @@ def amdsmi_get_cpu_df_pstate_range(processor_handle: processor_handle_t) -> dict
     max_pstate = ctypes.c_uint8()
 
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_df_pstate_range(
+        _amdsmi_entry_point("amdsmi_get_cpu_df_pstate_range")(
             processor_handle, ctypes.byref(min_pstate), ctypes.byref(max_pstate)
         )
     )

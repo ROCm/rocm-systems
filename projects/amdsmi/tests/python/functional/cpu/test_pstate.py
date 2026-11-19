@@ -4,10 +4,20 @@
 
 """CPU P-state: APB, DF P-state range."""
 
+import os
 import unittest
 
 import common.common as common
 from common.common import amdsmi
+
+
+_HSMP_WRITES_ENV = "AMDSMI_TEST_ALLOW_HSMP_WRITES"
+
+
+def _skip_unless_hsmp_writes_allowed(test):
+    """Skip a test that issues real HSMP writes unless explicitly opted in."""
+    if os.environ.get(_HSMP_WRITES_ENV) != "1":
+        test.skipTest(f"issues real HSMP writes; set {_HSMP_WRITES_ENV}=1 to run")
 
 
 class TestCpuPstate(unittest.TestCase):
@@ -30,15 +40,109 @@ class TestCpuPstate(unittest.TestCase):
     def tearDown(self):
         amdsmi.amdsmi_shut_down()
 
+    def _apb_write_roundtrip(self, name, write, expect):
+        """Run an APB write on every CPU socket, re-read the status and restore it.
+
+        `write(cpu, original)` issues the write; `expect(original)` returns the
+        status dict the socket must report afterwards. The original APB state is
+        restored for every socket in the finally, even if an assertion fails.
+        """
+        correct_processor = [
+            amdsmi.AmdSmiStatus.SUCCESS,
+        ]
+        if not os.access("/dev/hsmp", os.W_OK):
+            correct_processor.append(amdsmi.AmdSmiStatus.NO_PERM)
+        null_check = [amdsmi.AmdSmiStatus.INVAL]
+        failures = []
+
+        try:
+            msg = f"\t### {name}(cpu=null handle):"
+            null_handle = amdsmi.amdsmi_wrapper.amdsmi_processor_handle()
+            with self.common.expect_status(msg, null_check):
+                write(null_handle, {"apb_disabled": 0, "pstate": 0})
+        except Exception as e:
+            failures.append(e)
+
+        try:
+            with self.assertRaises(amdsmi.AmdSmiParameterException):
+                write(None, {"apb_disabled": 0, "pstate": 0})
+        except Exception as e:
+            failures.append(e)
+
+        try:
+            cpu_handles = amdsmi.amdsmi_get_cpu_handles()["processor_handles"]
+        except amdsmi.AmdSmiLibraryException:
+            cpu_handles = []
+        if not cpu_handles:
+            self.common.print("\tNo CPU sockets on machine, unable to test with valid cpu handles.")
+
+        originals = []
+        try:
+            with self.common.status_sweep():
+                for i, cpu in enumerate(cpu_handles):
+                    try:
+                        original = amdsmi.amdsmi_get_cpu_apb_status(cpu)
+                    except amdsmi.AmdSmiLibraryException as e:
+                        self.common.print(f"\t### amdsmi_get_cpu_apb_status(cpu={i}): {e}; skipping")
+                        continue
+                    originals.append((i, cpu, original))
+                    msg = f"\t### {name}(cpu={i}):"
+                    wrote = False
+                    with self.common.expect_status(msg, correct_processor):
+                        write(cpu, original)
+                        wrote = True
+                    # The library maps some rejected writes to SUCCESS, so only the
+                    # re-read proves the write took effect.
+                    if wrote:
+                        actual = amdsmi.amdsmi_get_cpu_apb_status(cpu)
+                        wanted = expect(original)
+                        self.assertEqual(
+                            actual["apb_disabled"],
+                            wanted["apb_disabled"],
+                            f"cpu={i}: apb_disabled not updated after {name}",
+                        )
+                        if wanted["apb_disabled"]:
+                            self.assertEqual(
+                                actual["pstate"],
+                                wanted["pstate"],
+                                f"cpu={i}: pstate not updated after {name}",
+                            )
+        except Exception as e:
+            failures.append(e)
+        finally:
+            for i, cpu, original in originals:
+                try:
+                    now = amdsmi.amdsmi_get_cpu_apb_status(cpu)
+                    if now["apb_disabled"] != original["apb_disabled"] or (
+                        original["apb_disabled"] and now["pstate"] != original["pstate"]
+                    ):
+                        if original["apb_disabled"]:
+                            amdsmi.amdsmi_cpu_apb_disable(cpu, original["pstate"])
+                        else:
+                            amdsmi.amdsmi_cpu_apb_enable(cpu)
+                except amdsmi.AmdSmiLibraryException as e:
+                    self.common.print(f"\t### restore apb status cpu={i} failed: {e}")
+
+        if failures:
+            raise AssertionError("\n\n".join(str(f) for f in failures)) from failures[0]
+
     def test_cpu_apb_disable(self):
         self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(amdsmi_cpu_apb_disable=amdsmi.amdsmi_cpu_apb_disable, pstate=0)
-        return
+        _skip_unless_hsmp_writes_allowed(self)
+        self._apb_write_roundtrip(
+            "amdsmi_cpu_apb_disable",
+            lambda cpu, original: amdsmi.amdsmi_cpu_apb_disable(cpu, 0),
+            lambda original: {"apb_disabled": 1, "pstate": 0},
+        )
 
     def test_cpu_apb_enable(self):
         self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(amdsmi_cpu_apb_enable=amdsmi.amdsmi_cpu_apb_enable)
-        return
+        _skip_unless_hsmp_writes_allowed(self)
+        self._apb_write_roundtrip(
+            "amdsmi_cpu_apb_enable",
+            lambda cpu, original: amdsmi.amdsmi_cpu_apb_enable(cpu),
+            lambda original: {"apb_disabled": 0, "pstate": original["pstate"]},
+        )
 
     def test_get_cpu_apb_status(self):
         self.common.print_func_name("")
@@ -51,9 +155,11 @@ class TestCpuPstate(unittest.TestCase):
         # a GPU handle, and that sweep is intentionally omitted.
         correct_processor = [
             amdsmi.AmdSmiStatus.SUCCESS,
-            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,  # firmware/protocol lacks the message (ENOMSG)
-            amdsmi.AmdSmiStatus.NO_PERM,  # no read access to /dev/hsmp (mode/LSM/container)
         ]
+        # NO_PERM is only legitimate when /dev/hsmp really is not readable;
+        # otherwise a permission regression would pass silently.
+        if not os.access("/dev/hsmp", os.R_OK):
+            correct_processor.append(amdsmi.AmdSmiStatus.NO_PERM)
         # A null (default-constructed) handle hits the C-layer null check -> INVAL.
         null_check = [amdsmi.AmdSmiStatus.INVAL]
 
@@ -95,6 +201,17 @@ class TestCpuPstate(unittest.TestCase):
             with self.common.status_sweep():
                 for i, cpu in enumerate(cpu_handles):
                     msg = f"\t### amdsmi_get_cpu_apb_status(cpu={i}):"
+                    try:
+                        proto_ver = amdsmi.amdsmi_get_cpu_hsmp_proto_ver(cpu)
+                    except amdsmi.AmdSmiLibraryException:
+                        proto_ver = None
+                    if proto_ver is not None and proto_ver < 7:
+                        with self.assertRaises(amdsmi.AmdSmiLibraryException) as context:
+                            amdsmi.amdsmi_get_cpu_apb_status(cpu)
+                        self.assertEqual(
+                            context.exception.err_code, amdsmi.AmdSmiStatus.NOT_SUPPORTED
+                        )
+                        continue
                     val = "N/A"
                     with self.common.expect_status(msg, correct_processor):
                         val = amdsmi.amdsmi_get_cpu_apb_status(cpu)
@@ -123,6 +240,7 @@ class TestCpuPstate(unittest.TestCase):
 
     def test_set_cpu_df_pstate_range(self):
         self.common.print_func_name("")
+        _skip_unless_hsmp_writes_allowed(self)
 
         # amdsmi_set_cpu_df_pstate_range derives the socket index from the handle's
         # processor index and forwards it to ESMI; it does not validate that the
@@ -132,9 +250,10 @@ class TestCpuPstate(unittest.TestCase):
         # A write-back of a just-read value is valid input, so INVAL is not accepted.
         correct_processor = [
             amdsmi.AmdSmiStatus.SUCCESS,
-            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,  # firmware/protocol lacks the message (ENOMSG)
-            amdsmi.AmdSmiStatus.NO_PERM,  # no write access to /dev/hsmp (root/LSM/container)
         ]
+        # NO_PERM is only legitimate when /dev/hsmp really is not writable.
+        if not os.access("/dev/hsmp", os.W_OK):
+            correct_processor.append(amdsmi.AmdSmiStatus.NO_PERM)
         null_check = [amdsmi.AmdSmiStatus.INVAL]
 
         # Independent sections: a bug in one (anything expect_status re-raises, ie.
@@ -168,6 +287,10 @@ class TestCpuPstate(unittest.TestCase):
         if not cpu_handles:
             self.common.print("\tNo CPU sockets on machine, unable to test with valid cpu handles.")
 
+        # Original value of every socket, restored in the finally below so a failure
+        # on one socket (or a rejected write that still read as success) cannot
+        # leave any socket reprogrammed.
+        originals = []
         try:
             with self.common.status_sweep():
                 for i, cpu in enumerate(cpu_handles):
@@ -180,16 +303,41 @@ class TestCpuPstate(unittest.TestCase):
                             f"\t### amdsmi_get_cpu_df_pstate_range(cpu={i}): {e}; skipping set"
                         )
                         continue
+                    originals.append((i, cpu, current))
                     msg = (
                         f"\t### amdsmi_set_cpu_df_pstate_range(cpu={i}, "
                         f"min_pstate={current['min_pstate']}, max_pstate={current['max_pstate']}):"
                     )
+                    wrote = False
                     with self.common.expect_status(msg, correct_processor):
                         amdsmi.amdsmi_set_cpu_df_pstate_range(
                             cpu, current["min_pstate"], current["max_pstate"]
                         )
+                        wrote = True
+                    # Always read the actual value back from the hardware. If the
+                    # write happened it must match what was written; if it did not
+                    # (e.g. NO_PERM), just report the actual value.
+                    actual = amdsmi.amdsmi_get_cpu_df_pstate_range(cpu)
+                    self.common.print(
+                        f"\t### amdsmi_get_cpu_df_pstate_range(cpu={i}) after write: {actual}"
+                    )
+                    if wrote:
+                        self.assertEqual(
+                            actual,
+                            current,
+                            f"cpu={i}: df pstate range differs from written value",
+                        )
         except Exception as e:
             failures.append(e)
+        finally:
+            for i, cpu, original in originals:
+                try:
+                    if amdsmi.amdsmi_get_cpu_df_pstate_range(cpu) != original:
+                        amdsmi.amdsmi_set_cpu_df_pstate_range(
+                            cpu, original["min_pstate"], original["max_pstate"]
+                        )
+                except amdsmi.AmdSmiLibraryException as e:
+                    self.common.print(f"\t### restore df pstate range cpu={i} failed: {e}")
 
         if failures:
             raise AssertionError("\n\n".join(str(f) for f in failures)) from failures[0]
@@ -206,9 +354,10 @@ class TestCpuPstate(unittest.TestCase):
         # a GPU handle, and that sweep is intentionally omitted.
         correct_processor = [
             amdsmi.AmdSmiStatus.SUCCESS,
-            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,  # firmware/protocol lacks the message (ENOMSG)
-            amdsmi.AmdSmiStatus.NO_PERM,  # no read access to /dev/hsmp (mode/LSM/container)
         ]
+        # NO_PERM is only legitimate when /dev/hsmp really is not readable.
+        if not os.access("/dev/hsmp", os.R_OK):
+            correct_processor.append(amdsmi.AmdSmiStatus.NO_PERM)
         # A null (default-constructed) handle hits the C-layer null check -> INVAL.
         null_check = [amdsmi.AmdSmiStatus.INVAL]
 
@@ -250,6 +399,17 @@ class TestCpuPstate(unittest.TestCase):
             with self.common.status_sweep():
                 for i, cpu in enumerate(cpu_handles):
                     msg = f"\t### amdsmi_get_cpu_df_pstate_range(cpu={i}):"
+                    try:
+                        proto_ver = amdsmi.amdsmi_get_cpu_hsmp_proto_ver(cpu)
+                    except amdsmi.AmdSmiLibraryException:
+                        proto_ver = None
+                    if proto_ver is not None and proto_ver < 7:
+                        with self.assertRaises(amdsmi.AmdSmiLibraryException) as context:
+                            amdsmi.amdsmi_get_cpu_df_pstate_range(cpu)
+                        self.assertEqual(
+                            context.exception.err_code, amdsmi.AmdSmiStatus.NOT_SUPPORTED
+                        )
+                        continue
                     val = "N/A"
                     with self.common.expect_status(msg, correct_processor):
                         val = amdsmi.amdsmi_get_cpu_df_pstate_range(cpu)

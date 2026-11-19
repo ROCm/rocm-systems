@@ -2767,11 +2767,19 @@ class MetricCommands:
                 link_width = amdsmi_interface.amdsmi_get_cpu_xgmi_width(args.cpu)
                 static_dict["xgmi_link_width"]["min_width"] = link_width["min_width"]
                 static_dict["xgmi_link_width"]["max_width"] = link_width["max_width"]
-            except amdsmi_exception.AmdSmiLibraryException as e:
+            except amdsmi_exception.AmdSmiException as e:
+                # AmdSmiParameterException (bad handle) is a sibling of
+                # AmdSmiLibraryException and carries no get_error_info().
                 static_dict["xgmi_link_width"]["min_width"] = "N/A"
                 static_dict["xgmi_link_width"]["max_width"] = "N/A"
                 logging.debug(
-                    "Failed to get xgmi link width for cpu %s | %s", cpu_id, e.get_error_info()
+                    "Failed to get xgmi link width for cpu %s | %s",
+                    cpu_id,
+                    (
+                        e.get_error_info()
+                        if isinstance(e, amdsmi_exception.AmdSmiLibraryException)
+                        else e
+                    ),
                 )
         if args.cpu_apb_status:
             static_dict["apb_status"] = {}
@@ -2783,11 +2791,18 @@ class MetricCommands:
                 else:
                     static_dict["apb_status"]["status"] = "ENABLED"
                     static_dict["apb_status"]["pstate"] = "N/A"
-            except amdsmi_exception.AmdSmiLibraryException as e:
+            except amdsmi_exception.AmdSmiException as e:
+                # See the xgmi_link_width handler: a bad handle is not a library error.
                 static_dict["apb_status"]["status"] = "N/A"
                 static_dict["apb_status"]["pstate"] = "N/A"
                 logging.debug(
-                    "Failed to get APB status for cpu %s | %s", cpu_id, e.get_error_info()
+                    "Failed to get APB status for cpu %s | %s",
+                    cpu_id,
+                    (
+                        e.get_error_info()
+                        if isinstance(e, amdsmi_exception.AmdSmiLibraryException)
+                        else e
+                    ),
                 )
         if args.cpu_freq_metrics:
             static_dict["freq_metrics"] = {}
@@ -2930,11 +2945,18 @@ class MetricCommands:
                 pstate_range = amdsmi_interface.amdsmi_get_cpu_df_pstate_range(args.cpu)
                 static_dict["df_pstate_range"]["min_pstate"] = pstate_range["min_pstate"]
                 static_dict["df_pstate_range"]["max_pstate"] = pstate_range["max_pstate"]
-            except amdsmi_exception.AmdSmiLibraryException as e:
+            except amdsmi_exception.AmdSmiException as e:
+                # See the xgmi_link_width handler: a bad handle is not a library error.
                 static_dict["df_pstate_range"]["min_pstate"] = "N/A"
                 static_dict["df_pstate_range"]["max_pstate"] = "N/A"
                 logging.debug(
-                    "Failed to get df pstate range for cpu %s | %s", cpu_id, e.get_error_info()
+                    "Failed to get df pstate range for cpu %s | %s",
+                    cpu_id,
+                    (
+                        e.get_error_info()
+                        if isinstance(e, amdsmi_exception.AmdSmiLibraryException)
+                        else e
+                    ),
                 )
         if args.cpu_metrics_ver:
             static_dict["metric_version"] = {}
