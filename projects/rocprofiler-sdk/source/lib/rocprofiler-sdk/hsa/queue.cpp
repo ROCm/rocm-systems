@@ -755,7 +755,7 @@ WriteInterceptor(const void* packets,
     do
     {
         // ROCr can invoke a retry after shutdown has started retiring the Queue objects.
-        if(admitted & write_interceptors_closed)
+        if((admitted & write_interceptors_closed) != 0)
         {
             writer(packets, pkt_count);
             return;
